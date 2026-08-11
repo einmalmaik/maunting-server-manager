@@ -389,7 +389,16 @@ def _config_patch_payload(
         )
         raise AiActionValidationError(grund) from exc
     if new_content == old_content:
-        raise AiActionValidationError("Die Ersetzungen aendern nichts an der Datei")
+        # Derselbe Gedanke wie bei den Trefferzahlen oben: das Modell muss aus
+        # der Absage etwas machen koennen. "Aendert nichts" klang nach einem
+        # Fehler im Vorschlag und war eine Sackgasse — im Betrieb brach die
+        # Anfrage an dieser Stelle ab, obwohl die Lage voellig harmlos war: der
+        # gewuenschte Wert stand bereits so in der Datei.
+        raise AiActionValidationError(
+            "Die Datei saehe danach genau aus wie jetzt — der gewuenschte Wert "
+            "steht also schon so darin. Das ist kein Fehler: sag dem Benutzer, "
+            "dass nichts zu aendern ist, statt es erneut zu versuchen."
+        )
     if is_binary_text(new_content):
         raise AiActionValidationError("Das Ergebnis waere keine Textdatei mehr")
 

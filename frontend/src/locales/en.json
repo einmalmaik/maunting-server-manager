@@ -198,18 +198,21 @@
       "clearTitle": "Delete the entire memory?",
       "clearConfirm": "Really delete all {{count}} entries? This cannot be undone.",
       "cleared": "Deleted {{count}} entries.",
-      "enabledScopeHint": "This switch covers your own memory, including notes about individual servers. Your teams' knowledge is unaffected — it belongs to the team and lives under Teams.",
+      "enabledScopeHint": "This switch covers your own memory, including notes about individual servers. Your teams' knowledge and a server's own knowledge are unaffected — they belong to the team and to the machine.",
       "titles": {
         "user": "Personal AI memory",
+        "server_shared": "This server's knowledge",
         "team": "This team's knowledge",
         "panel": "Panel-wide AI memory"
       },
       "descriptions": {
         "user": "What the assistant knows about you — in general and about individual servers. Nobody else sees it.",
+        "server_shared": "What the assistant knows about this machine. Everyone who may see the server reads it; changing it requires permission to change its configuration. It stays when a colleague leaves and disappears with the server.",
         "team": "What the assistant knows for this team. Every member can read it; changing it requires the “maintain knowledge” switch.",
         "panel": "Applies to every user of this panel and travels with every conversation. Nothing personal — everyone sees it."
       },
-      "forServer": "Server: {{name}}"
+      "forServer": "Server: {{name}}",
+      "serverSharedHint": "This is shared: every colleague who may see this server reads it too. Anything that concerns only you belongs in your personal memory under your profile."
     },
     "skills": {
       "title": "Skills",
@@ -988,7 +991,7 @@
     "serverFileUpdateCheckFound": "Game update available — will install on next start/restart.",
     "serverFileUpdateCheckFailed": "Game update check failed.",
     "deleted": "Server deleted",
-    "confirmDelete": "Really delete this server? All data will be permanently removed.",
+    "confirmDelete": "Really delete this server? All data will be permanently removed — including the knowledge the assistant has gathered about this machine and that your colleagues read too.",
     "switchBlueprintAction": "Switch Game / Blueprint",
     "switchBlueprintTitle": "Switch Game / Blueprint",
     "switchBlueprintSubtitle": "Switch the game or blueprint variant for this server.",
@@ -1444,6 +1447,7 @@
     "backups": "Backups",
     "databases": "Databases",
     "webhooks": "Webhooks",
+    "memory": "Server knowledge",
     "ai": "AI Assistant"
   },
   "files": {
@@ -2510,8 +2514,8 @@
           "context": "The submitted message, limited prior messages, and approved server metadata are transferred; IP addresses, installation paths, complete configurations, and detected secrets are excluded from model context",
           "credentials": "Personal and central provider API keys are context-bound and encrypted through DIS, then shown only as configuration status or a mask",
           "usage": "Provider, model, token reservation, actual or conservatively estimated usage, and timestamps are stored to enforce quotas; monetary cost is not claimed without an authoritative price source",
-          "memory": "Optional memory entries (personal, server-scoped, team-scoped or panel-wide) are stored encrypted and cryptographically bound to their owner, and can be reviewed and deleted at any time; team entries are visible to every member of that team, personal entries to nobody but the user",
-          "memoryConsent": "Memory is disabled by default and only becomes active after explicit consent in the chat; consent can be withdrawn at any time. Encryption protects the database at rest — the plaintext of remembered entries is transmitted to the chosen model provider with every request",
+          "memory": "Optional memory entries are stored encrypted and cryptographically bound to their scope, and can be reviewed and deleted at any time. There are five scopes: personal entries and personal server-scoped notes are visible to nobody but the user; team entries are visible to every member of that team; a server's own knowledge is visible to everyone allowed to see that server and remains when its author leaves the panel; panel-wide entries are visible to every user of the panel",
+          "memoryConsent": "Personal memory is disabled by default and only becomes active after explicit consent in the chat; consent can be withdrawn at any time and also covers your own server-scoped notes. Shared scopes (team, server, panel-wide) do not depend on that consent but on permissions - they hold operational knowledge, not personal data. Encryption protects the database at rest; the plaintext of remembered entries is transmitted to the chosen model provider with every request",
           "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider",
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
           "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat"

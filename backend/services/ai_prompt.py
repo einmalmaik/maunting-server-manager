@@ -134,15 +134,37 @@ Zusammenhang."""
 # freien OpenRouter-Modell: mit "hast du ein Problem geloest" passierte nichts,
 # sobald der Benutzer nicht ausdruecklich darum bat. Mit der Bestaetigung als
 # Ausloeser greift es.
+#
+# Die Bestaetigung blieb aber lange der **einzige** Ausloeser, und das war zu
+# eng. Sie setzt einen geloesten Fehler voraus; ein Gespraech ueber eine
+# Spieleinstellung endet nie mit "danke, laeuft wieder", obwohl genau dort das
+# Wiederverwendbare entsteht — wo ein Wert in welcher Datei steht, wie eine
+# Spielkonfiguration aufgebaut ist, welcher Weg hingefuehrt hat. Der Betreiber
+# hat es so formuliert: ein Mensch lernt auch zwischendurch, nicht nur wenn
+# etwas kaputt war. Deshalb ein zweiter Ausloeser, der die Entscheidung
+# ausdruecklich dem Modell laesst — die Bestaetigung bleibt daneben stehen,
+# weil sie der gemessene Fall ist und ein Modell mit zwei benannten Anlaessen
+# mehr anfangen kann als mit einem allgemeinen Auftrag.
 SKILLS = """\
-Skills: Sobald der Benutzer bestaetigt, dass etwas geloest ist — auch nur mit \
-"danke" oder "laeuft" — pruefe, ob die Ursache wiederkehren kann. Wenn ja und \
-noch kein Skill sie beschreibt, rufe `learn_skill` auf, **bevor** du \
-antwortest. Frag nicht um Erlaubnis; der Benutzer sieht es im Verlauf. \
+Skills: Du fuehrst dein eigenes Handbuch und schreibst selbst hinein. Halte \
+mit `learn_skill` fest, was beim naechsten Mal wieder gilt. Zwei Anlaesse:
+Erstens: Der Benutzer bestaetigt, dass etwas geloest ist — auch nur mit \
+"danke" oder "laeuft". Pruefe dann, ob die Ursache wiederkehren kann. Wenn ja \
+und noch kein Skill sie beschreibt, lerne **bevor** du antwortest.
+Zweitens: Du hast waehrend der Arbeit etwas herausgefunden, das ueber diesen \
+einen Fall hinausreicht — wo eine Einstellung eines Spiels steht, wie eine \
+Konfigurationsdatei aufgebaut ist, welcher Weg zum Ziel fuehrte und welcher in \
+die Irre. Dafuer braucht es weder einen Fehler noch einen Abschluss noch eine \
+Bestaetigung. Du entscheidest selbst, ob es das wert ist; im Zweifel halte es \
+fest.
+Frag in beiden Faellen nicht um Erlaubnis; der Benutzer sieht es im Verlauf. \
 Beschreibe die Vorgehensweise so, wie du sie dir selbst beim naechsten Mal \
 erklaeren wuerdest: was zu pruefen ist, in welcher Reihenfolge, woran man die \
-Ursache erkennt. Nicht festhalten: Einzelfaelle, Zwischenergebnisse, Dinge die \
-schon in einem Skill stehen."""
+Ursache erkennt, und wann der Skill **nicht** gilt. Nicht festhalten: \
+Einzelfaelle, Zwischenergebnisse, Zahlen und Namen eines einzelnen Servers, \
+Dinge die schon in einem Skill stehen. Passt eine Erkenntnis zu einem \
+vorhandenen Skill, nimm dessen Schluessel erneut, statt einen aehnlichen neuen \
+anzulegen."""
 
 
 # Die Endungsliste ist weg: die KI sieht jetzt dieselben Dateien wie ein Mensch

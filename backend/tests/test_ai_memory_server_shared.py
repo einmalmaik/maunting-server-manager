@@ -509,6 +509,177 @@ def test_losing_sight_of_the_server_hides_its_knowledge(
     assert fehler.value.status_code == 404
 
 
+# ── Der Weg der KI: merken, finden, vergessen ─────────────────────────
+
+
+def _werkzeug(db: Session, user: User, name: str, **argumente):
+    from services import ai_action_service
+
+    return ai_action_service.execute_read_tool(
+        db, user=user, tool_name=name, arguments=argumente
+    )
+
+
+def test_the_ai_can_fill_the_area_through_its_tool(
+    db: Session, regular_user: User
+) -> None:
+    """Ohne diesen Weg waere der Bereich nur ueber die Oberflaeche erreichbar.
+
+    Der Anlass war aber gerade, dass die KI den Satz selbst ablegt — sie hoert
+    ihn im Gespraech, nicht der Betreiber in einem Formular.
+    """
+    server = _server(db, "werkzeug")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+
+    ergebnis = _werkzeug(
+        db, regular_user, "remember", scope="server_shared", server_id=server.id,
+        key="whitelist", value="Nach jedem Neustart die Whitelist neu laden.",
+    )
+
+    assert ergebnis["remembered"] is True
+    assert ergebnis["scope"] == "server_shared"
+    # Die Nummer geht zurueck ans Modell: sonst weiss es hinterher nicht, zu
+    # welcher Anlage es gerade etwas abgelegt hat.
+    assert ergebnis["server_id"] == server.id
+
+
+def test_the_consent_switch_does_not_block_writing_the_manual_either(
+    db: Session, regular_user: User
+) -> None:
+    """Die Schreibseite derselben Entscheidung.
+
+    Beim persoenlichen Gedaechtnis ist der abgeschaltete Schalter ein Halt:
+    dort wurde frueher im Hintergrund weitergeschrieben, waehrend die
+    Oberflaeche "deaktiviert" meldete. Anlagenwissen ist kein persoenliches
+    Gedaechtnis — es haengt an `server.config.write`, nicht an einem Schalter
+    ueber die eigene Person.
+    """
+    server = _server(db, "schalteraus")
+    _allow(db, regular_user, server, "server.view", "server.config.write",
+           memory=False)
+
+    ergebnis = _werkzeug(
+        db, regular_user, "remember", scope="server_shared", server_id=server.id,
+        key="eigenheit", value="Gilt weiterhin fuer alle.",
+    )
+
+    assert ergebnis["remembered"] is True
+
+    # Zur Abgrenzung: die eigene Notiz zu derselben Anlage wird sehr wohl
+    # angehalten — und zwar sichtbar, nicht still.
+    persoenlich = _werkzeug(
+        db, regular_user, "remember", scope="server", server_id=server.id,
+        key="notiz", value="Nur fuer mich.",
+    )
+    assert persoenlich["remembered"] is False
+    assert persoenlich["reason"] == "memory_disabled"
+
+
+def test_the_ai_is_told_plainly_when_it_may_not_write(
+    db: Session, regular_user: User
+) -> None:
+    """Klarer Fehlschlag statt stiller Herabstufung — der Unterschied zum Team.
+
+    Beim Team ist "kein echtes Team vorhanden" ein Zustand des Panels, und
+    persoenlich zu speichern ist enger als gewuenscht, also unbedenklich. Hier
+    waere es umgekehrt gefaehrlich: der Benutzer glaubte, ein Kollege lese den
+    Satz, und niemand tut es.
+    """
+    from services.ai_action_errors import AiActionValidationError
+
+    server = _server(db, "nurlesend")
+    _allow(db, regular_user, server, "server.view")
+
+    with pytest.raises(AiActionValidationError) as fehler:
+        _werkzeug(
+            db, regular_user, "remember", scope="server_shared",
+            server_id=server.id, key="k", value="Wird nicht geschrieben.",
+        )
+
+    assert "scope='server'" in str(fehler.value)
+    assert db.query(AiMemoryEntry).count() == 0
+
+
+def test_what_the_search_finds_the_ai_can_also_forget(
+    db: Session, regular_user: User
+) -> None:
+    """Suchen und Loeschen muessen denselben Bereich meinen.
+
+    `search_memory` hat serverbezogene Eintraege schon immer gefunden,
+    `forget_memory` kannte sie nie: "vergiss die Notiz zu Server 62" endete in
+    "Unbekannter Memory-Bereich". Fuer den Benutzer sah das aus wie eine
+    Weigerung.
+
+    Geprueft wird die Kette, nicht die Einzelteile: was die Suche liefert, geht
+    unveraendert ins Loeschen. Deshalb muss die Suche die Servernummer
+    mitgeben — ohne sie laesst sich der Bereich nicht ein zweites Mal
+    aufloesen.
+    """
+    server = _server(db, "kette")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+    _merken(db, regular_user, server, "whitelist", "Whitelist nach dem Start laden.")
+
+    treffer = _werkzeug(db, regular_user, "search_memory", query="Whitelist")
+    gefunden = [
+        eintrag for eintrag in treffer["results"]
+        if eintrag["scope"] == "server_shared"
+    ]
+    assert len(gefunden) == 1
+    assert gefunden[0]["server_id"] == server.id
+
+    ergebnis = _werkzeug(
+        db, regular_user, "forget_memory", scope=gefunden[0]["scope"],
+        server_id=gefunden[0]["server_id"], keys=[gefunden[0]["key"]],
+    )
+
+    assert ergebnis["forgotten"] == ["whitelist"]
+    assert db.query(AiMemoryEntry).count() == 0
+
+
+def test_forgetting_needs_the_write_right_too(
+    db: Session, regular_user: User
+) -> None:
+    """Ein Leserecht loescht nicht, was alle anderen brauchen."""
+    from services.ai_action_errors import AiActionValidationError
+
+    server = _server(db, "nichtvergessen")
+    schreiber = _user(db, "schreiber")
+    _allow(db, schreiber, server, "server.view", "server.config.write")
+    _allow(db, regular_user, server, "server.view")
+    _merken(db, schreiber, server, "bleibt", "Bleibt stehen.")
+
+    with pytest.raises(AiActionValidationError):
+        _werkzeug(
+            db, regular_user, "forget_memory", scope="server_shared",
+            server_id=server.id, keys=["bleibt"],
+        )
+
+    assert db.query(AiMemoryEntry).count() == 1
+
+
+def test_the_shared_area_needs_a_server_number(
+    db: Session, regular_user: User
+) -> None:
+    """Ohne Nummer gibt es keinen Bereich, in den geschrieben werden koennte.
+
+    Das Modell soll den Fehlgriff als Auskunft bekommen und `list_my_servers`
+    aufrufen — nicht einen Eintrag anlegen, der irgendwo landet.
+    """
+    from services.ai_action_errors import AiActionValidationError
+
+    server = _server(db, "ohnenummer")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+
+    for argumente in (
+        {"scope": "server_shared", "server_id": None},
+        {"scope": "server_shared"},
+    ):
+        with pytest.raises(AiActionValidationError):
+            _werkzeug(db, regular_user, "remember", key="k", value="v", **argumente)
+
+    assert db.query(AiMemoryEntry).count() == 0
+
+
 # ── Nicht am Einwilligungsschalter, und eine gemeinsame Kasse ──────────
 
 

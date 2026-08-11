@@ -3,6 +3,11 @@
 Zwei Zusagen, die vorher beide gebrochen waren: ein grosser Anhang kostet die
 Historie nicht ihren Platz, und ein einzelner grosser Werkzeugauszug kostet die
 kleineren nicht ihren Rueckfluss.
+
+Dazu die Grenze des Rueckflusses selbst: er endet am Lauf. Ein Chat laeuft in
+MSM dauerhaft und wechselt dabei das Thema — ohne diese Grenze stand der
+gelesene Log von Server A noch vor dem Modell, wenn laengst nach Server B
+gefragt wurde.
 """
 
 import os
@@ -14,7 +19,9 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from models import AiConversation, AiMessage, AiToolResult, Role, RolePermission, User
+from models import (
+    AiConversation, AiMessage, AiRun, AiToolResult, Role, RolePermission, User,
+)
 from services.ai_context_service import (
     MAX_TOOL_RESULT_CONTEXT_CHARS,
     _recent_tool_results,
@@ -233,3 +240,126 @@ def test_trimming_spends_the_tool_output_before_the_conversation(
     assert gekuerzt[0]["content"] == messages[0]["content"]
     assert len(gekuerzt[2]["content"]) < len(messages[2]["content"]) // 4
     assert message_character_count(gekuerzt) <= 8_000
+
+
+# ── Der Rueckfluss endet an der Themengrenze ──────────────────────────
+
+
+def _lauf(db: Session, conversation: AiConversation, user: User) -> AiRun:
+    row = AiRun(
+        id=str(uuid4()), conversation_id=conversation.id, user_id=user.id, status="completed"
+    )
+    db.add(row)
+    db.commit()
+    return row
+
+
+def _ergebnis(
+    db: Session, conversation: AiConversation, *, lauf: AiRun | None,
+    tool: str, wert: str, sekunde: int,
+) -> None:
+    """Ein Werkzeugergebnis mit ausdruecklicher Uhrzeit.
+
+    Die Reihenfolge entscheidet hier ueber das Ergebnis, und mehrere Zeilen im
+    selben Commit teilen sich sonst denselben Zeitstempel — der Test waere dann
+    von der Einfuegereihenfolge der Datenbank abhaengig statt von der Zeit.
+    """
+    db.add(AiToolResult(
+        id=str(uuid4()), conversation_id=conversation.id,
+        run_id=lauf.id if lauf is not None else None,
+        tool_name=tool, result_json=wert,
+        created_at=datetime(2026, 8, 11, 12, 0, sekunde, tzinfo=timezone.utc),
+    ))
+    db.commit()
+
+
+def test_raw_data_of_an_earlier_topic_does_not_come_back(
+    db: Session,
+    regular_user: User,
+) -> None:
+    """Der Log von Server A gehoert nicht in die Frage nach Server B.
+
+    Die Unterhaltung laeuft in MSM dauerhaft und behandelt nacheinander
+    unabhaengige Themen; ein Lauf ist die Spanne, in der ein Thema gilt. Vorher
+    nahm der Rueckfluss die letzten sechs Ergebnisse der **gesamten**
+    Unterhaltung — Rohdaten, die zur Frage nicht gehoeren, sind schlimmer als
+    keine, weil das Modell sie fuer aktuell haelt.
+    """
+    conversation = _conversation(db, regular_user)
+    alt, neu = _lauf(db, conversation, regular_user), _lauf(db, conversation, regular_user)
+    _ergebnis(db, conversation, lauf=alt, tool="read_server_logs",
+              wert="Server A: Exit code 137", sekunde=1)
+    _ergebnis(db, conversation, lauf=neu, tool="read_config",
+              wert="Server B: LootAbundance=100", sekunde=2)
+
+    block = _recent_tool_results(db, conversation.id)
+
+    assert block is not None
+    assert "LootAbundance=100" in block
+    assert "Exit code 137" not in block
+
+
+def test_a_continuation_of_the_same_run_keeps_its_data(
+    db: Session,
+    regular_user: User,
+) -> None:
+    """Die Grenze liegt am Lauf, nicht an der Nachricht.
+
+    Eine Rueckfrage nach einer Bestaetigung setzt denselben Lauf fort und muss
+    dieselben Daten sehen — sonst faengt die KI mitten im Vorgang von vorn an zu
+    lesen. Genau deshalb ist der Lauf die Grenze und nicht die einzelne Runde.
+    """
+    conversation = _conversation(db, regular_user)
+    lauf = _lauf(db, conversation, regular_user)
+    _ergebnis(db, conversation, lauf=lauf, tool="read_server_logs",
+              wert="erste Runde", sekunde=1)
+    _ergebnis(db, conversation, lauf=lauf, tool="read_config",
+              wert="zweite Runde", sekunde=2)
+
+    block = _recent_tool_results(db, conversation.id)
+
+    assert block is not None
+    assert "erste Runde" in block and "zweite Runde" in block
+
+
+def test_a_read_skill_result_never_flows_back(db: Session, regular_user: User) -> None:
+    """Ein Skilltext ist eine Anleitung, keine Messung.
+
+    Er wiederholte sich sonst Zug um Zug und drueckte mit bis zu 12.000 Zeichen
+    alles andere aus dem Budget. Genau das war der Motor dafuer, dass ein einmal
+    gegriffener Skill jede folgende Antwort faerbte — auch die zu einem voellig
+    anderen Thema.
+    """
+    conversation = _conversation(db, regular_user)
+    lauf = _lauf(db, conversation, regular_user)
+    _ergebnis(db, conversation, lauf=lauf, tool="read_skill",
+              wert="Anleitung zum Startfehler", sekunde=1)
+    _ergebnis(db, conversation, lauf=lauf, tool="read_config",
+              wert="LootRespawnDays=2", sekunde=2)
+
+    block = _recent_tool_results(db, conversation.id)
+
+    assert block is not None
+    assert "LootRespawnDays=2" in block
+    assert "Anleitung zum Startfehler" not in block
+    assert "read_skill" not in block
+
+
+def test_rows_from_before_the_column_still_flow_back(
+    db: Session,
+    regular_user: User,
+) -> None:
+    """Bestandszeilen tragen `NULL` und bilden einen gemeinsamen Topf.
+
+    Fuer sie bleibt es beim frueheren Verhalten; der Topf laeuft von selbst aus.
+    Ohne diese Zusage haette das Update jeden laufenden Chat um seinen
+    Werkzeugkontext gebracht.
+    """
+    conversation = _conversation(db, regular_user)
+    _ergebnis(db, conversation, lauf=None, tool="read_config", wert="alt-eins", sekunde=1)
+    _ergebnis(db, conversation, lauf=None, tool="read_server_status", wert="alt-zwei", sekunde=2)
+
+    block = _recent_tool_results(db, conversation.id)
+
+    assert block is not None
+    assert "alt-eins" in block and "alt-zwei" in block

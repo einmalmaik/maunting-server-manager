@@ -78,6 +78,22 @@ def test_ein_lauf_ueberlebt_seinen_server(db: Session) -> None:
     }
 
 
+def test_ein_werkzeugergebnis_ueberlebt_seinen_lauf(db: Session) -> None:
+    """`ai_tool_results.run_id` ordnet zu, es besitzt nicht.
+
+    Die Spalte begrenzt den Rueckfluss in den Kontext auf den letzten Lauf. Das
+    Ergebnis selbst gehoert aber der Unterhaltung — dort haengt es bereits mit
+    `CASCADE`. Mit `CASCADE` auch am Lauf haette das Aufraeumen alter Laeufe die
+    Werkzeugbelege der Unterhaltung mitgenommen, obwohl sie ihr eigenes
+    Loeschverhalten schon haben.
+    """
+    inspector = inspect(db.get_bind())
+
+    assert _fremdschluessel(inspector, "ai_tool_results", "run_id")["options"] == {
+        "ondelete": "SET NULL"
+    }
+
+
 def _scope_check(inspector) -> str:
     for pruefung in inspector.get_check_constraints("ai_memory_entries"):
         if pruefung.get("name") == "ck_ai_memory_entries_scope":

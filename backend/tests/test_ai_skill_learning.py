@@ -84,7 +84,7 @@ def test_the_system_prompt_lists_available_skills(db: Session, regular_user: Use
 
     prompt = _system_prompt(db, regular_user)
 
-    assert "Verfuegbare Skills" in prompt
+    assert "Skill-Verzeichnis" in prompt
     assert "server-nicht-erreichbar" in prompt
     assert "read_skill" in prompt
 
@@ -106,7 +106,7 @@ def test_the_index_carries_descriptions_but_no_bodies(
 def test_without_the_permission_there_is_no_index(db: Session, regular_user: User) -> None:
     _allow(db, regular_user, "ai.chat.use")
 
-    assert "Verfuegbare Skills" not in _system_prompt(db, regular_user)
+    assert "Skill-Verzeichnis" not in _system_prompt(db, regular_user)
 
 
 def test_a_foreign_team_skill_never_reaches_the_prompt(

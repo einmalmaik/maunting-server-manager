@@ -10,7 +10,13 @@ import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
 import { AiKnowledgeShell } from './AiKnowledgeShell'
-import { type AiKnowledgeScope, memoryScopeName, scopeCanManage, scopeTeamId } from './knowledgeScope'
+import {
+  type AiKnowledgeScope,
+  memoryScopeName,
+  scopeCanManage,
+  scopeServerId,
+  scopeTeamId,
+} from './knowledgeScope'
 
 type Herkunft = 'all' | 'user' | 'ai'
 
@@ -42,6 +48,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const allowed = useHasPermission('ai.memory.use')
   const darfAendern = scopeCanManage(scope)
   const teamId = scopeTeamId(scope)
+  const serverId = scopeServerId(scope)
 
   const [entries, setEntries] = useState<AiMemoryEntry[]>([])
   const [enabled, setEnabled] = useState(false)
@@ -65,6 +72,9 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const laden = async () => {
     if (scope.kind === 'user') return setEntries(await aiApi.listPersonalMemory())
     if (scope.kind === 'panel') return setEntries(await aiApi.listMemory('panel'))
+    if (scope.kind === 'server_shared') {
+      return setEntries(await aiApi.listMemory('server_shared', scope.serverId))
+    }
     setEntries(await aiApi.listMemory('team', undefined, scope.teamId))
   }
 
@@ -76,7 +86,9 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       ? aiApi.listPersonalMemory()
       : scope.kind === 'panel'
         ? aiApi.listMemory('panel')
-        : aiApi.listMemory('team', undefined, scope.teamId)
+        : scope.kind === 'server_shared'
+          ? aiApi.listMemory('server_shared', scope.serverId)
+          : aiApi.listMemory('team', undefined, scope.teamId)
     Promise.all([
       liste,
       // Der Schalter ist eine Einstellung des Benutzers, kein Merkmal des
@@ -98,7 +110,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       .catch(() => { if (active) toast.error(t('ai.memory.errors.load')) })
     return () => { active = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allowed, scope.kind, teamId, t])
+  }, [allowed, scope.kind, teamId, serverId, t])
 
   const sichtbar = useMemo(() => {
     const nadel = suche.trim().toLowerCase()
@@ -153,7 +165,9 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           ? { scope: 'server', server_id: bearbeitet.server_id, ...feld }
           : scope.kind === 'team'
             ? { scope: 'team', team_id: scope.teamId, ...feld }
-            : { scope: scope.kind, ...feld },
+            : scope.kind === 'server_shared'
+              ? { scope: 'server_shared', server_id: scope.serverId, ...feld }
+              : { scope: scope.kind, ...feld },
       )
       setKey(''); setValue(''); setBearbeitet(null)
       await laden()
@@ -191,7 +205,7 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       // allgemeinen Einträge, nicht die Notizen zu einzelnen Servern. Die
       // stehen sichtbar daneben und lassen sich einzeln entfernen — ein Knopf,
       // der beides mitnimmt, wäre weiter, als er aussieht.
-      const { removed } = await aiApi.clearMemory(memoryScopeName(scope), teamId)
+      const { removed } = await aiApi.clearMemory(memoryScopeName(scope), teamId, serverId)
       setKey(''); setValue(''); setBearbeitet(null)
       await laden()
       toast.success(t('ai.memory.cleared', { count: removed }))
@@ -251,7 +265,15 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       ) : undefined}
       // Der Schalter regiert nur diesen Bereich. Das stand nirgends und war
       // auch nicht so — bis eben nahm er dem Assistenten auch das Teamwissen.
-      note={scope.kind === 'user' ? t('ai.memory.enabledScopeHint') : undefined}
+      //
+      // Beim Serverwissen steht dafür eine andere Ansage: dass es geteilt ist.
+      // Wer hier etwas hinschreibt, soll vorher wissen, dass die Kollegen es
+      // lesen — und nicht erst, wenn es jemand zitiert.
+      note={scope.kind === 'user'
+        ? t('ai.memory.enabledScopeHint')
+        : scope.kind === 'server_shared'
+          ? t('ai.memory.serverSharedHint')
+          : undefined}
       search={werkzeugleiste
         ? { value: suche, onChange: setSuche, label: t('ai.memory.search') }
         : undefined}

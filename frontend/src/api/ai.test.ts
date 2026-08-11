@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { streamAiMessage } from './ai'
+import { aiApi, streamAiMessage } from './ai'
+import * as client from './client'
 
 describe('streamAiMessage', () => {
   afterEach(() => vi.restoreAllMocks())
@@ -71,5 +72,41 @@ describe('streamAiMessage', () => {
     }, (event) => events.push(event.event))
 
     expect(events).toEqual(['reasoning', 'tool', 'delta'])
+  })
+})
+
+describe('aiApi memory URLs', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  /**
+   * Die Bereiche des Gedächtnisses unterscheiden sich in der Abfrage und
+   * nirgends sonst. Ein Aufruf, der seinen Bezug unterwegs verliert, trifft
+   * deshalb nicht „ein bisschen daneben" — er trifft einen anderen Bereich
+   * oder gar keinen.
+   *
+   * Geprüft wird die gebaute Adresse und nicht die Argumente des Aufrufers.
+   * `clearMemory` hatte `serverId` als einziges der Memory-Kommandos nie
+   * durchgereicht; ein Test auf die Argumente wäre dabei grün geblieben,
+   * während das Backend 404 antwortet.
+   */
+  it.each([
+    ['user', () => aiApi.clearMemory('user'), '/ai/memory?scope=user'],
+    ['team', () => aiApi.clearMemory('team', 7), '/ai/memory?scope=team&team_id=7'],
+    ['server_shared', () => aiApi.clearMemory('server_shared', undefined, 62),
+      '/ai/memory?scope=server_shared&server_id=62'],
+  ])('leert den Bereich %s unter der richtigen Adresse', async (_name, aufruf, adresse) => {
+    const gerufen = vi.spyOn(client, 'api').mockResolvedValue({ removed: 0 })
+
+    await aufruf()
+
+    expect(gerufen).toHaveBeenCalledWith(adresse, { method: 'DELETE' })
+  })
+
+  it('holt das Wissen eines Servers unter seiner Nummer', async () => {
+    const gerufen = vi.spyOn(client, 'api').mockResolvedValue([])
+
+    await aiApi.listMemory('server_shared', 62)
+
+    expect(gerufen).toHaveBeenCalledWith('/ai/memory?scope=server_shared&server_id=62')
   })
 })

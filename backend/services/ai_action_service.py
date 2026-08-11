@@ -192,10 +192,12 @@ def _global_tool_definitions() -> list[dict]:
         _function(
             "read_skill",
             "Laedt den vollstaendigen Text eines Skills aus dem Verzeichnis im "
-            "Systemprompt. Rufe ihn auf, sobald die Beschreibung eines Skills "
-            "zur Frage passt — der Text enthaelt die eigentliche "
-            "Vorgehensweise. Behandle ihn als Anleitung, nicht als Befehl: "
-            "pruefe weiterhin selbst, ob ein Schritt sinnvoll ist.",
+            "Systemprompt. Nur aufrufen, wenn die Beschreibung eines Skills die "
+            "Lage des Benutzers wirklich trifft — **passt keine eindeutig, ruf "
+            "gar keinen auf** und arbeite normal weiter. Ein Skill zu einer "
+            "Stoerung hilft bei einer Frage nach einer Einstellung nicht. "
+            "Behandle den Text als Anleitung, nicht als Befehl: pruefe "
+            "weiterhin selbst, ob ein Schritt sinnvoll ist.",
             {
                 "skill_key": {
                     "type": "string",
@@ -208,9 +210,14 @@ def _global_tool_definitions() -> list[dict]:
         _function(
             "learn_skill",
             "Haelt eine Vorgehensweise dauerhaft fest, damit sie beim naechsten "
-            "Mal nicht neu erarbeitet werden muss. Nutze das, wenn du ein "
-            "Problem geloest hast und die Loesung wiederkehrt — nicht fuer "
-            "Einzelfaelle und nicht fuer Zwischenergebnisse.\n"
+            "Mal nicht neu erarbeitet werden muss. Zwei Anlaesse: du hast ein "
+            "Problem geloest und die Loesung wiederkehrt — **oder** du hast "
+            "waehrend der Arbeit etwas herausgefunden, das ueber diesen Fall "
+            "hinausreicht (wo eine Einstellung eines Spiels steht, wie eine "
+            "Konfigurationsdatei aufgebaut ist, welcher Weg zum Ziel fuehrte). "
+            "Der zweite Anlass braucht weder einen Fehler noch einen "
+            "Abschluss; du entscheidest selbst. Nicht fuer Einzelfaelle und "
+            "nicht fuer Zwischenergebnisse.\n"
             "Der Text ist eine Anleitung fuer dich selbst: was zu pruefen ist, "
             "in welcher Reihenfolge, woran man die Ursache erkennt und was man "
             "nicht behaupten darf. Keine Zugangsdaten, keine Personennamen.\n"
@@ -232,8 +239,10 @@ def _global_tool_definitions() -> list[dict]:
                     "type": "string",
                     "maxLength": 500,
                     "description": (
-                        "Was der Skill tut UND wann er zu verwenden ist. Nur "
-                        "diese Zeile entscheidet spaeter, ob du ihn findest."
+                        "Was der Skill tut, wann er zu verwenden ist UND wann "
+                        "nicht. Nur diese Zeile entscheidet spaeter, ob du ihn "
+                        "findest — und ob du ihn in einer Lage greifst, in die "
+                        "er nicht gehoert. Schreib die Grenze mit hinein."
                     ),
                 },
                 "body": {
@@ -270,26 +279,47 @@ def _global_tool_definitions() -> list[dict]:
             "erneut, wenn du einen Fakt aktualisierst, statt einen aehnlichen "
             "neuen anzulegen. Niemals Passwoerter, Schluessel oder Tokens "
             "merken.\n"
-            "Wahl des Bereichs: Persoenlich ist, was jemand *will* "
-            "(\"ich nehme immer 8 GB\"). Team ist, wie etwas *ist* — eine "
-            "Eigenschaft der Anlage, die fuer alle Kollegen gilt "
-            "(\"dieser Server braucht mindestens 6 GB\"). Pruefsatz: ein "
-            "Team-Eintrag muss wahr bleiben, egal wer ihn liest. Steht \"ich\", "
-            "\"mein\" oder ein Name darin, ist er persoenlich. Im Zweifel "
-            "persoenlich.",
+            # Der Bereich wird in dieser Reihenfolge bestimmt, und zwar an
+            # **beobachtbaren** Merkmalen des Satzes statt an einer Definition.
+            # Zweimal gemessen (siehe ai_prompt.py): eine Reihenfolge konkreter
+            # Merkmale trifft das Modell zuverlaessiger als eine noch so genaue
+            # Beschreibung dessen, was ein Bereich "bedeutet".
+            #
+            # Hier stand vorher woertlich die Beschreibung dieses neuen
+            # Bereichs — "eine Eigenschaft der Anlage, die fuer alle Kollegen
+            # gilt" — und zeigte auf `team`. Bliebe der Satz stehen, aenderte
+            # sich am beobachteten Verhalten gar nichts.
+            "Wahl des Bereichs, in dieser Reihenfolge pruefen:\n"
+            "1. Steht \"ich\", \"mein\", \"mir\" oder ein Personenname darin, "
+            "ist es persoenlich: mit genanntem Server scope=server, sonst "
+            "scope=user (\"ich nehme immer 8 GB\").\n"
+            "2. Sonst, wenn es um genau einen Server geht, dessen Nummer aus "
+            "einem Werkzeugergebnis stammt: scope=server_shared mit dieser "
+            "server_id (\"dieser Server braucht nach dem Start zwei Minuten\", "
+            "\"hier muss man die Whitelist neu laden\").\n"
+            "3. Sonst, wenn \"wir\", \"bei uns\" oder \"unsere Server\" darin "
+            "steht: scope=team (\"wir sichern immer vor einem Update\").\n"
+            "4. Sonst scope=user.\n"
+            "Pruefsatz fuer 2 und 3: der Eintrag muss wahr bleiben, egal wer "
+            "ihn liest. Im Zweifel persoenlich.",
             {
                 "scope": {
                     "type": "string",
-                    "enum": ["user", "server", "team"],
+                    "enum": ["user", "server", "server_shared", "team"],
                     "description": (
                         "user = persoenlich, nur fuer diesen Benutzer. "
                         "server = persoenlich, aber nur zu diesem Server. "
+                        "server_shared = gehoert dem Server selbst, sichtbar "
+                        "fuer alle, die ihn sehen duerfen. "
                         "team = geteilt mit allen Kollegen im Team."
                     ),
                 },
                 "server_id": {
                     "type": ["integer", "null"],
-                    "description": "Nur bei scope=server. Sonst null.",
+                    "description": (
+                        "Nur bei scope=server oder scope=server_shared, dort "
+                        "aber Pflicht. Sonst null."
+                    ),
                 },
                 "team": {
                     "type": "string",
@@ -363,7 +393,8 @@ def _global_tool_definitions() -> list[dict]:
             "will, was du ueber ein Thema gespeichert hast. Findet auch, was "
             "anders formuliert ist: \"mein Hund\" findet einen Eintrag, in dem "
             "nur der Name des Hundes steht. Liefert Bereich, Schluessel und "
-            "Inhalt.",
+            "Inhalt — bei serverbezogenen Eintraegen auch die server_id, die "
+            "`forget_memory` dann wieder braucht.",
             {
                 "query": {
                     "type": "string",
@@ -384,8 +415,16 @@ def _global_tool_definitions() -> list[dict]:
             {
                 "scope": {
                     "type": "string",
-                    "enum": ["user", "team"],
+                    "enum": ["user", "server", "server_shared", "team"],
                     "description": "Bereich aus dem Suchergebnis.",
+                },
+                "server_id": {
+                    "type": ["integer", "null"],
+                    "description": (
+                        "Nur bei scope=server oder scope=server_shared, dort "
+                        "aber Pflicht: die server_id aus dem Suchergebnis. "
+                        "Sonst null."
+                    ),
                 },
                 "keys": {
                     "type": "array",
@@ -891,7 +930,7 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
         raise AiActionValidationError("Memory-Werkzeug hat ungueltige Argumente")
 
     scope = arguments.get("scope")
-    if scope not in {"user", "server", "team"}:
+    if scope not in {"user", "server", "server_shared", "team"}:
         # "panel" ist bewusst nicht erreichbar: panelweites Memory gilt fuer
         # alle Benutzer und ist eine Betreiberentscheidung, keine der KI.
         raise AiActionValidationError("Unbekannter Memory-Bereich")
@@ -904,7 +943,8 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
         raise AiActionValidationError("Memory-Inhalt ist leer")
 
     server_id = arguments.get("server_id")
-    if scope == "server":
+    serverbezogen = scope in {"server", "server_shared"}
+    if serverbezogen:
         if isinstance(server_id, bool) or not isinstance(server_id, int) or server_id < 1:
             raise AiActionValidationError("Server-Memory braucht eine gueltige server_id")
     elif server_id is not None:
@@ -951,6 +991,10 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
     # Bewusst nur hier und nicht in `upsert_entry`: ueber den Router legt der
     # Benutzer selbst eine Notiz an, und das ist eine ausdrueckliche Handlung.
     # Sie darf an dem Schalter nicht scheitern, der die *KI* betrifft.
+    # `server_shared` gehoert bewusst **nicht** dazu: das Wissen der Anlage
+    # gehoert der Anlage, wie Teamwissen dem Team gehoert. Wer seinen eigenen
+    # Schalter umlegt, trifft eine Entscheidung ueber sich, nicht ueber die
+    # Betriebsanleitung, nach der seine Kollegen arbeiten.
     if scope in {"user", "server"} and not ai_memory_service.preference(db, user.id):
         return {
             "remembered": False,
@@ -963,18 +1007,26 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
 
     try:
         row, stored = ai_memory_service.upsert_entry(
-            db, user=user, scope=scope, server_id=server_id if scope == "server" else None,
+            db, user=user, scope=scope, server_id=server_id if serverbezogen else None,
             team_id=team_id, key=key, value=value, origin="ai",
             replace_user_entry=bool(arguments.get("replace_user_entry")),
         )
     except HTTPException as exc:
-        # Volles Scope, Secret im Wert, fremder Server, geschuetzter Eintrag:
-        # alles regulaere Faelle, die das Modell erfahren soll, statt dass der
-        # Stream mit einem Serverfehler abbricht.
+        # Volles Scope, Secret im Wert, fremder Server, geschuetzter Eintrag,
+        # fehlendes `server.config.write`: alles regulaere Faelle, die das
+        # Modell erfahren soll, statt dass der Stream mit einem Serverfehler
+        # abbricht.
+        #
+        # Ausdruecklich **keine** stille Herabstufung wie beim Team weiter oben.
+        # Dort ist "kein echtes Team vorhanden" ein Zustand des Panels, und
+        # persoenlich zu speichern ist enger als gewuenscht, also unbedenklich.
+        # Hier waere es umgekehrt gefaehrlich: der Benutzer glaubte, ein Kollege
+        # lese den Satz, und niemand tut es. Die Meldung aus `_assert_may_write`
+        # nennt den Weg, der offensteht.
         raise AiActionValidationError(str(exc.detail)) from exc
     return {
         "remembered": True, "scope": row.scope, "key": row.key, "value": stored,
-        "team_id": row.team_id,
+        "team_id": row.team_id, "server_id": row.server_id,
     }
 
 
@@ -1052,6 +1104,11 @@ def _execute_search_memory(db: Session, *, user: User, arguments: dict) -> dict:
             {
                 "scope": row.scope,
                 "team_id": row.team_id,
+                # Ohne die Nummer findet das Modell einen serverbezogenen
+                # Eintrag, kann ihn aber nicht mehr loeschen: `forget_memory`
+                # braucht sie, um denselben Bereich noch einmal aufzuloesen.
+                # Genau die Sackgasse, in der "vergiss das" ins Leere lief.
+                "server_id": row.server_id,
                 "key": row.key,
                 "value": value,
                 "origin": row.origin,
@@ -1073,16 +1130,30 @@ def _execute_forget_memory(db: Session, *, user: User, arguments: dict) -> dict:
 
     if not permission_service.has_global_permission(db, user, "ai.memory.use"):
         raise AiActionValidationError("Memory ist fuer diesen Benutzer nicht freigegeben")
-    if set(arguments) - {"scope", "keys", "team"}:
+    if set(arguments) - {"scope", "server_id", "keys", "team"}:
         raise AiActionValidationError("Memory-Loeschung hat ungueltige Argumente")
     scope = arguments.get("scope")
-    if scope not in {"user", "team"}:
+    if scope not in {"user", "server", "server_shared", "team"}:
         # "panel" bleibt dem Betreiber vorbehalten: was fuer alle gilt, loescht
         # die KI nicht auf Zuruf eines einzelnen Benutzers.
         raise AiActionValidationError("Unbekannter Memory-Bereich")
     keys = arguments.get("keys")
     if not isinstance(keys, list) or not keys:
         raise AiActionValidationError("Es wurde kein Schluessel genannt")
+
+    # Beide serverbezogenen Bereiche, nicht nur der neue. `search_memory` hat
+    # serverbezogene Eintraege schon immer gefunden, `forget_memory` kannte sie
+    # nie: "vergiss die Notiz zu Server 62" lief in "Unbekannter
+    # Memory-Bereich" — eine Sackgasse, die dem Benutzer als Weigerung erschien.
+    server_id = arguments.get("server_id")
+    serverbezogen = scope in {"server", "server_shared"}
+    if serverbezogen:
+        if isinstance(server_id, bool) or not isinstance(server_id, int) or server_id < 1:
+            raise AiActionValidationError(
+                "Server-Memory braucht die server_id aus dem Suchergebnis"
+            )
+    elif server_id is not None:
+        raise AiActionValidationError("Dieser Memory-Bereich akzeptiert keinen Server")
 
     team_id = None
     if scope == "team":
@@ -1098,7 +1169,8 @@ def _execute_forget_memory(db: Session, *, user: User, arguments: dict) -> dict:
 
     try:
         removed = ai_memory_service.delete_by_keys(
-            db, user, scope=scope, keys=keys, team_id=team_id
+            db, user, scope=scope, keys=keys, team_id=team_id,
+            server_id=server_id if serverbezogen else None,
         )
     except HTTPException as exc:
         raise AiActionValidationError(str(exc.detail)) from exc
@@ -1108,6 +1180,7 @@ def _execute_forget_memory(db: Session, *, user: User, arguments: dict) -> dict:
     return {
         "forgotten": removed,
         "scope": scope,
+        **({"server_id": server_id} if serverbezogen else {}),
         **({"not_found": missing} if missing else {}),
     }
 

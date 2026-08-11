@@ -132,7 +132,8 @@ describe('AiMemoryManager', () => {
     render(<AiMemoryManager />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Alle löschen' }))
-    await waitFor(() => expect(aiApi.clearMemory).toHaveBeenCalledWith('user', undefined))
+    // Weder Team noch Server: der persönliche Bereich hat beides nicht.
+    await waitFor(() => expect(aiApi.clearMemory).toHaveBeenCalledWith('user', undefined, undefined))
   })
 
   it('edits an entry in place instead of demanding the key again', async () => {
@@ -230,6 +231,84 @@ describe('AiMemoryManager', () => {
     await waitFor(() => expect(aiApi.saveMemory).toHaveBeenCalledWith({
       scope: 'server', server_id: 62, key: 'start-timeout', value: 'braucht 300s',
     }))
+  })
+
+  /** Das Wissen einer Anlage, wie es vom Serverreiter kommt. */
+  const wissen: AiMemoryEntry = {
+    ...entry, id: '...-201', scope: 'server_shared', server_id: 62,
+    key: 'whitelist', value: 'Nach dem Start neu laden', origin: 'ai',
+  }
+  const serverBereich = { kind: 'server_shared', serverId: 62, canManage: true } as const
+
+  it('lädt und speichert das Wissen genau eines Servers', async () => {
+    vi.mocked(aiApi.listMemory).mockResolvedValue([wissen])
+    render(<AiMemoryManager scope={serverBereich} />)
+
+    expect(await screen.findByText('Nach dem Start neu laden')).toBeInTheDocument()
+    expect(aiApi.listMemory).toHaveBeenCalledWith('server_shared', 62)
+
+    fireEvent.change(screen.getByLabelText('Schlüssel, z. B. response.language'), { target: { value: 'ports' } })
+    fireEvent.change(screen.getByLabelText('Präferenz'), { target: { value: 'Aussen 30015' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Hinzufügen' }))
+
+    await waitFor(() => expect(aiApi.saveMemory).toHaveBeenCalledWith({
+      scope: 'server_shared', server_id: 62, key: 'ports', value: 'Aussen 30015',
+    }))
+  })
+
+  it('nimmt die Servernummer auch beim Leeren des Bereichs mit', async () => {
+    // Eigener Fall statt einer vierten Zeile im Test darüber: nach dem
+    // Speichern steht die Oberfläche noch auf `busy`, und ein Klick auf den
+    // dann deaktivierten Knopf bewiese gar nichts.
+    //
+    // `clearMemory` fehlte die Nummer als einzigem der Memory-Aufrufe. Ohne
+    // sie löst das Backend `server_shared` gar nicht erst auf und antwortet
+    // 404 — der Knopf „alles löschen" wäre auf diesem Reiter tot gewesen.
+    vi.mocked(aiApi.listMemory).mockResolvedValue([wissen])
+    render(<AiMemoryManager scope={serverBereich} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Alle löschen' }))
+
+    await waitFor(() => expect(aiApi.clearMemory).toHaveBeenCalledWith('server_shared', undefined, 62))
+  })
+
+  it('lädt neu, wenn der Benutzer ohne Umweg zum nächsten Server wechselt', async () => {
+    // Die Komponente bleibt dabei stehen — nur die Nummer im Bereich wechselt.
+    // Hinge das Laden allein an `scope.kind`, zeigte der zweite Server
+    // schweigend die Betriebsanleitung des ersten. Das ist genau die
+    // Verwechslung, gegen die auch das Etikett im Kontext steht.
+    vi.mocked(aiApi.listMemory).mockResolvedValue([wissen])
+    const { rerender } = render(<AiMemoryManager scope={serverBereich} />)
+    await waitFor(() => expect(aiApi.listMemory).toHaveBeenCalledWith('server_shared', 62))
+
+    rerender(<AiMemoryManager scope={{ kind: 'server_shared', serverId: 84, canManage: true }} />)
+
+    await waitFor(() => expect(aiApi.listMemory).toHaveBeenCalledWith('server_shared', 84))
+  })
+
+  it('sagt auf dem Serverreiter, dass die Kollegen mitlesen', async () => {
+    // Wer hier etwas hinschreibt, soll das vorher wissen und nicht erst, wenn
+    // es jemand zitiert. Der Schalter für das eigene Gedächtnis gehört
+    // umgekehrt nicht hierher — er regiert diesen Bereich gar nicht.
+    render(<AiMemoryManager scope={{ kind: 'server_shared', serverId: 62, canManage: true }} />)
+
+    expect(await screen.findByText(/alle Kollegen/i)).toBeInTheDocument()
+    expect(screen.queryByRole('switch', { name: 'Memory im KI-Kontext verwenden' })).toBeNull()
+  })
+
+  it('zeigt fremdes Serverwissen ohne Änderungsknöpfe, wenn man nur lesen darf', async () => {
+    // `server.view` reicht zum Lesen, geändert wird mit `server.config.write`.
+    // Ein Knopf, der zuverlässig 403 liefert, ist schlechter als keiner.
+    const wissen: AiMemoryEntry = {
+      ...entry, id: '...-202', scope: 'server_shared', server_id: 62,
+      key: 'whitelist', value: 'Nach dem Start neu laden',
+    }
+    vi.mocked(aiApi.listMemory).mockResolvedValue([wissen])
+    render(<AiMemoryManager scope={{ kind: 'server_shared', serverId: 62, canManage: false }} />)
+
+    expect(await screen.findByText('Nach dem Start neu laden')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /löschen/i })).toBeNull()
+    expect(screen.queryByLabelText('Präferenz')).toBeNull()
   })
 
   it('behält Suchfeld und Herkunftsfilter, solange sie noch etwas bewirken', async () => {

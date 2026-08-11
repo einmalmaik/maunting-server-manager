@@ -79,6 +79,50 @@ def test_shipped_skills_load_from_disk(db: Session, regular_user: User) -> None:
         assert len(skill.description) > 40
 
 
+def test_shipped_skills_are_written_in_real_german(db: Session, regular_user: User) -> None:
+    """Name und Beschreibung stehen sichtbar im Skillverzeichnis der Oberflaeche.
+
+    Damit gilt fuer sie `docs/agent-rules/architecture.md` §10: keine
+    ASCII-Umschreibungen in nutzersichtbarem Text. Die Dateien waren
+    durchgaengig in `ae`/`oe`/`ue`/`ss` geschrieben — im Panel stand dann
+    woertlich "Server startet nicht oder stuerzt sofort ab".
+
+    Geprueft wird gegen eine Liste verraeterischer Woerter statt gegen ein
+    Muster: `ue` steckt auch in "neu" und "Quelle", `ss` in "dass" und
+    "Adresse". Ein Muster waere entweder blind oder voller Ausnahmen.
+    """
+    ai_skill_service.reset_shipped_cache_for_tests()
+    verraeter = (
+        "laeuft", "stuerzt", "haengt", "ueber", "fuer", "moeglich", "aendern",
+        "Aenderung", "pruef", "naechst", "heisst", "muss ", "schliesst",
+        "koennen", "Loesung", "groess", "gehoert",
+    )
+    for skill in ai_skill_service.shipped_skills().values():
+        text = f"{skill.name}\n{skill.description}\n{skill.body}".lower()
+        gefunden = [wort for wort in verraeter if wort.lower() in text]
+        assert not gefunden, f"{skill.skill_key}: ASCII-Umschreibung {gefunden}"
+
+
+def test_every_shipped_description_says_when_it_does_not_apply(
+    db: Session, regular_user: User
+) -> None:
+    """Die Beschreibung ist die einzige Grenze, die das Modell vor dem Lesen sieht.
+
+    Der Betriebsfall: auf die Frage, wie man in 7 Days to Die die Erntemenge
+    einstellt, las die KI den Skill "Server startet nicht oder stuerzt sofort
+    ab". Der Server lief, es gab keine Stoerung — im Verzeichnis stand aber
+    nirgends, dass ein Stoerungsskill eine Stoerung voraussetzt.
+
+    Die Bedeutungsaehnlichkeit kann das nicht leisten (die Messung steht in
+    `ai_skill_service.skill_index`); die Grenze muss deshalb im Text stehen.
+    """
+    ai_skill_service.reset_shipped_cache_for_tests()
+    for skill in ai_skill_service.shipped_skills().values():
+        assert "Nicht nutzen" in skill.description, (
+            f"{skill.skill_key}: Beschreibung sagt nicht, wann der Skill nicht gilt"
+        )
+
+
 def test_a_broken_shipped_file_does_not_break_the_rest(tmp_path, monkeypatch) -> None:
     """Eine beschaedigte Datei faellt heraus, statt das Panel aufzuhalten."""
     (tmp_path / "kaputt.md").write_text("kein Frontmatter hier", encoding="utf-8")
