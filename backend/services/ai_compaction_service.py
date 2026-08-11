@@ -35,7 +35,17 @@ import httpx
 
 from database import SessionLocal
 from models import AiConversation, AiMessage, AiProvider, User
-from services.ai_context_service import MAX_SUMMARY_CHARS
+# `_message_content_for_provider` ist bewusst dieselbe Uebersetzung, die auch
+# `build_provider_messages` benutzt. Bei einer Rueckfrage steht der Text nicht
+# in `content`, sondern in `question_json`; wer hier `row.content` liest, faltet
+# ein leeres "Assistent:" ein, und die Antwort "den zweiten" verliert ihren
+# Bezug — die Originalnachrichten liegen danach hinter `summarized_until`.
+# Der fuehrende Unterstrich bleibt: die Funktion gehoert dem Kontextaufbau, die
+# Verdichtung borgt sie sich nur, statt eine zweite Fassung zu pflegen.
+from services.ai_context_service import (
+    MAX_SUMMARY_CHARS,
+    _message_content_for_provider,
+)
 from services.ai_redaction import redact_sensitive_text
 from services.ai_provider_service import estimate_cost_microunits, resolve_api_key
 from services.ai_usage_service import (
@@ -84,7 +94,15 @@ def needs_compaction(db, conversation: AiConversation) -> bool:
     if len(rows) <= KEEP_RECENT_MESSAGES:
         return False
     foldable = rows[: len(rows) - KEEP_RECENT_MESSAGES]
-    return sum(len(row.content or "") for row in foldable) >= COMPACTION_THRESHOLD_CHARS
+    # Gemessen wird der Text, den der Anbieter spaeter tatsaechlich saehe. Mit
+    # `row.content` zaehlte eine Rueckfrage als 0 Zeichen, obwohl sie mitsamt
+    # ihren Vorschlaegen in die Zusammenfassung geht — die Schwelle waere je
+    # nach Gespraechsverlauf deutlich zu spaet erreicht. Redigiert wird hier
+    # nicht: das kostet Rechenzeit bei jedem Streamende und aendert an der
+    # Laenge praktisch nichts.
+    return sum(
+        len(_message_content_for_provider(row)) for row in foldable
+    ) >= COMPACTION_THRESHOLD_CHARS
 
 
 def _pending_messages(db, conversation: AiConversation) -> list[AiMessage]:
@@ -96,6 +114,45 @@ def _pending_messages(db, conversation: AiConversation) -> list[AiMessage]:
     if conversation.summarized_until is not None:
         query = query.filter(AiMessage.created_at > conversation.summarized_until)
     return query.order_by(AiMessage.created_at.asc()).all()
+
+
+def _foldable_window(foldable: list[AiMessage]) -> tuple[list[AiMessage], str]:
+    """Waehlt die aeltesten Nachrichten, die zusammen in MAX_SOURCE_CHARS passen.
+
+    Frueher wurde der *gesamte* faltbare Bereich zu einem Text verkettet und
+    dann mit `[-MAX_SOURCE_CHARS:]` am Anfang abgeschnitten, waehrend
+    `summarized_until` trotzdem bis zur juengsten faltbaren Nachricht wanderte.
+    Was der Schnitt weggeworfen hatte, stand danach weder in der Zusammenfassung
+    noch in der Historie — es war still verschwunden. Deshalb entscheidet jetzt
+    erst das Fenster, was gefaltet wird, und die Grenze folgt dem Fenster statt
+    umgekehrt.
+
+    Gefaltet wird von vorne, also chronologisch. Nur so liegt der Ueberhang
+    *hinter* der Grenze und bleibt im Kontext; er kommt beim naechsten Durchlauf
+    an die Reihe und haengt sich an die dann bestehende Zusammenfassung an.
+    Genau das meint der Kommentar bei MAX_SOURCE_CHARS mit "in einem Rutsch".
+
+    Die erste Nachricht kommt immer mit, notfalls gekuerzt. Ohne diese Ausnahme
+    wuerde eine einzelne uebergrosse Nachricht das Falten dauerhaft blockieren:
+    die Schwelle waere ueberschritten, das Fenster aber leer, und der Chat
+    wuechse ohne Gegenwehr weiter.
+    """
+    fenster: list[AiMessage] = []
+    zeilen: list[str] = []
+    laenge = 0
+    for row in foldable:
+        sprecher = "Benutzer" if row.role == "user" else "Assistent"
+        zeile = (
+            f"{sprecher}: "
+            f"{redact_sensitive_text(_message_content_for_provider(row))}"
+        )
+        if fenster and laenge + len(zeile) + 1 > MAX_SOURCE_CHARS:
+            break
+        zeile = zeile[:MAX_SOURCE_CHARS]
+        fenster.append(row)
+        zeilen.append(zeile)
+        laenge += len(zeile) + 1
+    return fenster, "\n".join(zeilen)
 
 
 async def compact_conversation(
@@ -120,12 +177,14 @@ async def compact_conversation(
 
         rows = _pending_messages(db, conversation)
         foldable = rows[: len(rows) - KEEP_RECENT_MESSAGES]
-        boundary = foldable[-1].created_at
-        transcript = "\n".join(
-            f"{'Benutzer' if row.role == 'user' else 'Assistent'}: "
-            f"{redact_sensitive_text(row.content or '')}"
-            for row in foldable
-        )[-MAX_SOURCE_CHARS:]
+        window, transcript = _foldable_window(foldable)
+        # Die Grenze steht auf der letzten *tatsaechlich uebertragenen*
+        # Nachricht. Stuende sie wie vorher auf `foldable[-1]`, waere alles, was
+        # nicht mehr ins Fenster passte, aus dem Kontext gefiltert, ohne je in
+        # einer Zusammenfassung gelandet zu sein. `window` ist nie leer:
+        # `needs_compaction` hat bereits mehr als KEEP_RECENT_MESSAGES
+        # Nachrichten gesehen, und die erste kommt immer mit.
+        boundary = window[-1].created_at
         previous = conversation.summary or ""
         api_key = resolve_api_key(db, provider, user.id)
         if provider.requires_api_key and not api_key:

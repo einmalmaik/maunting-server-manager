@@ -13,6 +13,7 @@ verschwinden lassen.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -28,7 +29,7 @@ from models import (
     RolePermission,
     User,
 )
-from services import ai_compaction_service
+from services import ai_compaction_service, ai_usage_service
 from services.ai_context_service import build_provider_messages
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
 from services.openai_compatible_adapter import AiProviderRequestError, StreamChunk
@@ -221,11 +222,18 @@ async def test_the_summary_prompt_never_carries_credentials(
     _enable(db, regular_user)
     provider = _provider(db)
     conversation = _conversation(db, regular_user, messages=40, chars=2_000)
+    # Der Zeitpunkt ist der Kern des Tests: `_conversation` legt die vierzig
+    # Nachrichten ab `now - 40h` im Minutentakt an. Eine Zugangsdatennachricht
+    # auf `now - 1 Tag` waere die juengste der Unterhaltung und bliebe damit im
+    # woertlich erhaltenen Rest — sie wuerde nie gefaltet, und der Test bliebe
+    # auch dann gruen, wenn die Redaktion des Zusammenfassungsprompts ganz
+    # fehlte. Also setzen wir sie an den Anfang, wo tatsaechlich gefaltet wird.
+    frueh = datetime.now(timezone.utc) - timedelta(hours=40) + timedelta(seconds=30)
     db.add(AiMessage(
         id=str(uuid4()), conversation_id=conversation.id, role="user",
         content="mein key ist api_key=sk-abcdefghijklmnopqrstuvwxyz012345",
         status="complete",
-        created_at=datetime.now(timezone.utc) - timedelta(days=1),
+        created_at=frueh,
     ))
     db.commit()
     seen = _fake_summary(monkeypatch, "Zusammenfassung.")
@@ -236,4 +244,152 @@ async def test_the_summary_prompt_never_carries_credentials(
     )
 
     serialized = " ".join(str(item["content"]) for item in seen["messages"])
+    # Erst der Nachweis, dass die Nachricht ueberhaupt im Prompt steht: sonst
+    # wuerde die zweite Zusicherung schon dadurch halten, dass die Nachricht
+    # gar nicht mitgeschickt wurde.
+    assert "mein key ist" in serialized
     assert "sk-abcdefghijklmnopqrstuvwxyz012345" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_a_folded_question_keeps_its_text(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Text einer Rueckfrage steht in `question_json`, nicht in `content`.
+
+    Wer beim Falten nur `content` liest, uebergibt dem Modell ein leeres
+    "Assistent:" — und "den zweiten" ist danach nicht mehr aufloesbar, weil die
+    Originalnachrichten hinter `summarized_until` liegen und nie wiederkommen.
+    """
+    _enable(db, regular_user)
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, messages=40, chars=2_000)
+    # Bewusst ganz an den Anfang: nur so liegt das Paar im faltbaren Bereich und
+    # nicht in den zwoelf woertlich erhaltenen Nachrichten am Ende.
+    frueh = datetime.now(timezone.utc) - timedelta(hours=40)
+    db.add(AiMessage(
+        id=str(uuid4()), conversation_id=conversation.id, role="assistant",
+        content="", status="complete",
+        question_json=json.dumps({
+            "question": "Welchen Server meinst du?",
+            "options": [{"label": "Survival"}, {"label": "Creative"}],
+        }),
+        created_at=frueh + timedelta(seconds=30),
+    ))
+    db.add(AiMessage(
+        id=str(uuid4()), conversation_id=conversation.id, role="user",
+        content="den zweiten", status="complete",
+        created_at=frueh + timedelta(seconds=40),
+    ))
+    db.commit()
+    seen = _fake_summary(monkeypatch, "Zusammenfassung.")
+
+    await ai_compaction_service.compact_conversation(
+        client=None, user_id=regular_user.id,
+        conversation_id=conversation.id, provider_id=provider.id,
+    )
+
+    serialized = " ".join(str(item["content"]) for item in seen["messages"])
+    assert "Welchen Server meinst du?" in serialized
+    # Welche Auswahl zur Debatte stand, gehoert zum Verstaendnis der Antwort.
+    assert "Creative" in serialized
+    assert "den zweiten" in serialized
+
+
+@pytest.mark.asyncio
+async def test_nothing_falls_between_the_summary_and_the_boundary(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Was `summarized_until` verdeckt, muss in der Zusammenfassung stecken.
+
+    Bei 60 Nachrichten zu je rund 2.000 Zeichen sind ~97.000 Zeichen faltbar,
+    also deutlich mehr als MAX_SOURCE_CHARS. Frueher ging trotzdem nur der
+    juengste 60.000-Zeichen-Ausschnitt an den Anbieter, waehrend die Grenze auf
+    die *letzte* faltbare Nachricht sprang: der Anfang war danach weder in
+    `summary` noch in der Historie. Genau diese Luecke prueft der Test.
+    """
+    _enable(db, regular_user)
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, messages=60, chars=2_000)
+    seen = _fake_summary(monkeypatch, "Zusammenfassung.")
+
+    done = await ai_compaction_service.compact_conversation(
+        client=None, user_id=regular_user.id,
+        conversation_id=conversation.id, provider_id=provider.id,
+    )
+
+    assert done is True
+    transcript = str(seen["messages"][1]["content"])
+    # Gefaltet wird von vorne: die aelteste Nachricht ist die, die am ehesten
+    # verlorenging.
+    assert "Nachricht 0 " in transcript
+
+    db.expire_all()
+    conversation = db.get(AiConversation, conversation.id)
+    verdeckt = (
+        db.query(AiMessage)
+        .filter(
+            AiMessage.conversation_id == conversation.id,
+            AiMessage.created_at <= conversation.summarized_until,
+        )
+        .all()
+    )
+    assert verdeckt
+    for row in verdeckt:
+        assert row.content[:16] in transcript
+    # Der Ueberhang ist nicht verschwunden, sondern liegt als noch offene
+    # Nachricht hinter der Grenze und kommt beim naechsten Durchlauf dran. Ob
+    # `needs_compaction` dafuer schon wieder anschlaegt, haengt allein an
+    # COMPACTION_THRESHOLD_CHARS und ist hier nicht die Zusage — die Zusage ist,
+    # dass keine Nachricht zwischen Zusammenfassung und Grenze faellt.
+    offen = ai_compaction_service._pending_messages(db, conversation)
+    assert offen[0].content.startswith("Nachricht 29 ")
+
+
+def test_an_orphaned_reservation_is_released_at_startup(
+    db: Session, regular_user: User
+) -> None:
+    """Eine Reservierung ohne Nachricht sperrt sonst fuer immer.
+
+    Die Verdichtung ist der einzige Pfad, der Kontingent bucht, ohne eine
+    `AiMessage` anzulegen. Der Zaehler fuer `concurrent_operations` kennt kein
+    Zeitfenster: bleibt so eine Zeile nach einem Prozessabbruch auf `reserved`,
+    bekommt der Benutzer dauerhaft AiQuotaExceeded, obwohl nichts laeuft.
+    """
+    provider = _provider(db)
+    verwaist = str(uuid4())
+    mit_nachricht = str(uuid4())
+    for request_id in (verwaist, mit_nachricht):
+        db.add(AiUsageEvent(
+            request_id=request_id, user_id=regular_user.id, provider_id=provider.id,
+            model="model-a", status="reserved",
+            reserved_tokens=120, reserved_cost_microunits=340,
+            accounted_tokens=120, accounted_cost_microunits=340,
+        ))
+    conversation = AiConversation(
+        id=str(uuid4()), user_id=regular_user.id, server_id=None, title="Lauf"
+    )
+    db.add(conversation)
+    db.flush()
+    db.add(AiMessage(
+        id=str(uuid4()), conversation_id=conversation.id, role="assistant",
+        content="", status="streaming", request_id=mit_nachricht,
+        created_at=datetime.now(timezone.utc),
+    ))
+    db.commit()
+
+    geschlossen = ai_usage_service.verwaiste_reservierungen_abgleichen(db)
+
+    assert geschlossen == 1
+    db.expire_all()
+    frei = db.query(AiUsageEvent).filter(AiUsageEvent.request_id == verwaist).one()
+    assert frei.status == "completed"
+    # Konservativ mit dem reservierten Wert: nach einem Abbruch ist unbekannt,
+    # wie viel der Anbieter schon geliefert hat.
+    assert frei.accounted_tokens == 120
+    # Zeilen mit Nachricht bleiben liegen — dafuer ist der Stream-Wiederanlauf
+    # zustaendig, der zusaetzlich deren Zustand kennt.
+    gehalten = db.query(AiUsageEvent).filter(
+        AiUsageEvent.request_id == mit_nachricht
+    ).one()
+    assert gehalten.status == "reserved"

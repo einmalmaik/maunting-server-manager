@@ -561,6 +561,7 @@ async def lifespan(app: FastAPI):
 
     from services.ai_proposal_service import reconcile_interrupted_actions
     from services.ai_chat_service import reconcile_interrupted_ai_streams
+    from services.ai_usage_service import verwaiste_reservierungen_abgleichen
 
     from services.ai_run_service import unterbrochene_laeufe_abgleichen
 
@@ -568,6 +569,19 @@ async def lifespan(app: FastAPI):
     try:
         reconcile_interrupted_ai_streams(_ai_recovery_db)
         reconcile_interrupted_actions(_ai_recovery_db)
+        # Nach den nachrichtengebundenen Zeilen: die Kontextverdichtung
+        # reserviert Kontingent ohne Nachricht, ihre Zeile findet der Abgleich
+        # oben deshalb nie. Bliebe sie auf `reserved`, wuerde sie einen
+        # Nebenlaeufigkeitsplatz dauerhaft belegen — der Zaehler kennt kein
+        # Zeitfenster und vergisst nichts.
+        verwaist = verwaiste_reservierungen_abgleichen(_ai_recovery_db)
+        if verwaist:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "%d verwaiste KI-Reservierung(en) nach Panel-Start abgerechnet.",
+                verwaist,
+            )
         # Ein Lauf im Zustand `running` hat den Neustart nicht ueberlebt: sein
         # Arbeitsgedaechtnis endet mitten in einer Anbieterantwort, und ob ein
         # Werkzeug schon lief, ist nicht mehr feststellbar. Ein halber

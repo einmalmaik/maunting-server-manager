@@ -15,7 +15,7 @@ from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from models import AiUsageEvent, User
+from models import AiMessage, AiUsageEvent, User
 from services.ai_limit_service import (
     MONTHLY_COST_LIMIT_CENTS_MAX,
     TOKEN_LIMIT_MAX,
@@ -385,3 +385,59 @@ def usage_for_user(db: Session, user: User, *, now: datetime | None = None) -> A
         user_id=user.id, username=user.username, tokens_today=0, tokens_week=0,
         tokens_month=0, cost_month_microunits=0, requests_month=0, last_request_at=None,
     )
+
+
+def verwaiste_reservierungen_abgleichen(db) -> int:
+    """Schliesst beim Panel-Start Reservierungen ohne zugehoerige Nachricht.
+
+    Die Verdichtung ist der einzige Pfad, der Kontingent reserviert und sofort
+    committet, **ohne** dazu eine `AiMessage` anzulegen — sie fasst ja nur
+    vorhandene Nachrichten zusammen, sie schreibt keine. Der bestehende
+    Wiederanlauf `reconcile_interrupted_ai_streams` haengt aber genau an einer
+    Nachricht im Zustand `streaming` und findet diese Zeile deshalb nie.
+
+    Stirbt der Prozess zwischen Reservierung und Abschluss — ein Kill loest
+    `asyncio.CancelledError` aus, und das ist eine BaseException, die weder der
+    Anbieterfehler-Zweig hier noch das `except Exception` des Aufrufers faengt —
+    bleibt das Ereignis fuer immer auf `reserved`. Das ist nicht bloss
+    Buchhaltung: der Nebenlaeufigkeitszaehler in `reserve_ai_usage` zaehlt
+    reservierte Ereignisse **ohne Zeitfenster**. Bei `concurrent_operations = 2`
+    genuegen zwei solcher Abbrueche, und der Benutzer bekommt dauerhaft
+    AiQuotaExceeded, obwohl nichts laeuft — von selbst loest sich das nie.
+
+    Abgerechnet wird konservativ mit dem reservierten Wert, aus demselben Grund
+    wie beim Stream-Wiederanlauf: nach einem Abbruch ist unbekannt, wie viele
+    Tokens der Anbieter bereits geliefert hat, und verschenkte Tokens sind das
+    schlechtere Risiko als ein paar zu viel gebuchte.
+
+    Die Funktion steht hier und nicht bei der Verdichtung, obwohl nur diese die
+    verwaisten Zeilen erzeugt: sie fegt ueber *alle* offenen Reservierungen und
+    kennt weder Unterhaltung noch Faltung. Wer spaeter sucht, warum eine
+    Reservierung beim Start geschlossen wurde, sieht dort nach, wo sie angelegt
+    wurde.
+    """
+    offen = db.query(AiUsageEvent).filter(AiUsageEvent.status == "reserved").all()
+    jetzt = datetime.now(timezone.utc)
+    geschlossen = 0
+    for event in offen:
+        hat_nachricht = (
+            db.query(AiMessage.id)
+            .filter(AiMessage.request_id == event.request_id)
+            .first()
+        )
+        if hat_nachricht is not None:
+            # Gibt es eine Nachricht, ist `reconcile_interrupted_ai_streams`
+            # zustaendig. Der kennt zusaetzlich deren Zustand und darf eine
+            # gerade erst begonnene Anfrage nicht faelschlich abschliessen.
+            continue
+        complete_ai_usage(
+            db,
+            event,
+            actual_tokens=event.reserved_tokens,
+            actual_cost_microunits=event.reserved_cost_microunits,
+            now=jetzt,
+        )
+        geschlossen += 1
+    if geschlossen:
+        db.commit()
+    return geschlossen
