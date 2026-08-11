@@ -365,7 +365,12 @@
         "propose_config_patch": "Replace only the displayed passages in “{{path}}”? The rest of the file stays untouched. Execution is blocked if the file changed in the meantime.",
         "propose_config_update": "Write the displayed, revision-bound change to “{{path}}”? Execution is blocked if the file changed in the meantime.",
         "propose_mod_install": "Install the mod “{{path}}” through the existing installation path? The download runs in the background and the mod only takes effect after a restart.",
-        "propose_server_create": "Create a new server? Blueprint, capacity, ports and permissions are checked exactly as they are when creating one through the panel."
+        "propose_server_create": "Create a new server? Blueprint, capacity, ports and permissions are checked exactly as they are when creating one through the panel.",
+        "propose_server_delete": "Delete this server for good? Container, game files and database entry are removed. This cannot be undone — existing backups are the only source afterwards.",
+        "propose_backup_restore": "Restore the backup “{{path}}”? The current state of the game files is overwritten. Everything since that backup is gone afterwards.",
+        "propose_bind_ip_update": "Change the bind IP of this server? The server is restarted for it, and players have to connect through the new address.",
+        "propose_blueprint_change": "Derive a new blueprint from this server? The blueprint is then available to everyone who may create servers.",
+        "propose_server_blueprint_switch": "Switch this server to another blueprint? Start command, image and variables are replaced; the game files stay and may no longer match."
       },
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",

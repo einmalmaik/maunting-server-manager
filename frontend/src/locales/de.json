@@ -365,7 +365,12 @@
         "propose_config_patch": "Nur die angezeigten Stellen in „{{path}}“ ersetzen? Der übrige Inhalt der Datei bleibt unverändert. Bei zwischenzeitlicher Änderung wird die Ausführung blockiert.",
         "propose_config_update": "Die angezeigte Änderung an „{{path}}“ revisionsgebunden schreiben? Bei zwischenzeitlicher Änderung wird die Ausführung blockiert.",
         "propose_mod_install": "Die Mod „{{path}}“ über den vorhandenen Installationspfad einspielen? Der Download läuft im Hintergrund, die Mod wirkt erst nach einem Neustart.",
-        "propose_server_create": "Einen neuen Server anlegen? Blueprint, Kapazität, Ports und Rechte werden dabei genauso geprüft wie beim Anlegen über das Panel."
+        "propose_server_create": "Einen neuen Server anlegen? Blueprint, Kapazität, Ports und Rechte werden dabei genauso geprüft wie beim Anlegen über das Panel.",
+        "propose_server_delete": "Diesen Server endgültig löschen? Container, Spieldateien und Datenbankeintrag werden entfernt. Das lässt sich nicht rückgängig machen — vorhandene Backups sind danach die einzige Quelle.",
+        "propose_backup_restore": "Das Backup „{{path}}“ einspielen? Der aktuelle Stand der Spieldateien wird dabei überschrieben. Alles seit dem Backup ist danach weg.",
+        "propose_bind_ip_update": "Die Bind-IP dieses Servers ändern? Der Server wird dafür neu gestartet, und Spieler müssen sich unter der neuen Adresse verbinden.",
+        "propose_blueprint_change": "Aus diesem Server einen neuen Blueprint ableiten? Der Blueprint steht danach allen zur Verfügung, die Server anlegen dürfen.",
+        "propose_server_blueprint_switch": "Diesen Server auf einen anderen Blueprint umstellen? Startbefehl, Image und Variablen werden ersetzt; die Spieldateien bleiben liegen und passen unter Umständen nicht mehr dazu."
       },
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",

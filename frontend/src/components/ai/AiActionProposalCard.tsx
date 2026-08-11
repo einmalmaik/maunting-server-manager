@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, FilePenLine, HardDriveDownload, Package, Power, ServerCog } from 'lucide-react'
+import { AlertTriangle, Blocks, Bot, FilePenLine, HardDriveDownload, HardDriveUpload, Network, Package, Power, ServerCog, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -11,6 +11,25 @@ import { toast } from '@/stores/toastStore'
 function previewText(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
+
+/**
+ * Werkzeuge, deren Wirkung sich nicht zurueckholen laesst.
+ *
+ * Der Bestaetigungsdialog faerbte nur `propose_server_lifecycle` als
+ * gefaehrlich — also ausgerechnet das Werkzeug, dessen Wirkung ein Neustart
+ * ist. Loeschen, ein Backup ueberspielen und der Blueprintwechsel standen in
+ * derselben ruhigen Farbe wie „Backup erstellen“.
+ *
+ * `propose_server_lifecycle` bleibt drin: „stop“ auf einem laufenden Server
+ * wirft Spieler heraus, und das ist im Moment des Klicks das Gleiche wert wie
+ * eine Warnung.
+ */
+const UNUMKEHRBAR: readonly string[] = [
+  'propose_server_delete',
+  'propose_backup_restore',
+  'propose_server_blueprint_switch',
+  'propose_server_lifecycle',
+]
 
 export function AiActionProposalCard({
   proposal,
@@ -31,6 +50,13 @@ export function AiActionProposalCard({
     propose_mod_install: Package,
     propose_server_create: ServerCog,
     propose_server_lifecycle: Power,
+    // Fuenf Werkzeuge fielen bisher auf das Standardsymbol zurueck — ein
+    // Ein-/Ausschalter fuer „Server loeschen“ ist eine falsche Auskunft.
+    propose_server_delete: Trash2,
+    propose_backup_restore: HardDriveUpload,
+    propose_bind_ip_update: Network,
+    propose_blueprint_change: Blocks,
+    propose_server_blueprint_switch: Blocks,
   }[proposal.tool_name] ?? Power
   // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb
   // eine eigene, neutrale Farbgebung statt der warnenden — und keinen Knopf.
@@ -55,7 +81,7 @@ export function AiActionProposalCard({
       title: t('ai.actions.confirmTitle'),
       message,
       confirmText: t('ai.actions.execute'),
-      danger: proposal.tool_name === 'propose_server_lifecycle',
+      danger: UNUMKEHRBAR.includes(proposal.tool_name),
     })
     if (!accepted) return
     setBusy(true)

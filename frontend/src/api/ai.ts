@@ -118,12 +118,32 @@ export interface AiProviderTestResult {
   detail: string | null
 }
 
+/**
+ * Die Schreibwerkzeuge — vollstaendig, in der Reihenfolge von
+ * `ai_tool_registry.WERKZEUGE`.
+ *
+ * Hier standen fuenf der elf. Das war kein harmloser Auslassungsfehler: was der
+ * Typ nicht kennt, faellt beim Uebersetzen der Oberflaeche durch, und
+ * `propose_server_delete` erschien im Bestaetigungsdialog deshalb als roher
+ * Schluessel `ai.actions.confirm.propose_server_delete` — an genau der Stelle,
+ * an der stehen muss, was gleich unwiderruflich passiert.
+ *
+ * Wer hier etwas ergaenzt, ergaenzt auch `ai.actions.tools.*` und
+ * `ai.actions.confirm.*` in **allen** Sprachdateien und prueft, ob das Werkzeug
+ * in `UNUMKEHRBAR` gehoert (AiActionProposalCard).
+ */
 export type AiWriteTool =
   | 'propose_server_lifecycle'
   | 'propose_backup'
+  | 'propose_backup_restore'
   | 'propose_config_update'
+  | 'propose_config_patch'
   | 'propose_mod_install'
+  | 'propose_bind_ip_update'
   | 'propose_server_create'
+  | 'propose_server_delete'
+  | 'propose_blueprint_change'
+  | 'propose_server_blueprint_switch'
 
 export interface AiActionProposal {
   id: string
