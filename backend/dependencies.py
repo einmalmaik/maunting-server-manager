@@ -20,8 +20,17 @@ def _user_from_token(token: str | None, db: Session) -> User:
     payload = AuthService.decode_token(token)
     if not payload or "sub" not in payload or payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Ungültiges Token")
+    # Ein Access-Token ohne `jti` ist ein Blindgaenger: der Logout kann es nicht
+    # blacklisten, und die Pruefung unten findet nichts, was sie pruefen koennte.
+    # Es wird deshalb abgelehnt statt geduldet — nur so ist die Zusage aus
+    # services/session_service.py ("jti wird bewusst immer gesetzt") auch
+    # durchgesetzt und nicht bloss aufgeschrieben. Fuer Nutzer ist das
+    # folgenlos: der Client holt sich nach einem 401 automatisch ueber
+    # /api/auth/refresh ein regulaeres Token (frontend/src/api/client.ts).
     jti = payload.get("jti")
-    if jti and is_jwt_blacklisted(db, jti):
+    if not jti:
+        raise HTTPException(status_code=401, detail="Ungültiges Token")
+    if is_jwt_blacklisted(db, jti):
         raise HTTPException(status_code=401, detail="Token widerrufen")
     user = AuthService.get_user_by_username(db, payload["sub"])
     if not user or not user.is_active:

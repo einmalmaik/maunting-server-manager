@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from config import settings
-from cookies import _set_auth_cookies, _clear_auth_cookies
+# Nur noch das Loeschen der Cookies passiert hier direkt. Das Setzen laeuft
+# ausnahmslos ueber `issue_session`, damit kein Ausstellungsort die dort
+# zugesicherte `jti` erneut vergessen kann.
+from cookies import _clear_auth_cookies
 from database import get_db
 from dependencies import get_current_user, get_current_owner, verify_csrf
 from models import User, EmailVerification
@@ -415,10 +418,13 @@ def refresh(
     user = AuthService.get_user_by_id(db, rt.user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User nicht gefunden oder inaktiv")
-    access_token = AuthService.create_access_token({"sub": user.username, "user_id": user.id})
-    new_refresh = AuthService.create_refresh_token(db, user.id, family=family)
-    csrf_token = AuthService.create_csrf_token()
-    _set_auth_cookies(response, access_token, new_refresh, csrf_token)
+    # Die Rotation stellt eine vollwertige Sitzung aus und geht deshalb ueber
+    # denselben Weg wie jeder Login. Vorher baute sie die drei Token selbst —
+    # und liess dabei die `jti` weg. Folge: ab dem ersten Refresh konnte der
+    # Logout das Access-Token nicht mehr auf die Blacklist setzen, ein
+    # entwendetes Cookie blieb bis zum Ablauf voll gueltig. Die Familie wird
+    # weitergereicht, damit die Wiederverwendungserkennung nicht abreisst.
+    issue_session(response, db, user, family=family)
     return {"message": "Token refreshed"}
 
 
@@ -605,7 +611,31 @@ def delete_account(
     return {"message": "Account gelöscht"}
 
 @router.post("/2fa/setup")
-def setup_2fa(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+def setup_2fa(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Legt ein neues TOTP-Geheimnis an und gibt es einmalig im Klartext zurueck.
+
+    `verify_csrf` ist hier Pflicht, weil der Endpunkt zustandsaendernd ist und
+    keinen Body braucht. Im unterstuetzten Cross-Domain-Betrieb
+    (`settings.cookie_cross_site`) stehen alle Auth-Cookies auf SameSite=None;
+    ein fremdes `<form method="POST">` erreicht die Route dann ohne Preflight,
+    und CORS verhindert nur das Lesen der Antwort, nicht die Ausfuehrung. Ohne
+    die Pruefung koennte eine beliebige Seite das TOTP-Geheimnis des Opfers
+    austauschen.
+
+    Ein bereits aktives 2FA wird ausserdem nicht mehr stillschweigend
+    abgeschaltet. Der zweite Faktor darf nur dort fallen, wo der aktuelle Code
+    nachgewiesen wird — das ist `/2fa/disable`. Wer neu einrichten will, geht
+    denselben Weg: erst deaktivieren, dann aufsetzen.
+    """
+    if user.two_factor_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="2FA ist bereits aktiv. Bitte zuerst deaktivieren.",
+        )
     secret = DisClient.generate_totp_secret()
     user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{user.id}:2fa")
     user.two_factor_enabled = False
@@ -615,7 +645,20 @@ def setup_2fa(user: User = Depends(get_current_user), db: Session = Depends(get_
 
 
 @router.post("/2fa/enable")
-async def enable_2fa(otp_code: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+async def enable_2fa(
+    otp_code: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Aktiviert 2FA nach Nachweis eines gueltigen Codes.
+
+    Der Code allein haelt hier zwar schon jeden Fremdaufruf auf, aber der
+    Endpunkt ist zustandsaendernd — und genau die Uneinheitlichkeit war der
+    Grund, warum `/2fa/setup` beim Nachziehen des CSRF-Schutzes uebersehen
+    wurde. Deshalb gilt die Pflicht jetzt fuer alle Auth-Endpunkte ohne
+    Ausnahme.
+    """
     if not user.two_factor_secret_encrypted:
         raise HTTPException(status_code=400, detail="2FA nicht eingerichtet")
     if not AuthService.verify_current_2fa_code(user, otp_code):
