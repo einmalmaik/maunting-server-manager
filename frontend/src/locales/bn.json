@@ -752,7 +752,6 @@
     "backupCodesFileGeneratedAt": "তৈরির সময়",
     "otpRequired": "2FA কোড প্রয়োজন",
     "notVerified": "যাচাই করা হয়নি",
-    "2faQrCode": "2FA QR কোড",
     "deleteAccountTitle": "অ্যাকাউন্ট মুছুন",
     "deleteAccountSubtitle": "স্থায়ীভাবে আপনার ব্যক্তিগত অ্যাকাউন্ট এবং সমস্ত সংশ্লিষ্ট ডেটা মুছে ফেলুন।",
     "ownerCannotDelete": "সিস্টেমের মালিক হিসাবে, আপনি মোট লকআউট প্রতিরোধ করতে আপনার অ্যাকাউন্ট মুছতে পারবেন না।",

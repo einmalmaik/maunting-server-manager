@@ -176,17 +176,36 @@ export function TwoFactorTab() {
 
       {show2FASetup && (
         <div className="mt-4 space-y-4 border-t border-outline-variant/30 pt-4">
+          {/* Hier stand ein <img> auf api.qrserver.com. Die vollstaendige
+              `otpauth://`-URI ging dabei als Query-Parameter an einen fremden
+              Dienst — sie enthaelt das TOTP-Geheimnis und die Kennung des
+              Benutzers. Wer diese Zugriffslogs liest, erzeugt dauerhaft gueltige
+              Codes; der zweite Faktor waere damit keiner mehr.
+
+              Gewirkt hat das Bild ohnehin nie: unsere eigene CSP erlaubt
+              `img-src 'self' data:` und nennt den Dienst nicht (main.py). Der
+              Browser hat die Anfrage also blockiert, und der Kasten blieb leer —
+              ein Leck in jeder Aufstellung ohne diese CSP und eine kaputte
+              Anzeige in jeder mit ihr.
+
+              Ein lokal erzeugter QR-Code braucht eine Bibliothek; das ist eine
+              Entscheidung des Betreibers und keine, die nebenbei in einem
+              Reviewfix faellt. Solange sie aussteht, ist der Weg ohne Kamera
+              vollstaendig: Geheimnis zum Abschreiben und ein Link, den die
+              Authenticator-Apps selbst oeffnen. */}
           <p className="font-body-md text-sm text-on-surface-variant">{t('profile.2faScan')}</p>
           {faUri && (
-            <div className="flex flex-col items-center gap-4">
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(faUri)}`}
-                alt={t('profile.2faQrCode', '2FA QR Code')}
-                className="rounded-lg border border-outline-variant"
-              />
+            <div className="flex flex-col items-center gap-3">
               <p className="font-mono-sm text-mono-sm text-on-surface-variant bg-surface-container-high px-3 py-1.5 rounded border border-outline-variant select-all">
                 {faSecret}
               </p>
+              <a
+                href={faUri}
+                className="msm-btn-secondary inline-flex items-center gap-2 px-4 py-2 text-sm"
+              >
+                <Shield className="h-4 w-4" aria-hidden="true" />
+                {t('profile.2faOpenApp')}
+              </a>
             </div>
           )}
           <form onSubmit={handleEnable2FA} className="mx-auto flex max-w-xs flex-col gap-3">

@@ -752,7 +752,6 @@
     "backupCodesFileGeneratedAt": "Dibuat pada",
     "otpRequired": "Diperlukan kode 2FA",
     "notVerified": "Tidak terverifikasi",
-    "2faQrCode": "Kode QR 2FA",
     "deleteAccountTitle": "Hapus Akun",
     "deleteAccountSubtitle": "Hapus akun pribadi Anda dan semua data terkait secara permanen.",
     "ownerCannotDelete": "Sebagai pemilik sistem, Anda tidak dapat menghapus akun Anda untuk mencegah penguncian total.",

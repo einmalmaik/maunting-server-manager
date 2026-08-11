@@ -752,7 +752,6 @@
     "backupCodesFileGeneratedAt": "تم الإنشاء في",
     "otpRequired": "مطلوب رمز 2FA",
     "notVerified": "لم يتم التحقق منها",
-    "2faQrCode": "2FA رمز الاستجابة السريعة",
     "deleteAccountTitle": "حذف الحساب",
     "deleteAccountSubtitle": "حذف حسابك الشخصي وجميع البيانات المرتبطة به نهائيًا.",
     "ownerCannotDelete": "باعتبارك مالك النظام، لا يمكنك حذف حسابك لمنع الإغلاق الكامل.",

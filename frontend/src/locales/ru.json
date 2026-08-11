@@ -752,7 +752,6 @@
     "backupCodesFileGeneratedAt": "Создано",
     "otpRequired": "Требуется код 2FA",
     "notVerified": "Не проверено",
-    "2faQrCode": "QR-код 2FA",
     "deleteAccountTitle": "Удалить аккаунт",
     "deleteAccountSubtitle": "Удалите навсегда свою личную учетную запись и все связанные с ней данные.",
     "ownerCannotDelete": "Как владелец системы вы не можете удалить свою учетную запись, чтобы предотвратить полную блокировку.",

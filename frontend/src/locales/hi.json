@@ -752,7 +752,6 @@
     "backupCodesFileGeneratedAt": "बनाया गया",
     "otpRequired": "2FA कोड आवश्यक है",
     "notVerified": "सत्यापित नहीं",
-    "2faQrCode": "2एफए क्यूआर कोड",
     "deleteAccountTitle": "खाता हटाएँ",
     "deleteAccountSubtitle": "अपना व्यक्तिगत खाता और सभी संबद्ध डेटा स्थायी रूप से हटा दें।",
     "ownerCannotDelete": "सिस्टम स्वामी के रूप में, आप संपूर्ण लॉकआउट को रोकने के लिए अपना खाता नहीं हटा सकते।",

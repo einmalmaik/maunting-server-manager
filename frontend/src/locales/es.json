@@ -774,7 +774,6 @@
     "backupCodesFileGeneratedAt": "Generado el",
     "otpRequired": "Se requiere código 2FA",
     "notVerified": "No verificado",
-    "2faQrCode": "Código QR 2FA",
     "deleteAccountTitle": "Eliminar cuenta",
     "deleteAccountSubtitle": "Elimine permanentemente su cuenta personal y todos los datos asociados.",
     "ownerCannotDelete": "Como propietario del sistema, no puede eliminar su cuenta para evitar un bloqueo total.",

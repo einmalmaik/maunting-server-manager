@@ -752,7 +752,6 @@
     "backupCodesFileGeneratedAt": "生成时间",
     "otpRequired": "需要 2FA 代码",
     "notVerified": "未验证",
-    "2faQrCode": "2FA 二维码",
     "deleteAccountTitle": "删除帐户",
     "deleteAccountSubtitle": "永久删除您的个人帐户和所有相关数据。",
     "ownerCannotDelete": "作为系统所有者，您无法删除您的帐户以防止完全锁定。",
