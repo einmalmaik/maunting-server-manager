@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { CalendarClock, CheckCircle2, Plus, Save, Trash2, XCircle } from 'lucide-react'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import type { Server } from '@/types'
 import { formatPanelDateTime, formatPanelTime, type PanelTimeFormat } from '@/utils/timeFormat'
@@ -118,17 +119,28 @@ export function ServerRestartPanel({ server, serverId, onSaved }: Props) {
           </div>
         </div>
 
-        <label className="inline-flex items-center gap-3 cursor-pointer">
-          <span className={`relative w-10 h-6 rounded-full transition-colors ${enabled ? 'bg-secondary' : 'bg-surface-container-highest'}`}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              disabled={!canWrite}
-              className="sr-only"
-            />
-            <span className={`absolute top-1 left-1 w-4 h-4 rounded-full transition-transform ${enabled ? 'translate-x-4 bg-on-secondary' : 'bg-on-surface'}`} />
-          </span>
+        {/* Hier stand ein von Hand nachgebauter Umschalter: eine sr-only-Checkbox
+            mit zwei <span> als Optik. Das `disabled` saß dabei nur auf der
+            unsichtbaren Checkbox — die sichtbare Bahn, der Knubbel und das
+            `cursor-pointer` des Labels blieben unverändert. Ohne
+            `server.config.write` sah der Schalter also voll bedienbar aus, der
+            Mauszeiger versprach es, und der Klick verpuffte wortlos; das darunter
+            liegende <fieldset> dimmt zwar, den Schalter selbst erreicht es nicht,
+            denn er steht außerhalb.
+
+            `Switch` aus @/Singra/UI trägt `disabled:opacity-50` und
+            `disabled:cursor-not-allowed` und meldet sich als `role="switch"` mit
+            `aria-checked`. Der gesperrte Zustand ist damit sichtbar UND für
+            Bedienungshilfen lesbar — beides hat der Nachbau nicht geleistet.
+            Das `cursor-pointer` am Label fällt weg: es hätte weiter Bedienbarkeit
+            versprochen, die es bei Lesezugriff nicht gibt. */}
+        <label className="inline-flex items-center gap-3">
+          <Switch
+            checked={enabled}
+            onCheckedChange={setEnabled}
+            disabled={!canWrite}
+            aria-label={t('restarts.enabled')}
+          />
           <span className="font-body-md text-sm text-on-surface">{t('restarts.enabled')}</span>
         </label>
 
