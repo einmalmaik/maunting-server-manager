@@ -341,6 +341,11 @@ def search_file_contents(
     """
     from services.ai_action_service import is_binary_text
 
+    # Steht bewusst vor `auflisten`: die Funktion setzt es selbst, wenn sie ein
+    # Verzeichnis ueberspringen muss. Ein uebersprungenes Verzeichnis ist eine
+    # Kuerzung des Ergebnisses und muss dem Aufrufer gesagt werden.
+    gekuerzt = False
+
     def auflisten(pfad: str) -> dict | None:
         """Das Verzeichnis unter ``pfad`` — oder ``None``, wenn es keines ist.
 
@@ -349,13 +354,31 @@ def search_file_contents(
         nichts Auflistbares. Beides bedeutet dasselbe und wird hier auf dieselbe
         Antwort gebracht, damit der Aufrufer den Unterschied nicht kennen muss.
         """
+        nonlocal gekuerzt
         try:
             ergebnis = list_server_directory(
                 db, server_id=server_id, relative_path=pfad, limit=MAX_LISTED_ENTRIES
             )
         except HTTPException as exc:
-            if exc.status_code not in (400, 404):
+            if exc.status_code >= 500:
+                # Ab 500 geht es nicht mehr um dieses eine Verzeichnis, sondern
+                # um den Zugriffsweg: 502/503 heisst, der Node-Agent ist weg.
+                # Dann liefe jedes weitere Verzeichnis in denselben Fehler, und
+                # ein leeres Suchergebnis waere eine Luege statt einer Auskunft.
                 raise
+            if exc.status_code not in (400, 404):
+                # 400 und 404 sind hier keine Stoerung, sondern die Auskunft
+                # "das ist kein Verzeichnis" (siehe Docstring). Alles andere ist
+                # eine: ein Ordner ohne Leserecht wirft beim `iterdir` einen
+                # PermissionError, den `list_server_directory` zu 403 macht, und
+                # ein Symlink, der aus dem Serverbaum herauszeigt, wird von
+                # `safe_path` ebenfalls mit 403 abgewiesen. Vorher riss ein
+                # einziger solcher Ordner die gesamte Inhaltssuche ab, obwohl
+                # alle anderen lesbar waren - die Dateileseschleife weiter unten
+                # haelt es seit jeher richtig: ueberspringen und weitersuchen.
+                # Verschwiegen wird es trotzdem nicht, `gekuerzt` sagt dem
+                # Aufrufer, dass er kein vollstaendiges Ergebnis in der Hand hat.
+                gekuerzt = True
             return None
         if not ergebnis.get("exists", True) or not ergebnis.get("entries"):
             return None
@@ -369,7 +392,6 @@ def search_file_contents(
         "truncated": False,
     }
 
-    gekuerzt = False
     # Breitensuche statt Rekursion: so gehen die Deckel auf Dateizahl und Tiefe
     # zuerst in die Breite und nicht in den ersten Unterordner, den es findet.
     # Wer in `Data/` sucht, will nicht, dass das Budget in `Data/Bundles/`
@@ -379,7 +401,11 @@ def search_file_contents(
     wurzelliste = auflisten(relative_path)
     if wurzelliste is None:
         if not relative_path:
-            return leer
+            # Auch die Wurzel selbst kann unlesbar sein. Dann hat `auflisten`
+            # bereits `gekuerzt` gesetzt, und die Antwort muss das mittragen:
+            # ein leeres Ergebnis mit `truncated: false` waere die Behauptung,
+            # es gebe nichts zu finden - dabei wurde gar nicht gesucht.
+            return {**leer, "truncated": gekuerzt}
         # Kein Verzeichnis — dann ist der Pfad eine Datei, und die Suche gilt
         # genau ihr. Der haeufigste Fall ueberhaupt.
         dateien.append(relative_path)

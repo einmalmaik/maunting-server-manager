@@ -29,6 +29,26 @@ class DisDecryptionError(DisSidecarError):
     """
 
 
+# Fehlernamen, unter denen der Sidecar meldet, dass ein Ciphertext schon **vor**
+# dem Entschluesseln unbrauchbar ist: "!!!" ist kein Base64 (atob wirft
+# InvalidCharacterError), "AAAA" sind drei Bytes und damit kuerzer als der
+# 12-Byte-IV (@msdis/shield wirft DisInvalidArgumentError, bevor es ueberhaupt
+# zu entschluesseln beginnt).
+#
+# Warum die Abbildung hierhin gehoert und nicht zu jedem einzelnen Aufrufer:
+# Ciphertexte kommen nicht nur aus der eigenen Datenbank, sondern auch von
+# aussen - das OAuth-State-Cookie ist einer davon. Fuer den Aufrufer ist ein
+# unbrauchbarer Ciphertext dasselbe wie ein falscher, beides heisst "der Wert
+# taugt nicht". Ohne diese Abbildung schluepft der Fall als DisSidecarError an
+# jedem `except DisDecryptionError` vorbei, denn DisDecryptionError ist dessen
+# Unterklasse und nicht umgekehrt - aus einem abgeschnittenen Cookie wird so ein
+# HTTP 500 statt einer Abweisung.
+#
+# Nur beim Entschluesseln: derselbe Fehlername beim Verschluesseln waere ein
+# Fehler in unserem eigenen Aufruf und soll laut bleiben.
+_UNBRAUCHBARER_CIPHERTEXT = ("DisInvalidArgumentError", "InvalidCharacterError")
+
+
 class DisClient:
     """Statische Fassade fuer DIS-Krypto-Operationen ueber den lokalen Sidecar."""
 
@@ -52,7 +72,12 @@ class DisClient:
         if resp.status_code == 400:
             body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
             err = body.get("error", "")
-            if err in ("DisDecryptionError", "DisIntegrityError"):
+            # Der zweite Zweig ist der Grund fuer _UNBRAUCHBARER_CIPHERTEXT: ein
+            # Wert, der nicht einmal die Form eines Ciphertext hat, ist fuer den
+            # Aufrufer kein Serverfehler, sondern ein ungueltiger Wert.
+            if err in ("DisDecryptionError", "DisIntegrityError") or (
+                endpoint == "/decrypt" and err in _UNBRAUCHBARER_CIPHERTEXT
+            ):
                 raise DisDecryptionError("Entschluesselung fehlgeschlagen")
             raise DisSidecarError(f"DIS Sidecar Fehler: {err or resp.status_code}")
         if resp.status_code != 200:
@@ -81,7 +106,9 @@ class DisClient:
     def decrypt(ciphertext: str, aad: str | None = None) -> str:
         """Entschluesselt einen DIS-AES-256-GCM-Ciphertext.
 
-        Raises DisDecryptionError bei falschem Key, Tampering oder AAD-Mismatch.
+        Raises DisDecryptionError bei falschem Key, Tampering, AAD-Mismatch oder
+        einem Ciphertext, den der Sidecar gar nicht erst lesen kann (siehe
+        _UNBRAUCHBARER_CIPHERTEXT).
         """
         payload: dict = {"ciphertext": ciphertext}
         if aad:

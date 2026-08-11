@@ -724,6 +724,85 @@ class TestContentSearch:
         assert res.status_code == 200
         assert [m["path"] for m in res.json()["matches"]] == ["server.cfg"]
 
+    def test_content_search_skips_an_unreadable_directory(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        server_with_dir: Server,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Ein Ordner ohne Leserecht kostet den Ordner, nicht die ganze Suche.
+
+        Der Betriebsfall: ein Container legt sein Datenverzeichnis unter einer
+        fremden UID an, oder im Serververzeichnis liegt ein Symlink, der nach
+        draussen zeigt. Beides endet in `list_server_directory` als 403. Vorher
+        reichte die Verzeichnisauflistung der Suche diesen 403 weiter, und die
+        komplette Inhaltssuche scheiterte, obwohl jedes andere Verzeichnis
+        lesbar war.
+
+        Nachgestellt am `iterdir`, weil genau dort der PermissionError entsteht,
+        aus dem der 403 wird - eine gemockte HTTPException haette die Kette
+        nicht mitgeprueft.
+        """
+        root = Path(server_with_dir.install_dir)
+        (root / "Data").mkdir()
+        (root / "Data" / "buffs.xml").write_text(
+            "staminaLoss=1.0\n", encoding="utf-8"
+        )
+        (root / "world").mkdir()
+        (root / "world" / "level.dat").write_text(
+            "staminaLoss=egal\n", encoding="utf-8"
+        )
+
+        original_iterdir = Path.iterdir
+
+        def gesperrtes_iterdir(self: Path, *args, **kwargs):
+            if self.name == "world":
+                raise PermissionError(13, "Permission denied", str(self))
+            return original_iterdir(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "iterdir", gesperrtes_iterdir)
+
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/search-content?q=staminaloss",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 200
+        daten = res.json()
+        # Das lesbare Verzeichnis wurde durchsucht ...
+        assert [m["path"] for m in daten["matches"]] == ["Data/buffs.xml"]
+        # ... und die Antwort verschweigt nicht, dass etwas ausgelassen wurde.
+        assert daten["truncated"] is True
+
+    def test_content_search_reports_truncation_when_the_root_is_unreadable(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        server_with_dir: Server,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Nichts gefunden und nichts durchsucht sind zwei verschiedene Auskuenfte."""
+        root = Path(server_with_dir.install_dir)
+        (root / "server.cfg").write_text("maxPlayers=40\n", encoding="utf-8")
+
+        original_iterdir = Path.iterdir
+
+        def gesperrtes_iterdir(self: Path, *args, **kwargs):
+            if self.name == root.name:
+                raise PermissionError(13, "Permission denied", str(self))
+            return original_iterdir(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "iterdir", gesperrtes_iterdir)
+
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/search-content?q=maxPlayers",
+            cookies=owner_cookies,
+        )
+        assert res.status_code == 200
+        daten = res.json()
+        assert daten["matches"] == []
+        assert daten["truncated"] is True
+
 
 class TestFileHistoryEndpoints:
     def test_history_list_requires_read_permission(

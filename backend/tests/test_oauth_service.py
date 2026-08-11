@@ -102,6 +102,58 @@ class TestStateCookie:
         assert oauth_service.unpack_state_cookie(None) is None
         assert oauth_service.unpack_state_cookie("") is None
 
+    def test_unpack_unusable_ciphertext_returns_none(self, monkeypatch: pytest.MonkeyPatch):
+        """Ein Cookie, das gar kein brauchbarer Ciphertext ist, ist kein Serverfehler.
+
+        Der Callback bekommt den Cookiewert vom Browser, also von aussen. "!!!"
+        ist kein Base64, "AAAA" sind drei Bytes und damit kuerzer als der
+        12-Byte-IV. Der Sidecar meldet dafuer InvalidCharacterError bzw.
+        DisInvalidArgumentError statt DisDecryptionError. Weil
+        DisDecryptionError die *Unter*klasse von DisSidecarError ist, lief die
+        Ausnahme frueher an `except (DisDecryptionError, ValueError)` vorbei und
+        der Benutzer bekam HTTP 500 statt der Umleitung auf
+        'oauth_invalid_callback'.
+
+        Der Test geht bewusst durch das echte `DisClient._post`; ersetzt ist nur
+        der HTTP-Sprung zum Sidecar, denn genau dort wird der Fehlername
+        ausgewertet. Ein Test gegen einen selbstgebauten Fehler haette den
+        eigentlich fehlenden Schritt nicht geprueft.
+        """
+        from services import dis_client as dis_client_modul
+        from services.dis_client import DisClient
+
+        class _SidecarAntwort:
+            """Die 400er-Antwort des Sidecars: {"error": <Name der JS-Ausnahme>}."""
+
+            status_code = 400
+            headers = {"content-type": "application/json"}
+
+            def __init__(self, fehlername: str) -> None:
+                self._fehlername = fehlername
+
+            def json(self) -> dict:
+                return {"error": self._fehlername}
+
+        # conftest ersetzt DisClient.decrypt durch eine Attrappe. Hier wird der
+        # echte Weg wiederhergestellt, damit die Fehlerauswertung in _post
+        # ueberhaupt zur Ausfuehrung kommt.
+        monkeypatch.setattr(
+            DisClient,
+            "decrypt",
+            staticmethod(
+                lambda ciphertext, aad=None: DisClient._post(
+                    "/decrypt", {"ciphertext": ciphertext}
+                )["plaintext"]
+            ),
+        )
+        for fehlername in ("InvalidCharacterError", "DisInvalidArgumentError"):
+            monkeypatch.setattr(
+                dis_client_modul.httpx,
+                "post",
+                lambda *a, _n=fehlername, **k: _SidecarAntwort(_n),
+            )
+            assert oauth_service.unpack_state_cookie("!!!") is None
+
 
 # ── Panel-Switches ────────────────────────────────────────────────────
 
