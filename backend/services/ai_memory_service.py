@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import json
+import logging
 import re
 from uuid import UUID, uuid4
 
@@ -14,8 +15,10 @@ from models import AiMemoryEntry, AiMemoryPreference, Server, Team, User
 from services import ai_embedding_service, audit_service, permission_service
 from services.ai_redaction import redact_sensitive_text
 from services.ai_embedding_service import EMBEDDING_DIMENSIONS
-from services.dis_client import DisClient
+from services.dis_client import DisClient, DisSidecarError
 
+
+logger = logging.getLogger(__name__)
 
 MAX_ENTRIES_PER_SCOPE = 100
 
@@ -554,19 +557,41 @@ def _visible_scope_rows(
     Die Abfrage filtert ueber `scope_identity` beziehungsweise `team_id` — nie
     ueber ein Kennzeichen im Text. Das ist die Stelle, an der die Trennung
     zwischen zwei Benutzern tatsaechlich stattfindet.
+
+    Serverbezogene Zeilen werden zusaetzlich schon in der Abfrage auf die
+    sichtbaren Server begrenzt. Das ist eine Mengenbegrenzung, keine zweite
+    Rechtepruefung — die Autoritaet bleibt die Schleife unten.
     """
     from services import team_service
 
     team_ids = team_service.user_team_ids(db, user)
+    # Welche Server dieser Benutzer gerade sehen darf. Dieselbe Menge, die
+    # `list_my_servers` zeigt — die Funktion ist die vorhandene Antwort auf
+    # genau diese Frage und liegt bereits `list_visible_servers` zugrunde.
+    #
+    # Drei Rueckgabefaelle, und die Unterscheidung ist der ganze Punkt:
+    # `None` heisst **alle** (Owner oder eine Rolle mit pauschalem
+    # `server.view`), `[]` heisst **keinen**, eine Liste heisst genau diese.
+    # Ein `if sichtbare:` statt der Fallunterscheidung machte aus "sieht
+    # nichts" ein "sieht alles".
+    #
+    # Der Vorfilter ist eine Mengenbegrenzung, keine Rechtepruefung: die
+    # zeilenweise Nachpruefung unten bleibt die Autoritaet. Vorher stand hier
+    # gar keine Begrenzung, und die Schleife fragte fuer *jede* serverbezogene
+    # Zeile einzeln nach — bei einem Betreiber mit vielen Servern eine Abfrage
+    # je Zeile und Chatnachricht.
+    sichtbare = permission_service.list_visible_server_ids(db, user)
     conditions = [AiMemoryEntry.scope_identity == "panel"]
     if persoenlich:
         conditions.append(AiMemoryEntry.scope_identity == f"user:{user.id}")
-        conditions.append(
-            and_(
-                AiMemoryEntry.scope == "server",
-                AiMemoryEntry.owner_user_id == user.id,
-            )
-        )
+        eigene_notiz = [
+            AiMemoryEntry.scope == "server",
+            AiMemoryEntry.owner_user_id == user.id,
+        ]
+        if sichtbare is None:
+            conditions.append(and_(*eigene_notiz))
+        elif sichtbare:
+            conditions.append(and_(*eigene_notiz, AiMemoryEntry.server_id.in_(sichtbare)))
     if team_ids:
         conditions.append(
             and_(AiMemoryEntry.scope == "team", AiMemoryEntry.team_id.in_(team_ids))
@@ -584,6 +609,37 @@ def _visible_scope_rows(
                 continue
         visible.append(row)
     return visible
+
+
+def _entschluesseln(rows: list[AiMemoryEntry]) -> list[tuple[AiMemoryEntry, str]]:
+    """Entschluesselt, was sich entschluesseln laesst, und ueberspringt den Rest.
+
+    Vorher stand hier eine Listenauswertung ohne `try`. Ein einziger Eintrag,
+    dessen Text sich nicht mehr oeffnen laesst — verdrehte AAD, gewechselter
+    Schluessel, halb geschriebene Zeile —, warf `DisDecryptionError` bis in
+    `build_provider_messages`. Der Aufrufer in `ai_stream_service` faengt dort
+    `DisSidecarError` und uebersetzt ihn zu `AI_CREDENTIAL_UNAVAILABLE`: der
+    Lauf begann gar nicht erst. Eine kaputte Notiz nahm damit den ganzen Chat
+    mit, und zwar jedes Mal wieder, bis jemand die Zeile in der Datenbank fand.
+
+    Ein Gedaechtnis ist eine Beigabe. Es darf fehlen; es darf nicht im Weg
+    stehen. Dieselbe Haltung wie bei `refresh_embedding` weiter oben.
+
+    Bewusst `DisSidecarError` und nicht nur `DisDecryptionError`: ist der
+    Sidecar nicht erreichbar, scheitert jede Zeile, und der Benutzer bekommt
+    einen Assistenten ohne Gedaechtnis statt gar keinen. Sichtbar bleibt es
+    ueber das Protokoll — je Zeile eine Warnung.
+    """
+    entschluesselt: list[tuple[AiMemoryEntry, str]] = []
+    for row in rows:
+        try:
+            entschluesselt.append((row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))))
+        except DisSidecarError as exc:
+            logger.warning(
+                "Gedaechtniseintrag %s (%s) nicht lesbar, wird uebersprungen: %s",
+                row.id, row.scope, type(exc).__name__,
+            )
+    return entschluesselt
 
 
 def _memory_line(row: AiMemoryEntry, value: str) -> str:
@@ -667,7 +723,7 @@ def provider_memory_context(
     if not rows:
         return None
 
-    decoded = [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))) for row in rows]
+    decoded = _entschluesseln(rows)
     lines = [_memory_line(row, value) for row, value in decoded]
     total = sum(len(line) + 1 for line in lines)
 
@@ -747,7 +803,7 @@ def search_entries(
     if not rows or not query.strip():
         return []
 
-    decoded = [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))) for row in rows]
+    decoded = _entschluesseln(rows)
     now = datetime.now(timezone.utc)
     query_tokens = _tokens(query)
     scores = _similarities(query, [row for row, _ in decoded])

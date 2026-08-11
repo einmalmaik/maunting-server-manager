@@ -17,7 +17,12 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, Role, RolePermission, User
-from services import ai_action_errors, ai_action_service, ai_memory_service
+from services import (
+    ai_action_errors,
+    ai_action_service,
+    ai_memory_service,
+    permission_service,
+)
 from services.role_service import set_user_roles
 
 
@@ -216,6 +221,155 @@ def test_losing_access_to_a_server_removes_its_memory_from_the_context(
     block = ai_memory_service.provider_memory_context(db, regular_user, query="Notiz?")
 
     assert block is None or "Etwas ueber diesen Server" not in block
+
+
+def test_the_prefilter_alone_holds_for_a_user_without_any_server(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Vorfilter darf aus "sieht nichts" kein "sieht alles" machen.
+
+    `list_visible_server_ids` kennt drei Antworten: `None` heisst *alle Server*
+    (Betreiber oder eine Rolle mit pauschalem `server.view`), `[]` heisst
+    *keinen einzigen*. Beide sind in Python falsy; ein `if sichtbare:` an der
+    Filterstelle behandelte den zweiten Fall wie den ersten.
+
+    Die zeilenweise Nachpruefung faengt das im Betrieb ohnehin ab — genau
+    deshalb wird sie hier ausgehebelt. Ohne diesen Handgriff bliebe der Test
+    auch mit falschem Vorfilter gruen und wuerde nur die Nachpruefung messen,
+    die er gar nicht prueft. Was hier zugesichert wird, ist die zweite
+    Verteidigungslinie: der Vorfilter muss fuer sich allein richtig sein.
+    """
+    from models import Server, ServerPermission
+
+    _allow_memory(db, regular_user)
+    server = Server(
+        name="Fremder", game_type="dayz",
+        install_dir="/tmp/fremder", status="stopped",
+    )
+    db.add(server)
+    db.commit()
+
+    # Kurz sehen duerfen, um die Notiz ueberhaupt anlegen zu koennen ...
+    permission = ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view"
+    )
+    db.add(permission)
+    db.commit()
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="server", server_id=server.id,
+        key="geheim", value="Etwas ueber einen fremden Server", origin="ai",
+    )
+
+    # ... und danach gar keinen Server mehr sehen duerfen.
+    db.delete(permission)
+    db.commit()
+    assert permission_service.list_visible_server_ids(db, regular_user) == []
+
+    monkeypatch.setattr(
+        ai_memory_service.permission_service, "has_server_permission",
+        lambda **_kwargs: True,
+    )
+    rows = ai_memory_service._visible_scope_rows(db, regular_user)
+
+    assert [row for row in rows if row.scope == "server"] == []
+
+
+def test_a_server_seen_only_through_a_team_keeps_its_memory(
+    db: Session, regular_user: User
+) -> None:
+    """Der Vorfilter darf auch nicht enger sein als die Nachpruefung.
+
+    Das ist die gefaehrlichere Richtung: zu weit faengt die Nachpruefung ab, zu
+    eng faengt niemand. Der Eintrag verschwaende dann still aus dem Kontext,
+    ohne Fehler und ohne Hinweis — die KI wuesste einfach nichts mehr davon.
+
+    `list_visible_server_ids` und `has_server_permission` muessen dieselbe Menge
+    meinen. Hier zaehlt der Weg ueber ein Team, weil geliehene Teamrechte der
+    uebliche Freigabeweg im Panel sind.
+    """
+    from models import Server, ServerPermission, Team, TeamMember, TeamServerGrant
+
+    _allow_memory(db, regular_user)
+    besitzer = User(
+        username="teamowner", email="teamowner@example.com",
+        password_hash="x", is_active=True,
+    )
+    server = Server(
+        name="Teamserver", game_type="dayz",
+        install_dir="/tmp/teamserver", status="stopped",
+    )
+    db.add_all([besitzer, server])
+    db.commit()
+
+    team = Team(name="Betrieb", owner_user_id=besitzer.id)
+    db.add(team)
+    db.commit()
+    db.add_all([
+        # Ein Team verleiht nur, was sein Gruender selbst haelt — ohne dieses
+        # direkte Recht traegt die Zuteilung unten nichts.
+        ServerPermission(
+            user_id=besitzer.id, server_id=server.id, permission_key="server.view"
+        ),
+        TeamMember(team_id=team.id, user_id=regular_user.id, role="member"),
+        TeamServerGrant(
+            team_id=team.id, server_id=server.id,
+            permission_key="server.view", granted_by=besitzer.id,
+        ),
+    ])
+    db.commit()
+
+    assert server.id in (permission_service.list_visible_server_ids(db, regular_user) or [])
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="server", server_id=server.id,
+        key="eigenheit", value="Braucht nach dem Start zwei Minuten", origin="ai",
+    )
+
+    block = ai_memory_service.provider_memory_context(db, regular_user, query="Warum so langsam?")
+
+    assert block is not None and "zwei Minuten" in block
+
+
+def test_one_unreadable_entry_does_not_take_the_whole_chat_down(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein Gedaechtnis ist eine Beigabe. Es darf fehlen, nicht im Weg stehen.
+
+    Vorher entschluesselte der Abruf in einer Listenauswertung ohne `try`. Eine
+    einzige Zeile, die sich nicht mehr oeffnen liess, warf bis in
+    `build_provider_messages`; der Aufrufer in `ai_stream_service` faengt dort
+    `DisSidecarError` und uebersetzt ihn zu `AI_CREDENTIAL_UNAVAILABLE` — der
+    Lauf begann gar nicht erst, und zwar jedes Mal wieder.
+
+    Geprueft werden beide Aufrufstellen. Sie teilen sich denselben Helfer, aber
+    genau darum geht es: faellt eine davon spaeter auf die Listenauswertung
+    zurueck, faellt hier auch nur diese eine Zusicherung um. Der Weg ueber die
+    Suche traegt eigene Folgen — dort scheitert nicht der Lauf, sondern das
+    Werkzeug `search_memory` mitten in einer Antwort.
+    """
+    from services.dis_client import DisClient, DisDecryptionError
+
+    _allow_memory(db, regular_user)
+    kaputt = _write(db, regular_user, "kaputt", "Unlesbarer Wert")
+    _write(db, regular_user, "heil", "Lesbarer Wert")
+
+    echt = DisClient.decrypt
+
+    def stolpert(payload, *, aad):
+        if aad.endswith(kaputt.id):
+            raise DisDecryptionError("AAD passt nicht mehr")
+        return echt(payload, aad=aad)
+
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(stolpert))
+
+    block = ai_memory_service.provider_memory_context(db, regular_user, query="Was weisst du?")
+
+    assert block is not None
+    assert "Lesbarer Wert" in block
+    assert "Unlesbarer Wert" not in block
+
+    treffer = ai_memory_service.search_entries(db, regular_user, query="Wert")
+
+    assert [row.key for row, _value, _score in treffer] == ["heil"]
 
 
 def test_remember_requires_the_memory_permission(db: Session, regular_user: User) -> None:
