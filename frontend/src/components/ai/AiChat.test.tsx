@@ -151,11 +151,11 @@ describe('AiChat', () => {
     render(<AiChat />)
     await screen.findByText('synthetic-note.txt')
 
-    const stufen = screen.getByLabelText('Denktiefe')
-    expect(Array.from(stufen.querySelectorAll('option')).map((o) => o.textContent))
+    fireEvent.click(screen.getByLabelText('Denktiefe'))
+    expect(screen.getAllByRole('option').map((o) => o.textContent))
       .toEqual(['Kein Nachdenken', 'Niedrig', 'Mittel', 'Hoch'])
 
-    fireEvent.change(stufen, { target: { value: 'high' } })
+    fireEvent.click(screen.getByRole('option', { name: 'Hoch' }))
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Hallo' } })
     fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
 
@@ -183,11 +183,13 @@ describe('AiChat', () => {
     render(<AiChat />)
     await screen.findByText('synthetic-note.txt')
 
+    // Die Vorauswahl faellt auf die Vorgabe des Modells, nicht auf nichts —
+    // sichtbar am Knopf, bevor die Liste ueberhaupt aufgeklappt wird.
     const stufen = screen.getByLabelText('Denktiefe')
-    expect(Array.from(stufen.querySelectorAll('option')).map((o) => o.textContent))
-      .toEqual(['Niedrig', 'Hoch'])
-    // Und die Vorauswahl faellt auf die Vorgabe des Modells, nicht auf nichts.
-    expect(stufen).toHaveValue('low')
+    expect(stufen).toHaveTextContent('Niedrig')
+
+    fireEvent.click(stufen)
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Niedrig', 'Hoch'])
   })
   it('zeigt bei einem abgelehnten Werkzeugaufruf einen Satz statt eines Schlüssels', async () => {
     // Der Betreiber sah `ai.errors.codes.AI_TOOL_REJECTED` in der Meldung. Der

@@ -255,22 +255,19 @@ export function AiTab() {
                     {label}
                   </label>
                   {ranks ? (
-                    <select
+                    <Dropdown
                       id={fieldId}
-                      className="msm-input"
                       value={String(selected[key] ?? 0)}
                       disabled={!canWrite || unlimited || saving}
-                      onChange={(event) => updateField(selected.role_id, key, Number(event.target.value))}
+                      onChange={(wert) => updateField(selected.role_id, key, Number(wert))}
+                      options={ranks.map((rank, rang) => ({
+                        value: String(rang),
+                        label: rang === 0
+                          ? t('ai.reasoning.off')
+                          : t(`ai.reasoning.levels.${rank}`, { defaultValue: rank }),
+                      }))}
                       aria-label={`${label}: ${selected.role_name}`}
-                    >
-                      {ranks.map((rank, rang) => (
-                        <option key={rank} value={rang}>
-                          {rang === 0
-                            ? t('ai.reasoning.off')
-                            : t(`ai.reasoning.levels.${rank}`, { defaultValue: rank })}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   ) : (
                     <NumberStepper
                       id={fieldId}

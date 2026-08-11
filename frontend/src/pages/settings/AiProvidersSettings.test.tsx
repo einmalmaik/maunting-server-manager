@@ -75,8 +75,11 @@ describe('AiProvidersSettings', () => {
     //
     // Das Feld startet als Textfeld und wird erst zur Auswahl, wenn der
     // Katalog da ist — ein `findBy` allein griffe die erste Fassung ab.
-    await waitFor(() => expect(screen.getByLabelText('Standardmodell').tagName).toBe('SELECT'))
-    expect(screen.getByLabelText('Standardmodell')).toHaveValue('anthropic/claude-opus-5')
+    // Unser `Dropdown` statt eines nativen `<select>`: ein Knopf, der eine
+    // Listbox oeffnet. Am Knopf steht, was gewaehlt ist.
+    await waitFor(() =>
+      expect(screen.getByLabelText('Standardmodell')).toHaveTextContent('anthropic/claude-opus-5'))
+    expect(screen.getByLabelText('Standardmodell').tagName).toBe('BUTTON')
 
     // Und die Denkstufen des gewaehlten Modells stehen daneben.
     expect(await screen.findByText('Maximal')).toBeInTheDocument()

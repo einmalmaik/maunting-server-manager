@@ -17,7 +17,7 @@ import {
   type AiToolUse,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
-import { Button, Dropdown, Switch } from '@/Singra/UI'
+import { Button, Dropdown, type DropdownOption } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 import { AiActionProposalCard } from './AiActionProposalCard'
@@ -44,6 +44,58 @@ interface ServerOption {
 
 const ATTACHMENT_ACCEPT = '.txt,.log,.cfg,.conf,.ini,.json,.properties,.toml,.yaml,.yml,.png,.jpg,.jpeg'
 
+/**
+ * Die Denkwahl — dieselben zwei Felder, die auch auf der Leitung stehen und in
+ * `ai_runs` landen: **ob** nachgedacht wird und **wie tief**.
+ *
+ * Zwei Felder statt eines, weil die Anbieter selbst zwei Dinge kennen: 145 der
+ * 272 denkenden Modelle nennen ueberhaupt keine Stufen. `{an: true, stufe:
+ * null}` heisst dort „denk nach, so wie du es fuer richtig haeltst" — mit einem
+ * einzelnen Stufenfeld muesste man dafuer einen Wert erfinden.
+ */
+interface Denkwahl {
+  an: boolean
+  stufe: string | null
+}
+
+/**
+ * Die zwei Eintraege der Auswahlliste, die keine Stufe sind.
+ *
+ * Unser `Dropdown` traegt Zeichenketten als Werte; `null` waere dort „nichts
+ * gewaehlt" und wuerde den Platzhalter zeigen statt einer Entscheidung. Beide
+ * Werte koennen keine echte Stufe verdecken: `ai_reasoning.RANGFOLGE` kennt sie
+ * nicht, und `none` — das Wort, das OpenRouter fuer „aus" in die Stufenliste
+ * schreibt — filtert der Server bereits heraus.
+ */
+const AUS = '__aus__'
+const AN_OHNE_STUFE = '__an__'
+
+function wahlAusOption(wert: string): Denkwahl {
+  if (wert === AUS) return { an: false, stufe: null }
+  if (wert === AN_OHNE_STUFE) return { an: true, stufe: null }
+  return { an: true, stufe: wert }
+}
+
+/**
+ * Die Denkwahl beim Providerwechsel auf etwas Gueltiges bringen.
+ *
+ * Jedes Modell kennt andere Stufen — „xhigh" beim einen gibt es beim naechsten
+ * nicht. Bliebe die alte Wahl stehen, senkte der Server sie stillschweigend,
+ * und die Oberflaeche zeigte etwas anderes an, als tatsaechlich gilt. Bei einem
+ * Modell mit Denkzwang ist ausserdem „aus" keine gueltige Wahl.
+ *
+ * Eine reine Funktion, damit sie sich ohne gerendertes Bauteil pruefen laesst.
+ */
+function denkwahlFuer(jetzt: Denkwahl, provider: AiProviderAvailable): Denkwahl {
+  if (!provider.reasoning) return { an: false, stufe: null }
+  // Ausgeschaltet lassen, wo das Modell das zulaesst — auch beim Wechsel. Eine
+  // stillschweigend wieder eingeschaltete Denktiefe kostet Geld.
+  if (!jetzt.an && provider.can_disable) return { an: false, stufe: null }
+  if (provider.efforts.length === 0) return { an: true, stufe: null }
+  if (jetzt.stufe && provider.efforts.includes(jetzt.stufe)) return { an: true, stufe: jetzt.stufe }
+  return { an: true, stufe: provider.default_effort ?? provider.efforts[0] }
+}
+
 /** Zustaende, in denen der Lauf nichts mehr von selbst tut. */
 const RUHT: readonly AiRunStatus[] = [
   'completed', 'failed', 'cancelled', 'waiting_confirmation', 'waiting_user',
@@ -69,11 +121,13 @@ export function AiChat() {
   const [entries, setEntries] = useState<Entry[]>([])
   const [attachments, setAttachments] = useState<AiAttachment[]>([])
   const [servers, setServers] = useState<ServerOption[]>([])
-  // Nicht mehr an/aus, sondern eine Tiefe. `null` heisst „nicht nachdenken";
-  // ein Wort ist die gewaehlte Stufe. Welche Stufen es gibt, sagt der Provider
-  // aus dem Katalog — sie sind je Modell verschieden und bereits auf die Rolle
-  // dieses Benutzers geklemmt.
-  const [effort, setEffort] = useState<string | null>(null)
+  // Zwei Felder, genau wie auf der Leitung und in `ai_runs`: **ob** nachgedacht
+  // wird und **wie tief**. Das ist keine Doppelung — 145 der 272 denkenden
+  // Modelle kennen ueberhaupt keine Stufen, dort ist `stufe` zwangslaeufig
+  // `null`, und ein einzelnes Feld muesste fuer sie einen Wert erfinden.
+  // Welche Stufen es gibt, sagt der Provider aus dem Katalog; sie sind je
+  // Modell verschieden und bereits auf die Rolle dieses Benutzers geklemmt.
+  const [denken, setDenken] = useState<Denkwahl>({ an: false, stufe: null })
   // Ob der Einwilligungshinweis faellig ist. Die 24-Stunden-Regel entscheidet
   // das Backend — hier steht nur das Ergebnis.
   const [memoryNoticeDue, setMemoryNoticeDue] = useState(false)
@@ -164,23 +218,11 @@ export function AiChat() {
     [availableProviders, providerId],
   )
 
-  /**
-   * Beim Providerwechsel die Denkstufe auf etwas Gueltiges bringen.
-   *
-   * Jedes Modell kennt andere Stufen — „xhigh" beim einen gibt es beim
-   * naechsten nicht. Bliebe die alte Wahl stehen, senkte der Server sie
-   * stillschweigend, und die Oberflaeche zeigte etwas anderes an, als
-   * tatsaechlich gilt. Bei einem Modell, das Nachdenken nicht abschalten kann,
-   * ist ausserdem `null` keine gueltige Wahl.
-   */
+  // Beim Providerwechsel die Wahl auf etwas Gueltiges bringen. Warum das noetig
+  // ist, steht bei `denkwahlFuer`.
   useEffect(() => {
     if (!aktiverProvider) return
-    setEffort((current) => {
-      if (!aktiverProvider.reasoning) return null
-      if (current !== null && aktiverProvider.efforts.includes(current)) return current
-      if (current === null && aktiverProvider.can_disable) return null
-      return aktiverProvider.default_effort ?? aktiverProvider.efforts[0] ?? null
-    })
+    setDenken((jetzt) => denkwahlFuer(jetzt, aktiverProvider))
   }, [aktiverProvider])
 
   /** Hochgeladen, aber noch nicht abgeschickt — die Chips über dem Eingabefeld. */
@@ -566,8 +608,8 @@ export function AiChat() {
           content,
           provider_id: providerId,
           request_id: crypto.randomUUID(),
-          reasoning: effort !== null,
-          reasoning_effort: effort,
+          reasoning: denken.an,
+          reasoning_effort: denken.stufe,
         }, verarbeite, signal),
         assistantId,
         optimisticUser.id,
@@ -647,8 +689,8 @@ export function AiChat() {
 
         <ReasoningPicker
           provider={aktiverProvider}
-          value={effort}
-          onChange={setEffort}
+          wahl={denken}
+          onChange={setDenken}
           disabled={busy}
         />
 
@@ -1018,70 +1060,59 @@ export function AiChat() {
  * Die Wahl der Denktiefe — je Modell verschieden, deshalb keine feste Liste.
  *
  * Gemessen am 2026-08-11 ueber alle 402 Modelle im OpenRouter-Katalog gibt es
- * genau vier Faelle, und jeder sieht hier anders aus:
+ * genau vier Faelle. Sie fuehren zu **einer** Bedienung, nicht zu vieren:
  *
  * 1. **Modell denkt nicht** (130) → gar keine Anzeige. Ein Regler, der nichts
  *    bewirkt, ist schlimmer als keiner.
  * 2. **Stufen** (127, in 20 verschiedenen Zusammenstellungen) → eine Auswahl
  *    aus genau diesen Stufen. Deshalb kommt die Liste aus dem Katalog und nicht
- *    aus einer Konstante: „xhigh" gibt es bei einem Modell und beim naechsten
- *    nicht.
- * 3. **Nur an/aus** (145) → ein Schalter, wie bisher. Das ist die Mehrheit der
- *    denkenden Modelle.
- * 4. **Nicht abschaltbar** (82) → „aus" fehlt in der Auswahl. Der Anbieter
- *    denkt ohnehin und rechnet es ab; ein Aus-Knopf waere gelogen.
+ *    aus einer Konstante: `gpt-5.6-luna` kennt `max`, `gpt-5.5` hoert bei
+ *    `xhigh` auf, `gpt-5.5-pro` faengt erst bei `medium` an.
+ * 3. **Nur an/aus** (145) → dieselbe Liste mit zwei Eintraegen. Hier stand
+ *    einmal ein `Switch` daneben; das waren zwei Bedienelemente fuer dieselbe
+ *    Entscheidung, je nach Modell ein anderes.
+ * 4. **Nicht abschaltbar** (82) → „aus" fehlt in der Liste. Der Anbieter denkt
+ *    ohnehin und rechnet es ab; ein Aus-Knopf waere gelogen.
  *
  * Die Stufen sind bereits auf die Rolle des Benutzers geklemmt — das erledigt
  * der Server in `ai_reasoning.waehlbare_stufen`. Hier wird nichts entschieden,
  * nur angezeigt.
  */
-function ReasoningPicker({ provider, value, onChange, disabled }: {
+function ReasoningPicker({ provider, wahl, onChange, disabled }: {
   provider: AiProviderAvailable | null
-  value: string | null
-  onChange: (value: string | null) => void
+  wahl: Denkwahl
+  onChange: (wahl: Denkwahl) => void
   disabled: boolean
 }) {
   const { t } = useTranslation()
   if (!provider?.reasoning) return null
 
-  const rahmen = 'flex items-center gap-2 rounded-full border border-outline-variant/40 px-3 py-1.5 text-xs text-on-surface-variant'
-
-  // Kein Stufenwissen: derselbe Schalter wie bisher — fuer 145 der 272
-  // denkenden Modelle ist das die einzige Wahl, die es ueberhaupt gibt.
+  const optionen: DropdownOption[] = []
+  if (provider.can_disable) optionen.push({ value: AUS, label: t('ai.reasoning.off') })
   if (provider.efforts.length === 0) {
-    return (
-      <label className={rahmen}>
-        <Brain className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span className="hidden sm:inline">{t('ai.chat.reasoning')}</span>
-        <Switch
-          checked={value !== null}
-          disabled={disabled || !provider.can_disable}
-          onCheckedChange={(an) => onChange(an ? (provider.default_effort ?? '') : null)}
-          aria-label={t('ai.chat.reasoning')}
-        />
-      </label>
-    )
+    optionen.push({ value: AN_OHNE_STUFE, label: t('ai.chat.reasoning') })
+  } else {
+    for (const stufe of provider.efforts) {
+      optionen.push({ value: stufe, label: t(`ai.reasoning.levels.${stufe}`, { defaultValue: stufe }) })
+    }
   }
 
   return (
-    <label className={rahmen}>
-      <Brain className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span className="sr-only">{t('ai.chat.reasoningLevel')}</span>
-      <select
-        className="bg-transparent text-xs text-on-surface outline-none"
-        value={value ?? ''}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value === '' ? null : event.target.value)}
-        aria-label={t('ai.chat.reasoningLevel')}
-      >
-        {provider.can_disable && <option value="">{t('ai.reasoning.off')}</option>}
-        {provider.efforts.map((stufe) => (
-          <option key={stufe} value={stufe}>
-            {t(`ai.reasoning.levels.${stufe}`, { defaultValue: stufe })}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="flex items-center gap-1.5">
+      <Brain className="h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
+      <div className="min-w-[7rem] max-w-[11rem]">
+        <Dropdown
+          value={wahl.an ? (wahl.stufe ?? AN_OHNE_STUFE) : AUS}
+          onChange={(gewaehlt) => onChange(wahlAusOption(gewaehlt))}
+          options={optionen}
+          // Nur eine Option heisst: es gibt nichts zu waehlen. Das kommt bei
+          // einem Modell mit Denkzwang und ohne Stufen vor — die Anzeige ist
+          // dann eine Auskunft, keine Frage.
+          disabled={disabled || optionen.length < 2}
+          aria-label={t('ai.chat.reasoningLevel')}
+        />
+      </div>
+    </div>
   )
 }
 

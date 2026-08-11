@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { AlertCircle, CheckCircle2, KeyRound, PlugZap, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -11,7 +11,7 @@ import {
   type AiProviderWrite,
 } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
-import { Button, NumberStepper, Switch } from '@/Singra/UI'
+import { Button, Dropdown, NumberStepper, Switch } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
@@ -254,6 +254,12 @@ function ProviderForm({
 
   const gewaehltesModell = models?.find((item) => item.model_id === draft.default_model) ?? null
 
+  // Unser `Dropdown` ist ein Knopf, kein `<select>`. Ein umschliessendes
+  // `<label>` beschriftet ihn deshalb nicht — es braucht `htmlFor` und eine ID,
+  // die auch bei zwei Formularen auf derselben Seite eindeutig bleibt.
+  const kindId = useId()
+  const modelId = useId()
+
   /**
    * Schickt eine echte Mini-Anfrage an den Anbieter.
    *
@@ -291,20 +297,22 @@ function ProviderForm({
     }}>
       <fieldset disabled={disabled} className="grid grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2">
         <ProviderInput label={t('ai.providers.name')} value={draft.name} onChange={(name) => change({ name })} />
-        <label className="space-y-1.5">
-          <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.kind')}</span>
-          <select
-            className="msm-input"
-            value={draft.provider_kind}
-            onChange={(event) => change({ provider_kind: event.target.value, default_model: '' })}
-          >
-            {/* Eine Zeile ohne bekannten Anbieter gibt es nur nach der Migration
-                20260811_01, die fremde Zugaenge geparkt hat. Sie steht in der
-                Auswahl, damit der Betreiber sieht, was los ist — und nicht
-                stillschweigend auf den ersten Anbieter umgestellt wird. */}
-            {!draft.provider_kind && <option value="">{t('ai.providers.kindMissing')}</option>}
-            {kinds.map((item) => <option key={item.kind} value={item.kind}>{item.label}</option>)}
-          </select>
+        <div className="space-y-1.5">
+          <label htmlFor={kindId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+            {t('ai.providers.kind')}
+          </label>
+          <Dropdown
+            id={kindId}
+            value={draft.provider_kind || null}
+            onChange={(kind) => change({ provider_kind: kind, default_model: '' })}
+            // Eine Zeile ohne bekannten Anbieter gibt es nur nach der Migration
+            // 20260811_01, die fremde Zugaenge geparkt hat. Der Platzhalter sagt
+            // das, statt stillschweigend auf den ersten Anbieter umzustellen —
+            // und er ist bewusst **keine** waehlbare Option: „kein Anbieter" ist
+            // ein Befund, keine Einstellung.
+            placeholder={t('ai.providers.kindMissing')}
+            options={kinds.map((item) => ({ value: item.kind, label: item.label }))}
+          />
           {spec && (
             <p className="text-xs text-on-surface-variant">
               {t('ai.providers.kindHint', { url: spec.base_url })}
@@ -315,7 +323,7 @@ function ProviderForm({
           {!draft.provider_kind && (
             <p className="text-xs text-status-error">{t('ai.providers.kindMissingHint')}</p>
           )}
-        </label>
+        </div>
         <div className="md:col-span-2">
           <div className="flex items-end gap-2">
             <div className="flex-1">
@@ -323,15 +331,25 @@ function ProviderForm({
                   Testaufruf auf, und ueber die Denkfaehigkeiten des Modells
                   wusste MSM so oder so nichts. */}
               {models && models.length > 0 ? (
-                <label className="space-y-1.5 block">
-                  <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.model')}</span>
-                  <select className="msm-input" value={draft.default_model} onChange={(event) => change({ default_model: event.target.value })}>
-                    <option value="">{t('ai.providers.modelChoose')}</option>
-                    {models.map((item) => (
-                      <option key={item.model_id} value={item.model_id}>{item.model_id}</option>
-                    ))}
-                  </select>
-                </label>
+                <div className="space-y-1.5">
+                  <label htmlFor={modelId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                    {t('ai.providers.model')}
+                  </label>
+                  <Dropdown
+                    id={modelId}
+                    value={draft.default_model || null}
+                    onChange={(default_model) => change({ default_model })}
+                    placeholder={t('ai.providers.modelChoose')}
+                    options={models.map((item) => ({
+                      value: item.model_id,
+                      // Der Anzeigename daneben: `anthropic/claude-opus-5` ist
+                      // die ID, die gespeichert wird, „Claude Opus 5" das, was
+                      // der Betreiber sucht.
+                      label: item.model_id,
+                      hint: item.name !== item.model_id ? item.name : undefined,
+                    }))}
+                  />
+                </div>
               ) : (
                 <ProviderInput
                   label={t('ai.providers.model')}
