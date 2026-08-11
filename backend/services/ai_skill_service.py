@@ -60,6 +60,11 @@ MAX_DESCRIPTION_CHARS = 500
 # entscheidet die Bedeutungsaehnlichkeit zur Frage, welche mitkommen.
 MAX_INDEXED_SKILLS = 25
 MAX_SKILLS_PER_SCOPE = 200
+# Wartende Zeilen bekommen ein eigenes, viel kleineres Kontingent. Sie
+# entstehen ohne Entscheidung eines Menschen — unter der Lernpolitik `review`
+# legt jedes Kundengespraech welche an — und duerfen deshalb nicht dasselbe
+# Kontingent aufbrauchen wie die freigegebenen Skills des Betreibers.
+MAX_PENDING_PER_SCOPE = 25
 _EMBEDDING_MODEL_TAG = "potion-multilingual-128M"
 _SKILL_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,63}$")
 _FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n(.*)\Z", re.DOTALL)
@@ -178,6 +183,57 @@ def _scope_identity(team_id: int | None) -> str:
     return "global" if team_id is None else f"team:{team_id}"
 
 
+def _overlay_rank(row: AiSkill) -> tuple[str, int, int]:
+    """Der Rang einer Zeile bei der Ueberlagerung: eng schlaegt weit.
+
+    Warum das hier steht und nicht als `ORDER BY` in der Abfrage: die Schleife
+    in `_overlay` ueberschreibt, der zuletzt gelesene Eintrag gewinnt. Ohne
+    festen Rang entscheidet die Datenbank, welche Fassung ein Benutzer sieht —
+    und PostgreSQL sagt bei Gleichstand nichts zu. Derselbe Schluessel koennte
+    von Nachricht zu Nachricht einen anderen Text liefern.
+
+    Der Rang: global zuerst, Team danach. Ein Team-Skill ist die engere Aussage
+    und darf die panelweite Vorgabe ueberschreiben, so wie eine globale Zeile
+    die mitgelieferte Datei ueberschreibt. Gehoert jemand zwei Teams an, die
+    denselben Schluessel belegen, gewinnt das zuletzt angelegte — die hoehere
+    Team-Id. Diese letzte Regel ist willkuerlich, aber sie ist festgelegt, und
+    genau darum geht es: zweimal dieselbe Frage muss zweimal denselben Skill
+    finden.
+    """
+    return (row.skill_key, 0 if row.team_id is None else 1, row.team_id or 0)
+
+
+def _overlay(by_key: dict[str, SkillView], rows: list[AiSkill]) -> None:
+    """Legt die Datenbankzeilen ueber die mitgelieferten Dateien.
+
+    Eine eigene Funktion, weil die Reihenfolge sonst nicht pruefbar waere:
+    unter SQLite kommt die globale Zeile zufaellig zuerst, unter PostgreSQL
+    nicht zwingend. Ein Test gegen die Abfrage haette den Fehler also nie
+    gesehen — gegen diese Funktion sieht er ihn, weil die Zeilen als Liste
+    hereinkommen und der Test die unguenstige Reihenfolge selbst waehlen kann.
+    """
+    for row in sorted(rows, key=_overlay_rank):
+        if row.status != "active":
+            # Wartet auf Freigabe: gilt nicht — und verdeckt auch nichts.
+            continue
+        if not row.enabled:
+            standing = by_key.get(row.skill_key)
+            # Abschalten verdeckt nur die mitgelieferte Datei. Vorher nahm der
+            # Pop weg, was gerade unter dem Schluessel stand: kam die Zeile
+            # eines Teams zuerst, loeschte das Abschalten einer globalen Zeile
+            # den eingeschalteten Skill dieses Teams aus dem Verzeichnis —
+            # abgeschaltet hatte ihn niemand.
+            if row.team_id is None and standing is not None and standing.scope == "shipped":
+                del by_key[row.skill_key]
+            continue
+        by_key[row.skill_key] = SkillView(
+            id=row.id, skill_key=row.skill_key, name=row.name, description=row.description,
+            scope="global" if row.team_id is None else "team",
+            origin=row.origin, team_id=row.team_id, status=row.status,
+            enabled=row.enabled, editable=True,
+        )
+
+
 def visible_skills(db: Session, user: User) -> list[SkillView]:
     """Das vollstaendige Skill-Verzeichnis fuer diesen Benutzer.
 
@@ -201,6 +257,9 @@ def visible_skills(db: Session, user: User) -> list[SkillView]:
     Teamgrenzen entstehen hier ueber `scope_identity`, nicht ueber eine
     nachtraegliche Filterung — wer nicht im Team ist, dessen Abfrage fragt gar
     nicht erst danach.
+
+    Welche Fassung bei gleichem Schluessel gewinnt, entscheidet `_overlay` und
+    nicht die Datenbank; die Begruendung steht dort.
     """
     by_key: dict[str, SkillView] = {}
     for skill in shipped_skills().values():
@@ -212,26 +271,11 @@ def visible_skills(db: Session, user: User) -> list[SkillView]:
 
     team_ids = team_service.user_team_ids(db, user)
     scopes = ["global", *[f"team:{team_id}" for team_id in team_ids]]
-    rows = (
-        db.query(AiSkill)
-        .filter(AiSkill.scope_identity.in_(scopes))
-        .order_by(AiSkill.skill_key)
-        .all()
-    )
-    for row in rows:
-        if row.status != "active":
-            # Wartet auf Freigabe: gilt nicht — und verdeckt auch nichts.
-            continue
-        if not row.enabled:
-            if row.team_id is None:
-                by_key.pop(row.skill_key, None)
-            continue
-        by_key[row.skill_key] = SkillView(
-            id=row.id, skill_key=row.skill_key, name=row.name, description=row.description,
-            scope="global" if row.team_id is None else "team",
-            origin=row.origin, team_id=row.team_id, status=row.status,
-            enabled=row.enabled, editable=True,
-        )
+    # Bewusst ohne `order_by`: die Ordnung, auf die es ankommt, macht
+    # `_overlay` selbst. Zwei Stellen, die beide eine Reihenfolge zusagen,
+    # waeren eine Stelle zu viel.
+    rows = db.query(AiSkill).filter(AiSkill.scope_identity.in_(scopes)).all()
+    _overlay(by_key, rows)
     return sorted(by_key.values(), key=lambda item: item.skill_key)
 
 
@@ -255,9 +299,41 @@ def read_body(db: Session, user: User, skill_key: str) -> tuple[SkillView, str]:
 # ── Auswahl fuer den Systemprompt ─────────────────────────────────────
 
 
+def _index_text(skill_key: str, name: str, description: str) -> str:
+    """Der Text, aus dem der Auswahlvektor entsteht — eine Stelle fuer beide Seiten.
+
+    Vorher stand derselbe Satz zweimal im Modul: einmal beim Speichern, einmal
+    beim Auswaehlen. Solange der gespeicherte Vektor nie gelesen wurde, fiel ein
+    Auseinanderlaufen nicht auf. Jetzt wird er gelesen — und ein Vektor, der aus
+    einem anderen Text stammt als der Vergleichstext, waere ein stiller Fehler
+    in der Auswahl.
+    """
+    readable = skill_key.replace("-", " ")
+    return f"{readable}: {name}. {description}"
+
+
 def _index_source(view: SkillView) -> str:
-    readable = view.skill_key.replace("-", " ")
-    return f"{readable}: {view.name}. {view.description}"
+    return _index_text(view.skill_key, view.name, view.description)
+
+
+def _stored_vector(row: AiSkill) -> list[float] | None:
+    """Liest den gespeicherten Auswahlvektor, wenn er zum geladenen Modell passt.
+
+    Die fehlende Gegenstelle zu `refresh_embedding`, gebaut wie die des
+    Gedaechtnisses (`ai_memory_service._stored_vector`). Passt der Modellname
+    nicht oder stimmt die Laenge nicht, gilt der Vektor als nicht vorhanden und
+    der Skill wird frisch kodiert: ein Modellwechsel heilt sich damit von
+    selbst, ohne Migration und ohne falsche Aehnlichkeiten in der Zwischenzeit.
+    """
+    if not row.embedding_json or row.embedding_model != _EMBEDDING_MODEL_TAG:
+        return None
+    try:
+        vector = json.loads(row.embedding_json)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(vector, list) or len(vector) != EMBEDDING_DIMENSIONS:
+        return None
+    return vector
 
 
 def refresh_embedding(row: AiSkill) -> None:
@@ -267,12 +343,53 @@ def refresh_embedding(row: AiSkill) -> None:
     alphabetisch eingeordnet. Ein Skill darf nicht daran scheitern, dass ein
     Modell fehlt.
     """
-    readable = row.skill_key.replace("-", " ")
-    vectors = ai_embedding_service.encode([f"{readable}: {row.name}. {row.description}"])
+    vectors = ai_embedding_service.encode(
+        [_index_text(row.skill_key, row.name, row.description)]
+    )
     if not vectors:
         return
     row.embedding_json = json.dumps(vectors[0], separators=(",", ":"))
     row.embedding_model = _EMBEDDING_MODEL_TAG
+
+
+def _candidate_vectors(db: Session, views: list[SkillView]) -> list[list[float]] | None:
+    """Die Vergleichsvektoren aller sichtbaren Skills — gespeichert, wo es geht.
+
+    Diese Funktion laeuft bei **jeder** Chatnachricht, sobald mehr Skills
+    sichtbar sind als in den Prompt passen. Bis hierher wurde dabei jedes Mal
+    alles neu kodiert, obwohl `upsert_skill` fuer jede Datenbankzeile laengst
+    einen Vektor abgelegt hatte: die Spalte wurde geschrieben und von keiner
+    Stelle je gelesen.
+
+    Neu kodiert wird jetzt nur noch, was keinen brauchbaren Vektor hat — die
+    mitgelieferten Skills, die als Datei gar keine Zeile besitzen, und Zeilen
+    aus der Zeit eines anderen Embeddingmodells.
+
+    ``None`` heisst "keine Auswahl moeglich"; dann bleibt es bei der
+    alphabetischen Reihenfolge, genau wie ohne Modell.
+    """
+    stored: dict[str, list[float]] = {}
+    ids = [view.id for view in views if view.id is not None]
+    if ids:
+        for row in db.query(AiSkill).filter(AiSkill.id.in_(ids)).all():
+            vector = _stored_vector(row)
+            if vector is not None:
+                stored[row.id] = vector
+
+    missing = [view for view in views if stored.get(view.id) is None]
+    fresh: list[list[float]] = []
+    if missing:
+        encoded = ai_embedding_service.encode([_index_source(view) for view in missing])
+        if encoded is None or len(encoded) != len(missing):
+            return None
+        fresh = encoded
+
+    nachschub = iter(fresh)
+    candidates: list[list[float]] = []
+    for view in views:
+        vector = stored.get(view.id)
+        candidates.append(vector if vector is not None else next(nachschub))
+    return candidates
 
 
 def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
@@ -293,8 +410,8 @@ def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
     query_vectors = ai_embedding_service.encode([query])
     if not query_vectors:
         return views[:MAX_INDEXED_SKILLS]
-    candidates = ai_embedding_service.encode([_index_source(view) for view in views])
-    if not candidates or len(candidates) != len(views):
+    candidates = _candidate_vectors(db, views)
+    if candidates is None:
         return views[:MAX_INDEXED_SKILLS]
 
     scores = ai_embedding_service.similarity(query_vectors[0], candidates)
@@ -384,9 +501,32 @@ def upsert_skill(
     )
     action = "ai.skill.updated"
     if row is None:
-        count = db.query(AiSkill).filter(AiSkill.scope_identity == identity).count()
-        if count >= MAX_SKILLS_PER_SCOPE:
-            raise HTTPException(status_code=409, detail="Skill-Bereich ist voll")
+        # Getrennt gezaehlt: freigegebene Skills gegen das Bereichskontingent,
+        # wartende gegen ihr eigenes. Vorher zaehlte beides zusammen — und
+        # wartende Zeilen entstehen ohne Zutun eines Menschen: unter der
+        # Lernpolitik `review` legt jedes Kundengespraech welche an, und die
+        # Berechtigungspruefung entfaellt dabei ausdruecklich
+        # (`skip_permission_check`). Zweihundert Vorschlaege haetten dem
+        # Betreiber damit das Anlegen eigener globaler Skills gesperrt, obwohl
+        # kein einziger davon je gewirkt hat. Eine Vorschlagsliste darf
+        # niemandem etwas wegnehmen.
+        limit = MAX_PENDING_PER_SCOPE if status == "pending" else MAX_SKILLS_PER_SCOPE
+        count = (
+            db.query(AiSkill)
+            .filter(AiSkill.scope_identity == identity, AiSkill.status == status)
+            .count()
+        )
+        if count >= limit:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Die Warteschlange fuer globale Skills ist voll. Der Betreiber "
+                    "muss erst freigeben oder verwerfen — lege die Erkenntnis "
+                    "solange mit scope='team' an."
+                    if status == "pending"
+                    else "Skill-Bereich ist voll"
+                ),
+            )
         row = AiSkill(
             id=str(uuid4()), scope_identity=identity, team_id=team_id, skill_key=key,
             name=safe_name, description=safe_description, body=safe_body,

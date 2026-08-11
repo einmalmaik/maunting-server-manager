@@ -13,6 +13,8 @@ sieht, und dass ein Team-Skill das Team nicht verlaesst.
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from sqlalchemy.orm import Session
 
@@ -409,3 +411,187 @@ def test_the_index_selection_crosses_the_language_barrier(
             for view in ai_skill_service.skill_index(db, regular_user, question)
         }
         assert "server-nicht-erreichbar" in selected, question
+
+
+# ── Vorrang bei gleichem Schluessel ───────────────────────────────────
+#
+# Diese drei Tests gehen absichtlich direkt an `_overlay` statt ueber
+# `visible_skills`. Der Fehler lag in der Reihenfolge, in der die Zeilen aus
+# der Datenbank kommen — und die laesst sich nicht bestellen: SQLite liefert
+# die globale Zeile zufaellig zuerst, also genau die guenstige Ordnung.
+# Ein Test ueber die Abfrage waere auch ohne den Fix gruen gewesen.
+
+
+def _row(
+    skill_key: str, *, team_id: int | None, enabled: bool = True,
+    status: str = "active", name: str = "Fassung",
+) -> AiSkill:
+    """Eine Skill-Zeile ohne Sitzung — `_overlay` liest nur Felder."""
+    return AiSkill(
+        id=str(uuid4()), scope_identity=ai_skill_service._scope_identity(team_id),
+        team_id=team_id, skill_key=skill_key, name=name,
+        description="Eine Fassung dieses Skills, lang genug fuer die Pruefung.",
+        body="Text.", origin="operator", status=status, enabled=enabled,
+    )
+
+
+def test_switching_off_a_global_row_never_removes_a_team_skill() -> None:
+    """Der Betreiber schaltet die mitgelieferte Vorgabe ab — das Team behaelt seine.
+
+    Die Zeilen kommen hier in der unguenstigen Reihenfolge herein, Team zuerst:
+    genau die liefert PostgreSQL, denn `set_enabled` ist ein UPDATE und die neu
+    geschriebene globale Zeile landet am Ende des Heaps. Vorher nahm der Pop
+    weg, was gerade unter dem Schluessel stand — also den eingeschalteten Skill
+    des Teams, den niemand abgeschaltet hatte.
+    """
+    by_key = {
+        "portkonflikt": ai_skill_service.SkillView(
+            skill_key="portkonflikt", name="Mitgeliefert",
+            description="Die Vorgabe von MSM.", scope="shipped", origin="shipped",
+            team_id=None, status="active", enabled=True, editable=False,
+        )
+    }
+    rows = [
+        _row("portkonflikt", team_id=7, name="Fassung des Teams"),
+        _row("portkonflikt", team_id=None, enabled=False),
+    ]
+
+    ai_skill_service._overlay(by_key, rows)
+
+    assert "portkonflikt" in by_key
+    assert by_key["portkonflikt"].name == "Fassung des Teams"
+    assert by_key["portkonflikt"].scope == "team"
+
+
+def test_a_team_row_wins_over_the_global_row_in_either_order() -> None:
+    """Eng schlaegt weit — und zwar unabhaengig davon, wie die Zeilen kommen."""
+    global_row = _row("portkonflikt", team_id=None, name="Panelweite Fassung")
+    team_row = _row("portkonflikt", team_id=7, name="Fassung des Teams")
+
+    for rows in ([global_row, team_row], [team_row, global_row]):
+        by_key: dict[str, ai_skill_service.SkillView] = {}
+        ai_skill_service._overlay(by_key, rows)
+        assert by_key["portkonflikt"].name == "Fassung des Teams"
+
+
+def test_the_same_key_in_two_teams_always_resolves_the_same_way() -> None:
+    """Zwei Teams, ein Schluessel: eine Fassung gewinnt — aber immer dieselbe.
+
+    Welche es ist, ist eine Setzung (das zuletzt angelegte Team). Dass sie nicht
+    an der Reihenfolge der Datenbankzeilen haengt, ist der Punkt: sonst
+    beantwortet dieselbe Frage zweimal hintereinander mit zwei Texten.
+    """
+    vorwaerts = [
+        _row("portkonflikt", team_id=3, name="Team drei"),
+        _row("portkonflikt", team_id=7, name="Team sieben"),
+    ]
+    ergebnisse = []
+    for rows in (vorwaerts, list(reversed(vorwaerts))):
+        by_key: dict[str, ai_skill_service.SkillView] = {}
+        ai_skill_service._overlay(by_key, rows)
+        ergebnisse.append(by_key["portkonflikt"].name)
+
+    assert ergebnisse == ["Team sieben", "Team sieben"]
+
+
+# ── Der gespeicherte Auswahlvektor ────────────────────────────────────
+
+
+def test_the_index_reuses_the_stored_vector(
+    db: Session, regular_user: User, monkeypatch
+) -> None:
+    """Was beim Speichern kodiert wurde, wird beim Auswaehlen gelesen.
+
+    `embedding_json` wurde bei jedem Speichern geschrieben und von keiner Stelle
+    je gelesen; stattdessen kodierte `skill_index` bei **jeder** Chatnachricht
+    saemtliche sichtbaren Skills neu. Der Test haelt die Aufteilung fest: die
+    Frage wird kodiert, die mitgelieferten Dateien auch — sie haben keine Zeile
+    und damit keinen Vektor —, die Datenbankskills nicht mehr.
+    """
+    ai_skill_service.reset_shipped_cache_for_tests()
+    _allow(db, regular_user, "ai.skills.use", "ai.skills.manage")
+
+    kodiert: list[str] = []
+
+    def _fake_encode(texts: list[str]) -> list[list[float]]:
+        kodiert.extend(texts)
+        laenge = ai_embedding_service.EMBEDDING_DIMENSIONS
+        return [[1.0] + [0.0] * (laenge - 1) for _ in texts]
+
+    monkeypatch.setattr(ai_embedding_service, "encode", _fake_encode)
+
+    for index in range(ai_skill_service.MAX_INDEXED_SKILLS + 5):
+        ai_skill_service.upsert_skill(
+            db, user=regular_user, skill_key=f"gespeichert-{index:02d}",
+            name=f"Gespeicherter Skill {index}",
+            description=f"Ein Eintrag mit fertigem Vektor in der Datenbank, Nummer {index}.",
+            body=f"Inhalt {index}", team_id=None,
+        )
+    abgelegt = db.query(AiSkill).filter(AiSkill.skill_key == "gespeichert-00").one()
+    assert abgelegt.embedding_model == ai_skill_service._EMBEDDING_MODEL_TAG
+
+    kodiert.clear()
+    frage = "Wie loese ich einen Portkonflikt?"
+    auswahl = ai_skill_service.skill_index(db, regular_user, frage)
+
+    assert len(auswahl) == ai_skill_service.MAX_INDEXED_SKILLS
+    assert frage in kodiert
+    assert [text for text in kodiert if text.startswith("gespeichert ")] == []
+
+
+# ── Die Warteschlange als eigenes Kontingent ──────────────────────────
+
+
+def _fill_pending(db: Session, user: User, count: int) -> None:
+    """Legt wartende globale Zeilen an — so, wie die Lernpolitik `review` sie erzeugt."""
+    for index in range(count):
+        db.add(AiSkill(
+            id=str(uuid4()), scope_identity="global", team_id=None,
+            skill_key=f"vorschlag-{index:03d}", name=f"Vorschlag {index}",
+            description=f"Aus einem Kundengespraech entstanden, Nummer {index}.",
+            body="Wartet auf Freigabe.", origin="ai", status="pending",
+            enabled=True, created_by=user.id,
+        ))
+    db.commit()
+
+
+def test_a_full_queue_does_not_lock_out_the_operator(
+    db: Session, regular_user: User
+) -> None:
+    """Wartende Vorschlaege duerfen dem Betreiber nicht das Kontingent wegnehmen.
+
+    Sie entstehen ohne Entscheidung eines Menschen: unter `review` legt jedes
+    Kundengespraech welche an, und die Berechtigungspruefung entfaellt dabei
+    ausdruecklich. Zaehlten sie mit, koennte ein einzelner Benutzer mit
+    `ai.skills.use` den globalen Bereich fuellen und dem Betreiber damit das
+    Anlegen eigener Skills sperren — obwohl keiner der Vorschlaege je gewirkt hat.
+    """
+    _allow(db, regular_user, "ai.skills.use", "ai.skills.manage")
+    _fill_pending(db, regular_user, ai_skill_service.MAX_SKILLS_PER_SCOPE)
+
+    row = ai_skill_service.upsert_skill(
+        db, user=regular_user, skill_key="eigener-skill", name="Eigener Skill",
+        description="Ein Skill, den der Betreiber selbst anlegt, lang genug fuer die Pruefung.",
+        body="Inhalt.", team_id=None,
+    )
+
+    assert row.status == "active"
+
+
+def test_the_queue_has_a_limit_of_its_own(db: Session, regular_user: User) -> None:
+    """Und sie waechst nicht unbegrenzt.
+
+    Niemand raeumt die Warteschlange automatisch auf, einen Verfall gibt es
+    nicht — ohne eigene Grenze wuechse sie im Normalbetrieb dauerhaft.
+    """
+    _allow(db, regular_user, "ai.skills.use")
+    _fill_pending(db, regular_user, ai_skill_service.MAX_PENDING_PER_SCOPE)
+
+    with pytest.raises(Exception) as exc:
+        ai_skill_service.upsert_skill(
+            db, user=regular_user, skill_key="noch-ein-vorschlag", name="Noch einer",
+            description="Ein weiterer Vorschlag aus einem Gespraech, lang genug fuer die Pruefung.",
+            body="Wartet.", team_id=None, origin="ai", status="pending",
+            skip_permission_check=True,
+        )
+    assert getattr(exc.value, "status_code", None) == 409

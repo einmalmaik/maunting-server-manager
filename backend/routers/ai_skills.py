@@ -5,7 +5,7 @@ sondern gelesen — vom Modell im Chat, ueber das Werkzeug `read_skill`. Was
 bleibt, ist Verwaltung.
 """
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from database import get_db
