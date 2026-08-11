@@ -51,7 +51,10 @@ describe('supportWidgetLoader', () => {
     expect(script?.defer).toBe(true)
   })
 
-  it('injects Crisp script when crisp provider is configured', async () => {
+  // Crisp und Tawk muessen ohne Inline-Code auskommen, sonst blockt die CSP des
+  // Panels (script-src ohne 'unsafe-inline') das Startskript und das Widget
+  // erscheint nie — ohne Fehlermeldung fuer den Betreiber.
+  it('loads Crisp from an external src, never as inline script', async () => {
     fetchSpy.mockReturnValueOnce(
       mockJsonResponse({
         enabled: true,
@@ -64,10 +67,13 @@ describe('supportWidgetLoader', () => {
 
     const script = document.querySelector('script[data-msm-support-widget="crisp"]') as HTMLScriptElement | null
     expect(script).not.toBeNull()
-    expect(script?.textContent).toContain('test-crisp-id')
+    expect(script?.src).toBe('https://client.crisp.chat/l.js')
+    expect(script?.textContent).toBe('')
+    expect((window as any).CRISP_WEBSITE_ID).toBe('test-crisp-id')
+    expect(Array.isArray((window as any).$crisp)).toBe(true)
   })
 
-  it('injects Tawk script when tawk provider is configured', async () => {
+  it('loads Tawk from an external src, never as inline script', async () => {
     fetchSpy.mockReturnValueOnce(
       mockJsonResponse({
         enabled: true,
@@ -81,7 +87,75 @@ describe('supportWidgetLoader', () => {
 
     const script = document.querySelector('script[data-msm-support-widget="tawk"]') as HTMLScriptElement | null
     expect(script).not.toBeNull()
-    expect(script?.textContent).toContain('embed.tawk.to/prop123/wid456')
+    expect(script?.src).toBe('https://embed.tawk.to/prop123/wid456')
+    expect(script?.textContent).toBe('')
+    expect((window as any).Tawk_API).toBeTruthy()
+  })
+
+  // Das eigene Snippet stammt aus einem Einstellungsfeld und wird auch auf der
+  // Loginseite an nicht angemeldete Besucher ausgeliefert. Es darf deshalb
+  // weder Markup rendern noch Skripte ausfuehren.
+  it('never renders custom snippet markup into the page', async () => {
+    fetchSpy.mockReturnValueOnce(
+      mockJsonResponse({
+        enabled: true,
+        provider: 'custom',
+        custom_snippet:
+          '<div id="fake-login" style="position:fixed;inset:0">Bitte Passwort erneut eingeben</div>',
+      })
+    )
+
+    await loadSupportWidget()
+
+    expect(document.getElementById('fake-login')).toBeNull()
+    expect(document.getElementById('msm-support-widget-custom')).toBeNull()
+    expect(document.body.textContent).not.toContain('Bitte Passwort erneut eingeben')
+  })
+
+  it('never revives an inline script from the custom snippet', async () => {
+    fetchSpy.mockReturnValueOnce(
+      mockJsonResponse({
+        enabled: true,
+        provider: 'custom',
+        custom_snippet: '<script>window.__msmPwned = true</script>',
+      })
+    )
+
+    await loadSupportWidget()
+
+    expect(document.querySelector('script[data-msm-support-widget="custom"]')).toBeNull()
+    expect((window as any).__msmPwned).toBeUndefined()
+  })
+
+  it('drops custom snippet scripts from origins the panel CSP does not allow', async () => {
+    fetchSpy.mockReturnValueOnce(
+      mockJsonResponse({
+        enabled: true,
+        provider: 'custom',
+        custom_snippet: '<script src="https://evil.example/steal.js"></script>',
+      })
+    )
+
+    await loadSupportWidget()
+
+    expect(document.querySelector('script[src="https://evil.example/steal.js"]')).toBeNull()
+    expect(document.querySelector('script[data-msm-support-widget="custom"]')).toBeNull()
+  })
+
+  it('keeps custom snippet scripts from an allowed origin', async () => {
+    fetchSpy.mockReturnValueOnce(
+      mockJsonResponse({
+        enabled: true,
+        provider: 'custom',
+        custom_snippet: '<script src="https://client.crisp.chat/l.js" async></script>',
+      })
+    )
+
+    await loadSupportWidget()
+
+    const script = document.querySelector('script[data-msm-support-widget="custom"]') as HTMLScriptElement | null
+    expect(script).not.toBeNull()
+    expect(script?.src).toBe('https://client.crisp.chat/l.js')
   })
 
   it('removes widget artifacts when widget is disabled', async () => {

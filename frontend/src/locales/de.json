@@ -1672,7 +1672,7 @@
       "tawkHint": "Aus dem tawk.to Embed-Code (embed.tawk.to/PROPERTY/WIDGET).",
       "customSnippet": "HTML-Snippet (vor </body>)",
       "customSnippetPlaceholder": "<script>…</script>",
-      "customHint": "Nur wenn der Anbieter kein festes Feld hat — Script-Tags wie vom Anbieter dokumentiert.",
+      "customHint": "Nur externe Script-Tags von Anbietern, die die Panel-CSP erlaubt (Singra, Crisp, tawk.to) — HTML, Stile und Inline-Skripte werden verworfen.",
       "webhookTitle": "Webhook & Signatur (Singra)",
       "webhookDescription": "1) Diese URL im Singra-Widget-Panel eintragen. 2) Dort „Secret rotieren“ und das Secret unten im MSM-Panel speichern (oder als SINGRA_WEBHOOK_SECRET in der msm-panel-Umgebung).",
       "webhookSecretNew": "Webhook-Secret (aus Singra)",
