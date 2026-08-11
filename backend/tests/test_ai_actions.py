@@ -615,6 +615,60 @@ def test_a_rejected_patch_reveals_nothing_about_the_file(
     assert db.query(AiActionProposal).count() == 0
 
 
+def test_reading_logs_through_the_ai_needs_the_console_permission(
+    db: Session, regular_user: User, tmp_path: Path
+) -> None:
+    """Die Konsole war ueber den KI-Pfad fuer jeden lesbar, der den Server sah.
+
+    Das Panel verlangt `server.console.read` — sowohl der Endpunkt
+    (`routers/servers.py::server_logs`) als auch die Konsolen-WebSocket.
+    `read_server_logs` lief dagegen nur durch `_resolve_server`, und das prueft
+    ausschliesslich `server.view`. Ein Benutzer, dem nur „Server ansehen“
+    delegiert war, bekam auf die Bitte „lies die Logs“ bis zu 24.000 Zeichen
+    Containerausgabe: Spielerchat, Join-Zeilen mit IP-Adressen,
+    Admin-Kommandos, Stacktraces. Die Redaktion entfernt davon nichts, weil das
+    keine Zugangsdatenmuster sind.
+
+    Damit war `server.console.read` als Delegationsgrenze wertlos, sobald der
+    Benutzer `ai.chat.use` hatte.
+    """
+    role = Role(name="nur-chat-logs", description=None, is_system=False)
+    db.add(role)
+    db.flush()
+    db.add(RolePermission(role_id=role.id, permission_key="ai.chat.use"))
+    db.commit()
+    set_user_roles(db, regular_user, [role.id])
+
+    server = _server(db, regular_user, tmp_path)
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view"
+    ))
+    db.commit()
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db,
+            user=regular_user,
+            tool_name="read_server_logs",
+            arguments={"server_id": server.id, "lines": 50},
+        )
+
+    # Mit dem Konsolenrecht kommt der Aufruf durch die Rechtepruefung. Was
+    # danach zurueckkommt, haengt am Node und ist hier nicht die Frage —
+    # gepruefte Zusage ist allein, dass die Grenze dieselbe ist wie im Panel.
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.console.read"
+    ))
+    db.commit()
+    ergebnis = ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="read_server_logs",
+        arguments={"server_id": server.id, "lines": 50},
+    )
+    assert ergebnis["server_id"] == server.id
+
+
 def test_ai_file_tools_need_the_same_permissions_as_the_file_manager(
     db: Session, regular_user: User, tmp_path: Path
 ) -> None:

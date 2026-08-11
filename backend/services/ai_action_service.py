@@ -1780,6 +1780,16 @@ def execute_read_tool(
     if tool_name == "read_server_logs":
         if set(arguments) - {"lines"}:
             raise AiActionValidationError("Log-Tool hat ungueltige Argumente")
+        # Dasselbe Recht, das der Panel-Endpunkt verlangt (routers/servers.py:1172
+        # und die Konsolen-WebSocket). `_resolve_server` prueft nur `server.view`
+        # — damit war die Konsole ueber den KI-Pfad fuer jeden lesbar, der den
+        # Server ueberhaupt sehen darf. Containerlogs sind kein Nebenprodukt:
+        # dort stehen Spielerchat, Join-Zeilen mit IP-Adressen, Admin-Kommandos
+        # und Stacktraces, und `redact_sensitive_text` entfernt davon nichts.
+        if not permission_service.has_server_permission(
+            db, user, server.id, "server.console.read"
+        ):
+            raise AiActionValidationError("Konsolen-Lesezugriff ist nicht erlaubt")
         lines = arguments.get("lines", 100)
         if not isinstance(lines, int) or isinstance(lines, bool) or not 1 <= lines <= 200:
             raise AiActionValidationError("Ungueltige Log-Zeilenanzahl")
