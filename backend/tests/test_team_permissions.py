@@ -289,6 +289,67 @@ def test_leaving_the_team_removes_access_immediately(
     assert permission_service.list_visible_server_ids(db, colleague) == []
 
 
+def test_a_borrowed_permission_cannot_be_written_down_as_a_permanent_one(
+    db: Session, regular_user: User
+) -> None:
+    """Geliehenes weiterzugeben hiesse, es dauerhaft zu machen.
+
+    `_ensure_no_server_escalation` in `routers/admin.py` prueft, ob der
+    Handelnde ein Recht selbst besitzt — und benutzte dafuer
+    `has_server_permission`. Das zaehlt seit der Team-Erweiterung auch die
+    Leihe mit.
+
+    Damit liess sich ein geliehenes Recht in eine eigene `ServerPermission`
+    umschreiben. Die Zeile ueberlebt den Austritt aus dem Team, das Aufloesen
+    des Teams und den Rechteverlust dessen, der das Recht ueberhaupt
+    hineingebracht hat — genau das, was
+    `test_permission_evaporates_when_the_founder_loses_it` und
+    `test_leaving_the_team_removes_access_immediately` fuer den regulaeren Weg
+    ausschliessen.
+
+    Geprueft wird hier die Stelle selbst, nicht der HTTP-Weg: sie ist die
+    Obergrenze, und sie muss dieselbe sein wie in `team_service`.
+    """
+    from routers.admin import _ensure_no_server_escalation
+    from fastapi import HTTPException
+
+    gruender = regular_user
+    mitglied = _user(db, "mitglied-mit-verwaltung")
+    server = _server(db, "geliehen")
+
+    # Der Gruender haelt das Recht direkt und reicht es ueber das Team weiter.
+    _allow(db, gruender, server, "server.view", "server.console.exec")
+    team = _team_with_member(db, gruender, mitglied)
+    team_service.set_server_grants(
+        db, team=team, user=gruender, server_id=server.id,
+        keys=["server.view", "server.console.exec"],
+    )
+
+    # Das Mitglied hat das Recht jetzt — aber nur geliehen.
+    assert permission_service.has_server_permission(
+        db, mitglied, server.id, "server.console.exec"
+    )
+    assert not permission_service.direct_server_permission(
+        db, mitglied, server.id, "server.console.exec"
+    )
+
+    # Und darf es deshalb nicht als eigene Delegation eintragen — auch nicht
+    # fuer sich selbst.
+    _grant_global(db, mitglied, "users.permissions.manage")
+    with pytest.raises(HTTPException) as fehler:
+        _ensure_no_server_escalation(
+            db, mitglied, server.id, ["server.view", "server.console.exec"]
+        )
+    assert fehler.value.status_code == 403
+
+    # Die Gegenprobe: wer das Recht **selbst** haelt, darf es weitergeben.
+    # Ohne sie waere der Test auch dann gruen, wenn die Delegation insgesamt
+    # nicht mehr funktionierte.
+    _ensure_no_server_escalation(
+        db, gruender, server.id, ["server.view", "server.console.exec"]
+    )
+
+
 # ── Das persoenliche Team ─────────────────────────────────────────────
 
 

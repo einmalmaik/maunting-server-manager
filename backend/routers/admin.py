@@ -26,8 +26,8 @@ from dependencies import require_global, verify_csrf
 from services import AuthService, EmailService
 from services.email_verification_service import EmailVerificationService
 from services.permission_service import (
+    direct_server_permission,
     has_global_permission,
-    has_server_permission,
     list_user_server_permission_keys,
     set_user_server_permissions,
 )
@@ -72,12 +72,28 @@ def _ensure_no_server_escalation(
     required_keys: list[str],
 ) -> None:
     """Non-Owner darf einem Sub-User auf einem Server nur die Server-Keys
-    delegieren, die er auf diesem Server selbst hat (per Rolle pauschal oder
-    via eigene Per-Server-Delegation)."""
+    delegieren, die er auf diesem Server **selbst und dauerhaft** hat.
+
+    Geprueft wird mit ``direct_server_permission`` und nicht mit
+    ``has_server_permission``. Der Unterschied sind die geliehenen Teamrechte:
+    ``has_server_permission`` zaehlt seit der Team-Erweiterung auch das mit, was
+    jemandem nur ueber eine Mitgliedschaft zusteht.
+
+    Geliehenes weiterzugeben heisst hier, es dauerhaft zu machen. Eine
+    ``ServerPermission``-Zeile ueberlebt den Austritt aus dem Team, das
+    Aufloesen des Teams und den Rechteverlust dessen, der das Recht ins Team
+    gebracht hat. Genau das soll die Leihe nicht koennen — ``permission_service``
+    begruendet im Modul-Docstring, dass ein entzogenes Teamrecht sich „selbst
+    heilt“, und ``team_service.set_server_grants`` prueft aus demselben Grund
+    bereits gegen die direkte Berechtigung.
+
+    Der Owner-Umweg bleibt erhalten: ``direct_server_permission`` beruecksichtigt
+    den Serverbesitzer selbst.
+    """
     if actor.is_owner:
         return
     missing = sorted(
-        {k for k in required_keys if not has_server_permission(db, actor, server_id, k)}
+        {k for k in required_keys if not direct_server_permission(db, actor, server_id, k)}
     )
     if missing:
         raise HTTPException(
