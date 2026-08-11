@@ -229,6 +229,15 @@ class AuthService:
         from models.audit_log import AuditLog
         from models.server_permission import ServerPermission
 
+        # Dieselbe Vorpruefung wie im Adminpfad, aus demselben Grund: die drei
+        # RESTRICT-Fremdschluessel auf diesen Benutzer haben `db.commit()` unten
+        # scheitern lassen, und die ungefangene IntegrityError wurde zu einer
+        # HTTP 500 ohne Hinweis. Der lokale Import haelt den Dienst frei von
+        # einer Abhaengigkeit, die `services/__init__` beim Laden schon braucht.
+        from services.user_deletion_service import prepare_user_deletion
+
+        prepare_user_deletion(db, user)
+
         # Delete JwtBlacklist items
         db.query(JwtBlacklist).filter(JwtBlacklist.user_id == user.id).delete()
         

@@ -13,6 +13,8 @@ Datenbank durchsetzt, gehoert deshalb hierher und nicht in die Tests des
 jeweiligen Dienstes: dort wuerde es niemand vermissen, wenn es wieder verschwindet.
 """
 
+import io
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from alembic import command
@@ -93,3 +95,46 @@ def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+def test_das_downgrade_bleibt_nicht_am_ersten_uuid_ziel_haengen() -> None:
+    """Der Rueckbau muss auf PostgreSQL laufen, nicht nur auf SQLite.
+
+    `20260809_02` hat `audit_logs.target_id` zu Text gemacht, weil Memory und
+    Skills dort UUIDs eintragen. Das Downgrade castete sie ungefiltert mit
+    `target_id::integer` zurueck: auf PostgreSQL bricht das nach dem ersten
+    `remember`-Aufruf mit "invalid input syntax for type integer" ab — und zwar
+    als **erste** Anweisung, wodurch die gesamte Kette an dieser Revision
+    haengen bleibt.
+
+    Kein bestehender Test konnte das sehen: `test_migration_chain_upgrade.py`
+    faehrt die Downgrades auf SQLite, wo `postgresql_using` gar nicht angewandt
+    wird. Dieser Test erzeugt die DDL deshalb im Offline-Modus fuer den
+    PostgreSQL-Dialekt — dafuer braucht es keine laufende Datenbank, nur den
+    Dialektnamen in der URL.
+    """
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+
+    vorher = settings.database_url
+    settings.database_url = "postgresql+psycopg2://msm:msm@localhost/msm"
+    puffer = io.StringIO()
+    try:
+        with redirect_stdout(puffer):
+            command.downgrade(config, "20260809_02:20260809_01", sql=True)
+    finally:
+        settings.database_url = vorher
+
+    anweisung = next(
+        zeile
+        for zeile in puffer.getvalue().splitlines()
+        if "ALTER COLUMN target_id" in zeile
+    )
+
+    assert "USING target_id::integer" not in anweisung, (
+        "Ungefilterter Cast: das Downgrade scheitert an jeder UUID in der Spalte"
+    )
+    # Nicht umkehrbare Werte muessen benannt behandelt werden, statt die
+    # Migration abbrechen zu lassen.
+    assert "CASE" in anweisung and "NULL" in anweisung

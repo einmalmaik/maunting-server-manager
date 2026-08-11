@@ -41,6 +41,7 @@ from services.role_service import (
 )
 from services import audit_service, postgres_service
 from services.postgres_service import PostgresServiceError
+from services.user_deletion_service import prepare_user_deletion
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -209,6 +210,13 @@ def delete_user(
         actor,
         effective_user_role_permission_keys(db, user),
     )
+
+    # Vor jedem Schreibzugriff: die drei RESTRICT-Fremdschluessel, die auf
+    # diesen Benutzer zeigen. Ohne diese Zeile lief `db.commit()` unten in den
+    # Fremdschluessel und die ungefangene IntegrityError wurde zu einer nackten
+    # HTTP 500 — der Gruender eines Teams war damit dauerhaft nicht loeschbar,
+    # ohne dass irgendwo stand, warum.
+    prepare_user_deletion(db, user)
 
     # FK-Cleanup: AuditLogs entkoppeln, Sessions & BackupCodes loeschen.
     db.query(AuditLog).filter(AuditLog.user_id == user_id).update(

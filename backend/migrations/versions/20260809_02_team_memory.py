@@ -31,6 +31,12 @@ Skills und Anhaenge UUIDs an `record_privileged_action`, die Spalte war aber
 unsichtbar, weil sie auf SQLite laufen. Bestehende Zahlen werden zu ihrer
 Textdarstellung — `42` wird `"42"`, die Filter im Admin-Log vergleichen
 entsprechend als Text.
+
+Die Rueckrichtung ist nicht verlustfrei moeglich und sagt das ausdruecklich:
+eine UUID hat keine Integerentsprechung. Das Downgrade behaelt deshalb nur, was
+sich als Zahl lesen laesst, und setzt alles andere auf NULL — sonst waere der
+Rueckbau des gesamten Branches nach dem ersten `remember`-Aufruf dauerhaft
+versperrt.
 """
 
 from __future__ import annotations
@@ -87,7 +93,27 @@ def downgrade() -> None:
             existing_type=sa.String(length=64),
             type_=sa.Integer(),
             existing_nullable=True,
-            postgresql_using="target_id::integer",
+            # Ein glatter Cast ist hier unmoeglich: sobald die KI einmal etwas
+            # gemerkt hat, steht in der Spalte eine UUID, und PostgreSQL bricht
+            # mit "invalid input syntax for type integer" ab — ausgerechnet als
+            # **erste** Anweisung des Downgrades, wodurch die ganze Kette an
+            # dieser Revision haengen bleibt. Auf SQLite ist das unsichtbar,
+            # weil `postgresql_using` dort nie angewandt wird.
+            #
+            # Was sich nicht zurueckwandeln laesst, wird deshalb NULL. Der
+            # Verlust ist unvermeidlich (eine UUID hat keine
+            # Integerentsprechung) und trifft nur das Ziel des Audit-Eintrags,
+            # nicht den Eintrag selbst — dieselbe Entscheidung wie unten fuer
+            # die Team-Eintraege des Gedaechtnisses.
+            #
+            # Die Laengenschranke {1,9} ist kein Schoenheitsfehler: eine
+            # 20-stellige Ziffernfolge wuerde den Cast mit "integer out of
+            # range" zum Scheitern bringen und damit genau das wiederholen, was
+            # diese Zeile verhindern soll.
+            postgresql_using=(
+                "(CASE WHEN target_id ~ '^-?[0-9]{1,9}$' "
+                "THEN target_id::integer ELSE NULL END)"
+            ),
         )
 
     op.drop_index("ix_ai_memory_team", table_name="ai_memory_entries")
