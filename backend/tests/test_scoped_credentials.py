@@ -121,11 +121,19 @@ def test_steam_account_requires_a_username(
 ) -> None:
     response = client.put(
         "/api/credentials/me",
-        json={"kind": "steam_account", "label": "Ohne Name", "secret": "geheim"},
+        json={
+            "kind": "steam_account",
+            "label": "Ohne Name",
+            # Bewusst lang genug: die Laengenpruefung laeuft vor der
+            # Benutzernamenpflicht, ein kurzes Geheimnis wuerde diesen Test
+            # gruen halten, ohne dass er noch pruefte, was er behauptet.
+            "secret": "geheim-1234",
+        },
         cookies=user_cookies,
         headers=_csrf(user_cookies),
     )
     assert response.status_code == 422
+    assert "Benutzername" in response.text
 
 
 @pytest.mark.parametrize("label", ["", "   ", "a" * 80, "böse;label", "mit\nzeile"])
@@ -388,3 +396,162 @@ def test_binding_requires_the_server_credentials_permission(
 
     assert response.status_code == 403
     assert db.query(ServerCredentialBinding).count() == 0
+
+
+# ── Hinweise und fremde Zugangsdaten ───────────────────────────────────────
+
+
+def test_a_hint_never_contains_the_whole_secret() -> None:
+    """Bei genau vier Zeichen waeren "die letzten vier" der ganze Klartext.
+
+    Die alte Grenze `>= 4` war genau falsch gesetzt: der erste Fall, in dem
+    die Maskierung greifen sollte, war der erste, in dem sie nichts mehr
+    maskierte.
+    """
+    assert credential_service._hint("ab12") == "****"
+    assert credential_service._hint("ab1234") == "****"
+    assert credential_service._hint("12345678") == "****"
+    # Ab neun Zeichen ist der Hinweis das, wozu er gedacht ist.
+    assert credential_service._hint("passwort-1234") == "...1234"
+
+
+def test_a_too_short_secret_is_refused(
+    client: TestClient, db: Session, regular_user: User, user_cookies: dict
+) -> None:
+    """Sonst landet ein Geheimnis in der DB, dessen Hinweis es selbst ist."""
+    response = client.put(
+        "/api/credentials/me",
+        json={"kind": "github_token", "label": "Kurz", "secret": "ab12"},
+        cookies=user_cookies,
+        headers=_csrf(user_cookies),
+    )
+
+    assert response.status_code == 422
+    assert db.query(UserCredential).count() == 0
+
+
+def test_server_view_alone_reveals_nothing_about_a_foreign_credential(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+    owner_user: User,
+) -> None:
+    """Der Kunde darf sehen, DASS ein Zugang gebunden ist — nicht, wessen.
+
+    Gebunden wird immer ein Credential des Handelnden, und handeln darf nur,
+    wer `server.credentials.manage` haelt. Ohne diese Trennung bekaeme der
+    Kunde mit blossem `server.view` Login-Name und die letzten vier Zeichen
+    des Passworts eines fremden Kontos.
+    """
+    server = _server(db, game_type="dayz")
+    foreign = credential_service.upsert_user_credential(
+        db,
+        user_id=owner_user.id,
+        kind=KIND_STEAM_ACCOUNT,
+        label="Operator-Konto",
+        username="operator42",
+        secret="operator-passwort-9999",
+    )
+    credential_service.set_binding(
+        db,
+        server_id=server.id,
+        kind=KIND_STEAM_ACCOUNT,
+        credential_id=foreign.id,
+        actor=owner_user,
+    )
+    db.add(
+        ServerPermission(
+            user_id=regular_user.id, server_id=server.id, permission_key="server.view"
+        )
+    )
+    db.commit()
+
+    response = client.get(f"/api/servers/{server.id}/credentials", cookies=user_cookies)
+
+    assert response.status_code == 200
+    row = {entry["kind"]: entry for entry in response.json()}[KIND_STEAM_ACCOUNT]
+    # Die Herkunft bleibt sichtbar, sonst koennte der Kunde einen fehlenden
+    # Zugang nicht von einem gesetzten unterscheiden.
+    assert row["configured"] is True
+    assert row["source"] == "server"
+    # Alles, was das fremde Konto identifiziert, fehlt.
+    assert row["label"] is None
+    assert row["username"] is None
+    assert row["hint"] is None
+    assert row["credential_id"] is None
+    assert "operator42" not in response.text
+    assert "9999" not in response.text
+
+
+def test_who_may_bind_still_sees_which_credential_is_bound(
+    client: TestClient, db: Session, owner_user: User, owner_cookies: dict
+) -> None:
+    """Gegenprobe: die Auskunft darf nicht fuer alle nutzlos werden."""
+    server = _server(db, game_type="dayz")
+    own = credential_service.upsert_user_credential(
+        db,
+        user_id=owner_user.id,
+        kind=KIND_STEAM_ACCOUNT,
+        label="Operator-Konto",
+        username="operator42",
+        secret="operator-passwort-9999",
+    )
+    credential_service.set_binding(
+        db,
+        server_id=server.id,
+        kind=KIND_STEAM_ACCOUNT,
+        credential_id=own.id,
+        actor=owner_user,
+    )
+    db.commit()
+
+    response = client.get(
+        f"/api/servers/{server.id}/credentials", cookies=owner_cookies
+    )
+
+    assert response.status_code == 200
+    row = {entry["kind"]: entry for entry in response.json()}[KIND_STEAM_ACCOUNT]
+    assert row["label"] == "Operator-Konto"
+    assert row["username"] == "operator42"
+    assert row["hint"] == "...9999"
+    assert row["credential_id"] == own.id
+
+
+def test_the_panelwide_steam_username_stays_behind_the_settings_permission(
+    client: TestClient, db: Session, regular_user: User, user_cookies: dict
+) -> None:
+    """Ohne Bindung antwortete dieselbe Route mit dem Betreiber-Login.
+
+    Derselbe Wert liegt in routers/panel_settings.py hinter
+    `panel.settings.read`. Ueber diese Route war er fuer jeden abrufbar, der
+    Leserecht auf irgendeinen Server hat.
+    """
+    server = _server(db, game_type="dayz")
+    db.add(
+        ServerPermission(
+            user_id=regular_user.id, server_id=server.id, permission_key="server.view"
+        )
+    )
+    db.commit()
+
+    with patch(
+        "services.steam_account_service.SteamAccountService.is_configured",
+        return_value=True,
+    ), patch(
+        "services.steam_account_service.SteamAccountService.get_decrypted_password",
+        return_value="betreiber-passwort-0000",
+    ), patch(
+        "services.steam_account_service.SteamAccountService.get_username",
+        return_value="betreiber-konto",
+    ):
+        response = client.get(
+            f"/api/servers/{server.id}/credentials", cookies=user_cookies
+        )
+
+    assert response.status_code == 200
+    row = {entry["kind"]: entry for entry in response.json()}[KIND_STEAM_ACCOUNT]
+    assert row["source"] == "panel"
+    assert row["configured"] is True
+    assert row["username"] is None
+    assert "betreiber-konto" not in response.text

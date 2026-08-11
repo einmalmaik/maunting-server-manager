@@ -35,6 +35,7 @@ from schemas.credential import (
 from services import audit_service, credential_service
 from services.credential_service import CredentialError
 from services.dis_client import DisSidecarError
+from services.permission_service import has_server_permission
 
 
 router = APIRouter(prefix="/api", tags=["credentials"])
@@ -144,15 +145,32 @@ def read_server_credentials(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[ServerCredentialStatus]:
-    """Welche Zugangsdaten dieser Server braucht und woher sie aktuell kommen."""
+    """Welche Zugangsdaten dieser Server braucht und woher sie aktuell kommen.
+
+    Das Leserecht bleibt bewusst bei ``server.view``: wer einen Server betreut,
+    muss erkennen koennen, ob ueberhaupt ein Zugang hinterlegt ist — sonst
+    laeuft er beim naechsten Install in einen Fehler, dessen Ursache er nicht
+    sehen darf.
+
+    Wessen Zugang es ist, geht ihn dagegen nichts an. ``set_binding`` laesst
+    nur ein Credential des Handelnden binden, und handeln darf, wer
+    ``server.credentials.manage`` haelt — im Hoster-Betrieb also der Operator.
+    Ohne die zweite Pruefung hier bekaeme ein Kunde mit blossem Leserecht
+    Bezeichnung, Login-Name und die letzten Zeichen eines fremden Kontos.
+    """
     require_server_permission(user, server_id, db, "server.view")
     _require_server(db, server_id)
+    # Nicht werfend geprueft: fehlendes Verwaltungsrecht ist hier kein 403,
+    # sondern nur der Grund, die Auskunft knapper zu halten.
+    may_manage = has_server_permission(db, user, server_id, "server.credentials.manage")
     required = set(credential_service.required_kinds_for_server(db, server_id))
     from models import CREDENTIAL_KINDS
 
     rows: list[ServerCredentialStatus] = []
     for kind in CREDENTIAL_KINDS:
-        described = credential_service.describe_for_server(db, server_id, kind)
+        described = credential_service.describe_for_server(
+            db, server_id, kind, viewer_id=user.id, viewer_may_manage=may_manage
+        )
         rows.append(ServerCredentialStatus(required=kind in required, **described))
     return rows
 

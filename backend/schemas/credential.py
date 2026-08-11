@@ -16,6 +16,10 @@ class UserCredentialWrite(BaseModel):
     label: str = Field(..., min_length=1, max_length=64)
     # Nur fuer steam_account relevant; bei github_token wird der Wert ignoriert.
     username: str | None = Field(None, max_length=256)
+    # Die fachliche Untergrenze steht absichtlich nicht hier, sondern in
+    # `credential_service.MIN_SECRET_LENGTH`: sie muss nach dem strip() greifen,
+    # sonst kaemen acht Leerzeichen als gueltiges Geheimnis durch. Hier bleibt
+    # nur die Obergrenze, die den Request begrenzt.
     secret: SecretStr = Field(..., min_length=1, max_length=4096)
 
 

@@ -51,6 +51,12 @@ from services.panel_settings_service import PanelSettingsService
 
 PANEL_FALLBACK_SETTING = "credentials.allow_panel_fallback"
 MAX_SECRET_LENGTH = 4096
+# Untergrenze fuer ein Geheimnis. Sie steht hier nicht aus Passwortstrenge,
+# sondern weil `_hint` darunter nichts mehr verdecken kann: bei genau vier
+# Zeichen waeren "die letzten vier" der vollstaendige Klartext. Beide real
+# vorgesehenen Arten liegen ohnehin darueber (Steam erzwingt acht Zeichen, ein
+# GitHub-PAT ist deutlich laenger) — die Grenze trifft nur Fehleingaben.
+MIN_SECRET_LENGTH = 8
 MAX_USERNAME_LENGTH = 256
 MAX_CREDENTIALS_PER_USER = 20
 _LABEL_RE = re.compile(r"^[\w .\-]{1,64}$", re.UNICODE)
@@ -86,7 +92,22 @@ def _aad(credential_id: int) -> str:
 
 
 def _hint(secret: str) -> str:
-    return f"...{secret[-4:]}" if len(secret) >= 4 else "****"
+    """Ein Hinweis, der das Geheimnis nicht verraet.
+
+    Die alte Bedingung `len(secret) >= 4` war genau falsch herum: der erste
+    Fall, in dem die Maskierung greifen sollte, war der erste, in dem sie
+    nichts mehr maskierte. Das wiegt hier schwerer als bei einer reinen
+    Selbstauskunft, weil dieser Hinweis ueber die Serverbindung die
+    Besitzergrenze verlaesst.
+
+    Deshalb dieselbe Untergrenze wie im uebrigen Panel
+    (`routers/panel_settings._mask_secret`): alles bis acht Zeichen wird
+    vollstaendig maskiert. Die Maske ist bewusst laengenunabhaengig, damit sie
+    nicht ihrerseits verraet, wie kurz das Geheimnis ist.
+    """
+    if len(secret) <= MIN_SECRET_LENGTH:
+        return "****"
+    return f"...{secret[-4:]}"
 
 
 def panel_fallback_allowed() -> bool:
@@ -147,8 +168,13 @@ def upsert_user_credential(
     kind = _validate_kind(kind)
     label = _validate_label(label)
     value = (secret or "").strip()
-    if not value or len(value) > MAX_SECRET_LENGTH:
-        raise CredentialError("Geheimnis ist leer oder zu lang")
+    if len(value) > MAX_SECRET_LENGTH:
+        raise CredentialError("Geheimnis ist zu lang")
+    if len(value) < MIN_SECRET_LENGTH:
+        # Bewusst erst nach dem strip() geprueft: acht Leerzeichen kaemen sonst
+        # durch jede Laengenpruefung im Schema und landeten als leeres
+        # Geheimnis in der Datenbank.
+        raise CredentialError("Geheimnis muss mindestens acht Zeichen haben")
     name = (username or "").strip() or None
     if kind == KIND_STEAM_ACCOUNT:
         if not name:
@@ -359,19 +385,52 @@ def resolve_panel_default(kind: str) -> ResolvedCredential | None:
     )
 
 
-def describe_for_server(db: Session, server_id: int, kind: str) -> dict:
-    """Secret-freie Statusauskunft für die Serveroberfläche."""
+def describe_for_server(
+    db: Session,
+    server_id: int,
+    kind: str,
+    *,
+    viewer_id: int | None = None,
+    viewer_may_manage: bool = False,
+) -> dict:
+    """Statusauskunft für die Serveroberfläche — ohne fremde Kontodaten.
+
+    "Secret-frei" war als Zusage zu schwach. Bezeichnung, Login-Name und der
+    Hinweis auf die letzten Zeichen gehoeren dem Benutzer, dessen Credential
+    gebunden ist, und das ist im Hoster-Betrieb regelmaessig ein anderer als
+    der Betrachter: binden darf nur, wer ``server.credentials.manage`` haelt,
+    lesen schon, wer ``server.view`` haelt. Ein Kunde bekam so den Login-Namen
+    und vier Zeichen des Passworts eines fremden Kontos zu sehen.
+
+    Darum zwei Ebenen: **dass** und **woher** ein Zugang kommt, sieht jeder
+    Leser — sonst koennte er einen fehlenden Zugang nicht von einem gesetzten
+    unterscheiden und wuesste bei einem gescheiterten Install nicht, woran es
+    liegt. **Welcher** Zugang es ist, sieht nur, wem er gehoert oder wer ihn
+    ohnehin umsetzen darf.
+
+    Die Vorgaben sind absichtlich die restriktiven: ein Aufrufer, der die
+    Frage nicht beantwortet, bekommt die knappe Auskunft.
+
+    Der panelweite Benutzername faellt ganz heraus. Er ist eine
+    Betreibereinstellung und liegt sonst hinter ``panel.settings.read``
+    (routers/panel_settings.py) — ueber diese Route war er fuer jeden mit
+    Leserecht auf irgendeinen Server abrufbar.
+    """
     kind = _validate_kind(kind)
     binding = get_binding(db, server_id, kind)
     if binding is not None and binding.credential is not None:
+        credential = binding.credential
+        may_identify = viewer_may_manage or (
+            viewer_id is not None and credential.user_id == viewer_id
+        )
         return {
             "kind": kind,
             "source": "server",
             "configured": True,
-            "credential_id": binding.credential_id,
-            "label": binding.credential.label,
-            "username": binding.credential.username,
-            "hint": binding.credential.secret_hint,
+            "credential_id": credential.id if may_identify else None,
+            "label": credential.label if may_identify else None,
+            "username": credential.username if may_identify else None,
+            "hint": credential.secret_hint if may_identify else None,
         }
     panel = resolve_panel_default(kind)
     return {
@@ -380,7 +439,7 @@ def describe_for_server(db: Session, server_id: int, kind: str) -> dict:
         "configured": panel is not None,
         "credential_id": None,
         "label": None,
-        "username": panel.username if panel else None,
+        "username": None,
         "hint": None,
     }
 

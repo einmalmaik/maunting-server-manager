@@ -116,7 +116,14 @@ export function ServerCredentialsPanel({
                   {t('credentials.missing')}
                 </p>
               )}
-              {row.configured && row.source === 'server' && (
+              {/*
+                Bezeichnung, Benutzername und Hinweis gehoeren dem Benutzer,
+                dessen Zugangsdaten gebunden sind. Wer nur zuschauen darf,
+                bekommt sie vom Backend gar nicht mehr — ohne die zusaetzliche
+                Bedingung stuende hier ein leerer Absatz. Die Herkunft oben
+                (das Badge) bleibt sichtbar, sie ist die eigentliche Auskunft.
+              */}
+              {row.configured && row.source === 'server' && row.label !== null && (
                 <p className="mt-2 text-xs text-on-surface-variant">
                   {row.label}
                   {row.username ? ` · ${row.username}` : ''}
