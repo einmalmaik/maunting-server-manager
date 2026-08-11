@@ -19,6 +19,14 @@ import {
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
 import { Button, Dropdown, type DropdownOption } from '@/Singra/UI'
+import {
+  aiChatPreferenceKeys,
+  readAiProviderChoice,
+  readAiReasoningChoice,
+  writeAiProviderChoice,
+  writeAiReasoningChoice,
+} from '@/lib/aiChatPreferences'
+import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 import { AiActionProposalCard } from './AiActionProposalCard'
@@ -99,6 +107,27 @@ function denkwahlFuer(jetzt: Denkwahl, provider: AiProviderAvailable): Denkwahl 
 }
 
 /**
+ * Mit welchem Modell der Chat aufgeht: dem zuletzt gewaehlten, sonst dem
+ * ersten benutzbaren.
+ *
+ * Die gemerkte Kennung wird nicht geglaubt, sondern gegen die Liste geprueft.
+ * Zwischen zwei Besuchen kann der Provider geloescht, sein Schluessel entfernt
+ * oder dem Benutzer die Rolle entzogen worden sein — dann steht er nicht mehr
+ * als `available` in der Liste, und ein Verweis darauf ergaebe eine
+ * Auswahlliste, deren angezeigter Wert in keiner ihrer Optionen vorkommt.
+ *
+ * Eine reine Funktion, damit sie sich ohne gerendertes Bauteil pruefen laesst.
+ */
+function providerBeimOeffnen(
+  providers: AiProviderAvailable[],
+  gemerkt: number | null,
+): number | null {
+  const benutzbar = providers.filter((item) => item.available)
+  if (gemerkt !== null && benutzbar.some((item) => item.id === gemerkt)) return gemerkt
+  return benutzbar[0]?.id ?? null
+}
+
+/**
  * Der KI-Assistent: **eine** Unterhaltung, die die Seite ausfuellt.
  *
  * Bewusst wie ein Messenger und nicht wie ein Verwaltungsformular. Es gibt
@@ -112,6 +141,11 @@ export function AiChat() {
   const canAttach = useHasPermission('ai.attachments.use')
   const canUseAutonomy = useHasPermission('ai.autonomous.use')
   const canUseMemory = useHasPermission('ai.memory.use')
+  // Modell und Denkstufe merkt sich der Browser — je Benutzer, begruendet in
+  // `aiChatPreferences`. Die Kennung kommt aus dem Auth-Store statt aus einer
+  // Prop, damit keine Einbindung sie vergessen kann.
+  const userId = useAuthStore((state) => state.user?.id ?? 'anonym')
+  const merkSchluessel = useMemo(() => aiChatPreferenceKeys(userId), [userId])
 
   const [providers, setProviders] = useState<AiProviderAvailable[]>([])
   const [providerId, setProviderId] = useState<number | null>(null)
@@ -124,7 +158,13 @@ export function AiChat() {
   // `null`, und ein einzelnes Feld muesste fuer sie einen Wert erfinden.
   // Welche Stufen es gibt, sagt der Provider aus dem Katalog; sie sind je
   // Modell verschieden und bereits auf die Rolle dieses Benutzers geklemmt.
-  const [denken, setDenken] = useState<Denkwahl>({ an: false, stufe: null })
+  // Die Wahl ueberlebt das Neuladen: sie steht im localStorage unter der
+  // Benutzerkennung. Der Anfangswert kommt deshalb aus einer Funktion — sonst
+  // stuende beim ersten Bild „kein Nachdenken", und der Effekt darunter setzte
+  // die gemerkte Stufe erst nach dem Laden der Provider nach.
+  const [denken, setDenken] = useState<Denkwahl>(
+    () => readAiReasoningChoice(merkSchluessel.reasoning) ?? { an: false, stufe: null },
+  )
   // Ob der Einwilligungshinweis faellig ist. Die 24-Stunden-Regel entscheidet
   // das Backend — hier steht nur das Ergebnis.
   const [memoryNoticeDue, setMemoryNoticeDue] = useState(false)
@@ -185,7 +225,7 @@ export function AiChat() {
         setLaufBeimOeffnen(aktiverLauf)
         setMemoryNoticeDue(Boolean(memoryPreference?.notice_due))
         setProviders(providerRows)
-        setProviderId(providerRows.find((item) => item.available)?.id ?? null)
+        setProviderId(providerBeimOeffnen(providerRows, readAiProviderChoice(merkSchluessel.provider)))
         // Vorschlaege werden chronologisch zwischen die Nachrichten einsortiert,
         // damit man sieht, auf welche Antwort sie sich beziehen. Vorher standen
         // sie gesammelt am Ende und wirkten losgeloest.
@@ -202,7 +242,7 @@ export function AiChat() {
     return () => {
       active = false
     }
-  }, [canAttach, canUseMemory, t])
+  }, [canAttach, canUseMemory, merkSchluessel.provider, t])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'nearest' })
@@ -248,6 +288,30 @@ export function AiChat() {
     if (!aktiverProvider) return
     setDenken((jetzt) => denkwahlFuer(jetzt, aktiverProvider))
   }, [aktiverProvider])
+
+  /**
+   * Die Wahl merken — aber nur die **gewaehlte**, nicht die zurechtgebogene.
+   *
+   * Deshalb hier und nicht in einem Effekt auf `denken`: der Effekt darueber
+   * senkt die Stufe beim Wechsel auf ein Modell, das sie nicht kennt. Schriebe
+   * man auch das mit, waere „xhigh" nach einem kurzen Abstecher zu einem
+   * kleineren Modell dauerhaft verloren, ohne dass jemand es angefasst hat.
+   */
+  const waehleDenken = useCallback((wahl: Denkwahl) => {
+    setDenken(wahl)
+    writeAiReasoningChoice(merkSchluessel.reasoning, wahl)
+  }, [merkSchluessel.reasoning])
+
+  /**
+   * Das Modell merken. Auch hier nur die gewaehlte Kennung — was beim naechsten
+   * Oeffnen daraus wird, entscheidet `providerBeimOeffnen` gegen die dann
+   * gueltige Liste.
+   */
+  const waehleProvider = useCallback((wert: string) => {
+    const id = Number(wert)
+    setProviderId(id)
+    writeAiProviderChoice(merkSchluessel.provider, id)
+  }, [merkSchluessel.provider])
 
   /** Hochgeladen, aber noch nicht abgeschickt — die Chips über dem Eingabefeld. */
   const offeneAnhaenge = useMemo(
@@ -731,7 +795,7 @@ export function AiChat() {
         <div className="min-w-[10rem] max-w-[16rem] flex-1">
           <Dropdown
             value={providerId ? String(providerId) : null}
-            onChange={(value) => setProviderId(Number(value))}
+            onChange={waehleProvider}
             options={availableProviders.map((provider) => ({
               value: String(provider.id),
               label: provider.name,
@@ -746,7 +810,7 @@ export function AiChat() {
         <ReasoningPicker
           provider={aktiverProvider}
           wahl={denken}
-          onChange={setDenken}
+          onChange={waehleDenken}
           disabled={busy}
         />
 

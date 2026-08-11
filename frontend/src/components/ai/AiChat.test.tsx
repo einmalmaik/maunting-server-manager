@@ -92,6 +92,10 @@ const eigeneNachricht: AiMessage = {
 describe('AiChat', () => {
   beforeEach(async () => {
     Element.prototype.scrollIntoView = vi.fn()
+    // Der Chat merkt sich Modell und Denkstufe im localStorage. Ohne dieses
+    // Leeren truege ein Test die Wahl des vorigen in den naechsten — genau
+    // das, was die Speicherung im Browser fuer den Benutzer ja bewirken soll.
+    localStorage.clear()
     await i18n.changeLanguage('de')
     usePermissionsStore.setState({
       me: {
@@ -168,6 +172,78 @@ describe('AiChat', () => {
       expect.any(Function),
       expect.any(AbortSignal),
     ))
+  })
+
+  it('haelt die gewaehlte Denkstufe ueber ein Neuladen hinweg', async () => {
+    // Der eigentliche Fehler: nach F5 stand wieder „Kein Nachdenken" da,
+    // gleichgueltig was vorher gewaehlt war. Die Wahl gilt fuer die naechste
+    // Frage und nicht fuer die vorige Antwort — sie gehoert deshalb in den
+    // Browser und nicht in die Unterhaltung.
+    const ersteAnsicht = render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.click(screen.getByLabelText('Denktiefe'))
+    fireEvent.click(screen.getByRole('option', { name: 'Hoch' }))
+    expect(screen.getByLabelText('Denktiefe')).toHaveTextContent('Hoch')
+
+    // Ein Neuladen der Seite: dieselbe Herkunft, derselbe localStorage, aber
+    // ein frisch aufgebauter Baum ohne jeden Zustand von vorhin.
+    ersteAnsicht.unmount()
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    expect(screen.getByLabelText('Denktiefe')).toHaveTextContent('Hoch')
+  })
+
+  it('faellt auf die Vorgabe zurueck, wenn das Modell die gemerkte Stufe nicht kennt', async () => {
+    // Die Stufen sind je Modell verschieden. Eine gemerkte „xhigh" darf nicht
+    // stehenbleiben, wo es sie nicht gibt — der Server senkte sie sonst
+    // stillschweigend, und die Anzeige loege.
+    localStorage.setItem('msm_ai_chat:reasoning:anonym', JSON.stringify({ an: true, stufe: 'xhigh' }))
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    expect(screen.getByLabelText('Denktiefe')).toHaveTextContent('Mittel')
+  })
+
+  it('haelt das gewaehlte Modell ueber ein Neuladen hinweg', async () => {
+    vi.mocked(aiApi.listProviders).mockResolvedValue([
+      {
+        id: 1, name: 'Synthetic AI', default_model: 'test-model',
+        requires_api_key: false, operator_key_available: true, available: true,
+        reasoning: true, efforts: ['low', 'medium', 'high'],
+        can_disable: true, default_effort: 'medium',
+      },
+      {
+        id: 2, name: 'Synthetic Lab', default_model: 'lab-model',
+        requires_api_key: false, operator_key_available: true, available: true,
+        reasoning: false, efforts: [], can_disable: true, default_effort: null,
+      },
+    ])
+    const ersteAnsicht = render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.click(screen.getByLabelText('Provider auswählen'))
+    fireEvent.click(screen.getByRole('option', { name: /Synthetic Lab/ }))
+    expect(screen.getByLabelText('Provider auswählen')).toHaveTextContent('Synthetic Lab')
+
+    ersteAnsicht.unmount()
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    // Ohne das Merken stuende hier wieder das erste benutzbare Modell.
+    expect(screen.getByLabelText('Provider auswählen')).toHaveTextContent('Synthetic Lab')
+  })
+
+  it('faellt auf das erste benutzbare Modell zurueck, wenn das gemerkte weg ist', async () => {
+    // Zwischen zwei Besuchen kann der Provider geloescht, sein Schluessel
+    // entfernt oder dem Benutzer die Rolle entzogen worden sein. Ein Verweis
+    // darauf ergaebe eine Auswahlliste, deren Wert in keiner Option vorkommt.
+    localStorage.setItem('msm_ai_chat:provider:anonym', '99')
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    expect(screen.getByLabelText('Provider auswählen')).toHaveTextContent('Synthetic AI')
   })
 
   it('bietet bei einem Modell mit Denkzwang kein „aus" an', async () => {
