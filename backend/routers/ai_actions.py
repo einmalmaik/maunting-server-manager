@@ -1,6 +1,5 @@
 """Bestaetigung und Ausfuehrung persistenter AI-Aktionsvorschlaege."""
 
-import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,38 +20,17 @@ from services import (
     ai_proposal_service,
     ai_run_service,
 )
+# Die Serialisierung eines Vorschlags liegt beim Vorschlag, nicht beim Router:
+# der Stream veroeffentlicht denselben Typ ueber SSE und muss dieselbe Quelle
+# benutzen. Solange sie hier stand, hatte `AiActionProposal` zwei Wahrheiten —
+# und die des Streams kannte weder `reason` noch `expected_effect`.
+from services.ai_proposal_service import proposal_response
 from services.dis_client import DisSidecarError
 
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai", tags=["ai-actions"])
-
-
-def proposal_response(proposal: AiActionProposal) -> AiActionProposalResponse:
-    try:
-        preview = json.loads(proposal.preview_json)
-    except (TypeError, json.JSONDecodeError):
-        preview = {"unavailable": True}
-    if not isinstance(preview, dict):
-        preview = {"unavailable": True}
-    return AiActionProposalResponse(
-        id=proposal.id,
-        conversation_id=proposal.conversation_id,
-        server_id=proposal.server_id,
-        tool_name=proposal.tool_name,
-        preview=preview,
-        expected_revision=proposal.expected_revision,
-        requires_confirmation=proposal.requires_confirmation,
-        autonomous=bool(proposal.autonomous),
-        reason=proposal.reason,
-        expected_effect=proposal.expected_effect,
-        status=proposal.status,
-        task_id=proposal.task_id,
-        error_code=proposal.error_code,
-        run_id=proposal.run_id,
-        created_at=proposal.created_at,
-    )
 
 
 def _state_error(exc: ai_action_errors.AiActionStateError) -> HTTPException:

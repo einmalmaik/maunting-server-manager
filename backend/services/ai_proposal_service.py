@@ -32,6 +32,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from models import AiActionProposal, AiConversation, Server, User
+from schemas.ai_action import AiActionProposalResponse
 from services import audit_service, permission_service
 from services.actor_context import ActorContext
 from services.ai_action_errors import AiActionStateError, AiActionValidationError
@@ -731,6 +732,48 @@ def _mod_install_payload(db: Session, server: Server, arguments: dict) -> tuple[
         "restart_required": True,
     }
     return payload, preview
+
+
+def proposal_response(proposal: AiActionProposal) -> AiActionProposalResponse:
+    """Ein Vorschlag als Vertrag nach aussen — die **einzige** Serialisierung.
+
+    Sie stand vorher im Router, und der Stream baute sich daneben ein eigenes
+    Dict aus sechs Feldern. Das war kein Schoenheitsfehler: `reason` und
+    `expected_effect` fehlten damit genau auf der Karte, mit der ein Mensch
+    einen Schreibvorgang freigibt. Live erschien sie ohne Begruendung, und erst
+    ein Neuladen holte sie ueber die REST-Liste nach.
+
+    Deshalb liegt sie jetzt beim Vorschlag selbst, und beide Wege rufen sie auf.
+    Ein neues Feld am Vorschlag kann so nicht mehr auf nur einem der beiden
+    Wege ankommen.
+
+    `preview_json` wird bewusst defensiv gelesen: die Vorschau ist Anzeige, kein
+    Sicherheitsmerkmal. Eine kaputte Zeile darf die ganze Liste nicht unlesbar
+    machen — sie meldet sich als `unavailable`.
+    """
+    try:
+        preview = json.loads(proposal.preview_json)
+    except (TypeError, json.JSONDecodeError):
+        preview = {"unavailable": True}
+    if not isinstance(preview, dict):
+        preview = {"unavailable": True}
+    return AiActionProposalResponse(
+        id=proposal.id,
+        conversation_id=proposal.conversation_id,
+        server_id=proposal.server_id,
+        tool_name=proposal.tool_name,
+        preview=preview,
+        expected_revision=proposal.expected_revision,
+        requires_confirmation=proposal.requires_confirmation,
+        autonomous=bool(proposal.autonomous),
+        reason=proposal.reason,
+        expected_effect=proposal.expected_effect,
+        status=proposal.status,
+        task_id=proposal.task_id,
+        error_code=proposal.error_code,
+        run_id=proposal.run_id,
+        created_at=proposal.created_at,
+    )
 
 
 def create_proposal(

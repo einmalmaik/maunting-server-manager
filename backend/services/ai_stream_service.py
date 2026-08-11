@@ -45,6 +45,7 @@ from services.ai_action_service import (
 from services.ai_proposal_service import (
     create_proposal,
     execute_autonomously,
+    proposal_response,
 )
 from services.ai_tool_registry import (
     ASK_TOOLS,
@@ -426,6 +427,27 @@ def _ablehnung_protokollieren(
         logger.warning("Ablehnung konnte nicht protokolliert werden tool=%s", tool_name)
 
 
+def _vorschlag_ereignis(proposal: AiActionProposal) -> dict:
+    """Ein Vorschlag als SSE-Nutzlast — derselbe Vertrag wie die REST-Antwort.
+
+    Hier stand frueher ein handgebautes Dict aus sechs Feldern. Der Vertrag hat
+    fuenfzehn, und zwei der fehlenden — `reason` und `expected_effect` — stehen
+    auf der Karte, mit der ein Mensch einen Schreibvorgang freigibt. Live blieb
+    sie deshalb ohne Begruendung; erst ein Neuladen holte sie nach.
+
+    Schwerer wog der zweite Weg: dasselbe Dict landet im Abzug des Laufs
+    (`ai_run_broker`), und ein Chat, der sich an einen wartenden Lauf
+    wiederanhaengt, **ersetzt** damit den vollstaendigen Vorschlag aus der
+    REST-Liste. Die gerade noch sichtbare Begruendung verschwand vor den Augen
+    des Benutzers.
+
+    `mode="json"` ist Pflicht: `created_at` ist ein `datetime`, und `sse_event`
+    serialisiert mit `json.dumps` — ohne Umwandlung scheitert nicht die Anzeige,
+    sondern der Stream.
+    """
+    return proposal_response(proposal).model_dump(mode="json")
+
+
 def _persist_write_proposals(
     *, user_id: int, conversation_id: str, tool_calls, correlation_id: str, run_id: str | None = None
 ) -> list[dict]:
@@ -475,11 +497,15 @@ def _persist_write_proposals(
         results: list[dict] = []
         # Feste Kopien: `execute_autonomously` committet und rollt bei einem
         # Fehler zurueck. Ein danach noch gehaltenes ORM-Objekt waere abgelaufen.
+        #
+        # Kopiert wird der **vollstaendige** Vorschlag statt einer Handvoll
+        # Felder. Er ist zugleich die Rueckfallebene fuer den Fall, dass die
+        # Zeile nach der Ausfuehrung nicht mehr auffindbar ist.
         summaries = [
-            (proposal.id, proposal.tool_name, proposal.preview_json, proposal.autonomous)
+            (proposal.id, bool(proposal.autonomous), _vorschlag_ereignis(proposal))
             for proposal in proposals
         ]
-        for proposal_id, tool_name, preview_json, autonomous in summaries:
+        for proposal_id, autonomous, vorher in summaries:
             error_code: str | None = None
             if autonomous:
                 # Sofort ausfuehren — aber ueber denselben Pfad wie eine
@@ -493,15 +519,21 @@ def _persist_write_proposals(
                     logger.warning("Autonome AI-Aktion fehlgeschlagen id=%s", proposal_id)
                     error_code = "AI_ACTION_EXECUTION_FAILED"
             current = db.get(AiActionProposal, proposal_id)
-            results.append({
-                "id": proposal_id,
-                "server_id": current.server_id if current is not None else None,
-                "tool_name": tool_name,
-                "preview": json.loads(preview_json),
-                "status": current.status if current is not None else "failed",
-                "autonomous": bool(autonomous),
-                **({"error_code": error_code} if error_code else {}),
-            })
+            # Nach der Ausfuehrung noch einmal serialisieren: Status, `task_id`
+            # und — bei einer Servererstellung — die `server_id` entstehen erst
+            # dabei. Fehlt die Zeile, bleibt der Abzug von vorher; er ist
+            # vollstaendig und traegt nur einen anderen Status.
+            ereignis = (
+                _vorschlag_ereignis(current) if current is not None
+                else {**vorher, "status": "failed"}
+            )
+            if error_code:
+                # Zustandsfehler wie `AI_ACTION_SERVER_BUSY` oder eine
+                # abgelaufene Bestaetigung entstehen, **bevor** ueberhaupt
+                # ausgefuehrt wird. Sie stehen deshalb nicht an der Zeile und
+                # gingen ohne diese Zeile verloren.
+                ereignis["error_code"] = error_code
+            results.append(ereignis)
         return results
 
 

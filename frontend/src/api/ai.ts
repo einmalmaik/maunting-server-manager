@@ -145,6 +145,17 @@ export type AiWriteTool =
   | 'propose_blueprint_change'
   | 'propose_server_blueprint_switch'
 
+/**
+ * Ein Aktionsvorschlag — genau ein Vertrag für beide Wege.
+ *
+ * REST (`listActions`, `getAction`, `executeAction`) und das SSE-Ereignis
+ * `proposal`/`action` liefern dasselbe Objekt aus derselben Serialisierung
+ * (`ai_proposal_service.proposal_response`). Das ist keine Kosmetik: der Chat
+ * **ersetzt** beim Wiederanhängen den Vorschlag aus der Liste durch den aus dem
+ * Ereignis. Trägt das Ereignis weniger Felder, verschwinden Begründung und
+ * erwartete Wirkung aus einer bereits gerenderten Karte — ausgerechnet auf der,
+ * mit der ein Schreibvorgang freigegeben wird.
+ */
 export interface AiActionProposal {
   id: string
   conversation_id: string

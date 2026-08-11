@@ -26,6 +26,7 @@ from models import (
     ServerPermission,
     User,
 )
+from schemas.ai_action import AiActionProposalResponse
 from services import ai_run_broker, ai_run_service, ai_stream_service
 from services.ai_context_service import build_provider_messages
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
@@ -187,6 +188,20 @@ def _abholen(warteschlange) -> list[str]:
             break
         ereignisse.append(ai_stream_service.sse_event(name, daten))
     return ereignisse
+
+
+def _ereignis_daten(ereignisse: list[str], name: str) -> dict:
+    """Die Nutzlast des ersten Ereignisses dieses Namens.
+
+    Die Tests hier haben bisher nur geprueft, *dass* ein Ereignis kam. Was darin
+    steht, war nie Gegenstand — und genau dort fehlten neun von fuenfzehn
+    Feldern.
+    """
+    kopf = f"event: {name}\ndata: "
+    for ereignis in ereignisse:
+        if ereignis.startswith(kopf):
+            return json.loads(ereignis[len(kopf):])
+    raise AssertionError(f"Kein Ereignis '{name}' im Stream")
 
 
 async def _fortsetzen(db: Session, run_id: str) -> list[str]:
@@ -395,6 +410,67 @@ async def test_several_read_rounds_may_precede_a_write_round(
     assert any("propose_backup" in str(item.get("content")) for item in last_tool_messages)
     assert any(event.startswith("event: proposal") for event in events)
     assert db.query(AiActionProposal).count() == 1
+
+
+@pytest.mark.asyncio
+async def test_proposal_event_carries_the_whole_proposal(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Das SSE-Ereignis traegt denselben Vertrag wie die REST-Antwort.
+
+    Vorher trug es sechs von fuenfzehn Feldern. Zwei der fehlenden standen an
+    der schlimmstmoeglichen Stelle: `reason` und `expected_effect` sind das,
+    woran ein Mensch beim Freigeben eines Schreibvorgangs erkennt, *warum*
+    geschrieben werden soll. Live blieb die Karte begruendungslos.
+
+    Der zweite Weg wiegt schwerer: derselbe Dict liegt im Abzug des Laufs, und
+    ein Chat, der sich an einen wartenden Lauf wiederanhaengt, ersetzt damit
+    den vollstaendigen Vorschlag aus der REST-Liste — die gerade noch sichtbare
+    Begruendung verschwand vor den Augen des Benutzers. Deshalb prueft der Test
+    beide Ablagen.
+    """
+    server = _server(db, "vertrag")
+    _grant(db, regular_user, server=server, server_keys=("server.view", "server.backups.create"))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="propose_backup", arguments={
+            "server_id": server.id,
+            "reason": "Vor dem Update absichern.",
+            "expected_effect": "Ein wiederherstellbarer Stand liegt vor.",
+        }),
+    ]])
+
+    events = await _collect(db, regular_user, conversation, provider)
+
+    daten = _ereignis_daten(events, "proposal")
+    # Verglichen wird gegen das Schema und nicht gegen eine hier abgetippte
+    # Liste: ein neues Feld am Vertrag muss auch im Stream ankommen, sonst
+    # entsteht die Luecke gleich wieder.
+    assert set(daten) == set(AiActionProposalResponse.model_fields)
+    assert daten["reason"] == "Vor dem Update absichern."
+    assert daten["expected_effect"] == "Ein wiederherstellbarer Stand liegt vor."
+    proposal = db.query(AiActionProposal).one()
+    assert daten["id"] == proposal.id
+    assert daten["conversation_id"] == conversation.id
+    assert daten["requires_confirmation"] is True
+    # Der Rueckweg zum wartenden Lauf. Ohne ihn wuesste der Bestaetigungsknopf
+    # nicht, wen er aufwecken soll.
+    assert daten["run_id"] == proposal.run_id and proposal.run_id is not None
+    # `created_at` muss serialisiert sein: ein `datetime` im Ereignis liesse
+    # `json.dumps` im Stream scheitern, nicht erst den Browser.
+    assert isinstance(daten["created_at"], str)
+
+    # Und derselbe vollstaendige Vorschlag liegt im Abzug — das ist der Weg,
+    # ueber den ein wiederanhaengender Chat seine Karte ueberschreibt. Der
+    # Kanal ist noch offen, weil ein Lauf im Zustand `waiting_confirmation`
+    # nicht beendet wird; genau deshalb gibt es den Weg ueberhaupt.
+    anhang = ai_run_broker.abonnieren(proposal.run_id)
+    assert anhang is not None, "Der wartende Lauf muss im Vermittler bleiben"
+    abzug, _ = anhang
+    assert [set(eintrag) for eintrag in abzug.vorschlaege] == [
+        set(AiActionProposalResponse.model_fields)
+    ]
 
 
 @pytest.mark.asyncio
