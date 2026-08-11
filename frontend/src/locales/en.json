@@ -453,7 +453,23 @@
         "AI_QUOTA_MONTHLY_COST_LIMIT_CENTS": "The monthly cost limit has been reached.",
         "AI_ACTION_NOT_FOUND": "This action proposal no longer exists.",
         "AI_ACTION_ACCESS_REVOKED": "Your permission for this server was revoked. The proposal is still there, but you may no longer run it.",
-        "AI_ACTION_STORE_UNAVAILABLE": "The panel's secure store is currently unreachable. The proposal is still there — try again in a moment."
+        "AI_ACTION_STORE_UNAVAILABLE": "The panel's secure store is currently unreachable. The proposal is still there — try again in a moment.",
+        "AI_ACTION_PAYLOAD_INVALID": "The proposal's data is unusable. Have the proposal created again.",
+        "AI_ACTION_NOT_PROPOSED": "This proposal is no longer awaiting a decision — it was already confirmed, executed or discarded.",
+        "AI_ACTION_NOT_AUTONOMOUS": "This action is not allowed to run without asking.",
+        "AI_ACTION_NOT_CONFIRMED": "The proposal is no longer confirmed. Confirm it again.",
+        "AI_ACTION_CONFIRMATION_EXPIRED": "The confirmation has expired. Review the proposal and confirm it again.",
+        "AI_ACTION_CONFIRMATION_INVALID": "The confirmation does not match this proposal. Confirm it again.",
+        "AI_ACTION_TARGET_MISSING": "The target of the action no longer exists.",
+        "AI_ACTION_FILE_CHANGED": "The file has changed since the preview. Have the proposal created again.",
+        "AI_ACTION_REVISION_CONFLICT": "Someone else saved in the meantime. Have the proposal created again.",
+        "AI_ACTION_SERVER_BUSY": "An action is already running for this server. Wait until it has finished.",
+        "AI_ACTION_TOOL_NOT_ALLOWED": "This tool is not enabled for the AI.",
+        "AI_ACTION_BIND_IP_REJECTED": "The requested bind IP cannot be used for this server.",
+        "AI_ACTION_BLUEPRINT_REJECTED": "The proposed blueprint was rejected by validation.",
+        "AI_ACTION_BLUEPRINT_SWITCH_FAILED": "Switching to the other blueprint failed.",
+        "AI_ACTION_EXECUTION_FAILED": "The action failed. Details are in the log.",
+        "AI_ACTION_INTERRUPTED": "The panel restarted while the action was running. How far it got is unknown — check on the server before triggering it again."
       }
     },
     "webSearch": {

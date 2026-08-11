@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import i18n from '@/i18n'
-import { api, apiStream } from './client'
+import { api, apiStream, SanitizedApiError } from './client'
 
 // Locking the language guarantees the test does not silently break, wenn der
 // LanguageDetector im jsdom-Env eine andere Sprache als Fallback waehlt.
@@ -225,6 +225,46 @@ describe('api client', () => {
       await expect(api('/test', { method: 'POST' })).rejects.toThrow(
         'An installation or update is already running. Please wait until that job has finished.',
       )
+    })
+
+    it('macht aus einem reinen {code} einen Satz statt "Conflict"', async () => {
+      // Genau die Antwort von routers/ai_actions.py::_state_error: ein Code,
+      // kein Text. Ohne Uebersetzung liest der Benutzer den Statustext des
+      // Browsers und erfaehrt nicht, dass sich die Datei geaendert hat.
+      fetchSpy.mockReturnValueOnce(Promise.resolve({
+        ok: false,
+        status: 409,
+        statusText: 'Conflict',
+        headers: new Headers(),
+        json: () => Promise.resolve({}),
+        text: () => Promise.resolve(JSON.stringify({ detail: { code: 'AI_ACTION_FILE_CHANGED' } })),
+      } as Response))
+
+      const fehler = await api('/ai/actions/abc/execute', { method: 'POST' })
+        .then(() => null)
+        .catch((e: SanitizedApiError) => e)
+
+      expect(fehler?.code).toBe('AI_ACTION_FILE_CHANGED')
+      expect(fehler?.message).toBe(i18n.t('ai.errors.codes.AI_ACTION_FILE_CHANGED'))
+      expect(fehler?.message).not.toBe('Conflict')
+      // Kein roher Schluessel: der Katalog muss den Code wirklich kennen.
+      expect(fehler?.message).not.toMatch(/^ai\./)
+    })
+
+    it('uebersetzt den Code auch im SSE-Pfad', async () => {
+      // Dieselbe Luecke stand ein zweites Mal in apiStream — der Stream-Start
+      // scheitert mit derselben Antwort, wenn der Server gerade belegt ist.
+      fetchSpy.mockReturnValueOnce(Promise.resolve({
+        ok: false,
+        status: 409,
+        statusText: 'Conflict',
+        headers: new Headers(),
+        text: () => Promise.resolve(JSON.stringify({ detail: { code: 'AI_ACTION_SERVER_BUSY' } })),
+      } as Response))
+
+      await expect(
+        apiStream('/ai/conversations/1/messages/stream', { method: 'POST', body: '{}' }),
+      ).rejects.toThrow(i18n.t('ai.errors.codes.AI_ACTION_SERVER_BUSY'))
     })
 
     it('should fallback to statusText when body is empty', async () => {

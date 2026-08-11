@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Bot, Save } from 'lucide-react'
 
-import { api } from '@/api/client'
+import { api, SanitizedApiError } from '@/api/client'
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiSkillManager } from '@/components/ai/AiSkillManager'
 import { useHasPermission } from '@/hooks/useHasPermission'
@@ -120,7 +120,12 @@ export function AiTab() {
         setSelectedRoleId((list.find((row) => row.configured) ?? list[0])?.role_id ?? null)
       })
       .catch((error: unknown) => {
-        if (active) toast.error(error instanceof Error ? error.message : t('aiSettings.loadFailed'))
+        // Vorzeigbar ist nur, was aus einer verarbeiteten Backend-Antwort kommt
+        // (siehe api/client.ts). Ist das Panel nicht erreichbar, wirft `fetch`
+        // einen blanken TypeError — dessen `message` ist die englische Meldung
+        // des Browsers („Failed to fetch") und stünde unübersetzt in der
+        // Oberfläche, egal welche Sprache eingestellt ist.
+        if (active) toast.error(error instanceof SanitizedApiError ? error.message : t('aiSettings.loadFailed'))
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -158,7 +163,8 @@ export function AiTab() {
       )))
       toast.success(t('aiSettings.saved'))
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : t('aiSettings.saveFailed'))
+      // Wie beim Laden: ein roher Laufzeitfehler bekommt den übersetzten Satz.
+      toast.error(error instanceof SanitizedApiError ? error.message : t('aiSettings.saveFailed'))
     } finally {
       setSaving(false)
     }

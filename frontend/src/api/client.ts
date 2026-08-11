@@ -87,6 +87,25 @@ function extractErrorMessage(detail: unknown): string | null {
   return String(detail)
 }
 
+/**
+ * Macht aus einem reinen Fehlercode einen Satz.
+ *
+ * Die Zustandsfehler der KI-Aktionen antworten mit `{"code": "..."}` und ganz
+ * ohne Text (routers/ai_actions.py::_state_error). Das ist Absicht: der Code
+ * ist die stabile Kennung an der Schnittstelle, den Satz dazu hält die
+ * Oberfläche. Nur hielt sie ihn bisher nirgends — die Meldung fiel auf
+ * `res.statusText` zurück, und der Benutzer las „Conflict", statt zu erfahren,
+ * dass sich die Datei seit der Vorschau geändert hat.
+ *
+ * Nachgeschlagen wird im einzigen Katalog, den es dafür gibt. Kennt er den
+ * Code nicht, bleibt es beim bisherigen Rückfall: ein Statustext ist immer noch
+ * besser als ein roher Schlüssel in der Oberfläche.
+ */
+function translateErrorCode(code: string): string | null {
+  const key = `ai.errors.codes.${code}`
+  return i18n.exists(key) ? i18n.t(key) : null
+}
+
 let refreshPromise: Promise<void> | null = null
 
 async function doRefresh(): Promise<void> {
@@ -200,6 +219,11 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
         message = i18n.t(message)
       }
     }
+    // Bewusst erst nach `i18n.t(message)`: der Satz aus dem Katalog ist bereits
+    // übersetzt und darf nicht ein zweites Mal als Schlüssel gelesen werden.
+    if (!message && code) {
+      message = translateErrorCode(code)
+    }
     throw new SanitizedApiError(message || res.statusText || `HTTP ${res.status}`, {
       status: res.status,
       code: code ?? undefined,
@@ -277,8 +301,11 @@ export async function apiStream(path: string, options: RequestInit): Promise<Res
         message = text
       }
     }
+    // Derselbe Rückfall wie in `api()`. Der Stream-Start scheitert mit genau
+    // derselben Antwort, sobald ein Vorschlag nicht mehr ausführbar ist.
+    const ausCode = !message && code ? translateErrorCode(code) : null
     throw new SanitizedApiError(
-      message ? i18n.t(message) : res.statusText || `HTTP ${res.status}`,
+      (message ? i18n.t(message) : ausCode) || res.statusText || `HTTP ${res.status}`,
       { status: res.status, code: code ?? undefined },
     )
   }

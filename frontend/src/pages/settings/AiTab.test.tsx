@@ -6,7 +6,13 @@ import i18n from '@/i18n'
 import { useToastStore } from '@/stores/toastStore'
 import { AiTab, type AiRoleLimits } from './AiTab'
 
-vi.mock('@/api/client', () => ({ api: vi.fn() }))
+// `SanitizedApiError` bleibt die echte Klasse: die Seite entscheidet mit
+// `instanceof`, ob eine Meldung vorzeigbar ist. Eine Attrappe ohne die Klasse
+// würde genau diese Unterscheidung wegmocken.
+vi.mock('@/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/client')>()),
+  api: vi.fn(),
+}))
 vi.mock('./AiProvidersSettings', () => ({ AiProvidersSettings: () => null }))
 
 // Die beiden Wissenspanels haben eigene Tests und eigene Endpunkte. Hier zaehlt
@@ -163,11 +169,41 @@ describe('AiTab', () => {
   })
 
   it('shows API failures and does not silently discard them', async () => {
-    vi.mocked(client.api).mockRejectedValue(new Error('AI-Limits nicht erreichbar'))
+    // Eine Meldung aus einer verarbeiteten Backend-Antwort ist sanitisiert und
+    // darf wörtlich angezeigt werden — nur die.
+    vi.mocked(client.api).mockRejectedValue(new client.SanitizedApiError('AI-Limits nicht erreichbar'))
     render(<AiTab />)
 
     await waitFor(() => {
       expect(useToastStore.getState().toasts.some((toast) => toast.message === 'AI-Limits nicht erreichbar')).toBe(true)
+    })
+  })
+
+  it('zeigt bei einem Netzwerkabbruch den übersetzten Satz statt der Browsermeldung', async () => {
+    // Ist das Backend weg, wirft `fetch` einen blanken TypeError. Der ist keine
+    // Backend-Antwort, und seine `message` ist die englische Meldung des
+    // Browsers — unabhängig von der eingestellten Sprache.
+    vi.mocked(client.api).mockRejectedValue(new TypeError('Failed to fetch'))
+    render(<AiTab />)
+
+    await waitFor(() => {
+      const meldungen = useToastStore.getState().toasts.map((toast) => toast.message)
+      expect(meldungen).toContain(i18n.t('aiSettings.loadFailed'))
+      expect(meldungen).not.toContain('Failed to fetch')
+    })
+  })
+
+  it('zeigt auch beim Speichern nicht die rohe Browsermeldung', async () => {
+    render(<AiTab />)
+    await screen.findByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i })
+
+    vi.mocked(client.api).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    fireEvent.click(screen.getByRole('button', { name: /Speichern: ai-vip/i }))
+
+    await waitFor(() => {
+      const meldungen = useToastStore.getState().toasts.map((toast) => toast.message)
+      expect(meldungen).toContain(i18n.t('aiSettings.saveFailed'))
+      expect(meldungen).not.toContain('Failed to fetch')
     })
   })
 

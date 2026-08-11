@@ -453,7 +453,23 @@
         "AI_QUOTA_MONTHLY_COST_LIMIT_CENTS": "Das monatliche Kostenlimit ist erreicht.",
         "AI_ACTION_NOT_FOUND": "Diesen Aktionsvorschlag gibt es nicht mehr.",
         "AI_ACTION_ACCESS_REVOKED": "Die Berechtigung für diesen Server wurde entzogen. Der Vorschlag bleibt bestehen, ausführen darfst du ihn nicht mehr.",
-        "AI_ACTION_STORE_UNAVAILABLE": "Der sichere Speicher des Panels ist gerade nicht erreichbar. Der Vorschlag bleibt bestehen — versuche es in einem Moment erneut."
+        "AI_ACTION_STORE_UNAVAILABLE": "Der sichere Speicher des Panels ist gerade nicht erreichbar. Der Vorschlag bleibt bestehen — versuche es in einem Moment erneut.",
+        "AI_ACTION_PAYLOAD_INVALID": "Die Daten des Vorschlags sind unbrauchbar. Lass dir den Vorschlag neu erstellen.",
+        "AI_ACTION_NOT_PROPOSED": "Dieser Vorschlag wartet nicht mehr auf eine Entscheidung — er wurde bereits bestätigt, ausgeführt oder verworfen.",
+        "AI_ACTION_NOT_AUTONOMOUS": "Diese Aktion darf nicht ohne Rückfrage laufen.",
+        "AI_ACTION_NOT_CONFIRMED": "Der Vorschlag ist nicht mehr bestätigt. Bestätige ihn erneut.",
+        "AI_ACTION_CONFIRMATION_EXPIRED": "Die Bestätigung ist abgelaufen. Sieh dir den Vorschlag noch einmal an und bestätige ihn erneut.",
+        "AI_ACTION_CONFIRMATION_INVALID": "Die Bestätigung passt nicht zu diesem Vorschlag. Bestätige ihn erneut.",
+        "AI_ACTION_TARGET_MISSING": "Das Ziel der Aktion gibt es nicht mehr.",
+        "AI_ACTION_FILE_CHANGED": "Die Datei hat sich seit der Vorschau geändert. Lass dir den Vorschlag neu erstellen.",
+        "AI_ACTION_REVISION_CONFLICT": "Inzwischen hat jemand anderes gespeichert. Lass dir den Vorschlag neu erstellen.",
+        "AI_ACTION_SERVER_BUSY": "Für diesen Server läuft bereits eine Aktion. Warte, bis sie fertig ist.",
+        "AI_ACTION_TOOL_NOT_ALLOWED": "Dieses Werkzeug ist für die KI nicht freigegeben.",
+        "AI_ACTION_BIND_IP_REJECTED": "Die gewünschte Bind-IP ist für diesen Server nicht verwendbar.",
+        "AI_ACTION_BLUEPRINT_REJECTED": "Der vorgeschlagene Blueprint wurde bei der Prüfung abgelehnt.",
+        "AI_ACTION_BLUEPRINT_SWITCH_FAILED": "Der Wechsel auf den anderen Blueprint ist fehlgeschlagen.",
+        "AI_ACTION_EXECUTION_FAILED": "Die Aktion ist fehlgeschlagen. Einzelheiten stehen im Protokoll.",
+        "AI_ACTION_INTERRUPTED": "Das Panel wurde neu gestartet, während die Aktion lief. Wie weit sie gekommen ist, weiß es nicht — sieh am Server nach, bevor du sie erneut auslöst."
       }
     },
     "webSearch": {
