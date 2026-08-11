@@ -200,8 +200,38 @@ def _finalize_stream(
         db.commit()
 
 
+def _serverbezug(eintraege: list[dict]) -> int | None:
+    """Welchen Server hat diese Runde zuletzt **nachweislich** angefasst?
+
+    Nachweislich heisst: der Aufruf ist durchgelaufen. Jedes serverbezogene
+    Lesewerkzeug geht durch `_resolve_server`, und das laedt den Server und
+    prueft `server.view`. Eine erfolgreiche Rueckkehr ist damit der Beleg.
+
+    Der Ausschluss gescheiterter Aufrufe ist der Kern und keine Feinheit. Genau
+    dort scheitert `_resolve_server` ja — bei einer erfundenen oder fremden
+    Nummer. Zaehlte ein Fehlschlag mit, koennte sich das Modell Serverbezug
+    erfinden, indem es eine beliebige Nummer nennt und den Fehler hinnimmt.
+
+    Umgekehrt kostet ein Aufruf, der erst *nach* der Rechtepruefung scheitert
+    (Datei nicht gefunden), hier hoechstens einen Bezug, den die naechste Runde
+    ohnehin nachliefert. Zu vorsichtig ist an dieser Stelle die richtige
+    Richtung.
+
+    Der letzte gewinnt: fragt das Modell in einer Runde nach mehreren Servern,
+    ist der zuletzt gelesene der, bei dem es geblieben ist.
+    """
+    for eintrag in reversed(eintraege):
+        if eintrag.get("failed") or eintrag.get("tool_name") not in SERVER_READ_TOOLS:
+            continue
+        server_id = eintrag.get("server_id")
+        if isinstance(server_id, int):
+            return server_id
+    return None
+
+
 def _tool_followup_messages(
-    *, user_id: int, conversation_id: str, tool_calls, deferred=(), correlation_id: str | None = None
+    *, user_id: int, conversation_id: str, tool_calls, deferred=(),
+    correlation_id: str | None = None, run_id: str | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
 
@@ -337,6 +367,12 @@ def _tool_followup_messages(
             })
         _lesezugriffe_protokollieren(
             db, user_id=user_id, eintraege=display, correlation_id=correlation_id
+        )
+        # In derselben Sitzung und demselben Commit wie das Zugriffsprotokoll.
+        # Beide halten dieselbe Tatsache fest — in welchen Server die KI gesehen
+        # hat —, und beide sollen entweder stehen oder nicht.
+        ai_run_service.serverbezug_merken(
+            db, run_id=run_id, server_id=_serverbezug(display)
         )
         db.commit()
         return results, display
@@ -493,6 +529,23 @@ def _persist_write_proposals(
         # wuesste der Bestaetigungsknopf spaeter nicht, wen er aufwecken soll.
         for proposal in proposals:
             proposal.run_id = run_id
+        # Auch ein Schreibvorschlag belegt den Serverbezug: `create_proposal`
+        # geht durch dieselbe `_resolve_server`-Pruefung wie ein Lesewerkzeug.
+        # Ohne diese Zeile verloere ein Lauf sein Thema ausgerechnet dann, wenn
+        # er am meisten damit vorhat — etwa wenn das Modell eine gelesene
+        # Konfiguration direkt aendern will.
+        #
+        # `propose_server_create` traegt hier noch keine Nummer; sie entsteht
+        # erst bei der Ausfuehrung. Das ist kein Verlust: ueber einen Server,
+        # den es gerade erst gibt, weiss noch niemand etwas.
+        ai_run_service.serverbezug_merken(
+            db,
+            run_id=run_id,
+            server_id=next(
+                (p.server_id for p in reversed(proposals) if p.server_id is not None),
+                None,
+            ),
+        )
         db.commit()
         results: list[dict] = []
         # Feste Kopien: `execute_autonomously` committet und rollt bei einem
@@ -1182,6 +1235,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 tool_calls=current_usage.tool_calls,
                 deferred=deferred_calls,
                 correlation_id=vorbereitung.request_id,
+                run_id=run_id,
             )
             provider_messages.extend(followup)
             for used in used_tools:
@@ -1429,6 +1483,13 @@ def lauf_beginnen(
             reasoning=reasoning,
             reasoning_effort=reasoning_effort,
             zustand=zustand,
+            # Das Thema laeuft weiter, auch wenn der Lauf wechselt. "Und jetzt
+            # starte ihn neu" nennt keinen Server; gemeint ist der aus der
+            # Frage davor. Ohne dieses Erbe endete der Bezug an jeder
+            # Nachrichtengrenze.
+            last_server_id=ai_run_service.letzter_serverbezug(
+                db, conversation_id=conversation.id
+            ),
         )
         db.commit()
         return run, None

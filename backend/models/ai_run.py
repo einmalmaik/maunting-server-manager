@@ -122,6 +122,29 @@ class AiRun(Base):
     # fuer Fallunterscheidungen — dafuer ist `status` da.
     stop_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # Um welchen Server es in diesem Lauf zuletzt ging.
+    #
+    # Ein Chat hat keinen Server. Er hat ein Thema, und das Thema wechselt: der
+    # Benutzer fragt nach Server 62, dann nach 7, dann nochmal nach 62. Die
+    # Unterhaltung kann diese Frage deshalb nicht beantworten, ein Lauf schon —
+    # er ist die Spanne, in der ein Thema gilt.
+    #
+    # Gefuellt wird die Spalte nur aus **nachgewiesenem** Zugriff: ein
+    # erfolgreiches serverbezogenes Lesewerkzeug oder ein angelegter
+    # Schreibvorschlag. Beide sind durch `_resolve_server` gegangen und haben
+    # damit `server.view` belegt. Eine Nummer, die das Modell bloss genannt hat,
+    # kommt hier nicht an — sonst waere das Feld ein Weg, sich Serverbezug zu
+    # erfinden.
+    #
+    # `SET NULL` und nicht `CASCADE`: der Lauf ist ein Beleg der Unterhaltung und
+    # ueberlebt den Server, auf den er zeigt. Dieselbe Ueberlegung wie bei
+    # `ai_action_proposals.server_id` (Migration 20260810_06) — dort hat ein
+    # `CASCADE` einen ausgefuehrten Loeschvorschlag mitgenommen und den
+    # Chatverlauf rueckwirkend umgeschrieben.
+    last_server_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

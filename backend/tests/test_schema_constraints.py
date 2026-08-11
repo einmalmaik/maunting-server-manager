@@ -61,6 +61,21 @@ def test_ein_vorschlag_ueberlebt_seinen_server(db: Session) -> None:
     }
 
 
+def test_ein_lauf_ueberlebt_seinen_server(db: Session) -> None:
+    """Derselbe Gedanke wie beim Vorschlag, eine Tabelle weiter.
+
+    `ai_runs.last_server_id` haelt fest, um welchen Server es in diesem Zug
+    ging. Der Lauf gehoert aber der Unterhaltung und nicht dem Server: mit
+    `CASCADE` haette das Loeschen eines Servers rueckwirkend jeden Chat
+    ausgeduennt, in dem je jemand nach ihm gefragt hat.
+    """
+    inspector = inspect(db.get_bind())
+
+    assert _fremdschluessel(inspector, "ai_runs", "last_server_id")["options"] == {
+        "ondelete": "SET NULL"
+    }
+
+
 def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
     """Modell und Migration duerfen nicht auseinanderlaufen.
 
@@ -92,6 +107,19 @@ def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
         assert _fremdschluessel(
             inspect(engine), "ai_action_proposals", "server_id"
         )["options"] == {"ondelete": "SET NULL"}
+
+        # Dieselbe Zusage fuer den Lauf, und zwar aus der gefahrenen Migration
+        # heraus. `create_all` oben wuerde sie auch ohne Migration erfuellen —
+        # der Rueckbau bis vor die Revision und wieder vor beweist, dass sie
+        # tatsaechlich in der Kette steht.
+        command.downgrade(config, "20260811_01")
+        assert "last_server_id" not in {
+            spalte["name"] for spalte in inspect(engine).get_columns("ai_runs")
+        }
+        command.upgrade(config, "head")
+        assert _fremdschluessel(inspect(engine), "ai_runs", "last_server_id")[
+            "options"
+        ] == {"ondelete": "SET NULL"}
     finally:
         engine.dispose()
         settings.database_url = vorher

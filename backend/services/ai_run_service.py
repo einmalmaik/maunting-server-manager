@@ -151,6 +151,7 @@ def lauf_anlegen(
     reasoning: bool,
     zustand: dict,
     reasoning_effort: str | None = None,
+    last_server_id: int | None = None,
 ) -> AiRun:
     run = AiRun(
         id=str(uuid4()),
@@ -161,6 +162,7 @@ def lauf_anlegen(
         message_id=message_id,
         reasoning=reasoning,
         reasoning_effort=reasoning_effort,
+        last_server_id=last_server_id,
     )
     zustand_schreiben(run, zustand)
     db.add(run)
@@ -221,6 +223,59 @@ def vorgaenger_abloesen(db: Session, *, conversation_id: str) -> dict:
             aufgabe_abbrechen(run.id)
         run.updated_at = _jetzt()
     return erbe
+
+
+def letzter_serverbezug(db: Session, *, conversation_id: str) -> int | None:
+    """Um welchen Server ging es in dieser Unterhaltung zuletzt?
+
+    Gefragt wird beim Anlegen des naechsten Laufs. "Und jetzt starte ihn neu"
+    nennt keinen Server; gemeint ist der aus der Frage davor. Ohne dieses Erbe
+    endete der Bezug an jeder Nachrichtengrenze, und ein Chat ueber genau einen
+    Server haette abwechselnd Bezug und keinen.
+
+    Bewusst der juengste Lauf **mit** einem Bezug und nicht der juengste Lauf
+    ueberhaupt: dazwischen liegen Laeufe, die gar kein Werkzeug angefasst haben
+    ("danke!"), und die duerfen ein laufendes Thema nicht abraeumen.
+
+    Ebenso bewusst ohne Ruecksicht auf den Status. Ein abgebrochener oder
+    fehlgeschlagener Lauf hat trotzdem in einen Server hineingesehen — der
+    Bezug ist damit belegt, unabhaengig davon, wie der Lauf ausging.
+
+    Zeigt der Bezug auf einen inzwischen geloeschten Server, steht dort NULL
+    (`ON DELETE SET NULL`), und die Suche geht von selbst einen Lauf weiter
+    zurueck. Ein Recht wird hier trotzdem nicht vererbt: was der Benutzer sehen
+    darf, entscheidet weiterhin die Stelle, die den Bezug benutzt.
+    """
+    zeile = (
+        db.query(AiRun.last_server_id)
+        .filter(
+            AiRun.conversation_id == conversation_id,
+            AiRun.last_server_id.isnot(None),
+        )
+        .order_by(AiRun.created_at.desc())
+        .first()
+    )
+    return zeile[0] if zeile is not None else None
+
+
+def serverbezug_merken(db: Session, *, run_id: str | None, server_id: int | None) -> None:
+    """Haelt am Lauf fest, welchen Server er nachweislich angefasst hat.
+
+    Nur vorwaerts: ein bereits gesetzter Bezug wird ueberschrieben, ein
+    vorhandener aber nicht durch ``None`` geloescht. Eine Runde ohne
+    serverbezogenes Werkzeug sagt nichts ueber das Thema aus — sie ist stumm,
+    nicht widersprechend.
+
+    ``run_id is None`` kommt in der Testsuite vor, wo Segmente ohne Lauf
+    ausgefuehrt werden. Dann gibt es nichts zu merken.
+    """
+    if run_id is None or server_id is None:
+        return
+    run = db.get(AiRun, run_id)
+    if run is None or run.last_server_id == server_id:
+        return
+    run.last_server_id = server_id
+    run.updated_at = _jetzt()
 
 
 def aktiver_lauf(db: Session, *, user_id: int) -> AiRun | None:

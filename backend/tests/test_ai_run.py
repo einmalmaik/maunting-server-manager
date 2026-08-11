@@ -695,6 +695,157 @@ async def test_reading_a_server_leaves_a_trace(
     assert eintrag.origin == "ai"
 
 
+# ── Worum ging es? Der Serverbezug des Laufs ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_run_remembers_which_server_it_looked_into(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Lauf haelt fest, worum es gerade geht.
+
+    Eine Unterhaltung kann das nicht: ihr Thema wechselt. Der Lauf ist genau
+    die Spanne, in der ein Thema gilt.
+
+    Die zweite Runde darf den Bezug nicht wieder abraeumen. `list_my_servers`
+    sagt ueber das Thema nichts aus — es ist die Frage *welche gibt es*, nicht
+    *um welchen geht es*. Eine Runde ohne serverbezogenes Werkzeug ist stumm,
+    nicht widersprechend; genau dafuer steht der Schutz in
+    `serverbezug_merken`, und ohne zwei Runden bliebe er ungeprueft.
+    """
+    server = _server(db, "thema")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    _fake_stream(monkeypatch, [
+        [ProviderToolCall(id="a", name="read_server_status",
+                          arguments={"server_id": server.id})],
+        [ProviderToolCall(id="b", name="list_my_servers", arguments={})],
+    ])
+
+    run = await _lauf(db, regular_user, conversation, provider)
+
+    assert run.last_server_id == server.id
+
+
+@pytest.mark.asyncio
+async def test_a_server_the_model_may_not_see_never_becomes_the_topic(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eine bloss genannte Nummer ist kein Serverbezug.
+
+    Der Bezug wird spaeter Wissen aus dem Panel in den Kontext ziehen. Zaehlte
+    ein **gescheiterter** Aufruf mit, waere das Feld ein Weg, sich Zugang zu
+    erfinden: Nummer nennen, Fehlermeldung hinnehmen, Thema gesetzt.
+
+    Genau bei einem fremden Server scheitert `_resolve_server` ja — nur die
+    erfolgreiche Rueckkehr belegt `server.view`.
+    """
+    fremder = _server(db, "fremd")
+    eigener = _server(db, "eigen")
+    _grant(db, regular_user, server=eigener, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="read_server_status",
+                         arguments={"server_id": fremder.id}),
+    ]])
+
+    run = await _lauf(db, regular_user, conversation, provider)
+
+    assert run.last_server_id is None
+
+
+@pytest.mark.asyncio
+async def test_the_topic_survives_the_next_message(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """"Und jetzt starte ihn neu" nennt keinen Server — gemeint ist der vorige.
+
+    Ohne dieses Erbe endete der Bezug an jeder Nachrichtengrenze, und ein Chat
+    ueber genau einen Server haette abwechselnd Bezug und keinen.
+
+    Die zweite Nachricht fasst dabei bewusst gar kein Werkzeug an: nur so ist
+    zu sehen, dass der Bezug vom Vorgaenger kommt und nicht neu entsteht.
+    """
+    server = _server(db, "erbe")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="read_server_status",
+                         arguments={"server_id": server.id}),
+    ]])
+    erster = await _lauf(db, regular_user, conversation, provider)
+    assert erster.last_server_id == server.id
+
+    _fake_stream(monkeypatch, [])
+    zweiter = await _lauf(db, regular_user, conversation, provider, content="Danke!")
+
+    assert zweiter.id != erster.id
+    assert zweiter.last_server_id == server.id
+
+
+@pytest.mark.asyncio
+async def test_a_write_proposal_also_sets_the_topic(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Auch ein Schreibvorschlag belegt den Bezug.
+
+    `create_proposal` geht durch dieselbe Rechtepruefung wie ein Lesewerkzeug.
+    Ohne diese Stelle verloere ein Lauf sein Thema ausgerechnet dann, wenn er
+    am meisten damit vorhat — und der geparkte Lauf wuesste nach der
+    Bestaetigung nicht mehr, worum es ging.
+    """
+    server = _server(db, "vorschlag")
+    _grant(db, regular_user, server=server,
+           server_keys=("server.view", "server.backups.create"))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    _fake_stream(monkeypatch, [[_backup_aufruf(server)]])
+
+    run = await _lauf(db, regular_user, conversation, provider)
+
+    assert run.status == "waiting_confirmation"
+    assert run.last_server_id == server.id
+
+
+def test_a_deleted_server_does_not_take_the_run_with_it(
+    db: Session, regular_user: User
+) -> None:
+    """Der Lauf gehoert der Unterhaltung, nicht dem Server.
+
+    Mit `CASCADE` haette das Loeschen eines Servers rueckwirkend jeden Chat
+    ausgeduennt, in dem je jemand nach ihm gefragt hat — derselbe Fehler, den
+    `20260810_06` fuer die Aktionsvorschlaege behoben hat. Die Zusage steht im
+    Schema (`test_schema_constraints.py`); hier steht, was sie bedeutet.
+    """
+    server = _server(db, "vergaenglich")
+    conversation = _conversation(db, regular_user)
+    run = ai_run_service.lauf_anlegen(
+        db,
+        conversation_id=conversation.id,
+        user_id=regular_user.id,
+        provider_id=_provider(db).id,
+        message_id=str(uuid4()),
+        reasoning=False,
+        zustand={},
+        last_server_id=server.id,
+    )
+    db.commit()
+
+    db.delete(server)
+    db.commit()
+    db.expire_all()
+
+    ueberlebend = db.get(AiRun, run.id)
+    assert ueberlebend is not None
+    assert ueberlebend.last_server_id is None
+
+
 @pytest.mark.asyncio
 async def test_loop_detection_survives_a_question(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
