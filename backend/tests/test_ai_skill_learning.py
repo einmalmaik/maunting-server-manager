@@ -502,3 +502,53 @@ def test_changing_a_skill_keeps_a_single_entry(db: Session, regular_user: User) 
     rows = db.query(AiSkill).filter(AiSkill.skill_key == "wandelbar").all()
     assert len(rows) == 1
     assert rows[0].body == "Zweite, bessere Fassung."
+
+
+def test_the_same_key_in_two_scopes_is_never_deleted_by_guessing(
+    db: Session, regular_user: User
+) -> None:
+    """Zwei Bereiche, ein Schluessel — geloescht wird erst nach der Rueckfrage.
+
+    `forget_skill` loeste den Schluessel frueher ueber `read_body` auf, also
+    ueber die Sichtbarkeitsueberlagerung. Die kennt je Schluessel einen
+    Gewinner, und welcher das bei Gleichstand ist, entscheidet die
+    Zeilenreihenfolge der Datenbank. Wer "vergiss backup-routine" sagt und den
+    Skill seines Teams meint, loeschte damit womoeglich die panelweite Zeile —
+    die fuer jeden Kunden des Betreibers gilt — waehrend die gemeinte stehen
+    blieb. Lesen darf unscharf sein, Loeschen nicht: es ist die eine Stelle,
+    an der ein Fehlgriff nicht zurueckzunehmen ist.
+    """
+    _allow(db, regular_user, "ai.skills.use", "ai.skills.manage", "teams.create")
+    team = _team(db, regular_user)
+    for bereich in (None, team.id):
+        ai_skill_service.upsert_skill(
+            db, user=regular_user, skill_key="backup-routine",
+            name="Backup-Routine",
+            description="Wie ein Backup geprueft wird, bevor man sich darauf verlaesst.",
+            body=f"Fassung fuer Bereich {bereich}.", team_id=bereich,
+        )
+    assert db.query(AiSkill).filter(AiSkill.skill_key == "backup-routine").count() == 2
+
+    frage = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="forget_skill",
+        arguments={"skill_key": "backup-routine"},
+    )
+
+    assert frage["forgotten"] is False
+    assert "ask_user" in frage
+    assert set(frage["scopes"]) == {"panelweit", team.name}
+    # Solange die Frage offen ist, ist nichts angefasst.
+    assert db.query(AiSkill).filter(AiSkill.skill_key == "backup-routine").count() == 2
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="forget_skill",
+        arguments={"skill_key": "backup-routine", "scope": "team", "team": team.name},
+    )
+
+    assert ergebnis["forgotten"] is True
+    # Der Bereich gehoert ins Ergebnis: ohne ihn kann das Modell nicht
+    # berichten, was es geloescht hat, und ein Irrtum faellt nie auf.
+    assert ergebnis["scope"] == "team"
+    assert ergebnis["bereich"] == team.name
+    verbleibend = db.query(AiSkill).filter(AiSkill.skill_key == "backup-routine").all()
+    assert [row.team_id for row in verbleibend] == [None]

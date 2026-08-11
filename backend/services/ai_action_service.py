@@ -412,9 +412,30 @@ def _global_tool_definitions() -> list[dict]:
             "ueberschreiben, indem du unter demselben Schluessel einen neuen "
             "anlegst. Zum *Aendern* eines Skills nimm `learn_skill` mit "
             "demselben Schluessel; loeschen und neu anlegen verliert die "
-            "Herkunft.",
+            "Herkunft.\n"
+            "Denselben Schluessel kann es in mehreren Bereichen geben — "
+            "panelweit und in einem Team. Dann kommt eine Rueckfrage statt "
+            "einer Loeschung; nenne dem Benutzer die Bereiche und rufe das "
+            "Werkzeug mit seiner Antwort erneut auf.",
             {
                 "skill_key": {"type": "string", "maxLength": 64},
+                "scope": {
+                    "type": "string",
+                    "enum": ["global", "team"],
+                    "description": (
+                        "Nur, wenn zuvor eine Rueckfrage nach dem Bereich kam. "
+                        "Sonst weglassen."
+                    ),
+                },
+                "team": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": (
+                        "Nur bei scope=team und nur nach einer Rueckfrage: der "
+                        "Bereichsname aus dieser Rueckfrage, genau so "
+                        "geschrieben. Sonst weglassen."
+                    ),
+                },
             },
             ["skill_key"],
         ),
@@ -526,7 +547,10 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "read_server_capacity",
-            "Liest minimierte, zuletzt bekannte Kapazitaetswerte des Servers und seines Nodes.",
+            "Liest minimierte, zuletzt bekannte Kapazitaetswerte des Servers und "
+            "seines Nodes. Die Zahlen des Hosts bekommt nur, wer die Grenzen "
+            "dieses Servers aendern darf; sonst kommt `node_details: withheld` "
+            "und du darfst ueber die Auslastung des Hosts nichts behaupten.",
         ),
         _server_function(
             "read_server_logs",
@@ -1089,38 +1113,130 @@ def _execute_forget_memory(db: Session, *, user: User, arguments: dict) -> dict:
 
 
 def _execute_forget_skill(db: Session, *, user: User, arguments: dict) -> dict:
-    """Loescht einen erlernten Skill — mit denselben Rechten wie das Anlegen."""
+    """Loescht einen erlernten Skill — aufgeloest ueber das, was loeschbar ist.
+
+    Frueher lief die Aufloesung ueber `read_body`, also ueber die
+    Sichtbarkeitsueberlagerung aus `visible_skills`. Die kennt je Schluessel
+    genau einen Gewinner, und bei Gleichstand — derselbe Schluessel panelweit
+    **und** in einem Team — entscheidet die Zeilenreihenfolge der Datenbank,
+    welcher das ist. Beim Lesen ist das hoechstens unscharf. Beim Loeschen ist
+    es eine Zeile weniger auf der Platte, im schlechten Fall die panelweite,
+    die fuer jeden Kunden gilt, waehrend die gemeinte Team-Zeile stehen bleibt.
+    Umgekehrt war eine globale Zeile ueber dieses Werkzeug gar nicht mehr
+    erreichbar, sobald ein Team-Skill sie verdeckte.
+
+    Deshalb wird hier ueber `manageable_skills` aufgeloest: die Menge dessen,
+    was dieser Benutzer wirklich veraendern darf. Bleibt mehr als ein Bereich
+    uebrig, wird nicht geraten, sondern zurueckgefragt — dieselbe Vorsicht, die
+    `forget_memory` ueber die Schluesselliste erzwingt. Die Antwort kommt als
+    `scope`/`team` zurueck, sonst waere die Rueckfrage eine Sackgasse.
+    """
+    from models import Team
     from services import ai_skill_service
 
     if not permission_service.has_global_permission(db, user, "ai.skills.use"):
         raise AiActionValidationError("Skills sind fuer diesen Benutzer nicht freigegeben")
-    if set(arguments) - {"skill_key"}:
+    if set(arguments) - {"skill_key", "scope", "team"}:
         raise AiActionValidationError("Skill-Werkzeug hat ungueltige Argumente")
     skill_key = arguments.get("skill_key")
     if not isinstance(skill_key, str) or not skill_key.strip():
         raise AiActionValidationError("Ungueltiger Skill-Schluessel")
+    wunsch_scope = arguments.get("scope")
+    if wunsch_scope is not None and wunsch_scope not in {"global", "team"}:
+        raise AiActionValidationError("Unbekannter Skill-Bereich")
+    wunsch_team = arguments.get("team")
+    if wunsch_team is not None and not isinstance(wunsch_team, str):
+        raise AiActionValidationError("Ungueltiger Teamname")
 
-    try:
-        view, _body = ai_skill_service.read_body(db, user, skill_key)
-    except HTTPException as exc:
-        raise AiActionValidationError(str(exc.detail)) from exc
-    if view.id is None:
-        # Eine mitgelieferte Datei gibt es auf der Platte, nicht in der
-        # Datenbank. Sie zu "loeschen" waere ein Versprechen, das das naechste
-        # Update zurueckdreht.
+    key = skill_key.strip().lower()
+    # Zu jeder loeschbaren Zeile der Name, unter dem der Mensch den Bereich
+    # kennt. Eine Team-ID ist fuer eine Rueckfrage wertlos — der Benutzer
+    # antwortet mit dem Namen, den er im Panel sieht.
+    treffer = []
+    for row in ai_skill_service.manageable_skills(db, user):
+        if row.skill_key != key:
+            continue
+        if row.team_id is None:
+            treffer.append((row, "panelweit"))
+            continue
+        team = db.get(Team, row.team_id)
+        if team is None:
+            treffer.append((row, f"Team {row.team_id}"))
+        elif team.personal_for_user_id == user.id:
+            treffer.append((row, "persoenlich"))
+        else:
+            treffer.append((row, team.name))
+
+    if not treffer:
+        # Nichts, was dieser Benutzer loeschen darf. Warum, sagt der Blick auf
+        # das, was er sehen darf — und nicht mehr: ein erratener fremder
+        # Schluessel bleibt ein 404 ohne Existenzauskunft.
+        try:
+            view, _body = ai_skill_service.read_body(db, user, key)
+        except HTTPException as exc:
+            raise AiActionValidationError(str(exc.detail)) from exc
+        if view.id is None:
+            # Eine mitgelieferte Datei gibt es auf der Platte, nicht in der
+            # Datenbank. Sie zu "loeschen" waere ein Versprechen, das das
+            # naechste Update zurueckdreht.
+            return {
+                "forgotten": False,
+                "reason": (
+                    "Dieser Skill wird mit MSM ausgeliefert und laesst sich nicht "
+                    "loeschen. Lege mit `learn_skill` unter demselben Schluessel "
+                    "einen eigenen an, um ihn zu ersetzen."
+                ),
+            }
+        raise AiActionValidationError("Diesen Skill darf dieser Benutzer nicht loeschen")
+
+    kandidaten = treffer
+    if wunsch_scope == "global":
+        kandidaten = [paar for paar in kandidaten if paar[0].team_id is None]
+    elif wunsch_scope == "team":
+        kandidaten = [paar for paar in kandidaten if paar[0].team_id is not None]
+    if isinstance(wunsch_team, str) and wunsch_team.strip():
+        # Der Wunsch ist ein **Auswahlmittel, keine Berechtigung**: er darf nur
+        # einen Eintrag aus der ohnehin loeschbaren Liste treffen.
+        gesucht = wunsch_team.strip().casefold()
+        kandidaten = [paar for paar in kandidaten if paar[1].casefold() == gesucht]
+    if not kandidaten:
+        raise AiActionValidationError("In diesem Bereich gibt es den Skill nicht")
+    if len(kandidaten) > 1:
+        # Zwei Zeilen, ein Name. Welche gemeint ist, weiss der Mensch und nicht
+        # das Modell — und ein Fehlgriff ist hier nicht rueckgaengig zu machen.
+        bereiche = sorted(bereich for _row, bereich in kandidaten)
         return {
             "forgotten": False,
-            "reason": (
-                "Dieser Skill wird mit MSM ausgeliefert und laesst sich nicht "
-                "loeschen. Lege mit `learn_skill` unter demselben Schluessel "
-                "einen eigenen an, um ihn zu ersetzen."
+            "skill_key": key,
+            "scopes": bereiche,
+            "ask_user": (
+                f"Den Skill `{key}` gibt es in mehreren Bereichen: "
+                + ", ".join(bereiche)
+                + ". Frage nach, welcher gemeint ist, und rufe das Werkzeug "
+                "erneut mit scope und team auf."
             ),
         }
+
+    row, bereich = kandidaten[0]
+    # Das Ergebnis entsteht **vor** dem Loeschen: nach `db.delete` und `commit`
+    # sind die Attribute der Zeile nicht mehr abrufbar.
+    #
+    # `scope` und `bereich` gehoeren hinein, weil es sonst niemand erfaehrt:
+    # ohne sie kann das Modell nicht berichten, ob die Team-Zeile oder die
+    # panelweite Vorgabe verschwunden ist, und ein Irrtum faellt erst auf, wenn
+    # jemand den Skill vermisst.
+    ergebnis = {
+        "forgotten": True,
+        "skill_key": row.skill_key,
+        "name": row.name,
+        "scope": "global" if row.team_id is None else "team",
+        "bereich": bereich,
+    }
     try:
-        ai_skill_service.delete_skill(db, user=user, skill_id=view.id)
+        ai_skill_service.delete_skill(db, user=user, skill_id=row.id)
     except HTTPException as exc:
         raise AiActionValidationError(str(exc.detail)) from exc
-    return {"forgotten": True, "skill_key": view.skill_key, "name": view.name}
+    return ergebnis
 
 
 def _execute_read_skill(db: Session, *, user: User, arguments: dict) -> dict:
@@ -1799,6 +1915,28 @@ def execute_read_tool(
         node = server.node
         if node is None:
             return {"server_id": server.id, "node_status": "unassigned"}
+        # Die Zahlen der Node sind nicht die Zahlen dieses Servers.
+        # `sum_allocated_ram_mb` filtert in `services/node_capacity.py` allein
+        # auf `node_id` — das ist die Summe der Buchungen **aller** Kunden auf
+        # diesem Host —, und cpu_total/ram_total/disk_* beschreiben die
+        # Maschine des Betreibers. `_resolve_server` prueft nur `server.view`;
+        # damit gab dieses Werkzeug jedem Hosting-Kunden die Ueberbuchungslage
+        # seines Anbieters heraus, waehrend `read_node_capacity` dafuer
+        # `servers.create` und `read_node_health` `nodes.read` verlangt.
+        #
+        # Die Grenze ist dieselbe wie bei `describe_network`: wer die Grenzen
+        # dieses Servers aendern darf, muss sehen, wieviel Platz dafuer da ist.
+        # Alle anderen bekommen den Status der Node und sonst nichts —
+        # ausdruecklich als `withheld`, damit das Modell die Luecke kennt und
+        # nicht ueber die Auslastung raet.
+        if not permission_service.has_server_permission(
+            db, user, server.id, "server.resources.manage"
+        ):
+            return {
+                "server_id": server.id,
+                "node_status": node.status,
+                "node_details": "withheld",
+            }
         from services.node_capacity import (
             allocatable_ram_mb, sum_allocated_ram_mb, sum_running_ram_mb,
         )

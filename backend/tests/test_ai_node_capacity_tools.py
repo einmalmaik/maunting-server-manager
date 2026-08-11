@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from models import Node, Role, RolePermission, Server, User
+from models import Node, Role, RolePermission, Server, ServerPermission, User
 from services import ai_action_service
 from services.node_capacity import sum_allocated_ram_mb, sum_running_ram_mb
 from services.role_service import set_user_roles
@@ -102,3 +102,50 @@ def test_the_tool_description_names_the_difference(db: Session) -> None:
     beschreibung = definition["function"]["description"]
     assert "gestoppter" in beschreibung.lower()
     assert "ram_allocated_running_mb" in beschreibung
+
+
+def test_a_view_only_user_does_not_get_the_hosts_numbers(
+    db: Session, regular_user: User
+) -> None:
+    """Die Auslastung des Hosts ist Sache des Betreibers, nicht des Kunden.
+
+    `_resolve_server` prueft nur `server.view`. Damit gab `read_server_capacity`
+    jedem Hosting-Kunden `ram_allocated_mb` heraus — die Summe der Buchungen
+    **aller** Server auf dieser Node, auch der fremden — dazu Kernzahl, RAM-
+    und Plattengroesse der Maschine. Ueber `read_node_capacity` bekaeme er
+    dieselben Zahlen nicht: das verlangt `servers.create`. Zwei Wege zu
+    denselben Daten mit verschiedenen Huerden sind keine Grenze.
+    """
+    node = _node(db)
+    meiner = _server(db, node, "meiner", "running", 4_096)
+    _server(db, node, "fremder", "running", 12_288)
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=meiner.id, permission_key="server.view"
+    ))
+    db.commit()
+
+    zurueckgehalten = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="read_server_capacity",
+        arguments={"server_id": meiner.id},
+    )
+
+    assert zurueckgehalten["node_details"] == "withheld"
+    assert "ram_allocated_mb" not in zurueckgehalten
+    assert "cpu_total" not in zurueckgehalten
+    assert "disk_total_bytes" not in zurueckgehalten
+
+    # Die Gegenprobe: wer die Grenzen dieses Servers aendern darf, braucht die
+    # Zahlen — sonst kann die KI nicht sagen, ob mehr RAM ueberhaupt hineinpasst.
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=meiner.id,
+        permission_key="server.resources.manage",
+    ))
+    db.commit()
+
+    erlaubt = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="read_server_capacity",
+        arguments={"server_id": meiner.id},
+    )
+
+    assert erlaubt["ram_allocated_mb"] == 16_384
+    assert erlaubt["cpu_total"] == 8
