@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ArchiveRestore,
@@ -146,6 +146,12 @@ export function FileManager({ serverId }: FileManagerProps) {
   const [promptDialog, setPromptDialog] = useState<PromptDialogState | null>(null)
   const [moveDialog, setMoveDialog] = useState<MoveDialogState | null>(null)
   const [moveTarget, setMoveTarget] = useState('')
+  // Beide Dialoge brauchen eine Id auf ihrer Ueberschrift, damit ein
+  // Screenreader beim Oeffnen ueberhaupt sagen kann, worum es geht. useId statt
+  // fester Zeichenkette, weil doppelte DOM-Ids den Namen still zerstoeren, sobald
+  // der Dateimanager ein zweites Mal montiert wird.
+  const promptTitleId = useId()
+  const moveTitleId = useId()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const promptInputRef = useRef<HTMLInputElement>(null)
   const treeTriggerRef = useRef<HTMLButtonElement>(null)
@@ -269,7 +275,11 @@ export function FileManager({ serverId }: FileManagerProps) {
       else inspectorPanelRef.current?.focus()
     })
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || contextMenuRef.current) return
+      // Ein offener Dialog liegt sichtbar ueber der Schublade. Escape gehoert dann
+      // dem Dialog, nicht der Ebene darunter — sonst raeumt ein einziger
+      // Tastendruck zwei Ebenen gleichzeitig ab und der Benutzer verliert den
+      // Kontext, in dem er gerade gearbeitet hat.
+      if (event.key !== 'Escape' || contextMenuRef.current || promptDialog || moveDialog) return
       event.preventDefault()
       if (treeOpen) {
         setTreeOpen(false)
@@ -284,13 +294,30 @@ export function FileManager({ serverId }: FileManagerProps) {
       window.cancelAnimationFrame(focusPanel)
       document.removeEventListener('keydown', onKey)
     }
-  }, [inspectorOpen, treeOpen])
+  }, [inspectorOpen, moveDialog, promptDialog, treeOpen])
 
   useEffect(() => {
     if (!promptDialog) return
     const handle = window.setTimeout(() => promptInputRef.current?.focus(), 0)
     return () => window.clearTimeout(handle)
   }, [promptDialog])
+
+  // Escape schliesst den offenen Dialog. Der Listener haengt bewusst am Dokument
+  // und nicht am Eingabefeld: Sobald der Fokus das Feld verlaesst — beim Griff
+  // zum Abbrechen-Knopf, oder weil der Verschieben-Dialog frueher gar keinen
+  // Autofokus hatte — erreicht ein Handler am Feld die Taste nie mehr. Der
+  // Dialog blieb dann stehen, bis der Benutzer den Abbrechen-Knopf traf.
+  useEffect(() => {
+    if (!promptDialog && !moveDialog) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setPromptDialog(null)
+      setMoveDialog(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [moveDialog, promptDialog])
 
   const refreshWorkspace = useCallback(async () => {
     await loadDirectory(currentPath, true)
@@ -821,9 +848,9 @@ export function FileManager({ serverId }: FileManagerProps) {
 
       {contextMenu && <div ref={contextMenuRef} className="fixed z-[120] min-w-48 rounded-lg border border-outline-variant bg-surface-container-high p-1.5 shadow-panel" style={{ left: Math.min(contextMenu.x, window.innerWidth - 210), top: Math.min(contextMenu.y, window.innerHeight - 240) }} onClick={(event) => event.stopPropagation()} role="menu" aria-label={t('files.more')}>{actionItems(contextMenu).map((item) => <button key={item.key} type="button" role="menuitem" disabled={item.disabled} onClick={() => { item.onSelect(); setContextMenu(null) }} className={`flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary sm:min-h-9 ${item.separatorBefore ? 'mt-1 border-t border-outline-variant' : ''} ${item.destructive ? 'text-status-error hover:bg-status-error/10' : 'text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface'}`}>{item.icon}{item.label}</button>)}</div>}
 
-      {promptDialog && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"><div className="msm-card w-full max-w-md p-5"><h2 className="font-headline text-lg font-semibold text-on-surface">{promptDialog.title}</h2><label className="mt-4 block text-xs font-medium text-on-surface-variant">{promptDialog.label}</label><input ref={promptInputRef} defaultValue={promptDialog.initialValue} className="msm-input mt-1.5" onKeyDown={(event) => { if (event.key === 'Enter') void promptDialog.onConfirm(event.currentTarget.value); if (event.key === 'Escape') setPromptDialog(null) }} /><div className="mt-5 flex justify-end gap-2"><button type="button" className="msm-btn-secondary h-9 px-3 text-sm" onClick={() => setPromptDialog(null)}>{t('common.cancel')}</button><button type="button" className="msm-btn-primary h-9 px-3 text-sm" onClick={() => void promptDialog.onConfirm(promptInputRef.current?.value ?? '')}>{promptDialog.confirmLabel}</button></div></div></div>}
+      {promptDialog && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby={promptTitleId} onClick={() => setPromptDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={promptTitleId} className="font-headline text-lg font-semibold text-on-surface">{promptDialog.title}</h2><label className="mt-4 block text-xs font-medium text-on-surface-variant">{promptDialog.label}</label><input ref={promptInputRef} defaultValue={promptDialog.initialValue} className="msm-input mt-1.5" onKeyDown={(event) => { if (event.key === 'Enter') void promptDialog.onConfirm(event.currentTarget.value) }} /><div className="mt-5 flex justify-end gap-2"><button type="button" className="msm-btn-secondary h-9 px-3 text-sm" onClick={() => setPromptDialog(null)}>{t('common.cancel')}</button><button type="button" className="msm-btn-primary h-9 px-3 text-sm" onClick={() => void promptDialog.onConfirm(promptInputRef.current?.value ?? '')}>{promptDialog.confirmLabel}</button></div></div></div>}
 
-      {moveDialog && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"><div className="msm-card w-full max-w-md p-5"><h2 className="font-headline text-lg font-semibold text-on-surface">{t('files.move')}</h2><p className="mt-2 text-sm text-on-surface-variant">{t('files.moveHint', { name: moveDialog.entry.name })}</p><label className="mt-4 block text-xs font-medium text-on-surface-variant">{t('files.targetFolder')}</label><input value={moveTarget} onChange={(event) => setMoveTarget(event.target.value)} className="msm-input mt-1.5" placeholder="mods/config" /><p className="mt-1 text-xs text-on-surface-variant">{t('files.moveTargetHint')}</p><div className="mt-5 flex justify-end gap-2"><button type="button" className="msm-btn-secondary h-9 px-3 text-sm" onClick={() => setMoveDialog(null)}>{t('common.cancel')}</button><button type="button" className="msm-btn-primary h-9 px-3 text-sm" onClick={() => void submitMove()}>{t('common.save')}</button></div></div></div>}
+      {moveDialog && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby={moveTitleId} onClick={() => setMoveDialog(null)}><div className="msm-card w-full max-w-md p-5" onClick={(event) => event.stopPropagation()}><h2 id={moveTitleId} className="font-headline text-lg font-semibold text-on-surface">{t('files.move')}</h2><p className="mt-2 text-sm text-on-surface-variant">{t('files.moveHint', { name: moveDialog.entry.name })}</p><label className="mt-4 block text-xs font-medium text-on-surface-variant">{t('files.targetFolder')}</label><input value={moveTarget} onChange={(event) => setMoveTarget(event.target.value)} className="msm-input mt-1.5" placeholder="mods/config" autoFocus /><p className="mt-1 text-xs text-on-surface-variant">{t('files.moveTargetHint')}</p><div className="mt-5 flex justify-end gap-2"><button type="button" className="msm-btn-secondary h-9 px-3 text-sm" onClick={() => setMoveDialog(null)}>{t('common.cancel')}</button><button type="button" className="msm-btn-primary h-9 px-3 text-sm" onClick={() => void submitMove()}>{t('common.save')}</button></div></div></div>}
     </div>
   )
 }
