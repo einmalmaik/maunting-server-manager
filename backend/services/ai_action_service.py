@@ -1733,6 +1733,22 @@ def _config_path(value: object) -> str:
     path = PurePosixPath(value)
     if path.is_absolute() or ".." in path.parts:
         raise AiActionValidationError("Dateipfad ist nicht erlaubt")
+    # Kein Namensteil darf mit einem Bindestrich beginnen.
+    #
+    # Nicht wegen des Dateisystems — dort ist das erlaubt —, sondern wegen der
+    # Werkzeuge, die diese Namen spaeter als Argumente weiterreichen. `tar`
+    # deutet einen Operanden, der mit `-` beginnt, als Option; `games/updater.py`
+    # sichert seine Aufrufe deshalb zusaetzlich mit `--` ab. Diese Pruefung ist
+    # die zweite Haelfte davon: eine Datei, die niemand von Hand so genannt
+    # haette, entsteht hier gar nicht erst.
+    #
+    # Ein Mensch verliert dadurch nichts Sinnvolles. Die KI legt Dateien
+    # ungefragt an; ein Name wie `--use-compress-program=...` ist keine
+    # Konfiguration, sondern ein Versuch.
+    if any(teil.startswith("-") for teil in path.parts):
+        raise AiActionValidationError(
+            "Dateiname darf nicht mit einem Bindestrich beginnen"
+        )
     return path.as_posix()
 
 

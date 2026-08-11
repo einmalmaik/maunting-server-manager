@@ -615,6 +615,40 @@ def test_a_rejected_patch_reveals_nothing_about_the_file(
     assert db.query(AiActionProposal).count() == 0
 
 
+def test_a_filename_can_never_become_a_tar_option(
+    db: Session, regular_user: User, tmp_path: Path
+) -> None:
+    """Ein Dateiname, den kein Mensch vergeben haette, wird zur Programmoption.
+
+    Der Weg lief ueber zwei Stellen, die einzeln je harmlos aussahen:
+
+    1. Die KI legt eine Datei namens ``--use-compress-program=touch /tmp/x.cfg``
+       im Serververzeichnis an. Jede Pfadpruefung laesst das durch — der Name
+       ist relativ, enthaelt kein ``..``, verlaesst das Verzeichnis nicht.
+    2. Beim naechsten Reinstall sammelt ``cache_manual_configs`` die
+       Konfigurationsdateien per ``rglob`` ein und uebergibt die relativen Pfade
+       als Operanden an ``tar``. Ohne ``--`` deutet ``tar`` alles, was mit ``-``
+       beginnt, als **Option** — und ``--use-compress-program`` fuehrt ein
+       Programm aus.
+
+    Abgedichtet ist jetzt beides: ``updater.py`` trennt Optionen und Operanden
+    mit ``--``, und der Name entsteht hier gar nicht erst. Dieser Test haelt die
+    zweite Haelfte fest, weil sie die ist, die man beim Lesen fuer eine
+    Geschmacksfrage halten koennte.
+    """
+    for boeser_name in (
+        "--use-compress-program=touch /tmp/pwned.cfg",
+        "unterordner/--checkpoint-action=exec=sh",
+        "-rf",
+    ):
+        with pytest.raises(ai_action_errors.AiActionValidationError):
+            ai_action_service._config_path(boeser_name)
+
+    # Die Gegenprobe: ein Bindestrich **im** Namen ist voellig normal.
+    assert ai_action_service._config_path("server-settings.cfg") == "server-settings.cfg"
+    assert ai_action_service._config_path("cfg/my-server.ini") == "cfg/my-server.ini"
+
+
 def test_reading_logs_through_the_ai_needs_the_console_permission(
     db: Session, regular_user: User, tmp_path: Path
 ) -> None:

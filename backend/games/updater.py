@@ -945,7 +945,17 @@ def cache_manual_configs(server: Any, blueprint: Optional[Blueprint] = None) -> 
     # tar-Archiv erzeugen (im Cache-Verzeichnis)
     try:
         # Wir wechseln kurz ins install_dir, damit die Pfade relativ sauber sind
-        cmd = ["tar", "-cf", str(cache_file), "-C", str(install_dir)] + files_to_backup
+        #
+        # `--` trennt Optionen von Operanden. Ohne diese Trennung deutet `tar`
+        # jeden Dateinamen, der mit einem Bindestrich beginnt, als **Option**.
+        # Die Namen stammen aus `rglob` ueber das Installationsverzeichnis, also
+        # aus dem Dateisystem — und dort kann eine Datei landen, ohne dass ein
+        # Mensch sie benannt hat: die KI darf Konfigurationsdateien anlegen, und
+        # ein Name wie `--use-compress-program=…` besteht jede Pfadpruefung, weil
+        # er weder absolut ist noch `..` enthaelt noch das Verzeichnis verlaesst.
+        # Beim naechsten Reinstall waere daraus eine Programmausfuehrung
+        # geworden.
+        cmd = ["tar", "-cf", str(cache_file), "-C", str(install_dir), "--"] + files_to_backup
         subprocess.run(cmd, check=True, capture_output=True, timeout=120)
     except Exception as exc:
         logger.warning("Konnte manuelle Configs für Server %s nicht cachen: %s", server.id, exc)
