@@ -107,3 +107,7 @@ def test_the_rules_with_an_observed_cause_are_still_there() -> None:
     # Wiederverwendbare. Der zweite Anlass legt die Entscheidung ins Modell.
     assert "Zwei Anlaesse" in prompt
     assert "Du entscheidest selbst" in prompt
+    # Ueber MSM stand hier kein Satz ausser der Rollenzeile — jede Frage nach
+    # dem Panel wurde aus Trainingswissen ueber fremde Panels beantwortet.
+    assert "steht nichts in der MSM-Dokumentation" in prompt
+    assert "Wissen ueber andere Panels" in prompt

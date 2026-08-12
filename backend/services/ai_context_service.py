@@ -228,9 +228,16 @@ def _recent_tool_results(
     alles andere aus dem Budget — das war der Motor dafuer, dass ein einmal
     gegriffener Skill jede folgende Antwort faerbte. Braucht das Modell ihn
     erneut, ruft es `read_skill` erneut auf; das kostet eine Zeile.
+
+    **Ohne Doku, aus demselben Grund.** Ein Abschnitt aus `read_docs` ist bis zu
+    12.000 Zeichen lang und aendert sich zwischen zwei Fragen nie. Ihn stehen zu
+    lassen kostete dasselbe Budget wie ein Skill und brachte weniger: die Messung
+    des Servers waere verdraengt worden, die unveraenderliche Doku nicht. Braucht
+    das Modell den Abschnitt erneut, liest es ihn erneut — und genau das ist die
+    Belegpflicht, nicht ihr Umweg.
     """
     from models import AiToolResult
-    from services.ai_tool_registry import SKILL_TOOLS
+    from services.ai_tool_registry import DOCS_TOOLS, SKILL_TOOLS
 
     if grenzen is None:
         grenzen = _teilbudgets(MAX_CONTEXT_CHARS)
@@ -238,7 +245,7 @@ def _recent_tool_results(
         db.query(AiToolResult)
         .filter(
             AiToolResult.conversation_id == conversation_id,
-            AiToolResult.tool_name.notin_(sorted(SKILL_TOOLS)),
+            AiToolResult.tool_name.notin_(sorted(SKILL_TOOLS | DOCS_TOOLS)),
         )
         .order_by(AiToolResult.created_at.desc())
         .limit(grenzen.werkzeug_anzahl)

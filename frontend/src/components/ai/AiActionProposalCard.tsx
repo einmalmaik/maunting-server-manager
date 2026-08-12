@@ -1,15 +1,70 @@
-import { AlertTriangle, Blocks, Bot, FilePenLine, HardDriveDownload, HardDriveUpload, Network, Package, Power, ServerCog, Trash2 } from 'lucide-react'
+import { AlertTriangle, Blocks, Bot, FilePenLine, HardDriveDownload, HardDriveUpload, Network, Package, Plug, Power, ServerCog, ShieldCheck, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiActionProposal } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import { Button } from '@/Singra/UI'
+import { SecretOnce } from '@/components/ui/SecretOnce'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
 function previewText(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+/**
+ * Felder der Vorschau, die als **Panel-Tatsache** gerendert werden.
+ *
+ * Ohne sie liest der Bestaetigende ausser Werkzeugname und Pfad nur `reason`
+ * und `expected_effect` — und beides ist vom Modell verfasster Text. Er wuerde
+ * also bestaetigen, was das Modell ueber seinen eigenen Vorschlag behauptet.
+ * Die Werte hier hat dagegen das Backend aufgeloest: der Name des
+ * Dienstbenutzers, die Rechte der Rolle, das Kontingent.
+ *
+ * Bewusst eine Auswahl und keine Ausgabe des ganzen `preview`-Objekts: was der
+ * Mensch im Bestaetigungsmoment liest, soll entschieden sein, nicht das
+ * Nebenprodukt eines Payload-Baus.
+ */
+const TATSACHEN: readonly string[] = [
+  'name',
+  'slug',
+  'service_user',
+  'webhook_url',
+  'terminate_grace_days',
+  'integration',
+  'external_product_key',
+  'game_type',
+  'ram_limit_mb',
+  'cpu_limit_percent',
+  'disk_limit_gb',
+  'node_id',
+  'backup_interval_hours',
+  'role',
+  'role_permissions',
+  'permissions',
+  'ai_limits',
+  'enabled',
+]
+
+function tatsachenZeilen(preview: Record<string, unknown>): [string, string][] {
+  const zeilen: [string, string][] = []
+  for (const key of TATSACHEN) {
+    const wert = preview[key]
+    if (wert === undefined || wert === null || wert === '') continue
+    if (Array.isArray(wert)) {
+      // Eine leere Rechteliste ist die Aussage dieses Vorschlags, kein
+      // fehlender Wert — sie gehoert ausdruecklich gerendert.
+      zeilen.push([key, wert.length ? wert.join(', ') : '—'])
+    } else if (typeof wert === 'object') {
+      const paare = Object.entries(wert as Record<string, unknown>)
+        .filter(([, v]) => v !== null && v !== undefined)
+      if (paare.length) zeilen.push([key, paare.map(([k, v]) => `${k}: ${String(v)}`).join(', ')])
+    } else {
+      zeilen.push([key, String(wert)])
+    }
+  }
+  return zeilen
 }
 
 /**
@@ -40,9 +95,15 @@ export function AiActionProposalCard({
 }) {
   const { t } = useTranslation()
   const [busy, setBusy] = useState(false)
+  // Frisch erzeugte Geheimnisse aus `executeAction`. Sie liegen ausschliesslich
+  // hier, in einer lokalen Variablen dieser Karte — nicht in `entries`, nicht in
+  // `ai_messages`, nicht im Lauf-Snapshot. Nach einem Neuladen sind sie weg, und
+  // genau das heisst „genau einmal“.
+  const [geheimnisse, setGeheimnisse] = useState<{ label: string; value: string }[]>([])
   const operation = previewText(proposal.preview.operation)
   const path = previewText(proposal.preview.path)
   const diff = previewText(proposal.preview.diff)
+  const tatsachen = tatsachenZeilen(proposal.preview as Record<string, unknown>)
   const Icon = {
     propose_config_update: FilePenLine,
     propose_config_patch: FilePenLine,
@@ -57,6 +118,9 @@ export function AiActionProposalCard({
     propose_bind_ip_update: Network,
     propose_blueprint_change: Blocks,
     propose_server_blueprint_switch: Blocks,
+    propose_hoster_integration: Plug,
+    propose_hoster_product: Plug,
+    propose_ai_tarif_role: ShieldCheck,
   }[proposal.tool_name] ?? Power
   // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb
   // eine eigene, neutrale Farbgebung statt der warnenden — und keinen Knopf.
@@ -91,6 +155,14 @@ export function AiActionProposalCard({
       const confirmation = await aiApi.confirmAction(proposal.id)
       const executed = await aiApi.executeAction(proposal.id, confirmation.confirmation_token)
       onChange(executed.proposal)
+      // `result` wird nirgends persistiert, steht nicht im Audit und fliesst
+      // nicht zum Modell zurueck — der einzige Weg vom Backend an die
+      // Oberflaeche, der das Modell umgeht. Ein API-Key, den das Modell nie
+      // gesehen hat, kann es auch nicht ausplaudern; auf die Redaktion waere
+      // hier kein Verlass, ein `token_urlsafe(32)` passt auf kein Muster.
+      const frisch = (executed.result as { secrets?: { label: string; value: string }[] } | null)
+        ?.secrets
+      if (Array.isArray(frisch) && frisch.length) setGeheimnisse(frisch)
       // Lifecycle-Aktionen laufen im Hintergrund weiter. Eine Erfolgsmeldung
       // waere hier eine Aussage ueber einen noch offenen Ausgang.
       toast.success(
@@ -123,6 +195,16 @@ export function AiActionProposalCard({
           </div>
           {operation && <p className="mt-1 text-sm text-on-surface-variant">{t('ai.actions.operation', { operation })}</p>}
           {path && <p className="mt-1 break-all font-mono text-xs text-on-surface-variant">{path}</p>}
+          {tatsachen.length > 0 && (
+            <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+              {tatsachen.map(([key, wert]) => (
+                <div key={key} className="min-w-0">
+                  <dt className="text-on-surface-variant">{t(`ai.actions.fields.${key}`, key)}</dt>
+                  <dd className="break-words font-medium text-on-surface">{wert}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
           {/* Zielpunkt 3.6: warum geaendert wird und welche Folgen erwartet
               werden. Beides stammt vom Modell und wird als dessen Begruendung
               gekennzeichnet, nicht als Zusage des Panels. */}
@@ -146,6 +228,17 @@ export function AiActionProposalCard({
         </div>
         {proposal.status === 'proposed' && !proposal.autonomous && <Button type="button" variant={proposal.tool_name === 'propose_server_lifecycle' ? 'destructive' : 'primary'} disabled={busy} onClick={() => void execute()}>{busy ? t('ai.actions.executing') : t('ai.actions.review')}</Button>}
       </div>
+      {geheimnisse.map((geheimnis) => (
+        <div key={geheimnis.label} className="mt-3">
+          <SecretOnce
+            label={geheimnis.label}
+            value={geheimnis.value}
+            onDismiss={() =>
+              setGeheimnisse((rest) => rest.filter((eintrag) => eintrag.label !== geheimnis.label))
+            }
+          />
+        </div>
+      ))}
     </article>
   )
 }

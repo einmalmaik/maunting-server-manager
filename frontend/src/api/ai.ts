@@ -112,6 +112,23 @@ export interface AiToolUse {
   /** „pending" heißt: gelernt, aber bis zur Freigabe des Betreibers wirkungslos. */
   skill_status?: string | null
   skill_learned?: boolean
+  /**
+   * Der Aufruf ist gescheitert.
+   *
+   * Das Feld stand seit jeher im SSE-Payload und fehlte hier — ein
+   * fehlgeschlagener Werkzeugaufruf sah im Verlauf damit exakt aus wie ein
+   * geglückter. Für „Dokumentation gelesen" ist das der schlimmste Fall: die
+   * Zeile behauptet einen Beleg, und die Antwort darunter ist geraten.
+   */
+  failed?: boolean
+  /**
+   * Themengruppe aus `ai_tool_registry` (`memory`, `skill`, `docs`).
+   *
+   * Steuert allein das Symbol. Vorher riet das Frontend sie an einem
+   * hartkodierten `tool_name === 'remember'` nach und lag bei `search_memory`
+   * und `forget_memory` daneben.
+   */
+  gruppe?: string | null
 }
 
 /** Nur der Zustand — der Suchschluessel verlaesst das Backend nie. */
@@ -151,6 +168,9 @@ export type AiWriteTool =
   | 'propose_server_delete'
   | 'propose_blueprint_change'
   | 'propose_server_blueprint_switch'
+  | 'propose_hoster_integration'
+  | 'propose_hoster_product'
+  | 'propose_ai_tarif_role'
 
 /**
  * Ein Aktionsvorschlag — genau ein Vertrag für beide Wege.

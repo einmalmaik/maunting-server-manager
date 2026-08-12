@@ -105,6 +105,18 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "read_node_health": Werkzeug("global_read"),
     "web_search": Werkzeug("global_read"),
 
+    # Die Doku des Panels. Kein zusaetzliches Recht: dieselben Seiten stehen
+    # jedem angemeldeten Benutzer im Panel offen — ein Gate hier waere eine
+    # Schranke, die es nebenan nicht gibt.
+    "search_docs": Werkzeug("global_read", gruppe="docs"),
+    "read_docs": Werkzeug("global_read", gruppe="docs"),
+
+    # Die Shop-Anbindung. Beide pruefen `panel.hoster.read` im eigenen Zweig —
+    # bei `global_read` wertet die Registry `recht` nicht aus, das tut nur der
+    # Vorschlagspfad.
+    "read_hoster_setup": Werkzeug("global_read"),
+    "read_hoster_integration_guide": Werkzeug("global_read"),
+
     # `remember` und `forget_memory` schreiben, stehen aber bei den
     # Lesewerkzeugen. Der Unterschied zwischen den Mengen ist nicht "aendert
     # etwas", sondern "fasst einen Server an und braucht deshalb eine
@@ -204,6 +216,45 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "propose_server_create": Werkzeug(
         "global_write", recht="servers.create", recht_global=True
     ),
+
+    # ── Shop-Anbindung einrichten ─────────────────────────────────────
+    #
+    # Alle drei tragen `immer_bestaetigen`. Der Grund steht schon bei
+    # `GEPLANT_IMMER_BESTAETIGEN` weiter unten: eine Rechteaenderung oder eine
+    # Schluesselerzeugung wirkt auf die Grenzen, innerhalb derer die KI selbst
+    # arbeitet. Ein Produkt mit `role_id` bestimmt woertlich, welche Rolle
+    # **jeder kuenftige Kaeufer** bekommt; eine Tarifrolle traegt das
+    # KI-Kontingent; eine Integration erzeugt einen API-Key.
+    #
+    # Bei der Integration kommt ein **mechanischer** Grund dazu, der unabhaengig
+    # von jeder Auslegung gilt: im autonomen Modus ruft `ai_stream_service`
+    # `execute_autonomously` und verwirft dessen Rueckgabewert. Genau darin
+    # steckt der einmalige Klartextschluessel — `create_integration` gibt ihn
+    # exakt einmal aus, gespeichert wird nur der Hash. Eine autonom angelegte
+    # Integration waere unbenutzbar und nur ueber eine Rotation zu retten.
+    # Bestaetigungspflicht ist hier keine Vorsicht, sondern Funktionsbedingung.
+    "propose_hoster_integration": Werkzeug(
+        "global_write",
+        immer_bestaetigen=True,
+        recht="panel.hoster.write",
+        recht_global=True,
+    ),
+    "propose_hoster_product": Werkzeug(
+        "global_write",
+        immer_bestaetigen=True,
+        recht="panel.hoster.write",
+        recht_global=True,
+    ),
+    # `roles.manage` steht in der Tabelle, weil die Rolle angelegt wird.
+    # Das zweite noetige Recht (`panel.settings.write` fuer das KI-Kontingent)
+    # prueft der Payload-Bau zusaetzlich — die Tabelle traegt genau ein `recht`,
+    # und die Handlung braucht zwei.
+    "propose_ai_tarif_role": Werkzeug(
+        "global_write",
+        immer_bestaetigen=True,
+        recht="roles.manage",
+        recht_global=True,
+    ),
 }
 
 
@@ -241,6 +292,7 @@ GLOBAL_WRITE_TOOLS = _mit_art("global_write")
 WRITE_TOOLS = SERVER_WRITE_TOOLS | GLOBAL_WRITE_TOOLS
 MEMORY_TOOLS = _mit_gruppe("memory")
 SKILL_TOOLS = _mit_gruppe("skill")
+DOCS_TOOLS = _mit_gruppe("docs")
 ASK_TOOLS = _mit_art("ask")
 ALWAYS_CONFIRM_TOOLS = (
     {name for name, spec in WERKZEUGE.items() if spec.immer_bestaetigen}

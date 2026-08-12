@@ -31,57 +31,35 @@ from schemas.hoster import (
 )
 from services import audit_service, hoster_integration_service
 from services.dis_client import DisSidecarError
-from services.hoster_integration_service import HosterConfigurationError
-from services.permission_catalog import SYSTEM_ROLE_ADMIN
-from services.permission_service import has_global_permission
-from services.role_service import get_role, role_permission_keys
+from services.hoster_integration_service import (
+    HosterConfigurationError,
+    HosterRoleEscalation,
+)
 
 
 router = APIRouter(prefix="/api/hoster", tags=["hoster-admin"])
 
 
 def _ensure_actor_may_grant_role(db: Session, actor: User, role_id: int | None) -> None:
-    """Verbietet, ueber ein Produkt eine Rolle zu hinterlegen, die der Akteur
-    selbst nicht vergeben duerfte.
+    """Die Akteursschranke, uebersetzt in HTTP-Antworten.
 
-    `ensure_role_is_delegatable` im Dienst beantwortet eine andere Frage: ob die
-    *Integration* die Rolle vergeben darf. Sie prueft dazu gegen den
-    Dienstbenutzer — und den waehlt genau der Akteur aus, der hier gerade
-    schreibt. Als alleinige Schranke ist sie deshalb wertlos: wer
-    `panel.hoster.write` hat, legt eine Integration mit einem privilegierten
-    Dienstbenutzer an, haengt die `admin`-Rolle an ein Produkt, kauft mit dem
-    frisch erhaltenen API-Key einen Vertrag und holt sich ueber einen Handoff
-    eine Sitzung als der so erzeugte Admin-Kunde. `panel.hoster.write` waere
-    damit ein Weg zu Owner-naher Macht.
+    Die Regel selbst steht seit den KI-Werkzeugen im Dienst
+    (`hoster_integration_service.ensure_actor_may_grant_role`), weil es einen
+    zweiten Weg zu `upsert_product` gibt: einen bestaetigten KI-Vorschlag. Zwei
+    Wege und eine Schranke, die nur an einem haengt, sind keine Schranke.
 
-    Die drei Regeln hier sind woertlich die aus `_assign_roles` in
-    routers/admin.py — dieselbe Zusage, gleiche Reihenfolge, gleiche Codes.
-    Beide Pruefungen gelten zusammen: der Akteur muss die Rolle vergeben
-    duerfen, *und* der Dienstbenutzer muss sie tragen.
+    Hier bleibt nur die Uebersetzung — 404 fuer die unbekannte Rolle, 403 fuer
+    beide Eskalationsfaelle. Codes und Texte sind unveraendert, damit die
+    Zusagen aus `test_hoster_integration.py` weiter gelten.
     """
-    if role_id is None or actor.is_owner:
-        return
-    role = get_role(db, role_id)
-    if role is None:
-        raise HTTPException(status_code=404, detail="Rolle nicht gefunden")
-    if role.is_system and role.name == SYSTEM_ROLE_ADMIN:
-        raise HTTPException(
-            status_code=403,
-            detail="Nur Owner kann die admin-Rolle zuweisen",
+    try:
+        hoster_integration_service.ensure_actor_may_grant_role(
+            db, actor=actor, role_id=role_id
         )
-    missing = sorted(
-        key
-        for key in role_permission_keys(db, role.id)
-        if not has_global_permission(db, actor, key)
-    )
-    if missing:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Du kannst nur Rollen zuordnen, deren Rechte du selbst "
-                f"besitzt. Fehlend: {missing}"
-            ),
-        )
+    except HosterRoleEscalation as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except HosterConfigurationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def _integration_response(row: HosterIntegration) -> HosterIntegrationResponse:

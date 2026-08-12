@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { Copy, KeyRound, Pencil, Plug, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
+import { KeyRound, Pencil, Plug, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 
 import {
   hosterApi,
@@ -23,6 +23,7 @@ import { credentialsApi } from '@/api/credentials'
 import { rbacApi } from '@/api/rbac'
 import { SanitizedApiError } from '@/api/client'
 import { Button, NumberStepper, Switch } from '@/Singra/UI'
+import { SecretOnce } from '@/components/ui/SecretOnce'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 import type { Role } from '@/types/permissions'
@@ -254,31 +255,6 @@ function Fact({ label, value, hint }: { label: string; value: string; hint?: str
       <dt className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{label}</dt>
       <dd className="mt-0.5 break-all text-on-surface">{value}</dd>
       {hint && <dd className="mt-0.5 text-xs text-on-surface-variant">{hint}</dd>}
-    </div>
-  )
-}
-
-/** Zeigt ein frisch erzeugtes Geheimnis genau einmal an. */
-function SecretOnce({ label, value, onDismiss }: { label: string; value: string; onDismiss: () => void }) {
-  const { t } = useTranslation()
-  return (
-    <div className="msm-card space-y-3 border border-warning/40 p-6">
-      <p className="text-sm font-semibold text-on-surface">{t('hoster.secretOnce', { label })}</p>
-      <p className="text-xs text-on-surface-variant">{t('hoster.secretOnceHint')}</p>
-      <code className="block break-all rounded-lg bg-surface-container-low/60 p-3 text-sm">{value}</code>
-      <div className="flex flex-wrap justify-end gap-2">
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => {
-            void navigator.clipboard?.writeText(value)
-            toast.success(t('hoster.copied'))
-          }}
-        >
-          <Copy className="h-4 w-4" aria-hidden="true" />{t('common.copy', 'Kopieren')}
-        </Button>
-        <Button type="button" onClick={onDismiss}>{t('hoster.secretUnderstood')}</Button>
-      </div>
     </div>
   )
 }

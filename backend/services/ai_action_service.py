@@ -188,7 +188,108 @@ def _global_tool_definitions() -> list[dict]:
 
     learn_scopes = ["team"] if learning_policy() == "off" else ["team", "global"]
 
+    # Die Seitenliste steht in **beiden** Beschreibungen ausgeschrieben. Das
+    # Modell kann sonst nur raten, was es ueberhaupt nachschlagen koennte — und
+    # eine geratene Seitenkennung ist der erste Schritt zu einer geratenen
+    # Antwort.
+    from services.ai_docs_corpus import SEITEN as DOKU_SEITEN
+
+    doku_seiten = sorted(DOKU_SEITEN)
+    doku_liste = ", ".join(f"{s.schluessel} ({s.titel})" for s in DOKU_SEITEN.values())
+
     return optional + [
+        _function(
+            "search_docs",
+            "Durchsucht die Dokumentation dieses Panels. **Der erste Schritt, "
+            "bevor du etwas ueber MSM behauptest.** Verfuegbar: " + doku_liste + ".\n"
+            "Liefert Seite, Abschnitt und einen Ausschnitt — den Abschnitt "
+            "selbst holst du danach mit `read_docs`. Such danach, wie der "
+            "Benutzer fragt; Umlaute und ihre Umschreibung findet die Suche "
+            "gleichermassen.\n"
+            "Findest du nichts, ist das ein Ergebnis: sag, dass dazu nichts in "
+            "der MSM-Dokumentation steht. Nicht mit Wissen ueber andere Panels "
+            "auffuellen — Pterodactyl, Pelican und Plesk arbeiten anders, und "
+            "eine plausible Antwort ist hier schlimmer als keine.\n"
+            "Nicht aufrufen bei Fragen zu einem laufenden Server, zu "
+            "Spielinhalten oder zu Werten in einer Konfigurationsdatei — dafuer "
+            "gibt es die Serverwerkzeuge.",
+            {
+                "query": {"type": "string", "maxLength": 200},
+                "page": {
+                    "type": "string",
+                    "enum": doku_seiten,
+                    "description": "Nur diese Seite durchsuchen. Weglassen sucht in allen.",
+                },
+            },
+            ["query"],
+        ),
+        _function(
+            "read_docs",
+            "Liest die Dokumentation dieses Panels. Ohne `section` bekommst du "
+            "die Gliederung der Seite, mit `section` den Text des Abschnitts. "
+            "Seiten: " + doku_liste + ".\n"
+            "**Abschnittskennungen nie raten** — sie kommen aus der Gliederung "
+            "oder aus `search_docs`. Ein erfundener Abschnitt wird abgewiesen, "
+            "aber der Umweg kostet eine Runde.\n"
+            "Was du hier liest, gilt. Was hier nicht steht, behauptest du nicht. "
+            "Nenne dem Benutzer die Seite (`panel_page`), damit er dasselbe "
+            "nachlesen kann.",
+            {
+                "page": {"type": "string", "enum": doku_seiten},
+                "section": {
+                    "type": ["string", "null"],
+                    "maxLength": 64,
+                    "description": (
+                        "Abschnittskennung aus der Gliederung oder aus "
+                        "search_docs. Weglassen liefert die Gliederung."
+                    ),
+                },
+            },
+            ["page"],
+        ),
+        _function(
+            "read_hoster_setup",
+            "Zeigt die panelseitige Shop-Anbindung vollstaendig: vorhandene "
+            "Integrationen mit Slug, Dienstbenutzer, Webhook-Ziel und "
+            "Kuendigungsfrist, ihre Produktzuordnungen, die vergebenen Slugs, "
+            "die Benutzer, die als Dienstbenutzer taugen, und die Rollen, die "
+            "**dieser** Benutzer vergeben darf — samt ihrem KI-Kontingent.\n"
+            "**Ruf das auf, bevor du etwas zur Shop-Einrichtung vorschlaegst.** "
+            "Slug, Dienstbenutzer und Produktkennung sind nichts, was man raten "
+            "kann; ein geratener Wert erzeugt einen Vorschlag, den der Benutzer "
+            "bestaetigt und der dann scheitert. Es enthaelt bewusst keinen "
+            "Schluessel — nur den Hinweis, an dem man einen Schluessel "
+            "wiedererkennt.\n"
+            "Steht bei einer Liste `withheld`, gibt es sie, und du darfst sie "
+            "nur nicht sehen. Das ist nicht dasselbe wie eine leere Liste — "
+            "behaupte in dem Fall nicht, es gebe keine Rollen oder keine "
+            "geeigneten Benutzer.",
+            {},
+            [],
+        ),
+        _function(
+            "read_hoster_integration_guide",
+            "Liefert fuer **eine bestehende** Integration den technischen "
+            "Einbindungsblock: Basis-Adresse, Header, Endpunkte, Zustaende, "
+            "Eventnamen, Webhook-Header und die real hinterlegten "
+            "Produktkennungen dieser Anlage.\n"
+            "Alle Werte darin stammen aus dem Code, den die API durchsetzt. "
+            "**Gib den Block unveraendert weiter** — nicht umformulieren, nichts "
+            "ergaenzen, nichts weglassen. Erklaere ringsherum so ausfuehrlich, "
+            "wie es dem Benutzer hilft, aber lass die Werte in Ruhe: ein "
+            "abgetippter Header oder ein angepasster Pfad ist der haeufigste "
+            "Grund, warum eine Shop-Anbindung nicht laeuft.\n"
+            "Die Bedeutung der `status_code`-Werte steht nicht hier, sondern in "
+            "der Doku — der Block sagt dir, in welchem Abschnitt.",
+            {
+                "integration_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Aus read_hoster_setup. Nie raten.",
+                },
+            },
+            ["integration_id"],
+        ),
         _function(
             "read_skill",
             "Laedt den vollstaendigen Text eines Skills aus dem Verzeichnis im "
@@ -564,6 +665,129 @@ def _global_tool_definitions() -> list[dict]:
                 "ram_limit_mb",
                 "cpu_limit_percent",
                 "disk_limit_gb",
+                *_RATIONALE_REQUIRED,
+            ],
+        ),
+        _function(
+            "propose_ai_tarif_role",
+            "Legt eine globale Rolle fuer einen Shop-Tarif an — **mit leerer "
+            "Rechteliste** und nur einem KI-Kontingent. Genau darin liegt ihr "
+            "Zweck: Kontingente haengen an globalen Rollen, und ohne eine solche "
+            "Rolle bekommt jeder Shop-Kunde dasselbe Kontingent wie jeder "
+            "andere.\n"
+            "Rechte vergibt sie ausdruecklich keine. Braucht der Tarif welche, "
+            "gehoert das in die Rollenverwaltung des Panels und nicht hierher.\n"
+            "Ein Feld auf `null` heisst **unbegrenzt**, nicht null. Setz nur, "
+            "was der Benutzer genannt hat, und frag im Zweifel nach — ein "
+            "geratenes Tageslimit merkt der Kunde erst, wenn es greift.",
+            {
+                "name": {"type": "string", "maxLength": 64},
+                "description": {"type": ["string", "null"], "maxLength": 255},
+                "daily_token_limit": {"type": ["integer", "null"], "minimum": 0},
+                "weekly_token_limit": {"type": ["integer", "null"], "minimum": 0},
+                "monthly_token_limit": {"type": ["integer", "null"], "minimum": 0},
+                "requests_per_minute": {"type": ["integer", "null"], "minimum": 0},
+                "concurrent_operations": {"type": ["integer", "null"], "minimum": 0},
+                "monthly_cost_limit_cents": {"type": ["integer", "null"], "minimum": 0},
+                "max_reasoning_effort": {"type": ["integer", "null"], "minimum": 0},
+                **_RATIONALE_SCHEMA,
+            },
+            ["name", *_RATIONALE_REQUIRED],
+        ),
+        _function(
+            "propose_hoster_integration",
+            "Legt eine Hoster-Integration an oder aendert eine bestehende — die "
+            "panelseitige Haelfte einer Shop-Anbindung. Ist ein `webhook_url` "
+            "gesetzt und noch kein Secret vorhanden, wird zugleich eines "
+            "erzeugt: ein Ziel ohne Secret stellt nichts zu, und das faellt "
+            "sonst erst im Betrieb auf.\n"
+            "**Ruf vorher `read_hoster_setup` auf.** Der Slug muss panelweit "
+            "eindeutig sein und der Dienstbenutzer aktiv sein, kein Owner und "
+            "`servers.create` haben — beides steht dort, beides ist nicht zu "
+            "erraten.\n"
+            "Der API-Key entsteht erst beim Ausfuehren und wird dem Benutzer "
+            "**einmalig** in der Oberflaeche gezeigt. Du bekommst ihn nie zu "
+            "sehen und kannst ihn nicht wiederholen. Sag das dem Benutzer, "
+            "bevor er bestaetigt.",
+            {
+                "integration_id": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "description": "Zum Aendern. Weglassen legt neu an.",
+                },
+                "name": {"type": "string", "maxLength": 128},
+                "slug": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Kleinbuchstaben, Ziffern, Bindestriche. Panelweit eindeutig.",
+                },
+                "service_user_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Aus service_user_candidates in read_hoster_setup.",
+                },
+                "webhook_url": {"type": ["string", "null"], "maxLength": 2048},
+                "terminate_grace_days": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 365,
+                    "description": (
+                        "Tage, die Server und Daten nach einer Kuendigung "
+                        "erhalten bleiben. 0 = sofort loeschbar."
+                    ),
+                },
+                "enabled": {"type": "boolean"},
+                **_RATIONALE_SCHEMA,
+            },
+            [
+                "name",
+                "slug",
+                "service_user_id",
+                "terminate_grace_days",
+                *_RATIONALE_REQUIRED,
+            ],
+        ),
+        _function(
+            "propose_hoster_product",
+            "Ordnet eine Produktkennung des Shops einem Blueprint und einem "
+            "Ressourcenpaket zu. Die Kennung muss **exakt** so heissen wie im "
+            "Shop — MSM-interne IDs muss der Shop nie kennen.\n"
+            "**Ruf vorher `read_hoster_setup` auf** fuer die Integration, die "
+            "vorhandenen Produktkennungen und die Rollen, die dieser Benutzer "
+            "vergeben darf. Eine Rolle, die dort nicht steht, wird abgewiesen — "
+            "auch dann, wenn sie existiert.\n"
+            "`role_id` ist der Bogen zwischen Tarif und KI-Kontingent: der "
+            "Kunde bekommt diese Rolle, solange sein Vertrag laeuft, und "
+            "verliert sie bei Sperre oder Kuendigung. Leer lassen heisst: keine "
+            "Zusatzrolle.\n"
+            "Leere Grenzen bedeuten die Voreinstellung des Blueprints, nicht "
+            "null. Aenderungen gelten fuer neu erstellte Server; laufende passt "
+            "der Betreiber bewusst von Hand an.",
+            {
+                "integration_id": {"type": "integer", "minimum": 1},
+                "external_product_key": {"type": "string", "maxLength": 128},
+                "game_type": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Blueprint aus list_blueprints.",
+                },
+                "ram_limit_mb": {"type": ["integer", "null"], "minimum": 1},
+                "cpu_limit_percent": {"type": ["integer", "null"], "minimum": 1},
+                "disk_limit_gb": {"type": ["integer", "null"], "minimum": 1},
+                "node_id": {"type": ["integer", "null"], "minimum": 1},
+                "backup_interval_hours": {"type": ["integer", "null"], "minimum": 1},
+                "role_id": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "description": "Aus grantable_roles in read_hoster_setup.",
+                },
+                "enabled": {"type": "boolean"},
+                **_RATIONALE_SCHEMA,
+            },
+            [
+                "integration_id",
+                "external_product_key",
+                "game_type",
                 *_RATIONALE_REQUIRED,
             ],
         ),
@@ -1312,6 +1536,85 @@ def _execute_forget_skill(db: Session, *, user: User, arguments: dict) -> dict:
     return ergebnis
 
 
+def _execute_search_docs(arguments: dict) -> dict:
+    """Volltextsuche ueber die Dokumentation dieses Panels.
+
+    **Ohne zusaetzliches Recht.** Alle fuenf Seiten sind im Panel fuer jeden
+    angemeldeten Benutzer erreichbar (`/docs/*` und `/privacy`); ein Gate hier
+    waere eine Schranke, die es nebenan nicht gibt, und wuerde ausgerechnet die
+    Belegpflicht dort aushebeln, wo sie am noetigsten ist — bei jemandem, der
+    das Panel noch nicht kennt.
+
+    Kein Treffer ist ein Ergebnis und wird auch so gemeldet: `found: 0` mit den
+    durchsuchten Seiten. Eine leere Liste ohne diese Angabe laesst offen, ob
+    nichts drinsteht oder nichts gelesen wurde.
+    """
+    from services import ai_docs_corpus
+
+    if set(arguments) - {"query", "page"} or "query" not in arguments:
+        raise AiActionValidationError("Doku-Suche hat ungueltige Argumente")
+    query = arguments.get("query")
+    if not isinstance(query, str) or not query.strip():
+        raise AiActionValidationError("Suchbegriff fehlt")
+    page = arguments.get("page")
+    if page is not None:
+        if not isinstance(page, str) or page not in ai_docs_corpus.SEITEN:
+            raise AiActionValidationError(
+                f"Unbekannte Doku-Seite. Verfuegbar: {', '.join(sorted(ai_docs_corpus.SEITEN))}"
+            )
+
+    treffer = ai_docs_corpus.suche(query[:200], page)
+    return {
+        "untrusted": True,
+        "query": query[:200],
+        "searched_pages": [page] if page else sorted(ai_docs_corpus.SEITEN),
+        "matches": treffer,
+        "found": len(treffer),
+    }
+
+
+def _execute_read_docs(arguments: dict) -> dict:
+    """Gliederung oder Abschnitt einer Doku-Seite. Rechtefrage wie oben.
+
+    Eine unlesbare Quelle wird als solche gemeldet (`available: false`) und
+    **nicht** als leerer Abschnitt. Das ist dieselbe Unterscheidung wie bei
+    `web_search`: "steht nichts drin" und "konnte nicht lesen" sind zwei
+    Auskuenfte, und nur eine davon darf beim Benutzer ankommen.
+    """
+    from services import ai_docs_corpus
+
+    if set(arguments) - {"page", "section"} or "page" not in arguments:
+        raise AiActionValidationError("Doku-Werkzeug hat ungueltige Argumente")
+    page = arguments.get("page")
+    if not isinstance(page, str) or page not in ai_docs_corpus.SEITEN:
+        raise AiActionValidationError(
+            f"Unbekannte Doku-Seite. Verfuegbar: {', '.join(sorted(ai_docs_corpus.SEITEN))}"
+        )
+    section = arguments.get("section")
+    if section is not None and not isinstance(section, str):
+        raise AiActionValidationError("Ungueltige Abschnittskennung")
+
+    try:
+        if not section:
+            return {"untrusted": True, "available": True, **ai_docs_corpus.verzeichnis(page)}
+        return {"untrusted": True, "available": True, **ai_docs_corpus.abschnitt(page, section)}
+    except ai_docs_corpus.DokuNichtVerfuegbar as exc:
+        # Bewusst kein Fehler: das Modell soll den Ausfall benennen koennen,
+        # statt den Zug zu verlieren und im naechsten Anlauf zu raten.
+        return {
+            "untrusted": True,
+            "available": False,
+            "page": page,
+            "reason": str(exc),
+        }
+    except KeyError as exc:
+        vorhanden = [a["section"] for a in ai_docs_corpus.verzeichnis(page)["sections"]]
+        raise AiActionValidationError(
+            f"Abschnitt {exc.args[0]!r} gibt es auf dieser Seite nicht. "
+            f"Vorhanden: {', '.join(vorhanden)}"
+        ) from exc
+
+
 def _execute_read_skill(db: Session, *, user: User, arguments: dict) -> dict:
     """Laedt den Text eines Skills — Stufe zwei des schrittweisen Ladens.
 
@@ -1561,6 +1864,31 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
     Servererstellung. Wer keine Server anlegen darf, hat auch keinen Grund, die
     Kapazitaetsplanung des Betreibers zu sehen.
     """
+    if tool_name == "search_docs":
+        return _execute_search_docs(arguments)
+
+    if tool_name == "read_docs":
+        return _execute_read_docs(arguments)
+
+    if tool_name == "read_hoster_setup":
+        from services import ai_hoster_tools
+
+        _require_no_arguments(tool_name, arguments)
+        return ai_hoster_tools.setup_uebersicht(db, user=user)
+
+    if tool_name == "read_hoster_integration_guide":
+        from services import ai_hoster_tools
+
+        if set(arguments) != {"integration_id"}:
+            raise AiActionValidationError("Hoster-Werkzeug hat ungueltige Argumente")
+        roh = arguments.get("integration_id")
+        if roh is None:
+            raise AiActionValidationError(
+                "integration_id fehlt — hol sie aus read_hoster_setup"
+            )
+        kennung = _positive_int(roh, name="integration_id", default=0, minimum=1)
+        return ai_hoster_tools.integration_guide(db, user=user, integration_id=kennung)
+
     if tool_name == "remember":
         return _execute_remember(db, user=user, arguments=arguments)
 
@@ -1635,10 +1963,9 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
             raise AiActionValidationError("Node-Einsicht ist nicht erlaubt")
         return _node_health(db)
 
-    if not permission_service.has_global_permission(db, user, "servers.create"):
-        raise AiActionValidationError("Serverplanung ist nicht erlaubt")
-
     if tool_name == "list_blueprints":
+        if not permission_service.has_global_permission(db, user, "servers.create"):
+            raise AiActionValidationError("Serverplanung ist nicht erlaubt")
         from games import list_game_info
 
         entries = []
@@ -1652,36 +1979,48 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
             })
         return {"blueprints": entries, "count": len(entries)}
 
-    from models import Node
-    from services.node_capacity import (
-        allocatable_ram_mb, sum_allocated_ram_mb, sum_running_ram_mb,
-    )
+    if tool_name == "read_node_capacity":
+        if not permission_service.has_global_permission(db, user, "servers.create"):
+            raise AiActionValidationError("Serverplanung ist nicht erlaubt")
+        from models import Node
+        from services.node_capacity import (
+            allocatable_ram_mb, sum_allocated_ram_mb, sum_running_ram_mb,
+        )
 
-    nodes = db.query(Node).order_by(Node.id).limit(MAX_LISTED_NODES).all()
-    entries = []
-    for node in nodes:
-        allocated = sum_allocated_ram_mb(db, node.id)
-        entries.append({
-            # Bewusst ohne Hostname und IP: das Modell soll Kapazitaet
-            # vergleichen koennen, nicht die Netzstruktur des Betreibers
-            # kennen. Die Auswahl trifft ohnehin MSM.
-            "node_id": node.id,
-            "status": node.status,
-            "is_local": bool(node.is_local),
-            "cpu_total": node.cpu_total,
-            # Gebucht ueber **alle** Server, auch gestoppte. Das ist die
-            # Ueberbuchungsgrenze, nicht der Verbrauch.
-            "ram_allocated_mb": allocated,
-            # Gebucht von den Servern, die gerade wirklich laufen. Die
-            # Unterscheidung ist der Kern einer wiederkehrenden Fehlauskunft:
-            # vier gestoppte Server zu je 8 GB buchen 32 GB und belegen null.
-            "ram_allocated_running_mb": sum_running_ram_mb(db, node.id),
-            "ram_allocatable_mb": allocatable_ram_mb(node, allocated),
-            # Was die Node selbst meldet — die einzige echte Messung hier.
-            "ram_total_mb": int(node.ram_total / 1024 / 1024) if node.ram_total else None,
-            "ram_used_mb": int(node.ram_used / 1024 / 1024) if node.ram_used else None,
-        })
-    return {"nodes": entries}
+        nodes = db.query(Node).order_by(Node.id).limit(MAX_LISTED_NODES).all()
+        entries = []
+        for node in nodes:
+            allocated = sum_allocated_ram_mb(db, node.id)
+            entries.append({
+                # Bewusst ohne Hostname und IP: das Modell soll Kapazitaet
+                # vergleichen koennen, nicht die Netzstruktur des Betreibers
+                # kennen. Die Auswahl trifft ohnehin MSM.
+                "node_id": node.id,
+                "status": node.status,
+                "is_local": bool(node.is_local),
+                "cpu_total": node.cpu_total,
+                # Gebucht ueber **alle** Server, auch gestoppte. Das ist die
+                # Ueberbuchungsgrenze, nicht der Verbrauch.
+                "ram_allocated_mb": allocated,
+                # Gebucht von den Servern, die gerade wirklich laufen. Die
+                # Unterscheidung ist der Kern einer wiederkehrenden Fehlauskunft:
+                # vier gestoppte Server zu je 8 GB buchen 32 GB und belegen null.
+                "ram_allocated_running_mb": sum_running_ram_mb(db, node.id),
+                "ram_allocatable_mb": allocatable_ram_mb(node, allocated),
+                # Was die Node selbst meldet — die einzige echte Messung hier.
+                "ram_total_mb": int(node.ram_total / 1024 / 1024) if node.ram_total else None,
+                "ram_used_mb": int(node.ram_used / 1024 / 1024) if node.ram_used else None,
+            })
+        return {"nodes": entries}
+
+    # **Der Durchfall war die gefaehrlichste Zeile der Datei.** Bis hierher war
+    # die Kapazitaetsabfrage der namenlose Rumpf am Ende der Kette: wer keinen
+    # eigenen Zweig hatte, bekam ihn. Ein Werkzeug, das in der Tabelle und im
+    # Katalog steht, aber beim Verdrahten vergessen wurde, lieferte dem Modell
+    # damit RAM-Zahlen unter seinem eigenen Namen zurueck — eine falsche
+    # Auskunft, die wie eine richtige aussieht, und der einzige Ort im ganzen
+    # Werkzeugpfad, an dem das ohne Fehler passieren konnte.
+    raise AiActionValidationError(f"Kein Handler fuer Werkzeug: {tool_name}")
 
 
 def _execute_server_context_tool(

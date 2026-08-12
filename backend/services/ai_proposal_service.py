@@ -31,7 +31,7 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from models import AiActionProposal, AiConversation, Server, User
+from models import AiActionProposal, AiConversation, HosterIntegration, Role, Server, User
 from schemas.ai_action import AiActionProposalResponse
 from services import audit_service, permission_service
 from services.actor_context import ActorContext
@@ -587,6 +587,283 @@ def _blueprint_change_payload(arguments: dict) -> tuple[dict, dict]:
     return payload, preview
 
 
+def _hoster_integration_payload(db: Session, user: User, arguments: dict) -> tuple[dict, dict]:
+    """Integration anlegen oder aendern — validiert, bevor jemand bestaetigt.
+
+    Alles, was `create_integration` spaeter ohnehin prueft, wird hier schon
+    geprueft: Slug-Form, Dienstbenutzer, Webhook-Ziel, Kuendigungsfrist. Ein
+    Vorschlag, der erst nach der Bestaetigung scheitert, hat den Menschen
+    umsonst zustimmen lassen — und die Meldung kommt dann aus einer Schicht, die
+    ihn nicht mehr erreicht.
+
+    **Die Vorschau traegt Panel-Tatsachen.** Die Karte zeigt dem Bestaetigenden
+    sonst nur `reason` und `expected_effect`, und beides ist vom Modell
+    verfasster Text: er wuerde bestaetigen, was das Modell ueber seinen eigenen
+    Vorschlag behauptet. Der Name des Dienstbenutzers steht deshalb aufgeloest
+    darin, nicht nur seine Nummer.
+    """
+    from services import hoster_integration_service
+
+    erlaubt = {
+        "integration_id", "name", "slug", "service_user_id",
+        "webhook_url", "terminate_grace_days", "enabled",
+    }
+    if set(arguments) - erlaubt:
+        raise AiActionValidationError("Hoster-Integration hat ungueltige Argumente")
+
+    integration_id = arguments.get("integration_id")
+    vorhanden = None
+    if integration_id is not None:
+        vorhanden = (
+            db.query(HosterIntegration)
+            .filter(HosterIntegration.id == integration_id)
+            .first()
+        )
+        if vorhanden is None:
+            raise AiActionValidationError(f"Integration {integration_id} gibt es nicht")
+
+    name = str(arguments.get("name") or "").strip()
+    if not name or len(name) > 128:
+        raise AiActionValidationError("Name der Integration fehlt oder ist zu lang")
+    try:
+        slug = hoster_integration_service.normalize_slug(str(arguments.get("slug") or ""))
+        webhook_url = hoster_integration_service.validate_webhook_url(
+            arguments.get("webhook_url")
+        )
+        service_user = hoster_integration_service.require_service_user(
+            db, int(arguments.get("service_user_id") or 0)
+        )
+    except hoster_integration_service.HosterConfigurationError as exc:
+        raise AiActionValidationError(str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise AiActionValidationError("Dienstbenutzer fehlt oder ist ungueltig") from exc
+
+    tage = arguments.get("terminate_grace_days")
+    if isinstance(tage, bool) or not isinstance(tage, int) or not 0 <= tage <= 365:
+        raise AiActionValidationError("Kuendigungsfrist muss zwischen 0 und 365 Tagen liegen")
+
+    # Ein fremder Slug faellt sonst erst beim `flush` auf — dann als
+    # IntegrityError mitten in der Ausfuehrung statt als Formmeldung.
+    kollision = (
+        db.query(HosterIntegration.id)
+        .filter(HosterIntegration.slug == slug)
+        .filter(HosterIntegration.id != (vorhanden.id if vorhanden else -1))
+        .first()
+    )
+    if kollision is not None:
+        raise AiActionValidationError(f"Der Slug {slug!r} ist bereits vergeben")
+
+    aktiv = arguments.get("enabled")
+    aktiv = True if aktiv is None else bool(aktiv)
+
+    payload = {
+        "integration_id": vorhanden.id if vorhanden else None,
+        "name": name,
+        "slug": slug,
+        "service_user_id": service_user.id,
+        "webhook_url": webhook_url,
+        "terminate_grace_days": tage,
+        "enabled": aktiv,
+    }
+    preview = {
+        "operation": "hoster_integration_update" if vorhanden else "hoster_integration_create",
+        "path": slug,
+        "name": name,
+        "slug": slug,
+        # Aufgeloest, nicht als Nummer: der Mensch bestaetigt anhand dessen,
+        # was er lesen kann.
+        "service_user": service_user.username,
+        "webhook_url": webhook_url,
+        "webhook_secret_will_be_created": bool(
+            webhook_url and not (vorhanden.webhook_secret_encrypted if vorhanden else None)
+        ),
+        "terminate_grace_days": tage,
+        "enabled": aktiv,
+        # Der Schluessel steht **nicht** in der Vorschau. `preview_json` liegt
+        # im Klartext in der Datenbank und geht bei jedem `listActions()` erneut
+        # an den Browser. Er entsteht erst beim Ausfuehren und geht ueber
+        # `result` genau einmal an die Karte.
+        "api_key_shown_once": not vorhanden,
+        "restart_required": False,
+    }
+    return payload, preview
+
+
+def _hoster_product_payload(db: Session, user: User, arguments: dict) -> tuple[dict, dict]:
+    """Produktzuordnung — mit **beiden** Rollenschranken.
+
+    `ensure_role_is_delegatable` prueft gegen den Dienstbenutzer der
+    Integration, `ensure_actor_may_grant_role` gegen den Menschen, der hier
+    gerade schreibt. Beide gelten zusammen; die erste allein ist wertlos, weil
+    der Akteur den Dienstbenutzer selbst aussucht. Ohne die zweite waere der
+    KI-Weg schwaecher als der Panel-Knopf — und das ist er nie.
+    """
+    from games import get_plugin
+    from services import hoster_integration_service, role_service
+
+    erlaubt = {
+        "integration_id", "external_product_key", "game_type", "ram_limit_mb",
+        "cpu_limit_percent", "disk_limit_gb", "node_id", "backup_interval_hours",
+        "role_id", "enabled",
+    }
+    if set(arguments) - erlaubt:
+        raise AiActionValidationError("Hoster-Produkt hat ungueltige Argumente")
+
+    integration = (
+        db.query(HosterIntegration)
+        .filter(HosterIntegration.id == arguments.get("integration_id"))
+        .first()
+    )
+    if integration is None:
+        raise AiActionValidationError(
+            f"Integration {arguments.get('integration_id')} gibt es nicht"
+        )
+
+    try:
+        key = hoster_integration_service.normalize_external_id(
+            str(arguments.get("external_product_key") or ""), label="Produktkennung"
+        )
+    except hoster_integration_service.HosterConfigurationError as exc:
+        raise AiActionValidationError(str(exc)) from exc
+
+    game_type = str(arguments.get("game_type") or "").strip()
+    if not game_type or get_plugin(game_type) is None:
+        raise AiActionValidationError(f"Unbekannter Blueprint: {game_type!r}")
+
+    grenzen: dict[str, int | None] = {}
+    for feld, maximum in (
+        ("ram_limit_mb", 4_194_304),
+        ("cpu_limit_percent", 10_000),
+        ("disk_limit_gb", 1_048_576),
+        ("backup_interval_hours", 8_760),
+        ("node_id", None),
+        ("role_id", None),
+    ):
+        wert = arguments.get(feld)
+        if wert is None:
+            grenzen[feld] = None
+            continue
+        if isinstance(wert, bool) or not isinstance(wert, int) or wert < 1:
+            raise AiActionValidationError(f"'{feld}' muss eine positive ganze Zahl sein")
+        if maximum is not None and wert > maximum:
+            raise AiActionValidationError(f"'{feld}' liegt ausserhalb des erlaubten Bereichs")
+        grenzen[feld] = wert
+
+    rolle = None
+    if grenzen["role_id"] is not None:
+        try:
+            hoster_integration_service.ensure_actor_may_grant_role(
+                db, actor=user, role_id=grenzen["role_id"]
+            )
+            rolle = hoster_integration_service.ensure_role_is_delegatable(
+                db, integration=integration, role_id=grenzen["role_id"]
+            )
+        except hoster_integration_service.HosterConfigurationError as exc:
+            raise AiActionValidationError(str(exc)) from exc
+
+    aktiv = arguments.get("enabled")
+    aktiv = True if aktiv is None else bool(aktiv)
+
+    payload = {
+        "integration_id": integration.id,
+        "external_product_key": key,
+        "game_type": game_type,
+        **grenzen,
+        "enabled": aktiv,
+    }
+    preview = {
+        "operation": "hoster_product_save",
+        "path": f"{integration.slug}/{key}",
+        "integration": integration.name,
+        "external_product_key": key,
+        "game_type": game_type,
+        "ram_limit_mb": grenzen["ram_limit_mb"],
+        "cpu_limit_percent": grenzen["cpu_limit_percent"],
+        "disk_limit_gb": grenzen["disk_limit_gb"],
+        "node_id": grenzen["node_id"],
+        "backup_interval_hours": grenzen["backup_interval_hours"],
+        # Name **und** Rechte der Rolle: "welche Rolle bekommt jeder Kaeufer"
+        # ist die eigentliche Frage dieses Vorschlags, und eine Nummer
+        # beantwortet sie nicht.
+        "role": rolle.name if rolle is not None else None,
+        "role_permissions": (
+            sorted(role_service.role_permission_keys(db, rolle.id))
+            if rolle is not None else []
+        ),
+        "enabled": aktiv,
+        "restart_required": False,
+    }
+    return payload, preview
+
+
+def _ai_tarif_role_payload(db: Session, user: User, arguments: dict) -> tuple[dict, dict]:
+    """Eine Tarifrolle: leere Rechteliste, nur ein KI-Kontingent.
+
+    Die leere Rechteliste ist der Sicherheitsentwurf, nicht eine Sparmassnahme.
+    Eine Rolle ohne Permission-Keys kann ueber `ensure_actor_may_grant_role` nie
+    mehr vergeben, als der Akteur selbst hat — die Fehlmenge ist immer leer.
+    Eskalation ist damit **strukturell** ausgeschlossen und nicht durch eine
+    Pruefung verhindert, die jemand kuenftig umgehen koennte. Wer einer
+    Tarifrolle Rechte geben will, tut das in der Rollenverwaltung.
+
+    Zwei Rechte, ein Feld: die Registry traegt `roles.manage` und wird von
+    `_require_tool_permission` geprueft. Das KI-Kontingent haengt aber an
+    `panel.settings.write` (siehe `routers/ai_settings.py`), und ein Werkzeug,
+    das ueber die KI mehr darf als ueber das Panel, ist genau der Fehler, den
+    die Registry sonst verhindert.
+    """
+    from services import ai_limit_service, permission_service
+    from services.permission_catalog import SYSTEM_ROLE_NAMES
+
+    erlaubt = {"name", "description", *ai_limit_service.LIMIT_FIELDS}
+    if set(arguments) - erlaubt:
+        raise AiActionValidationError("Tarifrolle hat ungueltige Argumente")
+
+    if not permission_service.has_global_permission(db, user, "panel.settings.write"):
+        raise AiActionValidationError(
+            "Fuer das KI-Kontingent einer Rolle fehlt das Recht 'panel.settings.write'"
+        )
+
+    name = str(arguments.get("name") or "").strip()
+    if not name or len(name) > 64:
+        raise AiActionValidationError("Rollenname fehlt oder ist zu lang")
+    if name in SYSTEM_ROLE_NAMES:
+        raise AiActionValidationError(f"{name!r} ist ein reservierter Rollenname")
+    if db.query(Role.id).filter(Role.id.isnot(None), Role.name == name).first() is not None:
+        raise AiActionValidationError(f"Die Rolle {name!r} gibt es schon")
+
+    beschreibung = arguments.get("description")
+    if beschreibung is not None and not isinstance(beschreibung, str):
+        raise AiActionValidationError("Beschreibung muss Text sein")
+    beschreibung = redact_sensitive_text(str(beschreibung or "").strip())[:255] or None
+
+    limits: dict[str, int | None] = {}
+    for feld in ai_limit_service.LIMIT_FIELDS:
+        wert = arguments.get(feld)
+        if wert is None:
+            # `None` heisst in `resolve_effective_limits` ausdruecklich
+            # **unbegrenzt**. Das ist kein fehlender Wert, sondern eine Aussage.
+            limits[feld] = None
+            continue
+        maximum = ai_limit_service.LIMIT_MAXIMA[feld]
+        if isinstance(wert, bool) or not isinstance(wert, int) or not 0 <= wert <= maximum:
+            raise AiActionValidationError(f"Ungueltiger Wert fuer {feld}")
+        limits[feld] = wert
+
+    payload = {"name": name, "description": beschreibung, "limits": limits}
+    preview = {
+        "operation": "ai_tarif_role_create",
+        "path": name,
+        "name": name,
+        "description": beschreibung,
+        # Ausgeschrieben, damit in der Karte steht, was die Rolle **nicht** kann.
+        "permissions": [],
+        "ai_limits": limits,
+        "restart_required": False,
+    }
+    return payload, preview
+
+
 def _blueprint_switch_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
     """Bereitet den Wechsel vor — mit dem, was dabei wirklich passiert.
 
@@ -804,9 +1081,33 @@ def create_proposal(
     if tool_name == "propose_blueprint_change":
         payload, preview = _blueprint_change_payload(rest)
         expected_revision = None
-    elif tool_name in GLOBAL_WRITE_TOOLS:
+    elif tool_name == "propose_server_create":
         payload, preview = _server_create_payload(db, arguments)
         expected_revision = None
+    elif tool_name == "propose_hoster_integration":
+        # `rest` statt `arguments`: ohne `reason`/`expected_effect` behalten die
+        # Schluesselmengenpruefungen darunter ihre exakte Form.
+        _require_tool_permission(db, user, None, tool_name, rest)
+        payload, preview = _hoster_integration_payload(db, user, rest)
+        expected_revision = None
+    elif tool_name == "propose_hoster_product":
+        _require_tool_permission(db, user, None, tool_name, rest)
+        payload, preview = _hoster_product_payload(db, user, rest)
+        expected_revision = None
+    elif tool_name == "propose_ai_tarif_role":
+        _require_tool_permission(db, user, None, tool_name, rest)
+        payload, preview = _ai_tarif_role_payload(db, user, rest)
+        expected_revision = None
+    elif tool_name in GLOBAL_WRITE_TOOLS:
+        # **Nicht als Sammelklausel schreiben.** Hier stand frueher
+        # `elif tool_name in GLOBAL_WRITE_TOOLS: _server_create_payload(...)`.
+        # Das las sich wie eine Mengenzugehoerigkeit, meinte aber genau ein
+        # Werkzeug — und jedes zweite globale Schreibwerkzeug waere still in
+        # der Servererstellung gelandet und mit "Servererstellung hat
+        # ungueltige Argumente" gescheitert, einer Meldung, die auf die
+        # falsche Stelle zeigt. Ein neues globales Schreibwerkzeug bekommt
+        # einen eigenen `elif` darueber; wer das vergisst, faellt hier auf.
+        raise AiActionValidationError(f"Kein Payload-Bau fuer Werkzeug: {tool_name}")
     else:
         # Dieselbe zentrale Rechtepruefung wie bei den Lesewerkzeugen. `rest`
         # verliert dabei die `server_id`, damit die nachfolgenden
@@ -899,8 +1200,16 @@ def create_proposal(
             expected_revision = None
         elif tool_name == "propose_config_patch":
             payload, preview, expected_revision = _config_patch_payload(db, server.id, rest)
-        else:
+        elif tool_name == "propose_config_update":
             payload, preview, expected_revision = _config_payload(db, server.id, rest)
+        else:
+            # Dieselbe Falle wie oben bei den globalen Werkzeugen, nur eine
+            # Ebene tiefer: hier stand ein namenloses `else`, das jedes neue
+            # serverbezogene Schreibwerkzeug als Konfigurationsaenderung gebaut
+            # haette. Der Vorschlag waere entstanden, haette plausibel
+            # ausgesehen und beim Ausfuehren etwas anderes getan, als sein Name
+            # sagt.
+            raise AiActionValidationError(f"Kein Payload-Bau fuer Werkzeug: {tool_name}")
 
     preview["reason"] = reason
     preview["expected_effect"] = expected_effect
@@ -1185,6 +1494,139 @@ def _execute_bind_ip_update(db: Session, *, server_id: int, payload: dict) -> di
         "previous_bind_ip": old_bind_ip,
         "restarted": restarted,
     }
+
+
+def _execute_hoster_write(db: Session, *, user: User, tool_name: str, payload: dict) -> dict:
+    """Fuehrt die drei Shop-Einrichtungsvorschlaege ueber den Panel-Pfad aus.
+
+    Ein Weg, kein KI-Sonderweg: gerufen werden `create_integration`,
+    `upsert_product`, `create_role` und `set_role_limit` — dieselben Funktionen
+    wie hinter den Knoepfen in `routers/hoster_admin.py` und
+    `routers/ai_settings.py`.
+
+    **Der API-Key geht ueber den Rueckgabewert und nirgendwo sonst hin.**
+    `AiActionExecuteResponse.result` wird nicht persistiert, steht nicht im
+    Audit und fliesst nicht zum Modell zurueck — der Rueckfluss besteht
+    ausschliesslich aus `status`, `autonomous`, `server_id` und `error_code`.
+    Er darf deshalb hier stehen, aber niemals in `preview_json` (Klartext in der
+    Datenbank) und niemals im Antworttext.
+
+    Auf die Redaktion ist dabei kein Verlass, und das ist gemessen:
+    `redact_sensitive_text` ist namensgebunden, und ein
+    `secrets.token_urlsafe(32)` passt auf keines ihrer Muster. Ein Modell kann
+    einen Schluessel nur dann nicht ausplaudern, wenn es ihn nie gesehen hat.
+    """
+    from services import ai_limit_service, hoster_integration_service, role_service
+
+    try:
+        if tool_name == "propose_ai_tarif_role":
+            rolle = role_service.create_role(
+                db, payload["name"], payload.get("description"), []
+            )
+            ai_limit_service.set_role_limit(db, rolle.id, dict(payload["limits"]))
+            db.commit()
+            return {"role_id": rolle.id, "name": rolle.name, "permissions": []}
+
+        if tool_name == "propose_hoster_product":
+            integration = (
+                db.query(HosterIntegration)
+                .filter(HosterIntegration.id == payload["integration_id"])
+                .first()
+            )
+            if integration is None:
+                raise AiActionStateError("AI_ACTION_HOSTER_REJECTED")
+            # Beide Schranken erneut, nicht nur die des Dienstbenutzers: die
+            # Rechte des Akteurs koennen zwischen Vorschlag und Bestaetigung
+            # geschrumpft sein, und `upsert_product` kennt nur die Integration.
+            hoster_integration_service.ensure_actor_may_grant_role(
+                db, actor=user, role_id=payload.get("role_id")
+            )
+            produkt = hoster_integration_service.upsert_product(
+                db,
+                integration=integration,
+                external_product_key=payload["external_product_key"],
+                game_type=payload["game_type"],
+                ram_limit_mb=payload.get("ram_limit_mb"),
+                cpu_limit_percent=payload.get("cpu_limit_percent"),
+                disk_limit_gb=payload.get("disk_limit_gb"),
+                node_id=payload.get("node_id"),
+                backup_interval_hours=payload.get("backup_interval_hours"),
+                role_id=payload.get("role_id"),
+                enabled=bool(payload.get("enabled", True)),
+            )
+            db.commit()
+            return {
+                "product_id": produkt.id,
+                "external_product_key": produkt.external_product_key,
+            }
+
+        # propose_hoster_integration
+        integration_id = payload.get("integration_id")
+        if integration_id is not None:
+            integration = (
+                db.query(HosterIntegration)
+                .filter(HosterIntegration.id == integration_id)
+                .first()
+            )
+            if integration is None:
+                raise AiActionStateError("AI_ACTION_HOSTER_REJECTED")
+            service_user = hoster_integration_service.require_service_user(
+                db, int(payload["service_user_id"])
+            )
+            integration.name = payload["name"]
+            integration.slug = hoster_integration_service.normalize_slug(payload["slug"])
+            integration.service_user_id = service_user.id
+            integration.webhook_url = hoster_integration_service.validate_webhook_url(
+                payload.get("webhook_url")
+            )
+            integration.terminate_grace_days = int(payload["terminate_grace_days"])
+            integration.enabled = bool(payload.get("enabled", True))
+            api_key = None
+        else:
+            integration, api_key = hoster_integration_service.create_integration(
+                db,
+                name=payload["name"],
+                slug=payload["slug"],
+                enabled=bool(payload.get("enabled", True)),
+                service_user_id=int(payload["service_user_id"]),
+                webhook_url=payload.get("webhook_url"),
+                terminate_grace_days=int(payload["terminate_grace_days"]),
+            )
+
+        # Ein Webhook-Ziel ohne Secret stellt nichts zu. Das faellt sonst erst
+        # auf, wenn der Shop auf die erste Statusmeldung wartet, die nie kommt.
+        webhook_secret = None
+        if integration.webhook_url and not integration.webhook_secret_encrypted:
+            webhook_secret = hoster_integration_service.set_webhook_secret(db, integration)
+        db.commit()
+        db.refresh(integration)
+    except hoster_integration_service.HosterConfigurationError as exc:
+        db.rollback()
+        # Ein eigener Code statt des groben AI_ACTION_EXECUTION_FAILED: aus
+        # "ging nicht" wird "Slug ist bereits vergeben", und damit kann das
+        # Modell im naechsten Zug etwas anfangen.
+        logger.info("Hoster-Vorschlag abgelehnt: %s", exc)
+        raise AiActionStateError("AI_ACTION_HOSTER_REJECTED") from exc
+    except ValueError as exc:
+        db.rollback()
+        logger.info("Hoster-Vorschlag abgelehnt: %s", exc)
+        raise AiActionStateError("AI_ACTION_HOSTER_REJECTED") from exc
+
+    ergebnis: dict = {
+        "integration_id": integration.id,
+        "slug": integration.slug,
+        "api_key_hint": integration.api_key_hint,
+    }
+    # `secrets` ist der einzige Schluessel, der dieses Modul verlaesst — auf dem
+    # Weg zur Karte, die ihn genau einmal anzeigt, und auf keinem anderen.
+    geheimnisse = []
+    if api_key:
+        geheimnisse.append({"label": "API-Key", "value": api_key})
+    if webhook_secret:
+        geheimnisse.append({"label": "Webhook-Secret", "value": webhook_secret})
+    if geheimnisse:
+        ergebnis["secrets"] = geheimnisse
+    return ergebnis
 
 
 def _execute_mod_install(db: Session, *, server_id: int, payload: dict) -> dict:
@@ -1508,6 +1950,16 @@ def execute_proposal(
                 result = {"blueprint_id": blueprint_id}
                 task_id = None
                 queued = False
+            elif tool_name in {
+                "propose_hoster_integration",
+                "propose_hoster_product",
+                "propose_ai_tarif_role",
+            }:
+                result = _execute_hoster_write(
+                    db, user=active_user, tool_name=tool_name, payload=payload
+                )
+                task_id = None
+                queued = False
             else:
                 raise AiActionStateError("AI_ACTION_TOOL_NOT_ALLOWED")
 
@@ -1540,7 +1992,7 @@ def execute_proposal(
                 db,
                 user_id=active_user.id,
                 action="ai.action.executed",
-                target_type="server",
+                target_type="server" if server_id is not None else "ai_action",
                 target_id=server_id,
                 details={
                     "proposal_id": row_id,
@@ -1569,7 +2021,7 @@ def execute_proposal(
                     db,
                     user_id=active_user.id,
                     action="ai.action.executed",
-                    target_type="server",
+                    target_type="server" if server_id is not None else "ai_action",
                     target_id=server_id,
                     details={
                         "proposal_id": row_id,

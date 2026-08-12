@@ -139,9 +139,22 @@ def test_only_the_irreversible_tools_are_confirm_only() -> None:
     Bauchgefuehl, das jemand beim Bauen eines Werkzeugs hatte — genau so waren
     Blueprint-Wechsel und Bind-IP-Aenderung hineingeraten, obwohl beide
     umkehrbar sind.
+
+    Die drei Hoster-Werkzeuge sind bewusst dazugekommen und stehen unter dem
+    **zweiten** Kriterium, das `GEPLANT_IMMER_BESTAETIGEN` seit jeher fuehrt:
+    eine Rechteaenderung oder eine Schluesselerzeugung verschiebt den Rahmen, in
+    dem die KI selbst arbeitet. Bei `propose_hoster_integration` kommt ein
+    mechanischer Grund dazu — im autonomen Modus wird der Rueckgabewert und mit
+    ihm der einmalige API-Key verworfen; die Integration waere unbenutzbar.
     """
     gebaut = {
         name for name, spec in ai_tool_registry.WERKZEUGE.items()
         if spec.immer_bestaetigen
     }
-    assert gebaut == {"propose_server_delete", "propose_backup_restore"}
+    assert gebaut == {
+        "propose_server_delete",
+        "propose_backup_restore",
+        "propose_hoster_integration",
+        "propose_hoster_product",
+        "propose_ai_tarif_role",
+    }

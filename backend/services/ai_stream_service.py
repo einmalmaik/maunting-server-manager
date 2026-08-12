@@ -58,6 +58,7 @@ from services.ai_tool_registry import (
     READ_TOOLS,
     SERVER_READ_TOOLS,
     SKILL_TOOLS,
+    WERKZEUGE,
     WRITE_TOOLS,
 )
 from services.ai_context_service import (
@@ -351,6 +352,18 @@ def _tool_followup_messages(
                 # Ein gescheiterter Aufruf gehoert sichtbar in den Verlauf.
                 # Sonst wirkt eine Antwort vollstaendig, der eine Auskunft fehlt.
                 **({"failed": True} if failed_reason else {}),
+                # Die Gruppe entscheidet ueber das Symbol im Verlauf. Sie stand
+                # seit jeher in `ai_tool_registry`, verliess das Backend aber
+                # nie — das Frontend riet sie an einem hartkodierten
+                # `tool_name === 'remember'` nach und lag bei `search_memory`
+                # und `forget_memory` daneben. Eine Zeile hier entfernt eine
+                # Abschrift, statt eine hinzuzufuegen.
+                **(
+                    {"gruppe": WERKZEUGE[call.name].gruppe}
+                    if WERKZEUGE.get(call.name) is not None
+                    and WERKZEUGE[call.name].gruppe
+                    else {}
+                ),
             }
             # Bei Skills gehoert der Name in den Verlauf, nicht nur "read_skill".
             # Der Betreiber will sehen, *welche* erlernte Vorgehensweise

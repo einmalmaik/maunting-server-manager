@@ -85,6 +85,48 @@ describe('AiActionProposalCard', () => {
     expect(message).toMatch(/unvertrauenswürdiger Daten/i)
   })
 
+  /**
+   * Der API-Key einer frisch angelegten Shop-Anbindung.
+   *
+   * Er entsteht erst beim Ausfuehren, geht ueber `result` an genau diese Karte
+   * und wird nirgends gespeichert — nicht in `preview`, nicht im Verlauf, nicht
+   * im Modellkontext. Das Backend sichert die eine Haelfte zu; hier steht die
+   * andere: er erscheint einmal und ueberlebt kein Neuladen, weil er nur im
+   * Zustand dieser Komponente lebt.
+   */
+  it('shows a freshly created secret exactly once, from result and not from preview', async () => {
+    const hosterProposal: AiActionProposal = {
+      ...proposal,
+      server_id: null,
+      tool_name: 'propose_hoster_integration',
+      preview: {
+        operation: 'hoster_integration_create',
+        path: 'mein-shop',
+        slug: 'mein-shop',
+        service_user: 'shop-dienst',
+      },
+    }
+    vi.mocked(aiApi.executeAction).mockResolvedValue({
+      proposal: { ...hosterProposal, status: 'succeeded' },
+      result: { secrets: [{ label: 'API-Key', value: 'Zx9-KpQ2-einmalig-sichtbar' }] },
+    })
+
+    render(<AiActionProposalCard proposal={hosterProposal} onChange={vi.fn()} />)
+
+    // Vom Panel aufgeloeste Tatsache, nicht Modellprosa: der Dienstbenutzer
+    // steht mit Namen da, bevor jemand bestaetigt.
+    expect(screen.getByText('shop-dienst')).toBeInTheDocument()
+    expect(screen.queryByText(/Zx9-KpQ2/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prüfen und ausführen' }))
+    await act(async () => useConfirmStore.getState().resolve(true))
+
+    await waitFor(() => expect(screen.getByText(/Zx9-KpQ2/)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Verstanden' }))
+    await waitFor(() => expect(screen.queryByText(/Zx9-KpQ2/)).not.toBeInTheDocument())
+  })
+
   it('renders an executed autonomous action as a report without an action button', () => {
     render(
       <AiActionProposalCard

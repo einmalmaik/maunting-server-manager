@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, Brain, BrainCircuit, Check, Loader2, Paperclip, Pencil, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
+import { AlertTriangle, BookOpen, Bot, Brain, BrainCircuit, Check, Loader2, Paperclip, Pencil, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -868,7 +868,11 @@ export function AiChat() {
           <div className="space-y-4">
             {entries.map((entry, index) => {
               if (entry.kind === 'tool') {
-                const isMemory = entry.tool.tool_name === 'remember'
+                // Die Gruppe kommt jetzt aus der Registry mit. Vorher stand
+                // hier `tool_name === 'remember'` — `search_memory` und
+                // `forget_memory` tragen dieselbe Gruppe und bekamen trotzdem
+                // das allgemeine Werkzeugsymbol.
+                const gruppe = entry.tool.gruppe
                 const skillKey = entry.tool.skill_key
                 // Ein Skill bekommt seinen Namen in den Verlauf, nicht den
                 // Werkzeugnamen: "Skill *Valheim braucht 6 GB* gelernt" sagt
@@ -888,13 +892,24 @@ export function AiChat() {
                     key={entry.id}
                     className="flex items-center gap-2 text-xs text-on-surface-variant"
                   >
-                    {skillKey
+                    {gruppe === 'skill'
                       ? <Sparkles className="h-3.5 w-3.5 shrink-0 text-tertiary" aria-hidden="true" />
-                      : isMemory
+                      : gruppe === 'memory'
                         ? <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-                        : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
+                        : gruppe === 'docs'
+                          ? <BookOpen className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+                          : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
                     {skillLabel
                       ?? t(`ai.tools.${entry.tool.tool_name}`, { defaultValue: entry.tool.tool_name })}
+                    {/* Ohne diesen Zusatz behauptet die Zeile einen Beleg, den
+                        es nicht gibt — der gefaehrlichste Fall bei den
+                        Doku-Werkzeugen. */}
+                    {entry.tool.failed && (
+                      <span className="inline-flex items-center gap-1 text-status-error">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        {t('ai.chat.toolFailed')}
+                      </span>
+                    )}
                   </p>
                 )
               }

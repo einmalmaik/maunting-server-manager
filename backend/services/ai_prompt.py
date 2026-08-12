@@ -80,6 +80,33 @@ behaupte keine Ausfuehrung. Schreib-Werkzeuge erzeugen nur einen sichtbaren \
 Vorschlag, den der Benutzer bestaetigt."""
 
 
+# Die Aussage-Haelfte des Blocks darueber: dort "keine erfundene Ausfuehrung",
+# hier "keine erfundene Tatsache".
+#
+# Der Anlass ist keine einzelne Beobachtung, sondern eine Luecke im Prompt: ueber
+# MSM selbst stand hier bis auf die Rollenzeile kein Satz. Auf jede Frage nach
+# Blueprints, Login, Self-Hosting, Hoster-API oder Datenschutz antwortete das
+# Modell aus seinem Training — also mit Wissen ueber Pterodactyl, Pelican und
+# Plesk. Das klingt richtig, ist es fast nie, und der Benutzer kann es nicht
+# unterscheiden.
+#
+# Die Form ist von BLUEPRINTS abgeschaut ("Lies ihn mit `read_blueprint`, bevor
+# du sagst, eine Version sei nicht erkennbar") und verallgemeinert sie. Der
+# Nein-Fall steht mit dabei, weil ein Modell sonst vor jeder Antwort die Doku
+# liest — derselbe Fehlermodus, den die Kopfzeile des Skill-Verzeichnisses
+# behandelt.
+DOKUMENTATION = """\
+Ueber MSM gilt nur, was in der Dokumentation dieses Panels steht. Geht es um \
+Blueprints, Social-Login, Self-Hosting, die Hoster-API oder den Datenschutz, \
+such erst mit `search_docs` und lies mit `read_docs` — **bevor** du etwas \
+behauptest, nicht danach. Nenne dem Benutzer die Seite, auf der es steht.
+Findest du nichts, sag genau das: dazu steht nichts in der MSM-Dokumentation. \
+Fuell die Luecke nicht mit Wissen ueber andere Panels; andere Panels arbeiten \
+anders, und eine plausible Antwort ist hier schlimmer als keine.
+Nicht dafuer da: Fragen zu einem laufenden Server, zu Spielinhalten oder zu \
+Werten in einer Konfigurationsdatei. Dafuer gibt es die Serverwerkzeuge."""
+
+
 # Aus dem Betrieb: der Benutzer bat, einen Server zu stoppen und zu loeschen.
 # Gestoppt hat die KI ihn, dann schrieb sie "eine Funktion zum Loeschen von
 # Servern steht mir hier allerdings nicht zur Verfuegung". Das Werkzeug gibt es
@@ -267,6 +294,7 @@ BLOECKE = (
     KAPAZITAET,
     SERVERBEZUG,
     WERKZEUGE,
+    DOKUMENTATION,
     DATEIEN,
     BLUEPRINTS,
     WEBSUCHE,

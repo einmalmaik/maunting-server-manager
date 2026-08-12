@@ -280,6 +280,50 @@ def ensure_role_is_delegatable(
     return role
 
 
+def ensure_actor_may_grant_role(db: Session, *, actor: User, role_id: int | None) -> None:
+    """Verbietet, ueber ein Produkt eine Rolle zu hinterlegen, die der **Akteur**
+    selbst nicht vergeben duerfte.
+
+    `ensure_role_is_delegatable` beantwortet eine andere Frage: ob die
+    *Integration* die Rolle vergeben darf. Sie prueft dazu gegen den
+    Dienstbenutzer — und den waehlt genau der Akteur aus, der gerade schreibt.
+    Als alleinige Schranke ist sie deshalb wertlos: wer `panel.hoster.write`
+    hat, legt eine Integration mit einem privilegierten Dienstbenutzer an,
+    haengt die `admin`-Rolle an ein Produkt, kauft mit dem frisch erhaltenen
+    API-Key einen Vertrag und holt sich ueber einen Handoff eine Sitzung als der
+    so erzeugte Admin-Kunde.
+
+    Die drei Regeln sind woertlich die aus `_assign_roles` in routers/admin.py.
+    Beide Pruefungen gelten zusammen: der Akteur muss die Rolle vergeben
+    duerfen, *und* der Dienstbenutzer muss sie tragen.
+
+    Sie steht hier im Dienst und nicht mehr nur im Router, weil es seit den
+    KI-Werkzeugen einen **zweiten** Weg zu `upsert_product` gibt. Zwei Wege und
+    eine Schranke, die nur an einem haengt, sind keine Schranke — der andere
+    Weg waere schwaecher als der Panel-Knopf gewesen.
+    """
+    if role_id is None or actor.is_owner:
+        return
+    from services import permission_service
+    from services.permission_catalog import SYSTEM_ROLE_ADMIN
+
+    role = get_role(db, role_id)
+    if role is None:
+        raise HosterConfigurationError("Rolle nicht gefunden")
+    if role.is_system and role.name == SYSTEM_ROLE_ADMIN:
+        raise HosterRoleEscalation("Nur Owner kann die admin-Rolle zuweisen")
+    missing = sorted(
+        key
+        for key in role_permission_keys(db, role.id)
+        if not permission_service.has_global_permission(db, actor, key)
+    )
+    if missing:
+        raise HosterRoleEscalation(
+            "Du kannst nur Rollen zuordnen, deren Rechte du selbst besitzt. "
+            f"Fehlend: {missing}"
+        )
+
+
 def upsert_product(
     db: Session,
     *,
