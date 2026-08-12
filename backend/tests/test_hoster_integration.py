@@ -22,6 +22,7 @@ from models import (
     HosterHandoff,
     HosterIdentity,
     HosterIntegration,
+    HosterProduct,
     HosterService,
     Role,
     RolePermission,
@@ -32,7 +33,8 @@ from models import (
 from models.hoster import hash_token
 from services import hoster_integration_service, permission_service
 from services.auth_service import AuthService
-from services.role_service import set_user_roles
+from services.permission_catalog import SYSTEM_ROLE_USER
+from services.role_service import effective_user_role_ids, set_user_roles
 
 
 API_KEY_HEADER = hoster_integration_service.API_KEY_HEADER
@@ -72,20 +74,60 @@ def _integration(db: Session, service_user: User) -> tuple[HosterIntegration, st
     return integration, api_key
 
 
-def _product(db: Session, integration: HosterIntegration) -> None:
+def _role(db: Session, name: str, *, keys: tuple[str, ...] = ()) -> Role:
+    """Eine globale Rolle, wie ein Betreiber sie fuer einen Tarif anlegen wuerde.
+
+    Ohne Keys ist es genau der Regelfall des Produktfelds: eine Rolle, an der
+    nur ein KI-Kontingent haengt und kein einziges Panelrecht.
+    """
+    role = Role(name=name, is_system=False)
+    db.add(role)
+    db.flush()
+    for key in keys:
+        db.add(RolePermission(role_id=role.id, permission_key=key))
+    db.commit()
+    db.refresh(role)
+    return role
+
+
+def _product(
+    db: Session,
+    integration: HosterIntegration,
+    *,
+    role_id: int | None = None,
+    key: str = "mc-8gb",
+) -> None:
     hoster_integration_service.upsert_product(
         db,
         integration=integration,
-        external_product_key="mc-8gb",
+        external_product_key=key,
         game_type="dayz",
         ram_limit_mb=8192,
         cpu_limit_percent=200,
         disk_limit_gb=50,
         node_id=None,
         backup_interval_hours=None,
+        role_id=role_id,
         enabled=True,
     )
     db.commit()
+
+
+def _customer_roles(db: Session, external_service_id: str) -> set[int]:
+    """Die globalen Rollen des Kunden hinter einem Vertrag, frisch gelesen.
+
+    Der Vertragspfad schreibt ueber dieselbe Session, die der Testclient
+    benutzt; ohne das Verwerfen der Bezeichner sieht der Test den Stand von
+    vorher und waere gruen, ohne etwas gemessen zu haben.
+    """
+    db.expire_all()
+    service = (
+        db.query(HosterService)
+        .filter(HosterService.external_service_id == external_service_id)
+        .one()
+    )
+    customer = db.query(User).filter(User.id == service.identity.user_id).one()
+    return set(effective_user_role_ids(db, customer))
 
 
 def _fake_provision(db: Session):
@@ -407,6 +449,598 @@ def test_purge_runs_only_after_the_grace_period(
 
     db.expire_all()
     assert db.query(HosterService).one().status == "terminated"
+
+
+# ── Rolle bei Buchung ──────────────────────────────────────────────────────
+
+
+def test_an_active_contract_grants_the_product_role(
+    client: TestClient, db: Session, owner_user: User
+) -> None:
+    """Ein aktiver Vertrag bringt die Produktrolle mit — auch beim zweiten Mal.
+
+    Ueber globale Rollen laufen unter anderem die KI-Kontingente. Wer einen
+    groesseren Tarif bucht, muss sein Kontingent sofort haben, und zwar auch
+    dann, wenn Panelaccount und Server aus einer frueheren Buchung schon stehen.
+    """
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    tarif = _role(db, "tarif-gross")
+    _product(db, integration, role_id=tarif.id)
+
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        gebucht = client.put(
+            "/api/hoster/v1/services/svc-20",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-20",
+                "product_key": "mc-8gb",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+    assert gebucht.status_code == 200, gebucht.text
+    assert tarif.id in _customer_roles(db, "svc-20")
+
+    with patch(
+        "services.server_action_service.request_lifecycle_operation",
+        lambda *a, **k: {"task_id": None},
+    ):
+        client.put(
+            "/api/hoster/v1/services/svc-20",
+            json={"desired_state": "suspended", "external_subject": "kunde-20"},
+            headers={API_KEY_HEADER: api_key},
+        )
+    assert tarif.id not in _customer_roles(db, "svc-20")
+
+    # Zweite Aktivierung: Account und Server bestehen bereits, es wird nichts
+    # mehr provisioniert. Genau dieser Zweig darf die Rolle nicht vergessen.
+    erneut = client.put(
+        "/api/hoster/v1/services/svc-20",
+        json={"desired_state": "active", "external_subject": "kunde-20"},
+        headers={API_KEY_HEADER: api_key},
+    )
+
+    assert erneut.status_code == 200, erneut.text
+    assert db.query(Server).count() == 1
+    assert tarif.id in _customer_roles(db, "svc-20")
+
+
+@pytest.mark.parametrize("zielzustand", ["suspended", "terminated"])
+def test_suspending_and_terminating_revoke_the_product_role(
+    client: TestClient, db: Session, owner_user: User, zielzustand: str
+) -> None:
+    """Gesperrt oder gekuendigt heisst: das Kontingent ist wieder weg.
+
+    Ein Vertrag, der nicht mehr laeuft, darf kein KI-Budget mehr tragen — ob er
+    nur ruht oder ganz endet, macht dabei keinen Unterschied.
+    """
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    tarif = _role(db, "tarif-gross")
+    _product(db, integration, role_id=tarif.id)
+
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        client.put(
+            "/api/hoster/v1/services/svc-21",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-21",
+                "product_key": "mc-8gb",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+    assert tarif.id in _customer_roles(db, "svc-21")
+
+    with patch(
+        "services.server_action_service.request_lifecycle_operation",
+        lambda *a, **k: {"task_id": None},
+    ):
+        beendet = client.put(
+            "/api/hoster/v1/services/svc-21",
+            json={"desired_state": zielzustand, "external_subject": "kunde-21"},
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    assert beendet.status_code == 200, beendet.text
+    assert tarif.id not in _customer_roles(db, "svc-21")
+
+
+def test_a_second_active_contract_keeps_the_role(
+    client: TestClient, db: Session, owner_user: User
+) -> None:
+    """Entzogen wird nur, was kein anderer aktiver Vertrag noch fordert.
+
+    Wer zwei Server desselben Tarifs mietet und einen kuendigt, behaelt sein
+    Kontingent bis zum letzten Vertrag.
+    """
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    tarif = _role(db, "tarif-gross")
+    _product(db, integration, role_id=tarif.id)
+
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        for external_id in ("svc-22a", "svc-22b"):
+            gebucht = client.put(
+                f"/api/hoster/v1/services/{external_id}",
+                json={
+                    "desired_state": "active",
+                    "external_subject": "kunde-22",
+                    "product_key": "mc-8gb",
+                },
+                headers={API_KEY_HEADER: api_key},
+            )
+            assert gebucht.status_code == 200, gebucht.text
+
+    with patch(
+        "services.server_action_service.request_lifecycle_operation",
+        lambda *a, **k: {"task_id": None},
+    ):
+        client.put(
+            "/api/hoster/v1/services/svc-22a",
+            json={"desired_state": "terminated", "external_subject": "kunde-22"},
+            headers={API_KEY_HEADER: api_key},
+        )
+        assert tarif.id in _customer_roles(db, "svc-22b")
+
+        client.put(
+            "/api/hoster/v1/services/svc-22b",
+            json={"desired_state": "terminated", "external_subject": "kunde-22"},
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    assert tarif.id not in _customer_roles(db, "svc-22b")
+
+
+def test_a_manually_granted_role_survives_grant_and_revoke(
+    client: TestClient, db: Session, owner_user: User
+) -> None:
+    """Die Rollenvergabe eines Vertrags ist additiv, nicht ueberschreibend.
+
+    Eine von Hand vergebene Rolle — etwa fuer einen Supporter, der nebenbei
+    Kunde ist — darf weder beim Buchen noch beim Kuendigen verschwinden. Sonst
+    haette ein Shop-Aufruf die Rechtevergabe des Betreibers ueberschrieben.
+    """
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    tarif = _role(db, "tarif-gross")
+    manuell = _role(db, "supporter")
+    _product(db, integration, role_id=tarif.id)
+
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        client.put(
+            "/api/hoster/v1/services/svc-23",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-23",
+                "product_key": "mc-8gb",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    with patch(
+        "services.server_action_service.request_lifecycle_operation",
+        lambda *a, **k: {"task_id": None},
+    ):
+        client.put(
+            "/api/hoster/v1/services/svc-23",
+            json={"desired_state": "suspended", "external_subject": "kunde-23"},
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    # Der Betreiber vergibt die vertragsfremde Rolle von Hand.
+    db.expire_all()
+    vertrag = db.query(HosterService).one()
+    kunde = db.query(User).filter(User.id == vertrag.identity.user_id).one()
+    set_user_roles(db, kunde, sorted(set(effective_user_role_ids(db, kunde)) | {manuell.id}))
+
+    erneut = client.put(
+        "/api/hoster/v1/services/svc-23",
+        json={"desired_state": "active", "external_subject": "kunde-23"},
+        headers={API_KEY_HEADER: api_key},
+    )
+    assert erneut.status_code == 200, erneut.text
+    rollen = _customer_roles(db, "svc-23")
+    assert manuell.id in rollen and tarif.id in rollen
+
+    with patch(
+        "services.server_action_service.request_lifecycle_operation",
+        lambda *a, **k: {"task_id": None},
+    ):
+        client.put(
+            "/api/hoster/v1/services/svc-23",
+            json={"desired_state": "terminated", "external_subject": "kunde-23"},
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    rollen = _customer_roles(db, "svc-23")
+    assert manuell.id in rollen
+    assert tarif.id not in rollen
+
+
+def test_a_system_role_as_product_role_is_never_revoked(
+    client: TestClient, db: Session, owner_user: User
+) -> None:
+    """Eine Systemrolle bleibt stehen, auch wenn ein Produkt sie mitbringt.
+
+    Waehlt ein Betreiber "user" als Produktrolle, waere der Kunde nach der
+    Kuendigung ein Account ohne jede Rolle — und damit unbenutzbar, obwohl der
+    Betreiber nur ein Produkt konfiguriert hat.
+    """
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    systemrolle = db.query(Role).filter(Role.name == SYSTEM_ROLE_USER).one()
+    _product(db, integration, role_id=systemrolle.id)
+
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        client.put(
+            "/api/hoster/v1/services/svc-24",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-24",
+                "product_key": "mc-8gb",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    with patch(
+        "services.server_action_service.request_lifecycle_operation",
+        lambda *a, **k: {"task_id": None},
+    ):
+        gekuendigt = client.put(
+            "/api/hoster/v1/services/svc-24",
+            json={"desired_state": "terminated", "external_subject": "kunde-24"},
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    assert gekuendigt.status_code == 200, gekuendigt.text
+    assert _customer_roles(db, "svc-24") == {systemrolle.id}
+
+
+def test_a_product_role_above_the_service_user_cannot_be_saved(
+    db: Session, owner_user: User
+) -> None:
+    """Ein Shop darf ueber ein Produkt nicht mehr vergeben, als er selbst haelt.
+
+    Ohne diese Schranke waere das Feld ein Weg, sich per Shop-Kauf zum
+    Rollenverwalter zu machen. Die Zusage gilt schon beim Speichern: ein
+    Produkt, das erst bei der ersten Bestellung auffliegt, ist eine Falle.
+    """
+    service_user = _service_user(db)
+    integration, _ = _integration(db, service_user)
+    zu_maechtig = _role(db, "tarif-allmacht", keys=("servers.create", "roles.manage"))
+
+    with pytest.raises(hoster_integration_service.HosterRoleEscalation) as fehler:
+        _product(db, integration, role_id=zu_maechtig.id)
+
+    # Benannt wird nur, was tatsaechlich fehlt — sonst waere der Text fuer den
+    # Betreiber keine Anleitung, sondern nur eine Ablehnung.
+    assert "roles.manage" in str(fehler.value)
+    assert "servers.create" not in str(fehler.value)
+    assert db.query(HosterProduct).count() == 0
+
+
+def test_a_shrunken_service_user_makes_the_order_fail_loudly(
+    client: TestClient, db: Session, owner_user: User
+) -> None:
+    """Schrumpfen die Rechte nach der Konfiguration, scheitert der Kauf laut.
+
+    Die Rolle still auszulassen waere der schlimmere Ausgang: der Kunde haette
+    einen laufenden Vertrag ohne das Kontingent, fuer das er bezahlt, und
+    niemand einen Anhaltspunkt, warum. Stattdessen bleibt ein abfragbarer
+    Vertrag mit eigenem Fehlercode zurueck — und kein halber Server.
+    """
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    tarif = _role(db, "tarif-loeschen", keys=("servers.delete",))
+    _product(db, integration, role_id=tarif.id)
+
+    # Das Recht wird dem Dienstbenutzer NACH der Konfiguration entzogen — genau
+    # der Fall, den eine Pruefung nur beim Speichern uebersehen wuerde.
+    dienstrolle = db.query(Role).filter(Role.name == "hoster-service").one()
+    db.query(RolePermission).filter(
+        RolePermission.role_id == dienstrolle.id,
+        RolePermission.permission_key == "servers.delete",
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        response = client.put(
+            "/api/hoster/v1/services/svc-25",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-25",
+                "product_key": "mc-8gb",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    assert response.status_code == 422
+    db.expire_all()
+    vertrag = db.query(HosterService).one()
+    assert vertrag.status == "failed"
+    assert vertrag.status_code == "hoster_role_escalation"
+    assert db.query(Server).count() == 0
+
+
+def test_a_rejected_contract_does_not_entitle_to_its_role_later(
+    client: TestClient, db: Session, owner_user: User
+) -> None:
+    """Ein abgelehnter Vertrag darf seine Rolle auch spaeter nicht mitbringen.
+
+    Ein neuer Vertrag wird mit `desired_state="active"` festgeschrieben, bevor
+    die Aktivierung ueberhaupt versucht wird — der Rollback eines Fehlschlags
+    nimmt das nicht zurueck. Wer die Anspruchsmenge nur aus dem *Wunsch* bildet,
+    haelt den abgelehnten Vertrag fuer laufend und vergibt genau die Rolle, die
+    er eben verweigert hat, beim naechsten harmlosen Kauf desselben Kunden nach.
+    """
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    zu_maechtig = _role(db, "tarif-loeschen", keys=("servers.delete",))
+    _product(db, integration, role_id=zu_maechtig.id, key="mc-gross")
+    _product(db, integration, role_id=None, key="mc-klein")
+
+    dienstrolle = db.query(Role).filter(Role.name == "hoster-service").one()
+    db.query(RolePermission).filter(
+        RolePermission.role_id == dienstrolle.id,
+        RolePermission.permission_key == "servers.delete",
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        abgelehnt = client.put(
+            "/api/hoster/v1/services/svc-26a",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-26",
+                "product_key": "mc-gross",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+        assert abgelehnt.status_code == 422
+
+        # Derselbe Kunde kauft danach ein voellig harmloses Produkt ohne Rolle.
+        harmlos = client.put(
+            "/api/hoster/v1/services/svc-26b",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-26",
+                "product_key": "mc-klein",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    assert harmlos.status_code == 200, harmlos.text
+    assert zu_maechtig.id not in _customer_roles(db, "svc-26b")
+
+
+def test_changing_the_tariff_swaps_the_role(
+    client: TestClient, db: Session, owner_user: User
+) -> None:
+    """Ein Tarifwechsel tauscht die Rolle, er stapelt sie nicht.
+
+    Die alte Rolle haengt nach dem Wechsel an keinem Produkt des Kunden mehr.
+    Wer nur nachsieht, was heute an den Produkten steht, findet sie nie wieder
+    und entzieht sie nie — der Kunde behielte das Kontingent des grossen Tarifs,
+    waehrend er den kleinen zahlt.
+    """
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    gross = _role(db, "tarif-gross")
+    klein = _role(db, "tarif-klein")
+    _product(db, integration, role_id=gross.id, key="mc-gross")
+    _product(db, integration, role_id=klein.id, key="mc-klein")
+
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        client.put(
+            "/api/hoster/v1/services/svc-27",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-27",
+                "product_key": "mc-gross",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+    assert gross.id in _customer_roles(db, "svc-27")
+
+    gewechselt = client.put(
+        "/api/hoster/v1/services/svc-27",
+        json={
+            "desired_state": "active",
+            "external_subject": "kunde-27",
+            "product_key": "mc-klein",
+        },
+        headers={API_KEY_HEADER: api_key},
+    )
+
+    assert gewechselt.status_code == 200, gewechselt.text
+    rollen = _customer_roles(db, "svc-27")
+    assert klein.id in rollen
+    assert gross.id not in rollen
+
+
+def test_the_tariff_change_checks_the_role_of_the_new_product(
+    client: TestClient, db: Session, owner_user: User
+) -> None:
+    """Geprueft wird die Rolle, die auch vergeben wird.
+
+    `HosterService.product` ist `lazy="joined"` und die Session laeuft ohne
+    Autoflush: wer beim Wechsel nur den Fremdschluessel setzt, prueft die Rolle
+    des alten Tarifs und vergibt die des neuen. Die Eskalationsschranke stuende
+    dann neben der Vergabe statt davor.
+    """
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    harmlos = _role(db, "tarif-harmlos")
+    maechtig = _role(db, "tarif-loeschen", keys=("servers.delete",))
+    _product(db, integration, role_id=harmlos.id, key="mc-harmlos")
+    _product(db, integration, role_id=maechtig.id, key="mc-maechtig")
+
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        client.put(
+            "/api/hoster/v1/services/svc-28",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-28",
+                "product_key": "mc-harmlos",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    dienstrolle = db.query(Role).filter(Role.name == "hoster-service").one()
+    db.query(RolePermission).filter(
+        RolePermission.role_id == dienstrolle.id,
+        RolePermission.permission_key == "servers.delete",
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    gewechselt = client.put(
+        "/api/hoster/v1/services/svc-28",
+        json={
+            "desired_state": "active",
+            "external_subject": "kunde-28",
+            "product_key": "mc-maechtig",
+        },
+        headers={API_KEY_HEADER: api_key},
+    )
+
+    assert gewechselt.status_code == 422
+    assert maechtig.id not in _customer_roles(db, "svc-28")
+    db.expire_all()
+    assert db.query(HosterService).one().status_code == "hoster_role_escalation"
+
+
+def test_a_role_taken_off_the_product_is_still_revoked(
+    client: TestClient, db: Session, owner_user: User
+) -> None:
+    """Zurueckgenommen wird, was vergeben wurde — nicht, was heute im Tarif steht.
+
+    Nimmt der Betreiber die Rolle aus dem Produkt, waehrend ein Vertrag laeuft,
+    findet eine Ableitung ueber das Produkt sie nicht mehr. Die Kuendigung
+    liesse den Kunden mit einem Kontingent zurueck, das zu keinem Vertrag
+    gehoert, und keine spaetere Aktion holte es ein.
+    """
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    tarif = _role(db, "tarif-gross")
+    _product(db, integration, role_id=tarif.id)
+
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        client.put(
+            "/api/hoster/v1/services/svc-29",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-29",
+                "product_key": "mc-8gb",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+    assert tarif.id in _customer_roles(db, "svc-29")
+
+    # Der Betreiber nimmt die Rolle aus dem Tarif.
+    _product(db, integration, role_id=None)
+
+    with patch(
+        "services.server_action_service.request_lifecycle_operation",
+        lambda *a, **k: {"task_id": None},
+    ):
+        gekuendigt = client.put(
+            "/api/hoster/v1/services/svc-29",
+            json={"desired_state": "terminated", "external_subject": "kunde-29"},
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    assert gekuendigt.status_code == 200, gekuendigt.text
+    assert tarif.id not in _customer_roles(db, "svc-29")
+
+
+def test_a_deactivated_customer_still_loses_the_role(
+    client: TestClient, db: Session, owner_user: User
+) -> None:
+    """Auch ein gesperrtes Konto verliert die Rolle seines gekuendigten Vertrags.
+
+    Sonst haelt der Kunde nach einer Reaktivierung ein Kontingent ohne jeden
+    Vertrag — und weil sein letzter Vertrag beendet ist, laeuft nie wieder ein
+    Abgleich, der es einsammeln koennte.
+    """
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    tarif = _role(db, "tarif-gross")
+    _product(db, integration, role_id=tarif.id)
+
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        client.put(
+            "/api/hoster/v1/services/svc-30",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-30",
+                "product_key": "mc-8gb",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+    assert tarif.id in _customer_roles(db, "svc-30")
+
+    db.expire_all()
+    vertrag = db.query(HosterService).one()
+    kunde = db.query(User).filter(User.id == vertrag.identity.user_id).one()
+    kunde.is_active = False
+    db.commit()
+
+    with patch(
+        "services.server_action_service.request_lifecycle_operation",
+        lambda *a, **k: {"task_id": None},
+    ):
+        gekuendigt = client.put(
+            "/api/hoster/v1/services/svc-30",
+            json={"desired_state": "terminated", "external_subject": "kunde-30"},
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    assert gekuendigt.status_code == 200, gekuendigt.text
+    assert tarif.id not in _customer_roles(db, "svc-30")
+
+
+def test_the_operator_cannot_put_a_role_above_himself_on_a_product(
+    client: TestClient, db: Session, owner_user: User, regular_user: User, user_cookies: dict
+) -> None:
+    """`panel.hoster.write` ist kein Weg an der Rollenverwaltung vorbei.
+
+    Die Pruefung im Dienst richtet sich gegen den *Dienstbenutzer* — und den
+    waehlt genau dieser Akteur selbst aus. Ohne eine zweite Schranke gegen den
+    Akteur genuegt `panel.hoster.write`, um einen privilegierten Dienstbenutzer
+    einzutragen, die `admin`-Rolle an ein Produkt zu haengen, mit dem frisch
+    erhaltenen API-Key einen Vertrag zu kaufen und sich per Handoff eine
+    Sitzung als der so erzeugte Admin-Kunde ausstellen zu lassen.
+    """
+    betreiberrolle = _role(db, "hoster-betreiber", keys=("panel.hoster.read", "panel.hoster.write"))
+    set_user_roles(db, regular_user, [betreiberrolle.id])
+    service_user = _service_user(db)
+    integration, _ = _integration(db, service_user)
+    adminrolle = db.query(Role).filter(Role.name == "admin").one()
+    fremde_macht = _role(db, "tarif-allmacht", keys=("roles.manage",))
+
+    def speichern(role_id: int) -> int:
+        return client.put(
+            f"/api/hoster/integrations/{integration.id}/products",
+            json={
+                "external_product_key": "mc-8gb",
+                "game_type": "dayz",
+                "ram_limit_mb": 8192,
+                "cpu_limit_percent": 200,
+                "disk_limit_gb": 50,
+                "node_id": None,
+                "backup_interval_hours": None,
+                "role_id": role_id,
+                "enabled": True,
+            },
+            cookies=user_cookies,
+            headers=_csrf(user_cookies),
+        ).status_code
+
+    # Die Systemrolle `admin` ist ausdruecklich dem Owner vorbehalten.
+    assert speichern(adminrolle.id) == 403
+    # Und generell jede Rolle, deren Rechte der Akteur nicht selbst haelt.
+    assert speichern(fremde_macht.id) == 403
+    assert db.query(HosterProduct).count() == 0
 
 
 # ── Handoff ────────────────────────────────────────────────────────────────

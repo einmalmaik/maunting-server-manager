@@ -47,6 +47,10 @@ export interface HosterProduct {
   disk_limit_gb: number | null
   node_id: number | null
   backup_interval_hours: number | null
+  // Globale Rolle, die der Kunde zum laufenden Vertrag zusaetzlich erhaelt und
+  // beim Sperren wieder verliert. Ueber globale Rollen haengen unter anderem
+  // die KI-Kontingente — deshalb entscheidet dieses Feld ueber mehr als Optik.
+  role_id: number | null
   enabled: boolean
 }
 

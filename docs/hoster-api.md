@@ -206,6 +206,27 @@ Ein Tarifwechsel (`product_key` weicht ab) setzt `status_code` auf
 Ressourcengrenzen eines **laufenden** Servers bleiben eine bewusste Operator-Aktion — sie erfordern
 einen Neustart.
 
+Trägt die Produktzuordnung eine `role_id`, vergibt `active` diese globale Rolle **zusätzlich** zu
+den bestehenden Rollen des Kunden; `suspended` und `terminated` entziehen sie wieder — aber nur,
+wenn kein anderer laufender Vertrag desselben Kunden dieselbe Rolle noch fordert, und niemals,
+wenn es eine Systemrolle ist. Manuell vergebene Rollen bleiben unangetastet. Über globale Rollen
+laufen unter anderem die KI-Kontingente; genau dafür ist das Feld gedacht: ein größerer Tarif bringt
+mehr KI-Budget mit, ohne dass jemand von Hand Rollen pflegt.
+
+Maßgeblich ist dabei, was ein Vertrag **tatsächlich vergeben hat**, nicht was gerade an seinem
+Produkt steht. Daraus folgen drei Zusagen, auf die ein Shop sich verlassen kann:
+
+- Ein **Tarifwechsel** tauscht die Rolle, er stapelt sie nicht: die Rolle des vorherigen Produkts
+  wird entzogen, die des neuen vergeben — beides im selben Aufruf.
+- Ändert oder entfernt der Betreiber die Rolle eines Produkts, während Verträge darauf laufen, wird
+  bei der nächsten Zustandsänderung trotzdem die **ursprünglich vergebene** Rolle zurückgenommen.
+- Ein Vertrag, dessen Aktivierung fehlgeschlagen ist (`status: "failed"`), trägt keine Rolle — auch
+  dann nicht, wenn sein `desired_state` weiterhin `active` lautet.
+
+Löscht der Betreiber ein Produkt, während ein Vertrag darauf läuft, behält der Kunde die bereits
+vergebene Rolle bis zum Ende des Vertrags. Ein Aufräumen im Panel soll einem zahlenden Kunden nicht
+das Kontingent nehmen.
+
 ---
 
 ## Fehler und Statuscodes
@@ -231,8 +252,13 @@ Häufige `status_code`-Werte:
 | `install_directory_exists` | Rückstand einer früheren Installation |
 | `install_update_already_running` | Auf dem Server läuft bereits eine Installation |
 | `hoster_configuration_error` | Produkt, Dienstbenutzer oder Identität sind nicht nutzbar |
+| `hoster_role_escalation` | Die im Produkt hinterlegte Rolle enthält Rechte, die der Dienstbenutzer der Integration selbst nicht hat. Der Vertrag wird nicht umgesetzt. |
 | `hoster_internal_error` | Unerwarteter Fehler, im Panel-Log nachvollziehbar |
 | `product_changed_manual_resize_required` | Hinweis, kein Fehler: Tarif gewechselt, Ressourcen noch nicht angepasst |
+
+`hoster_role_escalation` schlägt absichtlich hart fehl, statt die Rolle still auszulassen: sonst
+hätte der Kunde einen Server ohne das Kontingent, für das er bezahlt hat, und niemand würde es
+merken.
 
 ---
 
@@ -499,7 +525,13 @@ Basis: `/api/hoster`
 | `disk_limit_gb` | `int \| null` | 1 – 1 048 576 |
 | `node_id` | `int \| null` | Feste Node erzwingen; `null` = automatische Wahl |
 | `backup_interval_hours` | `int \| null` | 1 – 8 760 |
+| `role_id` | `int \| null` | Globale Rolle, die der Kunde zusätzlich zu seinen bestehenden Rollen erhält, solange ein Vertrag auf dieses Produkt aktiv ist. Leer = keine Zusatzrolle. |
 | `enabled` | `bool` | Deaktivierte Produkte werden bei Bestellung abgelehnt |
+
+Die Rolle wird bereits beim Speichern geprüft: enthält sie eine Berechtigung, die der Dienstbenutzer
+der Integration selbst nicht hat, antwortet der Endpunkt mit `422`. Eine Integration kann nie mehr
+vergeben, als ihr Dienstbenutzer hält — sonst wäre das Feld ein Weg, sich über einen Shop-Kauf
+Rechte zu verschaffen.
 
 Das vollständige OpenAPI-Schema ist im Panel unter `/api/docs` verfügbar (erfordert Anmeldung und
 `panel.settings.read`).

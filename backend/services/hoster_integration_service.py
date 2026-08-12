@@ -26,13 +26,19 @@ from models import (
     HosterIdentity,
     HosterIntegration,
     HosterProduct,
+    Role,
     User,
 )
 from models.hoster import hash_token
 from services.auth_service import AuthService
 from services.dis_client import DisClient
 from services.permission_catalog import SYSTEM_ROLE_USER
-from services.role_service import get_role_by_name, set_user_roles
+from services.role_service import (
+    get_role,
+    get_role_by_name,
+    role_permission_keys,
+    set_user_roles,
+)
 
 
 API_KEY_HEADER = "X-MSM-Hoster-Key"
@@ -43,6 +49,15 @@ _EXTERNAL_ID_RE = re.compile(r"^[A-Za-z0-9._:@-]+$")
 
 class HosterConfigurationError(ValueError):
     """Die Hoster-Konfiguration ist ungueltig; wird am Rand zu einem 422."""
+
+
+class HosterRoleEscalation(HosterConfigurationError):
+    """Die Produktrolle traegt Rechte, die der Dienstbenutzer selbst nicht hat.
+
+    Bewusst eine Unterklasse: der Admin-Router behandelt sie ohne Zutun weiter
+    als 422, waehrend der Vertragspfad genau diesen Fall am Typ erkennt und mit
+    einem eigenen, stabilen Fehlercode fehlschlaegt.
+    """
 
 
 def _now() -> datetime:
@@ -224,6 +239,47 @@ def authenticate(db: Session, api_key: str | None) -> HosterIntegration:
 # ── Produkte ───────────────────────────────────────────────────────────────
 
 
+def ensure_role_is_delegatable(
+    db: Session, *, integration: HosterIntegration, role_id: int | None
+) -> Role | None:
+    """Prueft, ob eine Integration die Produktrolle ueberhaupt vergeben darf.
+
+    Eine Integration darf nie mehr vergeben, als ihr eigener Dienstbenutzer
+    haelt. Ohne diese Schranke waere das Produktfeld ein Weg, sich ueber einen
+    Shop-Kauf Rechte zu verschaffen: ein Produkt mit der Adminrolle wuerde jeden
+    Kaeufer zum Admin machen, obwohl der Shop-Schluessel nur ein Vertragskonto
+    ist. Inhaltlich dieselbe Regel wie `_ensure_no_global_escalation` in
+    routers/admin.py — dort aber an den Router gebunden und als HTTPException.
+    """
+    if role_id is None:
+        return None
+    from services import permission_service
+
+    role = get_role(db, role_id)
+    if role is None:
+        raise HosterConfigurationError("Zugeordnete Rolle existiert nicht")
+    service_user = (
+        db.query(User)
+        .filter(User.id == integration.service_user_id, User.is_active.is_(True))
+        .first()
+    )
+    if service_user is None:
+        raise HosterConfigurationError(
+            "Der Dienstbenutzer dieser Integration ist deaktiviert oder geloescht"
+        )
+    missing = sorted(
+        key
+        for key in role_permission_keys(db, role.id)
+        if not permission_service.has_global_permission(db, service_user, key)
+    )
+    if missing:
+        raise HosterRoleEscalation(
+            "Der Dienstbenutzer dieser Integration besitzt die Rechte der "
+            f"zugeordneten Rolle nicht selbst. Fehlend: {missing}"
+        )
+    return role
+
+
 def upsert_product(
     db: Session,
     *,
@@ -235,6 +291,7 @@ def upsert_product(
     disk_limit_gb: int | None,
     node_id: int | None,
     backup_interval_hours: int | None,
+    role_id: int | None,
     enabled: bool,
 ) -> HosterProduct:
     """Legt eine Produktzuordnung an oder aktualisiert sie.
@@ -242,6 +299,10 @@ def upsert_product(
     Der Blueprint wird sofort gegen die Registry geprueft. Ein Produkt, das auf
     einen unbekannten Blueprint zeigt, wuerde sonst erst bei der ersten echten
     Bestellung eines Kunden auffallen.
+
+    Dasselbe gilt fuer die Rolle bei Buchung: sie wird geprueft, bevor die Zeile
+    geschrieben wird. Eine gespeicherte, aber nicht delegierbare Rolle waere ein
+    Produkt, das jede Bestellung erst mitten im Ablauf scheitern liesse.
     """
     from games import get_plugin
 
@@ -262,6 +323,7 @@ def upsert_product(
 
         if db.query(Node).filter(Node.id == node_id).first() is None:
             raise HosterConfigurationError("Zugeordnete Node existiert nicht")
+    ensure_role_is_delegatable(db, integration=integration, role_id=role_id)
 
     product = (
         db.query(HosterProduct)
@@ -280,6 +342,7 @@ def upsert_product(
     product.disk_limit_gb = disk_limit_gb
     product.node_id = node_id
     product.backup_interval_hours = backup_interval_hours
+    product.role_id = role_id
     product.enabled = enabled
     product.updated_at = _now()
     try:

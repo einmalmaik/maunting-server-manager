@@ -143,6 +143,7 @@ const STATUS_CODES = [
   'install_directory_exists',
   'install_update_already_running',
   'hoster_configuration_error',
+  'hoster_role_escalation',
   'hoster_internal_error',
   'product_changed_manual_resize_required',
 ] as const
@@ -309,6 +310,12 @@ export function HosterApiDocs() {
         />
         <p className="mt-4 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsHosterApi.states.purge')}</p>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsHosterApi.states.productChange')}</p>
+        {/* Die Produktrolle haengt am Zielzustand, nicht am tatsaechlichen — deshalb hier
+            und nicht bei den Statuswerten. */}
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsHosterApi.states.role')}</p>
+        {/* Die eine Zusage, die ein Shop-Entwickler sonst falsch raet: entzogen
+            wird das Vergebene, nicht das heute am Produkt Stehende. */}
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsHosterApi.states.roleRecord')}</p>
       </section>
 
       <section aria-labelledby="errors" className="mb-10">
@@ -316,6 +323,7 @@ export function HosterApiDocs() {
         <DefinitionTable rows={HTTP_CODES.map(code => ({ term: code, body: t(`docsHosterApi.http.${code}`) }))} />
         <p className="mt-4 mb-4 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsHosterApi.errors.persisted')}</p>
         <DefinitionTable rows={STATUS_CODES.map(code => ({ term: code, body: t(`docsHosterApi.statusCode.${code}`) }))} />
+        <p className="mt-4 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsHosterApi.errors.roleEscalation')}</p>
       </section>
 
       <section aria-labelledby="webhooks" className="mb-10">
@@ -426,7 +434,8 @@ export function HosterApiDocs() {
             </tbody>
           </table>
         </div>
-        <p className="mt-4 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsHosterApi.admin.openapi')}</p>
+        <p className="mt-4 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsHosterApi.admin.productRole')}</p>
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-on-surface-variant">{t('docsHosterApi.admin.openapi')}</p>
       </section>
 
       <section aria-labelledby="operations" className="mb-10">

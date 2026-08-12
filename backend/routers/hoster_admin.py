@@ -32,9 +32,56 @@ from schemas.hoster import (
 from services import audit_service, hoster_integration_service
 from services.dis_client import DisSidecarError
 from services.hoster_integration_service import HosterConfigurationError
+from services.permission_catalog import SYSTEM_ROLE_ADMIN
+from services.permission_service import has_global_permission
+from services.role_service import get_role, role_permission_keys
 
 
 router = APIRouter(prefix="/api/hoster", tags=["hoster-admin"])
+
+
+def _ensure_actor_may_grant_role(db: Session, actor: User, role_id: int | None) -> None:
+    """Verbietet, ueber ein Produkt eine Rolle zu hinterlegen, die der Akteur
+    selbst nicht vergeben duerfte.
+
+    `ensure_role_is_delegatable` im Dienst beantwortet eine andere Frage: ob die
+    *Integration* die Rolle vergeben darf. Sie prueft dazu gegen den
+    Dienstbenutzer — und den waehlt genau der Akteur aus, der hier gerade
+    schreibt. Als alleinige Schranke ist sie deshalb wertlos: wer
+    `panel.hoster.write` hat, legt eine Integration mit einem privilegierten
+    Dienstbenutzer an, haengt die `admin`-Rolle an ein Produkt, kauft mit dem
+    frisch erhaltenen API-Key einen Vertrag und holt sich ueber einen Handoff
+    eine Sitzung als der so erzeugte Admin-Kunde. `panel.hoster.write` waere
+    damit ein Weg zu Owner-naher Macht.
+
+    Die drei Regeln hier sind woertlich die aus `_assign_roles` in
+    routers/admin.py — dieselbe Zusage, gleiche Reihenfolge, gleiche Codes.
+    Beide Pruefungen gelten zusammen: der Akteur muss die Rolle vergeben
+    duerfen, *und* der Dienstbenutzer muss sie tragen.
+    """
+    if role_id is None or actor.is_owner:
+        return
+    role = get_role(db, role_id)
+    if role is None:
+        raise HTTPException(status_code=404, detail="Rolle nicht gefunden")
+    if role.is_system and role.name == SYSTEM_ROLE_ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Nur Owner kann die admin-Rolle zuweisen",
+        )
+    missing = sorted(
+        key
+        for key in role_permission_keys(db, role.id)
+        if not has_global_permission(db, actor, key)
+    )
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Du kannst nur Rollen zuordnen, deren Rechte du selbst "
+                f"besitzt. Fehlend: {missing}"
+            ),
+        )
 
 
 def _integration_response(row: HosterIntegration) -> HosterIntegrationResponse:
@@ -65,6 +112,7 @@ def _product_response(row: HosterProduct) -> HosterProductResponse:
         disk_limit_gb=row.disk_limit_gb,
         node_id=row.node_id,
         backup_interval_hours=row.backup_interval_hours,
+        role_id=row.role_id,
         enabled=row.enabled,
     )
 
@@ -84,6 +132,10 @@ def _service_response(row: HosterService) -> HosterServiceResponse:
 
 
 def _config_error(exc: HosterConfigurationError) -> HTTPException:
+    # HosterRoleEscalation ist eine Unterklasse von HosterConfigurationError und
+    # wird deshalb hier bereits erfasst: eine Produktrolle, die der Dienstbenutzer
+    # selbst nicht haelt, ist eine Fehlkonfiguration wie jede andere und bleibt
+    # 422. Kein zweiter except-Zweig noetig.
     return HTTPException(status_code=422, detail=str(exc))
 
 
@@ -298,6 +350,7 @@ def upsert_product(
     _: None = Depends(verify_csrf),
 ) -> HosterProductResponse:
     integration = _get_integration(db, integration_id)
+    _ensure_actor_may_grant_role(db, actor, payload.role_id)
     try:
         product = hoster_integration_service.upsert_product(
             db, integration=integration, **payload.model_dump()
@@ -312,6 +365,7 @@ def upsert_product(
                 "slug": integration.slug,
                 "product": product.external_product_key,
                 "game_type": product.game_type,
+                "role_id": product.role_id,
             },
         )
         db.commit()

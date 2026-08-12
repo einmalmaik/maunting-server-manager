@@ -62,6 +62,7 @@ class HosterProductWrite(BaseModel):
     disk_limit_gb: int | None = Field(None, ge=1, le=1_048_576)
     node_id: int | None = Field(None, ge=1)
     backup_interval_hours: int | None = Field(None, ge=1, le=8_760)
+    role_id: int | None = Field(None, ge=1)
     enabled: bool = True
 
 
@@ -75,6 +76,7 @@ class HosterProductResponse(BaseModel):
     disk_limit_gb: int | None
     node_id: int | None
     backup_interval_hours: int | None
+    role_id: int | None
     enabled: bool
 
 

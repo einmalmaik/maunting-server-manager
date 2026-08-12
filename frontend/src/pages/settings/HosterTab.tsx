@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
 import { Copy, KeyRound, Pencil, Plug, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 
 import {
@@ -19,10 +20,12 @@ import {
   type HosterService,
 } from '@/api/hoster'
 import { credentialsApi } from '@/api/credentials'
+import { rbacApi } from '@/api/rbac'
 import { SanitizedApiError } from '@/api/client'
 import { Button, NumberStepper, Switch } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
+import type { Role } from '@/types/permissions'
 
 const EMPTY_PRODUCT: HosterProductWrite = {
   external_product_key: '',
@@ -32,6 +35,7 @@ const EMPTY_PRODUCT: HosterProductWrite = {
   disk_limit_gb: null,
   node_id: null,
   backup_interval_hours: null,
+  role_id: null,
   enabled: true,
 }
 
@@ -128,6 +132,15 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
             </h3>
           </div>
           <p className="mt-2 text-sm text-on-surface-variant">{t('hoster.description')}</p>
+          {/* Wer den Shop tatsaechlich anbindet, braucht die Endpunkt- und
+              Webhook-Referenz — dieser Reiter erklaert nur die Konfiguration. */}
+          <Link
+            to="/docs/hoster-api"
+            className="msm-btn-secondary mt-4 inline-flex items-center gap-2 px-4 py-2 text-sm"
+          >
+            <Plug className="h-4 w-4" aria-hidden="true" />
+            {t('hoster.docsLink')}
+          </Link>
         </div>
         {canWrite && !creating && (
           <Button type="button" variant="secondary" onClick={() => setCreating(true)}>
@@ -180,10 +193,15 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
           {selected && (
             <>
               <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-                <Fact label={t('hoster.apiKey')} value={selected.api_key_hint ?? '—'} />
+                <Fact
+                  label={t('hoster.apiKey')}
+                  value={selected.api_key_hint ?? '—'}
+                  hint={t('hoster.apiKeyHint')}
+                />
                 <Fact
                   label={t('hoster.webhookSecret')}
                   value={selected.webhook_secret_configured ? (selected.webhook_secret_hint ?? '••••') : t('hoster.notConfigured')}
+                  hint={t('hoster.webhookSecretHint')}
                 />
                 <Fact label={t('hoster.webhookUrl')} value={selected.webhook_url ?? t('hoster.notConfigured')} />
                 <Fact label={t('hoster.graceDays')} value={String(selected.terminate_grace_days)} />
@@ -230,11 +248,12 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
   )
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function Fact({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div>
       <dt className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{label}</dt>
       <dd className="mt-0.5 break-all text-on-surface">{value}</dd>
+      {hint && <dd className="mt-0.5 text-xs text-on-surface-variant">{hint}</dd>}
     </div>
   )
 }
@@ -307,8 +326,8 @@ function IntegrationForm({
       }}
     >
       <fieldset disabled={disabled || saving} className="grid grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2">
-        <Field label={t('hoster.name')} value={name} onChange={setName} />
-        <Field label={t('hoster.slug')} value={slug} onChange={setSlug} />
+        <Field label={t('hoster.name')} value={name} onChange={setName} hint={t('hoster.nameHint')} />
+        <Field label={t('hoster.slug')} value={slug} onChange={setSlug} hint={t('hoster.slugHint')} />
         <Field
           label={t('hoster.serviceUserId')}
           value={serviceUserId}
@@ -321,6 +340,7 @@ function IntegrationForm({
           onChange={setWebhookUrl}
           type="url"
           placeholder="https://shop.example/hooks/msm"
+          hint={t('hoster.webhookUrlHint')}
         />
         <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
           <p className="text-xs text-on-surface-variant">{t('hoster.serviceUserHint')}</p>
@@ -330,6 +350,7 @@ function IntegrationForm({
             {t('hoster.graceDays')}
           </span>
           <NumberStepper value={graceDays} onValueChange={setGraceDays} min={0} max={365} step={1} />
+          <p className="text-xs text-on-surface-variant">{t('hoster.graceDaysHint')}</p>
         </label>
       </fieldset>
       <div className="flex flex-wrap justify-end gap-2">
@@ -403,13 +424,20 @@ function IntegrationEditForm({
           onChange={setWebhookUrl}
           type="url"
           placeholder="https://shop.example/hooks/msm"
+          hint={t('hoster.webhookUrlHint')}
         />
         <label className="space-y-1.5">
           <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
             {t('hoster.graceDays')}
           </span>
           <NumberStepper value={graceDays} onValueChange={setGraceDays} min={0} max={365} step={1} />
+          <p className="text-xs text-on-surface-variant">{t('hoster.graceDaysHint')}</p>
         </label>
+        {/* Der Dienstbenutzer laesst sich hier nicht wechseln — was an ihm
+            haengt, gehoert trotzdem sichtbar erklaert. */}
+        <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+          <p className="text-xs text-on-surface-variant">{t('hoster.serviceUserHint')}</p>
+        </div>
         <label className="flex min-h-10 items-center justify-between gap-4 text-sm text-on-surface md:col-span-2">
           <span>{t('hoster.enabled')}</span>
           <Switch checked={enabled} onCheckedChange={setEnabled} />
@@ -485,6 +513,7 @@ function PanelFallbackSection({ canWrite }: { canWrite: boolean }) {
 function ProductSection({ integrationId, canWrite }: { integrationId: number; canWrite: boolean }) {
   const { t } = useTranslation()
   const [products, setProducts] = useState<HosterProduct[]>([])
+  const [roles, setRoles] = useState<Role[]>([])
   const [draft, setDraft] = useState<HosterProductWrite>(EMPTY_PRODUCT)
   const [busy, setBusy] = useState(false)
 
@@ -498,6 +527,27 @@ function ProductSection({ integrationId, canWrite }: { integrationId: number; ca
   }, [integrationId, t])
 
   useEffect(load, [load])
+
+  // Die Rollenliste ist Beiwerk: sie fuellt ein optionales Feld. Faellt sie aus,
+  // bleibt der Rest der Sektion bedienbar — deshalb hier kein Toast, sondern
+  // eine leere Auswahl.
+  useEffect(() => {
+    let active = true
+    rbacApi
+      .listRoles()
+      .then((rows) => { if (active) setRoles(rows) })
+      .catch(() => { if (active) setRoles([]) })
+    return () => { active = false }
+  }, [])
+
+  const sortedRoles = [...roles].sort((a, b) => a.name.localeCompare(b.name))
+
+  // Ohne geladene Liste bleibt die Kennung stehen: "keine Rolle" waere an der
+  // Stelle eine Falschaussage.
+  const roleLabel = (roleId: number | null) => {
+    if (roleId === null) return t('hoster.products.roleNone')
+    return roles.find((role) => role.id === roleId)?.name ?? `#${roleId}`
+  }
 
   const save = async () => {
     if (!canWrite || busy) return
@@ -531,6 +581,7 @@ function ProductSection({ integrationId, canWrite }: { integrationId: number; ca
             <span className="font-medium text-on-surface">{product.external_product_key}</span>
             <span className="text-on-surface-variant">
               {product.game_type} · {product.ram_limit_mb ?? '—'} MB · {product.cpu_limit_percent ?? '—'} %
+              {' · '}{roleLabel(product.role_id)}
             </span>
             {canWrite && (
               <Button
@@ -564,12 +615,17 @@ function ProductSection({ integrationId, canWrite }: { integrationId: number; ca
             label={t('hoster.products.key')}
             value={draft.external_product_key}
             onChange={(external_product_key) => setDraft({ ...draft, external_product_key })}
+            hint={t('hoster.products.keyHint')}
           />
           <Field
             label={t('hoster.products.gameType')}
             value={draft.game_type}
             onChange={(game_type) => setDraft({ ...draft, game_type })}
+            hint={t('hoster.products.gameTypeHint')}
           />
+          {/* Eine Erklaerung fuer alle drei Grenzen: dreimal derselbe Satz waere
+              nur laenger, nicht klarer. */}
+          <p className="text-xs text-on-surface-variant md:col-span-2">{t('hoster.products.limitsHint')}</p>
           <label className="space-y-1.5">
             <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
               {t('hoster.products.ram')}
@@ -617,6 +673,26 @@ function ProductSection({ integrationId, canWrite }: { integrationId: number; ca
               max={8760}
               step={1}
             />
+            <p className="text-xs text-on-surface-variant">{t('hoster.products.backupIntervalHint')}</p>
+          </label>
+          <label className="space-y-1.5">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('hoster.products.role')}
+            </span>
+            <select
+              className="msm-input"
+              value={draft.role_id ?? ''}
+              onChange={(event) => setDraft({
+                ...draft,
+                role_id: event.target.value ? Number(event.target.value) : null,
+              })}
+            >
+              <option value="">{t('hoster.products.roleNone')}</option>
+              {sortedRoles.map((role) => (
+                <option key={role.id} value={role.id}>{role.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-on-surface-variant">{t('hoster.products.roleHint')}</p>
           </label>
           <div className="md:col-span-2 flex items-center justify-between gap-4">
             <label className="flex items-center gap-3 text-sm text-on-surface">
@@ -737,22 +813,33 @@ function DeliverySection({ integrationId, canWrite }: { integrationId: number; c
   )
 }
 
+/**
+ * Eingabefeld mit optionaler Erklaerung.
+ *
+ * Der Hinweis steht als eigene Zeile unter dem Feld und bewusst nicht in einem
+ * Tooltip: ein Hover-Hinweis existiert auf Touch-Geraeten nicht und bleibt fuer
+ * Screenreader unerreichbar. Weil er im <label> steht, liest der Screenreader
+ * ihn zusammen mit der Beschriftung vor.
+ */
 function Field({
   label,
   value,
   onChange,
+  hint,
   className = '',
   ...props
 }: {
   label: string
   value: string
   onChange: (value: string) => void
+  hint?: string
   className?: string
 } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'>) {
   return (
     <label className={`space-y-1.5 ${className}`}>
       <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{label}</span>
       <input className="msm-input" value={value} onChange={(event) => onChange(event.target.value)} {...props} />
+      {hint && <p className="text-xs text-on-surface-variant">{hint}</p>}
     </label>
   )
 }

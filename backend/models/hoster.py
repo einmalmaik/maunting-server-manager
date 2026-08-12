@@ -106,6 +106,13 @@ class HosterProduct(Base):
         Integer, ForeignKey("nodes.id", ondelete="SET NULL"), nullable=True
     )
     backup_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Diese globale Rolle bekommt der Kunde zusaetzlich, solange sein Vertrag
+    # aktiv ist. Ueber globale Rollen laufen unter anderem die KI-Kontingente
+    # (`role_ai_limit.py`) — genau dafuer gibt es das Feld: ein groesseres
+    # Produkt darf mehr KI, ohne dass jemand von Hand Rollen nachpflegt.
+    role_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("roles.id", ondelete="SET NULL"), nullable=True
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
@@ -187,6 +194,17 @@ class HosterService(Base):
     )
     server_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # Welche globale Rolle dieser Vertrag dem Kunden tatsaechlich verschafft hat.
+    #
+    # Bewusst hier festgehalten und nicht bei Bedarf aus `product.role_id`
+    # abgeleitet: das Produkt ist veraenderlich, die Vergabe ist ein Ereignis.
+    # Wer beim Entzug nachsieht, was *heute* am Produkt steht, entzieht nach
+    # einem Tarifwechsel die falsche Rolle und nach einer Produktaenderung gar
+    # keine — der Kunde behielte ein KI-Kontingent ohne Vertrag. Diese Spalte
+    # ist die einzige Stelle, an der steht, was zurueckzunehmen ist.
+    granted_role_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("roles.id", ondelete="SET NULL"), nullable=True
     )
     desired_state: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)

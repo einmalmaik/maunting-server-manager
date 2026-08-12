@@ -94,6 +94,39 @@ def test_ein_werkzeugergebnis_ueberlebt_seinen_lauf(db: Session) -> None:
     }
 
 
+def test_ein_produkt_ueberlebt_seine_rolle(db: Session) -> None:
+    """`hoster_products.role_id` ordnet zu, es besitzt nicht.
+
+    Die Spalte sagt nur, welche globale Rolle eine Buchung mitbringt. Mit
+    `RESTRICT` waere jede Rolle unloeschbar, sobald sie einmal an einem Produkt
+    hing — mit `CASCADE` haette das Loeschen einer Rolle die Produktzeile
+    mitgenommen und damit stillschweigend alle laufenden Vertraege ihres
+    Blueprints und ihrer Ressourcengrenzen beraubt. `SET NULL` bedeutet exakt
+    das, was NULL in dieser Spalte immer bedeutet hat: keine Zusatzrolle.
+    """
+    inspector = inspect(db.get_bind())
+
+    assert _fremdschluessel(inspector, "hoster_products", "role_id")["options"] == {
+        "ondelete": "SET NULL"
+    }
+
+
+def test_ein_vertrag_ueberlebt_die_rolle_die_er_vergeben_hat(db: Session) -> None:
+    """`hoster_services.granted_role_id` ist ein Beleg, kein Besitz.
+
+    Die Spalte haelt fest, welche Rolle dieser Vertrag dem Kunden verschafft
+    hat — nur daraus laesst sich spaeter ableiten, was zurueckzunehmen ist.
+    `CASCADE` wuerde beim Loeschen einer Rolle den ganzen Vertrag vernichten,
+    samt Serverbezug und Kuendigungsfrist. `SET NULL` ist hier auch fachlich das
+    Richtige: ist die Rolle fort, gibt es nichts mehr zu entziehen.
+    """
+    inspector = inspect(db.get_bind())
+
+    assert _fremdschluessel(inspector, "hoster_services", "granted_role_id")["options"] == {
+        "ondelete": "SET NULL"
+    }
+
+
 def _scope_check(inspector) -> str:
     for pruefung in inspector.get_check_constraints("ai_memory_entries"):
         if pruefung.get("name") == "ck_ai_memory_entries_scope":
@@ -198,6 +231,32 @@ def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
         assert "server_shared" not in _scope_check(inspect(engine))
         command.upgrade(config, "head")
         assert "server_shared" in _scope_check(inspect(engine))
+
+        # Und derselbe Nachweis fuer die Rolle bei Buchung. Die Spalte kommt
+        # ueber einen Batch-Umbau von `hoster_products` in die Tabelle — laesst
+        # dieser Umbau den Fremdschluessel weg, sieht `create_all` davon nichts
+        # und der Test oben bliebe gruen.
+        command.downgrade(config, "20260812_01")
+        assert "role_id" not in {
+            spalte["name"] for spalte in inspect(engine).get_columns("hoster_products")
+        }
+        command.upgrade(config, "head")
+        assert _fremdschluessel(inspect(engine), "hoster_products", "role_id")[
+            "options"
+        ] == {"ondelete": "SET NULL"}
+
+        # Und fuer den Beleg der Vergabe. Er kam eine Revision spaeter als die
+        # Rolle am Produkt und aus gutem Grund: ohne ihn entzieht ein
+        # Tarifwechsel die falsche Rolle. Faellt die Spalte aus der Migration,
+        # laeuft der Betrieb wieder in genau diesen Fehler.
+        command.downgrade(config, "20260812_02")
+        assert "granted_role_id" not in {
+            spalte["name"] for spalte in inspect(engine).get_columns("hoster_services")
+        }
+        command.upgrade(config, "head")
+        assert _fremdschluessel(inspect(engine), "hoster_services", "granted_role_id")[
+            "options"
+        ] == {"ondelete": "SET NULL"}
     finally:
         engine.dispose()
         settings.database_url = vorher

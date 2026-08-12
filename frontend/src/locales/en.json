@@ -3213,17 +3213,24 @@
   "hoster": {
     "title": "Hoster integration",
     "description": "Connects an external shop to MSM. The shop only reports the desired contract state; server creation, permissions and lifecycle use the same logic as the panel.",
+    "docsLink": "Full reference for shop developers",
     "add": "Add integration",
     "empty": "No hoster integration configured yet. Self-hosted operation works unchanged without this area.",
     "integration": "Integration",
     "name": "Name",
+    "nameHint": "Display name for the list in the panel. Purely descriptive — it has no technical effect.",
     "slug": "Slug",
+    "slugHint": "Panel-wide unique technical identifier. It appears in every audit entry and every webhook payload, and it forms the username prefix of customers created here (<slug>-kunde-…). Changing it later breaks the mapping in existing logs.",
     "serviceUserId": "Service user (user ID)",
     "serviceUserHint": "The integration acts on behalf of this panel user and can never do more than they can. The user needs the 'servers.create' permission; the owner account is not allowed.",
     "webhookUrl": "Webhook target (HTTPS)",
+    "webhookUrlHint": "HTTPS target for state changes (service.ready, service.failed, …). Deliveries are persisted and retried with backoff. Empty means no notification.",
     "webhookSecret": "Webhook secret",
+    "webhookSecretHint": "Key of the HMAC signature on outgoing webhooks. The shop uses it to verify that a call really comes from MSM.",
     "apiKey": "API key",
+    "apiKeyHint": "The shop authenticates against /api/hoster/v1 with it. MSM stores only a hash — after creation the key cannot be retrieved again, only rotated.",
     "graceDays": "Retention after termination (days)",
+    "graceDaysHint": "After a termination, servers and data are kept for this many days before the cleanup run deletes them for good. 0 releases them for deletion immediately, more than 365 days is not possible.",
     "notConfigured": "Not configured",
     "rotateApiKey": "Rotate API key",
     "rotateWebhookSecret": "Rotate webhook secret",
@@ -3247,11 +3254,18 @@
       "description": "Maps a shop product key to a blueprint and a resource package. The shop does not need to know internal MSM details.",
       "empty": "No products mapped yet.",
       "key": "Shop product key",
+      "keyHint": "The product key the shop sends along when ordering. It must be spelled exactly as it is there — the shop never needs to know MSM-internal IDs.",
       "gameType": "Blueprint / game type",
+      "gameTypeHint": "Blueprint from the registry. An unknown value is rejected on save already.",
       "ram": "RAM limit (MB)",
       "cpu": "CPU limit (%)",
       "disk": "Disk limit (GB)",
+      "limitsHint": "Resource package of this plan. Empty uses the blueprint's default. Changes apply to newly created servers; running servers are adjusted by the operator deliberately, by hand.",
       "backupInterval": "Backup interval (hours)",
+      "backupIntervalHint": "Automatic backup interval for servers of this plan. Empty means no automatic backups.",
+      "role": "Role on purchase",
+      "roleHint": "The customer receives this global role in addition to their own for as long as the contract runs; AI quotas are among the things it governs. Suspending or terminating takes it back — unless another running contract of the same customer still requires it. A tariff change swaps the role. You can only pick roles whose permissions you hold yourself and which the integration's service user holds as well.",
+      "roleNone": "No additional role",
       "enabled": "Orderable",
       "save": "Save product",
       "saved": "Product saved",
@@ -3423,7 +3437,9 @@
       "desiredTitle": "Target states (set by the shop)",
       "actualTitle": "Actual states (set by MSM, each emits a webhook)",
       "purge": "The transition terminating → terminated does not happen in the API call but in a maintenance run that checks every minute whether terminate_after has been reached. The deletion path is the same as in the panel.",
-      "productChange": "A plan change sets status_code to product_changed_manual_resize_required. The product mapping changes immediately; resource limits of a running server remain a deliberate operator action — they require a restart."
+      "productChange": "A plan change sets status_code to product_changed_manual_resize_required. The product mapping changes immediately; resource limits of a running server remain a deliberate operator action — they require a restart.",
+      "role": "If the product mapping carries a role_id, the target state active grants that global role in addition to the customer's existing roles; suspended and terminated revoke it again — but only if no other active contract of the same customer still asks for that role, and never if it is a system role. Manually granted roles stay untouched. Global roles carry the AI quotas, among other things; that is exactly why the field exists: a larger plan brings more AI budget without anyone maintaining roles by hand.",
+      "roleRecord": "What counts is the role a contract actually granted, not what its product carries right now. A tariff change therefore swaps the role instead of stacking it; if the operator changes or removes a product's role while contracts run on it, the originally granted role is still taken back; and a contract whose activation failed carries no role at all, even if its desired state remains active. If the operator deletes a product, the customer keeps the granted role until the contract ends."
     },
     "desired": {
       "active": "Contract is running. A server is created if needed and customer permissions are granted.",
@@ -3441,7 +3457,8 @@
     },
     "errors": {
       "title": "Errors and status codes",
-      "persisted": "A functional failure is not just an HTTP error. The contract remains queryable with status “failed” and a stable status_code, so the shop can find out afterwards what happened."
+      "persisted": "A functional failure is not just an HTTP error. The contract remains queryable with status “failed” and a stable status_code, so the shop can find out afterwards what happened.",
+      "roleEscalation": "hoster_role_escalation fails hard on purpose instead of silently skipping the role: otherwise the customer would have a server without the quota they paid for, and nobody would notice."
     },
     "http": {
       "200": "Success. Also for PUT — there is no 201.",
@@ -3456,6 +3473,7 @@
       "install_directory_exists": "Leftover from an earlier installation.",
       "install_update_already_running": "An installation is already running on the server.",
       "hoster_configuration_error": "Product, service user or identity is not usable.",
+      "hoster_role_escalation": "The role configured on the product contains permissions the integration's service user does not hold itself. The contract is not carried out.",
       "hoster_internal_error": "Unexpected error, traceable in the panel log.",
       "product_changed_manual_resize_required": "A hint, not an error: plan changed, resources not yet adjusted."
     },
@@ -3592,6 +3610,7 @@
       "listServices": "Contracts of this integration",
       "listDeliveries": "Webhook delivery log (status code, attempt — never signature or body)",
       "retryDelivery": "Re-queue a failed delivery",
+      "productRole": "The product body of PUT /integrations/{integration_id}/products also accepts role_id: the global role a customer receives in addition to their existing roles for as long as a contract runs on this product. Empty means no additional role. Two limits apply together: the caller may only assign roles whose permissions they hold themselves (otherwise 403; the admin system role stays reserved for the owner), and the integration's service user must hold them as well (otherwise 422). An integration can therefore never grant more than both together cover.",
       "openapi": "The full OpenAPI schema is available at /api/docs and requires a login with the panel.settings.read permission."
     },
     "operations": {

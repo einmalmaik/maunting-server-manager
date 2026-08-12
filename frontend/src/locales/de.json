@@ -3213,17 +3213,24 @@
   "hoster": {
     "title": "Hoster-Anbindung",
     "description": "Verbindet einen externen Shop mit MSM. Der Shop meldet nur den gewünschten Vertragszustand; Servererstellung, Rechte und Lifecycle laufen über dieselbe Logik wie im Panel.",
+    "docsLink": "Vollständige Referenz für Shop-Entwickler",
     "add": "Integration hinzufügen",
     "empty": "Noch keine Hoster-Integration angelegt. Self-Hosted-Betrieb funktioniert unverändert ohne diesen Bereich.",
     "integration": "Integration",
     "name": "Name",
+    "nameHint": "Anzeigename für die Liste im Panel. Rein beschreibend — technisch wirkt er nirgends.",
     "slug": "Kurzname (Slug)",
+    "slugHint": "Panelweit eindeutige technische Kennung. Sie steht in jedem Audit-Eintrag und jeder Webhook-Nutzlast, und daraus entsteht der Benutzername-Präfix angelegter Kunden (<slug>-kunde-…). Nachträglich geändert bricht sie die Zuordnung in bestehenden Protokollen.",
     "serviceUserId": "Dienstbenutzer (User-ID)",
     "serviceUserHint": "Die Integration handelt im Namen dieses Panel-Benutzers und kann nie mehr als er. Der Benutzer benötigt das Recht 'servers.create'; der Owner-Account ist nicht zulässig.",
     "webhookUrl": "Webhook-Ziel (HTTPS)",
+    "webhookUrlHint": "HTTPS-Ziel für Statusänderungen (service.ready, service.failed, …). Zustellungen sind persistent und werden mit Backoff wiederholt. Leer bedeutet: keine Benachrichtigung.",
     "webhookSecret": "Webhook-Secret",
+    "webhookSecretHint": "Schlüssel der HMAC-Signatur ausgehender Webhooks. Der Shop prüft damit, dass ein Aufruf wirklich von MSM stammt.",
     "apiKey": "API-Key",
+    "apiKeyHint": "Damit authentifiziert sich der Shop gegen /api/hoster/v1. MSM speichert nur einen Hash — nach dem Anlegen ist der Schlüssel nicht mehr abrufbar, nur rotierbar.",
     "graceDays": "Aufbewahrung nach Kündigung (Tage)",
+    "graceDaysHint": "Nach einer Kündigung bleiben Server und Daten so viele Tage erhalten, bevor der Aufräumlauf sie endgültig löscht. 0 gibt sie sofort zum Löschen frei, mehr als 365 Tage sind nicht möglich.",
     "notConfigured": "Nicht konfiguriert",
     "rotateApiKey": "API-Key rotieren",
     "rotateWebhookSecret": "Webhook-Secret rotieren",
@@ -3247,11 +3254,18 @@
       "description": "Ordnet eine Shop-Produktkennung einem Blueprint und einem Ressourcenpaket zu. Der Shop muss keine internen MSM-Details kennen.",
       "empty": "Noch keine Produkte zugeordnet.",
       "key": "Produktkennung im Shop",
+      "keyHint": "Die Produktkennung, die der Shop beim Bestellen mitschickt. Sie muss exakt so heißen wie dort — MSM-interne IDs muss der Shop nie kennen.",
       "gameType": "Blueprint / Spieltyp",
+      "gameTypeHint": "Blueprint aus der Registry. Ein unbekannter Wert wird schon beim Speichern abgelehnt.",
       "ram": "RAM-Limit (MB)",
       "cpu": "CPU-Limit (%)",
       "disk": "Speicher-Limit (GB)",
+      "limitsHint": "Ressourcenpaket dieses Tarifs. Leer übernimmt die Voreinstellung des Blueprints. Änderungen gelten für neu erstellte Server; laufende Server passt der Betreiber bewusst von Hand an.",
       "backupInterval": "Backup-Intervall (Stunden)",
+      "backupIntervalHint": "Automatisches Backup-Intervall für Server dieses Tarifs. Leer bedeutet: keine automatischen Backups.",
+      "role": "Rolle bei Buchung",
+      "roleHint": "Diese globale Rolle bekommt der Kunde zusätzlich, solange der Vertrag läuft; über sie laufen unter anderem die KI-Kontingente. Bei Sperre oder Kündigung wird sie wieder entzogen — außer ein anderer laufender Vertrag desselben Kunden fordert sie noch. Ein Tarifwechsel tauscht die Rolle. Auswählbar sind nur Rollen, deren Rechte du selbst hältst und die auch der Dienstbenutzer der Integration hält.",
+      "roleNone": "Keine Zusatzrolle",
       "enabled": "Buchbar",
       "save": "Produkt speichern",
       "saved": "Produkt gespeichert",
@@ -3423,7 +3437,9 @@
       "desiredTitle": "Zielzustände (vom Shop gesetzt)",
       "actualTitle": "Tatsächliche Zustände (von MSM gesetzt, jeder erzeugt einen Webhook)",
       "purge": "Der Übergang terminating → terminated passiert nicht im API-Aufruf, sondern in einem Wartungslauf, der jede Minute prüft, ob terminate_after erreicht ist. Der Löschpfad ist derselbe wie im Panel.",
-      "productChange": "Ein Tarifwechsel setzt status_code auf product_changed_manual_resize_required. Die Produktzuordnung ändert sich sofort, die Ressourcengrenzen eines laufenden Servers bleiben eine bewusste Operator-Aktion — sie erfordern einen Neustart."
+      "productChange": "Ein Tarifwechsel setzt status_code auf product_changed_manual_resize_required. Die Produktzuordnung ändert sich sofort, die Ressourcengrenzen eines laufenden Servers bleiben eine bewusste Operator-Aktion — sie erfordern einen Neustart.",
+      "role": "Trägt die Produktzuordnung eine role_id, vergibt der Zielzustand active diese globale Rolle zusätzlich zu den bestehenden Rollen des Kunden; suspended und terminated entziehen sie wieder — aber nur, wenn kein anderer aktiver Vertrag desselben Kunden dieselbe Rolle noch fordert, und niemals, wenn es eine Systemrolle ist. Manuell vergebene Rollen bleiben unangetastet. Über globale Rollen laufen unter anderem die KI-Kontingente; genau dafür ist das Feld gedacht: ein größerer Tarif bringt mehr KI-Budget mit, ohne dass jemand von Hand Rollen pflegt.",
+      "roleRecord": "Massgeblich ist, was ein Vertrag tatsaechlich vergeben hat, nicht was gerade an seinem Produkt steht. Ein Tarifwechsel tauscht die Rolle deshalb, statt sie zu stapeln; aendert oder entfernt der Betreiber die Rolle eines Produkts, waehrend Vertraege darauf laufen, wird trotzdem die urspruenglich vergebene Rolle zurueckgenommen; und ein Vertrag, dessen Aktivierung fehlgeschlagen ist, traegt keine Rolle — auch dann nicht, wenn sein Zielzustand weiterhin active lautet. Loescht der Betreiber ein Produkt, behaelt der Kunde die vergebene Rolle bis zum Ende seines Vertrags."
     },
     "desired": {
       "active": "Vertrag läuft. Server wird bei Bedarf erstellt, Kundenrechte werden gesetzt.",
@@ -3441,7 +3457,8 @@
     },
     "errors": {
       "title": "Fehler und Statuscodes",
-      "persisted": "Ein fachlicher Fehlschlag ist nicht nur ein HTTP-Fehler. Der Vertrag bleibt mit status „failed“ und einem stabilen status_code abfragbar, damit der Shop nachträglich herausfinden kann, was passiert ist."
+      "persisted": "Ein fachlicher Fehlschlag ist nicht nur ein HTTP-Fehler. Der Vertrag bleibt mit status „failed“ und einem stabilen status_code abfragbar, damit der Shop nachträglich herausfinden kann, was passiert ist.",
+      "roleEscalation": "hoster_role_escalation schlägt absichtlich hart fehl, statt die Rolle still auszulassen: sonst hätte der Kunde einen Server ohne das Kontingent, für das er bezahlt hat, und niemand würde es merken."
     },
     "http": {
       "200": "Erfolg. Auch bei PUT — es gibt kein 201.",
@@ -3456,6 +3473,7 @@
       "install_directory_exists": "Rückstand einer früheren Installation.",
       "install_update_already_running": "Auf dem Server läuft bereits eine Installation.",
       "hoster_configuration_error": "Produkt, Dienstbenutzer oder Identität sind nicht nutzbar.",
+      "hoster_role_escalation": "Die im Produkt hinterlegte Rolle enthält Rechte, die der Dienstbenutzer der Integration selbst nicht hat. Der Vertrag wird nicht umgesetzt.",
       "hoster_internal_error": "Unerwarteter Fehler, im Panel-Log nachvollziehbar.",
       "product_changed_manual_resize_required": "Hinweis, kein Fehler: Tarif gewechselt, Ressourcen noch nicht angepasst."
     },
@@ -3592,6 +3610,7 @@
       "listServices": "Verträge dieser Integration",
       "listDeliveries": "Webhook-Zustellprotokoll (Statuscode, Versuch — nie Signatur oder Body)",
       "retryDelivery": "Fehlgeschlagene Zustellung erneut einplanen",
+      "productRole": "Der Produkt-Body von PUT /integrations/{integration_id}/products kennt zusaetzlich role_id: die globale Rolle, die der Kunde zusaetzlich zu seinen bestehenden Rollen erhaelt, solange ein Vertrag auf dieses Produkt laeuft. Leer bedeutet keine Zusatzrolle. Zwei Schranken gelten zusammen: der Aufrufer darf nur Rollen hinterlegen, deren Rechte er selbst haelt (sonst 403; die Systemrolle admin bleibt dem Owner vorbehalten), und der Dienstbenutzer der Integration muss sie ebenfalls halten (sonst 422). Eine Integration kann damit nie mehr vergeben, als beide zusammen decken.",
       "openapi": "Das vollständige OpenAPI-Schema ist unter /api/docs verfügbar und erfordert eine Anmeldung mit der Berechtigung panel.settings.read."
     },
     "operations": {

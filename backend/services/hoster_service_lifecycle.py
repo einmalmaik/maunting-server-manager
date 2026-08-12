@@ -26,12 +26,22 @@ from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from models import HosterIntegration, HosterService, Server, User
+from models import (
+    HosterIdentity,
+    HosterIntegration,
+    HosterProduct,
+    HosterService,
+    Role,
+    Server,
+    User,
+)
 from schemas import ServerCreate
-from services import audit_service, permission_service
+from services import audit_service, permission_service, role_service
 from services.actor_context import ActorContext
 from services.hoster_integration_service import (
     HosterConfigurationError,
+    HosterRoleEscalation,
+    ensure_role_is_delegatable,
     get_product,
     normalize_external_id,
     resolve_identity,
@@ -86,6 +96,25 @@ CUSTOMER_SERVER_PERMISSIONS = (
     # diesen Server — die Geheimnisse selbst bleiben unlesbar.
     "server.credentials.manage",
 )
+
+# Eigener Fehlercode fuer eine Produktrolle, die der Dienstbenutzer der
+# Integration selbst nicht haelt. Bewusst getrennt von
+# `hoster_configuration_error`: der Shop soll unterscheiden koennen zwischen
+# "Produkt falsch konfiguriert" und "diese Integration darf diese Rolle nicht
+# vergeben" — nur der zweite Fall ist ein Rechteproblem beim Betreiber.
+ROLE_ESCALATION_CODE = "hoster_role_escalation"
+
+# Erreichte Zustaende, in denen ein Vertrag seine Produktrolle traegt.
+#
+# `failed` fehlt bewusst, und das ist keine Feinheit: ein neu angelegter Vertrag
+# wird mit `desired_state="active"` festgeschrieben, bevor die Aktivierung
+# ueberhaupt versucht wird. Scheitert sie, bleibt genau diese Kombination stehen
+# — gewuenscht aktiv, tatsaechlich fehlgeschlagen. Wer nur den Wunsch abfragt,
+# haelt einen abgelehnten Vertrag fuer laufend und vergibt dessen Rolle beim
+# naechsten Anlass doch noch.
+#
+# `pending` fehlt aus demselben Grund: gewuenscht, aber nichts erreicht.
+ROLE_BEARING_STATUSES = frozenset({"provisioning", "ready"})
 
 
 def _now() -> datetime:
@@ -185,6 +214,122 @@ def _grant_customer_permissions(db: Session, service: HosterService) -> None:
         list(CUSTOMER_SERVER_PERMISSIONS),
         granted_by=None,
     )
+
+
+def _borne_role(service: HosterService, product: HosterProduct | None) -> int | None:
+    """Welche Rolle dieser eine Vertrag gerade traegt — ``None``, wenn keine.
+
+    `desired_state` allein reicht als Bedingung nicht. Ein neu angelegter
+    Vertrag wird mit `desired_state="active"` festgeschrieben, *bevor* die
+    Aktivierung ueberhaupt versucht wird (siehe `apply_desired_state`), und der
+    Rollback eines Fehlschlags nimmt das nicht zurueck. Wer nur den Wunsch
+    ansieht, haelt deshalb einen Vertrag fuer laufend, den MSM gerade abgelehnt
+    hat — bei einer abgelehnten Rolle waere das die Rolle selbst, ueber den
+    naechsten Vertrag desselben Kunden nachtraeglich doch vergeben. Deshalb
+    zaehlt hier zusaetzlich der *erreichte* Zustand.
+
+    Fehlt das Produkt, gilt weiter, was diesem Vertrag zuletzt zugestanden
+    wurde: dass der Betreiber ein Produkt aufraeumt, darf einem zahlenden
+    Kunden nicht sein Kontingent nehmen.
+    """
+    if service.desired_state != "active" or service.status not in ROLE_BEARING_STATUSES:
+        return None
+    if product is None:
+        return service.granted_role_id
+    return product.role_id
+
+
+def _apply_customer_role(db: Session, service: HosterService) -> None:
+    """Gleicht die globalen Rollen des Kunden an seine Vertraege an.
+
+    Ueber globale Rollen laufen unter anderem die KI-Kontingente. Ein Tarif
+    kann damit mehr KI-Budget mitbringen, ohne dass jemand von Hand Rollen
+    pflegt. Vier Eigenschaften bestimmen die Form dieser Funktion:
+
+    (a) Additiv: Basis ist die Ist-Menge aus `effective_user_role_ids`, nicht
+        eine frisch berechnete Wunschmenge. Manuell vergebene Rollen ueberleben
+        deshalb jede Vertragsaenderung — und `users.role_id` bleibt an genau
+        einer Stelle kompatibel gepflegt, weil `set_user_roles` das uebernimmt.
+    (b) Mehrere Vertraege: entzogen wird nur, was kein anderer laufender Vertrag
+        desselben Kunden noch fordert. Wer zwei Server desselben Tarifs mietet
+        und einen kuendigt, behaelt die Rolle.
+    (c) Systemrollen nie: waehlt ein Betreiber "user" als Produktrolle, bleibt
+        sie beim Entzug stehen. Ein Account ganz ohne Rolle waere unbenutzbar.
+    (d) Zurueckgenommen wird, was *vergeben wurde* — nicht, was heute am Produkt
+        steht. Die Kandidatenmenge kommt aus `granted_role_id` der Vertraege,
+        nicht aus `hoster_products.role_id`. Ohne diesen Unterschied verliert
+        ein Tarifwechsel die alte Rolle aus dem Blick (der Vertrag zeigt danach
+        auf ein anderes Produkt), und ein geloeschtes oder geaendertes Produkt
+        macht die Rolle unentziehbar — der Kunde behielte ein Kontingent ohne
+        Vertrag, und keine spaetere Kuendigung holte es zurueck.
+
+    Der Kunde wird ausdruecklich **ohne** `is_active`-Filter gesucht. Ein
+    deaktivierter Account behaelt seine Rollen, und eine Kuendigung waehrend der
+    Sperre muss ihm die Produktrolle trotzdem nehmen: sonst traegt er sie nach
+    einer spaeteren Reaktivierung ohne jeden Vertrag weiter.
+    """
+    user = db.query(User).filter(User.id == service.identity.user_id).first()
+    if user is None:
+        return
+
+    # Die Session laeuft ohne Autoflush; der frisch gesetzte Zustand dieses
+    # Vertrags muss vor der Abfrage in der Transaktion stehen, sonst rechnet die
+    # Soll-Menge noch mit dem alten.
+    db.flush()
+
+    # Serialisiert konkurrierende Vertragsaenderungen desselben Kunden. Ohne die
+    # Sperre lesen zwei gleichzeitige Auftraege dieselbe Ist-Menge und schreiben
+    # beide die volle Zielmenge zurueck — der spaetere Commit verwirft die Rolle
+    # des frueheren. Dasselbe Mittel wie in `ai_usage_service.reserve_ai_usage`.
+    db.query(User.id).filter(User.id == user.id).with_for_update().one()
+
+    # Alle Vertraege dieses Kunden, integrationsuebergreifend: eine globale
+    # Rolle gilt im ganzen Panel, nicht je Shop. `outerjoin` auf das Produkt,
+    # damit ein Vertrag mit geloeschtem Produkt (`product_id` faellt auf NULL)
+    # nicht aus der Betrachtung faellt und seine Rolle unentziehbar wird.
+    zeilen = (
+        db.query(HosterService, HosterProduct)
+        .select_from(HosterService)
+        .join(HosterIdentity, HosterIdentity.id == HosterService.identity_id)
+        .outerjoin(HosterProduct, HosterProduct.id == HosterService.product_id)
+        .filter(HosterIdentity.user_id == user.id)
+        .all()
+    )
+
+    soll: set[int] = set()
+    kandidaten: set[int] = set()
+    eigene_rolle: int | None = None
+    for zeile, produkt in zeilen:
+        getragen = _borne_role(zeile, produkt)
+        if zeile.id == service.id:
+            eigene_rolle = getragen
+        if getragen is not None:
+            soll.add(getragen)
+        if zeile.granted_role_id is not None:
+            kandidaten.add(zeile.granted_role_id)
+    kandidaten |= soll
+
+    aktuell = set(role_service.effective_user_role_ids(db, user))
+    ueberzaehlig = kandidaten - soll
+    entziehbar: set[int] = set()
+    if ueberzaehlig:
+        entziehbar = {
+            row[0]
+            for row in db.query(Role.id)
+            .filter(Role.id.in_(ueberzaehlig), Role.is_system.is_(False))
+            .all()
+        }
+    ziel = (aktuell | soll) - entziehbar
+    if ziel != aktuell:
+        # `set_user_roles` ERSETZT die Zuordnung, bekommt hier also immer die
+        # vollstaendige Zielmenge. `commit=False`, weil `apply_desired_state`
+        # am Ende selbst committet — ein Commit mitten im Ablauf wuerde den
+        # Rollback-Pfad der Fehlerbehandlung zerreissen.
+        role_service.set_user_roles(db, user, sorted(ziel), commit=False)
+
+    # Erst ganz zum Schluss: ab jetzt ist dies der Beleg, gegen den ein
+    # spaeterer Entzug rechnet.
+    service.granted_role_id = eigene_rolle
 
 
 def _provision(
@@ -318,7 +463,14 @@ def apply_desired_state(
         # weil sie den Server neu starten muessen.
         product = get_product(db, integration, product_key)
         if service.product_id != product.id:
-            service.product_id = product.id
+            # Die Beziehung setzen, nicht nur den Fremdschluessel: `product` ist
+            # `lazy="joined"` und beim Laden dieses Vertrags bereits gefuellt.
+            # Eine Zuweisung an `product_id` allein laesst das Attribut auf dem
+            # alten Produkt stehen, und die Session laeuft ohne Autoflush — die
+            # Eskalationspruefung weiter unten pruefte dann die Rolle des ALTEN
+            # Tarifs, waehrend `_apply_customer_role` (nach eigenem `flush`)
+            # bereits die des neuen vergibt. Genau daneben.
+            service.product = product
             service.status_code = "product_changed_manual_resize_required"
 
     service.desired_state = desired_state
@@ -326,12 +478,21 @@ def apply_desired_state(
 
     try:
         if desired_state == "active":
+            # Ganz zu Beginn und vor jeder Aenderung: eine Produktrolle, die die
+            # Integration gar nicht vergeben darf, ist eine Fehlkonfiguration —
+            # und die darf keinen halb fertigen Server hinterlassen.
+            ensure_role_is_delegatable(
+                db,
+                integration=integration,
+                role_id=service.product.role_id if service.product else None,
+            )
             if service.server_id is None:
                 _provision(db, integration=integration, service=service)
             else:
                 _set_status(service, "ready")
                 service.terminate_after = None
                 _grant_customer_permissions(db, service)
+            _apply_customer_role(db, service)
         elif desired_state == "suspended":
             # Gesperrt heisst: Server aus, Kundenrechte entzogen, Daten bleiben.
             # Der Panelaccount des Kunden bleibt ausdruecklich bestehen.
@@ -340,6 +501,7 @@ def apply_desired_state(
                 permission_service.set_user_server_permissions(
                     db, service.identity.user_id, service.server_id, [], granted_by=None
                 )
+            _apply_customer_role(db, service)
             _set_status(service, "suspended")
         else:
             # Kuendigung: sperren und eine Frist setzen. Es wird hier bewusst
@@ -349,6 +511,7 @@ def apply_desired_state(
                 permission_service.set_user_server_permissions(
                     db, service.identity.user_id, service.server_id, [], granted_by=None
                 )
+            _apply_customer_role(db, service)
             service.terminate_after = _now() + timedelta(days=integration.terminate_grace_days)
             _set_status(
                 service, "terminating" if service.server_id is not None else "terminated"
@@ -356,6 +519,14 @@ def apply_desired_state(
     except HTTPException as exc:
         db.rollback()
         _fail(db, integration=integration, service_id=service.id, code=_error_code(exc))
+        raise
+    except HosterRoleEscalation:
+        # Bewusst laut und mit eigenem Code: eine still ausgelassene Rolle waere
+        # genau der Fehler, um den es hier geht. Der Kunde haette einen
+        # laufenden Vertrag ohne das Kontingent, fuer das er bezahlt hat, und
+        # niemand haette einen Anhaltspunkt, warum.
+        db.rollback()
+        _fail(db, integration=integration, service_id=service.id, code=ROLE_ESCALATION_CODE)
         raise
     except HosterConfigurationError:
         db.rollback()
@@ -432,6 +603,9 @@ def purge_terminated_services(db: Session, *, now: datetime | None = None) -> in
     Bewusst als eigener Lauf und nicht im Kuendigungsaufruf: eine Kuendigung
     soll nicht in derselben Sekunde alle Daten vernichten. Der Betreiber
     bestimmt die Frist je Integration.
+
+    Die Produktrolle wird hier nicht mehr angefasst — sie ist seit der
+    Kuendigung entzogen, nicht erst seit Fristablauf.
     """
     current = now or _now()
     due = (
