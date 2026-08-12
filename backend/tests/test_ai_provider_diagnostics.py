@@ -142,6 +142,85 @@ async def test_reasoning_is_requested_and_arrives_as_its_own_chunk_kind(
 
 
 @pytest.mark.asyncio
+async def test_reasoning_arrives_when_only_the_structured_field_is_filled() -> None:
+    """Der Denkblock fehlte bei GPT-5-Modellen — der Text kam auf dem anderen Weg.
+
+    Beobachtet mit `gpt-5.6-luna` auf Stufe „mittel": die Antwort brauchte
+    auffaellig lange, und trotzdem stand kein aufklappbarer Block da. Der Grund
+    liegt hier: diese Familie laesst `delta.reasoning` leer und legt ihre
+    Ueberlegungen als `reasoning.summary` in `delta.reasoning_details`. MSM las
+    nur das Klartextfeld und sah deshalb nichts.
+
+    Der verschluesselte Eintrag geht bewusst nicht mit: er traegt keinen
+    lesbaren Text, und eine Zeile ohne Aussage ist kein Denkschritt.
+    """
+    frames = (
+        'data: {"choices":[{"delta":{"reasoning_details":['
+        '{"type":"reasoning.summary","summary":"Ich sehe zuerst in die Logs.",'
+        '"format":"openai-responses-v1","id":"rs_1"}]}}]}\n\n'
+        'data: {"choices":[{"delta":{"reasoning_details":['
+        '{"type":"reasoning.encrypted","data":"AAAA","format":"openai-responses-v1","id":"rs_2"}]}}]}\n\n'
+        'data: {"choices":[{"delta":{"reasoning_details":['
+        '{"type":"reasoning.text","text":" Dann pruefe ich den Port.","id":"rs_3"}]}}]}\n\n'
+        'data: {"choices":[{"delta":{"content":"Der Server laeuft."}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=frames)
+
+    usage = StreamUsage()
+    collected: list[tuple[str, str]] = []
+    async with _client(handler) as client:
+        async for chunk in stream_chat_completion(
+            client, provider=_provider(), api_key=None,
+            messages=[{"role": "user", "content": "Laeuft der Server?"}], usage=usage,
+            reasoning=True, reasoning_effort="medium",
+        ):
+            collected.append((chunk.kind, chunk.text))
+
+    assert collected == [
+        ("reasoning", "Ich sehe zuerst in die Logs."),
+        ("reasoning", " Dann pruefe ich den Port."),
+        ("content", "Der Server laeuft."),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_plain_text_field_wins_over_the_structured_one() -> None:
+    """Beide Felder in einem Frame heissen nicht zwei Denkschritte.
+
+    OpenRouter fuellt bei manchen Routen beides mit **demselben** Text. Wer
+    nacheinander liest statt zu waehlen, zeigt jeden Gedanken doppelt an.
+    """
+    frames = (
+        'data: {"choices":[{"delta":{"reasoning":"Ich pruefe die Ports.",'
+        '"reasoning_details":[{"type":"reasoning.text","text":"Ich pruefe die Ports."}]}}]}\n\n'
+        'data: {"choices":[{"delta":{"content":"Offen."}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=frames)
+
+    usage = StreamUsage()
+    collected: list[tuple[str, str]] = []
+    async with _client(handler) as client:
+        async for chunk in stream_chat_completion(
+            client, provider=_provider(), api_key=None,
+            messages=[{"role": "user", "content": "Ports?"}], usage=usage,
+            reasoning=True,
+        ):
+            collected.append((chunk.kind, chunk.text))
+
+    assert collected == [
+        ("reasoning", "Ich pruefe die Ports."),
+        ("content", "Offen."),
+    ]
+    assert usage.reasoning_chars == len("Ich pruefe die Ports.")
+
+
+@pytest.mark.asyncio
 async def test_switching_off_says_so_explicitly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

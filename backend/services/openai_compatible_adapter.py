@@ -241,6 +241,48 @@ def usage_addieren(ziel: StreamUsage, teil: StreamUsage) -> None:
     ziel.vom_anbieter = ziel.vom_anbieter and teil.vom_anbieter
 
 
+def _denktext_aus_details(rohdaten: object) -> str:
+    """Denkschritte aus ``reasoning_details`` — der zweite Weg, auf dem sie kommen.
+
+    Der Klartextstrom (``delta.reasoning``) ist nicht der einzige. OpenRouter
+    dokumentiert fuer den Streamingfall ``choices[].delta.reasoning_details``,
+    eine Liste getippter Stuecke, und **welchen** der beiden Wege ein Modell
+    nimmt, entscheidet seine Familie: die OpenAI-Modelle geben ihre Ueberlegungen
+    ueber die Responses-API als ``reasoning.summary`` heraus und lassen das
+    Klartextfeld leer. Wer nur den Textstrom liest, sieht bei ihnen nichts —
+    nicht weil nicht gedacht wurde, sondern weil der Text woanders steht. Genau
+    das war der Fall, in dem der aufklappbare Block fehlte, obwohl die Stufe an
+    war und die Antwort auffaellig lange brauchte.
+
+    Zwei Arten tragen Text: ``reasoning.text`` (die rohe Gedankenkette) und
+    ``reasoning.summary`` (die Zusammenfassung, die manche Anbieter statt der
+    Kette herausgeben). ``reasoning.encrypted`` traegt keinen — dort haelt der
+    Anbieter die Ueberlegungen zurueck und schickt nur einen Blob, den niemand
+    lesen kann. Er wird uebergangen statt als ``[REDACTED]`` angezeigt: eine
+    Zeile, die nichts sagt, ist kein Denkschritt.
+
+    Unbekannte Arten werden ebenso uebergangen. Die Formate sind
+    anbieterspezifisch und kommen laufend dazu; was MSM nicht einordnen kann,
+    zeigt es nicht an.
+    """
+    if not isinstance(rohdaten, list):
+        return ""
+    stuecke: list[str] = []
+    for eintrag in rohdaten:
+        if not isinstance(eintrag, dict):
+            continue
+        art = eintrag.get("type")
+        if art == "reasoning.text":
+            wert = eintrag.get("text")
+        elif art == "reasoning.summary":
+            wert = eintrag.get("summary")
+        else:
+            continue
+        if isinstance(wert, str) and wert:
+            stuecke.append(wert)
+    return "".join(stuecke)
+
+
 async def _iter_sse_lines(
     response: httpx.Response, *, deadline: float
 ) -> AsyncIterator[str]:
@@ -333,10 +375,20 @@ async def stream_chat_completion(
 
     ``reasoning`` steuert das Nachdenken. Der Schalter ist absichtlich
     generisch: gesendet wird ``{"reasoning": {"enabled": ...}}``, gelesen werden
-    ``delta.reasoning`` und ``delta.reasoning_content``. Das erste Feld nutzt
-    OpenRouter, das zweite die meisten OpenAI-kompatiblen Server (vLLM,
-    DeepSeek, Ollama). Ein Anbieter, der beides nicht kennt, ignoriert das
+    ``delta.reasoning``, ``delta.reasoning_content`` und — wenn beide leer
+    bleiben — ``delta.reasoning_details``. Das erste Feld nutzt OpenRouter, das
+    zweite die meisten OpenAI-kompatiblen Server (vLLM, DeepSeek, Ollama), das
+    dritte ist der dokumentierte Streamingweg fuer die Modellfamilien, die ihre
+    Ueberlegungen nur zusammengefasst herausgeben (siehe
+    `_denktext_aus_details`). Ein Anbieter, der nichts davon kennt, ignoriert das
     zusaetzliche Feld.
+
+    **Kein Denktext ist kein Fehler.** Ein Modell kann nachdenken, es abrechnen
+    und trotzdem nichts davon herausgeben — die OpenAI-Modelle verschluesseln
+    ihre Kette und liefern bestenfalls eine Zusammenfassung, und die faellt bei
+    kurzen Ueberlegungen auch mal ganz aus. ``usage.reasoning_tokens`` zaehlt
+    dann trotzdem. Die beiden Faelle sind verschieden und sehen von aussen
+    gleich aus.
 
     **Das Feld geht in beide Richtungen mit, auch bei ``False``.** Vorher wurde
     es nur bei ``True`` gesendet — bei „aus“ ging gar nichts hinaus, und das ist
@@ -485,13 +537,14 @@ async def stream_chat_completion(
                 if isinstance(delta, dict):
                     # `reasoning` ist OpenRouter, `reasoning_content` der in
                     # OpenAI-kompatiblen Servern verbreitete Name. Beide sind
-                    # reiner Text; die strukturierte Variante
-                    # (`reasoning_details`) wird bewusst nicht ausgewertet — sie
-                    # ist anbieterspezifisch und der Textstrom reicht fuer die
-                    # Anzeige vollstaendig aus.
+                    # reiner Text — und beide bleiben bei einem Teil der Modelle
+                    # leer, obwohl gedacht (und abgerechnet) wird. Dann steht der
+                    # Text in `reasoning_details`; siehe `_denktext_aus_details`.
                     thought = delta.get("reasoning")
                     if not isinstance(thought, str) or not thought:
                         thought = delta.get("reasoning_content")
+                    if not isinstance(thought, str) or not thought:
+                        thought = _denktext_aus_details(delta.get("reasoning_details"))
                     if isinstance(thought, str) and thought:
                         usage.reasoning_chars += len(thought)
                         if usage.reasoning_chars <= MAX_REASONING_CHARS:
