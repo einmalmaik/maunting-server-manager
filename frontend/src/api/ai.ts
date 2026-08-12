@@ -12,8 +12,15 @@ export interface AiProviderAdmin {
   requires_api_key: boolean
   operator_key_configured: boolean
   operator_key_hint: string | null
-  /** Preis in Cent je 1 Mio. Tokens. null = keine Preisquelle, Kosten bleiben 0. */
-  token_price_cents_per_million: number | null
+  /**
+   * Rückfallpreis je 1 Mio. Tokens, in US-Cent-Microunits (1 Cent = 10.000).
+   *
+   * Nur noch Rückfallebene: normalerweise wird gebucht, was der Anbieter
+   * meldet. `null` = keine Preisquelle, Kosten bleiben 0. Die Oberfläche zeigt
+   * hier eine Dezimalzahl in der Anzeigewährung (`utils/geld.ts`); in ganzen
+   * Cent ließ sich „1,20 €" nicht eintragen.
+   */
+  token_price_micro_usd_per_million: number | null
   updated_at: string
 }
 
@@ -290,11 +297,27 @@ export interface AiContextPolicy {
 }
 
 /**
+ * Wie Beträge angezeigt werden. Nicht, wie sie gebucht werden.
+ *
+ * Gebucht wird ausnahmslos in US-Cent-Microunits. Diese beiden Angaben machen
+ * daraus einen Betrag in der Währung des Betreibers — angewandt genau einmal,
+ * in `utils/geld.ts`.
+ */
+export interface AiCostPolicy {
+  currency: string
+  usd_rate: string
+  available_currencies: string[]
+  min_rate: string
+  max_rate: string
+}
+
+/**
  * Der Verbrauch eines Benutzers in denselben Zeiträumen wie die Grenzen.
  *
- * Kosten kommen bereits in **Cent** — dieselbe Einheit, in der die Grenze
- * `monthly_cost_limit_cents` eingestellt wird. Die Mikroeinheiten der Datenbank
- * erreichen die Oberfläche bewusst nie.
+ * Kosten kommen in **US-Cent-Microunits** (1 Cent = 10.000) — der Einheit, in
+ * der auch gebucht wird. Hier standen einmal aufgerundete Cent; für eine
+ * Monatssumme war das harmlos, für eine einzelne Anfrage nicht. Gerundet wird
+ * jetzt erst beim Anzeigen, mit `betragFormatieren`.
  */
 export interface AiUsageEntry {
   user_id: number
@@ -302,7 +325,7 @@ export interface AiUsageEntry {
   tokens_today: number
   tokens_week: number
   tokens_month: number
-  cost_month_cents: number
+  cost_month_micro_usd: number
   requests_month: number
   /** Letzte Anfrage im ausgewerteten Zeitraum, nicht die letzte überhaupt. */
   last_request_at: string | null
@@ -312,11 +335,46 @@ export interface AiUsageEntry {
 export interface AiUsageOverview {
   entries: AiUsageEntry[]
   total_tokens_month: number
-  total_cost_month_cents: number
+  total_cost_month_micro_usd: number
+  cost_policy: AiCostPolicy
+}
+
+/**
+ * Eine einzelne Anfrage, so wie der Anbieter sie gemeldet hat.
+ *
+ * Der Nachweis hinter den Summen — und die einzige Ansicht, mit der sich „das
+ * kann nicht stimmen" prüfen lässt: Zeile für Zeile gegen das Dashboard des
+ * Anbieters, mit `cost_source` als Auskunft, ob überhaupt gemessen wurde.
+ */
+export interface AiUsageEvent {
+  id: number
+  created_at: string
+  user_id: number
+  username: string
+  model: string | null
+  /** Die verbuchte Gesamtzahl — die, an der die Kontingente hängen. */
+  tokens: number
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  /** Teilmenge von `prompt_tokens`. Wer sie addiert, zählt doppelt. */
+  cached_tokens: number | null
+  reasoning_tokens: number | null
+  /** Eine Chatnachricht ist nicht eine Anfrage: jede Werkzeugrunde ruft neu. */
+  provider_requests: number | null
+  cost_micro_usd: number
+  /** `null` bei Zeilen aus der Zeit vor der Aufschlüsselung. */
+  cost_source: 'provider' | 'estimate' | 'none' | null
+}
+
+export interface AiUsageEvents {
+  entries: AiUsageEvent[]
+  has_more: boolean
+  cost_policy: AiCostPolicy
 }
 
 /** Der eigene Verbrauch — mit den Grenzen daneben, gegen die er läuft. */
 export interface AiUsageMine extends AiUsageEntry {
+  cost_policy: AiCostPolicy
   limits: {
     daily_token_limit: number | null
     weekly_token_limit: number | null
@@ -484,7 +542,7 @@ export interface AiProviderWrite {
   default_model: string
   enabled: boolean
   requires_api_key: boolean
-  token_price_cents_per_million?: number | null
+  token_price_micro_usd_per_million?: number | null
   operator_api_key?: string
   clear_operator_api_key?: boolean
 }
@@ -516,6 +574,19 @@ export const aiApi = {
   getMyUsage: () => api<AiUsageMine>('/ai/usage/me'),
   /** Alle Benutzer. Verlangt `ai.usage.read.all`. */
   getUsageOverview: () => api<AiUsageOverview>('/ai/usage'),
+  /** Die eigenen Anfragen einzeln — der Nachweis hinter den eigenen Summen. */
+  getMyUsageEvents: (limit = 50, offset = 0) =>
+    api<AiUsageEvents>(`/ai/usage/me/events?limit=${limit}&offset=${offset}`),
+  /** Alle Anfragen einzeln. Verlangt `ai.usage.read.all`. */
+  getUsageEvents: (limit = 50, offset = 0) =>
+    api<AiUsageEvents>(`/ai/usage/events?limit=${limit}&offset=${offset}`),
+  getCostPolicy: () => api<AiCostPolicy>('/ai/settings/cost'),
+  /** `usdRate` darf bei USD fehlen — dort gibt es keinen Kurs. */
+  setCostPolicy: (currency: string, usdRate: string | null) =>
+    api<AiCostPolicy>('/ai/settings/cost', {
+      method: 'PUT',
+      body: JSON.stringify({ currency, usd_rate: usdRate }),
+    }),
   getWebSearchStatus: () => api<AiWebSearchStatus>('/ai/settings/web-search'),
   /** Leerer Schluessel entfernt ihn — dann verschwindet auch das Werkzeug. */
   setWebSearchKey: (apiKey: string) => api<AiWebSearchStatus>('/ai/settings/web-search', {

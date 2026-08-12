@@ -18,6 +18,7 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import { Button, Dropdown, NumberStepper, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { AiContextSettings } from './AiContextSettings'
+import { AiCostSettings } from './AiCostSettings'
 import { AiLearningSettings } from './AiLearningSettings'
 import { AiProvidersSettings } from './AiProvidersSettings'
 import { AiUsageSettings } from './AiUsageSettings'
@@ -185,6 +186,9 @@ export function AiTab() {
           das dort gewählte Modell — einzustellen bleibt nur, wie voll er werden
           darf, bevor zusammengefasst wird. */}
       <AiContextSettings canWrite={canWrite} />
+      {/* Die Währung steht direkt hinter der Providerwahl, weil der Preis dort
+          eingetragen wird: welche Zahl „1,20" bedeutet, entscheidet sich hier. */}
+      <AiCostSettings canWrite={canWrite} />
       <AiWebSearchSettings canWrite={canWrite} />
       <AiLearningSettings canWrite={canWrite} />
 

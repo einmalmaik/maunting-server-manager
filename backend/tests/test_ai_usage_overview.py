@@ -120,7 +120,7 @@ def test_own_usage_needs_no_special_permission(
     assert antwort.status_code == 200
     daten = antwort.json()
     assert daten["tokens_today"] == 1_234
-    assert daten["cost_month_cents"] == 7
+    assert daten["cost_month_micro_usd"] == 7 * MICROUNITS_PER_CENT
     assert daten["user_id"] == regular_user.id
     # Die Grenzen stehen daneben: erst das Paar ergibt eine Aussage.
     assert "limits" in daten
@@ -272,15 +272,19 @@ def test_users_without_consumption_stay_out(db: Session, regular_user: User) -> 
     assert [reihe.user_id for reihe in reihen] == [regular_user.id]
 
 
-def test_the_total_is_summed_before_rounding(
+def test_die_api_rundet_kleinstbetraege_nicht_weg(
     client: TestClient, db: Session, regular_user: User, user_cookies: dict,
 ) -> None:
-    """Die Gesamtsumme entsteht aus Mikroeinheiten, nicht aus gerundeten Cent.
+    """Die Schnittstelle liefert Mikroeinheiten, nicht aufgerundete Cent.
 
-    Jede Zeile wird fuer die Anzeige aufgerundet — eine Kostenangabe darf nicht
-    zu niedrig sein. Wuerde die Summe diese gerundeten Werte addieren, ergaeben
-    drei Zeilen zu je einer Mikroeinheit drei Cent statt einem. Bei zweihundert
-    Kunden ist das kein Rundungsfehler mehr, sondern eine erfundene Rechnung.
+    Hier wurde frueher je Zeile auf ganze Cent aufgerundet, damit eine
+    Kostenangabe nie zu niedrig aussieht. Fuer eine Monatssumme war das
+    harmlos, fuer eine einzelne Anfrage nicht: die meisten kosten weniger als
+    einen Cent, und aufgerundet sah jede gleich teuer aus. Drei Zeilen zu je
+    einer Mikroeinheit wurden so zu drei Cent — dem Zehntausendfachen.
+
+    Gerundet wird jetzt erst beim Anzeigen. Die Schnittstelle traegt die Zahl,
+    die auch gebucht wurde, und genau daran laesst sie sich pruefen.
     """
     _allow(db, regular_user, "ai.chat.use", "ai.usage.read.all")
     for name in ("a-winzig", "b-winzig", "c-winzig"):
@@ -294,10 +298,10 @@ def test_the_total_is_summed_before_rounding(
 
     daten = client.get("/api/ai/usage", cookies=user_cookies).json()
 
-    # Je Zeile aufgerundet: dreimal 1 Cent.
-    assert [eintrag["cost_month_cents"] for eintrag in daten["entries"]] == [1, 1, 1]
-    # In der Summe sind es 3 Mikroeinheiten — also 1 Cent, nicht 3.
-    assert daten["total_cost_month_cents"] == 1
+    assert [eintrag["cost_month_micro_usd"] for eintrag in daten["entries"]] == [1, 1, 1]
+    assert daten["total_cost_month_micro_usd"] == 3
+    # Die Waehrung steht daneben, damit die Oberflaeche nicht zweimal fragt.
+    assert daten["cost_policy"]["currency"] in {"EUR", "USD"}
 
 
 def test_the_overview_covers_every_user(
@@ -314,4 +318,4 @@ def test_the_overview_covers_every_user(
     namen = {eintrag["username"] for eintrag in daten["entries"]}
     assert namen == {fremder.username, regular_user.username}
     assert daten["total_tokens_month"] == 5_000
-    assert daten["total_cost_month_cents"] == 5
+    assert daten["total_cost_month_micro_usd"] == 5 * MICROUNITS_PER_CENT

@@ -3,6 +3,7 @@ import { Gauge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiUsageMine } from '@/api/ai'
+import { betragFormatieren } from '@/utils/geld'
 
 /**
  * Der eigene KI-Verbrauch, mit der eigenen Grenze daneben.
@@ -34,7 +35,7 @@ export function AiUsageCard() {
   if (failed || !data) return null
 
   const numbers = new Intl.NumberFormat(i18n.language)
-  const money = new Intl.NumberFormat(i18n.language, { minimumFractionDigits: 2 })
+  const kosten = betragFormatieren(data.cost_month_micro_usd, data.cost_policy, i18n.language)
 
   const periods: Array<{ key: string; used: number; limit: number | null }> = [
     { key: 'today', used: data.tokens_today, limit: data.limits.daily_token_limit },
@@ -113,9 +114,16 @@ export function AiUsageCard() {
 
       <p className="text-xs text-on-surface-variant">
         {t('ai.usage.mineCost', {
-          cost: money.format(data.cost_month_cents / 100),
+          cost: kosten.primaer,
           requests: numbers.format(data.requests_month),
         })}
+        {/* Der Betrag in der Währung, in der tatsächlich abgerechnet wurde.
+            Er steht daneben und nicht anstelle: der Betreiber liest lieber
+            Euro, prüfen kann er aber nur gegen die Dollarrechnung seines
+            Anbieters. */}
+        {kosten.sekundaer && (
+          <span className="text-on-surface-variant/70">{` (${kosten.sekundaer})`}</span>
+        )}
       </p>
     </section>
   )

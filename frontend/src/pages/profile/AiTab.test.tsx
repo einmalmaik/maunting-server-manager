@@ -23,7 +23,11 @@ vi.mock('@/api/client', async () => {
         return Promise.resolve({
           user_id: 1, username: 'tester',
           tokens_today: 120, tokens_week: 800, tokens_month: 2_400,
-          cost_month_cents: 250, requests_month: 12, last_request_at: null,
+          cost_month_micro_usd: 2_500_000, requests_month: 12, last_request_at: null,
+          cost_policy: {
+            currency: 'EUR', usd_rate: '0.92',
+            available_currencies: ['EUR', 'USD'], min_rate: '0.01', max_rate: '100',
+          },
           limits: {
             daily_token_limit: 1_000, weekly_token_limit: null,
             monthly_token_limit: null, requests_per_minute: null,

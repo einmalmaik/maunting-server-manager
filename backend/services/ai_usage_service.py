@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import case, func
@@ -22,9 +23,23 @@ from services.ai_limit_service import (
     resolve_effective_limits,
 )
 
+if TYPE_CHECKING:  # pragma: no cover
+    # Nur fuer die Annotation. Zur Laufzeit importiert die Abrechnung den
+    # Anbieteradapter nicht: sie bucht Zahlen, sie spricht kein Protokoll — und
+    # die umgekehrte Richtung gibt es bereits.
+    from services.openai_compatible_adapter import StreamUsage
+
 
 ACTIVE_STATUSES = ("reserved", "completed")
+# Die Waehrung der Abrechnung ist **USD**: OpenRouter meldet die tatsaechlichen
+# Kosten in USD, und eine Umrechnung vor der Buchung waere eine zweite
+# Fehlerquelle in genau der Zahl, die stimmen soll. In die Anzeigewaehrung geht
+# es erst in der Oberflaeche (`services/ai_kosten.py`).
 MICROUNITS_PER_CENT = 10_000
+# Die Obergrenze jeder einzelnen Kostenangabe. Stand vorher an drei Stellen als
+# Produkt ausgeschrieben — einmal in der Reservierung, einmal beim Abschluss,
+# einmal beim Klemmen im Stream.
+MAX_COST_MICROUNITS = MONTHLY_COST_LIMIT_CENTS_MAX * MICROUNITS_PER_CENT
 
 
 class AiQuotaExceeded(ValueError):
@@ -113,7 +128,7 @@ def reserve_ai_usage(
         estimated_tokens < 0
         or estimated_tokens > TOKEN_LIMIT_MAX
         or estimated_cost_microunits < 0
-        or estimated_cost_microunits > MONTHLY_COST_LIMIT_CENTS_MAX * MICROUNITS_PER_CENT
+        or estimated_cost_microunits > MAX_COST_MICROUNITS
     ):
         raise ValueError("Geschätzter AI-Verbrauch liegt außerhalb des erlaubten Bereichs")
 
@@ -220,20 +235,87 @@ def reserve_ai_usage(
     return event
 
 
+def abrechnung(
+    usage: "StreamUsage",
+    *,
+    reserved_tokens: int,
+    estimated_actual_tokens: int,
+    failed: bool = False,
+    token_price_micro_usd_per_million: int | None = None,
+) -> tuple[int, int, str]:
+    """Was eine Anfrage gekostet hat — Tokens, Kosten, und woher die Zahl stammt.
+
+    Die Reihenfolge ist die ganze Aussage dieser Funktion:
+
+    1. **Was der Anbieter meldet.** OpenRouter schickt in der letzten Zeile
+       jedes Streams ``cost`` — den Betrag, der dem Konto tatsächlich belastet
+       wurde, in USD. Ihn zu buchen ist genauer als jede Nachrechnung, weil es
+       dieselbe Zahl ist, die im Dashboard des Anbieters steht. Genau daran
+       soll sich die Anzeige nachprüfen lassen.
+    2. **Sonst der gepflegte Preis** (`estimate_cost_microunits`, hier
+       nachgebildet, weil dort ein ``AiProvider`` erwartet wird und hier nur
+       noch die Zahl vorliegt). Eine Näherung mit *einem* Preis auf *alle*
+       Tokens — und als solche markiert.
+    3. **Sonst null.** MSM erfindet keinen Preis.
+
+    Im Stream stand hier früher ein ``max(reserviert, gerechnet)``. Der Gedanke
+    war, dass eine Überschreitung nicht nachträglich verschwinden soll — die
+    Wirkung war eine andere: die Reservierung ist eine grobe Schätzung
+    (`estimate_reserved_tokens`, Zeichen durch vier plus 2.048 Ausgabetokens),
+    und lag sie zu hoch, blieb sie **für immer** stehen, auch wenn hinterher
+    die gemessene Zahl vorlag. Eine Messung sticht eine Schätzung; das ist der
+    ganze Zweck einer Messung.
+
+    Die Tokenzahl folgt derselben Ordnung, hat aber einen zusätzlichen Fall:
+    bricht eine Anfrage ab, ohne dass der Anbieter etwas gemeldet hat, gilt
+    konservativ die Reserve. Nach einem Abbruch ist unbekannt, wieviel der
+    Anbieter bereits geliefert hat, und verschenkte Tokens sind das schlechtere
+    Risiko als ein paar zu viel gebuchte.
+
+    Steht hier und nicht im Stream, weil die Verdichtung dieselbe Frage
+    beantworten muss. Sie tat es lange nicht: sie buchte fest den reservierten
+    Betrag und damit **nie** echte Kosten.
+    """
+    if usage.total_tokens is not None:
+        tokens = usage.total_tokens
+    elif failed:
+        tokens = reserved_tokens
+    else:
+        tokens = estimated_actual_tokens
+    tokens = min(TOKEN_LIMIT_MAX, max(0, tokens))
+
+    if usage.vom_anbieter and usage.cost_micro_usd is not None:
+        return tokens, min(MAX_COST_MICROUNITS, max(0, usage.cost_micro_usd)), "provider"
+    if token_price_micro_usd_per_million:
+        kosten = (tokens * int(token_price_micro_usd_per_million)) // 1_000_000
+        return tokens, min(MAX_COST_MICROUNITS, kosten), "estimate"
+    return tokens, 0, "none"
+
+
 def complete_ai_usage(
     db: Session,
     event: AiUsageEvent,
     *,
     actual_tokens: int,
     actual_cost_microunits: int,
+    aufschluesselung: "StreamUsage | None" = None,
+    cost_source: str | None = None,
     now: datetime | None = None,
 ) -> AiUsageEvent:
-    """Schließt eine Reservierung idempotent mit dem tatsächlichen Verbrauch ab."""
+    """Schließt eine Reservierung idempotent mit dem tatsächlichen Verbrauch ab.
+
+    ``aufschluesselung`` und ``cost_source`` sind der **Nachweis** neben der
+    Buchung: was der Anbieter im Einzelnen gemeldet hat, und ob überhaupt er es
+    war. Sie gehören ausdrücklich **nicht** zum Idempotenzvertrag — der bleibt
+    auf ``accounted_tokens`` und ``accounted_cost_microunits``, den beiden
+    Zahlen, an denen die Kontingente hängen. Eine Wiederholung mit derselben
+    Buchung, aber leerem Nachweis, ist kein Konflikt; sie ergänzt nur nichts.
+    """
     if (
         actual_tokens < 0
         or actual_tokens > TOKEN_LIMIT_MAX
         or actual_cost_microunits < 0
-        or actual_cost_microunits > MONTHLY_COST_LIMIT_CENTS_MAX * MICROUNITS_PER_CENT
+        or actual_cost_microunits > MAX_COST_MICROUNITS
     ):
         raise ValueError("Tatsächlicher AI-Verbrauch liegt außerhalb des erlaubten Bereichs")
     if event.status == "completed":
@@ -248,6 +330,17 @@ def complete_ai_usage(
     event.status = "completed"
     event.accounted_tokens = actual_tokens
     event.accounted_cost_microunits = actual_cost_microunits
+    if aufschluesselung is not None:
+        event.prompt_tokens = aufschluesselung.prompt_tokens
+        event.completion_tokens = aufschluesselung.completion_tokens
+        event.cached_tokens = aufschluesselung.cached_tokens
+        event.reasoning_tokens = aufschluesselung.reasoning_tokens
+        # Mindestens eine: die Zeile existiert, weil eine Anfrage stattgefunden
+        # hat. Eine 0 hier hiesse "der Anbieter wurde nie gefragt", und das
+        # stimmt an dieser Stelle nie.
+        event.provider_requests = max(1, aufschluesselung.anfragen)
+    if cost_source is not None:
+        event.cost_source = cost_source
     event.completed_at = now or datetime.now(timezone.utc)
     db.flush()
     return event
@@ -357,6 +450,101 @@ def _usage_rows(
     ]
 
 
+@dataclass(frozen=True)
+class AiUsageEventRow:
+    """Eine einzelne Anfrage mit allem, was der Anbieter dazu gemeldet hat."""
+
+    id: int
+    created_at: datetime
+    user_id: int
+    username: str
+    model: str | None
+    tokens: int
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    cached_tokens: int | None
+    reasoning_tokens: int | None
+    provider_requests: int | None
+    cost_micro_usd: int
+    cost_source: str | None
+
+
+#: Wieviele Einzelzeilen eine Seite hoechstens traegt. Die Aufstellung ist ein
+#: Nachweis zum Durchsehen, keine Datenausleitung.
+MAX_EVENT_LIMIT = 200
+STANDARD_EVENT_LIMIT = 50
+
+
+def usage_events(
+    db: Session,
+    *,
+    user_id: int | None,
+    limit: int = STANDARD_EVENT_LIMIT,
+    offset: int = 0,
+    now: datetime | None = None,
+) -> tuple[list[AiUsageEventRow], bool]:
+    """Die Einzelanfragen hinter den Summen, neueste zuerst.
+
+    Bewusst aus **denselben** Bausteinen wie `_usage_rows`: derselbe Monat aus
+    `_period_starts`, dieselben `ACTIVE_STATUSES`. Eine Aufstellung, die andere
+    Zeilen zeigt als die Summe daneben zaehlt, waere schlimmer als keine — wer
+    eine Abweichung sucht, faende sie dann in der Ansicht statt in der Sache.
+
+    Der Monat ist die Grenze, weil er der laengste Zeitraum ist, den die Summen
+    ueberhaupt kennen. Eine Zeile von davor haette in dieser Ansicht keinen
+    Bezug mehr, gegen den man sie halten koennte.
+
+    Zurueck kommt ein Paar: die Zeilen und ob dahinter noch mehr liegt. Ermittelt
+    wird das, indem eine Zeile mehr geholt wird als gefragt — billiger als ein
+    zweites ``count(*)`` ueber dieselbe Tabelle.
+    """
+    current_time = now or datetime.now(timezone.utc)
+    _, _, month_start = _period_starts(current_time)
+    gefragt = max(1, min(MAX_EVENT_LIMIT, int(limit)))
+
+    query = (
+        db.query(AiUsageEvent, User.username)
+        .join(User, User.id == AiUsageEvent.user_id)
+        .filter(
+            AiUsageEvent.status.in_(ACTIVE_STATUSES),
+            AiUsageEvent.created_at >= month_start,
+        )
+    )
+    if user_id is not None:
+        query = query.filter(AiUsageEvent.user_id == user_id)
+
+    rohdaten = (
+        query
+        # Nach ``id`` als zweitem Kriterium: zwei Anfragen koennen im selben
+        # Sekundenbruchteil angelegt werden, und eine Sortierung ohne
+        # eindeutigen Schluessel laesst eine Zeile beim Blaettern doppelt oder
+        # gar nicht erscheinen.
+        .order_by(AiUsageEvent.created_at.desc(), AiUsageEvent.id.desc())
+        .offset(max(0, int(offset)))
+        .limit(gefragt + 1)
+        .all()
+    )
+    mehr = len(rohdaten) > gefragt
+    return [
+        AiUsageEventRow(
+            id=event.id,
+            created_at=event.created_at,
+            user_id=event.user_id,
+            username=username,
+            model=event.model,
+            tokens=int(event.accounted_tokens or 0),
+            prompt_tokens=event.prompt_tokens,
+            completion_tokens=event.completion_tokens,
+            cached_tokens=event.cached_tokens,
+            reasoning_tokens=event.reasoning_tokens,
+            provider_requests=event.provider_requests,
+            cost_micro_usd=int(event.accounted_cost_microunits or 0),
+            cost_source=event.cost_source,
+        )
+        for event, username in rohdaten[:gefragt]
+    ], mehr
+
+
 def usage_overview(db: Session, *, now: datetime | None = None) -> list[AiUsageSummary]:
     """Der Verbrauch aller Benutzer, die im Zeitraum ueberhaupt etwas verbraucht haben.
 
@@ -435,6 +623,11 @@ def verwaiste_reservierungen_abgleichen(db) -> int:
             event,
             actual_tokens=event.reserved_tokens,
             actual_cost_microunits=event.reserved_cost_microunits,
+            # Hier wird die Reserve gebucht, nicht eine Messung — der Prozess
+            # ist ja gestorben, bevor der Anbieter irgendetwas melden konnte.
+            # Die Zeile muss das sagen, sonst steht sie in der Aufstellung
+            # neben gemessenen und sieht aus wie eine von ihnen.
+            cost_source="estimate",
             now=jetzt,
         )
         geschlossen += 1

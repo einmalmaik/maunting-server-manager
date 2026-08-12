@@ -139,8 +139,8 @@
         "save": "AI provider could not be saved.",
         "delete": "AI provider could not be deleted."
       },
-      "tokenPrice": "Price in cents per 1M tokens",
-      "tokenPriceHint": "Take this from the provider's price list. MSM does not guess a price: without this value costs are accounted as zero and the role-based cost limit has no effect.",
+      "tokenPrice": "Fallback price per 1M tokens ({{currency}})",
+      "tokenPriceHint": "Only a fallback: normally what the provider reports is booked. This value applies when it stays silent — such rows appear as “estimated” in the breakdown. Without a value, costs are accounted as zero and the role-based cost limit has no effect.",
       "test": "Test connection",
       "testOk": "Connection successful. The provider responded.",
       "testFailed": "The test failed.",
@@ -157,7 +157,8 @@
         "levels": "Reasoning levels:",
         "toggleOnly": "This model reasons but knows no levels — only on or off.",
         "mandatory": "Reasoning cannot be turned off for this model."
-      }
+      },
+      "tokenPriceConverted": "Stored as {{amount}} — accounting happens in dollars."
     },
     "profile": {
       "title": "AI assistant",
@@ -522,16 +523,34 @@
       "week": "This week",
       "month": "This month",
       "requests": "Requests",
-      "cost": "Cost (€)",
+      "cost": "Cost",
       "total": "Total",
       "hint": "Users without consumption are not listed. Weeks start on Monday, all periods in UTC.",
       "mineTitle": "Your AI quota",
       "mineDescription": "Your consumption and the limits that apply to your roles. If the AI turns you away with “quota exhausted”, this is where you see why.",
       "noLimit": "No limit configured",
       "blocked": "Blocked: no quota is granted for this period.",
-      "mineCost": "This month: {{requests}} requests, {{cost}} € in cost.",
+      "mineCost": "This month: {{requests}} requests, {{cost}} in cost.",
       "errors": {
         "load": "AI usage could not be loaded."
+      },
+      "events": {
+        "title": "Individual requests",
+        "description": "The evidence behind the totals. One chat message is not one request: every tool round calls the provider again and resends the grown history in full — the “Calls” column says how often. These rows can be checked one by one against the provider dashboard.",
+        "when": "Time",
+        "model": "Model",
+        "input": "Input",
+        "output": "Output",
+        "cached": "Cached",
+        "calls": "Calls",
+        "source": "Source",
+        "more": "There are more requests this month; these are the most recent.",
+        "sources": {
+          "provider": "measured",
+          "estimate": "estimated",
+          "none": "no price",
+          "unknown": "unknown"
+        }
       }
     },
     "memoryNotice": {
@@ -585,6 +604,24 @@
         "high": "High",
         "xhigh": "Very high",
         "max": "Maximum"
+      }
+    },
+    "cost": {
+      "title": "Currency for cost display",
+      "description": "Accounting is always in US dollars — that is how the provider bills, and converting before booking would be a second source of error. This only sets the currency you read the amounts in.",
+      "currency": "Display currency",
+      "rate": "One US dollar in {{currency}}",
+      "rateRange": "Between {{min}} and {{max}}. MSM does not fetch a rate from the internet — enter the one from your bank.",
+      "example": "Example: 10.00 US dollars appear as {{amount}}.",
+      "bookingHint": "The rate only affects the display. Requests already booked do not change when you adjust it.",
+      "saved": "Currency saved.",
+      "currencies": {
+        "EUR": "Euro (EUR)",
+        "USD": "US dollar (USD)"
+      },
+      "errors": {
+        "load": "Currency setting could not be loaded.",
+        "save": "Currency setting could not be saved."
       }
     }
   },

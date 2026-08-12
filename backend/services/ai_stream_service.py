@@ -73,6 +73,7 @@ from services.ai_provider_service import estimate_cost_microunits, resolve_api_k
 from services.ai_usage_service import (
     AiQuotaExceeded,
     AiUsageConflict,
+    abrechnung,
     complete_ai_usage,
     fail_ai_usage,
     reserve_ai_usage,
@@ -84,6 +85,7 @@ from services.openai_compatible_adapter import (
     AiProviderRequestError,
     StreamUsage,
     stream_chat_completion,
+    usage_addieren,
 )
 
 
@@ -142,11 +144,11 @@ def _finalize_stream(
     message_id: str,
     usage_event_id: int,
     content: str,
-    provider_total_tokens: int | None,
+    usage: StreamUsage,
     estimated_actual_tokens: int,
     failed: bool,
     had_output: bool,
-    token_price_cents_per_million: int | None = None,
+    token_price_micro_usd_per_million: int | None = None,
     reasoning: str = "",
     question: dict | None = None,
 ) -> None:
@@ -184,27 +186,21 @@ def _finalize_stream(
             fail_ai_usage(db, usage_event)
         else:
             # Nach partieller Ausgabe darf Verbrauch nicht als null verbucht
-            # werden. Ohne finale Provider-Usage gilt konservativ die Reserve.
-            actual_tokens = provider_total_tokens
-            if actual_tokens is None:
-                actual_tokens = (
-                    usage_event.reserved_tokens if failed else estimated_actual_tokens
-                )
-            accounted_tokens = min(TOKEN_LIMIT_MAX, max(0, actual_tokens))
-            # Kosten folgen den tatsaechlich verbuchten Tokens. Ohne gepflegten
-            # Preis bleibt die Reserve (null) stehen; nie weniger als reserviert,
-            # damit eine Ueberschreitung nicht nachtraeglich verschwindet.
-            actual_cost = usage_event.reserved_cost_microunits
-            if token_price_cents_per_million:
-                actual_cost = max(
-                    actual_cost,
-                    (accounted_tokens * int(token_price_cents_per_million)) // 100,
-                )
+            # werden — auch dann nicht, wenn der Lauf gescheitert ist.
+            accounted_tokens, accounted_cost, herkunft = abrechnung(
+                usage,
+                reserved_tokens=usage_event.reserved_tokens,
+                estimated_actual_tokens=estimated_actual_tokens,
+                failed=failed,
+                token_price_micro_usd_per_million=token_price_micro_usd_per_million,
+            )
             complete_ai_usage(
                 db,
                 usage_event,
                 actual_tokens=accounted_tokens,
-                actual_cost_microunits=actual_cost,
+                actual_cost_microunits=accounted_cost,
+                aufschluesselung=usage,
+                cost_source=herkunft,
             )
         db.commit()
 
@@ -706,7 +702,7 @@ class _Vorbereitung:
     request_id: str
     reasoning: bool
     reasoning_effort: str | None
-    token_price_cents_per_million: int | None
+    token_price_micro_usd_per_million: int | None
     zustand: dict
 
 
@@ -909,7 +905,7 @@ def _segment_vorbereiten(run_id: str) -> tuple[_Vorbereitung | None, tuple[str, 
             # Neu klemmen hiesse, dass ein zwischenzeitlich geaenderter
             # Rollendeckel mitten in einer Aufgabe wirkt.
             reasoning_effort=run.reasoning_effort,
-            token_price_cents_per_million=provider.token_price_cents_per_million,
+            token_price_micro_usd_per_million=provider.token_price_micro_usd_per_million,
             zustand=zustand,
         ), None
 
@@ -1112,11 +1108,11 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 chunks.append(chunk.text)
                 ai_run_broker.veroeffentlichen(run_id, "delta", {"content": chunk.text})
             if current_usage is not usage:
-                usage.total_tokens = (
-                    usage.total_tokens + current_usage.total_tokens
-                    if usage.total_tokens is not None and current_usage.total_tokens is not None
-                    else usage.total_tokens or current_usage.total_tokens
-                )
+                # Jede Werkzeugrunde ist eine eigene Anbieteranfrage mit eigenem
+                # Prompt — summiert, nicht ersetzt. Vorher wurden hier nur die
+                # Tokens addiert; Kosten, Aufschluesselung und die Zahl der
+                # Anfragen fielen weg.
+                usage_addieren(usage, current_usage)
             if not current_usage.tool_calls:
                 break
             if tools is None:
@@ -1324,11 +1320,11 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 message_id=message_id,
                 usage_event_id=vorbereitung.usage_event_id,
                 content="".join(chunks),
-                provider_total_tokens=usage.total_tokens,
+                usage=usage,
                 estimated_actual_tokens=0,
                 failed=True,
                 had_output=bool(chunks),
-                token_price_cents_per_million=vorbereitung.token_price_cents_per_million,
+                token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
                 reasoning="".join(thoughts),
             )
             abgerechnet = True
@@ -1348,14 +1344,14 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             message_id=message_id,
             usage_event_id=vorbereitung.usage_event_id,
             content=complete_content,
-            provider_total_tokens=usage.total_tokens,
+            usage=usage,
             estimated_actual_tokens=estimated_actual,
             failed=False,
             # Eine Rueckfrage ist eine vollwertige Antwort, und ein Vorschlag
             # ebenso. Ohne das galten sie als "nichts geliefert" — genau der
             # Fall, in dem der Chat "Keine Antwort erhalten" anzeigte.
             had_output=bool(chunks) or gestellte_frage is not None or geparkt,
-            token_price_cents_per_million=vorbereitung.token_price_cents_per_million,
+            token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
             reasoning="".join(thoughts),
             question=gestellte_frage,
         )
@@ -1410,11 +1406,11 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 message_id=message_id,
                 usage_event_id=vorbereitung.usage_event_id,
                 content="".join(chunks),
-                provider_total_tokens=usage.total_tokens,
+                usage=usage,
                 estimated_actual_tokens=0,
                 failed=True,
                 had_output=bool(chunks),
-                token_price_cents_per_million=vorbereitung.token_price_cents_per_million,
+                token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
                 reasoning="".join(thoughts),
             )
             _lauf_abschliessen(run_id, status="cancelled", stop_reason="cancelled")
@@ -1446,11 +1442,11 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 message_id=message_id,
                 usage_event_id=vorbereitung.usage_event_id,
                 content="".join(chunks),
-                provider_total_tokens=usage.total_tokens,
+                usage=usage,
                 estimated_actual_tokens=0,
                 failed=True,
                 had_output=bool(chunks),
-                token_price_cents_per_million=vorbereitung.token_price_cents_per_million,
+                token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
                 reasoning="".join(thoughts),
             )
         ai_run_broker.veroeffentlichen(run_id, "error", {"code": code, "message_key": message_key})

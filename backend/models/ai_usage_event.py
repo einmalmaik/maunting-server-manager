@@ -34,6 +34,13 @@ class AiUsageEvent(Base):
             "reserved_cost_microunits >= 0",
             name="ck_ai_usage_events_reserved_cost",
         ),
+        # NULL ist ausdruecklich erlaubt: Bestandszeilen aus der Zeit vor der
+        # Aufschluesselung tragen keine Herkunft, und eine erfundene waere
+        # schlimmer als eine fehlende.
+        CheckConstraint(
+            "cost_source IS NULL OR cost_source IN ('provider', 'estimate', 'none')",
+            name="ck_ai_usage_events_cost_source",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -67,7 +74,35 @@ class AiUsageEvent(Base):
     reserved_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
     reserved_cost_microunits: Mapped[int] = mapped_column(BigInteger, nullable=False)
     accounted_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # In **US-Cent-Microunits** (1 Cent = 10.000, siehe
+    # `ai_usage_service.MICROUNITS_PER_CENT`). Die Waehrung stand hier lange
+    # nirgends und war deshalb die des zuletzt gepflegten Preises — bei zwei
+    # Anbietern mit unterschiedlicher Waehrung addierte die Uebersicht Aepfel
+    # und Birnen. Sie ist jetzt festgelegt: der Anbieter rechnet in USD ab, und
+    # eine Umrechnung *vor* der Buchung waere eine zweite Fehlerquelle. In die
+    # Anzeigewaehrung geht es erst in der Oberflaeche (`services/ai_kosten.py`).
     accounted_cost_microunits: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    # ── Aufschluesselung ──────────────────────────────────────────────
+    #
+    # Was der Anbieter gemeldet hat, so wie er es gemeldet hat. `accounted_tokens`
+    # bleibt die Zahl, an der die Kontingente haengen; das hier ist der Nachweis
+    # daneben. Alles nullable, weil "nicht gemeldet" nicht "null" heisst — ein
+    # stummer Anbieter hat nicht null Tokens verbraucht.
+    prompt_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Teilmengen der beiden obigen. Wer sie addiert, zaehlt doppelt.
+    cached_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    reasoning_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Wieviele Anbieteranfragen in dieser Zeile stecken. Eine Chatnachricht ist
+    # nicht eine Anfrage: jede Werkzeugrunde ruft den Anbieter erneut und
+    # schickt den gewachsenen Verlauf komplett mit. Ohne diese Zahl sieht eine
+    # ehrliche Summe von 360.000 Tokens fuer eine Frage nach einem Fehler aus.
+    provider_requests: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 'provider' — der Anbieter hat den Betrag gemeldet, er ist gebucht wie er kam.
+    # 'estimate' — der Anbieter schwieg, gerechnet wurde mit dem gepflegten Preis.
+    # 'none'     — kein Preis hinterlegt, die Kosten stehen ehrlich auf null.
+    cost_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

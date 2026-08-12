@@ -69,17 +69,21 @@ const usage = {
   entries: [
     {
       user_id: 9, username: 'viel-verbraucher', tokens_today: 1_200,
-      tokens_week: 9_000, tokens_month: 40_000, cost_month_cents: 350,
+      tokens_week: 9_000, tokens_month: 40_000, cost_month_micro_usd: 3_500_000,
       requests_month: 88, last_request_at: '2026-08-10T09:00:00Z',
     },
     {
       user_id: 4, username: 'gelegentlich', tokens_today: 0,
-      tokens_week: 40, tokens_month: 120, cost_month_cents: 1,
+      tokens_week: 40, tokens_month: 120, cost_month_micro_usd: 10_000,
       requests_month: 2, last_request_at: '2026-08-04T11:00:00Z',
     },
   ],
   total_tokens_month: 40_120,
-  total_cost_month_cents: 351,
+  total_cost_month_micro_usd: 3_510_000,
+  cost_policy: {
+    currency: 'EUR', usd_rate: '0.92',
+    available_currencies: ['EUR', 'USD'], min_rate: '0.01', max_rate: '100',
+  },
 }
 
 /**
@@ -91,6 +95,12 @@ const usage = {
  */
 function respond(path: string): Promise<unknown> {
   if (path === '/ai/usage') return Promise.resolve(usage)
+  // Die Einzelaufstellung und die Waehrungspolitik haengen an derselben Seite.
+  // Ohne eigene Antwort bekaemen sie die Rollenliste und scheiterten daran.
+  if (path.startsWith('/ai/usage/events')) {
+    return Promise.resolve({ entries: [], has_more: false, cost_policy: usage.cost_policy })
+  }
+  if (path === '/ai/settings/cost') return Promise.resolve(usage.cost_policy)
   return Promise.resolve([row])
 }
 

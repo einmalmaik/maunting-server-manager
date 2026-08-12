@@ -25,6 +25,7 @@ from services import ai_chat_service, ai_provider_service
 from services.ai_stream_service import MAX_TOOL_ROUNDS
 from services.ai_context_service import build_provider_messages, redact_sensitive_text
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
+from services.ai_usage_service import MICROUNITS_PER_CENT
 from services.openai_compatible_adapter import (
     AiProviderRequestError,
     ProviderToolCall,
@@ -834,7 +835,7 @@ def test_finalization_settles_usage_even_if_the_message_is_gone(
         message_id=str(uuid4()),  # existiert bewusst nicht
         usage_event_id=usage_event.id,
         content="ignoriert",
-        provider_total_tokens=None,
+        usage=StreamUsage(),
         estimated_actual_tokens=0,
         failed=True,
         had_output=True,
@@ -870,7 +871,7 @@ def test_cost_limit_actually_blocks_once_a_token_price_is_configured(
     db.commit()
     provider = _provider(db, monkeypatch)
     # 100.000 Cent je Million Tokens: schon eine kleine Anfrage sprengt 1 Cent.
-    provider.token_price_cents_per_million = 100_000
+    provider.token_price_micro_usd_per_million = 100_000 * MICROUNITS_PER_CENT
     db.commit()
     calls = 0
 
@@ -901,10 +902,15 @@ def test_without_a_token_price_cost_stays_zero_and_the_limit_does_not_fire(
     """MSM erfindet keinen Preis: ohne Konfiguration bleiben die Kosten null."""
     provider = _provider(db, monkeypatch)
 
-    assert provider.token_price_cents_per_million is None
+    assert provider.token_price_micro_usd_per_million is None
     assert ai_provider_service.estimate_cost_microunits(provider, 1_000_000) == 0
 
-    provider.token_price_cents_per_million = 300  # 3,00 EUR je 1M Tokens
-    # 1.000.000 Tokens * 300 Cent / 100 = 3.000.000 Microunits = 300 Cent.
+    # 3,00 USD je 1 Mio. Tokens. In Microunits, damit auch „1,20" eintragbar
+    # ist — in ganzen Cent lag zwischen 1 und 2 nichts.
+    provider.token_price_micro_usd_per_million = 300 * MICROUNITS_PER_CENT
+    # 1.000.000 Tokens zum Preis von 1.000.000 Tokens: genau der Preis selbst.
     assert ai_provider_service.estimate_cost_microunits(provider, 1_000_000) == 3_000_000
+    # Und die Nachkommastelle, die vorher nicht darstellbar war: 1,20 USD.
+    provider.token_price_micro_usd_per_million = 120 * MICROUNITS_PER_CENT
+    assert ai_provider_service.estimate_cost_microunits(provider, 1_000_000) == 1_200_000
     assert ai_provider_service.estimate_cost_microunits(provider, 0) == 0

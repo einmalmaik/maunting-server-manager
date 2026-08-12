@@ -5,7 +5,7 @@ folgen in separaten Schnitten, damit Rollenverwaltung und Secret-Flows nicht
 zu einem schwer prüfbaren Monolithen werden.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -15,18 +15,22 @@ from models import Role, User
 from schemas.ai_settings import (
     AiContextPolicyStatus,
     AiContextPolicyUpdate,
+    AiCostPolicyStatus,
+    AiCostPolicyUpdate,
     AiLearningPolicyStatus,
     AiLearningPolicyUpdate,
     AiRoleLimitsResponse,
     AiRoleLimitsUpdate,
     AiUsageEntry,
+    AiUsageEventEntry,
+    AiUsageEvents,
     AiUsageMine,
     AiUsageOverview,
     AiWebSearchKeyUpdate,
     AiWebSearchStatus,
     EffectiveAiLimitsResponse,
 )
-from services import ai_limit_service, ai_usage_service, audit_service
+from services import ai_kosten, ai_limit_service, ai_usage_service, audit_service
 from services.dis_client import DisSidecarError
 from services.role_service import effective_user_role_ids
 
@@ -274,14 +278,24 @@ def get_my_effective_limits(
     )
 
 
-def _cents(microunits: int) -> int:
-    """Rechnet Mikroeinheiten in Cent um — **aufgerundet**.
+def _kostenpolitik() -> AiCostPolicyStatus:
+    """Waehrung und Kurs fuer die Anzeige — haengt an jeder Verbrauchsantwort.
 
-    Die Richtung ist Absicht: eine Kostenanzeige, die zu niedrig ist, laesst
-    jemanden glauben, er habe noch Luft. Zu hoch ist die harmlosere Seite.
+    Hier stand einmal ``_cents``, eine Umrechnung von Mikroeinheiten in
+    aufgerundete Cent. Sie ist entfallen: fuer eine Monatssumme war sie
+    harmlos, fuer eine einzelne Anfrage nicht. Die meisten kosten weniger als
+    einen Cent, und aufgerundet sah jede gleich teuer aus — genau die Ansicht,
+    mit der sich eine Rechnung nicht pruefen laesst. Die API liefert jetzt
+    durchgehend Mikroeinheiten, gerundet wird erst beim Anzeigen.
     """
-    per_cent = ai_usage_service.MICROUNITS_PER_CENT
-    return -(-int(microunits) // per_cent)
+    politik = ai_kosten.politik()
+    return AiCostPolicyStatus(
+        currency=politik.waehrung,
+        usd_rate=format(politik.kurs, "f"),
+        available_currencies=list(ai_kosten.WAEHRUNGEN),
+        min_rate=format(ai_kosten.MIN_KURS, "f"),
+        max_rate=format(ai_kosten.MAX_KURS, "f"),
+    )
 
 
 def _entry(row: ai_usage_service.AiUsageSummary) -> AiUsageEntry:
@@ -291,10 +305,14 @@ def _entry(row: ai_usage_service.AiUsageSummary) -> AiUsageEntry:
         tokens_today=row.tokens_today,
         tokens_week=row.tokens_week,
         tokens_month=row.tokens_month,
-        cost_month_cents=_cents(row.cost_month_microunits),
+        cost_month_micro_usd=row.cost_month_microunits,
         requests_month=row.requests_month,
         last_request_at=row.last_request_at,
     )
+
+
+def _event(row: ai_usage_service.AiUsageEventRow) -> AiUsageEventEntry:
+    return AiUsageEventEntry(**row.__dict__)
 
 
 @router.get("/usage/me", response_model=AiUsageMine)
@@ -314,6 +332,52 @@ def get_my_usage(
         limits=EffectiveAiLimitsResponse(
             role_ids=effective_user_role_ids(db, user), **limits.__dict__
         ),
+        cost_policy=_kostenpolitik(),
+    )
+
+
+@router.get("/usage/me/events", response_model=AiUsageEvents)
+def get_my_usage_events(
+    limit: int = Query(default=ai_usage_service.STANDARD_EVENT_LIMIT, ge=1, le=ai_usage_service.MAX_EVENT_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> AiUsageEvents:
+    """Die eigenen Anfragen einzeln — der Nachweis hinter den eigenen Summen.
+
+    Ohne Sonderrecht, aus demselben Grund wie `/usage/me`: es sind die eigenen
+    Zahlen. Und es sind die, mit denen sich „das kann nicht stimmen" ueberhaupt
+    erst pruefen laesst — Zeile fuer Zeile gegen das Dashboard des Anbieters,
+    mit der Spalte, die sagt, ob ueberhaupt gemessen wurde.
+    """
+    rows, mehr = ai_usage_service.usage_events(db, user_id=user.id, limit=limit, offset=offset)
+    return AiUsageEvents(
+        entries=[_event(row) for row in rows],
+        has_more=mehr,
+        cost_policy=_kostenpolitik(),
+    )
+
+
+@router.get("/usage/events", response_model=AiUsageEvents)
+def get_usage_events(
+    limit: int = Query(default=ai_usage_service.STANDARD_EVENT_LIMIT, ge=1, le=ai_usage_service.MAX_EVENT_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_global("ai.usage.read.all")),
+) -> AiUsageEvents:
+    """Die Anfragen **aller** Benutzer einzeln.
+
+    An demselben Key wie die Uebersicht darueber und nicht an
+    `panel.settings.read`: wer fremde Verbraeuche sieht, sieht fremdes
+    Nutzungsverhalten — hier sogar zeitlich aufgeloest. Das ist eine eigene
+    Entscheidung des Betreibers und kein Nebeneffekt einer Leseberechtigung
+    fuer Einstellungen.
+    """
+    rows, mehr = ai_usage_service.usage_events(db, user_id=None, limit=limit, offset=offset)
+    return AiUsageEvents(
+        entries=[_event(row) for row in rows],
+        has_more=mehr,
+        cost_policy=_kostenpolitik(),
     )
 
 
@@ -340,8 +404,50 @@ def get_usage_overview(
     return AiUsageOverview(
         entries=entries,
         total_tokens_month=sum(entry.tokens_month for entry in entries),
-        # Die Summe entsteht aus den **Mikroeinheiten**, nicht aus den bereits
-        # gerundeten Cent-Werten je Zeile. Sonst addieren sich zweihundert
-        # Aufrundungen zu einem Betrag, den niemand verbraucht hat.
-        total_cost_month_cents=_cents(sum(row.cost_month_microunits for row in rows)),
+        total_cost_month_micro_usd=sum(row.cost_month_microunits for row in rows),
+        cost_policy=_kostenpolitik(),
     )
+
+
+@router.get("/settings/cost", response_model=AiCostPolicyStatus)
+def get_cost_policy(
+    _: User = Depends(require_global("panel.settings.read")),
+) -> AiCostPolicyStatus:
+    return _kostenpolitik()
+
+
+@router.put("/settings/cost", response_model=AiCostPolicyStatus)
+def set_cost_policy(
+    payload: AiCostPolicyUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("panel.settings.write")),
+    _: None = Depends(verify_csrf),
+) -> AiCostPolicyStatus:
+    """In welcher Waehrung der Betreiber seine KI-Kosten liest.
+
+    Ausdruecklich nur die **Anzeige**. Gebucht wird weiter in US-Cent, weil der
+    Anbieter in USD abrechnet; eine Umrechnung vor der Buchung waere eine
+    zweite Fehlerquelle, und ein Kurs, der sich taeglich aendert, wuerde
+    rueckwirkend Zeilen veraendern, die laengst bezahlt sind.
+
+    Der Kurs kommt vom Betreiber und nicht aus dem Netz. Ein Kursdienst waere
+    ein weiterer Fremdzugriff, den ein selbstgehostetes Panel weder erklaeren
+    noch abschalten kann — fuer eine Zahl, die niemand auf den Cent braucht.
+    """
+    try:
+        politik = ai_kosten.setzen(
+            neue_waehrung=payload.currency, neuer_kurs=payload.usd_rate
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor.id,
+        action="ai.cost.policy.updated",
+        target_type="panel_setting",
+        target_id=None,
+        details={"currency": politik.waehrung, "usd_rate": format(politik.kurs, "f")},
+    )
+    db.commit()
+    return _kostenpolitik()

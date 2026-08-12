@@ -104,13 +104,45 @@ class AiContextPolicyStatus(BaseModel):
     max_percent: int
 
 
+class AiCostPolicyUpdate(BaseModel):
+    """Waehrung und Kurs fuer die **Anzeige**. Gebucht wird weiter in USD.
+
+    ``usd_rate`` darf bei ``USD`` fehlen — dort gibt es keinen Kurs. Die
+    verbindliche Pruefung steht in `services/ai_kosten.setzen`; hier nur die
+    Form, damit ein Tippfehler eine 422 mit Feldbezug ergibt.
+    """
+
+    currency: str = Field(min_length=3, max_length=3)
+    usd_rate: str | None = Field(default=None, max_length=16)
+
+
+class AiCostPolicyStatus(BaseModel):
+    """Wie Betraege angezeigt werden — die Antwort haengt an jeder Verbrauchszahl.
+
+    Sie steht bewusst neben den Zahlen und nicht in einem eigenen Aufruf: eine
+    Oberflaeche, die Betraege rendert, bevor sie die Waehrung kennt, zeigt fuer
+    einen Wimpernschlag Dollar dort, wo Euro stehen — und beim Nachladen
+    umgekehrt.
+    """
+
+    currency: str
+    #: Als Zeichenkette, nicht als Fliesskommazahl: ein Kurs ist eine
+    #: Dezimalzahl, und der Umweg ueber ``float`` waere genau die Ungenauigkeit,
+    #: gegen die diese ganze Aenderung angeht.
+    usd_rate: str
+    available_currencies: list[str] = Field(default_factory=list)
+    min_rate: str
+    max_rate: str
+
+
 class AiUsageEntry(BaseModel):
     """Der Verbrauch eines Benutzers, in denselben Zeitraeumen wie die Grenzen.
 
-    Kosten stehen in **Cent**, nicht in den Mikroeinheiten der Datenbank. Die
-    Grenze heisst ``monthly_cost_limit_cents`` und wird in Cent eingestellt;
-    zwei Einheiten fuer dieselbe Groesse an der API waeren eine Einladung, sie
-    in der Oberflaeche zu verwechseln.
+    Kosten stehen in **US-Cent-Microunits** (1 Cent = 10.000) — der Einheit, in
+    der auch gebucht wird. Frueher standen hier ganze Cent, und das war fuer
+    eine Einzelanfrage unbrauchbar: die meisten kosten weniger als einen Cent,
+    und aufgerundet sah jede gleich teuer aus. Die Waehrung liefert
+    ``AiCostPolicyStatus`` daneben; umgerechnet wird in der Oberflaeche.
     """
 
     user_id: int
@@ -118,9 +150,53 @@ class AiUsageEntry(BaseModel):
     tokens_today: int
     tokens_week: int
     tokens_month: int
-    cost_month_cents: int
+    cost_month_micro_usd: int
     requests_month: int
     last_request_at: datetime | None = None
+
+
+class AiUsageEventEntry(BaseModel):
+    """Eine einzelne Anfrage, so wie der Anbieter sie gemeldet hat.
+
+    Der Nachweis hinter den Summen. Er existiert, weil die Summen allein sich
+    nicht gegen das Dashboard des Anbieters halten lassen — und weil eine
+    geschaetzte Zahl darin bis dahin genauso aussah wie eine gemessene.
+
+    Alle Tokenfelder ausser ``tokens`` sind optional: fuer Zeilen aus der Zeit
+    vor der Aufschluesselung gibt es sie nicht, und eine erfundene Null waere
+    dort eine Behauptung.
+    """
+
+    id: int
+    created_at: datetime
+    user_id: int
+    username: str
+    model: str | None = None
+    #: Die verbuchte Gesamtzahl — die, an der die Kontingente haengen.
+    tokens: int
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    #: Teilmenge von ``prompt_tokens``: aus dem Zwischenspeicher gelesen und
+    #: deshalb rund ein Zehntel so teuer. Wer sie addiert, zaehlt doppelt.
+    cached_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    #: Wieviele Anbieteranfragen in dieser Zeile stecken. Eine Chatnachricht ist
+    #: nicht eine Anfrage: jede Werkzeugrunde ruft den Anbieter erneut.
+    provider_requests: int | None = None
+    cost_micro_usd: int
+    #: 'provider' | 'estimate' | 'none' | None (Bestandszeile ohne Herkunft).
+    cost_source: str | None = None
+
+
+class AiUsageEvents(BaseModel):
+    """Ein Ausschnitt der Einzelaufstellung, mit der Politik zum Formatieren."""
+
+    entries: list[AiUsageEventEntry] = Field(default_factory=list)
+    #: Ob hinter diesem Ausschnitt noch mehr liegt. Bewusst kein Gesamtzaehler:
+    #: der kostet eine zweite Abfrage ueber dieselbe Tabelle fuer eine Zahl, die
+    #: niemand braucht, um weiterzublaettern.
+    has_more: bool = False
+    cost_policy: AiCostPolicyStatus
 
 
 class AiUsageOverview(BaseModel):
@@ -128,7 +204,8 @@ class AiUsageOverview(BaseModel):
 
     entries: list[AiUsageEntry] = Field(default_factory=list)
     total_tokens_month: int = 0
-    total_cost_month_cents: int = 0
+    total_cost_month_micro_usd: int = 0
+    cost_policy: AiCostPolicyStatus
 
 
 class AiUsageMine(AiUsageEntry):
@@ -139,6 +216,7 @@ class AiUsageMine(AiUsageEntry):
     """
 
     limits: EffectiveAiLimitsResponse
+    cost_policy: AiCostPolicyStatus
 
 
 class AiLearningPolicyStatus(BaseModel):

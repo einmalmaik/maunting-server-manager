@@ -5,13 +5,15 @@ import { useTranslation } from 'react-i18next'
 import {
   aiApi,
   type AiCatalogModel,
+  type AiCostPolicy,
   type AiProviderAdmin,
   type AiProviderKind,
   type AiProviderTestResult,
   type AiProviderWrite,
 } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
-import { Button, Dropdown, NumberStepper, Switch } from '@/Singra/UI'
+import { Button, Dropdown, Switch } from '@/Singra/UI'
+import { eingabeInMicroUsd, microUsdInEingabe, preisFormatieren } from '@/utils/geld'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
@@ -27,7 +29,7 @@ const EMPTY_PROVIDER: ProviderDraft = {
   default_model: '',
   enabled: true,
   requires_api_key: true,
-  token_price_cents_per_million: null,
+  token_price_micro_usd_per_million: null,
   operator_api_key: '',
 }
 
@@ -39,7 +41,7 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     default_model: provider.default_model,
     enabled: provider.enabled,
     requires_api_key: provider.requires_api_key,
-    token_price_cents_per_million: provider.token_price_cents_per_million,
+    token_price_micro_usd_per_million: provider.token_price_micro_usd_per_million,
     operator_api_key: '',
     operator_key_configured: provider.operator_key_configured,
     operator_key_hint: provider.operator_key_hint,
@@ -65,6 +67,10 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<number | 'new' | null>(null)
   const [kinds, setKinds] = useState<AiProviderKind[]>([])
+  // Waehrung und Kurs fuer das Preisfeld. Einmal fuer die ganze Seite und
+  // nicht je Formular: die Politik ist panelweit, und drei Anbieter wuerden
+  // sonst dreimal dasselbe fragen.
+  const [costPolicy, setCostPolicy] = useState<AiCostPolicy | null>(null)
 
   // Die Anbieterliste ist statisch und kommt aus `ai_provider_registry` — ein
   // Abruf fuer die ganze Seite, nicht einer je Formular.
@@ -72,6 +78,9 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
     let active = true
     aiApi.listProviderKinds()
       .then((rows) => { if (active) setKinds(rows) })
+      .catch(() => undefined)
+    aiApi.getCostPolicy()
+      .then((policy) => { if (active) setCostPolicy(policy) })
       .catch(() => undefined)
     return () => { active = false }
   }, [])
@@ -103,7 +112,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
       default_model: draft.default_model.trim(),
       enabled: draft.enabled,
       requires_api_key: draft.requires_api_key,
-      token_price_cents_per_million: draft.token_price_cents_per_million ?? null,
+      token_price_micro_usd_per_million: draft.token_price_micro_usd_per_million ?? null,
       ...(draft.operator_api_key ? { operator_api_key: draft.operator_api_key } : {}),
       ...(draft.clear_operator_api_key ? { clear_operator_api_key: true } : {}),
     }
@@ -172,6 +181,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
           key={provider.id}
           draft={provider}
           kinds={kinds}
+          costPolicy={costPolicy}
           disabled={!canWrite || busyId !== null}
           saving={busyId === provider.id}
           onChange={(patch) => update(index, patch)}
@@ -187,6 +197,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
         <ProviderForm
           draft={{ ...EMPTY_PROVIDER, provider_kind: kinds[0]?.kind ?? '' }}
           kinds={kinds}
+          costPolicy={costPolicy}
           disabled={busyId !== null}
           saving={busyId === 'new'}
           onChange={() => undefined}
@@ -202,6 +213,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
 function ProviderForm({
   draft: initialDraft,
   kinds,
+  costPolicy,
   disabled,
   saving,
   localDraft = false,
@@ -214,6 +226,8 @@ function ProviderForm({
 }: {
   draft: ProviderDraft
   kinds: AiProviderKind[]
+  /** `null`, solange die Politik nicht geladen ist — dann gilt USD 1:1. */
+  costPolicy: AiCostPolicy | null
   disabled: boolean
   saving: boolean
   localDraft?: boolean
@@ -224,7 +238,7 @@ function ProviderForm({
   onCancel?: () => void
   onTest?: () => Promise<AiProviderTestResult>
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [local, setLocal] = useState<ProviderDraft>({ ...initialDraft })
   const [testResult, setTestResult] = useState<AiProviderTestResult | null>(null)
   const [testing, setTesting] = useState(false)
@@ -272,6 +286,25 @@ function ProviderForm({
   const kindId = useId()
   const modelId = useId()
   const preisId = useId()
+
+  // Solange die Politik nicht geladen ist, gilt USD 1:1 — die Waehrung der
+  // Buchung. Ein Rueckfall auf Euro wuerde einen getippten Preis stillschweigend
+  // durch einen Kurs teilen, den es an dieser Stelle noch gar nicht gab.
+  const waehrung = costPolicy ?? { currency: 'USD', usd_rate: '1' }
+  const preisMicro = draft.token_price_micro_usd_per_million ?? null
+  // Eigener Zustand fuer das Feld: waehrend jemand „1," tippt, ist die Eingabe
+  // noch keine Zahl. Wuerde sie sofort durch den Umrechner laufen, spraenge der
+  // Cursor beim dritten Zeichen. Uebernommen wird beim Verlassen des Feldes.
+  const [preisText, setPreisText] = useState(() => microUsdInEingabe(preisMicro, waehrung))
+  // Kommt der Wert von aussen — nach dem Speichern, oder wenn die Politik
+  // nachlaedt —, folgt das Feld. Der Vergleich verhindert, dass es das auch
+  // waehrend des Tippens tut.
+  useEffect(() => {
+    const frisch = microUsdInEingabe(preisMicro, waehrung)
+    setPreisText((aktuell) => (
+      eingabeInMicroUsd(aktuell, waehrung) === preisMicro ? aktuell : frisch
+    ))
+  }, [preisMicro, waehrung.currency, waehrung.usd_rate])
 
   /**
    * Schickt eine echte Mini-Anfrage an den Anbieter.
@@ -399,25 +432,39 @@ function ProviderForm({
         <Toggle label={t('ai.providers.enabled')} checked={draft.enabled} onChange={(enabled) => change({ enabled })} />
         <Toggle label={t('ai.providers.requiresKey')} checked={draft.requires_api_key} onChange={(requires_api_key) => change({ requires_api_key })} />
         <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
-          {/* `htmlFor` statt Umschliessen: der `NumberStepper` ist eine
-              Knopfgruppe, und ein umschliessendes `<label>` benennt das erste
-              bedienbare Element darin — den **Minus**-Knopf. Ein Klick auf die
-              Beschriftung senkte den Preis damit um `step`, bei noch leerem
-              Feld sogar von „kein Preis“ auf 0, also auf „kostenlos“. */}
+          {/* Ein freies Textfeld und kein `NumberStepper` mehr. Der Stepper
+              zaehlte in ganzen Schritten, und genau daran scheiterte die
+              Eingabe: zwischen 1 und 2 Cent lag nichts, „1,20 €" war nicht
+              eintragbar. Ein Preis ist eine Dezimalzahl, kein Zaehler. */}
           <div className="space-y-1.5">
             <label htmlFor={preisId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-              {t('ai.providers.tokenPrice')}
+              {t('ai.providers.tokenPrice', { currency: waehrung.currency })}
             </label>
-            <NumberStepper
+            <input
               id={preisId}
-              value={draft.token_price_cents_per_million === null || draft.token_price_cents_per_million === undefined ? '' : String(draft.token_price_cents_per_million)}
-              onValueChange={(value) => change({ token_price_cents_per_million: value === '' ? null : Number(value) })}
-              min={0}
-              max={10000000}
-              step={10}
-              aria-label={t('ai.providers.tokenPrice')}
+              type="text"
+              inputMode="decimal"
+              className="msm-input w-full"
+              placeholder="1,20"
+              value={preisText}
+              onChange={(event) => setPreisText(event.target.value)}
+              onBlur={() => change({
+                token_price_micro_usd_per_million: eingabeInMicroUsd(preisText, waehrung),
+              })}
+              aria-label={t('ai.providers.tokenPrice', { currency: waehrung.currency })}
             />
           </div>
+          {/* Was daraus gespeichert wird, sichtbar und nicht im Verborgenen.
+              Gebucht wird in Dollar; eine Umrechnung, die der Betreiber nicht
+              sieht, waere spaeter der erste Verdaechtige, wenn eine Zahl nicht
+              stimmt. */}
+          {waehrung.currency !== 'USD' && preisMicro !== null && (
+            <p className="mt-2 text-xs text-on-surface-variant">
+              {t('ai.providers.tokenPriceConverted', {
+                amount: preisFormatieren(preisMicro, 'USD', i18n.language),
+              })}
+            </p>
+          )}
           <p className="mt-2 text-xs text-on-surface-variant">{t('ai.providers.tokenPriceHint')}</p>
         </div>
       </fieldset>

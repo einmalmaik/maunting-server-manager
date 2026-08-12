@@ -13,6 +13,7 @@ vi.mock('@/api/ai', () => ({
     createProvider: vi.fn(),
     updateProvider: vi.fn(),
     deleteProvider: vi.fn(),
+    getCostPolicy: vi.fn(),
   },
 }))
 
@@ -26,7 +27,7 @@ const provider: AiProviderAdmin = {
   requires_api_key: true,
   operator_key_configured: true,
   operator_key_hint: '********1234',
-  token_price_cents_per_million: null,
+  token_price_micro_usd_per_million: null,
   updated_at: '2026-08-01T12:00:00Z',
 }
 
@@ -42,6 +43,13 @@ describe('AiProvidersSettings', () => {
       key_url: 'https://openrouter.ai/keys',
       key_prefix: 'sk-or-',
     }])
+    vi.mocked(aiApi.getCostPolicy).mockReset().mockResolvedValue({
+      currency: 'EUR',
+      usd_rate: '0.92',
+      available_currencies: ['EUR', 'USD'],
+      min_rate: '0.01',
+      max_rate: '100',
+    })
     vi.mocked(aiApi.listCatalogModels).mockReset().mockResolvedValue([{
       model_id: 'anthropic/claude-opus-5',
       name: 'Claude Opus 5',
@@ -126,5 +134,26 @@ describe('AiProvidersSettings', () => {
     // die Denkstufen dieses Modells damit unbekannt bleiben.
     expect(await screen.findByText(/Modellkatalog des Anbieters ist gerade nicht erreichbar/i))
       .toBeInTheDocument()
+  })
+
+  it('nimmt „1,20" als Preis an und zeigt, was daraus in Dollar wird', async () => {
+    // Der eigentliche Anlass: das Feld war ein Zaehler in ganzen Cent, und
+    // zwischen 1 und 2 lag nichts. Ein Preis ist eine Dezimalzahl.
+    render(<AiProvidersSettings canWrite />)
+    const preisFeld = await screen.findByLabelText(/Rückfallpreis je 1 Mio\. Tokens \(EUR\)/)
+
+    fireEvent.change(preisFeld, { target: { value: '1,20' } })
+    fireEvent.blur(preisFeld)
+
+    // 1,20 EUR bei Kurs 0,92 sind 1,304348 USD — aufgerundet auf die Microunit,
+    // wie ueberall bei Kosten. Und der Betreiber sieht es, statt dass die
+    // Umrechnung im Verborgenen passiert.
+    await waitFor(() => expect(screen.getByText(/1,3043/)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: /Speichern/i }))
+    await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(
+      4,
+      expect.objectContaining({ token_price_micro_usd_per_million: 1_304_348 }),
+    ))
   })
 })

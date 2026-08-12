@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Integer, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -46,10 +46,20 @@ class AiProvider(Base):
     requires_api_key: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     operator_api_key_encrypted: Mapped[str | None] = mapped_column(String(4096), nullable=True)
     operator_api_key_hint: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Vom Betreiber gepflegter Preis in Cent je eine Million Tokens. MSM raet
-    # keinen Preis: ohne diesen Wert bleiben die Kosten bei null und das
-    # rollenbasierte Kostenlimit greift nicht (die Oberflaeche weist darauf hin).
-    token_price_cents_per_million: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Vom Betreiber gepflegter Preis je eine Million Tokens, in
+    # **US-Cent-Microunits** (1 Cent = 10.000). Frueher standen hier ganze Cent,
+    # und daran scheiterte schon die Eingabe: „1,20 €" liess sich nicht
+    # eintragen, weil zwischen 1 und 2 Cent nichts lag.
+    #
+    # Der Wert ist nur noch die **Rueckfallebene**. OpenRouter meldet in der
+    # letzten Zeile jedes Streams den tatsaechlich belasteten Betrag; der wird
+    # gebucht. Hierher greift die Abrechnung erst, wenn der Anbieter schweigt —
+    # und markiert die Zeile dann als `cost_source='estimate'`, damit niemand
+    # eine Schaetzung fuer eine Messung haelt. Ohne Wert bleiben die Kosten bei
+    # null und das rollenbasierte Kostenlimit greift nicht; MSM raet keinen Preis.
+    token_price_micro_usd_per_million: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

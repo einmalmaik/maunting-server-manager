@@ -5,6 +5,13 @@ from datetime import datetime
 from pydantic import BaseModel, Field, SecretStr
 
 
+# Obergrenze fuer den gepflegten Preis: 1.000 USD je eine Million Tokens, in
+# Microunits (1 US-Cent = 10.000). Das teuerste Modell bei OpenRouter liegt bei
+# rund 75 USD — die Grenze faengt also Tippfehler ab, ohne einer echten
+# Preisliste im Weg zu stehen.
+MAX_TOKEN_PRICE_MICRO_USD = 1_000_000_000
+
+
 class AiProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     # Schluessel aus `services/ai_provider_registry.ANBIETER`. Die Adresse
@@ -13,9 +20,15 @@ class AiProviderCreate(BaseModel):
     default_model: str = Field(min_length=1, max_length=256)
     enabled: bool = True
     requires_api_key: bool = True
-    # Preis in Cent je eine Million Tokens. ``None`` bedeutet: keine
-    # belastbare Preisquelle, Kosten werden mit null verbucht.
-    token_price_cents_per_million: int | None = Field(default=None, ge=0, le=10_000_000)
+    # Rueckfallpreis je eine Million Tokens, in US-Cent-Microunits (1 Cent =
+    # 10.000). Gebraucht wird er nur, wenn der Anbieter selbst keine Kosten
+    # meldet; ``None`` heisst dann: keine belastbare Preisquelle, Kosten werden
+    # mit null verbucht. Die Oberflaeche nimmt hier eine Dezimalzahl in der
+    # Anzeigewaehrung entgegen und rechnet um — die Schnittstelle sieht nur die
+    # ganze Zahl.
+    token_price_micro_usd_per_million: int | None = Field(
+        default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD
+    )
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
 
 
@@ -25,9 +38,10 @@ class AiProviderUpdate(BaseModel):
     default_model: str | None = Field(default=None, min_length=1, max_length=256)
     enabled: bool | None = None
     requires_api_key: bool | None = None
-    # Preis in Cent je eine Million Tokens. ``None`` bedeutet: keine
-    # belastbare Preisquelle, Kosten werden mit null verbucht.
-    token_price_cents_per_million: int | None = Field(default=None, ge=0, le=10_000_000)
+    # Siehe `AiProviderCreate`: Rueckfallpreis in US-Cent-Microunits je Million.
+    token_price_micro_usd_per_million: int | None = Field(
+        default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD
+    )
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
     clear_operator_api_key: bool = False
 
@@ -44,7 +58,7 @@ class AiProviderResponse(BaseModel):
     requires_api_key: bool
     operator_key_configured: bool
     operator_key_hint: str | None
-    token_price_cents_per_million: int | None
+    token_price_micro_usd_per_million: int | None
     updated_at: datetime
 
 

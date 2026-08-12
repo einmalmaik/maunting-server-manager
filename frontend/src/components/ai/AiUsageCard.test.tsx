@@ -21,9 +21,16 @@ function usage(tokensToday: number, dailyLimit: number | null): AiUsageMine {
     tokens_today: tokensToday,
     tokens_week: 0,
     tokens_month: 0,
-    cost_month_cents: 0,
+    cost_month_micro_usd: 0,
     requests_month: 0,
     last_request_at: null,
+    cost_policy: {
+      currency: 'EUR',
+      usd_rate: '0.92',
+      available_currencies: ['EUR', 'USD'],
+      min_rate: '0.01',
+      max_rate: '100',
+    },
     limits: {
       daily_token_limit: dailyLimit,
       weekly_token_limit: null,
@@ -91,5 +98,23 @@ describe('AiUsageCard', () => {
     // und es entsteht kein Balken, der einen Anteil an nichts behauptet.
     await waitFor(() => expect(screen.getAllByText('Keine Grenze hinterlegt')).toHaveLength(3))
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  it('nennt die Kosten in der Anzeigewährung und daneben in Dollar', async () => {
+    // Hier stand eine nackte Zahl ohne Währung, gerechnet als `cents / 100`.
+    // Gebucht wird in US-Cent; welche Währung daraus wird, entscheidet die
+    // Politik neben den Zahlen — und der Dollarbetrag steht daneben, weil sich
+    // nur gegen ihn die Rechnung des Anbieters prüfen lässt.
+    vi.mocked(aiApi.getMyUsage).mockResolvedValue({
+      ...usage(0, null),
+      // 2,00 USD gebucht, Kurs 0,92 → 1,84 €.
+      cost_month_micro_usd: 2_000_000,
+      requests_month: 4,
+    })
+    render(<AiUsageCard />)
+
+    const zeile = await screen.findByText(/1,84/)
+    expect(zeile.textContent?.replace(/\s/g, ' ')).toContain('1,84 €')
+    expect(zeile.textContent?.replace(/\s/g, ' ')).toContain('(2,00 $)')
   })
 })

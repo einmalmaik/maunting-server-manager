@@ -139,8 +139,8 @@
         "save": "KI-Provider konnte nicht gespeichert werden.",
         "delete": "KI-Provider konnte nicht gelöscht werden."
       },
-      "tokenPrice": "Preis in Cent je 1 Mio. Tokens",
-      "tokenPriceHint": "Aus der Preisliste des Anbieters übernehmen. MSM schätzt keinen Preis: ohne diesen Wert werden Kosten mit null verbucht und das rollenbasierte Kostenlimit greift nicht.",
+      "tokenPrice": "Rückfallpreis je 1 Mio. Tokens ({{currency}})",
+      "tokenPriceHint": "Nur die Rückfallebene: normalerweise wird gebucht, was der Anbieter meldet. Dieser Wert greift, wenn er dazu schweigt — solche Zeilen stehen in der Aufstellung als „geschätzt“. Ohne Wert werden Kosten mit null verbucht und das rollenbasierte Kostenlimit greift nicht.",
       "test": "Verbindung testen",
       "testOk": "Verbindung erfolgreich. Der Anbieter hat geantwortet.",
       "testFailed": "Der Test ist fehlgeschlagen.",
@@ -157,7 +157,8 @@
         "levels": "Denkstufen:",
         "toggleOnly": "Dieses Modell denkt nach, kennt aber keine Stufen — nur an oder aus.",
         "mandatory": "Nachdenken lässt sich bei diesem Modell nicht abschalten."
-      }
+      },
+      "tokenPriceConverted": "Gespeichert wird {{amount}} — gebucht wird in Dollar."
     },
     "profile": {
       "title": "KI-Assistent",
@@ -522,16 +523,34 @@
       "week": "Diese Woche",
       "month": "Dieser Monat",
       "requests": "Anfragen",
-      "cost": "Kosten (€)",
+      "cost": "Kosten",
       "total": "Gesamt",
       "hint": "Wer nichts verbraucht hat, steht nicht in der Liste. Die Woche beginnt am Montag, alle Zeiträume in UTC.",
       "mineTitle": "Dein KI-Kontingent",
       "mineDescription": "Dein Verbrauch und die Grenzen, die für deine Rollen gelten. Wirst du mit „Kontingent ausgeschöpft“ abgewiesen, steht hier, woran es liegt.",
       "noLimit": "Keine Grenze hinterlegt",
       "blocked": "Gesperrt: Für diesen Zeitraum ist kein Kontingent freigegeben.",
-      "mineCost": "Diesen Monat: {{requests}} Anfragen, {{cost}} € Kosten.",
+      "mineCost": "Diesen Monat: {{requests}} Anfragen, {{cost}} Kosten.",
       "errors": {
         "load": "KI-Nutzung konnte nicht geladen werden."
+      },
+      "events": {
+        "title": "Einzelne Anfragen",
+        "description": "Der Nachweis hinter den Summen. Eine Chatnachricht ist nicht eine Anfrage: jede Werkzeugrunde ruft den Anbieter erneut und schickt den gewachsenen Verlauf komplett mit — die Spalte „Rufe“ sagt, wie oft. Diese Zeilen lassen sich einzeln gegen das Dashboard des Anbieters halten.",
+        "when": "Zeit",
+        "model": "Modell",
+        "input": "Eingabe",
+        "output": "Ausgabe",
+        "cached": "Cache",
+        "calls": "Rufe",
+        "source": "Quelle",
+        "more": "Es gibt weitere Anfragen in diesem Monat; hier stehen die jüngsten.",
+        "sources": {
+          "provider": "gemessen",
+          "estimate": "geschätzt",
+          "none": "kein Preis",
+          "unknown": "unbekannt"
+        }
       }
     },
     "memoryNotice": {
@@ -585,6 +604,24 @@
         "high": "Hoch",
         "xhigh": "Sehr hoch",
         "max": "Maximal"
+      }
+    },
+    "cost": {
+      "title": "Währung der Kostenanzeige",
+      "description": "Gebucht wird immer in US-Dollar — so rechnet der Anbieter ab, und eine Umrechnung vor der Buchung wäre eine zweite Fehlerquelle. Hier steht nur, in welcher Währung du die Beträge liest.",
+      "currency": "Anzeigewährung",
+      "rate": "Ein US-Dollar entspricht in {{currency}}",
+      "rateRange": "Zwischen {{min}} und {{max}}. MSM holt keinen Kurs aus dem Internet — trag den deiner Bank ein.",
+      "example": "Beispiel: 10,00 US-Dollar erscheinen als {{amount}}.",
+      "bookingHint": "Der Kurs wirkt nur auf die Anzeige. Bereits gebuchte Anfragen ändern sich nicht, wenn du ihn anpasst.",
+      "saved": "Währung gespeichert.",
+      "currencies": {
+        "EUR": "Euro (EUR)",
+        "USD": "US-Dollar (USD)"
+      },
+      "errors": {
+        "load": "Währungseinstellung konnte nicht geladen werden.",
+        "save": "Währungseinstellung konnte nicht gespeichert werden."
       }
     }
   },

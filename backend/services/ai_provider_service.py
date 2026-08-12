@@ -84,7 +84,7 @@ def create_provider(
     requires_api_key: bool,
     operator_api_key: str | None,
     # Optional: ohne Preis bleiben die Kosten bei null (siehe estimate_cost_microunits).
-    token_price_cents_per_million: int | None = None,
+    token_price_micro_usd_per_million: int | None = None,
 ) -> AiProvider:
     if not name.strip() or not default_model.strip():
         raise AiProviderConfigurationError("Provider-Name und Modell dürfen nicht leer sein")
@@ -96,7 +96,7 @@ def create_provider(
         default_model=default_model.strip(),
         enabled=enabled,
         requires_api_key=requires_api_key,
-        token_price_cents_per_million=token_price_cents_per_million,
+        token_price_micro_usd_per_million=token_price_micro_usd_per_million,
     )
     db.add(provider)
     db.flush()
@@ -138,8 +138,10 @@ def update_provider(
             "Für diesen Zugang ist kein unterstützter Anbieter hinterlegt. "
             "Wähle einen Anbieter aus, bevor du ihn aktivierst."
         )
-    if "token_price_cents_per_million" in values:
-        provider.token_price_cents_per_million = values["token_price_cents_per_million"]
+    if "token_price_micro_usd_per_million" in values:
+        provider.token_price_micro_usd_per_million = values[
+            "token_price_micro_usd_per_million"
+        ]
     if clear_operator_api_key:
         provider.operator_api_key_encrypted = None
         provider.operator_api_key_hint = None
@@ -175,13 +177,26 @@ def resolve_api_key(db: Session, provider: AiProvider, user_id: int) -> str | No
 
 
 def estimate_cost_microunits(provider: AiProvider, tokens: int) -> int:
-    """Rechnet Tokens in Verbrauchskosten um.
+    """Rechnet Tokens mit dem gepflegten Preis in Kosten um — die Rückfallebene.
 
-    Ohne gepflegten Preis bleibt das Ergebnis null — MSM erfindet keinen Preis.
-    Die Rechnung läuft bewusst ganzzahlig: 1 Cent sind 10.000 Microunits, der
-    Preis gilt je eine Million Tokens, also `tokens * cent / 100`.
+    Gebucht wird normalerweise, was der Anbieter meldet: OpenRouter schickt in
+    der letzten Zeile jedes Streams den Betrag, der dem Konto tatsächlich
+    belastet wurde, und der ist genauer als jede Nachrechnung. Diese Funktion
+    greift nur, wenn er schweigt — und für die Reservierung *vor* dem Aufruf,
+    wo es die echte Zahl naturgemäß noch nicht gibt.
+
+    Sie bleibt dabei eine grobe Näherung, und das ist keine Nachlässigkeit,
+    sondern die Grenze der Eingabe: **ein** Preis auf **alle** Tokens. Eingabe
+    und Ausgabe kosten bei den meisten Modellen unterschiedlich viel, oft um
+    das Fünffache, und eine Eingabe aus dem Zwischenspeicher nochmal rund ein
+    Zehntel. Wer ein genaues Ergebnis braucht, braucht die Anbieterzahl — die
+    Oberfläche markiert Zeilen aus dieser Funktion deshalb als geschätzt.
+
+    Ohne gepflegten Preis bleibt das Ergebnis null; MSM erfindet keinen Preis.
+    Die Rechnung läuft ganzzahlig: Preis wie Ergebnis stehen in Microunits
+    (1 US-Cent = 10.000), der Preis gilt je eine Million Tokens.
     """
-    price = provider.token_price_cents_per_million
+    price = provider.token_price_micro_usd_per_million
     if not price or tokens <= 0:
         return 0
-    return (int(tokens) * int(price)) // 100
+    return (int(tokens) * int(price)) // 1_000_000

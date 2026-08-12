@@ -58,7 +58,7 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         requires_api_key=provider.requires_api_key,
         operator_key_configured=bool(provider.operator_api_key_encrypted),
         operator_key_hint=provider.operator_api_key_hint,
-        token_price_cents_per_million=provider.token_price_cents_per_million,
+        token_price_micro_usd_per_million=provider.token_price_micro_usd_per_million,
         updated_at=provider.updated_at,
     )
 

@@ -60,6 +60,7 @@ from services.ai_provider_service import estimate_cost_microunits, resolve_api_k
 from services.ai_usage_service import (
     AiQuotaExceeded,
     AiUsageConflict,
+    abrechnung,
     complete_ai_usage,
     fail_ai_usage,
     reserve_ai_usage,
@@ -336,11 +337,25 @@ async def compact_conversation(
     with SessionLocal() as db:
         event = _usage_event(db, request_id)
         if event is not None and event.status == "reserved":
-            actual = usage.total_tokens if usage.total_tokens is not None else estimated
+            # Dieselbe Abrechnung wie im Chat. Hier stand fest
+            # `actual_cost_microunits=event.reserved_cost_microunits` — die
+            # Verdichtung buchte damit **nie** echte Kosten, sondern immer die
+            # Schaetzung von vor dem Aufruf, selbst wenn der Anbieter den
+            # tatsaechlichen Betrag daneben gemeldet hatte.
+            tokens, kosten, herkunft = abrechnung(
+                usage,
+                reserved_tokens=event.reserved_tokens,
+                estimated_actual_tokens=estimated,
+                token_price_micro_usd_per_million=(
+                    provider.token_price_micro_usd_per_million
+                ),
+            )
             complete_ai_usage(
                 db, event,
-                actual_tokens=max(0, actual),
-                actual_cost_microunits=event.reserved_cost_microunits,
+                actual_tokens=tokens,
+                actual_cost_microunits=kosten,
+                aufschluesselung=usage,
+                cost_source=herkunft,
             )
         if not summary:
             # Leere Antwort: nichts als zusammengefasst markieren, sonst waeren
