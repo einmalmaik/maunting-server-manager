@@ -127,6 +127,313 @@ def test_ein_vertrag_ueberlebt_die_rolle_die_er_vergeben_hat(db: Session) -> Non
     }
 
 
+def _notiz_anlegen(
+    db: Session,
+    *,
+    incident_id: int,
+    user_id: int,
+    mode: str = "briefed",
+    run_id: str | None = None,
+) -> None:
+    """Eine Guardian-Notiz per SQL, ohne ORM-Kaskaden dazwischen.
+
+    Bewusst nicht ueber das Modell: geprueft werden soll, was die **Datenbank**
+    tut, wenn die Zeile darueber verschwindet — nicht, was SQLAlchemy vorher
+    schon von sich aus aufraeumt.
+    """
+    db.execute(
+        text(
+            "INSERT INTO ai_guardian_notices "
+            "(incident_id, user_id, mode, run_id, created_at) "
+            "VALUES (:incident_id, :user_id, :mode, :run_id, '2026-08-12')"
+        ),
+        {
+            "incident_id": incident_id,
+            "user_id": user_id,
+            "mode": mode,
+            "run_id": run_id,
+        },
+    )
+    db.commit()
+
+
+def _notizen(db: Session) -> list[tuple]:
+    db.expire_all()
+    return list(
+        db.execute(
+            text("SELECT incident_id, user_id, mode, run_id FROM ai_guardian_notices")
+        )
+    )
+
+
+def _vorfall(db: Session, server_id: int) -> int:
+    from models import Incident
+
+    vorfall = Incident(
+        server_id=server_id,
+        title="Container weg",
+        description="Der Container ist nicht mehr da.",
+        type="container_missing",
+        status="open",
+        fingerprint="fp-1",
+    )
+    db.add(vorfall)
+    db.commit()
+    db.refresh(vorfall)
+    return vorfall.id
+
+
+def _lauf(db: Session, user_id: int) -> str:
+    from models import AiConversation, AiRun
+
+    db.add(
+        AiConversation(id="conv-guardian", user_id=user_id, title="Heilung")
+    )
+    db.add(
+        AiRun(
+            id="run-guardian",
+            conversation_id="conv-guardian",
+            user_id=user_id,
+            status="running",
+        )
+    )
+    db.commit()
+    return "run-guardian"
+
+
+def test_eine_guardian_notiz_verschwindet_mit_ihrem_vorfall(
+    db: Session, owner_user, test_server
+) -> None:
+    """Ohne Vorfall gibt es nichts mehr zu merken.
+
+    Die Notiz beantwortet genau eine Frage: *ist dieser Mensch wegen dieses
+    Vorfalls schon versorgt worden?* Ist der Vorfall fort, ist die Frage
+    gegenstandslos — und eine Zeile, die auf eine verschwundene Vorfallsnummer
+    zeigt, waere ab dann eine Sperre gegen einen Vorfall, den es nicht gibt.
+
+    Das steht hier und nicht in den Tests des Guardian-Dienstes, weil es
+    ausschliesslich die Datenbank durchsetzt. Die Testsuite konnte
+    ``ON DELETE`` lange gar nicht beobachten, weil SQLite Fremdschluessel nur auf
+    Verlangen prueft — verschwindet der Listener aus `conftest.py`, faellt das
+    oben auf und nicht hier.
+    """
+    inspector = inspect(db.get_bind())
+    assert _fremdschluessel(inspector, "ai_guardian_notices", "incident_id")[
+        "options"
+    ] == {"ondelete": "CASCADE"}
+
+    incident_id = _vorfall(db, test_server.id)
+    _notiz_anlegen(db, incident_id=incident_id, user_id=owner_user.id)
+
+    db.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+    db.commit()
+
+    assert _notizen(db) == []
+
+
+def test_eine_guardian_notiz_verschwindet_mit_ihrem_benutzer(
+    db: Session, owner_user, test_server
+) -> None:
+    """Die Notiz gehoert einem Menschen — sie ueberlebt ihn nicht.
+
+    Der Ausloeser fragt "wurde **dieser Benutzer** wegen dieses Vorfalls schon
+    versorgt". Ist das Konto geloescht, gibt es niemanden mehr, den die Antwort
+    betraefe. Ein `SET NULL` waere hier falsch: die Spalte ist Teil der
+    Entdopplung, und eine Notiz ohne Benutzer wuerde in
+    `uq_ai_guardian_notices_incident_user` eine Zeile belegen, die keinem mehr
+    zuzuordnen ist.
+    """
+    inspector = inspect(db.get_bind())
+    assert _fremdschluessel(inspector, "ai_guardian_notices", "user_id")[
+        "options"
+    ] == {"ondelete": "CASCADE"}
+
+    incident_id = _vorfall(db, test_server.id)
+    _notiz_anlegen(db, incident_id=incident_id, user_id=owner_user.id)
+
+    db.execute(text("DELETE FROM users WHERE id = :id"), {"id": owner_user.id})
+    db.commit()
+
+    assert _notizen(db) == []
+
+
+def test_eine_guardian_notiz_ueberlebt_ihren_lauf(
+    db: Session, owner_user, test_server
+) -> None:
+    """`run_id` ist ein Verweis auf den Lauf, kein Besitz durch ihn.
+
+    Mit `CASCADE` haette das Abraeumen alter Laeufe die Notiz mitgenommen — und
+    genau daran haengt der Sinn der Tabelle. Der Ausloeser laeuft im
+    Sechzig-Sekunden-Takt ueber die offenen Vorfaelle, und ein Vorfall bleibt
+    offen, bis ihn jemand loest. Ohne die Notiz saehe der naechste Durchlauf
+    einen laengst behandelten Vorfall als neu, startete einen weiteren
+    Heilungslauf und haette das KI-Kontingent des Benutzers in einer
+    Viertelstunde aufgebraucht.
+
+    `SET NULL` haelt die Aussage, auf die es ankommt: *dieser Vorfall war
+    versorgt.* Sie bleibt wahr, auch wenn niemand mehr nachlesen kann, mit
+    welchem Lauf.
+    """
+    inspector = inspect(db.get_bind())
+    assert _fremdschluessel(inspector, "ai_guardian_notices", "run_id")[
+        "options"
+    ] == {"ondelete": "SET NULL"}
+
+    incident_id = _vorfall(db, test_server.id)
+    run_id = _lauf(db, owner_user.id)
+    _notiz_anlegen(
+        db, incident_id=incident_id, user_id=owner_user.id, mode="healing", run_id=run_id
+    )
+
+    db.execute(text("DELETE FROM ai_runs WHERE id = :id"), {"id": run_id})
+    db.commit()
+
+    assert _notizen(db) == [(incident_id, owner_user.id, "healing", None)]
+
+
+def test_derselbe_vorfall_wird_demselben_menschen_nur_einmal_gemeldet(
+    db: Session, owner_user, test_server
+) -> None:
+    """Die Entdopplung steht in der Datenbank, nicht in einer Pruefung davor.
+
+    `max_instances=1` am Scheduler gilt nur innerhalb **eines** Prozesses. Laeuft
+    das Panel mit mehreren Uvicorn-Arbeitern, gibt es den Auftrag mehrfach; zwei
+    Durchlaeufe sehen denselben offenen Vorfall im selben Moment, und eine
+    Pruefung "gibt es schon eine Notiz?" im Python-Code liefert beiden ein Nein.
+    Dann ist `uq_ai_guardian_notices_incident_user` die einzige Schranke, die
+    noch traegt — und der Unterschied zwischen einem gestarteten Heilungslauf und
+    zweien auf demselben Server.
+
+    Der zweite Einfuegeversuch traegt bewusst einen anderen `mode`: es geht um
+    das Paar aus Vorfall und Benutzer, nicht um eine identische Zeile.
+    """
+    incident_id = _vorfall(db, test_server.id)
+    _notiz_anlegen(db, incident_id=incident_id, user_id=owner_user.id, mode="briefed")
+
+    with pytest.raises(IntegrityError):
+        _notiz_anlegen(
+            db, incident_id=incident_id, user_id=owner_user.id, mode="healing"
+        )
+    db.rollback()
+
+    assert len(_notizen(db)) == 1
+
+
+def test_die_datenbank_kennt_genau_zwei_arten_von_notiz(
+    db: Session, owner_user, test_server
+) -> None:
+    """`mode` ist eine Aufzaehlung, und die Datenbank haelt sie.
+
+    Der Wert unterscheidet die beiden Wege, auf denen ein Mensch versorgt sein
+    kann: `briefed` — es gab keine Freigabe, die KI erwaehnt den Vorfall beim
+    naechsten Chat; `healing` — es gab eine, ein Lauf wurde gestartet. Eine dritte
+    Art gibt es nicht, und ein Tippfehler in einer spaeteren Migration oder in
+    einem Wartungsskript soll nicht stillschweigend als eine durchgehen: der
+    Ausloeser entschiede dann anders, ohne dass irgendwo etwas fehlschluege.
+
+    Anders als bei den Fremdschluesseln nebenan setzt SQLite CHECK-Bedingungen
+    von sich aus durch — der Test misst hier also dieselbe Zusage wie im Betrieb.
+    """
+    incident_id = _vorfall(db, test_server.id)
+    zweiter = _vorfall(db, test_server.id)
+
+    _notiz_anlegen(db, incident_id=incident_id, user_id=owner_user.id, mode="briefed")
+    _notiz_anlegen(db, incident_id=zweiter, user_id=owner_user.id, mode="healing")
+
+    dritter = _vorfall(db, test_server.id)
+    with pytest.raises(IntegrityError):
+        _notiz_anlegen(db, incident_id=dritter, user_id=owner_user.id, mode="notified")
+    db.rollback()
+
+    assert {zeile[2] for zeile in _notizen(db)} == {"briefed", "healing"}
+
+
+def test_ein_backup_kann_seinen_nachweis_tragen(db: Session) -> None:
+    """`sha256` und `verified_at` gibt es, und beide duerfen NULL sein.
+
+    Ohne die beiden Spalten ist die Zusage der autonomen Heilung nicht
+    einloesbar: nichts ueberschreiben oder loeschen, bevor ein Backup
+    **nachweislich** geglueckt ist. Das blosse Vorhandensein einer Backup-Zeile
+    taugt dafuer nicht — der Remote-Agent-Pfad legt sie vor der Arbeit des
+    Agenten an — und `size_mb` ist `bytes // (1024*1024)` und damit 0 fuer jedes
+    Archiv unter einem Megabyte, also ausgerechnet fuer den frisch angelegten
+    Server, bei dem am wenigsten schiefgehen kann.
+
+    Nullable ist keine Nachlaessigkeit, sondern die Richtung des Nachweises: NULL
+    heisst **unbewiesen**, nie "kaputt". Ein Server-Default oder NOT NULL haette
+    jeden Altbestand rueckwirkend als geprueft gelten lassen — und damit
+    ausgerechnet den Bestand freigegeben, ueber den niemand etwas weiss.
+    """
+    spalten = {
+        spalte["name"]: spalte
+        for spalte in inspect(db.get_bind()).get_columns("backups")
+    }
+
+    assert spalten["sha256"]["nullable"] is True
+    assert spalten["verified_at"]["nullable"] is True
+
+
+def test_die_migration_traegt_backupnachweis_und_notiztabelle(tmp_path: Path) -> None:
+    """Modell und Migration duerfen auch hier nicht auseinanderlaufen.
+
+    Die Tests bauen das Schema mit `create_all` aus den Modellen, die Produktion
+    mit Alembic. Steht eine Spalte oder ein `ON DELETE` nur an einer der beiden
+    Stellen, ist die Suite gruen und der Betrieb kaputt — genau die
+    Konstellation, aus der diese Datei entstanden ist. Der Rueckbau bis **vor**
+    die beiden Revisionen und wieder vor beweist, dass sie tatsaechlich in der
+    Kette stehen und nicht bloss aus `create_all` stammen.
+
+    Fuer die Notiztabelle steht hier ausdruecklich auch das `SET NULL` am Lauf.
+    Eine Migration, die dort versehentlich `CASCADE` schreibt, wuerde in den
+    Tests nie auffallen: das Modell traegt es richtig, und im Betrieb faenge der
+    Ausloeser nach dem naechsten Aufraeumen alter Laeufe auf laengst behandelten
+    Vorfaellen von vorne an.
+    """
+    db_url = f"sqlite:///{tmp_path / 'guardian_constraint.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        # Vor `20260812_04`: kein Nachweis am Backup, und die Notiztabelle
+        # (`20260812_05`) gibt es noch gar nicht.
+        command.downgrade(config, "20260812_03")
+        assert {
+            spalte["name"] for spalte in inspect(engine).get_columns("backups")
+        } & {"sha256", "verified_at"} == set()
+        assert "ai_guardian_notices" not in inspect(engine).get_table_names()
+
+        command.upgrade(config, "head")
+        gewandert = {
+            spalte["name"]: spalte
+            for spalte in inspect(engine).get_columns("backups")
+        }
+        # Dieselbe Nullbarkeit wie am Modell. Ein `nullable=False` in der
+        # Migration liesse das Upgrade auf einer bestehenden Anlage mit Backups
+        # sofort scheitern; ein Server-Default machte jeden Altbestand
+        # rueckwirkend zum Nachweis.
+        assert gewandert["sha256"]["nullable"] is True
+        assert gewandert["verified_at"]["nullable"] is True
+
+        assert _fremdschluessel(
+            inspect(engine), "ai_guardian_notices", "incident_id"
+        )["options"] == {"ondelete": "CASCADE"}
+        assert _fremdschluessel(
+            inspect(engine), "ai_guardian_notices", "user_id"
+        )["options"] == {"ondelete": "CASCADE"}
+        assert _fremdschluessel(
+            inspect(engine), "ai_guardian_notices", "run_id"
+        )["options"] == {"ondelete": "SET NULL"}
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
 def _scope_check(inspector) -> str:
     for pruefung in inspector.get_check_constraints("ai_memory_entries"):
         if pruefung.get("name") == "ck_ai_memory_entries_scope":

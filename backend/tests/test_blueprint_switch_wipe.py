@@ -15,6 +15,7 @@ Die Tests hier halten fest, was seitdem gilt: ein misslungenes Aufraeumen ist ei
 """
 
 import os
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -213,6 +214,18 @@ def _blueprint_registry():
     return registry
 
 
+def _nachgewiesenes_backup():
+    """Ein Backup-Datensatz, wie ihn `create_server_backup` bei Erfolg liefert.
+
+    Hier stand frueher `status="completed"` — ein Feld, das `Backup` nie hatte.
+    Der Stub bestaetigte damit eine Pruefung, die im Betrieb nie zutraf
+    (`getattr(..., "status", None) == "failed"` war immer `None`). Der Nachweis
+    heisst `verified_at` und wird nur gesetzt, wenn das Archiv nach dem
+    Schreiben nachgemessen wurde.
+    """
+    return SimpleNamespace(id=7, verified_at=datetime.now(timezone.utc))
+
+
 def test_switch_aborts_when_the_wipe_fails(db: Session, tmp_path):
     """Der Kern des Betriebsfalls.
 
@@ -223,7 +236,7 @@ def test_switch_aborts_when_the_wipe_fails(db: Session, tmp_path):
     from services import server_lifecycle_service
 
     server = _server(db, str(tmp_path))
-    backup = SimpleNamespace(id=7, status="completed")
+    backup = _nachgewiesenes_backup()
 
     with (
         patch("services.backup_orchestrator.create_server_backup", return_value=backup),
@@ -245,12 +258,45 @@ def test_switch_aborts_when_the_wipe_fails(db: Session, tmp_path):
     assert server.game_type == "minecraft_vanilla"
 
 
+def test_switch_aborts_when_the_backup_is_unproven(db: Session, tmp_path):
+    """Ohne Nachweis kein Wechsel — und keine geloeschte Datei.
+
+    Das Pflicht-Backup prueft sich seit jeher selbst, aber es pruefte auf ein
+    Feld, das `Backup` nie besass: `getattr(backup_record, "status", None) ==
+    "failed"` lieferte immer `None`. Ein Archiv, das gar nicht geschrieben wurde,
+    kam damit durch, und unmittelbar danach wurde das gesamte Serververzeichnis
+    geleert.
+
+    `verified_at is None` heisst "nicht nachgemessen" und ist damit dasselbe wie
+    "nicht vorhanden": beides berechtigt nicht zum Loeschen. Der Test haelt
+    zusaetzlich fest, dass `wipe_server_root` gar nicht erst gerufen wird.
+    """
+    from services import server_lifecycle_service
+
+    server = _server(db, str(tmp_path))
+    ohne_nachweis = SimpleNamespace(id=7, verified_at=None)
+    wipe = MagicMock()
+
+    with (
+        patch("services.backup_orchestrator.create_server_backup", return_value=ohne_nachweis),
+        patch("blueprints.get_registry", return_value=_blueprint_registry()),
+        patch.object(server_file_access_service, "wipe_server_root", wipe),
+    ):
+        with pytest.raises(HTTPException) as fehler:
+            server_lifecycle_service.switch_server_blueprint(db, server, "minecraft_forge")
+
+    assert fehler.value.detail["code"] == "pre_switch_backup_failed"
+    wipe.assert_not_called()
+    db.refresh(server)
+    assert server.game_type == "minecraft_vanilla"
+
+
 def test_switch_reports_what_it_removed(db: Session, tmp_path):
     """Erfolg heisst: mit Zahl. Eine Behauptung war der Fehler."""
     from services import server_lifecycle_service
 
     server = _server(db, str(tmp_path))
-    backup = SimpleNamespace(id=7, status="completed")
+    backup = _nachgewiesenes_backup()
 
     with (
         patch("services.backup_orchestrator.create_server_backup", return_value=backup),

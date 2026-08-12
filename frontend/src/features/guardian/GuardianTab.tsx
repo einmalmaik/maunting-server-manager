@@ -4,14 +4,40 @@ import {
   ShieldCheck,
   RefreshCw,
   AlertTriangle,
+  Bot,
   CheckCircle2,
   Clock,
   Activity,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Server, GuardianIncident } from "../../types";
 import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
 import { getGuardianDisplayState } from "./GuardianBadge";
+
+/** Zustaende, in denen ein Heilungslauf noch arbeitet (inkl. Warten auf einen Menschen). */
+const LAUF_OFFEN = ["running", "waiting_confirmation", "waiting_user"];
+
+/**
+ * Welcher Satz unter einem Vorfall steht, wenn die KI etwas veranlasst hat.
+ *
+ * "Behoben" verlangt **beides**: der Lauf ist sauber zu Ende gegangen *und* der
+ * Vorfall steht auf `resolved`. Dieselbe Und-Verknuepfung entscheidet im Backend
+ * ueber den Text der Ergebnis-Mail (`ai_guardian_report.bericht_versenden`) — es
+ * waere die schlechteste Art von Fehler, wenn Mail und Panel demselben Vorfall
+ * zwei verschiedene Ausgaenge bescheinigten.
+ */
+function aiSchluessel(inc: GuardianIncident): string | null {
+  const ai = inc.ai;
+  if (!ai) return null;
+  if (ai.mode === "briefed") return "servers.guardian.tab.aiBriefed";
+  if (ai.run_status === null) return "servers.guardian.tab.aiUnknown";
+  if (LAUF_OFFEN.includes(ai.run_status)) return "servers.guardian.tab.aiHealing";
+  if (ai.run_status === "completed" && inc.status === "resolved") {
+    return "servers.guardian.tab.aiHealed";
+  }
+  return "servers.guardian.tab.aiFailed";
+}
 
 interface GuardianTabProps {
   server: Server;
@@ -269,6 +295,28 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
                         ))}
                       </div>
                     )}
+
+                    {(() => {
+                      const schluessel = aiSchluessel(inc);
+                      if (!schluessel) return null;
+                      return (
+                        <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-outline-variant/30 bg-surface-container-low p-2 text-xs text-on-surface-variant">
+                          <Bot className="w-3.5 h-3.5 shrink-0 text-primary" aria-hidden="true" />
+                          <span className="font-medium text-on-surface">
+                            {t("servers.guardian.tab.aiHeading")}:
+                          </span>
+                          <span>{t(schluessel)}</span>
+                          {/* Nur der eigene Lauf ist zu oeffnen: es gibt eine
+                              Unterhaltung je Benutzer, und der Chat eines
+                              anderen Freigebers laesst sich nicht anzeigen. */}
+                          {inc.ai?.mine && inc.ai.mode === "healing" && (
+                            <Link to="/ai" className="text-primary underline underline-offset-2">
+                              {t("servers.guardian.tab.aiOpenChat")}
+                            </Link>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {inc.status !== "resolved" && (
                       <div className="flex justify-end pt-2 border-t border-outline-variant/20">

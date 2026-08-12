@@ -10,7 +10,8 @@ Datenfluss:
    a. Backup-Passwort entschluesseln via DIS
    b. Backup-Key initialisieren via DIS (init_key)
    c. Lokale Datei streamen -> DIS encrypt-stream -> S3 upload_stream
-   d. s3_key, s3_bucket, encrypted=True im Backup-Record speichern
+   d. Objekt per head_object nachsehen; erst dann s3_key, s3_bucket,
+      encrypted=True im Backup-Record speichern
    e. Backup-Key invalidieren (immer via try/finally)
 3. Bei S3/DIS-Fehler: Warning-Log (keine Secrets), lokales Backup bleibt,
    s3_key=null, encrypted=False.
@@ -21,6 +22,11 @@ Sicherheits-Invarianten:
 - S3-Ausfall blockiert nicht die lokale Backup-Erstellung.
 - DIS-Ausfall blockiert S3-Upload, lokales Backup bleibt.
 - Concurrent Backups verwenden separate key_ids (jeder Aufruf erzeugt eigenen Key).
+- **Behauptet wird nur, was nachgesehen wurde.** `s3_key` steht erst im
+  Datensatz, wenn das Objekt im Bucket messbar ist; `verified_at` erst, wenn
+  Groesse und Pruefsumme vorliegen. Ein ausgebliebener Fehler ist kein Beleg —
+  `upload_fileobj` gibt nichts zurueck, und auf diesem Schweigen ruhte die
+  Aussage "liegt in S3" bis hierher.
 """
 from __future__ import annotations
 
@@ -170,16 +176,42 @@ def _create_remote_agent_s3_backup(
             postgres=backup_context(db, server_id),
         )
         size_bytes = int(result.get("size_bytes") or 0)
-        backup.s3_key = result.get("s3_key") or s3_key
-        backup.s3_bucket = s3_cfg.get("bucket") or ""
+        gemeldeter_key = str(result.get("s3_key") or s3_key)
+        bucket = s3_cfg.get("bucket") or ""
+        backup.s3_key = gemeldeter_key
+        backup.s3_bucket = bucket
         backup.encrypted = True
         backup.size_mb = max(0, size_bytes // (1024 * 1024))
+
+        # Der Nachweis wird **panelseitig** gefuehrt, nicht aus der Meldung des
+        # Agenten uebernommen. Die Pruefsumme liefert er selbst (`sha256` seiner
+        # verschluesselten Bytes) und sie wurde bisher schlicht weggeworfen; das
+        # Vorhandensein des Objekts sieht das Panel dagegen mit eigenen Augen
+        # nach. Beides zusammen ist der Beleg, auf dem die Guardian-Schranke
+        # spaeter aufsetzt.
+        #
+        # Ein unbestaetigter Upload laesst `verified_at` NULL. Die Zeile bleibt
+        # trotzdem stehen: der Agent hat gearbeitet, und ein geloeschter
+        # Datensatz waere hier die groessere Luege als ein unbewiesener.
+        entfernte_groesse = None
+        try:
+            entfernte_groesse = S3Service.object_size(gemeldeter_key, bucket or None)
+        except Exception as pruef_exc:
+            logger.warning(
+                "S3-Pruefung nach Agent-Backup fehlgeschlagen (Server %s, Backup %s): %s",
+                server_id, backup.id, type(pruef_exc).__name__,
+            )
+        if size_bytes > 0 and entfernte_groesse is not None and entfernte_groesse > 0:
+            backup.sha256 = str(result.get("sha256") or "")[:64] or None
+            backup.verified_at = datetime.now(timezone.utc)
+
         db.commit()
         db.refresh(backup)
         logger.info(
-            "Agent-S3-Backup ok (Server %s, Backup %s)",
+            "Agent-S3-Backup ok (Server %s, Backup %s, bestaetigt=%s)",
             server_id,
             backup.id,
+            backup.verified_at is not None,
         )
         return backup
     except (NodeClientError, BackupCryptoError, S3NotConfiguredError, ValueError) as exc:
@@ -254,8 +286,21 @@ def _upload_to_s3(backup, db: Session, server_id: int) -> None:
             encrypted_stream = BackupCryptoService.encrypt_file_stream(local_path, key_id)
             S3Service.upload_stream(encrypted_stream, s3_key)
 
-        # Erfolg: s3_key, s3_bucket, encrypted=True speichern.
+        # Nachsehen, bevor behauptet wird. `upload_stream` gibt nichts zurueck,
+        # und eine ausgebliebene Ausnahme ist keine Aussage darueber, was im
+        # Bucket liegt — genau darauf ruhte die Zusage "Backup liegt in S3"
+        # bisher. Erst wenn das Objekt da ist, werden `s3_key`/`s3_bucket`
+        # gesetzt; sonst bleiben sie NULL und das Backup gilt weiterhin als
+        # lokales, aber nachgewiesenes. Die Behauptung wird nicht erhoben.
         bucket = BackupConfigService.get_s3_config().get("bucket") or ""
+        entfernte_groesse = S3Service.object_size(s3_key, bucket or None)
+        if entfernte_groesse is None or entfernte_groesse <= 0:
+            logger.warning(
+                "S3-Upload unbestaetigt (Server %s, Backup %s) — s3_key bleibt leer",
+                server_id, backup.id,
+            )
+            return
+
         backup.s3_key = s3_key
         backup.s3_bucket = bucket
         backup.encrypted = True
@@ -263,8 +308,8 @@ def _upload_to_s3(backup, db: Session, server_id: int) -> None:
         db.refresh(backup)
 
         logger.info(
-            "S3-Upload erfolgreich (Server %s, Backup %s)",
-            server_id, backup.id,
+            "S3-Upload bestaetigt (Server %s, Backup %s, %s Bytes)",
+            server_id, backup.id, entfernte_groesse,
         )
     except S3NotConfiguredError:
         logger.warning(

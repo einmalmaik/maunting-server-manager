@@ -326,7 +326,7 @@
         "mods": "Welche Mods sind auf meinem Server installiert und gibt es Updates?"
       },
       "toolFailed": "— fehlgeschlagen",
-        "compacted": "Ältere Nachrichten wurden zusammengefasst",
+      "compacted": "Ältere Nachrichten wurden zusammengefasst",
       "edit": "Nachricht bearbeiten",
       "editHint": "Diese Nachricht und alles danach wird entfernt. Die KI kennt die alte Fassung dann nicht mehr.",
       "editSend": "Neu senden",
@@ -375,7 +375,9 @@
         "propose_server_blueprint_switch": "Server auf anderen Blueprint umstellen",
         "propose_server_create": "Server erstellen",
         "propose_server_delete": "Server löschen",
-        "propose_server_lifecycle": "Serverstatus ändern"
+        "propose_server_lifecycle": "Serverstatus ändern",
+        "propose_server_repair": "Anlage reparieren",
+        "propose_file_delete": "Datei löschen"
       },
       "status": {
         "proposed": "Prüfung erforderlich",
@@ -404,7 +406,9 @@
         "propose_ai_tarif_role": "Die Rolle „{{path}}“ anlegen? Sie bekommt bewusst keine Rechte, nur das angezeigte KI-Kontingent — Rechte vergibt weiterhin die Rollenverwaltung.",
         "propose_hoster_integration": "Die Shop-Anbindung „{{path}}“ speichern? Beim Anlegen entsteht dabei ein API-Key, der genau einmal angezeigt wird und danach nur noch rotierbar ist.",
         "propose_hoster_product": "Die Produktzuordnung „{{path}}“ speichern? Jeder künftige Kauf dieses Produkts erzeugt einen Server mit diesen Grenzen — und, falls hinterlegt, mit der angezeigten Rolle.",
-        "propose_server_blueprint_switch": "Diesen Server auf einen anderen Blueprint umstellen? Startbefehl, Image und Variablen werden ersetzt; die Spieldateien bleiben liegen und passen unter Umständen nicht mehr dazu."
+        "propose_server_blueprint_switch": "Diesen Server auf einen anderen Blueprint umstellen? Startbefehl, Image und Variablen werden ersetzt; die Spieldateien bleiben liegen und passen unter Umständen nicht mehr dazu.",
+        "propose_server_repair": "Die Reparatur „{{operation}}“ an der Anlage dieses Servers ausführen? „repair_permissions“ setzt die Besitzrechte am Serververzeichnis neu, „reallocate_port“ vergibt belegte Ports neu und startet den Server dafür. Spieldateien werden in beiden Fällen nicht angefasst.",
+        "propose_file_delete": "Die Datei „{{path}}“ löschen? Sie ist danach nur noch aus einem Backup zurückzuholen. Vor dem Löschen wird ein Schnappschuss in der Dateihistorie angelegt."
       },
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
@@ -444,17 +448,21 @@
       "toggle": "Aktionen ohne Rückfrage ausführen",
       "budget": "Höchstens Aktionen pro Stunde",
       "budgetHint": "In der letzten Stunde automatisch ausgeführt: {{used}}. Ist das Kontingent erschöpft, fragt die KI wieder nach — es schlägt nichts fehl.",
-      "boundary": "Der autonome Modus entfernt genau eine Sache: deine Bestätigung. Berechtigungen, Serversperren und Audit gelten unverändert weiter — die KI kann nichts, was du selbst nicht dürftest. Nicht enthalten sind Löschen, Wipe, Neuinstallation und Backup-Wiederherstellung: die verlangen immer eine Bestätigung.",
+      "boundary": "Der autonome Modus entfernt deine Bestätigung und erlaubt der Guardian-Engine, die KI bei einer Störung zu wecken. Berechtigungen, Serversperren und Audit gelten unverändert weiter — die KI kann nichts, was du selbst nicht dürftest. Nicht enthalten sind Löschen eines Servers, Wipe, Neuinstallation und Backup-Wiederherstellung: die verlangen immer eine Bestätigung.",
       "confirmTitle": "Autonomen Modus einschalten?",
-      "confirmPanel": "Die KI führt danach erlaubte Aktionen auf allen deinen Servern ohne Rückfrage aus — einschließlich Konfigurationsänderungen, Mod-Installationen und dem Anlegen neuer Server.\n\nDeine Berechtigungen bleiben die Grenze. Alles erscheint im Audit-Log.",
-      "confirmServer": "Die KI führt danach erlaubte Aktionen auf diesem Server ohne Rückfrage aus — einschließlich Konfigurationsänderungen und Mod-Installationen.\n\nDeine Berechtigungen bleiben die Grenze. Alles erscheint im Audit-Log.",
+      "confirmPanel": "Die KI führt danach erlaubte Aktionen auf allen deinen Servern ohne Rückfrage aus — einschließlich Konfigurationsänderungen, Mod-Installationen und dem Anlegen neuer Server.\n\nNeu: Die Guardian-Engine darf die KI damit auch wecken, wenn du nicht da bist. Meldet sie eine Störung, untersucht die KI sie eigenständig, legt vor jedem Eingriff in Dateien ein nachweislich erfolgreiches Backup an und versucht, den Server wieder zum Laufen zu bringen — Neustart, Rechte am Serververzeichnis, Portvergabe, Konfiguration, notfalls das Löschen einer kaputten Datei. Danach bekommst du eine E-Mail mit dem Ergebnis.\n\nDeine Berechtigungen bleiben die Grenze. Gehandelt wird in deinem Namen und auf dein KI-Kontingent. Löschen eines Servers, Wipe, Neuinstallation und das Einspielen eines Backups verlangen weiterhin immer deine Bestätigung.",
+      "confirmServer": "Die KI führt danach erlaubte Aktionen auf diesem Server ohne Rückfrage aus — einschließlich Konfigurationsänderungen und Mod-Installationen.\n\nNeu: Die Guardian-Engine darf die KI damit auch wecken, wenn du nicht da bist. Meldet sie eine Störung auf diesem Server, untersucht die KI sie eigenständig, legt vor jedem Eingriff in Dateien ein nachweislich erfolgreiches Backup an und versucht, ihn wieder zum Laufen zu bringen. Danach bekommst du eine E-Mail mit dem Ergebnis.\n\nDeine Berechtigungen bleiben die Grenze. Gehandelt wird in deinem Namen und auf dein KI-Kontingent. Löschen, Wipe, Neuinstallation und das Einspielen eines Backups verlangen weiterhin immer deine Bestätigung.",
       "enable": "Einschalten",
       "save": "Kontingent speichern",
       "saved": "Freigabe gespeichert.",
       "error": "Die Freigabe konnte nicht gespeichert werden.",
       "short": "Autonom",
       "scope": "Geltungsbereich",
-      "scopePanel": "Panelweit"
+      "scopePanel": "Panelweit",
+      "disableTitle": "Autonomen Modus ausschalten?",
+      "disablePanel": "Die KI fragt danach vor jeder Aktion wieder nach — auf allen deinen Servern.\n\nGuardian-Störungen werden dann nur noch gemeldet, nicht mehr behoben. Die KI erwähnt sie beim nächsten Chat und schlägt etwas vor; handeln wird sie erst, wenn du bestätigst. Fällt ein Server nachts aus, bleibt er aus, bis jemand hinsieht.",
+      "disableServer": "Die KI fragt danach auf diesem Server vor jeder Aktion wieder nach.\n\nGuardian-Störungen werden dann nur noch gemeldet, nicht mehr behoben. Die KI erwähnt sie beim nächsten Chat und schlägt etwas vor; handeln wird sie erst, wenn du bestätigst.",
+      "disable": "Ausschalten"
     },
     "tools": {
       "ask_user": "Nachgefragt",
@@ -1181,7 +1189,14 @@
         "attempts": "Wiederherstellungsversuche",
         "historyErrorTitle": "Incident-Historie nicht verfügbar",
         "historyErrorBody": "Die Störungen konnten nicht geladen werden. Das ist kein Beleg für eine leere Historie.",
-        "quarantinePendingNote": "Die Freigabe wurde angefordert, ist aber noch nicht vom Agenten bestätigt. Die Quarantäne bleibt bis zur nächsten bestätigten Beobachtung aktiv."
+        "quarantinePendingNote": "Die Freigabe wurde angefordert, ist aber noch nicht vom Agenten bestätigt. Die Quarantäne bleibt bis zur nächsten bestätigten Beobachtung aktiv.",
+        "aiHeading": "KI-Eingriff",
+        "aiHealing": "Die KI bearbeitet diesen Vorfall.",
+        "aiHealed": "Die KI hat diesen Vorfall bearbeitet: behoben.",
+        "aiFailed": "Die KI hat diesen Vorfall bearbeitet: nicht behoben.",
+        "aiBriefed": "Die KI weist beim nächsten Chat auf diesen Vorfall hin.",
+        "aiUnknown": "Die KI hat diesen Vorfall bearbeitet; der Lauf ist nicht mehr vorhanden.",
+        "aiOpenChat": "Im KI-Chat ansehen"
       },
       "errors": {
         "guardian_capability_mismatch": "Der Agent unterstützt die für diesen Server konfigurierten Autopilot-Treiber nicht. Bitte Treiber auf dem Node prüfen.",
@@ -2587,7 +2602,8 @@
           "memoryConsent": "Das persoenliche Gedaechtnis ist standardmaessig ausgeschaltet und wird erst nach ausdruecklicher Zustimmung im Chat aktiv; die Zustimmung ist jederzeit widerrufbar und umfasst auch die eigenen serverbezogenen Notizen. Geteilte Bereiche (Team, Server, panelweit) haengen nicht an dieser Zustimmung, sondern an Berechtigungen - sie enthalten Betriebswissen und keine Angaben zur Person. Die Verschluesselung schuetzt die Datenbank im Ruhezustand; der Klartext gemerkter Eintraege wird bei jeder Anfrage an den gewaehlten Modellanbieter uebertragen",
           "attachments": "Freigegebene Text-, Konfigurations-, Log- und Bildanhänge werden größen- und typgeprüft, verschlüsselt im Panel gespeichert und zusammen mit der Unterhaltung an den gewählten Modellanbieter übertragen",
           "autonomy": "Der autonome Modus ist optional und muss pro Server oder panelweit ausdrücklich freigegeben werden; freigegebene Aktionen laufen ohne weitere Rückfrage, werden aber unverändert gegen die Berechtigungen des Nutzers geprüft und vollständig im Audit-Log als automatisch ausgeführt festgehalten",
-          "tools": "Beim Einsatz von Werkzeugen können begrenzte, redigierte Ausschnitte aus Serverlogs, Konfigurationsdateien, Mod- und Backup-Listen sowie Guardian-Vorfällen an den Modellanbieter übertragen werden; diese Ergebnisse werden für Rückfragen im selben Chat gespeichert und mit dem Chat gelöscht"
+          "tools": "Beim Einsatz von Werkzeugen können begrenzte, redigierte Ausschnitte aus Serverlogs, Konfigurationsdateien, Mod- und Backup-Listen sowie Guardian-Vorfällen an den Modellanbieter übertragen werden; diese Ergebnisse werden für Rückfragen im selben Chat gespeichert und mit dem Chat gelöscht",
+          "guardian": "Bei erteilter Autonomiefreigabe kann ein Guardian-Vorfall eine Verarbeitung auslösen, ohne dass der Nutzer anwesend ist: übertragen werden Vorfallart, Status und die ohnehin freigegebenen Serverdaten; Logauszüge werden dabei zusätzlich um öffentliche IP-Adressen und E-Mail-Adressen bereinigt. Verbrauch und Verantwortung liegen beim Freigeber. Der Ergebnisbericht per E-Mail enthält modellerzeugten Text."
         }
       },
       "storage": {

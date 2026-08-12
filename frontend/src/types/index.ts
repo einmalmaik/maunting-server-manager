@@ -64,6 +64,23 @@ export interface GuardianAttempt {
   timestamp?: string
 }
 
+/**
+ * Was die KI zu einem Vorfall veranlasst hat — `null`, wenn nichts.
+ *
+ * `mode` unterscheidet die beiden Wege: `briefed` heisst, der Vorfall wird beim
+ * naechsten Chat erwaehnt (keine Freigabe, kein Lauf), `healing` heisst, ein
+ * Lauf wurde gestartet. Der Ausgang steht in `run_status` und nicht hier — die
+ * Notiz sagt nur, dass etwas veranlasst wurde.
+ */
+export interface GuardianIncidentAi {
+  mode: 'briefed' | 'healing'
+  /** Status des Heilungslaufs, `null` bei `briefed` oder abgeraeumtem Lauf. */
+  run_status: string | null
+  /** Ob die Notiz zum angemeldeten Benutzer gehoert — nur dann fuehrt ein Link in seinen Chat. */
+  mine: boolean
+  at: string
+}
+
 export interface GuardianIncident {
   id: number
   title: string
@@ -74,6 +91,7 @@ export interface GuardianIncident {
   created_at: string
   resolved_at: string | null
   attempts: GuardianAttempt[]
+  ai?: GuardianIncidentAi | null
 }
 
 /** Node registry entry from GET /api/nodes (no auth tokens). */

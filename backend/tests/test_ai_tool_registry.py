@@ -158,3 +158,146 @@ def test_only_the_irreversible_tools_are_confirm_only() -> None:
         "propose_hoster_product",
         "propose_ai_tarif_role",
     }
+
+
+def test_die_beiden_heilungswerkzeuge_sind_eingeordnet() -> None:
+    """`propose_server_repair` und `propose_file_delete` sind autonomiefaehig.
+
+    Das sieht beim Loeschwerkzeug nach einem Widerspruch aus, ist aber keiner:
+    das Kriterium der Registry ist **Unumkehrbarkeit**, nicht gefuehltes Risiko.
+    `propose_server_delete` und `propose_backup_restore` stehen in der Sperre,
+    weil danach kein Backup mehr hilft — das eine nimmt die Backups mit, das
+    andere ueberschreibt einen Stand, von dem es nie eines gab.
+
+    Beim Loeschen einer einzelnen Datei ist es umgekehrt: das Werkzeug laeuft im
+    Heilungslauf ueberhaupt nur, wenn ein nachweislich geglecktes Backup
+    vorliegt, das **juenger als der Vorfall** ist. Der Weg zurueck ist damit Teil
+    des Vorgangs — dieselbe Begruendung, aus der der Blueprint-Wechsel
+    autonomiefaehig ist, obwohl er das ganze Verzeichnis leert.
+
+    Wichtig ist, **wo** dieser Beweis liegt: in
+    `ai_proposal_service._verlangt_gesichertes_backup`, geprueft beim Anlegen und
+    noch einmal vor der Ausfuehrung. Nicht in einer Prompt-Regel. Eine Regel im
+    Prompt ist eine Bitte an ein Modell, dessen Eingaben aus Logzeilen eines
+    Servers stammen, auf dem Fremde spielen; sie kann die Sperre hier nicht
+    tragen. Wandert die Schranke je aus dem Vorschlagspfad in den Prompt, ist
+    diese Einordnung falsch geworden — und dieser Test die Stelle, an der das
+    auffaellt.
+
+    Die Rechte sind bewusst schon vorhandene: `server.config.write` ist dasselbe
+    Recht wie am Panel-Knopf, hinter dem dieselben Reparaturfunktionen liegen,
+    `server.files.write` dasselbe wie beim Schreiben derselben Datei. Ein eigens
+    erfundenes Recht haette eine Handlung mit zwei Rechten erzeugt — der Fehler,
+    der bei `propose_server_blueprint_switch` zweimal gemacht wurde.
+    """
+    reparatur = ai_tool_registry.WERKZEUGE["propose_server_repair"]
+    loeschen = ai_tool_registry.WERKZEUGE["propose_file_delete"]
+
+    assert reparatur.art == "server_write"
+    assert reparatur.recht == "server.config.write"
+    assert reparatur.recht_global is False
+    assert reparatur.immer_bestaetigen is False
+
+    assert loeschen.art == "server_write"
+    assert loeschen.recht == "server.files.write"
+    assert loeschen.recht_global is False
+    assert loeschen.immer_bestaetigen is False
+
+    # Und dieselbe Aussage noch einmal ueber die abgeleiteten Mengen: wer die
+    # Zeile spaeter umhaengt, faellt auch dann auf, wenn er die Spalten oben
+    # unberuehrt laesst.
+    assert {"propose_server_repair", "propose_file_delete"} <= (
+        ai_tool_registry.SERVER_WRITE_TOOLS
+    )
+    assert {"propose_server_repair", "propose_file_delete"} & (
+        ai_tool_registry.ALWAYS_CONFIRM_TOOLS
+    ) == set()
+
+
+def test_die_heilungsmenge_kennt_nur_wirklich_vorhandene_werkzeuge() -> None:
+    """Ein Name in der Heilungsmenge, den es nicht gibt, waere eine Luege.
+
+    `GUARDIAN_HEILUNG_TOOLS` ist die Allowlist eines Laufs, den **kein Mensch
+    angestossen hat**. Ein Tippfehler darin faellt nirgends auf: die Menge wird
+    nur zum Filtern benutzt, und ein Filter gegen einen Namen, den es nicht gibt,
+    laesst schlicht ein Werkzeug weniger durch. Das Modell bekommt dann mitten im
+    Vorfall ein Werkzeug nicht angeboten, das jemand ihm ausdruecklich geben
+    wollte — und niemand erfaehrt davon.
+
+    Echte Teilmenge und nicht Gleichheit: die Heilung darf per Bauart weniger als
+    der Chat. Waeren beide Mengen gleich, waere die Aufzaehlung sinnlos geworden.
+    """
+    assert ai_tool_registry.GUARDIAN_HEILUNG_TOOLS < set(ai_tool_registry.WERKZEUGE)
+
+
+def test_die_heilung_kann_nichts_dauerhaftes_und_nichts_fremdes() -> None:
+    """Die Ausschluesse sind die eigentliche Zusage dieser Menge.
+
+    Der Lauf beginnt nicht mit der Bitte eines Menschen, sondern mit einem
+    Ereignis auf einem Server, auf dem Fremde spielen. Was das Modell dort liest —
+    Logzeilen, Dateiinhalte — kann jemand geschrieben haben, der genau darauf
+    hofft. Der Prompt sagt dem Modell, es solle Weisungen darin nicht befolgen;
+    diese Menge sorgt dafuer, dass es sie auch dann nicht **kann**, wenn es sie
+    befolgen wollte.
+
+    Wo es geht, wird der Ausschluss abgeleitet statt abgeschrieben — dann gilt er
+    auch fuer ein Werkzeug, das es heute noch nicht gibt:
+
+    * `ALWAYS_CONFIRM_TOOLS` — was ein Mensch selbst im autonomen Chat bestaetigen
+      muss, darf ein unbeaufsichtigter Lauf erst recht nicht. Das deckt
+      `propose_server_delete`, `propose_backup_restore`, die drei
+      Hoster-Werkzeuge und jeden kuenftigen Platzhalter aus
+      `GEPLANT_IMMER_BESTAETIGEN` mit ab.
+    * `MEMORY_TOOLS` und `SKILL_TOOLS` — aus einem Vorfall soll sich das Modell
+      nichts Dauerhaftes anlernen. Sonst waere ein praeparierter Logeintrag der
+      Weg, eine Weisung in jeden spaeteren Chat des Benutzers zu tragen.
+
+    Ausgeschrieben bleiben nur die, die unter keine der beiden Regeln fallen:
+    die Servererstellung (Reichweite ueber den Vorfall hinaus), beide
+    Blueprint-Werkzeuge (der Wechsel leert das Verzeichnis) und `web_search` —
+    der Name eines selbstgebauten Servers hat draussen nichts zu suchen, schon
+    gar nicht, wenn ihn niemand gefragt hat.
+    """
+    heilung = ai_tool_registry.GUARDIAN_HEILUNG_TOOLS
+
+    assert heilung & ai_tool_registry.ALWAYS_CONFIRM_TOOLS == set()
+    assert heilung & ai_tool_registry.MEMORY_TOOLS == set()
+    assert heilung & ai_tool_registry.SKILL_TOOLS == set()
+
+    # Die Hoster-Anbindung als Ganzes, nicht nur ihr schreibender Teil: auch das
+    # Lesen der Shop-Einrichtung hat in einem Vorfall nichts verloren.
+    hoster = {name for name in ai_tool_registry.WERKZEUGE if "hoster" in name}
+    assert hoster  # sonst prueft die Zeile darunter nichts
+    assert heilung & (hoster | {"propose_ai_tarif_role"}) == set()
+
+    for ausgeschlossen in (
+        "propose_server_create",
+        "propose_server_delete",
+        "propose_blueprint_change",
+        "propose_server_blueprint_switch",
+        "web_search",
+    ):
+        assert ausgeschlossen in ai_tool_registry.WERKZEUGE, (
+            f"{ausgeschlossen} wurde umbenannt — der Ausschluss zeigt ins Leere"
+        )
+        assert ausgeschlossen not in heilung
+
+
+def test_die_backup_pflicht_gilt_nur_fuer_erreichbare_werkzeuge() -> None:
+    """Eine Backup-Pflicht auf ein gesperrtes Werkzeug waere tote Regel.
+
+    `GUARDIAN_BACKUP_PFLICHT_TOOLS` wird ausschliesslich im Heilungslauf
+    ausgewertet. Steht dort ein Werkzeug, das die Heilung gar nicht aufrufen
+    darf, sieht die Regel nach Schutz aus und greift nie — schlimmer noch: sie
+    verdeckt, dass fuer ein tatsaechlich erreichbares Werkzeug keine steht.
+
+    `propose_backup` fehlt bewusst. Es unter Backup-Pflicht zu stellen waere ein
+    Zirkel: das Modell braeuchte ein Backup, um ein Backup anlegen zu duerfen,
+    und der einzige Ausweg aus einem Server ohne geprueftes Backup waere zu.
+    """
+    assert (
+        ai_tool_registry.GUARDIAN_BACKUP_PFLICHT_TOOLS
+        <= ai_tool_registry.GUARDIAN_HEILUNG_TOOLS
+    )
+    assert "propose_backup" not in ai_tool_registry.GUARDIAN_BACKUP_PFLICHT_TOOLS
+    assert "propose_backup" in ai_tool_registry.GUARDIAN_HEILUNG_TOOLS

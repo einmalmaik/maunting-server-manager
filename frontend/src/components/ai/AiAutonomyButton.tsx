@@ -106,6 +106,21 @@ export function AiAutonomyButton({
       })
       if (!accepted) return
     }
+    // Auch das **Aus**schalten fragt nach, seit die Freigabe mehr entscheidet
+    // als „ohne Rueckfrage ausfuehren“: sie ist der Schalter, der die
+    // Guardian-Engine die KI wecken laesst. Wer sie abschaltet, hat danach
+    // Server, die nachts stehen bleiben, bis jemand hinsieht — das gehoert
+    // gesagt, bevor es passiert, und nicht erst in der Stoerungsmeldung.
+    // Nicht `danger`: rot bedeutet in MSM unumkehrbar, und hier wird nur eine
+    // Erlaubnis zurueckgenommen, die man jederzeit wieder erteilen kann.
+    if (!nextEnabled && enabled) {
+      const accepted = await confirm({
+        title: t('ai.autonomy.disableTitle'),
+        message: t(serverId === null ? 'ai.autonomy.disablePanel' : 'ai.autonomy.disableServer'),
+        confirmText: t('ai.autonomy.disable'),
+      })
+      if (!accepted) return
+    }
     setBusy(true)
     try {
       const saved = await aiApi.saveAutonomyGrant({

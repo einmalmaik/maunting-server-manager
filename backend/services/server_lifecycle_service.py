@@ -1219,8 +1219,18 @@ def switch_server_blueprint(db: Session, server: Server, new_blueprint_id: str, 
             new_blueprint_id,
         )
         backup_record = create_server_backup(server.id, db, name=backup_name, timeout_seconds=600)
-        if not backup_record or getattr(backup_record, "status", None) == "failed":
-            raise RuntimeError("Backup-Status meldet 'failed'.")
+        # Hier stand `getattr(backup_record, "status", None) == "failed"`. Die
+        # Spalte gab es nie — `Backup` hat kein `status` —, der `getattr`-Default
+        # lieferte immer `None`, und die Bedingung konnte damit unter keinen
+        # Umstaenden zutreffen. Ein Pflicht-Backup, das nichts geprueft hat.
+        #
+        # `verified_at` ist die wahre Entsprechung: es wird nur gesetzt, wenn das
+        # Archiv nach dem Schreiben nachgemessen wurde (Datei vorhanden, nicht
+        # leer, Pruefsumme gerechnet). Ohne diesen Nachweis wird das gesamte
+        # Serververzeichnis gleich darunter geloescht — und der Weg zurueck
+        # waere eine Behauptung.
+        if backup_record is None or backup_record.verified_at is None:
+            raise RuntimeError("Backup ist nicht nachweisbar erfolgreich.")
     except Exception as exc:
         logger.error("Pre-Switch Backup fuer Server ID=%s fehlgeschlagen: %s", server.id, exc)
         raise HTTPException(

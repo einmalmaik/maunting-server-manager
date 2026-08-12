@@ -217,6 +217,62 @@ WERKZEUGE: dict[str, Werkzeug] = {
         "global_write", recht="servers.create", recht_global=True
     ),
 
+    # ── Heilung: Reparatur der Anlage, nicht des Spielstands ──────────
+    #
+    # Das eine Werkzeug fuer alles, was unterhalb der Spieldateien kaputt geht —
+    # Container, Docker-Netz, Rechte am Bind-Mount, Portvergabe. Es nimmt eine
+    # **Kennung aus einer geschlossenen Liste** und keinen freien Text. Das ist
+    # der ganze Punkt: es gibt damit keinen Weg von einer Modellausgabe zu einer
+    # Befehlszeile, zu einem Pfad oder zu einem Containernamen. Ein geglueckter
+    # Jailbreak kann hoechstens die falsche der vier Reparaturen waehlen.
+    #
+    # Umkehrbar und deshalb autonomiefaehig: jede der vier Aktionen stellt einen
+    # Sollzustand her, den MSM ohnehin kennt. Keine loescht Spieldaten — das
+    # Serververzeichnis ist ein Bind-Mount und ueberlebt den Container.
+    #
+    # `server.config.write` ist dasselbe Recht wie am Panel-Knopf, hinter dem
+    # dieselben Funktionen liegen. Ein eigenes Recht zu erfinden hiesse, eine
+    # Handlung mit zwei Rechten zu haben — der Fehler, der bei
+    # `propose_server_blueprint_switch` zweimal gemacht und dokumentiert wurde.
+    "propose_server_repair": Werkzeug(
+        "server_write", recht="server.config.write"
+    ),
+    # Loeschen einer **einzelnen** Datei unterhalb des Serververzeichnisses.
+    #
+    # Warum kein `immer_bestaetigen`, obwohl Loeschen sonst immer bestaetigt
+    # wird: das Kriterium der Registry ist Unumkehrbarkeit (siehe oben), nicht
+    # gefuehltes Risiko. `propose_server_delete` und `propose_backup_restore`
+    # stehen dort, weil danach **kein** Backup mehr hilft — das eine loescht die
+    # Backups mit, das andere ueberschreibt einen Stand, von dem es nie einen
+    # gab.
+    #
+    # Hier ist es anders herum, und zwar aus zwei Gruenden, die beide
+    # nachpruefbar sein muessen:
+    #
+    # 1. **Im Guardian-Lauf** laeuft das Werkzeug ueberhaupt nur, wenn ein
+    #    nachweislich geglecktes Backup vorliegt, das juenger ist als der Beginn
+    #    der Heilung (`ai_proposal_service._verlangt_gesichertes_backup`). Diese
+    #    Pruefung laeuft zweimal — beim Anlegen und, ueber
+    #    `guardian_aus_lauf`, noch einmal in `execute_proposal`. Die
+    #    Wiederholung ist nicht Zierde: zwischen beiden Punkten liegt ein Commit
+    #    und ein Zeitfenster ohne Obergrenze, in dem die Aufbewahrungsregel das
+    #    Archiv abgeraeumt haben kann. Als die zweite Pruefung hier noch
+    #    behauptet und nicht gebaut war, war genau das der Weg zu einer
+    #    geloeschten Datei ohne Backup.
+    # 2. **Im gewoehnlichen Chat** gibt es diese Schranke nicht — dort
+    #    entscheidet der Mensch. Der Weg zurueck ist dann der
+    #    Versionsschnappschuss aus `file_history_service`, und er ist eine
+    #    **Vorbedingung**: `delete_server_text` wertet seinen Rueckgabewert aus
+    #    und loescht nicht, wenn er ausbleibt. Deshalb weist schon der Vorschlag
+    #    ab, was sich nicht sichern laesst — binaere Dateien (ein mit U+FFFD
+    #    durchsetzter Schnappschuss ist ein Rueckweg, der die Datei zerstoert)
+    #    und alles ueber 512 KiB. Zuvor gab `snapshot` dort stillschweigend
+    #    `False` zurueck, der Wert wurde verworfen, und eine zwei Megabyte grosse
+    #    Regionsdatei verschwand ohne jede Spur.
+    "propose_file_delete": Werkzeug(
+        "server_write", recht="server.files.write"
+    ),
+
     # ── Shop-Anbindung einrichten ─────────────────────────────────────
     #
     # Alle drei tragen `immer_bestaetigen`. Der Grund steht schon bei
@@ -298,6 +354,81 @@ ALWAYS_CONFIRM_TOOLS = (
     {name for name, spec in WERKZEUGE.items() if spec.immer_bestaetigen}
     | set(GEPLANT_IMMER_BESTAETIGEN)
 )
+
+
+# Was ein von Guardian ausgeloester Heilungslauf ueberhaupt aufrufen darf.
+#
+# Diese Menge ist **keine Ableitung** aus den Spalten oben, sondern eine
+# ausdrueckliche Aufzaehlung — und das ist Absicht. Eine Ableitung waere eine
+# Regel ("alles Lesende plus alles Umkehrbare"), und jedes kuenftige Werkzeug
+# faende sich stillschweigend darin wieder. Hier soll es umgekehrt sein: wer ein
+# Werkzeug in die unbeaufsichtigte Heilung aufnehmen will, schreibt es hin.
+#
+# Der Grund ist die Bedrohungslage dieses Laufs. Er beginnt nicht mit einer Bitte
+# eines Menschen, sondern mit einem Ereignis auf einem Server, auf dem Fremde
+# spielen. Was das Modell dort liest — Logzeilen, Dateiinhalte — kann jemand
+# geschrieben haben, der genau darauf hofft. Der Prompt sagt dem Modell, dass es
+# Weisungen darin nicht befolgen soll; diese Menge sorgt dafuer, dass es sie auch
+# dann nicht kann, wenn es sie befolgen wollte.
+#
+# Deshalb fehlen hier: Gedaechtnis und Skills (das Modell soll sich aus einem
+# Vorfall nichts Dauerhaftes anlernen), die Hoster-Werkzeuge (Rechte und
+# Schluessel), `propose_server_create`/`propose_server_delete` (Reichweite ueber
+# den Vorfall hinaus), der Blueprint-Wechsel (leert das Verzeichnis) und
+# `web_search` (der Name eines selbstgebauten Servers hat draussen nichts zu
+# suchen — schon gar nicht, wenn ihn niemand gefragt hat).
+GUARDIAN_HEILUNG_TOOLS = frozenset({
+    # Sehen, was los ist.
+    "read_server_status",
+    "read_server_capacity",
+    "read_server_logs",
+    "read_config",
+    "read_server_ports",
+    "read_server_network",
+    "check_server_reachability",
+    "read_server_mods",
+    "list_server_files",
+    "search_server_files",
+    "read_server_backups",
+    "read_guardian_incidents",
+    "read_ai_action_history",
+    "read_node_health",
+    "read_blueprint",
+    "search_docs",
+    "read_docs",
+    # Handeln.
+    "propose_backup",
+    "propose_server_lifecycle",
+    "propose_config_patch",
+    "propose_config_update",
+    "propose_file_delete",
+    "propose_server_repair",
+    "propose_bind_ip_update",
+    "propose_mod_install",
+})
+
+
+# Werkzeuge, die in einem Heilungslauf ein nachweislich geglecktes Backup
+# voraussetzen — juenger als der Vorfall, mit gesetztem `verified_at`.
+#
+# Enthalten ist alles, was den Zustand des Servers **veraendert**, nicht nur was
+# ihn zerstoert. Auch ein Patch an der falschen Stelle macht eine Welt
+# unbrauchbar, und die Vorgabe des Betreibers lautete ausdruecklich: erst
+# sichern, dann anfassen.
+#
+# Nicht enthalten: `propose_backup` selbst (das waere ein Zirkel) und
+# `propose_server_lifecycle` — ein Neustart aendert keine Datei, und ihn hinter
+# ein Backup zu stellen hiesse, den haeufigsten und harmlosesten Heilungsschritt
+# genau dann zu blockieren, wenn die Platte voll ist und deshalb kein Backup
+# gelingt.
+GUARDIAN_BACKUP_PFLICHT_TOOLS = frozenset({
+    "propose_config_patch",
+    "propose_config_update",
+    "propose_file_delete",
+    "propose_server_repair",
+    "propose_mod_install",
+    "propose_bind_ip_update",
+})
 
 
 def bekannt(name: str) -> bool:

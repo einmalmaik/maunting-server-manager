@@ -10,8 +10,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-08-09',
-    version: '2.3',
+    lastUpdated: '2026-08-12',
+    version: '2.4',
     meta: 'Maunting Server Manager',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -73,6 +73,12 @@ export function Privacy() {
           // ausloest. Das gehoert ausdruecklich in den Datenschutzhinweis.
           t('privacyPolicy.sections.ai.items.autonomy'),
           t('privacyPolicy.sections.ai.items.tools'),
+          // Die Kopplung an die Guardian-Engine: seit ihr kann eine
+          // Verarbeitung beginnen, ohne dass jemand am Panel sitzt. Das ist die
+          // eine Aussage, die aus keinem der anderen Punkte folgt — alle
+          // beschreiben, was mit einer Eingabe geschieht, dieser beschreibt eine
+          // Verarbeitung ohne Eingabe.
+          t('privacyPolicy.sections.ai.items.guardian'),
         ],
       },
       {

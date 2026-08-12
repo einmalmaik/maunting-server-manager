@@ -72,6 +72,125 @@ def recreate_server_network(
     return True
 
 
+def reassign_conflicting_ports(db, server: Server) -> list[dict]:
+    """Vergibt die Ports neu, die auf dem Host jemand anderes belegt.
+
+    Der Fall aus dem Betrieb: ein Server startet nicht mehr, weil ein anderer
+    Dienst inzwischen auf seinem Port horcht. Guardian sieht nur "startet nicht";
+    die Ursache steht im Log als "address already in use".
+
+    **Nur fuer gestoppte Server.** Bei einem laufenden haelt sein eigener
+    Container die Ports, jede Pruefung meldete sie als belegt, und die Funktion
+    wuerde dem Server reihum neue Ports geben, die er gar nicht braucht.
+
+    Der Ablauf besteht ausschliesslich aus vorhandenen Teilen: `allocate_ports`
+    sucht freie Nummern, `ServerPort` haelt sie, `recreate_server_network` baut
+    Firewall und iptables um. Ein zweiter Weg, der die Firewall *fast* genauso
+    behandelt, waere genau die stille Abweichung, die dieses Modul vermeiden
+    soll — deshalb steht die Funktion hier und nicht neben dem Aufrufer.
+
+    Bewusst **enger** als der PATCH-Endpunkt: der kann beliebige Wunschports,
+    Protokollwechsel und Bind-IP-Aenderungen. Hier gibt es genau eine Handlung —
+    belegte Rolle bekommt eine freie Nummer. Was der Router mehr kann, bleibt
+    beim Router.
+
+    Returns:
+        Je gewechselter Port ein ``{"role", "old", "new", "protocol"}``. Leere
+        Liste heisst: es war kein Port belegt, es gab nichts zu tun.
+    """
+    from games.base import container_name_for
+    from models.server_port import ServerPort
+    from services import docker_service, port_check_service
+    from services.port_allocation_service import PortConflictError, allocate_ports
+
+    if docker_service.is_running(container_name_for(server.id), node=server.node):
+        return []
+
+    bind_ip = server.public_bind_ip or "0.0.0.0"
+    node = getattr(server, "node", None)
+    # Die Hostpruefung gilt nur fuer den eigenen Rechner. Auf einem entfernten
+    # Node saehe das Panel seine eigenen freien Ports statt der des Nodes und
+    # erklaerte jeden Port fuer frei — dieselbe Unterscheidung trifft der
+    # PATCH-Endpunkt mit `check_host`.
+    if node is not None and not getattr(node, "is_local", True):
+        return []
+
+    alt = [(p.role, p.port, p.protocol) for p in server.ports]
+    belegt = {
+        rolle
+        for rolle, port, protokoll in alt
+        if not port_check_service.is_port_available(port, protokoll, bind_ip)
+    }
+    if not belegt:
+        return []
+
+    # Belegte Rollen auf None — `allocate_ports` sucht genau fuer diese eine
+    # freie Nummer und laesst die uebrigen unangetastet.
+    wunsch = {rolle: (None if rolle in belegt else port) for rolle, port, _ in alt}
+    anforderungen = [(rolle, protokoll) for rolle, _, protokoll in alt]
+    try:
+        vergeben = allocate_ports(
+            db,
+            exclude_server_id=server.id,
+            bind_ip=bind_ip,
+            port_requirements=anforderungen,
+            requested_ports=wunsch,
+            node_id=getattr(server, "node_id", None),
+        )
+    except (PortConflictError, ValueError, RuntimeError) as exc:
+        raise PortReassignmentFailed(str(exc)) from exc
+
+    alte_nach_rolle = {rolle: (port, protokoll) for rolle, port, protokoll in alt}
+    db.query(ServerPort).filter(ServerPort.server_id == server.id).delete()
+    gewechselt: list[dict] = []
+    for rolle, port_val, protokoll in vergeben:
+        db.add(ServerPort(server_id=server.id, role=rolle, port=port_val, protocol=protokoll))
+        vorher = alte_nach_rolle.get(rolle, (None, protokoll))[0]
+        if vorher != port_val:
+            gewechselt.append(
+                {"role": rolle, "old": vorher, "new": port_val, "protocol": protokoll}
+            )
+    db.commit()
+    db.refresh(server)
+
+    # Der Server war gestoppt, also baut `recreate_server_network` nichts neu
+    # (es kehrt mit False zurueck). Die Firewallregeln der alten Ports muessen
+    # trotzdem weg — sonst bleiben Loecher offen, die niemand mehr braucht.
+    _alte_regeln_zuruecknehmen(server, [(p, prot, r) for r, p, prot in alt])
+    return gewechselt
+
+
+def _alte_regeln_zuruecknehmen(
+    server: Server, alte_ports: list[tuple[int, str, str]]
+) -> None:
+    """Nimmt Firewall- und iptables-Regeln der alten Ports zurueck.
+
+    Getrennt von `recreate_server_network`, weil der Server hier **nicht**
+    laeuft: es gibt nichts zu stoppen und nichts zu starten, nur aufzuraeumen.
+    Fehler sind hier kein Grund abzubrechen — die Ports sind in der Datenbank
+    bereits umgeschrieben, und eine ueberzaehlige Regel ist ein kleineres
+    Problem als ein halb umgestellter Server.
+    """
+    from services.docker_iptables_service import revoke_server as iptables_revoke_server
+    from services.firewall_service import close_ports, open_ports
+
+    try:
+        close_ports(alte_ports, node=server.node, name=server.name)
+        if server.node is None or server.node.is_local:
+            iptables_revoke_server(server.name, server.public_bind_ip or "", alte_ports)
+        neu = [(p.port, p.protocol, p.role) for p in server.ports]
+        open_ports(server.name, neu, node=server.node)
+    except Exception as exc:  # noqa: BLE001 - Aufraeumen darf nicht scheitern lassen
+        logger.warning(
+            "Firewall-Umstellung nach Portwechsel unvollstaendig (server_id=%s): %s",
+            server.id, type(exc).__name__,
+        )
+
+
+class PortReassignmentFailed(RuntimeError):
+    """Es gab keine freien Ports oder die Vergabe wurde abgelehnt."""
+
+
 class BindIpRejected(ValueError):
     """Die gewuenschte Bind-IP ist fuer diesen Server nicht verwendbar."""
 

@@ -514,6 +514,148 @@ def read_server_text(db: Session, *, server_id: int, relative_path: str) -> dict
         raise HTTPException(status_code=500, detail="Datei konnte nicht gelesen werden") from exc
 
 
+def delete_server_text(
+    db: Session, *, user: User, server_id: int, relative_path: str,
+    expected_revision: str | None,
+) -> dict:
+    """Loescht **eine** Datei des Servers — denselben Weg wie das Schreiben.
+
+    Bewusst neben `write_server_text` und nicht als Sonderfall darin: die
+    Vorbedingungen sind dieselben (Sandbox, Revision, Schnappschuss), die
+    Wirkung ist es nicht, und ein `content=None`-Zweig im Schreiben waere genau
+    die Art versteckter Verzweigung, die man beim Lesen uebersieht.
+
+    Drei Dinge passieren vor dem Loeschen, und keines davon ist verzichtbar:
+
+    1. `safe_path` bzw. der Agent loesen Symlinks auf und verlangen, dass das
+       Ziel unterhalb des Serververzeichnisses liegt. Ein `../` fuehrt nicht
+       aus dem Server heraus.
+    2. Die Revision muss stimmen. Hat sich die Datei seit dem Vorschlag
+       geaendert, ist es nicht mehr dieselbe — und die Begruendung, mit der
+       jemand (oder die KI) das Loeschen angestossen hat, gilt fuer sie nicht.
+    3. `file_history_service.snapshot` legt denselben verschluesselten
+       Versionsschnappschuss an wie vor jedem Schreiben, und er muss
+       **gelingen**. Fuer alles bis 512 KiB — also fuer jede Sperr- und
+       Konfigurationsdatei, um die es hier geht — holt der Dateimanager sie
+       danach einzeln zurueck, ohne Backup.
+
+    Zu Punkt 3 stand hier "keines davon ist verzichtbar", und der Code hielt das
+    nicht ein: `snapshot` gibt oberhalb von 512 KiB **stillschweigend `False`**
+    zurueck, ohne zu werfen, und der Rueckgabewert wurde verworfen. Eine 2 MiB
+    grosse Regionsdatei lief also durch `read_server_text` (das bis 5 MiB
+    durchlaesst), erzeugte keinen Schnappschuss und wurde geloescht. Der
+    Rueckweg, mit dem in der Werkzeugtabelle begruendet wird, warum
+    `propose_file_delete` keine Bestaetigungspflicht traegt, existierte fuer
+    genau diese Dateien nicht.
+
+    Ebenso binaere Dateien: `read_text` dekodiert mit ``errors="replace"``, der
+    Schnappschuss speichert also eine mit U+FFFD durchsetzte Fassung, und ein
+    Wiederherstellen schriebe eine kaputte Datei zurueck — ein Rueckweg, der
+    vorhanden aussieht und die Datei zerstoert. Der Schreibpfad weist binaeren
+    Inhalt aus genau diesem Grund seit jeher ab; das Loeschen tut es jetzt auch.
+
+    Verzeichnisse sind ausgeschlossen. Rekursives Loeschen ist eine andere
+    Handlung mit einer anderen Tragweite, und es gibt hier keinen Grund dafuer.
+    """
+    from services.ai_action_service import is_binary_text
+
+    def _rueckweg_sichern(inhalt: str) -> None:
+        """Schnappschuss oder Abbruch — dazwischen gibt es nichts.
+
+        Beide Pfade (Agent und lokal) brauchen dieselben zwei Pruefungen, und
+        sie stehen deshalb hier statt zweimal daneben. Der Statuscode 413 ist
+        derselbe, mit dem `routers/files.py` ein zu grosses Wiederherstellen
+        ablehnt — die Grenze ist dieselbe, nur die Richtung eine andere.
+        """
+        if is_binary_text(inhalt):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "FILE_BINARY_NO_HISTORY",
+                    "message": (
+                        "Binaere Dateien haben keinen brauchbaren "
+                        "Versionsschnappschuss und werden hier nicht geloescht."
+                    ),
+                },
+            )
+        # Die Groesse wird **vorher** geprueft und nicht aus dem Rueckgabewert
+        # von `snapshot` erschlossen. Der ist naemlich doppeldeutig: `False`
+        # heisst entweder "zu gross, kein Rueckweg" oder "die juengste Version
+        # traegt schon genau diesen Inhalt, es gibt nichts Neues zu sichern" —
+        # zwei Lagen, die gegensaetzlicher nicht sein koennten.
+        #
+        # Beides gleich zu behandeln war ein Fehler mit Betriebswirkung: wer eine
+        # Datei im Editor unveraendert speichert, hat danach eine Version mit
+        # demselben Inhalt in der Historie — und konnte die Datei ueber diesen
+        # Weg nie wieder loeschen, mit der Begruendung, sie sei zu gross.
+        if len(inhalt.encode("utf-8")) > file_history_service.MAX_HISTORY_EDIT_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "code": "FILE_TOO_LARGE_FOR_HISTORY",
+                    "message": (
+                        "Fuer diese Datei laesst sich kein Versionsschnappschuss "
+                        "anlegen. Ohne Rueckweg wird nicht geloescht."
+                    ),
+                },
+            )
+        file_history_service.snapshot(server_id, relative_path, inhalt, user.id)
+        # Und dann wird nachgesehen, statt geschlossen zu werden. Der Rueckweg
+        # ist belegt, wenn eine Version existiert — egal ob sie gerade eben
+        # entstanden ist oder schon vorher dalag.
+        if not file_history_service.list_versions(server_id, relative_path):
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "FILE_HISTORY_UNAVAILABLE",
+                    "message": (
+                        "Es liegt keine Version dieser Datei vor. Ohne Rueckweg "
+                        "wird nicht geloescht."
+                    ),
+                },
+            )
+
+    server = _server(db, server_id)
+    agent = _agent(server, db)
+    if agent is not None:
+        try:
+            current = agent.files_read_info(_agent_key(server), relative_path)
+            if expected_revision is not None and current.get("revision") != expected_revision:
+                raise HTTPException(status_code=409, detail={"code": "FILE_REVISION_CONFLICT"})
+            _rueckweg_sichern(str(current.get("content", "")))
+            agent.files_delete(_agent_key(server), relative_path)
+            return {"path": relative_path, "deleted": True}
+        except NodeClientError as exc:
+            raise _agent_error(exc) from exc
+        except (DisSidecarError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=503, detail="Versionsspeicher ist nicht verfuegbar"
+            ) from exc
+
+    target = safe_path(server.install_dir, relative_path)
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    try:
+        current = file_edit_service.read_text(target)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="Datei konnte nicht gelesen werden") from exc
+    if expected_revision is not None and current.get("revision") != expected_revision:
+        raise HTTPException(status_code=409, detail={"code": "FILE_REVISION_CONFLICT"})
+    try:
+        _rueckweg_sichern(str(current["content"]))
+    except (DisSidecarError, RuntimeError) as exc:
+        # Ohne Schnappschuss wird nicht geloescht. Der Weg zurueck ist Teil
+        # dieser Handlung, nicht ihr Beiwerk.
+        raise HTTPException(
+            status_code=503, detail="Versionsspeicher ist nicht verfuegbar"
+        ) from exc
+    try:
+        target.unlink()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail="Datei konnte nicht geloescht werden") from exc
+    return {"path": relative_path, "deleted": True}
+
+
 def _apply_permissions(install_dir: str, target: Path) -> None:
     def normalize(path: Path) -> None:
         info = path.lstat()

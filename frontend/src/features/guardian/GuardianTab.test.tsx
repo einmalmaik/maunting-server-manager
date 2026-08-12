@@ -6,7 +6,7 @@ import { GuardianTab } from "./GuardianTab";
 import { GuardianBadge, getGuardianDisplayState } from "./GuardianBadge";
 import { GuardianQuarantineBanner } from "./GuardianQuarantineBanner";
 import * as client from "@/api/client";
-import type { Server, GuardianIncident } from "@/types";
+import type { Server, GuardianIncident, GuardianIncidentAi } from "@/types";
 
 vi.mock("@/api/client", () => ({
   api: vi.fn(),
@@ -375,6 +375,182 @@ describe("Guardian UI Components", () => {
       });
       expect(screen.getAllByText(/Freigabe ausstehend/i).length).toBeGreaterThan(0);
       expect(screen.queryByText("Gelöst")).toBeNull();
+    });
+  });
+
+  /**
+   * Die KI-Zeile unter einem Vorfall ist die einzige Stelle, an der das Panel
+   * einem Nutzer sagt, wie ein Heilungslauf ausgegangen ist. Denselben Ausgang
+   * bescheinigt ihm die Ergebnis-Mail aus `ai_guardian_report.py`, die dafuer
+   * `run.status in ("completed",) and vorfall.status == "resolved"` prueft. Wenn
+   * Panel und Mail hier auseinanderlaufen, glaubt der Nutzer der einen Quelle
+   * und laesst einen weiterhin offenen Vorfall liegen — das ist der Fehler, den
+   * dieser Block ausschliesst.
+   */
+  describe("GuardianTab: KI-Zeile am Vorfall", () => {
+    const kiUeberschrift = () => `${i18n.t("servers.guardian.tab.aiHeading")}:`;
+    const satz = (name: string) => i18n.t(`servers.guardian.tab.${name}`);
+
+    function vorfall(
+      ai: GuardianIncidentAi | null | undefined,
+      status = "open",
+    ): GuardianIncident {
+      return {
+        id: 77,
+        title: "Autopilot: process_not_running",
+        description: "Synthetischer Vorfall fuer die KI-Zeile",
+        type: "process_not_running",
+        status,
+        fingerprint: "fp_ai",
+        created_at: "2026-08-12T12:00:00Z",
+        resolved_at: status === "resolved" ? "2026-08-12T12:05:00Z" : null,
+        attempts: [],
+        ai,
+      };
+    }
+
+    async function zeigeVorfall(inc: GuardianIncident) {
+      vi.mocked(client.api).mockResolvedValue([inc]);
+      render(
+        <MemoryRouter>
+          <GuardianTab server={mockServerGuardianEnabled} />
+        </MemoryRouter>,
+      );
+      await screen.findByText(inc.title);
+    }
+
+    /**
+     * Ohne KI-Notiz darf keine KI-Zeile stehen: ein leerer Kasten mit
+     * Bot-Symbol legt nahe, die KI haette sich den Vorfall angesehen — der
+     * haeufigste Fall ist aber, dass sie ihn nie gesehen hat.
+     */
+    it.each([
+      ["ohne Feld", undefined],
+      ["mit null", null],
+    ])("zeigt keine KI-Zeile, wenn die Notiz fehlt (%s)", async (_name, ai) => {
+      await zeigeVorfall(vorfall(ai));
+      expect(screen.queryByText(kiUeberschrift())).toBeNull();
+    });
+
+    /**
+     * "briefed" heisst: die KI hat nichts getan, sie wird den Vorfall beim
+     * naechsten Chat erwaehnen. Diese Zeile darf nie nach Eingriff klingen —
+     * `run_status` ist hier bedeutungslos und wird gar nicht erst gelesen.
+     */
+    it("meldet bei mode 'briefed' nur die Ankuendigung, nicht einen Lauf", async () => {
+      await zeigeVorfall(
+        vorfall({ mode: "briefed", run_status: null, mine: true, at: "2026-08-12T12:01:00Z" }),
+      );
+      expect(screen.getByText(satz("aiBriefed"))).toBeInTheDocument();
+      expect(screen.queryByText(satz("aiHealing"))).toBeNull();
+      expect(screen.queryByText(satz("aiUnknown"))).toBeNull();
+    });
+
+    /**
+     * Ein Lauf, der noch arbeitet oder auf eine Bestaetigung wartet, ist weder
+     * gelungen noch gescheitert. Wuerde das Panel ihn schon als gescheitert
+     * ausweisen, wuerde ein Nutzer eingreifen, waehrend die KI noch laeuft —
+     * `waiting_confirmation` wartet gerade auf genau diesen Nutzer.
+     */
+    it.each(["running", "waiting_confirmation", "waiting_user"])(
+      "zaehlt run_status '%s' als laufend",
+      async (run_status) => {
+        await zeigeVorfall(
+          vorfall({ mode: "healing", run_status, mine: true, at: "2026-08-12T12:01:00Z" }),
+        );
+        expect(screen.getByText(satz("aiHealing"))).toBeInTheDocument();
+        expect(screen.queryByText(satz("aiFailed"))).toBeNull();
+        expect(screen.queryByText(satz("aiHealed"))).toBeNull();
+      },
+    );
+
+    /** Beide Haelften erfuellt: der Lauf ist sauber zu Ende, der Vorfall ist zu. */
+    it("meldet 'behoben' nur, wenn Lauf und Vorfall beide fertig sind", async () => {
+      await zeigeVorfall(
+        vorfall(
+          { mode: "healing", run_status: "completed", mine: true, at: "2026-08-12T12:01:00Z" },
+          "resolved",
+        ),
+      );
+      expect(screen.getByText(satz("aiHealed"))).toBeInTheDocument();
+      expect(screen.queryByText(satz("aiFailed"))).toBeNull();
+    });
+
+    /**
+     * Der Fall, der die Und-Verknuepfung traegt: die KI ist fertig geworden, der
+     * Vorfall steht aber weiter offen — sie hat ihn also nicht behoben. Ein
+     * "behoben" allein aufgrund des Laufstatus waere die schlechteste Art von
+     * Fehler, denn die Ergebnis-Mail prueft zusaetzlich `vorfall.status ==
+     * "resolved"` und wuerde demselben Vorfall den gegenteiligen Ausgang
+     * bescheinigen.
+     */
+    it("meldet trotz beendetem Lauf 'nicht behoben', solange der Vorfall offen ist", async () => {
+      await zeigeVorfall(
+        vorfall(
+          { mode: "healing", run_status: "completed", mine: true, at: "2026-08-12T12:01:00Z" },
+          "open",
+        ),
+      );
+      expect(screen.getByText(satz("aiFailed"))).toBeInTheDocument();
+      expect(screen.queryByText(satz("aiHealed"))).toBeNull();
+    });
+
+    /** Ein abgebrochener Lauf ist ein Scheitern, auch wenn der Vorfall spaeter von Hand zuging. */
+    it("meldet einen gescheiterten Lauf als 'nicht behoben'", async () => {
+      await zeigeVorfall(
+        vorfall({ mode: "healing", run_status: "failed", mine: true, at: "2026-08-12T12:01:00Z" }),
+      );
+      expect(screen.getByText(satz("aiFailed"))).toBeInTheDocument();
+      expect(screen.queryByText(satz("aiHealed"))).toBeNull();
+    });
+
+    /**
+     * Ist der Lauf abgeraeumt, kennt niemand mehr seinen Ausgang. Dann muss die
+     * Zeile das offen sagen, statt sich fuer eine der beiden Behauptungen zu
+     * entscheiden — "nicht behoben" waere hier genauso erfunden wie "behoben".
+     */
+    it("meldet einen verschwundenen Lauf als unbekannt statt als Scheitern", async () => {
+      await zeigeVorfall(
+        vorfall({ mode: "healing", run_status: null, mine: true, at: "2026-08-12T12:01:00Z" }),
+      );
+      expect(screen.getByText(satz("aiUnknown"))).toBeInTheDocument();
+      expect(screen.queryByText(satz("aiFailed"))).toBeNull();
+      expect(screen.queryByText(satz("aiHealed"))).toBeNull();
+    });
+
+    /**
+     * Es gibt eine Unterhaltung je Benutzer: der Lauf eines anderen Freigebers
+     * laesst sich nicht oeffnen. Ein Verweis, der ins Leere fuehrt oder in den
+     * eigenen, voellig anderen Chat, waere schlechter als gar keiner — deshalb
+     * haengt der Link an `mine` und nicht daran, dass ueberhaupt ein Lauf
+     * existiert.
+     */
+    it("bietet den Weg in den Chat nur beim eigenen Lauf an", async () => {
+      await zeigeVorfall(
+        vorfall({ mode: "healing", run_status: "running", mine: true, at: "2026-08-12T12:01:00Z" }),
+      );
+      const link = screen.getByRole("link", { name: satz("aiOpenChat") });
+      expect(link).toHaveAttribute("href", "/ai");
+    });
+
+    it("verschweigt den Weg in den Chat beim Lauf eines anderen Freigebers", async () => {
+      await zeigeVorfall(
+        vorfall({ mode: "healing", run_status: "running", mine: false, at: "2026-08-12T12:01:00Z" }),
+      );
+      // Die Zeile selbst bleibt sichtbar — nur der Verweis fehlt.
+      expect(screen.getByText(satz("aiHealing"))).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: satz("aiOpenChat") })).toBeNull();
+    });
+
+    /**
+     * Bei "briefed" gibt es noch keinen Lauf, den man aufschlagen koennte; der
+     * Hinweis entsteht erst mit der naechsten Nachricht des Nutzers.
+     */
+    it("bietet bei einer blossen Ankuendigung keinen Weg in den Chat an", async () => {
+      await zeigeVorfall(
+        vorfall({ mode: "briefed", run_status: null, mine: true, at: "2026-08-12T12:01:00Z" }),
+      );
+      expect(screen.queryByRole("link", { name: satz("aiOpenChat") })).toBeNull();
     });
   });
 });

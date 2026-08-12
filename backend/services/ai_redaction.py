@@ -11,10 +11,24 @@ Unordnung hielt und ihn nach oben zog, brachte das Panel zum Stillstand.
 Die Muster sind bewusst konservativ: lieber ein `[REDACTED]` zu viel als ein
 Token in einem Log, einer Zusammenfassung oder einer Anfrage an einen externen
 KI-Anbieter.
+
+Zwei Funktionen, weil es zwei Arten von Text gibt:
+
+* `redact_sensitive_text` — ueberall. Zugangsdaten und E-Mail-Adressen.
+* `redact_freetext`       — zusaetzlich fremde IP-Adressen, fuer Text, der von
+  aussen in den Server kam (Logzeilen, Dateiinhalte, Vorfallbeschreibungen).
+
+Die Trennung ist kein Feinschliff, sondern notwendig. Eine IP kann beides sein:
+die Adresse eines Spielers in einer Logzeile — personenbezogen, ohne jeden
+Nutzen fuer die Diagnose — oder die Bind-Adresse des Servers in den
+Netzwerkangaben, ohne die sich eine falsche Bindung weder erkennen noch
+berichtigen laesst. Ein gemeinsames Muster fuer beides muesste eines von
+beiden falsch behandeln.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import re
 
 
@@ -65,6 +79,70 @@ _PRIVATE_KEY_RE = re.compile(
     re.DOTALL,
 )
 
+#: E-Mail-Adressen. Sie stehen in Serverlogs (Registrierungen, Whitelist-Fehler,
+#: Mailversand eines Plugins) und in Konfigurationsdateien, und sie sind
+#: personenbezogen ohne jeden Zweifel und ohne jeden Nutzen fuer eine Diagnose.
+#: Deshalb **global**: es gibt keinen Fall, in dem die KI eine echte Adresse
+#: braucht, um einen Server wieder zum Laufen zu bringen.
+_EMAIL_RE = re.compile(
+    r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+)
+
+#: IP-Adressen — **nicht** global, sondern nur in Freitext (siehe
+#: `redact_freetext`). Der Unterschied ist der Zweck: die Adresse eines Spielers
+#: in einer Logzeile ist personenbezogen, die Bind-Adresse des Servers in
+#: `read_server_network` ist eine Betriebsangabe, die die KI braucht, um eine
+#: falsche Bindung zu erkennen und mit `propose_bind_ip_update` zu berichtigen.
+#: Ein gemeinsames Muster fuer beides wuerde entweder die eine durchlassen oder
+#: die andere unbrauchbar machen.
+#:
+#: Stehen bleibt, was **keine Person bezeichnet**: `0.0.0.0` und `::` (jede
+#: Adresse), Loopback, Link-Local und die privaten Bereiche (RFC 1918, ULA).
+#: Eine private Adresse in einem Gameserver-Log ist die Bindeadresse des Dienstes
+#: oder ein anderer Rechner im Netz des Betreibers — also dessen eigene Anlage.
+#: Wer sie schwaerzt, nimmt der Diagnose genau die Zeile, an der man erkennt,
+#: dass ein Dienst auf der falschen Adresse horcht. Das ist der haeufigste Fall
+#: von "laeuft, aber niemand kommt drauf", und ihn unlesbar zu machen schuetzt
+#: niemanden.
+#:
+#: Geschwaerzt wird also nur, was oeffentlich routbar ist — und das ist bei einer
+#: Adresse in einer Verbindungszeile praktisch immer ein Spieler.
+_IPV4_RE = re.compile(r"(?<![\w.])((?:\d{1,3}\.){3}\d{1,3})(?![\w.])")
+#: IPv6 wird bewusst **grob** eingesammelt und erst danach geprueft. Ein
+#: regulaerer Ausdruck, der die zusammengefasste Schreibweise (`2a02:8109::1`)
+#: vollstaendig und korrekt trifft, ist berüchtigt lang und trifft trotzdem
+#: Sonderfaelle nicht — ein erster Entwurf hier liess ausgerechnet jede Adresse
+#: mit `::` durch, also die uebliche Schreibweise.
+#:
+#: Stattdessen: alles einsammeln, was nach Hex und Doppelpunkten aussieht, und
+#: `ipaddress` entscheiden lassen. Was keine Adresse ist — eine Uhrzeit `12:34:56`
+#: in einer Logzeile etwa — faellt bei der Pruefung durch und bleibt stehen.
+_IPV6_RE = re.compile(
+    r"(?<![\w:.])([A-Fa-f0-9]{0,4}(?::[A-Fa-f0-9]{0,4}){2,7})(?![\w:.])"
+)
+
+
+#: Derselbe Schluesselteil wie in `_SECRET_ASSIGNMENT_RE`, nur allein stehend.
+#:
+#: Gebraucht wird er dort, wo Schluessel und Wert **nicht** in einer Zeichenkette
+#: stehen, sondern als Paar in einer Datenstruktur — also in jedem
+#: Werkzeugergebnis, das ein Woerterbuch liefert. `read_blueprint` gibt
+#: ``{"runtime": {"env": {"RCON_PASSWORD": "hunter2"}}}`` zurueck; die Rekursion
+#: der Schwaerzung reicht dort nur ``"hunter2"`` weiter, und darauf passt kein
+#: Zuweisungsmuster. Das Passwort ging im Klartext an den Modellanbieter.
+#:
+#: Ein zweites Muster und keine zweite Wortliste: waeren es zwei Listen, wuerde
+#: die eine irgendwann um `credential` erweitert und die andere nicht.
+_SECRET_KEY_RE = re.compile(
+    r"(?i)^(?:[A-Za-z0-9]+[._-])*"
+    r"(?:password|passwd|secret|token|api[_-]?key|authorization|credential)$"
+)
+
+
+def ist_geheimer_schluessel(name: object) -> bool:
+    """Ob ein Woerterbuchschluessel einen Wert bezeichnet, der nicht hinausdarf."""
+    return isinstance(name, str) and bool(_SECRET_KEY_RE.match(name.strip()))
+
 
 def _ersetze_zuweisung(match: re.Match[str]) -> str:
     """Schreibt Schlüssel und Trennzeichen zurück, ersetzt nur den Wert.
@@ -95,9 +173,64 @@ def redact_and_count(value: str) -> tuple[str, int]:
     text, c = _SECRET_ASSIGNMENT_RE.subn(_ersetze_zuweisung, text)
     text, d = _BEARER_RE.subn("Bearer [REDACTED]", text)
     text, e = _KNOWN_TOKEN_RE.subn("[REDACTED_TOKEN]", text)
-    return text, a + b + c + d + e
+    text, f = _EMAIL_RE.subn("[REDACTED_EMAIL]", text)
+    return text, a + b + c + d + e + f
 
 
 def redact_sensitive_text(value: str) -> str:
     """Entfernt typische Credentials vor Persistenz und Providertransfer."""
     return redact_and_count(value)[0]
+
+
+def _ersetze_ip(match: re.Match[str]) -> str:
+    """Schwaerzt nur oeffentlich routbare Adressen.
+
+    Die Entscheidung faellt ueber `ipaddress` und nicht ueber Bereichsmuster im
+    regulaeren Ausdruck: die Bereiche sind in der Standardbibliothek bereits
+    richtig hinterlegt, und `172.16.0.0/12` von Hand als Muster zu schreiben ist
+    genau die Art Kleinarbeit, bei der man sich vertut.
+
+    Was sich nicht als Adresse lesen laesst, war keine — `999.1.2.3` oder eine
+    Versionsnummer wie `1.20.4.1` faellt hier durch und bleibt stehen.
+    """
+    roh = match.group(1)
+    try:
+        adresse = ipaddress.ip_address(roh)
+    except ValueError:
+        return roh
+    if (
+        adresse.is_private
+        or adresse.is_loopback
+        or adresse.is_link_local
+        or adresse.is_unspecified
+        or adresse.is_multicast
+        or adresse.is_reserved
+    ):
+        return roh
+    return "[REDACTED_IP]"
+
+
+def redact_freetext(value: str) -> str:
+    """Wie `redact_sensitive_text`, zusaetzlich ohne fremde IP-Adressen.
+
+    Gedacht fuer Text, der **von aussen** in den Server hineingekommen ist:
+    Logzeilen, Inhalte von Konfigurations- und Weltdateien, Beschreibungen von
+    Guardian-Vorfaellen. Dort steht die Adresse eines Spielers, und die ist ein
+    personenbezogenes Datum, das kein Modellanbieter zu sehen braucht.
+
+    Ausdruecklich **nicht** fuer strukturierte Serverangaben. `read_server_network`
+    liefert die Bind-Adresse und die Portbelegung des Servers; das sind
+    Betriebsangaben, und ohne sie kann die KI eine falsche Bindung weder
+    erkennen noch mit `propose_bind_ip_update` berichtigen. Deshalb liegt die
+    IP-Schwaerzung in dieser zweiten Funktion und nicht im allgemeinen Muster —
+    eine gemeinsame Regel wuerde entweder die Spieleradresse durchlassen oder
+    die Netzwerkdiagnose zerstoeren.
+
+    Was diese Funktion **nicht** kann: Spielernamen. Ein Name ist ein Wort und
+    hat kein Muster; ihn zu erkennen hiesse, gegen eine Liste zu pruefen, die es
+    nicht gibt. Die Grenze steht so auch in der Datenschutzerklaerung, statt sie
+    zu ueberschreiben.
+    """
+    text = redact_sensitive_text(value)
+    text = _IPV4_RE.sub(_ersetze_ip, text)
+    return _IPV6_RE.sub(_ersetze_ip, text)

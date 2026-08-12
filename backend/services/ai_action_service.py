@@ -1077,7 +1077,94 @@ def provider_tool_definitions() -> list[dict]:
             },
             ["workshop_id", "action", *_RATIONALE_REQUIRED],
         ),
+        # Die Reparatur der **Anlage** — alles unterhalb der Spieldateien.
+        #
+        # `action` ist ein `enum` und kein Freitext, und das ist der ganze Sinn
+        # des Werkzeugs: das Modell waehlt eine von vier Kennungen. Es formuliert
+        # keinen Pfad, kein Kommando und keinen Containernamen — der kommt aus
+        # `container_name_for(server_id)`. Ein Modell, das durch eine Logzeile
+        # zu etwas ueberredet wurde, kann hier hoechstens die falsche der vier
+        # Reparaturen anstossen.
+        _server_function(
+            "propose_server_repair",
+            "Repariert die Anlage unter dem Server, nicht seine Dateien. Zwei "
+            "Moeglichkeiten: `repair_permissions` berichtigt die Besitzrechte am "
+            "Serververzeichnis — der Weg bei 'permission denied', 'read-only "
+            "file system' oder wenn der Server seine eigenen Dateien nicht mehr "
+            "schreiben kann. `reallocate_port` vergibt die Ports neu, die auf "
+            "dem Host jemand anderes belegt — der Weg bei 'address already in "
+            "use', aber nur bei einem **gestoppten** Server; bei einem laufenden "
+            "haelt er seine Ports selbst und es gibt nichts zu vergeben. "
+            "Nichts davon aendert Spielstaende. "
+            "Fuer 'Container haengt' oder 'startet nicht' nimm "
+            "propose_server_lifecycle mit `restart` — das baut den Container "
+            "ohnehin aus dem Blueprint neu auf.",
+            {
+                "action": {
+                    "type": "string",
+                    "enum": ["repair_permissions", "reallocate_port"],
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            ["action", *_RATIONALE_REQUIRED],
+        ),
+        _server_function(
+            "propose_file_delete",
+            "Loescht **eine** Datei des Servers. Gedacht fuer haengende "
+            "Sperrdateien (`session.lock`, `*.pid`) und nachweislich kaputte "
+            "Einzeldateien, die der Server beim Start nicht mehr lesen kann. "
+            "Vorher wird derselbe Versionsschnappschuss angelegt wie beim "
+            "Schreiben, der Dateimanager holt die Datei also einzeln zurueck. "
+            "Im autonomen Guardian-Betrieb laeuft es nur mit einem nachweislich "
+            "erfolgreichen Backup, das juenger ist als der Vorfall — fehlt es, "
+            "wird der Vorschlag abgewiesen, und du legst erst eines an. "
+            "Kein Verzeichnis, keine Platzhalter: genau ein Pfad, den du vorher "
+            "mit list_server_files oder read_config gesehen hast.",
+            {
+                "path": {"type": "string", "maxLength": 256},
+                **_RATIONALE_SCHEMA,
+            },
+            ["path", *_RATIONALE_REQUIRED],
+        ),
     ]
+
+
+#: Wieviele Wiederherstellungsversuche eines Vorfalls die KI zu sehen bekommt.
+#: Die juengsten — bei einem Vorfall, der seit Stunden laeuft, sagt der erste
+#: Versuch weniger als der letzte.
+MAX_INCIDENT_ATTEMPTS = 8
+
+
+def _vorfall_versuche(attempts_json: str | None) -> list[dict]:
+    """Die Wiederherstellungsversuche des Agenten, auf das Noetige gekuerzt.
+
+    Sie stehen als JSON-Zeichenkette am Vorfall (`incidents.attempts`) und
+    tragen je Eintrag `attempt`, `stage`, `action`, `at` und `result`. Genau
+    diese fuenf gehen weiter — mehr steht nicht drin, und was der Agent kuenftig
+    ergaenzt, soll nicht ungefragt an einen Modellanbieter gehen.
+
+    Ohne diese Liste faengt die KI bei jedem Vorfall mit einem Neustart an. Das
+    ist der Schritt, den die Guardian-Engine ausweislich ihrer eigenen
+    Eskalationsleiter schon dreimal gemacht hat, bevor sie den Vorfall ueberhaupt
+    meldete — die KI wuerde also als Erstes das wiederholen, was nachweislich
+    nicht geholfen hat.
+
+    Unlesbares gibt eine leere Liste. Der Inhalt kommt vom Agenten, und ein
+    kaputtes JSON darf hier kein Werkzeug zum Absturz bringen.
+    """
+    try:
+        geladen = json.loads(attempts_json) if attempts_json else []
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(geladen, list):
+        return []
+    erlaubt = ("attempt", "stage", "action", "at", "result")
+    versuche = [
+        {k: v for k, v in eintrag.items() if k in erlaubt}
+        for eintrag in geladen
+        if isinstance(eintrag, dict)
+    ]
+    return versuche[-MAX_INCIDENT_ATTEMPTS:]
 
 
 def _require_no_arguments(tool_name: str, arguments: dict) -> None:
@@ -2104,6 +2191,12 @@ def _execute_server_context_tool(
             "server_id": server.id,
             "incidents": [
                 {
+                    # Ohne Kennung konnte das Modell einen Vorfall nicht
+                    # benennen, auf den es sich bezieht — weder in seiner
+                    # Antwort noch in der Begruendung eines Vorschlags. Bei
+                    # mehreren offenen Vorfaellen desselben Servers war damit
+                    # nicht unterscheidbar, welchen es meint.
+                    "id": row.id,
                     "type": row.type,
                     "status": row.status,
                     "title": redact_sensitive_text(str(row.title))[:128],
@@ -2112,6 +2205,11 @@ def _execute_server_context_tool(
                     "occurrences": row.occurrences,
                     "created_at": row.created_at.isoformat() if row.created_at else None,
                     "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+                    # Was die Guardian-Engine selbst schon versucht hat. Ohne
+                    # das faengt die KI bei jedem Vorfall mit einem Neustart an —
+                    # dem Schritt, den der Agent nachweislich schon dreimal
+                    # gemacht hat, bevor er aufgab.
+                    "attempts": _vorfall_versuche(row.attempts),
                 }
                 for row in rows
             ],
@@ -2446,6 +2544,23 @@ def execute_read_tool(
 
     if tool_name == "search_server_files":
         return _execute_file_search(db, user=user, server=server, arguments=arguments)
+
+    # Ab hier folgt `read_config` — und zwar bisher **ohne** dass sein Name
+    # geprueft wurde. Jedes serverbezogene Lesewerkzeug, das keinen eigenen
+    # Zweig hat, landete hier und wurde als Dateizugriff ausgefuehrt.
+    #
+    # Solange die Argumentpruefung darunter zuschlug, fiel das als
+    # "Datei-Lesewerkzeug hat ungueltige Argumente" auf — eine Fehlermeldung,
+    # die den falschen Grund nennt. Ein kuenftiges Werkzeug mit einem
+    # `path`-Argument haette sie aber passiert und dem Modell den Inhalt einer
+    # Datei unter dem Namen des anderen Werkzeugs geliefert: richtiger Name,
+    # falsche Daten. Genau dieses Muster hat in diesem Projekt schon dreimal
+    # zugeschlagen, und es faellt nie zur Laufzeit auf.
+    #
+    # `_werkzeug_bekannt` faengt beim Definieren ein Werkzeug ohne
+    # Registry-Zeile. Diese Zeile hier faengt eines ohne Handler.
+    if tool_name != "read_config":
+        raise AiActionValidationError(f"Kein Handler fuer Werkzeug: {tool_name}")
 
     if set(arguments) - {"path", "offset", "limit"} or "path" not in arguments:
         raise AiActionValidationError("Datei-Lesewerkzeug hat ungueltige Argumente")

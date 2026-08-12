@@ -534,7 +534,15 @@ zusätzlich die Blueprint-Liste und die Hostkapazität.
 
 **Schreibend** — jedes erzeugt zunächst nur einen sichtbaren Vorschlag:
 Start/Stop/Neustart, Backup, revisionsgebundene Konfigurationsänderung,
-Mod-Installation und Servererstellung.
+Mod-Installation, Servererstellung, das Löschen einer einzelnen Datei und die
+Reparatur der Anlage.
+
+Die Reparatur (`propose_server_repair`) nimmt **eine Kennung aus einer festen
+Liste** entgegen — `repair_permissions` oder `reallocate_port` — und niemals
+einen Pfad, ein Kommando oder einen Containernamen. Der Containername entsteht
+in jedem Zweig aus `container_name_for(server_id)`. Das ist die mechanische
+Seite der Zusage, dass es keinen Weg von einer Modellausgabe zu einer
+Befehlszeile gibt.
 
 Die Servererstellung läuft über denselben `server_provisioning_service` wie ein
 Klick im Panel und eine Shop-Bestellung. Blueprintprüfung, Kapazität, Portvergabe,
@@ -560,17 +568,73 @@ Autonomie verlangt **vier** Bedingungen gleichzeitig:
 > **Was Autonomie nicht entfernt.** Sie ersetzt genau einen Schritt: die
 > Bestätigung durch einen Menschen. Die Rechteprüfung läuft weiterhin dreimal
 > (Vorschlag, Freigabe, unmittelbar vor der Ausführung), der Server-Mutex gilt,
-> und jede Aktion steht im Audit mit `origin=ai` und `autonomous: true`. Die KI
-> kann nichts, was der handelnde Benutzer nicht selbst dürfte.
+> und jede Aktion steht im Audit mit `autonomous: true`. Die KI kann nichts, was
+> der handelnde Benutzer nicht selbst dürfte.
 
 Ein Betreiber, der Autonomie grundsätzlich erlauben, aber auf einem empfindlichen
 Server ausschließen will, legt dort eine Freigabe mit `enabled: false` an.
+
+### Guardian weckt die KI
+
+Mit erteilter Freigabe hat der autonome Modus eine zweite Wirkung: ein
+Guardian-Vorfall startet einen Heilungslauf, **ohne dass jemand am Panel sitzt**.
+Ein Scheduler-Job sieht alle sechzig Sekunden nach offenen Vorfällen.
+
+- **Der Akteur ist der Freigeber**, nicht ein Dienstbenutzer und nicht der
+  Serverbesitzer: derjenige Benutzer, der für diesen Server die Autonomie
+  eingeschaltet hat und zusätzlich `ai.chat.use`, `ai.autonomous.use` und
+  `server.view` besitzt. Verbrauch und Verantwortung liegen bei ihm. Gibt es
+  mehrere, gewinnt die serverbezogene Freigabe vor der panelweiten, danach die
+  kleinste Benutzer-ID.
+- **Ohne Freigabe passiert nichts** — kein Lauf, kein Anbieteraufruf, keine
+  Tokens. Der Vorfall wird nur vorgemerkt und beim nächsten Chat des Benutzers
+  als Meldung des Panels erwähnt.
+- **Der Lauf läuft im normalen Chat.** Er startet nur, wenn dort gerade nichts
+  läuft. Schreibt der Mensch dazwischen, gewinnt er; der Verlauf der Heilung
+  bleibt stehen, und ein „mach weiter" genügt.
+- **Die Werkzeugmenge ist enger** als im Chat (`GUARDIAN_HEILUNG_TOOLS`):
+  Lesewerkzeuge, Backup, Lifecycle, Konfiguration, Dateilöschung, Reparatur,
+  Doku. Nicht dabei sind Gedächtnis, Skills, Hoster, Blueprint-Wechsel,
+  Servererstellung und -löschung sowie die Websuche. Die `server_id` steht fest
+  im Lauf; ein Werkzeugaufruf auf einen anderen Server wird abgewiesen, bevor er
+  aufgelöst wird.
+- **Vor jedem schreibenden Eingriff muss ein Backup nachgewiesen sein.** Nicht
+  „angestoßen", sondern nachgewiesen: `backups.verified_at` ist gesetzt, das
+  Archiv ist nicht leer, seine sha256 wurde gerechnet, und es ist jünger als der
+  Vorfall. Fehlt der Nachweis, endet die Aktion mit `AI_BACKUP_UNVERIFIED` und
+  die ganze Runde bricht ab — sonst folgte auf ein gescheitertes Backup ein
+  Löschvorgang. Das Archiv heißt `Guardian-Heilung – <typ> – <uuid>`, damit im
+  Backup-Reiter erkennbar ist, wozu es gehört.
+- **Guardians eigene Heilungsleiter pausiert** währenddessen über
+  `guardian_recovery_suspension_lease`. Die **Quarantäne hebt die KI nie auf** —
+  die gehört dem Agenten.
+- **Im Audit steht `origin=system`** statt `origin=ai`. Damit ist unterscheidbar,
+  ob ein Mensch die KI gebeten hat oder ein Vorfall sie geweckt.
+- **Danach eine E-Mail an den Freigeber**, bei jedem Ausgang — auch bei
+  „nicht behoben". Der Text stammt vom Modell und ist HTML-escaped; „behoben"
+  steht nur dort, wenn der Lauf sauber endete **und** Guardian den Vorfall als
+  gelöst sieht.
+
+Der Schalter erklärt beides in einem Dialog, in beide Richtungen: Ausschalten
+heißt, dass Vorfälle danach nur noch gemeldet und nicht mehr behoben werden.
 
 ### Was an den Anbieter geht
 
 Nachricht, begrenzte Historie, freigegebene Servermetadaten und die Ergebnisse
 der Werkzeugaufrufe — jeweils durch `redact_sensitive_text` geführt und
-längenbegrenzt. Tool-Ergebnisse werden für Rückfragen im selben Chat gespeichert
+längenbegrenzt. Die Schwärzung sitzt an **einer** Stelle: dort, wo ein
+Werkzeugergebnis für das Modell serialisiert wird. Vorher schwärzte jeder
+Handler für sich, und mehrere taten es gar nicht.
+
+Erkannt und ersetzt werden Secrets, Token, Schlüssel und E-Mail-Adressen. Bei
+Freitext aus einem Server (Logzeilen, Dateiinhalte, Vorfallbeschreibungen) kommen
+**öffentliche** IP-Adressen dazu; private, Loopback- und Link-Local-Adressen
+bleiben stehen, weil eine geschwärzte Bind-Adresse jede Netzwerkdiagnose
+unmöglich machte. **Spielernamen sind nicht mustererkennbar** und können in
+Logausschnitten stehen — das ist die Grenze dieser Zusage, und sie steht so auch
+in der Datenschutzerklärung.
+
+Tool-Ergebnisse werden für Rückfragen im selben Chat gespeichert
 und mit dem Chat gelöscht. Alles, was aus einem Server stammt (Logs, Configs,
 Memory, Anhänge), ist im Modellkontext ausdrücklich als `untrusted` markiert.
 

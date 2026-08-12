@@ -281,6 +281,34 @@ def _reset_dis_streaming_keys():
     yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _versionsspeicher_umlenken(tmp_path_factory):
+    """Der Dateiversionsspeicher darf nie im Arbeitsverzeichnis landen.
+
+    `file_history_service._root()` baut seinen Pfad aus
+    `settings.panel_config_dir`, und der zeigt im Test auf `backend/`. Jeder
+    Test, der ueber `write_server_text`/`delete_server_text` oder ueber einen
+    ausgefuehrten KI-Vorschlag einen Schnappschuss anlegt, schrieb damit nach
+    `backend/.msm-file-history/` — in **echte, versionierte** Daten hinein.
+    Beobachtet: ein Testlauf legte drei Versionen zu Server 1 an und
+    verdraengte dabei die eine, die im Repository liegt (`git status` meldete
+    sie danach als geloescht).
+
+    Einzeln gefahren faellt das niemandem auf. Der Schaden entsteht still und
+    wird erst beim naechsten Commit sichtbar — oder gar nicht.
+
+    Deshalb sitzt die Umlenkung hier und nicht in den einzelnen Dateien: sie
+    muss auch fuer Tests gelten, die von diesem Weg gar nichts wissen. Wer
+    den Speicher selbst pruefen will, lenkt in seiner eigenen Fixture erneut
+    um (`test_file_history_service.py` tut das) — das gewinnt, weil es spaeter
+    greift.
+    """
+    from config import settings as _settings
+
+    _settings.panel_config_dir = str(tmp_path_factory.mktemp("panel-config"))
+    yield
+
+
 from main import app
 from models import User, RefreshToken, Server, Role, ServerPermission
 from services.auth_service import AuthService

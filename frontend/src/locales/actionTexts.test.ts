@@ -37,6 +37,12 @@ const SCHREIBWERKZEUGE = [
   'propose_hoster_integration',
   'propose_hoster_product',
   'propose_ai_tarif_role',
+  // Die Guardian-Kopplung. `propose_file_delete` steht im Bestätigungsdialog
+  // rot (`UNUMKEHRBAR` in AiActionProposalCard.tsx), obwohl es in der Registry
+  // nicht `immer_bestaetigen` ist — die Registry entscheidet, ob eine Freigabe
+  // übersprungen werden darf, die Farbe entscheidet, wie gefragt wird.
+  'propose_server_repair',
+  'propose_file_delete',
 ] as const
 
 const SPRACHEN = { de, en } as Record<string, typeof de>

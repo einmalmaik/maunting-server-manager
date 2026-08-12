@@ -78,6 +78,36 @@ def test_every_write_tool_has_a_label(sprache: str) -> None:
     )
 
 
+@pytest.mark.parametrize("sprache", SPRACHEN)
+def test_every_write_tool_has_a_confirmation_sentence(sprache: str) -> None:
+    """Der Satz im Bestaetigungsmoment — bisher nur im Frontend gesichert.
+
+    `ai.actions.confirm.<werkzeug>` steht im Dialog, mit dem ein Mensch einen
+    Schreibvorgang freigibt. Fehlt der Eintrag, gibt `parseMissingKeyHandler` in
+    `i18n.ts` den Schluessel zurueck, und im Dialog steht woertlich
+    `ai.actions.confirm.propose_server_delete` — an genau der Stelle, an der
+    jemand entscheidet, ob ein Server geloescht wird.
+
+    Gesichert war das bisher ausschliesslich in
+    `frontend/src/locales/actionTexts.test.ts`, und zwar gegen eine **von Hand
+    gefuehrte Abschrift** von `WERKZEUGE`. Diese Abschrift hinkt naturgemaess
+    hinterher: die beiden Werkzeuge der Guardian-Kopplung hatten ihre Texte in
+    beiden Sprachen, standen aber nicht in der Liste — der Frontendtest hielt sie
+    daraufhin fuer toten Ballast und schlug in der Gegenrichtung an.
+
+    Dieser Test liest die Wahrheit dort, wo sie liegt, und braucht keine
+    Abschrift. Der Frontendtest bleibt trotzdem stehen: er prueft zusaetzlich die
+    Gegenrichtung und laeuft auch dann, wenn niemand das Backend anfasst.
+    """
+    texte = _texte(sprache).get("ai", {}).get("actions", {}).get("confirm", {})
+    fehlend = [name for name in sorted(WRITE_TOOLS) if not str(texte.get(name, "")).strip()]
+
+    assert not fehlend, (
+        f"Diese Schreibwerkzeuge haben keinen Bestaetigungstext in {sprache}.json "
+        f"unter ai.actions.confirm; im Dialog stuende der Rohschluessel: {fehlend}"
+    )
+
+
 def test_both_languages_cover_the_same_tools() -> None:
     """Eine Sprache nachzupflegen und die andere zu vergessen ist der Normalfall."""
     je_sprache = {}

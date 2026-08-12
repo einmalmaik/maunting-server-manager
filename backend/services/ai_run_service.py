@@ -115,6 +115,30 @@ def leerer_zustand(
         # Schleifenerkennung. Wird ueber eine Rueckfrage hinweg vererbt, sonst
         # zaehlt jede Klaerung wieder bei null.
         "tool_signatures": {},
+        # Der Guardian-Rahmen, wenn ein Vorfall diesen Lauf geweckt hat: ein
+        # Woerterbuch aus `server_id`, `incident_id` und `incident_created_at`.
+        # `None` heisst: ein Mensch hat getippt, es gelten die gewoehnlichen
+        # Regeln.
+        #
+        # Er steht im Zustand und nicht in einer Spalte, weil er genau das ist,
+        # was dieser Zustand beschreibt — "was zwischen zwei Laeufen ueberlebt".
+        # Eine Fortsetzung nach einer Bestaetigung Stunden spaeter muss unter
+        # denselben Verschaerfungen laufen wie der erste Zug; haenge man ihn an
+        # den Aufruf, ginge er bei der ersten Fortsetzung verloren.
+        "guardian": None,
+        # Welche Guardian-Vorfaelle diesem Lauf zur Erwaehnung mitgegeben
+        # wurden. Erst wenn der Lauf endet, gelten sie als besprochen — bricht
+        # er ab, bleibt der Vorfall vorgemerkt und kommt beim naechsten Mal
+        # wieder.
+        "guardian_briefed": [],
+        # Ob der Ergebnisbericht dieses Heilungslaufs schon hinausgegangen ist.
+        # Der Abschluss wird aus zwei Richtungen gerufen — vom regulaeren Ende
+        # und vom Waechter fuer den bereits beendeten Lauf —, und beide koennen
+        # denselben Lauf treffen, wenn ein Mensch mitten in eine Heilung
+        # hineinschreibt. Zwei Mails zu demselben Vorfall waeren schlimmer als
+        # eine ausgebliebene Wiederholung: der Betreiber weiss dann nicht, ob es
+        # zwei Vorgaenge waren.
+        "guardian_berichtet": False,
         # Wieviele Zeichen Kontext das Modell dieses Laufs traegt, oder None,
         # wenn der Katalog es nicht kennt. Steht im Zustand und nicht in einer
         # Konstante, weil jede Fortsetzung mit demselben Budget rechnen muss wie

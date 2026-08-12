@@ -19,6 +19,7 @@ Zuordnung macht die Nutzlast unlesbar, statt sie umzuhaengen.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import difflib
 import hashlib
@@ -52,13 +53,48 @@ from services.ai_action_service import (
     is_binary_text,
 )
 from services.file_edit_service import EditNotApplicable, apply_edits
+# Die Grenze des Versionsspeichers steht dort, wo sie gilt, und wird hier nicht
+# abgeschrieben: `propose_file_delete` lehnt ab, was `file_history_service`
+# nicht sichern kann, und beide muessen dieselbe Zahl meinen.
+from services.file_history_service import MAX_HISTORY_EDIT_SIZE
 from services.ai_redaction import redact_sensitive_text
-from services.ai_tool_registry import GLOBAL_WRITE_TOOLS, WERKZEUGE, WRITE_TOOLS
+from services.ai_tool_registry import (
+    GLOBAL_WRITE_TOOLS,
+    GUARDIAN_HEILUNG_TOOLS,
+    WERKZEUGE,
+    WRITE_TOOLS,
+)
 from services.dis_client import DisClient
 from services.server_file_access_service import read_server_text, write_server_text
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class GuardianKontext:
+    """Der Rahmen eines Laufs, den ein Vorfall ausgeloest hat — nicht ein Mensch.
+
+    Er wird beim Start des Heilungslaufs gebildet, liegt im Arbeitsgedaechtnis
+    des Laufs (`ai_runs.state_json`) und wird bei jeder Runde daraus wieder
+    hergestellt. Drei Angaben, und jede traegt eine Schranke:
+
+    * ``server_id`` — der **einzige** Server, an dem dieser Lauf arbeiten darf.
+      Im gewoehnlichen Chat nennt das Modell die Server-ID selbst; das ist dort
+      richtig, weil ein Mensch mitliest. Hier liest niemand mit, und die Eingabe
+      des Modells stammt teilweise aus Serverlogs — also aus Text, den ein
+      Spieler geschrieben haben kann. Der Bezug wird deshalb vorgegeben.
+    * ``incident_id`` — welcher Vorfall gemeint ist. Fuer die Notiz-Zeile, den
+      Bericht und das Audit.
+    * ``incident_created_at`` — ab wann ein Backup als Nachweis taugt. Ein
+      Backup von gestern liegt vor der Stoerung und beweist nichts ueber den
+      Zustand, den die KI gleich anfasst.
+    """
+
+    server_id: int
+    incident_id: int
+    incident_created_at: datetime
+
 
 # Fehlte vor der Aufteilung: `logger` war in `ai_action_service` nie definiert,
 # die Zeile im Bind-IP-Zweig also ein wartender `NameError`. Statt der sauberen
@@ -1020,6 +1056,206 @@ def _mod_install_payload(db: Session, server: Server, arguments: dict) -> tuple[
     return payload, preview
 
 
+#: Die Reparaturen, die `propose_server_repair` kennt. Die Liste steht **hier**
+#: und im JSON-Schema des Werkzeugs, und beide Orte sind gewollt: das Schema
+#: fuehrt das Modell, diese Menge entscheidet. Ein Modell, das trotz Schema
+#: etwas anderes schickt — und Modelle tun das —, faellt hier auf.
+#:
+#: Es sind **zwei**, und das ist das Ergebnis einer Pruefung, nicht der erste
+#: Entwurf. Der hatte vier:
+#:
+#: * ``recreate_container`` — gestrichen, weil es das schon gibt. `run_container`
+#:   entfernt einen vorhandenen Container und baut ihn aus dem Blueprint neu
+#:   auf; ein Neustart ueber `propose_server_lifecycle` **ist** der Neuaufbau.
+#:   Ein zweites Werkzeug mit demselben Aufruf haette dem Modell zwei Namen fuer
+#:   eine Handlung gegeben und der Oberflaeche zwei Karten fuer denselben Vorgang.
+#: * ``repair_network`` — gestrichen, weil es nichts wiederherzustellen gibt.
+#:   Ein gewoehnlicher Gameserver haengt an der Default-Bridge mit
+#:   veroeffentlichten Ports und hat gar kein eigenes Docker-Netz; `extra_networks`
+#:   ist nur bei verwalteter Postgres-Datenbank belegt, und dieses Netz legt bis
+#:   heute ausschliesslich der Agent an. Der Aufruf waere der erste Netzanlage-
+#:   Aufruf des Panels ueberhaupt gewesen — ein neuer Weg an Docker heran, statt
+#:   eines vorhandenen.
+REPARATUREN = ("repair_permissions", "reallocate_port")
+
+#: Was jede Reparatur dem Menschen ankuendigt. Ohne diese Zeile stuende in der
+#: Bestaetigungskarte nur eine Kennung, und "reallocate_port" sagt niemandem,
+#: dass Spieler danach eine andere Portnummer brauchen.
+_REPARATUR_FOLGEN = {
+    "repair_permissions": ("Besitzrechte am Serververzeichnis werden berichtigt", False),
+    "reallocate_port": ("Belegte Ports werden neu vergeben", False),
+}
+
+
+def _server_repair_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
+    """Nutzlast fuer `propose_server_repair` — eine Kennung, sonst nichts.
+
+    Die Enge ist der Zweck. Das Modell liefert genau ein Wort aus `REPARATUREN`,
+    und dieses Wort wird geprueft, bevor irgendetwas daraus gemacht wird. Es gibt
+    keinen Pfad, kein Kommando und keinen Containernamen in dieser Nutzlast — der
+    Containername entsteht spaeter aus `container_name_for(server_id)` und nie
+    aus einer Eingabe.
+
+    Damit hat ein Modell, das durch eine praeparierte Logzeile ueberredet wurde,
+    hier keinen Hebel: es kann hoechstens die falsche der beiden Reparaturen
+    anstossen, und jede davon stellt einen Zustand her, den MSM ohnehin kennt.
+
+    `operation` traegt die **gewaehlte Kennung**, nicht das Wort "repair". Die
+    Oberflaeche zeigt genau dieses Feld an und interpoliert es in den
+    Bestaetigungsdialog; stuende dort fuer beide Reparaturen dasselbe, muesste
+    der Bestaetigende raten, welche er gerade freigibt.
+    """
+    if set(arguments) != {"action"}:
+        raise AiActionValidationError("Reparatur-Tool hat ungueltige Argumente")
+    aktion = arguments.get("action")
+    if aktion not in REPARATUREN:
+        raise AiActionValidationError("Unbekannte Reparatur")
+    beschreibung, neustart = _REPARATUR_FOLGEN[aktion]
+    payload = {"action": aktion}
+    preview = {
+        "operation": aktion,
+        "description": beschreibung,
+        "current_status": server.status,
+        "restart_required": neustart,
+    }
+    return payload, preview
+
+
+def _file_delete_payload(db: Session, server: Server, arguments: dict) -> tuple[dict, dict, str]:
+    """Nutzlast fuer `propose_file_delete` — genau eine vorhandene Datei.
+
+    Der Pfad laeuft durch `_config_path` (Formpruefung) und danach durch
+    `read_server_text`, das ihn zusaetzlich durch `safe_path` schickt. Zwei
+    Wirkungen, beide gewollt:
+
+    * Ein Verzeichnis, ein Platzhalter oder ein Ausbruch nach oben scheitert,
+      bevor irgendetwas gespeichert wird.
+    * Die Datei muss **existieren**. Ein Loeschvorschlag auf einen geratenen
+      Namen kommt gar nicht erst in den Chat, und das Modell bekommt eine
+      Antwort, mit der es weiterarbeiten kann, statt einer spaeteren
+      Fehlermeldung beim Ausfuehren.
+
+    Die Revision wird mitgefuehrt wie beim Schreiben. Aendert sich die Datei
+    zwischen Vorschlag und Bestaetigung, ist es nicht mehr dieselbe — und dann
+    soll sie nicht geloescht werden, weil die Begruendung dann nicht mehr gilt.
+    """
+    if set(arguments) != {"path"}:
+        raise AiActionValidationError("Loesch-Tool hat ungueltige Argumente")
+    pfad = _config_path(arguments["path"])
+    ergebnis = read_server_text(db, server_id=server.id, relative_path=pfad)
+    inhalt = str(ergebnis["content"])
+    # Beides sagt `delete_server_text` beim Ausfuehren ohnehin ab. Es hier schon
+    # abzuweisen, ist keine doppelte Pruefung um ihrer selbst willen: das Modell
+    # bekommt eine Antwort, mit der es weiterarbeiten kann, statt einen
+    # Vorschlag, der im Chat steht und beim Klick scheitert — und in einer
+    # unbeaufsichtigten Heilung klickt niemand, dort waere der Vorschlag
+    # schlicht das Ende des Weges.
+    if is_binary_text(inhalt):
+        raise AiActionValidationError(
+            "Binaere Dateien lassen sich nicht mit Versionsschnappschuss loeschen"
+        )
+    if len(inhalt.encode("utf-8")) > MAX_HISTORY_EDIT_SIZE:
+        raise AiActionValidationError(
+            "Diese Datei ist zu gross fuer einen Versionsschnappschuss und wird "
+            "deshalb nicht geloescht"
+        )
+    payload = {"path": pfad}
+    preview = {
+        "operation": "file_delete",
+        "path": pfad,
+        "current_status": server.status,
+        "restart_required": False,
+        # Wieviel dabei verschwindet. Eine Sperrdatei hat null Zeilen, eine
+        # Weltkonfiguration hunderte — der Unterschied entscheidet darueber, ob
+        # jemand das ohne Nachsehen bestaetigt.
+        "lines": len(inhalt.splitlines()),
+        "binary": False,
+    }
+    return payload, preview, str(ergebnis["revision"])
+
+
+def _verlangt_gesichertes_backup(
+    db: Session, server_id: int, tool_name: str, *, seit: datetime | None
+) -> None:
+    """Die Schranke: kein Eingriff ohne nachweislich geglecktes Backup.
+
+    Gilt **nur** im von Guardian ausgeloesten Heilungslauf. Im gewoehnlichen
+    Chat entscheidet weiterhin der Mensch mit seinem Klick; ihn zum Backup zu
+    zwingen waere eine Aenderung, um die niemand gebeten hat, und sie wuerde
+    jede kleine Korrektur zu einem Minutenvorgang machen.
+
+    Der Nachweis ist `Backup.verified_at`, nicht das blosse Vorhandensein einer
+    Zeile. Der Unterschied ist der ganze Punkt: eine Zeile entsteht auch dann,
+    wenn der Remote-Agent-Pfad sie vor der Arbeit des Agenten anlegt, und
+    `size_mb` ist fuer jedes Archiv unter einem Megabyte 0. `verified_at` wird
+    ausschliesslich gesetzt, nachdem die Datei nachgemessen wurde.
+
+    ``seit`` ist der Zeitpunkt des Vorfalls. Ein Backup von gestern beweist
+    nichts ueber den Zustand, den die KI gleich anfasst — es liegt vor der
+    Stoerung, und was seitdem passiert ist, holt es nicht zurueck.
+
+    Der Fehler ist ein `AiActionStateError` und keine Validierungsmeldung: es
+    ist kein Formfehler des Modells, sondern eine Bedingung der Anlage. Das
+    Modell erfaehrt sie ueber den `error_code` und kann darauf antworten, indem
+    es zuerst `propose_backup` aufruft.
+    """
+    from models import Backup
+    from services.ai_tool_registry import GUARDIAN_BACKUP_PFLICHT_TOOLS
+
+    if tool_name not in GUARDIAN_BACKUP_PFLICHT_TOOLS:
+        return
+    abfrage = db.query(Backup.id).filter(
+        Backup.server_id == server_id,
+        Backup.verified_at.isnot(None),
+    )
+    if seit is not None:
+        abfrage = abfrage.filter(Backup.created_at >= seit)
+    if abfrage.first() is None:
+        raise AiActionStateError("AI_BACKUP_UNVERIFIED")
+
+
+def guardian_aus_lauf(db: Session, run_id: str | None) -> "GuardianKontext | None":
+    """Holt den Guardian-Rahmen eines Vorschlags aus seinem Lauf zurueck.
+
+    `execute_proposal` bekommt keinen Rahmen uebergeben — es wird aus dem Router
+    gerufen, wenn ein Mensch auf "Bestaetigen" klickt, und das kann Stunden nach
+    dem Anlegen sein. Der Rahmen lebt im Arbeitsgedaechtnis des Laufs, und der
+    Vorschlag traegt dessen Kennung; damit ist er wiederherstellbar, ohne dass
+    eine Spalte an `ai_action_proposals` noetig waere.
+
+    Genau diese Luecke machte die zugesagte doppelte Pruefung zur Behauptung: die
+    Registry sagt zu `propose_file_delete` zu, der Backup-Nachweis werde "beim
+    Anlegen **und** vor der Ausfuehrung" geprueft, `_verlangt_gesichertes_backup`
+    hatte aber genau einen Aufrufer. Der Abstand zwischen beiden Punkten ist kein
+    Detail: dazwischen liegt ein Commit und ein unbegrenztes Zeitfenster, in dem
+    `cleanup_old_backups` das nachgewiesene Archiv abraeumen kann. Dieselbe
+    Begruendung laesst die Rechtepruefung dreimal laufen.
+    """
+    if not run_id:
+        return None
+    from models import AiRun
+    from services import ai_run_service
+
+    run = db.get(AiRun, run_id)
+    if run is None:
+        return None
+    rahmen = (ai_run_service.zustand_lesen(run) or {}).get("guardian")
+    if not isinstance(rahmen, dict):
+        return None
+    anker = rahmen.get("backup_anker") or rahmen.get("incident_created_at")
+    try:
+        return GuardianKontext(
+            server_id=int(rahmen["server_id"]),
+            incident_id=int(rahmen["incident_id"]),
+            incident_created_at=datetime.fromisoformat(str(anker)),
+        )
+    except (KeyError, TypeError, ValueError):
+        # Ein unlesbarer Rahmen ist kein Freibrief. Er heisst: dieser Vorschlag
+        # stammt aus einem Lauf, dessen Bedingungen nicht mehr feststellbar sind
+        # — und dann wird nicht ausgefuehrt.
+        raise AiActionStateError("AI_BACKUP_UNVERIFIED")
+
+
 def proposal_response(proposal: AiActionProposal) -> AiActionProposalResponse:
     """Ein Vorschlag als Vertrag nach aussen — die **einzige** Serialisierung.
 
@@ -1071,9 +1307,31 @@ def create_proposal(
     arguments: dict,
     correlation_id: str,
     rationale_fallback: tuple[str, str] | None = None,
+    guardian: "GuardianKontext | None" = None,
 ) -> AiActionProposal:
+    """Legt einen Vorschlag an.
+
+    ``guardian`` ist gesetzt, wenn dieser Lauf von einem Guardian-Vorfall
+    ausgeloest wurde und nicht von einem Menschen. Er aendert drei Dinge, und
+    alle drei sind Verschaerfungen:
+
+    * die Werkzeugmenge wird auf `GUARDIAN_HEILUNG_TOOLS` eingeengt,
+    * eingreifende Werkzeuge verlangen ein nachweislich geglecktes Backup,
+    * das Audit vermerkt `origin="system"` statt `"ai"`.
+
+    Nichts daran erweitert Rechte. Der handelnde Benutzer ist derselbe wie
+    sonst — der, der die Freigabe erteilt hat —, und `_require_tool_permission`
+    laeuft unveraendert.
+    """
     if tool_name not in WRITE_TOOLS:
         raise AiActionValidationError("Tool ist in diesem Kontext nicht erlaubt")
+    if guardian is not None and tool_name not in GUARDIAN_HEILUNG_TOOLS:
+        # Die Menge steht in der Registry und wird hier durchgesetzt, nicht im
+        # Prompt. Ein Modell, das aus einer praeparierten Logzeile heraus etwas
+        # anderes versucht, kommt nicht bis zum Payload-Bau.
+        raise AiActionValidationError(
+            "Dieses Werkzeug steht in einer Guardian-Heilung nicht zur Verfuegung"
+        )
     reason, expected_effect = _rationale(arguments, fallback=rationale_fallback)
     rest = {key: value for key, value in arguments.items() if key not in {"reason", "expected_effect"}}
 
@@ -1113,6 +1371,16 @@ def create_proposal(
         # verliert dabei die `server_id`, damit die nachfolgenden
         # Argumentpruefungen ihre exakten Schluesselmengen behalten.
         server, rest = _resolve_server(db, user, rest)
+
+        # Ein Heilungslauf gehoert **einem** Server. `_resolve_server` prueft
+        # nur, ob der Benutzer den genannten sehen darf — und der Freigeber darf
+        # in aller Regel mehrere sehen. Ohne diese Zeile koennte ein Modell,
+        # das aus einer Logzeile heraus in die Irre gefuehrt wurde, einen
+        # Vorfall auf Server A zum Anlass nehmen, an Server B zu schreiben.
+        if guardian is not None and server.id != guardian.server_id:
+            raise AiActionValidationError(
+                "In einer Guardian-Heilung ist nur der betroffene Server erlaubt"
+            )
 
         # **Das Recht vor der Nutzlast.** Frueher stand diese Pruefung erst
         # hinter dem Payload-Bau — und der liest den Zustand, ueber den er
@@ -1202,6 +1470,11 @@ def create_proposal(
             payload, preview, expected_revision = _config_patch_payload(db, server.id, rest)
         elif tool_name == "propose_config_update":
             payload, preview, expected_revision = _config_payload(db, server.id, rest)
+        elif tool_name == "propose_server_repair":
+            payload, preview = _server_repair_payload(server, rest)
+            expected_revision = None
+        elif tool_name == "propose_file_delete":
+            payload, preview, expected_revision = _file_delete_payload(db, server, rest)
         else:
             # Dieselbe Falle wie oben bei den globalen Werkzeugen, nur eine
             # Ebene tiefer: hier stand ein namenloses `else`, das jedes neue
@@ -1218,6 +1491,12 @@ def create_proposal(
     # Payload-Bau. Sie bleibt trotzdem stehen: hier steht die kanonische
     # Nutzlast, und die globalen Werkzeuge kommen nur an dieser Stelle vorbei.
     _require_tool_permission(db, user, server_id, tool_name, payload)
+    # Erst das Recht, dann der Nachweis. Die Reihenfolge zaehlt: wer den Server
+    # gar nicht anfassen darf, soll nicht erfahren, ob es dort ein Backup gibt.
+    if guardian is not None:
+        _verlangt_gesichertes_backup(
+            db, guardian.server_id, tool_name, seit=guardian.incident_created_at
+        )
     proposal_id = str(uuid4())
     encrypted = DisClient.encrypt(
         json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
@@ -1257,8 +1536,14 @@ def create_proposal(
             "proposal_id": proposal.id,
             "tool": tool_name,
             **({"autonomous": True} if autonomous else {}),
+            **({"guardian_incident_id": guardian.incident_id} if guardian else {}),
         },
-        origin="ai",
+        # "ai" heisst: ein Mensch hat die KI darum gebeten. "system" heisst: ein
+        # Ereignis hat sie geweckt, und niemand sass davor. Im Protokoll ist das
+        # der wichtigste Unterschied ueberhaupt — wer spaeter fragt, warum um
+        # 03:14 Uhr eine Datei geaendert wurde, findet die Antwort in diesem
+        # einen Wort. Der Wert stand in `AUDIT_ORIGINS` bereits bereit.
+        origin="system" if guardian is not None else "ai",
         correlation_id=proposal.correlation_id,
     )
     return proposal
@@ -1685,6 +1970,107 @@ def _execute_mod_install(db: Session, *, server_id: int, payload: dict) -> dict:
     }
 
 
+def _execute_file_delete(
+    db: Session, *, user: User, server_id: int, payload: dict,
+    expected_revision: str | None,
+) -> dict:
+    """Loescht die eine Datei aus der Nutzlast — ueber den Panel-Pfad.
+
+    Kein eigener Loeschweg fuer die KI: `delete_server_text` ist derselbe
+    Dienst, den auch der Dateimanager benutzt, mit derselben Sandbox, derselben
+    Revisionspruefung und demselben Versionsschnappschuss.
+
+    Ein `HTTPException` von dort wird in einen Zustandsfehler uebersetzt. Die
+    Unterscheidung ist fuer das Modell wichtig: 409 heisst "die Datei hat sich
+    geaendert, sieh sie dir neu an", 404 heisst "es gibt sie nicht mehr, du bist
+    fertig". Ein pauschales AI_ACTION_EXECUTION_FAILED wuerde beide zu
+    demselben Ratespiel machen.
+    """
+    from services.server_file_access_service import delete_server_text
+
+    try:
+        return delete_server_text(
+            db,
+            user=user,
+            server_id=server_id,
+            relative_path=str(payload["path"]),
+            expected_revision=expected_revision,
+        )
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise AiActionStateError("AI_ACTION_TARGET_MISSING") from exc
+        if exc.status_code == 409:
+            raise AiActionStateError("AI_ACTION_FILE_CHANGED") from exc
+        raise AiActionStateError("AI_ACTION_EXECUTION_FAILED") from exc
+
+
+def _execute_server_repair(
+    db: Session, *, server_id: int, payload: dict, user: User, correlation_id: str
+) -> dict:
+    """Fuehrt genau eine der Reparaturen aus `REPARATUREN` aus.
+
+    Jeder Zweig ruft eine Funktion, die es im Panel schon gibt und die dort von
+    einem Knopf ausgeloest wird. Es entsteht kein neuer Weg an Docker heran —
+    das waere ein zweiter Ort, an dem Containernamen, Netznamen und Rechte
+    richtig sein muessten.
+
+    Der Containername kommt in **jedem** Zweig aus `container_name_for(server_id)`
+    und nie aus der Nutzlast. Das ist die mechanische Seite der Zusage, dass ein
+    Jailbreak hier nichts erreicht: es gibt keine Zeichenkette aus dem Modell,
+    die bis zu Docker durchkommt.
+    """
+    from services import docker_service
+    from services.server_lifecycle_service import guardian_recovery_suspension_lease
+    from services.server_network_service import (
+        PortReassignmentFailed,
+        reassign_conflicting_ports,
+    )
+
+    aktion = str(payload["action"])
+    if aktion not in REPARATUREN:
+        # Die Nutzlast ist verschluesselt und wurde beim Anlegen geprueft. Trotzdem
+        # hier erneut: zwischen Vorschlag und Ausfuehrung liegt ein Commit, und
+        # eine Pruefung, die nur einmal laeuft, ist keine Invariante.
+        raise AiActionStateError("AI_ACTION_TOOL_NOT_ALLOWED")
+
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if server is None:
+        raise AiActionStateError("AI_ACTION_TARGET_MISSING")
+
+    # Waehrend der Reparatur haelt die Guardian-Engine still. Ohne diese Pacht
+    # laeuft `_trigger_guardian_auto_restart` in derselben Reconcile-Runde gegen
+    # uns: das Panel startet den Server neu, waehrend wir seine Ports gerade
+    # umschreiben. Denselben Schutz nehmen `create_server_backup` und
+    # `queue_lifecycle_operation` bereits.
+    with guardian_recovery_suspension_lease(db, server, "ai-repair"):
+        if aktion == "repair_permissions":
+            if not server.install_dir:
+                raise AiActionStateError("AI_ACTION_TARGET_MISSING")
+            # `repair_bind_mount_permissions` kennt keinen `node`-Parameter und
+            # laeuft immer auf dem Panel-Host. Bei einem Server auf einem
+            # entfernten Node repariert sie also das falsche Verzeichnis — oder
+            # findet es nicht und meldet einen Fehlschlag, obwohl nichts kaputt
+            # ist. Denselben Schutz zieht `games/base.py` vor jedem Start.
+            node = getattr(server, "node", None)
+            if node is not None and not getattr(node, "is_local", False):
+                raise AiActionStateError("AI_ACTION_REPAIR_NOT_LOCAL")
+            ergebnis = docker_service.repair_bind_mount_permissions(server.install_dir)
+            if not ergebnis.get("ok"):
+                raise AiActionStateError("AI_ACTION_EXECUTION_FAILED")
+            return {"action": aktion, "repaired": True}
+
+        # reallocate_port
+        try:
+            gewechselt = reassign_conflicting_ports(db, server)
+        except PortReassignmentFailed as exc:
+            logger.info("Portneuvergabe abgelehnt server_id=%s: %s", server_id, exc)
+            raise AiActionStateError("AI_ACTION_PORT_REASSIGN_FAILED") from exc
+        # Keine Aenderung ist kein Fehlschlag, sondern eine Auskunft: die Ports
+        # sind frei, das Problem liegt woanders. Das Modell soll das erfahren
+        # und weitersuchen, statt einen Fehler zu sehen und es zu wiederholen.
+        return {"action": aktion, "changed": bool(gewechselt), "ports": gewechselt}
+
+
 def execute_proposal(
     db: Session,
     *,
@@ -1723,6 +2109,31 @@ def execute_proposal(
         _require_tool_permission(db, active_user, proposal.server_id, proposal.tool_name, payload)
     except AiActionValidationError as exc:
         raise AiActionStateError("AI_ACTION_ACCESS_REVOKED") from exc
+
+    # **Der Backup-Nachweis, ein zweites Mal.** Genau hier fehlte er.
+    #
+    # Zwischen dem Anlegen des Vorschlags und diesem Punkt liegt ein Commit und
+    # ein Zeitfenster ohne Obergrenze: ein Vorschlag im Status 'proposed' altert
+    # nicht, und `cleanup_old_backups` raeumt nach `backup_retention_count` auch
+    # die verifizierte Zeile ab, auf die sich die erste Pruefung gestuetzt hat.
+    # Der Betreiber konnte das Archiv sogar von Hand loeschen — der Endpunkt
+    # kennt keine Regel, die das letzte nachgewiesene Backup schuetzt.
+    #
+    # Ohne diese Zeilen loeschte ein Klick auf "Bestaetigen" die Datei, obwohl
+    # der Nachweis, mit dem der Vorschlag ueberhaupt entstehen durfte, nicht mehr
+    # existierte. Die Zusage in `ai_tool_registry` — geprueft beim Anlegen **und**
+    # vor der Ausfuehrung — war bis hierher eine Behauptung.
+    guardian = guardian_aus_lauf(db, proposal.run_id)
+    if guardian is not None:
+        _verlangt_gesichertes_backup(
+            db, guardian.server_id, tool_name, seit=guardian.incident_created_at
+        )
+        # Und die Serverbindung ebenso: ein Vorschlag, dessen Lauf an Server A
+        # gebunden war, darf auch nach Stunden nicht auf Server B ausgefuehrt
+        # werden. Die Zeile kostet nichts und schliesst den Weg, auf dem eine
+        # spaetere Aenderung am Vorschlagspfad hier unbemerkt vorbeikaeme.
+        if server_id is not None and int(server_id) != guardian.server_id:
+            raise AiActionStateError("AI_ACTION_ACCESS_REVOKED")
 
     # Der Server-Mutex wird VOR dem Verbrauch des Einmal-Tokens geholt. Vorher
     # entwertete ein nur kurz belegter Server die Bestaetigung dauerhaft: der
@@ -1920,6 +2331,20 @@ def execute_proposal(
                 # das, was der Vorschlag zugesagt hat: die Installation ist
                 # angestossen. Ihren Ausgang traegt die Mod-Zeile.
                 result = _execute_mod_install(db, server_id=server_id, payload=payload)
+                task_id = None
+                queued = False
+            elif tool_name == "propose_server_repair":
+                result = _execute_server_repair(
+                    db, server_id=server_id, payload=payload,
+                    user=active_user, correlation_id=correlation_id,
+                )
+                task_id = None
+                queued = False
+            elif tool_name == "propose_file_delete":
+                result = _execute_file_delete(
+                    db, user=active_user, server_id=server_id, payload=payload,
+                    expected_revision=expected_revision,
+                )
                 task_id = None
                 queued = False
             elif tool_name == "propose_server_create":

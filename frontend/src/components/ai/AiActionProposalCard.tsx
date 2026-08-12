@@ -1,4 +1,4 @@
-import { AlertTriangle, Blocks, Bot, FilePenLine, HardDriveDownload, HardDriveUpload, Network, Package, Plug, Power, ServerCog, ShieldCheck, Trash2 } from 'lucide-react'
+import { AlertTriangle, Blocks, Bot, FilePenLine, FileX, HardDriveDownload, HardDriveUpload, Network, Package, Plug, Power, ServerCog, ShieldCheck, Trash2, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -84,6 +84,15 @@ const UNUMKEHRBAR: readonly string[] = [
   'propose_backup_restore',
   'propose_server_blueprint_switch',
   'propose_server_lifecycle',
+  // `propose_file_delete` steht hier, obwohl es in `ai_tool_registry` nicht
+  // `immer_bestaetigen` ist. Das ist kein Widerspruch: die Registry entscheidet,
+  // ob eine Freigabe uebersprungen werden darf, dieser Farbton entscheidet, wie
+  // ein Mensch die Frage gestellt bekommt, wenn er sie doch bekommt. Eine
+  // geloeschte Datei ist ohne Backup weg — das gehoert rot gefragt.
+  // `propose_server_repair` fehlt hier bewusst: Rechte richten und einen Port
+  // neu vergeben stellt einen Zustand her, den das Panel ohnehin herstellen
+  // wuerde.
+  'propose_file_delete',
 ]
 
 export function AiActionProposalCard({
@@ -121,6 +130,8 @@ export function AiActionProposalCard({
     propose_hoster_integration: Plug,
     propose_hoster_product: Plug,
     propose_ai_tarif_role: ShieldCheck,
+    propose_server_repair: Wrench,
+    propose_file_delete: FileX,
   }[proposal.tool_name] ?? Power
   // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb
   // eine eigene, neutrale Farbgebung statt der warnenden — und keinen Knopf.

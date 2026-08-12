@@ -907,6 +907,62 @@ def _ensure_guardian_reconciliation_job() -> None:
     )
 
 
+async def _ai_guardian_task() -> None:
+    """Weckt die KI, wenn Guardian etwas meldet und jemand es freigegeben hat.
+
+    **Bewusst ein eigener Auftrag** und kein Anhaengsel an
+    `_guardian_reconciliation_task`. Zwei Gruende, beide betrieblich:
+
+    Erstens die Vorfallaufnahme. `ingest_incidents_and_ack` committet die
+    Vorfaelle, verschickt danach Benachrichtigungen und quittiert erst zum
+    Schluss gegenueber dem Agenten — der Benachrichtigungsblock liegt
+    ungeschuetzt dazwischen. Wirft dort etwas, unterbleibt das ACK, und der
+    Agent liefert dieselben Vorfaelle fuer immer erneut. Ein KI-Lauf, der einen
+    Anbieter ueber das Netz befragt, gehoert nicht in diese Luecke.
+
+    Zweitens der Takt. Die Reconciliation laeuft alle 30 Sekunden ueber alle
+    Server; sie soll knapp bleiben. Die KI-Pruefung ist seltener noetig und darf
+    laenger dauern.
+
+    Wie jeder Auftrag hier faengt er alles ab. Ein Fehler im Ausloeser darf den
+    Scheduler nicht aus dem Takt bringen.
+    """
+    from database import SessionLocal
+    from services.ai_guardian_service import vorfaelle_bearbeiten
+
+    db = SessionLocal()
+    try:
+        anzahl = await vorfaelle_bearbeiten(db)
+        if anzahl:
+            logger.info("Guardian-KI: %s Vorfall/Vorfaelle uebernommen", anzahl)
+    except Exception as exc:
+        logger.warning("Error in AI guardian task: %s", exc)
+    finally:
+        db.close()
+
+
+def _ensure_ai_guardian_job() -> None:
+    scheduler = get_scheduler()
+    job_id = "global_ai_guardian"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler.add_job(
+        func=_ai_guardian_task,
+        # 60 Sekunden statt 30: die Reconciliation muss den Vorfall erst
+        # eingelagert haben, bevor es hier etwas zu sehen gibt. Ein gleicher
+        # Takt haette nur die Wahrscheinlichkeit erhoeht, dass beide gleichzeitig
+        # ueber dieselben Zeilen laufen.
+        trigger=IntervalTrigger(seconds=60),
+        id=job_id,
+        name="Guardian AI Healing",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
 async def _hoster_maintenance_task() -> None:
     """Stellt faellige Hoster-Webhooks zu und beendet abgelaufene Kuendigungen.
 
@@ -962,6 +1018,7 @@ def init_server_schedules(db):
     _ensure_git_update_check_job()
     _ensure_node_heartbeat_job()
     _ensure_guardian_reconciliation_job()
+    _ensure_ai_guardian_job()
     _ensure_hoster_maintenance_job()
 
     servers = db.query(Server).all()

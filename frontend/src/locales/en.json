@@ -326,7 +326,7 @@
         "mods": "Which mods are installed on my server and are there updates?"
       },
       "toolFailed": "— failed",
-        "compacted": "Older messages were summarized",
+      "compacted": "Older messages were summarized",
       "edit": "Edit message",
       "editHint": "This message and everything after it will be removed. The assistant will no longer know the earlier wording.",
       "editSend": "Send again",
@@ -375,7 +375,9 @@
         "propose_server_blueprint_switch": "Switch server to another blueprint",
         "propose_server_create": "Create server",
         "propose_server_delete": "Delete server",
-        "propose_server_lifecycle": "Change server state"
+        "propose_server_lifecycle": "Change server state",
+        "propose_server_repair": "Repair infrastructure",
+        "propose_file_delete": "Delete file"
       },
       "status": {
         "proposed": "Review required",
@@ -404,7 +406,9 @@
         "propose_ai_tarif_role": "Create the role “{{path}}”? It deliberately gets no permissions, only the AI quota shown — permissions are still granted through role management.",
         "propose_hoster_integration": "Save the shop integration “{{path}}”? Creating one also generates an API key that is shown exactly once and can only be rotated afterwards.",
         "propose_hoster_product": "Save the product mapping “{{path}}”? Every future purchase of this product creates a server with these limits — and, if configured, with the role shown.",
-        "propose_server_blueprint_switch": "Switch this server to another blueprint? Start command, image and variables are replaced; the game files stay and may no longer match."
+        "propose_server_blueprint_switch": "Switch this server to another blueprint? Start command, image and variables are replaced; the game files stay and may no longer match.",
+        "propose_server_repair": "Run the “{{operation}}” repair on this server's infrastructure? “repair_permissions” resets ownership of the server directory, “reallocate_port” reassigns occupied ports and restarts the server for it. Neither touches game files.",
+        "propose_file_delete": "Delete the file “{{path}}”? Afterwards it can only be recovered from a backup. A snapshot is written to the file history before deleting."
       },
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",
@@ -444,17 +448,21 @@
       "toggle": "Execute actions without asking",
       "budget": "At most actions per hour",
       "budgetHint": "Executed automatically in the last hour: {{used}}. Once the budget is used up the AI asks again — nothing fails.",
-      "boundary": "Autonomous mode removes exactly one thing: your confirmation. Permissions, server locks and the audit log stay unchanged — the AI can do nothing you could not do yourself. Not included are deletion, wipe, reinstall and backup restore: those always require a confirmation.",
+      "boundary": "Autonomous mode removes your confirmation and lets the Guardian engine wake the AI on a fault. Permissions, server locks and audit still apply unchanged — the AI cannot do anything you could not do yourself. Not included: deleting a server, wipe, reinstall and backup restore. Those always require confirmation.",
       "confirmTitle": "Enable autonomous mode?",
-      "confirmPanel": "The AI will then execute permitted actions on all of your servers without asking — including configuration changes, mod installations and creating new servers.\n\nYour permissions remain the boundary. Everything appears in the audit log.",
-      "confirmServer": "The AI will then execute permitted actions on this server without asking — including configuration changes and mod installations.\n\nYour permissions remain the boundary. Everything appears in the audit log.",
+      "confirmPanel": "The AI will then run permitted actions on all your servers without asking — including configuration changes, mod installs and creating new servers.\n\nNew: this also lets the Guardian engine wake the AI while you are away. When it reports a fault, the AI investigates on its own, takes a provably successful backup before touching any file, and tries to get the server running again — restart, directory permissions, port assignment, configuration, and if needed deleting a broken file. You then receive an email with the result.\n\nYour permissions remain the boundary. It acts in your name and on your AI quota. Deleting a server, wipe, reinstall and restoring a backup still always require your confirmation.",
+      "confirmServer": "The AI will then run permitted actions on this server without asking — including configuration changes and mod installs.\n\nNew: this also lets the Guardian engine wake the AI while you are away. When it reports a fault on this server, the AI investigates on its own, takes a provably successful backup before touching any file, and tries to get it running again. You then receive an email with the result.\n\nYour permissions remain the boundary. It acts in your name and on your AI quota. Delete, wipe, reinstall and restoring a backup still always require your confirmation.",
       "enable": "Enable",
       "save": "Save budget",
       "saved": "Grant saved.",
       "error": "The grant could not be saved.",
       "short": "Autonomous",
       "scope": "Scope",
-      "scopePanel": "Panel-wide"
+      "scopePanel": "Panel-wide",
+      "disableTitle": "Disable autonomous mode?",
+      "disablePanel": "The AI will ask before every action again — on all your servers.\n\nGuardian faults will then only be reported, not fixed. The AI mentions them in your next chat and proposes something; it will only act once you confirm. If a server goes down at night, it stays down until someone looks.",
+      "disableServer": "The AI will ask before every action on this server again.\n\nGuardian faults will then only be reported, not fixed. The AI mentions them in your next chat and proposes something; it will only act once you confirm.",
+      "disable": "Disable"
     },
     "tools": {
       "ask_user": "Asked a question",
@@ -1181,7 +1189,14 @@
         "attempts": "Recovery Attempts",
         "historyErrorTitle": "Incident history unavailable",
         "historyErrorBody": "Incidents could not be loaded. This is not evidence of an empty history.",
-        "quarantinePendingNote": "Release was requested but has not been confirmed by the agent. Quarantine remains active until the next confirmed observation."
+        "quarantinePendingNote": "Release was requested but has not been confirmed by the agent. Quarantine remains active until the next confirmed observation.",
+        "aiHeading": "AI intervention",
+        "aiHealing": "The AI is working on this incident.",
+        "aiHealed": "The AI worked on this incident: resolved.",
+        "aiFailed": "The AI worked on this incident: not resolved.",
+        "aiBriefed": "The AI will mention this incident in your next chat.",
+        "aiUnknown": "The AI worked on this incident; the run no longer exists.",
+        "aiOpenChat": "Open in AI chat"
       },
       "errors": {
         "guardian_capability_mismatch": "The agent does not support the Autopilot drivers configured for this server. Please check the drivers on the node.",
@@ -2587,7 +2602,8 @@
           "memoryConsent": "Personal memory is disabled by default and only becomes active after explicit consent in the chat; consent can be withdrawn at any time and also covers your own server-scoped notes. Shared scopes (team, server, panel-wide) do not depend on that consent but on permissions - they hold operational knowledge, not personal data. Encryption protects the database at rest; the plaintext of remembered entries is transmitted to the chosen model provider with every request",
           "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider",
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
-          "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat"
+          "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat",
+          "guardian": "With autonomy granted, a Guardian incident can trigger processing while the user is not present: the incident type, its status and the server data already shared with the assistant are transmitted; log excerpts are additionally stripped of public IP addresses and email addresses. Usage and responsibility remain with the grantor. The result report sent by email contains model-generated text."
         }
       },
       "storage": {

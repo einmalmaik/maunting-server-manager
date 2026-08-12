@@ -1,3 +1,4 @@
+import html
 import logging
 import httpx
 import aiosmtplib
@@ -297,8 +298,42 @@ Maunting Server Manager
     # Security notification emails
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def html_text(value: object) -> str:
+        """Fremdtext, der in eine Mail soll — maskiert, mit erhaltenen Umbruechen.
+
+        Das Grundgeruest dieser Datei setzt seine Bausteine als **rohes HTML**
+        zusammen, und mehrere Aufrufer nutzen das absichtlich (`<strong>` um
+        einen Statuswert). Solange dort nur Literale aus dem Code stehen, ist
+        das harmlos.
+
+        Sobald aber ein Servername, ein Benutzername, eine Vorfallbeschreibung
+        oder — neu — ein von einem Modell geschriebener Bericht hineinfliesst,
+        ist es eine Injection: der Name eines Servers stammt aus einem Formular
+        oder aus einer Shop-Bestellung, die Vorfallbeschreibung aus einer
+        Logzeile auf einem Server, auf dem Fremde spielen, und der Modelltext
+        aus beidem.
+
+        `<a href="...">Hier klicken</a>` in einer Mail, die aussieht, als kaeme
+        sie vom Panel, ist ein brauchbarer Phishing-Traeger. Deshalb geht
+        Fremdtext durch diese Funktion, bevor er in eine Vorlage kommt — und
+        nicht die Vorlage durch eine Maskierung, die die gewollten Auszeichnungen
+        mit zerstoeren wuerde.
+
+        Umbrueche bleiben erhalten: ein Bericht ueber mehrere Absaetze waere
+        sonst eine einzige Zeile.
+        """
+        return html.escape(str(value or ""), quote=True).replace("\n", "<br>")
+
     @classmethod
     def _notification_email_html(cls, username: str, title: str, message: str, detail: str = "") -> str:
+        # `username` und `title` werden **hier** maskiert: kein Aufrufer gibt
+        # dort Auszeichnung mit, und der Benutzername ist frei waehlbar.
+        # `message` und `detail` bleiben roh — mehrere Aufrufer bauen dort
+        # bewusst `<strong>` ein und maskieren ihre Fremdanteile selbst mit
+        # `html_text`.
+        username = cls.html_text(username)
+        title = cls.html_text(title)
         detail_html = f'<p style="margin:12px 0 0 0;font-size:13px;color:{cls.MUTED_COLOR};line-height:1.5;">{detail}</p>' if detail else ""
         content = f"""<h1 class="headline" style="margin:0 0 12px 0;font-size:24px;font-weight:700;color:{cls.CYAN_ACCENT};line-height:1.3;">{title}</h1>
 <p style="margin:0 0 8px 0;font-size:15px;color:{cls.PRIMARY_TEXT};line-height:1.6;">Hallo <strong>{username}</strong>,</p>
@@ -374,7 +409,11 @@ Der Server "{server_name}" hat seinen Status geändert: {status}
 
 Maunting Server Manager
 """
-        html = EmailService._notification_email_html(username, "Server-Status geändert", f'Der Server "{server_name}" hat seinen Status geändert: <strong>{status}</strong>.')
+        html = EmailService._notification_email_html(
+            username, "Server-Status geändert",
+            f'Der Server "{EmailService.html_text(server_name)}" hat seinen Status '
+            f'geändert: <strong>{EmailService.html_text(status)}</strong>.',
+        )
         return await EmailService.send_email(to, subject, body, html)
 
     @staticmethod
@@ -394,17 +433,88 @@ Bitte überprüfe den Server im Dashboard.
 
 Maunting Server Manager — Guardian Engine
 """
-        html_details = f"<p><strong>Details:</strong> {details}</p>" if details else ""
+        # Alle vier Werte sind Fremdtext: der Servername kommt aus einem
+        # Formular oder aus einer Shop-Bestellung, Art und Stand aus dem Agenten,
+        # die Beschreibung aus einer Logzeile eines Servers, auf dem Fremde
+        # spielen. Unmaskiert waren sie ein Phishing-Traeger in einer Mail, die
+        # aussieht, als kaeme sie vom Panel.
+        sicherer_name = EmailService.html_text(server_name)
+        sichere_details = EmailService.html_text(details)
+        html_details = f"<p><strong>Details:</strong> {sichere_details}</p>" if details else ""
         html = EmailService._notification_email_html(
             username,
             "Guardian Engine Alert",
-            f'Die Guardian Engine hat ein Ereignis beim Server <strong>"{server_name}"</strong> registriert.<br/><br/>'
-            f'<strong>Vorfall:</strong> {incident_type}<br/>'
-            f'<strong>Status:</strong> {status}<br/>'
+            f'Die Guardian Engine hat ein Ereignis beim Server <strong>"{sicherer_name}"</strong> registriert.<br/><br/>'
+            f'<strong>Vorfall:</strong> {EmailService.html_text(incident_type)}<br/>'
+            f'<strong>Status:</strong> {EmailService.html_text(status)}<br/>'
             f'{html_details}'
         )
         return await EmailService.send_email(to, subject, body, html)
 
+
+    @staticmethod
+    async def send_ai_healing_report(
+        to: str,
+        username: str,
+        *,
+        server_name: str,
+        incident_type: str,
+        geheilt: bool,
+        bericht: str,
+        backup_name: str | None = None,
+    ) -> bool:
+        """Der Bericht der KI ueber eine Heilung, die ohne den Benutzer lief.
+
+        Anders als jede andere Mail dieser Datei steht der Fliesstext hier nicht
+        im Code: er stammt vom Modell. Das hat zwei Folgen, und beide sind
+        beruecksichtigt.
+
+        Erstens die Maskierung. Modelltext ist unvertrauenswuerdige Eingabe,
+        unabhaengig davon, was im Systemprompt steht — ein Modell, das ueber
+        eine praeparierte Logzeile dazu gebracht wurde, `<a href="...">` zu
+        schreiben, haette sonst einen Phishing-Traeger in einer Mail, die
+        aussieht, als kaeme sie vom Panel. `html_text` maskiert und erhaelt die
+        Absaetze.
+
+        Zweitens die Ueberschrift. Sie kommt **nicht** vom Modell, sondern aus
+        `geheilt` — einer Tatsache des Panels. Ein Modell, das sich irrt oder
+        beschoenigt, soll nicht auch noch die Betreffzeile bestimmen.
+        """
+        zustand = "behoben" if geheilt else "nicht behoben"
+        titel = (
+            "Guardian: Problem behoben" if geheilt
+            else "Guardian: Problem nicht behoben"
+        )
+        subject = f"Maunting Server Manager — {titel}: {server_name}"
+        body = f"""Hallo {username},
+
+auf dem Server "{server_name}" gab es eine Stoerung ({incident_type}).
+Der KI-Assistent hat sie eigenstaendig bearbeitet. Ergebnis: {zustand}.
+
+{bericht}
+"""
+        if backup_name:
+            body += f"\nVor dem Eingriff wurde ein Backup angelegt: {backup_name}\n"
+        body += "\nMaunting Server Manager — Guardian Engine\n"
+
+        backup_html = (
+            f'<p style="margin:16px 0 0 0;font-size:13px;">Vor dem Eingriff wurde '
+            f'ein Backup angelegt: <strong>{EmailService.html_text(backup_name)}</strong></p>'
+            if backup_name else ""
+        )
+        nachricht = (
+            f'Auf dem Server <strong>"{EmailService.html_text(server_name)}"</strong> gab es '
+            f'eine Stoerung (<strong>{EmailService.html_text(incident_type)}</strong>).<br/>'
+            f'Der KI-Assistent hat sie eigenstaendig bearbeitet. '
+            f'Ergebnis: <strong>{zustand}</strong>.'
+        )
+        html_body = EmailService._notification_email_html(
+            username,
+            titel,
+            nachricht,
+            EmailService.html_text(bericht) + backup_html,
+        )
+        return await EmailService.send_email(to, subject, body, html_body)
 
     @staticmethod
     async def send_server_installed_notification(to: str, username: str, server_name: str) -> bool:
@@ -415,7 +525,10 @@ Der Server "{server_name}" wurde erfolgreich installiert und ist bereit.
 
 Maunting Server Manager
 """
-        html = EmailService._notification_email_html(username, "Server installiert", f'Der Server "{server_name}" wurde erfolgreich installiert.')
+        html = EmailService._notification_email_html(
+            username, "Server installiert",
+            f'Der Server "{EmailService.html_text(server_name)}" wurde erfolgreich installiert.',
+        )
         return await EmailService.send_email(to, subject, body, html)
 
     @staticmethod
@@ -427,7 +540,11 @@ Du wurdest von {added_by} zum Server "{server_name}" hinzugefügt.
 
 Maunting Server Manager
 """
-        html = EmailService._notification_email_html(username, "Zu Server hinzugefügt", f'Du wurdest von <strong>{added_by}</strong> zum Server "{server_name}" hinzugefügt.')
+        html = EmailService._notification_email_html(
+            username, "Zu Server hinzugefügt",
+            f'Du wurdest von <strong>{EmailService.html_text(added_by)}</strong> '
+            f'zum Server "{EmailService.html_text(server_name)}" hinzugefügt.',
+        )
         return await EmailService.send_email(to, subject, body, html)
 
     # ------------------------------------------------------------------

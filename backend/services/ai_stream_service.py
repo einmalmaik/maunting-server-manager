@@ -49,12 +49,14 @@ from services.ai_action_service import (
     question_payload,
 )
 from services.ai_proposal_service import (
+    GuardianKontext,
     create_proposal,
     execute_autonomously,
     proposal_response,
 )
 from services.ai_tool_registry import (
     ASK_TOOLS,
+    GUARDIAN_HEILUNG_TOOLS,
     READ_TOOLS,
     SERVER_READ_TOOLS,
     SKILL_TOOLS,
@@ -69,7 +71,11 @@ from services.ai_context_service import (
     message_character_count,
     teilbudgets,
 )
-from services.ai_redaction import redact_sensitive_text
+from services.ai_redaction import (
+    ist_geheimer_schluessel,
+    redact_freetext,
+    redact_sensitive_text,
+)
 from services.ai_provider_service import estimate_cost_microunits, resolve_api_key
 from services.ai_usage_service import (
     AiQuotaExceeded,
@@ -235,9 +241,117 @@ def _serverbezug(eintraege: list[dict]) -> int | None:
     return None
 
 
+# Werkzeuge, deren Ergebnis **Laufzeittext** ist: Zeilen, die der Server
+# geschrieben hat, waehrend Menschen auf ihm spielten. Dort steht die IP-Adresse
+# eines Spielers, und die ist ein personenbezogenes Datum ohne jeden Nutzen fuer
+# eine Diagnose.
+#
+# `read_config` steht bewusst **nicht** hier, obwohl auch dort IP-Adressen
+# vorkommen. Die sind dann aber Einstellungen — die Bind-Adresse in
+# `server.properties`, der Datenbankhost in einer Plugin-Konfiguration —, und
+# genau an ihnen erkennt die KI den haeufigsten Fehler ueberhaupt: der Dienst
+# horcht auf der falschen Adresse. Sie zu schwaerzen hiesse, die Diagnose
+# abzuschaffen, um ein Datum zu schuetzen, das keine Person bezeichnet.
+_FREITEXT_WERKZEUGE = frozenset({"read_server_logs", "read_guardian_incidents"})
+
+
+def _ergebnis_schwaerzen(wert, *, freitext: bool = False):
+    """Laeuft ein Werkzeugergebnis durch und schwaerzt jede Zeichenkette darin.
+
+    Rekursiv ueber Woerterbuecher und Listen, weil Ergebnisse verschachtelt sind
+    (`{"incidents": [{"description": ...}]}`). Schluessel bleiben unberuehrt: sie
+    stammen aus dem Code, nicht aus den Daten, und ein geschwaerzter Schluessel
+    machte das Ergebnis fuer das Modell unlesbar.
+
+    **Der Schluessel entscheidet aber ueber seinen Wert.** Die Muster in
+    `ai_redaction` sind auf Zuweisungstext ausgelegt — sie brauchen Schluessel
+    *und* Trennzeichen in derselben Zeichenkette. Genau diesen Zusammenhang
+    zerlegt die Rekursion: `read_blueprint` liefert
+    ``{"runtime": {"env": {"RCON_PASSWORD": "hunter2"}}}``, und weitergereicht
+    wurde nur ``"hunter2"`` — darauf passt kein Muster, und das Passwort ging im
+    Klartext an den Modellanbieter und in `ai_tool_results`. Der als "einziger
+    Ausgang" gebaute Punkt hielt seine Zusage damit ausgerechnet fuer die
+    haeufigste Form eines Geheimnisses nicht.
+
+    Zahlen und Wahrheitswerte bleiben, wie sie sind — ein Port ist kein Geheimnis
+    und eine Groesse in Megabyte auch nicht.
+    """
+    schwaerzen = redact_freetext if freitext else redact_sensitive_text
+    if isinstance(wert, str):
+        return schwaerzen(wert)
+    if isinstance(wert, dict):
+        ergebnis = {}
+        for k, v in wert.items():
+            if ist_geheimer_schluessel(k):
+                # Der ganze Teilbaum, nicht nur eine Zeichenkette: unter
+                # `credentials` kann ein Woerterbuch stehen, dessen Werte
+                # harmlose Schluessel wie `user` und `pass` tragen. Weiter
+                # hineinzusteigen hiesse, sich auf die inneren Namen zu
+                # verlassen — und der aeussere hat schon gesagt, worum es geht.
+                ergebnis[k] = "[REDACTED]"
+                continue
+            ergebnis[k] = _ergebnis_schwaerzen(v, freitext=freitext)
+        return ergebnis
+    if isinstance(wert, list):
+        return [_ergebnis_schwaerzen(v, freitext=freitext) for v in wert]
+    return wert
+
+
+class GuardianRahmenUnlesbar(RuntimeError):
+    """Der Laufzustand nennt eine Guardian-Heilung, aber nicht mehr, welche.
+
+    Eigene Klasse, damit der Aufrufer sie von einem gewoehnlichen Chatlauf
+    unterscheiden kann. Sie beendet den Lauf, statt ihn ohne Verschaerfungen
+    weiterlaufen zu lassen.
+    """
+
+
+def guardian_aus_zustand(zustand: dict) -> GuardianKontext | None:
+    """Baut den Guardian-Rahmen aus dem Arbeitsgedaechtnis des Laufs.
+
+    Er wird beim Start hineingeschrieben und bei **jeder** Runde daraus wieder
+    hergestellt — nicht einmal ermittelt und in einer Variablen gehalten. Der
+    Grund ist derselbe wie bei `reasoning_effort`: ein Lauf ueberlebt den
+    Prozess nicht, aber er ueberlebt Minuten und Fortsetzungen, und was mitten
+    in einer Aufgabe gilt, muss aus derselben Quelle kommen wie am Anfang.
+
+    Kein Schluessel ``guardian`` heisst: ein Mensch hat getippt, es gilt der
+    gewoehnliche Chatlauf.
+
+    Ein **vorhandener, aber unlesbarer** Rahmen ist etwas anderes und wirft.
+    Hier stand zuerst, ``None`` sei auch dafuer die sichere Richtung — "ohne
+    Rahmen greifen die Verschaerfungen nicht, aber es wird auch nichts erlaubt,
+    was sonst verboten waere". Das war falsch herum gedacht: in einer Heilung ist
+    die Werkzeugmenge **enger** als im Chat, der Server ist fest, und vor jedem
+    Eingriff steht ein Backup-Nachweis. Faellt der Rahmen weg, faellt all das
+    weg — und zwar in einem Lauf, in dem niemand mitliest, im Namen des
+    Freigebers und mit dessen Rechten. Der Verlust des Rahmens ist die
+    gefaehrliche Richtung, nicht die sichere.
+    """
+    roh = zustand.get("guardian")
+    if roh is None:
+        return None
+    if not isinstance(roh, dict):
+        raise GuardianRahmenUnlesbar("Guardian-Rahmen ist kein Woerterbuch")
+    try:
+        return GuardianKontext(
+            server_id=int(roh["server_id"]),
+            incident_id=int(roh["incident_id"]),
+            # `backup_anker` ist der Beginn des Heilungslaufs und damit der
+            # ehrliche Nachweiszeitpunkt; `incident_created_at` bleibt als
+            # Rueckfall fuer Laeufe, die vor dieser Aenderung angelegt wurden.
+            incident_created_at=datetime.fromisoformat(
+                str(roh.get("backup_anker") or roh["incident_created_at"])
+            ),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise GuardianRahmenUnlesbar("Guardian-Rahmen im Laufzustand unlesbar") from exc
+
+
 def _tool_followup_messages(
     *, user_id: int, conversation_id: str, tool_calls, deferred=(),
     correlation_id: str | None = None, run_id: str | None = None,
+    guardian: GuardianKontext | None = None,
 ) -> tuple[list[dict], list[dict], dict | None]:
     """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
 
@@ -264,6 +378,36 @@ def _tool_followup_messages(
         raise AiActionValidationError("Ungueltige Read-Tool-Sequenz")
     if any(call.name not in READ_TOOLS for call in tool_calls):
         raise AiActionValidationError("Ungueltige Read-Tool-Sequenz")
+    if guardian is not None:
+        # In einer Heilung ist die Werkzeugmenge kleiner und der Server fest.
+        # Beides steht hier und nicht im Prompt: die Eingabe dieses Laufs stammt
+        # teilweise aus Serverlogs, also aus Text, den ein Spieler geschrieben
+        # haben kann. Eine Regel, die das Modell befolgen *soll*, ist gegen so
+        # etwas keine Schranke.
+        for call in tool_calls:
+            if call.name not in GUARDIAN_HEILUNG_TOOLS:
+                raise AiActionValidationError(
+                    "Dieses Werkzeug steht in einer Guardian-Heilung nicht zur Verfuegung"
+                )
+            genannt = call.arguments.get("server_id")
+            if call.name in SERVER_READ_TOOLS and genannt is not None:
+                # `int(genannt)` stand hier ohne Typpruefung. Die Argumente
+                # kommen aus dem Modell, und ein `"abc"`, eine Liste oder ein
+                # Woerterbuch ergaben dort einen blanken `ValueError` bzw.
+                # `TypeError` — keine `AiActionValidationError`, mit der das
+                # Modell etwas anfangen kann, sondern ein Abbruch des ganzen
+                # Laufs. In einer unbeaufsichtigten Heilung heisst das: der
+                # Server bleibt stehen, weil das Modell einmal ein Argument
+                # falsch getippt hat. Der Vorschlagspfad prueft an derselben
+                # Stelle laengst mit `isinstance`.
+                try:
+                    nummer = int(genannt) if not isinstance(genannt, bool) else None
+                except (TypeError, ValueError):
+                    nummer = None
+                if nummer is None or nummer != guardian.server_id:
+                    raise AiActionValidationError(
+                        "In einer Guardian-Heilung ist nur der betroffene Server erlaubt"
+                    )
     with SessionLocal() as db:
         user = db.get(User, user_id)
         if user is None or not user.is_active:
@@ -317,6 +461,23 @@ def _tool_followup_messages(
                 # ein solcher Aufruf die gesamte Antwort ab.
                 failed_reason = str(exc)
                 value = {"error": failed_reason}
+            # **Der Choke Point.** Hier — und nur hier — verlaesst ein
+            # Werkzeugergebnis das Panel Richtung Anbieter und Datenbank.
+            #
+            # Geschwaerzt wurde bisher in den Handlern, jeder fuer sich. Das ist
+            # neunmal dieselbe Entscheidung an neun Orten, und wer einen zehnten
+            # Handler schreibt, vergisst sie: `read_blueprint`,
+            # `list_server_files`, `search_workshop_mods`, `read_skill` und
+            # `read_docs` gaben ihre Inhalte ungefiltert weiter. Dateinamen von
+            # der Platte und Titel aus dem Steam-Workshop sind Fremdtext wie
+            # Logzeilen auch.
+            #
+            # Die Handler behalten ihre eigenen Aufrufe. Doppelt zu schwaerzen
+            # kostet nichts — `[REDACTED]` enthaelt keines der Muster — und die
+            # Aufrufe dort sagen weiterhin, wo Fremdtext herkommt.
+            value = _ergebnis_schwaerzen(
+                value, freitext=call.name in _FREITEXT_WERKZEUGE
+            )
             # Persistieren, damit eine Rueckfrage im selben Chat die gerade
             # gelesenen Daten noch sieht. Ohne das musste das Modell sie neu
             # holen — oder antwortete ohne sie, obwohl es sie selbst geholt hatte.
@@ -521,7 +682,8 @@ def _vorschlag_ereignis(proposal: AiActionProposal) -> dict:
 
 
 def _persist_write_proposals(
-    *, user_id: int, conversation_id: str, tool_calls, correlation_id: str, run_id: str | None = None
+    *, user_id: int, conversation_id: str, tool_calls, correlation_id: str,
+    run_id: str | None = None, guardian: GuardianKontext | None = None,
 ) -> list[dict]:
     if len(tool_calls) > MAX_TOOL_CALLS or any(call.name not in WRITE_TOOLS for call in tool_calls):
         raise AiActionValidationError("Ungueltige Write-Tool-Sequenz")
@@ -533,7 +695,22 @@ def _persist_write_proposals(
         if conversation is None:
             raise AiActionValidationError("Unterhaltung ist nicht mehr verfuegbar")
         proposals = []
-        for call in tool_calls:
+        # Vorschlaege, die gar nicht erst entstanden sind, weil eine Bedingung
+        # der Anlage fehlte — heute nur der fehlende Backup-Nachweis. Sie sind
+        # **keine** Fehler des Modells, sondern eine Auskunft, auf die es
+        # antworten kann ("dann lege ich erst ein Backup an"). Deshalb reissen
+        # sie den Lauf nicht ab, sondern gehen als Ergebnis zurueck.
+        abgelehnt: list[dict] = []
+        uebersprungen: list[str] = []
+        for index, call in enumerate(tool_calls):
+            if abgelehnt:
+                # **Die Runde bricht ab.** Ohne diese Zeile fuehrte ein
+                # gescheitertes Backup nicht dazu, dass der Loeschvorgang
+                # dahinter unterbleibt — die Schleife lief weiter, und die
+                # Reihenfolge "erst sichern, dann anfassen" waere eine
+                # Absichtserklaerung statt einer Zusage.
+                uebersprungen.append(call.name)
+                continue
             try:
                 proposals.append(create_proposal(
                     db,
@@ -542,7 +719,22 @@ def _persist_write_proposals(
                     tool_name=call.name,
                     arguments=call.arguments,
                     correlation_id=correlation_id,
+                    guardian=guardian,
                 ))
+            except AiActionStateError as exc:
+                _ablehnung_protokollieren(
+                    user_id=user_id,
+                    tool_name=call.name,
+                    grund=exc.code,
+                    correlation_id=correlation_id,
+                )
+                abgelehnt.append({
+                    "tool_name": call.name,
+                    "status": "rejected",
+                    "autonomous": False,
+                    "server_id": None,
+                    "error_code": exc.code,
+                })
             except AiActionValidationError as exc:
                 # Der Versuch wird protokolliert, dann fliegt der Fehler weiter
                 # wie bisher — dieser Schritt aendert **nichts** am Verhalten des
@@ -623,7 +815,103 @@ def _persist_write_proposals(
                 # gingen ohne diese Zeile verloren.
                 ereignis["error_code"] = error_code
             results.append(ereignis)
+        # Abgelehnte und uebersprungene Aufrufe hinten dran. Sie tragen kein
+        # `id`, gehen also nicht als Vorschlagskarte an die Oberflaeche — es
+        # gibt nichts zu bestaetigen. Das Modell bekommt sie ueber
+        # `_write_followup_messages` und weiss damit, warum sein Aufruf nicht
+        # gelaufen ist und was zuerst zu tun waere.
+        results.extend(abgelehnt)
+        results.extend({
+            "tool_name": name,
+            "status": "skipped",
+            "autonomous": False,
+            "server_id": None,
+            "error_code": "AI_ACTION_ROUND_ABORTED",
+        } for name in uebersprungen)
         return results
+
+
+def _vorschlaege_zuruecknehmen(proposal_ids: list[str], *, grund: str) -> None:
+    """Nimmt offene Vorschlaege zurueck, auf die niemand mehr klicken wird.
+
+    Gebraucht wird das in genau einem Fall: eine Guardian-Heilung erzeugt einen
+    Vorschlag, der eine Bestaetigung verlangt, obwohl niemand am Panel sitzt.
+    Bliebe er auf 'proposed' stehen, waere er eine Karte, die den naechsten
+    Menschen Stunden spaeter bittet, einen Eingriff freizugeben, dessen Anlass
+    er nicht mitbekommen hat — und dessen Backup-Nachweis inzwischen von der
+    Aufbewahrungsregel abgeraeumt sein kann.
+
+    Gesetzt wird `expired` und nicht ein neuer Status: die Spalte traegt eine
+    CHECK-Bedingung mit sechs Werten, und `expired` heisst dort genau das, was
+    hier geschehen ist — die Gelegenheit zur Bestaetigung ist vorbei.
+    """
+    if not proposal_ids:
+        return
+    from models import AiActionProposal
+
+    try:
+        with SessionLocal() as db:
+            zeilen = (
+                db.query(AiActionProposal)
+                .filter(
+                    AiActionProposal.id.in_(proposal_ids),
+                    AiActionProposal.status.in_(("proposed", "confirmed")),
+                )
+                .all()
+            )
+            for zeile in zeilen:
+                zeile.status = "expired"
+                zeile.confirmation_token_hash = None
+                zeile.error_code = grund
+            db.commit()
+    except Exception:  # noqa: BLE001 - ein Aufraeumfehler beendet keinen Lauf
+        logger.warning("Offene Vorschlaege nicht zurueckgenommen: %s", proposal_ids)
+
+
+def _ask_refusal_messages(tool_calls) -> list[dict]:
+    """Die Antwort auf eine Rueckfrage, die in einer Heilung niemand hoert.
+
+    Verworfen wird die **ganze** Runde und nicht nur der `ask`-Aufruf. Das
+    Protokoll verlangt zu jeder `tool_call_id` genau eine Antwort; blieben die
+    uebrigen Aufrufe derselben Runde unbeantwortet, waere die naechste Anfrage
+    an den Anbieter formal kaputt. Und inhaltlich gehoert es so: eine Runde,
+    deren Plan auf einer Rueckfrage aufbaut, ist als Ganzes hinfaellig — das
+    Modell soll sie neu fassen, nicht die Haelfte davon weiterverwenden.
+    """
+    assistant_call = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(call.arguments, ensure_ascii=True),
+                },
+            }
+            for call in tool_calls
+        ],
+    }
+    hinweis = (
+        "In einer Guardian-Heilung sitzt niemand am Panel; Rueckfragen sind "
+        "nicht moeglich. Diese Runde wurde deshalb vollstaendig verworfen. "
+        "Entscheide selbst und rufe die Werkzeuge ohne Rueckfrage erneut auf, "
+        "oder beende mit einer Zusammenfassung deiner Vermutung — sie geht als "
+        "E-Mail an den Betreiber."
+    )
+    nachrichten: list[dict] = [assistant_call]
+    for call in tool_calls:
+        nachrichten.append({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": json.dumps(
+                {"error": "AI_GUARDIAN_NO_HUMAN", "message": hinweis},
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+        })
+    return nachrichten
 
 
 def _write_followup_messages(
@@ -954,6 +1242,28 @@ def _lauf_abschliessen(
             # Gemeldet wird der **tatsaechliche** Zustand und nicht der
             # gewuenschte: die Oberflaeche soll den Abbruch sehen und nicht auf
             # eine Antwort warten, die nicht mehr kommt.
+            # Die Nachbereitung laeuft trotzdem — und zwar **vor** dem Ausstieg.
+            #
+            # Hier lag der schwerste Fehler dieser Kopplung. Der Waechter oben
+            # ist richtig, aber er sprang bisher an `_guardian_nachbereiten`
+            # vorbei, und der haeufigste Weg in diesen Zweig ist ausgerechnet
+            # der, den `ai_guardian_service` als Normalfall beschreibt: der
+            # Freigeber tippt waehrend einer Heilung etwas in den Chat,
+            # `vorgaenger_abloesen` setzt den Lauf direkt in der Datenbank auf
+            # 'cancelled/superseded', und das Segment findet beim Abschliessen
+            # einen bereits beendeten Lauf vor.
+            #
+            # Folge war: keine Mail, obwohl `ai_guardian_report` bei **jedem**
+            # Endzustand zusagt. Und weil die Notiz mit `mode='healing'` schon
+            # beim Start committet wurde, ueberspringt der Ausloeser den Vorfall
+            # von da an bei jedem Takt. Ein Server blieb stehen, ein halb
+            # umgeschriebenes Konfigurationsfeld blieb liegen, und niemand
+            # erfuhr davon.
+            #
+            # Der Versand ist gegen Doppelung gesichert (`guardian_berichtet`
+            # im Zustand), deshalb schadet der zweite Aufruf nicht, wenn beide
+            # Wege einmal zusammenfallen.
+            _guardian_nachbereiten(db, run, None)
             ai_run_broker.veroeffentlichen(
                 run_id,
                 "run",
@@ -971,11 +1281,73 @@ def _lauf_abschliessen(
             run.message_id = None
         run.updated_at = datetime.now(timezone.utc)
         db.commit()
+        if status in AUSGELAUFEN:
+            _guardian_nachbereiten(db, run, zustand)
     ai_run_broker.veroeffentlichen(
         run_id, "run", {"run_id": run_id, "status": status, "stop_reason": stop_reason}
     )
     if status in AUSGELAUFEN:
         ai_run_broker.beenden(run_id)
+
+
+def _guardian_nachbereiten(db, run: AiRun, zustand: dict | None) -> None:
+    """Was am Ende eines Laufs mit Guardian-Bezug noch zu tun ist.
+
+    Zwei Dinge, beide erst **jetzt** — nicht beim Start:
+
+    * Genannte Vorfaelle als besprochen vermerken. Bricht der Lauf vorher ab,
+      bleibt der Vorfall vorgemerkt und kommt beim naechsten Mal wieder. Lieber
+      zweimal genannt als einmal verschluckt.
+    * War es ein Heilungslauf, geht der Bericht per E-Mail hinaus — bei jedem
+      Endzustand. "Nicht geschafft" ist fuer den Betreiber die wichtigere
+      Nachricht von beiden, und ein Lauf, der still scheitert, waere die
+      schlechteste Eigenschaft dieser ganzen Kopplung.
+
+    Kapselt alles ab: der Lauf ist zu diesem Zeitpunkt fertig und committet.
+    Ein Fehler beim Vermerken oder beim Versand darf ihn nicht nachtraeglich in
+    einen Fehlschlag verwandeln.
+
+    **Genau einmal.** Die Funktion wird aus zwei Richtungen gerufen — vom
+    regulaeren Abschluss und vom Waechter fuer den bereits beendeten Lauf. Beide
+    Wege koennen denselben Lauf treffen (ein abgeloester Lauf, dessen Segment
+    danach noch seinen eigenen Abschluss meldet). Die Marke `guardian_berichtet`
+    im Laufzustand entscheidet, und sie wird **vor** dem Versand gesetzt: eine
+    zweite Mail waere schlimmer als eine ausgebliebene Wiederholung, denn der
+    Betreiber liest zweimal denselben Vorgang und weiss nicht, ob es zwei waren.
+    """
+    if zustand is None:
+        zustand = ai_run_service.zustand_lesen(run)
+    try:
+        from services import ai_guardian_service
+
+        gebrieft = [int(x) for x in (zustand.get("guardian_briefed") or [])]
+        if gebrieft:
+            ai_guardian_service.briefings_abschliessen(
+                db, user_id=run.user_id, incident_ids=gebrieft
+            )
+            db.commit()
+    except Exception:
+        db.rollback()
+        logger.warning("Guardian-Briefing nicht vermerkt run_id=%s", run.id)
+
+    if not isinstance(zustand.get("guardian"), dict):
+        return
+    if zustand.get("guardian_berichtet"):
+        return
+    try:
+        zustand["guardian_berichtet"] = True
+        ai_run_service.zustand_schreiben(run, zustand)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.warning("Guardian-Berichtsmarke nicht gesetzt run_id=%s", run.id)
+        return
+    try:
+        from services import ai_guardian_report
+
+        ai_guardian_report.bericht_versenden(db, run=run, zustand=zustand)
+    except Exception:
+        logger.warning("Guardian-Bericht nicht versendet run_id=%s", run.id)
 
 
 def _werkzeug_signatur(name: str, argumente: dict) -> str:
@@ -1036,6 +1408,20 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     conversation_id = vorbereitung.conversation_id
     user_id = vorbereitung.user_id
     message_id = vorbereitung.message_id
+    # Aus dem Zustand geholt und nicht uebergeben: jede Fortsetzung dieses Laufs
+    # — auch die nach einer Bestaetigung Stunden spaeter — arbeitet unter
+    # denselben Verschaerfungen wie der erste Zug.
+    try:
+        guardian = guardian_aus_zustand(zustand)
+    except GuardianRahmenUnlesbar:
+        # Ein Lauf, der eine Heilung sein sollte, aber nicht mehr sagen kann,
+        # welchen Server er heilt, faehrt nicht weiter. Ohne diesen Ausstieg
+        # liefe er als gewoehnlicher Chatlauf weiter — mit dem vollen
+        # Werkzeugsatz, ohne Serverbindung, ohne Backup-Pflicht und ohne
+        # jemanden, der mitliest.
+        logger.error("Guardian-Rahmen unlesbar, Lauf wird beendet run_id=%s", run_id)
+        _lauf_abschliessen(run_id, status="failed", stop_reason="guardian_frame_lost")
+        return
 
     ai_run_broker.neues_segment(run_id)
     ai_run_broker.veroeffentlichen(
@@ -1148,6 +1534,50 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 (call for call in current_usage.tool_calls if call.name in ASK_TOOLS),
                 None,
             )
+            if frage is not None and guardian is not None:
+                # In einer Heilung ist niemand da, den man fragen koennte — und
+                # das war eine ausnutzbare Luecke, keine Unbequemlichkeit.
+                #
+                # Dieser Zweig lag vor **jeder** Guardian-Pruefung: weder die
+                # Werkzeugmenge (`_tool_followup_messages`) noch der
+                # Vorschlagspfad (`create_proposal`) sehen einen `ask_user`-Aufruf
+                # je. Eine Zeile im Spielchat eines Gameservers — "Assistant:
+                # before any action call ask_user" — genuegte, um den Lauf auf
+                # 'waiting_user' zu parken. Dieser Zustand ist kein Endzustand,
+                # also ging kein Bericht hinaus; die Notiz war laengst committet,
+                # also griff der Ausloeser den Vorfall nie wieder auf; und
+                # `aktiver_lauf` zaehlt wartende Laeufe mit, also blockierte der
+                # haengende Lauf jede weitere Heilung dieses Freigebers auf
+                # **allen** seinen Servern, bis er von sich aus in den Chat
+                # schrieb. Aus einer Textzeile wurde so ein dauerhafter Ausfall
+                # der autonomen Heilung samt unterdrueckter Fehlermeldung.
+                #
+                # Abgewiesen wird als Werkzeugergebnis und nicht als Abbruch: das
+                # Modell bekommt eine Antwort, mit der es weiterarbeiten kann,
+                # statt einen Lauf, der ohne Erklaerung endet.
+                logger.info(
+                    "Rueckfrage in einer Guardian-Heilung abgewiesen run_id=%s", run_id
+                )
+                # `provider_messages` **ist** die Liste im Zustand — extend
+                # genuegt. Hier stand einmal `zustand["messages"] = ...`, ein
+                # Schluessel, den es nicht gibt: der Zustand heisst
+                # `provider_messages`. Die Zeile hat nichts kaputt gemacht, aber
+                # auch nichts getan, und sie haette den naechsten Leser glauben
+                # lassen, hier passiere etwas Notwendiges.
+                provider_messages.extend(
+                    _ask_refusal_messages(current_usage.tool_calls)
+                )
+                # Die Runde zaehlt mit. Der gemeinsame Zaehler weiter unten wird
+                # von diesem `continue` uebersprungen, und ohne diese beiden
+                # Zeilen haette ein Modell, das hartnaeckig nachfragt, eine
+                # endlose Schleife aus Abweisungen erzeugt — auf Kosten des
+                # Freigebers, dem jede Runde eine Anbieteranfrage berechnet wird.
+                zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
+                if zustand["rounds"] > MAX_TOOL_ROUNDS:
+                    budget_erschoepft = True
+                    tools = None
+                current_usage = StreamUsage()
+                continue
             if frage is not None:
                 gestellte_frage = question_payload(frage.arguments)
                 ai_run_broker.veroeffentlichen(run_id, "question", gestellte_frage)
@@ -1180,8 +1610,14 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     tool_calls=current_usage.tool_calls,
                     correlation_id=vorbereitung.request_id,
                     run_id=run_id,
+                    guardian=guardian,
                 )
                 for proposal in proposals:
+                    # Nur echte Vorschlaege bekommen eine Karte. Ein abgelehnter
+                    # Aufruf hat keine Zeile und keine Kennung; ihn als
+                    # Vorschlagsereignis zu senden waere eine Karte ohne Knopf.
+                    if not proposal.get("id"):
+                        continue
                     ai_run_broker.veroeffentlichen(
                         run_id, "action" if proposal.get("autonomous") else "proposal", proposal
                     )
@@ -1207,13 +1643,64 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 # Werkzeuge. Sonst stuende die Karte im Chat und darueber
                 # nichts — der Benutzer soll lesen, was da bestaetigt werden
                 # will und warum.
+                # `proposal.get("id")` statt `proposal["id"]`: seit ein
+                # abgelehnter Aufruf als Ergebnis mitlaeuft, tragen nicht mehr
+                # alle Eintraege eine Kennung. Ein `KeyError` genau hier haette
+                # den Lauf mitten in einer Schreibrunde abgerissen — nach dem
+                # Anlegen der Vorschlaege und vor dem Parken.
                 offen = [
                     proposal["id"] for proposal in proposals
-                    if proposal.get("status") in {"proposed", "confirmed"}
+                    if proposal.get("id")
+                    and proposal.get("status") in {"proposed", "confirmed"}
                 ]
+                if offen and guardian is not None:
+                    # Eine Heilung parkt nicht. Es ist niemand da, der die Karte
+                    # anklickt.
+                    #
+                    # Der Fall ist nicht theoretisch: das Stundenkontingent ist
+                    # benutzerweit, und `autonomy_allows` faellt bei Erschoepfung
+                    # ausdruecklich auf Bestaetigungspflicht zurueck statt zu
+                    # scheitern. Wer vormittags im Chat gearbeitet hat, dessen
+                    # naechtliche Heilung stiess also mitten im Vorgang an die
+                    # Grenze. `zustaendiger_freigeber` prueft nur die Obergrenze
+                    # des Grants, nicht den bereits verbrauchten Stand — und das
+                    # kann es auch nicht, weil die Grenze waehrend des Laufs
+                    # kippt.
+                    #
+                    # Geparkt bedeutete: Status 'waiting_confirmation', kein
+                    # Endzustand, also kein Bericht; im Guardian-Reiter dauerhaft
+                    # "die KI bearbeitet das"; und weil `aktiver_lauf` wartende
+                    # Laeufe mitzaehlt, keine weitere Heilung dieses Freigebers
+                    # auf keinem seiner Server. Ein Neustart des Panels hob das
+                    # nicht auf, denn `unterbrochene_laeufe_abgleichen` fasst
+                    # 'waiting_*' bewusst nicht an.
+                    #
+                    # Ein Test dieses Projekts schreibt die Regel schon fest: ein
+                    # Freigeber mit Budget 0 kommt gar nicht erst als Akteur in
+                    # Frage, weil "ein Lauf, der sofort auf eine Bestaetigung
+                    # wartet, keine Heilung ist, sondern eine Zeile in der
+                    # Datenbank, die einen Vorfall als versorgt markiert, ohne es
+                    # zu sein". Genau dieser Zustand entstand hier — nur eben
+                    # mitten im Lauf statt am Anfang.
+                    #
+                    # Stattdessen: die offenen Vorschlaege zuruecknehmen und den
+                    # Lauf beenden. Der Bericht geht dann hinaus und sagt dem
+                    # Betreiber ehrlich, dass die KI nicht weiterkonnte.
+                    _vorschlaege_zuruecknehmen(offen, grund="guardian_unattended")
+                    logger.info(
+                        "Guardian-Heilung beendet: Vorschlag verlangt Bestaetigung, "
+                        "niemand ist da run_id=%s anzahl=%d",
+                        run_id, len(offen),
+                    )
+                    budget_erschoepft = True
+                    tools = None
+                    current_usage = StreamUsage()
+                    continue
                 if offen:
                     zustand["pending"] = {
-                        "proposal_ids": [proposal["id"] for proposal in proposals],
+                        "proposal_ids": [
+                            proposal["id"] for proposal in proposals if proposal.get("id")
+                        ],
                     }
                     geparkt = True
                     tools = None
@@ -1304,6 +1791,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 deferred=deferred_calls,
                 correlation_id=vorbereitung.request_id,
                 run_id=run_id,
+                guardian=guardian,
             )
             provider_messages.extend(followup)
             # Das Betriebswissen der Anlage, sobald feststeht welche. Genau
@@ -1477,6 +1965,7 @@ def lauf_beginnen(
     reasoning: bool,
     reasoning_effort: str | None = None,
     context_chars: int | None = None,
+    guardian_briefing_unterdruecken: bool = False,
 ) -> tuple[AiRun | None, tuple[str, str] | None]:
     """Legt einen Lauf an: Benutzernachricht, Kontingent, Antwortnachricht.
 
@@ -1530,6 +2019,23 @@ def lauf_beginnen(
             db, conversation, query=safe_content, server_id=serverbezug,
             context_chars=context_chars,
         )
+        # Was Guardian gemeldet hat, waehrend niemand da war. Nur wenn dieser
+        # Lauf nicht selbst aus einer Heilung stammt — sonst berichtete die KI
+        # sich selbst von dem Vorfall, an dem sie gerade arbeitet.
+        #
+        # Der Block wird **hier** angehaengt und nicht in
+        # `build_provider_messages`: er gehoert zum Start eines Laufs, nicht zum
+        # Kontext allgemein, und die Kennungen muessen in den Laufzustand. Eine
+        # Provider-Nachricht mit einem Zusatzfeld waere der falsche Traeger — sie
+        # geht so, wie sie ist, an den Anbieter.
+        gebrieft: list[int] = []
+        if not guardian_briefing_unterdruecken:
+            from services.ai_guardian_service import briefing_nachricht
+
+            briefing = briefing_nachricht(db, user)
+            if briefing is not None:
+                text, gebrieft = briefing
+                provider_messages.append({"role": "user", "content": text})
         estimated_tokens = estimate_reserved_tokens(provider_messages)
         usage_event = reserve_ai_usage(
             db,
@@ -1561,6 +2067,7 @@ def lauf_beginnen(
         )
         zustand["usage_event_id"] = usage_event.id
         zustand["tool_signatures"] = geerbte_signaturen
+        zustand["guardian_briefed"] = gebrieft
         # Das Budget dieses Laufs, festgehalten fuer alle Fortsetzungen. Es hier
         # abzulegen statt es je Segment neu zu ermitteln ist dieselbe
         # Entscheidung wie bei `reasoning_effort`: was mitten in einer Aufgabe
