@@ -36,6 +36,30 @@ def _fremdschluessel(inspector, tabelle: str, spalte: str) -> dict:
     raise AssertionError(f"{tabelle}.{spalte} hat gar keinen Fremdschluessel mehr")
 
 
+def _frisch(engine):
+    """Ein Inspector auf einer **neuen** Verbindung.
+
+    Alembic faehrt seine Migrationen ueber eine eigene Engine; der Pool der
+    Engine, mit der hier geprueft wird, haelt daneben Verbindungen, die vor der
+    Migration geoeffnet wurden. Fuer ein blosses ALTER faellt das nicht auf —
+    aber wenn eine Migration eine Tabelle **loescht und neu anlegt**, behaelt
+    eine solche Verbindung ihren alten, in sich zusammengefallenen Schema-Cache:
+    `SELECT sql FROM sqlite_master` liefert den frischen Text, waehrend
+    `PRAGMA foreign_key_list` leer bleibt.
+
+    Die Reflexion in SQLAlchemy braucht **beides** und meldet die Abweichung nur
+    als Warnung ("SQL-parsed foreign key constraint could not be located in
+    PRAGMA foreign_keys"); `get_foreign_keys` gibt danach eine leere Liste
+    zurueck. Ein Test, der darauf prueft, meldet dann "die Migration hat den
+    Fremdschluessel vergessen" — fuer eine Migration, die ihn korrekt anlegt.
+    Genau diese Fehldiagnose ist beim Bau von `ai_tasks` einmal passiert.
+
+    `dispose()` wirft den Pool weg; die naechste Verbindung liest das Schema neu.
+    """
+    engine.dispose()
+    return inspect(engine)
+
+
 def test_fremdschluessel_sind_im_test_scharf(db: Session) -> None:
     """Ohne diesen Schalter ist jede Aussage ueber ON DELETE hier wertlos.
 
@@ -348,6 +372,117 @@ def test_die_datenbank_kennt_genau_zwei_arten_von_notiz(
     assert {zeile[2] for zeile in _notizen(db)} == {"briefed", "healing"}
 
 
+def _aufgabe_anlegen(
+    db: Session,
+    *,
+    task_id: str,
+    user_id: int,
+    last_run_id: str | None = None,
+    kind: str = "report",
+    plan_kind: str = "daily",
+    channel: str = "chat",
+) -> None:
+    """Eine KI-Aufgabe per SQL, aus demselben Grund wie `_notiz_anlegen`."""
+    db.execute(
+        text(
+            "INSERT INTO ai_tasks "
+            "(id, user_id, title, instruction, kind, plan_kind, time_of_day, "
+            " time_zone, channel, enabled, next_run_at, last_run_id, "
+            " created_at, updated_at) "
+            "VALUES (:id, :user_id, 'Serverbericht', 'Sieh nach den Servern.', "
+            " :kind, :plan_kind, '08:00', 'Europe/Berlin', :channel, 1, "
+            " '2026-08-14 06:00:00', :last_run_id, '2026-08-13', '2026-08-13')"
+        ),
+        {
+            "id": task_id,
+            "user_id": user_id,
+            "kind": kind,
+            "plan_kind": plan_kind,
+            "channel": channel,
+            "last_run_id": last_run_id,
+        },
+    )
+    db.commit()
+
+
+def _aufgaben(db: Session) -> list[tuple]:
+    db.expire_all()
+    return list(db.execute(text("SELECT id, user_id, last_run_id FROM ai_tasks")))
+
+
+def test_eine_ki_aufgabe_verschwindet_mit_ihrem_benutzer(
+    db: Session, owner_user
+) -> None:
+    """Eine Aufgabe ohne Besitzer waere ein Termin ohne Rechte.
+
+    Ein faelliger Lauf handelt im Namen dessen, der die Aufgabe angelegt hat: mit
+    seinen Rechten, aus seinem Kontingent, an seine Adresse. Bliebe die Zeile
+    nach der Loeschung des Kontos stehen, saehe der Takt alle sechzig Sekunden
+    einen Termin, zu dem es keinen Akteur mehr gibt — im besten Fall eine
+    Logzeile je Minute, im schlechteren ein Lauf im Namen einer Nummer, die
+    inzwischen jemand anderem gehoert.
+    """
+    inspector = inspect(db.get_bind())
+    assert _fremdschluessel(inspector, "ai_tasks", "user_id")["options"] == {
+        "ondelete": "CASCADE"
+    }
+
+    _aufgabe_anlegen(db, task_id="task-1", user_id=owner_user.id)
+    db.execute(text("DELETE FROM users WHERE id = :id"), {"id": owner_user.id})
+    db.commit()
+
+    assert _aufgaben(db) == []
+
+
+def test_eine_ki_aufgabe_ueberlebt_ihren_letzten_lauf(
+    db: Session, owner_user
+) -> None:
+    """`last_run_id` ist ein Beleg, kein Besitz.
+
+    Mit `CASCADE` haette das Abraeumen alter Laeufe die **Aufgabe** geloescht —
+    und damit einen stehenden Auftrag vernichtet, den ein Mensch ausdruecklich
+    bestaetigt hat, ohne dass ihn je jemand danach gefragt haette. Der Verweis
+    beantwortet nur "wann lief sie zuletzt"; verschwindet die Antwort, bleibt
+    die Frage bestehen.
+    """
+    inspector = inspect(db.get_bind())
+    assert _fremdschluessel(inspector, "ai_tasks", "last_run_id")["options"] == {
+        "ondelete": "SET NULL"
+    }
+
+    run_id = _lauf(db, owner_user.id)
+    _aufgabe_anlegen(db, task_id="task-2", user_id=owner_user.id, last_run_id=run_id)
+
+    db.execute(text("DELETE FROM ai_runs WHERE id = :id"), {"id": run_id})
+    db.commit()
+
+    assert _aufgaben(db) == [("task-2", owner_user.id, None)]
+
+
+@pytest.mark.parametrize(
+    ("spalte", "wert"),
+    [("kind", "alles"), ("plan_kind", "cron"), ("channel", "sms")],
+)
+def test_die_datenbank_weist_erfundene_aufgabenarten_ab(
+    db: Session, owner_user, spalte: str, wert: str
+) -> None:
+    """Die drei Aufzaehlungen stehen im Schema, nicht nur in Python.
+
+    Jede von ihnen entscheidet ueber etwas, das niemand mitliest: `kind`
+    darueber, ob ein unbeaufsichtigter Lauf Schreibwerkzeuge bekommt, `plan_kind`
+    darueber, wie die naechste Faelligkeit gerechnet wird, `channel` darueber,
+    wohin das Ergebnis geht. Ein Tippfehler in einem spaeteren Wartungsskript
+    soll hier auflaufen und nicht als stille vierte Art durchgehen.
+    """
+    with pytest.raises(IntegrityError):
+        _aufgabe_anlegen(
+            db, task_id="task-3", user_id=owner_user.id, **{spalte: wert}
+        )
+    db.rollback()
+
+    assert _aufgaben(db) == []
+
+
 def test_ein_backup_kann_seinen_nachweis_tragen(db: Session) -> None:
     """`sha256` und `verified_at` gibt es, und beide duerfen NULL sein.
 
@@ -562,6 +697,24 @@ def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
         }
         command.upgrade(config, "head")
         assert _fremdschluessel(inspect(engine), "hoster_services", "granted_role_id")[
+            "options"
+        ] == {"ondelete": "SET NULL"}
+
+        # Und fuer die Tabelle der stehenden KI-Auftraege. Sie ist der Ort, an
+        # dem der Zeitplan lebt — APScheduler haelt seine Jobs nur im Speicher.
+        # Fehlt sie in der gefahrenen Migration, startet das Panel gar nicht
+        # erst (`schema_manager._missing_model_schema`), aber erst beim
+        # Betreiber: `create_all` legt sie in den Tests ohnehin an.
+        command.downgrade(config, "20260812_05")
+        assert "ai_tasks" not in _frisch(engine).get_table_names()
+        command.upgrade(config, "head")
+        # `_frisch` und nicht `inspect`: diese Tabelle wird von der Migration
+        # ganz geloescht und neu angelegt, und darauf reagiert eine schon
+        # geoeffnete SQLite-Verbindung anders als auf ein ALTER (siehe dort).
+        assert _fremdschluessel(_frisch(engine), "ai_tasks", "user_id")["options"] == {
+            "ondelete": "CASCADE"
+        }
+        assert _fremdschluessel(_frisch(engine), "ai_tasks", "last_run_id")[
             "options"
         ] == {"ondelete": "SET NULL"}
     finally:

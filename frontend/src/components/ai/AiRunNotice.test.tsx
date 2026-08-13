@@ -113,15 +113,53 @@ describe('AiRunNotice', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
-  it('hört auf nachzusehen, wenn nichts mehr läuft', async () => {
-    // Ein Dauerpoller für einen ruhenden Lauf wäre Last ohne Gegenwert.
+  it('sieht im Ruhetakt weiter nach, ohne dabei zu pollen wie im Betrieb', async () => {
+    // **Hier stand einmal das Gegenteil**: „hört auf nachzusehen, wenn nichts
+    // mehr läuft". Das war richtig, solange ein Lauf nur durch eine getippte
+    // Nachricht entstehen konnte — wer tippt, ist im Chat, und dort meldet der
+    // Ereignisstrom selbst.
+    //
+    // Seit ein stehender Auftrag um acht Uhr von selbst anfängt, stimmt die
+    // Annahme nicht mehr: eine Seite, die seit gestern Abend offen steht,
+    // hätte den Lauf nie bemerkt. Der Ruhetakt ist der einzige Weg, auf dem
+    // sie davon erfährt.
     vi.mocked(aiApi.getActiveRun).mockResolvedValue(null)
 
     zeichnen('/notes')
 
     await waitFor(() => expect(aiApi.getActiveRun).toHaveBeenCalledTimes(1))
-    await vi.advanceTimersByTimeAsync(30_000)
+    // Nach dem schnellen Takt passiert noch nichts — sonst wäre der Ruhetakt
+    // gar keiner, sondern nur ein zweiter Betriebstakt.
+    await vi.advanceTimersByTimeAsync(9_000)
     expect(aiApi.getActiveRun).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(55_000)
+    await waitFor(() => expect(aiApi.getActiveRun).toHaveBeenCalledTimes(2))
+  })
+
+  it('meldet einen Lauf, den niemand ausgelöst hat', async () => {
+    // Der Fall, für den der Ruhetakt existiert: die fällige KI-Aufgabe. Beim
+    // ersten Nachsehen ist nichts los, eine Minute später arbeitet plötzlich
+    // etwas, und am Ende soll die Glocke läuten.
+    vi.mocked(aiApi.getActiveRun)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(lauf('running'))
+      .mockResolvedValue(lauf('completed'))
+
+    zeichnen('/notes')
+
+    await waitFor(() => expect(aiApi.getActiveRun).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+
+    // Der Ruhetakt findet den von selbst gestarteten Lauf …
+    await vi.advanceTimersByTimeAsync(61_000)
+    await waitFor(() => expect(aiApi.getActiveRun).toHaveBeenCalledTimes(2))
+
+    // … und der schnelle Takt danach seinen Abschluss.
+    await vi.advanceTimersByTimeAsync(9_000)
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Die KI ist mit deinem Auftrag fertig.')
+    })
   })
 
   it('meldet jeden ruhenden Zustand, auch einen später hinzugekommenen', async () => {

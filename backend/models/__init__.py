@@ -13,6 +13,7 @@ from .ai_memory import AiMemoryEntry, AiMemoryPreference
 from .ai_skill import AiSkill
 from .ai_attachment import AiAttachment
 from .ai_guardian_notice import AiGuardianNotice
+from .ai_task import AiTask
 from .server import Server
 from .node import Node
 from .node_enrollment import NodeEnrollment
@@ -61,7 +62,7 @@ __all__ = [
     "User", "UserRole", "RoleAiLimit", "AiUsageEvent", "OperationTask",
     "AiProvider", "AiConversation", "AiMessage", "AiActionProposal",
     "AiMemoryEntry", "AiMemoryPreference", "AiSkill", "AiAttachment",
-    "AiAutonomyGrant", "AiToolResult", "AiRun", "AiGuardianNotice",
+    "AiAutonomyGrant", "AiToolResult", "AiRun", "AiGuardianNotice", "AiTask",
     "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
     "Team", "TeamMember", "TeamServerGrant",
     "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",

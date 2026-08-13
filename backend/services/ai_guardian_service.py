@@ -49,13 +49,13 @@ from sqlalchemy.orm import Session
 
 from models import (
     AiGuardianNotice,
-    AiProvider,
     AiRun,
     Incident,
     Server,
     User,
 )
-from services import ai_chat_service, ai_context_window, ai_reasoning, ai_run_service
+from services import ai_chat_service, ai_context_window, ai_provider_service
+from services import ai_reasoning, ai_run_service
 from services import permission_service
 from services.ai_autonomy_service import resolve_grant
 from services.ai_redaction import redact_sensitive_text
@@ -332,35 +332,6 @@ def briefings_abschliessen(db: Session, *, user_id: int, incident_ids: list[int]
 # ── Der Heilungslauf ──────────────────────────────────────────────────────
 
 
-def _anbieter_waehlen(db: Session, user: User) -> AiProvider | None:
-    """Welcher Anbieter, wenn niemand einen aussucht?
-
-    Im Chat kommt er aus der Anfrage. Hier gibt es keine, und `AiProvider` hat
-    kein `is_default` — eines zu erfinden waere eine neue Einstellung fuer ein
-    Problem, das die Daten schon beantworten: der Anbieter, den dieser Benutzer
-    zuletzt tatsaechlich benutzt hat. Das ist keine Vermutung ueber seine
-    Vorlieben, sondern seine juengste Entscheidung.
-
-    Gibt es keinen solchen, der einzige aktivierte. Gibt es mehrere und keinen
-    juengsten, wird **nicht** geraten — dann laeuft keine Heilung, und der
-    Benutzer erfaehrt beim naechsten Chat davon. Ein zufaellig gewaehltes Modell
-    koennte teurer sein, als er wollte.
-    """
-    letzter = (
-        db.query(AiRun)
-        .filter(AiRun.user_id == user.id, AiRun.provider_id.isnot(None))
-        .order_by(AiRun.created_at.desc())
-        .first()
-    )
-    if letzter is not None:
-        anbieter = db.get(AiProvider, letzter.provider_id)
-        if anbieter is not None and anbieter.enabled:
-            return anbieter
-
-    aktive = db.query(AiProvider).filter(AiProvider.enabled.is_(True)).order_by(AiProvider.id).all()
-    return aktive[0] if len(aktive) == 1 else None
-
-
 def _auftragstext(server: Server, vorfall: Incident) -> str:
     """Was der KI als Auftrag in den Chat geschrieben wird.
 
@@ -426,7 +397,7 @@ async def heilungslauf_starten(
         )
         return None
 
-    anbieter = _anbieter_waehlen(db, user)
+    anbieter = ai_provider_service.anbieter_ohne_auswahl(db, user)
     if anbieter is None:
         logger.info("Guardian-Heilung ohne Anbieter (user_id=%s)", user.id)
         return None

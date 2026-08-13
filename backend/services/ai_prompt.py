@@ -310,6 +310,22 @@ brauchbarer als eine plausible Behauptung — der Betreiber liest sie in einer \
 E-Mail und kann nicht nachfragen."""
 
 
+# Der Aufgaben-Block. Er steht neben GUARDIAN, weil er dessen Geschwister ist:
+# der zweite Fall, in dem niemand davorsitzt. Dort weckt eine Stoerung, hier die
+# Uhr.
+#
+# Auch er ist **keine** Schranke. Die Schranken sind mechanisch: die
+# Werkzeugmenge (`aufgaben_tools`), die Zeitzonenpruefung im Dienst und die
+# Autonomiepruefung beim Anlegen *und* bei jedem Lauf. Was hier steht, soll das
+# Modell nur nicht in Faelle laufen lassen, die es erst um drei Uhr nachts
+# bemerkt — und der zweite Absatz haelt fest, was der Betreiber ausdruecklich
+# verlangt hat: gefragt wird **vorher**, nicht wenn es soweit ist.
+AUFGABEN = """Stehende Auftraege: Sagt jemand "jeden Tag um acht", "alle acht Stunden" oder "ab morgen frueh", legst du mit `propose_task_set` einen stehenden Auftrag an. `list_tasks` zeigt alle; dasselbe Werkzeug ohne `task_id` legt an, mit `task_id` aendert es — auch nur `enabled: false`, um einen Auftrag stillzulegen, ohne ihn zu verlieren. `propose_task_delete` entfernt ihn ganz. Beschreib die Aufgabe nicht ab, sondern schreib in `instruction`, was du beim Faelligwerden tun sollst — dieser Text ist dein spaeterer Auftrag.
+Vor dem Anlegen muss die **Zeitzone** feststehen. Steht sie im Gedaechtnis, nimm sie; sonst frag mit `ask_user` danach und merk sie dir danach mit `remember`. Beim Bestaetigen nennst du Zone und naechste Faelligkeit ausdruecklich. Ist unklar, wie der Mensch erreicht werden will, frag ebenso nach dem Weg (Panel, E-Mail oder beides).
+Ein Auftrag mit `kind: "act"` darf selbst handeln und setzt den autonomen Modus voraus. Fehlt der, sag das **beim Anlegen** und nicht um drei Uhr nachts — biete an, ihn als reinen Bericht (`kind: "report"`) anzulegen.
+Weckt dich ein faelliger Auftrag, sitzt niemand davor: `ask_user` gibt es dann nicht. Entscheide selbst oder melde ehrlich Fehlanzeige. Dein Abschlusstext wird als E-Mail gelesen — fasse in wenigen Saetzen zusammen, was du festgestellt oder getan hast."""
+
+
 # Reihenfolge des fertigen Prompts. Der Skill-Index wird zwischen SKILLS und
 # GEHEIMNISSE eingesetzt: er gehoert thematisch zu den Skills, soll aber nicht
 # zwischen Regel und Verbot stehen.
@@ -335,6 +351,7 @@ NACH_SKILL_INDEX = (
     GEHEIMNISSE,
     UNTRUSTED,
     GUARDIAN,
+    AUFGABEN,
 )
 
 

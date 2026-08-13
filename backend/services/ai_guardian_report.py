@@ -16,9 +16,7 @@ scheitert, waere die schlechteste Eigenschaft dieser ganzen Kopplung.
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import threading
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -153,7 +151,7 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     Hier ist die Zuordnung eindeutig — wer die Autonomie erteilt hat, erfaehrt,
     was damit geschehen ist.
     """
-    from services.email_service import EmailService
+    from services import ai_mail
 
     rahmen = zustand.get("guardian") or {}
     server_id = rahmen.get("server_id")
@@ -166,13 +164,12 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     vorfall = db.get(Incident, int(incident_id))
     if user is None or server is None or vorfall is None:
         return
-    if not user.email_notifications:
-        return
-    if not EmailService.is_configured():
-        logger.info(
-            "Guardian-Bericht nicht zustellbar: E-Mail nicht eingerichtet (run_id=%s)",
-            run.id,
-        )
+    # Die drei Vorbedingungen — Benachrichtigungen gewuenscht, Versandweg
+    # eingerichtet, Adresse lesbar — stehen seit dem zweiten Anlass (den
+    # faelligen KI-Aufgaben) in `ai_mail` und nicht mehr hier. Sie einzeln zu
+    # wiederholen hiess, sie irgendwann verschieden zu wiederholen.
+    adresse = ai_mail.empfaenger(db, user)
+    if adresse is None:
         return
 
     # Der Zustand des **Vorfalls**, nicht die Behauptung des Modells. Ein Lauf
@@ -190,10 +187,6 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
             "Der Verlauf steht im KI-Chat des Panels."
         )
 
-    adresse = user.email
-    if not adresse:
-        return
-
     _zustellen(
         to=adresse,
         username=str(user.username),
@@ -206,31 +199,19 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
 
 
 def _zustellen(**felder) -> None:
-    """Schickt die Mail in einem eigenen Thread mit eigener Ereignisschleife.
+    """Waehlt die Mail aus; den Versand macht `ai_mail`.
 
-    `_lauf_abschliessen` ist synchron und laeuft je nach Weg auf der
-    Ereignisschleife der Anwendung — `asyncio.run` waere dort ein Fehler, und
-    `await` geht nicht, weil die Funktion kein `async def` ist. Dasselbe Muster
-    benutzt `guardian_incident_service` fuer seine Benachrichtigungen bereits.
-
-    Der Rueckgabewert wird **ausgewertet**. `send_email` wirft nie und gibt bei
-    jedem Problem `False` zurueck; ohne diese Zeile waere die Zusage "der
-    Benutzer wird informiert" weder erfuellt noch pruefbar, und im Log stuende
-    nichts.
+    Bleibt als eigene Funktion bestehen, obwohl sie nur noch drei Zeilen hat:
+    sie ist die Stelle, an der die Tests den Versand abfangen, und sie ist das
+    einzige Stueck, das **guardianspezifisch** ist — welche der `send_*`-
+    Funktionen es sein soll. Thread, Ereignisschleife und die Auswertung des
+    Rueckgabewerts sind an allen drei Anlaessen dieselben und stehen deshalb
+    einmal in `ai_mail.zustellen`.
     """
+    from services import ai_mail
     from services.email_service import EmailService
 
-    def _lauf() -> None:
-        schleife = asyncio.new_event_loop()
-        try:
-            ok = schleife.run_until_complete(
-                EmailService.send_ai_healing_report(**felder)
-            )
-            if not ok:
-                logger.warning("Guardian-Bericht konnte nicht zugestellt werden")
-        except Exception as exc:  # noqa: BLE001 - ein Mailfehler beendet keinen Lauf
-            logger.warning("Guardian-Bericht fehlgeschlagen: %s", type(exc).__name__)
-        finally:
-            schleife.close()
-
-    threading.Thread(target=_lauf, daemon=True, name="ai-guardian-report").start()
+    ai_mail.zustellen(
+        lambda: EmailService.send_ai_healing_report(**felder),
+        name="ai-guardian-report",
+    )

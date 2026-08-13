@@ -517,6 +517,97 @@ Der KI-Assistent hat sie eigenstaendig bearbeitet. Ergebnis: {zustand}.
         return await EmailService.send_email(to, subject, body, html_body)
 
     @staticmethod
+    async def send_ai_task_report(
+        to: str,
+        username: str,
+        *,
+        task_title: str,
+        plan_text: str,
+        geschafft: bool,
+        bericht: str,
+    ) -> bool:
+        """Der Bericht ueber einen stehenden Auftrag, der faellig war.
+
+        Dieselben zwei Regeln wie beim Heilungsbericht, aus denselben Gruenden:
+
+        Der Fliesstext stammt vom Modell und ist damit unvertrauenswuerdige
+        Eingabe — `html_text` maskiert ihn. Das gilt hier fuer **mehr** Felder
+        als dort: auch der Name der Aufgabe und der Plantext gehen letztlich auf
+        etwas zurueck, das ein Mensch in einen Chat getippt und ein Modell
+        umformuliert hat.
+
+        Und die Ueberschrift kommt aus `geschafft`, einer Tatsache des Panels
+        (dem Endzustand des Laufs), nicht aus der Selbsteinschaetzung des
+        Modells. Ein Auftrag, der still gescheitert ist, ist die wichtigere
+        Nachricht von beiden — niemand sass davor.
+        """
+        titel = (
+            "KI-Aufgabe erledigt" if geschafft else "KI-Aufgabe nicht abgeschlossen"
+        )
+        subject = f"Maunting Server Manager — {titel}: {task_title}"
+        zustand = "erledigt" if geschafft else "nicht abgeschlossen"
+        body = f"""Hallo {username},
+
+deine KI-Aufgabe "{task_title}" ({plan_text}) war faellig.
+Ergebnis: {zustand}.
+
+{bericht}
+
+Den vollstaendigen Verlauf findest du im KI-Chat des Panels.
+Maunting Server Manager
+"""
+        nachricht = (
+            f'Deine KI-Aufgabe <strong>"{EmailService.html_text(task_title)}"</strong> '
+            f'({EmailService.html_text(plan_text)}) war faellig.<br/>'
+            f'Ergebnis: <strong>{zustand}</strong>.'
+        )
+        detail = EmailService.html_text(bericht) + (
+            '<p style="margin:16px 0 0 0;font-size:13px;">Den vollstaendigen '
+            'Verlauf findest du im KI-Chat des Panels.</p>'
+        )
+        html_body = EmailService._notification_email_html(
+            username, titel, nachricht, detail
+        )
+        return await EmailService.send_email(to, subject, body, html_body)
+
+    @staticmethod
+    async def send_ai_test_email(to: str, username: str) -> bool:
+        """Die Mail, mit der sich der eingerichtete Versandweg nachpruefen laesst.
+
+        Kein Fremdtext darin — deshalb als einzige der KI-Mails ohne jede
+        Maskierung ausser der, die die Vorlage ohnehin auf `username` anwendet.
+
+        Sie geht ueber `send_email` und damit ueber genau den Weg, den auch ein
+        Aufgaben- oder Heilungsbericht nimmt. Das ist der Zweck: getestet wird
+        nicht irgendein Versand, sondern der, auf den es spaeter ankommt.
+        """
+        titel = "Testmail vom KI-Assistenten"
+        subject = f"Maunting Server Manager — {titel}"
+        body = f"""Hallo {username},
+
+diese Mail hat der KI-Assistent auf deine Bitte hin verschickt.
+
+Wenn du sie liest, funktioniert der im Panel eingerichtete Versandweg —
+und damit auch die Berichte, die dir die KI kuenftig zu deinen Aufgaben
+und zu behobenen Stoerungen schickt.
+
+Maunting Server Manager
+"""
+        nachricht = (
+            'Diese Mail hat der KI-Assistent auf deine Bitte hin verschickt.'
+        )
+        detail = (
+            '<p style="margin:0;">Wenn du sie liest, funktioniert der im Panel '
+            'eingerichtete Versandweg — und damit auch die Berichte, die dir die '
+            'KI kuenftig zu deinen Aufgaben und zu behobenen Stoerungen '
+            'schickt.</p>'
+        )
+        html_body = EmailService._notification_email_html(
+            username, titel, nachricht, detail
+        )
+        return await EmailService.send_email(to, subject, body, html_body)
+
+    @staticmethod
     async def send_server_installed_notification(to: str, username: str, server_name: str) -> bool:
         subject = f"Maunting Server Manager — Server installiert: {server_name}"
         body = f"""Hallo {username},

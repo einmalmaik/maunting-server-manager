@@ -93,15 +93,37 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     `provider_tool_definitions()` geht in **jeder** Runde der Werkzeugschleife
     mit ueber die Leitung, aber `message_character_count` sieht ihn nicht: er
     steht weder im Kontextbudget noch im Fuellstandsring neben dem
-    Absendeknopf. Gemessen sind das rund 31.000 Zeichen gegenueber gut 8.000
-    fuer den Prompt.
+    Absendeknopf.
 
-    Die Grenze hier ist keine technische Schranke, sondern eine sichtbare Zahl:
-    wer sie reisst, hat den Katalog um ein Drittel wachsen lassen und soll das
-    bemerken, bevor es ein Modell mit kleinem Fenster bemerkt.
+    Die Grenze ist keine technische Schranke, sondern eine sichtbare Zahl: wer
+    sie reisst, soll das bemerken, bevor es ein Modell mit kleinem Fenster
+    bemerkt. Genau dafuer ist sie beim Bau der stehenden KI-Aufgaben auch
+    angesprungen — und dabei kam heraus, dass die hier dokumentierte Messung
+    laengst nicht mehr stimmte.
+
+    Stand 13.08.2026, nachgemessen statt abgeschrieben:
+
+    * ohne die Aufgaben-Werkzeuge: **40.930** Zeichen (nicht "rund 31.000",
+      wie hier bis dahin stand — der Katalog war seither um ein Drittel
+      gewachsen, ohne dass die Grenze je angesprungen waere),
+    * die vier Aufgaben-Werkzeuge zusammen: **4.193** Zeichen,
+    * Systemprompt zum Vergleich: gut 8.000.
+
+    Die Grenze steht deshalb jetzt bei 50.000 und nicht bei 45.000. Das ist eine
+    bewusste Anhebung um rund zehn Prozent fuer ein Feature, das der Betreiber
+    ausdruecklich bestellt hat — und keine Gewoehnung: der naechste, der hier
+    auflaeuft, findet eine Zahl vor, die zu einer nachgemessenen gehoert, und
+    muss dieselbe Entscheidung erneut treffen. Wer sie wieder anhebt, misst
+    vorher nach und schreibt es hin.
+
+    Der billigste Weg unter die Grenze ist uebrigens **nicht**, Beschreibungen
+    zu kuerzen: jede von ihnen hat einen Betriebsanlass. Er ist, zwei Werkzeuge
+    zu einem zu machen, wenn sie dasselbe Schema tragen — so wurden aus
+    `propose_task_create` und `propose_task_update` ein `propose_task_set`, und
+    das Planschema steht seitdem einmal statt zweimal im Katalog.
     """
     katalog = json.dumps(ai_action_service.provider_tool_definitions(), ensure_ascii=False)
-    assert len(katalog) < 45_000, (
+    assert len(katalog) < 50_000, (
         f"Der Werkzeugkatalog ist auf {len(katalog)} Zeichen gewachsen. "
         "Er geht in jeder Runde mit und taucht in keiner Budgetrechnung auf."
     )

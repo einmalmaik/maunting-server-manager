@@ -645,6 +645,70 @@ Bestätigungspflicht.
 
 ---
 
+## KI-Aufgaben (stehende Aufträge)
+
+Der zweite Anlass, zu dem die KI ohne anwesenden Menschen arbeitet — neben der
+Guardian-Heilung. Dort weckt sie eine Störung, hier die Uhr.
+
+Ein stehender Auftrag entsteht **ausschließlich im Chat**. Es gibt keinen
+Bildschirm dafür und keine Tabelle: man sagt der KI, was regelmäßig geschehen
+soll, und bestätigt die Karte, die sie daraufhin vorlegt.
+
+```
+„Benachrichtige mich jeden Tag um 8 Uhr per Mail über den Zustand meiner Server."
+„Mach jeden Tag um 3 Uhr ein Backup von allen Servern."
+„Sag mir jeden Morgen, wie das Wetter wird."
+„Welche Aufgaben hast du für mich?"  →  listet alles auf
+„Pausier die erste."                  →  angehalten, aber nicht verloren
+„Lösch die zweite."                   →  ganz weg
+```
+
+**Zwei Arten.** Ein *Bericht* (`report`) liest, fasst zusammen und meldet sich;
+er darf nichts verändern. Ein *handelnder* Auftrag (`act`) darf zusätzlich
+schreiben — und setzt den **autonomen Modus** voraus, mit Recht *und* erteilter
+Freigabe. Die KI sagt das beim Anlegen und nicht erst um drei Uhr nachts. Wird
+die Freigabe später zurückgezogen, schaltet sich der Auftrag beim nächsten
+Termin ab, statt still zu Vorschlägen zu werden, die niemand bestätigt.
+
+**Zeitzone.** Sie steht an der Aufgabe, als IANA-Name (`Europe/Berlin`). Die KI
+fragt danach, wenn sie sie nicht schon aus dem Gedächtnis kennt, und nennt sie
+in jeder Bestätigung und jeder Auflistung mit. „Täglich um 08:00" ohne Zone ist
+genau die Angabe, bei der man sich später fragt, warum die Mail um neun kam.
+
+**Zeitplan.** Täglich zu einer Uhrzeit (wahlweise nur an bestimmten
+Wochentagen), in einem Abstand von 1 bis 168 Stunden, oder einmalig zu einem
+Zeitpunkt. Ein Benutzer hat höchstens 20 Aufträge.
+
+**Zustellweg.** `chat`, `email` oder `both`. Der Verlauf steht **immer** im
+Chat — `email` heißt *zusätzlich*, nicht *ausschließlich*. Die Mail geht über
+denselben panel-eigenen SMTP wie jede andere Benachrichtigung und über
+denselben Schalter (*Profil → E-Mail-Benachrichtigungen*); einen zweiten
+Schalter gibt es nicht. Auf Bitte hin kann die KI mit `send_test_email` prüfen,
+ob dieser Weg funktioniert — Empfänger ist immer die eigene hinterlegte
+Adresse, nie eine genannte.
+
+**Was beim Fälligwerden gilt.** Ein Takt sieht jede Minute in der Tabelle nach;
+der Zeitplan lebt also nicht im Scheduler, sondern in der Datenbank und
+überlebt jeden Neustart. Läuft gerade ein Chat desselben Benutzers, wird
+vertagt statt unterbrochen. Ein Termin, der mehr als eine Stunde alt ist, wird
+**übersprungen** und nicht nachgeholt — ein um elf Uhr nachgeholtes
+Nachtbackup ist schlechter als keines. Im Lauf selbst ist die Werkzeugmenge
+enger als im Chat: keine Rückfragen (es sitzt niemand da), kein Gedächtnis- und
+Skill-Schreiben, keine Hoster-Werkzeuge, und ein Auftrag legt keine Aufträge
+an. Verlangt ein Vorschlag trotzdem eine Bestätigung, wird er zurückgenommen
+und der Lauf endet mit einer ehrlichen Fehlanzeige — statt auf einen Klick zu
+warten, den niemand tut.
+
+**Abgrenzung.** Das ist etwas anderes als *Auto-Neustart* und *Auto-Backup* am
+einzelnen Server (siehe Servereinstellungen). Die bleiben, wie sie sind: fester
+Zweck, kein Modell, kein Kontingent. Ein stehender Auftrag ist an nichts davon
+gebunden.
+
+Recht: `ai.tasks.manage` (Gruppe *KI*), zusätzlich `ai.chat.use`. Für
+handelnde Aufträge kommt `ai.autonomous.use` samt Freigabe dazu.
+
+---
+
 ## Kubernetes
 
 Manifeste und Betriebsablauf liegen unter

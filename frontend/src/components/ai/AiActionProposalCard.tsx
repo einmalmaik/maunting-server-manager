@@ -1,4 +1,4 @@
-import { AlertTriangle, Blocks, Bot, FilePenLine, FileX, HardDriveDownload, HardDriveUpload, Network, Package, Plug, Power, ServerCog, ShieldCheck, Trash2, Wrench } from 'lucide-react'
+import { AlertTriangle, Blocks, Bot, CalendarClock, FilePenLine, FileX, HardDriveDownload, HardDriveUpload, Network, Package, Plug, Power, ServerCog, ShieldCheck, Trash2, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -132,6 +132,11 @@ export function AiActionProposalCard({
     propose_ai_tarif_role: ShieldCheck,
     propose_server_repair: Wrench,
     propose_file_delete: FileX,
+    // Ein stehender Auftrag ist eine Uhr, kein Serververhalten — deshalb
+    // dasselbe Symbol fuers Anlegen wie fuers Loeschen, aber ein anderes als
+    // fuer alles, was einen Server anfasst.
+    propose_task_set: CalendarClock,
+    propose_task_delete: CalendarClock,
   }[proposal.tool_name] ?? Power
   // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb
   // eine eigene, neutrale Farbgebung statt der warnenden — und keinen Knopf.

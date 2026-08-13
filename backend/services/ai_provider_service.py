@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from models import AiProvider
+from models import AiProvider, AiRun, User
 from services import ai_provider_registry
 from services.dis_client import DisClient
 
@@ -174,6 +174,41 @@ def resolve_api_key(db: Session, provider: AiProvider, user_id: int) -> str | No
             provider.operator_api_key_encrypted, aad=_operator_aad(provider.id)
         )
     return None
+
+
+def anbieter_ohne_auswahl(db: Session, user: User) -> AiProvider | None:
+    """Welcher Anbieter, wenn niemand einen aussucht?
+
+    Im Chat kommt er aus der Anfrage. In einem Lauf, den die Uhr oder die
+    Guardian-Engine ausloest, gibt es keine — und `AiProvider` hat kein
+    `is_default`. Eines zu erfinden waere eine neue Einstellung fuer ein
+    Problem, das die Daten schon beantworten: der Anbieter, den dieser Benutzer
+    zuletzt tatsaechlich benutzt hat. Das ist keine Vermutung ueber seine
+    Vorlieben, sondern seine juengste Entscheidung.
+
+    Gibt es keinen solchen, der einzige aktivierte. Gibt es mehrere und keinen
+    juengsten, wird **nicht** geraten — dann laeuft nichts, und der Benutzer
+    erfaehrt beim naechsten Chat davon. Ein zufaellig gewaehltes Modell koennte
+    teurer sein, als er wollte.
+
+    Steht hier und nicht bei der Guardian-Engine, seit es den zweiten Ausloeser
+    ohne Zuschauer gibt. Zwei Kopien dieser Regel waeren zwei Antworten auf
+    dieselbe Frage — und die zweite haette irgendwann geraten, wo die erste
+    schweigt.
+    """
+    letzter = (
+        db.query(AiRun)
+        .filter(AiRun.user_id == user.id, AiRun.provider_id.isnot(None))
+        .order_by(AiRun.created_at.desc())
+        .first()
+    )
+    if letzter is not None:
+        anbieter = db.get(AiProvider, letzter.provider_id)
+        if anbieter is not None and anbieter.enabled:
+            return anbieter
+
+    aktive = db.query(AiProvider).filter(AiProvider.enabled.is_(True)).order_by(AiProvider.id).all()
+    return aktive[0] if len(aktive) == 1 else None
 
 
 def estimate_cost_microunits(provider: AiProvider, tokens: int) -> int:

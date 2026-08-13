@@ -49,6 +49,7 @@ from services.ai_action_service import (
     question_payload,
 )
 from services.ai_proposal_service import (
+    AufgabenKontext,
     GuardianKontext,
     create_proposal,
     execute_autonomously,
@@ -62,6 +63,7 @@ from services.ai_tool_registry import (
     SKILL_TOOLS,
     WERKZEUGE,
     WRITE_TOOLS,
+    aufgaben_tools,
 )
 from services.ai_context_service import (
     anlagenwissen_nachtrag,
@@ -348,10 +350,40 @@ def guardian_aus_zustand(zustand: dict) -> GuardianKontext | None:
         raise GuardianRahmenUnlesbar("Guardian-Rahmen im Laufzustand unlesbar") from exc
 
 
+def aufgabe_aus_zustand(zustand: dict) -> AufgabenKontext | None:
+    """Baut den Aufgabenrahmen aus dem Arbeitsgedaechtnis des Laufs.
+
+    Wortgleich zur Ueberlegung bei `guardian_aus_zustand`, und aus demselben
+    Grund eine eigene Funktion: die beiden Rahmen schliessen sich nicht
+    gegenseitig aus, sie kommen nur nie zusammen vor.
+
+    Ein **vorhandener, aber unlesbarer** Rahmen wirft. Die Richtung ist hier
+    dieselbe wie dort: ohne Rahmen faellt die Werkzeugeinengung weg, `ask_user`
+    wird wieder moeglich (und parkt den Lauf, den niemand aufweckt), und offene
+    Vorschlaege werden geparkt statt zurueckgenommen. Der Verlust des Rahmens
+    ist die gefaehrliche Richtung, nicht die sichere.
+    """
+    roh = zustand.get("aufgabe")
+    if roh is None:
+        return None
+    if not isinstance(roh, dict):
+        raise GuardianRahmenUnlesbar("Aufgabenrahmen ist kein Woerterbuch")
+    try:
+        return AufgabenKontext(
+            task_id=str(roh["task_id"]),
+            kind=str(roh["kind"]),
+            channel=str(roh["channel"]),
+            title=str(roh.get("title") or ""),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise GuardianRahmenUnlesbar("Aufgabenrahmen im Laufzustand unlesbar") from exc
+
+
 def _tool_followup_messages(
     *, user_id: int, conversation_id: str, tool_calls, deferred=(),
     correlation_id: str | None = None, run_id: str | None = None,
     guardian: GuardianKontext | None = None,
+    aufgabe: AufgabenKontext | None = None,
 ) -> tuple[list[dict], list[dict], dict | None]:
     """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
 
@@ -408,6 +440,17 @@ def _tool_followup_messages(
                     raise AiActionValidationError(
                         "In einer Guardian-Heilung ist nur der betroffene Server erlaubt"
                     )
+    if aufgabe is not None:
+        # Dieselbe Durchsetzung wie oben, mit einem Unterschied: **keine**
+        # Serverbindung. Ein stehender Auftrag gehoert keinem Server — "sieh
+        # nach meinen Servern" meint alle, die der Benutzer sehen darf, und
+        # welche das sind, entscheidet `_resolve_server` bei jedem Aufruf
+        # ohnehin einzeln.
+        for call in tool_calls:
+            if call.name not in aufgaben_tools(aufgabe.kind):
+                raise AiActionValidationError(
+                    "Dieses Werkzeug steht in einer geplanten Aufgabe nicht zur Verfuegung"
+                )
     with SessionLocal() as db:
         user = db.get(User, user_id)
         if user is None or not user.is_active:
@@ -684,6 +727,7 @@ def _vorschlag_ereignis(proposal: AiActionProposal) -> dict:
 def _persist_write_proposals(
     *, user_id: int, conversation_id: str, tool_calls, correlation_id: str,
     run_id: str | None = None, guardian: GuardianKontext | None = None,
+    aufgabe: AufgabenKontext | None = None,
 ) -> list[dict]:
     if len(tool_calls) > MAX_TOOL_CALLS or any(call.name not in WRITE_TOOLS for call in tool_calls):
         raise AiActionValidationError("Ungueltige Write-Tool-Sequenz")
@@ -720,6 +764,7 @@ def _persist_write_proposals(
                     arguments=call.arguments,
                     correlation_id=correlation_id,
                     guardian=guardian,
+                    aufgabe=aufgabe,
                 ))
             except AiActionStateError as exc:
                 _ablehnung_protokollieren(
@@ -1245,7 +1290,7 @@ def _lauf_abschliessen(
             # Die Nachbereitung laeuft trotzdem — und zwar **vor** dem Ausstieg.
             #
             # Hier lag der schwerste Fehler dieser Kopplung. Der Waechter oben
-            # ist richtig, aber er sprang bisher an `_guardian_nachbereiten`
+            # ist richtig, aber er sprang bisher an `_lauf_nachbereiten`
             # vorbei, und der haeufigste Weg in diesen Zweig ist ausgerechnet
             # der, den `ai_guardian_service` als Normalfall beschreibt: der
             # Freigeber tippt waehrend einer Heilung etwas in den Chat,
@@ -1263,7 +1308,7 @@ def _lauf_abschliessen(
             # Der Versand ist gegen Doppelung gesichert (`guardian_berichtet`
             # im Zustand), deshalb schadet der zweite Aufruf nicht, wenn beide
             # Wege einmal zusammenfallen.
-            _guardian_nachbereiten(db, run, None)
+            _lauf_nachbereiten(db, run, None)
             ai_run_broker.veroeffentlichen(
                 run_id,
                 "run",
@@ -1282,7 +1327,7 @@ def _lauf_abschliessen(
         run.updated_at = datetime.now(timezone.utc)
         db.commit()
         if status in AUSGELAUFEN:
-            _guardian_nachbereiten(db, run, zustand)
+            _lauf_nachbereiten(db, run, zustand)
     ai_run_broker.veroeffentlichen(
         run_id, "run", {"run_id": run_id, "status": status, "stop_reason": stop_reason}
     )
@@ -1290,10 +1335,17 @@ def _lauf_abschliessen(
         ai_run_broker.beenden(run_id)
 
 
-def _guardian_nachbereiten(db, run: AiRun, zustand: dict | None) -> None:
-    """Was am Ende eines Laufs mit Guardian-Bezug noch zu tun ist.
+def _lauf_nachbereiten(db, run: AiRun, zustand: dict | None) -> None:
+    """Was am Ende eines Laufs ohne Zuschauer noch zu tun ist.
 
-    Zwei Dinge, beide erst **jetzt** — nicht beim Start:
+    **Eine** Funktion fuer beide Rahmen, und das ist eine Entscheidung gegen die
+    naheliegende Alternative. Ein zweites `_aufgaben_nachbereiten` daneben
+    haette zwei Aufrufe an zwei Stellen gebraucht — und genau das Vergessen
+    einer dieser Stellen war der schwerste Fehler der Guardian-Kopplung (siehe
+    den Waechterzweig weiter oben). Wer beide Faelle in eine Funktion legt, kann
+    die zweite Stelle nicht mehr uebersehen.
+
+    Drei Dinge, alle erst **jetzt** — nicht beim Start:
 
     * Genannte Vorfaelle als besprochen vermerken. Bricht der Lauf vorher ab,
       bleibt der Vorfall vorgemerkt und kommt beim naechsten Mal wieder. Lieber
@@ -1302,6 +1354,8 @@ def _guardian_nachbereiten(db, run: AiRun, zustand: dict | None) -> None:
       Endzustand. "Nicht geschafft" ist fuer den Betreiber die wichtigere
       Nachricht von beiden, und ein Lauf, der still scheitert, waere die
       schlechteste Eigenschaft dieser ganzen Kopplung.
+    * War es ein faelliger stehender Auftrag, geht dessen Bericht hinaus — nach
+      derselben Regel und mit derselben Begruendung.
 
     Kapselt alles ab: der Lauf ist zu diesem Zeitpunkt fertig und committet.
     Ein Fehler beim Vermerken oder beim Versand darf ihn nicht nachtraeglich in
@@ -1310,10 +1364,10 @@ def _guardian_nachbereiten(db, run: AiRun, zustand: dict | None) -> None:
     **Genau einmal.** Die Funktion wird aus zwei Richtungen gerufen — vom
     regulaeren Abschluss und vom Waechter fuer den bereits beendeten Lauf. Beide
     Wege koennen denselben Lauf treffen (ein abgeloester Lauf, dessen Segment
-    danach noch seinen eigenen Abschluss meldet). Die Marke `guardian_berichtet`
-    im Laufzustand entscheidet, und sie wird **vor** dem Versand gesetzt: eine
-    zweite Mail waere schlimmer als eine ausgebliebene Wiederholung, denn der
-    Betreiber liest zweimal denselben Vorgang und weiss nicht, ob es zwei waren.
+    danach noch seinen eigenen Abschluss meldet). Je Rahmen entscheidet eine
+    Marke im Laufzustand, und sie wird **vor** dem Versand gesetzt: eine zweite
+    Mail waere schlimmer als eine ausgebliebene Wiederholung, denn der Betreiber
+    liest zweimal denselben Vorgang und weiss nicht, ob es zwei waren.
     """
     if zustand is None:
         zustand = ai_run_service.zustand_lesen(run)
@@ -1330,24 +1384,48 @@ def _guardian_nachbereiten(db, run: AiRun, zustand: dict | None) -> None:
         db.rollback()
         logger.warning("Guardian-Briefing nicht vermerkt run_id=%s", run.id)
 
-    if not isinstance(zustand.get("guardian"), dict):
+    from services import ai_guardian_report, ai_task_report
+
+    _bericht_zustellen(
+        db, run, zustand,
+        rahmen="guardian", marke="guardian_berichtet",
+        versenden=ai_guardian_report.bericht_versenden,
+    )
+    _bericht_zustellen(
+        db, run, zustand,
+        rahmen="aufgabe", marke="aufgabe_berichtet",
+        versenden=ai_task_report.bericht_versenden,
+    )
+
+
+def _bericht_zustellen(db, run: AiRun, zustand: dict, *, rahmen: str, marke: str,
+                       versenden) -> None:
+    """Setzt die Marke, committet sie, und versendet erst dann.
+
+    Die Reihenfolge ist der ganze Inhalt dieser Funktion. Waere sie umgekehrt,
+    entstuende bei einem Fehler nach dem Versand eine zweite Mail beim naechsten
+    Anlauf — und der Betreiber saehe zwei Berichte ueber einen Vorgang, ohne
+    unterscheiden zu koennen, ob es zwei waren.
+
+    Kapselt alles ab: der Lauf ist fertig und committet. Ein Fehler beim Versand
+    darf ihn nicht nachtraeglich in einen Fehlschlag verwandeln.
+    """
+    if not isinstance(zustand.get(rahmen), dict):
         return
-    if zustand.get("guardian_berichtet"):
+    if zustand.get(marke):
         return
     try:
-        zustand["guardian_berichtet"] = True
+        zustand[marke] = True
         ai_run_service.zustand_schreiben(run, zustand)
         db.commit()
     except Exception:
         db.rollback()
-        logger.warning("Guardian-Berichtsmarke nicht gesetzt run_id=%s", run.id)
+        logger.warning("Berichtsmarke %s nicht gesetzt run_id=%s", marke, run.id)
         return
     try:
-        from services import ai_guardian_report
-
-        ai_guardian_report.bericht_versenden(db, run=run, zustand=zustand)
+        versenden(db, run=run, zustand=zustand)
     except Exception:
-        logger.warning("Guardian-Bericht nicht versendet run_id=%s", run.id)
+        logger.warning("Bericht %s nicht versendet run_id=%s", rahmen, run.id)
 
 
 def _werkzeug_signatur(name: str, argumente: dict) -> str:
@@ -1413,15 +1491,31 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     # denselben Verschaerfungen wie der erste Zug.
     try:
         guardian = guardian_aus_zustand(zustand)
+        aufgabe = aufgabe_aus_zustand(zustand)
     except GuardianRahmenUnlesbar:
         # Ein Lauf, der eine Heilung sein sollte, aber nicht mehr sagen kann,
         # welchen Server er heilt, faehrt nicht weiter. Ohne diesen Ausstieg
         # liefe er als gewoehnlicher Chatlauf weiter — mit dem vollen
         # Werkzeugsatz, ohne Serverbindung, ohne Backup-Pflicht und ohne
-        # jemanden, der mitliest.
-        logger.error("Guardian-Rahmen unlesbar, Lauf wird beendet run_id=%s", run_id)
+        # jemanden, der mitliest. Fuer einen Aufgabenlauf gilt dasselbe: ohne
+        # Rahmen faellt die Werkzeugeinengung weg, und `ask_user` wuerde ihn
+        # parken, bis er ablaeuft.
+        logger.error("Laufrahmen unlesbar, Lauf wird beendet run_id=%s", run_id)
         _lauf_abschliessen(run_id, status="failed", stop_reason="guardian_frame_lost")
         return
+
+    # **Der gemeinsame Nenner beider Rahmen: es sitzt niemand davor.**
+    #
+    # Drei Stellen im Segment haengen daran, und alle drei galten bisher nur
+    # fuer den Guardian: eine Rueckfrage wird abgewiesen, ein bestaetigungs-
+    # pflichtiger Vorschlag wird zurueckgenommen statt geparkt, und der Lauf
+    # endet, statt auf einen Klick zu warten, den niemand tut. Sie fuer die
+    # Aufgabe zu kopieren waere dreimal dieselbe Ueberlegung an drei Orten
+    # gewesen — und der erste, den jemand spaeter uebersieht, haengt einen
+    # Aufgabenlauf dauerhaft auf 'waiting_user'. Weil `aktiver_lauf` wartende
+    # Laeufe mitzaehlt, blockierte er von da an jede weitere Aufgabe dieses
+    # Benutzers.
+    unbeaufsichtigt = guardian is not None or aufgabe is not None
 
     ai_run_broker.neues_segment(run_id)
     ai_run_broker.veroeffentlichen(
@@ -1457,6 +1551,26 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     budget_erschoepft = False
     try:
         tools = provider_tool_definitions()
+        # **Angeboten wird nur, was auch ausgefuehrt wuerde.**
+        #
+        # Die Schranke ist das nicht — die steht in `_tool_followup_messages`
+        # und `create_proposal` und bleibt dort, weil ein Katalog eine Bitte ist
+        # und keine Zusage. Das hier ist Fuehrung, und sie hat einen messbaren
+        # Preis: ohne sie bekam ein Lauf ohne Zuschauer `ask_user` angeboten,
+        # obwohl niemand antwortet. Das Modell ruft es dann auch auf — der
+        # Prompt sagt ihm ja, bei Unklarheit zu fragen —, bekommt eine
+        # Ablehnung, und die Runde ist verbraucht. Bei einem stehenden Auftrag
+        # passiert das jede Nacht aufs Neue.
+        erlaubt = None
+        if guardian is not None:
+            erlaubt = GUARDIAN_HEILUNG_TOOLS
+        elif aufgabe is not None:
+            erlaubt = aufgaben_tools(aufgabe.kind)
+        if erlaubt is not None:
+            tools = [
+                eintrag for eintrag in tools
+                if str(eintrag.get("function", {}).get("name")) in erlaubt
+            ]
         # Zwischenspeichern des Prompts, sofern dieses Modell es ausdruecklich
         # verlangt. Einmal je Segment ermittelt und nicht je Runde: der Katalog
         # antwortet zwar aus seinem eigenen Speicher, aber die Antwort kann sich
@@ -1534,9 +1648,10 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 (call for call in current_usage.tool_calls if call.name in ASK_TOOLS),
                 None,
             )
-            if frage is not None and guardian is not None:
-                # In einer Heilung ist niemand da, den man fragen koennte — und
-                # das war eine ausnutzbare Luecke, keine Unbequemlichkeit.
+            if frage is not None and unbeaufsichtigt:
+                # In einer Heilung — und ebenso in einer faelligen Aufgabe — ist
+                # niemand da, den man fragen koennte. Das war eine ausnutzbare
+                # Luecke, keine Unbequemlichkeit.
                 #
                 # Dieser Zweig lag vor **jeder** Guardian-Pruefung: weder die
                 # Werkzeugmenge (`_tool_followup_messages`) noch der
@@ -1556,7 +1671,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 # Modell bekommt eine Antwort, mit der es weiterarbeiten kann,
                 # statt einen Lauf, der ohne Erklaerung endet.
                 logger.info(
-                    "Rueckfrage in einer Guardian-Heilung abgewiesen run_id=%s", run_id
+                    "Rueckfrage ohne Zuhoerer abgewiesen run_id=%s", run_id
                 )
                 # `provider_messages` **ist** die Liste im Zustand — extend
                 # genuegt. Hier stand einmal `zustand["messages"] = ...`, ein
@@ -1611,6 +1726,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     correlation_id=vorbereitung.request_id,
                     run_id=run_id,
                     guardian=guardian,
+                    aufgabe=aufgabe,
                 )
                 for proposal in proposals:
                     # Nur echte Vorschlaege bekommen eine Karte. Ein abgelehnter
@@ -1653,9 +1769,9 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     if proposal.get("id")
                     and proposal.get("status") in {"proposed", "confirmed"}
                 ]
-                if offen and guardian is not None:
-                    # Eine Heilung parkt nicht. Es ist niemand da, der die Karte
-                    # anklickt.
+                if offen and unbeaufsichtigt:
+                    # Eine Heilung parkt nicht, und eine faellige Aufgabe
+                    # ebensowenig. Es ist niemand da, der die Karte anklickt.
                     #
                     # Der Fall ist nicht theoretisch: das Stundenkontingent ist
                     # benutzerweit, und `autonomy_allows` faellt bei Erschoepfung
@@ -1688,8 +1804,8 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     # Betreiber ehrlich, dass die KI nicht weiterkonnte.
                     _vorschlaege_zuruecknehmen(offen, grund="guardian_unattended")
                     logger.info(
-                        "Guardian-Heilung beendet: Vorschlag verlangt Bestaetigung, "
-                        "niemand ist da run_id=%s anzahl=%d",
+                        "Lauf ohne Zuhoerer beendet: Vorschlag verlangt "
+                        "Bestaetigung, niemand ist da run_id=%s anzahl=%d",
                         run_id, len(offen),
                     )
                     budget_erschoepft = True
@@ -1792,6 +1908,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 correlation_id=vorbereitung.request_id,
                 run_id=run_id,
                 guardian=guardian,
+                aufgabe=aufgabe,
             )
             provider_messages.extend(followup)
             # Das Betriebswissen der Anlage, sobald feststeht welche. Genau

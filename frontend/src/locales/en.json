@@ -368,16 +368,18 @@
         "propose_bind_ip_update": "Change bind IP",
         "propose_blueprint_change": "Derive blueprint",
         "propose_config_patch": "Change part of a file",
+        "propose_config_update": "Change configuration",
+        "propose_file_delete": "Delete file",
         "propose_hoster_integration": "Set up shop integration",
         "propose_hoster_product": "Map shop product",
-        "propose_config_update": "Change configuration",
         "propose_mod_install": "Install mod",
         "propose_server_blueprint_switch": "Switch server to another blueprint",
         "propose_server_create": "Create server",
         "propose_server_delete": "Delete server",
         "propose_server_lifecycle": "Change server state",
         "propose_server_repair": "Repair infrastructure",
-        "propose_file_delete": "Delete file"
+        "propose_task_delete": "Delete recurring task",
+        "propose_task_set": "Set up recurring task"
       },
       "status": {
         "proposed": "Review required",
@@ -408,7 +410,9 @@
         "propose_hoster_product": "Save the product mapping “{{path}}”? Every future purchase of this product creates a server with these limits — and, if configured, with the role shown.",
         "propose_server_blueprint_switch": "Switch this server to another blueprint? Start command, image and variables are replaced; the game files stay and may no longer match.",
         "propose_server_repair": "Run the “{{operation}}” repair on this server's infrastructure? “repair_permissions” resets ownership of the server directory, “reallocate_port” reassigns occupied ports and restarts the server for it. Neither touches game files.",
-        "propose_file_delete": "Delete the file “{{path}}”? Afterwards it can only be recovered from a backup. A snapshot is written to the file history before deleting."
+        "propose_file_delete": "Delete the file “{{path}}”? Afterwards it can only be recovered from a backup. A snapshot is written to the file history before deleting.",
+        "propose_task_set": "This task will run on its own from now on, even when you are not in the panel. It acts with your permissions and from your AI quota. You can pause or delete it any time from the chat.",
+        "propose_task_delete": "This task will be removed for good and will no longer run. If it should only rest for a while, have it paused instead."
       },
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",
@@ -473,12 +477,11 @@
       "list_blueprints": "Read available server types",
       "list_my_servers": "Read server list",
       "list_server_files": "Listed files",
-      "search_server_files": "Searched files",
+      "list_tasks": "Tasks listed",
       "read_ai_action_history": "Read earlier AI actions",
       "read_blueprint": "Read blueprint",
       "read_config": "Read configuration file",
       "read_docs": "Read documentation",
-      "search_docs": "Searched documentation",
       "read_guardian_incidents": "Read autopilot incidents",
       "read_hoster_integration_guide": "Read integration details",
       "read_hoster_setup": "Read shop integration",
@@ -494,8 +497,11 @@
       "read_server_status": "Read server status",
       "read_skill": "Looked up a skill",
       "remember": "Remembered",
+      "search_docs": "Searched documentation",
       "search_memory": "Searched memory",
+      "search_server_files": "Searched files",
       "search_workshop_mods": "Search the Workshop",
+      "send_test_email": "Test email sent",
       "web_search": "Searched the web"
     },
     "errors": {
@@ -2603,7 +2609,8 @@
           "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider",
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
           "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat",
-          "guardian": "With autonomy granted, a Guardian incident can trigger processing while the user is not present: the incident type, its status and the server data already shared with the assistant are transmitted; log excerpts are additionally stripped of public IP addresses and email addresses. Usage and responsibility remain with the grantor. The result report sent by email contains model-generated text."
+          "guardian": "With autonomy granted, a Guardian incident can trigger processing while the user is not present: the incident type, its status and the server data already shared with the assistant are transmitted; log excerpts are additionally stripped of public IP addresses and email addresses. Usage and responsibility remain with the grantor. The result report sent by email contains model-generated text.",
+          "tasks": "A standing task created in chat (“AI task”) stores its name, instruction, schedule, time zone and delivery channel, and triggers processing at the agreed time while the user is not present. It runs with the permissions and quota of whoever created it; on each due run the instruction and the server data it retrieves are transmitted to the selected model provider. On request the result is additionally sent by email to the stored address and contains model-generated text. Tasks can be listed, paused and deleted from the chat at any time."
         }
       },
       "storage": {

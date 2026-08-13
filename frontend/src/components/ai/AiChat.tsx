@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, BookOpen, Bot, Brain, BrainCircuit, Check, Loader2, Paperclip, Pencil, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
+import { AlertTriangle, BookOpen, Bot, Brain, BrainCircuit, CalendarClock, Check, Loader2, Paperclip, Pencil, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -898,7 +898,9 @@ export function AiChat() {
                         ? <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
                         : gruppe === 'docs'
                           ? <BookOpen className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
-                          : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
+                          : gruppe === 'tasks'
+                            ? <CalendarClock className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+                            : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
                     {skillLabel
                       ?? t(`ai.tools.${entry.tool.tool_name}`, { defaultValue: entry.tool.tool_name })}
                     {/* Ohne diesen Zusatz behauptet die Zeile einen Beleg, den

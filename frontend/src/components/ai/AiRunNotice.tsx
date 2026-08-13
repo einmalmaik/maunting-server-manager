@@ -10,6 +10,22 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 /** Wie oft nachgesehen wird, solange ein Lauf arbeitet. */
 const TAKT_MS = 8_000
 
+/**
+ * Wie oft nachgesehen wird, solange **nichts** laeuft.
+ *
+ * Hier stand vorher gar nichts: ruhte alles, hoerte der Takt auf. Das war
+ * richtig, solange ein Lauf nur durch eine getippte Nachricht entstehen konnte —
+ * wer tippt, ist im Chat, und dort meldet der Ereignisstrom selbst.
+ *
+ * Seit ein stehender Auftrag um acht Uhr **von selbst** anfaengt, stimmt die
+ * Annahme nicht mehr. Eine Seite, die seit gestern Abend offen steht, haette
+ * den Lauf nie bemerkt: kein Takt, kein Ereignis, keine Meldung. Sechzig
+ * Sekunden sind derselbe Abstand, in dem der Server selbst nach faelligen
+ * Auftraegen sieht — feiner waere eine Genauigkeit, die es dahinter gar nicht
+ * gibt.
+ */
+const RUHETAKT_MS = 60_000
+
 const TEXTE: Record<string, { key: string; fallback: string }> = {
   completed: { key: 'ai.notice.completed', fallback: 'Die KI ist mit deinem Auftrag fertig.' },
   waiting_confirmation: { key: 'ai.notice.waitingConfirmation', fallback: 'Die KI wartet auf deine Bestätigung.' },
@@ -77,9 +93,10 @@ export function AiRunNotice() {
       if (!aktiv) return
       const laeuftNoch = await nachsehen()
       if (!aktiv) return
-      // Weiter nachsehen, solange etwas arbeitet. Ruht alles, hoert der Takt
-      // auf — bis die Chatseite beim naechsten Start wieder etwas anstoesst.
-      if (laeuftNoch) timer = setTimeout(takt, TAKT_MS)
+      // Schnell nachsehen, solange etwas arbeitet; danach langsam weiter, statt
+      // aufzuhoeren. Der langsame Takt ist die einzige Art, wie eine offene
+      // Seite von einem Lauf erfaehrt, den niemand ausgeloest hat.
+      timer = setTimeout(takt, laeuftNoch ? TAKT_MS : RUHETAKT_MS)
     }
     void takt()
     return () => {

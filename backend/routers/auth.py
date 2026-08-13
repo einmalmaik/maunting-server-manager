@@ -458,9 +458,15 @@ def update_notifications(
     ist ``ai``. Beide sind optional: wer nur eines umlegt, ruehrt das andere
     nicht an.
 
-    Getrennt, weil es zwei verschiedene Dinge sind. Die KI verschickt keine
-    E-Mails, und wer keine Post will, will deswegen nicht auch keinen Hinweis
-    mehr sehen, dass ein laufender Auftrag auf seine Bestaetigung wartet.
+    Getrennt, weil es zwei verschiedene Dinge sind: ``enabled`` entscheidet
+    ueber Post, ``ai`` ueber den Hinweis im Panel. Wer keine Post will, will
+    deswegen nicht auch keinen Hinweis mehr sehen, dass ein laufender Auftrag
+    auf seine Bestaetigung wartet.
+
+    Hier stand "Die KI verschickt keine E-Mails". Das stimmt seit dem
+    Guardian-Bericht nicht mehr und seit den stehenden Aufgaben erst recht
+    nicht: beide gehen ueber ``enabled``, denselben Schalter wie jede andere
+    Benachrichtigung. Einen dritten gibt es bewusst nicht.
     """
     if enabled is not None:
         user.email_notifications = enabled

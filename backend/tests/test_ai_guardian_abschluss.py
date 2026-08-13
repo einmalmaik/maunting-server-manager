@@ -10,7 +10,7 @@ beendeten Lauf ist ausgerechnet der Normalfall: der Freigeber tippt waehrend
 einer laufenden Heilung etwas in den Chat, `vorgaenger_abloesen` setzt den Lauf
 direkt in der Datenbank auf 'cancelled/superseded', und das Segment findet beim
 Abschliessen einen bereits beendeten Lauf vor. Der Waechter sprang dabei an
-`_guardian_nachbereiten` vorbei. Folge: keine Ergebnis-Mail, obwohl
+`_lauf_nachbereiten` vorbei. Folge: keine Ergebnis-Mail, obwohl
 `ai_guardian_report` bei **jedem** Endzustand zusagt — und weil die Notiz mit
 `mode='healing'` laengst committet war, uebersprang der Ausloeser den Vorfall
 von da an bei jedem Takt.
@@ -126,7 +126,7 @@ def _lauf(
     """Ein Lauf mit vollstaendigem Arbeitsgedaechtnis.
 
     Der Zustand kommt aus `leerer_zustand` und nicht aus einem selbstgebauten
-    Woerterbuch: `_guardian_nachbereiten` liest daraus `guardian_briefed` und
+    Woerterbuch: `_lauf_nachbereiten` liest daraus `guardian_briefed` und
     `guardian_berichtet`, und ein Test, der nur die Schluessel setzt, die er
     gerade braucht, prueft eine Form, die im Betrieb nie vorkommt.
     """
@@ -157,7 +157,7 @@ def _zustand_aus_db(db: Session, run_id: str) -> dict:
 def versand() -> Mock:
     """Der Mailversand als Attrappe.
 
-    `_guardian_nachbereiten` importiert `ai_guardian_report` verzoegert und ruft
+    `_lauf_nachbereiten` importiert `ai_guardian_report` verzoegert und ruft
     das Modulattribut — deshalb greift ein Patch am Modul und nicht an einem
     Namen im Stream-Modul.
     """
@@ -179,7 +179,7 @@ class TestAbschlussBerichtet:
         'cancelled/superseded'. Sein Segment kommt danach an den Abschluss und
         findet einen bereits beendeten Lauf vor.
 
-        Genau dieser Zweig sprang frueher an `_guardian_nachbereiten` vorbei. Der
+        Genau dieser Zweig sprang frueher an `_lauf_nachbereiten` vorbei. Der
         Betreiber erfuhr nie, dass die KI an seinem stehenden Server gearbeitet
         und mittendrin aufgehoert hat — und der Ausloeser uebersprang den Vorfall
         von da an, weil die Notiz mit `mode='healing'` beim Start committet wird.

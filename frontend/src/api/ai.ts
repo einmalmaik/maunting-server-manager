@@ -171,6 +171,13 @@ export type AiWriteTool =
   | 'propose_hoster_integration'
   | 'propose_hoster_product'
   | 'propose_ai_tarif_role'
+  | 'propose_task_set'
+  | 'propose_task_delete'
+  // Beide standen nicht in dieser Liste, obwohl es sie im Backend laengst gibt.
+  // Genau der Fehler, vor dem der Kommentar oben warnt — nachgetragen, damit
+  // die Liste wieder das ist, was sie behauptet zu sein.
+  | 'propose_file_delete'
+  | 'propose_server_repair'
 
 /**
  * Ein Aktionsvorschlag — genau ein Vertrag für beide Wege.

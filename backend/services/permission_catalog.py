@@ -68,6 +68,13 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("ai.usage.read.all",         "ai",      "KI-Nutzung aller Benutzer einsehen"),
     # Durchgesetzt in routers/ai_autonomy.py und services/ai_autonomy_service.py.
     PermissionDef("ai.autonomous.use",         "ai",      "Autonomen KI-Modus verwenden"),
+    # Durchgesetzt in services/ai_task_service.py. Ein stehender Auftrag ist die
+    # einzige Sache, die die KI *ohne* anwesenden Menschen in Gang setzt, ohne
+    # dass eine Störung sie geweckt hat — deshalb ein eigenes Recht und keines
+    # der vorhandenen. `ai.chat.use` wäre zu weit (jeder Chatbenutzer hätte es),
+    # `ai.autonomous.use` zu eng: eine Aufgabe, die nur liest und berichtet,
+    # verlangt keine Autonomie. Handelnde Aufgaben prüfen sie zusätzlich.
+    PermissionDef("ai.tasks.manage",           "ai",      "Wiederkehrende KI-Aufgaben anlegen und verwalten"),
     # OAuth-Provider-Konfiguration (Phase 4 — Social Login).
     # `secret_update` ist bewusst separat: erfordert zusaetzliche Audit-Bestaetigung.
     # `test` ist read-only, damit ein Operator ohne write-Rechte die Konfiguration pruefen kann.

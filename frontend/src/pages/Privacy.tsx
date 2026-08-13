@@ -10,8 +10,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-08-12',
-    version: '2.4',
+    lastUpdated: '2026-08-13',
+    version: '2.5',
     meta: 'Maunting Server Manager',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -79,6 +79,12 @@ export function Privacy() {
           // beschreiben, was mit einer Eingabe geschieht, dieser beschreibt eine
           // Verarbeitung ohne Eingabe.
           t('privacyPolicy.sections.ai.items.guardian'),
+          // Der zweite Ausloeser ohne anwesenden Menschen: die Uhr. Er steht
+          // ausdruecklich neben `guardian` und nicht darin — dort weckt eine
+          // Stoerung, hier ein Auftrag, den der Nutzer selbst erteilt hat, und
+          // die Aufbewahrung (Auftragstext, Zeitplan, Zeitzone) ist eine
+          // eigene Aussage.
+          t('privacyPolicy.sections.ai.items.tasks'),
         ],
       },
       {

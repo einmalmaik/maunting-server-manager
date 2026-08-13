@@ -963,6 +963,56 @@ def _ensure_ai_guardian_job() -> None:
     )
 
 
+async def _ai_tasks_task() -> None:
+    """Sieht nach, ob ein stehender Auftrag der KI faellig geworden ist.
+
+    Der zweite Ausloeser fuer einen Lauf ohne Zuschauer, neben der
+    Guardian-Heilung: dort ist es eine Stoerung, hier die Uhr. Beide teilen sich
+    die Vorsicht — eigene Session, alles abgefangen, nichts schlaegt nach oben
+    durch.
+
+    Der Takt betraegt 60 Sekunden und ist damit zugleich die Genauigkeit, mit
+    der ein Termin eingehalten wird. Feiner waere unehrlich: der Lauf selbst
+    dauert laenger als eine Minute.
+    """
+    from database import SessionLocal
+    from services.ai_task_service import faellige_aufgaben_bearbeiten
+
+    db = SessionLocal()
+    try:
+        anzahl = await faellige_aufgaben_bearbeiten(db)
+        if anzahl:
+            logger.info("KI-Aufgaben: %s Lauf/Laeufe begonnen", anzahl)
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Error in AI tasks scheduler: %s", exc)
+    finally:
+        db.close()
+
+
+def _ensure_ai_tasks_job() -> None:
+    scheduler = get_scheduler()
+    job_id = "global_ai_tasks"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler.add_job(
+        func=_ai_tasks_task,
+        trigger=IntervalTrigger(seconds=60),
+        id=job_id,
+        name="AI Scheduled Tasks",
+        replace_existing=True,
+        # `max_instances=1` und `coalesce=True` sind hier nicht Kosmetik: ohne
+        # sie liefen zwei Durchlaeufe ueber dieselben faelligen Zeilen, und nach
+        # einer laengeren Pause holte APScheduler jeden verpassten Takt einzeln
+        # nach — ein Schwall Anbieteraufrufe fuer Termine, die laengst vorbei
+        # sind.
+        max_instances=1,
+        coalesce=True,
+    )
+
+
 async def _hoster_maintenance_task() -> None:
     """Stellt faellige Hoster-Webhooks zu und beendet abgelaufene Kuendigungen.
 
@@ -1019,6 +1069,7 @@ def init_server_schedules(db):
     _ensure_node_heartbeat_job()
     _ensure_guardian_reconciliation_job()
     _ensure_ai_guardian_job()
+    _ensure_ai_tasks_job()
     _ensure_hoster_maintenance_job()
 
     servers = db.query(Server).all()

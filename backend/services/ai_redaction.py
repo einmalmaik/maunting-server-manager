@@ -182,6 +182,35 @@ def redact_sensitive_text(value: str) -> str:
     return redact_and_count(value)[0]
 
 
+def maskiere_email(adresse: str) -> str:
+    """``maik@example.com`` wird zu ``m***@example.com``.
+
+    Der eine Fall, in dem eine Adresse ueberhaupt in die Naehe des Modells
+    kommt: der Benutzer laesst mit `send_test_email` seinen Mailweg pruefen und
+    will wissen, **wohin** die Testmail ging. Hat er mehrere Konten, ist das die
+    ganze Auskunft; ohne sie liest er "ist raus" und weiss nicht, in welchem
+    Postfach er nachsehen soll.
+
+    Der erste Buchstabe und die Domain reichen dafuer, und beides zusammen ist
+    keine Adresse mehr: es fehlt genau der Teil, den man zum Schreiben braucht.
+    `_EMAIL_RE` laesst das Ergebnis stehen — `*` gehoert nicht zum erlaubten
+    Zeichenvorrat eines lokalen Teils, das Muster greift also nicht mehr.
+
+    Das ist **kein** Schlupfloch in der globalen Regel darueber, sondern ihre
+    Ausnahme mit Ansage: geschwaerzt wird, was eine Person **bezeichnet**. Ein
+    Anfangsbuchstabe tut das nicht.
+
+    Was nicht wie eine Adresse aussieht, wird ganz unkenntlich gemacht — lieber
+    zu viel als ein halb stehengebliebener Wert, dessen Herkunft niemand kennt.
+    """
+    if not isinstance(adresse, str) or adresse.count("@") != 1:
+        return "***"
+    lokal, _, domain = adresse.partition("@")
+    if not lokal or not domain:
+        return "***"
+    return f"{lokal[0]}***@{domain}"
+
+
 def _ersetze_ip(match: re.Match[str]) -> str:
     """Schwaerzt nur oeffentlich routbare Adressen.
 

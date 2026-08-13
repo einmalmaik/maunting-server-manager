@@ -117,6 +117,20 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "read_hoster_setup": Werkzeug("global_read"),
     "read_hoster_integration_guide": Werkzeug("global_read"),
 
+    # Die stehenden Auftraege. `list_tasks` liest nur, was diesem Benutzer
+    # gehoert.
+    #
+    # `send_test_email` steht hier aus demselben Grund wie `remember` weiter
+    # unten: das Kriterium fuer die Bestaetigungspflicht ist nicht "aendert
+    # etwas", sondern "fasst einen Server an". Eine Mail an die **eigene**
+    # hinterlegte Adresse tut das nicht — und einen Empfaengerparameter gibt es
+    # bewusst nicht, sonst waere MSM ueber die KI ein Mailversender fuer Fremde.
+    # Der Betreiber hat diesen Weg ausdruecklich ohne Bestaetigungsknopf
+    # gewuenscht: wer "teste mal meine Mails" tippt, hat die Frage schon
+    # beantwortet.
+    "list_tasks": Werkzeug("global_read", gruppe="tasks"),
+    "send_test_email": Werkzeug("global_read", gruppe="tasks"),
+
     # `remember` und `forget_memory` schreiben, stehen aber bei den
     # Lesewerkzeugen. Der Unterschied zwischen den Mengen ist nicht "aendert
     # etwas", sondern "fasst einen Server an und braucht deshalb eine
@@ -215,6 +229,38 @@ WERKZEUGE: dict[str, Werkzeug] = {
     ),
     "propose_server_create": Werkzeug(
         "global_write", recht="servers.create", recht_global=True
+    ),
+
+    # ── Stehende Auftraege anlegen, aendern, loeschen ─────────────────
+    #
+    # Kein `immer_bestaetigen`, obwohl auch geloescht wird — das Kriterium ist
+    # Unumkehrbarkeit, und eine Aufgabe ist eine Zeile, die man wieder anlegen
+    # kann. Nichts an ihr vernichtet Daten.
+    #
+    # Und ein zweiter Grund, der wichtiger ist: die Bestaetigungskarte **ist**
+    # hier die Genehmigung des stehenden Auftrags. Sie im autonomen Modus zu
+    # ueberspringen hiesse, dass die KI sich selbst kuenftige Laeufe einrichtet.
+    # Bei einem einzelnen Werkzeugaufruf ist das eine Handlung; bei einer
+    # Aufgabe ist es eine Handlung, die sich wiederholt. Deshalb steht der
+    # Vorschlag immer da — was `immer_bestaetigen` zusaetzlich absichern
+    # wuerde, waere der autonome Modus, und der ist genau die Freigabe, die
+    # `kind='act'` ohnehin verlangt.
+    #
+    # `ai.tasks.manage` ist ein **neues** Recht, und das ist hier richtig statt
+    # der sonst gebotenen Wiederverwendung: es gibt keinen Panelknopf fuer
+    # stehende Auftraege, also entsteht keine Handlung mit zwei Rechten.
+    # `ai.chat.use` waere zu weit (jeder Chatbenutzer haette es),
+    # `ai.autonomous.use` zu eng (ein reiner Bericht braucht keine Autonomie).
+    #
+    # Anlegen und Aendern sind **ein** Werkzeug — `task_id` weglassen heisst
+    # anlegen, dasselbe Muster wie bei `propose_hoster_integration`. Zwei
+    # Werkzeuge haetten den Zeitplan zweimal im Katalog gehabt, und der geht in
+    # jeder Runde der Werkzeugschleife mit ueber die Leitung.
+    "propose_task_set": Werkzeug(
+        "global_write", recht="ai.tasks.manage", recht_global=True
+    ),
+    "propose_task_delete": Werkzeug(
+        "global_write", recht="ai.tasks.manage", recht_global=True
     ),
 
     # ── Heilung: Reparatur der Anlage, nicht des Spielstands ──────────
@@ -421,6 +467,115 @@ GUARDIAN_HEILUNG_TOOLS = frozenset({
 # ein Backup zu stellen hiesse, den haeufigsten und harmlosesten Heilungsschritt
 # genau dann zu blockieren, wenn die Platte voll ist und deshalb kein Backup
 # gelingt.
+# Was ein faellig gewordener stehender Auftrag aufrufen darf.
+#
+# Wie `GUARDIAN_HEILUNG_TOOLS` eine **ausgeschriebene** Aufzaehlung und keine
+# Ableitung, aus demselben Grund: ein kuenftiges Werkzeug soll sich nicht
+# stillschweigend in einem Lauf wiederfinden, bei dem niemand zusieht. Wer eines
+# aufnehmen will, schreibt es hin.
+#
+# Die Bedrohungslage ist eine **andere** als beim Guardian, und deshalb ist die
+# Menge groesser. Ein Heilungslauf beginnt mit einem Ereignis auf einem Server,
+# auf dem Fremde spielen; hier beginnt er mit einem Satz, den ein Mensch getippt
+# und anschliessend an einer Vorschlagskarte bestaetigt hat. Was das Modell
+# **waehrend** des Laufs liest, ist trotzdem dasselbe unvertrauenswuerdige
+# Material — deshalb bleibt die Menge trotzdem eng.
+#
+# Enthalten ist alles Lesende ausser den Hoster-Werkzeugen (Rechte und
+# Schluessel gehoeren nicht in einen unbeaufsichtigten Lauf) und ausser
+# `send_test_email` (ein stehender Auftrag, der Testmails verschickt, ist eine
+# naechtliche Mailschleife).
+#
+# `web_search` ist ausdruecklich dabei, anders als beim Guardian. Dort fehlt es,
+# weil niemand gefragt hat; hier hat jemand gefragt — der Betreiber hat "sag mir
+# taeglich, wie das Wetter wird" als Beispiel genannt. Die Schranke gegen
+# Servernamen im Netz (`docs_searchable`) gilt unveraendert weiter.
+#
+# Nicht enthalten: Gedaechtnis und Skills. Was das Modell hier liest, kann ein
+# Spieler in ein Log geschrieben haben, und aus einem Lauf ohne Zeugen soll
+# nichts Dauerhaftes gelernt werden. Der Gedaechtnisblock im Kontext kommt
+# ohnehin von selbst mit — es fehlt also nichts.
+#
+# `ask_user` fehlt, weil niemand davorsitzt. Das ist keine Sparmassnahme: eine
+# unbeantwortbare Rueckfrage haette den Lauf bis zum Ablauf geparkt und die
+# Aufgabe damit still ausfallen lassen.
+AUFGABEN_LESEN = frozenset({
+    "read_server_status",
+    "read_server_capacity",
+    "read_server_logs",
+    "read_config",
+    "read_server_ports",
+    "read_server_network",
+    "check_server_reachability",
+    "read_server_mods",
+    "read_mod_updates",
+    "search_workshop_mods",
+    "list_server_files",
+    "search_server_files",
+    "read_server_backups",
+    "read_guardian_incidents",
+    "read_ai_action_history",
+    "list_my_servers",
+    "list_blueprints",
+    "read_blueprint",
+    "read_node_capacity",
+    "read_node_health",
+    "search_docs",
+    "read_docs",
+    "web_search",
+    # Damit ein Auftrag ueber die eigenen Auftraege berichten kann. Liest
+    # ausschliesslich, was diesem Benutzer gehoert.
+    "list_tasks",
+})
+
+
+# Was zusaetzlich erlaubt ist, wenn die Aufgabe als `kind='act'` angelegt wurde.
+#
+# Diese Werkzeuge laufen im faelligen Lauf **nicht** kraft dieser Menge, sondern
+# weiterhin nur, soweit `autonomy_allows` es zulaesst: erteilte Freigabe, Budget
+# der Stunde, Recht des Benutzers am konkreten Server. Die Menge hier ist die
+# aeussere Grenze, nicht die Erlaubnis.
+#
+# Nicht enthalten, jeweils mit Grund:
+#
+# * `propose_backup_restore`, `propose_server_delete` — stehen in
+#   `ALWAYS_CONFIRM_TOOLS` und wuerden ohnehin abgewiesen. Sie hier
+#   aufzuzaehlen hiesse, zwei Orte zu pflegen.
+# * `propose_server_create`, `propose_blueprint_change`,
+#   `propose_server_blueprint_switch` — Reichweite ueber den Auftrag hinaus. Der
+#   Wechsel loescht zudem das gesamte Serververzeichnis; ein nachts angestossener
+#   Blueprintwechsel ist nichts, was jemand mit "mach das taeglich" gemeint hat.
+# * `propose_file_delete` — im Guardian-Lauf steht davor ein nachgewiesenes
+#   Backup als Schranke. Diesen Anker gibt es hier nicht: eine Aufgabe hat
+#   keinen Vorfall, ab dem gerechnet wuerde. Ohne ihn bliebe als Rueckweg nur
+#   der Versionsschnappschuss, und eine stehende Anweisung, die Nacht fuer Nacht
+#   Dateien loescht, ist genau der Fall, fuer den jemand davorsitzen soll.
+# * die Hoster- und Aufgabenwerkzeuge — Rechte, Schluessel, und ein Auftrag, der
+#   Auftraege anlegt, waere ein Auftrag ohne Ende.
+AUFGABEN_HANDELN = frozenset({
+    "propose_server_lifecycle",
+    "propose_backup",
+    "propose_config_update",
+    "propose_config_patch",
+    "propose_mod_install",
+    "propose_bind_ip_update",
+    "propose_server_repair",
+})
+
+
+def aufgaben_tools(kind: str) -> frozenset[str]:
+    """Die Werkzeugmenge eines faelligen Laufs, je nach Art der Aufgabe.
+
+    ``report`` liest und berichtet, ``act`` darf zusaetzlich handeln. Die
+    Fallunterscheidung steht hier und nicht beim Aufrufer: sonst gaebe es zwei
+    Stellen, an denen jemand die Vereinigung bilden koennte, und eine davon
+    vergaesse irgendwann die Bedingung.
+    """
+    if kind == "act":
+        return AUFGABEN_LESEN | AUFGABEN_HANDELN
+    return AUFGABEN_LESEN
+
+
 GUARDIAN_BACKUP_PFLICHT_TOOLS = frozenset({
     "propose_config_patch",
     "propose_config_update",

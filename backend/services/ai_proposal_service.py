@@ -58,11 +58,13 @@ from services.file_edit_service import EditNotApplicable, apply_edits
 # nicht sichern kann, und beide muessen dieselbe Zahl meinen.
 from services.file_history_service import MAX_HISTORY_EDIT_SIZE
 from services.ai_redaction import redact_sensitive_text
+from services import ai_task_service
 from services.ai_tool_registry import (
     GLOBAL_WRITE_TOOLS,
     GUARDIAN_HEILUNG_TOOLS,
     WERKZEUGE,
     WRITE_TOOLS,
+    aufgaben_tools,
 )
 from services.dis_client import DisClient
 from services.server_file_access_service import read_server_text, write_server_text
@@ -94,6 +96,36 @@ class GuardianKontext:
     server_id: int
     incident_id: int
     incident_created_at: datetime
+
+
+@dataclass(frozen=True)
+class AufgabenKontext:
+    """Der Rahmen eines Laufs, den die Uhr ausgeloest hat — nicht ein Mensch.
+
+    Das Gegenstueck zu `GuardianKontext` und bewusst **anders geschnitten**. Ein
+    Heilungslauf gehoert einem Server; ein stehender Auftrag gehoert keinem. Der
+    Benutzer hat "sieh nach **meinen Servern**" gesagt, und welche das sind,
+    entscheidet seine Rechteliste, nicht der Auftrag. Es gibt hier deshalb keine
+    Serverbindung und keine Backup-Schranke.
+
+    Was bleibt, ist die Werkzeugmenge — und die haengt an ``kind``:
+
+    * ``report`` liest, fasst zusammen und meldet.
+    * ``act`` darf zusaetzlich handeln, und zwar nur, soweit `autonomy_allows`
+      es im Einzelfall zulaesst. Der Rahmen erweitert nichts: er begrenzt.
+
+    ``channel`` und ``title`` tragen nichts zur Schranke bei und stehen
+    trotzdem hier. Sie werden am **Ende** des Laufs gebraucht, fuer den Bericht
+    — und die Aufgabe kann bis dahin geloescht worden sein. Ein Bericht, der
+    seinen eigenen Betreff aus einer Zeile holen muesste, die es nicht mehr
+    gibt, waere ein Bericht, der ausgerechnet dann ausfaellt, wenn jemand
+    aufgeraeumt hat.
+    """
+
+    task_id: str
+    kind: str
+    channel: str
+    title: str
 
 
 # Fehlte vor der Aufteilung: `logger` war in `ai_action_service` nie definiert,
@@ -1174,6 +1206,71 @@ def _file_delete_payload(db: Session, server: Server, arguments: dict) -> tuple[
     return payload, preview, str(ergebnis["revision"])
 
 
+#: Die Felder, die `propose_task_set` entgegennimmt. `task_id` steht bewusst
+#: dabei: sie entscheidet ueber Anlegen oder Aendern und gehoert damit zur
+#: Nutzlast, nicht zur Vorschau.
+_AUFGABEN_FELDER = frozenset({
+    "task_id", "title", "instruction", "kind", "enabled", "plan_kind",
+    "time_of_day", "weekdays", "interval_hours", "once_at", "timezone",
+    "channel",
+})
+
+
+def _task_set_payload(db: Session, user: User, arguments: dict) -> tuple[dict, dict]:
+    """Nutzlast fuer `propose_task_set` — anlegen oder aendern.
+
+    Der Payload-Bau prueft **vollstaendig**: Zeitzone, Plan, Art, Zustellweg,
+    Rechte und die autonome Freigabe. Das ist nicht nur fuer die Vorschau da.
+    Ein Modell, dessen Vorschlag erst beim Klick scheitert, hat dem Benutzer
+    eine Karte hingelegt, die nicht haelt — und im Chat steht dann eine
+    Fehlermeldung an der Stelle, an der eine Zusage stand.
+
+    Gespeichert wird hier nichts. `vorschau` arbeitet auf einer losen Aufgabe;
+    die eigentliche Aenderung passiert erst in `_execute_task_set`, und dort
+    laufen dieselben Pruefungen erneut.
+    """
+    if set(arguments) - _AUFGABEN_FELDER:
+        raise AiActionValidationError("Aufgaben-Tool hat ungueltige Argumente")
+    roh = arguments.get("task_id")
+    if roh is not None and (not isinstance(roh, str) or not roh.strip()):
+        raise AiActionValidationError("task_id muss eine Kennung aus list_tasks sein")
+    task_id = roh.strip() if isinstance(roh, str) else None
+
+    felder = {name: wert for name, wert in arguments.items() if name != "task_id"}
+    if task_id is not None and not felder:
+        raise AiActionValidationError(
+            "Es wurde nichts genannt, das geaendert werden soll"
+        )
+
+    preview = ai_task_service.vorschau(db, user=user, felder=felder, task_id=task_id)
+    return {"task_id": task_id, "felder": felder}, preview
+
+
+def _task_delete_payload(db: Session, user: User, arguments: dict) -> tuple[dict, dict]:
+    """Nutzlast fuer `propose_task_delete`.
+
+    Die Aufgabe wird **jetzt** aufgeschlagen, damit auf der Karte ihr Name und
+    ihr Zeitplan stehen und nicht nur eine Kennung. "Aufgabe
+    a3f2c1…-… loeschen?" ist keine Frage, die jemand beantworten kann.
+    """
+    if set(arguments) != {"task_id"}:
+        raise AiActionValidationError("Aufgaben-Tool hat ungueltige Argumente")
+    aufgabe = ai_task_service.eigene_aufgabe(
+        db, user=user, task_id=arguments["task_id"]
+    )
+    return (
+        {"task_id": aufgabe.id},
+        {
+            "operation": "task_delete",
+            "task_id": aufgabe.id,
+            "title": aufgabe.title,
+            "plan": ai_task_service.plan_text(aufgabe),
+            "kind": aufgabe.kind,
+            "enabled": bool(aufgabe.enabled),
+        },
+    )
+
+
 def _verlangt_gesichertes_backup(
     db: Session, server_id: int, tool_name: str, *, seit: datetime | None
 ) -> None:
@@ -1308,6 +1405,7 @@ def create_proposal(
     correlation_id: str,
     rationale_fallback: tuple[str, str] | None = None,
     guardian: "GuardianKontext | None" = None,
+    aufgabe: "AufgabenKontext | None" = None,
 ) -> AiActionProposal:
     """Legt einen Vorschlag an.
 
@@ -1332,6 +1430,14 @@ def create_proposal(
         raise AiActionValidationError(
             "Dieses Werkzeug steht in einer Guardian-Heilung nicht zur Verfuegung"
         )
+    if aufgabe is not None and tool_name not in aufgaben_tools(aufgabe.kind):
+        # Dieselbe Durchsetzung an derselben Stelle. Bei `kind='report'` faellt
+        # hier **jedes** Schreibwerkzeug heraus: eine Aufgabe, die berichten
+        # sollte, kann nichts anfassen, auch wenn das Modell es versucht und
+        # auch dann, wenn der Benutzer die autonome Freigabe erteilt hat.
+        raise AiActionValidationError(
+            "Dieses Werkzeug steht in einer geplanten Aufgabe nicht zur Verfuegung"
+        )
     reason, expected_effect = _rationale(arguments, fallback=rationale_fallback)
     rest = {key: value for key, value in arguments.items() if key not in {"reason", "expected_effect"}}
 
@@ -1355,6 +1461,14 @@ def create_proposal(
     elif tool_name == "propose_ai_tarif_role":
         _require_tool_permission(db, user, None, tool_name, rest)
         payload, preview = _ai_tarif_role_payload(db, user, rest)
+        expected_revision = None
+    elif tool_name == "propose_task_set":
+        _require_tool_permission(db, user, None, tool_name, rest)
+        payload, preview = _task_set_payload(db, user, rest)
+        expected_revision = None
+    elif tool_name == "propose_task_delete":
+        _require_tool_permission(db, user, None, tool_name, rest)
+        payload, preview = _task_delete_payload(db, user, rest)
         expected_revision = None
     elif tool_name in GLOBAL_WRITE_TOOLS:
         # **Nicht als Sammelklausel schreiben.** Hier stand frueher
@@ -2383,6 +2497,46 @@ def execute_proposal(
                 result = _execute_hoster_write(
                     db, user=active_user, tool_name=tool_name, payload=payload
                 )
+                task_id = None
+                queued = False
+            elif tool_name == "propose_task_set":
+                # **Die Felder werden hier erneut geprueft**, nicht nur
+                # angewandt. Zwischen Vorschlag und Bestaetigung liegt ein
+                # Zeitfenster ohne Obergrenze, und in ihm kann der Betreiber die
+                # autonome Freigabe zurueckgenommen haben. Ohne die zweite
+                # Pruefung entstuende hier eine handelnde Aufgabe auf Grundlage
+                # einer Freigabe, die es nicht mehr gibt — und sie liefe von da
+                # an jede Nacht.
+                #
+                # `ai_task_service` prueft beides in `_anwenden`; deshalb steht
+                # hier nur der Aufruf und keine eigene Kette.
+                gemerkt = payload.get("task_id")
+                felder = dict(payload.get("felder") or {})
+                if gemerkt:
+                    aufgabe = ai_task_service.aendern(
+                        db, user=active_user, task_id=str(gemerkt), felder=felder
+                    )
+                else:
+                    aufgabe = ai_task_service.anlegen(
+                        db, user=active_user, felder=felder
+                    )
+                result = {
+                    "task_id": aufgabe.id,
+                    "title": aufgabe.title,
+                    "plan": ai_task_service.plan_text(aufgabe),
+                    "enabled": bool(aufgabe.enabled),
+                    "next_run": (
+                        ai_task_service.utc(aufgabe.next_run_at).isoformat()
+                        if aufgabe.next_run_at is not None else None
+                    ),
+                }
+                task_id = None
+                queued = False
+            elif tool_name == "propose_task_delete":
+                geloescht = ai_task_service.loeschen(
+                    db, user=active_user, task_id=str(payload["task_id"])
+                )
+                result = {"deleted": True, "title": geloescht}
                 task_id = None
                 queued = False
             else:

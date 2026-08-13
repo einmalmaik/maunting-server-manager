@@ -23,8 +23,23 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from models import AiActionProposal, Server, User
+# Die Aufzaehlungen des Aufgabenmodells als `enum` im Katalog — aus derselben
+# Quelle wie der CHECK in der Datenbank und die Pruefung im Dienst. Waeren es
+# Abschriften, boete der Katalog irgendwann einen Wert an, den der
+# Vorschlagspfad abweist: das Modell versucht es dann wieder und wieder.
+from models.ai_task import ARTEN as _AUFGABENARTEN
+from models.ai_task import KANAELE as _KANAELE
+from models.ai_task import PLANARTEN as _PLANARTEN
 from services import permission_service
 from services.ai_action_errors import AiActionValidationError
+# Die Intervallgrenzen sind im Dienst eine Kostenentscheidung und stehen hier
+# nur im Schema, damit das Modell sie sieht, statt sie durch Abweisungen zu
+# erraten. Der Import zeigt in eine Richtung: `ai_task_service` kennt
+# `ai_action_errors`, nicht diese Datei.
+from services.ai_task_service import (
+    MAX_INTERVALL_STUNDEN as _MAX_INTERVALL_STUNDEN,
+    MIN_INTERVALL_STUNDEN as _MIN_INTERVALL_STUNDEN,
+)
 from services.ai_redaction import redact_sensitive_text
 from services.server_file_access_service import read_server_text
 
@@ -790,6 +805,152 @@ def _global_tool_definitions() -> list[dict]:
                 "game_type",
                 *_RATIONALE_REQUIRED,
             ],
+        ),
+        *_aufgaben_tool_definitions(),
+    ]
+
+
+#: Der Zeitplan als Schema. Steht als eigene Konstante, weil `create` und
+#: `update` ihn beide brauchen und zwei Abschriften zwei Gelegenheiten waeren,
+#: verschiedene Grenzen anzubieten.
+#:
+#: Kein Feldname enthaelt `run`, `command`, `host` oder `args`: der Vertragstest
+#: `test_no_write_tool_accepts_something_that_could_be_a_command` prueft die
+#: Argumentnamen des Katalogs auf Wortteile, die nach Befehlsausfuehrung
+#: klingen, und `run` faellt dort als ganzer Namensteil auf. Ein `next_run_at`
+#: im Schema haette den Test gerissen — die Spalte in der Datenbank heisst
+#: trotzdem so, dort greift die Regel nicht.
+_PLAN_SCHEMA = {
+    "plan_kind": {
+        "type": "string",
+        "enum": list(_PLANARTEN),
+        "description": (
+            "daily = jeden Tag (oder an bestimmten Wochentagen) zu einer "
+            "Uhrzeit, interval = alle N Stunden, once = einmalig."
+        ),
+    },
+    "time_of_day": {
+        "type": "string",
+        "maxLength": 5,
+        "description": "Nur bei daily. 'HH:MM' in der angegebenen Zeitzone.",
+    },
+    "weekdays": {
+        "type": "array",
+        "items": {"type": "integer", "minimum": 1, "maximum": 7},
+        "description": "Nur bei daily. 1 = Montag bis 7 = Sonntag. Leer = taeglich.",
+    },
+    "interval_hours": {
+        "type": "integer",
+        "minimum": _MIN_INTERVALL_STUNDEN,
+        "maximum": _MAX_INTERVALL_STUNDEN,
+        "description": "Nur bei interval.",
+    },
+    "once_at": {
+        "type": "string",
+        "maxLength": 32,
+        "description": (
+            "Nur bei once. ISO-8601 wie '2026-08-20T08:00'. Ohne "
+            "Zeitzonenangabe gilt die der Aufgabe."
+        ),
+    },
+    "timezone": {
+        "type": "string",
+        "maxLength": 64,
+        "description": (
+            "IANA-Zone des Benutzers, z. B. Europe/Berlin. Pflicht — frag mit "
+            "ask_user, wenn du sie nicht sicher weisst."
+        ),
+    },
+    "channel": {
+        "type": "string",
+        "enum": list(_KANAELE),
+        "description": (
+            "chat = nur im Panel, email = zusaetzlich per Mail, both = beides. "
+            "Im Chat steht das Ergebnis immer."
+        ),
+    },
+}
+
+
+def _aufgaben_tool_definitions() -> list[dict]:
+    """Stehende Auftraege: auflisten, anlegen, aendern, loeschen — und die Testmail.
+
+    Eigene Funktion, damit der ohnehin lange Katalog nicht noch eine Handbreit
+    weiter nach rechts waechst. Der Katalog geht in **jeder** Runde der
+    Werkzeugschleife mit ueber die Leitung und taucht in keiner Budgetrechnung
+    auf; `test_ai_tool_handler_contract` haelt ihn deshalb unter 45.000 Zeichen.
+    """
+    return [
+        _function(
+            "list_tasks",
+            "Zeigt die stehenden Auftraege dieses Benutzers — Name, Zeitplan, "
+            "Zeitzone, Zustellweg, ob aktiv, und wann sie das naechste Mal "
+            "laufen. Ruf das auf, bevor du eine Aufgabe aenderst oder loeschst: "
+            "die Nummern sind nicht zu erraten.",
+            {},
+            [],
+        ),
+        _function(
+            "send_test_email",
+            "Schickt eine Testmail an die hinterlegte Adresse **des Benutzers, "
+            "der gerade fragt** — einen Empfaenger kannst du nicht waehlen. "
+            "Dafuer, wenn er wissen will, ob sein E-Mail-Versand funktioniert. "
+            "Die Antwort nennt den benutzten Weg und die maskierte Adresse.",
+            {},
+            [],
+        ),
+        _function(
+            "propose_task_set",
+            "Legt einen stehenden Auftrag an oder aendert einen vorhandenen: "
+            "etwas, das ab jetzt von selbst laeuft, ohne dass jemand im Chat "
+            "sitzt. Fuer 'benachrichtige mich jeden Tag um 8 Uhr ueber meine "
+            "Server' oder 'mach alle 12 Stunden ein Backup'.\n"
+            "**Ohne `task_id` wird angelegt**; dann sind `title`, "
+            "`instruction`, `kind`, `plan_kind`, `timezone` und `channel` "
+            "noetig. **Mit `task_id` (aus `list_tasks`) wird geaendert**, und "
+            "nur genannte Felder werden angefasst — zum Pausieren genuegt "
+            "`enabled: false`. Aenderst du den Plan, gib `plan_kind` und dessen "
+            "Felder zusammen an.\n"
+            "`instruction` ist der Auftrag an dich selbst — schreib ihn so, "
+            "dass du ihn in vier Wochen ohne dieses Gespraech verstehst.\n"
+            "`kind`: 'report' liest und berichtet; 'act' darf zusaetzlich "
+            "handeln (Backup, Neustart, Aenderungen) und setzt den "
+            "freigegebenen autonomen Modus voraus — ohne ihn wird abgewiesen.\n"
+            "**Zeitzone zuerst.** Ohne sie ist eine Uhrzeit bedeutungslos. "
+            "Steht sie im Gedaechtnis, nimm sie von dort; sonst frag vorher mit "
+            "`ask_user`.",
+            {
+                "task_id": {
+                    "type": "string",
+                    "maxLength": 36,
+                    "description": "Zum Aendern. Weglassen legt neu an.",
+                },
+                "title": {"type": "string", "maxLength": 120},
+                "instruction": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "Was bei jeder Faelligkeit zu tun ist.",
+                },
+                "kind": {"type": "string", "enum": list(_AUFGABENARTEN)},
+                "enabled": {
+                    "type": "boolean",
+                    "description": "false pausiert, true nimmt wieder auf.",
+                },
+                **_PLAN_SCHEMA,
+                **_RATIONALE_SCHEMA,
+            },
+            [*_RATIONALE_REQUIRED],
+        ),
+        _function(
+            "propose_task_delete",
+            "Entfernt einen stehenden Auftrag endgueltig. Soll er nur ruhen, "
+            "nimm `propose_task_set` mit `enabled: false` — das laesst sich "
+            "zuruecknehmen. `task_id` aus `list_tasks`.",
+            {
+                "task_id": {"type": "string", "maxLength": 36},
+                **_RATIONALE_SCHEMA,
+            },
+            ["task_id", *_RATIONALE_REQUIRED],
         ),
     ]
 
@@ -1939,6 +2100,93 @@ def _node_health(db: Session) -> dict:
     return {"nodes": nodes, "count": len(nodes)}
 
 
+#: Wann dieser Benutzer zuletzt Testmails ausgeloest hat. Im Prozessspeicher und
+#: nicht in der Datenbank — dasselbe Muster wie `_notified_server_update_keys`
+#: im Scheduler, aus demselben Grund: es geht um Anti-Spam innerhalb einer
+#: Laufzeit, nicht um eine Tatsache, die einen Neustart ueberleben muss.
+_TESTMAILS: dict[int, list[float]] = {}
+
+#: Drei je Stunde. Die Grenze ist nicht gegen den Menschen gerichtet, sondern
+#: gegen ein Modell in einer Schleife: "kommt sie an?" – "ich schicke nochmal" –
+#: "und nochmal". Wer wirklich dreimal testen will, hat danach eine Antwort.
+MAX_TESTMAILS_JE_STUNDE = 3
+
+
+def _execute_send_test_email(db: Session, *, user: User) -> dict:
+    """Schickt eine Testmail an die eigene Adresse des Fragenden.
+
+    **Kein Empfaengerparameter.** Das ist die eigentliche Sicherheitsaussage
+    dieses Werkzeugs: es gibt keinen Weg von einer Modellausgabe zu einer
+    fremden Adresse, also kann MSM ueber die KI kein Mailversender fuer Dritte
+    werden. Ein `to`-Argument haette genau das eroeffnet — und waere aus dem
+    Chat heraus mit einem Satz auszuloesen gewesen.
+
+    Zurueck kommt, was der Benutzer zum Nachsehen braucht: ob es rausging, an
+    welches Postfach (maskiert) und **welche Art** von Versandweg benutzt wurde.
+    Bewusst nicht der SMTP-Host: das ist Betreiberkonfiguration, die ein Kunde
+    im Panel nur mit `panel.settings.read` zu sehen bekaeme. Fuer die Diagnose
+    genuegt "es lief ueber SMTP" — wo die Einstellungen stehen, weiss der
+    Betreiber selbst.
+
+    Der Versand laeuft ueber `ai_mail` und damit ueber denselben Weg wie jede
+    andere Mail der KI. Genau das macht die Pruefung aussagekraeftig: getestet
+    wird nicht irgendein Mailversand, sondern **der**, den auch ein
+    Aufgabenbericht nehmen wuerde.
+    """
+    import time
+
+    from services import ai_mail
+    from services.ai_redaction import maskiere_email
+    from services.email_service import EmailService
+
+    jetzt = time.monotonic()
+    verlauf = [wann for wann in _TESTMAILS.get(user.id, []) if jetzt - wann < 3600]
+    if len(verlauf) >= MAX_TESTMAILS_JE_STUNDE:
+        _TESTMAILS[user.id] = verlauf
+        return {
+            "sent": False,
+            "reason": "rate_limited",
+            "detail": (
+                f"In dieser Stunde wurden bereits {MAX_TESTMAILS_JE_STUNDE} "
+                "Testmails verschickt. Sag dem Benutzer, er soll im Postfach "
+                "und im Spam-Ordner nachsehen, statt es erneut zu versuchen."
+            ),
+        }
+
+    # `empfaenger` prueft die drei Bedingungen, die auch fuer jede andere KI-Mail
+    # gelten. Ein Test, der sie umginge, testete etwas anderes als den Ernstfall.
+    adresse = ai_mail.empfaenger(db, user)
+    if adresse is None:
+        return {
+            "sent": False,
+            "reason": "not_deliverable",
+            "detail": (
+                "Es gibt keinen Weg zu diesem Benutzer: entweder sind seine "
+                "E-Mail-Benachrichtigungen aus, oder der Betreiber hat im Panel "
+                "keinen Versand eingerichtet, oder am Konto haengt keine "
+                "Adresse. Nenne ihm diese drei Moeglichkeiten."
+            ),
+        }
+
+    verlauf.append(jetzt)
+    _TESTMAILS[user.id] = verlauf
+    ai_mail.zustellen(
+        lambda: EmailService.send_ai_test_email(adresse, str(user.username)),
+        name="ai-test-email",
+    )
+    return {
+        "sent": True,
+        "recipient": maskiere_email(adresse),
+        "transport": EmailService._get_provider(),
+        "detail": (
+            "Die Mail wurde dem Versand uebergeben. Ob sie ankommt, entscheidet "
+            "der Weg dahinter — sag dem Benutzer, er soll jetzt nachsehen, auch "
+            "im Spam-Ordner. Kommt nichts an, liegt es an der Einrichtung des "
+            "Versands im Panel und nicht an dir."
+        ),
+    }
+
+
 def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, arguments: dict) -> dict:
     """Werkzeuge ohne Serverbezug.
 
@@ -1956,6 +2204,19 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
 
     if tool_name == "read_docs":
         return _execute_read_docs(arguments)
+
+    if tool_name == "list_tasks":
+        from services import ai_task_service
+
+        _require_no_arguments(tool_name, arguments)
+        # Kein zusaetzliches Recht: die Liste zeigt ausschliesslich, was diesem
+        # Benutzer gehoert. Wer keine Aufgaben anlegen darf, hat auch keine —
+        # dann ist die Liste leer, und das ist die richtige Auskunft.
+        return {"tasks": ai_task_service.auflisten(db, user=user)}
+
+    if tool_name == "send_test_email":
+        _require_no_arguments(tool_name, arguments)
+        return _execute_send_test_email(db, user=user)
 
     if tool_name == "read_hoster_setup":
         from services import ai_hoster_tools

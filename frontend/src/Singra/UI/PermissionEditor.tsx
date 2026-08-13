@@ -99,6 +99,10 @@ const PERMISSION_DETAILS: Record<string, { title: string; desc: string }> = {
     title: 'Autonomen KI-Modus verwenden',
     desc: 'Erlaubt dem Benutzer, den autonomen Modus pro Server oder panelweit freizugeben. Ohne zusätzliche Freigabe bleibt jede Aktion bestätigungspflichtig; Berechtigungen gelten unverändert.',
   },
+  'ai.tasks.manage': {
+    title: 'Wiederkehrende KI-Aufgaben verwalten',
+    desc: 'Erlaubt es, der KI im Chat stehende Aufträge zu geben — etwa täglich um 8 Uhr eine Zusammenfassung per E-Mail. Ein fälliger Auftrag läuft ohne anwesenden Benutzer, aber mit dessen Berechtigungen und aus dessen Kontingent. Aufträge, die selbst etwas ändern, setzen zusätzlich den autonomen Modus voraus.',
+  },
   'ai.usage.read.all': {
     title: 'Gesamte KI-Nutzung einsehen',
     desc: 'Zeigt unter Einstellungen → KI, welcher Benutzer wieviele Tokens und Kosten verbraucht hat. Damit wird das Nutzungsverhalten fremder Benutzer sichtbar — deshalb ein eigenes Recht und nicht Teil der Einstellungsberechtigung. Den eigenen Verbrauch sieht jeder ohne dieses Recht.',
@@ -285,6 +289,7 @@ const SUBGROUPS = [
       'ai.skills.manage',
       'ai.web_search.use',
       'ai.autonomous.use',
+      'ai.tasks.manage',
       'ai.usage.read.all',
     ],
   },

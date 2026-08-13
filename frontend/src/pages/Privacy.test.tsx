@@ -32,6 +32,7 @@ const KI_PUNKTE = [
   'autonomy',
   'tools',
   'guardian',
+  'tasks',
 ] as const;
 
 describe('Privacy page', () => {
@@ -115,19 +116,19 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die zur Guardian-Kopplung gehoerende Fassung 2.4 vom 2026-08-12 aus', () => {
+  it('weist die zu den stehenden KI-Aufgaben gehoerende Fassung 2.5 vom 2026-08-13 aus', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(`${i18n.t('privacyPolicy.versionLabel')} v2.4`),
+      screen.getByText(`${i18n.t('privacyPolicy.versionLabel')} v2.5`),
     ).toBeInTheDocument();
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-08-12');
-    expect(stand).toHaveTextContent('2026-08-12');
+    expect(stand).toHaveAttribute('datetime', '2026-08-13');
+    expect(stand).toHaveTextContent('2026-08-13');
   });
 
   /**
@@ -147,9 +148,9 @@ describe('Privacy page', () => {
     expect(gerendert).toEqual(
       KI_PUNKTE.map((schluessel) => i18n.t(`privacyPolicy.sections.ai.items.${schluessel}`)),
     );
-    // Ausdruecklich als Zahl festgehalten: vor der Guardian-Kopplung waren es
-    // neun Punkte, jetzt sind es zehn.
-    expect(gerendert).toHaveLength(10);
+    // Ausdruecklich als Zahl festgehalten: neun Punkte vor der
+    // Guardian-Kopplung, zehn danach, elf seit den stehenden KI-Aufgaben.
+    expect(gerendert).toHaveLength(11);
   });
 });
 
