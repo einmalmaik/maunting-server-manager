@@ -37,7 +37,11 @@ from services import (
     ai_run_service,
 )
 from services.ai_redaction import redact_sensitive_text
-from services.ai_stream_service import lauf_beginnen, lauf_verfolgen, sse_event
+from services.ai_stream_service import (
+    lauf_beginnen_nebenher,
+    lauf_verfolgen,
+    sse_event,
+)
 
 
 router = APIRouter(prefix="/api/ai/conversation", tags=["ai-chat"])
@@ -324,7 +328,7 @@ async def stream_message(
         if not safe_content:
             raise HTTPException(status_code=400, detail="Nachricht ist nach Sicherheitsfilter leer")
         # Die Denkvorgabe wird **hier** festgelegt und nicht erst beim Senden:
-        # `lauf_beginnen` laeuft synchron, der Modellkatalog ist ein
+        # der Anlauf kennt keinen HTTP-Client, der Modellkatalog ist aber ein
         # HTTP-Abruf. Wichtiger noch — der geklemmte Wert gehoert in den Lauf,
         # damit eine Fortsetzung nach einer Bestaetigung dieselbe Tiefe
         # verwendet wie der erste Zug.
@@ -336,19 +340,29 @@ async def stream_message(
             aktiv=payload.reasoning,
             wunsch=payload.reasoning_effort,
         )
-        # Aus demselben Grund hier und nicht in `lauf_beginnen`: das
-        # Kontextfenster steht im Modellkatalog, und den zu befragen ist ein
-        # HTTP-Abruf. Es gehoert ausserdem in den Lauf — eine Fortsetzung nach
-        # einer Bestaetigung muss mit demselben Budget rechnen wie der erste
-        # Zug, auch wenn der Betreiber zwischendurch das Modell wechselt.
+        # Aus demselben Grund hier und nicht im Anlauf: das Kontextfenster steht
+        # im Modellkatalog, und den zu befragen ist ein HTTP-Abruf. Es gehoert
+        # ausserdem in den Lauf — eine Fortsetzung nach einer Bestaetigung muss
+        # mit demselben Budget rechnen wie der erste Zug, auch wenn der
+        # Betreiber zwischendurch das Modell wechselt.
         fenster = await ai_context_window.ermitteln(
             request.app.state.ai_http_client, provider
         )
-        run, fehler = lauf_beginnen(
-            db,
-            user=user,
-            conversation=conversation,
-            provider=provider,
+        # Ab hier reisen nur noch **Kennungen** weiter. Der Anlauf legt sich
+        # gleich eine eigene Sitzung in einem eigenen Thread an, und die des
+        # Requests darf diese Grenze nicht ueberschreiten — sie gehoert dem
+        # Request-Thread und wird von ihm geschlossen.
+        user_id, conversation_id, provider_id = user.id, conversation.id, provider.id
+        # Und sie darf auch keine offene Transaktion ueber die Grenze tragen.
+        # Unter SQLite teilen sich beide Sitzungen eine Verbindung; der Commit
+        # der einen schloesse die offene Arbeit der anderen mit ab. Frueher
+        # endete `lauf_beginnen` selbst mit genau diesem Commit — es ist also
+        # derselbe Zeitpunkt wie bisher, nur eine Zeile frueher.
+        db.commit()
+        run_id, fehler = await lauf_beginnen_nebenher(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            provider_id=provider_id,
             request_id=payload.request_id,
             content=safe_content,
             reasoning=denken,
@@ -358,7 +372,7 @@ async def stream_message(
             # zwischen "kleines Fenster" und "kein Wissen" noch sehen.
             context_chars=fenster.zeichen if fenster.bekannt else None,
         )
-        if run is None:
+        if run_id is None:
             code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")
             stream = _fehlerstrom(code, message_key)
         else:
@@ -369,10 +383,10 @@ async def stream_message(
             # ihn zu lesen beginnt — der Lauf arbeitet da laengst. Wuerde erst
             # dort abonniert, waeren die ersten Zeichen schon durch. Abonniert
             # wird deshalb hier, synchron, vor dem Start.
-            ai_run_broker.eroeffnen(run.id)
-            abo = ai_run_broker.abonnieren(run.id)
-            ai_run_service.lauf_starten(run.id)
-            stream = lauf_verfolgen(run.id, abo=abo)
+            ai_run_broker.eroeffnen(run_id)
+            abo = ai_run_broker.abonnieren(run_id)
+            ai_run_service.lauf_starten(run_id)
+            stream = lauf_verfolgen(run_id, abo=abo)
     return StreamingResponse(
         stream,
         media_type="text/event-stream",

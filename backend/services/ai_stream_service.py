@@ -16,6 +16,7 @@ Damit die Aufgabenteilung nicht wieder verschwimmt:
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
@@ -2501,6 +2502,206 @@ def lauf_beginnen(
         db.rollback()
         logger.warning("AI-Lauf konnte nicht beginnen error=%s", type(exc).__name__)
         return None, ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")
+
+
+# ── Der Anlauf neben der Ereignisschleife ────────────────────────────────────
+#
+# `lauf_beginnen` ist reine Datenbankarbeit und deshalb **blockierend**. Gerufen
+# wurde es bisher geradewegs aus `async def stream_message` — also *auf* der
+# Ereignisschleife. Gemessen (backend/logs/ai-benchmark/*-vorher-anlauf-*.json,
+# Stufe 200): 13 ms je Lauf, zusammen 2,84 s, und die Schleife stand am Stueck
+# 3,45 s. In dieser Zeit bekommt **niemand** eine Antwort — auch nicht der
+# Kunde, der nur seine Serverliste aufruft. Genau diese Beschwerde gab es im
+# Betrieb schon einmal ("Backups fuer alle Server angelegt, danach lud die Seite
+# nicht mehr").
+#
+# Aufgeschluesselt sind die 13 ms fast vollstaendig Datenbank:
+# `reserve_ai_usage` 37 %, `build_provider_messages` 17 %, `lauf_anlegen` 7 %,
+# das Guardian-Briefing 7 %, `vorgaenger_abloesen` 5 %. Kein einziger Posten
+# laesst sich wegrechnen — es ist Arbeit, die getan werden muss. Sie muss nur
+# woanders getan werden.
+
+
+def _anlauf_nebenlaeufigkeit() -> int:
+    """Wieviele Laufbeginne gleichzeitig laufen duerfen.
+
+    Dieselbe Regel wie bei `_werkzeug_nebenlaeufigkeit` und aus demselben Grund:
+    auf **SQLite** teilen sich alle Sitzungen eine Verbindung, zwei
+    Transaktionen darauf sind kein Nebenlauf, sondern ein Datenfehler. Auf
+    **PostgreSQL** holt sich jeder Anlauf seine eigene Verbindung.
+
+    Acht und nicht mehr, obwohl `pool_size=10` plus `max_overflow=20` mehr
+    hergaebe: der Anlauf ist kurz (13 ms), aber er ist nicht das Einzige, was
+    Verbindungen braucht. Bei Stufe 200 waren schon vorher 20 von 30
+    gleichzeitig ausgeliehen. Eine unbegrenzte Breite haette daraus 200
+    gleichzeitig wartende Anlaeufe gemacht — der Pool haette abgesagt, und zwar
+    zuerst den gewoehnlichen Anfragen des Panels.
+
+    **Der wichtigere Teil geht dabei nicht verloren.** Auch bei eins laeuft der
+    Anlauf durch `asyncio.to_thread` und damit *neben* der Schleife. Die
+    Gleichzeitigkeit ist der zweite Gewinn, nicht der erste.
+
+    Nachgemessen, damit die Eins nicht als Vorsicht missverstanden wird: mit
+    acht auf der SQLite-Datei des Benchmarks wurde bei Stufe 200 **alles**
+    schlechter — Wanduhr 7,92 s statt 7,31 s, Blockade in Summe 3,87 s statt
+    0,97 s, Pool 20 statt 6 Verbindungen. Acht Schreiber auf einer Datei sind
+    keine acht Schreiber.
+    """
+    return 1 if str(engine.url).startswith("sqlite") else 8
+
+
+#: Die Ereignisschleife, zu der Schranke und Schloesser unten gehoeren. Ein
+#: `asyncio.Semaphore` bindet sich an die Schleife, die ihn zuerst benutzt;
+#: unter einer zweiten wirft er. Die Testsuite legt je Test eine neue an.
+#:
+#: Der Verweis ist mit Absicht **stark**. Wuerde er nur verglichen und die alte
+#: Schleife dabei freigegeben, koennte eine neue an derselben Adresse entstehen
+#: und der Vergleich `is` waere still falsch — ein Fehler, der genau einmal alle
+#: paar hundert Testlaeufe auftritt und nie zu finden ist. Eine tote Schleife im
+#: Speicher zu halten ist der billigere Preis.
+_ANLAUF_SCHLEIFE = None
+_ANLAUF_SCHRANKE: asyncio.Semaphore | None = None
+#: Ein Schloss je Unterhaltung, solange jemand darauf wartet.
+_ANLAUF_SCHLOESSER: dict[str, asyncio.Lock] = {}
+_ANLAUF_WARTENDE: dict[str, int] = {}
+
+
+@asynccontextmanager
+async def _anlaufrecht(conversation_id: str) -> AsyncIterator[None]:
+    """Haelt die Reihenfolge, die `lauf_beginnen` bisher geschenkt bekam.
+
+    Solange der Anlauf synchron auf der Schleife lief, konnte es je Unterhaltung
+    gar keine zwei geben — das erledigte das Nichtvorhandensein von
+    Nebenlaeufigkeit. Im Thread ist das weg, und ausgerechnet hier haengt daran
+    etwas Tragendes: `vorgaenger_abloesen` beendet die offenen Laeufe der
+    Unterhaltung, und **danach** wird der neue angelegt. Liefen zwei Anlaeufe
+    derselben Unterhaltung gleichzeitig, koennte jeder abloesen, bevor der
+    andere angelegt hat — und am Ende schrieben zwei Laeufe in denselben Chat.
+    Ein Benutzer hat genau eine Unterhaltung; zwei schnell hintereinander
+    abgeschickte Nachrichten reichen also aus.
+
+    Das Schloss haengt an der Unterhaltung und nicht am Prozess: zwei Benutzer
+    stehen sich damit nicht im Weg, und genau darum geht es.
+
+    **Erst das Schloss, dann die Schranke.** Andersherum haetten Wartende einer
+    besetzten Unterhaltung Plaetze der Schranke belegt, ohne zu arbeiten.
+    """
+    global _ANLAUF_SCHLEIFE, _ANLAUF_SCHRANKE
+    schleife = asyncio.get_running_loop()
+    if schleife is not _ANLAUF_SCHLEIFE:
+        _ANLAUF_SCHLEIFE = schleife
+        _ANLAUF_SCHRANKE = asyncio.Semaphore(_anlauf_nebenlaeufigkeit())
+        _ANLAUF_SCHLOESSER.clear()
+        _ANLAUF_WARTENDE.clear()
+    schloss = _ANLAUF_SCHLOESSER.get(conversation_id)
+    if schloss is None:
+        schloss = asyncio.Lock()
+        _ANLAUF_SCHLOESSER[conversation_id] = schloss
+    # Mitgezaehlt wird, damit das Schloss wieder verschwindet. Ohne das waechst
+    # die Ablage mit jeder je begonnenen Unterhaltung und wird nie kleiner.
+    _ANLAUF_WARTENDE[conversation_id] = _ANLAUF_WARTENDE.get(conversation_id, 0) + 1
+    try:
+        async with schloss:
+            assert _ANLAUF_SCHRANKE is not None
+            async with _ANLAUF_SCHRANKE:
+                yield
+    finally:
+        rest = _ANLAUF_WARTENDE.get(conversation_id, 1) - 1
+        if rest > 0:
+            _ANLAUF_WARTENDE[conversation_id] = rest
+        else:
+            _ANLAUF_WARTENDE.pop(conversation_id, None)
+            _ANLAUF_SCHLOESSER.pop(conversation_id, None)
+
+
+def _anlauf_im_thread(
+    *,
+    user_id: int,
+    conversation_id: str,
+    provider_id: int,
+    request_id: UUID,
+    content: str,
+    reasoning: bool,
+    reasoning_effort: str | None,
+    context_chars: int | None,
+    guardian_briefing_unterdruecken: bool,
+) -> tuple[str | None, tuple[str, str] | None]:
+    """Der Anlauf mit **eigener** Sitzung — das ist der ganze Zweck.
+
+    Eine Sitzung ueber eine Threadgrenze zu reichen ist ein Fehler, kein
+    Sparfleck: SQLAlchemy-Sitzungen sind nicht threadsicher, und die des
+    Requests wird vom Request-Thread gleich danach geschlossen. Deshalb kommen
+    hier nur Kennungen an, und die Objekte werden neu geholt.
+
+    Das Neuholen ist zugleich die zweite Pruefung. Zwischen Rechtepruefung im
+    Endpunkt und diesem Punkt liegt jetzt eine Wartezeit an der Schranke — in
+    der ein Benutzer gesperrt oder ein Anbieter abgeschaltet worden sein kann.
+    """
+    with SessionLocal() as db:
+        user = db.get(User, user_id)
+        if user is None or not user.is_active:
+            logger.info("Anlauf verworfen: Benutzer weg oder gesperrt user_id=%s", user_id)
+            return None, ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")
+        conversation = get_owned_conversation(db, conversation_id, user)
+        if conversation is None:
+            logger.info("Anlauf verworfen: Unterhaltung weg conversation_id=%s", conversation_id)
+            return None, ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")
+        provider = db.get(AiProvider, provider_id)
+        if provider is None or not provider.enabled:
+            logger.info("Anlauf verworfen: Anbieter weg provider_id=%s", provider_id)
+            return None, ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")
+        run, fehler = lauf_beginnen(
+            db,
+            user=user,
+            conversation=conversation,
+            provider=provider,
+            request_id=request_id,
+            content=content,
+            reasoning=reasoning,
+            reasoning_effort=reasoning_effort,
+            context_chars=context_chars,
+            guardian_briefing_unterdruecken=guardian_briefing_unterdruecken,
+        )
+        # Nur die Kennung verlaesst den Thread. Ein ORM-Objekt aus einer gleich
+        # geschlossenen Sitzung ist eine Falle: nach dem Commit sind seine
+        # Felder abgelaufen, und der erste Zugriff danach wirft.
+        return (run.id if run is not None else None), fehler
+
+
+async def lauf_beginnen_nebenher(
+    *,
+    user_id: int,
+    conversation_id: str,
+    provider_id: int,
+    request_id: UUID,
+    content: str,
+    reasoning: bool,
+    reasoning_effort: str | None = None,
+    context_chars: int | None = None,
+    guardian_briefing_unterdruecken: bool = False,
+) -> tuple[str | None, tuple[str, str] | None]:
+    """`lauf_beginnen`, aber **neben** der Ereignisschleife statt auf ihr.
+
+    Gibt die Lauf-Kennung zurueck und nicht den Lauf — siehe `_anlauf_im_thread`.
+    Der Endpunkt braucht ohnehin nur sie: mit ihr haengt sich der Browser an den
+    Ereignisstrom, und das passiert weiterhin sofort, ohne Umweg ueber einen
+    Hintergrundauftrag. Verschoben wird nur, **wo** gerechnet wird, nicht
+    **wann** geantwortet wird. Ein ueberschrittenes Kontingent und ein
+    Anfragekonflikt kommen deshalb weiterhin unmittelbar zurueck.
+    """
+    async with _anlaufrecht(conversation_id):
+        return await asyncio.to_thread(
+            _anlauf_im_thread,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            provider_id=provider_id,
+            request_id=request_id,
+            content=content,
+            reasoning=reasoning,
+            reasoning_effort=reasoning_effort,
+            context_chars=context_chars,
+            guardian_briefing_unterdruecken=guardian_briefing_unterdruecken,
+        )
 
 
 async def lauf_verfolgen(run_id: str, *, abo=None) -> AsyncIterator[str]:

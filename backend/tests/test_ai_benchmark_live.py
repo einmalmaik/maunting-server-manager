@@ -1456,6 +1456,12 @@ async def _ein_lastlauf(
     Verbindungspool laesst sich anders gar nicht stellen. Die Sitzung wird
     geschlossen, bevor der Lauf zu arbeiten beginnt — genau wie im Betrieb, wo
     der Request an dieser Stelle endet.
+
+    Der Anlauf geht ueber ``lauf_beginnen_nebenher`` und nicht ueber
+    ``lauf_beginnen``, weil der Endpunkt es so tut. Ein Benchmark, der den
+    synchronen Weg misst, misst einen Weg, den im Betrieb niemand mehr geht —
+    und haette die Blockade, um die es hier geht, weiterhin angezeigt, obwohl
+    sie weg ist.
     """
     ergebnis = Lastlauf()
     beginn = perf_counter()
@@ -1464,23 +1470,21 @@ async def _ein_lastlauf(
     try:
         with SessionLocal() as db:
             benutzer = db.get(User, user_id)
-            anbieter = db.get(AiProvider, provider_id)
             unterhaltung = ai_chat_service.get_or_create_primary_conversation(
                 db, benutzer
             )
             db.commit()
-            run, fehler = ai_stream_service.lauf_beginnen(
-                db,
-                user=benutzer,
-                conversation=unterhaltung,
-                provider=anbieter,
-                request_id=uuid4(),
-                content=PARALLEL_AUFTRAG,
-                reasoning=False,
-                reasoning_effort=None,
-                context_chars=None,
-            )
-            run_id = run.id if run is not None else None
+            conversation_id = unterhaltung.id
+        run_id, fehler = await ai_stream_service.lauf_beginnen_nebenher(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            provider_id=provider_id,
+            request_id=uuid4(),
+            content=PARALLEL_AUFTRAG,
+            reasoning=False,
+            reasoning_effort=None,
+            context_chars=None,
+        )
     except Exception as exc:  # noqa: BLE001 — ein Ausfall ist ein Messergebnis
         ergebnis.anlauf = perf_counter() - beginn
         ergebnis.dauer = ergebnis.anlauf
@@ -1679,18 +1683,20 @@ def _engpassbericht(stufen: list[Stufe]) -> list[str]:
             f"Summe {schlimmste.loop_block_summe:.2f}s."
         )
 
-    # Der Anlauf ist der Teil, der synchron im Request laeuft. Er ist deshalb
-    # die einzige Groesse hier, die sich **nicht** durch Warten verteilt: was er
-    # kostet, kostet er die ganze Anwendung.
+    # Der Anlauf ist der Teil, den der Benutzer abwartet, bevor er seine
+    # Lauf-Kennung bekommt. Seit `lauf_beginnen_nebenher` laeuft er in einem
+    # eigenen Thread — die Summe steht also weiterhin da, sie kostet aber nicht
+    # mehr die Ereignisschleife. Was sie kostet, steht in BLK.
     teuerste = max(stufen, key=lambda s: s.anlauf_summe)
     if teuerste.wanduhr > 0:
         anteil = 100.0 * teuerste.anlauf_summe / teuerste.wanduhr
         zeilen.append(
-            f"  ANLAUF (lauf_beginnen, synchron im Request): bei Stufe "
+            f"  ANLAUF (lauf_beginnen_nebenher, im Thread, Breite "
+            f"{ai_stream_service._anlauf_nebenlaeufigkeit()}): bei Stufe "
             f"{teuerste.laeufe} zusammen {teuerste.anlauf_summe:.2f}s = "
             f"{anteil:.0f}% der Wanduhr, Median je Lauf "
-            f"{_med([e.anlauf for e in teuerste.ergebnisse]):.3f}s. Diese Zeit "
-            "laeuft nicht nebeneinander, sondern hintereinander."
+            f"{_med([e.anlauf for e in teuerste.ergebnisse]):.3f}s. Die Summe "
+            "enthaelt die Wartezeit an der Schranke, nicht nur die Arbeit."
         )
 
     hoechster_pool = max(s.pool_hoechststand for s in stufen)
