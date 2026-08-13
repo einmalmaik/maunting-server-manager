@@ -214,6 +214,79 @@ def test_die_vorschau_beim_aendern_laesst_die_zeile_unberuehrt(db: Session) -> N
     assert aufgabe.enabled is True
 
 
+def test_eine_leere_kennung_legt_an_statt_abzuweisen(db: Session) -> None:
+    """**Der haeufigste Fehlschlag im Betrieb.**
+
+    Das Schema sagt "task_id weglassen legt neu an". Ein Modell kann ein Feld
+    aber schlecht weglassen, das im Schema danebensteht — es schickt `""`. Die
+    Abweisung kostete dabei nicht das Feld, sondern die ganze Antwort: eine
+    Formmeldung aus dem Vorschlagspfad beendet den Lauf, und im Chat stand
+    statt der neuen Aufgabe "Die KI hat einen Werkzeugaufruf gestellt, den das
+    Panel nicht annehmen konnte".
+
+    "Nicht genannt" und "leer genannt" zu unterscheiden trug hier nichts. Was
+    eine Kennung sein *soll* und keine ist — eine Zahl, ein Objekt — faellt
+    weiterhin durch.
+    """
+    user = _benutzer(db, "leerekennung", "ai.tasks.manage")
+
+    payload, preview = ai_proposal_service._task_set_payload(
+        db, user, {**ANLEGEN, "task_id": ""}
+    )
+
+    assert payload["task_id"] is None
+    assert preview["operation"] == "task_create"
+    assert db.query(AiTask).count() == 0
+
+
+def test_eine_kennung_die_keine_ist_faellt_weiterhin_durch(db: Session) -> None:
+    user = _benutzer(db, "falschekennung", "ai.tasks.manage")
+    for wert in (7, ["a"], {"id": "a"}):
+        with pytest.raises(AiActionValidationError, match="Kennung"):
+            ai_proposal_service._task_set_payload(
+                db, user, {**ANLEGEN, "task_id": wert}
+            )
+
+
+def test_eine_anders_geschriebene_uhrzeit_geht_durch(db: Session) -> None:
+    """Zusammen mit `test_dieselbe_uhrzeit_anders_geschrieben_wird_angenommen`.
+
+    Dort steht die Regel, hier steht, dass sie auch am Werkzeug ankommt — der
+    Weg dazwischen fuehrt durch `vorschau`, und der ist es, der im Betrieb den
+    Lauf abbrach.
+    """
+    user = _benutzer(db, "uhrzeitform", "ai.tasks.manage")
+
+    _, preview = ai_proposal_service._task_set_payload(
+        db, user, {**ANLEGEN, "time_of_day": "8:00"}
+    )
+
+    assert preview["plan"] == "taeglich um 08:00 (Europe/Berlin)"
+
+
+def test_nur_die_uhrzeit_zu_verschieben_genuegt(db: Session) -> None:
+    """Die kleinste denkbare Aenderung — und sie ging an Wochentagen kaputt.
+
+    `_planfelder_ergaenzen` reicht den Bestand aus der Datenbank herein, und
+    dort stehen die Tage als ``"1,3,5"``. Die Pruefung nahm nur Listen an, also
+    scheiterte ausgerechnet "verschieb das auf neun Uhr" an einer Aufgabe, die
+    gar nicht angefasst werden sollte.
+    """
+    user = _benutzer(db, "verschieben", "ai.tasks.manage")
+    aufgabe = ai_task_service.anlegen(
+        db, user=user, felder={**ANLEGEN, "weekdays": [1, 3, 5]}
+    )
+    db.commit()
+
+    _, preview = ai_proposal_service._task_set_payload(
+        db, user, {"task_id": aufgabe.id, "time_of_day": "09:00"}
+    )
+
+    assert preview["operation"] == "task_update"
+    # Die Tage stehen unveraendert daneben — sie waren nie Gegenstand.
+    assert preview["plan"] == "Mo, Mi, Fr um 09:00 (Europe/Berlin)"
+
+
 def test_ein_aenderungsvorschlag_ohne_aenderung_wird_abgewiesen(db: Session) -> None:
     user = _benutzer(db, "leeraendern", "ai.tasks.manage")
     aufgabe = ai_task_service.anlegen(db, user=user, felder=dict(ANLEGEN))

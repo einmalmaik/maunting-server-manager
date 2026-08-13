@@ -104,13 +104,28 @@ def zone_pruefen(name: object) -> str:
 
 
 def uhrzeit_pruefen(wert: object) -> str:
-    """``"HH:MM"`` — dasselbe Format wie `restart_times_utc` am Server."""
-    if not isinstance(wert, str) or len(wert) != 5 or wert[2] != ":":
+    """``"HH:MM"`` — dasselbe Format wie `restart_times_utc` am Server.
+
+    **Beim Lesen nachsichtig, beim Speichern streng.** Gespeichert wird immer
+    ``"HH:MM"``; angenommen werden auch ``"8:00"`` und ``"08:00:00"``.
+
+    Der Grund steht im Betrieb: das Schema sagt dem Modell ``'HH:MM'``, und
+    trotzdem schickt es regelmaessig eine einstellige Stunde oder haengt
+    Sekunden an. Beides ist eindeutig — es gibt keine zweite Lesart von
+    ``"8:00"``. Die Abweisung kostete den Benutzer aber nicht das Feld, sondern
+    die **ganze Antwort**: eine Formmeldung aus dem Vorschlagspfad beendet den
+    Lauf, und im Chat stand statt der Aufgabe eine Fehlermeldung.
+
+    Streng bleibt es, wo etwas wirklich mehrdeutig ist — ``"halb neun"`` oder
+    ``"8 pm"`` werden weiterhin abgewiesen. Nachsicht heisst hier: dieselbe
+    Angabe anders geschrieben, nicht eine andere Angabe.
+    """
+    if not isinstance(wert, str):
         raise AiActionValidationError("Uhrzeit muss im Format HH:MM stehen")
-    try:
-        stunde, minute = int(wert[:2]), int(wert[3:])
-    except ValueError as exc:
-        raise AiActionValidationError("Uhrzeit muss im Format HH:MM stehen") from exc
+    teile = wert.strip().split(":")
+    if len(teile) not in (2, 3) or not all(teil.strip().isdigit() for teil in teile[:2]):
+        raise AiActionValidationError("Uhrzeit muss im Format HH:MM stehen")
+    stunde, minute = int(teile[0]), int(teile[1])
     if not (0 <= stunde <= 23 and 0 <= minute <= 59):
         raise AiActionValidationError("Uhrzeit liegt ausserhalb des Tages")
     return f"{stunde:02d}:{minute:02d}"
@@ -126,6 +141,22 @@ def wochentage_pruefen(wert: object) -> str | None:
     """
     if wert is None or wert == [] or wert == "":
         return None
+    if isinstance(wert, str):
+        # Die gespeicherte Form (``"1,3,5"``) wird auch wieder angenommen. Zwei
+        # Aufrufer brauchen das, und beide sind echt:
+        #
+        # * `_planfelder_ergaenzen` reicht den Bestand aus der Datenbank
+        #   herein, wenn jemand nur die Uhrzeit verschiebt. Ohne diesen Zweig
+        #   scheiterte ausgerechnet die kleinste denkbare Aenderung an einer
+        #   Aufgabe, die Wochentage traegt.
+        # * Das Modell schickt sie ebenfalls, obwohl das Schema eine Liste
+        #   nennt — es hat die Zeichenkette gerade in `list_tasks` gelesen.
+        try:
+            wert = [int(teil) for teil in wert.split(",") if teil.strip()]
+        except ValueError as exc:
+            raise AiActionValidationError(
+                "Wochentage muessen Zahlen von 1 (Montag) bis 7 (Sonntag) sein"
+            ) from exc
     if not isinstance(wert, list):
         raise AiActionValidationError("Wochentage muessen eine Liste von Zahlen sein")
     tage: set[int] = set()

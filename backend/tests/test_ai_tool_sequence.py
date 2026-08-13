@@ -215,6 +215,26 @@ async def _fortsetzen(db: Session, run_id: str) -> list[str]:
     return _abholen(warteschlange)
 
 
+def _werkzeugantworten(gesehen: list[list[dict]]) -> list[dict]:
+    """Alles, was als `tool`-Nachricht an den Anbieter zurueckging.
+
+    Der einzige Weg, zu pruefen, was das **Modell** erfahren hat — im Gegensatz
+    zu dem, was der Benutzer sieht (`_error_codes`) oder der Betreiber im Log
+    findet. Seit ein Formfehler den Lauf nicht mehr beendet, ist genau das die
+    Stelle, an der die Auskunft ankommt.
+    """
+    antworten = []
+    for runde in gesehen:
+        for nachricht in runde:
+            if nachricht.get("role") != "tool":
+                continue
+            try:
+                antworten.append(json.loads(nachricht.get("content") or "{}"))
+            except ValueError:
+                antworten.append({"roh": nachricht.get("content")})
+    return antworten
+
+
 def _error_codes(events: list[str]) -> list[str]:
     codes = []
     for event in events:
@@ -310,19 +330,34 @@ async def test_write_proposal_without_permission_is_rejected(
     Damit ist auch der Log-Injektionspfad begrenzt — selbst wenn das Modell
     einer injizierten Anweisung folgt, scheitert die Umsetzung an der
     Rechtepruefung, nicht am Wohlwollen des Modells.
+
+    **Die Ablehnung sieht seit einer Aenderung anders aus.** Frueher endete der
+    ganze Lauf mit `AI_TOOL_REJECTED`: der Benutzer verlor die Antwort, und das
+    Modell erfuhr nie, woran es lag. Jetzt ist sie eine Werkzeugantwort — das
+    Modell liest den Grund und kann darauf eingehen. Am Kern aendert das nichts,
+    und genau das steht hier: es entsteht kein Vorschlag, weder als Zeile noch
+    als Karte.
     """
     server = _server(db, "norights")
     _grant(db, regular_user, server=server, server_keys=("server.view",))
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
-    _fake_stream(monkeypatch, [[
+    gesehen = _fake_stream(monkeypatch, [[
         ProviderToolCall(id="a", name="propose_server_lifecycle", arguments={"server_id": server.id, "operation": "stop"}),
     ]])
 
     events = await _collect(db, regular_user, conversation, provider)
 
-    assert "AI_TOOL_REJECTED" in _error_codes(events)
     assert db.query(AiActionProposal).count() == 0
+    assert not [e for e in events if e.startswith("event: proposal")]
+    # Der Benutzer bekommt seine Antwort — kein Fehlerereignis mehr.
+    assert _error_codes(events) == []
+    # Und das Modell hat erfahren, warum nichts entstanden ist.
+    assert any(
+        ergebnis.get("error_code") == "AI_TOOL_ARGUMENTS_INVALID"
+        for antwort in _werkzeugantworten(gesehen)
+        for ergebnis in antwort.get("outcomes") or []
+    )
 
 
 @pytest.mark.asyncio
@@ -1155,7 +1190,7 @@ async def test_ein_abgelehnter_schreibaufruf_nennt_den_grund_im_log(
     )
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
-    _fake_stream(monkeypatch, [[
+    gesehen = _fake_stream(monkeypatch, [[
         ProviderToolCall(id="a", name="propose_server_delete", arguments={
             "server_id": server.id,
             "reason": "Der Benutzer will den Server entfernen.",
@@ -1165,12 +1200,20 @@ async def test_ein_abgelehnter_schreibaufruf_nennt_den_grund_im_log(
     ]])
 
     with caplog.at_level(logging.WARNING):
-        events = await _collect(db, regular_user, conversation, provider)
+        await _collect(db, regular_user, conversation, provider)
 
-    assert "AI_TOOL_REJECTED" in _error_codes(events)
     protokoll = "\n".join(record.getMessage() for record in caplog.records)
     assert "AI-Werkzeugaufruf abgelehnt" in protokoll
     assert "Loesch-Tool akzeptiert keine Argumente" in protokoll
+    # **Der Grund geht jetzt an beide.** Frueher stand er nur hier im Log, und
+    # der Lauf war zu Ende — das Modell konnte den Fehler nicht einmal
+    # bemerken, geschweige denn ihn im zweiten Versuch weglassen.
+    gruende = [
+        ergebnis.get("error") or ""
+        for antwort in _werkzeugantworten(gesehen)
+        for ergebnis in antwort.get("outcomes") or []
+    ]
+    assert any("Loesch-Tool akzeptiert keine Argumente" in grund for grund in gruende)
 
 
 @pytest.mark.asyncio
@@ -1213,3 +1256,68 @@ async def test_ein_abgelehnter_schreibaufruf_hinterlaesst_eine_auditspur(
     assert len(eintraege) == 1
     assert eintraege[0].origin == "ai"
     assert "propose_server_delete" in (eintraege[0].details or "")
+
+
+@pytest.mark.asyncio
+async def test_nach_einem_formfehler_versucht_das_modell_es_richtig(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der eigentliche Zweck: aus der Auskunft wird ein zweiter, richtiger Zug.
+
+    Der Fall aus dem Betrieb kam von den stehenden Auftraegen — zwoelf teils
+    bedingte Argumente, und das Modell griff regelmaessig daneben. Der Fehler
+    war aber nie deren eigener: **jeder** Formfehler eines Schreibwerkzeugs
+    beendete den ganzen Lauf. Der Benutzer sah "Die KI hat einen Werkzeugaufruf
+    gestellt, den das Panel nicht annehmen konnte", verlor seine Antwort, und
+    das Modell erfuhr nie, was falsch war — obwohl die Meldungen ausdruecklich
+    an *es* geschrieben sind.
+
+    Hier laeuft genau das durch: erste Runde mit einem erfundenen Argument,
+    zweite Runde sauber, am Ende steht die Aufgabe. Ohne die Aenderung endete
+    der Lauf nach der ersten Runde, und die zweite haette es nie gegeben.
+    """
+    from models import AiActionProposal, AiTask
+
+    server = _server(db, "formfehler")
+    _grant(
+        db, regular_user, server=server,
+        server_keys=("server.view",), global_keys=("ai.tasks.manage",),
+    )
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    sauber = {
+        "title": "Serverbericht",
+        "instruction": "Sieh nach den Servern.",
+        "kind": "report",
+        "plan_kind": "daily",
+        "time_of_day": "08:00",
+        "timezone": "Europe/Berlin",
+        "channel": "chat",
+        "reason": "Der Benutzer will das taeglich.",
+        "expected_effect": "Ein stehender Auftrag entsteht.",
+    }
+    gesehen = _fake_stream(monkeypatch, [
+        [ProviderToolCall(id="a", name="propose_task_set", arguments={
+            **sauber, "wiederholung": "taeglich",
+        })],
+        [ProviderToolCall(id="b", name="propose_task_set", arguments=dict(sauber))],
+    ])
+
+    events = await _collect(db, regular_user, conversation, provider)
+
+    # Der Benutzer verliert seine Antwort nicht.
+    assert _error_codes(events) == []
+    # Das Modell hat den Grund gelesen …
+    gruende = [
+        ergebnis.get("error") or ""
+        for antwort in _werkzeugantworten(gesehen)
+        for ergebnis in antwort.get("outcomes") or []
+    ]
+    assert any("ungueltige Argumente" in grund for grund in gruende)
+    # … und der zweite Versuch ist durchgegangen.
+    assert db.query(AiActionProposal).filter(
+        AiActionProposal.tool_name == "propose_task_set",
+        AiActionProposal.status == "proposed",
+    ).count() == 1
+    # Bestaetigt wurde noch nichts — die Karte wartet auf den Menschen.
+    assert db.query(AiTask).count() == 0

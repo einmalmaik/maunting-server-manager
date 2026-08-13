@@ -781,9 +781,27 @@ def _persist_write_proposals(
                     "error_code": exc.code,
                 })
             except AiActionValidationError as exc:
-                # Der Versuch wird protokolliert, dann fliegt der Fehler weiter
-                # wie bisher — dieser Schritt aendert **nichts** am Verhalten des
-                # Laufs, er macht ihn nur nachvollziehbar.
+                # **Der Formfehler beendet den Lauf nicht mehr.** Er wird zur
+                # Werkzeugantwort, genau wie ein Zustandsfehler eine Zeile
+                # darueber.
+                #
+                # Vorher flog er weiter: der Benutzer sah "Die KI hat einen
+                # Werkzeugaufruf gestellt, den das Panel nicht annehmen konnte",
+                # verlor die ganze Antwort, und das Modell erfuhr nie, was falsch
+                # war. Das war doppelt widersinnig — die Meldungen sind
+                # ausdruecklich **an das Modell** geschrieben ("Frag im Zweifel
+                # mit ask_user nach", "leg die Aufgabe als reinen Bericht an"),
+                # und der Lesepfad macht es seit jeher andersherum: ein einzelner
+                # fehlgeschlagener Aufruf ist dort eine Auskunft und kein Grund,
+                # dem Benutzer die Antwort wegzunehmen.
+                #
+                # Aufgefallen ist es an den stehenden Auftraegen, weil deren
+                # Werkzeug zwoelf teils bedingte Argumente hat und entsprechend
+                # oft danebengreift. Der Fehler war aber nie deren eigener.
+                #
+                # Ausgefuehrt wird dabei nichts: der Vorschlag ist gar nicht erst
+                # entstanden, und die Zeile darueber laesst den Rest der Runde
+                # ausfallen. Was das Modell gewinnt, ist genau eine Auskunft.
                 #
                 # Vorher hinterliess eine Ablehnung keinerlei Spur: das Audit
                 # entsteht in `create_proposal` erst nach `db.add`, und die
@@ -797,7 +815,29 @@ def _persist_write_proposals(
                     grund=str(exc),
                     correlation_id=correlation_id,
                 )
-                raise
+                # Dieselbe Zeile, die frueher der aeussere Fehlerzweig schrieb.
+                # Sie zieht hierher mit, statt zu verschwinden: der Betreiber
+                # findet den Grund weiterhin an derselben Stelle im Panel-Log,
+                # und dass der Lauf jetzt weiterlaeuft, aendert daran nichts.
+                # Ohne sie waere die Aenderung ein Tausch — das Modell erfaehrt
+                # etwas, der Mensch nicht mehr.
+                logger.warning(
+                    "AI-Werkzeugaufruf abgelehnt run_id=%s werkzeug=%s grund=%s",
+                    run_id, call.name, redact_sensitive_text(str(exc))[:200],
+                )
+                abgelehnt.append({
+                    "tool_name": call.name,
+                    "status": "rejected",
+                    "autonomous": False,
+                    "server_id": None,
+                    "error_code": "AI_TOOL_ARGUMENTS_INVALID",
+                    # Der Grund im Klartext — er ist der ganze Zweck der
+                    # Aenderung. Redigiert und gekuerzt aus demselben Grund wie
+                    # die Logzeile: bei `propose_blueprint_change` kann ein vom
+                    # Modell gewaehlter Pfad woertlich im Text stehen, und
+                    # dieses Modell hat seinerseits fremden Logtext gelesen.
+                    "error": redact_sensitive_text(str(exc))[:300],
+                })
         # Der Rueckweg: welcher Lauf wartet auf diesen Vorschlag. Ohne ihn
         # wuesste der Bestaetigungsknopf spaeter nicht, wen er aufwecken soll.
         for proposal in proposals:
@@ -982,6 +1022,11 @@ def _write_followup_messages(
             "autonomous": proposal.get("autonomous"),
             "server_id": proposal.get("server_id"),
             **({"error_code": proposal["error_code"]} if proposal.get("error_code") else {}),
+            # Ein Code allein sagt "ging nicht". Bei einem Formfehler steht das
+            # Brauchbare im Text — welches Feld, welche Form, und oft der
+            # naechste Schritt. Ohne ihn haette das Modell nichts, woraus es
+            # einen besseren zweiten Versuch bauen koennte.
+            **({"error": proposal["error"]} if proposal.get("error") else {}),
         })
 
     assistant_call = {
@@ -1831,7 +1876,32 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     and not proposal.get("error_code")
                     for proposal in proposals
                 )
-                if not (ausgefuehrt and zustand["write_rounds"] < MAX_WRITE_ROUNDS):
+                # **Eine Runde, in der gar nichts entstanden ist, darf wiederholt
+                # werden.**
+                #
+                # Ohne diese Zeile war der Rueckfluss des Ablehnungsgrundes eine
+                # Geste: das Modell erfuhr, dass `time_of_day` im Format HH:MM
+                # stehen muss — und bekam im selben Atemzug die Werkzeuge
+                # weggenommen. Es konnte den Fehler nur noch beschreiben, nicht
+                # beheben. Der Benutzer las dann "ich konnte die Aufgabe nicht
+                # anlegen", obwohl der zweite Versuch durchgegangen waere.
+                #
+                # Die urspruengliche Regel ("erst wenn Schritt eins nachweislich
+                # lief, ergibt Schritt zwei Sinn") bleibt unangetastet, denn sie
+                # meint etwas anderes: eine Aktion, die **ausgefuehrt wurde und
+                # scheiterte**. Dann ist der Serverzustand unklar, und
+                # weiterzumachen waere leichtsinnig. Hier dagegen ist nichts
+                # passiert — kein Vorschlag, keine Zeile, kein Eingriff.
+                #
+                # Begrenzt ist es durch dieselbe Zahl wie zuvor: `write_rounds`
+                # zaehlt jede Schreibrunde, auch die abgelehnte.
+                nichts_entstanden = not any(
+                    proposal.get("id") for proposal in proposals
+                )
+                if not (
+                    (ausgefuehrt or nichts_entstanden)
+                    and zustand["write_rounds"] < MAX_WRITE_ROUNDS
+                ):
                     # Nur wenn die Runde *ausgefuehrt* wurde und trotzdem Schluss
                     # ist, lag es am Budget. Endet sie, weil ein Vorschlag offen
                     # blieb, wartet der Lauf auf einen Menschen — das ist kein

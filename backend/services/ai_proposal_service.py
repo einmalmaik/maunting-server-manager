@@ -1232,7 +1232,14 @@ def _task_set_payload(db: Session, user: User, arguments: dict) -> tuple[dict, d
     if set(arguments) - _AUFGABEN_FELDER:
         raise AiActionValidationError("Aufgaben-Tool hat ungueltige Argumente")
     roh = arguments.get("task_id")
-    if roh is not None and (not isinstance(roh, str) or not roh.strip()):
+    # **Eine leere Kennung heisst dasselbe wie keine: anlegen.** Das Schema sagt
+    # "weglassen legt neu an", aber ein Modell kann ein Feld schlecht weglassen,
+    # das es gerade gelesen hat — es schickt stattdessen `""`. Die Unterscheidung
+    # zwischen "nicht genannt" und "leer genannt" traegt hier nichts und kostete
+    # im Betrieb die haeufigste aller Aufgaben: das Anlegen der ersten.
+    if isinstance(roh, str) and not roh.strip():
+        roh = None
+    if roh is not None and not isinstance(roh, str):
         raise AiActionValidationError("task_id muss eine Kennung aus list_tasks sein")
     task_id = roh.strip() if isinstance(roh, str) else None
 

@@ -211,11 +211,35 @@ def test_der_plantext_nennt_immer_die_zeitzone() -> None:
 
 
 @pytest.mark.parametrize(
-    "wert", ["8:00", "08.00", "0800", "25:00", "08:60", "", None, 800]
+    "wert", ["08.00", "0800", "25:00", "08:60", "halb neun", "8 pm", "", None, 800]
 )
 def test_unbrauchbare_uhrzeiten_werden_abgewiesen(wert: object) -> None:
     with pytest.raises(AiActionValidationError):
         ai_task_service.uhrzeit_pruefen(wert)
+
+
+@pytest.mark.parametrize("wert,erwartet", [
+    ("08:00", "08:00"),
+    ("8:00", "08:00"),
+    ("08:00:00", "08:00"),
+    (" 8:05 ", "08:05"),
+])
+def test_dieselbe_uhrzeit_anders_geschrieben_wird_angenommen(
+    wert: str, erwartet: str
+) -> None:
+    """**Hier stand einmal, dass "8:00" abgewiesen wird.**
+
+    Die Strenge war gut gemeint und im Betrieb falsch: das Schema nennt dem
+    Modell ``'HH:MM'``, und trotzdem schickt es regelmaessig eine einstellige
+    Stunde oder haengt Sekunden an. Es gibt keine zweite Lesart von ``"8:00"`` —
+    die Abweisung kostete den Benutzer aber nicht das Feld, sondern die ganze
+    Antwort, weil eine Formmeldung aus dem Vorschlagspfad den Lauf beendet.
+
+    Gespeichert wird weiterhin genau eine Form. Nachsicht heisst hier: dieselbe
+    Angabe anders geschrieben, nicht eine andere Angabe — ``"halb neun"`` faellt
+    nach wie vor durch.
+    """
+    assert ai_task_service.uhrzeit_pruefen(wert) == erwartet
 
 
 def test_die_ganze_woche_und_keine_angabe_sind_dasselbe() -> None:
@@ -228,7 +252,20 @@ def test_die_ganze_woche_und_keine_angabe_sind_dasselbe() -> None:
     assert ai_task_service.wochentage_pruefen([5, 1, 1, 3]) == "1,3,5"
 
 
-@pytest.mark.parametrize("wert", [[0], [8], [-1], ["mo"], [True], "1,2", 3])
+@pytest.mark.parametrize("wert", [[0], [8], [-1], ["mo"], [True], "mo,di", "1;2", 3])
 def test_unbrauchbare_wochentage_werden_abgewiesen(wert: object) -> None:
     with pytest.raises(AiActionValidationError):
         ai_task_service.wochentage_pruefen(wert)
+
+
+def test_die_gespeicherte_schreibweise_wird_wieder_angenommen() -> None:
+    """``"1,3,5"`` ist die Form, in der die Tage in der Datenbank stehen.
+
+    Zwei echte Aufrufer reichen sie herein, und beide gingen daran kaputt:
+    `_planfelder_ergaenzen`, wenn jemand nur die Uhrzeit verschiebt — also die
+    kleinste denkbare Aenderung —, und das Modell, das die Zeichenkette gerade
+    in `list_tasks` gelesen hat.
+    """
+    assert ai_task_service.wochentage_pruefen("1,3,5") == "1,3,5"
+    assert ai_task_service.wochentage_pruefen("5,1,3") == "1,3,5"
+    assert ai_task_service.wochentage_pruefen("1,2,3,4,5,6,7") is None
