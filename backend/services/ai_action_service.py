@@ -1318,19 +1318,18 @@ def angebotene_werkzeuge(db: Session, user: User) -> frozenset[str]:
     hier gibt es noch keinen Server. Den waehlt das Modell erst im Argument des
     Aufrufs, und dort wird dann am konkreten Server geprueft.
     """
-    # Je Schluessel einmal fragen. Zwoelf Werkzeuge haengen an vier
-    # Dateirechten; ohne diesen Merkzettel waeren das zwoelf Abfragen fuer vier
-    # Antworten, und der Katalog wird einmal je Segment gebaut.
-    gemerkt: dict[str, bool] = {}
-
-    def darf(key: str) -> bool:
-        if key not in gemerkt:
-            gemerkt[key] = permission_service.has_permission_anywhere(db, user, key)
-        return gemerkt[key]
+    # Alle 24 Schluessel in einer Runde. Der Merkzettel je Schluessel, der hier
+    # zuerst stand, half nur halb: er sparte die Wiederholung je Werkzeug, nicht
+    # die je Schluessel — und darunter fragte jede Pruefung die Rollen des
+    # Benutzers erneut ab. Gemessen waren das 73 Abfragen bei einem
+    # gewoehnlichen Kunden und 93 bei einem Rolleninhaber, jedes Mal am Beginn
+    # eines Segments und damit auf dem Pfad zum ersten Token.
+    verlangt = {key for name in WERKZEUGE for key in angebotsrechte(name)}
+    gehalten = permission_service.rechte_irgendwo(db, user, verlangt)
 
     return frozenset(
         name for name in WERKZEUGE
-        if not angebotsrechte(name) or any(darf(key) for key in angebotsrechte(name))
+        if not angebotsrechte(name) or any(key in gehalten for key in angebotsrechte(name))
     )
 
 

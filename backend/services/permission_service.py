@@ -20,7 +20,10 @@ from models import (
     TeamServerGrant,
     User,
 )
-from services.role_service import effective_user_role_ids
+from services.role_service import (
+    effective_user_role_ids,
+    effective_user_role_permission_keys,
+)
 
 
 def has_global_permission(db: Session, user: User, key: str) -> bool:
@@ -174,6 +177,110 @@ def has_permission_anywhere(db: Session, user: User, key: str) -> bool:
         if owner is not None and direct_server_permission(db, owner, server_id, key):
             return True
     return False
+
+
+def _direkte_rechte(
+    db: Session, user: User, schluessel: set[str]
+) -> tuple[set[str], set[tuple[int, str]]]:
+    """Die direkten Rechte eines Benutzers, mengenweise — genau wie
+    `direct_server_permission`, nur fuer viele Schluessel auf einmal.
+
+    Zurueck kommen zwei Dinge, weil die Rechtekette zwei Arten von Anspruch
+    kennt: **pauschal** (Owner oder eine Rolle mit dem Key — gilt auf allen
+    Servern) und **je Server** (die Delegation in `server_permissions`). Beides
+    in einen Topf zu werfen waere hier falsch: der Gruenderdeckel unten fragt
+    nach einem Recht auf einem *bestimmten* Server, und ein pauschales Recht
+    beantwortet diese Frage anders als ein delegiertes.
+
+    Kosten: zwei Abfragen fuer die Rollen, eine fuer die Delegationen; beim
+    Owner keine einzige.
+    """
+    if user.is_owner:
+        return set(schluessel), set()
+    if not schluessel:
+        return set(), set()
+    pauschal = set(effective_user_role_permission_keys(db, user)) & schluessel
+    offen = schluessel - pauschal
+    if not offen:
+        return pauschal, set()
+    rows = (
+        db.query(ServerPermission.server_id, ServerPermission.permission_key)
+        .filter(
+            ServerPermission.user_id == user.id,
+            ServerPermission.permission_key.in_(offen),
+        )
+        .distinct()
+        .all()
+    )
+    return pauschal, {(server_id, key) for server_id, key in rows}
+
+
+def rechte_irgendwo(db: Session, user: User, schluessel: set[str]) -> set[str]:
+    """Welche dieser Rechte haelt der Benutzer **irgendwo** — global oder auf
+    irgendeinem Server?
+
+    Dieselbe Frage wie `has_permission_anywhere`, nur mengenweise gestellt. Die
+    dortige Beschreibung gilt unveraendert, samt der Warnung: das ist bewusst
+    die grosszuegigere Frage, sie entscheidet nur, was *angeboten* wird. Ob ein
+    Aufruf laeuft, entscheidet weiterhin `has_server_permission` am konkreten
+    Server.
+
+    Der Anlass war gemessen, nicht vermutet: der Werkzeugkatalog der KI fragt
+    24 verschiedene Rechteschluessel ab, und die Schleife ueber
+    `has_permission_anywhere` kostete dabei 73 Abfragen bei einem gewoehnlichen
+    Kunden und 93 bei einem Rolleninhaber — je Schluessel dreimal dieselbe
+    Frage nach den Rollen des Benutzers. Der Aufruf sitzt auf dem Pfad zum
+    ersten Token, dort zaehlt jede Runde zur Wartezeit.
+
+    `has_permission_anywhere` bleibt bestehen; wer genau ein Recht wissen will,
+    soll nicht erst eine Menge bauen muessen.
+    """
+    if not schluessel:
+        return set()
+    pauschal, delegiert = _direkte_rechte(db, user, schluessel)
+    gefunden = pauschal | {key for _, key in delegiert}
+    offen = schluessel - gefunden
+    if not offen:
+        return gefunden
+    # Der Teamweg wird nur betreten, wenn ueberhaupt etwas offen ist — und er
+    # kostet nur dann etwas, wenn es auch Zeilen gibt.
+    rows = (
+        db.query(
+            TeamServerGrant.server_id,
+            TeamServerGrant.permission_key,
+            Team.owner_user_id,
+        )
+        .join(Team, Team.id == TeamServerGrant.team_id)
+        .join(TeamMember, TeamMember.team_id == Team.id)
+        .filter(
+            TeamMember.user_id == user.id,
+            TeamServerGrant.permission_key.in_(offen),
+        )
+        .distinct()
+        .all()
+    )
+    # Je Gruender einmal nachsehen, was er selbst haelt. Bei mehreren Servern
+    # oder Schluesseln desselben Teams waere das sonst eine Abfrage pro Zeile —
+    # genau der Fehler, den diese Funktion behebt.
+    gruender_rechte: dict[int, tuple[set[str], set[tuple[int, str]]]] = {}
+    for server_id, key, owner_user_id in rows:
+        if key in gefunden:
+            continue
+        # Ein Gruender, der sich selbst ueber sein eigenes Team bedient, waere
+        # eine Schleife ohne Erkenntnisgewinn — sein direkter Anspruch steht
+        # oben schon in `pauschal`/`delegiert`.
+        if owner_user_id == user.id:
+            continue
+        if owner_user_id not in gruender_rechte:
+            gruender = db.get(User, owner_user_id)
+            gruender_rechte[owner_user_id] = (
+                _direkte_rechte(db, gruender, offen) if gruender is not None
+                else (set(), set())
+            )
+        g_pauschal, g_delegiert = gruender_rechte[owner_user_id]
+        if key in g_pauschal or (server_id, key) in g_delegiert:
+            gefunden.add(key)
+    return gefunden
 
 
 def _team_visible_server_ids(db: Session, user: User) -> set[int]:
