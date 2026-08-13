@@ -188,6 +188,7 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
         )
 
     _zustellen(
+        db=db,
         user_id=int(user.id),
         provider_id=run.provider_id,
         to=adresse,
@@ -200,34 +201,49 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     )
 
 
-def _zustellen(*, user_id: int, provider_id: int | None = None, **felder) -> None:
-    """Waehlt die Mail aus; den Versand macht `ai_mail`.
+def _zustellen(
+    *, db, user_id: int, provider_id: int | None = None, **felder
+) -> None:
+    """Legt den Heilungsbericht in den Ausgangskorb. Verschickt nichts.
 
     Bleibt als eigene Funktion bestehen: sie ist die Stelle, an der die Tests
     den Versand abfangen, und sie ist das einzige Stueck, das
-    **guardianspezifisch** ist — welche der `send_*`-Funktionen es sein soll.
-    Thread, Ereignisschleife und die Auswertung des Rueckgabewerts sind an
-    allen drei Anlaessen dieselben und stehen deshalb einmal in
-    `ai_mail.zustellen`.
+    **guardianspezifisch** ist — welcher Rahmen es sein soll.
 
-    Der Verfassungsschritt steht **innerhalb** der Koroutine: `bericht_versenden`
-    ist synchron und laeuft je nach Weg auf der Ereignisschleife der Anwendung,
-    und `ai_mail.zustellen` macht ohnehin einen eigenen Thread mit eigener
-    Schleife auf. Ein Modellaufruf davor haette auf der falschen gehangen.
+    Hier stand eine Koroutine in einem eigenen Thread, die erst verfasste und
+    dann verschickte. Sie ueberlebte keinen Neustart, und gerade dieser Bericht
+    darf nicht verlorengehen: er ist oft die einzige Spur davon, dass die KI in
+    Abwesenheit des Betreibers an einem Server gearbeitet hat. Jetzt entsteht
+    hier eine Zeile in der Datenbank, und der Arbeiter macht den Rest —
+    einschliesslich des Modellaufrufs, der damit innerhalb einer Schranke liegt.
+
+    Der hier gerenderte Text ist der **Rueckfall**. Er geht hinaus, wenn der
+    Verfassungsschritt im Arbeiter nichts liefert; verschickt wird in jedem Fall.
     """
-    from services import ai_mail, ai_mail_text
+    from services import ai_mail
     from services.email_service import EmailService
 
-    async def _mail() -> bool:
-        text = await ai_mail_text.verfassen(
-            user_id=user_id,
-            provider_id=provider_id,
-            anlass="ai-guardian-report",
-            fakten=_fakten(felder),
-        )
-        return await EmailService.send_ai_healing_report(**felder, mailtext=text)
-
-    ai_mail.zustellen(_mail, name="ai-guardian-report")
+    rahmen = EmailService.ai_rahmen_healing(
+        str(felder.get("username") or ""),
+        server_name=str(felder.get("server_name") or ""),
+        incident_type=str(felder.get("incident_type") or ""),
+        geheilt=bool(felder.get("geheilt")),
+        backup_name=felder.get("backup_name"),
+    )
+    rahmen["provider_id"] = provider_id
+    betreff, text, html = EmailService.ai_mail_rendern(
+        rahmen, rueckfall=str(felder.get("bericht") or "")
+    )
+    ai_mail.zustellen(
+        name="ai-guardian-report",
+        db=db,
+        user_id=user_id,
+        betreff=betreff,
+        text=text,
+        html=html,
+        fakten=_fakten(felder),
+        rahmen=rahmen,
+    )
 
 
 def _fakten(felder: dict) -> str:

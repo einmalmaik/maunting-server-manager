@@ -44,15 +44,26 @@ Die Adresse wird **hier** aufgeloest, unmittelbar vor dem Versand, ueber
 `ai_mail.empfaenger`. Das ist kein Umweg, sondern die Zusage: wer zwischen dem
 Einreihen und der Zustellung seine Benachrichtigungen abschaltet, bekommt keine
 Mail mehr.
+
+**Und der Text entsteht ebenfalls hier.** Der Korb speichert die Angaben
+(`fakten`, `rahmen_json`); geschrieben wird beim Versand, in
+`_verfassen_lassen`. Das ist die fuenfte Entscheidung und die, die zuletzt
+gefallen ist: beim Einreihen zu verfassen hiesse, dass zehntausend gleichzeitig
+endende Auftraege zehntausend gleichzeitige Modellaufrufe ausloesen — genau die
+Rechnung von oben, nur mit einer teureren Gegenseite. Hier liegt der Aufruf
+innerhalb derselben Schranke wie der Versand, und er ueberlebt einen Neustart.
+Misslingt er, geht der beim Einreihen gerenderte Text hinaus; verschickt wird
+immer, und ein misslungener Verfassungsschritt zaehlt nicht als Fehlversuch.
 """
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import logging
-from typing import Callable
+from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
@@ -83,7 +94,16 @@ ABSTAND_MAX = 3600.0
 #: sein als ein Versandversuch dauern kann (SMTP-Timeouts liegen bei
 #: Zehnersekunden) und kurz genug, dass ein Prozessabsturz nicht zu einer
 #: Nachricht fuehrt, die erst am naechsten Tag noch einmal versucht wird.
-UEBERNAHME = 300.0
+#
+# Der Wert stand einmal bei 300 Sekunden, und das war knapp falsch: seit der
+# Verfassungsschritt **innerhalb** der Uebernahme liegt, gehoert seine Dauer
+# dazu. Ein Stapel von STAPEL Zeilen laeuft in STAPEL/GLEICHZEITIG Wellen
+# nacheinander, und jede Welle kann bis `ai_mail_text.LESEFRIST_SEKUNDEN` auf
+# das Modell warten — die letzte Welle begann damit schon nach der alten Frist.
+# Ein zweiter Prozess haette diese Zeilen wieder als offen gesehen und denselben
+# Bericht ein zweites Mal zugestellt: genau der Fall, fuer den es SKIP LOCKED
+# gibt. Jetzt deckt die Frist die zehn Wellen samt Versand ab.
+UEBERNAHME = 1800.0
 
 
 @dataclass(frozen=True)
@@ -104,6 +124,15 @@ class _Auftrag:
     text_body: str
     html_body: str | None
     versuche: int
+    #: Die Angaben fuer den Verfassungsschritt. ``None`` heisst „diese Zeile
+    #: geht so hinaus, wie sie eingereiht wurde“ — der aeltere Fall und der
+    #: Zustand jeder Zeile, die vor `20260813_04` angelegt wurde.
+    fakten: str | None = None
+    #: Der Rahmen aus `rahmen_json`, schon entpackt. Bewusst hier und nicht im
+    #: Versand entpackt: ein kaputtes JSON soll auffallen, solange die Zeile
+    #: noch in der Hand des Uebernehmers ist, und nicht mitten in einer
+    #: Koroutine, die gerade eine SMTP-Verbindung haelt.
+    rahmen: dict | None = None
 
 
 #: Die Sitzungsfabrik. Wird sie nicht gesetzt, kommt sie aus `database` — aber
@@ -152,6 +181,23 @@ def _kann_ueberspringen(db: Session) -> bool:
         return False
 
 
+def _rahmen_lesen(roh: Any, zeilen_id: str) -> dict | None:
+    """Den gespeicherten Rahmen entpacken. ``None`` heisst „kein Rahmen“.
+
+    Ein kaputtes oder fremdes JSON kostet hier die schoene Fassung und sonst
+    nichts: ohne Rahmen geht der Text hinaus, der beim Einreihen gerendert wurde.
+    Das ist der Grund, warum ueberhaupt beides gespeichert wird.
+    """
+    if not roh:
+        return None
+    try:
+        rahmen = json.loads(roh)
+    except (TypeError, ValueError):
+        logger.warning("Ausgangskorb: Rahmen unlesbar outbox=%s", zeilen_id)
+        return None
+    return rahmen if isinstance(rahmen, dict) else None
+
+
 def _uebernehmen(grenze: int) -> list[_Auftrag]:
     """Faellige Zeilen greifen und in einem Zug als "in Arbeit" markieren.
 
@@ -187,6 +233,8 @@ def _uebernehmen(grenze: int) -> list[_Auftrag]:
                     text_body=zeile.text_body,
                     html_body=zeile.html_body,
                     versuche=zeile.versuche,
+                    fakten=zeile.fakten,
+                    rahmen=_rahmen_lesen(zeile.rahmen_json, zeile.id),
                 )
             )
         db.commit()
@@ -221,6 +269,76 @@ def _adresse(auftrag: _Auftrag) -> str | None:
         return None
     finally:
         db.close()
+
+
+async def _verfassen_lassen(auftrag: _Auftrag) -> _Auftrag:
+    """Laesst das Modell diese Mail schreiben — oder gibt den Auftrag zurueck, wie er kam.
+
+    **Hier und nicht beim Einreihen**, und das ist die tragende Entscheidung
+    dieses Moduls. Beim Einreihen zu verfassen hiesse, dass zehntausend
+    gleichzeitig endende Auftraege zehntausend gleichzeitige Modellaufrufe
+    ausloesen — dieselbe Rechnung, wegen der es diesen Korb gibt, nur eine Ebene
+    hoeher und mit einer teureren Gegenseite. Hier liegt der Aufruf **innerhalb**
+    von `GLEICHZEITIG`, weil der Aufrufer die Schranke schon haelt. Und er
+    ueberlebt einen Neustart: die Angaben stehen in der Datenbank, nicht in
+    einem Thread.
+
+    **Ein misslungener Verfassungsschritt ist kein Zustellfehler.** Jeder Ausgang
+    ausser „brauchbare Felder“ endet damit, dass der Auftrag unveraendert
+    zurueckkommt und der beim Einreihen gerenderte Text hinausgeht. Ihn
+    stattdessen in die Wiederholung zu schicken waere die schlechtere Haelfte
+    beider Moeglichkeiten: bei einem klemmenden Modell bekaeme der Betreiber
+    dieselbe Mail `VERSUCHE_MAX`-mal mit festem Text.
+
+    Der Betreff wird nicht noch einmal bereinigt — `ai_mail_rendern` setzt ihn
+    ueber `_ai_betreffzeile_aus_praefix` zusammen, und das ist die Stelle, an der
+    CR, LF und Steuerzeichen fallen. Gekuerzt wird er trotzdem: die Spalte fasst
+    255 Zeichen, und ein zu langer Betreff waere ein Datenbankfehler in einer
+    Zeile, die gerade zugestellt werden soll.
+    """
+    if not auftrag.fakten or not auftrag.rahmen:
+        return auftrag
+
+    from services import ai_mail_text
+    from services.email_service import EmailService
+
+    try:
+        # Hart gedeckelt, und zwar hier und nicht nur im Anbieteraufruf. Die
+        # Uebernahmefrist laeuft, waehrend gewartet wird; haengt das Verfassen
+        # laenger als vorgesehen, faellt die Zeile fuer einen zweiten Prozess
+        # wieder auf "offen" und derselbe Bericht ginge zweimal hinaus. Ein
+        # Deckel, der ein paar Sekunden Luft ueber `LESEFRIST_SEKUNDEN` laesst,
+        # kostet im schlechtesten Fall die schoene Fassung — nie die Mail.
+        text = await asyncio.wait_for(
+            ai_mail_text.verfassen(
+                user_id=auftrag.user_id,
+                provider_id=auftrag.rahmen.get("provider_id"),
+                anlass=auftrag.anlass,
+                fakten=auftrag.fakten,
+            ),
+            timeout=ai_mail_text.LESEFRIST_SEKUNDEN + 10.0,
+        )
+        if text is None:
+            return auftrag
+        betreff, body, html = EmailService.ai_mail_rendern(
+            auftrag.rahmen, mailtext=text
+        )
+    except asyncio.CancelledError:
+        # Das Herunterfahren ist kein misslungener Verfassungsschritt. Die Zeile
+        # bleibt uebernommen und faellt nach `UEBERNAHME` zurueck.
+        raise
+    except Exception as exc:  # noqa: BLE001 - ein Mailtext kostet keine Mail
+        logger.info(
+            "KI-Mailtext misslungen, fester Text geht hinaus outbox=%s error=%s",
+            auftrag.id,
+            type(exc).__name__,
+        )
+        return auftrag
+
+    if not betreff or not body:
+        return auftrag
+    logger.info("KI-Mail verfasst outbox=%s anlass=%s", auftrag.id, auftrag.anlass)
+    return replace(auftrag, betreff=betreff[:255], text_body=body, html_body=html)
 
 
 async def _versenden(adresse: str, auftrag: _Auftrag) -> bool:
@@ -301,6 +419,20 @@ async def _zustellen(auftrag: _Auftrag) -> bool:
             endgueltig=True,
         )
         return False
+    # Erst der Empfaenger, dann der Text. Andersherum liesse ein abbestellter
+    # Benutzer noch einen Modellaufruf kosten, dessen Ergebnis niemand liest.
+    #
+    # **Nur beim ersten Anlauf.** Ein zweiter Anlauf bedeutet, dass der VERSAND
+    # gescheitert ist — nicht das Verfassen. Weil die verfasste Fassung
+    # absichtlich nicht in die Zeile zurueckgeschrieben wird (sonst gaebe es
+    # zwei Wahrheiten ueber dieselbe Mail), kostete ein klemmender Versandweg
+    # sonst bis zu VERSUCHE_MAX Modellaufrufe samt ebenso vieler
+    # Kontingentbuchungen fuer eine einzige Nachricht. Der alte Weg ueber den
+    # Thread kostete genau einen. Ab dem zweiten Anlauf geht deshalb der
+    # Rueckfall hinaus: er steht fertig daneben und sagt dasselbe, nur
+    # nuechterner.
+    if auftrag.versuche <= 1:
+        auftrag = await _verfassen_lassen(auftrag)
     try:
         geglueckt = await _versenden(adresse, auftrag)
     except asyncio.CancelledError:

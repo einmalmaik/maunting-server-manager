@@ -120,6 +120,7 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
         )
 
     _zustellen(
+        db=db,
         user_id=int(user.id),
         provider_id=run.provider_id,
         to=adresse,
@@ -131,37 +132,53 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     )
 
 
-def _zustellen(*, user_id: int, provider_id: int | None = None, **felder) -> None:
-    """Waehlt die Mail aus; den Versand macht `ai_mail`.
+def _zustellen(
+    *, db, user_id: int, provider_id: int | None = None, **felder
+) -> None:
+    """Legt den Bericht in den Ausgangskorb. Verschickt nichts, wartet auf nichts.
 
     Eigene Funktion aus demselben Grund wie bei `ai_guardian_report`: sie ist
     die Stelle, an der die Tests den Versand abfangen, und das einzige Stueck,
-    das **aufgabenspezifisch** ist. Thread, Ereignisschleife und die Auswertung
-    des Rueckgabewerts stehen einmal in `ai_mail.zustellen`.
+    das **aufgabenspezifisch** ist.
 
-    Der Verfassungsschritt steht **innerhalb** der Koroutine und nicht davor.
-    Zwei Gruende: `bericht_versenden` ist synchron und laeuft je nach Weg auf
-    der Ereignisschleife der Anwendung — dort kann nichts erwartet werden. Und
-    `ai_mail.zustellen` macht einen eigenen Thread mit eigener Schleife auf; ein
-    Modellaufruf davor haette auf der falschen Schleife gehangen.
+    Hier stand eine Koroutine, die erst verfasste und dann verschickte, und
+    `ai_mail.zustellen` machte dafuer einen Thread auf. Das ueberlebte keinen
+    Neustart: stuerzte der Prozess zwischen dem Ende des Laufs und dem Versand
+    ab, war der Bericht weg — und zwar der ueber den Auftrag, bei dem niemand
+    davorsass. Jetzt entsteht hier nur noch eine Zeile in der Datenbank.
 
-    `provider_id` ist der Anbieter **dieses Laufs**. Ist er nicht gesetzt,
-    sucht `ai_mail_text` selbst einen; das ist derselbe Weg, den ein Lauf ohne
-    Auswahl auch sonst geht.
+    Gerendert wird trotzdem schon hier, und zwar der **Rueckfall**: der feste
+    Text, der hinausgeht, wenn der Verfassungsschritt im Arbeiter misslingt.
+    Damit traegt die Zeile ab dem ersten Moment eine vollstaendige Mail; alles
+    Weitere ist Verbesserung, nicht Voraussetzung.
+
+    `provider_id` ist der Anbieter **dieses Laufs** und wandert im Rahmen mit.
+    Ist er nicht gesetzt, sucht `ai_mail_text` beim Versand selbst einen; das
+    ist derselbe Weg, den ein Lauf ohne Auswahl auch sonst geht.
     """
-    from services import ai_mail, ai_mail_text
+    from services import ai_mail
     from services.email_service import EmailService
 
-    async def _mail() -> bool:
-        text = await ai_mail_text.verfassen(
-            user_id=user_id,
-            provider_id=provider_id,
-            anlass="ai-task-report",
-            fakten=_fakten(felder),
-        )
-        return await EmailService.send_ai_task_report(**felder, mailtext=text)
-
-    ai_mail.zustellen(_mail, name="ai-task-report")
+    rahmen = EmailService.ai_rahmen_task(
+        str(felder.get("username") or ""),
+        task_title=str(felder.get("task_title") or ""),
+        plan_text=str(felder.get("plan_text") or ""),
+        geschafft=bool(felder.get("geschafft")),
+    )
+    rahmen["provider_id"] = provider_id
+    betreff, text, html = EmailService.ai_mail_rendern(
+        rahmen, rueckfall=str(felder.get("bericht") or "")
+    )
+    ai_mail.zustellen(
+        name="ai-task-report",
+        db=db,
+        user_id=user_id,
+        betreff=betreff,
+        text=text,
+        html=html,
+        fakten=_fakten(felder),
+        rahmen=rahmen,
+    )
 
 
 def _fakten(felder: dict) -> str:

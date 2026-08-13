@@ -30,6 +30,18 @@ schreibt beides selbst; es gibt keine Vorlage, aus der sich der Text spaeter
 noch einmal herstellen liesse. Der fertige Text ist das Einzige, was den
 Neustart eines Prozesses ueberdauern kann.
 
+**Warum daneben trotzdem `fakten` und `rahmen_json` stehen.** Betreff und Text
+sind der **Rueckfall** — der feste Wortlaut, den `EmailService` seit jeher
+kennt. Die schoene Fassung schreibt ein Modell, und dieser Schritt gehoert
+nicht ins Einreihen: zehntausend gleichzeitig endende Auftraege waeren
+zehntausend gleichzeitige Modellaufrufe, also genau die Rechnung, wegen der es
+diesen Korb gibt, nur eine Ebene hoeher. Deshalb speichert der Korb die
+**Angaben** und der Arbeiter verfasst daraus, innerhalb seiner Schranke.
+
+Beide Spalten duerfen fehlen. Eine Zeile ohne sie ist eine Mail, die genau so
+hinausgeht, wie sie eingereiht wurde — das ist der aeltere und weiterhin
+gueltige Fall.
+
 **Warum kein `zugestellt_an`-Feld und kein Anhang.** Beides waere die naechste
 Kopie einer Angabe, die anderswo gepflegt wird. Wer wissen will, an welches
 Postfach etwas ging, findet es im Mailserverlog des Betreibers; MSM fuehrt
@@ -85,6 +97,18 @@ class AiMailOutbox(Base):
     #: Darf fehlen. Eine reine Textmail ist eine gueltige Mail; eine leere
     #: HTML-Fassung waere eine kaputte.
     html_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: Was das Modell wissen muss, um die Mail zu schreiben — derselbe Text, den
+    #: `_fakten()` in den Berichtspfaden zusammenstellt. Ausdruecklich **ohne**
+    #: die Adresse des Empfaengers: wer sie gar nicht erst zeigt, muss sie
+    #: hinterher nicht aus einer Modellausgabe herausfiltern.
+    fakten: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Was zum Rendern noetig ist, als JSON: Benutzername, Ueberschrift, der
+    #: Panelanteil der Betreffzeile (samt Zustandswort), Fusszeile, der Satz des
+    #: Panels und der Anbieter des Laufs. Ein JSON-Feld und keine sechs Spalten,
+    #: weil dieser Inhalt zur Vorlage gehoert und nicht zur Zustellung: der
+    #: Arbeiter reicht ihn nur durch, abgefragt wird davon nie etwas.
+    rahmen_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="offen", server_default="offen"

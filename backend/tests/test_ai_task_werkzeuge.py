@@ -338,28 +338,45 @@ def test_in_der_vorschau_steht_nichts_geheimes(db: Session) -> None:
 
 
 def test_die_testmail_geht_an_die_eigene_adresse(db: Session, monkeypatch) -> None:
-    from services import ai_mail
+    """Die Testmail nimmt denselben Korbweg wie jeder Bericht.
+
+    Frueher stand hier ein Thread mit einer Koroutine darin; abgefangen wurde
+    `ai_mail.zustellen` als Ganzes. Seit die Mail in den Ausgangskorb geht,
+    braucht es keine Attrappe mehr — die Zeile steht in der Datenbank und laesst
+    sich lesen. Genau das ist der Gewinn des Umbaus: der Versand ist nicht mehr
+    etwas, das gleich passiert, sondern etwas, das aufgeschrieben ist.
+    """
+    from models import AiMailOutbox
     from services.email_service import EmailService
 
     user = _benutzer(db, "testmail", "ai.chat.use")
-    gesehen: list[str] = []
     monkeypatch.setattr(
         EmailService, "is_configured", staticmethod(lambda: True)
     )
     monkeypatch.setattr(EmailService, "_get_provider", staticmethod(lambda: "smtp"))
-    monkeypatch.setattr(
-        ai_mail, "zustellen", lambda bauen, *, name: gesehen.append(name)
-    )
     ai_action_service._TESTMAILS.clear()
 
     ergebnis = ai_action_service._execute_send_test_email(db, user=user)
 
     assert ergebnis["sent"] is True
     assert ergebnis["transport"] == "smtp"
-    assert gesehen == ["ai-test-email"]
     # Maskiert: der erste Buchstabe und die Domain, nie die ganze Adresse.
     assert ergebnis["recipient"] == "t***@test.de"
     assert "testmail@test.de" not in json.dumps(ergebnis, ensure_ascii=False)
+
+    zeilen = (
+        db.query(AiMailOutbox).filter(AiMailOutbox.user_id == user.id).all()
+    )
+    assert len(zeilen) == 1
+    zeile = zeilen[0]
+    assert zeile.anlass == "ai-test-email"
+    assert zeile.status == "offen"
+    # Der Rueckfall steht vollstaendig darin — die Testmail ist das Messgeraet
+    # fuer den Versandweg und darf nicht am Modell haengen.
+    assert "Versandweg" in zeile.text_body
+    # Und die Angaben fuer den Verfassungsschritt liegen daneben, ohne Adresse.
+    assert zeile.fakten and "Testmail" in zeile.fakten
+    assert "testmail@test.de" not in (zeile.fakten + (zeile.rahmen_json or ""))
 
 
 def test_die_testmail_wird_gedrosselt(db: Session, monkeypatch) -> None:
@@ -371,7 +388,7 @@ def test_die_testmail_wird_gedrosselt(db: Session, monkeypatch) -> None:
     user = _benutzer(db, "drossel", "ai.chat.use")
     monkeypatch.setattr(EmailService, "is_configured", staticmethod(lambda: True))
     monkeypatch.setattr(EmailService, "_get_provider", staticmethod(lambda: "resend"))
-    monkeypatch.setattr(ai_mail, "zustellen", lambda bauen, *, name: None)
+    monkeypatch.setattr(ai_mail, "zustellen", lambda **felder: None)
     ai_action_service._TESTMAILS.clear()
 
     for _ in range(ai_action_service.MAX_TESTMAILS_JE_STUNDE):

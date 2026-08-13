@@ -18,14 +18,24 @@ haelt und die zusammen die eigentliche Zusage sind:
 * **Nie mehr als erlaubt gleichzeitig.** Bei zehntausend faelligen Zeilen wird
   der Hoechststand mitgezaehlt, und die Zahl der Threads ebenso.
 
+Seit die Naht zum Verfassungsschritt geschlossen ist, kommt eine vierte dazu:
+
+* **Verfasst wird beim Versand, nicht beim Einreihen.** Der Korb speichert die
+  Fakten, der Arbeiter laesst daraus schreiben — innerhalb derselben Schranke.
+  Misslingt das, geht der beim Einreihen gerenderte Text hinaus, und zwar genau
+  einmal: ein misslungener Verfassungsschritt ist kein Zustellfehler.
+
 Verschickt wird in keinem dieser Tests wirklich etwas: gefangen wird bei
-`ai_mail_outbox._versenden`, der einen Naht, die genau dafuer da ist.
+`ai_mail_outbox._versenden`, der einen Naht, die genau dafuer da ist. Das Modell
+wird bei `ai_mail_text.verfassen` ersetzt — auch dort geht kein Byte ins Netz.
 """
 
 import asyncio
+import json
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from pathlib import Path
 
 import pytest
@@ -37,7 +47,7 @@ from sqlalchemy.orm import Session
 from config import settings
 from database import Base
 from models import AiMailOutbox, User
-from services import ai_mail, ai_mail_outbox
+from services import ai_mail, ai_mail_outbox, ai_mail_text
 from services.auth_service import AuthService
 from services.email_service import EmailService
 
@@ -81,6 +91,88 @@ def _zeile(db: Session, user: User, *, betreff: str = "Bericht") -> str:
     )
     assert kennung is not None
     return kennung
+
+
+#: Der feste Text, der in jeder Zeile mit Fakten als Rueckfall danebensteht.
+#: Als Konstante, weil zwei Zusagen daran haengen: er geht hinaus, wenn das
+#: Modell klemmt — und er geht **nicht** hinaus, wenn es geliefert hat.
+RUECKFALL = "Der Assistent hat keine Zusammenfassung hinterlassen."
+
+
+def _rahmen(*, geschafft: bool = True) -> dict:
+    """Der Panelanteil eines Aufgabenberichts, so wie ihn `ai_task_report` baut."""
+    rahmen = EmailService.ai_rahmen_task(
+        "korbnutzer", task_title="Serverstatus", plan_text="täglich",
+        geschafft=geschafft,
+    )
+    rahmen["provider_id"] = None
+    return rahmen
+
+
+def _zeile_mit_fakten(
+    db: Session, user: User, *, rahmen: dict | None = None
+) -> tuple[str, dict]:
+    """Reiht eine Mail so ein, wie es ein Berichtspfad tut: Rueckfall **und** Fakten."""
+    rahmen = rahmen if rahmen is not None else _rahmen()
+    betreff, text, html = EmailService.ai_mail_rendern(rahmen, rueckfall=RUECKFALL)
+    kennung = ai_mail.einreihen(
+        db,
+        user_id=user.id,
+        anlass="ai-task-report",
+        betreff=betreff,
+        text=text,
+        html=html,
+        fakten="Ergebnis laut Panel: erledigt\nAbschlussbericht: alles ruhig.",
+        rahmen=rahmen,
+    )
+    assert kennung is not None
+    return kennung, rahmen
+
+
+def _modell(
+    monkeypatch,
+    *,
+    betreff: str | None = "Alle drei Server laufen",
+    absaetze: tuple[str, ...] = ("Ich habe die drei Server geprüft.",),
+    platzt: Exception | None = None,
+) -> list[dict]:
+    """Ersetzt den Verfassungsschritt. Gibt zurueck, womit er gerufen wurde.
+
+    ``betreff=None`` ist der Fall „das Modell hat nichts Brauchbares geliefert“
+    (`verfassen` gibt dann selbst ``None`` zurueck), ``platzt`` der Fall „es hat
+    geworfen“. Beide muessen dasselbe bewirken: der Rueckfall geht hinaus.
+    """
+    gerufen: list[dict] = []
+
+    async def _fake(*, user_id, anlass, fakten, provider_id=None, client=None):
+        gerufen.append(
+            {
+                "user_id": user_id,
+                "anlass": anlass,
+                "fakten": fakten,
+                "provider_id": provider_id,
+            }
+        )
+        if platzt is not None:
+            raise platzt
+        if betreff is None:
+            return None
+        return ai_mail_text.Mailtext(betreff=betreff, absaetze=list(absaetze))
+
+    monkeypatch.setattr(ai_mail_text, "verfassen", _fake)
+    return gerufen
+
+
+def _mitschnitt(monkeypatch) -> list[tuple[str, ai_mail_outbox._Auftrag]]:
+    """Faengt den Versand ab und haelt fest, **was** hinausgegangen waere."""
+    versandt: list[tuple[str, ai_mail_outbox._Auftrag]] = []
+
+    async def _fake(adresse, auftrag):
+        versandt.append((adresse, auftrag))
+        return True
+
+    monkeypatch.setattr(ai_mail_outbox, "_versenden", _fake)
+    return versandt
 
 
 def test_queueing_a_mail_writes_a_row_and_starts_no_thread(db: Session) -> None:
@@ -365,6 +457,17 @@ def test_the_migration_carries_the_same_on_delete_as_the_model(tmp_path) -> None
         Base.metadata.create_all(engine)
         command.stamp(config, "head")
 
+        # Erst nur die Spalten von `20260813_04` zurueck: sie muessen aus der
+        # Kette kommen und nicht aus `create_all`. Ein Betreiber, der die
+        # Migration faehrt, bekaeme sonst einen Arbeiter, der `fakten` liest,
+        # und eine Tabelle, die die Spalte nicht hat.
+        command.downgrade(config, "20260813_03")
+        engine.dispose()
+        spalten = {
+            spalte["name"] for spalte in inspect(engine).get_columns("ai_mail_outbox")
+        }
+        assert "fakten" not in spalten and "rahmen_json" not in spalten
+
         command.downgrade(config, "20260813_02")
         engine.dispose()
         assert "ai_mail_outbox" not in inspect(engine).get_table_names()
@@ -382,6 +485,15 @@ def test_the_migration_carries_the_same_on_delete_as_the_model(tmp_path) -> None
         assert "ix_ai_mail_outbox_faellig" in {
             index["name"] for index in pruefer.get_indexes("ai_mail_outbox")
         }
+        # Und die beiden Spalten sind wieder da — nullable, denn eine Zeile aus
+        # der Zeit davor ist eine gueltige Mail ohne Angaben fuer das Modell.
+        neue = {
+            spalte["name"]: spalte
+            for spalte in pruefer.get_columns("ai_mail_outbox")
+            if spalte["name"] in ("fakten", "rahmen_json")
+        }
+        assert set(neue) == {"fakten", "rahmen_json"}
+        assert all(spalte["nullable"] for spalte in neue.values())
     finally:
         engine.dispose()
         settings.database_url = vorher
@@ -478,3 +590,333 @@ async def test_ten_thousand_due_mails_stay_within_the_allowed_concurrency(
         )
     ).all()
     assert len(fertig) == anzahl
+
+
+# ── Der Verfassungsschritt liegt im Arbeiter ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_worker_composes_the_mail_and_sends_that_version(
+    db: Session, monkeypatch
+) -> None:
+    """Die Naht, um die es geht: der Korb haelt die Fakten, der Arbeiter schreibt.
+
+    Vorher endete jeder Berichtspfad im Koroutinenweg, weil der
+    Verfassungsschritt asynchron ist und das Einreihen eine fertige Mail
+    verlangte. Die Folge war, dass die Mail an einem Prozess hing statt an einer
+    Zeile. Hier steht das Gegenteil: eingereiht wird der feste Text, hinaus geht
+    der verfasste.
+    """
+    user = _empfaenger(db)
+    kennung, _ = _zeile_mit_fakten(db, user)
+    gerufen = _modell(monkeypatch)
+    versandt = _mitschnitt(monkeypatch)
+
+    assert await ai_mail_outbox.runde() == 1
+
+    assert len(versandt) == 1
+    adresse, auftrag = versandt[0]
+    assert adresse == "korbnutzer@test.de"
+    assert "Alle drei Server laufen" in auftrag.betreff
+    assert "Ich habe die drei Server geprüft." in auftrag.text_body
+    assert "Ich habe die drei Server geprüft." in (auftrag.html_body or "")
+    # Der feste Text steht nicht zusaetzlich darin — sonst saehe der Betreiber
+    # dieselbe Aussage zweimal, einmal vom Modell und einmal aus dem Code.
+    assert RUECKFALL not in auftrag.text_body
+
+    # Gerufen wurde mit genau dem, was in der Zeile stand.
+    assert len(gerufen) == 1
+    assert gerufen[0]["anlass"] == "ai-task-report"
+    assert gerufen[0]["user_id"] == user.id
+    assert "Ergebnis laut Panel: erledigt" in gerufen[0]["fakten"]
+
+    db.expire_all()
+    zeile = db.get(AiMailOutbox, kennung)
+    assert zeile.status == "zugestellt"
+    # Die Zeile selbst bleibt, wie sie eingereiht wurde. Die verfasste Fassung
+    # dort hineinzuschreiben waere eine zweite Wahrheit ueber dieselbe Mail —
+    # und beim naechsten Versuch waere unklar, welche der Rueckfall ist.
+    assert RUECKFALL in zeile.text_body
+
+
+@pytest.mark.asyncio
+async def test_the_composition_step_is_skipped_when_the_row_carries_no_facts(
+    db: Session, monkeypatch
+) -> None:
+    """Eine Zeile ohne Fakten geht so hinaus, wie sie eingereiht wurde.
+
+    Das ist der Zustand jeder Zeile, die vor `20260813_04` angelegt wurde, und
+    der Weg jeder Mail, die gar keinen Modelltext haben soll. Ein Modellaufruf
+    dafuer waere Verbrauch ohne Anlass.
+    """
+    user = _empfaenger(db)
+    _zeile(db, user, betreff="Ohne Fakten")
+    gerufen = _modell(monkeypatch)
+    versandt = _mitschnitt(monkeypatch)
+
+    await ai_mail_outbox.runde()
+
+    assert gerufen == []
+    assert versandt[0][1].betreff == "Ohne Fakten"
+
+
+@pytest.mark.asyncio
+async def test_a_failing_composition_sends_the_fallback_exactly_once(
+    db: Session, monkeypatch
+) -> None:
+    """Ein klemmendes Modell kostet den schoenen Text, nie die Mail — und nie zweimal.
+
+    Den Fehlschlag beim Verfassen als Zustellfehler zu werten waere die
+    schlimmste der moeglichen Antworten: die Zeile ginge zurueck in die
+    Warteschlange, und der Betreiber bekaeme bei einem laenger klemmenden Modell
+    dieselbe Mail `VERSUCHE_MAX`-mal mit festem Text.
+    """
+    user = _empfaenger(db)
+    kennung, _ = _zeile_mit_fakten(db, user)
+    _modell(monkeypatch, platzt=RuntimeError("Anbieter antwortet nicht"))
+    versandt = _mitschnitt(monkeypatch)
+
+    assert await ai_mail_outbox.runde() == 1
+    assert await ai_mail_outbox.runde() == 0
+
+    assert len(versandt) == 1
+    assert RUECKFALL in versandt[0][1].text_body
+    db.expire_all()
+    zeile = db.get(AiMailOutbox, kennung)
+    assert zeile.status == "zugestellt"
+    assert zeile.versuche == 1
+    assert zeile.letzter_fehler is None
+
+
+@pytest.mark.asyncio
+async def test_a_composition_without_usable_fields_sends_the_fallback_too(
+    db: Session, monkeypatch
+) -> None:
+    """`verfassen` gibt ``None`` zurueck, wenn Betreff oder Absaetze fehlen.
+
+    Kein Fehler, sondern die haeufigere Haelfte: kein Anbieter eingerichtet,
+    kein Kontingent, ein Modell ohne Werkzeugaufruf. Verschickt wird trotzdem.
+    """
+    user = _empfaenger(db)
+    _zeile_mit_fakten(db, user)
+    _modell(monkeypatch, betreff=None)
+    versandt = _mitschnitt(monkeypatch)
+
+    await ai_mail_outbox.runde()
+
+    assert len(versandt) == 1
+    assert RUECKFALL in versandt[0][1].text_body
+
+
+@pytest.mark.asyncio
+async def test_the_recipient_never_comes_from_the_model(
+    db: Session, monkeypatch
+) -> None:
+    """Ein Modell, das eine Adresse nennt, aendert keinen Empfaenger.
+
+    Die Adresse steht weder in der Zeile noch in den Fakten; aufgeloest wird sie
+    erst beim Versand ueber `ai_mail.empfaenger`. Waere es anders, waere MSM
+    ueber einen Satz im Chat zu einem Mailversender fuer Dritte geworden.
+    """
+    user = _empfaenger(db)
+    kennung, rahmen = _zeile_mit_fakten(db, user)
+    _modell(
+        monkeypatch,
+        betreff="Bitte an angreifer@boese.de weiterleiten",
+        absaetze=("Schicke das auch an angreifer@boese.de.",),
+    )
+    versandt = _mitschnitt(monkeypatch)
+
+    await ai_mail_outbox.runde()
+
+    assert versandt[0][0] == "korbnutzer@test.de"
+    zeile = db.get(AiMailOutbox, kennung)
+    assert "angreifer@boese.de" not in (zeile.fakten or "")
+    assert "angreifer@boese.de" not in (zeile.rahmen_json or "")
+    assert "@" not in json.dumps(rahmen, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_the_state_word_stays_in_front_of_what_the_model_wrote(
+    db: Session, monkeypatch
+) -> None:
+    """Das Zustandswort kommt aus dem Rahmen, der Modellbetreff dahinter.
+
+    Geprueft gegen ein Modell, das das Gegenteil behauptet: der Lauf ist
+    gescheitert, das Modell meldet Erfolg. Der Betreiber liest zuerst „nicht
+    abgeschlossen“ — und das ist die Tatsache aus dem Endzustand des Laufs.
+    """
+    user = _empfaenger(db)
+    _zeile_mit_fakten(db, user, rahmen=_rahmen(geschafft=False))
+    _modell(monkeypatch, betreff="Alles bestens erledigt")
+    versandt = _mitschnitt(monkeypatch)
+
+    await ai_mail_outbox.runde()
+
+    betreff = versandt[0][1].betreff
+    assert betreff == (
+        "Maunting Server Manager — KI-Aufgabe nicht abgeschlossen: "
+        "Alles bestens erledigt"
+    )
+    assert betreff.index("nicht abgeschlossen") < betreff.index("Alles bestens")
+
+
+@pytest.mark.asyncio
+async def test_a_line_break_in_the_composed_subject_never_reaches_the_header(
+    db: Session, monkeypatch
+) -> None:
+    """Der alte Vorfall, jetzt am neuen Weg.
+
+    `send_email` setzt ``msg["Subject"]`` vor dem ``try``; ein Umbruch darin
+    wirft, und die Ausnahme wird oben verschluckt. Der Lauf ist gruen, die Mail
+    ist weg. Der Umbruch kann jetzt aus zwei Richtungen kommen — aus dem
+    Modelltext und aus dem Rahmen —, bereinigt wird die fertige Zeile.
+    """
+    user = _empfaenger(db)
+    _zeile_mit_fakten(db, user)
+    _modell(monkeypatch, betreff="Bericht\r\nBcc: fremd@boese.de\x00jetzt")
+    versandt = _mitschnitt(monkeypatch)
+
+    await ai_mail_outbox.runde()
+
+    betreff = versandt[0][1].betreff
+    assert "\n" not in betreff and "\r" not in betreff and "\x00" not in betreff
+    # Der Beweis am fertigen Kopf und nicht an der Hilfsfunktion: was hier ohne
+    # Ausnahme durchgeht, geht auch in `_send_smtp` durch.
+    nachricht = EmailMessage()
+    nachricht["Subject"] = betreff
+    assert nachricht["Subject"] == betreff
+
+
+@pytest.mark.asyncio
+async def test_a_restart_between_queueing_and_sending_loses_nothing(
+    db: Session, monkeypatch
+) -> None:
+    """Der eigentliche Gewinn: die Mail haengt an einer Zeile, nicht an einem Prozess.
+
+    Nachgestellt wird ein Neustart, indem der Arbeiter erst **nach** dem
+    Einreihen entsteht — mit `zuruecksetzen_fuer_tests` dazwischen, also ohne
+    jeden Rest aus der Zeit davor. Frueher lag die Mail in diesem Moment in
+    einem Thread, der mit dem Prozess starb: der Bericht ueber den Auftrag, bei
+    dem niemand davorsass, war ersatzlos weg.
+    """
+    user = _empfaenger(db)
+    kennung, _ = _zeile_mit_fakten(db, user)
+
+    # Der Prozess geht — was im Speicher stand, ist damit fort.
+    ai_mail_outbox.zuruecksetzen_fuer_tests()
+
+    _modell(monkeypatch)
+    versandt = _mitschnitt(monkeypatch)
+    monkeypatch.setattr(ai_mail_outbox, "TAKT", 0.01)
+
+    assert ai_mail_outbox.arbeiter_starten() is True
+    try:
+        for _ in range(500):
+            db.expire_all()
+            if db.get(AiMailOutbox, kennung).status == "zugestellt":
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        await ai_mail_outbox.aufraeumen()
+
+    assert len(versandt) == 1
+    assert "Alle drei Server laufen" in versandt[0][1].betreff
+    db.expire_all()
+    assert db.get(AiMailOutbox, kennung).status == "zugestellt"
+
+
+@pytest.mark.asyncio
+async def test_ten_thousand_mails_with_facts_stay_within_the_same_limit(
+    db: Session, monkeypatch
+) -> None:
+    """Die Lastmessung noch einmal — jetzt einschliesslich der Modellaufrufe.
+
+    Genau dafuer liegt der Verfassungsschritt im Arbeiter und nicht im
+    Einreihen. Beim Einreihen zu verfassen hiesse, dass zehntausend gleichzeitig
+    endende Auftraege zehntausend gleichzeitige Modellaufrufe ausloesen — die
+    Rechnung, wegen der es diesen Korb gibt, nur mit einer teureren Gegenseite.
+    Gezaehlt wird deshalb **ein** Hoechststand ueber beide Schritte.
+    """
+    user = _empfaenger(db, "lastnutzer")
+    rahmen = _rahmen()
+    rahmen_json = json.dumps(rahmen, ensure_ascii=False)
+
+    anzahl = 10_000
+    jetzt = datetime.now(timezone.utc)
+    db.execute(
+        insert(AiMailOutbox),
+        [
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": user.id,
+                "anlass": "ai-task-report",
+                "betreff": f"Bericht {index}",
+                "text_body": RUECKFALL,
+                "html_body": None,
+                "fakten": "Ergebnis laut Panel: erledigt",
+                "rahmen_json": rahmen_json,
+                "status": "offen",
+                "versuche": 0,
+                "naechster_versuch_at": jetzt - timedelta(seconds=1),
+                "created_at": jetzt,
+            }
+            for index in range(anzahl)
+        ],
+    )
+    db.commit()
+
+    laufend = 0
+    hoechststand = 0
+    verfasst = 0
+    zugestellt = 0
+
+    async def _fake_verfassen(
+        *, user_id, anlass, fakten, provider_id=None, client=None
+    ):
+        nonlocal laufend, hoechststand, verfasst
+        laufend += 1
+        hoechststand = max(hoechststand, laufend)
+        # Ein echter Modellaufruf wartet auf die Gegenseite, und zwar laenger
+        # als ein SMTP-Versand. Ohne diesen Aufgabenwechsel saehe der Test die
+        # Gleichzeitigkeit nicht.
+        await asyncio.sleep(0)
+        laufend -= 1
+        verfasst += 1
+        return ai_mail_text.Mailtext(betreff="Kurz", absaetze=["Alles ruhig."])
+
+    async def _fake_versenden(adresse, auftrag):
+        nonlocal laufend, hoechststand, zugestellt
+        laufend += 1
+        hoechststand = max(hoechststand, laufend)
+        await asyncio.sleep(0)
+        laufend -= 1
+        zugestellt += 1
+        return True
+
+    monkeypatch.setattr(ai_mail_text, "verfassen", _fake_verfassen)
+    monkeypatch.setattr(ai_mail_outbox, "_versenden", _fake_versenden)
+    monkeypatch.setattr(ai_mail_outbox, "STAPEL", 250)
+    monkeypatch.setattr(ai_mail_outbox, "TAKT", 0.01)
+
+    threads_vorher = threading.active_count()
+    assert ai_mail_outbox.arbeiter_starten() is True
+    try:
+        for _ in range(6000):
+            offen = db.execute(
+                select(AiMailOutbox.id).where(AiMailOutbox.status == "offen").limit(1)
+            ).first()
+            if offen is None:
+                break
+            db.expire_all()
+            await asyncio.sleep(0.01)
+    finally:
+        await ai_mail_outbox.aufraeumen()
+
+    assert hoechststand <= ai_mail_outbox.GLEICHZEITIG
+    assert hoechststand > 1, "der Test haette eine Ueberschreitung nicht sehen koennen"
+    # Der Modellaufruf bringt keinen Thread mit. Er laeuft in derselben Aufgabe
+    # wie der Versand, unter derselben Schranke.
+    assert threading.active_count() <= threads_vorher
+    assert verfasst == anzahl
+    assert zugestellt == anzahl

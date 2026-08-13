@@ -586,31 +586,49 @@ Maunting Server Manager — Guardian Engine
 
 
     @staticmethod
-    def _ai_betreffzeile(titel: str, zusatz: str) -> str:
+    def _ai_betreff_praefix(titel: str) -> str:
+        """Der Anteil der Betreffzeile, der **nie** vom Modell kommt.
+
+        Eigene Funktion, seit der Betreff zweimal entsteht: einmal beim
+        Einreihen in den Ausgangskorb (mit dem festen Text) und einmal im
+        Arbeiter (mit der verfassten Fassung). Der Praefix wandert dazwischen
+        als Teil des Rahmens durch die Datenbank — es muss also einen Ort geben,
+        an dem er gebildet wird, und genau einen.
+        """
+        return f"Maunting Server Manager — {titel}"
+
+    @staticmethod
+    def _ai_betreffzeile_aus_praefix(praefix: str, zusatz: str) -> str:
         """Setzt die Betreffzeile zusammen und macht sie zustellbar.
 
         Zwei Dinge in einer Funktion, weil sie zusammengehoeren.
 
         Die **Reihenfolge** haelt die Zusage fest: vorne die Kennung des Panels
-        und das Zustandswort — beides Tatsachen aus dem Lauf —, dahinter erst
-        das, was das Modell beisteuert. Ein Modell, das beschoenigt, kann den
-        Betreff faerben, aber nie das Ergebnis darin umschreiben.
+        und das Zustandswort — beides Tatsachen aus dem Lauf und beide im
+        Praefix —, dahinter erst das, was das Modell beisteuert. Ein Modell, das
+        beschoenigt, kann den Betreff faerben, aber nie das Ergebnis darin
+        umschreiben.
 
         Die **Bereinigung** verhindert einen Vorfall, der die ganze Mail kostete
         und dabei Erfolg meldete: `send_email` setzt ``msg["Subject"]`` vor dem
         ``try``. Ein Zeilenumbruch darin wirft `ValueError`, die an der
-        Fehlerbehandlung des Versands vorbei bis nach `ai_mail.zustellen`
-        durchlaeuft und dort als Warnung endet — gruener Lauf, keine Mail.
-        Bereinigt wird die **fertige** Zeile und nicht nur der Modellteil:
-        Servername und Aufgabentitel kommen aus Formularen und aus einem Chat
-        und koennen denselben Umbruch tragen.
+        Fehlerbehandlung des Versands vorbei bis zum Aufrufer durchlaeuft und
+        dort als Warnung endet — gruener Lauf, keine Mail. Bereinigt wird die
+        **fertige** Zeile und nicht nur der Modellteil: Servername und
+        Aufgabentitel kommen aus Formularen und aus einem Chat und koennen
+        denselben Umbruch tragen.
+
+        Der Ersatz ``"Maunting Server Manager"`` fuer einen fehlenden Praefix
+        ist kein Schoenheitsfehler: der Praefix kann aus einem Rahmen kommen,
+        der eine Prozessgrenze und ein JSON-Feld hinter sich hat. Ein leerer
+        Betreff waere dort keine Mail mehr.
         """
         from services.ai_mail_text import (
             MAX_BETREFFZEILE_ZEICHEN,
             betreff_bereinigen,
         )
 
-        zeile = f"Maunting Server Manager — {titel}"
+        zeile = str(praefix or "Maunting Server Manager")
         if zusatz:
             zeile += f": {zusatz}"
         return betreff_bereinigen(zeile, grenze=MAX_BETREFFZEILE_ZEICHEN)
@@ -637,6 +655,149 @@ Maunting Server Manager — Guardian Engine
                 getattr(mailtext, "schluss", None),
             )
         return "", [fakt, rueckfall], [], None
+
+    # ── Rahmen und Rendern ────────────────────────────────────────────────
+    #
+    # Bis hierher rendern und senden die `send_ai_*`-Funktionen in einem Zug.
+    # Das ging, solange der Verfassungsschritt unmittelbar davor lag. Seit der
+    # Ausgangskorb die Angaben speichert und der Arbeiter daraus verfasst,
+    # entsteht **dieselbe** Mail an zwei Stellen: einmal beim Einreihen als
+    # Rueckfall und einmal im Arbeiter mit dem Modelltext. Zwei Stellen, die
+    # dasselbe zusammensetzen, laufen auseinander — die Textfassung dieser Mail
+    # trug einmal einen Sicherheitshinweis, den die HTML-Fassung nicht hatte,
+    # und niemand sah es.
+    #
+    # Deshalb ist es hier zerlegt: `ai_rahmen_*` sammelt je Anlass das, was das
+    # Panel beitraegt (und nur das — reine Funktionen, keine Datenbank, kein
+    # Versand), `ai_mail_rendern` macht daraus mit oder ohne Modelltext das
+    # fertige Tripel. Der Rahmen ist ein `dict`, weil er als JSON durch die
+    # Datenbank geht.
+
+    @staticmethod
+    def ai_rahmen_task(
+        username: str, *, task_title: str, plan_text: str, geschafft: bool
+    ) -> dict:
+        """Der Panelanteil des Aufgabenberichts.
+
+        `geschafft` ist der Endzustand des Laufs und bestimmt Ueberschrift und
+        Zustandswort. Ein Modell, das sich irrt oder beschoenigt, faerbt
+        hoechstens den Zusatz dahinter.
+        """
+        titel = (
+            "KI-Aufgabe erledigt" if geschafft else "KI-Aufgabe nicht abgeschlossen"
+        )
+        zustand = "erledigt" if geschafft else "nicht abgeschlossen"
+        return {
+            "username": str(username or ""),
+            "titel": titel,
+            "betreff_praefix": EmailService._ai_betreff_praefix(titel),
+            # Wonach der Betreff greift, wenn das Modell nichts geliefert hat.
+            "betreff_ersatz": str(task_title or ""),
+            "fakt": (
+                f'Deine KI-Aufgabe "{task_title}" ({plan_text}) war fällig. '
+                f"Ergebnis: {zustand}."
+            ),
+            "fusszeile": "Den vollständigen Verlauf findest du im KI-Chat des Panels.",
+        }
+
+    @staticmethod
+    def ai_rahmen_healing(
+        username: str,
+        *,
+        server_name: str,
+        incident_type: str,
+        geheilt: bool,
+        backup_name: str | None = None,
+    ) -> dict:
+        """Der Panelanteil des Heilungsberichts.
+
+        `geheilt` ist die Und-Verknuepfung aus Laufzustand und Vorfallzustand
+        (siehe `ai_guardian_report`) — eine Tatsache, keine Selbsteinschaetzung.
+        """
+        titel = (
+            "Guardian: Problem behoben" if geheilt
+            else "Guardian: Problem nicht behoben"
+        )
+        zustand = "behoben" if geheilt else "nicht behoben"
+        return {
+            "username": str(username or ""),
+            "titel": titel,
+            "betreff_praefix": EmailService._ai_betreff_praefix(titel),
+            "betreff_ersatz": str(server_name or ""),
+            "fakt": (
+                f'Auf dem Server "{server_name}" gab es eine Störung '
+                f"({incident_type}). Der KI-Assistent hat sie eigenständig "
+                f"bearbeitet. Ergebnis: {zustand}."
+            ),
+            "fusszeile": (
+                f"Vor dem Eingriff wurde ein Backup angelegt: {backup_name}"
+                if backup_name else None
+            ),
+        }
+
+    #: Der feste Text der Testmail. Steht als Konstante da, seit ihn zwei
+    #: Stellen brauchen: `send_ai_test_email` und der Werkzeughandler, der die
+    #: Mail in den Ausgangskorb legt und dabei den Rueckfall gleich mitrendert.
+    #: Bei genau dieser Mail ist der Rueckfall wichtiger als bei den anderen
+    #: beiden — sie ist das Messgeraet fuer den Versandweg und darf nicht
+    #: ausgerechnet dann ausbleiben, wenn das Modell klemmt.
+    AI_TESTMAIL_RUECKFALL = (
+        "Wenn du sie liest, funktioniert der im Panel eingerichtete "
+        "Versandweg — und damit auch die Berichte, die dir die KI künftig "
+        "zu deinen Aufgaben und zu behobenen Störungen schickt."
+    )
+
+    @staticmethod
+    def ai_rahmen_test(username: str) -> dict:
+        """Der Panelanteil der Testmail.
+
+        Ohne Zustandswort und ohne Ersatzbetreff: hier gibt es kein Ergebnis zu
+        melden, die Mail beweist sich selbst, indem sie ankommt.
+        """
+        titel = "Testmail vom KI-Assistenten"
+        return {
+            "username": str(username or ""),
+            "titel": titel,
+            "betreff_praefix": EmailService._ai_betreff_praefix(titel),
+            "betreff_ersatz": "",
+            "fakt": "Diese Mail hat der KI-Assistent auf deine Bitte hin verschickt.",
+            "fusszeile": None,
+        }
+
+    @staticmethod
+    def ai_mail_rendern(
+        rahmen: dict, *, mailtext=None, rueckfall: str = ""
+    ) -> tuple[str, str, str]:
+        """Aus Rahmen und (optionalem) Modelltext die fertige Mail: Betreff, Text, HTML.
+
+        Rein: kein Versand, keine Datenbank, kein Modellaufruf. Genau deshalb ist
+        sie zweimal benutzbar — beim Einreihen in den Ausgangskorb, wo
+        ``mailtext`` ``None`` ist und der feste ``rueckfall`` traegt, und im
+        Arbeiter, wo der verfasste Text vorliegt und ``rueckfall`` nicht mehr
+        gebraucht wird.
+
+        ``rahmen`` kommt im zweiten Fall aus einem JSON-Feld der Datenbank und
+        kann deshalb alt, unvollstaendig oder von einer aelteren Fassung des
+        Codes sein. Jeder Zugriff ist entsprechend nachsichtig: ein fehlender
+        Schluessel kostet einen Satz, nie die Mail.
+        """
+        betreff, absaetze, punkte, schluss = EmailService._ai_mailtext(
+            mailtext, fakt=str(rahmen.get("fakt") or ""), rueckfall=rueckfall
+        )
+        zusatz = betreff or str(rahmen.get("betreff_ersatz") or "")
+        subject = EmailService._ai_betreffzeile_aus_praefix(
+            str(rahmen.get("betreff_praefix") or ""), zusatz
+        )
+        username = str(rahmen.get("username") or "")
+        titel = str(rahmen.get("titel") or "")
+        fusszeile = rahmen.get("fusszeile") or None
+        body = EmailService._ai_report_email_text(
+            username, absaetze, punkte, schluss, fusszeile
+        )
+        html_body = EmailService._ai_report_email_html(
+            username, titel, absaetze, punkte, schluss, fusszeile
+        )
+        return subject, body, html_body
 
     @staticmethod
     async def send_ai_healing_report(
@@ -669,29 +830,15 @@ Maunting Server Manager — Guardian Engine
         beschoenigt, soll nicht auch noch die Betreffzeile bestimmen; es darf
         sie nur ergaenzen.
         """
-        zustand = "behoben" if geheilt else "nicht behoben"
-        titel = (
-            "Guardian: Problem behoben" if geheilt
-            else "Guardian: Problem nicht behoben"
+        rahmen = EmailService.ai_rahmen_healing(
+            username,
+            server_name=server_name,
+            incident_type=incident_type,
+            geheilt=geheilt,
+            backup_name=backup_name,
         )
-        fakt = (
-            f'Auf dem Server "{server_name}" gab es eine Störung ({incident_type}). '
-            f"Der KI-Assistent hat sie eigenständig bearbeitet. "
-            f"Ergebnis: {zustand}."
-        )
-        betreff, absaetze, punkte, schluss = EmailService._ai_mailtext(
-            mailtext, fakt=fakt, rueckfall=bericht
-        )
-        subject = EmailService._ai_betreffzeile(titel, betreff or server_name)
-        fusszeile = (
-            f"Vor dem Eingriff wurde ein Backup angelegt: {backup_name}"
-            if backup_name else None
-        )
-        body = EmailService._ai_report_email_text(
-            username, absaetze, punkte, schluss, fusszeile
-        )
-        html_body = EmailService._ai_report_email_html(
-            username, titel, absaetze, punkte, schluss, fusszeile
+        subject, body, html_body = EmailService.ai_mail_rendern(
+            rahmen, mailtext=mailtext, rueckfall=bericht
         )
         return await EmailService.send_email(to, subject, body, html_body)
 
@@ -720,24 +867,14 @@ Maunting Server Manager — Guardian Engine
         Modells. Ein Auftrag, der still gescheitert ist, ist die wichtigere
         Nachricht von beiden — niemand sass davor.
         """
-        titel = (
-            "KI-Aufgabe erledigt" if geschafft else "KI-Aufgabe nicht abgeschlossen"
+        rahmen = EmailService.ai_rahmen_task(
+            username,
+            task_title=task_title,
+            plan_text=plan_text,
+            geschafft=geschafft,
         )
-        zustand = "erledigt" if geschafft else "nicht abgeschlossen"
-        fakt = (
-            f'Deine KI-Aufgabe "{task_title}" ({plan_text}) war fällig. '
-            f"Ergebnis: {zustand}."
-        )
-        betreff, absaetze, punkte, schluss = EmailService._ai_mailtext(
-            mailtext, fakt=fakt, rueckfall=bericht
-        )
-        subject = EmailService._ai_betreffzeile(titel, betreff or task_title)
-        fusszeile = "Den vollständigen Verlauf findest du im KI-Chat des Panels."
-        body = EmailService._ai_report_email_text(
-            username, absaetze, punkte, schluss, fusszeile
-        )
-        html_body = EmailService._ai_report_email_html(
-            username, titel, absaetze, punkte, schluss, fusszeile
+        subject, body, html_body = EmailService.ai_mail_rendern(
+            rahmen, mailtext=mailtext, rueckfall=bericht
         )
         return await EmailService.send_email(to, subject, body, html_body)
 
@@ -756,22 +893,10 @@ Maunting Server Manager — Guardian Engine
         Aufgaben- oder Heilungsbericht nimmt. Das ist der Zweck: getestet wird
         nicht irgendein Versand, sondern der, auf den es spaeter ankommt.
         """
-        titel = "Testmail vom KI-Assistenten"
-        fakt = "Diese Mail hat der KI-Assistent auf deine Bitte hin verschickt."
-        rueckfall = (
-            "Wenn du sie liest, funktioniert der im Panel eingerichtete "
-            "Versandweg — und damit auch die Berichte, die dir die KI künftig "
-            "zu deinen Aufgaben und zu behobenen Störungen schickt."
-        )
-        betreff, absaetze, punkte, schluss = EmailService._ai_mailtext(
-            mailtext, fakt=fakt, rueckfall=rueckfall
-        )
-        subject = EmailService._ai_betreffzeile(titel, betreff)
-        body = EmailService._ai_report_email_text(
-            username, absaetze, punkte, schluss, None
-        )
-        html_body = EmailService._ai_report_email_html(
-            username, titel, absaetze, punkte, schluss, None
+        subject, body, html_body = EmailService.ai_mail_rendern(
+            EmailService.ai_rahmen_test(username),
+            mailtext=mailtext,
+            rueckfall=EmailService.AI_TESTMAIL_RUECKFALL,
         )
         return await EmailService.send_email(to, subject, body, html_body)
 

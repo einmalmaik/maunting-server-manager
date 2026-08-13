@@ -45,6 +45,7 @@ liegen und wird noch einmal versucht.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 import uuid
@@ -108,6 +109,8 @@ def einreihen(
     betreff: str,
     text: str,
     html: str | None = None,
+    fakten: str | None = None,
+    rahmen: dict | None = None,
 ) -> str | None:
     """Legt die Mail in den Ausgangskorb. Verschickt nichts.
 
@@ -127,6 +130,18 @@ def einreihen(
     Versandweg eingerichtet ist. Beides kann sich bis zur Zustellung aendern,
     und beides steht in `empfaenger` — einmal, an der Stelle, an der es zaehlt.
 
+    ``betreff``, ``text`` und ``html`` sind der **Rueckfall**: die Mail, wie sie
+    hinausgeht, wenn niemand mehr etwas dazutut. ``fakten`` und ``rahmen`` sind
+    das Material fuer die schoenere Fassung — der Arbeiter laesst daraus
+    `ai_mail_text.verfassen` schreiben und rendert ueber den Rahmen neu. Fehlt
+    eines von beiden, bleibt es beim Rueckfall, und das ist kein Fehler.
+
+    **Warum nicht hier verfasst wird**, obwohl die Angaben hier vorliegen:
+    zehntausend gleichzeitig endende Auftraege waeren zehntausend gleichzeitige
+    Modellaufrufe. Im Arbeiter liegt derselbe Aufruf innerhalb der Schranke, die
+    es dort ohnehin gibt — und er ueberlebt einen Neustart, weil die Angaben in
+    der Datenbank stehen und nicht in einem Thread.
+
     Gibt die Kennung der Zeile zurueck, oder ``None``, wenn sie nicht angelegt
     werden konnte. Wirft nie: eine nicht eingereihte Mail beendet keinen Lauf.
     """
@@ -138,6 +153,22 @@ def einreihen(
         logger.warning("KI-Mail nicht eingereiht (%s): Betreff oder Text fehlt", anlass)
         return None
 
+    rahmen_json: str | None = None
+    if rahmen:
+        try:
+            # `ensure_ascii=False`: der Rahmen traegt deutschen Text mit echten
+            # Umlauten, und ein Feld voller `ä` waere in der Datenbank
+            # dreimal so gross und beim Nachsehen unlesbar.
+            rahmen_json = json.dumps(rahmen, ensure_ascii=False, default=str)
+        except (TypeError, ValueError) as exc:
+            # Ein nicht serialisierbarer Rahmen kostet die schoene Fassung, nie
+            # die Mail: ohne Rahmen faellt der Arbeiter auf den festen Text
+            # zurueck, der hier ohnehin schon fertig danebensteht.
+            logger.warning(
+                "KI-Mail ohne Rahmen eingereiht (%s): %s", anlass, type(exc).__name__
+            )
+            rahmen_json = None
+
     zeile = AiMailOutbox(
         id=str(uuid.uuid4()),
         user_id=int(user_id),
@@ -145,6 +176,8 @@ def einreihen(
         betreff=betreff[:255],
         text_body=text,
         html_body=html or None,
+        fakten=(str(fakten).strip() or None) if fakten else None,
+        rahmen_json=rahmen_json,
         status="offen",
         versuche=0,
         # Sofort faellig. Ein Versatz waere eine Verzoegerung ohne Zweck: die
@@ -211,6 +244,8 @@ def zustellen(
     betreff: str | None = None,
     text: str | None = None,
     html: str | None = None,
+    fakten: str | None = None,
+    rahmen: dict | None = None,
 ) -> None:
     """Uebergibt eine Mail an den Versand. Wirft nie.
 
@@ -219,14 +254,18 @@ def zustellen(
     **Der Korbweg** — ``db``, ``user_id``, ``betreff`` und ``text`` angegeben.
     Dann entsteht eine Zeile in `ai_mail_outbox` und der Arbeiter verschickt
     sie. Das ist der Weg fuer alles, was in Buendeln anfaellt, also fuer jeden
-    KI-Bericht. ``name`` wird zum ``anlass`` der Zeile.
+    KI-Bericht. ``name`` wird zum ``anlass`` der Zeile. ``fakten`` und
+    ``rahmen`` sind optional: liegen sie an, laesst der Arbeiter den Text vom
+    Modell schreiben, statt den mitgegebenen zu nehmen.
 
-    **Der Thread-Weg** — nur ``bauen``, wie frueher. Er bleibt erhalten, weil
-    beim Umbau nicht alle Aufrufer gleichzeitig umgestellt werden konnten und
-    ein stillschweigender Bruch der Signatur schlimmer waere als ein alter Pfad
-    daneben. Er hat alle Nachteile, wegen derer es den Korb gibt: keine
-    Obergrenze, kein zweiter Versuch, und was scheitert, ist weg. Wer eine neue
-    Mailart baut, nimmt den Korbweg.
+    **Der Thread-Weg** — nur ``bauen``, wie frueher. Es faehrt niemand mehr auf
+    ihm: alle drei Berichtspfade nehmen den Korb, seit der Verfassungsschritt
+    dorthin gewandert ist. Er bleibt trotzdem stehen, weil ein stillschweigender
+    Bruch der Signatur schlimmer waere als ein alter Pfad daneben — dieses Modul
+    wirft nie, ein falsch gerufenes `zustellen` faende also niemand. Er hat alle
+    Nachteile, wegen derer es den Korb gibt: keine Obergrenze, kein zweiter
+    Versuch, und was scheitert, ist weg. Wer eine neue Mailart baut, nimmt den
+    Korbweg.
 
     ``bauen`` ist im Thread-Weg eine Fabrik und keine fertige Koroutine: die
     waere an eine Ereignisschleife gebunden, die es hier nicht gibt. Der Thread
@@ -241,6 +280,8 @@ def zustellen(
             betreff=betreff,
             text=text,
             html=html,
+            fakten=fakten,
+            rahmen=rahmen,
         )
         return
 

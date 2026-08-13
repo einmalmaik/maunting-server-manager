@@ -26,13 +26,15 @@ Gefaelscht wird das Modell wie in `test_ai_run.py` — ein Ersatz fuer
 from __future__ import annotations
 
 import asyncio
+import json
+import threading
 from email.message import EmailMessage
 from uuid import uuid4
 
 import pytest
 from sqlalchemy.orm import Session
 
-from models import AiProvider, AiUsageEvent, User
+from models import AiMailOutbox, AiProvider, AiUsageEvent, User
 from services import ai_guardian_report, ai_mail_text, ai_task_report
 from services.ai_mail_text import (
     WERKZEUG,
@@ -588,3 +590,160 @@ def test_a_report_without_a_usable_provider_still_sends(
     ))
 
     assert ergebnis is None
+
+
+# ── Rahmen und Rendern ────────────────────────────────────────────────────
+#
+# Dieselbe Mail entsteht seit dem Ausgangskorb an zwei Stellen: beim Einreihen
+# als Rueckfall und im Arbeiter mit dem Modelltext. Zwei Stellen, die dasselbe
+# zusammensetzen, laufen auseinander — die Textfassung dieser Mail trug einmal
+# einen Sicherheitshinweis, den die HTML-Fassung nicht hatte, und niemand sah
+# es. Deshalb gibt es genau einen Renderer, und diese Tests halten ihn fest.
+
+
+class TestRahmenUndRendern:
+    def test_the_frame_survives_the_trip_through_the_database(self):
+        """Der Rahmen geht als JSON durch eine Tabelle und muss danach dasselbe ergeben.
+
+        Zwischen Einreihen und Versand liegt eine `json.dumps`/`json.loads`-Runde
+        und moeglicherweise ein Prozessneustart. Ginge dabei etwas verloren —
+        das Zustandswort, die Fusszeile, der Satz des Panels —, faellt es
+        niemandem auf: die Mail geht ja trotzdem hinaus, nur mit weniger drin.
+        """
+        rahmen = EmailService.ai_rahmen_task(
+            "betreiber", task_title="Serverstatus", plan_text="täglich",
+            geschafft=False,
+        )
+        gereist = json.loads(json.dumps(rahmen, ensure_ascii=False))
+
+        text = Mailtext(betreff="Kurz", absaetze=["Ein Absatz."])
+        assert EmailService.ai_mail_rendern(
+            gereist, mailtext=text
+        ) == EmailService.ai_mail_rendern(rahmen, mailtext=text)
+
+    def test_rendering_the_same_frame_twice_differs_only_in_the_model_part(self):
+        """Rueckfall und verfasste Fassung teilen alles, was das Panel beitraegt.
+
+        Der Rueckfall entsteht beim Einreihen, die verfasste Fassung im
+        Arbeiter. Ueberschrift, Zustandswort, Anrede und Fusszeile muessen
+        beide Male dieselben sein — sonst haette der Betreiber je nach Laune
+        des Modells eine andere Mail vor sich.
+        """
+        rahmen = EmailService.ai_rahmen_task(
+            "betreiber", task_title="Serverstatus", plan_text="täglich",
+            geschafft=True,
+        )
+        fest_betreff, fest_text, fest_html = EmailService.ai_mail_rendern(
+            rahmen, rueckfall="Der feste Text."
+        )
+        verfasst_betreff, verfasst_text, verfasst_html = EmailService.ai_mail_rendern(
+            rahmen, mailtext=Mailtext(betreff="Alles läuft", absaetze=["Geprüft."])
+        )
+
+        for betreff in (fest_betreff, verfasst_betreff):
+            assert betreff.startswith("Maunting Server Manager — KI-Aufgabe erledigt")
+        for koerper in (fest_text, verfasst_text):
+            assert "Hallo betreiber," in koerper
+            assert 'Deine KI-Aufgabe "Serverstatus" (täglich) war fällig.' in koerper
+            assert "Den vollständigen Verlauf findest du im KI-Chat" in koerper
+        assert "Der feste Text." in fest_text
+        assert "Der feste Text." not in verfasst_text
+        assert "Geprüft." in verfasst_text
+        assert "Geprüft." in verfasst_html
+        assert "Geprüft." not in fest_html
+
+    def test_an_incomplete_frame_still_produces_a_deliverable_mail(self):
+        """Ein Rahmen aus einer aelteren Fassung des Codes kostet Text, nie die Mail.
+
+        Er kommt aus einem JSON-Feld und kann alles sein: leer, halb, von
+        vorgestern. Der Arbeiter liest ihn nachsichtig — und was dabei
+        herauskommt, muss trotzdem einen zustellbaren Betreff haben, sonst
+        wirft `msg["Subject"]` an einer Stelle, an der die Ausnahme oben
+        verschluckt wird.
+        """
+        betreff, koerper, html = EmailService.ai_mail_rendern(
+            {}, mailtext=Mailtext(betreff="Kurz", absaetze=["Ein Absatz."])
+        )
+
+        assert betreff == "Maunting Server Manager: Kurz"
+        assert "Ein Absatz." in koerper and "Ein Absatz." in html
+
+
+class TestBerichtspfadeNehmenDenKorb:
+    """Alle drei Anlaesse legen eine Zeile an, statt einen Thread zu starten.
+
+    Das war die offene Naht: der Verfassungsschritt ist asynchron, das
+    Einreihen verlangte eine fertig gerenderte Mail — also blieb der
+    Modellaufruf vor dem Korb und die Mail in einem Thread. Stuerzte der
+    Prozess zwischen Lauf-Ende und Versand ab, war sie weg.
+    """
+
+    def _benutzer(self, db: Session, name: str) -> User:
+        from services.auth_service import AuthService
+
+        user = AuthService.create_user(db, name, f"{name}@test.de", "KorbPass123!")
+        user.email_notifications = True
+        db.commit()
+        db.refresh(user)
+        return user
+
+    def test_the_task_report_queues_facts_and_a_fallback(self, db: Session):
+        user = self._benutzer(db, "aufgabenkorb")
+        vorher = threading.active_count()
+
+        ai_task_report._zustellen(
+            db=db,
+            user_id=int(user.id),
+            provider_id=None,
+            to="unbenutzt@test.de",
+            username=str(user.username),
+            task_title="Serverstatus",
+            plan_text="täglich",
+            geschafft=True,
+            bericht="Alle drei Server laufen.",
+        )
+
+        assert threading.active_count() == vorher
+        zeile = db.query(AiMailOutbox).filter(
+            AiMailOutbox.user_id == user.id
+        ).one()
+        assert zeile.anlass == "ai-task-report"
+        assert zeile.betreff.startswith(
+            "Maunting Server Manager — KI-Aufgabe erledigt"
+        )
+        assert "Alle drei Server laufen." in zeile.text_body
+        assert "Ergebnis laut Panel: erledigt" in zeile.fakten
+        # Die Adresse steht nirgends in der Zeile — auch nicht im Rahmen, obwohl
+        # der Aufrufer sie kennt.
+        assert "unbenutzt@test.de" not in zeile.rahmen_json
+        assert "aufgabenkorb@test.de" not in (zeile.rahmen_json + zeile.fakten)
+
+    def test_the_guardian_report_queues_facts_and_a_fallback(self, db: Session):
+        user = self._benutzer(db, "guardiankorb")
+        vorher = threading.active_count()
+
+        ai_guardian_report._zustellen(
+            db=db,
+            user_id=int(user.id),
+            provider_id=None,
+            to="unbenutzt@test.de",
+            username=str(user.username),
+            server_name="Testserver",
+            incident_type="process_not_running",
+            geheilt=False,
+            bericht="Der Dienst liess sich nicht starten.",
+            backup_name="vor-eingriff-2026",
+        )
+
+        assert threading.active_count() == vorher
+        zeile = db.query(AiMailOutbox).filter(
+            AiMailOutbox.user_id == user.id
+        ).one()
+        assert zeile.anlass == "ai-guardian-report"
+        # Das Zustandswort steht vorn und kommt aus `geheilt`, nicht aus dem
+        # Bericht — der behauptet hier nichts, aber ein Modell koennte es.
+        assert zeile.betreff.startswith(
+            "Maunting Server Manager — Guardian: Problem nicht behoben"
+        )
+        assert "vor-eingriff-2026" in zeile.text_body
+        assert "Ergebnis laut Panel: nicht behoben" in zeile.fakten

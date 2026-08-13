@@ -271,9 +271,9 @@ def _vorbereiten(
     Eigene, kurze Sitzung und danach `expunge` — dasselbe Muster wie in
     `ai_compaction_service`, aus demselben Grund: waehrend des Providerrufs
     darf keine Transaktion offen stehen. Der Aufruf kommt hier zusaetzlich aus
-    einem eigenen Thread mit eigener Ereignisschleife (`ai_mail.zustellen`),
-    also aus einem Kontext, in dem eine geliehene Sitzung erst recht nichts zu
-    suchen hat.
+    dem Arbeiter am Ausgangskorb (`ai_mail_outbox._verfassen_lassen`), der
+    keiner Anfrage gehoert — eine geliehene Sitzung haette dort erst recht
+    nichts zu suchen.
     """
     with SessionLocal() as db:
         user = db.get(User, user_id)
@@ -383,11 +383,18 @@ async def verfassen(
     dann mit dem Text hinaus, den `EmailService` ohnehin kennt. Verschickt wird
     immer — das ist die Zusage, an der dieser ganze Schritt haengt.
 
+    Gerufen wird **beim Versand** und nicht beim Einreihen: im Arbeiter am
+    Ausgangskorb, innerhalb dessen Schranke. Beim Einreihen zu verfassen hiesse,
+    dass zehntausend gleichzeitig endende Auftraege zehntausend gleichzeitige
+    Modellaufrufe ausloesen — und die Mail haenge wieder an einem Prozess statt
+    an einer Zeile in der Datenbank.
+
     ``client`` ist normalerweise ``None``. Der Prozessclient aus
-    `ai_run_service` waere hier falsch: dieser Aufruf laeuft in dem Thread, den
-    `ai_mail.zustellen` aufmacht, und damit auf einer **anderen**
-    Ereignisschleife als der, an die jener Client gebunden ist. Ein Test reicht
-    trotzdem einen durch, damit er keinen echten aufmachen muss.
+    `ai_run_service` waere hier falsch: dieser Aufruf laeuft am Ende in einer
+    anderen Aufgabe als der Lauf, dessen Bericht er schreibt — moeglicherweise
+    sogar in einem anderen Prozess, wenn die Zeile einen Neustart ueberdauert
+    hat. Ein Test reicht trotzdem einen durch, damit er keinen echten aufmachen
+    muss.
 
     ``anlass`` steht nur im Log. Er beantwortet die Frage „warum hat diese Mail
     keinen eigenen Text bekommen?“, ohne dass jemand die Fakten mitlesen muss —
