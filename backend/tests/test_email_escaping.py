@@ -160,3 +160,80 @@ class TestSicherheitsmeldungen:
         assert "<script>" not in html
         assert "&lt;script&gt;a&lt;/script&gt;" in html
         assert "<strong>ok</strong>" in html
+
+
+class TestBerichtsvorlage:
+    """Die eigene Vorlage fuer KI-Berichte — was sie traegt und was nicht.
+
+    Sie steht neben `_notification_email_html` und nicht darin, weil sich beide
+    an genau zwei Punkten unterscheiden muessen. Diese Tests halten beide fest.
+    """
+
+    def test_a_status_report_does_not_tell_you_to_change_your_password(self):
+        """Der Sicherheitshinweis gehoert zu Sicherheitsereignissen, sonst nirgends.
+
+        Der Betreiber fand unter einem reinen Serverstatusbericht den Satz
+        „Falls du diese Aktion nicht durchgeführt hast, ändere sofort dein
+        Passwort und kontaktiere den Administrator.“ — weil alle KI-Mails die
+        Sicherheitsvorlage mitbenutzten. Er ist dort nicht nur ueberfluessig,
+        sondern falsch: der Benutzer hat nichts durchgefuehrt, die KI hat.
+        """
+        html = EmailService._ai_report_email_html(
+            "einmalmaik", "Serverstatus", ["Alles laeuft."],
+        )
+        assert "Passwort" not in html
+        assert "kontaktiere den Administrator" not in html
+
+        # Und die andere Vorlage traegt ihn weiterhin — 17 Aufrufer brauchen ihn.
+        sicherheit = EmailService._notification_email_html(
+            "einmalmaik", "Neuer Login", "Von einer neuen Adresse.", "",
+        )
+        assert "ändere sofort dein Passwort" in sicherheit
+
+    def test_every_single_field_is_escaped_because_all_of_them_come_from_a_model(self):
+        """Hier gilt das Gegenteil der anderen Vorlage: nichts geht roh durch.
+
+        `_notification_email_html` laesst `message` und `detail` bewusst roh —
+        ihre Aufrufer bauen dort `<strong>` ein. In der Berichtsvorlage stammt
+        **jedes** Feld aus einem Modell, und ein Modell laesst sich ueber einen
+        praeparierten Servernamen oder eine Logzeile zu `<a href="...">`
+        ueberreden. Deshalb maskiert diese Vorlage selbst, an jedem Feld.
+        """
+        html = EmailService._ai_report_email_html(
+            "<script>nutzer</script>",
+            "<script>titel</script>",
+            ["<script>absatz</script>"],
+            ["<script>punkt</script>"],
+            "<script>schluss</script>",
+            "<script>fuss</script>",
+        )
+        assert "<script>" not in html
+        assert html.count("&lt;script&gt;") >= 6
+
+    def test_text_and_html_say_the_same_thing(self):
+        """Beide Fassungen aus einem Satz Felder — sie koennen nicht auseinanderlaufen.
+
+        Vorher wurden sie getrennt zusammengesetzt, und genau das ging schief:
+        die HTML-Fassung trug den Sicherheitshinweis, die Textfassung nicht.
+        """
+        felder = dict(
+            absaetze=["Drei Server laufen."],
+            punkte=["MauntShrouded", "7 Days to Die"],
+            schluss="Ich habe nichts geändert.",
+            fusszeile="Der Verlauf steht im KI-Chat.",
+        )
+        html = EmailService._ai_report_email_html("maik", "Status", **felder)
+        text = EmailService._ai_report_email_text("maik", **felder)
+
+        for satz in ("Drei Server laufen.", "MauntShrouded", "7 Days to Die",
+                     "Ich habe nichts geändert.", "Der Verlauf steht im KI-Chat."):
+            assert satz in text
+            assert EmailService.html_text(satz) in html
+
+    def test_an_empty_bullet_list_leaves_no_empty_markup(self):
+        """Ein Modell, das nichts aufzuzaehlen hat, hinterlaesst keine leere Liste."""
+        html = EmailService._ai_report_email_html(
+            "maik", "Status", ["Nur ein Satz."], [], None, None,
+        )
+        assert "<ul" not in html
+        assert "<li" not in html

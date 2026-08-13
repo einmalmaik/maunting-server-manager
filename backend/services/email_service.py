@@ -361,6 +361,120 @@ Maunting Server Manager
 <p style="margin:20px 0 0 0;font-size:13px;color:{cls.MUTED_COLOR};line-height:1.5;text-align:center;">Falls du diese Aktion nicht durchgeführt hast, ändere sofort dein Passwort und kontaktiere den Administrator.</p>"""
         return cls._base_template(title, content)
 
+    @classmethod
+    def _ai_report_email_html(
+        cls,
+        username: str,
+        titel: str,
+        absaetze: list[str],
+        punkte: list[str] | None = None,
+        schluss: str | None = None,
+        fusszeile: str | None = None,
+    ) -> str:
+        """Die Vorlage fuer Berichte der KI. Neben `_notification_email_html`, nicht darin.
+
+        Zwei Unterschiede, und beide sind der Grund fuer die eigene Vorlage.
+
+        **Kein Sicherheitshinweis.** `_notification_email_html` haengt
+        unbedingt „Falls du diese Aktion nicht durchgeführt hast, ändere sofort
+        dein Passwort“ an. Fuer einen neuen Login ist das richtig. Unter einem
+        Serverstatusbericht ist es falsch: der Benutzer hat nichts durchgefuehrt,
+        die KI hat — er hat sie ja darum gebeten. Der Betreiber hat den Satz
+        genau dort vorgefunden und sich zu Recht gewundert. Nebenbei war es
+        schon vorher widerspruechlich, denn die Textfassung derselben Mail
+        enthielt ihn nie.
+
+        **Alles wird hier maskiert.** Die andere Vorlage laesst `message` und
+        `detail` roh durch, weil ihre Aufrufer dort absichtlich `<strong>`
+        einbauen und ihre Fremdanteile selbst behandeln. Hier gilt das
+        Gegenteil: **jedes** Feld stammt aus einem Modell, und ein Modell, das
+        ueber einen praeparierten Servernamen oder eine Logzeile dazu gebracht
+        wurde, `<a href="...">` zu schreiben, haette sonst einen
+        Phishing-Traeger in einer Mail, die aussieht, als kaeme sie vom Panel.
+        Deshalb liefert das Modell **nur Text und nie Auszeichnung**, und die
+        Struktur — Absaetze, Aufzaehlung — kommt aus den Feldern statt aus
+        Markdown. Das erspart zugleich einen Markdown-Leser, den es hier nicht
+        gibt: `**Laufend:**` stand deshalb woertlich in der Mail.
+
+        `titel` und `fusszeile` stammen ausdruecklich **nicht** vom Modell,
+        sondern vom Panel — siehe `send_ai_task_report`.
+        """
+        username = cls.html_text(username)
+        titel_sicher = cls.html_text(titel)
+
+        teile = [
+            f'<h1 class="headline" style="margin:0 0 12px 0;font-size:24px;'
+            f'font-weight:700;color:{cls.CYAN_ACCENT};line-height:1.3;">{titel_sicher}</h1>',
+            f'<p style="margin:0 0 8px 0;font-size:15px;color:{cls.PRIMARY_TEXT};'
+            f'line-height:1.6;">Hallo <strong>{username}</strong>,</p>',
+        ]
+        for absatz in absaetze:
+            if not str(absatz or "").strip():
+                continue
+            teile.append(
+                f'<p style="margin:0 0 14px 0;font-size:15px;color:{cls.SECONDARY_TEXT};'
+                f'line-height:1.6;">{cls.html_text(absatz)}</p>'
+            )
+        if punkte:
+            zeilen = "".join(
+                f'<li style="margin:0 0 6px 0;">{cls.html_text(punkt)}</li>'
+                for punkt in punkte
+                if str(punkt or "").strip()
+            )
+            if zeilen:
+                teile.append(
+                    f'<ul style="margin:0 0 16px 0;padding-left:20px;font-size:15px;'
+                    f'color:{cls.SECONDARY_TEXT};line-height:1.6;">{zeilen}</ul>'
+                )
+        if schluss and str(schluss).strip():
+            teile.append(
+                f'<p style="margin:0 0 8px 0;font-size:15px;color:{cls.SECONDARY_TEXT};'
+                f'line-height:1.6;">{cls.html_text(schluss)}</p>'
+            )
+        if fusszeile and str(fusszeile).strip():
+            teile.append(
+                f'<p style="margin:20px 0 0 0;font-size:13px;color:{cls.MUTED_COLOR};'
+                f'line-height:1.5;">{cls.html_text(fusszeile)}</p>'
+            )
+        # Der **maskierte** Titel auch hier hinein: `_base_template` setzt ihn
+        # roh in `<title>`, genau wie es `_notification_email_html` vormacht
+        # (dort wird `title` einmal oben maskiert und danach nur noch das
+        # Ergebnis weitergereicht). Mit dem Rohwert stuende die Auszeichnung im
+        # Kopf des Dokuments statt im Text — dieselbe Luecke, nur woanders.
+        return cls._base_template(titel_sicher, "\n".join(teile))
+
+    @staticmethod
+    def _ai_report_email_text(
+        username: str,
+        absaetze: list[str],
+        punkte: list[str] | None = None,
+        schluss: str | None = None,
+        fusszeile: str | None = None,
+    ) -> str:
+        """Dieselben Felder als reiner Text.
+
+        Aus **derselben** Quelle wie die HTML-Fassung, und das ist der Punkt:
+        vorher wurden Text- und HTML-Fassung getrennt zusammengesetzt und gingen
+        auseinander — die eine trug den Sicherheitshinweis, die andere nicht.
+        Wer beides aus einem Satz Felder baut, kann sie nicht mehr auseinander
+        laufen lassen.
+        """
+        zeilen = [f"Hallo {username},", ""]
+        for absatz in absaetze:
+            if str(absatz or "").strip():
+                zeilen.extend([str(absatz).strip(), ""])
+        for punkt in punkte or []:
+            if str(punkt or "").strip():
+                zeilen.append(f"- {str(punkt).strip()}")
+        if punkte:
+            zeilen.append("")
+        if schluss and str(schluss).strip():
+            zeilen.extend([str(schluss).strip(), ""])
+        if fusszeile and str(fusszeile).strip():
+            zeilen.extend([str(fusszeile).strip(), ""])
+        zeilen.append("Maunting Server Manager")
+        return "\n".join(zeilen) + "\n"
+
     @staticmethod
     async def send_security_notification(to: str, username: str, title: str, message: str, detail: str = "") -> bool:
         """Zentrale Funktion für Security-/Login-bezogene Benachrichtigungen (neuer Login, OAuth-Link, Passwort-Änderung etc.).
