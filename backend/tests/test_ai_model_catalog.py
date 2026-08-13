@@ -15,6 +15,9 @@ OpenRouter-Katalog vom 2026-08-11.
 
 from __future__ import annotations
 
+import asyncio
+from time import perf_counter
+
 import httpx
 import pytest
 
@@ -304,3 +307,236 @@ async def test_an_unknown_provider_kind_fails_loudly() -> None:
     async with _client(lambda _r: httpx.Response(200, json=ANTWORT)) as client:
         with pytest.raises(KeyError):
             await ai_model_catalog.modelle(client, "anbieter-von-morgen")
+
+
+# ── Niemand wartet auf diesen Abruf ──────────────────────────────────────
+#
+# Lief die Frist ab, wartete der Absender einer Chatnachricht auf einen
+# HTTP-Abruf zu einem fremden Dienst, obwohl ein brauchbarer Stand danebenlag.
+# Gemessen ist dieser Abruf schnell (0,08-0,17 s am 2026-08-13) — die Tests hier
+# messen deshalb bewusst **keine Sekunden am echten Anbieter**, sondern
+# verhalten sich zu einem Anbieter, der haengt. Denn genau dann, und nur dann,
+# war die alte Bauart teuer: ABRUF_TIMEOUT betraegt 30 Sekunden, und das
+# Schloss lag frueher ueber allen Anbietern zusammen.
+#
+# Die Tests zaehlen also zweierlei: Versuche am Anbieter wie oben, und **wer
+# wartet**. Das Zweite ist der eigentliche Punkt.
+
+
+async def _auffrischung_abwarten(kind: str = "openrouter") -> None:
+    """Auf die laufende Hintergrundauffrischung warten, falls es eine gibt.
+
+    Der Verweis wird geholt, *bevor* gewartet wird: die Aufgabe raeumt sich beim
+    Beenden selbst aus dem Woerterbuch, ein spaeterer Zugriff liefe ins Leere.
+    """
+    aufgabe = ai_model_catalog._auffrischungen.get(kind)
+    if aufgabe is not None:
+        await asyncio.gather(aufgabe, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_an_expired_catalog_goes_out_before_the_provider_answers() -> None:
+    """Der abgelaufene Stand ist die Antwort, nicht der Anlass zum Warten.
+
+    Die Frist trennt "frisch" von "nicht mehr frisch" — nicht "brauchbar" von
+    "unbrauchbar". Ein Kontextfenster schrumpft ueber Nacht nicht, und die
+    Denkstufen eines Modells aendern sich auch nicht. Wer nach Ablauf der Frist
+    auf den Abruf wartet, tauscht eine Minute Stille gegen eine Genauigkeit,
+    die niemand braucht.
+    """
+    weiter = asyncio.Event()
+    versuche = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal versuche
+        versuche += 1
+        if versuche > 1:
+            # Der Anbieter antwortet ab jetzt nicht mehr von selbst. Genau so
+            # sah der Vorfall aus: der Abruf lief, nur eben lange.
+            await weiter.wait()
+        return httpx.Response(200, json=ANTWORT)
+
+    async with _client(handler) as client:
+        ai_model_catalog.laufzeit_setzen(client)
+        erst = await ai_model_catalog.modelle(client, "openrouter")
+        assert versuche == 1
+
+        ai_model_catalog._cache["openrouter"].geholt_am -= ai_model_catalog.CACHE_TTL
+
+        # Der Anbieter haengt — und der Aufrufer bekommt trotzdem sofort etwas.
+        # Die Schranke ist grosszuegig: sie soll "sofort" von "eine Minute"
+        # unterscheiden, nicht Millisekunden messen.
+        gestartet = perf_counter()
+        wieder = await asyncio.wait_for(
+            ai_model_catalog.modelle(client, "openrouter"), 1.0
+        )
+        assert perf_counter() - gestartet < 0.5
+        assert [m.model_id for m in wieder] == [m.model_id for m in erst]
+
+        # Und die Auffrischung laeuft wirklich, sie wurde nicht nur behauptet.
+        aufgabe = ai_model_catalog._auffrischungen["openrouter"]
+        weiter.set()
+        await aufgabe
+        assert versuche == 2
+
+
+@pytest.mark.asyncio
+async def test_many_waiting_calls_share_a_single_refresh() -> None:
+    """Fuenf gleichzeitige Nachrichten fragen den Anbieter nicht fuenfmal.
+
+    Ohne diese Zusage waere der Umbau ein Rueckschritt: vorher stauten sich die
+    Aufrufe am Schloss, hinterher schickte jeder seinen eigenen Abruf los.
+    """
+    versuche = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal versuche
+        versuche += 1
+        await asyncio.sleep(0)
+        return httpx.Response(200, json=ANTWORT)
+
+    async with _client(handler) as client:
+        ai_model_catalog.laufzeit_setzen(client)
+        await ai_model_catalog.modelle(client, "openrouter")
+        ai_model_catalog._cache["openrouter"].geholt_am -= ai_model_catalog.CACHE_TTL
+
+        ergebnisse = await asyncio.gather(
+            *(ai_model_catalog.modelle(client, "openrouter") for _ in range(5))
+        )
+        await _auffrischung_abwarten()
+
+    assert all(len(treffer) == 4 for treffer in ergebnisse)
+    assert versuche == 2
+
+
+@pytest.mark.asyncio
+async def test_the_very_first_call_gives_up_instead_of_holding_the_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ohne jeden Stand wird kurz gewartet — nicht die volle ``ABRUF_TIMEOUT``.
+
+    Das ist der einzige Fall, in dem ueberhaupt noch jemand wartet, und er ist
+    nach dem Vorwaermen selten. Wenn er eintritt, gilt: eine leere Liste ist
+    verkraftbar (``ai_context_window`` meldet "Fenster unbekannt",
+    ``ai_reasoning`` bleibt beim reinen An/Aus), 30 Sekunden Stille nicht.
+
+    Der Abruf laeuft dabei **weiter**. Ihn abzubrechen hiesse, die Wartezeit zu
+    bezahlen und das Ergebnis wegzuwerfen.
+    """
+    monkeypatch.setattr(ai_model_catalog, "ERSTE_WARTE", 0.05)
+    weiter = asyncio.Event()
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        await weiter.wait()
+        return httpx.Response(200, json=ANTWORT)
+
+    async with _client(handler) as client:
+        ai_model_catalog.laufzeit_setzen(client)
+        gestartet = perf_counter()
+        assert await ai_model_catalog.modelle(client, "openrouter") == []
+        assert perf_counter() - gestartet < 1.0
+
+        aufgabe = ai_model_catalog._auffrischungen["openrouter"]
+        assert not aufgabe.done()
+        weiter.set()
+        await aufgabe
+        # Der naechste Aufrufer erbt, wofuer der erste gewartet hat.
+        assert len(await ai_model_catalog.modelle(client, "openrouter")) == 4
+
+
+@pytest.mark.asyncio
+async def test_warming_up_means_the_first_message_finds_a_full_catalog() -> None:
+    """Der Start holt den Katalog, damit ihn der erste Chat nicht holen muss."""
+    versuche = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal versuche
+        versuche += 1
+        return httpx.Response(200, json=ANTWORT)
+
+    async with _client(handler) as client:
+        ai_model_catalog.laufzeit_setzen(client)
+        ai_model_catalog.vorwaermen_anstossen()
+        await _auffrischung_abwarten()
+        assert versuche == 1
+
+        # Und jetzt der Sendepfad: kein einziger weiterer Versuch.
+        assert len(await ai_model_catalog.modelle(client, "openrouter")) == 4
+        assert versuche == 1
+
+
+@pytest.mark.asyncio
+async def test_without_a_background_client_nothing_changes() -> None:
+    """Ohne hinterlegten Client bleibt es beim alten, wartenden Weg.
+
+    Wichtig, weil MSM sonst in jedem Skript und in jedem Test ohne Anwendung
+    ewig denselben veralteten Stand ausliefern wuerde, ohne ihn je zu erneuern.
+    Ein Abruf, der niemandem gehoert, waere schlimmer als ein Aufrufer, der
+    wartet.
+    """
+    versuche = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal versuche
+        versuche += 1
+        return httpx.Response(200, json=ANTWORT)
+
+    async with _client(handler) as client:
+        # Kein laufzeit_setzen: ``_HTTP`` bleibt None.
+        await ai_model_catalog.modelle(client, "openrouter")
+        ai_model_catalog._cache["openrouter"].geholt_am -= ai_model_catalog.CACHE_TTL
+        await ai_model_catalog.modelle(client, "openrouter")
+
+    assert versuche == 2
+    assert not ai_model_catalog._auffrischungen
+
+
+@pytest.mark.asyncio
+async def test_a_hanging_provider_does_not_stall_a_healthy_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anbieter warten nicht mehr aufeinander.
+
+    Vorher hielten sich alle Anbieter **ein** Schloss. Ein haengender staute
+    damit die Abrufe der uebrigen mit, obwohl sie nichts miteinander zu tun
+    haben. Der Test baut den zweiten Anbieter, den es heute noch nicht gibt —
+    laut ``ai_provider_registry`` ist das ein Eintrag und ein Leser.
+    """
+    from services.ai_provider_registry import Anbieter
+
+    zweiter = Anbieter(
+        kind="zweiter",
+        label="Zweiter",
+        base_url="https://zweiter.example",
+        catalog_url="https://zweiter.example/models",
+        key_url="https://zweiter.example/keys",
+    )
+    echt = ai_model_catalog.anbieter
+    monkeypatch.setitem(
+        ai_model_catalog._LESER, "zweiter", ai_model_catalog._modell_aus_openrouter
+    )
+    monkeypatch.setattr(
+        ai_model_catalog,
+        "anbieter",
+        lambda kind: zweiter if kind == "zweiter" else echt(kind),
+    )
+
+    weiter = asyncio.Event()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if "zweiter.example" not in str(request.url):
+            await weiter.wait()
+        return httpx.Response(200, json=ANTWORT)
+
+    async with _client(handler) as client:
+        haengt = asyncio.ensure_future(ai_model_catalog.modelle(client, "openrouter"))
+        await asyncio.sleep(0)
+
+        # Der gesunde Anbieter antwortet, waehrend der andere haengt.
+        gesund = await asyncio.wait_for(
+            ai_model_catalog.modelle(client, "zweiter"), 1.0
+        )
+        assert len(gesund) == 4
+
+        weiter.set()
+        assert len(await haengt) == 4

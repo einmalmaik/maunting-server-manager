@@ -57,6 +57,34 @@ warteten alle gleichzeitigen Anfragen hintereinander mit. Ein nicht
 erreichbarer Anbieter haette den Chat dann nicht nur ausgebremst, sondern
 gestaut: die Providerliste fragt den Katalog je Provider, das Absenden einer
 Nachricht noch einmal.
+
+**Niemand wartet auf diesen Abruf, wenn es etwas auszuliefern gibt.** Das ist
+die zweite Lehre. Sie kam aus der Suche nach einer langsamen Chatantwort, und
+dabei ist wichtig, was sie **nicht** war: gemessen am 2026-08-13 antwortet
+OpenRouter auf diesen Abruf in 0,08 bis 0,17 Sekunden (653 KB, 409 Modelle).
+Der Katalog war also nicht der Grund fuer die beobachtete Wartezeit, und dieser
+Absatz behauptet das auch nicht.
+
+Was er behauptet, ist schlichter: der Abruf hatte im Sendepfad nichts zu
+suchen. Lief die Frist ab, wartete der Absender einer Chatnachricht auf einen
+HTTP-Abruf zu einem fremden Dienst — obwohl ein vollkommen brauchbarer Stand
+danebenlag. Die Frist trennt naemlich nicht „brauchbar“ von „unbrauchbar“,
+sondern nur „frisch“ von „nicht mehr frisch“; ein Kontextfenster schrumpft
+ueber Nacht nicht, und die Denkstufen eines Modells aendern sich auch nicht.
+Solange OpenRouter schnell ist, kostet das kaum etwas. An dem Tag, an dem es
+langsam ist, kostet es ``ABRUF_TIMEOUT`` — und zwar jeden Chat gleichzeitig,
+denn das Schloss lag frueher ueber allen Anbietern zusammen.
+
+Deshalb gilt jetzt: ein vorhandener Stand geht **sofort** hinaus, die
+Auffrischung laeuft nebenher. Nur wenn es ueberhaupt nichts gibt, wartet noch
+jemand — und auch dann hoechstens ``ERSTE_WARTE``, denn beide Stellen im
+Sendepfad kommen mit einer leeren Antwort zurecht (``ai_context_window`` sagt
+dann „Fenster unbekannt“, ``ai_reasoning`` bleibt beim reinen An/Aus ohne
+Stufe). Eine Sekunde spaeter falsch zu liegen ist besser als eine Minute lang
+richtig zu schweigen.
+
+Damit der Fall „ueberhaupt nichts da“ im Sendepfad gar nicht erst eintritt,
+waermt ``vorwaermen_anstossen()`` den Katalog beim Start der Anwendung vor.
 """
 
 from __future__ import annotations
@@ -91,6 +119,12 @@ FEHLER_RUHE = timedelta(seconds=60)
 #: Schutz gegen eine Antwort, die kein Katalog mehr ist. Der echte Katalog liegt
 #: bei rund 660 KB; alles jenseits dieser Grenze wird nicht erst geparst.
 MAX_KATALOG_BYTES = 8 * 1024 * 1024
+#: Wie lange ein Aufrufer hoechstens auf den **allerersten** Katalog wartet.
+#: Danach bekommt er die leere Liste und der Abruf laeuft im Hintergrund weiter;
+#: der naechste Aufrufer findet ihn dann fertig vor. Nur hier ist Warten
+#: ueberhaupt noch noetig, denn nur hier gibt es nichts auszuliefern — und drei
+#: Sekunden sind die Grenze, ab der ein Chat sich aufgehaengt anfuehlt.
+ERSTE_WARTE = 3.0
 
 
 @dataclass(frozen=True)
@@ -148,7 +182,111 @@ class _Eintrag:
 
 
 _cache: dict[str, _Eintrag] = {}
-_lock = asyncio.Lock()
+#: Ein Schloss **je Anbieter**, nicht eines fuer alle. Vorher teilten sich alle
+#: Anbieter eines: ein haengender Anbieter staute damit auch die Abrufe der
+#: uebrigen, obwohl die nichts miteinander zu tun haben. Nebenbei loest das eine
+#: zweite Sache — ein ``asyncio.Lock`` bindet sich an die Ereignisschleife, in
+#: der er zuerst benutzt wird, und die Testsuite baut je Test eine neue. Ein
+#: Woerterbuch laesst sich leeren, ein Modulobjekt nicht.
+_locks: dict[str, asyncio.Lock] = {}
+#: Laufende Auffrischungen, je Anbieter hoechstens eine. Der Verweis liegt hier,
+#: damit die Aufgabe nicht mitten im Abruf vom Aufraeumer eingesammelt wird —
+#: ``create_task`` allein haelt nichts fest.
+_auffrischungen: dict[str, asyncio.Task] = {}
+#: Der langlebige HTTP-Client der Anwendung. Eine Hintergrundauffrischung darf
+#: **nicht** den Client des Aufrufers benutzen: der gehoert einer Anfrage und ist
+#: geschlossen, sobald sie beantwortet ist. Gesetzt wird er im ``lifespan``,
+#: genau wie bei ``ai_run_service.laufzeit_setzen``.
+_HTTP: httpx.AsyncClient | None = None
+
+
+def laufzeit_setzen(http: httpx.AsyncClient | None) -> None:
+    """Den Client hinterlegen, mit dem im Hintergrund abgerufen wird.
+
+    Ohne ihn gibt es keine Hintergrundauffrischung — und dann verhaelt sich das
+    Modul wieder genau wie frueher: der Aufrufer wartet auf den Abruf. Das ist
+    Absicht und keine Notloesung. Ein Abruf, der niemandem gehoert, waere
+    schlimmer als ein Aufrufer, der wartet.
+    """
+    global _HTTP
+    _HTTP = http
+
+
+def _schloss(kind: str) -> asyncio.Lock:
+    schloss = _locks.get(kind)
+    if schloss is None:
+        schloss = _locks[kind] = asyncio.Lock()
+    return schloss
+
+
+def _auffrischen_anstossen(kind: str) -> bool:
+    """Eine Auffrischung im Hintergrund anstossen; laeuft schon eine, nichts tun.
+
+    Der Rueckgabewert ist die eigentliche Aussage: ``True`` heisst „um den
+    frischen Stand kuemmert sich jemand“. Nur dann darf der Aufrufer den alten
+    ausliefern. Ist es ``False`` — kein Client hinterlegt, keine laufende
+    Schleife —, bleibt es beim alten Verhalten und der Aufrufer holt selbst.
+    Sonst lieferte MSM in der Testsuite und in jedem Skript ohne Anwendung
+    ewig denselben veralteten Stand aus, ohne ihn je zu erneuern.
+    """
+    laufend = _auffrischungen.get(kind)
+    if laufend is not None and not laufend.done():
+        return True
+    client = _HTTP
+    if client is None:
+        return False
+    try:
+        schleife = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    aufgabe = schleife.create_task(_auffrischen(client, kind))
+    _auffrischungen[kind] = aufgabe
+    # Ohne diesen Rueckruf meldet asyncio beim Aufraeumen "Task exception was
+    # never retrieved" — und der Verweis bliebe fuer immer stehen.
+    aufgabe.add_done_callback(lambda fertig: _auffrischung_abschliessen(kind, fertig))
+    return True
+
+
+def _auffrischung_abschliessen(kind: str, aufgabe: asyncio.Task) -> None:
+    if _auffrischungen.get(kind) is aufgabe:
+        _auffrischungen.pop(kind, None)
+    if aufgabe.cancelled():
+        return
+    fehler = aufgabe.exception()
+    if fehler is not None:
+        logger.warning(
+            "Auffrischung des Modellkatalogs %s abgebrochen error=%s",
+            kind,
+            type(fehler).__name__,
+        )
+
+
+async def _auffrischen(client: httpx.AsyncClient, kind: str) -> None:
+    """Der Abruf im Hintergrund.
+
+    Ausdruecklich **ohne** ``erzwingen``: die Ruhefrist nach einem Fehlversuch
+    gilt auch hier. Sonst liefe bei einem nicht erreichbaren Anbieter mit jeder
+    abgeschickten Nachricht ein neuer Abruf ueber die volle ``ABRUF_TIMEOUT``
+    an — unsichtbar, aber deswegen nicht harmlos.
+    """
+    await _besorgen(client, kind, erzwingen=False, sofort=False)
+
+
+def vorwaermen_anstossen() -> None:
+    """Den Katalog beim Start der Anwendung holen, bevor ihn jemand braucht.
+
+    Damit trifft die erste Chatnachricht nach einem Neustart einen gefuellten
+    Speicher statt eines leeren. Das ist der einzige Fall, in dem ueberhaupt noch
+    jemand auf den Katalog warten muesste, und dieser Aufruf raeumt ihn aus dem
+    Weg.
+
+    Braucht bewusst **keine** Datenbank und fragt nicht, welche Anbieter
+    eingerichtet sind: die Anbieterliste steht im Programm, ein Abruf je Anbieter
+    kostet einmal wenige hundert Kilobyte, und ein Start, der auf das Schema
+    wartet, waere von der Reihenfolge im ``lifespan`` abhaengig.
+    """
+    for kind in _LESER:
+        _auffrischen_anstossen(kind)
 
 
 def _antwortet_ohne_abruf(eintrag: _Eintrag, jetzt: datetime) -> bool:
@@ -323,7 +461,22 @@ async def modelle(
     „unbekanntes Modell“ ist, sondern „der Katalog ist ein paar Stunden alt“.
     Er umgeht **auch** die Ruhefrist nach einem Fehlversuch: wer den Knopf
     drueckt, hat gerade beim Anbieter nachgesehen und will jetzt eine Antwort,
-    keine gespeicherte Absage.
+    keine gespeicherte Absage. Und er wartet als einziger Weg noch auf den
+    Abruf — das ist genau das, was der Knopf verspricht.
+    """
+    return await _besorgen(client, kind, erzwingen=erzwingen, sofort=True)
+
+
+async def _besorgen(
+    client: httpx.AsyncClient, kind: str, *, erzwingen: bool, sofort: bool
+) -> list[Modell]:
+    """Der gemeinsame Weg fuer Vordergrund und Hintergrund.
+
+    ``sofort`` unterscheidet die beiden. Im Vordergrund (``True``) zaehlt, dass
+    niemand wartet: ein vorhandener Stand geht hinaus, notfalls ein abgelaufener.
+    Im Hintergrund (``False``) zaehlt das Gegenteil — dort *soll* wirklich
+    abgerufen werden, sonst faende die Auffrischung nur den alten Stand vor, den
+    sie gerade ersetzen soll, und taete nichts.
     """
     spec = anbieter(kind)
     jetzt = datetime.now(timezone.utc)
@@ -332,7 +485,26 @@ async def modelle(
     if not erzwingen and eintrag is not None and _antwortet_ohne_abruf(eintrag, jetzt):
         return eintrag.modelle
 
-    async with _lock:
+    if not erzwingen and sofort and _auffrischen_anstossen(kind):
+        # Ab hier holt jemand anders den frischen Stand. Also nicht warten.
+        if eintrag is not None and eintrag.modelle:
+            return eintrag.modelle
+        # Ausser es gibt noch gar nichts — dann ist Warten die einzige Chance
+        # auf eine brauchbare Antwort. Aber nur kurz, und ohne den Abruf
+        # mitzureissen: ``shield`` sorgt dafuer, dass er weiterlaeuft, wenn die
+        # Geduld hier abgelaufen ist. Der naechste Aufrufer erbt ihn fertig.
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(_auffrischungen[kind]), ERSTE_WARTE
+            )
+        except Exception:
+            # Zeit abgelaufen, Aufgabe verschwunden oder gescheitert — alles
+            # drei enden gleich: mit dem, was da ist. Und da ist notfalls nichts.
+            pass
+        bestand = _cache.get(kind)
+        return bestand.modelle if bestand is not None else []
+
+    async with _schloss(kind):
         # Zweite Prüfung im Schloss: während des Wartens kann ein anderer
         # Aufruf den Katalog bereits geholt haben — oder erfolglos versucht
         # haben, ihn zu holen. Ohne sie holen ihn beim Start alle gleichzeitig
@@ -381,4 +553,17 @@ async def finde(
 
 
 def cache_leeren_fuer_tests() -> None:
+    """Setzt den gesamten Modulzustand zurueck.
+
+    Auch Schloesser und laufende Aufgaben, nicht nur der Speicher: beide haengen
+    an einer Ereignisschleife, und die Testsuite baut je Test eine neue. Ein
+    Schloss aus dem vorigen Test waere im naechsten unbrauchbar, eine Aufgabe
+    aus einer geschlossenen Schleife nie mehr fertig.
+    """
+    global _HTTP
+    for aufgabe in _auffrischungen.values():
+        aufgabe.cancel()
+    _auffrischungen.clear()
+    _locks.clear()
     _cache.clear()
+    _HTTP = None

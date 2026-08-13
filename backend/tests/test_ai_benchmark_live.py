@@ -929,11 +929,22 @@ async def test_ai_benchmark(
     nach_szenario: dict[str, list[Messung]] = {}
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=15.0)) as client:
-        # Aufwaermen. Der erste Lauf zahlt den Modellkatalog (ein HTTP-Abruf mit
-        # sechs Stunden Frist) und den ersten Verbindungsaufbau. Beides gehoert
-        # zur Wahrheit ueber den Kaltstart, aber nicht in den Median eines
-        # Szenarios — sonst traegt `chat_trivial` als erstes Szenario dauerhaft
-        # Kosten, die keinem Szenario gehoeren.
+        # Genau das, was `main.lifespan` beim Start tut. Ohne diese zwei Zeilen
+        # misst der Benchmark einen Prozess, den es so nicht gibt: der
+        # Modellkatalog haette keinen Hintergrund-Client, wuerde also nie
+        # nebenher auffrischen, und `anlauf` zeigte eine Wartezeit, die in der
+        # Anwendung niemand mehr zahlt. Ein Benchmark, der guenstiger *oder*
+        # teurer misst als die Wirklichkeit, ist gleich wertlos.
+        from services import ai_model_catalog
+
+        ai_model_catalog.laufzeit_setzen(client)
+        ai_model_catalog.vorwaermen_anstossen()
+
+        # Aufwaermen. Der erste Lauf zahlt den ersten Verbindungsaufbau — und
+        # frueher auch den Modellkatalog, den jetzt das Vorwaermen oben
+        # nebenher holt. Beides gehoert zur Wahrheit ueber den Kaltstart, aber
+        # nicht in den Median eines Szenarios — sonst traegt `chat_trivial` als
+        # erstes Szenario dauerhaft Kosten, die keinem Szenario gehoeren.
         aufwaermen = perf_counter()
         await _messen(
             db, user=owner_user, provider=provider,

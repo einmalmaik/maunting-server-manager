@@ -117,6 +117,7 @@ async def lifespan(app: FastAPI):
         _asyncio.get_running_loop(), app.state.ai_http_client
     )
 
+
     os.makedirs(settings.servers_dir, exist_ok=True)
     os.makedirs("/opt/msm/backups", exist_ok=True)
 
@@ -124,6 +125,26 @@ async def lifespan(app: FastAPI):
     # Only bypassed if explicitly testing (e.g. pytest)
     import sys
     is_testing = os.getenv("MSM_TESTING") == "true" or "pytest" in sys.modules
+
+    # Der Modellkatalog bekommt denselben langlebigen Client. Er frischt sich
+    # kuenftig im Hintergrund auf und darf dafuer nicht den Client einer Anfrage
+    # benutzen — der ist geschlossen, sobald sie beantwortet ist.
+    #
+    # Und dann einmal holen, bevor ihn jemand braucht. Das ist der Unterschied
+    # zwischen "die erste Nachricht nach dem Neustart dauert eine Minute" und
+    # "sie dauert so lange wie jede andere": ohne Vorwaermen faellt der Abruf
+    # beim Anbieter genau in den Sendepfad des ersten Chats.
+    #
+    # In der Testsuite unterbleibt beides. Ein Vorwaermen dort waere ein echter
+    # Aufruf an OpenRouter bei jedem Hochfahren der Anwendung, und ein gesetzter
+    # Client liesse Tests im Hintergrund abrufen, die von nichts dergleichen
+    # wissen.
+    if not is_testing:
+        from services import ai_model_catalog as _ai_model_catalog
+
+        _ai_model_catalog.laufzeit_setzen(app.state.ai_http_client)
+        _ai_model_catalog.vorwaermen_anstossen()
+
     from services.dis_client import DisClient
     if not is_testing and not DisClient.health_check():
         raise RuntimeError(
