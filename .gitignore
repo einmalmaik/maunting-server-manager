@@ -90,3 +90,4 @@ prompt.txt
 # Entstehen zur Laufzeit bei jedem Schreibvorgang — auch bei dem, den
 # `propose_config_patch` ausloest. Betriebsdaten eines Panels, keine Quelle.
 /backend/.msm-file-history/
+claude.md
