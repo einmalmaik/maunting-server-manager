@@ -145,6 +145,21 @@ async def lifespan(app: FastAPI):
         _ai_model_catalog.laufzeit_setzen(app.state.ai_http_client)
         _ai_model_catalog.vorwaermen_anstossen()
 
+    # Der Ausgangskorb der KI-Mails. Eine einzige Aufgabe auf dieser Schleife
+    # loest den Fall ab, in dem jede faellige Mail einen eigenen Thread mit
+    # eigener Ereignisschleife bekam — bei zehntausend gleichzeitig faelligen
+    # Auftraegen waren das zehntausend Threads und ebenso viele frische
+    # SMTP-Verbindungen.
+    #
+    # In der Testsuite unterbleibt der Start, aus demselben Grund wie beim
+    # Katalog daneben: ein Arbeiter, der im Hintergrund die Datenbank abfragt
+    # und Mails verschickt, gehoert nicht in Tests, die von nichts dergleichen
+    # wissen. Die Tests des Korbs starten ihn selbst.
+    if not is_testing:
+        from services import ai_mail_outbox as _ai_mail_outbox
+
+        _ai_mail_outbox.arbeiter_starten()
+
     from services.dis_client import DisClient
     if not is_testing and not DisClient.health_check():
         raise RuntimeError(
@@ -633,6 +648,15 @@ async def lifespan(app: FastAPI):
         from services import ai_model_catalog as _ai_model_catalog
 
         await _ai_model_catalog.aufraeumen()
+
+        # Der Ausgangskorb ebenfalls vor den Clients, und ebenfalls mit Abwarten:
+        # `cancel()` bittet nur. Eine Mail, die dabei abgebrochen wird, ist nicht
+        # verloren — ihre Zeile steht weiter auf `offen` und faellt nach der
+        # Uebernahmefrist zurueck in die Warteschlange. Genau dafuer gibt es die
+        # Tabelle.
+        from services import ai_mail_outbox as _ai_mail_outbox
+
+        await _ai_mail_outbox.aufraeumen()
 
     await app.state.http_client.aclose()
     await app.state.ai_http_client.aclose()

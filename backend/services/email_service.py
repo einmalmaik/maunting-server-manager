@@ -586,6 +586,59 @@ Maunting Server Manager — Guardian Engine
 
 
     @staticmethod
+    def _ai_betreffzeile(titel: str, zusatz: str) -> str:
+        """Setzt die Betreffzeile zusammen und macht sie zustellbar.
+
+        Zwei Dinge in einer Funktion, weil sie zusammengehoeren.
+
+        Die **Reihenfolge** haelt die Zusage fest: vorne die Kennung des Panels
+        und das Zustandswort — beides Tatsachen aus dem Lauf —, dahinter erst
+        das, was das Modell beisteuert. Ein Modell, das beschoenigt, kann den
+        Betreff faerben, aber nie das Ergebnis darin umschreiben.
+
+        Die **Bereinigung** verhindert einen Vorfall, der die ganze Mail kostete
+        und dabei Erfolg meldete: `send_email` setzt ``msg["Subject"]`` vor dem
+        ``try``. Ein Zeilenumbruch darin wirft `ValueError`, die an der
+        Fehlerbehandlung des Versands vorbei bis nach `ai_mail.zustellen`
+        durchlaeuft und dort als Warnung endet — gruener Lauf, keine Mail.
+        Bereinigt wird die **fertige** Zeile und nicht nur der Modellteil:
+        Servername und Aufgabentitel kommen aus Formularen und aus einem Chat
+        und koennen denselben Umbruch tragen.
+        """
+        from services.ai_mail_text import (
+            MAX_BETREFFZEILE_ZEICHEN,
+            betreff_bereinigen,
+        )
+
+        zeile = f"Maunting Server Manager — {titel}"
+        if zusatz:
+            zeile += f": {zusatz}"
+        return betreff_bereinigen(zeile, grenze=MAX_BETREFFZEILE_ZEICHEN)
+
+    @staticmethod
+    def _ai_mailtext(mailtext, *, fakt: str, rueckfall: str) -> tuple[str, list[str], list[str], str | None]:
+        """Betreff, Absaetze, Punkte und Schluss — vom Modell oder aus dem Code.
+
+        ``mailtext`` ist ein `ai_mail_text.Mailtext` oder ``None``. ``None``
+        heisst „das Modell konnte nicht“ und ist kein Fehler: dann steht der
+        feste Text in der Mail, und verschickt wird trotzdem. Der Verfassungs-
+        schritt darf den Versand verschoenern, aber niemals verhindern.
+
+        ``fakt`` ist der Satz des Panels und steht **immer** an erster Stelle,
+        auch wenn das Modell geschrieben hat. Er traegt das Ergebnis, und das
+        Ergebnis stammt aus dem Endzustand des Laufs, nicht aus der
+        Selbsteinschaetzung des Modells.
+        """
+        if mailtext is not None and getattr(mailtext, "absaetze", None):
+            return (
+                str(getattr(mailtext, "betreff", "") or ""),
+                [fakt] + list(mailtext.absaetze),
+                list(getattr(mailtext, "punkte", None) or []),
+                getattr(mailtext, "schluss", None),
+            )
+        return "", [fakt, rueckfall], [], None
+
+    @staticmethod
     async def send_ai_healing_report(
         to: str,
         username: str,
@@ -595,57 +648,50 @@ Maunting Server Manager — Guardian Engine
         geheilt: bool,
         bericht: str,
         backup_name: str | None = None,
+        mailtext=None,
     ) -> bool:
         """Der Bericht der KI ueber eine Heilung, die ohne den Benutzer lief.
 
         Anders als jede andere Mail dieser Datei steht der Fliesstext hier nicht
-        im Code: er stammt vom Modell. Das hat zwei Folgen, und beide sind
-        beruecksichtigt.
+        im Code: er stammt vom Modell — seit `ai_mail_text` sogar der Betreff.
+        Das hat zwei Folgen, und beide sind beruecksichtigt.
 
         Erstens die Maskierung. Modelltext ist unvertrauenswuerdige Eingabe,
         unabhaengig davon, was im Systemprompt steht — ein Modell, das ueber
         eine praeparierte Logzeile dazu gebracht wurde, `<a href="...">` zu
         schreiben, haette sonst einen Phishing-Traeger in einer Mail, die
-        aussieht, als kaeme sie vom Panel. `html_text` maskiert und erhaelt die
-        Absaetze.
+        aussieht, als kaeme sie vom Panel. Deshalb geht diese Mail durch
+        `_ai_report_email_html`, das **jedes** Feld maskiert, und nicht mehr
+        durch die Sicherheitsvorlage, die Fliesstext roh durchlaesst.
 
         Zweitens die Ueberschrift. Sie kommt **nicht** vom Modell, sondern aus
         `geheilt` — einer Tatsache des Panels. Ein Modell, das sich irrt oder
-        beschoenigt, soll nicht auch noch die Betreffzeile bestimmen.
+        beschoenigt, soll nicht auch noch die Betreffzeile bestimmen; es darf
+        sie nur ergaenzen.
         """
         zustand = "behoben" if geheilt else "nicht behoben"
         titel = (
             "Guardian: Problem behoben" if geheilt
             else "Guardian: Problem nicht behoben"
         )
-        subject = f"Maunting Server Manager — {titel}: {server_name}"
-        body = f"""Hallo {username},
-
-auf dem Server "{server_name}" gab es eine Störung ({incident_type}).
-Der KI-Assistent hat sie eigenständig bearbeitet. Ergebnis: {zustand}.
-
-{bericht}
-"""
-        if backup_name:
-            body += f"\nVor dem Eingriff wurde ein Backup angelegt: {backup_name}\n"
-        body += "\nMaunting Server Manager — Guardian Engine\n"
-
-        backup_html = (
-            f'<p style="margin:16px 0 0 0;font-size:13px;">Vor dem Eingriff wurde '
-            f'ein Backup angelegt: <strong>{EmailService.html_text(backup_name)}</strong></p>'
-            if backup_name else ""
+        fakt = (
+            f'Auf dem Server "{server_name}" gab es eine Störung ({incident_type}). '
+            f"Der KI-Assistent hat sie eigenständig bearbeitet. "
+            f"Ergebnis: {zustand}."
         )
-        nachricht = (
-            f'Auf dem Server <strong>"{EmailService.html_text(server_name)}"</strong> gab es '
-            f'eine Störung (<strong>{EmailService.html_text(incident_type)}</strong>).<br/>'
-            f'Der KI-Assistent hat sie eigenständig bearbeitet. '
-            f'Ergebnis: <strong>{zustand}</strong>.'
+        betreff, absaetze, punkte, schluss = EmailService._ai_mailtext(
+            mailtext, fakt=fakt, rueckfall=bericht
         )
-        html_body = EmailService._notification_email_html(
-            username,
-            titel,
-            nachricht,
-            EmailService.html_text(bericht) + backup_html,
+        subject = EmailService._ai_betreffzeile(titel, betreff or server_name)
+        fusszeile = (
+            f"Vor dem Eingriff wurde ein Backup angelegt: {backup_name}"
+            if backup_name else None
+        )
+        body = EmailService._ai_report_email_text(
+            username, absaetze, punkte, schluss, fusszeile
+        )
+        html_body = EmailService._ai_report_email_html(
+            username, titel, absaetze, punkte, schluss, fusszeile
         )
         return await EmailService.send_email(to, subject, body, html_body)
 
@@ -658,16 +704,16 @@ Der KI-Assistent hat sie eigenständig bearbeitet. Ergebnis: {zustand}.
         plan_text: str,
         geschafft: bool,
         bericht: str,
+        mailtext=None,
     ) -> bool:
         """Der Bericht ueber einen stehenden Auftrag, der faellig war.
 
         Dieselben zwei Regeln wie beim Heilungsbericht, aus denselben Gruenden:
 
-        Der Fliesstext stammt vom Modell und ist damit unvertrauenswuerdige
-        Eingabe — `html_text` maskiert ihn. Das gilt hier fuer **mehr** Felder
-        als dort: auch der Name der Aufgabe und der Plantext gehen letztlich auf
-        etwas zurueck, das ein Mensch in einen Chat getippt und ein Modell
-        umformuliert hat.
+        Jedes Feld ist unvertrauenswuerdige Eingabe und wird maskiert. Das gilt
+        hier fuer **mehr** Felder als dort: auch der Name der Aufgabe und der
+        Plantext gehen letztlich auf etwas zurueck, das ein Mensch in einen Chat
+        getippt und ein Modell umformuliert hat.
 
         Und die Ueberschrift kommt aus `geschafft`, einer Tatsache des Panels
         (dem Endzustand des Laufs), nicht aus der Selbsteinschaetzung des
@@ -677,66 +723,55 @@ Der KI-Assistent hat sie eigenständig bearbeitet. Ergebnis: {zustand}.
         titel = (
             "KI-Aufgabe erledigt" if geschafft else "KI-Aufgabe nicht abgeschlossen"
         )
-        subject = f"Maunting Server Manager — {titel}: {task_title}"
         zustand = "erledigt" if geschafft else "nicht abgeschlossen"
-        body = f"""Hallo {username},
-
-deine KI-Aufgabe "{task_title}" ({plan_text}) war fällig.
-Ergebnis: {zustand}.
-
-{bericht}
-
-Den vollständigen Verlauf findest du im KI-Chat des Panels.
-Maunting Server Manager
-"""
-        nachricht = (
-            f'Deine KI-Aufgabe <strong>"{EmailService.html_text(task_title)}"</strong> '
-            f'({EmailService.html_text(plan_text)}) war fällig.<br/>'
-            f'Ergebnis: <strong>{zustand}</strong>.'
+        fakt = (
+            f'Deine KI-Aufgabe "{task_title}" ({plan_text}) war fällig. '
+            f"Ergebnis: {zustand}."
         )
-        detail = EmailService.html_text(bericht) + (
-            '<p style="margin:16px 0 0 0;font-size:13px;">Den vollständigen '
-            'Verlauf findest du im KI-Chat des Panels.</p>'
+        betreff, absaetze, punkte, schluss = EmailService._ai_mailtext(
+            mailtext, fakt=fakt, rueckfall=bericht
         )
-        html_body = EmailService._notification_email_html(
-            username, titel, nachricht, detail
+        subject = EmailService._ai_betreffzeile(titel, betreff or task_title)
+        fusszeile = "Den vollständigen Verlauf findest du im KI-Chat des Panels."
+        body = EmailService._ai_report_email_text(
+            username, absaetze, punkte, schluss, fusszeile
+        )
+        html_body = EmailService._ai_report_email_html(
+            username, titel, absaetze, punkte, schluss, fusszeile
         )
         return await EmailService.send_email(to, subject, body, html_body)
 
     @staticmethod
-    async def send_ai_test_email(to: str, username: str) -> bool:
+    async def send_ai_test_email(to: str, username: str, *, mailtext=None) -> bool:
         """Die Mail, mit der sich der eingerichtete Versandweg nachpruefen laesst.
 
-        Kein Fremdtext darin — deshalb als einzige der KI-Mails ohne jede
-        Maskierung ausser der, die die Vorlage ohnehin auf `username` anwendet.
+        Auch sie schreibt die KI selbst — der Betreiber hat ausdruecklich
+        verlangt, dass hier nichts Vorgefertigtes mehr steht. Der feste Text
+        bleibt trotzdem im Code, und das ist bei dieser Mail wichtiger als bei
+        den anderen beiden: sie ist das Messgeraet fuer den Versandweg. Eine
+        Testmail, die ausgerechnet dann ausbleibt, wenn das Modell klemmt,
+        misst das Falsche und laesst den Betreiber am Mailversand zweifeln.
 
         Sie geht ueber `send_email` und damit ueber genau den Weg, den auch ein
         Aufgaben- oder Heilungsbericht nimmt. Das ist der Zweck: getestet wird
         nicht irgendein Versand, sondern der, auf den es spaeter ankommt.
         """
         titel = "Testmail vom KI-Assistenten"
-        subject = f"Maunting Server Manager — {titel}"
-        body = f"""Hallo {username},
-
-diese Mail hat der KI-Assistent auf deine Bitte hin verschickt.
-
-Wenn du sie liest, funktioniert der im Panel eingerichtete Versandweg —
-und damit auch die Berichte, die dir die KI künftig zu deinen Aufgaben
-und zu behobenen Störungen schickt.
-
-Maunting Server Manager
-"""
-        nachricht = (
-            'Diese Mail hat der KI-Assistent auf deine Bitte hin verschickt.'
+        fakt = "Diese Mail hat der KI-Assistent auf deine Bitte hin verschickt."
+        rueckfall = (
+            "Wenn du sie liest, funktioniert der im Panel eingerichtete "
+            "Versandweg — und damit auch die Berichte, die dir die KI künftig "
+            "zu deinen Aufgaben und zu behobenen Störungen schickt."
         )
-        detail = (
-            '<p style="margin:0;">Wenn du sie liest, funktioniert der im Panel '
-            'eingerichtete Versandweg — und damit auch die Berichte, die dir die '
-            'KI künftig zu deinen Aufgaben und zu behobenen Störungen '
-            'schickt.</p>'
+        betreff, absaetze, punkte, schluss = EmailService._ai_mailtext(
+            mailtext, fakt=fakt, rueckfall=rueckfall
         )
-        html_body = EmailService._notification_email_html(
-            username, titel, nachricht, detail
+        subject = EmailService._ai_betreffzeile(titel, betreff)
+        body = EmailService._ai_report_email_text(
+            username, absaetze, punkte, schluss, None
+        )
+        html_body = EmailService._ai_report_email_html(
+            username, titel, absaetze, punkte, schluss, None
         )
         return await EmailService.send_email(to, subject, body, html_body)
 

@@ -188,6 +188,8 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
         )
 
     _zustellen(
+        user_id=int(user.id),
+        provider_id=run.provider_id,
         to=adresse,
         username=str(user.username),
         server_name=str(server.name or ""),
@@ -198,20 +200,53 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     )
 
 
-def _zustellen(**felder) -> None:
+def _zustellen(*, user_id: int, provider_id: int | None = None, **felder) -> None:
     """Waehlt die Mail aus; den Versand macht `ai_mail`.
 
-    Bleibt als eigene Funktion bestehen, obwohl sie nur noch drei Zeilen hat:
-    sie ist die Stelle, an der die Tests den Versand abfangen, und sie ist das
-    einzige Stueck, das **guardianspezifisch** ist — welche der `send_*`-
-    Funktionen es sein soll. Thread, Ereignisschleife und die Auswertung des
-    Rueckgabewerts sind an allen drei Anlaessen dieselben und stehen deshalb
-    einmal in `ai_mail.zustellen`.
+    Bleibt als eigene Funktion bestehen: sie ist die Stelle, an der die Tests
+    den Versand abfangen, und sie ist das einzige Stueck, das
+    **guardianspezifisch** ist — welche der `send_*`-Funktionen es sein soll.
+    Thread, Ereignisschleife und die Auswertung des Rueckgabewerts sind an
+    allen drei Anlaessen dieselben und stehen deshalb einmal in
+    `ai_mail.zustellen`.
+
+    Der Verfassungsschritt steht **innerhalb** der Koroutine: `bericht_versenden`
+    ist synchron und laeuft je nach Weg auf der Ereignisschleife der Anwendung,
+    und `ai_mail.zustellen` macht ohnehin einen eigenen Thread mit eigener
+    Schleife auf. Ein Modellaufruf davor haette auf der falschen gehangen.
     """
-    from services import ai_mail
+    from services import ai_mail, ai_mail_text
     from services.email_service import EmailService
 
-    ai_mail.zustellen(
-        lambda: EmailService.send_ai_healing_report(**felder),
-        name="ai-guardian-report",
-    )
+    async def _mail() -> bool:
+        text = await ai_mail_text.verfassen(
+            user_id=user_id,
+            provider_id=provider_id,
+            anlass="ai-guardian-report",
+            fakten=_fakten(felder),
+        )
+        return await EmailService.send_ai_healing_report(**felder, mailtext=text)
+
+    ai_mail.zustellen(_mail, name="ai-guardian-report")
+
+
+def _fakten(felder: dict) -> str:
+    """Was das Modell ueber diese Mail wissen muss — ohne die Adresse.
+
+    Die Adresse steht eine Ebene hoeher in denselben Feldern und bleibt hier
+    ausdruecklich weg. Wer sie gar nicht erst zeigt, muss sie spaeter nicht aus
+    dem Text herausfiltern — und der Empfaenger kommt in jedem Fall aus
+    `ai_mail.empfaenger`, nie aus etwas, das ein Modell geschrieben hat.
+    """
+    zustand = "behoben" if felder.get("geheilt") else "nicht behoben"
+    zeilen = [
+        "Anlass: die Guardian-Engine hat eine Stoerung gemeldet, "
+        "der Assistent hat sie eigenstaendig bearbeitet.",
+        f"Server: {felder.get('server_name') or '(ohne Namen)'}",
+        f"Art der Stoerung: {felder.get('incident_type') or 'unbekannt'}",
+        f"Ergebnis laut Panel: {zustand}",
+    ]
+    if felder.get("backup_name"):
+        zeilen.append(f"Vor dem Eingriff angelegtes Backup: {felder['backup_name']}")
+    zeilen.append(f"Abschlussbericht des Laufs:\n{felder.get('bericht') or ''}")
+    return "\n".join(zeilen)

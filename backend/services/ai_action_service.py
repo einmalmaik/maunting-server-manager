@@ -2170,10 +2170,37 @@ def _execute_send_test_email(db: Session, *, user: User) -> dict:
 
     verlauf.append(jetzt)
     _TESTMAILS[user.id] = verlauf
-    ai_mail.zustellen(
-        lambda: EmailService.send_ai_test_email(adresse, str(user.username)),
-        name="ai-test-email",
-    )
+
+    # Auch die Testmail schreibt die KI selbst — der Betreiber hat
+    # ausdruecklich verlangt, dass hier nichts Vorgefertigtes mehr steht. Der
+    # Verfassungsschritt liegt **in** der Koroutine, weil `ai_mail.zustellen`
+    # einen eigenen Thread mit eigener Ereignisschleife aufmacht; davor
+    # aufgerufen haette er auf der falschen Schleife gehangen. Liefert er
+    # nichts, geht der feste Text hinaus: diese Mail ist das Messgeraet fuer den
+    # Versandweg und darf nicht ausgerechnet dann ausbleiben, wenn das Modell
+    # klemmt.
+    benutzer_id = int(user.id)
+    name = str(user.username)
+
+    async def _mail() -> bool:
+        from services import ai_mail_text
+
+        text = await ai_mail_text.verfassen(
+            user_id=benutzer_id,
+            anlass="ai-test-email",
+            fakten=(
+                "Anlass: der Benutzer hat im Chat um eine Testmail gebeten, "
+                "um den eingerichteten Versandweg des Panels zu pruefen.\n"
+                "Es ist nichts passiert, worueber zu berichten waere — die Mail "
+                "beweist sich selbst, indem sie ankommt.\n"
+                "Sag ihm in zwei bis drei Saetzen, dass der Versandweg damit "
+                "nachgewiesen ist und dass auch die Berichte zu seinen Aufgaben "
+                "und zu behobenen Stoerungen diesen Weg nehmen."
+            ),
+        )
+        return await EmailService.send_ai_test_email(adresse, name, mailtext=text)
+
+    ai_mail.zustellen(_mail, name="ai-test-email")
     return {
         "sent": True,
         "recipient": maskiere_email(adresse),

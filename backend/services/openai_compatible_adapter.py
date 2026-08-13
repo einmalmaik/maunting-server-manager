@@ -362,6 +362,7 @@ async def stream_chat_completion(
     messages: list[dict[str, Any]],
     usage: StreamUsage,
     tools: list[dict] | None = None,
+    tool_choice: str | dict | None = None,
     reasoning: bool = False,
     reasoning_effort: str | None = None,
     cache_marke: bool = False,
@@ -372,6 +373,13 @@ async def stream_chat_completion(
     Tool-Calls werden nur strukturell normalisiert. Ob ein Tool erlaubt ist
     und ob daraus lediglich ein Vorschlag entsteht, entscheidet die interne
     AI-Aktionsschicht; Providerdaten loesen hier niemals Aktionen aus.
+
+    ``tool_choice`` bleibt ohne Angabe ``"auto"`` — so, wie es hier fest stand,
+    seit es Werkzeuge gibt. Der Parameter existiert fuer den einen Fall, in dem
+    „das Modell entscheidet“ die falsche Vorgabe ist: `ai_mail_text` will keine
+    Prosa, sondern ein ausgefuelltes Formular, und reicht deshalb ein einzelnes
+    Werkzeug samt Zwang darauf herein. Diese Schicht prueft den Wert nicht — sie
+    sendet ihn, wie sie ``tools`` sendet.
 
     ``reasoning`` steuert das Nachdenken. Der Schalter ist absichtlich
     generisch: gesendet wird ``{"reasoning": {"enabled": ...}}``, gelesen werden
@@ -450,7 +458,11 @@ async def stream_chat_completion(
     }
     if tools:
         request_body["tools"] = tools
-        request_body["tool_choice"] = "auto"
+        # ``"auto"`` bleibt die Vorgabe und damit das Verhalten jedes bisherigen
+        # Aufrufers: im Chat entscheidet das Modell, ob es ein Werkzeug braucht.
+        # Erzwungen wird nur dort, wo der Aufruf gar keine Antwort in Prosa
+        # will, sondern ein ausgefuelltes Formular — siehe `ai_mail_text`.
+        request_body["tool_choice"] = tool_choice or "auto"
     # Immer setzen, nie weglassen: "nichts senden" heisst beim Anbieter nicht
     # "aus", sondern "nimm deinen Default" — und der ist bei den meisten
     # aktuellen Modellen an.

@@ -69,6 +69,20 @@ braucht Netz; sie gehoert nicht in die normale Suite.
 
 Das Ergebnis landet als JSON unter ``backend/logs/ai-benchmark/`` (gitignoriert)
 und wird beim naechsten Lauf mit anderem ``MSM_BENCH_LABEL`` vergleichbar.
+
+**Die zweite Messung: Gleichzeitigkeit.**
+
+    cd backend
+    MSM_BENCH_PARALLEL=1,10,50,200,1000 \\
+    python -m pytest tests/test_ai_benchmark_live.py -o addopts="" -q -s
+
+Sie braucht **keinen** Schluessel und kein Netz und laeuft unabhaengig von der
+Messung oben: der Anbieter ist eine Attrappe. Das ist keine Sparsamkeit,
+sondern die Voraussetzung — mit echtem Anbieter waere die Zahl seine
+Warteschlange und nicht unsere Grenze. Gefragt wird: wieviele Laeufe kommen je
+Stufe durch, woran scheitern die uebrigen, wie lange steht dabei die
+Ereignisschleife, und **welche Grenze greift zuerst**. Einzelheiten stehen am
+Anfang des Abschnitts "Gleichzeitigkeit" weiter unten.
 """
 
 from __future__ import annotations
@@ -155,16 +169,52 @@ BENCH_NUR = {
 WAECHTER_TAKT = 0.02
 WAECHTER_SCHWELLE = 0.05
 
-pytestmark = pytest.mark.skipif(
+#: Wieviele Laeufe gleichzeitig, kommagetrennt: ``MSM_BENCH_PARALLEL=1,10,50,200``.
+#: Leer heisst: die Gleichzeitigkeitsmessung wird uebersprungen.
+#:
+#: **Eine eigene Variable und nicht ``MSM_BENCH_AI_KEY``**, weil es eine andere
+#: Messung ist. Der Szenariendurchlauf oben fragt den Anbieter etwas und misst,
+#: was der Mensch davor wartet — dafuer braucht er ein echtes Modell. Diese
+#: Messung fragt, **wo MSM selbst kippt**, wenn viele Laeufe gleichzeitig
+#: arbeiten. Ein echter Anbieter waere dafuer nicht nur teuer (tausend Antworten
+#: kosten Geld), er waere schaedlich: die Zahl, die dabei herauskaeme, waere
+#: seine Warteschlange und sein Kontingent, nicht unsere Grenze.
+BENCH_PARALLEL_STUFEN = [
+    int(stufe.strip())
+    for stufe in os.environ.get("MSM_BENCH_PARALLEL", "").split(",")
+    if stufe.strip().isdigit() and int(stufe.strip()) > 0
+]
+#: Wie lange der gefaelschte Anbieter je Runde braucht, in Sekunden.
+#:
+#: Ohne Wartezeit waere die Messung wertlos: ein Anbieter, der sofort antwortet,
+#: laesst die Laeufe hintereinander durchlaufen statt nebeneinander, und
+#: "gleichzeitig" waere nur ein Wort in der Ueberschrift. Mit einer Wartezeit
+#: haengen alle Laeufe zur selben Zeit im ``await`` — genau der Zustand, den der
+#: Betreiber fuerchtet.
+BENCH_PARALLEL_LATENZ = float(os.environ.get("MSM_BENCH_PARALLEL_LATENZ", "0.30"))
+#: Reissleine je Einzellauf der Gleichzeitigkeitsmessung. Deutlich groesser als
+#: die Latenz mal Runden: ein Lauf, der wartet, weil tausend andere die Schleife
+#: belegen, ist kein Ausfall, sondern der gesuchte Befund. Erst wenn er gar nicht
+#: mehr drankommt, ist er einer.
+BENCH_PARALLEL_TIMEOUT = float(os.environ.get("MSM_BENCH_PARALLEL_TIMEOUT", "300"))
+
+NUR_MIT_SCHLUESSEL = pytest.mark.skipif(
     not BENCH_KEY,
     reason="MSM_BENCH_AI_KEY nicht gesetzt — Benchmark uebersprungen",
+)
+NUR_MIT_STUFEN = pytest.mark.skipif(
+    not BENCH_PARALLEL_STUFEN,
+    reason="MSM_BENCH_PARALLEL nicht gesetzt — Lastmessung uebersprungen",
 )
 
 
 # ── Der Waechter ─────────────────────────────────────────────────────────
 
 
-async def _waechter(blockaden: list[tuple[float, float]]) -> None:
+async def _waechter(
+    blockaden: list[tuple[float, float]],
+    beobachter: Callable[[], None] | None = None,
+) -> None:
     """Merkt sich, wann die Ereignisschleife nicht zur Verfuegung stand.
 
     Eine Koroutine, die 20 ms schlafen will und erst nach 3 Sekunden wieder
@@ -176,10 +226,19 @@ async def _waechter(blockaden: list[tuple[float, float]]) -> None:
 
     Aufgezeichnet wird das Fenster, nicht nur die Dauer. Damit laesst sich
     spaeter fuer jedes Ereignis ausrechnen, wann es fruehestens sichtbar war.
+
+    ``beobachter`` ist ein zweiter Blick im selben Takt — die Lastmessung
+    braucht den Hoechststand des Verbindungspools, und der ist nur zu sehen,
+    solange er hoch ist. Als Parameter und nicht als eigene Schleife: eine
+    zweite Aufgabe, die im selben Takt schlaeft, waere ein zweiter Messfuehler
+    fuer dieselbe Groesse und wuerde bei jeder Blockade eine andere Zahl
+    liefern als dieser hier.
     """
     letzte = perf_counter()
     while True:
         await asyncio.sleep(WAECHTER_TAKT)
+        if beobachter is not None:
+            beobachter()
         jetzt = perf_counter()
         verzug = (jetzt - letzte) - WAECHTER_TAKT
         if verzug >= WAECHTER_SCHWELLE:
@@ -902,6 +961,7 @@ def _treffer(nach_szenario: dict[str, list[Messung]]) -> tuple[int, int, list[st
 # ── Der Lauf ─────────────────────────────────────────────────────────────
 
 
+@NUR_MIT_SCHLUESSEL
 @pytest.mark.asyncio
 async def test_ai_benchmark(
     db: Session, owner_user: User, monkeypatch: pytest.MonkeyPatch
@@ -1034,3 +1094,828 @@ async def test_ai_benchmark(
     # soll er nur, wenn gar nichts gemessen werden konnte: dann stimmt etwas am
     # Aufbau nicht, und eine Tabelle voller Ausfaelle waere keine Grundlage.
     assert alle, "Kein einziger Lauf ist durchgekommen — Aufbau pruefen"
+
+
+# =========================================================================
+# Gleichzeitigkeit — wo MSM kippt, wenn viele Laeufe zugleich arbeiten
+# =========================================================================
+#
+# Der Anlass steht in einer Frage des Betreibers: was passiert, wenn 10.000
+# Auftraege zur selben Sekunde faellig werden? Die Szenarienmessung oben kann
+# das nicht beantworten — sie faehrt einen Lauf nach dem anderen und misst den
+# Anbieter mit. Hier laeuft es umgekehrt: **kein** echter Anbieter, dafuer
+# beliebig viele Laeufe zur selben Zeit.
+#
+# Was dabei gemessen wird, ist bewusst nicht "wie schnell ist die KI". Gemessen
+# wird, **welche Grenze zuerst zuschlaegt** und bei welcher Stufe:
+#
+#   * das Kontingent je Benutzer (`ai_limit_service.concurrent_operations`,
+#     geprueft in `ai_usage_service.reserve_ai_usage`),
+#   * der Verbindungspool der Datenbank (`database.py`: pool_size=10,
+#     max_overflow=20, pool_timeout=60 — nur bei PostgreSQL),
+#   * die Kanalgrenze des Vermittlers (`ai_run_broker.MAX_KANAELE` = 256),
+#   * die Ereignisschleife selbst.
+#
+# **Was diese Messung nicht sehen kann, und warum das im Bericht stehen muss.**
+# Die Testsuite haengt an einer SQLite-Datenbank im Arbeitsspeicher mit einer
+# einzigen geteilten Verbindung (`conftest.py`, StaticPool). Ein erschoepfter
+# Verbindungspool ist hier per Konstruktion unmoeglich, und `with_for_update`
+# in `reserve_ai_usage` ist unter SQLite eine leere Anweisung. Beide Grenzen
+# sind damit **ungemessen**, nicht etwa unproblematisch. Der Bericht sagt das
+# ausdruecklich, statt eine gruene Zeile fuer eine Zusage auszugeben.
+
+import logging as _logging
+import shutil
+import tempfile
+
+import database as _database
+from sqlalchemy import create_engine, event as _sa_event
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as SaTimeoutError
+
+from models.ai_run import BEENDET as LAUF_BEENDET
+from services.ai_run_broker import MAX_KANAELE, MAX_RUECKSTAU
+from services.openai_compatible_adapter import ProviderToolCall, StreamChunk
+
+#: Die Poolwerte aus ``database.py`` — hier woertlich nachgebaut, damit die
+#: Messung dieselbe Grenze trifft wie der Betrieb.
+POOL_SIZE = 10
+POOL_MAX_OVERFLOW = 20
+POOL_TIMEOUT = 60.0
+
+
+#: Der Auftrag jedes Lastlaufs. Bewusst einer mit **einer** Werkzeugrunde: eine
+#: reine Textantwort wuerde den Werkzeugpfad ueberspringen, und genau der ist
+#: der Teil, der Datenbank und Ereignisschleife anfasst.
+PARALLEL_AUFTRAG = "Welche Server habe ich denn?"
+
+
+def _gefaelschter_strom(latenz: float):
+    """Ein Anbieter, der sich verhaelt wie einer, aber nichts kostet.
+
+    Zwei Runden, weil ein Lauf mit einer Runde die Haelfte des Pfades auslaesst:
+    zuerst ein Werkzeugaufruf, danach Text. Damit laeuft in jedem Lastlauf
+    dasselbe wie im Betrieb — Werkzeugausfuehrung, Datenbankzugriff,
+    Ereignisse an den Vermittler, Abrechnung.
+
+    Die Wartezeit ist **echtes** ``await`` und kein ``sleep``: ein Anbieter
+    blockiert die Ereignisschleife nicht, er laesst warten. Wuerde hier
+    synchron geschlafen, waere jede gemessene Blockade eine des Messaufbaus.
+    """
+
+    async def _strom(
+        _client, *, provider, api_key, messages, usage, tools=None,
+        reasoning=False, reasoning_effort=None, cache_marke=False,
+    ):
+        del provider, api_key, reasoning, reasoning_effort, cache_marke
+        await asyncio.sleep(latenz)
+        letzte = messages[-1] if messages else {}
+        if tools and letzte.get("role") != "tool":
+            # Erste Runde: das Modell will ein Werkzeug.
+            usage.total_tokens = 900
+            usage.tool_calls = [
+                ProviderToolCall(
+                    id=f"call_{uuid4().hex[:12]}",
+                    name="list_my_servers",
+                    arguments={},
+                )
+            ]
+            return
+        for stueck in ("Ich habe nachgesehen. ", "Es sieht alles gut aus. ",
+                       "Sag Bescheid, wenn du mehr brauchst."):
+            await asyncio.sleep(latenz / 6)
+            usage.output_chars += len(stueck)
+            yield StreamChunk("content", stueck)
+        usage.total_tokens = 1200
+
+    return _strom
+
+
+class _Kanalzaehler(_logging.Handler):
+    """Zaehlt, wie oft der Vermittler einen laufenden Kanal wegwerfen musste.
+
+    Der Vermittler meldet das als Warnung und macht danach weiter — der Lauf
+    laeuft, aber niemand kann ihm mehr zusehen. Fuer den Benutzer ist das ein
+    Chat, der mitten im Satz stehenbleibt und erst nach dem Neuladen wieder
+    etwas zeigt. Ohne Zaehler waere dieser Ausfall in keiner Zahl sichtbar: der
+    Lauf selbst gilt als gelungen.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=_logging.WARNING)
+        self.verdraengt = 0
+
+    def emit(self, record: _logging.LogRecord) -> None:
+        if "Kanalgrenze" in str(record.msg):
+            self.verdraengt += 1
+
+
+class _Fehlerlupe(_logging.Handler):
+    """Faengt die **echte** Ausnahme hinter einem gescheiterten Lauf ein.
+
+    ``segment_ausfuehren`` behandelt seine Fehler selbst: es protokolliert
+    ``error=InterfaceError`` und beendet den Lauf mit ``AI_STREAM_FAILED``.
+    Nach aussen bleibt davon ein Code uebrig, der fuer jede Ursache derselbe
+    ist — Datenbank, Werkzeug, Programmierfehler. Eine Lastmessung, die nur
+    "12 x AI_STREAM_FAILED" melden kann, sagt dem Betreiber nichts darueber,
+    **woran** es lag, und genau danach hat er gefragt.
+
+    Der Griff nach ``sys.exc_info()`` funktioniert, weil die Protokollzeile
+    innerhalb des ``except``-Blocks steht: die Ausnahme ist in diesem Moment
+    noch die aktive. Das ist ein Mitlesen und kein Eingriff — der Lauf merkt
+    nichts davon.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=_logging.WARNING)
+        self.ursachen: dict[str, int] = {}
+
+    def emit(self, record: _logging.LogRecord) -> None:
+        if "fehlgeschlagen" not in str(record.msg):
+            return
+        typ, wert, _ = sys.exc_info()
+        if typ is None:
+            return
+        text = f"{typ.__name__}: {str(wert)[:120]}"
+        self.ursachen[text] = self.ursachen.get(text, 0) + 1
+
+
+@dataclass
+class Lastlauf:
+    """Ein einzelner Lauf innerhalb einer Stufe."""
+
+    ok: bool = False
+    grund: str = ""
+    anlauf: float = 0.0
+    dauer: float = 0.0
+    status: str = ""
+    stop_reason: str = ""
+
+
+@dataclass
+class Stufe:
+    """Was eine Stufe der Lastmessung ergeben hat."""
+
+    laeufe: int
+    ergebnisse: list[Lastlauf] = field(default_factory=list)
+    wanduhr: float = 0.0
+    anlauf_summe: float = 0.0
+    loop_block_max: float = 0.0
+    loop_block_summe: float = 0.0
+    loop_block_anzahl: int = 0
+    kanal_verdraengt: int = 0
+    kanaele_am_ende: int = 0
+    #: Die echten Ausnahmen hinter den Ausfaellen, gezaehlt.
+    ursachen: dict[str, int] = field(default_factory=dict)
+    #: Wieviele Datenbankverbindungen zur selben Zeit ausgeliehen waren.
+    pool_hoechststand: int = 0
+
+    @property
+    def gelungen(self) -> int:
+        return sum(1 for e in self.ergebnisse if e.ok)
+
+    @property
+    def gescheitert(self) -> int:
+        return len(self.ergebnisse) - self.gelungen
+
+    @property
+    def gruende(self) -> dict[str, int]:
+        zaehler: dict[str, int] = {}
+        for eintrag in self.ergebnisse:
+            if eintrag.ok:
+                continue
+            zaehler[eintrag.grund] = zaehler.get(eintrag.grund, 0) + 1
+        return dict(sorted(zaehler.items(), key=lambda paar: -paar[1]))
+
+    def als_dict(self) -> dict:
+        dauern = [e.dauer for e in self.ergebnisse]
+        anlaeufe = [e.anlauf for e in self.ergebnisse]
+        return {
+            "laeufe": self.laeufe,
+            "gelungen": self.gelungen,
+            "gescheitert": self.gescheitert,
+            "gruende": self.gruende,
+            "wanduhr": round(self.wanduhr, 3),
+            "dauer_median": round(_med(dauern), 3),
+            "dauer_p90": round(_p90(dauern), 3),
+            "dauer_max": round(max(dauern, default=0.0), 3),
+            "anlauf_median": round(_med(anlaeufe), 4),
+            "anlauf_summe": round(self.anlauf_summe, 3),
+            "loop_block_max": round(self.loop_block_max, 3),
+            "loop_block_summe": round(self.loop_block_summe, 3),
+            "loop_block_anzahl": self.loop_block_anzahl,
+            "kanal_verdraengt": self.kanal_verdraengt,
+            "kanaele_am_ende": self.kanaele_am_ende,
+            "pool_hoechststand": self.pool_hoechststand,
+            "ursachen": self.ursachen,
+        }
+
+
+def _med(werte: list[float]) -> float:
+    return statistics.median(werte) if werte else 0.0
+
+
+def _p90(werte: list[float]) -> float:
+    """Das schlechteste Zehntel — die Zahl, die der unglueckliche Benutzer sieht.
+
+    Der Median sagt, wie es den meisten ging. Er ist genau deshalb die falsche
+    Zahl fuer eine Lastfrage: bei 1000 Laeufen sind 100 schlechter als er, und
+    diese 100 sind die, die sich beschweren.
+    """
+    if not werte:
+        return 0.0
+    if len(werte) < 10:
+        return max(werte)
+    return statistics.quantiles(werte, n=10)[-1]
+
+
+def _lastdatenbank(ordner: Path):
+    """Eine eigene Datenbank fuer die Lastmessung — mit **echtem** Pool.
+
+    **Warum das sein muss.** Die Testsuite haengt an einer SQLite im
+    Arbeitsspeicher, deren ``StaticPool`` allen Sitzungen *dieselbe* Verbindung
+    gibt. Der erste Messversuch scheiterte daran sichtbar: ab zehn
+    gleichzeitigen Laeufen meldete jeder fuenfte einen
+    ``sqlite3.InterfaceError: bad parameter or other API misuse`` — zwei
+    Sitzungen, ein Cursor. Das ist kein Befund ueber MSM, sondern einer ueber
+    den Messaufbau, und ``ai_stream_service._leseplaetze`` beschreibt genau
+    diese Eigenschaft bereits im Quelltext.
+
+    Eine Messung, deren Ausfaelle vom Messgeraet stammen, beantwortet die
+    gestellte Frage nicht. Deshalb bekommt die Lastmessung eine Datei-Datenbank
+    mit den Poolwerten aus ``database.py`` — jede Sitzung ihre eigene
+    Verbindung, ``pool_size`` und ``max_overflow`` als echte Schranke. Damit
+    ist die Frage "greift der Verbindungspool zuerst?" ueberhaupt erst
+    stellbar.
+
+    Was das **nicht** herstellt: PostgreSQL. SQLite kennt keinen echten
+    Schreibnebenlauf, ``with_for_update`` ist eine leere Anweisung, und
+    ``_leseplaetze`` liefert unter SQLite bewusst 1 statt 8. Der Bericht sagt
+    das dazu, statt die Zahlen fuer mehr auszugeben, als sie sind.
+    """
+    pfad = ordner / "last.sqlite"
+    engine = create_engine(
+        f"sqlite:///{pfad.as_posix()}",
+        connect_args={"check_same_thread": False, "timeout": 30},
+        pool_size=POOL_SIZE,
+        max_overflow=POOL_MAX_OVERFLOW,
+        pool_timeout=POOL_TIMEOUT,
+        pool_pre_ping=True,
+    )
+
+    @_sa_event.listens_for(engine, "connect")
+    def _pragmas(verbindung, _record) -> None:
+        # WAL, damit ein Leser einen Schreiber nicht aussperrt — sonst misst
+        # die Stufe die Sperrstrategie von SQLite und nicht den KI-Pfad.
+        verbindung.execute("PRAGMA journal_mode=WAL")
+        verbindung.execute("PRAGMA busy_timeout=30000")
+        verbindung.execute("PRAGMA foreign_keys=ON")
+
+    _database.Base.metadata.create_all(engine)
+    return engine
+
+
+def _lastbenutzer(db: Session, anzahl: int) -> list[int]:
+    """Ein eigener Benutzer je gleichzeitigem Lauf.
+
+    Nicht ein Benutzer mit vielen Laeufen, und das ist keine Bequemlichkeit,
+    sondern die Bauform des Produkts: ``ai_conversations.user_id`` ist
+    eindeutig, ein Benutzer hat genau eine Unterhaltung, und ``lauf_beginnen``
+    loest ueber ``vorgaenger_abloesen`` jeden noch laufenden Lauf derselben
+    Unterhaltung ab. Zehn gleichzeitige Laeufe eines Benutzers sind damit **per
+    Konstruktion** neun abgeloeste und einer — das misst nicht Last, sondern
+    die Abloeseregel. Die Frage des Betreibers ("10.000 gleichzeitig faellige
+    Auftraege") meint ohnehin viele Benutzer.
+
+    Betreiberrechte, aus demselben Grund wie beim Szenariendurchlauf: gemessen
+    werden soll die Maschine und nicht die Rechteverwaltung. Ein an einer
+    fehlenden Berechtigung gescheitertes Werkzeug waere ein kuerzerer Lauf und
+    damit eine geschoente Zahl.
+    """
+    from services.auth_service import AuthService
+
+    ids: list[int] = []
+    vorhandene = {
+        name: uid
+        for name, uid in db.query(User.username, User.id)
+        .filter(User.username.like("last%"))
+        .all()
+    }
+    for i in range(anzahl):
+        name = f"last{i:05d}"
+        if name in vorhandene:
+            ids.append(vorhandene[name])
+            continue
+        benutzer = AuthService.create_user(
+            db, name, f"{name}@bench.invalid", "LastPass123!"
+        )
+        benutzer.email_verified = True
+        benutzer.is_owner = True
+        db.flush()
+        ids.append(benutzer.id)
+    db.commit()
+    return ids
+
+
+def _grund_aus_fehler(code: str | None, exc: BaseException | None) -> str:
+    """Woran ein Lauf gescheitert ist — in den Worten der Frage, nicht des Codes.
+
+    Der Betreiber will nicht wissen, dass eine ``AiQuotaExceeded`` flog, sondern
+    ob ihn **das Kontingent**, **die Datenbank**, **eine Sperre** oder ein
+    schlichter Fehler ausgebremst hat. Genau diese vier Toepfe hat er benannt,
+    und die Tabelle zaehlt in sie hinein.
+    """
+    if code:
+        if code.startswith("AI_QUOTA"):
+            return "kontingent"
+        if code == "AI_REQUEST_CONFLICT":
+            return "nebenlaeufersperre"
+        if code in {"AI_CREDENTIAL_UNAVAILABLE", "AI_PROVIDER_KEY_MISSING"}:
+            return "schluessel"
+        if code == "AI_PREPARATION_FAILED":
+            return "vorbereitung"
+        return code.lower()
+    if isinstance(exc, asyncio.TimeoutError):
+        return "zeitgrenze"
+    if isinstance(exc, SaTimeoutError):
+        return "datenbankverbindung"
+    if isinstance(exc, OperationalError):
+        return "datenbank"
+    if exc is not None:
+        return f"ausnahme:{type(exc).__name__}"
+    return "unbekannt"
+
+
+async def _ein_lastlauf(
+    *, user_id: int, provider_id: int, client: httpx.AsyncClient
+) -> Lastlauf:
+    """Ein vollstaendiger Lauf, wie ihn ``routers/ai_chat`` ausloest.
+
+    Mit **eigener** Datenbanksitzung je Lauf und nicht mit der des Tests: so
+    macht es der Request auch (``get_db``), und die Frage nach dem
+    Verbindungspool laesst sich anders gar nicht stellen. Die Sitzung wird
+    geschlossen, bevor der Lauf zu arbeiten beginnt — genau wie im Betrieb, wo
+    der Request an dieser Stelle endet.
+    """
+    ergebnis = Lastlauf()
+    beginn = perf_counter()
+    run_id: str | None = None
+    fehler: tuple[str, str] | None = None
+    try:
+        with SessionLocal() as db:
+            benutzer = db.get(User, user_id)
+            anbieter = db.get(AiProvider, provider_id)
+            unterhaltung = ai_chat_service.get_or_create_primary_conversation(
+                db, benutzer
+            )
+            db.commit()
+            run, fehler = ai_stream_service.lauf_beginnen(
+                db,
+                user=benutzer,
+                conversation=unterhaltung,
+                provider=anbieter,
+                request_id=uuid4(),
+                content=PARALLEL_AUFTRAG,
+                reasoning=False,
+                reasoning_effort=None,
+                context_chars=None,
+            )
+            run_id = run.id if run is not None else None
+    except Exception as exc:  # noqa: BLE001 — ein Ausfall ist ein Messergebnis
+        ergebnis.anlauf = perf_counter() - beginn
+        ergebnis.dauer = ergebnis.anlauf
+        ergebnis.grund = _grund_aus_fehler(None, exc)
+        return ergebnis
+    ergebnis.anlauf = perf_counter() - beginn
+    if run_id is None:
+        ergebnis.dauer = ergebnis.anlauf
+        ergebnis.grund = _grund_aus_fehler(fehler[0] if fehler else None, None)
+        return ergebnis
+
+    ai_run_broker.eroeffnen(run_id)
+    try:
+        await asyncio.wait_for(
+            ai_stream_service.segment_ausfuehren(run_id, client=client),
+            timeout=BENCH_PARALLEL_TIMEOUT,
+        )
+    except Exception as exc:  # noqa: BLE001
+        ergebnis.dauer = perf_counter() - beginn
+        ergebnis.grund = _grund_aus_fehler(None, exc)
+        return ergebnis
+    ergebnis.dauer = perf_counter() - beginn
+
+    # Das Urteil kommt aus der Datenbank und nicht daraus, dass die Koroutine
+    # zurueckkam. `segment_ausfuehren` faengt seine eigenen Fehler ab und endet
+    # brav — ein Lauf, der an einem Kontingent gescheitert ist, sieht von aussen
+    # aus wie einer, der gearbeitet hat. Der Unterschied steht in `status`.
+    from models import AiRun
+
+    with SessionLocal() as frisch:
+        lauf = frisch.get(AiRun, run_id)
+        if lauf is None:
+            ergebnis.grund = "lauf_verschwunden"
+            return ergebnis
+        ergebnis.status = lauf.status or ""
+        ergebnis.stop_reason = lauf.stop_reason or ""
+    if ergebnis.status == "completed":
+        ergebnis.ok = True
+        return ergebnis
+    if ergebnis.status not in LAUF_BEENDET:
+        ergebnis.grund = f"haengt:{ergebnis.status}"
+        return ergebnis
+    ergebnis.grund = _grund_aus_fehler(ergebnis.stop_reason.split(":")[0], None)
+    return ergebnis
+
+
+async def _eine_stufe(
+    *, laeufe: int, benutzer_ids: list[int], provider_id: int,
+    client: httpx.AsyncClient, zaehler: _Kanalzaehler, lupe: _Fehlerlupe,
+    pool,
+) -> Stufe:
+    """Eine Stufe: ``laeufe`` Laeufe, alle zur selben Zeit losgelassen."""
+    stufe = Stufe(laeufe=laeufe)
+    ai_run_broker.zuruecksetzen_fuer_tests()
+    zaehler.verdraengt = 0
+    lupe.ursachen = {}
+
+    hoechststand = [0]
+
+    def _pool_ablesen() -> None:
+        hoechststand[0] = max(hoechststand[0], pool.checkedout())
+
+    blockaden: list[tuple[float, float]] = []
+    waechter = asyncio.create_task(_waechter(blockaden, _pool_ablesen))
+    # Ein Takt Vorlauf, damit der Waechter seine erste Messung nicht als
+    # Blockade des Starts verbucht.
+    await asyncio.sleep(WAECHTER_TAKT * 2)
+
+    t0 = perf_counter()
+    ergebnisse = await asyncio.gather(
+        *(
+            _ein_lastlauf(
+                user_id=benutzer_ids[i], provider_id=provider_id, client=client
+            )
+            for i in range(laeufe)
+        ),
+        return_exceptions=True,
+    )
+    stufe.wanduhr = perf_counter() - t0
+
+    waechter.cancel()
+    try:
+        await waechter
+    except asyncio.CancelledError:
+        pass
+
+    for eintrag in ergebnisse:
+        if isinstance(eintrag, BaseException):
+            stufe.ergebnisse.append(
+                Lastlauf(grund=_grund_aus_fehler(None, eintrag))
+            )
+            continue
+        stufe.ergebnisse.append(eintrag)
+    stufe.anlauf_summe = sum(e.anlauf for e in stufe.ergebnisse)
+    if blockaden:
+        dauern = [ende - beginn for beginn, ende in blockaden]
+        stufe.loop_block_max = max(dauern)
+        stufe.loop_block_summe = sum(dauern)
+        stufe.loop_block_anzahl = len(dauern)
+    stufe.kanal_verdraengt = zaehler.verdraengt
+    stufe.kanaele_am_ende = len(ai_run_broker._KANAELE)
+    stufe.ursachen = dict(
+        sorted(lupe.ursachen.items(), key=lambda paar: -paar[1])
+    )
+    stufe.pool_hoechststand = hoechststand[0]
+    return stufe
+
+
+def _lasttabelle(stufen: list[Stufe]) -> str:
+    kopf = (
+        f"{'Stufe':>6} {'ok':>6} {'Fehl':>5} {'Anl-Med':>8} {'Anl-Sum':>8} "
+        f"{'Dau-Med':>8} {'Dau-P90':>8} {'Dau-Max':>8} {'Wanduhr':>8} "
+        f"{'BLK-max':>8} {'BLK-Sum':>8} {'Kanal-w':>8} {'Pool':>6}  {'Gruende':<28}"
+    )
+    zeilen = [kopf, "-" * len(kopf)]
+    for stufe in stufen:
+        dauern = [e.dauer for e in stufe.ergebnisse]
+        anlaeufe = [e.anlauf for e in stufe.ergebnisse]
+        gruende = ", ".join(
+            f"{name}x{anzahl}" for name, anzahl in stufe.gruende.items()
+        )
+        zeilen.append(
+            f"{stufe.laeufe:>6}"
+            f" {stufe.gelungen:>6}"
+            f" {stufe.gescheitert:>5}"
+            f" {_med(anlaeufe):>7.3f}s"
+            f" {stufe.anlauf_summe:>7.2f}s"
+            f" {_med(dauern):>7.2f}s"
+            f" {_p90(dauern):>7.2f}s"
+            f" {max(dauern, default=0.0):>7.2f}s"
+            f" {stufe.wanduhr:>7.2f}s"
+            f" {stufe.loop_block_max:>7.2f}s"
+            f" {stufe.loop_block_summe:>7.2f}s"
+            f" {stufe.kanal_verdraengt:>8}"
+            f" {stufe.pool_hoechststand:>6}"
+            f"  {(gruende or '-')[:28]:<28}"
+        )
+    return "\n".join(zeilen)
+
+
+def _engpassbericht(stufen: list[Stufe]) -> list[str]:
+    """Welche Grenze zuerst zuschlaegt — als Satz, nicht als Zahlenkolonne.
+
+    Die Tabelle beantwortet "wieviel". Der Betreiber hat aber "was zuerst"
+    gefragt, und diese Antwort steht nirgends in einer Spalte: sie ergibt sich
+    aus dem Vergleich mehrerer Spalten ueber mehrere Stufen. Sie hier
+    auszurechnen ist ehrlicher, als sie dem Leser zu ueberlassen — er wuerde
+    sonst die groesste Zahl fuer den Engpass halten, und das ist sie oft nicht.
+    """
+    zeilen: list[str] = []
+
+    erste_fehler = next((s for s in stufen if s.gescheitert), None)
+    if erste_fehler is None:
+        zeilen.append(
+            "  Kein Lauf ist gescheitert. Bis zur hoechsten gefahrenen Stufe "
+            f"({stufen[-1].laeufe}) kommt jede Nachricht durch."
+        )
+    else:
+        haupt = next(iter(erste_fehler.gruende), "?")
+        zeilen.append(
+            f"  ERSTER AUSFALL bei Stufe {erste_fehler.laeufe}: "
+            f"{erste_fehler.gescheitert} von {erste_fehler.laeufe}, "
+            f"haeufigster Grund '{haupt}'."
+        )
+
+    erste_kanal = next((s for s in stufen if s.kanal_verdraengt), None)
+    if erste_kanal is not None:
+        zeilen.append(
+            f"  KANALGRENZE ({MAX_KANAELE}) greift ab Stufe {erste_kanal.laeufe}: "
+            f"{erste_kanal.kanal_verdraengt} laufende Kanaele verdraengt. Diese "
+            "Laeufe arbeiten zu Ende, aber niemand kann ihnen mehr zusehen - "
+            "der Chat bleibt stehen, bis der Benutzer neu laedt."
+        )
+    else:
+        zeilen.append(
+            f"  Kanalgrenze ({MAX_KANAELE}) nicht erreicht; Rueckstaugrenze je "
+            f"Zuhoerer ist {MAX_RUECKSTAU} und wurde hier nicht gemessen "
+            "(kein Zuhoerer angehaengt)."
+        )
+
+    erste_blockade = next((s for s in stufen if s.loop_block_max >= 1.0), None)
+    if erste_blockade is not None:
+        zeilen.append(
+            f"  EREIGNISSCHLEIFE steht ab Stufe {erste_blockade.laeufe} am Stueck "
+            f"{erste_blockade.loop_block_max:.2f}s, in Summe "
+            f"{erste_blockade.loop_block_summe:.2f}s von "
+            f"{erste_blockade.wanduhr:.2f}s Wanduhr. In dieser Zeit antwortet das "
+            "Panel niemandem - auch keinem Benutzer, der gar nichts mit der KI "
+            "zu tun hat."
+        )
+    else:
+        schlimmste = max(stufen, key=lambda s: s.loop_block_max)
+        zeilen.append(
+            f"  Laengste Blockade am Stueck ueber alle Stufen: "
+            f"{schlimmste.loop_block_max:.2f}s (Stufe {schlimmste.laeufe}), "
+            f"Summe {schlimmste.loop_block_summe:.2f}s."
+        )
+
+    # Der Anlauf ist der Teil, der synchron im Request laeuft. Er ist deshalb
+    # die einzige Groesse hier, die sich **nicht** durch Warten verteilt: was er
+    # kostet, kostet er die ganze Anwendung.
+    teuerste = max(stufen, key=lambda s: s.anlauf_summe)
+    if teuerste.wanduhr > 0:
+        anteil = 100.0 * teuerste.anlauf_summe / teuerste.wanduhr
+        zeilen.append(
+            f"  ANLAUF (lauf_beginnen, synchron im Request): bei Stufe "
+            f"{teuerste.laeufe} zusammen {teuerste.anlauf_summe:.2f}s = "
+            f"{anteil:.0f}% der Wanduhr, Median je Lauf "
+            f"{_med([e.anlauf for e in teuerste.ergebnisse]):.3f}s. Diese Zeit "
+            "laeuft nicht nebeneinander, sondern hintereinander."
+        )
+
+    hoechster_pool = max(s.pool_hoechststand for s in stufen)
+    grenze = POOL_SIZE + POOL_MAX_OVERFLOW
+    if hoechster_pool >= grenze:
+        zeilen.append(
+            f"  VERBINDUNGSPOOL erschoepft: {hoechster_pool} von {grenze} "
+            f"(pool_size={POOL_SIZE} + max_overflow={POOL_MAX_OVERFLOW}). Jeder "
+            f"weitere Lauf wartet bis zu {POOL_TIMEOUT:.0f}s auf eine Verbindung "
+            "und scheitert danach."
+        )
+    elif hoechster_pool > POOL_SIZE:
+        ueberzug = next(s for s in stufen if s.pool_hoechststand > POOL_SIZE)
+        zeilen.append(
+            f"  VERBINDUNGSPOOL: ab Stufe {ueberzug.laeufe} wird der Ueberzug "
+            f"gebraucht: hoechstens {hoechster_pool} von {grenze} Verbindungen "
+            f"gleichzeitig, davon {hoechster_pool - POOL_SIZE} ueber "
+            f"pool_size={POOL_SIZE} hinaus. Noch keine Absage, aber der Abstand "
+            f"zur Grenze ist nur noch {grenze - hoechster_pool}."
+        )
+    else:
+        zeilen.append(
+            f"  VERBINDUNGSPOOL: hoechstens {hoechster_pool} von {grenze} "
+            f"Verbindungen gleichzeitig ausgeliehen (pool_size={POOL_SIZE} + "
+            f"max_overflow={POOL_MAX_OVERFLOW}). Er ist nicht der Engpass: der "
+            "Lauf haelt seine Sitzung nur in kurzen Stuecken, nicht waehrend er "
+            "auf den Anbieter wartet."
+        )
+    zeilen.append(
+        "  UNGEMESSEN: die Nebenlaeuferschranke je Benutzer "
+        "(concurrent_operations) greift im Chatpfad nie, weil ein Benutzer "
+        "genau eine Unterhaltung hat und eine neue Nachricht den laufenden Lauf "
+        "abloest. Sie zaehlt fuer Aufgaben- und Guardian-Laeufe."
+    )
+    zeilen.append(
+        "  VORBEHALT: gemessen auf SQLite (Datei, WAL, eigener Pool). "
+        "PostgreSQL bringt echten Schreibnebenlauf, ein wirksames "
+        "'SELECT ... FOR UPDATE' in reserve_ai_usage und laut "
+        "ai_stream_service._leseplaetze 8 statt 1 Werkzeugplatz. Die Zahlen "
+        "hier sind eine Untergrenze fuer den Durchsatz und eine Obergrenze "
+        "fuer die Sperrkosten."
+    )
+    return zeilen
+
+
+@NUR_MIT_STUFEN
+@pytest.mark.asyncio
+async def test_ai_last_gleichzeitigkeit(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Misst, wo der KI-Pfad unter vielen gleichzeitigen Laeufen kippt.
+
+    Ohne echten Anbieter und ohne Schluessel: gemessen wird MSM, nicht
+    OpenRouter. Der Anbieter wird durch ``_gefaelschter_strom`` ersetzt, der
+    Modellkatalog durch eine Antwort ohne Netz — beides sind die einzigen
+    Stellen im Lauf, die hinaus wollen.
+
+    Der Test faellt nicht wegen einer Zahl durch. Er faellt durch, wenn die
+    Messung selbst nicht zustande kam: eine Stufe ohne einen einzigen gelungenen
+    Lauf ist kein Befund ueber die Last, sondern einer ueber den Aufbau.
+    """
+    for strom in (sys.stdout, sys.stderr):
+        if hasattr(strom, "reconfigure"):
+            strom.reconfigure(errors="replace")
+
+    ai_skill_service.reset_shipped_cache_for_tests()
+
+    # ``db`` bleibt in der Signatur, weil die Fixture die Tabellen und die
+    # Systemrollen der Suite bereitstellt — benutzt wird sie hier nicht. Die
+    # Lastmessung arbeitet auf ihrer eigenen Datenbank (siehe
+    # `_lastdatenbank`), und dieselbe Sitzung fuer beides zu nehmen waere genau
+    # der Fehler, den der eigene Pool vermeiden soll.
+    del db
+    ordner = Path(tempfile.mkdtemp(prefix="msm-last-"))
+    lastengine = _lastdatenbank(ordner)
+    alte_bindung = _database.SessionLocal.kw.get("bind")
+
+    from services import ai_model_catalog
+
+    async def _kein_katalog(_client, _kind, _modell):
+        """Der Katalog antwortet, ohne zu fragen.
+
+        Er wird je Segment einmal gerufen. Unter Last waeren das tausend
+        Anfragen an OpenRouter, die alle scheitern — gemessen waere danach die
+        Wiederholungslogik einer HTTP-Bibliothek und nicht der KI-Pfad. Ein
+        unbekanntes Modell ist im Code ohnehin ein vorgesehener Fall: dann geht
+        keine Zwischenspeichermarke mit.
+        """
+        return None
+
+    monkeypatch.setattr(ai_model_catalog, "finde", _kein_katalog)
+    monkeypatch.setattr(
+        ai_stream_service, "stream_chat_completion",
+        _gefaelschter_strom(BENCH_PARALLEL_LATENZ),
+    )
+
+    zaehler = _Kanalzaehler()
+    broker_logger = _logging.getLogger("services.ai_run_broker")
+    broker_logger.addHandler(zaehler)
+    lupe = _Fehlerlupe()
+    strom_logger = _logging.getLogger("services.ai_stream_service")
+    strom_logger.addHandler(lupe)
+
+    stufen: list[Stufe] = []
+    try:
+        # **Eine Umleitung statt vieler Attrappen.** Jedes Modul im Lauf holt
+        # sich seine Sitzung ueber dasselbe `SessionLocal`-Objekt; es umzubinden
+        # trifft alle auf einmal. Einzelne `SessionLocal`-Verweise zu ersetzen
+        # haette jeden Import einzeln erwischen muessen — und der erste
+        # vergessene haette still auf der alten Datenbank weitergearbeitet.
+        #
+        # Innerhalb des ``try``, damit das ``finally`` sie in **jedem** Fall
+        # wieder zurueckdreht. Stuende sie davor und ein Aufbauschritt faellt
+        # um, arbeitete jeder folgende Test dieser Sitzung auf einer Datenbank,
+        # die es dann nicht mehr gibt — ein Fehler, der nicht hier auffiele,
+        # sondern irgendwo danach.
+        _database.SessionLocal.configure(bind=lastengine)
+
+        from services.role_service import ensure_system_roles
+
+        with _database.SessionLocal() as aufbau:
+            ensure_system_roles(aufbau)
+            aufbau.commit()
+            # Ein Anbieter ohne Schluesselzwang. `_segment_vorbereiten` wuerde
+            # sonst mit AI_PROVIDER_KEY_MISSING abbrechen — und jede Zeile der
+            # Tabelle waere ein Ausfall an einer Stelle, die mit Last nichts zu
+            # tun hat.
+            provider = AiProvider(
+                name="Attrappe (last)",
+                provider_kind="openrouter",
+                default_model="attrappe/kein-echtes-modell",
+                enabled=True,
+                requires_api_key=False,
+            )
+            aufbau.add(provider)
+            aufbau.commit()
+            aufbau.refresh(provider)
+            provider_id = provider.id
+            _server_anlegen(aufbau)
+            benutzer_ids = _lastbenutzer(aufbau, max(BENCH_PARALLEL_STUFEN))
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            for anzahl in BENCH_PARALLEL_STUFEN:
+                stufe = await _eine_stufe(
+                    laeufe=anzahl, benutzer_ids=benutzer_ids,
+                    provider_id=provider_id, client=client, zaehler=zaehler,
+                    lupe=lupe, pool=lastengine.pool,
+                )
+                stufen.append(stufe)
+                print(
+                    f"    Stufe {anzahl:>5}: ok={stufe.gelungen} "
+                    f"fehl={stufe.gescheitert} wanduhr={stufe.wanduhr:.2f}s "
+                    f"block={stufe.loop_block_max:.2f}s "
+                    f"kanal_verdraengt={stufe.kanal_verdraengt}",
+                    flush=True,
+                )
+    finally:
+        broker_logger.removeHandler(zaehler)
+        strom_logger.removeHandler(lupe)
+        # Die Umleitung zurueck, **bevor** irgendetwas anderes laeuft: bliebe
+        # sie stehen, arbeitete jeder folgende Test dieser Sitzung auf einer
+        # Datenbank, die es gleich nicht mehr gibt.
+        _database.SessionLocal.configure(bind=alte_bindung)
+        lastengine.dispose()
+        shutil.rmtree(ordner, ignore_errors=True)
+
+    # **Erst sichern, dann darstellen** — dieselbe Lehre wie oben: eine Messung,
+    # die nur im Terminal existiert, ist eine Messung, die man verlieren kann.
+    ziel = Path(__file__).resolve().parents[1] / "logs" / "ai-benchmark"
+    ziel.mkdir(parents=True, exist_ok=True)
+    stempel = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    datei = ziel / f"{stempel}-{BENCH_LABEL}-parallel.json"
+    datei.write_text(
+        json.dumps(
+            {
+                "label": BENCH_LABEL,
+                "art": "gleichzeitigkeit",
+                "zeitpunkt": datetime.now(timezone.utc).isoformat(),
+                "anbieter": "attrappe",
+                "latenz_je_runde": BENCH_PARALLEL_LATENZ,
+                "auftrag": PARALLEL_AUFTRAG,
+                "datenbank": (
+                    "eigene SQLite-Datei mit WAL und den Poolwerten aus "
+                    "database.py; nicht die geteilte Speicherdatenbank der Suite"
+                ),
+                "grenzen_im_code": {
+                    "ai_run_broker.MAX_KANAELE": MAX_KANAELE,
+                    "ai_run_broker.MAX_RUECKSTAU": MAX_RUECKSTAU,
+                    "database.pool_size": POOL_SIZE,
+                    "database.max_overflow": POOL_MAX_OVERFLOW,
+                    "database.pool_timeout": POOL_TIMEOUT,
+                    "ai_stream_service._leseplaetze": (
+                        "1 unter SQLite, 8 unter PostgreSQL"
+                    ),
+                    "ai_limit_service.concurrent_operations": (
+                        "im Chatpfad wirkungslos, da ein Benutzer eine "
+                        "Unterhaltung hat und der Vorgaenger abgeloest wird"
+                    ),
+                },
+                "stufen": [stufe.als_dict() for stufe in stufen],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    linie = "=" * 130
+    print("\n\n" + linie)
+    print(
+        f"  MSM AI-LAST (GLEICHZEITIGKEIT) - {BENCH_LABEL}   "
+        f"Anbieter: Attrappe, {BENCH_PARALLEL_LATENZ:.2f}s je Runde, 2 Runden, "
+        f"1 Werkzeug"
+    )
+    print(linie)
+    print(_lasttabelle(stufen))
+    print(linie)
+    for stufe in stufen:
+        for text, anzahl in stufe.ursachen.items():
+            print(f"  Stufe {stufe.laeufe:>5}: {anzahl:>4}x {text}")
+    for zeile in _engpassbericht(stufen):
+        print(zeile)
+    print(linie)
+    print(f"  Ergebnis: {datei}\n")
+
+    assert any(stufe.gelungen for stufe in stufen), (
+        "Keine einzige Stufe hat einen Lauf durchgebracht - Aufbau pruefen"
+    )

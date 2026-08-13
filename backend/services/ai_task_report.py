@@ -120,6 +120,8 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
         )
 
     _zustellen(
+        user_id=int(user.id),
+        provider_id=run.provider_id,
         to=adresse,
         username=str(user.username),
         task_title=titel,
@@ -129,18 +131,54 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     )
 
 
-def _zustellen(**felder) -> None:
+def _zustellen(*, user_id: int, provider_id: int | None = None, **felder) -> None:
     """Waehlt die Mail aus; den Versand macht `ai_mail`.
 
     Eigene Funktion aus demselben Grund wie bei `ai_guardian_report`: sie ist
     die Stelle, an der die Tests den Versand abfangen, und das einzige Stueck,
     das **aufgabenspezifisch** ist. Thread, Ereignisschleife und die Auswertung
     des Rueckgabewerts stehen einmal in `ai_mail.zustellen`.
+
+    Der Verfassungsschritt steht **innerhalb** der Koroutine und nicht davor.
+    Zwei Gruende: `bericht_versenden` ist synchron und laeuft je nach Weg auf
+    der Ereignisschleife der Anwendung — dort kann nichts erwartet werden. Und
+    `ai_mail.zustellen` macht einen eigenen Thread mit eigener Schleife auf; ein
+    Modellaufruf davor haette auf der falschen Schleife gehangen.
+
+    `provider_id` ist der Anbieter **dieses Laufs**. Ist er nicht gesetzt,
+    sucht `ai_mail_text` selbst einen; das ist derselbe Weg, den ein Lauf ohne
+    Auswahl auch sonst geht.
     """
-    from services import ai_mail
+    from services import ai_mail, ai_mail_text
     from services.email_service import EmailService
 
-    ai_mail.zustellen(
-        lambda: EmailService.send_ai_task_report(**felder),
-        name="ai-task-report",
+    async def _mail() -> bool:
+        text = await ai_mail_text.verfassen(
+            user_id=user_id,
+            provider_id=provider_id,
+            anlass="ai-task-report",
+            fakten=_fakten(felder),
+        )
+        return await EmailService.send_ai_task_report(**felder, mailtext=text)
+
+    ai_mail.zustellen(_mail, name="ai-task-report")
+
+
+def _fakten(felder: dict) -> str:
+    """Was das Modell ueber diese Mail wissen muss — und nichts darueber hinaus.
+
+    Ausdruecklich **ohne** die Adresse des Empfaengers. Sie steht nur eine
+    Ebene hoeher in denselben Feldern, und ein Modell, das sie im Text
+    wiederholt, waere die erste Stufe eines Weges, den es hier nicht geben
+    soll: MSM verschickt keine Post an Dritte, weil ein Modell einen Namen
+    genannt hat. Wer die Adresse gar nicht erst zeigt, muss auch nichts
+    herausfiltern.
+    """
+    zustand = "erledigt" if felder.get("geschafft") else "nicht abgeschlossen"
+    return (
+        f"Anlass: eine faellige KI-Aufgabe wurde ausgefuehrt.\n"
+        f"Name der Aufgabe: {felder.get('task_title') or '(ohne Namen)'}\n"
+        f"Zeitplan: {felder.get('plan_text') or 'einmalig'}\n"
+        f"Ergebnis laut Panel: {zustand}\n"
+        f"Abschlussbericht des Laufs:\n{felder.get('bericht') or ''}"
     )
