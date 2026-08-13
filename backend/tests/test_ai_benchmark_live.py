@@ -94,7 +94,9 @@ from database import SessionLocal
 from models import AiConversation, AiProvider, Server, User
 from services import (
     ai_chat_service,
+    ai_context_window,
     ai_memory_service,
+    ai_reasoning,
     ai_run_broker,
     ai_skill_service,
     ai_stream_service,
@@ -235,6 +237,16 @@ class Messung:
     fehler: str | None = None
 
     gesamt: float = 0.0
+    #: Was passiert, **bevor** der Lauf ueberhaupt anlaeuft — und damit bevor das
+    #: erste Ereignis fliessen kann.
+    #:
+    #: Diese Zahl fehlte, und ihr Fehlen war ein Messfehler mit Ansage: alle
+    #: uebrigen Zahlen zaehlen ab Segmentstart, der Benutzer zaehlt ab dem
+    #: Klick auf "Senden". Dazwischen liegt der ganze Vorlauf aus
+    #: `routers/ai_chat.stream_message` — die Denkvorgabe und das Kontextfenster
+    #: (beide ueber den Modellkatalog, also potenziell HTTP) und `lauf_beginnen`,
+    #: das den vollstaendigen Kontext synchron im Request aufbaut.
+    anlauf: float = 0.0
     ttfe: float | None = None            # erstes Ereignis ueberhaupt
     ttft_denken: float | None = None     # erster Denkschritt, sichtbar
     ttft_text: float | None = None       # erstes Antwortzeichen, sichtbar
@@ -258,6 +270,8 @@ class Messung:
     antwortlaenge: int = 0
     denklaenge: int = 0
     abschnitte: int = 0
+    #: Die zusammengefasste Ereignisfolge — was der Benutzer wann sah.
+    folge: list[dict] = field(default_factory=list)
 
     @property
     def msm_zeit(self) -> float:
@@ -310,6 +324,8 @@ class Messung:
             "antwortlaenge": self.antwortlaenge,
             "denklaenge": self.denklaenge,
             "abschnitte": self.abschnitte,
+            "anlauf": round(self.anlauf, 3),
+            "folge": self.folge,
         }
 
 
@@ -533,6 +549,23 @@ async def _messen(
     ai_run_broker.zuruecksetzen_fuer_tests()
 
     conversation = _unterhaltung(db, user)
+
+    # ── Der Anlauf ───────────────────────────────────────────────────────
+    #
+    # Genau die Schritte, die `routers/ai_chat.stream_message` **vor** dem Lauf
+    # macht — und die der Benutzer als Teil seiner Wartezeit erlebt, weil bis
+    # dahin kein einziges Ereignis geflossen ist.
+    #
+    # Sie standen hier vorher ausserhalb der Messung. Das war ein Messfehler mit
+    # Ansage: alles andere zaehlte ab Segmentstart, der Mensch zaehlt ab dem
+    # Klick. Was dazwischen liegt, war damit per Konstruktion unsichtbar — und
+    # es sind ausgerechnet zwei Abrufe des Modellkatalogs und ein vollstaendiger
+    # Kontextaufbau.
+    anlauf_beginn = perf_counter()
+    denken, stufe = await ai_reasoning.vorgabe(
+        client, db, user=user, provider=provider, aktiv=True, wunsch=None,
+    )
+    fenster = await ai_context_window.ermitteln(client, provider)
     run, fehler = ai_stream_service.lauf_beginnen(
         db,
         user=user,
@@ -540,10 +573,11 @@ async def _messen(
         provider=provider,
         request_id=uuid4(),
         content=szenario.auftrag,
-        reasoning=True,
-        reasoning_effort=None,
-        context_chars=None,
+        reasoning=denken,
+        reasoning_effort=stufe,
+        context_chars=fenster.zeichen if fenster.bekannt else None,
     )
+    messung.anlauf = perf_counter() - anlauf_beginn
     if run is None:
         messung.ok = False
         messung.fehler = f"lauf_beginnen: {fehler}"
@@ -693,6 +727,22 @@ async def _messen(
     messung.ttft_text = _seit_start(lambda a: a == "delta")
     messung.ttfw = _seit_start(lambda a: a in {"tool", "proposal", "action"})
 
+    # Die Ereignisfolge selbst, zusammengefasst. Zwei Zahlen (`ttft_denken`
+    # gegen `ttft_text`) sagen, **ob** der Denktext zu spaet kam; sie sagen
+    # nicht, was stattdessen passierte. Fuer eine Beschwerde wie "der
+    # Nachdenken-Block kam erst am Ende" ist genau das die gesuchte Auskunft.
+    #
+    # Zusammengefasst und nicht roh: ein Lauf erzeugt tausende `delta`, und eine
+    # Liste davon waere unlesbar. Aufeinanderfolgende gleiche Ereignisse werden
+    # zu einem Eintrag mit Anzahl und Zeitspanne.
+    for art, zeitpunkt in ereignisse:
+        sichtbar = round(_sichtbar_ab(zeitpunkt, blockaden) - t0, 2)
+        if messung.folge and messung.folge[-1]["art"] == art:
+            messung.folge[-1]["bis"] = sichtbar
+            messung.folge[-1]["anzahl"] += 1
+            continue
+        messung.folge.append({"art": art, "ab": sichtbar, "bis": sichtbar, "anzahl": 1})
+
     # Die laengste Stille — gemessen an dem, was der Benutzer **sieht**.
     # `message` zaehlt als Anfang: ab da steht die Blase im Chat.
     sichtbare = [
@@ -817,6 +867,12 @@ def _treffer(nach_szenario: dict[str, list[Messung]]) -> tuple[int, int, list[st
     verfehlt: list[str] = []
     for szenario in SZENARIEN:
         if not szenario.erwartet:
+            continue
+        # Ein Szenario, das gar nicht gefahren wurde (`MSM_BENCH_ONLY`), hat
+        # nichts verfehlt. Ohne diese Zeile meldete ein gezielter Lauf ueber drei
+        # Szenarien "Werkzeugtreffer 2/10" und neun Fehlschlaege — eine Zahl, die
+        # aussieht wie ein Rueckschritt und keiner ist.
+        if szenario.name not in nach_szenario:
             continue
         # Ein Werkzeug, das gar nicht angeboten wurde, kann das Modell nicht
         # rufen. `web_search` steht nur im Katalog, wenn ein Suchschluessel

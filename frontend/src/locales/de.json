@@ -329,6 +329,7 @@
       "toolsUsed_one": "{{count}} Werkzeug verwendet",
       "toolsUsed_other": "{{count}} Werkzeuge verwendet",
       "toolsCollapse": "Werkzeuge einklappen",
+      "working": "Arbeitet weiter …",
       "compacted": "Ältere Nachrichten wurden zusammengefasst",
       "edit": "Nachricht bearbeiten",
       "editHint": "Diese Nachricht und alles danach wird entfernt. Die KI kennt die alte Fassung dann nicht mehr.",

@@ -329,6 +329,7 @@
       "toolsUsed_one": "{{count}} tool used",
       "toolsUsed_other": "{{count}} tools used",
       "toolsCollapse": "Collapse tools",
+      "working": "Working …",
       "compacted": "Older messages were summarized",
       "edit": "Edit message",
       "editHint": "This message and everything after it will be removed. The assistant will no longer know the earlier wording.",

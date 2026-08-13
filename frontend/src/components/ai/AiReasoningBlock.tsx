@@ -9,6 +9,18 @@ import { useTranslation } from 'react-i18next'
  * Waehrend das Modell noch denkt, ist der Block aber offen und laeuft mit —
  * genau dann ist er naemlich das Einzige, was passiert, und ein leerer
  * Bildschirm sieht aus wie ein Fehler.
+ *
+ * **Er steht ab dem ersten Augenblick da, auch ohne Inhalt.** Das ist der
+ * eigentliche Punkt und kam aus einer Beobachtung im Betrieb: "der
+ * Nachdenken-Block kam erst am Ende". Gemessen stimmte das auch — nur nicht aus
+ * dem vermuteten Grund. Der Block wurde frueher erst gerendert, wenn schon
+ * Denktext da war, und **manche Modelle liefern in der ersten Runde gar keinen**
+ * (gemessen: erste Denkzeichen nach 6,5 s, in einem Fall erst nach 29 s, lange
+ * nach dem ersten Antworttext). Bis dahin sah man nur eine nackte Zeile, und
+ * dann sprang oben ein Kasten hinein, den es vorher nicht gab.
+ *
+ * Jetzt ist er von Anfang an der Ort, an dem "es passiert etwas" steht. Er
+ * erscheint nicht mehr — er fuellt sich.
  */
 export function AiReasoningBlock({ content, streaming }: { content: string; streaming: boolean }) {
   const { t } = useTranslation()
@@ -30,11 +42,21 @@ export function AiReasoningBlock({ content, streaming }: { content: string; stre
           aria-hidden="true"
         />
       </button>
-      {open && (
+      {open && (content ? (
         <p className="whitespace-pre-wrap break-words px-3 pb-3 text-xs leading-5 text-on-surface-variant">
           {content}
         </p>
-      )}
+      ) : streaming ? (
+        // Noch kein Denktext, aber der Block steht schon. Drei pulsende Punkte
+        // statt eines leeren Kastens: er soll arbeiten aussehen, nicht kaputt.
+        <p className="px-3 pb-3 text-xs leading-5 text-on-surface-variant" aria-hidden="true">
+          <span className="inline-flex gap-1">
+            <span className="h-1 w-1 animate-pulse rounded-full bg-current" />
+            <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
+            <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:300ms]" />
+          </span>
+        </p>
+      ) : null)}
     </div>
   )
 }

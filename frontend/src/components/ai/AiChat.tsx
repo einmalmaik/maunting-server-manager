@@ -1024,26 +1024,54 @@ export function AiChat() {
               }
 
               const isStreaming = message.status === 'streaming'
+              // Einmal je Nachricht gruppieren, nicht je Abschnitt. Waehrend
+              // des Streamens laeuft dieser Block bei **jedem** Textstueck
+              // erneut — und `gruppiert` geht ueber alle Abschnitte. Zweimal
+              // aufgerufen waere daraus quadratische Arbeit bei jedem
+              // einzelnen Zeichen geworden.
+              const teile = message.sections?.length
+                ? gruppiert(message.sections)
+                : null
               return (
                 <article key={entry.id} className="flex gap-3">
                   <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
                     <Bot className="h-3.5 w-3.5" aria-hidden="true" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    {message.reasoning && (
-                      <AiReasoningBlock content={message.reasoning} streaming={isStreaming} />
+                    {/* Ab dem ersten Augenblick da, nicht erst wenn Denktext
+                        kam. Der Betreiber meldete "der Nachdenken-Block kam
+                        erst am Ende" — und gemessen stimmte das: die ersten
+                        Denkzeichen trafen nach 6,5 s ein, in einem Fall erst
+                        nach 29 s und damit lange nach dem ersten Antworttext.
+                        Bis dahin stand hier nichts, und dann sprang oben ein
+                        Kasten hinein, den es vorher nicht gab.
+
+                        Ist am Ende kein Denktext gekommen — viele Modelle
+                        rechnen ihn ab, geben ihn aber nicht heraus —, faellt
+                        der Block weg, statt leer stehenzubleiben. */}
+                    {(message.reasoning || isStreaming) && (
+                      <AiReasoningBlock
+                        content={message.reasoning ?? ''}
+                        streaming={isStreaming}
+                      />
                     )}
-                    {message.sections && message.sections.length > 0 ? (
+                    {teile ? (
                       // Der Zug in seiner tatsaechlichen Reihenfolge: Satz,
                       // Werkzeuge, Satz, Werkzeuge. Genau so ist er entstanden,
                       // und genau so hat der Benutzer ihn live gesehen — nach
                       // einem Neuladen soll er nicht anders aussehen.
                       <div className="space-y-3">
-                        {gruppiert(message.sections).map((teil, stelle) => (
+                        {teile.map((teil, stelle) => (
                           teil.art === 'tools' ? (
                             <AiWerkzeuggruppe
                               key={stelle}
                               werkzeuge={teil.werkzeuge}
+                              // Zeigt an, dass es nach diesen Werkzeugen
+                              // weitergeht — aber nur bei der letzten Gruppe,
+                              // sonst behaupteten alle vorherigen dasselbe.
+                              arbeitetWeiter={
+                                isStreaming && stelle === teile.length - 1
+                              }
                               // Waehrend die Antwort entsteht, ist das
                               // Aufgeklappte die Antwort: der Benutzer sieht,
                               // dass gearbeitet wird. Ist sie fertig, ist es
@@ -1378,9 +1406,20 @@ function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {
  * eingeklappt ist der ruhige Zustand.
  */
 function AiWerkzeuggruppe(
-  { werkzeuge, offenVoreingestellt }: {
+  { werkzeuge, offenVoreingestellt, arbeitetWeiter = false }: {
     werkzeuge: AiToolUse[]
     offenVoreingestellt: boolean
+    /**
+     * Nach dieser Gruppe geht es weiter, es ist nur noch nichts da.
+     *
+     * Gemessen ist das die laengste Stille des ganzen Ablaufs: zwischen dem
+     * letzten Werkzeugchip und dem ersten Zeichen der naechsten Runde vergingen
+     * bis zu 17,5 Sekunden, in denen die Oberflaeche **nichts** anzeigte. Das
+     * Modell verarbeitet in dieser Zeit den gewachsenen Kontext — daran aendert
+     * die Oberflaeche nichts, aber sie kann aufhoeren, wie eingefroren
+     * auszusehen.
+     */
+    arbeitetWeiter?: boolean
   },
 ) {
   const { t } = useTranslation()
@@ -1390,12 +1429,20 @@ function AiWerkzeuggruppe(
   // Benutzers zu ueberschreiben, die es vorher gar nicht geben konnte.
   useEffect(() => { setOffen(offenVoreingestellt) }, [offenVoreingestellt])
 
+  const weiter = arbeitetWeiter && (
+    <p className="flex items-center gap-2 text-xs text-on-surface-variant">
+      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+      {t('ai.chat.working')}
+    </p>
+  )
+
   if (offen) {
     return (
       <div className="space-y-1">
         {werkzeuge.map((werkzeug, stelle) => (
           <AiWerkzeugzeile key={stelle} tool={werkzeug} />
         ))}
+        {weiter}
         {!offenVoreingestellt && (
           <button
             type="button"
@@ -1411,6 +1458,7 @@ function AiWerkzeuggruppe(
   }
   const gescheitert = werkzeuge.some((werkzeug) => werkzeug.failed)
   return (
+    <div className="space-y-1">
     <button
       type="button"
       onClick={() => setOffen(true)}
@@ -1428,5 +1476,7 @@ function AiWerkzeuggruppe(
         </span>
       )}
     </button>
+    {weiter}
+    </div>
   )
 }
