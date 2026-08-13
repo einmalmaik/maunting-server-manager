@@ -64,6 +64,25 @@ class Werkzeug:
     `servers.delete` etwa, weil es destruktiv ist. Ein serverbezogenes Werkzeug
     kann also durchaus ein globales Recht verlangen: `propose_server_delete`
     braucht eine `server_id` und trotzdem die globale Loeschbefugnis.
+
+    ``angebot`` sind die Rechte, von denen **eines** genuegt, damit das Werkzeug
+    dem Modell ueberhaupt angeboten wird. Ohne Angabe gilt `recht`; steht auch
+    das nicht da, wird das Werkzeug jedem angeboten.
+
+    Der Unterschied zu `recht` ist die Richtung, nicht die Strenge: `recht`
+    entscheidet, ob ein Aufruf **laeuft**, `angebot` nur, ob er im Katalog
+    **steht**. Ein Lesewerkzeug prueft sein Recht im eigenen Handler und traegt
+    deshalb kein `recht` — `angebot` schreibt denselben Schluessel hin, damit
+    der Katalog ihn kennt, ohne dass sich an der Pruefung etwas aendert. Zwei
+    Eintraege sind noetig, weil zwei Werkzeuge mit einem einzelnen Schluessel
+    nicht auskommen: `read_blueprint` genuegt `servers.create` **oder**
+    `blueprints.manage`, und `propose_server_lifecycle` haengt am Vorgang.
+
+    Warum es das ueberhaupt gibt: bis hierher bekam jeder Benutzer alle 51
+    Werkzeuge angeboten — auch die, die seine KI in seinem Namen gar nicht
+    ausfuehren darf, weil ihm das Recht fehlt. Das Modell versuchte sie,
+    prallte ab und verbrauchte dabei eine Runde. Der Katalog ging in **jeder**
+    Runde ueber die Leitung und machte 94 Prozent des Prompts aus.
     """
 
     art: str
@@ -71,6 +90,7 @@ class Werkzeug:
     immer_bestaetigen: bool = False
     recht: str | None = None
     recht_global: bool = False
+    angebot: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.art not in ARTEN:
@@ -81,29 +101,45 @@ class Werkzeug:
 
 WERKZEUGE: dict[str, Werkzeug] = {
     # ── Serverbezogen lesen ───────────────────────────────────────────
+    #
+    # Ohne `angebot` steht hier nur `server.view` dahinter, und das prueft
+    # `_resolve_server` bei jedem Aufruf am **konkreten** Server. Es hier
+    # nochmal hinzuschreiben brauchte fuenfzehn gleichlautende Zeilen und
+    # sparte nur bei einem Benutzer etwas ein, der ueberhaupt keinen Server
+    # sieht — und dessen Gespraech endet ohnehin an `list_my_servers`.
+    # Eingetragen ist deshalb nur, was ein **eigenes** Recht verlangt.
     "read_server_status": Werkzeug("server_read"),
     "read_server_capacity": Werkzeug("server_read"),
-    "read_server_logs": Werkzeug("server_read"),
-    "read_config": Werkzeug("server_read"),
+    "read_server_logs": Werkzeug("server_read", angebot=("server.console.read",)),
+    "read_config": Werkzeug("server_read", angebot=("server.files.read",)),
     "read_server_ports": Werkzeug("server_read"),
     "read_server_network": Werkzeug("server_read"),
     "check_server_reachability": Werkzeug("server_read"),
-    "read_server_mods": Werkzeug("server_read"),
-    "read_mod_updates": Werkzeug("server_read"),
-    "search_workshop_mods": Werkzeug("server_read"),
-    "list_server_files": Werkzeug("server_read"),
-    "search_server_files": Werkzeug("server_read"),
-    "read_server_backups": Werkzeug("server_read"),
+    "read_server_mods": Werkzeug("server_read", angebot=("server.mods.read",)),
+    "read_mod_updates": Werkzeug("server_read", angebot=("server.mods.read",)),
+    "search_workshop_mods": Werkzeug("server_read", angebot=("server.mods.read",)),
+    "list_server_files": Werkzeug("server_read", angebot=("server.files.read",)),
+    "search_server_files": Werkzeug("server_read", angebot=("server.files.read",)),
+    "read_server_backups": Werkzeug("server_read", angebot=("server.backups.read",)),
     "read_guardian_incidents": Werkzeug("server_read"),
     "read_ai_action_history": Werkzeug("server_read"),
 
     # ── Global lesen ──────────────────────────────────────────────────
     "list_my_servers": Werkzeug("global_read"),
-    "list_blueprints": Werkzeug("global_read"),
-    "read_blueprint": Werkzeug("global_read"),
-    "read_node_capacity": Werkzeug("global_read"),
-    "read_node_health": Werkzeug("global_read"),
-    "web_search": Werkzeug("global_read"),
+    "list_blueprints": Werkzeug("global_read", angebot=("servers.create",)),
+    # Zwei Rechte, von denen eines genuegt — genau der Fall, fuer den `angebot`
+    # eine Aufzaehlung ist und kein einzelner Schluessel: wer Blueprints pflegen
+    # darf, muss seine eigene Vorlage ansehen koennen, auch ohne Server anlegen
+    # zu duerfen (`_execute_global_read_tool`).
+    "read_blueprint": Werkzeug(
+        "global_read", angebot=("servers.create", "blueprints.manage")
+    ),
+    "read_node_capacity": Werkzeug("global_read", angebot=("servers.create",)),
+    "read_node_health": Werkzeug("global_read", angebot=("nodes.read",)),
+    # Zusaetzlich zum Recht entscheidet die Einrichtung: ohne hinterlegten
+    # Suchschluessel steht `web_search` gar nicht erst im Katalog
+    # (`ai_action_service._global_tool_definitions`).
+    "web_search": Werkzeug("global_read", angebot=("ai.web_search.use",)),
 
     # Die Doku des Panels. Kein zusaetzliches Recht: dieselben Seiten stehen
     # jedem angemeldeten Benutzer im Panel offen — ein Gate hier waere eine
@@ -114,8 +150,10 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Die Shop-Anbindung. Beide pruefen `panel.hoster.read` im eigenen Zweig —
     # bei `global_read` wertet die Registry `recht` nicht aus, das tut nur der
     # Vorschlagspfad.
-    "read_hoster_setup": Werkzeug("global_read"),
-    "read_hoster_integration_guide": Werkzeug("global_read"),
+    "read_hoster_setup": Werkzeug("global_read", angebot=("panel.hoster.read",)),
+    "read_hoster_integration_guide": Werkzeug(
+        "global_read", angebot=("panel.hoster.read",)
+    ),
 
     # Die stehenden Auftraege. `list_tasks` liest nur, was diesem Benutzer
     # gehoert.
@@ -135,16 +173,22 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Lesewerkzeugen. Der Unterschied zwischen den Mengen ist nicht "aendert
     # etwas", sondern "fasst einen Server an und braucht deshalb eine
     # Bestaetigung". Ein gemerkter Satz im Profil des Benutzers tut das nicht.
-    "remember": Werkzeug("global_read", gruppe="memory"),
-    "search_memory": Werkzeug("global_read", gruppe="memory"),
-    "forget_memory": Werkzeug("global_read", gruppe="memory"),
+    "remember": Werkzeug("global_read", gruppe="memory", angebot=("ai.memory.use",)),
+    "search_memory": Werkzeug(
+        "global_read", gruppe="memory", angebot=("ai.memory.use",)
+    ),
+    "forget_memory": Werkzeug(
+        "global_read", gruppe="memory", angebot=("ai.memory.use",)
+    ),
 
     # Dasselbe fuer Skills, mit einem zweiten Grund: **Prosa fuehrt nichts
     # aus.** Ein gelernter Skill kann nichts, was das Modell nicht ohnehin
     # duerfte — er aendert nur, wie es an eine Aufgabe herangeht.
-    "read_skill": Werkzeug("global_read", gruppe="skill"),
-    "learn_skill": Werkzeug("global_read", gruppe="skill"),
-    "forget_skill": Werkzeug("global_read", gruppe="skill"),
+    "read_skill": Werkzeug("global_read", gruppe="skill", angebot=("ai.skills.use",)),
+    "learn_skill": Werkzeug("global_read", gruppe="skill", angebot=("ai.skills.use",)),
+    "forget_skill": Werkzeug(
+        "global_read", gruppe="skill", angebot=("ai.skills.use",)
+    ),
 
     # ── Rueckfrage ────────────────────────────────────────────────────
     "ask_user": Werkzeug("ask"),
@@ -154,7 +198,13 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # `propose_server_lifecycle` traegt kein `recht`: es haengt vom Vorgang ab
     # (start/stop/restart sind drei verschiedene Rechte). Die Zuordnung steht
     # als ausdrueckliche Ausnahme in `ai_proposal_service._permission_for`.
-    "propose_server_lifecycle": Werkzeug("server_write"),
+    # `angebot` zaehlt alle drei auf, weil eines genuegt: wer nur starten darf,
+    # soll das Werkzeug bekommen. Welches Recht der einzelne Aufruf braucht,
+    # entscheidet weiterhin `_permission_for` am `operation`-Argument.
+    "propose_server_lifecycle": Werkzeug(
+        "server_write",
+        angebot=("server.start", "server.stop", "server.restart"),
+    ),
     "propose_backup": Werkzeug("server_write", recht="server.backups.create"),
     # Einspielen ueberschreibt den aktuellen Spielstand mit einem aelteren. Was
     # seit dem Backup passiert ist, existiert danach nicht mehr — und kein
@@ -376,6 +426,26 @@ GEPLANT_IMMER_BESTAETIGEN = frozenset({
     "propose_permission_change",
     "propose_secret_rotation",
 })
+
+
+def angebotsrechte(name: str) -> tuple[str, ...]:
+    """Rechte, von denen **eines** genuegt, damit dieses Werkzeug angeboten wird.
+
+    Eine leere Menge heisst "jedem anbieten" — das gilt fuer `ask_user`, die
+    Doku, `list_my_servers` und `list_tasks`, die alle kein zusaetzliches Recht
+    verlangen.
+
+    Der Rueckfall auf `recht` ist Absicht: bei den Schreibwerkzeugen steht das
+    verlangte Recht bereits dort, und es ein zweites Mal in `angebot`
+    hinzuschreiben waere genau die doppelte Pflege, gegen die diese Tabelle
+    gebaut wurde. `angebot` ist nur fuer die Faelle da, die `recht` nicht
+    ausdruecken kann: Lesewerkzeuge (die ihr Recht im eigenen Handler pruefen)
+    und Werkzeuge mit mehreren gleichwertigen Rechten.
+    """
+    spec = WERKZEUGE[name]
+    if spec.angebot:
+        return spec.angebot
+    return (spec.recht,) if spec.recht else ()
 
 
 def _mit_art(*arten: str) -> set[str]:

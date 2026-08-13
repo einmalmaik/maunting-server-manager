@@ -45,6 +45,7 @@ from services.ai_action_errors import (
     AiActionValidationError,
 )
 from services.ai_action_service import (
+    angebotene_werkzeuge,
     execute_read_tool,
     provider_tool_definitions,
     question_payload,
@@ -1274,6 +1275,12 @@ class _Vorbereitung:
     reasoning_effort: str | None
     token_price_micro_usd_per_million: int | None
     zustand: dict
+    # Welche Werkzeuge diesem Benutzer angeboten werden. Hier geholt und nicht
+    # im Segment: die Frage braucht eine Datenbanksitzung, und waehrend der
+    # Anbieter streamt, steht keine offen. Je Segment neu — eine Fortsetzung
+    # nach einer Bestaetigung Stunden spaeter soll den Rechtestand von *jetzt*
+    # sehen, nicht den von damals.
+    angebotene_werkzeuge: frozenset[str]
 
 
 def _vorschlag_ergebnisse(db, proposal_ids: list[str]) -> list[dict]:
@@ -1477,6 +1484,7 @@ def _segment_vorbereiten(run_id: str) -> tuple[_Vorbereitung | None, tuple[str, 
             reasoning_effort=run.reasoning_effort,
             token_price_micro_usd_per_million=provider.token_price_micro_usd_per_million,
             zustand=zustand,
+            angebotene_werkzeuge=angebotene_werkzeuge(db, user),
         ), None
 
 
@@ -1785,16 +1793,25 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         # Prompt sagt ihm ja, bei Unklarheit zu fragen —, bekommt eine
         # Ablehnung, und die Runde ist verbraucht. Bei einem stehenden Auftrag
         # passiert das jede Nacht aufs Neue.
-        erlaubt = None
+        #
+        # Dasselbe gilt seit der Rechtepruefung fuer den ganzen Katalog: wer
+        # kein Hoster-Recht hat, dessen KI kann die Hoster-Werkzeuge ohnehin
+        # nicht ausfuehren — angeboten bekam er sie trotzdem, alle 51.
+        #
+        # **Geschnitten, nicht ersetzt.** `GUARDIAN_HEILUNG_TOOLS` und
+        # `aufgaben_tools` sind bewusst ausgeschriebene Aufzaehlungen: was dort
+        # nicht steht, soll auch dann nicht in einen unbeaufsichtigten Lauf
+        # geraten, wenn der Benutzer das Recht dazu haette. Und umgekehrt darf
+        # ein Eintrag dort kein Recht ersetzen, das dem Benutzer fehlt.
+        erlaubt = vorbereitung.angebotene_werkzeuge
         if guardian is not None:
-            erlaubt = GUARDIAN_HEILUNG_TOOLS
+            erlaubt = erlaubt & GUARDIAN_HEILUNG_TOOLS
         elif aufgabe is not None:
-            erlaubt = aufgaben_tools(aufgabe.kind)
-        if erlaubt is not None:
-            tools = [
-                eintrag for eintrag in tools
-                if str(eintrag.get("function", {}).get("name")) in erlaubt
-            ]
+            erlaubt = erlaubt & aufgaben_tools(aufgabe.kind)
+        tools = [
+            eintrag for eintrag in tools
+            if str(eintrag.get("function", {}).get("name")) in erlaubt
+        ]
         # Zwischenspeichern des Prompts, sofern dieses Modell es ausdruecklich
         # verlangt. Einmal je Segment ermittelt und nicht je Runde: der Katalog
         # antwortet zwar aus seinem eigenen Speicher, aber die Antwort kann sich

@@ -123,6 +123,59 @@ def has_server_permission(db: Session, user: User, server_id: int, key: str) -> 
     return _team_server_permission(db, user, server_id, key)
 
 
+def has_permission_anywhere(db: Session, user: User, key: str) -> bool:
+    """Haelt der Benutzer dieses Recht **irgendwo** — global oder auf irgendeinem Server?
+
+    Gebraucht wird das an genau einer Stelle: beim Zusammenstellen des
+    Werkzeugkatalogs fuer die KI. Dort gibt es noch keinen Server, ueber den
+    geurteilt werden koennte — das Modell waehlt ihn erst im Argument des
+    Aufrufs. Die Frage lautet deshalb nicht "darf er es hier", sondern "kann er
+    es ueberhaupt".
+
+    **Das ist bewusst die grosszuegigere Frage.** Sie entscheidet nur, was
+    angeboten wird. Ob ein Aufruf laeuft, entscheidet weiterhin
+    `has_server_permission` am konkreten Server — unveraendert und als einzige
+    Wahrheit. Eine Verwechslung der beiden waere eine Rechteausweitung: wer auf
+    Server A schreiben darf, duerfte es sonst auch auf B.
+
+    Dieselbe Reihenfolge wie in `has_server_permission`, nur mengenweise:
+    Owner, pauschale Rolle, Per-Server-Delegation, Team — und beim Team
+    derselbe Deckel, das direkte Recht des Gruenders.
+    """
+    if has_global_permission(db, user, key):
+        # Deckt Owner und die pauschale Rolle ab. Eine Rolle mit einem
+        # server-scoped Key gilt fuer alle Server (siehe Kopf dieser Datei).
+        return True
+    delegiert = (
+        db.query(ServerPermission.id)
+        .filter(
+            ServerPermission.user_id == user.id,
+            ServerPermission.permission_key == key,
+        )
+        .first()
+    )
+    if delegiert is not None:
+        return True
+    rows = (
+        db.query(TeamServerGrant.server_id, Team.owner_user_id)
+        .join(Team, Team.id == TeamServerGrant.team_id)
+        .join(TeamMember, TeamMember.team_id == Team.id)
+        .filter(
+            TeamMember.user_id == user.id,
+            TeamServerGrant.permission_key == key,
+        )
+        .distinct()
+        .all()
+    )
+    for server_id, owner_user_id in rows:
+        if owner_user_id == user.id:
+            continue
+        owner = db.get(User, owner_user_id)
+        if owner is not None and direct_server_permission(db, owner, server_id, key):
+            return True
+    return False
+
+
 def _team_visible_server_ids(db: Session, user: User) -> set[int]:
     """Server, die dieser Benutzer ueber ein Team sehen darf.
 

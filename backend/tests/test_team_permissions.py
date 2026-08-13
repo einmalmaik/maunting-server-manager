@@ -148,6 +148,58 @@ def test_member_receives_exactly_the_granted_permissions(
     assert not permission_service.has_server_permission(db, colleague, server.id, "server.stop")
 
 
+def test_a_team_grant_counts_as_holding_the_right_anywhere(
+    db: Session, regular_user: User
+) -> None:
+    """`has_permission_anywhere` muss den Teamweg mitzaehlen.
+
+    Die Funktion beantwortet die Frage des KI-Werkzeugkatalogs: "kann dieser
+    Benutzer das ueberhaupt". Wuerde sie den Teamweg uebersehen, bekaeme ein
+    Teammitglied Werkzeuge nicht angeboten, die es sehr wohl benutzen darf —
+    kein Loch, aber ein stiller Funktionsverlust genau bei den Benutzern, die
+    ihre Rechte nicht direkt halten.
+    """
+    colleague = _user(db, "kollege")
+    server = _server(db, "geteilt")
+    _allow(db, regular_user, server, "server.view", "server.files.read")
+    assert not permission_service.has_permission_anywhere(
+        db, colleague, "server.files.read"
+    )
+
+    team = _team_with_member(db, regular_user, colleague)
+    team_service.set_server_grants(
+        db, team=team, user=regular_user, server_id=server.id,
+        keys=["server.view", "server.files.read"],
+    )
+
+    assert permission_service.has_permission_anywhere(db, colleague, "server.files.read")
+    # Und der Deckel gilt auch hier: was der Gruender nicht weitergegeben hat,
+    # entsteht nicht.
+    assert not permission_service.has_permission_anywhere(
+        db, colleague, "server.files.write"
+    )
+
+
+def test_holding_a_right_anywhere_is_not_holding_it_everywhere(
+    db: Session, regular_user: User
+) -> None:
+    """Die weichere Frage darf die harte nicht ersetzen.
+
+    Sonst waere der Werkzeugkatalog eine Rechteausweitung: wer auf Server A
+    schreiben darf, duerfte es auch auf B.
+    """
+    server_a = _server(db, "eigener")
+    server_b = _server(db, "fremder")
+    _allow(db, regular_user, server_a, "server.view", "server.files.write")
+
+    assert permission_service.has_permission_anywhere(
+        db, regular_user, "server.files.write"
+    )
+    assert not permission_service.has_server_permission(
+        db, regular_user, server_b.id, "server.files.write"
+    )
+
+
 def test_permission_evaporates_when_the_founder_loses_it(
     db: Session, regular_user: User
 ) -> None:

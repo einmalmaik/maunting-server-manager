@@ -102,6 +102,8 @@ MAX_OPTION_HINT_CHARS = 120
 from services.ai_tool_registry import (  # noqa: E402
     GLOBAL_READ_TOOLS,
     READ_TOOLS,
+    WERKZEUGE,
+    angebotsrechte,
     bekannt as _werkzeug_bekannt,
 )
 
@@ -1288,6 +1290,48 @@ def provider_tool_definitions() -> list[dict]:
             ["path", *_RATIONALE_REQUIRED],
         ),
     ]
+
+
+def angebotene_werkzeuge(db: Session, user: User) -> frozenset[str]:
+    """Die Werkzeuge, die diesem Benutzer ueberhaupt angeboten werden.
+
+    **Der Katalog ist eine Bitte, keine Zusage.** Was hier fehlt, wird nicht
+    angeboten; was hier steht, ist damit noch lange nicht erlaubt. Die Schranke
+    bleibt unveraendert dort, wo sie war — `_resolve_server`, die
+    Rechtepruefung im jeweiligen Handler und `_require_tool_permission` im
+    Vorschlagspfad. Ein Modell, das sich ein Werkzeug ausdenkt oder aus dem
+    Gespraechsverlauf abschreibt, prallt dort weiterhin ab.
+
+    Warum es das trotzdem gibt, und zwar zuerst als **Korrektur**: die KI erbt
+    die Rechte des Benutzers. Wer kein Hoster-Recht hat, dessen KI kann die
+    Hoster-Werkzeuge nicht ausfuehren — angeboten bekam er sie trotzdem, alle
+    51. Das Modell versuchte sie, wurde abgewiesen und hatte eine Runde
+    verbraucht. Wir haben ihm also Faehigkeiten angeboten, die es in seinem
+    Namen nie hatte.
+
+    Die Ersparnis kommt obendrauf: der Katalog geht in **jeder** Runde der
+    Werkzeugschleife mit ueber die Leitung und machte 94 Prozent des Prompts
+    aus. Und die Trefferqualitaet steigt — bei 51 aehnlichen Werkzeugen greift
+    ein Modell haeufiger zum falschen.
+
+    Gefragt wird `has_permission_anywhere` und nicht `has_server_permission`:
+    hier gibt es noch keinen Server. Den waehlt das Modell erst im Argument des
+    Aufrufs, und dort wird dann am konkreten Server geprueft.
+    """
+    # Je Schluessel einmal fragen. Zwoelf Werkzeuge haengen an vier
+    # Dateirechten; ohne diesen Merkzettel waeren das zwoelf Abfragen fuer vier
+    # Antworten, und der Katalog wird einmal je Segment gebaut.
+    gemerkt: dict[str, bool] = {}
+
+    def darf(key: str) -> bool:
+        if key not in gemerkt:
+            gemerkt[key] = permission_service.has_permission_anywhere(db, user, key)
+        return gemerkt[key]
+
+    return frozenset(
+        name for name in WERKZEUGE
+        if not angebotsrechte(name) or any(darf(key) for key in angebotsrechte(name))
+    )
 
 
 #: Wieviele Wiederherstellungsversuche eines Vorfalls die KI zu sehen bekommt.
