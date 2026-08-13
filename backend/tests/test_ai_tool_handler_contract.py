@@ -137,7 +137,10 @@ def test_a_failed_tool_call_is_marked_in_the_history() -> None:
     stand seit jeher im SSE-Payload — es fehlte im TypeScript-Typ und wurde
     nirgends gerendert.
     """
-    quelle = inspect.getsource(ai_stream_service._tool_followup_messages)
+    # `_anzeigeeintrag` und nicht mehr `_tool_followup_messages`: der Bau des
+    # Verlaufseintrags ist dorthin gewandert, als die Werkzeuge nebenlaeufig
+    # wurden. Die Zusage ist dieselbe geblieben, nur ihr Ort hat sich geaendert.
+    quelle = inspect.getsource(ai_stream_service._anzeigeeintrag)
     assert '"failed": True' in quelle
     typen = (
         Path(ai_action_service.__file__).resolve().parents[2]
@@ -153,7 +156,7 @@ def test_the_group_reaches_the_frontend() -> None:
     — `search_memory` und `forget_memory` tragen dieselbe Gruppe und bekamen
     trotzdem den allgemeinen Schraubenschluessel.
     """
-    quelle = inspect.getsource(ai_stream_service._tool_followup_messages)
+    quelle = inspect.getsource(ai_stream_service._anzeigeeintrag)
     assert '"gruppe"' in quelle
 
 

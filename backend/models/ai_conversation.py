@@ -87,6 +87,25 @@ class AiMessage(Base):
     # Schwerste — **das Modell sah seine eigene Frage in der Historie nicht**.
     # Auf die Antwort "Server.properties" folgte deshalb dieselbe Frage erneut.
     question_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Die Gliederung dieser Antwort: Text und Werkzeuge in der Reihenfolge, in
+    # der sie entstanden sind, als [{"art": "text", "inhalt": ...},
+    # {"art": "tool", "werkzeug": {...}}, ...].
+    #
+    # Aus demselben Grund hier wie `question_json` daneben, und aus demselben
+    # gemeldeten Anlass: was nur im Ereignisstrom lebte, war nach einem
+    # Neuladen weg. Der Betreiber hat genau das benannt — "man sieht die
+    # Tool-Uses nur waehrenddessen".
+    #
+    # `content` bleibt daneben stehen und ist **kein** zweiter Speicher
+    # derselben Sache: es ist der reine Text, der zum Anbieter zurueckgeht und
+    # in die Zusammenfassung einfliesst. Die Abschnitte sind das, was der
+    # Browser zeichnet. Wer nur eines von beiden haette, muesste das andere
+    # raten — aus dem Text die Reihenfolge der Werkzeuge, oder aus den
+    # Abschnitten einen Text, der Werkzeugchips enthaelt.
+    #
+    # `None` heisst "aus der Zeit vor dieser Spalte", nicht "keine Abschnitte".
+    # Der Verlauf zeigt solche Nachrichten weiterhin als reinen Text.
+    sections_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="complete")
     provider_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("ai_providers.id", ondelete="SET NULL"), nullable=True

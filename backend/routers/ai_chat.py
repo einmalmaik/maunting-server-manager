@@ -5,6 +5,7 @@ Unterhaltungen mehr. Der Assistent hat genau einen Chat; geloescht wird der
 *Verlauf*, nicht die Unterhaltung.
 """
 
+import json
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -24,6 +25,7 @@ from schemas.ai_chat import (
     AiMessageResponse,
     AiQuestionPayload,
     AiRunResponse,
+    AiSection,
 )
 from services import (
     ai_chat_service,
@@ -69,6 +71,27 @@ def _question(message: AiMessage) -> AiQuestionPayload | None:
         return None
 
 
+def _sections(message: AiMessage) -> list[AiSection] | None:
+    """Die gespeicherte Gliederung dieser Antwort, falls es eine gibt.
+
+    Dieselbe Nachsicht wie bei `_question` daneben, aus demselben Grund: eine
+    unlesbare Zeile kostet die Werkzeugchips einer alten Nachricht, nicht den
+    ganzen Verlauf. Der Text steht ohnehin in `content` und wird angezeigt.
+    """
+    if not message.sections_json:
+        return None
+    try:
+        roh = json.loads(message.sections_json)
+    except ValueError:
+        return None
+    if not isinstance(roh, list):
+        return None
+    try:
+        return [AiSection.model_validate(eintrag) for eintrag in roh]
+    except ValueError:
+        return None
+
+
 def _message_response(message: AiMessage) -> AiMessageResponse:
     return AiMessageResponse(
         id=message.id,
@@ -76,6 +99,7 @@ def _message_response(message: AiMessage) -> AiMessageResponse:
         content=message.content,
         reasoning=message.reasoning,
         question=_question(message),
+        sections=_sections(message),
         status=message.status,
         provider_id=message.provider_id,
         model=message.model,
@@ -197,7 +221,19 @@ async def _replay_message(message: AiMessage) -> AsyncIterator[str]:
     yield sse_event("message", {"message_id": message.id, "request_id": message.request_id})
     if message.reasoning:
         yield sse_event("reasoning", {"content": message.reasoning})
-    if message.content:
+    # Die Wiedergabe folgt der **gespeicherten Reihenfolge**, wenn es eine gibt.
+    # Ein einzelnes `delta` mit dem ganzen Text waere fuer eine Antwort, die
+    # zwischen ihren Absaetzen Werkzeuge gerufen hat, eine falsche Wiedergabe:
+    # der Text stimmte, die Werkzeuge fehlten, und beim naechsten Neuladen
+    # saehe dieselbe Nachricht wieder anders aus als eben.
+    abschnitte = _sections(message)
+    if abschnitte:
+        for abschnitt in abschnitte:
+            if abschnitt.art == "text" and abschnitt.inhalt:
+                yield sse_event("delta", {"content": abschnitt.inhalt})
+            elif abschnitt.art == "tool" and abschnitt.werkzeug:
+                yield sse_event("tool", abschnitt.werkzeug)
+    elif message.content:
         yield sse_event("delta", {"content": message.content})
     # Endete der Zug mit einer Rueckfrage, gehoert sie auch in die Wiedergabe —
     # sonst saehe der Benutzer nach einem erneuten Absenden derselben Anfrage

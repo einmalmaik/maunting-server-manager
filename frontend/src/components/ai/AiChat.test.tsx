@@ -480,19 +480,26 @@ describe('AiChat', () => {
   })
 
   it('zeigt eine Werkzeugzeile nach dem erneuten Anhängen nicht doppelt', async () => {
-    // Der Abzug eines Laufs trägt **alle** seine Werkzeuge: `Abzug.werkzeuge`
-    // wird auch beim Segmentwechsel nicht geleert. Wer sich nach einer
-    // bestätigten Aktion wieder anhängt, bekommt sie deshalb erneut. Trugen
-    // live gemeldete und aus dem Abzug gelesene Zeilen verschiedene Kennungen,
-    // lief die Dublettenprüfung ins Leere — jede vorher gezeigte Werkzeugzeile
-    // stand danach zweimal im Verlauf.
+    // Der Abzug eines Laufs trägt **alle** seine Abschnitte. Wer sich nach
+    // einer bestätigten Aktion wieder anhängt, bekommt sie deshalb erneut.
+    //
+    // Früher waren Werkzeuge eigene Verlaufseinträge mit selbst vergebenen
+    // Kennungen, und die Dublettenprüfung dagegen war handgemacht: trugen live
+    // gemeldete und aus dem Abzug gelesene Zeilen verschiedene Nummern, stand
+    // jede vorher gezeigte Zeile danach zweimal da. Seit Werkzeuge Abschnitte
+    // **innerhalb** der Nachricht sind, wird die Liste aus dem Abzug gesetzt
+    // statt angehängt — die Dublette kann strukturell nicht mehr entstehen.
+    // Der Test bleibt trotzdem: er hält fest, dass das Setzen und nicht das
+    // Anhängen die richtige Verknüpfung ist.
     const werkzeug: AiToolUse = {
       tool_name: 'read_server_logs', server_id: 7,
       skill_key: null, skill_name: null, skill_status: null, skill_learned: false,
     }
     const abzug = (tools: AiToolUse[]): AiRunSnapshot => ({
       run_id: 'lauf-9', status: 'running', message_id: null, content: '',
-      reasoning: '', tools, question: null, proposals: [], stop_reason: null,
+      reasoning: '',
+      sections: tools.map((werkzeug) => ({ art: 'tool' as const, werkzeug })),
+      question: null, proposals: [], stop_reason: null,
     })
     const { streamAiMessage } = await import('@/api/ai')
     vi.mocked(aiApi.listActions).mockResolvedValue([{

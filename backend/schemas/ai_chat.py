@@ -1,6 +1,7 @@
 """API-Vertraege fuer die eine persistente AI-Unterhaltung."""
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -30,6 +31,26 @@ class AiConversationResponse(BaseModel):
     updated_at: datetime
 
 
+class AiSection(BaseModel):
+    """Ein Abschnitt einer Antwort — entweder Text oder ein Werkzeugaufruf.
+
+    Zwei Formen in einem Typ statt zweier Listen: die **Reihenfolge zwischen
+    ihnen** ist die Information, um die es geht. "Ich sehe mir den Status an" —
+    Werkzeug — "der laeuft, jetzt die Logs" — Werkzeug ist etwas anderes als
+    derselbe Text mit denselben Werkzeugen in beliebiger Anordnung, und aus zwei
+    getrennten Listen laesst sich das nicht wiederherstellen.
+
+    ``werkzeug`` traegt dieselbe Nutzlast wie das `tool`-Ereignis im Stream
+    (`_anzeigeeintrag`): Name, Server, Gruppe, Fehlschlag, Skillangaben. Bewusst
+    ohne Ergebnis — ein Logausschnitt gehoert nicht ungefragt in den sichtbaren
+    Verlauf.
+    """
+
+    art: Literal["text", "tool"]
+    inhalt: str | None = None
+    werkzeug: dict | None = None
+
+
 class AiMessageResponse(BaseModel):
     id: str
     role: str
@@ -42,6 +63,13 @@ class AiMessageResponse(BaseModel):
     # Nachricht und keine eigene Blase — im Chat erscheint sie unter dem Text
     # derselben Antwort, so wie ein Mensch eine Frage an das Gesagte anhaengt.
     question: AiQuestionPayload | None = None
+    # Die Gliederung dieser Antwort: Text und Werkzeuge in der Reihenfolge, in
+    # der sie entstanden sind. Damit zeigt der nachgeladene Verlauf dasselbe wie
+    # der Live-Strom — vorher endeten die Werkzeuge mit der Verbindung.
+    #
+    # `None` heisst "aus der Zeit vor dieser Spalte". Die Oberflaeche zeigt
+    # solche Nachrichten dann wie immer: als reinen Text aus `content`.
+    sections: list[AiSection] | None = None
     status: str
     provider_id: int | None
     model: str | None

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, BookOpen, Bot, Brain, BrainCircuit, CalendarClock, Check, Loader2, Paperclip, Pencil, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
+import { AlertTriangle, BookOpen, Bot, Brain, BrainCircuit, CalendarClock, Check, ChevronDown, ChevronRight, Loader2, Paperclip, Pencil, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -14,6 +14,7 @@ import {
   type AiMessage,
   type AiProviderAvailable,
   type AiRunInfo,
+  type AiSection,
   type AiStreamEvent,
   type AiToolUse,
 } from '@/api/ai'
@@ -41,11 +42,66 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 /** Ein Eintrag im sichtbaren Verlauf — chronologisch, nicht nach Typ sortiert. */
 type Entry =
   | { kind: 'message'; id: string; message: AiMessage }
-  | { kind: 'tool'; id: string; tool: AiToolUse }
   // Marke fuer das Falten des aelteren Verlaufs. Ohne sichtbaren Hinweis
   // wuerde die KI spaeter Dinge "vergessen", ohne dass jemand weiss warum.
   | { kind: 'compacted'; id: string }
   | { kind: 'proposal'; id: string; proposal: AiActionProposal }
+
+// Hier stand ein `{ kind: 'tool' }` als **eigener** Verlaufseintrag, den
+// `insertBeforeStreaming` vor die noch schreibende Blase schob. Das stimmte
+// genau solange, wie die KI erst alle Werkzeuge rief und danach redete: dann
+// gehoerte alles davor. Seit sie waehrend der Arbeit spricht, gehoert ein
+// Werkzeug **zwischen** zwei Absaetze derselben Antwort — und damit in die
+// Nachricht, nicht daneben. Ein eigener Eintrag koennte diese Stelle nicht
+// benennen.
+
+/** Haengt Text an den letzten Textabschnitt an — oder faengt einen neuen an. */
+function mitText(abschnitte: AiSection[] | null | undefined, stueck: string): AiSection[] {
+  const bisher = abschnitte ?? []
+  const letzter = bisher[bisher.length - 1]
+  if (letzter?.art === 'text') {
+    return [
+      ...bisher.slice(0, -1),
+      { ...letzter, inhalt: (letzter.inhalt ?? '') + stueck },
+    ]
+  }
+  return [...bisher, { art: 'text', inhalt: stueck }]
+}
+
+function mitWerkzeug(
+  abschnitte: AiSection[] | null | undefined, werkzeug: AiToolUse,
+): AiSection[] {
+  return [...(abschnitte ?? []), { art: 'tool', werkzeug }]
+}
+
+/**
+ * Fasst **aufeinanderfolgende** Werkzeuge zu einer Gruppe zusammen.
+ *
+ * Der Betreiber wollte die Werkzeuge vergangener Nachrichten sehen, aber
+ * eingeklappt. Beides zugleich geht nur, wenn die Gruppierung der Reihenfolge
+ * folgt: eine einzige Liste am Ende der Blase waere eingeklappt zwar
+ * uebersichtlich, verloere aber genau die Zuordnung, um die es geht — welcher
+ * Satz vor welchem Aufruf stand.
+ */
+function gruppiert(abschnitte: AiSection[]): (
+  | { art: 'text'; inhalt: string }
+  | { art: 'tools'; werkzeuge: AiToolUse[] }
+)[] {
+  const raus: (
+    | { art: 'text'; inhalt: string }
+    | { art: 'tools'; werkzeuge: AiToolUse[] }
+  )[] = []
+  for (const abschnitt of abschnitte) {
+    if (abschnitt.art === 'tool' && abschnitt.werkzeug) {
+      const letzte = raus[raus.length - 1]
+      if (letzte?.art === 'tools') letzte.werkzeuge.push(abschnitt.werkzeug)
+      else raus.push({ art: 'tools', werkzeuge: [abschnitt.werkzeug] })
+    } else if (abschnitt.art === 'text' && abschnitt.inhalt) {
+      raus.push({ art: 'text', inhalt: abschnitt.inhalt })
+    }
+  }
+  return raus
+}
 
 interface ServerOption {
   id: number
@@ -456,26 +512,19 @@ export function AiChat() {
     let offeneOptimistische = optimistischeId !== null
     let offeneBenutzerblase = optimistischeBenutzerId
     let gescheitert = false
-    // Zu welchem Lauf die Werkzeugzeilen gehören und wie viele davon schon
-    // stehen. Beides braucht ihre Kennung — und sie muss **dieselbe** sein,
-    // egal ob die Zeile live gemeldet wurde oder aus dem Abzug kam. Sonst
-    // erkennt die Dublettenprüfung im Abzug die eigenen Zeilen nicht wieder:
-    // der Abzug trägt **alle** Werkzeuge des Laufs (`Abzug.werkzeuge` wird auch
-    // beim Segmentwechsel nicht geleert), und wer sich nach einer bestätigten
-    // Aktion wieder anhängt, sähe jede vorher gezeigte Zeile ein zweites Mal.
+    // Hier wurden einmal Kennungen für Werkzeugzeilen vergeben, damit eine live
+    // gemeldete Zeile und dieselbe Zeile aus einem späteren Abzug als **eine**
+    // erkannt wurden — sonst stand nach dem Wiederanhängen jede doppelt da.
     //
-    // Der Abzug kommt immer zuerst (`lauf_verfolgen` sendet ihn als erstes
-    // Ereignis, auch beim frischen Senden) — die Laufkennung steht also, bevor
-    // das erste Werkzeug gemeldet wird.
-    let laufKennung: string | null = null
-    let werkzeugZaehler = 0
-    const werkzeugId = (nummer: number) => `run-${laufKennung}-tool-${nummer}`
+    // Die Frage stellt sich nicht mehr. Werkzeuge sind Abschnitte **innerhalb**
+    // einer Nachricht, und der Abzug bringt die Abschnittsliste vollständig mit:
+    // sie wird gesetzt, nicht angehängt. Eine Dublette kann so nicht entstehen,
+    // und es gibt nichts abzugleichen.
 
     const verarbeite = ({ event: name, data }: AiStreamEvent) => {
       if (!mountedRef.current) return
       if (name === 'snapshot') {
         setRunId(data.run_id)
-        laufKennung = data.run_id
         // Der Abzug **ersetzt** den Stand, er ergaenzt ihn nicht: er ist die
         // vollstaendige Antwort bis hierher. Alles anzuhaengen wuerde den Text
         // verdoppeln, wenn man sich waehrend des Schreibens wieder anhaengt.
@@ -489,6 +538,11 @@ export function AiChat() {
             const gesetzt = (message: AiMessage): AiMessage => ({
               ...message,
               content: data.content,
+              // Die Gliederung kommt vollstaendig aus dem Abzug — sie **ist**
+              // der Grund, warum es ihn gibt. Vorher brachte er `tools` als
+              // eigene Liste mit, und die Oberflaeche musste raten, wo
+              // dazwischen der Text stand.
+              sections: data.sections,
               reasoning: data.reasoning || null,
               question: data.question,
               status: laeuft ? 'streaming' : 'complete',
@@ -513,19 +567,6 @@ export function AiChat() {
           aktuell = id
           offeneOptimistische = false
         }
-        // Werkzeugspuren ueberleben kein Neuladen — der Abzug bringt sie zurueck.
-        data.tools.forEach((tool, index) => {
-          const id = werkzeugId(index)
-          setEntries((current) => (
-            current.some((entry) => entry.kind === 'tool' && entry.id === id)
-              ? current
-              : insertBeforeStreaming(current, { kind: 'tool', id, tool })
-          ))
-        })
-        // Der Abzug ist vollständig: die nächste live gemeldete Werkzeugzeile
-        // ist die (n+1)-te dieses Laufs und bekommt genau die Nummer, unter der
-        // sie in einem späteren Abzug wieder auftauchen wird.
-        werkzeugZaehler = data.tools.length
         data.proposals.forEach(merkeVorschlag)
         return
       }
@@ -591,11 +632,19 @@ export function AiChat() {
         aktuell = data.message_id
         return
       }
-      if (!aktuell && (name === 'delta' || name === 'reasoning' || name === 'question' || name === 'done')) {
+      if (!aktuell && (name === 'delta' || name === 'reasoning' || name === 'question' || name === 'done' || name === 'tool')) {
         return
       }
       if (name === 'delta') {
-        aendere(aktuell!, (message) => ({ ...message, content: message.content + data.content }))
+        // `content` und `sections` gehen zusammen weiter, weil sie
+        // Verschiedenes sind: der reine Text und seine Gliederung. Die
+        // Gliederung erbt hier ihre eigentliche Aufgabe — ein Werkzeug, das
+        // zwischen zwei Absaetzen lief, trennt sie in zwei Abschnitte.
+        aendere(aktuell!, (message) => ({
+          ...message,
+          content: message.content + data.content,
+          sections: mitText(message.sections, data.content),
+        }))
       } else if (name === 'reasoning') {
         aendere(aktuell!, (message) => ({
           ...message, reasoning: (message.reasoning ?? '') + data.content,
@@ -611,14 +660,14 @@ export function AiChat() {
         // Kontext. Genau hier hat sich der Fuellstand geaendert.
         void ladeKontext()
       } else if (name === 'tool') {
-        // Dieselbe Kennung wie im Abzug — siehe `werkzeugId`. Vorher stand hier
-        // `${data.tool_name}-${current.length}`, eine Nummer aus der Länge des
-        // **ganzen** Verlaufs; die konnte im Abzug niemals wieder vorkommen,
-        // und beim Wiederanhängen stand jede Zeile ein zweites Mal da.
-        const id = werkzeugId(werkzeugZaehler)
-        werkzeugZaehler += 1
-        setEntries((current) => insertBeforeStreaming(current, {
-          kind: 'tool', id, tool: data,
+        // In die laufende Nachricht, an ihr Ende — dorthin, wo der Aufruf
+        // tatsaechlich stattgefunden hat. Eine eigene Kennung braucht es dafuer
+        // nicht mehr: die Stelle in der Liste **ist** die Identitaet, und ein
+        // spaeterer Abzug bringt dieselbe Liste mit. Genau daran krankte die
+        // alte Loesung — sie musste Nummern vergeben, die im Abzug wieder
+        // auftauchen konnten.
+        aendere(aktuell!, (message) => ({
+          ...message, sections: mitWerkzeug(message.sections, data),
         }))
       } else if (name === 'compacted') {
         // Die Marke gehoert an den Anfang: sie beschreibt, was *vorher* war.
@@ -867,54 +916,6 @@ export function AiChat() {
 
           <div className="space-y-4">
             {entries.map((entry, index) => {
-              if (entry.kind === 'tool') {
-                // Die Gruppe kommt jetzt aus der Registry mit. Vorher stand
-                // hier `tool_name === 'remember'` — `search_memory` und
-                // `forget_memory` tragen dieselbe Gruppe und bekamen trotzdem
-                // das allgemeine Werkzeugsymbol.
-                const gruppe = entry.tool.gruppe
-                const skillKey = entry.tool.skill_key
-                // Ein Skill bekommt seinen Namen in den Verlauf, nicht den
-                // Werkzeugnamen: "Skill *Valheim braucht 6 GB* gelernt" sagt
-                // etwas, "learn_skill" sagt nichts.
-                const skillLabel = skillKey
-                  ? t(
-                      entry.tool.skill_learned
-                        ? (entry.tool.skill_status === 'pending'
-                            ? 'ai.skills.learnedPending'
-                            : 'ai.skills.learned')
-                        : 'ai.skills.used',
-                      { name: entry.tool.skill_name || skillKey },
-                    )
-                  : null
-                return (
-                  <p
-                    key={entry.id}
-                    className="flex items-center gap-2 text-xs text-on-surface-variant"
-                  >
-                    {gruppe === 'skill'
-                      ? <Sparkles className="h-3.5 w-3.5 shrink-0 text-tertiary" aria-hidden="true" />
-                      : gruppe === 'memory'
-                        ? <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-                        : gruppe === 'docs'
-                          ? <BookOpen className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
-                          : gruppe === 'tasks'
-                            ? <CalendarClock className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
-                            : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
-                    {skillLabel
-                      ?? t(`ai.tools.${entry.tool.tool_name}`, { defaultValue: entry.tool.tool_name })}
-                    {/* Ohne diesen Zusatz behauptet die Zeile einen Beleg, den
-                        es nicht gibt — der gefaehrlichste Fall bei den
-                        Doku-Werkzeugen. */}
-                    {entry.tool.failed && (
-                      <span className="inline-flex items-center gap-1 text-status-error">
-                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                        {t('ai.chat.toolFailed')}
-                      </span>
-                    )}
-                  </p>
-                )
-              }
               if (entry.kind === 'compacted') {
                 return (
                   <div key={entry.id} className="flex items-center gap-3 py-2">
@@ -1032,7 +1033,30 @@ export function AiChat() {
                     {message.reasoning && (
                       <AiReasoningBlock content={message.reasoning} streaming={isStreaming} />
                     )}
-                    {message.content ? (
+                    {message.sections && message.sections.length > 0 ? (
+                      // Der Zug in seiner tatsaechlichen Reihenfolge: Satz,
+                      // Werkzeuge, Satz, Werkzeuge. Genau so ist er entstanden,
+                      // und genau so hat der Benutzer ihn live gesehen — nach
+                      // einem Neuladen soll er nicht anders aussehen.
+                      <div className="space-y-3">
+                        {gruppiert(message.sections).map((teil, stelle) => (
+                          teil.art === 'tools' ? (
+                            <AiWerkzeuggruppe
+                              key={stelle}
+                              werkzeuge={teil.werkzeuge}
+                              // Waehrend die Antwort entsteht, ist das
+                              // Aufgeklappte die Antwort: der Benutzer sieht,
+                              // dass gearbeitet wird. Ist sie fertig, ist es
+                              // ein Beleg, den man nachschlagen kann — und der
+                              // den Verlauf nicht zustellen soll.
+                              offenVoreingestellt={isStreaming}
+                            />
+                          ) : (
+                            <AiMarkdown key={stelle} content={teil.inhalt} />
+                          )
+                        ))}
+                      </div>
+                    ) : message.content ? (
                       <AiMarkdown content={message.content} />
                     ) : isStreaming ? (
                       <p className="flex items-center gap-2 text-sm text-on-surface-variant">
@@ -1296,11 +1320,113 @@ function entryTimestamp(entry: Entry): string {
   return ''
 }
 
-/** Haengt einen Werkzeugeintrag vor die noch streamende Antwort. */
-function insertBeforeStreaming(entries: Entry[], entry: Entry): Entry[] {
-  const index = entries.findIndex(
-    (item) => item.kind === 'message' && item.message.status === 'streaming' && item.message.role === 'assistant',
+/** Eine einzelne Werkzeugzeile: Symbol, Bezeichnung, ggf. Fehlschlag. */
+function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {
+  const { t } = useTranslation()
+  // Die Gruppe kommt aus der Registry mit. Vorher stand hier
+  // `tool_name === 'remember'` — `search_memory` und `forget_memory` tragen
+  // dieselbe Gruppe und bekamen trotzdem das allgemeine Werkzeugsymbol.
+  const gruppe = tool.gruppe
+  const skillKey = tool.skill_key
+  // Ein Skill bekommt seinen Namen in den Verlauf, nicht den Werkzeugnamen:
+  // "Skill *Valheim braucht 6 GB* gelernt" sagt etwas, "learn_skill" nichts.
+  const skillLabel = skillKey
+    ? t(
+        tool.skill_learned
+          ? (tool.skill_status === 'pending'
+              ? 'ai.skills.learnedPending'
+              : 'ai.skills.learned')
+          : 'ai.skills.used',
+        { name: tool.skill_name || skillKey },
+      )
+    : null
+  return (
+    <p className="flex items-center gap-2 text-xs text-on-surface-variant">
+      {gruppe === 'skill'
+        ? <Sparkles className="h-3.5 w-3.5 shrink-0 text-tertiary" aria-hidden="true" />
+        : gruppe === 'memory'
+          ? <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+          : gruppe === 'docs'
+            ? <BookOpen className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+            : gruppe === 'tasks'
+              ? <CalendarClock className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+              : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
+      {skillLabel ?? t(`ai.tools.${tool.tool_name}`, { defaultValue: tool.tool_name })}
+      {/* Ohne diesen Zusatz behauptet die Zeile einen Beleg, den es nicht gibt
+          — der gefaehrlichste Fall bei den Doku-Werkzeugen. */}
+      {tool.failed && (
+        <span className="inline-flex items-center gap-1 text-status-error">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {t('ai.chat.toolFailed')}
+        </span>
+      )}
+    </p>
   )
-  if (index < 0) return [...entries, entry]
-  return [...entries.slice(0, index), entry, ...entries.slice(index)]
+}
+
+/**
+ * Eine Gruppe aufeinanderfolgender Werkzeuge — aufklappbar.
+ *
+ * Waehrend die Antwort entsteht, steht sie offen: das Zusehen **ist** hier die
+ * Rueckmeldung, und ein zugeklappter Kasten waehrend einer Minute Arbeit waere
+ * wieder das, was abgeschafft werden sollte. Ist die Antwort fertig, klappt
+ * sie zu — dann ist sie ein Beleg zum Nachschlagen, und ein Verlauf aus
+ * zwanzig Werkzeugzeilen liest sich niemand durch.
+ *
+ * Der Zustand haengt am Bauteil und nicht am Verlauf: was jemand aufgeklappt
+ * hat, geht beim naechsten Neuladen wieder zu. Das ist die richtige Richtung —
+ * eingeklappt ist der ruhige Zustand.
+ */
+function AiWerkzeuggruppe(
+  { werkzeuge, offenVoreingestellt }: {
+    werkzeuge: AiToolUse[]
+    offenVoreingestellt: boolean
+  },
+) {
+  const { t } = useTranslation()
+  const [offen, setOffen] = useState(offenVoreingestellt)
+  // Waechst die Gruppe waehrend des Schreibens weiter, soll sie offen bleiben —
+  // und beim Uebergang auf "fertig" zugehen, ohne eine Entscheidung des
+  // Benutzers zu ueberschreiben, die es vorher gar nicht geben konnte.
+  useEffect(() => { setOffen(offenVoreingestellt) }, [offenVoreingestellt])
+
+  if (offen) {
+    return (
+      <div className="space-y-1">
+        {werkzeuge.map((werkzeug, stelle) => (
+          <AiWerkzeugzeile key={stelle} tool={werkzeug} />
+        ))}
+        {!offenVoreingestellt && (
+          <button
+            type="button"
+            onClick={() => setOffen(false)}
+            className="flex items-center gap-1 text-xs text-on-surface-variant hover:text-on-surface"
+          >
+            <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            {t('ai.chat.toolsCollapse')}
+          </button>
+        )}
+      </div>
+    )
+  }
+  const gescheitert = werkzeuge.some((werkzeug) => werkzeug.failed)
+  return (
+    <button
+      type="button"
+      onClick={() => setOffen(true)}
+      className="flex items-center gap-2 text-xs text-on-surface-variant hover:text-on-surface"
+    >
+      <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+      {t('ai.chat.toolsUsed', { count: werkzeuge.length })}
+      {/* Ein Fehlschlag darf sich nicht hinter dem Zuklappen verstecken: er ist
+          genau die Auskunft, wegen der die Zeile ueberhaupt existiert. */}
+      {gescheitert && (
+        <span className="inline-flex items-center gap-1 text-status-error">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {t('ai.chat.toolFailed')}
+        </span>
+      )}
+    </button>
+  )
 }

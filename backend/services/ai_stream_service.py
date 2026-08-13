@@ -26,7 +26,7 @@ from uuid import UUID, uuid4
 import httpx
 from sqlalchemy.exc import IntegrityError
 
-from database import SessionLocal
+from database import SessionLocal, engine
 from models import (
     AiActionProposal, AiMessage, AiProvider, AiRun, AiToolResult, AiUsageEvent, User,
 )
@@ -160,6 +160,7 @@ def _finalize_stream(
     token_price_micro_usd_per_million: int | None = None,
     reasoning: str = "",
     question: dict | None = None,
+    abschnitte: list[dict] | None = None,
 ) -> None:
     with SessionLocal() as db:
         message = db.get(AiMessage, message_id)
@@ -183,6 +184,18 @@ def _finalize_stream(
             if question is not None:
                 message.question_json = json.dumps(
                     question, ensure_ascii=True, separators=(",", ":")
+                )
+            # Die Gliederung — Text und Werkzeuge in ihrer Reihenfolge. Sie kommt
+            # aus dem Vermittler, weil der sie ohnehin fuehrt; eine zweite Liste
+            # im Lauf waere dieselbe Sache ein zweites Mal, und Reihenfolgen
+            # laufen dann auseinander.
+            #
+            # Nur schreiben, wenn es etwas gibt: eine leere Liste hiesse "diese
+            # Antwort hatte keine Abschnitte", und das stimmt fuer einen Lauf,
+            # dessen Kanal schon abgeraeumt war, gerade nicht.
+            if abschnitte:
+                message.sections_json = json.dumps(
+                    abschnitte, ensure_ascii=True, separators=(",", ":")
                 )
             message.status = "failed" if failed else "complete"
         else:
@@ -379,13 +392,141 @@ def aufgabe_aus_zustand(zustand: dict) -> AufgabenKontext | None:
         raise GuardianRahmenUnlesbar("Aufgabenrahmen im Laufzustand unlesbar") from exc
 
 
-def _tool_followup_messages(
+def _werkzeug_nebenlaeufigkeit() -> int:
+    """Wieviele Lesewerkzeuge gleichzeitig laufen duerfen.
+
+    Auf **PostgreSQL** — der einzigen unterstuetzten Betriebsdatenbank
+    (`database_policy.validate_panel_database_url`) — holt sich jeder Aufruf
+    seine eigene Verbindung aus dem Pool. Acht gleichzeitig passen bequem neben
+    den gewoehnlichen Anfragen des Panels; der Rest wartet kurz, statt den Pool
+    leerzuraeumen.
+
+    Auf **SQLite** teilen sich alle Sitzungen eine einzige Verbindung
+    (`StaticPool` in der Testsuite, `SingletonThreadPool` sonst). Zwei
+    Transaktionen gleichzeitig darauf sind keine Nebenlaeufigkeit, sondern ein
+    Datenfehler: der Commit der einen schliesst die offene Arbeit der anderen
+    mit ab. Dort laeuft deshalb einer nach dem anderen.
+
+    **Der wichtigere Teil geht dabei nicht verloren.** Auch bei eins laufen die
+    Aufrufe durch `asyncio.to_thread`, und genau das war das eigentliche
+    Problem: sie hingen bisher *auf* der Ereignisschleife. Neun Aufrufe zu drei
+    Sekunden legten den ganzen Prozess siebenundzwanzig Sekunden lahm —
+    gemessen, nicht vermutet. Die Gleichzeitigkeit ist der zweite Gewinn, nicht
+    der erste.
+    """
+    return 1 if str(engine.url).startswith("sqlite") else 8
+
+
+def _anzeigeeintrag(call, wert, fehlgeschlagen: str | None) -> dict:
+    """Was der Benutzer im Verlauf sehen soll: welches Werkzeug lief und womit.
+
+    Bewusst ohne das Ergebnis — ein Logausschnitt gehoert nicht ungefragt in den
+    sichtbaren Verlauf, und die Antwort fasst ihn ohnehin zusammen.
+    """
+    eintrag = {
+        "tool_name": call.name,
+        "server_id": call.arguments.get("server_id")
+        if isinstance(call.arguments.get("server_id"), int)
+        else None,
+        # Ein gescheiterter Aufruf gehoert sichtbar in den Verlauf. Sonst wirkt
+        # eine Antwort vollstaendig, der eine Auskunft fehlt.
+        **({"failed": True} if fehlgeschlagen else {}),
+        # Die Gruppe entscheidet ueber das Symbol im Verlauf. Sie stand seit
+        # jeher in `ai_tool_registry`, verliess das Backend aber nie — das
+        # Frontend riet sie an einem hartkodierten `tool_name === 'remember'`
+        # nach und lag bei `search_memory` und `forget_memory` daneben. Eine
+        # Zeile hier entfernt eine Abschrift, statt eine hinzuzufuegen.
+        **(
+            {"gruppe": WERKZEUGE[call.name].gruppe}
+            if WERKZEUGE.get(call.name) is not None and WERKZEUGE[call.name].gruppe
+            else {}
+        ),
+    }
+    # Bei Skills gehoert der Name in den Verlauf, nicht nur "read_skill". Der
+    # Betreiber will sehen, *welche* erlernte Vorgehensweise gegriffen hat —
+    # sonst wirkt eine Antwort, die aus einem Skill entstanden ist, wie geraten.
+    # Der Schluessel kommt aus dem Ergebnis und nicht aus den Argumenten: dort
+    # ist er bereits normalisiert und gegen die Sichtbarkeit geprueft.
+    if call.name in SKILL_TOOLS and isinstance(wert, dict):
+        eintrag["skill_key"] = wert.get("skill_key")
+        eintrag["skill_name"] = wert.get("name")
+        eintrag["skill_status"] = wert.get("status")
+        eintrag["skill_learned"] = bool(wert.get("learned"))
+    return eintrag
+
+
+def _werkzeug_ausfuehren(user_id: int, call) -> tuple[object, str | None]:
+    """Genau **ein** Lesewerkzeug, in eigener Sitzung und eigenem Thread.
+
+    Eine Sitzung je Aufruf und nicht eine geteilte fuer die ganze Runde: eine
+    SQLAlchemy-Sitzung gehoert dem Thread, der sie geoeffnet hat. Sie
+    weiterzureichen waere genau die Art Fehler, die erst unter Last auffaellt.
+
+    Der Commit steht hier, weil manches "Lese"-Werkzeug schreibt: `remember`
+    legt einen Eintrag an, `learn_skill` einen Skill, `forget_memory` loescht.
+    Frueher committete die gemeinsame Sitzung am Ende der Runde fuer alle
+    zusammen; jetzt steht jeder Aufruf fuer sich. Das ist die bessere
+    Aufteilung — ein gescheiterter Nachbaraufruf nimmt einem gemerkten Namen
+    nicht mehr die Speicherung.
+    """
+    with SessionLocal() as db:
+        user = db.get(User, user_id)
+        if user is None or not user.is_active:
+            raise AiActionValidationError("AI-Zugriff wurde entzogen")
+        try:
+            wert = execute_read_tool(
+                db, user=user, tool_name=call.name, arguments=call.arguments
+            )
+            db.commit()
+        except AiActionValidationError as exc:
+            # Fehlendes Recht, fremde Server-ID, ungueltige Argumente. Das
+            # Modell soll es erfahren und weitermachen koennen; frueher riss ein
+            # solcher Aufruf die gesamte Antwort ab.
+            db.rollback()
+            return {"error": str(exc)}, str(exc)
+    # **Der Choke Point.** Hier — und nur hier — verlaesst ein Werkzeugergebnis
+    # das Panel Richtung Anbieter und Datenbank.
+    #
+    # Geschwaerzt wurde bisher in den Handlern, jeder fuer sich. Das ist neunmal
+    # dieselbe Entscheidung an neun Orten, und wer einen zehnten Handler
+    # schreibt, vergisst sie: `read_blueprint`, `list_server_files`,
+    # `search_workshop_mods`, `read_skill` und `read_docs` gaben ihre Inhalte
+    # ungefiltert weiter. Dateinamen von der Platte und Titel aus dem
+    # Steam-Workshop sind Fremdtext wie Logzeilen auch.
+    #
+    # Die Handler behalten ihre eigenen Aufrufe. Doppelt zu schwaerzen kostet
+    # nichts — `[REDACTED]` enthaelt keines der Muster — und die Aufrufe dort
+    # sagen weiterhin, wo Fremdtext herkommt.
+    #
+    # Ausserhalb der Sitzung, weil Schwaerzen reine Textarbeit ist und eine
+    # offene Transaktion waehrenddessen nichts zu suchen hat.
+    return _ergebnis_schwaerzen(wert, freitext=call.name in _FREITEXT_WERKZEUGE), None
+
+
+async def _tool_followup_messages(
     *, user_id: int, conversation_id: str, tool_calls, deferred=(),
     correlation_id: str | None = None, run_id: str | None = None,
     guardian: GuardianKontext | None = None,
     aufgabe: AufgabenKontext | None = None,
 ) -> tuple[list[dict], list[dict], dict | None]:
     """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
+
+    **Nebenlaeufig und neben der Ereignisschleife, nicht auf ihr.** Diese
+    Funktion war einmal synchron und wurde geradewegs aus `segment_ausfuehren`
+    gerufen. Gemessen hiess das: neun Werkzeugaufrufe zu drei Sekunden ergaben
+    siebenundzwanzig Sekunden Laufzeit **und** siebenundzwanzig Sekunden, in
+    denen der Prozess keine einzige andere Anfrage beantwortete — von niemandem.
+    Genau das war die Beobachtung des Betreibers: "ich habe von jedem Server ein
+    Backup erstellen lassen, danach hat die Seite nicht mehr geladen".
+
+    Jeder Aufruf laeuft jetzt in `asyncio.to_thread` mit eigener Sitzung,
+    gemeinsam ueber `asyncio.gather`. Die Obergrenze steht in
+    `_werkzeug_nebenlaeufigkeit` und haengt an der Datenbank.
+
+    **Das Ereignis geht raus, sobald der einzelne Aufruf fertig ist** — nicht
+    erst, wenn die ganze Runde durch ist. Vorher erschienen alle Chips
+    gleichzeitig nach der letzten Antwort; jetzt erscheint jeder, sobald er
+    etwas bedeutet.
 
     ``deferred`` sind Paare aus Aufruf und Begruendung: Aufrufe, die in dieser
     Runde bewusst **nicht** laufen — ein Schreibwerkzeug, das das Modell mit
@@ -451,171 +592,208 @@ def _tool_followup_messages(
                 raise AiActionValidationError(
                     "Dieses Werkzeug steht in einer geplanten Aufgabe nicht zur Verfuegung"
                 )
+    # Zugriff und Unterhaltung **einmal** pruefen, bevor irgendetwas laeuft.
+    # Eine kurze eigene Transaktion: die Ausfuehrung bringt jetzt ihre eigenen
+    # Sitzungen mit, und eine ueber die ganze Runde offene waere genau das, was
+    # hier abgeschafft wird.
     with SessionLocal() as db:
         user = db.get(User, user_id)
         if user is None or not user.is_active:
             raise AiActionValidationError("AI-Zugriff wurde entzogen")
-        conversation = get_owned_conversation(db, conversation_id, user)
-        if conversation is None:
+        if get_owned_conversation(db, conversation_id, user) is None:
             raise AiActionValidationError("Unterhaltung ist nicht mehr verfuegbar")
-        assistant_call = {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": call.id,
-                    "type": "function",
-                    "function": {
-                        "name": call.name,
-                        "arguments": json.dumps(call.arguments, ensure_ascii=True),
-                    },
-                }
-                for call in [*tool_calls, *(item[0] for item in deferred)]
-            ],
-        }
-        results: list[dict] = [assistant_call]
-        # Was der Benutzer im Chat sehen soll: welches Werkzeug lief und womit.
-        # Bewusst ohne das Ergebnis — ein Logausschnitt gehoert nicht ungefragt
-        # in den sichtbaren Verlauf, und die Antwort fasst ihn ohnehin zusammen.
-        display: list[dict] = []
-        spent = 0
-        for index, call in enumerate(tool_calls):
-            # Budget statt Stueckzahl. Wer schon etwas bekommen hat und das
-            # Budget ausgeschoepft sieht, hoert auf — der Rest wird vertagt,
-            # nicht abgewiesen. Der erste Aufruf laeuft immer: sonst kaeme ein
-            # einzelner grosser Logauszug nie durch.
-            if index > 0 and spent >= MAX_TOOL_RESULT_CHARS_PER_ROUND:
+
+    assistant_call = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(call.arguments, ensure_ascii=True),
+                },
+            }
+            for call in [*tool_calls, *(item[0] for item in deferred)]
+        ],
+    }
+
+    # ── Ausfuehren ───────────────────────────────────────────────────────
+    #
+    # Das Schloss entsteht je Runde und nicht als Modulwert. Ein
+    # `asyncio.Semaphore` bindet sich an die Ereignisschleife, die ihn zuerst
+    # benutzt; die Testsuite legt je Test eine neue an, und ein
+    # weitergereichter Wert waere dort ein Fehler, der erst beim zweiten Test
+    # auffaellt. Die aeussere Grenze halten ohnehin der Standard-Threadpool und
+    # der Verbindungspool.
+    breite = _werkzeug_nebenlaeufigkeit()
+    schloss = asyncio.Semaphore(breite)
+
+    async def _einer(call):
+        async with schloss:
+            wert, fehlgeschlagen = await asyncio.to_thread(
+                _werkzeug_ausfuehren, user_id, call
+            )
+        anzeige = _anzeigeeintrag(call, wert, fehlgeschlagen)
+        # **Sofort melden.** Hier stand nichts — die Chips gingen erst raus,
+        # nachdem die ganze Runde fertig war (die Schleife im Aufrufer). Bei
+        # neun Aufrufen sah der Benutzer siebenundzwanzig Sekunden nichts und
+        # dann alles auf einmal.
+        if run_id is not None:
+            ai_run_broker.veroeffentlichen(run_id, "tool", anzeige)
+        return call, wert, anzeige
+
+    results: list[dict] = [assistant_call]
+    display: list[dict] = []
+    behalten: list[tuple[object, object]] = []
+    spent = 0
+    erledigt = 0
+    offen = list(tool_calls)
+
+    # **In Wellen, nicht alles auf einmal.** Das Budget hat zwei Aufgaben, und
+    # nur eine davon ist der Kontext.
+    #
+    # Die andere ist der Node: `read_server_logs` liefert bis zu 24.000 Zeichen,
+    # zwei davon fuellen die Runde. Ein Modell, das zehn Logauszuege nebeneinander
+    # anfordert, hat frueher **zwei** ausgeloest — die Pruefung stand vor der
+    # Ausfuehrung. Ein blosses `gather` ueber alle haette zehn Docker-Aufrufe
+    # gemacht und acht Ergebnisse weggeworfen. Gleich schnell, dreifache Last auf
+    # einem Rechner, der nebenbei Spieleserver bedient.
+    #
+    # Eine Welle ist so breit wie die Nebenlaeufigkeit. Der Normalfall — bis zu
+    # acht Aufrufe — laeuft damit vollstaendig gleichzeitig, und ein
+    # durchgedrehtes Modell wird nach der ersten Welle gebremst. Auf SQLite ist
+    # die Breite eins; dort ergibt sich exakt das alte Verhalten, was die
+    # bestehenden Zusagen der Testsuite unangetastet laesst.
+    while offen:
+        if erledigt and spent >= MAX_TOOL_RESULT_CHARS_PER_ROUND:
+            for call in offen:
                 deferred.append((call, (
                     "Fuer diese Runde war kein Platz mehr. Der Aufruf lief "
                     "nicht — stelle ihn in der naechsten Runde erneut."
                 )))
-                continue
-            failed_reason: str | None = None
-            try:
-                value = execute_read_tool(
-                    db,
-                    user=user,
-                    tool_name=call.name,
-                    arguments=call.arguments,
-                )
-            except AiActionValidationError as exc:
-                # Fehlendes Recht, fremde Server-ID, ungueltige Argumente. Das
-                # Modell soll es erfahren und weitermachen koennen; frueher riss
-                # ein solcher Aufruf die gesamte Antwort ab.
-                failed_reason = str(exc)
-                value = {"error": failed_reason}
-            # **Der Choke Point.** Hier — und nur hier — verlaesst ein
-            # Werkzeugergebnis das Panel Richtung Anbieter und Datenbank.
-            #
-            # Geschwaerzt wurde bisher in den Handlern, jeder fuer sich. Das ist
-            # neunmal dieselbe Entscheidung an neun Orten, und wer einen zehnten
-            # Handler schreibt, vergisst sie: `read_blueprint`,
-            # `list_server_files`, `search_workshop_mods`, `read_skill` und
-            # `read_docs` gaben ihre Inhalte ungefiltert weiter. Dateinamen von
-            # der Platte und Titel aus dem Steam-Workshop sind Fremdtext wie
-            # Logzeilen auch.
-            #
-            # Die Handler behalten ihre eigenen Aufrufe. Doppelt zu schwaerzen
-            # kostet nichts — `[REDACTED]` enthaelt keines der Muster — und die
-            # Aufrufe dort sagen weiterhin, wo Fremdtext herkommt.
-            value = _ergebnis_schwaerzen(
-                value, freitext=call.name in _FREITEXT_WERKZEUGE
-            )
-            # Persistieren, damit eine Rueckfrage im selben Chat die gerade
-            # gelesenen Daten noch sieht. Ohne das musste das Modell sie neu
-            # holen — oder antwortete ohne sie, obwohl es sie selbst geholt hatte.
-            db.add(AiToolResult(
-                id=str(uuid4()),
-                conversation_id=conversation.id,
-                run_id=run_id,
-                tool_name=call.name,
-                result_json=json.dumps(value, ensure_ascii=True, separators=(",", ":")),
-            ))
-            # Das Ergebnis wird ausdruecklich als unvertrauenswuerdig gekennzeichnet.
-            # Genau hier kommt der Text an, den ein Spieler ueber den Chat eines
-            # Gameservers in dessen Log geschrieben hat: read_server_logs liefert
-            # bis zu 24.000 Zeichen, die vollstaendig von aussen stammen koennen.
-            # Anhaenge tragen dieses Label seit jeher (ai_attachment_service),
-            # Tool-Ergebnisse bisher nicht — obwohl sie der offenere Kanal sind.
+            break
+        welle, offen = offen[:breite], offen[breite:]
+        # `gather` haelt die **Aufrufreihenfolge** in seinem Ergebnis fest, auch
+        # wenn die Aufrufe in beliebiger Reihenfolge fertig werden. Das ist
+        # wichtig: das Budget und `_serverbezug` ("der letzte gewinnt") haengen
+        # daran. Gemeldet wird trotzdem in Fertigstellungsreihenfolge — das ist
+        # die Reihenfolge, in der es etwas zu sehen gibt.
+        for call, wert, anzeige in await asyncio.gather(
+            *(_einer(call) for call in welle)
+        ):
+            erledigt += 1
+            # Jeder ausgefuehrte Aufruf gehoert in den Verlauf und ins
+            # Protokoll — auch der, dessen Ergebnis gleich nicht mehr in die
+            # Runde passt. Er ist gelaufen, und das ist die Tatsache.
+            display.append(anzeige)
+            behalten.append((call, wert))
+            # Das Ergebnis wird ausdruecklich als unvertrauenswuerdig
+            # gekennzeichnet. Genau hier kommt der Text an, den ein Spieler ueber
+            # den Chat eines Gameservers in dessen Log geschrieben hat:
+            # read_server_logs liefert bis zu 24.000 Zeichen, die vollstaendig
+            # von aussen stammen koennen. Anhaenge tragen dieses Label seit jeher
+            # (ai_attachment_service), Tool-Ergebnisse bisher nicht — obwohl sie
+            # der offenere Kanal sind.
             serialized = json.dumps(
-                {"untrusted": True, "tool": call.name, "data": value},
+                {"untrusted": True, "tool": call.name, "data": wert},
                 ensure_ascii=True,
                 separators=(",", ":"),
             )
+            # Der erste Aufruf kommt immer durch: sonst kaeme ein einzelner
+            # grosser Logauszug nie an.
+            #
+            # Innerhalb einer Welle kann das Budget erst **nach** der Ausfuehrung
+            # reissen — die Groesse steht vorher nicht fest. Die Begruendung sagt
+            # deshalb etwas anderes als die oben: dort lief der Aufruf nicht,
+            # hier lief er und sein Ergebnis passte nicht mehr. Ein Modell, das
+            # die falsche Auskunft bekommt, holte ein bereits erledigtes
+            # `remember` ein zweites Mal.
+            if erledigt > 1 and spent >= MAX_TOOL_RESULT_CHARS_PER_ROUND:
+                deferred.append((call, (
+                    "Der Aufruf lief, aber sein Ergebnis passte nicht mehr in "
+                    "diese Runde. Frag gezielter nach — weniger Zeilen, engerer "
+                    "Pfad — oder hol es in der naechsten Runde."
+                )))
+                continue
             spent += len(serialized)
             results.append({
                 "role": "tool",
                 "tool_call_id": call.id,
                 "content": serialized,
             })
-            entry = {
-                "tool_name": call.name,
-                "server_id": call.arguments.get("server_id")
-                if isinstance(call.arguments.get("server_id"), int)
-                else None,
-                # Ein gescheiterter Aufruf gehoert sichtbar in den Verlauf.
-                # Sonst wirkt eine Antwort vollstaendig, der eine Auskunft fehlt.
-                **({"failed": True} if failed_reason else {}),
-                # Die Gruppe entscheidet ueber das Symbol im Verlauf. Sie stand
-                # seit jeher in `ai_tool_registry`, verliess das Backend aber
-                # nie — das Frontend riet sie an einem hartkodierten
-                # `tool_name === 'remember'` nach und lag bei `search_memory`
-                # und `forget_memory` daneben. Eine Zeile hier entfernt eine
-                # Abschrift, statt eine hinzuzufuegen.
-                **(
-                    {"gruppe": WERKZEUGE[call.name].gruppe}
-                    if WERKZEUGE.get(call.name) is not None
-                    and WERKZEUGE[call.name].gruppe
-                    else {}
-                ),
-            }
-            # Bei Skills gehoert der Name in den Verlauf, nicht nur "read_skill".
-            # Der Betreiber will sehen, *welche* erlernte Vorgehensweise
-            # gegriffen hat — sonst wirkt eine Antwort, die aus einem Skill
-            # entstanden ist, wie geraten. Der Schluessel kommt aus dem
-            # Ergebnis und nicht aus den Argumenten: dort ist er bereits
-            # normalisiert und gegen die Sichtbarkeit geprueft.
-            if call.name in SKILL_TOOLS and isinstance(value, dict):
-                entry["skill_key"] = value.get("skill_key")
-                entry["skill_name"] = value.get("name")
-                entry["skill_status"] = value.get("status")
-                entry["skill_learned"] = bool(value.get("learned"))
-            display.append(entry)
-        # Erst hier: die Ausfuehrungsschleife oben legt selbst weitere Aufrufe
-        # zurueck, sobald das Budget aufgebraucht ist. Wuerden die Absagen
-        # vorher erzeugt, blieben genau diese `tool_call_id` ohne Antwort — und
-        # manche Anbieter weisen die naechste Anfrage deswegen ab.
-        for call, reason in deferred:
-            results.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": json.dumps({
-                    "executed": False, "reason": reason,
-                }, ensure_ascii=True, separators=(",", ":")),
-            })
-        _lesezugriffe_protokollieren(
-            db, user_id=user_id, eintraege=display, correlation_id=correlation_id
-        )
-        # In derselben Sitzung und demselben Commit wie das Zugriffsprotokoll.
-        # Beide halten dieselbe Tatsache fest — in welchen Server die KI gesehen
-        # hat —, und beide sollen entweder stehen oder nicht.
-        bezug = _serverbezug(display)
-        ai_run_service.serverbezug_merken(db, run_id=run_id, server_id=bezug)
-        # Jetzt erst steht fest, um welche Anlage es geht. Ihr Betriebswissen
-        # gehoert in **diese** Runde und nicht erst in die naechste Nachricht:
-        # sonst antwortet das Modell auf "warum kommt keiner rein?" ohne den
-        # Satz, der die Antwort ist.
-        #
-        # `nachtrag` faehrt als dritter Rueckgabewert mit, statt hier an
-        # `provider_messages` zu haengen: die Funktion kennt die Liste nicht,
-        # und sie soll sie auch nicht kennen — sie fuehrt Werkzeuge aus.
-        nachtrag = (
-            anlagenwissen_nachtrag(db, user_id=user_id, server_id=bezug)
-            if bezug is not None
-            else None
-        )
-        db.commit()
-        return results, display, nachtrag
+    # Erst hier: die Schleife oben legt selbst weitere Aufrufe zurueck, sobald
+    # das Budget aufgebraucht ist. Wuerden die Absagen vorher erzeugt, blieben
+    # genau diese `tool_call_id` ohne Antwort — und manche Anbieter weisen die
+    # naechste Anfrage deswegen ab.
+    for call, reason in deferred:
+        results.append({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": json.dumps({
+                "executed": False, "reason": reason,
+            }, ensure_ascii=True, separators=(",", ":")),
+        })
+
+    def _festhalten() -> dict | None:
+        """Protokoll, Ergebnisse und Serverbezug — in **einer** Transaktion.
+
+        Auch das laeuft im Thread. Es ist wenig Arbeit, aber
+        `anlagenwissen_nachtrag` liest das Betriebswissen einer Anlage, und die
+        Ereignisschleife hat waehrenddessen Besseres zu tun.
+        """
+        with SessionLocal() as db:
+            user_jetzt = db.get(User, user_id)
+            conversation = (
+                get_owned_conversation(db, conversation_id, user_jetzt)
+                if user_jetzt is not None else None
+            )
+            if conversation is None:
+                # Der Chat wurde waehrend der Runde geleert. Die Werkzeuge sind
+                # gelaufen, ihre Ergebnisse gehen trotzdem ans Modell zurueck —
+                # nur festzuhalten gibt es nichts mehr.
+                return None
+            # Persistieren, damit eine Rueckfrage im selben Chat die gerade
+            # gelesenen Daten noch sieht. Ohne das musste das Modell sie neu
+            # holen — oder antwortete ohne sie, obwohl es sie selbst geholt hatte.
+            for call, wert in behalten:
+                db.add(AiToolResult(
+                    id=str(uuid4()),
+                    conversation_id=conversation.id,
+                    run_id=run_id,
+                    tool_name=call.name,
+                    result_json=json.dumps(
+                        wert, ensure_ascii=True, separators=(",", ":")
+                    ),
+                ))
+            _lesezugriffe_protokollieren(
+                db, user_id=user_id, eintraege=display, correlation_id=correlation_id
+            )
+            # In derselben Sitzung und demselben Commit wie das
+            # Zugriffsprotokoll. Beide halten dieselbe Tatsache fest — in
+            # welchen Server die KI gesehen hat —, und beide sollen entweder
+            # stehen oder nicht.
+            bezug = _serverbezug(display)
+            ai_run_service.serverbezug_merken(db, run_id=run_id, server_id=bezug)
+            # Jetzt erst steht fest, um welche Anlage es geht. Ihr Betriebswissen
+            # gehoert in **diese** Runde und nicht erst in die naechste Nachricht:
+            # sonst antwortet das Modell auf "warum kommt keiner rein?" ohne den
+            # Satz, der die Antwort ist.
+            #
+            # `nachtrag` faehrt als dritter Rueckgabewert mit, statt hier an
+            # `provider_messages` zu haengen: die Funktion kennt die Liste nicht,
+            # und sie soll sie auch nicht kennen — sie fuehrt Werkzeuge aus.
+            nachtrag = (
+                anlagenwissen_nachtrag(db, user_id=user_id, server_id=bezug)
+                if bezug is not None
+                else None
+            )
+            db.commit()
+            return nachtrag
+
+    nachtrag = await asyncio.to_thread(_festhalten)
+    return results, display, nachtrag
 
 
 def _lesezugriffe_protokollieren(
@@ -1764,7 +1942,21 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 if _lauf_status(run_id) != "running":
                     abgeloest = True
                     break
-                proposals = _persist_write_proposals(
+                # **Als Ganzes in einen Thread, innen unveraendert sequenziell.**
+                #
+                # Hier entstehen die Backups, Neustarts und
+                # Konfigurationsaenderungen — die langsamste Arbeit des ganzen
+                # Laufs, und bisher lief sie auf der Ereignisschleife. Drei
+                # Backups zu drei Sekunden hiessen neun Sekunden, in denen das
+                # Panel niemandem antwortete.
+                #
+                # Was **nicht** nebenlaeufig wird: der Inhalt. Die Reihenfolge
+                # "erst sichern, dann anfassen" und der Abbruch der Runde nach
+                # einer Ablehnung sind Zusagen an den Benutzer, keine
+                # Ablaufdetails. Sie stehen unveraendert in
+                # `_persist_write_proposals`.
+                proposals = await asyncio.to_thread(
+                    _persist_write_proposals,
                     user_id=user_id,
                     conversation_id=conversation_id,
                     tool_calls=current_usage.tool_calls,
@@ -1970,7 +2162,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 continue
             if not current_usage.tool_calls and not deferred_calls:
                 break
-            followup, used_tools, nachtrag = _tool_followup_messages(
+            followup, used_tools, nachtrag = await _tool_followup_messages(
                 user_id=user_id,
                 conversation_id=conversation_id,
                 tool_calls=current_usage.tool_calls,
@@ -1988,8 +2180,11 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             if nachtrag is not None and not zustand.get("anlagenwissen_gereicht"):
                 zustand["anlagenwissen_gereicht"] = True
                 provider_messages.append(nachtrag)
-            for used in used_tools:
-                ai_run_broker.veroeffentlichen(run_id, "tool", used)
+            # Hier stand die Schleife, die alle Werkzeugchips auf einmal
+            # herausgab — **nach** der ganzen Runde. Sie ist nach
+            # `_tool_followup_messages` gewandert und meldet jeden Aufruf,
+            # sobald er fertig ist. `used_tools` bleibt der Rueckgabewert, weil
+            # es weiterhin das Protokoll und den Serverbezug traegt.
             current_usage = StreamUsage()
 
         if abgeloest:
@@ -2014,6 +2209,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 had_output=bool(chunks),
                 token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
                 reasoning="".join(thoughts),
+                abschnitte=ai_run_broker.abschnitte(run_id),
             )
             abgerechnet = True
             # Schreibt nichts um: `_lauf_abschliessen` laesst Endzustaende stehen
@@ -2041,6 +2237,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             had_output=bool(chunks) or gestellte_frage is not None or geparkt,
             token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
             reasoning="".join(thoughts),
+            abschnitte=ai_run_broker.abschnitte(run_id),
             question=gestellte_frage,
         )
         abgerechnet = True
@@ -2100,6 +2297,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 had_output=bool(chunks),
                 token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
                 reasoning="".join(thoughts),
+                abschnitte=ai_run_broker.abschnitte(run_id),
             )
             _lauf_abschliessen(run_id, status="cancelled", stop_reason="cancelled")
         raise
@@ -2136,6 +2334,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 had_output=bool(chunks),
                 token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
                 reasoning="".join(thoughts),
+                abschnitte=ai_run_broker.abschnitte(run_id),
             )
         ai_run_broker.veroeffentlichen(run_id, "error", {"code": code, "message_key": message_key})
         _lauf_abschliessen(run_id, status="failed", stop_reason=code)

@@ -706,7 +706,8 @@ def test_a_proposal_rewritten_after_confirmation_fails_on_execution(
 
 
 @pytest.mark.parametrize("genannt", ["abc", {"server_id": 1}, [1]])
-def test_a_bogus_server_id_in_a_run_is_a_refusal_not_a_crash(genannt) -> None:
+@pytest.mark.asyncio
+async def test_a_bogus_server_id_in_a_run_is_a_refusal_not_a_crash(genannt) -> None:
     """Die Serverbindung gilt auch fuer die Lesewerkzeuge — und muss es aushalten.
 
     Der Vorschlagspfad ist an dieser Stelle sorgfaeltig: `_resolve_server`
@@ -727,7 +728,7 @@ def test_a_bogus_server_id_in_a_run_is_a_refusal_not_a_crash(genannt) -> None:
     )
 
     with pytest.raises(AiActionValidationError):
-        _tool_followup_messages(
+        await _tool_followup_messages(
             user_id=1,
             conversation_id=str(uuid4()),
             tool_calls=[

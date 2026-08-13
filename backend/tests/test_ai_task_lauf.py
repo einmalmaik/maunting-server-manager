@@ -522,7 +522,7 @@ async def test_ein_verbotenes_werkzeug_wird_im_code_abgewiesen(
     rahmen = ai_stream_service.aufgabe_aus_zustand(zustand)
 
     with pytest.raises(AiActionValidationError, match="geplanten Aufgabe"):
-        ai_stream_service._tool_followup_messages(
+        await ai_stream_service._tool_followup_messages(
             user_id=user.id,
             conversation_id=run.conversation_id,
             tool_calls=[ProviderToolCall(
@@ -554,7 +554,7 @@ async def test_eine_aufgabe_bindet_sich_an_keinen_server(
     run = await ai_task_service.aufgabenlauf_starten(db, aufgabe=aufgabe)
     rahmen = ai_stream_service.aufgabe_aus_zustand(ai_run_service.zustand_lesen(run))
 
-    nachrichten, benutzt, _ = ai_stream_service._tool_followup_messages(
+    nachrichten, benutzt, _ = await ai_stream_service._tool_followup_messages(
         user_id=user.id,
         conversation_id=run.conversation_id,
         tool_calls=[

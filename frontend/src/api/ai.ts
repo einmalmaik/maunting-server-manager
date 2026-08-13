@@ -87,10 +87,38 @@ export interface AiMessage {
    * dieselbe Frage erneut.
    */
   question: AiQuestion | null
+  /**
+   * Die Gliederung dieser Antwort: Text und Werkzeuge in der Reihenfolge, in
+   * der sie entstanden sind.
+   *
+   * Sie ersetzt `content` nicht, sie ordnet es. `content` ist der reine Text —
+   * er geht an den Anbieter zurueck und wird durchsucht; die Abschnitte sind,
+   * was gezeichnet wird. Aus `content` allein liesse sich nicht herstellen, an
+   * welcher Stelle ein Werkzeug lief.
+   *
+   * `null` heisst „aus der Zeit vor dieser Spalte". Solche Nachrichten werden
+   * wie immer als reiner Text dargestellt.
+   */
+  sections?: AiSection[] | null
   status: 'complete' | 'streaming' | 'failed'
   provider_id: number | null
   model: string | null
   created_at: string
+}
+
+/**
+ * Ein Abschnitt einer Antwort — Text oder ein Werkzeugaufruf.
+ *
+ * Zwei Formen in einem Typ statt zweier Listen, weil die **Reihenfolge
+ * zwischen ihnen** die Information ist. „Ich sehe mir den Status an" —
+ * Werkzeug — „der laeuft, jetzt die Logs" — Werkzeug ist etwas anderes als
+ * derselbe Text mit denselben Werkzeugen davor, und genau so sah es aus,
+ * solange beides getrennt gefuehrt wurde.
+ */
+export interface AiSection {
+  art: 'text' | 'tool'
+  inhalt?: string | null
+  werkzeug?: AiToolUse | null
 }
 
 export interface AiConversationDetail extends AiConversation {
@@ -543,7 +571,14 @@ export interface AiRunSnapshot {
   message_id: string | null
   content: string
   reasoning: string
-  tools: AiToolUse[]
+  /**
+   * Die Gliederung des laufenden Segments. Hier stand `tools: AiToolUse[]`
+   * neben `content` — zwei Toepfe ohne Beziehung zueinander. Solange die KI
+   * erst alle Werkzeuge rief und danach redete, liess sich die Anordnung raten
+   * (alle Werkzeuge vor die Blase); sobald sie **waehrend** der Arbeit spricht,
+   * geht das nicht mehr.
+   */
+  sections: AiSection[]
   question: AiQuestion | null
   proposals: AiActionProposal[]
   stop_reason: string | null

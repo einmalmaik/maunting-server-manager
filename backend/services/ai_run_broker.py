@@ -40,19 +40,72 @@ MAX_KANAELE = 256
 MAX_RUECKSTAU = 512
 
 
+def text_abschnitt(inhalt: str) -> dict:
+    return {"art": "text", "inhalt": inhalt}
+
+
+def werkzeug_abschnitt(werkzeug: dict) -> dict:
+    return {"art": "tool", "werkzeug": werkzeug}
+
+
 @dataclass
 class Abzug:
-    """Der vollstaendige Stand eines Laufs — alles, was ein Zuschauer braucht."""
+    """Der vollstaendige Stand eines Laufs — alles, was ein Zuschauer braucht.
+
+    **Die Abschnitte sind die Ordnung.** Hier standen einmal ``inhalt`` (eine
+    Zeichenkette) und ``werkzeuge`` (eine Liste) nebeneinander — zwei Toepfe
+    ohne jede Beziehung zueinander. Solange die KI erst alle Werkzeuge rief und
+    danach redete, fiel das nicht auf: die Oberflaeche haengte die Werkzeuge
+    einfach vor die Antwortblase, und das stimmte zufaellig.
+
+    Sobald die KI **waehrend** der Arbeit spricht — "ich sehe mir erst den
+    Status an", Werkzeug, "der laeuft, jetzt die Logs", Werkzeug — ist die
+    Reihenfolge zwischen beiden die eigentliche Information. Zwei getrennte
+    Felder koennen sie nicht tragen, und sie ist auch nicht rekonstruierbar:
+    beim Wiederanhaengen nach einem Seitenwechsel waere jede Anordnung geraten.
+
+    ``inhalt`` gibt es weiterhin, aber als **Ableitung** und nicht als zweiten
+    Speicher: der reine Text ist das, was in die Nachricht und zum Anbieter
+    geht, die Abschnitte sind das, was der Browser zeichnet.
+    """
 
     run_id: str
     status: str = "running"
     message_id: str | None = None
-    inhalt: str = ""
+    abschnitte: list[dict] = field(default_factory=list)
     denken: str = ""
-    werkzeuge: list[dict] = field(default_factory=list)
     frage: dict | None = None
     vorschlaege: list[dict] = field(default_factory=list)
     stop_reason: str | None = None
+
+    @property
+    def inhalt(self) -> str:
+        return "".join(
+            str(abschnitt.get("inhalt") or "")
+            for abschnitt in self.abschnitte
+            if abschnitt.get("art") == "text"
+        )
+
+    @property
+    def werkzeuge(self) -> list[dict]:
+        return [
+            abschnitt["werkzeug"]
+            for abschnitt in self.abschnitte
+            if abschnitt.get("art") == "tool"
+        ]
+
+    def text_anhaengen(self, stueck: str) -> None:
+        """Haengt an den letzten Textabschnitt an — oder faengt einen neuen an.
+
+        Genau hier entsteht das Wechselspiel: laeuft gerade Text, waechst er
+        weiter; kam zwischendurch ein Werkzeug, beginnt danach ein **neuer**
+        Textabschnitt. Ohne das waere die Antwort wieder ein Block, und die
+        Werkzeuge lagen irgendwo daneben.
+        """
+        if self.abschnitte and self.abschnitte[-1].get("art") == "text":
+            self.abschnitte[-1]["inhalt"] += stueck
+            return
+        self.abschnitte.append(text_abschnitt(stueck))
 
     def kopie(self) -> "Abzug":
         """Ein Standbild — **nicht** der weiterlaufende Abzug selbst.
@@ -61,14 +114,18 @@ class Abzug:
         heraus, waechst es zwischen Abonnement und Serialisierung weiter. Der
         Client bekaeme denselben Text zweimal — einmal im Abzug und einmal als
         Ereignis aus der Warteschlange.
+
+        Die Abschnitte werden **tief** kopiert, anders als die Listen frueher.
+        Eine flache Kopie teilte sich die Woerterbuecher mit dem lebenden Abzug,
+        und ``text_anhaengen`` schreibt in genau diese hinein — das Standbild
+        haette sich nachtraeglich noch veraendert.
         """
         return Abzug(
             run_id=self.run_id,
             status=self.status,
             message_id=self.message_id,
-            inhalt=self.inhalt,
+            abschnitte=[dict(abschnitt) for abschnitt in self.abschnitte],
             denken=self.denken,
-            werkzeuge=list(self.werkzeuge),
             frage=self.frage,
             vorschlaege=list(self.vorschlaege),
             stop_reason=self.stop_reason,
@@ -79,9 +136,12 @@ class Abzug:
             "run_id": self.run_id,
             "status": self.status,
             "message_id": self.message_id,
+            "sections": [dict(abschnitt) for abschnitt in self.abschnitte],
+            # Abgeleitet und mitgeschickt, nicht doppelt gefuehrt. Der Browser
+            # braucht den reinen Text an Stellen, an denen die Gliederung nichts
+            # beitraegt — die Pruefung "kam ueberhaupt eine Antwort?" etwa.
             "content": self.inhalt,
             "reasoning": self.denken,
-            "tools": list(self.werkzeuge),
             "question": self.frage,
             "proposals": list(self.vorschlaege),
             "stop_reason": self.stop_reason,
@@ -155,11 +215,11 @@ def veroeffentlichen(run_id: str, ereignis: str, daten: dict) -> None:
     if ereignis == "message":
         abzug.message_id = daten.get("message_id")
     elif ereignis == "delta":
-        abzug.inhalt += str(daten.get("content") or "")
+        abzug.text_anhaengen(str(daten.get("content") or ""))
     elif ereignis == "reasoning":
         abzug.denken += str(daten.get("content") or "")
     elif ereignis == "tool":
-        abzug.werkzeuge.append(daten)
+        abzug.abschnitte.append(werkzeug_abschnitt(daten))
     elif ereignis == "question":
         abzug.frage = daten
     elif ereignis in {"proposal", "action"}:
@@ -174,7 +234,7 @@ def veroeffentlichen(run_id: str, ereignis: str, daten: dict) -> None:
     # Ein neues Segment schreibt eine neue Nachricht — der bisherige Text gehoert
     # zur vorherigen und darf nicht in die neue hineinlaufen.
     if ereignis == "segment":
-        abzug.inhalt = ""
+        abzug.abschnitte = []
         abzug.denken = ""
         abzug.frage = None
 
@@ -224,6 +284,21 @@ def beenden(run_id: str) -> None:
 def laeuft(run_id: str) -> bool:
     kanal = _KANAELE.get(run_id)
     return kanal is not None and not kanal.beendet
+
+
+def abschnitte(run_id: str) -> list[dict]:
+    """Die Gliederung des laufenden Segments — fuer das Festhalten am Ende.
+
+    Der Lauf koennte sie auch selbst mitschreiben, aber dann gaebe es sie
+    zweimal: einmal hier, wo sie ohnehin fuer die Zuschauer entsteht, und einmal
+    dort. Zwei Listen, die dasselbe meinen, laufen frueher oder spaeter
+    auseinander — und die Reihenfolge ist genau das, was hier nicht schiefgehen
+    darf.
+    """
+    kanal = _KANAELE.get(run_id)
+    if kanal is None:
+        return []
+    return [dict(abschnitt) for abschnitt in kanal.abzug.abschnitte]
 
 
 def neues_segment(run_id: str) -> None:

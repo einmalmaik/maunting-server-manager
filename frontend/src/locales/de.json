@@ -326,6 +326,9 @@
         "mods": "Welche Mods sind auf meinem Server installiert und gibt es Updates?"
       },
       "toolFailed": "— fehlgeschlagen",
+      "toolsUsed_one": "{{count}} Werkzeug verwendet",
+      "toolsUsed_other": "{{count}} Werkzeuge verwendet",
+      "toolsCollapse": "Werkzeuge einklappen",
       "compacted": "Ältere Nachrichten wurden zusammengefasst",
       "edit": "Nachricht bearbeiten",
       "editHint": "Diese Nachricht und alles danach wird entfernt. Die KI kennt die alte Fassung dann nicht mehr.",
