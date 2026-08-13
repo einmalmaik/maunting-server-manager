@@ -79,6 +79,12 @@ class AiCatalogModelResponse(BaseModel):
     aus dem Katalog. Eine leere Liste heisst nicht "denkt nicht", sondern "kennt
     keine Stufen": gemessen koennen 145 der 272 denkenden Modelle bei OpenRouter
     nur an oder aus.
+
+    ``recommended`` ist die einzige Angabe hier, die **nicht** vom Anbieter
+    stammt, sondern von MSM: das Modell, mit dem das Panel erprobt ist. Es
+    steht am Modell und nicht neben der Liste, damit die Oberflaeche es dort
+    zeigen kann, wo gewaehlt wird — und damit es verschwindet, wenn der Katalog
+    diese Kennung nicht mehr fuehrt.
     """
 
     model_id: str
@@ -87,6 +93,7 @@ class AiCatalogModelResponse(BaseModel):
     efforts: list[str]
     default_effort: str | None
     mandatory: bool
+    recommended: bool = False
 
 
 class AiProviderAvailableResponse(BaseModel):

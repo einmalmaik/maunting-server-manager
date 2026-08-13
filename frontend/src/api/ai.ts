@@ -63,6 +63,12 @@ export interface AiCatalogModel {
   efforts: string[]
   default_effort: string | null
   mandatory: boolean
+  /**
+   * Das von MSM empfohlene Modell — die einzige Angabe hier, die nicht vom
+   * Anbieter stammt. Hoechstens eines je Katalog, und keines, wenn der Anbieter
+   * die empfohlene Kennung nicht mehr fuehrt.
+   */
+  recommended: boolean
 }
 
 export interface AiConversation {

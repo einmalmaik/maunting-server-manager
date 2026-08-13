@@ -54,6 +54,17 @@ class Anbieter:
     #: Wo der Betreiber seinen Schlüssel bekommt. Steht in der Oberfläche.
     key_url: str
     key_prefix: str | None = None
+    #: Welches Modell MSM empfiehlt. Das ist die **einzige** Aussage in dieser
+    #: Datei, die eine Meinung ist und keine Tatsache — deshalb steht sie hier
+    #: und nicht im Katalog. Der Katalog sagt, was ein Modell kann; was sich im
+    #: Betrieb bewährt hat, weiß er nicht.
+    #:
+    #: Die Empfehlung **erfindet nichts**. Führt der Katalog diese Kennung nicht
+    #: (umbenannt, abgekündigt), zeigt die Oberfläche einfach keine Empfehlung
+    #: an — nie einen Eintrag, den es beim Anbieter nicht gibt. Das ist dieselbe
+    #: Regel wie überall sonst hier, und sie ist der Grund, warum die Empfehlung
+    #: eine Modellkennung ist und kein eigener Listeneintrag.
+    empfehlung: str | None = None
 
 
 ANBIETER: dict[str, Anbieter] = {
@@ -64,6 +75,11 @@ ANBIETER: dict[str, Anbieter] = {
         catalog_url="https://openrouter.ai/api/v1/models",
         key_url="https://openrouter.ai/keys",
         key_prefix="sk-or-",
+        # Im Betrieb von MSM erprobt: schnell genug fuer den Chat, kennt
+        # Denkstufen, und der Werkzeugkatalog geht ihm nicht verloren. Wer
+        # etwas anderes waehlt, bekommt keine Warnung — es ist ein Vorschlag,
+        # keine Bedingung.
+        empfehlung="openai/gpt-5.6-luna",
     ),
 }
 

@@ -152,6 +152,9 @@
       "modelChoose": "Choose a model …",
       "reloadModels": "Reload models",
       "catalogUnavailable": "The provider's model catalog is currently unreachable. You can type the model name by hand meanwhile; reasoning levels stay unknown.",
+      "recommended": "Recommended",
+      "recommendationHint": "MSM is tested with {{model}} — fast enough for chat and it knows reasoning levels. Another model works too.",
+      "recommendationApply": "Use it",
       "caps": {
         "none": "This model does not reason.",
         "levels": "Reasoning levels:",

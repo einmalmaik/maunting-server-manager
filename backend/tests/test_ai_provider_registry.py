@@ -148,3 +148,32 @@ def test_a_parked_provider_cannot_be_reactivated_by_a_mere_checkbox(
         operator_api_key=None, clear_operator_api_key=False,
     )
     assert provider.enabled is True
+
+
+def test_the_recommendation_is_a_model_id_and_nothing_else() -> None:
+    """Die Empfehlung ist eine Kennung, die der Katalog fuehren kann.
+
+    Sie ist die einzige Meinung in dieser Datei — alles andere dort sind
+    Tatsachen (Adresse, Katalogadresse, Schluesselpraefix). Meinungen veralten,
+    Tatsachen nicht, und deshalb braucht genau diese eine Angabe eine Form, die
+    ein Fehlgehen ueberlebt: eine Modellkennung, die die Oberflaeche gegen den
+    Katalog abgleicht.
+
+    Der Test prueft bewusst **nicht**, dass OpenRouter das Modell heute fuehrt.
+    Das waere ein Netzabruf in der Testsuite und eine Zusage ueber einen fremden
+    Dienst, die MSM nicht halten kann. Er prueft die Form — dass die Empfehlung
+    ueberhaupt jemals auf einen Katalogeintrag passen kann.
+    """
+    from services import ai_provider_registry
+
+    for kind, spec in ai_provider_registry.ANBIETER.items():
+        if spec.empfehlung is None:
+            continue
+        assert spec.empfehlung == spec.empfehlung.strip(), kind
+        # Eine OpenRouter-Kennung ist "anbieter/modell". Ein blosser Modellname
+        # ohne Praefix trifft nie einen Eintrag und die Empfehlung waere still
+        # wirkungslos — genau das soll hier auffallen, nicht im Betrieb.
+        assert "/" in spec.empfehlung, kind
+
+    # Und der eine Anbieter, den es heute gibt, hat auch wirklich eine.
+    assert ai_provider_registry.ANBIETER["openrouter"].empfehlung == "openai/gpt-5.6-luna"

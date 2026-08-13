@@ -57,6 +57,7 @@ describe('AiProvidersSettings', () => {
       efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
       default_effort: 'high',
       mandatory: false,
+      recommended: false,
     }])
   })
 
@@ -155,5 +156,54 @@ describe('AiProvidersSettings', () => {
       4,
       expect.objectContaining({ token_price_micro_usd_per_million: 1_304_348 }),
     ))
+  })
+
+  it('offers the recommended model and takes it over on one click', async () => {
+    // Die Empfehlung kommt aus dem Katalog, nicht aus der Oberflaeche. Genau
+    // deshalb ist sie hier ein Feld an einem Modell und keine Zeichenkette im
+    // Test: fuehrt der Anbieter die Kennung nicht mehr, verschwindet sie.
+    vi.mocked(aiApi.listCatalogModels).mockResolvedValue([
+      {
+        model_id: 'anthropic/claude-opus-5',
+        name: 'Claude Opus 5',
+        reasoning: true,
+        efforts: ['low', 'high'],
+        default_effort: 'high',
+        mandatory: false,
+        recommended: false,
+      },
+      {
+        model_id: 'openai/gpt-5.6-luna',
+        name: 'GPT-5.6 Luna',
+        reasoning: true,
+        efforts: ['low', 'medium', 'high'],
+        default_effort: 'medium',
+        mandatory: false,
+        recommended: true,
+      },
+    ])
+
+    render(<AiProvidersSettings canWrite />)
+
+    const uebernehmen = await screen.findByRole('button', { name: 'Übernehmen' })
+    expect(screen.getByText(/MSM ist mit openai\/gpt-5\.6-luna erprobt/)).toBeInTheDocument()
+
+    fireEvent.click(uebernehmen)
+
+    // Uebernommen — und der Hinweis geht weg. Er soll nicht ueber eine
+    // Entscheidung belehren, die schon gefallen ist.
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Übernehmen' })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('says nothing when the provider no longer lists the recommended model', async () => {
+    // Kein Sonderfall, sondern der Normalfall von morgen: Modelle werden
+    // umbenannt und abgekuendigt. Dann zeigt MSM keine Empfehlung — nie eine
+    // auf ein Modell, das es beim Anbieter nicht gibt.
+    render(<AiProvidersSettings canWrite />)
+
+    await screen.findByLabelText('Operator-API-Key')
+    expect(screen.queryByRole('button', { name: 'Übernehmen' })).not.toBeInTheDocument()
   })
 })

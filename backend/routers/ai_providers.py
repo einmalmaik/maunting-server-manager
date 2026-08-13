@@ -305,6 +305,11 @@ async def list_catalog_models(
             efforts=ai_reasoning.waehlbare_stufen(modell, None),
             default_effort=modell.standard_stufe,
             mandatory=modell.zwingend,
+            # Die Empfehlung steht in der Anbieterliste und wird hier nur
+            # zugeordnet. Trifft sie auf kein Modell — weil der Anbieter die
+            # Kennung umbenannt oder abgekuendigt hat —, bleibt schlicht jede
+            # Zeile ohne Marke. Nie eine erfundene daneben.
+            recommended=modell.model_id == ai_provider_registry.anbieter(kind).empfehlung,
         )
         for modell in modelle
     ]

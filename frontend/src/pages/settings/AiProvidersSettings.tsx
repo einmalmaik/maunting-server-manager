@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react'
-import { AlertCircle, CheckCircle2, KeyRound, PlugZap, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, KeyRound, PlugZap, Plus, RefreshCw, Save, Star, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -279,6 +279,10 @@ function ProviderForm({
   }, [draft.provider_kind])
 
   const gewaehltesModell = models?.find((item) => item.model_id === draft.default_model) ?? null
+  // Kommt aus dem Katalog, nicht aus der Oberflaeche: fuehrt der Anbieter die
+  // empfohlene Kennung nicht mehr, gibt es hier `null` und die Empfehlung
+  // verschwindet von selbst — statt auf ein Modell zu zeigen, das es nicht gibt.
+  const empfohlenesModell = models?.find((item) => item.recommended) ?? null
 
   // Unser `Dropdown` ist ein Knopf, kein `<select>`. Ein umschliessendes
   // `<label>` beschriftet ihn deshalb nicht — es braucht `htmlFor` und eine ID,
@@ -386,14 +390,27 @@ function ProviderForm({
                     value={draft.default_model || null}
                     onChange={(default_model) => change({ default_model })}
                     placeholder={t('ai.providers.modelChoose')}
-                    options={models.map((item) => ({
-                      value: item.model_id,
-                      // Der Anzeigename daneben: `anthropic/claude-opus-5` ist
-                      // die ID, die gespeichert wird, „Claude Opus 5" das, was
-                      // der Betreiber sucht.
-                      label: item.model_id,
-                      hint: item.name !== item.model_id ? item.name : undefined,
-                    }))}
+                    // Das empfohlene Modell steht oben. Bei ueber 400 Eintraegen
+                    // ist eine Empfehlung, die man erst suchen muss, keine.
+                    options={[...models]
+                      .sort((a, b) => Number(b.recommended) - Number(a.recommended))
+                      .map((item) => ({
+                        value: item.model_id,
+                        // Der Anzeigename daneben: `anthropic/claude-opus-5` ist
+                        // die ID, die gespeichert wird, „Claude Opus 5" das, was
+                        // der Betreiber sucht.
+                        label: item.model_id,
+                        hint: item.recommended
+                          ? [item.name !== item.model_id ? item.name : null, t('ai.providers.recommended')]
+                              .filter(Boolean)
+                              .join(' · ')
+                          : item.name !== item.model_id
+                            ? item.name
+                            : undefined,
+                        icon: item.recommended
+                          ? <Star className="h-3.5 w-3.5 fill-current text-primary" aria-hidden="true" />
+                          : undefined,
+                      }))}
                   />
                 </div>
               ) : (
@@ -411,6 +428,24 @@ function ProviderForm({
           </div>
           {models === null && !loadingModels && draft.provider_kind && (
             <p className="mt-1.5 text-xs text-on-surface-variant">{t('ai.providers.catalogUnavailable')}</p>
+          )}
+          {/* Steht nur da, solange der Betreiber die Empfehlung nicht gewaehlt
+              hat. Danach waere es eine Belehrung ueber eine Entscheidung, die
+              schon gefallen ist. */}
+          {empfohlenesModell && draft.default_model !== empfohlenesModell.model_id && (
+            <p className="mt-1.5 flex items-start gap-1.5 text-xs text-on-surface-variant">
+              <Star className="mt-0.5 h-3.5 w-3.5 shrink-0 fill-current text-primary" aria-hidden="true" />
+              <span>
+                {t('ai.providers.recommendationHint', { model: empfohlenesModell.model_id })}{' '}
+                <button
+                  type="button"
+                  onClick={() => change({ default_model: empfohlenesModell.model_id })}
+                  className="underline underline-offset-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {t('ai.providers.recommendationApply')}
+                </button>
+              </span>
+            </p>
           )}
           {gewaehltesModell && <ModelCapabilities model={gewaehltesModell} />}
         </div>

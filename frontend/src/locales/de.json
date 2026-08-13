@@ -152,6 +152,9 @@
       "modelChoose": "Modell wählen …",
       "reloadModels": "Modelle neu laden",
       "catalogUnavailable": "Der Modellkatalog des Anbieters ist gerade nicht erreichbar. Du kannst den Modellnamen so lange von Hand eintragen; die Denkstufen bleiben dann unbekannt.",
+      "recommended": "Empfohlen",
+      "recommendationHint": "MSM ist mit {{model}} erprobt — schnell genug für den Chat und mit Denkstufen. Ein anderes Modell geht auch.",
+      "recommendationApply": "Übernehmen",
       "caps": {
         "none": "Dieses Modell denkt nicht nach.",
         "levels": "Denkstufen:",
