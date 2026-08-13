@@ -54,7 +54,22 @@ def _abschlusstext(db: Session, run: AiRun) -> str:
     )
     if zeile is None or not zeile.content:
         return ""
-    return redact_sensitive_text(str(zeile.content))[:MAX_BERICHT_ZEICHEN]
+    text = redact_sensitive_text(str(zeile.content)).strip()
+
+    # **Von hinten**, nicht von vorne. Vorher stand hier `[:MAX_BERICHT_ZEICHEN]`,
+    # und das war genau verkehrt herum: `content` ist das Protokoll des ganzen
+    # Laufs, und `MITREDEN` verlangt vor jedem Werkzeugaufruf einen Satz. Vorne
+    # steht deshalb "Ich pruefe jetzt den Status aller Server", hinten steht das
+    # Ergebnis. Wer vorne abschneidet, verschickt die Ansagen und laesst den
+    # Bericht weg — so geschehen in einer Mail an den Betreiber.
+    #
+    # Der letzte Absatz ist die Schlussfassung, seit die Runden durch eine
+    # Leerzeile getrennt sind. Ist er zu duenn, um allein zu stehen, geht der
+    # Schluss des ganzen Textes hinaus.
+    absaetze = [teil.strip() for teil in text.split("\n\n") if teil.strip()]
+    if absaetze and len(absaetze[-1]) >= 80:
+        return absaetze[-1][-MAX_BERICHT_ZEICHEN:]
+    return text[-MAX_BERICHT_ZEICHEN:]
 
 
 def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:

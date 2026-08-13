@@ -2185,6 +2185,18 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             # `_tool_followup_messages` gewandert und meldet jeden Aufruf,
             # sobald er fertig ist. `used_tools` bleibt der Rueckgabewert, weil
             # es weiterhin das Protokoll und den Serverbezug traegt.
+            #
+            # Und hier endet ein Absatz. `chunks` sammelt den Text **aller**
+            # Runden in einer flachen Liste, und `"".join(chunks)` weiter unten
+            # klebte deshalb den Schlusssatz dieser Runde an das erste Zeichen
+            # der naechsten: „…damit die Mail nur bestaetigte Informationen
+            # enthaelt.Ich pruefe jetzt den Status…“ — so stand es in einer
+            # Berichtsmail. Innerhalb einer Runde ist das nahtlose Aneinander
+            # richtig (es sind Token-Bruchstuecke), zwischen zwei Runden liegt
+            # ein Werkzeugaufruf, und `MITREDEN` verlangt davor einen ganzen
+            # Satz. Der Umbruch gehoert also genau hierhin, an die Naht.
+            if chunks and not chunks[-1].endswith("\n"):
+                chunks.append("\n\n")
             current_usage = StreamUsage()
 
         if abgeloest:

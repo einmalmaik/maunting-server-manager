@@ -105,6 +105,25 @@ class EmailService:
 
     @staticmethod
     async def _send_smtp(to: str, subject: str, body: str, html: str | None = None) -> bool:
+        """Der SMTP-Weg.
+
+        **Umlaute sind hier unbedenklich, in Text wie in Betreff.** Das steht
+        da, weil es einmal anders geglaubt wurde: die KI-Mails schrieben
+        "faellig" und "vollstaendig" in Ersatzschreibung, waehrend die aelteren
+        Vorlagen derselben Datei "durchgeführt" schrieben. In einer Mail standen
+        beide Schreibweisen nebeneinander, und es sah aus wie ein Notbehelf
+        gegen eine kaputte Kodierung.
+
+        Ist es nicht. ``EmailMessage`` waehlt fuer ``set_content`` selbst den
+        passenden Zeichensatz und die passende Transferkodierung, und beim
+        Serialisieren kodiert es einen Betreff mit Nicht-ASCII nach RFC 2047.
+        Der Resend-Weg daneben schickt ohnehin JSON ueber HTTPS, also UTF-8.
+
+        Wer hier kuenftig Ersatzschreibungen einfuegt, macht die Mail nicht
+        sicherer, sondern nur schlechter zu lesen. (Fuer Quelltextkommentare
+        gilt weiter die Projektschreibweise — nur nicht fuer Text, den ein
+        Mensch in seinem Postfach liest.)
+        """
         msg = EmailMessage()
         msg["From"] = EmailService._get_setting("smtp_from") or settings.smtp_from
         msg["To"] = to
@@ -488,8 +507,8 @@ Maunting Server Manager — Guardian Engine
         subject = f"Maunting Server Manager — {titel}: {server_name}"
         body = f"""Hallo {username},
 
-auf dem Server "{server_name}" gab es eine Stoerung ({incident_type}).
-Der KI-Assistent hat sie eigenstaendig bearbeitet. Ergebnis: {zustand}.
+auf dem Server "{server_name}" gab es eine Störung ({incident_type}).
+Der KI-Assistent hat sie eigenständig bearbeitet. Ergebnis: {zustand}.
 
 {bericht}
 """
@@ -504,8 +523,8 @@ Der KI-Assistent hat sie eigenstaendig bearbeitet. Ergebnis: {zustand}.
         )
         nachricht = (
             f'Auf dem Server <strong>"{EmailService.html_text(server_name)}"</strong> gab es '
-            f'eine Stoerung (<strong>{EmailService.html_text(incident_type)}</strong>).<br/>'
-            f'Der KI-Assistent hat sie eigenstaendig bearbeitet. '
+            f'eine Störung (<strong>{EmailService.html_text(incident_type)}</strong>).<br/>'
+            f'Der KI-Assistent hat sie eigenständig bearbeitet. '
             f'Ergebnis: <strong>{zustand}</strong>.'
         )
         html_body = EmailService._notification_email_html(
@@ -548,21 +567,21 @@ Der KI-Assistent hat sie eigenstaendig bearbeitet. Ergebnis: {zustand}.
         zustand = "erledigt" if geschafft else "nicht abgeschlossen"
         body = f"""Hallo {username},
 
-deine KI-Aufgabe "{task_title}" ({plan_text}) war faellig.
+deine KI-Aufgabe "{task_title}" ({plan_text}) war fällig.
 Ergebnis: {zustand}.
 
 {bericht}
 
-Den vollstaendigen Verlauf findest du im KI-Chat des Panels.
+Den vollständigen Verlauf findest du im KI-Chat des Panels.
 Maunting Server Manager
 """
         nachricht = (
             f'Deine KI-Aufgabe <strong>"{EmailService.html_text(task_title)}"</strong> '
-            f'({EmailService.html_text(plan_text)}) war faellig.<br/>'
+            f'({EmailService.html_text(plan_text)}) war fällig.<br/>'
             f'Ergebnis: <strong>{zustand}</strong>.'
         )
         detail = EmailService.html_text(bericht) + (
-            '<p style="margin:16px 0 0 0;font-size:13px;">Den vollstaendigen '
+            '<p style="margin:16px 0 0 0;font-size:13px;">Den vollständigen '
             'Verlauf findest du im KI-Chat des Panels.</p>'
         )
         html_body = EmailService._notification_email_html(
@@ -588,8 +607,8 @@ Maunting Server Manager
 diese Mail hat der KI-Assistent auf deine Bitte hin verschickt.
 
 Wenn du sie liest, funktioniert der im Panel eingerichtete Versandweg —
-und damit auch die Berichte, die dir die KI kuenftig zu deinen Aufgaben
-und zu behobenen Stoerungen schickt.
+und damit auch die Berichte, die dir die KI künftig zu deinen Aufgaben
+und zu behobenen Störungen schickt.
 
 Maunting Server Manager
 """
@@ -599,7 +618,7 @@ Maunting Server Manager
         detail = (
             '<p style="margin:0;">Wenn du sie liest, funktioniert der im Panel '
             'eingerichtete Versandweg — und damit auch die Berichte, die dir die '
-            'KI kuenftig zu deinen Aufgaben und zu behobenen Stoerungen '
+            'KI künftig zu deinen Aufgaben und zu behobenen Störungen '
             'schickt.</p>'
         )
         html_body = EmailService._notification_email_html(

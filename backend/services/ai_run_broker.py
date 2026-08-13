@@ -80,11 +80,31 @@ class Abzug:
 
     @property
     def inhalt(self) -> str:
-        return "".join(
-            str(abschnitt.get("inhalt") or "")
+        """Der reine Text des Laufs, Abschnitt fuer Abschnitt.
+
+        **Mit Leerzeile zwischen den Abschnitten.** Frueher stand hier
+        ``"".join(...)``, und das war an einer Stelle richtig und an einer
+        anderen falsch: *innerhalb* eines Abschnitts sind die Stuecke
+        Token-Bruchstuecke und gehoeren nahtlos aneinander, *zwischen* zwei
+        Abschnitten liegt aber ein Werkzeugaufruf. Der Prompt-Block ``MITREDEN``
+        verlangt vor jedem Werkzeug einen Satz, also endet ein Abschnitt mit
+        einem Satzende und der naechste beginnt mit einem Grossbuchstaben.
+
+        Ohne Trenner kam dabei heraus, was ein Betreiber in einer Berichtsmail
+        vorfand: „…damit die Mail nur bestaetigte Informationen enthaelt.Ich
+        pruefe jetzt den Status…“. Im Chat fiel es nicht auf, weil der die
+        Abschnitte einzeln zeichnet — nur wer ``inhalt`` weiterverwendet, sah es.
+
+        ``rstrip`` je Abschnitt, damit aus einem bereits vorhandenen Zeilenumbruch
+        keine dritte Leerzeile wird. Fuehrende Leerzeichen bleiben: sie koennen
+        zu einem Codeblock gehoeren.
+        """
+        stuecke = (
+            str(abschnitt.get("inhalt") or "").rstrip()
             for abschnitt in self.abschnitte
             if abschnitt.get("art") == "text"
         )
+        return "\n\n".join(stueck for stueck in stuecke if stueck)
 
     @property
     def werkzeuge(self) -> list[dict]:

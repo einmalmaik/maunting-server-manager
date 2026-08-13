@@ -589,6 +589,33 @@ async def test_the_snapshot_is_a_still_picture_not_the_living_state(
     assert abzug.inhalt == ""
 
 
+def test_text_around_a_tool_call_does_not_run_together() -> None:
+    """Zwischen zwei Textabschnitten liegt eine Leerzeile, nicht nichts.
+
+    Aus dem Betrieb, aus einer Berichtsmail: „…damit die Mail nur bestaetigte
+    Informationen enthaelt.Ich pruefe jetzt den Status…“. Der Vermittler fuegte
+    die Abschnitte mit ``"".join`` zusammen — richtig fuer die Token-Bruchstuecke
+    *innerhalb* eines Abschnitts, falsch *zwischen* zweien. Dazwischen liegt ein
+    Werkzeugaufruf, und der Prompt verlangt vor jedem einen ganzen Satz.
+
+    Im Chat fiel es nie auf, weil der die Abschnitte einzeln zeichnet. Nur wer
+    ``inhalt`` weiterverwendet — die Mail, der Anbieter, der Verlauf — sah es.
+    """
+    ai_run_broker.zuruecksetzen_fuer_tests()
+    ai_run_broker.eroeffnen("lauf-trenner")
+
+    # Zwei Bruchstuecke eines Satzes: die gehoeren nahtlos aneinander.
+    ai_run_broker.veroeffentlichen("lauf-trenner", "delta", {"content": "Ich sehe "})
+    ai_run_broker.veroeffentlichen("lauf-trenner", "delta", {"content": "nach."})
+    ai_run_broker.veroeffentlichen(
+        "lauf-trenner", "tool", {"name": "server_uebersicht", "gruppe": "server"}
+    )
+    ai_run_broker.veroeffentlichen("lauf-trenner", "delta", {"content": "Drei laufen."})
+
+    abzug, _ = ai_run_broker.abonnieren("lauf-trenner")
+    assert abzug.inhalt == "Ich sehe nach.\n\nDrei laufen."
+
+
 @pytest.mark.asyncio
 async def test_a_failed_action_still_lets_the_run_speak(
     db: Session,
