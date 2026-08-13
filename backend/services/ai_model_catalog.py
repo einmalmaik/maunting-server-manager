@@ -552,6 +552,29 @@ async def finde(
     return None
 
 
+async def aufraeumen() -> None:
+    """Laufende Auffrischungen beenden, bevor die Anwendung schliesst.
+
+    Muss **vor** dem Schliessen des HTTP-Clients laufen. Eine Auffrischung haelt
+    denselben Client wie der Sendepfad; wird der unter ihr weggezogen, endet sie
+    in einem Fehler auf einem geschlossenen Client. Das haelt nichts auf — es
+    hinterlaesst nur eine Fehlermeldung beim Herunterfahren, die aussieht, als
+    sei etwas kaputt.
+
+    Abbrechen allein genuegt nicht: ``cancel()`` bittet nur darum. Erst das
+    Abwarten stellt sicher, dass die Aufgabe wirklich fertig ist, wenn diese
+    Funktion zurueckkehrt.
+    """
+    global _HTTP
+    _HTTP = None
+    laufende = [a for a in _auffrischungen.values() if not a.done()]
+    for aufgabe in laufende:
+        aufgabe.cancel()
+    if laufende:
+        await asyncio.gather(*laufende, return_exceptions=True)
+    _auffrischungen.clear()
+
+
 def cache_leeren_fuer_tests() -> None:
     """Setzt den gesamten Modulzustand zurueck.
 

@@ -492,6 +492,37 @@ async def test_without_a_background_client_nothing_changes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_shutdown_waits_for_the_refresh_it_cancels() -> None:
+    """Beim Herunterfahren endet die Auffrischung, bevor der Client zugeht.
+
+    Sie haelt denselben Client wie der Sendepfad. Wird der unter ihr weggezogen,
+    endet sie in einem Fehler auf einem geschlossenen Client — das haelt nichts
+    auf, hinterlaesst aber eine Meldung beim Herunterfahren, die aussieht, als
+    sei etwas kaputt. ``cancel()`` allein genuegt dafuer nicht: es bittet nur
+    darum. Erst das Abwarten macht die Zusage wahr.
+    """
+    weiter = asyncio.Event()
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        await weiter.wait()
+        return httpx.Response(200, json=ANTWORT)
+
+    async with _client(handler) as client:
+        ai_model_catalog.laufzeit_setzen(client)
+        ai_model_catalog.vorwaermen_anstossen()
+        aufgabe = ai_model_catalog._auffrischungen["openrouter"]
+        await asyncio.sleep(0)
+        assert not aufgabe.done()
+
+        await ai_model_catalog.aufraeumen()
+
+        assert aufgabe.done()
+        assert not ai_model_catalog._auffrischungen
+        # Und danach stoesst nichts mehr etwas an: ohne Client kein Hintergrund.
+        assert ai_model_catalog._auffrischen_anstossen("openrouter") is False
+
+
+@pytest.mark.asyncio
 async def test_a_hanging_provider_does_not_stall_a_healthy_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

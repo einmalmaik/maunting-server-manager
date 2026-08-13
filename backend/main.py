@@ -623,6 +623,17 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    #
+    # Der Modellkatalog zuerst, und zwar **vor** den Clients: eine noch laufende
+    # Auffrischung benutzt `ai_http_client`. Wird der geschlossen, waehrend sie
+    # laeuft, endet sie in einem RuntimeError auf einem geschlossenen Client —
+    # ein Fehler beim Herunterfahren, der nichts bedeutet und trotzdem im Log
+    # steht. Aufraeumen heisst hier: abbrechen und abwarten.
+    if not is_testing:
+        from services import ai_model_catalog as _ai_model_catalog
+
+        await _ai_model_catalog.aufraeumen()
+
     await app.state.http_client.aclose()
     await app.state.ai_http_client.aclose()
     stop_scheduler()
