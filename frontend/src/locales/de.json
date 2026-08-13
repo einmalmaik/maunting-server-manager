@@ -318,6 +318,7 @@
       "clearTitle": "Verlauf löschen?",
       "clearConfirm": "Alle Nachrichten dieser Unterhaltung wirklich löschen? Bereits ausgeführte Aktionen bleiben im Audit-Log.",
       "reasoning": "Nachdenken",
+      "thinkingNow": "Denkt nach …",
       "thought": "Nachgedacht",
       "noPermission": "Keine Berechtigung für den KI-Assistenten.",
       "examples": {

@@ -318,6 +318,7 @@
       "clearTitle": "Clear history?",
       "clearConfirm": "Really delete all messages in this conversation? Actions that already ran stay in the audit log.",
       "reasoning": "Thinking",
+      "thinkingNow": "Thinking …",
       "thought": "Thought",
       "noPermission": "No permission to use the AI assistant.",
       "examples": {

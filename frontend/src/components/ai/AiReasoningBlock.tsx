@@ -36,7 +36,15 @@ export function AiReasoningBlock({ content, streaming }: { content: string; stre
         className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-medium text-on-surface-variant transition-colors hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <Brain className={`h-3.5 w-3.5 shrink-0 ${streaming ? 'animate-pulse text-primary' : ''}`} aria-hidden="true" />
-        <span>{streaming ? t('ai.chat.thinking') : t('ai.chat.thought')}</span>
+        {/*
+          Eigener Text, nicht `ai.chat.thinking`. Der Block trug frueher
+          waehrend des Denkens exakt denselben Satz wie der globale
+          Ladezustand ("Antwort wird erstellt …"). Damit stand ueber der
+          einzigen Stelle, an der sichtbar etwas geschah, wortwoertlich das,
+          was auch dasteht, wenn noch nichts geschieht — und "Nachgedacht"
+          erschien erst am Schluss. Der Block sagt jetzt selbst, was er tut.
+        */}
+        <span>{streaming ? t('ai.chat.thinkingNow') : t('ai.chat.thought')}</span>
         <ChevronDown
           className={`ml-auto h-3.5 w-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
           aria-hidden="true"
