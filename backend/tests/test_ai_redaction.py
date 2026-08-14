@@ -48,6 +48,17 @@ from services.ai_redaction import redact_and_count, redact_sensitive_text
         ("password=hunter2", "hunter2"),
         ("API-KEY: abcdef", "abcdef"),
         ("credential=xyz", "xyz"),
+        # Zusammengeschrieben — das dritte Loch. Der Präfix verlangte hinter
+        # jedem Wortteil ein Trennzeichen, und die Grenze davor verbot die
+        # Wortmitte; zusammen liessen sie genau die Schreibweise durch, die in
+        # den INI-Dateien von ARK, Palworld, DayZ und SCUM steht. Das sind die
+        # Dateien, die `read_config` liest und an den Anbieter weiterreicht.
+        ("ServerAdminPassword=geheim", "geheim"),
+        ("AdminPassword=hunter2", "hunter2"),
+        ("SpectatorPassword=xyzabc", "xyzabc"),
+        ("rconPassword: swordfish", "swordfish"),
+        ("MyApiKey=sk-test-value", "sk-test-value"),
+        ('{"ServerAdminPassword": "hunter2"}', "hunter2"),
     ],
 )
 def test_a_secret_assignment_never_survives(eingabe: str, geheimnis: str) -> None:
@@ -108,6 +119,13 @@ def test_the_count_reports_every_replacement_not_every_secret() -> None:
         "Dein Passwort steht in der Anleitung",
         "secretary=anna",
         "Die Konfiguration liegt in /etc/server.properties",
+        # Seit der Präfix auch Wortteile ohne Trennzeichen frisst, ist die
+        # Gegenprobe wichtiger geworden: das Schlüsselwort muss weiterhin
+        # unmittelbar vor dem Trennzeichen stehen, sonst greift die Schwärzung
+        # in jede Zeile, in der irgendwo „token“ vorkommt.
+        "tokenCount=42",
+        "MaxTokens=100",
+        "PasswordPolicy_MinLength=8",
     ],
 )
 def test_ordinary_text_is_left_alone(harmlos: str) -> None:

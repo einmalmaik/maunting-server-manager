@@ -49,13 +49,21 @@ import re
 #: und optionale Anführungszeichen um Trennzeichen und Wert. Die Anführungs-
 #: zeichen werden mitgeschrieben, damit aus gültigem JSON wieder gültiges JSON
 #: wird — der Text geht als Kontext an ein Modell und soll lesbar bleiben.
+#:
+#: 3. Ein drittes Loch, gefunden am 14.08.2026: der Präfix verlangte hinter
+#:    jedem Wortteil ein Trennzeichen (``[._-]``), und davor stand ein
+#:    ``(?<![A-Za-z0-9])``. Beides zusammen liess jede zusammengeschriebene
+#:    Schreibweise durch — ``ServerAdminPassword=geheim``, ``AdminSecret``,
+#:    ``rconPassword``. Das ist ausgerechnet die Schreibweise der INI-Dateien
+#:    von ARK, Palworld, DayZ und SCUM, also der Dateien, die ``read_config``
+#:    liest und weiterreicht. Der Präfix frisst deshalb jetzt auch Wortteile
+#:    ohne Trennzeichen, und die Grenze davor faellt weg: sie hat hier nichts
+#:    geschuetzt, sondern nur die Wortmitte ausgeschlossen, in der das
+#:    Schluesselwort tatsaechlich steht.
 _SECRET_ASSIGNMENT_RE = re.compile(
     r"(?i)"
-    # Kein Buchstabe und keine Ziffer davor: der Präfix unten fängt das ab, was
-    # dazugehört, und hier soll keine Wortmitte anfangen.
-    r"(?<![A-Za-z0-9])"
     r"(?P<key>"
-    r"(?:[A-Za-z0-9]+[._-])*"
+    r"[A-Za-z0-9._-]*"
     r"(?:password|passwd|secret|token|api[_-]?key|authorization|credential)"
     r")"
     # Trennzeichen, davor optional das schliessende Anführungszeichen des
@@ -134,7 +142,7 @@ _IPV6_RE = re.compile(
 #: Ein zweites Muster und keine zweite Wortliste: waeren es zwei Listen, wuerde
 #: die eine irgendwann um `credential` erweitert und die andere nicht.
 _SECRET_KEY_RE = re.compile(
-    r"(?i)^(?:[A-Za-z0-9]+[._-])*"
+    r"(?i)^[A-Za-z0-9._-]*"
     r"(?:password|passwd|secret|token|api[_-]?key|authorization|credential)$"
 )
 
