@@ -150,6 +150,41 @@ def test_an_id_that_belongs_to_a_native_blueprint_is_refused(db: Session) -> Non
     assert fehler.value.status_code == 409
 
 
+def test_the_refusal_does_not_reveal_whether_a_blueprint_exists(
+    db: Session, regular_user: User
+) -> None:
+    """Ohne `blueprints.manage` sagt die Ablehnung nichts über den Bestand.
+
+    `_blueprint_change_payload` liest die Quelle vom Datenträger und reicht die
+    Meldung des Blueprint-Dienstes wörtlich durch. Liefe der Bau vor der
+    Rechteprüfung, unterschiede ein Benutzer ohne das Recht vorhandene von
+    erfundenen Blueprint-Kennungen an der Fehlermeldung.
+    """
+    _rechte(db, regular_user, global_keys=("ai.chat.use",))
+    conversation = _conversation(db, regular_user)
+
+    meldungen = []
+    for quelle in ("minecraft_forge", "gibt-es-nicht-4711"):
+        with pytest.raises(ai_action_errors.AiActionValidationError) as fehler:
+            ai_proposal_service.create_proposal(
+                db,
+                user=regular_user,
+                conversation=conversation,
+                tool_name="propose_blueprint_change",
+                arguments={
+                    "source_id": quelle,
+                    "new_id": "abgeleitet_4711",
+                    "changes": {"runtime.env": {"VERSION": "1.20.1"}},
+                    "reason": "Test.",
+                    "expected_effect": "Test.",
+                },
+                correlation_id=str(uuid4()),
+            )
+        meldungen.append(str(fehler.value))
+
+    assert meldungen[0] == meldungen[1] == "AI-Aktion ist nicht erlaubt"
+
+
 def test_a_running_server_cannot_be_switched(
     db: Session, regular_user: User, tmp_path: Path
 ) -> None:

@@ -9,7 +9,7 @@ Reihenfolge:
 """
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from models import (
     RolePermission,
@@ -19,6 +19,7 @@ from models import (
     TeamMember,
     TeamServerGrant,
     User,
+    UserRole,
 )
 from services.role_service import (
     effective_user_role_ids,
@@ -179,7 +180,7 @@ def has_permission_anywhere(db: Session, user: User, key: str) -> bool:
     return False
 
 
-def _direkte_rechte(
+def direkte_rechte(
     db: Session, user: User, schluessel: set[str]
 ) -> tuple[set[str], set[tuple[int, str]]]:
     """Die direkten Rechte eines Benutzers, mengenweise — genau wie
@@ -237,7 +238,7 @@ def rechte_irgendwo(db: Session, user: User, schluessel: set[str]) -> set[str]:
     """
     if not schluessel:
         return set()
-    pauschal, delegiert = _direkte_rechte(db, user, schluessel)
+    pauschal, delegiert = direkte_rechte(db, user, schluessel)
     gefunden = pauschal | {key for _, key in delegiert}
     offen = schluessel - gefunden
     if not offen:
@@ -274,13 +275,58 @@ def rechte_irgendwo(db: Session, user: User, schluessel: set[str]) -> set[str]:
         if owner_user_id not in gruender_rechte:
             gruender = db.get(User, owner_user_id)
             gruender_rechte[owner_user_id] = (
-                _direkte_rechte(db, gruender, offen) if gruender is not None
+                direkte_rechte(db, gruender, offen) if gruender is not None
                 else (set(), set())
             )
         g_pauschal, g_delegiert = gruender_rechte[owner_user_id]
         if key in g_pauschal or (server_id, key) in g_delegiert:
             gefunden.add(key)
     return gefunden
+
+
+def benutzer_mit_recht(db: Session, kandidaten: list[User], key: str) -> set[int]:
+    """Welche dieser Benutzer halten den globalen Schluessel? Zwei Abfragen.
+
+    Dieselbe Frage wie `has_global_permission`, nur fuer viele Benutzer auf
+    einmal. Der Anlass war gemessen: die Dienstbenutzerliste der Shop-Anbindung
+    fragte je Kandidat einzeln und kostete 1 + 2n Abfragen — 401 bei ihrer
+    Obergrenze von 200.
+
+    Zwei Fallen, die ein naiver Join uebersieht und die deshalb hier stehen:
+
+    - **Owner** halten alles ohne eine einzige Zeile in der Datenbank.
+    - Die Rolle eines Benutzers kann allein in der Altspalte `users.role_id`
+      stehen, ohne Zeile in `user_roles`. `effective_user_role_ids` liest sie
+      ausdruecklich mit; wer nur `user_roles` joint, uebersieht genau die
+      Konten, die ein Admin ueber die Benutzerverwaltung angelegt hat.
+    """
+    if not kandidaten:
+        return set()
+    rollen_mit_recht = {
+        row[0]
+        for row in db.query(RolePermission.role_id)
+        .filter(RolePermission.permission_key == key)
+        .all()
+    }
+    zuordnung: dict[int, set[int]] = {}
+    for user_id, role_id in (
+        db.query(UserRole.user_id, UserRole.role_id)
+        .filter(UserRole.user_id.in_([u.id for u in kandidaten]))
+        .all()
+    ):
+        zuordnung.setdefault(user_id, set()).add(role_id)
+
+    treffer: set[int] = set()
+    for u in kandidaten:
+        if u.is_owner:
+            treffer.add(u.id)
+            continue
+        rollen = set(zuordnung.get(u.id, ()))
+        if u.role_id is not None:
+            rollen.add(u.role_id)
+        if rollen & rollen_mit_recht:
+            treffer.add(u.id)
+    return treffer
 
 
 def _team_visible_server_ids(db: Session, user: User) -> set[int]:
@@ -352,12 +398,28 @@ def list_visible_server_ids(db: Session, user: User) -> list[int] | None:
 
 
 def list_visible_servers(db: Session, user: User) -> list[Server]:
+    """Die sichtbaren Server samt ihrer Ports.
+
+    `selectinload(Server.ports)` ist kein Feinschliff: `ServerResponse` liest
+    die Ports bei jeder Serialisierung, und die Serveruebersicht ruft diese
+    Liste alle fuenf Sekunden ab. Ohne den Ladehinweis kostet sie eine Abfrage
+    je Server, mit ihm genau eine zusaetzliche — gemessen 34 statt 2 bei
+    dreissig Servern, bei gleichem JSON.
+
+    `Server.node` bleibt bewusst ohne Hinweis: die Beziehung zeigt auf **eine**
+    Node, die die Identity Map ohnehin nur einmal holt.
+    """
     ids = list_visible_server_ids(db, user)
     if ids is None:
-        return db.query(Server).all()
+        return db.query(Server).options(selectinload(Server.ports)).all()
     if not ids:
         return []
-    return db.query(Server).filter(Server.id.in_(ids)).all()
+    return (
+        db.query(Server)
+        .options(selectinload(Server.ports))
+        .filter(Server.id.in_(ids))
+        .all()
+    )
 
 
 def list_user_server_permission_keys(

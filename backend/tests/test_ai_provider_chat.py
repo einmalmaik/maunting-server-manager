@@ -116,6 +116,36 @@ def test_provider_read_path_never_decrypts_secret(
     assert response.json()[0]["operator_key_configured"] is True
 
 
+def test_provider_list_survives_a_row_with_an_unknown_kind(
+    client: TestClient,
+    db: Session,
+    owner_cookies: dict,
+) -> None:
+    """Eine geparkte Zeile darf die Liste nicht mit 500 abräumen.
+
+    Die Migration setzt `provider_kind` auf "" und `enabled` auf False, wenn
+    sie die früher frei eintragbare Basis-URL keinem unterstützten Anbieter
+    zuordnen kann. Genau diese Zeile muss der Betreiber sehen — sonst kann er
+    sie weder umstellen noch löschen.
+    """
+    db.add(
+        AiProvider(
+            name="Geparkter Zugang",
+            provider_kind="",
+            default_model="llama3",
+            enabled=False,
+            requires_api_key=False,
+        )
+    )
+    db.commit()
+
+    response = client.get("/api/ai/settings/providers", cookies=owner_cookies)
+
+    assert response.status_code == 200
+    zeile = next(item for item in response.json() if item["name"] == "Geparkter Zugang")
+    assert zeile["base_url"] is None
+
+
 def test_a_user_cannot_bring_their_own_key_any_more(
     client: TestClient,
     db: Session,

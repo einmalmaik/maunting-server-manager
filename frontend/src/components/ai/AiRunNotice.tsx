@@ -41,9 +41,10 @@ const TEXTE: Record<string, { key: string; fallback: string }> = {
  * Fortschritt unsichtbar — man muesste den Chat offen lassen, also genau das
  * tun, was nicht mehr noetig sein sollte.
  *
- * Bewusst kein Dauerpoller: nachgesehen wird nur, solange tatsaechlich etwas
- * laeuft. Ist nichts los, kostet die Komponente einen einzigen Aufruf beim
- * Anmelden und danach nichts mehr.
+ * Der schnelle Takt gilt nur, solange etwas läuft **und** man nicht im Chat
+ * steht. Sonst der Ruhetakt: im Chat meldet der Ereignisstrom selbst, und eine
+ * Meldung, die dort ohnehin unterdrückt wird, ist keine Abfrage alle acht
+ * Sekunden wert.
  */
 export function AiRunNotice() {
   const { t } = useTranslation()
@@ -93,10 +94,11 @@ export function AiRunNotice() {
       if (!aktiv) return
       const laeuftNoch = await nachsehen()
       if (!aktiv) return
-      // Schnell nachsehen, solange etwas arbeitet; danach langsam weiter, statt
-      // aufzuhoeren. Der langsame Takt ist die einzige Art, wie eine offene
-      // Seite von einem Lauf erfaehrt, den niemand ausgeloest hat.
-      timer = setTimeout(takt, laeuftNoch ? TAKT_MS : RUHETAKT_MS)
+      // Schnell nachsehen, solange etwas arbeitet und man nicht im Chat steht;
+      // sonst langsam weiter, statt aufzuhören. Der langsame Takt ist die
+      // einzige Art, wie eine offene Seite von einem Lauf erfährt, den niemand
+      // ausgelöst hat.
+      timer = setTimeout(takt, laeuftNoch && !imChat ? TAKT_MS : RUHETAKT_MS)
     }
     void takt()
     return () => {

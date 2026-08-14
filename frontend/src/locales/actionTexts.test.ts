@@ -37,6 +37,8 @@ const SCHREIBWERKZEUGE = [
   'propose_hoster_integration',
   'propose_hoster_product',
   'propose_ai_tarif_role',
+  'propose_task_set',
+  'propose_task_delete',
   // Die Guardian-Kopplung. `propose_file_delete` steht im Bestätigungsdialog
   // rot (`UNUMKEHRBAR` in AiActionProposalCard.tsx), obwohl es in der Registry
   // nicht `immer_bestaetigen` ist — die Registry entscheidet, ob eine Freigabe

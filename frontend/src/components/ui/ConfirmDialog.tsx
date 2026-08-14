@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle } from 'lucide-react'
 import { useConfirmStore } from '@/stores/confirmStore'
@@ -28,6 +28,21 @@ export function ConfirmDialog() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [pending, resolve])
+
+  // Wer den Dialog geöffnet hat, steht nur während des Renderns fest: das
+  // `autoFocus` des Bestätigen-Knopfes zieht den Fokus schon vor jedem Effekt
+  // in den Dialog. Deshalb hier merken und beim Schließen zurückgeben — sonst
+  // fällt die Tastaturbedienung auf `document.body` und beginnt von vorn.
+  const previousFocus = useRef<HTMLElement | null>(null)
+  if (pending && !previousFocus.current) {
+    previousFocus.current = document.activeElement as HTMLElement | null
+  }
+  useEffect(() => {
+    if (pending) return
+    const target = previousFocus.current
+    previousFocus.current = null
+    if (target?.isConnected) target.focus()
+  }, [pending])
 
   if (!pending) return null
 

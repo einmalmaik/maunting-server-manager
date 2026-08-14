@@ -194,9 +194,16 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     // Die Anzahl steht in der Frage: „alles löschen" ist bei drei Einträgen
     // etwas anderes als bei achtzig, und nur der Benutzer weiß, welches er
     // gerade meint.
+    //
+    // Gezählt wird, was der Knopf danach wirklich trifft — nicht, was die Liste
+    // zeigt. Der persönliche Bereich listet auch die Notizen zu einzelnen
+    // Servern mit, gelöscht werden aber nur die allgemeinen Einträge (siehe
+    // unten). Mit `entries.length` fragte die Bestätigung nach „alle 12" und
+    // meldete danach „8 gelöscht".
+    const betroffen = entries.filter((eintrag) => eintrag.scope === memoryScopeName(scope))
     if (!await confirm({
       title: t('ai.memory.clearTitle'),
-      message: t('ai.memory.clearConfirm', { count: entries.length }),
+      message: t('ai.memory.clearConfirm', { count: betroffen.length }),
       confirmText: t('common.delete'), danger: true,
     })) return
     setBusy(true)

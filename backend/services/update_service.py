@@ -6,6 +6,8 @@ import tempfile
 import tarfile
 import subprocess
 import logging
+import threading
+import time
 from pathlib import Path
 from sqlalchemy.orm import Session
 
@@ -15,6 +17,11 @@ from services.panel_backup_service import create_panel_backup
 
 logger = logging.getLogger(__name__)
 
+# Zwischenspeicher für get_update_status(): {"ts": float, "data": dict}
+_STATUS_CACHE: dict = {}
+_STATUS_CACHE_LOCK = threading.Lock()
+_STATUS_CACHE_TTL_SECONDS = 60
+
 
 def _get_repo_root() -> str:
     # backend/services/update_service.py -> msm root
@@ -22,7 +29,27 @@ def _get_repo_root() -> str:
 
 
 def get_update_status() -> dict:
-    """Ermittelt den aktuellen Git-Update-Status des Panels."""
+    """Ermittelt den aktuellen Git-Update-Status des Panels.
+
+    Das Ergebnis wird 60 Sekunden zwischengespeichert. Jeder Aufruf startet
+    sonst ein `git fetch` über das Netz, das bis zu 15 Sekunden hängen kann,
+    während der Endpunkt beim Update-Fortschritt im Sekundentakt abgefragt
+    wird. Auch Fehlschläge werden zwischengespeichert, damit ein hängendes
+    Remote nicht bei jeder Anfrage erneut abgewartet wird.
+    """
+    now = time.time()
+    with _STATUS_CACHE_LOCK:
+        if _STATUS_CACHE and now - _STATUS_CACHE["ts"] < _STATUS_CACHE_TTL_SECONDS:
+            return dict(_STATUS_CACHE["data"])
+
+    result = _read_update_status()
+    with _STATUS_CACHE_LOCK:
+        _STATUS_CACHE["ts"] = now
+        _STATUS_CACHE["data"] = result
+    return dict(result)
+
+
+def _read_update_status() -> dict:
     repo_root = _get_repo_root()
     try:
         # 1. Fetch remote changes
@@ -84,6 +111,11 @@ def trigger_panel_update(db: Session) -> dict:
     except Exception as e:
         logger.error("Fehler beim Starten des Update-Scripts: %s", e)
         raise RuntimeError(f"Update-Script konnte nicht gestartet werden: {str(e)}")
+
+    # Ab hier ist der zwischengespeicherte Stand ungültig: das Skript ändert
+    # den Arbeitsbaum oder scheitert. Beides darf der Endpunkt sofort sehen.
+    with _STATUS_CACHE_LOCK:
+        _STATUS_CACHE.clear()
 
     return {"ok": True, "message": "Panel-Update und Backup initiiert"}
 

@@ -74,14 +74,51 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
           setOpen(false)
         }
       }
+      // Die Optionen liegen per Portal an `document.body` und damit außerhalb
+      // von `rootRef`. Deshalb hängen die Tasten am Dokument und die Liste wird
+      // über `menuRef` eingesammelt — dasselbe Vorgehen wie in
+      // Singra/UI/ActionMenu.tsx.
+      const optionenSammeln = (): HTMLButtonElement[] =>
+        menuRef.current
+          ? Array.from<HTMLButtonElement>(menuRef.current.querySelectorAll('[role="option"]:not(:disabled)'))
+          : []
       const onKey = (event: KeyboardEvent) => {
-        if (event.key === 'Escape') setOpen(false)
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          setOpen(false)
+          // Ohne diese Zeile verliert man nach Escape seinen Platz im Formular.
+          rootRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
+          return
+        }
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+        const optionen = optionenSammeln()
+        if (!optionen.length) return
+        event.preventDefault()
+        const aktuell = optionen.indexOf(document.activeElement as HTMLButtonElement)
+        const naechste =
+          event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? optionen.length - 1
+              : event.key === 'ArrowUp'
+                ? (aktuell - 1 + optionen.length) % optionen.length
+                : (aktuell + 1) % optionen.length
+        optionen[naechste].focus()
       }
+      // Beim Öffnen wandert der Fokus in die Liste, auf die gewählte Option.
+      // Erst im nächsten Frame — vorher steht das Menü noch nicht im DOM, weil
+      // die Position im Effekt darunter gemessen wird.
+      const fokusFrame = window.requestAnimationFrame(() => {
+        const optionen = optionenSammeln()
+        const gewaehlt = optionen.find((option) => option.getAttribute('aria-selected') === 'true')
+        ;(gewaehlt ?? optionen[0])?.focus()
+      })
       document.addEventListener('mousedown', onClick)
       document.addEventListener('keydown', onKey)
       return () => {
         document.removeEventListener('mousedown', onClick)
         document.removeEventListener('keydown', onKey)
+        window.cancelAnimationFrame(fokusFrame)
       }
     }, [open])
 
@@ -199,7 +236,7 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
                               setOpen(false)
                             }}
                             className={cx(
-                              'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                              'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:cursor-not-allowed disabled:opacity-40',
                               active
                                 ? 'bg-primary/10 text-primary'
                                 : 'text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface',

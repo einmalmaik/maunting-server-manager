@@ -82,11 +82,18 @@ def clear_history(db: Session, conversation: AiConversation) -> int:
 
     Die Unterhaltung bleibt, weil sie die Identitaet des Chats ist — an ihr
     haengen laufende Vorschlaege und die Idempotenz der Anfragen. Geloescht wird,
-    was der Benutzer sieht: Nachrichten, Werkzeugergebnisse und die
+    was der Benutzer sieht: Nachrichten, Werkzeugergebnisse, Anhänge und die
     Zusammenfassung. Bereits ausgefuehrte Aktionen bleiben im Audit; ein
     Chatverlauf ist kein Loeschknopf fuer die Nachvollziehbarkeit.
+
+    Die Anhänge gehen über die Unterhaltung weg, nicht über die Nachrichten:
+    `ai_attachments.message_id` trägt bewusst keinen Fremdschlüssel, ein
+    Bulk-Delete auf `ai_messages` räumt dort also nichts mit ab. Und weil die
+    Unterhaltung selbst stehen bleibt, greift auch ihre Kaskade nie. Gebundene
+    und noch ungebundene Anhänge fallen zusammen — genau das zeigt die
+    Oberfläche nach dem Leeren.
     """
-    from models import AiToolResult
+    from models import AiAttachment, AiToolResult
 
     removed = (
         db.query(AiMessage)
@@ -95,6 +102,9 @@ def clear_history(db: Session, conversation: AiConversation) -> int:
     )
     db.query(AiToolResult).filter(
         AiToolResult.conversation_id == conversation.id
+    ).delete(synchronize_session=False)
+    db.query(AiAttachment).filter(
+        AiAttachment.conversation_id == conversation.id
     ).delete(synchronize_session=False)
     conversation.summary = None
     conversation.summarized_until = None

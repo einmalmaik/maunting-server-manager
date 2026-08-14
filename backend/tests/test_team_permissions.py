@@ -590,3 +590,176 @@ def test_the_personal_team_is_never_a_candidate(db: Session, regular_user: User)
 
     kandidaten = team_service.learning_teams(db, colleague, schalter="skills")
     assert [row.id for row in kandidaten] == [team.id]
+
+
+# ── Die Vorschlagsliste: mengenweise, aber Zeichen fuer Zeichen dieselbe ──
+#
+# `assignable-servers` fragte je Server und je Rechteschluessel einzeln nach —
+# 28 Rechtefragen mal drei Abfragen je Server, rund 1700 bei dreissig Servern.
+# Die Bündelung ueber `direkte_rechte` ist nur dann eine Verbesserung, wenn sie
+# **dieselbe** Antwort gibt. Eine schnellere Liste mit anderem Inhalt waere hier
+# entweder eine stille Rechteausweitung (ein Server zuviel im Dialog) oder ein
+# stiller Rechteverlust. Deshalb rechnet jeder Test unten beide Wege
+# gegeneinander, statt eine Wunschliste zu behaupten.
+
+
+def _alter_weg(db: Session, user: User) -> dict[int, list[str]]:
+    """Die Liste, wie sie die Einzelabfrage je Schluessel ergeben wuerde."""
+    from services.permission_catalog import SERVER_KEYS
+
+    erwartet: dict[int, list[str]] = {}
+    for server in db.query(Server).order_by(Server.name).all():
+        if not permission_service.direct_server_permission(
+            db, user, server.id, "server.view"
+        ):
+            continue
+        erwartet[server.id] = sorted(
+            key for key in SERVER_KEYS
+            if permission_service.direct_server_permission(db, user, server.id, key)
+        )
+    return erwartet
+
+
+def _vergleiche_vorschlagsliste(db: Session, user: User, team: Team) -> dict[int, list[str]]:
+    """Rechnet Endpunkt und Einzelabfrage gegeneinander."""
+    from routers.teams import assignable_servers
+
+    neu = {
+        eintrag.server_id: sorted(eintrag.permission_keys)
+        for eintrag in assignable_servers(team.id, db, user)
+    }
+    alt = _alter_weg(db, user)
+    assert neu == alt, (
+        f"Vorschlagsliste weicht ab fuer {user.username}: neu={neu} alt={alt}"
+    )
+    return neu
+
+
+def test_assignable_servers_matches_the_single_lookup_for_a_delegated_customer(
+    db: Session, regular_user: User
+) -> None:
+    """Ein Kunde mit Delegation auf genau einem von zwei Servern.
+
+    Der zweite Server darf nicht auftauchen — die Vorschlagsliste ist die
+    Obergrenze, die `permission_service` spaeter ohnehin durchsetzt.
+    """
+    einer = _server(db, "a-einer")
+    _server(db, "b-anderer")
+    _allow(db, regular_user, einer, "server.view", "server.start", "server.console.read")
+    _grant_global(db, regular_user, "teams.create")
+    team = team_service.create_team(db, user=regular_user, name="kundenteam")
+
+    liste = _vergleiche_vorschlagsliste(db, regular_user, team)
+    assert liste == {
+        einer.id: ["server.console.read", "server.start", "server.view"],
+    }
+
+
+def test_assignable_servers_matches_the_single_lookup_for_a_role_holder(
+    db: Session, regular_user: User
+) -> None:
+    """Eine globale Rolle gilt pauschal — auf **allen** Servern.
+
+    Genau hier trennt sich die gebuendelte Menge in `pauschal` und `je Server`;
+    wer die beiden verwechselt, verliert entweder alle Server oder gibt einen
+    Schluessel auf einem Server aus, auf dem er nicht gilt.
+    """
+    a = _server(db, "a-eins")
+    b = _server(db, "b-zwei")
+    _grant_global(
+        db, regular_user,
+        "teams.create", "server.view", "server.files.read", "server.backups.read",
+    )
+    team = team_service.create_team(db, user=regular_user, name="rollenteam")
+
+    erwartet = ["server.backups.read", "server.files.read", "server.view"]
+    assert _vergleiche_vorschlagsliste(db, regular_user, team) == {
+        a.id: erwartet, b.id: erwartet,
+    }
+
+
+def test_assignable_servers_mixes_a_global_role_with_a_delegation(
+    db: Session, regular_user: User
+) -> None:
+    """Rolle und Delegation ergaenzen sich, sie ersetzen sich nicht.
+
+    Der Realfall eines gewachsenen Kontos: `server.view` pauschal ueber die
+    Rolle, `server.console.exec` nur auf einem einzigen Server. Fiele die
+    Vereinigung falsch aus, stuende das maechtigste Serverrecht entweder
+    ueberall oder nirgends im Dialog.
+    """
+    a = _server(db, "a-eins")
+    b = _server(db, "b-zwei")
+    _grant_global(db, regular_user, "teams.create", "server.view")
+    _allow(db, regular_user, b, "server.console.exec")
+    team = team_service.create_team(db, user=regular_user, name="mischteam")
+
+    assert _vergleiche_vorschlagsliste(db, regular_user, team) == {
+        a.id: ["server.view"],
+        b.id: ["server.console.exec", "server.view"],
+    }
+
+
+def test_assignable_servers_matches_the_single_lookup_for_the_owner(
+    db: Session, owner_user: User
+) -> None:
+    """Der Owner haelt alles ohne eine einzige Zeile in der Datenbank."""
+    from services.permission_catalog import SERVER_KEYS
+
+    a = _server(db, "a-eins")
+    b = _server(db, "b-zwei")
+    team = team_service.create_team(db, user=owner_user, name="ownerteam")
+
+    alle = sorted(SERVER_KEYS)
+    assert _vergleiche_vorschlagsliste(db, owner_user, team) == {
+        a.id: alle, b.id: alle,
+    }
+
+
+def test_assignable_servers_stays_empty_without_any_right(
+    db: Session, regular_user: User
+) -> None:
+    """Ohne `server.view` bleibt die Liste leer, auch wenn Server existieren."""
+    _server(db, "a-fremd")
+    _server(db, "b-fremd")
+    _grant_global(db, regular_user, "teams.create")
+    team = team_service.create_team(db, user=regular_user, name="leerteam")
+
+    assert _vergleiche_vorschlagsliste(db, regular_user, team) == {}
+
+
+def test_assignable_servers_does_not_ask_once_per_server(
+    db: Session, regular_user: User
+) -> None:
+    """Die Abfragezahl darf nicht mit der Serverzahl wachsen.
+
+    Die Grenze steht bewusst grosszuegig und schreibt keine Zaehlung fest. Sie
+    faengt den einen Fehler ab, der hier zurueckfallen kann: eine Schleife, die
+    je Server und je Schluessel erneut fragt. Gemessen waren das 1682 Abfragen
+    bei dreissig Servern.
+    """
+    from sqlalchemy import event
+
+    import database as db_module
+    from routers.teams import assignable_servers
+
+    for i in range(12):
+        _server(db, f"s{i:02d}")
+    _grant_global(db, regular_user, "teams.create", "server.view", "server.start")
+    team = team_service.create_team(db, user=regular_user, name="zaehlteam")
+
+    gesehen: list[str] = []
+
+    def _hook(conn, cursor, statement, parameters, context, executemany) -> None:
+        gesehen.append(statement)
+
+    event.listen(db_module.engine, "before_cursor_execute", _hook)
+    try:
+        eintraege = assignable_servers(team.id, db, regular_user)
+    finally:
+        event.remove(db_module.engine, "before_cursor_execute", _hook)
+
+    assert len(eintraege) == 12
+    assert len(gesehen) <= 10, (
+        f"{len(gesehen)} Abfragen fuer zwoelf Server:\n" + "\n".join(gesehen)
+    )

@@ -182,7 +182,11 @@ export function AdminNodes() {
 
   useEffect(() => {
     load()
-    const id = window.setInterval(load, 20_000)
+    const id = window.setInterval(() => {
+      // Im Hintergrundtab schaut niemand hin: kein Takt, keine Anfragen.
+      if (document.visibilityState !== 'visible') return
+      void load()
+    }, 20_000)
     return () => window.clearInterval(id)
   }, [load])
 

@@ -49,6 +49,16 @@ describe('ToastContainer', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
+  it('zeigt dieselbe Fehlermeldung nur einmal', () => {
+    act(() => {
+      toast.error('Knoten nicht erreichbar')
+      toast.error('Knoten nicht erreichbar')
+    })
+    render(<ToastContainer />)
+
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+  })
+
   it('copies error toast text', () => {
     const message = 'failed to extract layer to overlayfs'
     act(() => {

@@ -14,9 +14,12 @@ interface ToastState {
 
 let _nextId = 0
 
-export const useToastStore = create<ToastState>((set) => ({
+export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
   addToast: (message, type = 'error') => {
+    // Dieselbe Nachricht steht nur einmal im Stapel. Sonst türmt ein Poll im
+    // Sekundentakt oder eine doppelt gemeldete 429-Sperre identische Toasts auf.
+    if (get().toasts.some((t) => t.message === message && t.type === type)) return
     const id = ++_nextId
     set((s) => ({ toasts: [...s.toasts, { id, message, type }] }))
     if (type === 'success') {

@@ -129,12 +129,10 @@ export function TwoFactorTab() {
 
   return (
     <div className="msm-card p-6">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-          <Shield className="w-5 h-5 text-secondary" />
-        </div>
+      <div className="flex items-center gap-2 mb-6">
+        <Shield className="h-5 w-5 text-secondary" aria-hidden="true" />
         <div className="flex-1">
-          <h2 className="font-headline text-headline-sm text-primary">{t('profile.2faStatus')}</h2>
+          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('profile.2faStatus')}</h2>
           <p className="font-body-md text-sm text-on-surface-variant mt-1">
             {user?.two_factor_enabled ? t('profile.2faEnabled') : t('profile.2faDisabled')}
           </p>

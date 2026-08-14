@@ -64,7 +64,7 @@ class DisClient:
     def _post(endpoint: str, payload: dict) -> dict:
         url = settings.dis_sidecar_url.rstrip("/") + endpoint
         try:
-            resp = httpx.post(url, json=payload, headers=DisClient._headers(), timeout=DisClient._timeout)
+            resp = _client.post(url, json=payload, headers=DisClient._headers())
         except httpx.HTTPError as e:
             raise DisSidecarError(f"DIS Sidecar nicht erreichbar: {e}") from e
         if resp.status_code == 401:
@@ -164,7 +164,24 @@ class DisClient:
         """Prueft ob der Sidecar erreichbar ist."""
         try:
             url = settings.dis_sidecar_url.rstrip("/") + "/health"
-            resp = httpx.get(url, headers=DisClient._headers(), timeout=5.0)
+            resp = _client.get(url, headers=DisClient._headers(), timeout=5.0)
             return resp.status_code == 200
         except httpx.HTTPError:
             return False
+
+
+# Ein gehaltener Client statt der Modulfunktion `httpx.post` je Aufruf: diese
+# baut bei jedem Aufruf einen vollständigen httpx.Client auf, und dessen
+# Konstruktor legt sofort einen SSL-Kontext an und liest dabei das komplette
+# CA-Bündel — auch wenn das Ziel ein http://127.0.0.1 ist. Über diesen Weg läuft
+# jede Krypto-Operation des Panels: jedes Passwort-Hashing, jede TOTP-Prüfung,
+# jedes Lesen einer E-Mail-Adresse. Der Aufschlag fiel bisher vor jedem
+# einzelnen Byte an den Sidecar an.
+#
+# Dasselbe Muster hält node_client.py mit `get_shared_sync_client` schon vor;
+# httpx.Client ist threadsicher und passt damit zu den Aufrufen aus
+# `asyncio.to_thread`. Der Preis der Wiederverwendung: eine im Pool wartende
+# Keep-alive-Verbindung überlebt einen Neustart des Sidecars nicht. Der
+# betroffene Aufruf fällt dann in `except httpx.HTTPError` und damit
+# fail-closed — richtig, aber einmal spürbar.
+_client = httpx.Client(timeout=DisClient._timeout)

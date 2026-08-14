@@ -48,6 +48,10 @@ def werkzeug_abschnitt(werkzeug: dict) -> dict:
     return {"art": "tool", "werkzeug": werkzeug}
 
 
+def denk_abschnitt(inhalt: str) -> dict:
+    return {"art": "denken", "inhalt": inhalt}
+
+
 @dataclass
 class Abzug:
     """Der vollstaendige Stand eines Laufs — alles, was ein Zuschauer braucht.
@@ -67,13 +71,19 @@ class Abzug:
     ``inhalt`` gibt es weiterhin, aber als **Ableitung** und nicht als zweiten
     Speicher: der reine Text ist das, was in die Nachricht und zum Anbieter
     geht, die Abschnitte sind das, was der Browser zeichnet.
+
+    **Der Denktext gehört genauso dazu.** Er stand hier zuletzt als flaches
+    Feld ``denken`` neben den Abschnitten — derselbe Fehler ein zweites Mal,
+    nur eine Zeile tiefer. Die Oberfläche konnte ihn deshalb nur als *einen*
+    Kasten über allem zeichnen, und die Gedanken der dritten Runde landeten
+    über dem Text der ersten. Jetzt ist er eine dritte Art in derselben Liste,
+    und ``denken`` ist die Ableitung daraus.
     """
 
     run_id: str
     status: str = "running"
     message_id: str | None = None
     abschnitte: list[dict] = field(default_factory=list)
-    denken: str = ""
     frage: dict | None = None
     vorschlaege: list[dict] = field(default_factory=list)
     stop_reason: str | None = None
@@ -107,6 +117,23 @@ class Abzug:
         return "\n\n".join(stueck for stueck in stuecke if stueck)
 
     @property
+    def denken(self) -> str:
+        """Der gesamte Denktext des Laufs, Abschnitt für Abschnitt.
+
+        **Ohne Trenner**, anders als ``inhalt`` daneben. Das ist Absicht und
+        keine Nachlässigkeit: hier stand früher ein einziges Feld, an das jedes
+        Bruchstück mit ``+=`` angehängt wurde. Genau diese Zeichenkette geht in
+        ``AiMessage.reasoning`` und von dort in die Berichtsmail — ein Trenner
+        an den Rundengrenzen wäre eine stille Änderung an gespeichertem Text.
+        Die Gliederung, die es vorher nicht gab, steckt in den Abschnitten.
+        """
+        return "".join(
+            str(abschnitt.get("inhalt") or "")
+            for abschnitt in self.abschnitte
+            if abschnitt.get("art") == "denken"
+        )
+
+    @property
     def werkzeuge(self) -> list[dict]:
         return [
             abschnitt["werkzeug"]
@@ -127,6 +154,18 @@ class Abzug:
             return
         self.abschnitte.append(text_abschnitt(stueck))
 
+    def denken_anhaengen(self, stueck: str) -> None:
+        """Dasselbe für den Denktext: anhängen, solange gedacht wird.
+
+        Kam dazwischen ein Werkzeug oder ein Satz, beginnt danach ein **neuer**
+        Denkabschnitt — und genau der ist die Runde, an deren Stelle die
+        Oberfläche ihn zeichnet.
+        """
+        if self.abschnitte and self.abschnitte[-1].get("art") == "denken":
+            self.abschnitte[-1]["inhalt"] += stueck
+            return
+        self.abschnitte.append(denk_abschnitt(stueck))
+
     def kopie(self) -> "Abzug":
         """Ein Standbild — **nicht** der weiterlaufende Abzug selbst.
 
@@ -145,7 +184,6 @@ class Abzug:
             status=self.status,
             message_id=self.message_id,
             abschnitte=[dict(abschnitt) for abschnitt in self.abschnitte],
-            denken=self.denken,
             frage=self.frage,
             vorschlaege=list(self.vorschlaege),
             stop_reason=self.stop_reason,
@@ -237,7 +275,7 @@ def veroeffentlichen(run_id: str, ereignis: str, daten: dict) -> None:
     elif ereignis == "delta":
         abzug.text_anhaengen(str(daten.get("content") or ""))
     elif ereignis == "reasoning":
-        abzug.denken += str(daten.get("content") or "")
+        abzug.denken_anhaengen(str(daten.get("content") or ""))
     elif ereignis == "tool":
         abzug.abschnitte.append(werkzeug_abschnitt(daten))
     elif ereignis == "question":
@@ -253,9 +291,10 @@ def veroeffentlichen(run_id: str, ereignis: str, daten: dict) -> None:
 
     # Ein neues Segment schreibt eine neue Nachricht — der bisherige Text gehoert
     # zur vorherigen und darf nicht in die neue hineinlaufen.
+    # Der Denktext braucht hier keine eigene Zeile mehr: er steht in derselben
+    # Liste und geht mit ihr.
     if ereignis == "segment":
         abzug.abschnitte = []
-        abzug.denken = ""
         abzug.frage = None
 
     for warteschlange in list(kanal.zuhoerer):

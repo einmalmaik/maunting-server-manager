@@ -11,6 +11,7 @@ Schwerpunkt: Security-Invarianten
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -147,10 +148,12 @@ class TestStateCookie:
             ),
         )
         for fehlername in ("InvalidCharacterError", "DisInvalidArgumentError"):
+            # `_post` benutzt den gehaltenen Client des Moduls, nicht mehr die
+            # Modulfunktion httpx.post. Ersetzt wird deshalb der Client.
             monkeypatch.setattr(
-                dis_client_modul.httpx,
-                "post",
-                lambda *a, _n=fehlername, **k: _SidecarAntwort(_n),
+                dis_client_modul,
+                "_client",
+                SimpleNamespace(post=lambda *a, _n=fehlername, **k: _SidecarAntwort(_n)),
             )
             assert oauth_service.unpack_state_cookie("!!!") is None
 

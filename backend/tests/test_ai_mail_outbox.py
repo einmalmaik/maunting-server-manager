@@ -206,31 +206,29 @@ def test_queueing_a_mail_writes_a_row_and_starts_no_thread(db: Session) -> None:
     assert zeile.betreff == "Nachtbericht"
 
 
-def test_the_old_coroutine_form_of_zustellen_still_works() -> None:
-    """Der alte Weg bleibt fahrbar, solange noch jemand auf ihm faehrt.
+def test_the_old_coroutine_form_of_zustellen_is_gone() -> None:
+    """Es gibt nur noch den Korbweg — und das laut und nicht leise.
 
-    Beim Umbau konnten nicht alle Aufrufer gleichzeitig umgestellt werden. Eine
-    Signatur stillschweigend zu brechen waere die schlechtere Haelfte beider
-    Moeglichkeiten: der alte Aufruf liefe weiter durch, wuerde aber nichts mehr
-    tun — und niemand saehe es, weil `zustellen` nie wirft.
+    Der Koroutinenweg lief in einem eigenen Thread, ohne Obergrenze, ohne
+    zweiten Versuch, und was scheiterte, war weg. Aufrufer hatte er zuletzt
+    keine mehr. Wäre er stehengeblieben, hätte ihn irgendwann jemand
+    versehentlich wieder gefahren und dabei still Persistenz und Wiederholung
+    verloren. Jetzt schlägt derselbe Aufruf sofort fehl.
     """
-    gelaufen = threading.Event()
 
     async def _bauen() -> bool:
-        gelaufen.set()
         return True
 
-    ai_mail.zustellen(_bauen, name="ai-test-email")
-
-    assert gelaufen.wait(5.0), "die alte Koroutinenform wurde nicht mehr ausgefuehrt"
+    with pytest.raises(TypeError):
+        ai_mail.zustellen(_bauen, name="ai-test-email")
 
 
 def test_zustellen_without_any_usable_form_does_not_raise(caplog) -> None:
-    """Ein falsch gerufenes `zustellen` kostet eine Mail, nie einen Lauf.
+    """Eine fehlende Korbangabe kostet eine Mail, nie einen Lauf.
 
-    Der Fall entsteht beim Umstellen der Aufrufer: jemand gibt `betreff` an,
-    vergisst aber `db`. Frueher waere das ein `TypeError` mitten im Abschluss
-    eines KI-Laufs gewesen.
+    Der Fall entsteht beim Bauen einer neuen Mailart: jemand gibt `betreff` an,
+    vergisst aber `db`. Ein `TypeError` mitten im Abschluss eines KI-Laufs wäre
+    hier das Falsche — der Lauf ist fertig, die Mail ist die Zugabe.
     """
     ai_mail.zustellen(name="ai-task-report", betreff="Ohne Sitzung", text="Text")
 

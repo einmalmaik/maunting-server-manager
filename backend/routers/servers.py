@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -121,8 +122,17 @@ async def create_server(
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     retry_of_id: str | None = Header(None, alias="X-Task-Retry-Of"),
 ) -> ServerCreateResponse:
-    """Dünner HTTP-Adapter; RBAC und Provisionierung liegen im gemeinsamen Service."""
-    result = provision_server(
+    """Dünner HTTP-Adapter; RBAC und Provisionierung liegen im gemeinsamen Service.
+
+    `provision_server` ist durchgehend synchron und macht dabei echtes I/O:
+    Socket-Binds, HTTP-Aufrufe an die Node mit zehn Sekunden Zeitlimit,
+    Verzeichnisse anlegen, Datenbanken einrichten. Auf dem Event-Loop
+    ausgefuehrt legt eine einzige Serveranlage das ganze Panel still — keine
+    andere Anfrage, kein WebSocket-Frame. Deshalb der Threadpool. Die Route
+    bleibt `async`, weil die Mailbenachrichtigung darunter awaited wird.
+    """
+    result = await run_in_threadpool(
+        provision_server,
         db,
         req,
         ActorContext.for_user(user),
@@ -676,7 +686,7 @@ async def cancel_auth_setup(server_id: int, db: Session = Depends(get_db), user:
 
 
 @router.post("/{server_id}/kill")
-async def kill_server(
+def kill_server(
     server_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -686,6 +696,14 @@ async def kill_server(
 ) -> dict:
     """Erzwungenes Beenden (Docker force remove). Als Notfall auch während start/restart nutzbar (emergency override des Job-Locks).
     Permission "server.kill" (Naming analog zu server.stop, nicht server.power.* für Code-Konsistenz mit bestehenden server.* Keys).
+
+    Bewusst `def` statt `async def`: die Route wartet auf `docker_service.remove`
+    an der Node (30 s Zeitlimit). Auf dem Event-Loop haette ein Kill gegen eine
+    nicht erreichbare Node das ganze Panel bis zum Zeitlimit eingefroren. Der
+    Kill-Zweig setzt `server.status` direkt statt ueber `_set_status` und haengt
+    an keinem laufenden Loop — der Wechsel in den Threadpool aendert also
+    nichts am Verhalten. Fuer start/stop/restart gilt das **nicht**: dort
+    verschickt `_set_status` den Webhook nur bei laufendem Loop.
     """
     return request_lifecycle_operation(
         db,

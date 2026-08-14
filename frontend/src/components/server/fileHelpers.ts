@@ -96,10 +96,17 @@ export function reconcileSavedContent(
   }
 }
 
+/**
+ * Die Fusszeile des Editors ruft das bei jedem Tastendruck auf. Ein `split`
+ * wuerde vorher das ganze Dokument in ein Zeilenarray zerlegen — bei einer
+ * mehrere Megabyte grossen Serverkonfiguration Zehntausende Zeichenketten, die
+ * sofort wieder Muell sind. Der mehrzeilige Regex bricht dagegen bei der ersten
+ * eingerueckten Zeile ab und legt nichts an.
+ */
 export function detectIndentation(content: string): string {
-  const indented = content.split(/\r?\n/).find((line) => /^(?:\t+| +)\S/.test(line))
-  if (!indented) return 'Einzug: –'
-  const prefix = indented.match(/^(\t+| +)/)?.[0] ?? ''
+  const treffer = content.match(/^(\t+| +)\S/m)
+  if (!treffer) return 'Einzug: –'
+  const prefix = treffer[1]
   return prefix.startsWith('\t') ? 'Tabs' : `Leerzeichen: ${prefix.length}`
 }
 

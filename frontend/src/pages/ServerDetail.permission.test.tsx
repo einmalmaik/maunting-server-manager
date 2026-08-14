@@ -26,7 +26,7 @@ vi.mock('@/api/client', () => ({
 }))
 
 vi.mock('@/hooks/useHostInterfaces', () => ({
-  useHostInterfaces: () => ({ interfaces: [], defaultBindIp: '' }),
+  useHostInterfaces: () => ({ interfaces: [], defaultBindIp: '', loading: false }),
 }))
 
 // Stub child components so the test renders ServerDetail's permission logic
@@ -483,6 +483,46 @@ describe('ServerDetail permission topology — VAL-UI-002 / VAL-UI-018', () => {
       expect(screen.getByText('CPU')).toBeInTheDocument()
       expect(screen.getByText('RAM')).toBeInTheDocument()
       expect(screen.getByText('Disk')).toBeInTheDocument()
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Der Fünf-Sekunden-Takt
+  // -------------------------------------------------------------------------
+
+  describe('Statusabfrage im Takt', () => {
+    it('stapelt keine Anfragen, wenn der Node nicht antwortet', async () => {
+      // `/status` geht bei einem entfernten Node über das Netz und belegt
+      // serverseitig einen Threadpool-Arbeiter für den ganzen Rundlauf. Ein
+      // fester Takt ohne Überlappungsschutz schickt die nächste Anfrage los,
+      // bevor die vorherige zurück ist — und das ausgerechnet gegen einen Node,
+      // der ohnehin schon klemmt.
+      let statusAufrufe = 0
+      mockApi.mockImplementation(async (path: string) => {
+        if (path === `/servers/${SERVER_ID}`) return SYNTHETIC_SERVER as any
+        if (path === `/servers/${SERVER_ID}/status`) {
+          statusAufrufe += 1
+          return new Promise(() => {}) as any // antwortet nie
+        }
+        if (path === '/system/games') return SYNTHETIC_GAMES as any
+        return undefined as any
+      })
+      setPermissions(VIEW_ONLY_ME)
+
+      vi.useFakeTimers()
+      renderServerDetail()
+      await act(async () => {})
+      expect(statusAufrufe).toBe(1)
+
+      // Drei Takte, aber der erste Durchlauf hängt noch: genau eine weitere
+      // Anfahrt darf herausgehen, die übrigen Takte werden ausgelassen.
+      for (let takt = 0; takt < 3; takt += 1) {
+        await act(async () => {
+          vi.advanceTimersByTime(5000)
+        })
+      }
+
+      expect(statusAufrufe).toBe(2)
     })
   })
 })

@@ -111,9 +111,16 @@ for (const file of await backendFiles(path.join(backendDir, 'routers'))) {
 }
 for (const key of backendReferenced) referenced.add(key)
 
+// Ein Pluralschlüssel liegt in der Locale nur als `_one`/`_other` vor, aufgerufen
+// wird er im Code aber unter dem Basisnamen: `t('ai.chat.toolsUsed', { count })`.
+// Nur die Suffixform zu suchen, meldet einen vorhandenen Schlüssel als fehlend —
+// und verleitet dazu, einen flachen Zwilling zu erfinden, den i18next mit
+// JSON-v4 nie anzeigt. `_zero/_few/_many` kennen en und de nicht.
+const vorhanden = (keys, key) => keys.has(key) || keys.has(`${key}_one`) || keys.has(`${key}_other`)
+
 // Checked against en and de only — the other nine locales are deliberate partial
 // subsets with English fallback, and demanding completeness there would be wrong.
-const missingReferenced = [...referenced].filter(key => !enKeys.has(key) || !deKeys.has(key)).sort()
+const missingReferenced = [...referenced].filter(key => !vorhanden(enKeys, key) || !vorhanden(deKeys, key)).sort()
 if (missingReferenced.length) errors.push(`UI references keys missing from the en/de base locales:\n  ${missingReferenced.join('\n  ')}`)
 
 if (errors.length) {

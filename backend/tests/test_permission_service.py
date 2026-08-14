@@ -121,6 +121,75 @@ class TestListVisibleServers:
         assert result == []
 
 
+class TestListVisibleServersLaedtDiePorts:
+    """Die Serveruebersicht ist die Startseite und wird alle fuenf Sekunden geholt.
+
+    `ServerResponse` liest die Ports jedes Servers. Ohne Ladehinweis kostete das
+    eine Abfrage **je Server** — gemessen 34 statt 2 bei dreissig Servern. Der
+    Zaehler hier schreibt keine Zahl fest; er faengt den Rueckfall ab, dass die
+    Zahl wieder mit der Serverzahl waechst.
+    """
+
+    def _mit_ports(self, db: Session, name: str) -> Server:
+        server = _make_server(db, name)
+        server.set_port("game", 27015 + server.id, "udp")
+        server.set_port("query", 28015 + server.id, "udp")
+        db.commit()
+        return server
+
+    def _zaehle(self, db: Session, user: User) -> tuple[int, list[list[int]]]:
+        from sqlalchemy import event
+
+        import database as db_module
+
+        gesehen: list[str] = []
+
+        def _hook(conn, cursor, statement, parameters, context, executemany) -> None:
+            gesehen.append(statement)
+
+        db.expire_all()
+        event.listen(db_module.engine, "before_cursor_execute", _hook)
+        try:
+            server = permission_service.list_visible_servers(db, user)
+            # Die Ports wirklich anfassen — nur so faellt lazy loading auf.
+            ports = [sorted(p.port for p in s.ports) for s in server]
+        finally:
+            event.remove(db_module.engine, "before_cursor_execute", _hook)
+        return len(gesehen), ports
+
+    def test_owner_path_does_not_query_once_per_server(
+        self, db: Session, owner_user: User
+    ):
+        erwartet = {}
+        for i in range(8):
+            server = self._mit_ports(db, f"s{i}")
+            erwartet[server.id] = sorted(p.port for p in server.ports)
+
+        abfragen, ports = self._zaehle(db, owner_user)
+
+        assert sorted(ports) == sorted(erwartet.values())
+        assert abfragen <= 3, f"{abfragen} Abfragen fuer acht Server"
+
+    def test_delegated_path_does_not_query_once_per_server(
+        self, db: Session, regular_user: User
+    ):
+        regular_user.role_id = None
+        erwartet = []
+        for i in range(8):
+            server = self._mit_ports(db, f"s{i}")
+            db.add(ServerPermission(
+                user_id=regular_user.id, server_id=server.id,
+                permission_key="server.view",
+            ))
+            erwartet.append(sorted(p.port for p in server.ports))
+        db.commit()
+
+        abfragen, ports = self._zaehle(db, regular_user)
+
+        assert sorted(ports) == sorted(erwartet)
+        assert abfragen <= 6, f"{abfragen} Abfragen fuer acht delegierte Server"
+
+
 class TestSetUserServerPermissions:
     def test_creates_delegations(self, db: Session, regular_user: User, test_server: Server, owner_user: User):
         keys = permission_service.set_user_server_permissions(

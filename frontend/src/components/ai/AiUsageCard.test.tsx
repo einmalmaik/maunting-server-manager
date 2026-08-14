@@ -87,7 +87,9 @@ describe('AiUsageCard', () => {
     render(<AiUsageCard />)
 
     const bar = await screen.findByRole('progressbar', { name: 'Heute' })
-    expect(bar.firstElementChild?.className).toContain('bg-primary')
+    // Die Ruhefarbe von `Singra/UI/ProgressBar` — dieselbe wie bei den
+    // CPU-/RAM-Balken, seit die Karte den Balken nicht mehr selbst nachbaut.
+    expect(bar.firstElementChild?.className).toContain('bg-secondary')
   })
 
   it('behält „Keine Grenze hinterlegt“ für eine wirklich fehlende Grenze', async () => {

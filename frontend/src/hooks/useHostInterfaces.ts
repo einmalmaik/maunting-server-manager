@@ -5,14 +5,20 @@ import type { HostInterface, HostInterfacesResponse } from '@/types'
 /**
  * Laedt die verfuegbaren Host-Interfaces (IPv4) fuer das Bind-IP-Dropdown.
  * Nur Owner duerfen den Endpunkt aufrufen — bei 403 bleibt die Liste leer.
+ *
+ * `enabled` erlaubt Aufrufern, die die Liste nur in einem Dialog brauchen, das
+ * Laden bis zum Oeffnen aufzuschieben. Ohne das kostet jeder Seitenaufruf eine
+ * Anfrage fuer Daten, die niemand sieht — und fuer Benutzer ohne `system.view`
+ * zusaetzlich einen 403-Eintrag im Log.
  */
-export function useHostInterfaces(nodeId?: string | number | null) {
+export function useHostInterfaces(nodeId?: string | number | null, enabled = true) {
   const [interfaces, setInterfaces] = useState<HostInterface[]>([])
   const [defaultBindIp, setDefaultBindIp] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     const load = async () => {
       setLoading(true)
@@ -39,7 +45,7 @@ export function useHostInterfaces(nodeId?: string | number | null) {
     return () => {
       cancelled = true
     }
-  }, [nodeId])
+  }, [nodeId, enabled])
 
   return { interfaces, defaultBindIp, loading, error }
 }

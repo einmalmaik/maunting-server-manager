@@ -859,8 +859,9 @@ _PLAN_SCHEMA = {
         "type": "string",
         "maxLength": 64,
         "description": (
-            "IANA-Zone des Benutzers, z. B. Europe/Berlin. Pflicht — frag mit "
-            "ask_user, wenn du sie nicht sicher weisst."
+            "IANA-Zone des Benutzers, z. B. Europe/Berlin. Pflicht — sie steht "
+            "in der Lage; nur wenn die Lage sie als unbekannt ausweist, frag "
+            "mit ask_user."
         ),
     },
     "channel": {
@@ -868,7 +869,8 @@ _PLAN_SCHEMA = {
         "enum": list(_KANAELE),
         "description": (
             "chat = nur im Panel, email = zusaetzlich per Mail, both = beides. "
-            "Im Chat steht das Ergebnis immer."
+            "Im Chat steht das Ergebnis immer. Weglassen heisst chat — frag "
+            "nicht danach."
         ),
     },
 }
@@ -908,7 +910,7 @@ def _aufgaben_tool_definitions() -> list[dict]:
             "sitzt. Fuer 'benachrichtige mich jeden Tag um 8 Uhr ueber meine "
             "Server' oder 'mach alle 12 Stunden ein Backup'.\n"
             "**Ohne `task_id` wird angelegt**; dann sind `title`, "
-            "`instruction`, `kind`, `plan_kind`, `timezone` und `channel` "
+            "`instruction`, `kind`, `plan_kind` und `timezone` "
             "noetig. **Mit `task_id` (aus `list_tasks`) wird geaendert**, und "
             "nur genannte Felder werden angefasst — zum Pausieren genuegt "
             "`enabled: false`. Aenderst du den Plan, gib `plan_kind` und dessen "
@@ -918,9 +920,9 @@ def _aufgaben_tool_definitions() -> list[dict]:
             "`kind`: 'report' liest und berichtet; 'act' darf zusaetzlich "
             "handeln (Backup, Neustart, Aenderungen) und setzt den "
             "freigegebenen autonomen Modus voraus — ohne ihn wird abgewiesen.\n"
-            "**Zeitzone zuerst.** Ohne sie ist eine Uhrzeit bedeutungslos. "
-            "Steht sie im Gedaechtnis, nimm sie von dort; sonst frag vorher mit "
-            "`ask_user`.",
+            "**Zeitzone zuerst.** Ohne sie ist eine Uhrzeit bedeutungslos. Nimm "
+            "sie aus der Lage; nur wenn die Lage sie als unbekannt ausweist, "
+            "frag vorher mit `ask_user`.",
             {
                 "task_id": {
                     "type": "string",

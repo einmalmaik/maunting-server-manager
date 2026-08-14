@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, RefreshCw, ShieldCheck } from "lucide-react";
 import { api } from "@/api/client";
@@ -24,6 +24,8 @@ export function SwitchBlueprintDialog({
   const [selectedId, setSelectedId] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const abbrechenRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -51,6 +53,60 @@ export function SwitchBlueprintDialog({
       .finally(() => setLoading(false));
   }, [open, server.game_type, t]);
 
+  // Fokus wie im Nachbardialog ResourceEditorDialog.tsx: beim Öffnen springt er
+  // auf "Abbrechen", beim Schließen zurück auf den Knopf, der den Dialog
+  // geöffnet hat. Ohne das startet ein Tastaturbenutzer hinter der Seite und
+  // muss sich erst durch sie hindurch in den Dialog tabben.
+  useEffect(() => {
+    if (!open) return;
+    const vorherAktiv = document.activeElement as HTMLElement | null;
+    const zeitgeber = setTimeout(() => abbrechenRef.current?.focus(), 0);
+    return () => {
+      clearTimeout(zeitgeber);
+      vorherAktiv?.focus();
+    };
+  }, [open]);
+
+  // Escape schließt den Dialog, solange kein Wechsel läuft; Tab und Shift+Tab
+  // bleiben im Dialog gefangen. Gleiches Vorgehen wie ResourceEditorDialog.tsx.
+  useEffect(() => {
+    if (!open) return;
+    const beiTaste = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        // Die Blueprint-Auswahl behandelt Escape selbst und markiert die Taste
+        // dabei als verbraucht (Dropdown.tsx). Ein Escape, das nur die
+        // aufgeklappte Liste schließen soll, darf nicht gleich den ganzen
+        // Dialog mitnehmen.
+        if (submitting || e.defaultPrevented) return;
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key === "Tab") {
+        const fokussierbar = dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (!fokussierbar || fokussierbar.length === 0) return;
+        const erstes = fokussierbar[0];
+        const letztes = fokussierbar[fokussierbar.length - 1];
+        const drinnen = dialogRef.current?.contains(document.activeElement);
+        if (e.shiftKey) {
+          if (document.activeElement === erstes || !drinnen) {
+            e.preventDefault();
+            letztes.focus();
+          }
+        } else {
+          if (document.activeElement === letztes || !drinnen) {
+            e.preventDefault();
+            erstes.focus();
+          }
+        }
+      }
+    };
+    window.addEventListener("keydown", beiTaste);
+    return () => window.removeEventListener("keydown", beiTaste);
+  }, [open, onClose, submitting]);
+
   if (!open) return null;
 
   const handleSwitch = async () => {
@@ -77,8 +133,17 @@ export function SwitchBlueprintDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-      <div className="msm-card max-w-lg w-full p-6 shadow-2xl border border-outline/30 animate-in fade-in zoom-in duration-150">
-        <h2 className="font-headline text-headline-sm text-on-surface mb-2 flex items-center gap-2">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="switch-blueprint-title"
+        className="msm-card max-w-lg w-full p-6 shadow-2xl border border-outline/30 animate-in fade-in zoom-in duration-150"
+      >
+        <h2
+          id="switch-blueprint-title"
+          className="font-headline text-headline-sm text-on-surface mb-2 flex items-center gap-2"
+        >
           <RefreshCw className="w-5 h-5 text-primary" />
           {t("servers.switchBlueprintTitle", "Spiel / Blueprint wechseln")}
         </h2>
@@ -147,6 +212,7 @@ export function SwitchBlueprintDialog({
 
         <div className="flex justify-end gap-3 pt-2 border-t border-outline/20">
           <button
+            ref={abbrechenRef}
             type="button"
             className="msm-btn-secondary px-4 py-2 text-sm"
             onClick={onClose}

@@ -20,6 +20,16 @@ from services.panel_settings_service import PanelSettingsService
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 
+# ── Passiver Cache für den GitHub-Release-Check in /version ──
+# Die Fusszeile fragt /version bei jedem Seitenaufbau ab. Ohne Cache löst
+# das pro Aufruf eine ausgehende HTTPS-Anfrage aus; GitHub erlaubt
+# unangemeldet nur 60 pro Stunde und IP. Gleiches Muster wie
+# _UPDATE_CACHE in routers/servers.py. Kein Lock nötig: im schlechtesten
+# Fall laufen zwei Anfragen parallel gegen GitHub, das ist harmlos.
+_GITHUB_RELEASE_CACHE: tuple[float, dict] | None = None
+_GITHUB_RELEASE_CACHE_TTL_SECONDS = 3600
+
+
 @router.get("/legal")
 def legal_settings() -> dict:
     """Oeffentliche Legal-Metadaten fuer Footer und Hilfe.
@@ -209,6 +219,41 @@ def host_interfaces(user: User = Depends(require_global("system.view"))) -> dict
     }
 
 
+def _get_latest_release() -> dict:
+    """Liest das neueste GitHub-Release, höchstens einmal pro TTL.
+
+    Gibt ``{"tag_name": ..., "html_url": ...}`` zurück oder ein leeres Dict,
+    wenn der Aufruf fehlschlägt. Auch der Fehlschlag wird zwischengespeichert
+    — sonst läuft eine abgeschottete Installation ohne Internetausgang bei
+    jedem Seitenaufbau in den Zehn-Sekunden-Timeout.
+    """
+    global _GITHUB_RELEASE_CACHE
+
+    now = time.monotonic()
+    cached = _GITHUB_RELEASE_CACHE
+    if cached is not None and now - cached[0] < _GITHUB_RELEASE_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    release: dict = {}
+    try:
+        url = (
+            f"https://api.github.com/repos/"
+            f"{settings.github_owner}/{settings.github_repo}/releases/latest"
+        )
+        resp = httpx.get(url, headers={"Accept": "application/vnd.github+json"}, timeout=10.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            release = {
+                "tag_name": data.get("tag_name", "unknown"),
+                "html_url": data.get("html_url", ""),
+            }
+    except Exception:
+        pass
+
+    _GITHUB_RELEASE_CACHE = (now, release)
+    return release
+
+
 @router.get("/version")
 def system_version(user: User = Depends(get_current_user)) -> dict:
     """Aktuelle Version + Update-Status (GitHub Releases).
@@ -220,23 +265,13 @@ def system_version(user: User = Depends(get_current_user)) -> dict:
     update_available = False
     release_url = None
 
-    try:
-        url = (
-            f"https://api.github.com/repos/"
-            f"{settings.github_owner}/{settings.github_repo}/releases/latest"
-        )
-        resp = httpx.get(url, headers={"Accept": "application/vnd.github+json"}, timeout=10.0)
-        if resp.status_code == 200:
-            data = resp.json()
-            latest = data.get("tag_name", "unknown")
-            release_url = data.get("html_url", "")
-            # SemVer-Vergleich: v-Prefix und git-describe-Suffixe
-            # normalisieren, dann numerisch pruefen ob latest > current.
-            norm_current = _strip_version(current)
-            norm_latest = _strip_version(latest)
-            update_available = _version_newer(norm_latest, norm_current)
-    except Exception:
-        pass
+    release = _get_latest_release()
+    if release:
+        latest = release["tag_name"]
+        release_url = release["html_url"]
+        # SemVer-Vergleich: v-Prefix und git-describe-Suffixe
+        # normalisieren, dann numerisch pruefen ob latest > current.
+        update_available = _version_newer(_strip_version(latest), _strip_version(current))
 
     return {
         "current_version": current,

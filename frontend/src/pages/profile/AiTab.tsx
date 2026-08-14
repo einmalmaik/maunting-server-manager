@@ -21,7 +21,7 @@ export function AiTab() {
   const { t } = useTranslation()
 
   return (
-    <section className="space-y-4" aria-labelledby="ai-profile-title">
+    <section className="space-y-6" aria-labelledby="ai-profile-title">
       <div className="msm-card p-6">
         <div className="flex items-center gap-2">
           <Bot className="h-5 w-5 text-secondary" aria-hidden="true" />

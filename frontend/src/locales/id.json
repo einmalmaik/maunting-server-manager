@@ -275,67 +275,6 @@
       "user": "Pengguna"
     }
   },
-  "permissions": {
-    "users": {
-      "read": "Lihat daftar pengguna",
-      "manage": "Buat, edit, hapus pengguna",
-      "permissions": {
-        "manage": "Kelola peran pengguna dan izin server"
-      }
-    },
-    "roles": {
-      "manage": "Buat, edit, hapus peran"
-    },
-    "panel": {
-      "settings": {
-        "read": "Baca pengaturan panel",
-        "write": "Ubah pengaturan panel (Steam, email, ...)"
-      }
-    },
-    "servers": {
-      "create": "Buat server baru",
-      "delete": "Hapus server (global, tidak dapat didelegasikan)"
-    },
-    "system": {
-      "view": "Lihat sumber daya sistem, antarmuka, versi"
-    },
-    "server": {
-      "view": "Lihat server dalam daftar dan detail",
-      "start": "Mulai server",
-      "stop": "Hentikan server",
-      "restart": "Mulai ulang server",
-      "install": "Instal atau instal ulang server",
-      "config": {
-        "write": "Edit pengaturan server (nama, mulai ulang otomatis, jadwal pencadangan)"
-      },
-      "network": {
-        "manage": "Ubah port dan ikat IP"
-      },
-      "resources": {
-        "manage": "Ubah batas CPU/RAM/disk"
-      },
-      "console": {
-        "read": "Baca konsol dan log",
-        "write": "Kirim perintah ke konsol"
-      },
-      "files": {
-        "read": "Membaca dan mengunduh file",
-        "write": "Unggah, buat, edit, ekstrak file",
-        "delete": "Hapus file"
-      },
-      "backups": {
-        "read": "Daftar cadangan",
-        "create": "Buat cadangan",
-        "restore": "Pulihkan cadangan",
-        "delete": "Hapus cadangan"
-      },
-      "mods": {
-        "read": "Daftar mod, cari bengkel",
-        "write": "Berlangganan, hapus, susun ulang mod",
-        "toggle": "Mengaktifkan atau menonaktifkan mod"
-      }
-    }
-  },
   "serverPermissions": {
     "title": "Izin",
     "subtitle": "Siapa yang dapat melakukan apa di server ini",

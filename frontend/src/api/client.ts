@@ -1,6 +1,7 @@
 import i18n from '@/i18n'
 import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
+import { useAuthStore } from '@/stores/authStore'
 
 export { API_BASE, apiUrl } from '@/config/api'
 
@@ -186,7 +187,14 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
       })
       captureCsrfFromResponse(res)
     } catch {
-      // Refresh fehlgeschlagen — Weiterleitung zum Login im Aufrufer.
+      // Refresh fehlgeschlagen — die Sitzung ist zu Ende, und das muss der
+      // Anmeldezustand auch sagen. Vorher tat es niemand: kein Aufrufer wertete
+      // SESSION_EXPIRED aus, `isAuthenticated` blieb true, die Wache der Route
+      // griff nicht, und offene Intervalle (z. B. das Fünf-Sekunden-Polling der
+      // Serverdetails) feuerten weiter gegen den ratenbegrenzten Refresh.
+      // `getState()` läuft erst zur Aufrufzeit, der Importzyklus zum authStore
+      // ist damit unkritisch.
+      useAuthStore.getState().setAuthenticated(false)
       // Lokalisierte Meldung, damit der Caller die Fehlermeldung direkt
       // anzeigen kann (kein doppelter `t()`-Aufruf noetig). Diese Meldung
       // stammt aus einem verarbeiteten Backend-Response-Pfad und ist
@@ -213,7 +221,12 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
           code = detail.code
         }
       } catch {
-        message = text
+        // Kein JSON — dann hat nicht das Backend geantwortet, sondern etwas
+        // davor (Proxy-Fehlerseite bei 502/504, abgeschnittener Rumpf). Dieser
+        // Text ist nie durch die Bereinigung des Backends gelaufen und darf
+        // deshalb nicht in die Meldung: er zeigte dem Benutzer sonst die
+        // komplette HTML-Seite samt Kennung und Version des Proxys.
+        // `message` bleibt null, der Rückfall auf statusText greift von allein.
       }
       if (message) {
         message = i18n.t(message)
@@ -276,6 +289,9 @@ export async function apiStream(path: string, options: RequestInit): Promise<Res
       res = await fetch(url, { ...fetchOptions, headers: retryHeaders })
       captureCsrfFromResponse(res)
     } catch {
+      // Wie in `api()`: der Anmeldezustand fällt, sonst bleibt die Oberfläche
+      // scheinbar angemeldet stehen.
+      useAuthStore.getState().setAuthenticated(false)
       throw new SanitizedApiError(i18n.t('errors.SESSION_EXPIRED'))
     }
   }
@@ -298,7 +314,8 @@ export async function apiStream(path: string, options: RequestInit): Promise<Res
           code = detail.code
         }
       } catch {
-        message = text
+        // Kein JSON — siehe `api()`: der Rohtext stammt nicht vom Backend und
+        // bleibt außen vor.
       }
     }
     // Derselbe Rückfall wie in `api()`. Der Stream-Start scheitert mit genau

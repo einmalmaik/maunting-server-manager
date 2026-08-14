@@ -275,67 +275,6 @@
       "user": "Usuário"
     }
   },
-  "permissions": {
-    "users": {
-      "read": "Ver lista de usuários",
-      "manage": "Criar, editar, excluir usuários",
-      "permissions": {
-        "manage": "Gerenciar funções de usuário e permissões de servidor"
-      }
-    },
-    "roles": {
-      "manage": "Criar, editar, excluir funções"
-    },
-    "panel": {
-      "settings": {
-        "read": "Leia as configurações do painel",
-        "write": "Alterar as configurações do painel (Steam, email, ...)"
-      }
-    },
-    "servers": {
-      "create": "Crie um novo servidor",
-      "delete": "Excluir servidores (globais, não delegáveis)"
-    },
-    "system": {
-      "view": "Ver recursos do sistema, interfaces, versão"
-    },
-    "server": {
-      "view": "Veja o servidor em lista e detalhes",
-      "start": "Iniciar servidor",
-      "stop": "Parar servidor",
-      "restart": "Reiniciar servidor",
-      "install": "Instalar ou reinstalar o servidor",
-      "config": {
-        "write": "Editar configurações do servidor (nome, reinicialização automática, agendamento de backup)"
-      },
-      "network": {
-        "manage": "Alterar portas e vincular IP"
-      },
-      "resources": {
-        "manage": "Alterar limites de CPU/RAM/disco"
-      },
-      "console": {
-        "read": "Leia o console e os registros",
-        "write": "Envie comandos para o console"
-      },
-      "files": {
-        "read": "Ler e baixar arquivos",
-        "write": "Carregar, criar, editar, extrair arquivos",
-        "delete": "Excluir arquivos"
-      },
-      "backups": {
-        "read": "Listar backups",
-        "create": "Criar backup",
-        "restore": "Restaurar cópia de segurança",
-        "delete": "Excluir backup"
-      },
-      "mods": {
-        "read": "Listar mods, oficina de pesquisa",
-        "write": "Assine, remova, reordene mods",
-        "toggle": "Habilitar ou desabilitar mods"
-      }
-    }
-  },
   "serverPermissions": {
     "title": "Permissões",
     "subtitle": "Quem pode fazer o quê neste servidor",

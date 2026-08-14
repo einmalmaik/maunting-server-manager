@@ -19,8 +19,16 @@
  *
  * Beides prüft dieser Test: die echte Antwortform muss Einträge ergeben, und
  * die Einträge müssen über die Panel-Auswahl erreichbar sein.
+ *
+ * **Und er ging nur über den Abbrechen-Knopf wieder zu.** Escape tat nichts,
+ * der Fokus blieb beim Öffnen hinter der Seite. Seitdem trägt der Dialog
+ * dieselbe Tastaturbehandlung wie ResourceEditorDialog.tsx im selben Ordner:
+ * Escape schließt (nicht während des Wechsels), der Fokus startet auf
+ * "Abbrechen" und kehrt beim Schließen zum Auslöser zurück. Ein Escape, das
+ * nur die aufgeklappte Blueprint-Auswahl schließen soll, darf den Dialog
+ * dabei nicht mitnehmen.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as client from '@/api/client'
@@ -62,9 +70,9 @@ const zweiBlueprints = {
   ],
 }
 
-function zeichnen() {
-  render(
-    <SwitchBlueprintDialog open onClose={() => {}} server={server} onSwitched={() => {}} />,
+function zeichnen(onClose: () => void = () => {}) {
+  return render(
+    <SwitchBlueprintDialog open onClose={onClose} server={server} onSwitched={() => {}} />,
   )
 }
 
@@ -77,6 +85,17 @@ function zeichnen() {
  */
 function auswahlKnopf() {
   return screen.getByTestId('switch-blueprint-select')
+}
+
+/**
+ * Die beiden Knöpfe der Fußzeile, ohne den Auswahlknopf des Dropdowns — auch
+ * hier über die Struktur statt über die Beschriftung, aus demselben Grund.
+ * Reihenfolge im Dialog: Abbrechen, dann Wechseln.
+ */
+function fusszeilenKnoepfe() {
+  return within(screen.getByRole('dialog'))
+    .getAllByRole('button')
+    .filter((knopf) => knopf.getAttribute('data-testid') !== 'switch-blueprint-select')
 }
 
 describe('SwitchBlueprintDialog', () => {
@@ -116,5 +135,92 @@ describe('SwitchBlueprintDialog', () => {
     await waitFor(() => expect(auswahlKnopf()).toBeInTheDocument())
     fireEvent.click(auswahlKnopf())
     expect(screen.queryAllByRole('option')).toHaveLength(0)
+  })
+
+  it('meldet sich als Dialog', async () => {
+    vi.mocked(client.api).mockResolvedValue(zweiBlueprints)
+    zeichnen()
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    await waitFor(() => expect(auswahlKnopf()).toBeEnabled())
+  })
+
+  it('schließt bei Escape', async () => {
+    vi.mocked(client.api).mockResolvedValue(zweiBlueprints)
+    const schliessen = vi.fn()
+    zeichnen(schliessen)
+
+    await waitFor(() => expect(auswahlKnopf()).toBeEnabled())
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(schliessen).toHaveBeenCalledTimes(1)
+  })
+
+  it('setzt den Fokus beim Öffnen auf Abbrechen und gibt ihn beim Schließen zurück', async () => {
+    vi.mocked(client.api).mockResolvedValue(zweiBlueprints)
+    const ausloeser = document.createElement('button')
+    document.body.appendChild(ausloeser)
+    ausloeser.focus()
+
+    const { rerender } = zeichnen()
+    await waitFor(() => expect(fusszeilenKnoepfe()[0]).toHaveFocus())
+
+    rerender(
+      <SwitchBlueprintDialog
+        open={false}
+        onClose={() => {}}
+        server={server}
+        onSwitched={() => {}}
+      />,
+    )
+    expect(ausloeser).toHaveFocus()
+
+    ausloeser.remove()
+  })
+
+  it('lässt Tab nicht aus dem Dialog fallen', async () => {
+    vi.mocked(client.api).mockResolvedValue(zweiBlueprints)
+    zeichnen()
+
+    await waitFor(() => expect(auswahlKnopf()).toBeEnabled())
+    const wechseln = fusszeilenKnoepfe()[1]
+    wechseln.focus()
+    fireEvent.keyDown(window, { key: 'Tab' })
+
+    expect(auswahlKnopf()).toHaveFocus()
+  })
+
+  it('schließt nicht bei Escape, während der Wechsel läuft', async () => {
+    // Der zweite Aufruf ist der Wechsel selbst; er bleibt hängen, damit der
+    // Dialog im Zustand "wird gewechselt" stehen bleibt.
+    vi.mocked(client.api).mockImplementation(((pfad: string) =>
+      pfad === '/blueprints'
+        ? Promise.resolve(zweiBlueprints)
+        : new Promise(() => {})) as typeof client.api)
+    const schliessen = vi.fn()
+    zeichnen(schliessen)
+
+    await waitFor(() => expect(auswahlKnopf()).toBeEnabled())
+    fireEvent.click(fusszeilenKnoepfe()[1])
+    await waitFor(() => expect(fusszeilenKnoepfe()[0]).toBeDisabled())
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(schliessen).not.toHaveBeenCalled()
+  })
+
+  it('nimmt bei Escape aus der offenen Auswahl nur die Liste, nicht den Dialog', async () => {
+    vi.mocked(client.api).mockResolvedValue(zweiBlueprints)
+    const schliessen = vi.fn()
+    zeichnen(schliessen)
+
+    await waitFor(() => expect(auswahlKnopf()).toBeEnabled())
+    fireEvent.click(auswahlKnopf())
+    const optionen = await screen.findAllByRole('option')
+
+    fireEvent.keyDown(optionen[0], { key: 'Escape' })
+
+    await waitFor(() => expect(screen.queryAllByRole('option')).toHaveLength(0))
+    expect(schliessen).not.toHaveBeenCalled()
   })
 })

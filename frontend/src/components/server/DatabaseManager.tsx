@@ -68,7 +68,12 @@ export function DatabaseManager({ serverId }: Props) {
   const fetchResources = async () => {
     const data = await api<PostgresResources>(`/servers/${serverId}/databases`)
     setResources(data)
-    setSelectedDbId((current) => current ?? data.databases[0]?.id ?? null)
+    // Die gemerkte Kennung wird nicht geglaubt, sondern gegen die frische Liste
+    // geprüft. Sonst bleibt nach dem Löschen die verschwundene Datenbank
+    // ausgewählt und ihre Tabellen und Zeilen stehen weiter in der Anzeige.
+    setSelectedDbId((current) =>
+      data.databases.some((db) => db.id === current) ? current : data.databases[0]?.id ?? null,
+    )
   }
 
   const fetchDatabaseData = async (databaseId: number) => {
@@ -371,12 +376,14 @@ export function DatabaseManager({ serverId }: Props) {
   const handleDeleteRows = (schema: string, table: string, rowConditions: Array<Record<string, any>>) =>
     run('delete-rows', async () => {
       if (!selectedDbId) return
-      await api(`/servers/${serverId}/databases/rows/delete`, {
+      // Die Zahl aus der Antwort, nicht die angeforderte: eine Bedingung kann
+      // mehr als eine Zeile treffen, und das muss der Benutzer sehen.
+      const res = await api<{ deleted_count?: number }>(`/servers/${serverId}/databases/rows/delete`, {
         method: 'POST',
         headers: csrfHeader(),
         body: JSON.stringify({ database_id: selectedDbId, schema_name: schema, table_name: table, row_conditions: rowConditions }),
       })
-      toast.success(`${rowConditions.length} Zeile(n) gelöscht`)
+      toast.success(`${res?.deleted_count ?? rowConditions.length} Zeile(n) gelöscht`)
       if (selectedTable) {
         await selectTable(selectedTable, selectedDbId)
       }

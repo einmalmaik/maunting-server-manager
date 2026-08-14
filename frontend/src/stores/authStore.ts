@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { api, clearCsrfTokenMemory } from '@/api/client'
 import { usePermissionsStore } from '@/stores/permissionsStore'
+import { useNodeStore } from '@/stores/nodeStore'
 import { clearSqlConsoleHistory } from '@/lib/sqlConsoleStorage'
 import type { User } from '@/types'
 
@@ -46,6 +47,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     // nächsten Benutzers — deshalb fällt er hier zusammen mit dem CSRF-Speicher.
     clearSqlConsoleHistory()
     usePermissionsStore.getState().reset()
+    // Die Knotenliste hält Name, Adresse und Port des Agenten sowie den
+    // TLS-Fingerabdruck. Ohne dieses clear() bliebe sie bis zum nächsten
+    // Neuladen der Seite im Speicher des Tabs liegen.
+    useNodeStore.getState().clear()
     set({ user: null, isAuthenticated: false, isLoading: false })
   },
 
@@ -59,6 +64,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch {
       clearCsrfTokenMemory()
       usePermissionsStore.getState().reset()
+      useNodeStore.getState().clear()
       set({ user: null, isAuthenticated: false, isLoading: false })
     }
   },

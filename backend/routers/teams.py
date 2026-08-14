@@ -217,21 +217,26 @@ def assignable_servers(
     anderes Team bekommen hat. Damit zeigt die Oberflaeche dieselbe Obergrenze,
     die `permission_service` spaeter durchsetzt, statt dass der Benutzer sie
     erst beim Speichern als Fehlermeldung erlebt.
+
+    Die Rechte werden **einmal** mengenweise geholt, nicht je Server und je
+    Schluessel einzeln: das waren 28 Rechtefragen mal drei Abfragen je Server,
+    also rund 1700 bei dreissig Servern, fuer eine Liste, die beim Oeffnen
+    eines Dialogs entsteht.
     """
     from services.permission_catalog import SERVER_KEYS
 
     team = team_service.get_team_for_member(db, team_id, user)
     team_service.assert_team_owner(db, team, user)
 
+    pauschal, delegiert = permission_service.direkte_rechte(db, user, set(SERVER_KEYS))
+
     result: list[TeamServerResponse] = []
     for server in db.query(Server).order_by(Server.name).all():
-        if not permission_service.direct_server_permission(db, user, server.id, "server.view"):
+        keys = pauschal | {key for sid, key in delegiert if sid == server.id}
+        if "server.view" not in keys:
             continue
-        keys = sorted(
-            key for key in SERVER_KEYS
-            if permission_service.direct_server_permission(db, user, server.id, key)
-        )
         result.append(TeamServerResponse(
-            server_id=server.id, server_name=server.name, permission_keys=keys,
+            server_id=server.id, server_name=server.name,
+            permission_keys=sorted(keys),
         ))
     return result

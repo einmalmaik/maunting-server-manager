@@ -167,7 +167,13 @@ export function ServerDetail() {
     ports: {} as Record<string, string>,
     protocols: {} as Record<string, string>,
   });
-  const { interfaces } = useHostInterfaces(server?.node_id);
+  // Die Liste wird ausschliesslich im Netzwerk-Dialog gelesen, also erst dann
+  // geladen. Sonst kostet jeder Aufruf der Detailseite zwei Anfragen fuer Daten,
+  // die niemand zu sehen bekommt.
+  const { interfaces, loading: interfacesLoading } = useHostInterfaces(
+    server?.node_id,
+    showEditNetwork,
+  );
 
   const serverId = parseInt(id || "0");
 
@@ -199,14 +205,12 @@ export function ServerDetail() {
   const fetchAll = async () => {
     if (!serverId) return;
     try {
-      const [srv, st, gms] = await Promise.all([
+      const [srv, st] = await Promise.all([
         api<Server>(`/servers/${serverId}`),
         api<ServerStatus>(`/servers/${serverId}/status`).catch(() => null),
-        api<GameInfo[]>("/system/games").catch(() => []),
       ]);
       setServer(srv);
       setStatus(st);
-      setGames(Array.isArray(gms) ? gms : []);
     } catch {
       // silent
     } finally {
@@ -214,9 +218,32 @@ export function ServerDetail() {
     }
   };
 
+  // Der Spielekatalog hängt nicht am Server und ändert sich nur, wenn ein
+  // Blueprint dazukommt. Einmal holen statt alle fünf Sekunden.
+  useEffect(() => {
+    api<GameInfo[]>("/system/games")
+      .then((gms) => setGames(Array.isArray(gms) ? gms : []))
+      .catch(() => {});
+  }, []);
+
+  // Der Merker gehört in den Takt, nicht in `fetchAll`: die manuellen Aufrufer
+  // warten auf das Versprechen und löschen danach den optimistischen Status.
+  // Ein Frühausstieg in `fetchAll` ließe ihr `.then` sofort feuern.
+  const pollLaeuft = useRef(false);
+
   useEffect(() => {
     void fetchAll();
-    const handle = setInterval(fetchAll, 5000);
+    const handle = setInterval(() => {
+      // Im Hintergrundtab schaut niemand hin: kein Takt, keine Anfragen.
+      if (document.visibilityState !== "visible") return;
+      // Ist der vorherige Durchlauf noch unterwegs, wird dieser Takt
+      // ausgelassen, statt die Anfragen zu stapeln.
+      if (pollLaeuft.current) return;
+      pollLaeuft.current = true;
+      void fetchAll().finally(() => {
+        pollLaeuft.current = false;
+      });
+    }, 5000);
     return () => clearInterval(handle);
   }, [serverId]);
 
@@ -1091,9 +1118,14 @@ export function ServerDetail() {
                       public_bind_ip: e.target.value,
                     })
                   }
+                  disabled={interfacesLoading}
                   required
                 >
-                  <option value="">{t("servers.bindIp.choose")}</option>
+                  <option value="">
+                    {interfacesLoading
+                      ? t("servers.bindIp.loading")
+                      : t("servers.bindIp.choose")}
+                  </option>
                   {interfaces.map((iface) => (
                     <option
                       key={`${iface.interface}-${iface.ip}`}

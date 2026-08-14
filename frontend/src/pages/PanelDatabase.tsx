@@ -128,11 +128,13 @@ export function PanelDatabase() {
 
   const handleDeleteRows = (schema: string, table: string, rowConditions: Array<Record<string, any>>) =>
     run('delete-rows', async () => {
-      await api('/panel/database/rows/delete', {
+      // Die Zahl aus der Antwort, nicht die angeforderte: eine Bedingung kann
+      // mehr als eine Zeile treffen, und das muss der Benutzer sehen.
+      const res = await api<{ deleted_count?: number }>('/panel/database/rows/delete', {
         method: 'POST',
         body: JSON.stringify({ database_id: PANEL_DB_ID, schema_name: schema, table_name: table, row_conditions: rowConditions }),
       })
-      toast.success(`${rowConditions.length} Zeile(n) gelöscht`)
+      toast.success(`${res?.deleted_count ?? rowConditions.length} Zeile(n) gelöscht`)
       if (selectedTable) {
         await selectTable(selectedTable)
       }

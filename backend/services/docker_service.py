@@ -1178,6 +1178,12 @@ def inspect_state(name: str, *, node: Any | None = None) -> dict | None:
                 "started_at": None,
                 "exit_code": None,
                 "oom_killed": False,
+                # Der Agent liefert CPU und RAM in derselben Antwort. Wer sie
+                # hier wegwirft, holt sie mit einer zweiten, identischen Runde
+                # zur Node nach. Der lokale Zweig unten hat diese Schlüssel
+                # bewusst nicht — dort kostet der Wert eine eigene Abfrage.
+                "cpu_percent": stats.get("cpu_percent"),
+                "ram_mb": stats.get("ram_mb"),
             }
         except Exception as exc:
             if getattr(exc, "status_code", None) == 404:
@@ -1265,11 +1271,21 @@ def logs(name: str, lines: int = 200, *, node: Any | None = None) -> str:
 
 
 def exec_in(name: str, command: list[str], timeout: int = 30, *, node: Any | None = None) -> dict:
+    """Führt einen Befehl im Container aus.
+
+    ``timeout`` stammt aus dem Blueprint (``execTimeoutSeconds``) und gilt für
+    den Node-Zweig. Der lokale Docker-Zweig kennt an ``exec_run`` keine eigene
+    Frist; dort greift die 60-Sekunden-Vorgabe des docker-py-Clients. Das ist
+    bewusst so: ein Umbau auf ``exec_start(stream=True)`` wäre mehr Aufwand,
+    als die Sache wert ist, und eine Grenze gibt es dort ohnehin.
+    """
     if node is not None:
         try:
             from services.node_client import NodeClient
 
-            result = NodeClient.from_node(node).exec_in_container(name, command)
+            result = NodeClient.from_node(node).exec_in_container(
+                name, command, timeout=float(timeout)
+            )
             return {
                 "ok": bool(result.get("ok")),
                 "error": result.get("error") or "",

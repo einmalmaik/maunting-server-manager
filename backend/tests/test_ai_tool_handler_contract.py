@@ -28,7 +28,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy.orm import Session
 
-from models import User
+from models import Server, User
 from services import (
     ai_action_service,
     ai_proposal_service,
@@ -158,6 +158,105 @@ def test_the_group_reaches_the_frontend() -> None:
     """
     quelle = inspect.getsource(ai_stream_service._anzeigeeintrag)
     assert '"gruppe"' in quelle
+
+
+# Serverbezogene Lesewerkzeuge, die der Rauchtest unten ausspart — je Zeile mit
+# dem Grund.
+#
+# Beide sprechen nach draußen. Sie mitzunehmen hieße, sie zu mocken, und ein
+# Mock ersetzt genau den Teil, den dieser Test prüfen soll. Ehrlicher ist eine
+# kurze, benannte Ausnahmeliste — zusammen mit dem Test darunter, der aufpasst,
+# dass sie nicht durch eine Umbenennung still ins Leere zeigt.
+OHNE_RAUCHTEST = {
+    "check_server_reachability": "öffnet eine TCP-Verbindung zum Server",
+    "search_workshop_mods": "fragt die Steam-Workshop-Suche",
+}
+
+
+# Argumente, ohne die ein Werkzeug schon an seiner eigenen Formprüfung endet.
+# Ein Aufruf, der dort abbricht, hat den Handler nie erreicht und würde nichts
+# beweisen.
+BEISPIELARGUMENTE: dict[str, dict] = {
+    "read_config": {"path": "server.cfg"},
+    "search_server_files": {"query": "hostname"},
+}
+
+
+@pytest.fixture
+def rauchtest_server(db: Session, tmp_path: Path) -> Server:
+    """Ein Server, an dem die Lesewerkzeuge wirklich etwas zu lesen finden.
+
+    Bewusst nicht die `test_server`-Fixture: die trägt einen Containernamen,
+    und damit griffe `read_server_logs` nach dem Docker-Daemon. Ohne
+    Containernamen endet es sauber mit `available: False` — derselbe Handler,
+    ohne die Abhängigkeit nach außen.
+
+    Das Verzeichnis ist echt und enthält eine Datei, damit `read_config`,
+    `list_server_files` und `search_server_files` nicht schon am fehlenden Pfad
+    scheitern.
+
+    Und der Server hat bewusst **keine** Mods: `read_mod_updates` fragt Steam
+    erst, wenn es aktive Mods gibt (`games/updater.py`, `mod_ids` leer heißt
+    kein Abruf). Wer hier eine Mod-Fixture ergänzt, holt sich damit einen
+    Netzabruf in den Test.
+    """
+    verzeichnis = tmp_path / "srv"
+    verzeichnis.mkdir()
+    (verzeichnis / "server.cfg").write_text("hostname=Rauchtest\n", encoding="utf-8")
+    server = Server(
+        name="Rauchtest",
+        game_type="dayz",
+        install_dir=str(verzeichnis),
+        status="stopped",
+    )
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+    return server
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    sorted(ai_tool_registry.SERVER_READ_TOOLS - set(OHNE_RAUCHTEST)),
+)
+def test_every_server_read_tool_survives_being_called(
+    db: Session, owner_user: User, rauchtest_server: Server, tool_name: str
+) -> None:
+    """Jedes serverbezogene Lesewerkzeug wird einmal wirklich ausgeführt.
+
+    Die Tests weiter oben prüfen, ob ein Werkzeugname im Quelltext der
+    Verteilung **vorkommt**. Das ist zu wenig: `read_guardian_incidents` kam
+    vor und war trotzdem kaputt — ein `NameError` in seinem Zweig fiel erst im
+    Betrieb auf, in einem Lauf, bei dem niemand zusah.
+
+    Verlangt wird deshalb nur das Mindeste, aber das für jedes Werkzeug: es
+    kommt ein `dict` heraus, oder es kommt ein `AiActionValidationError`
+    heraus. Jede andere Ausnahme ist ein Baufehler.
+
+    Der Benutzer hat bewusst jedes Recht: sonst endete die Kette an der ersten
+    Rechteprüfung, und geprüft wäre wieder nur die Prüfung.
+    """
+    arguments = {
+        "server_id": rauchtest_server.id,
+        **BEISPIELARGUMENTE.get(tool_name, {}),
+    }
+    try:
+        ergebnis = ai_action_service.execute_read_tool(
+            db, user=owner_user, tool_name=tool_name, arguments=arguments
+        )
+    except AiActionValidationError:
+        return
+    assert isinstance(ergebnis, dict)
+
+
+def test_the_smoke_test_exceptions_are_still_real_tools() -> None:
+    """Eine Ausnahmeliste, die ins Leere zeigt, spart still ein Werkzeug aus.
+
+    Wird eines der ausgesparten Werkzeuge umbenannt oder entfernt, bliebe der
+    alte Name hier stehen — und ein neues Werkzeug mit ähnlichem Namen liefe
+    unbemerkt nicht mit.
+    """
+    assert set(OHNE_RAUCHTEST) <= ai_tool_registry.SERVER_READ_TOOLS
 
 
 def test_every_write_tool_has_an_execution_branch() -> None:

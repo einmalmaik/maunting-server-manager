@@ -359,9 +359,17 @@ E-Mail und kann nicht nachfragen."""
 # Modell nur nicht in Faelle laufen lassen, die es erst um drei Uhr nachts
 # bemerkt — und der zweite Absatz haelt fest, was der Betreiber ausdruecklich
 # verlangt hat: gefragt wird **vorher**, nicht wenn es soweit ist.
+#
+# Zeitzone und autonomer Modus kommen aus dem Lageblock (`ai_lage`), nicht aus
+# einer Rückfrage. Beides sind Tatsachen des Panels; das Modell konnte sie
+# früher nirgends sehen und fragte deshalb bei jeder ersten Aufgabe nach der
+# Zone — oder behauptete, der autonome Modus sei nicht freigegeben, obwohl er
+# es war. Der Zustellweg wiederum ist keine Tatsache, sondern eine Vorliebe:
+# dafür gibt es jetzt den Standard `chat` (`ai_task_service._anwenden`), und
+# gefragt wird gar nicht mehr.
 AUFGABEN = """Stehende Auftraege: Sagt jemand "jeden Tag um acht", "alle acht Stunden" oder "ab morgen frueh", legst du mit `propose_task_set` einen stehenden Auftrag an. `list_tasks` zeigt alle; dasselbe Werkzeug ohne `task_id` legt an, mit `task_id` aendert es — auch nur `enabled: false`, um einen Auftrag stillzulegen, ohne ihn zu verlieren. `propose_task_delete` entfernt ihn ganz. Beschreib die Aufgabe nicht ab, sondern schreib in `instruction`, was du beim Faelligwerden tun sollst — dieser Text ist dein spaeterer Auftrag.
-Vor dem Anlegen muss die **Zeitzone** feststehen. Steht sie im Gedaechtnis, nimm sie; sonst frag mit `ask_user` danach und merk sie dir danach mit `remember`. Beim Bestaetigen nennst du Zone und naechste Faelligkeit ausdruecklich. Ist unklar, wie der Mensch erreicht werden will, frag ebenso nach dem Weg (Panel, E-Mail oder beides).
-Ein Auftrag mit `kind: "act"` darf selbst handeln und setzt den autonomen Modus voraus. Fehlt der, sag das **beim Anlegen** und nicht um drei Uhr nachts — biete an, ihn als reinen Bericht (`kind: "report"`) anzulegen.
+Vor dem Anlegen muss die **Zeitzone** feststehen — nimm sie aus der Lage. Nur wenn die Lage sie als unbekannt ausweist, frag mit `ask_user` danach und merk sie dir danach mit `remember`. Beim Bestaetigen nennst du Zone und naechste Faelligkeit ausdruecklich. Nach dem Zustellweg fragst du nicht: es gilt der Chat, ausser der Benutzer nennt selbst einen anderen Weg (E-Mail oder beides).
+Ein Auftrag mit `kind: "act"` darf selbst handeln und setzt den autonomen Modus voraus. Ob er freigegeben ist, steht in der Lage — lies es dort nach, statt es zu vermuten. Ist er es nicht, sag das beim Anlegen und nicht um drei Uhr nachts, und biete an, den Auftrag als reinen Bericht (`kind: "report"`) anzulegen.
 Weckt dich ein faelliger Auftrag, sitzt niemand davor: `ask_user` gibt es dann nicht. Entscheide selbst oder melde ehrlich Fehlanzeige. Dein Abschlusstext wird als E-Mail gelesen — fasse in wenigen Saetzen zusammen, was du festgestellt oder getan hast."""
 
 

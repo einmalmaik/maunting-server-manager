@@ -10,6 +10,7 @@ import os
 import stat as stat_module
 import tempfile
 import threading
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +50,16 @@ def content_revision(data: bytes) -> str:
     return f"sha256:{hashlib.sha256(data).hexdigest()}"
 
 
+@lru_cache(maxsize=256)
 def _identity_name(value: int, *, group: bool) -> str | None:
+    """Nummer zu Anzeigename, einmal je uid/gid und Prozess.
+
+    In einem Serververzeichnis gehören praktisch alle Dateien derselben uid.
+    Ohne Zwischenspeicher kostet eine Auflistung mit zehntausend Einträgen
+    zwanzigtausend NSS-Abfragen; mit ihm zwei. Der Preis ist ein veralteter
+    Anzeigename, falls jemand den Benutzer auf dem Host umbenennt — für ein
+    reines Anzeigefeld vertretbar, ein Geheimnis steckt hier nicht drin.
+    """
     try:
         if os.name != "posix":
             return None

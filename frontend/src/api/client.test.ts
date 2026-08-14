@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import i18n from '@/i18n'
+import { useAuthStore } from '@/stores/authStore'
 import { api, apiStream, SanitizedApiError } from './client'
 
 // Locking the language guarantees the test does not silently break, wenn der
@@ -155,6 +156,45 @@ describe('api client', () => {
       )
     })
 
+    it('meldet den Benutzer ab, wenn der Refresh scheitert', async () => {
+      // Ohne diesen Schritt bleibt `isAuthenticated` true: die Wache der Route
+      // greift nicht, die Oberfläche friert scheinbar angemeldet ein und
+      // laufende Intervalle pollen weiter gegen den Refresh-Endpunkt.
+      useAuthStore.setState({ isAuthenticated: true, isLoading: false })
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Invalid refresh' }))
+
+      await expect(api('/test')).rejects.toThrow(i18n.t('errors.SESSION_EXPIRED'))
+
+      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+    })
+
+    it('meldet den Benutzer auch im SSE-Pfad ab, wenn der Refresh scheitert', async () => {
+      useAuthStore.setState({ isAuthenticated: true, isLoading: false })
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Invalid refresh' }))
+
+      await expect(
+        apiStream('/ai/conversations/1/messages/stream', { method: 'POST', body: '{}' }),
+      ).rejects.toThrow(i18n.t('errors.SESSION_EXPIRED'))
+
+      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+    })
+
+    it('lässt den Anmeldezustand in Ruhe, wenn der Refresh gelingt', async () => {
+      useAuthStore.setState({ isAuthenticated: true, isLoading: false })
+      fetchSpy
+        .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
+        .mockReturnValueOnce(mockResponse(200, { message: 'refreshed' }))
+        .mockReturnValueOnce(mockResponse(200, { ok: true }))
+
+      await api('/test')
+
+      expect(useAuthStore.getState().isAuthenticated).toBe(true)
+    })
+
     it('should NOT refresh on /auth/login 401', async () => {
       fetchSpy.mockReturnValueOnce(mockResponse(401, { detail: 'Bad credentials' }))
 
@@ -193,8 +233,53 @@ describe('api client', () => {
         text: () => Promise.resolve('bad gateway'),
       } as Response)
 
-      // client.ts uses response text when json fails, then falls back to statusText
-      await expect(api('/test')).rejects.toThrow('bad gateway')
+      // Ein Rumpf, der kein JSON ist, stammt nicht vom Backend. Er wird
+      // verworfen, übrig bleibt der Statuscode.
+      await expect(api('/test')).rejects.toThrow('HTTP 502')
+    })
+
+    it('zeigt die Fehlerseite des Proxys nicht in der Meldung', async () => {
+      const proxySeite =
+        '<html><head><title>502 Bad Gateway</title></head><body>' +
+        '<center><h1>502 Bad Gateway</h1></center>' +
+        '<hr><center>nginx/1.24.0</center></body></html>'
+      fetchSpy.mockReturnValueOnce(Promise.resolve({
+        ok: false,
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: new Headers({ 'Content-Type': 'text/html' }),
+        json: () => Promise.reject(new Error('bad json')),
+        text: () => Promise.resolve(proxySeite),
+      } as Response))
+
+      const fehler = await api('/test')
+        .then(() => null)
+        .catch((e: SanitizedApiError) => e)
+
+      expect(fehler?.message).toBe('Bad Gateway')
+      // Weder Kennung noch Version des Proxys dürfen den Benutzer erreichen.
+      expect(fehler?.message).not.toContain('nginx')
+      expect(fehler?.message).not.toContain('<')
+    })
+
+    it('verwirft die Fehlerseite des Proxys auch im SSE-Pfad', async () => {
+      fetchSpy.mockReturnValueOnce(Promise.resolve({
+        ok: false,
+        status: 504,
+        statusText: 'Gateway Timeout',
+        headers: new Headers({ 'Content-Type': 'text/html' }),
+        text: () => Promise.resolve('<html><body><center>nginx/1.24.0</center></body></html>'),
+      } as Response))
+
+      const fehler = await apiStream('/ai/conversations/1/messages/stream', {
+        method: 'POST',
+        body: '{}',
+      })
+        .then(() => null)
+        .catch((e: SanitizedApiError) => e)
+
+      expect(fehler?.message).toBe('Gateway Timeout')
+      expect(fehler?.message).not.toContain('nginx')
     })
 
     it('should surface message + errors[] from structured detail', async () => {

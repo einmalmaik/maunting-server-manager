@@ -215,7 +215,12 @@ def _leeren(wurzel: str) -> int | None:
 
 
 def list_server_directory(
-    db: Session, *, server_id: int, relative_path: str = "", limit: int | None = None
+    db: Session,
+    *,
+    server_id: int,
+    relative_path: str = "",
+    limit: int | None = None,
+    agent: NodeClient | None = None,
 ) -> dict:
     """Listet ein Verzeichnis im Serververzeichnis auf.
 
@@ -228,9 +233,14 @@ def list_server_directory(
     ``limit`` kuerzt die Liste und meldet das ausdruecklich in ``truncated``.
     Stillschweigend abzuschneiden waere schlimmer als gar nicht aufzulisten: das
     Modell haelte die Datei, die es sucht, dann fuer nicht vorhanden.
+
+    ``agent`` reicht einen bereits aufgelösten Node-Agenten durch (siehe
+    `search_file_contents`). ``None`` heißt schlicht "selbst auflösen" und ist
+    gefahrlos: der teure Fall — ein entfernter Node — liefert immer einen
+    Client, der billige Fall — ein lokaler Node — ohnehin ``None``.
     """
     server = _server(db, server_id)
-    agent = _agent(server, db)
+    agent = agent or _agent(server, db)
     if agent is not None:
         try:
             roh = agent.files_list(_agent_key(server), relative_path or "")
@@ -338,8 +348,21 @@ def search_file_contents(
     Gebaut auf `list_server_directory` und `read_server_text`, weil beide den
     Node-Agenten schon beherrschen. Damit sucht dieselbe Funktion auf einem
     lokalen wie auf einem entfernten Server.
+
+    Der Node-Agent wird dabei **einmal** aufgelöst und durchgereicht. Vorher
+    baute ihn jede Verzeichnisrunde und jede der bis zu 200 Dateilesungen neu
+    auf, und jeder Aufbau kostet eine Entschlüsselung des Node-Tokens beim
+    DIS-Sidecar und einen frischen, angehefteten TLS-Kontext — beides eine
+    eigene Netzrunde. Aus einer Suche wurden so rund dreimal so viele Runden wie
+    nötig.
+
+    Ausdrücklich **kein** modulweiter Zwischenspeicher für Node-Clients: das
+    entschlüsselte Token soll nicht länger im Speicher liegen als die eine
+    Suche, die es braucht.
     """
     from services.ai_action_service import is_binary_text
+
+    agent = _agent(_server(db, server_id), db)
 
     # Steht bewusst vor `auflisten`: die Funktion setzt es selbst, wenn sie ein
     # Verzeichnis ueberspringen muss. Ein uebersprungenes Verzeichnis ist eine
@@ -357,7 +380,11 @@ def search_file_contents(
         nonlocal gekuerzt
         try:
             ergebnis = list_server_directory(
-                db, server_id=server_id, relative_path=pfad, limit=MAX_LISTED_ENTRIES
+                db,
+                server_id=server_id,
+                relative_path=pfad,
+                limit=MAX_LISTED_ENTRIES,
+                agent=agent,
             )
         except HTTPException as exc:
             if exc.status_code >= 500:
@@ -451,7 +478,7 @@ def search_file_contents(
             break
         try:
             inhalt = str(read_server_text(
-                db, server_id=server_id, relative_path=datei
+                db, server_id=server_id, relative_path=datei, agent=agent
             )["content"])
         except HTTPException:
             # Zu gross, verschwunden, keine Datei — kein Grund, die ganze Suche
@@ -493,9 +520,21 @@ def search_file_contents(
     }
 
 
-def read_server_text(db: Session, *, server_id: int, relative_path: str) -> dict:
+def read_server_text(
+    db: Session,
+    *,
+    server_id: int,
+    relative_path: str,
+    agent: NodeClient | None = None,
+) -> dict:
+    """Liest **eine** Textdatei des Servers.
+
+    ``agent`` reicht einen bereits aufgelösten Node-Agenten durch, damit eine
+    Schleife über viele Dateien ihn nicht je Datei neu aufbaut; ``None`` heißt
+    "selbst auflösen".
+    """
     server = _server(db, server_id)
-    agent = _agent(server, db)
+    agent = agent or _agent(server, db)
     if agent is not None:
         try:
             return {"path": relative_path, "name": relative_path.rsplit("/", 1)[-1], **agent.files_read_info(_agent_key(server), relative_path)}

@@ -32,13 +32,19 @@ class AiConversationResponse(BaseModel):
 
 
 class AiSection(BaseModel):
-    """Ein Abschnitt einer Antwort — entweder Text oder ein Werkzeugaufruf.
+    """Ein Abschnitt einer Antwort — Text, ein Werkzeugaufruf oder ein Denkblock.
 
-    Zwei Formen in einem Typ statt zweier Listen: die **Reihenfolge zwischen
+    Drei Formen in einem Typ statt dreier Listen: die **Reihenfolge zwischen
     ihnen** ist die Information, um die es geht. "Ich sehe mir den Status an" —
-    Werkzeug — "der laeuft, jetzt die Logs" — Werkzeug ist etwas anderes als
-    derselbe Text mit denselben Werkzeugen in beliebiger Anordnung, und aus zwei
-    getrennten Listen laesst sich das nicht wiederherstellen.
+    Werkzeug — "der läuft, jetzt die Logs" — Werkzeug ist etwas anderes als
+    derselbe Text mit denselben Werkzeugen in beliebiger Anordnung, und aus
+    getrennten Listen lässt sich das nicht wiederherstellen.
+
+    ``denken`` kam zuletzt dazu und aus genau demselben Anlass: der Denktext war
+    ein flaches Feld daneben, die Oberfläche zeichnete ihn als *einen* Kasten
+    über allem, und die Gedanken der dritten Runde standen über dem Text der
+    ersten. ``AiMessageResponse.reasoning`` bleibt daneben bestehen — als
+    Ableitung, nicht als zweiter Speicher.
 
     ``werkzeug`` traegt dieselbe Nutzlast wie das `tool`-Ereignis im Stream
     (`_anzeigeeintrag`): Name, Server, Gruppe, Fehlschlag, Skillangaben. Bewusst
@@ -46,7 +52,7 @@ class AiSection(BaseModel):
     Verlauf.
     """
 
-    art: Literal["text", "tool"]
+    art: Literal["text", "tool", "denken"]
     inhalt: str | None = None
     werkzeug: dict | None = None
 
@@ -151,15 +157,13 @@ class AiContextStatus(BaseModel):
     #: Was das Gespraech davon gerade belegt. Kann ``usable_tokens``
     #: ueberschreiten: dann wird beim naechsten Zug gekuerzt und gefaltet.
     used_tokens: int
-    #: Ab wieviel belegten Tokens zusammengefasst wird. Die Marke wird eher
-    #: erreicht als das Falten stattfindet: gefaltet wird nur der **aeltere**
-    #: Teil, und die letzten zwoelf Nachrichten zaehlen nie dazu
-    #: (`ai_compaction_service.KEEP_RECENT_MESSAGES`). Der Ring darf also kurz
-    #: an der Marke stehen, bevor sich etwas tut — das ist richtig so und nicht
-    #: die haeufigere Sorte Fehler, naemlich eine Marke, die vorgibt, das Falten
-    #: sei schon passiert.
-    compaction_at_tokens: int
-    #: Dieselbe Marke als Prozentsatz — die Einstellung des Betreibers.
+    #: Ab wie viel Prozent der Belegung zusammengefasst wird — die Einstellung
+    #: des Betreibers. Hier stand einmal dieselbe Marke zusätzlich in Tokens;
+    #: das war eine zweite Zählweise auf derselben Skala, denn `used_tokens`
+    #: misst den ganzen Kontext, die Faltschwelle nur den faltbaren Teil.
+    #: Die Marke wird deshalb ohnehin eher erreicht als das Falten stattfindet:
+    #: gefaltet wird nur der **ältere** Teil, und die letzten zwölf
+    #: Nachrichten zählen nie dazu (`ai_compaction_service.KEEP_RECENT_MESSAGES`).
     compaction_percent: int
     #: Ob bereits eine Zusammenfassung im Kontext steckt.
     summarized: bool

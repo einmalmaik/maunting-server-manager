@@ -101,10 +101,15 @@ export function CaptchaTab() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
+                  <label
+                    htmlFor="captcha-site-key"
+                    className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider"
+                  >
+                    {t('settings.captcha.siteKey', { defaultValue: 'Site Key (Website-Schlüssel)' })}
+                  </label>
                   <Input
                     id="captcha-site-key"
                     type="text"
-                    label={t('settings.captcha.siteKey', { defaultValue: 'Site Key (Website-Schlüssel)' })}
                     value={settings.captcha_site_key}
                     onChange={(event) => setSettings({ ...settings, captcha_site_key: event.target.value })}
                     placeholder="e.g. 0x4AAAAAA..."
@@ -116,7 +121,10 @@ export function CaptchaTab() {
                 </div>
 
                 <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                  <label
+                    htmlFor="captcha-secret-key"
+                    className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider"
+                  >
                     {t('settings.captcha.secretKey', { defaultValue: 'Secret Key (Geheimer Schlüssel)' })}
                   </label>
                   <PasswordInput

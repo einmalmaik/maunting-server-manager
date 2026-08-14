@@ -8,7 +8,7 @@ import { useHostInterfaces } from '@/hooks/useHostInterfaces'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import type { Server, GameInfo, PostgresCredential, ServerCreateResult, Node } from '@/types'
 import { labelRole, mapBlueprintPorts } from '@/utils/portRoles'
-import { Server as ServerIcon, Plus, Activity, Cpu, HardDrive, Database, Network } from 'lucide-react'
+import { Server as ServerIcon, Plus, Activity, AlertTriangle, Cpu, HardDrive, Database, Network } from 'lucide-react'
 import { PostgresCredentialsDialog } from '@/components/server/PostgresCredentialsDialog'
 import { Badge } from '@/components/ui/Badge'
 import { Dropdown } from '@/components/ui/Dropdown'
@@ -22,6 +22,9 @@ export function Servers() {
   const [games, setGames] = useState<GameInfo[]>([])
   const [nodes, setNodes] = useState<Node[]>([])
   const [loading, setLoading] = useState(true)
+  // Ohne dieses Flag wird aus einem fehlgeschlagenen Laden die Aussage
+  // "Keine Server vorhanden" — der Betreiber liest, seine Server seien weg.
+  const [loadError, setLoadError] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
   const [nodesLoading, setNodesLoading] = useState(false)
@@ -54,14 +57,10 @@ export function Servers() {
 
   const fetchServers = async () => {
     try {
-      const [srvs, gms] = await Promise.all([
-        api<Server[]>('/servers'),
-        api<GameInfo[]>('/system/games'),
-      ])
-      setServers(srvs)
-      setGames(gms)
+      setServers(await api<Server[]>('/servers'))
+      setLoadError(false)
     } catch {
-      // silent
+      setLoadError(true)
     } finally {
       setLoading(false)
     }
@@ -91,9 +90,19 @@ export function Servers() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canCreateServer])
 
+  // Der Spielekatalog ist statisch — er ändert sich nur, wenn ein Blueprint
+  // dazukommt. Einmal holen reicht, er gehört nicht in den 5-Sekunden-Takt.
+  useEffect(() => {
+    api<GameInfo[]>('/system/games').then(setGames).catch(() => {})
+  }, [])
+
   useEffect(() => {
     fetchServers()
-    const interval = setInterval(fetchServers, 5000)
+    const interval = setInterval(() => {
+      // Im Hintergrundtab schaut niemand hin: kein Takt, keine Anfragen.
+      if (document.visibilityState !== 'visible') return
+      fetchServers()
+    }, 5000)
     return () => clearInterval(interval)
   }, [])
 
@@ -317,7 +326,16 @@ export function Servers() {
             {t('servers.create')}
           </button>) : undefined} />
 
-      {servers.length === 0 && (
+      {loadError && (
+        <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
+          <AlertTriangle className="w-10 h-10 text-status-error mx-auto mb-4" />
+          <h3 className="font-headline text-body-lg text-on-surface mb-1">
+            {t('servers.loadFailed')}
+          </h3>
+        </div>
+      )}
+
+      {!loadError && servers.length === 0 && (
         <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
           <ServerIcon className="w-10 h-10 text-on-surface-variant mx-auto mb-4" />
           <h3 className="font-headline text-body-lg text-on-surface mb-1">

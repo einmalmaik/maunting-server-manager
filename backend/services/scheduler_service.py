@@ -537,7 +537,10 @@ async def _disk_soft_limit_task() -> None:
             result = await asyncio.to_thread(evaluate_disk_soft_limit, db, server)
             if not result.get("ok"):
                 continue
-        db.commit()
+            # Je Messung ein Commit: bricht der Lauf später ab, sind die bis
+            # dahin gemessenen Werte gespeichert, und die Transaktion bleibt
+            # nicht über die gesamte Laufzeit offen.
+            db.commit()
     except Exception as e:
         logger.warning("disk soft-limit task crashed: %s", e)
     finally:
@@ -780,7 +783,13 @@ async def _node_heartbeat_task() -> None:
             async with semaphore:
                 now_utc = datetime.now(timezone.utc)
                 try:
-                    node_client = NodeClient.from_node(node, timeout=10.0)
+                    # ``from_node`` entschlüsselt das Node-Token synchron gegen
+                    # den DIS-Sidecar. Direkt in der Koroutine ausgeführt hält
+                    # das die Ereignisschleife an, und die fünfzig angeblich
+                    # parallelen Sonden laufen in Wahrheit nacheinander.
+                    node_client = await asyncio.to_thread(
+                        NodeClient.from_node, node, timeout=10.0
+                    )
                     metrics = await node_client.metrics_async(client=client)
                     if isinstance(metrics, dict):
                         node.status = "online"
@@ -882,7 +891,10 @@ async def _guardian_reconciliation_task() -> None:
 
     db = SessionLocal()
     try:
-        reconcile_firewall_rules(db)
+        # Der Abgleich startet je Server ``ufw``-Unterprozesse beziehungsweise
+        # HTTPS-Aufrufe zur Node. Beides gehört nicht in die Ereignisschleife,
+        # sonst steht das Panel alle 30 Sekunden.
+        await asyncio.to_thread(reconcile_firewall_rules, db)
     except Exception as exc:
         logger.warning("Error in firewall reconciliation task: %s", exc)
     finally:
@@ -1030,8 +1042,12 @@ async def _hoster_maintenance_task() -> None:
         from services.hoster_service_lifecycle import purge_terminated_services
         from services.hoster_webhook_service import deliver_pending
 
-        deliver_pending(db)
-        purge_terminated_services(db)
+        # Beide Schritte sind blockierendes IO: ``deliver_pending`` verschickt
+        # bis zu 25 Webhooks mit synchronem httpx (je 10 s Frist), und
+        # ``purge_terminated_services`` löscht ganze Server samt Verzeichnis.
+        # In der Ereignisschleife würde das jede Anfrage des Panels anhalten.
+        await asyncio.to_thread(deliver_pending, db)
+        await asyncio.to_thread(purge_terminated_services, db)
     except Exception as exc:
         db.rollback()
         logging.getLogger(__name__).warning(

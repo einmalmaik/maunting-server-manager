@@ -45,12 +45,17 @@ export function ServerPermissionsPanel({ serverId }: Props) {
 
       // Fuer alle nicht-Owner-User schauen, ob es Permissions auf diesem Server gibt.
       const candidates = users.filter((u) => !u.is_owner)
+      // Eine gescheiterte Abfrage darf nicht als "keine Rechte" durchgehen:
+      // sonst verschwindet eine tatsächlich vergebene Delegation lautlos aus
+      // der Tabelle. Wir sammeln die Fehlschläge und nennen sie beim Namen.
+      const gescheitert: string[] = []
       const fetched = await Promise.all(
         candidates.map(async (u) => {
           try {
             const res = await rbacApi.getServerPermissions(u.id, serverId)
             return { user: u, permissions: res.permissions } as UserPermissionRow
           } catch {
+            gescheitert.push(u.username)
             return null
           }
         }),
@@ -60,6 +65,9 @@ export function ServerPermissionsPanel({ serverId }: Props) {
           .filter((r): r is UserPermissionRow => r !== null && r.permissions.length > 0)
           .sort((a, b) => a.user.username.localeCompare(b.user.username)),
       )
+      if (gescheitert.length > 0) {
+        toast.error(t('serverPermissions.loadFailed', { users: gescheitert.join(', ') }))
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {

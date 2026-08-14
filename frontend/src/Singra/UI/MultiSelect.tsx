@@ -140,7 +140,7 @@ export const MultiSelect = forwardRef<HTMLDivElement, MultiSelectProps>(
             role="listbox"
             aria-label={ariaLabel}
             aria-multiselectable="true"
-            className="absolute left-0 right-0 z-50 mt-2 max-h-64 overflow-y-auto rounded-xl border border-outline-variant/70 bg-surface-container-highest/95 p-1.5 shadow-2xl backdrop-blur-xl"
+            className="absolute left-0 right-0 z-50 mt-2 max-h-64 overflow-y-auto rounded-xl border border-outline-variant/70 bg-surface-container-high/95 p-1.5 shadow-2xl backdrop-blur-xl"
           >
             {options.length === 0 ? (
               <p className="px-3 py-4 text-center text-xs text-on-surface-variant">
@@ -161,7 +161,7 @@ export const MultiSelect = forwardRef<HTMLDivElement, MultiSelectProps>(
                     className={`flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/70 disabled:cursor-not-allowed disabled:opacity-45 ${
                       isSelected
                         ? 'bg-primary/10 text-primary'
-                        : 'text-on-surface hover:bg-surface-container-high'
+                        : 'text-on-surface hover:bg-surface-container-highest'
                     }`}
                   >
                     <span

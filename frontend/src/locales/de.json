@@ -1039,6 +1039,7 @@
     "overcommitDiskWarning": "Auf diesem Node sind noch {{available}} Festplattenspeicher verfügbar (von {{total}}). Mit den neu zugewiesenen {{requested}} Festplattenspeicher wird die physische Kapazität überschritten. Falls Server mehr Speicher als frei benötigen, können sie nicht mehr starten. Möchtest du die Ressourcen trotzdem so zuweisen?",
     "overcommitConfirm": "Trotzdem zuweisen",
     "noServers": "Keine Server vorhanden",
+    "loadFailed": "Die Serverliste konnte nicht geladen werden.",
     "createHint": "Erstelle deinen ersten Server, um loszulegen.",
     "name": "Name",
     "game": "Spiel",
@@ -1272,41 +1273,270 @@
       "user": "User"
     }
   },
-  "permissions": {
-    "users.read": "Userliste sehen",
-    "users.manage": "User anlegen, bearbeiten, löschen",
-    "users.permissions.manage": "User-Rollen und Server-Permissions verwalten",
-    "roles.manage": "Rollen anlegen, bearbeiten, löschen",
-    "panel.settings.read": "Panel-Einstellungen lesen",
-    "panel.settings.write": "Panel-Einstellungen ändern (Steam, E-Mail, ...)",
-    "servers.create": "Neuen Server anlegen",
-    "servers.delete": "Server löschen (global, nicht delegierbar)",
-    "system.view": "System-Ressourcen, Interfaces, Version",
-    "nodes.read": "Nodeliste sehen",
-    "nodes.manage": "Nodes anlegen, bearbeiten, löschen",
-    "server.view": "Server in Liste und Detail sehen",
-    "server.start": "Server starten",
-    "server.stop": "Server stoppen",
-    "server.restart": "Server neustarten",
-    "server.install": "Server (re-)installieren",
-    "server.config.write": "Server-Einstellungen ändern (Name, Auto-Restart, Backup-Schedule)",
-    "server.network.manage": "Ports und Bind-IP ändern",
-    "server.resources.manage": "CPU-/RAM-/Disk-Limits ändern",
-    "server.console.read": "Konsole und Logs lesen",
-    "server.console.write": "Befehle an die Konsole senden",
-    "server.files.read": "Dateien lesen, herunterladen",
-    "server.files.write": "Dateien hochladen, anlegen, bearbeiten, entpacken",
-    "server.files.delete": "Dateien löschen",
-    "server.backups.read": "Backups auflisten",
-    "server.backups.create": "Backup erstellen",
-    "server.backups.restore": "Backup wiederherstellen",
-    "server.backups.delete": "Backup löschen",
-    "server.mods.read": "Mods auflisten, Workshop durchsuchen",
-    "server.mods.write": "Mods abonnieren, entfernen, sortieren",
-    "server.mods.toggle": "Mods aktivieren oder deaktivieren",
-    "server.databases.read": "PostgreSQL-Datenbanken lesen",
-    "server.databases.write": "PostgreSQL-Tabellen und Daten bearbeiten",
-    "server.databases.admin": "PostgreSQL-Datenbanken und User verwalten"
+  "permissionEditor": {
+    "searchPlaceholder": "Berechtigung suchen...",
+    "selectAll": "Alle auswählen",
+    "deselectAll": "Auswahl aufheben",
+    "empty": "Keine Berechtigungen gefunden",
+    "hoverHint": "Fahre mit der Maus über eine Berechtigung, um eine Beschreibung anzuzeigen.",
+    "groups": {
+      "users": "Benutzer & Rollen",
+      "panel": "Panel-Einstellungen",
+      "ai": "KI-Rechte",
+      "infrastructure": "Infrastruktur & System",
+      "server_basic": "Server-Basisrechte",
+      "server_config": "Server-Konfiguration & Ressourcen",
+      "server_console": "Server-Konsole",
+      "server_files": "Dateien & Backups",
+      "server_features": "Server-Erweiterungen (Mods & DBs)",
+      "other": "Andere Berechtigungen"
+    }
+  },
+  "permissionDetails": {
+    "users_read": {
+      "title": "Benutzerliste einsehen",
+      "desc": "Erlaubt das Auflisten und Betrachten aller registrierten Benutzer im System."
+    },
+    "users_manage": {
+      "title": "Benutzer verwalten",
+      "desc": "Erlaubt das Erstellen, Bearbeiten und Löschen von Benutzern im Panel."
+    },
+    "users_permissions_manage": {
+      "title": "Berechtigungen zuweisen",
+      "desc": "Erlaubt das Zuweisen von Rollen an Benutzer sowie das Delegieren von Server-Rechten."
+    },
+    "roles_manage": {
+      "title": "Rollen verwalten",
+      "desc": "Erlaubt das Erstellen, Ändern und Löschen von Berechtigungsrollen."
+    },
+    "panel_settings_read": {
+      "title": "Einstellungen lesen",
+      "desc": "Erlaubt das Einsehen der allgemeinen Panel-Konfiguration."
+    },
+    "panel_settings_write": {
+      "title": "Einstellungen bearbeiten",
+      "desc": "Erlaubt das Ändern globaler Panel-Einstellungen (z.B. SMTP, Steam, Backups)."
+    },
+    "panel_database_read": {
+      "title": "Panel-Datenbank lesen",
+      "desc": "Erlaubt das Einsehen von Systemdatenbank-Tabellen (nur für Diagnose)."
+    },
+    "panel_database_admin": {
+      "title": "Panel-Datenbank verwalten",
+      "desc": "Erlaubt administrative Aufgaben und direkte Änderungen an der Panel-Datenbank."
+    },
+    "servers_create": {
+      "title": "Server erstellen",
+      "desc": "Erlaubt das Erstellen neuer Gameserver auf verfügbaren Nodes."
+    },
+    "servers_delete": {
+      "title": "Server löschen",
+      "desc": "Erlaubt das dauerhafte Löschen von Gameservern aus dem System (global, destruktiv)."
+    },
+    "blueprints_manage": {
+      "title": "Blueprints verwalten",
+      "desc": "Erlaubt das Anlegen, Ändern und Löschen von Blueprints — den Vorlagen, aus denen Server entstehen. Damit lässt sich zum Beispiel eine andere Spielversion bereitstellen. Mitgelieferte Blueprints bleiben unveränderbar; man leitet eigene davon ab."
+    },
+    "system_view": {
+      "title": "Systemstatus anzeigen",
+      "desc": "Erlaubt das Betrachten der Systemauslastung, Log-Dateien und Netzwerkschnittstellen des Host-Systems."
+    },
+    "system_audit_read": {
+      "title": "Audit-Log lesen",
+      "desc": "Erlaubt das Einsehen des Admin-Audit-Logs mit allen privilegierten Aktionen. Secrets und vollständige Logdateien stehen dort bewusst nicht drin."
+    },
+    "system_secrets_rotate": {
+      "title": "Cluster-Secrets rotieren",
+      "desc": "Erlaubt das Erneuern der Managed-Postgres-Admin-Zugangsdaten. Stark privilegiert: betrifft alle verwalteten Datenbanken gleichzeitig."
+    },
+    "nodes_read": {
+      "title": "Nodes anzeigen",
+      "desc": "Erlaubt das Auflisten der Nodes (Infrastruktur-Server) und deren Systemauslastung."
+    },
+    "nodes_manage": {
+      "title": "Nodes verwalten",
+      "desc": "Erlaubt das Hinzufügen, Editieren, Löschen und Registrieren von Nodes."
+    },
+    "teams_create": {
+      "title": "Teams gründen",
+      "desc": "Erlaubt das Gründen eigener Teams, um KI-Wissen und Serverrechte mit Kollegen zu teilen. Ein Team kann dabei nie mehr Rechte weitergeben, als sein Gründer selbst besitzt."
+    },
+    "ai_chat_use": {
+      "title": "KI-Chat verwenden",
+      "desc": "Erlaubt den KI-Chat. Rollenlimits und Tool-Rechte werden zusätzlich im Backend geprüft."
+    },
+    "ai_attachments_use": {
+      "title": "KI-Anhänge verwenden",
+      "desc": "Erlaubt geprüfte Anhänge im KI-Chat; Dateityp-, Größen- und Pfadgrenzen bleiben aktiv."
+    },
+    "ai_memory_use": {
+      "title": "KI-Memory verwenden",
+      "desc": "Erlaubt das eigene, sichtbare und löschbare KI-Memory."
+    },
+    "ai_skills_use": {
+      "title": "KI-Skills verwenden",
+      "desc": "Erlaubt freigegebene, versionierte Skills aus der MSM-Aktions-Whitelist."
+    },
+    "ai_skills_manage": {
+      "title": "KI-Skills verwalten",
+      "desc": "Erlaubt das Erstellen und Verwalten von Skills, aber keine freien Skripte."
+    },
+    "ai_web_search_use": {
+      "title": "KI-Websuche verwenden",
+      "desc": "Erlaubt der KI, im Web nachzuschlagen. Sucht über den in den KI-Einstellungen hinterlegten Suchdienst; ohne Schlüssel steht das Werkzeug gar nicht zur Verfügung. Treffer werden gekürzt und als unvertrauenswürdige Daten behandelt."
+    },
+    "ai_autonomous_use": {
+      "title": "Autonomen KI-Modus verwenden",
+      "desc": "Erlaubt dem Benutzer, den autonomen Modus pro Server oder panelweit freizugeben. Ohne zusätzliche Freigabe bleibt jede Aktion bestätigungspflichtig; Berechtigungen gelten unverändert."
+    },
+    "ai_tasks_manage": {
+      "title": "Wiederkehrende KI-Aufgaben verwalten",
+      "desc": "Erlaubt es, der KI im Chat stehende Aufträge zu geben — etwa täglich um 8 Uhr eine Zusammenfassung per E-Mail. Ein fälliger Auftrag läuft ohne anwesenden Benutzer, aber mit dessen Berechtigungen und aus dessen Kontingent. Aufträge, die selbst etwas ändern, setzen zusätzlich den autonomen Modus voraus."
+    },
+    "ai_usage_read_all": {
+      "title": "Gesamte KI-Nutzung einsehen",
+      "desc": "Zeigt unter Einstellungen → KI, welcher Benutzer wieviele Tokens und Kosten verbraucht hat. Damit wird das Nutzungsverhalten fremder Benutzer sichtbar — deshalb ein eigenes Recht und nicht Teil der Einstellungsberechtigung. Den eigenen Verbrauch sieht jeder ohne dieses Recht."
+    },
+    "panel_oauth_read": {
+      "title": "OAuth-Anbieter anzeigen",
+      "desc": "Erlaubt das Einsehen der konfigurierten OAuth/Social-Login-Anbieter."
+    },
+    "panel_oauth_create": {
+      "title": "OAuth-Anbieter erstellen",
+      "desc": "Erlaubt das Hinzufügen neuer OAuth2-Identitätsprovider."
+    },
+    "panel_oauth_update": {
+      "title": "OAuth-Anbieter bearbeiten",
+      "desc": "Erlaubt das Ändern von Client-IDs und Endpunkten der Login-Provider."
+    },
+    "panel_oauth_delete": {
+      "title": "OAuth-Anbieter löschen",
+      "desc": "Erlaubt das Löschen von Social-Login-Anbietern."
+    },
+    "panel_oauth_secret_update": {
+      "title": "OAuth Client-Secret ändern",
+      "desc": "Erlaubt das Rotieren und Aktualisieren des OAuth Client-Secrets."
+    },
+    "panel_oauth_test": {
+      "title": "OAuth-Verbindung testen",
+      "desc": "Erlaubt das Testen der Authentifizierungsverbindung zum OAuth-Provider."
+    },
+    "panel_hoster_read": {
+      "title": "Hoster-Verträge einsehen",
+      "desc": "Erlaubt das Betrachten der Hoster-Integrationen, Produkte und gebuchten Services — ohne Zugriff auf API-Schlüssel."
+    },
+    "panel_hoster_write": {
+      "title": "Hoster-Anbindung verwalten",
+      "desc": "Erlaubt das Anlegen und Ändern von Hoster-Integrationen, Produktzuordnungen und deren API-Schlüsseln."
+    },
+    "server_view": {
+      "title": "Server anzeigen",
+      "desc": "Erlaubt das Betrachten des Servers in der Liste und das Öffnen der Detail-Seiten."
+    },
+    "server_start": {
+      "title": "Server starten",
+      "desc": "Erlaubt das Starten des Spieleservers."
+    },
+    "server_stop": {
+      "title": "Server stoppen",
+      "desc": "Erlaubt das Herunterfahren des Spieleservers."
+    },
+    "server_restart": {
+      "title": "Server neustarten",
+      "desc": "Erlaubt den Neustart des Spieleservers."
+    },
+    "server_kill": {
+      "title": "Server stoppen erzwingen",
+      "desc": "Erlaubt das sofortige Beenden (SIGKILL) des Containers bei Hängern."
+    },
+    "server_install": {
+      "title": "Server installieren",
+      "desc": "Erlaubt das (Neu-)Installieren des Servers über das Installationsskript."
+    },
+    "server_update": {
+      "title": "Outbound-Webhooks verwalten",
+      "desc": "Erlaubt das Anlegen und Ändern der Webhooks, die dieser Server an fremde Dienste sendet. Das Neuaufsetzen des Servers steckt in „Server installieren\"."
+    },
+    "server_config_write": {
+      "title": "Einstellungen anpassen",
+      "desc": "Erlaubt das Ändern von Servername, Auto-Restart und Startparametern."
+    },
+    "server_network_manage": {
+      "title": "Netzwerk bearbeiten",
+      "desc": "Erlaubt das Zuweisen von Ports und Ändern der Bind-IP."
+    },
+    "server_resources_manage": {
+      "title": "Ressourcen anpassen",
+      "desc": "Erlaubt das Festlegen von CPU-, RAM- und Festplatten-Limits."
+    },
+    "server_console_read": {
+      "title": "Konsole mitlesen",
+      "desc": "Erlaubt das Betrachten der Live-Konsole und Logs."
+    },
+    "server_console_write": {
+      "title": "Befehle senden",
+      "desc": "Erlaubt das Senden von Spielbefehlen an die Server-Konsole."
+    },
+    "server_console_exec": {
+      "title": "Exec ausführen",
+      "desc": "Erlaubt das Ausführen beliebiger Befehle im Server-Container."
+    },
+    "server_files_read": {
+      "title": "Dateien anzeigen",
+      "desc": "Erlaubt das Browsen und Herunterladen von Spieldateien."
+    },
+    "server_files_write": {
+      "title": "Dateien hochladen/ändern",
+      "desc": "Erlaubt das Erstellen, Editieren, Hochladen und Entpacken von Dateien."
+    },
+    "server_files_delete": {
+      "title": "Dateien löschen",
+      "desc": "Erlaubt das Löschen von Dateien aus dem Dateisystem des Servers."
+    },
+    "server_backups_read": {
+      "title": "Backups anzeigen",
+      "desc": "Erlaubt das Auflisten der Backups."
+    },
+    "server_backups_create": {
+      "title": "Backups erstellen",
+      "desc": "Erlaubt das Erstellen von Server-Sicherungen."
+    },
+    "server_backups_restore": {
+      "title": "Backups einspielen",
+      "desc": "Erlaubt das Wiederherstellen von Spieldateien aus einem Backup."
+    },
+    "server_backups_delete": {
+      "title": "Backups löschen",
+      "desc": "Erlaubt das dauerhafte Löschen von Server-Sicherungen."
+    },
+    "server_mods_read": {
+      "title": "Mods anzeigen",
+      "desc": "Erlaubt das Auflisten installierter Mods und das Durchsuchen des Steam Workshops."
+    },
+    "server_mods_write": {
+      "title": "Mods verwalten",
+      "desc": "Erlaubt das Abonnieren, Sortieren und Deinstallieren von Workshop-Mods."
+    },
+    "server_mods_toggle": {
+      "title": "Mods ein/ausschalten",
+      "desc": "Erlaubt das temporäre Aktivieren oder Deaktivieren installierter Mods."
+    },
+    "server_databases_read": {
+      "title": "PostgreSQL lesen",
+      "desc": "Erlaubt das Betrachten der PostgreSQL-Datenbanken des Servers."
+    },
+    "server_databases_write": {
+      "title": "PostgreSQL bearbeiten",
+      "desc": "Erlaubt das Ändern von Tabellen und Daten der Server-Datenbank."
+    },
+    "server_databases_admin": {
+      "title": "PostgreSQL verwalten",
+      "desc": "Erlaubt das Hinzufügen, Löschen und Konfigurieren von PostgreSQL-Datenbanken und Usern."
+    },
+    "server_credentials_manage": {
+      "title": "Zugangsdaten zuweisen",
+      "desc": "Erlaubt das Verknüpfen dieses Servers mit einem hinterlegten Steam- oder GitHub-Zugang. Der Klartext bleibt dabei verborgen; eigene Zugangsdaten anlegen darf jeder im eigenen Profil."
+    }
   },
   "serverPermissions": {
     "title": "Berechtigungen",
@@ -1317,6 +1547,7 @@
     "revoke": "Komplett entfernen",
     "revokeConfirm": "Alle Berechtigungen dieses Users für diesen Server entfernen?",
     "saved": "Berechtigungen gespeichert.",
+    "loadFailed": "Berechtigungen konnten nicht geladen werden für: {{users}}. Die Liste ist unvollständig.",
     "ownerHint": "Owner hat immer alle Rechte. Admin-Rolle hat alle Rechte pauschal.",
     "adminTitle": "Server-Berechtigungen verwalten",
     "adminSubtitle": "Delegiere Server-Rechte an einzelne Sub-User. Wähle zuerst den Server.",
@@ -1349,6 +1580,7 @@
     "statusDegraded": "Eingeschränkt",
     "statusError": "Fehler",
     "noServers": "Keine Server vorhanden",
+    "loadFailed": "Die Serverliste konnte nicht geladen werden.",
     "createFirstServer": "Erstelle deinen ersten Server, um loszulegen.",
     "createServer": "Server erstellen",
     "nodeCapacity": "Node-Kapazität",
@@ -1392,7 +1624,8 @@
     "oauth2faSubmit": "2FA bestätigen",
     "backupCode": "Backup-Code",
     "resendFailed": "Der Code konnte nicht erneut gesendet werden.",
-    "use2FAInstead": "Stattdessen einen 2FA-Code verwenden"
+    "use2FAInstead": "Stattdessen einen 2FA-Code verwenden",
+    "captchaLoadFailed": "Sicherheitsabfrage konnte nicht geladen werden — bitte Werbeblocker deaktivieren oder Seite neu laden."
   },
   "setup": {
     "welcome": "Willkommen beim MSM",
@@ -1619,7 +1852,11 @@
     "restoreVersion": "Wiederherstellen",
     "confirmRestoreVersion": "Diese Version wiederherstellen? Der aktuelle Inhalt wird zuvor als neue Version gesichert.",
     "versionRestored": "Dateiversion wiederhergestellt",
-    "restoreFailed": "Die Dateiversion konnte nicht wiederhergestellt werden."
+    "restoreFailed": "Die Dateiversion konnte nicht wiederhergestellt werden.",
+    "tree": {
+      "contentResults": "Treffer der Inhaltssuche",
+      "searchResults": "Suchergebnisse"
+    }
   },
   "backups": {
     "subtitle": "Backup-Verwaltung",
@@ -1632,6 +1869,7 @@
     "confirmDelete": "Backup wirklich löschen?",
     "deletedBackup": "Backup gelöscht",
     "noBackups": "Keine Backups vorhanden",
+    "loadFailed": "Die Backups konnten nicht geladen werden.",
     "createHint": "Erstelle dein erstes Backup.",
     "selectServer": "Wähle einen Server, um Backups zu verwalten.",
     "settingsSaved": "Einstellungen gespeichert",
@@ -2011,6 +2249,11 @@
       "linkErrorUnknown": "Verknüpfung fehlgeschlagen."
     },
     "confirmDeleteWordLabel": "Tippe delete zur Bestätigung (nicht kopierbar)"
+  },
+  "errorBoundary": {
+    "title": "Diese Ansicht konnte nicht geladen werden",
+    "hint": "Meist hilft ein Neuladen — etwa nach einer Panel-Aktualisierung. Bleibt es dabei, melde dich bei deinem Betreiber.",
+    "reload": "Neu laden"
   },
   "errors": {
     "RATE_LIMITED": "Zu viele Anfragen. Bitte warte einen Moment.",
@@ -2612,8 +2855,8 @@
           "context": "Übertragen werden die eingegebene Nachricht, begrenzte vorherige Nachrichten und ausschließlich freigegebene Servermetadaten; IP-Adressen, Installationspfade, vollständige Konfigurationen und erkannte Secrets werden nicht in den Modellkontext aufgenommen",
           "credentials": "Persönliche und zentrale Provider-API-Keys werden über DIS kontextgebunden verschlüsselt und nach dem Speichern nur als Konfigurationsstatus beziehungsweise Maske angezeigt",
           "usage": "Provider, Modell, Tokenreservierung, tatsächlicher oder konservativ geschätzter Verbrauch und Zeitpunkte werden zur Kontingentdurchsetzung gespeichert; Preiswerte werden ohne belastbare Preisquelle nicht behauptet",
-          "memory": "Optionale Memory-Eintraege werden verschluesselt und an ihren Bereich gebunden gespeichert, sind jederzeit einsehbar und loeschbar. Es gibt fuenf Bereiche: persoenliche und persoenliche serverbezogene Eintraege sieht niemand ausser dem Nutzer selbst; teambezogene sehen alle Mitglieder des jeweiligen Teams; das Wissen eines Servers sehen alle, die diesen Server sehen duerfen, und es bleibt bestehen, wenn der Verfasser das Panel verlaesst; panelweite Eintraege sieht jeder Nutzer des Panels",
-          "memoryConsent": "Das persoenliche Gedaechtnis ist standardmaessig ausgeschaltet und wird erst nach ausdruecklicher Zustimmung im Chat aktiv; die Zustimmung ist jederzeit widerrufbar und umfasst auch die eigenen serverbezogenen Notizen. Geteilte Bereiche (Team, Server, panelweit) haengen nicht an dieser Zustimmung, sondern an Berechtigungen - sie enthalten Betriebswissen und keine Angaben zur Person. Die Verschluesselung schuetzt die Datenbank im Ruhezustand; der Klartext gemerkter Eintraege wird bei jeder Anfrage an den gewaehlten Modellanbieter uebertragen",
+          "memory": "Optionale Memory-Einträge werden verschlüsselt und an ihren Bereich gebunden gespeichert, sind jederzeit einsehbar und löschbar. Es gibt fünf Bereiche: persönliche und persönliche serverbezogene Einträge sieht niemand außer dem Nutzer selbst; teambezogene sehen alle Mitglieder des jeweiligen Teams; das Wissen eines Servers sehen alle, die diesen Server sehen dürfen, und es bleibt bestehen, wenn der Verfasser das Panel verlässt; panelweite Einträge sieht jeder Nutzer des Panels",
+          "memoryConsent": "Das persönliche Gedächtnis ist standardmäßig ausgeschaltet und wird erst nach ausdrücklicher Zustimmung im Chat aktiv; die Zustimmung ist jederzeit widerrufbar und umfasst auch die eigenen serverbezogenen Notizen. Geteilte Bereiche (Team, Server, panelweit) hängen nicht an dieser Zustimmung, sondern an Berechtigungen - sie enthalten Betriebswissen und keine Angaben zur Person. Die Verschlüsselung schützt die Datenbank im Ruhezustand; der Klartext gemerkter Einträge wird bei jeder Anfrage an den gewählten Modellanbieter übertragen",
           "attachments": "Freigegebene Text-, Konfigurations-, Log- und Bildanhänge werden größen- und typgeprüft, verschlüsselt im Panel gespeichert und zusammen mit der Unterhaltung an den gewählten Modellanbieter übertragen",
           "autonomy": "Der autonome Modus ist optional und muss pro Server oder panelweit ausdrücklich freigegeben werden; freigegebene Aktionen laufen ohne weitere Rückfrage, werden aber unverändert gegen die Berechtigungen des Nutzers geprüft und vollständig im Audit-Log als automatisch ausgeführt festgehalten",
           "tools": "Beim Einsatz von Werkzeugen können begrenzte, redigierte Ausschnitte aus Serverlogs, Konfigurationsdateien, Mod- und Backup-Listen sowie Guardian-Vorfällen an den Modellanbieter übertragen werden; diese Ergebnisse werden für Rückfragen im selben Chat gespeichert und mit dem Chat gelöscht",
@@ -3305,7 +3548,7 @@
     "deleteConfirm": "Integration {{name}} wirklich entfernen?",
     "copied": "In die Zwischenablage kopiert",
     "secretOnce": "{{label}} wird nur jetzt angezeigt",
-    "secretOnceHint": "MSM speichert diesen Wert nicht im Klartext. Nach dem Schliessen ist er nicht mehr abrufbar — dann hilft nur eine Rotation.",
+    "secretOnceHint": "MSM speichert diesen Wert nicht im Klartext. Nach dem Schließen ist er nicht mehr abrufbar — dann hilft nur eine Rotation.",
     "secretUnderstood": "Verstanden",
     "states": {
       "active": "Aktiv",
@@ -3502,7 +3745,7 @@
       "purge": "Der Übergang terminating → terminated passiert nicht im API-Aufruf, sondern in einem Wartungslauf, der jede Minute prüft, ob terminate_after erreicht ist. Der Löschpfad ist derselbe wie im Panel.",
       "productChange": "Ein Tarifwechsel setzt status_code auf product_changed_manual_resize_required. Die Produktzuordnung ändert sich sofort, die Ressourcengrenzen eines laufenden Servers bleiben eine bewusste Operator-Aktion — sie erfordern einen Neustart.",
       "role": "Trägt die Produktzuordnung eine role_id, vergibt der Zielzustand active diese globale Rolle zusätzlich zu den bestehenden Rollen des Kunden; suspended und terminated entziehen sie wieder — aber nur, wenn kein anderer aktiver Vertrag desselben Kunden dieselbe Rolle noch fordert, und niemals, wenn es eine Systemrolle ist. Manuell vergebene Rollen bleiben unangetastet. Über globale Rollen laufen unter anderem die KI-Kontingente; genau dafür ist das Feld gedacht: ein größerer Tarif bringt mehr KI-Budget mit, ohne dass jemand von Hand Rollen pflegt.",
-      "roleRecord": "Massgeblich ist, was ein Vertrag tatsaechlich vergeben hat, nicht was gerade an seinem Produkt steht. Ein Tarifwechsel tauscht die Rolle deshalb, statt sie zu stapeln; aendert oder entfernt der Betreiber die Rolle eines Produkts, waehrend Vertraege darauf laufen, wird trotzdem die urspruenglich vergebene Rolle zurueckgenommen; und ein Vertrag, dessen Aktivierung fehlgeschlagen ist, traegt keine Rolle — auch dann nicht, wenn sein Zielzustand weiterhin active lautet. Loescht der Betreiber ein Produkt, behaelt der Kunde die vergebene Rolle bis zum Ende seines Vertrags."
+      "roleRecord": "Maßgeblich ist, was ein Vertrag tatsächlich vergeben hat, nicht was gerade an seinem Produkt steht. Ein Tarifwechsel tauscht die Rolle deshalb, statt sie zu stapeln; ändert oder entfernt der Betreiber die Rolle eines Produkts, während Verträge darauf laufen, wird trotzdem die ursprünglich vergebene Rolle zurückgenommen; und ein Vertrag, dessen Aktivierung fehlgeschlagen ist, trägt keine Rolle — auch dann nicht, wenn sein Zielzustand weiterhin active lautet. Löscht der Betreiber ein Produkt, behält der Kunde die vergebene Rolle bis zum Ende seines Vertrags."
     },
     "desired": {
       "active": "Vertrag läuft. Server wird bei Bedarf erstellt, Kundenrechte werden gesetzt.",
@@ -3618,7 +3861,7 @@
       "serviceIdType": "string 1–128, Pflicht",
       "serviceIdBody": "Vertrag, für den der Link gilt.",
       "targetType": "string ≤128, optional",
-      "targetBody": "Sprungziel im Panel. Erlaubt sind ausschliesslich /servers, /servers/{id} und /dashboard. Default ist /servers, alles andere ergibt 422.",
+      "targetBody": "Sprungziel im Panel. Erlaubt sind ausschließlich /servers, /servers/{id} und /dashboard. Default ist /servers, alles andere ergibt 422.",
       "commandLabel": "Handoff erzeugen",
       "createOnClick": "Der Link sollte deshalb beim Klick erzeugt werden, nicht beim Rendern der Shop-Seite.",
       "splitHosting": "Split-Hosting beachten: die zurückgegebene URL wird aus MSM_PANEL_URL gebaut, während /api/hoster/handoff/{token} eine Backend-Route ist. Wer Frontend und API auf getrennten Hosts betreibt, muss sicherstellen, dass MSM_PANEL_URL auf einen Host zeigt, der /api/* an das Backend weiterreicht — sonst führt der Link ins Leere.",
@@ -3673,7 +3916,7 @@
       "listServices": "Verträge dieser Integration",
       "listDeliveries": "Webhook-Zustellprotokoll (Statuscode, Versuch — nie Signatur oder Body)",
       "retryDelivery": "Fehlgeschlagene Zustellung erneut einplanen",
-      "productRole": "Der Produkt-Body von PUT /integrations/{integration_id}/products kennt zusaetzlich role_id: die globale Rolle, die der Kunde zusaetzlich zu seinen bestehenden Rollen erhaelt, solange ein Vertrag auf dieses Produkt laeuft. Leer bedeutet keine Zusatzrolle. Zwei Schranken gelten zusammen: der Aufrufer darf nur Rollen hinterlegen, deren Rechte er selbst haelt (sonst 403; die Systemrolle admin bleibt dem Owner vorbehalten), und der Dienstbenutzer der Integration muss sie ebenfalls halten (sonst 422). Eine Integration kann damit nie mehr vergeben, als beide zusammen decken.",
+      "productRole": "Der Produkt-Body von PUT /integrations/{integration_id}/products kennt zusätzlich role_id: die globale Rolle, die der Kunde zusätzlich zu seinen bestehenden Rollen erhält, solange ein Vertrag auf dieses Produkt läuft. Leer bedeutet keine Zusatzrolle. Zwei Schranken gelten zusammen: der Aufrufer darf nur Rollen hinterlegen, deren Rechte er selbst haelt (sonst 403; die Systemrolle admin bleibt dem Owner vorbehalten), und der Dienstbenutzer der Integration muss sie ebenfalls halten (sonst 422). Eine Integration kann damit nie mehr vergeben, als beide zusammen decken.",
       "openapi": "Das vollständige OpenAPI-Schema ist unter /api/docs verfügbar und erfordert eine Anmeldung mit der Berechtigung panel.settings.read."
     },
     "operations": {

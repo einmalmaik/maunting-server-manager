@@ -81,7 +81,11 @@ export function OutgoingWebhooksPanel({ serverId }: { serverId: number }) {
 
   useEffect(() => {
     void refresh();
-    const h = setInterval(refresh, 5000);
+    const h = setInterval(() => {
+      // Im Hintergrundtab schaut niemand hin: kein Takt, keine Anfragen.
+      if (document.visibilityState !== 'visible') return;
+      void refresh();
+    }, 5000);
     return () => clearInterval(h);
   }, [refresh]);
 

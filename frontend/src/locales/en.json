@@ -1039,6 +1039,7 @@
     "overcommitDiskWarning": "This node currently has {{available}} disk space available (out of {{total}}). Allocating {{requested}} disk space exceeds physical capacity. If servers require more storage than available, they may fail to start. Do you still want to assign these resources?",
     "overcommitConfirm": "Assign anyway",
     "noServers": "No servers yet",
+    "loadFailed": "The server list could not be loaded.",
     "createHint": "Create your first server to get started.",
     "name": "Name",
     "game": "Game",
@@ -1272,41 +1273,270 @@
       "user": "User"
     }
   },
-  "permissions": {
-    "users.read": "View user list",
-    "users.manage": "Create, edit, delete users",
-    "users.permissions.manage": "Manage user roles and server permissions",
-    "roles.manage": "Create, edit, delete roles",
-    "panel.settings.read": "Read panel settings",
-    "panel.settings.write": "Change panel settings (Steam, email, ...)",
-    "servers.create": "Create a new server",
-    "servers.delete": "Delete servers (global, not delegable)",
-    "system.view": "View system resources, interfaces, version",
-    "nodes.read": "View nodes list",
-    "nodes.manage": "Create, edit, delete nodes",
-    "server.view": "View server in list and detail",
-    "server.start": "Start server",
-    "server.stop": "Stop server",
-    "server.restart": "Restart server",
-    "server.install": "Install or reinstall server",
-    "server.config.write": "Edit server settings (name, auto-restart, backup schedule)",
-    "server.network.manage": "Change ports and bind IP",
-    "server.resources.manage": "Change CPU/RAM/disk limits",
-    "server.console.read": "Read console and logs",
-    "server.console.write": "Send commands to console",
-    "server.files.read": "Read and download files",
-    "server.files.write": "Upload, create, edit, extract files",
-    "server.files.delete": "Delete files",
-    "server.backups.read": "List backups",
-    "server.backups.create": "Create backup",
-    "server.backups.restore": "Restore backup",
-    "server.backups.delete": "Delete backup",
-    "server.mods.read": "List mods, search workshop",
-    "server.mods.write": "Subscribe, remove, reorder mods",
-    "server.mods.toggle": "Enable or disable mods",
-    "server.databases.read": "Read PostgreSQL databases",
-    "server.databases.write": "Edit PostgreSQL tables and data",
-    "server.databases.admin": "Manage PostgreSQL databases and users"
+  "permissionEditor": {
+    "searchPlaceholder": "Search permission...",
+    "selectAll": "Select all",
+    "deselectAll": "Clear selection",
+    "empty": "No permissions found",
+    "hoverHint": "Hover over a permission to see its description.",
+    "groups": {
+      "users": "Users & roles",
+      "panel": "Panel settings",
+      "ai": "AI permissions",
+      "infrastructure": "Infrastructure & system",
+      "server_basic": "Server basics",
+      "server_config": "Server configuration & resources",
+      "server_console": "Server console",
+      "server_files": "Files & backups",
+      "server_features": "Server extensions (mods & databases)",
+      "other": "Other permissions"
+    }
+  },
+  "permissionDetails": {
+    "users_read": {
+      "title": "View user list",
+      "desc": "Allows listing and viewing all registered users in the system."
+    },
+    "users_manage": {
+      "title": "Manage users",
+      "desc": "Allows creating, editing and deleting users in the panel."
+    },
+    "users_permissions_manage": {
+      "title": "Assign permissions",
+      "desc": "Allows assigning roles to users and delegating server permissions."
+    },
+    "roles_manage": {
+      "title": "Manage roles",
+      "desc": "Allows creating, editing and deleting permission roles."
+    },
+    "panel_settings_read": {
+      "title": "Read settings",
+      "desc": "Allows viewing the general panel configuration."
+    },
+    "panel_settings_write": {
+      "title": "Edit settings",
+      "desc": "Allows changing global panel settings (e.g. SMTP, Steam, backups)."
+    },
+    "panel_database_read": {
+      "title": "Read panel database",
+      "desc": "Allows viewing system database tables (for diagnostics only)."
+    },
+    "panel_database_admin": {
+      "title": "Administer panel database",
+      "desc": "Allows administrative tasks and direct changes to the panel database."
+    },
+    "servers_create": {
+      "title": "Create servers",
+      "desc": "Allows creating new game servers on available nodes."
+    },
+    "servers_delete": {
+      "title": "Delete servers",
+      "desc": "Allows permanently deleting game servers from the system (global, destructive)."
+    },
+    "blueprints_manage": {
+      "title": "Manage blueprints",
+      "desc": "Allows creating, editing and deleting blueprints — the templates servers are built from. This is how a different game version is made available, for example. Bundled blueprints stay unchangeable; you derive your own from them."
+    },
+    "system_view": {
+      "title": "View system status",
+      "desc": "Allows viewing the system load, log files and network interfaces of the host system."
+    },
+    "system_audit_read": {
+      "title": "Read audit log",
+      "desc": "Allows viewing the admin audit log with all privileged actions. Secrets and complete log files are deliberately not part of it."
+    },
+    "system_secrets_rotate": {
+      "title": "Rotate cluster secrets",
+      "desc": "Allows renewing the managed Postgres admin credentials. Highly privileged: affects all managed databases at once."
+    },
+    "nodes_read": {
+      "title": "View nodes",
+      "desc": "Allows listing the nodes (infrastructure servers) and their system load."
+    },
+    "nodes_manage": {
+      "title": "Manage nodes",
+      "desc": "Allows adding, editing, deleting and enrolling nodes."
+    },
+    "teams_create": {
+      "title": "Found teams",
+      "desc": "Allows founding your own teams to share AI knowledge and server permissions with colleagues. A team can never pass on more permissions than its founder holds."
+    },
+    "ai_chat_use": {
+      "title": "Use AI chat",
+      "desc": "Allows the AI chat. Role limits and tool permissions are checked in the backend on top of this."
+    },
+    "ai_attachments_use": {
+      "title": "Use AI attachments",
+      "desc": "Allows checked attachments in the AI chat; file type, size and path limits stay in force."
+    },
+    "ai_memory_use": {
+      "title": "Use AI memory",
+      "desc": "Allows your own AI memory, which stays visible and deletable."
+    },
+    "ai_skills_use": {
+      "title": "Use AI skills",
+      "desc": "Allows approved, versioned skills from the MSM action whitelist."
+    },
+    "ai_skills_manage": {
+      "title": "Manage AI skills",
+      "desc": "Allows creating and managing skills, but no free-form scripts."
+    },
+    "ai_web_search_use": {
+      "title": "Use AI web search",
+      "desc": "Allows the AI to look things up on the web. It searches through the search service configured in the AI settings; without a key the tool is not offered at all. Results are truncated and treated as untrusted data."
+    },
+    "ai_autonomous_use": {
+      "title": "Use autonomous AI mode",
+      "desc": "Allows the user to enable autonomous mode per server or panel-wide. Without that extra approval every action still needs confirmation; permissions apply unchanged."
+    },
+    "ai_tasks_manage": {
+      "title": "Manage recurring AI tasks",
+      "desc": "Allows giving the AI standing orders in the chat — a daily summary by email at 8 a.m., for example. A due order runs without the user present, but with that user's permissions and from that user's quota. Orders that change something also require autonomous mode."
+    },
+    "ai_usage_read_all": {
+      "title": "View overall AI usage",
+      "desc": "Shows under Settings → AI which user spent how many tokens and how much money. This makes other users' behaviour visible — which is why it is a permission of its own and not part of the settings permission. Everyone sees their own usage without it."
+    },
+    "panel_oauth_read": {
+      "title": "View OAuth providers",
+      "desc": "Allows viewing the configured OAuth/social login providers."
+    },
+    "panel_oauth_create": {
+      "title": "Create OAuth providers",
+      "desc": "Allows adding new OAuth2 identity providers."
+    },
+    "panel_oauth_update": {
+      "title": "Edit OAuth providers",
+      "desc": "Allows changing client IDs and endpoints of the login providers."
+    },
+    "panel_oauth_delete": {
+      "title": "Delete OAuth providers",
+      "desc": "Allows deleting social login providers."
+    },
+    "panel_oauth_secret_update": {
+      "title": "Change OAuth client secret",
+      "desc": "Allows rotating and updating the OAuth client secret."
+    },
+    "panel_oauth_test": {
+      "title": "Test OAuth connection",
+      "desc": "Allows testing the authentication connection to the OAuth provider."
+    },
+    "panel_hoster_read": {
+      "title": "View hoster contracts",
+      "desc": "Allows viewing hoster integrations, products and booked services — without access to API keys."
+    },
+    "panel_hoster_write": {
+      "title": "Manage hoster integration",
+      "desc": "Allows creating and changing hoster integrations, product assignments and their API keys."
+    },
+    "server_view": {
+      "title": "View server",
+      "desc": "Allows seeing the server in the list and opening its detail pages."
+    },
+    "server_start": {
+      "title": "Start server",
+      "desc": "Allows starting the game server."
+    },
+    "server_stop": {
+      "title": "Stop server",
+      "desc": "Allows shutting down the game server."
+    },
+    "server_restart": {
+      "title": "Restart server",
+      "desc": "Allows restarting the game server."
+    },
+    "server_kill": {
+      "title": "Force server stop",
+      "desc": "Allows terminating the container immediately (SIGKILL) when it hangs."
+    },
+    "server_install": {
+      "title": "Install server",
+      "desc": "Allows (re-)installing the server via the installation script."
+    },
+    "server_update": {
+      "title": "Manage outbound webhooks",
+      "desc": "Allows creating and changing the webhooks this server sends to third-party services. Rebuilding the server sits in \"Install server\"."
+    },
+    "server_config_write": {
+      "title": "Adjust settings",
+      "desc": "Allows changing the server name, auto-restart and startup parameters."
+    },
+    "server_network_manage": {
+      "title": "Edit network",
+      "desc": "Allows assigning ports and changing the bind IP."
+    },
+    "server_resources_manage": {
+      "title": "Adjust resources",
+      "desc": "Allows setting CPU, RAM and disk limits."
+    },
+    "server_console_read": {
+      "title": "Read console",
+      "desc": "Allows viewing the live console and logs."
+    },
+    "server_console_write": {
+      "title": "Send commands",
+      "desc": "Allows sending game commands to the server console."
+    },
+    "server_console_exec": {
+      "title": "Run exec",
+      "desc": "Allows running arbitrary commands inside the server container."
+    },
+    "server_files_read": {
+      "title": "View files",
+      "desc": "Allows browsing and downloading game files."
+    },
+    "server_files_write": {
+      "title": "Upload/change files",
+      "desc": "Allows creating, editing, uploading and extracting files."
+    },
+    "server_files_delete": {
+      "title": "Delete files",
+      "desc": "Allows deleting files from the server's file system."
+    },
+    "server_backups_read": {
+      "title": "View backups",
+      "desc": "Allows listing the backups."
+    },
+    "server_backups_create": {
+      "title": "Create backups",
+      "desc": "Allows creating server backups."
+    },
+    "server_backups_restore": {
+      "title": "Restore backups",
+      "desc": "Allows restoring game files from a backup."
+    },
+    "server_backups_delete": {
+      "title": "Delete backups",
+      "desc": "Allows permanently deleting server backups."
+    },
+    "server_mods_read": {
+      "title": "View mods",
+      "desc": "Allows listing installed mods and searching the Steam Workshop."
+    },
+    "server_mods_write": {
+      "title": "Manage mods",
+      "desc": "Allows subscribing to, reordering and uninstalling workshop mods."
+    },
+    "server_mods_toggle": {
+      "title": "Enable/disable mods",
+      "desc": "Allows temporarily enabling or disabling installed mods."
+    },
+    "server_databases_read": {
+      "title": "Read PostgreSQL",
+      "desc": "Allows viewing the server's PostgreSQL databases."
+    },
+    "server_databases_write": {
+      "title": "Edit PostgreSQL",
+      "desc": "Allows changing tables and data of the server database."
+    },
+    "server_databases_admin": {
+      "title": "Administer PostgreSQL",
+      "desc": "Allows adding, deleting and configuring PostgreSQL databases and users."
+    },
+    "server_credentials_manage": {
+      "title": "Assign credentials",
+      "desc": "Allows linking this server to a stored Steam or GitHub account. The plaintext stays hidden; anyone may create their own credentials in their profile."
+    }
   },
   "serverPermissions": {
     "title": "Permissions",
@@ -1317,6 +1547,7 @@
     "revoke": "Remove completely",
     "revokeConfirm": "Remove all permissions for this user on this server?",
     "saved": "Permissions saved.",
+    "loadFailed": "Could not load permissions for: {{users}}. The list is incomplete.",
     "ownerHint": "Owner always has all permissions. Admin role has all permissions blanket.",
     "adminTitle": "Manage server permissions",
     "adminSubtitle": "Delegate server permissions to individual sub-users. Pick a server first.",
@@ -1349,6 +1580,7 @@
     "statusDegraded": "Degraded",
     "statusError": "Error",
     "noServers": "No servers yet",
+    "loadFailed": "The server list could not be loaded.",
     "createFirstServer": "Create your first server to get started.",
     "createServer": "Create Server",
     "nodeCapacity": "Node capacity",
@@ -1392,7 +1624,8 @@
     "oauth2faSubmit": "Confirm 2FA",
     "backupCode": "Backup code",
     "resendFailed": "The code could not be resent.",
-    "use2FAInstead": "Use a 2FA code instead"
+    "use2FAInstead": "Use a 2FA code instead",
+    "captchaLoadFailed": "The security check could not be loaded — please disable your ad blocker or reload the page."
   },
   "setup": {
     "welcome": "Welcome to MSM",
@@ -1631,7 +1864,11 @@
     "restoreVersion": "Restore",
     "confirmRestoreVersion": "Restore this version? The current content will be saved as a new version first.",
     "versionRestored": "File version restored",
-    "restoreFailed": "The file version could not be restored."
+    "restoreFailed": "The file version could not be restored.",
+    "tree": {
+      "contentResults": "Content search results",
+      "searchResults": "Search results"
+    }
   },
   "backups": {
     "subtitle": "Backup Management",
@@ -1644,6 +1881,7 @@
     "confirmDelete": "Really delete this backup?",
     "deletedBackup": "Backup deleted",
     "noBackups": "No backups yet",
+    "loadFailed": "The backups could not be loaded.",
     "createHint": "Create your first backup.",
     "selectServer": "Select a server to manage backups.",
     "settingsSaved": "Settings saved",
@@ -2011,6 +2249,11 @@
       "linkErrorUnknown": "Link failed."
     },
     "confirmDeleteWordLabel": "Type delete to confirm (paste disabled)"
+  },
+  "errorBoundary": {
+    "title": "This view could not be loaded",
+    "hint": "A reload usually helps — for example after a panel update. If it persists, contact your operator.",
+    "reload": "Reload"
   },
   "errors": {
     "RATE_LIMITED": "Too many requests. Please wait a moment.",

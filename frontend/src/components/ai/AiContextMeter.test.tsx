@@ -10,7 +10,6 @@ const BASIS: AiContextStatus = {
   window_tokens: 128_000,
   usable_tokens: 100_000,
   used_tokens: 25_000,
-  compaction_at_tokens: 75_000,
   compaction_percent: 75,
   summarized: false,
 }
@@ -57,6 +56,17 @@ describe('AiContextMeter', () => {
     const beschriftung = screen.getByRole('img').getAttribute('aria-label') ?? ''
     expect(beschriftung).not.toMatch(/%/)
     expect(beschriftung).toMatch(/nicht bekannt/)
+  })
+
+  it('färbt den Ring nach der eingestellten Marke, nicht nach einer Tokenzahl', () => {
+    // Die Marke ist ein Prozentsatz und hängt deshalb nicht am Fenster: bei
+    // 75 % Faltmarke warnt der Ring ab 75 % Belegung, egal wie groß das
+    // Fenster ist.
+    const ruhig = render(<AiContextMeter status={{ ...BASIS, usable_tokens: 200_000, used_tokens: 100_000 }} />)
+    expect(ruhig.container.querySelector('[role="img"]')?.className).toContain('text-on-surface-variant')
+
+    const gewarnt = render(<AiContextMeter status={{ ...BASIS, usable_tokens: 200_000, used_tokens: 160_000 }} />)
+    expect(gewarnt.container.querySelector('[role="img"]')?.className).toContain('text-status-warning')
   })
 
   it('kappt die Anzeige bei voller Belegung statt über hundert zu laufen', () => {

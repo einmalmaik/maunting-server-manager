@@ -136,6 +136,7 @@ def test_guardian_sync_detects_crash_and_closes_ports(db: Session) -> None:
 
 def test_reconcile_firewall_rules_cleans_stray_rules(db: Session) -> None:
     server = Server(name="Stray Port Server", game_type="seven_days_to_die", status="stopped", install_dir="/tmp/srv4")
+    server.set_port("game", 26900, "udp")
     db.add(server)
     db.commit()
     db.refresh(server)
@@ -154,6 +155,65 @@ def test_reconcile_firewall_rules_cleans_stray_rules(db: Session) -> None:
 
     assert audit is not None
     assert "Audit-Reconciliation" in audit.details
+
+
+def test_reconcile_firewall_rules_schweigt_ohne_ports(db: Session) -> None:
+    """Ein Server ohne Ports erzeugt weder einen UFW-Aufruf noch eine Audit-Zeile.
+
+    Der Abgleich läuft alle 30 Sekunden. Schreibt er für jeden gestoppten
+    Server eine Zeile, besteht das Audit-Log nach einem Tag fast nur noch aus
+    diesem Rauschen — und die echten privilegierten Aktionen sind darin nicht
+    mehr zu finden.
+    """
+    server = Server(
+        name="Portloser Server", game_type="seven_days_to_die",
+        status="stopped", install_dir="/tmp/srv-portlos",
+    )
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+
+    with patch("services.firewall_service._ufw_available", return_value=True) as mock_available, \
+         patch("services.firewall_service._run_ufw") as mock_ufw:
+        mock_ufw.return_value = MagicMock(returncode=0, stdout="Rule deleted\n", stderr="")
+        firewall_service.reconcile_firewall_rules(db)
+
+    assert mock_available.call_count == 0
+    assert mock_ufw.call_count == 0
+    assert db.query(AuditLog).filter(
+        AuditLog.action == "server.firewall_closed",
+        AuditLog.target_id == server.id,
+    ).count() == 0
+
+
+def test_reconcile_firewall_rules_schweigt_wenn_regel_schon_weg_ist(db: Session) -> None:
+    """Findet UFW nichts zu löschen, entsteht keine Audit-Zeile.
+
+    UFW meldet für eine nicht existierende Regel Exit 0 mit "Could not
+    delete". Früher galt das als Erfolg, und jeder Durchlauf protokollierte
+    eine Schließung, die es nie gab.
+    """
+    server = Server(
+        name="Schon Zu Server", game_type="seven_days_to_die",
+        status="stopped", install_dir="/tmp/srv-schon-zu",
+    )
+    server.set_port("game", 26902, "udp")
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+
+    with patch("services.firewall_service._ufw_available", return_value=True), \
+         patch("services.firewall_service._run_ufw") as mock_ufw:
+        mock_ufw.return_value = MagicMock(
+            returncode=0, stdout="Could not delete non-existent rule\n", stderr="",
+        )
+        firewall_service.reconcile_firewall_rules(db)
+
+    assert mock_ufw.call_count >= 1
+    assert db.query(AuditLog).filter(
+        AuditLog.action == "server.firewall_closed",
+        AuditLog.target_id == server.id,
+    ).count() == 0
 
 
 def test_reconcile_firewall_rules_keeps_starting_and_restarting_open(db: Session) -> None:
@@ -188,6 +248,10 @@ def test_reconcile_firewall_rules_keeps_starting_and_restarting_open(db: Session
         status="stopped",
         install_dir="/tmp/srv-stopped",
     )
+    # Alle vier bekommen einen Port, damit allein der Status entscheidet, wer
+    # geschlossen wird — und nicht nebenbei die Portlosigkeit.
+    for index, srv in enumerate((starting, restarting, running, stopped)):
+        srv.set_port("game", 26910 + index, "udp")
     db.add_all([starting, restarting, running, stopped])
     db.commit()
     for s in (starting, restarting, running, stopped):
@@ -225,6 +289,8 @@ def test_reconcile_firewall_rules_still_closes_stopping_and_queued(db: Session) 
         name="Queued Close Ok", game_type="seven_days_to_die",
         status="queued", install_dir="/tmp/srv-queued",
     )
+    stopping.set_port("game", 26920, "udp")
+    queued.set_port("game", 26921, "udp")
     db.add_all([stopping, queued])
     db.commit()
     db.refresh(stopping)

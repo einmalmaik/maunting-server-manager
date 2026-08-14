@@ -88,6 +88,14 @@ describe('editor file details', () => {
     expect(fileName('config/server.ini')).toBe('server.ini')
   })
 
+  it('erkennt Einzug auch bei CRLF und meldet fehlenden Einzug', () => {
+    expect(detectIndentation('root\r\n  child\r\n')).toBe('Leerzeichen: 2')
+    expect(detectIndentation('root\r\n\tchild\r\n')).toBe('Tabs')
+    expect(detectIndentation('a\nb\nc')).toBe('Einzug: –')
+    // Eine Leerzeile aus Leerzeichen ist kein Einzug — erst Zeichen dahinter zaehlen.
+    expect(detectIndentation('a\n   \nb')).toBe('Einzug: –')
+  })
+
   it('keeps newer keystrokes dirty after an older save response', () => {
     expect(reconcileSavedContent('submitted', 'submitted')).toEqual({
       savedContent: 'submitted',

@@ -4,6 +4,7 @@ import { ServerPermissionsPanel } from './ServerPermissionsPanel'
 import { api } from '@/api/client'
 import { rbacApi } from '@/api/rbac'
 import { confirm } from '@/stores/confirmStore'
+import { toast } from '@/stores/toastStore'
 import i18n from '@/i18n'
 import type { User } from '@/types'
 
@@ -106,5 +107,27 @@ describe('ServerPermissionsPanel delegation wiring', () => {
       })
       expect(rbacApi.revokeServerPermissions).toHaveBeenCalledWith(delegated.id, 41)
     })
+  })
+
+  /**
+   * Vorher verschluckte ein `catch { return null }` jeden Fehlschlag, und der
+   * Filter danach warf die Zeile weg: eine tatsächlich vergebene Delegation
+   * verschwand lautlos aus dem Admin-Bild. Ein Rechte-Überblick, der bei einem
+   * Fehler weniger zeigt als es gibt, ist schlimmer als gar keiner.
+   */
+  it('meldet einen Benutzer, dessen Rechte nicht geladen werden konnten', async () => {
+    const fehler = vi.spyOn(toast, 'error').mockImplementation(() => undefined)
+    vi.mocked(rbacApi.getServerPermissions).mockImplementation(async (userId, serverId) => {
+      if (userId === delegated.id) throw new Error('429')
+      return { server_id: serverId, permissions: [] }
+    })
+
+    render(<ServerPermissionsPanel serverId={41} />)
+
+    await waitFor(() => {
+      expect(fehler).toHaveBeenCalledWith(expect.stringContaining('delegated-user'))
+    })
+    expect(screen.queryByText('delegated-user')).not.toBeInTheDocument()
+    fehler.mockRestore()
   })
 })

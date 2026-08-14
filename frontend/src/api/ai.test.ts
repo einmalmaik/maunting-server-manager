@@ -42,6 +42,26 @@ describe('streamAiMessage', () => {
     }, () => undefined)).rejects.toThrow('AI_STREAM_INVALID')
   })
 
+  it('skips unknown event names instead of tearing the answer down', async () => {
+    // Ein Bündel, das ein Panelupdate überlebt hat, kennt ein neu
+    // eingeführtes Ereignis noch nicht. Es zu übergehen kostet nichts; ein
+    // Wurf riss die halb geschriebene Antwort ab und markierte sie als
+    // fehlgeschlagen, während der Lauf serverseitig weiterlief.
+    vi.spyOn(global, 'fetch').mockResolvedValue(new Response(
+      'event: delta\ndata: {"content":"Hallo"}\n\n'
+      + 'event: neues_ereignis\ndata: {"irgendwas":1}\n\n'
+      + 'event: done\ndata: {"message_id":"m1"}\n\n',
+      { status: 200 },
+    ))
+    const events: string[] = []
+
+    await streamAiMessage({
+      content: 'Hi', provider_id: 1, request_id: 'request', reasoning: false,
+    }, (event) => events.push(event.event))
+
+    expect(events).toEqual(['delta', 'done'])
+  })
+
   it('accepts a minimized action proposal event', async () => {
     vi.spyOn(global, 'fetch').mockResolvedValue(new Response(
       'event: proposal\ndata: {"id":"p1","conversation_id":"c1","server_id":2,"tool_name":"propose_backup","preview":{"operation":"backup"},"expected_revision":null,"requires_confirmation":true,"status":"proposed","task_id":null,"error_code":null,"created_at":"2026-08-01T12:00:00Z"}\n\n',

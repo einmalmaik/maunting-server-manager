@@ -24,8 +24,10 @@ from sqlalchemy.orm import Session
 from models import (
     AiConversation,
     AiToolResult,
+    HosterIdentity,
     HosterIntegration,
     HosterProduct,
+    HosterService,
     Role,
     RolePermission,
     User,
@@ -210,6 +212,187 @@ def test_the_setup_shows_what_cannot_be_guessed(
     assert eintrag["service_user"] == dienstbenutzer.username
     assert "GAME-MC-PRO" in [p["external_product_key"] for p in eintrag["products"]]
     assert ergebnis["used_slugs"] == ["testshop"]
+
+
+def _vertrag(
+    db: Session,
+    integration: HosterIntegration,
+    kunde: User,
+    nummer: str,
+    *,
+    desired_state: str,
+    status: str,
+) -> None:
+    """Ein gebuchter Vertrag in einem bestimmten Zustand."""
+    identitaet = HosterIdentity(
+        integration_id=integration.id,
+        external_subject_hash=f"hash-{nummer}",
+        user_id=kunde.id,
+    )
+    db.add(identitaet)
+    db.flush()
+    db.add(HosterService(
+        integration_id=integration.id,
+        external_service_id=nummer,
+        identity_id=identitaet.id,
+        desired_state=desired_state,
+        status=status,
+        correlation_id=str(uuid4()),
+    ))
+    db.commit()
+
+
+def test_the_contract_counts_are_per_integration_and_count_only_the_running_ones(
+    db: Session, owner_user: User, integration, dienstbenutzer: User
+) -> None:
+    """Die beiden Zahlen entstehen jetzt in SQL statt in Python.
+
+    Zwei Dinge koennen dabei still kippen: die Zaehlung faellt auf die falsche
+    Integration (die Gruppierung fehlt), oder der Filter trifft eine andere
+    Menge als die fruehere Python-Bedingung. Deshalb steht hier eine zweite
+    Anlage daneben, und die Vertraege decken jeden Zustand ab, den die
+    Pruefbedingung der Tabelle zulaesst — `active` zaehlt nur zusammen mit
+    `provisioning` oder `ready`, sonst nie.
+    """
+    erste, _ = integration
+    zweite, _ = hoster_integration_service.create_integration(
+        db,
+        name="Zweitshop",
+        slug="zweitshop",
+        enabled=True,
+        service_user_id=dienstbenutzer.id,
+        webhook_url=None,
+        terminate_grace_days=7,
+    )
+    db.commit()
+
+    # Erste Anlage: alle sieben Status bei `desired_state == "active"`.
+    # Nur `provisioning` und `ready` duerfen als aktiv zaehlen.
+    for i, status in enumerate((
+        "pending", "provisioning", "ready", "suspended",
+        "failed", "terminating", "terminated",
+    )):
+        _vertrag(db, erste, owner_user, f"a{i}", desired_state="active", status=status)
+    # Derselbe laufende Status, aber der Shop will ihn nicht mehr: zaehlt nicht.
+    _vertrag(db, erste, owner_user, "a7", desired_state="suspended", status="ready")
+    _vertrag(db, erste, owner_user, "a8", desired_state="terminated", status="ready")
+    # Zweite Anlage: genau ein laufender Vertrag.
+    _vertrag(db, zweite, owner_user, "b0", desired_state="active", status="ready")
+
+    ergebnis = _werkzeug(db, owner_user, "read_hoster_setup")
+    nach_id = {e["integration_id"]: e for e in ergebnis["integrations"]}
+
+    assert nach_id[erste.id]["contract_count"] == 9
+    assert nach_id[erste.id]["active_contract_count"] == 2
+    assert nach_id[zweite.id]["contract_count"] == 1
+    assert nach_id[zweite.id]["active_contract_count"] == 1
+
+
+def test_an_integration_without_contracts_counts_zero(
+    db: Session, owner_user: User, integration
+) -> None:
+    """Ohne Vertragszeile liefert die Gruppierung keinen Schluessel.
+
+    Ein `KeyError` oder ein fehlendes Feld waere hier kein Absturz, sondern
+    schlimmer: das Modell schloesse aus der Abwesenheit auf etwas anderes als
+    auf null.
+    """
+    row, _ = integration
+    eintrag = next(
+        e for e in _werkzeug(db, owner_user, "read_hoster_setup")["integrations"]
+        if e["integration_id"] == row.id
+    )
+    assert eintrag["contract_count"] == 0
+    assert eintrag["active_contract_count"] == 0
+
+
+def test_the_service_user_list_matches_the_single_lookup(
+    db: Session, owner_user: User, integration, dienstbenutzer: User
+) -> None:
+    """Die Mengenabfrage muss dieselben Benutzer finden wie die Einzelfrage.
+
+    Besonders der Altpfad: ein vom Admin angelegtes Konto traegt seine Rolle
+    unter Umstaenden nur in `users.role_id` und hat gar keine Zeile in
+    `user_roles`. Wer nur `user_roles` joint, verliert genau diese Konten aus
+    der Dienstbenutzerliste — der Betreiber saehe den Benutzer nicht, den er
+    gerade angelegt hat.
+    """
+    from services import permission_service
+    from services.ai_hoster_tools import _dienstbenutzer
+
+    altkonto = AuthService.create_user(db, "altkonto", "alt@test.de", "ShopPass123!")
+    rolle = Role(name="rolle-alt", is_system=False)
+    db.add(rolle)
+    db.flush()
+    db.add(RolePermission(role_id=rolle.id, permission_key="servers.create"))
+    db.commit()
+    # Bewusst ohne `set_user_roles`: genau das tut routers/admin.py beim
+    # Anlegen eines Benutzers durch den Admin.
+    altkonto.role_id = rolle.id
+    db.commit()
+    _mit_rechten(db, "ohne-recht", ("panel.hoster.read",))
+
+    kandidaten = (
+        db.query(User)
+        .filter(User.is_active.is_(True), User.is_owner.is_(False))
+        .order_by(User.id)
+        .all()
+    )
+    alt = {
+        u.id for u in kandidaten
+        if permission_service.has_global_permission(db, u, "servers.create")
+    }
+    neu = {e["user_id"] for e in _dienstbenutzer(db)}
+
+    assert neu == alt
+    assert {dienstbenutzer.id, altkonto.id} <= neu
+
+
+def test_reading_the_setup_does_not_ask_once_per_user(
+    db: Session, owner_user: User, integration
+) -> None:
+    """Die Abfragezahl darf nicht mit der Benutzerzahl wachsen.
+
+    Gemessen waren es 1 + 2n Abfragen allein fuer die Dienstbenutzerliste, also
+    401 an ihrer Obergrenze von 200. Die Grenze hier ist grosszuegig gesetzt und
+    schreibt keine Zaehlung fest; sie faengt den einen Fehler ab, der
+    zurueckfallen kann — eine Rechtefrage je Benutzer.
+
+    Alle zwanzig Kunden teilen sich **eine** Rolle. Nur so misst der Zaehler die
+    Benutzerzahl: die Rollenliste kostet ihrerseits Abfragen je Rolle, das ist
+    ein anderer Pfad und durch `MAX_ROLLEN` gedeckelt.
+    """
+    from sqlalchemy import event
+
+    import database as db_module
+
+    tarif = Role(name="tarif-viele", is_system=False)
+    db.add(tarif)
+    db.flush()
+    db.add(RolePermission(role_id=tarif.id, permission_key="servers.create"))
+    db.commit()
+    for i in range(20):
+        kunde = AuthService.create_user(
+            db, f"kunde{i:02d}", f"kunde{i:02d}@test.de", "ShopPass123!"
+        )
+        set_user_roles(db, kunde, [tarif.id])
+    db.commit()
+
+    gesehen: list[str] = []
+
+    def _hook(conn, cursor, statement, parameters, context, executemany) -> None:
+        gesehen.append(statement)
+
+    event.listen(db_module.engine, "before_cursor_execute", _hook)
+    try:
+        ergebnis = _werkzeug(db, owner_user, "read_hoster_setup")
+    finally:
+        event.remove(db_module.engine, "before_cursor_execute", _hook)
+
+    assert len(ergebnis["service_user_candidates"]) >= 20
+    assert len(gesehen) <= 20, (
+        f"{len(gesehen)} Abfragen fuer zwanzig Kandidaten:\n" + "\n".join(gesehen)
+    )
 
 
 # ── Der woertliche Block ─────────────────────────────────────────────────

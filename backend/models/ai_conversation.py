@@ -87,9 +87,14 @@ class AiMessage(Base):
     # Schwerste — **das Modell sah seine eigene Frage in der Historie nicht**.
     # Auf die Antwort "Server.properties" folgte deshalb dieselbe Frage erneut.
     question_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Die Gliederung dieser Antwort: Text und Werkzeuge in der Reihenfolge, in
-    # der sie entstanden sind, als [{"art": "text", "inhalt": ...},
-    # {"art": "tool", "werkzeug": {...}}, ...].
+    # Die Gliederung dieser Antwort: Text, Werkzeuge und Denkschritte in der
+    # Reihenfolge, in der sie entstanden sind, als [{"art": "text", "inhalt":
+    # ...}, {"art": "tool", "werkzeug": {...}}, {"art": "denken", "inhalt":
+    # ...}, ...].
+    #
+    # `reasoning` daneben ist die Ableitung aus den Denkabschnitten, so wie
+    # `content` die Ableitung aus den Textabschnitten ist — kein zweiter
+    # Speicher. Der Denktext steht hier bereits geschwärzt (`_finalize_stream`).
     #
     # Aus demselben Grund hier wie `question_json` daneben, und aus demselben
     # gemeldeten Anlass: was nur im Ereignisstrom lebte, war nach einem

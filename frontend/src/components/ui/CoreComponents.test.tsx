@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { Badge } from './Badge'
 import { Button } from './Button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './Card'
 import { ErrorMessage } from './ErrorMessage'
@@ -45,5 +46,14 @@ describe('central UI components', () => {
     expect(toggle).toHaveAttribute('aria-checked', 'false')
     fireEvent.click(toggle)
     expect(onChange).toHaveBeenCalledWith(true)
+  })
+
+  it('färbt das Warn-Abzeichen mit einem Token, das die Palette kennt', () => {
+    render(<Badge variant="warning">Wartung</Badge>)
+
+    const abzeichen = screen.getByText('Wartung')
+    expect(abzeichen.className).toContain('text-status-warning')
+    expect(abzeichen.className).toContain('bg-status-warning/10')
+    expect(abzeichen.className).toContain('border-status-warning/30')
   })
 })

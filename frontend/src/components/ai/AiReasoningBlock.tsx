@@ -10,8 +10,13 @@ import { useTranslation } from 'react-i18next'
  * genau dann ist er naemlich das Einzige, was passiert, und ein leerer
  * Bildschirm sieht aus wie ein Fehler.
  *
- * **Er steht ab dem ersten Augenblick da, auch ohne Inhalt.** Das ist der
- * eigentliche Punkt und kam aus einer Beobachtung im Betrieb: "der
+ * **Wo er steht, entscheidet der Aufrufer** (`AiChat`): einen Block je Runde,
+ * an der Stelle, an der gedacht wurde. Früher gab es genau einen über allem,
+ * weil der Denktext ein flaches Feld neben den Abschnitten war — die Gedanken
+ * der dritten Runde standen dann über dem Text der ersten.
+ *
+ * **Zu Beginn steht er auch ohne Inhalt da, aber nur, wenn Nachdenken
+ * angefordert wurde.** Das kam aus einer Beobachtung im Betrieb: "der
  * Nachdenken-Block kam erst am Ende". Gemessen stimmte das auch — nur nicht aus
  * dem vermuteten Grund. Der Block wurde frueher erst gerendert, wenn schon
  * Denktext da war, und **manche Modelle liefern in der ersten Runde gar keinen**
@@ -19,8 +24,10 @@ import { useTranslation } from 'react-i18next'
  * nach dem ersten Antworttext). Bis dahin sah man nur eine nackte Zeile, und
  * dann sprang oben ein Kasten hinein, den es vorher nicht gab.
  *
- * Jetzt ist er von Anfang an der Ort, an dem "es passiert etwas" steht. Er
- * erscheint nicht mehr — er fuellt sich.
+ * Die Gegenprobe gilt aber genauso: bei ausgeschaltetem Nachdenken — der
+ * Voreinstellung — behauptete derselbe Kasten "Denkt nach …", obwohl nie ein
+ * Zeichen kam, und verschwand am Ende ersatzlos. Deshalb entscheidet der
+ * Aufrufer auch, **ob** er ihn leer zeigt.
  */
 export function AiReasoningBlock({ content, streaming }: { content: string; streaming: boolean }) {
   const { t } = useTranslation()

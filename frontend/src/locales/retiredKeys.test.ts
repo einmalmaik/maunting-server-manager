@@ -20,6 +20,12 @@ import en from './en.json'
  * solche Regel wäre entweder löchrig oder bestünde aus Ausnahmen.
  * `scripts/check-i18n.mjs` prüft die Gegenrichtung (benutzt, aber nicht
  * übersetzt); dies hier ist die fehlende Hälfte.
+ *
+ * Der ganze Namensraum `permissions` ist entfallen: 34 Kurzbeschriftungen für
+ * Rechte, die kein `t()`-Aufruf je gelesen hat, weil der PermissionEditor seine
+ * Texte fest verdrahtet im Quelltext trug. Jetzt liest er sie aus
+ * `permissionDetails.<schlüssel mit _ statt .>` — und zwei Fassungen desselben
+ * Rechtetextes wären schlimmer als die eine deutsche von vorher.
  */
 const ABGELOESTE_SCHLUESSEL = [
   'ai.memory.title',
@@ -27,6 +33,7 @@ const ABGELOESTE_SCHLUESSEL = [
   'ai.memory.teamTitle',
   'ai.memory.teamDescription',
   'teams.personalHint',
+  'permissions',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */
@@ -38,6 +45,10 @@ const NACHFOLGER = [
   'ai.memory.descriptions.team',
   'ai.memory.descriptions.panel',
   'teams.personalKnowledgeHint',
+  'permissionDetails.users_read.title',
+  'permissionDetails.users_read.desc',
+  'permissionDetails.server_databases_admin.title',
+  'permissionEditor.groups.users',
 ]
 
 // Nur die beiden Basissprachen: die übrigen neun sind bewusst Teilmengen mit

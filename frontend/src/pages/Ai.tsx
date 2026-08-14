@@ -30,10 +30,15 @@ export function Ai() {
   }
 
   return (
-    // Volle Hoehe abzueglich der Topbar. `min-h-0` ist hier nicht kosmetisch:
-    // ohne das kann ein Flex-Kind nicht kleiner werden als sein Inhalt, und der
-    // Verlauf wuerde die Seite statt seines eigenen Bereichs scrollen.
-    <div className="flex h-[calc(100dvh-4rem)] min-h-0 flex-col md:h-[calc(100dvh-5rem)]">
+    // Volle Höhe abzüglich dessen, was der Rahmen schon verbraucht: 4rem Topbar
+    // (Topbar.tsx, `h-16` auf allen Breakpoints) plus die Polsterung von `main`
+    // (Shell.tsx, `p-margin-mobile md:p-margin-desktop` = 1rem bzw. 2.5rem, oben
+    // und unten). Macht 6rem mobil und 9rem ab `md`. Wird die Polsterung in
+    // Shell.tsx geändert, muss diese Rechnung mit.
+    // `min-h-0` ist hier nicht kosmetisch: ohne das kann ein Flex-Kind nicht
+    // kleiner werden als sein Inhalt, und der Verlauf würde die Seite statt
+    // seines eigenen Bereichs scrollen.
+    <div className="flex h-[calc(100dvh-6rem)] min-h-0 flex-col md:h-[calc(100dvh-9rem)]">
       <AiChat />
 
       {canUseSkills && (

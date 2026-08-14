@@ -15,7 +15,7 @@
  * Stub unten misst die Komponente ein Feld der Größe 0 am Ursprung, und der
  * Test prüfte nichts.
  */
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Dropdown } from './Dropdown'
@@ -92,5 +92,71 @@ describe('Dropdown', () => {
     const menue = oeffnen()
 
     expect(menue.style.maxHeight).toBe('320px')
+  })
+
+  /**
+   * Ohne Maus war die Auswahl bisher nicht bedienbar: der Auslöser ließ sich
+   * öffnen, danach passierte bei jedem Pfeiltastendruck nichts. Weil das Menü
+   * per Portal an `document.body` hängt, springt Tab vom Auslöser auch nicht in
+   * die Liste, sondern zum nächsten Feld des Formulars.
+   */
+  it('führt den Fokus mit den Pfeiltasten durch die Liste und gibt ihn bei Escape zurück', async () => {
+    feldBei({ top: 80, bottom: 120 })
+    const auswahl = vi.fn()
+    render(
+      <Dropdown
+        data-testid="auswahl"
+        value="a"
+        onChange={auswahl}
+        options={[...OPTIONEN, { value: 'c', label: 'Gesperrt', disabled: true }]}
+      />,
+    )
+
+    const ausloeser = screen.getByTestId('auswahl')
+    ausloeser.focus()
+    fireEvent.click(ausloeser)
+
+    const forge = screen.getByRole('option', { name: /Minecraft Forge/ })
+    const vanilla = screen.getByRole('option', { name: /Minecraft Vanilla/ })
+    // Beim Öffnen landet der Fokus auf der gewählten Option, nicht auf der
+    // ersten — sonst verliert man beim Öffnen seinen aktuellen Wert aus dem
+    // Blick.
+    await waitFor(() => expect(forge).toHaveFocus())
+
+    fireEvent.keyDown(document, { key: 'ArrowDown' })
+    expect(vanilla).toHaveFocus()
+    // Gesperrte Optionen werden übersprungen, deshalb geht es von der zweiten
+    // wieder auf die erste zurück.
+    fireEvent.keyDown(document, { key: 'ArrowDown' })
+    expect(forge).toHaveFocus()
+    fireEvent.keyDown(document, { key: 'End' })
+    expect(vanilla).toHaveFocus()
+    fireEvent.keyDown(document, { key: 'Home' })
+    expect(forge).toHaveFocus()
+    fireEvent.keyDown(document, { key: 'ArrowUp' })
+    expect(vanilla).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(ausloeser).toHaveFocus()
+    expect(auswahl).not.toHaveBeenCalled()
+  })
+
+  it('wählt die fokussierte Option mit Enter aus', async () => {
+    feldBei({ top: 80, bottom: 120 })
+    const auswahl = vi.fn()
+    render(<Dropdown data-testid="auswahl" value="a" onChange={auswahl} options={OPTIONEN} />)
+
+    fireEvent.click(screen.getByTestId('auswahl'))
+    const forge = screen.getByRole('option', { name: /Minecraft Forge/ })
+    await waitFor(() => expect(forge).toHaveFocus())
+
+    fireEvent.keyDown(document, { key: 'ArrowDown' })
+    // Der Klick ist das, was ein Browser beim Enter auf einem fokussierten
+    // <button> auslöst.
+    fireEvent.click(screen.getByRole('option', { name: /Minecraft Vanilla/ }))
+
+    expect(auswahl).toHaveBeenCalledWith('b')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 })

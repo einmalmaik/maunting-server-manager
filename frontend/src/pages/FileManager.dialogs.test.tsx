@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { FileManager } from './FileManager'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
@@ -94,5 +94,60 @@ describe('FileManager: Verschieben- und Umbenennen-Dialog', () => {
     fireEvent.keyDown(document.body, { key: 'Escape' })
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+})
+
+describe('FileManager: Dateisuche', () => {
+  beforeEach(async () => {
+    mockApi.mockReset()
+    await i18n.changeLanguage('en')
+    usePermissionsStore.setState({ me: OWNER, isLoading: false, error: null })
+  })
+
+  it('zeigt die Treffer der zuletzt getippten Suche, auch wenn die ältere später zurückkommt', async () => {
+    // Die Inhaltssuche liest Dateien auf dem Zielserver; wie lange sie braucht,
+    // hängt am Datenbestand. Die ältere, breitere Suche kann deshalb nach der
+    // neueren zurückkommen — und darf deren Treffer nicht überschreiben.
+    const antworten = new Map<string, (wert: unknown) => void>()
+    mockApi.mockImplementation(
+      (pfad: string) =>
+        new Promise((resolve) => {
+          if (!pfad.includes('/search')) {
+            resolve(ROOT_LISTING as any)
+            return
+          }
+          antworten.set(pfad.includes('ser&') || pfad.endsWith('q=ser') ? 'alt' : 'neu', resolve)
+        }) as any,
+    )
+
+    vi.useFakeTimers()
+    try {
+      render(<FileManager serverId={SERVER_ID} />)
+      const feld = screen.getByPlaceholderText(i18n.t('files.searchPlaceholder'))
+
+      fireEvent.change(feld, { target: { value: 'ser' } })
+      await act(async () => {
+        vi.advanceTimersByTime(400)
+      })
+      fireEvent.change(feld, { target: { value: 'server' } })
+      await act(async () => {
+        vi.advanceTimersByTime(400)
+      })
+      expect(antworten.has('alt')).toBe(true)
+      expect(antworten.has('neu')).toBe(true)
+
+      // Die neuere Suche kommt zuerst zurück, die ältere danach.
+      await act(async () => {
+        antworten.get('neu')!({ truncated: false, results: [{ path: 'server.cfg', is_dir: false }] })
+      })
+      await act(async () => {
+        antworten.get('alt')!({ truncated: false, results: [{ path: 'veraltet.txt', is_dir: false }] })
+      })
+
+      expect(screen.getByText('server.cfg')).toBeInTheDocument()
+      expect(screen.queryByText('veraltet.txt')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

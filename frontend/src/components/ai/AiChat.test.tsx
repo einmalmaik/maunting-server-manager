@@ -336,6 +336,110 @@ describe('AiChat', () => {
     // Ohne diesen Zusatz haette der Benutzer den Eindruck, der Skill wirke bereits.
     await screen.findByText(/wartet auf Freigabe/)
   })
+  it('zeigt den Denktext im Block und nicht nur den Block', async () => {
+    // Bis hierher prüfte kein einziger Test, dass **Text** im Denkblock
+    // landet — nur, dass es ihn gibt. Genau daran hätte der Umbau von einem
+    // flachen Feld auf einen Abschnitt still scheitern können.
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(streamAiMessage).mockReset().mockImplementation(async (_payload, onEvent) => {
+      onEvent({ event: 'reasoning', data: { content: 'Ich pruefe die Ports.' } })
+    })
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    await screen.findByText('Ich pruefe die Ports.')
+  })
+
+  it('zeichnet die Gedanken jeder Runde an ihrer Stelle', async () => {
+    // **Der eigentliche Fehler.** Der Denktext war ein flaches Feld neben den
+    // Abschnitten, also gab es genau eine mögliche Stelle für ihn: ganz oben.
+    // Die Gedanken der dritten Runde standen damit über dem Text der ersten,
+    // der dort seit zwölf Sekunden stand.
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(streamAiMessage).mockReset().mockImplementation(async (_payload, onEvent) => {
+      onEvent({ event: 'reasoning', data: { content: 'Ich pruefe die Ports.' } })
+      onEvent({ event: 'tool', data: {
+        tool_name: 'read_server_logs', server_id: 7,
+        skill_key: null, skill_name: null, skill_status: null, skill_learned: false,
+      } })
+      onEvent({ event: 'reasoning', data: { content: 'Jetzt die Logs.' } })
+    })
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    const zweiter = await screen.findByText('Jetzt die Logs.')
+    const werkzeug = screen.getByText('Logs gelesen')
+    // Die Reihenfolge ist die Information: der zweite Gedanke steht **hinter**
+    // dem Werkzeug, nicht in einem wachsenden Kasten davor.
+    expect(werkzeug.compareDocumentPosition(zweiter))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+
+    // Die erste Runde ist vorbei: ihr Block sagt "Nachgedacht" und steht zu.
+    // Aufgeklappt liegt ihr Text vor dem Werkzeug — dort, wo er entstanden ist.
+    fireEvent.click(screen.getByRole('button', { name: /Nachgedacht/ }))
+    const erster = await screen.findByText('Ich pruefe die Ports.')
+    expect(erster.compareDocumentPosition(werkzeug))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+
+  it('zeigt keinen Denkblock, wenn Nachdenken ausgeschaltet ist', async () => {
+    // Der Block behauptete "Denkt nach …" auch in der Voreinstellung „aus",
+    // obwohl nie ein Zeichen kommen konnte — und darunter stand gleichzeitig
+    // "Antwort wird erstellt …". Zwei Anzeigen für dieselbe Wartezeit, eine
+    // davon gelogen.
+    const { streamAiMessage } = await import('@/api/ai')
+    // Der Lauf hängt: genau der Zustand, in dem beide Anzeigen standen.
+    vi.mocked(streamAiMessage).mockReset().mockImplementation(() => new Promise(() => {}))
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    await screen.findByText('Antwort wird erstellt …')
+    expect(screen.queryByText('Denkt nach …')).not.toBeInTheDocument()
+  })
+
+  it('zeigt bei angefordertem Nachdenken den Block statt einer zweiten Wartezeile', async () => {
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(streamAiMessage).mockReset().mockImplementation(() => new Promise(() => {}))
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.click(screen.getByLabelText('Denktiefe'))
+    fireEvent.click(screen.getByRole('option', { name: 'Hoch' }))
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    // Der Block ist der Ort, an dem gleich etwas passiert — und der einzige.
+    await screen.findByText('Denkt nach …')
+    expect(screen.queryByText('Antwort wird erstellt …')).not.toBeInTheDocument()
+  })
+
+  it('zeigt die Gedanken einer alten Nachricht weiterhin an', async () => {
+    // Nachrichten aus der Zeit vor den Denkabschnitten tragen sie nur flach.
+    // Ohne den Rückfall wären sie nach dem Umbau stillschweigend verschwunden.
+    vi.mocked(aiApi.getConversation).mockResolvedValue({
+      ...CONVERSATION,
+      messages: [eigeneNachricht, {
+        id: 'msg-alt', role: 'assistant', content: 'Alles läuft.',
+        reasoning: 'Damals nachgedacht.', question: null, status: 'complete',
+        provider_id: 1, model: 'test-model', created_at: '2026-08-01T12:00:01Z',
+      }],
+    })
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.click(screen.getByRole('button', { name: /Nachgedacht/ }))
+    await screen.findByText('Damals nachgedacht.')
+  })
+
   it('nimmt beim Bearbeiten die alte Fassung zurueck, bevor neu gesendet wird', async () => {
     // Der Verlaufsschnitt muss *vor* dem Senden passieren. Andersherum stuende
     // die verworfene Fassung noch im Kontext, und die KI wuerde eine Frage

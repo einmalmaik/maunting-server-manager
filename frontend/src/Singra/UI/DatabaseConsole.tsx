@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useState } from 'react'
+import { ReactNode, RefObject, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUpDown,
   Boxes,
@@ -46,6 +46,78 @@ import type {
 } from '@/types'
 
 type TabKey = 'tables' | 'sql' | 'users'
+
+const FOKUSSIERBAR =
+  'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+/** Escape schließt den Dialog, Tab bleibt darin, der Fokus kehrt danach zurück.
+ *
+ *  Diese Datei hat vier Modale, die alle dasselbe brauchen — deshalb steht die
+ *  Hilfsfunktion hier und nicht projektweit: außerhalb ist das Muster in
+ *  NodeEnrollmentDialog und ResourceEditorDialog jeweils ausgeschrieben.
+ *  `gesperrt` hält Escape zurück, solange eine Aktion läuft: ein Dialog, der
+ *  gerade löscht oder speichert, darf nicht unter der Antwort weggezogen werden.
+ */
+function useDialogTastatur(
+  dialogRef: RefObject<HTMLDivElement>,
+  onClose: () => void,
+  gesperrt = false,
+) {
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  const gesperrtRef = useRef(gesperrt)
+  gesperrtRef.current = gesperrt
+  // Beim ersten Rendern gemerkt, nicht im Effekt: `autoFocus` greift schon beim
+  // Einhängen des Feldes. Ein Effekt merkte sich sonst ein Feld aus dem Dialog
+  // selbst und gäbe den Fokus nach dem Schließen ins Leere zurück.
+  const vorherigerFokus = useRef<HTMLElement | null>(
+    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  )
+
+  useEffect(() => {
+    // `autoFocus` hat zu diesem Zeitpunkt bereits gegriffen. Nur wenn niemand
+    // im Dialog steht, wird der Fokus hineingeholt.
+    const dialog = dialogRef.current
+    if (dialog && !dialog.contains(document.activeElement)) {
+      dialog.querySelector<HTMLElement>(FOKUSSIERBAR)?.focus()
+    }
+
+    const beiTaste = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (gesperrtRef.current) return
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const offen = dialogRef.current
+      if (!offen) return
+      const ziele = Array.from(offen.querySelectorAll<HTMLElement>(FOKUSSIERBAR))
+      if (ziele.length === 0) return
+
+      const erstes = ziele[0]
+      const letztes = ziele[ziele.length - 1]
+      const aktiv = document.activeElement
+      if (event.shiftKey && (aktiv === erstes || !offen.contains(aktiv))) {
+        event.preventDefault()
+        letztes.focus()
+      } else if (!event.shiftKey && (aktiv === letztes || !offen.contains(aktiv))) {
+        event.preventDefault()
+        erstes.focus()
+      }
+    }
+
+    document.addEventListener('keydown', beiTaste)
+    return () => {
+      document.removeEventListener('keydown', beiTaste)
+      const zurueck = vorherigerFokus.current
+      if (zurueck?.isConnected) zurueck.focus()
+    }
+    // Der Dialog lebt nur, solange er offen ist — einmal einhängen genügt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+}
 
 export interface SqlFavorite {
   id: string
@@ -312,11 +384,14 @@ export function DatabaseConsole({
 
   const handleConfirmDeleteSelectedRows = async () => {
     if (!selectedTable || !onDeleteRows || !processedRows) return
-    const indices = Array.from(selectedRowIndices)
-    const rowConditions = indices.map((idx) => {
-      const row = processedRows.rows[idx]
-      return buildRowKeyConditions(row, tableInfo, resultColumns)
-    })
+    const rowConditions: Array<Record<string, any>> = []
+    for (const idx of selectedRowIndices) {
+      const bedingung = buildRowKeyConditions(processedRows.rows[idx], tableInfo, resultColumns)
+      // Eine einzige nicht eindeutig ansprechbare Zeile sperrt den ganzen Lauf.
+      // Der Dialog fängt den Fehler und zeigt ihn an, gelöscht wird nichts.
+      if (bedingung === null) throw new Error(NICHT_EINDEUTIG_ADRESSIERBAR)
+      rowConditions.push(bedingung)
+    }
     await onDeleteRows(selectedTable.schema, selectedTable.name, rowConditions)
     setSelectedRowIndices(new Set())
   }
@@ -863,11 +938,22 @@ function SaveFavoriteModal({
   onSave: (title: string) => void
 }) {
   const [title, setTitle] = useState('')
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogTastatur(dialogRef, onClose)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div className="msm-card max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sql-favorit-titel"
+        className="msm-card max-w-md w-full p-6 shadow-2xl space-y-4"
+      >
         <div className="flex items-center justify-between">
-          <h3 className="font-headline text-base font-bold text-on-surface flex items-center gap-2">
+          <h3
+            id="sql-favorit-titel"
+            className="font-headline text-base font-bold text-on-surface flex items-center gap-2"
+          >
             <Star className="h-4 w-4 text-status-warning fill-status-warning/20" />
             Abfrage als Favorit speichern
           </h3>
@@ -1338,6 +1424,8 @@ function EditRowModal({
   const [formData, setFormData] = useState<Record<string, any>>(() => ({ ...initialRow }))
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogTastatur(dialogRef, onClose, isSubmitting)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1345,6 +1433,12 @@ function EditRowModal({
     setError(null)
     try {
       const keyConditions = buildRowKeyConditions(initialRow, tableInfo, columns)
+      if (keyConditions === null) {
+        // Dieselbe Bedingung baut auch das UPDATE. Unvollständig hieße hier:
+        // die Korrektur einer Zeile überschreibt still mehrere.
+        setError(NICHT_EINDEUTIG_ADRESSIERBAR)
+        return
+      }
       const updates: Record<string, any> = {}
       for (const col of columns) {
         if (formData[col] !== initialRow[col]) {
@@ -1365,9 +1459,17 @@ function EditRowModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div className="msm-card max-h-[85vh] w-full max-w-xl flex flex-col overflow-hidden p-6 shadow-2xl">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="zeile-bearbeiten-titel"
+        className="msm-card max-h-[85vh] w-full max-w-xl flex flex-col overflow-hidden p-6 shadow-2xl"
+      >
         <div className="flex items-center justify-between">
-          <h3 className="font-headline text-lg font-bold text-on-surface">Zeile bearbeiten</h3>
+          <h3 id="zeile-bearbeiten-titel" className="font-headline text-lg font-bold text-on-surface">
+            Zeile bearbeiten
+          </h3>
           <button className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
         </div>
         <p className="mt-1 text-xs text-on-surface-variant">Werte für die ausgewählte Tabellenzeile anpassen.</p>
@@ -1409,6 +1511,8 @@ function InsertRowModal({
   const [formData, setFormData] = useState<Record<string, any>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogTastatur(dialogRef, onClose, isSubmitting)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1436,9 +1540,17 @@ function InsertRowModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div className="msm-card max-h-[85vh] w-full max-w-xl flex flex-col overflow-hidden p-6 shadow-2xl">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="zeile-einfuegen-titel"
+        className="msm-card max-h-[85vh] w-full max-w-xl flex flex-col overflow-hidden p-6 shadow-2xl"
+      >
         <div className="flex items-center justify-between">
-          <h3 className="font-headline text-lg font-bold text-on-surface">Neue Zeile hinzufügen</h3>
+          <h3 id="zeile-einfuegen-titel" className="font-headline text-lg font-bold text-on-surface">
+            Neue Zeile hinzufügen
+          </h3>
           <button className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
         </div>
         <p className="mt-1 text-xs text-on-surface-variant">Werte für eine neue Tabellenzeile eingeben.</p>
@@ -1480,6 +1592,8 @@ function DeleteConfirmModal({
 }) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogTastatur(dialogRef, onClose, isDeleting)
 
   const handleConfirm = async () => {
     setIsDeleting(true)
@@ -1495,9 +1609,17 @@ function DeleteConfirmModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div className="msm-card w-full max-w-md p-6 shadow-2xl space-y-4">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="zeilen-loeschen-titel"
+        className="msm-card w-full max-w-md p-6 shadow-2xl space-y-4"
+      >
         <div className="flex items-center justify-between">
-          <h3 className="font-headline text-lg font-bold text-status-error">Zeile(n) löschen</h3>
+          <h3 id="zeilen-loeschen-titel" className="font-headline text-lg font-bold text-status-error">
+            Zeile(n) löschen
+          </h3>
           <button className="text-on-surface-variant hover:text-on-surface" onClick={onClose}><X className="h-5 w-5" /></button>
         </div>
         <p className="text-sm text-on-surface-variant">
@@ -1517,7 +1639,25 @@ function DeleteConfirmModal({
   )
 }
 
-function buildRowKeyConditions(row: Record<string, any>, tableInfo: PostgresTableInfo | null, columns: string[]): Record<string, any> {
+/** Text für den Fall, dass eine Zeile nicht eindeutig ansprechbar ist. */
+export const NICHT_EINDEUTIG_ADRESSIERBAR =
+  'Zeile ohne Primärschlüssel nicht eindeutig adressierbar — Löschen und Bearbeiten sind hier gesperrt.'
+
+/** Baut die WHERE-Bedingung, die genau diese eine Zeile beschreibt.
+ *
+ *  Gibt `null` zurück, wenn das nicht möglich ist. Das ist der Kern: ohne
+ *  Primärschlüssel beschreiben nur ALLE Spalten die Zeile. Fehlt auch nur
+ *  eine — weil sie NULL ist (`spalte = NULL` trifft nie) oder JSON enthält
+ *  (lässt sich nicht per `=` vergleichen) — dann wäre die Bedingung kürzer
+ *  als die Zeile und träfe womöglich fremde Zeilen mit. Am Ende der Kette
+ *  steht ein `DELETE ... WHERE` ohne `LIMIT`; eine unvollständige Bedingung
+ *  löscht dort still zu viel. Lieber gar nichts tun und es sagen.
+ */
+export function buildRowKeyConditions(
+  row: Record<string, any>,
+  tableInfo: PostgresTableInfo | null,
+  columns: string[],
+): Record<string, any> | null {
   const pkCols = tableInfo?.columns.filter((c) => c.primary_key || c.name === 'id').map((c) => c.name) || []
   if (pkCols.length > 0 && pkCols.every((col) => col in row && row[col] !== undefined && row[col] !== null)) {
     const keys: Record<string, any> = {}
@@ -1528,11 +1668,12 @@ function buildRowKeyConditions(row: Record<string, any>, tableInfo: PostgresTabl
   }
   const keys: Record<string, any> = {}
   for (const col of columns) {
-    if (col in row && row[col] !== undefined && row[col] !== null && typeof row[col] !== 'object') {
-      keys[col] = row[col]
-    }
+    const wert = row[col]
+    if (!(col in row) || wert === undefined || wert === null || typeof wert === 'object') return null
+    keys[col] = wert
   }
-  return keys
+  // Ohne jede Spalte wäre die Bedingung leer — das träfe die ganze Tabelle.
+  return Object.keys(keys).length > 0 ? keys : null
 }
 
 function compareValues(a: unknown, b: unknown, direction: 'asc' | 'desc'): number {

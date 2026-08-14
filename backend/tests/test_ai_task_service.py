@@ -145,6 +145,38 @@ def test_der_auftragstext_wird_beim_anlegen_geschwaerzt(db: Session) -> None:
     assert "sk-geheim1234567890" not in aufgabe.instruction
 
 
+def test_ohne_zustellweg_gilt_der_chat(db: Session) -> None:
+    """Der Zustellweg ist eine Vorliebe, keine Pflichtangabe.
+
+    Er stand unter ``neu`` und wurde deshalb beim Anlegen verlangt — der
+    Standard in `_leere_aufgabe` konnte nie greifen. Gekostet hat das im Betrieb
+    eine ganze Rückfrage bei jeder ersten Aufgabe („und wie möchtest du die
+    Ergebnisse erhalten?"), also eine volle Anbieterrunde für etwas, das der
+    Chat ohnehin kann.
+
+    Genannt bleibt genannt: ein unbekannter Wert wird weiterhin abgewiesen —
+    das prüft `test_unbrauchbare_angaben_werden_abgewiesen` mit ``"sms"``.
+    """
+    ohne_weg = {name: wert for name, wert in TAEGLICH.items() if name != "channel"}
+    user = _benutzer(db, "ohneweg", "ai.tasks.manage")
+
+    aufgabe = ai_task_service.anlegen(db, user=user, felder=dict(ohne_weg))
+    db.commit()
+
+    assert aufgabe.channel == "chat"
+    # Und die Bestätigungskarte zeigt denselben Weg an, den die Aufgabe danach
+    # trägt. Stünde dort etwas anderes, bestätigte der Benutzer eine Zusage, die
+    # nicht gilt.
+    assert ai_task_service.vorschau(
+        db, user=user, felder=dict(ohne_weg), task_id=None
+    )["channel"] == "chat"
+    # Ein ausdrücklich leer geschicktes Feld heisst dasselbe wie keines — ein
+    # Modell schickt lieber `null` als gar nichts.
+    assert ai_task_service.anlegen(
+        db, user=user, felder={**ohne_weg, "title": "Zweiter", "channel": None}
+    ).channel == "chat"
+
+
 @pytest.mark.parametrize(
     "aenderung",
     [

@@ -16,7 +16,7 @@ import remarkGfm from 'remark-gfm'
  */
 export const AiMarkdown = memo(function AiMarkdown({ content }: { content: string }) {
   return (
-    <div className="msm-prose text-sm leading-6 text-on-surface">
+    <div className="text-sm leading-6 text-on-surface">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -66,7 +66,13 @@ export const AiMarkdown = memo(function AiMarkdown({ content }: { content: strin
           p: ({ children }) => <p className="my-2 first:mt-0 last:mb-0">{children}</p>,
           h1: ({ children }) => <h3 className="mt-3 mb-1 font-headline text-base font-semibold">{children}</h3>,
           h2: ({ children }) => <h4 className="mt-3 mb-1 font-headline text-sm font-semibold">{children}</h4>,
+          // Die Ebenen sind bewusst um zwei nach unten verschoben, damit Modelltext
+          // die Gliederung der Seite nicht kapert. Ebene 4 bis 6 landen alle auf
+          // <h6>, weil es darunter kein Element mehr gibt.
           h3: ({ children }) => <h5 className="mt-3 mb-1 font-headline text-sm font-semibold">{children}</h5>,
+          h4: ({ children }) => <h6 className="mt-3 mb-1 font-headline text-sm font-semibold">{children}</h6>,
+          h5: ({ children }) => <h6 className="mt-3 mb-1 font-headline text-sm font-semibold">{children}</h6>,
+          h6: ({ children }) => <h6 className="mt-3 mb-1 font-headline text-sm font-semibold">{children}</h6>,
           blockquote: ({ children }) => (
             <blockquote className="my-2 border-l-2 border-outline-variant/60 pl-3 text-on-surface-variant">
               {children}

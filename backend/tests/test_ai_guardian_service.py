@@ -19,7 +19,7 @@ und nicht in einer Pruefung davor.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -96,7 +96,9 @@ def _freigabe(
     return grant
 
 
-def _vorfall(db: Session, server: Server, *, status: str = "open") -> Incident:
+def _vorfall(
+    db: Session, server: Server, *, status: str = "open", alter_minuten: int = 0
+) -> Incident:
     vorfall = Incident(
         server_id=server.id,
         title="Autopilot: process_not_running",
@@ -105,7 +107,7 @@ def _vorfall(db: Session, server: Server, *, status: str = "open") -> Incident:
         status=status,
         fingerprint=f"guardian:{server.id}:process_not_running",
         occurrences=3,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc) - timedelta(minutes=alter_minuten),
     )
     db.add(vorfall)
     db.commit()
@@ -675,3 +677,122 @@ class TestRahmenDerHochgestuftenHeilung:
         assert rahmen.get("server_id") == server.id
         assert rahmen.get("incident_id") == vorfall.id
         assert rahmen.get("backup_anker")
+
+
+# ── Das Fenster darf nicht zuwachsen ──────────────────────────────────────
+
+
+class TestFensterVerstopfung:
+    """Ein Vorfall, den niemand heilen wird, darf keinen Platz belegen.
+
+    Der Takt nimmt die zwanzig ältesten offenen Vorfälle. Offen bleibt ein
+    Vorfall aber auch dann, wenn er nie behandelt werden kann: `quarantined` ist
+    der Zustand, in dem die Guardian-Engine aufgegeben hat, und von allein
+    wechselt er nie. Zwanzig davon — nach einem Node-Ausfall keine künstliche
+    Zahl — schlossen das Fenster für immer. Jeder neue Vorfall stand dahinter,
+    der Autonom-Schalter stand auf an, das Panel zeigte ihn als an, und es
+    passierte nichts.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_young_incident_is_healed_behind_twenty_without_a_grant(
+        self, db: Session
+    ):
+        """Einundzwanzig ältere ohne Freigabe, ein jüngerer mit — er wird geheilt."""
+        ohne = _server(db, "ohne-freigabe")
+        mit = _server(db, "mit-freigabe")
+        user = _benutzer(db, "freigeber")
+        _sichtbar(db, user, mit)
+        # Ausdrücklich **serverbezogen**: eine panelweite Freigabe deckte auch
+        # den anderen Server, und dann wäre nichts verstopft.
+        _freigabe(db, user, server=mit)
+
+        for nummer in range(21):
+            _vorfall(db, ohne, status="quarantined", alter_minuten=100 + nummer)
+        jung = _vorfall(db, mit)
+
+        with patch.object(
+            ai_guardian_service, "heilungslauf_starten", AsyncMock(side_effect=_lauf_vortaeuschen)
+        ):
+            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
+
+        zeilen = db.query(AiGuardianNotice).all()
+        assert len(zeilen) == 1
+        assert zeilen[0].incident_id == jung.id
+        assert zeilen[0].mode == "healing"
+
+    @pytest.mark.asyncio
+    async def test_a_young_incident_is_healed_behind_twenty_already_healed(
+        self, db: Session
+    ):
+        """Der häufigere Dauerbeleger: schon geheilt, aber weiter offen.
+
+        Eine Heilungsnotiz verschwindet nie, und `_einen_vorfall_bearbeiten`
+        steigt bei ihr jedes Mal wieder aus — der Vorfall bleibt im Fenster
+        stehen und nimmt einem jüngeren den Platz weg.
+        """
+        server = _server(db)
+        user = _benutzer(db, "freigeber")
+        _sichtbar(db, user, server)
+        _freigabe(db, user, server=server)
+
+        for nummer in range(21):
+            alt = _vorfall(db, server, alter_minuten=100 + nummer)
+            _notiz(db, alt, user, mode="healing")
+        jung = _vorfall(db, server)
+
+        with patch.object(
+            ai_guardian_service, "heilungslauf_starten", AsyncMock(side_effect=_lauf_vortaeuschen)
+        ):
+            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
+
+        neue = (
+            db.query(AiGuardianNotice)
+            .filter(AiGuardianNotice.incident_id == jung.id)
+            .one()
+        )
+        assert neue.mode == "healing"
+
+    @pytest.mark.asyncio
+    async def test_the_panel_wide_grant_still_reaches_every_server(self, db: Session):
+        """Der Vorfilter darf die panelweite Freigabe nicht wegfiltern.
+
+        Sie steht mit `server_id IS NULL` in der Tabelle. Wer sie mit
+        `IN (None, id)` sucht, findet sie in SQL nicht — derselbe Fehler, der in
+        der Kandidatenabfrage schon einmal dafür sorgte, dass panelweit
+        freigegebene Server nie geheilt wurden.
+        """
+        server = _server(db)
+        user = _benutzer(db, "panelweit")
+        _sichtbar(db, user, server)
+        _freigabe(db, user, server=None)
+        _vorfall(db, server)
+
+        with patch.object(
+            ai_guardian_service, "heilungslauf_starten", AsyncMock(side_effect=_lauf_vortaeuschen)
+        ):
+            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
+
+    @pytest.mark.asyncio
+    async def test_the_prefilter_does_not_decide_the_grant_itself(self, db: Session):
+        """Panelweit erlaubt, auf diesem Server ausdrücklich nicht.
+
+        Der Vorfilter lässt diesen Vorfall durch — er sieht nur die panelweite
+        Zeile. Entscheiden muss weiterhin `resolve_grant`, und das findet die
+        abgeschaltete serverbezogene Zeile und sagt Nein. Würde der Vorfilter
+        die Entscheidung übernehmen, wäre aus einer Beschleunigung eine stille
+        Rechteänderung geworden.
+        """
+        server = _server(db)
+        user = _benutzer(db, "ausgenommen")
+        _sichtbar(db, user, server)
+        _freigabe(db, user, server=None)
+        _freigabe(db, user, server=server, enabled=False)
+        _vorfall(db, server)
+
+        starter = AsyncMock(side_effect=_lauf_vortaeuschen)
+        with patch.object(ai_guardian_service, "heilungslauf_starten", starter):
+            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 0
+
+        assert starter.await_count == 0
+        assert db.query(AiGuardianNotice).count() == 0

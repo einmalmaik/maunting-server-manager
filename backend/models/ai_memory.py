@@ -90,10 +90,12 @@ class AiMemoryEntry(Base):
     aad_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Lokal berechneter Vektor als JSON-Liste. Bewusst *nicht* verschluesselt:
-    # der `key` daneben steht ohnehin im Klartext und verraet mehr, und nur so
-    # kann die Auswahl vor dem Entschluesseln stattfinden — was pro Chatnachricht
-    # dutzende Sidecar-Aufrufe spart. NULL heisst: noch nicht berechnet.
+    # Lokal berechneter Vektor als JSON-Liste. Bewusst *nicht* verschlüsselt:
+    # der `key` daneben steht ohnehin im Klartext und verrät mehr, und die
+    # Rangfolge kann ihn so ohne einen weiteren Sidecar-Aufruf je Zeile lesen.
+    # Die Auswahl selbst findet **nach** dem Entschlüsseln statt — sie bewertet
+    # neben der Bedeutung auch die Wortüberschneidung im Wert und braucht ihn
+    # dafür im Klartext. NULL heisst: noch nicht berechnet.
     embedding_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Womit gerechnet wurde. Passt es nicht zum geladenen Modell, wird der
     # Vektor ignoriert statt falsche Aehnlichkeiten zu liefern.

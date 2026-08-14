@@ -39,9 +39,11 @@ export function AiContextMeter({ status }: { status: AiContextStatus | null }) {
     ? Math.min(status.used_tokens / status.usable_tokens, 1)
     : 0
   const prozent = Math.round(anteil * 100)
-  const faltmarke = status.usable_tokens > 0
-    ? Math.round((status.compaction_at_tokens / status.usable_tokens) * 100)
-    : 100
+  // Die Marke kommt als Prozentsatz und wird nicht mehr aus einer Tokenzahl
+  // zurückgerechnet: die Faltschwelle misst nur den faltbaren Teil des
+  // Verlaufs, `used_tokens` den ganzen Kontext. Zwei Zählweisen auf derselben
+  // Skala ergaben eine Marke, der man nicht glauben konnte.
+  const faltmarke = status.compaction_percent
   const farbe = !status.known
     ? 'text-on-surface-variant/60'
     : prozent >= faltmarke

@@ -9,6 +9,12 @@ interface ProgressBarProps {
   /** 0–100, or null when usage is unknown */
   value: number | null | undefined
   label?: string
+  /**
+   * Zugänglicher Name, wenn der Balken schon eine sichtbare Überschrift daneben
+   * hat. `label` würde diese Überschrift ein zweites Mal rendern; hier steht der
+   * Name nur für Screenreader. Ohne Angabe bleibt es beim `label`.
+   */
+  ariaLabel?: string
   hint?: string
   className?: string
   /** When true, high values use warning/error tint */
@@ -19,6 +25,7 @@ interface ProgressBarProps {
 export function ProgressBar({
   value,
   label,
+  ariaLabel,
   hint,
   className = '',
   heat = false,
@@ -57,7 +64,7 @@ export function ProgressBar({
         aria-valuenow={known ? Math.round(clamped) : undefined}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label={label}
+        aria-label={ariaLabel ?? label}
         aria-valuetext={known ? undefined : 'unknown'}
       >
         {known ? (

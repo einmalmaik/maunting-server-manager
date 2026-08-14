@@ -5,11 +5,13 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import BigInteger
 from sqlalchemy.orm import Session
 
-from models import AiUsageEvent, AuditLog, Role, RolePermission, User
+from models import AiUsageEvent, AuditLog, Role, RoleAiLimit, RolePermission, User
 from services.ai_limit_service import (
     LIMIT_FIELDS,
+    LIMIT_MAXIMA,
     resolve_effective_limits,
     set_role_limit,
 )
@@ -118,6 +120,19 @@ def test_service_rejects_invalid_internal_limit_values(db: Session) -> None:
         set_role_limit(db, role.id, _limits(daily_token_limit=True))
     with pytest.raises(ValueError, match="requests_per_minute"):
         set_role_limit(db, role.id, _limits(requests_per_minute=10_001))
+
+
+def test_erlaubte_maxima_passen_in_die_spaltenbreite() -> None:
+    """Kein erlaubtes Maximum darf breiter sein als die Spalte, die es aufnimmt.
+
+    Die Tests laufen auf SQLite, wo INTEGER acht Byte hat — dort faellt ein zu
+    grosses Maximum nie auf. In Produktion (PostgreSQL) endet INTEGER bei
+    2^31-1, und ein darueber liegender Wert bricht erst beim Speichern ab.
+    """
+    for feld, maximum in LIMIT_MAXIMA.items():
+        spalte = RoleAiLimit.__table__.columns[feld]
+        grenze = 2**63 - 1 if isinstance(spalte.type, BigInteger) else 2**31 - 1
+        assert maximum <= grenze, f"{feld} erlaubt {maximum}, die Spalte fasst nur {grenze}"
 
 
 def test_highest_limit_and_explicit_unlimited_win(

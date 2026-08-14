@@ -123,7 +123,7 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
   }
 
   return (
-    <section className="space-y-4" aria-labelledby="hoster-title">
+    <section className="space-y-6" aria-labelledby="hoster-title">
       <div className="msm-card flex flex-wrap items-start justify-between gap-4 p-6">
         <div className="max-w-3xl">
           <div className="flex items-center gap-2">

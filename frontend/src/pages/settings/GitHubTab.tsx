@@ -75,11 +75,9 @@ export function GitHubTab() {
   return (
     <fieldset disabled={!canWrite} className="space-y-6 border-0 p-0 m-0">
       <div className="msm-card p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-            <Github className="w-5 h-5 text-secondary" />
-          </div>
-          <h2 className="font-headline text-headline-sm text-primary">{t('settings.githubTokenTitle')}</h2>
+        <div className="flex items-center gap-2 mb-6">
+          <Github className="h-5 w-5 text-secondary" aria-hidden="true" />
+          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.githubTokenTitle')}</h2>
         </div>
 
         <div className="space-y-4">

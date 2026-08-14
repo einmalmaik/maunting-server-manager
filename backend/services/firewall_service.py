@@ -18,6 +18,8 @@ import logging
 import re
 import subprocess
 
+from sqlalchemy.orm import selectinload
+
 logger = logging.getLogger(__name__)
 
 # UFW-Comment-Praefix — wird in Regex zur Identifikation eigener Regeln genutzt.
@@ -96,15 +98,22 @@ def _allow(port: int, protocol: str, comment: str) -> bool:
 
 
 def _delete(port: int, protocol: str) -> bool:
-    # ``ufw delete allow PORT/PROTO`` ist idempotent: nicht existierende Regeln
-    # geben Exit 0 mit "Could not delete ..." aus.
+    """Löscht eine UFW-Regel und meldet, ob es überhaupt eine zu löschen gab.
+
+    ``ufw delete allow PORT/PROTO`` ist idempotent: eine nicht existierende
+    Regel gibt Exit 0 mit "Could not delete ..." aus. Genau dieser Fall muss
+    ``False`` melden. Sonst behauptet ``close_ports`` einen Erfolg, den es nie
+    gemessen hat — und der periodische Abgleich schreibt alle 30 Sekunden eine
+    Audit-Zeile für Regeln, die es längst nicht mehr gibt.
+    """
     result = _run_ufw("delete", "allow", f"{port}/{protocol}")
     if result.returncode != 0:
         logger.debug(
             "UFW delete %s/%s ohne Treffer: %s",
             port, protocol, (result.stderr or result.stdout).strip(),
         )
-    return True
+        return False
+    return "Could not delete" not in (result.stdout or "")
 
 
 # Eine Zeile aus ``ufw status``:
@@ -273,7 +282,13 @@ def close_ports(
     user_id: int | None = None,
     reason: str = "Server gestoppt",
 ) -> bool:
-    """Schliesst (idempotent) die UFW-Regeln eines Servers und protokolliert dies im AuditLog."""
+    """Schließt (idempotent) die UFW-Regeln eines Servers und protokolliert dies im AuditLog.
+
+    Returns:
+        ``True`` nur, wenn tatsächlich mindestens eine Regel entfernt wurde.
+        War schon alles zu, ist die Rückgabe ``False`` — und es entsteht keine
+        Audit-Zeile für eine Änderung, die nie stattgefunden hat.
+    """
     deleted_any = False
     if node is not None and not getattr(node, "is_local", True):
         if not isinstance(game_port, list):
@@ -289,18 +304,16 @@ def close_ports(
     elif not _ufw_available():
         deleted_any = False
     elif isinstance(game_port, list):
-        deleted_any = True
         for port, protocol, _ in game_port:
-            if port:
-                _delete(port, protocol)
+            if port and _delete(port, protocol):
+                deleted_any = True
     else:
-        deleted_any = True
-        if game_port:
-            _delete(game_port, "udp")
-        if query_port:
-            _delete(query_port, "udp")
-        if rcon_port:
-            _delete(rcon_port, "tcp")
+        if game_port and _delete(game_port, "udp"):
+            deleted_any = True
+        if query_port and _delete(query_port, "udp"):
+            deleted_any = True
+        if rcon_port and _delete(rcon_port, "tcp"):
+            deleted_any = True
 
     if db is not None and server_id is not None and deleted_any:
         try:
@@ -357,6 +370,7 @@ def reconcile_firewall_rules(db) -> int:
     try:
         non_running = (
             db.query(Server)
+            .options(selectinload(Server.ports))
             .filter(Server.status.notin_(tuple(_FIREWALL_KEEP_OPEN_STATUSES)))
             .all()
         )
@@ -368,6 +382,11 @@ def reconcile_firewall_rules(db) -> int:
     for srv in non_running:
         try:
             ports_list = _ports(srv)
+            if not ports_list:
+                # Ohne Ports gibt es nichts zu schließen. Der Aufruf hätte nur
+                # einen ``ufw --version``-Unterprozess gekostet und alle 30
+                # Sekunden eine Audit-Zeile über nichts geschrieben.
+                continue
             if close_ports(
                 ports_list,
                 node=srv.node,

@@ -4,6 +4,7 @@ import { Shell } from './components/layout/Shell'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { PublicOnlyRoute } from './components/PublicOnlyRoute'
 import { RequirePermission } from './components/RequirePermission'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { ToastContainer } from './components/ui/ToastContainer'
 import { ConfirmDialog } from './components/ui/ConfirmDialog'
 import { PromptDialog } from './components/ui/PromptDialog'
@@ -75,6 +76,7 @@ function App() {
 
   return (
     <PrivacyNoticeVisibilityContext.Provider value={privacyNoticeVisible}>
+      <ErrorBoundary>
       <Suspense fallback={
         <Loader fullScreen label="Maunting Server Manager" />
       }>
@@ -170,6 +172,7 @@ function App() {
         </Route>
       </Routes>
       </Suspense>
+      </ErrorBoundary>
       <PrivacyAcknowledgementNotice onVisibilityChange={setPrivacyNoticeVisible} />
       <SupportWidgetLoader enabled={!privacyNoticeVisible} />
       <ToastContainer />

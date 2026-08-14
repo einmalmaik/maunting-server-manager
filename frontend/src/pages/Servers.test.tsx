@@ -124,6 +124,89 @@ describe('Servers create form — dynamic port fields', () => {
 })
 
 
+/**
+ * Der Takt der Serverübersicht.
+ *
+ * Zwei Dinge liefen hier unnötig: der Spielekatalog wurde alle fünf Sekunden
+ * mitgeholt, obwohl er sich nur ändert, wenn ein Blueprint dazukommt — und der
+ * Takt lief in jedem Hintergrundtab weiter, für ein Bild, das niemand ansieht.
+ */
+describe('Servers — Takt und Katalog', () => {
+  beforeEach(async () => {
+    vi.mocked(client.api).mockReset()
+    await i18n.changeLanguage('de')
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const pfade = (pfad: string) =>
+    vi.mocked(client.api).mock.calls.filter(([p]) => p === pfad)
+
+  it('holt den Spielekatalog genau einmal, auch nach zwei Taktschritten', async () => {
+    mockApi(GAMES)
+    vi.useFakeTimers()
+    renderServers()
+    await act(async () => {})
+
+    await act(async () => { vi.advanceTimersByTime(10_000) })
+
+    expect(pfade('/system/games')).toHaveLength(1)
+    // Gegenprobe: der eigentliche Takt läuft weiter.
+    expect(pfade('/servers').length).toBeGreaterThan(1)
+  })
+
+  it('fragt im unsichtbaren Tab nichts mehr ab', async () => {
+    mockApi(GAMES)
+    vi.useFakeTimers()
+    renderServers()
+    await act(async () => {})
+    vi.mocked(client.api).mockClear()
+
+    const echt = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    try {
+      await act(async () => { vi.advanceTimersByTime(15_000) })
+      expect(pfade('/servers')).toHaveLength(0)
+    } finally {
+      delete (document as unknown as Record<string, unknown>).visibilityState
+      if (echt) Object.defineProperty(Document.prototype, 'visibilityState', echt)
+    }
+  })
+})
+
+/**
+ * Ein Ladefehler ist kein Leerzustand. Bricht `/servers` weg, darf die Seite
+ * nicht behaupten, es gebe keine Server — der Betreiber liest das als
+ * "deine Server sind weg".
+ */
+describe('Servers — Ladefehler statt Leerzustand', () => {
+  beforeEach(async () => {
+    vi.mocked(client.api).mockReset()
+    await i18n.changeLanguage('de')
+  })
+
+  it('zeigt bei abgelehntem /servers die Fehlermeldung und nicht "Keine Server vorhanden"', async () => {
+    vi.mocked(client.api).mockImplementation(async (path: string) => {
+      if (path === '/servers') throw new Error('502')
+      if (path === '/system/games') return GAMES as any
+      return [] as any
+    })
+    renderServers()
+
+    expect(await screen.findByText('Die Serverliste konnte nicht geladen werden.')).toBeInTheDocument()
+    expect(screen.queryByText('Keine Server vorhanden')).not.toBeInTheDocument()
+  })
+
+  it('zeigt den Leerzustand weiterhin, wenn die Liste leer geladen wurde', async () => {
+    mockApi(GAMES)
+    renderServers()
+
+    expect(await screen.findByText('Keine Server vorhanden')).toBeInTheDocument()
+    expect(screen.queryByText('Die Serverliste konnte nicht geladen werden.')).not.toBeInTheDocument()
+  })
+})
+
 // === Strengthened AUFGABE vitest (exact required scenarios per review Issues 2/3/12) ===
 // Real component renders, button matrix, badge text, disabled states, 1500ms timer exercising create path + reset + refetch.
 // Consolidated mocks (no dups). All use existing patterns (MemoryRouter, waitFor, act, i18n, confirmStore, api mock).

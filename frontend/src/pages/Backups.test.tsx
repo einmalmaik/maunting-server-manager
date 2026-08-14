@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
@@ -303,5 +303,81 @@ describe('Backups — S3 Cloud Features', () => {
     renderBackups()
     const badge = await screen.findByText('S3: Aktiv')
     expect(badge.textContent).not.toMatch(/access|secret|password|key/i)
+  })
+
+  /**
+   * Ein Ladefehler ist kein Leerzustand. Bei einem Backup-Manager ist
+   * "Keine Backups vorhanden" die gefährlichste aller Falschaussagen: der
+   * Betreiber glaubt, seine Sicherungen sind weg, und steuert gegen.
+   */
+  it('zeigt bei abgelehnter Backupliste die Fehlermeldung statt "Keine Backups vorhanden"', async () => {
+    mockApi((p) => {
+      if (p.startsWith('/backups/1/settings')) return DEFAULT_SETTINGS
+      if (p.startsWith('/backups/1/status')) return INACTIVE_STATUS
+      if (p === '/backup-config/status') return STATUS_RESPONSE
+      if (p === '/backups/1') throw new Error('403')
+      return undefined
+    })
+    renderBackups()
+
+    expect(await screen.findByText('Die Backups konnten nicht geladen werden.')).toBeInTheDocument()
+    expect(screen.queryByText('Keine Backups vorhanden')).not.toBeInTheDocument()
+  })
+
+  /**
+   * Der Statuspoll ist die einzige Quelle fuer "es laeuft gerade etwas" — auch
+   * fuer Vorgaenge, die der Zeitplan oder jemand anderes gestartet hat. Er darf
+   * darum nie ganz stehen, aber im Ruhezustand seltener fragen.
+   */
+  it('fragt den Status im Ruhezustand alle 10 s und bei laufendem Backup alle 2 s', async () => {
+    vi.useFakeTimers()
+    let aktuellerStatus: unknown = INACTIVE_STATUS
+    let statusAufrufe = 0
+    mockApi((p) => {
+      if (p.startsWith('/backups/1/settings')) return DEFAULT_SETTINGS
+      if (p.startsWith('/backups/1/status')) {
+        statusAufrufe += 1
+        return aktuellerStatus
+      }
+      if (p === '/backup-config/status') return STATUS_RESPONSE
+      if (p === '/backups/1') return []
+      return undefined
+    })
+
+    try {
+      renderBackups()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      const nachMount = statusAufrufe
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000)
+      })
+      expect(statusAufrufe).toBe(nachMount)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6000)
+      })
+      expect(statusAufrufe).toBe(nachMount + 1)
+
+      aktuellerStatus = {
+        active: true,
+        operation: 'creating',
+        started_at: new Date().toISOString(),
+        estimated_size_mb: null,
+      }
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10000)
+      })
+      const beimStart = statusAufrufe
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000)
+      })
+      expect(statusAufrufe).toBe(beimStart + 2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

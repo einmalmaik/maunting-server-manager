@@ -2,7 +2,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import SQLAlchemyError
 
 from database import get_db
@@ -111,7 +111,8 @@ def list_users(
     db: Session = Depends(get_db),
     _: User = Depends(require_global("users.read")),
 ) -> list[User]:
-    return db.query(User).all()
+    # Rollen mitladen: sonst kostet role_ids je Benutzer eine eigene Abfrage.
+    return db.query(User).options(selectinload(User.role_assignments)).all()
 
 
 @router.get("/users/{user_id}", response_model=UserResponse)

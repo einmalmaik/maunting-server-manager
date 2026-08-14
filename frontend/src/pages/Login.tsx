@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { apiUrl } from '@/config/api'
@@ -17,6 +17,7 @@ import { Shield, ArrowRight, KeyRound, Mail, Check } from 'lucide-react'
 export function Login() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const { finishLogin } = useAuthStore()
   const [error, setError] = useState('')
@@ -30,6 +31,12 @@ export function Login() {
   const [verifyCode, setVerifyCode] = useState('')
   const [verifiedSuccess, setVerifiedSuccess] = useState(false)
   const [pendingVerifiedUser, setPendingVerifiedUser] = useState<User | null>(null)
+
+  // ProtectedRoute legt die ursprünglich angefragte Seite in location.state ab.
+  // Nach der Anmeldung geht es dorthin zurück statt immer auf das Dashboard.
+  const gemerktesZiel = (location.state as { from?: string } | null)?.from
+  const zielNachLogin =
+    gemerktesZiel?.startsWith('/') && !gemerktesZiel.startsWith('//') ? gemerktesZiel : '/'
 
   const oauthStep = searchParams.get('step')
   const oauthChallenge = searchParams.get('challenge') || ''
@@ -87,7 +94,7 @@ export function Login() {
 
       const user = await api<User>('/auth/me')
       await finishLogin(user)
-      navigate('/')
+      navigate(zielNachLogin, { replace: true })
     } catch (err: any) {
       setError(err.message || t('auth.loginFailed'))
       setSubmitting(false)
@@ -177,7 +184,7 @@ export function Login() {
             <button
               onClick={() => {
                 if (!pendingVerifiedUser) return
-                void finishLogin(pendingVerifiedUser).then(() => navigate('/'))
+                void finishLogin(pendingVerifiedUser).then(() => navigate(zielNachLogin, { replace: true }))
               }}
               className="msm-btn-primary px-8 py-3 inline-flex items-center gap-2"
             >

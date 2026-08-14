@@ -150,6 +150,22 @@ def sse_event(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=True)}\n\n"
 
 
+def _abschnitt_fuer_ablage(abschnitt: dict) -> dict:
+    """Ein Abschnitt so, wie er in die Datenbank darf.
+
+    Denkabschnitte werden geschwärzt und gekürzt — **genau wie das Feld
+    ``reasoning`` daneben**, das aus ihnen abgeleitet wird. Ohne diese Zeile
+    hätte die neue Gliederung die alte Schwärzung ausgehebelt: der Denktext
+    läge dann roh in ``sections_json``, und die Oberfläche zeichnet ihn von
+    dort. Ein Modell kann in seinen Überlegungen denselben Schlüssel
+    wiederholen wie in der Antwort.
+    """
+    if abschnitt.get("art") != "denken":
+        return abschnitt
+    roh = str(abschnitt.get("inhalt") or "")
+    return {"art": "denken", "inhalt": redact_sensitive_text(roh)[:MAX_REASONING_CHARS]}
+
+
 def _finalize_stream(
     *,
     message_id: str,
@@ -197,7 +213,9 @@ def _finalize_stream(
             # dessen Kanal schon abgeraeumt war, gerade nicht.
             if abschnitte:
                 message.sections_json = json.dumps(
-                    abschnitte, ensure_ascii=True, separators=(",", ":")
+                    [_abschnitt_fuer_ablage(eintrag) for eintrag in abschnitte],
+                    ensure_ascii=True,
+                    separators=(",", ":"),
                 )
             message.status = "failed" if failed else "complete"
         else:

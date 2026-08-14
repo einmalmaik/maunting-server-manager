@@ -803,6 +803,62 @@ class TestContentSearch:
         assert daten["matches"] == []
         assert daten["truncated"] is True
 
+    def test_content_search_resolves_the_node_agent_only_once(
+        self,
+        db: Session,
+        server_with_dir: Server,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Eine Suche, ein Node-Client — nicht einer je Verzeichnis und Datei.
+
+        Jeder Aufbau eines `NodeClient` lässt das Node-Token beim DIS-Sidecar
+        entschlüsseln und baut einen frisch angehefteten TLS-Kontext auf, beides
+        über das Netz. Bei ``SEARCH_MAX_FILES = 200`` wären das rund
+        vierhundert vermeidbare Runden für eine einzige Suche.
+
+        Geprüft wird an `_agent` selbst und nicht am Ergebnis: die Trefferliste
+        sieht in beiden Fällen gleich aus, der Unterschied liegt allein in der
+        Zahl der Aufbauten.
+        """
+        from services import server_file_access_service as dienst
+
+        baum = {
+            "": [
+                {"name": "Data", "is_dir": True},
+                {"name": "server.cfg", "is_dir": False},
+            ],
+            "Data": [{"name": "buffs.xml", "is_dir": False}],
+        }
+        inhalte = {
+            "server.cfg": "maxPlayers=40\n",
+            "Data/buffs.xml": "staminaLoss=1.0\n",
+        }
+
+        class FesterAgent:
+            def files_list(self, kennung: str, pfad: str) -> list[dict]:
+                return baum.get(pfad, [])
+
+            def files_read_info(self, kennung: str, pfad: str) -> dict:
+                return {"content": inhalte[pfad], "revision": "r1"}
+
+        aufbauten: list[int] = []
+
+        def gezaehlter_agent(server: Server, session: Session) -> FesterAgent:
+            aufbauten.append(server.id)
+            return FesterAgent()
+
+        monkeypatch.setattr(dienst, "_agent", gezaehlter_agent)
+
+        ergebnis = dienst.search_file_contents(
+            db, server_id=server_with_dir.id, query="staminaloss"
+        )
+
+        # Zwei Verzeichnisrunden und zwei Dateilesungen — und trotzdem nur ein
+        # einziger aufgelöster Node-Agent.
+        assert [t["path"] for t in ergebnis["matches"]] == ["Data/buffs.xml"]
+        assert ergebnis["files_searched"] == 2
+        assert aufbauten == [server_with_dir.id]
+
 
 class TestFileHistoryEndpoints:
     def test_history_list_requires_read_permission(

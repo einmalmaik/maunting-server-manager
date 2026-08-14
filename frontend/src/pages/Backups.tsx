@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
 import { confirm } from "@/stores/confirmStore";
-import { HardDrive, Plus, RotateCcw, Trash2, Settings, Cloud, CloudOff, UploadCloud } from "lucide-react";
+import { AlertTriangle, HardDrive, Plus, RotateCcw, Trash2, Settings, Cloud, CloudOff, UploadCloud } from "lucide-react";
 
 interface Backup {
   id: number;
@@ -64,6 +64,10 @@ export function Backups({ serverId }: BackupsProps) {
   const { t } = useTranslation();
   const [backups, setBackups] = useState<Backup[]>([]);
   const [loading, setLoading] = useState(true);
+  // Ohne dieses Flag wird aus einem fehlgeschlagenen Laden die Aussage
+  // "Keine Backups vorhanden" — bei einem Backup-Manager die gefährlichste
+  // aller Falschaussagen.
+  const [loadError, setLoadError] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Create modal
@@ -87,8 +91,9 @@ export function Backups({ serverId }: BackupsProps) {
     try {
       const data = await api<Backup[]>(`/backups/${serverId}`);
       setBackups(data);
+      setLoadError(false);
     } catch {
-      // silent
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -131,19 +136,25 @@ export function Backups({ serverId }: BackupsProps) {
     fetchS3Status();
   }, [serverId]);
 
-  // Live-Status Polling (alle 2s) mit Cache-Buster
+  // Live-Status Polling mit Cache-Buster. Eng, solange wirklich etwas laeuft —
+  // sonst im Ruhetakt. Ganz abschalten waere ein geschlossener Kreis: `active`
+  // entsteht ausschliesslich aus genau diesem Poll, also wuerde ein vom
+  // Zeitplan oder von jemand anderem gestartetes Backup nie sichtbar.
+  const statusTakt = backupStatus?.active ? 2000 : 10000;
   useEffect(() => {
     if (!serverId) return;
     const interval = setInterval(async () => {
+      // Im Hintergrundtab schaut niemand hin: kein Takt, keine Anfragen.
+      if (document.visibilityState !== "visible") return;
       try {
         const s = await api<BackupStatus>(`/backups/${serverId}/status?_t=${Date.now()}`);
         setBackupStatus(s);
       } catch {
         setBackupStatus(null);
       }
-    }, 2000);
+    }, statusTakt);
     return () => clearInterval(interval);
-  }, [serverId]);
+  }, [serverId, statusTakt]);
 
   // Live-Tick für "Läuft seit" (separate Sekundenuhr, nicht vom Poll)
   const tickRef = useRef<number | null>(null);
@@ -507,7 +518,20 @@ export function Backups({ serverId }: BackupsProps) {
       )}
 
       {/* Backup List */}
-      {backups.length === 0 ? (
+      {loadError ? (
+        <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
+          <AlertTriangle className="w-10 h-10 text-status-error mx-auto mb-4" />
+          <h3 className="font-headline text-body-lg text-on-surface mb-1">
+            {t("backups.loadFailed")}
+          </h3>
+          <button
+            onClick={() => void fetchBackups()}
+            className="msm-btn-secondary min-h-11 px-4 py-2 mt-4"
+          >
+            {t("common.retry")}
+          </button>
+        </div>
+      ) : backups.length === 0 ? (
         <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
           <HardDrive className="w-10 h-10 text-on-surface-variant mx-auto mb-4" />
           <h3 className="font-headline text-body-lg text-on-surface mb-1">

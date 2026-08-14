@@ -351,10 +351,10 @@ export function Users() {
           </p>
         </div>
 
-        <div className="msm-card min-w-0 overflow-hidden" data-testid="user-directory">
+        <div className="msm-card min-w-0" data-testid="user-directory">
           <div
             aria-hidden="true"
-            className="hidden grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_7rem_minmax(10rem,12rem)_2.75rem] gap-4 border-b border-outline-variant/50 bg-surface-container-low/35 px-5 py-3 font-label-md text-[10px] uppercase tracking-wider text-on-surface-variant md:grid"
+            className="hidden grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_7rem_minmax(10rem,12rem)_2.75rem] gap-4 border-b border-outline-variant/50 bg-surface-container-low/35 px-5 py-3 font-label-md text-[10px] uppercase tracking-wider text-on-surface-variant md:grid md:rounded-t-lg"
           >
             <span>{t('auth.username')}</span>
             <span>{t('auth.email')}</span>
@@ -381,7 +381,7 @@ export function Users() {
               return (
                 <article
                   key={user.id}
-                  className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3 px-4 py-4 transition-colors hover:bg-surface-container-high/30 md:grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_7rem_minmax(10rem,12rem)_2.75rem] md:items-center md:gap-4 md:px-5"
+                  className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-3 px-4 py-4 transition-colors last:rounded-b-lg hover:bg-surface-container-high/30 md:grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.35fr)_7rem_minmax(10rem,12rem)_2.75rem] md:items-center md:gap-4 md:px-5"
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <span

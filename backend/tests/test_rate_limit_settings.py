@@ -262,6 +262,29 @@ class TestDynamicRateLimitEnforcement:
                 break
         assert saw_429, "Global rate limit mit rate_limit_global=50 hat nicht gegriffen"
 
+    def test_global_limit_counts_per_endpoint_not_per_url(self, client: TestClient):
+        """Wechselnde Pfad-IDs umgehen das Limit nicht.
+
+        Ohne ``key_style="endpoint"`` bekommt jede Server-ID einen eigenen
+        Zähler, und ein einzelner Client darf denselben teuren Endpunkt
+        beliebig oft aufrufen, solange er nur die ID variiert.
+        """
+        PanelSettingsService.set(KEY_GLOBAL, "50")
+        PanelSettingsService.invalidate_cache()
+        assert PanelSettingsService.get(KEY_GLOBAL) == "50"
+
+        from middleware.rate_limit import limiter
+
+        limiter.reset()
+
+        saw_429 = False
+        for server_id in range(1, 56):
+            response = client.get(f"/api/servers/{server_id}/status")
+            if response.status_code == 429:
+                saw_429 = True
+                break
+        assert saw_429, "Jede Server-ID bekam einen eigenen Zähler — das Limit greift nicht"
+
     def test_global_default_still_triggers_around_100(self, client: TestClient):
         """Ohne Setting: Default 100 — nach >100 Requests 429 (Regression)."""
         PanelSettingsService.invalidate_cache()

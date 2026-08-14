@@ -391,3 +391,55 @@ def test_truncating_the_history_takes_the_attachments_with_it(
     # Nur der Anhang der weggeschnittenen Frage ist weg — der davor gehoert zu
     # einer Nachricht, die es weiterhin gibt.
     assert [row.message_id for row in uebrig] == [bleibt.id]
+
+
+def test_clearing_the_history_takes_the_attachments_with_it(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+) -> None:
+    """Wer den Verlauf leert, löscht auch die hochgeladenen Dateien.
+
+    Die Unterhaltung bleibt beim Leeren bewusst stehen, ihre Kaskade greift also
+    nie, und `message_id` trägt keinen Fremdschlüssel — bliebe die eine Zeile in
+    `clear_history` aus, lägen die verschlüsselten Serverlogs für immer in
+    `ai_attachments`. Sichtbar würde das erst als dauerhaftes
+    AI_ATTACHMENT_LIMIT_REACHED: das Limit zählt alle Zeilen der Unterhaltung,
+    auch die, die in der Oberfläche nirgends mehr auftauchen.
+    """
+    from services.ai_attachment_service import bind_to_message
+    from services.ai_chat_service import clear_history
+
+    _enable_attachments(db, regular_user)
+    conversation = _conversation(db, regular_user)
+
+    client.post(
+        "/api/ai/conversation/attachments",
+        files={"file": ("gesendet.log", b"Gesendete Datei\n", "text/plain")},
+        cookies=user_cookies, headers=_csrf(user_cookies),
+    )
+    frage = _message(db, conversation, "user", "Warum startet der Server nicht?")
+    bind_to_message(
+        db, conversation_id=conversation.id, user_id=regular_user.id, message_id=frage.id
+    )
+    db.commit()
+    _message(db, conversation, "assistant", "Der Port ist belegt.")
+
+    # Der zweite hängt noch als Chip über dem Eingabefeld und gehört zu keiner
+    # Nachricht. Auch er fällt, denn über die Unterhaltung zählt er weiter gegen
+    # das Limit.
+    client.post(
+        "/api/ai/conversation/attachments",
+        files={"file": ("noch_offen.log", b"Ungesendete Datei\n", "text/plain")},
+        cookies=user_cookies, headers=_csrf(user_cookies),
+    )
+    assert db.query(AiAttachment).count() == 2
+
+    clear_history(db, conversation)
+    db.commit()
+
+    assert db.query(AiAttachment).count() == 0
+    assert db.query(AiMessage).count() == 0
+    # Die Unterhaltung selbst ist die Identität des Chats und bleibt.
+    assert db.get(AiConversation, conversation.id) is not None

@@ -75,6 +75,32 @@ function mitWerkzeug(
 }
 
 /**
+ * Dasselbe für den Denktext — anhängen, solange gedacht wird.
+ *
+ * Er lief früher in ein flaches Feld neben den Abschnitten. Damit gab es nur
+ * eine mögliche Stelle, ihn zu zeichnen: ganz oben. Die Gedanken der dritten
+ * Runde standen dann über dem Text der ersten, der dort seit zwölf Sekunden
+ * stand.
+ */
+function mitDenken(abschnitte: AiSection[] | null | undefined, stueck: string): AiSection[] {
+  const bisher = abschnitte ?? []
+  const letzter = bisher[bisher.length - 1]
+  if (letzter?.art === 'denken') {
+    return [
+      ...bisher.slice(0, -1),
+      { ...letzter, inhalt: (letzter.inhalt ?? '') + stueck },
+    ]
+  }
+  return [...bisher, { art: 'denken', inhalt: stueck }]
+}
+
+/** Ein gezeichneter Block: ein Absatz, ein Denkkasten oder eine Werkzeuggruppe. */
+type Teil =
+  | { art: 'text'; inhalt: string }
+  | { art: 'denken'; inhalt: string }
+  | { art: 'tools'; werkzeuge: AiToolUse[] }
+
+/**
  * Fasst **aufeinanderfolgende** Werkzeuge zu einer Gruppe zusammen.
  *
  * Der Betreiber wollte die Werkzeuge vergangener Nachrichten sehen, aber
@@ -82,20 +108,22 @@ function mitWerkzeug(
  * folgt: eine einzige Liste am Ende der Blase waere eingeklappt zwar
  * uebersichtlich, verloere aber genau die Zuordnung, um die es geht — welcher
  * Satz vor welchem Aufruf stand.
+ *
+ * Text und Denkkästen werden **nicht** gruppiert: sie stehen für sich, und
+ * zwei Denkkästen hintereinander kann es ohnehin nicht geben — der Vermittler
+ * hängt an den laufenden Abschnitt an.
  */
-function gruppiert(abschnitte: AiSection[]): (
-  | { art: 'text'; inhalt: string }
-  | { art: 'tools'; werkzeuge: AiToolUse[] }
-)[] {
-  const raus: (
-    | { art: 'text'; inhalt: string }
-    | { art: 'tools'; werkzeuge: AiToolUse[] }
-  )[] = []
+function gruppiert(abschnitte: AiSection[]): Teil[] {
+  const raus: Teil[] = []
   for (const abschnitt of abschnitte) {
     if (abschnitt.art === 'tool' && abschnitt.werkzeug) {
       const letzte = raus[raus.length - 1]
       if (letzte?.art === 'tools') letzte.werkzeuge.push(abschnitt.werkzeug)
       else raus.push({ art: 'tools', werkzeuge: [abschnitt.werkzeug] })
+    } else if (abschnitt.art === 'denken' && abschnitt.inhalt) {
+      // Leere Denkabschnitte fallen weg wie leere Textabschnitte: ein Kasten
+      // ohne Inhalt behauptet eine Überlegung, die es nicht gab.
+      raus.push({ art: 'denken', inhalt: abschnitt.inhalt })
     } else if (abschnitt.art === 'text' && abschnitt.inhalt) {
       raus.push({ art: 'text', inhalt: abschnitt.inhalt })
     }
@@ -646,8 +674,13 @@ export function AiChat() {
           sections: mitText(message.sections, data.content),
         }))
       } else if (name === 'reasoning') {
+        // In die Gliederung, an ihre Stelle — nicht in ein flaches Feld
+        // daneben. `message.reasoning` bleibt dabei leer und wird erst durch
+        // einen Abzug gesetzt; gezeichnet wird ohnehin aus den Abschnitten,
+        // und zwei mitgeführte Fassungen desselben Textes liefen früher oder
+        // später auseinander.
         aendere(aktuell!, (message) => ({
-          ...message, reasoning: (message.reasoning ?? '') + data.content,
+          ...message, sections: mitDenken(message.sections, data.content),
         }))
       } else if (name === 'question') {
         // Die Frage gehoert an die Antwort, nicht neben sie. Als eigener
@@ -1038,28 +1071,21 @@ export function AiChat() {
                     <Bot className="h-3.5 w-3.5" aria-hidden="true" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    {/* Ab dem ersten Augenblick da, nicht erst wenn Denktext
-                        kam. Der Betreiber meldete "der Nachdenken-Block kam
-                        erst am Ende" — und gemessen stimmte das: die ersten
-                        Denkzeichen trafen nach 6,5 s ein, in einem Fall erst
-                        nach 29 s und damit lange nach dem ersten Antworttext.
-                        Bis dahin stand hier nichts, und dann sprang oben ein
-                        Kasten hinein, den es vorher nicht gab.
-
-                        Ist am Ende kein Denktext gekommen — viele Modelle
-                        rechnen ihn ab, geben ihn aber nicht heraus —, faellt
-                        der Block weg, statt leer stehenzubleiben. */}
-                    {(message.reasoning || isStreaming) && (
-                      <AiReasoningBlock
-                        content={message.reasoning ?? ''}
-                        streaming={isStreaming}
-                      />
+                    {/* Nachrichten aus der Zeit vor den Denkabschnitten: dort
+                        gibt es die Gedanken nur am Stück, ohne jede Stelle.
+                        Dann steht der Kasten wie früher oben — besser als gar
+                        nicht, und es ist die einzige Anordnung, die sich für
+                        sie nicht raten lässt. Alles Neuere zeichnet unten in
+                        `teile` einen Block je Runde. */}
+                    {message.reasoning && !teile?.some((teil) => teil.art === 'denken') && (
+                      <AiReasoningBlock content={message.reasoning} streaming={false} />
                     )}
-                    {teile ? (
-                      // Der Zug in seiner tatsaechlichen Reihenfolge: Satz,
-                      // Werkzeuge, Satz, Werkzeuge. Genau so ist er entstanden,
-                      // und genau so hat der Benutzer ihn live gesehen — nach
-                      // einem Neuladen soll er nicht anders aussehen.
+                    {teile?.length ? (
+                      // Der Zug in seiner tatsaechlichen Reihenfolge: Gedanke,
+                      // Satz, Werkzeuge, Gedanke, Satz. Genau so ist er
+                      // entstanden, und genau so hat der Benutzer ihn live
+                      // gesehen — nach einem Neuladen soll er nicht anders
+                      // aussehen.
                       <div className="space-y-3">
                         {teile.map((teil, stelle) => (
                           teil.art === 'tools' ? (
@@ -1079,6 +1105,16 @@ export function AiChat() {
                               // den Verlauf nicht zustellen soll.
                               offenVoreingestellt={isStreaming}
                             />
+                          ) : teil.art === 'denken' ? (
+                            <AiReasoningBlock
+                              key={stelle}
+                              content={teil.inhalt}
+                              // Nur der letzte Block denkt noch. Alle früheren
+                              // sind abgeschlossen und klappen zu — sonst
+                              // pulsten drei Kästen gleichzeitig und
+                              // behaupteten dasselbe.
+                              streaming={isStreaming && stelle === teile.length - 1}
+                            />
                           ) : (
                             <AiMarkdown key={stelle} content={teil.inhalt} />
                           )
@@ -1087,10 +1123,21 @@ export function AiChat() {
                     ) : message.content ? (
                       <AiMarkdown content={message.content} />
                     ) : isStreaming ? (
-                      <p className="flex items-center gap-2 text-sm text-on-surface-variant">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                        {t('ai.chat.thinking')}
-                      </p>
+                      // Noch ist nichts da. **Eine** Anzeige für diese
+                      // Wartezeit, nicht zwei: wurde Nachdenken angefordert,
+                      // ist der Denkkasten der Ort, an dem gleich etwas
+                      // passiert — er stand hier zuletzt zusätzlich zu
+                      // "Antwort wird erstellt …". War Nachdenken aus (die
+                      // Voreinstellung), behauptete er außerdem "Denkt nach …",
+                      // obwohl nie ein Zeichen kam.
+                      denken.an ? (
+                        <AiReasoningBlock content="" streaming />
+                      ) : (
+                        <p className="flex items-center gap-2 text-sm text-on-surface-variant">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                          {t('ai.chat.thinking')}
+                        </p>
+                      )
                     ) : message.question ? null : (
                       // Eine Rueckfrage *ist* die Antwort. Frueher stand hier
                       // "Keine Antwort erhalten" unter jeder gestellten Frage,

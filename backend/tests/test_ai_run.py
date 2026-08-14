@@ -616,6 +616,83 @@ def test_text_around_a_tool_call_does_not_run_together() -> None:
     assert abzug.inhalt == "Ich sehe nach.\n\nDrei laufen."
 
 
+def test_thoughts_keep_their_place_in_the_section_list() -> None:
+    """Der Denktext ist ein Abschnitt an seiner Stelle, kein Feld daneben.
+
+    Er lag zuletzt flach neben ``abschnitte``, und die Oberfläche konnte ihn
+    deshalb nur als **einen** Kasten über allem zeichnen: die Gedanken der
+    dritten Runde standen über dem Text der ersten, der dort seit zwölf
+    Sekunden stand.
+
+    ``denken`` bleibt daneben bestehen — als Ableitung, wie ``inhalt`` es
+    längst ist. Genau diese Zeichenkette geht in ``AiMessage.reasoning`` und
+    von dort in die Berichtsmail; sie muss Zeichen für Zeichen dieselbe sein
+    wie vorher.
+    """
+    ai_run_broker.zuruecksetzen_fuer_tests()
+    ai_run_broker.eroeffnen("lauf-denken")
+
+    ai_run_broker.veroeffentlichen("lauf-denken", "reasoning", {"content": "Ich pruefe "})
+    ai_run_broker.veroeffentlichen("lauf-denken", "reasoning", {"content": "die Ports."})
+    ai_run_broker.veroeffentlichen("lauf-denken", "delta", {"content": "Ich sehe nach."})
+    ai_run_broker.veroeffentlichen(
+        "lauf-denken", "tool", {"name": "server_uebersicht", "gruppe": "server"}
+    )
+    ai_run_broker.veroeffentlichen("lauf-denken", "reasoning", {"content": "Jetzt die Logs."})
+
+    abzug, _ = ai_run_broker.abonnieren("lauf-denken")
+    assert [abschnitt["art"] for abschnitt in abzug.abschnitte] == [
+        "denken", "text", "tool", "denken",
+    ]
+    # Die Bruchstücke einer Runde gehören nahtlos aneinander, die Runden
+    # bleiben getrennt.
+    assert abzug.abschnitte[0]["inhalt"] == "Ich pruefe die Ports."
+    assert abzug.abschnitte[3]["inhalt"] == "Jetzt die Logs."
+    # Die Ableitung: dieselbe Zeichenkette wie beim früheren flachen Feld.
+    assert abzug.denken == "Ich pruefe die Ports.Jetzt die Logs."
+    assert abzug.als_ereignis()["reasoning"] == "Ich pruefe die Ports.Jetzt die Logs."
+
+
+def test_a_new_segment_drops_the_thoughts_with_the_sections() -> None:
+    """Ein neues Segment schreibt eine neue Nachricht — auch für die Gedanken.
+
+    Das Leeren stand früher als eigene Zeile im Vermittler. Es fällt jetzt mit
+    der Abschnittsliste weg, und genau das muss zugesichert bleiben: bliebe der
+    Denktext stehen, trüge die Fortsetzung nach einer Bestätigung die
+    Überlegungen der vorherigen Nachricht.
+    """
+    ai_run_broker.zuruecksetzen_fuer_tests()
+    ai_run_broker.eroeffnen("lauf-segment")
+    ai_run_broker.veroeffentlichen("lauf-segment", "reasoning", {"content": "Erste Runde."})
+
+    ai_run_broker.neues_segment("lauf-segment")
+
+    abzug, _ = ai_run_broker.abonnieren("lauf-segment")
+    assert abzug.abschnitte == []
+    assert abzug.denken == ""
+
+
+def test_a_stored_thought_section_is_redacted_like_the_flat_field() -> None:
+    """Die Schwärzung darf die neue Gliederung nicht verpassen.
+
+    ``message.reasoning`` wird beim Abschluss geschwärzt und gekürzt — ein
+    Modell kann in seinen Überlegungen denselben Schlüssel wiederholen wie in
+    der Antwort. Wandert derselbe Text zusätzlich als Abschnitt in
+    ``sections_json`` und zeichnet die Oberfläche von dort, wäre die
+    Schwärzung ohne diesen Schritt stillschweigend ausgehebelt.
+    """
+    roh = ai_run_broker.denk_abschnitt("Der Key sk-abcdefghijklmnopqrst passt.")
+
+    abgelegt = ai_stream_service._abschnitt_fuer_ablage(roh)
+
+    assert "sk-abcdefghijklmnopqrst" not in abgelegt["inhalt"]
+    assert "[REDACTED_TOKEN]" in abgelegt["inhalt"]
+    # Text und Werkzeuge gehen unverändert durch — sie tragen keine eigene
+    # Schwärzung, und hier eine zu erfinden wäre eine zweite Wahrheit.
+    unveraendert = ai_run_broker.text_abschnitt("Alles in Ordnung.")
+    assert ai_stream_service._abschnitt_fuer_ablage(unveraendert) == unveraendert
+
+
 @pytest.mark.asyncio
 async def test_a_failed_action_still_lets_the_run_speak(
     db: Session,

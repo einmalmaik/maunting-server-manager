@@ -421,12 +421,14 @@ class NodeClient:
         data = self._request("GET", f"/containers/{quote(name, safe='')}/logs", params={"tail": tail})
         return str(data.get("logs", ""))
 
-    def exec_in_container(self, name: str, command: list[str]) -> dict[str, Any]:
+    def exec_in_container(
+        self, name: str, command: list[str], timeout: float = _LONG_TIMEOUT
+    ) -> dict[str, Any]:
         return self._request(
             "POST",
             f"/containers/{quote(name, safe='')}/exec",
             json={"command": command},
-            timeout=_LONG_TIMEOUT,
+            timeout=timeout,
         )
 
     def update_container_resources(self, name: str, updates: dict[str, int | None]) -> dict[str, Any]:

@@ -1,7 +1,16 @@
 from unittest.mock import MagicMock, patch
 import pytest
+from services import update_service
 from services.update_service import get_update_status, trigger_panel_update, trigger_node_updates
 from models import Node
+
+
+@pytest.fixture(autouse=True)
+def _leerer_zwischenspeicher():
+    """Jeder Test startet und endet mit leerem Update-Zwischenspeicher."""
+    update_service._STATUS_CACHE.clear()
+    yield
+    update_service._STATUS_CACHE.clear()
 
 
 @patch("subprocess.run")
@@ -33,6 +42,59 @@ def test_get_update_status_update_available(mock_run):
     assert res["local_sha"] == "localsha"
     assert res["remote_sha"] == "remotesh"
     assert res["branch"] == "main"
+
+
+@patch("subprocess.run")
+def test_zweiter_aufruf_startet_kein_zweites_git_fetch(mock_run):
+    """Innerhalb der TTL darf kein weiterer Netzaufruf entstehen."""
+    mock_run.side_effect = [
+        MagicMock(returncode=0),
+        MagicMock(returncode=0, stdout="localsha\n"),
+        MagicMock(returncode=0, stdout="remotesh\n"),
+    ]
+
+    erster = get_update_status()
+    zweiter = get_update_status()
+
+    assert zweiter == erster
+    assert mock_run.call_count == 3
+
+
+@patch("subprocess.run")
+def test_aufrufer_bekommt_eine_kopie_des_zwischenspeichers(mock_run):
+    """Der Aufrufer ergänzt Felder (z. B. updates_automatic) am Ergebnis."""
+    mock_run.side_effect = [
+        MagicMock(returncode=0),
+        MagicMock(returncode=0, stdout="localsha\n"),
+        MagicMock(returncode=0, stdout="remotesh\n"),
+    ]
+
+    erster = get_update_status()
+    erster["updates_automatic"] = True
+
+    assert "updates_automatic" not in get_update_status()
+
+
+@patch("services.update_service.create_panel_backup")
+@patch("subprocess.Popen")
+@patch("subprocess.run")
+def test_trigger_panel_update_leert_den_zwischenspeicher(mock_run, mock_popen, mock_backup, db):
+    """Nach dem Anstoßen eines Updates zählt nur noch der frische Stand."""
+    mock_backup.return_value = MagicMock(local_path="backups/panel/backup.tar.gz")
+    mock_run.side_effect = [
+        MagicMock(returncode=0),
+        MagicMock(returncode=0, stdout="alterloc\n"),
+        MagicMock(returncode=0, stdout="neuerrem\n"),
+        MagicMock(returncode=0),
+        MagicMock(returncode=0, stdout="neuerrem\n"),
+        MagicMock(returncode=0, stdout="neuerrem\n"),
+    ]
+
+    assert get_update_status()["update_available"] is True
+    trigger_panel_update(db)
+
+    assert get_update_status()["update_available"] is False
+    assert mock_run.call_count == 6
 
 
 @patch("services.update_service.create_panel_backup")

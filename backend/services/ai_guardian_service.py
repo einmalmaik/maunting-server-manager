@@ -518,11 +518,60 @@ async def vorfaelle_bearbeiten(db: Session) -> int:
     uebrigen nicht mitnehmen, und der Auftrag darf unter keinen Umstaenden
     durchschlagen: er laeuft neben der Guardian-Reconciliation, und ein
     abgebrochener Scheduler-Auftrag zieht keine Vorfaelle mehr ein.
+
+    **Das Fenster nimmt nur behandelbare Vorfälle auf.** Es sind die zwanzig
+    ältesten offenen, und offen bleibt ein Vorfall auch dann, wenn niemand ihn
+    je heilen wird: `quarantined` ist der Zustand, in dem die Guardian-Engine
+    aufgegeben hat, und von allein wechselt er nie. Ohne die beiden Filter unten
+    genügten zwanzig solcher Dauerbeleger, um das Fenster für immer zu
+    schließen — jeder neue Vorfall stünde dahinter und käme nie an die Reihe.
+    Der Schalter stünde auf an, das Panel zeigte ihn als an, und es passierte
+    nichts.
+
+    Beide Filter **verkleinern nur**. Sie entscheiden nichts: die Freigabe
+    beurteilt weiterhin allein `zustaendiger_freigeber` über `resolve_grant`,
+    und die Bedingung hier ist wörtlich dieselbe wie dessen Kandidatenabfrage.
+    Wer sie enger fasst, macht aus einer Beschleunigung eine stille
+    Rechteänderung.
     """
+    from models import AiAutonomyGrant
+
+    from sqlalchemy import or_
+
+    # Schon geheilt — von wem auch immer. Zweimal denselben Vorfall zu heilen
+    # wäre ohnehin doppelte Arbeit, und die Zeile verschwindet nie von selbst.
+    schon_geheilt = (
+        db.query(AiGuardianNotice.id)
+        .filter(
+            AiGuardianNotice.incident_id == Incident.id,
+            AiGuardianNotice.mode == "healing",
+        )
+        .exists()
+    )
+    # Wortgleich mit der Kandidatenabfrage in `zustaendiger_freigeber` — inklusive
+    # `IS NULL OR = id` statt `IN (None, id)`, siehe den Kommentar dort.
+    freigabe_moeglich = (
+        db.query(AiAutonomyGrant.id)
+        .join(User, User.id == AiAutonomyGrant.user_id)
+        .filter(
+            User.is_active.is_(True),
+            AiAutonomyGrant.enabled.is_(True),
+            or_(
+                AiAutonomyGrant.server_id.is_(None),
+                AiAutonomyGrant.server_id == Incident.server_id,
+            ),
+        )
+        .exists()
+    )
+
     behandelt = 0
     vorfaelle = (
         db.query(Incident)
-        .filter(Incident.status.in_(OFFENE_ZUSTAENDE))
+        .filter(
+            Incident.status.in_(OFFENE_ZUSTAENDE),
+            ~schon_geheilt,
+            freigabe_moeglich,
+        )
         .order_by(Incident.created_at.asc())
         .limit(MAX_VORFAELLE_JE_DURCHLAUF * 4)
         .all()

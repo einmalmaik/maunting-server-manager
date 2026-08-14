@@ -40,6 +40,40 @@ def test_run_in_container_delegates_to_docker_exec_in(monkeypatch):
     assert seen["timeout"] == 30
 
 
+def test_exec_in_reicht_den_timeout_an_die_node_weiter(monkeypatch):
+    """Der Blueprint-Wert muss auf der Node ankommen, nicht nur in der Signatur.
+
+    Früher setzte ``exec_in_container`` fest zehn Minuten. Ein hängender
+    Befehl blockierte damit bis zu 600 Sekunden, obwohl der Betreiber im
+    Blueprint etwas ganz anderes eingetragen hatte.
+    """
+    from services import docker_service
+
+    gesehen: dict = {}
+
+    class FakeNodeClient:
+        @staticmethod
+        def from_node(_node):
+            return FakeNodeClient()
+
+        def exec_in_container(self, name, command, timeout):
+            gesehen["name"] = name
+            gesehen["command"] = command
+            gesehen["timeout"] = timeout
+            return {"ok": True, "stdout": "", "stderr": ""}
+
+    import services.node_client as node_client_module
+
+    monkeypatch.setattr(node_client_module, "NodeClient", FakeNodeClient)
+
+    result = docker_service.exec_in(
+        "msm-server-7", ["ls"], timeout=45, node=object()
+    )
+
+    assert result["ok"] is True
+    assert gesehen["timeout"] == 45.0
+
+
 def test_run_in_container_passes_argv_verbatim_no_shell_escape(monkeypatch):
     """Sicherheits-kritisch: ein ``;`` im argv wird als literaler Filename
     behandelt, NICHT als Shell-Metazeichen. Der Befehl geht als argv-Liste an

@@ -71,9 +71,11 @@ const FIELD_DEFINITIONS: Array<{
    */
   ranks?: readonly string[]
 }> = [
-  { key: 'daily_token_limit', labelKey: 'aiSettings.dailyTokens', max: 1_000_000_000_000, step: 1_000 },
-  { key: 'weekly_token_limit', labelKey: 'aiSettings.weeklyTokens', max: 1_000_000_000_000, step: 10_000 },
-  { key: 'monthly_token_limit', labelKey: 'aiSettings.monthlyTokens', max: 1_000_000_000_000, step: 10_000 },
+  // Muss `TOKEN_LIMIT_MAX` im Backend entsprechen: die Tokenspalten sind
+  // PostgreSQL INTEGER, hoehere Werte wuerden beim Speichern abbrechen.
+  { key: 'daily_token_limit', labelKey: 'aiSettings.dailyTokens', max: 2_147_483_647, step: 1_000 },
+  { key: 'weekly_token_limit', labelKey: 'aiSettings.weeklyTokens', max: 2_147_483_647, step: 10_000 },
+  { key: 'monthly_token_limit', labelKey: 'aiSettings.monthlyTokens', max: 2_147_483_647, step: 10_000 },
   { key: 'requests_per_minute', labelKey: 'aiSettings.requestsPerMinute', max: 10_000, step: 1 },
   { key: 'concurrent_operations', labelKey: 'aiSettings.concurrentOperations', max: 100, step: 1 },
   { key: 'monthly_cost_limit_cents', labelKey: 'aiSettings.monthlyCostCents', max: 1_000_000_000, step: 100 },
@@ -180,7 +182,7 @@ export function AiTab() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <AiProvidersSettings canWrite={canWrite} />
       {/* Direkt unter der Providerwahl: wie groß der Kontext ist, entscheidet
           das dort gewählte Modell — einzustellen bleibt nur, wie voll er werden

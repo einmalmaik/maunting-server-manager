@@ -14,9 +14,13 @@ from services.rate_limit_settings import dynamic_global_limit_provider
 # default_limits als Callable: slowapi wertet den String pro Request neu aus,
 # sodass gespeicherte Admin-Werte ohne Restart greifen. Bei Lesefehler/ungültig
 # liefert dynamic_global_limit_provider den Default 100 (fail-closed).
+# key_style="endpoint" zählt pro Routenfunktion statt pro URL-Pfad. Ohne das
+# bekommt jeder parametrisierte Pfad (/api/servers/{id}/status) einen eigenen
+# Zähler, und das Limit lässt sich durch Variieren der ID beliebig umgehen.
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=[dynamic_global_limit_provider],
     storage_uri=settings.redis_url or None,
     in_memory_fallback_enabled=True,
+    key_style="endpoint",
 )

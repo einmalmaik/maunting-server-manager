@@ -297,67 +297,6 @@
       "user": "Usuario"
     }
   },
-  "permissions": {
-    "users": {
-      "read": "Ver lista de usuarios",
-      "manage": "Crear, editar, eliminar usuarios",
-      "permissions": {
-        "manage": "Administrar roles de usuario y permisos de servidor"
-      }
-    },
-    "roles": {
-      "manage": "Crear, editar, eliminar roles"
-    },
-    "panel": {
-      "settings": {
-        "read": "Leer la configuración del panel",
-        "write": "Cambiar la configuración del panel (Steam, correo electrónico,...)"
-      }
-    },
-    "servers": {
-      "create": "Crear un nuevo servidor",
-      "delete": "Eliminar servidores (globales, no delegables)"
-    },
-    "system": {
-      "view": "Ver recursos del sistema, interfaces y versión."
-    },
-    "server": {
-      "view": "Ver servidor en lista y detalle",
-      "start": "Iniciar servidor",
-      "stop": "Detener servidor",
-      "restart": "Reiniciar el servidor",
-      "install": "Instalar o reinstalar el servidor",
-      "config": {
-        "write": "Editar la configuración del servidor (nombre, reinicio automático, programación de copias de seguridad)"
-      },
-      "network": {
-        "manage": "Cambiar puertos y vincular IP"
-      },
-      "resources": {
-        "manage": "Cambiar los límites de CPU/RAM/disco"
-      },
-      "console": {
-        "read": "Leer consola y registros",
-        "write": "Enviar comandos a la consola"
-      },
-      "files": {
-        "read": "Leer y descargar archivos",
-        "write": "Cargar, crear, editar, extraer archivos",
-        "delete": "Eliminar archivos"
-      },
-      "backups": {
-        "read": "Listar copias de seguridad",
-        "create": "Crear copia de seguridad",
-        "restore": "Restaurar copia de seguridad",
-        "delete": "Eliminar copia de seguridad"
-      },
-      "mods": {
-        "read": "Lista de mods, taller de búsqueda.",
-        "write": "Suscríbete, elimina y reordena mods",
-        "toggle": "Activar o desactivar mods"
-      }
-    }
-  },
   "serverPermissions": {
     "title": "Permisos",
     "subtitle": "¿Quién puede hacer qué en este servidor?",

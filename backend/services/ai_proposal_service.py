@@ -1450,9 +1450,19 @@ def create_proposal(
 
     server: Server | None = None
     if tool_name == "propose_blueprint_change":
+        # Das Recht vor der Nutzlast, aus demselben Grund wie 150 Zeilen tiefer:
+        # `_blueprint_change_payload` liest den Bestand und reicht die Meldung
+        # des Blueprint-Dienstes wörtlich durch. Ohne diese Zeile unterschiede
+        # ein Benutzer ohne `blueprints.manage` vorhandene von erfundenen
+        # Blueprint-Kennungen an der Fehlermeldung.
+        _require_tool_permission(db, user, None, tool_name, rest)
         payload, preview = _blueprint_change_payload(rest)
         expected_revision = None
     elif tool_name == "propose_server_create":
+        # Dasselbe: `_server_create_payload` schlägt die `node_id` im Bestand
+        # nach, "Unbekannte Node" wäre sonst eine Auskunft an jemanden ohne
+        # `servers.create`.
+        _require_tool_permission(db, user, None, tool_name, rest)
         payload, preview = _server_create_payload(db, arguments)
         expected_revision = None
     elif tool_name == "propose_hoster_integration":

@@ -15,43 +15,33 @@ nichts oder etwas an jemanden, der es abbestellt hat.
 **Wie komme ich aus synchronem Code an einen asynchronen Versand?** Der Aufruf
 kommt aus `_lauf_abschliessen`, das je nach Weg bereits auf der Ereignisschleife
 der Anwendung steht. `asyncio.run` ist dort ein Fehler, `await` geht nicht, weil
-die Funktion kein `async def` ist. Bleibt ein eigener Thread mit eigener
-Schleife — dreimal fast gleich geschrieben ist dreimal die Gelegenheit, den
-Rueckgabewert zu verschlucken.
+die Funktion kein `async def` ist. Die Antwort war lange ein eigener Thread mit
+eigener Schleife je Mail. Sie war falsch: ein Thread je Mail war tragbar,
+solange Mails einzeln entstanden, aber seit es stehende Aufträge gibt, entstehen
+sie in Bündeln. Zehntausend Aufgaben, alle auf 18:00 gestellt, waren zehntausend
+Threads mit zehntausend Ereignisschleifen — und darunter zehntausend frische
+SMTP-Verbindungen, denn `aiosmtplib.send` baut je Aufruf eine neue auf. Kein
+Anbieter nimmt das an. Schlimmer noch war, was danach geschah: der Versand endete
+in `except Exception: return False`, und die Nachricht existierte danach nirgends
+mehr.
 
-Genau der Rueckgabewert ist der Punkt: `EmailService.send_email` wirft nie und
-gibt bei jedem Problem `False` zurueck. Ohne Auswertung waere die Zusage "der
-Benutzer wird informiert" weder erfuellt noch nachpruefbar, und im Log stuende
-nichts.
+Deshalb legt `zustellen` nur noch eine Zeile in `ai_mail_outbox` an — synchron,
+in Millisekunden, ohne Thread. Den Versand macht ein einziger begrenzter
+Arbeiter (`services/ai_mail_outbox.py`), und was scheitert, bleibt liegen und
+wird noch einmal versucht. Der Thread-Weg steht nicht mehr daneben: ein zweiter,
+schlechterer Weg, den niemand mehr fährt, wird irgendwann versehentlich wieder
+gefahren.
 
 **Nicht** hier drin: wie eine Mail aussieht. Das bleibt bei `EmailService` —
 dieses Modul entscheidet, *ob* und *wie* zugestellt wird, nicht *was*.
-
-**Die zweite Frage ist inzwischen anders beantwortet.** Ein Thread je Mail war
-tragbar, solange Mails einzeln entstanden. Seit es stehende Auftraege gibt,
-entstehen sie in Buendeln: zehntausend Aufgaben, alle auf 18:00 gestellt, waren
-zehntausend Threads mit zehntausend Ereignisschleifen — und darunter
-zehntausend frische SMTP-Verbindungen, denn `aiosmtplib.send` baut je Aufruf
-eine neue auf. Kein Anbieter nimmt das an. Schlimmer noch war, was danach
-geschah: der Versand endete in `except Exception: return False`, und die
-Nachricht existierte danach nirgends mehr.
-
-Deshalb legt `zustellen` heute nur noch eine Zeile in `ai_mail_outbox` an —
-synchron, in Millisekunden, ohne Thread. Den Versand macht ein einziger
-begrenzter Arbeiter (`services/ai_mail_outbox.py`), und was scheitert, bleibt
-liegen und wird noch einmal versucht.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Awaitable, Callable
 
 from sqlalchemy.orm import Session
 
@@ -197,46 +187,7 @@ def einreihen(
     return zeile.id
 
 
-#: Wieviele Mails des Koroutinenwegs gleichzeitig unterwegs sein duerfen.
-#: Fuenf, weil dahinter eine SMTP-Verbindung je Mail steht und kein Anbieter
-#: mehr als eine Handvoll gleichzeitig zulaesst — und weil in derselben
-#: Koroutine der Verfassungsschritt liegt, also auch ein Modellaufruf.
-MAX_GLEICHZEITIGE_MAILS = 5
-
-_pool: ThreadPoolExecutor | None = None
-_pool_schloss = threading.Lock()
-
-
-def _ARBEITER() -> ThreadPoolExecutor:
-    """Der begrenzte Arbeitsstock fuer den Koroutinenweg.
-
-    Hier stand ``threading.Thread(...).start()`` — **ein eigener Betriebssystem-
-    Thread mit eigener Ereignisschleife je Mail**, ohne jede Obergrenze. Bei
-    einem Panel mit vielen Kunden ist das kein theoretischer Fall: Tagesberichte
-    stehen zur vollen Stunde an, und zehntausend gleichzeitig faellige Auftraege
-    haetten zehntausend Threads erzeugt, jeden mit eigener Schleife und eigener
-    frischer SMTP-Verbindung. Der Prozess waere vorher gestorben.
-
-    Ein Stock mit fester Groesse dreht das um: die ueberzaehligen Mails warten in
-    der Schlange statt jede einen Thread zu bekommen. Verloren geht dabei
-    nichts, es dauert nur laenger — und genau so herum ist es richtig.
-
-    Traege angelegt und nicht beim Import: ein Arbeitsstock, der in jedem
-    Testlauf und in jedem Hilfsskript entsteht, kostet Threads fuer nichts.
-    """
-    global _pool
-    if _pool is None:
-        with _pool_schloss:
-            if _pool is None:
-                _pool = ThreadPoolExecutor(
-                    max_workers=MAX_GLEICHZEITIGE_MAILS,
-                    thread_name_prefix="ai-mail",
-                )
-    return _pool
-
-
 def zustellen(
-    bauen: Callable[[], Awaitable[bool]] | None = None,
     *,
     name: str,
     db: Session | None = None,
@@ -247,58 +198,36 @@ def zustellen(
     fakten: str | None = None,
     rahmen: dict | None = None,
 ) -> None:
-    """Uebergibt eine Mail an den Versand. Wirft nie.
+    """Übergibt eine Mail an den Ausgangskorb. Wirft nie.
 
-    Es gibt zwei Wege hinein, und der Unterschied ist nicht Geschmack:
+    Es gibt genau einen Weg hinein: ``db``, ``user_id``, ``betreff`` und
+    ``text`` angegeben. Dann entsteht eine Zeile in `ai_mail_outbox` und der
+    Arbeiter verschickt sie. ``name`` wird zum ``anlass`` der Zeile. ``fakten``
+    und ``rahmen`` sind optional: liegen sie an, lässt der Arbeiter den Text
+    vom Modell schreiben, statt den mitgegebenen zu nehmen.
 
-    **Der Korbweg** — ``db``, ``user_id``, ``betreff`` und ``text`` angegeben.
-    Dann entsteht eine Zeile in `ai_mail_outbox` und der Arbeiter verschickt
-    sie. Das ist der Weg fuer alles, was in Buendeln anfaellt, also fuer jeden
-    KI-Bericht. ``name`` wird zum ``anlass`` der Zeile. ``fakten`` und
-    ``rahmen`` sind optional: liegen sie an, laesst der Arbeiter den Text vom
-    Modell schreiben, statt den mitgegebenen zu nehmen.
+    Daneben stand bis vor kurzem ein zweiter Weg: eine Koroutinenfabrik, die in
+    einem eigenen Thread lief. Er hatte alle Nachteile, wegen derer es den Korb
+    gibt — keine Obergrenze, kein zweiter Versuch, und was scheiterte, war weg.
+    Aufrufer hatte er keine mehr, also ist er fort. Wer ihn versehentlich ruft,
+    bekommt sofort einen ``TypeError`` und damit die deutlichste aller
+    Rückmeldungen; ein stiller Verlust ist das gerade nicht.
 
-    **Der Thread-Weg** — nur ``bauen``, wie frueher. Es faehrt niemand mehr auf
-    ihm: alle drei Berichtspfade nehmen den Korb, seit der Verfassungsschritt
-    dorthin gewandert ist. Er bleibt trotzdem stehen, weil ein stillschweigender
-    Bruch der Signatur schlimmer waere als ein alter Pfad daneben — dieses Modul
-    wirft nie, ein falsch gerufenes `zustellen` faende also niemand. Er hat alle
-    Nachteile, wegen derer es den Korb gibt: keine Obergrenze, kein zweiter
-    Versuch, und was scheitert, ist weg. Wer eine neue Mailart baut, nimmt den
-    Korbweg.
-
-    ``bauen`` ist im Thread-Weg eine Fabrik und keine fertige Koroutine: die
-    waere an eine Ereignisschleife gebunden, die es hier nicht gibt. Der Thread
-    bekommt einen Namen — das kostet nichts und ist der Unterschied zwischen
-    einem lesbaren Stacktrace und "Thread-7".
+    **Fehlt eine der vier Korbangaben**, wird geloggt und zurückgekehrt statt
+    geworfen. Das ist Absicht: der Aufrufer ist ein Berichtspfad am Ende eines
+    KI-Laufs, und eine nicht zugestellte Mail darf diesen Lauf nicht mitnehmen.
     """
-    if db is not None and user_id is not None and betreff is not None and text is not None:
-        einreihen(
-            db,
-            user_id=user_id,
-            anlass=name,
-            betreff=betreff,
-            text=text,
-            html=html,
-            fakten=fakten,
-            rahmen=rahmen,
-        )
+    if db is None or user_id is None or betreff is None or text is None:
+        logger.warning("KI-Mail nicht zustellbar (%s): Korbangaben fehlen", name)
         return
 
-    if bauen is None:
-        logger.warning(
-            "KI-Mail nicht zustellbar (%s): weder Korbangaben noch Koroutine", name
-        )
-        return
-
-    def _lauf() -> None:
-        schleife = asyncio.new_event_loop()
-        try:
-            if not schleife.run_until_complete(bauen()):
-                logger.warning("KI-Mail konnte nicht zugestellt werden (%s)", name)
-        except Exception as exc:  # noqa: BLE001 - ein Mailfehler beendet keinen Lauf
-            logger.warning("KI-Mail fehlgeschlagen (%s): %s", name, type(exc).__name__)
-        finally:
-            schleife.close()
-
-    _ARBEITER().submit(_lauf)
+    einreihen(
+        db,
+        user_id=user_id,
+        anlass=name,
+        betreff=betreff,
+        text=text,
+        html=html,
+        fakten=fakten,
+        rahmen=rahmen,
+    )

@@ -29,7 +29,6 @@ from schemas.ai_chat import (
 )
 from services import (
     ai_chat_service,
-    ai_compaction_service,
     ai_context_service,
     ai_context_window,
     ai_reasoning,
@@ -171,7 +170,6 @@ async def get_context_status(
         window_tokens=fenster.fenster_tokens if fenster.bekannt else None,
         usable_tokens=fenster.nutzbar_tokens,
         used_tokens=belegt // je_token,
-        compaction_at_tokens=ai_compaction_service.faltschwelle(context_chars) // je_token,
         compaction_percent=ai_context_window.schwelle_prozent(),
         summarized=bool(conversation.summary),
     )
@@ -223,18 +221,25 @@ def edit_message(
 
 async def _replay_message(message: AiMessage) -> AsyncIterator[str]:
     yield sse_event("message", {"message_id": message.id, "request_id": message.request_id})
-    if message.reasoning:
-        yield sse_event("reasoning", {"content": message.reasoning})
     # Die Wiedergabe folgt der **gespeicherten Reihenfolge**, wenn es eine gibt.
     # Ein einzelnes `delta` mit dem ganzen Text waere fuer eine Antwort, die
     # zwischen ihren Absaetzen Werkzeuge gerufen hat, eine falsche Wiedergabe:
     # der Text stimmte, die Werkzeuge fehlten, und beim naechsten Neuladen
     # saehe dieselbe Nachricht wieder anders aus als eben.
     abschnitte = _sections(message)
+    # Trägt die Gliederung die Gedanken, kommen sie an ihrer Stelle. Nur für
+    # Nachrichten aus der Zeit davor gibt es sie ausschließlich flach — dann
+    # vorweg, wie bisher. Beides zugleich wäre derselbe Text zweimal.
+    if message.reasoning and not any(
+        abschnitt.art == "denken" for abschnitt in (abschnitte or [])
+    ):
+        yield sse_event("reasoning", {"content": message.reasoning})
     if abschnitte:
         for abschnitt in abschnitte:
             if abschnitt.art == "text" and abschnitt.inhalt:
                 yield sse_event("delta", {"content": abschnitt.inhalt})
+            elif abschnitt.art == "denken" and abschnitt.inhalt:
+                yield sse_event("reasoning", {"content": abschnitt.inhalt})
             elif abschnitt.art == "tool" and abschnitt.werkzeug:
                 yield sse_event("tool", abschnitt.werkzeug)
     elif message.content:

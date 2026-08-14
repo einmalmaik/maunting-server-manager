@@ -1367,7 +1367,14 @@ class GamePlugin(ABC):
             return ServerStatus(status="stopped")
 
         is_running = state["status"] == "running"
-        live_stats = docker_service.stats(name, node=node) if is_running else None
+        if not is_running:
+            live_stats = None
+        elif "cpu_percent" in state:
+            # Node-Zweig: der Agent hat CPU und RAM zusammen mit dem Zustand
+            # geliefert. Ein zweiter Aufruf wäre dieselbe Anfrage noch einmal.
+            live_stats = state
+        else:
+            live_stats = docker_service.stats(name, node=node)
         started_at = _parse_docker_started_at(state.get("started_at")) if is_running else None
         uptime_seconds = None
         if started_at is not None:

@@ -452,8 +452,19 @@ def _anwenden(db: Session, *, user: User, ziel: AiTask, felder: dict, neu: bool)
                 "Aufgabe als reinen Bericht an (kind='report')."
             )
         ziel.kind = kind
-    if neu or "channel" in felder:
-        channel = felder.get("channel")
+    # Der Zustellweg ist **keine** Pflichtangabe. Er stand bis hierher unter
+    # ``neu`` und wurde damit beim Anlegen verlangt — der Standard ``chat`` aus
+    # `_leere_aufgabe` konnte nie greifen. Gekostet hat das eine ganze Rückfrage
+    # bei jeder ersten Aufgabe („und wie möchtest du die Ergebnisse erhalten?"),
+    # also eine volle Anbieterrunde mit mehreren Sekunden Stille — für eine
+    # reine Vorliebe. Der Chat ist ohnehin da, und dort steht das Ergebnis in
+    # jedem Fall.
+    #
+    # Genannt bleibt genannt: ein unbekannter Wert wird weiterhin abgewiesen,
+    # nur das Weglassen ist jetzt erlaubt. ``None`` gilt dabei als weggelassen —
+    # ein Modell schickt ein Feld, das es kennt, lieber leer als gar nicht.
+    if felder.get("channel") is not None:
+        channel = felder["channel"]
         if channel not in KANAELE:
             raise AiActionValidationError(
                 f"Unbekannter Zustellweg. Moeglich sind: {', '.join(KANAELE)}"
@@ -482,6 +493,13 @@ def _anwenden(db: Session, *, user: User, ziel: AiTask, felder: dict, neu: bool)
 
 
 def _leere_aufgabe(user: User) -> AiTask:
+    """Der Entwurf, auf dem `_anwenden` arbeitet.
+
+    ``channel="chat"`` ist der wirksame Standard: wer nichts sagt, bekommt den
+    Chat. ``time_zone="UTC"`` ist dagegen nur ein Platzhalter — `zone_pruefen`
+    verlangt beim Anlegen eine echte Angabe, und der Platzhalter überlebt
+    keinen einzigen Aufruf.
+    """
     return AiTask(
         id=str(uuid4()),
         user_id=user.id,

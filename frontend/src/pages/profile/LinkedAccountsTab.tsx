@@ -70,12 +70,10 @@ export function LinkedAccountsTab() {
 
   return (
     <div className="msm-card p-6">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-          <Link2 className="w-5 h-5 text-secondary" />
-        </div>
+      <div className="flex items-center gap-2 mb-6">
+        <Link2 className="h-5 w-5 text-secondary" aria-hidden="true" />
         <div>
-          <h2 className="font-headline text-headline-sm text-primary">{t('profile.linkedAccounts.title')}</h2>
+          <h2 className="font-headline text-lg font-semibold text-on-surface">{t('profile.linkedAccounts.title')}</h2>
           <p className="font-body-md text-sm text-on-surface-variant mt-1">
             {t('profile.linkedAccounts.subtitle')}
           </p>

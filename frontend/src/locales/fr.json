@@ -275,67 +275,6 @@
       "user": "Utilisateur"
     }
   },
-  "permissions": {
-    "users": {
-      "read": "Afficher la liste des utilisateurs",
-      "manage": "Créer, modifier, supprimer des utilisateurs",
-      "permissions": {
-        "manage": "Gérer les rôles des utilisateurs et les autorisations du serveur"
-      }
-    },
-    "roles": {
-      "manage": "Créer, modifier, supprimer des rôles"
-    },
-    "panel": {
-      "settings": {
-        "read": "Lire les paramètres du panneau",
-        "write": "Modifier les paramètres du panneau (Steam, email, ...)"
-      }
-    },
-    "servers": {
-      "create": "Créer un nouveau serveur",
-      "delete": "Supprimer des serveurs (globaux, non délégables)"
-    },
-    "system": {
-      "view": "Afficher les ressources système, les interfaces, la version"
-    },
-    "server": {
-      "view": "Afficher le serveur en liste et en détail",
-      "start": "Démarrer le serveur",
-      "stop": "Arrêter le serveur",
-      "restart": "Redémarrer le serveur",
-      "install": "Installer ou réinstaller le serveur",
-      "config": {
-        "write": "Modifier les paramètres du serveur (nom, redémarrage automatique, planification de sauvegarde)"
-      },
-      "network": {
-        "manage": "Changer les ports et lier l'IP"
-      },
-      "resources": {
-        "manage": "Modifier les limites du CPU/RAM/disque"
-      },
-      "console": {
-        "read": "Lire la console et les journaux",
-        "write": "Envoyer des commandes à la console"
-      },
-      "files": {
-        "read": "Lire et télécharger des fichiers",
-        "write": "Télécharger, créer, modifier, extraire des fichiers",
-        "delete": "Supprimer des fichiers"
-      },
-      "backups": {
-        "read": "Liste des sauvegardes",
-        "create": "Créer une sauvegarde",
-        "restore": "Restaurer la sauvegarde",
-        "delete": "Supprimer la sauvegarde"
-      },
-      "mods": {
-        "read": "Liste des mods, recherche d'atelier",
-        "write": "Abonnez-vous, supprimez, réorganisez les mods",
-        "toggle": "Activer ou désactiver les mods"
-      }
-    }
-  },
   "serverPermissions": {
     "title": "Autorisations",
     "subtitle": "Qui peut faire quoi sur ce serveur",

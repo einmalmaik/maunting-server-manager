@@ -10,6 +10,7 @@ import { DangerZoneTab } from './profile/DangerZoneTab'
 import { AiTab } from './profile/AiTab'
 import { CredentialsTab } from './profile/CredentialsTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 
 type TabId = 'account' | 'password' | '2fa' | 'linked' | 'credentials' | 'ai' | 'danger'
 
@@ -26,12 +27,13 @@ const BASE_TABS: TabDef<TabId>[] = [
 /**
  * Profil-Orchestrator.
  *
- * Seit dem Refactor nur noch eine duenne Huelle: TabBar oben, Tab-Content unten.
+ * Seit dem Refactor nur noch eine dünne Hülle: TabBar oben, Tab-Content unten.
  * Die schwere Logik (Forms, API-Calls) liegt in den einzelnen Tab-Komponenten.
  *
- * Nutzt den gleichen TabBar-Mechanismus wie `/settings`, damit beide Seiten
- * dasselbe Verhalten, Design und i18n-Schema teilen. Aenderungen am TabBar
- * wirken damit automatisch auf beide Seiten.
+ * Nutzt dieselbe Seitenhülle wie `/settings`: `msm-page` als Breitenrahmen und
+ * `PageHeader` als Kopf, dazu denselben TabBar-Mechanismus. Damit teilen beide
+ * Seiten Verhalten, Design und i18n-Schema, und Änderungen an den zentralen
+ * Bausteinen wirken automatisch auf beide.
  */
 export function Profile() {
   const { t } = useTranslation()
@@ -44,13 +46,8 @@ export function Profile() {
   ]
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-headline text-headline-sm text-primary">{t('profile.title')}</h1>
-        <p className="font-body-md text-body-md text-on-surface-variant mt-1">
-          {t('profile.subtitle')}
-        </p>
-      </div>
+    <div className="msm-page">
+      <PageHeader eyebrow={t('pageContext.panel', 'Panel')} title={t('profile.title')} description={t('profile.subtitle')} status={<span className="msm-badge-info">{t(`profile.tabs.${activeTab}`)}</span>} />
 
       <TabBar
         tabs={tabs}

@@ -51,8 +51,15 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         name=provider.name,
         provider_kind=provider.provider_kind,
         # Abgeleitet, nicht gespeichert — eine Kopie in der Zeile wuerde nach
-        # einer Aenderung an der Registry still veralten.
-        base_url=ai_provider_service.base_url(provider),
+        # einer Aenderung an der Registry still veralten. ``None``, wenn diese
+        # Version den Anbieter nicht kennt: genau solche Zeilen parkt die
+        # Migration mit leerem `provider_kind`, und der Betreiber muss sie
+        # sehen können, um sie umzustellen oder zu löschen.
+        base_url=(
+            ai_provider_service.base_url(provider)
+            if ai_provider_registry.bekannt(provider.provider_kind)
+            else None
+        ),
         default_model=provider.default_model,
         enabled=provider.enabled,
         requires_api_key=provider.requires_api_key,

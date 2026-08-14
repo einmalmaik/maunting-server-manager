@@ -1,8 +1,9 @@
 """Backend-erzwungene KI-Kontingente pro globaler Rolle.
 
 ``None`` bedeutet bei einem vorhandenen Datensatz bewusst „unbegrenzt“.
-Fehlt der Datensatz dagegen vollständig, trägt die Rolle ein sicheres Limit
-von 0 bei. Damit schaltet ein neues Recht nicht versehentlich Kosten frei.
+Fehlt der Datensatz, trägt die Rolle nichts bei; ist gar keine Rolle des
+Benutzers konfiguriert, gilt unbegrenzt. Die Auflösungsregeln stehen
+einmalig in ``services/ai_limit_service``.
 """
 
 from datetime import datetime, timezone

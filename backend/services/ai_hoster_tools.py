@@ -32,6 +32,7 @@ gemeint ist, und genuegt nicht, um ihn zu benutzen.
 
 from __future__ import annotations
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models import HosterIntegration, HosterProduct, HosterService, Role, User
@@ -55,14 +56,21 @@ def _rollen_fuer_akteur(db: Session, akteur: User) -> list[dict]:
     """
     from services.permission_catalog import SYSTEM_ROLE_ADMIN
 
+    # Die eigenen Rechte des Akteurs einmal holen statt zweimal je geprueftem
+    # Schluessel. `has_global_permission` fragt fuer einen Nicht-Owner genau
+    # diese Menge ab, nur jedes Mal neu.
+    akteur_keys = (
+        set()
+        if akteur.is_owner
+        else set(role_service.effective_user_role_permission_keys(db, akteur))
+    )
+
     eintraege: list[dict] = []
     for rolle in role_service.list_roles(db)[:MAX_ROLLEN]:
         if rolle.is_system and rolle.name == SYSTEM_ROLE_ADMIN and not akteur.is_owner:
             continue
         keys = role_service.role_permission_keys(db, rolle.id)
-        if not akteur.is_owner and any(
-            not permission_service.has_global_permission(db, akteur, key) for key in keys
-        ):
+        if not akteur.is_owner and not set(keys) <= akteur_keys:
             continue
         eintraege.append({
             "role_id": rolle.id,
@@ -101,10 +109,13 @@ def _dienstbenutzer(db: Session) -> list[dict]:
         .limit(200)
         .all()
     )
+    # Mengenweise fragen, nicht je Kandidat: einzeln waren das 1 + 2n
+    # Abfragen, also 401 an der Obergrenze von 200.
+    berechtigt = permission_service.benutzer_mit_recht(db, kandidaten, "servers.create")
     treffer = [
         {"user_id": u.id, "username": u.username}
         for u in kandidaten
-        if permission_service.has_global_permission(db, u, "servers.create")
+        if u.id in berechtigt
     ]
     return treffer[:MAX_DIENSTBENUTZER]
 
@@ -150,13 +161,29 @@ def setup_uebersicht(db: Session, *, user: User) -> dict:
         ).all()
     }
 
+    # Zwei Zahlen je Integration, in SQL gezaehlt. Die Vertragstabelle waechst
+    # mit dem Geschaeft — sie war die einzige ungedeckelte Abfrage dieser
+    # Funktion, und ihr ganzes Ergebnis diente nur diesen beiden Summen.
+    integration_ids = [i.id for i in integrationen] or [0]
+    vertraege_gesamt = dict(
+        db.query(HosterService.integration_id, func.count())
+        .filter(HosterService.integration_id.in_(integration_ids))
+        .group_by(HosterService.integration_id)
+        .all()
+    )
+    vertraege_aktiv = dict(
+        db.query(HosterService.integration_id, func.count())
+        .filter(
+            HosterService.integration_id.in_(integration_ids),
+            HosterService.desired_state == "active",
+            HosterService.status.in_(("provisioning", "ready")),
+        )
+        .group_by(HosterService.integration_id)
+        .all()
+    )
+
     eintraege = []
     for i in integrationen:
-        vertraege = (
-            db.query(HosterService.status, HosterService.desired_state)
-            .filter(HosterService.integration_id == i.id)
-            .all()
-        )
         eintraege.append({
             "integration_id": i.id,
             "name": i.name,
@@ -174,11 +201,8 @@ def setup_uebersicht(db: Session, *, user: User) -> dict:
             # Hash und wird beim Anlegen genau einmal angezeigt.
             "api_key_hint": i.api_key_hint,
             "products": _produkte(db, i.id),
-            "contract_count": len(vertraege),
-            "active_contract_count": sum(
-                1 for status, desired in vertraege
-                if desired == "active" and status in {"provisioning", "ready"}
-            ),
+            "contract_count": vertraege_gesamt.get(i.id, 0),
+            "active_contract_count": vertraege_aktiv.get(i.id, 0),
         })
 
     ergebnis: dict = {

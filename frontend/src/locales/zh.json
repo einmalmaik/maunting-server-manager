@@ -275,67 +275,6 @@
       "user": "用户"
     }
   },
-  "permissions": {
-    "users": {
-      "read": "查看用户列表",
-      "manage": "创建、编辑、删除用户",
-      "permissions": {
-        "manage": "管理用户角色和服务器权限"
-      }
-    },
-    "roles": {
-      "manage": "创建、编辑、删除角色"
-    },
-    "panel": {
-      "settings": {
-        "read": "读取面板设置",
-        "write": "更改面板设置（Steam、电子邮件...）"
-      }
-    },
-    "servers": {
-      "create": "创建一个新服务器",
-      "delete": "删除服务器（全局，不可委托）"
-    },
-    "system": {
-      "view": "查看系统资源、接口、版本"
-    },
-    "server": {
-      "view": "查看服务器列表和详细信息",
-      "start": "启动服务器",
-      "stop": "停止服务器",
-      "restart": "重启服务器",
-      "install": "安装或重新安装服务器",
-      "config": {
-        "write": "编辑服务器设置（名称、自动重启、备份计划）"
-      },
-      "network": {
-        "manage": "更改端口并绑定IP"
-      },
-      "resources": {
-        "manage": "更改 CPU/RAM/磁盘限制"
-      },
-      "console": {
-        "read": "读取控制台和日志",
-        "write": "发送命令到控制台"
-      },
-      "files": {
-        "read": "读取和下载文件",
-        "write": "上传、创建、编辑、提取文件",
-        "delete": "删除文件"
-      },
-      "backups": {
-        "read": "列出备份",
-        "create": "创建备份",
-        "restore": "恢复备份",
-        "delete": "删除备份"
-      },
-      "mods": {
-        "read": "列出模组、搜索研讨会",
-        "write": "订阅、删除、重新排序模组",
-        "toggle": "启用或禁用模组"
-      }
-    }
-  },
   "serverPermissions": {
     "title": "权限",
     "subtitle": "谁可以在此服务器上执行什么操作",

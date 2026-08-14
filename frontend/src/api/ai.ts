@@ -5,8 +5,11 @@ export interface AiProviderAdmin {
   name: string
   /** Schluessel aus der Anbieterliste, z. B. "openrouter". */
   provider_kind: string
-  /** Abgeleitet aus dem Anbieter — nur zur Anzeige, nicht editierbar. */
-  base_url: string
+  /**
+   * Abgeleitet aus dem Anbieter — nur zur Anzeige, nicht editierbar.
+   * `null`, wenn das Panel diesen Anbieter nicht (mehr) kennt.
+   */
+  base_url: string | null
   default_model: string
   enabled: boolean
   requires_api_key: boolean
@@ -82,7 +85,15 @@ export interface AiMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
-  /** Denkschritte des Modells, sofern es welche geliefert hat. */
+  /**
+   * Denkschritte des Modells, sofern es welche geliefert hat — **die ganze
+   * Antwort am Stück**.
+   *
+   * Gezeichnet wird aus `sections`: dort steht der Denktext je Runde an seiner
+   * Stelle. Dieses Feld bleibt für Nachrichten aus der Zeit vor den
+   * Denkabschnitten (dann gibt es sie nur hier) und weil es dieselbe
+   * Zeichenkette ist, die serverseitig in die Berichtsmail geht.
+   */
   reasoning: string | null
   /**
    * Die Rueckfrage, die diese Nachricht gestellt hat.
@@ -113,16 +124,21 @@ export interface AiMessage {
 }
 
 /**
- * Ein Abschnitt einer Antwort — Text oder ein Werkzeugaufruf.
+ * Ein Abschnitt einer Antwort — Text, ein Werkzeugaufruf oder ein Denkblock.
  *
- * Zwei Formen in einem Typ statt zweier Listen, weil die **Reihenfolge
+ * Drei Formen in einem Typ statt dreier Listen, weil die **Reihenfolge
  * zwischen ihnen** die Information ist. „Ich sehe mir den Status an" —
  * Werkzeug — „der laeuft, jetzt die Logs" — Werkzeug ist etwas anderes als
  * derselbe Text mit denselben Werkzeugen davor, und genau so sah es aus,
  * solange beides getrennt gefuehrt wurde.
+ *
+ * `denken` kam zuletzt dazu, aus demselben Anlass: der Denktext lag als flaches
+ * Feld daneben, und die Oberfläche konnte ihn deshalb nur als **einen** Kasten
+ * über allem zeichnen — die Gedanken der dritten Runde standen dann über dem
+ * Text der ersten. `AiMessage.reasoning` bleibt daneben, aber als Ableitung.
  */
 export interface AiSection {
-  art: 'text' | 'tool'
+  art: 'text' | 'tool' | 'denken'
   inhalt?: string | null
   werkzeug?: AiToolUse | null
 }
@@ -345,7 +361,7 @@ export interface AiContextStatus {
   usable_tokens: number
   /** Belegt. Darf `usable_tokens` überschreiten — dann wird gleich gefaltet. */
   used_tokens: number
-  compaction_at_tokens: number
+  /** Ab wie viel Prozent Belegung zusammengefasst wird. */
   compaction_percent: number
   summarized: boolean
 }
@@ -599,7 +615,14 @@ export interface AiRunInfo {
   created_at: string
 }
 
-const STREAM_EVENTS = [
+/**
+ * Die Ereignisse, die dieser Client versteht.
+ *
+ * An die Union gebunden, damit ein neues Ereignis in `AiStreamEvent` hier
+ * auffällt, statt still zu fehlen — ohne die Bindung war die Liste eine
+ * handgepflegte Kopie.
+ */
+const STREAM_EVENTS: readonly AiStreamEvent['event'][] = [
   'message', 'delta', 'reasoning', 'tool', 'question', 'compacted',
   'proposal', 'action', 'done', 'error', 'snapshot', 'segment', 'run',
 ]
@@ -835,9 +858,12 @@ async function leseStrom(
     } catch {
       throw new Error('AI_STREAM_INVALID')
     }
-    if (!data || typeof data !== 'object' || !STREAM_EVENTS.includes(eventName)) {
-      throw new Error('AI_STREAM_INVALID')
-    }
+    if (!data || typeof data !== 'object') throw new Error('AI_STREAM_INVALID')
+    // Ein unbekannter Ereignisname ist kein kaputter Strom, sondern ein
+    // Bündel, das älter ist als das Backend. Übergehen statt werfen: sonst
+    // reißt ein neu eingeführtes Ereignis die halb geschriebene Antwort ab
+    // und markiert sie als fehlgeschlagen, während der Lauf weiterläuft.
+    if (!(STREAM_EVENTS as readonly string[]).includes(eventName)) return
     onEvent({ event: eventName, data } as AiStreamEvent)
   }
 

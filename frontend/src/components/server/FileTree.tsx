@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, File as FileIcon, Folder, Server } from 'lucide-react'
 import type { ContentMatch, FileEntry, SearchResult } from './fileWorkspaceTypes'
 import { formatBytes, joinPath, sortEntries } from './fileHelpers'
@@ -46,8 +47,19 @@ export function FileTree({
   onDragStart,
   onDropFolder,
 }: FileTreeProps) {
+  const { t } = useTranslation()
   const itemRefs = useRef(new Map<string, HTMLElement>())
   const [focusedKey, setFocusedKey] = useState(activePath ?? ROOT_KEY)
+
+  // Einmal je `nodes` sortieren statt bei jedem Render und je Verzeichnis.
+  // Der Editor schreibt bei jedem Tastendruck in den Zustand des Dateimanagers,
+  // dieser Baum rendert dabei mit — und sortierte dann jedes aufgeklappte
+  // Verzeichnis erneut, in `visibleKeys` und in `renderChildren` sogar doppelt.
+  const sortierteKinder = useMemo(() => {
+    const sortiert: Record<string, FileEntry[]> = {}
+    for (const [parent, entries] of Object.entries(nodes)) sortiert[parent] = sortEntries(entries)
+    return sortiert
+  }, [nodes])
 
   const visibleKeys = useMemo(() => {
     // Zeile im Schluessel: dieselbe Datei kann mehrfach treffen, und zwei
@@ -56,7 +68,7 @@ export function FileTree({
     if (searchResults) return searchResults.map((result) => result.path)
     const keys = [ROOT_KEY]
     const collect = (parent: string) => {
-      for (const entry of sortEntries(nodes[parent] ?? [])) {
+      for (const entry of sortierteKinder[parent] ?? []) {
         const path = joinPath(parent, entry.name)
         keys.push(path)
         if (entry.is_dir && expanded.has(path)) collect(path)
@@ -64,7 +76,7 @@ export function FileTree({
     }
     collect('')
     return keys
-  }, [contentMatches, expanded, nodes, searchResults])
+  }, [contentMatches, expanded, searchResults, sortierteKinder])
 
   useEffect(() => {
     if (activePath && visibleKeys.includes(activePath)) setFocusedKey(activePath)
@@ -142,7 +154,7 @@ export function FileTree({
   }
 
   const renderChildren = (parent: string, depth: number): React.ReactNode => {
-    const entries = sortEntries(nodes[parent] ?? [])
+    const entries = sortierteKinder[parent] ?? []
     return entries.map((entry) => {
       const path = joinPath(parent, entry.name)
       const isExpanded = entry.is_dir && expanded.has(path)
@@ -200,7 +212,7 @@ export function FileTree({
 
   if (contentMatches) {
     return (
-      <div role="tree" aria-label="Content search results" className="py-1">
+      <div role="tree" aria-label={t('files.tree.contentResults')} className="py-1">
         {searchTruncated && <p className="border-b border-outline-variant px-3 py-2 text-xs text-status-warning">{searchTruncatedLabel}</p>}
         {contentMatches.length === 0 ? (
           <p className="px-4 py-10 text-center text-xs text-on-surface-variant">{searchEmptyLabel}</p>
@@ -235,7 +247,7 @@ export function FileTree({
 
   if (searchResults) {
     return (
-      <div role="tree" aria-label="Search results" className="py-1">
+      <div role="tree" aria-label={t('files.tree.searchResults')} className="py-1">
         {searchTruncated && <p className="border-b border-outline-variant px-3 py-2 text-xs text-status-warning">{searchTruncatedLabel}</p>}
         {searchResults.length === 0 ? (
           <p className="px-4 py-10 text-center text-xs text-on-surface-variant">{searchEmptyLabel}</p>
@@ -260,7 +272,7 @@ export function FileTree({
   }
 
   return (
-    <div role="tree" aria-label="Server files" className="py-1">
+    <div role="tree" aria-label={t('files.serverFiles')} className="py-1">
       <button
         ref={registerItem(ROOT_KEY)}
         type="button"
@@ -274,7 +286,7 @@ export function FileTree({
       >
         <ChevronDown className="h-3.5 w-3.5" />
         <Server className="h-4 w-4 text-secondary" />
-        <span>Server-Dateien</span>
+        <span>{t('files.serverFiles')}</span>
       </button>
       {(nodes['']?.length ?? 0) === 0 ? <p className="px-4 py-10 text-center text-xs text-on-surface-variant">{emptyLabel}</p> : renderChildren('', 1)}
     </div>

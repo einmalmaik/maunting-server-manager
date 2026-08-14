@@ -3,6 +3,7 @@ import { Gauge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiUsageMine } from '@/api/ai'
+import { ProgressBar } from '@/Singra/UI'
 import { betragFormatieren } from '@/utils/geld'
 
 /**
@@ -65,13 +66,6 @@ export function AiUsageCard() {
           if (limit === 0) share = 100
           else if (limit !== null) share = Math.min(100, (used / limit) * 100)
 
-          // Dieselben Schwellen wie bei den CPU-/RAM-Balken (`Singra/UI/ProgressBar`
-          // mit `heat`): Wer 90 % seines Kontingents verbraucht hat, soll das sehen,
-          // ohne die Zahl darüber selbst ins Verhältnis setzen zu müssen. Eine
-          // Grenze von 0 landet über die 100 von oben automatisch im roten Bereich.
-          let barColor = 'bg-primary'
-          if (share !== null && share >= 90) barColor = 'bg-status-error'
-          else if (share !== null && share >= 70) barColor = 'bg-status-warning'
           return (
             <div key={key} className="space-y-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
               <p className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
@@ -89,16 +83,14 @@ export function AiUsageCard() {
                 <p className="text-xs text-on-surface-variant">{t('ai.usage.noLimit')}</p>
               ) : (
                 <>
-                  <div
-                    className="h-1.5 overflow-hidden rounded-full bg-surface-container-high"
-                    role="progressbar"
-                    aria-valuenow={Math.round(share)}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-label={t(`ai.usage.${key}`)}
-                  >
-                    <div className={`h-full rounded-full ${barColor}`} style={{ width: `${share}%` }} />
-                  </div>
+                  {/* Derselbe Balken wie bei CPU und RAM, samt seiner Schwellen
+                      (`heat`: ab 70 % warnend, ab 90 % rot). Wer 90 % seines
+                      Kontingents verbraucht hat, soll das sehen, ohne die Zahl
+                      darüber selbst ins Verhältnis setzen zu müssen. Eine Grenze
+                      von 0 landet über die 100 von oben automatisch im Roten.
+                      `ariaLabel` statt `label`, weil der Periodenname schon
+                      sichtbar darüber steht. */}
+                  <ProgressBar value={share} heat ariaLabel={t(`ai.usage.${key}`)} />
                   {limit === 0 && (
                     // Der volle rote Balken allein bliebe zweideutig — er sieht aus
                     // wie „heute aufgebraucht, morgen wieder da“. Der Satz nennt den

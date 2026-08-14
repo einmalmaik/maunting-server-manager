@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useAuthStore } from './authStore'
 import { usePermissionsStore } from './permissionsStore'
+import { useNodeStore } from './nodeStore'
 import * as client from '@/api/client'
 
 vi.mock('@/api/client', () => ({
@@ -12,6 +13,7 @@ describe('authStore', () => {
   beforeEach(() => {
     useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: true })
     usePermissionsStore.setState({ me: null, isLoading: false, error: null })
+    useNodeStore.setState({ nodes: [], total: 0, page: 1, loading: false, error: null })
     vi.mocked(client.api).mockReset()
   })
 
@@ -53,6 +55,7 @@ describe('authStore', () => {
 
     it('should set isAuthenticated=false on failed /auth/me', async () => {
       vi.mocked(client.api).mockRejectedValueOnce(new Error('Unauthorized'))
+      useNodeStore.setState({ nodes: [{ id: 7, name: 'node-eu' } as any], total: 1 })
 
       const store = useAuthStore.getState()
       await store.checkAuth()
@@ -60,6 +63,7 @@ describe('authStore', () => {
       expect(useAuthStore.getState().isAuthenticated).toBe(false)
       expect(useAuthStore.getState().user).toBeNull()
       expect(useAuthStore.getState().isLoading).toBe(false)
+      expect(useNodeStore.getState().nodes).toEqual([])
     })
   })
 
@@ -89,6 +93,19 @@ describe('authStore', () => {
 
       expect(useAuthStore.getState().isAuthenticated).toBe(false)
       expect(useAuthStore.getState().user).toBeNull()
+    })
+
+    it('räumt die Knotenliste mit ab — keine Agentenadressen nach dem Abmelden', async () => {
+      vi.mocked(client.api).mockResolvedValueOnce({})
+      useNodeStore.setState({
+        nodes: [{ id: 7, name: 'node-eu', host: 'https://10.0.0.7:8080' } as any],
+        total: 1,
+      })
+
+      await useAuthStore.getState().logout()
+
+      expect(useNodeStore.getState().nodes).toEqual([])
+      expect(useNodeStore.getState().total).toBe(0)
     })
   })
 

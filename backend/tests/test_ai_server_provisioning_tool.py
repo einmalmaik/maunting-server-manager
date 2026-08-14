@@ -15,7 +15,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.orm import Session
 
-from models import AiActionProposal, AiConversation, Role, RolePermission, Server, User
+from models import AiActionProposal, AiConversation, Node, Role, RolePermission, Server, User
 from services import ai_action_errors, ai_action_service, ai_proposal_service, ai_tool_registry
 from services.role_service import set_user_roles
 
@@ -94,6 +94,45 @@ def test_creation_without_servers_create_is_rejected(
             arguments=_arguments(),
             correlation_id=str(uuid4()),
         )
+    assert db.query(AiActionProposal).count() == 0
+
+
+def test_the_refusal_does_not_reveal_whether_a_node_exists(
+    db: Session, regular_user: User
+) -> None:
+    """Ohne `servers.create` sagt die Ablehnung nichts über den Bestand.
+
+    Der Payload-Bau schlägt die `node_id` nach und wirft "Unbekannte Node",
+    wenn es sie nicht gibt. Liefe er vor der Rechteprüfung, wäre die Ablehnung
+    selbst eine Auskunft: ein Benutzer ohne `servers.create` könnte Node-
+    Kennungen abzählen, indem er die beiden Meldungen unterscheidet. Über
+    `read_node_capacity` bekäme er sie nicht — das Werkzeug hängt an genau
+    diesem Recht.
+    """
+    node = Node(
+        name="node-1", host="http://127.0.0.1", auth_token_enc="enc", status="online"
+    )
+    db.add(node)
+    db.commit()
+    db.refresh(node)
+
+    _role(db, regular_user, ("ai.chat.use",))
+    conversation = _conversation(db, regular_user)
+
+    meldungen = []
+    for node_id in (node.id, node.id + 10_000):
+        with pytest.raises(ai_action_errors.AiActionValidationError) as fehler:
+            ai_proposal_service.create_proposal(
+                db,
+                user=regular_user,
+                conversation=conversation,
+                tool_name="propose_server_create",
+                arguments=_arguments(node_id=node_id),
+                correlation_id=str(uuid4()),
+            )
+        meldungen.append(str(fehler.value))
+
+    assert meldungen[0] == meldungen[1] == "AI-Aktion ist nicht erlaubt"
     assert db.query(AiActionProposal).count() == 0
 
 

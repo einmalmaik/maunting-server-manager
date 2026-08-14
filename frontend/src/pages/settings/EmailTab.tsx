@@ -96,11 +96,9 @@ export function EmailTab() {
     <form onSubmit={handleSave} className="space-y-6">
       <fieldset disabled={!canWrite} className="space-y-6 border-0 p-0 m-0">
         <div className="msm-card p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center">
-              <Mail className="w-5 h-5 text-secondary" />
-            </div>
-            <h2 className="font-headline text-headline-sm text-primary">{t('settings.emailConfig')}</h2>
+          <div className="flex items-center gap-2 mb-6">
+            <Mail className="h-5 w-5 text-secondary" aria-hidden="true" />
+            <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.emailConfig')}</h2>
           </div>
 
           <div className="flex gap-2 mb-6">

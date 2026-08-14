@@ -10,7 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models import AiConversation, AiMessage, User
-from services import ai_prompt
+from services import ai_lage, ai_prompt
 from services.ai_redaction import redact_sensitive_text
 
 
@@ -431,6 +431,20 @@ def build_provider_messages(
     if tool_context:
         result.append({"role": "user", "content": tool_context})
 
+    if user is not None:
+        # Die Lage: Uhrzeit, Zeitzone, autonomer Modus. Bewusst **hier** und
+        # nicht im Systemprompt — der ist der stabile Vorspann und genau das,
+        # was der Zwischenspeicher des Anbieters wiederverwendet; eine Uhrzeit
+        # darin machte ihn bei jeder Frage neu und entwertete ihn für das ganze
+        # Gespräch. Spät heisst ausserdem: nah an der aktuellen Frage.
+        #
+        # Rolle `system`, weil es eine Auskunft des Panels ist und kein
+        # Benutzertext — anders als Memory und Anhänge, die bewusst `user`
+        # tragen. Und **ohne** `redact_sensitive_text`: der Block ist Ausgabe an
+        # das Modell, nicht Eingabe von ihm. Sein einziger Wert aus fremder Hand
+        # ist der Zonenname, und der ist bereits eine geprüfte IANA-Kennung.
+        result.append({"role": "system", "content": ai_lage.lageblock(db, user)})
+
     selected: list[dict[str, str]] = []
     # `len(item["content"])` war fuer Bildanhaenge die Zahl der Listenelemente
     # (also 2), nicht die Groesse der Base64-Daten. Bis zu fuenf Anhaenge zu je
@@ -541,6 +555,11 @@ def geschaetzte_belegung(
     # Der Systemprompt ohne Skill-Verzeichnis: er ist der feste Sockel jeder
     # Anfrage und mit Abstand der groesste unter den nicht-historischen Teilen.
     belegung = len(ai_prompt.build(""))
+    # Der Lageblock ist der zweite feste Teil jeder Anfrage. Gezählt wird seine
+    # gemessene Länge und nicht der gebaute Block: bauen hiesse das Gedächtnis
+    # entschlüsseln, und das kostet je Eintrag einen Aufruf des Sidecars — bei
+    # jedem Blick auf den Ring, und der wird nach jeder Antwort neu geholt.
+    belegung += ai_lage.TYPISCHE_ZEICHEN
     belegung += min(len(conversation.summary or ""), grenzen.zusammenfassung_zeichen)
 
     historie = db.query(

@@ -67,7 +67,11 @@ def list_role_limits(
     db: Session = Depends(get_db),
     _: User = Depends(require_global("panel.settings.read")),
 ) -> list[AiRoleLimitsResponse]:
-    """Listet jede Rolle; unkonfigurierte Rollen bleiben explizit auf 0."""
+    """Listet jede Rolle.
+
+    Unkonfigurierte Rollen erscheinen mit ``configured=false`` und leeren
+    Werten — die Begründung dazu steht in ``_role_response``.
+    """
     roles = db.query(Role).order_by(Role.is_system.desc(), Role.name.asc()).all()
     return [_role_response(db, role) for role in roles]
 

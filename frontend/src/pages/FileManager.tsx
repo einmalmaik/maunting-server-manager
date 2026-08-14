@@ -205,24 +205,33 @@ export function FileManager({ serverId }: FileManagerProps) {
     // Die Inhaltssuche liest Dateien und ist deshalb spuerbar teurer als der
     // Namensvergleich. Etwas mehr Ruhe vor dem Abschicken, damit nicht jeder
     // Tastendruck den halben Serverbaum durchliest.
+    // Der Merker verhindert, dass eine bereits abgeschickte, überholte Suche
+    // ihre Treffer noch in die Anzeige schreibt.
+    let aktiv = true
     const handle = window.setTimeout(async () => {
       try {
         if (searchMode === 'content') {
           const response = await api<ContentSearchResponse>(`/files/${serverId}/search-content?q=${encodeURIComponent(query)}`)
+          if (!aktiv) return
           setSearchResults(null)
           setContentMatches(response.matches ?? [])
           setSearchTruncated(response.truncated)
           return
         }
         const response = await api<SearchResponse>(`/files/${serverId}/search?q=${encodeURIComponent(query)}`)
+        if (!aktiv) return
         setContentMatches(null)
         setSearchResults(response.results ?? [])
         setSearchTruncated(response.truncated)
       } catch (error) {
+        if (!aktiv) return
         toast.error(safeErrorMessage(error, t('files.searchFailed')))
       }
     }, searchMode === 'content' ? 500 : 300)
-    return () => window.clearTimeout(handle)
+    return () => {
+      aktiv = false
+      window.clearTimeout(handle)
+    }
   }, [searchMode, searchQuery, serverId, t])
 
   useEffect(() => {

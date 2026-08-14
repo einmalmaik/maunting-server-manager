@@ -121,16 +121,28 @@ function parseConsoleFrame(raw: string): Omit<ConsoleLogLine, 'marker'> & { id?:
   }
 }
 
+// Der Konstruktor von Intl.DateTimeFormat ist der teure Teil der Formatierung,
+// das Ergebnis hängt aber nur an Sprache und Zeitformat -- zwei Werte, die
+// sich in einer Sitzung praktisch nie ändern. Ein einziger Platz reicht.
+let cachedTimeFormatter: { key: string; fmt: Intl.DateTimeFormat } | null = null
+
 function formatConsoleTime(value: string | null, format: PanelTimeFormat, locale: string): string {
   if (!value) return ''
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
-  return new Intl.DateTimeFormat(locale, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: format === '12h',
-  }).format(date)
+  const key = `${locale}|${format}`
+  if (cachedTimeFormatter?.key !== key) {
+    cachedTimeFormatter = {
+      key,
+      fmt: new Intl.DateTimeFormat(locale, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: format === '12h',
+      }),
+    }
+  }
+  return cachedTimeFormatter.fmt.format(date)
 }
 
 function splitUrlToken(token: string): { href: string; suffix: string } {
@@ -243,7 +255,6 @@ export function ServerConsolePanel({ serverId, mode = 'console' }: Props) {
       const frame = parseConsoleFrame(raw)
       if (typeof frame.id === 'number') {
         lastServerIdRef.current = frame.id
-        nextSeqRef.current = Math.max(nextSeqRef.current, frame.id)
       }
     } catch {
       // Parse-Fehler werden im flushBuffer nochmal versucht; hier nur der
@@ -261,14 +272,19 @@ export function ServerConsolePanel({ serverId, mode = 'console' }: Props) {
     }
     setLogs((prev) => {
       const mapped = toFlush.map((item) => {
-        try {
-          const frame = parseConsoleFrame(item)
-          const { id: _id, ...rest } = frame
-          const marker = typeof _id === 'number' ? _id : nextSeqRef.current + 1
-          return { marker, ...rest }
-        } catch {
-          nextSeqRef.current += 1
-          return { marker: nextSeqRef.current, ...parseConsoleFrame(item) }
+        // Der Marker ist ein reiner Client-Zähler und trägt allein die
+        // Render-Identität der Zeile. Er zählt immer hoch, ist damit
+        // eindeutig und bleibt beim Kappen der Liste stabil -- deshalb kann
+        // der React-Key ohne Index auskommen. Die Server-ID gehört nicht
+        // hierher: für den Resume nach Reconnect ist lastServerIdRef
+        // zuständig.
+        const frame = parseConsoleFrame(item)
+        nextSeqRef.current += 1
+        return {
+          marker: nextSeqRef.current,
+          text: frame.text,
+          timestamp: frame.timestamp,
+          source: frame.source,
         }
       })
       const next = [...prev, ...mapped]
@@ -609,9 +625,9 @@ export function ServerConsolePanel({ serverId, mode = 'console' }: Props) {
             {filteredLogs.length === 0 ? (
               <span className="text-on-surface-variant">{t('servers.noLogs')}</span>
             ) : (
-              filteredLogs.map((line, i) => (
+              filteredLogs.map((line) => (
                 <ConsoleLogLineDisplay
-                  key={`${line.marker}-${i}`}
+                  key={line.marker}
                   line={line}
                   language={i18n.language}
                   timeFormat={timeFormat}

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { aiApi, type AiMemoryEntry } from '@/api/ai'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
+import { confirm } from '@/stores/confirmStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { AiMemoryManager } from './AiMemoryManager'
 
@@ -73,6 +74,7 @@ describe('AiMemoryManager', () => {
     vi.mocked(aiApi.setMemoryPreference).mockReset().mockResolvedValue({ enabled: false, notice_due: false, notice_hidden: false })
     vi.mocked(aiApi.saveMemory).mockReset().mockResolvedValue(entry)
     vi.mocked(aiApi.clearMemory).mockReset().mockResolvedValue({ removed: 4 })
+    vi.mocked(confirm).mockClear()
   })
 
   it('loads explicit entries and persists the opt-out without exposing hidden values', async () => {
@@ -127,11 +129,23 @@ describe('AiMemoryManager', () => {
   it('clears the whole scope in one step', async () => {
     // Ein gewachsenes Gedaechtnis Zeile fuer Zeile abzuraeumen hiess vorher:
     // eine Bestaetigung je Eintrag.
-    vi.mocked(aiApi.listMemory).mockResolvedValue(viele)
-    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(viele)
+    //
+    // Die Servernotiz steht in derselben Liste, wird von „Alle löschen" aber
+    // nicht mitgenommen: geloescht wird ueber `user:{id}`, sie liegt unter
+    // `server:{sid}:user:{uid}`. Die Frage darf deshalb nicht nach fuenf
+    // Eintraegen fragen, um danach vier zu loeschen.
+    const mitServernotiz: AiMemoryEntry[] = [
+      ...viele,
+      { ...entry, id: '...-108', scope: 'server', server_id: 62, key: 'startzeit', value: 'Braucht laengeren Timeout' },
+    ]
+    vi.mocked(aiApi.listMemory).mockResolvedValue(mitServernotiz)
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(mitServernotiz)
     render(<AiMemoryManager />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Alle löschen' }))
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Wirklich alle 4 Einträge löschen? Das lässt sich nicht rückgängig machen.',
+    })))
     // Weder Team noch Server: der persönliche Bereich hat beides nicht.
     await waitFor(() => expect(aiApi.clearMemory).toHaveBeenCalledWith('user', undefined, undefined))
   })

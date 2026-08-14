@@ -87,8 +87,12 @@ describe('AiRunNotice', () => {
     })
   })
 
-  it('schweigt, solange man im Chat steht', async () => {
-    // Dort sieht man es ohnehin — eine Meldung wäre nur im Weg.
+  it('schweigt, solange man im Chat steht — und fragt auch nicht nach', async () => {
+    // Dort sieht man es ohnehin — eine Meldung wäre nur im Weg. Also darf der
+    // schnelle Takt dort auch nicht laufen: er könnte per Konstruktion nichts
+    // anzeigen und käme obendrauf auf den Ereignisstrom, der denselben Zustand
+    // schon liefert. Deshalb zählt dieser Test die Aufrufe, nicht nur die
+    // ausbleibende Anzeige.
     vi.mocked(aiApi.getActiveRun)
       .mockResolvedValueOnce(lauf('running'))
       .mockResolvedValue(lauf('waiting_confirmation'))
@@ -97,6 +101,7 @@ describe('AiRunNotice', () => {
 
     await waitFor(() => expect(aiApi.getActiveRun).toHaveBeenCalledTimes(1))
     await vi.advanceTimersByTimeAsync(9_000)
+    expect(aiApi.getActiveRun).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
