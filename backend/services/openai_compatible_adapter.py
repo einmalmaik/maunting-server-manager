@@ -105,6 +105,9 @@ class StreamUsage:
     # sind bereits gelesene Eingabe, ``reasoning_tokens`` bereits erzeugte
     # Ausgabe — wer sie addiert, zaehlt doppelt.
     cached_tokens: int = 0
+    # Was in den Zwischenspeicher **geschrieben** wurde. Warum es beide Zahlen
+    # braucht, steht bei der Spalte in `models/ai_usage_event.py`.
+    cache_write_tokens: int = 0
     reasoning_tokens: int = 0
     cost_micro_usd: int | None = None
     vom_anbieter: bool = False
@@ -189,6 +192,11 @@ def usage_uebernehmen(usage: StreamUsage, rohdaten: Any) -> None:
     usage.prompt_tokens = eingabe
     usage.completion_tokens = ausgabe
     usage.cached_tokens = _teilmenge(rohdaten.get("prompt_tokens_details"), "cached_tokens")
+    # Beide stehen im selben Objekt und heißen bei OpenRouter genau so
+    # (``prompt_tokens_details.cached_tokens`` / ``…cache_write_tokens``).
+    usage.cache_write_tokens = _teilmenge(
+        rohdaten.get("prompt_tokens_details"), "cache_write_tokens"
+    )
     usage.reasoning_tokens = _teilmenge(
         rohdaten.get("completion_tokens_details"), "reasoning_tokens"
     )
@@ -235,6 +243,7 @@ def usage_addieren(ziel: StreamUsage, teil: StreamUsage) -> None:
     ziel.prompt_tokens = _summe(ziel.prompt_tokens, teil.prompt_tokens)
     ziel.completion_tokens = _summe(ziel.completion_tokens, teil.completion_tokens)
     ziel.cached_tokens += teil.cached_tokens
+    ziel.cache_write_tokens += teil.cache_write_tokens
     ziel.reasoning_tokens += teil.reasoning_tokens
     ziel.cost_micro_usd = _summe(ziel.cost_micro_usd, teil.cost_micro_usd)
     ziel.anfragen += teil.anfragen
@@ -375,10 +384,13 @@ async def stream_chat_completion(
     AI-Aktionsschicht; Providerdaten loesen hier niemals Aktionen aus.
 
     ``tool_choice`` bleibt ohne Angabe ``"auto"`` — so, wie es hier fest stand,
-    seit es Werkzeuge gibt. Der Parameter existiert fuer den einen Fall, in dem
-    „das Modell entscheidet“ die falsche Vorgabe ist: `ai_mail_text` will keine
-    Prosa, sondern ein ausgefuelltes Formular, und reicht deshalb ein einzelnes
-    Werkzeug samt Zwang darauf herein. Diese Schicht prueft den Wert nicht — sie
+    seit es Werkzeuge gibt. Der Parameter existiert für die beiden Fälle, in
+    denen „das Modell entscheidet“ die falsche Vorgabe ist: `ai_mail_text` will
+    keine Prosa, sondern ein ausgefülltes Formular, und reicht deshalb ein
+    einzelnes Werkzeug samt Zwang darauf herein; die Schlussrunde eines Laufs
+    (`ai_stream_service`) will umgekehrt gar keinen Aufruf mehr und sendet
+    ``"none"`` — den Katalog aber weiterhin mit, weil er bei Anthropic Teil des
+    zwischengespeicherten Präfix ist. Diese Schicht prüft den Wert nicht — sie
     sendet ihn, wie sie ``tools`` sendet.
 
     ``reasoning`` steuert das Nachdenken. Der Schalter ist absichtlich
@@ -424,6 +436,16 @@ async def stream_chat_completion(
     das Feld ueberfluessig. Anders als bei ``reasoning`` ist Weglassen hier also
     richtig: es gibt keinen Anbieterdefault, der sich unbemerkt einschaltet und
     abgerechnet wird — die Voreinstellung ist ueberall „kein Zwischenspeicher“.
+
+    **Geprüft und bewusst nicht aufgeteilt:** die oberste Form gilt laut
+    OpenRouter-Doku für Anthropic, Google Vertex AI, Azure und Bedrock. Gemini
+    und Qwen verlangen die Marke im Inhaltsblock, GPT ab 5.6 ein eigenes
+    ``prompt_cache_breakpoint``. Folgenlos ist das trotzdem fast überall:
+    OpenAI und Gemini speichern bei OpenRouter von selbst zwischen, ein
+    wirkungsloses Feld ändert dort nichts. Es bliebe Qwen — und dafür müsste
+    diese Schicht wissen, welcher Nachrichtenblock der letzte stabile ist. Das
+    weiß sie nicht, das weiß `ai_context_service`, und ein falsch gesetzter
+    Breakpoint kostet mehr als ein fehlender.
 
     Ohne ``ttl`` und damit die kurze Frist. Die lange (``"1h"``) kostet das
     Anlegen das Doppelte statt des 1,25-Fachen und traegt sich nur, wenn

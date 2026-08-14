@@ -491,7 +491,11 @@ describe('AiChat', () => {
     expect(screen.queryByText('Denkt nach …')).not.toBeInTheDocument()
   })
 
-  it('zeigt bei angefordertem Nachdenken den Block statt einer zweiten Wartezeile', async () => {
+  it('zeigt auch bei angefordertem Nachdenken keinen leeren Denkblock', async () => {
+    // Der Kasten hing an der Auswahlliste, nicht am Denktext: "denken" an
+    // hieß Kasten da, auch wenn nie ein Denkzeichen kam. Er behauptete damit
+    // eine Überlegung, die nicht stattfand — und war für die Wartezeit die
+    // schlechtere Auskunft als ein Satz, der sagt, was gerade läuft.
     const { streamAiMessage } = await import('@/api/ai')
     vi.mocked(streamAiMessage).mockReset().mockImplementation(() => new Promise(() => {}))
     render(<AiChat />)
@@ -502,9 +506,102 @@ describe('AiChat', () => {
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
     fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
 
-    // Der Block ist der Ort, an dem gleich etwas passiert — und der einzige.
+    // Solange nichts bekannt ist, steht der allgemeine Hinweis da — genau
+    // einer, und kein Kasten daneben.
+    await screen.findByText('Antwort wird erstellt …')
+    expect(screen.queryByText('Denkt nach …')).not.toBeInTheDocument()
+  })
+
+  it('zeigt den Denkblock, sobald wirklich Denktext fließt', async () => {
+    // Die Gegenprobe zum Test darüber: der Block ist nicht abgeschafft, er
+    // hängt nur nicht mehr an der Auswahlliste.
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(streamAiMessage).mockReset().mockImplementation(async (_payload, onEvent) => {
+      onEvent({ event: 'reasoning', data: { content: 'Ich pruefe die Ports.' } })
+      await new Promise(() => {})
+    })
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
     await screen.findByText('Denkt nach …')
+    await screen.findByText('Ich pruefe die Ports.')
+  })
+
+  it('sagt beim angekündigten Werkzeug, woran gerade gearbeitet wird', async () => {
+    // Der Kern der Sache: `tool_plan` meldet, was gleich läuft — bevor es
+    // läuft. Vorher stand während der längsten Stille des Ablaufs nur
+    // "Antwort wird erstellt …", also nichts.
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(streamAiMessage).mockReset().mockImplementation(async (_payload, onEvent) => {
+      onEvent({ event: 'tool_plan', data: { aufrufe: [
+        { call_id: 'call-1', tool_name: 'list_tasks', server_id: null },
+        { call_id: 'call-2', tool_name: 'read_server_logs', server_id: 7 },
+      ] } })
+      await new Promise(() => {})
+    })
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    // Zwei Werkzeuge, zwei Zeilen — und der allgemeine Hinweis weicht ihnen.
+    await screen.findByText('Ich sehe mir die Aufgabenliste an')
+    await screen.findByText('Ich lese die Logs')
     expect(screen.queryByText('Antwort wird erstellt …')).not.toBeInTheDocument()
+  })
+
+  it('fasst denselben Werkzeugnamen zu einer Zeile zusammen', async () => {
+    // Zwei `read_config` für zwei Dateien sind zwei Aufrufe, aber ein Satz:
+    // der Unterschied liegt allein in den Argumenten, und die dürfen hier
+    // nicht stehen. Zweimal derselbe Satz sähe aus wie ein Fehler.
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(streamAiMessage).mockReset().mockImplementation(async (_payload, onEvent) => {
+      onEvent({ event: 'tool_plan', data: { aufrufe: [
+        { call_id: 'call-1', tool_name: 'read_server_logs', server_id: 7 },
+        { call_id: 'call-2', tool_name: 'read_server_logs', server_id: 8 },
+      ] } })
+      await new Promise(() => {})
+    })
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    await screen.findByText('Ich lese die Logs')
+    expect(screen.getAllByText('Ich lese die Logs')).toHaveLength(1)
+  })
+
+  it('nimmt die Ankündigung zurück, sobald das Werkzeug gelaufen ist', async () => {
+    // Sonst behauptete "Ich lese die Logs" eine Arbeit, die längst vorbei ist
+    // — und stünde nach einem Fehlschlag für immer da.
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(streamAiMessage).mockReset().mockImplementation(async (_payload, onEvent) => {
+      onEvent({ event: 'tool_plan', data: { aufrufe: [
+        { call_id: 'call-1', tool_name: 'read_server_logs', server_id: 7 },
+      ] } })
+      onEvent({ event: 'tool', data: {
+        tool_name: 'read_server_logs', server_id: 7,
+        skill_key: null, skill_name: null, skill_status: null, skill_learned: false,
+      } })
+      await new Promise(() => {})
+    })
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    // Die Vergangenheitsform steht im Verlauf, die Verlaufsform ist weg —
+    // und darunter genau eine Wartezeile, nicht zwei.
+    await screen.findByText('Logs gelesen')
+    expect(screen.queryByText('Ich lese die Logs')).not.toBeInTheDocument()
+    await screen.findByText('Antwort wird erstellt …')
+    expect(screen.getAllByText('Antwort wird erstellt …')).toHaveLength(1)
   })
 
   it('zeigt die Gedanken einer alten Nachricht weiterhin an', async () => {

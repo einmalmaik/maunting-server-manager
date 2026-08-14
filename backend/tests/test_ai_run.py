@@ -111,13 +111,15 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, runden: list[list[ProviderTool
     zaehler = {"runde": 0}
 
     async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
-                   tools=None, reasoning=False, reasoning_effort=None,
-                   cache_marke=False):
+                   tools=None, tool_choice=None, reasoning=False,
+                   reasoning_effort=None, cache_marke=False):
         del provider, api_key, reasoning
         gesehen.append([dict(item) for item in messages])
         if denken:
             yield StreamChunk("reasoning", denken)
-        if tools is None:
+        # Die Schlussrunde erkennt man an `tool_choice="none"`: der Katalog
+        # fährt auch dort mit, damit der Zwischenspeicher greift.
+        if tool_choice == "none":
             usage.total_tokens = 10
             yield StreamChunk("content", text)
             return
@@ -1363,11 +1365,11 @@ async def test_a_superseded_run_performs_no_write_actions(
     stand = {"abgeloest": False}
 
     async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
-                   tools=None, reasoning=False, reasoning_effort=None,
-                   cache_marke=False):
+                   tools=None, tool_choice=None, reasoning=False,
+                   reasoning_effort=None, cache_marke=False):
         del provider, api_key, messages, reasoning, reasoning_effort
         usage.total_tokens = 10
-        if tools is not None and not stand["abgeloest"]:
+        if tool_choice != "none" and tools and not stand["abgeloest"]:
             usage.tool_calls = [_backup_aufruf(server)]
             yield StreamChunk("content", "ich sichere gleich")
             # Genau jetzt schreibt der Benutzer etwas Neues: der Lauf ist ab
@@ -1596,9 +1598,10 @@ async def test_a_round_without_thoughts_leaves_no_empty_thought_box(
     gedacht = {"einmal": False}
 
     async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
-                   tools=None, reasoning=False, reasoning_effort=None,
-                   cache_marke=False):
-        del provider, api_key, messages, reasoning, reasoning_effort, cache_marke
+                   tools=None, tool_choice=None, reasoning=False,
+                   reasoning_effort=None, cache_marke=False):
+        del provider, api_key, messages, tool_choice, reasoning, reasoning_effort
+        del cache_marke
         # Nur die erste Runde denkt — danach schweigt das Modell und arbeitet.
         if not gedacht["einmal"]:
             gedacht["einmal"] = True

@@ -326,29 +326,35 @@ def _global_tool_definitions() -> list[dict]:
             },
             ["skill_key"],
         ),
+        # Der Bauplan des Textes ("was zu pruefen ist, in welcher Reihenfolge,
+        # woran man die Ursache erkennt") und die Ausschlussliste ("Nicht
+        # festhalten: Einzelfaelle, Zwischenergebnisse …") stehen in
+        # `ai_prompt.SKILLS`, und der Systemprompt geht in derselben Anfrage
+        # mit (`ai_prompt.build`). Was dort steht, ist hier gestrichen.
+        #
+        # Der **Anlass** bleibt dagegen hier, und das ist eine Korrektur: bei
+        # der ersten Kuerzung am 14.08.2026 wanderte er mit in den Prompt, nach
+        # der Regel "was das Modell vor der Werkzeugwahl braucht, gehoert in
+        # den Systemprompt". Die Regel stimmt fuer den Bauplan und nicht fuer
+        # den Anlass. Das Modell vergleicht bei der Auswahl die Beschreibungen
+        # von 52 Werkzeugen gegeneinander; steht der Anlass nur im Prompt,
+        # weiss es *dass* es Skills lernen soll, aber nicht, dass **jetzt** der
+        # Moment dafuer ist. Der Benchmark hat es sofort gezeigt: das Szenario
+        # `skill_lernen` griff danach zu `read_skill` statt zu `learn_skill`
+        # (Werkzeugtreffer 10/10 auf 9/10). Ein Satz zurueck, Ersparnis bleibt.
         _function(
             "learn_skill",
-            "Haelt eine Vorgehensweise dauerhaft fest, damit sie beim naechsten "
-            "Mal nicht neu erarbeitet werden muss. Zwei Anlaesse: du hast ein "
-            "Problem geloest und die Loesung wiederkehrt — **oder** du hast "
-            "waehrend der Arbeit etwas herausgefunden, das ueber diesen Fall "
-            "hinausreicht (wo eine Einstellung eines Spiels steht, wie eine "
-            "Konfigurationsdatei aufgebaut ist, welcher Weg zum Ziel fuehrte). "
-            "Der zweite Anlass braucht weder einen Fehler noch einen "
-            "Abschluss; du entscheidest selbst. Nicht fuer Einzelfaelle und "
-            "nicht fuer Zwischenergebnisse.\n"
-            "Der Text ist eine Anleitung fuer dich selbst: was zu pruefen ist, "
-            "in welcher Reihenfolge, woran man die Ursache erkennt und was man "
-            "nicht behaupten darf. Keine Zugangsdaten, keine Personennamen.\n"
+            "Haelt eine Vorgehensweise dauerhaft fest. Keine Zugangsdaten, "
+            "keine Personennamen.\n"
+            "Anlass: du hast gerade ein Problem gelöst oder eine Vorgehensweise "
+            "erarbeitet, die beim nächsten Mal wieder gebraucht wird.\n"
             "Bereich: 'team' fuer alles, was zu diesem Betrieb gehoert. "
             "'global' nur fuer Erkenntnisse, die bei jedem Betreiber gelten — "
             "etwa eine Eigenschaft eines Spiels oder einer Mod. Pruefsatz: ein "
             "globaler Skill muss auf einem fremden Panel genauso stimmen. Im "
             "Zweifel 'team'.\n"
             "Gibt es den Schlüssel schon, wird der Skill ersetzt — "
-            "vollständig, nicht ergänzt; lies ihn vorher mit read_skill. "
-            "Verwende denselben Schlüssel erneut, statt einen ähnlichen "
-            "anzulegen.",
+            "vollständig, nicht ergänzt; lies ihn vorher mit read_skill.",
             {
                 "skill_key": {
                     "type": "string",
@@ -366,10 +372,17 @@ def _global_tool_definitions() -> list[dict]:
                         "er nicht gehoert. Schreib die Grenze mit hinein."
                     ),
                 },
+                # "nichts behaupten, was du nicht geprueft hast" ist der eine
+                # Halbsatz der alten Beschreibung, für den `ai_prompt.SKILLS`
+                # keinen Ersatz hat. Er steht deshalb nicht weiter oben,
+                # sondern an dem Feld, das er regiert.
                 "body": {
                     "type": "string",
                     "maxLength": 12_000,
-                    "description": "Die Vorgehensweise als Fliesstext, gern mit Markdown.",
+                    "description": (
+                        "Die Vorgehensweise als Fliesstext, gern mit Markdown. "
+                        "Behaupte darin nichts, was du nicht geprueft hast."
+                    ),
                 },
                 "scope": {"type": "string", "enum": learn_scopes},
                 "team": {
@@ -392,14 +405,18 @@ def _global_tool_definitions() -> list[dict]:
             {},
             [],
         ),
+        # Wann gemerkt wird und was **nicht** gemerkt wird, steht in
+        # `ai_prompt.GEDAECHTNIS` und geht in derselben Anfrage mit: "Nicht
+        # merken: Zwischenergebnisse, Logauszuege, Tagesform …" und
+        # "Aktualisierst du einen bekannten Fakt, verwende denselben
+        # Schluessel erneut". Beides stand hier ein zweites Mal und ist
+        # gestrichen. Das Verbot von Zugangsdaten bleibt: es steht nirgends
+        # sonst — `ai_prompt.GEHEIMNISSE` verbietet das *Ausgeben*, nicht das
+        # Merken.
         _function(
             "remember",
-            "Merkt sich eine dauerhafte Vorliebe oder Eigenheit. Nur fuer "
-            "Dinge, die ueber dieses Gespraech hinaus gelten — nicht fuer "
-            "Zwischenergebnisse. Verwende einen bereits vorhandenen Schluessel "
-            "erneut, wenn du einen Fakt aktualisierst, statt einen aehnlichen "
-            "neuen anzulegen. Niemals Passwoerter, Schluessel oder Tokens "
-            "merken.\n"
+            "Merkt sich eine dauerhafte Vorliebe oder Eigenheit. Niemals "
+            "Passwoerter, Schluessel oder Tokens merken.\n"
             # Der Bereich wird in dieser Reihenfolge bestimmt, und zwar an
             # **beobachtbaren** Merkmalen des Satzes statt an einer Definition.
             # Zweimal gemessen (siehe ai_prompt.py): eine Reihenfolge konkreter
@@ -858,22 +875,22 @@ _PLAN_SCHEMA = {
             "Zeitzonenangabe gilt die der Aufgabe."
         ),
     },
+    # Woher die Zone kommt und dass nach dem Zustellweg nicht gefragt wird,
+    # sagt `ai_prompt.AUFGABEN` in derselben Anfrage ("nimm sie aus der Lage.
+    # Nur wenn die Lage sie als unbekannt ausweist, frag mit `ask_user`" und
+    # "Nach dem Zustellweg fragst du nicht: es gilt der Chat"). Hier steht nur
+    # noch, wie das Feld auszusehen hat.
     "timezone": {
         "type": "string",
         "maxLength": 64,
-        "description": (
-            "IANA-Zone des Benutzers, z. B. Europe/Berlin. Pflicht — sie steht "
-            "in der Lage; nur wenn die Lage sie als unbekannt ausweist, frag "
-            "mit ask_user."
-        ),
+        "description": "Pflicht. IANA-Zone des Benutzers, z. B. Europe/Berlin.",
     },
     "channel": {
         "type": "string",
         "enum": list(_KANAELE),
         "description": (
             "chat = nur im Panel, email = zusaetzlich per Mail, both = beides. "
-            "Im Chat steht das Ergebnis immer. Weglassen heißt chat — frag "
-            "nicht danach."
+            "Im Chat steht das Ergebnis immer."
         ),
     },
 }
@@ -906,26 +923,25 @@ def _aufgaben_tool_definitions() -> list[dict]:
             {},
             [],
         ),
+        # Der ganze *Anlass* steht in `ai_prompt.AUFGABEN` und geht in
+        # derselben Anfrage mit: wann ein stehender Auftrag entsteht ("jeden
+        # Tag um acht", "alle acht Stunden"), was in `instruction` gehört
+        # ("dieser Text ist dein spaeterer Auftrag"), was `kind: "act"`
+        # voraussetzt und dass die Zeitzone aus der Lage kommt. Das stand hier
+        # ein zweites Mal und ist gestrichen.
+        #
+        # Was bleibt, ist die Feldkunde — und die trägt hier mehr als sonst:
+        # `required` nennt nur die Begründung, weil dasselbe Werkzeug anlegt
+        # **und** ändert. Welche Felder beim Anlegen nötig sind, erfährt das
+        # Modell nirgends sonst; ein fehlendes kostet eine ganze Runde.
         _function(
             "propose_task_set",
-            "Legt einen stehenden Auftrag an oder aendert einen vorhandenen: "
-            "etwas, das ab jetzt von selbst laeuft, ohne dass jemand im Chat "
-            "sitzt. Fuer 'benachrichtige mich jeden Tag um 8 Uhr ueber meine "
-            "Server' oder 'mach alle 12 Stunden ein Backup'.\n"
+            "Legt einen stehenden Auftrag an oder aendert einen vorhandenen.\n"
             "**Ohne `task_id` wird angelegt**; dann sind `title`, "
             "`instruction`, `kind`, `plan_kind` und `timezone` "
             "noetig. **Mit `task_id` (aus `list_tasks`) wird geaendert**, und "
-            "nur genannte Felder werden angefasst — zum Pausieren genuegt "
-            "`enabled: false`. Aenderst du den Plan, gib `plan_kind` und dessen "
-            "Felder zusammen an.\n"
-            "`instruction` ist der Auftrag an dich selbst — schreib ihn so, "
-            "dass du ihn in vier Wochen ohne dieses Gespraech verstehst.\n"
-            "`kind`: 'report' liest und berichtet; 'act' darf zusaetzlich "
-            "handeln (Backup, Neustart, Aenderungen) und setzt den "
-            "freigegebenen autonomen Modus voraus — ohne ihn wird abgewiesen.\n"
-            "**Zeitzone zuerst.** Ohne sie ist eine Uhrzeit bedeutungslos. Nimm "
-            "sie aus der Lage; nur wenn die Lage sie als unbekannt ausweist, "
-            "frag vorher mit `ask_user`.",
+            "nur genannte Felder werden angefasst. Aenderst du den Plan, gib "
+            "`plan_kind` und dessen Felder zusammen an.",
             {
                 "task_id": {
                     "type": "string",

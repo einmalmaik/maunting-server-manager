@@ -15,19 +15,15 @@ import { useTranslation } from 'react-i18next'
  * weil der Denktext ein flaches Feld neben den Abschnitten war — die Gedanken
  * der dritten Runde standen dann über dem Text der ersten.
  *
- * **Zu Beginn steht er auch ohne Inhalt da, aber nur, wenn Nachdenken
- * angefordert wurde.** Das kam aus einer Beobachtung im Betrieb: "der
- * Nachdenken-Block kam erst am Ende". Gemessen stimmte das auch — nur nicht aus
- * dem vermuteten Grund. Der Block wurde frueher erst gerendert, wenn schon
- * Denktext da war, und **manche Modelle liefern in der ersten Runde gar keinen**
- * (gemessen: erste Denkzeichen nach 6,5 s, in einem Fall erst nach 29 s, lange
- * nach dem ersten Antworttext). Bis dahin sah man nur eine nackte Zeile, und
- * dann sprang oben ein Kasten hinein, den es vorher nicht gab.
- *
- * Die Gegenprobe gilt aber genauso: bei ausgeschaltetem Nachdenken — der
- * Voreinstellung — behauptete derselbe Kasten "Denkt nach …", obwohl nie ein
- * Zeichen kam, und verschwand am Ende ersatzlos. Deshalb entscheidet der
- * Aufrufer auch, **ob** er ihn leer zeigt.
+ * **Er erscheint nur, wenn wirklich Denktext fließt.** Eine Zeit lang stand er
+ * schon leer da, sobald in der Auswahlliste "denken" angeschaltet war — mit
+ * pulsenden Punkten und der Überschrift "Denkt nach …". Das war eine
+ * Behauptung über etwas, das noch gar nicht geschah: manche Modelle liefern in
+ * der ersten Runde überhaupt keinen Denktext (gemessen: erste Denkzeichen nach
+ * 6,5 s, in einem Fall erst nach 29 s), und bei manchen Fragen fällt er ganz
+ * aus. Die Wartezeit gehört jetzt der Wartezeile in `AiChat`, die sagen kann,
+ * **woran** gerade gearbeitet wird; dieser Block sagt nur noch, was tatsächlich
+ * gedacht wurde.
  */
 export function AiReasoningBlock({ content, streaming }: { content: string; streaming: boolean }) {
   const { t } = useTranslation()
@@ -57,21 +53,11 @@ export function AiReasoningBlock({ content, streaming }: { content: string; stre
           aria-hidden="true"
         />
       </button>
-      {open && (content ? (
+      {open && content && (
         <p className="whitespace-pre-wrap break-words px-3 pb-3 text-xs leading-5 text-on-surface-variant">
           {content}
         </p>
-      ) : streaming ? (
-        // Noch kein Denktext, aber der Block steht schon. Drei pulsende Punkte
-        // statt eines leeren Kastens: er soll arbeiten aussehen, nicht kaputt.
-        <p className="px-3 pb-3 text-xs leading-5 text-on-surface-variant" aria-hidden="true">
-          <span className="inline-flex gap-1">
-            <span className="h-1 w-1 animate-pulse rounded-full bg-current" />
-            <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
-            <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:300ms]" />
-          </span>
-        </p>
-      ) : null)}
+      )}
     </div>
   )
 }

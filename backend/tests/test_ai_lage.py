@@ -198,6 +198,11 @@ def test_der_block_haengt_spaet_in_den_nachrichten_und_nicht_im_systemprompt(
     Block ist deshalb eine eigene, späte `system`-Nachricht — und er hängt in
     `build_provider_messages`, damit fälliger Lauf und Guardian-Heilung ihn von
     selbst bekommen.
+
+    „Spät“ heißt seit der Cache-Umstellung **ganz hinten**, hinter der
+    Gesprächshistorie. Hier stand nur `> 0`, und das war auch dann erfüllt,
+    wenn der Block wieder vor die Historie rutschte — also genau in dem Fall,
+    den die Umstellung beheben sollte.
     """
     user = _benutzer(db, "einbau", "ai.chat.use", "ai.memory.use")
     conversation = AiConversation(id=str(uuid4()), user_id=user.id, title="Lage")
@@ -213,7 +218,7 @@ def test_der_block_haengt_spaet_in_den_nachrichten_und_nicht_im_systemprompt(
         and item["content"].startswith("Lage (Auskunft des Panels")
     ]
     assert len(lagen) == 1
-    assert lagen[0] > 0
+    assert lagen[0] == len(nachrichten) - 1
 
 
 def test_die_geschaetzte_belegung_zaehlt_den_block_mit(db: Session) -> None:

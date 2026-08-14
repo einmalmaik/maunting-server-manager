@@ -325,11 +325,16 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, runden: list[list[ProviderTool
 
     async def fake(
         _client, *, provider, api_key, messages, usage: StreamUsage,
-        tools=None, reasoning=False, reasoning_effort=None, cache_marke=False,
+        tools=None, tool_choice=None, reasoning=False, reasoning_effort=None,
+        cache_marke=False,
     ):
         del provider, api_key, reasoning, reasoning_effort, cache_marke
         gesehen.append([dict(item) for item in messages])
-        if tools is None:
+        # Die Schlussrunde erkennt man an `tool_choice="none"`. Der Katalog
+        # fährt auch dort mit — er ist bei Anthropic Teil des
+        # zwischengespeicherten Präfix, und ihn wegzunehmen kostete den
+        # Treffer in der teuersten Runde.
+        if tool_choice == "none":
             usage.total_tokens = 10
             yield StreamChunk("content", "ok")
             return
@@ -355,11 +360,12 @@ def _fake_stream_fragt_immer(monkeypatch: pytest.MonkeyPatch):
 
     async def fake(
         _client, *, provider, api_key, messages, usage: StreamUsage,
-        tools=None, reasoning=False, reasoning_effort=None, cache_marke=False,
+        tools=None, tool_choice=None, reasoning=False, reasoning_effort=None,
+        cache_marke=False,
     ):
         del provider, api_key, reasoning, reasoning_effort, cache_marke
         gesehen.append([dict(item) for item in messages])
-        if tools is not None:
+        if tool_choice != "none" and tools:
             usage.tool_calls = [ProviderToolCall(
                 id=f"frage-{len(gesehen)}",
                 name="ask_user",

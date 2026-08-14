@@ -121,6 +121,15 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     zu einem zu machen, wenn sie dasselbe Schema tragen — so wurden aus
     `propose_task_create` und `propose_task_update` ein `propose_task_set`, und
     das Planschema steht seitdem einmal statt zweimal im Katalog.
+
+    Stand 14.08.2026: **43.565** Zeichen ohne hinterlegten Websuchschlüssel,
+    **44.331** mit ihm. Die 1.701 Zeichen weniger stammen nicht daher, dass ein
+    Anlass fallengelassen wurde, sondern daher, dass er nur noch **einmal**
+    dasteht: `propose_task_set`, `remember` und `learn_skill` wiederholten in
+    ihren Beschreibungen, was `ai_prompt.AUFGABEN`, `GEDAECHTNIS` und `SKILLS`
+    in derselben Anfrage schon sagen. Welche Stelle welche ersetzt, steht als
+    Kommentar über dem jeweiligen Werkzeug; dass die Blöcke dabeibleiben
+    müssen, hält `test_ai_prompt` fest.
     """
     katalog = json.dumps(ai_action_service.provider_tool_definitions(), ensure_ascii=False)
     assert len(katalog) < 50_000, (

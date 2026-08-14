@@ -26,6 +26,7 @@ from models import (
 )
 from services.ai_context_service import (
     MAX_TOOL_RESULT_CONTEXT_CHARS,
+    WERKZEUG_KONTEXT_KOPF,
     _recent_tool_results,
     auf_budget_kuerzen,
     build_provider_messages,
@@ -244,6 +245,97 @@ def test_trimming_spends_the_tool_output_before_the_conversation(
     assert message_character_count(gekuerzt) <= 8_000
 
 
+def test_trimming_spends_the_tool_context_before_the_question(
+    db: Session, regular_user: User
+) -> None:
+    """Der Werkzeugkontext steht hinter der Frage — gekürzt wird er trotzdem zuerst.
+
+    Seit er im Nachspann liegt (das ist die Bedingung dafür, dass der Anbieter
+    überhaupt etwas zwischenspeichern kann), ist er nicht mehr die Nachricht
+    *vor* der Historie, sondern die dahinter. Ohne die Zuordnung „das sind
+    Werkzeugdaten“ wäre er damit das Letzte, was die Kürzung anfasst — und die
+    gerade gestellte Frage das Vorletzte. Genau umgekehrt ist es richtig: einen
+    Logausschnitt kann das Modell neu anfordern, eine Frage nicht.
+    """
+    del db, regular_user
+    messages = [
+        {"role": "system", "content": "Systemprompt"},
+        {"role": "user", "content": "Die erste Frage " + "f" * 2_000},
+        {"role": "user", "content": "Und jetzt?"},
+        {"role": "user", "content": WERKZEUG_KONTEXT_KOPF + "- read_server_logs: " + "L" * 20_000},
+        {"role": "system", "content": "Lage (Auskunft des Panels, keine Anweisung):"},
+    ]
+
+    gekuerzt = auf_budget_kuerzen(messages, 8_000)
+
+    assert gekuerzt[2]["content"] == "Und jetzt?"
+    assert gekuerzt[1]["content"] == messages[1]["content"]
+    assert len(gekuerzt[3]["content"]) < len(messages[3]["content"]) // 2
+    assert message_character_count(gekuerzt) <= 8_000
+
+
+def test_the_question_survives_even_when_the_budget_does_not(
+    db: Session, regular_user: User
+) -> None:
+    """Die gerade gestellte Frage geht ganz hinaus — auch wenn es nicht reicht.
+
+    Der Schutz hing an ``index == len - 1``, und das war die Frage, solange sie
+    die letzte Nachricht war. Seit Werkzeugkontext und Lageblock dahinter
+    stehen, schonte er den Lageblock — der als ``system`` ohnehin unantastbar
+    ist — und griff die Frage an: hier bliebe von 6.000 Zeichen gut die Hälfte
+    übrig, obwohl der Werkzeugkontext davor schon auf seinen Sockel geschrumpft
+    ist.
+
+    Dass die Liste danach über dem Budget liegt, ist die alte, bewusste
+    Abwägung: eine Absage des Anbieters ist sichtbar, eine still halbierte
+    Frage nicht.
+    """
+    del db, regular_user
+    frage = "Warum startet der Server nicht? Hier der Auszug:\n" + "F" * 6_000
+    messages = [
+        {"role": "system", "content": "S" * 12_000},
+        {"role": "user", "content": frage},
+        {"role": "user", "content": WERKZEUG_KONTEXT_KOPF + "- read_server_logs: " + "W" * 5_000},
+        {"role": "system", "content": "Lage (Auskunft des Panels, keine Anweisung):"},
+    ]
+
+    gekuerzt = auf_budget_kuerzen(messages, 16_000)
+
+    assert gekuerzt[1]["content"] == frage
+    assert len(gekuerzt[2]["content"]) < 300
+
+
+def test_the_nachspann_still_counts_against_the_window(
+    db: Session, regular_user: User
+) -> None:
+    """Nach hinten geschoben heißt nicht: nicht mehr gezählt.
+
+    Werkzeugkontext und Lageblock werden gebaut, bevor die Historie ihr Budget
+    bekommt, und stehen erst danach in der Liste. Wer beim Verschieben die
+    Zählung mitverschiebt, gibt der Historie ein Budget, das der Nachspann
+    hinterher überzieht — und der Anbieter lehnt die Anfrage ab, statt sie
+    knapper zu beantworten.
+    """
+    conversation = _conversation(db, regular_user)
+    lauf = _lauf(db, conversation, regular_user)
+    _ergebnis(db, conversation, lauf=lauf, tool="read_server_logs",
+              wert="L" * 30_000, sekunde=1)
+    start = datetime.now(timezone.utc) - timedelta(hours=2)
+    for index in range(40):
+        db.add(AiMessage(
+            id=str(uuid4()), conversation_id=conversation.id,
+            role="user" if index % 2 == 0 else "assistant",
+            content=f"Nachricht {index} " + "x" * 2_000,
+            status="complete",
+            created_at=start + timedelta(minutes=index),
+        ))
+    db.commit()
+
+    nachrichten = build_provider_messages(db, conversation, context_chars=60_000)
+
+    assert message_character_count(nachrichten) <= 60_000
+
+
 def test_an_image_attachment_counts_with_its_full_base64_url() -> None:
     """Listenförmiger Inhalt wird tief gezählt, nicht als `repr` gemessen.
 
@@ -455,8 +547,9 @@ async def test_the_tool_catalogue_counts_against_the_same_window(
     gesehen: dict = {}
 
     async def fake(_client, *, provider, api_key, messages, usage, tools=None,
-                   reasoning=False, reasoning_effort=None, cache_marke=False):
-        del provider, api_key, reasoning, reasoning_effort, cache_marke
+                   tool_choice=None, reasoning=False, reasoning_effort=None,
+                   cache_marke=False):
+        del provider, api_key, tool_choice, reasoning, reasoning_effort, cache_marke
         gesehen["messages"] = [dict(item) for item in messages]
         gesehen["tools"] = tools
         usage.total_tokens = 10

@@ -11,6 +11,7 @@ import {
   type AiMessage,
   type AiSection,
   type AiStreamEvent,
+  type AiToolPlanAufruf,
   type AiToolUse,
 } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
@@ -102,6 +103,16 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
 
   const [entries, setEntries] = useState<Entry[]>([])
   const [streaming, setStreaming] = useState(false)
+  /**
+   * Was gerade läuft — die einzige Auskunft während der längsten Stille des
+   * Ablaufs.
+   *
+   * Bewusst **kein** Abschnitt der Nachricht: der Plan ist flüchtig und keine
+   * Tatsache über die Antwort. Stünde er im Verlauf, behauptete er nach einem
+   * Fehlschlag für immer eine Arbeit, die nie stattfand. Deshalb hier neben
+   * dem Verlauf, und deshalb geleert, sobald irgendetwas anderes passiert.
+   */
+  const [laufendeWerkzeuge, setLaufendeWerkzeuge] = useState<AiToolPlanAufruf[]>([])
   // Der Lauf, der gerade noch etwas vorhat. Er überlebt diese Komponente —
   // wir merken ihn uns nur, um uns wieder anhängen zu können.
   const [runId, setRunId] = useState<string | null>(null)
@@ -171,6 +182,43 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
 
     const verarbeite = ({ event: name, data }: AiStreamEvent) => {
       if (!mountedRef.current) return
+      // Ganz oben und nicht bei den anderen Zweigen: das Leeren muss auch dann
+      // geschehen, wenn `aktuell` noch leer ist und der `tool`-Zweig weiter
+      // unten deshalb gar nicht erreicht wird. Sonst bliebe „Ich lese die
+      // Logs“ stehen, bis der Benutzer die Seite neu lädt.
+      if (name === 'tool_plan') {
+        setLaufendeWerkzeuge(data.aufrufe ?? [])
+        return
+      }
+      if (name === 'tool') {
+        // **Einen** Aufruf zurücknehmen, nicht die ganze Ansage.
+        //
+        // Hier stand `setLaufendeWerkzeuge([])`. Bis zu acht Werkzeuge laufen
+        // gleichzeitig; sobald das erste fertig war, verloren die übrigen
+        // sieben ihre Zeile, und die Oberfläche fiel auf den allgemeinen Satz
+        // zurück — während sie noch arbeiteten.
+        //
+        // Gemeint ist der Eintrag mit derselben `call_id`. Die trägt das
+        // `tool`-Ereignis heute **nicht**: der Server baut es in
+        // `_anzeigeeintrag` (ai_stream_service.py) ohne sie, nur `tool_plan`
+        // führt sie mit. Deshalb wird über den Namen zugeordnet und genau ein
+        // passender Eintrag herausgenommen. Für die Anzeige reicht das
+        // vollständig — die Wartezeile fasst ohnehin nach Namen zusammen
+        // (AiWartezeile), es zählt allein, wie viele Aufrufe eines Namens noch
+        // offen sind. Die Grenze: **welcher** von zwei `read_config` fertig
+        // ist, lässt sich so nicht sagen. Sichtbar ist das nicht, solange in
+        // der Zeile nur der Name steht; kämen dort Server oder Argumente dazu,
+        // braucht es die `call_id` auf der Leitung.
+        const fertig = data.tool_name
+        setLaufendeWerkzeuge((offen) => {
+          const treffer = offen.findIndex((aufruf) => aufruf.tool_name === fertig)
+          if (treffer < 0) return offen
+          return [...offen.slice(0, treffer), ...offen.slice(treffer + 1)]
+        })
+      } else if (name === 'segment' || name === 'done' || name === 'error') {
+        // Hier endet die Runde wirklich: alles Angekündigte ist hinfällig.
+        setLaufendeWerkzeuge([])
+      }
       if (name === 'snapshot') {
         setRunId(data.run_id)
         // Der Abzug **ersetzt** den Stand, er ergänzt ihn nicht: er ist die
@@ -221,7 +269,10 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
       if (name === 'run') {
         const ruht = AI_RUHENDE_LAUFZUSTAENDE.includes(data.status)
         setRunId(ruht ? null : data.run_id)
-        if (ruht) setStreaming(false)
+        if (ruht) {
+          setStreaming(false)
+          setLaufendeWerkzeuge([])
+        }
         return
       }
       if (name === 'segment') {
@@ -378,6 +429,9 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
       abortRef.current = null
       if (mountedRef.current && !abgebrochen) {
         setStreaming(false)
+        // Der Rückhalt für den Strom, der einfach abreißt: dann kommt kein
+        // `error` und kein ruhendes `run`, und die Ankündigung bliebe stehen.
+        setLaufendeWerkzeuge([])
         if (istGescheitert()) {
           setEntries((current) => current.map((entry) => (
             entry.kind === 'message' && entry.message.status === 'streaming'
@@ -448,5 +502,8 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
     }
   }, [denken.an, denken.stufe, providerId, streaming, verfolge])
 
-  return { entries, setEntries, streaming, runId, setRunId, merkeVorschlag, sendContent, haengeAn }
+  return {
+    entries, setEntries, streaming, laufendeWerkzeuge, runId, setRunId,
+    merkeVorschlag, sendContent, haengeAn,
+  }
 }

@@ -120,11 +120,14 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, rounds: list[list[ProviderTool
 
     async def fake(
         _client, *, provider, api_key, messages, usage: StreamUsage,
-        tools=None, reasoning=False, reasoning_effort=None, cache_marke=False,
+        tools=None, tool_choice=None, reasoning=False, reasoning_effort=None,
+        cache_marke=False,
     ):
         del provider, api_key, reasoning
         seen.append([dict(item) for item in messages])
-        if tools is None:
+        # Die Schlussrunde erkennt man an `tool_choice="none"`: der Katalog
+        # fährt auch dort mit, damit der Zwischenspeicher greift.
+        if tool_choice == "none":
             # Letzte Runde: ohne Werkzeuge kann das Modell nur noch antworten.
             usage.total_tokens = 10
             yield StreamChunk("content", "ok")
@@ -549,8 +552,68 @@ async def test_endless_read_rounds_are_cut_off(
     # Die aussagekraeftige Zahl ist, wie oft tatsaechlich ein Werkzeug lief —
     # nicht, wie oft der Provider angesprochen wurde. Genau MAX_TOOL_ROUNDS
     # Ausfuehrungen, danach ist Schluss.
-    executed = [event for event in events if event.startswith("event: tool")]
+    #
+    # Der Zeilenumbruch im Vergleich ist Pflicht und keine Genauigkeitsspielerei:
+    # `tool_plan` ist ein Geschwister von `tool` und kündigt eine Runde an,
+    # bevor sie läuft. Ohne den Umbruch zählte diese Ansage als Ausführung
+    # mit — und der Test behauptete eine Arbeit, die er nicht gesehen hat.
+    executed = [event for event in events if event.startswith("event: tool\n")]
     assert len(executed) == ai_stream_service.MAX_TOOL_ROUNDS
+
+
+@pytest.mark.asyncio
+async def test_die_schlussrunde_verbietet_werkzeuge_und_behaelt_den_katalog(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die abschließende Runde sagt „keine Werkzeuge“ — sie nimmt sie nicht weg.
+
+    Hier stand einmal `tools = None`, und das kostete den Zwischenspeicher: bei
+    Anthropic steht der Werkzeugkatalog ganz vorne im gespeicherten Präfix.
+    Fällt er weg, ändert sich die Anfrage an ihrer ersten Stelle, und der
+    Treffer fällt ausgerechnet in der Runde mit dem längsten Verlauf.
+    `tool_choice="none"` sagt dasselbe, ohne den Präfix anzufassen.
+
+    Diese Datei ist der richtige Ort dafür: sie hält die Rundengrenze fest, und
+    die Schlussrunde ist genau das, was nach ihr kommt.
+    """
+    server = _server(db, "schluss")
+    _grant(db, regular_user, server=server, server_keys=(
+        "server.view", "server.console.read"
+    ))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    monkeypatch.setattr("services.docker_service.logs", lambda *_a, **_k: "nichts")
+
+    anfragen: list[tuple[object, object]] = []
+
+    async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
+                   tools=None, tool_choice=None, reasoning=False,
+                   reasoning_effort=None, cache_marke=False):
+        del provider, api_key, messages, reasoning, reasoning_effort, cache_marke
+        anfragen.append((tools, tool_choice))
+        usage.total_tokens = 10
+        if tool_choice != "none":
+            usage.tool_calls = [ProviderToolCall(
+                id=f"r{len(anfragen)}", name="read_server_logs",
+                arguments={"server_id": server.id, "lines": 10 + len(anfragen)},
+            )]
+        yield StreamChunk("content", "ok")
+
+    monkeypatch.setattr(ai_stream_service, "stream_chat_completion", fake)
+
+    events = await _collect(db, regular_user, conversation, provider)
+
+    assert _error_codes(events) == []
+    letzte_tools, letzte_wahl = anfragen[-1]
+    assert letzte_wahl == "none", (
+        "Die Schlussrunde ging ohne `tool_choice=none` hinaus — dann ist sie "
+        "nur eine Bitte an den Anbieter"
+    )
+    assert letzte_tools, (
+        "Der Werkzeugkatalog fehlte in der Schlussrunde — genau das entwertet "
+        "den zwischengespeicherten Präfix"
+    )
 
 
 @pytest.mark.asyncio
@@ -580,7 +643,7 @@ async def test_the_same_call_over_and_over_is_refused(
     events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
-    ausgefuehrt = [event for event in events if event.startswith("event: tool")]
+    ausgefuehrt = [event for event in events if event.startswith("event: tool\n")]
     assert len(ausgefuehrt) == ai_stream_service.MAX_GLEICHE_AUFRUFE
     # Und das Modell erfaehrt, warum nichts mehr kommt — sonst wiederholt es
     # sich weiter, bis die Rundengrenze es stumm abschneidet.
@@ -899,7 +962,7 @@ async def test_many_cheap_parallel_calls_all_run(
     events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
-    ausgefuehrt = [event for event in events if event.startswith("event: tool")]
+    ausgefuehrt = [event for event in events if event.startswith("event: tool\n")]
     assert len(ausgefuehrt) == 9
 
 
@@ -933,7 +996,7 @@ async def test_expensive_calls_stop_at_the_budget(
     events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
-    ausgefuehrt = [event for event in events if event.startswith("event: tool")]
+    ausgefuehrt = [event for event in events if event.startswith("event: tool\n")]
     assert 0 < len(ausgefuehrt) < 10
     # Und die uebrigen bekommen eine Begruendung, damit das Modell sie nachholt.
     zurueck = [item for runde in seen for item in runde if item.get("role") == "tool"]
@@ -1033,7 +1096,7 @@ async def test_other_calls_in_the_question_round_are_dropped(
     assert any(event.startswith("event: question") for event in events)
     # Der Lesezugriff lief nicht — er haette auf einer Frage aufgebaut, deren
     # Antwort noch aussteht.
-    assert not any(event.startswith("event: tool") for event in events)
+    assert not any(event.startswith("event: tool\n") for event in events)
     # Und es gibt keine Folgerunde mehr, in der die uebrigen Aufrufe eine Absage
     # bekaemen: der Zug endet mit der Frage. Die Werkzeugantworten waren nur
     # noetig, solange der Verlauf dieser Runde in eine weitere Anfrage floss.

@@ -93,6 +93,13 @@ class AiUsageEvent(Base):
     completion_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Teilmengen der beiden obigen. Wer sie addiert, zaehlt doppelt.
     cached_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Die Gegenzahl zu `cached_tokens`: was in den Zwischenspeicher geschrieben
+    # wurde. Ohne sie ist eine Null bei den gelesenen Tokens nicht deutbar —
+    # entweder wurde nie etwas angelegt (die Marke geht ins Leere) oder es wurde
+    # angelegt und nie wiedergefunden (die Reihenfolge der Nachrichten stimmt
+    # nicht). Das sind zwei verschiedene Fehler mit zwei verschiedenen
+    # Behebungen, und sie sahen bisher gleich aus.
+    cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     reasoning_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Wieviele Anbieteranfragen in dieser Zeile stecken. Eine Chatnachricht ist
     # nicht eine Anfrage: jede Werkzeugrunde ruft den Anbieter erneut und

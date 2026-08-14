@@ -181,6 +181,24 @@ export interface AiToolUse {
   gruppe?: string | null
 }
 
+/**
+ * Ein Werkzeug, das gleich läuft — angekündigt, bevor es losgeht.
+ *
+ * Das Gegenstück zu `AiToolUse`: dort steht, was **war**, hier, was **kommt**.
+ * `call_id` ist der Schlüssel und nicht `tool_name`, weil bis zu acht Werkzeuge
+ * gleichzeitig laufen und dasselbe Werkzeug in einer Runde zweimal vorkommen
+ * kann (zwei `read_config` für zwei Dateien).
+ *
+ * Die Argumente stehen bewusst **nicht** darin: Serverpfade, Dateinamen und IPs
+ * gehören nicht in eine Statuszeile.
+ */
+export interface AiToolPlanAufruf {
+  call_id: string
+  tool_name: string
+  /** Null, wenn das Werkzeug keinen Server betrifft. */
+  server_id: number | null
+}
+
 /** Nur der Zustand — der Suchschluessel verlaesst das Backend nie. */
 export interface AiWebSearchStatus {
   configured: boolean
@@ -435,6 +453,8 @@ export interface AiUsageEvent {
   completion_tokens: number | null
   /** Teilmenge von `prompt_tokens`. Wer sie addiert, zählt doppelt. */
   cached_tokens: number | null
+  /** Die Gegenzahl dazu: was in den Zwischenspeicher geschrieben wurde. */
+  cache_write_tokens: number | null
   reasoning_tokens: number | null
   /** Eine Chatnachricht ist nicht eine Anfrage: jede Werkzeugrunde ruft neu. */
   provider_requests: number | null
@@ -530,6 +550,11 @@ export type AiStreamEvent =
   // Ein gerade ausgefuehrtes Lesewerkzeug — macht sichtbar, worauf die Antwort
   // beruht.
   | { event: 'tool'; data: AiToolUse }
+  // Was gleich läuft, gemeldet **bevor** es läuft. Flüchtig: das Ereignis
+  // landet nicht im Abzug, weil es keine Tatsache über die Antwort ist,
+  // sondern eine Anzeige während der Arbeit. Nach einem Neuladen mitten im
+  // Lauf fehlt es also — das ist bewusst so.
+  | { event: 'tool_plan'; data: { aufrufe: AiToolPlanAufruf[] } }
   // Rückfrage mit Vorschlägen. Beendet den Zug — ab hier ist der Mensch dran.
   | { event: 'question'; data: AiQuestion }
   // Der aeltere Teil des Verlaufs wurde zu einer Zusammenfassung gefaltet.
@@ -623,7 +648,7 @@ export interface AiRunInfo {
  * handgepflegte Kopie.
  */
 const STREAM_EVENTS: readonly AiStreamEvent['event'][] = [
-  'message', 'delta', 'reasoning', 'tool', 'question', 'compacted',
+  'message', 'delta', 'reasoning', 'tool', 'tool_plan', 'question', 'compacted',
   'proposal', 'action', 'done', 'error', 'snapshot', 'segment', 'run',
 ]
 

@@ -330,13 +330,15 @@ def test_chat_stream_persists_usage_and_replays_without_second_provider_call(
     calls = 0
 
     async def fake_stream(
-        _client, *, provider, api_key, messages, usage, tools=None, reasoning=False,
-        reasoning_effort=None, cache_marke=False,
+        _client, *, provider, api_key, messages, usage, tools=None, tool_choice=None,
+        reasoning=False, reasoning_effort=None, cache_marke=False,
     ):
         nonlocal calls
         calls += 1
         assert api_key == "sk-or-v1-operator-secret"
-        assert messages[-1]["content"] == "Wie geht es?"
+        # Ganz am Ende steht seit der Cache-Umstellung der Lageblock, davor die
+        # Frage. Gesucht wird sie deshalb im Gespräch und nicht an einem Index.
+        assert any(item.get("content") == "Wie geht es?" for item in messages)
         usage.total_tokens = 42
         yield StreamChunk("content", "Alles ")
         yield StreamChunk("content", "gut.")

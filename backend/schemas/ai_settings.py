@@ -179,6 +179,9 @@ class AiUsageEventEntry(BaseModel):
     #: Teilmenge von ``prompt_tokens``: aus dem Zwischenspeicher gelesen und
     #: deshalb rund ein Zehntel so teuer. Wer sie addiert, zaehlt doppelt.
     cached_tokens: int | None = None
+    #: Die Gegenzahl dazu: was in den Zwischenspeicher geschrieben wurde. Warum
+    #: es beide braucht, steht bei der Spalte in `models/ai_usage_event.py`.
+    cache_write_tokens: int | None = None
     reasoning_tokens: int | None = None
     #: Wieviele Anbieteranfragen in dieser Zeile stecken. Eine Chatnachricht ist
     #: nicht eine Anfrage: jede Werkzeugrunde ruft den Anbieter erneut.

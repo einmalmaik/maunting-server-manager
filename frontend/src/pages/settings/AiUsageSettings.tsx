@@ -133,6 +133,7 @@ export function AiUsageSettings() {
                   <th scope="col" className="py-2 pr-4 text-right">{t('ai.usage.events.input')}</th>
                   <th scope="col" className="py-2 pr-4 text-right">{t('ai.usage.events.output')}</th>
                   <th scope="col" className="py-2 pr-4 text-right">{t('ai.usage.events.cached')}</th>
+                  <th scope="col" className="py-2 pr-4 text-right">{t('ai.usage.events.cacheWritten')}</th>
                   <th scope="col" className="py-2 pr-4 text-right">{t('ai.usage.events.calls')}</th>
                   <th scope="col" className="py-2 pr-4 text-right">{t('ai.usage.cost')}</th>
                   <th scope="col" className="py-2">{t('ai.usage.events.source')}</th>
@@ -162,6 +163,9 @@ export function AiUsageSettings() {
                       </td>
                       <td className="py-2 pr-4 text-right tabular-nums text-on-surface-variant">
                         {event.cached_tokens === null ? '—' : numbers.format(event.cached_tokens)}
+                      </td>
+                      <td className="py-2 pr-4 text-right tabular-nums text-on-surface-variant">
+                        {event.cache_write_tokens === null ? '—' : numbers.format(event.cache_write_tokens)}
                       </td>
                       <td className="py-2 pr-4 text-right tabular-nums text-on-surface-variant">
                         {event.provider_requests === null ? '—' : numbers.format(event.provider_requests)}

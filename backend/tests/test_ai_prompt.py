@@ -111,3 +111,29 @@ def test_the_rules_with_an_observed_cause_are_still_there() -> None:
     # dem Panel wurde aus Trainingswissen ueber fremde Panels beantwortet.
     assert "steht nichts in der MSM-Dokumentation" in prompt
     assert "Wissen ueber andere Panels" in prompt
+
+
+def test_drei_werkzeuge_beziehen_ihren_anlass_aus_diesen_bloecken() -> None:
+    """Die Beschreibungen dreier Werkzeuge sind gekürzt, weil das hier steht.
+
+    `propose_task_set`, `remember` und `learn_skill` waren zusammen 7.481 der
+    46.032 Zeichen des Werkzeugkatalogs und erklärten dasselbe ein zweites Mal,
+    was AUFGABEN, GEDAECHTNIS und SKILLS in **derselben** Anfrage sagen. Das
+    Doppelte ist in den Beschreibungen gestrichen, nicht im Prompt.
+
+    Wer einen dieser Blöcke herausnimmt oder an eine Bedingung hängt, nimmt den
+    drei Werkzeugen damit ihren Anlass: das Modell erführe nirgends mehr, wann
+    es einen stehenden Auftrag anlegt, wann es sich etwas ungefragt merkt und
+    wann es einen Skill lernt. Dann gehört der gestrichene Text zurück in die
+    Beschreibung — der Anlass darf nicht zwischen beiden Stellen verlorengehen.
+    """
+    prompt = ai_prompt.build("")
+
+    # AUFGABEN trägt den Anlass von propose_task_set.
+    assert "Stehende Auftraege" in prompt and "propose_task_set" in prompt
+    # GEDAECHTNIS trägt den von remember, samt Ausschlussliste.
+    assert "merke es dir sofort mit `remember`" in prompt
+    assert "Nicht merken:" in prompt
+    # SKILLS trägt den von learn_skill, samt Bauplan des Skilltextes.
+    assert "Halte mit `learn_skill` fest" in prompt
+    assert "was zu pruefen ist, in welcher Reihenfolge" in prompt

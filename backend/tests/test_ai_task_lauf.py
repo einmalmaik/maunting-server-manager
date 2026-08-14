@@ -167,11 +167,13 @@ class Anbieter:
 
     def einbauen(self, monkeypatch) -> "Anbieter":
         async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
-                       tools=None, reasoning=False, reasoning_effort=None,
-                       cache_marke=False):
+                       tools=None, tool_choice=None, reasoning=False,
+                       reasoning_effort=None, cache_marke=False):
             del provider, api_key, reasoning, reasoning_effort, cache_marke
             self.gesehen.append([dict(item) for item in messages])
-            if tools is not None:
+            # In der Schlussrunde fährt der Katalog mit, darf aber nicht
+            # benutzt werden — das sagt `tool_choice="none"`.
+            if tools and tool_choice != "none":
                 self.werkzeugsaetze.append({
                     str(eintrag.get("function", {}).get("name")) for eintrag in tools
                 })

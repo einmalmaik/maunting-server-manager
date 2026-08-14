@@ -108,6 +108,27 @@ def test_every_write_tool_has_a_confirmation_sentence(sprache: str) -> None:
     )
 
 
+@pytest.mark.parametrize("sprache", SPRACHEN)
+def test_every_tool_has_a_running_sentence(sprache: str) -> None:
+    """Der Satz, den der Benutzer sekundenlang anstarrt, während das Werkzeug läuft.
+
+    `ai.toolsRunning.<werkzeug>` ist ein flacher Geschwisterraum von `ai.tools`
+    und deckt **alle** Werkzeuge ab, lesende wie schreibende: die bestehende
+    Zweiteilung gibt es nur, weil die beiden Texte an zwei verschiedenen Stellen
+    der Oberfläche stehen. Der Verlaufssatz hat genau eine Stelle.
+
+    Nicht unter `ai.tools.running.*` verschachteln — das schlüge in
+    `test_no_label_is_left_over_from_a_removed_tool` als Text ohne Werkzeug an.
+    """
+    texte = _texte(sprache).get("ai", {}).get("toolsRunning", {})
+    fehlend = [name for name in sorted(WERKZEUGE) if not str(texte.get(name, "")).strip()]
+
+    assert not fehlend, (
+        f"Diese Werkzeuge haben keinen Verlaufssatz in {sprache}.json unter "
+        f"ai.toolsRunning; während der Ausführung stünde dort nichts: {fehlend}"
+    )
+
+
 def test_both_languages_cover_the_same_tools() -> None:
     """Eine Sprache nachzupflegen und die andere zu vergessen ist der Normalfall."""
     je_sprache = {}
@@ -116,9 +137,11 @@ def test_both_languages_cover_the_same_tools() -> None:
         je_sprache[sprache] = (
             set(daten.get("tools", {})),
             set(daten.get("actions", {}).get("tools", {})),
+            set(daten.get("toolsRunning", {})),
         )
-    lesend = {s: paar[0] for s, paar in je_sprache.items()}
-    schreibend = {s: paar[1] for s, paar in je_sprache.items()}
+    lesend = {s: teile[0] for s, teile in je_sprache.items()}
+    schreibend = {s: teile[1] for s, teile in je_sprache.items()}
+    laufend = {s: teile[2] for s, teile in je_sprache.items()}
 
     assert lesend["de"] == lesend["en"], (
         "ai.tools weicht zwischen de und en ab: "
@@ -127,6 +150,10 @@ def test_both_languages_cover_the_same_tools() -> None:
     assert schreibend["de"] == schreibend["en"], (
         "ai.actions.tools weicht zwischen de und en ab: "
         f"{schreibend['de'] ^ schreibend['en']}"
+    )
+    assert laufend["de"] == laufend["en"], (
+        "ai.toolsRunning weicht zwischen de und en ab: "
+        f"{laufend['de'] ^ laufend['en']}"
     )
 
 
@@ -139,7 +166,9 @@ def test_no_label_is_left_over_from_a_removed_tool(sprache: str) -> None:
     """
     daten = _texte(sprache).get("ai", {})
     ueberzaehlig = (
-        set(daten.get("tools", {})) | set(daten.get("actions", {}).get("tools", {}))
+        set(daten.get("tools", {}))
+        | set(daten.get("actions", {}).get("tools", {}))
+        | set(daten.get("toolsRunning", {}))
     ) - set(WERKZEUGE)
 
     assert not ueberzaehlig, (

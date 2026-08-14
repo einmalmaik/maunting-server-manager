@@ -193,12 +193,15 @@ class Anbieter:
 
     def einbauen(self, monkeypatch) -> "Anbieter":
         async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
-                       tools=None, reasoning=False, reasoning_effort=None,
-                       cache_marke=False):
+                       tools=None, tool_choice=None, reasoning=False,
+                       reasoning_effort=None, cache_marke=False):
             del provider, api_key, reasoning, reasoning_effort, cache_marke
             self.gesehen.append([dict(item) for item in messages])
             self.anfragen += 1
-            if tools is not None and self.runden:
+            # Die Schlussrunde erkennt man an `tool_choice="none"`, nicht mehr
+            # an einem fehlenden Katalog: der fährt jetzt auch dort mit, damit
+            # der Zwischenspeicher des Anbieters greift.
+            if tool_choice != "none" and tools and self.runden:
                 usage.tool_calls = list(self.runden.pop(0))
             usage.total_tokens = 10
             yield StreamChunk("content", self.text)

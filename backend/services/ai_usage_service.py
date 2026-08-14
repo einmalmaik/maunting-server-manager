@@ -334,6 +334,7 @@ def complete_ai_usage(
         event.prompt_tokens = aufschluesselung.prompt_tokens
         event.completion_tokens = aufschluesselung.completion_tokens
         event.cached_tokens = aufschluesselung.cached_tokens
+        event.cache_write_tokens = aufschluesselung.cache_write_tokens
         event.reasoning_tokens = aufschluesselung.reasoning_tokens
         # Mindestens eine: die Zeile existiert, weil eine Anfrage stattgefunden
         # hat. Eine 0 hier hiesse "der Anbieter wurde nie gefragt", und das
@@ -463,6 +464,7 @@ class AiUsageEventRow:
     prompt_tokens: int | None
     completion_tokens: int | None
     cached_tokens: int | None
+    cache_write_tokens: int | None
     reasoning_tokens: int | None
     provider_requests: int | None
     cost_micro_usd: int
@@ -536,6 +538,7 @@ def usage_events(
             prompt_tokens=event.prompt_tokens,
             completion_tokens=event.completion_tokens,
             cached_tokens=event.cached_tokens,
+            cache_write_tokens=event.cache_write_tokens,
             reasoning_tokens=event.reasoning_tokens,
             provider_requests=event.provider_requests,
             cost_micro_usd=int(event.accounted_cost_microunits or 0),

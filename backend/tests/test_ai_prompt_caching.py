@@ -24,12 +24,19 @@ und abgerechnet wird. Ein Modell ohne Marke speichert nicht zwischen, Punkt.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import httpx
 import pytest
+from sqlalchemy.orm import Session
 
-from models import AiProvider
+from models import AiConversation, AiMessage, AiProvider, AiToolResult, User
 from services import ai_model_catalog
+from services.ai_context_service import (
+    WERKZEUG_KONTEXT_KOPF,
+    build_provider_messages,
+)
 from services.openai_compatible_adapter import StreamUsage, stream_chat_completion
 
 
@@ -194,3 +201,104 @@ async def test_the_mark_does_not_disturb_thinking_or_tools() -> None:
     assert body["cache_control"] == {"type": "ephemeral"}
     assert body["reasoning"] == {"enabled": True, "effort": "high"}
     assert body["tool_choice"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_a_forbidden_catalogue_still_goes_out() -> None:
+    """„Keine Werkzeuge benutzen“ und „keinen Katalog schicken“ ist nicht dasselbe.
+
+    Der Unterschied ist der Zwischenspeicher: bei Anthropic steht der
+    Werkzeugkatalog ganz vorne im wiederverwendbaren Präfix. Wer ihn in der
+    Schlussrunde weglässt, ändert die Anfrage an ihrer ersten Stelle — und
+    verliert den Treffer ausgerechnet in der Runde, die den längsten Verlauf
+    trägt. `tool_choice="none"` sagt dieselbe Absicht, ohne den Präfix
+    anzufassen.
+    """
+    body = await _gesendeter_body(
+        cache_marke=True,
+        tools=[{"type": "function", "function": {"name": "list_my_servers"}}],
+        tool_choice="none",
+    )
+    assert body["tool_choice"] == "none"
+    assert [eintrag["function"]["name"] for eintrag in body["tools"]] == [
+        "list_my_servers"
+    ]
+
+
+# ── Was überhaupt zwischengespeichert werden kann ─────────────────────
+#
+# Ein Anbieter speichert immer nur den **Präfix** einer Anfrage: alles bis zur
+# ersten Abweichung von der vorigen. Damit ist die Reihenfolge der Nachrichten
+# keine Geschmacksfrage, sondern entscheidet, wieviel überhaupt
+# wiederverwendbar ist.
+
+
+def _gespraech(db: Session, user: User) -> AiConversation:
+    row = AiConversation(id=str(uuid4()), user_id=user.id, title="Zwischenspeicher")
+    db.add(row)
+    db.commit()
+    return row
+
+
+def test_what_changes_stands_behind_what_stays(
+    db: Session, regular_user: User
+) -> None:
+    """Erst das Stabile, dann das Wechselnde — und ganz zuletzt die Frage.
+
+    Der Werkzeugkontext wechselt nach jedem Lauf, der Lageblock jede Minute.
+    Standen sie vor der Historie, endete der wiederverwendbare Teil bei der
+    Zusammenfassung: ausgerechnet die Gesprächshistorie — der einzige Teil, der
+    von sich aus stabil ist und mit jeder Runde wächst — lag dahinter und wurde
+    nie wiederverwendet.
+
+    Der erste Entwurf hängte beide ganz ans Ende, hinter die Frage. Der
+    Zwischenspeicher stieg damit von 78 auf 98 Prozent — und die Werkzeugwahl
+    kippte: im Benchmark vom 14.08.2026 rief `skill_lernen` vorher in zwei von
+    drei Läufen `learn_skill`, danach in null von drei, dafür konsistent
+    `list_my_servers`. Stand die Frage nicht mehr am Schluss, las das Modell
+    zuletzt den Betriebszustand und antwortete darauf.
+
+    Deshalb gilt beides zugleich, und dieser Test hält beides fest: das
+    Wechselnde steht hinter dem Stabilen, **und** die Frage steht zuletzt. Der
+    Präfix verliert dadurch nur die letzte Gesprächszeile — ein paar hundert
+    Zeichen gegen die zehntausende davor.
+    """
+    conversation = _gespraech(db, regular_user)
+    start = datetime.now(timezone.utc) - timedelta(hours=1)
+    for index, text in enumerate(["Warum stuerzt er ab?", "Ich sehe nach.", "Und jetzt?"]):
+        db.add(AiMessage(
+            id=str(uuid4()), conversation_id=conversation.id,
+            role="assistant" if index == 1 else "user",
+            content=text, status="complete",
+            created_at=start + timedelta(minutes=index),
+        ))
+    db.add(AiToolResult(
+        id=str(uuid4()), conversation_id=conversation.id,
+        tool_name="read_server_status", result_json="Server laeuft",
+    ))
+    db.commit()
+
+    nachrichten = build_provider_messages(db, conversation, "Und jetzt?")
+
+    def stelle(text: str) -> int:
+        return next(
+            index for index, item in enumerate(nachrichten)
+            if isinstance(item.get("content"), str) and text in item["content"]
+        )
+
+    # Der Systemprompt bleibt vorn — er ist der größte stabile Block.
+    assert nachrichten[0]["role"] == "system"
+    # Die Frage steht zuletzt. Gemessen, nicht gemeint: hängte man die beiden
+    # wechselnden Blöcke dahinter, stieg der Zwischenspeicher von 68 auf 98
+    # Prozent — und `skill_lernen` rief in null von drei Läufen `learn_skill`,
+    # dafür dreimal `list_my_servers`. Das Modell antwortete auf den
+    # Betriebszustand statt auf die Frage.
+    assert nachrichten[-1]["content"] == "Und jetzt?"
+    # Direkt davor das Wechselnde, also hinter der gesamten übrigen Historie.
+    assert nachrichten[-2]["role"] == "system"
+    assert nachrichten[-2]["content"].startswith("Lage (Auskunft des Panels")
+    assert nachrichten[-3]["content"].startswith(WERKZEUG_KONTEXT_KOPF)
+    # Der ältere Verlauf liegt davor und ist damit Teil des wiederverwendbaren
+    # Präfix — das war vorher nicht so.
+    assert stelle("Warum stuerzt er ab?") < stelle(WERKZEUG_KONTEXT_KOPF)
+    assert stelle("Ich sehe nach.") < stelle(WERKZEUG_KONTEXT_KOPF)

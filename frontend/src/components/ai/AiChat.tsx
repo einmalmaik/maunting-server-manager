@@ -12,6 +12,7 @@ import {
   type AiProviderAvailable,
   type AiRunInfo,
   type AiSection,
+  type AiToolPlanAufruf,
   type AiToolUse,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
@@ -72,6 +73,14 @@ function gruppiert(abschnitte: AiSection[]): Teil[] {
   }
   return raus
 }
+
+/**
+ * Die leere Ankündigung — **eine** Liste für alle Blasen, die keine haben.
+ *
+ * Ein frisches `[]` je Render machte den `memo`-Vergleich von `AiAntwortblase`
+ * für den gesamten Verlauf wertlos, ohne dass ein Test es merkt.
+ */
+const KEINE_AUFRUFE: AiToolPlanAufruf[] = []
 
 interface ServerOption {
   id: number
@@ -310,7 +319,7 @@ export function AiChat() {
    * ohne gerendertes Bauteil prüfen.
    */
   const {
-    entries, setEntries, streaming, runId, setRunId,
+    entries, setEntries, streaming, laufendeWerkzeuge, runId, setRunId,
     merkeVorschlag, sendContent, haengeAn,
   } = useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttachments })
 
@@ -728,7 +737,13 @@ export function AiChat() {
                   // gespeichert werden müsste.
                   beantwortet={index < entries.length - 1}
                   busy={busy}
-                  nachdenken={denken.an}
+                  // Nur die noch schreibende Blase bekommt den Plan. Alle
+                  // anderen bekommen immer dieselbe leere Liste — sonst
+                  // entwertete eine je Runde neue Eigenschaft den `memo`
+                  // Vergleich für den ganzen Verlauf.
+                  laufendeWerkzeuge={
+                    message.status === 'streaming' ? laufendeWerkzeuge : KEINE_AUFRUFE
+                  }
                   onAnswer={sendContent}
                 />
               )
@@ -975,13 +990,13 @@ function entryTimestamp(entry: Entry): string {
  * Vergleich still wertlos, ohne dass ein Test es merkt.
  */
 const AiAntwortblase = memo(function AiAntwortblase({
-  message, beantwortet, busy, nachdenken, onAnswer,
+  message, beantwortet, busy, laufendeWerkzeuge, onAnswer,
 }: {
   message: AiMessage
   beantwortet: boolean
   busy: boolean
-  /** Wurde für diesen Lauf überhaupt Nachdenken angefordert? */
-  nachdenken: boolean
+  /** Was gerade läuft — leer, wenn diese Blase nicht mehr schreibt. */
+  laufendeWerkzeuge: AiToolPlanAufruf[]
   onAnswer: (label: string) => void
 }) {
   const { t } = useTranslation()
@@ -1016,10 +1031,6 @@ const AiAntwortblase = memo(function AiAntwortblase({
                 <AiWerkzeuggruppe
                   key={stelle}
                   werkzeuge={teil.werkzeuge}
-                  // Zeigt an, dass es nach diesen Werkzeugen weitergeht — aber
-                  // nur bei der letzten Gruppe, sonst behaupteten alle
-                  // vorherigen dasselbe.
-                  arbeitetWeiter={isStreaming && stelle === teile.length - 1}
                   // Während die Antwort entsteht, ist das Aufgeklappte die
                   // Antwort: der Benutzer sieht, dass gearbeitet wird. Ist sie
                   // fertig, ist es ein Beleg, den man nachschlagen kann — und
@@ -1042,26 +1053,19 @@ const AiAntwortblase = memo(function AiAntwortblase({
           </div>
         ) : message.content ? (
           <AiMarkdown content={message.content} />
-        ) : isStreaming ? (
-          // Noch ist nichts da. **Eine** Anzeige für diese Wartezeit, nicht
-          // zwei: wurde Nachdenken angefordert, ist der Denkkasten der Ort, an
-          // dem gleich etwas passiert — er stand hier zuletzt zusätzlich zu
-          // "Antwort wird erstellt …". War Nachdenken aus (die Voreinstellung),
-          // behauptete er außerdem "Denkt nach …", obwohl nie ein Zeichen kam.
-          nachdenken ? (
-            <AiReasoningBlock content="" streaming />
-          ) : (
-            <p className="flex items-center gap-2 text-sm text-on-surface-variant">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              {t('ai.chat.thinking')}
-            </p>
-          )
-        ) : message.question ? null : (
+        ) : !isStreaming && !message.question ? (
           // Eine Rückfrage *ist* die Antwort. Früher stand hier "Keine Antwort
           // erhalten" unter jeder gestellten Frage, weil die Frage in einer
           // eigenen Karte lag und der Nachrichtentext leer blieb.
           <p className="text-sm text-on-surface-variant">{t('ai.chat.noResponse')}</p>
-        )}
+        ) : null}
+        {/* Die Wartezeile steht **einmal** und immer als letzte Zeile der
+            Blase — nicht mehr an drei Stellen mit drei Bedingungen. Genau
+            daraus entstanden die zwei Anzeigen übereinander und der leere
+            Denkkasten, der nur behauptete, dass gedacht wird. Der Denkkasten
+            erscheint jetzt allein dann, wenn wirklich Denktext fließt: er ist
+            oben ein `teil`, kein Platzhalter. */}
+        {isStreaming && <AiWartezeile aufrufe={laufendeWerkzeuge} />}
         {/* Die Rückfrage gehört in dieselbe Blase wie der Text davor — sie ist
             Teil dieser Antwort und keine neue Nachricht. */}
         {message.question && (
@@ -1138,20 +1142,9 @@ function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {
  * eingeklappt ist der ruhige Zustand.
  */
 function AiWerkzeuggruppe(
-  { werkzeuge, offenVoreingestellt, arbeitetWeiter = false }: {
+  { werkzeuge, offenVoreingestellt }: {
     werkzeuge: AiToolUse[]
     offenVoreingestellt: boolean
-    /**
-     * Nach dieser Gruppe geht es weiter, es ist nur noch nichts da.
-     *
-     * Gemessen ist das die laengste Stille des ganzen Ablaufs: zwischen dem
-     * letzten Werkzeugchip und dem ersten Zeichen der naechsten Runde vergingen
-     * bis zu 17,5 Sekunden, in denen die Oberflaeche **nichts** anzeigte. Das
-     * Modell verarbeitet in dieser Zeit den gewachsenen Kontext — daran aendert
-     * die Oberflaeche nichts, aber sie kann aufhoeren, wie eingefroren
-     * auszusehen.
-     */
-    arbeitetWeiter?: boolean
   },
 ) {
   const { t } = useTranslation()
@@ -1161,12 +1154,11 @@ function AiWerkzeuggruppe(
   // Benutzers zu ueberschreiben, die es vorher gar nicht geben konnte.
   useEffect(() => { setOffen(offenVoreingestellt) }, [offenVoreingestellt])
 
-  const weiter = arbeitetWeiter && (
-    <p className="flex items-center gap-2 text-xs text-on-surface-variant">
-      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
-      {t('ai.chat.working')}
-    </p>
-  )
+  // Die Zeile "es geht weiter" stand früher hier drin, einmal je Rückgabe.
+  // Sie gehört nicht der Gruppe: sie sagt etwas über die **Antwort**, nicht
+  // über diese Werkzeuge, und sie stand deshalb bei jeder Änderung an dieser
+  // Stelle wieder zur Debatte. Jetzt zeichnet `AiAntwortblase` sie einmal am
+  // Ende der Blase — siehe `AiWartezeile`.
 
   if (offen) {
     return (
@@ -1174,7 +1166,6 @@ function AiWerkzeuggruppe(
         {werkzeuge.map((werkzeug, stelle) => (
           <AiWerkzeugzeile key={stelle} tool={werkzeug} />
         ))}
-        {weiter}
         {!offenVoreingestellt && (
           <button
             type="button"
@@ -1190,7 +1181,6 @@ function AiWerkzeuggruppe(
   }
   const gescheitert = werkzeuge.some((werkzeug) => werkzeug.failed)
   return (
-    <div className="space-y-1">
     <button
       type="button"
       onClick={() => setOffen(true)}
@@ -1208,7 +1198,51 @@ function AiWerkzeuggruppe(
         </span>
       )}
     </button>
-    {weiter}
+  )
+}
+
+/**
+ * Die eine Wartezeile einer noch schreibenden Antwort.
+ *
+ * Gemessen ist das die längste Stille des ganzen Ablaufs: zwischen dem letzten
+ * Werkzeugchip und dem ersten Zeichen der nächsten Runde vergingen bis zu 17,5
+ * Sekunden, in denen die Oberfläche **nichts** Konkretes anzeigte. Daran, wie
+ * lange es dauert, ändert die Anzeige nichts — aber sie kann sagen, woran
+ * gerade gearbeitet wird, statt nur, dass gearbeitet wird.
+ *
+ * Ohne Ankündigung bleibt der allgemeine Hinweis: es steht nie nichts da.
+ *
+ * **Mehrere gleichzeitige Werkzeuge werden zu je einer Zeile** — und nach
+ * Werkzeugnamen zusammengefasst. Die Sätze sind vollständige Ich-Sätze
+ * ("Ich sehe mir die Aufgabenliste an"); aneinandergereiht ergäben sie kein
+ * Deutsch, und zweimal derselbe Satz untereinander sähe aus wie ein Fehler.
+ * Der Unterschied zwischen zwei Aufrufen desselben Werkzeugs liegt allein in
+ * den Argumenten — und die dürfen hier nicht stehen (Serverpfade, Dateinamen,
+ * IPs).
+ */
+function AiWartezeile({ aufrufe }: { aufrufe: AiToolPlanAufruf[] }) {
+  const { t } = useTranslation()
+  const namen = [...new Set(aufrufe.map((aufruf) => aufruf.tool_name))]
+
+  if (namen.length === 0) {
+    return (
+      <p className="flex items-center gap-2 text-sm text-on-surface-variant">
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+        {t('ai.chat.thinking')}
+      </p>
+    )
+  }
+  return (
+    <div className="space-y-1">
+      {namen.map((name) => (
+        <p key={name} className="flex items-center gap-2 text-sm text-on-surface-variant">
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+          {/* Der Name kommt vom Modell und ist damit Fremdeingabe. Er wird
+              übersetzt oder gar nicht gezeigt: der Rückfall ist der
+              allgemeine Satz, nie der rohe Werkzeugname. */}
+          {t(`ai.toolsRunning.${name}`, { defaultValue: t('ai.chat.working') })}
+        </p>
+      ))}
     </div>
   )
 }

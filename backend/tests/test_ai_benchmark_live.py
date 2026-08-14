@@ -1164,7 +1164,7 @@ def _gefaelschter_strom(latenz: float):
     """
 
     async def _strom(
-        _client, *, provider, api_key, messages, usage, tools=None,
+        _client, *, provider, api_key, messages, usage, tools=None, tool_choice=None,
         reasoning=False, reasoning_effort=None, cache_marke=False,
     ):
         del provider, api_key, reasoning, reasoning_effort, cache_marke

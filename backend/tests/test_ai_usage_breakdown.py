@@ -111,6 +111,40 @@ async def test_der_adapter_liest_die_ganze_aufschluesselung() -> None:
 
 
 @pytest.mark.asyncio
+async def test_der_zwischenspeicher_wird_von_beiden_seiten_gelesen() -> None:
+    """Gelesen **und** geschrieben — beide stehen im selben Objekt.
+
+    Warum es beide Zahlen braucht, steht bei der Spalte in
+    `models/ai_usage_event.py`.
+    """
+    usage = await _lauf(
+        'data: {"choices":[],"usage":{"prompt_tokens":20000,"completion_tokens":50,'
+        '"total_tokens":20050,"prompt_tokens_details":'
+        '{"cached_tokens":0,"cache_write_tokens":18000}}}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    assert usage.cached_tokens == 0
+    assert usage.cache_write_tokens == 18_000
+
+
+@pytest.mark.asyncio
+async def test_ein_anbieter_ohne_zwischenspeicher_meldet_null_und_nicht_nichts() -> None:
+    """Fehlt das Feld, ist die Antwort 0 — wie bei den gelesenen Tokens.
+
+    Ein Modell ohne Zwischenspeicher hat nichts geschrieben, und das ist eine
+    Aussage und keine Luecke. Die Unterscheidung "nicht gemeldet" gilt bei den
+    Tokensummen; bei den Teilmengen des Zwischenspeichers ist beides dasselbe.
+    """
+    usage = await _lauf(
+        'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":25}}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    assert usage.cache_write_tokens == 0
+
+
+@pytest.mark.asyncio
 async def test_ohne_usage_zeile_gilt_nichts_als_gemessen() -> None:
     """Ein stummer Anbieter hat nicht null Tokens verbraucht.
 
@@ -169,18 +203,23 @@ def test_werkzeugrunden_werden_summiert_nicht_ersetzt() -> None:
     """
     gesamt = StreamUsage(
         total_tokens=1_000, prompt_tokens=900, completion_tokens=100,
-        cached_tokens=400, cost_micro_usd=500, vom_anbieter=True, anfragen=1,
+        cached_tokens=400, cache_write_tokens=500, cost_micro_usd=500,
+        vom_anbieter=True, anfragen=1,
     )
     for _ in range(2):
         usage_addieren(gesamt, StreamUsage(
             total_tokens=2_000, prompt_tokens=1_900, completion_tokens=100,
-            cached_tokens=1_500, cost_micro_usd=800, vom_anbieter=True, anfragen=1,
+            cached_tokens=1_500, cache_write_tokens=0, cost_micro_usd=800,
+            vom_anbieter=True, anfragen=1,
         ))
 
     assert gesamt.total_tokens == 5_000
     assert gesamt.prompt_tokens == 4_700
     assert gesamt.completion_tokens == 300
     assert gesamt.cached_tokens == 3_400
+    # Geschrieben wird einmal, gelesen in jeder Folgerunde — genau daran sieht
+    # man, dass der Zwischenspeicher innerhalb eines Laufs greift.
+    assert gesamt.cache_write_tokens == 500
     assert gesamt.cost_micro_usd == 2_100
     assert gesamt.anfragen == 3
     assert gesamt.vom_anbieter is True
@@ -306,8 +345,8 @@ def test_die_aufstellung_zeigt_die_aufschluesselung_und_ihre_herkunft(
         actual_cost_microunits=2_100,
         aufschluesselung=StreamUsage(
             total_tokens=200, prompt_tokens=194, completion_tokens=6,
-            cached_tokens=120, reasoning_tokens=4, cost_micro_usd=2_100,
-            vom_anbieter=True, anfragen=3,
+            cached_tokens=120, cache_write_tokens=60, reasoning_tokens=4,
+            cost_micro_usd=2_100, vom_anbieter=True, anfragen=3,
         ),
         cost_source="provider",
     )
@@ -320,7 +359,11 @@ def test_die_aufstellung_zeigt_die_aufschluesselung_und_ihre_herkunft(
     zeile = zeilen[0]
     assert zeile.tokens == 200
     assert zeile.prompt_tokens == 194
+    # Beide Zahlen des Zwischenspeichers kommen nebeneinander an: erst zusammen
+    # ergeben sie eine Trefferquote statt einer Zahl. Gebucht war
+    # ``cache_write_tokens`` schon laenger, ausgeliefert wurde sie nicht.
     assert zeile.cached_tokens == 120
+    assert zeile.cache_write_tokens == 60
     assert zeile.provider_requests == 3
     assert zeile.cost_micro_usd == 2_100
     assert zeile.cost_source == "provider"

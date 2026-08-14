@@ -469,6 +469,60 @@ def _werkzeug_nebenlaeufigkeit() -> int:
     return 1 if str(engine.url).startswith("sqlite") else 8
 
 
+def _servernummer(call) -> int | None:
+    """Die Servernummer eines Aufrufs, sofern eine echte Zahl dabei steht.
+
+    Die Argumente kommen vom Modell: dort kann genauso gut ``"12"``, eine Liste
+    oder gar nichts stehen. Für die Anzeige zählt nur eine Zahl — alles andere
+    ist ``None`` und damit "kein Serverbezug".
+    """
+    nummer = call.arguments.get("server_id")
+    return nummer if isinstance(nummer, int) else None
+
+
+def _werkzeuge_ansagen(run_id: str | None, calls) -> None:
+    """Sagt an, welche Werkzeuge gleich laufen — vor dem ersten Ergebnis.
+
+    Ohne diese Ansage erfährt die Oberfläche einen Werkzeugnamen erst zusammen
+    mit dem Ergebnis (`tool`). Genau davor liegt die längste Stille des Laufs,
+    und sie war bisher textlos.
+
+    **Eigener Name und flüchtig.** `veroeffentlichen` hängt jedes `tool` an den
+    Abzug (ai_run_broker.py). Ein früheres `tool` stünde nach dem Wiederanhängen
+    doppelt und dauerhaft im Verlauf. `tool_plan` kennt der Vermittler nicht —
+    es geht an die Zuhörer und sonst nirgends. Wer sich mitten im Lauf neu
+    anhängt, sieht es deshalb nicht; das ist richtig so, denn es ist keine
+    Tatsache über die Antwort, sondern eine Anzeige während der Arbeit.
+
+    `call_id` und nicht der Name ist der Schlüssel: bis zu acht Werkzeuge laufen
+    gleichzeitig, und dasselbe Werkzeug kann in einer Runde zweimal vorkommen.
+    Argumente gehen bewusst **nicht** mit — Pfade, Dateinamen und Adressen haben
+    in einer Anzeigezeile nichts verloren.
+
+    **Genau einmal je Runde, und für jede Art von Werkzeug dieselbe Ansage.**
+    Die Oberfläche ersetzt ihren Zustand mit jeder Ansage, sie ergänzt ihn
+    nicht; zwei Ansagen in einer Runde hiessen also, die zweite vergisst die
+    erste. Der Ablauf gibt das her: eine Runde ist entweder eine Leserunde oder
+    eine Schreibrunde. Mischt das Modell beides, laufen nur die Lesewerkzeuge,
+    und die Schreibaufrufe gehen unausgeführt mit Begründung an das Modell
+    zurück — angesagt wird dann nur, was wirklich läuft.
+
+    Gerufen wird ausschliesslich auf der Ereignisschleife, auch im Schreibpfad,
+    dessen eigentliche Arbeit in einem Thread liegt: `veroeffentlichen` schreibt
+    in eine gewöhnliche `asyncio.Queue` und verträgt keinen zweiten Schreiber.
+    """
+    if run_id is None or not calls:
+        return
+    ai_run_broker.veroeffentlichen(run_id, "tool_plan", {"aufrufe": [
+        {
+            "call_id": call.id,
+            "tool_name": call.name,
+            "server_id": _servernummer(call),
+        }
+        for call in calls
+    ]})
+
+
 def _anzeigeeintrag(call, wert, fehlgeschlagen: str | None) -> dict:
     """Was der Benutzer im Verlauf sehen soll: welches Werkzeug lief und womit.
 
@@ -477,9 +531,7 @@ def _anzeigeeintrag(call, wert, fehlgeschlagen: str | None) -> dict:
     """
     eintrag = {
         "tool_name": call.name,
-        "server_id": call.arguments.get("server_id")
-        if isinstance(call.arguments.get("server_id"), int)
-        else None,
+        "server_id": _servernummer(call),
         # Ein gescheiterter Aufruf gehoert sichtbar in den Verlauf. Sonst wirkt
         # eine Antwort vollstaendig, der eine Auskunft fehlt.
         **({"failed": True} if fehlgeschlagen else {}),
@@ -750,6 +802,12 @@ async def _tool_followup_messages(
     spent = 0
     erledigt = 0
     offen = list(tool_calls)
+
+    # **Ansagen, bevor es läuft.** Hier stehen die Aufrufe der Runde fest —
+    # aussortiert ist aussortiert, geprüft ist geprüft —, und ausgeführt ist
+    # noch keiner. Es ist die einzige Stelle, an der beides gleichzeitig gilt.
+    # Warum die Ansage so aussieht, wie sie aussieht, steht bei `_werkzeuge_ansagen`.
+    _werkzeuge_ansagen(run_id, offen)
 
     # **In Wellen, nicht alles auf einmal.** Das Budget hat zwei Aufgaben, und
     # nur eine davon ist der Kontext.
@@ -1957,8 +2015,8 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         # knapperen Kontext, sondern in eine Absage des Anbieters.
         #
         # Der Wert wird hier einmal genommen und nicht in der Schleife: nach dem
-        # Zuschnitt ändert sich `tools` nur noch zu `None` (letzte Runde), und
-        # dann ist die Grenze ohnehin großzügiger als nötig.
+        # Zuschnitt ändert sich `tools` nicht mehr — auch die Schlussrunde
+        # schickt den Katalog mit und verbietet nur noch seine Benutzung.
         katalog_zeichen = len(json.dumps(tools, ensure_ascii=False))
         # Zwischenspeichern des Prompts, sofern dieses Modell es ausdruecklich
         # verlangt. Einmal je Segment ermittelt und nicht je Runde: der Katalog
@@ -1984,6 +2042,19 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             vorbereitung.provider.default_model,
         )
         cache_marke = modell is not None and modell.cache_marke_noetig
+        # Ist die nächste Runde die abschließende? Dann darf das Modell keine
+        # Werkzeuge mehr aufrufen — der Katalog geht aber weiter mit.
+        #
+        # Hier stand `tools = None`, und das war teuer: bei Anthropic steht der
+        # Werkzeugkatalog ganz vorne im zwischengespeicherten Präfix. Fällt er
+        # weg, ändert sich die Anfrage an ihrer ersten Stelle, und der Treffer
+        # fällt ausgerechnet in der Runde, die den längsten Verlauf trägt.
+        # Dieselbe Absicht sagt `tool_choice="none"` (OpenRouter führt den Wert
+        # ausdrücklich), ohne den Präfix anzufassen.
+        #
+        # Die Grenze bleibt trotzdem auf unserer Seite: meldet der Anbieter
+        # danach doch Werkzeugaufrufe, werden sie verworfen — siehe unten.
+        letzte_runde = False
         current_usage = usage
         signaturen: dict[str, int] = dict(zustand.get("tool_signatures") or {})
         # Das Budget dieses Laufs. `build_provider_messages` hat es beim Start
@@ -2019,6 +2090,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 messages=provider_messages,
                 usage=current_usage,
                 tools=tools,
+                tool_choice="none" if letzte_runde else None,
                 reasoning=vorbereitung.reasoning,
                 reasoning_effort=vorbereitung.reasoning_effort,
                 cache_marke=cache_marke,
@@ -2053,15 +2125,15 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 usage_addieren(usage, current_usage)
             if not current_usage.tool_calls:
                 break
-            if tools is None:
-                # Diese Runde wurde ohne Werkzeugliste angefragt — sie ist die
-                # abschliessende. Meldet der Anbieter trotzdem Werkzeugaufrufe,
-                # ist das keine Anfrage, die wir erfuellen: wir haben nichts
-                # angeboten. Frueher war `tools = None` nur eine Bitte, und ein
-                # Anbieter, der sich nicht daran hielt, hielt den Lauf endlos
-                # offen. Hier steht die Grenze auf unserer Seite.
+            if letzte_runde:
+                # Diese Runde war die abschließende: sie ging mit
+                # `tool_choice="none"` hinaus. Meldet der Anbieter trotzdem
+                # Werkzeugaufrufe, ist das keine Anfrage, die wir erfüllen —
+                # wir haben ausdrücklich keine erlaubt. Ein Anbieter, der sich
+                # nicht daran hält, hielte den Lauf sonst endlos offen; hier
+                # steht die Grenze auf unserer Seite.
                 logger.warning(
-                    "Anbieter meldet Werkzeugaufrufe ohne angebotene Werkzeuge, "
+                    "Anbieter meldet Werkzeugaufrufe trotz tool_choice=none, "
                     "werden verworfen run_id=%s anzahl=%d",
                     run_id, len(current_usage.tool_calls),
                 )
@@ -2115,7 +2187,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
                 if zustand["rounds"] > MAX_TOOL_ROUNDS:
                     budget_erschoepft = True
-                    tools = None
+                    letzte_runde = True
                 current_usage = StreamUsage()
                 continue
             if frage is not None:
@@ -2144,6 +2216,17 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 if _lauf_status(run_id) != "running":
                     abgeloest = True
                     break
+                # **Dieselbe Ansage wie im Lesepfad**, an derselben Stelle im
+                # Ablauf: geprueft ist geprueft, angelegt ist noch nichts.
+                # Achtzehn der zweiundfuenfzig gepflegten Verlaufssaetze
+                # gehoeren Schreibwerkzeugen und waren ohne diese Zeile
+                # unerreichbar — die laengste Stille des Laufs liegt
+                # ausgerechnet hier, wo ein Backup laeuft.
+                #
+                # Sie steht hier und nicht in `_persist_write_proposals`, weil
+                # diese Funktion gleich in einem Thread laeuft; `veroeffentlichen`
+                # gehoert auf die Ereignisschleife.
+                _werkzeuge_ansagen(run_id, current_usage.tool_calls)
                 # **Als Ganzes in einen Thread, innen unveraendert sequenziell.**
                 #
                 # Hier entstehen die Backups, Neustarts und
@@ -2248,7 +2331,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                         run_id, len(offen),
                     )
                     budget_erschoepft = True
-                    tools = None
+                    letzte_runde = True
                     current_usage = StreamUsage()
                     continue
                 if offen:
@@ -2258,7 +2341,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                         ],
                     }
                     geparkt = True
-                    tools = None
+                    letzte_runde = True
                     current_usage = StreamUsage()
                     continue
                 # Alles ausgefuehrt? Dann darf der Lauf weiterarbeiten. Das ist
@@ -2302,7 +2385,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     # aufgebrauchtes Budget.
                     if ausgefuehrt:
                         budget_erschoepft = True
-                    tools = None
+                    letzte_runde = True
                 current_usage = StreamUsage()
                 continue
             if "unknown" in kinds:
@@ -2359,7 +2442,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     run_id,
                 )
                 budget_erschoepft = True
-                tools = None
+                letzte_runde = True
                 current_usage = StreamUsage()
                 continue
             if not current_usage.tool_calls and not deferred_calls:
