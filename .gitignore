@@ -91,3 +91,6 @@ prompt.txt
 # `propose_config_patch` ausloest. Betriebsdaten eines Panels, keine Quelle.
 /backend/.msm-file-history/
 claude.md
+
+# Lokale Smart System Konzeptnotizen (nicht in Git committen)
+docs/smart-system-notes.md
