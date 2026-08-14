@@ -58,6 +58,7 @@ from sqlalchemy.orm import Session
 from models import AiSkill, User
 from services import ai_embedding_service, audit_service, permission_service, team_service
 from services.ai_embedding_service import EMBEDDING_DIMENSIONS
+from services.ai_embedding_service import MODEL_TAG as _EMBEDDING_MODEL_TAG
 from services.ai_redaction import redact_sensitive_text
 
 
@@ -75,7 +76,6 @@ MAX_SKILLS_PER_SCOPE = 200
 # legt jedes Kundengespraech welche an — und duerfen deshalb nicht dasselbe
 # Kontingent aufbrauchen wie die freigegebenen Skills des Betreibers.
 MAX_PENDING_PER_SCOPE = 25
-_EMBEDDING_MODEL_TAG = "potion-multilingual-128M"
 _SKILL_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,63}$")
 _FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n(.*)\Z", re.DOTALL)
 
@@ -107,6 +107,11 @@ class SkillView:
     enabled: bool
     editable: bool
     id: str | None = None
+    #: Wann die Datenbankzeile zuletzt geschrieben wurde. ``None`` heißt
+    #: mitgeliefert — eine Datei hat kein Änderungsdatum. Gebraucht wird das
+    #: Feld allein für den Notschnitt in `_neueste_zuerst`; die Oberfläche
+    #: zeigt es nicht.
+    updated_at: datetime | None = None
 
 
 def shipped_directory() -> Path:
@@ -248,7 +253,7 @@ def _overlay(by_key: dict[str, SkillView], rows: list[AiSkill]) -> None:
             id=row.id, skill_key=row.skill_key, name=row.name, description=row.description,
             scope="global" if row.team_id is None else "team",
             origin=row.origin, team_id=row.team_id, status=row.status,
-            enabled=row.enabled, editable=True,
+            enabled=row.enabled, editable=True, updated_at=row.updated_at,
         )
 
 
@@ -410,6 +415,38 @@ def _candidate_vectors(db: Session, views: list[SkillView]) -> list[list[float]]
     return candidates
 
 
+def _neueste_zuerst(views: list[SkillView]) -> list[SkillView]:
+    """Der Notschnitt, wenn die Bedeutungsauswahl nicht greift.
+
+    Hier stand viermal `views[:MAX_INDEXED_SKILLS]`, und `visible_skills` gibt
+    alphabetisch sortiert zurück. Der Schnitt war damit keine Reihenfolge,
+    sondern eine **Auswahl**: was hinter Position 25 stand, kam nie in den
+    Systemprompt — das Modell erfuhr seine Existenz nicht und forderte ihn
+    folglich nie mit `read_skill` an. Ein frisch gelernter Skill blieb dauerhaft
+    wirkungslos, allein weil sein Schlüssel spät im Alphabet steht, während die
+    Oberfläche ihn als aktiv führt.
+
+    Stattdessen: die mitgelieferten Skills bleiben — sie haben kein
+    Änderungsdatum und sind die Störungsdrehbücher —, die übrigen Plätze gehen
+    an die zuletzt geänderten. Zurück kommt wieder alphabetisch; am sichtbaren
+    Verzeichnis ändert sich dadurch nichts.
+
+    Bewusst **kein** zweites Auswahlverfahren mit Nutzungszählern und
+    Halbwertszeiten wie beim Gedächtnis: ein Feld und ein Sortierschlüssel
+    reichen, um "nie" in "später" zu verwandeln.
+    """
+    if len(views) <= MAX_INDEXED_SKILLS:
+        return list(views)
+    mitgeliefert = [item for item in views if item.updated_at is None]
+    geaendert = sorted(
+        (item for item in views if item.updated_at is not None),
+        key=lambda item: item.updated_at,
+        reverse=True,
+    )
+    gewaehlt = [*mitgeliefert, *geaendert][:MAX_INDEXED_SKILLS]
+    return sorted(gewaehlt, key=lambda item: item.skill_key)
+
+
 def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
     """Die Skills, die in den Systemprompt kommen.
 
@@ -418,8 +455,10 @@ def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
     mehrsprachige Modell wie beim Gedaechtnis: eine englische Frage findet damit
     einen deutsch beschriebenen Skill.
 
-    Ohne Modell bleibt die alphabetische Reihenfolge. Schlechter als Bedeutung,
-    aber besser als gar kein Verzeichnis.
+    Ohne Modell entscheidet das Änderungsdatum (`_neueste_zuerst`). Schlechter
+    als Bedeutung, aber besser als gar kein Verzeichnis — und vor allem besser
+    als der alphabetische Schnitt, der hier einmal stand: der sperrte dieselben
+    Schlüssel dauerhaft aus, statt nur schlechter zu ordnen.
 
     **Die Aehnlichkeit ordnet, sie waehlt nicht aus.** Der naheliegende Ausbau
     — eine Mindestaehnlichkeit, unter der ein Skill aus dem Verzeichnis faellt —
@@ -436,18 +475,18 @@ def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
     """
     views = visible_skills(db, user)
     if len(views) <= MAX_INDEXED_SKILLS or not query.strip():
-        return views[:MAX_INDEXED_SKILLS]
+        return _neueste_zuerst(views)
 
     query_vectors = ai_embedding_service.encode([query])
     if not query_vectors:
-        return views[:MAX_INDEXED_SKILLS]
+        return _neueste_zuerst(views)
     candidates = _candidate_vectors(db, views)
     if candidates is None:
-        return views[:MAX_INDEXED_SKILLS]
+        return _neueste_zuerst(views)
 
     scores = ai_embedding_service.similarity(query_vectors[0], candidates)
     if len(scores) != len(views):
-        return views[:MAX_INDEXED_SKILLS]
+        return _neueste_zuerst(views)
     ranked = sorted(zip(views, scores), key=lambda item: item[1], reverse=True)
     selected = [view for view, _score in ranked[:MAX_INDEXED_SKILLS]]
     # Lesbare Reihenfolge wiederherstellen statt die Rangfolge zu zeigen.
@@ -568,11 +607,20 @@ def upsert_skill(
     elif origin == "ai" and row.origin == "operator":
         # Dieselbe Regel wie beim Gedaechtnis: was ein Mensch geschrieben hat,
         # ueberschreibt die KI nicht stillschweigend.
+        #
+        # Die Meldung riet einmal "Verwende einen anderen Schlüssel." — und das
+        # war genau der falsche Ausweg. Sie geht als Werkzeugantwort an das
+        # Modell, dessen Systemprompt daneben sagt, es solle für eine passende
+        # Erkenntnis **denselben** Schlüssel nehmen. Das Modell legte also
+        # `valheim-ram-2` an, und im Verzeichnis standen ab da zwei Skills zum
+        # selben Thema mit widersprechenden Zahlen. Die Schranke bleibt; nur der
+        # Ausweg ist jetzt einer, der kein Duplikat erzeugt.
         raise HTTPException(
             status_code=409,
             detail=(
                 "Dieser Skill stammt von einem Menschen und wird nicht automatisch "
-                "ueberschrieben. Verwende einen anderen Schluessel."
+                "überschrieben. Lege keinen ähnlichen zweiten an — sag dem "
+                "Benutzer, was du herausgefunden hast."
             ),
         )
     elif status == "pending" and row.status == "active":

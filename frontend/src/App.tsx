@@ -57,6 +57,13 @@ function App() {
       .catch(() => setSetupRequired(false))
   }, [])
 
+  // Den Anmeldezustand einmal beim Start klären. Ohne das bliebe isAuthenticated bei
+  // einem harten Reload auf /privacy dauerhaft false — die Route gewinnt gegen /*,
+  // ProtectedRoute mountet nie und ein angemeldeter Benutzer sähe die Seite ohne Panel.
+  useEffect(() => {
+    void useAuthStore.getState().checkAuth()
+  }, [])
+
   if (setupRequired === null) {
     return <Loader fullScreen label="Maunting Server Manager" />
   }

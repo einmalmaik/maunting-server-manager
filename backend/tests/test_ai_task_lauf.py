@@ -23,6 +23,7 @@ und die Laufzeit der Anwendung. Alles dazwischen ist Produktivcode.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -30,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from models import (
     AiAutonomyGrant,
+    AiConversation,
     AiProvider,
     AiRun,
     AiTask,
@@ -40,9 +42,14 @@ from models import (
     User,
 )
 from services import ai_run_broker, ai_run_service, ai_stream_service, ai_task_service
-from services.ai_action_errors import AiActionValidationError
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
-from services.ai_tool_registry import AUFGABEN_HANDELN, AUFGABEN_LESEN, aufgaben_tools
+from services.ai_tool_registry import (
+    AUFGABEN_HANDELN,
+    AUFGABEN_LESEN,
+    MEMORY_TOOLS,
+    SKILL_TOOLS,
+    aufgaben_tools,
+)
 from services.auth_service import AuthService
 from services.openai_compatible_adapter import ProviderToolCall, StreamChunk, StreamUsage
 from services.permission_catalog import SERVER_KEYS
@@ -275,11 +282,15 @@ def test_gedaechtnis_und_skills_bleiben_dem_beaufsichtigten_chat_vorbehalten() -
     Die Werkzeugergebnisse enthalten Serverlogs — Text, den ein Spieler
     geschrieben haben kann. Ein `remember` daraus stuende danach in jedem
     weiteren Lauf im Kontext, und niemand hat es je gesehen.
+
+    Gegen die beiden Gruppen aus der Registry gefragt und nicht gegen eine
+    Namensliste: hier standen `forget`, `read_memories` und `propose_skill_save`
+    — drei Namen, die es in `WERKZEUGE` nie gab. Sie konnten nicht
+    fehlschlagen, und die Zusage trug damit nur zu einem Viertel. Über die
+    Gruppen kann sie nicht wieder veralten, wenn jemand ein Werkzeug umbenennt.
     """
     for art in ("report", "act"):
-        menge = aufgaben_tools(art)
-        for name in ("remember", "forget", "read_memories", "propose_skill_save"):
-            assert name not in menge, name
+        assert aufgaben_tools(art) & (MEMORY_TOOLS | SKILL_TOOLS) == set(), art
 
 
 # ── Der Rahmen ────────────────────────────────────────────────────────────
@@ -332,6 +343,45 @@ async def test_der_faellige_lauf_traegt_den_rahmen_und_den_auftrag(
     assert rahmen.kind == "report"
     db.refresh(aufgabe)
     assert aufgabe.last_run_id == run.id
+
+
+@pytest.mark.asyncio
+async def test_der_faellige_lauf_sieht_kein_skill_verzeichnis(
+    db: Session, monkeypatch
+) -> None:
+    """Kein Verzeichnis zu Werkzeugen, die dieser Lauf nicht bekommt.
+
+    Der Block im Systemprompt fordert ausdrücklich dazu auf, den passenden
+    Skill mit `read_skill` zu lesen — und `AUFGABEN_LESEN` bietet das nicht an.
+    Der Versuch kostete eine Runde, das Verzeichnis kostete in jeder Runde
+    Tokens; beides Nacht für Nacht, bei jedem fälligen Auftrag.
+
+    Aufgelöst auf der Prompt-Seite: die Werkzeugmenge eines Laufs ohne Zeugen
+    zu erweitern, ist eine Entscheidung des Betreibers, keine Aufräumarbeit.
+    """
+    from services.ai_context_service import build_provider_messages
+
+    # Ausdrücklich **mit** dem Skillrecht: ohne es fällt der Block ohnehin
+    # weg, und der Test würde nichts zeigen.
+    user = _benutzer(db, "planer", rechte=(*KI_RECHTE, "ai.skills.use"))
+    _anbieter(db)
+    _laufzeit_faelschen(monkeypatch)
+    aufgabe = _aufgabe(db, user)
+
+    run = await ai_task_service.aufgabenlauf_starten(db, aufgabe=aufgabe)
+
+    assert run is not None
+    systemnachricht = ai_run_service.zustand_lesen(run)["provider_messages"][0]
+    assert systemnachricht["role"] == "system"
+    assert "Skill-Verzeichnis" not in systemnachricht["content"]
+    assert "read_skill" not in systemnachricht["content"]
+
+    # Gegenprobe an derselben Unterhaltung: im Chat bleibt das Verzeichnis.
+    conversation = (
+        db.query(AiConversation).filter(AiConversation.user_id == user.id).first()
+    )
+    assert conversation is not None
+    assert "Skill-Verzeichnis" in build_provider_messages(db, conversation)[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -512,6 +562,13 @@ async def test_ein_verbotenes_werkzeug_wird_im_code_abgewiesen(
     Die Eingabe eines Aufgabenlaufs enthaelt Serverlogs, also Text, den ein
     Spieler geschrieben haben kann. Eine Regel, die das Modell befolgen *soll*,
     ist dagegen keine Schranke.
+
+    Abgewiesen wird als **Werkzeugergebnis**, nicht als Abbruch. Früher verließ
+    hier eine Ausnahme die Funktion, wurde im Fehlerbehandler des Segments zu
+    `AI_TOOL_REJECTED` und beendete den ganzen Lauf mit 'failed' — ein einziger
+    Aufruf des falschen Werkzeugs kostete damit den nächtlichen Bericht. Die
+    Menge bleibt unverändert scharf: ausgeführt wird nichts, und das Modell
+    bekommt eine Antwort, mit der es weiterarbeiten kann.
     """
     user = _benutzer(db, "ungehorsam")
     _anbieter(db)
@@ -521,15 +578,23 @@ async def test_ein_verbotenes_werkzeug_wird_im_code_abgewiesen(
     zustand = ai_run_service.zustand_lesen(run)
     rahmen = ai_stream_service.aufgabe_aus_zustand(zustand)
 
-    with pytest.raises(AiActionValidationError, match="geplanten Aufgabe"):
-        await ai_stream_service._tool_followup_messages(
-            user_id=user.id,
-            conversation_id=run.conversation_id,
-            tool_calls=[ProviderToolCall(
-                id="m1", name="search_memory", arguments={"query": "Zeitzone"},
-            )],
-            aufgabe=rahmen,
-        )
+    nachrichten, benutzt, _ = await ai_stream_service._tool_followup_messages(
+        user_id=user.id,
+        conversation_id=run.conversation_id,
+        tool_calls=[ProviderToolCall(
+            id="m1", name="search_memory", arguments={"query": "Zeitzone"},
+        )],
+        aufgabe=rahmen,
+    )
+
+    # Gelaufen ist nichts — kein Protokolleintrag, kein Ergebnis.
+    assert benutzt == []
+    antworten = [n for n in nachrichten if n.get("role") == "tool"]
+    assert len(antworten) == 1
+    assert antworten[0]["tool_call_id"] == "m1"
+    inhalt = json.loads(antworten[0]["content"])
+    assert inhalt["executed"] is False
+    assert "geplanten Aufgabe" in inhalt["reason"]
 
 
 @pytest.mark.asyncio
@@ -605,6 +670,45 @@ async def test_der_rahmen_gilt_auch_in_der_dritten_runde(
     assert len(anbieter.werkzeugsaetze) >= 3
     for angeboten in anbieter.werkzeugsaetze:
         assert "ask_user" not in angeboten
+
+
+@pytest.mark.asyncio
+async def test_ein_verbotenes_werkzeug_kostet_eine_runde_und_nicht_den_lauf(
+    db: Session, monkeypatch
+) -> None:
+    """Der Lauf überlebt, was er nicht darf.
+
+    `read_skill` liegt in den Lesewerkzeugen und kommt deshalb an der
+    Sequenzprüfung vorbei; angeboten wird es in einer Aufgabe nicht, der
+    Systemprompt bewirbt es aber wörtlich. Früher endete der Lauf an dieser
+    Stelle mit 'failed' und `AI_TOOL_REJECTED` — der nächtliche Bericht fiel
+    inhaltlich aus, obwohl die Aufgabe noch zu erledigen gewesen wäre.
+
+    Jetzt kostet der Widerspruch eine Runde: der Aufruf läuft nicht, das Modell
+    bekommt die Begründung als Werkzeugergebnis und antwortet.
+    """
+    user = _benutzer(db, "liest-skill")
+    server = _server(db, "delta")
+    _sichtbar(db, user, server)
+    _anbieter(db)
+    _laufzeit_faelschen(monkeypatch)
+    anbieter = Anbieter([
+        [ProviderToolCall(id="s1", name="read_skill",
+                          arguments={"skill_key": "portkonflikt"})],
+    ]).einbauen(monkeypatch)
+    aufgabe = _aufgabe(db, user)
+
+    run = await ai_task_service.aufgabenlauf_starten(db, aufgabe=aufgabe)
+    ergebnis = await _lauf_fahren(db, run)
+
+    assert ergebnis.status == "completed"
+    assert ergebnis.stop_reason != "AI_TOOL_REJECTED"
+    abgesagt = [
+        antwort for antwort in anbieter.werkzeugantworten()
+        if antwort.get("executed") is False
+    ]
+    assert len(abgesagt) == 1
+    assert "geplanten Aufgabe" in abgesagt[0]["reason"]
 
 
 @pytest.mark.asyncio

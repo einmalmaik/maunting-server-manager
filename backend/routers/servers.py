@@ -127,7 +127,7 @@ async def create_server(
     `provision_server` ist durchgehend synchron und macht dabei echtes I/O:
     Socket-Binds, HTTP-Aufrufe an die Node mit zehn Sekunden Zeitlimit,
     Verzeichnisse anlegen, Datenbanken einrichten. Auf dem Event-Loop
-    ausgefuehrt legt eine einzige Serveranlage das ganze Panel still — keine
+    ausgeführt legt eine einzige Serveranlage das ganze Panel still — keine
     andere Anfrage, kein WebSocket-Frame. Deshalb der Threadpool. Die Route
     bleibt `async`, weil die Mailbenachrichtigung darunter awaited wird.
     """
@@ -698,11 +698,11 @@ def kill_server(
     Permission "server.kill" (Naming analog zu server.stop, nicht server.power.* für Code-Konsistenz mit bestehenden server.* Keys).
 
     Bewusst `def` statt `async def`: die Route wartet auf `docker_service.remove`
-    an der Node (30 s Zeitlimit). Auf dem Event-Loop haette ein Kill gegen eine
+    an der Node (30 s Zeitlimit). Auf dem Event-Loop hätte ein Kill gegen eine
     nicht erreichbare Node das ganze Panel bis zum Zeitlimit eingefroren. Der
-    Kill-Zweig setzt `server.status` direkt statt ueber `_set_status` und haengt
-    an keinem laufenden Loop — der Wechsel in den Threadpool aendert also
-    nichts am Verhalten. Fuer start/stop/restart gilt das **nicht**: dort
+    Kill-Zweig setzt `server.status` direkt statt über `_set_status` und hängt
+    an keinem laufenden Loop — der Wechsel in den Threadpool ändert also
+    nichts am Verhalten. Für start/stop/restart gilt das **nicht**: dort
     verschickt `_set_status` den Webhook nur bei laufendem Loop.
     """
     return request_lifecycle_operation(

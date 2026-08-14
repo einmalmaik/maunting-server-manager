@@ -247,11 +247,11 @@ def test_the_contract_counts_are_per_integration_and_count_only_the_running_ones
 ) -> None:
     """Die beiden Zahlen entstehen jetzt in SQL statt in Python.
 
-    Zwei Dinge koennen dabei still kippen: die Zaehlung faellt auf die falsche
+    Zwei Dinge können dabei still kippen: die Zählung fällt auf die falsche
     Integration (die Gruppierung fehlt), oder der Filter trifft eine andere
-    Menge als die fruehere Python-Bedingung. Deshalb steht hier eine zweite
-    Anlage daneben, und die Vertraege decken jeden Zustand ab, den die
-    Pruefbedingung der Tabelle zulaesst — `active` zaehlt nur zusammen mit
+    Menge als die frühere Python-Bedingung. Deshalb steht hier eine zweite
+    Anlage daneben, und die Verträge decken jeden Zustand ab, den die
+    Prüfbedingung der Tabelle zulässt — `active` zählt nur zusammen mit
     `provisioning` oder `ready`, sonst nie.
     """
     erste, _ = integration
@@ -267,13 +267,13 @@ def test_the_contract_counts_are_per_integration_and_count_only_the_running_ones
     db.commit()
 
     # Erste Anlage: alle sieben Status bei `desired_state == "active"`.
-    # Nur `provisioning` und `ready` duerfen als aktiv zaehlen.
+    # Nur `provisioning` und `ready` dürfen als aktiv zählen.
     for i, status in enumerate((
         "pending", "provisioning", "ready", "suspended",
         "failed", "terminating", "terminated",
     )):
         _vertrag(db, erste, owner_user, f"a{i}", desired_state="active", status=status)
-    # Derselbe laufende Status, aber der Shop will ihn nicht mehr: zaehlt nicht.
+    # Derselbe laufende Status, aber der Shop will ihn nicht mehr: zählt nicht.
     _vertrag(db, erste, owner_user, "a7", desired_state="suspended", status="ready")
     _vertrag(db, erste, owner_user, "a8", desired_state="terminated", status="ready")
     # Zweite Anlage: genau ein laufender Vertrag.
@@ -291,10 +291,10 @@ def test_the_contract_counts_are_per_integration_and_count_only_the_running_ones
 def test_an_integration_without_contracts_counts_zero(
     db: Session, owner_user: User, integration
 ) -> None:
-    """Ohne Vertragszeile liefert die Gruppierung keinen Schluessel.
+    """Ohne Vertragszeile liefert die Gruppierung keinen Schlüssel.
 
-    Ein `KeyError` oder ein fehlendes Feld waere hier kein Absturz, sondern
-    schlimmer: das Modell schloesse aus der Abwesenheit auf etwas anderes als
+    Ein `KeyError` oder ein fehlendes Feld wäre hier kein Absturz, sondern
+    schlimmer: das Modell schlösse aus der Abwesenheit auf etwas anderes als
     auf null.
     """
     row, _ = integration
@@ -311,10 +311,10 @@ def test_the_service_user_list_matches_the_single_lookup(
 ) -> None:
     """Die Mengenabfrage muss dieselben Benutzer finden wie die Einzelfrage.
 
-    Besonders der Altpfad: ein vom Admin angelegtes Konto traegt seine Rolle
-    unter Umstaenden nur in `users.role_id` und hat gar keine Zeile in
+    Besonders der Altpfad: ein vom Admin angelegtes Konto trägt seine Rolle
+    unter Umständen nur in `users.role_id` und hat gar keine Zeile in
     `user_roles`. Wer nur `user_roles` joint, verliert genau diese Konten aus
-    der Dienstbenutzerliste — der Betreiber saehe den Benutzer nicht, den er
+    der Dienstbenutzerliste — der Betreiber sähe den Benutzer nicht, den er
     gerade angelegt hat.
     """
     from services import permission_service
@@ -353,12 +353,12 @@ def test_reading_the_setup_does_not_ask_once_per_user(
 ) -> None:
     """Die Abfragezahl darf nicht mit der Benutzerzahl wachsen.
 
-    Gemessen waren es 1 + 2n Abfragen allein fuer die Dienstbenutzerliste, also
-    401 an ihrer Obergrenze von 200. Die Grenze hier ist grosszuegig gesetzt und
-    schreibt keine Zaehlung fest; sie faengt den einen Fehler ab, der
-    zurueckfallen kann — eine Rechtefrage je Benutzer.
+    Gemessen waren es 1 + 2n Abfragen allein für die Dienstbenutzerliste, also
+    401 an ihrer Obergrenze von 200. Die Grenze hier ist großzügig gesetzt und
+    schreibt keine Zählung fest; sie fängt den einen Fehler ab, der
+    zurückfallen kann — eine Rechtefrage je Benutzer.
 
-    Alle zwanzig Kunden teilen sich **eine** Rolle. Nur so misst der Zaehler die
+    Alle zwanzig Kunden teilen sich **eine** Rolle. Nur so misst der Zähler die
     Benutzerzahl: die Rollenliste kostet ihrerseits Abfragen je Rolle, das ist
     ein anderer Pfad und durch `MAX_ROLLEN` gedeckelt.
     """
@@ -391,7 +391,7 @@ def test_reading_the_setup_does_not_ask_once_per_user(
 
     assert len(ergebnis["service_user_candidates"]) >= 20
     assert len(gesehen) <= 20, (
-        f"{len(gesehen)} Abfragen fuer zwanzig Kandidaten:\n" + "\n".join(gesehen)
+        f"{len(gesehen)} Abfragen für zwanzig Kandidaten:\n" + "\n".join(gesehen)
     )
 
 

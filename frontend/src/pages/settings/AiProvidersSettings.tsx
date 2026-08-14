@@ -427,13 +427,13 @@ function ProviderForm({
             </Button>
           </div>
           {models === null && !loadingModels && draft.provider_kind && (
-            <p className="mt-1.5 text-xs text-on-surface-variant">{t('ai.providers.catalogUnavailable')}</p>
+            <p className="msm-field-help">{t('ai.providers.catalogUnavailable')}</p>
           )}
           {/* Steht nur da, solange der Betreiber die Empfehlung nicht gewaehlt
               hat. Danach waere es eine Belehrung ueber eine Entscheidung, die
               schon gefallen ist. */}
           {empfohlenesModell && draft.default_model !== empfohlenesModell.model_id && (
-            <p className="mt-1.5 flex items-start gap-1.5 text-xs text-on-surface-variant">
+            <p className="msm-field-help flex items-start gap-1.5">
               <Star className="mt-0.5 h-3.5 w-3.5 shrink-0 fill-current text-primary" aria-hidden="true" />
               <span>
                 {t('ai.providers.recommendationHint', { model: empfohlenesModell.model_id })}{' '}
@@ -494,13 +494,13 @@ function ProviderForm({
               sieht, waere spaeter der erste Verdaechtige, wenn eine Zahl nicht
               stimmt. */}
           {waehrung.currency !== 'USD' && preisMicro !== null && (
-            <p className="mt-2 text-xs text-on-surface-variant">
+            <p className="msm-field-help">
               {t('ai.providers.tokenPriceConverted', {
                 amount: preisFormatieren(preisMicro, 'USD', i18n.language),
               })}
             </p>
           )}
-          <p className="mt-2 text-xs text-on-surface-variant">{t('ai.providers.tokenPriceHint')}</p>
+          <p className="msm-field-help">{t('ai.providers.tokenPriceHint')}</p>
         </div>
       </fieldset>
       {testResult && (

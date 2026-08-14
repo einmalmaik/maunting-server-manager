@@ -122,8 +122,16 @@ export function AiLearningSettings({ canWrite }: { canWrite: boolean }) {
         </h4>
         <p className="max-w-3xl text-xs leading-5 text-on-surface-variant">{t('ai.skills.pendingHint')}</p>
 
+        {/* Die Liste kommt von /ai/skills/pending und verlangt ai.skills.manage —
+            die Zahl daneben nur panel.settings.read. Wer die Stufe einstellen darf,
+            aber die Warteschlange nicht sehen, bekäme sonst „Nichts zu prüfen"
+            zu lesen, während sich der Rückstau aufbaut. */}
         {pending.length === 0 && (
-          <p className="text-sm text-on-surface-variant">{t('ai.skills.pendingEmpty')}</p>
+          <p className="text-sm text-on-surface-variant">
+            {state.pending_count > 0
+              ? t('ai.skills.pendingHidden', { count: state.pending_count })
+              : t('ai.skills.pendingEmpty')}
+          </p>
         )}
 
         <ul className="space-y-2">

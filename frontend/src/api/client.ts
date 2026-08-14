@@ -187,14 +187,18 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
       })
       captureCsrfFromResponse(res)
     } catch {
-      // Refresh fehlgeschlagen — die Sitzung ist zu Ende, und das muss der
-      // Anmeldezustand auch sagen. Vorher tat es niemand: kein Aufrufer wertete
-      // SESSION_EXPIRED aus, `isAuthenticated` blieb true, die Wache der Route
-      // griff nicht, und offene Intervalle (z. B. das Fünf-Sekunden-Polling der
-      // Serverdetails) feuerten weiter gegen den ratenbegrenzten Refresh.
+      // Refresh fehlgeschlagen — die Sitzung ist zu Ende, und der Speicher des
+      // Tabs muss das nachvollziehen. Vorher tat es niemand: kein Aufrufer
+      // wertete SESSION_EXPIRED aus, `isAuthenticated` blieb true, die Wache
+      // der Route griff nicht, und offene Intervalle (z. B. das
+      // Fünf-Sekunden-Polling der Serverdetails) feuerten weiter gegen den
+      // ratenbegrenzten Refresh. Danach fiel zwar das Flag, aber sonst nichts —
+      // Benutzer, Rechte und die Knotenliste mit ihren Agentenadressen standen
+      // weiter im Speicher. `clearSession()` ist der eine Weg, den auch das
+      // bewusste Abmelden geht.
       // `getState()` läuft erst zur Aufrufzeit, der Importzyklus zum authStore
       // ist damit unkritisch.
-      useAuthStore.getState().setAuthenticated(false)
+      useAuthStore.getState().clearSession()
       // Lokalisierte Meldung, damit der Caller die Fehlermeldung direkt
       // anzeigen kann (kein doppelter `t()`-Aufruf noetig). Diese Meldung
       // stammt aus einem verarbeiteten Backend-Response-Pfad und ist
@@ -289,9 +293,9 @@ export async function apiStream(path: string, options: RequestInit): Promise<Res
       res = await fetch(url, { ...fetchOptions, headers: retryHeaders })
       captureCsrfFromResponse(res)
     } catch {
-      // Wie in `api()`: der Anmeldezustand fällt, sonst bleibt die Oberfläche
-      // scheinbar angemeldet stehen.
-      useAuthStore.getState().setAuthenticated(false)
+      // Wie in `api()`: der ganze Sitzungsspeicher fällt, sonst bleibt die
+      // Oberfläche scheinbar angemeldet stehen — mit fremden Daten darin.
+      useAuthStore.getState().clearSession()
       throw new SanitizedApiError(i18n.t('errors.SESSION_EXPIRED'))
     }
   }

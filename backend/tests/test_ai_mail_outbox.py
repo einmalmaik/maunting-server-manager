@@ -16,7 +16,11 @@ haelt und die zusammen die eigentliche Zusage sind:
   erst nach `VERSUCHE_MAX` Anlaeufen wird aufgegeben, und dann steht der Grund
   daneben.
 * **Nie mehr als erlaubt gleichzeitig.** Bei zehntausend faelligen Zeilen wird
-  der Hoechststand mitgezaehlt, und die Zahl der Threads ebenso.
+  der Höchststand mitgezählt — und die Threadzahl, die dabei nicht mit der
+  Zahl der Mails wachsen darf.
+* **Und ohne die Ereignisschleife anzuhalten.** Die Datenbankschritte des
+  Arbeiters liegen in einem eigenen Thread; ein langsamer DIS-Sidecar darf das
+  Panel nicht zum Stehen bringen.
 
 Seit die Naht zum Verfassungsschritt geschlossen ist, kommt eine vierte dazu:
 
@@ -33,6 +37,7 @@ wird bei `ai_mail_text.verfassen` ersetzt — auch dort geht kein Byte ins Netz.
 import asyncio
 import json
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -92,6 +97,11 @@ def _zeile(db: Session, user: User, *, betreff: str = "Bericht") -> str:
     assert kennung is not None
     return kennung
 
+
+#: Wieviele Threads der laufende Arbeiter höchstens mitbringt: den einen, in dem
+#: seine Datenbankarbeit liegt (`ai_mail_outbox._in_der_datenbank`). Die Zahl ist
+#: eine Konstante und kennt `anzahl` nicht — genau das ist die Zusage.
+THREADS_HOECHSTENS = 1
 
 #: Der feste Text, der in jeder Zeile mit Fakten als Rueckfall danebensteht.
 #: Als Konstante, weil zwei Zusagen daran haengen: er geht hinaus, wenn das
@@ -161,6 +171,28 @@ def _modell(
 
     monkeypatch.setattr(ai_mail_text, "verfassen", _fake)
     return gerufen
+
+
+def _vermerke(monkeypatch) -> list[str]:
+    """Hält fest, welche Zeilen der Arbeiter als zugestellt **vermerkt** hat.
+
+    Die Tests mit laufendem Arbeiter warten darauf und nicht auf den Versand,
+    und dafür gibt es einen Grund: zwischen „verschickt“ und „vermerkt“ liegt
+    ein Schritt im Datenbankthread. Wer den Arbeiter genau dazwischen abbricht,
+    bricht ihn vor dem Vermerk ab; die Zeile bliebe offen und ginge nach
+    `UEBERNAHME` ein zweites Mal hinaus. Für den Betrieb ist dieser schmale
+    Augenblick hingenommen — `aufraeumen` sagt es —, für einen Test wäre er
+    bloßes Flackern.
+    """
+    vermerkt: list[str] = []
+    echtes_abschliessen = ai_mail_outbox._abschliessen
+
+    def _mitschreiben(auftrag) -> None:
+        echtes_abschliessen(auftrag)
+        vermerkt.append(auftrag.id)
+
+    monkeypatch.setattr(ai_mail_outbox, "_abschliessen", _mitschreiben)
+    return vermerkt
 
 
 def _mitschnitt(monkeypatch) -> list[tuple[str, ai_mail_outbox._Auftrag]]:
@@ -509,9 +541,30 @@ async def test_ten_thousand_due_mails_stay_within_the_allowed_concurrency(
     ausgeht.
 
     Gemessen wird deshalb dreierlei: der **Hoechststand** gleichzeitiger
-    Zustellungen (nie mehr als `GLEICHZEITIG`), die Zahl der Threads (sie bleibt
-    stehen) und am Ende, dass **jede einzelne** Zeile zugestellt ist. Der Versand
-    ist gefaelscht — es geht kein Byte ins Netz.
+    Zustellungen (nie mehr als `GLEICHZEITIG`), das Wachstum der Threadzahl und
+    am Ende, dass **jede einzelne** Zeile zugestellt ist. Der Versand ist
+    gefälscht — es geht kein Byte ins Netz.
+
+    **Zur Threadzahl, und warum hier nicht mehr ``<= threads_vorher`` steht.**
+    Die Zeile fragte ursprünglich „startet der Versand überhaupt einen Thread?“
+    — und das war die falsche Frage, sie gab nur lange zufällig dieselbe
+    Antwort. Gemeint war immer „wächst die Threadzahl mit der Zahl der Mails?“,
+    denn das war der Schaden, den es abzustellen galt: zehntausend Aufträge
+    waren zehntausend Threads. Seit die vier synchronen Datenbankhelfer
+    **neben** der Ereignisschleife laufen — sie dürfen sie nicht länger
+    anhalten, während sie den DIS-Sidecar nach der Adresse fragen —, gibt es
+    einen Helferthread. Die alte Zahl wäre daran zerbrochen, ohne dass
+    irgendetwas schlechter geworden wäre. Geprüft wird deshalb der Abstand:
+    `THREADS_HOECHSTENS` kommt dazu, bei zehntausend Mails genauso wie bei zehn.
+    Gezählt wird während der Last und nicht danach, denn danach ist der Thread
+    wieder fort — `aufraeumen` wartet ihn aus.
+
+    **Und die Datenbank wird währenddessen nicht von hier aus gelesen.** Der
+    Fortschritt kommt aus den Vermerken des Arbeiters. Die Testsuite bindet eine
+    einzige SQLite-Verbindung (`StaticPool` in conftest); sie zugleich aus
+    diesem Test und aus dem Datenbankthread des Arbeiters anzufassen wäre kein
+    Nebeneinander, sondern ein Datenfehler. Geprüft wird die Tabelle am Ende,
+    wenn der Arbeiter steht.
     """
     user = _empfaenger(db)
     zweiter = _empfaenger(db, "korbnutzer2")
@@ -541,11 +594,13 @@ async def test_ten_thousand_due_mails_stay_within_the_allowed_concurrency(
     laufend = 0
     hoechststand = 0
     zugestellt = 0
+    threads_hoechststand = 0
 
     async def _fake(adresse, auftrag):
-        nonlocal laufend, hoechststand, zugestellt
+        nonlocal laufend, hoechststand, zugestellt, threads_hoechststand
         laufend += 1
         hoechststand = max(hoechststand, laufend)
+        threads_hoechststand = max(threads_hoechststand, threading.active_count())
         # Ein echter Versand wartet auf die Gegenseite. Ohne diesen
         # Aufgabenwechsel liefe jede Zustellung am Stueck durch und der
         # Hoechststand waere immer 1 — der Test saehe dann nichts.
@@ -555,6 +610,7 @@ async def test_ten_thousand_due_mails_stay_within_the_allowed_concurrency(
         return True
 
     monkeypatch.setattr(ai_mail_outbox, "_versenden", _fake)
+    vermerkt = _vermerke(monkeypatch)
     # Groessere Stapel, kein Warten zwischen den Durchgaengen: gemessen wird die
     # Schranke, nicht die Taktzahl. Die Schranke selbst bleibt unberuehrt.
     monkeypatch.setattr(ai_mail_outbox, "STAPEL", 250)
@@ -564,21 +620,20 @@ async def test_ten_thousand_due_mails_stay_within_the_allowed_concurrency(
     assert ai_mail_outbox.arbeiter_starten() is True
     try:
         for _ in range(6000):
-            offen = db.execute(
-                select(AiMailOutbox.id).where(AiMailOutbox.status == "offen").limit(1)
-            ).first()
-            if offen is None:
+            if len(vermerkt) >= anzahl:
                 break
-            db.expire_all()
             await asyncio.sleep(0.01)
     finally:
+        # Beendet den Arbeiter **und** wartet seinen Datenbankthread aus. Erst
+        # danach gehört die eine Verbindung wieder diesem Test allein.
         await ai_mail_outbox.aufraeumen()
 
     assert hoechststand <= ai_mail_outbox.GLEICHZEITIG
     assert hoechststand > 1, "der Test haette eine Ueberschreitung nicht sehen koennen"
     # Kein Thread je Mail. Ein einziger Arbeiter auf der Ereignisschleife der
-    # Anwendung reicht fuer zehntausend Nachrichten.
-    assert threading.active_count() <= threads_vorher
+    # Anwendung reicht für zehntausend Nachrichten; dazu kommt der eine Thread,
+    # in dem seine Datenbankarbeit liegt.
+    assert threads_hoechststand - threads_vorher <= THREADS_HOECHSTENS
     assert zugestellt == anzahl
 
     db.expire_all()
@@ -588,6 +643,55 @@ async def test_ten_thousand_due_mails_stay_within_the_allowed_concurrency(
         )
     ).all()
     assert len(fertig) == anzahl
+
+
+@pytest.mark.asyncio
+async def test_a_slow_database_step_does_not_stop_the_event_loop(
+    db: Session, monkeypatch
+) -> None:
+    """Die Zusage hinter dem Umzug der vier Helfer in einen eigenen Thread.
+
+    `_adresse` fragt über `ai_mail.empfaenger` den DIS-Sidecar nach der Adresse,
+    und das ist ein synchroner HTTP-Aufruf mit fünfzehn Sekunden Frist;
+    `_uebernehmen`, `_abschliessen` und `_fehlschlag` öffnen je eine eigene
+    Datenbanksitzung. Lagen diese Aufrufe auf der Ereignisschleife, stand
+    währenddessen das ganze Panel — ausgelöst von einem Vorgang, den kein
+    Benutzer angestoßen hat, alle zwanzig Sekunden.
+
+    Nachgestellt wird das mit einem `_adresse`, das eine Fünftelsekunde schläft.
+    Danebengelegt wird eine Koroutine, die zählt, wie oft sie in dieser Zeit
+    drankommt: sie steht für jede andere Anfrage des Panels. Ohne den
+    Threadwechsel kommt sie auf zwei — gemessen, nicht geschätzt — statt auf ein
+    Vielfaches davon.
+    """
+    user = _empfaenger(db)
+    _zeile(db, user)
+    _mitschnitt(monkeypatch)
+
+    echtes_adresse = ai_mail_outbox._adresse
+
+    def _langsam(auftrag):
+        time.sleep(0.2)
+        return echtes_adresse(auftrag)
+
+    monkeypatch.setattr(ai_mail_outbox, "_adresse", _langsam)
+
+    takte = 0
+
+    async def _mitzaehlen() -> None:
+        nonlocal takte
+        while True:
+            takte += 1
+            await asyncio.sleep(0.005)
+
+    zaehler = asyncio.get_running_loop().create_task(_mitzaehlen())
+    try:
+        assert await ai_mail_outbox.runde() == 1
+    finally:
+        zaehler.cancel()
+        await asyncio.gather(zaehler, return_exceptions=True)
+
+    assert takte > 10, "die Ereignisschleife stand still, während die Zeile lief"
 
 
 # ── Der Verfassungsschritt liegt im Arbeiter ──────────────────────────────
@@ -806,13 +910,17 @@ async def test_a_restart_between_queueing_and_sending_loses_nothing(
 
     _modell(monkeypatch)
     versandt = _mitschnitt(monkeypatch)
+    vermerkt = _vermerke(monkeypatch)
     monkeypatch.setattr(ai_mail_outbox, "TAKT", 0.01)
 
     assert ai_mail_outbox.arbeiter_starten() is True
     try:
+        # Gewartet wird auf den Vermerk des Arbeiters und nicht auf die Tabelle:
+        # solange er läuft, gehört die eine SQLite-Verbindung der Testsuite
+        # seinem Datenbankthread. `aufraeumen` wartet ihn aus, danach liest
+        # dieser Test wieder selbst.
         for _ in range(500):
-            db.expire_all()
-            if db.get(AiMailOutbox, kennung).status == "zugestellt":
+            if vermerkt:
                 break
             await asyncio.sleep(0.01)
     finally:
@@ -868,6 +976,7 @@ async def test_ten_thousand_mails_with_facts_stay_within_the_same_limit(
     hoechststand = 0
     verfasst = 0
     zugestellt = 0
+    threads_hoechststand = 0
 
     async def _fake_verfassen(
         *, user_id, anlass, fakten, provider_id=None, client=None
@@ -884,9 +993,10 @@ async def test_ten_thousand_mails_with_facts_stay_within_the_same_limit(
         return ai_mail_text.Mailtext(betreff="Kurz", absaetze=["Alles ruhig."])
 
     async def _fake_versenden(adresse, auftrag):
-        nonlocal laufend, hoechststand, zugestellt
+        nonlocal laufend, hoechststand, zugestellt, threads_hoechststand
         laufend += 1
         hoechststand = max(hoechststand, laufend)
+        threads_hoechststand = max(threads_hoechststand, threading.active_count())
         await asyncio.sleep(0)
         laufend -= 1
         zugestellt += 1
@@ -894,6 +1004,7 @@ async def test_ten_thousand_mails_with_facts_stay_within_the_same_limit(
 
     monkeypatch.setattr(ai_mail_text, "verfassen", _fake_verfassen)
     monkeypatch.setattr(ai_mail_outbox, "_versenden", _fake_versenden)
+    vermerkt = _vermerke(monkeypatch)
     monkeypatch.setattr(ai_mail_outbox, "STAPEL", 250)
     monkeypatch.setattr(ai_mail_outbox, "TAKT", 0.01)
 
@@ -901,20 +1012,17 @@ async def test_ten_thousand_mails_with_facts_stay_within_the_same_limit(
     assert ai_mail_outbox.arbeiter_starten() is True
     try:
         for _ in range(6000):
-            offen = db.execute(
-                select(AiMailOutbox.id).where(AiMailOutbox.status == "offen").limit(1)
-            ).first()
-            if offen is None:
+            if len(vermerkt) >= anzahl:
                 break
-            db.expire_all()
             await asyncio.sleep(0.01)
     finally:
         await ai_mail_outbox.aufraeumen()
 
     assert hoechststand <= ai_mail_outbox.GLEICHZEITIG
     assert hoechststand > 1, "der Test haette eine Ueberschreitung nicht sehen koennen"
-    # Der Modellaufruf bringt keinen Thread mit. Er laeuft in derselben Aufgabe
-    # wie der Versand, unter derselben Schranke.
-    assert threading.active_count() <= threads_vorher
+    # Der Modellaufruf bringt keinen eigenen Thread mit: er läuft in derselben
+    # Aufgabe wie der Versand, unter derselben Schranke. Gezählt wird wie im
+    # Test darüber — die Begründung für diese Grenze steht dort.
+    assert threads_hoechststand - threads_vorher <= THREADS_HOECHSTENS
     assert verfasst == anzahl
     assert zugestellt == anzahl

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import i18n from '@/i18n'
 import { FileEditorWorkspace } from './FileEditorWorkspace'
 import type { EditorTab } from './fileWorkspaceTypes'
 
@@ -47,6 +48,12 @@ function tab(path: string, content = ''): EditorTab {
 }
 
 describe('FileEditorWorkspace tabs', () => {
+  // Die sichtbaren Texte kommen jetzt aus der Sprachdatei. Ohne feste Sprache
+  // hängen die Erwartungen unten an der Spracherkennung der Testumgebung.
+  beforeEach(async () => {
+    await i18n.changeLanguage('de')
+  })
+
   it('binds the CodeMirror wrapper and editor to the available height', () => {
     render(
       <FileEditorWorkspace
@@ -131,5 +138,84 @@ describe('FileEditorWorkspace tabs', () => {
     replacementInput.focus()
     fireEvent.change(replacementInput, { target: { value: 'Beta' } })
     expect(replacementInput).toHaveFocus()
+  })
+})
+
+/**
+ * Der Editor war vollständig auf Deutsch verdrahtet, während der Dateibaum
+ * daneben längst aus dem Katalog las. Wer die Oberfläche auf Englisch stellte,
+ * bekam im selben Bild einen englischen Baum und einen deutschen Editor — bis
+ * hin zum Warnhinweis über den Änderungskonflikt. Diese Tests halten fest, dass
+ * die sichtbaren Texte aus der Sprachdatei kommen und nicht aus dem Quelltext.
+ */
+describe('FileEditorWorkspace — Sprachwahl', () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('en')
+  })
+
+  afterEach(async () => {
+    await i18n.changeLanguage('de')
+  })
+
+  it('beschriftet Suchleiste und Speichern in der gewählten Sprache', () => {
+    render(
+      <FileEditorWorkspace
+        tabs={[tab('config/server.ini', 'Alpha=one')]}
+        activePath="config/server.ini"
+        canWrite
+        tabListLabel="Open files"
+        horizontalScrollHint="Scroll horizontally"
+        onActivate={vi.fn()}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+        onClose={vi.fn()}
+        onReload={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Search and replace' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close server.ini' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Speichern' })).toBeNull()
+  })
+
+  it('führt den Konflikthinweis in der gewählten Sprache', () => {
+    render(
+      <FileEditorWorkspace
+        tabs={[{ ...tab('config/server.ini', 'Alpha=one'), saveState: 'conflict' }]}
+        activePath="config/server.ini"
+        canWrite
+        tabListLabel="Open files"
+        horizontalScrollHint="Scroll horizontally"
+        onActivate={vi.fn()}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+        onClose={vi.fn()}
+        onReload={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Reload server version' })).toBeInTheDocument()
+    expect(screen.getByText(/changed outside this editor/i)).toBeInTheDocument()
+  })
+
+  it('zeigt den leeren Editor in der gewählten Sprache', () => {
+    render(
+      <FileEditorWorkspace
+        tabs={[]}
+        activePath={null}
+        canWrite
+        tabListLabel="Open files"
+        horizontalScrollHint="Scroll horizontally"
+        onActivate={vi.fn()}
+        onChange={vi.fn()}
+        onSave={vi.fn()}
+        onClose={vi.fn()}
+        onReload={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('No file open')).toBeInTheDocument()
+    expect(screen.getByText('Open a file to edit')).toBeInTheDocument()
   })
 })

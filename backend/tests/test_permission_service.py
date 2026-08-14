@@ -122,12 +122,12 @@ class TestListVisibleServers:
 
 
 class TestListVisibleServersLaedtDiePorts:
-    """Die Serveruebersicht ist die Startseite und wird alle fuenf Sekunden geholt.
+    """Die Serverübersicht ist die Startseite und wird alle fünf Sekunden geholt.
 
     `ServerResponse` liest die Ports jedes Servers. Ohne Ladehinweis kostete das
-    eine Abfrage **je Server** — gemessen 34 statt 2 bei dreissig Servern. Der
-    Zaehler hier schreibt keine Zahl fest; er faengt den Rueckfall ab, dass die
-    Zahl wieder mit der Serverzahl waechst.
+    eine Abfrage **je Server** — gemessen 34 statt 2 bei dreißig Servern. Der
+    Zähler hier schreibt keine Zahl fest; er fängt den Rückfall ab, dass die
+    Zahl wieder mit der Serverzahl wächst.
     """
 
     def _mit_ports(self, db: Session, name: str) -> Server:
@@ -151,7 +151,7 @@ class TestListVisibleServersLaedtDiePorts:
         event.listen(db_module.engine, "before_cursor_execute", _hook)
         try:
             server = permission_service.list_visible_servers(db, user)
-            # Die Ports wirklich anfassen — nur so faellt lazy loading auf.
+            # Die Ports wirklich anfassen — nur so fällt lazy loading auf.
             ports = [sorted(p.port for p in s.ports) for s in server]
         finally:
             event.remove(db_module.engine, "before_cursor_execute", _hook)
@@ -168,7 +168,7 @@ class TestListVisibleServersLaedtDiePorts:
         abfragen, ports = self._zaehle(db, owner_user)
 
         assert sorted(ports) == sorted(erwartet.values())
-        assert abfragen <= 3, f"{abfragen} Abfragen fuer acht Server"
+        assert abfragen <= 3, f"{abfragen} Abfragen für acht Server"
 
     def test_delegated_path_does_not_query_once_per_server(
         self, db: Session, regular_user: User
@@ -187,7 +187,7 @@ class TestListVisibleServersLaedtDiePorts:
         abfragen, ports = self._zaehle(db, regular_user)
 
         assert sorted(ports) == sorted(erwartet)
-        assert abfragen <= 6, f"{abfragen} Abfragen fuer acht delegierte Server"
+        assert abfragen <= 6, f"{abfragen} Abfragen für acht delegierte Server"
 
 
 class TestSetUserServerPermissions:

@@ -28,7 +28,7 @@ from models import AiActionProposal, AiRun, User
 # wer dort einen Zustand ergaenzt, soll ihn hier nicht ein zweites Mal
 # eintragen muessen — sonst sieht die Konstante wie die Wahrheitsquelle aus und
 # ist doch nur eine Beschreibung.
-from models.ai_run import WARTEND
+from models.ai_run import BEENDET, WARTEND
 
 
 logger = logging.getLogger(__name__)
@@ -168,6 +168,39 @@ def zustand_schreiben(run: AiRun, zustand: dict) -> None:
     run.updated_at = _jetzt()
 
 
+def arbeitsspeicher_leeren(run: AiRun, zustand: dict | None = None) -> dict:
+    """Wirft die Provider-Nachrichten eines **beendeten** Laufs weg.
+
+    ``provider_messages`` ist das Arbeitsgedächtnis der Schleife, und darin
+    steht der entschlüsselte Gedächtnisblock des Benutzers im Klartext —
+    `build_provider_messages` hängt ihn als eigene Nachricht an. `state_json`
+    ist eine gewöhnliche Textspalte, und es gab keinen Weg, der sie je wieder
+    leerte: weder `forget_memory`, das die verschlüsselte Zeile in
+    `ai_memory_entries` entfernt, noch das Leeren des Chatverlaufs. Ein Eintrag,
+    den der Benutzer nur über Profil > Memory hinterlegt und später gelöscht
+    hat, stand danach dauerhaft im Klartext daneben — die Verschlüsselung mit
+    scope-gebundener AAD war gegen einen Datenbankleser damit wirkungslos, und
+    "wer sein Gedächtnis löschen will, will es ganz löschen" traf nicht zu.
+
+    **Nur bei einem Endzustand.** Ein geparkter Lauf (`waiting_*`) braucht seine
+    Nachrichten für die Fortsetzung nach der Bestätigung; ihm den Speicher zu
+    nehmen hieße, ihn zu töten. Die Prüfung steht deshalb hier drin und nicht
+    bei den Aufrufern — es sind drei, und einer würde sie irgendwann vergessen.
+
+    Gibt den Zustand zurück, damit der Aufrufer mit **demselben** Wörterbuch
+    weiterarbeitet. Schriebe er danach seine eigene, noch volle Fassung zurück
+    (die Nachbereitung tut genau das, wenn sie eine Berichtsmarke setzt), wäre
+    der Klartext wieder da.
+    """
+    if zustand is None:
+        zustand = zustand_lesen(run)
+    if run.status not in BEENDET:
+        return zustand
+    zustand["provider_messages"] = []
+    zustand_schreiben(run, zustand)
+    return zustand
+
+
 # ── Lebenslauf ───────────────────────────────────────────────────────────
 
 
@@ -251,6 +284,9 @@ def vorgaenger_abloesen(db: Session, *, conversation_id: str) -> dict:
             run.stop_reason = "superseded"
             # Der Status allein hat noch nie etwas gestoppt.
             aufgabe_abbrechen(run.id)
+        # Beendet heißt beendet: das Arbeitsgedächtnis wird nicht mehr
+        # gebraucht und trägt den entschlüsselten Gedächtnisblock.
+        arbeitsspeicher_leeren(run)
         run.updated_at = _jetzt()
     return erbe
 
@@ -528,14 +564,39 @@ def unterbrochene_laeufe_abgleichen(db: Session) -> int:
 
     Geparkte Laeufe (``waiting_*``) bleiben unangetastet — die warten auf einen
     Menschen und haben nichts Offenes in der Luft.
+
+    Und sie werden **nachbereitet** wie jeder andere Endzustand auch. Hier stand
+    nur der Statuswechsel, und damit umging ausgerechnet dieser Weg die Stelle,
+    an der die Berichtsmails hängen: fällt das Panel während einer
+    Guardian-Heilung oder eines fälligen Auftrags aus, sagt `ai_guardian_report`
+    einen Bericht "bei jedem Endzustand" zu — und keiner ging hinaus. Der Server
+    stand weiter, und der Betreiber erfuhr nichts davon.
     """
     laeufe = db.query(AiRun).filter(AiRun.status == "running").all()
     for run in laeufe:
         run.status = "failed"
         run.stop_reason = "process_restart"
+        arbeitsspeicher_leeren(run)
         run.updated_at = _jetzt()
-    if laeufe:
-        db.commit()
+    if not laeufe:
+        return 0
+    db.commit()
+
+    # **Nach** dem Commit, nicht davor: die Nachbereitung berichtet über den
+    # Endzustand, und der soll festgeschrieben sein, bevor eine Mail ihn
+    # behauptet. Verzögerter Import wie in `_aufgabe_planen` — die Schleife
+    # selbst gehört dem Stream, dieser Dienst kennt sie nur beim Namen.
+    from services.ai_stream_service import _lauf_nachbereiten
+
+    for run in laeufe:
+        # Ein misslungener Bericht darf die übrigen nicht mitnehmen. Der
+        # Abgleich läuft beim Start des Panels; eine Ausnahme hier hieße, dass
+        # das Panel nicht hochkommt.
+        try:
+            _lauf_nachbereiten(db, run, None)
+        except Exception:
+            db.rollback()
+            logger.warning("Lauf nach Neustart nicht nachbereitet run_id=%s", run.id)
     return len(laeufe)
 
 

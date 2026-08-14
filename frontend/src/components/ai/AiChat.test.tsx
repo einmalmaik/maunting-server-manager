@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -6,6 +6,7 @@ import {
   attachAiRun,
   type AiActionProposal,
   type AiAttachment,
+  type AiContextStatus,
   type AiMessage,
   type AiRunSnapshot,
   type AiSkillSummary,
@@ -33,6 +34,7 @@ vi.mock('@/api/ai', async (importOriginal) => {
       deleteAttachment: vi.fn(),
       listAutonomyGrants: vi.fn(),
       saveAutonomyGrant: vi.fn(),
+      getContextStatus: vi.fn(),
     },
     streamAiMessage: vi.fn(),
     attachAiRun: vi.fn(),
@@ -82,6 +84,12 @@ const skills: AiSkillSummary[] = [
   { id: null, skill_key: 'server-nicht-erreichbar', name: 'Nicht erreichbar', description: 'Synthetische Beschreibung fuer den Test', scope: 'shipped', origin: 'shipped', team_id: null, status: 'active', enabled: true, editable: false },
 ]
 
+/** Wie voll der Kontext ist — die Zahlen hinter dem Ring am Absendeknopf. */
+const kontextStand: AiContextStatus = {
+  known: true, window_tokens: 128_000, usable_tokens: 100_000, used_tokens: 1_000,
+  compaction_percent: 75, summarized: false,
+}
+
 /** Eine bereits gesendete eigene Nachricht — die Grundlage fuers Bearbeiten. */
 const eigeneNachricht: AiMessage = {
   id: 'msg-user', role: 'user', content: 'urspruengliche Frage', reasoning: null,
@@ -126,6 +134,7 @@ describe('AiChat', () => {
     // Nichts laeuft mehr von vorhin. Der Chat fragt das beim Oeffnen, um
     // sich an einen weiterlaufenden Lauf wieder anhaengen zu koennen.
     vi.mocked(aiApi.getActiveRun).mockReset().mockResolvedValue(null)
+    vi.mocked(aiApi.getContextStatus).mockReset().mockResolvedValue(kontextStand)
     vi.mocked(attachAiRun).mockReset().mockResolvedValue(undefined)
   })
 
@@ -136,6 +145,35 @@ describe('AiChat', () => {
     // Der Kern der Aenderung: kein "Neue Unterhaltung", keine Chatliste.
     expect(screen.queryByRole('button', { name: /neue unterhaltung/i })).not.toBeInTheDocument()
     expect(aiApi.getConversation).toHaveBeenCalledWith()
+  })
+
+  it('holt die Serverliste nicht ohne Autonomierecht', async () => {
+    // Die Liste wird an genau einer Stelle gebraucht: im Autonomie-Knopf. Ohne
+    // `ai.autonomous.use` wird der gar nicht gezeichnet — die Abfrage holte
+    // trotzdem alle sichtbaren Server samt Bind-IP, Spiel-, Query- und
+    // RCON-Port in den Browser und warf sie weg.
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    expect(client.api).not.toHaveBeenCalled()
+  })
+
+  it('holt die Serverliste mit Autonomierecht', async () => {
+    // Das Gegenstück: wo der Knopf steht, braucht er die Namen.
+    usePermissionsStore.setState({
+      me: {
+        is_owner: false, role_id: null, role_name: null,
+        global_keys: ['ai.chat.use', 'ai.attachments.use', 'ai.skills.use', 'ai.autonomous.use'],
+        server_keys: {},
+      },
+      isLoading: false,
+      error: null,
+    })
+    vi.mocked(aiApi.listAutonomyGrants).mockResolvedValue([])
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    await waitFor(() => expect(client.api).toHaveBeenCalledWith('/servers'))
   })
 
   it('uploads through the attachment endpoint of the single conversation', async () => {
@@ -244,6 +282,53 @@ describe('AiChat', () => {
     await screen.findByText('synthetic-note.txt')
 
     expect(screen.getByLabelText('Provider auswählen')).toHaveTextContent('Synthetic AI')
+  })
+
+  it('lässt den Kontextring nicht von der Antwort des alten Modells überschreiben', async () => {
+    // Zwei Modellwechsel kurz hintereinander — etwa beim Vergleichen. Die
+    // Auskunft ist bei kaltem Modellkatalog ein externer Abruf, die langsamere
+    // Antwort für das erste Modell kann also nach der des zweiten eintreffen.
+    // Der Ring zeigte dann ein 128k-Fenster für ein 1M-Modell an — genau die
+    // Zahl, an der man abliest, wann gefaltet wird.
+    vi.mocked(aiApi.listProviders).mockResolvedValue([
+      {
+        id: 1, name: 'Synthetic AI', default_model: 'test-model',
+        requires_api_key: false, operator_key_available: true, available: true,
+        reasoning: true, efforts: ['low', 'medium', 'high'],
+        can_disable: true, default_effort: 'medium',
+      },
+      {
+        id: 2, name: 'Synthetic Lab', default_model: 'lab-model',
+        requires_api_key: false, operator_key_available: true, available: true,
+        reasoning: false, efforts: [], can_disable: true, default_effort: null,
+      },
+    ])
+    let antworteAltesModell: (stand: AiContextStatus) => void = () => {}
+    vi.mocked(aiApi.getContextStatus).mockReset().mockImplementation((id: number) => (
+      id === 1
+        ? new Promise<AiContextStatus>((resolve) => { antworteAltesModell = resolve })
+        : Promise.resolve({
+            known: true, window_tokens: 1_000_000, usable_tokens: 500_000,
+            used_tokens: 50_000, compaction_percent: 75, summarized: false,
+          })
+    ))
+    render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    // Weiter zum zweiten Modell, während die Auskunft zum ersten noch hängt.
+    fireEvent.click(screen.getByLabelText('Provider auswählen'))
+    fireEvent.click(screen.getByRole('option', { name: /Synthetic Lab/ }))
+    await screen.findByRole('img', { name: /50k Token \(10 %\)/ })
+
+    // Jetzt erst antwortet das erste Modell — mit einem fast vollen Fenster.
+    await act(async () => { antworteAltesModell({
+      known: true, window_tokens: 128_000, usable_tokens: 100_000,
+      used_tokens: 90_000, compaction_percent: 75, summarized: false,
+    }) })
+
+    // Stehenbleiben muss der Stand des gewählten Modells.
+    expect(screen.getByRole('img', { name: /Belegt/ }))
+      .toHaveAccessibleName(expect.stringContaining('50k Token (10 %)'))
   })
 
   it('bietet bei einem Modell mit Denkzwang kein „aus" an', async () => {
@@ -516,6 +601,85 @@ describe('AiChat', () => {
     // Die Karte bleibt stehen, aber ohne Knoepfe: sonst saehe man spaeter nur
     // die Antwort und wuesste nicht mehr, worauf sie sich bezieht.
     await screen.findByText('Beantwortet.')
+  })
+
+  /**
+   * Den Verlaufskasten für die Scrollprüfungen vorbereiten.
+   *
+   * jsdom rechnet kein Layout: `scrollHeight`, `clientHeight` und `scrollTop`
+   * sind dort immer 0, und der Kasten stünde damit rechnerisch stets schon
+   * ganz unten. Die drei Zahlen müssen deshalb gesetzt werden — sonst prüft
+   * der Test nichts.
+   */
+  function bereiteVerlauf(kasten: HTMLElement, start: number) {
+    let stand = start
+    Object.defineProperty(kasten, 'clientHeight', { value: 300, configurable: true })
+    Object.defineProperty(kasten, 'scrollHeight', { value: 2000, configurable: true })
+    Object.defineProperty(kasten, 'scrollTop', {
+      configurable: true,
+      get: () => stand,
+      set: (wert: number) => { stand = wert },
+    })
+    return () => stand
+  }
+
+  it('reißt den Verlauf nicht ans Ende, wenn der Benutzer hochgescrollt hat', async () => {
+    // **Die gemeldete Beobachtung.** Während einer langen Antwort zurück zu
+    // einem früheren Absatz oder einer Werkzeugzeile zu blättern war
+    // unmöglich: das nächste Textstück zog die Ansicht sofort wieder ans Ende.
+    const { streamAiMessage } = await import('@/api/ai')
+    let melde: (event: { event: 'delta'; data: { content: string } }) => void = () => {}
+    vi.mocked(streamAiMessage).mockReset().mockImplementation((_payload, onEvent) => {
+      melde = onEvent as typeof melde
+      return new Promise(() => {})
+    })
+    const { container } = render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    const kasten = container.querySelector('[aria-live="polite"]') as HTMLElement
+    const standJetzt = bereiteVerlauf(kasten, 0)
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+    await screen.findByText('Antwort wird erstellt …')
+
+    // Der Benutzer blättert zurück.
+    kasten.scrollTop = 100
+    fireEvent.scroll(kasten)
+
+    act(() => melde({ event: 'delta', data: { content: 'Ein weiterer Absatz.' } }))
+    await screen.findByText('Ein weiterer Absatz.')
+
+    expect(standJetzt()).toBe(100)
+  })
+
+  it('schiebt weiter nach, solange der Verlauf unten steht', async () => {
+    // Das Gegenstück: wer nicht wegblättert, will die Antwort mitlaufen sehen.
+    // Ohne diesen Fall wäre der Fix oben ein abgeschaltetes Nachziehen.
+    const { streamAiMessage } = await import('@/api/ai')
+    let melde: (event: { event: 'delta'; data: { content: string } }) => void = () => {}
+    vi.mocked(streamAiMessage).mockReset().mockImplementation((_payload, onEvent) => {
+      melde = onEvent as typeof melde
+      return new Promise(() => {})
+    })
+    const { container } = render(<AiChat />)
+    await screen.findByText('synthetic-note.txt')
+
+    const kasten = container.querySelector('[aria-live="polite"]') as HTMLElement
+    const standJetzt = bereiteVerlauf(kasten, 0)
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+    await screen.findByText('Antwort wird erstellt …')
+
+    // Fast unten heißt unten — dieselben 50 Pixel Spielraum wie in der Konsole.
+    kasten.scrollTop = 1680
+    fireEvent.scroll(kasten)
+
+    act(() => melde({ event: 'delta', data: { content: 'Ein weiterer Absatz.' } }))
+    await screen.findByText('Ein weiterer Absatz.')
+
+    expect(standJetzt()).toBe(2000)
   })
 
   it('haengt sich beim Oeffnen an einen Lauf, der noch arbeitet', async () => {

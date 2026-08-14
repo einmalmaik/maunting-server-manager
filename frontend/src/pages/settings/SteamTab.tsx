@@ -112,7 +112,7 @@ export function SteamTab() {
               onChange={(e) => setNewSteamKey(e.target.value)}
               placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
             />
-            <p className="font-body-md text-xs text-on-surface-variant mt-2">
+            <p className="msm-field-help">
               {t('settings.steamKeyHint')}{' '}
               <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener noreferrer" className="text-secondary hover:underline">
                 steamcommunity.com/dev/apikey

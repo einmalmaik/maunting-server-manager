@@ -7,9 +7,9 @@ import type { HostInterface, HostInterfacesResponse } from '@/types'
  * Nur Owner duerfen den Endpunkt aufrufen — bei 403 bleibt die Liste leer.
  *
  * `enabled` erlaubt Aufrufern, die die Liste nur in einem Dialog brauchen, das
- * Laden bis zum Oeffnen aufzuschieben. Ohne das kostet jeder Seitenaufruf eine
- * Anfrage fuer Daten, die niemand sieht — und fuer Benutzer ohne `system.view`
- * zusaetzlich einen 403-Eintrag im Log.
+ * Laden bis zum Öffnen aufzuschieben. Ohne das kostet jeder Seitenaufruf eine
+ * Anfrage für Daten, die niemand sieht — und für Benutzer ohne `system.view`
+ * zusätzlich einen 403-Eintrag im Log.
  */
 export function useHostInterfaces(nodeId?: string | number | null, enabled = true) {
   const [interfaces, setInterfaces] = useState<HostInterface[]>([])

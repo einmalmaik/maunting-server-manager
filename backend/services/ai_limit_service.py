@@ -35,9 +35,9 @@ from services.role_service import effective_user_role_ids
 
 
 # Genau die Breite von PostgreSQL INTEGER (2^31-1). Die drei Tokenspalten in
-# `models/role_ai_limit.py` sind INTEGER; eine hoehere Obergrenze hier haette die
-# Oberflaeche Werte anbieten lassen, die beim Speichern in einen
-# NumericValueOutOfRange laufen — den der Router als „gleichzeitige Aenderung“
+# `models/role_ai_limit.py` sind INTEGER; eine höhere Obergrenze hier hätte die
+# Oberfläche Werte anbieten lassen, die beim Speichern in einen
+# NumericValueOutOfRange laufen — den der Router als „gleichzeitige Änderung“
 # (HTTP 409) meldet, also mit einer Ursache, die es gar nicht gibt.
 TOKEN_LIMIT_MAX = 2_147_483_647
 REQUESTS_PER_MINUTE_MAX = 10_000

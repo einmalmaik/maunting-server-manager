@@ -157,6 +157,65 @@ async def test_der_laufbeginn_blockiert_die_ereignisschleife_nicht(
 
 
 @pytest.mark.asyncio
+async def test_die_segmentvorbereitung_blockiert_die_ereignisschleife_nicht(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dieselbe Zusage eine Ebene tiefer — für **jedes** Segment.
+
+    Der Laufbeginn war nur der erste Halt. `_segment_vorbereiten` macht dieselbe
+    Art Arbeit noch einmal, und zwar bei jedem Segment: beim ersten Zug, bei
+    jeder Fortsetzung nach einer Bestätigung und bei jedem fälligen stehenden
+    Auftrag. Es öffnet eine Sitzung, macht rund acht Rundreisen und holt sich
+    mittendrin über `resolve_api_key` den Schlüssel beim DIS-Sidecar — und das
+    ist ein **synchrones** `httpx.post` mit fünfzehn Sekunden Frist.
+
+    `segment_ausfuehren` liegt als Aufgabe auf der Hauptschleife. Direkt
+    aufgerufen stand damit der ganze Panelprozess, und zwar vor dem ersten
+    Anbieterbyte: die Zeit ging zusätzlich in die Wartezeit bis zum ersten Wort.
+
+    Der Ersatz gibt `(None, None)` zurück — „der Lauf ist nicht mehr fällig“.
+    `segment_ausfuehren` steigt dann sofort aus, und übrig bleibt genau die
+    Frage, um die es geht: läuft die Vorbereitung neben der Schleife?
+
+    Die eigene, längere Dauer statt `ANLAUFDAUER`: die Segmente haben hier —
+    anders als die Anläufe — keine Schranke, laufen also nebeneinander. Die
+    Wanduhr misst deshalb **eine** Vorbereitung und nicht vier, und bei 0,2 s
+    wären selbst im guten Fall nur rund zehn Takte drin. Blockierend wären es
+    null; die Trennung soll aber nicht vom Zufall abhängen.
+    """
+    segmentdauer = ANLAUFDAUER * 3
+
+    def _schlafen(run_id: str):
+        del run_id
+        time.sleep(segmentdauer)
+        return None, None
+
+    monkeypatch.setattr(ai_stream_service, "_segment_vorbereiten", _schlafen)
+
+    ticks = 0
+
+    async def _waechter() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.02)
+            ticks += 1
+
+    waechter = asyncio.create_task(_waechter())
+    try:
+        await asyncio.gather(*(
+            ai_stream_service.segment_ausfuehren(str(uuid4()))
+            for _ in range(ANLAEUFE)
+        ))
+    finally:
+        waechter.cancel()
+
+    assert ticks >= 10, (
+        f"Die Ereignisschleife kam während der Segmentvorbereitung nur {ticks}-mal "
+        "dran — das Panel steht in dieser Zeit"
+    )
+
+
+@pytest.mark.asyncio
 async def test_zwei_anlaeufe_derselben_unterhaltung_ueberlappen_nie(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -5,7 +5,9 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { Button } from '@/components/ui/Button'
 import { NumberStepper } from '@/components/ui/NumberStepper'
+import { Switch } from '@/components/ui/Switch'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 
 export function EmailTab() {
@@ -188,14 +190,13 @@ export function EmailTab() {
                 />
               </div>
               <div className="flex items-end">
-                <label className="flex items-center gap-2 cursor-pointer pb-3">
-                  <input
-                    type="checkbox"
-                    checked={settings.smtp_tls === 'true'}
-                    onChange={(e) => setSettings({ ...settings, smtp_tls: e.target.checked ? 'true' : 'false' })}
-                    className="w-4 h-4 rounded border-outline bg-surface-container-high"
-                  />
+                <label className="flex items-center gap-3 pb-3">
                   <span className="font-body-md text-sm text-on-surface-variant">{t('settings.smtpTls')}</span>
+                  <Switch
+                    checked={settings.smtp_tls === 'true'}
+                    onCheckedChange={(checked) => setSettings({ ...settings, smtp_tls: checked ? 'true' : 'false' })}
+                    aria-label={t('settings.smtpTls')}
+                  />
                 </label>
               </div>
             </div>
@@ -231,7 +232,7 @@ export function EmailTab() {
                   onChange={(e) => setNewResendKey(e.target.value)}
                   placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                 />
-                <p className="font-body-md text-xs text-on-surface-variant mt-2">
+                <p className="msm-field-help">
                   Resend API-Key von <a href="https://resend.com" target="_blank" rel="noopener noreferrer" className="text-secondary hover:underline">resend.com</a>
                 </p>
               </div>
@@ -287,18 +288,14 @@ export function EmailTab() {
 
         {canWrite && provider === 'smtp' && (
           <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={saving}
-              className="msm-btn-primary px-6 py-3 inline-flex items-center gap-2 disabled:opacity-50"
-            >
+            <Button type="submit" disabled={saving}>
               {saving ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
               ) : (
                 <Save className="w-4 h-4" />
               )}
               {t('settings.save')}
-            </button>
+            </Button>
           </div>
         )}
       </fieldset>

@@ -95,7 +95,7 @@ class AiMemoryEntry(Base):
     # Rangfolge kann ihn so ohne einen weiteren Sidecar-Aufruf je Zeile lesen.
     # Die Auswahl selbst findet **nach** dem Entschlüsseln statt — sie bewertet
     # neben der Bedeutung auch die Wortüberschneidung im Wert und braucht ihn
-    # dafür im Klartext. NULL heisst: noch nicht berechnet.
+    # dafür im Klartext. NULL heißt: noch nicht berechnet.
     embedding_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Womit gerechnet wurde. Passt es nicht zum geladenen Modell, wird der
     # Vektor ignoriert statt falsche Aehnlichkeiten zu liefern.

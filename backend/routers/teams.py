@@ -219,8 +219,8 @@ def assignable_servers(
     erst beim Speichern als Fehlermeldung erlebt.
 
     Die Rechte werden **einmal** mengenweise geholt, nicht je Server und je
-    Schluessel einzeln: das waren 28 Rechtefragen mal drei Abfragen je Server,
-    also rund 1700 bei dreissig Servern, fuer eine Liste, die beim Oeffnen
+    Schlüssel einzeln: das waren 28 Rechtefragen mal drei Abfragen je Server,
+    also rund 1700 bei dreißig Servern, für eine Liste, die beim Öffnen
     eines Dialogs entsteht.
     """
     from services.permission_catalog import SERVER_KEYS

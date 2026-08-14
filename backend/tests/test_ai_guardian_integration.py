@@ -1645,3 +1645,61 @@ async def test_der_auftragstext_traegt_keinen_agententext(
     text = str(zustand)
     assert "IGNORE ALL PREVIOUS INSTRUCTIONS" not in text
     assert str(server.id) in text
+
+
+@pytest.mark.asyncio
+async def test_die_heilung_wird_nicht_zu_etwas_aufgefordert_das_sie_nicht_darf(
+    db: Session, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Im Systemprompt einer Heilung steht kein Skill-Verzeichnis.
+
+    Es stand dort — samt der Zeile „Lies einen Skill mit `read_skill`“ und den
+    Namen der sechs mitgelieferten Störungsdrehbücher, also genau der
+    Drehbücher, um die es in einer Heilung geht. Angeboten wird `read_skill`
+    aber nicht: es steht nicht in `GUARDIAN_HEILUNG_TOOLS`. Der Aufruf kostete
+    eine Runde, das Verzeichnis kostete in jeder Runde Tokens, und beides
+    ausgerechnet in dem Lauf, bei dem niemand nachsieht.
+
+    Die Wahl fiel auf den Prompt und nicht auf die Werkzeugmenge: was in einem
+    Skilltext steht, kann die KI aus einem Kundengespräch gelernt haben, und
+    dieser Text lenkte dann einen Lauf, der unter der Freigabe des Betreibers
+    handelt. Die Menge zu erweitern ist seine Entscheidung.
+    """
+    from services.ai_context_service import build_provider_messages
+
+    server = _server(db, "ohne-verzeichnis", tmp_path)
+    _konfig(tmp_path)
+    # Ausdrücklich **mit** dem Skillrecht: ohne es fällt der Block ohnehin
+    # weg, und der Test würde nichts zeigen.
+    user = _benutzer(db, "freigeber", rechte=(*KI_RECHTE, "ai.skills.use"))
+    _sichtbar(db, user, server)
+    _freigabe(db, user, server=server)
+    _anbieter(db)
+    _vorfall(db, server)
+
+    _laufzeit_faelschen(monkeypatch)
+    _backup_faelschen(monkeypatch)
+    Mailfach().einbauen(monkeypatch)
+    Anbieter([]).einbauen(monkeypatch)
+
+    assert await _takt(db) == 1
+
+    run = (
+        db.query(AiRun).filter(AiRun.user_id == user.id)
+        .order_by(AiRun.created_at.desc()).first()
+    )
+    assert run is not None
+    systemnachricht = ai_run_service.zustand_lesen(run)["provider_messages"][0]
+    assert systemnachricht["role"] == "system"
+    assert "Skill-Verzeichnis" not in systemnachricht["content"]
+    assert "read_skill" not in systemnachricht["content"]
+
+    # Gegenprobe an derselben Unterhaltung: im Chat sieht dieser Benutzer das
+    # Verzeichnis unverändert. Sonst prüfte der Test nur, dass es niemand hat.
+    conversation = (
+        db.query(AiConversation).filter(AiConversation.user_id == user.id).first()
+    )
+    assert conversation is not None
+    im_chat = build_provider_messages(db, conversation)[0]["content"]
+    assert "Skill-Verzeichnis" in im_chat
+    assert "read_skill" in im_chat

@@ -56,8 +56,8 @@ def _rollen_fuer_akteur(db: Session, akteur: User) -> list[dict]:
     """
     from services.permission_catalog import SYSTEM_ROLE_ADMIN
 
-    # Die eigenen Rechte des Akteurs einmal holen statt zweimal je geprueftem
-    # Schluessel. `has_global_permission` fragt fuer einen Nicht-Owner genau
+    # Die eigenen Rechte des Akteurs einmal holen statt zweimal je geprüftem
+    # Schlüssel. `has_global_permission` fragt für einen Nicht-Owner genau
     # diese Menge ab, nur jedes Mal neu.
     akteur_keys = (
         set()
@@ -161,7 +161,7 @@ def setup_uebersicht(db: Session, *, user: User) -> dict:
         ).all()
     }
 
-    # Zwei Zahlen je Integration, in SQL gezaehlt. Die Vertragstabelle waechst
+    # Zwei Zahlen je Integration, in SQL gezählt. Die Vertragstabelle wächst
     # mit dem Geschaeft — sie war die einzige ungedeckelte Abfrage dieser
     # Funktion, und ihr ganzes Ergebnis diente nur diesen beiden Summen.
     integration_ids = [i.id for i in integrationen] or [0]

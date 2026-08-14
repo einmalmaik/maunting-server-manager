@@ -189,6 +189,85 @@ def test_ohne_abschlusstext_steht_trotzdem_etwas_in_der_mail(
     assert "KI-Chat" in fach.briefe[0]["bericht"]
 
 
+def test_der_bericht_zitiert_keinen_fremden_zug(db: Session, monkeypatch) -> None:
+    """Es gibt genau **eine** Unterhaltung je Benutzer.
+
+    `uq_ai_conversations_user` hält das fest: Chat, Guardian-Heilungen und
+    fällige Aufträge landen alle darin. Endet ein Auftragslauf, ohne selbst eine
+    fertige Antwort geschrieben zu haben — der häufigste Weg dorthin ist das
+    erschöpfte Kontingent —, fand die Abfrage die jüngste Antwort aus einem
+    völlig anderen Zug. Der Betreiber las dann unter "Abschlussbericht des
+    Laufs" seine Chatunterhaltung von gestern, etwa "Ich habe Server 12
+    gelöscht."
+
+    Der Anker ist die eigene Benutzernachricht des Laufs; sie steht im Zustand.
+    """
+    fach = Mailfach().einbauen(monkeypatch)
+    user = _benutzer(db, "fremderzug")
+    aufgabe = _aufgabe(db, user)
+    # Der Zug von gestern — eine fertige Antwort, die diesem Lauf nicht gehört.
+    run = _lauf(db, user, aufgabe, status="failed",
+                antwort="Ich habe Server 12 gelöscht.")
+    anker = AiMessage(
+        id="msg-anker",
+        conversation_id=run.conversation_id,
+        role="user",
+        content="Fälliger Auftrag: Serverbericht.",
+        status="complete",
+    )
+    db.add(anker)
+    db.commit()
+
+    zustand = _zustand(aufgabe)
+    zustand["user_message_id"] = anker.id
+
+    ai_task_report.bericht_versenden(db, run=run, zustand=zustand)
+
+    assert "Server 12" not in fach.briefe[0]["bericht"]
+    # Die Mail geht trotzdem hinaus — mit dem ehrlichen Ersatztext.
+    assert "KI-Chat" in fach.briefe[0]["bericht"]
+
+
+def test_mit_anker_geht_die_eigene_antwort_des_laufs_hinaus(
+    db: Session, monkeypatch
+) -> None:
+    """Die Gegenprobe: der Anker darf den Normalfall nicht wegschneiden.
+
+    Ein Filter über `run.created_at` hätte genau das getan — `ai_messages` wird
+    im selben Flush **vor** `ai_runs` eingefügt, die eigene Antwort eines Laufs
+    trägt also stets eine frühere Zeit als der Lauf selbst. Jeder erfolgreiche
+    Bericht wäre auf den Ersatztext gefallen.
+    """
+    fach = Mailfach().einbauen(monkeypatch)
+    user = _benutzer(db, "eigeneantwort")
+    aufgabe = _aufgabe(db, user)
+    run = _lauf(db, user, aufgabe, antwort=None)
+    anker = AiMessage(
+        id="msg-anker-eigen",
+        conversation_id=run.conversation_id,
+        role="user",
+        content="Fälliger Auftrag: Serverbericht.",
+        status="complete",
+    )
+    db.add(anker)
+    db.flush()
+    db.add(AiMessage(
+        id="msg-eigen",
+        conversation_id=run.conversation_id,
+        role="assistant",
+        content="Alle vier Server laufen, Backups sind aktuell.",
+        status="complete",
+    ))
+    db.commit()
+
+    zustand = _zustand(aufgabe)
+    zustand["user_message_id"] = anker.id
+
+    ai_task_report.bericht_versenden(db, run=run, zustand=zustand)
+
+    assert "Alle vier Server laufen" in fach.briefe[0]["bericht"]
+
+
 def test_der_fremdtext_ist_geschwaerzt(db: Session, monkeypatch) -> None:
     """Der Abschlusstext kann Serverlogs enthalten — also fremde Adressen."""
     fach = Mailfach().einbauen(monkeypatch)

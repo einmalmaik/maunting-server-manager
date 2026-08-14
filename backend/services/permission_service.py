@@ -285,20 +285,20 @@ def rechte_irgendwo(db: Session, user: User, schluessel: set[str]) -> set[str]:
 
 
 def benutzer_mit_recht(db: Session, kandidaten: list[User], key: str) -> set[int]:
-    """Welche dieser Benutzer halten den globalen Schluessel? Zwei Abfragen.
+    """Welche dieser Benutzer halten den globalen Schlüssel? Zwei Abfragen.
 
-    Dieselbe Frage wie `has_global_permission`, nur fuer viele Benutzer auf
+    Dieselbe Frage wie `has_global_permission`, nur für viele Benutzer auf
     einmal. Der Anlass war gemessen: die Dienstbenutzerliste der Shop-Anbindung
     fragte je Kandidat einzeln und kostete 1 + 2n Abfragen — 401 bei ihrer
     Obergrenze von 200.
 
-    Zwei Fallen, die ein naiver Join uebersieht und die deshalb hier stehen:
+    Zwei Fallen, die ein naiver Join übersieht und die deshalb hier stehen:
 
     - **Owner** halten alles ohne eine einzige Zeile in der Datenbank.
     - Die Rolle eines Benutzers kann allein in der Altspalte `users.role_id`
       stehen, ohne Zeile in `user_roles`. `effective_user_role_ids` liest sie
-      ausdruecklich mit; wer nur `user_roles` joint, uebersieht genau die
-      Konten, die ein Admin ueber die Benutzerverwaltung angelegt hat.
+      ausdrücklich mit; wer nur `user_roles` joint, übersieht genau die
+      Konten, die ein Admin über die Benutzerverwaltung angelegt hat.
     """
     if not kandidaten:
         return set()
@@ -401,10 +401,10 @@ def list_visible_servers(db: Session, user: User) -> list[Server]:
     """Die sichtbaren Server samt ihrer Ports.
 
     `selectinload(Server.ports)` ist kein Feinschliff: `ServerResponse` liest
-    die Ports bei jeder Serialisierung, und die Serveruebersicht ruft diese
-    Liste alle fuenf Sekunden ab. Ohne den Ladehinweis kostet sie eine Abfrage
-    je Server, mit ihm genau eine zusaetzliche — gemessen 34 statt 2 bei
-    dreissig Servern, bei gleichem JSON.
+    die Ports bei jeder Serialisierung, und die Serverübersicht ruft diese
+    Liste alle fünf Sekunden ab. Ohne den Ladehinweis kostet sie eine Abfrage
+    je Server, mit ihm genau eine zusätzliche — gemessen 34 statt 2 bei
+    dreißig Servern, bei gleichem JSON.
 
     `Server.node` bleibt bewusst ohne Hinweis: die Beziehung zeigt auf **eine**
     Node, die die Identity Map ohnehin nur einmal holt.

@@ -63,8 +63,12 @@ def _conversation(db: Session, user: User) -> AiConversation:
     return conversation
 
 
-def _system_prompt(db: Session, user: User, query: str = "") -> str:
-    messages = build_provider_messages(db, _conversation(db, user), query)
+def _system_prompt(
+    db: Session, user: User, query: str = "", unbeaufsichtigt: bool = False
+) -> str:
+    messages = build_provider_messages(
+        db, _conversation(db, user), query, unbeaufsichtigt=unbeaufsichtigt
+    )
     return next(item["content"] for item in messages if item["role"] == "system")
 
 
@@ -107,6 +111,40 @@ def test_without_the_permission_there_is_no_index(db: Session, regular_user: Use
     _allow(db, regular_user, "ai.chat.use")
 
     assert "Skill-Verzeichnis" not in _system_prompt(db, regular_user)
+
+
+def test_a_run_without_witnesses_is_not_asked_to_read_what_it_cannot_read(
+    db: Session, regular_user: User
+) -> None:
+    """Ein Heilungs- oder Aufgabenlauf sieht kein Skill-Verzeichnis.
+
+    Der Block nennt die sechs Störungsdrehbücher beim Namen und fordert auf,
+    das passende mit ``read_skill`` zu lesen — und genau dieses Werkzeug steht
+    weder in ``GUARDIAN_HEILUNG_TOOLS`` noch in ``AUFGABEN_LESEN``. Ausgerechnet
+    der Lauf, für den diese Drehbücher geschrieben wurden, bekam also eine
+    Aufforderung, der er nicht nachkommen kann: eine verlorene Runde, und in
+    jeder weiteren Runde die Tokens des Verzeichnisses.
+
+    Der Freigeber einer Heilung ist üblicherweise der Owner, und
+    ``has_global_permission`` sagt für ihn zu allem ja — das Recht
+    ``ai.skills.use`` allein hat den Block also nie zurückgehalten.
+    """
+    _allow(db, regular_user, "ai.chat.use", "ai.skills.use")
+    # Dieselbe Unterhaltung für beide Prompts: ein Benutzer hat genau eine.
+    conversation = _conversation(db, regular_user)
+
+    def systemprompt(unbeaufsichtigt: bool) -> str:
+        nachrichten = build_provider_messages(
+            db, conversation, unbeaufsichtigt=unbeaufsichtigt
+        )
+        return next(item["content"] for item in nachrichten if item["role"] == "system")
+
+    ohne_zeugen = systemprompt(True)
+    assert "Skill-Verzeichnis" not in ohne_zeugen
+    assert "server-nicht-erreichbar" not in ohne_zeugen
+    assert "read_skill" not in ohne_zeugen
+    # Der Chat des Menschen daneben behält es unverändert.
+    assert "Skill-Verzeichnis" in systemprompt(False)
 
 
 def test_a_foreign_team_skill_never_reaches_the_prompt(

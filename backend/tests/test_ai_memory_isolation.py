@@ -124,6 +124,35 @@ def test_each_user_sees_only_their_own_entry(db: Session, regular_user: User) ->
     assert "32 GB" in theirs and "8 GB" not in theirs
 
 
+def test_a_stranger_cannot_delete_my_entry(db: Session, regular_user: User) -> None:
+    """Die Trennung gilt auch für den Weg zurück.
+
+    Für die anderen drei Zweige von `delete_entry` gibt es Negativtests, für den
+    persönlichen bisher nur den Positivfall. Die einzige Schranke zwischen zwei
+    Benutzern ist dort eine Zeile — `row.owner_user_id == user.id` —, und sie
+    wurde schon einmal angefasst. Fällt sie bei einem späteren Umbau weg, könnte
+    jeder Angemeldete mit einer bekannten Kennung fremde Erinnerungen
+    unwiderruflich löschen, und die Suite bliebe grün.
+
+    404 statt 403, aus demselben Grund wie überall hier: die Antwort soll nicht
+    verraten, dass es die Zeile gibt.
+    """
+    other = _user(db, "andere")
+    _allow(db, regular_user, "ai.memory.use")
+    _allow(db, other, "ai.memory.use")
+
+    fremd, _value = ai_memory_service.upsert_entry(
+        db, user=other, scope="user", server_id=None,
+        key="privat", value="Sehr persönliche Notiz",
+    )
+
+    with pytest.raises(HTTPException) as fehler:
+        ai_memory_service.delete_entry(db, regular_user, fremd.id)
+
+    assert fehler.value.status_code == 404
+    assert db.get(AiMemoryEntry, fremd.id) is not None
+
+
 def test_two_users_writing_the_same_key_do_not_collide(
     db: Session, regular_user: User
 ) -> None:
@@ -172,7 +201,7 @@ def test_rewriting_the_owner_makes_the_entry_unreadable(
 
     row, _value = ai_memory_service.upsert_entry(
         db, user=other, scope="user", server_id=None,
-        key="privat", value="Sehr persoenliche Notiz",
+        key="privat", value="Sehr persönliche Notiz",
     )
     assert row.aad_version == 2
 

@@ -15,7 +15,8 @@ from models import AiMemoryEntry, AiMemoryPreference, Server, Team, User
 from services import ai_embedding_service, audit_service, permission_service
 from services.ai_redaction import redact_sensitive_text
 from services.ai_embedding_service import EMBEDDING_DIMENSIONS
-from services.dis_client import DisClient, DisSidecarError
+from services.ai_embedding_service import MODEL_TAG as _EMBEDDING_MODEL_TAG
+from services.dis_client import DisClient, DisDecryptionError, DisSidecarError
 
 
 logger = logging.getLogger(__name__)
@@ -26,10 +27,6 @@ MAX_ENTRIES_PER_SCOPE = 100
 #: `team` und `panel` gehoeren dem Team bzw. dem Betreiber.
 PERSOENLICHE_SCOPES = ("user", "server")
 MAX_CONTEXT_CHARS = 6_000
-# Kennung des Modells, mit dem ein gespeicherter Vektor entstanden ist. Wechselt
-# der Betreiber das Modell, passen alte Vektoren nicht mehr — sie werden dann
-# ignoriert statt falsche Aehnlichkeiten zu liefern.
-_EMBEDDING_MODEL_TAG = "potion-multilingual-128M"
 # Nach so vielen Tagen ohne Nutzung haelbiert sich der Aktualitaetsbonus. Grob
 # an "eine Arbeitswoche" angelehnt; der Wert entscheidet nur bei Platzmangel.
 RECENCY_HALFLIFE_DAYS = 7.0
@@ -217,7 +214,7 @@ def list_entries(
 ) -> list[tuple[AiMemoryEntry, str]]:
     identity, _, _, _ = scope_identity(db, user, scope, server_id, team_id)
     rows = db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity).order_by(AiMemoryEntry.key).all()
-    return [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))) for row in rows]
+    return _entschluesseln_lesbare(rows)
 
 
 def personal_entries(db: Session, user: User) -> list[tuple[AiMemoryEntry, str]]:
@@ -244,7 +241,7 @@ def personal_entries(db: Session, user: User) -> list[tuple[AiMemoryEntry, str]]
         .order_by(AiMemoryEntry.scope, AiMemoryEntry.server_id, AiMemoryEntry.key)
         .all()
     )
-    return [(row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))) for row in rows]
+    return _entschluesseln_lesbare(rows)
 
 
 def _assert_may_write(
@@ -333,7 +330,23 @@ def upsert_entry(
     action = "ai.memory.updated"
     if row is None:
         if db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity).count() >= MAX_ENTRIES_PER_SCOPE:
-            raise HTTPException(status_code=409, detail="Memory-Scope ist voll")
+            # Die Meldung nennt den offenen Weg, wie jede andere dieses Moduls.
+            # Sie geht unverändert an das Modell (`_execute_remember` reicht
+            # `str(exc.detail)` weiter), und der Systemprompt weist es an,
+            # ungefragt zu merken. Ohne den Hinweis kennt es hier keinen Ausweg
+            # und hört für diesen Bereich schlicht auf zu lernen.
+            #
+            # Verdrängt wird bewusst nichts von selbst: was ein Mensch gesagt
+            # hat, wirft das Panel nicht ungefragt weg. Deshalb ist die Meldung
+            # das Einzige, was sich hier ändert.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Memory-Scope ist voll ({MAX_ENTRIES_PER_SCOPE} Einträge). "
+                    "Suche mit search_memory, was nicht mehr gilt, nenne es dem "
+                    "Benutzer und lösche es mit forget_memory — dann erneut merken."
+                ),
+            )
         row = AiMemoryEntry(
             id=str(uuid4()), owner_user_id=owner_id, server_id=normalized_server_id,
             team_id=normalized_team_id,
@@ -584,12 +597,21 @@ def _embedding_source(key: str, value: str) -> str:
 def refresh_embedding(row: AiMemoryEntry, value: str) -> None:
     """Berechnet den Vektor eines Eintrags neu, falls ein Modell da ist.
 
-    Schlaegt es fehl, bleibt der alte Wert stehen und der Eintrag wird eben
-    ohne Bedeutungsanteil bewertet. Ein Gedaechtniseintrag darf nicht daran
+    Schlägt es fehl, wird ein alter Vektor **verworfen** und der Eintrag eben
+    ohne Bedeutungsanteil bewertet. Ein Gedächtniseintrag darf nicht daran
     scheitern, dass ein Modell fehlt.
+
+    Das Verwerfen ist der Punkt: bliebe der alte Vektor stehen, beschriebe er
+    dauerhaft den *alten* Text. Ein von "Minecraft" auf "Factorio" berichtigter
+    Eintrag würde bei knappem Platz weiterhin für Minecraft-Fragen hochgezogen —
+    und nichts rechnet ihn je nach, denn `upsert_entry` ist der einzige Aufrufer
+    und eine Nachberechnung gibt es für das Gedächtnis nicht. ``None`` heißt
+    laut Modell "noch nicht berechnet"; `_stored_vector` kommt damit zurecht.
     """
     vectors = ai_embedding_service.encode([_embedding_source(row.key, value)])
     if not vectors:
+        row.embedding_json = None
+        row.embedding_model = None
         return
     row.embedding_json = json.dumps(vectors[0], separators=(",", ":"))
     row.embedding_model = _EMBEDDING_MODEL_TAG
@@ -683,12 +705,30 @@ def _visible_scope_rows(
         or_(*conditions)
     ).order_by(AiMemoryEntry.scope, AiMemoryEntry.key).all()
 
+    # Je Server einmal fragen, nicht je Zeile. Zehn Notizen zu demselben Server
+    # stellten bisher zehnmal dieselbe Frage, und die ist nicht billig:
+    # `has_server_permission` lädt Rollen, Rollenrechte und Serverrechte und
+    # fällt bei einem Teammitglied zusätzlich in einen Dreifach-Join. Die
+    # Antwort kann sich innerhalb dieses Aufrufs nicht ändern — `db`, `user`
+    # und `key` sind konstant.
+    #
+    # **Die Lebensdauer ist die Bedingung.** Dieses Wörterbuch lebt genau so
+    # lange wie der Funktionsrumpf. Eine Rechteantwort, die eine Anfrage
+    # überlebt, wäre kein schnellerer Aufruf mehr, sondern ein entzogenes
+    # Recht, das noch eine Weile weiterwirkt.
+    geprueft: dict[int, bool] = {}
     visible: list[AiMemoryEntry] = []
     for row in rows:
         if row.scope in ("server", "server_shared"):
-            if row.server_id is None or not permission_service.has_server_permission(
-                db=db, user=user, server_id=row.server_id, key="server.view"
-            ):
+            if row.server_id is None:
+                continue
+            erlaubt = geprueft.get(row.server_id)
+            if erlaubt is None:
+                erlaubt = permission_service.has_server_permission(
+                    db=db, user=user, server_id=row.server_id, key="server.view"
+                )
+                geprueft[row.server_id] = erlaubt
+            if not erlaubt:
                 continue
         visible.append(row)
     return visible
@@ -720,6 +760,39 @@ def _entschluesseln(rows: list[AiMemoryEntry]) -> list[tuple[AiMemoryEntry, str]
         except DisSidecarError as exc:
             logger.warning(
                 "Gedaechtniseintrag %s (%s) nicht lesbar, wird uebersprungen: %s",
+                row.id, row.scope, type(exc).__name__,
+            )
+    return entschluesselt
+
+
+def _entschluesseln_lesbare(rows: list[AiMemoryEntry]) -> list[tuple[AiMemoryEntry, str]]:
+    """Wie `_entschluesseln`, aber für die Verwaltungsansicht.
+
+    Der Unterschied zum Helfer darüber ist **genau eine Ausnahmeklasse**, und er
+    ist Absicht:
+
+    - `DisDecryptionError` — diese eine Zeile lässt sich nicht mehr öffnen
+      (verdrehte AAD, gewechselter Schlüssel). Sie fällt still heraus, die
+      übrigen bleiben sichtbar. Vorher nahm ein einziger solcher Eintrag die
+      ganze Seite mit: der Router übersetzt ihn zu 503, und der Benutzer sah
+      unter Profil > Memory dauerhaft "Memory ist nicht verfügbar" — auch für
+      die vierzig intakten Einträge daneben, während der Chat sie unauffällig
+      weiterbenutzte.
+    - `DisSidecarError` — der Sidecar antwortet gar nicht. Der läuft bewusst
+      **weiter** bis zum Router und wird dort zu einem ehrlichen 503. Finge man
+      ihn hier mit, zeigte die Verwaltungsansicht eine leere Liste: das
+      Gedächtnis wäre angeblich leer, während jedes Schreiben scheitert.
+
+    Der Chatweg (`_entschluesseln`) wählt genau andersherum, und aus demselben
+    Grund: dort ist ein Assistent ohne Gedächtnis besser als gar keiner.
+    """
+    entschluesselt: list[tuple[AiMemoryEntry, str]] = []
+    for row in rows:
+        try:
+            entschluesselt.append((row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))))
+        except DisDecryptionError as exc:
+            logger.warning(
+                "Gedächtniseintrag %s (%s) nicht lesbar, wird übersprungen: %s",
                 row.id, row.scope, type(exc).__name__,
             )
     return entschluesselt

@@ -10,6 +10,7 @@ interface ToastState {
   toasts: Toast[]
   addToast: (message: string, type?: 'error' | 'success') => void
   removeToast: (id: number) => void
+  clearAll: () => void
 }
 
 let _nextId = 0
@@ -29,6 +30,11 @@ export const useToastStore = create<ToastState>((set, get) => ({
     }
   },
   removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+
+  // Für das Ende einer Sitzung. Der Stapel hängt an keiner Seite, sondern am
+  // Wurzelelement der Anwendung: eine Meldung wie „Server prod-eu-1 gestoppt"
+  // stünde sonst nach dem Abmelden weiter über der Anmeldeseite.
+  clearAll: () => set({ toasts: [] }),
 }))
 
 export const toast = {

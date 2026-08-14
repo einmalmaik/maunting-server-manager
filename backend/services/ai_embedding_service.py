@@ -40,6 +40,14 @@ logger = logging.getLogger(__name__)
 # gespeicherter Vektor erkennbar nicht mehr zum geladenen Modell passt.
 EMBEDDING_DIMENSIONS = 256
 
+# Kennung des Modells, mit dem ein gespeicherter Vektor entstanden ist. Wechselt
+# der Betreiber das Modell, passen alte Vektoren nicht mehr — sie werden dann
+# ignoriert statt falsche Ähnlichkeiten zu liefern. Sie steht hier und nicht in
+# den beiden Diensten, die sie brauchen: Gedächtnis und Fertigkeiten lasen die
+# Kennung früher je als eigenes Literal, und wer eines davon beim Modellwechsel
+# übersieht, bekommt in genau einem der beiden Bereiche stille Falschtreffer.
+MODEL_TAG = "potion-multilingual-128M"
+
 _lock = threading.Lock()
 _model = None
 _load_failed = False

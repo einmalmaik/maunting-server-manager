@@ -8,7 +8,7 @@ Drei Zusagen, und jede hat einen gemessenen Fehlschlag hinter sich:
 * **Der autonome Modus steht im Kontext.** Er wurde bisher nur *innerhalb* der
   Werkzeugausführung geprüft. Das Modell sollte trotzdem eine Aussage darüber
   treffen — und behauptete dreimal, die Freigabe fehle, während sie erteilt war.
-* **Eine unbekannte Zeitzone heisst „unbekannt“.** Genau deshalb darf
+* **Eine unbekannte Zeitzone heißt „unbekannt“.** Genau deshalb darf
   `zone_pruefen` streng bleiben: eine Annahme, die das Modell kennt, kann es
   hinterfragen.
 """
@@ -177,7 +177,7 @@ def test_der_autonome_modus_steht_so_im_block_wie_darf_handeln_ihn_liest(
 
 
 def test_eine_abgeschaltete_freigabe_ist_keine(db: Session) -> None:
-    """Dieselbe Lesart wie in `darf_handeln`: `enabled=False` heisst nichts."""
+    """Dieselbe Lesart wie in `darf_handeln`: `enabled=False` heißt nichts."""
     user = _benutzer(db, "freigabeaus", "ai.chat.use", "ai.autonomous.use")
     _freigabe(db, user, an=False)
 

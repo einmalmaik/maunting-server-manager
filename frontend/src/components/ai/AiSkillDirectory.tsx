@@ -87,6 +87,9 @@ export function AiSkillDirectory() {
           >
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium text-on-surface">{skill.name}</span>
+              {/* Der Schlüssel ist der einzige Weg, einen mitgelieferten Skill zu
+                  ersetzen — ohne ihn müsste man ihn raten. */}
+              <span className="font-mono text-[11px] text-on-surface-variant">{skill.skill_key}</span>
               <span className="rounded-full border border-outline-variant/40 px-2 py-0.5 text-[10px] uppercase tracking-wider text-on-surface-variant">
                 {herkunft(skill)}
               </span>
@@ -98,6 +101,9 @@ export function AiSkillDirectory() {
               )}
             </div>
             <p className="mt-1 text-xs leading-5 text-on-surface-variant">{skill.description}</p>
+            {skill.scope === 'shipped' && (
+              <p className="mt-1 text-xs leading-5 text-on-surface-variant/80">{t('ai.skills.readOnly')}</p>
+            )}
           </li>
         ))}
         {sichtbar.length === 0 && (

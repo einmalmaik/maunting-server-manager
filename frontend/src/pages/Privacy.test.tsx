@@ -1,9 +1,26 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Outlet } from 'react-router-dom';
 import { Privacy } from './Privacy';
+import App from '@/App';
 import { useAuthStore } from '@/stores/authStore';
 import i18n from '@/i18n';
+
+// Die Shell zieht das halbe Panel nach — für diese Zusicherung zählt nur, DASS
+// sie gerendert wird, nicht was in ihr steht.
+vi.mock('@/components/layout/Shell', () => ({
+  Shell: () => (
+    <div data-testid="shell">
+      <Outlet />
+    </div>
+  ),
+}));
+
+const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
+vi.mock('@/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/client')>()),
+  api: apiMock,
+}));
 
 function renderPrivacy() {
   return render(
@@ -151,6 +168,55 @@ describe('Privacy page', () => {
     // Ausdruecklich als Zahl festgehalten: neun Punkte vor der
     // Guardian-Kopplung, zehn danach, elf seit den stehenden KI-Aufgaben.
     expect(gerendert).toHaveLength(11);
+  });
+});
+
+/**
+ * /privacy ist die einzige Seite, die es zweimal gibt: einmal öffentlich neben
+ * den Anmeldeformularen und einmal innerhalb der Shell. Welche der beiden ein
+ * harter Reload trifft, hängt allein daran, ob der Anmeldezustand zu diesem
+ * Zeitpunkt schon geladen wurde — und die statische Route gewinnt gegen das
+ * Splat, ProtectedRoute mountet also nie. Ohne einen eigenen Anstoß in App
+ * bliebe ein angemeldeter Benutzer dauerhaft auf der öffentlichen Fassung
+ * sitzen, ohne Navigation und mit einem Zurück-Knopf aufs Anmeldeformular.
+ */
+describe('Privacy nach hartem Reload', () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('de');
+    apiMock.mockReset();
+    useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: true });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ setup_required: false, email_configured: true }),
+      })),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('zeigt einem angemeldeten Benutzer das Panel statt der öffentlichen Fassung', async () => {
+    apiMock.mockImplementation(async (path: string) => {
+      if (path === '/auth/me') {
+        return { id: 1, username: 'admin', email: 'admin@example.test' };
+      }
+      return { permissions: [], is_owner: false };
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/privacy']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('shell')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: new RegExp(i18n.t('common.back')) })).toHaveAttribute(
+      'href',
+      '/docs',
+    );
   });
 });
 

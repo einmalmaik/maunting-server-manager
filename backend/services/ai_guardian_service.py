@@ -427,6 +427,9 @@ async def heilungslauf_starten(
         # gerade arbeitet — und markierte ihn dabei als besprochen, obwohl ihn
         # kein Mensch gesehen hat.
         guardian_briefing_unterdruecken=True,
+        # Niemand sitzt davor: kein Skill-Verzeichnis im Systemprompt, denn
+        # `GUARDIAN_HEILUNG_TOOLS` bietet kein `read_skill` an.
+        unbeaufsichtigt=True,
     )
     if run is None:
         # Kontingent erschoepft, Schluessel nicht lesbar, Anfragekonflikt. Alles

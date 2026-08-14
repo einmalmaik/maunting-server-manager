@@ -51,7 +51,7 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         name=provider.name,
         provider_kind=provider.provider_kind,
         # Abgeleitet, nicht gespeichert — eine Kopie in der Zeile wuerde nach
-        # einer Aenderung an der Registry still veralten. ``None``, wenn diese
+        # einer Änderung an der Registry still veralten. ``None``, wenn diese
         # Version den Anbieter nicht kennt: genau solche Zeilen parkt die
         # Migration mit leerem `provider_kind`, und der Betreiber muss sie
         # sehen können, um sie umzustellen oder zu löschen.

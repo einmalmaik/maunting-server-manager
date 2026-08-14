@@ -702,6 +702,72 @@ def test_a_proposal_rewritten_after_confirmation_fails_on_execution(
     assert danach.error_code == "AI_ACTION_TOOL_NOT_ALLOWED"
 
 
+# ── Der erste Schritt des Heilungslaufs muss überhaupt laufen ─────────────
+
+
+def test_reading_the_incidents_returns_the_agents_attempts(db: Session, lage: Lage) -> None:
+    """`read_guardian_incidents` liest die Versuche, statt den Lauf abzureißen.
+
+    `_vorfall_versuche` ruft `json.loads`, und `json` war in `ai_action_service`
+    nie importiert. Das `except (TypeError, ValueError)` darunter fängt kein
+    `NameError`, und `_werkzeug_ausfuehren` fängt nur
+    `AiActionValidationError` — jeder Aufruf auf einem Vorfall mit gesetztem
+    `attempts` riss also den ganzen Lauf ab.
+
+    Der Kurzschluss `if attempts_json` half nicht: `guardian_incident_service`
+    setzt das Feld immer per `json.dumps`, also mindestens auf `"[]"`.
+
+    Getroffen hat es ausgerechnet den unbeaufsichtigten Heilungslauf. Dort steht
+    das Werkzeug in `GUARDIAN_HEILUNG_TOOLS` und ist der erste Schritt: sehen,
+    was los ist und was der Agent schon versucht hat.
+    """
+    lage.vorfall.attempts = json.dumps([
+        {"attempt": 1, "stage": "restart", "action": "container_restart",
+         "at": "2026-08-14T10:00:00+00:00", "result": "failed"},
+        # Ein Feld, das die Engine später ergänzen könnte: es darf nicht
+        # ungefragt an einen Modellanbieter gehen.
+        {"attempt": 2, "stage": "reinstall", "result": "failed", "intern": "geheim"},
+    ])
+    db.commit()
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db,
+        user=lage.user,
+        tool_name="read_guardian_incidents",
+        arguments={"server_id": lage.a.id},
+    )
+
+    vorfall = next(
+        eintrag for eintrag in ergebnis["incidents"] if eintrag["id"] == lage.vorfall.id
+    )
+    assert [v["attempt"] for v in vorfall["attempts"]] == [1, 2]
+    assert vorfall["attempts"][0]["action"] == "container_restart"
+    assert "intern" not in vorfall["attempts"][1]
+
+
+def test_unreadable_attempts_stay_an_empty_list(db: Session, lage: Lage) -> None:
+    """Kaputtes JSON am Vorfall ist eine leere Liste, kein Absturz.
+
+    Der Inhalt kommt vom Agenten. Die Zusage des Docstrings von
+    `_vorfall_versuche` war bisher nicht prüfbar, weil schon der gute Fall
+    abstürzte.
+    """
+    lage.vorfall.attempts = "{kein json"
+    db.commit()
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db,
+        user=lage.user,
+        tool_name="read_guardian_incidents",
+        arguments={"server_id": lage.a.id},
+    )
+
+    vorfall = next(
+        eintrag for eintrag in ergebnis["incidents"] if eintrag["id"] == lage.vorfall.id
+    )
+    assert vorfall["attempts"] == []
+
+
 # ── Randbefund: dieselbe Bindung auf der Leseseite ────────────────────────
 
 
@@ -740,3 +806,53 @@ async def test_a_bogus_server_id_in_a_run_is_a_refusal_not_a_crash(genannt) -> N
             ],
             guardian=kontext,
         )
+
+
+@pytest.mark.asyncio
+async def test_a_read_tool_outside_the_set_costs_a_round_not_the_healing(
+    db: Session, lage: Lage
+) -> None:
+    """Ein nicht angebotenes Lesewerkzeug reißt die Heilung nicht mehr ab.
+
+    `read_skill` liegt in den Lesewerkzeugen und kommt deshalb an der
+    Sequenzprüfung vorbei; in `GUARDIAN_HEILUNG_TOOLS` steht es nicht. Der
+    Systemprompt bewarb es einmal wörtlich — das Skill-Verzeichnis ist aus
+    einem Lauf ohne Zuschauer inzwischen weg, aber ein Modell kann jedes
+    Werkzeug nennen, das es aus dem Training oder dem Verlauf kennt. Früher
+    verließ hier eine Ausnahme die Funktion, wurde im Fehlerbehandler des
+    Segments zu `AI_TOOL_REJECTED` und beendete den Heilungslauf mit 'failed'
+    — der gestörte Server blieb stehen, die Vorfallsnotiz war längst
+    committet, und der Betreiber bekam eine Mail ohne Diagnose.
+
+    Abgewiesen wird jetzt wie eine Rückfrage ohne Zuhörer: als
+    Werkzeugergebnis. Die Menge bleibt unverändert scharf — ausgeführt wird
+    nichts, und der erlaubte Aufruf derselben Runde läuft trotzdem.
+    """
+    from services.ai_stream_service import _tool_followup_messages
+    from services.openai_compatible_adapter import ProviderToolCall
+
+    assert "read_skill" not in GUARDIAN_HEILUNG_TOOLS
+    assert "read_server_status" in GUARDIAN_HEILUNG_TOOLS
+
+    nachrichten, benutzt, _ = await _tool_followup_messages(
+        user_id=lage.user.id,
+        conversation_id=lage.conversation.id,
+        tool_calls=[
+            ProviderToolCall(id="s1", name="read_skill",
+                             arguments={"skill_key": "portkonflikt"}),
+            ProviderToolCall(id="s2", name="read_server_status",
+                             arguments={"server_id": lage.a.id}),
+        ],
+        guardian=lage.kontext,
+    )
+
+    # Das Protokoll verlangt zu jeder tool_call_id genau ein Ergebnis.
+    antworten = {
+        nachricht["tool_call_id"]: json.loads(nachricht["content"])
+        for nachricht in nachrichten if nachricht.get("role") == "tool"
+    }
+    assert set(antworten) == {"s1", "s2"}
+    assert antworten["s1"]["executed"] is False
+    assert "Guardian-Heilung" in antworten["s1"]["reason"]
+    # Gelaufen ist allein das erlaubte Werkzeug.
+    assert {eintrag["tool_name"] for eintrag in benutzt} == {"read_server_status"}

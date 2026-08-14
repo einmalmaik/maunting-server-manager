@@ -7,7 +7,7 @@ Testet die Root-Cause des False-Positive-Update-Banners:
 - Korrekte numerische Reihenfolge statt String-Vergleich
 
 Dazu der Zwischenspeicher des GitHub-Release-Checks: die Fusszeile fragt
-/version bei jedem Seitenaufbau ab, der Netzaufruf darf hoechstens einmal
+/version bei jedem Seitenaufbau ab, der Netzaufruf darf höchstens einmal
 pro TTL stattfinden.
 """
 import httpx
@@ -128,7 +128,7 @@ class TestEndToEndScenarios:
 
 
 class _FakeResponse:
-    """Minimale httpx-Antwort fuer den gemockten Release-Aufruf."""
+    """Minimale httpx-Antwort für den gemockten Release-Aufruf."""
 
     def __init__(self, status_code: int, payload: dict):
         self.status_code = status_code
@@ -145,7 +145,7 @@ def leerer_release_cache(monkeypatch):
 
 
 class TestReleaseCache:
-    """_get_latest_release ruft GitHub hoechstens einmal pro TTL an."""
+    """_get_latest_release ruft GitHub höchstens einmal pro TTL an."""
 
     def test_zweiter_aufruf_geht_nicht_ins_netz(self, monkeypatch, leerer_release_cache):
         aufrufe = []
@@ -173,7 +173,7 @@ class TestReleaseCache:
         monkeypatch.setattr(httpx, "get", fake_get)
 
         system_router._get_latest_release()
-        # Zeitstempel kuenstlich altern lassen (aelter als die TTL).
+        # Zeitstempel künstlich altern lassen (älter als die TTL).
         ts, daten = system_router._GITHUB_RELEASE_CACHE
         system_router._GITHUB_RELEASE_CACHE = (
             ts - system_router._GITHUB_RELEASE_CACHE_TTL_SECONDS - 1,

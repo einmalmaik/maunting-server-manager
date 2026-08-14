@@ -1,9 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DatabaseConsole, buildRowKeyConditions, type DatabaseConsoleProps } from './DatabaseConsole'
+import i18n from '@/i18n'
 import { useAuthStore } from '@/stores/authStore'
-import type { PostgresTableInfo } from '@/types'
+import type { PostgresTable, PostgresTableInfo } from '@/types'
 
 // Der Store zieht den API-Client mit; die Konsole ruft im Test nichts davon auf.
 vi.mock('@/api/client', () => ({
@@ -57,8 +58,9 @@ function oeffneKonsole(props: Partial<DatabaseConsoleProps> = {}) {
 }
 
 describe('DatabaseConsole — Abfrageverlauf', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     localStorage.clear()
+    await i18n.changeLanguage('de')
   })
 
   it('zeigt dem nächsten Benutzer am selben Rechner nicht die Abfragen des vorigen', () => {
@@ -100,9 +102,10 @@ describe('DatabaseConsole — Abfrageverlauf', () => {
 })
 
 describe('DatabaseConsole — Dialoge am Tastenbrett', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     localStorage.clear()
     meldeAn(1)
+    await i18n.changeLanguage('de')
   })
 
   it('kündigt den Favoritendialog als Dialog an', () => {
@@ -123,6 +126,67 @@ describe('DatabaseConsole — Dialoge am Tastenbrett', () => {
 
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(document.activeElement).toBe(ausloeser)
+  })
+
+  /**
+   * Der Schließen-Knopf besteht nur aus einem Kreuz. Ohne eigenen Namen sagt ein
+   * Screenreader an dieser Stelle „Schaltfläche" und sonst nichts — der Weg aus
+   * dem Dialog ist damit nur für den sichtbar, der ihn sieht.
+   */
+  it('gibt dem Schließen-Knopf des Favoritendialogs einen vorlesbaren Namen', () => {
+    oeffneKonsole()
+    fireEvent.click(screen.getByRole('button', { name: 'Favorit speichern' }))
+
+    expect(screen.getByRole('button', { name: 'Schließen' })).toBeInTheDocument()
+  })
+})
+
+/**
+ * Die Konsole war vollständig auf Deutsch verdrahtet — rund vierzig Literale im
+ * Quelltext, kein einziger `t()`-Aufruf. Wer die Oberfläche auf Englisch stellt,
+ * las damit ausgerechnet an der unwiderruflichen Stelle Deutsch: „Löschen" und
+ * den Bestätigungsdialog dazu. Diese Tests halten fest, dass die sichtbaren
+ * Texte aus der Sprachdatei kommen und nicht aus dem Quelltext.
+ */
+describe('DatabaseConsole — Sprachwahl', () => {
+  const TABELLE: PostgresTable = { schema: 'public', name: 'spieler', row_estimate: 1 }
+
+  beforeEach(async () => {
+    localStorage.clear()
+    meldeAn(1)
+    await i18n.changeLanguage('en')
+  })
+
+  afterEach(async () => {
+    await i18n.changeLanguage('de')
+  })
+
+  it('beschriftet die Reiter in der gewählten Sprache', () => {
+    render(<DatabaseConsole {...basisProps} onCreateUser={() => undefined} />)
+
+    expect(screen.getByRole('button', { name: 'Tables' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'SQL console' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Users' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Tabellen' })).toBeNull()
+  })
+
+  it('führt den Löschdialog in der gewählten Sprache', () => {
+    render(
+      <DatabaseConsole
+        {...basisProps}
+        selectedTable={TABELLE}
+        rows={{ columns: ['id'], rows: [{ id: 1 }] }}
+        onDeleteRows={() => undefined}
+      />,
+    )
+
+    // Das erste Häkchen wählt alle Zeilen aus, das zweite gehört zur ersten Zeile.
+    fireEvent.click(screen.getAllByRole('checkbox')[1])
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+    expect(screen.getByRole('heading', { name: 'Delete row(s)' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete permanently' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
   })
 })
 

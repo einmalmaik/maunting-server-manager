@@ -1,13 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, BookOpen, Bot, Brain, BrainCircuit, CalendarClock, Check, ChevronDown, ChevronRight, Loader2, Paperclip, Pencil, Send, Sparkles, Trash2, User, Wrench, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
 import {
-  AI_RUHENDE_LAUFZUSTAENDE,
   aiApi,
-  attachAiRun,
-  streamAiMessage,
   type AiActionProposal,
   type AiAttachment,
   type AiContextStatus,
@@ -15,7 +12,6 @@ import {
   type AiProviderAvailable,
   type AiRunInfo,
   type AiSection,
-  type AiStreamEvent,
   type AiToolUse,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
@@ -37,62 +33,8 @@ import { AiMarkdown } from './AiMarkdown'
 import { AiMemoryNotice } from './AiMemoryNotice'
 import { AiQuestionCard } from './AiQuestionCard'
 import { AiReasoningBlock } from './AiReasoningBlock'
+import { useAiLauf, type Entry } from './useAiLauf'
 import { useHasPermission } from '@/hooks/useHasPermission'
-
-/** Ein Eintrag im sichtbaren Verlauf — chronologisch, nicht nach Typ sortiert. */
-type Entry =
-  | { kind: 'message'; id: string; message: AiMessage }
-  // Marke fuer das Falten des aelteren Verlaufs. Ohne sichtbaren Hinweis
-  // wuerde die KI spaeter Dinge "vergessen", ohne dass jemand weiss warum.
-  | { kind: 'compacted'; id: string }
-  | { kind: 'proposal'; id: string; proposal: AiActionProposal }
-
-// Hier stand ein `{ kind: 'tool' }` als **eigener** Verlaufseintrag, den
-// `insertBeforeStreaming` vor die noch schreibende Blase schob. Das stimmte
-// genau solange, wie die KI erst alle Werkzeuge rief und danach redete: dann
-// gehoerte alles davor. Seit sie waehrend der Arbeit spricht, gehoert ein
-// Werkzeug **zwischen** zwei Absaetze derselben Antwort — und damit in die
-// Nachricht, nicht daneben. Ein eigener Eintrag koennte diese Stelle nicht
-// benennen.
-
-/** Haengt Text an den letzten Textabschnitt an — oder faengt einen neuen an. */
-function mitText(abschnitte: AiSection[] | null | undefined, stueck: string): AiSection[] {
-  const bisher = abschnitte ?? []
-  const letzter = bisher[bisher.length - 1]
-  if (letzter?.art === 'text') {
-    return [
-      ...bisher.slice(0, -1),
-      { ...letzter, inhalt: (letzter.inhalt ?? '') + stueck },
-    ]
-  }
-  return [...bisher, { art: 'text', inhalt: stueck }]
-}
-
-function mitWerkzeug(
-  abschnitte: AiSection[] | null | undefined, werkzeug: AiToolUse,
-): AiSection[] {
-  return [...(abschnitte ?? []), { art: 'tool', werkzeug }]
-}
-
-/**
- * Dasselbe für den Denktext — anhängen, solange gedacht wird.
- *
- * Er lief früher in ein flaches Feld neben den Abschnitten. Damit gab es nur
- * eine mögliche Stelle, ihn zu zeichnen: ganz oben. Die Gedanken der dritten
- * Runde standen dann über dem Text der ersten, der dort seit zwölf Sekunden
- * stand.
- */
-function mitDenken(abschnitte: AiSection[] | null | undefined, stueck: string): AiSection[] {
-  const bisher = abschnitte ?? []
-  const letzter = bisher[bisher.length - 1]
-  if (letzter?.art === 'denken') {
-    return [
-      ...bisher.slice(0, -1),
-      { ...letzter, inhalt: (letzter.inhalt ?? '') + stueck },
-    ]
-  }
-  return [...bisher, { art: 'denken', inhalt: stueck }]
-}
 
 /** Ein gezeichneter Block: ein Absatz, ein Denkkasten oder eine Werkzeuggruppe. */
 type Teil =
@@ -233,7 +175,6 @@ export function AiChat() {
 
   const [providers, setProviders] = useState<AiProviderAvailable[]>([])
   const [providerId, setProviderId] = useState<number | null>(null)
-  const [entries, setEntries] = useState<Entry[]>([])
   const [attachments, setAttachments] = useState<AiAttachment[]>([])
   const [servers, setServers] = useState<ServerOption[]>([])
   // Zwei Felder, genau wie auf der Leitung und in `ai_runs`: **ob** nachgedacht
@@ -257,34 +198,31 @@ export function AiChat() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
   const [loading, setLoading] = useState(true)
-  const [streaming, setStreaming] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [dragging, setDragging] = useState(false)
-  // Der Lauf, der gerade noch etwas vorhat. Er ueberlebt diese Komponente —
-  // wir merken ihn uns nur, um uns wieder anhaengen zu koennen.
-  const [runId, setRunId] = useState<string | null>(null)
   // Was beim Oeffnen schon lief. Wird in einem eigenen Effekt angehaengt, weil
   // das Anhaengen erst gehen kann, wenn die Verarbeitung steht.
   const [laufBeimOeffnen, setLaufBeimOeffnen] = useState<AiRunInfo | null>(null)
   // Wie voll der Kontext ist. `null` heisst „noch nicht geladen oder nicht
   // abrufbar“ — der Ring bleibt dann schlicht weg.
   const [contextStatus, setContextStatus] = useState<AiContextStatus | null>(null)
+  // Steht der Verlauf unten? Nur dann wird nachgeschoben. Anfangs ja — ein
+  // frisch geöffneter Chat zeigt die letzte Nachricht.
+  const [amEnde, setAmEnde] = useState(true)
 
-  const abortRef = useRef<AbortController | null>(null)
-  // `streaming` ist Zustand und damit fuer die Ereignisschleife zu spaet: zwei
-  // Anhaengeversuche kurz hintereinander saehen beide noch `false`.
-  const streamingRef = useRef(false)
-  const endRef = useRef<HTMLDivElement | null>(null)
+  const verlaufRef = useRef<HTMLDivElement | null>(null)
   const mountedRef = useRef(true)
   const dragDepthRef = useRef(0)
+  // Welches Modell **jetzt** gewählt ist. `ladeKontext` braucht das, um eine
+  // Antwort zu erkennen, die zu einer älteren Wahl gehört. Zuweisung beim
+  // Render, dasselbe Muster wie `autoscrollRef` in ServerConsolePanel.
+  const providerRef = useRef<number | null>(null)
+  providerRef.current = providerId
 
   useEffect(() => {
     // StrictMode fuehrt Setup/Cleanup in Entwicklung absichtlich doppelt aus.
     mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-      abortRef.current?.abort()
-    }
+    return () => { mountedRef.current = false }
   }, [])
 
   useEffect(() => {
@@ -294,7 +232,13 @@ export function AiChat() {
       aiApi.getConversation(),
       aiApi.listActions(),
       canAttach ? aiApi.listAttachments() : Promise.resolve([] as AiAttachment[]),
-      api<ServerOption[]>('/servers').catch(() => [] as ServerOption[]),
+      // Nur für den Autonomie-Knopf, und nur dort wird die Liste gebraucht.
+      // Ohne das Recht holte jedes Öffnen der Seite alle sichtbaren Server
+      // samt Bind-IP, Spiel-, Query- und RCON-Port in den Browser — für eine
+      // Auswahlliste, die gar nicht gezeichnet wird.
+      canUseAutonomy
+        ? api<ServerOption[]>('/servers').catch(() => [] as ServerOption[])
+        : Promise.resolve([] as ServerOption[]),
       // Scheitert der Abruf, wird der Hinweis nicht gezeigt statt den ganzen
       // Chat scheitern zu lassen — er ist wichtig, aber nicht so wichtig.
       canUseMemory
@@ -326,11 +270,7 @@ export function AiChat() {
     return () => {
       active = false
     }
-  }, [canAttach, canUseMemory, merkSchluessel.provider, t])
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'nearest' })
-  }, [entries])
+  }, [canAttach, canUseAutonomy, canUseMemory, merkSchluessel.provider, t])
 
   /**
    * Die Zahlen hinter dem Ring — abhaengig vom **Modell**, nicht nur vom Chat.
@@ -346,7 +286,12 @@ export function AiChat() {
     }
     try {
       const status = await aiApi.getContextStatus(providerId)
-      if (mountedRef.current) setContextStatus(status)
+      // Nur übernehmen, wenn die Wahl seither dieselbe geblieben ist. Zwei
+      // Modellwechsel kurz hintereinander können sich überholen — die Auskunft
+      // ist bei kaltem Modellkatalog ein externer Abruf. Der Ring zeigte dann
+      // das Fenster des ersten Modells für das zweite an, und genau daran
+      // liest der Benutzer ab, wann gefaltet wird.
+      if (mountedRef.current && providerRef.current === providerId) setContextStatus(status)
     } catch {
       // Der Ring ist eine Zusatzauskunft. Faellt sie aus, verschwindet er —
       // ein Fehlertoast fuer eine Anzeige waere laestiger als die fehlende Zahl.
@@ -355,6 +300,32 @@ export function AiChat() {
   }, [providerId])
 
   useEffect(() => { void ladeKontext() }, [ladeKontext])
+
+  /**
+   * Der Lauf und sein Ereignisstrom — der Verlauf entsteht dort, nicht hier.
+   *
+   * Diese Komponente bleibt für das zuständig, was man sieht und bedient:
+   * Modellwahl, Denktiefe, Anhänge, Bearbeiten, Zeichnen. Wie aus dreizehn
+   * Ereignisarten ein Verlauf wird, steht in `useAiLauf` und lässt sich dort
+   * ohne gerendertes Bauteil prüfen.
+   */
+  const {
+    entries, setEntries, streaming, runId, setRunId,
+    merkeVorschlag, sendContent, haengeAn,
+  } = useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttachments })
+
+  /**
+   * Nachschieben — aber nur, solange der Verlauf unten steht.
+   *
+   * Vorher zog jedes Textstück die Ansicht ans Ende. Wer während einer langen
+   * Antwort hochscrollte, um einen früheren Absatz oder eine Werkzeugzeile zu
+   * lesen, wurde vom nächsten Stück sofort zurückgerissen. Dasselbe Muster
+   * steht in `ServerConsolePanel`.
+   */
+  useEffect(() => {
+    const kasten = verlaufRef.current
+    if (kasten && amEnde) kasten.scrollTop = kasten.scrollHeight
+  }, [amEnde, entries])
 
   const availableProviders = useMemo(
     () => providers.filter((provider) => provider.available),
@@ -501,326 +472,6 @@ export function AiChat() {
     await sendContent(content)
   }
 
-  /** Aendert genau eine Nachricht im Verlauf. */
-  const aendere = useCallback((id: string, update: (message: AiMessage) => AiMessage) => {
-    setEntries((current) => current.map((entry) => (
-      entry.kind === 'message' && entry.id === id
-        ? { ...entry, message: update(entry.message) }
-        : entry
-    )))
-  }, [])
-
-  const merkeVorschlag = useCallback((proposal: AiActionProposal) => {
-    setEntries((current) => (
-      current.some((entry) => entry.kind === 'proposal' && entry.id === proposal.id)
-        ? current.map((entry) => (
-            entry.kind === 'proposal' && entry.id === proposal.id
-              ? { ...entry, proposal }
-              : entry
-          ))
-        : [...current, { kind: 'proposal', id: proposal.id, proposal }]
-    ))
-  }, [])
-
-  /**
-   * Baut den Ereignisverarbeiter eines Laufs.
-   *
-   * Bewusst **einer** fuer beide Wege — frisch gesendet und nachtraeglich
-   * angehaengt. Zwei Verarbeiter waeren zwei Wahrheiten darueber, wie ein Lauf
-   * aussieht, und genau daran bricht so etwas spaeter.
-   *
-   * `optimistischeId` ist die Blase, die beim Senden schon steht, bevor der
-   * Server seine eigene ID vergeben hat. Beim Anhaengen gibt es sie nicht.
-   */
-  const machVerarbeiter = useCallback((
-    optimistischeId: string | null,
-    optimistischeBenutzerId: string | null = null,
-  ) => {
-    let aktuell: string | null = optimistischeId
-    let offeneOptimistische = optimistischeId !== null
-    let offeneBenutzerblase = optimistischeBenutzerId
-    let gescheitert = false
-    // Hier wurden einmal Kennungen für Werkzeugzeilen vergeben, damit eine live
-    // gemeldete Zeile und dieselbe Zeile aus einem späteren Abzug als **eine**
-    // erkannt wurden — sonst stand nach dem Wiederanhängen jede doppelt da.
-    //
-    // Die Frage stellt sich nicht mehr. Werkzeuge sind Abschnitte **innerhalb**
-    // einer Nachricht, und der Abzug bringt die Abschnittsliste vollständig mit:
-    // sie wird gesetzt, nicht angehängt. Eine Dublette kann so nicht entstehen,
-    // und es gibt nichts abzugleichen.
-
-    const verarbeite = ({ event: name, data }: AiStreamEvent) => {
-      if (!mountedRef.current) return
-      if (name === 'snapshot') {
-        setRunId(data.run_id)
-        // Der Abzug **ersetzt** den Stand, er ergaenzt ihn nicht: er ist die
-        // vollstaendige Antwort bis hierher. Alles anzuhaengen wuerde den Text
-        // verdoppeln, wenn man sich waehrend des Schreibens wieder anhaengt.
-        if (data.message_id) {
-          const laeuft = !AI_RUHENDE_LAUFZUSTAENDE.includes(data.status)
-          const id = data.message_id
-          setEntries((current) => {
-            const vorhanden = current.some(
-              (entry) => entry.kind === 'message' && entry.id === id,
-            )
-            const gesetzt = (message: AiMessage): AiMessage => ({
-              ...message,
-              content: data.content,
-              // Die Gliederung kommt vollstaendig aus dem Abzug — sie **ist**
-              // der Grund, warum es ihn gibt. Vorher brachte er `tools` als
-              // eigene Liste mit, und die Oberflaeche musste raten, wo
-              // dazwischen der Text stand.
-              sections: data.sections,
-              reasoning: data.reasoning || null,
-              question: data.question,
-              status: laeuft ? 'streaming' : 'complete',
-            })
-            if (vorhanden) {
-              return current.map((entry) => (
-                entry.kind === 'message' && entry.id === id
-                  ? { ...entry, message: gesetzt(entry.message) }
-                  : entry
-              ))
-            }
-            return [...current, {
-              kind: 'message',
-              id,
-              message: gesetzt({
-                id, role: 'assistant', content: '', reasoning: null, question: null,
-                status: 'streaming', provider_id: providerId, model: null,
-                created_at: new Date().toISOString(),
-              }),
-            }]
-          })
-          aktuell = id
-          offeneOptimistische = false
-        }
-        data.proposals.forEach(merkeVorschlag)
-        return
-      }
-      if (name === 'run') {
-        const ruht = AI_RUHENDE_LAUFZUSTAENDE.includes(data.status)
-        setRunId(ruht ? null : data.run_id)
-        if (ruht) setStreaming(false)
-        return
-      }
-      if (name === 'segment') {
-        // Eine Fortsetzung schreibt eine **neue** Nachricht. Die naechste
-        // `message` legt sie an; hier wird nur die alte losgelassen.
-        aktuell = null
-        return
-      }
-      if (name === 'message') {
-        // Die Benutzerblase steht optimistisch mit einer erfundenen ID da.
-        // Sie hier zu berichtigen ist keine Kosmetik: die Anhaenge dieser Frage
-        // sind serverseitig an die **echte** Nachricht gebunden und fanden ihre
-        // Blase sonst nie.
-        if (offeneBenutzerblase && data.user_message_id) {
-          const echteId = data.user_message_id
-          const alteId = offeneBenutzerblase
-          setEntries((current) => current.map((entry) => (
-            entry.kind === 'message' && entry.id === alteId
-              ? { ...entry, id: echteId, message: { ...entry.message, id: echteId } }
-              : entry
-          )))
-          offeneBenutzerblase = null
-          // Jetzt tragen die Anhaenge eine Nachricht — nachladen, damit sie aus
-          // der Chipleiste in ihre Blase wandern.
-          if (canAttach) {
-            void aiApi.listAttachments()
-              .then((rows) => { if (mountedRef.current) setAttachments(rows) })
-              .catch(() => undefined)
-          }
-        }
-        if (offeneOptimistische && optimistischeId) {
-          // Ab hier kennt der Server die Nachricht unter seiner eigenen ID.
-          const neueId = data.message_id
-          setEntries((current) => current.map((entry) => (
-            entry.kind === 'message' && entry.id === optimistischeId
-              ? { ...entry, id: neueId, message: { ...entry.message, id: neueId } }
-              : entry
-          )))
-          offeneOptimistische = false
-        } else {
-          const id = data.message_id
-          setEntries((current) => (
-            current.some((entry) => entry.kind === 'message' && entry.id === id)
-              ? current
-              : [...current, {
-                  kind: 'message',
-                  id,
-                  message: {
-                    id, role: 'assistant', content: '', reasoning: null, question: null,
-                    status: 'streaming', provider_id: providerId, model: null,
-                    created_at: new Date().toISOString(),
-                  },
-                }]
-          ))
-        }
-        aktuell = data.message_id
-        return
-      }
-      if (!aktuell && (name === 'delta' || name === 'reasoning' || name === 'question' || name === 'done' || name === 'tool')) {
-        return
-      }
-      if (name === 'delta') {
-        // `content` und `sections` gehen zusammen weiter, weil sie
-        // Verschiedenes sind: der reine Text und seine Gliederung. Die
-        // Gliederung erbt hier ihre eigentliche Aufgabe — ein Werkzeug, das
-        // zwischen zwei Absaetzen lief, trennt sie in zwei Abschnitte.
-        aendere(aktuell!, (message) => ({
-          ...message,
-          content: message.content + data.content,
-          sections: mitText(message.sections, data.content),
-        }))
-      } else if (name === 'reasoning') {
-        // In die Gliederung, an ihre Stelle — nicht in ein flaches Feld
-        // daneben. `message.reasoning` bleibt dabei leer und wird erst durch
-        // einen Abzug gesetzt; gezeichnet wird ohnehin aus den Abschnitten,
-        // und zwei mitgeführte Fassungen desselben Textes liefen früher oder
-        // später auseinander.
-        aendere(aktuell!, (message) => ({
-          ...message, sections: mitDenken(message.sections, data.content),
-        }))
-      } else if (name === 'question') {
-        // Die Frage gehoert an die Antwort, nicht neben sie. Als eigener
-        // Eintrag stand sie frueher VOR der noch leeren Assistentenblase,
-        // unter der dann "Keine Antwort erhalten" erschien.
-        aendere(aktuell!, (message) => ({ ...message, question: data }))
-      } else if (name === 'done') {
-        aendere(aktuell!, (message) => ({ ...message, status: 'complete' }))
-        // Der Zug ist durch: Frage, Antwort und alles Gelesene stehen jetzt im
-        // Kontext. Genau hier hat sich der Fuellstand geaendert.
-        void ladeKontext()
-      } else if (name === 'tool') {
-        // In die laufende Nachricht, an ihr Ende — dorthin, wo der Aufruf
-        // tatsaechlich stattgefunden hat. Eine eigene Kennung braucht es dafuer
-        // nicht mehr: die Stelle in der Liste **ist** die Identitaet, und ein
-        // spaeterer Abzug bringt dieselbe Liste mit. Genau daran krankte die
-        // alte Loesung — sie musste Nummern vergeben, die im Abzug wieder
-        // auftauchen konnten.
-        aendere(aktuell!, (message) => ({
-          ...message, sections: mitWerkzeug(message.sections, data),
-        }))
-      } else if (name === 'compacted') {
-        // Die Marke gehoert an den Anfang: sie beschreibt, was *vorher* war.
-        setEntries((current) => [
-          { kind: 'compacted', id: `compacted-${data.conversation_id}` },
-          ...current.filter((entry) => entry.kind !== 'compacted'),
-        ])
-        // Nach dem Falten ist der Ring die halbe Erklaerung fuer die Zeile
-        // darueber: er faellt sichtbar zurueck.
-        void ladeKontext()
-      } else if (name === 'proposal' || name === 'action') {
-        merkeVorschlag(data)
-      } else if (name === 'error') {
-        gescheitert = true
-        // Der stabile Code sagt konkret, was fehlt (falscher Key, falsches
-        // Modell, falsche Basis-URL). Der allgemeine `message_key` bleibt
-        // nur der Rueckfall fuer Codes ohne eigenen Text.
-        toast.error(t(`ai.errors.codes.${data.code}`, {
-          defaultValue: t(data.message_key, { defaultValue: t('ai.chat.errors.stream') }),
-        }))
-      }
-    }
-    return { verarbeite, istGescheitert: () => gescheitert }
-  }, [aendere, canAttach, ladeKontext, merkeVorschlag, providerId, t])
-
-  /**
-   * Verfolgt einen Lauf, bis er ruht — oder bis der Benutzer weggeht.
-   *
-   * Geht er weg, bricht **nur die Anzeige** ab. Der Lauf arbeitet auf dem
-   * Server weiter; genau das war vorher nicht so.
-   */
-  const verfolge = useCallback(async (
-    beginne: (verarbeite: (event: AiStreamEvent) => void, signal: AbortSignal) => Promise<void>,
-    optimistischeId: string | null,
-    optimistischeBenutzerId: string | null = null,
-  ) => {
-    const controller = new AbortController()
-    abortRef.current = controller
-    const { verarbeite, istGescheitert } = machVerarbeiter(optimistischeId, optimistischeBenutzerId)
-    let abgebrochen = false
-    try {
-      await beginne(verarbeite, controller.signal)
-    } catch (error: unknown) {
-      if (controller.signal.aborted) {
-        abgebrochen = true
-      } else {
-        toast.error(error instanceof SanitizedApiError ? error.message : t('ai.chat.errors.stream'))
-        setEntries((current) => current.map((entry) => (
-          entry.kind === 'message' && entry.message.status === 'streaming'
-            ? { ...entry, message: { ...entry.message, status: 'failed' } }
-            : entry
-        )))
-      }
-    } finally {
-      abortRef.current = null
-      if (mountedRef.current && !abgebrochen) {
-        setStreaming(false)
-        if (istGescheitert()) {
-          setEntries((current) => current.map((entry) => (
-            entry.kind === 'message' && entry.message.status === 'streaming'
-              ? { ...entry, message: { ...entry.message, status: 'failed' } }
-              : entry
-          )))
-        }
-      }
-    }
-  }, [machVerarbeiter, t])
-
-  /** Haengt sich an einen Lauf, der schon arbeitet. */
-  const haengeAn = useCallback(async (id: string) => {
-    if (streamingRef.current) return
-    setStreaming(true)
-    streamingRef.current = true
-    try {
-      await verfolge(
-        (verarbeite, signal) => attachAiRun(id, verarbeite, signal),
-        null,
-      )
-    } finally {
-      streamingRef.current = false
-    }
-  }, [verfolge])
-
-  const sendContent = async (content: string) => {
-    if (!content || !providerId || streaming) return
-
-    const now = new Date().toISOString()
-    const assistantId = crypto.randomUUID()
-    const optimisticUser: AiMessage = {
-      id: crypto.randomUUID(), role: 'user', content, reasoning: null, question: null,
-      status: 'complete', provider_id: null, model: null, created_at: now,
-    }
-    const optimisticAssistant: AiMessage = {
-      id: assistantId, role: 'assistant', content: '', reasoning: null, question: null,
-      status: 'streaming', provider_id: providerId, model: null, created_at: now,
-    }
-    setEntries((current) => [
-      ...current,
-      { kind: 'message', id: optimisticUser.id, message: optimisticUser },
-      { kind: 'message', id: assistantId, message: optimisticAssistant },
-    ])
-    setStreaming(true)
-    streamingRef.current = true
-    try {
-      await verfolge(
-        (verarbeite, signal) => streamAiMessage({
-          content,
-          provider_id: providerId,
-          request_id: crypto.randomUUID(),
-          reasoning: denken.an,
-          reasoning_effort: denken.stufe,
-        }, verarbeite, signal),
-        assistantId,
-        optimisticUser.id,
-      )
-    } finally {
-      streamingRef.current = false
-    }
-  }
-
   /**
    * Beim Oeffnen an einen laufenden Lauf anhaengen.
    *
@@ -834,7 +485,7 @@ export function AiChat() {
     if (!laufBeimOeffnen.live) return
     setRunId(laufBeimOeffnen.id)
     void haengeAn(laufBeimOeffnen.id)
-  }, [haengeAn, laufBeimOeffnen])
+  }, [haengeAn, laufBeimOeffnen, setRunId])
 
   if (loading) {
     return (
@@ -911,7 +562,17 @@ export function AiChat() {
       </header>
 
       {/* ── Verlauf ───────────────────────────────────────────────────── */}
-      <div className="relative min-h-0 flex-1 overflow-y-auto" aria-live="polite">
+      <div
+        ref={verlaufRef}
+        className="relative min-h-0 flex-1 overflow-y-auto"
+        aria-live="polite"
+        onScroll={(event) => {
+          // Die 50 Pixel Spielraum sind derselbe Wert wie in der Konsole: wer
+          // fast unten steht, meint unten.
+          const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
+          setAmEnde(scrollHeight - scrollTop - clientHeight < 50)
+        }}
+      >
         {dragging && (
           <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/5">
             <span className="flex items-center gap-2 text-sm font-medium text-primary">
@@ -1056,119 +717,23 @@ export function AiChat() {
                 )
               }
 
-              const isStreaming = message.status === 'streaming'
-              // Einmal je Nachricht gruppieren, nicht je Abschnitt. Waehrend
-              // des Streamens laeuft dieser Block bei **jedem** Textstueck
-              // erneut — und `gruppiert` geht ueber alle Abschnitte. Zweimal
-              // aufgerufen waere daraus quadratische Arbeit bei jedem
-              // einzelnen Zeichen geworden.
-              const teile = message.sections?.length
-                ? gruppiert(message.sections)
-                : null
               return (
-                <article key={entry.id} className="flex gap-3">
-                  <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
-                    <Bot className="h-3.5 w-3.5" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    {/* Nachrichten aus der Zeit vor den Denkabschnitten: dort
-                        gibt es die Gedanken nur am Stück, ohne jede Stelle.
-                        Dann steht der Kasten wie früher oben — besser als gar
-                        nicht, und es ist die einzige Anordnung, die sich für
-                        sie nicht raten lässt. Alles Neuere zeichnet unten in
-                        `teile` einen Block je Runde. */}
-                    {message.reasoning && !teile?.some((teil) => teil.art === 'denken') && (
-                      <AiReasoningBlock content={message.reasoning} streaming={false} />
-                    )}
-                    {teile?.length ? (
-                      // Der Zug in seiner tatsaechlichen Reihenfolge: Gedanke,
-                      // Satz, Werkzeuge, Gedanke, Satz. Genau so ist er
-                      // entstanden, und genau so hat der Benutzer ihn live
-                      // gesehen — nach einem Neuladen soll er nicht anders
-                      // aussehen.
-                      <div className="space-y-3">
-                        {teile.map((teil, stelle) => (
-                          teil.art === 'tools' ? (
-                            <AiWerkzeuggruppe
-                              key={stelle}
-                              werkzeuge={teil.werkzeuge}
-                              // Zeigt an, dass es nach diesen Werkzeugen
-                              // weitergeht — aber nur bei der letzten Gruppe,
-                              // sonst behaupteten alle vorherigen dasselbe.
-                              arbeitetWeiter={
-                                isStreaming && stelle === teile.length - 1
-                              }
-                              // Waehrend die Antwort entsteht, ist das
-                              // Aufgeklappte die Antwort: der Benutzer sieht,
-                              // dass gearbeitet wird. Ist sie fertig, ist es
-                              // ein Beleg, den man nachschlagen kann — und der
-                              // den Verlauf nicht zustellen soll.
-                              offenVoreingestellt={isStreaming}
-                            />
-                          ) : teil.art === 'denken' ? (
-                            <AiReasoningBlock
-                              key={stelle}
-                              content={teil.inhalt}
-                              // Nur der letzte Block denkt noch. Alle früheren
-                              // sind abgeschlossen und klappen zu — sonst
-                              // pulsten drei Kästen gleichzeitig und
-                              // behaupteten dasselbe.
-                              streaming={isStreaming && stelle === teile.length - 1}
-                            />
-                          ) : (
-                            <AiMarkdown key={stelle} content={teil.inhalt} />
-                          )
-                        ))}
-                      </div>
-                    ) : message.content ? (
-                      <AiMarkdown content={message.content} />
-                    ) : isStreaming ? (
-                      // Noch ist nichts da. **Eine** Anzeige für diese
-                      // Wartezeit, nicht zwei: wurde Nachdenken angefordert,
-                      // ist der Denkkasten der Ort, an dem gleich etwas
-                      // passiert — er stand hier zuletzt zusätzlich zu
-                      // "Antwort wird erstellt …". War Nachdenken aus (die
-                      // Voreinstellung), behauptete er außerdem "Denkt nach …",
-                      // obwohl nie ein Zeichen kam.
-                      denken.an ? (
-                        <AiReasoningBlock content="" streaming />
-                      ) : (
-                        <p className="flex items-center gap-2 text-sm text-on-surface-variant">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                          {t('ai.chat.thinking')}
-                        </p>
-                      )
-                    ) : message.question ? null : (
-                      // Eine Rueckfrage *ist* die Antwort. Frueher stand hier
-                      // "Keine Antwort erhalten" unter jeder gestellten Frage,
-                      // weil die Frage in einer eigenen Karte lag und der
-                      // Nachrichtentext leer blieb.
-                      <p className="text-sm text-on-surface-variant">{t('ai.chat.noResponse')}</p>
-                    )}
-                    {/* Die Rueckfrage gehoert in dieselbe Blase wie der Text
-                        davor — sie ist Teil dieser Antwort und keine neue
-                        Nachricht. Beantwortet ist sie, sobald irgendein
-                        spaeterer Eintrag existiert: dann hat der Benutzer
-                        geschrieben, ob per Knopf oder frei getippt. Damit
-                        ueberlebt der Zustand auch ein Neuladen der Seite, ohne
-                        dass er irgendwo gespeichert werden muesste. */}
-                    {message.question && (
-                      <AiQuestionCard
-                        question={message.question}
-                        answered={index < entries.length - 1}
-                        disabled={busy}
-                        onAnswer={(label) => void sendContent(label)}
-                      />
-                    )}
-                    {message.status === 'failed' && (
-                      <p className="mt-2 text-xs text-status-error">{t('ai.chat.failed')}</p>
-                    )}
-                  </div>
-                </article>
+                <AiAntwortblase
+                  key={entry.id}
+                  message={message}
+                  // Beantwortet ist eine Rückfrage, sobald irgendein späterer
+                  // Eintrag existiert: dann hat der Benutzer geschrieben, ob
+                  // per Knopf oder frei getippt. Damit überlebt der Zustand
+                  // auch ein Neuladen der Seite, ohne dass er irgendwo
+                  // gespeichert werden müsste.
+                  beantwortet={index < entries.length - 1}
+                  busy={busy}
+                  nachdenken={denken.an}
+                  onAnswer={sendContent}
+                />
               )
             })}
           </div>
-          <div ref={endRef} />
         </div>
       </div>
 
@@ -1394,6 +959,126 @@ function entryTimestamp(entry: Entry): string {
   if (entry.kind === 'proposal') return entry.proposal.created_at
   return ''
 }
+
+/**
+ * Eine Antwort der KI: Gedanken, Text, Werkzeuge und eine mögliche Rückfrage.
+ *
+ * Ein eigenes Bauteil und `memo` — das ist der ganze Grund, warum es sie gibt.
+ * Während eine Antwort einläuft, baut `aendere` bei jedem Textstück ein neues
+ * `entries`-Array; die nicht betroffenen Einträge gibt es dabei unverändert
+ * zurück, ihre `message` bleibt also referenzgleich. Nur deshalb fällt hier
+ * jede Blase außer der schreibenden durch den Standardvergleich. Vorher lief
+ * `gruppiert` je Textstück über **alle** Nachrichten des Verlaufs.
+ *
+ * Damit das so bleibt, müssen alle Eigenschaften stabil sein: `onAnswer` ist
+ * beim Aufrufer ein `useCallback`. Ein Pfeil an dieser Stelle machte den
+ * Vergleich still wertlos, ohne dass ein Test es merkt.
+ */
+const AiAntwortblase = memo(function AiAntwortblase({
+  message, beantwortet, busy, nachdenken, onAnswer,
+}: {
+  message: AiMessage
+  beantwortet: boolean
+  busy: boolean
+  /** Wurde für diesen Lauf überhaupt Nachdenken angefordert? */
+  nachdenken: boolean
+  onAnswer: (label: string) => void
+}) {
+  const { t } = useTranslation()
+  const isStreaming = message.status === 'streaming'
+  // Einmal je Nachricht gruppieren, nicht je Abschnitt: `gruppiert` geht über
+  // alle Abschnitte, zweimal aufgerufen wäre daraus quadratische Arbeit.
+  const teile = message.sections?.length
+    ? gruppiert(message.sections)
+    : null
+  return (
+    <article className="flex gap-3">
+      <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+        <Bot className="h-3.5 w-3.5" aria-hidden="true" />
+      </span>
+      <div className="min-w-0 flex-1">
+        {/* Nachrichten aus der Zeit vor den Denkabschnitten: dort gibt es die
+            Gedanken nur am Stück, ohne jede Stelle. Dann steht der Kasten wie
+            früher oben — besser als gar nicht, und es ist die einzige
+            Anordnung, die sich für sie nicht raten lässt. Alles Neuere
+            zeichnet unten in `teile` einen Block je Runde. */}
+        {message.reasoning && !teile?.some((teil) => teil.art === 'denken') && (
+          <AiReasoningBlock content={message.reasoning} streaming={false} />
+        )}
+        {teile?.length ? (
+          // Der Zug in seiner tatsächlichen Reihenfolge: Gedanke, Satz,
+          // Werkzeuge, Gedanke, Satz. Genau so ist er entstanden, und genau so
+          // hat der Benutzer ihn live gesehen — nach einem Neuladen soll er
+          // nicht anders aussehen.
+          <div className="space-y-3">
+            {teile.map((teil, stelle) => (
+              teil.art === 'tools' ? (
+                <AiWerkzeuggruppe
+                  key={stelle}
+                  werkzeuge={teil.werkzeuge}
+                  // Zeigt an, dass es nach diesen Werkzeugen weitergeht — aber
+                  // nur bei der letzten Gruppe, sonst behaupteten alle
+                  // vorherigen dasselbe.
+                  arbeitetWeiter={isStreaming && stelle === teile.length - 1}
+                  // Während die Antwort entsteht, ist das Aufgeklappte die
+                  // Antwort: der Benutzer sieht, dass gearbeitet wird. Ist sie
+                  // fertig, ist es ein Beleg, den man nachschlagen kann — und
+                  // der den Verlauf nicht zustellen soll.
+                  offenVoreingestellt={isStreaming}
+                />
+              ) : teil.art === 'denken' ? (
+                <AiReasoningBlock
+                  key={stelle}
+                  content={teil.inhalt}
+                  // Nur der letzte Block denkt noch. Alle früheren sind
+                  // abgeschlossen und klappen zu — sonst pulsten drei Kästen
+                  // gleichzeitig und behaupteten dasselbe.
+                  streaming={isStreaming && stelle === teile.length - 1}
+                />
+              ) : (
+                <AiMarkdown key={stelle} content={teil.inhalt} />
+              )
+            ))}
+          </div>
+        ) : message.content ? (
+          <AiMarkdown content={message.content} />
+        ) : isStreaming ? (
+          // Noch ist nichts da. **Eine** Anzeige für diese Wartezeit, nicht
+          // zwei: wurde Nachdenken angefordert, ist der Denkkasten der Ort, an
+          // dem gleich etwas passiert — er stand hier zuletzt zusätzlich zu
+          // "Antwort wird erstellt …". War Nachdenken aus (die Voreinstellung),
+          // behauptete er außerdem "Denkt nach …", obwohl nie ein Zeichen kam.
+          nachdenken ? (
+            <AiReasoningBlock content="" streaming />
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-on-surface-variant">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              {t('ai.chat.thinking')}
+            </p>
+          )
+        ) : message.question ? null : (
+          // Eine Rückfrage *ist* die Antwort. Früher stand hier "Keine Antwort
+          // erhalten" unter jeder gestellten Frage, weil die Frage in einer
+          // eigenen Karte lag und der Nachrichtentext leer blieb.
+          <p className="text-sm text-on-surface-variant">{t('ai.chat.noResponse')}</p>
+        )}
+        {/* Die Rückfrage gehört in dieselbe Blase wie der Text davor — sie ist
+            Teil dieser Antwort und keine neue Nachricht. */}
+        {message.question && (
+          <AiQuestionCard
+            question={message.question}
+            answered={beantwortet}
+            disabled={busy}
+            onAnswer={onAnswer}
+          />
+        )}
+        {message.status === 'failed' && (
+          <p className="mt-2 text-xs text-status-error">{t('ai.chat.failed')}</p>
+        )}
+      </div>
+    </article>
+  )
+})
 
 /** Eine einzelne Werkzeugzeile: Symbol, Bezeichnung, ggf. Fehlschlag. */
 function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {

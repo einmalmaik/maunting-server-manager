@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DatabaseManager } from './DatabaseManager'
 import { api } from '@/api/client'
+import i18n from '@/i18n'
 import { useAuthStore } from '@/stores/authStore'
 
 vi.mock('@/api/client', () => ({
@@ -55,7 +56,11 @@ function statistikFuer(pfad: string, opts?: { body?: string }) {
 }
 
 describe('DatabaseManager', () => {
-  beforeEach(() => {
+  // Die Konsole holt ihre Beschriftungen aus der Sprachdatei. Ohne geladene und
+  // festgelegte Sprache stünde hier der rohe Schlüssel statt „Datenbank löschen",
+  // und der Test suchte einen Text, den die Umgebung bestimmt.
+  beforeEach(async () => {
+    await i18n.changeLanguage('de')
     vorhandeneDatenbanken = [ERSTE, ZWEITE]
     vi.mocked(api).mockReset()
     vi.mocked(api).mockImplementation(async (pfad: string, opts?: any) => statistikFuer(pfad, opts) as any)

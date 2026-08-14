@@ -766,6 +766,11 @@ def test_the_area_fills_up_per_server_and_says_so(
     Hier kann ein Kollege sie fuer alle vollmachen. Ein Verdraengungsmechanismus
     existiert nicht — die Meldung ist deshalb das Einzige, was den naechsten
     davor bewahrt, den Fehler bei sich zu suchen.
+
+    Und sie geht unverändert an das Modell weiter (`_execute_remember` reicht
+    `str(exc.detail)` durch). Sie muss deshalb den offenen Weg nennen: ohne
+    `search_memory` und `forget_memory` darin hört die KI für diesen Bereich
+    schlicht auf zu lernen, obwohl beide Werkzeuge vor ihr liegen.
     """
     server = _server(db, "voll")
     nachbar = _server(db, "nachbar")
@@ -782,6 +787,110 @@ def test_the_area_fills_up_per_server_and_says_so(
     with pytest.raises(HTTPException) as fehler:
         _merken(db, regular_user, server, "einer_zuviel", "Passt nicht mehr.")
     assert fehler.value.status_code == 409
+    assert "search_memory" in fehler.value.detail
+    assert "forget_memory" in fehler.value.detail
 
     # Die Nachbaranlage hat ihre eigene Kasse und ist davon unberuehrt.
     _merken(db, regular_user, nachbar, "eigenheit", "Passt.")
+
+
+# ── Einmal je Lauf, nicht einmal je Runde ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_manual_is_read_once_per_run_not_once_per_round(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Das Anlagenwissen gehört dem Lauf, nicht der Werkzeugrunde.
+
+    Angehängt wurde es schon immer genau einmal — die Marke im Laufzustand
+    entscheidet darüber. **Gelesen** wurde es aber in jeder Runde: der Nachtrag
+    lief unbedingt, sobald ein Serverbezug feststand, und ab Runde zwei wanderte
+    das Ergebnis in den Papierkorb. Ein Lauf mit acht Werkzeugrunden las damit
+    achtmal das komplette sichtbare Gedächtnis, prüfte jede Zeile einzeln gegen
+    die Rechte und entschlüsselte sie über den Sidecar.
+
+    Der Nutzungszähler ist der bleibende Schaden davon, nicht die Rechenzeit:
+    `server_shared_context` zählt bei jedem Aufruf hoch, und der Zähler
+    entscheidet beim nächsten Engpass mit, was im Kontext bleibt. Achtmal
+    gezählt für einmal gezeigt verschiebt das Gewicht zwischen Anlagenwissen,
+    Teamwissen und persönlichen Vorlieben ohne jeden Grund.
+    """
+    from uuid import uuid4
+
+    from models import AiConversation
+    from services import ai_stream_service
+    from services.openai_compatible_adapter import ProviderToolCall
+
+    user = _user(db, "rundenzaehler")
+    server = _server(db, "runden")
+    _allow(db, user, server, "server.view", "server.config.write")
+    eintrag_id = _merken(
+        db, user, server, "whitelist", "Whitelist nach dem Start laden."
+    )[0].id
+    conversation = AiConversation(
+        id=str(uuid4()), user_id=user.id, server_id=None, title="Runden"
+    )
+    db.add(conversation)
+    db.commit()
+
+    monkeypatch.setattr(
+        ai_stream_service,
+        "_werkzeug_ausfuehren",
+        lambda _user_id, call: ({"lines": []}, None),
+    )
+    aufruf = ProviderToolCall(
+        id="c1", name="read_server_logs", arguments={"server_id": server.id}
+    )
+
+    async def _runde(noetig: bool):
+        _, _, nachtrag = await ai_stream_service._tool_followup_messages(
+            user_id=user.id,
+            conversation_id=conversation.id,
+            tool_calls=[aufruf],
+            anlagenwissen_noetig=noetig,
+        )
+        return nachtrag
+
+    assert await _runde(True) is not None
+    assert await _runde(False) is None
+
+    db.expire_all()
+    assert db.get(AiMemoryEntry, eintrag_id).use_count == 1
+
+
+def test_the_permission_is_asked_once_per_server_not_once_per_row(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zehn Notizen zu **einem** Server sind eine Frage, nicht zehn.
+
+    `has_server_permission` ist für ein Teammitglied kein billiger Aufruf:
+    `direct_server_permission` fragt Rollen, Rollenrechte und Serverrechte ab,
+    und schlägt das fehl, folgt ein Dreifach-Join über die Teams samt erneuter
+    Prüfung je Gründer. Gecacht wird nichts. Die Antwort kann sich innerhalb
+    eines Aufrufs aber nicht ändern — `db`, `user` und `key` sind konstant.
+
+    Der Zwischenspeicher lebt ausdrücklich nur im Funktionsrumpf. Eine
+    Rechteantwort, die eine Anfrage überlebt, wäre keine Optimierung mehr,
+    sondern ein entzogenes Recht, das noch eine Weile weiterwirkt.
+    """
+    from services import permission_service
+
+    user = _user(db, "vielenotizen")
+    server = _server(db, "vielzeilen")
+    _allow(db, user, server, "server.view", "server.config.write")
+    for nummer in range(10):
+        _merken(db, user, server, f"eigenheit{nummer}", f"Wert {nummer}")
+
+    echt = permission_service.has_server_permission
+    gefragt: list[int] = []
+
+    def _zaehlen(**felder):
+        gefragt.append(int(felder["server_id"]))
+        return echt(**felder)
+
+    monkeypatch.setattr(permission_service, "has_server_permission", _zaehlen)
+    zeilen = ai_memory_service._visible_scope_rows(db, user)
+
+    assert len([zeile for zeile in zeilen if zeile.scope == "server_shared"]) == 10
+    assert gefragt == [server.id]

@@ -104,7 +104,7 @@ export function GitHubTab() {
               onChange={(e) => setNewToken(e.target.value)}
               placeholder="ghp_xxxxxxxxxxxxxxxxxxxx oder github_pat_xxxxxxxx"
             />
-            <p className="font-body-md text-xs text-on-surface-variant mt-2">
+            <p className="msm-field-help">
               {t('settings.githubTokenHint')}{' '}
               <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer" className="text-secondary hover:underline">
                 github.com/settings/tokens

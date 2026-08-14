@@ -13,6 +13,7 @@ sieht, und dass ein Team-Skill das Team nicht verlaesst.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -392,6 +393,62 @@ def test_the_index_is_capped(db: Session, regular_user: User) -> None:
 
     index = ai_skill_service.skill_index(db, regular_user, "Server nicht erreichbar")
     assert len(index) == ai_skill_service.MAX_INDEXED_SKILLS
+
+
+def test_a_freshly_learned_skill_is_not_locked_out_by_the_alphabet(
+    db: Session, regular_user: User
+) -> None:
+    """Wer den Platz bekommt, entscheidet das Änderungsdatum — nicht der Schlüssel.
+
+    Hier stand einmal `views[:MAX_INDEXED_SKILLS]` auf einer alphabetisch
+    sortierten Liste. Das war keine Reihenfolge, sondern eine **Auswahl**: was
+    hinter Position 25 stand, kam nie in den Systemprompt, das Modell erfuhr
+    seine Existenz nicht und forderte ihn folglich nie mit `read_skill` an. Die
+    KI meldete "Skill gelernt", die Oberfläche führte ihn als aktiv, und der
+    Benutzer bekam beim nächsten Mal trotzdem wieder die alte Antwort —
+    dauerhaft und ohne Hinweis.
+
+    Die leere Frage ist Absicht: sie nimmt genau den Notzweig, den sonst ein
+    fehlendes Embeddingmodell nimmt. Nur der ist hier gemeint, und ohne Modell
+    ist er der Normalfall.
+
+    `len(index)` allein hätte das nie gezeigt — die Zahl stimmte auch vorher.
+    """
+    ai_skill_service.reset_shipped_cache_for_tests()
+    _allow(db, regular_user, "ai.skills.use", "ai.skills.manage")
+    for index_nr in range(ai_skill_service.MAX_INDEXED_SKILLS + 10):
+        ai_skill_service.upsert_skill(
+            db, user=regular_user, skill_key=f"aaa-fuell-{index_nr:02d}",
+            name=f"Füllskill {index_nr}",
+            description=f"Ein Fülleintrag mit der Nummer {index_nr}, lang genug für die Prüfung.",
+            body=f"Inhalt {index_nr}", team_id=None,
+        )
+    zuletzt = ai_skill_service.upsert_skill(
+        db, user=regular_user, skill_key="zzz-gerade-gelernt",
+        name="Gerade gelernt",
+        description="Was die KI im letzten Gespräch gelernt hat, lang genug für die Prüfung.",
+        body="Der frische Inhalt.", team_id=None,
+    )
+
+    # Die Zeitstempel von Hand setzen: die Zeilen entstehen hier innerhalb
+    # weniger Millisekunden, und zwei gleiche Werte machten die Rangfolge
+    # unbestimmt. Der frische Skill ist der jüngste, alle Fülleinträge sind
+    # älter — genau die Lage, um die es geht.
+    alt = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    for row in db.query(AiSkill).all():
+        row.updated_at = alt
+    zuletzt.updated_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    db.commit()
+
+    index = ai_skill_service.skill_index(db, regular_user, "")
+    schluessel = _keys(index)
+
+    assert len(index) == ai_skill_service.MAX_INDEXED_SKILLS
+    assert "zzz-gerade-gelernt" in schluessel
+    # Die mitgelieferten Störungsdrehbücher haben kein Änderungsdatum und
+    # behalten ihren Platz. Vorher fielen sie geschlossen heraus: 'a' kommt vor
+    # 'm', 'n', 'p', 's' und 'z'.
+    assert set(ai_skill_service.shipped_skills()) <= schluessel
 
 
 def test_the_index_carries_no_bodies(db: Session, regular_user: User) -> None:

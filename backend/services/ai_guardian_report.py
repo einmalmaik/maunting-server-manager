@@ -21,42 +21,24 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from models import AiMessage, AiRun, Backup, Incident, Server, User
+from models import AiRun, Backup, Incident, Server, User
+# **Dieselbe** Funktion wie beim Aufgabenbericht, nicht eine zweite Fassung.
+# Hier stand eine wortgleiche Kopie, und sie ist auseinandergelaufen: die eine
+# schnitt den Abschlusstext von hinten ab (dort steht das Ergebnis), diese von
+# vorne (dort stehen die Ansagen vor jedem Werkzeugaufruf). Ein Heilungslauf hat
+# mehr Runden als ein Aufgabenlauf, also mehr Ansagen — die Mail an den
+# Betreiber trug damit ausgerechnet im wichtigeren Fall die Ankündigungen statt
+# des Ergebnisses. Kein Importzyklus: `ai_task_report` kennt dieses Modul nicht.
+from services.ai_task_report import abschlusstext
 from services.ai_redaction import redact_sensitive_text
 
 
 logger = logging.getLogger(__name__)
 
-#: Wieviel vom Abschlusstext des Modells in die Mail geht. Genug fuer eine
-#: Ursache und einen Ablauf, zu wenig fuer einen abgeschriebenen Logauszug.
-MAX_BERICHT_ZEICHEN = 4000
-
 #: Welche Endzustaende als "behoben" gelten. Ausschliesslich `completed` — ein
 #: abgebrochener oder fehlgeschlagener Lauf hat nichts bewiesen, auch wenn er
 #: unterwegs etwas getan hat.
 ERFOLG = ("completed",)
-
-
-def _abschlusstext(db: Session, run: AiRun) -> str:
-    """Die letzte Antwort des Modells in diesem Lauf.
-
-    Ueber die Unterhaltung gesucht und nicht ueber `run.message_id`: die wird
-    beim Abschluss auf `None` gesetzt (ein beendeter Lauf hat kein laufendes
-    Segment mehr), und zum Zeitpunkt dieses Aufrufs ist das bereits geschehen.
-    """
-    zeile = (
-        db.query(AiMessage)
-        .filter(
-            AiMessage.conversation_id == run.conversation_id,
-            AiMessage.role == "assistant",
-            AiMessage.status == "complete",
-        )
-        .order_by(AiMessage.created_at.desc())
-        .first()
-    )
-    if zeile is None or not zeile.content:
-        return ""
-    return redact_sensitive_text(str(zeile.content))[:MAX_BERICHT_ZEICHEN]
 
 
 def _utc(wert: datetime) -> datetime:
@@ -180,7 +162,7 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     db.refresh(vorfall)
     geheilt = run.status in ERFOLG and vorfall.status == "resolved"
 
-    bericht = _abschlusstext(db, run)
+    bericht = abschlusstext(db, run, zustand)
     if not bericht:
         bericht = (
             "Der Assistent hat keinen Abschlussbericht hinterlassen. "
@@ -193,7 +175,11 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
         provider_id=run.provider_id,
         to=adresse,
         username=str(user.username),
-        server_name=str(server.name or ""),
+        # Geschwärzt und gekürzt wie im Auftragstext desselben Laufs
+        # (ai_guardian_service): der Name ist Betreibertext, kann aber aus einer
+        # Shop-Bestellung stammen. Von hier geht er über die Fakten im
+        # Ausgangskorb an den KI-Anbieter.
+        server_name=redact_sensitive_text(str(server.name or ""))[:64],
         incident_type=str(vorfall.type),
         geheilt=geheilt,
         bericht=bericht,

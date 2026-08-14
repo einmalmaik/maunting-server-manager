@@ -171,8 +171,8 @@ function NodeCapacityCard() {
 
                   const segments: Segment[] = [
                     { value: panelUsedMb, colorClass: 'bg-primary' },
-                    { value: systemUsedMb, colorClass: 'bg-neutral-500' },
-                    { value: freeMb, colorClass: 'bg-emerald-500' },
+                    { value: systemUsedMb, colorClass: 'bg-outline' },
+                    { value: freeMb, colorClass: 'bg-status-success' },
                   ]
 
                   return (

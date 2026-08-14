@@ -803,6 +803,9 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
         # und markierte sie dabei als besprochen, obwohl kein Mensch sie gesehen
         # hat. Der Betreiber erfaehrt von der Stoerung dann nie.
         guardian_briefing_unterdruecken=True,
+        # Niemand sitzt davor: kein Skill-Verzeichnis im Systemprompt, denn
+        # `AUFGABEN_LESEN` bietet kein `read_skill` an.
+        unbeaufsichtigt=True,
     )
     if run is None:
         # Kontingent erschoepft, Schluessel nicht lesbar, Anfragekonflikt. Alles

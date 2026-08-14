@@ -2009,3 +2009,132 @@ def test_a_wer_loeschen_darf_sieht_seinen_loeschvorschlag_auch_danach(
 
     assert danach.status_code == 200, danach.text
     assert danach.json()["status"] == "succeeded"
+
+
+# ── Der schnellere Weg zur Serverliste sieht genau dasselbe ────────────────
+
+
+def _sichtbar_je_zeile(db: Session, user: User) -> list[int]:
+    """Der alte Weg: `has_server_permission` je Serverzeile.
+
+    Steht hier als Maßstab und nicht mehr im Dienst. `_visible_servers` fragt
+    heute gebündelt über `list_visible_server_ids`, weil die Schleife bei einem
+    Betreiber mit fünfhundert Servern rund fünfzehnhundert Abfragen kostete —
+    auf dem Weg zum ersten Token, während der Benutzer den Chat still sieht.
+
+    Ein schnellerer Weg mit anderer Sichtbarkeitsmenge wäre jedoch keine
+    Optimierung, sondern eine stille Rechteänderung. Genau das prüft dieser
+    Maßstab.
+    """
+    from services import permission_service
+
+    return [
+        server.id
+        for server in db.query(Server).order_by(Server.id).all()
+        if permission_service.has_server_permission(db, user, server.id, "server.view")
+    ]
+
+
+def _listenserver(db: Session, name: str) -> Server:
+    """Ein Server ohne Verzeichnis — hier zählt nur, wer ihn sehen darf."""
+    server = Server(
+        name=name,
+        game_type="dayz",
+        install_dir=f"/tmp/{name}",
+        container_name=f"msm-{name}",
+        status="stopped",
+    )
+    db.add(server)
+    db.commit()
+    db.refresh(server)
+    return server
+
+
+def test_the_bundled_server_list_sees_exactly_what_the_per_row_check_sees(
+    db: Session, owner_user: User, regular_user: User
+) -> None:
+    """Vier Wege zur Sichtbarkeit, und alle vier müssen dasselbe ergeben.
+
+    Sichtbarkeit entsteht in MSM aus vier Quellen: Eigentümerschaft, eine
+    pauschale Rolle, eine einzeln delegierte Serverberechtigung und ein Team.
+    Der gebündelte Weg muss jede davon genauso abbilden wie die Einzelprüfung —
+    in beide Richtungen. Zu viel wäre eine Rechteausweitung, zu wenig ein
+    Server, den sein Betreuer im Detail sieht, aber nicht in der Liste.
+
+    Der `None`-Fall ist der heikle: `list_visible_server_ids` gibt für
+    Eigentümer und pauschale Rollen `None` zurück, und das heißt **alle**. Wer
+    es wie eine leere Liste behandelt, gibt ausgerechnet dem Betreiber eine
+    leere Serverliste.
+    """
+    from services.auth_service import AuthService
+    from models import Team, TeamMember, TeamServerGrant
+
+    erster = _listenserver(db, "sicht-eins")
+    zweiter = _listenserver(db, "sicht-zwei")
+    dritter = _listenserver(db, "sicht-drei")
+
+    # Pauschale Rolle: sieht alles, ohne eine einzige Delegation.
+    rollenhalter = AuthService.create_user(db, "rolle", "rolle@test.de", "RollePass123!")
+    rolle = Role(name="ai-sicht", is_system=False)
+    db.add(rolle)
+    db.flush()
+    db.add(RolePermission(role_id=rolle.id, permission_key="server.view"))
+    db.commit()
+    set_user_roles(db, rollenhalter, [rolle.id])
+
+    # Delegierter: genau ein Server, einzeln zugeteilt.
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=zweiter.id, permission_key="server.view",
+    ))
+    db.commit()
+
+    # Teammitglied: bekommt den Server über das Team des Delegierten. Der
+    # Gründer hält `server.view` auf `zweiter` direkt — nur deshalb wirkt der
+    # Eintrag überhaupt. `dritter` steht bewusst auch im Team: dort fehlt dem
+    # Gründer das Recht, also darf es beim Mitglied nicht ankommen.
+    mitglied = AuthService.create_user(db, "team", "team@test.de", "TeamPass123!")
+    team = Team(name="Betreuer", owner_user_id=regular_user.id)
+    db.add(team)
+    db.flush()
+    db.add_all([
+        TeamMember(team_id=team.id, user_id=mitglied.id, role="member"),
+        TeamServerGrant(
+            team_id=team.id, server_id=zweiter.id, permission_key="server.view"
+        ),
+        TeamServerGrant(
+            team_id=team.id, server_id=dritter.id, permission_key="server.view"
+        ),
+    ])
+    db.commit()
+
+    # Und jemand ohne jedes Recht — die Gegenprobe.
+    fremder = AuthService.create_user(db, "fremd", "fremd@test.de", "FremdPass123!")
+    db.commit()
+
+    for name, akteur, erwartet in (
+        ("Eigentümer", owner_user, [erster.id, zweiter.id, dritter.id]),
+        ("Rollenhalter", rollenhalter, [erster.id, zweiter.id, dritter.id]),
+        ("Delegierter", regular_user, [zweiter.id]),
+        ("Teammitglied", mitglied, [zweiter.id]),
+        ("Fremder", fremder, []),
+    ):
+        mengenweise = [s.id for s in ai_action_service._visible_servers(db, akteur)]
+        assert mengenweise == erwartet, f"{name} sieht {mengenweise} statt {erwartet}"
+        assert mengenweise == _sichtbar_je_zeile(db, akteur), (
+            f"{name}: der gebündelte Weg weicht von der Einzelprüfung ab — "
+            "das ist eine stille Rechteänderung, keine Beschleunigung"
+        )
+
+
+def test_the_server_list_stops_at_the_cap(db: Session, owner_user: User) -> None:
+    """Der Deckel steht jetzt in der Abfrage, nicht in der Schleife.
+
+    Er zieht dieselbe Grenze wie vorher — daran hängt das `truncated`-Feld, an
+    dem das Modell erkennt, dass es nicht die ganze Liste gesehen hat.
+    """
+    for index in range(ai_action_service.MAX_LISTED_SERVERS + 3):
+        _listenserver(db, f"deckel-{index}")
+
+    sichtbar = ai_action_service._visible_servers(db, owner_user)
+
+    assert len(sichtbar) == ai_action_service.MAX_LISTED_SERVERS

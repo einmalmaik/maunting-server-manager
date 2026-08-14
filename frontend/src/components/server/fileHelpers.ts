@@ -98,10 +98,10 @@ export function reconcileSavedContent(
 
 /**
  * Die Fusszeile des Editors ruft das bei jedem Tastendruck auf. Ein `split`
- * wuerde vorher das ganze Dokument in ein Zeilenarray zerlegen — bei einer
- * mehrere Megabyte grossen Serverkonfiguration Zehntausende Zeichenketten, die
- * sofort wieder Muell sind. Der mehrzeilige Regex bricht dagegen bei der ersten
- * eingerueckten Zeile ab und legt nichts an.
+ * würde vorher das ganze Dokument in ein Zeilenarray zerlegen — bei einer
+ * mehrere Megabyte großen Serverkonfiguration Zehntausende Zeichenketten, die
+ * sofort wieder Müll sind. Der mehrzeilige Regex bricht dagegen bei der ersten
+ * eingerückten Zeile ab und legt nichts an.
  */
 export function detectIndentation(content: string): string {
   const treffer = content.match(/^(\t+| +)\S/m)

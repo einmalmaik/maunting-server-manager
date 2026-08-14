@@ -72,7 +72,7 @@ const FIELD_DEFINITIONS: Array<{
   ranks?: readonly string[]
 }> = [
   // Muss `TOKEN_LIMIT_MAX` im Backend entsprechen: die Tokenspalten sind
-  // PostgreSQL INTEGER, hoehere Werte wuerden beim Speichern abbrechen.
+  // PostgreSQL INTEGER, höhere Werte würden beim Speichern abbrechen.
   { key: 'daily_token_limit', labelKey: 'aiSettings.dailyTokens', max: 2_147_483_647, step: 1_000 },
   { key: 'weekly_token_limit', labelKey: 'aiSettings.weeklyTokens', max: 2_147_483_647, step: 10_000 },
   { key: 'monthly_token_limit', labelKey: 'aiSettings.monthlyTokens', max: 2_147_483_647, step: 10_000 },

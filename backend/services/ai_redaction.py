@@ -52,16 +52,29 @@ import re
 #:
 #: 3. Ein drittes Loch, gefunden am 14.08.2026: der Präfix verlangte hinter
 #:    jedem Wortteil ein Trennzeichen (``[._-]``), und davor stand ein
-#:    ``(?<![A-Za-z0-9])``. Beides zusammen liess jede zusammengeschriebene
+#:    ``(?<![A-Za-z0-9])``. Beides zusammen ließ jede zusammengeschriebene
 #:    Schreibweise durch — ``ServerAdminPassword=geheim``, ``AdminSecret``,
 #:    ``rconPassword``. Das ist ausgerechnet die Schreibweise der INI-Dateien
 #:    von ARK, Palworld, DayZ und SCUM, also der Dateien, die ``read_config``
 #:    liest und weiterreicht. Der Präfix frisst deshalb jetzt auch Wortteile
-#:    ohne Trennzeichen, und die Grenze davor faellt weg: sie hat hier nichts
-#:    geschuetzt, sondern nur die Wortmitte ausgeschlossen, in der das
-#:    Schluesselwort tatsaechlich steht.
+#:    ohne Trennzeichen.
+#:
+#: Die Grenze davor bleibt — aber sie umfasst jetzt **denselben** Zeichenvorrat
+#: wie der Präfix. Das ist der Punkt, an dem die alte Fassung scheiterte: sie
+#: verbot mit ``(?<![A-Za-z0-9])`` nur Buchstaben und Ziffern, der Präfix konnte
+#: aber gar nicht bis zum Wortanfang laufen, also begann der Versuch mitten im
+#: Wort und fiel an der Grenze durch. Jetzt läuft der Präfix bis zum Wortanfang,
+#: und die Grenze prüft genau dort.
+#:
+#: Ohne diese Grenze wäre das Muster nicht nur ungenauer, sondern quadratisch:
+#: der Präfix darf an **jeder** Stelle eines langen Wortes neu ansetzen und
+#: jedes Mal bis zum Ende laufen. Gemessen an einer Zeichenkette aus 50.000
+#: Wortzeichen — wie sie in einer Logzeile oder einer Konfigurationsdatei
+#: vorkommt — waren das 101 Sekunden statt 0,002. Mit der Grenze gibt es je Wort
+#: genau einen Ansatzpunkt.
 _SECRET_ASSIGNMENT_RE = re.compile(
     r"(?i)"
+    r"(?<![A-Za-z0-9._-])"
     r"(?P<key>"
     r"[A-Za-z0-9._-]*"
     r"(?:password|passwd|secret|token|api[_-]?key|authorization|credential)"
@@ -227,8 +240,17 @@ def _ersetze_ip(match: re.Match[str]) -> str:
     richtig hinterlegt, und `172.16.0.0/12` von Hand als Muster zu schreiben ist
     genau die Art Kleinarbeit, bei der man sich vertut.
 
-    Was sich nicht als Adresse lesen laesst, war keine — `999.1.2.3` oder eine
-    Versionsnummer wie `1.20.4.1` faellt hier durch und bleibt stehen.
+    Was sich nicht als Adresse lesen lässt, war keine — `999.1.2.3` fällt hier
+    durch und bleibt stehen.
+
+    Eine vierteilige Versionsnummer fällt **nicht** durch: `1.20.4.1` ist eine
+    gültige, öffentlich routbare Adresse, und `ipaddress` kann den Unterschied
+    nicht kennen. Hier stand das Gegenteil, und es war schlicht falsch. Der Preis
+    ist zu benennen, seit `read_config` und `search_server_files` als Freitext
+    gelten: in einer Konfigurationsdatei kann eine solche Versionsangabe zu
+    `[REDACTED_IP]` werden. Das ist die richtige Richtung — wer im Zweifel
+    schwärzt, verliert eine Zeile Diagnose; wer im Zweifel stehenlässt, verliert
+    die Adresse eines Spielers an einen externen Anbieter.
     """
     roh = match.group(1)
     try:

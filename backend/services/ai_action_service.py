@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import PurePosixPath
+import json
 import re
 
 from fastapi import HTTPException
@@ -344,8 +345,10 @@ def _global_tool_definitions() -> list[dict]:
             "etwa eine Eigenschaft eines Spiels oder einer Mod. Pruefsatz: ein "
             "globaler Skill muss auf einem fremden Panel genauso stimmen. Im "
             "Zweifel 'team'.\n"
-            "Gibt es den Schluessel schon, wird der Skill ersetzt. Verwende "
-            "denselben Schluessel erneut, statt einen aehnlichen anzulegen.",
+            "Gibt es den Schlüssel schon, wird der Skill ersetzt — "
+            "vollständig, nicht ergänzt; lies ihn vorher mit read_skill. "
+            "Verwende denselben Schlüssel erneut, statt einen ähnlichen "
+            "anzulegen.",
             {
                 "skill_key": {
                     "type": "string",
@@ -869,7 +872,7 @@ _PLAN_SCHEMA = {
         "enum": list(_KANAELE),
         "description": (
             "chat = nur im Panel, email = zusaetzlich per Mail, both = beides. "
-            "Im Chat steht das Ergebnis immer. Weglassen heisst chat — frag "
+            "Im Chat steht das Ergebnis immer. Weglassen heißt chat — frag "
             "nicht danach."
         ),
     },
@@ -1381,20 +1384,30 @@ def _require_no_arguments(tool_name: str, arguments: dict) -> None:
 def _visible_servers(db: Session, user: User) -> list[Server]:
     """Alle Server, die der Benutzer sehen darf — die Grundlage von `list_my_servers`.
 
-    Die Pruefung laeuft je Zeile ueber `has_server_permission` und nicht ueber
-    eine gefilterte Abfrage: Sichtbarkeit entsteht aus Rollenrechten *und*
-    einzeln delegierten Serverrechten, und diese Aufloesung gehoert an genau
-    eine Stelle. Die Obergrenze verhindert, dass ein Betreiber mit hunderten
-    Servern die halbe Liste ins Kostenbudget des Benutzers schreibt.
+    Die Auflösung von Rollenrechten *und* einzeln delegierten Serverrechten
+    liegt an genau einer Stelle — sie ist nur die Mengenfunktion und nicht die
+    Einzelprüfung. Hier stand einmal eine Schleife, die `has_server_permission`
+    je Serverzeile rief. Sie lieferte dieselbe Menge, kostete aber drei Abfragen
+    je Zeile, und der Deckel griff erst bei 60 *sichtbaren* Treffern: ein Kunde
+    mit einem Server unter fünfhundert lief alle fünfhundert Zeilen durch, auf
+    dem Weg zum ersten Token. `list_visible_server_ids` beantwortet dieselbe
+    Frage gebündelt, einschließlich des Teamwegs.
+
+    Die Obergrenze verhindert, dass ein Betreiber mit hunderten Servern die
+    halbe Liste ins Kostenbudget des Benutzers schreibt. Sie steht jetzt in der
+    Abfrage statt in der Schleife und zieht dieselbe Grenze.
     """
-    rows = db.query(Server).order_by(Server.id).all()
-    visible: list[Server] = []
-    for server in rows:
-        if permission_service.has_server_permission(db, user, server.id, "server.view"):
-            visible.append(server)
-        if len(visible) >= MAX_LISTED_SERVERS:
-            break
-    return visible
+    # Dreiwertig: `None` heißt **alle** (Eigentümer oder pauschale Rolle), eine
+    # leere Liste heißt **keiner**. Die beiden zu verwechseln wäre in der einen
+    # Richtung eine Rechteausweitung und in der anderen eine leere Liste für den
+    # Betreiber.
+    ids = permission_service.list_visible_server_ids(db, user)
+    if ids is not None and not ids:
+        return []
+    abfrage = db.query(Server)
+    if ids is not None:
+        abfrage = abfrage.filter(Server.id.in_(ids))
+    return abfrage.order_by(Server.id).limit(MAX_LISTED_SERVERS).all()
 
 
 def _resolve_server(db: Session, user: User, arguments: dict) -> tuple[Server, dict]:
@@ -1512,7 +1525,9 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
     # gehoert der Anlage, wie Teamwissen dem Team gehoert. Wer seinen eigenen
     # Schalter umlegt, trifft eine Entscheidung ueber sich, nicht ueber die
     # Betriebsanleitung, nach der seine Kollegen arbeiten.
-    if scope in {"user", "server"} and not ai_memory_service.preference(db, user.id):
+    if scope in ai_memory_service.PERSOENLICHE_SCOPES and not ai_memory_service.preference(
+        db, user.id
+    ):
         return {
             "remembered": False,
             "reason": "memory_disabled",
@@ -2440,7 +2455,7 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
     # damit RAM-Zahlen unter seinem eigenen Namen zurueck — eine falsche
     # Auskunft, die wie eine richtige aussieht, und der einzige Ort im ganzen
     # Werkzeugpfad, an dem das ohne Fehler passieren konnte.
-    raise AiActionValidationError(f"Kein Handler fuer Werkzeug: {tool_name}")
+    raise AiActionValidationError(f"Kein Handler für Werkzeug: {tool_name}")
 
 
 def _execute_server_context_tool(
@@ -2629,7 +2644,8 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
             ],
         }
 
-    # search_workshop_mods
+    if tool_name != "search_workshop_mods":
+        raise AiActionValidationError(f"Kein Handler für Werkzeug: {tool_name}")
     if set(arguments) - {"query", "page"} or not isinstance(arguments.get("query"), str):
         raise AiActionValidationError("Workshop-Suche hat ungueltige Argumente")
     page = arguments.get("page", 1)
@@ -2893,7 +2909,7 @@ def execute_read_tool(
     # `_werkzeug_bekannt` faengt beim Definieren ein Werkzeug ohne
     # Registry-Zeile. Diese Zeile hier faengt eines ohne Handler.
     if tool_name != "read_config":
-        raise AiActionValidationError(f"Kein Handler fuer Werkzeug: {tool_name}")
+        raise AiActionValidationError(f"Kein Handler für Werkzeug: {tool_name}")
 
     if set(arguments) - {"path", "offset", "limit"} or "path" not in arguments:
         raise AiActionValidationError("Datei-Lesewerkzeug hat ungueltige Argumente")

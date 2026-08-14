@@ -294,6 +294,17 @@ def test_die_backup_pflicht_gilt_nur_fuer_erreichbare_werkzeuge() -> None:
     `propose_backup` fehlt bewusst. Es unter Backup-Pflicht zu stellen waere ein
     Zirkel: das Modell braeuchte ein Backup, um ein Backup anlegen zu duerfen,
     und der einzige Ausweg aus einem Server ohne geprueftes Backup waere zu.
+
+    Die zweite Zusicherung geht die andere Richtung, und sie ist die
+    sicherheitsrelevante: **jedes** schreibende Werkzeug der Heilung steht hinter
+    der Schranke. Ohne sie fällt ein künftig aufgenommenes Werkzeug still
+    durch — es liefe im unbeaufsichtigten Lauf gegen einen Kundenserver, ohne
+    dass ein Rückweg nachgewiesen wäre, und kein Test würde rot. Draußen stehen
+    genau zwei, beide mit Grund (ai_tool_registry.py bei
+    `GUARDIAN_BACKUP_PFLICHT_TOOLS`): `propose_backup` wegen des Zirkels und
+    `propose_server_lifecycle`, weil ein Neustart keine Datei ändert und die
+    Pflicht ihn ausgerechnet dann sperren würde, wenn die volle Platte kein
+    Backup mehr zulässt.
     """
     assert (
         ai_tool_registry.GUARDIAN_BACKUP_PFLICHT_TOOLS
@@ -301,3 +312,9 @@ def test_die_backup_pflicht_gilt_nur_fuer_erreichbare_werkzeuge() -> None:
     )
     assert "propose_backup" not in ai_tool_registry.GUARDIAN_BACKUP_PFLICHT_TOOLS
     assert "propose_backup" in ai_tool_registry.GUARDIAN_HEILUNG_TOOLS
+    assert (
+        ai_tool_registry.GUARDIAN_HEILUNG_TOOLS & ai_tool_registry.WRITE_TOOLS
+    ) - ai_tool_registry.GUARDIAN_BACKUP_PFLICHT_TOOLS == {
+        "propose_backup",
+        "propose_server_lifecycle",
+    }

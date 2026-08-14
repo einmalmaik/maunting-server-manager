@@ -125,9 +125,9 @@ def test_service_rejects_invalid_internal_limit_values(db: Session) -> None:
 def test_erlaubte_maxima_passen_in_die_spaltenbreite() -> None:
     """Kein erlaubtes Maximum darf breiter sein als die Spalte, die es aufnimmt.
 
-    Die Tests laufen auf SQLite, wo INTEGER acht Byte hat — dort faellt ein zu
-    grosses Maximum nie auf. In Produktion (PostgreSQL) endet INTEGER bei
-    2^31-1, und ein darueber liegender Wert bricht erst beim Speichern ab.
+    Die Tests laufen auf SQLite, wo INTEGER acht Byte hat — dort fällt ein zu
+    großes Maximum nie auf. In Produktion (PostgreSQL) endet INTEGER bei
+    2^31-1, und ein darüber liegender Wert bricht erst beim Speichern ab.
     """
     for feld, maximum in LIMIT_MAXIMA.items():
         spalte = RoleAiLimit.__table__.columns[feld]

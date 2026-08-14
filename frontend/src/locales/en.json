@@ -259,6 +259,7 @@
       "pendingTitle": "Globally learned skills awaiting approval",
       "pendingHint": "These came out of customer conversations and take effect only once you approve them.",
       "pendingEmpty": "Nothing to review.",
+      "pendingHidden": "In the queue: {{count}}. Viewing and approving them requires the \"Manage AI skills\" permission.",
       "errors": {
         "load": "Skills could not be loaded.",
         "save": "Skill could not be saved."
@@ -1201,6 +1202,7 @@
         },
         "resolveAction": "Mark Incident Resolved",
         "resolvedSuccess": "Incident marked as resolved.",
+        "resolveError": "Incident could not be resolved.",
         "attempts": "Recovery Attempts",
         "historyErrorTitle": "Incident history unavailable",
         "historyErrorBody": "Incidents could not be loaded. This is not evidence of an empty history.",
@@ -1868,6 +1870,31 @@
     "tree": {
       "contentResults": "Content search results",
       "searchResults": "Search results"
+    },
+    "editor": {
+      "noFileOpen": "No file open",
+      "closeTab": "Close {{name}}",
+      "saving": "Saving…",
+      "conflict": "Conflict",
+      "saveError": "Saving failed",
+      "unsaved": "Unsaved",
+      "saved": "Saved",
+      "searchAndReplace": "Search and replace",
+      "conflictNotice": "The file was changed outside this editor. Your local content is kept and will not be overwritten.",
+      "reloadServerVersion": "Reload server version",
+      "findPlaceholder": "Search…",
+      "replacePlaceholder": "Replace with…",
+      "matchCase": "Match case",
+      "previousMatch": "Previous match",
+      "nextMatch": "Next match",
+      "replace": "Replace",
+      "replaceAll": "Replace all",
+      "findAll": "Find all ({{anzahl}})",
+      "closeSearch": "Close search",
+      "cursorPosition": "Line {{zeile}}, column {{spalte}}",
+      "selection": "Selection {{anzahl}}",
+      "emptyTitle": "Open a file to edit",
+      "emptyHint": "Multiple files stay open as tabs. Changes are never discarded silently."
     }
   },
   "backups": {
@@ -2355,6 +2382,149 @@
     "powerUserDialogWarn": "This password is NOT saved by the panel and cannot be shown again. Store it securely now (e.g. in a password manager).",
     "powerUserDialogHint": "Connect via the docker network (msm-internal) only, or via msm-postgres:5432. Applies to this database only.",
     "powerUserDialogClose": "Close — I have stored the password"
+  },
+  "databaseConsole": {
+    "breadcrumbServer": "Server",
+    "database": "Database",
+    "selectDatabase": "Select database",
+    "deleteDatabase": "Delete database",
+    "connectDatabase": "Connect database",
+    "rowsUnit": "rows",
+    "reset": "Reset",
+    "rowNotAddressable": "Row without a primary key cannot be addressed uniquely — deleting and editing are blocked here.",
+    "metrics": {
+      "database": "Database",
+      "status": "Status",
+      "statusHealthy": "Healthy",
+      "statusUnknown": "Unclear",
+      "statusHint": "Checked by the backend",
+      "tables": "Tables",
+      "tablesHint": "In this database",
+      "storage": "Storage",
+      "storageHint": "Total data size",
+      "connections": "Connections",
+      "connectionsHint": "Active / maximum",
+      "latency": "Latency",
+      "latencyHint": "Backend connection"
+    },
+    "tabs": {
+      "tables": "Tables",
+      "sql": "SQL console",
+      "users": "Users"
+    },
+    "sql": {
+      "title": "SQL console",
+      "subtitle": "Run, format and bookmark interactive SQL statements.",
+      "saveFavorite": "Save favourite",
+      "saveFavoriteTitle": "Save as favourite",
+      "import": "Import",
+      "export": "Export",
+      "run": "Run",
+      "format": "Format",
+      "hint": "Ctrl+Enter · max. 500 rows in the result",
+      "favorites": "SQL favourites",
+      "removeFavorite": "Remove favourite",
+      "noFavorites": "No favourites saved.",
+      "untitledFavorite": "Query",
+      "history": "Query history",
+      "clearHistory": "Clear",
+      "noHistory": "No queries in the history yet."
+    },
+    "favoriteModal": {
+      "title": "Save query as favourite",
+      "titleLabel": "Title / label",
+      "titlePlaceholder": "e.g. find active users",
+      "sqlLabel": "SQL statement"
+    },
+    "tables": {
+      "searchPlaceholder": "Search tables...",
+      "create": "Create new table",
+      "current": "Table:",
+      "drop": "Drop table",
+      "selected": "selected"
+    },
+    "rows": {
+      "insert": "+ Row",
+      "insertTitle": "Insert new row",
+      "edit": "Edit",
+      "editTitle": "Edit row",
+      "delete": "Delete",
+      "deleteTitle": "Delete selected rows",
+      "searchPlaceholder": "Search...",
+      "selectTable": "Select a table.",
+      "noData": "No data."
+    },
+    "toolbar": {
+      "filter": "Filter",
+      "sort": "Sort",
+      "columns": "Columns"
+    },
+    "filter": {
+      "column": "Column",
+      "columnPlaceholder": "-- Select column --",
+      "valueContains": "Value contains",
+      "valuePlaceholder": "Text..."
+    },
+    "sort": {
+      "direction": "Direction",
+      "ascending": "Ascending",
+      "descending": "Descending"
+    },
+    "schema": {
+      "noTable": "No table",
+      "heading": "Schema & indexes",
+      "empty": "No schema details loaded.",
+      "estimatedRows": "Estimated rows",
+      "dataSize": "Data size",
+      "columns": "Columns",
+      "primaryKey": "Primary key",
+      "indexes": "Indexes",
+      "foreignKeys": "Foreign keys"
+    },
+    "powerUser": {
+      "title": "Power user",
+      "active": "Owner access active (no cluster SUPERUSER).",
+      "inactive": "Only enable the power user for deliberate admin work.",
+      "rotate": "Rotate",
+      "demote": "Revoke",
+      "enable": "Enable"
+    },
+    "users": {
+      "title": "Database users",
+      "subtitle": "Additional users with access to this server's databases.",
+      "create": "Create user",
+      "empty": "No database users exist.",
+      "username": "Username",
+      "password": "Password",
+      "createdAt": "Created",
+      "lastRotated": "Last rotated",
+      "actions": "Actions",
+      "rotate": "Rotate",
+      "delete": "Delete user"
+    },
+    "editRow": {
+      "title": "Edit row",
+      "subtitle": "Adjust the values of the selected table row.",
+      "saveError": "Failed to save the row",
+      "saving": "Saving...",
+      "submit": "Save changes"
+    },
+    "insertRow": {
+      "title": "Add new row",
+      "subtitle": "Enter the values for a new table row.",
+      "valuePlaceholder": "Enter value...",
+      "emptyError": "At least one field must be filled in.",
+      "saveError": "Failed to insert the row",
+      "saving": "Inserting...",
+      "submit": "Insert row"
+    },
+    "deleteRows": {
+      "title": "Delete row(s)",
+      "question": "Do you really want to permanently delete the {{anzahl}} selected row(s) from the table?",
+      "deleteError": "Failed to delete the rows",
+      "deleting": "Deleting...",
+      "submit": "Delete permanently"
+    }
   },
   "language": {
     "label": "Language",

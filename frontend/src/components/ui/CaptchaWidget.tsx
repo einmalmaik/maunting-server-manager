@@ -129,7 +129,7 @@ export function CaptchaWidget({ onVerify }: CaptchaWidgetProps) {
       }
 
       // Wird das Skript geblockt, feuert `load` nie — ohne diesen Listener
-      // liefe nicht einmal der Timeout oben, und es bliebe vollstaendig still.
+      // liefe nicht einmal der Timeout oben, und es bliebe vollständig still.
       const handleError = () => setLoadFailed(true)
 
       script.addEventListener('load', handleLoad)

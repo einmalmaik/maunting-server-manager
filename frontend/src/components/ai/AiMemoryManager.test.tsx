@@ -131,12 +131,12 @@ describe('AiMemoryManager', () => {
     // eine Bestaetigung je Eintrag.
     //
     // Die Servernotiz steht in derselben Liste, wird von „Alle löschen" aber
-    // nicht mitgenommen: geloescht wird ueber `user:{id}`, sie liegt unter
-    // `server:{sid}:user:{uid}`. Die Frage darf deshalb nicht nach fuenf
-    // Eintraegen fragen, um danach vier zu loeschen.
+    // nicht mitgenommen: gelöscht wird über `user:{id}`, sie liegt unter
+    // `server:{sid}:user:{uid}`. Die Frage darf deshalb nicht nach fünf
+    // Einträgen fragen, um danach vier zu löschen.
     const mitServernotiz: AiMemoryEntry[] = [
       ...viele,
-      { ...entry, id: '...-108', scope: 'server', server_id: 62, key: 'startzeit', value: 'Braucht laengeren Timeout' },
+      { ...entry, id: '...-108', scope: 'server', server_id: 62, key: 'startzeit', value: 'Braucht längeren Timeout' },
     ]
     vi.mocked(aiApi.listMemory).mockResolvedValue(mitServernotiz)
     vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(mitServernotiz)
@@ -202,11 +202,11 @@ describe('AiMemoryManager', () => {
     vi.mocked(client.api).mockResolvedValue([{ id: 62, name: 'DayZ-1' }])
     vi.mocked(aiApi.listPersonalMemory).mockResolvedValue([
       entry,
-      { ...entry, id: '...-105', scope: 'server', server_id: 62, key: 'startzeit', value: 'Braucht laengeren Timeout' },
+      { ...entry, id: '...-105', scope: 'server', server_id: 62, key: 'startzeit', value: 'Braucht längeren Timeout' },
     ])
     render(<AiMemoryManager />)
 
-    expect(await screen.findByText('Braucht laengeren Timeout')).toBeInTheDocument()
+    expect(await screen.findByText('Braucht längeren Timeout')).toBeInTheDocument()
     expect(screen.getByText('Server: DayZ-1')).toBeInTheDocument()
     // Der allgemeine Eintrag traegt kein Serverschild.
     expect(screen.queryByText(/^Server: #/)).not.toBeInTheDocument()

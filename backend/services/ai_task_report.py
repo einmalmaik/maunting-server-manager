@@ -35,23 +35,50 @@ MAX_BERICHT_ZEICHEN = 4000
 ERFOLG = ("completed",)
 
 
-def _abschlusstext(db: Session, run: AiRun) -> str:
-    """Die letzte Antwort des Modells in diesem Lauf.
+def abschlusstext(db: Session, run: AiRun, zustand: dict | None = None) -> str:
+    """Die letzte Antwort des Modells **in diesem Lauf**.
 
-    Ueber die Unterhaltung gesucht und nicht ueber `run.message_id`: die wird
+    Öffentlich und nicht `_abschlusstext`, weil `ai_guardian_report` sie
+    mitbenutzt. Dort stand einmal eine wortgleiche Kopie, und sie ist genau so
+    auseinandergelaufen, wie Kopien das tun: die eine wurde von vorne
+    abgeschnitten, die andere von hinten — und die von vorne verschickte dem
+    Betreiber die Ankündigungen statt des Ergebnisses.
+
+    Über die Unterhaltung gesucht und nicht über `run.message_id`: die wird
     beim Abschluss auf `None` gesetzt (ein beendeter Lauf hat kein laufendes
     Segment mehr), und zum Zeitpunkt dieses Aufrufs ist das bereits geschehen.
+
+    Der Anker ist die **eigene Benutzernachricht** dieses Laufs. Es gibt genau
+    eine Unterhaltung je Benutzer (`uq_ai_conversations_user`), in der Chat,
+    Guardian-Heilungen und fällige Aufträge gemeinsam landen. Ohne Anker fand
+    die Abfrage bei einem Lauf, der selbst keine fertige Antwort hinterlassen
+    hat — erschöpftes Kontingent, abgebrochenes Segment —, die jüngste Antwort
+    aus einem völlig anderen Zug. Der Betreiber las dann unter
+    "Abschlussbericht des Laufs" seine Chatunterhaltung von gestern.
+
+    `run.created_at` taugt als Anker **nicht**: `ai_messages` wird im selben
+    Flush vor `ai_runs` eingefügt, die eigene Antwort eines Laufs trägt also
+    stets eine frühere Zeit als der Lauf selbst. Die Benutzernachricht dagegen
+    entsteht in einem eigenen, früheren Flush und liegt damit vor allen
+    Nachrichten dieses Laufs und nach allen des Zuges davor.
+
+    Ohne Anker — alte Läufe ohne `user_message_id` im Zustand — bleibt es beim
+    bisherigen Verhalten: eine ungenaue Zuordnung ist immer noch besser als gar
+    kein Bericht.
     """
-    zeile = (
-        db.query(AiMessage)
-        .filter(
-            AiMessage.conversation_id == run.conversation_id,
-            AiMessage.role == "assistant",
-            AiMessage.status == "complete",
-        )
-        .order_by(AiMessage.created_at.desc())
-        .first()
+    anker = None
+    kennung = (zustand or {}).get("user_message_id")
+    if kennung:
+        anker = db.get(AiMessage, str(kennung))
+
+    abfrage = db.query(AiMessage).filter(
+        AiMessage.conversation_id == run.conversation_id,
+        AiMessage.role == "assistant",
+        AiMessage.status == "complete",
     )
+    if anker is not None:
+        abfrage = abfrage.filter(AiMessage.created_at >= anker.created_at)
+    zeile = abfrage.order_by(AiMessage.created_at.desc()).first()
     if zeile is None or not zeile.content:
         return ""
     text = redact_sensitive_text(str(zeile.content)).strip()
@@ -112,7 +139,7 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     titel = str((aufgabe.title if aufgabe is not None else rahmen.get("title")) or "")
     plan = plan_text(aufgabe) if aufgabe is not None else "einmalig"
 
-    bericht = _abschlusstext(db, run)
+    bericht = abschlusstext(db, run, zustand)
     if not bericht:
         bericht = (
             "Der Assistent hat keine Zusammenfassung hinterlassen. "

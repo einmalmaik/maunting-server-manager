@@ -242,7 +242,7 @@ export function SupportWidgetTab() {
                 onChange={(e) => setSettings({ ...settings, support_widget_crisp_website_id: e.target.value })}
                 placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
               />
-              <p className="mt-1.5 text-xs text-on-surface-variant">{t('settings.supportWidget.crispHint')}</p>
+              <p className="msm-field-help">{t('settings.supportWidget.crispHint')}</p>
             </label>
           )}
 
@@ -275,7 +275,7 @@ export function SupportWidgetTab() {
                 onChange={(e) => setSettings({ ...settings, support_widget_custom_snippet: e.target.value })}
                 placeholder={t('settings.supportWidget.customSnippetPlaceholder')}
               />
-              <p className="mt-1.5 text-xs text-on-surface-variant">{t('settings.supportWidget.customHint')}</p>
+              <p className="msm-field-help">{t('settings.supportWidget.customHint')}</p>
             </label>
           )}
         </div>
@@ -310,7 +310,7 @@ export function SupportWidgetTab() {
                 onChange={(e) => setNewWebhookSecret(e.target.value)}
                 placeholder={t('settings.supportWidget.webhookSecretPlaceholder')}
               />
-              <p className="mt-1.5 text-xs text-on-surface-variant">{t('settings.supportWidget.webhookSecretHint')}</p>
+              <p className="msm-field-help">{t('settings.supportWidget.webhookSecretHint')}</p>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -337,10 +337,10 @@ export function SupportWidgetTab() {
 
         {canWrite && (
           <div className="flex justify-end">
-            <button type="submit" disabled={saving} className="msm-btn-primary inline-flex items-center gap-2 px-6 py-3 disabled:opacity-50">
+            <Button type="submit" disabled={saving}>
               {saving ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-on-primary border-t-transparent" /> : <Save className="h-4 w-4" />}
               {t('settings.save')}
-            </button>
+            </Button>
           </div>
         )}
       </fieldset>

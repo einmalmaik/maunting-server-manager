@@ -488,7 +488,10 @@ ALWAYS_CONFIRM_TOOLS = (
 # dann nicht kann, wenn es sie befolgen wollte.
 #
 # Deshalb fehlen hier: Gedaechtnis und Skills (das Modell soll sich aus einem
-# Vorfall nichts Dauerhaftes anlernen), die Hoster-Werkzeuge (Rechte und
+# Vorfall nichts Dauerhaftes anlernen — und auch nichts lesen, was ihm ein
+# anderes Gespräch in die Hand gelegt hat; solange `read_skill` fehlt, lässt
+# `ai_context_service._skill_index_block` das Skill-Verzeichnis aus dem Prompt
+# eines solchen Laufs weg), die Hoster-Werkzeuge (Rechte und
 # Schluessel), `propose_server_create`/`propose_server_delete` (Reichweite ueber
 # den Vorfall hinaus), der Blueprint-Wechsel (leert das Verzeichnis) und
 # `web_search` (der Name eines selbstgebauten Servers hat draussen nichts zu
@@ -564,7 +567,10 @@ GUARDIAN_HEILUNG_TOOLS = frozenset({
 # Nicht enthalten: Gedaechtnis und Skills. Was das Modell hier liest, kann ein
 # Spieler in ein Log geschrieben haben, und aus einem Lauf ohne Zeugen soll
 # nichts Dauerhaftes gelernt werden. Der Gedaechtnisblock im Kontext kommt
-# ohnehin von selbst mit — es fehlt also nichts.
+# ohnehin von selbst mit — es fehlt also nichts. Das Skill-Verzeichnis kommt
+# umgekehrt **nicht** mit: solange `read_skill` hier fehlt, lässt
+# `ai_context_service._skill_index_block` es aus dem Prompt weg, statt zum
+# Lesen aufzufordern.
 #
 # `ask_user` fehlt, weil niemand davorsitzt. Das ist keine Sparmassnahme: eine
 # unbeantwortbare Rueckfrage haette den Lauf bis zum Ablauf geparkt und die

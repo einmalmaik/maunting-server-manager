@@ -86,7 +86,7 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
         onRefreshServer();
       }
     } catch {
-      toast.error("Incident konnte nicht gelöst werden.");
+      toast.error(t("servers.guardian.tab.resolveError"));
     } finally {
       setResolvingId(null);
     }
@@ -178,7 +178,9 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
               {t("servers.guardian.tab.containerStatus")}
             </p>
             <p className="text-sm font-mono-sm text-on-surface font-semibold capitalize">
-              {server.status || "Unknown"}
+              {server.status
+                ? t(`servers.status.${server.status}`, { defaultValue: server.status })
+                : t("servers.guardian.tab.status.unknown")}
             </p>
           </div>
 
@@ -207,7 +209,6 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
           <button
             onClick={() => void fetchIncidents()}
             className="msm-btn-secondary px-3 py-1.5 text-xs flex items-center gap-1.5"
-            title="Aktualisieren"
           >
             <RefreshCw
               className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}

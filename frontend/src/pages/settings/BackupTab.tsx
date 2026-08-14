@@ -323,7 +323,7 @@ export function BackupTab() {
             onChange={(e) => setNewPassword(e.target.value)}
             placeholder={t('settings.backup.newPasswordPlaceholder')}
           />
-          <p className="font-body-md text-xs text-on-surface-variant mt-2">
+          <p className="msm-field-help">
             {t('settings.backup.passwordHint')}
           </p>
         </div>

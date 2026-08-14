@@ -244,6 +244,15 @@ def _aufraeumen() -> None:
                 "AI-Kanalgrenze erreicht, aeltester laufender Kanal verworfen run_id=%s",
                 aeltester,
             )
+            # Erst wecken, dann wegwerfen. Ohne das `beenden` bekamen hier
+            # angehängte Zuhörer nie ihr `(None, None)`: `lauf_verfolgen`
+            # stand in `await warteschlange.get()` ohne Frist, der weiterlaufende
+            # Lauf legte sich über `_kanal()` einen **neuen** Kanal an, und auch
+            # das abschließende `beenden(run_id)` traf nur diesen. Die
+            # SSE-Verbindung blieb dann für immer offen, im Browser fiel
+            # `setStreaming(false)` nie, und die Eingabe blieb gesperrt — der
+            # Kommentar darüber verspricht „ohne Live-Bild“, nicht „hängend“.
+            beenden(aeltester)
             del _KANAELE[aeltester]
 
 

@@ -92,7 +92,7 @@ describe('editor file details', () => {
     expect(detectIndentation('root\r\n  child\r\n')).toBe('Leerzeichen: 2')
     expect(detectIndentation('root\r\n\tchild\r\n')).toBe('Tabs')
     expect(detectIndentation('a\nb\nc')).toBe('Einzug: –')
-    // Eine Leerzeile aus Leerzeichen ist kein Einzug — erst Zeichen dahinter zaehlen.
+    // Eine Leerzeile aus Leerzeichen ist kein Einzug — erst Zeichen dahinter zählen.
     expect(detectIndentation('a\n   \nb')).toBe('Einzug: –')
   })
 

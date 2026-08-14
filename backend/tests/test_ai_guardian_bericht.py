@@ -50,7 +50,7 @@ from models import (
 )
 from services import ai_guardian_report
 from services.ai_redaction import ist_geheimer_schluessel
-from services.ai_stream_service import _ergebnis_schwaerzen
+from services.ai_stream_service import _ergebnis_schwaerzen, _FREITEXT_WERKZEUGE
 from services.auth_service import AuthService
 from services.email_service import EmailService
 
@@ -104,7 +104,13 @@ def _vorfall(db: Session, server: Server, *, status: str = "resolved") -> Incide
     return vorfall
 
 
-def _lauf(db: Session, user: User, *, status: str = "completed") -> AiRun:
+def _lauf(
+    db: Session,
+    user: User,
+    *,
+    status: str = "completed",
+    antwort: str = "Die Konfiguration war unbrauchbar; ich habe sie berichtigt.",
+) -> AiRun:
     """Ein abgeschlossener Heilungslauf samt Abschlusstext des Modells.
 
     Der Text gehoert dazu und ist kein Beiwerk: ohne eine fertige
@@ -130,7 +136,7 @@ def _lauf(db: Session, user: User, *, status: str = "completed") -> AiRun:
         id=str(uuid4()),
         conversation_id=conversation.id,
         role="assistant",
-        content="Die Konfiguration war unbrauchbar; ich habe sie berichtigt.",
+        content=antwort,
         status="complete",
     ))
     run = AiRun(
@@ -492,6 +498,195 @@ class TestBackupnameImBericht:
         assert felder["backup_name"] == "KI-Sicherung"
 
 
+# ── Der Servername in den Fakten ──────────────────────────────────────────
+
+
+class TestServernameImBericht:
+    """Der Name geht an den Anbieter — also so geschwärzt wie überall sonst.
+
+    Aus diesen Feldern baut `_zustellen` die Fakten des Ausgangskorbs, und der
+    Arbeiter reicht sie an das Modell weiter, das die Mail verfasst. Derselbe
+    Wert wird im Auftragstext desselben Laufs (`ai_guardian_service`) längst
+    geschwärzt und auf 64 Zeichen gekürzt; der Berichtspfad war der einzige
+    Ausreißer. Ein Servername ist Betreibertext, kann aber aus einer
+    Shop-Bestellung stammen und dann tragen, was dort mitkam.
+    """
+
+    def test_ein_tokenmuster_im_servernamen_geht_nicht_an_den_anbieter(
+        self, db: Session
+    ) -> None:
+        user = _benutzer(db)
+        server = _server(db, name="DayZ sk-abcdefghijklmnopqrst1234 Livonia")
+        vorfall = _vorfall(db, server)
+        run = _lauf(db, user)
+
+        felder = _versenden(db, run=run, server=server, vorfall=vorfall)
+
+        assert "sk-abcdefghijklmnopqrst1234" not in felder["server_name"]
+        # Der Rest bleibt lesbar: der Betreiber soll seinen Server wiedererkennen.
+        assert "DayZ" in felder["server_name"]
+
+    def test_der_name_wird_wie_im_auftragstext_gekuerzt(self, db: Session) -> None:
+        """64 Zeichen, dieselbe Grenze wie in `ai_guardian_service`.
+
+        Ohne sie trägt der Bericht denselben Namen unbegrenzt lang, während der
+        Auftragstext desselben Laufs ihn kürzt — zwei Längen für eine Angabe.
+        """
+        user = _benutzer(db)
+        server = _server(db, name="A" * 200)
+        vorfall = _vorfall(db, server)
+        run = _lauf(db, user)
+
+        felder = _versenden(db, run=run, server=server, vorfall=vorfall)
+
+        assert len(felder["server_name"]) == 64
+
+
+# ── Der Abschlusstext ─────────────────────────────────────────────────────
+
+
+class TestAbschlusstextImBericht:
+    """Was der Betreiber liest, ist der Schluss des Laufs — nicht sein Anfang."""
+
+    def test_bei_langem_protokoll_steht_das_ergebnis_in_der_mail(
+        self, db: Session
+    ) -> None:
+        """Von hinten schneiden, nicht von vorne.
+
+        `content` ist das Protokoll des ganzen Laufs, und `MITREDEN` verlangt vor
+        jedem Werkzeugaufruf einen Satz. Vorne stehen deshalb die Ankündigungen
+        ("Ich sehe mir zuerst die Logs an"), hinten steht das Ergebnis. Diese
+        Funktion schnitt hier `[:MAX_BERICHT_ZEICHEN]` — während die wortgleiche
+        Kopie im Aufgabenbericht denselben Ausdruck längst als behobenen Fehler
+        beschrieb. Ein Heilungslauf hat mehr Runden als ein Aufgabenlauf, also
+        mehr Ansagen: die Mail traf ausgerechnet im wichtigeren Fall daneben.
+        """
+        user = _benutzer(db)
+        server = _server(db)
+        vorfall = _vorfall(db, server)
+        ansagen = "\n\n".join(
+            f"Ich sehe mir jetzt Schritt {nummer} an: " + "die nächste Logdatei. " * 12
+            for nummer in range(20)
+        )
+        ergebnis = (
+            "Ergebnis: der Dienst horchte auf der falschen Adresse. Ich habe die "
+            "Bindung berichtigt und den Server neu gestartet; er nimmt wieder "
+            "Verbindungen an."
+        )
+        protokoll = ansagen + "\n\n" + ergebnis
+        # Ohne diese Zusicherung wäre der Test auch grün, wenn das Protokoll
+        # unter die Grenze rutscht und schlicht vollständig mitgeht.
+        assert len(protokoll) > 4000
+        run = _lauf(db, user, antwort=protokoll)
+
+        felder = _versenden(db, run=run, server=server, vorfall=vorfall)
+
+        assert ergebnis in felder["bericht"]
+        assert "Schritt 0" not in felder["bericht"]
+
+    def test_der_bericht_zitiert_keinen_fremden_zug(self, db: Session) -> None:
+        """Es gibt genau **eine** Unterhaltung je Benutzer.
+
+        Chat, Heilungen und fällige Aufträge landen alle darin
+        (`uq_ai_conversations_user`). Endet ein Lauf, ohne selbst eine fertige
+        Antwort geschrieben zu haben — erschöpftes Kontingent, abgebrochenes
+        Segment —, fand die Abfrage die jüngste Antwort aus einem völlig anderen
+        Zug. Beim Heilungsbericht heißt das: die Mail zum Vorfall trägt eine
+        Schilderung einer Untersuchung, die dieser Lauf nie geführt hat.
+
+        Der Anker ist die eigene Benutzernachricht des Laufs.
+        """
+        from services import ai_run_service
+
+        user = _benutzer(db)
+        server = _server(db)
+        vorfall = _vorfall(db, server, status="open")
+        # Der Zug von gestern: eine fertige Antwort in derselben Unterhaltung.
+        vorlauf = _lauf(db, user, antwort="Ich habe Server 12 gelöscht.")
+        # Und die Heilung von heute Nacht, die selbst nichts geschrieben hat.
+        conversation_id = vorlauf.conversation_id
+        anker_id = str(uuid4())
+        db.add(AiMessage(
+            id=anker_id,
+            conversation_id=conversation_id,
+            role="user",
+            content="Guardian meldet: process_not_running.",
+            status="complete",
+        ))
+        run = AiRun(
+            id=str(uuid4()),
+            user_id=user.id,
+            conversation_id=conversation_id,
+            status="failed",
+        )
+        db.add(run)
+        db.flush()
+        zustand = ai_run_service.leerer_zustand(
+            [], request_id=str(uuid4()), user_message_id=anker_id
+        )
+        zustand["guardian"] = {"server_id": server.id, "incident_id": vorfall.id}
+        ai_run_service.zustand_schreiben(run, zustand)
+        db.commit()
+
+        gesehen: dict = {}
+        with (
+            patch.object(EmailService, "is_configured", staticmethod(lambda: True)),
+            patch.object(
+                ai_guardian_report, "_zustellen", lambda **f: gesehen.update(f)
+            ),
+        ):
+            ai_guardian_report.bericht_versenden(db, run=run, zustand=zustand)
+
+        assert "Server 12" not in gesehen["bericht"]
+        # Die Mail geht trotzdem hinaus — mit dem ehrlichen Ersatztext.
+        assert "KI-Chat" in gesehen["bericht"]
+
+
+# ── Der Neustart mitten im Lauf ───────────────────────────────────────────
+
+
+def test_ein_neustart_waehrend_der_heilung_berichtet_trotzdem(db: Session) -> None:
+    """`unterbrochene_laeufe_abgleichen` ist ein Endzustand wie jeder andere.
+
+    Hier stand nur der Statuswechsel auf 'failed'. Damit umging ausgerechnet
+    dieser Weg die Stelle, an der die Berichtsmails hängen: fällt das Panel
+    während einer Heilung aus — Deploy, Absturz, Host-Neustart —, sagt
+    `ai_guardian_report` einen Bericht "bei jedem Endzustand" zu, und keiner ging
+    hinaus. Der Server stand weiter, und der Betreiber erfuhr nichts davon.
+
+    Gleichzeitig die Gegenprobe zum Arbeitsgedächtnis: `provider_messages` trägt
+    den entschlüsselten Gedächtnisblock, und `state_json` ist eine gewöhnliche
+    Textspalte, die nie wieder geleert wurde.
+    """
+    from services import ai_run_service
+
+    user = _benutzer(db)
+    server = _server(db)
+    vorfall = _vorfall(db, server, status="open")
+    run = _lauf(db, user, status="running")
+    zustand = ai_run_service.leerer_zustand(
+        [{"role": "user", "content": "Merkzettel: der Betreiber heißt Maik."}],
+        request_id=str(uuid4()),
+    )
+    zustand["guardian"] = {"server_id": server.id, "incident_id": vorfall.id}
+    ai_run_service.zustand_schreiben(run, zustand)
+    db.commit()
+
+    gesehen: dict = {}
+    with (
+        patch.object(EmailService, "is_configured", staticmethod(lambda: True)),
+        patch.object(ai_guardian_report, "_zustellen", lambda **f: gesehen.update(f)),
+    ):
+        anzahl = ai_run_service.unterbrochene_laeufe_abgleichen(db)
+
+    assert anzahl == 1
+    db.refresh(run)
+    assert run.status == "failed"
+    assert run.stop_reason == "process_restart"
+    assert gesehen["geheilt"] is False
+    assert "Merkzettel" not in (run.state_json or "")
+
+
 # ── Die Schwaerzung strukturierter Werte ──────────────────────────────────
 
 
@@ -716,3 +911,57 @@ class TestSchwaerzungStrukturierterWerte:
 
         assert "93.184.216.34" not in ergebnis["lines"][0]
         assert "192.168.1.50" in ergebnis["lines"][1]
+
+
+class TestWelcheWerkzeugeFreitextLiefern:
+    """Welches Werkzeug es war, darf über den Datenschutz nicht entscheiden.
+
+    Genau das war der Zustand: `read_server_logs` schwärzte fremde Adressen,
+    `read_config` nicht — und der Prompt führt das Modell für eine
+    Absturzanalyse ausdrücklich über `search_server_files` nach `read_config`.
+    Dieselbe Logzeile ging damit je nach Werkzeugwahl des Modells geschwärzt
+    oder im Klartext an den Anbieter.
+
+    Geprüft wird über die echte Menge und nicht über eine Kopie der Namen: ein
+    Test mit eigener Liste bliebe grün, wenn jemand die Menge im Code
+    zurückdreht.
+    """
+
+    #: Werkzeuge, deren Ergebnis Text ist, den der Server oder ein Spieler
+    #: geschrieben hat. Dateiinhalte gehören dazu — `read_config` liest jede
+    #: Textdatei, nicht nur Konfigurationen.
+    FREITEXT = (
+        "read_server_logs",
+        "read_guardian_incidents",
+        "read_config",
+        "search_server_files",
+    )
+
+    @pytest.mark.parametrize("werkzeug", FREITEXT)
+    def test_die_adresse_eines_spielers_geht_nicht_hinaus(self, werkzeug: str) -> None:
+        assert werkzeug in _FREITEXT_WERKZEUGE
+
+        ergebnis = _ergebnis_schwaerzen(
+            {"content": "[12:34:56] Anna joined from 93.184.216.34"},
+            freitext=werkzeug in _FREITEXT_WERKZEUGE,
+        )
+
+        assert "93.184.216.34" not in ergebnis["content"]
+
+    def test_die_netzwerkangaben_bleiben_die_ausnahme(self) -> None:
+        """`read_server_network` bleibt draußen — und muss draußen bleiben.
+
+        Es liefert die Bind-Adresse als Betriebsangabe, und ohne sie kann die KI
+        eine falsche Bindung weder erkennen noch mit `propose_bind_ip_update`
+        berichtigen. Das ist die eine Stelle, an der eine öffentliche Adresse
+        keine Person bezeichnet, sondern eine Einstellung.
+        """
+        werkzeug = "read_server_network"
+        assert werkzeug not in _FREITEXT_WERKZEUGE
+
+        ergebnis = _ergebnis_schwaerzen(
+            {"bind_address": "93.184.216.34", "port": 2302},
+            freitext=werkzeug in _FREITEXT_WERKZEUGE,
+        )
+
+        assert ergebnis["bind_address"] == "93.184.216.34"

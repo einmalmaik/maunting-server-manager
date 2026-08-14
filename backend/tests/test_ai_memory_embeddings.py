@@ -87,6 +87,34 @@ def test_a_broken_model_directory_is_reported_once_and_then_ignored(
         ai_embedding_service.reset_for_tests()
 
 
+def test_a_failed_write_discards_the_old_vector(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein Vektor darf nie den *alten* Text beschreiben.
+
+    Der Fall: ein Eintrag wird berichtigt — "Minecraft" wird zu "Factorio" —,
+    und genau bei diesem Schreibvorgang liefert `encode` nichts (das Modell ist
+    weg oder stolpert einmal; anders als `_load` merkt sich `encode` einen
+    solchen Fehlschlag nicht). Blieb der alte Vektor stehen, wurde der Eintrag
+    bei knappem Platz danach dauerhaft für Minecraft-Fragen hochgezogen — und
+    nichts rechnet ihn je nach, denn eine Nachberechnung gibt es für das
+    Gedächtnis nicht.
+    """
+    vorhanden = [[0.0] * ai_embedding_service.EMBEDDING_DIMENSIONS]
+    vorhanden[0][0] = 1.0
+    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: vorhanden)
+    _allow_memory(db, regular_user)
+    row = _write(db, regular_user, "lieblingsspiel", "Am liebsten spiele ich Minecraft")
+    assert ai_memory_service._stored_vector(row) is not None
+
+    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
+    row = _write(db, regular_user, "lieblingsspiel", "Am liebsten spiele ich Factorio")
+
+    assert row.embedding_json is None
+    assert row.embedding_model is None
+    assert ai_memory_service._stored_vector(row) is None
+
+
 def test_a_vector_from_a_different_model_is_ignored(
     db: Session, regular_user: User
 ) -> None:

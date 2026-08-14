@@ -10,6 +10,15 @@ interface PermissionsState {
   reset: () => void
 }
 
+/**
+ * Zählt die Abfragen, damit eine unterwegs befindliche Antwort nicht in einen
+ * Speicher fällt, den inzwischen jemand geräumt hat. `checkAuth()` startet
+ * `refresh()` ohne darauf zu warten — wer in dieser Sekunde abmeldet, bekäme
+ * die Rechtekarte (Rolle, globale Schlüssel, Serverschlüssel) sonst nach dem
+ * `reset()` wieder eingespielt. Dasselbe Muster wie in `nodeStore`.
+ */
+let letzteAbfrage = 0
+
 /** Zentraler RBAC-Store. Quelle der Wahrheit fuer Frontend-Permission-Checks.
  *
  * Backend prueft jeden Call zusaetzlich \u2014 dieser Store entscheidet nur,
@@ -21,14 +30,20 @@ export const usePermissionsStore = create<PermissionsState>((set) => ({
   error: null,
 
   refresh: async () => {
+    const abfrage = ++letzteAbfrage
     set({ isLoading: true, error: null })
     try {
       const me = await rbacApi.me()
+      if (abfrage !== letzteAbfrage) return
       set({ me, isLoading: false, error: null })
     } catch {
+      if (abfrage !== letzteAbfrage) return
       set({ me: null, isLoading: false, error: 'PERMISSIONS_LOAD_FAILED' })
     }
   },
 
-  reset: () => set({ me: null, isLoading: false, error: null }),
+  reset: () => {
+    letzteAbfrage += 1
+    set({ me: null, isLoading: false, error: null })
+  },
 }))

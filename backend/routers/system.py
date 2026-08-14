@@ -270,7 +270,7 @@ def system_version(user: User = Depends(get_current_user)) -> dict:
         latest = release["tag_name"]
         release_url = release["html_url"]
         # SemVer-Vergleich: v-Prefix und git-describe-Suffixe
-        # normalisieren, dann numerisch pruefen ob latest > current.
+        # normalisieren, dann numerisch prüfen ob latest > current.
         update_available = _version_newer(_strip_version(latest), _strip_version(current))
 
     return {

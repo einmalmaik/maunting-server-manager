@@ -10,12 +10,14 @@ gelesene Log von Server A noch vor dem Modell, wenn laengst nach Server B
 gefragt wurde.
 """
 
+import json
 import os
 import struct
 import zlib
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -242,6 +244,40 @@ def test_trimming_spends_the_tool_output_before_the_conversation(
     assert message_character_count(gekuerzt) <= 8_000
 
 
+def test_an_image_attachment_counts_with_its_full_base64_url() -> None:
+    """Listenförmiger Inhalt wird tief gezählt, nicht als `repr` gemessen.
+
+    Hier stand `len(str(content))`: das baute in jeder Werkzeugrunde die
+    vollständige Zeichenkette des Inhalts auf — bei fünf Bildern in
+    Maximalgröße rund 1,7 MB —, nahm ihre Länge und warf sie weg.
+
+    Die naheliegende Abkürzung ist falsch, und genau deshalb steht dieser Test
+    hier: eine Fassung, die nur die Werte der obersten Ebene summiert, zählt
+    für diesen Anhang 52 Zeichen statt Hunderttausender — die Base64-URL liegt
+    eine Ebene tiefer, in `{"url": ...}`. Das Bild wäre für das Budget
+    unsichtbar, `auf_budget_kuerzen` ließe den Verlauf ungekürzt, und der
+    Anbieter wiese die Anfrage wegen des überschrittenen Fensters ab — der
+    Fall, den die Kürzung gerade verhindern soll.
+    """
+    url = "data:image/png;base64," + "A" * 340_000
+    messages = [
+        {"role": "user", "content": "Sieh dir das an"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Unvertrauenswuerdiger Bildanhang: bild.png"},
+                {"type": "image_url", "image_url": {"url": url}},
+            ],
+        },
+    ]
+
+    gezaehlt = message_character_count(messages)
+
+    assert gezaehlt > len(url)
+    # Die 52 Zeichen der flachen Fassung wären hier ein stiller Unterzählfehler.
+    assert gezaehlt > 1_000
+
+
 # ── Der Rueckfluss endet an der Themengrenze ──────────────────────────
 
 
@@ -363,3 +399,88 @@ def test_rows_from_before_the_column_still_flow_back(
 
     assert block is not None
     assert "alt-eins" in block and "alt-zwei" in block
+
+
+# ── Der Werkzeugkatalog fährt mit und zählt mit ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_tool_catalogue_counts_against_the_same_window(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`context_chars` ist die eine Währung — dann muss auch der Katalog hinein.
+
+    Das Budget wurde ausschließlich über die Nachrichtenliste gerechnet:
+    `message_character_count` summiert nur `content`. Der Werkzeugkatalog ging
+    daneben über dieselbe Leitung, als `tools=`, und tauchte in keiner Rechnung
+    auf — bei 51 Werkzeugen rund 45.000 Zeichen, mehr als das gesamte
+    Nachrichtenbudget eines 32k-Modells.
+
+    Der Benutzer sah davon keinen knapperen Kontext, sondern einen
+    abgebrochenen Lauf: der Anbieter lehnt eine zu große Anfrage ab.
+
+    Geprüft wird am echten Segment und nicht an der Formel — genau die
+    Nachrichten und genau der Katalog, die zusammen hinausgehen.
+    """
+    from services import ai_run_broker, ai_stream_service
+    from models import AiProvider
+    from services.openai_compatible_adapter import StreamChunk
+
+    provider = AiProvider(
+        name="Budget", provider_kind="openrouter", default_model="model-a",
+        enabled=True, requires_api_key=False,
+    )
+    db.add(provider)
+    db.commit()
+    db.refresh(provider)
+
+    conversation = _conversation(db, regular_user)
+    start = datetime.now(timezone.utc) - timedelta(hours=2)
+    # Reichlich mehr Verlauf, als in das Fenster passt: nur dann schöpft die
+    # Kürzung das Budget wirklich aus, und nur dann ist die Frage überhaupt
+    # gestellt. Bei knapper Historie bliebe der Test grün, ohne etwas zu wissen.
+    for index in range(100):
+        db.add(AiMessage(
+            id=str(uuid4()), conversation_id=conversation.id,
+            role="user" if index % 2 == 0 else "assistant",
+            content=f"Nachricht {index} " + "x" * 2_000,
+            status="complete",
+            created_at=start + timedelta(minutes=index),
+        ))
+    db.commit()
+
+    # Ein bekannt kleines Fenster. Groß genug, dass der Katalog hineinpasst,
+    # klein genug, dass die Historie ohne die Behebung darüber hinausläuft.
+    fenster = 120_000
+    gesehen: dict = {}
+
+    async def fake(_client, *, provider, api_key, messages, usage, tools=None,
+                   reasoning=False, reasoning_effort=None, cache_marke=False):
+        del provider, api_key, reasoning, reasoning_effort, cache_marke
+        gesehen["messages"] = [dict(item) for item in messages]
+        gesehen["tools"] = tools
+        usage.total_tokens = 10
+        yield StreamChunk("content", "ok")
+
+    monkeypatch.setattr(ai_stream_service, "stream_chat_completion", fake)
+
+    run, fehler = ai_stream_service.lauf_beginnen(
+        db, user=regular_user, conversation=conversation, provider=provider,
+        request_id=uuid4(), content="Und jetzt?", reasoning=False,
+        context_chars=fenster,
+    )
+    assert run is not None, f"Lauf konnte nicht beginnen: {fehler}"
+    ai_run_broker.eroeffnen(run.id)
+    await ai_stream_service.segment_ausfuehren(run.id, client=object())
+
+    assert gesehen.get("tools"), "Es ging kein Werkzeugkatalog hinaus"
+    katalog = len(json.dumps(gesehen["tools"], ensure_ascii=False))
+    nachrichten = message_character_count(gesehen["messages"])
+
+    assert katalog > 0
+    assert nachrichten + katalog <= fenster, (
+        f"Nachrichten ({nachrichten}) und Werkzeugkatalog ({katalog}) sind zusammen "
+        f"{nachrichten + katalog} Zeichen und sprengen das Fenster von {fenster} — "
+        "der Anbieter lehnt die Anfrage ab"
+    )
+    assert gesehen.get("messages"), "Es gingen keine Nachrichten hinaus"

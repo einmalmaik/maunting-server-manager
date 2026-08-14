@@ -22,7 +22,11 @@ from __future__ import annotations
 
 import pytest
 
-from services.ai_redaction import redact_and_count, redact_sensitive_text
+from services.ai_redaction import (
+    redact_and_count,
+    redact_freetext,
+    redact_sensitive_text,
+)
 
 
 # ── Was verschwinden muss ─────────────────────────────────────────────
@@ -50,7 +54,7 @@ from services.ai_redaction import redact_and_count, redact_sensitive_text
         ("credential=xyz", "xyz"),
         # Zusammengeschrieben — das dritte Loch. Der Präfix verlangte hinter
         # jedem Wortteil ein Trennzeichen, und die Grenze davor verbot die
-        # Wortmitte; zusammen liessen sie genau die Schreibweise durch, die in
+        # Wortmitte; zusammen ließen sie genau die Schreibweise durch, die in
         # den INI-Dateien von ARK, Palworld, DayZ und SCUM steht. Das sind die
         # Dateien, die `read_config` liest und an den Anbieter weiterreicht.
         ("ServerAdminPassword=geheim", "geheim"),
@@ -135,3 +139,104 @@ def test_ordinary_text_is_left_alone(harmlos: str) -> None:
 def test_the_authorization_header_keeps_its_established_shape() -> None:
     """Diese Form ist anderswo zugesichert und darf sich nicht verschieben."""
     assert redact_sensitive_text("Authorization: Bearer abc.def.ghi") == "Authorization=[REDACTED]"
+
+
+def test_a_long_word_does_not_bring_the_redaction_to_a_standstill() -> None:
+    """Ein einziges langes Wort darf keine spürbare Zeit kosten.
+
+    Der Präfix vor dem Schlüsselwort (``[A-Za-z0-9._-]*``) darf ohne eine Grenze
+    davor an **jeder** Stelle eines Wortes neu ansetzen und jedes Mal bis zum
+    Ende laufen — quadratischer Aufwand. Gemessen an 50.000 Wortzeichen waren
+    das 101 Sekunden statt 0,002; und solche Zeichenketten stehen in echten
+    Logzeilen und Konfigurationsdateien, die die KI liest. Die Schwärzung läuft
+    dabei im Anfragepfad, ein Hänger dort hält den Arbeiter fest.
+
+    Die Grenze ``(?<![A-Za-z0-9._-])`` lässt je Wort genau einen Ansatzpunkt zu.
+    Fällt sie wieder weg, schlägt dieser Test zu — und zwar deutlich.
+    """
+    import time
+
+    text = "A" * 200_000
+    beginn = time.perf_counter()
+    assert redact_sensitive_text(text) == text
+    assert time.perf_counter() - beginn < 2.0
+
+
+# ── Freitext: zusätzlich fremde IP-Adressen ───────────────────────────
+#
+# `redact_freetext` hatte bis zur Reviewrunde vom 14.08.2026 überhaupt keine
+# Abdeckung — kein einziger Treffer für `redact_freetext`, `freetext` oder
+# `REDACTED_IP` über backend/tests/. Das ist die Funktion, die entscheidet, ob
+# die öffentliche Adresse eines Spielers aus einer Join-Zeile an einen externen
+# KI-Anbieter geht.
+#
+# Die öffentlichen Adressen hier stammen bewusst **nicht** aus den
+# Dokumentationsnetzen (`203.0.113.0/24` und Geschwister): Python zählt die seit
+# 3.13 zu `is_private`, und ein Test damit wäre aus dem falschen Grund rot.
+
+
+@pytest.mark.parametrize(
+    "zeile",
+    [
+        "[12:34:56] Spieler Anna joined from 93.184.216.34",
+        "Connection from 8.8.8.8 refused",
+        "player disconnect ip=1.1.1.1 reason=timeout",
+        "IPv6-Verbindung von 2606:4700:4700::1111 angenommen",
+    ],
+)
+def test_a_public_address_in_freetext_is_redacted(zeile: str) -> None:
+    """In einer Logzeile bezeichnet eine öffentliche Adresse eine Person.
+
+    Sie hat für die Diagnose keinen Wert und ist ein personenbezogenes Datum,
+    das kein Modellanbieter zu sehen braucht.
+    """
+    assert "[REDACTED_IP]" in redact_freetext(zeile)
+
+
+@pytest.mark.parametrize(
+    "bleibt",
+    [
+        # Die Bindeadresse — genau die Zeile, an der man "läuft, aber niemand
+        # kommt drauf" erkennt. Sie zu schwärzen hieße, die Diagnose
+        # abzuschaffen, um ein Datum zu schützen, das keine Person bezeichnet.
+        "server-ip=0.0.0.0",
+        "bind 127.0.0.1:2302",
+        "listening on 192.168.1.50",
+        "gateway 10.0.0.1",
+        "docker bridge 172.17.0.2",
+        "link-local 169.254.0.5",
+        "IPv6 loopback ::1",
+        "ULA fd00::1",
+        # Keine Adressen: `ipaddress` entscheidet, und was durchfällt, bleibt.
+        "Minecraft 1.20.4 gestartet",
+        "Fehlercode 999.1.2.3",
+        "[12:34:56] Serverstart",
+    ],
+)
+def test_freetext_leaves_what_names_no_person(bleibt: str) -> None:
+    assert redact_freetext(bleibt) == bleibt
+
+
+def test_freetext_still_removes_credentials() -> None:
+    """Die IP-Schwärzung kommt **zusätzlich**, nicht an Stelle der übrigen.
+
+    Wäre `redact_freetext` ein eigener Weg statt eine Erweiterung, würde die
+    nächste Ergänzung an `redact_sensitive_text` genau die Werkzeuge nicht
+    erreichen, die den meisten Fremdtext liefern.
+    """
+    text = redact_freetext("RCON_PASSWORD=hunter2 von 93.184.216.34")
+
+    assert "hunter2" not in text
+    assert "93.184.216.34" not in text
+
+
+def test_the_plain_redaction_keeps_addresses() -> None:
+    """Die Gegenprobe zur Trennung der beiden Funktionen.
+
+    `read_server_network` liefert die Bind-Adresse als Betriebsangabe und läuft
+    über `redact_sensitive_text`. Wanderte die IP-Schwärzung ins allgemeine
+    Muster, wäre die Netzwerkdiagnose ohne jede Fehlermeldung tot.
+    """
+    assert redact_sensitive_text("bind_address=93.184.216.34") == (
+        "bind_address=93.184.216.34"
+    )

@@ -167,8 +167,8 @@ export function ServerDetail() {
     ports: {} as Record<string, string>,
     protocols: {} as Record<string, string>,
   });
-  // Die Liste wird ausschliesslich im Netzwerk-Dialog gelesen, also erst dann
-  // geladen. Sonst kostet jeder Aufruf der Detailseite zwei Anfragen fuer Daten,
+  // Die Liste wird ausschließlich im Netzwerk-Dialog gelesen, also erst dann
+  // geladen. Sonst kostet jeder Aufruf der Detailseite zwei Anfragen für Daten,
   // die niemand zu sehen bekommt.
   const { interfaces, loading: interfacesLoading } = useHostInterfaces(
     server?.node_id,

@@ -82,7 +82,7 @@ export function CaptchaTab() {
           </div>
 
           {settings.captcha_enabled && (
-            <div className="max-w-2xl space-y-6 border-t border-border/40 pt-6">
+            <div className="max-w-2xl space-y-6 border-t border-outline-variant/40 pt-6">
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('settings.captcha.provider', { defaultValue: 'Anbieter' })}
@@ -115,7 +115,7 @@ export function CaptchaTab() {
                     placeholder="e.g. 0x4AAAAAA..."
                     disabled={!canWrite}
                   />
-                  <p className="font-body-md text-xs text-on-surface-variant mt-1.5">
+                  <p className="msm-field-help">
                     {t('settings.captcha.siteKeyHint', { defaultValue: 'Öffentlicher Schlüssel zur Anzeige des Widgets im Browser.' })}
                   </p>
                 </div>
@@ -134,7 +134,7 @@ export function CaptchaTab() {
                     placeholder={settings.captcha_secret_key ? '••••••••' : 'e.g. 0x4AAAAAA...'}
                     disabled={!canWrite}
                   />
-                  <p className="font-body-md text-xs text-on-surface-variant mt-1.5">
+                  <p className="msm-field-help">
                     {t('settings.captcha.secretKeyHint', { defaultValue: 'Privater Schlüssel zur serverseitigen Token-Validierung.' })}
                   </p>
                 </div>

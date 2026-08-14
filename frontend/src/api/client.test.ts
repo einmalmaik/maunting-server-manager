@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import i18n from '@/i18n'
 import { useAuthStore } from '@/stores/authStore'
-import { api, apiStream, SanitizedApiError } from './client'
+import { useNodeStore } from '@/stores/nodeStore'
+import { usePermissionsStore } from '@/stores/permissionsStore'
+import { useToastStore } from '@/stores/toastStore'
+import { api, apiStream, getCsrfToken, SanitizedApiError } from './client'
 
 // Locking the language guarantees the test does not silently break, wenn der
 // LanguageDetector im jsdom-Env eine andere Sprache als Fallback waehlt.
@@ -113,6 +116,26 @@ describe('api client', () => {
     })
   })
 
+  describe('CSRF-Speicher am Ende der Sitzung', () => {
+    // Der authStore-Test kann diese Zusage nicht prüfen: dort ist das ganze
+    // Modul gemockt, und `expect(clearCsrfTokenMemory).toHaveBeenCalled()`
+    // sichert nur einen Aufruf zu, nicht einen leeren Speicher. Hier läuft der
+    // echte Client, also steht die Zusage hier.
+    it('vergisst den gemerkten CSRF-Wert, wenn die Sitzung geräumt wird', async () => {
+      // So kommt der Wert im getrennten Hosting herein: über den Antwortkopf,
+      // weil `document.cookie` das Cookie der API-Herkunft dort nicht sieht.
+      fetchSpy.mockReturnValueOnce(
+        mockResponse(200, { ok: true }, { 'X-CSRF-Token': 'wert_dieser_sitzung' }),
+      )
+      await api('/test')
+      expect(getCsrfToken()).toBe('wert_dieser_sitzung')
+
+      useAuthStore.getState().clearSession()
+
+      expect(getCsrfToken()).toBeNull()
+    })
+  })
+
   describe('credentials', () => {
     it('should always include credentials: include', async () => {
       fetchSpy.mockReturnValueOnce(mockResponse(200, { ok: true }))
@@ -156,22 +179,49 @@ describe('api client', () => {
       )
     })
 
-    it('meldet den Benutzer ab, wenn der Refresh scheitert', async () => {
+    // Der gescheiterte Refresh ist ein Sitzungsende wie das Abmelden auch, und
+    // CLAUDE.md Abschnitt 4 verlangt danach einen leeren Speicher. Anfangs fiel
+    // hier gar nichts, dann nur `isAuthenticated` — Benutzer, Rechte und die
+    // Knotenliste mit den Agentenadressen standen weiter im Tab. Die beiden
+    // Tests prüfen deshalb den ganzen Speicher, nicht nur das Flag.
+    function sitzungsspeicherFuellen() {
+      useAuthStore.setState({
+        user: { id: 1, username: 'admin', is_owner: true } as any,
+        isAuthenticated: true,
+        isLoading: false,
+      })
+      usePermissionsStore.setState({ me: { is_owner: true } as any, isLoading: false, error: null })
+      useNodeStore.setState({
+        nodes: [{ id: 7, name: 'node-eu', host: 'https://10.0.0.7:8080' } as any],
+        total: 1,
+      })
+      useToastStore.setState({ toasts: [{ id: 1, message: 'Server prod-eu-1 gestoppt', type: 'error' }] })
+    }
+
+    function sitzungsspeicherIstLeer() {
+      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+      expect(useAuthStore.getState().user).toBeNull()
+      expect(usePermissionsStore.getState().me).toBeNull()
+      expect(useNodeStore.getState().nodes).toEqual([])
+      expect(useToastStore.getState().toasts).toEqual([])
+    }
+
+    it('räumt den Sitzungsspeicher, wenn der Refresh scheitert', async () => {
       // Ohne diesen Schritt bleibt `isAuthenticated` true: die Wache der Route
       // greift nicht, die Oberfläche friert scheinbar angemeldet ein und
       // laufende Intervalle pollen weiter gegen den Refresh-Endpunkt.
-      useAuthStore.setState({ isAuthenticated: true, isLoading: false })
+      sitzungsspeicherFuellen()
       fetchSpy
         .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
         .mockReturnValueOnce(mockResponse(401, { detail: 'Invalid refresh' }))
 
       await expect(api('/test')).rejects.toThrow(i18n.t('errors.SESSION_EXPIRED'))
 
-      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+      sitzungsspeicherIstLeer()
     })
 
-    it('meldet den Benutzer auch im SSE-Pfad ab, wenn der Refresh scheitert', async () => {
-      useAuthStore.setState({ isAuthenticated: true, isLoading: false })
+    it('räumt den Sitzungsspeicher auch im SSE-Pfad, wenn der Refresh scheitert', async () => {
+      sitzungsspeicherFuellen()
       fetchSpy
         .mockReturnValueOnce(mockResponse(401, { detail: 'Unauthorized' }))
         .mockReturnValueOnce(mockResponse(401, { detail: 'Invalid refresh' }))
@@ -180,7 +230,7 @@ describe('api client', () => {
         apiStream('/ai/conversations/1/messages/stream', { method: 'POST', body: '{}' }),
       ).rejects.toThrow(i18n.t('errors.SESSION_EXPIRED'))
 
-      expect(useAuthStore.getState().isAuthenticated).toBe(false)
+      sitzungsspeicherIstLeer()
     })
 
     it('lässt den Anmeldezustand in Ruhe, wenn der Refresh gelingt', async () => {

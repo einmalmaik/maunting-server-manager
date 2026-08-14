@@ -180,6 +180,25 @@ def test_the_unattended_sets_are_cut_not_replaced(db: Session, owner_user: User)
     assert "ask_user" not in aufgabe
 
 
+def test_no_unattended_run_is_asked_to_read_a_skill_it_cannot_read() -> None:
+    """Die Klammer zwischen Werkzeugmenge und Systemprompt.
+
+    ``ai_context_service._skill_index_block`` lässt das Skill-Verzeichnis in
+    einem unbeaufsichtigten Lauf weg — **weil** ``read_skill`` in keiner der
+    beiden Aufzählungen steht. Nimmt jemand es auf, ist der Grund dafür weg
+    und der Zweig gehört entfernt; sonst hätten wir das Gegenteil des
+    ursprünglichen Fehlers: ein Werkzeug ohne das Verzeichnis, in dem die
+    Schlüssel stehen.
+
+    Deshalb steht die Zusage hier und nicht als Kommentar. Sie fällt
+    ausdrücklich um, wenn der Betreiber die Allowlist erweitert — das ist
+    seine Entscheidung, und dieser Test ist die Erinnerung an die zweite
+    Stelle.
+    """
+    assert "read_skill" not in ai_tool_registry.GUARDIAN_HEILUNG_TOOLS
+    assert "read_skill" not in ai_tool_registry.aufgaben_tools("act")
+
+
 def test_a_missing_right_still_shrinks_an_unattended_run(
     db: Session, regular_user: User
 ) -> None:

@@ -110,7 +110,9 @@ def teilbudgets(context_chars: int | None) -> Teilbudgets:
     return _teilbudgets(context_chars if context_chars else MAX_CONTEXT_CHARS)
 
 
-def _skill_index_block(db: Session, user: User | None, query: str) -> str:
+def _skill_index_block(
+    db: Session, user: User | None, query: str, unbeaufsichtigt: bool = False
+) -> str:
     """Stufe eins des schrittweisen Ladens: Name und Beschreibung je Skill.
 
     Rund hundert Tokens pro Eintrag. Der eigentliche Text kommt erst, wenn das
@@ -129,8 +131,26 @@ def _skill_index_block(db: Session, user: User | None, query: str) -> str:
     im Verzeichnis stand nichts Passenderes. Aus sechs Stoerungsskills waehlt
     ein Modell den naechstbesten, wenn ihm niemand sagt, dass "keiner" eine
     Antwort ist.
+
+    **In einem Lauf ohne Zuschauer entfällt der Block.** Er fordert
+    ausdrücklich dazu auf, einen Skill mit ``read_skill`` zu lesen — und genau
+    dieses Werkzeug steht weder in ``GUARDIAN_HEILUNG_TOOLS`` noch in
+    ``AUFGABEN_LESEN``. Ein Heilungslauf bekam damit das Verzeichnis der sechs
+    Störungsdrehbücher samt der Aufforderung, sie zu lesen, und hatte kein
+    Werkzeug dafür: der Versuch kostete eine Runde, das Verzeichnis kostete in
+    jeder Runde Tokens.
+
+    Aufgelöst wird der Widerspruch auf der Prompt-Seite und nicht durch eine
+    Erweiterung der Werkzeugmengen. Die sind von Hand gepflegte Allowlists für
+    Läufe, bei denen niemand danebensitzt; was in einem Skilltext steht, kann
+    die KI aus einem Kundengespräch gelernt haben, und dieser Text lenkte dann
+    einen Lauf, der unter der Freigabe des Betreibers handelt. Sie zu
+    erweitern ist dessen Entscheidung, nicht die einer Aufräumrunde.
+
+    Wer ``read_skill`` später dort aufnimmt, nimmt diesen Zweig wieder weg —
+    ``test_ai_werkzeug_angebot.py`` hält beide Stellen zusammen.
     """
-    if user is None:
+    if user is None or unbeaufsichtigt:
         return ""
     from services import permission_service
 
@@ -155,6 +175,7 @@ def _skill_index_block(db: Session, user: User | None, query: str) -> str:
 
 def _system_message(
     db: Session, conversation: AiConversation, user: User | None = None, query: str = "",
+    unbeaufsichtigt: bool = False,
 ) -> str:
     """Baut den Systemprompt des Assistenten.
 
@@ -162,12 +183,16 @@ def _system_message(
     eine eigene Konstante. Hier bleibt nur das Zusammensetzen mit dem einzigen
     dynamischen Teil, dem Skill-Verzeichnis dieses Benutzers.
 
+    ``unbeaufsichtigt`` heißt: niemand sitzt davor, es ist ein Heilungs- oder
+    Aufgabenlauf. Der Wert entscheidet allein über das Skill-Verzeichnis; die
+    Begründung steht bei `_skill_index_block`.
+
     Der Prompt ist **nicht** die Sicherheitsgrenze. Die liegt in RBAC, der
     Tool-Allowlist, `_resolve_server` und der Bestaetigungspflicht. Er soll das
     Modell nur nicht ohne Not in die Irre laufen lassen.
     """
     del conversation  # Der Prompt haengt nicht mehr an der Unterhaltung.
-    return ai_prompt.build(_skill_index_block(db, user, query))
+    return ai_prompt.build(_skill_index_block(db, user, query, unbeaufsichtigt))
 
 
 def _message_content_for_provider(row: AiMessage) -> str:
@@ -350,6 +375,7 @@ def build_provider_messages(
     query: str = "",
     server_id: int | None = None,
     context_chars: int | None = None,
+    unbeaufsichtigt: bool = False,
 ) -> list[dict[str, Any]]:
     """Baut eine neueste, begrenzte Historie unter einer Zeichenobergrenze.
 
@@ -367,11 +393,19 @@ def build_provider_messages(
     Konstanten — das ist kein Notbehelf, sondern der Weg, auf dem jeder
     Aufrufer, der kein Modell kennt (Tests, aeltere Pfade), unveraendert
     weiterlaeuft.
+
+    ``unbeaufsichtigt`` sagt, dass niemand vor diesem Lauf sitzt — eine Heilung
+    oder ein fällig gewordener Auftrag. Es wirkt nur auf den Systemprompt: das
+    Skill-Verzeichnis entfällt, weil solche Läufe kein ``read_skill`` angeboten
+    bekommen.
     """
     grenzen = teilbudgets(context_chars)
     user = db.get(User, conversation.user_id)
     result: list[dict[str, Any]] = [
-        {"role": "system", "content": _system_message(db, conversation, user, query)}
+        {
+            "role": "system",
+            "content": _system_message(db, conversation, user, query, unbeaufsichtigt),
+        }
     ]
     if user is not None:
         from services import ai_memory_service, permission_service
@@ -436,7 +470,7 @@ def build_provider_messages(
         # nicht im Systemprompt — der ist der stabile Vorspann und genau das,
         # was der Zwischenspeicher des Anbieters wiederverwendet; eine Uhrzeit
         # darin machte ihn bei jeder Frage neu und entwertete ihn für das ganze
-        # Gespräch. Spät heisst ausserdem: nah an der aktuellen Frage.
+        # Gespräch. Spät heißt außerdem: nah an der aktuellen Frage.
         #
         # Rolle `system`, weil es eine Auskunft des Panels ist und kein
         # Benutzertext — anders als Memory und Anhänge, die bewusst `user`
@@ -556,7 +590,7 @@ def geschaetzte_belegung(
     # Anfrage und mit Abstand der groesste unter den nicht-historischen Teilen.
     belegung = len(ai_prompt.build(""))
     # Der Lageblock ist der zweite feste Teil jeder Anfrage. Gezählt wird seine
-    # gemessene Länge und nicht der gebaute Block: bauen hiesse das Gedächtnis
+    # gemessene Länge und nicht der gebaute Block: bauen hieße das Gedächtnis
     # entschlüsseln, und das kostet je Eintrag einen Aufruf des Sidecars — bei
     # jedem Blick auf den Ring, und der wird nach jeder Antwort neu geholt.
     belegung += ai_lage.TYPISCHE_ZEICHEN
@@ -585,6 +619,30 @@ def geschaetzte_belegung(
     return belegung
 
 
+def _zeichen_tief(wert: Any) -> int:
+    """Zählt die Zeichenketten in einem verschachtelten Inhalt.
+
+    Listenförmiger Inhalt entsteht bei Bildanhängen, und dort steckt die
+    Base64-URL zwei Ebenen tief: ``[{"type": "image_url", "image_url":
+    {"url": "data:...;base64,..."}}]``. Hier stand einmal ``len(str(content))``
+    — das baute in **jeder** Werkzeugrunde die vollständige ``repr``-Kette von
+    bis zu 1,7 MB auf, nur um ihre Länge zu nehmen, und warf sie danach weg.
+
+    Rekursiv und nicht flach: eine Fassung, die nur ``teil.values()`` summiert,
+    zählt für einen echten Bildanhang 52 Zeichen statt 349.668. Das Bild wäre
+    damit für das Budget unsichtbar, ``auf_budget_kuerzen`` ließe den Verlauf
+    ungekürzt, und der Anbieter wiese die Anfrage wegen des überschrittenen
+    Fensters ab — genau der Fall, den die Kürzung verhindern soll.
+    """
+    if isinstance(wert, str):
+        return len(wert)
+    if isinstance(wert, dict):
+        return sum(_zeichen_tief(teil) for teil in wert.values())
+    if isinstance(wert, list):
+        return sum(_zeichen_tief(teil) for teil in wert)
+    return 0
+
+
 def message_character_count(messages: list[dict[str, Any]]) -> int:
     total = 0
     for item in messages:
@@ -592,7 +650,7 @@ def message_character_count(messages: list[dict[str, Any]]) -> int:
         if isinstance(content, str):
             total += len(content)
         elif isinstance(content, list):
-            total += len(str(content))
+            total += _zeichen_tief(content)
     return total
 
 

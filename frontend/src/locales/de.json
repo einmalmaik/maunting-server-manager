@@ -259,6 +259,7 @@
       "pendingTitle": "Global gelernte Skills warten auf Freigabe",
       "pendingHint": "Diese Skills sind aus Kundengesprächen entstanden und wirken erst nach deiner Freigabe.",
       "pendingEmpty": "Nichts zu prüfen.",
+      "pendingHidden": "In der Warteschlange: {{count}}. Zum Ansehen und Freigeben fehlt dir das Recht „KI-Skills verwalten“.",
       "errors": {
         "load": "Skills konnten nicht geladen werden.",
         "save": "Skill konnte nicht gespeichert werden."
@@ -1201,6 +1202,7 @@
         },
         "resolveAction": "Incident als gelöst markieren",
         "resolvedSuccess": "Incident erfolgreich als gelöst markiert.",
+        "resolveError": "Incident konnte nicht gelöst werden.",
         "attempts": "Wiederherstellungsversuche",
         "historyErrorTitle": "Incident-Historie nicht verfügbar",
         "historyErrorBody": "Die Störungen konnten nicht geladen werden. Das ist kein Beleg für eine leere Historie.",
@@ -1856,6 +1858,31 @@
     "tree": {
       "contentResults": "Treffer der Inhaltssuche",
       "searchResults": "Suchergebnisse"
+    },
+    "editor": {
+      "noFileOpen": "Keine Datei geöffnet",
+      "closeTab": "{{name}} schließen",
+      "saving": "Speichert…",
+      "conflict": "Konflikt",
+      "saveError": "Speichern fehlgeschlagen",
+      "unsaved": "Ungespeichert",
+      "saved": "Gespeichert",
+      "searchAndReplace": "Suchen und ersetzen",
+      "conflictNotice": "Die Datei wurde außerhalb dieses Editors geändert. Dein lokaler Inhalt bleibt erhalten und wird nicht überschrieben.",
+      "reloadServerVersion": "Server-Version neu laden",
+      "findPlaceholder": "Suchen…",
+      "replacePlaceholder": "Ersetzen durch…",
+      "matchCase": "Groß-/Kleinschreibung",
+      "previousMatch": "Vorheriger Treffer",
+      "nextMatch": "Nächster Treffer",
+      "replace": "Ersetzen",
+      "replaceAll": "Alle ersetzen",
+      "findAll": "Alle finden ({{anzahl}})",
+      "closeSearch": "Suche schließen",
+      "cursorPosition": "Zeile {{zeile}}, Spalte {{spalte}}",
+      "selection": "Auswahl {{anzahl}}",
+      "emptyTitle": "Datei zum Bearbeiten öffnen",
+      "emptyHint": "Mehrere Dateien bleiben als Tabs geöffnet. Änderungen werden nie stillschweigend verworfen."
     }
   },
   "backups": {
@@ -2355,6 +2382,149 @@
     "powerUserDialogWarn": "Dieses Passwort wird vom Panel NICHT gespeichert und kann nicht wieder angezeigt werden. Bitte jetzt sicher notieren (z. B. in einem Passwort-Manager).",
     "powerUserDialogHint": "Verbindung nur über das Docker-Netz (msm-internal) oder via msm-postgres:5432. Gilt nur für diese Datenbank.",
     "powerUserDialogClose": "Schließen — Passwort habe ich notiert"
+  },
+  "databaseConsole": {
+    "breadcrumbServer": "Server",
+    "database": "Datenbank",
+    "selectDatabase": "Datenbank auswählen",
+    "deleteDatabase": "Datenbank löschen",
+    "connectDatabase": "Datenbank verbinden",
+    "rowsUnit": "Zeilen",
+    "reset": "Zurücksetzen",
+    "rowNotAddressable": "Zeile ohne Primärschlüssel nicht eindeutig adressierbar — Löschen und Bearbeiten sind hier gesperrt.",
+    "metrics": {
+      "database": "Datenbank",
+      "status": "Status",
+      "statusHealthy": "Gesund",
+      "statusUnknown": "Unklar",
+      "statusHint": "Backend-geprüft",
+      "tables": "Tabellen",
+      "tablesHint": "In dieser Datenbank",
+      "storage": "Speicher",
+      "storageHint": "Gesamte Datengröße",
+      "connections": "Verbindungen",
+      "connectionsHint": "Aktive / maximale",
+      "latency": "Latenz",
+      "latencyHint": "Backend-Verbindung"
+    },
+    "tabs": {
+      "tables": "Tabellen",
+      "sql": "SQL-Konsole",
+      "users": "Benutzer"
+    },
+    "sql": {
+      "title": "SQL-Konsole",
+      "subtitle": "Interaktive SQL-Befehle ausführen, formatieren und als Favorit speichern.",
+      "saveFavorite": "Favorit speichern",
+      "saveFavoriteTitle": "Als Favorit speichern",
+      "import": "Import",
+      "export": "Export",
+      "run": "Ausführen",
+      "format": "Formatieren",
+      "hint": "Ctrl+Enter · Max. 500 Zeilen im Ergebnis",
+      "favorites": "SQL-Favoriten",
+      "removeFavorite": "Favorit entfernen",
+      "noFavorites": "Keine Favoriten gespeichert.",
+      "untitledFavorite": "Abfrage",
+      "history": "Abfrageverlauf",
+      "clearHistory": "Leeren",
+      "noHistory": "Noch keine Abfragen im Verlauf."
+    },
+    "favoriteModal": {
+      "title": "Abfrage als Favorit speichern",
+      "titleLabel": "Titel / Bezeichnung",
+      "titlePlaceholder": "z. B. Aktive Benutzer suchen",
+      "sqlLabel": "SQL-Befehl"
+    },
+    "tables": {
+      "searchPlaceholder": "Tabellen suchen...",
+      "create": "Neue Tabelle erstellen",
+      "current": "Tabelle:",
+      "drop": "Tabelle löschen",
+      "selected": "gewählt"
+    },
+    "rows": {
+      "insert": "+ Zeile",
+      "insertTitle": "Neue Zeile einfügen",
+      "edit": "Bearbeiten",
+      "editTitle": "Zeile bearbeiten",
+      "delete": "Löschen",
+      "deleteTitle": "Ausgewählte Zeilen löschen",
+      "searchPlaceholder": "Suchen...",
+      "selectTable": "Tabelle auswählen.",
+      "noData": "Keine Daten."
+    },
+    "toolbar": {
+      "filter": "Filter",
+      "sort": "Sortieren",
+      "columns": "Spalten"
+    },
+    "filter": {
+      "column": "Spalte",
+      "columnPlaceholder": "-- Spalte wählen --",
+      "valueContains": "Wert enthält",
+      "valuePlaceholder": "Text..."
+    },
+    "sort": {
+      "direction": "Richtung",
+      "ascending": "Aufsteigend",
+      "descending": "Absteigend"
+    },
+    "schema": {
+      "noTable": "Keine Tabelle",
+      "heading": "Schema & Indizes",
+      "empty": "Keine Schema-Details geladen.",
+      "estimatedRows": "Geschätzte Zeilen",
+      "dataSize": "Datengröße",
+      "columns": "Spalten",
+      "primaryKey": "Primärschlüssel",
+      "indexes": "Indizes",
+      "foreignKeys": "Fremdschlüssel"
+    },
+    "powerUser": {
+      "title": "Power-User",
+      "active": "Owner-Zugang aktiv (kein Cluster-SUPERUSER).",
+      "inactive": "Power-User nur für bewusste Admin-Arbeiten aktivieren.",
+      "rotate": "Rotieren",
+      "demote": "Entziehen",
+      "enable": "Aktivieren"
+    },
+    "users": {
+      "title": "Datenbank-Benutzer",
+      "subtitle": "Zusätzliche Benutzer mit Zugriff auf die Datenbanken dieses Servers.",
+      "create": "Benutzer erstellen",
+      "empty": "Keine Datenbank-Benutzer vorhanden.",
+      "username": "Benutzername",
+      "password": "Passwort",
+      "createdAt": "Erstellt",
+      "lastRotated": "Zuletzt rotiert",
+      "actions": "Aktionen",
+      "rotate": "Rotieren",
+      "delete": "Benutzer löschen"
+    },
+    "editRow": {
+      "title": "Zeile bearbeiten",
+      "subtitle": "Werte für die ausgewählte Tabellenzeile anpassen.",
+      "saveError": "Fehler beim Speichern der Zeile",
+      "saving": "Speichert...",
+      "submit": "Änderungen speichern"
+    },
+    "insertRow": {
+      "title": "Neue Zeile hinzufügen",
+      "subtitle": "Werte für eine neue Tabellenzeile eingeben.",
+      "valuePlaceholder": "Wert eingeben...",
+      "emptyError": "Mindestens ein Feld muss ausgefüllt werden.",
+      "saveError": "Fehler beim Einfügen der Zeile",
+      "saving": "Einfügen...",
+      "submit": "Zeile einfügen"
+    },
+    "deleteRows": {
+      "title": "Zeile(n) löschen",
+      "question": "Möchtest du die {{anzahl}} ausgewählte(n) Zeile(n) wirklich unwiderruflich aus der Tabelle löschen?",
+      "deleteError": "Fehler beim Löschen der Zeilen",
+      "deleting": "Löscht...",
+      "submit": "Unwiderruflich löschen"
+    }
   },
   "language": {
     "label": "Sprache",
@@ -3916,7 +4086,7 @@
       "listServices": "Verträge dieser Integration",
       "listDeliveries": "Webhook-Zustellprotokoll (Statuscode, Versuch — nie Signatur oder Body)",
       "retryDelivery": "Fehlgeschlagene Zustellung erneut einplanen",
-      "productRole": "Der Produkt-Body von PUT /integrations/{integration_id}/products kennt zusätzlich role_id: die globale Rolle, die der Kunde zusätzlich zu seinen bestehenden Rollen erhält, solange ein Vertrag auf dieses Produkt läuft. Leer bedeutet keine Zusatzrolle. Zwei Schranken gelten zusammen: der Aufrufer darf nur Rollen hinterlegen, deren Rechte er selbst haelt (sonst 403; die Systemrolle admin bleibt dem Owner vorbehalten), und der Dienstbenutzer der Integration muss sie ebenfalls halten (sonst 422). Eine Integration kann damit nie mehr vergeben, als beide zusammen decken.",
+      "productRole": "Der Produkt-Body von PUT /integrations/{integration_id}/products kennt zusätzlich role_id: die globale Rolle, die der Kunde zusätzlich zu seinen bestehenden Rollen erhält, solange ein Vertrag auf dieses Produkt läuft. Leer bedeutet keine Zusatzrolle. Zwei Schranken gelten zusammen: der Aufrufer darf nur Rollen hinterlegen, deren Rechte er selbst hält (sonst 403; die Systemrolle admin bleibt dem Owner vorbehalten), und der Dienstbenutzer der Integration muss sie ebenfalls halten (sonst 422). Eine Integration kann damit nie mehr vergeben, als beide zusammen decken.",
       "openapi": "Das vollständige OpenAPI-Schema ist unter /api/docs verfügbar und erfordert eine Anmeldung mit der Berechtigung panel.settings.read."
     },
     "operations": {

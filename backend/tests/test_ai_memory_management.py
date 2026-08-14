@@ -431,6 +431,76 @@ def test_servernotizen_stehen_im_persoenlichen_bereich(
     assert "Timeout" in nach_scope["server"][1]
 
 
+def test_ein_unlesbarer_eintrag_nimmt_nicht_die_ganze_uebersicht_mit(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Entsprechung zur Härtung des Chatwegs, für die Verwaltungsansicht.
+
+    Der Chat überspringt eine Zeile, die sich nicht mehr öffnen lässt, seit
+    `test_one_unreadable_entry_does_not_take_the_whole_chat_down`. Die beiden
+    Lesewege der Oberfläche (`GET /api/ai/memory` und
+    `GET /api/ai/memory/personal`) hatten diese Härtung nicht: der Router
+    übersetzt `DisSidecarError` zu 503, und `DisDecryptionError` ist dessen
+    Unterklasse. Eine einzige beschädigte Zeile — verdrehte AAD, halb
+    eingespielte Sicherung — ließ unter Profil > Memory dauerhaft "Memory ist
+    nicht verfügbar" stehen, auch für die intakten Einträge daneben. Löschen
+    konnte man den Störenfried auch nicht, weil man keine Kennung zu sehen
+    bekam.
+    """
+    from services.dis_client import DisClient, DisDecryptionError
+
+    _allow(db, regular_user, "ai.memory.use")
+    kaputt, _ = ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="user", server_id=None,
+        key="kaputt", value="Unlesbarer Wert",
+    )
+    _remember(db, regular_user, "heil", "Lesbarer Wert")
+    kaputte_id = kaputt.id
+
+    echt = DisClient.decrypt
+
+    def stolpert(payload, *, aad):
+        if aad.endswith(kaputte_id):
+            raise DisDecryptionError("AAD passt nicht mehr")
+        return echt(payload, aad=aad)
+
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(stolpert))
+
+    uebersicht = ai_memory_service.list_entries(db, regular_user, "user", None)
+    assert [row.key for row, _wert in uebersicht] == ["heil"]
+
+    persoenlich = ai_memory_service.personal_entries(db, regular_user)
+    assert [row.key for row, _wert in persoenlich] == ["heil"]
+
+
+def test_ein_toter_sidecar_bleibt_ein_ehrlicher_fehler(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die andere Hälfte derselben Entscheidung.
+
+    Antwortet der Sidecar gar nicht, scheitert **jede** Zeile. Würde die
+    Verwaltungsansicht auch das still überspringen, sähe der Benutzer eine leere
+    Liste und hielte sein Gedächtnis für gelöscht — während jeder Schreibversuch
+    weiterhin mit 503 abbricht. Der Fehler muss also bis zum Router durchkommen.
+    Genau darin unterscheidet sich der Helfer der Oberfläche vom Helfer des
+    Chats, und nur darin.
+    """
+    from services.dis_client import DisClient, DisSidecarError
+
+    _allow(db, regular_user, "ai.memory.use")
+    _remember(db, regular_user, "heil", "Lesbarer Wert")
+
+    def tot(payload, *, aad):
+        raise DisSidecarError("Sidecar nicht erreichbar")
+
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(tot))
+
+    with pytest.raises(DisSidecarError):
+        ai_memory_service.list_entries(db, regular_user, "user", None)
+    with pytest.raises(DisSidecarError):
+        ai_memory_service.personal_entries(db, regular_user)
+
+
 def test_ein_entzogener_server_sperrt_die_eigene_notiz_nicht_ein(
     db: Session, regular_user: User
 ) -> None:

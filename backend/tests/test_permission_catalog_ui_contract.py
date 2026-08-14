@@ -1,9 +1,9 @@
 """Vertragstest zwischen Permission-Katalog und Rollen-Editor.
 
 Der Katalog in ``services/permission_catalog.py`` ist die Single Source of
-Truth. Der Rollen-Editor im Frontend zeigt dazu einen deutschen Titel und eine
-Beschreibung aus ``PERMISSION_DETAILS`` und faellt, wenn ein Key dort fehlt,
-still auf das Backend-Label zurueck.
+Truth. Der Rollen-Editor im Frontend zeigt dazu einen Titel und eine
+Beschreibung aus dem Abschnitt ``permissionDetails`` der Sprachdateien und
+fällt, wenn ein Key dort fehlt, still auf das Backend-Label zurück.
 
 Genau dieser stille Rueckfall war der Fehler: neu hinzugekommene Rechte wie
 ``server.credentials.manage`` landeten ohne Beschreibung in einer Sammelgruppe
@@ -13,12 +13,14 @@ ohne verstaendliche Erklaerung ist ein Sicherheitsproblem: wer nicht weiss, was
 er vergibt, vergibt zu viel.
 
 Dieser Test laeuft im Backend, weil dort die Wahrheit liegt. Er liest die
-Frontend-Datei als Text — bewusst kein TypeScript-Parser, sondern zwei enge
-regulaere Ausdruecke auf zwei klar abgegrenzten Bloecken.
+Texte als JSON aus den Sprachdateien und die Gruppierung als Text aus dem
+Editor — bewusst kein TypeScript-Parser, sondern ein enger regulärer Ausdruck
+auf einem klar abgegrenzten Block.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 
@@ -29,6 +31,11 @@ from services.permission_catalog import ALL_KEYS
 
 ROOT = Path(__file__).resolve().parents[2]
 EDITOR = ROOT / "frontend" / "src" / "Singra" / "UI" / "PermissionEditor.tsx"
+LOCALES = ROOT / "frontend" / "src" / "locales"
+
+# Nur diese beiden Sprachdateien tragen die Rechtetexte; alle anderen Sprachen
+# fallen im Editor auf sie zurück.
+SPRACHEN = ("de", "en")
 
 # Die im Frontend absichtlich anders geschriebenen Zeichen. Der Katalog darf
 # keine ASCII-Ersatzschreibung mehr enthalten, weil sie im Fallback sichtbar
@@ -49,17 +56,48 @@ def _block(source: str, start_marker: str) -> str:
     return rest if end < 0 else rest[:end]
 
 
+def _detail_schluessel(key: str) -> str:
+    """Spiegelt ``detailSchluessel`` im Editor.
+
+    Der Punkt ist bei i18next ein Ebenentrenner, deshalb hält der Unterstrich
+    den Übersetzungsschlüssel flach: ``permissionDetails.server_files_read``.
+    """
+    return key.replace(".", "_")
+
+
+def _permission_details(sprache: str) -> dict[str, dict[str, str]]:
+    quelle = LOCALES / f"{sprache}.json"
+    assert quelle.is_file(), f"Sprachdatei nicht gefunden: {quelle}"
+    daten = json.loads(quelle.read_text(encoding="utf-8"))
+    return daten.get("permissionDetails", {})
+
+
 def test_every_permission_key_has_a_frontend_description() -> None:
     """Kein Recht darf ohne eigenen Titel und Beschreibung angezeigt werden."""
-    details_block = _block(_editor_source(), "const PERMISSION_DETAILS")
-    described = set(re.findall(r"^\s{2}'([a-z0-9_.]+)':\s*\{", details_block, re.MULTILINE))
-
-    missing = sorted(ALL_KEYS - described)
-
-    assert not missing, (
-        "Diese Permission-Keys haben keine Beschreibung in PERMISSION_DETAILS "
-        f"und wuerden mit dem Backend-Rohtext angezeigt: {missing}"
+    # Ohne diese Zeile prüfte der Test irgendwann eine Quelle, die der Editor
+    # gar nicht mehr liest — und bliebe grün, während die Oberfläche wieder
+    # rohe Backend-Labels zeigt. Genau so ist er schon einmal blind geworden.
+    assert "permissionDetails." in _editor_source(), (
+        "Der Rollen-Editor holt seine Texte nicht mehr aus den Sprachdateien; "
+        "dann prüft dieser Test die falsche Quelle."
     )
+
+    for sprache in SPRACHEN:
+        details = _permission_details(sprache)
+        missing = sorted(
+            key
+            for key in ALL_KEYS
+            if not (
+                details.get(_detail_schluessel(key), {}).get("title")
+                and details.get(_detail_schluessel(key), {}).get("desc")
+            )
+        )
+
+        assert not missing, (
+            f"Diese Permission-Keys haben in {sprache}.json keinen Titel und "
+            f"keine Beschreibung und würden mit dem Backend-Rohtext "
+            f"angezeigt: {missing}"
+        )
 
 
 def test_every_permission_key_is_assigned_to_a_group() -> None:
@@ -102,25 +140,16 @@ def _all_definitions():
 INSTALL_VERSPRECHEN = ("Reinstall", "Spieldatei")
 
 
-def _permission_texts(key: str) -> tuple[str, ...]:
+def _permission_texts(key: str) -> tuple[str, str]:
     """Titel und Beschreibung eines Rechts, so wie der Rollen-Editor sie zeigt.
 
-    Gelesen werden ausdruecklich nur die beiden Textwerte und nicht der ganze
-    Block: ein erklaerender Kommentar im Editor darf Woerter enthalten, die dem
-    Betreiber nie unter die Augen kommen.
+    Bewusst nur die deutsche Fassung: die Wortlisten oben sind deutsch, und das
+    Backend-Label daneben ist es auch. Eine auf ``en.json`` nur halb greifende
+    Prüfung wäre schlechter als keine, weil sie Deckung vortäuschte.
     """
-    details_block = _block(_editor_source(), "const PERMISSION_DETAILS")
-    eintrag = re.search(
-        rf"^  '{re.escape(key)}': \{{\n(.*?)^  \}},",
-        details_block,
-        re.MULTILINE | re.DOTALL,
-    )
-    assert eintrag, f"Kein PERMISSION_DETAILS-Eintrag fuer {key}"
-    texte = tuple(
-        re.findall(r"^\s+(?:title|desc): '(.*)',$", eintrag.group(1), re.MULTILINE)
-    )
-    assert len(texte) == 2, f"Titel oder Beschreibung fehlt bei {key}: {texte}"
-    return texte
+    eintrag = _permission_details("de").get(_detail_schluessel(key))
+    assert eintrag, f"Kein permissionDetails-Eintrag für {key} in de.json"
+    return eintrag["title"], eintrag["desc"]
 
 
 def test_server_update_verspricht_nur_die_outbound_webhooks() -> None:

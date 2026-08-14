@@ -136,9 +136,9 @@ export function Backups({ serverId }: BackupsProps) {
     fetchS3Status();
   }, [serverId]);
 
-  // Live-Status Polling mit Cache-Buster. Eng, solange wirklich etwas laeuft —
-  // sonst im Ruhetakt. Ganz abschalten waere ein geschlossener Kreis: `active`
-  // entsteht ausschliesslich aus genau diesem Poll, also wuerde ein vom
+  // Live-Status Polling mit Cache-Buster. Eng, solange wirklich etwas läuft —
+  // sonst im Ruhetakt. Ganz abschalten wäre ein geschlossener Kreis: `active`
+  // entsteht ausschließlich aus genau diesem Poll, also würde ein vom
   // Zeitplan oder von jemand anderem gestartetes Backup nie sichtbar.
   const statusTakt = backupStatus?.active ? 2000 : 10000;
   useEffect(() => {

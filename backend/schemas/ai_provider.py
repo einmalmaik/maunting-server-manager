@@ -51,7 +51,7 @@ class AiProviderResponse(BaseModel):
     name: str
     provider_kind: str
     # Aus der Registry abgeleitet, nicht gespeichert. Steht in der Antwort,
-    # damit die Oberflaeche zeigen kann, wohin die Anfragen gehen. ``None``
+    # damit die Oberfläche zeigen kann, wohin die Anfragen gehen. ``None``
     # bei einer geparkten Zeile, deren Anbieter diese Version nicht kennt —
     # sie soll trotzdem in der Liste erscheinen.
     base_url: str | None = None

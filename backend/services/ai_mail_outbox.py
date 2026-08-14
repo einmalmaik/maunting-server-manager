@@ -54,16 +54,39 @@ Rechnung von oben, nur mit einer teureren Gegenseite. Hier liegt der Aufruf
 innerhalb derselben Schranke wie der Versand, und er ueberlebt einen Neustart.
 Misslingt er, geht der beim Einreihen gerenderte Text hinaus; verschickt wird
 immer, und ein misslungener Verfassungsschritt zaehlt nicht als Fehlversuch.
+
+**Und die Datenbankarbeit liegt daneben, in genau einem Thread.**
+`_uebernehmen`, `_adresse`, `_abschliessen` und `_fehlschlag` sind synchron:
+jeder öffnet seine eigene Sitzung, und `_adresse` fragt darin über
+`ai_mail.empfaenger` den DIS-Sidecar nach der Adresse. Geradewegs aus der
+Koroutine gerufen stand die Ereignisschleife der ganzen Anwendung so lange
+still, wie diese Umläufe dauerten — bei einem vollen Stapel bis zu `STAPEL`
+Sidecar-Aufrufe und doppelt so viele Datenbankumläufe, ausgelöst von einem
+Vorgang, den kein Benutzer angestoßen hat. Jetzt gehen sie über
+`_in_der_datenbank`, und die Schleife bleibt frei.
+
+Dass es **ein** Thread ist und nicht der Vorratsausführer hinter
+`asyncio.to_thread`, hat zwei Gründe. Erstens teilen sich auf SQLite alle
+Sitzungen eine einzige Verbindung; zwei Transaktionen gleichzeitig darauf sind
+keine Nebenläufigkeit, sondern ein Datenfehler — dieselbe Rechnung wie in
+`ai_stream_service._werkzeug_nebenlaeufigkeit`. Zweitens hält `aufraeumen` sein
+Versprechen nur, wenn danach wirklich niemand mehr schreibt: einen Ausführer,
+der diesem Modul gehört, kann es beim Herunterfahren leeren; den der
+Ereignisschleife nicht. Gekostet hat die Entscheidung nichts — die Umläufe sind
+Millisekunden-Vorgänge, und die Gleichzeitigkeit, auf die es ankommt, ist die
+des Versands unter `GLEICHZEITIG`.
 """
 
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 import json
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
 
 from sqlalchemy.orm import Session
 
@@ -163,6 +186,49 @@ def _sitzung() -> Session:
     import database
 
     return database.SessionLocal()
+
+
+#: Der eine Thread, in dem die Datenbankarbeit des Arbeiters läuft. Entsteht
+#: beim ersten Griff und wird beim Herunterfahren wieder abgeräumt; läuft kein
+#: Arbeiter, gibt es ihn nicht.
+_DB_THREAD: ThreadPoolExecutor | None = None
+
+_Ergebnis = TypeVar("_Ergebnis")
+
+
+async def _in_der_datenbank(
+    funktion: Callable[..., _Ergebnis], *args: Any, **kwargs: Any
+) -> _Ergebnis:
+    """Einen der vier synchronen Helfer laufen lassen, ohne die Schleife anzuhalten.
+
+    Der Aufruf geht in den einen Thread dieses Moduls (siehe Modulkopf) und
+    kommt als Ergebnis zurück, als wäre er hier gelaufen. `partial` ist nötig,
+    weil `run_in_executor` keine Schlüsselwortargumente durchreicht —
+    `_fehlschlag(..., endgueltig=True)` braucht genau das.
+    """
+    global _DB_THREAD
+    if _DB_THREAD is None:
+        _DB_THREAD = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="ai-mail-outbox-db"
+        )
+    schleife = asyncio.get_running_loop()
+    return await schleife.run_in_executor(
+        _DB_THREAD, partial(funktion, *args, **kwargs)
+    )
+
+
+def _db_thread_leeren() -> None:
+    """Auf die letzte Datenbankarbeit warten und den Thread beenden.
+
+    Steht neben `aufraeumen`, weil dessen Zusage sonst nur die halbe wäre: die
+    Aufgabe abzubrechen beendet den Versand, nicht den Schreibvorgang, der
+    gerade im Thread läuft. Erst hier ist sicher, dass keine Sitzung mehr offen
+    ist, wenn die Anwendung ihre Datenbankverbindungen abräumt.
+    """
+    global _DB_THREAD
+    ausfuehrer, _DB_THREAD = _DB_THREAD, None
+    if ausfuehrer is not None:
+        ausfuehrer.shutdown(wait=True)
 
 
 def _kann_ueberspringen(db: Session) -> bool:
@@ -411,9 +477,10 @@ def _fehlschlag(auftrag: _Auftrag, grund: str, *, endgueltig: bool = False) -> N
 
 async def _zustellen(auftrag: _Auftrag) -> bool:
     """Eine einzelne Zeile. Wirft nie — ein Fehler ist ein Vermerk, kein Abbruch."""
-    adresse = _adresse(auftrag)
+    adresse = await _in_der_datenbank(_adresse, auftrag)
     if adresse is None:
-        _fehlschlag(
+        await _in_der_datenbank(
+            _fehlschlag,
             auftrag,
             "kein Empfaenger: abbestellt, kein Versandweg oder keine Adresse",
             endgueltig=True,
@@ -442,12 +509,12 @@ async def _zustellen(auftrag: _Auftrag) -> bool:
         # Versuch, den niemand zu Ende gefuehrt hat.
         raise
     except Exception as exc:  # noqa: BLE001 - genau dafuer gibt es diese Tabelle
-        _fehlschlag(auftrag, f"{type(exc).__name__}: {exc}")
+        await _in_der_datenbank(_fehlschlag, auftrag, f"{type(exc).__name__}: {exc}")
         return False
     if not geglueckt:
-        _fehlschlag(auftrag, "Versand meldete Fehlschlag")
+        await _in_der_datenbank(_fehlschlag, auftrag, "Versand meldete Fehlschlag")
         return False
-    _abschliessen(auftrag)
+    await _in_der_datenbank(_abschliessen, auftrag)
     return True
 
 
@@ -463,7 +530,9 @@ async def runde(grenze: int | None = None) -> int:
     Testsuite baut je Test eine neue. Dieselbe Lehre wie bei den Schloessern in
     `ai_model_catalog`.
     """
-    auftraege = _uebernehmen(grenze if grenze is not None else STAPEL)
+    auftraege = await _in_der_datenbank(
+        _uebernehmen, grenze if grenze is not None else STAPEL
+    )
     if not auftraege:
         return 0
     schranke = asyncio.Semaphore(GLEICHZEITIG)
@@ -525,25 +594,38 @@ async def aufraeumen() -> None:
 
     Was mitten im Versand abgebrochen wird, ist nicht verloren: die Zeile steht
     weiter auf ``offen`` und faellt nach `UEBERNAHME` zurueck in die
-    Warteschlange.
+    Warteschlange. Dasselbe gilt für den schmalen Augenblick zwischen dem
+    geglückten Versand und seinem Vermerk: wer den Prozess genau dort trifft,
+    bekommt diese eine Mail später ein zweites Mal. Der Tausch ist bewusst —
+    die Gegenrichtung wäre eine Zeile, die als zugestellt gilt, ohne dass
+    jemand weiß, ob sie hinausging.
+
+    Zum Abwarten gehört der Datenbankthread. Ein abgebrochener Versand lässt
+    seinen letzten Schritt — `_abschliessen` oder `_fehlschlag` — dort zu Ende
+    laufen; ohne `_db_thread_leeren` käme dessen Commit auf einer Verbindung an,
+    die es nicht mehr gibt.
     """
     global _arbeiter
     aufgabe, _arbeiter = _arbeiter, None
-    if aufgabe is None or aufgabe.done():
-        return
-    aufgabe.cancel()
-    await asyncio.gather(aufgabe, return_exceptions=True)
+    if aufgabe is not None and not aufgabe.done():
+        aufgabe.cancel()
+        await asyncio.gather(aufgabe, return_exceptions=True)
+    _db_thread_leeren()
 
 
 def zuruecksetzen_fuer_tests() -> None:
-    """Arbeiter und Sitzungsfabrik verwerfen.
+    """Arbeiter, Datenbankthread und Sitzungsfabrik verwerfen.
 
     Eine Aufgabe aus einer geschlossenen Ereignisschleife wird nie mehr fertig,
     und eine Sitzungsfabrik aus einem fremden Test zeigt auf eine Datenbank, die
-    es nicht mehr gibt.
+    es nicht mehr gibt. Für den Datenbankthread gilt dasselbe, nur schärfer:
+    seine Sitzung hält die Verbindung des vorigen Tests, und was er noch
+    schreibt, schreibt er in eine Datenbank, die dieser Test schon abgeräumt
+    hat. `shutdown(wait=True)` wartet ihn deshalb aus.
     """
     global _arbeiter, _SITZUNGEN
     if _arbeiter is not None:
         _arbeiter.cancel()
     _arbeiter = None
+    _db_thread_leeren()
     _SITZUNGEN = None

@@ -68,6 +68,7 @@ from services.ai_tool_registry import (
     aufgaben_tools,
 )
 from services.ai_context_service import (
+    MIN_HISTORY_CHARS,
     anlagenwissen_nachtrag,
     auf_budget_kuerzen,
     build_provider_messages,
@@ -188,11 +189,25 @@ def _finalize_stream(
             logger.warning("AI usage event missing at finalization message_id=%s", message_id)
             return
         if message is not None:
+            # **Die Antwort wird nicht geschwärzt — und das ist Absicht.**
+            #
+            # Sie ist der einzige Text hier, in dem eine Zuweisung eine
+            # *Anleitung* sein kann: auf "wie setze ich das RCON-Passwort"
+            # antwortet ein Modell mit `rcon.password=DeinPasswort`, und
+            # `[REDACTED]` an dieser Stelle wäre keine Antwort mehr. Die Wege
+            # nach draußen sind trotzdem alle dicht: an den Anbieter geht die
+            # Historie nur durch `redact_sensitive_text` (ai_context_service),
+            # in die Berichtsmails ebenso (ai_task_report, ai_guardian_report),
+            # und gelesen wird diese Zeile ausschließlich von dem Benutzer,
+            # dessen Unterhaltung sie ist. Wer das ändert, muss die Zeile hier
+            # mit ändern — und dann auch `_abschnitt_fuer_ablage` daneben,
+            # sonst steht derselbe Text roh in `sections_json`.
             message.content = content
             # Denkschritte werden mitgespeichert, damit der aufklappbare Block
-            # nach einem Neuladen der Seite noch da ist. Redigiert wie jeder
-            # andere Modelltext auch: ein Modell kann in seinen Ueberlegungen
-            # genauso einen Key wiederholen wie in der Antwort.
+            # nach einem Neuladen der Seite noch da ist. Anders als die Antwort
+            # **wird** er geschwärzt: er ist Selbstgespräch und keine Anleitung,
+            # niemand liest hier eine Beispielzeile heraus — und ein Modell
+            # wiederholt in seinen Überlegungen genauso einen Key wie im Text.
             message.reasoning = (
                 redact_sensitive_text(reasoning)[:MAX_REASONING_CHARS] or None
             )
@@ -281,13 +296,30 @@ def _serverbezug(eintraege: list[dict]) -> int | None:
 # eines Spielers, und die ist ein personenbezogenes Datum ohne jeden Nutzen fuer
 # eine Diagnose.
 #
-# `read_config` steht bewusst **nicht** hier, obwohl auch dort IP-Adressen
-# vorkommen. Die sind dann aber Einstellungen — die Bind-Adresse in
-# `server.properties`, der Datenbankhost in einer Plugin-Konfiguration —, und
-# genau an ihnen erkennt die KI den haeufigsten Fehler ueberhaupt: der Dienst
-# horcht auf der falschen Adresse. Sie zu schwaerzen hiesse, die Diagnose
-# abzuschaffen, um ein Datum zu schuetzen, das keine Person bezeichnet.
-_FREITEXT_WERKZEUGE = frozenset({"read_server_logs", "read_guardian_incidents"})
+# `read_config` und `search_server_files` stehen hier, obwohl sie nach
+# Einstellungen klingen. Hier stand einmal das Gegenteil, begründet mit der
+# Bind-Adresse in `server.properties` — und die Begründung trägt nicht:
+#
+# * Der Prompt führt das Modell mit diesen beiden Werkzeugen ausdrücklich in
+#   Logdateien ("`read_config` liest jede Textdatei des Servers, nicht nur
+#   Konfigurationen", und der Weg zur Absturzanalyse ist `search_server_files`
+#   nach dem Begriff, dann `read_config` mit `offset`). Die Spieleradressen aus
+#   den Join-Zeilen gingen damit ungeschwärzt hinaus, sobald das Modell dieses
+#   Werkzeug statt `read_server_logs` wählte — Datenschutz per Zufall.
+# * Die Bind-Adresse überlebt ohnehin: `_ersetze_ip` lässt private, Loopback-,
+#   Link-Local- und unspezifizierte Adressen grundsätzlich stehen, und das ist
+#   praktisch jede Bind-Adresse.
+#
+# `read_server_network` bleibt draußen und bleibt damit die Quelle für die
+# Netzwerkdiagnose. Der Preis der Änderung ist zu benennen: eine öffentlich
+# routbare Adresse als Datenbankhost in einer Plugin-Konfiguration wird künftig
+# `[REDACTED_IP]`.
+_FREITEXT_WERKZEUGE = frozenset({
+    "read_server_logs",
+    "read_guardian_incidents",
+    "read_config",
+    "search_server_files",
+})
 
 
 def _ergebnis_schwaerzen(wert, *, freitext: bool = False):
@@ -523,11 +555,39 @@ def _werkzeug_ausfuehren(user_id: int, call) -> tuple[object, str | None]:
     return _ergebnis_schwaerzen(wert, freitext=call.name in _FREITEXT_WERKZEUGE), None
 
 
+def _aufrufnachricht(calls) -> dict:
+    """Der Assistentenzug, der die Werkzeugaufrufe trägt.
+
+    Reine Datenform gegenüber dem Anbieter, keine Logik. Sie stand dreimal
+    wörtlich gleich in dieser Datei — bei den Lesewerkzeugen, bei der
+    abgewiesenen Rückfrage und beim Rückfluss der Schreibaufrufe. Eine
+    Anpassung des Formats musste an drei Orten gleich landen; bleibt eine
+    zurück, weist der Anbieter genau die Runde ab, in der ein Schreibaufruf
+    beantwortet wird.
+    """
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(call.arguments, ensure_ascii=True),
+                },
+            }
+            for call in calls
+        ],
+    }
+
+
 async def _tool_followup_messages(
     *, user_id: int, conversation_id: str, tool_calls, deferred=(),
     correlation_id: str | None = None, run_id: str | None = None,
     guardian: GuardianKontext | None = None,
     aufgabe: AufgabenKontext | None = None,
+    anlagenwissen_noetig: bool = True,
 ) -> tuple[list[dict], list[dict], dict | None]:
     """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
 
@@ -565,6 +625,15 @@ async def _tool_followup_messages(
     Anlage, um die es in dieser Runde ging. Vorher konnte es nicht dabei sein —
     beim Anlegen des Laufs war der Server noch nicht bekannt. Ist nichts
     nachzureichen, ist er None.
+
+    ``anlagenwissen_noetig=False`` heißt: der Lauf hat das Anlagenwissen schon
+    bekommen, das Lesen kann entfallen. Es entfiel bisher nicht — die
+    Entdopplung stand erst beim Aufrufer, und ab der zweiten Werkzeugrunde wurde
+    das Ergebnis weggeworfen, nachdem es das ganze sichtbare Gedächtnis gelesen,
+    jede Zeile einzeln gegen die Rechte geprüft und über den Sidecar
+    entschlüsselt hatte. Teurer als die Arbeit war die Nebenwirkung:
+    `server_shared_context` zählt bei jedem Aufruf `use_count` hoch, und der
+    Zähler entscheidet beim nächsten Engpass mit, was bleibt.
     """
     deferred = [(call, reason) for call, reason in deferred]
     if len(tool_calls) + len(deferred) > MAX_TOOL_CALLS:
@@ -577,11 +646,25 @@ async def _tool_followup_messages(
         # teilweise aus Serverlogs, also aus Text, den ein Spieler geschrieben
         # haben kann. Eine Regel, die das Modell befolgen *soll*, ist gegen so
         # etwas keine Schranke.
+        #
+        # Ein Werkzeug außerhalb der Menge wird **aussortiert, nicht geworfen**:
+        # der Aufruf wandert mit Begründung nach `deferred`, das Modell bekommt
+        # eine Antwort und arbeitet weiter. Vorher riss ein einziges solches
+        # Werkzeug den ganzen Heilungslauf ab — die Ausnahme verließ diese
+        # Funktion, wurde im Fehlerbehandler zu `AI_TOOL_REJECTED` und beendete
+        # den Lauf mit 'failed'. Der gestörte Server blieb stehen, und der
+        # Bericht an den Betreiber war leer. Ausgerechnet `read_skill` ist so
+        # ein Fall: es liegt in `READ_TOOLS`, kommt an der Prüfung oben vorbei,
+        # und der Systemprompt bewirbt es. Die Allowlist bleibt unverändert
+        # scharf — ausgeführt wird nach wie vor nichts.
+        erlaubte: list = []
         for call in tool_calls:
             if call.name not in GUARDIAN_HEILUNG_TOOLS:
-                raise AiActionValidationError(
-                    "Dieses Werkzeug steht in einer Guardian-Heilung nicht zur Verfuegung"
-                )
+                deferred.append((call, (
+                    "Dieses Werkzeug steht in einer Guardian-Heilung nicht zur "
+                    "Verfügung. Der Aufruf lief nicht — arbeite ohne ihn weiter."
+                )))
+                continue
             genannt = call.arguments.get("server_id")
             if call.name in SERVER_READ_TOOLS and genannt is not None:
                 # `int(genannt)` stand hier ohne Typpruefung. Die Argumente
@@ -601,17 +684,28 @@ async def _tool_followup_messages(
                     raise AiActionValidationError(
                         "In einer Guardian-Heilung ist nur der betroffene Server erlaubt"
                     )
+            erlaubte.append(call)
+        tool_calls = erlaubte
     if aufgabe is not None:
         # Dieselbe Durchsetzung wie oben, mit einem Unterschied: **keine**
         # Serverbindung. Ein stehender Auftrag gehoert keinem Server — "sieh
         # nach meinen Servern" meint alle, die der Benutzer sehen darf, und
         # welche das sind, entscheidet `_resolve_server` bei jedem Aufruf
         # ohnehin einzeln.
+        #
+        # Aussortiert statt geworfen, aus demselben Grund wie oben: der
+        # nächtliche Auftrag soll an einem Werkzeug scheitern, nicht am Lauf.
+        menge = aufgaben_tools(aufgabe.kind)
+        erlaubte = []
         for call in tool_calls:
-            if call.name not in aufgaben_tools(aufgabe.kind):
-                raise AiActionValidationError(
-                    "Dieses Werkzeug steht in einer geplanten Aufgabe nicht zur Verfuegung"
-                )
+            if call.name not in menge:
+                deferred.append((call, (
+                    "Dieses Werkzeug steht in einer geplanten Aufgabe nicht zur "
+                    "Verfügung. Der Aufruf lief nicht — arbeite ohne ihn weiter."
+                )))
+                continue
+            erlaubte.append(call)
+        tool_calls = erlaubte
     # Zugriff und Unterhaltung **einmal** pruefen, bevor irgendetwas laeuft.
     # Eine kurze eigene Transaktion: die Ausfuehrung bringt jetzt ihre eigenen
     # Sitzungen mit, und eine ueber die ganze Runde offene waere genau das, was
@@ -623,21 +717,7 @@ async def _tool_followup_messages(
         if get_owned_conversation(db, conversation_id, user) is None:
             raise AiActionValidationError("Unterhaltung ist nicht mehr verfuegbar")
 
-    assistant_call = {
-        "role": "assistant",
-        "content": None,
-        "tool_calls": [
-            {
-                "id": call.id,
-                "type": "function",
-                "function": {
-                    "name": call.name,
-                    "arguments": json.dumps(call.arguments, ensure_ascii=True),
-                },
-            }
-            for call in [*tool_calls, *(item[0] for item in deferred)]
-        ],
-    }
+    assistant_call = _aufrufnachricht([*tool_calls, *(item[0] for item in deferred)])
 
     # ── Ausfuehren ───────────────────────────────────────────────────────
     #
@@ -806,7 +886,7 @@ async def _tool_followup_messages(
             # und sie soll sie auch nicht kennen — sie fuehrt Werkzeuge aus.
             nachtrag = (
                 anlagenwissen_nachtrag(db, user_id=user_id, server_id=bezug)
-                if bezug is not None
+                if bezug is not None and anlagenwissen_noetig
                 else None
             )
             db.commit()
@@ -1130,7 +1210,6 @@ def _vorschlaege_zuruecknehmen(proposal_ids: list[str], *, grund: str) -> None:
     """
     if not proposal_ids:
         return
-    from models import AiActionProposal
 
     try:
         with SessionLocal() as db:
@@ -1161,21 +1240,7 @@ def _ask_refusal_messages(tool_calls) -> list[dict]:
     deren Plan auf einer Rueckfrage aufbaut, ist als Ganzes hinfaellig — das
     Modell soll sie neu fassen, nicht die Haelfte davon weiterverwenden.
     """
-    assistant_call = {
-        "role": "assistant",
-        "content": None,
-        "tool_calls": [
-            {
-                "id": call.id,
-                "type": "function",
-                "function": {
-                    "name": call.name,
-                    "arguments": json.dumps(call.arguments, ensure_ascii=True),
-                },
-            }
-            for call in tool_calls
-        ],
-    }
+    assistant_call = _aufrufnachricht(tool_calls)
     hinweis = (
         "In einer Guardian-Heilung sitzt niemand am Panel; Rueckfragen sind "
         "nicht moeglich. Diese Runde wurde deshalb vollstaendig verworfen. "
@@ -1227,21 +1292,7 @@ def _write_followup_messages(
             **({"error": proposal["error"]} if proposal.get("error") else {}),
         })
 
-    assistant_call = {
-        "role": "assistant",
-        "content": None,
-        "tool_calls": [
-            {
-                "id": call.id,
-                "type": "function",
-                "function": {
-                    "name": call.name,
-                    "arguments": json.dumps(call.arguments, ensure_ascii=True),
-                },
-            }
-            for call in tool_calls
-        ],
-    }
+    assistant_call = _aufrufnachricht(tool_calls)
     messages: list[dict] = [assistant_call]
     for call in tool_calls:
         outcomes = outcome_by_tool.get(call.name, [])
@@ -1570,6 +1621,13 @@ def _lauf_abschliessen(
         run.stop_reason = stop_reason
         if zustand is not None:
             ai_run_service.zustand_schreiben(run, zustand)
+        if status in AUSGELAUFEN:
+            # Das Arbeitsgedächtnis wird nicht mehr gebraucht — und es trägt
+            # den entschlüsselten Gedächtnisblock des Benutzers im Klartext.
+            # Der Rückgabewert ist **dasselbe** Wörterbuch: die Nachbereitung
+            # gleich darunter schreibt es beim Setzen einer Berichtsmarke
+            # zurück, und mit der alten Fassung wäre der Klartext wieder da.
+            zustand = ai_run_service.arbeitsspeicher_leeren(run, zustand)
         if status != "running":
             # Ein geparkter oder beendeter Lauf hat kein laufendes Segment mehr.
             # Die naechste Fortsetzung legt eine neue Nachricht an.
@@ -1698,8 +1756,22 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     #
     # Die bekannten Fehler behandelt `_segment_vorbereiten` selbst und gibt sie
     # als Tupel zurueck. Dieser Block ist fuer das Uebrige da.
+    #
+    # `to_thread` und nicht direkt: die Vorbereitung ist keine kurze
+    # Datenbanktransaktion, wie hier lange stand. Sie öffnet eine Sitzung, macht
+    # rund acht Rundreisen und holt sich mittendrin über `resolve_api_key` den
+    # Schlüssel beim DIS-Sidecar — und das ist ein **synchrones** `httpx.post`
+    # mit 15 Sekunden Frist. Direkt aufgerufen stand der ganze Panelprozess
+    # solange still, denn diese Koroutine liegt als Aufgabe auf der Hauptschleife.
+    # Derselbe Fehler war für den Laufbeginn schon einmal behoben worden
+    # (`lauf_beginnen_nebenher`); das Segment war dabei übersehen worden.
+    #
+    # Nichts Schleifengebundenes überquert dabei die Threadgrenze: im Rumpf von
+    # `_segment_vorbereiten` steht kein einziger `ai_run_broker`-Aufruf, die
+    # Sitzung wird dort geöffnet und geschlossen, und der einzige ORM-Wert ist
+    # durch `db.refresh` / `db.expunge` abgelöst.
     try:
-        vorbereitung, fehler = _segment_vorbereiten(run_id)
+        vorbereitung, fehler = await asyncio.to_thread(_segment_vorbereiten, run_id)
     except Exception as exc:
         logger.exception("AI-Segment-Vorbereitung abgebrochen run_id=%s", run_id)
         ai_run_broker.veroeffentlichen(
@@ -1751,7 +1823,10 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         # Rahmen faellt die Werkzeugeinengung weg, und `ask_user` wuerde ihn
         # parken, bis er ablaeuft.
         logger.error("Laufrahmen unlesbar, Lauf wird beendet run_id=%s", run_id)
-        _lauf_abschliessen(run_id, status="failed", stop_reason="guardian_frame_lost")
+        # Der Grund heißt nicht "guardian_...": hier scheitern beide Rahmen,
+        # und ein Aufgabenlauf, der unter dem Namen des Wächters abbricht,
+        # schickt den Nachlesenden in die falschen Vorfälle.
+        _lauf_abschliessen(run_id, status="failed", stop_reason="laufrahmen_unlesbar")
         return
 
     # **Der gemeinsame Nenner beider Rahmen: es sitzt niemand davor.**
@@ -1786,6 +1861,24 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
 
     chunks: list[str] = []
     thoughts: list[str] = []
+    # Der Absatz, den die nächste Denkzeile vorangestellt bekommt. Gesetzt wird
+    # er an der Rundennaht ganz unten, eingelöst beim ersten Gedanken der neuen
+    # Runde — genau wie beim Antworttext, nur aufgeschoben. Ohne ihn klebte der
+    # letzte Gedanke einer Runde am ersten der nächsten: „…sehe ich mir zuerst
+    # die Logs an.Die Logs zeigen einen Portkonflikt…“.
+    denknaht = ""
+    # Wie viel Denktext dieser **Lauf** schon gesammelt hat. Der Adapter zählt
+    # dasselbe, aber je Anfrage: er schreibt in `usage.reasoning_chars`, und
+    # `current_usage` wird nach jeder Werkzeugrunde neu angelegt — der Zähler
+    # fing also jede Runde wieder bei null an. `usage_addieren` übernimmt ihn
+    # ausdrücklich nicht ("die gehören der laufenden Runde und werden vom
+    # Aufrufer verwaltet"); genau dieser Zähler ist der Aufrufer, der das tut.
+    #
+    # Ohne ihn standen bei sechzehn Runden bis zu sechzehnmal 32.000 Zeichen im
+    # Vermittler und in `sections_json`, während `_finalize_stream` beim
+    # Speichern auf 32.000 kürzt: der Benutzer sah live den ganzen Denkverlauf
+    # und nach einem Neuladen dessen Anfang.
+    gedachte_zeichen = 0
     usage = StreamUsage()
     abgerechnet = False
     gestellte_frage: dict | None = None
@@ -1799,6 +1892,32 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     # Unterschied gehoert ins Protokoll. Genau dafuer stand `stop_reason`
     # ('budget') im Modell und wurde nie gesetzt.
     budget_erschoepft = False
+
+    def _abbruch_abrechnen() -> None:
+        """Der ehrliche Abschluss eines Laufs, der nicht zu Ende kam.
+
+        Dreimal wörtlich derselbe Aufruf stand hier: abgelöst, abgebrochen,
+        gescheitert. Das ist die Stelle, an der abgerechnet wird — wer ein
+        Argument ergänzt und nur zwei der drei Kopien anfasst, verbucht
+        abgebrochene Läufe anders als abgelöste.
+
+        Parameterlos und unmittelbar neben den Zählern, aus denen sie liest.
+        Braucht sie einmal ein Argument, ist die Dopplung die ehrlichere
+        Fassung — dann gehört sie zurück an ihre drei Stellen.
+        """
+        _finalize_stream(
+            message_id=message_id,
+            usage_event_id=vorbereitung.usage_event_id,
+            content="".join(chunks),
+            usage=usage,
+            estimated_actual_tokens=0,
+            failed=True,
+            had_output=bool(chunks),
+            token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
+            reasoning="".join(thoughts),
+            abschnitte=ai_run_broker.abschnitte(run_id),
+        )
+
     try:
         tools = provider_tool_definitions()
         # **Angeboten wird nur, was auch ausgefuehrt wuerde.**
@@ -1830,14 +1949,28 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             eintrag for eintrag in tools
             if str(eintrag.get("function", {}).get("name")) in erlaubt
         ]
+        # Was der Katalog selbst kostet. Er geht in Zeile `tools=tools` neben den
+        # Nachrichten über dieselbe Leitung, wurde aber in keinem Budget
+        # mitgezählt: `message_character_count` summiert nur `content`. Bei 51
+        # Werkzeugen sind das rund 45.000 Zeichen — mehr als das gesamte
+        # Nachrichtenbudget eines 32k-Modells. Der Lauf lief damit nicht in einen
+        # knapperen Kontext, sondern in eine Absage des Anbieters.
+        #
+        # Der Wert wird hier einmal genommen und nicht in der Schleife: nach dem
+        # Zuschnitt ändert sich `tools` nur noch zu `None` (letzte Runde), und
+        # dann ist die Grenze ohnehin großzügiger als nötig.
+        katalog_zeichen = len(json.dumps(tools, ensure_ascii=False))
         # Zwischenspeichern des Prompts, sofern dieses Modell es ausdruecklich
         # verlangt. Einmal je Segment ermittelt und nicht je Runde: der Katalog
         # antwortet zwar aus seinem eigenen Speicher, aber die Antwort kann sich
         # innerhalb eines Laufs ohnehin nicht aendern.
         #
-        # Warum das hier steht und nicht in `_Vorbereitung`: die Frage geht
-        # ueber das Netz, die Vorbereitung laeuft in einer kurzen
-        # Datenbanktransaktion. Warum es nicht am Lauf haengt wie
+        # Warum das hier steht und nicht in `_Vorbereitung`: die Frage ist
+        # asynchron und braucht den HTTP-Client dieses Laufs; die Vorbereitung
+        # ist synchron und läuft in einem Thread. (Hier stand einmal, die
+        # Vorbereitung sei „eine kurze Datenbanktransaktion“ — sie geht über
+        # `resolve_api_key` selbst über das Netz, und genau deshalb liegt sie
+        # inzwischen in `to_thread`.) Warum es nicht am Lauf hängt wie
         # `reasoning_effort`: es ist keine Wahl des Benutzers, die eine
         # Fortsetzung stabil halten muesste, sondern eine Eigenschaft des
         # Modells.
@@ -1859,9 +1992,26 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         # gelesener Log bringt bis zu 24.000 Zeichen mit. Ohne die Kuerzung vor
         # jedem Ruf laeuft ein langer Lauf mitten in der Arbeit ueber das
         # Fenster — und das ist kein knapperer Kontext, sondern eine Absage.
-        kontextgrenze = teilbudgets(zustand.get("context_chars")).gesamt
+        #
+        # Abzüglich des Werkzeugkatalogs: er fährt in derselben Anfrage mit und
+        # gehört deshalb in dieselbe Rechnung. `MIN_HISTORY_CHARS` als Boden,
+        # damit ein sehr kleines Fenster nicht in eine negative Grenze fällt —
+        # dort passt der Katalog allein schon nicht, und ein leerer Kontext wäre
+        # nicht besser als ein knapper.
+        kontextgrenze = max(
+            teilbudgets(zustand.get("context_chars")).gesamt - katalog_zeichen,
+            MIN_HISTORY_CHARS,
+        )
         while True:
             provider_messages = auf_budget_kuerzen(provider_messages, kontextgrenze)
+            # **Direkt hinter der Kürzung**, nicht erst am Segmentende. Unter
+            # Budget gibt `auf_budget_kuerzen` dieselbe Liste zurück, darüber
+            # eine neue — ab der ersten Kürzung zeigte `zustand` also auf die
+            # alte, während der Kommentar weiter unten sagt, `provider_messages`
+            # *sei* die Liste im Zustand. Wer eine weitere Ausstiegsstelle
+            # einbaut, die den Zustand vor dem Segmentende schreibt, speicherte
+            # sonst einen Verlauf ohne alle seither gelesenen Werkzeugergebnisse.
+            zustand["provider_messages"] = provider_messages
             async for chunk in stream_chat_completion(
                 client,
                 provider=vorbereitung.provider,
@@ -1874,8 +2024,24 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 cache_marke=cache_marke,
             ):
                 if chunk.kind == "reasoning":
-                    thoughts.append(chunk.text)
-                    ai_run_broker.veroeffentlichen(run_id, "reasoning", {"content": chunk.text})
+                    # Die Grenze steht hier und nicht erst beim Speichern.
+                    # Geschnitten wird auch **innerhalb** eines Stücks: nur so
+                    # ist der Denktext, den der Benutzer live gesehen hat,
+                    # Zeichen für Zeichen derselbe, den er nach dem Neuladen
+                    # wiederfindet.
+                    rest = MAX_REASONING_CHARS - gedachte_zeichen
+                    if rest <= 0:
+                        continue
+                    # Vorne dran der Absatz, den die vorige Rundennaht bestellt
+                    # hat — erst hier, wo feststeht, dass wirklich ein zweiter
+                    # Gedanke kommt. Eine Runde ohne Denktext bekommt so keinen
+                    # leeren Denkkasten, und der Schlusstext keinen Umbruch am
+                    # Ende, hinter dem nichts mehr steht.
+                    stueck = (denknaht + chunk.text)[:rest]
+                    denknaht = ""
+                    gedachte_zeichen += len(stueck)
+                    thoughts.append(stueck)
+                    ai_run_broker.veroeffentlichen(run_id, "reasoning", {"content": stueck})
                     continue
                 chunks.append(chunk.text)
                 ai_run_broker.veroeffentlichen(run_id, "delta", {"content": chunk.text})
@@ -2207,6 +2373,11 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 run_id=run_id,
                 guardian=guardian,
                 aufgabe=aufgabe,
+                # Nur solange der Lauf es noch nicht bekommen hat. Die
+                # Entscheidung fällt weiterhin unten — dort steht die Marke —,
+                # aber gelesen wird jetzt gar nicht erst, was ohnehin
+                # weggeworfen würde.
+                anlagenwissen_noetig=not zustand.get("anlagenwissen_gereicht"),
             )
             provider_messages.extend(followup)
             # Das Betriebswissen der Anlage, sobald feststeht welche. Genau
@@ -2233,6 +2404,22 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             # Satz. Der Umbruch gehoert also genau hierhin, an die Naht.
             if chunks and not chunks[-1].endswith("\n"):
                 chunks.append("\n\n")
+            # Und dasselbe für den Denktext, der über alle Runden in derselben
+            # flachen Liste liegt und mit `"".join(thoughts)` genauso
+            # zusammenklebte. `thoughts and …` ist Pflicht: bei abgeschaltetem
+            # Denken ist die Liste leer, und ein führender Umbruch wäre ein
+            # neuer Fehler.
+            #
+            # Bestellt statt gesetzt: der Umbruch geht oben zusammen mit dem
+            # ersten Gedanken der nächsten Runde als `reasoning`-Ereignis
+            # hinaus, damit der Live-Text Zeichen für Zeichen derselbe bleibt
+            # wie der gespeicherte. Hängte man ihn hier gleich an `thoughts`
+            # und veröffentlichte ihn als eigenes Ereignis, entstünde beim
+            # Vermittler ein Denkabschnitt aus nichts als zwei Umbrüchen — und
+            # denkt die nächste Runde nicht mehr, zeichnet die Oberfläche
+            # daraus einen leeren Kasten „Nachgedacht“.
+            if thoughts and not thoughts[-1].endswith("\n"):
+                denknaht = "\n\n"
             current_usage = StreamUsage()
 
         if abgeloest:
@@ -2247,18 +2434,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             # Kam Text durch, wird er abgerechnet; kam keiner durch, und das ist
             # bei einer reinen Schreibrunde der Normalfall, gibt `had_output`
             # False und die Reserve wird freigegeben.
-            _finalize_stream(
-                message_id=message_id,
-                usage_event_id=vorbereitung.usage_event_id,
-                content="".join(chunks),
-                usage=usage,
-                estimated_actual_tokens=0,
-                failed=True,
-                had_output=bool(chunks),
-                token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
-                reasoning="".join(thoughts),
-                abschnitte=ai_run_broker.abschnitte(run_id),
-            )
+            _abbruch_abrechnen()
             abgerechnet = True
             # Schreibt nichts um: `_lauf_abschliessen` laesst Endzustaende stehen
             # und meldet der Oberflaeche den tatsaechlichen.
@@ -2266,7 +2442,6 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             return
 
         zustand["tool_signatures"] = signaturen
-        zustand["provider_messages"] = provider_messages
         complete_content = "".join(chunks)
         estimated_actual = max(
             1,
@@ -2304,19 +2479,18 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 run_id, status="waiting_user", stop_reason="question", zustand=zustand
             )
             return
-        _lauf_abschliessen(
-            run_id,
-            status="completed",
-            # "budget" heisst: die KI hatte noch etwas vor, durfte aber nicht
-            # mehr. Sie hat aus dem geantwortet, was sie hatte — das ist eine
-            # Antwort, aber keine erledigte Aufgabe, und wer das Protokoll liest
-            # soll den Unterschied sehen.
-            stop_reason="budget" if budget_erschoepft else "done",
-            zustand=zustand,
-        )
-
-        # Erst jetzt falten — der Benutzer hat seine Antwort und wartet nicht auf
-        # die Zusammenfassung.
+        # Falten, **bevor** der Lauf abgeschlossen wird. Der Text steht bereits
+        # vollständig auf dem Bildschirm: `done` ist raus und `_finalize_stream`
+        # hat committet. Danach zu falten war dagegen wirkungslos — der
+        # Abschluss veröffentlicht das ruhende `run`-Ereignis und schließt den
+        # Kanal, `lauf_verfolgen` steigt an genau diesem Ereignis aus, und
+        # `compacted` entstand erst danach. Der Hinweis "Ältere Nachrichten
+        # wurden zusammengefasst" erreichte deshalb keinen Browser, und der
+        # Kontextring blieb auf dem Stand von vor der Faltung stehen.
+        #
+        # Der Preis: die Eingabe bleibt während der Faltung gesperrt, weil die
+        # Oberfläche erst beim ruhenden `run` freigibt. Vertretbar, weil
+        # `compact_conversation` nur oberhalb der Marke überhaupt faltet.
         try:
             from services.ai_compaction_service import compact_conversation
 
@@ -2332,22 +2506,29 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 )
         except Exception as exc:
             logger.info("AI-Kompression uebersprungen error=%s", type(exc).__name__)
+
+        _lauf_abschliessen(
+            run_id,
+            status="completed",
+            # "budget" heißt: die KI hatte noch etwas vor, durfte aber nicht
+            # mehr. Sie hat aus dem geantwortet, was sie hatte — das ist eine
+            # Antwort, aber keine erledigte Aufgabe, und wer das Protokoll liest
+            # soll den Unterschied sehen.
+            stop_reason="budget" if budget_erschoepft else "done",
+            zustand=zustand,
+        )
     except asyncio.CancelledError:
         # Der Prozess faehrt herunter. Nicht mehr als ehrlich abschliessen.
         if not abgerechnet:
-            _finalize_stream(
-                message_id=message_id,
-                usage_event_id=vorbereitung.usage_event_id,
-                content="".join(chunks),
-                usage=usage,
-                estimated_actual_tokens=0,
-                failed=True,
-                had_output=bool(chunks),
-                token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
-                reasoning="".join(thoughts),
-                abschnitte=ai_run_broker.abschnitte(run_id),
-            )
-            _lauf_abschliessen(run_id, status="cancelled", stop_reason="cancelled")
+            _abbruch_abrechnen()
+        # Der Abschluss steht **außerhalb** der Bedingung, so wie im Zweig
+        # darunter auch. Seit die Faltung vor dem Abschluss läuft, liegt genau
+        # dort ein Haltepunkt zwischen "abgerechnet" und "abgeschlossen":
+        # trifft der Abbruch ihn, hat der Benutzer seine Antwort, die Zeile
+        # stünde aber weiter auf 'running' — und der Abgleich beim nächsten
+        # Start machte daraus 'failed'. Einen bereits erreichten Endzustand
+        # lässt `_lauf_abschliessen` ohnehin stehen.
+        _lauf_abschliessen(run_id, status="cancelled", stop_reason="cancelled")
         raise
     except Exception as exc:
         if isinstance(exc, AiProviderRequestError):
@@ -2372,18 +2553,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             logger.warning("AI-Lauf fehlgeschlagen error=%s", type(exc).__name__)
             code, message_key = "AI_STREAM_FAILED", "ai.chat.errors.unavailable"
         if not abgerechnet:
-            _finalize_stream(
-                message_id=message_id,
-                usage_event_id=vorbereitung.usage_event_id,
-                content="".join(chunks),
-                usage=usage,
-                estimated_actual_tokens=0,
-                failed=True,
-                had_output=bool(chunks),
-                token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
-                reasoning="".join(thoughts),
-                abschnitte=ai_run_broker.abschnitte(run_id),
-            )
+            _abbruch_abrechnen()
         ai_run_broker.veroeffentlichen(run_id, "error", {"code": code, "message_key": message_key})
         _lauf_abschliessen(run_id, status="failed", stop_reason=code)
 
@@ -2400,6 +2570,7 @@ def lauf_beginnen(
     reasoning_effort: str | None = None,
     context_chars: int | None = None,
     guardian_briefing_unterdruecken: bool = False,
+    unbeaufsichtigt: bool = False,
 ) -> tuple[AiRun | None, tuple[str, str] | None]:
     """Legt einen Lauf an: Benutzernachricht, Kontingent, Antwortnachricht.
 
@@ -2408,6 +2579,16 @@ def lauf_beginnen(
     gesendete Anfrage sind Dinge, die der Benutzer sofort erfahren soll — nicht
     Sekunden spaeter aus einem Ereignisstrom. Erst wenn all das durch ist,
     beginnt die eigentliche Arbeit, und ab da haengt sie an nichts mehr.
+
+    ``unbeaufsichtigt`` sagt an, dass dies eine Heilung oder ein fällig
+    gewordener Auftrag wird. Es geht ausschließlich in den Systemprompt: der
+    Rahmen selbst (``zustand["guardian"]``, ``zustand["aufgabe"]``) entsteht
+    erst **nach** dieser Funktion, der Prompt aber schon darin — ohne diesen
+    Wert ließe sich der Unterschied hier nicht sehen. Ein eigener Wert und
+    nicht an ``guardian_briefing_unterdruecken`` angehängt: das eine
+    unterdrückt einen Bericht, das andere entscheidet über den Prompt, und ein
+    Aufrufer, der nur das eine will, soll nicht stillschweigend das andere
+    bekommen.
     """
     safe_content = redact_sensitive_text(content).strip()
     if not safe_content:
@@ -2451,7 +2632,7 @@ def lauf_beginnen(
         )
         provider_messages = build_provider_messages(
             db, conversation, query=safe_content, server_id=serverbezug,
-            context_chars=context_chars,
+            context_chars=context_chars, unbeaufsichtigt=unbeaufsichtigt,
         )
         # Was Guardian gemeldet hat, waehrend niemand da war. Nur wenn dieser
         # Lauf nicht selbst aus einer Heilung stammt — sonst berichtete die KI

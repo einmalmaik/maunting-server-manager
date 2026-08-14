@@ -18,6 +18,7 @@ Betreiber gesehen hat.
 from __future__ import annotations
 
 import asyncio
+import json
 from uuid import uuid4
 
 import pytest
@@ -99,7 +100,13 @@ def _conversation(db: Session, user: User) -> AiConversation:
 
 
 def _fake_stream(monkeypatch: pytest.MonkeyPatch, runden: list[list[ProviderToolCall]],
-                 *, text: str = "ok"):
+                 *, text: str = "ok", denken: str = ""):
+    """``denken`` ist der Denktext, den **jede** Runde vorweg liefert.
+
+    Leer voreingestellt, damit die Tests daneben unverändert bleiben: ein
+    Modell ohne Nachdenken schickt keinen einzigen ``reasoning``-Brocken, und
+    genau das war der Normalfall, als diese Hilfe entstand.
+    """
     gesehen: list[list[dict]] = []
     zaehler = {"runde": 0}
 
@@ -108,6 +115,8 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, runden: list[list[ProviderTool
                    cache_marke=False):
         del provider, api_key, reasoning
         gesehen.append([dict(item) for item in messages])
+        if denken:
+            yield StreamChunk("reasoning", denken)
         if tools is None:
             usage.total_tokens = 10
             yield StreamChunk("content", text)
@@ -134,6 +143,23 @@ async def _lauf(db: Session, user: User, conversation: AiConversation,
     await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
     db.expire_all()
     return db.get(AiRun, run.id)
+
+
+def _letzte_antwort(db: Session, conversation: AiConversation) -> AiMessage:
+    """Die zuletzt geschriebene Antwort dieser Unterhaltung.
+
+    Über die Unterhaltung und nicht über ``run.message_id``: ein beendeter
+    Lauf räumt dieses Feld ab (``_lauf_abschliessen``), weil die nächste
+    Fortsetzung eine neue Nachricht anlegt.
+    """
+    nachricht = (
+        db.query(AiMessage)
+        .filter(AiMessage.conversation_id == conversation.id,
+                AiMessage.role == "assistant")
+        .order_by(AiMessage.created_at.desc()).first()
+    )
+    assert nachricht is not None, "Der Lauf hat keine Antwort hinterlassen"
+    return nachricht
 
 
 def _backup_aufruf(server: Server) -> ProviderToolCall:
@@ -561,6 +587,66 @@ def test_a_restart_closes_running_runs_honestly(db: Session, regular_user: User)
     assert db.get(AiRun, wartend.id).status == "waiting_confirmation"
 
 
+@pytest.mark.asyncio
+async def test_a_finished_run_keeps_no_working_memory(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Was der Lauf zum Arbeiten brauchte, überlebt ihn nicht.
+
+    ``provider_messages`` ist das Arbeitsgedächtnis der Schleife, und darin
+    steht mehr als die Frage des Benutzers: `build_provider_messages` hängt den
+    **entschlüsselten** Gedächtnisblock als eigene Nachricht an. `state_json`
+    ist eine gewöhnliche Textspalte ohne Verschlüsselung, und es gab keinen Weg,
+    der sie je wieder leerte — weder `forget_memory`, das die verschlüsselte
+    Zeile in `ai_memory_entries` entfernt, noch das Leeren des Chatverlaufs. Ein
+    Eintrag, den der Benutzer nur über Profil > Memory hinterlegt und später
+    gelöscht hat, stand danach dauerhaft im Klartext daneben.
+
+    Geprüft wird über die getippte Frage: sie ist im Klartext Teil derselben
+    Liste und damit der Nachweis, ob die Liste geleert wurde.
+    """
+    conversation = _conversation(db, regular_user)
+    provider = _provider(db)
+    _fake_stream(monkeypatch, [])
+
+    run = await _lauf(
+        db, regular_user, conversation, provider,
+        content="Wie viel Arbeitsspeicher hat mein Server?",
+    )
+
+    assert run.status == "completed"
+    assert ai_run_service.zustand_lesen(run)["provider_messages"] == []
+    assert "Arbeitsspeicher hat mein Server" not in (run.state_json or "")
+
+
+def test_a_parked_run_keeps_its_working_memory(
+    db: Session, regular_user: User
+) -> None:
+    """Die Gegenprobe — und die Grenze, an der das Leeren zum Fehler würde.
+
+    Ein Lauf auf ``waiting_confirmation`` hat nicht aufgehört, sondern wartet
+    auf einen Menschen. Seine Nachrichten sind genau das, womit er nach der
+    Bestätigung weitermacht; sie wegzuwerfen hieße, ihn zu töten. Deshalb steht
+    die Prüfung auf den Endzustand in `arbeitsspeicher_leeren` selbst und nicht
+    bei ihren drei Aufrufern.
+    """
+    conversation = _conversation(db, regular_user)
+    provider = _provider(db)
+    run = ai_run_service.lauf_anlegen(
+        db, conversation_id=conversation.id, user_id=regular_user.id,
+        provider_id=provider.id, message_id=None, reasoning=False,
+        zustand=ai_run_service.leerer_zustand(
+            [{"role": "user", "content": "Merkzettel"}], request_id=str(uuid4())
+        ),
+    )
+    run.status = "waiting_confirmation"
+    db.commit()
+
+    ai_run_service.arbeitsspeicher_leeren(run)
+
+    assert ai_run_service.zustand_lesen(run)["provider_messages"]
+
+
 def test_scheduling_without_an_application_says_so(db: Session) -> None:
     """Ohne laufende Anwendung wird nichts geplant — und das wird gemeldet.
 
@@ -587,6 +673,49 @@ async def test_the_snapshot_is_a_still_picture_not_the_living_state(
     ai_run_broker.veroeffentlichen("lauf-1", "delta", {"content": "danach"})
 
     assert abzug.inhalt == ""
+
+
+@pytest.mark.asyncio
+async def test_ein_verworfener_kanal_weckt_wer_zusieht(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wer einen Kanal wegwirft, muss seine Zuhörer entlassen.
+
+    Die Kanalgrenze hat zwei Wege. Der erste räumt beendete Kanäle ohne Zuhörer
+    weg — harmlos. Der zweite greift, wenn alle Kanäle laufen oder beobachtet
+    werden, und nimmt dann den ältesten; der hatte bis zuletzt **keine** Prüfung
+    auf Zuhörer und rief kein ``beenden``.
+
+    Die Folge sah der Benutzer, nicht das Protokoll: ``lauf_verfolgen`` steht in
+    ``await warteschlange.get()`` ohne Frist. Ohne das Abbruchsignal kommt in
+    diese Warteschlange nie wieder etwas — der weiterlaufende Lauf legt sich
+    einen neuen Kanal an, und auch sein abschließendes ``beenden`` trifft nur
+    den. Die SSE-Verbindung blieb offen, im Browser fiel ``setStreaming(false)``
+    nie, und die Eingabe blieb gesperrt: ein ewig tippender Assistent.
+
+    Die Grenze wird für den Test heruntergesetzt statt 256 Kanäle anzulegen —
+    geprüft wird das Verhalten an der Grenze, nicht die Zahl.
+    """
+    ai_run_broker.zuruecksetzen_fuer_tests()
+    monkeypatch.setattr(ai_run_broker, "MAX_KANAELE", 2)
+
+    ai_run_broker.eroeffnen("lauf-alt")
+    _abzug, warteschlange = ai_run_broker.abonnieren("lauf-alt")
+
+    # Zwei weitere laufende Kanäle: keiner ist beendet, also fällt die
+    # Aufräumung in den zweiten Zweig und nimmt den ältesten — den mit dem
+    # Zuhörer.
+    ai_run_broker.eroeffnen("lauf-neu-1")
+    ai_run_broker.eroeffnen("lauf-neu-2")
+
+    assert "lauf-alt" not in ai_run_broker._KANAELE, (
+        "Der älteste Kanal hätte der Grenze weichen müssen"
+    )
+    ereignis, daten = await asyncio.wait_for(warteschlange.get(), timeout=1.0)
+    assert (ereignis, daten) == (None, None), (
+        "Der Zuhörer des verworfenen Kanals wartet weiter — seine SSE-Verbindung "
+        "hängt für immer"
+    )
 
 
 def test_text_around_a_tool_call_does_not_run_together() -> None:
@@ -1344,3 +1473,268 @@ def test_the_waiting_states_have_exactly_one_home(
     # Konstruktion nie umfallen. Dass die Datenbankgrenze und die Konstante
     # dieselbe Quelle haben, ist eine Wartbarkeitsaenderung ohne Testwirkung —
     # und eine Zusicherung, die immer haelt, behauptet nur Absicherung.
+
+
+# ── 6. Der Denkblock überlebt das Neuladen ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_reasoning_survives_a_reload_without_carrying_credentials(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der aufklappbare Denkblock hängt an genau einer Zuweisung — und die war ungeprüft.
+
+    Nach einem F5 kommt er nicht aus dem Strom, sondern aus ``AiMessage.reasoning``
+    über das Feld ``reasoning`` der Antwortform. Fällt eines von beiden weg,
+    verschwindet der Block still; die Testsuite bliebe grün.
+
+    Im selben Zug die zweite Zusage derselben Zeile: ein Modell wiederholt in
+    seinen Überlegungen genauso einen Schlüssel wie im Text, und gespeichert
+    wird er nicht.
+    """
+    from routers.ai_chat import _message_response
+
+    server = _server(db, "denkspur")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    _fake_stream(
+        monkeypatch, [], text="Fertig.",
+        denken="In der Datei steht RCON_PASSWORD=hunter2, das erklärt es.",
+    )
+
+    await _lauf(db, regular_user, conversation, provider)
+
+    nachricht = _letzte_antwort(db, conversation)
+    assert nachricht.reasoning, "Der Denktext wurde gar nicht erst gespeichert"
+    assert "das erklärt es" in nachricht.reasoning
+    assert "hunter2" not in nachricht.reasoning
+    assert "RCON_PASSWORD=[REDACTED]" in nachricht.reasoning
+    # Und der Weg, den ein Neuladen wirklich nimmt.
+    assert _message_response(nachricht).reasoning == nachricht.reasoning
+
+
+@pytest.mark.asyncio
+async def test_the_thoughts_of_two_rounds_do_not_run_together(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zwischen den Gedanken zweier Runden liegt eine Leerzeile, nicht nichts.
+
+    Der Antworttext bekam sie an der Rundennaht längst, mit derselben
+    Begründung — dazwischen liegt ein Werkzeugaufruf, und ein Satzende trifft
+    ohne Trenner auf einen Satzanfang: „…sehe ich mir zuerst die Logs
+    an.Ich sehe mir…". Für den Denktext passierte an derselben Stelle nichts,
+    und ``"".join(thoughts)`` geht genauso in ``AiMessage.reasoning`` und von
+    dort in die Berichtsmail.
+
+    Zweite Zusage derselben Naht: der Umbruch geht **live** mit hinaus. Stünde
+    er nur im gespeicherten Text, läse der Benutzer während des Laufs etwas
+    anderes als nach dem Neuladen.
+    """
+    server = _server(db, "denknaht")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    # Eine Werkzeugrunde, danach die Antwortrunde: zweimal derselbe Gedanke,
+    # und genau dazwischen liegt die Naht.
+    _fake_stream(
+        monkeypatch,
+        [[ProviderToolCall(id="a", name="read_server_status",
+                           arguments={"server_id": server.id})]],
+        text="Fertig.",
+        denken="Ich sehe mir zuerst die Logs an.",
+    )
+
+    run, fehler = ai_stream_service.lauf_beginnen(
+        db, user=regular_user, conversation=conversation, provider=provider,
+        request_id=uuid4(), content="Mach was", reasoning=True,
+    )
+    assert run is not None, f"Lauf konnte nicht beginnen: {fehler}"
+    ai_run_broker.eroeffnen(run.id)
+    abzug, warteschlange = ai_run_broker.abonnieren(run.id)
+    del abzug
+    await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
+    db.expire_all()
+
+    live = ""
+    while not warteschlange.empty():
+        ereignis, daten = warteschlange.get_nowait()
+        if ereignis == "reasoning":
+            live += str(daten.get("content") or "")
+
+    nachricht = _letzte_antwort(db, conversation)
+    assert nachricht.reasoning == (
+        "Ich sehe mir zuerst die Logs an.\n\nIch sehe mir zuerst die Logs an."
+    ), "Die Gedanken zweier Runden kleben aneinander"
+    assert live == nachricht.reasoning, (
+        "Live stand ein anderer Denktext als nach dem Neuladen"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_round_without_thoughts_leaves_no_empty_thought_box(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Umbruch kommt mit dem nächsten Gedanken — oder gar nicht.
+
+    Er wird an der Naht nur bestellt und erst beim ersten Gedanken der neuen
+    Runde eingelöst. Das ist kein Umweg, sondern der Unterschied zwischen einem
+    Trenner und einem Abschnitt aus nichts: viele Modelle denken nur in der
+    ersten Runde. Ginge der Umbruch sofort als eigenes ``reasoning``-Ereignis
+    hinaus, entstünde beim Vermittler ein Denkabschnitt mit zwei Umbrüchen als
+    einzigem Inhalt — und die Oberfläche zeichnete daraus einen leeren Kasten
+    „Nachgedacht", der eine Überlegung behauptet, die es nicht gab. Am Ende des
+    Laufs stünde derselbe Umbruch außerdem als Rest im gespeicherten Denktext.
+    """
+    server = _server(db, "denknaht-still")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+
+    gedacht = {"einmal": False}
+
+    async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
+                   tools=None, reasoning=False, reasoning_effort=None,
+                   cache_marke=False):
+        del provider, api_key, messages, reasoning, reasoning_effort, cache_marke
+        # Nur die erste Runde denkt — danach schweigt das Modell und arbeitet.
+        if not gedacht["einmal"]:
+            gedacht["einmal"] = True
+            yield StreamChunk("reasoning", "Erst der Status.")
+            usage.tool_calls = [ProviderToolCall(
+                id="a", name="read_server_status", arguments={"server_id": server.id},
+            )]
+        usage.total_tokens = 10
+        yield StreamChunk("content", "Fertig.")
+
+    monkeypatch.setattr(ai_stream_service, "stream_chat_completion", fake)
+
+    run, fehler = ai_stream_service.lauf_beginnen(
+        db, user=regular_user, conversation=conversation, provider=provider,
+        request_id=uuid4(), content="Mach was", reasoning=True,
+    )
+    assert run is not None, f"Lauf konnte nicht beginnen: {fehler}"
+    ai_run_broker.eroeffnen(run.id)
+    abzug, _warteschlange = ai_run_broker.abonnieren(run.id)
+    del abzug
+    await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
+    db.expire_all()
+
+    nachricht = _letzte_antwort(db, conversation)
+    assert nachricht.reasoning == "Erst der Status.", (
+        "Der Denktext endet mit einem Trenner, hinter dem nichts mehr kommt"
+    )
+    abschnitte = json.loads(nachricht.sections_json or "[]")
+    denkabschnitte = [
+        abschnitt for abschnitt in abschnitte if abschnitt.get("art") == "denken"
+    ]
+    assert [abschnitt["inhalt"] for abschnitt in denkabschnitte] == ["Erst der Status."], (
+        "Ein Denkabschnitt ohne Inhalt wird zu einem leeren Kasten 'Nachgedacht'"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_reasoning_stops_at_the_same_limit_live_and_stored(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Was der Benutzer live gelesen hat, findet er nach dem Neuladen wieder.
+
+    Die Zeichengrenze zählte im Adapter je **Anfrage**, und der Zähler wurde
+    nach jeder Werkzeugrunde neu angelegt. Gespeichert wurde dann auf einmal je
+    **Nachricht** gekürzt: bei sechzehn Runden bis zu sechzehnmal 32.000
+    Zeichen live gegen 32.000 in der Datenbank. Der Denkblock brach nach dem
+    Neuladen mitten im Satz ab, ohne dass irgendetwas darauf hinwies.
+    """
+    server = _server(db, "denkgrenze")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    # Zwei Runden mit je gut der Hälfte der Grenze — zusammen darüber.
+    _fake_stream(
+        monkeypatch,
+        [[ProviderToolCall(id="a", name="read_server_status",
+                           arguments={"server_id": server.id})]],
+        text="Fertig.",
+        denken="d" * (ai_stream_service.MAX_REASONING_CHARS // 2 + 1_000),
+    )
+
+    run, fehler = ai_stream_service.lauf_beginnen(
+        db, user=regular_user, conversation=conversation, provider=provider,
+        request_id=uuid4(), content="Mach was", reasoning=True,
+    )
+    assert run is not None, f"Lauf konnte nicht beginnen: {fehler}"
+    ai_run_broker.eroeffnen(run.id)
+    # Zusehen ab der ersten Sekunde, so wie der Browser nach dem Absenden.
+    abzug, warteschlange = ai_run_broker.abonnieren(run.id)
+    del abzug
+    await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
+    db.expire_all()
+
+    live = ""
+    while not warteschlange.empty():
+        ereignis, daten = warteschlange.get_nowait()
+        if ereignis == "reasoning":
+            live += str(daten.get("content") or "")
+
+    nachricht = _letzte_antwort(db, conversation)
+    assert len(live) == ai_stream_service.MAX_REASONING_CHARS, (
+        f"Live gingen {len(live)} Zeichen hinaus"
+    )
+    assert nachricht.reasoning == live, (
+        "Der gespeicherte Denktext ist nicht der, den der Benutzer gesehen hat"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_compaction_reports_itself_before_the_run_ends(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Faltung muss sich melden, solange noch jemand zuhört.
+
+    Der Abschluss eines Laufs schließt den Kanal, und die Anzeige steigt an
+    genau diesem Ereignis aus. Stand die Faltung dahinter, entstand ``compacted``
+    in einem bereits geschlossenen Kanal: der Hinweis "Ältere Nachrichten wurden
+    zusammengefasst" erreichte nie einen Browser, und der Kontextring blieb auf
+    dem Stand von vor der Faltung stehen.
+    """
+    from services import ai_compaction_service
+
+    server = _server(db, "faltung")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    _fake_stream(monkeypatch, [], text="Fertig.")
+
+    async def _faltet(*, client, user_id, conversation_id, provider_id,
+                      context_chars=None) -> bool:
+        del client, user_id, conversation_id, provider_id, context_chars
+        # Eine echte Faltung spricht mit dem Anbieter. Der Haltepunkt, den sie
+        # dabei zwangsläufig hat, gehört in die Nachstellung.
+        await asyncio.sleep(0)
+        return True
+
+    monkeypatch.setattr(ai_compaction_service, "compact_conversation", _faltet)
+
+    run, fehler = ai_stream_service.lauf_beginnen(
+        db, user=regular_user, conversation=conversation, provider=provider,
+        request_id=uuid4(), content="Mach was", reasoning=False,
+    )
+    assert run is not None, f"Lauf konnte nicht beginnen: {fehler}"
+    ai_run_broker.eroeffnen(run.id)
+    abo = ai_run_broker.abonnieren(run.id)
+    await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
+
+    ereignisse = [
+        stueck async for stueck in ai_stream_service.lauf_verfolgen(run.id, abo=abo)
+    ]
+    verbunden = "".join(ereignisse)
+    assert "event: compacted" in verbunden, (
+        "Die Faltung meldet sich erst, wenn niemand mehr zuhört"
+    )
+    assert verbunden.index("event: compacted") < verbunden.index('"status": "completed"'), (
+        "Die Anzeige ist beim Endereignis schon ausgestiegen"
+    )
+

@@ -5,7 +5,9 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher'
+import { Button } from '@/components/ui/Button'
 import { Dropdown } from '@/components/ui/Dropdown'
+import { Switch } from '@/components/ui/Switch'
 import { normalizePanelLanguage } from '@/config/panelLocales'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
 
@@ -80,7 +82,7 @@ export function GeneralTab() {
                 readOnly
                 className="msm-input opacity-60 cursor-not-allowed"
               />
-              <p className="font-body-md text-xs text-on-surface-variant mt-1.5">
+              <p className="msm-field-help">
                 {t('settings.panelUrlHint')}
               </p>
             </div>
@@ -92,7 +94,7 @@ export function GeneralTab() {
                 className={!canWrite ? 'pointer-events-none opacity-60' : ''}
                 onLanguageChange={(code) => setSettings({ ...settings, default_language: code })}
               />
-              <p className="font-body-md text-xs text-on-surface-variant mt-1.5">
+              <p className="msm-field-help">
                 {t('settings.defaultLanguageHint')}
               </p>
             </div>
@@ -109,28 +111,27 @@ export function GeneralTab() {
                 ]}
                 disabled={!canWrite}
               />
-              <p className="font-body-md text-xs text-on-surface-variant mt-1.5 inline-flex items-center gap-1.5">
+              <p className="msm-field-help inline-flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5" />
                 {t('settings.timeFormatHint')}
               </p>
             </div>
-            <div className="md:col-span-2 border-t border-border mt-4 pt-4">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings.updates_automatic}
-                  onChange={(e) => setSettings({ ...settings, updates_automatic: e.target.checked })}
-                  disabled={!canWrite}
-                  className="w-4 h-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-background"
-                />
-                <div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 mt-6 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
                   <span className="block font-headline text-body-md text-primary font-semibold">
                     {t('settings.updatesAutomatic', 'Automatische Updates')}
                   </span>
                   <span className="block font-body text-xs text-on-surface-variant">
                     {t('settings.updatesAutomaticHint', 'Das Panel und die remote Nodes aktualisieren sich automatisch, sobald ein neues Commit auf GitHub verfügbar ist.')}
                   </span>
-                </div>
+                </span>
+                <Switch
+                  checked={settings.updates_automatic}
+                  onCheckedChange={(checked) => setSettings({ ...settings, updates_automatic: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.updatesAutomatic', 'Automatische Updates')}
+                />
               </label>
             </div>
           </div>
@@ -138,18 +139,14 @@ export function GeneralTab() {
 
         {canWrite && (
           <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={saving}
-              className="msm-btn-primary px-6 py-3 inline-flex items-center gap-2 disabled:opacity-50"
-            >
+            <Button type="submit" disabled={saving}>
               {saving ? (
                 <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
               ) : (
                 <Save className="w-4 h-4" />
               )}
               {t('settings.save')}
-            </button>
+            </Button>
           </div>
         )}
       </fieldset>

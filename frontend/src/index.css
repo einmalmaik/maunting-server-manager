@@ -107,7 +107,7 @@
   }
 
   .msm-card {
-    @apply msm-panel rounded-lg;
+    @apply msm-panel rounded-2xl;
   }
 
   .msm-database-console-grid {
@@ -128,10 +128,14 @@
   }
 
   /* Primary Button - controlled logo cyan, high contrast on dark */
+  /*
+   * Kein eigener focus-visible-Ring in den Button-Klassen: der globale
+   * :focus-visible-Outline weiter oben liegt zwei Pixel weiter außen und
+   * verdeckt jeden Ring vollständig. Eine Quelle für den Fokus, nicht zwei.
+   */
   .msm-btn-primary {
     @apply bg-primary text-on-primary font-label-md text-label-md rounded-md
            hover:shadow-primary-glow-hover active:scale-[0.98]
-           focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
            disabled:pointer-events-none disabled:opacity-50
            transition-all duration-200;
     box-shadow: 0 12px 28px hsl(190 92% 62% / 0.18);
@@ -141,9 +145,8 @@
   .msm-btn-secondary {
     @apply bg-surface-container-high/50 border border-outline-variant
            text-on-surface-variant hover:text-on-surface
-           hover:bg-surface-variant/30 hover:border-outline
+           hover:bg-surface-variant hover:border-outline
            font-label-md text-label-md rounded-md
-           focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
            disabled:pointer-events-none disabled:opacity-50
            active:scale-[0.98] transition-all duration-200;
   }
@@ -152,7 +155,6 @@
     @apply bg-transparent border border-transparent text-on-surface-variant
            hover:text-primary hover:bg-primary/10 hover:border-primary/20
            font-label-md text-label-md rounded-md
-           focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
            disabled:pointer-events-none disabled:opacity-50
            active:scale-[0.98] transition-all duration-200;
   }
@@ -162,7 +164,6 @@
     @apply border border-status-destructive text-error
            hover:bg-status-destructive hover:text-on-error
            font-label-md text-label-md rounded-md
-           focus-visible:ring-2 focus-visible:ring-status-destructive focus-visible:ring-offset-2 focus-visible:ring-offset-background
            disabled:pointer-events-none disabled:opacity-50
            active:scale-[0.98] transition-all duration-200;
   }
@@ -223,16 +224,6 @@
            flex items-center justify-center p-4 z-50;
   }
 
-  .msm-modal {
-    @apply msm-card max-w-md w-full p-6;
-    box-shadow: 0 24px 56px hsl(0 0% 0% / 0.45);
-  }
-
-  /* Empty State */
-  .msm-empty {
-    @apply msm-card p-12 text-center;
-  }
-
   /* Alert Patterns */
   .msm-alert-success {
     @apply bg-status-success/10 border border-status-success/30
@@ -265,12 +256,6 @@
 
   .msm-nav-link-active {
     @apply msm-nav-link bg-primary/10 text-primary border border-primary/20 font-bold;
-  }
-
-  /* Ambient Glow — Decorative background element */
-  .msm-ambient-glow {
-    @apply absolute pointer-events-none;
-    background: radial-gradient(circle, hsl(194 44% 68% / 0.18) 0%, transparent 70%);
   }
 
   /* Deep Grid Background */

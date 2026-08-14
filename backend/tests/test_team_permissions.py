@@ -592,19 +592,19 @@ def test_the_personal_team_is_never_a_candidate(db: Session, regular_user: User)
     assert [row.id for row in kandidaten] == [team.id]
 
 
-# ── Die Vorschlagsliste: mengenweise, aber Zeichen fuer Zeichen dieselbe ──
+# ── Die Vorschlagsliste: mengenweise, aber Zeichen für Zeichen dieselbe ──
 #
-# `assignable-servers` fragte je Server und je Rechteschluessel einzeln nach —
-# 28 Rechtefragen mal drei Abfragen je Server, rund 1700 bei dreissig Servern.
-# Die Bündelung ueber `direkte_rechte` ist nur dann eine Verbesserung, wenn sie
-# **dieselbe** Antwort gibt. Eine schnellere Liste mit anderem Inhalt waere hier
+# `assignable-servers` fragte je Server und je Rechteschlüssel einzeln nach —
+# 28 Rechtefragen mal drei Abfragen je Server, rund 1700 bei dreißig Servern.
+# Die Bündelung über `direkte_rechte` ist nur dann eine Verbesserung, wenn sie
+# **dieselbe** Antwort gibt. Eine schnellere Liste mit anderem Inhalt wäre hier
 # entweder eine stille Rechteausweitung (ein Server zuviel im Dialog) oder ein
 # stiller Rechteverlust. Deshalb rechnet jeder Test unten beide Wege
 # gegeneinander, statt eine Wunschliste zu behaupten.
 
 
 def _alter_weg(db: Session, user: User) -> dict[int, list[str]]:
-    """Die Liste, wie sie die Einzelabfrage je Schluessel ergeben wuerde."""
+    """Die Liste, wie sie die Einzelabfrage je Schlüssel ergeben würde."""
     from services.permission_catalog import SERVER_KEYS
 
     erwartet: dict[int, list[str]] = {}
@@ -630,7 +630,7 @@ def _vergleiche_vorschlagsliste(db: Session, user: User, team: Team) -> dict[int
     }
     alt = _alter_weg(db, user)
     assert neu == alt, (
-        f"Vorschlagsliste weicht ab fuer {user.username}: neu={neu} alt={alt}"
+        f"Vorschlagsliste weicht ab für {user.username}: neu={neu} alt={alt}"
     )
     return neu
 
@@ -641,7 +641,7 @@ def test_assignable_servers_matches_the_single_lookup_for_a_delegated_customer(
     """Ein Kunde mit Delegation auf genau einem von zwei Servern.
 
     Der zweite Server darf nicht auftauchen — die Vorschlagsliste ist die
-    Obergrenze, die `permission_service` spaeter ohnehin durchsetzt.
+    Obergrenze, die `permission_service` später ohnehin durchsetzt.
     """
     einer = _server(db, "a-einer")
     _server(db, "b-anderer")
@@ -660,9 +660,9 @@ def test_assignable_servers_matches_the_single_lookup_for_a_role_holder(
 ) -> None:
     """Eine globale Rolle gilt pauschal — auf **allen** Servern.
 
-    Genau hier trennt sich die gebuendelte Menge in `pauschal` und `je Server`;
+    Genau hier trennt sich die gebündelte Menge in `pauschal` und `je Server`;
     wer die beiden verwechselt, verliert entweder alle Server oder gibt einen
-    Schluessel auf einem Server aus, auf dem er nicht gilt.
+    Schlüssel auf einem Server aus, auf dem er nicht gilt.
     """
     a = _server(db, "a-eins")
     b = _server(db, "b-zwei")
@@ -681,12 +681,12 @@ def test_assignable_servers_matches_the_single_lookup_for_a_role_holder(
 def test_assignable_servers_mixes_a_global_role_with_a_delegation(
     db: Session, regular_user: User
 ) -> None:
-    """Rolle und Delegation ergaenzen sich, sie ersetzen sich nicht.
+    """Rolle und Delegation ergänzen sich, sie ersetzen sich nicht.
 
-    Der Realfall eines gewachsenen Kontos: `server.view` pauschal ueber die
+    Der Realfall eines gewachsenen Kontos: `server.view` pauschal über die
     Rolle, `server.console.exec` nur auf einem einzigen Server. Fiele die
-    Vereinigung falsch aus, stuende das maechtigste Serverrecht entweder
-    ueberall oder nirgends im Dialog.
+    Vereinigung falsch aus, stünde das mächtigste Serverrecht entweder
+    überall oder nirgends im Dialog.
     """
     a = _server(db, "a-eins")
     b = _server(db, "b-zwei")
@@ -703,7 +703,7 @@ def test_assignable_servers_mixes_a_global_role_with_a_delegation(
 def test_assignable_servers_matches_the_single_lookup_for_the_owner(
     db: Session, owner_user: User
 ) -> None:
-    """Der Owner haelt alles ohne eine einzige Zeile in der Datenbank."""
+    """Der Owner hält alles ohne eine einzige Zeile in der Datenbank."""
     from services.permission_catalog import SERVER_KEYS
 
     a = _server(db, "a-eins")
@@ -733,10 +733,10 @@ def test_assignable_servers_does_not_ask_once_per_server(
 ) -> None:
     """Die Abfragezahl darf nicht mit der Serverzahl wachsen.
 
-    Die Grenze steht bewusst grosszuegig und schreibt keine Zaehlung fest. Sie
-    faengt den einen Fehler ab, der hier zurueckfallen kann: eine Schleife, die
-    je Server und je Schluessel erneut fragt. Gemessen waren das 1682 Abfragen
-    bei dreissig Servern.
+    Die Grenze steht bewusst großzügig und schreibt keine Zählung fest. Sie
+    fängt den einen Fehler ab, der hier zurückfallen kann: eine Schleife, die
+    je Server und je Schlüssel erneut fragt. Gemessen waren das 1682 Abfragen
+    bei dreißig Servern.
     """
     from sqlalchemy import event
 
@@ -761,5 +761,5 @@ def test_assignable_servers_does_not_ask_once_per_server(
 
     assert len(eintraege) == 12
     assert len(gesehen) <= 10, (
-        f"{len(gesehen)} Abfragen fuer zwoelf Server:\n" + "\n".join(gesehen)
+        f"{len(gesehen)} Abfragen für zwölf Server:\n" + "\n".join(gesehen)
     )

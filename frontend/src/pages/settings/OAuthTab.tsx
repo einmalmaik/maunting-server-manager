@@ -433,7 +433,7 @@ function ProviderDialog({
           <h2 className="font-headline text-headline-sm text-primary">
             {form.id === null ? t('settings.oauth.createTitle') : t('settings.oauth.editTitle')}
           </h2>
-          <button type="button" onClick={onClose} className="text-on-surface-variant hover:text-on-surface">
+          <button type="button" aria-label={t('common.close')} onClick={onClose} className="text-on-surface-variant hover:text-on-surface">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -453,7 +453,7 @@ function ProviderDialog({
                 readOnly={form.id !== null}
                 disabled={form.id !== null}
               />
-              <p className="font-body-md text-xs text-on-surface-variant mt-1">
+              <p className="msm-field-help">
                 {t('settings.oauth.providerSlugHint')}
               </p>
             </div>
@@ -489,13 +489,14 @@ function ProviderDialog({
             </select>
           </div>
 
-          <div className="flex items-center justify-between py-2 px-3 rounded-md bg-surface-container-low">
+          <label className="flex items-center justify-between gap-4 rounded-lg border border-outline-variant/40 bg-surface-container-high px-3 py-2">
             <span className="font-label-md text-sm text-on-surface">{t('settings.oauth.providerEnabled')}</span>
             <Switch
               checked={form.enabled}
               onCheckedChange={(v) => setForm({ ...form, enabled: v })}
+              aria-label={t('settings.oauth.providerEnabled')}
             />
-          </div>
+          </label>
 
           <div>
             <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
@@ -522,7 +523,7 @@ function ProviderDialog({
               placeholder={form.client_secret_present ? '•••••••• (leave empty to keep)' : 'GOCSPX-…'}
               autoComplete="off"
             />
-            <p className="font-body-md text-xs text-on-surface-variant mt-1">
+            <p className="msm-field-help">
               {t('settings.oauth.providerSecretHint')}
             </p>
           </div>
@@ -609,7 +610,7 @@ function ProviderDialog({
                 className="msm-input font-mono text-sm min-h-[80px]"
                 placeholder='{"id":"sub","email":"email"}'
               />
-              <p className="font-body-md text-xs text-on-surface-variant mt-1">
+              <p className="msm-field-help">
                 {t('settings.oauth.providerClaimsHint')}
               </p>
             </div>

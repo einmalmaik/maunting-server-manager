@@ -325,8 +325,8 @@ describe('Backups — S3 Cloud Features', () => {
   })
 
   /**
-   * Der Statuspoll ist die einzige Quelle fuer "es laeuft gerade etwas" — auch
-   * fuer Vorgaenge, die der Zeitplan oder jemand anderes gestartet hat. Er darf
+   * Der Statuspoll ist die einzige Quelle für "es läuft gerade etwas" — auch
+   * für Vorgänge, die der Zeitplan oder jemand anderes gestartet hat. Er darf
    * darum nie ganz stehen, aber im Ruhezustand seltener fragen.
    */
   it('fragt den Status im Ruhezustand alle 10 s und bei laufendem Backup alle 2 s', async () => {

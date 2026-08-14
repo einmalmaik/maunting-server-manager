@@ -170,7 +170,7 @@ def test_ohne_zustellweg_gilt_der_chat(db: Session) -> None:
     assert ai_task_service.vorschau(
         db, user=user, felder=dict(ohne_weg), task_id=None
     )["channel"] == "chat"
-    # Ein ausdrücklich leer geschicktes Feld heisst dasselbe wie keines — ein
+    # Ein ausdrücklich leer geschicktes Feld heißt dasselbe wie keines — ein
     # Modell schickt lieber `null` als gar nichts.
     assert ai_task_service.anlegen(
         db, user=user, felder={**ohne_weg, "title": "Zweiter", "channel": None}

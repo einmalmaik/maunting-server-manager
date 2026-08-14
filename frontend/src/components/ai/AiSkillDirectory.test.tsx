@@ -54,6 +54,30 @@ describe('AiSkillDirectory', () => {
     expect(screen.queryByText('Team: einmalmaik')).not.toBeInTheDocument()
   })
 
+  /**
+   * Mitgelieferte Skills stehen in Dateien, nicht in der Tabelle — sie tauchen in
+   * keiner Verwaltungsansicht auf. Der einzige dokumentierte Weg, einen davon zu
+   * ersetzen, führt über einen panelweiten Skill mit demselben Schlüssel. Ohne
+   * den Schlüssel und ohne den Satz, der den Weg nennt, müsste der Betreiber
+   * beides raten.
+   */
+  it('nennt bei mitgelieferten Skills den Schlüssel und den Weg, sie zu ersetzen', async () => {
+    render(<AiSkillDirectory />)
+    await screen.findByText('DayZ-Start')
+
+    expect(screen.getByText('dayz-start')).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('ai.skills.readOnly'))).toBeInTheDocument()
+  })
+
+  it('hängt den Ersetzungshinweis nur an mitgelieferte Skills', async () => {
+    render(<AiSkillDirectory />)
+    await screen.findByText('DayZ-Start')
+
+    // Ein eigener Skill ist im Panel änderbar — der Hinweis wäre dort falsch.
+    expect(screen.getAllByText(i18n.t('ai.skills.readOnly'))).toHaveLength(1)
+    expect(screen.getByText('backup')).toBeInTheDocument()
+  })
+
   it('bietet nichts zum Ändern an', async () => {
     render(<AiSkillDirectory />)
     await screen.findByText('DayZ-Start')
