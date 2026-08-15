@@ -155,13 +155,21 @@ MAX_WRITE_ROUNDS = 24
 
 # Was diese Runden **nicht** begrenzen — damit sie niemand für eine Schranke
 # hält, die sie nicht ist: Es gibt keine Wanduhr-, keine Token- und keine
-# Kostengrenze je Lauf. Ein Lauf darf achtundvierzig Leserunden lang dauern und
-# kosten, was er kostet; gezählt wird nur, wie oft der Anbieter gefragt wird und
-# wieviel Ergebnistext eine Runde erzeugt. Der einzige operative Deckel liegt
-# woanders und zählt etwas anderes: `grant.max_actions_per_hour` begrenzt
-# ausgeführte autonome Aktionen je Benutzer und Stunde — benutzerweit über alle
-# Läufe hinweg, nicht die Runden eines einzelnen. Wer eine Grenze je Lauf will,
-# muss sie bauen; hier steht sie nicht.
+# Kostengrenze **je Lauf**. Ein Lauf darf achtundvierzig Leserunden lang dauern;
+# gezählt wird hier nur, wie oft der Anbieter gefragt wird und wieviel
+# Ergebnistext eine Runde erzeugt.
+#
+# Deckel gibt es trotzdem, nur zählen sie etwas anderes. `reserve_ai_usage`
+# (`ai_usage_service`) erzwingt an den beiden Stellen weiter unten die
+# rollengebundenen Kontingente — Tages-, Wochen- und Monatstoken, Monatskosten,
+# Anfragen je Minute, gleichzeitige Vorgänge — und bricht den Lauf mit
+# `AiQuotaError` ab, wenn eins reißt. `grant.max_actions_per_hour` begrenzt
+# daneben ausgeführte autonome Aktionen je Benutzer und Stunde und fällt bei
+# Erschöpfung auf Bestätigungspflicht zurück, statt zu sperren.
+#
+# Alle drei sind benutzer- oder rollenbezogen und zeitfensterweit, keiner ist
+# laufbezogen. Wer eine Grenze für genau einen Lauf will, muss sie bauen; hier
+# steht sie nicht.
 
 # Wie oft derselbe Werkzeugaufruf mit **denselben** Argumenten laufen darf,
 # gezählt über Runden hinweg. Ein Modell, das die gleiche Auskunft zum fünften

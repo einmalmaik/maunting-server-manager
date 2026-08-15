@@ -672,9 +672,13 @@ def _global_tool_definitions() -> list[dict]:
             "Leitet aus einem vorhandenen Blueprint einen neuen ab — so aendert "
             "man eine Spielversion, ohne die Vorlage aller anderen Server "
             "anzufassen. Die Quelle bleibt unveraendert. Aenderbar sind "
-            "meta.name, meta.description, runtime.image und runtime.env; "
-            "runtime.env wird gemischt, vorhandene Variablen bleiben also "
-            "erhalten.",
+            "meta.name, meta.description, runtime.image, runtime.env und "
+            "runtime.startup — ueber runtime.startup korrigierst du fehlende "
+            "oder falsche Startparameter. runtime.env wird gemischt, vorhandene "
+            "Variablen bleiben also erhalten. Fuehrt der Quell-Blueprint "
+            "runtime.startupProfiles, wird eine Aenderung an runtime.startup "
+            "abgewiesen: dort entscheidet das Profil ueber die Startzeile, die "
+            "Korrektur bliebe wirkungslos.",
             {
                 **_RATIONALE_SCHEMA,
                 "source_id": {

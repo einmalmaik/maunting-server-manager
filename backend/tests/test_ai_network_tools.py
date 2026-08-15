@@ -220,7 +220,12 @@ def test_external_reachability_is_never_claimed(
 # drei Faelle auseinander, deren Verwechslung teuer ist.
 
 def _mit_urteil(
-    db: Session, server: Server, state: str, *, gemessen_vor_sekunden: int | None
+    db: Session,
+    server: Server,
+    state: str,
+    *,
+    gemessen_vor_sekunden: int | None,
+    wechselte_vor_sekunden: int | None = None,
 ) -> None:
     """Setzt das, was ``guardian_sync_service`` im Betrieb schreibt."""
     server.guardian_observed_state = state
@@ -228,6 +233,10 @@ def _mit_urteil(
     server.guardian_probe_timestamp = (
         None if gemessen_vor_sekunden is None
         else datetime.now(timezone.utc) - timedelta(seconds=gemessen_vor_sekunden)
+    )
+    server.guardian_transition_timestamp = (
+        None if wechselte_vor_sekunden is None
+        else datetime.now(timezone.utc) - timedelta(seconds=wechselte_vor_sekunden)
     )
     db.commit()
 
@@ -264,6 +273,12 @@ def test_a_blueprint_without_an_application_probe_is_not_a_finding(
         ("healthy", "answering"),
         ("unhealthy", "not_answering"),
         ("degraded", "not_answering"),
+        # "recovering" setzt der Guardian genau dann, wenn eine Probe
+        # fehlgeschlagen ist und er deswegen zu handeln beginnt. Es ist damit ein
+        # Messergebnis und gehoert nicht zu den Zustaenden ohne Messung — es ist
+        # einmal still durch das Raster gefallen.
+        ("recovering", "not_answering"),
+        ("quarantined", "not_answering"),
     ],
 )
 def test_the_guardian_verdict_is_what_the_probe_reports(
@@ -330,6 +345,82 @@ def test_without_a_verdict_the_probe_claims_nothing(
     # fehlt nur ihr Ergebnis.
     assert probe["probe_type"] == "source-query"
     assert "kein verwertbares Urteil" in probe["note"]
+
+
+@pytest.mark.parametrize("guardian_state", ["starting", "verifying"])
+def test_a_booting_server_is_not_reported_as_silent(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch,
+    guardian_state: str,
+) -> None:
+    """Hochfahren ist keine ausgebliebene Antwort.
+
+    In der Grace Period fragt der Guardian die Anwendungsprobe gar nicht ab, und
+    danach laufen zunaechst nur die Startpruefungen — ``required_for_startup``
+    steht bei ihr auf False. Wer diesen Zustand "antwortet nicht" nennt, schickt
+    die KI nach jedem Neustart eine Minute lang auf die Suche nach einem
+    Startbefehl, der in Ordnung ist.
+    """
+    server = _server(db, f"faehrt-hoch-{guardian_state}", bind_ip="192.168.1.50")
+    _mit_urteil(db, server, guardian_state, gemessen_vor_sekunden=20)
+    monkeypatch.setattr(
+        "services.port_check_service.is_port_available", lambda *_a, **_k: False
+    )
+
+    probe = server_network_diagnostics.check_reachability(db, server)["game_probe"]
+
+    assert probe["status"] == "starting"
+    assert probe["probe_type"] == "source-query"
+    assert "faehrt hoch" in probe["note"]
+
+
+def test_a_verdict_older_than_the_state_it_describes_counts_for_nothing(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein Urteil von vor dem Neustart ist kein Urteil ueber jetzt.
+
+    ``last_probe_at`` ueberlebt im Guardian einen Containerneustart, waehrend die
+    Probenergebnisse verworfen werden. Ohne diese Pruefung traegt die Diagnose
+    nach jedem Neustart das Urteil des vorherigen Laufs weiter — mit Zeitstempel,
+    also glaubwuerdig aussehend.
+    """
+    server = _server(db, "urteil-veraltet", bind_ip="192.168.1.50")
+    _mit_urteil(
+        db, server, "unhealthy",
+        gemessen_vor_sekunden=600, wechselte_vor_sekunden=30,
+    )
+    monkeypatch.setattr(
+        "services.port_check_service.is_port_available", lambda *_a, **_k: False
+    )
+
+    probe = server_network_diagnostics.check_reachability(db, server)["game_probe"]
+
+    assert probe["status"] == "no_measurement"
+    assert "vor dem jetzigen Zustand" in probe["note"]
+
+
+def test_every_guardian_state_has_a_deliberate_meaning() -> None:
+    """Kein Guardian-Zustand darf stillschweigend durchfallen.
+
+    Genau das ist mit ``recovering`` passiert: es stand in keiner der Listen,
+    fiel damit auf "keine Messung" und verschwieg den einzigen harten Befund,
+    den es gab. Der Kommentar an den Listen verspricht, dass ein neuer Zustand
+    jemanden zu einer Entscheidung zwingt — hier steht der Beweis. Faellt dieser
+    Test aus, gehoert der neue Zustand in eine der drei Listen oder ausdruecklich
+    in die Restgruppe.
+    """
+    from services.guardian_sync_service import _OBSERVED_STATES
+
+    eingeordnet = set(
+        server_network_diagnostics._GUARDIAN_ANSWERING
+        + server_network_diagnostics._GUARDIAN_STARTING
+        + server_network_diagnostics._GUARDIAN_NOT_ANSWERING
+    )
+    # Die Restgruppe ist bewusst nicht "alles andere", sondern benannt: nur diese
+    # drei bedeuten "gar keine Messung".
+    ohne_messung = {"stopped", "disabled", "unknown"}
+
+    assert eingeordnet.isdisjoint(ohne_messung)
+    assert eingeordnet | ohne_messung == set(_OBSERVED_STATES)
 
 
 def test_a_failed_probe_is_reported_as_unknown_not_as_closed(

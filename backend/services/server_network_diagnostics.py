@@ -50,16 +50,37 @@ _DOCKER_NETWORKS = (
     ipaddress.IPv4Network("172.17.0.0/16"),
 )
 
-# Der Guardian kennt neun Zustaende. Nur "healthy" heisst, dass alle geforderten
-# Proben antworten — und wo der Blueprint eine Anwendungsprobe erklaert, ist sie
-# eine davon. Die mittlere Gruppe beschreibt einen Server, der laufen soll,
-# dessen Probe aber (noch) nicht antwortet. Alles uebrige — "stopped",
-# "disabled", "unknown" — ist gar keine Messung und darf nie als "antwortet
-# nicht" gelesen werden. Die Zustaende stehen als Liste hier und nicht als
-# Vergleich mitten im Code, damit ein neuer Guardian-Zustand jemanden zwingt,
-# sich bewusst fuer eine der drei Bedeutungen zu entscheiden.
+# Der Guardian kennt zehn Zustaende (`guardian_sync_service._OBSERVED_STATES`).
+# Sie zerfallen hier in vier Bedeutungen, und die Grenze zwischen der zweiten und
+# der dritten ist die wichtige:
+#
+# "healthy" heisst, dass alle geforderten Proben antworten — und wo der Blueprint
+# eine Anwendungsprobe erklaert, ist sie eine davon.
+#
+# "starting" und "verifying" heissen **nicht**, dass eine Probe geschwiegen hat.
+# In der Grace Period fragt der Guardian die Anwendungsprobe gar nicht ab
+# (msm-agent/services/guardian_service.py), und danach laufen zunaechst nur die
+# Startpruefungen — `required_for_startup` steht bei der Anwendungsprobe auf
+# False. Ein Server, der gerade hochfaehrt, ist also ohne Messung und nicht
+# stumm. Ihn als "antwortet nicht" zu melden hiesse, die KI bei jedem Neustart
+# eine Minute lang an einem Startbefehl suchen zu lassen, der in Ordnung ist.
+#
+# Erst die dritte Gruppe ist ein negatives Messergebnis. "recovering" gehoert
+# dazu und nicht zu den Startzustaenden: der Guardian setzt es genau dann, wenn
+# eine Probe fehlgeschlagen ist und er deswegen eine Recovery-Aktion beginnt.
+#
+# Alles uebrige — "stopped", "disabled", "unknown" — ist gar keine Messung und
+# darf nie als "antwortet nicht" gelesen werden.
+#
+# Die Zustaende stehen als Listen hier und nicht als Vergleich mitten im Code,
+# damit ein neuer Guardian-Zustand jemanden zwingt, sich bewusst fuer eine der
+# vier Bedeutungen zu entscheiden. Damit dieser Zwang nicht bloss eine Absicht
+# ist, haelt `test_ai_network_tools.py` die Listen gegen `_OBSERVED_STATES` —
+# genau dieses Loch hat "recovering" hier einmal stillschweigend durchfallen
+# lassen.
 _GUARDIAN_ANSWERING = ("healthy",)
-_GUARDIAN_NOT_ANSWERING = ("starting", "verifying", "degraded", "unhealthy", "quarantined")
+_GUARDIAN_STARTING = ("starting", "verifying")
+_GUARDIAN_NOT_ANSWERING = ("degraded", "unhealthy", "quarantined", "recovering")
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -123,7 +144,17 @@ def _game_probe(server: Server) -> dict:
         }
 
     measured_at = _as_utc(server.guardian_probe_timestamp)
+    wechselte_at = _as_utc(server.guardian_transition_timestamp)
     state = server.guardian_observed_state or "unknown"
+    # Ein Zeitstempel aelter als der letzte Zustandswechsel gehoert zum Lauf
+    # davor: `last_probe_at` ueberlebt einen Neustart des Containers, waehrend
+    # die Probenergebnisse verworfen werden. Ohne diese Pruefung traegt die
+    # Diagnose nach jedem Neustart eine Minute lang das Urteil von vorher.
+    veraltet = (
+        measured_at is not None
+        and wechselte_at is not None
+        and measured_at < wechselte_at
+    )
     result = {
         "probe_type": application.type,
         "measured_at": measured_at.isoformat() if measured_at is not None else None,
@@ -136,14 +167,24 @@ def _game_probe(server: Server) -> dict:
         "container_status": server.guardian_container_status,
     }
 
-    if measured_at is None or state not in _GUARDIAN_ANSWERING + _GUARDIAN_NOT_ANSWERING:
+    if state in _GUARDIAN_STARTING:
+        result["status"] = "starting"
+        result["note"] = (
+            f"Der Server faehrt hoch (Guardian-Zustand '{state}'). In diesem "
+            f"Fenster fragt der Guardian die Anwendungsprobe ({application.type}) "
+            "gar nicht ab — es liegt also keine Messung vor, und 'antwortet "
+            "nicht' waere unbelegt. Sieh in einer Minute erneut nach, statt "
+            "jetzt einen Fehler zu suchen."
+        )
+    elif measured_at is None or veraltet or state not in _GUARDIAN_ANSWERING + _GUARDIAN_NOT_ANSWERING:
         result["status"] = "no_measurement"
         result["note"] = (
             f"Der Blueprint erklaert eine Anwendungsprobe ({application.type}), "
             "aber es liegt kein verwertbares Urteil vor (Guardian-Zustand "
             f"'{state}'): entweder hat der Guardian auf der Node noch nie "
-            "gemessen, oder er ist fuer diesen Server abgeschaltet, oder der "
-            "Server soll gar nicht laufen. In keinem dieser Faelle ist "
+            "gemessen, oder seine letzte Messung stammt aus der Zeit vor dem "
+            "jetzigen Zustand, oder er ist fuer diesen Server abgeschaltet, "
+            "oder der Server soll gar nicht laufen. In keinem dieser Faelle ist "
             "'antwortet nicht' belegt."
         )
     elif state in _GUARDIAN_ANSWERING:
