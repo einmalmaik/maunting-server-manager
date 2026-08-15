@@ -23,10 +23,16 @@ MAX_CONTEXT_CHARS = 24_000
 MAX_HISTORY_MESSAGES = 20
 MAX_SUMMARY_CHARS = 4_000
 RESERVED_OUTPUT_TOKENS = 2_048
-# Wieviel an frueher gelesenen Tool-Daten in eine Folgeanfrage zurueckfliesst.
-# Bewusst deutlich enger als der Gesamtkontext: die Historie der Unterhaltung
-# soll nicht von einem einzigen grossen Logausschnitt verdraengt werden.
-MAX_TOOL_RESULT_CONTEXT_CHARS = 8_000
+# Wieviel an früher gelesenen Tool-Daten in eine Folgeanfrage zurückfließt.
+# Ein fester Deckel, der mit dem Fenster nicht mitwächst — er kostet nicht
+# Platz, sondern Geld (Zahlen im Docstring von `Teilbudgets`).
+#
+# 8.000 war zu eng: dort fiel in der Live-Messung das größte Werkzeugergebnis
+# ganz aus dem Rückfluss, und das Modell griff in einem von drei Läufen zum
+# falschen Werkzeug. Die Kosten sind streng linear im Deckel — jede Folgefrage
+# zahlt ihn genau einmal —, eine Anhebung kauft also Information zu
+# proportionalem Preis zurück.
+MAX_TOOL_RESULT_CONTEXT_CHARS = 16_000
 MAX_TOOL_RESULTS = 6
 # Der Sockel, den die juengste Historie in jedem Fall bekommt. Anhaenge,
 # Zusammenfassung und Tool-Block koennen `MAX_CONTEXT_CHARS` zusammen schon
@@ -63,13 +69,20 @@ class Teilbudgets:
     gebraucht werden — Kontextaufbau, Kompression und Anzeige — und drei
     Kopien derselben Formeln unweigerlich auseinanderlaufen.
 
-    Jede Grenze hat einen **Sockel** (den Wert von vor der Fensterberechnung)
-    und einen **Deckel**. Der Sockel sorgt dafuer, dass ein unbekanntes Modell
-    nicht schlechter dasteht als vorher. Der Deckel ist wichtiger: bei einem
-    Fenster von einer Million Token wuerde ein rein anteiliges Budget einem
-    einzigen gelesenen Logfile eine Viertelmillion Token zugestehen, und dann
-    haette die Anlage zwar ein grosses Gedaechtnis, aber es waere voller Log
-    statt voller Gespraech.
+    Die meisten Grenzen haben einen **Sockel** (den Wert von vor der
+    Fensterberechnung) und einen **Deckel**: der Sockel sorgt dafür, dass ein
+    unbekanntes Modell nicht schlechter dasteht als vorher, der Deckel dafür,
+    dass ein großes Fenster nicht einer einzigen Zutat alles zuschlägt.
+
+    Der Rückfluss der Werkzeugergebnisse wächst als einziger **gar nicht** mit
+    dem Fenster. Er kostet nicht Platz, sondern Geld: er steht vor der Frage
+    und ändert sich mit jedem Lauf, geht also bei jeder Folgefrage ungecacht
+    neu mit. Nachgerechnet über die Formeln dieser Datei (acht Fragen einer
+    Unterhaltung, je ein 24.480-Zeichen-Log, Zwischenspeicher zu 25 % des
+    Preises): der zwischenspeicherbare Präfix steigt von 70,5 % auf 77,9 %,
+    eine Folgefrage kostet 20,0 % weniger, über alle acht Fragen 16,7 % — die
+    erste Frage ist in beiden Fassungen gleich, weil da noch kein Ergebnis
+    vorliegt. Eine Anbietermessung ist das nicht.
     """
 
     #: Das Gesamtbudget in Zeichen — was alle Teile zusammen fuellen duerfen.
@@ -88,16 +101,30 @@ class Teilbudgets:
 
 
 def _teilbudgets(zeichen: int) -> Teilbudgets:
-    # Der jeweils letzte Term ist der Anteil am Ganzen. Er bindet nur bei
-    # wirklich kleinen Fenstern — der Katalog fuehrt Modelle mit 4.096 Token,
-    # und dort ist der Sockel von 8.000 Zeichen fuer Werkzeugdaten groesser als
-    # der gesamte Kontext. Ohne den Anteil bekaeme ausgerechnet das engste
-    # Modell einen Kontext, der fast nur aus Logauszuegen besteht.
+    # Der jeweils letzte Term ist der Anteil am Ganzen. Er bindet bei kleinen
+    # Fenstern — der Katalog führt Modelle mit 4.096 Token, und dort sind die
+    # 16.000 Zeichen für Werkzeugdaten größer als der gesamte Kontext. Ohne den
+    # Anteil bekäme ausgerechnet das engste Modell einen Kontext, der fast nur
+    # aus Logauszügen besteht.
+    #
+    # `werkzeug_zeichen` ist deshalb ein fester Deckel und kein mitwachsender
+    # Sockel (Begründung im Docstring von `Teilbudgets`). Der Preis gehört
+    # dazu: eine Folgefrage sieht vom Log der vorigen rund 16.000 statt 24.586
+    # Zeichen, sichtbar markiert mit `TOOL_RESULT_TRUNCATION_MARK`. Ob ein
+    # Modell daraufhin nachliest und was diese Runde kostet, ist nicht gemessen.
+    #
+    # Seit der Deckel bei 16.000 steht, bindet der Anteil auch im **Rückfall**
+    # (`teilbudgets(None)`, 24.000 Zeichen): dort sind es 12.000 statt 16.000.
+    # Gemessen ändert das die Menge beim Anbieter nicht — die Kürzungsgrenze im
+    # Lauf ist `max(24.000 - Werkzeugkatalog, 4.000)` und liegt je nach Zuschnitt
+    # des Katalogs zwischen 4.000 (voller Katalog) und 16.036 Zeichen
+    # (rechtefreier), `auf_budget_kuerzen` schneidet den Block also in beiden
+    # Fassungen auf dieselbe Länge. Nicht dasselbe ist sein **Inhalt**: der
+    # größere Block reicht eine Ergebniszeile weiter zurück, und weil vorne
+    # geschnitten wird, überlebt danach die ältere statt der jüngeren.
     return Teilbudgets(
         gesamt=zeichen,
-        werkzeug_zeichen=min(
-            max(zeichen // 4, MAX_TOOL_RESULT_CONTEXT_CHARS), 200_000, zeichen // 2
-        ),
+        werkzeug_zeichen=min(MAX_TOOL_RESULT_CONTEXT_CHARS, zeichen // 2),
         werkzeug_anzahl=min(max(zeichen // 20_000, MAX_TOOL_RESULTS), 40),
         zusammenfassung_zeichen=min(
             max(zeichen // 10, MAX_SUMMARY_CHARS), 40_000, zeichen // 4
@@ -298,8 +325,8 @@ def _recent_tool_results(
     # nach hinten: was zuletzt gelesen wurde, ist fuer die naechste Frage das
     # Wichtigste. Frueher lief die Schleife vom aeltesten Eintrag her und brach
     # beim ersten zu grossen `break` ab — ein gelesener Log liefert bis zu
-    # 24.000 Zeichen, also das Dreifache dieses Budgets, und nahm damit alle
-    # juengeren, winzigen Ergebnisse mit ins Nichts. Wer einen Log las und
+    # 24.000 Zeichen und damit mehr, als dieses Budget in jeder Lage hergibt,
+    # und nahm damit alle juengeren, winzigen Ergebnisse mit ins Nichts. Wer einen Log las und
     # danach zwei Rueckfragen stellte, bekam gar keinen Werkzeugkontext mehr.
     #
     # Eine zu grosse Zeile wird jetzt gekuerzt statt die Schleife zu beenden:
@@ -529,36 +556,37 @@ def build_provider_messages(
         selected.append({"role": row.role, "content": content})
         budget -= len(content)
     # Die Reihenfolge am Ende: … Historie, Werkzeugkontext, Lage, **Frage**.
-    # Die Frage steht zuletzt. Das ist keine Stilfrage, sondern gemessen.
+    # Die Frage steht zuletzt, und das ist gemessen, nicht Stil: in Anordnung A
+    # (alles Wechselnde hinter die Frage, am 14.08.2026 gegen gpt-5.6-luna
+    # gefahren) las das Modell den Betriebszustand als das Jüngste und
+    # antwortete darauf — es rief dreimal `list_my_servers`, ein Werkzeug, das
+    # es in dieser Lage nie zuvor angefasst hatte, und in null von drei Läufen
+    # `learn_skill`, um das es ging. Eine falsch gewählte Runde ist teurer als
+    # jeder Präfix.
     #
-    # Drei Anordnungen wurden am 14.08.2026 gegen gpt-5.6-luna gefahren (n=3,
-    # `MSM_BENCH_ONLY`, Protokolle unter backend/logs/ai-benchmark):
+    # Aus den Cache-Quoten derselben Messreihe folgt zur Reihenfolge dagegen
+    # nichts: bei n=3 lieferte dasselbe Szenario mit derselben Frage einmal 0 %
+    # und einmal 100 % (`websuche` im Protokoll 20260814-194720). Wer daraus
+    # eine Anordnung ableitet, dreht an einer Kausalität, die es nicht gibt —
+    # erst messen, und nicht mit n=3.
     #
-    #   Anordnung                        Zwischenspeicher   `skill_lernen`
-    #   Ausgangslage                            68 %        2 von 3 richtig
-    #   A  alles Wechselnde hinter die Frage    98 %        0 von 3
-    #   B  alles Wechselnde vor die Frage       72 %        2 von 3   <- gewaehlt
-    #   C  Lage vor, Werkzeugkontext hinter     66 %        0 von 3
+    # Zwei Wege sind bereits gegangen worden und lohnen keinen zweiten Versuch:
     #
-    # A ist die schnellste und faellt trotzdem aus. Stand die Frage nicht mehr
-    # zuletzt, las das Modell den Betriebszustand als das Juengste und
-    # antwortete darauf: es rief dreimal `list_my_servers`, ein Werkzeug, das
-    # es in dieser Lage nie zuvor angefasst hatte, und kein einziges Mal
-    # `learn_skill`. Ein Zwischenspeicher, der die Werkzeugwahl kostet, spart
-    # nichts — eine falsch gewaehlte Runde ist teurer als jeder Praefix.
+    # Anordnung C (Lage vor die Frage, Werkzeugkontext dahinter) wurde gefahren
+    # und sah schlecht aus — die Zahl trägt aber nichts. Der Benchmark leerte
+    # damals vor jedem Szenario den Verlauf **und** die Werkzeugergebnisse, C
+    # baute dort also byte-gleich dieselbe Anfrage wie die Ausgangslage. Der
+    # Fehlschlag ist C nicht zuzuschreiben, und C ist damit auch nicht
+    # widerlegt. Wer eine weitere Anordnung messen will, braucht ein Szenario
+    # mit echtem Verlauf — dafür gibt es `kontext_folge`.
     #
-    # C war der Versuch, beides zu bekommen: die Lage vor die Frage (sie wird
-    # *ersetzt*), die Werkzeugergebnisse dahinter (sie *wachsen* nur, was ein
-    # Praefixspeicher eigentlich mag). Die Ueberlegung stimmt nicht — gemessen
-    # 66 %, also schlechter als der Ausgangszustand, und die Werkzeugwahl kippte
-    # trotzdem. Nicht noch einmal probieren, ohne vorher zu messen.
-    #
-    # Bleibt B: die Frage zuletzt, alles Wechselnde davor. Der Gewinn ist mit
-    # vier Punkten klein, weil der Praefix an der Stelle bricht, an der die
-    # Werkzeugergebnisse der laufenden Runde stehen — die sind der eigentliche
-    # Kostentreiber, und sie muessen dorthin. Wer hier mehr holen will, muss
-    # den Werkzeugkontext anders fuehren (anhaengen statt neu bauen), nicht die
-    # Reihenfolge weiterdrehen.
+    # Den Werkzeugkontext anzuhängen statt neu zu bauen, damit die nächste
+    # Anfrage eine echte Verlängerung der vorigen ist: durchgerechnet über acht
+    # Fragen 297.960 gegen 297.143 Zeichen, also kein Gewinn — der Präfix hält,
+    # aber die Anfrage wächst um genau das, was er spart. Dazu wüchse
+    # `state_json` auf das Dreifache, und `arbeitsspeicher_leeren`
+    # (ai_run_service.py) löscht `provider_messages` am Laufende mit Absicht:
+    # dort steht der entschlüsselte Gedächtnisblock im Klartext.
     verlauf = list(reversed(selected))
     letzte = verlauf.pop() if verlauf else None
     result.extend(verlauf)

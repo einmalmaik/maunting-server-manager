@@ -26,11 +26,13 @@ from models import (
 )
 from services.ai_context_service import (
     MAX_TOOL_RESULT_CONTEXT_CHARS,
+    TOOL_RESULT_TRUNCATION_MARK,
     WERKZEUG_KONTEXT_KOPF,
     _recent_tool_results,
     auf_budget_kuerzen,
     build_provider_messages,
     message_character_count,
+    teilbudgets,
 )
 from services.role_service import set_user_roles
 
@@ -127,10 +129,11 @@ def test_one_huge_tool_result_does_not_suppress_the_smaller_ones(
 ) -> None:
     """Ein gelesener Log verdraengt die uebrigen Werkzeugergebnisse nicht.
 
-    `read_server_logs` liefert bis zu 24.000 Zeichen, dreimal so viel wie das
-    Rueckflussbudget. Vorher lief die Schleife vom aeltesten Eintrag her und
-    brach beim ersten zu grossen `break` ab — der alte Log nahm damit alle
-    juengeren, winzigen Ergebnisse mit ins Nichts.
+    `read_server_logs` liefert bis zu 24.000 Zeichen, doppelt so viel wie das
+    Rueckflussbudget dieses Pfades (ohne Katalogwissen 12.000). Vorher lief die
+    Schleife vom aeltesten Eintrag her und brach beim ersten zu grossen `break`
+    ab — der alte Log nahm damit alle juengeren, winzigen Ergebnisse mit ins
+    Nichts.
     """
     conversation = _conversation(db, regular_user)
     for name, wert in [
@@ -153,6 +156,43 @@ def test_one_huge_tool_result_does_not_suppress_the_smaller_ones(
     # soll erkennen, dass da mehr war.
     assert "read_server_logs" in block
     assert len(block) <= MAX_TOOL_RESULT_CONTEXT_CHARS + 200
+
+
+def test_der_rückfluss_wächst_nicht_mit_dem_kontextfenster(
+    db: Session,
+    regular_user: User,
+) -> None:
+    """Ein Millionenfenster gibt dem Log der vorigen Runde keinen Zoll mehr.
+
+    Vorher wuchs das Rückflussbudget mit dem Fenster und lag bei luna
+    (3.319.200 Zeichen) bei 200.000. Ein einmal gelesener Log ging damit bei
+    jeder Folgefrage vollständig neu mit — er steht vor der Frage, wird also
+    nicht zwischengespeichert. Nachgerechnet an acht Fragen mit je einem
+    24.480-Zeichen-Log: Präfix 70,5 % statt 77,9 %, je Folgefrage 25,0 % mehr
+    bezahlte Zeichen.
+
+    Verglichen werden zwei Fenster, in denen der Deckel wirklich bindet. Der
+    Rückfall (`teilbudgets(None)`) taugt dafür seit dem 16.000er Deckel nicht
+    mehr: bei 24.000 Zeichen bindet dort `gesamt // 2` = 12.000, der Block wäre
+    also kleiner statt gleich groß.
+    """
+    conversation = _conversation(db, regular_user)
+    db.add(AiToolResult(
+        id=str(uuid4()), conversation_id=conversation.id,
+        tool_name="read_server_logs", result_json="L" * 24_480,
+    ))
+    db.commit()
+
+    mittel = _recent_tool_results(db, conversation.id, teilbudgets(64_000))
+    weit = _recent_tool_results(db, conversation.id, teilbudgets(3_319_200))
+
+    assert mittel is not None
+    assert weit == mittel, "Das große Fenster hat den Rückfluss wachsen lassen"
+    assert len(weit) <= len(WERKZEUG_KONTEXT_KOPF) + MAX_TOOL_RESULT_CONTEXT_CHARS
+    # Und das Modell sieht, dass es nur einen Ausschnitt vor sich hat. Hier
+    # steht die Marke am Blockende, weil es genau eine Zeile gibt; bei mehreren
+    # trägt sie die gekürzte Zeile, und die ist nach `reversed()` die älteste.
+    assert weit.endswith(TOOL_RESULT_TRUNCATION_MARK)
 
 
 def test_a_large_window_lets_more_than_twenty_messages_through(

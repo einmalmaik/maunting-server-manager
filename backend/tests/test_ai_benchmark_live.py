@@ -41,6 +41,48 @@ kostet Millisekunden, waehrend hier Sekunden gesucht werden.
     ist der Rest: Vorbereitung, Werkzeuge, Datenbank, Kompression. Das ist der
     Teil, der uns gehoert.
 
+**Ein Szenario hat ein Gedächtnis, die übrigen nicht.** Vor jeder Messung wird
+der Verlauf geleert, und das muss so bleiben — sonst misst das zwölfte Szenario
+den Kontext der elf davor mit. Der Preis dafür war, dass **jede** gemessene
+Anfrage aus genau drei Nachrichten bestand (Systemprompt, Lageblock, Frage) und
+ein Werkzeugkontext nie entstand: alles, was mit Verlauf und Werkzeugrückfluss
+zu tun hat, war hier per Konstruktion unsichtbar. Eine Änderung an der Größe
+dieses Rückflusses hätte einen Nullbefund geliefert, und ein Nullbefund ist kein
+Freispruch.
+
+``kontext_folge`` ist die Ausnahme: drei Fragen nacheinander in **derselben**
+Unterhaltung. Jede Frage ist ein eigener Lauf und steht als ``kontext_folge``,
+``kontext_folge#2``, ``kontext_folge#3`` in Tabelle und Protokoll. Messbar
+werden damit der wachsende Verlauf, der Präfix zweier aufeinander folgender
+Anfragen **und der Werkzeugrückfluss**.
+
+Beim Rückfluss ist die Stelle enger, als die drei Fragen vermuten lassen: er
+wird **einmal je Durchgang** gemessen, in der ersten Runde von Frage 2.
+``_recent_tool_results`` nimmt nur die Zeilen des jüngsten Laufs, der überhaupt
+Zeilen beigesteuert hat (``rows[0].run_id``) — für Frage 2 ist das der Lauf von
+Frage 1 mit ihren Blueprints. Was Frage 3 sieht, hängt daran, was Frage 2 getan
+hat: rief sie selbst ein Werkzeug, rückt der jüngste Lauf nach und Frage 3 sieht
+nur dessen kleines Ergebnis; rief sie keines, sieht Frage 3 denselben Block ein
+zweites Mal. Beides ist keine zweite unabhängige Messung. Frage 3 trägt
+Verlaufslänge und Präfix bei, nicht den Rückfluss.
+
+**Warum Blueprints und nicht die Doku.** ``_recent_tool_results`` nimmt Doku-
+und Skillwerkzeuge ausdrücklich aus (``tool_name.notin_(SKILL_TOOLS |
+DOCS_TOOLS)``) — ein Szenario, das auf die Doku zielt, füllt den Rückfluss mit
+null Zeichen. Nachgeprüft: zwei Dokuergebnisse mit 3.000 und 37.000 Zeichen
+ergeben ``None``. ``read_blueprint`` steht in keiner der beiden Mengen, liest
+echte Repo-Daten ohne Docker und ohne Node und liefert je Aufruf gemessene
+2.567 bis 5.824 Zeichen. Die sieben Blueprints der ersten Frage ergeben zusammen
+26.031 Zeichen und laufen damit sicher in den Deckel von 16.000
+(``MAX_TOOL_RESULT_CONTEXT_CHARS``), sichtbar an der Marke ``[...gekuerzt]``.
+Wer das Szenario auf die Doku zurückdreht, misst hier wieder nichts.
+
+Dazu zwei Zahlen, die es vorher nicht gab: der Verbrauch **je Runde**
+statt nur als Summe (eine Summe beantwortet nicht, welche Runde den
+Zwischenspeicher traf) und der gemeinsame **Präfix** zweier aufeinander
+folgender Anfragen in Zeichen — deterministisch, während die gemeldete
+Cache-Quote bei drei Wiederholungen zwischen 0 % und 100 % springt.
+
 **Sichtbar ist nicht dasselbe wie veroeffentlicht.** Der Lauf schreibt seine
 Ereignisse mit ``ai_run_broker.veroeffentlichen`` in eine Warteschlange — das
 kostet nichts und gelingt auch, waehrend die Schleife blockiert ist. Beim
@@ -108,6 +150,7 @@ from database import SessionLocal
 from models import AiConversation, AiProvider, Server, User
 from services import (
     ai_chat_service,
+    ai_context_service,
     ai_context_window,
     ai_memory_service,
     ai_reasoning,
@@ -263,6 +306,42 @@ def _sichtbar_ab(zeitpunkt: float, blockaden: list[tuple[float, float]]) -> floa
 # ── Was eine Messung ist ─────────────────────────────────────────────────
 
 
+def _gemeinsamer_praefix(links: list[dict], rechts: list[dict]) -> int:
+    """Wieviele Zeichen zwei Anfragen sich von vorne her teilen.
+
+    Der Zwischenspeicher des Anbieters greift auf dem **Präfix**: er bricht an
+    der ersten Abweichung ab und alles dahinter ist frisch bezahlte Eingabe.
+    Genau das macht diese Zahl zur Kennzahl neben der Cache-Quote — sie steht
+    im Code fest, während die gemeldete Quote bei drei Wiederholungen zwischen
+    0 % und 100 % springt, ohne dass sich an der Anfrage etwas geändert hätte.
+
+    Verglichen wird **nachrichtenweise** und nicht Zeichen für Zeichen. Eine
+    geänderte Nachricht ändert ohnehin alles ab ihrem Anfang, und der Rest des
+    Unterschieds liegt innerhalb einer einzelnen Nachricht — unter dem Rauschen
+    der Tokenisierung. Dafür kostet diese Fassung nichts, und das ist hier
+    Bedingung: sie läuft mitten in der gemessenen Strecke.
+
+    Gezählt wird mit ``message_character_count`` und nicht mit einer eigenen
+    Formel: das ist die Währung, in der das Kontextbudget rechnet, und zwei
+    Zählweisen für dieselbe Größe wären zwei Wahrheiten.
+
+    Damit zählt der **Werkzeugkatalog nicht mit**: er geht als ``tools`` über
+    dieselbe Leitung, aber ``message_character_count`` summiert nur ``content``
+    (rund 45.000 Zeichen, siehe ``katalog_zeichen`` in ``ai_stream_service``).
+    Der ausgewiesene Anteil ist deshalb der Präfixanteil **der Nachrichten**,
+    nicht der zwischenspeicherbare Anteil der ganzen Anfrage — er ist mit den
+    Prozentzahlen aus ``Teilbudgets`` nicht vergleichbar und untertreibt, weil
+    der Katalog innerhalb eines Laufs feststeht. Vergleichbar ist er mit sich
+    selbst über mehrere Läufe, und dafür ist er da.
+    """
+    gleich = 0
+    for a, b in zip(links, rechts):
+        if a != b:
+            break
+        gleich += 1
+    return ai_context_service.message_character_count(links[:gleich])
+
+
 @dataclass
 class Runde:
     """Eine einzelne Anfrage an den Anbieter."""
@@ -270,6 +349,30 @@ class Runde:
     start: float
     erstes_zeichen: float | None = None
     ende: float | None = None
+
+    #: Was **diese eine** Anfrage verbraucht hat.
+    #:
+    #: Die Summe über alle Runden stand schon immer im Protokoll — sie kommt aus
+    #: dem Verbrauchsereignis, das ``usage_addieren`` gefüllt hat. Nur ist "50 %
+    #: aus dem Zwischenspeicher" damit nicht von "Runde 1 traf nichts, Runde 2
+    #: traf alles" zu unterscheiden, und genau dieser Fall lag vor. Der
+    #: Unterschied ist keine Feinheit: im ersten Fall wäre der Präfix zur Hälfte
+    #: kaputt, im zweiten ist er heil und nur die erste Runde einer Unterhaltung
+    #: zahlt ihn.
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+
+    #: Die Anfrage in Zeichen, und wieviel davon mit der vorigen Anfrage
+    #: übereinstimmte.
+    #:
+    #: ``None`` heißt "es gab keine Vorgängerin" und nie "der Präfix war
+    #: kaputt". Die erste Anfrage einer geleerten Unterhaltung hat keine, und
+    #: eine Null an dieser Stelle läse sich als Totalausfall des
+    #: Zwischenspeichers — also als Befund, wo nur nichts zu messen war.
+    anfrage_zeichen: int = 0
+    praefix_zeichen: int | None = None
 
     @property
     def dauer(self) -> float:
@@ -280,6 +383,12 @@ class Runde:
         if self.erstes_zeichen is None:
             return None
         return self.erstes_zeichen - self.start
+
+    @property
+    def praefix_anteil(self) -> float | None:
+        if self.praefix_zeichen is None or not self.anfrage_zeichen:
+            return None
+        return self.praefix_zeichen / self.anfrage_zeichen
 
 
 @dataclass
@@ -332,6 +441,15 @@ class Messung:
     #: Die zusammengefasste Ereignisfolge — was der Benutzer wann sah.
     folge: list[dict] = field(default_factory=list)
 
+    #: Die Nachrichten der **letzten** Anfrage dieses Laufs, damit die erste
+    #: Anfrage der nächsten Frage ihren Präfix dagegen messen kann.
+    #:
+    #: Steht bewusst **nicht** in ``als_dict``. In diesen Nachrichten steht der
+    #: entschlüsselte Gedächtnisblock im Klartext; das Protokoll unter
+    #: ``logs/ai-benchmark/`` ist eine Datei auf der Platte und kein Ort für
+    #: Benutzerdaten. Sie lebt nur so lange wie der Durchlauf.
+    letzte_anfrage: list[dict] = field(default_factory=list, repr=False)
+
     @property
     def msm_zeit(self) -> float:
         """Alles, was nicht der Anbieter war. Der Teil, der uns gehoert."""
@@ -362,10 +480,23 @@ class Messung:
             "msm_zeit": round(self.msm_zeit, 3),
             "werkzeugzeit": round(self.werkzeugzeit, 3),
             "runden": len(self.runden),
+            # Je Runde und nicht nur als Summe: eine Summe beantwortet nicht,
+            # **welche** Runde den Zwischenspeicher traf. Die Summen oben bleiben
+            # unangetastet, damit ältere Auswertungen weiterlesen können.
             "runden_detail": [
                 {
                     "dauer": round(r.dauer, 3),
                     "ttft": round(r.ttft, 3) if r.ttft is not None else None,
+                    "prompt_tokens": r.prompt_tokens,
+                    "completion_tokens": r.completion_tokens,
+                    "cached_tokens": r.cached_tokens,
+                    "reasoning_tokens": r.reasoning_tokens,
+                    "anfrage_zeichen": r.anfrage_zeichen,
+                    "praefix_zeichen": r.praefix_zeichen,
+                    "praefix_anteil": (
+                        round(r.praefix_anteil, 4)
+                        if r.praefix_anteil is not None else None
+                    ),
                 }
                 for r in self.runden
             ],
@@ -405,6 +536,30 @@ class Szenario:
     #: Was vor dem Szenario in der Datenbank stehen muss.
     saat: Callable[[Session, User], None] | None = None
     beschreibung: str = ""
+    #: Weitere Fragen, gestellt in **derselben** Unterhaltung wie ``auftrag``
+    #: und ohne sie vorher zu leeren.
+    #:
+    #: Leer ist der Normalfall und bleibt es: jedes andere Szenario startet
+    #: sauber, sonst misst das zwölfte den Kontext der elf davor mit (siehe
+    #: ``_unterhaltung``). Genau deshalb konnte dieser Benchmark bisher aber
+    #: nichts über den Verlauf sagen — jede gemessene Anfrage bestand aus drei
+    #: Nachrichten. Das ändert sich hier.
+    #:
+    #: Der **Werkzeugrückfluss** hängt zusätzlich am gewählten Werkzeug:
+    #: ``_recent_tool_results`` nimmt ``DOCS_TOOLS`` und ``SKILL_TOOLS`` aus.
+    #: Eine Nachfrage auf ein Werkzeug aus diesen Mengen ergäbe dort einen
+    #: Nullbefund, und ein Nullbefund ist kein Freispruch.
+    #:
+    #: Jede Nachfrage ist ein eigener Lauf und wird einzeln gemessen; sie
+    #: erscheint als ``<name>#2``, ``<name>#3`` in Tabelle und Protokoll. Der
+    #: Median über drei Wiederholungen bleibt damit je Frage sauber — die dritte
+    #: Frage ist ein anderer Lauf als die erste und gehört nicht in denselben
+    #: Topf.
+    #:
+    #: ``MSM_BENCH_ONLY`` kennt trotzdem nur den Szenarionamen und fährt dann
+    #: alle Fragen: eine Nachfrage ohne ihre Vorgängerin hätte den Verlauf
+    #: nicht, den zu messen ihr einziger Zweck ist.
+    nachfragen: tuple[str, ...] = ()
 
 
 def _saat_gedaechtnis(db: Session, user: User) -> None:
@@ -525,6 +680,82 @@ SZENARIEN: list[Szenario] = [
         erwartet=frozenset({"propose_task_set", "list_my_servers"}),
         beschreibung="Mehrstufiger Auftrag ueber Lesen und Schreiben hinweg.",
     ),
+    # ── Das einzige Szenario mit Gedächtnis ──────────────────────────────
+    #
+    # **Warum Blueprints.** Gesucht war eine Quelle mit echtem und
+    # **deterministischem** Umfang, die der Rückfluss auch annimmt.
+    # `read_server_logs` wäre im Betrieb der dickste (bis 24.000 Zeichen aus
+    # einem Container), liefert hier aber nichts: ohne Docker und Node antwortet
+    # das Werkzeug mit `available: false`. Die Doku hat Umfang, wird aber von
+    # `_recent_tool_results` ausdrücklich ausgenommen — `read_docs` und
+    # `search_docs` stehen in `DOCS_TOOLS`, und das Szenario füllte den
+    # Rückfluss deshalb mit null Zeichen. `read_blueprint` steht in keiner der
+    # beiden Mengen und liest Dateien aus `blueprints/native/`: gemessen 2.567
+    # bis 5.824 Zeichen je Aufruf, `list_blueprints` 3.348.
+    #
+    # **Warum diese sieben Spiele.** Große Blueprints, damit wenige Aufrufe
+    # reichen — gemessen über `execute_read_tool` und `json.dumps` wie beim
+    # Persistieren: 7 Days to Die 5.824 (der größte der 27), Conan Exiles (UE5)
+    # 3.689, ARK: Survival Evolved 3.552, ARK: Survival Ascended 3.534, DayZ
+    # 3.260, Enshrouded 3.149, Rust 3.023 — zusammen 26.031 Zeichen und damit
+    # gut das Anderthalbfache des Deckels von 16.000
+    # (`MAX_TOOL_RESULT_CONTEXT_CHARS`). Mit den kleinsten Blueprints (2.567)
+    # wären für dieselbe Summe elf Aufrufe nötig, und elf Spiele zählt so kein
+    # Betreiber auf. Ein knapper Vorrat wäre hier ohnehin wertlos: läge die
+    # Summe unter dem Deckel, meldete das Szenario einen Nullbefund und sähe aus
+    # wie ein Freispruch.
+    #
+    # Reichlich heißt aber nicht "in jeder Teilmenge scharf". Nachgerechnet über
+    # die Blockformel (Kopf 86 Zeichen, je Zeile `- read_blueprint: ` vor dem
+    # Ergebnis, dazwischen je eine Trennzeile): alle sieben ergeben ungekürzt
+    # 26.249 Zeichen. Gemessen bleiben davon 16.090 = 86 + 16.000 + 4
+    # Trennzeilen: fünf Zeilen passen hinein, die fünfte wird abgeschnitten,
+    # zwei Blueprints fehlen ganz. Nach Teilmengen: fünf beliebige der sieben
+    # reißen den Deckel immer (Zeilensumme 16.608 bis 19.949), vier je nach
+    # Auswahl (13.038 bis 16.671), drei nie (höchstens 13.119). Fehlt die Marke
+    # `[...gekuerzt]`, ist das kein Freispruch, sondern der Hinweis, in der
+    # Werkzeugspalte nachzusehen, wie viele Blueprints tatsächlich gelesen
+    # wurden.
+    Szenario(
+        name="kontext_folge",
+        auftrag=(
+            "Wir wollen unser Hosting-Angebot um ein Survival-Paket erweitern, "
+            "und ich muss vorher wissen, was die Spiele an Ports und Umgebung "
+            "brauchen. Lies mir bitte die Blueprints von 7 Days to Die, Conan "
+            "Exiles, ARK: Survival Evolved, ARK: Survival Ascended, DayZ, Rust "
+            "und Enshrouded und stell mir gegenüber, welche Ports jeder öffnet "
+            "und welche Umgebungsvariablen gesetzt sein müssen."
+        ),
+        nachfragen=(
+            # Die eigentliche Frage des Szenarios. Beantwortbar nur, wenn die
+            # Blueprints noch vor dem Modell stehen — und mit Deckel sieht es
+            # davon einen Ausschnitt, markiert mit `[...gekuerzt]`. Ob es
+            # daraufhin nachliest oder falsch antwortet, ist genau der Befund,
+            # den dieses Szenario liefern soll. Die Einzelheiten sind scharf
+            # gewählt: die App-IDs sind sieben verschiedene Zahlen (294420,
+            # 443030, 376030, 2430930, 223350, 258550, 2278520), und ohne
+            # RCON-Port kommen nur zwei der sieben aus — 7 Days to Die und
+            # Enshrouded. Die Frage zielt bewusst auf **alle** sieben: welche
+            # Zeile die Kürzung trifft, hängt an der Lesereihenfolge, aber zwei
+            # fehlen in jedem Fall. Die App-ID steht dabei in `meta.description`
+            # innerhalb der ersten 290 Zeichen und überlebt ein Abschneiden; die
+            # Ports stehen ab Offset 1.065 bis 3.797 und sind der härtere Teil.
+            "Welche Steam-App-ID steht bei jedem der sieben, und welche von "
+            "ihnen kommen ohne RCON-Port aus?",
+            "Fass mir deine Empfehlung bitte in fünf Stichpunkten für mein "
+            "Runbook zusammen.",
+        ),
+        # Eine Menge von Alternativen, geprüft über **alle** Fragen des
+        # Szenarios (siehe `_treffer`) — der vorhandene Mechanismus trägt den
+        # interessanten Fall schon: die zweite Frage darf direkt antworten
+        # (kein Werkzeug, kein Fehlschlag) oder `read_blueprint` erneut rufen.
+        # Beides ist richtig. Ein *anderes* Werkzeug fiele in der
+        # Werkzeugspalte der Tabelle auf.
+        erwartet=frozenset({"read_blueprint", "list_blueprints"}),
+        beschreibung="Drei Fragen in einer Unterhaltung — hier und nur hier "
+                     "wachsen Verlauf und Präfix über mehrere Fragen, und nur "
+                     "hier ist der Werkzeugrückfluss gefüllt.",
+    ),
 ]
 
 
@@ -575,7 +806,7 @@ def _server_anlegen(db: Session, anzahl: int = 3) -> list[Server]:
     return server
 
 
-def _unterhaltung(db: Session, user: User) -> AiConversation:
+def _unterhaltung(db: Session, user: User, *, leeren: bool = True) -> AiConversation:
     """Die eine Unterhaltung des Benutzers, vor jedem Szenario geleert.
 
     Geleert und nicht neu angelegt: ``ai_conversations.user_id`` ist eindeutig,
@@ -583,15 +814,29 @@ def _unterhaltung(db: Session, user: User) -> AiConversation:
     sondern eine Zusicherung des Produkts — und der Verlauf **muss** weg, sonst
     misst das zwoelfte Szenario den Kontext der elf davor mit und jede Zahl
     waechst monoton, ohne dass sich etwas verschlechtert haette.
+
+    ``leeren=False`` ist die eine Ausnahme, und sie ist der Zweck einer
+    Nachfrage: sie soll den Verlauf ihrer Vorgängerin vorfinden. Gelöscht
+    werden hier nämlich nicht nur Nachrichten, sondern auch die
+    ``AiToolResult``-Zeilen — und die sind es, aus denen
+    ``build_provider_messages`` den Werkzeugkontext der nächsten Frage baut.
+    Solange jede Messung leert, gibt es diesen Kontext nie, und alles was mit
+    ihm zusammenhängt bleibt unmessbar.
     """
     conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
-    ai_chat_service.clear_history(db, conversation)
-    db.commit()
+    if leeren:
+        ai_chat_service.clear_history(db, conversation)
+        db.commit()
     db.refresh(conversation)
     return conversation
 
 
 # ── Die Messung ──────────────────────────────────────────────────────────
+
+
+def _schritt_name(szenario: Szenario, schritt: int) -> str:
+    """Wie die Frage Nummer ``schritt`` in Tabelle und Protokoll heißt."""
+    return szenario.name if schritt == 0 else f"{szenario.name}#{schritt + 1}"
 
 
 async def _messen(
@@ -602,12 +847,28 @@ async def _messen(
     szenario: Szenario,
     client: httpx.AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
+    schritt: int = 0,
+    vorige_anfrage: list[dict] | None = None,
 ) -> Messung:
-    """Ein Lauf, vollstaendig vermessen."""
-    messung = Messung(szenario=szenario.name)
+    """Ein Lauf, vollständig vermessen.
+
+    ``schritt`` ist die Nummer der Frage innerhalb des Szenarios: 0 ist
+    ``szenario.auftrag``, alles darüber greift in ``szenario.nachfragen``. Ein
+    Parameter statt drei, weil Frage, Name und die Entscheidung über das Leeren
+    des Verlaufs sich alle aus dieser einen Zahl ergeben — und weil ``0`` genau
+    das Verhalten von vorher ist.
+
+    ``vorige_anfrage`` sind die Nachrichten der letzten Anbieteranfrage der
+    vorigen Frage. Nur dafür da, dass die erste Runde hier ihren gemeinsamen
+    Präfix dagegen messen kann; sie wird gelesen und nie geschrieben.
+    """
+    frage = szenario.auftrag if schritt == 0 else szenario.nachfragen[schritt - 1]
+    messung = Messung(szenario=_schritt_name(szenario, schritt))
     ai_run_broker.zuruecksetzen_fuer_tests()
 
-    conversation = _unterhaltung(db, user)
+    # Eine Nachfrage lebt von dem, was vorher da war — sie ist der einzige Fall,
+    # in dem der Verlauf stehenbleibt.
+    conversation = _unterhaltung(db, user, leeren=schritt == 0)
 
     # ── Der Anlauf ───────────────────────────────────────────────────────
     #
@@ -631,7 +892,7 @@ async def _messen(
         conversation=conversation,
         provider=provider,
         request_id=uuid4(),
-        content=szenario.auftrag,
+        content=frage,
         reasoning=denken,
         reasoning_effort=stufe,
         context_chars=fenster.zeichen if fenster.bekannt else None,
@@ -690,9 +951,29 @@ async def _messen(
     # langsam" von "wir waren langsam" trennen.
     echt_stream = ai_stream_service.stream_chat_completion
 
+    # Die Nachrichten der zuletzt gestellten Anfrage — Ausgangspunkt für den
+    # Präfixvergleich der nächsten. Beim Eintritt sind das die der vorigen
+    # Frage, sofern es eine gab.
+    vorige: list[dict] = list(vorige_anfrage or [])
+
     async def _stream(*args, **kwargs):
+        nonlocal vorige
         runde = Runde(start=perf_counter())
         runden.append(runde)
+        # **Vor** dem ersten Stück und nicht im `finally`: `provider_messages`
+        # ist dieselbe Liste, an die der Lauf nach der Runde den Assistentenzug
+        # und die Werkzeugergebnisse anhängt. Wer sie erst am Ende ansieht,
+        # misst die nächste Anfrage und nennt sie diese. Die flache Kopie
+        # kostet nichts und friert die Reihenfolge ein.
+        nachrichten = list(kwargs.get("messages") or [])
+        runde.anfrage_zeichen = ai_context_service.message_character_count(nachrichten)
+        if vorige:
+            runde.praefix_zeichen = _gemeinsamer_praefix(nachrichten, vorige)
+        vorige = nachrichten
+        # Der Verbrauchszähler **dieser** Runde. Der Lauf legt für jede
+        # Werkzeugrunde ein frisches `StreamUsage` an und addiert es hinterher
+        # in die Laufsumme; wer hier hineinsieht, sieht die Runde allein.
+        verbrauch = kwargs.get("usage")
         try:
             async for chunk in echt_stream(*args, **kwargs):
                 if runde.erstes_zeichen is None:
@@ -700,6 +981,13 @@ async def _messen(
                 yield chunk
         finally:
             runde.ende = perf_counter()
+            # Gelesen wird erst hier: der Anbieter meldet seinen Verbrauch in
+            # der letzten Zeile des Stroms, vorher steht dort nichts.
+            if verbrauch is not None:
+                runde.prompt_tokens = int(verbrauch.prompt_tokens or 0)
+                runde.completion_tokens = int(verbrauch.completion_tokens or 0)
+                runde.cached_tokens = int(verbrauch.cached_tokens or 0)
+                runde.reasoning_tokens = int(verbrauch.reasoning_tokens or 0)
 
     # Werkzeuge einzeln vermessen. Die Summe gegen die Wanduhr zeigt, ob sie
     # nacheinander oder nebeneinander liefen.
@@ -770,6 +1058,10 @@ async def _messen(
     messung.runden = runden
     messung.werkzeuge = werkzeuge
     messung.anbieterzeit = sum(r.dauer for r in runden)
+    # Weitergereicht an die nächste Frage derselben Unterhaltung. Kam dieser
+    # Lauf gar nicht bis zu einer Anfrage, steht hier weiter die des Vorgängers
+    # — die Kette bricht dann nicht zusätzlich noch an einer leeren Liste.
+    messung.letzte_anfrage = vorige
     if blockaden:
         dauern = [ende - beginn for beginn, ende in blockaden]
         messung.loop_block_max = max(dauern)
@@ -912,6 +1204,65 @@ def _tabelle(nach_szenario: dict[str, list[Messung]]) -> str:
     return "\n".join(zeilen)
 
 
+def _k(zeichen: int) -> str:
+    """Tausender kurz — die Tabelle ist eng und ASCII."""
+    return f"{zeichen / 1000:.1f}k"
+
+
+def _rueckfluss(nach_szenario: dict[str, list[Messung]]) -> list[str]:
+    """Was jede Anfrage an Verlauf mitschleppt und was davon wiedererkannt wurde.
+
+    **Zwei Zahlen nebeneinander, weil eine allein nicht trägt.** Die Cache-Quote
+    kommt vom Anbieter und ist bei drei Wiederholungen als Kennzahl untauglich:
+    im Protokoll ``20260814-194720-vorher.json`` meldet ``websuche`` für drei
+    Durchgänge derselben Frage 100 %, 100 % und 0 % — bei je einer Runde. Byte-
+    gleich waren diese Anfragen deswegen nicht: der Lageblock trägt die Uhrzeit
+    auf die Minute genau (``ai_lage``). Nur eben auch nicht so verschieden, dass
+    der Sprung daher käme. Der gemeinsame Präfix dagegen steht im Code fest und
+    schwankt nicht. Laufen beide auseinander, liegt es am Anbieter und
+    nicht an der Anfrage — und genau das ist eine Auskunft, die vorher niemand
+    hatte.
+
+    **Je Runde und nicht als Summe.** "Die Hälfte kam aus dem Zwischenspeicher"
+    heißt bei zwei Runden entweder "beide zur Hälfte" oder "die erste gar nicht,
+    die zweite ganz". Nur das zweite ist der Normalfall, und aus einer Summe ist
+    es nicht zu lesen.
+
+    Die Rundenreihe stammt aus dem **ersten gelungenen** Durchgang und nicht aus
+    einem Median: die Zahl der Runden schwankt zwischen den Durchgängen, und ein
+    Median über verschieden lange Reihen ist keine Zahl. Alle Durchgänge stehen
+    vollständig im JSON.
+    """
+    zeilen: list[str] = []
+    for name, messungen in nach_szenario.items():
+        gelungen = [m for m in messungen if m.ok and m.runden]
+        if not gelungen:
+            continue
+        # Die **erste** Runde jedes Durchgangs: sie trägt Verlauf und
+        # Werkzeugkontext so, wie die Frage sie vorgefunden hat. Die späteren
+        # Runden hängen nur an, was dieser Lauf selbst gelesen hat.
+        erste = [m.runden[0] for m in gelungen]
+        gemessen = [r for r in erste if r.praefix_zeichen is not None]
+        praefix = (
+            f"praefix="
+            f"{_k(int(_median([float(r.praefix_zeichen or 0) for r in gemessen]) or 0)):>7} Z"
+            f" ({(_median([r.praefix_anteil for r in gemessen]) or 0) * 100:3.0f}%)"
+            # 24 Zeichen wie der befüllte Zweig, sonst verrutscht die Spalte.
+            if gemessen else "praefix=      - Z       "
+        )
+        # Beides in Tokens und beides vom Anbieter gemeldet — Zeichen und Tokens
+        # in einem Bruch wären eine Zahl, die nichts bedeutet.
+        reihe = " ".join(
+            f"{_k(r.cached_tokens)}/{_k(r.prompt_tokens)}" for r in gelungen[0].runden
+        )
+        zeilen.append(
+            f"  {name:<20} "
+            f"anfrage={_k(int(_median([float(r.anfrage_zeichen) for r in erste]) or 0)):>7} Z  "
+            f"{praefix}  Rd cache/prompt Tk: {reihe}"
+        )
+    return zeilen
+
+
 def _treffer(nach_szenario: dict[str, list[Messung]]) -> tuple[int, int, list[str]]:
     """Wie oft das erwartete Werkzeug tatsaechlich kam.
 
@@ -946,7 +1297,18 @@ def _treffer(nach_szenario: dict[str, list[Messung]]) -> tuple[int, int, list[st
             )
             continue
         gesamt += 1
-        messungen = nach_szenario.get(szenario.name, [])
+        # Über alle Fragen des Szenarios: bei einem mit Nachfragen liest die
+        # erste die Blueprints und die dritte fasst zusammen. Die Erwartung gilt
+        # dem Szenario, nicht der einzelnen Frage — sonst wäre jede Nachfrage
+        # ohne Werkzeug ein gemeldeter Fehlschlag und richtiges Verhalten stünde
+        # als Rückschritt in der Tabelle. Genau daran hängt auch der offene Fall
+        # der zweiten Frage: direkt antworten und erneut lesen sind beide
+        # richtig, und beide bestehen diese Prüfung.
+        messungen = [
+            m
+            for schritt in range(len(szenario.nachfragen) + 1)
+            for m in nach_szenario.get(_schritt_name(szenario, schritt), [])
+        ]
         genutzt = {w.name for m in messungen if m.ok for w in m.werkzeuge}
         if genutzt & szenario.erwartet:
             erfuellt += 1
@@ -1019,22 +1381,32 @@ async def test_ai_benchmark(
                 continue
             if szenario.saat is not None:
                 szenario.saat(db, owner_user)
-            messungen: list[Messung] = []
             for durchgang in range(BENCH_WIEDERHOLUNGEN):
-                messung = await _messen(
-                    db, user=owner_user, provider=provider, szenario=szenario,
-                    client=client, monkeypatch=monkeypatch,
-                )
-                messungen.append(messung)
-                marke = "ok" if messung.ok else f"AUSFALL {messung.fehler}"
-                print(
-                    f"    {szenario.name:<20} #{durchgang + 1} "
-                    f"ttft={_z(messung.ttft_text).strip():>8} "
-                    f"gesamt={messung.gesamt:6.2f}s "
-                    f"block={messung.loop_block_max:5.2f}s "
-                    f"runden={len(messung.runden)} {marke}"
-                )
-            nach_szenario[szenario.name] = messungen
+                # Eine Unterhaltung von vorne: Schritt 0 leert den Verlauf, jede
+                # Nachfrage findet ihn vor. `vorige` trägt die letzte Anfrage
+                # weiter, damit die nächste ihren gemeinsamen Präfix dagegen
+                # messen kann — und fängt bei jedem Durchgang wieder leer an,
+                # weil der geleerte Verlauf keine Vorgängerin hat.
+                #
+                # Ohne Nachfragen ist das genau der Ablauf von vorher: eine
+                # Runde durch die Schleife, `schritt=0`.
+                vorige: list[dict] = []
+                for schritt in range(len(szenario.nachfragen) + 1):
+                    messung = await _messen(
+                        db, user=owner_user, provider=provider, szenario=szenario,
+                        client=client, monkeypatch=monkeypatch,
+                        schritt=schritt, vorige_anfrage=vorige,
+                    )
+                    vorige = messung.letzte_anfrage
+                    nach_szenario.setdefault(messung.szenario, []).append(messung)
+                    marke = "ok" if messung.ok else f"AUSFALL {messung.fehler}"
+                    print(
+                        f"    {messung.szenario:<20} #{durchgang + 1} "
+                        f"ttft={_z(messung.ttft_text).strip():>8} "
+                        f"gesamt={messung.gesamt:6.2f}s "
+                        f"block={messung.loop_block_max:5.2f}s "
+                        f"runden={len(messung.runden)} {marke}"
+                    )
 
     erfuellt, gesamt_erwartet, verfehlt = _treffer(nach_szenario)
     alle = [m for messungen in nach_szenario.values() for m in messungen if m.ok]
@@ -1077,13 +1449,32 @@ async def test_ai_benchmark(
     print(_tabelle(nach_szenario))
     print(linie)
 
+    rueckfluss = _rueckfluss(nach_szenario)
+    if rueckfluss:
+        print("  Rueckfluss und Praefix   (Z = Zeichen, Tk = Tokens)")
+        for zeile in rueckfluss:
+            print(zeile)
+        print(linie)
+
+    # Die Summenzeile ohne die Nachfragen (`#2`, `#3`). Sie existiert, um Läufe
+    # über die Zeit zu vergleichen, und dieser Vergleich darf nicht daran
+    # hängen, wie viele Nachfragen ein Szenario hat: `kontext_folge` liefert
+    # neun Messungen, jedes andere drei. Ohne diesen Filter spränge die Summe
+    # zwischen zwei Läufen aus einem Grund, der keine Änderung an MSM ist. In
+    # Tabelle und JSON stehen die Nachfragen unverändert mit allen Zahlen.
+    #
+    # Die längste Blockade bleibt bewusst über **alles**: sie ist ein Höchstwert
+    # und keine Summe, und eine im Nachfragelauf blockierte Schleife ist ein
+    # Befund über MSM. Den zu verschweigen wäre schlimmer als eine Zahl, die um
+    # einen Ausreißer schwankt.
+    summen = [m for m in alle if "#" not in m.szenario]
     if alle:
         print(
             f"  Werkzeugtreffer: {erfuellt}/{gesamt_erwartet}   "
-            f"TTFT Median ueber alles: {_median([m.ttft_text for m in alle]) or 0:.2f}s   "
-            f"laengste Blockade: {max(m.loop_block_max for m in alle):.2f}s   "
-            f"Anbieterzeit gesamt: {sum(m.anbieterzeit for m in alle):.1f}s   "
-            f"MSM-Zeit gesamt: {sum(m.msm_zeit for m in alle):.1f}s"
+            f"laengste Blockade: {max(m.loop_block_max for m in alle):.2f}s (alles)   "
+            f"TTFT Median: {_median([m.ttft_text for m in summen]) or 0:.2f}s   "
+            f"Anbieterzeit: {sum(m.anbieterzeit for m in summen):.1f}s   "
+            f"MSM-Zeit: {sum(m.msm_zeit for m in summen):.1f}s   (ohne Nachfragen)"
         )
     for zeile in verfehlt:
         print(f"  ! {zeile}")

@@ -99,24 +99,31 @@ def test_a_genuinely_small_window_is_respected_not_raised() -> None:
 
     assert fenster.nutzbar_tokens < ai_context_window.RUECKFALL_NUTZBAR_TOKENS
     grenzen = ai_context_service.teilbudgets(fenster.zeichen)
-    # Und der Sockel fuer Werkzeugdaten (8.000 Zeichen) darf hier nicht den
+    # Und der Deckel für Werkzeugdaten (16.000 Zeichen) darf hier nicht den
     # halben Kontext beanspruchen.
     assert grenzen.werkzeug_zeichen <= grenzen.gesamt // 2
 
 
 @pytest.mark.parametrize("modell", [None, _modell(None), _modell(0)])
-def test_without_catalog_knowledge_everything_stays_as_it_was(modell) -> None:
+def test_without_catalog_knowledge_only_the_tool_reflux_is_narrower(modell) -> None:
     """Katalog nicht erreichbar, Modell unbekannt, Auto Router ohne Fenster.
 
-    Alle drei landen im selben Zustand, und der ist woertlich der von vor
-    dieser Aenderung: 6.000 Token, 24.000 Zeichen, dieselben Teilbudgets.
+    Alle drei landen im selben Zustand: 6.000 Token, 24.000 Zeichen, und bis
+    auf eine Ausnahme dieselben Teilbudgets wie vor der Fensterberechnung.
+
+    Die Ausnahme ist der Rückfluss der Werkzeugergebnisse. Seit sein Deckel bei
+    16.000 steht, bindet hier nicht mehr er, sondern der Anteil `gesamt // 2` —
+    also 12.000. Beim Anbieter ändert das die Menge nicht: die Kürzungsgrenze im
+    Lauf ist `max(24.000 - Werkzeugkatalog, 4.000)` und liegt gemessen zwischen
+    4.000 und 16.036 Zeichen, der Block wird dort also ohnehin geschnitten.
     """
     fenster = ai_context_window.aus_modell(modell)
 
     assert fenster.bekannt is False
     assert fenster.zeichen == ai_context_service.MAX_CONTEXT_CHARS
     grenzen = ai_context_service.teilbudgets(None)
-    assert grenzen.werkzeug_zeichen == ai_context_service.MAX_TOOL_RESULT_CONTEXT_CHARS
+    assert grenzen.werkzeug_zeichen == grenzen.gesamt // 2
+    assert grenzen.werkzeug_zeichen < ai_context_service.MAX_TOOL_RESULT_CONTEXT_CHARS
     assert grenzen.werkzeug_anzahl == ai_context_service.MAX_TOOL_RESULTS
     assert grenzen.zusammenfassung_zeichen == ai_context_service.MAX_SUMMARY_CHARS
 
