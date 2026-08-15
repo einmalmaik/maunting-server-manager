@@ -420,8 +420,10 @@ def test_the_whole_minecraft_case_end_to_end(
         # Blueprints sind Dateien auf der Platte, keine Datenbankzeilen: die
         # `clean_db`-Fixture raeumt sie nicht mit weg.
         try:
-            blueprint_service.delete_community_blueprint("minecraft_forge_1_20_1")
-        except HTTPException:
+            server.game_type = "minecraft_forge"
+            db.commit()
+            blueprint_service.delete_community_blueprint("minecraft_forge_1_20_1", db=db)
+        except Exception:
             pass
 
 
@@ -539,3 +541,123 @@ def test_a_server_on_a_deleted_blueprint_can_still_be_switched_away(
     # Unbekannt statt leer: ein leeres Objekt haette behauptet, die alte Vorlage
     # habe keine Umgebungsvariablen gehabt.
     assert vorschau["env_before"] is None
+
+
+def test_propose_blueprint_delete_blocks_active_servers(
+    db: Session, regular_user: User, tmp_path: Path
+) -> None:
+    """Loeschen eines Blueprints, der noch von einem Server genutzt wird, muss geblockt werden."""
+    _rechte(db, regular_user, global_keys=("ai.chat.use", "blueprints.manage"))
+    conversation = _conversation(db, regular_user)
+
+    from services import blueprint_service
+
+    # 1. Community-Blueprint anlegen
+    vorschlag = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_blueprint_change",
+        arguments={
+            "source_id": "minecraft_forge",
+            "new_id": "custom_active_bp",
+            "changes": {"runtime.env": {"VERSION": "1.20.1"}},
+            "reason": "Test-Blueprint fuer aktiven Server",
+            "expected_effect": "Blueprint wird angelegt",
+        },
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+    _, token = ai_proposal_service.confirm_proposal(db, proposal_id=vorschlag.id, user=regular_user)
+    ai_proposal_service.execute_proposal(db, proposal_id=vorschlag.id, user=regular_user, confirmation_token=token)
+
+    server = _server(db, regular_user, tmp_path, "custom_active_bp", server_keys=("server.view",))
+
+    try:
+        with pytest.raises(ai_proposal_service.AiActionValidationError) as exc:
+            ai_proposal_service.create_proposal(
+                db,
+                user=regular_user,
+                conversation=conversation,
+                tool_name="propose_blueprint_delete",
+                arguments={
+                    "blueprint_id": "custom_active_bp",
+                    "reason": "Test-Loeschung",
+                    "expected_effect": "Wird geblockt",
+                },
+                correlation_id=str(uuid4()),
+            )
+        assert "verwendet" in str(exc.value)
+
+        # Auch direkter Service-Aufruf wirft HTTPException 409
+        with pytest.raises(HTTPException) as http_exc:
+            blueprint_service.delete_community_blueprint("custom_active_bp", db=db)
+        assert http_exc.value.status_code == 409
+    finally:
+        try:
+            server.game_type = "minecraft_forge"
+            db.commit()
+            blueprint_service.delete_community_blueprint("custom_active_bp", db=db)
+        except Exception:
+            pass
+
+
+def test_propose_blueprint_delete_succeeds_for_unused_blueprint(
+    db: Session, regular_user: User
+) -> None:
+    """Loeschen eines ungenutzten Community-Blueprints klappt nach Bestaetigung."""
+    _rechte(db, regular_user, global_keys=("ai.chat.use", "blueprints.manage"))
+    conversation = _conversation(db, regular_user)
+
+    from services import blueprint_service
+
+    # 1. Community-Blueprint anlegen
+    vorschlag = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_blueprint_change",
+        arguments={
+            "source_id": "minecraft_forge",
+            "new_id": "unused_bp",
+            "changes": {"runtime.env": {"VERSION": "1.20.1"}},
+            "reason": "Test-Blueprint ungenutzt",
+            "expected_effect": "Blueprint wird angelegt",
+        },
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+    _, token = ai_proposal_service.confirm_proposal(db, proposal_id=vorschlag.id, user=regular_user)
+    ai_proposal_service.execute_proposal(db, proposal_id=vorschlag.id, user=regular_user, confirmation_token=token)
+
+    try:
+        vorschlag2 = ai_proposal_service.create_proposal(
+            db,
+            user=regular_user,
+            conversation=conversation,
+            tool_name="propose_blueprint_delete",
+            arguments={
+                "blueprint_id": "unused_bp",
+                "reason": "Wird nicht mehr gebraucht",
+                "expected_effect": "Entfernt den Blueprint",
+            },
+            correlation_id=str(uuid4()),
+        )
+        db.commit()
+
+        assert vorschlag2.status == "proposed"
+        assert vorschlag2.requires_confirmation is True
+
+        # Bestaetigen und ausfuehren
+        _, token2 = ai_proposal_service.confirm_proposal(db, proposal_id=vorschlag2.id, user=regular_user)
+        _, ergebnis = ai_proposal_service.execute_proposal(
+            db, proposal_id=vorschlag2.id, user=regular_user, confirmation_token=token2
+        )
+        assert ergebnis["deleted"] is True
+        assert blueprint_service.get_registry().get("unused_bp") is None
+    finally:
+        try:
+            blueprint_service.delete_community_blueprint("unused_bp", db=db)
+        except Exception:
+            pass
+

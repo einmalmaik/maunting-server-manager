@@ -67,6 +67,7 @@ AENDERBARE_PFADE = (
     "meta.description",
     "runtime.image",
     "runtime.env",
+    "runtime.startup",
 )
 
 
@@ -142,8 +143,8 @@ def save_community_blueprint(raw: dict[str, Any]) -> str:
     return blueprint.meta.id
 
 
-def delete_community_blueprint(blueprint_id: str) -> None:
-    """Loescht einen Community-Blueprint. Native IDs sind hart geschuetzt."""
+def delete_community_blueprint(blueprint_id: str, db: Any = None) -> None:
+    """Loescht einen Community-Blueprint. Native IDs und aktive Blueprints sind geschuetzt."""
     eintrag = get_registry().get(blueprint_id)
     if eintrag is None:
         raise HTTPException(status_code=404, detail="Blueprint nicht gefunden")
@@ -152,6 +153,31 @@ def delete_community_blueprint(blueprint_id: str) -> None:
             status_code=400,
             detail="Native Blueprints sind read-only und koennen nicht geloescht werden.",
         )
+
+    # Pruefen, ob aktive Server diesen Blueprint verwenden
+    try:
+        from models import Server
+        if db is not None:
+            anzahl = db.query(Server).filter(Server.game_type == blueprint_id).count()
+            if anzahl > 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Blueprint wird noch von {anzahl} aktiven Server(n) verwendet und kann nicht geloescht werden.",
+                )
+        else:
+            from database import SessionLocal
+            with SessionLocal() as session:
+                anzahl = session.query(Server).filter(Server.game_type == blueprint_id).count()
+                if anzahl > 0:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Blueprint wird noch von {anzahl} aktiven Server(n) verwendet und kann nicht geloescht werden.",
+                    )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Konnte Server-Nutzung fuer Blueprint %s nicht pruefen: %s", blueprint_id, exc)
+
     try:
         ziel = community_blueprint_path(blueprint_id)
     except ValueError as exc:

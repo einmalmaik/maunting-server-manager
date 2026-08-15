@@ -263,6 +263,7 @@ export type AiWriteTool =
   | 'propose_server_create'
   | 'propose_server_delete'
   | 'propose_blueprint_change'
+  | 'propose_blueprint_delete'
   | 'propose_server_blueprint_switch'
   | 'propose_hoster_integration'
   | 'propose_hoster_product'

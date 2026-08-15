@@ -656,6 +656,36 @@ def _blueprint_change_payload(arguments: dict) -> tuple[dict, dict]:
     return payload, preview
 
 
+def _blueprint_delete_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
+    """Prueft das Loeschen eines Community-Blueprints schon beim Vorschlagen."""
+    from services import blueprint_service
+    from models import Server
+
+    if set(arguments) != {"blueprint_id"}:
+        raise AiActionValidationError("Blueprint-Delete-Tool hat ungueltige Argumente")
+    blueprint_id = str(arguments["blueprint_id"])
+    try:
+        ansicht = blueprint_service.blueprint_view(blueprint_id)
+    except HTTPException as exc:
+        raise AiActionValidationError(str(exc.detail)) from exc
+    if ansicht.get("origin") == "native" or not ansicht.get("editable"):
+        raise AiActionValidationError("Native Blueprints koennen nicht geloescht werden")
+
+    anzahl = db.query(Server).filter(Server.game_type == blueprint_id).count()
+    if anzahl > 0:
+        raise AiActionValidationError(
+            f"Blueprint '{blueprint_id}' wird noch von {anzahl} Server(n) verwendet und kann nicht geloescht werden."
+        )
+
+    payload = {"blueprint_id": blueprint_id}
+    preview = {
+        "operation": "blueprint_delete",
+        "blueprint_id": blueprint_id,
+        "blueprint_name": (ansicht.get("blueprint") or {}).get("meta", {}).get("name") or blueprint_id,
+    }
+    return payload, preview
+
+
 def _hoster_integration_payload(db: Session, user: User, arguments: dict) -> tuple[dict, dict]:
     """Integration anlegen oder aendern — validiert, bevor jemand bestaetigt.
 
@@ -1480,6 +1510,10 @@ def create_proposal(
         # Blueprint-Kennungen an der Fehlermeldung.
         _require_tool_permission(db, user, None, tool_name, rest)
         payload, preview = _blueprint_change_payload(rest)
+        expected_revision = None
+    elif tool_name == "propose_blueprint_delete":
+        _require_tool_permission(db, user, None, tool_name, rest)
+        payload, preview = _blueprint_delete_payload(db, rest)
         expected_revision = None
     elif tool_name == "propose_server_create":
         # Dasselbe: `_server_create_payload` schlägt die `node_id` im Bestand
@@ -2527,6 +2561,17 @@ def execute_proposal(
                     logger.info("Blueprint-Vorschlag abgelehnt: %s", exc.detail)
                     raise AiActionStateError("AI_ACTION_BLUEPRINT_REJECTED") from exc
                 result = {"blueprint_id": blueprint_id}
+                task_id = None
+                queued = False
+            elif tool_name == "propose_blueprint_delete":
+                from services import blueprint_service
+
+                try:
+                    blueprint_service.delete_community_blueprint(str(payload["blueprint_id"]))
+                except HTTPException as exc:
+                    logger.info("Blueprint-Loeschvorschlag abgelehnt: %s", exc.detail)
+                    raise AiActionStateError("AI_ACTION_BLUEPRINT_DELETE_REJECTED") from exc
+                result = {"deleted": True, "blueprint_id": str(payload["blueprint_id"])}
                 task_id = None
                 queued = False
             elif tool_name in {

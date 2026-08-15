@@ -257,6 +257,11 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="blueprints.manage",
         recht_global=True,
     ),
+    "propose_blueprint_delete": Werkzeug(
+        "global_write",
+        recht="blueprints.manage",
+        recht_global=True,
+    ),
     # Der Wechsel des Spiels bzw. Blueprints eines bestehenden Servers.
     #
     # Autonomiefaehig auf ausdrueckliche Vorgabe des Betreibers — und es passt

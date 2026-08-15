@@ -29,6 +29,8 @@ from blueprints import (
     COMMENTED_TEMPLATE_EN,
     get_registry,
 )
+from sqlalchemy.orm import Session
+from database import get_db
 from dependencies import get_current_user, require_global, verify_csrf
 from models import User
 
@@ -155,7 +157,8 @@ def delete_blueprint(
     blueprint_id: str,
     _user: User = Depends(require_global("blueprints.manage")),
     __=Depends(verify_csrf),
+    db: Session = Depends(get_db),
 ) -> Response:
-    """Loescht eine Community-Blueprint. Native-IDs sind hart geschuetzt (400)."""
-    blueprint_service.delete_community_blueprint(blueprint_id)
+    """Loescht eine Community-Blueprint. Native-IDs und in Verwendung befindliche sind geschuetzt."""
+    blueprint_service.delete_community_blueprint(blueprint_id, db=db)
     return Response(status_code=204)

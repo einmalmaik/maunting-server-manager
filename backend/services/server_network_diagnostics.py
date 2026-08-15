@@ -23,7 +23,13 @@ die Luecke.
 from __future__ import annotations
 
 import ipaddress
+import json
 import logging
+import socket
+import struct
+import urllib.request
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -38,6 +44,192 @@ _DOCKER_NETWORKS = (
     ipaddress.IPv4Network("172.16.0.0/12"),
     ipaddress.IPv4Network("172.17.0.0/16"),
 )
+
+_cached_public_ip: str | None = None
+_cached_public_ip_time: datetime | None = None
+
+
+def detect_public_ip(timeout: float = 1.5) -> str | None:
+    """Ermittelt die öffentliche IPv4 des Hosts mit 15 Minuten Caching."""
+    global _cached_public_ip, _cached_public_ip_time
+    jetzt = datetime.now(timezone.utc)
+    if _cached_public_ip and _cached_public_ip_time and (jetzt - _cached_public_ip_time) < timedelta(minutes=15):
+        return _cached_public_ip
+
+    endpoints = [
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+        "https://checkip.amazonaws.com",
+    ]
+    for url in endpoints:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "MSM-Diagnostics/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", errors="ignore").strip()
+                if raw:
+                    ipaddress.IPv4Address(raw)
+                    _cached_public_ip = raw
+                    _cached_public_ip_time = jetzt
+                    return raw
+        except Exception:
+            continue
+    return None
+
+
+def _probe_tcp_connect(host: str, port: int, timeout: float = 1.2) -> bool:
+    """Prüft per einfachem TCP-Socket-Connect, ob der Port antwortet."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
+def _read_null_string(data: bytes, offset: int) -> tuple[str, int]:
+    """Liest einen Null-terminierten UTF-8/Latin-1-String aus einem Byte-Buffer."""
+    end = data.find(b"\x00", offset)
+    if end == -1:
+        return data[offset:].decode("utf-8", errors="replace"), len(data)
+    val = data[offset:end].decode("utf-8", errors="replace")
+    return val, end + 1
+
+
+def _probe_a2s_query(host: str, port: int, timeout: float = 1.5) -> dict[str, Any] | None:
+    """Sendet ein Source/Steam-A2S_INFO-Query-Paket (ARK, ASA, CS2, DayZ, Palworld, Rust, etc.)."""
+    query_pkt = b"\xFF\xFF\xFF\xFF\x54Source Engine Query\x00"
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        sock.sendto(query_pkt, (host, port))
+        resp, _ = sock.recvfrom(4096)
+        if not resp or len(resp) < 5:
+            return None
+
+        # Challenge Response (0x41) -> mit Challenge erneut senden
+        if resp.startswith(b"\xFF\xFF\xFF\xFF\x41") and len(resp) >= 9:
+            challenge = resp[5:9]
+            sock.sendto(query_pkt + challenge, (host, port))
+            resp, _ = sock.recvfrom(4096)
+            if not resp or len(resp) < 5:
+                return None
+
+        # A2S_INFO Response (0x49)
+        if resp.startswith(b"\xFF\xFF\xFF\xFF\x49"):
+            offset = 5
+            protocol = resp[offset] if len(resp) > offset else 0
+            offset += 1
+            name, offset = _read_null_string(resp, offset)
+            map_name, offset = _read_null_string(resp, offset)
+            folder, offset = _read_null_string(resp, offset)
+            game, offset = _read_null_string(resp, offset)
+            
+            steam_id = 0
+            if len(resp) >= offset + 2:
+                steam_id = struct.unpack("<H", resp[offset:offset+2])[0]
+                offset += 2
+            
+            players = resp[offset] if len(resp) > offset else 0
+            offset += 1
+            max_players = resp[offset] if len(resp) > offset else 0
+            offset += 1
+            bots = resp[offset] if len(resp) > offset else 0
+            offset += 1
+            server_type = chr(resp[offset]) if len(resp) > offset else "d"
+            offset += 1
+            environment = chr(resp[offset]) if len(resp) > offset else "l"
+            offset += 1
+            visibility = bool(resp[offset]) if len(resp) > offset else False
+            offset += 1
+            vac = bool(resp[offset]) if len(resp) > offset else False
+            offset += 1
+
+            version = ""
+            if offset < len(resp):
+                version, _ = _read_null_string(resp, offset)
+
+            return {
+                "protocol": "a2s",
+                "responded": True,
+                "server_name": name,
+                "map": map_name,
+                "folder": folder,
+                "game": game,
+                "steam_id": steam_id,
+                "players": players,
+                "max_players": max_players,
+                "bots": bots,
+                "server_type": server_type,
+                "environment": environment,
+                "password_protected": visibility,
+                "vac_enabled": vac,
+                "version": version,
+            }
+        return None
+    except Exception as exc:
+        logger.debug("A2S-Probe fehlgeschlagen host=%s port=%d exc=%s", host, port, exc)
+        return None
+    finally:
+        sock.close()
+
+
+def _probe_minecraft_ping(host: str, port: int, timeout: float = 1.5) -> dict[str, Any] | None:
+    """Sendet einen Minecraft Server List Ping (SLP) Handshake + Request."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as s:
+            s.settimeout(timeout)
+            # Handshake Packet: packet_id 0x00, protocol_version -1 (0xFF), host, port, next_state 1
+            host_bytes = host.encode("utf-8")
+            data = b"\x00\xff\x05" + struct.pack(">B", len(host_bytes)) + host_bytes + struct.pack(">H", port) + b"\x01"
+            data_len = len(data)
+            # Length prefix (VarInt) + Data
+            s.sendall(struct.pack(">B", data_len) + data)
+            # Status Request: length 1, packet_id 0x00
+            s.sendall(b"\x01\x00")
+            
+            # Read response length
+            raw = s.recv(4096)
+            if not raw:
+                return None
+            
+            # Find JSON payload start '{'
+            idx = raw.find(b"{")
+            if idx != -1:
+                try:
+                    payload = json.loads(raw[idx:].decode("utf-8", errors="ignore"))
+                    players = payload.get("players") or {}
+                    version = payload.get("version") or {}
+                    desc = payload.get("description")
+                    motd = desc if isinstance(desc, str) else (desc.get("text", "") if isinstance(desc, dict) else "")
+                    return {
+                        "protocol": "minecraft",
+                        "responded": True,
+                        "server_name": motd,
+                        "version": version.get("name", ""),
+                        "players": players.get("online", 0),
+                        "max_players": players.get("max", 0),
+                    }
+                except Exception:
+                    pass
+            return {"protocol": "minecraft", "responded": True}
+    except Exception:
+        return None
+
+
+def probe_game_query(host: str, port: int, protocol: str, *, game_type: str | None = None) -> dict[str, Any] | None:
+    """Probt generic oder protokollspezifisch den Spielserver."""
+    proto = str(protocol).lower()
+    if proto == "udp":
+        a2s = _probe_a2s_query(host, port)
+        if a2s:
+            return a2s
+    elif proto == "tcp":
+        if game_type == "minecraft" or port == 25565:
+            mc = _probe_minecraft_ping(host, port)
+            if mc:
+                return mc
+        if _probe_tcp_connect(host, port):
+            return {"protocol": "tcp", "responded": True}
+    return None
 
 
 def _classify_bind_ip(bind_ip: str | None) -> dict:
@@ -278,6 +470,76 @@ def check_reachability(db: Session, server: Server) -> dict:
     elif listening and not silent:
         verdict = "listening"
 
+    # ── Game-Query-Probing (A2S, Minecraft SLP, TCP Connect) ──────────
+    query_details: list[dict[str, Any]] = []
+    local_probe_ip = "127.0.0.1" if bind_ip in {"0.0.0.0", "::", None} else bind_ip
+
+    if server.status == "running" and verdict == "listening":
+        for p in ports:
+            port_num = p[0]
+            protocol = p[1]
+            role = p[2]
+            probe_res = probe_game_query(
+                local_probe_ip, port_num, protocol, game_type=getattr(server, "game_type", None)
+            )
+            if probe_res:
+                query_details.append({
+                    "port": port_num,
+                    "protocol": protocol,
+                    "role": role,
+                    "query": probe_res,
+                })
+
+    public_ip = detect_public_ip()
+    external_check = "unavailable"
+    external_reason = (
+        "MSM laeuft im selben Netz wie der Server und kann eine Verbindung "
+        "von aussen nicht simulieren. Ob eine Portweiterleitung im Router "
+        "existiert, laesst sich von hier nicht feststellen."
+    )
+    external_reachability: dict[str, Any] = {
+        "status": "unavailable",
+        "public_ip": public_ip,
+        "note": external_reason,
+    }
+
+    if public_ip and server.status == "running" and verdict == "listening":
+        # Öffentlichen WAN-Query-Probe versuchen
+        wan_responsive = False
+        wan_query_res = None
+        for p in ports:
+            port_num = p[0]
+            protocol = p[1]
+            q_res = probe_game_query(
+                public_ip, port_num, protocol, game_type=getattr(server, "game_type", None)
+            )
+            if q_res:
+                wan_responsive = True
+                wan_query_res = q_res
+                break
+
+        if wan_responsive:
+            external_check = "reachable"
+            external_reason = f"Der Server antwortet auf öffentlicher IP {public_ip} auf Spielanfragen."
+            external_reachability = {
+                "status": "reachable",
+                "public_ip": public_ip,
+                "query": wan_query_res,
+                "note": external_reason,
+            }
+        else:
+            external_check = "unavailable"
+            external_reason = (
+                f"Lokal antwortet der Server, aber über die öffentliche IP {public_ip} "
+                "wurde keine Antwort erhalten. Ob eine Portweiterleitung im Router "
+                "existiert, laesst sich von hier nicht feststellen."
+            )
+            external_reachability = {
+                "status": "unreachable_or_nat_restricted",
+                "public_ip": public_ip,
+                "note": external_reason,
+            }
+
     return {
         "server_id": server.id,
         "status": server.status,
@@ -285,11 +547,8 @@ def check_reachability(db: Session, server: Server) -> dict:
         "ports": listening,
         "verdict": verdict,
         **({"probe_error": probe_error} if probe_error else {}),
-        # Ehrlichkeit statt Erfindung: siehe Modul-Docstring.
-        "external_check": "unavailable",
-        "external_check_reason": (
-            "MSM laeuft im selben Netz wie der Server und kann eine Verbindung "
-            "von aussen nicht simulieren. Ob eine Portweiterleitung im Router "
-            "existiert, laesst sich von hier nicht feststellen."
-        ),
+        **({"game_queries": query_details} if query_details else {}),
+        "external_check": external_check,
+        "external_check_reason": external_reason,
+        "external_reachability": external_reachability,
     }
