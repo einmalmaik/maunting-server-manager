@@ -59,9 +59,22 @@ export class FakeScriptProcessor {
   onaudioprocess: ((ereignis: { inputBuffer: { getChannelData: () => Float32Array } }) => void) | null = null
   verbunden = false
 
-  constructor(readonly groesse: number) {}
+  constructor(readonly groesse: number, readonly ausgangskanaele = 1) {}
 
   connect(): void {
+    // Die Regel des Browsers, nachgebildet. Sie fehlte hier, und deshalb ging
+    // ein echter Fehler durch die ganze Testsuite: die Aufnahme verband einen
+    // Prozessor mit null Ausgangskanälen, Chrome warf `InvalidAccessError`, und
+    // der Sprachmodus meldete „kein Zugriff auf das Mikrofon" — obwohl die
+    // Freigabe erteilt war. Eine Attrappe, die nachsichtiger ist als die
+    // Wirklichkeit, prüft nichts; sie bestätigt nur.
+    if (this.ausgangskanaele === 0) {
+      const fehler = new Error(
+        'cannot connect a ScriptProcessorNode with 0 output channels to any destination node.',
+      )
+      fehler.name = 'InvalidAccessError'
+      throw fehler
+    }
     this.verbunden = true
   }
 
@@ -84,6 +97,7 @@ export class FakeAudioContext {
   readonly destination = {}
   readonly quellen: FakeBufferSource[] = []
   readonly prozessoren: FakeScriptProcessor[] = []
+  readonly verstaerker: { gain: { value: number } }[] = []
   geschlossen = false
 
   constructor(optionen?: { sampleRate?: number }) {
@@ -105,10 +119,24 @@ export class FakeAudioContext {
     return { connect: () => undefined, disconnect: () => undefined }
   }
 
-  createScriptProcessor(groesse: number): FakeScriptProcessor {
-    const prozessor = new FakeScriptProcessor(groesse)
+  createScriptProcessor(
+    groesse: number,
+    _eingang = 1,
+    ausgang = 1,
+  ): FakeScriptProcessor {
+    const prozessor = new FakeScriptProcessor(groesse, ausgang)
     this.prozessoren.push(prozessor)
     return prozessor
+  }
+
+  createGain(): { gain: { value: number }; connect: () => void; disconnect: () => void } {
+    const knoten = {
+      gain: { value: 1 },
+      connect: () => undefined,
+      disconnect: () => undefined,
+    }
+    this.verstaerker.push(knoten)
+    return knoten
   }
 
   resume(): Promise<void> {
@@ -164,7 +192,14 @@ export function installFakeAudio(optionen?: { verweigern?: boolean }): Aufbau {
     value: {
       getUserMedia: (wunsch: unknown) => {
         anfrage = wunsch
-        if (optionen?.verweigern) return Promise.reject(new Error('NotAllowedError'))
+        if (optionen?.verweigern) {
+          // Browser melden das über `name`, nicht über den Text. Stand hier
+          // als schlichter `Error` mit „NotAllowedError" als Botschaft — und
+          // damit prüfte der Test eine Unterscheidung, die es so nie gibt.
+          const fehler = new Error('Permission denied')
+          fehler.name = 'NotAllowedError'
+          return Promise.reject(fehler)
+        }
         strom = new FakeMediaStream()
         return Promise.resolve(strom)
       },

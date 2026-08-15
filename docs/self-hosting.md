@@ -823,8 +823,18 @@ handelnde Aufträge kommt `ai.autonomous.use` samt Freigabe dazu.
 ## Sprachmodus (mit der KI reden)
 
 Derselbe Agent, dieselbe Unterhaltung, dieselben Werkzeuge — nur gesprochen
-statt getippt. Man drückt unter dem Chat auf das Mikrofon, redet, und die KI
-antwortet mit Stimme. Reinreden bricht ihre Antwort ab, wie bei einem Menschen.
+statt getippt. Reinreden bricht die Antwort der KI ab, wie bei einem Menschen.
+
+**Es ist ein eigener Modus, kein Zusatz neben dem Chat.** Oben rechts auf der
+KI-Seite steht *Realtime-Modus*; ein Klick, und der Chat weicht einer Kugel, die
+sich zum gesprochenen Wort bewegt. Zurück geht es über *Text-Modus* oder mit
+`ESC`. Das ist Absicht: ein Sprachmodus neben einem Eingabefeld ist beides halb —
+man weiss nicht, wohin man schaut, und das Textfeld verspricht eine Eingabe, die
+gerade niemand benutzt.
+
+Der Chat ist dabei einen Klick weit weg, nicht gelöscht. Das ist wichtiger als es
+klingt: eine per Stimme angestossene Änderung erzeugt dieselbe Vorschlagskarte
+wie immer, und die steht im Chat.
 
 ### Ein zweiter Anbieterzugang, und warum
 

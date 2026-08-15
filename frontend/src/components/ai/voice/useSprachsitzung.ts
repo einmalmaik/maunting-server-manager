@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { starteAufnahme, type Aufnahme } from './audioAufnahme'
+import { AufnahmeAbbruch, starteAufnahme, type Aufnahme } from './audioAufnahme'
 import { Wiedergabe } from './audioWiedergabe'
 
 export type Sprachzustand =
@@ -46,6 +46,14 @@ interface Ergebnis {
   werkzeug: string | null
   /** Was schiefging, als Übersetzungsschlüssel. `null`, wenn nichts. */
   fehler: string | null
+  /**
+   * Der aktuelle Lautstärkepegel zwischen 0 und 1 — wer gerade redet, egal wer.
+   *
+   * Eine **Funktion** und kein Zustandswert. Die Blase liest ihn sechzigmal je
+   * Sekunde; als `useState` wäre das sechzig Renderdurchläufe je Sekunde für
+   * eine Zahl, die kein React-Element je anzeigt.
+   */
+  pegel: () => number
   starten: () => void
   beenden: () => void
 }
@@ -127,8 +135,21 @@ export function useSprachsitzung(): Ergebnis {
           }
           mikro.current = laufend
         })
-        .catch(() => {
-          setFehler('ai.voice.errors.microphone')
+        .catch((fehler: unknown) => {
+          // Der Grund kommt aus der Aufnahme und wird hier nicht geraten. Ein
+          // pauschales „kein Zugriff auf das Mikrofon" schickte den Menschen in
+          // die Browsereinstellungen, wo nichts zu finden war — die Freigabe
+          // war erteilt, die Audiokette dahinter gescheitert.
+          const grund = fehler instanceof AufnahmeAbbruch ? fehler.grund : 'audio'
+          setFehler(
+            grund === 'verweigert'
+              ? 'ai.voice.errors.microphone'
+              : 'ai.voice.errors.audio',
+          )
+          // Der Wortlaut bleibt in der Konsole. Ohne ihn ist ein Browserfehler
+          // in dieser Kette nicht auffindbar — er sieht von aussen aus wie ein
+          // Mikrofon, das nicht will.
+          console.error('Sprachmodus: Aufnahme nicht moeglich', fehler)
           beenden()
         })
     }
@@ -216,5 +237,13 @@ export function useSprachsitzung(): Ergebnis {
     aufraeumen()
   }, [aufraeumen])
 
-  return { zustand, zeilen, werkzeug, fehler, starten, beenden }
+  // Wer gerade redet, bestimmt die Quelle: beim Zuhören das Mikrofon, sonst
+  // die Stimme der KI. Ein Maximum über beide wäre bequemer und falsch — dann
+  // atmete die Blase auch dann, wenn nur ein Lüfter neben dem Mikrofon steht.
+  const pegel = useCallback(
+    () => (zustand === 'hoert' ? mikro.current?.pegel() : lautsprecher.current?.pegel()) ?? 0,
+    [zustand],
+  )
+
+  return { zustand, zeilen, werkzeug, fehler, pegel, starten, beenden }
 }

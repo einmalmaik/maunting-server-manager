@@ -93,6 +93,67 @@ def test_a_realtime_access_without_a_key_does_not_count(
     assert client.get("/api/ai/voice/config", cookies=owner_cookies).json()["available"] is False
 
 
+def test_the_test_button_speaks_instead_of_chatting(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db, monkeypatch
+) -> None:
+    """Ein Sprachzugang wird gesprochen geprueft, nicht getippt.
+
+    Der Chattest schickt ein „ping" an `/chat/completions`. Darauf antwortet
+    OpenAI bei einem Realtime-Modell woertlich *„This is not a chat model and
+    thus not supported in the v1/chat/completions endpoint"* — eine
+    Fehlermeldung fuer einen voellig richtig eingerichteten Zugang. Der
+    Betreiber haette daraufhin an seiner Konfiguration gesucht, an der nichts
+    war.
+    """
+    from routers import ai_providers
+
+    zugang = _zugang(db)
+    gesprochen: list[str] = []
+
+    async def probe(adresse: str, schluessel: str) -> None:
+        gesprochen.append(adresse)
+
+    monkeypatch.setattr(ai_providers.ai_voice_session, "pruefen", probe)
+
+    antwort = client.post(
+        f"/api/ai/settings/providers/{zugang.id}/test",
+        cookies=owner_cookies,
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert antwort.status_code == 200
+    assert antwort.json()["ok"] is True
+    # Die Adresse ist die echte Sprachadresse und keine Chat-URL.
+    assert gesprochen == ["wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1"]
+
+
+def test_a_failed_probe_answers_in_a_code_and_not_in_the_providers_words(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db, monkeypatch
+) -> None:
+    """Der Wortlaut kann Kontingentstaende und Kontonamen tragen."""
+    from routers import ai_providers
+
+    zugang = _zugang(db)
+
+    class Abgelehnt(Exception):
+        response = type("A", (), {"status_code": 401})()
+
+    async def probe(adresse: str, schluessel: str) -> None:
+        raise Abgelehnt("Incorrect API key provided: sk-abc***. Org org-geheim")
+
+    monkeypatch.setattr(ai_providers.ai_voice_session, "pruefen", probe)
+
+    antwort = client.post(
+        f"/api/ai/settings/providers/{zugang.id}/test",
+        cookies=owner_cookies,
+        headers={"X-CSRF-Token": csrf_token},
+    ).json()
+
+    assert antwort["ok"] is False
+    assert antwort["code"] == "AI_PROVIDER_AUTH_FAILED"
+    assert antwort["detail"] is None
+
+
 # ── Der WebSocket ─────────────────────────────────────────────────────────
 
 

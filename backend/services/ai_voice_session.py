@@ -432,6 +432,65 @@ async def verbinden(adresse: str, schluessel: str) -> Any:
     )
 
 
+def probe_fehlercode(fehler: BaseException) -> str:
+    """Ein Fehlschlag der Probe als Code, den die Oberfläche schon kennt.
+
+    Absichtlich auf die vorhandenen ``AI_PROVIDER_*``-Codes abgebildet statt auf
+    neue: sie sind in beiden Sprachdateien übersetzt und sagen dasselbe. Ein
+    eigener Satz Codes für den Sprachweg wäre eine zweite Wortwahl für dieselben
+    drei Fälle — falscher Schlüssel, falsches Modell, nicht erreichbar.
+
+    Der Wortlaut des Anbieters geht **nicht** mit. Er kann Kontingentstände und
+    Kontonamen enthalten; der Code sagt dem Betreiber, was zu tun ist.
+    """
+    antwort = getattr(fehler, "response", None)
+    status = getattr(antwort, "status_code", None)
+    if isinstance(status, int):
+        if status in (401, 403):
+            return "AI_PROVIDER_AUTH_FAILED"
+        if status in (400, 404):
+            # Bei OpenAI heisst das fast immer: die Modellkennung stimmt nicht.
+            # Die Adresse baut MSM selbst, sie kann nicht danebenliegen.
+            return "AI_PROVIDER_REQUEST_REJECTED"
+        if status == 429:
+            return "AI_PROVIDER_RATE_LIMITED"
+    if isinstance(fehler, (asyncio.TimeoutError, TimeoutError)):
+        return "AI_PROVIDER_STREAM_TIMEOUT"
+    return "AI_PROVIDER_UNAVAILABLE"
+
+
+#: Wie lange die Probe auf das erste Ereignis wartet. Kurz, weil sie im
+#: Einstellungsdialog auf einen Klick hin läuft und niemand zwanzig Sekunden vor
+#: einem Spinner sitzen soll.
+PROBE_TIMEOUT = 8.0
+
+
+async def pruefen(adresse: str, schluessel: str) -> None:
+    """Öffnet die Sitzung einmal und legt sofort wieder auf.
+
+    Das Gegenstück zum Chattest, und es muss ein eigenes sein: der Chattest
+    schickt ein „ping" an ``/chat/completions``, und darauf antwortet OpenAI bei
+    einem Sprachmodell wörtlich *„This is not a chat model"*. Der Betreiber
+    bekäme also eine Fehlermeldung für einen richtig eingerichteten Zugang.
+
+    Geprüft wird genau das, was später auch passiert: Adresse, Schlüssel und
+    Modell zusammen. Schon der Handschlag entscheidet — ein falscher Schlüssel
+    endet in einem 401, ein falsches Modell in einem 400 oder 404, und beides
+    kommt zurück, bevor ein einziger Ton geflossen ist. Es kostet nichts: eine
+    Sitzung, die niemand bespricht, hat keine Tokens.
+    """
+    verbindung = await verbinden(adresse, schluessel)
+    try:
+        # Auf das erste Ereignis warten (`session.created`). Ohne das würde ein
+        # Anbieter, der die Verbindung erst nach dem Handschlag ablehnt, als
+        # Erfolg durchgehen.
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(verbindung.recv(), PROBE_TIMEOUT)
+    finally:
+        with contextlib.suppress(Exception):
+            await verbindung.close()
+
+
 async def fuehren(
     browser: WebSocket,
     *,

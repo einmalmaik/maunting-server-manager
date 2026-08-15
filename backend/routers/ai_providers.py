@@ -9,6 +9,8 @@ und Providerkonfiguration liegen beim Betreiber, weil ein Nutzerschluessel in
 einem gehosteten Panel ein zweiter Abrechnungspfad neben dem kalkulierten waere.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -32,6 +34,7 @@ from services import (
     ai_provider_registry,
     ai_provider_service,
     ai_reasoning,
+    ai_voice_session,
     audit_service,
 )
 from services.ai_provider_service import AiProviderConfigurationError
@@ -42,6 +45,8 @@ from services.openai_compatible_adapter import (
     stream_chat_completion,
 )
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai", tags=["ai-providers"])
 
@@ -233,6 +238,13 @@ async def test_provider(
             ok=False, code="AI_PROVIDER_KEY_MISSING", detail=None
         )
 
+    # Ein Sprachzugang wird gesprochen geprüft und nicht getippt. Der Chattest
+    # unten schickt ein „ping" an `/chat/completions`, und darauf antwortet
+    # OpenAI bei einem Realtime-Modell wörtlich *„This is not a chat model"* —
+    # eine Fehlermeldung für einen völlig richtig eingerichteten Zugang.
+    if ai_provider_service.spricht(provider, ai_provider_registry.REALTIME):
+        return await _sprachzugang_pruefen(provider, api_key or "")
+
     usage = StreamUsage()
     try:
         received = False
@@ -256,6 +268,39 @@ async def test_provider(
         return AiProviderTestResponse(ok=False, code="AI_PROVIDER_URL_REJECTED", detail=str(exc))
     except AiProviderRequestError as exc:
         return AiProviderTestResponse(ok=False, code=exc.code, detail=exc.detail)
+
+
+async def _sprachzugang_pruefen(
+    provider: AiProvider, api_key: str
+) -> AiProviderTestResponse:
+    """Die Probe für einen Sprachzugang: Sitzung auf, Sitzung zu.
+
+    Geprüft wird dasselbe wie im Betrieb — Adresse, Schlüssel und Modell
+    zusammen. Schon der Handschlag entscheidet, und er kostet nichts: eine
+    Sitzung, die niemand bespricht, hat keine Tokens.
+    """
+    if not ai_voice_session.SPRACHE_MOEGLICH:
+        return AiProviderTestResponse(
+            ok=False,
+            code="AI_PROVIDER_UNAVAILABLE",
+            detail="Die WebSocket-Bibliothek fehlt in dieser Installation.",
+        )
+    adresse = ai_voice_session.verbindungsadresse(
+        ai_provider_service.base_url(provider), provider.default_model
+    )
+    try:
+        await ai_voice_session.pruefen(adresse, api_key)
+    except Exception as fehler:
+        # Der Wortlaut des Anbieters bleibt im Protokoll. Nach aussen geht der
+        # Code — er sagt dem Betreiber, was zu tun ist, ohne Kontonamen und
+        # Kontingentstände mitzuschicken.
+        code = ai_voice_session.probe_fehlercode(fehler)
+        logger.info(
+            "Sprachprobe fehlgeschlagen provider=%s code=%s error=%s",
+            provider.id, code, type(fehler).__name__,
+        )
+        return AiProviderTestResponse(ok=False, code=code, detail=None)
+    return AiProviderTestResponse(ok=True, code=None, detail=None)
 
 
 @router.get("/settings/provider-kinds", response_model=list[AiProviderKindResponse])

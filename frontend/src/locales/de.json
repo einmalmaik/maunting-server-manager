@@ -640,8 +640,30 @@
       },
       "errors": {
         "microphone": "Kein Zugriff auf das Mikrofon. Erlaube ihn in den Browsereinstellungen.",
+        "audio": "Der Browser konnte die Tonverbindung nicht aufbauen. Einzelheiten stehen in der Entwicklerkonsole.",
         "provider": "Der Sprachanbieter hat die Sitzung abgebrochen.",
         "connection": "Verbindung zum Sprachmodus verloren."
+      },
+      "toVoiceMode": "Realtime-Modus",
+      "toTextMode": "Text-Modus",
+      "end": "Gespräch beenden",
+      "endHint": "ESC drücken",
+      "settings": "Angaben zum Sprachmodus",
+      "hint": {
+        "aus": "Der Sprachmodus ist beendet.",
+        "verbindet": "Die Verbindung wird aufgebaut.",
+        "bereit": "Sprich mit mir, ich bin bereit.",
+        "hoert": "Ich höre zu — sprich einfach weiter.",
+        "denkt": "Einen Moment, ich sehe nach.",
+        "spricht": "Du kannst mich jederzeit unterbrechen.",
+        "error": "Der Sprachmodus konnte nicht fortgesetzt werden."
+      },
+      "info": {
+        "model": "Modell",
+        "sampleRate": "Abtastrate",
+        "maxSession": "Sitzungsdauer",
+        "minutes": "{{count}} Minuten",
+        "hint": "Am Sprachmodus lässt sich nichts einstellen: Modell und Schlüssel gehören dem Betreiber, und die Sitzungsdauer hängt an der Lebensdauer deiner Anmeldung. Nach Ablauf wird automatisch neu verbunden."
       }
     },
     "webSearch": {
@@ -2896,7 +2918,7 @@
     },
     "voice": {
       "title": "Sprachmodus",
-      "intro": "Mit der KI reden statt tippen — derselbe Agent, dieselbe Unterhaltung, dieselben Werkzeuge. Für den Betrieb ist es genau ein neuer Schritt: ein zweiter Anbieterzugang mit eigenem Schlüssel.",
+      "intro": "Mit der KI reden statt tippen — derselbe Agent, dieselbe Unterhaltung, dieselben Werkzeuge. Umgeschaltet wird oben rechts auf der KI-Seite: der Chat weicht einer Kugel, die sich zum gesprochenen Wort bewegt. Für den Betrieb ist es genau ein neuer Schritt: ein zweiter Anbieterzugang mit eigenem Schlüssel.",
       "access": {
         "title": "Zweiter Zugang",
         "body": "Einstellungen → KI → Anbieter, Art „OpenAI (Sprache)\", ein Schlüssel von platform.openai.com. OpenRouter kann kein Duplex — am 15.08.2026 nachgemessen, /api/v1/realtime antwortet dort mit 404. Der bestehende OpenRouter-Zugang bleibt und bedient weiter den getippten Chat."
@@ -2907,7 +2929,7 @@
       },
       "permission": {
         "title": "Recht ai.voice.use",
-        "body": "Getrennt von ai.chat.use, weil Sprechen ein Vielfaches verbraucht und Änderungen per Stimme statt per Klick bestätigt werden. Ohne eingerichteten Sprachzugang erscheint der Knopf gar nicht — nicht ausgegraut."
+        "body": "Getrennt von ai.chat.use, weil Sprechen ein Vielfaches verbraucht und Änderungen per Stimme statt per Klick bestätigt werden. Ohne eingerichteten Sprachzugang erscheint der Umschalter gar nicht — nicht ausgegraut."
       },
       "confirm": {
         "title": "Bestätigen per Stimme",

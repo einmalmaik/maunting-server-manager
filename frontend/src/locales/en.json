@@ -640,8 +640,30 @@
       },
       "errors": {
         "microphone": "No access to the microphone. Allow it in your browser settings.",
+        "audio": "The browser could not set up the audio chain. Details are in the developer console.",
         "provider": "The voice provider ended the session.",
         "connection": "Lost the connection to voice mode."
+      },
+      "toVoiceMode": "Realtime mode",
+      "toTextMode": "Text mode",
+      "end": "End conversation",
+      "endHint": "press ESC",
+      "settings": "Voice mode details",
+      "hint": {
+        "aus": "Voice mode has ended.",
+        "verbindet": "Setting up the connection.",
+        "bereit": "Talk to me, I'm ready.",
+        "hoert": "I'm listening — just keep going.",
+        "denkt": "One moment, I'm looking into it.",
+        "spricht": "You can interrupt me at any time.",
+        "error": "Voice mode could not continue."
+      },
+      "info": {
+        "model": "Model",
+        "sampleRate": "Sample rate",
+        "maxSession": "Session length",
+        "minutes": "{{count}} minutes",
+        "hint": "There is nothing to adjust in voice mode: the model and key belong to the operator, and the session length follows the lifetime of your sign-in. It reconnects automatically once it expires."
       }
     },
     "webSearch": {
@@ -2896,7 +2918,7 @@
     },
     "voice": {
       "title": "Voice mode",
-      "intro": "Talk to the AI instead of typing — same agent, same conversation, same tools. For operations it is exactly one new step: a second provider access with its own key.",
+      "intro": "Talk to the AI instead of typing — same agent, same conversation, same tools. You switch at the top right of the AI page: the chat gives way to a sphere that moves with the spoken word. For operations it is exactly one new step: a second provider access with its own key.",
       "access": {
         "title": "Second access",
         "body": "Settings → AI → Providers, kind “OpenAI (voice)”, a key from platform.openai.com. OpenRouter cannot do duplex — measured on 2026-08-15, /api/v1/realtime answers with a 404 there. The existing OpenRouter access stays and keeps serving the typed chat."
@@ -2907,7 +2929,7 @@
       },
       "permission": {
         "title": "Permission ai.voice.use",
-        "body": "Separate from ai.chat.use, because speaking consumes a multiple and confirms changes by voice instead of by click. Without a configured voice access the button does not appear at all — not greyed out."
+        "body": "Separate from ai.chat.use, because speaking consumes a multiple and confirms changes by voice instead of by click. Without a configured voice access the switch does not appear at all — not greyed out."
       },
       "confirm": {
         "title": "Confirming by voice",

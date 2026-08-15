@@ -417,3 +417,98 @@ async def test_the_session_ends_by_itself_and_says_so(
 async def _sofort(wert):
     """Ein fertiges Ergebnis als Coroutine — für `monkeypatch` auf `verbinden`."""
     return wert
+
+
+# ── Die Probe für den Einstellungsdialog ──────────────────────────────────
+#
+# Der Chattest schickt ein „ping" an `/chat/completions`. Bei einem
+# Realtime-Modell antwortet OpenAI darauf woertlich *„This is not a chat model
+# and thus not supported in the v1/chat/completions endpoint"* — eine
+# Fehlermeldung fuer einen voellig richtig eingerichteten Zugang. Deshalb hat
+# der Sprachweg seine eigene Probe.
+
+
+class ProbeGegenstelle(FalscheGegenstelle):
+    """Eine Gegenstelle, die auf `recv()` ein Ereignis liefert."""
+
+    def __init__(self, ereignis: dict | None = None) -> None:
+        super().__init__()
+        self._ereignis = ereignis or {"type": "session.created"}
+
+    async def recv(self) -> str:
+        return json.dumps(self._ereignis)
+
+
+@pytest.mark.asyncio
+async def test_the_probe_opens_and_hangs_up_again(monkeypatch) -> None:
+    """Sie kostet nichts: eine Sitzung, die niemand bespricht, hat keine Tokens."""
+    oben = ProbeGegenstelle()
+    monkeypatch.setattr(sitzung, "verbinden", lambda *a, **k: _sofort(oben))
+
+    await sitzung.pruefen("wss://beispiel/realtime?model=m", "sk-test")
+
+    assert oben.geschlossen is True
+
+
+@pytest.mark.asyncio
+async def test_a_silent_provider_does_not_hang_the_probe(monkeypatch) -> None:
+    """Wer nach dem Handschlag schweigt, blockiert den Dialog nicht."""
+    class Stumm(FalscheGegenstelle):
+        async def recv(self) -> str:
+            await asyncio.sleep(3600)
+            return ""
+
+    oben = Stumm()
+    monkeypatch.setattr(sitzung, "verbinden", lambda *a, **k: _sofort(oben))
+    monkeypatch.setattr(sitzung, "PROBE_TIMEOUT", 0.05)
+
+    await sitzung.pruefen("wss://beispiel/realtime?model=m", "sk-test")
+
+    assert oben.geschlossen is True
+
+
+class _Antwort:
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+
+
+class _Abgelehnt(Exception):
+    def __init__(self, status_code: int) -> None:
+        self.response = _Antwort(status_code)
+        super().__init__(f"HTTP {status_code}")
+
+
+@pytest.mark.parametrize(
+    "fehler, erwartet",
+    [
+        (_Abgelehnt(401), "AI_PROVIDER_AUTH_FAILED"),
+        (_Abgelehnt(403), "AI_PROVIDER_AUTH_FAILED"),
+        # Bei OpenAI heisst das fast immer: die Modellkennung stimmt nicht. Die
+        # Adresse baut MSM selbst, sie kann nicht danebenliegen.
+        (_Abgelehnt(400), "AI_PROVIDER_REQUEST_REJECTED"),
+        (_Abgelehnt(404), "AI_PROVIDER_REQUEST_REJECTED"),
+        (_Abgelehnt(429), "AI_PROVIDER_RATE_LIMITED"),
+        (_Abgelehnt(500), "AI_PROVIDER_UNAVAILABLE"),
+        (asyncio.TimeoutError(), "AI_PROVIDER_STREAM_TIMEOUT"),
+        (OSError("kein Netz"), "AI_PROVIDER_UNAVAILABLE"),
+    ],
+)
+def test_the_probe_speaks_in_codes_the_panel_already_knows(fehler, erwartet) -> None:
+    """Keine eigenen Codes fuer den Sprachweg — es sind dieselben drei Faelle.
+
+    Falscher Schluessel, falsches Modell, nicht erreichbar. Ein zweiter Satz
+    Codes waere eine zweite Wortwahl fuer dasselbe, und die Haelfte davon
+    stuende in keiner Sprachdatei.
+    """
+    assert sitzung.probe_fehlercode(fehler) == erwartet
+
+
+def test_the_probe_never_forwards_the_providers_wording() -> None:
+    """Der Wortlaut kann Kontingentstaende und Kontonamen tragen."""
+    fehler = _Abgelehnt(401)
+    fehler.args = ("Incorrect API key provided: sk-abc***. Org org-geheim",)
+
+    code = sitzung.probe_fehlercode(fehler)
+
+    assert code == "AI_PROVIDER_AUTH_FAILED"
+    assert "sk-abc" not in code and "org-geheim" not in code

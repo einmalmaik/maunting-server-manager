@@ -31,10 +31,45 @@ export class Wiedergabe {
   private kontext: AudioContext | null = null
   private naechsterStart = 0
   private quellen = new Set<AudioBufferSourceNode>()
+  /**
+   * Misst, wie laut gerade gesprochen wird.
+   *
+   * Nicht für die Wiedergabe nötig — für die **Blase**. Sie soll sich zum
+   * gesprochenen Wort bewegen und nicht zu einem Zufallsgenerator, der so tut.
+   * Der Unterschied ist der ganze Punkt: eine Animation, die nur ungefähr zum
+   * Ton passt, sieht sofort nach Dekoration aus.
+   */
+  private messer: AnalyserNode | null = null
+  // `Uint8Array<ArrayBuffer>` und nicht bloss `Uint8Array`: seit TypeScript 5.7
+  // ist die Sicht typisiert, und `getByteTimeDomainData` nimmt ausdrücklich
+  // keinen `SharedArrayBuffer`.
+  private probe: Uint8Array<ArrayBuffer> | null = null
 
   /** Ob gerade noch etwas eingeplant ist oder läuft. */
   get spricht(): boolean {
     return this.quellen.size > 0
+  }
+
+  /**
+   * Der aktuelle Pegel zwischen 0 und 1.
+   *
+   * Effektivwert (RMS) und nicht der Spitzenwert: der Spitzenwert springt bei
+   * jedem Zischlaut auf Anschlag und lässt die Blase zappeln. RMS folgt der
+   * Lautstärke, wie ein Ohr sie hört.
+   */
+  pegel(): number {
+    const messer = this.messer
+    const probe = this.probe
+    if (!messer || !probe || this.quellen.size === 0) return 0
+    messer.getByteTimeDomainData(probe)
+    let summe = 0
+    for (let i = 0; i < probe.length; i += 1) {
+      const abweichung = (probe[i] - 128) / 128
+      summe += abweichung * abweichung
+    }
+    // Der Faktor holt den RMS gesprochener Sprache (grob 0,05 bis 0,25) in
+    // einen Bereich, in dem die Blase sichtbar atmet.
+    return Math.min(1, Math.sqrt(summe / probe.length) * 4)
   }
 
   /**
@@ -56,7 +91,7 @@ export class Wiedergabe {
 
     const quelle = kontext.createBufferSource()
     quelle.buffer = puffer
-    quelle.connect(kontext.destination)
+    quelle.connect(this.messer ?? kontext.destination)
 
     const jetzt = kontext.currentTime
     if (this.naechsterStart < jetzt) {
@@ -95,6 +130,8 @@ export class Wiedergabe {
     this.abbrechen()
     void this.kontext?.close().catch(() => undefined)
     this.kontext = null
+    this.messer = null
+    this.probe = null
   }
 
   /**
@@ -108,6 +145,16 @@ export class Wiedergabe {
   private hole(): AudioContext {
     if (this.kontext === null) {
       this.kontext = new AudioContext({ sampleRate: ABTASTRATE })
+      // Der Messpunkt liegt **vor** dem Lautsprecher: alles, was klingt, geht
+      // durch ihn. Ein Browser ohne `createAnalyser` verliert damit die
+      // Bewegung der Blase, nicht den Ton — der Weg zum Ziel bleibt bestehen.
+      if (typeof this.kontext.createAnalyser === 'function') {
+        this.messer = this.kontext.createAnalyser()
+        this.messer.fftSize = 256
+        this.messer.smoothingTimeConstant = 0.6
+        this.messer.connect(this.kontext.destination)
+        this.probe = new Uint8Array(this.messer.fftSize)
+      }
     }
     if (this.kontext.state === 'suspended') {
       void this.kontext.resume().catch(() => undefined)

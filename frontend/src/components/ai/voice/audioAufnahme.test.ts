@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { installFakeAudio, type FakeAudioContext } from '@/test/fakeAudio'
+import { FakeAudioContext, installFakeAudio } from '@/test/fakeAudio'
 import { ABTASTRATE, starteAufnahme } from './audioAufnahme'
 
 let audio: ReturnType<typeof installFakeAudio>
@@ -101,12 +101,56 @@ describe('audioAufnahme', () => {
     expect(() => aufnahme.beenden()).not.toThrow()
   })
 
-  it('wirft weiter, wenn das Mikrofon verweigert wird', async () => {
+  it('haengt das Mikrofon nie an den Lautsprecher', async () => {
+    await starteAufnahme(() => undefined)
+
+    // Der Prozessor braucht ein Ziel, sonst laeuft er nicht an — aber der Weg
+    // dorthin geht ueber eine Verstaerkung von null. Ohne sie waere das keine
+    // leise Panne, sondern eine Rueckkopplung.
+    expect(kontext().verstaerker).toHaveLength(1)
+    expect(kontext().verstaerker[0].gain.value).toBe(0)
+  })
+
+  it('verbindet keinen Prozessor ohne Ausgangskanal', async () => {
+    // Genau hier lag der Fehler: `createScriptProcessor(…, 1, 0)` liess sich
+    // erzeugen, aber nicht verbinden — Chrome wirft `InvalidAccessError`. Der
+    // Fehlschlag kam **nach** der Mikrofonfreigabe und wurde als „kein Zugriff
+    // auf das Mikrofon" gemeldet.
+    await starteAufnahme(() => undefined)
+
+    expect(kontext().prozessoren[0].ausgangskanaele).toBeGreaterThan(0)
+    expect(kontext().prozessoren[0].verbunden).toBe(true)
+  })
+
+  it('nennt eine verweigerte Freigabe beim Namen', async () => {
     audio.restore()
     audio = installFakeAudio({ verweigern: true })
 
-    // Eine stumme Sitzung, in der niemand weiss warum, ist die schlechtere
-    // Antwort. Der Aufrufer soll den Fehlschlag sehen.
-    await expect(starteAufnahme(() => undefined)).rejects.toThrow()
+    await expect(starteAufnahme(() => undefined)).rejects.toMatchObject({
+      name: 'AufnahmeAbbruch',
+      grund: 'verweigert',
+    })
+  })
+
+  it('nennt einen Fehler der Audiokette nicht Mikrofon', async () => {
+    // Die Freigabe ist erteilt, die Kette dahinter scheitert. Wer das
+    // „Mikrofon" nennt, schickt den Menschen in die Browsereinstellungen, wo
+    // nichts zu finden ist.
+    const kaputt = installFakeAudio()
+    const Kaputter = class extends FakeAudioContext {
+      createGain(): never {
+        throw new Error('kein Audio')
+      }
+    }
+    ;(globalThis as { AudioContext?: unknown }).AudioContext = Kaputter
+
+    await expect(starteAufnahme(() => undefined)).rejects.toMatchObject({
+      name: 'AufnahmeAbbruch',
+      grund: 'audio',
+    })
+    // Und das Mikrofon geht trotzdem zu — sonst bliebe der rote Punkt im Tab
+    // stehen fuer eine Aufnahme, die es nicht gibt.
+    expect(kaputt.letzterStrom()?.getTracks()[0].gestoppt).toBe(true)
+    kaputt.restore()
   })
 })
