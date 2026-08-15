@@ -31,6 +31,8 @@ from services import (
     ai_chat_service,
     ai_context_service,
     ai_context_window,
+    ai_provider_registry,
+    ai_provider_service,
     ai_reasoning,
     ai_run_broker,
     ai_run_service,
@@ -48,6 +50,19 @@ router = APIRouter(prefix="/api/ai/conversation", tags=["ai-chat"])
 # Der sichtbare Verlauf. Aeltere Nachrichten bleiben gespeichert und fliessen
 # ueber die Zusammenfassung weiter in den Kontext ein.
 HISTORY_LIMIT = 200
+
+
+def _fuer_chat(provider) -> bool:
+    """Taugt dieser Zugang fuer den Chat?
+
+    Ein Realtime-Zugang taugt es nicht — er spricht kein ``/chat/completions``.
+    Die Absage ist bewusst dasselbe 404 wie bei einem unbekannten Zugang und
+    keine eigene Fehlermeldung: aus Sicht des Chats *gibt* es diesen Provider
+    nicht. Er steht auch in keiner Auswahl (`/api/ai/providers/available`
+    filtert ihn), es kann ihn hier also nur nennen, wer die Kennung errät oder
+    eine alte Auswahl im Tab liegen hat.
+    """
+    return ai_provider_service.spricht(provider, ai_provider_registry.CHAT)
 
 
 def _conversation_response(conversation) -> AiConversationResponse:
@@ -153,7 +168,7 @@ async def get_context_status(
     und der wird nach jeder Antwort neu geholt.
     """
     provider = db.get(AiProvider, provider_id)
-    if provider is None or not provider.enabled:
+    if provider is None or not provider.enabled or not _fuer_chat(provider):
         raise HTTPException(status_code=404, detail="Provider nicht gefunden")
     conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
     db.commit()
@@ -315,7 +330,7 @@ async def stream_message(
     conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
     db.commit()
     provider = db.get(AiProvider, payload.provider_id)
-    if provider is None or not provider.enabled:
+    if provider is None or not provider.enabled or not _fuer_chat(provider):
         raise HTTPException(status_code=404, detail="Provider nicht gefunden")
     if provider.requires_api_key and not provider.operator_api_key_encrypted:
         raise HTTPException(status_code=409, detail="Fuer diesen Provider ist kein API-Key konfiguriert")

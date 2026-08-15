@@ -44,6 +44,7 @@ from routers import (
     tasks_router,
     ai_providers_router,
     ai_chat_router,
+    ai_voice_router,
     ai_actions_router,
     ai_autonomy_router,
     ai_memory_router,
@@ -805,6 +806,7 @@ app.include_router(guardian_router)
 app.include_router(ai_settings_router)
 app.include_router(ai_providers_router)
 app.include_router(ai_chat_router)
+app.include_router(ai_voice_router)
 app.include_router(ai_actions_router)
 app.include_router(ai_memory_router)
 app.include_router(ai_autonomy_router)

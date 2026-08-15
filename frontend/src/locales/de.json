@@ -152,6 +152,12 @@
       "modelChoose": "Modell wählen …",
       "reloadModels": "Modelle neu laden",
       "catalogUnavailable": "Der Modellkatalog des Anbieters ist gerade nicht erreichbar. Du kannst den Modellnamen so lange von Hand eintragen; die Denkstufen bleiben dann unbekannt.",
+      "catalogNeedsKey": "Dieser Anbieter gibt seine Modelliste nur gegen den Schlüssel heraus. Trage den Schlüssel ein und speichere den Zugang — danach steht die Auswahl hier.",
+      "realtimeHint": "Ein Sprachzugang. Er erscheint nicht in der Modellauswahl des Chats, sondern trägt den Sprachmodus. Wer ihn nutzen darf, entscheidet das Recht „Mit der KI sprechen“.",
+      "protokoll": {
+        "chat_completions": "Chat",
+        "realtime": "Sprache"
+      },
       "recommended": "Empfohlen",
       "recommendationHint": "MSM ist mit {{model}} erprobt — schnell genug für den Chat und mit Denkstufen. Ein anderes Modell geht auch.",
       "recommendationApply": "Übernehmen",
@@ -606,6 +612,25 @@
         "AI_ACTION_BLUEPRINT_SWITCH_FAILED": "Der Wechsel auf den anderen Blueprint ist fehlgeschlagen.",
         "AI_ACTION_EXECUTION_FAILED": "Die Aktion ist fehlgeschlagen. Einzelheiten stehen im Protokoll.",
         "AI_ACTION_INTERRUPTED": "Das Panel wurde neu gestartet, während die Aktion lief. Wie weit sie gekommen ist, weiß es nicht — sieh am Server nach, bevor du sie erneut auslöst."
+      }
+    },
+    "voice": {
+      "start": "Sprachmodus starten",
+      "stop": "Sprachmodus beenden",
+      "you": "Du:",
+      "assistant": "KI:",
+      "zustand": {
+        "aus": "Sprachmodus aus",
+        "verbindet": "Verbindet …",
+        "bereit": "Bereit — sprich einfach los",
+        "hoert": "Hört zu",
+        "denkt": "Denkt nach",
+        "spricht": "Spricht"
+      },
+      "errors": {
+        "microphone": "Kein Zugriff auf das Mikrofon. Erlaube ihn in den Browsereinstellungen.",
+        "provider": "Der Sprachanbieter hat die Sitzung abgebrochen.",
+        "connection": "Verbindung zum Sprachmodus verloren."
       }
     },
     "webSearch": {
@@ -1421,6 +1446,10 @@
     "ai_chat_use": {
       "title": "KI-Chat verwenden",
       "desc": "Erlaubt den KI-Chat. Rollenlimits und Tool-Rechte werden zusätzlich im Backend geprüft."
+    },
+    "ai_voice_use": {
+      "title": "Mit der KI sprechen",
+      "desc": "Erlaubt den Sprachmodus. Getrennt vom Chat aus zwei Gründen: Änderungen werden hier per Stimme bestätigt statt angeklickt, und gesprochene Zustimmung ist schwächer als ein Klick — Löschen, Backup-Einspielen und Schlüsselvergabe verlangen deshalb weiterhin die Bestätigungskarte. Außerdem kostet Sprache ein Vielfaches des getippten Chats."
     },
     "ai_attachments_use": {
       "title": "KI-Anhänge verwenden",
@@ -2853,6 +2882,35 @@
         "title": "Kubernetes",
         "body": "Die Manifeste unter deploy/kubernetes betreiben die Control Plane. Gameserver bleiben Docker-Container auf den angebundenen Nodes. Genau eine Panel-Replica, der DIS-Sidecar läuft im selben Pod."
       }
+    },
+    "voice": {
+      "title": "Sprachmodus",
+      "intro": "Mit der KI reden statt tippen — derselbe Agent, dieselbe Unterhaltung, dieselben Werkzeuge. Für den Betrieb ist es genau ein neuer Schritt: ein zweiter Anbieterzugang mit eigenem Schlüssel.",
+      "access": {
+        "title": "Zweiter Zugang",
+        "body": "Einstellungen → KI → Anbieter, Art „OpenAI (Sprache)\", ein Schlüssel von platform.openai.com. OpenRouter kann kein Duplex — am 15.08.2026 nachgemessen, /api/v1/realtime antwortet dort mit 404. Der bestehende OpenRouter-Zugang bleibt und bedient weiter den getippten Chat."
+      },
+      "model": {
+        "title": "Modell",
+        "body": "gpt-realtime-2.1. Die Liste kommt aus OpenAIs Katalog und nicht aus einer Konstante: gpt-realtime, -mini und gpt-4o-realtime werden am 20.01.2027 abgeschaltet. Für den Katalogabruf braucht OpenAI den Schlüssel — ohne hinterlegten Schlüssel bleibt die Liste beim Anlegen leer."
+      },
+      "permission": {
+        "title": "Recht ai.voice.use",
+        "body": "Getrennt von ai.chat.use, weil Sprechen ein Vielfaches verbraucht und Änderungen per Stimme statt per Klick bestätigt werden. Ohne eingerichteten Sprachzugang erscheint der Knopf gar nicht — nicht ausgegraut."
+      },
+      "confirm": {
+        "title": "Bestätigen per Stimme",
+        "body": "Die Vorschlagskarte erscheint wie immer und bleibt sichtbar; zusätzlich liest die KI vor, was sie vorhat. Der vorgelesene Satz stammt aus dem Panel, nicht vom Modell. Es kann immer nur ein Vorschlag offen sein, damit ein „ja\" nicht auf dem falschen landet."
+      },
+      "quota": {
+        "title": "Kontingent",
+        "body": "Eine Sitzung ist eine Buchung, nicht eine je Antwort; sie endet nach 15 Minuten von selbst und der Browser verbindet neu. Ist die Tokengrenze aufgebraucht, endet sie nach dem laufenden Satz. Die Kostengrenze in Cent bindet erst, wenn am Zugang ein Tokenpreis gepflegt ist — OpenAIs Katalog nennt keine Preise, und MSM erfindet keinen."
+      },
+      "relay": {
+        "title": "Der Ton läuft durch das Panel",
+        "body": "Browser → Panel → OpenAI, nicht daran vorbei. Bei einer Direktverbindung liefe die Werkzeugschleife über den Browser — er sähe jeden Aufruf und könnte welche erfinden. Der Betreiberschlüssel verlässt den Panelprozess nie. Kein zusätzlicher Port; der Reverse-Proxy muss WebSocket-Upgrades unter /api/ durchlassen, was er für die Server-Konsole ohnehin tut."
+      },
+      "spokenLimit": "Eine gesprochene Zustimmung ist schwächer als ein Klick: ein Sprachmodell lässt sich nicht zwingen, wörtlich vorzulesen. Löschen, das Einspielen eines Backups sowie Schlüssel und Rollen der Hoster-Anbindung bleiben deshalb per Stimme unbestätigbar und verlangen die Karte im Panel."
     }
   },
   "docsOAuth": {

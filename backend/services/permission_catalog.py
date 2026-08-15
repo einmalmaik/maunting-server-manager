@@ -75,6 +75,15 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # `ai.autonomous.use` zu eng: eine Aufgabe, die nur liest und berichtet,
     # verlangt keine Autonomie. Handelnde Aufgaben prüfen sie zusätzlich.
     PermissionDef("ai.tasks.manage",           "ai",      "Wiederkehrende KI-Aufgaben anlegen und verwalten"),
+    # Durchgesetzt in routers/ai_voice.py beim WebSocket-Upgrade. Ein eigenes
+    # Recht und nicht `ai.chat.use`, obwohl es dieselbe KI mit denselben
+    # Werkzeugen ist: der Sprachweg bestaetigt Schreibaktionen per Stimme, und
+    # eine gesprochene Zustimmung ist schwaecher als ein Klick. Wer das fuer
+    # seine Kunden nicht will, muss es abwaehlen koennen, ohne ihnen den Chat zu
+    # nehmen. Ausserdem kostet Sprache ein Vielfaches: Audio wird bei
+    # `gpt-realtime-2.1` mit 32 USD je Million Eingabe- und 64 USD je Million
+    # Ausgabetokens berechnet.
+    PermissionDef("ai.voice.use",              "ai",      "Mit der KI sprechen (Realtime-Sprachmodus)"),
     # OAuth-Provider-Konfiguration (Phase 4 — Social Login).
     # `secret_update` ist bewusst separat: erfordert zusaetzliche Audit-Bestaetigung.
     # `test` ist read-only, damit ein Operator ohne write-Rechte die Konfiguration pruefen kann.

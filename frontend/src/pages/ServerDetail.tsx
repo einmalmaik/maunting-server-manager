@@ -983,7 +983,12 @@ export function ServerDetail() {
                   <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
                     {label}
                   </p>
-                  <p className="font-headline text-display-sm text-primary">
+                  {/* Dieselbe Groesse wie Node und Bind-IP daneben. Hier stand
+                      `text-display-sm` — 36px fett gegen 16px normal in
+                      derselben Rasterzeile. Eine Portnummer ist kein
+                      Kennzahlwert wie auf dem Dashboard, sondern ein Datenfeld
+                      unter anderen. */}
+                  <p className="font-headline text-body-md text-primary">
                     {p.port ?? "-"}{" "}
                     <span className="text-sm font-body-md text-on-surface-variant">
                       {p.protocol.toUpperCase()}
@@ -998,7 +1003,7 @@ export function ServerDetail() {
                 <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
                   {t("servers.gamePort")}
                 </p>
-                <p className="font-headline text-display-sm text-primary">
+                <p className="font-headline text-body-md text-primary">
                   {server.game_port ?? "-"}{" "}
                   <span className="text-sm font-body-md text-on-surface-variant">
                     UDP
@@ -1009,7 +1014,7 @@ export function ServerDetail() {
                 <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
                   {t("servers.queryPort")}
                 </p>
-                <p className="font-headline text-display-sm text-primary">
+                <p className="font-headline text-body-md text-primary">
                   {server.query_port ?? "-"}{" "}
                   <span className="text-sm font-body-md text-on-surface-variant">
                     UDP
@@ -1020,7 +1025,7 @@ export function ServerDetail() {
                 <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
                   {t("servers.rconPort")}
                 </p>
-                <p className="font-headline text-display-sm text-primary">
+                <p className="font-headline text-body-md text-primary">
                   {server.rcon_port ?? "-"}{" "}
                   <span className="text-sm font-body-md text-on-surface-variant">
                     TCP

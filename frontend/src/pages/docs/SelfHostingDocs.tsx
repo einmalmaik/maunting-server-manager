@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, ArrowRightLeft, FileArchive, GitBranch, KeyRound, MonitorSmartphone, Network, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRightLeft, FileArchive, GitBranch, KeyRound, Mic, MonitorSmartphone, Network, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
 import { CodeBlock } from '@/components/docs/CodeBlock'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
@@ -77,6 +77,7 @@ export function SelfHostingDocs() {
           ['artifacts', t('docsSelfHosting.artifacts.title')],
           ['credentials-scoping', t('docsSelfHosting.credentials.title')],
           ['hoster-integration', t('docsSelfHosting.hoster.title')],
+          ['voice-mode', t('docsSelfHosting.voice.title')],
         ].map(([id, label]) => (
           <a key={id} href={`#${id}`} className="msm-btn-secondary shrink-0 px-3 py-2 text-xs">{label}</a>
         ))}
@@ -332,6 +333,35 @@ export function SelfHostingDocs() {
           <Plug className="h-4 w-4" />
           {t('docsSelfHosting.hoster.apiReferenceLink')}
         </Link>
+      </section>
+
+      {/* Sprachmodus. Steht hier und nicht auf einer eigenen Seite, weil er
+          fuer den Betreiber genau ein neuer Betriebsschritt ist: ein zweiter
+          Anbieterzugang mit eigenem Schluessel. */}
+      <section aria-labelledby="voice-mode" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <Mic className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="voice-mode" className="font-headline text-headline-md text-on-surface">
+              {t('docsSelfHosting.voice.title')}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
+              {t('docsSelfHosting.voice.intro')}
+            </p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['access', 'model', 'permission', 'confirm', 'quota', 'relay'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.voice.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.voice.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-4 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <p className="text-sm leading-6">{t('docsSelfHosting.voice.spokenLimit')}</p>
+        </div>
       </section>
 
       <aside className="mb-8 flex gap-3 rounded-xl border border-status-warning/30 bg-status-warning/10 p-4 text-status-warning" aria-labelledby="database-compatibility">

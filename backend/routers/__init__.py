@@ -25,6 +25,7 @@ from .ai_settings import router as ai_settings_router
 from .tasks import router as tasks_router
 from .ai_providers import router as ai_providers_router
 from .ai_chat import router as ai_chat_router
+from .ai_voice import router as ai_voice_router
 from .ai_actions import router as ai_actions_router
 from .ai_autonomy import router as ai_autonomy_router
 from .ai_memory import router as ai_memory_router
@@ -63,6 +64,7 @@ __all__ = [
     "tasks_router",
     "ai_providers_router",
     "ai_chat_router",
+    "ai_voice_router",
     "ai_actions_router",
     "ai_autonomy_router",
     "ai_memory_router",

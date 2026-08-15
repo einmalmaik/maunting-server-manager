@@ -219,7 +219,7 @@ def _schloss(kind: str) -> asyncio.Lock:
     return schloss
 
 
-def _auffrischen_anstossen(kind: str) -> bool:
+def _auffrischen_anstossen(kind: str, schluessel: str | None = None) -> bool:
     """Eine Auffrischung im Hintergrund anstossen; laeuft schon eine, nichts tun.
 
     Der Rueckgabewert ist die eigentliche Aussage: ``True`` heisst „um den
@@ -228,6 +228,10 @@ def _auffrischen_anstossen(kind: str) -> bool:
     Schleife —, bleibt es beim alten Verhalten und der Aufrufer holt selbst.
     Sonst lieferte MSM in der Testsuite und in jedem Skript ohne Anwendung
     ewig denselben veralteten Stand aus, ohne ihn je zu erneuern.
+
+    ``schluessel`` reist mit in die Hintergrundaufgabe. Ohne ihn bekaeme ein
+    schluesselpflichtiger Katalog dort ein 401 — und zwar unsichtbar, weil
+    niemand auf diese Aufgabe wartet.
     """
     laufend = _auffrischungen.get(kind)
     if laufend is not None and not laufend.done():
@@ -239,7 +243,7 @@ def _auffrischen_anstossen(kind: str) -> bool:
         schleife = asyncio.get_running_loop()
     except RuntimeError:
         return False
-    aufgabe = schleife.create_task(_auffrischen(client, kind))
+    aufgabe = schleife.create_task(_auffrischen(client, kind, schluessel))
     _auffrischungen[kind] = aufgabe
     # Ohne diesen Rueckruf meldet asyncio beim Aufraeumen "Task exception was
     # never retrieved" — und der Verweis bliebe fuer immer stehen.
@@ -261,7 +265,9 @@ def _auffrischung_abschliessen(kind: str, aufgabe: asyncio.Task) -> None:
         )
 
 
-async def _auffrischen(client: httpx.AsyncClient, kind: str) -> None:
+async def _auffrischen(
+    client: httpx.AsyncClient, kind: str, schluessel: str | None = None
+) -> None:
     """Der Abruf im Hintergrund.
 
     Ausdruecklich **ohne** ``erzwingen``: die Ruhefrist nach einem Fehlversuch
@@ -269,7 +275,7 @@ async def _auffrischen(client: httpx.AsyncClient, kind: str) -> None:
     abgeschickten Nachricht ein neuer Abruf ueber die volle ``ABRUF_TIMEOUT``
     an — unsichtbar, aber deswegen nicht harmlos.
     """
-    await _besorgen(client, kind, erzwingen=False, sofort=False)
+    await _besorgen(client, kind, erzwingen=False, sofort=False, schluessel=schluessel)
 
 
 def vorwaermen_anstossen() -> None:
@@ -284,8 +290,16 @@ def vorwaermen_anstossen() -> None:
     eingerichtet sind: die Anbieterliste steht im Programm, ein Abruf je Anbieter
     kostet einmal wenige hundert Kilobyte, und ein Start, der auf das Schema
     wartet, waere von der Reihenfolge im ``lifespan`` abhaengig.
+
+    Genau deshalb bleiben schluesselpflichtige Kataloge hier aussen vor: der
+    Schluessel steht in der Datenbank, und die wird hier nicht gefragt. Ein
+    Versuch ohne ihn endete in einem 401, wuerde als Fehlversuch vermerkt, und
+    die Ruhefrist verzoegerte anschliessend den ersten echten Abruf um eine
+    Minute — fuer einen Fehler, den niemand gemacht hat.
     """
     for kind in _LESER:
+        if anbieter(kind).katalog_braucht_schluessel:
+            continue
         _auffrischen_anstossen(kind)
 
 
@@ -421,13 +435,62 @@ def _modell_aus_openrouter(rohdaten: dict) -> Modell | None:
     )
 
 
+#: Womit eine Realtime-Kennung bei OpenAI beginnt. Der Katalog dort führt
+#: *alle* Modelle des Kontos — Bildgeneratoren, Einbettungen, Transkription.
+#: Keines davon gehört in eine Auswahl für den Sprachweg.
+_REALTIME_PRAEFIX = "gpt-realtime"
+
+
+def _modell_aus_openai_realtime(rohdaten: dict) -> Modell | None:
+    """Liest einen Katalogeintrag von OpenAI — und weiss dabei fast nichts.
+
+    Das ist der Unterschied zu `_modell_aus_openrouter` und keine Nachlässigkeit:
+    OpenAIs ``/v1/models`` liefert je Eintrag nur ``id``, ``object``, ``created``
+    und ``owned_by``. Kein Kontextfenster, keine Denkstufen, keine Preise. Was
+    hier nicht steht, kann MSM auch nicht wissen — und erfindet es deshalb nicht.
+
+    ``kontext_tokens=None`` heisst überall im Code „unbekannt" und nie „klein"
+    (`ai_context_window.ermitteln`). Das ist die ehrliche Antwort. Eine Zahl aus
+    der Doku abzuschreiben wäre die unehrliche: sie stimmte am Tag des
+    Abschreibens und danach so lange, bis jemand sie widerlegt.
+
+    ``denkt=False``, obwohl `gpt-realtime-2.1` sehr wohl eine ``reasoning.effort``
+    kennt. Auch das ist Absicht: der Katalog sagt es nicht, und `ai_reasoning`
+    darf keine Stufe schicken, die es vielleicht nicht gibt. Sobald OpenAI die
+    Fähigkeit im Katalog führt, greift der bestehende Weg von selbst.
+
+    **Warum der Katalog trotzdem gefragt wird, wenn er so wenig sagt:** wegen
+    der Liste. `gpt-realtime`, `gpt-realtime-mini` und alle `gpt-4o-realtime`
+    werden am 2027-01-20 abgeschaltet. Eine Auswahl aus einer Konstante im
+    Programm zeigte danach Modelle an, die es nicht mehr gibt. Der Katalog
+    vergisst sie von selbst.
+    """
+    model_id = rohdaten.get("id")
+    if not isinstance(model_id, str) or not model_id.startswith(_REALTIME_PRAEFIX):
+        return None
+    return Modell(model_id=model_id, name=model_id, denkt=False)
+
+
 #: Je Anbieter ein Leser. Ein zweiter Anbieter ist eine Zeile hier und ein
 #: Eintrag in `ai_provider_registry` — kein Umbau.
-_LESER = {"openrouter": _modell_aus_openrouter}
+_LESER = {
+    "openrouter": _modell_aus_openrouter,
+    "openai_realtime": _modell_aus_openai_realtime,
+}
 
 
-async def _hole(client: httpx.AsyncClient, spec: Anbieter) -> list[Modell]:
-    antwort = await client.get(spec.catalog_url, timeout=ABRUF_TIMEOUT)
+async def _hole(
+    client: httpx.AsyncClient, spec: Anbieter, schluessel: str | None = None
+) -> list[Modell]:
+    # Der Schluessel geht nur mit, wenn der Anbieter ihn fuer den **Katalog**
+    # verlangt. Ihn vorsorglich immer mitzuschicken waere ein Geheimnis an einer
+    # Adresse, die es nicht braucht — OpenRouter gibt seine Liste offen heraus.
+    kopf = (
+        {"Authorization": f"Bearer {schluessel}"}
+        if spec.katalog_braucht_schluessel and schluessel
+        else None
+    )
+    antwort = await client.get(spec.catalog_url, timeout=ABRUF_TIMEOUT, headers=kopf)
     antwort.raise_for_status()
     if len(antwort.content) > MAX_KATALOG_BYTES:
         raise ValueError("Katalog ist unerwartet groß")
@@ -452,9 +515,19 @@ async def _hole(client: httpx.AsyncClient, spec: Anbieter) -> list[Modell]:
 
 
 async def modelle(
-    client: httpx.AsyncClient, kind: str, *, erzwingen: bool = False
+    client: httpx.AsyncClient,
+    kind: str,
+    *,
+    erzwingen: bool = False,
+    schluessel: str | None = None,
 ) -> list[Modell]:
     """Die Modelle eines Anbieters, gecacht.
+
+    ``schluessel`` wird nur von Anbietern mit ``katalog_braucht_schluessel``
+    ausgewertet. Der Speicher bleibt dabei nach ``kind`` geschluesselt und nicht
+    nach Zugang: welche Modelle es *gibt*, haengt nicht daran, wer fragt. Zwei
+    Betreiberschluessel beim selben Anbieter liefern dieselbe Liste, und sie
+    zweimal zu halten hiesse, denselben Katalog zweimal zu holen.
 
     ``erzwingen=True`` umgeht die Frist — das ist der Knopf „Modelle neu laden“
     in den Provider-Einstellungen. Er ist nötig, weil der häufigste Fall nicht
@@ -464,11 +537,18 @@ async def modelle(
     keine gespeicherte Absage. Und er wartet als einziger Weg noch auf den
     Abruf — das ist genau das, was der Knopf verspricht.
     """
-    return await _besorgen(client, kind, erzwingen=erzwingen, sofort=True)
+    return await _besorgen(
+        client, kind, erzwingen=erzwingen, sofort=True, schluessel=schluessel
+    )
 
 
 async def _besorgen(
-    client: httpx.AsyncClient, kind: str, *, erzwingen: bool, sofort: bool
+    client: httpx.AsyncClient,
+    kind: str,
+    *,
+    erzwingen: bool,
+    sofort: bool,
+    schluessel: str | None = None,
 ) -> list[Modell]:
     """Der gemeinsame Weg fuer Vordergrund und Hintergrund.
 
@@ -485,7 +565,7 @@ async def _besorgen(
     if not erzwingen and eintrag is not None and _antwortet_ohne_abruf(eintrag, jetzt):
         return eintrag.modelle
 
-    if not erzwingen and sofort and _auffrischen_anstossen(kind):
+    if not erzwingen and sofort and _auffrischen_anstossen(kind, schluessel):
         # Ab hier holt jemand anders den frischen Stand. Also nicht warten.
         if eintrag is not None and eintrag.modelle:
             return eintrag.modelle
@@ -518,7 +598,7 @@ async def _besorgen(
         ):
             return eintrag.modelle
         try:
-            frisch = await _hole(client, spec)
+            frisch = await _hole(client, spec, schluessel)
         except Exception as exc:
             logger.warning(
                 "Modellkatalog %s nicht abrufbar error=%s", kind, type(exc).__name__
@@ -540,13 +620,17 @@ async def _besorgen(
 
 
 async def finde(
-    client: httpx.AsyncClient, kind: str, model_id: str
+    client: httpx.AsyncClient,
+    kind: str,
+    model_id: str,
+    *,
+    schluessel: str | None = None,
 ) -> Modell | None:
     """Ein einzelnes Modell, oder ``None``, wenn der Katalog es nicht führt."""
     gesucht = (model_id or "").strip()
     if not gesucht:
         return None
-    for modell in await modelle(client, kind):
+    for modell in await modelle(client, kind, schluessel=schluessel):
         if modell.model_id == gesucht:
             return modell
     return None
