@@ -115,10 +115,74 @@ logger = logging.getLogger(__name__)
 # abgewiesen. Rund 48.000 Zeichen sind grob 12.000 Tokens — Platz fuer etwa
 # dreissig Statusabfragen oder zwei volle Logauszuege.
 MAX_TOOL_RESULT_CHARS_PER_ROUND = 48_000
+# Absolute Reissleine gegen ein durchgedrehtes Modell: so viele Werkzeugaufrufe
+# darf **eine** Runde höchstens enthalten. Hier wird nichts vertagt und nichts
+# begründet abgelehnt — die Sequenz bricht hart ab, weil eine Runde mit mehr
+# Aufrufen kein Arbeitsplan mehr ist, sondern ein Fehler.
+#
+# Hier standen zweiunddreissig, gemessen an einer Frage. Ein Auftrag ist
+# breiter: "sieh dir alle Server an" ist bei einem Dutzend Anlagen schon eine
+# Runde mit einem Dutzend Statusabfragen, und danach kommen die Logs. Was
+# tatsächlich knapp ist, deckelt ohnehin die Zeile darüber — Zeichen, nicht
+# Aufrufe. Diese Zahl muss nur gross genug sein, um eine breite Bestandsaufnahme
+# durchzulassen, und klein genug, um eine Aufzählung ohne Ende zu stoppen.
 MAX_TOOL_CALLS = 64
+# Leserunden **je Lauf**, nicht je Nachricht.
+#
+# Hier standen erst vier, dann sechzehn. Vier war die Zahl aus der Zeit, in der
+# ein Zug eine Frage beantwortete: lesen, lesen, antworten. Sechzehn trug eine
+# Diagnose, aber keinen Auftrag wie "richte den Server ein, stell das ein,
+# starte ihn und sag Bescheid" — die KI kam bis zur Hälfte und musste aufhören,
+# obwohl sie wusste, was noch fehlte. Genau die Beschwerde: *"die muss das
+# wirklich komplett bis zum Ende machen, Aufgaben zu Ende bringen, Ende zu
+# Ende."*
+#
+# Achtundvierzig ist der Punkt, an dem eine Kette nicht mehr länger wird,
+# sondern im Kreis läuft — und dagegen ist die Signaturzählung weiter unten das
+# passende Mittel, nicht diese Grenze. Sie bricht auch nichts ab: sie nimmt die
+# Werkzeuge weg, und das Modell antwortet aus dem, was es hat.
 MAX_TOOL_ROUNDS = 48
+# Schreibrunden je Lauf. Zwei reichten für "pass die Config an und starte
+# danach", acht für eine Einrichtung aus Anlegen, Konfigurieren, Starten und
+# Melden. Was sie nicht trugen, ist die Wiederholung: eine Einrichtung, die beim
+# ersten Versuch schiefgeht, korrigiert wird und neu startet, braucht dieselben
+# Schritte ein zweites Mal. Vierundzwanzig lassen einem Auftrag diesen zweiten
+# Anlauf und bleiben weit unter dem, was ein durchgedrehtes Modell bräuchte, um
+# Schaden anzurichten — jede einzelne Aktion durchläuft weiterhin die
+# Rechteprüfung und, wo nötig, die Bestätigung eines Menschen. An der Grenze
+# endet die Werkzeugnutzung, nicht der Lauf.
 MAX_WRITE_ROUNDS = 24
+
+# Was diese Runden **nicht** begrenzen — damit sie niemand für eine Schranke
+# hält, die sie nicht ist: Es gibt keine Wanduhr-, keine Token- und keine
+# Kostengrenze je Lauf. Ein Lauf darf achtundvierzig Leserunden lang dauern und
+# kosten, was er kostet; gezählt wird nur, wie oft der Anbieter gefragt wird und
+# wieviel Ergebnistext eine Runde erzeugt. Der einzige operative Deckel liegt
+# woanders und zählt etwas anderes: `grant.max_actions_per_hour` begrenzt
+# ausgeführte autonome Aktionen je Benutzer und Stunde — benutzerweit über alle
+# Läufe hinweg, nicht die Runden eines einzelnen. Wer eine Grenze je Lauf will,
+# muss sie bauen; hier steht sie nicht.
+
+# Wie oft derselbe Werkzeugaufruf mit **denselben** Argumenten laufen darf,
+# gezählt über Runden hinweg. Ein Modell, das die gleiche Auskunft zum fünften
+# Mal holt, bekommt keine neue Antwort — es hängt. Der Aufruf wird dann nicht
+# ausgeführt, sondern begründet abgelehnt: eine Grenze, die erklärt, statt
+# einer, die abbricht.
 MAX_GLEICHE_AUFRUFE = 4
+# Für drei Werkzeuge ist die Wiederholung kein Hängen, sondern Warten.
+#
+# Ihr Ergebnis hängt an der Zeit und nicht an den Argumenten: zwischen
+# "gestartet" und "läuft" liegt bei einem Spielserver eine Minute oder mehr, und
+# wer in dieser Zeit nachsieht, stellt dieselbe Frage mit denselben Argumenten —
+# bekommt aber jedes Mal eine andere Antwort. `read_server_status` sagt, ob der
+# Container schon oben ist, `read_server_logs` zeigt, wie weit das Hochfahren
+# gekommen ist, `check_server_reachability` beantwortet die Frage, auf die es am
+# Ende ankommt. Darin unterscheiden sich genau diese drei von allem anderen:
+# `read_config` ein zweites Mal zu lesen bringt nichts Neues.
+#
+# Acht Runden reichen, um ein Hochfahren zu begleiten, und sind wenig genug,
+# dass ein wirklich festgefahrenes Modell nicht den ganzen Lauf damit verbringt.
+# Danach gilt dieselbe begründete Ablehnung wie oben.
 MAX_GLEICHE_POLLING_AUFRUFE = 8
 POLLING_WERKZEUGE = {"read_server_status", "read_server_logs", "check_server_reachability"}
 

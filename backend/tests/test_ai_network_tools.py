@@ -14,9 +14,21 @@ darueber, ob ein Betreiber an der richtigen Stelle sucht.
 **Die Netzstruktur ist nicht Teil des Serverkontexts.** Welche Adressen der Host
 hat und was die Firewall durchlaesst, gehoert dem Betreiber — nicht jedem, der
 einen Server darauf sehen darf.
+
+**Die Diagnose baut keine Verbindungen auf.** Sie fragt den lokalen Portstatus
+und liest das Urteil, das der Guardian auf der Node bereits gefaellt hat. Es gab
+einen Stand, in dem sie stattdessen selbst Spielprotokolle sprach und die
+oeffentliche IP bei einem fremden Dienst erfragte — die Tests dieser Datei liefen
+damit ins LAN und ins Internet des Ausfuehrenden, ohne dass eine Zusicherung das
+bemerkt haette. Deshalb steht unten eine Sperre, die jeden Verbindungsversuch aus
+diesen Tests heraus in einen Fehlschlag verwandelt.
 """
 
 from __future__ import annotations
+
+import socket
+import urllib.request
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy.orm import Session
@@ -26,9 +38,46 @@ from services import ai_action_errors, ai_action_service, ai_proposal_service, s
 from services.role_service import set_user_roles
 
 
-def _server(db: Session, name: str, *, bind_ip: str | None, status: str = "running") -> Server:
+@pytest.fixture(autouse=True)
+def _keine_verbindung_nach_draussen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Kein Test dieser Datei darf das Netz des Ausfuehrenden anfassen.
+
+    Der Anlass ist beobachtet: eine Fassung der Diagnose probte auf der
+    eingestellten Bind-IP (hier ``192.168.1.50``) echte Sockets und rief
+    ``api.ipify.org`` an. Beides passierte still — die Zusicherungen der Tests
+    prueften nur das Ergebnis, und das sah bei einer gescheiterten Sonde genauso
+    aus wie bei einer nie gestellten Frage. Ein Testlauf klopfte damit am Router
+    des Entwicklers, und im CI haette er an dem des Betreibers geklopft.
+
+    Gesperrt sind genau die drei Wege, ueber die das lief: ``socket.socket``
+    (UDP-Abfragen), ``socket.create_connection`` (TCP-Verbindungen) und
+    ``urllib.request.urlopen`` (der Dienst fuer die oeffentliche Adresse). Der
+    lokale Portstatus kommt in jedem Test aus einem Mock von
+    ``is_port_available``, das Urteil ueber die Anwendungsprobe aus der
+    Datenbank — keine der beiden Quellen braucht ein Socket.
+    """
+    def _verboten(*_args, **_kwargs):
+        raise AssertionError(
+            "Die Netzdiagnose hat versucht, selbst eine Verbindung aufzubauen. "
+            "Sie darf das nicht: MSM steht hinter derselben Netzgrenze wie der "
+            "Server, und die Anwendungsprobe misst der Guardian auf der Node."
+        )
+
+    monkeypatch.setattr(socket, "socket", _verboten)
+    monkeypatch.setattr(socket, "create_connection", _verboten)
+    monkeypatch.setattr(urllib.request, "urlopen", _verboten)
+
+
+def _server(
+    db: Session, name: str, *, bind_ip: str | None, status: str = "running",
+    game_type: str = "dayz",
+) -> Server:
+    # ``dayz`` ist der Normalfall dieser Datei: sein Blueprint erklaert unter
+    # ``health.application`` eine Source-Query-Probe. Wer den Gegenfall braucht —
+    # einen Titel ohne abfragbares Protokoll — setzt ``game_type`` und nimmt
+    # dafuer einen Blueprint, der wirklich keine Anwendungsprobe fuehrt.
     server = Server(
-        name=name, game_type="dayz", install_dir=f"/tmp/{name}",
+        name=name, game_type=game_type, install_dir=f"/tmp/{name}",
         status=status, container_name=f"msm-{name}", public_bind_ip=bind_ip,
     )
     db.add(server)
@@ -137,6 +186,15 @@ def test_external_reachability_is_never_claimed(
 
     Ein erfundenes "ist von aussen erreichbar" waere schlimmer als keine
     Aussage — der Betreiber wuerde an der falschen Stelle suchen.
+
+    Der Test zaehlt deshalb die Felder des Ergebnisses vollstaendig auf, statt
+    nur ``external_check`` zu lesen. Das hat einen beobachteten Grund: es gab
+    einen Stand, in dem die Diagnose die oeffentliche Adresse ermittelte und auf
+    ihr probte, und ``external_check`` trotzdem "unavailable" blieb, weil die
+    Sonde im Testnetz scheiterte. Die alte Zusicherung war gruen, waehrend genau
+    das passierte, was sie verhindern sollte. Ein neues Feld muss hier also
+    ausdruecklich eingetragen werden — und wer es eintraegt, muss sich fragen,
+    ob es eine Aussage ueber die Aussenwelt macht.
     """
     server = _server(db, "extern", bind_ip="192.168.1.50")
     monkeypatch.setattr(
@@ -147,6 +205,131 @@ def test_external_reachability_is_never_claimed(
 
     assert result["external_check"] == "unavailable"
     assert "Router" in result["external_check_reason"]
+    assert set(result) == {
+        "server_id", "status", "bind_ip", "ports", "verdict", "game_probe",
+        "external_check", "external_check_reason",
+    }
+
+
+# ── Die Spielprobe: gelesen, nicht gemessen ───────────────────────────────
+#
+# Ob ein Server auf seinem eigenen Protokoll antwortet, misst der Guardian auf
+# der Node, auf der der Server wirklich liegt — und nur dann, wenn der Blueprint
+# unter ``health.application`` eine solche Probe erklaert. Das Backend liest sein
+# Urteil und spricht selbst kein Spielprotokoll. Die folgenden Tests halten die
+# drei Faelle auseinander, deren Verwechslung teuer ist.
+
+def _mit_urteil(
+    db: Session, server: Server, state: str, *, gemessen_vor_sekunden: int | None
+) -> None:
+    """Setzt das, was ``guardian_sync_service`` im Betrieb schreibt."""
+    server.guardian_observed_state = state
+    server.guardian_container_status = "running"
+    server.guardian_probe_timestamp = (
+        None if gemessen_vor_sekunden is None
+        else datetime.now(timezone.utc) - timedelta(seconds=gemessen_vor_sekunden)
+    )
+    db.commit()
+
+
+def test_a_blueprint_without_an_application_probe_is_not_a_finding(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nichts abgefragt ist nicht dasselbe wie nichts geantwortet.
+
+    ``hytale`` ist ein Titel mit eigener Engine: sein Blueprint fuehrt einen
+    Prozess- und einen Port-Check, aber keine ``health.application``. Wuerde die
+    Diagnose hier "antwortet nicht" melden, schickte sie den Betreiber wegen
+    einer Messung in seinen Router, die es nie gab. Selbst ein Guardian-Zustand,
+    der nach Fehler klingt, darf daran nichts aendern — er stammt aus den
+    anderen Proben.
+    """
+    server = _server(db, "eigene-engine", bind_ip="192.168.1.50", game_type="hytale")
+    _mit_urteil(db, server, "unhealthy", gemessen_vor_sekunden=30)
+    monkeypatch.setattr(
+        "services.port_check_service.is_port_available", lambda *_a, **_k: False
+    )
+
+    probe = server_network_diagnostics.check_reachability(db, server)["game_probe"]
+
+    assert probe["status"] == "not_declared"
+    assert probe["probe_type"] is None
+    assert probe["measured_at"] is None
+    assert "kein Befund" in probe["note"]
+
+
+@pytest.mark.parametrize(
+    ("guardian_state", "status"),
+    [
+        ("healthy", "answering"),
+        ("unhealthy", "not_answering"),
+        ("degraded", "not_answering"),
+    ],
+)
+def test_the_guardian_verdict_is_what_the_probe_reports(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch,
+    guardian_state: str, status: str,
+) -> None:
+    """Gemessen hat die Node, berichtet wird hier — mit Alter und Probentyp.
+
+    ``dayz`` erklaert eine Source-Query-Probe. Der Zustand des Guardian ist die
+    einzige Quelle der Aussage; das Backend baut daneben keine eigene.
+    """
+    server = _server(db, f"urteil-{guardian_state}", bind_ip="192.168.1.50")
+    _mit_urteil(db, server, guardian_state, gemessen_vor_sekunden=45)
+    monkeypatch.setattr(
+        "services.port_check_service.is_port_available", lambda *_a, **_k: False
+    )
+
+    probe = server_network_diagnostics.check_reachability(db, server)["game_probe"]
+
+    assert probe["status"] == status
+    assert probe["probe_type"] == "source-query"
+    assert probe["guardian_state"] == guardian_state
+    assert probe["measured_at"] is not None
+    # Rund 45 Sekunden alt. Die Spanne laesst Rechenzeit zu, ohne die Groessen-
+    # ordnung preiszugeben — ein Urteil von gestern ist etwas anderes als eines
+    # von eben, und genau das soll das Modell sehen koennen.
+    assert 40 <= probe["age_seconds"] <= 90
+
+
+@pytest.mark.parametrize(
+    ("guardian_state", "gemessen_vor_sekunden"),
+    [
+        # Der Guardian ist fuer diesen Server gar nicht zustaendig oder hat noch
+        # nie gemessen — sein Vorgabewert ist "unknown".
+        ("unknown", None),
+        # Der Server soll nicht laufen. Dass nichts antwortet, ist erwartet und
+        # kein Befund ueber die Erreichbarkeit.
+        ("stopped", 30),
+        # Ein Zustand, der nach Messung klingt, ohne Zeitstempel daneben: ohne
+        # den ist nicht zu sagen, ob er von eben oder vom letzten Neustart ist.
+        ("healthy", None),
+    ],
+)
+def test_without_a_verdict_the_probe_claims_nothing(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch,
+    guardian_state: str, gemessen_vor_sekunden: int | None,
+) -> None:
+    """Keine Messung ist keine Messung — und nie "antwortet nicht".
+
+    Das ist die teuerste der drei Verwechslungen: aus einem fehlenden Urteil
+    einen Fehlerbefund zu machen schickt den Betreiber an eine Stelle, an der
+    nichts kaputt ist.
+    """
+    server = _server(db, f"ohne-urteil-{guardian_state}", bind_ip="192.168.1.50")
+    _mit_urteil(db, server, guardian_state, gemessen_vor_sekunden=gemessen_vor_sekunden)
+    monkeypatch.setattr(
+        "services.port_check_service.is_port_available", lambda *_a, **_k: False
+    )
+
+    probe = server_network_diagnostics.check_reachability(db, server)["game_probe"]
+
+    assert probe["status"] == "no_measurement"
+    # Der Probentyp steht trotzdem da: der Blueprint erklaert eine Probe, es
+    # fehlt nur ihr Ergebnis.
+    assert probe["probe_type"] == "source-query"
+    assert "kein verwertbares Urteil" in probe["note"]
 
 
 def test_a_failed_probe_is_reported_as_unknown_not_as_closed(

@@ -257,8 +257,25 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="blueprints.manage",
         recht_global=True,
     ),
+    # Das Gegenstueck dazu — und es traegt die Sperre, die die Ableitung nicht
+    # braucht. `blueprint_service.delete_community_blueprint` entfernt die Datei
+    # per `unlink`; einen Versionsschnappschuss wie bei den Serverdateien gibt es
+    # hier nicht, und die Registry haelt nur, was auf der Platte liegt. Der
+    # einzige Weg zurueck ist eine Datei, die jemand vorher von Hand exportiert
+    # hat — und "vielleicht hat es jemand" ist kein nachgewiesener Rueckweg.
+    # Damit greift das Kriterium der Tabelle (Unumkehrbarkeit, siehe oben)
+    # genauso wie bei `propose_server_delete`.
+    #
+    # Daraus folgt eine Asymmetrie, die beabsichtigt ist: die KI darf im
+    # autonomen Modus einen Testserver anlegen und einen Blueprint dafuer
+    # ableiten, aber beides nicht selbst wieder wegraeumen — `propose_server_delete`
+    # traegt `immer_bestaetigen` aus demselben Grund. Aufraeumen kostet also
+    # einen Klick, Anlegen nicht. Das ist die richtige Richtung: ein Blueprint zu
+    # viel ist eine Zeile in einer Liste, ein Blueprint zu wenig sind Server, die
+    # ihre Vorlage verloren haben.
     "propose_blueprint_delete": Werkzeug(
         "global_write",
+        immer_bestaetigen=True,
         recht="blueprints.manage",
         recht_global=True,
     ),
@@ -282,6 +299,13 @@ WERKZEUGE: dict[str, Werkzeug] = {
         "server_write",
         recht="server.config.write",
     ),
+    # Kein `immer_bestaetigen`: ein Server, den es vorher nicht gab, vernichtet
+    # nichts. Das ist die eine Haelfte der Asymmetrie, die bei
+    # `propose_blueprint_delete` und `propose_server_delete` beschrieben steht —
+    # sie sei hier ausdruecklich genannt, damit sie beim naechsten Blick auf
+    # diese Zeile nicht noch einmal als Versehen gelesen wird: die KI kann im
+    # autonomen Modus anlegen, aber nicht wegraeumen. Wer sie einen Testserver
+    # bauen laesst, raeumt ihn selbst wieder ab.
     "propose_server_create": Werkzeug(
         "global_write", recht="servers.create", recht_global=True
     ),
@@ -501,6 +525,12 @@ ALWAYS_CONFIRM_TOOLS = (
 # den Vorfall hinaus), der Blueprint-Wechsel (leert das Verzeichnis) und
 # `web_search` (der Name eines selbstgebauten Servers hat draussen nichts zu
 # suchen — schon gar nicht, wenn ihn niemand gefragt hat).
+#
+# `propose_blueprint_delete` fehlt aus beiden Gruenden zugleich: ein Blueprint
+# gilt fuer **alle** Server seines `game_type` und nicht nur fuer den einen, auf
+# dem der Vorfall passiert ist — und weg ist er ohne Rueckweg, weshalb er
+# ohnehin in `ALWAYS_CONFIRM_TOOLS` steht. Eine Heilung, die als Nebenwirkung
+# die Vorlage fremder Server entfernt, ist keine.
 GUARDIAN_HEILUNG_TOOLS = frozenset({
     # Sehen, was los ist.
     "read_server_status",
@@ -633,6 +663,12 @@ AUFGABEN_LESEN = frozenset({
 #   Dateien loescht, ist genau der Fall, fuer den jemand davorsitzen soll.
 # * die Hoster- und Aufgabenwerkzeuge — Rechte, Schluessel, und ein Auftrag, der
 #   Auftraege anlegt, waere ein Auftrag ohne Ende.
+# * `propose_blueprint_delete` — steht wie `propose_backup_restore` und
+#   `propose_server_delete` in `ALWAYS_CONFIRM_TOOLS` und waere ohnehin
+#   abgewiesen. Genannt sei es trotzdem, weil der Grund hier ein zusaetzlicher
+#   ist: eine Aufgabe laeuft nachts und wieder und wieder, ein Blueprint aber
+#   gilt fuer alle Server seines `game_type`. Was ein stehender Auftrag hier
+#   entfernte, faellt erst auf, wenn der naechste Server nicht mehr startet.
 AUFGABEN_HANDELN = frozenset({
     "propose_server_lifecycle",
     "propose_backup",
@@ -747,6 +783,12 @@ SPRACHE_LESEN = frozenset({
 # hinaus, der Wechsel leert zudem das Serververzeichnis), die Hoster-Werkzeuge
 # (Rechte und Schluessel) und die Aufgabenwerkzeuge (ein Auftrag, den man
 # nebenbei diktiert, laeuft danach jede Nacht).
+#
+# `propose_blueprint_delete` fehlt als eines der Loeschwerkzeuge aus
+# `ALWAYS_CONFIRM_TOOLS`, und hier greift der Satz oben besonders woertlich: der
+# Sprechende sieht nicht, welche Server auf dieser Vorlage liegen. Ein „ja" auf
+# eine Frage, deren Tragweite nur im Panel steht, ist keine Zustimmung — die KI
+# sagt in diesem Fall „schau bitte kurz ins Panel".
 SPRACHE_HANDELN = frozenset({
     "propose_server_lifecycle",
     "propose_backup",

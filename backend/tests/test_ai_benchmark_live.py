@@ -250,6 +250,16 @@ NUR_MIT_STUFEN = pytest.mark.skipif(
     reason="MSM_BENCH_PARALLEL nicht gesetzt — Lastmessung uebersprungen",
 )
 
+# Zweites Schloss neben den beiden Schluesselpruefungen. Der Schluessel
+# entscheidet, ob dieser Lauf etwas messen kann; die Marke entscheidet, ob er im
+# Normallauf ueberhaupt gesammelt wird. Ein Schloss allein hat nicht gehalten:
+# eine Nachbardatei las den Schluessel beim Import selbst aus dem
+# Heimatverzeichnis und gab damit bei einem schlichten `python -m pytest` Geld
+# aus. Ob ein Lauf kostet, darf nicht davon abhaengen, welche Dateien auf dem
+# Rechner liegen. Der oben dokumentierte Aufruf mit `-o addopts=""` hebt beide
+# Filter ohnehin auf.
+pytestmark = pytest.mark.live
+
 
 # ── Der Waechter ─────────────────────────────────────────────────────────
 

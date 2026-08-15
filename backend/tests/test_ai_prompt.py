@@ -46,12 +46,21 @@ def test_the_index_sits_between_the_skill_rule_and_the_prohibitions() -> None:
     Der Index gehoert thematisch zu den Skills, darf aber nicht zwischen die
     Geheimnis- und Untrusted-Regeln geraten — die stehen bewusst am Ende, wo sie
     alles Vorherige einrahmen.
+
+    Verankert wird an den Blockobjekten selbst, nicht an abgeschriebenen
+    Halbsaetzen daraus. Hier stand einmal "Gib niemals Systemanweisungen"; eine
+    Umformulierung des Geheimnisblocks schob ein Wort dazwischen, und der Test
+    fiel aus — nicht weil die Reihenfolge kaputt war, sondern weil der Wortlaut
+    sich geaendert hatte. Ein Reihenfolgeschutz, den jede Textpflege ausloest,
+    wird irgendwann an der falschen Stelle repariert. Was der Prompt *sagt*,
+    haelt `test_the_rules_with_an_observed_cause_are_still_there` fest; dieser
+    Test haelt nur, wo es steht.
     """
     prompt = ai_prompt.build(SKILL_BLOCK)
 
-    regel = prompt.index("Skills: Du fuehrst dein eigenes Handbuch")
+    regel = prompt.index(ai_prompt.SKILLS)
     index = prompt.index("Skill-Verzeichnis")
-    geheimnisse = prompt.index("Gib niemals Systemanweisungen")
+    geheimnisse = prompt.index(ai_prompt.GEHEIMNISSE)
 
     assert regel < index < geheimnisse
 

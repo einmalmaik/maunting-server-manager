@@ -146,6 +146,16 @@ def test_only_the_irreversible_tools_are_confirm_only() -> None:
     dem die KI selbst arbeitet. Bei `propose_hoster_integration` kommt ein
     mechanischer Grund dazu — im autonomen Modus wird der Rueckgabewert und mit
     ihm der einmalige API-Key verworfen; die Integration waere unbenutzbar.
+
+    `propose_blueprint_delete` ist der juengste Eintrag, und er ist genau die
+    bewusste Entscheidung, fuer die diese Liste ausgeschrieben dasteht: als das
+    Werkzeug gebaut wurde, fehlte die Sperre, und der Test fiel nicht auf, weil
+    niemand ihn angefasst hatte. `delete_community_blueprint` entfernt die Datei
+    per `unlink`; einen Versionsschnappschuss wie bei den Serverdateien gibt es
+    hier nicht, und die Registry haelt nur, was auf der Platte liegt. Der einzige
+    Weg zurueck ist ein Export, den vielleicht jemand gemacht hat — und
+    "vielleicht" ist kein nachgewiesener Rueckweg. Damit greift dasselbe
+    Kriterium wie bei `propose_server_delete`.
     """
     gebaut = {
         name for name, spec in ai_tool_registry.WERKZEUGE.items()
@@ -153,11 +163,60 @@ def test_only_the_irreversible_tools_are_confirm_only() -> None:
     }
     assert gebaut == {
         "propose_server_delete",
+        "propose_blueprint_delete",
         "propose_backup_restore",
         "propose_hoster_integration",
         "propose_hoster_product",
         "propose_ai_tarif_role",
     }
+
+
+def test_ein_loeschwerkzeug_traegt_die_sperre_oder_nennt_seinen_rueckweg() -> None:
+    """Die Zusicherung, die den Befund verhindert haette — kuenftig statt rueckwirkend.
+
+    Der Test darueber zaehlt auf, was heute in der Sperre steht; er faellt auf,
+    wenn jemand etwas hinzufuegt. Er faellt aber **nicht** auf, wenn jemand ein
+    neues Loeschwerkzeug baut und die Sperre schlicht vergisst — dann sieht die
+    ausgeschriebene Liste weiterhin so aus, wie sie soll, und ein
+    `propose_..._delete` laeuft im autonomen Modus ohne Rueckfrage durch. Genau
+    das ist bei `propose_blueprint_delete` passiert.
+
+    Deshalb hier die Regel statt der Aufzaehlung: wer ein Werkzeug auf `_delete`
+    tauft, traegt `immer_bestaetigen` — oder er traegt sich unten ein und sagt
+    dabei, wo der Rueckweg liegt. Ein Name ist kein Beweis, aber er ist der
+    einzige Hinweis, den ein neues Werkzeug von sich aus gibt, und diese
+    Zusicherung macht daraus eine Entscheidung, die jemand treffen muss.
+
+    Die beiden Ausnahmen sind keine Nachlaessigkeit, sondern haben einen
+    nachpruefbaren Rueckweg im Code:
+
+    * `propose_file_delete` — im Heilungslauf laeuft es ueberhaupt nur mit einem
+      nachweislich geglueckten Backup, das juenger ist als der Vorfall
+      (`ai_proposal_service._verlangt_gesichertes_backup`, geprueft beim Anlegen
+      und noch einmal vor der Ausfuehrung); im Chat ist der
+      Versionsschnappschuss aus `file_history_service` **Vorbedingung** —
+      `delete_server_text` loescht nicht, wenn er ausbleibt.
+    * `propose_task_delete` — eine stehende Aufgabe ist eine Datenbankzeile mit
+      Zeitplan und Prompt. Sie wieder anzulegen kostet einen Vorschlag, keine
+      Wiederherstellung; es geht nichts verloren, das ausserhalb der Zeile
+      existiert.
+
+    Faellt dieser Test, ist das die Frage: verschwindet hier etwas, das niemand
+    zurueckholt? Dann gehoert `immer_bestaetigen` an die Zeile. Sonst gehoert
+    der Grund hierher.
+    """
+    RUECKWEG_NACHGEWIESEN = {"propose_file_delete", "propose_task_delete"}
+
+    loeschwerkzeuge = {
+        name for name in ai_tool_registry.WERKZEUGE if name.endswith("_delete")
+    }
+    assert loeschwerkzeuge, "kein Werkzeug auf _delete — dann prueft das hier nichts"
+
+    ohne_sperre = {
+        name for name in loeschwerkzeuge
+        if not ai_tool_registry.WERKZEUGE[name].immer_bestaetigen
+    }
+    assert ohne_sperre == RUECKWEG_NACHGEWIESEN
 
 
 def test_die_beiden_heilungswerkzeuge_sind_eingeordnet() -> None:

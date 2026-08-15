@@ -1,29 +1,64 @@
 ---
-name: Blueprint experimentieren, anpassen und bereinigen
-description: Beheben von Startparameter-Problemen, Ausprobieren neuer Startflags oder Testen von Umgebungs- und Image-Änderungen in Blueprints. Nutzen wenn ein Blueprint angepasst, getestet oder ein temporärer Test-Blueprint nach Abschluss gelöscht werden soll. Nicht nutzen für reine Statusabfragen oder einfache Konfigurationsänderungen.
+name: Startparameter im Blueprint ändern
+description: Ein Startbefehl, eine Umgebungsvariable oder ein Image im Blueprint stimmt nicht — der Server startet mit falschen Parametern, taucht nicht im Serverbrowser auf oder ignoriert Vorgaben. Nutzen beim Ableiten, Ändern und Aufräumen von Blueprints und beim Umstellen eines Servers auf einen anderen Blueprint. Nicht nutzen für Werte in Konfigurationsdateien des Servers oder für reine Statusfragen.
 ---
 
-# Blueprint experimentieren, anpassen und bereinigen
+# Startparameter im Blueprint ändern
 
-Blueprints steuern Container-Image, Startparameter (`runtime.startup`), Umgebungsvariablen (`runtime.env`) und Ports.
+Zwei Sätze, aus denen sich alles Weitere ergibt: Ein Blueprint gilt für **alle**
+Server seines Typs. Und der Wechsel eines Servers auf einen anderen Blueprint
+ist keine Umschaltung, sondern eine Neuinstallation. Wer daraus eine Schleife
+aus "umstellen und ausprobieren" macht, leert den Server des Benutzers — jedes
+Mal aufs Neue.
 
-## 1. Blueprint analysieren
+## 1. Erst begründen, dann ändern
 
-- Mit `read_blueprint` den Blueprint des Servers oder aus `list_blueprints` einsehen.
-- Startbefehle in `runtime.startup` prüfen (z. B. fehlende Parameter wie `-PublicIPForEpic=`, `?QueryPort=`, `?Port=`, `-automanagedmods`).
+`read_blueprint` zeigt Startbefehl (`runtime.startup`), Umgebung (`runtime.env`),
+Image und Ports.
 
-## 2. Test-Blueprint ableiten
+Jede Änderung braucht eine Quelle: eine Logzeile aus `read_server_logs`, die
+offizielle Dokumentation des Spiels (`web_search`, nur bei
+`docs_searchable: true`) oder die MSM-Dokumentation. Ein Parameter, den du
+"mal probierst", beweist nichts — du weißt hinterher weder, ob er geholfen hat,
+noch warum.
 
-- Native Blueprints (`origin: native`) sind schreibgeschützt.
-- Mit `propose_blueprint_change` einen abgeleiteten Community-Blueprint mit den Test-Anpassungen erstellen (z. B. `changes: {"runtime.startup": "..."}`).
+## 2. Abgeleiteten Blueprint anlegen
 
-## 3. Server auf neuen Blueprint umstellen und testen
+Mitgelieferte Blueprints (`origin: native`) sind schreibgeschützt.
+`propose_blueprint_change` legt daraus einen eigenen Community-Blueprint mit
+deinen Änderungen an; die Vorlage bleibt unberührt.
 
-- Mit `propose_server_blueprint_switch` den Server auf den neuen Blueprint umstellen.
-- Server starten (`propose_server_lifecycle`), Status und Erreichbarkeit mit `check_server_reachability` und Logs mit `read_server_logs` prüfen.
+Dieser Schritt allein ändert an **keinem** Server etwas. Melde danach keinen
+Erfolg, sondern kündige den zweiten Schritt an.
 
-## 4. Test-Blueprints nach Abschluss bereinigen
+## 3. Der Wechsel — und was er kostet
 
-- Wenn ein temporärer Test-Blueprint nicht mehr benötigt wird oder ein Fehler behoben wurde:
-- Lösche den Test-Blueprint mit `propose_blueprint_delete` (`blueprint_id: "..."`).
-- Native Blueprints können nicht gelöscht werden.
+`propose_server_blueprint_switch` stellt einen Server auf den neuen Blueprint um.
+Zwei Dinge musst du vorher sagen und tun:
+
+- **Der Server ist vorher zu stoppen.** Ein Vorschlag für einen laufenden Server
+  wird abgewiesen. Stopp ihn also vorher mit `propose_server_lifecycle`
+  (`operation: "stop"`) — das ist ein eigener Vorschlag, kein Nebeneffekt.
+- **Der Wechsel löscht das gesamte Serververzeichnis.** Er legt ein
+  Pflicht-Backup an, wirft Welten, Konfigurationen und Mods weg, vergibt die
+  Ports neu und installiert das Spiel frisch. Sag dem Benutzer genau das,
+  bevor du den Vorschlag machst — nicht "ich stelle kurz um".
+
+Willst du wirklich ausprobieren, dann an einem eigens dafür angelegten Server
+(`propose_server_create`), nie am Server, um den es dem Benutzer geht. Sag ihm
+vorher, dass und wozu du einen anlegst.
+
+## 4. Aufräumen ist nicht selbstverständlich
+
+Sei hier ehrlich, statt "ich räume auf" zu melden:
+
+- Den Testserver entfernt `propose_server_delete`, und der läuft **nie** ohne
+  Bestätigung des Benutzers, auch bei erteilter Freigabe. Kündige ihn an, statt
+  Vollzug zu melden.
+- Solange dieser Server steht, weist `propose_blueprint_delete` den
+  Test-Blueprint ab: ein Blueprint, den noch ein Server benutzt, wird nicht
+  gelöscht. Die Reihenfolge ist also erst Server, dann Blueprint.
+- Mitgelieferte Blueprints lassen sich nicht löschen.
+
+Sag am Ende, was übrig geblieben ist und was der Benutzer dafür noch bestätigen
+muss. Ein vergessener Testserver kostet RAM und Ports.

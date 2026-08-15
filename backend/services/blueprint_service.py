@@ -37,6 +37,8 @@ import re
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from blueprints.registry import (
     BlueprintSourceOrigin,
@@ -46,6 +48,7 @@ from blueprints.registry import (
     reload_registry,
 )
 from blueprints.schema import BlueprintValidationError, load_blueprint_dict
+from models import Server
 
 
 logger = logging.getLogger(__name__)
@@ -62,6 +65,15 @@ ID_MUSTER = re.compile(r"^[a-z0-9_]{1,64}$")
 # Blueprint hoch — dann sieht ein Mensch das vollstaendige Ergebnis, statt einer
 # Liste von Einzelaenderungen zustimmen zu muessen, deren Zusammenwirken er
 # nicht ueberblickt.
+#
+# `runtime.startup` steht hier, seit die KI auch eine falsche Startzeile
+# korrigieren koennen soll — sie ist bei GitHub-Quellen der haeufigste Grund,
+# warum ein Server ueberhaupt nicht hochkommt. `runtime.startupProfiles` steht
+# bewusst **nicht** hier: das ist eine Liste mit Bedingungen, und eine
+# Punktpfad-Aenderung an einer Liste ist keine, die ein Mensch auf einer
+# Bestaetigungskarte ueberblickt. Wo ein Blueprint Profile fuehrt, weist
+# `derived_payload` eine Aenderung an `runtime.startup` deshalb ab, statt sie
+# wirkungslos durchzureichen — siehe dort.
 AENDERBARE_PFADE = (
     "meta.name",
     "meta.description",
@@ -143,8 +155,51 @@ def save_community_blueprint(raw: dict[str, Any]) -> str:
     return blueprint.meta.id
 
 
-def delete_community_blueprint(blueprint_id: str, db: Any = None) -> None:
-    """Loescht einen Community-Blueprint. Native IDs und aktive Blueprints sind geschuetzt."""
+def _server_anzahl(db: Session, blueprint_id: str) -> int:
+    """Wie viele Server auf diesem Blueprint liegen.
+
+    Die eine Zaehlung fuer beide Faelle, in denen ein Blueprint unter einem
+    laufenden Server weggezogen wuerde: das Loeschen und das Ueberschreiben
+    einer bestehenden Kennung. Zweimal geschrieben waeren es zweimal die Chance,
+    dass die eine Stelle spaeter etwas anderes zaehlt als die andere.
+
+    Ein Datenbankfehler wird hier zu einem 503 und **nicht** zu einem stillen
+    "vermutlich benutzt es niemand". Wer die Verwendung nicht pruefen kann,
+    fasst den Blueprint nicht an; das Gegenteil waere ein Fallback, der eine
+    Schutzpruefung ueberspringt, sobald der Pool klemmt.
+    """
+    try:
+        return db.query(Server).filter(Server.game_type == blueprint_id).count()
+    except SQLAlchemyError as exc:
+        logger.error(
+            "Konnte Server-Nutzung fuer Blueprint %s nicht pruefen: %s",
+            blueprint_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Die Verwendung dieses Blueprints laesst sich gerade nicht "
+                "pruefen (Datenbank nicht erreichbar). Aus Sicherheitsgruenden "
+                "wird nichts geaendert — bitte spaeter erneut versuchen."
+            ),
+        ) from exc
+
+
+def delete_community_blueprint(blueprint_id: str, db: Session) -> None:
+    """Loescht einen Community-Blueprint. Native und benutzte sind geschuetzt.
+
+    ``db`` ist Pflicht und wird vom Aufrufer gestellt — dem Router aus seinem
+    Request, dem Vorschlagsdienst aus dem Lauf, der die Bestaetigung ausfuehrt.
+    Eine eigene Verbindung daneben aufzumachen waere bequemer und faengt sich
+    genau den Fehler ein, den diese Pruefung verhindern soll: sie antwortete auf
+    einen anderen Stand als den, auf dem der Aufrufer gerade arbeitet.
+
+    Geloescht wird per ``unlink``, und es gibt keinen Schnappschuss davon. Der
+    einzige Weg zurueck ist die Datei, die jemand vorher exportiert hat —
+    deshalb steht die Zaehlung **vor** dem Loeschen und nicht als Warnung
+    daneben.
+    """
     eintrag = get_registry().get(blueprint_id)
     if eintrag is None:
         raise HTTPException(status_code=404, detail="Blueprint nicht gefunden")
@@ -154,29 +209,15 @@ def delete_community_blueprint(blueprint_id: str, db: Any = None) -> None:
             detail="Native Blueprints sind read-only und koennen nicht geloescht werden.",
         )
 
-    # Pruefen, ob aktive Server diesen Blueprint verwenden
-    try:
-        from models import Server
-        if db is not None:
-            anzahl = db.query(Server).filter(Server.game_type == blueprint_id).count()
-            if anzahl > 0:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Blueprint wird noch von {anzahl} aktiven Server(n) verwendet und kann nicht geloescht werden.",
-                )
-        else:
-            from database import SessionLocal
-            with SessionLocal() as session:
-                anzahl = session.query(Server).filter(Server.game_type == blueprint_id).count()
-                if anzahl > 0:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Blueprint wird noch von {anzahl} aktiven Server(n) verwendet und kann nicht geloescht werden.",
-                    )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.warning("Konnte Server-Nutzung fuer Blueprint %s nicht pruefen: %s", blueprint_id, exc)
+    anzahl = _server_anzahl(db, blueprint_id)
+    if anzahl > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Blueprint wird noch von {anzahl} Server(n) verwendet und kann "
+                "nicht geloescht werden."
+            ),
+        )
 
     try:
         ziel = community_blueprint_path(blueprint_id)
@@ -203,7 +244,7 @@ def _setze(ziel: dict, pfad: str, wert: Any) -> None:
 
 
 def derived_payload(
-    source_id: str, *, new_id: str, changes: dict[str, Any]
+    source_id: str, *, new_id: str, changes: dict[str, Any], db: Session
 ) -> dict[str, Any]:
     """Baut die Nutzlast eines abgeleiteten Blueprints — ohne zu speichern.
 
@@ -215,6 +256,13 @@ def derived_payload(
     ``changes`` sind Punktpfade auf ``AENDERBARE_PFADE``. ``runtime.env`` wird
     **gemischt**, nicht ersetzt: wer die Version aendert, will nicht alle
     anderen Umgebungsvariablen verlieren.
+
+    ``db`` ist Pflicht, aus demselben Grund wie bei
+    `delete_community_blueprint`: eine Ableitung ist nur dann harmlos, wenn sie
+    wirklich eine **neue** Datei anlegt. Zeigt ``new_id`` auf einen bestehenden
+    Community-Blueprint, ist es keine Ableitung mehr, sondern eine Aenderung an
+    allen Servern, die darauf liegen — und die muss dieselbe Zaehlung sehen wie
+    das Loeschen.
     """
     if not ID_MUSTER.match(new_id or ""):
         raise HTTPException(
@@ -224,12 +272,30 @@ def derived_payload(
     quelle = get_registry().get(source_id)
     if quelle is None:
         raise HTTPException(status_code=404, detail="Vorlage nicht gefunden")
-    if get_registry().get(new_id) is not None and new_id != source_id:
-        vorhanden = get_registry().get(new_id)
+
+    # Der Ueberschreibschutz. Zuvor stand hier nur die Native-Abfrage, und die
+    # sprang bei ``new_id == source_id`` gar nicht erst an — ausgerechnet der
+    # Fall, in dem die Vorlage selbst ueberschrieben wird. Ein bestehender
+    # Community-Blueprint mit Servern darauf ist keine Vorlage mehr, sondern
+    # eine Betriebsgrundlage: seine `runtime.image`, `runtime.env` und seit
+    # Kurzem auch seine Startzeile entscheiden, was diese Server beim naechsten
+    # Start ausfuehren. Wer das aendern will, legt eine neue Kennung an.
+    vorhanden = get_registry().get(new_id)
+    if vorhanden is not None:
         if vorhanden.origin == BlueprintSourceOrigin.NATIVE:
             raise HTTPException(
                 status_code=409,
                 detail=f"Die ID '{new_id}' gehoert einem nativen Blueprint.",
+            )
+        anzahl = _server_anzahl(db, new_id)
+        if anzahl > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Die ID '{new_id}' gehoert einem Blueprint, auf dem "
+                    f"{anzahl} Server liegen. Ihn zu ueberschreiben aenderte "
+                    "diese Server mit. Waehle eine neue ID."
+                ),
             )
 
     nutzlast = copy.deepcopy(quelle.blueprint.model_dump(mode="json", by_alias=True))
@@ -242,6 +308,28 @@ def derived_payload(
                 detail=(
                     f"'{pfad}' ist nicht aenderbar. Erlaubt: "
                     + ", ".join(AENDERBARE_PFADE)
+                ),
+            )
+        if pfad == "runtime.startup" and quelle.blueprint.runtime.startupProfiles:
+            # `resolve_startup_template` (blueprints/github_source.py) nimmt das
+            # erste Profil, dessen `whenFile` im Installationsverzeichnis
+            # existiert, und faellt nur auf `runtime.startup` zurueck, wenn
+            # keines passt. Bei so einem Blueprint kann eine Korrektur an
+            # `runtime.startup` also folgenlos bleiben — und zwar unbemerkt: der
+            # Vorschlag sieht richtig aus, wird bestaetigt, und der Server
+            # startet danach mit derselben Zeile wie vorher. Lieber eine Absage,
+            # die sagt warum, als eine Zusage, die nicht haelt. Die Profile
+            # selbst sind ueber `AENDERBARE_PFADE` nicht erreichbar; wer sie
+            # aendern will, laedt den Blueprint als Ganzes hoch.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"'{source_id}' waehlt seine Startzeile ueber "
+                    "runtime.startupProfiles (nach vorhandener Datei). Eine "
+                    "Aenderung an runtime.startup wirkt dort nur, wenn kein "
+                    "Profil zutrifft, und bliebe sonst folgenlos. Die Profile "
+                    "lassen sich nur beim Hochladen eines vollstaendigen "
+                    "Blueprints aendern."
                 ),
             )
         if pfad == "runtime.env":

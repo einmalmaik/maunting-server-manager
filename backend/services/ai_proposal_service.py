@@ -613,7 +613,7 @@ def _bind_ip_payload(db: Session, server: Server, arguments: dict) -> tuple[dict
     }
 
 
-def _blueprint_change_payload(arguments: dict) -> tuple[dict, dict]:
+def _blueprint_change_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
     """Baut den abgeleiteten Blueprint **schon beim Vorschlagen**.
 
     Nicht erst beim Ausfuehren, und das ist der Punkt: der Mensch soll sehen,
@@ -622,6 +622,12 @@ def _blueprint_change_payload(arguments: dict) -> tuple[dict, dict]:
     Ergebnis das Schema verletzt, entsteht damit gar nicht erst; sonst
     scheiterte er nach der Bestaetigung, und jemand haette einer Aenderung
     zugestimmt, die es nicht gibt.
+
+    Die Session dieses Requests geht an `derived_payload` weiter, weil dort der
+    Ueberschreibschutz haengt: zeigt ``new_id`` auf einen Community-Blueprint,
+    auf dem Server liegen, ist das keine Ableitung mehr, sondern eine Aenderung
+    an diesen Servern. Wer das zaehlt, muss denselben Bestand sehen wie dieser
+    Request.
     """
     from services import blueprint_service
 
@@ -635,6 +641,7 @@ def _blueprint_change_payload(arguments: dict) -> tuple[dict, dict]:
             str(arguments["source_id"]),
             new_id=str(arguments["new_id"]),
             changes=aenderungen,
+            db=db,
         )
     except HTTPException as exc:
         raise AiActionValidationError(str(exc.detail)) from exc
@@ -651,6 +658,13 @@ def _blueprint_change_payload(arguments: dict) -> tuple[dict, dict]:
         "env_after": (nutzlast.get("runtime") or {}).get("env") or {},
         "image_before": (quelle.get("runtime") or {}).get("image"),
         "image_after": (nutzlast.get("runtime") or {}).get("image"),
+        # Die Startzeile steht hier aus demselben Grund wie Image und Umgebung:
+        # seit `runtime.startup` aenderbar ist, entscheidet sie mit, was der
+        # Container spaeter wirklich ausfuehrt. Fehlte sie in dieser
+        # Gegenueberstellung, bestaetigte ein Mensch einen Startbefehl, den er
+        # nie zu sehen bekommen hat.
+        "startup_before": (quelle.get("runtime") or {}).get("startup"),
+        "startup_after": (nutzlast.get("runtime") or {}).get("startup"),
         "restart_required": False,
     }
     return payload, preview
@@ -682,6 +696,11 @@ def _blueprint_delete_payload(db: Session, arguments: dict) -> tuple[dict, dict]
         "operation": "blueprint_delete",
         "blueprint_id": blueprint_id,
         "blueprint_name": (ansicht.get("blueprint") or {}).get("meta", {}).get("name") or blueprint_id,
+        # `path` ist das eine Vorschaufeld, das die Bestaetigungskarte immer
+        # rendert — unabhaengig von ihrer Tatsachenliste. Ein Loeschvorschlag
+        # ohne Ziel auf der Karte waere die Frage "loeschen?" ohne das Objekt;
+        # deshalb steht die ID hier ein zweites Mal unter diesem Namen.
+        "path": blueprint_id,
     }
     return payload, preview
 
@@ -1518,7 +1537,7 @@ def create_proposal(
         # ein Benutzer ohne `blueprints.manage` vorhandene von erfundenen
         # Blueprint-Kennungen an der Fehlermeldung.
         _require_tool_permission(db, user, None, tool_name, rest)
-        payload, preview = _blueprint_change_payload(rest)
+        payload, preview = _blueprint_change_payload(db, rest)
         expected_revision = None
     elif tool_name == "propose_blueprint_delete":
         _require_tool_permission(db, user, None, tool_name, rest)
@@ -2573,10 +2592,19 @@ def execute_proposal(
                 task_id = None
                 queued = False
             elif tool_name == "propose_blueprint_delete":
+                # Die Session dieses Requests geht mit. `delete_community_blueprint`
+                # zaehlt vor dem Loeschen die Server, die den Blueprint noch
+                # verwenden — und zwar erneut, denn zwischen Vorschlag und Klick
+                # kann ein Server angelegt worden sein. Diese Zaehlung muss den
+                # Stand sehen, auf dem dieser Request arbeitet; eine eigene
+                # Verbindung daneben antwortete auf eine andere Frage als die,
+                # die hier gestellt wird.
                 from services import blueprint_service
 
                 try:
-                    blueprint_service.delete_community_blueprint(str(payload["blueprint_id"]))
+                    blueprint_service.delete_community_blueprint(
+                        str(payload["blueprint_id"]), db=db
+                    )
                 except HTTPException as exc:
                     logger.info("Blueprint-Loeschvorschlag abgelehnt: %s", exc.detail)
                     raise AiActionStateError("AI_ACTION_BLUEPRINT_DELETE_REJECTED") from exc

@@ -1126,7 +1126,15 @@ def provider_tool_definitions() -> list[dict]:
             "meldet ein Port sich als frei, obwohl der Server laeuft, horcht "
             "der Dienst nicht oder horcht auf einer anderen Adresse. "
             "Beantwortet nicht, ob der Server aus dem Internet erreichbar ist — "
-            "das kann MSM nicht messen und behauptet es auch nicht.",
+            "das kann MSM nicht messen und behauptet es auch nicht.\n"
+            "`game_probe` traegt zusaetzlich das Urteil der Anwendungsprobe, die "
+            "der Blueprint deklariert und der Guardian auf der Node ausfuehrt: "
+            "`answering` (der Dienst antwortet im Spielprotokoll), "
+            "`not_answering` (Port offen, Dienst stumm — der eigentliche Befund "
+            "bei 'laeuft, aber niemand kommt drauf'), `not_declared` und "
+            "`no_measurement`. **`not_declared` ist kein Fehlerbefund**, sondern "
+            "heisst nur, dass dieser Blueprint keine Probe vorsieht; melde es "
+            "nicht als Problem.",
         ),
         _server_function(
             "read_server_mods",

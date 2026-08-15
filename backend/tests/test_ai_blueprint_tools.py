@@ -25,8 +25,10 @@ import pytest
 from unittest.mock import patch
 
 from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from blueprints.registry import community_blueprint_path, reload_registry
 from models import AiConversation, Role, RolePermission, Server, ServerPermission, User
 from services import (
     ai_action_errors,
@@ -76,6 +78,54 @@ def _conversation(db: Session, user: User) -> AiConversation:
     return row
 
 
+def _community_ableitung(db: Session, blueprint_id: str) -> Path:
+    """Legt einen Community-Blueprint auf der Platte an, Pfad zurueck.
+
+    Mehrere Tests hier brauchen eine loeschbare Vorlage als Ausgangslage. Sie
+    jedes Mal ueber Vorschlag, Bestaetigung und Ausfuehrung anzulegen waere
+    derselbe Aufbau in vierfacher Ausfertigung — und wuerde pruefen, was andere
+    Tests dieser Datei schon pruefen. Der Weg hier ist derselbe, den
+    `execute_proposal` nach einer Bestaetigung nimmt: ableiten, dann speichern.
+    """
+    nutzlast = blueprint_service.derived_payload(
+        "minecraft_forge",
+        new_id=blueprint_id,
+        changes={"runtime.env": {"VERSION": "1.20.1"}},
+        db=db,
+    )
+    blueprint_service.save_community_blueprint(nutzlast)
+    return community_blueprint_path(blueprint_id)
+
+
+def _blueprint_entfernen(blueprint_id: str) -> None:
+    """Raeumt die Datei weg, ohne den Dienst zu fragen.
+
+    Blueprints sind Dateien auf der Platte und keine Datenbankzeilen — die
+    `clean_db`-Fixture nimmt sie nicht mit. Im Aufraeumen eines Tests ist der
+    Dienstweg trotzdem der falsche: `delete_community_blueprint` weigert sich zu
+    Recht, solange noch ein Server auf der Vorlage liegt, und genau diesen
+    Zustand stellen mehrere Tests hier absichtlich her. Ein Aufraeumen, das an
+    der Zusicherung scheitert, die der Test gerade bewiesen hat, laesst die
+    Datei fuer den naechsten Lauf liegen.
+    """
+    community_blueprint_path(blueprint_id).unlink(missing_ok=True)
+    reload_registry()
+
+
+class _SessionOhneDatenbank:
+    """Eine Session, deren Zaehlabfrage scheitert. Mehr braucht der Test nicht.
+
+    Der Anlass ist kein erdachter: ein Pool ohne freie Verbindung, ein
+    Neustart der Datenbank, ein abgelaufenes Statement-Timeout. Gebaut ist sie
+    als Attrappe statt als Monkeypatch auf `_server_anzahl`, weil genau in
+    dieser Funktion die Entscheidung steht, die geprueft werden soll — wer sie
+    ersetzt, prueft seine eigene Ersatzfunktion.
+    """
+
+    def query(self, *args, **kwargs):
+        raise SQLAlchemyError("Verbindung zur Datenbank verloren")
+
+
 def test_the_ai_can_finally_read_the_game_version(
     db: Session, regular_user: User
 ) -> None:
@@ -112,6 +162,7 @@ def test_deriving_leaves_the_native_template_untouched(db: Session) -> None:
         "minecraft_forge",
         new_id="minecraft_forge_1_20",
         changes={"runtime.env": {"VERSION": "1.20.1"}},
+        db=db,
     )
 
     assert nutzlast["meta"]["id"] == "minecraft_forge_1_20"
@@ -134,7 +185,7 @@ def test_only_a_narrow_set_of_fields_can_be_changed(db: Session) -> None:
     """
     with pytest.raises(HTTPException) as fehler:
         blueprint_service.derived_payload(
-            "minecraft_forge", new_id="boese", changes={"ports": []},
+            "minecraft_forge", new_id="boese", changes={"ports": []}, db=db,
         )
     assert fehler.value.status_code == 400
 
@@ -146,6 +197,7 @@ def test_an_id_that_belongs_to_a_native_blueprint_is_refused(db: Session) -> Non
             "minecraft_vanilla",
             new_id="minecraft_forge",
             changes={"runtime.env": {"VERSION": "1.20.1"}},
+            db=db,
         )
     assert fehler.value.status_code == 409
 
@@ -271,6 +323,15 @@ def test_both_blueprint_tools_run_under_an_autonomy_grant(
     (`switch_server_blueprint`). Der Weg zurueck ist Teil des Vorgangs.
 
     Die Freigabe ist die Entscheidung — nicht die Bestaetigung jedes Falls.
+
+    Die Gegenprobe unten fuehrt seit der Reparatur auch
+    `propose_blueprint_delete`. Es ist das Gegenstueck zur Ableitung und faellt
+    unter dasselbe Kriterium wie `propose_server_delete`:
+    `delete_community_blueprint` entfernt die Datei per `unlink`, einen
+    Versionsschnappschuss wie bei den Serverdateien gibt es hier nicht, und die
+    Registry haelt nur, was auf der Platte liegt. Anlegen darf die KI autonom,
+    wegraeumen nicht — ein Blueprint zu viel ist eine Zeile in einer Liste, ein
+    Blueprint zu wenig sind Server, die ihre Vorlage verloren haben.
     """
     from services import ai_autonomy_service, ai_tool_registry
 
@@ -295,7 +356,12 @@ def test_both_blueprint_tools_run_under_an_autonomy_grant(
         ), f"{werkzeug} soll unter einer Freigabe durchlaufen"
 
     # Die Gegenprobe im selben Atemzug: was Daten vernichtet, fragt trotzdem.
-    for werkzeug in ("propose_server_delete", "propose_backup_restore"):
+    for werkzeug in (
+        "propose_server_delete",
+        "propose_backup_restore",
+        "propose_blueprint_delete",
+    ):
+        assert werkzeug in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
         assert not ai_autonomy_service.autonomy_allows(
             db, user=regular_user, server_id=server.id, tool_name=werkzeug,
         ), f"{werkzeug} darf niemals autonom laufen"
@@ -660,4 +726,187 @@ def test_propose_blueprint_delete_succeeds_for_unused_blueprint(
             blueprint_service.delete_community_blueprint("unused_bp", db=db)
         except Exception:
             pass
+
+
+def test_a_failing_usage_check_prevents_the_delete(db: Session) -> None:
+    """Faellt die Zaehlung aus, verschwindet nichts — die Pruefung faellt zu.
+
+    Zwischenzeitlich stand an dieser Stelle ein Fallback: schlug die Zaehlung
+    fehl, lief das Loeschen weiter, als haette niemand den Blueprint benutzt.
+    Das ist der teuerste denkbare Zeitpunkt fuer Optimismus. Die Datei geht per
+    `unlink`, einen Schnappschuss gibt es nicht, und was zurueckbleibt, sind
+    Server, deren `game_type` auf eine Vorlage zeigt, die es nicht mehr gibt —
+    ausgerechnet dann, wenn die Datenbank ohnehin schon klemmt.
+
+    Die Zusicherung steht bewusst nicht nur auf dem Statuscode: ein 503 waere
+    auch dann zu bekommen, wenn die Datei vorher weg ist. Der Beweis liegt auf
+    der Platte.
+    """
+    _blueprint_entfernen("failclosed_bp")
+    pfad = _community_ableitung(db, "failclosed_bp")
+    try:
+        assert pfad.exists()
+
+        with pytest.raises(HTTPException) as fehler:
+            blueprint_service.delete_community_blueprint(
+                "failclosed_bp", db=_SessionOhneDatenbank(),  # type: ignore[arg-type]
+            )
+
+        assert fehler.value.status_code == 503
+        assert pfad.exists()
+        assert blueprint_service.get_registry().get("failclosed_bp") is not None
+    finally:
+        _blueprint_entfernen("failclosed_bp")
+
+
+def test_a_server_created_after_the_proposal_still_blocks_the_delete(
+    db: Session, regular_user: User, tmp_path: Path
+) -> None:
+    """Zwischen Karte und Klick liegt Zeit — und in der entsteht ein Server.
+
+    Der Vorschlag prueft die Verwendung beim Anlegen, und das ist auch richtig:
+    ein Loeschvorschlag zu einer belegten Vorlage soll gar nicht erst auf dem
+    Bildschirm landen. Nur beantwortet diese Pruefung eine Frage von vorhin.
+    Zwischen dem Vorschlag und der Bestaetigung kann eine Minute liegen oder ein
+    Tag, und in dieser Zeit legt ein Kunde einen Server auf genau diese Vorlage.
+
+    Deshalb zaehlt `delete_community_blueprint` ein zweites Mal, mit der Session
+    des Requests, der ausfuehrt. Ohne diese zweite Zaehlung waere der bestaetigte
+    Vorschlag ein Freifahrtschein auf einen Bestand, den niemand mehr geprueft
+    hat.
+    """
+    _rechte(db, regular_user, global_keys=("ai.chat.use", "blueprints.manage"))
+    conversation = _conversation(db, regular_user)
+    _blueprint_entfernen("toctou_bp")
+    pfad = _community_ableitung(db, "toctou_bp")
+    try:
+        vorschlag = ai_proposal_service.create_proposal(
+            db,
+            user=regular_user,
+            conversation=conversation,
+            tool_name="propose_blueprint_delete",
+            arguments={
+                "blueprint_id": "toctou_bp",
+                "reason": "Wird nicht mehr gebraucht.",
+                "expected_effect": "Die Vorlage verschwindet.",
+            },
+            correlation_id=str(uuid4()),
+        )
+        db.commit()
+        _, token = ai_proposal_service.confirm_proposal(
+            db, proposal_id=vorschlag.id, user=regular_user
+        )
+
+        # Jetzt zieht jemand einen Server auf die Vorlage — nach der Bestaetigung.
+        _server(db, regular_user, tmp_path, "toctou_bp")
+
+        with pytest.raises(ai_action_errors.AiActionStateError):
+            ai_proposal_service.execute_proposal(
+                db,
+                proposal_id=vorschlag.id,
+                user=regular_user,
+                confirmation_token=token,
+            )
+
+        assert pfad.exists()
+        assert blueprint_service.get_registry().get("toctou_bp") is not None
+    finally:
+        _blueprint_entfernen("toctou_bp")
+
+
+def test_a_community_blueprint_with_servers_on_it_cannot_be_overwritten(
+    db: Session, regular_user: User, tmp_path: Path
+) -> None:
+    """Eine Ableitung legt eine neue Datei an — sonst ist sie keine.
+
+    Zeigt ``new_id`` auf einen Community-Blueprint, auf dem Server liegen, ist
+    der Vorgang keine Ableitung mehr: er aendert `runtime.image`, `runtime.env`
+    und die Startzeile dieser Server mit, und zwar beim naechsten Start, ohne
+    dass jemand sie angefasst haette. Genau das ist der Grund, aus dem eine
+    Ableitung ueberhaupt existiert (siehe
+    `test_deriving_leaves_the_native_template_untouched`).
+
+    Der erste Fall unten ist der, den die alte Bedingung durchliess: sie hing an
+    ``new_id != source_id`` und sprang deshalb ausgerechnet dann nicht an, wenn
+    die Vorlage sich selbst ueberschreibt.
+    """
+    _rechte(db, regular_user, global_keys=("ai.chat.use", "blueprints.manage"))
+    _blueprint_entfernen("inbetrieb_bp")
+    pfad = _community_ableitung(db, "inbetrieb_bp")
+    try:
+        _server(db, regular_user, tmp_path, "inbetrieb_bp")
+
+        # Die Vorlage ueberschreibt sich selbst.
+        with pytest.raises(HTTPException) as selbst:
+            blueprint_service.derived_payload(
+                "inbetrieb_bp",
+                new_id="inbetrieb_bp",
+                changes={"runtime.env": {"VERSION": "1.21.4"}},
+                db=db,
+            )
+        assert selbst.value.status_code == 409
+
+        # Und derselbe Schutz, wenn die Ableitung von woanders kommt.
+        with pytest.raises(HTTPException) as fremd:
+            blueprint_service.derived_payload(
+                "minecraft_vanilla",
+                new_id="inbetrieb_bp",
+                changes={"runtime.env": {"VERSION": "1.21.4"}},
+                db=db,
+            )
+        assert fremd.value.status_code == 409
+
+        # Der Beweis steht in der Datei: die Server lesen unveraendert weiter.
+        auf_platte = json.loads(pfad.read_text(encoding="utf-8"))
+        assert auf_platte["runtime"]["env"]["VERSION"] == "1.20.1"
+    finally:
+        _blueprint_entfernen("inbetrieb_bp")
+
+
+def test_a_startup_change_is_refused_where_profiles_decide(db: Session) -> None:
+    """Eine Korrektur, die folgenlos bliebe, wird abgesagt statt zugesagt.
+
+    `resolve_startup_template` (blueprints/github_source.py) nimmt das erste
+    Profil, dessen `whenFile` im Installationsverzeichnis liegt, und faellt nur
+    auf `runtime.startup` zurueck, wenn keines passt. Bei so einem Blueprint
+    sieht eine Aenderung an `runtime.startup` auf der Bestaetigungskarte richtig
+    aus, wird bestaetigt — und der Server startet danach mit derselben Zeile wie
+    vorher. Das ist schlimmer als eine Absage: der Mensch haelt das Problem fuer
+    behoben und sucht den Fehler beim naechsten Mal woanders.
+
+    Die Profile selbst sind ueber `AENDERBARE_PFADE` bewusst nicht erreichbar —
+    eine Punktpfad-Aenderung an einer Liste mit Bedingungen ueberblickt niemand
+    auf einer Karte. Wer sie aendern will, laedt den Blueprint als Ganzes hoch.
+    """
+    quelle = blueprint_service.blueprint_view("minecraft_forge")["blueprint"]
+    quelle["meta"]["id"] = "profil_bp"
+    quelle["runtime"]["startupProfiles"] = [
+        {"whenFile": "run.sh", "startup": "bash run.sh"},
+    ]
+    _blueprint_entfernen("profil_bp")
+    blueprint_service.save_community_blueprint(quelle)
+    try:
+        with pytest.raises(HTTPException) as fehler:
+            blueprint_service.derived_payload(
+                "profil_bp",
+                new_id="profil_bp_abgeleitet",
+                changes={"runtime.startup": "java -jar server.jar"},
+                db=db,
+            )
+        assert fehler.value.status_code == 400
+        # Die Meldung muss das Modell weiterarbeiten lassen, nicht nur abweisen:
+        # sie nennt den Grund beim Namen.
+        assert "startupProfiles" in str(fehler.value.detail)
+
+        # Gegenprobe: an allem anderen aendert der Profil-Blueprint nichts.
+        nutzlast = blueprint_service.derived_payload(
+            "profil_bp",
+            new_id="profil_bp_abgeleitet",
+            changes={"runtime.env": {"VERSION": "1.20.1"}},
+            db=db,
+        )
+        assert nutzlast["meta"]["id"] == "profil_bp_abgeleitet"
+        assert nutzlast["runtime"]["env"]["VERSION"] == "1.20.1"
+    finally:
+        _blueprint_entfernen("profil_bp")
 

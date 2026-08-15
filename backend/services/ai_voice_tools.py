@@ -43,19 +43,26 @@ logger = logging.getLogger(__name__)
 
 #: Wie oft derselbe Aufruf mit denselben Argumenten hintereinander laufen darf.
 #:
-#: Übernommen aus `ai_stream_service.MAX_GLEICHE_AUFRUFE` und nicht importiert:
-#: dort ist es eine Grenze je Lauf, hier je Sitzung. Dieselbe Zahl, eine andere
+#: Angelehnt an `ai_stream_service.MAX_GLEICHE_AUFRUFE` und bewusst nicht
+#: importiert: dort ist es eine Grenze je Lauf, hier je Sitzung. Eine andere
 #: Bezugsgrösse — ein Import täuschte eine Kopplung vor, die es nicht gibt.
+#:
+#: Dass die Zahl hier kleiner ist als dort, ist deshalb kein Nachziehbedarf,
+#: sondern derselbe Gedanke unter anderen Bedingungen: im Chat darf ein Modell
+#: einem Hochfahren zusehen und mehrfach nachfragen, hier hört jemand zu, und
+#: dieselbe Auskunft ein viertes Mal vorgelesen zu bekommen ist keine
+#: Gründlichkeit.
 MAX_GLEICHE_AUFRUFE = 3
 
 #: Wieviele Werkzeugaufrufe eine Sprachsitzung insgesamt tun darf.
 #:
-#: Im Chat begrenzt `MAX_TOOL_CALLS = 32` **einen Zug**; eine Unterhaltung darf
-#: beliebig viele Züge haben, weil zwischen ihnen ein Mensch tippt. Hier gilt
-#: dieselbe Zahl für die ganze Sitzung, und das ist strenger — mit Absicht.
-#: Zwischen zwei Zügen liegt hier niemand, der etwas tippt, sondern eine
-#: Sprechpause. Wer nach 32 Werkzeugaufrufen noch nicht fertig ist, ist in einer
-#: Schleife und nicht in einem Gespräch.
+#: Im Chat begrenzt `ai_stream_service.MAX_TOOL_CALLS` **eine Runde**, und ein
+#: Lauf darf viele Runden haben; eine Unterhaltung darf ausserdem beliebig viele
+#: Züge haben, weil zwischen ihnen ein Mensch tippt. Hier gilt die Zahl für die
+#: ganze Sitzung, und das ist deutlich strenger — mit Absicht. Zwischen zwei
+#: Zügen liegt hier niemand, der etwas tippt, sondern eine Sprechpause. Wer nach
+#: 32 Werkzeugaufrufen noch nicht fertig ist, ist in einer Schleife und nicht in
+#: einem Gespräch.
 MAX_AUFRUFE_JE_SITZUNG = 32
 
 #: Wie lang ein Werkzeugergebnis höchstens sein darf, bevor es gekürzt wird.

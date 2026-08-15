@@ -20,6 +20,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
 
 from services import blueprint_service
 
@@ -29,7 +30,6 @@ from blueprints import (
     COMMENTED_TEMPLATE_EN,
     get_registry,
 )
-from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user, require_global, verify_csrf
 from models import User
@@ -159,6 +159,13 @@ def delete_blueprint(
     __=Depends(verify_csrf),
     db: Session = Depends(get_db),
 ) -> Response:
-    """Loescht eine Community-Blueprint. Native-IDs und in Verwendung befindliche sind geschuetzt."""
+    """Loescht eine Community-Blueprint.
+
+    Native-IDs sind hart geschuetzt (400), und ein Blueprint, auf dem noch
+    Server liegen, ebenso (409). Die Session dieses Requests geht mit, weil der
+    Dienst diese Zaehlung selbst macht — sie soll denselben Stand sehen, auf dem
+    dieser Request arbeitet, statt auf einer eigenen Verbindung eine andere
+    Frage zu beantworten.
+    """
     blueprint_service.delete_community_blueprint(blueprint_id, db=db)
     return Response(status_code=204)

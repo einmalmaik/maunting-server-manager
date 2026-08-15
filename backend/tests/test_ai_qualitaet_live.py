@@ -93,6 +93,15 @@ from tests.test_ai_benchmark_live import (
 )
 
 
+# Zweites Schloss neben ``NUR_MIT_SCHLUESSEL``. Der Schlüssel entscheidet, ob
+# dieser Lauf etwas messen kann; die Marke entscheidet, ob er im Normallauf
+# überhaupt gesammelt wird. Ein Schloss allein hat nicht gehalten: eine
+# Nachbardatei las den Schlüssel beim Import aus dem Heimatverzeichnis und gab
+# damit bei einem schlichten ``python -m pytest`` Geld aus. Der oben
+# dokumentierte Aufruf mit ``-o addopts=""`` hebt beide Filter ohnehin auf.
+pytestmark = pytest.mark.live
+
+
 #: Das Modell, das den Ton beurteilt. Bewusst getrennt vom geprüften Modell und
 #: aus der Umgebung, nicht fest verdrahtet: ein Modell, das sich selbst
 #: benotet, ist ein schwacher Richter. Ohne eigene Angabe fällt es auf das

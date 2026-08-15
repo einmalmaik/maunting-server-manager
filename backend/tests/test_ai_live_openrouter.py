@@ -42,9 +42,21 @@ LIVE_KEY = os.environ.get("MSM_LIVE_AI_KEY", "").strip()
 LIVE_MODEL = os.environ.get("MSM_LIVE_AI_MODEL", "openrouter/free").strip()
 LIVE_BASE_URL = os.environ.get("MSM_LIVE_AI_BASE_URL", "https://openrouter.ai/api/v1").strip()
 
-pytestmark = pytest.mark.skipif(
-    not LIVE_KEY, reason="MSM_LIVE_AI_KEY nicht gesetzt — echter Providerlauf uebersprungen"
-)
+# Zwei Schloesser, nicht eines. Der Schluessel aus der Umgebung entscheidet, ob
+# der Lauf ueberhaupt etwas messen kann — die Marke entscheidet, ob er im
+# Normallauf ueberhaupt gesammelt wird. Ein Schloss allein hat schon einmal
+# nicht gehalten: eine Nachbardatei las den Schluessel beim Import selbst aus
+# dem Heimatverzeichnis und gab damit bei einem schlichten `python -m pytest`
+# Geld aus. Ob etwas kostet, darf nicht davon abhaengen, welche Dateien auf dem
+# Rechner liegen. Der dokumentierte Aufruf mit `-o addopts=""` hebt beide
+# Filter ohnehin auf.
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.skipif(
+        not LIVE_KEY,
+        reason="MSM_LIVE_AI_KEY nicht gesetzt — echter Providerlauf uebersprungen",
+    ),
+]
 
 
 def _provider(db: Session) -> AiProvider:

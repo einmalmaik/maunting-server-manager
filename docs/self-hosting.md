@@ -524,18 +524,57 @@ einrichtet.
 
 ### Was die KI tun kann
 
-Die KI verwendet ausschließlich vorhandene MSM-Funktionen; es gibt keine freie
-Befehlsausführung und keinen eigenen Downloadpfad.
+Die KI ruft ausschließlich vorhandene MSM-Funktionen auf; es gibt keine freie
+Befehlsausführung, keine Shell und keinen eigenen Downloadpfad. **Eine Stelle
+verlangt eine genauere Formulierung**: über einen Blueprint kann die KI die
+Startzeile setzen, aus der die argv eines Containers entsteht. Das ist keine
+Befehlsausführung — der Abschnitt *Was die KI an einem Blueprint ändern kann*
+sagt, wie weit es reicht und was es aufhält.
 
 **Lesend** (jedes Werkzeug prüft sein eigenes Recht): Serverstatus, Node-Kapazität,
 Logausschnitt, Konfigurationsdatei, Ports, Mods, Backups, Guardian-Vorfälle,
 bisherige KI-Aktionen, ausstehende Modupdates, Workshop-Suche. Im Panel-Chat
 zusätzlich die Blueprint-Liste und die Hostkapazität.
 
+Die Erreichbarkeitsprüfung (`check_server_reachability`) sagt dabei ausdrücklich
+**nichts über das Internet**. Sie sieht, ob die Ports auf der Node lauschen, wie
+die Bind-Adresse einzuordnen ist, und was die im Blueprint deklarierte
+Anwendungsprobe zuletzt gemeldet hat — die misst der Guardian dort, wo der
+Server wirklich liegt; das Panel spricht selbst kein Spielprotokoll. Das Panel
+steht hinter derselben Netzgrenze wie der Server, eine Verbindung auf die eigene
+öffentliche Adresse prüfte also Hairpin-NAT und nicht die Außenwelt. Deshalb
+steht in der Antwort dauerhaft `external_check: unavailable`: weder „von außen
+offen" noch „von außen dicht" ist eine Aussage, die MSM treffen darf, und ein
+erfundenes „ist erreichbar" wäre schlimmer als gar keine.
+
 **Schreibend** — jedes erzeugt zunächst nur einen sichtbaren Vorschlag:
-Start/Stop/Neustart, Backup, revisionsgebundene Konfigurationsänderung,
-Mod-Installation, Servererstellung, das Löschen einer einzelnen Datei und die
-Reparatur der Anlage.
+Start/Stop/Neustart, Backup und Backup-Wiederherstellung, revisionsgebundene
+Konfigurationsänderung, Mod-Installation, Bind-IP, Servererstellung und
+-löschung, das Löschen einer einzelnen Datei, die Reparatur der Anlage, stehende
+Aufträge, die Shop-Anbindung (Integration, Produkt, Tarifrolle) — und die drei
+Blueprint-Werkzeuge, die am weitesten reichen:
+
+- **`propose_blueprint_change`** (`blueprints.manage`) leitet aus einer Vorlage
+  eine neue ab und schreibt sie als Community-Blueprint. Es rührt **keinen**
+  laufenden Server an; eine Vorlage, auf der bereits Server liegen, kann es
+  nicht überschreiben.
+- **`propose_blueprint_delete`** (`blueprints.manage`) entfernt eine
+  Community-Vorlage per `unlink`. Es gibt keinen Versionsschnappschuss und
+  keinen Papierkorb — deshalb ist es immer bestätigungspflichtig. Liegt noch ein
+  Server auf der Vorlage, wird schon der Vorschlag mit der Anzahl abgewiesen.
+- **`propose_server_blueprint_switch`** (`server.config.write`) stellt einen
+  **gestoppten** Server auf eine andere Vorlage um. Was dabei geschieht, steht
+  einzeln auf der Bestätigungskarte, weil „Blueprint wechseln" es sonst
+  verschweigen würde: ein **Pflicht-Backup**, das **Löschen des gesamten
+  Serververzeichnisses** samt Welten, Konfigurationen und Mods, eine
+  Portneuvergabe und eine Neuinstallation. Der Server steht danach auf
+  `installing`, nicht auf `stopped`.
+
+Der Wechsel ist damit neben dem Löschen der weitreichendste Vorgang, den die KI
+vorschlagen kann. Dass er trotzdem **nicht** auf der Immer-bestätigen-Liste
+steht, ist eine bewusste Entscheidung und keine Lücke: das Pflicht-Backup
+entsteht, bevor irgendetwas angefasst wird, und genau dieses Backup ist der Weg
+zurück.
 
 Die Reparatur (`propose_server_repair`) nimmt **eine Kennung aus einer festen
 Liste** entgegen — `repair_permissions` oder `reallocate_port` — und niemals
@@ -549,6 +588,55 @@ Klick im Panel und eine Shop-Bestellung. Blueprintprüfung, Kapazität, Portverg
 Installation und Rollback sind identisch — es gibt bewusst keinen zweiten Weg,
 einen Server anzulegen.
 
+### Was die KI an einem Blueprint ändern kann
+
+Änderbar ist eine **bewusst kurze Liste** von Punktpfaden (`AENDERBARE_PFADE` in
+`services/blueprint_service.py`): `meta.name`, `meta.description`,
+`runtime.image`, `runtime.env` und `runtime.startup`. Portrollen,
+Installationsquelle und alles Übrige bleiben, wie sie sind; wer daran etwas
+ändern will, lädt einen vollständigen Blueprint hoch — dann sieht ein Mensch das
+ganze Ergebnis, statt einer Liste von Einzeländerungen zuzustimmen, deren
+Zusammenwirken er nicht überblickt.
+
+`runtime.startup` verlangt dabei eine ehrliche Einordnung: das ist die Zeile,
+aus der die argv des Containers entsteht. Sie steht in der Liste, seit eine
+falsche Startzeile bei GitHub-Quellen der häufigste Grund war, dass ein Server
+gar nicht erst hochkommt — die KI soll sie korrigieren können. Vier Schranken
+stehen davor:
+
+- **Es ist kein Shell-Aufruf.** Der Renderer (`blueprints/renderer.py`)
+  tokenisiert den String mit `shlex.split` und übergibt die fertige Liste an
+  `docker run`, nie über `sh -c`. Ein Argument kann deshalb kein zweites
+  Argument erzeugen, gleich was darin steht.
+- **Die Schemaprüfung läuft vor dem Vorschlag, nicht danach.** `$` und Backtick
+  sowie `$(`, `${`, `&&` und `||` sind in `runtime.startup` verboten. In einer
+  argv-Liste wären sie ohnehin harmlos; das Verbot ist Defense-in-Depth für den
+  Fall, dass ein Konsument den String je an eine Shell weiterreicht. Weil der
+  abgeleitete Blueprint schon beim *Vorschlagen* gebaut und validiert wird,
+  entsteht eine Karte, die das Schema verletzt, gar nicht erst.
+- **Platzhalter sind eine Whitelist.** Erlaubt sind `{GAME_PORT}`,
+  `{QUERY_PORT}`, `{RCON_PORT}`, `{VOICE_PORT}`, `{WEB_PORT}`, `{INSTALL_DIR}`,
+  `{MOD_ARG}`, `{BIND_IP}`, `{CUSTOM_PORT_<N>}` und `{ENV.<KEY>}`. Ein
+  unbekanntes Token macht den Blueprint ungültig, statt beim Start zu einem
+  leeren Argument zu werden.
+- **Der Mensch liest die Zeile.** Die Bestätigungskarte stellt `startup_before`
+  und `startup_after` gegenüber, dazu Image und Umgebung. Ohne diese
+  Gegenüberstellung bestätigte jemand einen Startbefehl, den er nie zu sehen
+  bekommen hat.
+
+`runtime.startupProfiles` steht bewusst **nicht** in der Liste: das ist eine
+Liste mit Bedingungen, und eine Punktpfad-Änderung daran überblickt niemand auf
+einer Karte. Führt die Quelle Profile, weist der Dienst eine Änderung an
+`runtime.startup` deshalb ab, statt sie wirkungslos durchzureichen —
+`resolve_startup_template` nähme dort ohnehin das erste Profil, dessen
+`whenFile` existiert, und die Korrektur bliebe unbemerkt folgenlos.
+
+Das Recht ist `blueprints.manage`, und es ist panelweit: wer keine Blueprints
+verwalten darf, kommt an diesen Weg nicht heran. Wirksam wird eine so geänderte
+Vorlage außerdem erst, wenn ein Server auf ihr liegt — entweder weil er neu
+darauf angelegt wird, oder über `propose_server_blueprint_switch`, und der
+wischt das Serververzeichnis und will bestätigt werden.
+
 ### Autonomer Modus
 
 Standard ist der unterstützte Modus: die KI analysiert, schlägt vor, wartet.
@@ -559,9 +647,27 @@ Autonomie verlangt **vier** Bedingungen gleichzeitig:
 2. eine ausdrückliche Freigabe des Benutzers — pro Server im KI-Tab des Servers
    oder panelweit unter *KI*. Eine Freigabe für einen konkreten Server gewinnt
    über die panelweite, **auch wenn sie abschaltet**;
-3. ein Werkzeug, das nicht auf der Immer-bestätigen-Liste steht (Löschen, Wipe,
-   Neuinstallation, Backup-Wiederherstellung, Blueprint-Wechsel, Secret-Rotation,
-   Rechteänderung);
+3. ein Werkzeug, das nicht auf der Immer-bestätigen-Liste steht. Die Liste heißt
+   im Code `ALWAYS_CONFIRM_TOOLS` (`services/ai_tool_registry.py`) und ist dort
+   keine eigene Aufzählung, sondern die Ableitung aus der Spalte
+   `immer_bestaetigen` der Werkzeugtabelle. Gebaut und gesperrt sind heute:
+   `propose_server_delete`, `propose_blueprint_delete`, `propose_backup_restore`,
+   `propose_hoster_integration`, `propose_hoster_product` und
+   `propose_ai_tarif_role`. Dazu kommen vier Namen aus dem Zielbild, die es noch
+   nicht gibt und die vorsorglich gesperrt sind, damit ein künftiges Werkzeug
+   sich einordnen muss statt stillschweigend autonomiefähig zu sein:
+   `propose_server_wipe`, `propose_server_reinstall`,
+   `propose_permission_change` und `propose_secret_rotation`.
+
+   Das Kriterium ist **Unumkehrbarkeit, nicht Risiko** — ausdrückliche Vorgabe
+   des Betreibers, und sie ersetzt eine frühere Einteilung nach „das klingt
+   heikel". Was die KI selbst wieder zurückstellen kann, darf sie autonom tun;
+   was Daten vernichtet, die niemand zurückholt, fragt immer. Deshalb steht der
+   Blueprint-*Wechsel* trotz seiner Reichweite nicht auf der Liste (er legt
+   zwingend ein Backup an, bevor er etwas anfasst), das Blueprint-*Löschen*
+   dagegen schon: `unlink` ohne Schnappschuss. Die Rechte- und
+   Schlüsselwerkzeuge stehen aus einem anderen Grund darauf — sie wirken auf die
+   Grenzen, innerhalb derer die KI selbst arbeitet;
 4. freies Stundenbudget (Standard 10 Aktionen). Ist es erschöpft, **schlägt
    nichts fehl** — die KI fragt einfach wieder nach.
 
@@ -594,8 +700,11 @@ Ein Scheduler-Job sieht alle sechzig Sekunden nach offenen Vorfällen.
   bleibt stehen, und ein „mach weiter" genügt.
 - **Die Werkzeugmenge ist enger** als im Chat (`GUARDIAN_HEILUNG_TOOLS`):
   Lesewerkzeuge, Backup, Lifecycle, Konfiguration, Dateilöschung, Reparatur,
-  Doku. Nicht dabei sind Gedächtnis, Skills, Hoster, Blueprint-Wechsel,
-  Servererstellung und -löschung sowie die Websuche. Die `server_id` steht fest
+  Doku. Nicht dabei sind Gedächtnis, Skills, Hoster, alle drei
+  Blueprint-Werkzeuge (Ableiten, Löschen, Wechsel — das erste und das zweite
+  gälten für jeden Server auf der Vorlage, nicht nur für den mit dem Vorfall),
+  die Backup-Wiederherstellung, stehende Aufträge, Servererstellung und
+  -löschung sowie die Websuche. Die `server_id` steht fest
   im Lauf; ein Werkzeugaufruf auf einen anderen Server wird abgewiesen, bevor er
   aufgelöst wird.
 - **Vor jedem schreibenden Eingriff muss ein Backup nachgewiesen sein.** Nicht
@@ -694,7 +803,9 @@ vertagt statt unterbrochen. Ein Termin, der mehr als eine Stunde alt ist, wird
 **übersprungen** und nicht nachgeholt — ein um elf Uhr nachgeholtes
 Nachtbackup ist schlechter als keines. Im Lauf selbst ist die Werkzeugmenge
 enger als im Chat: keine Rückfragen (es sitzt niemand da), kein Gedächtnis- und
-Skill-Schreiben, keine Hoster-Werkzeuge, und ein Auftrag legt keine Aufträge
+Skill-Schreiben, keine Hoster-Werkzeuge, kein Löschen (weder Server noch Datei
+noch Blueprint), keine Backup-Wiederherstellung, keine Blueprint-Ableitung und
+kein Blueprint-Wechsel — und ein Auftrag legt keine Aufträge
 an. Verlangt ein Vorschlag trotzdem eine Bestätigung, wird er zurückgenommen
 und der Lauf endet mit einer ehrlichen Fehlanzeige — statt auf einen Klick zu
 warten, den niemand tut.

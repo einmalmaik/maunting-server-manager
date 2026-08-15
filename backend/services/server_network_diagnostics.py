@@ -18,18 +18,23 @@ Hairpin-NAT, nicht die Aussenwelt. Ein erfundenes "ist erreichbar" waere
 schlimmer als keine Aussage — der Betreiber wuerde an der falschen Stelle
 suchen. Stattdessen liefert die Diagnose die belegbaren Teilbefunde und benennt
 die Luecke.
+
+**Woher die Spielprobe kommt.** Ob ein Server auf seinem eigenen Protokoll
+antwortet — A2S, Minecraft-SLP, HTTP —, misst der Guardian auf der Node, auf
+der der Server wirklich liegt, und nur dann, wenn der Blueprint unter
+`health.application` eine solche Probe erklaert. Sein Urteil steht bereits in
+der Datenbank (`guardian_observed_state`, `guardian_probe_timestamp`); diese
+Datei liest es und spricht selbst kein Spielprotokoll. Das ist keine
+Bequemlichkeit: eine Probe vom Panel-Host aus traefe die falsche Maschine, und
+ein zweiter Protokoll-Parser neben dem des Guardian waere ein zweiter Ort, an
+dem er falsch sein kann.
 """
 
 from __future__ import annotations
 
 import ipaddress
-import json
 import logging
-import socket
-import struct
-import urllib.request
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -45,191 +50,118 @@ _DOCKER_NETWORKS = (
     ipaddress.IPv4Network("172.17.0.0/16"),
 )
 
-_cached_public_ip: str | None = None
-_cached_public_ip_time: datetime | None = None
+# Der Guardian kennt neun Zustaende. Nur "healthy" heisst, dass alle geforderten
+# Proben antworten — und wo der Blueprint eine Anwendungsprobe erklaert, ist sie
+# eine davon. Die mittlere Gruppe beschreibt einen Server, der laufen soll,
+# dessen Probe aber (noch) nicht antwortet. Alles uebrige — "stopped",
+# "disabled", "unknown" — ist gar keine Messung und darf nie als "antwortet
+# nicht" gelesen werden. Die Zustaende stehen als Liste hier und nicht als
+# Vergleich mitten im Code, damit ein neuer Guardian-Zustand jemanden zwingt,
+# sich bewusst fuer eine der drei Bedeutungen zu entscheiden.
+_GUARDIAN_ANSWERING = ("healthy",)
+_GUARDIAN_NOT_ANSWERING = ("starting", "verifying", "degraded", "unhealthy", "quarantined")
 
 
-def detect_public_ip(timeout: float = 1.5) -> str | None:
-    """Ermittelt die öffentliche IPv4 des Hosts mit 15 Minuten Caching."""
-    global _cached_public_ip, _cached_public_ip_time
-    jetzt = datetime.now(timezone.utc)
-    if _cached_public_ip and _cached_public_ip_time and (jetzt - _cached_public_ip_time) < timedelta(minutes=15):
-        return _cached_public_ip
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Zeitstempel als UTC lesen.
 
-    endpoints = [
-        "https://api.ipify.org",
-        "https://ifconfig.me/ip",
-        "https://checkip.amazonaws.com",
-    ]
-    for url in endpoints:
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "MSM-Diagnostics/1.0"})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read().decode("utf-8", errors="ignore").strip()
-                if raw:
-                    ipaddress.IPv4Address(raw)
-                    _cached_public_ip = raw
-                    _cached_public_ip_time = jetzt
-                    return raw
-        except Exception:
-            continue
-    return None
-
-
-def _probe_tcp_connect(host: str, port: int, timeout: float = 1.2) -> bool:
-    """Prüft per einfachem TCP-Socket-Connect, ob der Port antwortet."""
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except (OSError, ValueError):
-        return False
-
-
-def _read_null_string(data: bytes, offset: int) -> tuple[str, int]:
-    """Liest einen Null-terminierten UTF-8/Latin-1-String aus einem Byte-Buffer."""
-    end = data.find(b"\x00", offset)
-    if end == -1:
-        return data[offset:].decode("utf-8", errors="replace"), len(data)
-    val = data[offset:end].decode("utf-8", errors="replace")
-    return val, end + 1
-
-
-def _probe_a2s_query(host: str, port: int, timeout: float = 1.5) -> dict[str, Any] | None:
-    """Sendet ein Source/Steam-A2S_INFO-Query-Paket (ARK, ASA, CS2, DayZ, Palworld, Rust, etc.)."""
-    query_pkt = b"\xFF\xFF\xFF\xFF\x54Source Engine Query\x00"
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(timeout)
-    try:
-        sock.sendto(query_pkt, (host, port))
-        resp, _ = sock.recvfrom(4096)
-        if not resp or len(resp) < 5:
-            return None
-
-        # Challenge Response (0x41) -> mit Challenge erneut senden
-        if resp.startswith(b"\xFF\xFF\xFF\xFF\x41") and len(resp) >= 9:
-            challenge = resp[5:9]
-            sock.sendto(query_pkt + challenge, (host, port))
-            resp, _ = sock.recvfrom(4096)
-            if not resp or len(resp) < 5:
-                return None
-
-        # A2S_INFO Response (0x49)
-        if resp.startswith(b"\xFF\xFF\xFF\xFF\x49"):
-            offset = 5
-            protocol = resp[offset] if len(resp) > offset else 0
-            offset += 1
-            name, offset = _read_null_string(resp, offset)
-            map_name, offset = _read_null_string(resp, offset)
-            folder, offset = _read_null_string(resp, offset)
-            game, offset = _read_null_string(resp, offset)
-            
-            steam_id = 0
-            if len(resp) >= offset + 2:
-                steam_id = struct.unpack("<H", resp[offset:offset+2])[0]
-                offset += 2
-            
-            players = resp[offset] if len(resp) > offset else 0
-            offset += 1
-            max_players = resp[offset] if len(resp) > offset else 0
-            offset += 1
-            bots = resp[offset] if len(resp) > offset else 0
-            offset += 1
-            server_type = chr(resp[offset]) if len(resp) > offset else "d"
-            offset += 1
-            environment = chr(resp[offset]) if len(resp) > offset else "l"
-            offset += 1
-            visibility = bool(resp[offset]) if len(resp) > offset else False
-            offset += 1
-            vac = bool(resp[offset]) if len(resp) > offset else False
-            offset += 1
-
-            version = ""
-            if offset < len(resp):
-                version, _ = _read_null_string(resp, offset)
-
-            return {
-                "protocol": "a2s",
-                "responded": True,
-                "server_name": name,
-                "map": map_name,
-                "folder": folder,
-                "game": game,
-                "steam_id": steam_id,
-                "players": players,
-                "max_players": max_players,
-                "bots": bots,
-                "server_type": server_type,
-                "environment": environment,
-                "password_protected": visibility,
-                "vac_enabled": vac,
-                "version": version,
-            }
+    SQLite gibt `DateTime(timezone=True)` ohne Zone zurueck. Geschrieben wird die
+    Spalte ausschliesslich aus UTC-Zeiten (`guardian_sync_service`), deshalb ist
+    das Nachtragen der Zone hier eine Wiederherstellung und keine Annahme.
+    """
+    if value is None:
         return None
-    except Exception as exc:
-        logger.debug("A2S-Probe fehlgeschlagen host=%s port=%d exc=%s", host, port, exc)
-        return None
-    finally:
-        sock.close()
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
-def _probe_minecraft_ping(host: str, port: int, timeout: float = 1.5) -> dict[str, Any] | None:
-    """Sendet einen Minecraft Server List Ping (SLP) Handshake + Request."""
-    try:
-        with socket.create_connection((host, port), timeout=timeout) as s:
-            s.settimeout(timeout)
-            # Handshake Packet: packet_id 0x00, protocol_version -1 (0xFF), host, port, next_state 1
-            host_bytes = host.encode("utf-8")
-            data = b"\x00\xff\x05" + struct.pack(">B", len(host_bytes)) + host_bytes + struct.pack(">H", port) + b"\x01"
-            data_len = len(data)
-            # Length prefix (VarInt) + Data
-            s.sendall(struct.pack(">B", data_len) + data)
-            # Status Request: length 1, packet_id 0x00
-            s.sendall(b"\x01\x00")
-            
-            # Read response length
-            raw = s.recv(4096)
-            if not raw:
-                return None
-            
-            # Find JSON payload start '{'
-            idx = raw.find(b"{")
-            if idx != -1:
-                try:
-                    payload = json.loads(raw[idx:].decode("utf-8", errors="ignore"))
-                    players = payload.get("players") or {}
-                    version = payload.get("version") or {}
-                    desc = payload.get("description")
-                    motd = desc if isinstance(desc, str) else (desc.get("text", "") if isinstance(desc, dict) else "")
-                    return {
-                        "protocol": "minecraft",
-                        "responded": True,
-                        "server_name": motd,
-                        "version": version.get("name", ""),
-                        "players": players.get("online", 0),
-                        "max_players": players.get("max", 0),
-                    }
-                except Exception:
-                    pass
-            return {"protocol": "minecraft", "responded": True}
-    except Exception:
-        return None
+def _game_probe(server: Server) -> dict:
+    """Antwortet der Spielserver auf seinem eigenen Protokoll?
 
+    Gemessen wird hier nichts. Die Antwort ist das Urteil des Guardian, der auf
+    der richtigen Node sitzt; diese Funktion ordnet es nur so ein, dass die drei
+    Faelle nicht verwechselt werden koennen: *der Blueprint erklaert gar keine
+    Anwendungsprobe*, *es gibt ein Urteil und es ist so und so alt*, *es gibt
+    keins*. Der Unterschied ist der ganze Punkt — bei einem Titel mit eigener
+    Engine, der kein abfragbares Protokoll spricht, ist "antwortet nicht" kein
+    Befund, sondern eine erfundene Aussage ueber eine Messung, die es nie gab.
+    """
+    from blueprints import get_registry
 
-def probe_game_query(host: str, port: int, protocol: str, *, game_type: str | None = None) -> dict[str, Any] | None:
-    """Probt generic oder protokollspezifisch den Spielserver."""
-    proto = str(protocol).lower()
-    if proto == "udp":
-        a2s = _probe_a2s_query(host, port)
-        if a2s:
-            return a2s
-    elif proto == "tcp":
-        if game_type == "minecraft" or port == 25565:
-            mc = _probe_minecraft_ping(host, port)
-            if mc:
-                return mc
-        if _probe_tcp_connect(host, port):
-            return {"protocol": "tcp", "responded": True}
-    return None
+    entry = get_registry().get(server.game_type)
+    if entry is None:
+        return {
+            "status": "no_measurement",
+            "probe_type": None,
+            "measured_at": None,
+            "age_seconds": None,
+            "guardian_state": server.guardian_observed_state,
+            "note": (
+                "Zu diesem Server liegt kein Blueprint mehr in der Registry. Ob "
+                "ueberhaupt eine Anwendungsprobe erklaert ist, laesst sich damit "
+                "nicht sagen."
+            ),
+        }
+
+    health = entry.blueprint.health
+    application = health.application if health is not None else None
+    if application is None:
+        return {
+            "status": "not_declared",
+            "probe_type": None,
+            "measured_at": None,
+            "age_seconds": None,
+            "guardian_state": server.guardian_observed_state,
+            "note": (
+                "Der Blueprint dieses Servers erklaert keine Anwendungsprobe. "
+                "Viele Titel mit eigener Engine sprechen kein abfragbares "
+                "Protokoll. Dass hier nichts antwortet, ist deshalb kein Befund "
+                "und kein Hinweis auf einen Fehler — es wird schlicht nichts "
+                "abgefragt."
+            ),
+        }
+
+    measured_at = _as_utc(server.guardian_probe_timestamp)
+    state = server.guardian_observed_state or "unknown"
+    result = {
+        "probe_type": application.type,
+        "measured_at": measured_at.isoformat() if measured_at is not None else None,
+        "age_seconds": (
+            int((datetime.now(timezone.utc) - measured_at).total_seconds())
+            if measured_at is not None
+            else None
+        ),
+        "guardian_state": state,
+        "container_status": server.guardian_container_status,
+    }
+
+    if measured_at is None or state not in _GUARDIAN_ANSWERING + _GUARDIAN_NOT_ANSWERING:
+        result["status"] = "no_measurement"
+        result["note"] = (
+            f"Der Blueprint erklaert eine Anwendungsprobe ({application.type}), "
+            "aber es liegt kein verwertbares Urteil vor (Guardian-Zustand "
+            f"'{state}'): entweder hat der Guardian auf der Node noch nie "
+            "gemessen, oder er ist fuer diesen Server abgeschaltet, oder der "
+            "Server soll gar nicht laufen. In keinem dieser Faelle ist "
+            "'antwortet nicht' belegt."
+        )
+    elif state in _GUARDIAN_ANSWERING:
+        result["status"] = "answering"
+        result["note"] = (
+            f"Die Anwendungsprobe ({application.type}) hat bei der letzten "
+            "Messung des Guardian auf der Node geantwortet. Ueber die "
+            "Erreichbarkeit aus dem Internet sagt das nichts."
+        )
+    else:
+        result["status"] = "not_answering"
+        result["note"] = (
+            f"Die Anwendungsprobe ({application.type}) hat bei der letzten "
+            f"Messung des Guardian nicht geantwortet (Zustand '{state}'). "
+            "Gemessen wurde auf der Node selbst — der Dienst antwortet also "
+            "schon dort nicht, unabhaengig von Router und Firewall."
+        )
+    return result
 
 
 def _classify_bind_ip(bind_ip: str | None) -> dict:
@@ -470,76 +402,6 @@ def check_reachability(db: Session, server: Server) -> dict:
     elif listening and not silent:
         verdict = "listening"
 
-    # ── Game-Query-Probing (A2S, Minecraft SLP, TCP Connect) ──────────
-    query_details: list[dict[str, Any]] = []
-    local_probe_ip = "127.0.0.1" if bind_ip in {"0.0.0.0", "::", None} else bind_ip
-
-    if server.status == "running" and verdict == "listening":
-        for p in ports:
-            port_num = p[0]
-            protocol = p[1]
-            role = p[2]
-            probe_res = probe_game_query(
-                local_probe_ip, port_num, protocol, game_type=getattr(server, "game_type", None)
-            )
-            if probe_res:
-                query_details.append({
-                    "port": port_num,
-                    "protocol": protocol,
-                    "role": role,
-                    "query": probe_res,
-                })
-
-    public_ip = detect_public_ip()
-    external_check = "unavailable"
-    external_reason = (
-        "MSM laeuft im selben Netz wie der Server und kann eine Verbindung "
-        "von aussen nicht simulieren. Ob eine Portweiterleitung im Router "
-        "existiert, laesst sich von hier nicht feststellen."
-    )
-    external_reachability: dict[str, Any] = {
-        "status": "unavailable",
-        "public_ip": public_ip,
-        "note": external_reason,
-    }
-
-    if public_ip and server.status == "running" and verdict == "listening":
-        # Öffentlichen WAN-Query-Probe versuchen
-        wan_responsive = False
-        wan_query_res = None
-        for p in ports:
-            port_num = p[0]
-            protocol = p[1]
-            q_res = probe_game_query(
-                public_ip, port_num, protocol, game_type=getattr(server, "game_type", None)
-            )
-            if q_res:
-                wan_responsive = True
-                wan_query_res = q_res
-                break
-
-        if wan_responsive:
-            external_check = "reachable"
-            external_reason = f"Der Server antwortet auf öffentlicher IP {public_ip} auf Spielanfragen."
-            external_reachability = {
-                "status": "reachable",
-                "public_ip": public_ip,
-                "query": wan_query_res,
-                "note": external_reason,
-            }
-        else:
-            external_check = "unavailable"
-            external_reason = (
-                f"Lokal antwortet der Server, aber über die öffentliche IP {public_ip} "
-                "wurde keine Antwort erhalten. Ob eine Portweiterleitung im Router "
-                "existiert, laesst sich von hier nicht feststellen."
-            )
-            external_reachability = {
-                "status": "unreachable_or_nat_restricted",
-                "public_ip": public_ip,
-                "note": external_reason,
-            }
-
     return {
         "server_id": server.id,
         "status": server.status,
@@ -547,8 +409,15 @@ def check_reachability(db: Session, server: Server) -> dict:
         "ports": listening,
         "verdict": verdict,
         **({"probe_error": probe_error} if probe_error else {}),
-        **({"game_queries": query_details} if query_details else {}),
-        "external_check": external_check,
-        "external_check_reason": external_reason,
-        "external_reachability": external_reachability,
+        # Lauschender Port und antwortender Dienst sind zwei Fragen: ein Port
+        # kann belegt sein, waehrend das Spiel selbst nichts beantwortet. Die
+        # zweite Frage hat der Guardian auf der Node bereits gestellt.
+        "game_probe": _game_probe(server),
+        # Ehrlichkeit statt Erfindung: siehe Modul-Docstring.
+        "external_check": "unavailable",
+        "external_check_reason": (
+            "MSM laeuft im selben Netz wie der Server und kann eine Verbindung "
+            "von aussen nicht simulieren. Ob eine Portweiterleitung im Router "
+            "existiert, laesst sich von hier nicht feststellen."
+        ),
     }

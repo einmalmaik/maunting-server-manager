@@ -620,13 +620,20 @@ async def test_die_schlussrunde_verbietet_werkzeuge_und_behaelt_den_katalog(
 async def test_the_same_call_over_and_over_is_refused(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Dieselbe Frage zum vierten Mal ist kein Fleiss, sondern eine Schleife.
+    """Dieselbe Frage noch einmal ist kein Fleiss, sondern eine Schleife.
 
-    Die Rundengrenze allein reicht dafuer nicht: sie laesst sechzehn Runden zu,
+    Die Rundengrenze allein reicht dafuer nicht: sie laesst Dutzende Runden zu,
     und ein Modell, das haengt, verbrennt sie alle mit derselben Abfrage. Die
     Signaturzaehlung greift frueher — und sie zaehlt **je Runde**, nicht je
-    Aufruf. Neun Statusabfragen nebeneinander sind eine Bestandsaufnahme,
-    dieselbe Abfrage in der vierten Runde hintereinander ist Stillstand.
+    Aufruf. Neun gleiche Abfragen nebeneinander sind eine Bestandsaufnahme,
+    dieselbe Abfrage Runde um Runde ist Stillstand.
+
+    Geprueft wird hier ein Werkzeug, dessen Antwort **nicht** an der Zeit
+    haengt: die Serverliste sieht in der fuenften Runde aus wie in der ersten.
+    Fuer die drei Werkzeuge, bei denen das anders ist, gilt die groessere
+    Grenze — siehe den Test darunter. Die erwartete Zahl kommt aus der
+    Konstante und wird nicht abgeschrieben, sonst prueft der Test seine eigene
+    Erinnerung.
     """
     server = _server(db, "schleife")
     _grant(db, regular_user, server=server, server_keys=("server.view",))
@@ -634,10 +641,8 @@ async def test_the_same_call_over_and_over_is_refused(
     conversation = _conversation(db, regular_user, server)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
     seen = _fake_stream(monkeypatch, [
-        [ProviderToolCall(
-            id=f"s{index}", name="read_server_status", arguments={"server_id": server.id}
-        )]
-        for index in range(8)
+        [ProviderToolCall(id=f"s{index}", name="list_my_servers", arguments={})]
+        for index in range(ai_stream_service.MAX_GLEICHE_AUFRUFE + 3)
     ])
 
     events = await _collect(db, regular_user, conversation, provider)
@@ -649,6 +654,47 @@ async def test_the_same_call_over_and_over_is_refused(
     # sich weiter, bis die Rundengrenze es stumm abschneidet.
     zurueck = [item for runde in seen for item in runde if item.get("role") == "tool"]
     assert any("liefert nichts Neues" in str(item.get("content")) for item in zurueck)
+
+
+@pytest.mark.asyncio
+async def test_beim_warten_gilt_die_groessere_grenze(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Wer einem Start zusieht, wiederholt sich nicht — er wartet.
+
+    `read_server_status` liefert bei jedem Aufruf eine andere Antwort, solange
+    der Server hochfaehrt. Dieselbe Signatur ist hier also kein Stillstand,
+    sondern genau die Arbeit, um die es geht: nachsehen, ob er schon oben ist.
+    Deshalb steht das Werkzeug in `POLLING_WERKZEUGE` und faellt unter die
+    groessere Grenze.
+
+    Der Test haengt an derselben Stelle wie der davor und prueft die andere
+    Haelfte der Verzweigung. Ohne ihn deckt die Datei nur einen der beiden
+    Zweige ab, und ein Vertauschen der beiden Zahlen faellt niemandem auf.
+    """
+    server = _server(db, "wartend")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+    _fake_stream(monkeypatch, [
+        [ProviderToolCall(
+            id=f"p{index}", name="read_server_status", arguments={"server_id": server.id}
+        )]
+        for index in range(ai_stream_service.MAX_GLEICHE_POLLING_AUFRUFE + 3)
+    ])
+
+    events = await _collect(db, regular_user, conversation, provider)
+
+    assert _error_codes(events) == []
+    ausgefuehrt = [event for event in events if event.startswith("event: tool\n")]
+    assert len(ausgefuehrt) == ai_stream_service.MAX_GLEICHE_POLLING_AUFRUFE
+    # Und die beiden Grenzen sind wirklich zwei: waeren sie gleich, pruefte der
+    # Test oben denselben Zweig ein zweites Mal.
+    assert (
+        ai_stream_service.MAX_GLEICHE_POLLING_AUFRUFE
+        > ai_stream_service.MAX_GLEICHE_AUFRUFE
+    )
 
 
 @pytest.mark.asyncio

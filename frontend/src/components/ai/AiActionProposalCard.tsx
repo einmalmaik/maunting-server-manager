@@ -45,6 +45,23 @@ const TATSACHEN: readonly string[] = [
   'permissions',
   'ai_limits',
   'enabled',
+  // Das Ziel eines Blueprint-Vorschlags. Beim Loeschen stand es bisher
+  // nirgends: `path` bleibt bei diesem Werkzeug leer, die Karte zeigte also
+  // „blueprint_delete“ und sonst nichts. Das Backend loest beides auf — wer
+  // zustimmt, soll den Namen dessen gelesen haben, was gleich verschwindet.
+  'blueprint_id',
+  'blueprint_name',
+  // Beim Ableiten zaehlt, was am Ende wirklich startet. `startup_after` ist das
+  // gefaehrlichste Feld des ganzen Vorschlags — eine falsche Startzeile laesst
+  // den Server gar nicht erst hochkommen — und steht deshalb neben der
+  // bisherigen, damit der Bestaetigende den Unterschied liest und nicht nur das
+  // Ergebnis. Bei Image und Umgebung genuegt der Nachher-Wert: er ist der, der
+  // nach der Bestaetigung gilt, und der Quell-Blueprint bleibt unveraendert
+  // daneben bestehen.
+  'startup_before',
+  'startup_after',
+  'image_after',
+  'env_after',
 ]
 
 function tatsachenZeilen(preview: Record<string, unknown>): [string, string][] {
@@ -93,6 +110,12 @@ const UNUMKEHRBAR: readonly string[] = [
   // neu vergeben stellt einen Zustand her, den das Panel ohnehin herstellen
   // wuerde.
   'propose_file_delete',
+  // `propose_blueprint_delete` aus demselben Grund: `delete_community_blueprint`
+  // entfernt die Blueprint-Datei per `unlink`, es gibt keinen Schnappschuss und
+  // keinen Papierkorb. Dass das Backend Blueprints mit aktiven Servern gar nicht
+  // erst zum Loeschen zulaesst, schuetzt die laufenden Anlagen — den Blueprint
+  // selbst holt danach niemand zurueck.
+  'propose_blueprint_delete',
 ]
 
 export function AiActionProposalCard({
@@ -126,7 +149,12 @@ export function AiActionProposalCard({
     propose_backup_restore: HardDriveUpload,
     propose_bind_ip_update: Network,
     propose_blueprint_change: Blocks,
-    propose_blueprint_delete: Blocks,
+    // Das Loeschen lag auf demselben `Blocks` wie das harmlose Ableiten — im
+    // Kartenkopf war „neuen Blueprint bauen“ von „Blueprint endgueltig
+    // entfernen“ nicht zu unterscheiden. `Trash2` wie bei
+    // `propose_server_delete`: hier wie dort verschwindet ein ganzer Eintrag,
+    // nicht eine Datei im Serververzeichnis (das traegt `FileX`).
+    propose_blueprint_delete: Trash2,
     propose_server_blueprint_switch: Blocks,
     propose_hoster_integration: Plug,
     propose_hoster_product: Plug,
