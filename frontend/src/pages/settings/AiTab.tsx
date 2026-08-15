@@ -36,6 +36,41 @@ export interface AiRoleLimits {
   concurrent_operations: number | null
   monthly_cost_limit_cents: number | null
   /**
+   * Wieviele Memory-Eintraege in **je einem Bereich** liegen duerfen — hier
+   * stand vorher „was ein Benutzer dieser Rolle anlegen darf", und das war
+   * falsch. Gezaehlt wird je scope_identity: persoenlich allgemein, je Server
+   * und je Team. „Je Server" meint dabei die persoenlichen Notizen zu einem
+   * Server; das geteilte „Wissen dieses Servers" ist ein anderer Bereich und
+   * haengt wie das panelweite Gedaechtnis an gar keiner Rolle. Wieviele
+   * Bereiche es gibt, bestimmt der Benutzer selbst; wer 20 Server sieht, hat
+   * bei „25" nicht 25 Eintraege, sondern 25 persoenliche plus 25 je Server
+   * plus 25 je selbst gegruendetem Team.
+   *
+   * `null` heisst hier — anders als bei den Kontingenten darueber — *nicht*
+   * unbegrenzt: das Backend faellt auf MAX_SYSTEM_SCOPE_ENTRIES zurueck,
+   * sobald die Rollenaufloesung keine Zahl liefert (`resolve_scope_memory_limit`
+   * in services/ai_limit_service.py). Die Zahl stand hier ausgeschrieben und
+   * war damit eine zweite, ungebundene Fassung derselben Konstante — die
+   * Waechter im Backend halten die Locale-Texte und den Feld-Deckel an ihr
+   * fest, dieser Docblock lag ausserhalb dessen, was sie lesen, und haette die
+   * alte Zahl ueberlebt. Ohne diesen Rueckfall waere die Grenze auf jeder
+   * Bestandsanlage ersatzlos weggefallen, denn nach der Migration traegt jede
+   * Rolle NULL — und der Leseweg hat keinen Deckel: jeder sichtbare Eintrag
+   * wird bei jeder Chatanfrage einzeln entschluesselt.
+   *
+   * Der Rueckfall greift benutzerweit, nicht je Rollenkarte: ein leeres Feld
+   * traegt in der Rollenaufloesung nichts mehr bei (FELDER_OHNE_UNBEGRENZT),
+   * damit eine zusaetzliche Rolle den Vorrat nie senkt. Die Systemgrenze gilt
+   * also erst, wenn *keine* Rolle des Benutzers eine Zahl traegt — was diese
+   * Karte zeigt, ist nur eine der Rollen, die er tragen kann.
+   *
+   * Team-Gedaechtnis zaehlt gegen das Limit des Team-Gruenders, nicht gegen das
+   * des schreibenden Mitglieds. Das ist an der Oberflaeche sonst nicht zu
+   * erraten: wer hier eine Rolle knapp haelt, begrenzt damit auch die Teams,
+   * die ein Traeger dieser Rolle gegruendet hat.
+   */
+  max_memory_entries: number | null
+  /**
    * Hoechste erlaubte Denktiefe als Rang: 0 = gar nicht, 1 = minimal … 6 = max.
    * `null` heisst unbegrenzt — dieselbe Bedeutung wie bei den Kontingenten.
    *
@@ -70,6 +105,29 @@ const FIELD_DEFINITIONS: Array<{
    * Mengen und bleiben Zahlen.
    */
   ranks?: readonly string[]
+  /**
+   * Ein ruhiger Satz unter dem Feld, fuer die Faelle, in denen Beschriftung und
+   * Schalter allein in die Irre fuehren. Bisher hat das kein Feld gebraucht;
+   * `max_memory_entries` braucht es, weil dort viererlei nicht selbsterklaerend
+   * ist: die Zahl gilt je Bereich, „Unbegrenzt" bedeutet die Systemgrenze, im
+   * Teambereich entscheidet die Rolle des Gruenders statt der des Schreibenden,
+   * und Anlagen- wie Panelwissen haengen an gar keiner Rolle.
+   *
+   * Zweimal hat dieser Satz schon gelogen, und beide Male, weil er eine
+   * Rollenkarte beschrieb, wo das Backend benutzerweit aufloest. Erst zaehlte
+   * er den Teambereich auf, als sei er von der eingestellten Zahl gedeckelt —
+   * wer „basic" auf 5 setzt, deckelt damit aber kein einziges Team, dessen
+   * Gruender eine andere Rolle traegt; ein Basic-Kunde schreibt im Team eines
+   * VIP-Gruenders weiterhin dessen 500. Dann versprach er die Systemgrenze
+   * „ohne eigene Zahl": das stimmte, solange ein leeres Feld jede Zahl
+   * verdraengte, und wurde falsch, als es nichts mehr beitrug. Wer heute an der
+   * knappen Rolle plant, plant fuer Benutzer, die daneben eine grosszuegige
+   * tragen — und die gewinnt.
+   *
+   * Optional, damit die uebrigen Felder unveraendert bleiben — sie sagen genau
+   * das, was ihre Beschriftung sagt.
+   */
+  hintKey?: string
 }> = [
   // Muss `TOKEN_LIMIT_MAX` im Backend entsprechen: die Tokenspalten sind
   // PostgreSQL INTEGER, höhere Werte würden beim Speichern abbrechen.
@@ -79,6 +137,22 @@ const FIELD_DEFINITIONS: Array<{
   { key: 'requests_per_minute', labelKey: 'aiSettings.requestsPerMinute', max: 10_000, step: 1 },
   { key: 'concurrent_operations', labelKey: 'aiSettings.concurrentOperations', max: 100, step: 1 },
   { key: 'monthly_cost_limit_cents', labelKey: 'aiSettings.monthlyCostCents', max: 1_000_000_000, step: 100 },
+  // 1_000 muss `MAX_MEMORY_ENTRIES_MAX` im Backend entsprechen: dort ist der
+  // Deckel bewusst niedrig, weil jeder Eintrag beim Promptaufbau einzeln
+  // entschlüsselt wird. Ein hier großzügigeres Maximum ließe den Betreiber
+  // Werte eintragen, die das Backend abweist.
+  // „Muss entsprechen" war bis eben eine blosse Bitte: die Zahl steht hier,
+  // die Konstante dort, und keine Prüfung sah beide. `test_ai_role_limits.py`
+  // liest diese Zeile jetzt und vergleicht sie — wer den Backend-Deckel
+  // verschiebt, bekommt dort einen roten Test statt hier ein stilles Formular,
+  // das gültige Werte abweist oder ungültige durchlässt.
+  {
+    key: 'max_memory_entries',
+    labelKey: 'aiSettings.maxMemoryEntries',
+    max: 1_000,
+    step: 10,
+    hintKey: 'aiSettings.maxMemoryEntriesHint',
+  },
   {
     key: 'max_reasoning_effort',
     labelKey: 'aiSettings.maxReasoningEffort',
@@ -216,6 +290,13 @@ export function AiTab() {
           <h3 className="font-headline text-lg font-semibold text-on-surface">{t('aiSettings.title')}</h3>
         </div>
         <p className="max-w-3xl text-sm text-on-surface-variant">{t('aiSettings.description')}</p>
+        {/* Der Regeltext steht ueber dem Feldraster und wird zuerst gelesen —
+            er muss deshalb selbst sagen, wo er nicht gilt. Bis eben drehte er
+            die Sonderregel des Memory-Feldes genau um („eine explizit
+            unbegrenzte Rolle gewinnt ueber begrenzte Rollen"), waehrend der
+            Feldhinweis eine Zeile tiefer das Gegenteil sagte. Wer oben las,
+            legte an der grosszuegigen Rolle „Unbegrenzt" um — und nahm ihr
+            damit jeden Beitrag, statt ihr einen zu geben. */}
         <p className="mt-2 max-w-3xl text-xs text-on-surface-variant">{t('aiSettings.ruleHelp')}</p>
       </div>
 
@@ -255,6 +336,12 @@ export function AiTab() {
             )}
           </div>
 
+          {/* Derselbe Grund wie beim Regeltext darueber, nur naeher am Schaden:
+              dieser Kasten erscheint genau an einer Rolle, deren Memory-Feld
+              leer ist. „Solange keine Rolle konfiguriert ist, gilt unbegrenzt"
+              stimmt fuer die Kontingente und nicht fuer den Vorrat — wer daraus
+              schloss, ein leeres Feld lasse das Gedaechtnis offen, plante gegen
+              eine Zahl, die das Panel nie durchsetzt. */}
           {!selected.configured && (
             <p className="mb-5 rounded-lg border border-outline-variant/40 bg-surface-container-low/45 p-3 text-xs leading-5 text-on-surface-variant">
               {t('aiSettings.notConfiguredHint')}
@@ -262,10 +349,19 @@ export function AiTab() {
           )}
 
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {FIELD_DEFINITIONS.map(({ key, labelKey, max, step, ranks }) => {
+            {FIELD_DEFINITIONS.map(({ key, labelKey, max, step, ranks, hintKey }) => {
               const unlimited = selected[key] === null
               const label = t(labelKey)
               const fieldId = `ai-${selected.role_id}-${key}`
+              // Der Hinweis haengt per `aria-describedby` an **beiden**
+              // Bedienelementen der Karte, am Eingabefeld und am Schalter. Nur
+              // am Feld war er falsch aufgehoben, und zwar genau dort, wo er
+              // gebraucht wird: das Feld ist `disabled`, sobald „Unbegrenzt" an
+              // ist, und ein deaktiviertes Feld steht in keiner Tabreihenfolge.
+              // Wer die Karte nicht sieht, sondern vorgelesen bekommt, hoerte
+              // in genau dem Zustand, in dem „Unbegrenzt" die Unwahrheit sagt,
+              // nur den Schalter — und der schwieg.
+              const hintId = hintKey ? `${fieldId}-hint` : undefined
               return (
                 <div key={key} className="space-y-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
                   <label htmlFor={fieldId} className="block min-h-10 text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
@@ -284,6 +380,7 @@ export function AiTab() {
                           : t(`ai.reasoning.levels.${rank}`, { defaultValue: rank }),
                       }))}
                       aria-label={`${label}: ${selected.role_name}`}
+                      aria-describedby={hintId}
                     />
                   ) : (
                     <NumberStepper
@@ -298,8 +395,17 @@ export function AiTab() {
                         if (parsed !== null) updateField(selected.role_id, key, parsed)
                       }}
                       aria-label={`${label}: ${selected.role_name}`}
+                      aria-describedby={hintId}
                     />
                   )}
+                  {/* Der Schalter bleibt technisch, wie er ist, und speichert
+                      weiter `null`. Er ist fuer alle Felder derselbe, und fuer
+                      die Kontingente stimmt „Unbegrenzt" ja auch weiterhin;
+                      allein bei der Memory-Grenze bedeutet `null` seit dem
+                      Rueckfall auf die Systemgrenze etwas anderes. Ein zweiter
+                      Schalter, der genauso aussieht und etwas anderes meint,
+                      waere schlechter als ein Satz darunter — deshalb macht ihn
+                      hier der Hinweis ehrlich und kein Sonderweg im Bauteil. */}
                   <div className="flex min-h-10 items-center justify-between gap-3">
                     <span className="text-xs text-on-surface-variant">{t('aiSettings.unlimited')}</span>
                     <Switch
@@ -307,8 +413,18 @@ export function AiTab() {
                       disabled={!canWrite || saving}
                       onCheckedChange={(next) => updateField(selected.role_id, key, next ? null : 0)}
                       aria-label={`${t('aiSettings.unlimited')}: ${label}: ${selected.role_name}`}
+                      aria-describedby={hintId}
                     />
                   </div>
+                  {/* Steht unter dem Schalter, weil er zuletzt erklaert werden
+                      muss — und weil so die Hoehen von Beschriftung, Eingabe und
+                      Schalter ueber alle Karten des Rasters in einer Linie
+                      bleiben; nur diese eine Karte wird laenger. */}
+                  {hintKey && (
+                    <p id={hintId} className="text-xs leading-5 text-on-surface-variant">
+                      {t(hintKey)}
+                    </p>
+                  )}
                 </div>
               )
             })}

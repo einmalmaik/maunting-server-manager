@@ -717,6 +717,31 @@ def test_die_migration_erzeugt_dasselbe_wie_das_modell(tmp_path: Path) -> None:
         assert _fremdschluessel(_frisch(engine), "ai_tasks", "last_run_id")[
             "options"
         ] == {"ondelete": "SET NULL"}
+
+        # Und fuer den Memory-Vorrat an der Rolle. Er ist eine blosse Spalte
+        # ohne Fremdschluessel, aber der Ausfall waere derselbe: `create_all`
+        # legt sie in den Tests ohnehin an, faellt das `add_column` kuenftig
+        # bei einem Rebase aus der Kette, bleibt die Suite gruen. Beim
+        # Bestandsbetreiber knallt es dann nach dem Upgrade bei jedem Lesen der
+        # Rollenlimits — also im Chat und in den Einstellungen zugleich.
+        command.downgrade(config, "20260814_01")
+        assert "max_memory_entries" not in {
+            spalte["name"] for spalte in _frisch(engine).get_columns("role_ai_limits")
+        }
+        command.upgrade(config, "head")
+        # `_frisch` wie bei `ai_tasks`: die Spalte kommt ueber einen
+        # Batch-Umbau, und den beantwortet SQLite je nach Alter der Verbindung
+        # aus einem Schema-Cache, der die Tabelle noch ohne sie kennt.
+        gewandert = {
+            spalte["name"]: spalte
+            for spalte in _frisch(engine).get_columns("role_ai_limits")
+        }
+        # Nullable, und zwar mit derselben Begruendung wie beim Backupnachweis
+        # oben: NULL heisst „der Betreiber hat nichts gesagt“. Ein NOT NULL mit
+        # server_default 100 haette die bisher im Code stehende Grenze als
+        # seine eigene Politik in die Datenbank geschrieben — sichtbar in der
+        # Maske, obwohl er sie nie gesetzt hat.
+        assert gewandert["max_memory_entries"]["nullable"] is True
     finally:
         engine.dispose()
         settings.database_url = vorher

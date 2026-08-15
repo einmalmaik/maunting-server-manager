@@ -42,6 +42,12 @@ from services.ai_task_service import (
     MIN_INTERVALL_STUNDEN as _MIN_INTERVALL_STUNDEN,
 )
 from services.ai_redaction import redact_sensitive_text
+# Aus demselben Grund wie die Intervallgrenzen: der Werkzeugtext nennt dem
+# Modell, welche Zahl bei `max_memory_entries` gilt, wenn nichts hinterlegt ist.
+# Als Abschrift im Text wuerde sie still falsch, sobald jemand die Systemgrenze
+# verschiebt — und still falsch ist sie genau dort am teuersten, wo sie
+# woertlich an das Modell geht.
+from services.ai_limit_service import MAX_SYSTEM_SCOPE_ENTRIES as _MAX_SCOPE_ENTRIES
 from services.server_file_access_service import read_server_text
 
 
@@ -272,6 +278,14 @@ def _global_tool_definitions() -> list[dict]:
             "Kuendigungsfrist, ihre Produktzuordnungen, die vergebenen Slugs, "
             "die Benutzer, die als Dienstbenutzer taugen, und die Rollen, die "
             "**dieser** Benutzer vergeben darf — samt ihrem KI-Kontingent.\n"
+            "Beim Kontingent gilt dieselbe Ausnahme wie beim Anlegen: fehlt "
+            "`ai_limits` ganz oder steht `max_memory_entries` darin auf `null`, "
+            "sagt diese Rolle zum Gedaechtnisvorrat **nichts** — weder "
+            f"'unbegrenzt' noch '{_MAX_SCOPE_ENTRIES}'. Es gewinnt die hoechste "
+            "gesetzte Zahl unter allen Rollen ihres Traegers; die Systemgrenze "
+            f"von {_MAX_SCOPE_ENTRIES} Eintraegen greift erst, wenn keine seiner "
+            "Rollen eine Zahl traegt. Was ein einzelner Kunde am Ende hat, ist "
+            "hier also nicht ablesbar.\n"
             "**Ruf das auf, bevor du etwas zur Shop-Einrichtung vorschlaegst.** "
             "Slug, Dienstbenutzer und Produktkennung sind nichts, was man raten "
             "kann; ein geratener Wert erzeugt einen Vorschlag, den der Benutzer "
@@ -714,9 +728,10 @@ def _global_tool_definitions() -> list[dict]:
             "andere.\n"
             "Rechte vergibt sie ausdruecklich keine. Braucht der Tarif welche, "
             "gehoert das in die Rollenverwaltung des Panels und nicht hierher.\n"
-            "Ein Feld auf `null` heisst **unbegrenzt**, nicht null. Setz nur, "
-            "was der Benutzer genannt hat, und frag im Zweifel nach — ein "
-            "geratenes Tageslimit merkt der Kunde erst, wenn es greift.",
+            "Bei den Kontingenten heisst ein Feld auf `null` **unbegrenzt**, "
+            "nicht null; `max_memory_entries` ist die Ausnahme, siehe dort. "
+            "Setz nur, was der Benutzer genannt hat, und frag im Zweifel nach "
+            "— ein geratenes Tageslimit merkt der Kunde erst, wenn es greift.",
             {
                 "name": {"type": "string", "maxLength": 64},
                 "description": {"type": ["string", "null"], "maxLength": 255},
@@ -727,6 +742,23 @@ def _global_tool_definitions() -> list[dict]:
                 "concurrent_operations": {"type": ["integer", "null"], "minimum": 0},
                 "monthly_cost_limit_cents": {"type": ["integer", "null"], "minimum": 0},
                 "max_reasoning_effort": {"type": ["integer", "null"], "minimum": 0},
+                "max_memory_entries": {
+                    "type": ["integer", "null"],
+                    "minimum": 0,
+                    "description": (
+                        "Memory-Eintraege je Bereich. `null` heisst hier "
+                        "**nicht** unbegrenzt, sondern 'nichts hinterlegt': "
+                        "die Rolle traegt zum Vorrat dann nichts bei. Es "
+                        "gewinnt die hoechste gesetzte Zahl unter allen Rollen "
+                        f"des Kunden; die Systemgrenze von {_MAX_SCOPE_ENTRIES} "
+                        "Eintraegen greift erst, wenn keine davon eine Zahl "
+                        "traegt. `null` taugt damit zu keinem der beiden "
+                        "Wuensche: 'unbegrenztes Gedaechtnis' braucht eine "
+                        "Zahl, die du dem Benutzer nennst, und senken kann "
+                        "eine zusaetzliche Rolle gar nicht — dafuer muss die "
+                        "Zahl der bestehenden Rolle sinken."
+                    ),
+                },
                 **_RATIONALE_SCHEMA,
             },
             ["name", *_RATIONALE_REQUIRED],
@@ -1466,7 +1498,9 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
     `ai_memory_service.upsert_entry`: Secret-Abweisung, Groessengrenze,
     DIS-Verschluesselung, Scope-Trennung je Benutzer und die Regel, dass eine
     Ableitung der KI keine ausdrueckliche Ansage des Benutzers ueberschreibt.
-    Hier steht nur die Argumentpruefung.
+    Hier steht die Argumentpruefung — und die Uebersetzung einer Absage in eine
+    Anweisung. Die kann nur hier stehen: der Dienst bedient auch den Router und
+    schreibt deshalb fuer einen Menschen, nicht fuer ein Modell.
     """
     from services import ai_memory_service
 
@@ -1559,11 +1593,45 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
             team_id=team_id, key=key, value=value, origin="ai",
             replace_user_entry=bool(arguments.get("replace_user_entry")),
         )
+    except ai_memory_service.MemoryScopeVoll as exc:
+        # Die Werkzeugnamen stehen **hier** und nicht im Dienst, weil derselbe
+        # Vorgang zwei Adressaten hat: `upsert_entry` bedient auch den Router,
+        # und dessen `detail` liest ein Mensch als Toast. Ein Text, der beiden
+        # dienen soll, dient keinem — der Dienst sagt deshalb die Tatsache, und
+        # erst an dieser Naht kommt dazu, was das Modell damit tun soll.
+        #
+        # Unterschieden wird ueber die Zahlen der Ausnahme und nicht ueber den
+        # Meldungstext: sonst entschiede eine Umformulierung drueben
+        # stillschweigend, ob hier zum Loeschen geraten wird.
+        #
+        # Und geraten wird dazu nur in einem der drei Faelle. Bei Grenze 0
+        # schafft Loeschen keinen Platz, bei einer nachtraeglichen Senkung
+        # trifft es die falschen: `search_memory` liefert hoechstens fuenfzehn
+        # Treffer, und zwar die zur Frage **relevantesten**. Wer daraus dutzende
+        # Eintraege wegraeumt, loescht nicht, was nicht mehr gilt, sondern was
+        # zuletzt gebraucht wurde — bei `team` und `server_shared` obendrein die
+        # Betriebsanleitung der Kollegen. `forget_memory` fragt vorher
+        # niemanden.
+        if exc.grenze == 0:
+            hinweis = "Versuch es nicht erneut."
+        elif exc.bestand == exc.grenze:
+            hinweis = (
+                "Suche mit search_memory, was nicht mehr gilt, nenne es dem "
+                "Benutzer und lösche es mit forget_memory — aber nur Einträge "
+                "aus genau diesem Bereich, denn die Suche geht über alle "
+                "Bereiche, die er sehen darf."
+            )
+        else:
+            hinweis = (
+                "Nenne dem Benutzer den Stand und frag, was weg soll. Lösche "
+                "hier nichts von dir aus: bei dieser Menge triffst du nicht, "
+                "was nicht mehr gilt, sondern was zuletzt gebraucht wurde."
+            )
+        raise AiActionValidationError(f"{exc.detail} {hinweis}") from exc
     except HTTPException as exc:
-        # Volles Scope, Secret im Wert, fremder Server, geschuetzter Eintrag,
-        # fehlendes `server.config.write`: alles regulaere Faelle, die das
-        # Modell erfahren soll, statt dass der Stream mit einem Serverfehler
-        # abbricht.
+        # Secret im Wert, fremder Server, geschuetzter Eintrag, fehlendes
+        # `server.config.write`: alles regulaere Faelle, die das Modell erfahren
+        # soll, statt dass der Stream mit einem Serverfehler abbricht.
         #
         # Ausdruecklich **keine** stille Herabstufung wie beim Team weiter oben.
         # Dort ist "kein echtes Team vorhanden" ein Zustand des Panels, und
@@ -1630,7 +1698,12 @@ def _execute_search_memory(db: Session, *, user: User, arguments: dict) -> dict:
     `search_entries` nutzt denselben Sichtbarkeitsfilter wie der Abruf in den
     Kontext. Eine Suche kann damit nichts aufdecken, was ohne sie verborgen
     waere.
+
+    Ein Treffer muss ausserdem **wieder ansprechbar** sein: die Suche ist die
+    erste Haelfte des zweistufigen Loeschwegs, und `forget_memory` braucht den
+    Bereich in genau der Form, in der es ihn annimmt.
     """
+    from models import Team
     from services import ai_memory_service
 
     if not permission_service.has_global_permission(db, user, "ai.memory.use"):
@@ -1645,25 +1718,63 @@ def _execute_search_memory(db: Session, *, user: User, arguments: dict) -> dict:
         hits = ai_memory_service.search_entries(db, user, query)
     except HTTPException as exc:
         raise AiActionValidationError(str(exc.detail)) from exc
-    return {
-        "untrusted": True,
-        "query": query,
-        "results": [
-            {
-                "scope": row.scope,
-                "team_id": row.team_id,
-                # Ohne die Nummer findet das Modell einen serverbezogenen
-                # Eintrag, kann ihn aber nicht mehr loeschen: `forget_memory`
-                # braucht sie, um denselben Bereich noch einmal aufzuloesen.
-                # Genau die Sackgasse, in der "vergiss das" ins Leere lief.
-                "server_id": row.server_id,
-                "key": row.key,
-                "value": value,
-                "origin": row.origin,
-            }
-            for row, value, _score in hits
-        ],
-    }
+
+    # Zu jedem Team-Treffer der Name, unter dem der Bereich ansprechbar ist.
+    # Dasselbe Muster wie in `_execute_forget_skill` weiter unten und aus
+    # demselben Grund: eine Team-ID ist wertlos, sobald jemand mit dem Bereich
+    # noch etwas vorhat. `remember` und `forget_memory` adressieren ein Team
+    # ausschliesslich ueber `team="<Name>"` (aufgeloest in
+    # `team_service.learning_team`); ein Werkzeug, das eine Nummer in einen
+    # Namen uebersetzt, gibt es nicht.
+    #
+    # Erst damit ist die Auflage aus der vollen Absage befolgbar — "nur
+    # Eintraege aus genau diesem Bereich", wobei der Bereich dort als Name
+    # genannt wird (`ai_memory_service._bereichsname`). Vorher endete der Name
+    # an der Suche: Treffer trugen nur `team_id`, und weil Schluessel bewusst
+    # stabil sind und sich ueber Teams hinweg wiederholen, standen zwei
+    # gleichnamige Eintraege aus zwei Teams ununterscheidbar nebeneinander. Wer
+    # dann `forget_memory(team="Alpha")` rief, loeschte den noch gueltigen
+    # Eintrag und liess den veralteten aus dem anderen Team stehen.
+    #
+    # Je Team einmal fragen, nicht je Treffer: fuenfzehn Treffer aus einem Team
+    # sind der Normalfall.
+    namen: dict[int, str | None] = {}
+
+    def _teamname(team_id: int | None) -> str | None:
+        """Der Name eines Teams, oder ``None``, wenn er sich nicht holen laesst."""
+        if team_id is None:
+            return None
+        if team_id not in namen:
+            team = db.get(Team, team_id)
+            namen[team_id] = team.name if team is not None and team.name else None
+        return namen[team_id]
+
+    results = []
+    for row, value, _score in hits:
+        treffer = {
+            "scope": row.scope,
+            "team_id": row.team_id,
+            # Ohne die Nummer findet das Modell einen serverbezogenen
+            # Eintrag, kann ihn aber nicht mehr loeschen: `forget_memory`
+            # braucht sie, um denselben Bereich noch einmal aufzuloesen.
+            # Genau die Sackgasse, in der "vergiss das" ins Leere lief.
+            "server_id": row.server_id,
+            "key": row.key,
+            "value": value,
+            "origin": row.origin,
+        }
+        name = _teamname(row.team_id)
+        if name is not None:
+            # Der Feldname ist der Argumentname von `forget_memory`, damit der
+            # Weg vom Treffer zum Aufruf ohne Uebersetzung auskommt.
+            treffer["team"] = name
+        # Fehlt die Zeile wider Erwarten, bleibt es bei `team_id` allein. Ein
+        # ersatzweises "Team 7" waere schlimmer als nichts: das Modell setzte
+        # es als `team` ein, `learning_team` traefe damit keinen Kandidaten und
+        # antwortete mit derselben Rueckfrage wie ohne jede Angabe.
+        results.append(treffer)
+
+    return {"untrusted": True, "query": query, "results": results}
 
 
 def _execute_forget_memory(db: Session, *, user: User, arguments: dict) -> dict:

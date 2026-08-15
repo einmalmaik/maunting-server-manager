@@ -561,9 +561,14 @@ Alternativen (gemessen, nicht geschätzt):
   - Postgres-Volltextsuche: sprachgebunden und damit am Problem vorbei.
   - pgvector: MSM verwaltet seinen PostgreSQL selbst mit `postgres:17-alpine`
     (config.managed_postgres_image), das die Erweiterung nicht enthält. Ein
-    Image-Wechsel träfe jede Installation. Bei höchstens 100 Einträgen je
-    Bereich ist ein Skalarprodukt in Python ohnehin schneller als der
-    Datenbank-Roundtrip; ein Vektorindex lohnt ab etwa 10.000 Einträgen.
+    Image-Wechsel träfe jede Installation. Bei bis zu 1.000 Einträgen je Bereich
+    (`ai_limit_service.MAX_MEMORY_ENTRIES_MAX` — die 100, die hier ursprünglich
+    stand, ist seit 2026-08-15 nur noch der Ausgangswert je Rolle) ist ein
+    Skalarprodukt in Python weiterhin schneller als der Datenbank-Roundtrip. Die
+    Absage bleibt, ihr Abstand nicht: bis zur Index-Schwelle von etwa 10.000
+    Einträgen sind es statt zwei Zehnerpotenzen noch eine, und in einen Prompt
+    fließen mehrere Bereiche nebeneinander. Steigt der Deckel erneut, ist
+    pgvector neu zu prüfen.
 
 Security:
   `model2vec` berührt weder Secrets noch Server-Verbindungen. Der Dienst

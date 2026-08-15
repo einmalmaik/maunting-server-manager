@@ -12,7 +12,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, AiMemoryPreference, Server, Team, User
-from services import ai_embedding_service, audit_service, permission_service
+from services import (
+    ai_embedding_service,
+    ai_limit_service,
+    audit_service,
+    permission_service,
+)
 from services.ai_redaction import redact_sensitive_text
 from services.ai_embedding_service import EMBEDDING_DIMENSIONS
 from services.ai_embedding_service import MODEL_TAG as _EMBEDDING_MODEL_TAG
@@ -21,16 +26,58 @@ from services.dis_client import DisClient, DisDecryptionError, DisSidecarError
 
 logger = logging.getLogger(__name__)
 
-MAX_ENTRIES_PER_SCOPE = 100
-
 #: Was diesem Benutzer gehoert und deshalb an seiner Einwilligung haengt.
 #: `team` und `panel` gehoeren dem Team bzw. dem Betreiber.
 PERSOENLICHE_SCOPES = ("user", "server")
 MAX_CONTEXT_CHARS = 6_000
+# Wieviele Eintraege eine *einzelne Anfrage* hoechstens entschluesselt.
+#
+# Das ist eine andere Zusage als `max_memory_entries`, und die eine ersetzt die
+# andere nicht: jenes Rollenlimit deckelt einen **Bereich**, dieser Wert deckelt
+# eine **Anfrage**. Der Unterschied ist der Multiplikator dazwischen, und der
+# gehoert nicht dem Betreiber, sondern dem Benutzer: mit jedem Server, den er
+# sehen darf, und jedem Team, das er gruendet, kommt ein weiterer Bereich hinzu.
+# `provider_memory_context` filtert nur `server_shared` auf den einen aktuellen
+# Server — die persoenlichen Servernotizen kommen fuer *alle* sichtbaren Server
+# mit. Bei einem Rollenlimit von 1.000 und zwanzig Anlagen waren das ueber
+# 21.000 Zeilen, und jede kostet in `_entschluesseln` einen synchronen
+# HTTP-Roundtrip zum DIS-Sidecar — vor dem Schnitt auf `MAX_CONTEXT_CHARS`,
+# weil sich erst am Klartext messen laesst, was ins Budget passt.
+#
+# 300 ist gegen genau dieses Budget gewaehlt: bei kurzen Eintraegen passen
+# hoechstens rund 150 Zeilen in 6.000 Zeichen, der Deckel liegt also beim
+# Doppelten dessen, was ueberhaupt je gezeigt werden koennte. Unterhalb davon
+# aendert sich **nichts** — `_vorauswahl` reicht die Zeilen dann unveraendert
+# durch. Er greift nur dort, wo das Budget ohnehin das meiste weggeworfen haette.
+MAX_CONTEXT_ROWS = 300
 # Nach so vielen Tagen ohne Nutzung haelbiert sich der Aktualitaetsbonus. Grob
 # an "eine Arbeitswoche" angelehnt; der Wert entscheidet nur bei Platzmangel.
 RECENCY_HALFLIFE_DAYS = 7.0
 _WORD_RE = re.compile(r"[\w]+", re.UNICODE)
+
+
+class MemoryScopeVoll(HTTPException):
+    """409 mit dem Zählstand daneben, weil ein Text allein zu wenig trägt.
+
+    Bleibt bewusst eine `HTTPException`: der Router in `routers/ai_memory.py`
+    und jeder andere Aufrufer merken von dieser Klasse nichts, bekommen
+    denselben 409 und dasselbe `detail` wie vorher — und dieses `detail` ist
+    ein Satz für einen **Menschen**, denn über den Router legt der Benutzer
+    selbst einen Eintrag an und liest die Meldung als Toast.
+
+    Die drei Zahlen daneben sind für die eine Stelle da, die aus derselben
+    Tatsache eine Anweisung an das *Modell* macht (`_execute_remember`). Ohne
+    sie müsste die auf den Meldungstext horchen, um „gesperrt“ von „genau
+    voll“ von „nachträglich gesenkt“ zu unterscheiden — und jede Umformulierung
+    hier änderte drüben stillschweigend das Verhalten, ohne dass ein Test es
+    merkt.
+    """
+
+    def __init__(self, *, bereich: str, bestand: int, grenze: int, detail: str) -> None:
+        super().__init__(status_code=409, detail=detail)
+        self.bereich = bereich
+        self.bestand = bestand
+        self.grenze = grenze
 
 
 def _aad(row: AiMemoryEntry) -> str:
@@ -224,13 +271,21 @@ def personal_entries(db: Session, user: User) -> list[tuple[AiMemoryEntry, str]]
     serverbezogenen Notizen eine konkrete `server_id`. Damit war der Bereich
     ueber die Oberflaeche nicht erreichbar: die KI schreibt solche Notizen
     (`remember` mit scope='server'), sie fliessen in jeden Chat und zaehlen
-    gegen die 100er-Grenze — sehen oder loeschen konnte man sie nicht.
+    gegen die Bereichsgrenze — sehen oder loeschen konnte man sie nicht.
 
     Serverbezogene Eintraege bleiben persoenlich (`owner_user_id` ist gesetzt,
     die Kennung lautet `server:{sid}:user:{uid}`), gehoeren also ins Profil und
     nicht zum Server. Anders als beim Kontextaufbau wird hier **nicht** auf
     `server.view` geprueft: es ist der eigene Eintrag, und wer den Zugriff auf
     einen Server verliert, soll seine Notiz dazu weiterhin loeschen koennen.
+
+    Bewusst **ohne** `MAX_CONTEXT_ROWS`: dieser Weg traegt denselben
+    Multiplikator wie der Kontextaufbau (ein Bereich je sichtbarem Server), aber
+    nicht dieselbe Frage. Hier hat der Benutzer genau diese Liste angefordert,
+    einmal, und will sie aufraeumen — eine Ansicht, die stillschweigend 300 von
+    400 Eintraegen zeigt, waere schlimmer als eine langsame: sie verstecke
+    genau die Zeilen, die zu loeschen er gekommen ist. Der Deckel dort schuetzt
+    *jede* Chatnachricht, dieser Aufruf geschieht auf Klick.
     """
     rows = (
         db.query(AiMemoryEntry)
@@ -300,6 +355,67 @@ def _assert_may_write(
             )
 
 
+def _bereichsname(
+    db: Session, scope: str, server_id: int | None, team_id: int | None
+) -> str:
+    """Benennt einen Bereich so, dass der Satz darum vor einem Menschen besteht.
+
+    Der zweite Benenner dieses Moduls neben dem in `_memory_line`, und das mit
+    Absicht. Das dortige Etikett (`server:62:anlage`) ist eine Marke für die
+    Maschine: es steht vor **jeder** Kontextzeile, wird also je Zeile bezahlt,
+    und das Modell muss es wieder in `scope` und `server_id` zerlegen können,
+    um denselben Bereich noch einmal anzusprechen. Hier ist das Gegenteil
+    gefragt — ein Satzteil, den ein Mensch versteht, gleich ob er ihn selbst
+    als Fehlermeldung liest oder das Modell ihn ihm vorliest. Die
+    beiden aus einer Funktion zu bedienen hiesse, an jeder Aufrufstelle einen
+    Schalter mitzuführen, und sie ändern sich aus verschiedenen Gründen: das
+    Etikett, wenn ein Bereich dazukommt, dieser Name, wenn der Ton der
+    Meldungen nicht mehr stimmt. Auch die Form passt nicht zusammen: dort liegt
+    eine fertige Zeile vor, hier gibt es noch keine — geschrieben wird ja
+    gerade erst.
+
+    Die Sitzung steht in der Signatur wegen des Teams: dessen Name ist das
+    einzige Stück dieses Satzes, das nicht schon in den Argumenten liegt, und
+    ohne ihn wäre der Satz für ein Team wertlos (siehe unten).
+    """
+    if scope == "user":
+        return "dein persönliches Gedächtnis"
+    if scope == "server":
+        return f"deine Notizen zu Server {server_id}"
+    if scope == "server_shared":
+        return f"das Wissen von Server {server_id}"
+    if scope == "team":
+        # Der Name, nicht die Nummer — und das ist keine Kosmetik. Ein Team
+        # sprechen `remember` und `forget_memory` ausschliesslich über
+        # `team="<Name>"` an, aufgelöst über Namensgleichheit in
+        # `team_service.learning_team`; ein Werkzeug, das eine Nummer in einen
+        # Namen übersetzt, gibt es nicht. „Team 42“ benennt für das Modell also
+        # nichts, was es ansprechen könnte: die Auflage „nur Einträge aus genau
+        # diesem Bereich“ wäre damit nicht befolgbar, und dem Benutzer könnte es
+        # den vollen Bereich nur als Nummer nennen.
+        #
+        # Der Schaden bleibt nicht beim Nichtstun. Schlüssel sind bewusst stabil
+        # und wiederholen sich über Teams hinweg — wer den Bereich nicht treffen
+        # kann, greift den gleichnamigen Treffer des falschen Teams und löscht
+        # dort.
+        ziel = db.get(Team, team_id) if team_id is not None else None
+        if ziel is not None and ziel.name:
+            return f"das Wissen von Team „{ziel.name}“"
+        # Kein stiller Notausgang: `scope_identity` hat die Mitgliedschaft in
+        # genau diesem Team schon geprüft, die Zeile existiert also. Bliebe sie
+        # wider Erwarten aus, ist die Nummer immer noch besser als ein Satz ohne
+        # Bereich — dass es um das Team geht und nicht um den eigenen Vorrat,
+        # ist die Hälfte der Meldung, und die darf nie fehlen.
+        return f"das Wissen von Team {team_id}"
+    if scope == "panel":
+        return "das panelweite Gedächtnis"
+    # Unerreichbar: `scope_identity` hat jeden unbekannten Bereich längst mit
+    # 422 abgewiesen. Trotzdem kein `else`-Zweig auf "panel" — ein neuer
+    # Bereich, der hier durchrutscht, würde dem Benutzer sonst als das
+    # panelweite Gedächtnis angesagt und damit als Sache des Betreibers.
+    return "dieser Bereich"
+
+
 def upsert_entry(
     db: Session, *, user: User, scope: str, server_id: int | None, key: str, value: str,
     origin: str = "user", team_id: int | None = None, replace_user_entry: bool = False,
@@ -329,23 +445,87 @@ def upsert_entry(
     ).first()
     action = "ai.memory.updated"
     if row is None:
-        if db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity).count() >= MAX_ENTRIES_PER_SCOPE:
-            # Die Meldung nennt den offenen Weg, wie jede andere dieses Moduls.
-            # Sie geht unverändert an das Modell (`_execute_remember` reicht
-            # `str(exc.detail)` weiter), und der Systemprompt weist es an,
-            # ungefragt zu merken. Ohne den Hinweis kennt es hier keinen Ausweg
-            # und hört für diesen Bereich schlicht auf zu lernen.
+        # Wieviel hier hineinpasst, entscheidet nicht mehr eine Konstante dieses
+        # Moduls, sondern der Betreiber über das Rollenlimit — je nach Bereich
+        # das des Schreibenden, das des Teamgründers oder die feste
+        # Systemgrenze. Eine zweite Zahl hier daneben wäre eine zweite Wahrheit,
+        # die mit der ersten auseinanderläuft.
+        #
+        # Die Auflösung gibt immer eine Zahl zurück, nie „unbegrenzt“: hat der
+        # Betreiber nichts hinterlegt, gilt dort weiterhin die alte 100. Die
+        # Zählung läuft deshalb ausnahmslos — und ihr Ergebnis steht in einer
+        # Variablen, weil die Meldung es gleich noch braucht.
+        grenze = ai_limit_service.resolve_scope_memory_limit(
+            db, scope, user, team_id=normalized_team_id, server_id=normalized_server_id,
+        )
+        bestand = db.query(AiMemoryEntry).filter(
+            AiMemoryEntry.scope_identity == identity
+        ).count()
+        if bestand >= grenze:
+            # Hier steht die **Tatsache**, in Sätzen, die ein Mensch versteht —
+            # und nichts sonst. Vorher stand hier eine Regieanweisung an das
+            # Modell („Sag dem Benutzer …“, „Suche mit search_memory …“). Diese
+            # Funktion hat aber zwei Adressaten: über `routers/ai_memory.py`
+            # legt der Benutzer selbst einen Eintrag an, und `detail` wird ihm
+            # als Toast vorgesetzt. Er las dort eine Anweisung an eine dritte
+            # Instanz, über ihn selbst, mit Werkzeugnamen, die er nicht hat. Ein
+            # Text, der beiden dienen soll, dient keinem — was das Modell tun
+            # oder lassen soll, steht deshalb in `_execute_remember`, an der
+            # Naht zum Modell.
+            #
+            # Der Bereich steht in jedem der drei Sätze, und das ist keine
+            # Höflichkeit: nur er sagt, **wo** es klemmt. „Voll“ ohne Bereich
+            # liest sich wie „das Gedächtnis ist voll“ und stimmt dann für jeden
+            # anderen Vorrat des Benutzers nicht.
+            #
+            # Drei Fälle, weil die Auskunft in dreien verschieden ist:
+            #
+            # 0 — hier passt nichts hinein, und daran ändert kein Aufräumen
+            #   etwas. Vom Tarif des Benutzers spricht die Absage bewusst nicht:
+            #   bei `scope='team'` kommt die 0 vom Gründer, nicht vom
+            #   Schreibenden. Ein Mitglied mit grosszügigem eigenem Limit hörte
+            #   sonst, sein Tarif sei schuld — und könnte das durch keinen
+            #   Tarifwechsel beheben.
+            # genau voll — der Normalfall. Einer geht, einer kommt.
+            # zu voll — der Betreiber hat nachträglich gesenkt. Nur dieser Fall
+            #   nennt eine Menge, und er nennt sie als Auskunft, nicht als
+            #   Auftrag: „einer muss weichen“ wäre hier eine Anleitung zu so
+            #   vielen Fehlschlägen, wie der Bereich zu viel hat. Wer entscheidet,
+            #   welche gehen, steht bewusst **nicht** mehr dabei. „Welche das
+            #   sind, entscheidet der Benutzer“ stand hier bis zuletzt — ein Satz,
+            #   der über seinen eigenen Leser hinwegredet, denn dieses `detail`
+            #   liest der Benutzer selbst als Toast, und die zwei Sätze davor
+            #   duzen ihn. Derselbe Fehler wie die frühere Regieanweisung im
+            #   0-Fall, nur eine Stufe leiser. Als Anweisung gebraucht wird der
+            #   Gedanke ohnehin nur vom Modell, und dort steht er schon: „Nenne
+            #   dem Benutzer den Stand und frag, was weg soll“ in
+            #   `_execute_remember`.
             #
             # Verdrängt wird bewusst nichts von selbst: was ein Mensch gesagt
-            # hat, wirft das Panel nicht ungefragt weg. Deshalb ist die Meldung
-            # das Einzige, was sich hier ändert.
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Memory-Scope ist voll ({MAX_ENTRIES_PER_SCOPE} Einträge). "
-                    "Suche mit search_memory, was nicht mehr gilt, nenne es dem "
-                    "Benutzer und lösche es mit forget_memory — dann erneut merken."
-                ),
+            # hat, wirft das Panel nicht ungefragt weg.
+            bereich = _bereichsname(db, scope, normalized_server_id, normalized_team_id)
+            if grenze == 0:
+                meldung = (
+                    f"Für {bereich} ist kein Gedächtnis freigegeben (0 Einträge erlaubt). "
+                    "Das entscheidet die Rolle und nicht der Inhalt — Löschen schafft hier "
+                    "keinen Platz."
+                )
+            elif bestand == grenze:
+                meldung = (
+                    f"Voll — {bereich} führt {bestand} von {grenze} erlaubten Einträgen. "
+                    "Einer muss weichen, bevor ein neuer passt."
+                )
+            else:
+                # Nicht `bestand - grenze`: der neue Eintrag will ja auch noch
+                # hinein. Bei 21 von 20 wären das sonst „1 muss weichen“ und
+                # danach immer noch kein Platz.
+                zuviel = bestand - grenze + 1
+                meldung = (
+                    f"Zu voll — {bereich} führt {bestand} Einträge, erlaubt sind {grenze}. "
+                    f"Die Grenze wurde nachträglich gesenkt; {zuviel} müssen weichen."
+                )
+            raise MemoryScopeVoll(
+                bereich=bereich, bestand=bestand, grenze=grenze, detail=meldung
             )
         row = AiMemoryEntry(
             id=str(uuid4()), owner_user_id=owner_id, server_id=normalized_server_id,
@@ -560,7 +740,27 @@ def _relevance(
     noch keinen Vektor hat. Dann entscheiden die drei uebrigen Kriterien; der
     Eintrag faellt nicht heraus.
     """
-    overlap = len(query_tokens & _tokens(f"{row.key} {value}"))
+    return _bewertung(row, f"{row.key} {value}", query_tokens, now, similarity)
+
+
+def _bewertung(
+    row: AiMemoryEntry,
+    text: str,
+    query_tokens: set[str],
+    now: datetime,
+    similarity: float | None = None,
+) -> float:
+    """Die Formel hinter `_relevance` — mit dem Vergleichstext als Parameter.
+
+    Sie steht getrennt, weil es zwei Zeitpunkte gibt, an denen bewertet wird,
+    und nur einer davon den Klartext hat: `_vorauswahl` laeuft **vor** der
+    Entschluesselung und kann nur `row.key` beisteuern, `_relevance` laeuft
+    danach und hat Schluessel *und* Wert. Zwei getrennt gepflegte Formeln waeren
+    hier besonders tueckisch — die Vorauswahl entschiede dann nach anderen
+    Massstaeben, als die Auswahl unmittelbar danach anlegt, und die Zeile fiele
+    in der ersten Runde heraus, die in der zweiten gewonnen haette.
+    """
+    overlap = len(query_tokens & _tokens(text))
     reference = row.last_used_at or row.updated_at or row.created_at
     age_days = max(0.0, (now - _utc(reference)).total_seconds() / 86_400)
     recency = 1.0 / (1.0 + age_days / RECENCY_HALFLIFE_DAYS)
@@ -568,6 +768,49 @@ def _relevance(
     # einen Eintrag nicht unter einen ohne Vektor druecken.
     meaning = max(0.0, similarity) if similarity is not None else 0.0
     return meaning * 6.0 + overlap * 3.0 + min(row.use_count, 20) * 0.5 + recency * 2.0
+
+
+def _vorauswahl(
+    rows: list[AiMemoryEntry],
+    query: str,
+    now: datetime,
+    limit: int,
+) -> tuple[list[AiMemoryEntry], bool]:
+    """Kuerzt die Zeilenmenge, **bevor** sie entschluesselt wird.
+
+    Der Trick liegt darin, dass die Rangfolge den Klartext fast nicht braucht:
+    `_similarities` liest den gespeicherten Vektor von der Zeile, Nutzung und
+    Aktualitaet stehen als Spalten daneben, und `row.key` ist ohnehin Klartext —
+    verschluesselt ist allein der Wert. Von den vier Kriterien in `_bewertung`
+    sind hier also drei in voller Staerke da; nur die Wortueberlappung sieht den
+    Schluessel statt Schluessel und Wert.
+
+    Das ist der Preis, und er ist der richtige: die Alternative waere, alles zu
+    entschluesseln, um es bewerten zu koennen — also genau der Aufwand, gegen
+    den dieser Deckel steht. Und er faellt nur an, wo er kaum wiegt: unterhalb
+    von ``limit`` gibt die Funktion die Liste **unveraendert** zurueck, nicht
+    einmal neu sortiert.
+
+    Hat ein Eintrag keinen Vektor, liefert `_similarities` fuer ihn ``None``.
+    Das heisst dort ausdruecklich "kein Vergleich moeglich" und nicht
+    "unaehnlich" — er wird nach den uebrigen Kriterien bewertet und faellt
+    nicht schon deshalb heraus, weil er noch nie eingebettet wurde.
+
+    Der zweite Rueckgabewert sagt, ob gekuerzt wurde. Er gehoert in dasselbe
+    `truncated`-Kennzeichen wie der Budgetschnitt: dass das Modell nicht alles
+    sieht, muss im Block stehen, egal an welcher der beiden Engstellen es
+    weggefallen ist.
+    """
+    if len(rows) <= limit:
+        return rows, False
+    query_tokens = _tokens(query)
+    scores = _similarities(query, rows)
+    ranked = sorted(
+        zip(rows, scores),
+        key=lambda paar: _bewertung(paar[0], paar[0].key, query_tokens, now, paar[1]),
+        reverse=True,
+    )
+    return [row for row, _score in ranked[:limit]], True
 
 
 def _stored_vector(row: AiMemoryEntry) -> list[float] | None:
@@ -822,6 +1065,22 @@ def _memory_line(row: AiMemoryEntry, value: str) -> str:
         # Rest der Zeile ebenfalls deutsch ist.
         scope = f"server:{row.server_id}:anlage"
     elif row.scope == "team":
+        # Die Nummer, nicht der Name — anders als in der Absage
+        # (`_bereichsname`) und im Suchergebnis (`_execute_search_memory`), und
+        # das ist kein Versehen. Dort geht es ums **Ansprechen**: das Team ist
+        # das Ziel eines naechsten Aufrufs, und dafuer taugt nur der Name, den
+        # `remember` und `forget_memory` als `team="<Name>"` entgegennehmen.
+        # Hier geht es ums **Unterscheiden**: die Zeile soll sagen, dass zwei
+        # widersprechende Antworten aus zwei verschiedenen Teams stammen, und
+        # dafuer reicht eine beliebige stabile Marke.
+        #
+        # Der Name kostete hier, was er dort nicht kostet. `_memory_line` hat
+        # keine Sitzung und ist eine reine Formatierung; ihn zu holen hiesse,
+        # die Signatur und beide Kontextaufbauten zu aendern und im
+        # schlechtesten Fall je Zeile ein `db.get(Team, …)` zu bezahlen — bei
+        # jeder Nachricht neu, waehrend die Suche einmal je Loeschabsicht
+        # laeuft. Dazu geht jede Zeile gegen dieselben 6.000 Zeichen; ein Name
+        # je Zeile verdraengt Eintraege, statt welche zu erklaeren.
         scope = f"team:{row.team_id}"
     else:
         scope = row.scope
@@ -882,6 +1141,11 @@ def server_shared_context(
     ]
     if not rows:
         return None
+    # Hier braucht es kein `_vorauswahl`: der Filter laesst genau *einen*
+    # Bereich uebrig, und `server_shared` haengt an der festen
+    # `MAX_SYSTEM_SCOPE_ENTRIES` statt am Rollenlimit. Mehr als hundert Zeilen
+    # koennen es also gar nicht sein — der Multiplikator, gegen den
+    # `MAX_CONTEXT_ROWS` steht, entsteht erst durch *mehrere* Bereiche.
     decoded = _entschluesseln(rows)
     if not decoded:
         return None
@@ -890,8 +1154,11 @@ def server_shared_context(
         row.use_count = int(row.use_count or 0) + 1
         row.last_used_at = jetzt
     db.flush()
-    # Kein Budgetschnitt und keine Rangfolge: eine Anlage hat hoechstens 100
-    # Zeilen, und anders als beim Gesamtkontext steht hier nichts daneben, mit
+    # Kein Budgetschnitt und keine Rangfolge: eine Anlage hat hoechstens
+    # `MAX_SYSTEM_SCOPE_ENTRIES` Zeilen — dieser Bereich haengt an keiner
+    # Benutzerrolle und bleibt deshalb bei der festen Systemgrenze, auch
+    # nachdem die uebrigen Bereiche konfigurierbar geworden sind. Anders als
+    # beim Gesamtkontext steht hier ausserdem nichts daneben, mit
     # dem sie um Platz konkurrieren muessten. `query` bleibt trotzdem in der
     # Signatur — wird die Grenze eines Tages doch erreicht, ist die Auswahl an
     # dieser Stelle zu treffen und nicht beim Aufrufer.
@@ -906,10 +1173,10 @@ def provider_memory_context(
 ) -> str | None:
     """Baut den Memory-Block fuer eine konkrete Anfrage.
 
-    Passt alles ins Budget, kommt alles mit — das ist der Normalfall bei
-    hoechstens 100 Eintraegen je Scope und zugleich der sprachunabhaengigste:
-    das Sprachmodell sieht jeden Eintrag und stellt den Bezug selbst her, egal
-    in welcher Sprache er formuliert ist.
+    Passt alles ins Budget, kommt alles mit — der Normalfall, solange der
+    Betreiber die Bereichsgrenze nicht hochgesetzt hat, und zugleich der
+    sprachunabhaengigste Fall: das Sprachmodell sieht jeden Eintrag und stellt
+    den Bezug selbst her, egal in welcher Sprache er formuliert ist.
 
     Erst wenn es *nicht* passt, wird ausgewaehlt — nach Bedeutung, Bezug zur
     Frage, Nutzung und Aktualitaet. Vorher wurde an dieser Stelle alphabetisch
@@ -946,15 +1213,19 @@ def provider_memory_context(
     if not rows:
         return None
 
+    now = datetime.now(timezone.utc)
+    # Die zweite Engstelle, und die einzige, die vor der Entschluesselung
+    # greifen kann. Der Budgetschnitt weiter unten braucht den Klartext, um zu
+    # messen — er kommt also zwangslaeufig zu spaet, um Roundtrips zu sparen.
+    rows, vorgekuerzt = _vorauswahl(rows, query, now, MAX_CONTEXT_ROWS)
     decoded = _entschluesseln(rows)
     lines = [_memory_line(row, value) for row, value in decoded]
     total = sum(len(line) + 1 for line in lines)
 
     if total <= MAX_CONTEXT_CHARS:
         selected = decoded
-        truncated = False
+        truncated = vorgekuerzt
     else:
-        now = datetime.now(timezone.utc)
         query_tokens = _tokens(query)
         scores = _similarities(query, [row for row, _ in decoded])
         ranked = sorted(
@@ -974,12 +1245,15 @@ def provider_memory_context(
             used += len(line) + 1
         # Die urspruengliche Reihenfolge lesbar halten, nicht die Rangfolge.
         selected.sort(key=lambda item: (item[0].scope, item[0].key))
-        truncated = len(selected) < len(decoded)
+        # `vorgekuerzt` gehoert mit hinein: hat schon die Vorauswahl Zeilen
+        # weggelassen, fehlt etwas, auch wenn hier zufaellig alles Uebrige ins
+        # Budget passt. `decoded` weiss davon nichts mehr — es kennt nur, was
+        # ihm gegeben wurde.
+        truncated = vorgekuerzt or len(selected) < len(decoded)
 
     if not selected:
         return None
 
-    now = datetime.now(timezone.utc)
     for row, _value in selected:
         row.use_count = int(row.use_count or 0) + 1
         row.last_used_at = now
@@ -1026,8 +1300,16 @@ def search_entries(
     if not rows or not query.strip():
         return []
 
-    decoded = _entschluesseln(rows)
     now = datetime.now(timezone.utc)
+    # Derselbe Deckel wie beim Abruf in den Kontext, und aus demselben Grund:
+    # diese Funktion entschluesselte bisher **alles** Sichtbare, um am Ende
+    # ``limit`` Treffer zurueckzugeben — bei 15 Treffern und zwanzig sichtbaren
+    # Anlagen waren das Tausende Sidecar-Roundtrips fuer fuenfzehn Zeilen.
+    # Die Vorauswahl bewertet nach denselben Kriterien, die auch hier gleich
+    # angelegt werden, nur ohne den Wert; sie nimmt also nicht "irgendwelche
+    # 300", sondern dieselben, die auch danach vorn laegen.
+    rows, _vorgekuerzt = _vorauswahl(rows, query, now, MAX_CONTEXT_ROWS)
+    decoded = _entschluesseln(rows)
     query_tokens = _tokens(query)
     scores = _similarities(query, [row for row, _ in decoded])
     ranked = sorted(

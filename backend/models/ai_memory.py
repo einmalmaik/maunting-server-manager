@@ -43,10 +43,20 @@ class AiMemoryEntry(Base):
       zuerst weg, was nie abgerufen wurde — statt dessen, was zufaellig hinten
       im Alphabet steht.
 
-    Bewusst **kein** Vektorfeld: bei hoechstens 100 Eintraegen je Scope passt in
-    aller Regel alles gleichzeitig in den Kontext, und dann liefert das
-    Sprachmodell das Verstaendnis — sprachunabhaengig und ohne Index. Ein
-    Embedding waere spaeter eine zusaetzliche Spalte, kein Umbau.
+    Das Vektorfeld ``embedding_json`` weiter unten stand hier lange als
+    ausdrueckliches *Nein*: bei hoechstens 100 Eintraegen je Scope passe ohnehin
+    alles gleichzeitig in den Kontext. Die Annahme fiel zweimal — erst am
+    Sprachwechsel (ein deutscher Eintrag und eine englische Frage teilen kein
+    Wort), dann an der Zahl: 100 ist seit dem konfigurierbaren Rollenlimit nur
+    noch der Ausgangswert, ein Bereich fasst bis zu 1.000 Eintraege
+    (``ai_limit_service.MAX_MEMORY_ENTRIES_MAX``). So viel geht nicht mehr am
+    Stueck mit, deshalb waehlt ``provider_memory_context`` aus.
+
+    Ihr zweiter Teil traegt weiter: der Vektor kam als zusaetzliche Spalte und
+    nicht als Umbau, und einen Vektor*index* gibt es nach wie vor bewusst nicht.
+    Bei 1.000 Zeilen ist ein Skalarprodukt in numpy schneller als der Weg in die
+    Datenbank. Duenner begruendet ist er trotzdem: bis zu der Menge, ab der sich
+    ein Index lohnt, lag frueher eine Zehnerpotenz mehr als heute.
     """
 
     __tablename__ = "ai_memory_entries"

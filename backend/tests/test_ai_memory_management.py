@@ -120,6 +120,59 @@ def test_search_finds_what_is_worded_differently(
     assert result["results"][0]["key"] == "bello"
 
 
+def test_ein_team_treffer_traegt_den_namen_und_nicht_nur_die_nummer(
+    db: Session, regular_user: User
+) -> None:
+    """Ein Treffer muss in dem Bereich ansprechbar sein, aus dem er stammt.
+
+    Die volle Absage aus `ai_memory_service` nennt den Bereich beim **Namen**
+    und macht daraus eine Auflage: „nur Eintraege aus genau diesem Bereich“.
+    `remember` und `forget_memory` erreichen ein Team aber ausschliesslich ueber
+    `team="<Name>"`; ein Werkzeug, das eine Nummer in einen Namen uebersetzt,
+    gibt es nicht. Trug ein Treffer nur `team_id`, war die Auflage fuer das
+    Modell schlicht nicht befolgbar.
+
+    Folgenlos bliebe das nicht. Schluessel sind bewusst stabil und wiederholen
+    sich ueber Teams hinweg — deshalb steht derselbe Schluessel hier in beiden
+    Teams. Ohne den Namen stehen die zwei Treffer ununterscheidbar nebeneinander,
+    das Modell greift den falschen, und `forget_memory` loescht den noch
+    gueltigen Eintrag, waehrend der veraltete bleibt. Mit nur einem Team waere
+    dieser Test gruen, ohne davon irgendetwas zu belegen.
+    """
+    _allow(db, regular_user, "ai.memory.use", "teams.create")
+    alpha = team_service.create_team(db, user=regular_user, name="Alpha")
+    beta = team_service.create_team(db, user=regular_user, name="Beta")
+    for team, wert in (
+        (alpha, "Wartungsfenster ist sonntags um 20 Uhr"),
+        (beta, "Wartungsfenster ist mittwochs um 6 Uhr"),
+    ):
+        ai_memory_service.upsert_entry(
+            db, user=regular_user, scope="team", server_id=None, team_id=team.id,
+            key="wartungsfenster", value=wert,
+        )
+
+    result = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="search_memory",
+        arguments={"query": "Wartungsfenster"},
+    )
+
+    # Genau der Fall, um den es geht: ein Schluessel, zwei Bereiche.
+    assert _keys_of(result) == {"wartungsfenster"}
+    treffer = [item for item in result["results"] if item["scope"] == "team"]
+    assert len(treffer) == 2
+    # `.get` und nicht `[...]`: fehlt der Name, soll der Test das als fehlenden
+    # Namen melden und nicht als KeyError.
+    nach_namen = {item.get("team"): item for item in treffer}
+    assert set(nach_namen) == {"Alpha", "Beta"}
+    # Der Name muss zum Bereich gehoeren und nicht bloss vorhanden sein — sonst
+    # bliebe der Test auch gruen, wenn beide Treffer denselben Namen truegen.
+    assert nach_namen["Alpha"]["team_id"] == alpha.id
+    assert nach_namen["Beta"]["team_id"] == beta.id
+    # Die Nummer bleibt daneben stehen: sie ist der Fremdschluessel, ueber den
+    # die Oberflaeche denselben Eintrag findet.
+    assert {item["team_id"] for item in treffer} == {alpha.id, beta.id}
+
+
 # ── Loeschen ──────────────────────────────────────────────────────────
 
 

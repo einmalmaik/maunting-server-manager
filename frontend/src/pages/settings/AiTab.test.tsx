@@ -44,6 +44,7 @@ const row: AiRoleLimits = {
   requests_per_minute: 20,
   concurrent_operations: 2,
   monthly_cost_limit_cents: 5_000,
+  max_memory_entries: 250,
   // Rang 4 = "hoch". Diese Rolle darf tief denken lassen, aber nicht maximal.
   max_reasoning_effort: 4,
   updated_at: '2026-08-01T12:00:00Z',
@@ -60,6 +61,7 @@ const blankRow: AiRoleLimits = {
   requests_per_minute: null,
   concurrent_operations: null,
   monthly_cost_limit_cents: null,
+  max_memory_entries: null,
   max_reasoning_effort: null,
   updated_at: null,
 }
@@ -135,6 +137,11 @@ describe('AiTab', () => {
           requests_per_minute: 20,
           concurrent_operations: 2,
           monthly_cost_limit_cents: 5_000,
+          // Die Reihenfolge ist hier bedeutsam: verglichen werden zwei
+          // Zeichenketten, und der Rumpf entsteht in der Reihenfolge von
+          // FIELD_DEFINITIONS. Wer ein Feld dort verschiebt, muss es auch hier
+          // verschieben.
+          max_memory_entries: 250,
           // Der Rumpf entsteht aus FIELD_DEFINITIONS — ein neues Limit ist
           // damit automatisch mit im Speichern. Genau das prüft diese Zeile:
           // ein Feld hinzuzufügen, ohne den Speicherpfad anzufassen, darf nicht
@@ -176,6 +183,112 @@ describe('AiTab', () => {
     })
     expect(unlimited).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByText(/noch kein Kontingent gespeichert/i)).toBeInTheDocument()
+  })
+
+  it('hängt den Hinweis an das Memory-Feld — und nur an dieses', async () => {
+    render(<AiTab />)
+
+    // Vier Unwahrheiten trug dieses Feld: die Beschriftung las sich wie ein
+    // Vorrat je Benutzer (gezählt wird je Bereich, und wieviele es davon gibt,
+    // bestimmt der Benutzer selbst), „Unbegrenzt" heißt hier seit dem Rückfall
+    // auf die Systemgrenze nicht mehr unbegrenzt, im Teambereich entscheidet
+    // die Rolle des Gründers, und das geteilte Serverwissen hängt an gar keiner
+    // Rolle. Alles vier zieht allein der Hinweis gerade — deshalb muss er am
+    // Feld hängen, nicht irgendwo.
+    //
+    // Gesucht wird über den Locale-Schlüssel statt über einen abgeschriebenen
+    // Halbsatz, und geprüft wird nur die Verdrahtung. Hier stand vorher
+    // `toHaveTextContent('Systemgrenze von 100 Einträgen')`: die deutsche
+    // Locale gegen eine Kopie ihrer selbst — und im Widerspruch zum
+    // Backend-Wächter `test_der_hinweis_nennt_genau_die_systemgrenze_aus_dem_code`,
+    // der dieselbe Zeile an MAX_SYSTEM_SCOPE_ENTRIES bindet. Wer die Konstante
+    // verschiebt und die Locales pflichtgemäß nachzieht — genau die Änderung,
+    // für die jener Wächter gebaut wurde —, wurde hier rot, ohne etwas falsch
+    // gemacht zu haben. Die Zahl gehört dem Backend, die Verdrahtung hierher.
+    const feld = await screen.findByLabelText('Max. Memory-Einträge je Bereich: ai-vip')
+    const hinweis = screen.getByText(i18n.t('aiSettings.maxMemoryEntriesHint'))
+    expect(feld).toHaveAttribute('aria-describedby', hinweis.id)
+
+    // Und wirklich nur dort. Die übrigen Felder sagen genau das, was ihre
+    // Beschriftung sagt; ein Hinweis an jedem wäre Dekoration und würde den
+    // einen, der etwas zu sagen hat, mit übersehen lassen.
+    expect(screen.getAllByText(i18n.t('aiSettings.maxMemoryEntriesHint'))).toHaveLength(1)
+    expect(screen.getByLabelText('Tägliches Tokenlimit: ai-vip')).not.toHaveAttribute('aria-describedby')
+    expect(screen.getByLabelText('Monatliches Kostenlimit (Cent): ai-vip')).not.toHaveAttribute('aria-describedby')
+    // Auch die Auswahl, nicht nur die Zahlenfelder: sie ist das einzige Feld
+    // mit einem anderen Bauteil und würde einen Fehler dort sonst verstecken.
+    expect(screen.getByLabelText('Höchste Denkstufe: ai-vip')).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('sagt den Hinweis auch am Schalter an, weil das Feld daneben abgeschaltet sein kann', async () => {
+    render(<AiTab />)
+
+    const schalter = await screen.findByRole('switch', {
+      name: 'Unbegrenzt: Max. Memory-Einträge je Bereich: ai-vip',
+    })
+    const hinweis = screen.getByText(i18n.t('aiSettings.maxMemoryEntriesHint'))
+    expect(schalter).toHaveAttribute('aria-describedby', hinweis.id)
+
+    // Der Grund, warum die Beschreibung nicht allein am Zahlenfeld hängen darf:
+    // ist „Unbegrenzt" an, ist das Feld `disabled` und damit aus der
+    // Tabreihenfolge. Vorgelesen bekäme man dann nur noch „Unbegrenzt: Max.
+    // Memory-Einträge je Bereich: ai-vip, Umschalter, aktiviert" — und gerade in
+    // diesem Zustand ist „Unbegrenzt" die Unwahrheit, weil das Backend auf die
+    // Systemgrenze zurückfällt. Der Test schaltet deshalb wirklich um, statt
+    // nur das Attribut im Ausgangszustand zu zählen.
+    fireEvent.click(schalter)
+
+    expect(schalter).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByLabelText('Max. Memory-Einträge je Bereich: ai-vip')).toBeDisabled()
+    expect(schalter).toHaveAttribute('aria-describedby', hinweis.id)
+
+    // Und wieder nur an diesem einen: an den übrigen Schaltern sagt
+    // „Unbegrenzt" weiterhin die Wahrheit und braucht keine Fußnote.
+    expect(screen.getByRole('switch', {
+      name: 'Unbegrenzt: Tägliches Tokenlimit: ai-vip',
+    })).not.toHaveAttribute('aria-describedby')
+    expect(screen.getByRole('switch', {
+      name: 'Unbegrenzt: Höchste Denkstufe: ai-vip',
+    })).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('nennt die Ausnahme des Memory-Feldes auch in den beiden allgemeinen Regeltexten', async () => {
+    // Die Karte erklärt sich aus drei Texten, und zwei davon standen dem
+    // dritten entgegen: `ruleHelp` über dem Raster und `notConfiguredHint`
+    // daneben versprechen „unbegrenzt", solange keine Rolle etwas hinterlegt
+    // hat — für die Memory-Einträge ist das seit dem Rückfall auf die
+    // Systemgrenze das Gegenteil dessen, was eine Zeile tiefer im Feldhinweis
+    // steht. Beides wird zuerst gelesen, und beide Leserichtungen kosten:
+    // wer oben las, legte an der großzügigen Rolle „Unbegrenzt" um und nahm ihr
+    // damit jeden Beitrag; wer das leere Feld für offen hielt, plante gegen eine
+    // Zahl, die das Panel nie durchsetzt. Kein Test hat die beiden Schlüssel je
+    // gelesen — der Wächter am Feldhinweis prüft nur `maxMemoryEntriesHint` und
+    // wäre grün geblieben.
+    vi.mocked(client.api).mockImplementation((pfad: string) => (
+      pfad === '/ai/settings/role-limits' ? Promise.resolve([blankRow]) : respond(pfad)
+    ) as never)
+    render(<AiTab />)
+
+    // Beide Sätze müssen wirklich auf dem Schirm stehen, nicht nur in der
+    // Locale: `notConfiguredHint` erscheint ausschließlich an einer
+    // unkonfigurierten Rolle — also genau dort, wo er in die Irre führte.
+    await screen.findByText(i18n.t('aiSettings.ruleHelp'))
+    screen.getByText(i18n.t('aiSettings.notConfiguredHint'))
+
+    // Gesucht wird die Ausnahme über die Beschriftung des Feldes, das sie
+    // betrifft, und die kommt aus derselben Locale statt aus einer Kopie hier.
+    // Die Systemgrenze bleibt bewusst draußen: ihre Zahl gehört dem
+    // Backend-Wächter `test_der_hinweis_nennt_genau_die_systemgrenze_aus_dem_code`,
+    // der sie an MAX_SYSTEM_SCOPE_ENTRIES bindet — eine zweite Fassung hier
+    // würde bei jeder pflichtgemäßen Änderung rot, ohne dass etwas falsch ist.
+    // Beide Sprachen, weil die englische Fassung sonst still zurückfallen
+    // könnte auf einen Satz, der die Ausnahme nicht kennt.
+    for (const sprache of ['de', 'en'] as const) {
+      const text = i18n.getFixedT(sprache)
+      const feld = text('aiSettings.maxMemoryEntries')
+      expect(text('aiSettings.ruleHelp')).toContain(feld)
+      expect(text('aiSettings.notConfiguredHint')).toContain(feld)
+    }
   })
 
   it('shows API failures and does not silently discard them', async () => {

@@ -97,10 +97,10 @@
   "aiSettings": {
     "title": "KI-Kontingente pro Rolle",
     "description": "Konfiguriere Token-, Anfrage-, Parallelitäts- und Kostengrenzen getrennt von den Rollenrechten. Die Durchsetzung erfolgt ausschließlich im Backend.",
-    "ruleHelp": "Solange keine Rolle eines Benutzers ein Kontingent hinterlegt hat, gilt unbegrenzt. Sobald mindestens eine Rolle konfiguriert ist, gewinnt der höchste Wert; eine explizit unbegrenzte Rolle gewinnt über begrenzte Rollen. 0 sperrt das jeweilige Kontingent.",
+    "ruleHelp": "Solange keine Rolle eines Benutzers ein Kontingent hinterlegt hat, gilt unbegrenzt. Sobald mindestens eine Rolle konfiguriert ist, gewinnt der höchste Wert; eine explizit unbegrenzte Rolle gewinnt über begrenzte Rollen. 0 sperrt das jeweilige Kontingent. Ausgenommen ist „Max. Memory-Einträge je Bereich“: dort gewinnt „Unbegrenzt“ nicht, sondern trägt gar nichts bei — die Systemgrenze gilt erst, wenn keine Rolle des Benutzers eine Zahl trägt.",
     "selectRole": "Rolle",
     "notConfigured": "Nicht konfiguriert",
-    "notConfiguredHint": "Für diese Rolle ist noch kein Kontingent gespeichert. Solange keine Rolle eines Benutzers konfiguriert ist, gilt unbegrenzt. Beim Speichern werden genau die hier gezeigten Werte festgeschrieben.",
+    "notConfiguredHint": "Für diese Rolle ist noch kein Kontingent gespeichert. Solange keine Rolle eines Benutzers konfiguriert ist, gilt unbegrenzt — außer bei „Max. Memory-Einträge je Bereich“, wo dann die Systemgrenze gilt. Beim Speichern werden genau die hier gezeigten Werte festgeschrieben.",
     "dailyTokens": "Tägliches Tokenlimit",
     "weeklyTokens": "Wöchentliches Tokenlimit",
     "monthlyTokens": "Monatliches Tokenlimit",
@@ -114,6 +114,8 @@
     "loadFailed": "KI-Limits konnten nicht geladen werden.",
     "saveFailed": "KI-Limits konnten nicht gespeichert werden.",
     "saved": "KI-Limits gespeichert.",
+    "maxMemoryEntries": "Max. Memory-Einträge je Bereich",
+    "maxMemoryEntriesHint": "Gilt je persönlichem Bereich — allgemein und je Server getrennt gezählt. Ein leeres Feld senkt den Vorrat nicht: die Systemgrenze von 100 Einträgen gilt erst, wenn keine Rolle des Benutzers eine Zahl trägt. Beim Teamwissen zählt die Rolle des Gründers, nicht die des Schreibenden. „Wissen dieses Servers“ und „Panelweites KI-Gedächtnis“ hängen an keiner Rolle; dort gilt immer die Systemgrenze.",
     "maxReasoningEffort": "Höchste Denkstufe"
   },
   "ai": {

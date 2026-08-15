@@ -466,3 +466,176 @@ def test_recency_beats_an_old_never_used_entry(
 
     assert "Gerade eben gemerkt" in block
     assert "Lange her" not in block
+
+
+def _zaehle_entschluesselungen(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Zaehlt die Aufrufe von `DisClient.decrypt` — die Groesse, um die es geht.
+
+    Jeder Aufruf ist ein synchroner HTTP-Roundtrip zum DIS-Sidecar. An der
+    Laenge des Ergebnisses laesst sich das nicht ablesen: der Block wird danach
+    ohnehin auf `MAX_CONTEXT_CHARS` gekuerzt und sieht mit und ohne Deckel
+    gleich aus. Gemessen werden muss der Aufwand, nicht das Ergebnis.
+    """
+    from services.dis_client import DisClient
+
+    zaehler = [0]
+    echt = DisClient.decrypt
+
+    def mitzaehlen(payload, *, aad):
+        zaehler[0] += 1
+        return echt(payload, aad=aad)
+
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(mitzaehlen))
+    return zaehler
+
+
+def _server_mit_notiz(db: Session, user: User, nummer: int, wert: str) -> None:
+    """Ein sichtbarer Server plus eine persoenliche Notiz dazu — ein Bereich mehr."""
+    from models import Server, ServerPermission
+
+    server = Server(
+        name=f"Anlage {nummer}", game_type="dayz",
+        install_dir=f"/tmp/anlage-{nummer}", status="stopped",
+    )
+    db.add(server)
+    db.commit()
+    db.add(ServerPermission(
+        user_id=user.id, server_id=server.id, permission_key="server.view"
+    ))
+    db.commit()
+    ai_memory_service.upsert_entry(
+        db, user=user, scope="server", server_id=server.id,
+        key=f"eigenheit{nummer}", value=wert, origin="ai",
+    )
+
+
+def test_eine_anfrage_entschluesselt_nie_mehr_als_der_deckel_erlaubt(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Aufwand einer Anfrage haengt am Deckel, nicht an der Zahl der Bereiche.
+
+    `max_memory_entries` begrenzt einen **Bereich**. Wieviele Bereiche ein
+    Benutzer hat, bestimmt er selbst — mit jedem sichtbaren Server kommt einer
+    hinzu. Ohne diesen Deckel war die Menge je Anfrage Bereiche mal Rollenlimit,
+    und jede Zeile kostet einen synchronen Sidecar-Roundtrip **vor** dem Schnitt
+    auf 6.000 Zeichen, weil sich erst am Klartext messen laesst, was hineinpasst.
+    """
+    _allow_memory(db, regular_user)
+    _write(db, regular_user, "grundregel", "Immer erst das Backup pruefen")
+    for nummer in range(6):
+        _server_mit_notiz(db, regular_user, nummer, f"Eigenheit der Anlage {nummer}")
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 3)
+    zaehler = _zaehle_entschluesselungen(monkeypatch)
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, query="Was muss ich bei den Anlagen beachten?"
+    )
+
+    assert block is not None
+    # Sieben Bereiche waeren sieben Entschluesselungen gewesen.
+    assert zaehler[0] == 3
+
+
+def test_unterhalb_des_deckels_bleibt_alles_wie_es_war(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Deckel ist kein stiller Umbau der Auswahl.
+
+    Solange weniger Zeilen anfallen als er erlaubt, reicht `_vorauswahl` sie
+    unveraendert durch — dieselben Eintraege, dieselbe Reihenfolge, dieselbe
+    Zahl an Entschluesselungen. Sonst haette diese Aenderung den Normalfall
+    angefasst, um einen Randfall zu retten.
+    """
+    _allow_memory(db, regular_user)
+    _write(db, regular_user, "alpha", "Erster Wert")
+    _write(db, regular_user, "beta", "Zweiter Wert")
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 300)
+    zaehler = _zaehle_entschluesselungen(monkeypatch)
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, query="Was weisst du?"
+    )
+
+    assert "Erster Wert" in block and "Zweiter Wert" in block
+    assert zaehler[0] == 2
+    # Und der Block behauptet nicht, es fehle etwas.
+    assert "gekuerzt" not in block.lower() and "nicht alles" not in block.lower()
+
+
+def test_die_vorauswahl_nimmt_die_passenden_und_nicht_die_ersten(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gekuerzt wird nach Rang, nicht nach Reihenfolge.
+
+    Die Vorauswahl laeuft vor der Entschluesselung und kennt den Wert deshalb
+    nicht — wohl aber den Schluessel, die Nutzung und das Alter. Genau davon
+    muss sie Gebrauch machen: ein blosses "nimm die ersten N" waere hier rot,
+    weil der gesuchte Eintrag zuletzt angelegt wurde.
+    """
+    _allow_memory(db, regular_user)
+    for nummer in range(6):
+        _write(db, regular_user, f"belanglos{nummer}", f"Fuellwert {nummer}")
+    gesucht = _write(db, regular_user, "wartungsfenster", "Sonntags ab drei Uhr")
+    gesucht.use_count = 15
+    db.commit()
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 2)
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, query="Wann ist das wartungsfenster?"
+    )
+
+    assert "Sonntags ab drei Uhr" in block
+
+
+def test_wer_gekuerzt_bekommt_erfaehrt_es_auch(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hat die Vorauswahl gekuerzt, sagt der Block es — wie beim Budgetschnitt.
+
+    Ein stilles Weglassen waere die Unehrlichkeit, gegen die der Hinweis
+    ueberhaupt existiert: das Modell soll aus einer Luecke nicht schliessen, es
+    gebe nichts. Der Hinweis haengt bisher am Budget; die zweite Engstelle muss
+    ihn genauso setzen.
+    """
+    _allow_memory(db, regular_user)
+    for nummer in range(5):
+        _write(db, regular_user, f"eintrag{nummer}", f"Wert {nummer}")
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 2)
+
+    gekuerzt = ai_memory_service.provider_memory_context(
+        db, regular_user, query="Was weisst du?"
+    )
+
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 300)
+    vollstaendig = ai_memory_service.provider_memory_context(
+        db, regular_user, query="Was weisst du?"
+    )
+
+    assert gekuerzt != vollstaendig
+    # Der Hinweis steht im gekuerzten Block und fehlt im vollstaendigen.
+    zusatz = set(gekuerzt.splitlines()) - set(vollstaendig.splitlines())
+    assert zusatz, "der gekuerzte Block traegt keinen Hinweis auf das Fehlende"
+
+
+def test_die_suche_entschluesselt_ebenfalls_nicht_alles(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`search_memory` gab fuenfzehn Treffer zurueck und oeffnete dafuer alles.
+
+    Derselbe Deckel, derselbe Grund — und die Treffer bleiben die besten: die
+    Vorauswahl bewertet nach denselben Kriterien, die `search_entries` gleich
+    danach anlegt, nur ohne den Wert.
+    """
+    _allow_memory(db, regular_user)
+    for nummer in range(6):
+        _write(db, regular_user, f"belanglos{nummer}", f"Fuellwert {nummer}")
+    _write(db, regular_user, "wartungsfenster", "Sonntags ab drei Uhr")
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 3)
+    zaehler = _zaehle_entschluesselungen(monkeypatch)
+
+    treffer = ai_memory_service.search_entries(
+        db, regular_user, query="wartungsfenster"
+    )
+
+    assert zaehler[0] == 3
+    assert "wartungsfenster" in [row.key for row, _value, _score in treffer]

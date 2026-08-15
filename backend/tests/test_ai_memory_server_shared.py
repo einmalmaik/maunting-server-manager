@@ -32,7 +32,7 @@ from models import (
     ServerPermission,
     User,
 )
-from services import ai_memory_service
+from services import ai_limit_service, ai_memory_service
 from services.auth_service import AuthService
 from services.role_service import set_user_roles
 
@@ -760,18 +760,24 @@ def test_two_colleagues_share_one_key_instead_of_doubling_it(
 def test_the_area_fills_up_per_server_and_says_so(
     db: Session, regular_user: User
 ) -> None:
-    """Die 100er-Grenze zaehlt je Anlage, nicht je Mensch.
+    """Die Systemgrenze zaehlt je Anlage, nicht je Mensch.
 
     Das ist neu und bewusst angenommen: bisher fuellte jeder seine eigene Kasse.
     Hier kann ein Kollege sie fuer alle vollmachen. Ein Verdraengungsmechanismus
     existiert nicht — die Meldung ist deshalb das Einzige, was den naechsten
     davor bewahrt, den Fehler bei sich zu suchen.
 
-    Und sie geht unverändert an das Modell weiter (`_execute_remember` reicht
-    `str(exc.detail)` durch). Sie muss deshalb den offenen Weg nennen: ohne
-    `search_memory` und `forget_memory` darin hört die KI für diesen Bereich
-    schlicht auf zu lernen, obwohl beide Werkzeuge vor ihr liegen.
+    Sie hat zwei Adressaten und deshalb zwei Haelften. Der Dienst sagt die
+    Tatsache — die Anlage, um die es geht, und beide Zahlen —, denn ueber
+    `routers/ai_memory.py` liest sie ein Mensch als Toast. Die Werkzeugnamen
+    kommen erst an der Naht dazu (`_execute_remember`); hier standen sie
+    frueher mit im Dienst, und der Benutzer las eine Anweisung an eine dritte
+    Instanz mit Werkzeugen, die er nicht hat. Geprueft werden beide Haelften
+    getrennt, sonst belegt der eine Weg den anderen mit.
     """
+    from services.ai_action_errors import AiActionValidationError
+
+    grenze = ai_limit_service.MAX_SYSTEM_SCOPE_ENTRIES
     server = _server(db, "voll")
     nachbar = _server(db, "nachbar")
     _allow(db, regular_user, server, "server.view", "server.config.write")
@@ -781,14 +787,25 @@ def test_the_area_fills_up_per_server_and_says_so(
         for key in ("server.view", "server.config.write")
     ])
     db.commit()
-    for nummer in range(ai_memory_service.MAX_ENTRIES_PER_SCOPE):
+    for nummer in range(grenze):
         _merken(db, regular_user, server, f"eigenheit{nummer}", f"Wert {nummer}")
 
     with pytest.raises(HTTPException) as fehler:
         _merken(db, regular_user, server, "einer_zuviel", "Passt nicht mehr.")
     assert fehler.value.status_code == 409
-    assert "search_memory" in fehler.value.detail
-    assert "forget_memory" in fehler.value.detail
+    assert f"Server {server.id}" in fehler.value.detail
+    assert f"{grenze} von {grenze} erlaubten" in fehler.value.detail
+
+    # Und derselbe Fehlgriff ueber das Werkzeug: ohne `search_memory` und
+    # `forget_memory` hoert die KI fuer diesen Bereich schlicht auf zu lernen,
+    # obwohl beide Werkzeuge vor ihr liegen.
+    with pytest.raises(AiActionValidationError) as ansage:
+        _werkzeug(
+            db, regular_user, "remember", scope="server_shared",
+            server_id=server.id, key="einer_zuviel", value="Passt nicht mehr.",
+        )
+    assert "search_memory" in str(ansage.value)
+    assert "forget_memory" in str(ansage.value)
 
     # Die Nachbaranlage hat ihre eigene Kasse und ist davon unberuehrt.
     _merken(db, regular_user, nachbar, "eigenheit", "Passt.")

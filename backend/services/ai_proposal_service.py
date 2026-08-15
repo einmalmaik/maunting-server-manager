@@ -909,8 +909,17 @@ def _ai_tarif_role_payload(db: Session, user: User, arguments: dict) -> tuple[di
     for feld in ai_limit_service.LIMIT_FIELDS:
         wert = arguments.get(feld)
         if wert is None:
-            # `None` heisst in `resolve_effective_limits` ausdruecklich
-            # **unbegrenzt**. Das ist kein fehlender Wert, sondern eine Aussage.
+            # Ein leeres Feld ist eine Aussage und kein vergessener Wert — was
+            # es aussagt, haengt inzwischen aber am Feld ab. Bei den
+            # Kontingenten heisst es "unbegrenzt"; bei `max_memory_entries`
+            # heisst es "nichts hinterlegt", und welche Zahl daraus beim Merken
+            # wird, entscheidet allein
+            # `ai_limit_service.resolve_scope_memory_limit`.
+            # Hier bleibt das bewusst ohne Fallunterscheidung: dieser Bau
+            # schreibt weiter genau das, was der Betreiber gesagt hat. Dass das
+            # Modell den Unterschied kennt, *bevor* es `null` setzt, leistet der
+            # Werkzeugtext in `ai_action_service` — er ist die einzige Stelle,
+            # an der ein "unbegrenztes Gedaechtnis" noch abbiegen kann.
             limits[feld] = None
             continue
         maximum = ai_limit_service.LIMIT_MAXIMA[feld]

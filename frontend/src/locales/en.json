@@ -97,10 +97,10 @@
   "aiSettings": {
     "title": "AI quotas by role",
     "description": "Configure token, request, concurrency, and cost limits separately from role permissions. Enforcement happens exclusively in the backend.",
-    "ruleHelp": "As long as none of a user's roles has a quota stored, usage is unlimited. Once at least one role is configured, the highest value wins; an explicitly unlimited role wins over limited roles. 0 disables that quota.",
+    "ruleHelp": "As long as none of a user's roles has a quota stored, usage is unlimited. Once at least one role is configured, the highest value wins; an explicitly unlimited role wins over limited roles. 0 disables that quota. “Max memory entries per scope” is the exception: there “Unlimited” does not win but contributes nothing at all — the system limit applies only when none of the user's roles carries a number.",
     "selectRole": "Role",
     "notConfigured": "Not configured",
-    "notConfiguredHint": "No quota is stored for this role yet. As long as none of a user's roles is configured, usage is unlimited. Saving writes exactly the values shown here.",
+    "notConfiguredHint": "No quota is stored for this role yet. As long as none of a user's roles is configured, usage is unlimited — except for “Max memory entries per scope”, where the system limit applies instead. Saving writes exactly the values shown here.",
     "dailyTokens": "Daily token limit",
     "weeklyTokens": "Weekly token limit",
     "monthlyTokens": "Monthly token limit",
@@ -114,6 +114,8 @@
     "loadFailed": "AI limits could not be loaded.",
     "saveFailed": "AI limits could not be saved.",
     "saved": "AI limits saved.",
+    "maxMemoryEntries": "Max memory entries per scope",
+    "maxMemoryEntriesHint": "Applies per personal scope — general and per server counted separately. An empty field does not lower the allowance: the system limit of 100 entries applies only when none of the user's roles carries a number. For team knowledge the founder's role counts, not the writer's. “This server's knowledge” and “Panel-wide AI memory” depend on no role at all; there the system limit always applies.",
     "maxReasoningEffort": "Maximum reasoning depth"
   },
   "ai": {
