@@ -159,21 +159,36 @@ def test_the_recommendation_is_a_model_id_and_nothing_else() -> None:
     ein Fehlgehen ueberlebt: eine Modellkennung, die die Oberflaeche gegen den
     Katalog abgleicht.
 
-    Der Test prueft bewusst **nicht**, dass OpenRouter das Modell heute fuehrt.
+    Der Test prueft bewusst **nicht**, dass der Anbieter das Modell heute fuehrt.
     Das waere ein Netzabruf in der Testsuite und eine Zusage ueber einen fremden
     Dienst, die MSM nicht halten kann. Er prueft die Form — dass die Empfehlung
     ueberhaupt jemals auf einen Katalogeintrag passen kann.
+
+    Gemessen wird dafuer am **Katalogleser des jeweiligen Anbieters** und nicht
+    an einer Formregel in diesem Test. Der Leser ist die eine Stelle, die
+    entscheidet, was aus einem Katalog ueberhaupt ein `Modell` wird; weist er
+    die Empfehlung ab, kann sie im Betrieb nie erscheinen, egal wie sie aussieht.
+    Eine zweite Formregel hier waere eine zweite Wahrheit — und sie war eine:
+    frueher stand hier ein hartes ``"/" in empfehlung``, weil OpenRouter seine
+    Kennungen als ``anbieter/modell`` fuehrt. Beim zweiten Anbieter schlug das
+    fehl, obwohl ``gpt-realtime-2.1`` voellig richtig ist. OpenAI hat schlicht
+    kein Praefix.
     """
     from services import ai_provider_registry
+    from services.ai_model_catalog import _LESER
 
     for kind, spec in ai_provider_registry.ANBIETER.items():
         if spec.empfehlung is None:
             continue
         assert spec.empfehlung == spec.empfehlung.strip(), kind
-        # Eine OpenRouter-Kennung ist "anbieter/modell". Ein blosser Modellname
-        # ohne Praefix trifft nie einen Eintrag und die Empfehlung waere still
-        # wirkungslos — genau das soll hier auffallen, nicht im Betrieb.
-        assert "/" in spec.empfehlung, kind
+        assert _LESER[kind]({"id": spec.empfehlung}) is not None, (
+            f"Der Katalogleser von {kind} wuerde die Empfehlung "
+            f"{spec.empfehlung!r} verwerfen — sie kann dort nie erscheinen."
+        )
 
-    # Und der eine Anbieter, den es heute gibt, hat auch wirklich eine.
+    # Und die beiden Anbieter, die es heute gibt, haben auch wirklich eine.
+    # Die OpenRouter-Kennung traegt zusaetzlich das anbietereigene Praefix; das
+    # steht hier ausdruecklich bei OpenRouter und nicht in der Schleife oben.
     assert ai_provider_registry.ANBIETER["openrouter"].empfehlung == "openai/gpt-5.6-luna"
+    assert "/" in ai_provider_registry.ANBIETER["openrouter"].empfehlung
+    assert ai_provider_registry.ANBIETER["openai_realtime"].empfehlung == "gpt-realtime-2.1"

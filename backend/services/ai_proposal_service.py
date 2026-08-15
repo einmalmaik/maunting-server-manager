@@ -62,6 +62,7 @@ from services import ai_task_service
 from services.ai_tool_registry import (
     GLOBAL_WRITE_TOOLS,
     GUARDIAN_HEILUNG_TOOLS,
+    SPRACHE_HANDELN,
     WERKZEUGE,
     WRITE_TOOLS,
     aufgaben_tools,
@@ -651,6 +652,36 @@ def _blueprint_change_payload(arguments: dict) -> tuple[dict, dict]:
         "image_before": (quelle.get("runtime") or {}).get("image"),
         "image_after": (nutzlast.get("runtime") or {}).get("image"),
         "restart_required": False,
+    }
+    return payload, preview
+
+
+def _blueprint_delete_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
+    """Prueft das Loeschen eines Community-Blueprints schon beim Vorschlagen."""
+    from services import blueprint_service
+    from models import Server
+
+    if set(arguments) != {"blueprint_id"}:
+        raise AiActionValidationError("Blueprint-Delete-Tool hat ungueltige Argumente")
+    blueprint_id = str(arguments["blueprint_id"])
+    try:
+        ansicht = blueprint_service.blueprint_view(blueprint_id)
+    except HTTPException as exc:
+        raise AiActionValidationError(str(exc.detail)) from exc
+    if ansicht.get("origin") == "native" or not ansicht.get("editable"):
+        raise AiActionValidationError("Native Blueprints koennen nicht geloescht werden")
+
+    anzahl = db.query(Server).filter(Server.game_type == blueprint_id).count()
+    if anzahl > 0:
+        raise AiActionValidationError(
+            f"Blueprint '{blueprint_id}' wird noch von {anzahl} Server(n) verwendet und kann nicht geloescht werden."
+        )
+
+    payload = {"blueprint_id": blueprint_id}
+    preview = {
+        "operation": "blueprint_delete",
+        "blueprint_id": blueprint_id,
+        "blueprint_name": (ansicht.get("blueprint") or {}).get("meta", {}).get("name") or blueprint_id,
     }
     return payload, preview
 
@@ -1422,8 +1453,15 @@ def create_proposal(
     rationale_fallback: tuple[str, str] | None = None,
     guardian: "GuardianKontext | None" = None,
     aufgabe: "AufgabenKontext | None" = None,
+    sprache: bool = False,
 ) -> AiActionProposal:
     """Legt einen Vorschlag an.
+
+    ``sprache`` heisst: der Vorschlag entsteht in einer Sprachsitzung und wird
+    gesprochen bestaetigt. Er engt die Werkzeugmenge auf `SPRACHE_HANDELN` ein —
+    dieselbe Bauart wie ``guardian`` und ``aufgabe``, und aus demselben Grund an
+    dieser Stelle: die Durchsetzung gehoert vor den Payload-Bau und nicht in den
+    Prompt.
 
     ``guardian`` ist gesetzt, wenn dieser Lauf von einem Guardian-Vorfall
     ausgeloest wurde und nicht von einem Menschen. Er aendert drei Dinge, und
@@ -1454,6 +1492,21 @@ def create_proposal(
         raise AiActionValidationError(
             "Dieses Werkzeug steht in einer geplanten Aufgabe nicht zur Verfuegung"
         )
+    if sprache and tool_name not in SPRACHE_HANDELN:
+        # Dieselbe Durchsetzung an derselben Stelle wie bei Guardian und
+        # Aufgabe — und hier faellt vor allem heraus, was in
+        # `ALWAYS_CONFIRM_TOOLS` steht. Der Grund ist nicht die Reichweite,
+        # sondern die Beweiskraft: eine gesprochene Zustimmung kann
+        # missverstanden werden, im Hintergrund kann jemand anders „ja" sagen,
+        # und im Audit steht ein Transkript statt einer Betaetigung. Fuer alles,
+        # wovon es keinen Weg zurueck gibt, ist das zu wenig.
+        #
+        # Der Prompt sagt dem Modell dasselbe. Diese Zeile sorgt dafuer, dass es
+        # auch dann nicht durchkommt, wenn es den Prompt ignoriert.
+        raise AiActionValidationError(
+            "Das laesst sich per Sprache nicht bestaetigen. Sag dem Menschen, "
+            "dass er es im Panel auf der Karte bestaetigen muss."
+        )
     reason, expected_effect = _rationale(arguments, fallback=rationale_fallback)
     rest = {key: value for key, value in arguments.items() if key not in {"reason", "expected_effect"}}
 
@@ -1466,6 +1519,10 @@ def create_proposal(
         # Blueprint-Kennungen an der Fehlermeldung.
         _require_tool_permission(db, user, None, tool_name, rest)
         payload, preview = _blueprint_change_payload(rest)
+        expected_revision = None
+    elif tool_name == "propose_blueprint_delete":
+        _require_tool_permission(db, user, None, tool_name, rest)
+        payload, preview = _blueprint_delete_payload(db, rest)
         expected_revision = None
     elif tool_name == "propose_server_create":
         # Dasselbe: `_server_create_payload` schlägt die `node_id` im Bestand
@@ -2513,6 +2570,17 @@ def execute_proposal(
                     logger.info("Blueprint-Vorschlag abgelehnt: %s", exc.detail)
                     raise AiActionStateError("AI_ACTION_BLUEPRINT_REJECTED") from exc
                 result = {"blueprint_id": blueprint_id}
+                task_id = None
+                queued = False
+            elif tool_name == "propose_blueprint_delete":
+                from services import blueprint_service
+
+                try:
+                    blueprint_service.delete_community_blueprint(str(payload["blueprint_id"]))
+                except HTTPException as exc:
+                    logger.info("Blueprint-Loeschvorschlag abgelehnt: %s", exc.detail)
+                    raise AiActionStateError("AI_ACTION_BLUEPRINT_DELETE_REJECTED") from exc
+                result = {"deleted": True, "blueprint_id": str(payload["blueprint_id"])}
                 task_id = None
                 queued = False
             elif tool_name in {

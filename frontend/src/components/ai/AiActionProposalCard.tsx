@@ -126,6 +126,7 @@ export function AiActionProposalCard({
     propose_backup_restore: HardDriveUpload,
     propose_bind_ip_update: Network,
     propose_blueprint_change: Blocks,
+    propose_blueprint_delete: Blocks,
     propose_server_blueprint_switch: Blocks,
     propose_hoster_integration: Plug,
     propose_hoster_product: Plug,

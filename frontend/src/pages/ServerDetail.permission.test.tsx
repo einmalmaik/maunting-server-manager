@@ -236,6 +236,23 @@ describe('ServerDetail permission topology — VAL-UI-002 / VAL-UI-018', () => {
   // Allowed cases: exactly one resource edit action is rendered
   // -------------------------------------------------------------------------
 
+  it('renders port numbers at the same type scale as the host IP next to them', async () => {
+    // Die Portnummern standen auf `text-display-sm` — 36px fett gegen 16px
+    // normal in derselben Rasterzeile. Neben der Host-IP sah das aus, als sei
+    // die Portnummer die wichtigste Zahl der Seite. Sie ist ein Datenfeld unter
+    // anderen; das Dashboard hat die Kennzahlen.
+    setPermissions(VIEW_ONLY_ME)
+    renderServerDetail()
+    await waitForServerToLoad()
+
+    const hostIp = screen.getByText('127.0.0.1')
+    const gamePort = screen.getByText(/27015/)
+
+    expect(gamePort.className).toContain('text-body-md')
+    expect(gamePort.className).not.toContain('text-display')
+    expect(hostIp.className).toContain('text-body-md')
+  })
+
   it('labels and copies the canonical Docker container name without implying an install directory', async () => {
     setPermissions(VIEW_ONLY_ME)
     renderServerDetail()

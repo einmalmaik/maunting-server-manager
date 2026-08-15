@@ -115,36 +115,12 @@ logger = logging.getLogger(__name__)
 # abgewiesen. Rund 48.000 Zeichen sind grob 12.000 Tokens — Platz fuer etwa
 # dreissig Statusabfragen oder zwei volle Logauszuege.
 MAX_TOOL_RESULT_CHARS_PER_ROUND = 48_000
-# Absolute Reissleine gegen ein durchgedrehtes Modell. Kein Mensch stellt eine
-# Frage, die mehr als das rechtfertigt; wer mehr schickt, antwortet nicht
-# gruendlich, sondern fehlerhaft.
-MAX_TOOL_CALLS = 32
-# Leserunden **je Lauf**, nicht je Nachricht.
-#
-# Hier standen vier. Das war die Zahl aus der Zeit, in der ein Zug eine Frage
-# beantwortete: lesen, lesen, antworten. Fuer einen Auftrag wie "richte den
-# Server ein, stell das ein, starte ihn und sag Bescheid" ist sie zu klein —
-# die KI kam bis zur Haelfte und musste aufhoeren, obwohl sie wusste, was noch
-# fehlte. Genau die Beschwerde: *"die muss das wirklich komplett bis zum Ende
-# machen, Aufgaben zu Ende bringen, Ende zu Ende."*
-#
-# Sechzehn ist keine Beliebigkeit, sondern die Obergrenze der Anbieteraufrufe
-# eines Laufs: mehr als sechzehn Leserunden hat noch keine Diagnose gebraucht,
-# und die Grenze bricht nicht ab, sondern nimmt die Werkzeuge weg. Das Modell
-# antwortet dann aus dem, was es hat.
-MAX_TOOL_ROUNDS = 16
-# Schreibrunden je Lauf. Zwei reichten fuer "pass die Config an und starte
-# danach" — aber nicht fuer eine Einrichtung aus Anlegen, Konfigurieren,
-# Starten und Melden. Acht deckt jede Bitte ab, die ein Mensch in einem Absatz
-# formuliert, und bleibt weit unter dem, was ein durchgedrehtes Modell braeuchte,
-# um Schaden anzurichten — jede einzelne Aktion durchlaeuft weiterhin
-# Rechtepruefung und, wo noetig, die Bestaetigung eines Menschen.
-MAX_WRITE_ROUNDS = 8
-# Wie oft derselbe Lesewerkzeugaufruf mit **denselben** Argumenten laufen darf.
-# Ein Modell, das die gleiche Auskunft zum dritten Mal holt, bekommt keine neue
-# Antwort — es haengt. Der Aufruf wird dann nicht ausgefuehrt, sondern begruendet
-# abgelehnt: eine Grenze, die erklaert, statt einer, die abbricht.
-MAX_GLEICHE_AUFRUFE = 3
+MAX_TOOL_CALLS = 64
+MAX_TOOL_ROUNDS = 48
+MAX_WRITE_ROUNDS = 24
+MAX_GLEICHE_AUFRUFE = 4
+MAX_GLEICHE_POLLING_AUFRUFE = 8
+POLLING_WERKZEUGE = {"read_server_status", "read_server_logs", "check_server_reachability"}
 
 
 def sse_event(event: str, payload: dict) -> str:
@@ -2417,7 +2393,8 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             frisch: list = []
             for call in current_usage.tool_calls:
                 gezaehlt = signaturen.get(_werkzeug_signatur(call.name, call.arguments), 0)
-                if gezaehlt >= MAX_GLEICHE_AUFRUFE:
+                limit = MAX_GLEICHE_POLLING_AUFRUFE if call.name in POLLING_WERKZEUGE else MAX_GLEICHE_AUFRUFE
+                if gezaehlt >= limit:
                     wiederholt.append((call, (
                         "Dieser Aufruf lief mit genau diesen Argumenten bereits in "
                         f"{gezaehlt} Runden und liefert nichts Neues. Arbeite mit dem, "

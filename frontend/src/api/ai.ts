@@ -56,6 +56,19 @@ export interface AiProviderKind {
   base_url: string
   key_url: string
   key_prefix: string | null
+  /**
+   * Wofür dieser Zugang taugt. `chat_completions` ist der getippte Chat,
+   * `realtime` der Sprachmodus — zwei verschiedene APIs, die sich nicht
+   * gegenseitig vertreten. Ein Realtime-Zugang erscheint deshalb gar nicht
+   * erst in der Modellauswahl des Chats.
+   */
+  protokoll: 'chat_completions' | 'realtime'
+  /**
+   * Ob der Modellkatalog dieses Anbieters den Schlüssel braucht. Wenn ja,
+   * bleibt die Modelliste leer, bis der Zugang mit Schlüssel gespeichert ist —
+   * das ist kein Fehler, sondern die Reihenfolge.
+   */
+  katalog_braucht_schluessel: boolean
 }
 
 /** Ein Modell aus dem Katalog des Anbieters, mit seinen Denkfaehigkeiten. */
@@ -211,6 +224,21 @@ export interface AiProviderTestResult {
 }
 
 /**
+ * Was der Sprachmodus braucht, um überhaupt angeboten zu werden.
+ *
+ * `available` ist `false`, solange kein Realtime-Zugang mit Schlüssel
+ * eingerichtet ist. Dann erscheint der Sprachknopf gar nicht — kein
+ * ausgegrauter Schalter für etwas, das der Betreiber nicht bestellt hat.
+ */
+export interface AiVoiceConfig {
+  available: boolean
+  /** Nur zur Anzeige. `null`, solange nichts eingerichtet ist. */
+  model: string | null
+  sample_rate: number
+  max_seconds: number
+}
+
+/**
  * Die Schreibwerkzeuge — vollstaendig, in der Reihenfolge von
  * `ai_tool_registry.WERKZEUGE`.
  *
@@ -235,6 +263,7 @@ export type AiWriteTool =
   | 'propose_server_create'
   | 'propose_server_delete'
   | 'propose_blueprint_change'
+  | 'propose_blueprint_delete'
   | 'propose_server_blueprint_switch'
   | 'propose_hoster_integration'
   | 'propose_hoster_product'
@@ -676,13 +705,31 @@ export const aiApi = {
   deleteProvider: (id: number) => api(`/ai/settings/providers/${id}`, { method: 'DELETE' }),
   listProviders: () => api<AiProviderAvailable[]>('/ai/providers'),
   listProviderKinds: () => api<AiProviderKind[]>('/ai/settings/provider-kinds'),
-  /** Die Modelle eines Anbieters. `refresh` umgeht den Zwischenspeicher. */
-  listCatalogModels: (kind: string, refresh = false) => api<AiCatalogModel[]>(
-    `/ai/settings/provider-kinds/${encodeURIComponent(kind)}/models${refresh ? '?refresh=true' : ''}`,
-  ),
+  /**
+   * Die Modelle eines Anbieters. `refresh` umgeht den Zwischenspeicher.
+   *
+   * `providerId` nennt den Zugang, dessen Schlüssel den Katalog holt. Nur
+   * nötig bei Anbietern mit `katalog_braucht_schluessel` (OpenAI); OpenRouter
+   * gibt seine Liste offen heraus. Fehlt der Schlüssel, kommt eine leere
+   * Liste — beim Anlegen eines Zugangs gibt es ihn noch gar nicht.
+   */
+  listCatalogModels: (kind: string, refresh = false, providerId?: number) => {
+    const frage = new URLSearchParams()
+    if (refresh) frage.set('refresh', 'true')
+    if (providerId !== undefined) frage.set('provider_id', String(providerId))
+    const anhang = frage.toString()
+    return api<AiCatalogModel[]>(
+      `/ai/settings/provider-kinds/${encodeURIComponent(kind)}/models${anhang ? `?${anhang}` : ''}`,
+    )
+  },
   testProvider: (id: number) => api<AiProviderTestResult>(`/ai/settings/providers/${id}/test`, {
     method: 'POST',
   }),
+  /**
+   * Ob gesprochen werden kann. Braucht nur `ai.voice.use` — die Antwort nennt
+   * keinen Schlüssel und keinen Zugang, nur die Modellkennung.
+   */
+  getVoiceConfig: () => api<AiVoiceConfig>('/ai/voice/config'),
   /**
    * Der eigene Verbrauch. Ohne Sonderrecht — wer von der KI wegen des
    * Kontingents abgewiesen wird, muss nachsehen können, woran es lag.

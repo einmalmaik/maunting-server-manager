@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronDown, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { aiApi } from '@/api/ai'
 import { AiChat } from '@/components/ai/AiChat'
 import { AiSkillDirectory } from '@/components/ai/AiSkillDirectory'
+import { SprachLeiste } from '@/components/ai/voice/SprachLeiste'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
 /**
@@ -19,7 +21,26 @@ export function Ai() {
   const { t } = useTranslation()
   const canChat = useHasPermission('ai.chat.use')
   const canUseSkills = useHasPermission('ai.skills.use')
+  const canSpeak = useHasPermission('ai.voice.use')
   const [skillsOpen, setSkillsOpen] = useState(false)
+  const [sprachModus, setSprachModus] = useState(false)
+
+  // Zwei Bedingungen, und beide müssen stimmen: das Recht *und* ein
+  // eingerichteter Realtime-Zugang. Ohne Zugang gibt es keinen Knopf — nicht
+  // ausgegraut, sondern gar nicht. Dieselbe Regel wie bei `web_search`.
+  useEffect(() => {
+    if (!canSpeak) return
+    let lebt = true
+    aiApi
+      .getVoiceConfig()
+      .then((konfiguration) => {
+        if (lebt) setSprachModus(konfiguration.available)
+      })
+      .catch(() => undefined)
+    return () => {
+      lebt = false
+    }
+  }, [canSpeak])
 
   if (!canChat) {
     return (
@@ -40,6 +61,8 @@ export function Ai() {
     // seines eigenen Bereichs scrollen.
     <div className="flex h-[calc(100dvh-6rem)] min-h-0 flex-col md:h-[calc(100dvh-9rem)]">
       <AiChat />
+
+      {sprachModus && <SprachLeiste />}
 
       {canUseSkills && (
         <div className="shrink-0 border-t border-outline-variant/40">

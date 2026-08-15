@@ -72,6 +72,17 @@ class AiProviderKindResponse(BaseModel):
     base_url: str
     key_url: str
     key_prefix: str | None
+    #: ``chat_completions`` oder ``realtime``. Steht hier, weil das Formular
+    #: sonst zwei Zugaenge anbietet, die verschiedene Dinge tun, und nichts
+    #: verraet welchen wofuer. Ein Realtime-Zugang taucht in der Chatauswahl
+    #: spaeter gar nicht auf — das soll der Betreiber beim Anlegen wissen und
+    #: nicht danach suchen muessen.
+    protokoll: str
+    #: Ob der Modellkatalog dieses Anbieters den Betreiberschluessel braucht.
+    #: Die Oberflaeche erklaert damit die leere Modelliste, statt sie als
+    #: Stoerung aussehen zu lassen: erst Schluessel speichern, dann Modell
+    #: waehlen.
+    katalog_braucht_schluessel: bool
 
 
 class AiCatalogModelResponse(BaseModel):

@@ -10,6 +10,7 @@ einem gehosteten Panel ein zweiter Abrechnungspfad neben dem kalkulierten waere.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -270,6 +271,8 @@ def list_provider_kinds(
         AiProviderKindResponse(
             kind=spec.kind, label=spec.label, base_url=spec.base_url,
             key_url=spec.key_url, key_prefix=spec.key_prefix,
+            protokoll=spec.protokoll,
+            katalog_braucht_schluessel=spec.katalog_braucht_schluessel,
         )
         for spec in ai_provider_registry.alle()
     ]
@@ -283,7 +286,9 @@ async def list_catalog_models(
     kind: str,
     request: Request,
     refresh: bool = False,
-    _: User = Depends(require_global("panel.settings.read")),
+    provider_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("panel.settings.read")),
 ) -> list[AiCatalogModelResponse]:
     """Die Modelle eines Anbieters — die Auswahl statt eines Textfelds.
 
@@ -295,11 +300,37 @@ async def list_catalog_models(
     ``refresh=true`` umgeht den Zwischenspeicher — der Knopf „Modelle neu
     laden“. Der haeufigste Fall ist naemlich nicht das unbekannte Modell,
     sondern der ein paar Stunden alte Katalog.
+
+    ``provider_id`` nennt den Zugang, dessen Schluessel den Katalog holen soll.
+    Gebraucht wird das nur von Anbietern mit ``katalog_braucht_schluessel``:
+    OpenRouter gibt seine Liste offen heraus, OpenAI nicht. Fehlt der Schluessel
+    dort, kommt eine **leere Liste** und kein Fehler — beim Anlegen eines
+    Zugangs gibt es die Zeile mit dem Schluessel naemlich noch gar nicht, und
+    eine Fehlermeldung an dieser Stelle waere die Meldung eines Normalzustands.
+    Die Oberflaeche sagt dann „erst Schluessel speichern, dann Modell waehlen".
     """
     if not ai_provider_registry.bekannt(kind):
         raise HTTPException(status_code=404, detail="Unbekannter KI-Anbieter")
+
+    schluessel: str | None = None
+    if ai_provider_registry.anbieter(kind).katalog_braucht_schluessel:
+        provider = db.get(AiProvider, provider_id) if provider_id else None
+        # Der genannte Zugang muss zu **diesem** Anbieter gehoeren. Sonst holte
+        # eine falsch gesetzte Kennung den Schluessel eines fremden Zugangs und
+        # schickte ihn an eine Adresse, fuer die er nicht ausgestellt wurde.
+        if provider is None or provider.provider_kind != kind:
+            return []
+        schluessel = await run_in_threadpool(
+            ai_provider_service.resolve_api_key, db, provider, user.id
+        )
+        if not schluessel:
+            return []
+
     modelle = await ai_model_catalog.modelle(
-        request.app.state.ai_http_client, kind, erzwingen=refresh
+        request.app.state.ai_http_client,
+        kind,
+        erzwingen=refresh,
+        schluessel=schluessel,
     )
     return [
         AiCatalogModelResponse(
@@ -345,6 +376,15 @@ async def list_available_providers(
     aus; die Providerauswahl funktioniert weiter.
     """
     providers = db.query(AiProvider).filter(AiProvider.enabled.is_(True)).order_by(AiProvider.name).all()
+    # Ein Sprachzugang gehoert nicht in die Chatauswahl. Er spricht kein
+    # `/chat/completions`, und der Katalog haette ueber sein Modell ohnehin
+    # nichts zu sagen — die Zeile stuende mit leeren Denkangaben da und liefe
+    # beim Absenden in ein 404 aus `_fuer_chat`. Gefiltert wird hier und nicht
+    # erst dort, damit gar nicht erst auswaehlbar ist, was nicht funktioniert.
+    providers = [
+        provider for provider in providers
+        if ai_provider_service.spricht(provider, ai_provider_registry.CHAT)
+    ]
     deckel = ai_limit_service.resolve_effective_limits(db, user).max_reasoning_effort
 
     antworten: list[AiProviderAvailableResponse] = []

@@ -51,6 +51,7 @@ const SUBGROUPS = [
     id: 'ai',
     keys: [
       'ai.chat.use',
+      'ai.voice.use',
       'ai.attachments.use',
       'ai.memory.use',
       'ai.skills.use',

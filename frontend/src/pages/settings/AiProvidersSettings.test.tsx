@@ -42,6 +42,19 @@ describe('AiProvidersSettings', () => {
       base_url: 'https://openrouter.ai/api/v1',
       key_url: 'https://openrouter.ai/keys',
       key_prefix: 'sk-or-',
+      protokoll: 'chat_completions',
+      katalog_braucht_schluessel: false,
+    }, {
+      // Der zweite Anbieter steht hier, damit die Auswahl im Test dieselbe
+      // Entscheidung zu treffen hat wie im Betrieb: zwei Zugänge, die
+      // verschiedene Dinge tun.
+      kind: 'openai_realtime',
+      label: 'OpenAI (Sprache)',
+      base_url: 'https://api.openai.com/v1',
+      key_url: 'https://platform.openai.com/api-keys',
+      key_prefix: 'sk-',
+      protokoll: 'realtime',
+      katalog_braucht_schluessel: true,
     }])
     vi.mocked(aiApi.getCostPolicy).mockReset().mockResolvedValue({
       currency: 'EUR',
@@ -129,7 +142,12 @@ describe('AiProvidersSettings', () => {
     // Erst belegen, dass es **versucht** wurde. Ohne diese Zusicherung ginge
     // der Test auch dann durch, wenn der Katalog gar nicht abgefragt wird —
     // ein Textfeld sieht in beiden Faellen gleich aus.
-    await waitFor(() => expect(aiApi.listCatalogModels).toHaveBeenCalledWith('openrouter'))
+    //
+    // Die Kennung des Zugangs geht mit, weil manche Anbieter ihren Katalog nur
+    // gegen den Schluessel herausgeben. Fuer OpenRouter aendert das nichts —
+    // der Aufruf traegt sie trotzdem, und genau das haelt dieser Test fest.
+    await waitFor(() => expect(aiApi.listCatalogModels)
+      .toHaveBeenCalledWith('openrouter', false, provider.id))
     expect(screen.getByLabelText('Standardmodell').tagName).toBe('INPUT')
     // Und der Betreiber erfaehrt, warum er tippen muss — samt der Folge, dass
     // die Denkstufen dieses Modells damit unbekannt bleiben.

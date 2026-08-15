@@ -259,7 +259,7 @@ function ProviderForm({
     if (!draft.provider_kind || loadingModels) return
     setLoadingModels(true)
     try {
-      setModels(await aiApi.listCatalogModels(draft.provider_kind, refresh))
+      setModels(await aiApi.listCatalogModels(draft.provider_kind, refresh, draft.id))
     } catch {
       setModels(null)
     } finally {
@@ -271,12 +271,15 @@ function ProviderForm({
     let active = true
     if (!draft.provider_kind) { setModels(null); return }
     setLoadingModels(true)
-    aiApi.listCatalogModels(draft.provider_kind)
+    // `draft.id` geht mit, weil manche Anbieter ihren Katalog nur gegen den
+    // Schlüssel herausgeben. Beim Anlegen gibt es die Kennung noch nicht — dann
+    // kommt eine leere Liste, und der Hinweis darunter erklärt die Reihenfolge.
+    aiApi.listCatalogModels(draft.provider_kind, false, draft.id)
       .then((rows) => { if (active) setModels(rows) })
       .catch(() => { if (active) setModels(null) })
       .finally(() => { if (active) setLoadingModels(false) })
     return () => { active = false }
-  }, [draft.provider_kind])
+  }, [draft.provider_kind, draft.id])
 
   const gewaehltesModell = models?.find((item) => item.model_id === draft.default_model) ?? null
   // Kommt aus dem Katalog, nicht aus der Oberflaeche: fuehrt der Anbieter die
@@ -361,7 +364,15 @@ function ProviderForm({
             // und er ist bewusst **keine** waehlbare Option: „kein Anbieter" ist
             // ein Befund, keine Einstellung.
             placeholder={t('ai.providers.kindMissing')}
-            options={kinds.map((item) => ({ value: item.kind, label: item.label }))}
+            // Der Hinweis je Zeile sagt, wofuer der Zugang ueberhaupt taugt.
+            // Ohne ihn stehen zwei Anbieter untereinander, die verschiedene
+            // Dinge tun — und ein Sprachzugang, der im Chat nie auftaucht,
+            // saehe wie ein Fehler aus statt wie eine Absicht.
+            options={kinds.map((item) => ({
+              value: item.kind,
+              label: item.label,
+              hint: t(`ai.providers.protokoll.${item.protokoll}`),
+            }))}
           />
           {spec && (
             <p className="text-xs text-on-surface-variant">
@@ -369,6 +380,9 @@ function ProviderForm({
               {' '}
               <a href={spec.key_url} target="_blank" rel="noreferrer" className="underline">{t('ai.providers.keyLink')}</a>
             </p>
+          )}
+          {spec?.protokoll === 'realtime' && (
+            <p className="text-xs text-on-surface-variant">{t('ai.providers.realtimeHint')}</p>
           )}
           {!draft.provider_kind && (
             <p className="text-xs text-status-error">{t('ai.providers.kindMissingHint')}</p>
@@ -428,6 +442,15 @@ function ProviderForm({
           </div>
           {models === null && !loadingModels && draft.provider_kind && (
             <p className="msm-field-help">{t('ai.providers.catalogUnavailable')}</p>
+          )}
+          {/* Eine leere Liste ist bei diesen Anbietern kein Ausfall, sondern die
+              Reihenfolge: OpenAI gibt seinen Katalog nur gegen den Schlüssel
+              heraus, und beim Anlegen ist der noch nicht gespeichert. Ohne
+              diesen Satz sähe der Betreiber ein Textfeld und wüsste nicht,
+              warum er die Kennung selbst tippen soll. */}
+          {models !== null && models.length === 0 && !loadingModels
+            && spec?.katalog_braucht_schluessel && (
+            <p className="msm-field-help">{t('ai.providers.catalogNeedsKey')}</p>
           )}
           {/* Steht nur da, solange der Betreiber die Empfehlung nicht gewaehlt
               hat. Danach waere es eine Belehrung ueber eine Entscheidung, die

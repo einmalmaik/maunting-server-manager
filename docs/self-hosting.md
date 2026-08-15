@@ -709,6 +709,111 @@ handelnde Aufträge kommt `ai.autonomous.use` samt Freigabe dazu.
 
 ---
 
+## Sprachmodus (mit der KI reden)
+
+Derselbe Agent, dieselbe Unterhaltung, dieselben Werkzeuge — nur gesprochen
+statt getippt. Man drückt unter dem Chat auf das Mikrofon, redet, und die KI
+antwortet mit Stimme. Reinreden bricht ihre Antwort ab, wie bei einem Menschen.
+
+### Ein zweiter Anbieterzugang, und warum
+
+Der Sprachmodus läuft **nicht** über OpenRouter. Am 2026-08-15 nachgemessen:
+`POST /api/v1/realtime` antwortet dort mit 404, die OpenAPI-Spec kennt weder
+`realtime` noch `websocket`, und `gpt-realtime` hat keinen Endpunkt-Eintrag.
+OpenRouter kann Sprache nur rundenbasiert (`openai/gpt-audio`) — kein Duplex,
+kein Reinreden. Für ein Gespräch braucht es eine stehende Sitzung, und die gibt
+es bei OpenAI direkt.
+
+Deshalb legt der Betreiber unter *Einstellungen → KI → Anbieter* einen
+**zweiten** Zugang an:
+
+| Feld | Wert |
+|---|---|
+| Anbieter | *OpenAI (Sprache)* |
+| Schlüssel | ein OpenAI-Schlüssel (`sk-…`) von <https://platform.openai.com/api-keys> |
+| Modell | `gpt-realtime-2.1` |
+
+Das ist ein eigener Schlüssel und eine eigene Rechnung — der Preis dafür, dass
+OpenRouter kein Duplex kann. Der bestehende OpenRouter-Zugang bleibt unberührt
+und bedient weiter den getippten Chat; die beiden Protokolle sind getrennt, und
+kein Zugang kann versehentlich für das falsche verwendet werden.
+
+> **Modellwahl.** Die Liste kommt aus OpenAIs Modellkatalog und nicht aus einer
+> gepflegten Konstante. Das ist kein Selbstzweck: `gpt-realtime`, `-mini` und
+> `gpt-4o-realtime` werden am **20.01.2027** abgeschaltet. Eine handgeschriebene
+> Liste wäre an diesem Tag falsch. Für den Katalogabruf braucht OpenAI — anders
+> als OpenRouter — den Schlüssel; solange keiner hinterlegt ist, bleibt die
+> Modellliste beim Anlegen leer.
+
+**Ohne eingerichteten Sprachzugang gibt es keinen Sprachknopf.** Nicht
+ausgegraut, sondern gar nicht — dieselbe Regel wie bei der Websuche, die ohne
+Schlüssel nicht einmal im Werkzeugkatalog steht.
+
+### Recht und Grenzen
+
+Recht: `ai.voice.use` (Gruppe *KI*). Bewusst getrennt von `ai.chat.use`: wer
+spricht, bestätigt Änderungen per Stimme statt per Klick und verbraucht ein
+Vielfaches. Ein Betreiber muss das abwählen können, ohne den Chat mitzunehmen.
+
+Eine Sitzung endet nach **15 Minuten** von selbst; der Browser verbindet
+automatisch neu. Das ist keine Vorsicht, sondern die Lebensdauer des
+Access-Tokens: ein WebSocket prüft die Anmeldung nur beim Verbindungsaufbau, und
+eine stundenlang offene Leitung umginge sowohl den Ablauf als auch die
+Sperrliste abgemeldeter Sitzungen.
+
+### Bestätigen per Stimme — und was nur per Klick geht
+
+Soll etwas geändert werden, entsteht **dieselbe Vorschlagskarte wie immer** und
+sie ist sichtbar. Zusätzlich liest die KI vor, was sie vorhat, und fragt nach.
+Der vorgelesene Satz stammt dabei aus dem Panel und nicht vom Modell.
+
+Bei einem klaren Ja wird ausgeführt; die gesprochene Zustimmung steht im Audit.
+Es kann immer nur **ein** Vorschlag offen sein — damit ein „ja" nicht auf dem
+falschen landet.
+
+Nicht per Stimme bestätigbar sind Löschen, das Einspielen eines Backups sowie
+Schlüssel und Rollen der Hoster-Anbindung. Dort verweist die KI auf die Karte im
+Panel. Der Grund steht so auch im Restrisiko: **eine gesprochene Zustimmung ist
+schwächer als ein Klick** — ein Sprachmodell lässt sich nicht zwingen, wörtlich
+vorzulesen. Die eigentliche Autorisierung bleibt die Rechteprüfung im Backend,
+die beim Einlösen ein zweites Mal stattfindet; das gesprochene Ja ersetzt den
+Klick, nicht das Recht.
+
+### Kontingent
+
+Eine Sprachsitzung ist **eine** Buchung in der Verbrauchsübersicht, keine je
+Antwort. Reserviert wird beim Öffnen, abgeschlossen wird mit den Zahlen, die der
+Anbieter gemeldet hat; ist die Tages-, Wochen- oder Monatsgrenze aufgebraucht,
+endet die Sitzung nach dem laufenden Satz.
+
+Die **Kostengrenze in Cent bindet den Sprachmodus nicht**, solange am Zugang
+kein Tokenpreis gepflegt ist: OpenAIs Modellkatalog nennt keine Preise, und MSM
+erfindet keinen. Die Tokengrenzen binden ihn sehr wohl. Wer auch die
+Kostengrenze greifen lassen will, trägt den Preis am Zugang ein. Zur
+Größenordnung: `gpt-realtime-2.1` kostet Ton mit 32 USD je Million Eingabe- und
+64 USD je Million Ausgabetokens.
+
+### Was technisch passiert
+
+Der Ton läuft **durch das Panel** und nicht am Panel vorbei:
+
+```
+Browser ──WSS /api/ai/voice/ws──► MSM-Backend ──WSS──► api.openai.com/v1/realtime
+       (Cookie, Origin-Check)      (Betreiberschlüssel, Werkzeuge, RBAC)
+```
+
+OpenAI böte auch eine Direktverbindung per WebRTC an. Dann liefe die
+Werkzeugschleife aber über den Browser — er sähe jeden Werkzeugaufruf und könnte
+welche erfinden. Der Umweg über das Panel kostet rund eine Viertelsekunde und
+erspart zugleich die Ausgabe kurzlebiger Client-Geheimnisse an den Browser: der
+Betreiberschlüssel verlässt den Panelprozess nie.
+
+Kein zusätzlicher Port, kein zusätzlicher Dienst. Der Reverse-Proxy muss
+WebSocket-Upgrades unter `/api/` durchlassen — das tut er bereits für die
+Server-Konsole.
+
+---
+
 ## Kubernetes
 
 Manifeste und Betriebsablauf liegen unter

@@ -42,6 +42,23 @@ def base_url(provider: AiProvider) -> str:
     return ai_provider_registry.anbieter(provider.provider_kind).base_url
 
 
+def spricht(provider: AiProvider, protokoll: str) -> bool:
+    """Spricht der Anbieter dieses Zugangs das verlangte Protokoll?
+
+    Steht hier und nicht in den Routern, aus demselben Grund wie `base_url()`
+    direkt darüber: welche API hinter einem Zugang steckt, ist eine Eigenschaft
+    des Anbieters und keine der Zeile. Ein Router, der dafür `provider_kind`
+    auswertet, hätte die Registry ein zweites Mal im Kopf.
+
+    Gebraucht wird das an jeder Stelle, die einen Zugang **entgegennimmt**: der
+    Chat verlangt ``CHAT``, der Sprachweg ``REALTIME``. Ohne die Prüfung liefe
+    ein Realtime-Zugang im Chat gegen ``https://api.openai.com/v1/chat/completions``
+    — eine Adresse, die es gibt, mit einem Modell, das dort nicht antwortet. Der
+    Benutzer sähe einen Anbieterfehler statt einer Erklärung.
+    """
+    return ai_provider_registry.spricht(provider.provider_kind, protokoll)
+
+
 def _hint(secret: str) -> str:
     return "********" + secret[-4:] if len(secret) >= 4 else "********"
 

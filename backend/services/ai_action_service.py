@@ -698,6 +698,20 @@ def _global_tool_definitions() -> list[dict]:
             ["source_id", "new_id", "changes", *_RATIONALE_REQUIRED],
         ),
         _function(
+            "propose_blueprint_delete",
+            "Loescht einen selbst erstellten oder abgeleiteten Community-Blueprint. "
+            "Native Blueprints koennen nicht geloescht werden.",
+            {
+                "blueprint_id": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "ID des zu loeschenden Community-Blueprints.",
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            ["blueprint_id", *_RATIONALE_REQUIRED],
+        ),
+        _function(
             "propose_server_create",
             "Schlaegt die Erstellung eines neuen Servers zur manuellen Bestaetigung vor. "
             "Ports, Installationsverzeichnis und Host werden von MSM vergeben.",
