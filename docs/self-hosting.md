@@ -832,9 +832,16 @@ sich zum gesprochenen Wort bewegt. Zurück geht es über *Text-Modus* oder mit
 man weiss nicht, wohin man schaut, und das Textfeld verspricht eine Eingabe, die
 gerade niemand benutzt.
 
-Der Chat ist dabei einen Klick weit weg, nicht gelöscht. Das ist wichtiger als es
-klingt: eine per Stimme angestossene Änderung erzeugt dieselbe Vorschlagskarte
-wie immer, und die steht im Chat.
+Der Chat ist dabei einen Klick weit weg, nicht gelöscht — es ist dieselbe
+Unterhaltung, und wer mitten im Gespräch hinüberwechselt, liest dort weiter, was
+er eben gehört hat.
+
+**Bestätigt wird gesprochen.** Eine Schreibaktion erzeugt denselben Vorschlag wie
+im Chat, aber ohne Knopf: die KI sagt, was sie vorhat, ein *Ja* führt es aus,
+alles andere nicht. Daneben erscheint ein Kasten mit dem Namen der Aktion —
+gesprochen ist „ich lösche dann mal den Server" eindeutig genug, um zuzustimmen,
+und zu ungenau, um zu wissen, welchen. Das gilt auch für Löschen und
+Backup-Einspielen; der Sprachmodus kennt keine Aktion, die er dem Chat vorbehält.
 
 ### Ein zweiter Anbieterzugang, und warum
 

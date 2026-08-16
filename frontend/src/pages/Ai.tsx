@@ -54,8 +54,10 @@ export function Ai() {
   const [servers, setServers] = useState<ServerOption[]>([])
 
   // Zwei Bedingungen, und beide müssen stimmen: das Recht *und* ein
-  // eingerichteter Realtime-Zugang. Ohne Zugang gibt es keinen Knopf — nicht
-  // ausgegraut, sondern gar nicht. Dieselbe Regel wie bei `web_search`.
+  // eingerichteter Sprachweg. Der besteht aus zwei Zugängen — Gehör und Stimme
+  // —, aber das entscheidet das Backend: `available` ist erst wahr, wenn beide
+  // stehen. Fehlt einer, gibt es keinen Knopf — nicht ausgegraut, sondern gar
+  // nicht. Dieselbe Regel wie bei `web_search`.
   useEffect(() => {
     if (!canSpeak) return
     let lebt = true

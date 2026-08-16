@@ -675,6 +675,10 @@
       "beleg": {
         "heading": "Belegstelle",
         "untrusted": "Dieser Text stammt unverändert aus der genannten Quelle — die KI hat ihn herausgesucht, nicht geschrieben. Lies ihn selbst, statt der Erklärung zu glauben."
+      },
+      "vorschlag": {
+        "heading": "Wartet auf dich",
+        "hint": "Sag Ja, dann wird es ausgeführt. Sag Nein oder etwas anderes, dann nicht."
       }
     },
     "webSearch": {
@@ -1493,7 +1497,7 @@
     },
     "ai_voice_use": {
       "title": "Mit der KI sprechen",
-      "desc": "Erlaubt den Sprachmodus. Getrennt vom Chat aus zwei Gründen: Änderungen werden hier per Stimme bestätigt statt angeklickt, und gesprochene Zustimmung ist schwächer als ein Klick — Löschen, Backup-Einspielen und Schlüsselvergabe verlangen deshalb weiterhin die Bestätigungskarte. Außerdem kostet Sprache ein Vielfaches des getippten Chats."
+      "desc": "Erlaubt den Sprachmodus. Getrennt vom Chat, weil Änderungen hier gesprochen bestätigt werden statt angeklickt — auch Löschen und Backup-Einspielen. Wer dieses Recht hat, kann per Stimme alles auslösen, was er im Chat auch auslösen könnte: die Rechteprüfung ist dieselbe, die Bestätigung ist es nicht. Außerdem kostet Sprache extra, je Äußerung eine Abschrift und je gesprochenem Zeichen die Stimme."
     },
     "ai_attachments_use": {
       "title": "KI-Anhänge verwenden",
@@ -2944,7 +2948,7 @@
       },
       "confirm": {
         "title": "Bestaetigen per Stimme",
-        "body": "Die Vorschlagskarte erscheint wie immer und bleibt sichtbar; zusaetzlich sagt die KI, was sie vorhat. Ein klares „Ja\" fuehrt aus. Klar heisst woertlich: die Aeusserung muss nichts als eine Zustimmung sein — „ja, aber schau vorher nochmal nach\" ist ein neuer Auftrag und keine. Das gesprochene Ja ersetzt den Klick und keine einzige Pruefung."
+        "body": "Die KI sagt, was sie vorhat; daneben zeigt ein Kasten den Namen der Aktion — ohne Knopf, denn entschieden wird gesprochen. Gesprochen ist „ich loesche dann mal den Server\" eindeutig genug, um zuzustimmen, und zu ungenau, um zu wissen, welchen. Ein klares „Ja\" fuehrt aus. Klar heisst woertlich: die Aeusserung muss nichts als eine Zustimmung sein — „ja, aber schau vorher nochmal nach\" ist ein neuer Auftrag und keine. Das gesprochene Ja ersetzt den Klick und keine einzige Pruefung."
       },
       "quota": {
         "title": "Kontingent",

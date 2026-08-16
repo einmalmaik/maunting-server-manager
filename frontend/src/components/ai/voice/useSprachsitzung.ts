@@ -54,6 +54,25 @@ export interface Beleg {
   zeilen: string[]
 }
 
+/**
+ * Eine Schreibaktion, die auf ein gesprochenes Ja wartet.
+ *
+ * **Ohne Knopf, und das ist der Punkt.** Im Chat steht hier eine Karte mit
+ * „Ausführen"; im Sprachmodus fragt die KI, und der Mensch antwortet. Ein Knopf
+ * daneben wäre ein zweiter Weg zum selben Ziel — und damit ein zweiter Zustand,
+ * den beide Seiten auseinanderhalten müssten (geklickt, während gesprochen
+ * wurde?). Gezeigt wird nur, *was* gleich passiert: welches Werkzeug, welcher
+ * Server. Gesprochen ist das schwer zu behalten, gelesen ist es ein Blick.
+ *
+ * `wirkung` ist vom Modell verfasster Text und wird als reiner Text gezeichnet.
+ */
+export interface Vorschlag {
+  /** Die Kennung des Werkzeugs, für `ai.actions.tools.<name>`. */
+  werkzeug: string
+  /** Was das Modell als Folge erwartet. Leer, wenn es nichts gesagt hat. */
+  wirkung: string
+}
+
 interface Ergebnis {
   zustand: Sprachzustand
   /** Der laufende Wortwechsel, für die Anzeige. */
@@ -68,6 +87,8 @@ interface Ergebnis {
    * Neuzeichnen mitten im Wechsel nicht ins Leere greift.
    */
   belege: Beleg[]
+  /** Die Schreibaktion, auf die gerade ein Ja fehlt. `null`, wenn keine. */
+  vorschlag: Vorschlag | null
   /**
    * Der aktuelle Lautstärkepegel zwischen 0 und 1 — wer gerade redet, egal wer.
    *
@@ -95,9 +116,8 @@ const MAX_BELEGE = 5
  *
  * Anlass: die Überschrift blieb dauerhaft auf „Sprachverbindung verloren"
  * stehen, obwohl Ton und Verbindung längst weiterliefen — ein einziger
- * unkritischer Anbieterfehler (der Client schickt `response.cancel` beim
- * Dazwischenreden auch dann, wenn gerade keine Antwort läuft) setzte `fehler`,
- * und nichts nahm ihn je zurück. Wer hört, dass es weitergeht, darf oben nicht
+ * unkritischer Anbieterfehler (siehe die Abbruchbedingung weiter unten) setzte
+ * `fehler`, und nichts nahm ihn je zurück. Wer hört, dass es weitergeht, darf oben nicht
  * das Gegenteil lesen. `denkt` steht bewusst nicht dabei: dort schweigt die
  * Gegenstelle, und ein Fehler, der genau dann kam, ist noch keiner von gestern.
  */
@@ -114,6 +134,7 @@ export function useSprachsitzung(): Ergebnis {
   const [werkzeug, setWerkzeug] = useState<string | null>(null)
   const [fehler, setFehler] = useState<string | null>(null)
   const [belege, setBelege] = useState<Beleg[]>([])
+  const [vorschlag, setVorschlag] = useState<Vorschlag | null>(null)
 
   const ws = useRef<WebSocket | null>(null)
   const mikro = useRef<Aufnahme | null>(null)
@@ -139,6 +160,7 @@ export function useSprachsitzung(): Ergebnis {
     aufraeumen()
     setZustand('aus')
     setWerkzeug(null)
+    setVorschlag(null)
   }, [aufraeumen])
 
   const zeileAnhaengen = useCallback((wer: Sprachzeile['wer'], text: string) => {
@@ -220,17 +242,19 @@ export function useSprachsitzung(): Ergebnis {
             // was sie gerade sagt, ist die Antwort auf die vorige Frage und
             // damit falsch.
             //
-            // Die Bedingung ist neu und stand hier nicht: unterbrochen wurde
-            // bedingungslos, bei jedem `hoert`. Nur redet ein Mensch meistens
-            // dann, wenn die KI schweigt — es gab also nichts abzubrechen, und
-            // das `response.cancel` traf keine laufende Antwort. Die
-            // Gegenstelle antwortete darauf mit `response_cancel_not_active`,
-            // und der Sprechende las währenddessen „Der Sprachanbieter hat die
-            // Sitzung abgebrochen". Bei jedem Satz.
+            // Die Bedingung stand hier nicht: unterbrochen wurde bedingungslos,
+            // bei jedem `hoert`. Nur redet ein Mensch meistens dann, wenn die
+            // KI schweigt — es gab also nichts abzubrechen. Die damalige
+            // Gegenstelle (OpenAIs Realtime-API, seit dem 16.08.2026 nicht mehr
+            // im Haus) beantwortete den Abbruch ins Leere mit einem Fehler, und
+            // der Sprechende las bei jedem Satz „Der Sprachanbieter hat die
+            // Sitzung abgebrochen" — doppelt tückisch, weil `hoert` unmittelbar
+            // davor die Fehleranzeige zurücksetzt.
             //
-            // Der Fehler war doppelt tückisch, weil `hoert` unmittelbar davor
-            // die Fehleranzeige zurücksetzt: die Meldung erschien immer genau
-            // nach dem Zustand, der sie hätte löschen sollen.
+            // Die Bedingung bleibt, obwohl die Brücke `unterbrechen` heute
+            // klaglos schluckt (`ai_voice_bridge._abwuergen`). Ein Abbruch ins
+            // Leere ist auch ohne Fehlermeldung falsch: er meldet dem Backend
+            // ein Dazwischenreden, das nicht stattgefunden hat.
             lautsprecher.current.abbrechen()
             if (verbindung.readyState === WebSocket.OPEN) {
               verbindung.send(JSON.stringify({ art: 'unterbrechen' }))
@@ -245,6 +269,12 @@ export function useSprachsitzung(): Ergebnis {
           break
         }
         case 'gehoert':
+          // Wer spricht, hat entschieden — ja, nein oder etwas ganz anderes.
+          // Die Brücke räumt ihre offenen Vorschläge auf jedem dieser drei
+          // Wege weg (`_entscheidung`), also verschwindet die Karte hier
+          // genauso bedingungslos. Sie stehen zu lassen, bis eine Antwort
+          // eintrifft, hiesse: sie steht noch da, während die Löschung läuft.
+          setVorschlag(null)
           zeileAnhaengen('ich', String(nachricht.text ?? ''))
           break
         case 'antworttext':
@@ -265,6 +295,23 @@ export function useSprachsitzung(): Ergebnis {
             [...bisher, { quelle: String(nachricht.quelle ?? ''), zeilen: gezeigt }]
               .slice(-MAX_BELEGE),
           )
+          break
+        }
+        case 'vorschlag': {
+          // Fremdinhalt in einem eigenen Rahmen: `tool_name` ist eine Kennung
+          // aus der Werkzeugliste des Backends und wird gleich als
+          // Übersetzungsschlüssel benutzt — deshalb wird nur übernommen, was
+          // wie eine solche Kennung aussieht. Ohne diese Prüfung liesse ein
+          // Feld voller Punkte den Menschen in `de.json` spazieren gehen.
+          const daten = nachricht.vorschlag
+          if (!daten || typeof daten !== 'object') break
+          const roh = daten as Record<string, unknown>
+          const werkzeug = String(roh.tool_name ?? '')
+          if (!/^[a-z0-9_]{1,64}$/.test(werkzeug)) break
+          setVorschlag({
+            werkzeug,
+            wirkung: String(roh.expected_effect ?? '').slice(0, 400),
+          })
           break
         }
         case 'abgelaufen':
@@ -291,6 +338,10 @@ export function useSprachsitzung(): Ergebnis {
       lautsprecher.current = null
       ws.current = null
       setWerkzeug(null)
+      // Die offenen Vorschläge der Brücke leben in der Sitzung und nicht in
+      // der Datenbank. Nach dem Neuverbinden nimmt kein gesprochenes Ja sie
+      // mehr an — eine Karte, die stehen bliebe, versprächt das Gegenteil.
+      setVorschlag(null)
 
       if (planmaessig.current && gewollt.current) {
         // Die 15 Minuten sind um. Neu verbinden heißt: erneut anmelden — genau
@@ -320,5 +371,5 @@ export function useSprachsitzung(): Ergebnis {
     [zustand],
   )
 
-  return { zustand, zeilen, werkzeug, fehler, belege, pegel, starten, beenden }
+  return { zustand, zeilen, werkzeug, fehler, belege, vorschlag, pegel, starten, beenden }
 }

@@ -77,13 +77,15 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("ai.tasks.manage",           "ai",      "Wiederkehrende KI-Aufgaben anlegen und verwalten"),
     # Durchgesetzt in routers/ai_voice.py beim WebSocket-Upgrade. Ein eigenes
     # Recht und nicht `ai.chat.use`, obwohl es dieselbe KI mit denselben
-    # Werkzeugen ist: der Sprachweg bestaetigt Schreibaktionen per Stimme, und
-    # eine gesprochene Zustimmung ist schwaecher als ein Klick. Wer das fuer
-    # seine Kunden nicht will, muss es abwaehlen koennen, ohne ihnen den Chat zu
-    # nehmen. Ausserdem kostet Sprache ein Vielfaches: Audio wird bei
-    # `gpt-realtime-2.1` mit 32 USD je Million Eingabe- und 64 USD je Million
-    # Ausgabetokens berechnet.
-    PermissionDef("ai.voice.use",              "ai",      "Mit der KI sprechen (Realtime-Sprachmodus)"),
+    # Werkzeugen und denselben Rechten ist: der Sprachweg bestaetigt
+    # Schreibaktionen per Stimme, und eine gesprochene Zustimmung ist schwaecher
+    # als ein Klick. Loeschen eingeschlossen — der Betreiber hat das ausdruecklich
+    # verlangt. Wer das fuer seine Kunden nicht will, muss es abwaehlen koennen,
+    # ohne ihnen den Chat zu nehmen. Ausserdem kostet Sprache zweimal extra: je
+    # Aeusserung eine Abschrift beim Chatanbieter und je gesprochenem Zeichen die
+    # Stimme bei ElevenLabs, die nach Zeichen abrechnet und deshalb in keiner
+    # Tokengrenze auftaucht (Deckel: `ai_tts_elevenlabs.MAX_ZEICHEN_JE_ANTWORT`).
+    PermissionDef("ai.voice.use",              "ai",      "Mit der KI sprechen (Sprachmodus)"),
     # OAuth-Provider-Konfiguration (Phase 4 — Social Login).
     # `secret_update` ist bewusst separat: erfordert zusaetzliche Audit-Bestaetigung.
     # `test` ist read-only, damit ein Operator ohne write-Rechte die Konfiguration pruefen kann.

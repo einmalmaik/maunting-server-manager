@@ -55,7 +55,8 @@ HISTORY_LIMIT = 200
 def _fuer_chat(provider) -> bool:
     """Taugt dieser Zugang fuer den Chat?
 
-    Ein Realtime-Zugang taugt es nicht — er spricht kein ``/chat/completions``.
+    Ein Stimmzugang taugt es nicht — ElevenLabs spricht kein
+    ``/chat/completions``, sondern nimmt Text und gibt Ton zurueck.
     Die Absage ist bewusst dasselbe 404 wie bei einem unbekannten Zugang und
     keine eigene Fehlermeldung: aus Sicht des Chats *gibt* es diesen Provider
     nicht. Er steht auch in keiner Auswahl (`/api/ai/providers/available`

@@ -53,10 +53,11 @@ def spricht(provider: AiProvider, protokoll: str) -> bool:
     auswertet, hätte die Registry ein zweites Mal im Kopf.
 
     Gebraucht wird das an jeder Stelle, die einen Zugang **entgegennimmt**: der
-    Chat verlangt ``CHAT``, der Sprachweg ``REALTIME``. Ohne die Prüfung liefe
-    ein Realtime-Zugang im Chat gegen ``https://api.openai.com/v1/chat/completions``
-    — eine Adresse, die es gibt, mit einem Modell, das dort nicht antwortet. Der
-    Benutzer sähe einen Anbieterfehler statt einer Erklärung.
+    Chat verlangt ``CHAT``, die Stimme ``TTS``. Ohne die Prüfung liefe ein
+    Stimmzugang im Chat gegen ``https://api.elevenlabs.io/v1/chat/completions``
+    — eine Adresse, die es nicht gibt, mit einem Schlüssel, der in den falschen
+    Kopf geschrieben würde. Der Benutzer sähe einen Anbieterfehler statt einer
+    Erklärung.
     """
     return ai_provider_registry.spricht(provider.provider_kind, protokoll)
 

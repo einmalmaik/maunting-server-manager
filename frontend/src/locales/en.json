@@ -675,6 +675,10 @@
       "beleg": {
         "heading": "Evidence",
         "untrusted": "This text comes unchanged from the source named above — the AI picked it out, it did not write it. Read it yourself instead of taking the explanation on trust."
+      },
+      "vorschlag": {
+        "heading": "Waiting for you",
+        "hint": "Say yes and it runs. Say no, or anything else, and it does not."
       }
     },
     "webSearch": {
@@ -1493,7 +1497,7 @@
     },
     "ai_voice_use": {
       "title": "Talk to the AI",
-      "desc": "Allows voice mode. Kept separate from chat for two reasons: changes are confirmed by voice here instead of by click, and spoken consent is weaker than a click — deleting, restoring backups and issuing keys therefore still require the confirmation card. Voice also costs a multiple of typed chat."
+      "desc": "Allows voice mode. Kept separate from chat because changes are confirmed by voice here instead of by click — including deletion and restoring backups. Whoever holds this permission can trigger by voice anything they could trigger in chat: the permission check is the same, the confirmation is not. Voice also costs extra, one transcription per utterance and the voice per spoken character."
     },
     "ai_attachments_use": {
       "title": "Use AI attachments",
@@ -2944,7 +2948,7 @@
       },
       "confirm": {
         "title": "Confirming by voice",
-        "body": "The proposal card appears as always and stays visible; in addition the AI says what it intends to do. A clear “yes” executes. Clear means literally: the utterance must be nothing but consent — “yes, but check the logs first” is a new instruction, not consent. The spoken yes replaces the click and not a single check."
+        "body": "The AI says what it intends to do; next to it a box names the action — with no button, because the decision is spoken. Out loud, “I’ll delete the server then” is clear enough to agree to and too vague to tell you which one. A clear “yes” executes. Clear means literally: the utterance must be nothing but consent — “yes, but check the logs first” is a new instruction, not consent. The spoken yes replaces the click and not a single check."
       },
       "quota": {
         "title": "Quota",

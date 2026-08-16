@@ -53,8 +53,8 @@ vi.mock('@/components/ai/AiAutonomyButton', () => ({
 
 const KONFIGURATION: AiVoiceConfig = {
   available: true,
-  model: 'gpt-realtime-2.1',
-  voice: 'alloy',
+  model: 'openai/gpt-5.6',
+  voice: '21m00Tcm4TlvDq8ikWAM',
   sample_rate: 24_000,
   max_seconds: 900,
 }

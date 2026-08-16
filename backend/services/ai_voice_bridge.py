@@ -645,9 +645,11 @@ class Sprachbruecke:
         kennung = daten.get("id")
         if isinstance(kennung, str) and kennung:
             self._offene_vorschlaege.append(kennung)
-        # Die Karte geht trotzdem an den Browser: wer hinsieht, soll sie sehen,
-        # und sie ist der Weg für alles, was per Sprache nicht bestätigt werden
-        # darf (Löschen, Backups, Rechte).
+        # Die Karte geht trotzdem an den Browser, aber ohne Knopf: sie sagt,
+        # *was* gleich passiert — welcher Server, welche Aktion —, und das ist
+        # gesprochen schwer zu behalten. Entschieden wird ausschliesslich per
+        # Stimme; ein zweiter Weg neben dem gesprochenen Ja waere ein zweiter
+        # Zustand, den der Sprachmodus dann pflegen muesste.
         await self._senden({"art": "vorschlag", "vorschlag": daten})
 
     async def _entscheidung(self, wortlaut: str) -> bool:

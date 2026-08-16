@@ -4,7 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiVoiceConfig } from '@/api/ai'
 import i18n from '@/i18n'
 import { SprachAnsicht } from './SprachAnsicht'
-import type { Beleg, Sprachzeile, Sprachzustand } from './useSprachsitzung'
+import type { Beleg, Sprachzeile, Sprachzustand, Vorschlag } from './useSprachsitzung'
 
 const starten = vi.fn()
 const beenden = vi.fn()
@@ -15,6 +15,7 @@ let sitzung: {
   werkzeug: string | null
   fehler: string | null
   belege: Beleg[]
+  vorschlag: Vorschlag | null
 }
 
 vi.mock('./useSprachsitzung', () => ({
@@ -28,11 +29,11 @@ vi.mock('./Sprachblase', () => ({ Sprachblase: () => null }))
 
 const KONFIGURATION: AiVoiceConfig = {
   available: true,
-  model: 'gpt-realtime-2.1',
-  // Kommt vom Server bereits aufgeloest: hat der Zugang keine Stimme
-  // hinterlegt, steht hier die Standardstimme. Die Ansicht bekommt nie `null`
-  // und muss deshalb auch nie eine einsetzen.
-  voice: 'alloy',
+  model: 'openai/gpt-5.6',
+  // Die Voice ID des Zugangs. Eine Standardstimme gibt es nicht mehr: ohne
+  // hinterlegte Kennung meldet `/config` `available: false`, und diese Ansicht
+  // wird gar nicht erst gezeichnet. Sie bekommt deshalb nie `null`.
+  voice: '21m00Tcm4TlvDq8ikWAM',
   sample_rate: 24_000,
   max_seconds: 900,
 }
@@ -42,7 +43,15 @@ function ansicht(
   aufChat = vi.fn(),
   konfiguration: AiVoiceConfig = KONFIGURATION,
 ) {
-  sitzung = { zustand: 'bereit', zeilen: [], werkzeug: null, fehler: null, belege: [], ...teil }
+  sitzung = {
+    zustand: 'bereit',
+    zeilen: [],
+    werkzeug: null,
+    fehler: null,
+    belege: [],
+    vorschlag: null,
+    ...teil,
+  }
   const ergebnis = render(
     <SprachAnsicht konfiguration={konfiguration} aufChat={aufChat} />,
   )
@@ -170,6 +179,39 @@ describe('SprachAnsicht', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
 
+  it('nennt die anstehende Aktion beim Namen — und gibt ihr keinen Knopf', () => {
+    ansicht({
+      zustand: 'spricht',
+      vorschlag: {
+        werkzeug: 'propose_server_delete',
+        wirkung: 'Der Server „Kreativ" und alle seine Dateien werden entfernt.',
+      },
+    })
+
+    expect(screen.getByText(i18n.t('ai.voice.vorschlag.heading'))).toBeInTheDocument()
+    // Derselbe Werkzeugname wie auf der Karte im Chat, aus derselben Quelle.
+    expect(
+      screen.getByText(i18n.t('ai.actions.tools.propose_server_delete')),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Der Server „Kreativ"/)).toBeInTheDocument()
+
+    // Der Kern der Zusage. Im Sprachmodus entscheidet die Stimme; ein Knopf
+    // waere ein zweiter Weg zum selben Ziel — und damit ein Zustand, den Bruecke
+    // und Ansicht auseinanderhalten muessten (geklickt, waehrend gesprochen
+    // wurde?). Die Knoepfe, die die Ansicht sonst hat, sind Mikrofon, Zahnrad
+    // und „Gespraech beenden"; im Vorschlagskasten selbst ist keiner.
+    const kasten = screen.getByText(i18n.t('ai.voice.vorschlag.heading')).closest('section')
+    expect(kasten).not.toBeNull()
+    expect(kasten?.querySelector('button')).toBeNull()
+    expect(screen.getByText(i18n.t('ai.voice.vorschlag.hint'))).toBeInTheDocument()
+  })
+
+  it('zeigt keinen Vorschlagskasten, solange keiner ansteht', () => {
+    ansicht({ zustand: 'spricht' })
+
+    expect(screen.queryByText(i18n.t('ai.voice.vorschlag.heading'))).not.toBeInTheDocument()
+  })
+
   it('zeigt nur die zuletzt gezeigte Stelle', () => {
     ansicht({
       zustand: 'spricht',
@@ -191,7 +233,7 @@ describe('SprachAnsicht', () => {
 
     fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.voice.settings') }))
 
-    expect(screen.getByText('gpt-realtime-2.1')).toBeInTheDocument()
+    expect(screen.getByText('openai/gpt-5.6')).toBeInTheDocument()
     expect(screen.getByText('24 kHz')).toBeInTheDocument()
     expect(screen.getByText(i18n.t('ai.voice.info.minutes', { count: 15 }))).toBeInTheDocument()
     // Kein Schalter, der nichts tut: es gibt am Sprachmodus nichts zu stellen,
@@ -200,15 +242,17 @@ describe('SprachAnsicht', () => {
   })
 
   it('nennt hinter dem Zahnrad die Stimme, mit der gerade gesprochen wird', () => {
-    ansicht({}, vi.fn(), { ...KONFIGURATION, voice: 'shimmer' })
+    ansicht({}, vi.fn(), { ...KONFIGURATION, voice: 'pNInz6obpgDQGcFmaJgB' })
 
     fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.voice.settings') }))
 
-    // Was hier steht, kommt vom Server. Ein fest eingetragenes „alloy" waere
+    // Was hier steht, kommt vom Server. Eine fest eingetragene Kennung waere
     // eine zweite Wahrheit — und sie loege in dem Augenblick, in dem der
-    // Betreiber am Zugang eine andere Stimme hinterlegt.
+    // Betreiber am Zugang eine andere Stimme hinterlegt. Seit ElevenLabs ist
+    // das kein theoretischer Fall mehr: die Kennung gehoert seinem Konto, MSM
+    // kann sie nicht einmal raten.
     expect(screen.getByText(i18n.t('ai.voice.info.voice'))).toBeInTheDocument()
-    expect(screen.getByText('shimmer')).toBeInTheDocument()
+    expect(screen.getByText('pNInz6obpgDQGcFmaJgB')).toBeInTheDocument()
   })
 
   it('schliesst mit ESC erst die Angaben und dann das Gespraech', () => {
@@ -219,7 +263,7 @@ describe('SprachAnsicht', () => {
 
     // Die erste Flucht gilt dem, was zuletzt aufging. Sonst riesse ein ESC,
     // das nur das Panel schliessen sollte, das ganze Gespraech ab.
-    expect(screen.queryByText('gpt-realtime-2.1')).not.toBeInTheDocument()
+    expect(screen.queryByText('openai/gpt-5.6')).not.toBeInTheDocument()
     expect(aufChat).not.toHaveBeenCalled()
 
     fireEvent.keyDown(window, { key: 'Escape' })

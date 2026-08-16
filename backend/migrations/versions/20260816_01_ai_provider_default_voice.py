@@ -21,6 +21,13 @@ Bestandszugang weiter mit der alten — nicht weil der Betreiber sie gewählt
 hätte, sondern weil diese Migration sie hineingeschrieben hat. Und beim nächsten
 Blick in die Oberfläche müsste er sie für seine eigene Wahl halten. NULL lässt
 das Feld leer und die Entscheidung bei ihm.
+
+**Nachtrag vom selben Tag.** ``20260816_02`` verbreitert diese Spalte auf 64
+Zeichen und leert sie. Das oben genannte ``ai_voice_session.STANDARDSTIMME``
+gibt es nicht mehr: die acht Stimmen gehörten OpenAIs Realtime-API, und die ist
+gefallen. Der Gedanke von oben hat den Umbau aber überlebt — er ist genau der
+Grund, warum ``_02`` die Spalte leert statt ein ``alloy`` auf eine
+ElevenLabs-Kennung umzurechnen.
 """
 
 from __future__ import annotations

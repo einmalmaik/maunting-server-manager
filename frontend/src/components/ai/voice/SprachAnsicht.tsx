@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { AiVoiceConfig } from '@/api/ai'
 import { Sprachblase } from './Sprachblase'
-import { useSprachsitzung, type Beleg } from './useSprachsitzung'
+import { useSprachsitzung, type Beleg, type Vorschlag } from './useSprachsitzung'
 
 /**
  * Der Sprachmodus als eigener Modus — der Chat tritt zurück.
@@ -15,11 +15,14 @@ import { useSprachsitzung, type Beleg } from './useSprachsitzung'
  * Hier stand zuerst eine schmale Leiste unter dem Chat; sie war sparsam und
  * falsch.
  *
- * Der Chat ist einen Klick weit weg, nicht gelöscht — und das ist wichtiger als
- * es klingt: eine per Stimme angestossene Änderung erzeugt dieselbe
- * Vorschlagskarte wie immer, und die steht im Chat. Die KI liest deshalb vor,
- * was sie vorhat, und verweist für alles Unumkehrbare ausdrücklich auf die
- * Karte.
+ * Der Chat ist einen Klick weit weg, nicht gelöscht. Er ist derselbe Lauf mit
+ * demselben Verlauf — wer mitten im Gespräch auf ihn wechselt, liest dort
+ * weiter, was er eben gehört hat.
+ *
+ * Eine per Stimme angestossene Änderung erzeugt denselben Vorschlag wie im
+ * Chat, aber hier ohne Knopf: die KI fragt, der Mensch antwortet, und der
+ * `Vorschlagskasten` zeigt dazu, *was* gleich passiert. Bestätigt wird
+ * ausschliesslich gesprochen — siehe `useSprachsitzung.Vorschlag`.
  */
 export function SprachAnsicht({
   konfiguration,
@@ -29,7 +32,8 @@ export function SprachAnsicht({
   aufChat: () => void
 }) {
   const { t } = useTranslation()
-  const { zustand, zeilen, werkzeug, fehler, belege, pegel, starten, beenden } = useSprachsitzung()
+  const { zustand, zeilen, werkzeug, fehler, belege, vorschlag, pegel, starten, beenden } =
+    useSprachsitzung()
   const [einstellungenOffen, setEinstellungenOffen] = useState(false)
   const kasten = useRef<HTMLDivElement>(null)
   const gestartet = useRef(false)
@@ -124,6 +128,7 @@ export function SprachAnsicht({
         </div>
       )}
 
+      {vorschlag && <Vorschlagskasten vorschlag={vorschlag} />}
       {beleg && <Belegkasten beleg={beleg} />}
 
       <div className="mt-8 flex items-center gap-4">
@@ -166,6 +171,51 @@ export function SprachAnsicht({
 
       {einstellungenOffen && <Einstellungen konfiguration={konfiguration} />}
     </div>
+  )
+}
+
+/**
+ * Was gleich passiert, wenn der Mensch Ja sagt — gezeigt, nicht anklickbar.
+ *
+ * **Kein Knopf, und das ist Absicht.** Der Sprachmodus bestätigt gesprochen;
+ * ein Knopf daneben wäre ein zweiter Weg zum selben Ziel und damit ein zweiter
+ * Zustand, den Brücke und Anzeige auseinanderhalten müssten. Was der Kasten
+ * beiträgt, ist das, was gesprochen schlecht ankommt: der genaue Name der
+ * Aktion. „Ich lösche dann mal den Server" ist gehört eindeutig genug, um Ja zu
+ * sagen, und zu ungenau, um zu wissen, welchen.
+ *
+ * Der Werkzeugname wird übersetzt (`ai.actions.tools.*`, dieselbe Quelle wie
+ * die Karte im Chat), die erwartete Wirkung ist vom Modell verfasst und steht
+ * deshalb als reiner Text da.
+ */
+function Vorschlagskasten({ vorschlag }: { vorschlag: Vorschlag }) {
+  const { t } = useTranslation()
+  return (
+    <section
+      className="mt-4 w-full max-w-2xl rounded-xl border border-tertiary/40 bg-tertiary-container/20 px-4 py-3"
+      aria-live="polite"
+    >
+      <div className="flex items-baseline gap-2">
+        <ShieldAlert
+          className="h-3.5 w-3.5 shrink-0 self-center text-tertiary"
+          aria-hidden="true"
+        />
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+          {t('ai.voice.vorschlag.heading')}
+        </h3>
+        <span className="ml-auto min-w-0 truncate text-sm font-medium text-on-surface">
+          {t(`ai.actions.tools.${vorschlag.werkzeug}`, vorschlag.werkzeug)}
+        </span>
+      </div>
+      {vorschlag.wirkung && (
+        <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">
+          {vorschlag.wirkung}
+        </p>
+      )}
+      <p className="mt-2 text-xs text-on-surface-variant/70">
+        {t('ai.voice.vorschlag.hint')}
+      </p>
+    </section>
   )
 }
 

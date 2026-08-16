@@ -114,10 +114,15 @@ describe('useSprachsitzung', () => {
     // an zu reden, waehrend die KI schweigt. Es gibt nichts abzubrechen.
     //
     // Vorher ging das `unterbrechen` trotzdem hinaus, wurde zu einem
-    // `response.cancel` ins Leere, und die Gegenstelle antwortete mit
-    // `response_cancel_not_active`. Der Sprechende las daraufhin bei **jedem**
-    // Satz „Der Sprachanbieter hat die Sitzung abgebrochen" — eine
-    // Stoerungsmeldung fuer eine Leitung, die einwandfrei trug.
+    // `response.cancel` ins Leere, und die damalige Gegenstelle (OpenAIs
+    // Realtime-API) antwortete mit `response_cancel_not_active`. Der Sprechende
+    // las daraufhin bei **jedem** Satz „Der Sprachanbieter hat die Sitzung
+    // abgebrochen" — eine Stoerungsmeldung fuer eine Leitung, die einwandfrei
+    // trug.
+    //
+    // Die Zusage bleibt, obwohl die heutige Bruecke ein `unterbrechen` ins
+    // Leere klaglos schluckt: sie meldete dem Backend ein Dazwischenreden, das
+    // nicht stattgefunden hat, und das ist auch ohne Fehlermeldung falsch.
     const haken = await sitzung()
 
     act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'hoert' }))
@@ -238,6 +243,66 @@ describe('useSprachsitzung', () => {
     // aber aus einem Werkzeugergebnis — hier wird nichts geglaubt, was nicht
     // dasteht.
     expect(haken.result.current.belege).toEqual([])
+  })
+
+  it('zeigt den Vorschlag an, auf den ein Ja fehlt', async () => {
+    const haken = await sitzung()
+
+    act(() => {
+      leitung().simulateMessage({
+        art: 'vorschlag',
+        vorschlag: {
+          id: 'proposal-1',
+          tool_name: 'propose_server_delete',
+          expected_effect: 'Der Server „Kreativ" und seine Dateien werden entfernt.',
+        },
+      })
+    })
+
+    expect(haken.result.current.vorschlag).toEqual({
+      werkzeug: 'propose_server_delete',
+      wirkung: 'Der Server „Kreativ" und seine Dateien werden entfernt.',
+    })
+  })
+
+  it('nimmt den Vorschlag weg, sobald der Mensch etwas sagt', async () => {
+    const haken = await sitzung()
+
+    act(() => {
+      leitung().simulateMessage({
+        art: 'vorschlag',
+        vorschlag: { id: 'p1', tool_name: 'propose_backup', expected_effect: '' },
+      })
+    })
+    expect(haken.result.current.vorschlag).not.toBeNull()
+
+    act(() => {
+      leitung().simulateMessage({ art: 'gehoert', text: 'Ja, mach das' })
+    })
+
+    // Die Bruecke raeumt ihre offenen Vorschlaege auf jedem Weg weg — Ja, Nein
+    // und „etwas ganz anderes". Eine Karte, die waehrend der laufenden Loeschung
+    // noch „wartet auf dich" sagt, ist die gefaehrlichste Art von falsch.
+    expect(haken.result.current.vorschlag).toBeNull()
+  })
+
+  it('glaubt keinen Werkzeugnamen, der ein Uebersetzungspfad sein koennte', async () => {
+    const haken = await sitzung()
+
+    act(() => {
+      // `tool_name` wird als Schluessel `ai.actions.tools.<name>` benutzt. Ein
+      // Name mit Punkten liesse den Menschen anderswo in `de.json` landen — und
+      // dort steht Text, den er fuer die Beschreibung der Aktion hielte.
+      leitung().simulateMessage({
+        art: 'vorschlag',
+        vorschlag: { id: 'p1', tool_name: '../../permissionDetails.ai_voice_use.title' },
+      })
+      leitung().simulateMessage({ art: 'vorschlag', vorschlag: { id: 'p2' } })
+      leitung().simulateMessage({ art: 'vorschlag', vorschlag: 'propose_backup' })
+      leitung().simulateMessage({ art: 'vorschlag' })
+    })
+
+    expect(haken.result.current.vorschlag).toBeNull()
   })
 
   it('ueberspringt Rahmen, die kein JSON sind', async () => {

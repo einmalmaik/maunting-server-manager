@@ -25,7 +25,7 @@
  * sondern der Normalfall an einem Laptop ohne Kopfhörer.
  */
 
-/** Dieselbe Rate wie im Backend (`ai_voice_session.ABTASTRATE`). */
+/** Dieselbe Rate wie im Backend (`ai_voice_vad.ABTASTRATE`). */
 export const ABTASTRATE = 24_000
 
 /**

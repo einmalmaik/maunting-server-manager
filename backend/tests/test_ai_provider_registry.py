@@ -171,8 +171,8 @@ def test_the_recommendation_is_a_model_id_and_nothing_else() -> None:
     Eine zweite Formregel hier waere eine zweite Wahrheit — und sie war eine:
     frueher stand hier ein hartes ``"/" in empfehlung``, weil OpenRouter seine
     Kennungen als ``anbieter/modell`` fuehrt. Beim zweiten Anbieter schlug das
-    fehl, obwohl ``gpt-realtime-2.1`` voellig richtig ist. OpenAI hat schlicht
-    kein Praefix.
+    fehl, obwohl ``eleven_flash_v2_5`` voellig richtig ist. ElevenLabs hat
+    schlicht kein Praefix.
     """
     from services import ai_provider_registry
     from services.ai_model_catalog import _LESER
