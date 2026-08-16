@@ -85,10 +85,13 @@ def test_every_branch_migration_runs_both_ways(tmp_path: Path) -> None:
         }, "ai_tool_results.run_id fehlt nach `upgrade head`"
         # Dieselbe Sorte Spalte, eine Tabelle weiter. Sie muss ausserdem
         # ``nullable`` bleiben: ``NULL`` heisst bei der Stimme „nichts
-        # hinterlegt" und loest erst beim Verbinden auf die Standardstimme auf.
-        # Eine Migration, die hier ein NOT NULL mit Vorgabewert setzte, machte
-        # aus dem Standard eine Wahl des Betreibers — und ein spaeterer Wechsel
-        # der Standardstimme erreichte keinen einzigen bestehenden Zugang mehr.
+        # hinterlegt", und dann gibt es ueber diesen Zugang **keinen**
+        # Sprachmodus (routers/ai_voice.py). Aufgeloest wird nichts — eine
+        # Standardstimme gibt es seit dem 16.08.2026 nicht mehr, weil die
+        # Stimmen dem ElevenLabs-Konto des Betreibers gehoeren und MSM sie gar
+        # nicht kennt. Eine Migration, die hier ein NOT NULL mit Vorgabewert
+        # setzte, schriebe ihm eine geratene Voice ID auf die Rechnung, und beim
+        # naechsten Blick in die Oberflaeche hielte er sie fuer seine Wahl.
         stimmen = [
             spalte
             for spalte in inspect(engine).get_columns("ai_providers")

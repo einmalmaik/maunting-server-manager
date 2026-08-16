@@ -9,8 +9,8 @@ gewöhnliche Chatlauf mit zwei Wandlern davor und dahinter:
                                               ↓
     Lautsprecher ←──── Stimme ←──── derselbe Antworttext
 
-Was das kostet, ist eine Sprechpausenerkennung, die weniger klug ist als die
-weggefallene (`ai_voice_vad`). Was es spart, ist ein zweiter Werkzeuglauf, eine
+Was das kostet, ist eine Sprechpausenerkennung (`ai_voice_vad`), die weniger
+klug ist als das weggefallene ``semantic_vad``. Was es spart, ist ein zweiter Werkzeuglauf, eine
 zweite Bestätigungsmechanik, ein zweites Gedächtnis, ein zweiter Werkzeugkatalog
 und ein zweites Protokoll — rund 2.700 Zeilen, in denen jeder Befund zweimal
 behoben werden musste und beim zweiten Mal regelmässig anders.
@@ -58,6 +58,7 @@ import httpx
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
+from config import settings
 from database import SessionLocal
 from models import AiProvider, User
 from services import (
@@ -66,16 +67,19 @@ from services import (
     ai_tts_elevenlabs,
     ai_voice_vad,
 )
-from services.ai_redaction import redact_sensitive_text
 
 logger = logging.getLogger(__name__)
 
 
 # ── Was der Browser zu sehen bekommt ──────────────────────────────────────
 #
-# Dieselbe kleine, geschlossene Liste wie zuvor — der Browser merkt vom
-# Anbieterwechsel nichts. Binärrahmen sind Ton (PCM16, 24 kHz, mono),
-# Textrahmen sind JSON und beschreiben, was gerade passiert.
+# Die **Rahmenformate** sind unverändert, und darauf kommt es an: Binärrahmen
+# sind Ton (PCM16, 24 kHz, mono), Textrahmen sind JSON und beschreiben, was
+# gerade passiert. Die Liste der Ereignisse hat sich mit dem Umbau dagegen
+# geändert — `kontingent` ist weg, weil es keine eigene Sprachkontingentrechnung
+# mehr gibt, und `vorschlag` ist dazugekommen. Wer hier eines hinzufügt, muss in
+# `useSprachsitzung.ts` einen `case` dafür anlegen; unbekannte fallen dort
+# stillschweigend durch.
 
 ZUSTAND_BEREIT = "bereit"
 ZUSTAND_HOERT = "hoert"
@@ -89,7 +93,14 @@ ZUSTAND_SPRICHT = "spricht"
 #: WebSocket prüft die Anmeldung **nur beim Handshake** (`dependencies.py`), und
 #: eine Verbindung, die Stunden offen bleibt, umginge damit beides: den Ablauf
 #: des Tokens und die jti-Sperrliste. Wer abgemeldet wird, spräche weiter.
-MAX_SITZUNGSSEKUNDEN = 15 * 60
+#:
+#: Deshalb **abgeleitet** und nicht abgeschrieben: `access_token_expire_minutes`
+#: ist über ``MSM_ACCESS_TOKEN_EXPIRE_MINUTES`` einstellbar. Hier stand die 15
+#: ein zweites Mal fest im Code — wer sie auf fünf senkt, um Tokens schneller
+#: rotieren zu lassen, hätte eine Sprachsitzung bekommen, die zehn Minuten
+#: länger spricht als der Token gilt. Genau der Fall, den der Absatz darüber
+#: ausschliessen soll.
+MAX_SITZUNGSSEKUNDEN = settings.access_token_expire_minutes * 60
 
 #: Wie groß ein einzelner Tonrahmen vom Browser höchstens sein darf. Bei 24 kHz
 #: mono sind 128 KiB rund 2,7 Sekunden Ton — großzügig für Rahmen, die alle 20
@@ -657,8 +668,14 @@ class Sprachbruecke:
 
         ``True`` heisst: erledigt, es beginnt kein neuer Lauf. ``False`` heisst:
         das war keine Entscheidung, sondern etwas Neues — dann wird der Wortlaut
-        als gewöhnliche Nachricht behandelt, und `vorgaenger_abloesen` räumt die
-        offenen Vorschläge weg wie im Chat auch.
+        als gewöhnliche Nachricht behandelt.
+
+        Weggeräumt wird dabei nur **diese Liste hier**, also das Wissen der
+        Brücke, welche Kennungen ein gesprochenes Ja gerade meinen könnte. Der
+        Vorschlag selbst bleibt in der Datenbank ausführbar, bis seine Frist
+        abläuft — genau wie eine Karte im Chat, die niemand anklickt.
+        `vorgaenger_abloesen` beendet den alten **Lauf** und sagt dazu
+        ausdrücklich, dass der Vorschlag davon unberührt bleibt.
         """
         offene = self._offene_vorschlaege
         if ist_zustimmung(wortlaut):
@@ -671,11 +688,11 @@ class Sprachbruecke:
             return True
         if ist_ablehnung(wortlaut):
             # Nichts an der Datenbank. Ein abgelehnter Vorschlag verhält sich
-            # genau wie eine Karte, die niemand anklickt: er bleibt stehen, bis
-            # er abläuft oder die nächste Nachricht ihn ablöst
-            # (`vorgaenger_abloesen`). Einen eigenen Ablehnungsweg gibt es im
-            # Chat nicht — hier einen zu erfinden hiesse, im Sprachmodus einen
-            # Zustand herstellen zu können, den der Chat nicht kennt.
+            # genau wie eine Karte, die niemand anklickt: er bleibt ausführbar,
+            # bis seine Frist abläuft. Vergessen wird nur die Kennung hier.
+            # Einen eigenen Ablehnungsweg gibt es im Chat nicht — hier einen zu
+            # erfinden hiesse, im Sprachmodus einen Zustand herstellen zu
+            # können, den der Chat nicht kennt.
             self._offene_vorschlaege = []
             await self._zustand_melden(ZUSTAND_BEREIT)
             return True
@@ -690,9 +707,12 @@ class Sprachbruecke:
         entwertet den Token atomar. Die gesprochene Zustimmung ersetzt genau
         einen Schritt — den Klick — und keinen einzigen der Schutzmechanismen.
 
-        Was per Sprache nicht bestätigt werden darf, prallt hier nicht ab,
-        sondern schon davor: solche Werkzeuge tragen ``requires_confirmation``
-        und stehen gar nicht erst in der Werkzeugmenge des Sprachmodus.
+        Es gibt **keine** Werkzeugmenge, die der Sprachmodus sich vorbehält.
+        Er nimmt denselben Katalog wie der Chat, `ALWAYS_CONFIRM_TOOLS`
+        eingeschlossen; die frühere Sperre ist am 16.08.2026 auf ausdrückliche
+        Anweisung des Betreibers gefallen. Ob ein Vorschlag überhaupt bestätigt
+        werden muss, entscheidet unverändert `create_proposal` über
+        ``immer_bestaetigen`` — hier wird nur der Klick durch ein Wort ersetzt.
         """
         from services import ai_action_errors, ai_proposal_service, ai_run_service
 
@@ -780,8 +800,3 @@ class Sprachbruecke:
             aufgabe.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await aufgabe
-
-
-def gespraechstext(rolle: str, inhalt: str) -> str:
-    """Redigierter Text für das Protokoll. Nie roher Fremdtext im Log."""
-    return f"{rolle}: {redact_sensitive_text(inhalt)[:200]}"

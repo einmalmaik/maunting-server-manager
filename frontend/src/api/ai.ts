@@ -255,20 +255,22 @@ export interface AiProviderTestResult {
 /**
  * Was der Sprachmodus braucht, um überhaupt angeboten zu werden.
  *
- * `available` ist `false`, solange kein Realtime-Zugang mit Schlüssel
- * eingerichtet ist. Dann erscheint der Sprachknopf gar nicht — kein
- * ausgegrauter Schalter für etwas, das der Betreiber nicht bestellt hat.
+ * `available` ist `false`, solange nicht **beide** Zugänge stehen: ein
+ * Chatzugang mit hinterlegtem Modell für Gesprochenes und ein Stimmzugang mit
+ * Voice ID, jeder mit eigenem Schlüssel. Fehlt einer, erscheint der Sprachknopf
+ * gar nicht — kein ausgegrauter Schalter für etwas, das der Betreiber nicht
+ * bestellt hat.
  */
 export interface AiVoiceConfig {
   available: boolean
   /** Nur zur Anzeige. `null`, solange nichts eingerichtet ist. */
   model: string | null
   /**
-   * Womit gesprochen wird — bereits aufgeloest, deshalb nie `null`: hat der
-   * Zugang nichts hinterlegt, steht hier die Standardstimme. Nur sinnvoll
-   * belegt, solange `available` wahr ist.
+   * Die Voice ID des Stimmzugangs, nur zur Anzeige. `null`, solange keiner
+   * eingerichtet ist — aufgelöst wird nichts, eine Standardstimme gibt es
+   * nicht. Sinnvoll belegt nur, solange `available` wahr ist.
    */
-  voice: string
+  voice: string | null
   sample_rate: number
   max_seconds: number
 }

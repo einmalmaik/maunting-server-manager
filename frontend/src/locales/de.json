@@ -647,7 +647,7 @@
       "errors": {
         "microphone": "Kein Zugriff auf das Mikrofon. Erlaube ihn in den Browsereinstellungen.",
         "audio": "Der Browser konnte die Tonverbindung nicht aufbauen. Einzelheiten stehen in der Entwicklerkonsole.",
-        "provider": "Der Sprachanbieter hat die Sitzung abgebrochen.",
+        "provider": "Das hat gerade nicht geklappt.",
         "connection": "Verbindung zum Sprachmodus verloren."
       },
       "toVoiceMode": "Realtime-Modus",
@@ -662,7 +662,7 @@
         "hoert": "Ich höre zu — sprich einfach weiter.",
         "denkt": "Einen Moment, ich sehe nach.",
         "spricht": "Du kannst mich jederzeit unterbrechen.",
-        "error": "Der Sprachmodus konnte nicht fortgesetzt werden."
+        "error": "Der Versuch ist gescheitert — sprich einfach weiter."
       },
       "info": {
         "model": "Modell",
@@ -2933,32 +2933,32 @@
     },
     "voice": {
       "title": "Sprachmodus",
-      "intro": "Mit der KI reden statt tippen — und zwar mit demselben Agenten: dieselbe Unterhaltung, derselbe Lauf, dieselben Werkzeuge, dieselben Rechte. Es ist kein zweites Modell, sondern der gewoehnliche Chatlauf mit zwei Wandlern davor und dahinter. Umgeschaltet wird oben rechts auf der KI-Seite: der Chat weicht einer Kugel, die sich zum gesprochenen Wort bewegt.",
+      "intro": "Mit der KI reden statt tippen — und zwar mit demselben Agenten: dieselbe Unterhaltung, derselbe Lauf, dieselben Werkzeuge, dieselben Rechte. Es ist kein zweites Modell, sondern der gewöhnliche Chatlauf mit zwei Wandlern davor und dahinter. Umgeschaltet wird oben rechts auf der KI-Seite: der Chat weicht einer Kugel, die sich zum gesprochenen Wort bewegt.",
       "access": {
         "title": "Was eingerichtet sein muss",
-        "body": "Zweierlei. Am bestehenden OpenRouter-Zugang ein „Modell fuer Gesprochenes\" — ein hoerfaehiges Chatmodell wie google/gemini-2.5-flash. Und ein zweiter Zugang der Art „ElevenLabs (Stimme)\" mit Schluessel, Sprachmodell und Voice ID. Fehlt eines davon, erscheint der Umschalter gar nicht."
+        "body": "Zweierlei. Am bestehenden OpenRouter-Zugang ein „Modell für Gesprochenes\" — ein hörfähiges Chatmodell wie google/gemini-2.5-flash. Und ein zweiter Zugang der Art „ElevenLabs (Stimme)\" mit Schlüssel, Sprachmodell und Voice ID. Fehlt eines davon, erscheint der Umschalter gar nicht."
       },
       "model": {
         "title": "Modelle und Stimme",
-        "body": "Gehoer: ein Modell, das Audio versteht. Einen Transkriptions-Endpunkt hat OpenRouter nicht (16.08.2026 geprueft) — „whisper\" gibt es dort also nicht; Gesprochenes geht als Inhaltsteil in eine gewoehnliche Anfrage. Stimme: eleven_flash_v2_5, rund 75 ms Rechenzeit. Die Voice ID stammt aus deiner Stimmenbibliothek und ist ein Textfeld — MSM kennt deine Stimmen nicht und raet deshalb keine."
+        "body": "Gehör: ein Modell, das Audio versteht. Einen Transkriptions-Endpunkt hat OpenRouter nicht (16.08.2026 geprüft) — „whisper\" gibt es dort also nicht; Gesprochenes geht als Inhaltsteil in eine gewöhnliche Anfrage. Stimme: eleven_flash_v2_5, rund 75 ms Rechenzeit. Die Voice ID stammt aus deiner Stimmenbibliothek und ist ein Textfeld — MSM kennt deine Stimmen nicht und rät deshalb keine."
       },
       "permission": {
         "title": "Recht ai.voice.use",
-        "body": "Getrennt von ai.chat.use, weil per Stimme bestaetigt wird statt per Klick. Die KI erbt dabei genau die Rechte des Sprechenden und keines mehr — ueber seine Rolle oder als direkt zugewiesener Benutzer eines Servers. Ohne eingerichtete Zugaenge erscheint der Umschalter gar nicht, nicht ausgegraut."
+        "body": "Getrennt von ai.chat.use, weil per Stimme bestätigt wird statt per Klick. Die KI erbt dabei genau die Rechte des Sprechenden und keines mehr — über seine Rolle oder als direkt zugewiesener Benutzer eines Servers. Ohne eingerichtete Zugänge erscheint der Umschalter gar nicht, nicht ausgegraut."
       },
       "confirm": {
-        "title": "Bestaetigen per Stimme",
-        "body": "Die KI sagt, was sie vorhat; daneben zeigt ein Kasten den Namen der Aktion — ohne Knopf, denn entschieden wird gesprochen. Gesprochen ist „ich loesche dann mal den Server\" eindeutig genug, um zuzustimmen, und zu ungenau, um zu wissen, welchen. Ein klares „Ja\" fuehrt aus. Klar heisst woertlich: die Aeusserung muss nichts als eine Zustimmung sein — „ja, aber schau vorher nochmal nach\" ist ein neuer Auftrag und keine. Das gesprochene Ja ersetzt den Klick und keine einzige Pruefung."
+        "title": "Bestätigen per Stimme",
+        "body": "Die KI sagt, was sie vorhat; daneben zeigt ein Kasten den Namen der Aktion — ohne Knopf, denn entschieden wird gesprochen. Gesprochen ist „ich lösche dann mal den Server\" eindeutig genug, um zuzustimmen, und zu ungenau, um zu wissen, welchen. Ein klares „Ja\" führt aus. Klar heisst wörtlich: die Äußerung muss nichts als eine Zustimmung sein — „ja, aber schau vorher nochmal nach\" ist ein neuer Auftrag und keine. Das gesprochene Ja ersetzt den Klick und keine einzige Prüfung."
       },
       "quota": {
         "title": "Kontingent",
-        "body": "Jede Aeusserung ist eine Anfrage — dieselbe Buchung wie eine getippte Nachricht. Ein Rollenlimit „Anfragen pro Minute\" von fuenf zerreisst damit ein Gespraech; ohne gesetztes Limit passiert nichts. Dafuer greifen Token- und Kostengrenze jetzt genauso wie im Chat. Die Zeichen bei ElevenLabs zaehlt MSM nicht mit; eine Antwort ist auf 4.000 gedeckelt."
+        "body": "Jede Äußerung ist eine Anfrage — dieselbe Buchung wie eine getippte Nachricht. Ein Rollenlimit „Anfragen pro Minute\" von fünf zerreißt damit ein Gespräch; ohne gesetztes Limit passiert nichts. Dafür greifen Token- und Kostengrenze jetzt genauso wie im Chat. Die Zeichen bei ElevenLabs zählt MSM nicht mit; eine Antwort ist auf 4.000 gedeckelt. Die Abschrift des Gesprochenen zählt MSM ebenfalls nicht mit: sie geht dem Lauf voraus und gehört zu keinem. Beim Anbieter steht sie trotzdem auf der Rechnung."
       },
       "relay": {
-        "title": "Der Ton laeuft durch das Panel",
-        "body": "Browser → Panel → Anbieter, nicht daran vorbei. Bei einer Direktverbindung liefe die Werkzeugschleife ueber den Browser — er saehe jeden Aufruf und koennte welche erfinden. Auch wann jemand aufgehoert hat zu reden, entscheidet das Backend. Die Schluessel verlassen den Panelprozess nie. Kein zusaetzlicher Port; der Reverse-Proxy muss WebSocket-Upgrades unter /api/ durchlassen, was er fuer die Server-Konsole ohnehin tut."
+        "title": "Der Ton läuft durch das Panel",
+        "body": "Browser → Panel → Anbieter, nicht daran vorbei. Bei einer Direktverbindung liefe die Werkzeugschleife über den Browser — er sähe jeden Aufruf und könnte welche erfinden. Auch wann jemand aufgehört hat zu reden, entscheidet das Backend. Die Schlüssel verlassen den Panelprozess nie. Kein zusätzlicher Port; der Reverse-Proxy muss WebSocket-Upgrades unter /api/ durchlassen, was er für die Server-Konsole ohnehin tut."
       },
-      "spokenLimit": "Loeschen und das Einspielen eines Backups sind seit dem 16.08.2026 auch per Stimme bestaetigbar — der Betreiber hat das ausdruecklich so entschieden. Das Restrisiko: im Audit steht danach eine gesprochene Zustimmung, und wer im Raum mithoert, kann sie aussprechen. Wem das zu weit geht, nimmt ai.voice.use aus der Rolle. Gesprochenes geht als Ton an OpenRouter, der Antworttext an ElevenLabs; deren EU-Datenresidenz ist Enterprise-Kunden vorbehalten."
+      "spokenLimit": "Löschen und das Einspielen eines Backups sind seit dem 16.08.2026 auch per Stimme bestätigbar — der Betreiber hat das ausdrücklich so entschieden. Das Restrisiko: im Audit steht danach eine gesprochene Zustimmung, und wer im Raum mithört, kann sie aussprechen. Wem das zu weit geht, nimmt ai.voice.use aus der Rolle. Gesprochenes geht als Ton an OpenRouter, der Antworttext an ElevenLabs; deren EU-Datenresidenz ist Enterprise-Kunden vorbehalten."
     }
   },
   "docsOAuth": {

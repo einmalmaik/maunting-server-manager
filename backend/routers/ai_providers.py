@@ -364,7 +364,7 @@ async def list_catalog_models(
 
     ``provider_id`` nennt den Zugang, dessen Schluessel den Katalog holen soll.
     Gebraucht wird das nur von Anbietern mit ``katalog_braucht_schluessel``:
-    OpenRouter gibt seine Liste offen heraus, OpenAI nicht. Fehlt der Schluessel
+    OpenRouter gibt seine Liste offen heraus, ElevenLabs nicht. Fehlt der Schluessel
     dort, kommt eine **leere Liste** und kein Fehler — beim Anlegen eines
     Zugangs gibt es die Zeile mit dem Schluessel naemlich noch gar nicht, und
     eine Fehlermeldung an dieser Stelle waere die Meldung eines Normalzustands.

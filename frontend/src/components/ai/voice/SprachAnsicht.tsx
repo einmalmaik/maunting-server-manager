@@ -301,8 +301,8 @@ function RunderKnopf({
  *
  * Es sind **Angaben**, keine Regler. Am Sprachmodus lässt sich von hier aus
  * nichts einstellen: Modell und Schlüssel gehören dem Betreiber, die Stimme
- * auch (sie steht am Anbieter unter „Standardstimme"), und die Höchstdauer
- * hängt an der Lebensdauer des Anmeldetokens. Ein Zahnrad, das drei Schalter
+ * auch (sie steht als Voice ID am Stimmzugang unter „Stimme"), und die
+ * Höchstdauer hängt an der Lebensdauer des Anmeldetokens. Ein Zahnrad, das drei Schalter
  * zeigt, die nichts tun, wäre schlimmer als keines — hier steht, woran man
  * gerade dran ist, und wo man es ändert.
  *
@@ -314,8 +314,9 @@ function Einstellungen({ konfiguration }: { konfiguration: AiVoiceConfig | null 
   const { t } = useTranslation()
   const zeilen: [string, string][] = [
     ['ai.voice.info.model', konfiguration?.model ?? '—'],
-    // Die Stimme kommt vom Server bereits aufgelöst — hat der Zugang nichts
-    // hinterlegt, steht dort die Standardstimme. Deshalb wird hier nichts
+    // Die Voice ID des Stimmzugangs, so wie der Server sie führt. Eine
+    // Standardstimme gibt es nicht — ohne hinterlegte Kennung ist `available`
+    // falsch und diese Ansicht erscheint gar nicht. Deshalb wird hier nichts
     // geraten und nichts eingesetzt; `—` deckt nur den Fall ab, dass die
     // Konfiguration noch gar nicht da ist.
     ['ai.voice.info.voice', konfiguration?.voice || '—'],

@@ -137,10 +137,11 @@ abgibst oder eine Rueckfrage stellst, gehoert ein Satz davor, der ihn erklaert \
 # braeuchte.
 #
 # Die Regel ist mit Absicht dieselbe wie im Sprachmodus, nur ohne dessen
-# Mechanik: dort geht der Ausschnitt ueber `zeige_beleg` als eigener Kanal auf
-# den Schirm, weil eine gesprochene Antwort keinen Codeblock hat. Hier ist die
-# Antwort selbst der Kanal. Gleich bleibt die Reihenfolge — erst die Stelle
-# zeigen, dann sie deuten.
+# Mechanik: dort schreibt das Modell denselben Codeblock (`GESPROCHEN` verlangt
+# ihn ausdruecklich), und `ai_voice_bridge.Belegfilter` nimmt ihn aus dem
+# Redefluss und gibt ihn als eigenes Ereignis auf den Schirm — gezeigt statt
+# vorgelesen. Hier ist die Antwort selbst der Kanal. Gleich bleibt die
+# Reihenfolge — erst die Stelle zeigen, dann sie deuten.
 BELEGE = """\
 Belege statt Abschriften: Gib Logs, Konfigurationen und Dateiinhalte nie \
 vollstaendig wieder. Zeig die Zeilen, um die es geht — meist eine bis fuenf — \
@@ -644,9 +645,10 @@ wuerdest, und frag, ob du es tun sollst. Ein klares "Ja" fuehrt es aus, ein
 klares "Nein" laesst es. Sagt er etwas anderes, ist das keine Antwort auf die
 Frage, sondern ein neuer Auftrag — behandle ihn so.
 
-Stehende Auftraege, Loeschen, das Einspielen eines Backups: das entscheidet er
-auf der Karte im Panel und nicht im Gespraech. Sag dann, was du vorbereitet
-hast und dass es dort bestaetigt wird — das ist keine Panne, sondern Absicht."""
+Es gibt nichts, was du auf eine Karte im Panel verschieben musst — Loeschen und
+das Einspielen eines Backups eingeschlossen. Der Weg ist derselbe wie bei allem
+anderen: sag, was du tun wuerdest, frag, und handle nach der Antwort. Verweise
+ihn nicht auf einen Knopf; im Sprachmodus gibt es keinen."""
 
 
 def build(skill_index: str = "", *, gesprochen: bool = False) -> str:

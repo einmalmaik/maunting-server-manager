@@ -44,9 +44,6 @@ ABTASTRATE = 24_000
 #: verschlafen, lang genug, dass ein einzelner Knacks nicht wie Sprache aussieht.
 RAHMEN_MS = 20
 
-#: Wie viele Bytes ein Rahmen hat (PCM16 mono).
-RAHMEN_BYTES = ABTASTRATE * RAHMEN_MS // 1000 * 2
-
 #: Wie lange es still sein muss, damit die Äusserung als beendet gilt.
 STILLE_SEKUNDEN = 0.7
 
@@ -104,9 +101,14 @@ class Aeusserung:
     pcm: bytes
     sekunden: float
     #: Ob die Äusserung wegen `MAX_SEKUNDEN` abgegeben wurde und nicht, weil
-    #: jemand aufgehört hat zu reden. Der Aufrufer erfährt damit, dass gleich
-    #: noch mehr kommt — und kann es dem Sprechenden sagen, statt ihn im
-    #: Glauben zu lassen, er sei zu Ende gekommen.
+    #: jemand aufgehört hat zu reden.
+    #:
+    #: Die Brücke liest das Feld heute **nicht**, und das ist eine bekannte
+    #: Lücke, keine Entscheidung: wer dreissig Sekunden am Stück redet, bekommt
+    #: eine Antwort auf die erste Hälfte und erfährt nicht, dass die zweite nie
+    #: ankam. Es zu ändern heisst, ein Ereignis dafür zu erfinden — und ein
+    #: Ereignis ist eine Zeile im Backend, ein `case` im Browser und ein Satz in
+    #: zwei Sprachdateien. Wer das tut, fängt hier an.
     abgeschnitten: bool = False
 
 
@@ -160,22 +162,6 @@ class Pausenerkennung:
         """Ob gerade jemand redet. Der Sprachmodus zeigt das als Zustand an."""
         return self._spricht
 
-    def zuruecksetzen(self) -> None:
-        """Alles Angesammelte verwerfen — etwa nach einer Unterbrechung.
-
-        Der Grundpegel bleibt: er beschreibt den Raum, und der Raum hat sich
-        nicht geändert. Ihn mitzurücksetzen hiesse, die Einmessung nach jedem
-        Zug erneut zu bezahlen.
-        """
-        self._rest = b""
-        self._vorlauf.clear()
-        self._aufnahme.clear()
-        self._aufnahme_bytes = 0
-        self._spricht = False
-        self._laute_rahmen = 0
-        self._laute_gesamt = 0
-        self._stille_zaehler = 0
-
     def fuettern(self, pcm: bytes) -> Aeusserung | None:
         """Nimmt einen Tonrahmen beliebiger Länge entgegen.
 
@@ -204,10 +190,13 @@ class Pausenerkennung:
         return ergebnis
 
     def ausklingen(self) -> Aeusserung | None:
-        """Was noch da ist, jetzt abgeben — die Leitung geht zu.
+        """Was noch da ist, jetzt abgeben — für einen Aufrufer, der zumacht.
 
-        Ohne das ginge der letzte Satz verloren, wenn jemand direkt nach dem
-        Sprechen auflegt: die Nachlaufzeit wäre nie abgelaufen.
+        Die Brücke ruft das **nicht**: wer auflegt, will keine Antwort mehr auf
+        einen halben Satz, und eine, die nach dem Zumachen noch entstünde, ginge
+        ohnehin ins Leere. Die Möglichkeit steht hier trotzdem, weil sie eine
+        Zeile ist und der nächste Aufrufer — ein Diktierfeld, ein Testlauf über
+        eine Aufnahme — sie braucht, ohne den Zustand von aussen anzufassen.
         """
         if not self._spricht:
             return None

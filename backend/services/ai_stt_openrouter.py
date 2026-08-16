@@ -11,8 +11,21 @@ gibt keinen zweiten Anbieter, kein zweites Protokoll und keinen zweiten
 Schlüssel. Derselbe Zugang, der antwortet, hört auch zu — nur mit einer anderen
 Modellzeile (``ai_providers.transcription_model``). Deshalb geht der Aufruf
 durch `openai_compatible_adapter` wie jeder andere, und damit kommen
-Fehlercodes, Redaktion und die **Kostenerfassung** mit, ohne dass hier etwas
-davon stünde.
+Fehlercodes und Redaktion mit, ohne dass hier etwas davon stünde.
+
+**Gebucht wird die Abschrift nicht**, und das ist eine Lücke und keine
+Feinheit. `openai_compatible_adapter` bucht nirgends — es füllt nur ein
+übergebenes `StreamUsage`; gebucht wird über `reserve_ai_usage` beim Aufrufer.
+Der einzige Aufrufer hier ist `ai_voice_bridge`, und der übergibt keines: die
+Abschrift gehört zu keinem Lauf, sie geht ihm voraus. Für den Betreiber heisst
+das: die Tokengrenze und die Kostengrenze decken den **Denk**- und den
+Sprechweg, nicht das Zuhören. Das steht so auch in `docs/self-hosting.md` unter
+"Kontingent", damit es niemand aus einer Rechnung erfahren muss.
+
+Wer es ändern will, braucht mehr als ein Argument mehr: eine abgelehnte
+Reservierung würde die Äusserung verwerfen, **bevor** irgendwer weiss, was
+gesagt wurde — der Sprechende bekäme dann nicht einmal die Auskunft, dass sein
+Kontingent erschöpft ist.
 
 **Was hier bewusst nicht passiert.** Kein Bewerten, kein Zusammenfassen, kein
 Beantworten. Was zurückkommt, ist der Wortlaut des Menschen und wird behandelt
@@ -70,10 +83,17 @@ MAX_ZEICHEN = 2_000
 
 #: Wie kurz eine Äusserung sein darf, damit sie überhaupt hinausgeht.
 #:
-#: Ein Huster ist keine Frage. Unterhalb dieser Dauer wird gar nicht erst
-#: gefragt: das spart den Aufruf, und vor allem verhindert es, dass ein
-#: Räuspern als „ja" durchgeht — was bei einer Rückfrage nach dem Löschen eines
-#: Servers der teuerste denkbare Hörfehler wäre.
+#: **Nicht** die Schranke gegen den Huster — die sitzt in `ai_voice_vad`, und
+#: sie muss dort sitzen: gemessen wird hier die Länge des *Stücks*, und jedes
+#: Stück aus der Pausenerkennung trägt Vorlauf und Nachlauf mit sich. Ein
+#: Räuspern von einer Zehntelsekunde käme als knappe Sekunde an und liefe glatt
+#: durch. Die Pausenerkennung zählt stattdessen die **lauten** Rahmen
+#: (`_min_laute_rahmen`) und gibt so etwas gar nicht erst ab.
+#:
+#: Diese Grenze hier ist die Schranke für Aufrufer **ohne** Pausenerkennung —
+#: ein Testlauf, ein Diktierfeld, was auch immer als nächstes kommt. Sie ist
+#: bewusst dieselbe Zahl: wer sie an einer Stelle ändert, soll die andere
+#: finden.
 MIN_SEKUNDEN = 0.35
 
 #: Was das hörende Modell tun soll — und was ausdrücklich nicht.

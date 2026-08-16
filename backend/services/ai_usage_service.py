@@ -110,43 +110,6 @@ def _ensure_within(limit: int | None, current: int, requested: int, reason: str)
         raise AiQuotaExceeded(reason)
 
 
-def verbleibende_tokens(
-    db: Session, user: User, *, now: datetime | None = None
-) -> int | None:
-    """Wieviele Tokens dieser Benutzer noch frei hat — ``None`` heisst unbegrenzt.
-
-    Die Reservierung prüft Tag, Woche und Monat **einzeln**, weil jede Grenze
-    für sich gilt. Für eine Vorabfrage ist die kleinste der drei Restmengen die
-    Antwort: mehr als sie kann niemand verbrauchen, ohne irgendwo anzustossen.
-
-    Gebraucht wird das dort, wo der Verbrauch **nicht** in einer einzelnen
-    Anfrage steckt, sondern über Minuten anfällt — im Sprachmodus. Der Chat
-    reserviert, ruft einmal an und schliesst ab; eine Sprachsitzung redet
-    weiter, solange jemand redet. Ohne diese Zahl wüsste sie nicht, wann Schluss
-    ist, und die Reservierung erführe es erst hinterher.
-
-    Keine Sperre auf der Benutzerzeile: das hier ist eine Auskunft und keine
-    Buchung. Die verbindliche Entscheidung fällt weiterhin in
-    `reserve_ai_usage` unter Sperre.
-    """
-    current_time = now or datetime.now(timezone.utc)
-    day_start, week_start, month_start = _period_starts(current_time)
-    limits = resolve_effective_limits(db, user)
-
-    reste = [
-        limit - _sum_since(db, user.id, beginn, AiUsageEvent.accounted_tokens)
-        for limit, beginn in (
-            (limits.daily_token_limit, day_start),
-            (limits.weekly_token_limit, week_start),
-            (limits.monthly_token_limit, month_start),
-        )
-        if limit is not None
-    ]
-    if not reste:
-        return None
-    return max(0, min(reste))
-
-
 def reserve_ai_usage(
     db: Session,
     user: User,

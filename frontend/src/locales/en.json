@@ -647,7 +647,7 @@
       "errors": {
         "microphone": "No access to the microphone. Allow it in your browser settings.",
         "audio": "The browser could not set up the audio chain. Details are in the developer console.",
-        "provider": "The voice provider ended the session.",
+        "provider": "That didn't work just now.",
         "connection": "Lost the connection to voice mode."
       },
       "toVoiceMode": "Realtime mode",
@@ -662,7 +662,7 @@
         "hoert": "I'm listening — just keep going.",
         "denkt": "One moment, I'm looking into it.",
         "spricht": "You can interrupt me at any time.",
-        "error": "Voice mode could not continue."
+        "error": "That attempt failed — just keep talking."
       },
       "info": {
         "model": "Model",
@@ -2952,7 +2952,7 @@
       },
       "quota": {
         "title": "Quota",
-        "body": "Every utterance is one request — the same booking as a typed message. A role limit of five requests per minute will therefore tear a conversation apart; with no limit set, nothing happens. In exchange, token and cost limits now apply exactly as they do in chat. MSM does not count ElevenLabs characters; a single answer is capped at 4,000."
+        "body": "Every utterance is one request — the same booking as a typed message. A role limit of five requests per minute will therefore tear a conversation apart; with no limit set, nothing happens. In exchange, token and cost limits now apply exactly as they do in chat. MSM does not count ElevenLabs characters; a single answer is capped at 4,000. MSM does not count the transcription either: it precedes the run and belongs to none. The provider still bills it."
       },
       "relay": {
         "title": "Audio travels through the panel",

@@ -407,7 +407,14 @@ class Stimme:
 
     @property
     def abgeschnitten(self) -> bool:
-        """Ob wegen `MAX_ZEICHEN_JE_ANTWORT` nicht alles vorgelesen wurde."""
+        """Ob wegen `MAX_ZEICHEN_JE_ANTWORT` nicht alles vorgelesen wurde.
+
+        Niemand fragt sie ab — dass gekürzt wurde, erfährt heute nur das
+        Protokoll. Dieselbe Lücke wie bei `ai_voice_vad.Aeusserung.abgeschnitten`
+        und aus demselben Grund offen: der Sprechende zu informieren braucht ein
+        eigenes Ereignis. Auf dem Schirm steht der Text vollständig, nur gehört
+        hat er ihn nicht bis zum Ende.
+        """
         return self._abgeschnitten
 
     async def _stueck_senden(self, stueck: str) -> None:

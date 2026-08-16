@@ -920,13 +920,16 @@ Eine Sitzung endet nach **15 Minuten** von selbst; der Browser verbindet
 automatisch neu. Das ist keine Vorsicht, sondern die Lebensdauer des
 Access-Tokens: ein WebSocket prüft die Anmeldung nur beim Verbindungsaufbau, und
 eine stundenlang offene Leitung umginge sowohl den Ablauf als auch die
-Sperrliste abgemeldeter Sitzungen.
+Sperrliste abgemeldeter Sitzungen. Wer `MSM_ACCESS_TOKEN_EXPIRE_MINUTES` ändert,
+ändert die Sitzungsdauer mit — sie ist daraus abgeleitet, nicht daneben
+notiert.
 
 ### Bestätigen per Stimme
 
-Soll etwas geändert werden, entsteht **dieselbe Vorschlagskarte wie immer** und
-sie ist sichtbar. Zusätzlich sagt die KI, was sie vorhat, und fragt nach. Ein
-klares „Ja" führt aus, ein klares „Nein" lässt es.
+Soll etwas geändert werden, entsteht **derselbe Vorschlag wie im Chat** — hier
+aber als Kasten ohne Knopf, der nur den Namen der Aktion nennt. Entschieden wird
+gesprochen: die KI sagt, was sie vorhat, und fragt nach. Ein klares „Ja" führt
+aus, ein klares „Nein" lässt es.
 
 „Klar" heisst hier wörtlich: die Äusserung muss **nichts als** eine Zustimmung
 sein. „Ja, aber schau vorher nochmal in die Logs" ist keine — das ist ein neuer
@@ -970,15 +973,28 @@ ist jetzt jeder Zug eine — dieselbe Buchung wie eine getippte Nachricht, über
 denselben Weg gezählt. Ein Rollenlimit *Anfragen pro Minute* von fünf zerreisst
 damit ein Gespräch, das vorher durchlief. Ohne gesetztes Limit passiert nichts.
 
-Der Gewinn ist, dass Tokengrenzen und Kostengrenze im Sprachmodus **genauso**
-greifen wie im Chat: dieselbe Rechnung, dieselben vom Anbieter gemeldeten
-Zahlen, derselbe gepflegte Rückfallpreis am Zugang. Die frühere Lücke — „die
-Kostengrenze bindet den Sprachmodus nicht" — gibt es nicht mehr.
+Der Gewinn ist, dass Tokengrenzen und Kostengrenze das **Denken** im
+Sprachmodus genauso binden wie im Chat: dieselbe Rechnung, dieselben vom
+Anbieter gemeldeten Zahlen, derselbe gepflegte Rückfallpreis am Zugang. Die
+frühere Lücke — „die Kostengrenze bindet den Sprachmodus überhaupt nicht" —
+gibt es nicht mehr.
 
-Was MSM **nicht** mitzählt, sind die Zeichen bei ElevenLabs: sie werden nach
-Zeichen abgerechnet und nicht nach Tokens, und die Grenze dafür steht im Konto
-des Betreibers. Eine einzelne Antwort ist auf 4.000 Zeichen gedeckelt, damit ein
-Modell, das sich verrennt, kein ganzes Log verliest.
+Zwei Posten zählt MSM aber **nicht** mit, und beide stehen trotzdem auf der
+Rechnung des Betreibers:
+
+- **Die Abschrift des Gesprochenen.** Sie geht dem Lauf voraus und gehört zu
+  keinem — es gibt keine Anfrage, der man sie zuschlagen könnte. Sie ist billig
+  (kein Nachdenken, eine kurze Antwort), aber sie fällt bei *jeder* Äusserung
+  an. Eine Reservierung davor wäre auch kein Gewinn: abgelehnt, würde sie die
+  Äusserung verwerfen, bevor irgendwer weiss, was gesagt wurde — der Sprechende
+  erführe nicht einmal, dass sein Kontingent erschöpft ist.
+- **Die Zeichen bei ElevenLabs.** Sie werden nach Zeichen abgerechnet und nicht
+  nach Tokens; die Grenze dafür steht im Konto des Betreibers. Eine einzelne
+  Antwort ist auf 4.000 Zeichen gedeckelt, damit ein Modell, das sich verrennt,
+  kein ganzes Log verliest.
+
+Wer den Sprachmodus hart deckeln will, tut das deshalb über *Anfragen pro
+Minute* und über `ai.voice.use` — nicht über die Tokengrenze allein.
 
 ### Was technisch passiert
 

@@ -98,7 +98,7 @@ class Anbieter:
     #: eine Modellkennung ist und kein eigener Listeneintrag.
     empfehlung: str | None = None
     #: Ob der Katalogabruf den Betreiberschlüssel braucht. OpenRouter gibt seine
-    #: Liste ohne heraus, OpenAI nicht.
+    #: Liste ohne heraus, ElevenLabs nicht.
     #:
     #: Das Feld steht hier, weil `vorwaermen_anstossen()` beim Start der
     #: Anwendung ausdrücklich **ohne** Datenbank läuft — es kennt also keinen
