@@ -262,3 +262,26 @@ def test_bind_ip_in_env_values() -> None:
         bind_ip="1.2.3.4",
     )
     assert out == {"BIND": "1.2.3.4", "PORT": "27015"}
+
+
+def test_curseforge_renders_with_custom_separator() -> None:
+    """CurseForge Mods (z.B. ARK: Survival Ascended) werden mit individuellem Separator (',') gerendert."""
+    bp = load_blueprint_dict(_bp_with_startup(
+        "/data/ArkAscendedServer -port={GAME_PORT} {MOD_ARG}",
+        mods={
+            "supportsMods": True,
+            "supportsCurseForge": True,
+            "curseforgeGameId": "83374",
+            "modInjection": "startupArg",
+            "modStartupArgumentFormat": "-mods={mods}",
+            "modStartupArgumentSeparator": ",",
+        },
+    ))
+    argv = render_argv(
+        bp,
+        install_dir="/data",
+        ports={"game": 7777, "query": None, "rcon": None},
+        active_mod_ids=["927142", "928111", "930222"],
+    )
+    assert argv == ["/data/ArkAscendedServer", "-port=7777", "-mods=927142,928111,930222"]
+

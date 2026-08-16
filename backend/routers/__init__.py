@@ -5,6 +5,7 @@ from .backups import router as backups_router
 from .mods import router as mods_router
 from .system import router as system_router
 from .steam import router as steam_router
+from .curseforge import router as curseforge_router
 from .panel_settings import router as panel_settings_router
 from .files import router as files_router
 from .roles import router as roles_router
@@ -45,6 +46,7 @@ __all__ = [
     "mods_router",
     "system_router",
     "steam_router",
+    "curseforge_router",
     "panel_settings_router",
     "files_router",
     "roles_router",

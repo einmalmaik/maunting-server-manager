@@ -37,15 +37,15 @@ _PORT_TOKEN_RE = re.compile(r"\{([A-Z][A-Z0-9_]*)\}")
 def build_mod_arg(blueprint: Blueprint, active_mod_ids: list[str]) -> str:
     """Erzeugt den Wert fuer ``{MOD_ARG}`` anhand des Blueprint-Modus.
 
-    - Workshop deaktiviert  → leerer String (filtert beim Renderer)
-    - ``modInjection=none`` → leerer String
-    - ``modInjection=file`` → leerer String (Modliste landet in Datei)
-    - ``modInjection=startupArg`` → ``modStartupArgumentFormat`` mit ``{mods}``
-      ersetzt durch ``;``-separierte IDs (semikolon ist Standard fuer DayZ &
-      andere BI-Spiele). Wenn keine Mods aktiv sind, weiterhin leerer String.
+    - Mod-Support (Steam Workshop oder CurseForge) deaktiviert -> leerer String
+    - ``modInjection=none`` -> leerer String
+    - ``modInjection=file`` -> leerer String (Modliste landet in Datei)
+    - ``modInjection=startupArg`` -> ``modStartupArgumentFormat`` mit ``{mods}``
+      ersetzt durch mit ``modStartupArgumentSeparator`` (Default ``;``, z. B. ``,`` fuer ASA)
+      separierte IDs. Wenn keine Mods aktiv sind, weiterhin leerer String.
     """
     mods = blueprint.effective_mods()
-    if not mods.supportsSteamWorkshop:
+    if not (mods.supportsSteamWorkshop or mods.supportsCurseForge):
         return ""
     if mods.modInjection != BlueprintModInjection.STARTUP_ARG:
         return ""
@@ -55,7 +55,8 @@ def build_mod_arg(blueprint: Blueprint, active_mod_ids: list[str]) -> str:
     if "{mods}" not in fmt:
         # Schema schliesst das bereits aus, aber Defense-in-Depth.
         return ""
-    return fmt.replace("{mods}", ";".join(active_mod_ids))
+    sep = mods.modStartupArgumentSeparator or ";"
+    return fmt.replace("{mods}", sep.join(active_mod_ids))
 
 
 def render_env_values(

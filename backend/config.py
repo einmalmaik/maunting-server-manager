@@ -149,6 +149,7 @@ class Settings(BaseSettings):
     # als dediziertes Tool-Image mit pre-installed binary). steamcmd_path bleibt nur für Backward-Compat-Tests.
     steamcmd_path: str = "/usr/games/steamcmd"
     steam_api_key: str = ""
+    curseforge_api_key: str = ""
     github_clone_token: str = ""
     """Optional: MSM_GITHUB_CLONE_TOKEN für private GitHub-Repos (source.type=github)."""
 

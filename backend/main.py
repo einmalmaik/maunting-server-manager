@@ -24,6 +24,7 @@ from routers import (
     mods_router,
     system_router,
     steam_router,
+    curseforge_router,
     panel_settings_router,
     files_router,
     roles_router,
@@ -803,6 +804,7 @@ app.include_router(backups_router)
 app.include_router(mods_router)
 app.include_router(system_router)
 app.include_router(steam_router)
+app.include_router(curseforge_router)
 app.include_router(panel_settings_router)
 app.include_router(nodes_router)
 app.include_router(files_router)

@@ -1866,10 +1866,14 @@
   },
   "mods": {
     "title": "Mod Manager",
-    "subtitle": "Manage workshop mods and adjust load order",
+    "subtitle": "Manage Workshop and CurseForge mods and adjust load order",
     "addMod": "Add Mod",
     "searchSteam": "Search Steam Workshop",
     "searchPlaceholder": "Search mods...",
+    "curseforgeSearch": "CurseForge Browser",
+    "searchPlaceholderCurseForge": "Search CurseForge mods...",
+    "curseforgeModId": "CurseForge Mod ID",
+    "viewInCurseForge": "View on CurseForge",
     "noMods": "No mods installed",
     "noModsHint": "Add your first workshop mod.",
     "noSearchResults": "No mods found",
@@ -2185,6 +2189,18 @@
     "steamAccountRemove": "Remove",
     "steamAccountSaved": "Steam account saved",
     "steamAccountRemoved": "Steam account removed",
+    "curseforgeApiKey": "CurseForge API",
+    "curseforgeConfigured": "CurseForge API configured",
+    "curseforgeNotConfigured": "CurseForge API not configured",
+    "curseforgeCurrentKey": "Current Key",
+    "curseforgeNewKey": "New CurseForge API Key",
+    "curseforgeKeyHint": "Required for games with CurseForge mod integration (e.g. ARK: Survival Ascended, Minecraft). Registration & API key:",
+    "curseforgeSaveKey": "Save API Key",
+    "curseforgeSaved": "CurseForge API key saved",
+    "curseforgeDeleteKey": "Remove Key",
+    "curseforgeRemoved": "CurseForge API key removed",
+    "curseforgeConfirmDelete": "Do you really want to remove the saved CurseForge API key?",
+    "curseforgeTest": "Test Connection",
     "save": "Save",
     "saved": "Settings saved",
     "updatesAutomatic": "Automatic Updates",
@@ -2201,6 +2217,7 @@
       "general": "General",
       "email": "Email",
       "steam": "Steam",
+      "curseforge": "CurseForge",
       "github": "GitHub",
       "oauth": "OAuth / Social Login",
       "captcha": "CAPTCHA",
@@ -2477,6 +2494,11 @@
     "steam_api_unavailable": "Steam API is unavailable or the API key is invalid.",
     "steam_search_failed": "Steam search failed.",
     "steam_load_failed": "Steam data could not be loaded.",
+    "curseforge_api_key_missing": "CurseForge API key is missing. Please configure it in panel settings.",
+    "curseforge_api_key_invalid": "CurseForge API key is invalid or expired.",
+    "curseforge_api_unavailable": "CurseForge API is currently unreachable.",
+    "curseforge_search_failed": "CurseForge mod search failed.",
+    "curseforge_load_failed": "Failed to load CurseForge mods.",
     "invalid_workshop_id": "Invalid Workshop ID.",
     "server_lifecycle_already_running": "A server lifecycle operation (start/stop/restart) is already running. Please wait until the current operation finishes or use the kill button as emergency."
   },
@@ -3354,7 +3376,8 @@
     },
     "mods": {
       "supportsMods": "Support mods",
-      "supportsWorkshop": "Support Steam Workshop"
+      "supportsWorkshop": "Support Steam Workshop",
+      "supportsCurseForge": "Support CurseForge"
     },
     "review": {
       "issueCount": "Review {{count}} fields",
@@ -3611,6 +3634,18 @@
         "label": "Workshop App ID",
         "help": "Numeric App ID of the Workshop area."
       },
+      "curseforgeGameId": {
+        "label": "CurseForge Game ID",
+        "help": "Official CurseForge Game ID (e.g. 83374 for ARK: Survival Ascended, 432 for Minecraft)."
+      },
+      "curseforgeClassId": {
+        "label": "CurseForge Class ID",
+        "help": "Optional: Filters by category/type (e.g. 6 for Minecraft Mods, 4552 for Bukkit Plugins)."
+      },
+      "curseforgeInstallPath": {
+        "label": "CurseForge Target Path",
+        "help": "Optional: Relative destination directory for .jar/.zip downloads (e.g. mods or plugins)."
+      },
       "filterTags": {
         "label": "Workshop filters",
         "help": "Up to 10 tags, one per line."
@@ -3622,6 +3657,10 @@
       "modFormat": {
         "label": "Argument format",
         "help": "Must contain the {mods} placeholder."
+      },
+      "modSeparator": {
+        "label": "Separator",
+        "help": "Separator for mod IDs in startup arguments (default ; e.g. , for ASA -mods=...)."
       },
       "modFile": {
         "label": "Mod list path",
@@ -3857,6 +3896,9 @@
       "manualFiles": "Enter at least one required file.",
       "unsafePath": "Unsafe relative path: {{path}}",
       "workshopAppId": "Workshop support requires a numeric App ID.",
+      "curseforgeGameId": "CurseForge support requires a numeric Game ID.",
+      "curseforgeClassId": "CurseForge Class ID must be numeric.",
+      "curseforgeInstallPath": "CurseForge target path must be a safe relative path.",
       "modArgument": "The startup argument must contain {mods}.",
       "modListPath": "Enter a safe relative list path.",
       "postInstall": "Target filenames require at least one file action.",

@@ -15,6 +15,7 @@ from schemas.panel_settings import (
     TestEmailRequest,
     ResendKeyRequest,
     SteamApiKeyRequest,
+    CurseForgeApiKeyRequest,
     SteamAccountRequest,
     GitHubTokenRequest,
     GitHubTokenStatus,
@@ -38,6 +39,13 @@ from services.steam_api_key_service import (
     resolve_key as resolve_steam_api_key,
     set_panel_key,
     status as steam_api_status,
+)
+from services.curseforge_api_key_service import (
+    current_source as curseforge_api_source,
+    resolve_key as resolve_curseforge_api_key,
+    set_panel_key as set_curseforge_panel_key,
+    clear_panel_key as clear_curseforge_panel_key,
+    status as curseforge_api_status,
 )
 from services.github_token_service import status as github_token_status, set_panel_token as set_github_panel_token, clear_panel_token as clear_github_panel_token
 from services import singra_webhook_secret_service as singra_secret
@@ -65,6 +73,8 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
     SteamAccountService.migrate_legacy_if_needed()
     steam_key = resolve_steam_api_key()
     api_st = steam_api_status()
+    curseforge_key = resolve_curseforge_api_key()
+    cf_st = curseforge_api_status()
     return {
         "panel_url": all_db.get("panel_url", ""),
         "imprint_enabled": all_db.get("imprint_enabled", "false") == "true",
@@ -82,6 +92,9 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "steam_api_key": _mask_secret(steam_key),
         "steam_api_configured": bool(steam_key),
         "steam_api_source": api_st.get("source", "none"),
+        "curseforge_api_key": _mask_secret(curseforge_key),
+        "curseforge_api_configured": bool(curseforge_key),
+        "curseforge_api_source": cf_st.get("source", "none"),
         "steam_account_username": SteamAccountService.get_username(),
         "steam_account_configured": SteamAccountService.is_configured(),
         **github_token_status_dict(),
@@ -385,6 +398,69 @@ async def test_steam_key(
                 return {"message": "Steam API-Key ist ungueltig", "valid": False}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Test fehlgeschlagen: {e}")
+
+
+@router.post("/curseforge-api-key", status_code=200)
+def update_curseforge_api_key(
+    req: CurseForgeApiKeyRequest,
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    """Stores the CurseForge API key securely in .env and panel database (DIS-encrypted)."""
+    key = req.curseforge_api_key.strip()
+    if not key or len(key) < 10:
+        raise HTTPException(status_code=400, detail="Ungueltiger CurseForge API-Key")
+
+    try:
+        _update_env_file("MSM_CURSEFORGE_API_KEY", key)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f".env Update fehlgeschlagen: {e}")
+
+    set_curseforge_panel_key(key)
+
+    # Update in-memory for immediate effect
+    settings.__dict__["curseforge_api_key"] = key
+    os.environ["MSM_CURSEFORGE_API_KEY"] = key
+    os.environ["CURSEFORGE_API_KEY"] = key
+
+    return {"message": "CurseForge API-Key gespeichert", "curseforge_api_source": curseforge_api_source()}
+
+
+@router.delete("/curseforge-api-key", status_code=200)
+def delete_curseforge_api_key(
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    """Removes the CurseForge API key from panel database and .env."""
+    try:
+        _update_env_file("MSM_CURSEFORGE_API_KEY", "")
+    except OSError:
+        pass
+    clear_curseforge_panel_key()
+    settings.__dict__["curseforge_api_key"] = ""
+    os.environ.pop("MSM_CURSEFORGE_API_KEY", None)
+    os.environ.pop("CURSEFORGE_API_KEY", None)
+    return {"message": "CurseForge API-Key entfernt"}
+
+
+@router.post("/curseforge-key/test", status_code=200)
+async def test_curseforge_key(
+    db: Session = Depends(get_db),
+    _=Depends(require_global("panel.settings.read")),
+) -> dict:
+    """Tests whether the configured CurseForge API key is valid."""
+    key = resolve_curseforge_api_key()
+    if not key:
+        raise HTTPException(status_code=400, detail="Kein CurseForge API-Key konfiguriert")
+
+    from services.curseforge_service import get_curseforge_service
+
+    svc = await get_curseforge_service()
+    res = await svc.test_connection()
+    if res.get("ok"):
+        return {"message": "CurseForge API-Key ist gueltig", "valid": True}
+    else:
+        return {"message": f"CurseForge API-Key ist ungueltig: {res.get('error')}", "valid": False}
 
 
 # ------------------------------------------------------------------

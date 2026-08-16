@@ -18,6 +18,9 @@ class PanelSettingsResponse(BaseModel):
     steam_api_key: str = ""
     steam_api_configured: bool = False
     steam_api_source: str = "none"  # "env" | "panel" | "none"
+    curseforge_api_key: str = ""
+    curseforge_api_configured: bool = False
+    curseforge_api_source: str = "none"  # "env" | "panel" | "none"
     steam_account_username: str = ""
     steam_account_configured: bool = False
     github_token_configured: bool = False
@@ -83,6 +86,10 @@ class ResendKeyRequest(BaseModel):
 
 class SteamApiKeyRequest(BaseModel):
     steam_api_key: str
+
+
+class CurseForgeApiKeyRequest(BaseModel):
+    curseforge_api_key: str
 
 
 class SteamAccountRequest(BaseModel):

@@ -43,6 +43,10 @@
     "supportsMods": true,
     "supportsSteamWorkshop": false,
     "workshopAppId": null,
+    "supportsCurseForge": true,
+    "curseforgeGameId": "432",
+    "curseforgeClassId": "6",
+    "curseforgeInstallPath": "mods",
     "modInjection": "none",
     "modStartupArgumentFormat": null,
     "modListFilePath": null
