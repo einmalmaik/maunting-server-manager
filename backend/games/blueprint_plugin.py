@@ -31,6 +31,7 @@ from blueprints.http_source import install_http_source
 from blueprints.renderer import render_env_values
 from blueprints.schema import (
     BlueprintConfigPatchType,
+    BlueprintModInjection,
     BlueprintModListContent,
     BlueprintSteamCompatibility,
     BlueprintSourceType,
@@ -780,17 +781,45 @@ class BlueprintPlugin(GamePlugin):
         if not clean_ids:
             return {"ok": True, "applied": 0, "items": {}}
 
+        from services.curseforge_service import get_curseforge_service
+        from services.curseforge_api_key_service import resolve_key as resolve_cf_key
+        import asyncio
+        from database import SessionLocal
+        from models import Mod
+
         # Startup-Arg Injektion (z. B. ASA) - Spiel laedt Mods beim Start selbst ueber -mods=...
         if bp_mods.modInjection == BlueprintModInjection.STARTUP_ARG:
+            try:
+                async def _resolve_titles():
+                    svc = await get_curseforge_service()
+                    titles = {}
+                    for wid in clean_ids:
+                        try:
+                            info = await svc.get_mod_details(wid)
+                            if info and info.title:
+                                titles[wid] = info.title
+                        except Exception:
+                            pass
+                    return titles
+                titles = asyncio.run(_resolve_titles())
+                if titles:
+                    db = SessionLocal()
+                    try:
+                        for wid, title in titles.items():
+                            mod_row = db.query(Mod).filter(Mod.server_id == server.id, Mod.workshop_id == wid).first()
+                            if mod_row and not mod_row.name:
+                                mod_row.name = title
+                        db.commit()
+                    finally:
+                        db.close()
+            except Exception:
+                pass
             for wid in clean_ids:
                 _append_console_log(server.id, f"[MSM] CurseForge Mod {wid} registriert (Start-Argument)\n")
             self.update_modlist(server)
             return {"ok": True, "applied": len(clean_ids), "items": {wid: {"ok": True} for wid in clean_ids}}
 
         # Dateibasierte Installation (z. B. Minecraft mods/ oder plugins/)
-        from services.curseforge_service import get_curseforge_service
-        from services.curseforge_api_key_service import resolve_key as resolve_cf_key
-        import asyncio
         import httpx
 
         cf_key = resolve_cf_key()
@@ -838,6 +867,16 @@ class BlueprintPlugin(GamePlugin):
                         resp.raise_for_status()
                         dest_file.write_bytes(resp.content)
                     self._try_chown_install_path(server, dest_file)
+                    # Name in DB aktualisieren falls leer
+                    if mod_info.title:
+                        db = SessionLocal()
+                        try:
+                            mod_row = db.query(Mod).filter(Mod.server_id == server.id, Mod.workshop_id == wid).first()
+                            if mod_row and not mod_row.name:
+                                mod_row.name = mod_info.title
+                                db.commit()
+                        finally:
+                            db.close()
                     applied += 1
                     items[wid] = {"ok": True}
                     _append_console_log(

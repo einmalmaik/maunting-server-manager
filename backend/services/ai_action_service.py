@@ -1325,6 +1325,7 @@ def provider_tool_definitions() -> list[dict]:
             {
                 "workshop_id": {"type": "string", "maxLength": 20},
                 "action": {"type": "string", "enum": ["install", "update", "reinstall"]},
+                "name": {"type": "string", "maxLength": 256, "description": "Lesbarer Mod-Titel"},
                 **_RATIONALE_SCHEMA,
             },
             ["workshop_id", "action", *_RATIONALE_REQUIRED],
@@ -2856,6 +2857,7 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
                     "name": redact_sensitive_text(str(row.name or ""))[:128],
                     "enabled": bool(row.enabled),
                     "install_status": row.install_status,
+                    "install_error": redact_sensitive_text(str(row.install_error or ""))[:256] if row.install_error else None,
                     "update_status": row.update_status,
                     "update_reason": row.update_reason,
                     "load_order": row.load_order,
@@ -2933,6 +2935,7 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
                 {
                     "workshop_id": m.publishedfileid,
                     "title": m.title,
+                    "description": redact_sensitive_text(str(m.description or ""))[:256] if m.description else None,
                     "preview_url": m.preview_url,
                     "creator": m.creator,
                     "subscriptions": m.subscriptions,

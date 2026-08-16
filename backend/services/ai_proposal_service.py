@@ -1152,7 +1152,8 @@ def _mod_install_payload(db: Session, server: Server, arguments: dict) -> tuple[
     from games import get_plugin
     from models import Mod
 
-    if set(arguments) != {"workshop_id", "action"}:
+    allowed_keys = {"workshop_id", "action", "name"}
+    if not (set(arguments).issubset(allowed_keys) and {"workshop_id", "action"}.issubset(set(arguments))):
         raise AiActionValidationError("Mod-Tool hat ungueltige Argumente")
     workshop_id = arguments["workshop_id"]
     if not isinstance(workshop_id, str) or not workshop_id.isdigit() or len(workshop_id) > 20:
@@ -1160,6 +1161,7 @@ def _mod_install_payload(db: Session, server: Server, arguments: dict) -> tuple[
     action = arguments["action"]
     if action not in {"install", "update", "reinstall"}:
         raise AiActionValidationError("Ungueltige Mod-Aktion")
+    name = str(arguments.get("name") or "")[:256] or None
 
     plugin = get_plugin(server.game_type)
     if plugin is None or not getattr(plugin, "supports_mods", False):
@@ -1171,10 +1173,12 @@ def _mod_install_payload(db: Session, server: Server, arguments: dict) -> tuple[
         .first()
     )
     payload = {"workshop_id": workshop_id, "action": action}
+    if name:
+        payload["name"] = name
     preview = {
         "operation": f"mod_{action}",
         "workshop_id": workshop_id,
-        "known_name": redact_sensitive_text(str(existing.name or ""))[:128] if existing else None,
+        "known_name": redact_sensitive_text(str((existing.name if existing and existing.name else name) or ""))[:128] or None,
         "already_installed": existing is not None,
         "current_status": server.status,
         # Eine Mod wird beim Start geladen — ohne Neustart wirkt sie nicht.
@@ -2265,7 +2269,18 @@ def _execute_mod_install(db: Session, *, server_id: int, payload: dict) -> dict:
     if existing is None:
         if action != "install":
             raise AiActionStateError("AI_ACTION_EXECUTION_FAILED")
-        db.add(Mod(server_id=server_id, workshop_id=workshop_id, install_status="pending"))
+        name = payload.get("name")
+        max_order = db.query(Mod).filter(Mod.server_id == server_id).count()
+        db.add(Mod(
+            server_id=server_id,
+            workshop_id=workshop_id,
+            name=name,
+            load_order=max_order,
+            install_status="pending",
+        ))
+        db.commit()
+    elif payload.get("name") and not existing.name:
+        existing.name = payload.get("name")
         db.commit()
 
     # Bewusst ein eigener Thread und keine BackgroundTasks: dieser Pfad haengt

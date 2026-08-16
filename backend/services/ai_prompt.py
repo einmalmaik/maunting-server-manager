@@ -390,6 +390,19 @@ frisch. Sag das ausdruecklich, bevor du ihn vorschlaegst, und stoppe den Server 
 vorher — ungestoppt wird der Vorschlag abgewiesen."""
 
 
+MODS = """\
+Mods & Mod-Manager: Sagt der Benutzer 'installiere Mod XY' oder fragt nach Mods, ist der Ablauf: \
+1. `search_workshop_mods` sucht im Steam Workshop oder bei CurseForge fuer das Spiel dieses Servers. \
+Lies Titel und Beschreibung der Treffer genau. \
+2. Gibt es genau einen eindeutigen Treffer (oder einen offensichtlich passenden), schlaegst du die \
+Installation direkt mit `propose_mod_install` vor (uebergib `workshop_id`, `action: "install"` und den `name` der Mod). \
+3. Gibt es mehrere verschiedene Mods oder ist die Anfrage mehrdeutig, liste die Optionen mit Name, ID und \
+Kurzbeschreibung auf und frage den Benutzer, welche Mod er installieren moechte. \
+4. `read_server_mods` zeigt die bereits installierten Mods samt Aktivierungsstatus (`enabled`), Ladereihenfolge \
+und eventueller Installationsfehler (`install_error`). Wenn eine Mod-Installation fehlschlaegt, lies `install_error` \
+mit `read_server_mods` aus und erklaere dem Benutzer praezise die Ursache."""
+
+
 # Der Anlass ist ein Satz, den die KI im Betrieb geschrieben hat: "der Port ist
 # von aussen offen". Gemessen hatte sie, dass auf der Node etwas lauscht. MSM
 # steht hinter derselben Netzgrenze wie der Server; eine Verbindung auf die
@@ -578,6 +591,7 @@ BLOECKE = (
     DOKUMENTATION,
     DATEIEN,
     BLUEPRINTS,
+    MODS,
     ERREICHBARKEIT,
     WEBSUCHE,
     UNWIDERRUFLICHES,
