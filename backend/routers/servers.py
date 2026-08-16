@@ -286,6 +286,29 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
             detail="Ressourcen- und Netzwerk-Aenderungen koennen nicht in einem gemeinsamen PATCH durchgefuehrt werden",
         )
 
+    # ── Netzwerkeinstellungen nur fuer gestoppte Server ──
+    # Port- und Bind-IP-Aenderungen an einem laufenden Server fuehren zu
+    # Portkonflikten auf dem Host (is_port_in_use), unerwarteten Recreates
+    # und Session-Abbruechen fuer Spieler. Deshalb werden Netzwerk-Aenderungen
+    # strikt nur bei gestoppten Servern zugelassen.
+    if network_change:
+        from games.base import container_name_for
+        from services import docker_service
+        from services.server_lifecycle_service import is_lifecycle_job_active
+
+        if server.status == "running" or docker_service.is_running(
+            container_name_for(server.id), node=server.node
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Netzwerkeinstellungen können nur geändert werden, wenn der Server gestoppt ist",
+            )
+        if is_lifecycle_job_active(server_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Server Lifecycle-Aktion läuft, Netzwerkeinstellungen können nicht geändert werden",
+            )
+
     # RAM booking guard: only when a numeric limit is being set/changed and the
     # node has a known host total (heartbeat). Unlimited (null) is not booked.
     if ram_changed and payload.get("ram_limit_mb") is not None:

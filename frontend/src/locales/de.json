@@ -1279,7 +1279,8 @@
     "network": "Netzwerk",
     "networkSaved": "Netzwerk-Einstellungen gespeichert.",
     "editNetworkTitle": "Netzwerk bearbeiten",
-    "editNetworkDescription": "Bind-IP und Ports anpassen. Bei laufendem Server werden alte Firewall-Regeln entfernt, der Container neu erstellt und mit den neuen Bindings gestartet.",
+    "editNetworkDescription": "Bind-IP und Ports anpassen. Der Server muss gestoppt sein, um Netzwerkeinstellungen zu ändern.",
+    "networkEditRequiresStopped": "Der Server muss gestoppt sein, um Netzwerkeinstellungen zu ändern.",
     "bindIp": {
       "loading": "Host-Interfaces werden geladen …",
       "hint": "Aus den verfügbaren Host-Interfaces wählen. 0.0.0.0 ist nicht erlaubt, da Docker sonst die UFW-Regeln umgeht.",

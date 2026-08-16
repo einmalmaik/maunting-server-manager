@@ -1279,7 +1279,8 @@
     "network": "Network",
     "networkSaved": "Network settings saved.",
     "editNetworkTitle": "Edit network",
-    "editNetworkDescription": "Update bind IP and ports. For running servers the old firewall rules are removed, the container is recreated and started with the new bindings.",
+    "editNetworkDescription": "Update bind IP and ports. The server must be stopped to change network settings.",
+    "networkEditRequiresStopped": "The server must be stopped to change network settings.",
     "bindIp": {
       "loading": "Loading host interfaces…",
       "hint": "Choose from the available host interfaces. 0.0.0.0 is rejected so Docker cannot bypass UFW.",
