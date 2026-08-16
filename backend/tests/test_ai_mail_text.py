@@ -554,7 +554,7 @@ def test_the_model_writes_subject_and_body_of_a_real_report(
     ))
 
     assert gesendet["subject"] == (
-        "Maunting Server Manager — KI-Aufgabe erledigt: Alle drei Server laufen"
+        "Maunting Service Manager — KI-Aufgabe erledigt: Alle drei Server laufen"
     )
     assert "Ich habe die drei Server geprüft." in gesendet["body"]
     # Der feste Rueckfalltext taucht nicht zusaetzlich auf — sonst stuende
@@ -641,7 +641,7 @@ class TestRahmenUndRendern:
         )
 
         for betreff in (fest_betreff, verfasst_betreff):
-            assert betreff.startswith("Maunting Server Manager — KI-Aufgabe erledigt")
+            assert betreff.startswith("Maunting Service Manager — KI-Aufgabe erledigt")
         for koerper in (fest_text, verfasst_text):
             assert "Hallo betreiber," in koerper
             assert 'Deine KI-Aufgabe "Serverstatus" (täglich) war fällig.' in koerper
@@ -665,7 +665,7 @@ class TestRahmenUndRendern:
             {}, mailtext=Mailtext(betreff="Kurz", absaetze=["Ein Absatz."])
         )
 
-        assert betreff == "Maunting Server Manager: Kurz"
+        assert betreff == "Maunting Service Manager: Kurz"
         assert "Ein Absatz." in koerper and "Ein Absatz." in html
 
 
@@ -709,7 +709,7 @@ class TestBerichtspfadeNehmenDenKorb:
         ).one()
         assert zeile.anlass == "ai-task-report"
         assert zeile.betreff.startswith(
-            "Maunting Server Manager — KI-Aufgabe erledigt"
+            "Maunting Service Manager — KI-Aufgabe erledigt"
         )
         assert "Alle drei Server laufen." in zeile.text_body
         assert "Ergebnis laut Panel: erledigt" in zeile.fakten
@@ -743,7 +743,7 @@ class TestBerichtspfadeNehmenDenKorb:
         # Das Zustandswort steht vorn und kommt aus `geheilt`, nicht aus dem
         # Bericht — der behauptet hier nichts, aber ein Modell koennte es.
         assert zeile.betreff.startswith(
-            "Maunting Server Manager — Guardian: Problem nicht behoben"
+            "Maunting Service Manager — Guardian: Problem nicht behoben"
         )
         assert "vor-eingriff-2026" in zeile.text_body
         assert "Ergebnis laut Panel: nicht behoben" in zeile.fakten

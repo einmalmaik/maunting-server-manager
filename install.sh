@@ -7,7 +7,7 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 
 # ═══════════════════════════════════════════════════════════════
-#  Maunting Server Manager — Zero-Config One-Line Installer
+#  Maunting Service Manager — Zero-Config One-Line Installer
 #  Supports: Ubuntu 22.04+, Debian 12+, WSL2
 #
 #  Usage:  sudo bash install.sh
@@ -497,7 +497,7 @@ setup_rootless_docker() {
     ok "Rootless Docker bereit (${MSM_DOCKER_HOST})"
 }
 
-log "=== Maunting Server Manager Installation ==="
+log "=== Maunting Service Manager Installation ==="
 log "Log: $LOG_FILE"
 log ""
 
@@ -1241,7 +1241,7 @@ cat > "$ENV_FILE" <<EOF
 # ÄNDERUNGEN NUR MIT VORSICHT
 # Vollständige Erklärung aller Werte: $MSM_DIR/backend/.env.example
 
-MSM_APP_NAME="Maunting Server Manager"
+MSM_APP_NAME="Maunting Service Manager"
 MSM_DEBUG=false
 MSM_DATABASE_URL="$DB_URL"
 MSM_DATABASE_URL_ASYNC="$DB_URL_ASYNC"
@@ -1709,7 +1709,7 @@ EOF
 
     cat > /etc/systemd/system/msm-panel.service <<EOF
 [Unit]
-Description=Maunting Server Manager Panel
+Description=Maunting Service Manager Panel
 After=network.target redis-server.service msm-dis-sidecar.service
 Wants=redis-server.service
 Requires=msm-dis-sidecar.service
@@ -2050,9 +2050,9 @@ fi
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 if $REINSTALL_MODE; then
-    echo -e "${GREEN}  Maunting Server Manager erfolgreich aktualisiert!${NC}"
+    echo -e "${GREEN}  Maunting Service Manager erfolgreich aktualisiert!${NC}"
 else
-    echo -e "${GREEN}  Maunting Server Manager erfolgreich installiert!${NC}"
+    echo -e "${GREEN}  Maunting Service Manager erfolgreich installiert!${NC}"
 fi
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 

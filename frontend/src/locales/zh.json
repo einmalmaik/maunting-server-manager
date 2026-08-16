@@ -685,7 +685,7 @@
     "regenerateBackupCodes": "重新生成备份代码",
     "regenerateBackupCodesConfirm": "旧的备份代码将被完全删除并替换为新代码。继续吗？",
     "backupCodesRegenerated": "新的备份代码已生成。请立即将其作为文件下载。",
-    "backupCodesFileTitle": "Maunting Server Manager - 备份代码",
+    "backupCodesFileTitle": "Maunting Service Manager - 备份代码",
     "backupCodesFileIntro": "如果你的 2FA 代码不可用，这些备份代码可用于紧急登录。",
     "backupCodesFileUser": "账户",
     "backupCodesFileGeneratedAt": "生成时间",

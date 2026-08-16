@@ -647,7 +647,7 @@ def setup_2fa(
     user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{user.id}:2fa")
     user.two_factor_enabled = False
     db.commit()
-    uri = DisClient.build_totp_uri("Maunting Server Manager", user.email, secret)
+    uri = DisClient.build_totp_uri("Maunting Service Manager", user.email, secret)
     # Der QR-Code entsteht hier und nicht im Browser: die Antwort traegt das
     # Geheimnis ohnehin, ein zusaetzliches Bild verraet also nichts Neues — im
     # Gegensatz zum frueheren Weg ueber einen fremden Bilddienst, der es aus dem

@@ -685,7 +685,7 @@
     "regenerateBackupCodes": "Создать новые резервные коды",
     "regenerateBackupCodesConfirm": "Старые резервные коды будут полностью удалены и заменены новыми. Продолжить?",
     "backupCodesRegenerated": "Новые резервные коды созданы. Скачайте их сейчас как файл.",
-    "backupCodesFileTitle": "Maunting Server Manager - Резервные коды",
+    "backupCodesFileTitle": "Maunting Service Manager - Резервные коды",
     "backupCodesFileIntro": "Эти резервные коды предназначены для экстренного входа, если ваш 2FA-код недоступен.",
     "backupCodesFileUser": "Аккаунт",
     "backupCodesFileGeneratedAt": "Создано",

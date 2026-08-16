@@ -1,4 +1,4 @@
-# Caddy-Konfiguration für Maunting Server Manager
+# Caddy-Konfiguration für Maunting Service Manager
 # Wird durch install.sh automatisch generiert. Manuelle Änderungen gehen bei Re-Install verloren.
 
 {{DOMAIN}} {

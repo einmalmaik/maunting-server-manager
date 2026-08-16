@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "Maunting Server Manager"
+    app_name: str = "Maunting Service Manager"
     debug: bool = False
 
     # Datenbank

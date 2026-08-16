@@ -685,7 +685,7 @@
     "regenerateBackupCodes": "बैकअप कोड फिर से बनाएं",
     "regenerateBackupCodesConfirm": "पुराने बैकअप कोड पूरी तरह हटा दिए जाएंगे और नए कोड से बदल दिए जाएंगे। जारी रखें?",
     "backupCodesRegenerated": "नए बैकअप कोड बना दिए गए हैं। उन्हें अभी फ़ाइल के रूप में डाउनलोड करें।",
-    "backupCodesFileTitle": "Maunting Server Manager - बैकअप कोड",
+    "backupCodesFileTitle": "Maunting Service Manager - बैकअप कोड",
     "backupCodesFileIntro": "यदि आपका 2FA कोड उपलब्ध नहीं है, तो ये बैकअप कोड आपातकालीन लॉगिन के लिए हैं।",
     "backupCodesFileUser": "अकाउंट",
     "backupCodesFileGeneratedAt": "बनाया गया",

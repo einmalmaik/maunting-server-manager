@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "DIS Sidecar for Maunting Server Manager — local crypto service wrapping @msdis/shield",
+  "description": "DIS Sidecar for Maunting Service Manager — local crypto service wrapping @msdis/shield",
   "engines": {
     "node": ">=20.19.0"
   },

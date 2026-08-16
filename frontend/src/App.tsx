@@ -65,13 +65,13 @@ function App() {
   }, [])
 
   if (setupRequired === null) {
-    return <Loader fullScreen label="Maunting Server Manager" />
+    return <Loader fullScreen label="Maunting Service Manager" />
   }
 
   if (setupRequired) {
     return (
       <Suspense fallback={
-        <Loader fullScreen label="Maunting Server Manager" />
+        <Loader fullScreen label="Maunting Service Manager" />
       }>
         <SetupWizard
           onComplete={() => setSetupRequired(false)}
@@ -85,7 +85,7 @@ function App() {
     <PrivacyNoticeVisibilityContext.Provider value={privacyNoticeVisible}>
       <ErrorBoundary>
       <Suspense fallback={
-        <Loader fullScreen label="Maunting Server Manager" />
+        <Loader fullScreen label="Maunting Service Manager" />
       }>
         <Routes>
         {/* Oeffentliche Auth-Routen — nur fuer nicht-eingeloggte User */}

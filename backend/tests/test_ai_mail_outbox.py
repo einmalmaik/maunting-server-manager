@@ -857,7 +857,7 @@ async def test_the_state_word_stays_in_front_of_what_the_model_wrote(
 
     betreff = versandt[0][1].betreff
     assert betreff == (
-        "Maunting Server Manager — KI-Aufgabe nicht abgeschlossen: "
+        "Maunting Service Manager — KI-Aufgabe nicht abgeschlossen: "
         "Alles bestens erledigt"
     )
     assert betreff.index("nicht abgeschlossen") < betreff.index("Alles bestens")

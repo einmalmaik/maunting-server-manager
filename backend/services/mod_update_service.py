@@ -152,7 +152,7 @@ def search_workshop(
     try:
         with httpx.Client(
             timeout=SEARCH_TIMEOUT_SECONDS,
-            headers={"User-Agent": "MSM/1.0 (Maunting Server Manager)"},
+            headers={"User-Agent": "MSM/1.0 (Maunting Service Manager)"},
             follow_redirects=False,
         ) as client:
             response = client.get(

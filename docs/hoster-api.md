@@ -1,7 +1,7 @@
 # MSM Hoster-API — Referenz für Shop-Anbindungen
 
 Diese Datei ist die vollständige technische Referenz für Entwickler, die einen externen Shop an
-Maunting Server Manager anbinden. Die Einrichtung im Panel und die betrieblichen Zusammenhänge
+Maunting Service Manager anbinden. Die Einrichtung im Panel und die betrieblichen Zusammenhänge
 stehen in [self-hosting.md](self-hosting.md#hoster--und-shop-anbindung-optional-phase-6); hier geht
 es ausschließlich um den Vertrag zwischen Shop und MSM.
 

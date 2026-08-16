@@ -1,5 +1,5 @@
 [Unit]
-Description=Maunting Server Manager — Auto-Update (GitHub Releases)
+Description=Maunting Service Manager — Auto-Update (GitHub Releases)
 After=network.target
 
 [Service]

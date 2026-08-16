@@ -5,7 +5,7 @@ metadata:
   namespace: msm
 data:
   # Ausschliesslich nicht-geheime Werte. Alles Geheime kommt aus `msm-secrets`.
-  MSM_APP_NAME: "Maunting Server Manager"
+  MSM_APP_NAME: "Maunting Service Manager"
   MSM_DEBUG: "false"
   MSM_ALGORITHM: "HS256"
   MSM_ACCESS_TOKEN_EXPIRE_MINUTES: "15"

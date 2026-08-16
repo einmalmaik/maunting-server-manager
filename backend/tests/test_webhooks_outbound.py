@@ -292,5 +292,5 @@ def test_format_discord_payload_embeds():
     assert embed["color"] == 15158332  # Red for quarantined
     assert "Palworld Server" in embed["title"]
     assert "CrashLoop" in embed["description"]
-    assert embed["footer"]["text"] == "Maunting Server Manager — Guardian Engine"
+    assert embed["footer"]["text"] == "Maunting Service Manager — Guardian Engine"
 

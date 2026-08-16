@@ -1,5 +1,5 @@
 [Unit]
-Description=Maunting Server Manager — Auto-Update Timer
+Description=Maunting Service Manager — Auto-Update Timer
 
 [Timer]
 OnBootSec=10min

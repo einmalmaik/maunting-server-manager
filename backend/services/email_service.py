@@ -221,7 +221,7 @@ class EmailService:
           <tr>
             <td style="padding:24px 32px;text-align:center;border-top:1px solid {cls.BORDER_COLOR};">
               <p style="margin:0;font-family:'Courier New',monospace;font-size:11px;color:{cls.MUTED_COLOR};line-height:1.5;">
-                Maunting Server Manager<br>
+                Maunting Service Manager<br>
                 Diese Nachricht wurde automatisch versendet.
               </p>
             </td>
@@ -284,7 +284,7 @@ class EmailService:
     @staticmethod
     async def send_password_reset_email(to: str, username: str, token: str) -> bool:
         url = f"{settings.panel_url}/reset-password?token={token}"
-        subject = "Maunting Server Manager — Passwort zurücksetzen"
+        subject = "Maunting Service Manager — Passwort zurücksetzen"
         body = f"""Hallo {username},
 
 setze dein Passwort zurück:
@@ -292,14 +292,14 @@ setze dein Passwort zurück:
 
 Dieser Link ist 1 Stunde gültig.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._password_reset_email_html(username, url)
         return await EmailService.send_email(to, subject, body, html)
 
     @staticmethod
     async def send_verification_code_email(to: str, username: str, code: str) -> bool:
-        subject = "Maunting Server Manager — Verifizierungscode"
+        subject = "Maunting Service Manager — Verifizierungscode"
         body = f"""Hallo,
 
 Dein Verifizierungscode lautet:
@@ -308,7 +308,7 @@ Dein Verifizierungscode lautet:
 
 Gültig für 10 Minuten.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._verification_code_email_html(username, code)
         return await EmailService.send_email(to, subject, body, html)
@@ -472,7 +472,7 @@ Maunting Server Manager
             zeilen.extend([str(schluss).strip(), ""])
         if fusszeile and str(fusszeile).strip():
             zeilen.extend([str(fusszeile).strip(), ""])
-        zeilen.append("Maunting Server Manager")
+        zeilen.append("Maunting Service Manager")
         return "\n".join(zeilen) + "\n"
 
     @staticmethod
@@ -480,7 +480,7 @@ Maunting Server Manager
         """Zentrale Funktion für Security-/Login-bezogene Benachrichtigungen (neuer Login, OAuth-Link, Passwort-Änderung etc.).
         Nutzt _notification_email_html + send_email. Alle Security-Events gehen hier durch (KISS + zentrale Wartung).
         """
-        subject = f"Maunting Server Manager — {title}"
+        subject = f"Maunting Service Manager — {title}"
         body = f"""Hallo {username},
 
 {message}
@@ -489,21 +489,21 @@ Maunting Server Manager
 
 Falls du diese Aktion nicht durchgeführt hast, ändere sofort dein Passwort und kontaktiere den Administrator.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(username, title, message, detail)
         return await EmailService.send_email(to, subject, body, html)
 
     @staticmethod
     async def send_password_changed_notification(to: str, username: str) -> bool:
-        subject = "Maunting Server Manager — Passwort geändert"
+        subject = "Maunting Service Manager — Passwort geändert"
         body = f"""Hallo {username},
 
 Dein Passwort wurde soeben geändert.
 
 Falls du diese Änderung nicht vorgenommen hast, ändere sofort dein Passwort und kontaktiere den Administrator.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(username, "Passwort geändert", "Dein Passwort wurde soeben geändert.")
         return await EmailService.send_email(to, subject, body, html)
@@ -521,26 +521,26 @@ Maunting Server Manager
     @staticmethod
     async def send_2fa_status_notification(to: str, username: str, enabled: bool) -> bool:
         action = "aktiviert" if enabled else "deaktiviert"
-        subject = f"Maunting Server Manager — 2FA {action}"
+        subject = f"Maunting Service Manager — 2FA {action}"
         body = f"""Hallo {username},
 
 Die Zwei-Faktor-Authentifizierung (2FA) wurde {action}.
 
 Falls du diese Änderung nicht vorgenommen hast, ändere sofort dein Passwort und kontaktiere den Administrator.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(username, f"2FA {action}", f"Die Zwei-Faktor-Authentifizierung wurde {action}.")
         return await EmailService.send_email(to, subject, body, html)
 
     @staticmethod
     async def send_server_status_notification(to: str, username: str, server_name: str, status: str) -> bool:
-        subject = f"Maunting Server Manager — Server-Status: {server_name}"
+        subject = f"Maunting Service Manager — Server-Status: {server_name}"
         body = f"""Hallo {username},
 
 Der Server "{server_name}" hat seinen Status geändert: {status}
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(
             username, "Server-Status geändert",
@@ -553,7 +553,7 @@ Maunting Server Manager
     async def send_guardian_incident_notification(
         to: str, username: str, server_name: str, incident_type: str, status: str, details: str = ""
     ) -> bool:
-        subject = f"Maunting Server Manager — Guardian Alert: {server_name}"
+        subject = f"Maunting Service Manager — Guardian Alert: {server_name}"
         body = f"""Hallo {username},
 
 Die Guardian Engine hat ein Ereignis beim Server "{server_name}" registriert.
@@ -564,7 +564,7 @@ Details: {details}
 
 Bitte überprüfe den Server im Dashboard.
 
-Maunting Server Manager — Guardian Engine
+Maunting Service Manager — Guardian Engine
 """
         # Alle vier Werte sind Fremdtext: der Servername kommt aus einem
         # Formular oder aus einer Shop-Bestellung, Art und Stand aus dem Agenten,
@@ -595,7 +595,7 @@ Maunting Server Manager — Guardian Engine
         als Teil des Rahmens durch die Datenbank — es muss also einen Ort geben,
         an dem er gebildet wird, und genau einen.
         """
-        return f"Maunting Server Manager — {titel}"
+        return f"Maunting Service Manager — {titel}"
 
     @staticmethod
     def _ai_betreffzeile_aus_praefix(praefix: str, zusatz: str) -> str:
@@ -618,7 +618,7 @@ Maunting Server Manager — Guardian Engine
         Aufgabentitel kommen aus Formularen und aus einem Chat und koennen
         denselben Umbruch tragen.
 
-        Der Ersatz ``"Maunting Server Manager"`` fuer einen fehlenden Praefix
+        Der Ersatz ``"Maunting Service Manager"`` fuer einen fehlenden Praefix
         ist kein Schoenheitsfehler: der Praefix kann aus einem Rahmen kommen,
         der eine Prozessgrenze und ein JSON-Feld hinter sich hat. Ein leerer
         Betreff waere dort keine Mail mehr.
@@ -628,7 +628,7 @@ Maunting Server Manager — Guardian Engine
             betreff_bereinigen,
         )
 
-        zeile = str(praefix or "Maunting Server Manager")
+        zeile = str(praefix or "Maunting Service Manager")
         if zusatz:
             zeile += f": {zusatz}"
         return betreff_bereinigen(zeile, grenze=MAX_BETREFFZEILE_ZEICHEN)
@@ -902,12 +902,12 @@ Maunting Server Manager — Guardian Engine
 
     @staticmethod
     async def send_server_installed_notification(to: str, username: str, server_name: str) -> bool:
-        subject = f"Maunting Server Manager — Server installiert: {server_name}"
+        subject = f"Maunting Service Manager — Server installiert: {server_name}"
         body = f"""Hallo {username},
 
 Der Server "{server_name}" wurde erfolgreich installiert und ist bereit.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(
             username, "Server installiert",
@@ -917,12 +917,12 @@ Maunting Server Manager
 
     @staticmethod
     async def send_user_added_to_server_notification(to: str, username: str, server_name: str, added_by: str) -> bool:
-        subject = f"Maunting Server Manager — Zu Server hinzugefügt: {server_name}"
+        subject = f"Maunting Service Manager — Zu Server hinzugefügt: {server_name}"
         body = f"""Hallo {username},
 
 Du wurdest von {added_by} zum Server "{server_name}" hinzugefügt.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(
             username, "Zu Server hinzugefügt",
@@ -994,7 +994,7 @@ Maunting Server Manager
         passive Check einen Hinweis meldet. Für Steam blockiert dieser Hinweis
         keinen Start/Restart; SteamCMD-Validate läuft dort ohnehin.
         """
-        subject = f"Maunting Server Manager — Server-Update verfügbar: {server_name}"
+        subject = f"Maunting Service Manager — Server-Update verfügbar: {server_name}"
         body = f"""Hallo {username},
 
 [DE] Ein Update für die Server-Dateien von "{server_name}" ist verfügbar.
@@ -1003,7 +1003,7 @@ Maunting Server Manager
 [EN] A server file update is available for "{server_name}".
      The update will be considered on the next restart.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(
             username,
@@ -1019,14 +1019,14 @@ Maunting Server Manager
         Typischer Aufruf aus Hintergrund-Check-Job (Scheduler), nachdem
         check_for_mod_updates() relevante Einträge geliefert hat.
         """
-        subject = f"Maunting Server Manager — Mod-Update verfügbar: {mod_name}"
+        subject = f"Maunting Service Manager — Mod-Update verfügbar: {mod_name}"
         body = f"""Hallo {username},
 
 [DE] Ein Update für den Mod "{mod_name}" auf Server "{server_name}" ist verfügbar.
 
 [EN] An update for the mod "{mod_name}" on server "{server_name}" is available.
 
-Maunting Server Manager
+Maunting Service Manager
 """
         html = EmailService._notification_email_html(
             username,

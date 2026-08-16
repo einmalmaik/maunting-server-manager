@@ -676,7 +676,7 @@ async def lifespan(app: FastAPI):
 #    vollstaendige Schema aller Endpunkte inklusive der Hoster-Verwaltung heraus.
 app = FastAPI(
     title=settings.app_name,
-    description="Maunting Server Manager — Universeller Game Server Manager",
+    description="Maunting Service Manager — Universeller Game Server Manager",
     version="3.0.0",
     lifespan=lifespan,
     docs_url=None,

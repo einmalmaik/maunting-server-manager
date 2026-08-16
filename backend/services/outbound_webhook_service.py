@@ -403,7 +403,7 @@ def format_discord_payload(raw_payload_str: str, event_type: str) -> str:
                         {"name": "Status", "value": str(status), "inline": True},
                     ],
                     "timestamp": data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
-                    "footer": {"text": "Maunting Server Manager — Guardian Engine"},
+                    "footer": {"text": "Maunting Service Manager — Guardian Engine"},
                 }
             ],
         }
@@ -412,14 +412,14 @@ def format_discord_payload(raw_payload_str: str, event_type: str) -> str:
         status = data.get("status", "unknown")
         color = 3066993 if status == "running" else 15158332
         embed = {
-            "username": "Maunting Server Manager",
+            "username": "Maunting Service Manager",
             "embeds": [
                 {
                     "title": f"Server-Status: {server_name}",
                     "description": f"Der Status des Servers **{server_name}** hat sich geändert zu: `{status}`",
                     "color": color,
                     "timestamp": data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
-                    "footer": {"text": "Maunting Server Manager"},
+                    "footer": {"text": "Maunting Service Manager"},
                 }
             ],
         }
@@ -427,28 +427,28 @@ def format_discord_payload(raw_payload_str: str, event_type: str) -> str:
     elif event_type == EVENT_ERROR:
         err = data.get("error", "Unbekannter Fehler")
         embed = {
-            "username": "Maunting Server Manager",
+            "username": "Maunting Service Manager",
             "embeds": [
                 {
                     "title": f"Server-Fehler: {server_name}",
                     "description": f"```{err}```",
                     "color": 15158332,
                     "timestamp": data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
-                    "footer": {"text": "Maunting Server Manager"},
+                    "footer": {"text": "Maunting Service Manager"},
                 }
             ],
         }
         return json.dumps(embed, ensure_ascii=False)
 
     embed = {
-        "username": "Maunting Server Manager",
+        "username": "Maunting Service Manager",
         "embeds": [
             {
                 "title": f"Event: {event_type} ({server_name})",
                 "description": json.dumps(data, indent=2, ensure_ascii=False)[:1900],
                 "color": 3447003,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "footer": {"text": "Maunting Server Manager"},
+                "footer": {"text": "Maunting Service Manager"},
             }
         ],
     }

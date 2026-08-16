@@ -12,7 +12,7 @@ export function Privacy() {
     callout: t('privacyPolicy.callout'),
     lastUpdated: '2026-08-13',
     version: '2.5',
-    meta: 'Maunting Server Manager',
+    meta: 'Maunting Service Manager',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
       {
