@@ -337,7 +337,7 @@
   },
   "auth": {
     "login": "Iniciar sesión",
-    "loginDescription": "Inicie sesión en su Administrador de servidores",
+    "loginDescription": "Inicie sesión en su Administrador de servicios",
     "register": "Regístrate",
     "registerDescription": "Crea una nueva cuenta",
     "username": "Nombre de usuario",
@@ -368,11 +368,11 @@
     "resendCode": "Reenviar código"
   },
   "setup": {
-    "welcome": "Bienvenido a HSH",
-    "welcomeDesc": "El Administrador del servidor Maunting está listo. Crea la cuenta de propietario ahora para administrar tus servidores de juegos.",
+    "welcome": "Bienvenido a MSM",
+    "welcomeDesc": "El Administrador de servicios de Maunting está listo. Crea la cuenta de propietario ahora para administrar tus servidores de juegos.",
     "start": "Empezar",
     "title": "Configuración inicial",
-    "description": "Cree la cuenta de propietario para su Administrador de servidores",
+    "description": "Cree la cuenta de propietario para su Administrador de servicios",
     "createOwner": "Crear propietario",
     "error": "La configuración falló.",
     "verifyEmail": "Verificar correo electrónico",

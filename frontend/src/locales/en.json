@@ -1783,7 +1783,7 @@
   },
   "auth": {
     "login": "Sign In",
-    "loginDescription": "Sign in to your Server Manager",
+    "loginDescription": "Sign in to your Service Manager",
     "register": "Register",
     "registerDescription": "Create a new account",
     "username": "Username",
@@ -1827,7 +1827,7 @@
     "welcomeDesc": "The Maunting Service Manager is ready. Create the owner account now to manage your game servers.",
     "start": "Get Started",
     "title": "Initial Setup",
-    "description": "Create the owner account for your Server Manager",
+    "description": "Create the owner account for your Service Manager",
     "createOwner": "Create Owner",
     "emailDelivery": "Email delivery",
     "emailDeliveryDesc": "Configured once for verification and system emails. Credentials are stored encrypted.",
