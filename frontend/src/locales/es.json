@@ -707,7 +707,7 @@
     "regenerateBackupCodes": "Regenerar códigos de respaldo",
     "regenerateBackupCodesConfirm": "Los códigos de respaldo antiguos se eliminarán por completo y se reemplazarán por códigos nuevos. ¿Continuar?",
     "backupCodesRegenerated": "Se generaron nuevos códigos de respaldo. Descárgalos ahora como archivo.",
-    "backupCodesFileTitle": "Maunting Server Manager - Códigos de respaldo",
+    "backupCodesFileTitle": "Maunting Service Manager - Códigos de respaldo",
     "backupCodesFileIntro": "Estos códigos de respaldo sirven como inicio de sesión de emergencia si tu código 2FA no está disponible.",
     "backupCodesFileUser": "Cuenta",
     "backupCodesFileGeneratedAt": "Generado el",

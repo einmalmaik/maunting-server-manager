@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 # ═══════════════════════════════════════════════════════════════
-#  Maunting Server Manager — Updater
+#  Maunting Service Manager — Updater
 #
 #  Usage:  sudo bash update.sh [--check-only] [--force]
 #
@@ -179,7 +179,7 @@ if [[ -d /run/systemd/system ]] && command -v systemctl &>/dev/null; then
     SYSTEMD_AVAILABLE=true
 fi
 
-log "=== Maunting Server Manager Updater ==="
+log "=== Maunting Service Manager Updater ==="
 log "Repository: $GITHUB_OWNER/$GITHUB_REPO"
 log ""
 
@@ -665,7 +665,7 @@ EOF
     # Panel Service
     cat > /etc/systemd/system/msm-panel.service <<EOF
 [Unit]
-Description=Maunting Server Manager Panel
+Description=Maunting Service Manager Panel
 After=network.target redis-server.service msm-dis-sidecar.service
 Wants=redis-server.service
 Requires=msm-dis-sidecar.service

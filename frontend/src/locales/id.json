@@ -685,7 +685,7 @@
     "regenerateBackupCodes": "Buat ulang kode cadangan",
     "regenerateBackupCodesConfirm": "Kode cadangan lama akan dihapus sepenuhnya dan diganti dengan kode baru. Lanjutkan?",
     "backupCodesRegenerated": "Kode cadangan baru telah dibuat. Unduh sekarang sebagai file.",
-    "backupCodesFileTitle": "Maunting Server Manager - Kode Cadangan",
+    "backupCodesFileTitle": "Maunting Service Manager - Kode Cadangan",
     "backupCodesFileIntro": "Kode cadangan ini adalah login darurat jika kode 2FA Anda tidak tersedia.",
     "backupCodesFileUser": "Akun",
     "backupCodesFileGeneratedAt": "Dibuat pada",

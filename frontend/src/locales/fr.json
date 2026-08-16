@@ -685,7 +685,7 @@
     "regenerateBackupCodes": "Regénérer les codes de secours",
     "regenerateBackupCodesConfirm": "Les anciens codes de secours seront entièrement supprimés et remplacés par de nouveaux codes. Continuer ?",
     "backupCodesRegenerated": "De nouveaux codes de secours ont été générés. Téléchargez-les maintenant sous forme de fichier.",
-    "backupCodesFileTitle": "Maunting Server Manager - Codes de secours",
+    "backupCodesFileTitle": "Maunting Service Manager - Codes de secours",
     "backupCodesFileIntro": "Ces codes de secours servent de connexion d'urgence si votre code 2FA n'est pas disponible.",
     "backupCodesFileUser": "Compte",
     "backupCodesFileGeneratedAt": "Généré le",

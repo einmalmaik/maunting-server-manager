@@ -1,6 +1,6 @@
 {
   "panel": {
-    "title": "Maunting Server Manager"
+    "title": "Maunting Service Manager"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -1765,7 +1765,7 @@
   },
   "setup": {
     "welcome": "Willkommen beim MSM",
-    "welcomeDesc": "Der Maunting Server Manager ist bereit. Erstelle jetzt den Owner-Account, um deine Game-Server zu verwalten.",
+    "welcomeDesc": "Der Maunting Service Manager ist bereit. Erstelle jetzt den Owner-Account, um deine Game-Server zu verwalten.",
     "start": "Loslegen",
     "title": "Ersteinrichtung",
     "description": "Erstelle den Owner-Account für deinen Server Manager",
@@ -2371,7 +2371,7 @@
     "regenerateBackupCodes": "Backup-Codes neu generieren",
     "regenerateBackupCodesConfirm": "Alte Backup-Codes werden vollständig gelöscht und durch neue Codes ersetzt. Fortfahren?",
     "backupCodesRegenerated": "Neue Backup-Codes wurden erzeugt. Lade sie jetzt als Datei herunter.",
-    "backupCodesFileTitle": "Maunting Server Manager - Backup-Codes",
+    "backupCodesFileTitle": "Maunting Service Manager - Backup-Codes",
     "backupCodesFileIntro": "Diese Backup-Codes dienen als Notfall-Login, wenn dein 2FA-Code nicht verfügbar ist.",
     "backupCodesFileUser": "Account",
     "backupCodesFileGeneratedAt": "Erstellt am",
@@ -3130,7 +3130,7 @@
   },
   "privacyPolicy": {
     "title": "Datenschutzerklärung",
-    "intro": "Diese Erklärung beschreibt die vom Maunting Server Manager unterstützten Datenflüsse. Der Betreiber dieser selbst gehosteten Instanz wählt optionale Anbieter und ist für Rechtsgrundlage, Hinweise, Aufbewahrungsfristen und Kontaktdaten seiner Instanz verantwortlich.",
+    "intro": "Diese Erklärung beschreibt die vom Maunting Service Manager unterstützten Datenflüsse. Der Betreiber dieser selbst gehosteten Instanz wählt optionale Anbieter und ist für Rechtsgrundlage, Hinweise, Aufbewahrungsfristen und Kontaktdaten seiner Instanz verantwortlich.",
     "callout": "Kurzfassung: MSM minimiert Daten, schützt sensible Zugangsdaten und verschweigt keine Infrastruktur-Metadaten, die für den Betrieb von Servern und Nodes erforderlich sind.",
     "documentLabel": "MSM Datenschutz",
     "summaryLabel": "Datenschutz",

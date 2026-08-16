@@ -685,7 +685,7 @@
     "regenerateBackupCodes": "إعادة إنشاء رموز النسخ الاحتياطي",
     "regenerateBackupCodesConfirm": "سيتم حذف رموز النسخ الاحتياطي القديمة بالكامل واستبدالها برموز جديدة. هل تريد المتابعة؟",
     "backupCodesRegenerated": "تم إنشاء رموز نسخ احتياطي جديدة. قم بتنزيلها الآن كملف.",
-    "backupCodesFileTitle": "Maunting Server Manager - رموز النسخ الاحتياطي",
+    "backupCodesFileTitle": "Maunting Service Manager - رموز النسخ الاحتياطي",
     "backupCodesFileIntro": "هذه الرموز مخصصة لتسجيل الدخول في حالات الطوارئ إذا لم يكن رمز 2FA متاحًا.",
     "backupCodesFileUser": "الحساب",
     "backupCodesFileGeneratedAt": "تم الإنشاء في",

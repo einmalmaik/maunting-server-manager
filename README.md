@@ -3,9 +3,9 @@
 > [!IMPORTANT]
 > Dieses Panel befindet sich in aktiver Entwicklung. Der Einsatz in produktiven Umgebungen ohne vorheriges Backup wird nicht empfohlen.
 
-# Maunting Server Manager (MSM)
+# Maunting Service Manager (MSM)
 
-Maunting Server Manager (MSM) ist ein selbstgehostetes Web-Panel zur zentralen Steuerung von Game-Servern, Anwendungen und Linux-Workloads auf eigenen Servern oder VPS — ohne Notwendigkeit täglicher SSH-Eingaben.
+Maunting Service Manager (MSM) ist ein selbstgehostetes Web-Panel zur zentralen Steuerung von Game-Servern, Anwendungen und Linux-Workloads auf eigenen Servern oder VPS — ohne Notwendigkeit täglicher SSH-Eingaben.
 
 ---
 
@@ -63,7 +63,7 @@ GitHub-Token und Steam-Konto können panelweit, pro Benutzer oder pro Server hin
 
 Die folgende Tabelle vergleicht verifizierte technische Eigenschaften von MSM mit **Pelican Panel** (dem modernen Nachfolger von Pterodactyl) und **Klassischen Panels** (wie Pterodactyl v1 oder AMP).
 
-| Eigenschaft / Funktion | Maunting Server Manager (MSM) | Pelican Panel | Klassische Panels (z. B. Pterodactyl v1, AMP) |
+| Eigenschaft / Funktion | Maunting Service Manager (MSM) | Pelican Panel | Klassische Panels (z. B. Pterodactyl v1, AMP) |
 |---|---|---|---|
 | **Architektur** | Central Control Plane + Multi-Node (Multinode System) | Panel + Node-Architektur (Wings) | Monolithisch oder Panel + Daemon (Wings/AMP Instance) |
 | **Container-Sicherheit** | Standardmäßig Rootless Docker pro Node-User (`unix:///run/user/...`) | Standardmäßig privilegierter Root-Docker-Daemon | Standardmäßig privilegierter Root-Docker-Daemon |

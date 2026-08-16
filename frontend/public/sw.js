@@ -1,4 +1,4 @@
-// Service Worker for Maunting Server Manager PWA
+// Service Worker for Maunting Service Manager PWA
 
 // CACHE_NAME muss bei jedem Release erhoeht werden, in dem sich statische
 // Assets aendern (neue JS-Bundles, neue Icons, ...). Sonst liefert der SW

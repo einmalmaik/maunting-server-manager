@@ -1,5 +1,5 @@
 /**
- * DIS Sidecar for Maunting Server Manager.
+ * DIS Sidecar for Maunting Service Manager.
  *
  * Tiny local HTTP service that wraps @msdis/shield so the Python backend
  * can use DIS (WebCrypto-based) without importing JS directly.

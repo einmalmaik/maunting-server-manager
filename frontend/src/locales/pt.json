@@ -347,7 +347,7 @@
   },
   "setup": {
     "welcome": "Bem-vindo ao MSM",
-    "welcomeDesc": "O Maunting Server Manager está pronto. Crie a conta de proprietário agora para gerenciar seus servidores de jogo.",
+    "welcomeDesc": "O Maunting Service Manager está pronto. Crie a conta de proprietário agora para gerenciar seus servidores de jogo.",
     "start": "Comece",
     "title": "Configuração inicial",
     "description": "Crie a conta de proprietário para o seu Gerenciador de Servidores",
@@ -685,7 +685,7 @@
     "regenerateBackupCodes": "Gerar novos códigos de backup",
     "regenerateBackupCodesConfirm": "Os códigos de backup antigos serão excluídos completamente e substituídos por novos códigos. Continuar?",
     "backupCodesRegenerated": "Novos códigos de backup foram gerados. Baixe-os agora como arquivo.",
-    "backupCodesFileTitle": "Maunting Server Manager - Códigos de backup",
+    "backupCodesFileTitle": "Maunting Service Manager - Códigos de backup",
     "backupCodesFileIntro": "Estes códigos de backup servem como login de emergência se seu código 2FA não estiver disponível.",
     "backupCodesFileUser": "Conta",
     "backupCodesFileGeneratedAt": "Gerado em",

@@ -1,10 +1,10 @@
-Maunting Server Manager v4.0 — Zielbild
+Maunting Service Manager v4.0 — Zielbild
 
 Dokumenttyp: Produkt-, Funktions- und ErgebnisbeschreibungZielversion: MSM v4.0Status: Verbindliches Zielbild für die spätere technische PlanungZweck: Dieses Dokument beschreibt, was MSM v4.0 am Ende können und wie sich das System verhalten soll. Es legt noch nicht verbindlich fest, mit welchen Datenbanktabellen, Klassen, Endpunkten oder einzelnen Programmbibliotheken das Ergebnis umgesetzt wird.
 
 1. Gesamtziel
 
-Maunting Server Manager soll sich mit v4.0 von einem reinen Server-Panel zu einer intelligenten, verteilten und für Hoster nutzbaren Server-Management-Plattform weiterentwickeln.
+Maunting Service Manager soll sich mit v4.0 von einem reinen Server-Panel zu einer intelligenten, verteilten und für Hoster nutzbaren Server-Management-Plattform weiterentwickeln.
 
 Der Kern von MSM bleibt dabei erhalten:
 

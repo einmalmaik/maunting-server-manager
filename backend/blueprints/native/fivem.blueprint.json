@@ -15,7 +15,7 @@
       "HOME": "/home/container",
       "TAGS": "msm",
       "PROJECT_NAME": "My MSM FXServer",
-      "PROJECT_DESC": "FiveM server powered by Maunting Server Manager"
+      "PROJECT_DESC": "FiveM server powered by Maunting Service Manager"
     },
     "startup": "/opt/cfx-server/FXServer +localvar serverProfile default +exec server.cfg +set tags {ENV.TAGS} +set sv_projectName {ENV.PROJECT_NAME} +set sv_projectDesc {ENV.PROJECT_DESC}",
     "ensureDirs": [

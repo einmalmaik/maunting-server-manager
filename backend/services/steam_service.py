@@ -51,7 +51,7 @@ class SteamService:
         self.client = httpx.AsyncClient(
             timeout=30.0,
             headers={
-                'User-Agent': 'MSM/1.0 (Maunting Server Manager)',
+                'User-Agent': 'MSM/1.0 (Maunting Service Manager)',
                 'Accept': 'application/json',
             }
         )

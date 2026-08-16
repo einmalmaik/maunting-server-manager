@@ -214,7 +214,7 @@ class TestUmlauteInKiMails:
         msg = EmailMessage()
         msg["From"] = "panel@example.com"
         msg["To"] = "admin@test.de"
-        msg["Subject"] = "Maunting Server Manager — KI-Aufgabe erledigt: Prüfung"
+        msg["Subject"] = "Maunting Service Manager — KI-Aufgabe erledigt: Prüfung"
         msg.set_content("Deine KI-Aufgabe war fällig. Alles läuft.")
 
         roh = msg.as_bytes()

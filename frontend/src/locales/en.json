@@ -1,6 +1,6 @@
 {
   "panel": {
-    "title": "Maunting Server Manager"
+    "title": "Maunting Service Manager"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -1765,7 +1765,7 @@
   },
   "setup": {
     "welcome": "Welcome to MSM",
-    "welcomeDesc": "The Maunting Server Manager is ready. Create the owner account now to manage your game servers.",
+    "welcomeDesc": "The Maunting Service Manager is ready. Create the owner account now to manage your game servers.",
     "start": "Get Started",
     "title": "Initial Setup",
     "description": "Create the owner account for your Server Manager",
@@ -2371,7 +2371,7 @@
     "regenerateBackupCodes": "Regenerate backup codes",
     "regenerateBackupCodesConfirm": "Old backup codes will be fully deleted and replaced with new codes. Continue?",
     "backupCodesRegenerated": "New backup codes were generated. Download them as a file now.",
-    "backupCodesFileTitle": "Maunting Server Manager - Backup Codes",
+    "backupCodesFileTitle": "Maunting Service Manager - Backup Codes",
     "backupCodesFileIntro": "These backup codes are emergency login codes if your 2FA code is unavailable.",
     "backupCodesFileUser": "Account",
     "backupCodesFileGeneratedAt": "Generated at",
@@ -3130,7 +3130,7 @@
   },
   "privacyPolicy": {
     "title": "Privacy policy",
-    "intro": "This policy describes the data flows supported by Maunting Server Manager. The operator of this self-hosted instance selects optional providers and is responsible for the instance-specific legal basis, notices, retention periods, and contact details.",
+    "intro": "This policy describes the data flows supported by Maunting Service Manager. The operator of this self-hosted instance selects optional providers and is responsible for the instance-specific legal basis, notices, retention periods, and contact details.",
     "callout": "Summary: MSM minimizes data, protects sensitive credentials, and does not hide infrastructure metadata that is required to operate servers and nodes.",
     "documentLabel": "MSM privacy",
     "summaryLabel": "Data protection",

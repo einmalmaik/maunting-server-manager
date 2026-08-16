@@ -685,7 +685,7 @@
     "regenerateBackupCodes": "ব্যাকআপ কোড পুনরায় তৈরি করুন",
     "regenerateBackupCodesConfirm": "পুরোনো ব্যাকআপ কোড সম্পূর্ণভাবে মুছে নতুন কোড দিয়ে প্রতিস্থাপন করা হবে। চালিয়ে যাবেন?",
     "backupCodesRegenerated": "নতুন ব্যাকআপ কোড তৈরি হয়েছে। এখন সেগুলো ফাইল হিসেবে ডাউনলোড করুন।",
-    "backupCodesFileTitle": "Maunting Server Manager - ব্যাকআপ কোড",
+    "backupCodesFileTitle": "Maunting Service Manager - ব্যাকআপ কোড",
     "backupCodesFileIntro": "আপনার 2FA কোড না থাকলে এই ব্যাকআপ কোডগুলো জরুরি লগইনের জন্য ব্যবহৃত হবে।",
     "backupCodesFileUser": "অ্যাকাউন্ট",
     "backupCodesFileGeneratedAt": "তৈরির সময়",
