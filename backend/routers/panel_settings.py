@@ -335,7 +335,7 @@ def update_steam_key(
     """Stores the Steam Web API key securely in .env."""
     key = req.steam_api_key.strip()
     if not key or len(key) < 10:
-        raise HTTPException(status_code=400, detail="Ungueltiger Steam API-Key")
+        raise HTTPException(status_code=400, detail="Ungültiger Steam API-Key")
 
     try:
         _update_env_file("MSM_STEAM_API_KEY", key)
@@ -393,9 +393,9 @@ async def test_steam_key(
                 params={"key": key},
             )
             if resp.status_code == 200:
-                return {"message": "Steam API-Key ist gueltig", "valid": True}
+                return {"message": "Steam API-Key ist gültig", "valid": True}
             else:
-                return {"message": "Steam API-Key ist ungueltig", "valid": False}
+                return {"message": "Steam API-Key ist ungültig", "valid": False}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Test fehlgeschlagen: {e}")
 
@@ -409,7 +409,7 @@ def update_curseforge_api_key(
     """Stores the CurseForge API key securely in .env and panel database (DIS-encrypted)."""
     key = req.curseforge_api_key.strip()
     if not key or len(key) < 10:
-        raise HTTPException(status_code=400, detail="Ungueltiger CurseForge API-Key")
+        raise HTTPException(status_code=400, detail="Ungültiger CurseForge API-Key")
 
     try:
         _update_env_file("MSM_CURSEFORGE_API_KEY", key)
@@ -458,9 +458,9 @@ async def test_curseforge_key(
     svc = await get_curseforge_service()
     res = await svc.test_connection()
     if res.get("ok"):
-        return {"message": "CurseForge API-Key ist gueltig", "valid": True}
+        return {"message": "CurseForge API-Key ist gültig", "valid": True}
     else:
-        return {"message": f"CurseForge API-Key ist ungueltig: {res.get('error')}", "valid": False}
+        return {"message": f"CurseForge API-Key ist ungültig: {res.get('error')}", "valid": False}
 
 
 # ------------------------------------------------------------------
@@ -540,9 +540,9 @@ async def test_github_token(
             )
             if resp.status_code == 200:
                 login = (resp.json() or {}).get("login", "?")
-                return {"message": f"GitHub-Token ist gueltig (login: {login})", "valid": True}
+                return {"message": f"GitHub-Token ist gültig (login: {login})", "valid": True}
             if resp.status_code == 401:
-                return {"message": "GitHub-Token ist ungueltig oder abgelaufen", "valid": False}
+                return {"message": "GitHub-Token ist ungültig oder abgelaufen", "valid": False}
             return {"message": f"GitHub-API unerwartet: HTTP {resp.status_code}", "valid": False}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Test fehlgeschlagen: {e}")

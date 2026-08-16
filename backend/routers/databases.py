@@ -170,7 +170,7 @@ def delete_database(
             server_id=server_id,
             details={"database_id": database_id, "database_name": db_name},
         )
-        return {"message": "Datenbank geloescht"}
+        return {"message": "Datenbank gelöscht"}
     except Exception as exc:
         raise _service_error(exc) from exc
 
@@ -241,7 +241,7 @@ def delete_user(
     if not pg_user:
         raise HTTPException(status_code=404, detail="Datenbank-User nicht gefunden")
     if body.confirm_name != pg_user.username:
-        raise HTTPException(status_code=400, detail="Bestaetigungsname stimmt nicht ueberein")
+        raise HTTPException(status_code=400, detail="Bestätigungsname stimmt nicht überein")
     try:
         uname = pg_user.username
         postgres_service.delete_user(db, server_id, user_id)
@@ -252,7 +252,7 @@ def delete_user(
             server_id=server_id,
             details={"username": uname},
         )
-        return {"message": "Datenbank-User geloescht"}
+        return {"message": "Datenbank-User gelöscht"}
     except Exception as exc:
         raise _service_error(exc) from exc
 
@@ -337,10 +337,10 @@ def drop_table(
     _ensure_server(db, server_id)
     require_server_permission(user, server_id, db, "server.databases.write")
     if body.confirm_name != body.table_name:
-        raise HTTPException(status_code=400, detail="Bestaetigungsname stimmt nicht ueberein")
+        raise HTTPException(status_code=400, detail="Bestätigungsname stimmt nicht überein")
     try:
         postgres_service.drop_table(db, server_id, body.database_id, body.schema_name, body.table_name)
-        return {"message": "Tabelle geloescht"}
+        return {"message": "Tabelle gelöscht"}
     except Exception as exc:
         raise _service_error(exc) from exc
 

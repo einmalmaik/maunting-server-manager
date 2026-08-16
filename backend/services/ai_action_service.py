@@ -1162,8 +1162,8 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "search_workshop_mods",
-            "Sucht Mods im Steam Workshop fuer das Spiel dieses Servers. "
-            "Liefert Kennung, Titel und Tags — keine Beschreibungstexte.",
+            "Sucht Mods im Steam Workshop oder bei CurseForge fuer das Spiel dieses Servers. "
+            "Liefert Kennung, Titel und Tags.",
             {
                 "query": {"type": "string", "maxLength": 128},
                 "page": {"type": "integer", "minimum": 1, "maximum": 50},
@@ -1320,7 +1320,7 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_mod_install",
-            "Schlaegt Installation, Aktualisierung oder Neuinstallation einer Workshop-Mod vor. "
+            "Schlaegt Installation, Aktualisierung oder Neuinstallation einer Workshop- oder CurseForge-Mod vor. "
             "Der Download laeuft ueber den vorhandenen MSM-Installationspfad.",
             {
                 "workshop_id": {"type": "string", "maxLength": 20},
@@ -2891,11 +2891,64 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
     if tool_name != "search_workshop_mods":
         raise AiActionValidationError(f"Kein Handler für Werkzeug: {tool_name}")
     if set(arguments) - {"query", "page"} or not isinstance(arguments.get("query"), str):
-        raise AiActionValidationError("Workshop-Suche hat ungueltige Argumente")
+        raise AiActionValidationError("Workshop-Suche hat ungültige Argumente")
     page = arguments.get("page", 1)
     if not isinstance(page, int) or isinstance(page, bool) or not 1 <= page <= 50:
-        raise AiActionValidationError("Ungueltige Seitenzahl")
+        raise AiActionValidationError("Ungültige Seitenzahl")
     mod_support = plugin.get_mod_support() or {}
+
+    # 1. CurseForge Provider
+    if mod_support.get("provider") == "curseforge" or mod_support.get("curseforge_game_id"):
+        cf_game_id = str(mod_support.get("curseforge_game_id") or "")
+        cf_class_id = str(mod_support.get("curseforge_class_id") or "") or None
+        if not cf_game_id:
+            return {"server_id": server.id, "available": False, "reason": "curseforge_game_id_missing"}
+        try:
+            import asyncio
+            import concurrent.futures
+            from services.curseforge_service import get_curseforge_service, CurseForgeApiUnavailable
+
+            async def _do_cf_search():
+                svc = await get_curseforge_service()
+                return await svc.search_mods(
+                    game_id=cf_game_id,
+                    class_id=cf_class_id,
+                    query=arguments["query"],
+                    page=page,
+                    per_page=20,
+                )
+
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    cf_mods = pool.submit(asyncio.run, _do_cf_search()).result()
+            else:
+                cf_mods = asyncio.run(_do_cf_search())
+
+            results = [
+                {
+                    "workshop_id": m.publishedfileid,
+                    "title": m.title,
+                    "preview_url": m.preview_url,
+                    "creator": m.creator,
+                    "subscriptions": m.subscriptions,
+                    "updated": m.updated.isoformat() if m.updated else None,
+                    "direct_url": m.direct_url,
+                    "provider": "curseforge",
+                }
+                for m in cf_mods
+            ]
+            return {"server_id": server.id, "available": True, "provider": "curseforge", "results": results}
+        except CurseForgeApiUnavailable as exc:
+            return {"server_id": server.id, "available": False, "reason": exc.code}
+        except Exception as exc:
+            return {"server_id": server.id, "available": False, "reason": str(exc)}
+
+    # 2. Steam Workshop Provider
     appid = mod_support.get("workshop_id")
     if not appid:
         return {"server_id": server.id, "available": False, "reason": "workshop_id_missing"}

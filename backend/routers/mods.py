@@ -274,7 +274,7 @@ def install_existing_mod(
 ):
     require_server_permission(user, server_id, db, "server.mods.write")
     if action not in _MOD_ACTIONS:
-        raise HTTPException(status_code=400, detail="Ungueltige Mod-Aktion")
+        raise HTTPException(status_code=400, detail="Ungültige Mod-Aktion")
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
@@ -476,7 +476,7 @@ def reorder_mods(server_id: int, order: list[int], db: Session = Depends(get_db)
     mods = db.query(Mod).filter(Mod.server_id == server_id).all()
     mod_map = {m.id: m for m in mods}
     if len(order) != len(mod_map) or len(set(order)) != len(order) or set(order) != set(mod_map):
-        raise HTTPException(status_code=400, detail="Ungueltige Mod-Ladereihenfolge")
+        raise HTTPException(status_code=400, detail="Ungültige Mod-Ladereihenfolge")
     for idx, mod_id in enumerate(order):
         mod_map[mod_id].load_order = idx
     db.commit()

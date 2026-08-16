@@ -279,7 +279,7 @@ def delete_provider(
     slug = p.slug
     oauth_service.delete_provider(db, p)
     _audit(db, user.id, "oauth_provider.deleted", provider_id, f"slug={slug}")
-    return {"message": "Provider geloescht"}
+    return {"message": "Provider gelöscht"}
 
 
 @router.post("/providers/{provider_id}/secret", status_code=200)

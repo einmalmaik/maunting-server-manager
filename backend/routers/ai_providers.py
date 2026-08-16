@@ -207,7 +207,7 @@ def delete_provider(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except SQLAlchemyError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Provider konnte nicht geloescht werden") from exc
+        raise HTTPException(status_code=409, detail="Provider konnte nicht gelöscht werden") from exc
 
 
 @router.post("/settings/providers/{provider_id}/test", response_model=AiProviderTestResponse)

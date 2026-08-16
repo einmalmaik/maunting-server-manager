@@ -1119,6 +1119,40 @@ class BlueprintPlugin(GamePlugin):
         self.update_modlist(server)
         return {"ok": not errors, "synced": synced, "errors": errors}
 
+    def update_modlist(self, server) -> None:
+        """Aktualisiert Mod-Status (z. B. .disabled für dateibasierte CurseForge-Mods oder Modlist-Dateien)."""
+        bp_mods = self._blueprint.effective_mods()
+        if bp_mods.supportsCurseForge and bp_mods.modInjection != "startupArg":
+            target_dir_rel = bp_mods.curseforgeInstallPath or "mods"
+            from database import SessionLocal
+            from models import Mod
+            db = SessionLocal()
+            try:
+                mods = db.query(Mod).filter(Mod.server_id == server.id).all()
+                base = Path(server.install_dir).resolve()
+                target_dir = (base / target_dir_rel).resolve()
+                try:
+                    target_dir.relative_to(base)
+                    if target_dir.exists() and target_dir.is_dir():
+                        for mod in mods:
+                            wid = str(mod.workshop_id)
+                            matches = list(target_dir.glob(f"*{wid}*"))
+                            for p in matches:
+                                if not p.is_file():
+                                    continue
+                                if mod.enabled and p.name.endswith(".disabled"):
+                                    new_name = p.name[:-9]
+                                    p.rename(p.parent / new_name)
+                                elif not mod.enabled and not p.name.endswith(".disabled"):
+                                    p.rename(p.parent / f"{p.name}.disabled")
+                except Exception as exc:
+                    logger.warning("Fehler beim Synchronisieren des CurseForge-Mod-Status für Server %s: %s", server.id, exc)
+            finally:
+                db.close()
+            return
+
+        super().update_modlist(server)
+
     def cleanup_mod(self, server, workshop_id: str) -> dict:
         bp_mods = self._blueprint.effective_mods()
         if bp_mods.supportsCurseForge:
