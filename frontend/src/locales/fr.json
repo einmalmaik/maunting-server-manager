@@ -315,7 +315,7 @@
   },
   "auth": {
     "login": "Connectez-vous",
-    "loginDescription": "Connectez-vous à votre gestionnaire de serveur",
+    "loginDescription": "Connectez-vous à votre gestionnaire de services",
     "register": "S'inscrire",
     "registerDescription": "Créer un nouveau compte",
     "username": "Nom d'utilisateur",
@@ -347,10 +347,10 @@
   },
   "setup": {
     "welcome": "Bienvenue chez MSM",
-    "welcomeDesc": "Le gestionnaire de serveur Maunting est prêt. Créez maintenant le compte propriétaire pour gérer vos serveurs de jeux.",
+    "welcomeDesc": "Le gestionnaire de services Maunting est prêt. Créez maintenant le compte propriétaire pour gérer vos serveurs de jeux.",
     "start": "Commencer",
     "title": "Configuration initiale",
-    "description": "Créez le compte propriétaire pour votre gestionnaire de serveur",
+    "description": "Créez le compte propriétaire pour votre gestionnaire de services",
     "createOwner": "Créer un propriétaire",
     "error": "L'installation a échoué.",
     "verifyEmail": "Vérifier l'e-mail",

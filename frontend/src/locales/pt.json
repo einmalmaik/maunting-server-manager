@@ -315,7 +315,7 @@
   },
   "auth": {
     "login": "Entrar",
-    "loginDescription": "Faça login no seu Gerenciador de Servidores",
+    "loginDescription": "Faça login no seu Gerenciador de Serviços",
     "register": "Cadastre-se",
     "registerDescription": "Crie uma nova conta",
     "username": "Nome de usuário",
@@ -350,7 +350,7 @@
     "welcomeDesc": "O Maunting Service Manager está pronto. Crie a conta de proprietário agora para gerenciar seus servidores de jogo.",
     "start": "Comece",
     "title": "Configuração inicial",
-    "description": "Crie a conta de proprietário para o seu Gerenciador de Servidores",
+    "description": "Crie a conta de proprietário para o seu Gerenciador de Serviços",
     "createOwner": "Criar proprietário",
     "error": "Falha na configuração.",
     "verifyEmail": "Verificar e-mail",

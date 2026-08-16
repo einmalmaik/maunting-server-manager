@@ -1718,7 +1718,7 @@
   },
   "auth": {
     "login": "Anmelden",
-    "loginDescription": "Melde dich bei deinem Server Manager an",
+    "loginDescription": "Melde dich bei deinem Service Manager an",
     "register": "Registrieren",
     "registerDescription": "Erstelle ein neues Konto",
     "username": "Benutzername",
@@ -1762,7 +1762,7 @@
     "welcomeDesc": "Der Maunting Service Manager ist bereit. Erstelle jetzt den Owner-Account, um deine Game-Server zu verwalten.",
     "start": "Loslegen",
     "title": "Ersteinrichtung",
-    "description": "Erstelle den Owner-Account für deinen Server Manager",
+    "description": "Erstelle den Owner-Account für deinen Service Manager",
     "createOwner": "Owner erstellen",
     "emailDelivery": "E-Mail-Versand",
     "emailDeliveryDesc": "Wird einmalig für Verifizierung und System-E-Mails eingerichtet. Zugangsdaten werden verschlüsselt gespeichert.",
