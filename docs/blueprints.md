@@ -230,10 +230,11 @@ starten kann. Deshalb ist `source.type=dockerOnly` ausreichend.
   hat wahrscheinlich keinen Zugriff, der Code ist abgelaufen oder die lokal
   gespeicherten Hytale-Downloader-Credentials müssen erneuert werden.
 
-## Workshop-Mods
+## Workshop- und CurseForge-Mods
 
-Steam Workshop wird über `mods` aktiviert:
+Steam Workshop und CurseForge werden über `mods` im Blueprint konfiguriert:
 
+### Steam Workshop
 ```json
 {
   "supportsMods": true,
@@ -242,21 +243,41 @@ Steam Workshop wird über `mods` aktiviert:
   "filterTags": ["Enhanced"],
   "modInjection": "startupArg",
   "modStartupArgumentFormat": "-mod={mods};",
+  "modStartupArgumentSeparator": ";",
   "modListFilePath": null,
   "modListContent": "workshopIds",
   "postInstall": []
 }
 ```
 
+### CurseForge
+```json
+{
+  "supportsMods": true,
+  "supportsCurseForge": true,
+  "curseforgeGameId": "83374",
+  "curseforgeClassId": null,
+  "curseforgeInstallPath": "mods",
+  "modInjection": "startupArg",
+  "modStartupArgumentFormat": "-mods={mods}",
+  "modStartupArgumentSeparator": ","
+}
+```
+
+`curseforgeGameId` ist die offizielle CurseForge Game-ID (z. B. `83374` für ARK: Survival Ascended, `432` für Minecraft).
+`curseforgeClassId` (optional) filtert auf bestimmte Kategorien (z. B. `6` für Minecraft Mods, `4552` für Bukkit Plugins).
+`curseforgeInstallPath` (optional) definiert das relative Zielverzeichnis für heruntergeladene .jar/.zip-Dateien (z. B. `mods` oder `plugins`).
+`modStartupArgumentSeparator` (optional, default `;`) steuert das Trennzeichen zwischen Mod-IDs in `{MOD_ARG}` (z. B. `,` für ARK: Survival Ascended).
+
 `filterTags` (optional, Liste von Strings, max. 10 Tags) definiert Tags, nach denen die Mod-Suche und -Auflistung im Steam Workshop gefiltert wird. Das Feld verhindert, dass inkompatible Versionen gemischt angezeigt werden (z. B. Legacy- und Enhanced-Mods bei Conan Exiles). Erlaubte Zeichen in Tags sind Alphanumerisch, Leerzeichen, `_`, `-` und `+` (max. 64 Zeichen pro Tag).
 
-`modInjection=startupArg` setzt aktive Workshop-IDs in `{MOD_ARG}` ein.
+`modInjection=startupArg` setzt aktive Mod-IDs in `{MOD_ARG}` ein.
 
 `modInjection=file` schreibt eine Modliste nach `modListFilePath`.
 
 `modListContent` steuert den Inhalt der Modliste:
 
-- `workshopIds`: eine Workshop-ID pro Zeile
+- `workshopIds`: eine Workshop-/CurseForge-ID pro Zeile
 - `postInstallTargetBasenames`: Dateinamen der Ziele aus `postInstall`
 
 ## Runtime-Startup

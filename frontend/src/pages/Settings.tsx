@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Globe, Mail, Gamepad2, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot, Plug } from 'lucide-react'
+import { Globe, Mail, Gamepad2, Flame, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot, Plug } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { GeneralTab } from './settings/GeneralTab'
 import { EmailTab } from './settings/EmailTab'
 import { SteamTab } from './settings/SteamTab'
+import { CurseForgeTab } from './settings/CurseForgeTab'
 import { OAuthTab } from './settings/OAuthTab'
 import { GitHubTab } from './settings/GitHubTab'
 import { BackupTab } from './settings/BackupTab'
@@ -21,6 +22,7 @@ type TabId =
   | 'general'
   | 'email'
   | 'steam'
+  | 'curseforge'
   | 'github'
   | 'oauth'
   | 'imprint'
@@ -47,6 +49,7 @@ export function Settings() {
     { id: 'general', labelKey: 'settings.tabs.general', icon: Globe },
     { id: 'email', labelKey: 'settings.tabs.email', icon: Mail },
     { id: 'steam', labelKey: 'settings.tabs.steam', icon: Gamepad2 },
+    { id: 'curseforge', labelKey: 'settings.tabs.curseforge', icon: Flame },
     { id: 'github', labelKey: 'settings.tabs.github', icon: Github },
     { id: 'oauth', labelKey: 'settings.tabs.oauth', icon: KeyRound },
     { id: 'captcha', labelKey: 'settings.tabs.captcha', icon: Shield },
@@ -72,6 +75,7 @@ export function Settings() {
       {activeTab === 'general' && <GeneralTab />}
       {activeTab === 'email' && <EmailTab />}
       {activeTab === 'steam' && <SteamTab />}
+      {activeTab === 'curseforge' && <CurseForgeTab />}
       {activeTab === 'github' && <GitHubTab />}
       {activeTab === 'oauth' && <OAuthTab />}
       {activeTab === 'captcha' && <CaptchaTab />}

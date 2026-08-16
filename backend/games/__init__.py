@@ -72,6 +72,8 @@ def list_game_info() -> list[dict]:
             "category": bp.meta.category.value,
             "mod_support": bp_mods.supportsMods,
             "supports_steam_workshop": bp_mods.supportsSteamWorkshop,
+            "supports_curseforge": bp_mods.supportsCurseForge,
+            "mod_provider": "curseforge" if bp_mods.supportsCurseForge else ("steam" if bp_mods.supportsSteamWorkshop else None),
             "supports_server_file_updates": supports_file_updates,
             # v1.4.7+: Exec-Tab-Opt-in pro Blueprint. UI nutzt das, um den
             # Tab nur dann anzuzeigen, wenn der Server-Blueprint das Feature

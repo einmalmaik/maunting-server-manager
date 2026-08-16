@@ -213,6 +213,7 @@ class BlueprintPlugin(GamePlugin):
         bp_mods = blueprint.effective_mods()
         self.supports_mods = bp_mods.supportsMods
         self.supports_steam_workshop = bp_mods.supportsSteamWorkshop
+        self.supports_curseforge = bp_mods.supportsCurseForge
 
     # ─ Identitaet ─────────────────────────────────────────────────────────
 
@@ -753,8 +754,19 @@ class BlueprintPlugin(GamePlugin):
         if not self.supports_mods:
             return None
         bp_mods = self._blueprint.effective_mods()
+        provider = "none"
+        if bp_mods.supportsCurseForge:
+            provider = "curseforge"
+        elif bp_mods.supportsSteamWorkshop:
+            provider = "steam"
         return {
+            "provider": provider,
+            "supports_steam_workshop": bp_mods.supportsSteamWorkshop,
+            "supports_curseforge": bp_mods.supportsCurseForge,
             "workshop_id": bp_mods.workshopAppId,
+            "curseforge_game_id": bp_mods.curseforgeGameId,
+            "curseforge_class_id": bp_mods.curseforgeClassId,
+            "curseforge_install_path": bp_mods.curseforgeInstallPath,
             "dependency_resolution": False,
             "required_tags": bp_mods.filterTags,
         }
@@ -762,8 +774,97 @@ class BlueprintPlugin(GamePlugin):
     def install_mod(self, server, workshop_id: str) -> dict:
         return self.install_mods(server, [workshop_id])
 
+    def _install_curseforge_mods(self, server, workshop_ids: list[str]) -> dict:
+        bp_mods = self._blueprint.effective_mods()
+        clean_ids = [str(wid).strip() for wid in workshop_ids if str(wid).strip()]
+        if not clean_ids:
+            return {"ok": True, "applied": 0, "items": {}}
+
+        # Startup-Arg Injektion (z. B. ASA) - Spiel laedt Mods beim Start selbst ueber -mods=...
+        if bp_mods.modInjection == BlueprintModInjection.STARTUP_ARG:
+            for wid in clean_ids:
+                _append_console_log(server.id, f"[MSM] CurseForge Mod {wid} registriert (Start-Argument)\n")
+            self.update_modlist(server)
+            return {"ok": True, "applied": len(clean_ids), "items": {wid: {"ok": True} for wid in clean_ids}}
+
+        # Dateibasierte Installation (z. B. Minecraft mods/ oder plugins/)
+        from services.curseforge_service import get_curseforge_service
+        from services.curseforge_api_key_service import resolve_key as resolve_cf_key
+        import asyncio
+        import httpx
+
+        cf_key = resolve_cf_key()
+        if not cf_key:
+            return {"error": "CurseForge API-Key nicht konfiguriert (in Panel-Einstellungen hinterlegen)"}
+
+        base = Path(server.install_dir).resolve()
+        target_dir_rel = bp_mods.curseforgeInstallPath or "mods"
+        target_dir = (base / target_dir_rel).resolve()
+        try:
+            target_dir.relative_to(base)
+        except ValueError:
+            return {"error": "curseforgeInstallPath verlaesst install_dir"}
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        async def _download_cf():
+            svc = await get_curseforge_service()
+            errors = []
+            applied = 0
+            items = {}
+            for wid in clean_ids:
+                try:
+                    mod_info = await svc.get_mod_details(wid)
+                    if not mod_info or not mod_info.latest_files:
+                        errors.append(f"{wid}: Mod-Dateien nicht gefunden")
+                        items[wid] = {"ok": False, "error": "Dateien nicht gefunden"}
+                        continue
+                    file_obj = mod_info.latest_files[0]
+                    dl_url = file_obj.get("downloadUrl")
+                    if not dl_url:
+                        dl_url = await svc.get_file_download_url(wid, file_obj["id"])
+                    if not dl_url:
+                        errors.append(f"{wid}: Keine Download-URL verfuegbar")
+                        items[wid] = {"ok": False, "error": "Keine Download-URL"}
+                        continue
+                    file_name = file_obj.get("fileName") or f"mod_{wid}.jar"
+                    safe_name = Path(file_name).name
+                    dest_file_name = safe_name if str(wid) in safe_name else f"cf_{wid}_{safe_name}"
+                    dest_file = (target_dir / dest_file_name).resolve()
+                    dest_file.relative_to(base)
+
+                    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as dl_client:
+                        resp = await dl_client.get(dl_url, headers={"x-api-key": cf_key})
+                        resp.raise_for_status()
+                        dest_file.write_bytes(resp.content)
+                    self._try_chown_install_path(server, dest_file)
+                    applied += 1
+                    items[wid] = {"ok": True}
+                    _append_console_log(
+                        server.id,
+                        f"[MSM] CurseForge Mod {mod_info.title} ({dest_file_name}) heruntergeladen nach {target_dir_rel}/\n",
+                    )
+                except Exception as exc:
+                    errors.append(f"{wid}: {exc}")
+                    items[wid] = {"ok": False, "error": str(exc)}
+            return {
+                "ok": len(errors) == 0,
+                "applied": applied,
+                "errors": errors,
+                "items": items,
+                "error": "; ".join(errors) if errors else None,
+            }
+
+        res = asyncio.run(_download_cf())
+        self.update_modlist(server)
+        return res
+
     def install_mods(self, server, workshop_ids: list[str]) -> dict:
         bp_mods = self._blueprint.effective_mods()
+        if not bp_mods.supportsMods:
+            return {"error": "Mods nicht in dieser Blueprint aktiviert"}
+        if bp_mods.supportsCurseForge:
+            return self._install_curseforge_mods(server, workshop_ids)
         if not bp_mods.supportsSteamWorkshop or not bp_mods.workshopAppId:
             return {"error": "Steam Workshop nicht in dieser Blueprint aktiviert"}
         workshop_app_id = bp_mods.workshopAppId
@@ -1020,6 +1121,22 @@ class BlueprintPlugin(GamePlugin):
 
     def cleanup_mod(self, server, workshop_id: str) -> dict:
         bp_mods = self._blueprint.effective_mods()
+        if bp_mods.supportsCurseForge:
+            target_dir_rel = bp_mods.curseforgeInstallPath or "mods"
+            if bp_mods.modInjection != "startupArg":
+                base = Path(server.install_dir).resolve()
+                target_dir = (base / target_dir_rel).resolve()
+                try:
+                    target_dir.relative_to(base)
+                    if target_dir.exists() and target_dir.is_dir():
+                        for p in target_dir.glob(f"*{workshop_id}*"):
+                            if p.is_file():
+                                p.unlink()
+                except Exception:
+                    pass
+            _append_console_log(server.id, f"[MSM] CurseForge Mod {workshop_id} entfernt\n")
+            return {"ok": True, "removed": [workshop_id]}
+
         if not bp_mods.supportsSteamWorkshop or not bp_mods.workshopAppId:
             return {"ok": True, "removed": []}
 

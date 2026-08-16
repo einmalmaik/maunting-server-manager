@@ -278,7 +278,7 @@ export function ServerDetail() {
     () => (Array.isArray(games) ? games : []).find((g) => g.id === server?.game_type),
     [games, server?.game_type],
   );
-  const showModTab = !!gameInfo?.supports_steam_workshop;
+  const showModTab = !!(gameInfo?.supports_steam_workshop || gameInfo?.supports_curseforge || gameInfo?.mod_support);
   /** Steam / HTTP / GitHub: manueller Datei-Update-Check (nicht Workshop-Mods). */
   const showServerFileUpdates = !!gameInfo?.supports_server_file_updates;
 
@@ -1073,7 +1073,7 @@ export function ServerDetail() {
           <ServerConsolePanel serverId={serverId} mode="exec" />
         )}
         {activeTab === "mods" && showModTab && (
-          <ModManager serverId={serverId} />
+          <ModManager serverId={serverId} gameInfo={gameInfo} />
         )}
         {activeTab === "restarts" && (
           <ServerRestartPanel
