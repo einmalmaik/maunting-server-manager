@@ -291,11 +291,15 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
     # Portkonflikten auf dem Host (is_port_in_use), unerwarteten Recreates
     # und Session-Abbruechen fuer Spieler. Deshalb werden Netzwerk-Aenderungen
     # strikt nur bei gestoppten Servern zugelassen.
+    # Kein lokaler Import hier. `container_name_for`, `docker_service` und
+    # `is_lifecycle_job_active` stehen bereits oben im Modul — ein zweiter
+    # Import *innerhalb* dieser Verzweigung machte alle drei zu lokalen Namen
+    # der ganzen Funktion. Bei jedem PATCH ohne Netzwerkaenderung lief die
+    # Verzweigung nicht, der Name blieb unbelegt, und Zeile ~452 stieg mit
+    # `UnboundLocalError` aus — abgefangen als 500. Damit war jede Ressourcen-,
+    # Disk- und Konfigurationsaenderung kaputt, waehrend ausgerechnet die
+    # Netzwerkaenderung funktionierte.
     if network_change:
-        from games.base import container_name_for
-        from services import docker_service
-        from services.server_lifecycle_service import is_lifecycle_job_active
-
         if server.status == "running" or docker_service.is_running(
             container_name_for(server.id), node=server.node
         ):
