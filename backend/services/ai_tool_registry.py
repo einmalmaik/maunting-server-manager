@@ -281,10 +281,28 @@ WERKZEUGE: dict[str, Werkzeug] = {
     ),
     # Der Wechsel des Spiels bzw. Blueprints eines bestehenden Servers.
     #
-    # Autonomiefaehig auf ausdrueckliche Vorgabe des Betreibers — und es passt
-    # zum Kriterium: `switch_server_blueprint` legt **zwingend** ein Backup an,
-    # bevor es die erste Datei anfasst, und bricht ab, wenn das Backup scheitert.
-    # Der Weg zurueck ist damit Teil des Vorgangs selbst.
+    # **`immer_bestaetigen`, seit jemand nachgesehen hat, was dabei passiert.**
+    #
+    # Hier stand: "autonomiefaehig auf ausdrueckliche Vorgabe des Betreibers —
+    # und es passt zum Kriterium: `switch_server_blueprint` legt zwingend ein
+    # Backup an, bevor es die erste Datei anfasst." Der erste Halbsatz stimmt,
+    # der zweite auch, und die Folgerung trotzdem nicht.
+    #
+    # `switch_server_blueprint` ist kein Umhaengen, sondern eine
+    # **Neuinstallation**: `wipe_server_root` loescht das *gesamte*
+    # Serververzeichnis — Welt, Konfigurationen, Mods —, die Ports werden neu
+    # vergeben, und danach laeuft eine frische Installation. Dass davor ein
+    # Backup steht, macht den Vorgang wiederherstellbar, nicht harmlos: der Weg
+    # zurueck ist eine Wiederherstellung, die selbst Stunden dauert, und
+    # `propose_backup_restore` traegt aus genau diesem Grund seit jeher
+    # `immer_bestaetigen`.
+    #
+    # Aufgefallen ist es beim Bau der Guardian-Reparatur, wo der Wechsel als
+    # naheliegender Weg galt ("Blueprint ableiten, anpassen, Server umstellen").
+    # Fuer eine zu knapp bemessene Startzeit die Welt zu loeschen ist keine
+    # Behebung — dafuer gibt es jetzt `propose_guardian_tuning`. Der Wechsel
+    # bleibt moeglich und braucht einen Menschen; im unbeaufsichtigten Lauf
+    # heisst das ab Teil 4 eine Freigabe per E-Mail.
     #
     # `server.config.write` — dasselbe Recht wie am Panel-Knopf "Spiel /
     # Blueprint wechseln" (`routers/servers.py::switch_server_blueprint_endpoint`).
@@ -297,6 +315,7 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # bereits; es fehlte nur die Verbindung dorthin.
     "propose_server_blueprint_switch": Werkzeug(
         "server_write",
+        immer_bestaetigen=True,
         recht="server.config.write",
     ),
     # Kein `immer_bestaetigen`: ein Server, den es vorher nicht gab, vernichtet
@@ -360,6 +379,32 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Handlung mit zwei Rechten zu haben — der Fehler, der bei
     # `propose_server_blueprint_switch` zweimal gemacht und dokumentiert wurde.
     "propose_server_repair": Werkzeug(
+        "server_write", recht="server.config.write"
+    ),
+    # Guardian **fuer diesen einen Server** anders einstellen.
+    #
+    # Der Fall, den es abdeckt, ist der dritte der drei, die eine Reparatur
+    # auseinanderhalten muss: Guardian hat sich nicht geirrt, und der Server ist
+    # nicht kaputt — Guardian ist fuer diesen Server falsch eingestellt. Die
+    # Blueprint gilt fuer jeden Server ihres Spiels und kann nicht wissen, dass
+    # ausgerechnet auf dieser Node zwoelf Instanzen um acht Gigabyte streiten.
+    #
+    # Bis hierher gab es dagegen zwei Werkzeuge, und beide sind zu grob: die
+    # Blueprint fuer **alle** Server dieses Spiels aendern, oder den Server auf
+    # eine abgeleitete Blueprint umhaengen — was `switch_server_blueprint` als
+    # Neuinstallation mit `wipe_server_root` ausfuehrt. Fuer eine zu knapp
+    # bemessene Startzeit die Welt zu loeschen ist keine Behebung.
+    #
+    # **Kein `immer_bestaetigen`**, und das ist dieselbe Regel wie ueberall
+    # hier: das Kriterium ist Unumkehrbarkeit, nicht gefuehltes Risiko. Eine
+    # Uebersteuerung ist eine Zeile in einer Spalte, `reset` nimmt sie zurueck,
+    # und der Guardian-Reiter zeigt sie an. Sie loescht nichts.
+    #
+    # `server.config.write` ist dasselbe Recht wie am Panelknopf, hinter dem
+    # dieselbe Spalte liegt. Ein eigenes Recht waere eine Handlung mit zwei
+    # Rechten — der Fehler, der bei `propose_server_blueprint_switch` zweimal
+    # gemacht und dokumentiert wurde.
+    "propose_guardian_tuning": Werkzeug(
         "server_write", recht="server.config.write"
     ),
     # Loeschen einer **einzelnen** Datei unterhalb des Serververzeichnisses.
@@ -522,15 +567,38 @@ ALWAYS_CONFIRM_TOOLS = (
 # `ai_context_service._skill_index_block` das Skill-Verzeichnis aus dem Prompt
 # eines solchen Laufs weg), die Hoster-Werkzeuge (Rechte und
 # Schluessel), `propose_server_create`/`propose_server_delete` (Reichweite ueber
-# den Vorfall hinaus), der Blueprint-Wechsel (leert das Verzeichnis) und
-# `web_search` (der Name eines selbstgebauten Servers hat draussen nichts zu
-# suchen — schon gar nicht, wenn ihn niemand gefragt hat).
+# den Vorfall hinaus) und `web_search` (der Name eines selbstgebauten Servers
+# hat draussen nichts zu suchen — schon gar nicht, wenn ihn niemand gefragt hat).
 #
 # `propose_blueprint_delete` fehlt aus beiden Gruenden zugleich: ein Blueprint
 # gilt fuer **alle** Server seines `game_type` und nicht nur fuer den einen, auf
 # dem der Vorfall passiert ist — und weg ist er ohne Rueckweg, weshalb er
 # ohnehin in `ALWAYS_CONFIRM_TOOLS` steht. Eine Heilung, die als Nebenwirkung
 # die Vorlage fremder Server entfernt, ist keine.
+#
+# ── Drei Zugaenge, die seit `20260816_03` dazugehoeren ────────────────────
+#
+# `propose_guardian_tuning` ist der dritte der drei Faelle, die eine Reparatur
+# auseinanderhalten muss: Guardian hat sich nicht geirrt, und der Server ist
+# nicht kaputt — Guardian ist **fuer diesen Server** falsch eingestellt. Ohne
+# dieses Werkzeug konnte die KI genau das nicht beheben und schrieb stattdessen
+# "ich kann den Vorfall nicht schliessen, solange weiter Restarts gemeldet
+# werden". Umkehrbar (`reset`), sichtbar im Guardian-Reiter, und begrenzt auf
+# eine geschlossene Menge geklemmter Zahlen.
+#
+# `list_blueprints` und `propose_blueprint_change` legen eine **neue Datei** an
+# und ruehren keinen laufenden Server an. Eine Ableitung ist der Weg fuer den
+# Fall, in dem wirklich die Vorlage falsch ist — eine Startzeile, die im
+# aktuellen Image nicht mehr stimmt. Sie wird abgeleitet, angepasst und steht
+# danach zur Ansicht bereit; was **noch nichts** tut, ist sie in Betrieb zu
+# nehmen.
+#
+# Der Wechsel selbst bleibt genau deshalb draussen und traegt seit derselben
+# Aenderung `immer_bestaetigen`: `switch_server_blueprint` ist keine Umhaengung,
+# sondern eine Neuinstallation mit `wipe_server_root` — Welt, Configs und Mods
+# sind danach weg. Fuer eine zu knapp bemessene Startzeit die Welt zu loeschen
+# ist keine Behebung, und ein unbeaufsichtigter Lauf darf das nie ohne einen
+# Menschen tun.
 GUARDIAN_HEILUNG_TOOLS = frozenset({
     # Sehen, was los ist.
     "read_server_status",
@@ -548,6 +616,7 @@ GUARDIAN_HEILUNG_TOOLS = frozenset({
     "read_ai_action_history",
     "read_node_health",
     "read_blueprint",
+    "list_blueprints",
     "search_docs",
     "read_docs",
     # Handeln.
@@ -557,6 +626,8 @@ GUARDIAN_HEILUNG_TOOLS = frozenset({
     "propose_config_update",
     "propose_file_delete",
     "propose_server_repair",
+    "propose_guardian_tuning",
+    "propose_blueprint_change",
     "propose_bind_ip_update",
     "propose_mod_install",
 })
@@ -570,11 +641,21 @@ GUARDIAN_HEILUNG_TOOLS = frozenset({
 # unbrauchbar, und die Vorgabe des Betreibers lautete ausdruecklich: erst
 # sichern, dann anfassen.
 #
-# Nicht enthalten: `propose_backup` selbst (das waere ein Zirkel) und
-# `propose_server_lifecycle` — ein Neustart aendert keine Datei, und ihn hinter
-# ein Backup zu stellen hiesse, den haeufigsten und harmlosesten Heilungsschritt
-# genau dann zu blockieren, wenn die Platte voll ist und deshalb kein Backup
-# gelingt.
+# Nicht enthalten sind vier, jedes mit seinem eigenen Grund:
+#
+# * `propose_backup` selbst — das waere ein Zirkel.
+# * `propose_server_lifecycle` — ein Neustart aendert keine Datei, und ihn
+#   hinter ein Backup zu stellen hiesse, den haeufigsten und harmlosesten
+#   Heilungsschritt genau dann zu blockieren, wenn die Platte voll ist und
+#   deshalb kein Backup gelingt.
+# * `propose_guardian_tuning` — es aendert eine Spalte am Server, keine Datei
+#   auf ihm. Der Rueckweg ist `reset`, und er kostet nichts. Dieselbe
+#   Ueberlegung wie beim Neustart, nur noch deutlicher: waere es hinter der
+#   Schranke, koennte die KI ausgerechnet dann nicht mehr nachjustieren, wenn
+#   der Server so kaputt ist, dass kein Backup mehr durchgeht.
+# * `propose_blueprint_change` — es legt eine **neue Blueprint-Datei** im Panel
+#   an und ruehrt keinen Server an. Ein Serverbackup bewiese darueber gar
+#   nichts; der Rueckweg ist, die Datei nicht in Betrieb zu nehmen.
 # Was ein faellig gewordener stehender Auftrag aufrufen darf.
 #
 # Wie `GUARDIAN_HEILUNG_TOOLS` eine **ausgeschriebene** Aufzaehlung und keine

@@ -764,10 +764,22 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
         _stilllegen(db, aufgabe, grund="autonomie_entzogen")
         return None
 
-    laufend = ai_run_service.aktiver_lauf(db, user_id=user.id)
+    # **Ein stehender Auftrag bleibt im Dauerchat.** Das ist keine Nachlaessigkeit
+    # gegenueber dem Guardian-Fenster daneben, sondern die Zusage aus der Doku:
+    # "Der Verlauf steht **immer** im Chat — `email` heisst *zusaetzlich*, nicht
+    # *ausschliesslich*." Ein Auftrag ist etwas, das ein Mensch bestellt hat; er
+    # gehoert in dessen Gespraech. Eine Reparatur hat niemand bestellt.
+    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    db.commit()
+
+    laufend = ai_run_service.aktiver_lauf(db, user_id=user.id, kind="primary")
     if laufend is not None:
         # Der Mensch chattet gerade. Ein Aufgabenlauf, der jetzt startet, riefe
         # `vorgaenger_abloesen` und braeche ihm mitten im Satz die Antwort ab.
+        #
+        # Gefragt wird nach **diesem** Fenster. Ohne die Einschraenkung vertagte
+        # sich das naechtliche Backup, weil auf einer ganz anderen Anlage eine
+        # Reparatur lief — zwei Vorgaenge, die einander nie in die Quere kommen.
         logger.debug(
             "Aufgabenlauf vertagt: Lauf %s ist aktiv (task_id=%s)", laufend.id, aufgabe.id
         )
@@ -780,9 +792,6 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
     if anbieter.requires_api_key and not anbieter.operator_api_key_encrypted:
         logger.info("Aufgabenlauf ohne API-Schluessel (provider_id=%s)", anbieter.id)
         return None
-
-    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
-    db.commit()
 
     denken, stufe = await ai_reasoning.vorgabe(
         client, db, user=user, provider=anbieter, aktiv=False, wunsch=None
@@ -960,7 +969,10 @@ async def _eine_aufgabe_bearbeiten(db: Session, aufgabe: AiTask, *, jetzt: datet
     # stehen — der naechste Durchlauf versucht es in einer Minute erneut. Wer
     # den Anspruch schon genommen haette, haette den Termin verbrannt, nur weil
     # der Mensch gerade einen Satz tippte.
-    if ai_run_service.aktiver_lauf(db, user_id=aufgabe.user_id) is not None:
+    # Nur der Dauerchat zaehlt: dort schreibt der faellige Lauf hin, und nur
+    # dort kann er jemandem ins Wort fallen. Eine Guardian-Reparatur laeuft in
+    # einem anderen Fenster und geht diesen Auftrag nichts an.
+    if ai_run_service.aktiver_lauf(db, user_id=aufgabe.user_id, kind="primary") is not None:
         logger.debug("Aufgabe vertagt, Benutzer arbeitet (task_id=%s)", aufgabe.id)
         return 0
 

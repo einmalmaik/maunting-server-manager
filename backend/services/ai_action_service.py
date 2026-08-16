@@ -1210,15 +1210,25 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "propose_server_blueprint_switch",
+            # Der Satz "die Portrollen beider Blueprints muessen
+            # uebereinstimmen" stand hier und ist ersatzlos gestrichen: er war
+            # erfunden. `switch_server_blueprint` vergibt die Ports ohnehin neu
+            # und prueft nichts dergleichen — dokumentiert in
+            # `ai_proposal_service` bei den erfundenen Einschraenkungen. Eine
+            # Bedingung, die es nicht gibt, haelt das Modell von Wechseln ab,
+            # die durchgegangen waeren.
             "Schlaegt vor, einen bestehenden Server auf einen anderen Blueprint "
             "umzustellen — so aendert man die Spielversion, denn sie steht im "
-            "Blueprint und nicht am Server. Der Server muss gestoppt sein, und "
-            "die Portrollen beider Blueprints muessen uebereinstimmen. Leite "
+            "Blueprint und nicht am Server. Der Server muss gestoppt sein. Leite "
             "vorher mit propose_blueprint_change einen passenden ab. Der "
             "Vorgang legt zwingend ein Backup an und **loescht danach alle "
             "Serverdateien**, damit die neue Version auf einem leeren "
             "Verzeichnis aufsetzt: Welt, Configs und Mods sind anschliessend "
-            "weg und stehen nur noch im Backup. Sage das im Grund ausdruecklich.",
+            "weg und stehen nur noch im Backup. Sage das im Grund ausdruecklich. "
+            "Braucht immer eine Bestaetigung durch einen Menschen — auch im "
+            "autonomen Modus. Wenn Guardian fuer diesen Server nur falsch "
+            "eingestellt ist, nimm propose_guardian_tuning: das aendert nichts "
+            "an den Dateien.",
             {
                 **_RATIONALE_SCHEMA,
                 "blueprint_id": {
@@ -1349,6 +1359,87 @@ def provider_tool_definitions() -> list[dict]:
                 **_RATIONALE_SCHEMA,
             },
             ["action", *_RATIONALE_REQUIRED],
+        ),
+        # Guardian **fuer diesen einen Server** anders einstellen.
+        #
+        # Alle Felder sind Zahlen mit Ober- und Untergrenze, und es gibt keine
+        # anderen. Damit kann ein Modell, das durch eine praeparierte Logzeile
+        # ueberredet wurde, hoechstens einen ungeschickten Wert waehlen — es
+        # kann keine Probe abschalten, keinen Probentyp tauschen und kein
+        # Muster einschmuggeln.
+        _server_function(
+            "propose_guardian_tuning",
+            "Stellt die Guardian-Engine **fuer diesen einen Server** anders ein, "
+            "ohne die Blueprint anderer Server anzufassen. Der Weg fuer den Fall, "
+            "dass Guardian sich nicht geirrt hat und der Server nicht kaputt ist, "
+            "sondern Guardian fuer diesen Server falsch eingestellt wurde — etwa "
+            "wenn eine volle Node laenger zum Hochfahren braucht, als die "
+            "Blueprint erwartet, und deshalb dauernd Neustarts gemeldet werden. "
+            "Gib nur die Werte an, die du aendern willst; die uebrigen bleiben "
+            "stehen. `reset: true` nimmt alles zurueck und laesst wieder die "
+            "Blueprint gelten. Aendert keine Datei und keinen Spielstand.",
+            {
+                "startup_grace_period_seconds": {
+                    "type": "integer", "minimum": 1, "maximum": 3600,
+                    "description": "Ruhe nach dem Start, bevor Proben zaehlen.",
+                },
+                "startup_timeout_seconds": {
+                    "type": "integer", "minimum": 10, "maximum": 7200,
+                    "description": "Ab wann ein Start als gescheitert gilt.",
+                },
+                "probe_interval_seconds": {
+                    "type": "integer", "minimum": 1, "maximum": 600,
+                    "description": "Abstand zwischen zwei Proben (alle Proben).",
+                },
+                "probe_timeout_seconds": {
+                    "type": "integer", "minimum": 1, "maximum": 120,
+                    "description": "Geduld einer Netzprobe.",
+                },
+                "probe_failure_threshold": {
+                    "type": "integer", "minimum": 1, "maximum": 20,
+                    "description": "Fehlschlaege in Folge bis zum Vorfall.",
+                },
+                "probe_success_threshold": {
+                    "type": "integer", "minimum": 1, "maximum": 20,
+                    "description": "Erfolge in Folge bis 'gesund'.",
+                },
+                "recovery_max_attempts": {
+                    "type": "integer", "minimum": 0, "maximum": 20,
+                    "description": (
+                        "Wieviele Selbstheilungsversuche Guardian unternimmt. "
+                        "0 heisst: gar keine mehr, nur noch melden."
+                    ),
+                },
+                "recovery_attempt_window_seconds": {
+                    "type": "integer", "minimum": 60, "maximum": 86400,
+                    "description": "Zeitfenster, in dem die Versuche gezaehlt werden.",
+                },
+                "recovery_cooldown_seconds": {
+                    "type": "integer", "minimum": 0, "maximum": 86400,
+                    "description": "Pause zwischen zwei Versuchen.",
+                },
+                "verification_min_healthy_seconds": {
+                    "type": "integer", "minimum": 0, "maximum": 3600,
+                    "description": "Wie lange gesund, damit es als geheilt gilt.",
+                },
+                "verification_required_successes": {
+                    "type": "integer", "minimum": 1, "maximum": 20,
+                    "description": "Erfolge in Folge fuer die Bestaetigung.",
+                },
+                "verification_timeout_seconds": {
+                    "type": "integer", "minimum": 10, "maximum": 7200,
+                    "description": "Ab wann die Bestaetigung als gescheitert gilt.",
+                },
+                "reset": {
+                    "type": "boolean",
+                    "description": (
+                        "Alle Uebersteuerungen zuruecknehmen. Schliesst jede "
+                        "andere Angabe aus."
+                    ),
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            [*_RATIONALE_REQUIRED],
         ),
         _server_function(
             "propose_file_delete",

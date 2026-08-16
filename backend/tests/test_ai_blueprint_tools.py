@@ -315,14 +315,25 @@ def test_switching_needs_the_same_permission_as_the_panel_button(
 def test_both_blueprint_tools_run_under_an_autonomy_grant(
     db: Session, regular_user: User, tmp_path: Path
 ) -> None:
-    """Vorgabe des Betreibers: im autonomen Modus laeuft der Wechsel durch.
+    """Vorgabe des Betreibers: im autonomen Modus laeuft die **Ableitung** durch.
 
-    Beide Werkzeuge sind umkehrbar. Eine Ableitung legt eine neue Datei an und
-    laesst die Vorlage stehen; ein Wechsel legt **zwingend** ein Backup an,
-    bevor er die erste Datei anfasst, und bricht ab, wenn das Backup scheitert
-    (`switch_server_blueprint`). Der Weg zurueck ist Teil des Vorgangs.
+    Eine Ableitung legt eine neue Datei an und laesst die Vorlage stehen. Sie
+    ruehrt keinen Server an, und die Freigabe ist die Entscheidung — nicht die
+    Bestaetigung jedes Falls.
 
-    Die Freigabe ist die Entscheidung — nicht die Bestaetigung jedes Falls.
+    **Der Wechsel steht hier nicht mehr daneben.** Er stand es, mit der
+    Begruendung, er sei umkehrbar, "weil zwingend ein Backup angelegt wird". Das
+    Backup gibt es wirklich; es macht den Vorgang wiederherstellbar, nicht
+    harmlos. `switch_server_blueprint` ruft `wipe_server_root` und loescht das
+    **gesamte** Serververzeichnis — Welt, Konfigurationen, Mods — und
+    installiert frisch. Wer das ohne Rueckfrage laufen laesst, hat die Welt
+    verloren, sobald das Backup irgendwo klemmt; und genau dieser Fall stand
+    unter derselben Zusicherung wie eine Umgebungsvariable.
+
+    Der Wille des Betreibers bleibt trotzdem gewahrt: der Wechsel ist nicht
+    verboten, er fragt. Und die Frage erreicht auch den, der einen Monat im
+    Urlaub ist — sie geht als E-Mail hinaus (Teil 4) statt auf eine Karte im
+    Panel zu warten, die niemand aufschlaegt.
 
     Die Gegenprobe unten fuehrt seit der Reparatur auch
     `propose_blueprint_delete`. Es ist das Gegenstueck zur Ableitung und faellt
@@ -349,7 +360,7 @@ def test_both_blueprint_tools_run_under_an_autonomy_grant(
     )
     db.commit()
 
-    for werkzeug in ("propose_blueprint_change", "propose_server_blueprint_switch"):
+    for werkzeug in ("propose_blueprint_change",):
         assert werkzeug not in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
         assert ai_autonomy_service.autonomy_allows(
             db, user=regular_user, server_id=server.id, tool_name=werkzeug,
@@ -360,6 +371,7 @@ def test_both_blueprint_tools_run_under_an_autonomy_grant(
         "propose_server_delete",
         "propose_backup_restore",
         "propose_blueprint_delete",
+        "propose_server_blueprint_switch",
     ):
         assert werkzeug in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
         assert not ai_autonomy_service.autonomy_allows(

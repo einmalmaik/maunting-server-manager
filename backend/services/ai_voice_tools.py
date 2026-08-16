@@ -193,6 +193,7 @@ _VORLESEN = {
     "propose_mod_install": "Eine Mod auf {server} installieren",
     "propose_bind_ip_update": "Die Bind-IP von {server} auf {ip} ändern",
     "propose_server_repair": "Eine Reparatur an {server} ausführen",
+    "propose_guardian_tuning": "Die Guardian-Einstellungen von {server} ändern",
 }
 
 _VORGANG = {

@@ -3,7 +3,12 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Bot, X } from 'lucide-react'
 
-import { AI_RUHENDE_LAUFZUSTAENDE, aiApi, type AiRunStatus } from '@/api/ai'
+import {
+  AI_RUHENDE_LAUFZUSTAENDE,
+  aiApi,
+  type AiConversationKind,
+  type AiRunStatus,
+} from '@/api/ai'
 import { useAuthStore } from '@/stores/authStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
@@ -34,6 +39,27 @@ const TEXTE: Record<string, { key: string; fallback: string }> = {
 }
 
 /**
+ * Dieselben Zustände, andere Sätze — weil es ein anderer Anlass ist.
+ *
+ * „Die KI ist mit deinem Auftrag fertig" wäre hier schlicht falsch: den
+ * Auftrag hat niemand gegeben, eine Störung hat ihn ausgelöst. Und
+ * „fehlgeschlagen" heißt bei einer Reparatur etwas anderes als bei einer
+ * Frage — es heißt, dass ein Server womöglich noch steht.
+ */
+const GUARDIAN_TEXTE: Record<string, { key: string; fallback: string }> = {
+  completed: { key: 'ai.notice.guardianCompleted', fallback: 'Die KI hat eine Guardian-Störung bearbeitet.' },
+  waiting_confirmation: { key: 'ai.notice.guardianWaiting', fallback: 'Eine Guardian-Reparatur wartet auf deine Freigabe.' },
+  waiting_user: { key: 'ai.notice.guardianWaiting', fallback: 'Eine Guardian-Reparatur wartet auf deine Freigabe.' },
+  failed: { key: 'ai.notice.guardianFailed', fallback: 'Eine Guardian-Reparatur ist fehlgeschlagen.' },
+}
+
+/** Wohin die Meldung zeigt. Der Dauerchat ist die Seite ohne Zusatz. */
+const ZIEL: Record<AiConversationKind, string> = {
+  primary: '/ai',
+  guardian: '/ai?ansicht=guardian',
+}
+
+/**
  * Meldet unten rechts, wenn ein KI-Auftrag fertig ist oder wartet.
  *
  * Der Gegenwert zur Hintergrundausfuehrung: seit die KI weiterarbeitet, waehrend
@@ -54,36 +80,65 @@ export function AiRunNotice() {
   const user = useAuthStore((state) => state.user)
   const meldungenAn = user?.ai_notifications !== false
 
-  const [meldung, setMeldung] = useState<{ status: AiRunStatus } | null>(null)
-  // Der zuletzt gesehene Zustand. Gemeldet wird der **Uebergang**, nicht der
-  // Zustand: sonst kaeme bei jedem Takt dieselbe Meldung erneut.
-  const letzterRef = useRef<{ id: string; status: AiRunStatus } | null>(null)
-  const imChat = ort.pathname.startsWith('/ai')
+  const [meldung, setMeldung] = useState<
+    { status: AiRunStatus; kind: AiConversationKind } | null
+  >(null)
+  // Der zuletzt gesehene Zustand — **je Fenster**. Gemeldet wird der
+  // *Uebergang*, nicht der Zustand: sonst kaeme bei jedem Takt dieselbe
+  // Meldung erneut.
+  //
+  // Je Fenster und nicht als eine Zeile, weil es zwei Laeufe gleichzeitig geben
+  // kann: der Mensch fragt etwas, waehrend im Hintergrund ein Server repariert
+  // wird. Eine gemeinsame Zeile saehe den Wechsel zwischen beiden als
+  // Zustandswechsel eines Laufs und meldete abwechselnd Unsinn.
+  const letzterRef = useRef<
+    Partial<Record<AiConversationKind, { id: string; status: AiRunStatus }>>
+  >({})
+
+  // **Unterdrueckt wird nur das Fenster, in das man gerade sieht.** Vorher
+  // genuegte der Pfad `/ai`: wer im Chat stand, bekam auch von einer beendeten
+  // Reparatur nichts mit, obwohl er sie gar nicht sehen konnte.
+  const offenesFenster: AiConversationKind | null = ort.pathname.startsWith('/ai')
+    ? (new URLSearchParams(ort.search).get('ansicht') === 'guardian'
+        ? 'guardian'
+        : 'primary')
+    : null
 
   const nachsehen = useCallback(async () => {
-    let lauf: Awaited<ReturnType<typeof aiApi.getActiveRun>> = null
-    try {
-      lauf = await aiApi.getActiveRun()
-    } catch {
-      // Eine gescheiterte Nachfrage ist kein Grund, etwas anzuzeigen.
-      return false
-    }
-    const vorher = letzterRef.current
-    if (!lauf) {
-      // Der Lauf ist aus der Liste der offenen verschwunden — also fertig.
-      if (vorher && vorher.status === 'running' && !imChat) {
-        setMeldung({ status: 'completed' })
+    const fenster: AiConversationKind[] = ['primary', 'guardian']
+    let laeuftNoch = false
+    for (const art of fenster) {
+      let lauf: Awaited<ReturnType<typeof aiApi.getActiveRun>> = null
+      try {
+        lauf = await aiApi.getActiveRun(art)
+      } catch {
+        // Eine gescheiterte Nachfrage ist kein Grund, etwas anzuzeigen.
+        continue
       }
-      letzterRef.current = null
-      return false
+      const vorher = letzterRef.current[art]
+      const stumm = offenesFenster === art
+      if (!lauf) {
+        // Der Lauf ist aus der Liste der offenen verschwunden — also fertig.
+        if (vorher && vorher.status === 'running' && !stumm) {
+          setMeldung({ status: 'completed', kind: art })
+        }
+        delete letzterRef.current[art]
+        continue
+      }
+      const gewechselt = !vorher || vorher.id !== lauf.id || vorher.status !== lauf.status
+      if (
+        gewechselt
+        && vorher?.id === lauf.id
+        && AI_RUHENDE_LAUFZUSTAENDE.includes(lauf.status)
+        && !stumm
+      ) {
+        setMeldung({ status: lauf.status, kind: art })
+      }
+      letzterRef.current[art] = { id: lauf.id, status: lauf.status }
+      if (lauf.status === 'running') laeuftNoch = true
     }
-    const gewechselt = !vorher || vorher.id !== lauf.id || vorher.status !== lauf.status
-    if (gewechselt && vorher?.id === lauf.id && AI_RUHENDE_LAUFZUSTAENDE.includes(lauf.status) && !imChat) {
-      setMeldung({ status: lauf.status })
-    }
-    letzterRef.current = { id: lauf.id, status: lauf.status }
-    return lauf.status === 'running'
-  }, [imChat])
+    return laeuftNoch
+  }, [offenesFenster])
 
   useEffect(() => {
     if (!darfChatten || !meldungenAn) return
@@ -98,18 +153,24 @@ export function AiRunNotice() {
       // sonst langsam weiter, statt aufzuhören. Der langsame Takt ist die
       // einzige Art, wie eine offene Seite von einem Lauf erfährt, den niemand
       // ausgelöst hat.
-      timer = setTimeout(takt, laeuftNoch && !imChat ? TAKT_MS : RUHETAKT_MS)
+      timer = setTimeout(
+        takt,
+        laeuftNoch && offenesFenster === null ? TAKT_MS : RUHETAKT_MS,
+      )
     }
     void takt()
     return () => {
       aktiv = false
       if (timer) clearTimeout(timer)
     }
-  }, [darfChatten, meldungenAn, nachsehen, ort.pathname])
+  }, [darfChatten, meldungenAn, nachsehen, offenesFenster])
 
-  // Wer im Chat steht, sieht es ohnehin.
-  if (!meldung || imChat || !darfChatten || !meldungenAn) return null
-  const text = TEXTE[meldung.status] ?? TEXTE.completed
+  // Wer in **dieses** Fenster sieht, sieht es ohnehin. Wer im Chat steht,
+  // sieht eine laufende Reparatur dagegen nicht — und soll sie gemeldet
+  // bekommen.
+  if (!meldung || meldung.kind === offenesFenster || !darfChatten || !meldungenAn) return null
+  const tabelle = meldung.kind === 'guardian' ? GUARDIAN_TEXTE : TEXTE
+  const text = tabelle[meldung.status] ?? tabelle.completed
 
   return (
     <div
@@ -124,7 +185,7 @@ export function AiRunNotice() {
         <button
           type="button"
           className="mt-1 text-xs font-medium text-primary hover:underline"
-          onClick={() => { setMeldung(null); navigate('/ai') }}
+          onClick={() => { setMeldung(null); navigate(ZIEL[meldung.kind]) }}
         >
           {t('ai.notice.open', 'Zum Assistenten')}
         </button>

@@ -683,8 +683,14 @@ Server ausschließen will, legt dort eine Freigabe mit `enabled: false` an.
 ### Guardian weckt die KI
 
 Mit erteilter Freigabe hat der autonome Modus eine zweite Wirkung: ein
-Guardian-Vorfall startet einen Heilungslauf, **ohne dass jemand am Panel sitzt**.
-Ein Scheduler-Job sieht alle sechzig Sekunden nach offenen Vorfällen.
+Guardian-Vorfall startet eine **Reparatur**, ohne dass jemand am Panel sitzt.
+Ein Scheduler-Job sieht alle sechzig Sekunden nach offenen Vorfällen und nach
+fälligen Reparaturaufträgen.
+
+Eine Reparatur ist kein einzelner Lauf, sondern ein Auftrag über Stunden. Der
+Grund ist Betriebserfahrung: ein Lauf las ein paar Werkzeuge, schrieb „ohne
+Freigabe kann ich da nichts machen", und derselbe Vorfall wurde **nie wieder**
+angefasst — auch dann nicht, wenn der Lauf nur an seinem Rundenbudget endete.
 
 - **Der Akteur ist der Freigeber**, nicht ein Dienstbenutzer und nicht der
   Serverbesitzer: derjenige Benutzer, der für diesen Server die Autonomie
@@ -695,18 +701,47 @@ Ein Scheduler-Job sieht alle sechzig Sekunden nach offenen Vorfällen.
 - **Ohne Freigabe passiert nichts** — kein Lauf, kein Anbieteraufruf, keine
   Tokens. Der Vorfall wird nur vorgemerkt und beim nächsten Chat des Benutzers
   als Meldung des Panels erwähnt.
-- **Der Lauf läuft im normalen Chat.** Er startet nur, wenn dort gerade nichts
-  läuft. Schreibt der Mensch dazwischen, gewinnt er; der Verlauf der Heilung
-  bleibt stehen, und ein „mach weiter" genügt.
+- **Die Reparatur läuft in einem eigenen Fenster**, nicht im Dauerchat. Jeder
+  Benutzer hat zwei Unterhaltungen: den Chat und das Guardian-Fenster
+  (`/ai?ansicht=guardian`). Damit würgen sich beide nicht mehr gegenseitig ab —
+  vorher verhinderte ein laufender Chat jede Heilung, und eine getippte
+  Nachricht beendete eine laufende. Im Guardian-Fenster kann man zusehen; ein
+  Knopf „Übernehmen" bricht den Auftrag ausdrücklich ab und öffnet den Chat.
+  Ein Eingabefeld gibt es dort nicht, damit ein versehentlicher Tastendruck
+  keine laufende Reparatur abwürgt.
+- **Drei Phasen, mit Frist und Versuchsdeckel.** `diagnose` → `eingriff` →
+  `beobachtung`, und von dort zurück in den Eingriff, bis die Anlage den Server
+  als gesund meldet. Vorgabe sind sechs Stunden und acht Anläufe; danach endet
+  der Auftrag als `aufgegeben`. Zwischen zwei Beobachtungen wartet der Auftrag
+  zehn Minuten, statt in einer Schleife zu pollen — ein beendeter Lauf ist
+  billiger als ein wartender.
+- **„Erledigt" entscheidet die Anlage, nicht das Modell.** Der Vorfall steht auf
+  `resolved`, der Server ist nicht in Quarantäne, und der vom Agenten
+  beobachtete Zustand passt zum gewünschten. Ein durchgelaufener `docker start`
+  reicht nicht.
 - **Die Werkzeugmenge ist enger** als im Chat (`GUARDIAN_HEILUNG_TOOLS`):
   Lesewerkzeuge, Backup, Lifecycle, Konfiguration, Dateilöschung, Reparatur,
-  Doku. Nicht dabei sind Gedächtnis, Skills, Hoster, alle drei
-  Blueprint-Werkzeuge (Ableiten, Löschen, Wechsel — das erste und das zweite
-  gälten für jeden Server auf der Vorlage, nicht nur für den mit dem Vorfall),
-  die Backup-Wiederherstellung, stehende Aufträge, Servererstellung und
-  -löschung sowie die Websuche. Die `server_id` steht fest
-  im Lauf; ein Werkzeugaufruf auf einen anderen Server wird abgewiesen, bevor er
-  aufgelöst wird.
+  Guardian-Einstellungen, Blueprints lesen und ableiten, Doku. Nicht dabei sind
+  Gedächtnis, Skills, Hoster, das Löschen eines Blueprints, die
+  Backup-Wiederherstellung, stehende Aufträge, Servererstellung und -löschung
+  sowie die Websuche. Die `server_id` steht fest im Lauf; ein Werkzeugaufruf auf
+  einen anderen Server wird abgewiesen, bevor er aufgelöst wird.
+- **Guardian lässt sich je Server anders einstellen** (`propose_guardian_tuning`).
+  Der Blueprint gilt für jeden Server seines Spiels und kann nicht wissen, dass
+  auf dieser Node zwölf Instanzen um acht Gigabyte streiten; genau diese Lücke
+  füllt die Übersteuerung. Erlaubt ist eine geschlossene Menge von zwölf Zahlen
+  mit Ober- und Untergrenze — Startfenster, Probenabstand und -geduld,
+  Schwellen, Wiederherstellungsversuche, Verifikationsfenster. Keine Listen,
+  keine Regexe, keine Probentypen. Was gilt, steht sichtbar im Autopilot-Reiter
+  samt Herkunft, und ein Knopf setzt es auf den Blueprint zurück
+  (`server.config.write`). Nimmt der Agent die Konfiguration nicht an, wird die
+  Übersteuerung zurückgerollt — sonst hinge die Synchronisation dieses Servers
+  dauerhaft in einem gespeicherten Fehler.
+- **Blueprints ableiten ja, wechseln nur mit Zustimmung.** Eine Ableitung legt
+  eine neue Datei an und rührt keinen Server an. Der *Wechsel* eines Servers auf
+  einen anderen Blueprint löscht dagegen das gesamte Serververzeichnis — Welt,
+  Konfigurationen, Mods — und installiert frisch; er verlangt deshalb immer eine
+  menschliche Bestätigung.
 - **Vor jedem schreibenden Eingriff muss ein Backup nachgewiesen sein.** Nicht
   „angestoßen", sondern nachgewiesen: `backups.verified_at` ist gesetzt, das
   Archiv ist nicht leer, seine sha256 wurde gerechnet, und es ist jünger als der
@@ -719,10 +754,21 @@ Ein Scheduler-Job sieht alle sechzig Sekunden nach offenen Vorfällen.
   die gehört dem Agenten.
 - **Im Audit steht `origin=system`** statt `origin=ai`. Damit ist unterscheidbar,
   ob ein Mensch die KI gebeten hat oder ein Vorfall sie geweckt.
-- **Danach eine E-Mail an den Freigeber**, bei jedem Ausgang — auch bei
-  „nicht behoben". Der Text stammt vom Modell und ist HTML-escaped; „behoben"
-  steht nur dort, wenn der Lauf sauber endete **und** Guardian den Vorfall als
-  gelöst sieht.
+- **Eine E-Mail je Auftrag**, am Ende — nicht je Anlauf. Bei jedem Ausgang, auch
+  bei „nicht behoben". Der Text stammt vom Modell und ist HTML-escaped;
+  „behoben" steht nur dort, wenn die Anlage es zeigt.
+- **Bestätigungspflichtige Schritte fragen per E-Mail**, statt den Lauf zu
+  beenden. Trifft eine Reparatur auf etwas, das der autonome Modus nie ohne
+  Klick tut — Serverlöschung, Wipe, Neuinstallation, Blueprint-Wechsel,
+  Backup-Wiederherstellung —, geht ein Freigabelink an den Freigeber; der Lauf
+  parkt und wird geweckt, sobald entschieden wurde. Der Link zeigt eine Seite
+  (`GET`), entschieden wird per `POST` von dort: Mailscanner klicken Links. Er
+  gilt 24 Stunden, lässt sich genau einmal verwenden, und **umgeht keine
+  Prüfung** — Rechte, Backup-Schranke und Server-Mutex laufen unverändert. Im
+  Audit steht `confirmed_via='email'`. Ist keine Adresse hinterlegt oder kein
+  Versandweg eingerichtet, bleibt es beim alten Verhalten: zurücknehmen und
+  ehrlich melden. Endet der Auftrag, bevor jemand geantwortet hat, wird der Link
+  entwertet und der Auftrag als `eskaliert` abgeschlossen.
 
 Der Schalter erklärt beides in einem Dialog, in beide Richtungen: Ausschalten
 heißt, dass Vorfälle danach nur noch gemeldet und nicht mehr behoben werden.

@@ -613,7 +613,18 @@ def _bind_ip_payload(db: Session, server: Server, arguments: dict) -> tuple[dict
     }
 
 
-def _blueprint_change_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
+#: Die fuenf Abschnitte, an denen `is_guardian_enabled` haengt.
+#:
+#: Sie stehen hier ein zweites Mal, weil `is_guardian_enabled` ein
+#: `Blueprint`-Objekt liest und die Ableitung ein Dict baut. Wer einen sechsten
+#: Abschnitt einfuehrt, muss beide Stellen anfassen — deshalb nennt der Test
+#: `test_guardian_overrides` die Mengen ausdruecklich gegeneinander.
+_GUARDIAN_ABSCHNITTE = ("health", "logs", "diagnostics", "recovery", "backups")
+
+
+def _blueprint_change_payload(
+    db: Session, arguments: dict, *, reparatur: bool = False
+) -> tuple[dict, dict]:
     """Baut den abgeleiteten Blueprint **schon beim Vorschlagen**.
 
     Nicht erst beim Ausfuehren, und das ist der Punkt: der Mensch soll sehen,
@@ -628,6 +639,20 @@ def _blueprint_change_payload(db: Session, arguments: dict) -> tuple[dict, dict]
     auf dem Server liegen, ist das keine Ableitung mehr, sondern eine Aenderung
     an diesen Servern. Wer das zaehlt, muss denselben Bestand sehen wie dieser
     Request.
+
+    ``reparatur`` heisst: der Vorschlag entsteht in einem Reparaturlauf. Dann
+    muss das Ergebnis Guardian mitbringen — sonst ist die Ableitung ein Ziel,
+    auf dem der Wachmann blind waere.
+
+    Das kann die Ableitung nicht selbst verschulden: `AENDERBARE_PFADE` kennt
+    fuenf Pfade, alle unter `meta` und `runtime`, und alles uebrige wird aus der
+    Vorlage tief kopiert — ein abgeleiteter Blueprint traegt die Guardian-Bloecke
+    seiner Vorlage immer. Was diese Zeilen abfangen, ist deshalb die
+    **guardianlose Vorlage**: leitet ein Reparaturlauf von ihr ab und stellt den
+    Server anschliessend darauf um, meldet der Agent nie wieder etwas ueber
+    diesen Server — und die Kampagne wartet auf einen Nachweis
+    (`wirkung_belegt`), den es dann nicht mehr geben kann. Der Vorfall waere
+    nicht behoben, sondern unbeobachtbar geworden.
     """
     from services import blueprint_service
 
@@ -646,12 +671,24 @@ def _blueprint_change_payload(db: Session, arguments: dict) -> tuple[dict, dict]
     except HTTPException as exc:
         raise AiActionValidationError(str(exc.detail)) from exc
 
+    mit_guardian = any(nutzlast.get(name) is not None for name in _GUARDIAN_ABSCHNITTE)
+    if reparatur and not mit_guardian:
+        raise AiActionValidationError(
+            f"'{arguments['source_id']}' bringt keine Guardian-Ueberwachung mit. "
+            "Eine Ableitung davon koennte diesen Server nicht mehr beobachten — "
+            "waehle eine Vorlage mit Guardian."
+        )
+
     quelle = blueprint_service.blueprint_view(str(arguments["source_id"]))["blueprint"]
     payload = {"blueprint": nutzlast}
     preview = {
         "operation": "blueprint_change",
         "source_id": arguments["source_id"],
         "new_id": arguments["new_id"],
+        # Ob der abgeleitete Blueprint ueberwacht wird, steht auf der Karte.
+        # Ein Mensch, der einer Ableitung zustimmt, soll nicht nachrechnen
+        # muessen, ob er dabei den Wachmann verliert.
+        "guardian_enabled": mit_guardian,
         # Was sich wirklich unterscheidet — die Zeile, die der Bestaetigende
         # liest. `changes` allein waere die Absicht, nicht das Ergebnis.
         "env_before": (quelle.get("runtime") or {}).get("env") or {},
@@ -1212,6 +1249,86 @@ def _server_repair_payload(server: Server, arguments: dict) -> tuple[dict, dict]
     return payload, preview
 
 
+def _guardian_tuning_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
+    """Nutzlast fuer `propose_guardian_tuning` — Zahlen aus einer festen Menge.
+
+    Der Fall dahinter: die Blueprint gilt fuer **jeden** Server ihres Spiels und
+    kann nicht wissen, dass ausgerechnet auf dieser Node zwoelf Instanzen um
+    acht Gigabyte streiten. Guardian sieht dort einen Server, der nicht in
+    dreissig Sekunden hochkommt, startet ihn neu, sieht es wieder — und nach
+    drei Anlaeufen steht er in Quarantaene, obwohl nichts kaputt ist ausser der
+    Erwartung.
+
+    Die Enge ist wieder der Zweck. Erlaubt sind ausschliesslich die Schluessel
+    aus `GUARDIAN_STELLSCHRAUBEN`, alle Werte sind ganze Zahlen mit Ober- und
+    Untergrenze, und ausserhalb des Bereichs wird **abgewiesen** statt geklemmt:
+    das Modell soll erfahren, dass es danebenlag, statt stillschweigend etwas
+    anderes zu bekommen, als es vorgeschlagen hat. Geklemmt wird trotzdem noch
+    einmal im Compiler — dort gegen alles, was nicht durch dieses Werkzeug kam.
+
+    `reset` ist der Rueckweg und schliesst alles andere aus. Eine Nutzlast, die
+    zugleich zuruecksetzt und setzt, haette zwei Bedeutungen und keine davon
+    ganz.
+    """
+    from services.guardian_runtime_compiler import (
+        GUARDIAN_STELLSCHRAUBEN,
+        gelesene_uebersteuerung,
+    )
+
+    # `reason` und `expected_effect` sind hier schon abgetrennt (`rest`), wie
+    # bei jedem Payload-Bauer.
+    unbekannt = set(arguments) - (set(GUARDIAN_STELLSCHRAUBEN) | {"reset"})
+    if unbekannt:
+        raise AiActionValidationError(
+            "Unbekannte Guardian-Stellschraube: " + ", ".join(sorted(unbekannt))
+        )
+
+    zuruecksetzen = bool(arguments.get("reset"))
+    werte: dict[str, int] = {}
+    for name, (unten, oben) in GUARDIAN_STELLSCHRAUBEN.items():
+        if name not in arguments:
+            continue
+        roh = arguments[name]
+        if isinstance(roh, bool) or not isinstance(roh, (int, float)):
+            raise AiActionValidationError(f"{name} muss eine Zahl sein")
+        wert = int(roh)
+        if wert < unten or wert > oben:
+            raise AiActionValidationError(
+                f"{name} liegt ausserhalb von {unten}..{oben}"
+            )
+        werte[name] = wert
+
+    if zuruecksetzen and werte:
+        raise AiActionValidationError(
+            "Zuruecksetzen und Setzen schliessen sich aus"
+        )
+    if not zuruecksetzen and not werte:
+        raise AiActionValidationError("Keine Guardian-Stellschraube angegeben")
+
+    vorher = gelesene_uebersteuerung(server)
+    # Der Nachtrag ist ein Nachtrag: was das Modell nicht nennt, bleibt stehen.
+    # Sonst hiesse jede Anpassung einer einzelnen Zahl, alle anderen zu
+    # verlieren — und das Modell muesste sie in jedem Aufruf mitschreiben.
+    nachher: dict[str, int] = {} if zuruecksetzen else {**vorher, **werte}
+    payload = {"overrides": nachher, "reset": zuruecksetzen}
+    preview = {
+        "operation": "guardian_tuning",
+        "description": (
+            "Guardian-Einstellungen dieses Servers auf die Blueprint zuruecksetzen"
+            if zuruecksetzen
+            else "Guardian fuer diesen Server anders einstellen"
+        ),
+        # Beide Staende in der Karte: wer bestaetigt, soll sehen, was sich
+        # aendert, und nicht nur, was danach gilt.
+        "before": vorher,
+        "after": nachher,
+        "changed": sorted(werte) if not zuruecksetzen else sorted(vorher),
+        "current_status": server.status,
+        "restart_required": False,
+    }
+    return payload, preview
+
+
 def _file_delete_payload(db: Session, server: Server, arguments: dict) -> tuple[dict, dict, str]:
     """Nutzlast fuer `propose_file_delete` — genau eine vorhandene Datei.
 
@@ -1537,7 +1654,9 @@ def create_proposal(
         # ein Benutzer ohne `blueprints.manage` vorhandene von erfundenen
         # Blueprint-Kennungen an der Fehlermeldung.
         _require_tool_permission(db, user, None, tool_name, rest)
-        payload, preview = _blueprint_change_payload(db, rest)
+        payload, preview = _blueprint_change_payload(
+            db, rest, reparatur=guardian is not None
+        )
         expected_revision = None
     elif tool_name == "propose_blueprint_delete":
         _require_tool_permission(db, user, None, tool_name, rest)
@@ -1688,6 +1807,9 @@ def create_proposal(
             payload, preview, expected_revision = _config_payload(db, server.id, rest)
         elif tool_name == "propose_server_repair":
             payload, preview = _server_repair_payload(server, rest)
+            expected_revision = None
+        elif tool_name == "propose_guardian_tuning":
+            payload, preview = _guardian_tuning_payload(server, rest)
             expected_revision = None
         elif tool_name == "propose_file_delete":
             payload, preview, expected_revision = _file_delete_payload(db, server, rest)
@@ -2287,6 +2409,101 @@ def _execute_server_repair(
         return {"action": aktion, "changed": bool(gewechselt), "ports": gewechselt}
 
 
+def _execute_guardian_tuning(
+    db: Session,
+    *,
+    server_id: int,
+    payload: dict,
+    user: User,
+    correlation_id: str,
+    incident_id: int | None = None,
+) -> dict:
+    """Schreibt die Uebersteuerung — und nimmt sie zurueck, wenn sie nicht ankommt.
+
+    Der Rueckweg ist der eigentliche Inhalt dieser Funktion. Ohne ihn haengt die
+    Guardian-Synchronisation dieses Servers dauerhaft in einem gespeicherten
+    Fehler: `compile_and_sync_desired_state` erhoeht die Generation, der Agent
+    lehnt die Nutzlast ab oder kann sie nicht, und jeder folgende
+    Reconcile-Takt versucht dieselbe abgelehnte Konfiguration erneut. Der Server
+    bekaeme von da an gar keine Guardian-Aktualisierung mehr — auch keine
+    richtige.
+
+    Deshalb: Stand merken, schreiben, synchronisieren, und bei einem Fehlschlag
+    den gemerkten Stand wiederherstellen. Danach steht wieder, was vorher stand,
+    und die naechste Synchronisation traegt das hinaus.
+
+    `mark_guardian_configuration_changed` und nicht bloss ein erhoehtes
+    `desired_state_generation`: die Funktion setzt zusaetzlich
+    `guardian_config_hash` auf NULL, und ohne das haelt der Compiler die
+    Konfiguration fuer unveraendert und schickt gar nichts.
+    """
+    import json as _json
+
+    from models import ChangeEvent
+    from services import audit_service, guardian_state_service
+    from services.server_lifecycle_service import sync_desired_state_to_agent
+
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if server is None:
+        raise AiActionStateError("AI_ACTION_TARGET_MISSING")
+
+    neu = payload.get("overrides") or {}
+    if not isinstance(neu, dict):
+        raise AiActionStateError("AI_ACTION_TOOL_NOT_ALLOWED")
+    vorher = server.guardian_overrides_json
+
+    server.guardian_overrides_json = (
+        _json.dumps(neu, sort_keys=True, separators=(",", ":")) if neu else None
+    )
+    guardian_state_service.mark_guardian_configuration_changed(server)
+    db.commit()
+    db.refresh(server)
+
+    # Ein Server ohne Node hat keinen Agenten, der etwas quittieren koennte —
+    # das ist kein Fehlschlag, sondern ein Server, der noch nirgends laeuft.
+    if server.node_id is not None and not sync_desired_state_to_agent(db, server):
+        server.guardian_overrides_json = vorher
+        guardian_state_service.mark_guardian_configuration_changed(server)
+        db.commit()
+        logger.info(
+            "Guardian-Uebersteuerung zurueckgerollt server_id=%s", server_id
+        )
+        raise AiActionStateError("AI_ACTION_GUARDIAN_SYNC_FAILED")
+
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="guardian.overrides.set",
+        target_type="server",
+        target_id=server.id,
+        # Nur die Zahlen, keine Begruendung des Modells: der Audit-Eintrag soll
+        # sagen, was gilt, und nicht, was jemand dazu gedacht hat.
+        details={"overrides": neu, "generation": server.desired_state_generation},
+        correlation_id=correlation_id,
+    )
+    db.add(ChangeEvent(
+        server_id=server.id,
+        event_type="guardian_overrides",
+        description=(
+            "Guardian-Einstellungen dieses Servers auf die Blueprint zurueckgesetzt"
+            if not neu
+            else "Guardian fuer diesen Server anders eingestellt"
+        ),
+        # Die Chronikzeile ist zugleich die Herkunftsangabe im Guardian-Reiter
+        # (`routers/guardian._herkunft`). Deshalb steht der Vorfall hier: ohne
+        # ihn koennte der Reiter zwar sagen "von der KI gesetzt", aber nicht,
+        # woraufhin — und genau das ist die Frage, die jemand stellt, der eine
+        # unerwartete Zahl sieht.
+        details=_json.dumps(
+            {"overrides": neu, "source": "ai", "incident_id": incident_id},
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    ))
+    db.commit()
+    return {"overrides": neu, "generation": server.desired_state_generation}
+
+
 def execute_proposal(
     db: Session,
     *,
@@ -2553,6 +2770,14 @@ def execute_proposal(
                 result = _execute_server_repair(
                     db, server_id=server_id, payload=payload,
                     user=active_user, correlation_id=correlation_id,
+                )
+                task_id = None
+                queued = False
+            elif tool_name == "propose_guardian_tuning":
+                result = _execute_guardian_tuning(
+                    db, server_id=server_id, payload=payload,
+                    user=active_user, correlation_id=correlation_id,
+                    incident_id=guardian.incident_id if guardian else None,
                 )
                 task_id = None
                 queued = False

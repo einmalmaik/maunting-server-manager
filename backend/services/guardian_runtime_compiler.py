@@ -42,6 +42,48 @@ SUPPORTED_ACTIONS = frozenset(
 _TOKEN_RE = re.compile(r"{{(SERVER_PORT|PORT:([a-zA-Z0-9_.-]{1,64}))}}")
 _ANY_TOKEN_RE = re.compile(r"{{[^{}]+}}")
 
+#: Was sich je Server anders einstellen laesst — und in welchen Grenzen.
+#:
+#: Die Blueprint gilt fuer jeden Server ihres Spiels und kann nicht wissen, dass
+#: ausgerechnet auf dieser Node zwoelf Instanzen um acht Gigabyte streiten.
+#: Genau diese Luecke fuellt die Uebersteuerung.
+#:
+#: **Ausschliesslich Skalare, und ausschliesslich diese.** Keine Listen, keine
+#: Regexe, keine Probentypen — dieselbe Begruendung, aus der `AENDERBARE_PFADE`
+#: in `blueprint_service` listenwertige Pfade ausschliesst: was sich in einer
+#: Zahl mit Ober- und Untergrenze ausdruecken laesst, kann keine Struktur
+#: zerstoeren. Eine uebersteuerte Probenliste dagegen koennte Guardian fuer
+#: diesen Server blind machen, ohne dass es irgendwo als "abgeschaltet" stuende.
+#:
+#: Die Grenzen sind Deckel, nicht Vorschlaege. Geklemmt wird **hier**, obwohl
+#: das Werkzeug dieselben Grenzen schon prueft und einen Verstoss abweist: die
+#: Pruefung dort ist eine Rueckmeldung an das Modell, das Klemmen hier ist die
+#: Schranke gegen alles, was nicht durch das Werkzeug kam — eine von Hand
+#: bearbeitete Zeile etwa. Ein Startfenster von zehn Tagen waere ein Guardian,
+#: der nie wieder etwas meldet.
+GUARDIAN_STELLSCHRAUBEN: dict[str, tuple[int, int]] = {
+    # Wie lange ein Server nach dem Start Ruhe hat, bevor Proben zaehlen.
+    "startup_grace_period_seconds": (1, 3_600),
+    # Und wann ein Start endgueltig als gescheitert gilt.
+    "startup_timeout_seconds": (10, 7_200),
+    # Der Abstand zwischen zwei Proben und ihre Geduld.
+    "probe_interval_seconds": (1, 600),
+    "probe_timeout_seconds": (1, 120),
+    # Wieviele Fehlschlaege beziehungsweise Erfolge zaehlen.
+    "probe_failure_threshold": (1, 20),
+    "probe_success_threshold": (1, 20),
+    # Guardians eigene Leiter. ``0`` ist erlaubt und heisst: gar kein
+    # Selbstheilungsversuch mehr — der Fall "haende weg, ich habe es von Hand
+    # gerichtet, melde nur noch".
+    "recovery_max_attempts": (0, 20),
+    "recovery_attempt_window_seconds": (60, 86_400),
+    "recovery_cooldown_seconds": (0, 86_400),
+    # Wie lange ein Server gesund sein muss, damit er als geheilt gilt.
+    "verification_min_healthy_seconds": (0, 3_600),
+    "verification_required_successes": (1, 20),
+    "verification_timeout_seconds": (10, 7_200),
+}
+
 
 class GuardianCompileError(ValueError):
     def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None) -> None:
@@ -245,6 +287,92 @@ def _application_port(application: Any, ports: dict[str, int]) -> int:
         return port
 
 
+def gelesene_uebersteuerung(server: Server) -> dict[str, int]:
+    """Die Uebersteuerung dieses Servers — gesaeubert und geklemmt.
+
+    Alles, was nicht in `GUARDIAN_STELLSCHRAUBEN` steht, faellt weg; alles, was
+    darin steht, wird auf seinen Bereich geklemmt. Unlesbares JSON gilt als
+    "keine Uebersteuerung" und wirft **nicht**: diese Funktion laeuft in jedem
+    Reconciliation-Takt ueber jeden Server, und eine kaputte Zeile darf nicht
+    die Guardian-Synchronisation der ganzen Node anhalten.
+    """
+    roh = server.guardian_overrides_json
+    if not roh:
+        return {}
+    try:
+        geladen = json.loads(roh)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(geladen, dict):
+        return {}
+    sauber: dict[str, int] = {}
+    for name, (unten, oben) in GUARDIAN_STELLSCHRAUBEN.items():
+        wert = geladen.get(name)
+        if isinstance(wert, bool) or not isinstance(wert, (int, float)):
+            # `bool` ist in Python ein `int`, und `True` als Startfenster waere
+            # eine Sekunde — ein Wert, den niemand gemeint hat.
+            continue
+        sauber[name] = max(unten, min(oben, int(wert)))
+    return sauber
+
+
+def _uebersteuern(config: dict[str, Any], werte: dict[str, int]) -> dict[str, Any]:
+    """Legt die Uebersteuerung ueber die aus der Blueprint abgeleitete Konfiguration.
+
+    **Nach** der Ableitung und nicht statt ihrer: was hier nicht genannt ist,
+    bleibt genau so, wie die Blueprint es sagt. Eine Uebersteuerung ist ein
+    Nachtrag, keine zweite Konfiguration — sonst muesste sie vollstaendig sein,
+    und dann waere sie eine Blueprint.
+
+    Die Probenwerte gelten fuer **alle** Proben dieses Servers. Einzelne Proben
+    anzusprechen hiesse, ihre Kennungen zu kennen, und die stehen in einer Liste
+    in der Blueprint; eine Uebersteuerung, die sich auf Listeneintraege bezieht,
+    zeigt nach der naechsten Blueprint-Aenderung ins Leere.
+    """
+    if not werte:
+        return config
+
+    startup = config["startup"]
+    if "startup_grace_period_seconds" in werte:
+        startup["grace_period_seconds"] = werte["startup_grace_period_seconds"]
+    if "startup_timeout_seconds" in werte:
+        startup["timeout_seconds"] = werte["startup_timeout_seconds"]
+
+    for probe in config["health_checks"]:
+        if "probe_interval_seconds" in werte:
+            probe["interval_seconds"] = werte["probe_interval_seconds"]
+        if "probe_failure_threshold" in werte:
+            probe["failure_threshold"] = werte["probe_failure_threshold"]
+        if "probe_success_threshold" in werte:
+            probe["success_threshold"] = werte["probe_success_threshold"]
+        # Die Prozessprobe hat keine Gegenstelle, auf die man warten koennte —
+        # sie sieht nach, ob ein Prozess laeuft. Ihr eine Netzgeduld zu geben
+        # waere eine Zahl ohne Bedeutung, und der Agent prueft seine Felder.
+        if "probe_timeout_seconds" in werte and probe.get("type") != "process":
+            probe["timeout_seconds"] = werte["probe_timeout_seconds"]
+
+    verification = config["verification"]
+    if "verification_min_healthy_seconds" in werte:
+        verification["minimum_healthy_duration_seconds"] = werte[
+            "verification_min_healthy_seconds"
+        ]
+    if "verification_required_successes" in werte:
+        verification["required_consecutive_successes"] = werte[
+            "verification_required_successes"
+        ]
+    if "verification_timeout_seconds" in werte:
+        verification["verification_timeout_seconds"] = werte["verification_timeout_seconds"]
+
+    recovery = config["recovery"]
+    if "recovery_max_attempts" in werte:
+        recovery["max_attempts"] = werte["recovery_max_attempts"]
+    if "recovery_attempt_window_seconds" in werte:
+        recovery["attempt_window_seconds"] = werte["recovery_attempt_window_seconds"]
+    if "recovery_cooldown_seconds" in werte:
+        recovery["cooldown_seconds"] = werte["recovery_cooldown_seconds"]
+    return config
+
+
 def compile_guardian_config(server: Server, blueprint: Blueprint) -> dict[str, Any]:
     ports = _port_map(server)
     health = blueprint.health
@@ -328,6 +456,20 @@ def compile_guardian_config(server: Server, blueprint: Blueprint) -> dict[str, A
     diagnostics = blueprint.diagnostics
     backups = blueprint.backups
     verification = recovery.verification if recovery else None
+    return _uebersteuern(_aus_blueprint(
+        checks, startup, verification, logs, diagnostics, recovery, backups
+    ), gelesene_uebersteuerung(server))
+
+
+def _aus_blueprint(
+    checks, startup, verification, logs, diagnostics, recovery, backups
+) -> dict[str, Any]:
+    """Die Konfiguration, wie die Blueprint sie meint — ohne Uebersteuerung.
+
+    Eigene Funktion, damit die Uebersteuerung eine Zeile weiter oben als
+    **Nachtrag** sichtbar ist und nicht als Sonderfall irgendwo mitten in einem
+    hundert Zeilen langen Woerterbuchliteral.
+    """
     return {
         "health_checks": checks,
         "startup": {

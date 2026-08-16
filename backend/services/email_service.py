@@ -370,6 +370,7 @@ Maunting Service Manager
         punkte: list[str] | None = None,
         schluss: str | None = None,
         fusszeile: str | None = None,
+        cta: tuple[str, str] | None = None,
     ) -> str:
         """Die Vorlage fuer Berichte der KI. Neben `_notification_email_html`, nicht darin.
 
@@ -398,6 +399,12 @@ Maunting Service Manager
 
         `titel` und `fusszeile` stammen ausdruecklich **nicht** vom Modell,
         sondern vom Panel — siehe `send_ai_task_report`.
+
+        `cta` ist der einzige Weg, auf dem in eine KI-Mail ein Link kommt, und
+        er geht durch `_pruefe_cta`: alles, was nicht mit der Paneladresse aus
+        den Einstellungen beginnt, faellt weg. Ohne diese Pruefung waere die
+        eine maskierungsfreie Stelle dieser Vorlage der Traeger, nach dem eine
+        Prompt-Injection sucht.
         """
         username = cls.html_text(username)
         titel_sicher = cls.html_text(titel)
@@ -431,6 +438,10 @@ Maunting Service Manager
                 f'<p style="margin:0 0 8px 0;font-size:15px;color:{cls.SECONDARY_TEXT};'
                 f'line-height:1.6;">{cls.html_text(schluss)}</p>'
             )
+        geprueft = cls._pruefe_cta(cta)
+        if geprueft is not None:
+            url, label = geprueft
+            teile.append(cls._cta_button(url, cls.html_text(label)))
         if fusszeile and str(fusszeile).strip():
             teile.append(
                 f'<p style="margin:20px 0 0 0;font-size:13px;color:{cls.MUTED_COLOR};'
@@ -443,6 +454,33 @@ Maunting Service Manager
         # Kopf des Dokuments statt im Text — dieselbe Luecke, nur woanders.
         return cls._base_template(titel_sicher, "\n".join(teile))
 
+    @classmethod
+    def _pruefe_cta(cls, cta: tuple[str, str] | None) -> tuple[str, str] | None:
+        """Laesst genau die Links durch, die auf das eigene Panel zeigen.
+
+        Der Rahmen einer KI-Mail geht als JSON durch die Datenbank und wird vom
+        Postausgang wieder eingelesen — moeglicherweise Tage spaeter, aus einer
+        Zeile, die inzwischen jemand angefasst hat. Der Knopf ist die einzige
+        Stelle dieser Vorlage, die nicht maskiert wird; ohne Pruefung waere er
+        der Traeger, auf den es jede Prompt-Injection abgesehen hat.
+
+        Geprueft wird gegen `settings.panel_url` und nicht gegen ein Muster wie
+        "beginnt mit https": ein fremdes HTTPS-Ziel ist genau der Fall, den
+        diese Zeile verhindern soll.
+        """
+        if not cta:
+            return None
+        url, label = cta
+        url = str(url or "").strip()
+        label = str(label or "").strip()
+        if not url or not label:
+            return None
+        basis = str(settings.panel_url or "").rstrip("/")
+        if not basis or not url.startswith(basis + "/"):
+            _log.warning("CTA-Link verworfen: zeigt nicht auf das Panel")
+            return None
+        return url, label
+
     @staticmethod
     def _ai_report_email_text(
         username: str,
@@ -450,6 +488,7 @@ Maunting Service Manager
         punkte: list[str] | None = None,
         schluss: str | None = None,
         fusszeile: str | None = None,
+        cta: tuple[str, str] | None = None,
     ) -> str:
         """Dieselben Felder als reiner Text.
 
@@ -470,6 +509,14 @@ Maunting Service Manager
             zeilen.append("")
         if schluss and str(schluss).strip():
             zeilen.extend([str(schluss).strip(), ""])
+        # Der Link **auch** in der Textfassung, und als nackte Adresse. Ein
+        # Knopf, den es nur im HTML gibt, fehlt genau denen, die ihr Postfach
+        # auf Textdarstellung stehen haben — und die Mail waere dann eine Frage
+        # ohne Antwortmoeglichkeit.
+        geprueft = EmailService._pruefe_cta(cta)
+        if geprueft is not None:
+            url, label = geprueft
+            zeilen.extend([f"{label}: {url}", ""])
         if fusszeile and str(fusszeile).strip():
             zeilen.extend([str(fusszeile).strip(), ""])
         zeilen.append("Maunting Service Manager")
@@ -735,6 +782,65 @@ Maunting Service Manager — Guardian Engine
             ),
         }
 
+    @staticmethod
+    def ai_rahmen_freigabe(
+        username: str,
+        *,
+        tool_name: str,
+        server_name: str,
+        token: str,
+        stunden: int,
+    ) -> dict:
+        """Der Panelanteil der Freigabemail — samt Link.
+
+        **Der Link wird hier gebaut, nicht vom Modell geschrieben.** Der
+        Systemprompt verbietet dem Modell Links, und `_ai_report_email_html`
+        maskiert jedes Modellfeld; ein Modell, das ueber eine praeparierte
+        Logzeile dazu gebracht wurde, eine Adresse zu nennen, koennte sonst
+        einen Phishing-Traeger in eine Mail setzen, die aussieht, als kaeme sie
+        vom Panel. Deshalb steht die Adresse im Rahmen, wird ueber `_cta_button`
+        gerendert und stammt aus `settings.panel_url`.
+
+        **Und sie zeigt auf eine Seite, nicht auf eine Aktion.** ``GET`` zeigt,
+        was ansteht; erst ein ``POST`` von dieser Seite entscheidet. Mailscanner
+        und Vorschaudienste klicken Links — ein GET, das ausfuehrt, waere ein
+        Servereingriff durch einen Virenscanner.
+
+        Der Werkzeugname bleibt roh stehen (``propose_file_delete`` und nicht
+        "Datei loeschen"): der Rahmen kennt keine Uebersetzungen, und ein hier
+        erfundener deutscher Name koennte von dem abweichen, was auf der
+        Freigabeseite steht. Die Seite loest ihn auf.
+        """
+        titel = "KI wartet auf deine Freigabe"
+        ziel = f' auf "{server_name}"' if server_name else ""
+        url = f"{settings.panel_url.rstrip('/')}/ai/freigabe/{token}"
+        return {
+            "username": str(username or ""),
+            "titel": titel,
+            "betreff_praefix": EmailService._ai_betreff_praefix(titel),
+            "betreff_ersatz": str(server_name or ""),
+            "fakt": (
+                f"Der KI-Assistent bearbeitet gerade eine Störung{ziel} und "
+                f'braucht dafür deine Zustimmung zu "{tool_name}". Der autonome '
+                "Modus führt diesen Schritt nicht von selbst aus."
+            ),
+            # Der Rueckfalltext, der beim Einreihen gerendert wird. Ab dem
+            # zweiten Zustellversuch ruft der Postausgang das Modell nicht mehr,
+            # und eine Freigabemail ohne diesen Satz waere eine Frage ohne
+            # Antwortmoeglichkeit.
+            "rueckfall": (
+                "Öffne den Link unten, dort siehst du den Vorgang und "
+                "entscheidest. Tust du nichts, passiert nichts: der Vorschlag "
+                f"verfällt nach {stunden} Stunden."
+            ),
+            "cta_url": url,
+            "cta_label": "Vorgang ansehen",
+            "fusszeile": (
+                f"Dieser Link gilt {stunden} Stunden und lässt sich genau "
+                "einmal verwenden. Gib ihn nicht weiter."
+            ),
+        }
+
     #: Der feste Text der Testmail. Steht als Konstante da, seit ihn zwei
     #: Stellen brauchen: `send_ai_test_email` und der Werkzeughandler, der die
     #: Mail in den Ausgangskorb legt und dabei den Rueckfall gleich mitrendert.
@@ -791,11 +897,14 @@ Maunting Service Manager — Guardian Engine
         username = str(rahmen.get("username") or "")
         titel = str(rahmen.get("titel") or "")
         fusszeile = rahmen.get("fusszeile") or None
+        cta = None
+        if rahmen.get("cta_url"):
+            cta = (str(rahmen.get("cta_url")), str(rahmen.get("cta_label") or "Öffnen"))
         body = EmailService._ai_report_email_text(
-            username, absaetze, punkte, schluss, fusszeile
+            username, absaetze, punkte, schluss, fusszeile, cta
         )
         html_body = EmailService._ai_report_email_html(
-            username, titel, absaetze, punkte, schluss, fusszeile
+            username, titel, absaetze, punkte, schluss, fusszeile, cta
         )
         return subject, body, html_body
 

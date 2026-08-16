@@ -26,6 +26,9 @@ class AiQuestionPayload(BaseModel):
 
 class AiConversationResponse(BaseModel):
     id: str
+    #: Welches Fenster — ``primary`` (der Dauerchat) oder ``guardian`` (die
+    #: Reparaturen im Hintergrund). Siehe `models.ai_conversation.ARTEN`.
+    kind: str = "primary"
     title: str
     created_at: datetime
     updated_at: datetime
@@ -84,6 +87,14 @@ class AiMessageResponse(BaseModel):
 
 class AiConversationDetail(AiConversationResponse):
     messages: list[AiMessageResponse] = Field(default_factory=list)
+    #: Gibt es aeltere Nachrichten als die aelteste hier gelieferte? Dann kann
+    #: die Oberflaeche mit ``?before=<id der aeltesten>`` weiterblaettern.
+    #:
+    #: Der Dauerchat brauchte das nie: zweihundert Nachrichten sind mehr, als
+    #: ein Mensch zurueckliest. Eine Reparatur ueber Stunden schreibt sie in
+    #: einem Anlauf voll, und dann ist das Blaettern der einzige Weg an den
+    #: Anfang — die Zusammenfassung ist eine Verdichtung, kein Verlauf.
+    has_more: bool = False
 
 
 class AiChatRequest(BaseModel):
@@ -132,6 +143,20 @@ class AiRunResponse(BaseModel):
     message_id: str | None = None
     live: bool = False
     created_at: datetime
+    #: In welchem Fenster dieser Lauf arbeitet.
+    #:
+    #: Ohne diese Angabe kann die Oberflaeche einen Reparaturlauf nicht von
+    #: einem Chatlauf unterscheiden — und genau das war das Symptom: der Chat
+    #: haengte sich an den naechstbesten aktiven Lauf und zeichnete eine Heilung
+    #: in das Fenster des Menschen. Auch die Glocke braucht es, sonst meldet sie
+    #: "die KI ist mit deinem Auftrag fertig" fuer etwas, das niemand beauftragt
+    #: hat.
+    kind: str = "primary"
+    conversation_id: str | None = None
+    #: Um welchen Server es in diesem Lauf zuletzt ging — nur aus
+    #: nachgewiesenem Zugriff gefuellt (`ai_runs.last_server_id`). Die
+    #: Guardian-Ansicht nennt ihn in der Kopfzeile.
+    server_id: int | None = None
 
 
 class AiContextStatus(BaseModel):

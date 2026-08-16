@@ -1,10 +1,18 @@
-"""Ownership- und Recovery-Regeln fuer die eine persistente AI-Unterhaltung.
+"""Ownership- und Recovery-Regeln fuer die persistenten AI-Unterhaltungen.
 
-Jeder Benutzer hat genau einen Chat. Es gibt keinen Weg, einen zweiten
-anzulegen: der Assistent soll wie ein Gespraechspartner funktionieren, nicht wie
-eine Ablage, in der man erst den richtigen Ordner suchen muss. Der Serverbezug
-haengt am einzelnen Werkzeugaufruf (`ai_action_service._resolve_server`) und
-nicht mehr an der Unterhaltung.
+Jeder Benutzer hat genau einen Chat **je Anlass**, und es gibt genau zwei
+Anlaesse (`AiConversation.ARTEN`): der Mensch tippt (`primary`), oder eine
+Guardian-Stoerung weckt die KI (`guardian`). Es gibt weiterhin keinen Weg, sich
+einen dritten Chat anzulegen — der Assistent soll wie ein Gespraechspartner
+funktionieren, nicht wie eine Ablage, in der man erst den richtigen Ordner
+suchen muss.
+
+Warum die Trennung ueberhaupt sein muss, steht am Modell: solange beides in
+derselben Zeile stand, schlossen sich Reparatur und Gespraech gegenseitig aus.
+
+Der Serverbezug haengt am einzelnen Werkzeugaufruf
+(`ai_action_service._resolve_server`) und nicht an der Unterhaltung — auch nicht
+an der Guardian-Unterhaltung.
 """
 
 from __future__ import annotations
@@ -17,10 +25,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import AiConversation, AiMessage, AiUsageEvent, User
+from models.ai_conversation import ARTEN
 from services.ai_usage_service import complete_ai_usage
 
 
 DEFAULT_TITLE = "KI-Assistent"
+
+#: Der Titel je Art. Die Spalte gab es laengst und niemand las sie; jetzt traegt
+#: sie das, was die Oberflaeche ueber ein Fenster schreibt.
+TITEL = {
+    "primary": DEFAULT_TITLE,
+    "guardian": "Guardian-Reparaturen",
+}
 
 
 def canonical_uuid(value: str | UUID) -> str | None:
@@ -49,22 +65,45 @@ def get_owned_conversation(
     )
 
 
-def get_or_create_primary_conversation(db: Session, user: User) -> AiConversation:
-    """Liefert die eine Unterhaltung des Benutzers und legt sie beim ersten Mal an.
+def get_or_create_conversation(
+    db: Session, user: User, kind: str = "primary"
+) -> AiConversation:
+    """Liefert die Unterhaltung dieser Art und legt sie beim ersten Mal an.
 
-    Der eindeutige Index auf ``user_id`` ist die eigentliche Zusicherung. Zwei
-    gleichzeitige erste Aufrufe (zwei Browsertabs) rennen sonst in dieselbe
-    Luecke zwischen Pruefung und Insert; der Verlierer liest die Zeile des
-    Gewinners.
+    Der eindeutige Index auf ``(user_id, kind)`` ist die eigentliche
+    Zusicherung. Zwei gleichzeitige erste Aufrufe (zwei Browsertabs) rennen
+    sonst in dieselbe Luecke zwischen Pruefung und Insert; der Verlierer liest
+    die Zeile des Gewinners.
+
+    **Der Wiedereinstieg nach der `IntegrityError` filtert auf `kind` mit.** Ohne
+    das waere er falsch, seit es mehr als eine Zeile je Benutzer gibt: legt ein
+    Browsertab den Dauerchat an, waehrend der Takt die Guardian-Zeile anlegt,
+    schlaegt eine der beiden Einfuegungen fehl — und ein `.one()` ohne `kind`
+    faende danach zwei Zeilen und riefe `MultipleResultsFound`, oder schlimmer,
+    ein `.first()` lieferte die falsche. Ein Reparaturlauf, der in den Dauerchat
+    schreibt, ist genau der Zustand, den diese Aenderung beseitigt.
+
+    ``kind`` wird gegen `ARTEN` geprueft, obwohl die Datenbank denselben CHECK
+    traegt: ein Tippfehler soll hier auffallen und nicht als
+    Integritaetsverletzung mitten in einer fremden Transaktion.
     """
+    if kind not in ARTEN:
+        raise ValueError(f"Unbekannte Unterhaltungsart: {kind!r}")
+
     existing = (
-        db.query(AiConversation).filter(AiConversation.user_id == user.id).first()
+        db.query(AiConversation)
+        .filter(AiConversation.user_id == user.id, AiConversation.kind == kind)
+        .first()
     )
     if existing is not None:
         return existing
 
     conversation = AiConversation(
-        id=str(uuid4()), user_id=user.id, server_id=None, title=DEFAULT_TITLE
+        id=str(uuid4()),
+        user_id=user.id,
+        server_id=None,
+        kind=kind,
+        title=TITEL.get(kind, DEFAULT_TITLE),
     )
     try:
         with db.begin_nested():
@@ -72,9 +111,23 @@ def get_or_create_primary_conversation(db: Session, user: User) -> AiConversatio
             db.flush()
     except IntegrityError:
         conversation = (
-            db.query(AiConversation).filter(AiConversation.user_id == user.id).one()
+            db.query(AiConversation)
+            .filter(AiConversation.user_id == user.id, AiConversation.kind == kind)
+            .one()
         )
     return conversation
+
+
+def get_or_create_primary_conversation(db: Session, user: User) -> AiConversation:
+    """Der Dauerchat. Duenner Wrapper, damit die vorhandenen Aufrufer bleiben.
+
+    Ein Dutzend Stellen fragt nach "der" Unterhaltung und meint dabei immer den
+    Dauerchat. Sie alle in einem Zug umzuschreiben hiesse, an jeder einzelnen zu
+    entscheiden, ob sie es wirklich meint — und eine davon falsch zu
+    beantworten. Wer eine andere Art braucht, ruft `get_or_create_conversation`
+    und sagt welche.
+    """
+    return get_or_create_conversation(db, user, "primary")
 
 
 def clear_history(db: Session, conversation: AiConversation) -> int:

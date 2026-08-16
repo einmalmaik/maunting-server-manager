@@ -36,11 +36,19 @@ Bewusst **kein** Feld fuer den Ausgang des letzten Laufs. Der steht am Lauf
 (``ai_runs.status``, ``stop_reason``), und ihn hier zu spiegeln hiesse, zwei
 Wahrheiten zu pflegen — derselbe Verzicht wie in ``ai_guardian_notice``.
 
-Bewusst **keine** ``conversation_id``. Es gibt genau eine Unterhaltung je
-Benutzer (``uq_ai_conversations_user``); sie ist aus ``user_id`` ableitbar, und
-eine gespeicherte Kennung waere nur die Gelegenheit, irgendwann auf eine
-geloeschte zu zeigen. Der faellige Lauf holt sie ueber
-``get_or_create_primary_conversation``, genau wie eine Guardian-Heilung.
+Bewusst **keine** ``conversation_id``. Es gibt je Benutzer und Art genau eine
+Unterhaltung (``uq_ai_conversations_user_kind``), und ein faelliger Auftrag
+schreibt immer in dieselbe: den Dauerchat. Sie ist damit aus ``user_id``
+ableitbar, und eine gespeicherte Kennung waere nur die Gelegenheit, irgendwann
+auf eine geloeschte zu zeigen. Der faellige Lauf holt sie ueber
+``get_or_create_primary_conversation``.
+
+Das ist seit ``20260816_01`` der Unterschied zur Guardian-Heilung, die vorher
+denselben Weg ging: die laeuft jetzt im Fenster ``kind='guardian'``. Fuer einen
+stehenden Auftrag waere das falsch — er ist ein Satz, den ein Mensch im Chat
+diktiert hat, und sein Ergebnis gehoert dorthin zurueck, wo er ihn gegeben hat
+(die Doku sagt: "Der Verlauf steht **immer** im Chat"). Eine Guardian-Stoerung
+hat dagegen niemand bestellt.
 """
 
 from datetime import datetime, timezone

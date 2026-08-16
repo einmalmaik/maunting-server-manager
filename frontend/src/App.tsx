@@ -15,6 +15,7 @@ const Login = lazy(() => import('./pages/Login').then(module => ({ default: modu
 const Register = lazy(() => import('./pages/Register').then(module => ({ default: module.Register })))
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword').then(module => ({ default: module.ForgotPassword })))
 const ResetPassword = lazy(() => import('./pages/ResetPassword').then(module => ({ default: module.ResetPassword })))
+const AiFreigabe = lazy(() => import('./pages/AiFreigabe').then(module => ({ default: module.AiFreigabe })))
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })))
 const Servers = lazy(() => import('./pages/Servers').then(module => ({ default: module.Servers })))
 const Teams = lazy(() => import('./pages/Teams').then(module => ({ default: module.Teams })))
@@ -92,6 +93,11 @@ function App() {
         <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
         <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        {/* Ohne Anmeldung, und ohne `PublicOnlyRoute`: der Link kommt per
+            Mail und muss auch dann funktionieren, wenn im selben Browser
+            noch eine Sitzung offen ist. Das Token im Pfad ist die ganze
+            Berechtigung. */}
+        <Route path="/ai/freigabe/:token" element={<AiFreigabe />} />
         <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
         
         {/* Oeffentliche Datenschutz-Route, wenn nicht eingeloggt */}

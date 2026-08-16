@@ -171,6 +171,24 @@ def lageblock(db: Session, user: User) -> str:
         )
         return "\n".join(zeilen)
 
+    # **Was mit einem bestaetigungspflichtigen Schritt im Hintergrund passiert.**
+    #
+    # Die Zeile steht hier und nicht im Prompt, weil sie eine Tatsache des
+    # Panels ist und keine Anweisung — und weil sie sich mit dem Zustellweg
+    # aendert. Ohne sie zog das Modell aus "der autonome Modus deckt das nicht"
+    # den einzigen Schluss, den es ziehen konnte: aufhoeren. Genau das war das
+    # gemeldete Verhalten ("ohne Freigabe kann ich da nichts machen"), und es
+    # war aus Modellsicht richtig.
+    #
+    # Der Konjunktiv ist Absicht. Ob am Ende wirklich eine Mail hinausgeht,
+    # entscheidet `ai_mail.empfaenger` im Augenblick des Vorschlags — hier eine
+    # Zusage zu machen, die dann nicht traegt, waere schlimmer als keine.
+    freigabeweg = (
+        "Bestätigungspflichtige Schritte enden im Hintergrund nicht: der "
+        "Betreiber bekommt einen Freigabelink per E-Mail, und dein Lauf wird "
+        "geweckt, sobald er entschieden hat."
+    )
+
     verbraucht = ai_autonomy_service.hourly_usage(db, user_id=user.id)
     # Die panelweite Freigabe trägt das Budget, das für alles gilt. Fehlt sie,
     # ist `darf_handeln` trotzdem wahr, weil irgendein einzelner Server
@@ -186,4 +204,5 @@ def lageblock(db: Session, user: User) -> str:
             f"Autonomer Modus: aktiv für einzelne Server, {verbraucht} Aktionen "
             "in der letzten Stunde verbraucht."
         )
+    zeilen.append(freigabeweg)
     return "\n".join(zeilen)

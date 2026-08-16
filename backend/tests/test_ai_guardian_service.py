@@ -29,6 +29,7 @@ from models import (
     AiAutonomyGrant,
     AiConversation,
     AiGuardianNotice,
+    AiGuardianRepair,
     AiProvider,
     AiRun,
     Incident,
@@ -218,11 +219,12 @@ class TestFreigeberWahl:
 
 class TestEntdopplung:
     @pytest.mark.asyncio
-    async def test_the_second_tick_does_not_start_a_second_run(self, db: Session):
-        """Zwei Takte, ein Lauf.
+    async def test_the_second_tick_does_not_create_a_second_repair(self, db: Session):
+        """Zwei Takte, ein Auftrag.
 
-        Ohne diese Zusage startete derselbe offene Vorfall jede Minute einen
-        weiteren Lauf.
+        Ohne diese Zusage bekaeme derselbe offene Vorfall jede Minute einen
+        weiteren Auftrag — und damit jede Minute einen weiteren Lauf, denn jeder
+        Auftrag ist sofort faellig.
         """
         server = _server(db)
         user = _benutzer(db, "freigeber")
@@ -230,24 +232,22 @@ class TestEntdopplung:
         _freigabe(db, user, server=server)
         _vorfall(db, server)
 
-        with patch.object(
-            ai_guardian_service, "heilungslauf_starten", AsyncMock(side_effect=_lauf_vortaeuschen)
-        ):
-            erster = await ai_guardian_service.vorfaelle_bearbeiten(db)
-            zweiter = await ai_guardian_service.vorfaelle_bearbeiten(db)
+        erster = await ai_guardian_service.vorfaelle_bearbeiten(db)
+        zweiter = await ai_guardian_service.vorfaelle_bearbeiten(db)
 
         assert erster == 1
         assert zweiter == 0
-        assert db.query(AiGuardianNotice).count() == 1
+        assert db.query(AiGuardianRepair).count() == 1
 
     @pytest.mark.asyncio
-    async def test_a_run_that_never_started_leaves_no_notice(self, db: Session):
-        """``None`` heisst: nichts angelegt, nichts verbraucht.
+    async def test_the_tick_creates_the_order_but_starts_no_run(self, db: Session):
+        """Angelegt, nicht gestartet — und das ist keine Kleinigkeit.
 
-        Kein Anbieter, kein Schluessel, Kontingent erschoepft — alles Gruende,
-        die beim naechsten Takt anders liegen koennen. Bliebe eine Notiz zurueck,
-        waere der Vorfall fuer immer als versorgt vermerkt, ohne dass je etwas
-        geschehen ist.
+        Es gibt genau **einen** Weg, auf dem ein Reparaturlauf beginnt:
+        `ai_guardian_repair_service.faellige_bearbeiten`, mit einer atomaren
+        Anspruchnahme davor. Ein zweiter Weg hier waere eine zweite Stelle, an
+        der jemand den Anspruch vergessen kann — und ein vergessener Anspruch
+        ist eine heisse Schleife, die jede Minute einen Anbieteraufruf kostet.
         """
         server = _server(db)
         user = _benutzer(db, "freigeber")
@@ -255,12 +255,16 @@ class TestEntdopplung:
         _freigabe(db, user, server=server)
         _vorfall(db, server)
 
-        with patch.object(
-            ai_guardian_service, "heilungslauf_starten", AsyncMock(return_value=None)
-        ):
-            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 0
+        starter = AsyncMock(return_value=None)
+        with patch.object(ai_guardian_service, "heilungslauf_starten", starter):
+            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
 
-        assert db.query(AiGuardianNotice).count() == 0
+        assert starter.await_count == 0
+        auftrag = db.query(AiGuardianRepair).one()
+        assert auftrag.phase == "diagnose"
+        assert auftrag.attempt == 0
+        # Sofort faellig: der zweite Durchgang desselben Takts holt ihn ab.
+        assert auftrag.next_run_at is not None
 
     @pytest.mark.asyncio
     async def test_a_resolved_incident_is_left_alone(self, db: Session):
@@ -277,52 +281,8 @@ class TestEntdopplung:
         _vorfall(db, server, status="resolved")
         _vorfall(db, server, status="verifying")
 
-        with patch.object(
-            ai_guardian_service, "heilungslauf_starten", AsyncMock(side_effect=_lauf_vortaeuschen)
-        ):
-            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 0
-
-        assert db.query(AiGuardianNotice).count() == 0
-
-
-async def _lauf_vortaeuschen(db: Session, *, server: Server, vorfall: Incident, user: User):
-    """Ersatz fuer `heilungslauf_starten`, der nur die Notiz hinterlaesst.
-
-    Der echte Weg braucht eine laufende Anwendung, einen Anbieter und einen
-    HTTP-Client. Was hier geprueft wird, ist die Entdopplung — und die haengt
-    genau an dieser Notiz.
-    """
-    from models import AiConversation, AiRun
-
-    conversation = (
-        db.query(AiConversation).filter(AiConversation.user_id == user.id).first()
-    )
-    if conversation is None:
-        conversation = AiConversation(
-            id=f"conv-{user.id}", user_id=user.id, server_id=None, title="Guardian"
-        )
-        db.add(conversation)
-        db.flush()
-    run = AiRun(
-        id=f"run-{vorfall.id}",
-        user_id=user.id,
-        conversation_id=conversation.id,
-        status="running",
-    )
-    db.add(run)
-    # **Festgeschrieben und nicht nur gespuelt**, weil der echte Weg es auch so
-    # macht: `lauf_beginnen` endet mit einem Commit, und erst danach schreibt
-    # `heilungslauf_starten` die Notiz. Der Unterschied ist hier nicht kosmetisch
-    # — trifft `_notiz_anlegen` auf eine vorhandene Briefingzeile, laeuft es in
-    # die Eindeutigkeitsbedingung und ruft `db.rollback()`. Ein nur gespuelter
-    # Lauf waere danach verschwunden, und die Hochstufung schriebe eine `run_id`
-    # auf eine Zeile, die es nicht mehr gibt.
-    db.commit()
-    ai_guardian_service._notiz_anlegen(
-        db, incident_id=vorfall.id, user_id=user.id, mode="healing", run_id=run.id
-    )
-    db.commit()
-    return run
+        assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 0
+        assert db.query(AiGuardianRepair).count() == 0
 
 
 # ── Briefing sperrt die Heilung nicht ─────────────────────────────────────
@@ -334,6 +294,33 @@ def _notiz(
     """Eine Notiz von Hand — der Zustand, den der Ausloeser vorfindet."""
     zeile = AiGuardianNotice(
         incident_id=vorfall.id, user_id=user.id, mode=mode, run_id=run_id
+    )
+    db.add(zeile)
+    db.commit()
+    db.refresh(zeile)
+    return zeile
+
+
+def _auftrag(
+    db: Session,
+    vorfall: Incident,
+    user: User,
+    server: Server,
+    *,
+    phase: str = "diagnose",
+) -> AiGuardianRepair:
+    """Ein Reparaturauftrag von Hand — der Zustand, den der Takt vorfindet."""
+    from uuid import uuid4
+
+    zeile = AiGuardianRepair(
+        id=str(uuid4()),
+        incident_id=vorfall.id,
+        server_id=server.id,
+        user_id=user.id,
+        phase=phase,
+        attempt=0,
+        next_run_at=None,
+        deadline_at=datetime.now(timezone.utc) + timedelta(hours=6),
     )
     db.add(zeile)
     db.commit()
@@ -428,12 +415,12 @@ class TestBriefingUndHeilung:
     blieb fuer immer liegen, obwohl die Autonomie eingeschaltet war.
 
     Die Entdopplung selbst bleibt davon unberuehrt. Sie ist der Grund, warum es
-    diese Tabelle gibt, und haengt jetzt an `mode='healing'` statt am blossen
-    Vorhandensein einer Zeile.
+    diese Tabelle gibt, und liegt seit `20260816_02` beim Reparaturauftrag —
+    die Notiz sperrt nur noch den Altbestand.
     """
 
     @pytest.mark.asyncio
-    async def test_a_briefing_notice_does_not_block_the_healing(self, db: Session):
+    async def test_a_briefing_notice_does_not_block_the_repair(self, db: Session):
         """Der Kern der Behebung: gebrieft ist nicht behandelt.
 
         Der Vorfall ist erwaehnt worden, mehr nicht — kein Lauf, kein Eingriff,
@@ -447,33 +434,57 @@ class TestBriefingUndHeilung:
         vorfall = _vorfall(db, server)
         _notiz(db, vorfall, user, mode="briefed")
 
-        with patch.object(
-            ai_guardian_service,
-            "heilungslauf_starten",
-            AsyncMock(side_effect=_lauf_vortaeuschen),
-        ):
-            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
+        assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
 
+        auftrag = db.query(AiGuardianRepair).one()
+        assert auftrag.incident_id == vorfall.id
+        # Die Briefingzeile bleibt unangetastet — hochgestuft wird sie erst,
+        # wenn der erste Anlauf wirklich laeuft.
         zeilen = db.query(AiGuardianNotice).all()
-        # Eine Zeile, nicht zwei: die Eindeutigkeitsbedingung haelt weiterhin,
-        # die Hochstufung geht ueber sie hinweg und nicht an ihr vorbei.
         assert len(zeilen) == 1
-        assert zeilen[0].mode == "healing"
-        assert zeilen[0].run_id is not None
-        # Und der Vorfall wird deswegen kein zweites Mal gebrieft — die
-        # Hochstufung ersetzt die Zeile, sie loescht sie nicht.
+        assert zeilen[0].mode == "briefed"
+        # Und der Vorfall wird kein zweites Mal gebrieft: die Zeile steht ja.
         assert ai_guardian_service.offene_briefings(db, user) == []
 
     @pytest.mark.asyncio
-    async def test_an_existing_healing_notice_still_blocks_the_tick(self, db: Session):
+    async def test_an_existing_repair_blocks_the_tick(self, db: Session):
         """Die Entdopplung bleibt — sonst waere die Behebung ein Ruecksturz.
 
-        Ohne sie startete derselbe offene Vorfall jede Minute einen weiteren
-        Lauf, und das Kontingent des Freigebers waere in einer Viertelstunde
-        aufgebraucht. Geprueft wird deshalb nicht nur die Zahl, sondern auch,
-        dass `heilungslauf_starten` gar nicht erst gerufen wurde: ein Lauf, der
-        angelegt und gleich wieder zurueckgenommen wird, hat trotzdem Tokens
-        gekostet.
+        Ohne sie bekaeme derselbe offene Vorfall jede Minute einen weiteren
+        Auftrag, und das Kontingent des Freigebers waere in einer Viertelstunde
+        aufgebraucht. Geprueft wird auch der **beendete** Auftrag: eine Zeile in
+        einer Endphase heisst "dieser Vorfall ist durch", nicht "der Platz ist
+        wieder frei".
+        """
+        server = _server(db)
+        user = _benutzer(db, "freigeber")
+        _sichtbar(db, user, server)
+        _freigabe(db, user, server=server)
+        vorfall = _vorfall(db, server)
+
+        assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
+        auftrag = db.query(AiGuardianRepair).one()
+        auftrag.phase = "aufgegeben"
+        auftrag.next_run_at = None
+        db.commit()
+
+        assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 0
+        assert db.query(AiGuardianRepair).count() == 1
+        assert vorfall.status == "open"
+
+    @pytest.mark.asyncio
+    async def test_a_legacy_healing_notice_still_blocks_the_tick(self, db: Session):
+        """Altbestand bekommt keine Rechnung nachgereicht.
+
+        Vor dieser Aenderung war die Heilungsnotiz die Sperre: ein Vorfall, der
+        seinen einen Lauf hatte, blieb liegen. Faellt sie als Filter weg,
+        bekaeme beim ersten Takt nach dem Update *jeder* noch offene Vorfall
+        einen frischen Auftrag mit bis zu acht Anlaeufen — auf einem Panel mit
+        zwanzig Dauerbelegern hundertsechzig Anbieteraufrufe, die niemand
+        bestellt hat.
+
+        Fuer alles Neue ist die Zeile bedeutungslos: seit es Auftraege gibt,
+        entsteht eine Heilungsnotiz nur noch **mit** einem Auftrag daneben.
         """
         server = _server(db)
         user = _benutzer(db, "freigeber")
@@ -483,12 +494,8 @@ class TestBriefingUndHeilung:
         lauf = _lauf(db, user, lauf_id="run-laeuft-schon")
         _notiz(db, vorfall, user, mode="healing", run_id=lauf.id)
 
-        starter = AsyncMock(side_effect=_lauf_vortaeuschen)
-        with patch.object(ai_guardian_service, "heilungslauf_starten", starter):
-            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 0
-
-        assert starter.await_count == 0
-        assert db.query(AiGuardianNotice).count() == 1
+        assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 0
+        assert db.query(AiGuardianRepair).count() == 0
 
     def test_notiz_anlegen_upgrades_a_briefing_to_a_healing(self, db: Session):
         """Hochgestuft wird die vorhandene Zeile, nicht eine zweite angelegt.
@@ -711,25 +718,20 @@ class TestFensterVerstopfung:
             _vorfall(db, ohne, status="quarantined", alter_minuten=100 + nummer)
         jung = _vorfall(db, mit)
 
-        with patch.object(
-            ai_guardian_service, "heilungslauf_starten", AsyncMock(side_effect=_lauf_vortaeuschen)
-        ):
-            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
+        assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
 
-        zeilen = db.query(AiGuardianNotice).all()
-        assert len(zeilen) == 1
-        assert zeilen[0].incident_id == jung.id
-        assert zeilen[0].mode == "healing"
+        auftrag = db.query(AiGuardianRepair).one()
+        assert auftrag.incident_id == jung.id
 
     @pytest.mark.asyncio
-    async def test_a_young_incident_is_healed_behind_twenty_already_healed(
+    async def test_a_young_incident_is_healed_behind_twenty_already_handled(
         self, db: Session
     ):
-        """Der häufigere Dauerbeleger: schon geheilt, aber weiter offen.
+        """Der häufigere Dauerbeleger: schon übernommen, aber weiter offen.
 
-        Eine Heilungsnotiz verschwindet nie, und `_einen_vorfall_bearbeiten`
-        steigt bei ihr jedes Mal wieder aus — der Vorfall bleibt im Fenster
-        stehen und nimmt einem jüngeren den Platz weg.
+        Ein Auftrag verschwindet nie, auch nicht in seiner Endphase, und
+        `_einen_vorfall_bearbeiten` steigt bei ihm jedes Mal wieder aus — der
+        Vorfall bleibt im Fenster stehen und nimmt einem jüngeren den Platz weg.
         """
         server = _server(db)
         user = _benutzer(db, "freigeber")
@@ -738,20 +740,17 @@ class TestFensterVerstopfung:
 
         for nummer in range(21):
             alt = _vorfall(db, server, alter_minuten=100 + nummer)
-            _notiz(db, alt, user, mode="healing")
+            _auftrag(db, alt, user, server, phase="aufgegeben")
         jung = _vorfall(db, server)
 
-        with patch.object(
-            ai_guardian_service, "heilungslauf_starten", AsyncMock(side_effect=_lauf_vortaeuschen)
-        ):
-            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
+        assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
 
-        neue = (
-            db.query(AiGuardianNotice)
-            .filter(AiGuardianNotice.incident_id == jung.id)
+        neu = (
+            db.query(AiGuardianRepair)
+            .filter(AiGuardianRepair.incident_id == jung.id)
             .one()
         )
-        assert neue.mode == "healing"
+        assert neu.phase == "diagnose"
 
     @pytest.mark.asyncio
     async def test_the_panel_wide_grant_still_reaches_every_server(self, db: Session):
@@ -768,10 +767,7 @@ class TestFensterVerstopfung:
         _freigabe(db, user, server=None)
         _vorfall(db, server)
 
-        with patch.object(
-            ai_guardian_service, "heilungslauf_starten", AsyncMock(side_effect=_lauf_vortaeuschen)
-        ):
-            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
+        assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 1
 
     @pytest.mark.asyncio
     async def test_the_prefilter_does_not_decide_the_grant_itself(self, db: Session):
@@ -790,9 +786,5 @@ class TestFensterVerstopfung:
         _freigabe(db, user, server=server, enabled=False)
         _vorfall(db, server)
 
-        starter = AsyncMock(side_effect=_lauf_vortaeuschen)
-        with patch.object(ai_guardian_service, "heilungslauf_starten", starter):
-            assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 0
-
-        assert starter.await_count == 0
-        assert db.query(AiGuardianNotice).count() == 0
+        assert await ai_guardian_service.vorfaelle_bearbeiten(db) == 0
+        assert db.query(AiGuardianRepair).count() == 0

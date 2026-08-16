@@ -395,6 +395,7 @@
         "propose_server_create": "Create server",
         "propose_server_delete": "Delete server",
         "propose_server_lifecycle": "Change server state",
+        "propose_guardian_tuning": "Change autopilot settings",
         "propose_server_repair": "Repair infrastructure",
         "propose_task_delete": "Delete recurring task",
         "propose_task_set": "Set up recurring task"
@@ -428,6 +429,7 @@
         "propose_hoster_integration": "Save the shop integration “{{path}}”? Creating one also generates an API key that is shown exactly once and can only be rotated afterwards.",
         "propose_hoster_product": "Save the product mapping “{{path}}”? Every future purchase of this product creates a server with these limits — and, if configured, with the role shown.",
         "propose_server_blueprint_switch": "Switch this server to another blueprint? Start command, image and variables are replaced; the game files stay and may no longer match.",
+        "propose_guardian_tuning": "Change the autopilot settings for this server? They apply to this server only and override what the blueprint specifies — the startup grace period, for instance, or the number of recovery attempts. The blueprint itself and every other server stay untouched; the autopilot tab then shows what applies, with a button to reset it.",
         "propose_server_repair": "Run the “{{operation}}” repair on this server's infrastructure? “repair_permissions” resets ownership of the server directory, “reallocate_port” reassigns occupied ports and restarts the server for it. Neither touches game files.",
         "propose_file_delete": "Delete the file “{{path}}”? Afterwards it can only be recovered from a backup. A snapshot is written to the file history before deleting.",
         "propose_task_set": "This task will run on its own from now on, even when you are not in the panel. It acts with your permissions and from your AI quota. You can pause or delete it any time from the chat.",
@@ -477,9 +479,9 @@
       "toggle": "Execute actions without asking",
       "budget": "At most actions per hour",
       "budgetHint": "Executed automatically in the last hour: {{used}}. Once the budget is used up the AI asks again — nothing fails.",
-      "boundary": "Autonomous mode removes your confirmation and lets the Guardian engine wake the AI on a fault. Permissions, server locks and audit still apply unchanged — the AI cannot do anything you could not do yourself. Not included: deleting a server, wipe, reinstall and backup restore. Those always require confirmation.",
+      "boundary": "Autonomous mode removes your confirmation and lets the Guardian engine wake the AI on a fault. Permissions, server locks and audit still apply unchanged — the AI cannot do anything you could not do yourself. Not included: deleting a server, wipe, reinstall, switching blueprints and backup restore. Those always require confirmation. When the AI hits such a step in the background, it emails you an approval link instead of giving up.",
       "confirmTitle": "Enable autonomous mode?",
-      "confirmPanel": "The AI will then run permitted actions on all your servers without asking — including configuration changes, mod installs and creating new servers.\n\nNew: this also lets the Guardian engine wake the AI while you are away. When it reports a fault, the AI investigates on its own, takes a provably successful backup before touching any file, and tries to get the server running again — restart, directory permissions, port assignment, configuration, and if needed deleting a broken file. You then receive an email with the result.\n\nYour permissions remain the boundary. It acts in your name and on your AI quota. Deleting a server, wipe, reinstall and restoring a backup still always require your confirmation.",
+      "confirmPanel": "The AI will then run permitted actions on all your servers without asking — including configuration changes, mod installs and creating new servers.\n\nNew: this also lets the Guardian engine wake the AI while you are away. When it reports a fault, the AI investigates on its own, takes a provably successful backup before touching any file, and tries to get the server running again — restart, directory permissions, port assignment, configuration, autopilot settings, and if needed deleting a broken file. It stays on it until the system reports the server healthy again. You then receive an email with the result.\n\nYour permissions remain the boundary. It acts in your name and on your AI quota. Deleting a server, wipe, reinstall, switching blueprints and restoring a backup still always require your confirmation — in the background the AI asks for it by email and waits for your answer.",
       "confirmServer": "The AI will then run permitted actions on this server without asking — including configuration changes and mod installs.\n\nNew: this also lets the Guardian engine wake the AI while you are away. When it reports a fault on this server, the AI investigates on its own, takes a provably successful backup before touching any file, and tries to get it running again. You then receive an email with the result.\n\nYour permissions remain the boundary. It acts in your name and on your AI quota. Delete, wipe, reinstall and restoring a backup still always require your confirmation.",
       "enable": "Enable",
       "save": "Save budget",
@@ -555,6 +557,7 @@
       "propose_server_create": "Preparing the new server",
       "propose_server_delete": "Preparing to delete the server",
       "propose_server_lifecycle": "Preparing the change to the server state",
+      "propose_guardian_tuning": "Preparing the autopilot settings",
       "propose_server_repair": "Preparing the infrastructure repair",
       "propose_task_delete": "Preparing to delete the task",
       "propose_task_set": "Preparing the recurring task",
@@ -604,6 +607,8 @@
         "AI_QUOTA_MONTHLY_TOKEN_LIMIT": "The monthly token allowance is used up.",
         "AI_QUOTA_MONTHLY_COST_LIMIT_CENTS": "The monthly cost limit has been reached.",
         "AI_ACTION_NOT_FOUND": "This action proposal no longer exists.",
+        "AI_APPROVAL_INVALID": "This approval link is no longer valid. Either a decision was already made, or the request has expired.",
+        "AI_APPROVAL_FAILED": "The decision could not be applied.",
         "AI_ACTION_ACCESS_REVOKED": "Your permission for this server was revoked. The proposal is still there, but you may no longer run it.",
         "AI_ACTION_STORE_UNAVAILABLE": "The panel's secure store is currently unreachable. The proposal is still there — try again in a moment.",
         "AI_ACTION_PAYLOAD_INVALID": "The proposal's data is unusable. Have the proposal created again.",
@@ -665,6 +670,20 @@
         "minutes": "{{count}} minutes",
         "hint": "There is nothing to adjust in voice mode: the model and key belong to the operator, and the session length follows the lifetime of your sign-in. It reconnects automatically once it expires."
       }
+    },
+    "guardian": {
+      "title": "Guardian repairs",
+      "subtitle": "Runs in the background. Triggered by an incident, not by you.",
+      "toGuardianMode": "Guardian window",
+      "running": "Working",
+      "readOnly": "Read-only — a message here would supersede the running repair. Ask in the chat instead.",
+      "emptyTitle": "Nothing to repair",
+      "emptyDescription": "When the Guardian engine reports an incident and autonomy is granted, the AI works here — even with nobody watching.",
+      "takeOver": "Take over",
+      "takeOverHint": "Ends the running repairs and opens the chat. The AI will not restart them on its own.",
+      "takeOverDone": "Taken over. The repair has ended.",
+      "waitingApproval": "Waiting for your approval by email",
+        "takeOverFailed": "The repair could not be ended."
     },
     "webSearch": {
       "title": "Web search",
@@ -761,7 +780,10 @@
       "waitingConfirmation": "The AI is waiting for your confirmation.",
       "waitingUser": "The AI has a question for you.",
       "failed": "The AI task failed.",
-      "open": "Open assistant"
+      "open": "Open assistant",
+      "guardianCompleted": "The AI worked on a Guardian incident.",
+      "guardianWaiting": "A Guardian repair is waiting for your approval.",
+      "guardianFailed": "A Guardian repair failed."
     },
     "reasoning": {
       "off": "No reasoning",
@@ -791,6 +813,20 @@
         "load": "Currency setting could not be loaded.",
         "save": "Currency setting could not be saved."
       }
+    },
+    "approval": {
+      "title": "AI approval",
+      "action": "Action",
+      "server": "Server",
+      "reason": "The AI's reason",
+      "effect": "Expected effect",
+      "expiresAt": "This link is valid until {{date}}.",
+      "approve": "Approve",
+      "reject": "Reject",
+      "approvedDone": "Approved. The AI carries on and will email you when it is done.",
+      "rejectedDone": "Rejected. The AI will try another way and email you.",
+      "invalid": "This link is no longer valid. Either a decision was already made, or the request has expired.",
+      "failed": "The decision could not be applied."
     }
   },
   "shell": {
@@ -1279,6 +1315,29 @@
         "unknown": "Autopilot unknown",
         "offline": "Autopilot offline",
         "error": "Autopilot error"
+      },
+      "override": {
+        "title": "Autopilot settings for this server",
+        "originAi": "Set by the AI on {{date}} — incident #{{incident}}.",
+        "originHuman": "Set for this server, differing from the blueprint.",
+        "reset": "Reset to blueprint",
+        "resetDenied": "You lack the permission to change server settings.",
+        "resetSuccess": "The autopilot follows the blueprint again.",
+        "resetError": "Reset failed.",
+        "knob": {
+          "startup_grace_period_seconds": "Startup grace period (seconds)",
+          "startup_timeout_seconds": "Startup timeout (seconds)",
+          "probe_interval_seconds": "Probe interval (seconds)",
+          "probe_timeout_seconds": "Probe timeout (seconds)",
+          "probe_failure_threshold": "Failures before alarm",
+          "probe_success_threshold": "Successes before all-clear",
+          "recovery_max_attempts": "Recovery attempts",
+          "recovery_attempt_window_seconds": "Attempt window (seconds)",
+          "recovery_cooldown_seconds": "Cooldown between attempts (seconds)",
+          "verification_min_healthy_seconds": "Minimum healthy duration (seconds)",
+          "verification_required_successes": "Consecutive successes required",
+          "verification_timeout_seconds": "Verification timeout (seconds)"
+        }
       },
       "quarantine": {
         "title": "Autopilot: Server Placed in Quarantine",

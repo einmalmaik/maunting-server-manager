@@ -46,6 +46,7 @@ from routers import (
     ai_chat_router,
     ai_voice_router,
     ai_actions_router,
+    ai_approvals_router,
     ai_autonomy_router,
     ai_memory_router,
     ai_skills_router,
@@ -595,6 +596,22 @@ async def lifespan(app: FastAPI):
         import logging
         logging.getLogger(__name__).warning("OAuth-LoginChallenge-Cleanup fehlgeschlagen: %s", exc)
 
+    # Dasselbe fuer die E-Mail-Freigaben. Sie sind kurzlebig und werden nach
+    # dem Verbrauch nicht mehr gebraucht — die Tatsache, dass jemand zugestimmt
+    # hat, steht im Audit. Hier stuende sie ein zweites Mal, mit einem
+    # Tokenhash daneben.
+    try:
+        from database import SessionLocal as _SessionLocal3
+        from services.ai_approval_service import abgelaufene_aufraeumen
+        _approval_db = _SessionLocal3()
+        try:
+            abgelaufene_aufraeumen(_approval_db)
+        finally:
+            _approval_db.close()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("KI-Freigaben-Cleanup fehlgeschlagen: %s", exc)
+
 
     from services.ai_proposal_service import reconcile_interrupted_actions
     from services.ai_chat_service import reconcile_interrupted_ai_streams
@@ -751,7 +768,15 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Content-Security-Policy"] = csp
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # `setdefault` und nicht Zuweisung — wie zwei Zeilen tiefer bei
+    # `Cache-Control`, und aus demselben Grund. Es gibt Endpunkte, deren Pfad
+    # **selbst** das Geheimnis ist: der Hoster-Handoff und die KI-Freigabe
+    # tragen ein Einmal-Token in der URL. Beide setzen deshalb ausdruecklich
+    # `no-referrer`, damit das Token nicht im `Referer` jeder nachgeladenen
+    # Ressource landet — und beide wurden hier bis eben wieder auf die
+    # allgemeine, laxere Regel zurueckgesetzt. Der strengere Wert des Handlers
+    # gewinnt jetzt; wo keiner gesetzt ist, gilt weiterhin die Vorgabe.
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
 
     # ── Cache-Control: Vite erzeugt content-gehashte Asset-Pfade ──
     # /assets/* → 1 Jahr immutable (Hash aendert sich bei jeder neuen Version)
@@ -808,6 +833,10 @@ app.include_router(ai_providers_router)
 app.include_router(ai_chat_router)
 app.include_router(ai_voice_router)
 app.include_router(ai_actions_router)
+# Ohne Anmeldung, aber unter dem strengen Auth-Limit: das Token im Pfad ist
+# die ganze Berechtigung, und ein Endpunkt, der Token gegen einen Bestand
+# prueft, gehoert hinter dieselbe Drossel wie der Login.
+app.include_router(ai_approvals_router, dependencies=[Depends(auth_rate_limit)])
 app.include_router(ai_memory_router)
 app.include_router(ai_autonomy_router)
 app.include_router(ai_skills_router)

@@ -48,13 +48,18 @@ def abschlusstext(db: Session, run: AiRun, zustand: dict | None = None) -> str:
     beim Abschluss auf `None` gesetzt (ein beendeter Lauf hat kein laufendes
     Segment mehr), und zum Zeitpunkt dieses Aufrufs ist das bereits geschehen.
 
-    Der Anker ist die **eigene Benutzernachricht** dieses Laufs. Es gibt genau
-    eine Unterhaltung je Benutzer (`uq_ai_conversations_user`), in der Chat,
-    Guardian-Heilungen und fällige Aufträge gemeinsam landen. Ohne Anker fand
-    die Abfrage bei einem Lauf, der selbst keine fertige Antwort hinterlassen
-    hat — erschöpftes Kontingent, abgebrochenes Segment —, die jüngste Antwort
-    aus einem völlig anderen Zug. Der Betreiber las dann unter
+    Der Anker ist die **eigene Benutzernachricht** dieses Laufs. Es gibt je
+    Benutzer und Art genau eine Unterhaltung (`uq_ai_conversations_user_kind`),
+    und in den Dauerchat schreiben Mensch und fällige Aufträge gemeinsam. Ohne
+    Anker fand die Abfrage bei einem Lauf, der selbst keine fertige Antwort
+    hinterlassen hat — erschöpftes Kontingent, abgebrochenes Segment —, die
+    jüngste Antwort aus einem völlig anderen Zug. Der Betreiber las dann unter
     "Abschlussbericht des Laufs" seine Chatunterhaltung von gestern.
+
+    Das Guardian-Fenster hat seit `20260816_01` eine eigene Unterhaltung, aber
+    der Anker bleibt trotzdem nötig — und dort umso mehr: ein Reparaturauftrag
+    hat bis zu acht Anläufe im selben Verlauf, und ohne Anker trüge der Bericht
+    des sechsten die Schlussworte des siebten.
 
     `run.created_at` taugt als Anker **nicht**: `ai_messages` wird im selben
     Flush vor `ai_runs` eingefügt, die eigene Antwort eines Laufs trägt also

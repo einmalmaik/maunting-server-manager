@@ -2,12 +2,13 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import require_global, verify_csrf
 from models import AiActionProposal, User
+from models.ai_conversation import ARTEN
 from schemas.ai_action import (
     AiActionConfirmationResponse,
     AiActionExecuteRequest,
@@ -61,13 +62,37 @@ def _state_error(exc: ai_action_errors.AiActionStateError) -> HTTPException:
     return HTTPException(status_code=409, detail={"code": exc.code})
 
 
+def _art(kind: str) -> str:
+    """Wie `ai_chat._art`: eine unbekannte Fensterangabe ist ein 404.
+
+    Zwei Zeilen doppelt statt eines gemeinsamen Moduls fuer eine
+    Zugehoerigkeitspruefung — ein Router, der einen anderen Router importiert,
+    waere der teurere Handel.
+    """
+    if kind not in ARTEN:
+        raise HTTPException(
+            status_code=404, detail="ai.errors.codes.AI_ACTION_NOT_FOUND"
+        )
+    return kind
+
+
 @router.get("/conversation/actions", response_model=list[AiActionProposalResponse])
 def list_conversation_actions(
+    kind: str = Query("primary"),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
 ) -> list[AiActionProposalResponse]:
-    """Alle Vorschlaege der einen Unterhaltung, aeltester zuerst."""
-    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    """Alle Vorschlaege einer Unterhaltung, aeltester zuerst.
+
+    ``kind`` waehlt das Fenster; ohne Angabe der Dauerchat.
+
+    Diese Angabe ist noetig, seit eine Reparatur in einem eigenen Fenster
+    laeuft. Ein Reparaturlauf, der auf eine Bestaetigung wartet, legt seine
+    Vorschlaege mit **seiner** Unterhaltungskennung an — ohne den Parameter
+    liefert dieser Endpunkt sie nie, und die Karte, auf deren Klick der Lauf
+    wartet, waere im ganzen Panel nirgends zu sehen.
+    """
+    conversation = ai_chat_service.get_or_create_conversation(db, user, _art(kind))
     db.commit()
     rows = db.query(AiActionProposal).filter(
         AiActionProposal.conversation_id == conversation.id,

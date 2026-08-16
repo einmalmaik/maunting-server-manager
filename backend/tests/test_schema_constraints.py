@@ -569,6 +569,144 @@ def test_die_migration_traegt_backupnachweis_und_notiztabelle(tmp_path: Path) ->
         settings.database_url = vorher
 
 
+def test_je_benutzer_und_art_genau_eine_unterhaltung(db: Session) -> None:
+    """Die Trennung von Dauerchat und Guardian-Fenster haelt die Datenbank.
+
+    Sie ist der Grund, warum ueberhaupt repariert werden kann: solange beides in
+    derselben Zeile stand, startete eine Heilung nicht, wenn der Mensch etwas
+    laufen hatte, und eine getippte Nachricht loeste eine laufende Heilung ab.
+
+    Geprueft wird beides, und das ist der Punkt: eine **zweite** Zeile derselben
+    Art muss scheitern (sonst waere aus dem Fenster eine Ablage geworden, und
+    `get_or_create_conversation` griffe irgendeine davon), eine Zeile der
+    **anderen** Art muss durchgehen (sonst gaebe es das Fenster nicht).
+    """
+    from models import User
+
+    user = User(
+        username="fensterpruefung",
+        email_encrypted="x",
+        email_hash="fensterpruefung",
+        password_hash="x",
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+
+    db.execute(
+        text(
+            "INSERT INTO ai_conversations (id, user_id, kind, title, created_at, updated_at) "
+            "VALUES ('k-1', :uid, 'primary', 't', '2026-08-16', '2026-08-16')"
+        ),
+        {"uid": user.id},
+    )
+    # Andere Art, derselbe Mensch: erlaubt.
+    db.execute(
+        text(
+            "INSERT INTO ai_conversations (id, user_id, kind, title, created_at, updated_at) "
+            "VALUES ('k-2', :uid, 'guardian', 't', '2026-08-16', '2026-08-16')"
+        ),
+        {"uid": user.id},
+    )
+
+    # Dieselbe Art ein zweites Mal: nicht erlaubt.
+    with pytest.raises(IntegrityError):
+        db.execute(
+            text(
+                "INSERT INTO ai_conversations (id, user_id, kind, title, created_at, updated_at) "
+                "VALUES ('k-3', :uid, 'guardian', 't', '2026-08-16', '2026-08-16')"
+            ),
+            {"uid": user.id},
+        )
+    db.rollback()
+
+
+def test_die_datenbank_kennt_genau_zwei_unterhaltungsarten(db: Session) -> None:
+    """``kind`` ist eine Aufzaehlung, und die Datenbank haelt sie.
+
+    Dieselbe Ueberlegung wie beim Gedaechtnisbereich darunter: eine Art, die nur
+    im Python-Code steht, ist gegen einen Tippfehler in einer Migration oder
+    einen direkten Datenbankzugriff wehrlos. ``kind='gardian'`` waere ein
+    Fenster, das keine Route je findet — und ein Reparaturlauf, der hineinredet,
+    schriebe an einen Ort, den niemand aufmachen kann.
+    """
+    from models import User
+    from models.ai_conversation import ARTEN
+
+    assert ARTEN == ("primary", "guardian")
+
+    user = User(
+        username="artenpruefung",
+        email_encrypted="x",
+        email_hash="artenpruefung",
+        password_hash="x",
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+
+    with pytest.raises(IntegrityError):
+        db.execute(
+            text(
+                "INSERT INTO ai_conversations (id, user_id, kind, title, created_at, updated_at) "
+                "VALUES ('k-x', :uid, 'gardian', 't', '2026-08-16', '2026-08-16')"
+            ),
+            {"uid": user.id},
+        )
+    db.rollback()
+
+
+def test_die_migration_traegt_die_unterhaltungsart(tmp_path: Path) -> None:
+    """Modell und Migration duerfen auch hier nicht auseinanderlaufen.
+
+    Der Rueckbau bis **vor** `20260816_01` beweist, dass die Spalte aus der
+    Kette stammt und nicht bloss aus `create_all`. Und er prueft die Richtung,
+    die im Betrieb weh taete: das Downgrade muss den alten, engeren Index
+    wiederherstellen — sonst stuende eine zurueckgerollte Anlage ohne jede
+    Eindeutigkeit da, und `get_or_create_primary_conversation` legte bei jedem
+    Rennen einen weiteren Chat an.
+    """
+    db_url = f"sqlite:///{tmp_path / 'fenster_constraint.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        command.downgrade(config, "20260815_01")
+        inspector = _frisch(engine)
+        assert "kind" not in {
+            spalte["name"] for spalte in inspector.get_columns("ai_conversations")
+        }
+        assert "uq_ai_conversations_user" in {
+            index["name"] for index in inspector.get_indexes("ai_conversations")
+        }
+
+        command.upgrade(config, "head")
+        inspector = _frisch(engine)
+        spalten = {
+            spalte["name"]: spalte
+            for spalte in inspector.get_columns("ai_conversations")
+        }
+        assert spalten["kind"]["nullable"] is False
+        indizes = {
+            index["name"]: index for index in inspector.get_indexes("ai_conversations")
+        }
+        assert "uq_ai_conversations_user" not in indizes
+        assert indizes["uq_ai_conversations_user_kind"]["unique"]
+        assert indizes["uq_ai_conversations_user_kind"]["column_names"] == [
+            "user_id",
+            "kind",
+        ]
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
 def _scope_check(inspector) -> str:
     for pruefung in inspector.get_check_constraints("ai_memory_entries"):
         if pruefung.get("name") == "ck_ai_memory_entries_scope":
@@ -788,3 +926,296 @@ def test_das_downgrade_bleibt_nicht_am_ersten_uuid_ziel_haengen() -> None:
     # Nicht umkehrbare Werte muessen benannt behandelt werden, statt die
     # Migration abbrechen zu lassen.
     assert "CASE" in anweisung and "NULL" in anweisung
+
+
+# ── Der Reparaturauftrag ──────────────────────────────────────────────────
+
+
+def _auftrag_anlegen(
+    db: Session,
+    *,
+    kennung: str,
+    incident_id: int,
+    server_id: int | None,
+    user_id: int,
+    run_id: str | None = None,
+) -> None:
+    """Einen Reparaturauftrag per SQL, ohne ORM-Kaskaden dazwischen.
+
+    Bewusst nicht ueber das Modell: geprueft werden soll, was die **Datenbank**
+    tut, wenn die Zeile darueber verschwindet — nicht, was SQLAlchemy vorher
+    schon von sich aus aufraeumt.
+    """
+    db.execute(
+        text(
+            "INSERT INTO ai_guardian_repairs "
+            "(id, incident_id, server_id, user_id, phase, attempt, "
+            " next_run_at, deadline_at, last_run_id, created_at, updated_at) "
+            "VALUES (:id, :incident_id, :server_id, :user_id, 'diagnose', 0, "
+            " '2026-08-16', '2026-08-16', :run_id, '2026-08-16', '2026-08-16')"
+        ),
+        {
+            "id": kennung,
+            "incident_id": incident_id,
+            "server_id": server_id,
+            "user_id": user_id,
+            "run_id": run_id,
+        },
+    )
+    db.commit()
+
+
+def _auftraege(db: Session) -> list[tuple]:
+    db.expire_all()
+    return list(
+        db.execute(
+            text(
+                "SELECT id, incident_id, server_id, user_id, last_run_id "
+                "FROM ai_guardian_repairs"
+            )
+        )
+    )
+
+
+def test_ein_reparaturauftrag_verschwindet_mit_seinem_vorfall(
+    db: Session, owner_user, test_server
+) -> None:
+    """Ohne Vorfall gibt es nichts zu reparieren.
+
+    Anders als die Notiz ist der Auftrag kein Beleg ueber die Vergangenheit,
+    sondern ein laufendes Vorhaben — eines, das ins Leere liefe. Bliebe die
+    Zeile stehen, waere sie ausserdem weiterhin die Sperre gegen einen neuen
+    Auftrag, und zwar fuer eine Vorfallsnummer, die es nicht mehr gibt.
+    """
+    incident_id = _vorfall(db, test_server.id)
+    _auftrag_anlegen(
+        db, kennung="rep-1", incident_id=incident_id,
+        server_id=test_server.id, user_id=owner_user.id,
+    )
+
+    db.execute(text("DELETE FROM incidents WHERE id = :id"), {"id": incident_id})
+    db.commit()
+
+    assert _auftraege(db) == []
+    assert _fremdschluessel(
+        inspect(db.get_bind()), "ai_guardian_repairs", "incident_id"
+    )["options"] == {"ondelete": "CASCADE"}
+
+
+def test_ein_reparaturauftrag_verschwindet_mit_seinem_freigeber(
+    db: Session, owner_user, test_server
+) -> None:
+    """Gehandelt wird in seinem Namen, mit seinen Rechten, auf seine Freigabe hin.
+
+    Ist er weg, gibt es niemanden, als den der Auftrag laufen koennte — und ein
+    Auftrag, der mit den Rechten eines geloeschten Kontos weiterliefe, waere
+    genau die Konstruktion, die dieses Modul an anderer Stelle ausdruecklich
+    ausschliesst.
+    """
+    from models import User
+
+    user = User(
+        username="reparaturfreigeber",
+        email_encrypted="x",
+        email_hash="reparaturfreigeber",
+        password_hash="x",
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    _auftrag_anlegen(
+        db, kennung="rep-4", incident_id=_vorfall(db, test_server.id),
+        server_id=test_server.id, user_id=user.id,
+    )
+
+    db.execute(text("DELETE FROM users WHERE id = :id"), {"id": user.id})
+    db.commit()
+
+    assert _auftraege(db) == []
+    assert _fremdschluessel(
+        inspect(db.get_bind()), "ai_guardian_repairs", "user_id"
+    )["options"] == {"ondelete": "CASCADE"}
+
+
+def test_ein_reparaturauftrag_ueberlebt_seinen_letzten_lauf(
+    db: Session, owner_user, test_server
+) -> None:
+    """Der Lauf ist hier ein Beleg, kein Besitz.
+
+    Raeumt jemand alte Laeufe ab, bleibt der Auftrag bestehen — mit
+    ``last_run_id = NULL``. Mit CASCADE verschwaende mitten in einer laufenden
+    Reparatur der Auftrag, und der naechste Takt legte einen neuen an: derselbe
+    Vorfall, von vorne, mit einem frischen Versuchszaehler.
+    """
+    run_id = _lauf(db, owner_user.id)
+    _auftrag_anlegen(
+        db, kennung="rep-5", incident_id=_vorfall(db, test_server.id),
+        server_id=test_server.id, user_id=owner_user.id, run_id=run_id,
+    )
+
+    db.execute(text("DELETE FROM ai_runs WHERE id = :id"), {"id": run_id})
+    db.commit()
+
+    zeilen = _auftraege(db)
+    assert len(zeilen) == 1
+    assert zeilen[0][4] is None
+    assert _fremdschluessel(
+        inspect(db.get_bind()), "ai_guardian_repairs", "last_run_id"
+    )["options"] == {"ondelete": "SET NULL"}
+
+
+def test_ein_vorfall_bekommt_je_freigeber_nur_einen_auftrag(
+    db: Session, owner_user, test_server
+) -> None:
+    """Die Entdopplung liegt in der Datenbank, nicht in einer Pruefung davor.
+
+    Sie ist der Grund, warum der Takt einen Vorfall nicht alle sechzig Sekunden
+    erneut uebernimmt, und sie haelt auch dann, wenn das Panel je mit mehreren
+    Arbeitsprozessen laeuft: ``max_instances=1`` gilt nur innerhalb eines
+    Prozesses.
+    """
+    incident_id = _vorfall(db, test_server.id)
+    _auftrag_anlegen(
+        db, kennung="rep-6", incident_id=incident_id,
+        server_id=test_server.id, user_id=owner_user.id,
+    )
+
+    with pytest.raises(IntegrityError):
+        _auftrag_anlegen(
+            db, kennung="rep-7", incident_id=incident_id,
+            server_id=test_server.id, user_id=owner_user.id,
+        )
+    db.rollback()
+
+
+def test_die_datenbank_kennt_genau_sieben_reparaturphasen(
+    db: Session, owner_user, test_server
+) -> None:
+    """``phase`` ist eine Aufzaehlung, und die Datenbank haelt sie.
+
+    Eine Phase, die nur im Python-Code steht, ist gegen einen Tippfehler in
+    einer Migration oder einen direkten Datenbankzugriff wehrlos. ``'eingrif'``
+    waere ein Auftrag, den `faellige_bearbeiten` weckt, weil er in keiner
+    Endphase steht — und den `_naechste_phase_setzen` dann in den Zweig
+    "beobachtet und nicht belegt" schickt, also in einen Eingriff, den nie
+    jemand angeordnet hat.
+    """
+    from models.ai_guardian_repair import ARBEITSPHASEN, ENDPHASEN, PHASEN
+
+    assert ARBEITSPHASEN == ("diagnose", "eingriff", "beobachtung")
+    assert ENDPHASEN == ("erledigt", "eskaliert", "aufgegeben", "abgebrochen")
+    assert len(PHASEN) == 7
+
+    incident_id = _vorfall(db, test_server.id)
+    with pytest.raises(IntegrityError):
+        db.execute(
+            text(
+                "INSERT INTO ai_guardian_repairs "
+                "(id, incident_id, server_id, user_id, phase, attempt, "
+                " next_run_at, deadline_at, created_at, updated_at) "
+                "VALUES ('rep-x', :incident_id, :server_id, :user_id, 'eingrif', 0, "
+                " '2026-08-16', '2026-08-16', '2026-08-16', '2026-08-16')"
+            ),
+            {
+                "incident_id": incident_id,
+                "server_id": test_server.id,
+                "user_id": owner_user.id,
+            },
+        )
+    db.rollback()
+
+
+def test_die_migration_traegt_den_reparaturauftrag(tmp_path: Path) -> None:
+    """Modell und Migration duerfen nicht auseinanderlaufen.
+
+    Der Rueckbau bis **vor** `20260816_02` beweist, dass die Tabelle aus der
+    Kette stammt und nicht bloss aus `create_all` — genau der Unterschied, den
+    eine frische Testdatenbank sonst verdeckt. Und er prueft die vier
+    ``ON DELETE``-Regeln dort, wo sie im Betrieb wirklich herkommen.
+
+    ``server_id`` faellt dabei als einzige auf ``SET NULL``: verschwindet der
+    Server mitten in einer Reparatur, soll der Takt die Zeile noch einmal
+    finden, keinen Server sehen und den Auftrag ordentlich als ``abgebrochen``
+    beenden. Ein CASCADE haette dieselbe Wirkung ohne Spur.
+    """
+    db_url = f"sqlite:///{tmp_path / 'reparatur_constraint.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        command.downgrade(config, "20260816_01")
+        assert "ai_guardian_repairs" not in _frisch(engine).get_table_names()
+
+        command.upgrade(config, "head")
+        inspector = _frisch(engine)
+        assert "ai_guardian_repairs" in inspector.get_table_names()
+        assert _fremdschluessel(
+            inspector, "ai_guardian_repairs", "incident_id"
+        )["options"] == {"ondelete": "CASCADE"}
+        assert _fremdschluessel(
+            inspector, "ai_guardian_repairs", "server_id"
+        )["options"] == {"ondelete": "SET NULL"}
+        assert _fremdschluessel(
+            inspector, "ai_guardian_repairs", "user_id"
+        )["options"] == {"ondelete": "CASCADE"}
+        assert _fremdschluessel(
+            inspector, "ai_guardian_repairs", "last_run_id"
+        )["options"] == {"ondelete": "SET NULL"}
+        spalten = {
+            spalte["name"]: spalte
+            for spalte in inspector.get_columns("ai_guardian_repairs")
+        }
+        # Ohne Frist kann ein Auftrag, der bei jedem Anlauf ein bisschen
+        # weiterkommt, tagelang Kosten verursachen, ohne dass je eine Mail den
+        # Betreiber erreicht. Deshalb NOT NULL und nicht "meistens gesetzt".
+        assert spalten["deadline_at"]["nullable"] is False
+        assert spalten["next_run_at"]["nullable"] is True
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
+def test_die_migration_traegt_die_guardian_uebersteuerung(tmp_path: Path) -> None:
+    """Die Uebersteuerung muss aus der Kette kommen, nicht aus ``create_all``.
+
+    Eine Spalte, die nur das Modell kennt, faellt im Test nie auf und im Betrieb
+    sofort: `compile_guardian_config` liest sie bei **jedem** Reconcile-Takt
+    ueber **jeden** Server, und ein fehlendes Feld waere dort kein stiller
+    Rueckfall auf "keine Uebersteuerung", sondern ein ``OperationalError`` in
+    der Guardian-Synchronisation der ganzen Node.
+
+    Nullable ist die Zusage dahinter: "keine Uebersteuerung" ist NULL und nicht
+    ``'{}'``. Beides waere lesbar, aber nur eines davon laesst sich am Bestand
+    zaehlen, ohne JSON zu parsen — und `routers/guardian.reset_overrides`
+    entscheidet genau daran, ob es ueberhaupt etwas zu tun gibt.
+    """
+    db_url = f"sqlite:///{tmp_path / 'uebersteuerung_constraint.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        command.downgrade(config, "20260816_02")
+        spalten = {s["name"] for s in _frisch(engine).get_columns("servers")}
+        assert "guardian_overrides_json" not in spalten
+
+        command.upgrade(config, "head")
+        spalten = {
+            s["name"]: s for s in _frisch(engine).get_columns("servers")
+        }
+        assert "guardian_overrides_json" in spalten
+        assert spalten["guardian_overrides_json"]["nullable"] is True
+    finally:
+        engine.dispose()
+        settings.database_url = vorher

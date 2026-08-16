@@ -751,6 +751,55 @@ jede vorhandene deklarierte Lockdatei vor dem Löschen bytegenau unter
 Die Verzeichnisse sind nur für den Agent-Betreiber lesbar. Wiederherstellung
 erfolgt bewusst manuell nach Prüfung des Incidents.
 
+### Übersteuerung je Server
+
+Ein Blueprint gilt für **jeden** Server seines Spiels. Er kann nicht wissen,
+dass auf einer bestimmten Node zwölf Instanzen um acht Gigabyte streiten und
+deshalb keine davon in dreißig Sekunden hochkommt — Guardian sieht dort einen
+Server, der die Startfrist reißt, startet ihn neu, sieht es wieder, und nach
+drei Anläufen steht er in Quarantäne, obwohl nichts kaputt ist außer der
+Erwartung.
+
+Für genau diesen Fall lässt sich eine Handvoll Zahlen **je Server** übersteuern.
+Sie werden **nach** der Ableitung aus dem Blueprint darübergelegt; alles, was
+nicht genannt ist, bleibt wie der Blueprint es sagt. Ein Nachtrag, keine zweite
+Konfiguration.
+
+Erlaubt ist eine geschlossene Menge von Skalaren mit Ober- und Untergrenze:
+
+| Feld | Bereich | Wirkung |
+| --- | --- | --- |
+| `startup_grace_period_seconds` | 1–3600 | Ruhe nach dem Start, bevor Proben zählen |
+| `startup_timeout_seconds` | 10–7200 | Wann ein Start als gescheitert gilt |
+| `probe_interval_seconds` | 1–600 | Abstand zwischen zwei Proben |
+| `probe_timeout_seconds` | 1–120 | Geduld einer Probe (nicht für `process`) |
+| `probe_failure_threshold` | 1–20 | Fehlschläge bis zum Alarm |
+| `probe_success_threshold` | 1–20 | Erfolge bis zur Entwarnung |
+| `recovery_max_attempts` | 0–20 | Guardians eigene Leiter; `0` heißt „nur melden" |
+| `recovery_attempt_window_seconds` | 60–86400 | Zeitfenster für die Versuche |
+| `recovery_cooldown_seconds` | 0–86400 | Pause zwischen zwei Versuchen |
+| `verification_min_healthy_seconds` | 0–3600 | Mindestdauer gesund nach einer Heilung |
+| `verification_required_successes` | 1–20 | Nötige Erfolge in Folge |
+| `verification_timeout_seconds` | 10–7200 | Frist der Verifikation |
+
+Keine Listen, keine Regexe, keine Probentypen — dieselbe Begründung, aus der der
+Blueprint-Editor listenwertige Pfade ausschließt: was sich in einer Zahl mit
+Deckel ausdrücken lässt, kann keine Struktur zerstören. Eine übersteuerte
+Probenliste dagegen könnte Guardian für diesen Server blind machen, ohne dass es
+irgendwo als „abgeschaltet" stünde.
+
+Geklemmt wird beim Lesen, unabhängig davon, wie der Wert in die Zeile kam.
+Unbekannte Schlüssel fallen weg, unlesbares JSON gilt als „keine
+Übersteuerung" — diese Funktion läuft in jedem Reconcile-Takt über jeden Server
+und darf die Synchronisation einer ganzen Node nicht anhalten.
+
+Gesetzt wird sie im Autopilot-Reiter des Servers oder von der KI während einer
+Reparatur (`propose_guardian_tuning`, Recht `server.config.write`). Was gilt,
+steht sichtbar im Reiter samt Herkunft; ein Knopf setzt auf den Blueprint
+zurück. Die Übersteuerung geht in den Konfigurations-Hash ein und bewegt damit
+die `desired_state_generation` — ohne das stünde sie in der Datenbank und wirkte
+nie.
+
 ### Beispiele und Webeditor-Parität
 
 Alle Guardian-Felder sind im Blueprint-Webeditor verfügbar; Änderungen an

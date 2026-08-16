@@ -395,6 +395,7 @@
         "propose_server_create": "Server erstellen",
         "propose_server_delete": "Server löschen",
         "propose_server_lifecycle": "Serverstatus ändern",
+        "propose_guardian_tuning": "Autopilot-Einstellungen ändern",
         "propose_server_repair": "Anlage reparieren",
         "propose_task_delete": "Wiederkehrende Aufgabe löschen",
         "propose_task_set": "Wiederkehrende Aufgabe einrichten"
@@ -428,6 +429,7 @@
         "propose_hoster_integration": "Die Shop-Anbindung „{{path}}“ speichern? Beim Anlegen entsteht dabei ein API-Key, der genau einmal angezeigt wird und danach nur noch rotierbar ist.",
         "propose_hoster_product": "Die Produktzuordnung „{{path}}“ speichern? Jeder künftige Kauf dieses Produkts erzeugt einen Server mit diesen Grenzen — und, falls hinterlegt, mit der angezeigten Rolle.",
         "propose_server_blueprint_switch": "Diesen Server auf einen anderen Blueprint umstellen? Startbefehl, Image und Variablen werden ersetzt; die Spieldateien bleiben liegen und passen unter Umständen nicht mehr dazu.",
+        "propose_guardian_tuning": "Die Autopilot-Einstellungen dieses Servers ändern? Sie gelten nur für diesen Server und überschreiben, was der Blueprint vorgibt — etwa das Startfenster oder die Zahl der Wiederherstellungsversuche. Der Blueprint selbst und alle anderen Server bleiben unberührt; im Autopilot-Reiter steht danach, was gilt, und ein Knopf setzt es zurück.",
         "propose_server_repair": "Die Reparatur „{{operation}}“ an der Anlage dieses Servers ausführen? „repair_permissions“ setzt die Besitzrechte am Serververzeichnis neu, „reallocate_port“ vergibt belegte Ports neu und startet den Server dafür. Spieldateien werden in beiden Fällen nicht angefasst.",
         "propose_file_delete": "Die Datei „{{path}}“ löschen? Sie ist danach nur noch aus einem Backup zurückzuholen. Vor dem Löschen wird ein Schnappschuss in der Dateihistorie angelegt.",
         "propose_task_set": "Diese Aufgabe läuft ab jetzt von selbst — auch dann, wenn du nicht im Panel bist. Sie handelt mit deinen Berechtigungen und aus deinem KI-Kontingent. Du kannst sie jederzeit im Chat pausieren oder löschen.",
@@ -477,9 +479,9 @@
       "toggle": "Aktionen ohne Rückfrage ausführen",
       "budget": "Höchstens Aktionen pro Stunde",
       "budgetHint": "In der letzten Stunde automatisch ausgeführt: {{used}}. Ist das Kontingent erschöpft, fragt die KI wieder nach — es schlägt nichts fehl.",
-      "boundary": "Der autonome Modus entfernt deine Bestätigung und erlaubt der Guardian-Engine, die KI bei einer Störung zu wecken. Berechtigungen, Serversperren und Audit gelten unverändert weiter — die KI kann nichts, was du selbst nicht dürftest. Nicht enthalten sind Löschen eines Servers, Wipe, Neuinstallation und Backup-Wiederherstellung: die verlangen immer eine Bestätigung.",
+      "boundary": "Der autonome Modus entfernt deine Bestätigung und erlaubt der Guardian-Engine, die KI bei einer Störung zu wecken. Berechtigungen, Serversperren und Audit gelten unverändert weiter — die KI kann nichts, was du selbst nicht dürftest. Nicht enthalten sind Löschen eines Servers, Wipe, Neuinstallation, Blueprint-Wechsel und Backup-Wiederherstellung: die verlangen immer eine Bestätigung. Trifft die KI im Hintergrund auf einen solchen Schritt, schickt sie dir einen Freigabelink per E-Mail, statt aufzugeben.",
       "confirmTitle": "Autonomen Modus einschalten?",
-      "confirmPanel": "Die KI führt danach erlaubte Aktionen auf allen deinen Servern ohne Rückfrage aus — einschließlich Konfigurationsänderungen, Mod-Installationen und dem Anlegen neuer Server.\n\nNeu: Die Guardian-Engine darf die KI damit auch wecken, wenn du nicht da bist. Meldet sie eine Störung, untersucht die KI sie eigenständig, legt vor jedem Eingriff in Dateien ein nachweislich erfolgreiches Backup an und versucht, den Server wieder zum Laufen zu bringen — Neustart, Rechte am Serververzeichnis, Portvergabe, Konfiguration, notfalls das Löschen einer kaputten Datei. Danach bekommst du eine E-Mail mit dem Ergebnis.\n\nDeine Berechtigungen bleiben die Grenze. Gehandelt wird in deinem Namen und auf dein KI-Kontingent. Löschen eines Servers, Wipe, Neuinstallation und das Einspielen eines Backups verlangen weiterhin immer deine Bestätigung.",
+      "confirmPanel": "Die KI führt danach erlaubte Aktionen auf allen deinen Servern ohne Rückfrage aus — einschließlich Konfigurationsänderungen, Mod-Installationen und dem Anlegen neuer Server.\n\nNeu: Die Guardian-Engine darf die KI damit auch wecken, wenn du nicht da bist. Meldet sie eine Störung, untersucht die KI sie eigenständig, legt vor jedem Eingriff in Dateien ein nachweislich erfolgreiches Backup an und versucht, den Server wieder zum Laufen zu bringen — Neustart, Rechte am Serververzeichnis, Portvergabe, Konfiguration, Autopilot-Einstellungen, notfalls das Löschen einer kaputten Datei. Sie bleibt dabei, bis die Anlage den Server wieder als gesund meldet. Danach bekommst du eine E-Mail mit dem Ergebnis.\n\nDeine Berechtigungen bleiben die Grenze. Gehandelt wird in deinem Namen und auf dein KI-Kontingent. Löschen eines Servers, Wipe, Neuinstallation, Blueprint-Wechsel und das Einspielen eines Backups verlangen weiterhin immer deine Bestätigung — im Hintergrund fragt die KI dafür per E-Mail und wartet auf deine Antwort.",
       "confirmServer": "Die KI führt danach erlaubte Aktionen auf diesem Server ohne Rückfrage aus — einschließlich Konfigurationsänderungen und Mod-Installationen.\n\nNeu: Die Guardian-Engine darf die KI damit auch wecken, wenn du nicht da bist. Meldet sie eine Störung auf diesem Server, untersucht die KI sie eigenständig, legt vor jedem Eingriff in Dateien ein nachweislich erfolgreiches Backup an und versucht, ihn wieder zum Laufen zu bringen. Danach bekommst du eine E-Mail mit dem Ergebnis.\n\nDeine Berechtigungen bleiben die Grenze. Gehandelt wird in deinem Namen und auf dein KI-Kontingent. Löschen, Wipe, Neuinstallation und das Einspielen eines Backups verlangen weiterhin immer deine Bestätigung.",
       "enable": "Einschalten",
       "save": "Kontingent speichern",
@@ -555,6 +557,7 @@
       "propose_server_create": "Ich bereite den neuen Server vor",
       "propose_server_delete": "Ich bereite das Löschen des Servers vor",
       "propose_server_lifecycle": "Ich bereite die Änderung am Serverbetrieb vor",
+      "propose_guardian_tuning": "Ich bereite die Autopilot-Einstellungen vor",
       "propose_server_repair": "Ich bereite die Reparatur der Anlage vor",
       "propose_task_delete": "Ich bereite das Löschen der Aufgabe vor",
       "propose_task_set": "Ich bereite die wiederkehrende Aufgabe vor",
@@ -604,6 +607,8 @@
         "AI_QUOTA_MONTHLY_TOKEN_LIMIT": "Das Monatskontingent an Tokens ist ausgeschöpft.",
         "AI_QUOTA_MONTHLY_COST_LIMIT_CENTS": "Das monatliche Kostenlimit ist erreicht.",
         "AI_ACTION_NOT_FOUND": "Diesen Aktionsvorschlag gibt es nicht mehr.",
+        "AI_APPROVAL_INVALID": "Dieser Freigabelink ist nicht mehr gültig. Entweder wurde bereits entschieden, oder die Anfrage ist abgelaufen.",
+        "AI_APPROVAL_FAILED": "Die Entscheidung konnte nicht übernommen werden.",
         "AI_ACTION_ACCESS_REVOKED": "Die Berechtigung für diesen Server wurde entzogen. Der Vorschlag bleibt bestehen, ausführen darfst du ihn nicht mehr.",
         "AI_ACTION_STORE_UNAVAILABLE": "Der sichere Speicher des Panels ist gerade nicht erreichbar. Der Vorschlag bleibt bestehen — versuche es in einem Moment erneut.",
         "AI_ACTION_PAYLOAD_INVALID": "Die Daten des Vorschlags sind unbrauchbar. Lass dir den Vorschlag neu erstellen.",
@@ -665,6 +670,20 @@
         "minutes": "{{count}} Minuten",
         "hint": "Am Sprachmodus lässt sich nichts einstellen: Modell und Schlüssel gehören dem Betreiber, und die Sitzungsdauer hängt an der Lebensdauer deiner Anmeldung. Nach Ablauf wird automatisch neu verbunden."
       }
+    },
+    "guardian": {
+      "title": "Guardian-Reparaturen",
+      "subtitle": "Läuft im Hintergrund. Ausgelöst hat es eine Störung, nicht du.",
+      "toGuardianMode": "Guardian-Fenster",
+      "running": "Arbeitet gerade",
+      "readOnly": "Hier wird gelesen, nicht geschrieben — eine Nachricht würde die laufende Reparatur ablösen. Fragen gehören in den Chat.",
+      "emptyTitle": "Nichts zu reparieren",
+      "emptyDescription": "Meldet die Guardian-Engine eine Störung und ist die Autonomie freigegeben, arbeitet die KI hier — auch wenn niemand davorsitzt.",
+      "takeOver": "Übernehmen",
+      "takeOverHint": "Beendet die laufenden Reparaturen und öffnet den Chat. Die KI fängt danach nicht von selbst wieder an.",
+      "takeOverDone": "Übernommen. Die Reparatur ist beendet.",
+      "waitingApproval": "Wartet auf deine Freigabe per E-Mail",
+        "takeOverFailed": "Die Reparatur ließ sich nicht beenden."
     },
     "webSearch": {
       "title": "Websuche",
@@ -761,7 +780,10 @@
       "waitingConfirmation": "Die KI wartet auf deine Bestätigung.",
       "waitingUser": "Die KI hat eine Rückfrage an dich.",
       "failed": "Der KI-Auftrag ist fehlgeschlagen.",
-      "open": "Zum Assistenten"
+      "open": "Zum Assistenten",
+      "guardianCompleted": "Die KI hat eine Guardian-Störung bearbeitet.",
+      "guardianWaiting": "Eine Guardian-Reparatur wartet auf deine Freigabe.",
+      "guardianFailed": "Eine Guardian-Reparatur ist fehlgeschlagen."
     },
     "reasoning": {
       "off": "Kein Nachdenken",
@@ -791,6 +813,20 @@
         "load": "Währungseinstellung konnte nicht geladen werden.",
         "save": "Währungseinstellung konnte nicht gespeichert werden."
       }
+    },
+    "approval": {
+      "title": "Freigabe für die KI",
+      "action": "Vorgang",
+      "server": "Server",
+      "reason": "Begründung der KI",
+      "effect": "Erwartete Wirkung",
+      "expiresAt": "Dieser Link gilt bis {{date}}.",
+      "approve": "Freigeben",
+      "reject": "Ablehnen",
+      "approvedDone": "Freigegeben. Die KI arbeitet weiter und meldet sich per E-Mail, sobald sie fertig ist.",
+      "rejectedDone": "Abgelehnt. Die KI versucht einen anderen Weg und meldet sich per E-Mail.",
+      "invalid": "Dieser Link ist nicht mehr gültig. Entweder wurde bereits entschieden, oder die Anfrage ist abgelaufen.",
+      "failed": "Die Entscheidung konnte nicht übernommen werden."
     }
   },
   "shell": {
@@ -1279,6 +1315,29 @@
         "unknown": "Autopilot unbekannt",
         "offline": "Autopilot offline",
         "error": "Autopilot Fehler"
+      },
+      "override": {
+        "title": "Abweichende Autopilot-Einstellungen",
+        "originAi": "Von der KI gesetzt am {{date}} — Vorfall #{{incident}}.",
+        "originHuman": "Für diesen Server abweichend vom Blueprint eingestellt.",
+        "reset": "Auf Blueprint zurücksetzen",
+        "resetDenied": "Dafür fehlt dir das Recht, Server-Einstellungen zu ändern.",
+        "resetSuccess": "Der Autopilot richtet sich wieder nach dem Blueprint.",
+        "resetError": "Zurücksetzen fehlgeschlagen.",
+        "knob": {
+          "startup_grace_period_seconds": "Startfenster (Sekunden)",
+          "startup_timeout_seconds": "Start-Zeitüberschreitung (Sekunden)",
+          "probe_interval_seconds": "Prüfabstand (Sekunden)",
+          "probe_timeout_seconds": "Prüf-Zeitüberschreitung (Sekunden)",
+          "probe_failure_threshold": "Fehlversuche bis Alarm",
+          "probe_success_threshold": "Erfolge bis Entwarnung",
+          "recovery_max_attempts": "Wiederherstellungsversuche",
+          "recovery_attempt_window_seconds": "Zeitfenster für Versuche (Sekunden)",
+          "recovery_cooldown_seconds": "Pause zwischen Versuchen (Sekunden)",
+          "verification_min_healthy_seconds": "Mindestdauer gesund (Sekunden)",
+          "verification_required_successes": "Nötige Erfolge in Folge",
+          "verification_timeout_seconds": "Prüffrist nach Wiederherstellung (Sekunden)"
+        }
       },
       "quarantine": {
         "title": "Autopilot: Server in Quarantäne versetzt",

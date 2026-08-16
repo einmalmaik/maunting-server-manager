@@ -156,6 +156,15 @@ def test_only_the_irreversible_tools_are_confirm_only() -> None:
     Weg zurueck ist ein Export, den vielleicht jemand gemacht hat — und
     "vielleicht" ist kein nachgewiesener Rueckweg. Damit greift dasselbe
     Kriterium wie bei `propose_server_delete`.
+
+    `propose_server_blueprint_switch` ist der juengste Eintrag und die
+    Korrektur einer Fehleinschaetzung, die genau umgekehrt begruendet war: er
+    galt als umkehrbar, "weil zwingend ein Backup angelegt wird". Das Backup
+    gibt es wirklich — es macht den Vorgang aber wiederherstellbar, nicht
+    harmlos. `switch_server_blueprint` ruft `wipe_server_root` und loescht das
+    **gesamte** Serververzeichnis: Welt, Configs, Mods. Der Weg zurueck ist eine
+    Wiederherstellung, die selbst Stunden dauert — genau das Kriterium, unter
+    dem `propose_backup_restore` seit jeher hier steht.
     """
     gebaut = {
         name for name, spec in ai_tool_registry.WERKZEUGE.items()
@@ -165,6 +174,7 @@ def test_only_the_irreversible_tools_are_confirm_only() -> None:
         "propose_server_delete",
         "propose_blueprint_delete",
         "propose_backup_restore",
+        "propose_server_blueprint_switch",
         "propose_hoster_integration",
         "propose_hoster_product",
         "propose_ai_tarif_role",
@@ -312,10 +322,22 @@ def test_die_heilung_kann_nichts_dauerhaftes_und_nichts_fremdes() -> None:
       Weg, eine Weisung in jeden spaeteren Chat des Benutzers zu tragen.
 
     Ausgeschrieben bleiben nur die, die unter keine der beiden Regeln fallen:
-    die Servererstellung (Reichweite ueber den Vorfall hinaus), beide
-    Blueprint-Werkzeuge (der Wechsel leert das Verzeichnis) und `web_search` —
+    die Servererstellung (Reichweite ueber den Vorfall hinaus) und `web_search` —
     der Name eines selbstgebauten Servers hat draussen nichts zu suchen, schon
     gar nicht, wenn ihn niemand gefragt hat.
+
+    Der **Blueprint-Wechsel** stand einmal in dieser Aufzaehlung und ist daraus
+    verschwunden, ohne dass sich etwas gelockert haette — im Gegenteil: er
+    traegt jetzt `immer_bestaetigen` und faellt damit unter die erste,
+    abgeleitete Regel. Das ist die bessere Stelle. Eine abgeleitete Sperre gilt
+    auch fuer das naechste Werkzeug, das jemand aehnlich baut; eine
+    ausgeschriebene gilt nur fuer den Namen, der dasteht.
+
+    Die **Ableitung eines Blueprints** dagegen ist bewusst hinzugekommen. Sie
+    legt eine neue Datei an und ruehrt keinen Server an — das ist der Weg fuer
+    den Fall, in dem wirklich die Vorlage falsch ist. Was noch nichts tut, ist
+    sie in Betrieb zu nehmen, und genau dieser Schritt braucht weiterhin einen
+    Menschen.
     """
     heilung = ai_tool_registry.GUARDIAN_HEILUNG_TOOLS
 
@@ -332,8 +354,6 @@ def test_die_heilung_kann_nichts_dauerhaftes_und_nichts_fremdes() -> None:
     for ausgeschlossen in (
         "propose_server_create",
         "propose_server_delete",
-        "propose_blueprint_change",
-        "propose_server_blueprint_switch",
         "web_search",
     ):
         assert ausgeschlossen in ai_tool_registry.WERKZEUGE, (
@@ -359,11 +379,21 @@ def test_die_backup_pflicht_gilt_nur_fuer_erreichbare_werkzeuge() -> None:
     der Schranke. Ohne sie fällt ein künftig aufgenommenes Werkzeug still
     durch — es liefe im unbeaufsichtigten Lauf gegen einen Kundenserver, ohne
     dass ein Rückweg nachgewiesen wäre, und kein Test würde rot. Draußen stehen
-    genau zwei, beide mit Grund (ai_tool_registry.py bei
-    `GUARDIAN_BACKUP_PFLICHT_TOOLS`): `propose_backup` wegen des Zirkels und
-    `propose_server_lifecycle`, weil ein Neustart keine Datei ändert und die
-    Pflicht ihn ausgerechnet dann sperren würde, wenn die volle Platte kein
-    Backup mehr zulässt.
+    genau vier, jedes mit Grund (ai_tool_registry.py bei
+    `GUARDIAN_BACKUP_PFLICHT_TOOLS`):
+
+    * `propose_backup` wegen des Zirkels,
+    * `propose_server_lifecycle`, weil ein Neustart keine Datei ändert und die
+      Pflicht ihn ausgerechnet dann sperren würde, wenn die volle Platte kein
+      Backup mehr zulässt,
+    * `propose_guardian_tuning`, weil es eine Spalte am Server ändert und keine
+      Datei auf ihm — der Rückweg ist `reset` und kostet nichts,
+    * `propose_blueprint_change`, weil es eine neue Datei im Panel anlegt und
+      keinen Server anfasst; ein Serverbackup bewiese darüber gar nichts.
+
+    Die Liste wächst hier bewusst mit — sie ist die Stelle, an der man sich
+    festlegen muss, statt ein Werkzeug stillschweigend an der Schranke vorbei
+    in den unbeaufsichtigten Lauf zu heben.
     """
     assert (
         ai_tool_registry.GUARDIAN_BACKUP_PFLICHT_TOOLS
@@ -376,4 +406,6 @@ def test_die_backup_pflicht_gilt_nur_fuer_erreichbare_werkzeuge() -> None:
     ) - ai_tool_registry.GUARDIAN_BACKUP_PFLICHT_TOOLS == {
         "propose_backup",
         "propose_server_lifecycle",
+        "propose_guardian_tuning",
+        "propose_blueprint_change",
     }

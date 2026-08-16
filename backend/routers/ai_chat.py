@@ -1,20 +1,31 @@
-"""Die eine persistente AI-Unterhaltung eines Benutzers mit POST-SSE.
+"""Die persistenten AI-Unterhaltungen eines Benutzers mit POST-SSE.
 
 Es gibt bewusst keine Routen zum Auflisten, Anlegen oder Loeschen von
-Unterhaltungen mehr. Der Assistent hat genau einen Chat; geloescht wird der
-*Verlauf*, nicht die Unterhaltung.
+Unterhaltungen. Der Assistent hat genau einen Chat je Anlass, und die Anlaesse
+sind fest (`models.ai_conversation.ARTEN`); geloescht wird der *Verlauf*, nicht
+die Unterhaltung.
+
+**Lesen kennt beide Fenster, Schreiben nur den Dauerchat.** Die Endpunkte, die
+etwas veraendern — senden, leeren, eine Nachricht zuruecknehmen — arbeiten
+weiterhin unbedingt auf ``primary``. Das ist keine Sparmassnahme, sondern der
+Zweck des zweiten Fensters: eine getippte Nachricht loest ueber
+`vorgaenger_abloesen` jeden offenen Lauf ihrer Unterhaltung ab, und in das
+Guardian-Fenster zu schreiben hiesse, eine laufende Reparatur mit einem
+Tastendruck abzubrechen. Wer eingreifen will, tut es ausdruecklich: die
+Oberflaeche bricht den Auftrag ab und wechselt in den Dauerchat.
 """
 
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import require_global, verify_csrf
-from models import AiMessage, AiProvider, User
+from models import AiConversation, AiMessage, AiProvider, User
+from models.ai_conversation import ARTEN
 from schemas.ai_chat import (
     AiChatRequest,
     AiContextStatus,
@@ -65,12 +76,48 @@ def _fuer_chat(provider) -> bool:
     return ai_provider_service.spricht(provider, ai_provider_registry.CHAT)
 
 
+def _art(kind: str) -> str:
+    """Prueft die Fensterangabe aus dem Query und gibt sie zurueck.
+
+    Eine unbekannte Art ist ein 404 und keine stillschweigende Umdeutung auf
+    ``primary``: wer ``?kind=guardain`` tippt, soll das erfahren und nicht den
+    Dauerchat bekommen, den er fuer das Guardian-Fenster haelt.
+    """
+    if kind not in ARTEN:
+        raise HTTPException(status_code=404, detail="Unterhaltung nicht gefunden")
+    return kind
+
+
 def _conversation_response(conversation) -> AiConversationResponse:
     return AiConversationResponse(
         id=conversation.id,
+        kind=conversation.kind,
         title=conversation.title,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
+    )
+
+
+def _run_response(db: Session, run) -> AiRunResponse:
+    """Ein Lauf fuer die Oberflaeche — mitsamt dem Fenster, in dem er arbeitet.
+
+    Die Art kommt ueber die **Unterhaltung** und nicht aus dem Laufrahmen: der
+    Rahmen steht in `state_json` und wird bei jedem Endzustand mitsamt dem
+    Arbeitsspeicher geleert (`ai_run_service.arbeitsspeicher_leeren`). Ein
+    beendeter Reparaturlauf haette danach keine Art mehr — und die Glocke
+    haengte ihn dem Dauerchat an, also ausgerechnet dort, wo er nicht hingehoert.
+    """
+    conversation = db.get(AiConversation, run.conversation_id)
+    return AiRunResponse(
+        id=run.id,
+        status=run.status,
+        stop_reason=run.stop_reason,
+        message_id=run.message_id,
+        live=ai_run_broker.laeuft(run.id),
+        created_at=run.created_at,
+        kind=getattr(conversation, "kind", "primary"),
+        conversation_id=run.conversation_id,
+        server_id=run.last_server_id,
     )
 
 
@@ -127,24 +174,64 @@ def _message_response(message: AiMessage) -> AiMessageResponse:
 
 @router.get("", response_model=AiConversationDetail)
 def get_conversation(
+    kind: str = Query("primary"),
+    before: str | None = Query(
+        None,
+        description=(
+            "Kennung der aeltesten bereits geladenen Nachricht. Liefert die "
+            "Seite davor."
+        ),
+    ),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
 ) -> AiConversationDetail:
-    """Liefert die Unterhaltung des Benutzers und legt sie beim ersten Aufruf an."""
-    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    """Liefert eine Unterhaltung des Benutzers und legt sie beim ersten Aufruf an.
+
+    ``kind`` waehlt das Fenster und ist ``primary``, wenn nichts dabeisteht —
+    die vorhandene Oberflaeche fragt ohne Angabe und bekommt weiterhin den
+    Dauerchat.
+
+    ``before`` blaettert zurueck. Der Schnitt laeuft ueber ``(created_at, id)``
+    und nicht ueber einen Zaehler: waehrend jemand blaettert, schreibt ein Lauf
+    unter Umstaenden weiter, und ein Versatz haette dann Zeilen doppelt
+    geliefert und andere ausgelassen. Der Index
+    ``ix_ai_messages_conversation_created`` traegt genau diese Ordnung.
+    """
+    conversation = ai_chat_service.get_or_create_conversation(db, user, _art(kind))
     db.commit()
     db.refresh(conversation)
-    messages = (
-        db.query(AiMessage)
-        .filter(AiMessage.conversation_id == conversation.id)
-        .order_by(AiMessage.created_at.desc())
-        .limit(HISTORY_LIMIT)
+
+    query = db.query(AiMessage).filter(AiMessage.conversation_id == conversation.id)
+    if before is not None:
+        anker = db.get(AiMessage, before)
+        if anker is None or anker.conversation_id != conversation.id:
+            raise HTTPException(status_code=404, detail="Nachricht nicht gefunden")
+        # Gleicher Zeitstempel kommt vor — zwei Nachrichten derselben Runde
+        # koennen in dieselbe Sekunde fallen. Die Kennung entscheidet dann,
+        # damit die Seite weder haengt noch eine Zeile ueberspringt.
+        query = query.filter(
+            (AiMessage.created_at < anker.created_at)
+            | (
+                (AiMessage.created_at == anker.created_at)
+                & (AiMessage.id < anker.id)
+            )
+        )
+
+    # Eine mehr holen, als geliefert wird: das ist die ganze Auskunft darueber,
+    # ob es weitergeht — ohne ein zweites COUNT ueber den halben Verlauf.
+    zeilen = (
+        query.order_by(AiMessage.created_at.desc(), AiMessage.id.desc())
+        .limit(HISTORY_LIMIT + 1)
         .all()
     )
+    weitere = len(zeilen) > HISTORY_LIMIT
+    messages = zeilen[:HISTORY_LIMIT]
+
     base = _conversation_response(conversation)
     return AiConversationDetail(
         **base.model_dump(),
         messages=[_message_response(message) for message in reversed(messages)],
+        has_more=weitere,
     )
 
 
@@ -275,6 +362,13 @@ async def _fehlerstrom(code: str, message_key: str) -> AsyncIterator[str]:
 
 @router.get("/run")
 def get_active_run(
+    kind: str | None = Query(
+        "primary",
+        description=(
+            "Fenster, in dem gesucht wird. Ohne Angabe der Dauerchat; leer "
+            "gelassen (kind=) ueber alle Fenster — das fragt die Glocke."
+        ),
+    ),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
 ) -> AiRunResponse | None:
@@ -283,18 +377,54 @@ def get_active_run(
     Die Oberflaeche fragt das beim Oeffnen: laeuft da noch etwas von vorhin?
     Damit haengt sie sich nach einem Seitenwechsel oder einem Neustart des
     Browsers wieder an, statt eine abgebrochene Antwort zu zeigen.
+
+    **Die Fensterangabe ist hier keine Bequemlichkeit.** Ohne sie beantwortet
+    der Endpunkt "laeuft irgendwo etwas fuer diesen Menschen?", und der Chat
+    haengte sich danach an eine Guardian-Reparatur und zeichnete sie in das
+    Fenster des Benutzers — genau das, was die Trennung beseitigt. Die Glocke
+    darf die Frage weit stellen (``kind=``), muss dann aber ueber ``kind`` in
+    der Antwort entscheiden, wohin sie zeigt.
     """
-    run = ai_run_service.aktiver_lauf(db, user_id=user.id)
+    run = ai_run_service.aktiver_lauf(
+        db, user_id=user.id, kind=_art(kind) if kind else None
+    )
     if run is None:
         return None
-    return AiRunResponse(
-        id=run.id,
-        status=run.status,
-        stop_reason=run.stop_reason,
-        message_id=run.message_id,
-        live=ai_run_broker.laeuft(run.id),
-        created_at=run.created_at,
-    )
+    return _run_response(db, run)
+
+
+@router.post("/guardian/takeover")
+def guardian_uebernehmen(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Ein Mensch uebernimmt: die laufenden Reparaturen dieses Menschen enden.
+
+    Der Knopf im Guardian-Fenster. Er ist der Grund, warum es dort kein
+    Eingabefeld gibt: abbrechen soll man koennen, aber ausdruecklich und nicht
+    durch einen Tastendruck — im Chat loest jede getippte Nachricht ueber
+    `vorgaenger_abloesen` den offenen Lauf ab, und in einem Fenster, in dem seit
+    vier Uhr eine Reparatur laeuft, waere ein Eingabefeld ein Knopf zum
+    versehentlichen Abbrechen.
+
+    **Beendet wird der Auftrag, nicht nur der Lauf.** Nur den Lauf abzubrechen
+    hiesse, dass der Takt neunzig Sekunden spaeter den naechsten startet — der
+    Mensch haette uebernommen und die KI arbeitete weiter.
+
+    Kein eigenes Recht: es sind die eigenen Auftraege dieses Benutzers, und
+    ``ai.chat.use`` hat er ohnehin, sonst gaebe es das Fenster fuer ihn nicht.
+    """
+    from services import ai_guardian_repair_service
+
+    beendet = ai_guardian_repair_service.uebernehmen(db, user=user)
+    # Erst der Auftrag, dann der Lauf. Andersherum faende der Takt zwischen
+    # beiden Schritten einen Auftrag ohne laufenden Lauf und startete den
+    # naechsten Anlauf — mitten in die Uebernahme hinein.
+    fenster = ai_chat_service.get_or_create_conversation(db, user, "guardian")
+    ai_run_service.vorgaenger_abloesen(db, conversation_id=fenster.id)
+    db.commit()
+    return {"aborted": beendet}
 
 
 @router.get("/run/{run_id}/stream")
