@@ -12,7 +12,6 @@
     "workdir": "/home/container",
     "user": "1000:1000",
     "env": {
-      "STEAM_COMPAT_CLIENT_INSTALL_PATH": "/home/container/.steam/steam",
       "STEAM_COMPAT_DATA_PATH": "/data/compatdata",
       "WINEDEBUG": "-all",
       "WINEESYNC": "1",
