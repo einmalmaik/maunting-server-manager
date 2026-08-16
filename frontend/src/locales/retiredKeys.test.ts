@@ -26,6 +26,18 @@ import en from './en.json'
  * Texte fest verdrahtet im Quelltext trug. Jetzt liest er sie aus
  * `permissionDetails.<schlüssel mit _ statt .>` — und zwei Fassungen desselben
  * Rechtetextes wären schlimmer als die eine deutsche von vorher.
+ *
+ * `ai.providers.voices` und `ai.providers.realtimeHint` sind am 16.08.2026 mit
+ * OpenAIs Realtime-API gefallen. Die acht Stimmen gehörten dem Modell und
+ * hatten deshalb eine Beschriftung im Panel („Ash — ruhig, tief"); eine
+ * ElevenLabs-Stimme gehört dem Konto des Betreibers, MSM kennt sie nicht und
+ * kann sie folglich nicht beschriften. Aus dem Auswahlfeld ist ein Textfeld
+ * geworden.
+ *
+ * Diese beiden sind der Grund, warum es diese Liste gibt: acht wortreiche
+ * Hörprofile, die niemand mehr liest, sähen in der Sprachdatei aus wie
+ * gepflegte Texte — und der Nächste, der eine Stimme beschreiben will, fände
+ * sie und schriebe daran weiter.
  */
 const ABGELOESTE_SCHLUESSEL = [
   'ai.memory.title',
@@ -34,6 +46,8 @@ const ABGELOESTE_SCHLUESSEL = [
   'ai.memory.teamDescription',
   'teams.personalHint',
   'permissions',
+  'ai.providers.voices',
+  'ai.providers.realtimeHint',
 ]
 
 /** Die Nachfolger muss es geben — sonst wäre das Löschen ein Verlust. */
@@ -49,6 +63,18 @@ const NACHFOLGER = [
   'permissionDetails.users_read.desc',
   'permissionDetails.server_databases_admin.title',
   'permissionEditor.groups.users',
+  // Die Nachfolger des Sprachmodus-Umbaus. `ttsHint` erklärt den Stimmzugang
+  // dort, wo `realtimeHint` den Sprachzugang erklärte; die beiden
+  // Transkript-Schlüssel sind neu und haben keinen Vorgänger — sie stehen hier
+  // trotzdem, weil ein Formularfeld ohne Beschriftung genau so aussieht wie
+  // eines, dessen Beschriftung jemand beim Umbau vergessen hat.
+  'ai.providers.ttsHint',
+  'ai.providers.defaultVoice',
+  'ai.providers.defaultVoiceHint',
+  'ai.providers.transcriptionModel',
+  'ai.providers.transcriptionModelHint',
+  'ai.providers.protokoll.tts',
+  'ai.providers.protokoll.chat_completions',
 ]
 
 // Nur die beiden Basissprachen: die übrigen neun sind bewusst Teilmengen mit
