@@ -21,7 +21,7 @@
       "ADMIN_PASSWORD": "",
       "MAP_NAME": "TheIsland_WP"
     },
-    "startup": "./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?SessionName={ENV.SERVER_NAME}?ServerPassword={ENV.SERVER_PASSWORD}?ServerAdminPassword={ENV.ADMIN_PASSWORD} -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RCONPort={RCON_PORT} -game -server -log -NoBattlEye {MOD_ARG}",
+    "startup": "./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?SessionName={ENV.SERVER_NAME}?Port={GAME_PORT}?QueryPort={QUERY_PORT}?RCONPort={RCON_PORT}?ServerPassword={ENV.SERVER_PASSWORD}?ServerAdminPassword={ENV.ADMIN_PASSWORD}?RCONEnabled=True -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RCONPort={RCON_PORT} -RCONEnabled=True -MULTIHOME=0.0.0.0 -PublicIPForEpic={BIND_IP} -game -server -log -stdout -nosteamclient -NoBattlEye {MOD_ARG}",
     "ensureDirs": [
       "ShooterGame/Saved/Config/WindowsServer",
       "ShooterGame/Saved/SavedArks",
@@ -37,6 +37,10 @@
   "ports": [
     {
       "name": "game",
+      "protocol": "udp"
+    },
+    {
+      "name": "peer",
       "protocol": "udp"
     },
     {

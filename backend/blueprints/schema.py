@@ -79,6 +79,7 @@ class BlueprintPortName(str, Enum):
     RCON = "rcon"
     VOICE = "voice"
     WEB = "web"
+    PEER = "peer"
     CUSTOM = "custom"
 
 
@@ -172,6 +173,7 @@ _ALLOWED_STARTUP_TOKENS: frozenset[str] = frozenset({
     "RCON_PORT",
     "VOICE_PORT",
     "WEB_PORT",
+    "PEER_PORT",
     "INSTALL_DIR",
     "MOD_ARG",
     "BIND_IP",
@@ -189,6 +191,7 @@ _ALLOWED_ENV_VALUE_TOKENS: frozenset[str] = frozenset({
     "RCON_PORT",
     "VOICE_PORT",
     "WEB_PORT",
+    "PEER_PORT",
     "BIND_IP",
 })
 
@@ -199,6 +202,7 @@ _ALLOWED_CONFIG_VALUE_TOKENS: frozenset[str] = frozenset({
     "RCON_PORT",
     "VOICE_PORT",
     "WEB_PORT",
+    "PEER_PORT",
 })
 _ALLOWED_WORKSHOP_PATH_TOKENS: frozenset[str] = frozenset({
     "WORKSHOP_APP_ID",

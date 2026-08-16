@@ -385,21 +385,45 @@ export function ServerDetail() {
         return networkForm[field] !== current;
       };
 
-      let customPortsChanged = false;
-      let protocolsChanged = false;
+      const currentPortsMap: Record<string, number | null> = {};
       server?.ports?.forEach((p) => {
-        if ((networkForm.protocols[p.role] || p.protocol) !== p.protocol) {
-          protocolsChanged = true;
-        }
-        if (p.role !== 'game' && p.role !== 'query' && p.role !== 'rcon') {
-          const current = p.port ? String(p.port) : "";
-          if ((networkForm.ports[p.role] || "") !== current) {
-            customPortsChanged = true;
+        currentPortsMap[p.role] = p.port;
+      });
+
+      let portsChanged = false;
+      let protocolsChanged = false;
+
+      if (portChanged("game_port") || portChanged("query_port") || portChanged("rcon_port")) {
+        portsChanged = true;
+      }
+
+      const portDefs = gameInfo?.ports ?? [];
+      const mappedPortRoles = portDefs.length > 0
+        ? mapBlueprintPorts(portDefs).map((p) => p.mappedRole)
+        : Object.keys(currentPortsMap);
+
+      if (mappedPortRoles.length !== (server?.ports?.length ?? 0)) {
+        portsChanged = true;
+      }
+
+      mappedPortRoles.forEach((role) => {
+        if (role !== "game" && role !== "query" && role !== "rcon") {
+          const formVal = networkForm.ports[role];
+          const formNum = formVal ? parseInt(formVal) : null;
+          const currentNum = currentPortsMap[role] ?? null;
+          if (formNum !== currentNum || !(role in currentPortsMap)) {
+            portsChanged = true;
           }
         }
       });
 
-      if (portChanged("game_port") || portChanged("query_port") || portChanged("rcon_port") || customPortsChanged || protocolsChanged) {
+      server?.ports?.forEach((p) => {
+        if ((networkForm.protocols[p.role] || p.protocol) !== p.protocol) {
+          protocolsChanged = true;
+        }
+      });
+
+      if (portsChanged || protocolsChanged) {
         const portsPayload: Record<string, number | null> = {};
         const protocolsPayload: Record<string, string> = {};
         portsPayload["game"] = networkForm.game_port ? parseInt(networkForm.game_port) : null;
@@ -408,13 +432,15 @@ export function ServerDetail() {
         if (networkForm.protocols.game) protocolsPayload.game = networkForm.protocols.game;
         if (networkForm.protocols.query) protocolsPayload.query = networkForm.protocols.query;
         if (networkForm.protocols.rcon) protocolsPayload.rcon = networkForm.protocols.rcon;
-        
-        Object.keys(networkForm.ports).forEach((role) => {
-          const val = networkForm.ports[role];
-          portsPayload[role] = val ? parseInt(val) : null;
-        });
-        Object.keys(networkForm.protocols).forEach((role) => {
-          protocolsPayload[role] = networkForm.protocols[role];
+
+        mappedPortRoles.forEach((role) => {
+          if (role !== "game" && role !== "query" && role !== "rcon") {
+            const val = networkForm.ports[role];
+            portsPayload[role] = val ? parseInt(val) : null;
+            if (networkForm.protocols[role]) {
+              protocolsPayload[role] = networkForm.protocols[role];
+            }
+          }
         });
 
         body.ports = portsPayload;
@@ -953,7 +979,7 @@ export function ServerDetail() {
             {t("common.edit")}
           </button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <div>
             <p className="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider mb-1">
               {t("servers.node")}
@@ -979,6 +1005,8 @@ export function ServerDetail() {
               const baseRole = labelRole(p.role);
               const label = baseRole === 'game'
                 ? t('servers.gamePort')
+                : baseRole === 'peer'
+                ? t('servers.peerPort', { defaultValue: 'Peer-Port' })
                 : baseRole === 'query'
                 ? t('servers.queryPort')
                 : baseRole === 'rcon'
@@ -1189,6 +1217,8 @@ export function ServerDetail() {
                       const baseRole = labelRole(role);
                       const label = baseRole === 'game'
                         ? t('servers.gamePort')
+                        : baseRole === 'peer'
+                        ? t('servers.peerPort', { defaultValue: 'Peer-Port' })
                         : baseRole === 'query'
                         ? t('servers.queryPort')
                         : baseRole === 'rcon'

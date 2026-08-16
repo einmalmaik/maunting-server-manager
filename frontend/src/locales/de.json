@@ -1277,6 +1277,7 @@
     "publicBindIp": "Host-IP",
     "publicBindIpHint": "Pflichtfeld. Nur ein konkretes Interface (kein 0.0.0.0). Standard: erste Public-IP des Hosts.",
     "gamePort": "Game-Port",
+    "peerPort": "Peer-Port",
     "queryPort": "Query-Port",
     "rconPort": "RCon-Port",
     "portAuto": "auto",
