@@ -12,6 +12,7 @@
     "workdir": "/home/container",
     "user": "1000:1000",
     "env": {
+      "STEAM_COMPAT_CLIENT_INSTALL_PATH": "/data/.steam/steam",
       "STEAM_COMPAT_DATA_PATH": "/data/compatdata",
       "WINEDEBUG": "-all",
       "WINEESYNC": "1",
@@ -25,6 +26,7 @@
     "startup": "proton run ./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?MaxPlayers={ENV.MAX_PLAYERS}?SessionName=\"{ENV.SERVER_NAME}\"?Port={GAME_PORT}?RCONPort={RCON_PORT}?RCONEnabled=True?ServerPassword=\"{ENV.SERVER_PASSWORD}\"?ServerAdminPassword=\"{ENV.ADMIN_PASSWORD}\" -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -oldconsole -servergamelog -Port={GAME_PORT} -NoBattlEye {MOD_ARG}",
     "ensureDirs": [
       "compatdata",
+      ".steam/steam",
       "ShooterGame/Saved/Config/WindowsServer",
       "ShooterGame/Saved/SavedArks",
       "ShooterGame/Saved/Logs"
