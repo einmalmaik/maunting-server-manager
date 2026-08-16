@@ -8,10 +8,12 @@
     "description": "ARK: Survival Ascended Dedicated Server (App-ID 2430930) via SteamCMD. Windows-Binary wird ueber GE-Proton/Wine gestartet. Maps: TheIsland_WP, ScorchedEarth_WP, TheCenter_WP, Aberration_WP, Extinction_WP, Ragnarok_WP, Valguero_WP, Astraeos_WP, LostColony_WP, Fjordur_WP, ClubArk_WP."
   },
   "runtime": {
-    "image": "ghcr.io/parkervcp/yolks:wine_10",
+    "image": "ghcr.io/ptero-eggs/steamcmd:proton",
     "workdir": "/home/container",
     "user": "1000:1000",
     "env": {
+      "STEAM_COMPAT_CLIENT_INSTALL_PATH": "/data/.steam/steam",
+      "STEAM_COMPAT_DATA_PATH": "/data/compatdata",
       "WINEDEBUG": "-all",
       "WINEESYNC": "1",
       "WINEFSYNC": "1",
@@ -21,8 +23,10 @@
       "ADMIN_PASSWORD": "",
       "MAP_NAME": "TheIsland_WP"
     },
-    "startup": "./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?SessionName={ENV.SERVER_NAME}?Port={GAME_PORT}?QueryPort={QUERY_PORT}?RCONPort={RCON_PORT}?ServerPassword={ENV.SERVER_PASSWORD}?ServerAdminPassword={ENV.ADMIN_PASSWORD}?RCONEnabled=True -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RCONPort={RCON_PORT} -RCONEnabled=True -MULTIHOME=0.0.0.0 -PublicIPForEpic={BIND_IP} -game -server -log -stdout -nosteamclient -NoBattlEye {MOD_ARG}",
+    "startup": "proton run ./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?MaxPlayers={ENV.MAX_PLAYERS}?SessionName=\"{ENV.SERVER_NAME}\"?Port={GAME_PORT}?RCONPort={RCON_PORT}?RCONEnabled=True?ServerPassword=\"{ENV.SERVER_PASSWORD}\"?ServerAdminPassword=\"{ENV.ADMIN_PASSWORD}\" -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -oldconsole -servergamelog -Port={GAME_PORT} -NoBattlEye {MOD_ARG}",
     "ensureDirs": [
+      "compatdata",
+      ".steam/steam",
       "ShooterGame/Saved/Config/WindowsServer",
       "ShooterGame/Saved/SavedArks",
       "ShooterGame/Saved/Logs"
