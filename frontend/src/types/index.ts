@@ -285,7 +285,7 @@ export interface PostgresExtension {
   trusted?: boolean
 }
 
-export type BlueprintPortRole = 'game' | 'query' | 'rcon' | 'voice' | 'web' | 'custom'
+export type BlueprintPortRole = 'game' | 'query' | 'rcon' | 'voice' | 'web' | 'peer' | 'custom'
 export type BlueprintPortProtocol = 'tcp' | 'udp'
 
 export interface BlueprintPortDef {

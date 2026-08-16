@@ -979,6 +979,8 @@ export function ServerDetail() {
               const baseRole = labelRole(p.role);
               const label = baseRole === 'game'
                 ? t('servers.gamePort')
+                : baseRole === 'peer'
+                ? t('servers.peerPort', { defaultValue: 'Peer-Port' })
                 : baseRole === 'query'
                 ? t('servers.queryPort')
                 : baseRole === 'rcon'
@@ -1189,6 +1191,8 @@ export function ServerDetail() {
                       const baseRole = labelRole(role);
                       const label = baseRole === 'game'
                         ? t('servers.gamePort')
+                        : baseRole === 'peer'
+                        ? t('servers.peerPort', { defaultValue: 'Peer-Port' })
                         : baseRole === 'query'
                         ? t('servers.queryPort')
                         : baseRole === 'rcon'

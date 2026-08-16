@@ -40,6 +40,10 @@
       "protocol": "udp"
     },
     {
+      "name": "peer",
+      "protocol": "udp"
+    },
+    {
       "name": "query",
       "protocol": "udp"
     },
