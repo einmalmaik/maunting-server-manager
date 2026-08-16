@@ -14,21 +14,38 @@ Ein Sprachzugang muss deshalb zu einem zweiten Anbieter gehen, und beide Wege
 müssen den jeweils falschen Zugang **vorher** abweisen statt ihn an eine Adresse
 zu schicken, an der sein Modell nicht antwortet.
 
+Dazu kommt seit dem Sprachmodus eine zweite Eigenschaft, die nur ein
+Sprachzugang hat: **seine Stimme**. Sie ist die einzige Einstellung des Panels,
+die der Kunde nicht sieht, sondern hört, und sie gehört deshalb dem Betreiber —
+so wie Logo und Farbe. Was hier daran hängt, ist eine Unterscheidung, die man
+leicht wegoptimiert: ``NULL`` heisst „nichts hinterlegt" und ausdrücklich nicht
+„alloy". Steht der Standard erst einmal in der Spalte, wird er zu einer Auswahl,
+die niemand getroffen hat, und ein späterer Wechsel von `STANDARDSTIMME` läuft
+bei jedem bestehenden Zugang ins Leere.
+
 Was hier zugesichert wird:
 
 * Ein Realtime-Zugang kommt nicht in den Chat — weder über die Auswahl noch
   über eine geratene Kennung.
 * Der Katalogschlüssel geht nur an den Anbieter, der ihn verlangt.
 * Das Vorwärmen beim Start fasst schlüsselpflichtige Kataloge nicht an.
+* Eine hinterlegte Stimme kommt zurück, wie sie hineinging; eine erfundene
+  kommt gar nicht erst hinein; und keine hinterlegte Stimme bleibt keine.
 """
 
 from __future__ import annotations
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from models import AiProvider
-from services import ai_model_catalog, ai_provider_registry, ai_provider_service
+from services import (
+    ai_model_catalog,
+    ai_provider_registry,
+    ai_provider_service,
+    ai_voice_session,
+)
 
 
 # ── Die Registry ──────────────────────────────────────────────────────────
@@ -175,3 +192,208 @@ def test_prewarming_leaves_key_bound_catalogs_alone(monkeypatch: pytest.MonkeyPa
 
     assert "openrouter" in angestossen
     assert "openai_realtime" not in angestossen
+
+
+# ── Die Stimme am Zugang ──────────────────────────────────────────────────
+
+
+def _anlegen(
+    client: TestClient, cookies: dict, csrf: str | None, **felder
+) -> httpx.Response:
+    """Einen Sprachzugang so anlegen, wie der Betreiber es tut: über das Formular.
+
+    Über die Schnittstelle und nicht über den Dienst, weil die eine Hälfte
+    dieser Zusagen genau dort entsteht: die 422 für eine erfundene Stimme kommt
+    aus `schemas.ai_provider.Stimme`, und ein Dienstaufruf ginge daran vorbei.
+    """
+    daten: dict = {
+        "name": "Sprachzugang",
+        "provider_kind": "openai_realtime",
+        "default_model": "gpt-realtime-2.1",
+    }
+    daten.update(felder)
+    return client.post(
+        "/api/ai/settings/providers",
+        json=daten,
+        cookies=cookies,
+        headers={"X-CSRF-Token": csrf},
+    )
+
+
+def _aendern(
+    client: TestClient, cookies: dict, csrf: str | None, zugang_id: int, **felder
+) -> httpx.Response:
+    return client.patch(
+        f"/api/ai/settings/providers/{zugang_id}",
+        json=felder,
+        cookies=cookies,
+        headers={"X-CSRF-Token": csrf},
+    )
+
+
+def test_a_chosen_voice_survives_the_round_trip(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db
+) -> None:
+    """Hin, in die Spalte, und wieder zurück — ohne dass jemand etwas umdeutet."""
+    angelegt = _anlegen(client, owner_cookies, csrf_token, default_voice="verse")
+
+    assert angelegt.status_code == 201, angelegt.text
+    assert angelegt.json()["default_voice"] == "verse"
+    assert db.query(AiProvider).one().default_voice == "verse"
+    # Und über die Liste, die das Einstellungsformular beim Öffnen liest: sonst
+    # stünde die Wahl in der Datenbank und das Feld daneben leer da.
+    gelesen = client.get("/api/ai/settings/providers", cookies=owner_cookies).json()
+    assert gelesen[0]["default_voice"] == "verse"
+
+
+@pytest.mark.parametrize("stimme", ai_voice_session.STIMMEN)
+def test_every_voice_the_model_can_speak_is_accepted(
+    stimme: str, client: TestClient, owner_cookies: dict, csrf_token: str, db
+) -> None:
+    """Acht Namen, eine Liste — und drei Stellen, die sie lesen.
+
+    `STIMMEN` steht in `ai_voice_session`, geprüft wird gegen sie im Vertrag
+    **und** im Dienst. Zwei Prüfungen gegen eine Liste sind in Ordnung; zwei
+    Listen wären es nicht. Dieser Test fällt genau dann, wenn irgendwo eine
+    Kopie entstanden ist, die eine Stimme weniger kennt.
+    """
+    antwort = _anlegen(client, owner_cookies, csrf_token, default_voice=stimme)
+
+    assert antwort.status_code == 201, antwort.text
+    assert db.query(AiProvider).one().default_voice == stimme
+
+
+@pytest.mark.parametrize("erfunden", ["nova", "karl", "alloy2", "Alloy Deluxe"])
+def test_an_invented_voice_never_reaches_the_column(
+    erfunden: str, client: TestClient, owner_cookies: dict, csrf_token: str, db
+) -> None:
+    """Abgewiesen am Feld, in das er gerade getippt hat — nicht im Gespräch.
+
+    ``nova`` steht hier nicht zufällig an erster Stelle: es ist eine echte
+    OpenAI-Stimme, nur eben aus der Text-zu-Sprache-Familie und nicht aus dem
+    Realtime-Modell. Genau so entsteht der Fehlgriff, und er fiele ohne diese
+    Prüfung erst der Gegenstelle auf — die weist das ``session.update`` dann
+    ab, und das Gespräch liefe ohne Anweisungen und ohne Werkzeuge weiter.
+    """
+    antwort = _anlegen(client, owner_cookies, csrf_token, default_voice=erfunden)
+
+    assert antwort.status_code == 422
+    assert db.query(AiProvider).count() == 0
+
+
+def test_an_invented_voice_is_refused_on_the_way_in_as_well(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db
+) -> None:
+    """Und beim Ändern bleibt die alte Wahl stehen, statt beschädigt zu werden."""
+    zugang = _anlegen(client, owner_cookies, csrf_token, default_voice="coral").json()
+
+    antwort = _aendern(
+        client, owner_cookies, csrf_token, zugang["id"], default_voice="nova"
+    )
+
+    assert antwort.status_code == 422
+    assert db.query(AiProvider).one().default_voice == "coral"
+
+
+def test_the_service_refuses_an_invented_voice_without_the_contract(db) -> None:
+    """Der zweite Riegel, für die Schreibwege, die am Vertrag vorbeiführen.
+
+    Ein Seed, ein Test, ein späterer Importweg rufen `create_provider` direkt
+    auf. Ohne diese Prüfung stünde die erfundene Stimme dann in der Spalte, und
+    der Betreiber suchte den Fehler in einem Sprachgespräch statt in seiner
+    Einrichtung.
+    """
+    with pytest.raises(ai_provider_service.AiProviderConfigurationError):
+        ai_provider_service.create_provider(
+            db,
+            name="Sprachzugang",
+            provider_kind="openai_realtime",
+            default_model="gpt-realtime-2.1",
+            enabled=True,
+            requires_api_key=True,
+            operator_api_key=None,
+            default_voice="nova",
+        )
+
+
+def test_nothing_chosen_is_not_the_same_as_alloy(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db
+) -> None:
+    """Der ganze Grund, warum die Spalte ``nullable`` ist.
+
+    Es wäre bequem, beim Anlegen die Standardstimme einzutragen — ein Feld
+    weniger, das ``None`` sein kann. Der Preis stünde erst Jahre später auf der
+    Rechnung: eine neue `STANDARDSTIMME` gälte dann für keinen einzigen
+    bestehenden Zugang, und niemand fände den Grund.
+    """
+    angelegt = _anlegen(client, owner_cookies, csrf_token)
+
+    assert angelegt.status_code == 201, angelegt.text
+    assert angelegt.json()["default_voice"] is None
+    assert db.query(AiProvider).one().default_voice is None
+
+
+def test_a_dropdown_without_a_choice_sends_an_empty_string(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db
+) -> None:
+    """``""`` ist der Weg, auf dem „nichts gewählt" hier ankommt.
+
+    Ein Auswahlfeld ohne Wahl schickt einen leeren String und kein ``null``.
+    Landete der so in der Spalte, ginge er beim Verbinden als Stimme an OpenAI
+    — und ``None`` heisst dort etwas völlig anderes als ``""``.
+    """
+    angelegt = _anlegen(client, owner_cookies, csrf_token, default_voice="")
+
+    assert angelegt.status_code == 201, angelegt.text
+    assert db.query(AiProvider).one().default_voice is None
+
+
+def test_the_operator_may_type_what_he_reads(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db
+) -> None:
+    """Nachsichtig lesen, streng speichern.
+
+    In der Oberfläche steht die Stimme gross („Alloy — neutral, ausgeglichen"),
+    die API verlangt sie klein. Wer den Wert von Hand setzt, tippt ab, was er
+    sieht; ein 422 dafür wäre eine Belehrung ohne Anlass. In der Spalte steht
+    trotzdem genau eine Schreibweise.
+    """
+    angelegt = _anlegen(client, owner_cookies, csrf_token, default_voice="  Verse ")
+
+    assert angelegt.status_code == 201, angelegt.text
+    assert db.query(AiProvider).one().default_voice == "verse"
+
+
+def test_a_field_left_out_leaves_the_voice_standing(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db
+) -> None:
+    """Ein Chatzugang schickt das Feld gar nicht mit — und darf nichts löschen."""
+    zugang = _anlegen(client, owner_cookies, csrf_token, default_voice="echo").json()
+
+    geaendert = _aendern(
+        client, owner_cookies, csrf_token, zugang["id"], default_model="gpt-realtime"
+    )
+
+    assert geaendert.status_code == 200, geaendert.text
+    assert db.query(AiProvider).one().default_voice == "echo"
+
+
+def test_an_explicit_null_takes_the_voice_back(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db
+) -> None:
+    """Der Betreiber muss seine Wahl auch zurücknehmen können.
+
+    „Nicht mitgeschickt" und „ausdrücklich ``null``" sehen im Vertrag beide wie
+    ``None`` aus; auseinander hält sie erst `model_dump(exclude_unset=True)` im
+    Router. Ohne diese Unterscheidung gäbe es keinen Weg zurück zur Vorgabe —
+    ausser den Zugang zu löschen.
+    """
+    zugang = _anlegen(client, owner_cookies, csrf_token, default_voice="echo").json()
+
+    geaendert = _aendern(
+        client, owner_cookies, csrf_token, zugang["id"], default_voice=None
+    )
+
+    assert geaendert.status_code == 200, geaendert.text
+    assert geaendert.json()["default_voice"] is None
+    assert db.query(AiProvider).one().default_voice is None

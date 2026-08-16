@@ -56,7 +56,7 @@ def abschlusstext(db: Session, run: AiRun, zustand: dict | None = None) -> str:
     jüngste Antwort aus einem völlig anderen Zug. Der Betreiber las dann unter
     "Abschlussbericht des Laufs" seine Chatunterhaltung von gestern.
 
-    Das Guardian-Fenster hat seit `20260816_01` eine eigene Unterhaltung, aber
+    Das Guardian-Fenster hat seit `20260816_02` eine eigene Unterhaltung, aber
     der Anker bleibt trotzdem nötig — und dort umso mehr: ein Reparaturauftrag
     hat bis zu acht Anläufe im selben Verlauf, und ohne Anker trüge der Bericht
     des sechsten die Schlussworte des siebten.

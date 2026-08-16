@@ -156,6 +156,18 @@
       "catalogUnavailable": "Der Modellkatalog des Anbieters ist gerade nicht erreichbar. Du kannst den Modellnamen so lange von Hand eintragen; die Denkstufen bleiben dann unbekannt.",
       "catalogNeedsKey": "Dieser Anbieter gibt seine Modelliste nur gegen den Schlüssel heraus. Trage den Schlüssel ein und speichere den Zugang — danach steht die Auswahl hier.",
       "realtimeHint": "Ein Sprachzugang. Er erscheint nicht in der Modellauswahl des Chats, sondern trägt den Sprachmodus. Wer ihn nutzen darf, entscheidet das Recht „Mit der KI sprechen“.",
+      "defaultVoice": "Standardstimme",
+      "defaultVoiceHint": "Gilt nur für Sprachzugänge. Ohne Wahl bleibt es bei der Standardstimme — wird die später eine andere, spricht dieser Zugang ohne Zutun mit ihr.",
+      "voices": {
+        "alloy": "Alloy — neutral, ausgeglichen",
+        "ash": "Ash — ruhig, tief",
+        "ballad": "Ballad — weich, erzählend",
+        "coral": "Coral — warm, freundlich",
+        "echo": "Echo — sachlich, klar",
+        "sage": "Sage — ruhig, bedächtig",
+        "shimmer": "Shimmer — hell, lebhaft",
+        "verse": "Verse — ausdrucksstark, variabel"
+      },
       "protokoll": {
         "chat_completions": "Chat",
         "realtime": "Sprache"
@@ -665,10 +677,15 @@
       },
       "info": {
         "model": "Modell",
+        "voice": "Stimme",
         "sampleRate": "Abtastrate",
         "maxSession": "Sitzungsdauer",
         "minutes": "{{count}} Minuten",
         "hint": "Am Sprachmodus lässt sich nichts einstellen: Modell und Schlüssel gehören dem Betreiber, und die Sitzungsdauer hängt an der Lebensdauer deiner Anmeldung. Nach Ablauf wird automatisch neu verbunden."
+      },
+      "beleg": {
+        "heading": "Belegstelle",
+        "untrusted": "Dieser Text stammt unverändert aus der genannten Quelle — die KI hat ihn herausgesucht, nicht geschrieben. Lies ihn selbst, statt der Erklärung zu glauben."
       }
     },
     "guardian": {

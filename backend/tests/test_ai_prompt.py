@@ -120,6 +120,14 @@ def test_the_rules_with_an_observed_cause_are_still_there() -> None:
     # dem Panel wurde aus Trainingswissen ueber fremde Panels beantwortet.
     assert "steht nichts in der MSM-Dokumentation" in prompt
     assert "Wissen ueber andere Panels" in prompt
+    # Auf die Frage nach einem Fehler kam eine Abschrift der halben Logdatei.
+    # Im Sprachmodus wurde sie vorgelesen, im Chat wandert sie in den Verlauf
+    # und geht danach in jeder weiteren Runde erneut hinaus.
+    assert "Belege statt Abschriften" in prompt
+    assert "nie vollstaendig wieder" in prompt
+    # Das Gedaechtnis soll wirken und nicht auftreten: kein "ich schaue kurz in
+    # meinen Notizen nach", keine Schluesselnamen im Text.
+    assert "passieren **lautlos**" in prompt
 
 
 def test_drei_werkzeuge_beziehen_ihren_anlass_aus_diesen_bloecken() -> None:

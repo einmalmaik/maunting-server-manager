@@ -83,6 +83,19 @@ def test_every_branch_migration_runs_both_ways(tmp_path: Path) -> None:
         assert "run_id" in {
             spalte["name"] for spalte in inspect(engine).get_columns("ai_tool_results")
         }, "ai_tool_results.run_id fehlt nach `upgrade head`"
+        # Dieselbe Sorte Spalte, eine Tabelle weiter. Sie muss ausserdem
+        # ``nullable`` bleiben: ``NULL`` heisst bei der Stimme „nichts
+        # hinterlegt" und loest erst beim Verbinden auf die Standardstimme auf.
+        # Eine Migration, die hier ein NOT NULL mit Vorgabewert setzte, machte
+        # aus dem Standard eine Wahl des Betreibers — und ein spaeterer Wechsel
+        # der Standardstimme erreichte keinen einzigen bestehenden Zugang mehr.
+        stimmen = [
+            spalte
+            for spalte in inspect(engine).get_columns("ai_providers")
+            if spalte["name"] == "default_voice"
+        ]
+        assert stimmen, "ai_providers.default_voice fehlt nach `upgrade head`"
+        assert stimmen[0]["nullable"], "ai_providers.default_voice muss NULL erlauben"
     finally:
         engine.dispose()
         settings.database_url = previous

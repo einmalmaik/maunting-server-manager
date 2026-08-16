@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from models import AiProvider, AiRun, User
 from services import ai_provider_registry
+from services.ai_voice_session import STIMMEN
 from services.dis_client import DisClient
 
 
@@ -91,6 +92,33 @@ def _assert_key_passt(kind: str, api_key: str | None) -> None:
         )
 
 
+def _assert_stimme(stimme: str | None) -> str | None:
+    """Nur eine Stimme, die es wirklich gibt — oder gar keine.
+
+    Die verbindliche Prüfung, obwohl `schemas.ai_provider.Stimme` dasselbe schon
+    tut. Der Vertrag dort verschafft dem Betreiber eine 422 mit Feldbezug statt
+    einer Meldung ohne Ort; hier steht sie, weil nicht jeder Schreibweg durch
+    ihn führt — ein Seed, ein Test, ein späterer Importweg schreiben direkt in
+    diese Funktion. Und eine erfundene Stimme fiele sonst erst beim Verbinden
+    auf, als Anbieterfehler mitten in einem Sprachgespräch.
+
+    ``None`` bleibt ``None`` und wird **nicht** zur Standardstimme aufgelöst:
+    was in der Spalte steht, ist die Wahl des Betreibers, und die hat er hier
+    nicht getroffen. Aufgelöst wird beim Verbinden, siehe
+    `ai_voice_session.STANDARDSTIMME`.
+    """
+    if stimme is None:
+        return None
+    name = stimme.strip().lower()
+    if not name:
+        return None
+    if name not in STIMMEN:
+        raise AiProviderConfigurationError(
+            "Unbekannte Stimme. Wählbar sind: " + ", ".join(sorted(STIMMEN))
+        )
+    return name
+
+
 def create_provider(
     db: Session,
     *,
@@ -102,6 +130,10 @@ def create_provider(
     operator_api_key: str | None,
     # Optional: ohne Preis bleiben die Kosten bei null (siehe estimate_cost_microunits).
     token_price_micro_usd_per_million: int | None = None,
+    # Optional: ohne Stimme greift beim Verbinden `ai_voice_session.STANDARDSTIMME`.
+    # Der Standard wird bewusst **nicht** hier eingetragen — warum, steht an der
+    # Spalte in `models/ai_provider.py`.
+    default_voice: str | None = None,
 ) -> AiProvider:
     if not name.strip() or not default_model.strip():
         raise AiProviderConfigurationError("Provider-Name und Modell dürfen nicht leer sein")
@@ -114,6 +146,7 @@ def create_provider(
         enabled=enabled,
         requires_api_key=requires_api_key,
         token_price_micro_usd_per_million=token_price_micro_usd_per_million,
+        default_voice=_assert_stimme(default_voice),
     )
     db.add(provider)
     db.flush()
@@ -159,6 +192,15 @@ def update_provider(
         provider.token_price_micro_usd_per_million = values[
             "token_price_micro_usd_per_million"
         ]
+    # Wie beim Preis darüber entscheidet die **Anwesenheit** des Schlüssels und
+    # nicht sein Wert: `values` kommt aus `model_dump(exclude_unset=True)`, ein
+    # nicht mitgeschicktes Feld fehlt also ganz. Ein ausdrückliches ``null``
+    # landet dagegen hier und leert die Spalte — der Zugang spricht danach
+    # wieder mit der Standardstimme. Nicht bei `name`/`default_model` oben, denn
+    # die dürfen nicht leer werden; diese Spalte schon, und leer heißt hier
+    # etwas.
+    if "default_voice" in values:
+        provider.default_voice = _assert_stimme(values["default_voice"])
     if clear_operator_api_key:
         provider.operator_api_key_encrypted = None
         provider.operator_api_key_hint = None

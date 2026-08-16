@@ -386,7 +386,7 @@ async def _takt(db: Session) -> int:
 def _letzter_anlauf(db: Session, user: User) -> None:
     """Stellt den Reparaturauftrag auf seinen **letzten** Anlauf.
 
-    Die Abschlussmail geht seit `20260816_02` einmal je *Auftrag* hinaus, nicht
+    Die Abschlussmail geht seit `20260816_03` einmal je *Auftrag* hinaus, nicht
     je Lauf — sonst bekaeme der Betreiber bis zu acht Mails ueber einen Server,
     von denen sieben "nicht behoben" sagen und die achte ihnen widerspricht.
 

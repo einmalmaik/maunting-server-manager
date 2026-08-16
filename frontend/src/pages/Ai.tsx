@@ -4,11 +4,19 @@ import { AudioLines, ChevronDown, MessageSquare, ShieldAlert, Sparkles } from 'l
 import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiVoiceConfig } from '@/api/ai'
+import { api } from '@/api/client'
+import { AiAutonomyButton } from '@/components/ai/AiAutonomyButton'
 import { AiChat } from '@/components/ai/AiChat'
 import { AiSkillDirectory } from '@/components/ai/AiSkillDirectory'
 import { GuardianAnsicht } from '@/components/ai/GuardianAnsicht'
 import { SprachAnsicht } from '@/components/ai/voice/SprachAnsicht'
 import { useHasPermission } from '@/hooks/useHasPermission'
+
+/** Nur, was die Bereichsauswahl des Autonomie-Knopfs braucht. */
+interface ServerOption {
+  id: number
+  name: string
+}
 
 /**
  * Welche Ansicht die Seite gerade ausfüllt.
@@ -75,6 +83,18 @@ function Umschalter({ aktiv, onClick, icon, label }: {
  * dort optisch hingehörte. Die Topbar gehört allen Seiten; ein Knopf darin, der
  * nur unter `/ai` etwas bedeutet, wäre eine Abhängigkeit vom Rahmen zur Seite.
  *
+ * Neben ihm steht im Sprachmodus der **Autonomie-Schalter**. Er hängt im
+ * getippten Modus in der Kopfleiste des Chats und verschwand damit genau dann,
+ * wenn man ihn am dringendsten braucht: im Sprachmodus, wo jede Rückfrage den
+ * Menschen zwingt, mitten im Gespräch auf den Bildschirm zu sehen. Der Zustand
+ * gilt ohnehin für beide Modi — es ist dieselbe Freigabe.
+ *
+ * Er steht hier deshalb **nur**, solange gesprochen wird, und nicht zusätzlich
+ * zu dem im Chat. Zwei Instanzen nebeneinander wären zwei Knöpfe mit je eigenem
+ * Zustand: wer den einen umlegt, sähe am anderen weiter den alten Stand und
+ * schaltete mit dem nächsten Klick unbeabsichtigt zurück. Ein Schalter, der
+ * seinen eigenen Zwilling nicht kennt, ist schlimmer als ein fehlender.
+ *
  * Darunter eingeklappt das Skill-**Verzeichnis**: nur lesend, dafür vollständig.
  */
 export function Ai() {
@@ -82,8 +102,10 @@ export function Ai() {
   const canChat = useHasPermission('ai.chat.use')
   const canUseSkills = useHasPermission('ai.skills.use')
   const canSpeak = useHasPermission('ai.voice.use')
+  const canUseAutonomy = useHasPermission('ai.autonomous.use')
   const [skillsOpen, setSkillsOpen] = useState(false)
   const [sprachkonfiguration, setSprachkonfiguration] = useState<AiVoiceConfig | null>(null)
+  const [servers, setServers] = useState<ServerOption[]>([])
   const [suchParameter, setzeSuchParameter] = useSearchParams()
 
   const gewuenscht = ansichtAusAbfrage(suchParameter.get('ansicht'))
@@ -118,6 +140,30 @@ export function Ai() {
     }
   }, [canSpeak])
 
+  // Die Serverliste holt sich der Autonomie-Knopf nicht selbst — er bekommt
+  // sie, wie im Chat. Und nur mit dem Recht: ohne es zöge jedes Öffnen der
+  // Seite alle sichtbaren Server samt Bind-IP und Ports in den Browser, für
+  // eine Auswahlliste, die gar nicht gezeichnet wird. Scheitert der Abruf,
+  // bleibt die Liste leer — panelweite Freigabe geht dann immer noch.
+  //
+  // Die Ansicht steht mit in der Bedingung, weil der Knopf hier **nur** im
+  // Sprachmodus steht: im getippten Modus zeichnet ihn `AiChat` selbst, und
+  // dort holt er seine Liste auch selbst. Ohne diese Bedingung liefen im
+  // Chatmodus zwei Abrufe derselben Liste für zwei Knöpfe nebeneinander. Im
+  // Guardian-Fenster gibt es ihn gar nicht — dort wird nicht gehandelt.
+  useEffect(() => {
+    if (!canUseAutonomy || ansicht !== 'sprache') return
+    let lebt = true
+    api<ServerOption[]>('/servers')
+      .then((liste) => {
+        if (lebt) setServers(liste)
+      })
+      .catch(() => undefined)
+    return () => {
+      lebt = false
+    }
+  }, [ansicht, canUseAutonomy])
+
   if (!canChat) {
     return (
       <div className="msm-page">
@@ -136,7 +182,12 @@ export function Ai() {
     // kleiner werden als sein Inhalt, und der Verlauf würde die Seite statt
     // seines eigenen Bereichs scrollen.
     <div className="flex h-[calc(100dvh-6rem)] min-h-0 flex-col md:h-[calc(100dvh-9rem)]">
-      <div className="flex shrink-0 flex-wrap justify-end gap-2 pb-2">
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pb-2">
+        {/* Der Autonomie-Schalter, solange gesprochen wird — die Begründung
+            steht im Doc-Kommentar oben. Er steht **vor** der Umschaltreihe,
+            weil er kein Wechsel ist, sondern eine Einstellung: zwischen den
+            Modusknöpfen sähe er aus wie ein vierter Modus. */}
+        {canUseAutonomy && ansicht === 'sprache' && <AiAutonomyButton servers={servers} />}
         {ansicht !== 'text' && (
           <Umschalter
             aktiv={false}

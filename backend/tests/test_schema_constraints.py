@@ -659,7 +659,7 @@ def test_die_datenbank_kennt_genau_zwei_unterhaltungsarten(db: Session) -> None:
 def test_die_migration_traegt_die_unterhaltungsart(tmp_path: Path) -> None:
     """Modell und Migration duerfen auch hier nicht auseinanderlaufen.
 
-    Der Rueckbau bis **vor** `20260816_01` beweist, dass die Spalte aus der
+    Der Rueckbau bis **vor** `20260816_02` beweist, dass die Spalte aus der
     Kette stammt und nicht bloss aus `create_all`. Und er prueft die Richtung,
     die im Betrieb weh taete: das Downgrade muss den alten, engeren Index
     wiederherstellen — sonst stuende eine zurueckgerollte Anlage ohne jede
@@ -677,7 +677,7 @@ def test_die_migration_traegt_die_unterhaltungsart(tmp_path: Path) -> None:
         Base.metadata.create_all(engine)
         command.stamp(config, "head")
 
-        command.downgrade(config, "20260815_01")
+        command.downgrade(config, "20260816_01")
         inspector = _frisch(engine)
         assert "kind" not in {
             spalte["name"] for spalte in inspector.get_columns("ai_conversations")
@@ -1128,7 +1128,7 @@ def test_die_datenbank_kennt_genau_sieben_reparaturphasen(
 def test_die_migration_traegt_den_reparaturauftrag(tmp_path: Path) -> None:
     """Modell und Migration duerfen nicht auseinanderlaufen.
 
-    Der Rueckbau bis **vor** `20260816_02` beweist, dass die Tabelle aus der
+    Der Rueckbau bis **vor** `20260816_03` beweist, dass die Tabelle aus der
     Kette stammt und nicht bloss aus `create_all` — genau der Unterschied, den
     eine frische Testdatenbank sonst verdeckt. Und er prueft die vier
     ``ON DELETE``-Regeln dort, wo sie im Betrieb wirklich herkommen.
@@ -1149,7 +1149,7 @@ def test_die_migration_traegt_den_reparaturauftrag(tmp_path: Path) -> None:
         Base.metadata.create_all(engine)
         command.stamp(config, "head")
 
-        command.downgrade(config, "20260816_01")
+        command.downgrade(config, "20260816_02")
         assert "ai_guardian_repairs" not in _frisch(engine).get_table_names()
 
         command.upgrade(config, "head")
@@ -1206,7 +1206,7 @@ def test_die_migration_traegt_die_guardian_uebersteuerung(tmp_path: Path) -> Non
         Base.metadata.create_all(engine)
         command.stamp(config, "head")
 
-        command.downgrade(config, "20260816_02")
+        command.downgrade(config, "20260816_03")
         spalten = {s["name"] for s in _frisch(engine).get_columns("servers")}
         assert "guardian_overrides_json" not in spalten
 

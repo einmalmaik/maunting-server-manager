@@ -1,7 +1,7 @@
 """Der Guardian bekommt ein eigenes Fenster.
 
-Revision ID: 20260816_01
-Revises: 20260815_01
+Revision ID: 20260816_02
+Revises: 20260816_01
 Create Date: 2026-08-16
 
 Bisher gab es genau eine Unterhaltung je Benutzer, erzwungen ueber den
@@ -46,8 +46,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "20260816_01"
-down_revision: Union[str, None] = "20260815_01"
+revision: str = "20260816_02"
+down_revision: Union[str, None] = "20260816_01"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

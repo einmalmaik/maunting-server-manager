@@ -45,7 +45,7 @@ Reparatur laufen hat, kann morgens nichts fragen, ohne sie abzubrechen. Ein
 "mach weiter" setzt ausserdem jemanden voraus, der es tippt — und der Anlass
 dieses Moduls ist gerade, dass niemand davorsitzt.
 
-Deshalb hat die Reparatur seit `20260816_01` ihre eigene Unterhaltung
+Deshalb hat die Reparatur seit `20260816_02` ihre eigene Unterhaltung
 (`kind='guardian'`). Beide laufen nebeneinander, ohne voneinander zu wissen:
 `vorgaenger_abloesen` greift je Unterhaltung und reicht nicht mehr hinueber,
 und `aktiver_lauf` bekommt hier das Guardian-Fenster genannt statt "irgendetwas
@@ -456,7 +456,7 @@ def _auftragstext(server: Server, vorfall: Incident, auftrag=None) -> str:
         "Niemand sitzt gerade davor."
     )
     if auftrag is None:
-        # Ein Lauf ohne Auftrag gibt es seit `20260816_02` nicht mehr; der Zweig
+        # Ein Lauf ohne Auftrag gibt es seit `20260816_03` nicht mehr; der Zweig
         # bleibt fuer den Fall, dass jemand `heilungslauf_starten` direkt ruft
         # (die Testsuite tut das). Dann gilt der Text, der vorher hier stand.
         return (

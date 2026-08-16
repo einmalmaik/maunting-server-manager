@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, KeyRound, PlugZap, Plus, RefreshCw, Save, St
 import { useTranslation } from 'react-i18next'
 
 import {
+  AI_STIMMEN,
   aiApi,
   type AiCatalogModel,
   type AiCostPolicy,
@@ -30,6 +31,10 @@ const EMPTY_PROVIDER: ProviderDraft = {
   enabled: true,
   requires_api_key: true,
   token_price_micro_usd_per_million: null,
+  // Keine Vorbelegung. Ein neuer Sprachzugang soll die Standardstimme erben und
+  // ihr folgen, wenn MSM spaeter eine andere waehlt — truege er sie hier schon
+  // als eigenen Wert, waere aus dem Erben eine Festlegung geworden.
+  default_voice: null,
   operator_api_key: '',
 }
 
@@ -42,6 +47,7 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     enabled: provider.enabled,
     requires_api_key: provider.requires_api_key,
     token_price_micro_usd_per_million: provider.token_price_micro_usd_per_million,
+    default_voice: provider.default_voice,
     operator_api_key: '',
     operator_key_configured: provider.operator_key_configured,
     operator_key_hint: provider.operator_key_hint,
@@ -106,6 +112,11 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
     const target = draft.id ?? 'new'
     if (!canWrite || busyId !== null) return
     setBusyId(target)
+    // Die Stimme geht nur beim Sprachzugang mit — dieselbe Bedingung, unter der
+    // das Feld ueberhaupt erscheint. Ein Chatzugang schickt sie gar nicht erst:
+    // sonst stuende in seiner Zeile eine Angabe, die er nie verwendet, und beim
+    // naechsten Blick in die Datenbank saehe es aus wie eine Einstellung.
+    const protokoll = kinds.find((item) => item.kind === draft.provider_kind)?.protokoll
     const payload: AiProviderWrite = {
       name: draft.name.trim(),
       provider_kind: draft.provider_kind,
@@ -113,6 +124,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
       enabled: draft.enabled,
       requires_api_key: draft.requires_api_key,
       token_price_micro_usd_per_million: draft.token_price_micro_usd_per_million ?? null,
+      ...(protokoll === 'realtime' ? { default_voice: draft.default_voice ?? null } : {}),
       ...(draft.operator_api_key ? { operator_api_key: draft.operator_api_key } : {}),
       ...(draft.clear_operator_api_key ? { clear_operator_api_key: true } : {}),
     }
@@ -292,6 +304,7 @@ function ProviderForm({
   // die auch bei zwei Formularen auf derselben Seite eindeutig bleibt.
   const kindId = useId()
   const modelId = useId()
+  const stimmeId = useId()
   const preisId = useId()
 
   // Solange die Politik nicht geladen ist, gilt USD 1:1 — die Waehrung der
@@ -472,6 +485,36 @@ function ProviderForm({
           )}
           {gewaehltesModell && <ModelCapabilities model={gewaehltesModell} />}
         </div>
+        {/* Nur beim Sprachzugang, an derselben Bedingung wie der Hinweis oben.
+            Ein Chatzugang haette hier eine Einstellung ohne Wirkung stehen —
+            und dahinter die Frage, warum der Chat nicht spricht.
+
+            Nichts gewaehlt ist ein gueltiger Zustand und kein Versaeumnis: dann
+            gilt die Standardstimme des Backends. Deshalb steht sie hier auch
+            nicht als vorbelegter Wert — MSM kennt sie an dieser Stelle
+            absichtlich nicht, damit ein spaeterer Wechsel dort auch hier
+            durchschlaegt. */}
+        {spec?.protokoll === 'realtime' && (
+          <div className="space-y-1.5 md:col-span-2">
+            <label htmlFor={stimmeId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('ai.providers.defaultVoice')}
+            </label>
+            <Dropdown
+              id={stimmeId}
+              value={draft.default_voice ?? null}
+              onChange={(default_voice) => change({ default_voice })}
+              placeholder={t('common.select')}
+              // Das Hoerprofil steckt in der Uebersetzung: „Ash" allein sagt
+              // niemandem, wie die Stimme klingt, und vorhoeren laesst sich hier
+              // nichts.
+              options={AI_STIMMEN.map((stimme) => ({
+                value: stimme,
+                label: t(`ai.providers.voices.${stimme}`),
+              }))}
+            />
+            <p className="msm-field-help">{t('ai.providers.defaultVoiceHint')}</p>
+          </div>
+        )}
         <ProviderInput
           className="md:col-span-2"
           type="password"

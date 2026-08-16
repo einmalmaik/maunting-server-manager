@@ -43,7 +43,7 @@ ableitbar, und eine gespeicherte Kennung waere nur die Gelegenheit, irgendwann
 auf eine geloeschte zu zeigen. Der faellige Lauf holt sie ueber
 ``get_or_create_primary_conversation``.
 
-Das ist seit ``20260816_01`` der Unterschied zur Guardian-Heilung, die vorher
+Das ist seit ``20260816_02`` der Unterschied zur Guardian-Heilung, die vorher
 denselben Weg ging: die laeuft jetzt im Fenster ``kind='guardian'``. Fuer einen
 stehenden Auftrag waere das falsch — er ist ein Satz, den ein Mensch im Chat
 diktiert hat, und sein Ergebnis gehoert dorthin zurueck, wo er ihn gegeben hat

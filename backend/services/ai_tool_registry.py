@@ -576,7 +576,7 @@ ALWAYS_CONFIRM_TOOLS = (
 # ohnehin in `ALWAYS_CONFIRM_TOOLS` steht. Eine Heilung, die als Nebenwirkung
 # die Vorlage fremder Server entfernt, ist keine.
 #
-# ── Drei Zugaenge, die seit `20260816_03` dazugehoeren ────────────────────
+# ── Drei Zugaenge, die seit `20260816_04` dazugehoeren ────────────────────
 #
 # `propose_guardian_tuning` ist der dritte der drei Faelle, die eine Reparatur
 # auseinanderhalten muss: Guardian hat sich nicht geirrt, und der Server ist

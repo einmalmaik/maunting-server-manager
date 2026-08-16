@@ -1,7 +1,7 @@
 """Guardian laesst sich je Server anders einstellen.
 
-Revision ID: 20260816_03
-Revises: 20260816_02
+Revision ID: 20260816_04
+Revises: 20260816_03
 Create Date: 2026-08-16
 
 Die Blueprint gilt fuer jeden Server ihres Spiels. Sie kann nicht wissen, dass
@@ -39,8 +39,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "20260816_03"
-down_revision: Union[str, None] = "20260816_02"
+revision: str = "20260816_04"
+down_revision: Union[str, None] = "20260816_03"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
