@@ -21,7 +21,7 @@
       "ADMIN_PASSWORD": "",
       "MAP_NAME": "TheIsland_WP"
     },
-    "startup": "./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?SessionName={ENV.SERVER_NAME}?ServerPassword={ENV.SERVER_PASSWORD}?ServerAdminPassword={ENV.ADMIN_PASSWORD} -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RCONPort={RCON_PORT} -game -server -log -NoBattlEye",
+    "startup": "./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?SessionName={ENV.SERVER_NAME}?ServerPassword={ENV.SERVER_PASSWORD}?ServerAdminPassword={ENV.ADMIN_PASSWORD} -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RCONPort={RCON_PORT} -game -server -log -NoBattlEye {MOD_ARG}",
     "ensureDirs": [
       "ShooterGame/Saved/Config/WindowsServer",
       "ShooterGame/Saved/SavedArks",
@@ -60,29 +60,30 @@
     "updateStrategy": "checkBased"
   },
   "mods": {
-    "supportsMods": false,
+    "supportsMods": true,
     "supportsSteamWorkshop": false,
     "workshopAppId": null,
-    "modInjection": "none",
-    "modStartupArgumentFormat": null,
+    "supportsCurseForge": true,
+    "curseforgeGameId": "83374",
+    "curseforgeClassId": null,
+    "curseforgeInstallPath": null,
+    "filterTags": [],
+    "modInjection": "startupArg",
+    "modStartupArgumentFormat": "-mods={mods}",
+    "modStartupArgumentSeparator": ",",
     "modListFilePath": null,
     "modListContent": "workshopIds",
     "postInstall": []
   },
   "health": {
     "process": {},
-    "application": {
-      "type": "source-query",
-      "port": "{{QUERY_PORT}}",
-      "interval": "60s",
-      "failure_threshold": 3
-    },
     "startup": {
       "grace_period_seconds": 240,
       "success_patterns": [
         "Server successfully started",
         "Setting breakpad minidump AppID",
-        "wp.Runtime.HLOD"
+        "wp.Runtime.HLOD",
+        "Event queue: No events to send"
       ],
       "failure_patterns": [
         "Address already in use",
@@ -111,10 +112,6 @@
     "policies": [
       {
         "match": "process_not_running",
-        "action": "restart"
-      },
-      {
-        "match": "source_query_failed",
         "action": "restart"
       },
       {

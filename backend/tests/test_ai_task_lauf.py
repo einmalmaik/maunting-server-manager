@@ -439,14 +439,24 @@ async def test_ohne_laufzeit_entsteht_gar_nichts(db: Session, monkeypatch) -> No
 @pytest.mark.asyncio
 async def test_ein_aktiver_lauf_vertagt_statt_abzuloesen(db: Session, monkeypatch) -> None:
     """Der Mensch chattet gerade — ihm mitten im Satz die Antwort abzuschneiden
-    waere der teuerste denkbare Weg, ein Backup anzustossen."""
+    waere der teuerste denkbare Weg, ein Backup anzustossen.
+
+    Der Ersatz nimmt ``kind`` entgegen und prueft es mit: gefragt werden darf
+    hier nur nach dem **Dauerchat**. Eine Frage ohne Fenster faende auch eine
+    Guardian-Reparatur auf einer ganz anderen Anlage und vertagte das
+    naechtliche Backup deswegen — zwei Vorgaenge, die einander nie in die Quere
+    kommen.
+    """
     user = _benutzer(db, "chattet")
     _anbieter(db)
     _laufzeit_faelschen(monkeypatch)
     aufgabe = _aufgabe(db, user)
-    monkeypatch.setattr(
-        ai_run_service, "aktiver_lauf", lambda db, *, user_id: AiRun(id="laeuft-schon")
-    )
+
+    def _laeuft(db, *, user_id, kind=None):
+        assert kind == "primary", "ein Aufgabenlauf fragt nur nach dem Dauerchat"
+        return AiRun(id="laeuft-schon")
+
+    monkeypatch.setattr(ai_run_service, "aktiver_lauf", _laeuft)
 
     assert await ai_task_service.aufgabenlauf_starten(db, aufgabe=aufgabe) is None
     assert db.query(AiRun).count() == 0

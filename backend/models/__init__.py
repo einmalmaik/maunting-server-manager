@@ -13,6 +13,8 @@ from .ai_memory import AiMemoryEntry, AiMemoryPreference
 from .ai_skill import AiSkill
 from .ai_attachment import AiAttachment
 from .ai_guardian_notice import AiGuardianNotice
+from .ai_guardian_repair import AiGuardianRepair
+from .ai_action_approval import AiActionApproval
 from .ai_task import AiTask
 from .ai_mail_outbox import AiMailOutbox
 from .server import Server
@@ -63,7 +65,8 @@ __all__ = [
     "User", "UserRole", "RoleAiLimit", "AiUsageEvent", "OperationTask",
     "AiProvider", "AiConversation", "AiMessage", "AiActionProposal",
     "AiMemoryEntry", "AiMemoryPreference", "AiSkill", "AiAttachment",
-    "AiAutonomyGrant", "AiToolResult", "AiRun", "AiGuardianNotice", "AiTask",
+    "AiAutonomyGrant", "AiToolResult", "AiRun", "AiGuardianNotice",
+    "AiGuardianRepair", "AiTask", "AiActionApproval",
     "AiMailOutbox",
     "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
     "Team", "TeamMember", "TeamServerGrant",

@@ -998,7 +998,7 @@ def delete_path(
             agent.files_delete(_agent_files_key(server), path)
         except NodeClientError as exc:
             raise _map_agent_error(exc) from exc
-        return {"message": "Geloescht", "path": path}
+        return {"message": "Gelöscht", "path": path}
 
     target = _safe_path(server.install_dir, path)
 
@@ -1007,7 +1007,7 @@ def delete_path(
 
     # Never delete the install_dir itself
     if target.resolve() == Path(server.install_dir).resolve():
-        raise HTTPException(status_code=403, detail="Server-Stammverzeichnis kann nicht geloescht werden")
+        raise HTTPException(status_code=403, detail="Server-Stammverzeichnis kann nicht gelöscht werden")
 
     try:
         def _delete() -> None:
@@ -1016,11 +1016,11 @@ def delete_path(
             else:
                 target.unlink()
 
-        _run_with_permission_repair(server, "Pfad loeschen", _delete)
+        _run_with_permission_repair(server, "Pfad löschen", _delete)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Loeschen fehlgeschlagen: {e}")
+        raise HTTPException(status_code=500, detail=f"Löschen fehlgeschlagen: {e}")
 
-    return {"message": "Geloescht", "path": path}
+    return {"message": "Gelöscht", "path": path}
 
 
 @router.post("/{server_id}/rename")

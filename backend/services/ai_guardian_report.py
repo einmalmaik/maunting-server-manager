@@ -133,12 +133,30 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     Hier ist die Zuordnung eindeutig — wer die Autonomie erteilt hat, erfaehrt,
     was damit geschehen ist.
     """
-    from services import ai_mail
+    from services import ai_guardian_repair_service, ai_mail
 
     rahmen = zustand.get("guardian") or {}
     server_id = rahmen.get("server_id")
     incident_id = rahmen.get("incident_id")
     if not server_id or not incident_id:
+        return
+
+    # **Eine Mail je Auftrag, nicht je Lauf.**
+    #
+    # Seit ein Vorfall bis zu acht Anlaeufe bekommt, waere die alte Regel
+    # ("bei jedem Endzustand") acht Mails ueber einen Server — sieben davon mit
+    # "nicht behoben", und die achte widerspraeche ihnen. Der Betreiber koennte
+    # daraus nicht ablesen, ob sein Server laeuft.
+    #
+    # Der Rueckhalt gegen die naheliegende Gefahr — der Auftrag endet, ohne dass
+    # noch ein Lauf endet — steht in `ai_guardian_repair_service._schlussbericht`:
+    # laeuft die Frist im Takt ab, verschickt der Takt selbst.
+    auftrag = ai_guardian_repair_service.auftrag_aus_zustand(db, zustand)
+    if auftrag is not None and ai_guardian_repair_service.kampagne_laeuft_noch(db, zustand):
+        logger.debug(
+            "Heilungsbericht zurueckgestellt: Auftrag laeuft weiter repair_id=%s",
+            auftrag.id,
+        )
         return
 
     user = db.get(User, run.user_id)
@@ -160,7 +178,15 @@ def bericht_versenden(db: Session, *, run: AiRun, zustand: dict) -> None:
     # als geloest sieht. Beides zusammen ergibt erst die Wahrheit — deshalb
     # zaehlt hier die Und-Verknuepfung.
     db.refresh(vorfall)
-    geheilt = run.status in ERFOLG and vorfall.status == "resolved"
+    if auftrag is not None:
+        # Mit Auftrag ist der Lauf die falsche Einheit. Sein letzter Anlauf kann
+        # am Rundenbudget geendet sein, waehrend der Server laengst laeuft —
+        # oder sauber, waehrend nichts gehalten hat. `erledigt` sagt beides
+        # richtig: die Phase wird gesetzt, nachdem die **Anlage** befragt wurde
+        # (Vorfall geloest, Server im gewollten Zustand, keine Quarantaene).
+        geheilt = str(auftrag.phase) == "erledigt"
+    else:
+        geheilt = run.status in ERFOLG and vorfall.status == "resolved"
 
     bericht = abschlusstext(db, run, zustand)
     if not bericht:

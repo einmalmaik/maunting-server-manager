@@ -782,9 +782,14 @@ class BlueprintMods(BaseModel):
     supportsMods: bool = False
     supportsSteamWorkshop: bool = False
     workshopAppId: str | None = None
+    supportsCurseForge: bool = False
+    curseforgeGameId: str | None = None
+    curseforgeClassId: str | None = None
+    curseforgeInstallPath: str | None = None
     filterTags: list[str] = Field(default_factory=list, max_length=10)
     modInjection: BlueprintModInjection = BlueprintModInjection.NONE
     modStartupArgumentFormat: str | None = Field(default=None, max_length=256)
+    modStartupArgumentSeparator: str = Field(default=";", max_length=8)
     modListFilePath: str | None = Field(default=None, max_length=512)
     modListContent: BlueprintModListContent = BlueprintModListContent.WORKSHOP_IDS
     postInstall: list["BlueprintWorkshopFileAction"] = Field(default_factory=list, max_length=32)
@@ -810,6 +815,35 @@ class BlueprintMods(BaseModel):
             raise ValueError("mods.workshopAppId muss numerischer String sein (^\\d{1,10}$).")
         return v
 
+    @field_validator("curseforgeGameId")
+    @classmethod
+    def _check_cf_game_id(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not _NUMERIC_ID_RE.match(v):
+            raise ValueError("mods.curseforgeGameId muss numerischer String sein (^\\d{1,10}$).")
+        return v
+
+    @field_validator("curseforgeClassId")
+    @classmethod
+    def _check_cf_class_id(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not _NUMERIC_ID_RE.match(v):
+            raise ValueError("mods.curseforgeClassId muss numerischer String sein (^\\d{1,10}$).")
+        return v
+
+    @field_validator("curseforgeInstallPath")
+    @classmethod
+    def _check_cf_install_path(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return None
+        if not _is_safe_relative_path(v):
+            raise ValueError(
+                "mods.curseforgeInstallPath muss sicherer relativer Pfad ohne '..' sein."
+            )
+        return v
+
     @field_validator("modStartupArgumentFormat")
     @classmethod
     def _check_format(cls, v: str | None) -> str | None:
@@ -819,6 +853,18 @@ class BlueprintMods(BaseModel):
             if ch in v:
                 raise ValueError(
                     f"mods.modStartupArgumentFormat enthaelt verbotenes Shell-Zeichen '{ch}'."
+                )
+        return v
+
+    @field_validator("modStartupArgumentSeparator")
+    @classmethod
+    def _check_sep(cls, v: str) -> str:
+        if not v:
+            return ";"
+        for ch in ("$", "`", "&", "|", ">", "<", "\n", "\r", "\"", "'", "\\"):
+            if ch in v:
+                raise ValueError(
+                    f"mods.modStartupArgumentSeparator enthaelt verbotenes Zeichen '{ch}'."
                 )
         return v
 
@@ -840,12 +886,11 @@ class BlueprintMods(BaseModel):
                 raise ValueError(
                     "mods.workshopAppId ist Pflicht, wenn supportsSteamWorkshop=true."
                 )
-        else:
-            # Workshop deaktiviert -> Mod-Injection ist effektiv none.
-            # Wir akzeptieren noch im Schema, dass die Felder gesetzt sind, sodass
-            # ein User Workshop spaeter aktivieren kann, ohne erneut alles
-            # einzutragen. Der Renderer/Helper ignoriert sie aber.
-            pass
+        if self.supportsCurseForge:
+            if not self.curseforgeGameId:
+                raise ValueError(
+                    "mods.curseforgeGameId ist Pflicht, wenn supportsCurseForge=true."
+                )
 
         if self.modInjection == BlueprintModInjection.STARTUP_ARG:
             if not self.modStartupArgumentFormat:

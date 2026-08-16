@@ -365,8 +365,59 @@ def _laufzeit_faelschen(monkeypatch):
 
 
 async def _takt(db: Session) -> int:
-    """Ein Durchlauf des Ausloesers — genau das, was der Scheduler tut."""
-    return await ai_guardian_service.vorfaelle_bearbeiten(db)
+    """Ein Durchlauf des Ausloesers — genau das, was der Scheduler tut.
+
+    **Zwei Durchgaenge**, seit ein Vorfall einen Reparaturauftrag bekommt statt
+    eines einzelnen Laufs: der erste legt den Auftrag an, der zweite weckt
+    faellige Auftraege. Beide stehen im selben Sechzig-Sekunden-Auftrag und in
+    dieser Reihenfolge — ein frisch angelegter Auftrag ist sofort faellig und
+    soll nicht eine Minute auf seinen ersten Anlauf warten.
+
+    Zurueck kommt, wieviele **Laeufe** begonnen haben. Das ist, was die Tests
+    hier meinen, wenn sie von einem Takt sprechen: sie zaehlen Anbieteraufrufe,
+    nicht Zeilen.
+    """
+    from services import ai_guardian_repair_service
+
+    await ai_guardian_service.vorfaelle_bearbeiten(db)
+    return await ai_guardian_repair_service.faellige_bearbeiten(db)
+
+
+def _letzter_anlauf(db: Session, user: User) -> None:
+    """Stellt den Reparaturauftrag auf seinen **letzten** Anlauf.
+
+    Die Abschlussmail geht seit `20260816_12` einmal je *Auftrag* hinaus, nicht
+    je Lauf — sonst bekaeme der Betreiber bis zu acht Mails ueber einen Server,
+    von denen sieben "nicht behoben" sagen und die achte ihnen widerspricht.
+
+    Tests, die die Mail pruefen, muessen den Auftrag also wirklich zu Ende
+    bringen. Dieser Helfer tut das ueber zwei Stellschrauben und **kein**
+    gefaelschtes Ergebnis:
+
+    * ``phase='beobachtung'`` ist die einzige Phase, aus der ein ``erledigt``
+      entstehen kann — ob es dazu kommt, entscheidet weiterhin `wirkung_belegt`
+      anhand der Anlage (Vorfall geloest, Server im gewollten Zustand, keine
+      Quarantaene).
+    * ``attempt`` auf dem Deckel heisst: was auch immer dieser Lauf ergibt, ein
+      neunter Anlauf kommt nicht mehr. Bleibt die Wirkung aus, endet der Auftrag
+      als ``aufgegeben`` — und genau dann sagt die Mail "nicht behoben".
+
+    Der Test entscheidet damit nicht, *was* in der Mail steht, sondern nur,
+    dass sie jetzt faellig ist.
+    """
+    from models import AiGuardianRepair
+    from services import ai_guardian_repair_service
+
+    auftrag = (
+        db.query(AiGuardianRepair)
+        .filter(AiGuardianRepair.user_id == user.id)
+        .order_by(AiGuardianRepair.created_at.desc())
+        .first()
+    )
+    assert auftrag is not None, "Ohne Auftrag gibt es nichts zu beenden"
+    auftrag.phase = "beobachtung"
+    auftrag.attempt = ai_guardian_repair_service.MAX_VERSUCHE
+    db.commit()
 
 
 async def _heilung_fahren(db: Session, user: User) -> AiRun | None:
@@ -476,6 +527,9 @@ async def test_der_ganze_weg_vom_vorfall_bis_zur_mail(
     ]).einbauen(monkeypatch)
 
     assert await _takt(db) == 1
+
+    # Die Mail kommt am Ende des **Auftrags**, nicht am Ende eines Laufs.
+    _letzter_anlauf(db, user)
 
     # Der Vorfall gilt als von der KI uebernommen, bevor sie fertig ist —
     # sonst startete der naechste Takt einen zweiten Lauf.
@@ -792,6 +846,9 @@ async def test_eine_rueckfrage_haelt_die_heilung_nicht_an(
     anbieter = Anbieter([[frage], [_backup(server)]]).einbauen(monkeypatch)
 
     await _takt(db)
+
+    # Die Mail kommt am Ende des **Auftrags**, nicht am Ende eines Laufs.
+    _letzter_anlauf(db, user)
     run = await _heilung_fahren(db, user)
 
     assert run is not None
@@ -1041,6 +1098,9 @@ async def test_der_abgeloeste_heilungslauf_berichtet_trotzdem(
     Anbieter([[_backup(server)]]).einbauen(monkeypatch)
 
     await _takt(db)
+
+    # Die Mail kommt am Ende des **Auftrags**, nicht am Ende eines Laufs.
+    _letzter_anlauf(db, user)
     run = (
         db.query(AiRun).filter(AiRun.user_id == user.id)
         .order_by(AiRun.created_at.desc()).first()
@@ -1093,6 +1153,9 @@ async def test_der_bericht_geht_genau_einmal_hinaus(
     Anbieter([[_backup(server)]]).einbauen(monkeypatch)
 
     await _takt(db)
+
+    # Die Mail kommt am Ende des **Auftrags**, nicht am Ende eines Laufs.
+    _letzter_anlauf(db, user)
     run = (
         db.query(AiRun).filter(AiRun.user_id == user.id)
         .order_by(AiRun.created_at.desc()).first()
@@ -1114,33 +1177,21 @@ async def test_der_bericht_geht_genau_einmal_hinaus(
 # ══════════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.asyncio
-async def test_eine_heilung_parkt_nicht_auf_einer_bestaetigung(
-    db: Session, monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
-    """Wenn das Stundenkontingent kippt, endet der Lauf — er wartet nicht.
+async def _kontingent_kippt(db, monkeypatch, tmp_path, *, freigabemail: bool):
+    """Baut die Lage, in der mitten im Lauf eine Bestaetigung noetig wird.
 
-    Das Kontingent ist benutzerweit, und `autonomy_allows` faellt bei
-    Erschoepfung ausdruecklich auf Bestaetigungspflicht zurueck statt zu
-    scheitern. Wer vormittags im Chat gearbeitet hat, dessen naechtliche Heilung
-    stoesst also mitten im Vorgang an die Grenze.
+    Budget 1: der erste Vorschlag laeuft autonom, der zweite nicht mehr.
 
-    Geparkt hiesse: Status 'waiting_confirmation', kein Endzustand, kein
-    Bericht, im Panel dauerhaft "die KI bearbeitet das" — und weil `aktiver_lauf`
-    wartende Laeufe mitzaehlt, keine weitere Heilung dieses Freigebers auf
-    keinem seiner Server. Ein Panel-Neustart hob das nicht auf.
-
-    Ein Test dieses Projekts schreibt die Regel schon fest: ein Freigeber mit
-    Budget 0 kommt gar nicht erst als Akteur in Frage, weil ein sofort wartender
-    Lauf "keine Heilung ist, sondern eine Zeile in der Datenbank, die einen
-    Vorfall als versorgt markiert, ohne es zu sein". Hier tritt derselbe Zustand
-    mitten im Lauf ein.
+    ``freigabemail=False`` laesst das Einreihen in den Ausgangskorb scheitern —
+    und **nur** das. Der naheliegende Weg waere `ai_mail.empfaenger`; den nutzt
+    aber auch der Abschlussbericht, und dann faellt mit der Freigabe auch die
+    Mail weg, deren Ausbleiben dieser Test gar nicht meint. Der Fall "gar keine
+    Adresse" steht in `test_ai_action_approval.TestAnfordern`, wo er hingehoert.
     """
     server = _server(db, "kontingent", tmp_path)
     _konfig(tmp_path)
     user = _benutzer(db, "freigeber")
     _sichtbar(db, user, server)
-    # Budget 1: der erste Vorschlag laeuft autonom, der zweite nicht mehr.
     _freigabe(db, user, server=server, budget=1)
     _anbieter(db)
     _vorfall(db, server)
@@ -1151,14 +1202,107 @@ async def test_eine_heilung_parkt_nicht_auf_einer_bestaetigung(
     mailfach = Mailfach().einbauen(monkeypatch)
     Anbieter([[_backup(server)], [_patch(server, tmp_path)]]).einbauen(monkeypatch)
 
+    if not freigabemail:
+        from services import ai_mail
+
+        monkeypatch.setattr(
+            ai_mail, "einreihen", lambda db_, **felder: None
+        )
+
+    return server, user, mailfach
+
+
+@pytest.mark.asyncio
+async def test_eine_heilung_fragt_per_mail_statt_aufzugeben(
+    db: Session, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Kippt das Stundenkontingent, wird gefragt — nicht aufgegeben.
+
+    Das Kontingent ist benutzerweit, und `autonomy_allows` faellt bei
+    Erschoepfung ausdruecklich auf Bestaetigungspflicht zurueck statt zu
+    scheitern. Wer vormittags im Chat gearbeitet hat, dessen naechtliche
+    Reparatur stoesst also mitten im Vorgang an die Grenze — und das ist die
+    haeufigste Ursache des gemeldeten Verhaltens: "ohne Freigabe kann ich da
+    nichts machen", Server bleibt kaputt.
+
+    **Vorher wurde hier zurueckgenommen und beendet**, und das war richtig,
+    solange ein geparkter Lauf vier Folgen hatte: kein Endzustand also kein
+    Bericht, im Panel dauerhaft "die KI bearbeitet das", eine blockierte Heilung
+    auf jedem weiteren Server desselben Freigebers, und ein Panel-Neustart hob
+    es nicht auf.
+
+    Alle vier sind einzeln abgeraeumt: `aktiver_lauf` ist nach Unterhaltung
+    gefasst, der Auftrag laeuft in eine Frist, die Mail kommt vom Auftrag statt
+    vom Lauf, und das Guardian-Fenster zeigt den wartenden Lauf. Deshalb darf
+    hier jetzt geparkt werden — und der Betreiber bekommt einen Freigabelink
+    aufs Telefon.
+    """
+    from models import AiActionApproval
+
+    server, user, mailfach = await _kontingent_kippt(
+        db, monkeypatch, tmp_path, freigabemail=True
+    )
     await _takt(db)
     run = await _heilung_fahren(db, user)
 
     assert run is not None
+    assert run.status == "waiting_confirmation", (
+        "Ein Schritt, der eine Zustimmung braucht, soll fragen statt aufzugeben"
+    )
+
+    freigabe = db.query(AiActionApproval).one()
+    assert freigabe.run_id == run.id
+    assert freigabe.consumed_at is None
+    # Der Klartext steht nur in der Mail.
+    assert len(freigabe.token_hash) == 64
+
+    # Der Vorschlag steht noch — er wartet auf die Entscheidung und wurde nicht
+    # zurueckgenommen.
+    offen = db.query(AiActionProposal).filter(
+        AiActionProposal.status.in_(("proposed", "confirmed"))
+    ).all()
+    assert len(offen) == 1
+
+    # **Der Dauerchat bleibt frei.** Das war der Grund, aus dem ein
+    # unbeaufsichtigter Lauf frueher nie parken durfte.
+    assert ai_run_service.aktiver_lauf(db, user_id=user.id, kind="primary") is None
+
+    # Und der Abschlussbericht kommt noch nicht: der Auftrag laeuft weiter.
+    assert mailfach.briefe == []
+
+
+@pytest.mark.asyncio
+async def test_ohne_freigabemail_bleibt_es_beim_alten_rueckfall(
+    db: Session, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Geht die Frage nicht hinaus, wird zurueckgenommen und beendet.
+
+    Der Rueckfall ist kein toter Zweig, sondern die Bedingung, unter der das
+    Parken ueberhaupt vertretbar ist. Ein Lauf, der auf eine Antwort wartet, die
+    nie kommen kann, haengt bis zu seiner Frist und meldet in der Zwischenzeit
+    "die KI bearbeitet das" — schlimmer als einer, der ehrlich aufhoert.
+
+    Und der Abschlussbericht geht trotzdem hinaus: der Betreiber hat eine
+    Adresse, nur die Freigabemail kam nicht in den Ausgangskorb. Genau daran
+    haengt der Unterschied zwischen "es hat nicht gereicht" und Schweigen.
+    """
+    from models import AiActionApproval
+
+    server, user, mailfach = await _kontingent_kippt(
+        db, monkeypatch, tmp_path, freigabemail=False
+    )
+    await _takt(db)
+
+    # Die Mail kommt am Ende des **Auftrags**, nicht am Ende eines Laufs.
+    _letzter_anlauf(db, user)
+    run = await _heilung_fahren(db, user)
+
+    assert run is not None
     assert run.status != "waiting_confirmation", (
-        "Eine unbeaufsichtigte Heilung darf nicht auf einen Klick warten"
+        "Ohne hinausgegangene Frage darf eine Heilung nicht auf einen Klick warten"
     )
     assert run.status in ("completed", "failed", "cancelled")
+    assert db.query(AiActionApproval).count() == 0
 
     # Der geparkte Vorschlag wurde zurueckgenommen statt liegengelassen.
     offen = db.query(AiActionProposal).filter(
@@ -1346,6 +1490,9 @@ async def test_behoben_verlangt_beides_lauf_und_vorfall(
     ).einbauen(monkeypatch)
 
     await _takt(db)
+
+    # Die Mail kommt am Ende des **Auftrags**, nicht am Ende eines Laufs.
+    _letzter_anlauf(db, user)
     run = await _heilung_fahren(db, user)
 
     assert run.status == "completed"
@@ -1386,6 +1533,9 @@ async def test_ein_fremdes_backup_wird_nicht_als_eigenes_ausgegeben(
     Anbieter([[_neustart(server)]]).einbauen(monkeypatch)
 
     await _takt(db)
+
+    # Die Mail kommt am Ende des **Auftrags**, nicht am Ende eines Laufs.
+    _letzter_anlauf(db, user)
 
     # Der Scheduler legt waehrenddessen sein turnusmaessiges Backup an.
     db.add(Backup(

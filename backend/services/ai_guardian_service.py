@@ -31,12 +31,26 @@ Ausnahme an dieser Stelle verhindert das ACK, und der Agent liefert denselben
 Vorfall dann fuer immer erneut. Ein KI-Lauf hat in dieser Luecke nichts zu
 suchen.
 
-**Geheilt wird im gewoehnlichen Chat.** Es gibt genau eine Unterhaltung je
-Benutzer, und eine Heilung schreibt hinein wie ein Mensch. Damit sie sich nicht
-gegenseitig abwuergen, startet eine Heilung ausschliesslich dann, wenn dort
-gerade nichts laeuft. Umgekehrt gilt die vorhandene Regel unveraendert: schreibt
-der Mensch waehrend einer Heilung, loest er sie ab. Das ist richtig so — was die
-KI bis dahin getan hat, steht im Verlauf, und ein "mach weiter" genuegt.
+**Geheilt wird in einem eigenen Fenster.** Nicht im Dauerchat.
+
+Das war einmal andersherum, mit einer Begruendung, die stimmig klang: es gibt
+eine Unterhaltung je Benutzer, eine Heilung schreibt hinein wie ein Mensch,
+und damit sie sich nicht gegenseitig abwuergen, startet sie nur, wenn dort
+gerade nichts laeuft. Schreibt der Mensch dazwischen, loest er sie ab — was die
+KI bis dahin getan hat, steht ja im Verlauf, und ein "mach weiter" genuegt.
+
+Im Betrieb genuegte es nicht. Beide Regeln zusammen heissen: wer tagsueber mit
+der KI redet, bekommt nachts keinen Server repariert, und wer nachts eine
+Reparatur laufen hat, kann morgens nichts fragen, ohne sie abzubrechen. Ein
+"mach weiter" setzt ausserdem jemanden voraus, der es tippt — und der Anlass
+dieses Moduls ist gerade, dass niemand davorsitzt.
+
+Deshalb hat die Reparatur seit `20260816_11` ihre eigene Unterhaltung
+(`kind='guardian'`). Beide laufen nebeneinander, ohne voneinander zu wissen:
+`vorgaenger_abloesen` greift je Unterhaltung und reicht nicht mehr hinueber,
+und `aktiver_lauf` bekommt hier das Guardian-Fenster genannt statt "irgendetwas
+von diesem Benutzer". Das Fenster ist im Panel ein eigener Reiter, in den man
+sieht, aber nicht schreibt.
 """
 
 from __future__ import annotations
@@ -231,6 +245,44 @@ def _notiz_anlegen(
     return True
 
 
+def _heilungsnotiz_fuehren(
+    db: Session, *, incident_id: int, user_id: int, run_id: str
+) -> None:
+    """Haelt die Notiz auf dem neuesten Anlauf. Scheitert nie laut.
+
+    Anders als `_notiz_anlegen` ist das hier **keine** Sperre, sondern eine
+    Anzeige: der Guardian-Reiter liest die Zeile, um "die KI bearbeitet das" zu
+    zeigen und auf den Lauf zu verweisen. Ein Auftrag hat mehrere Anlaeufe, und
+    der Verweis soll auf den zeigen, der gerade arbeitet.
+
+    Der Einschub laeuft in einer eigenen Teiltransaktion. Ohne sie naehme ein
+    `IntegrityError` beim Anlegen die ganze offene Arbeit des Aufrufers mit —
+    und das ist an dieser Stelle der frisch angelegte Lauf samt Rahmen.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        with db.begin_nested():
+            db.add(AiGuardianNotice(
+                incident_id=int(incident_id), user_id=int(user_id),
+                mode="healing", run_id=run_id,
+            ))
+            db.flush()
+    except IntegrityError:
+        vorhanden = (
+            db.query(AiGuardianNotice)
+            .filter(
+                AiGuardianNotice.incident_id == int(incident_id),
+                AiGuardianNotice.user_id == int(user_id),
+            )
+            .first()
+        )
+        if vorhanden is not None:
+            vorhanden.mode = "healing"
+            vorhanden.run_id = run_id
+    db.commit()
+
+
 def offene_briefings(db: Session, user: User) -> list[Incident]:
     """Vorfaelle, die dieser Benutzer noch nicht genannt bekommen hat.
 
@@ -332,38 +384,114 @@ def briefings_abschliessen(db: Session, *, user_id: int, incident_ids: list[int]
 # ── Der Heilungslauf ──────────────────────────────────────────────────────
 
 
-def _auftragstext(server: Server, vorfall: Incident) -> str:
+#: Was in der jeweiligen Phase zu tun ist. Der Text kommt aus dem Panel und
+#: nicht aus dem Modell — die Phase ist eine Vorgabe, keine Empfehlung.
+#:
+#: Warum ueberhaupt drei Texte und nicht einer, der alles nennt: ein Auftrag,
+#: der "untersuche, behebe und pruefe nach" sagt, laesst dem Modell die Wahl,
+#: wo es aufhoert. Im Betrieb hat es die immer gleich getroffen — nach dem
+#: Untersuchen. Ein Text je Phase nimmt ihm diese Wahl ab.
+_PHASENTEXTE: dict[str, str] = {
+    "diagnose": (
+        "**Phase 1 von 3: Diagnose.** Verstehe die Ursache, bevor du etwas "
+        "aenderst. Sieh dir die Logs an, den Zustand des Servers, was die "
+        "Guardian-Engine selbst schon versucht hat, und die Konfiguration. "
+        "Frage dich ausdruecklich, welcher der drei Faelle vorliegt: hat "
+        "Guardian sich geirrt, ist Guardian fuer diesen Server falsch "
+        "eingestellt, oder ist wirklich etwas am Server kaputt. Aendere in "
+        "dieser Phase nichts. Schreibe zum Schluss, was du gefunden hast und "
+        "was du als Naechstes tun wirst — dieser Text ist alles, was der "
+        "naechste Anlauf von dir mitbekommt."
+    ),
+    "eingriff": (
+        "**Phase 2 von 3: Eingriff.** Jetzt behebst du es. Du hast die "
+        "Diagnose, also handle danach — lesen allein hilft dem Server nicht "
+        "mehr. Lege vor jedem Eingriff in Dateien ein Backup an. Guardians "
+        "eigene Heilungsleiter ist waehrenddessen angehalten, du arbeitest "
+        "also nicht gegen sie. Kommst du an einer Stelle nicht weiter, nimm "
+        "die naechste, die du fuer wahrscheinlich haeltst; ein Anlauf, der "
+        "nur beschreibt, warum es schwierig ist, ist ein verlorener Anlauf. "
+        "Schreibe zum Schluss, was du geaendert hast."
+    ),
+    "beobachtung": (
+        "**Phase 3 von 3: Beobachtung.** Sieh nach, ob dein Eingriff gehalten "
+        "hat: laeuft der Server, ist der Vorfall geschlossen, meldet Guardian "
+        "etwas Neues. Frage jeden Wert **einmal** ab — wiederholtes Nachfragen "
+        "im selben Lauf bringt nichts, die Zeit zwischen zwei Anlaeufen ist "
+        "das Beobachten. Haelt es nicht, sag warum; du bekommst einen weiteren "
+        "Eingriff. Haelt es, fasse in wenigen Saetzen zusammen, was die Ursache "
+        "war und was du getan hast — diese Zusammenfassung geht als E-Mail an "
+        "den Betreiber."
+    ),
+}
+
+
+def _auftragstext(server: Server, vorfall: Incident, auftrag=None) -> str:
     """Was der KI als Auftrag in den Chat geschrieben wird.
 
-    **Ausschliesslich aus Paneldaten.** Kein Wort aus der Beschreibung des
-    Vorfalls, obwohl sie danebensteht — die stammt vom Agenten auf einem Server,
-    auf dem Fremde spielen, und ein Auftragstext ist die Stelle mit dem meisten
-    Gewicht, die es in einem Lauf gibt. Was das Modell ueber die Ursache wissen
-    will, holt es sich selbst mit `read_guardian_incidents` und
-    `read_server_logs`; dort kommt es als ausdruecklich unvertrauenswuerdiges
-    Werkzeugergebnis an, geschwaerzt und als solches markiert.
+    **Ausschliesslich aus Paneldaten und eigenem Text.** Kein Wort aus der
+    Beschreibung des Vorfalls, obwohl sie danebensteht — die stammt vom Agenten
+    auf einem Server, auf dem Fremde spielen, und ein Auftragstext ist die
+    Stelle mit dem meisten Gewicht, die es in einem Lauf gibt. Was das Modell
+    ueber die Ursache wissen will, holt es sich selbst mit
+    `read_guardian_incidents` und `read_server_logs`; dort kommt es als
+    ausdruecklich unvertrauenswuerdiges Werkzeugergebnis an, geschwaerzt und als
+    solches markiert.
+
+    Die einzige Ausnahme sind die `erkenntnisse` des Auftrags — und die sind
+    keine: es ist der **eigene** Abschlusstext des vorigen Anlaufs, geschwaerzt
+    und gedeckelt, ausdruecklich als eigene Notiz gekennzeichnet. Er ist der
+    einzige Weg, auf dem etwas eine Laufgrenze ueberlebt;
+    `arbeitsspeicher_leeren` wirft die Provider-Nachrichten bei jedem
+    Endzustand weg.
 
     Der Servername ist Betreibertext und wird trotzdem geschwaerzt und gekuerzt —
     er kann aus einer Shop-Bestellung stammen.
     """
     name = redact_sensitive_text(str(server.name or ""))[:64]
-    return (
+    kopf = (
         f"Die Guardian-Engine meldet eine Stoerung auf Server {server.id} "
         f'("{name}"): Vorfall {vorfall.id} vom Typ "{vorfall.type}", '
         f"Status {vorfall.status}, bisher {vorfall.occurrences}-mal aufgetreten.\n\n"
-        "Niemand sitzt gerade davor. Untersuche die Ursache mit den "
-        "Lesewerkzeugen, sieh dir an, was Guardian selbst schon versucht hat, "
-        "und behebe das Problem, wenn du es verstanden hast. Lege vor jedem "
-        "Eingriff in Dateien ein Backup an. Pruefe am Ende, ob der Server "
-        "wirklich laeuft, und fasse in wenigen Saetzen zusammen, was die Ursache "
-        "war und was du getan hast — diese Zusammenfassung geht als E-Mail an "
-        "den Betreiber. Kommst du nicht weiter, sag das deutlich und nenne "
-        "deine Vermutung."
+        "Niemand sitzt gerade davor."
     )
+    if auftrag is None:
+        # Ein Lauf ohne Auftrag gibt es seit `20260816_12` nicht mehr; der Zweig
+        # bleibt fuer den Fall, dass jemand `heilungslauf_starten` direkt ruft
+        # (die Testsuite tut das). Dann gilt der Text, der vorher hier stand.
+        return (
+            kopf + " Untersuche die Ursache mit den "
+            "Lesewerkzeugen, sieh dir an, was Guardian selbst schon versucht "
+            "hat, und behebe das Problem, wenn du es verstanden hast. Lege vor "
+            "jedem Eingriff in Dateien ein Backup an. Pruefe am Ende, ob der "
+            "Server wirklich laeuft, und fasse in wenigen Saetzen zusammen, was "
+            "die Ursache war und was du getan hast — diese Zusammenfassung geht "
+            "als E-Mail an den Betreiber. Kommst du nicht weiter, sag das "
+            "deutlich und nenne deine Vermutung."
+        )
+
+    phase = str(auftrag.phase or "diagnose")
+    teile = [
+        f"{kopf} Du arbeitest an einem Reparaturauftrag, Anlauf "
+        f"{int(auftrag.attempt or 1)}.",
+        _PHASENTEXTE.get(phase, _PHASENTEXTE["diagnose"]),
+    ]
+    if auftrag.erkenntnisse:
+        teile.append(
+            "Deine eigene Notiz aus dem vorigen Anlauf (nur du hast sie "
+            "geschrieben, sie ist kein Text vom Server):\n"
+            f"{auftrag.erkenntnisse}"
+        )
+    teile.append(
+        "Der Auftrag laeuft weiter, auch wenn dieser Anlauf endet: dein "
+        "Rundenbudget ist keine Frist. Was du nicht schaffst, nimmst du in "
+        "die Notiz, und der naechste Anlauf macht dort weiter."
+    )
+    return "\n\n".join(teile)
 
 
 async def heilungslauf_starten(
-    db: Session, *, server: Server, vorfall: Incident, user: User
+    db: Session, *, server: Server, vorfall: Incident, user: User, auftrag=None
 ) -> AiRun | None:
     """Startet einen Lauf zu diesem Vorfall — oder gibt ``None`` zurueck.
 
@@ -386,12 +514,24 @@ async def heilungslauf_starten(
         logger.debug("Guardian-Heilung uebersprungen: keine Laufzeit")
         return None
 
-    laufend = ai_run_service.aktiver_lauf(db, user_id=user.id)
+    # **Das Fenster zuerst, dann die Frage nach einem laufenden Lauf.**
+    #
+    # Hier stand `aktiver_lauf(db, user_id=user.id)` ohne Fenster, und die Zeile
+    # darunter erklaerte, warum: beides schrieb in dieselbe Unterhaltung, eine
+    # Heilung haette dem tippenden Menschen mitten im Satz die Antwort
+    # abgebrochen. Seit die Reparatur ein eigenes Fenster hat, gilt das nicht
+    # mehr — und die Frage ist die falsche geworden. Wer sie so stellt, laesst
+    # nachts keinen Server anlaufen, weil jemand tagsueber eine Frage offen
+    # stehen liess.
+    conversation = ai_chat_service.get_or_create_conversation(db, user, "guardian")
+    db.commit()
+
+    laufend = ai_run_service.aktiver_lauf(db, user_id=user.id, kind="guardian")
     if laufend is not None:
-        # Der Mensch arbeitet gerade. Eine Heilung, die jetzt startet, riefe
-        # `vorgaenger_abloesen` und braeche ihm mitten im Satz die Antwort ab.
-        # Der Vorfall bleibt offen und ohne Notiz — der naechste Takt versucht
-        # es erneut.
+        # In diesem Fenster arbeitet schon eine Reparatur. Zwei davon
+        # gleichzeitig wuerden sich ueber `vorgaenger_abloesen` gegenseitig
+        # abloesen — der Vorfall bleibt offen und ohne Notiz, der naechste Takt
+        # versucht es erneut.
         logger.debug(
             "Guardian-Heilung vertagt: Lauf %s ist aktiv (user_id=%s)", laufend.id, user.id
         )
@@ -405,9 +545,6 @@ async def heilungslauf_starten(
         logger.info("Guardian-Heilung ohne API-Schluessel (provider_id=%s)", anbieter.id)
         return None
 
-    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
-    db.commit()
-
     denken, stufe = await ai_reasoning.vorgabe(
         client, db, user=user, provider=anbieter, aktiv=False, wunsch=None
     )
@@ -419,7 +556,7 @@ async def heilungslauf_starten(
         conversation=conversation,
         provider=anbieter,
         request_id=uuid4(),
-        content=_auftragstext(server, vorfall),
+        content=_auftragstext(server, vorfall, auftrag),
         reasoning=denken,
         reasoning_effort=stufe,
         context_chars=fenster.zeichen if fenster.bekannt else None,
@@ -441,15 +578,33 @@ async def heilungslauf_starten(
         )
         return None
 
-    if not _notiz_anlegen(
-        db, incident_id=vorfall.id, user_id=user.id, mode="healing", run_id=run.id
-    ):
-        # Ein anderer Durchlauf war schneller. Den eigenen Lauf zuruecknehmen,
-        # sonst laufen zwei Heilungen auf denselben Vorfall.
-        run.status = "cancelled"
-        run.stop_reason = "guardian_duplicate"
-        db.commit()
-        return None
+    if auftrag is None:
+        if not _notiz_anlegen(
+            db, incident_id=vorfall.id, user_id=user.id, mode="healing", run_id=run.id
+        ):
+            # Ein anderer Durchlauf war schneller. Den eigenen Lauf
+            # zuruecknehmen, sonst laufen zwei Heilungen auf denselben Vorfall.
+            run.status = "cancelled"
+            run.stop_reason = "guardian_duplicate"
+            db.commit()
+            return None
+    else:
+        # **Mit Auftrag traegt die Notiz die Doppelungssperre nicht mehr.**
+        #
+        # Sie kann es auch nicht: ein Auftrag hat bis zu acht Anlaeufe, und ab
+        # dem zweiten faende `_notiz_anlegen` seine eigene Zeile von vorhin vor
+        # und nennte den Lauf ein Duplikat. Die Sperre liegt jetzt eine Ebene
+        # hoeher, dort wo sie hingehoert: `uq_ai_guardian_repairs_incident_user`
+        # und die atomare Anspruchnahme des Weckrufs.
+        #
+        # Was die Notiz weiterhin tut, ist die Anzeige: der Guardian-Reiter
+        # eines Servers liest sie, um "die KI bearbeitet das" zu zeigen und auf
+        # den Lauf zu verweisen. Deshalb wird sie hier auf den **neuesten** Lauf
+        # gestellt — der Verweis soll dorthin zeigen, wo gerade gearbeitet wird,
+        # und nicht auf den Anlauf von vor vier Stunden.
+        _heilungsnotiz_fuehren(
+            db, incident_id=vorfall.id, user_id=user.id, run_id=run.id
+        )
 
     # **Der Rahmen erst jetzt — nach der Notiz, nicht davor.**
     #
@@ -493,6 +648,20 @@ async def heilungslauf_starten(
         # soll bewiesen werden.
         "backup_anker": _jetzt().isoformat(),
     }
+    if auftrag is not None:
+        # **Derselbe Block, nur mehr Felder — kein dritter Rahmen.**
+        #
+        # `guardian_aus_zustand` liest genau drei Schluessel und ignoriert den
+        # Rest; die Werkzeugsiebe und `guardian_aus_lauf` fragen nur, *ob* es
+        # den Block gibt. Ein eigener `reparatur`-Block daneben waere eine
+        # vierte Stelle, an der jemand vergessen kann, ihn mitzupruefen — und
+        # ein Lauf ohne Guardian-Rahmen ist ein Lauf mit vollem Werkzeugsatz,
+        # ohne Serverbindung und ohne Backup-Pflicht.
+        zustand["guardian"].update({
+            "repair_id": auftrag.id,
+            "phase": str(auftrag.phase),
+            "attempt": int(auftrag.attempt or 0),
+        })
     ai_run_service.zustand_schreiben(run, zustand)
     db.commit()
 
@@ -537,12 +706,37 @@ async def vorfaelle_bearbeiten(db: Session) -> int:
     Wer sie enger fasst, macht aus einer Beschleunigung eine stille
     Rechteänderung.
     """
-    from models import AiAutonomyGrant
+    from models import AiAutonomyGrant, AiGuardianRepair
 
     from sqlalchemy import or_
 
-    # Schon geheilt — von wem auch immer. Zweimal denselben Vorfall zu heilen
-    # wäre ohnehin doppelte Arbeit, und die Zeile verschwindet nie von selbst.
+    # Schon uebernommen — von wem auch immer. Zweimal denselben Vorfall zu
+    # reparieren wäre ohnehin doppelte Arbeit, und die Zeile verschwindet nie
+    # von selbst.
+    #
+    # **Hier stand die Heilungsnotiz.** Sie war die falsche Frage: sie entsteht
+    # beim *Start* eines Laufs und bedeutet damit "es wurde einmal etwas
+    # versucht", nicht "es ist versorgt". Ein Lauf, der nach achtundvierzig
+    # Leserunden am Rundenbudget endete, hat den Vorfall damit fuer immer
+    # erledigt — der Server blieb stehen. Der Auftrag beantwortet die richtige
+    # Frage, weil er eine Endphase hat: solange er laeuft, kommt er von selbst
+    # wieder; ist er zu Ende, ist er es mit einem Ergebnis und einer Mail.
+    schon_uebernommen = (
+        db.query(AiGuardianRepair.id)
+        .filter(AiGuardianRepair.incident_id == Incident.id)
+        .exists()
+    )
+    # **Und die alte Notiz bleibt als Sperre stehen — fuer Altbestand.**
+    #
+    # Ohne sie bekaeme beim ersten Takt nach dem Update *jeder* noch offene
+    # Vorfall, der unter der alten Regel seinen einen Lauf schon hatte, einen
+    # frischen Auftrag mit bis zu acht Anlaeufen. Auf einem Panel mit
+    # zwanzig Dauerbelegern waeren das hundertsechzig Anbieteraufrufe, die
+    # niemand bestellt hat — ein Update darf keine Rechnung schreiben.
+    #
+    # Fuer alles Neue ist die Zeile bedeutungslos: seit es Auftraege gibt,
+    # entsteht eine Heilungsnotiz nur noch **mit** einem Auftrag daneben, und
+    # dann greift schon der Filter darueber.
     schon_geheilt = (
         db.query(AiGuardianNotice.id)
         .filter(
@@ -572,6 +766,7 @@ async def vorfaelle_bearbeiten(db: Session) -> int:
         db.query(Incident)
         .filter(
             Incident.status.in_(OFFENE_ZUSTAENDE),
+            ~schon_uebernommen,
             ~schon_geheilt,
             freigabe_moeglich,
         )
@@ -595,7 +790,14 @@ async def vorfaelle_bearbeiten(db: Session) -> int:
 
 
 async def _einen_vorfall_bearbeiten(db: Session, vorfall: Incident) -> bool:
-    """``True``, wenn fuer diesen Vorfall eine Heilung angelaufen ist.
+    """``True``, wenn fuer diesen Vorfall ein Reparaturauftrag entstanden ist.
+
+    **Angelegt, nicht gestartet.** Der erste Lauf entsteht Sekunden spaeter im
+    zweiten Durchgang desselben Takts (`faellige_bearbeiten`), und das ist
+    Absicht: es gibt damit genau einen Weg, auf dem ein Reparaturlauf beginnt,
+    mit genau einer Anspruchnahme davor. Zwei Wege waeren zwei Stellen, an denen
+    der Anspruch vergessen werden kann — und ein vergessener Anspruch ist eine
+    heisse Schleife, die jede Minute einen Anbieteraufruf kostet.
 
     Der Zweig **ohne** Freigabe taucht hier nicht auf, und das ist kein
     Versehen. Er braucht keinen Ausloeser: `offene_briefings` holt die noch
@@ -604,6 +806,8 @@ async def _einen_vorfall_bearbeiten(db: Session, vorfall: Incident) -> bool:
     Takt soll nicht jede Minute ueber alle Server laufen, um am Ende
     festzustellen, dass er nichts zu tun hatte.
     """
+    from services import ai_guardian_repair_service
+
     server = db.get(Server, vorfall.server_id)
     if server is None:
         return False
@@ -612,33 +816,24 @@ async def _einen_vorfall_bearbeiten(db: Session, vorfall: Incident) -> bool:
     if freigeber is None:
         return False
 
-    # Nur eine **Heilungsnotiz** sperrt. Eine Briefingnotiz sagt lediglich, dass
-    # der Vorfall im Chat erwaehnt wurde, und das darf keine Heilung verhindern.
+    # Gefragt wird nach dem **Auftrag** und nicht mehr nach der Notiz. Nur eine
+    # Heilungsnotiz sperrte frueher; eine Briefingnotiz sagt lediglich, dass der
+    # Vorfall im Chat erwaehnt wurde, und das darf eine Reparatur nicht
+    # verhindern. Diese Unterscheidung faellt hier weg, weil der Auftrag ein
+    # eigenes Ding ist — er kann gar nicht aus einer Erwaehnung entstehen.
     #
-    # Ohne den `mode`-Filter entschied ein Zufall von sechzig Sekunden: legt
-    # Guardian einen Vorfall an und schreibt der Freigeber vor dem naechsten Takt
-    # irgendetwas in den Chat, haengt `briefing_nachricht` den Vorfall an — der
-    # Briefingpfad kennt die Freigabe naemlich gar nicht —, und beim Abschluss
-    # dieses Laufs entsteht die Zeile mit `mode='briefed'`. Der Ausloeser sah
-    # danach eine Notiz und liess den Vorfall fuer immer liegen. Der Server blieb
-    # stehen, obwohl die Autonomie eingeschaltet war.
-    vorhanden = (
-        db.query(AiGuardianNotice.id)
-        .filter(
-            AiGuardianNotice.incident_id == vorfall.id,
-            AiGuardianNotice.user_id == freigeber.id,
-            AiGuardianNotice.mode == "healing",
-        )
-        .first()
-    )
-    if vorhanden is not None:
+    # Ohne Benutzerfilter: zwei Freigeber, die denselben Vorfall gleichzeitig
+    # reparieren lassen, waeren zwei Laeufe auf einem Server.
+    if ai_guardian_repair_service.auftrag_zu_vorfall(db, incident_id=vorfall.id):
         return False
 
-    run = await heilungslauf_starten(db, server=server, vorfall=vorfall, user=freigeber)
-    if run is None:
+    auftrag = ai_guardian_repair_service.auftrag_anlegen(
+        db, vorfall=vorfall, server=server, user=freigeber
+    )
+    if auftrag is None:
         return False
     logger.info(
-        "Guardian-Heilung gestartet run_id=%s server_id=%s incident_id=%s",
-        run.id, server.id, vorfall.id,
+        "Reparaturauftrag angelegt repair_id=%s server_id=%s incident_id=%s user_id=%s",
+        auftrag.id, server.id, vorfall.id, freigeber.id,
     )
     return True

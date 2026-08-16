@@ -62,9 +62,13 @@ vi.mock('./AiActionProposalCard', () => ({
 
 const CONVERSATION = {
   id: '00000000-0000-0000-0000-000000000301',
+  // Der Chat ist das `primary`-Fenster. Die Guardian-Reparaturen liegen
+  // daneben in einer eigenen Unterhaltung und kommen hier nie an.
+  kind: 'primary' as const,
   title: 'KI-Assistent',
   created_at: '2026-08-01T12:00:00Z',
   updated_at: '2026-08-01T12:00:00Z',
+  has_more: false,
 }
 
 const attachment: AiAttachment = {
@@ -786,6 +790,7 @@ describe('AiChat', () => {
     vi.mocked(aiApi.getActiveRun).mockResolvedValue({
       id: 'lauf-42', status: 'running', stop_reason: null,
       message_id: 'msg-a', live: true, created_at: '2026-08-01T12:00:00Z',
+      kind: 'primary', conversation_id: CONVERSATION.id, server_id: null,
     })
     vi.mocked(attachAiRun).mockResolvedValue(undefined)
 
@@ -803,6 +808,7 @@ describe('AiChat', () => {
     vi.mocked(aiApi.getActiveRun).mockResolvedValue({
       id: 'lauf-43', status: 'waiting_confirmation', stop_reason: 'awaiting_confirmation',
       message_id: null, live: false, created_at: '2026-08-01T12:00:00Z',
+      kind: 'primary', conversation_id: CONVERSATION.id, server_id: null,
     })
 
     render(<AiChat />)

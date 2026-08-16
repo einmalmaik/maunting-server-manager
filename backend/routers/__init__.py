@@ -5,6 +5,7 @@ from .backups import router as backups_router
 from .mods import router as mods_router
 from .system import router as system_router
 from .steam import router as steam_router
+from .curseforge import router as curseforge_router
 from .panel_settings import router as panel_settings_router
 from .files import router as files_router
 from .roles import router as roles_router
@@ -27,6 +28,7 @@ from .ai_providers import router as ai_providers_router
 from .ai_chat import router as ai_chat_router
 from .ai_voice import router as ai_voice_router
 from .ai_actions import router as ai_actions_router
+from .ai_approvals import router as ai_approvals_router
 from .ai_autonomy import router as ai_autonomy_router
 from .ai_memory import router as ai_memory_router
 from .ai_skills import router as ai_skills_router
@@ -44,6 +46,7 @@ __all__ = [
     "mods_router",
     "system_router",
     "steam_router",
+    "curseforge_router",
     "panel_settings_router",
     "files_router",
     "roles_router",
@@ -66,6 +69,7 @@ __all__ = [
     "ai_chat_router",
     "ai_voice_router",
     "ai_actions_router",
+    "ai_approvals_router",
     "ai_autonomy_router",
     "ai_memory_router",
     "ai_skills_router",

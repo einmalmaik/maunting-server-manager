@@ -47,6 +47,10 @@ const SCHREIBWERKZEUGE = [
   // übersprungen werden darf, die Farbe entscheidet, wie gefragt wird.
   'propose_server_repair',
   'propose_file_delete',
+  // Guardian je Server anders einstellen. Steht hier, seit die Reparatur den
+  // Fall „der Blueprint erwartet etwas, das diese Node nicht leisten kann"
+  // beheben darf, ohne die Vorlage für alle Server dieses Spiels zu ändern.
+  'propose_guardian_tuning',
 ] as const
 
 const SPRACHEN = { de, en } as Record<string, typeof de>

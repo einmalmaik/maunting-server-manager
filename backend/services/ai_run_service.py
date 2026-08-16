@@ -344,17 +344,44 @@ def serverbezug_merken(db: Session, *, run_id: str | None, server_id: int | None
     run.updated_at = _jetzt()
 
 
-def aktiver_lauf(db: Session, *, user_id: int) -> AiRun | None:
-    """Der juengste Lauf, der noch etwas vorhat. Fuer Glocke und Wiederanschluss."""
-    return (
-        db.query(AiRun)
-        .filter(
-            AiRun.user_id == user_id,
-            AiRun.status.in_(("running", *WARTEND)),
-        )
-        .order_by(AiRun.created_at.desc())
-        .first()
+def aktiver_lauf(
+    db: Session, *, user_id: int, kind: str | None = None
+) -> AiRun | None:
+    """Der juengste Lauf, der noch etwas vorhat. Fuer Glocke und Wiederanschluss.
+
+    ``kind`` schraenkt auf ein Fenster ein — und **jeder** Aufrufer, der eine
+    Entscheidung darauf stuetzt, muss es setzen, seit es mehr als eines gibt.
+
+    Ohne die Einschraenkung beantwortet diese Funktion "laeuft irgendwo etwas
+    fuer diesen Menschen?", und darauf gibt es keine brauchbare Reaktion mehr.
+    Der Chat haengte sich an den Reparaturlauf und zeichnete dessen Verlauf in
+    das Fenster des Menschen — genau das Symptom, dessentwegen die Fenster
+    getrennt wurden. Und umgekehrt liesse ein geparkter Reparaturlauf keine
+    weitere Reparatur und keinen faelligen Auftrag mehr beginnen, auf **allen**
+    Anlagen dieses Benutzers.
+
+    Gefragt wird ueber die **Art** und nicht ueber eine Kennung: eine
+    Unterhaltung gehoert genau einem Benutzer und genau einer Art
+    (`uq_ai_conversations_user_kind`), beides ist also dasselbe — aber wer nach
+    der Art fragt, muss die Zeile nicht vorher anlegen lassen. Das ist der
+    Unterschied zwischen einer Auskunft und einer Nebenwirkung.
+
+    ``None`` bleibt erlaubt und heisst weiterhin "ueber alle Fenster". Es gibt
+    eine Frage, die so gestellt gehoert: die Glocke will wissen, ob ueberhaupt
+    etwas laeuft. Wer sie stellt, muss anschliessend selbst entscheiden, wohin
+    er zeigt.
+    """
+    query = db.query(AiRun).filter(
+        AiRun.user_id == user_id,
+        AiRun.status.in_(("running", *WARTEND)),
     )
+    if kind is not None:
+        from models import AiConversation
+
+        query = query.join(
+            AiConversation, AiConversation.id == AiRun.conversation_id
+        ).filter(AiConversation.kind == kind)
+    return query.order_by(AiRun.created_at.desc()).first()
 
 
 def eigener_lauf(db: Session, run_id: str, user: User) -> AiRun | None:

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { AudioLines, ChevronDown, MessageSquare, Sparkles } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { AudioLines, ChevronDown, MessageSquare, ShieldAlert, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiVoiceConfig } from '@/api/ai'
@@ -7,6 +8,7 @@ import { api } from '@/api/client'
 import { AiAutonomyButton } from '@/components/ai/AiAutonomyButton'
 import { AiChat } from '@/components/ai/AiChat'
 import { AiSkillDirectory } from '@/components/ai/AiSkillDirectory'
+import { GuardianAnsicht } from '@/components/ai/GuardianAnsicht'
 import { SprachAnsicht } from '@/components/ai/voice/SprachAnsicht'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
@@ -17,12 +19,65 @@ interface ServerOption {
 }
 
 /**
+ * Welche Ansicht die Seite gerade ausfüllt.
+ *
+ * `text` und `sprache` sind zwei Modi **derselben** Unterhaltung — getippt und
+ * gesprochen. `guardian` ist etwas anderes: ein zweiter Verlauf, in den nur die
+ * Läufe schreiben, die eine Störung ausgelöst hat. Er steht trotzdem in
+ * derselben Reihe, weil er dasselbe Bild ausfüllt und man dazwischen wechselt.
+ */
+type Ansicht = 'text' | 'sprache' | 'guardian'
+
+const ANSICHTEN: readonly Ansicht[] = ['text', 'sprache', 'guardian']
+
+function ansichtAusAbfrage(wert: string | null): Ansicht {
+  return (ANSICHTEN as readonly string[]).includes(wert ?? '') ? (wert as Ansicht) : 'text'
+}
+
+/** Ein Knopf der Umschaltreihe. Aktiv heisst: diese Ansicht steht gerade. */
+function Umschalter({ aktiv, onClick, icon, label }: {
+  aktiv: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={aktiv}
+      className={[
+        'inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium',
+        'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+        aktiv
+          ? 'border-outline-variant/60 bg-surface-container-low/50 text-on-surface-variant hover:text-on-surface'
+          : 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15',
+      ].join(' ')}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
+
+/**
  * Die KI-Seite ist der Chat — nicht eine Seite *mit* einem Chat.
  *
  * Seit dem Sprachmodus sind es zwei Modi derselben Unterhaltung: getippt und
  * gesprochen. Umgeschaltet wird oben rechts, und es ist wirklich ein Wechsel und
  * kein Nebeneinander — der Chat verschwindet, die Kugel übernimmt. Ein
  * Sprachmodus neben einem Eingabefeld wäre beides halb.
+ *
+ * Dazu kommt das **Guardian-Fenster**: der Verlauf der Reparaturen, die im
+ * Hintergrund laufen. Es ist bewusst dieselbe Umschaltreihe und keine eigene
+ * Seite — es ist derselbe Assistent, nur ein anderer Anlass, und wer eine
+ * Störung gemeldet bekommt, soll einen Klick weit weg sein. Geschrieben wird
+ * dort nicht; warum, steht in `GuardianAnsicht`.
+ *
+ * Die Wahl steht in der Adresse (`?ansicht=guardian`). Das ist der Weg, über
+ * den der Guardian-Reiter eines Servers und die Glocke hierher zeigen — ein
+ * Zustand allein in der Komponente wäre von dort nicht erreichbar. Dieselbe
+ * Bauart wie die Reiter der Serverseite.
  *
  * Der Umschalter sitzt **auf dieser Seite** und nicht in der Topbar, obwohl er
  * dort optisch hingehörte. Die Topbar gehört allen Seiten; ein Knopf darin, der
@@ -50,8 +105,23 @@ export function Ai() {
   const canUseAutonomy = useHasPermission('ai.autonomous.use')
   const [skillsOpen, setSkillsOpen] = useState(false)
   const [sprachkonfiguration, setSprachkonfiguration] = useState<AiVoiceConfig | null>(null)
-  const [spricht, setSpricht] = useState(false)
   const [servers, setServers] = useState<ServerOption[]>([])
+  const [suchParameter, setzeSuchParameter] = useSearchParams()
+
+  const gewuenscht = ansichtAusAbfrage(suchParameter.get('ansicht'))
+  // Ohne eingerichteten Realtime-Zugang gibt es den Sprachmodus nicht — auch
+  // dann nicht, wenn er in der Adresse steht. Dieselbe Regel wie beim Knopf.
+  const ansicht: Ansicht =
+    gewuenscht === 'sprache' && !sprachkonfiguration ? 'text' : gewuenscht
+
+  const setzeAnsicht = (neu: Ansicht) => {
+    const naechste = new URLSearchParams(suchParameter)
+    if (neu === 'text') naechste.delete('ansicht')
+    else naechste.set('ansicht', neu)
+    // `replace`, damit der Zurück-Knopf des Browsers aus der KI-Seite
+    // herausführt und nicht durch drei Ansichten davon.
+    setzeSuchParameter(naechste, { replace: true })
+  }
 
   // Zwei Bedingungen, und beide müssen stimmen: das Recht *und* ein
   // eingerichteter Sprachweg. Der besteht aus zwei Zugängen — Gehör und Stimme
@@ -78,12 +148,13 @@ export function Ai() {
   // eine Auswahlliste, die gar nicht gezeichnet wird. Scheitert der Abruf,
   // bleibt die Liste leer — panelweite Freigabe geht dann immer noch.
   //
-  // `spricht` steht mit in der Bedingung, weil der Knopf hier **nur** im
+  // Die Ansicht steht mit in der Bedingung, weil der Knopf hier **nur** im
   // Sprachmodus steht: im getippten Modus zeichnet ihn `AiChat` selbst, und
   // dort holt er seine Liste auch selbst. Ohne diese Bedingung liefen im
-  // Chatmodus zwei Abrufe derselben Liste für zwei Knöpfe nebeneinander.
+  // Chatmodus zwei Abrufe derselben Liste für zwei Knöpfe nebeneinander. Im
+  // Guardian-Fenster gibt es ihn gar nicht — dort wird nicht gehandelt.
   useEffect(() => {
-    if (!canUseAutonomy || !spricht) return
+    if (!canUseAutonomy || ansicht !== 'sprache') return
     let lebt = true
     api<ServerOption[]>('/servers')
       .then((liste) => {
@@ -93,7 +164,7 @@ export function Ai() {
     return () => {
       lebt = false
     }
-  }, [canUseAutonomy, spricht])
+  }, [ansicht, canUseAutonomy])
 
   if (!canChat) {
     return (
@@ -113,43 +184,48 @@ export function Ai() {
     // kleiner werden als sein Inhalt, und der Verlauf würde die Seite statt
     // seines eigenen Bereichs scrollen.
     <div className="flex h-[calc(100dvh-6rem)] min-h-0 flex-col md:h-[calc(100dvh-9rem)]">
-      {sprachkonfiguration && (
-        <div className="flex shrink-0 items-center justify-end gap-3 pb-2">
-          {canUseAutonomy && spricht && <AiAutonomyButton servers={servers} />}
-          {sprachkonfiguration && (
-            <button
-              type="button"
-              onClick={() => setSpricht((an) => !an)}
-              aria-pressed={spricht}
-              className={[
-                'inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium',
-                'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
-                spricht
-                  ? 'border-outline-variant/60 bg-surface-container-low/50 text-on-surface-variant hover:text-on-surface'
-                  : 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15',
-              ].join(' ')}
-            >
-              {spricht ? (
-                <MessageSquare className="h-4 w-4" aria-hidden="true" />
-              ) : (
-                <AudioLines className="h-4 w-4" aria-hidden="true" />
-              )}
-              {t(spricht ? 'ai.voice.toTextMode' : 'ai.voice.toVoiceMode')}
-            </button>
-          )}
-        </div>
-      )}
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pb-2">
+        {/* Der Autonomie-Schalter, solange gesprochen wird — die Begründung
+            steht im Doc-Kommentar oben. Er steht **vor** der Umschaltreihe,
+            weil er kein Wechsel ist, sondern eine Einstellung: zwischen den
+            Modusknöpfen sähe er aus wie ein vierter Modus. */}
+        {canUseAutonomy && ansicht === 'sprache' && <AiAutonomyButton servers={servers} />}
+        {ansicht !== 'text' && (
+          <Umschalter
+            aktiv={false}
+            onClick={() => setzeAnsicht('text')}
+            icon={<MessageSquare className="h-4 w-4" aria-hidden="true" />}
+            label={t('ai.voice.toTextMode')}
+          />
+        )}
+        <Umschalter
+          aktiv={ansicht === 'guardian'}
+          onClick={() => setzeAnsicht(ansicht === 'guardian' ? 'text' : 'guardian')}
+          icon={<ShieldAlert className="h-4 w-4" aria-hidden="true" />}
+          label={t('ai.guardian.toGuardianMode')}
+        />
+        {sprachkonfiguration && ansicht !== 'sprache' && (
+          <Umschalter
+            aktiv={false}
+            onClick={() => setzeAnsicht('sprache')}
+            icon={<AudioLines className="h-4 w-4" aria-hidden="true" />}
+            label={t('ai.voice.toVoiceMode')}
+          />
+        )}
+      </div>
 
-      {spricht && sprachkonfiguration ? (
+      {ansicht === 'sprache' && sprachkonfiguration ? (
         <SprachAnsicht
           konfiguration={sprachkonfiguration}
-          aufChat={() => setSpricht(false)}
+          aufChat={() => setzeAnsicht('text')}
         />
+      ) : ansicht === 'guardian' ? (
+        <GuardianAnsicht />
       ) : (
         <AiChat />
       )}
 
-      {canUseSkills && !spricht && (
+      {canUseSkills && ansicht === 'text' && (
         <div className="shrink-0 border-t border-outline-variant/40">
           <button
             type="button"

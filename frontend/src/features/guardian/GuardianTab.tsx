@@ -8,12 +8,26 @@ import {
   CheckCircle2,
   Clock,
   Activity,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Server, GuardianIncident } from "../../types";
 import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
+import { useHasPermission } from "@/hooks/useHasPermission";
 import { getGuardianDisplayState } from "./GuardianBadge";
+
+/**
+ * Was fuer diesen Server abweichend von der Blueprint gilt.
+ *
+ * `overrides` traegt nur die **wirkenden** Werte — der Endpunkt liest sie durch
+ * dieselbe Saeuberung wie der Compiler. Eine von Hand verbogene Zeile zeigt
+ * hier deshalb, was der Agent bekommt, und nicht, was in der Spalte steht.
+ */
+interface GuardianOverrides {
+  overrides: Record<string, number>;
+  origin: { source: string; incident_id: number | null; changed_at: string | null } | null;
+}
 
 /** Zustaende, in denen ein Heilungslauf noch arbeitet (inkl. Warten auf einen Menschen). */
 const LAUF_OFFEN = ["running", "waiting_confirmation", "waiting_user"];
@@ -53,6 +67,9 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
   const [loading, setLoading] = useState(true);
   const [incidentError, setIncidentError] = useState(false);
   const [resolvingId, setResolvingId] = useState<number | null>(null);
+  const [overrides, setOverrides] = useState<GuardianOverrides | null>(null);
+  const [resettingOverrides, setResettingOverrides] = useState(false);
+  const canWriteConfig = useHasPermission("server.config.write", server.id);
 
   const fetchIncidents = useCallback(async () => {
     setLoading(true);
@@ -70,9 +87,47 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
     }
   }, [server.id]);
 
+  const fetchOverrides = useCallback(async () => {
+    try {
+      const res = await api<GuardianOverrides>(
+        `/servers/${server.id}/guardian/overrides`
+      );
+      // Dieselbe Vorsicht wie bei den Vorfällen: was nicht die zugesagte Form
+      // hat, gilt als "keine Auskunft". Eine Karte, die aus einer unerwarteten
+      // Antwort etwas herausliest, zeigte sonst Zahlen an, die nirgends gelten.
+      if (!res || typeof res.overrides !== "object" || res.overrides === null) {
+        throw new Error("INVALID_OVERRIDE_RESPONSE");
+      }
+      setOverrides(res);
+    } catch {
+      // Eine nicht ladbare Uebersteuerung blendet die Karte aus, statt einen
+      // Fehler zu melden. Sie ist eine Zusatzauskunft; ein roter Kasten daneben
+      // laesst den ganzen Reiter kaputt aussehen, obwohl Vorfaelle und Zustand
+      // stehen.
+      setOverrides(null);
+    }
+  }, [server.id]);
+
   useEffect(() => {
     void fetchIncidents();
-  }, [fetchIncidents]);
+    void fetchOverrides();
+  }, [fetchIncidents, fetchOverrides]);
+
+  const handleResetOverrides = async () => {
+    setResettingOverrides(true);
+    try {
+      await api(`/servers/${server.id}/guardian/overrides`, { method: "DELETE" });
+      toast.success(t("servers.guardian.override.resetSuccess"));
+      await fetchOverrides();
+      if (onRefreshServer) {
+        onRefreshServer();
+      }
+    } catch {
+      toast.error(t("servers.guardian.override.resetError"));
+    } finally {
+      setResettingOverrides(false);
+    }
+  };
 
   const handleResolveIncident = async (incident: GuardianIncident) => {
     setResolvingId(incident.id);
@@ -199,6 +254,64 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
         </div>
       </div>
 
+      {/* Übersteuerung — nur wenn es eine gibt.
+
+          Eine unsichtbare Verhaltensänderung wäre schlimmer als das Problem,
+          das sie behebt: die KI darf diese Zahlen im Reparaturlauf ohne Klick
+          setzen, und wer danach eine unerwartete Startfrist sucht, sucht sie
+          in der Blueprint — wo sie nicht steht. Deshalb steht hier, was gilt,
+          woher es kommt, und wie man es wieder los wird. */}
+      {overrides && Object.keys(overrides.overrides).length > 0 && (
+        <div className="msm-card p-6">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <h3 className="text-lg font-headline font-semibold text-on-surface flex items-center gap-2">
+                <SlidersHorizontal className="w-5 h-5 text-primary" />
+                {t("servers.guardian.override.title")}
+              </h3>
+              <p className="mt-1 text-sm text-on-surface-variant">
+                {overrides.origin?.source === "ai"
+                  ? t("servers.guardian.override.originAi", {
+                      date: overrides.origin?.changed_at
+                        ? new Date(overrides.origin.changed_at).toLocaleString()
+                        : t("servers.guardian.tab.status.unknown"),
+                      incident: overrides.origin?.incident_id ?? "—",
+                    })
+                  : t("servers.guardian.override.originHuman")}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleResetOverrides()}
+              disabled={!canWriteConfig || resettingOverrides}
+              className="msm-btn-secondary px-3 py-1.5 text-xs shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+              title={
+                canWriteConfig ? undefined : t("servers.guardian.override.resetDenied")
+              }
+            >
+              {t("servers.guardian.override.reset")}
+            </button>
+          </div>
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {Object.entries(overrides.overrides).map(([name, wert]) => (
+              <div
+                key={name}
+                className="p-3 rounded-lg bg-surface-container-low border border-outline-variant/40"
+              >
+                <dt className="text-xs text-on-surface-variant font-medium">
+                  {t(`servers.guardian.override.knob.${name}`, {
+                    defaultValue: name,
+                  })}
+                </dt>
+                <dd className="text-sm font-mono-sm text-on-surface font-semibold">
+                  {wert}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+
       {/* Incidents & History Card */}
       <div className="msm-card p-6">
         <div className="flex items-center justify-between mb-4">
@@ -307,11 +420,19 @@ export const GuardianTab: React.FC<GuardianTabProps> = ({
                             {t("servers.guardian.tab.aiHeading")}:
                           </span>
                           <span>{t(schluessel)}</span>
-                          {/* Nur der eigene Lauf ist zu oeffnen: es gibt eine
-                              Unterhaltung je Benutzer, und der Chat eines
-                              anderen Freigebers laesst sich nicht anzeigen. */}
+                          {/* Nur der eigene Lauf ist zu oeffnen: das
+                              Guardian-Fenster gehoert dem Freigeber, und das
+                              eines anderen laesst sich nicht anzeigen.
+
+                              Das Ziel ist seit dem eigenen Fenster nicht mehr
+                              der Dauerchat: dort steht die Reparatur nicht
+                              mehr drin, und ein Verweis darauf zeigte auf eine
+                              Unterhaltung, in der nichts davon passiert ist. */}
                           {inc.ai?.mine && inc.ai.mode === "healing" && (
-                            <Link to="/ai" className="text-primary underline underline-offset-2">
+                            <Link
+                              to="/ai?ansicht=guardian"
+                              className="text-primary underline underline-offset-2"
+                            >
                               {t("servers.guardian.tab.aiOpenChat")}
                             </Link>
                           )}

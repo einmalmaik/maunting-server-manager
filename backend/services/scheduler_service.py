@@ -938,17 +938,35 @@ async def _ai_guardian_task() -> None:
 
     Wie jeder Auftrag hier faengt er alles ab. Ein Fehler im Ausloeser darf den
     Scheduler nicht aus dem Takt bringen.
+
+    **Zwei Durchgaenge, in dieser Reihenfolge.** Der erste legt fuer neue
+    Vorfaelle einen Reparaturauftrag an, der zweite weckt faellige Auftraege.
+    Andersherum wartete ein frisch angelegter Auftrag eine Minute auf seinen
+    ersten Anlauf, obwohl er sofort faellig ist. Beide Durchgaenge sind einzeln
+    gekapselt: findet der erste nichts oder scheitert er, soll der zweite
+    trotzdem laufen — dort haengen die Auftraege, die seit Stunden unterwegs
+    sind.
     """
     from database import SessionLocal
+    from services.ai_guardian_repair_service import faellige_bearbeiten
     from services.ai_guardian_service import vorfaelle_bearbeiten
 
     db = SessionLocal()
     try:
-        anzahl = await vorfaelle_bearbeiten(db)
-        if anzahl:
-            logger.info("Guardian-KI: %s Vorfall/Vorfaelle uebernommen", anzahl)
-    except Exception as exc:
-        logger.warning("Error in AI guardian task: %s", exc)
+        try:
+            anzahl = await vorfaelle_bearbeiten(db)
+            if anzahl:
+                logger.info("Guardian-KI: %s Vorfall/Vorfaelle uebernommen", anzahl)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in AI guardian task: %s", exc)
+        try:
+            begonnen = await faellige_bearbeiten(db)
+            if begonnen:
+                logger.info("Guardian-KI: %s Reparaturlauf/-laeufe begonnen", begonnen)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in AI guardian repair task: %s", exc)
     finally:
         db.close()
 

@@ -287,3 +287,84 @@ def test_workshop_search_reports_a_missing_api_key_honestly(
     assert result["available"] is False
     assert result["reason"] in {"steam_api_key_missing", "workshop_id_missing", "mods_not_supported"}
     assert "results" not in result
+
+
+def test_mod_install_proposal_with_name_stores_mod_name(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    started: list[tuple] = []
+
+    class _Thread:
+        def __init__(self, *, target, args, daemon, name):
+            started.append((target, args))
+
+        def start(self) -> None:
+            return None
+
+    monkeypatch.setattr("threading.Thread", _Thread)
+
+    server, conversation = _setup(
+        db, regular_user, server_keys=("server.view", "server.mods.read", "server.mods.write")
+    )
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_mod_install",
+        arguments=_install_arguments(
+            server.id,
+            workshop_id="927142",
+            name="Moros Indomitable Duo",
+        ),
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    preview = json.loads(proposal.preview_json)
+    assert preview["workshop_id"] == "927142"
+    assert preview["known_name"] == "Moros Indomitable Duo"
+
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=regular_user
+    )
+    executed, result = ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal.id, user=regular_user, confirmation_token=token
+    )
+    assert executed.status == "succeeded"
+
+    mod = db.query(Mod).filter(Mod.server_id == server.id, Mod.workshop_id == "927142").first()
+    assert mod is not None
+    assert mod.name == "Moros Indomitable Duo"
+
+
+def test_read_server_mods_reports_install_error(
+    db: Session, regular_user: User
+) -> None:
+    server, conversation = _setup(
+        db, regular_user, server_keys=("server.view", "server.mods.read")
+    )
+    db.add(Mod(
+        server_id=server.id,
+        workshop_id="927142",
+        name="Moros Indomitable Duo",
+        enabled=True,
+        install_status="failed",
+        install_error="Installation fehlgeschlagen. — Download timeout",
+        load_order=0,
+    ))
+    db.commit()
+
+    result = ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="read_server_mods",
+        arguments={"server_id": server.id},
+    )
+
+    assert len(result["mods"]) == 1
+    assert result["mods"][0]["workshop_id"] == "927142"
+    assert result["mods"][0]["install_status"] == "failed"
+    assert result["mods"][0]["install_error"] == "Installation fehlgeschlagen. — Download timeout"
+

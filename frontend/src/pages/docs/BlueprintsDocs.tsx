@@ -475,6 +475,11 @@ export function BlueprintsDocs() {
             <FieldTable>
               <FieldRow field="mods.supportsMods" type="boolean" required={false}>{t('docs.reference.modsSupportsMods')}</FieldRow>
               <FieldRow field="mods.supportsSteamWorkshop" type="boolean" required={false}>{t('docs.reference.modsSupportsSteamWorkshop')}</FieldRow>
+              <FieldRow field="mods.supportsCurseForge" type="boolean" required={false}>{t('docs.reference.modsSupportsCurseForge')}</FieldRow>
+              <FieldRow field="mods.curseforgeGameId" type="string" required={false}>{t('docs.reference.modsCurseforgeGameId')}</FieldRow>
+              <FieldRow field="mods.curseforgeClassId" type="string" required={false}>{t('docs.reference.modsCurseforgeClassId')}</FieldRow>
+              <FieldRow field="mods.curseforgeInstallPath" type="string" required={false}>{t('docs.reference.modsCurseforgeInstallPath')}</FieldRow>
+              <FieldRow field="mods.modStartupArgumentSeparator" type="string" required={false}>{t('docs.reference.modsModStartupArgumentSeparator')}</FieldRow>
               <FieldRow field="mods.workshopAppId" type="string" required={false}>{t('docs.reference.modsWorkshopAppId')}</FieldRow>
               <FieldRow field="mods.filterTags" type="list" required={false}>{t('docs.reference.modsFilterTags')}</FieldRow>
               <FieldRow field="mods.modInjection" type="enum" required={false}>{t('docs.reference.modsModInjection')}</FieldRow>
@@ -491,6 +496,9 @@ export function BlueprintsDocs() {
 
             <h3 className="font-bold text-on-surface mt-4">{t('docs.howto.h1')}</h3>
             <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b1')}</p>
+
+            <h3 className="font-bold text-on-surface mt-6">{t('docs.howto.hCurseForge')}</h3>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.bCurseForge')}</p>
 
             <h3 className="font-bold text-on-surface mt-6">{t('docs.howto.h2')}</h3>
             <p className="font-body-md text-body-md text-on-surface-variant mb-2">{t('docs.howto.b2')}</p>

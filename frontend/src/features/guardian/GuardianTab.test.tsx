@@ -6,6 +6,7 @@ import { GuardianTab } from "./GuardianTab";
 import { GuardianBadge, getGuardianDisplayState } from "./GuardianBadge";
 import { GuardianQuarantineBanner } from "./GuardianQuarantineBanner";
 import * as client from "@/api/client";
+import { usePermissionsStore } from "@/stores/permissionsStore";
 import type { Server, GuardianIncident, GuardianIncidentAi } from "@/types";
 
 vi.mock("@/api/client", () => ({
@@ -519,18 +520,22 @@ describe("Guardian UI Components", () => {
     });
 
     /**
-     * Es gibt eine Unterhaltung je Benutzer: der Lauf eines anderen Freigebers
-     * laesst sich nicht oeffnen. Ein Verweis, der ins Leere fuehrt oder in den
-     * eigenen, voellig anderen Chat, waere schlechter als gar keiner — deshalb
-     * haengt der Link an `mine` und nicht daran, dass ueberhaupt ein Lauf
-     * existiert.
+     * Es gibt je Benutzer *und Art* eine Unterhaltung: der Lauf eines anderen
+     * Freigebers laesst sich nicht oeffnen. Ein Verweis, der ins Leere fuehrt
+     * oder in den eigenen, voellig anderen Verlauf, waere schlechter als gar
+     * keiner — deshalb haengt der Link an `mine` und nicht daran, dass
+     * ueberhaupt ein Lauf existiert.
+     *
+     * Und er zeigt auf das **Guardian-Fenster**, nicht auf den Dauerchat: dort
+     * steht die Reparatur, seit sie ein eigenes Fenster hat. `/ai` allein
+     * oeffnete den Chat, in dem von diesem Lauf keine Zeile steht.
      */
-    it("bietet den Weg in den Chat nur beim eigenen Lauf an", async () => {
+    it("bietet den Weg in das Guardian-Fenster nur beim eigenen Lauf an", async () => {
       await zeigeVorfall(
         vorfall({ mode: "healing", run_status: "running", mine: true, at: "2026-08-12T12:01:00Z" }),
       );
       const link = screen.getByRole("link", { name: satz("aiOpenChat") });
-      expect(link).toHaveAttribute("href", "/ai");
+      expect(link).toHaveAttribute("href", "/ai?ansicht=guardian");
     });
 
     it("verschweigt den Weg in den Chat beim Lauf eines anderen Freigebers", async () => {
@@ -551,6 +556,125 @@ describe("Guardian UI Components", () => {
         vorfall({ mode: "briefed", run_status: null, mine: true, at: "2026-08-12T12:01:00Z" }),
       );
       expect(screen.queryByRole("link", { name: satz("aiOpenChat") })).toBeNull();
+    });
+  });
+  /**
+   * Warum es diese Tests gibt: die KI darf im Reparaturlauf die
+   * Guardian-Stellschrauben dieses Servers ohne Klick verstellen. Eine
+   * Verhaltensaenderung, die nirgends steht, waere schlimmer als der Vorfall,
+   * den sie behebt — wer danach eine unerwartete Startfrist sucht, sucht sie im
+   * Blueprint, wo sie nicht steht.
+   *
+   * Geprueft wird deshalb genau das Sichtbarmachen: die geltenden Zahlen, die
+   * Herkunft, der Rueckweg — und dass der Rueckweg ohne `server.config.write`
+   * als gesperrt zu erkennen ist statt wortlos zu verpuffen.
+   */
+  describe("GuardianTab: Uebersteuerung", () => {
+    const satz = (name: string) => i18n.t(`servers.guardian.override.${name}`);
+
+    function antworten(uebersteuerung: unknown) {
+      vi.mocked(client.api).mockImplementation(async (path, init?: RequestInit) => {
+        if (path === "/servers/1/incidents") return [];
+        if (path === "/servers/1/guardian/overrides") {
+          if (init?.method === "DELETE") return { ok: true, overrides: {} };
+          return uebersteuerung;
+        }
+        return null;
+      });
+    }
+
+    function zeichnen() {
+      render(
+        <MemoryRouter>
+          <GuardianTab server={mockServerGuardianEnabled} />
+        </MemoryRouter>,
+      );
+    }
+
+    beforeEach(() => {
+      usePermissionsStore.setState({ me: null, isLoading: false });
+    });
+
+    it("zeigt keine Karte, solange nichts uebersteuert ist", async () => {
+      antworten({ overrides: {}, bounds: {}, origin: null });
+      zeichnen();
+      await waitFor(() => {
+        expect(client.api).toHaveBeenCalledWith("/servers/1/guardian/overrides");
+      });
+      expect(screen.queryByText(satz("title"))).toBeNull();
+    });
+
+    it("zeigt die geltenden Werte samt Herkunft", async () => {
+      antworten({
+        overrides: { startup_grace_period_seconds: 600 },
+        bounds: {},
+        origin: { source: "ai", incident_id: 5, changed_at: "2026-08-16T10:00:00Z" },
+      });
+      zeichnen();
+      expect(await screen.findByText(satz("title"))).toBeInTheDocument();
+      expect(
+        screen.getByText(i18n.t("servers.guardian.override.knob.startup_grace_period_seconds")),
+      ).toBeInTheDocument();
+      expect(screen.getByText("600")).toBeInTheDocument();
+      // Die Herkunft nennt den Vorfall. Ohne ihn koennte die Karte zwar sagen
+      // "von der KI gesetzt", aber nicht, woraufhin — und genau das fragt, wer
+      // eine unerwartete Zahl sieht.
+      expect(screen.getByText(/#5/)).toBeInTheDocument();
+    });
+
+    it("sperrt den Rueckweg ohne server.config.write sichtbar", async () => {
+      antworten({
+        overrides: { probe_interval_seconds: 42 },
+        bounds: {},
+        origin: null,
+      });
+      zeichnen();
+      const knopf = await screen.findByRole("button", { name: satz("reset") });
+      expect(knopf).toBeDisabled();
+    });
+
+    it("setzt mit dem Recht wirklich zurueck", async () => {
+      usePermissionsStore.setState({
+        me: {
+          is_owner: false,
+          role_id: 2,
+          role_name: "user",
+          global_keys: [],
+          server_keys: { "1": ["server.config.write"] },
+        },
+        isLoading: false,
+      });
+      antworten({
+        overrides: { probe_interval_seconds: 42 },
+        bounds: {},
+        origin: null,
+      });
+      zeichnen();
+      const knopf = await screen.findByRole("button", { name: satz("reset") });
+      fireEvent.click(knopf);
+      await waitFor(() => {
+        expect(client.api).toHaveBeenCalledWith("/servers/1/guardian/overrides", {
+          method: "DELETE",
+        });
+      });
+    });
+
+    /**
+     * Eine unerwartete Antwort darf nicht dazu fuehren, dass die Karte etwas
+     * herausliest: sie zeigte sonst Zahlen an, die nirgends gelten. Und der
+     * uebrige Reiter muss stehen bleiben — die Uebersteuerung ist eine
+     * Zusatzauskunft, kein Grund, Vorfaelle und Zustand zu verbergen.
+     */
+    it("verschweigt sich bei einer unerwarteten Antwort", async () => {
+      antworten([{ nichts: "davon" }]);
+      zeichnen();
+      await waitFor(() => {
+        expect(client.api).toHaveBeenCalledWith("/servers/1/guardian/overrides");
+      });
+      expect(screen.queryByText(satz("title"))).toBeNull();
+      expect(
+        screen.getByText(i18n.t("servers.guardian.tab.overviewTitle")),
+      ).toBeInTheDocument();
     });
   });
 });

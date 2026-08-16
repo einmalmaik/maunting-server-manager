@@ -170,6 +170,15 @@ MAX_WRITE_ROUNDS = 24
 # Alle drei sind benutzer- oder rollenbezogen und zeitfensterweit, keiner ist
 # laufbezogen. Wer eine Grenze für genau einen Lauf will, muss sie bauen; hier
 # steht sie nicht.
+#
+# **Eine Ausnahme gibt es inzwischen, und sie liegt woanders.** Ein
+# Reparaturlauf gehört zu einem Auftrag (`ai_guardian_repairs`), und der trägt
+# eine Frist (Vorgabe sechs Stunden) und einen Versuchsdeckel (Vorgabe acht
+# Anläufe). Beide begrenzen nicht diesen Lauf, sondern wie oft ein Vorfall
+# überhaupt noch einen bekommt — genau die Grenze, die es vorher nirgends gab:
+# ein Lauf, der auf `stop_reason='budget'` endete, war das Ende der Behandlung
+# dieses Vorfalls für immer. Jetzt ist er ein Grund für den nächsten Anlauf,
+# und die Frist sagt, wann Schluss ist.
 
 # Wie oft derselbe Werkzeugaufruf mit **denselben** Argumenten laufen darf,
 # gezählt über Runden hinweg. Ein Modell, das die gleiche Auskunft zum fünften
@@ -1336,6 +1345,55 @@ def _vorschlaege_zuruecknehmen(proposal_ids: list[str], *, grund: str) -> None:
         logger.warning("Offene Vorschlaege nicht zurueckgenommen: %s", proposal_ids)
 
 
+def _freigabe_per_mail_erbeten(run_id: str, proposal_ids: list[str]) -> bool:
+    """Fragt per E-Mail nach — fuer **genau einen** der offenen Vorschlaege.
+
+    Einen, nicht alle: eine Mail je Vorschlag waere ein Postfach voller Links,
+    von denen der Empfaenger bei keinem wuesste, ob er noch gilt, und die
+    Reihenfolge der Ausfuehrung waere seine Sache. Der erste wartet, die uebrigen
+    bleiben offen und werden im selben Lauf weitergefuehrt, sobald die Antwort
+    da ist.
+
+    Eigene Sitzung wie bei `_vorschlaege_zuruecknehmen`: dieser Zweig laeuft im
+    Streamsegment, also im Ereignisschleifen-Thread, und die Sitzung des Laufs
+    gehoert hier nicht her.
+
+    ``False`` heisst "es kann niemand antworten" — dann faellt der Aufrufer auf
+    das alte Verhalten zurueck.
+    """
+    if not proposal_ids:
+        return False
+    try:
+        with SessionLocal() as db:
+            from services import ai_approval_service
+
+            run = db.get(AiRun, run_id)
+            if run is None:
+                return False
+            user = db.query(User).filter(User.id == run.user_id).first()
+            if user is None:
+                return False
+            proposal = (
+                db.query(AiActionProposal)
+                .filter(
+                    AiActionProposal.id.in_(proposal_ids),
+                    AiActionProposal.status.in_(("proposed", "confirmed")),
+                )
+                .order_by(AiActionProposal.created_at.asc())
+                .first()
+            )
+            if proposal is None:
+                return False
+            return ai_approval_service.freigabe_anfordern(
+                db, proposal=proposal, user=user, run_id=run_id
+            )
+    except Exception:  # noqa: BLE001 - ein Mailfehler beendet keinen Lauf
+        logger.warning(
+            "Freigabe per Mail nicht angefordert run_id=%s", run_id, exc_info=True
+        )
+        return False
+
+
 def _ask_refusal_messages(tool_calls) -> list[dict]:
     """Die Antwort auf eine Rueckfrage, die in einer Heilung niemand hoert.
 
@@ -1797,6 +1855,19 @@ def _lauf_nachbereiten(db, run: AiRun, zustand: dict | None) -> None:
     except Exception:
         db.rollback()
         logger.warning("Guardian-Briefing nicht vermerkt run_id=%s", run.id)
+
+    # **Der Auftrag zuerst, dann der Bericht.** Die Reihenfolge ist tragend:
+    # `_bericht_zustellen` fragt gleich darunter, ob der Reparaturauftrag noch
+    # laeuft, und laese sonst eine Phase, die noch nicht geschrieben ist. Der
+    # Betreiber bekaeme eine Mail "nicht behoben" zu einem Auftrag, der zwei
+    # Minuten spaeter weitermacht.
+    try:
+        from services import ai_guardian_repair_service
+
+        ai_guardian_repair_service.lauf_beendet(db, run, zustand)
+    except Exception:
+        db.rollback()
+        logger.warning("Reparaturauftrag nicht fortgeschrieben run_id=%s", run.id)
 
     from services import ai_guardian_report, ai_task_report
 
@@ -2369,7 +2440,30 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     # zu sein". Genau dieser Zustand entstand hier — nur eben
                     # mitten im Lauf statt am Anfang.
                     #
-                    # Stattdessen: die offenen Vorschlaege zuruecknehmen und den
+                    # **Seit es die Freigabe per E-Mail gibt, wird zuerst
+                    # gefragt.** Alle vier Gruende oben sind einzeln abgeraeumt:
+                    # `aktiver_lauf` ist nach Unterhaltung gefasst, also
+                    # blockiert ein geparkter Reparaturlauf keine weitere
+                    # Heilung; der Takt laeuft in eine Frist und weckt den Lauf,
+                    # statt ihn ewig stehen zu lassen; die Abschlussmail kommt
+                    # vom Auftrag, nicht vom einzelnen Lauf; und der
+                    # Guardian-Reiter zeigt den wartenden Lauf an.
+                    #
+                    # Der Rueckfall darunter bleibt trotzdem stehen und ist
+                    # nicht tot: ohne hinterlegte Adresse, ohne eingerichteten
+                    # Versandweg oder wenn schon eine Freigabe offen ist, kann
+                    # niemand antworten. Dann wird zurueckgenommen und beendet,
+                    # genau wie vorher — ein Lauf, der auf eine Antwort wartet,
+                    # die nie kommen kann, waere schlimmer als einer, der
+                    # ehrlich aufhoert.
+                    if _freigabe_per_mail_erbeten(run_id, offen):
+                        zustand["pending"] = {"proposal_ids": list(offen)}
+                        geparkt = True
+                        letzte_runde = True
+                        current_usage = StreamUsage()
+                        continue
+
+                    # Sonst: die offenen Vorschlaege zuruecknehmen und den
                     # Lauf beenden. Der Bericht geht dann hinaus und sagt dem
                     # Betreiber ehrlich, dass die KI nicht weiterkonnte.
                     _vorschlaege_zuruecknehmen(offen, grund="guardian_unattended")

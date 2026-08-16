@@ -278,7 +278,7 @@ export function ServerDetail() {
     () => (Array.isArray(games) ? games : []).find((g) => g.id === server?.game_type),
     [games, server?.game_type],
   );
-  const showModTab = !!gameInfo?.supports_steam_workshop;
+  const showModTab = !!(gameInfo?.supports_steam_workshop || gameInfo?.supports_curseforge || gameInfo?.mod_support);
   /** Steam / HTTP / GitHub: manueller Datei-Update-Check (nicht Workshop-Mods). */
   const showServerFileUpdates = !!gameInfo?.supports_server_file_updates;
 
@@ -942,7 +942,13 @@ export function ServerDetail() {
           </div>
           <button
             onClick={() => setShowEditNetwork(true)}
-            className="msm-btn-secondary px-3 py-1.5 text-sm"
+            disabled={effectiveStatus === "running" || !!actionLoading}
+            title={effectiveStatus === "running" ? t("servers.networkEditRequiresStopped") : undefined}
+            className={`px-3 py-1.5 text-sm ${
+              effectiveStatus === "running" || !!actionLoading
+                ? "msm-btn-secondary opacity-50 cursor-not-allowed"
+                : "msm-btn-secondary"
+            }`}
           >
             {t("common.edit")}
           </button>
@@ -1073,7 +1079,7 @@ export function ServerDetail() {
           <ServerConsolePanel serverId={serverId} mode="exec" />
         )}
         {activeTab === "mods" && showModTab && (
-          <ModManager serverId={serverId} />
+          <ModManager serverId={serverId} gameInfo={gameInfo} />
         )}
         {activeTab === "restarts" && (
           <ServerRestartPanel
@@ -1109,6 +1115,11 @@ export function ServerDetail() {
             <p className="font-body-md text-sm text-on-surface-variant mb-6">
               {t("servers.editNetworkDescription")}
             </p>
+            {effectiveStatus === "running" && (
+              <div className="mb-4 p-3 rounded-lg bg-status-warning/10 border border-status-warning/30 text-status-warning text-sm">
+                {t("servers.networkEditRequiresStopped")}
+              </div>
+            )}
             <form onSubmit={handleSaveNetwork} className="space-y-4">
               <div>
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
@@ -1247,7 +1258,7 @@ export function ServerDetail() {
                 <button
                   type="submit"
                   className="msm-btn-primary flex-1 py-2 disabled:opacity-50"
-                  disabled={savingNetwork}
+                  disabled={savingNetwork || effectiveStatus === "running"}
                 >
                   {savingNetwork ? t("common.loading") : t("common.save")}
                 </button>

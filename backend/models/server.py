@@ -58,6 +58,19 @@ class Server(Base):
     guardian_last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     guardian_agent_quarantine_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     guardian_agent_recovery_suspension_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Guardian **fuer diesen einen Server** anders eingestellt als im Blueprint.
+    #
+    # Die Blueprint gilt fuer jeden Server ihres Spiels; sie kann nicht wissen,
+    # dass ausgerechnet auf dieser Node zwoelf Instanzen um acht Gigabyte
+    # streiten und der Start deshalb nicht in dreissig Sekunden durch ist. Genau
+    # dafuer gibt es diese Spalte: eine Handvoll Zahlen, die `compile_guardian_config`
+    # **nach** der Ableitung aus der Blueprint darueberlegt.
+    #
+    # Ausschliesslich Skalare, aus einer geschlossenen Menge, mit geklemmten
+    # Bereichen (`GUARDIAN_STELLSCHRAUBEN` im Compiler). Keine Listen, keine
+    # Regexe, keine Probentypen — dieselbe Begruendung, aus der `AENDERBARE_PFADE`
+    # in `blueprint_service` listenwertige Pfade ausschliesst.
+    guardian_overrides_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Auto-Restart
     # WICHTIG: Nur EIN Modus aktiv (Intervall oder feste Zeiten).

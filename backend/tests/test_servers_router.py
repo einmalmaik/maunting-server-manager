@@ -3621,3 +3621,43 @@ class TestNetworkFieldPresenceDetection:
         assert response.status_code == 409
         db.refresh(test_server)
         assert test_server.cpu_limit_percent == 100
+
+    # ── Network modification requires stopped server ──
+
+    def test_network_change_when_running_returns_409(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """A running server must reject port/bind IP changes with 409."""
+        test_server.status = "running"
+        test_server.public_bind_ip = "127.0.0.1"
+        db.commit()
+
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"public_bind_ip": "192.168.1.50"},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 409
+        assert "gestoppt" in response.json()["detail"]
+        db.refresh(test_server)
+        assert test_server.public_bind_ip == "127.0.0.1"
+
+    def test_port_change_when_running_returns_409(
+        self, client: TestClient, owner_cookies: dict, csrf_token: str,
+        test_server: Server, db: Session,
+    ):
+        """A running server must reject port changes with 409."""
+        test_server.status = "running"
+        db.commit()
+
+        response = client.patch(
+            f"/api/servers/{test_server.id}",
+            json={"game_port": 27015},
+            cookies=owner_cookies,
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert response.status_code == 409
+        assert "gestoppt" in response.json()["detail"]
+

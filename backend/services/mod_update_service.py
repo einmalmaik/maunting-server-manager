@@ -97,21 +97,17 @@ def refresh_update_availability(
 
 
 def _minimized(mod_data: dict) -> dict:
-    """Reduziert einen Steam-Treffer auf das, was zur Auswahl noetig ist.
-
-    Die Beschreibung eines Workshop-Eintrags ist frei vom Autor befuellbarer
-    Text. Sie waere gleichzeitig der groesste Kontextfresser und der bequemste
-    Injektionskanal, den diese Suche oeffnen koennte — deshalb kommt sie nicht
-    mit. Wer sie lesen will, oeffnet den Eintrag im Panel.
-    """
+    """Reduziert einen Steam-Treffer auf das, was zur Auswahl noetig ist."""
     tags = [
         str(tag.get("tag"))[:32]
         for tag in (mod_data.get("tags") or [])
         if isinstance(tag, dict) and tag.get("tag")
     ]
+    raw_desc = str(mod_data.get("short_description") or "").strip()
     return {
         "workshop_id": str(mod_data.get("publishedfileid") or ""),
         "title": str(mod_data.get("title") or "")[:MAX_TITLE_CHARS],
+        "description": raw_desc[:256] if raw_desc else None,
         "updated": mod_data.get("time_updated"),
         "subscriptions": mod_data.get("subscriptions"),
         "tags": tags[:8],
@@ -140,7 +136,7 @@ def search_workshop(
         "numperpage": MAX_SEARCH_RESULTS,
         "appid": int(appid),
         "search_text": query[:128],
-        "return_short_description": False,
+        "return_short_description": True,
         "return_tags": True,
         "return_previews": False,
         "return_details": True,

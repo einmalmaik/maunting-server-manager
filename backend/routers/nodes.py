@@ -701,12 +701,12 @@ def delete_node(
     if not node:
         raise HTTPException(status_code=404, detail="Node nicht gefunden")
     if node.is_local:
-        raise HTTPException(status_code=400, detail="Lokaler Default-Node kann nicht geloescht werden")
+        raise HTTPException(status_code=400, detail="Lokaler Default-Node kann nicht gelöscht werden")
     count = db.query(Server).filter(Server.node_id == node.id).count()
     if count > 0:
         raise HTTPException(
             status_code=400,
-            detail=f"Node hat noch {count} Server — zuerst Server verschieben oder loeschen",
+            detail=f"Node hat noch {count} Server — zuerst Server verschieben oder löschen",
         )
     db.delete(node)
     db.commit()

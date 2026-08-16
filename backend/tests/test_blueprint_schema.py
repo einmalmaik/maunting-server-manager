@@ -640,3 +640,74 @@ def test_health_application_http_ping_rejects_invalid_path() -> None:
     d["health"]["application"]["path"] = "//healthz"  # Doppelter Slash
     with pytest.raises(BlueprintValidationError):
         load_blueprint_dict(d)
+
+
+# ── CurseForge Mod Validation ──────────────────────────────────────────────
+
+
+def test_blueprint_mods_curseforge_valid() -> None:
+    d = _minimal_valid_dict()
+    d["mods"] = {
+        "supportsMods": True,
+        "supportsCurseForge": True,
+        "curseforgeGameId": "83374",
+        "curseforgeClassId": "6",
+        "curseforgeInstallPath": "mods",
+        "modInjection": "startupArg",
+        "modStartupArgumentFormat": "-mods={mods}",
+        "modStartupArgumentSeparator": ",",
+    }
+    bp = load_blueprint_dict(d)
+    assert bp.mods is not None
+    assert bp.mods.supportsCurseForge is True
+    assert bp.mods.curseforgeGameId == "83374"
+    assert bp.mods.curseforgeClassId == "6"
+    assert bp.mods.curseforgeInstallPath == "mods"
+    assert bp.mods.modStartupArgumentSeparator == ","
+
+
+def test_blueprint_mods_curseforge_missing_game_id_rejected() -> None:
+    d = _minimal_valid_dict()
+    d["mods"] = {
+        "supportsMods": True,
+        "supportsCurseForge": True,
+        "curseforgeGameId": None,
+    }
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+
+
+def test_blueprint_mods_curseforge_invalid_game_id_rejected() -> None:
+    d = _minimal_valid_dict()
+    d["mods"] = {
+        "supportsMods": True,
+        "supportsCurseForge": True,
+        "curseforgeGameId": "abc",
+    }
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+
+
+def test_blueprint_mods_curseforge_invalid_class_id_rejected() -> None:
+    d = _minimal_valid_dict()
+    d["mods"] = {
+        "supportsMods": True,
+        "supportsCurseForge": True,
+        "curseforgeGameId": "432",
+        "curseforgeClassId": "invalid-class",
+    }
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+
+
+def test_blueprint_mods_curseforge_traversal_install_path_rejected() -> None:
+    d = _minimal_valid_dict()
+    d["mods"] = {
+        "supportsMods": True,
+        "supportsCurseForge": True,
+        "curseforgeGameId": "432",
+        "curseforgeInstallPath": "../etc/passwd",
+    }
+    with pytest.raises(BlueprintValidationError):
+        load_blueprint_dict(d)
+

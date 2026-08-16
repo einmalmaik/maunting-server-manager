@@ -204,9 +204,13 @@ async def test_ein_chattender_mensch_vertagt_und_verbrennt_den_termin_nicht(
     starts = Starts().einbauen(monkeypatch)
     aufgabe = _aufgabe(db, user)
     vorher = _faellig_machen(db, aufgabe)
-    monkeypatch.setattr(
-        ai_run_service, "aktiver_lauf", lambda db, *, user_id: AiRun(id="laeuft")
-    )
+    def _laeuft(db, *, user_id, kind=None):
+        # Nur der Dauerchat vertagt. Eine Reparatur in ihrem eigenen Fenster
+        # geht diesen Auftrag nichts an.
+        assert kind == "primary"
+        return AiRun(id="laeuft")
+
+    monkeypatch.setattr(ai_run_service, "aktiver_lauf", _laeuft)
 
     assert await ai_task_service.faellige_aufgaben_bearbeiten(db) == 0
     assert starts.gestartet == []

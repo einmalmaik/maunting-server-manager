@@ -8,24 +8,64 @@ from sqlalchemy.orm import Mapped, mapped_column
 from database import Base
 
 
-class AiConversation(Base):
-    """Die eine, dauerhafte Unterhaltung eines Benutzers mit dem Assistenten.
+#: Die Arten von Unterhaltungen, die es geben darf — und mehr als eine je Art
+#: gibt es nie.
+#:
+#: ``primary`` ist der Dauerchat: der eine Gespraechspartner, in den der Mensch
+#: tippt und in dem ein faellig gewordener stehender Auftrag berichtet.
+#: ``guardian`` ist der Hintergrund: dort und nur dort schreiben die Laeufe, die
+#: eine Guardian-Stoerung ausgeloest hat.
+#:
+#: Die Trennung ist keine Ordnungsfrage, sondern der Grund, warum ueberhaupt
+#: repariert werden kann. Solange beides in derselben Zeile stand, galt: eine
+#: Heilung startete nicht, solange der Mensch etwas laufen hatte, und eine
+#: getippte Nachricht loeste eine laufende Heilung ab (``vorgaenger_abloesen``
+#: greift je Unterhaltung). Wer nachts einen Server repariert bekommen wollte,
+#: durfte tagsueber nicht mit der KI reden.
+#:
+#: Diese Aufzaehlung ist die Wahrheitsquelle: der CheckConstraint unten wird
+#: daraus **erzeugt**, `ai_chat_service` nimmt sie entgegen. Wer eine dritte Art
+#: braucht, traegt sie hier ein — und bekommt die Schranke geschenkt.
+ARTEN = ("primary", "guardian")
 
-    Es gibt genau eine Zeile je Benutzer — erzwungen ueber den eindeutigen Index
-    ``uq_ai_conversations_user``. Der Serverbezug haengt nicht mehr hier, sondern
-    am einzelnen Werkzeugaufruf: ein Assistent, dem man erst sagen muss, welchen
-    Server er ansehen darf, bevor man ihn ueberhaupt fragen kann, ist keiner.
-    ``server_id`` bleibt nur als Spalte bestehen, damit die Migration nichts
-    loeschen muss; sie ist ab dieser Version immer ``NULL``.
+
+class AiConversation(Base):
+    """Eine dauerhafte Unterhaltung eines Benutzers mit dem Assistenten.
+
+    Genau eine Zeile je Benutzer **und Art** — erzwungen ueber den eindeutigen
+    Index ``uq_ai_conversations_user_kind``. Es sind bewusst nicht beliebig
+    viele: der Assistent soll wie ein Gespraechspartner funktionieren und nicht
+    wie eine Ablage, in der man erst den richtigen Ordner suchen muss. Was hier
+    aufgeteilt wird, ist deshalb kein Ordner, sondern ein *Anlass* — der Mensch
+    fragt, oder eine Stoerung weckt.
+
+    Der Serverbezug haengt nicht hier, sondern am einzelnen Werkzeugaufruf: ein
+    Assistent, dem man erst sagen muss, welchen Server er ansehen darf, bevor man
+    ihn ueberhaupt fragen kann, ist keiner. ``server_id`` bleibt nur als Spalte
+    bestehen, damit die Migration nichts loeschen muss; sie ist immer ``NULL``.
+    Auch die Guardian-Unterhaltung bekommt sie **nicht** gesetzt: sie gehoert dem
+    Benutzer und sammelt die Reparaturen aller seiner Anlagen; um welchen Server
+    es in einem Lauf ging, steht an ``ai_runs.last_server_id`` und im Laufrahmen.
     """
 
     __tablename__ = "ai_conversations"
     __table_args__ = (
+        # Erzeugt statt abgeschrieben — dasselbe Muster wie `ZUSTAENDE` in
+        # `ai_run.py`. Die Migration traegt ihre eigene Kopie: eine angewandte
+        # Migration ist Geschichte und wird nicht nachtraeglich umgeschrieben.
+        CheckConstraint(
+            "kind IN (" + ", ".join(f"'{art}'" for art in ARTEN) + ")",
+            name="ck_ai_conversations_kind",
+        ),
         Index("ix_ai_conversations_user_updated", "user_id", "updated_at"),
-        Index("uq_ai_conversations_user", "user_id", unique=True),
+        Index("uq_ai_conversations_user_kind", "user_id", "kind", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # Welcher Anlass in diese Zeile schreibt. Siehe `ARTEN`.
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="primary", server_default="primary"
+    )
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )

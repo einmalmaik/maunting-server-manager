@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { aiApi, type AiVoiceConfig } from '@/api/ai'
@@ -43,6 +44,9 @@ vi.mock('@/components/ai/voice/SprachAnsicht', () => ({
 vi.mock('@/components/ai/AiSkillDirectory', () => ({
   AiSkillDirectory: () => null,
 }))
+vi.mock('@/components/ai/GuardianAnsicht', () => ({
+  GuardianAnsicht: () => <div>guardian-attrappe</div>,
+}))
 
 // Der Schalter zaehlt hier als Vorkommen und nicht als Bedienelement. Die echte
 // Komponente laedt beim Zeichnen ihre Freigaben — genau der Nebeneffekt, der
@@ -70,6 +74,23 @@ function rechte(...global_keys: string[]) {
   })
 }
 
+/**
+ * Die Seite braucht einen Router.
+ *
+ * Seit das Guardian-Fenster dazugekommen ist, steht die gewaehlte Ansicht in
+ * der Adresse (`?ansicht=guardian`) statt in einem `useState` — das ist der
+ * Weg, ueber den der Guardian-Reiter eines Servers und die Glocke hierher
+ * zeigen. Ein Zustand allein in der Komponente waere von dort nicht
+ * erreichbar, und `useSearchParams` wirft ohne Router.
+ */
+function zeichnen() {
+  render(
+    <MemoryRouter initialEntries={['/ai']}>
+      <Ai />
+    </MemoryRouter>,
+  )
+}
+
 async function inDenSprachmodus() {
   fireEvent.click(await screen.findByRole('button', { name: i18n.t('ai.voice.toVoiceMode') }))
   await screen.findByText('sprache-attrappe')
@@ -87,7 +108,7 @@ describe('Ai', () => {
     // `AiChat` bringt seinen eigenen mit. Ein zweiter daneben waere kein
     // Komfort, sondern zwei Wahrheiten ueber denselben Zustand.
     rechte('ai.chat.use', 'ai.voice.use', 'ai.autonomous.use')
-    render(<Ai />)
+    zeichnen()
 
     await screen.findByText('chat-attrappe')
     expect(screen.queryByTestId('autonomie-schalter')).toBeNull()
@@ -97,7 +118,7 @@ describe('Ai', () => {
     // Dort ist er noetig: jede Rueckfrage zwingt den Sprechenden sonst, mitten
     // im Gespraech auf den Bildschirm zu sehen.
     rechte('ai.chat.use', 'ai.voice.use', 'ai.autonomous.use')
-    render(<Ai />)
+    zeichnen()
     await inDenSprachmodus()
 
     expect(screen.getByTestId('autonomie-schalter')).toBeTruthy()
@@ -108,7 +129,7 @@ describe('Ai', () => {
     // Abrufe derselben Liste fuer zwei Knoepfe waren der sichtbare Teil des
     // Fehlers; dies ist der unsichtbare.
     rechte('ai.chat.use', 'ai.voice.use', 'ai.autonomous.use')
-    render(<Ai />)
+    zeichnen()
 
     await screen.findByText('chat-attrappe')
     expect(client.api).not.toHaveBeenCalledWith('/servers')
@@ -119,19 +140,24 @@ describe('Ai', () => {
 
   it('zeigt ihn ohne Autonomierecht auch im Sprachmodus nicht', async () => {
     rechte('ai.chat.use', 'ai.voice.use')
-    render(<Ai />)
+    zeichnen()
     await inDenSprachmodus()
 
     expect(screen.queryByTestId('autonomie-schalter')).toBeNull()
     expect(client.api).not.toHaveBeenCalledWith('/servers')
   })
 
-  it('zeigt ohne eingerichteten Sprachzugang gar keine Kopfleiste', async () => {
+  it('zeigt ohne eingerichteten Sprachzugang keinen Sprachknopf', async () => {
     // Kein ausgegrauter Umschalter, sondern keiner. Dieselbe Regel wie bei
     // `web_search`: was der Betreiber nicht bestellt hat, gibt es nicht.
+    //
+    // Die Kopfleiste selbst bleibt seit dem Guardian-Fenster stehen: dort
+    // wechselt man auch ohne Sprachzugang hinueber, und sie zu verstecken
+    // haette den einzigen Weg dorthin an eine Einstellung gehaengt, die nichts
+    // damit zu tun hat.
     vi.mocked(aiApi.getVoiceConfig).mockResolvedValue({ ...KONFIGURATION, available: false })
     rechte('ai.chat.use', 'ai.voice.use', 'ai.autonomous.use')
-    render(<Ai />)
+    zeichnen()
 
     await screen.findByText('chat-attrappe')
     expect(screen.queryByRole('button', { name: i18n.t('ai.voice.toVoiceMode') })).toBeNull()

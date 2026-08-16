@@ -116,8 +116,18 @@ export interface AiCatalogModel {
   recommended: boolean
 }
 
+/**
+ * Welches Fenster. `primary` ist der Dauerchat, in den der Mensch tippt;
+ * `guardian` sammelt die Reparaturen, die eine Störung ausgelöst hat.
+ *
+ * Es sind zwei feste Anlässe und keine Ablage: mehr als eine Unterhaltung je
+ * Art gibt es nicht, erzwungen über `uq_ai_conversations_user_kind`.
+ */
+export type AiConversationKind = 'primary' | 'guardian'
+
 export interface AiConversation {
   id: string
+  kind: AiConversationKind
   title: string
   created_at: string
   updated_at: string
@@ -187,6 +197,15 @@ export interface AiSection {
 
 export interface AiConversationDetail extends AiConversation {
   messages: AiMessage[]
+  /**
+   * Gibt es ältere Nachrichten als die älteste gelieferte? Dann lädt
+   * `getConversation` mit `before` die Seite davor nach.
+   *
+   * Der Dauerchat brauchte das nie — zweihundert Nachrichten sind mehr, als
+   * jemand zurückliest. Eine Reparatur über Stunden schreibt sie in einem
+   * Anlauf voll.
+   */
+  has_more: boolean
 }
 
 /** Ein von der KI ausgefuehrtes Lesewerkzeug, sichtbar im Verlauf. */
@@ -705,6 +724,19 @@ export interface AiRunInfo {
   message_id: string | null
   live: boolean
   created_at: string
+  /**
+   * In welchem Fenster dieser Lauf arbeitet.
+   *
+   * Ohne diese Angabe hängt sich der Chat an den nächstbesten aktiven Lauf —
+   * und zeichnet eine Guardian-Reparatur in das Fenster des Menschen. Genau
+   * das ist der Zustand, den die Trennung beseitigt. Die Glocke braucht es
+   * ebenso, sonst meldet sie „die KI ist mit deinem Auftrag fertig" für etwas,
+   * das niemand beauftragt hat.
+   */
+  kind: AiConversationKind
+  conversation_id: string | null
+  /** Um welchen Server es zuletzt ging — nur aus nachgewiesenem Zugriff. */
+  server_id: number | null
 }
 
 /**
@@ -802,8 +834,18 @@ export const aiApi = {
     method: 'PUT',
     body: JSON.stringify({ api_key: apiKey || null }),
   }),
-  /** Die eine Unterhaltung. Wird beim ersten Aufruf serverseitig angelegt. */
-  getConversation: () => api<AiConversationDetail>('/ai/conversation'),
+  /**
+   * Eine Unterhaltung. Wird beim ersten Aufruf serverseitig angelegt.
+   *
+   * Ohne `kind` der Dauerchat — so fragt der Chat, und so hat er immer
+   * gefragt. `before` ist die Kennung der ältesten bereits geladenen
+   * Nachricht und liefert die Seite davor.
+   */
+  getConversation: (kind: AiConversationKind = 'primary', before?: string) => {
+    const suche = new URLSearchParams({ kind })
+    if (before) suche.set('before', before)
+    return api<AiConversationDetail>(`/ai/conversation?${suche.toString()}`)
+  },
   clearHistory: () => api('/ai/conversation/messages', { method: 'DELETE' }),
   /**
    * Nimmt eine eigene Nachricht zurück: sie und alles Spätere verschwinden.
@@ -814,7 +856,16 @@ export const aiApi = {
     `/ai/conversation/messages/${messageId}`,
     { method: 'PUT', body: JSON.stringify({ content }) },
   ),
-  listActions: () => api<AiActionProposal[]>('/ai/conversation/actions'),
+  /**
+   * Die Vorschläge eines Fensters. Ohne `kind` die des Dauerchats.
+   *
+   * Ein Reparaturlauf, der auf eine Bestätigung wartet, legt seine Vorschläge
+   * unter **seiner** Unterhaltung an — ohne `kind` bekäme man sie nie zu
+   * sehen, und die Karte, auf deren Klick der Lauf wartet, wäre im ganzen
+   * Panel nirgends.
+   */
+  listActions: (kind: AiConversationKind = 'primary') =>
+    api<AiActionProposal[]>(`/ai/conversation/actions?kind=${kind}`),
   getAction: (proposalId: string) => api<AiActionProposal>(`/ai/actions/${proposalId}`),
   confirmAction: (proposalId: string) => api<{ proposal_id: string; confirmation_token: string; expires_at: string }>(`/ai/actions/${proposalId}/confirm`, {
     method: 'POST',
@@ -907,8 +958,24 @@ export const aiApi = {
     return api<AiAttachment>('/ai/conversation/attachments', { method: 'POST', body })
   },
   deleteAttachment: (id: string) => api(`/ai/attachments/${id}`, { method: 'DELETE' }),
-  /** Laeuft gerade noch etwas von vorhin? `null`, wenn nicht. */
-  getActiveRun: () => api<AiRunInfo | null>('/ai/conversation/run'),
+  /**
+   * Laeuft gerade noch etwas von vorhin? `null`, wenn nicht.
+   *
+   * `kind` grenzt auf ein Fenster ein. `null` fragt über alle — das tut die
+   * Glocke, die nur wissen will, ob überhaupt etwas läuft, und danach über
+   * `AiRunInfo.kind` entscheidet, wohin sie zeigt.
+   */
+  getActiveRun: (kind: AiConversationKind | null = 'primary') =>
+    api<AiRunInfo | null>(`/ai/conversation/run?kind=${kind ?? ''}`),
+  /**
+   * Ein Mensch übernimmt: die laufenden Reparaturen dieses Menschen enden.
+   *
+   * Beendet wird der **Auftrag**, nicht nur der Lauf. Nur den Lauf abzubrechen
+   * hieße, dass der Takt neunzig Sekunden später den nächsten startet.
+   */
+  takeOverGuardian: () => api<{ aborted: number }>(
+    '/ai/conversation/guardian/takeover', { method: 'POST' },
+  ),
 }
 
 /** Liest einen fragmentierten SSE-Stream, ohne unbekannte Providerdaten auszugeben. */
