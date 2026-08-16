@@ -408,9 +408,20 @@ class Sprachbruecke:
         except asyncio.CancelledError:
             raise
         except Exception as fehler:  # pragma: no cover - Netz und Anbieter
+            # Der Klassenname allein war eine Sackgasse: „AiProviderRequestError"
+            # steht gleichermassen fuer einen abgelaufenen Schluessel, ein
+            # falsch geschriebenes Modell und einen Anbieter, der gerade nicht
+            # mag. Genau dafuer traegt dieser Fehler `code` und `detail`, und
+            # beide sind ausdruecklich fuer die Ausgabe gebaut: der Code ist
+            # eine feste Kennung, das Detail die **redigierte**, einzeilige und
+            # gekuerzte Meldung des Anbieters (`_error_detail`). Sie hier
+            # wegzuwerfen hiess, den Betreiber mit dem Wort „Fehler" allein zu
+            # lassen.
+            kennung = getattr(fehler, "code", None)
+            einzelheit = getattr(fehler, "detail", None)
             logger.warning(
-                "Sprachzug gescheitert user=%s error=%s",
-                self._user_id, type(fehler).__name__,
+                "Sprachzug gescheitert user=%s error=%s code=%s detail=%s",
+                self._user_id, type(fehler).__name__, kennung or "-", einzelheit or "-",
             )
             await self._senden({"art": "stoerung"})
             await self._zustand_melden(ZUSTAND_BEREIT)

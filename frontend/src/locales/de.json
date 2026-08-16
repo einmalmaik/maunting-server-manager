@@ -173,7 +173,7 @@
       "tokenPriceConverted": "Gespeichert wird {{amount}} — gebucht wird in Dollar.",
       "ttsHint": "Ein Stimmzugang. Er erscheint nicht in der Modellauswahl des Chats, sondern liest im Sprachmodus vor, was das Chatmodell antwortet. Wer ihn nutzen darf, entscheidet das Recht „Mit der KI sprechen“.",
       "transcriptionModel": "Modell für Gesprochenes",
-      "transcriptionModelHint": "Wandelt im Sprachmodus Gesprochenes in Text, bevor das Standardmodell darüber nachdenkt. Es muss ein Modell sein, das Audio versteht — etwa google/gemini-2.5-flash. Einen eigenen Transkriptions-Endpunkt hat OpenRouter nicht, „whisper“ gibt es dort also nicht. Ohne Eintrag bleibt der Sprachmodus aus."
+      "transcriptionModelHint": "Wandelt im Sprachmodus Gesprochenes in Text, bevor das Standardmodell darüber nachdenkt. Hier gehört ein Transkriptionsmodell hinein, etwa openai/gpt-transcribe oder openai/whisper-large-v3 — kein Chatmodell. Solche Modelle stehen nicht in der Auswahlliste oben, weil OpenRouter sie über einen eigenen Endpunkt bedient; deshalb ist das hier ein Textfeld. Ohne Eintrag bleibt der Sprachmodus aus."
     },
     "profile": {
       "title": "KI-Assistent",
@@ -698,7 +698,7 @@
       "takeOverHint": "Beendet die laufenden Reparaturen und öffnet den Chat. Die KI fängt danach nicht von selbst wieder an.",
       "takeOverDone": "Übernommen. Die Reparatur ist beendet.",
       "waitingApproval": "Wartet auf deine Freigabe per E-Mail",
-        "takeOverFailed": "Die Reparatur ließ sich nicht beenden."
+      "takeOverFailed": "Die Reparatur ließ sich nicht beenden."
     },
     "webSearch": {
       "title": "Websuche",
@@ -3030,7 +3030,7 @@
       },
       "model": {
         "title": "Modelle und Stimme",
-        "body": "Gehör: ein Modell, das Audio versteht. Einen Transkriptions-Endpunkt hat OpenRouter nicht (16.08.2026 geprüft) — „whisper\" gibt es dort also nicht; Gesprochenes geht als Inhaltsteil in eine gewöhnliche Anfrage. Stimme: eleven_flash_v2_5, rund 75 ms Rechenzeit. Die Voice ID stammt aus deiner Stimmenbibliothek und ist ein Textfeld — MSM kennt deine Stimmen nicht und rät deshalb keine."
+        "body": "Gehör: ein Transkriptionsmodell wie openai/gpt-transcribe, angesprochen über OpenRouters Endpunkt /audio/transcriptions. Es steht nicht in der Modellauswahl — die liest /models, und dort stehen Chatmodelle. Deshalb ist das Feld ein Textfeld. Stimme: eleven_flash_v2_5, rund 75 ms Rechenzeit. Die Voice ID stammt aus deiner Stimmenbibliothek und ist ebenfalls ein Textfeld — MSM kennt deine Stimmen nicht und rät deshalb keine."
       },
       "permission": {
         "title": "Recht ai.voice.use",

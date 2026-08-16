@@ -29,9 +29,13 @@ export interface AiProviderAdmin {
    * Das hoerende Modell eines Chatzugangs — was Gesprochenes zu Text macht.
    *
    * `null` heisst „nichts hinterlegt": dann gibt es ueber diesen Zugang keinen
-   * Sprachmodus. Hier gehoert ein **hoerfaehiges Chatmodell** hinein und nicht
-   * `whisper` oder `gpt-4o-transcribe` — einen Transkriptions-Endpunkt hat
-   * OpenRouter nicht, Audio geht als Inhaltsteil in eine gewoehnliche Anfrage.
+   * Sprachmodus. Hier gehoert ein **Transkriptionsmodell** hinein —
+   * `openai/gpt-transcribe`, `openai/whisper-large-v3` — und kein Chatmodell.
+   * Der Ton geht an OpenRouters `/audio/transcriptions`.
+   *
+   * Solche Modelle stehen **nicht** in der Modellauswahl: die liest `/models`,
+   * und dort fuehrt OpenRouter Chatmodelle. Deshalb ist das Feld hier ein
+   * Textfeld und keine Liste.
    *
    * Bei einem Stimmzugang bleibt das Feld unbeachtet.
    */

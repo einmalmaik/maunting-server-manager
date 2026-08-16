@@ -173,7 +173,7 @@
       "tokenPriceConverted": "Stored as {{amount}} — accounting happens in dollars.",
       "ttsHint": "A voice access. It does not appear in the chat model picker; it reads out what the chat model answers in voice mode. Who may use it is decided by the “Talk to the AI” permission.",
       "transcriptionModel": "Model for speech",
-      "transcriptionModelHint": "Turns speech into text in voice mode, before the default model thinks about it. It has to be a model that understands audio — for example google/gemini-2.5-flash. OpenRouter has no dedicated transcription endpoint, so “whisper” does not exist there. Left empty, voice mode stays off."
+      "transcriptionModelHint": "Turns speech into text in voice mode, before the default model thinks about it. This takes a transcription model such as openai/gpt-transcribe or openai/whisper-large-v3 — not a chat model. Those do not appear in the dropdown above because OpenRouter serves them through a separate endpoint, which is why this is a text field. Left empty, voice mode stays off."
     },
     "profile": {
       "title": "AI assistant",
@@ -698,7 +698,7 @@
       "takeOverHint": "Ends the running repairs and opens the chat. The AI will not restart them on its own.",
       "takeOverDone": "Taken over. The repair has ended.",
       "waitingApproval": "Waiting for your approval by email",
-        "takeOverFailed": "The repair could not be ended."
+      "takeOverFailed": "The repair could not be ended."
     },
     "webSearch": {
       "title": "Web search",
@@ -3030,7 +3030,7 @@
       },
       "model": {
         "title": "Models and voice",
-        "body": "Hearing: a model that understands audio. OpenRouter has no transcription endpoint (checked 2026-08-16) — so “whisper” does not exist there; speech travels as a content part inside an ordinary request. Voice: eleven_flash_v2_5, about 75 ms of inference. The voice ID comes from your voice library and is a text field — MSM does not know your voices and will not guess one."
+        "body": "Hearing: a transcription model such as openai/gpt-transcribe, called through OpenRouter's /audio/transcriptions endpoint. It does not appear in the model dropdown — that reads /models, which lists chat models. Hence the text field. Voice: eleven_flash_v2_5, about 75 ms of inference. The voice ID comes from your voice library and is a text field too — MSM does not know your voices and will not guess one."
       },
       "permission": {
         "title": "Permission ai.voice.use",
