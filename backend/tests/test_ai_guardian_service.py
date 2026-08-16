@@ -415,7 +415,7 @@ class TestBriefingUndHeilung:
     blieb fuer immer liegen, obwohl die Autonomie eingeschaltet war.
 
     Die Entdopplung selbst bleibt davon unberuehrt. Sie ist der Grund, warum es
-    diese Tabelle gibt, und liegt seit `20260816_03` beim Reparaturauftrag —
+    diese Tabelle gibt, und liegt seit `20260816_12` beim Reparaturauftrag —
     die Notiz sperrt nur noch den Altbestand.
     """
 

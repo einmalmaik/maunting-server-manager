@@ -1,7 +1,7 @@
 """Ein Vorfall bekommt einen Auftrag statt eines Laufs.
 
-Revision ID: 20260816_03
-Revises: 20260816_02
+Revision ID: 20260816_12
+Revises: 20260816_11
 Create Date: 2026-08-16
 
 Bisher war die Heilungsnotiz (``ai_guardian_notices`` mit ``mode='healing'``)
@@ -24,7 +24,7 @@ beendet den Auftrag ordentlich. Ein CASCADE haette dieselbe Wirkung ohne Spur.
 
 Der CHECK wird ausgeschrieben und nicht aus ``PHASEN`` importiert — dasselbe
 Verfahren wie beim Zustands-CHECK in ``ai_runs`` und bei der Unterhaltungsart in
-``20260816_02``. Eine angewandte Migration ist Geschichte; laese sie das Tupel
+``20260816_11``. Eine angewandte Migration ist Geschichte; laese sie das Tupel
 aus dem Modell, schriebe eine spaetere Erweiterung rueckwirkend um, was diese
 Migration getan hat.
 """
@@ -37,8 +37,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "20260816_03"
-down_revision: Union[str, None] = "20260816_02"
+revision: str = "20260816_12"
+down_revision: Union[str, None] = "20260816_11"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

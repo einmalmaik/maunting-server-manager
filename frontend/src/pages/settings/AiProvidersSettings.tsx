@@ -3,7 +3,6 @@ import { AlertCircle, CheckCircle2, KeyRound, PlugZap, Plus, RefreshCw, Save, St
 import { useTranslation } from 'react-i18next'
 
 import {
-  AI_STIMMEN,
   aiApi,
   type AiCatalogModel,
   type AiCostPolicy,
@@ -31,10 +30,11 @@ const EMPTY_PROVIDER: ProviderDraft = {
   enabled: true,
   requires_api_key: true,
   token_price_micro_usd_per_million: null,
-  // Keine Vorbelegung. Ein neuer Sprachzugang soll die Standardstimme erben und
-  // ihr folgen, wenn MSM spaeter eine andere waehlt — truege er sie hier schon
-  // als eigenen Wert, waere aus dem Erben eine Festlegung geworden.
+  // Keine Vorbelegung, bei beiden. Es gibt weder eine Standardstimme noch ein
+  // Standard-Hoermodell — MSM kennt die Stimmen des fremden Kontos nicht, und
+  // ein geratenes Hoermodell stuende auf der Rechnung des Betreibers.
   default_voice: null,
+  transcription_model: null,
   operator_api_key: '',
 }
 
@@ -48,6 +48,7 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     requires_api_key: provider.requires_api_key,
     token_price_micro_usd_per_million: provider.token_price_micro_usd_per_million,
     default_voice: provider.default_voice,
+    transcription_model: provider.transcription_model,
     operator_api_key: '',
     operator_key_configured: provider.operator_key_configured,
     operator_key_hint: provider.operator_key_hint,
@@ -112,10 +113,11 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
     const target = draft.id ?? 'new'
     if (!canWrite || busyId !== null) return
     setBusyId(target)
-    // Die Stimme geht nur beim Sprachzugang mit — dieselbe Bedingung, unter der
-    // das Feld ueberhaupt erscheint. Ein Chatzugang schickt sie gar nicht erst:
-    // sonst stuende in seiner Zeile eine Angabe, die er nie verwendet, und beim
-    // naechsten Blick in die Datenbank saehe es aus wie eine Einstellung.
+    // Jedes Zusatzfeld geht nur mit seinem Zugang mit — dieselbe Bedingung,
+    // unter der es ueberhaupt erscheint. Der jeweils andere schickt es gar
+    // nicht erst: sonst stuende in seiner Zeile eine Angabe, die er nie
+    // verwendet, und beim naechsten Blick in die Datenbank saehe es aus wie
+    // eine Einstellung.
     const protokoll = kinds.find((item) => item.kind === draft.provider_kind)?.protokoll
     const payload: AiProviderWrite = {
       name: draft.name.trim(),
@@ -124,7 +126,10 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
       enabled: draft.enabled,
       requires_api_key: draft.requires_api_key,
       token_price_micro_usd_per_million: draft.token_price_micro_usd_per_million ?? null,
-      ...(protokoll === 'realtime' ? { default_voice: draft.default_voice ?? null } : {}),
+      ...(protokoll === 'tts' ? { default_voice: draft.default_voice?.trim() || null } : {}),
+      ...(protokoll === 'chat_completions'
+        ? { transcription_model: draft.transcription_model?.trim() || null }
+        : {}),
       ...(draft.operator_api_key ? { operator_api_key: draft.operator_api_key } : {}),
       ...(draft.clear_operator_api_key ? { clear_operator_api_key: true } : {}),
     }
@@ -305,6 +310,7 @@ function ProviderForm({
   const kindId = useId()
   const modelId = useId()
   const stimmeId = useId()
+  const hoerenId = useId()
   const preisId = useId()
 
   // Solange die Politik nicht geladen ist, gilt USD 1:1 — die Waehrung der
@@ -394,8 +400,8 @@ function ProviderForm({
               <a href={spec.key_url} target="_blank" rel="noreferrer" className="underline">{t('ai.providers.keyLink')}</a>
             </p>
           )}
-          {spec?.protokoll === 'realtime' && (
-            <p className="text-xs text-on-surface-variant">{t('ai.providers.realtimeHint')}</p>
+          {spec?.protokoll === 'tts' && (
+            <p className="text-xs text-on-surface-variant">{t('ai.providers.ttsHint')}</p>
           )}
           {!draft.provider_kind && (
             <p className="text-xs text-status-error">{t('ai.providers.kindMissingHint')}</p>
@@ -485,34 +491,52 @@ function ProviderForm({
           )}
           {gewaehltesModell && <ModelCapabilities model={gewaehltesModell} />}
         </div>
-        {/* Nur beim Sprachzugang, an derselben Bedingung wie der Hinweis oben.
+        {/* Nur beim Stimmzugang, an derselben Bedingung wie der Hinweis oben.
             Ein Chatzugang haette hier eine Einstellung ohne Wirkung stehen —
             und dahinter die Frage, warum der Chat nicht spricht.
 
-            Nichts gewaehlt ist ein gueltiger Zustand und kein Versaeumnis: dann
-            gilt die Standardstimme des Backends. Deshalb steht sie hier auch
-            nicht als vorbelegter Wert — MSM kennt sie an dieser Stelle
-            absichtlich nicht, damit ein spaeterer Wechsel dort auch hier
-            durchschlaegt. */}
-        {spec?.protokoll === 'realtime' && (
+            Ein **Textfeld** und kein Auswahlfeld: bis zum 16.08.2026 standen
+            hier acht feste Namen, die dem Modell gehoerten. Eine
+            ElevenLabs-Kennung gehoert dem Konto des Betreibers, und MSM kennt
+            es nicht. Nichts eingetragen heisst deshalb nicht „Standardstimme",
+            sondern „kein Sprachmodus" — es gibt hier nichts zu erben. */}
+        {spec?.protokoll === 'tts' && (
           <div className="space-y-1.5 md:col-span-2">
             <label htmlFor={stimmeId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
               {t('ai.providers.defaultVoice')}
             </label>
-            <Dropdown
+            <input
               id={stimmeId}
-              value={draft.default_voice ?? null}
-              onChange={(default_voice) => change({ default_voice })}
-              placeholder={t('common.select')}
-              // Das Hoerprofil steckt in der Uebersetzung: „Ash" allein sagt
-              // niemandem, wie die Stimme klingt, und vorhoeren laesst sich hier
-              // nichts.
-              options={AI_STIMMEN.map((stimme) => ({
-                value: stimme,
-                label: t(`ai.providers.voices.${stimme}`),
-              }))}
+              type="text"
+              className="msm-input"
+              autoComplete="off"
+              spellCheck={false}
+              value={draft.default_voice ?? ''}
+              onChange={(ereignis) => change({ default_voice: ereignis.target.value })}
+              placeholder="21m00Tcm4TlvDq8ikWAM"
             />
             <p className="msm-field-help">{t('ai.providers.defaultVoiceHint')}</p>
+          </div>
+        )}
+        {/* Und das Gegenstueck am Chatzugang: was Gesprochenes zu Text macht.
+            Es steht unter dem Standardmodell, weil es dasselbe Konto und
+            denselben Schluessel benutzt — nur eine andere Modellzeile. */}
+        {spec?.protokoll === 'chat_completions' && (
+          <div className="space-y-1.5 md:col-span-2">
+            <label htmlFor={hoerenId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('ai.providers.transcriptionModel')}
+            </label>
+            <input
+              id={hoerenId}
+              type="text"
+              className="msm-input"
+              autoComplete="off"
+              spellCheck={false}
+              value={draft.transcription_model ?? ''}
+              onChange={(ereignis) => change({ transcription_model: ereignis.target.value })}
+              placeholder="google/gemini-2.5-flash"
+            />
+            <p className="msm-field-help">{t('ai.providers.transcriptionModelHint')}</p>
           </div>
         )}
         <ProviderInput

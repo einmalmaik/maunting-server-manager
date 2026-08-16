@@ -12,16 +12,30 @@ export interface AiProviderAdmin {
   base_url: string | null
   default_model: string
   /**
-   * Die Stimme eines Sprachzugangs — einer aus `AI_STIMMEN`.
+   * Die Stimm-Kennung eines Stimmzugangs, aus dem Konto des Betreibers.
    *
-   * `null` heisst „nichts hinterlegt" und loest serverseitig auf die
-   * Standardstimme auf. Es heisst ausdruecklich **nicht** „alloy": stuende der
-   * heutige Standard erst einmal als Wert in der Zeile, bliebe dieser Zugang
-   * daran haengen, wenn MSM spaeter eine andere Stimme voranstellt.
+   * `null` heisst „nichts hinterlegt" und loest sich **nicht** auf: es gibt
+   * keine Standardstimme. Ohne sie gibt es ueber diesen Zugang keinen
+   * Sprachmodus — eine geratene Stimme stuende auf der Rechnung des Betreibers.
    *
-   * Bei einem Chatzugang ohne Realtime bleibt das Feld unbeachtet.
+   * Hier stand bis zum 16.08.2026 einer von acht festen Namen. Seit die
+   * Kennung aus einem fremden Konto stammt, gibt es keine Liste mehr, gegen die
+   * sich pruefen liesse — und deshalb ein Textfeld statt eines Auswahlfelds.
+   *
+   * Bei einem Chatzugang bleibt das Feld unbeachtet.
    */
   default_voice: string | null
+  /**
+   * Das hoerende Modell eines Chatzugangs — was Gesprochenes zu Text macht.
+   *
+   * `null` heisst „nichts hinterlegt": dann gibt es ueber diesen Zugang keinen
+   * Sprachmodus. Hier gehoert ein **hoerfaehiges Chatmodell** hinein und nicht
+   * `whisper` oder `gpt-4o-transcribe` — einen Transkriptions-Endpunkt hat
+   * OpenRouter nicht, Audio geht als Inhaltsteil in eine gewoehnliche Anfrage.
+   *
+   * Bei einem Stimmzugang bleibt das Feld unbeachtet.
+   */
+  transcription_model: string | null
   enabled: boolean
   requires_api_key: boolean
   operator_key_configured: boolean
@@ -68,12 +82,16 @@ export interface AiProviderKind {
   key_url: string
   key_prefix: string | null
   /**
-   * Wofür dieser Zugang taugt. `chat_completions` ist der getippte Chat,
-   * `realtime` der Sprachmodus — zwei verschiedene APIs, die sich nicht
-   * gegenseitig vertreten. Ein Realtime-Zugang erscheint deshalb gar nicht
-   * erst in der Modellauswahl des Chats.
+   * Wofür dieser Zugang taugt. `chat_completions` ist das Modell, das denkt
+   * (und im Sprachmodus zusaetzlich zuhoert), `tts` die Stimme, die vorliest —
+   * zwei verschiedene APIs, die sich nicht gegenseitig vertreten. Ein
+   * Stimmzugang erscheint deshalb gar nicht erst in der Modellauswahl des
+   * Chats.
+   *
+   * Das Feld entscheidet ausserdem, welches Zusatzfeld das Formular zeigt: das
+   * hoerende Modell beim einen, die Stimm-Kennung beim anderen.
    */
-  protokoll: 'chat_completions' | 'realtime'
+  protokoll: 'chat_completions' | 'tts'
   /**
    * Ob der Modellkatalog dieses Anbieters den Schlüssel braucht. Wenn ja,
    * bleibt die Modelliste leer, bis der Zugang mit Schlüssel gespeichert ist —
@@ -274,22 +292,6 @@ export interface AiVoiceConfig {
   max_seconds: number
 }
 
-/**
- * Die waehlbaren Stimmen des Realtime-Modells.
- *
- * Der Vorrat gehoert dem Backend: `services/ai_voice_session.STIMMEN` fuehrt
- * ihn, und der Anbieter kennt keine weiteren. Einen Abruf dafuer gibt es
- * bewusst nicht — acht feste Namen sind kein Katalog, der sich zur Laufzeit
- * aendert, und ein Endpunkt dafuer waere ein Netzaufruf je Anbieterformular.
- *
- * Dieselbe Abmachung wie bei `AI_LAUFZUSTAENDE`: die Liste ist eine Kopie und
- * sagt das. Wer hier etwas ergaenzt, ergaenzt `ai.providers.voices.*` in
- * **allen** Sprachdateien mit — ohne Uebersetzung stuende im Auswahlfeld der
- * rohe Schluessel.
- */
-export const AI_STIMMEN = [
-  'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse',
-] as const
 
 /**
  * Die Schreibwerkzeuge — vollstaendig, in der Reihenfolge von
@@ -761,6 +763,7 @@ export interface AiProviderWrite {
    * ausdrueckliches `null` nimmt sie zurueck.
    */
   default_voice?: string | null
+  transcription_model?: string | null
   operator_api_key?: string
   clear_operator_api_key?: boolean
 }

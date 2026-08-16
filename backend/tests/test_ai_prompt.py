@@ -130,6 +130,104 @@ def test_the_rules_with_an_observed_cause_are_still_there() -> None:
     assert "passieren **lautlos**" in prompt
 
 
+def test_der_sprachprompt_traegt_die_getippten_bloecke_gar_nicht_erst() -> None:
+    """Gesprochen wird weggelassen, nicht widerrufen.
+
+    Der Anlass steht im Protokoll vom 16.08.2026: der Sprachprompt hob
+    `MITREDEN` woertlich auf, und das Modell sagte trotzdem an, was es gleich
+    nachsieht — fast woertlich das Beispiel aus dem aufgehobenen Block. Eine
+    Ruecknahme setzt darauf, dass der spaetere Satz den frueheren schlaegt; bei
+    15.000 Zeichen Abstand und einem kleinen Modell tut er das nicht.
+
+    Der Test haelt die Richtung fest, nicht die Liste: wer einen Block nach
+    `NUR_GETIPPT` aufnimmt oder herausnimmt, aendert die Zusage bewusst und
+    braucht hier nichts anzupassen. Er faellt, sobald ein Block wieder auf dem
+    Sprachweg landet oder einer verschwindet, der dort gelten soll.
+    """
+    voll = ai_prompt.build(SKILL_BLOCK)
+    gesprochen = ai_prompt.build(SKILL_BLOCK, gesprochen=True)
+
+    for block in ai_prompt.NUR_GETIPPT:
+        assert block in voll, f"Block steht nicht im Chatprompt: {block[:40]!r}"
+        assert block not in gesprochen, f"Block ueberlebt gesprochen: {block[:40]!r}"
+
+    # Und alles andere ueberlebt vollstaendig, genau einmal und in derselben
+    # Reihenfolge — ein Filter, der beim Kuerzen danebengreift, waere schlimmer
+    # als der Widerspruch, den er ersetzt.
+    bleibt = [
+        block
+        for block in list(ai_prompt.BLOECKE) + list(ai_prompt.NACH_SKILL_INDEX)
+        if block not in ai_prompt.NUR_GETIPPT
+    ]
+    positionen = []
+    for block in bleibt:
+        assert gesprochen.count(block) == 1, f"Block fehlt gesprochen: {block[:40]!r}"
+        positionen.append(gesprochen.index(block))
+    assert positionen == sorted(positionen)
+
+    # Namentlich die, die der Betreiber ausdruecklich als "gilt gesprochen
+    # genauso" benannt hat.
+    for block in (
+        ai_prompt.SERVERBEZUG,
+        ai_prompt.GEHEIMNISSE,
+        ai_prompt.UNTRUSTED,
+        ai_prompt.DOKUMENTATION,
+    ):
+        assert block in gesprochen
+
+    # Und der eine Block, den es **nur** gesprochen gibt. Ohne ihn waere der
+    # Filter oben die halbe Miete: der Sprachmodus wuesste dann, was nicht gilt,
+    # aber nicht, dass er spricht.
+    assert ai_prompt.GESPROCHEN in gesprochen
+    assert ai_prompt.GESPROCHEN not in voll
+    # Ganz am Ende, damit er zuletzt gelesen wird.
+    assert gesprochen.rstrip().endswith(ai_prompt.GESPROCHEN.rstrip())
+
+
+def test_gesprochen_bleibt_buendeln_und_kein_stummer_zug() -> None:
+    """Zwei Drittel von MITREDEN gelten gesprochen — eines davon staerker.
+
+    `MITREDEN` trug drei Regeln in einem: ansagen, buendeln, nicht stumm enden.
+    Nur die erste ist an einen Bildschirm gebunden. Solange sie zusammenstanden,
+    liess sich die erste nicht wegnehmen, ohne die anderen mitzunehmen — und
+    `KEIN_STUMMER_ZUG` ist ausgerechnet die eine Regel im ganzen Prompt, die die
+    Stille nach einem Werkzeugaufruf verbietet.
+    """
+    gesprochen = ai_prompt.build("", gesprochen=True)
+
+    assert ai_prompt.BUENDELN in gesprochen
+    assert ai_prompt.KEIN_STUMMER_ZUG in gesprochen
+    # Medienneutral formuliert: die alte Fassung hing an "sichtbarem Text" und
+    # einer "leeren Blase" — zwei Woerter, die es im Gespraech nicht gibt, und
+    # an denen ein Modell die Regel als "gilt hier nicht" liest.
+    assert "sichtbaren Text" not in gesprochen
+    assert "leere Blase" not in gesprochen
+
+
+def test_gesprochen_ist_ein_schalter_und_kein_zweiter_prompt() -> None:
+    """Gefiltert wird beim Zusammensetzen, nicht am fertigen Text.
+
+    Hier stand `fuer_sprache`: eine Funktion, die den **fertigen** Prompt
+    entgegennahm und die getippten Bloecke per Textersetzung herausschnitt. Sie
+    hinterliess Loecher zwischen den Absaetzen, die nachgeraeumt werden mussten,
+    und der Sprachweg schickte jede `system`-Nachricht durch sie — auch den
+    Lageblock und eine frueher gezogene Zusammenfassung, an denen nichts zu tun
+    war.
+
+    Beides ist mit dem Schalter erledigt: er greift genau einmal, genau dort, wo
+    der Prompt entsteht. Was diese Zusage festhaelt, ist die Folge davon — der
+    gesprochene Prompt ist ein **gebauter** Text und kein beschnittener, und
+    zwischen zwei Bloecken steht darin dasselbe wie im getippten.
+    """
+    gesprochen = ai_prompt.build("", gesprochen=True)
+
+    assert "\n\n\n" not in gesprochen, "Loch zwischen zwei Bloecken"
+    assert not gesprochen.startswith("\n")
+    # Und es gibt die alte Funktion nicht mehr. Sie stehenzulassen hiesse, einen
+    # zweiten Weg anzubieten, der den Schalter nicht kennt.
+    assert not hasattr(ai_prompt, "fuer_sprache")
+
+
 def test_drei_werkzeuge_beziehen_ihren_anlass_aus_diesen_bloecken() -> None:
     """Die Beschreibungen dreier Werkzeuge sind gekürzt, weil das hier steht.
 

@@ -435,47 +435,44 @@ def _modell_aus_openrouter(rohdaten: dict) -> Modell | None:
     )
 
 
-#: Womit eine Realtime-Kennung bei OpenAI beginnt. Der Katalog dort führt
-#: *alle* Modelle des Kontos — Bildgeneratoren, Einbettungen, Transkription.
-#: Keines davon gehört in eine Auswahl für den Sprachweg.
-_REALTIME_PRAEFIX = "gpt-realtime"
+def _modell_aus_elevenlabs(rohdaten: dict) -> Modell | None:
+    """Liest ein Sprachmodell von ElevenLabs — und weiss dabei fast nichts.
 
-
-def _modell_aus_openai_realtime(rohdaten: dict) -> Modell | None:
-    """Liest einen Katalogeintrag von OpenAI — und weiss dabei fast nichts.
-
-    Das ist der Unterschied zu `_modell_aus_openrouter` und keine Nachlässigkeit:
-    OpenAIs ``/v1/models`` liefert je Eintrag nur ``id``, ``object``, ``created``
-    und ``owned_by``. Kein Kontextfenster, keine Denkstufen, keine Preise. Was
-    hier nicht steht, kann MSM auch nicht wissen — und erfindet es deshalb nicht.
+    Das ist der Unterschied zu `_modell_aus_openrouter` und keine
+    Nachlässigkeit: ein Sprachmodell hat kein Kontextfenster, keine Denkstufen
+    und keinen Tokenpreis. Es hat einen Namen, eine Kennung und eine Antwort auf
+    die Frage, ob es überhaupt vorlesen kann. Alles Weitere, was `Modell` bieten
+    würde, wäre hier eine erfundene Null.
 
     ``kontext_tokens=None`` heisst überall im Code „unbekannt" und nie „klein"
-    (`ai_context_window.ermitteln`). Das ist die ehrliche Antwort. Eine Zahl aus
-    der Doku abzuschreiben wäre die unehrliche: sie stimmte am Tag des
-    Abschreibens und danach so lange, bis jemand sie widerlegt.
+    (`ai_context_window.ermitteln`) — hier heisst es zusätzlich „gibt es nicht".
+    Beides führt zum selben Verhalten, und das ist der Grund, warum kein drittes
+    Feld nötig ist.
 
-    ``denkt=False``, obwohl `gpt-realtime-2.1` sehr wohl eine ``reasoning.effort``
-    kennt. Auch das ist Absicht: der Katalog sagt es nicht, und `ai_reasoning`
-    darf keine Stufe schicken, die es vielleicht nicht gibt. Sobald OpenAI die
-    Fähigkeit im Katalog führt, greift der bestehende Weg von selbst.
-
-    **Warum der Katalog trotzdem gefragt wird, wenn er so wenig sagt:** wegen
-    der Liste. `gpt-realtime`, `gpt-realtime-mini` und alle `gpt-4o-realtime`
-    werden am 2027-01-20 abgeschaltet. Eine Auswahl aus einer Konstante im
-    Programm zeigte danach Modelle an, die es nicht mehr gibt. Der Katalog
-    vergisst sie von selbst.
+    ``can_do_text_to_speech`` ist die eigentliche Arbeit dieser Funktion. Der
+    Katalog führt auch Modelle zur Stimmumwandlung; eines davon in der Auswahl
+    für den Sprachmodus wäre ein Eintrag, der beim ersten Satz scheitert. Fehlt
+    das Feld, wird der Eintrag **nicht** übernommen: ein unbekanntes Modell in
+    einer Auswahl ist ein Versprechen, das MSM nicht halten kann.
     """
-    model_id = rohdaten.get("id")
-    if not isinstance(model_id, str) or not model_id.startswith(_REALTIME_PRAEFIX):
+    model_id = rohdaten.get("model_id")
+    if not isinstance(model_id, str) or not model_id:
         return None
-    return Modell(model_id=model_id, name=model_id, denkt=False)
+    if rohdaten.get("can_do_text_to_speech") is not True:
+        return None
+    name = rohdaten.get("name")
+    return Modell(
+        model_id=model_id,
+        name=name if isinstance(name, str) and name else model_id,
+        denkt=False,
+    )
 
 
 #: Je Anbieter ein Leser. Ein zweiter Anbieter ist eine Zeile hier und ein
 #: Eintrag in `ai_provider_registry` — kein Umbau.
 _LESER = {
     "openrouter": _modell_aus_openrouter,
-    "openai_realtime": _modell_aus_openai_realtime,
+    "elevenlabs": _modell_aus_elevenlabs,
 }
 
 
@@ -486,7 +483,7 @@ async def _hole(
     # verlangt. Ihn vorsorglich immer mitzuschicken waere ein Geheimnis an einer
     # Adresse, die es nicht braucht — OpenRouter gibt seine Liste offen heraus.
     kopf = (
-        {"Authorization": f"Bearer {schluessel}"}
+        {spec.schluessel_kopf: f"{spec.schluessel_praefix}{schluessel}"}
         if spec.katalog_braucht_schluessel and schluessel
         else None
     )
@@ -496,9 +493,17 @@ async def _hole(
         raise ValueError("Katalog ist unerwartet groß")
 
     nutzlast = antwort.json()
-    rohliste = nutzlast.get("data") if isinstance(nutzlast, dict) else None
+    if spec.katalog_liste_feld is None:
+        # Die Antwort **ist** die Liste. Kein Sonderfall, nur eine andere
+        # Hausordnung — ElevenLabs macht es so.
+        rohliste = nutzlast
+    else:
+        rohliste = (
+            nutzlast.get(spec.katalog_liste_feld) if isinstance(nutzlast, dict) else None
+        )
     if not isinstance(rohliste, list):
-        raise ValueError("Katalog hat kein data-Feld")
+        erwartet = spec.katalog_liste_feld or "eine Liste"
+        raise ValueError(f"Katalog hat kein {erwartet}-Feld")
 
     leser = _LESER[spec.kind]
     modelle = [

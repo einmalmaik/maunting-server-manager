@@ -177,11 +177,28 @@ def test_the_recommendation_is_a_model_id_and_nothing_else() -> None:
     from services import ai_provider_registry
     from services.ai_model_catalog import _LESER
 
+    # Wie ein Katalogeintrag dieses Anbieters mindestens aussieht. Je Anbieter
+    # eine eigene Form, und das ist keine Umstaendlichkeit, sondern die Lage:
+    # OpenRouter nennt die Kennung ``id``, ElevenLabs ``model_id`` und verlangt
+    # zusaetzlich die Zusage, dass das Modell ueberhaupt vorlesen kann. Ein
+    # gemeinsamer Probeeintrag wuerde von einem der beiden Leser verworfen — und
+    # dieser Test bestuende dann aus einer Zusicherung, die immer haelt.
+    probe = {
+        "openrouter": lambda kennung: {"id": kennung},
+        "elevenlabs": lambda kennung: {
+            "model_id": kennung, "can_do_text_to_speech": True
+        },
+    }
+
     for kind, spec in ai_provider_registry.ANBIETER.items():
         if spec.empfehlung is None:
             continue
         assert spec.empfehlung == spec.empfehlung.strip(), kind
-        assert _LESER[kind]({"id": spec.empfehlung}) is not None, (
+        assert kind in probe, (
+            f"Neuer Anbieter {kind!r} ohne Probeeintrag — ohne ihn prueft diese "
+            f"Zusage seine Empfehlung nicht mit."
+        )
+        assert _LESER[kind](probe[kind](spec.empfehlung)) is not None, (
             f"Der Katalogleser von {kind} wuerde die Empfehlung "
             f"{spec.empfehlung!r} verwerfen — sie kann dort nie erscheinen."
         )
@@ -191,4 +208,4 @@ def test_the_recommendation_is_a_model_id_and_nothing_else() -> None:
     # steht hier ausdruecklich bei OpenRouter und nicht in der Schleife oben.
     assert ai_provider_registry.ANBIETER["openrouter"].empfehlung == "openai/gpt-5.6-luna"
     assert "/" in ai_provider_registry.ANBIETER["openrouter"].empfehlung
-    assert ai_provider_registry.ANBIETER["openai_realtime"].empfehlung == "gpt-realtime-2.1"
+    assert ai_provider_registry.ANBIETER["elevenlabs"].empfehlung == "eleven_flash_v2_5"

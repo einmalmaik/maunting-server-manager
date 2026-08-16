@@ -109,6 +109,23 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.zustand).toBe('hoert')
   })
 
+  it('unterbricht nichts, wenn gar nichts laeuft', async () => {
+    // Der Regelfall, und bis zum 16.08.2026 der Fehlerfall: der Mensch faengt
+    // an zu reden, waehrend die KI schweigt. Es gibt nichts abzubrechen.
+    //
+    // Vorher ging das `unterbrechen` trotzdem hinaus, wurde zu einem
+    // `response.cancel` ins Leere, und die Gegenstelle antwortete mit
+    // `response_cancel_not_active`. Der Sprechende las daraufhin bei **jedem**
+    // Satz „Der Sprachanbieter hat die Sitzung abgebrochen" — eine
+    // Stoerungsmeldung fuer eine Leitung, die einwandfrei trug.
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'hoert' }))
+
+    expect(leitung().sent).not.toContain(JSON.stringify({ art: 'unterbrechen' }))
+    expect(haken.result.current.zustand).toBe('hoert')
+  })
+
   it('fuehrt den Wortwechsel mit', async () => {
     const haken = await sitzung()
 

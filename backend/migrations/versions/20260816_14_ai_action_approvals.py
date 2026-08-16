@@ -1,7 +1,7 @@
 """Eine Freigabe, die per E-Mail erteilt wird.
 
-Revision ID: 20260816_05
-Revises: 20260816_04
+Revision ID: 20260816_14
+Revises: 20260816_13
 Create Date: 2026-08-16
 
 Bis hierher endete ein unbeaufsichtigter Lauf an dem Punkt, an dem einer seiner
@@ -27,8 +27,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "20260816_05"
-down_revision: Union[str, None] = "20260816_04"
+revision: str = "20260816_14"
+down_revision: Union[str, None] = "20260816_13"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

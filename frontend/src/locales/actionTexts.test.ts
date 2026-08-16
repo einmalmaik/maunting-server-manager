@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 
-import { AI_STIMMEN } from '@/api/ai'
 
 import de from './de.json'
 import en from './en.json'
@@ -78,30 +77,13 @@ describe('Texte der KI-Aktionen', () => {
     })
   }
 
-  for (const [sprache, daten] of Object.entries(SPRACHEN)) {
-    it(`${sprache}: jede Realtime-Stimme hat eine Beschriftung`, () => {
-      // Derselbe Fehlermodus wie oben bei den Werkzeugen, nur an anderer
-      // Stelle: `AI_STIMMEN` ist eine Abschrift von
-      // `ai_voice_session.STIMMEN`, und eine neunte Stimme braucht drei
-      // Schritte — Backend, Abschrift, Uebersetzung. Fehlt der dritte, steht im
-      // Auswahlfeld des Betreibers der rohe Schluessel
-      // `ai.providers.voices.ash`, weil `parseMissingKeyHandler` ihn
-      // zurueckgibt. Vergessen wird genau dieser Schritt.
-      const stimmen = daten.ai.providers.voices as Record<string, string>
-      const ohneText = AI_STIMMEN.filter((s) => !stimmen[s]?.trim())
-
-      expect(ohneText, `ohne Beschriftung in ${sprache}.json`).toEqual([])
-    })
-
-    it(`${sprache}: keine Beschriftung ohne zugehoerige Stimme`, () => {
-      // Die Gegenrichtung: eine abgekuendigte Stimme, die nur noch im
-      // Auswahlfeld steht, laesst sich speichern und wird vom Anbieter
-      // abgewiesen — erst beim naechsten Gespraech, nicht beim Speichern.
-      const uebrig = Object.keys(daten.ai.providers.voices)
-        .filter((k) => !AI_STIMMEN.includes(k as (typeof AI_STIMMEN)[number]))
-      expect(uebrig).toEqual([])
-    })
-  }
+  // Hier standen zwei Zusagen ueber die acht Realtime-Stimmen: jede braucht
+  // eine Beschriftung, und keine Beschriftung ohne Stimme. Beide sind mit dem
+  // 16.08.2026 gegenstandslos geworden — eine ElevenLabs-Stimme hat keine
+  // Beschriftung im Panel, weil sie MSM gar nicht kennt. Sie gehoert dem Konto
+  // des Betreibers, er traegt ihre Kennung als Text ein, und geprueft wird
+  // nicht ihr Name, sondern ihre **Form**: sie steht in einem URL-Pfad
+  // (`backend/tests/test_ai_voice_provider.py`).
 
   it('die unumkehrbaren Werkzeuge sagen im Text, dass es unumkehrbar ist', () => {
     // Kein Stilcheck: der Dialog färbt diese Werkzeuge rot, und die Farbe ohne

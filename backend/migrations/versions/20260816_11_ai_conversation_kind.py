@@ -1,8 +1,23 @@
 """Der Guardian bekommt ein eigenes Fenster.
 
-Revision ID: 20260816_02
-Revises: 20260816_01
+Revision ID: 20260816_11
+Revises: 20260816_02
 Create Date: 2026-08-16
+
+**Warum die Nummerierung bei 11 weitergeht und nicht bei 03.**
+
+Am selben Tag entstanden auf zwei Zweigen Migrationen: hier die vier fuer das
+Guardian-Fenster, dort die fuer den umgebauten Sprachmodus. Beide zaehlten von
+01 aufwaerts, beide haengten sich an ``20260815_01`` — und weil es
+verschiedene Dateien waren, sah git keinen Konflikt. Alembic sah ihn: zwei
+Revisionen derselben Kennung, danach zwei Heads.
+
+Zweimal hintereinander hinter den anderen Zweig zu ruecken haette das Rennen
+nur verlaengert; solange dort weiter Migrationen entstehen, kollidiert die
+naechste Zahl wieder. Deshalb der Sprung: 03 bis 10 bleiben dem Sprachzweig,
+die Guardian-Kette beginnt bei 11. Die Luecke ist kein Versehen, sondern die
+Stelle, an der zwei Zweige aufgehoert haben, sich um dieselben Zahlen zu
+streiten.
 
 Bisher gab es genau eine Unterhaltung je Benutzer, erzwungen ueber den
 eindeutigen Index ``uq_ai_conversations_user`` (angelegt in ``20260808_02``).
@@ -46,8 +61,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "20260816_02"
-down_revision: Union[str, None] = "20260816_01"
+revision: str = "20260816_11"
+down_revision: Union[str, None] = "20260816_02"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -1,36 +1,33 @@
 """Zwei Anbieter, zwei Protokolle — und keine Verwechslung dazwischen.
 
-Bis hierher gab es genau einen Anbieter, und deshalb gab es die Frage nicht:
-*welche API spricht dieser Zugang eigentlich?* Mit dem Sprachmodus gibt es sie.
-OpenRouter beantwortet Anfragen unter `/chat/completions`, OpenAI beantwortet
-den Sprachweg unter `/realtime` — und zwar mit Ereignissen statt mit Nachrichten.
-Die beiden sind nicht ineinander überführbar.
+Bis zum Sprachmodus gab es genau einen Anbieter, und deshalb gab es die Frage
+nicht: *welche API spricht dieser Zugang eigentlich?* Mit ihm gibt es sie.
+OpenRouter beantwortet Anfragen unter ``/chat/completions``, ElevenLabs liest
+unter ``/text-to-speech/{voice}/stream-input`` vor — und zwar über eine
+WebSocket-Sitzung statt über Nachrichten. Die beiden sind nicht ineinander
+überführbar, und beide Wege müssen den jeweils falschen Zugang **vorher**
+abweisen statt ihn an eine Adresse zu schicken, an der er nichts zu suchen hat.
 
-Der Anlass ist nachprüfbar und keine Vorsichtsmaßnahme: OpenRouter hat **keine**
-Realtime-API. Am 2026-08-15 nachgesehen — `POST /api/v1/realtime` antwortet mit
-404, während `/chat/completions` mit 401 antwortet, und die vollständige
-OpenAPI-Spezifikation kennt weder `websocket` noch `webrtc` oder `realtime`.
-Ein Sprachzugang muss deshalb zu einem zweiten Anbieter gehen, und beide Wege
-müssen den jeweils falschen Zugang **vorher** abweisen statt ihn an eine Adresse
-zu schicken, an der sein Modell nicht antwortet.
+Hier stand bis zum 16.08.2026 OpenAIs Realtime-API als zweiter Anbieter. Sie
+konnte beides — denken und sprechen — und tat damit alles doppelt, was der Chat
+schon konnte. Geblieben ist die Aufteilung, gewechselt hat der zweite Anbieter:
+er spricht jetzt nur noch.
 
-Dazu kommt seit dem Sprachmodus eine zweite Eigenschaft, die nur ein
-Sprachzugang hat: **seine Stimme**. Sie ist die einzige Einstellung des Panels,
-die der Kunde nicht sieht, sondern hört, und sie gehört deshalb dem Betreiber —
-so wie Logo und Farbe. Was hier daran hängt, ist eine Unterscheidung, die man
-leicht wegoptimiert: ``NULL`` heisst „nichts hinterlegt" und ausdrücklich nicht
-„alloy". Steht der Standard erst einmal in der Spalte, wird er zu einer Auswahl,
-die niemand getroffen hat, und ein späterer Wechsel von `STANDARDSTIMME` läuft
-bei jedem bestehenden Zugang ins Leere.
+Dazu kommen zwei Eigenschaften, die je nur an einer Seite hängen: die
+**Stimme** am Sprachzugang und das **hörende Modell** am Chatzugang. Beide sind
+Betreiberentscheidungen, beide sind optional, und bei beiden heisst ``NULL``
+„nichts hinterlegt". Der Unterschied ist keine Kosmetik: ohne Stimme gibt es
+keinen Sprachmodus, und eine geratene stünde auf der Rechnung des Betreibers.
 
 Was hier zugesichert wird:
 
-* Ein Realtime-Zugang kommt nicht in den Chat — weder über die Auswahl noch
-  über eine geratene Kennung.
-* Der Katalogschlüssel geht nur an den Anbieter, der ihn verlangt.
+* Ein Stimmzugang kommt nicht in den Chat — weder über die Auswahl noch über
+  eine geratene Kennung.
+* Der Katalogschlüssel geht nur an den Anbieter, der ihn verlangt, und im Kopf,
+  den dieser Anbieter versteht.
 * Das Vorwärmen beim Start fasst schlüsselpflichtige Kataloge nicht an.
-* Eine hinterlegte Stimme kommt zurück, wie sie hineinging; eine erfundene
-  kommt gar nicht erst hinein; und keine hinterlegte Stimme bleibt keine.
+* Eine hinterlegte Stimme kommt zurück, wie sie hineinging — **gross wie
+  klein**; eine, die den URL-Pfad verlassen könnte, kommt gar nicht erst hinein.
 """
 
 from __future__ import annotations
@@ -44,7 +41,6 @@ from services import (
     ai_model_catalog,
     ai_provider_registry,
     ai_provider_service,
-    ai_voice_session,
 )
 
 
@@ -54,9 +50,20 @@ from services import (
 def test_the_two_providers_speak_different_protocols() -> None:
     assert ai_provider_registry.ANBIETER["openrouter"].protokoll == ai_provider_registry.CHAT
     assert (
-        ai_provider_registry.ANBIETER["openai_realtime"].protokoll
-        == ai_provider_registry.REALTIME
+        ai_provider_registry.ANBIETER["elevenlabs"].protokoll
+        == ai_provider_registry.TTS
     )
+
+
+def test_the_realtime_provider_is_gone() -> None:
+    """Der Eintrag ist weg — und mit ihm das Protokoll.
+
+    Kein Nachruf, sondern eine Zusage: ein zurückkehrender Eintrag brächte den
+    zweiten Werkzeuglauf mit, den dieser Umbau abgeschafft hat. Wer ihn wieder
+    aufnimmt, soll hier stolpern und nicht erst im Betrieb.
+    """
+    assert "openai_realtime" not in ai_provider_registry.ANBIETER
+    assert not hasattr(ai_provider_registry, "REALTIME")
 
 
 def test_asking_for_a_protocol_never_raises_on_an_unknown_kind() -> None:
@@ -68,9 +75,9 @@ def test_asking_for_a_protocol_never_raises_on_an_unknown_kind() -> None:
     den einen Eintrag auszulassen.
     """
     assert ai_provider_registry.spricht("openrouter", ai_provider_registry.CHAT)
-    assert not ai_provider_registry.spricht("openrouter", ai_provider_registry.REALTIME)
-    assert ai_provider_registry.spricht("openai_realtime", ai_provider_registry.REALTIME)
-    assert not ai_provider_registry.spricht("openai_realtime", ai_provider_registry.CHAT)
+    assert not ai_provider_registry.spricht("openrouter", ai_provider_registry.TTS)
+    assert ai_provider_registry.spricht("elevenlabs", ai_provider_registry.TTS)
+    assert not ai_provider_registry.spricht("elevenlabs", ai_provider_registry.CHAT)
     # Kein KeyError, sondern ein schlichtes Nein.
     assert not ai_provider_registry.spricht("gibtsnicht", ai_provider_registry.CHAT)
 
@@ -84,60 +91,74 @@ def test_a_provider_row_is_checked_through_the_service() -> None:
         id=1, name="Chat", provider_kind="openrouter",
         default_model="openai/gpt-5.6-luna", enabled=True, requires_api_key=True,
     )
-    sprache = AiProvider(
-        id=2, name="Sprache", provider_kind="openai_realtime",
-        default_model="gpt-realtime-2.1", enabled=True, requires_api_key=True,
+    stimme = AiProvider(
+        id=2, name="Stimme", provider_kind="elevenlabs",
+        default_model="eleven_flash_v2_5", enabled=True, requires_api_key=True,
     )
     assert ai_provider_service.spricht(chat, ai_provider_registry.CHAT)
-    assert not ai_provider_service.spricht(chat, ai_provider_registry.REALTIME)
-    assert ai_provider_service.spricht(sprache, ai_provider_registry.REALTIME)
-    assert not ai_provider_service.spricht(sprache, ai_provider_registry.CHAT)
+    assert not ai_provider_service.spricht(chat, ai_provider_registry.TTS)
+    assert ai_provider_service.spricht(stimme, ai_provider_registry.TTS)
+    assert not ai_provider_service.spricht(stimme, ai_provider_registry.CHAT)
 
 
 # ── Der Katalogleser ──────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(
-    "kennung, erwartet",
-    [
-        ("gpt-realtime-2.1", True),
-        ("gpt-realtime-2.1-mini", True),
-        ("gpt-realtime", True),
-        # Alles andere im Konto des Betreibers gehört nicht in eine
-        # Sprachauswahl — und OpenAIs Katalog führt es trotzdem mit auf.
-        ("gpt-5.6", False),
-        ("gpt-audio", False),
-        ("text-embedding-3-small", False),
-        ("dall-e-3", False),
-        ("whisper-1", False),
-    ],
-)
-def test_only_realtime_models_survive_the_openai_reader(kennung: str, erwartet: bool) -> None:
-    gelesen = ai_model_catalog._modell_aus_openai_realtime({"id": kennung})
-    assert (gelesen is not None) is erwartet, kennung
+def test_only_speaking_models_survive_the_elevenlabs_reader() -> None:
+    """Der Katalog führt auch Modelle, die nicht vorlesen können.
+
+    Eines davon in der Auswahl für den Sprachmodus wäre ein Eintrag, der beim
+    ersten Satz scheitert — und zwar erst dort, mitten im Gespräch.
+    """
+    kann = ai_model_catalog._modell_aus_elevenlabs(
+        {"model_id": "eleven_flash_v2_5", "name": "Flash v2.5", "can_do_text_to_speech": True}
+    )
+    assert kann is not None
+    assert kann.model_id == "eleven_flash_v2_5"
+    assert kann.name == "Flash v2.5"
+
+    umwandler = ai_model_catalog._modell_aus_elevenlabs(
+        {"model_id": "eleven_voice_changer", "can_do_text_to_speech": False}
+    )
+    assert umwandler is None
 
 
-def test_the_openai_reader_admits_what_it_does_not_know() -> None:
+def test_a_model_that_does_not_say_what_it_can_is_left_out() -> None:
+    """Fehlt das Feld, wird der Eintrag **nicht** übernommen.
+
+    Ein unbekanntes Modell in einer Auswahl ist ein Versprechen, das MSM nicht
+    halten kann. Das Gegenteil — im Zweifel aufnehmen — sähe grosszügig aus und
+    verschöbe den Fehlschlag in das Gespräch.
+    """
+    assert ai_model_catalog._modell_aus_elevenlabs({"model_id": "was-auch-immer"}) is None
+
+
+def test_the_elevenlabs_reader_admits_what_it_does_not_know() -> None:
     """Kein erfundenes Kontextfenster, keine erfundene Denkstufe.
 
-    OpenAIs ``/v1/models`` liefert je Eintrag nur ``id``, ``object``, ``created``
-    und ``owned_by``. `None` heißt im übrigen Code „unbekannt" und nie „klein"
-    (`ai_context_window.ermitteln`) — genau deshalb darf hier keine Zahl aus
-    einer Dokumentation stehen, die morgen eine andere ist.
+    Ein Sprachmodell hat beides nicht. `None` heißt im übrigen Code „unbekannt"
+    und nie „klein" (`ai_context_window.ermitteln`) — hier heisst es zusätzlich
+    „gibt es nicht", und beides führt zum selben Verhalten.
     """
-    modell = ai_model_catalog._modell_aus_openai_realtime({"id": "gpt-realtime-2.1"})
+    modell = ai_model_catalog._modell_aus_elevenlabs(
+        {"model_id": "eleven_flash_v2_5", "can_do_text_to_speech": True}
+    )
     assert modell is not None
     assert modell.kontext_tokens is None
     assert modell.max_ausgabe_tokens is None
     assert modell.denkt is False
     assert modell.stufen == ()
     assert modell.cache_marke_noetig is False
+    # Ohne Namen bleibt die Kennung stehen, statt dass „None" in der Auswahl
+    # erscheint.
+    assert modell.name == "eleven_flash_v2_5"
 
 
 def test_a_broken_entry_is_skipped_and_not_fatal() -> None:
-    assert ai_model_catalog._modell_aus_openai_realtime({}) is None
-    assert ai_model_catalog._modell_aus_openai_realtime({"id": None}) is None
-    assert ai_model_catalog._modell_aus_openai_realtime({"id": 42}) is None
+    assert ai_model_catalog._modell_aus_elevenlabs({}) is None
+    assert ai_model_catalog._modell_aus_elevenlabs({"model_id": None}) is None
+    assert ai_model_catalog._modell_aus_elevenlabs({"model_id": 42}) is None
+    assert ai_model_catalog._modell_aus_elevenlabs({"model_id": ""}) is None
 
 
 # ── Der Schlüssel im Katalogabruf ─────────────────────────────────────────
@@ -151,13 +172,12 @@ async def test_the_key_goes_only_to_the_provider_that_demands_it() -> None:
     mitzuschicken wäre kein Fehler mit sichtbarer Folge — und genau deshalb
     steht hier ein Test: so etwas fällt im Betrieb nie auf.
     """
-    async def kopf_beim_abruf(kind: str, kennung: str) -> str | None:
-        """Welchen ``Authorization``-Kopf trägt der Katalogabruf dieses Anbieters?"""
-        gesehen: list[str | None] = []
+    async def koepfe_beim_abruf(kind: str, nutzlast) -> httpx.Headers:
+        gesehen: list[httpx.Headers] = []
 
         def antworte(request: httpx.Request) -> httpx.Response:
-            gesehen.append(request.headers.get("authorization"))
-            return httpx.Response(200, json={"data": [{"id": kennung}]})
+            gesehen.append(request.headers)
+            return httpx.Response(200, json=nutzlast)
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(antworte)) as client:
             await ai_model_catalog._hole(
@@ -165,10 +185,40 @@ async def test_the_key_goes_only_to_the_provider_that_demands_it() -> None:
             )
         return gesehen[-1]
 
-    assert await kopf_beim_abruf("openai_realtime", "gpt-realtime-2.1") == "Bearer sk-geheim"
-    assert await kopf_beim_abruf("openrouter", "openai/gpt-5.6-luna") is None, (
+    offen = await koepfe_beim_abruf(
+        "openrouter", {"data": [{"id": "openai/gpt-5.6-luna"}]}
+    )
+    assert offen.get("authorization") is None, (
         "Der Schlüssel ging an OpenRouter, obwohl der Katalog dort offen ist."
     )
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_gets_its_key_in_its_own_header() -> None:
+    """``xi-api-key`` und nicht ``Authorization: Bearer``.
+
+    Ein Bearer-Token beantwortet ElevenLabs mit einem 401 — einem 401, das wie
+    ein falscher Schlüssel aussieht und keiner ist. Genau solche Fehlersuchen
+    kostet ein fest verdrahteter Kopf, und deshalb steht er am Anbieter.
+    """
+    gesehen: list[httpx.Headers] = []
+
+    def antworte(request: httpx.Request) -> httpx.Response:
+        gesehen.append(request.headers)
+        # Eine **nackte Liste**, kein ``data``-Feld. Auch das ist Hausordnung
+        # dieses Anbieters und stand `_hole` einmal im Weg.
+        return httpx.Response(
+            200, json=[{"model_id": "eleven_flash_v2_5", "can_do_text_to_speech": True}]
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(antworte)) as client:
+        modelle = await ai_model_catalog._hole(
+            client, ai_model_catalog.anbieter("elevenlabs"), "sk_geheim"
+        )
+
+    assert gesehen[-1].get("xi-api-key") == "sk_geheim"
+    assert gesehen[-1].get("authorization") is None
+    assert [modell.model_id for modell in modelle] == ["eleven_flash_v2_5"]
 
 
 # ── Das Vorwärmen beim Start ──────────────────────────────────────────────
@@ -191,7 +241,7 @@ def test_prewarming_leaves_key_bound_catalogs_alone(monkeypatch: pytest.MonkeyPa
     ai_model_catalog.vorwaermen_anstossen()
 
     assert "openrouter" in angestossen
-    assert "openai_realtime" not in angestossen
+    assert "elevenlabs" not in angestossen
 
 
 # ── Die Stimme am Zugang ──────────────────────────────────────────────────
@@ -200,16 +250,17 @@ def test_prewarming_leaves_key_bound_catalogs_alone(monkeypatch: pytest.MonkeyPa
 def _anlegen(
     client: TestClient, cookies: dict, csrf: str | None, **felder
 ) -> httpx.Response:
-    """Einen Sprachzugang so anlegen, wie der Betreiber es tut: über das Formular.
+    """Einen Stimmzugang so anlegen, wie der Betreiber es tut: über das Formular.
 
     Über die Schnittstelle und nicht über den Dienst, weil die eine Hälfte
-    dieser Zusagen genau dort entsteht: die 422 für eine erfundene Stimme kommt
-    aus `schemas.ai_provider.Stimme`, und ein Dienstaufruf ginge daran vorbei.
+    dieser Zusagen genau dort entsteht: die 422 für eine unzulässige Kennung
+    kommt aus `schemas.ai_provider.Stimme`, und ein Dienstaufruf ginge daran
+    vorbei.
     """
     daten: dict = {
-        "name": "Sprachzugang",
-        "provider_kind": "openai_realtime",
-        "default_model": "gpt-realtime-2.1",
+        "name": "Stimmzugang",
+        "provider_kind": "elevenlabs",
+        "default_model": "eleven_flash_v2_5",
     }
     daten.update(felder)
     return client.post(
@@ -235,96 +286,114 @@ def test_a_chosen_voice_survives_the_round_trip(
     client: TestClient, owner_cookies: dict, csrf_token: str, db
 ) -> None:
     """Hin, in die Spalte, und wieder zurück — ohne dass jemand etwas umdeutet."""
-    angelegt = _anlegen(client, owner_cookies, csrf_token, default_voice="verse")
+    angelegt = _anlegen(
+        client, owner_cookies, csrf_token, default_voice="21m00Tcm4TlvDq8ikWAM"
+    )
 
     assert angelegt.status_code == 201, angelegt.text
-    assert angelegt.json()["default_voice"] == "verse"
-    assert db.query(AiProvider).one().default_voice == "verse"
+    assert angelegt.json()["default_voice"] == "21m00Tcm4TlvDq8ikWAM"
+    assert db.query(AiProvider).one().default_voice == "21m00Tcm4TlvDq8ikWAM"
     # Und über die Liste, die das Einstellungsformular beim Öffnen liest: sonst
     # stünde die Wahl in der Datenbank und das Feld daneben leer da.
     gelesen = client.get("/api/ai/settings/providers", cookies=owner_cookies).json()
-    assert gelesen[0]["default_voice"] == "verse"
+    assert gelesen[0]["default_voice"] == "21m00Tcm4TlvDq8ikWAM"
 
 
-@pytest.mark.parametrize("stimme", ai_voice_session.STIMMEN)
-def test_every_voice_the_model_can_speak_is_accepted(
-    stimme: str, client: TestClient, owner_cookies: dict, csrf_token: str, db
+def test_the_case_of_a_voice_id_is_preserved(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db
 ) -> None:
-    """Acht Namen, eine Liste — und drei Stellen, die sie lesen.
+    """Der teuerste denkbare Einzeiler an dieser Stelle wäre ein ``.lower()``.
 
-    `STIMMEN` steht in `ai_voice_session`, geprüft wird gegen sie im Vertrag
-    **und** im Dienst. Zwei Prüfungen gegen eine Liste sind in Ordnung; zwei
-    Listen wären es nicht. Dieser Test fällt genau dann, wenn irgendwo eine
-    Kopie entstanden ist, die eine Stimme weniger kennt.
+    Bis zum 16.08.2026 stand hier einer, und er war richtig: die acht
+    OpenAI-Stimmen hiessen ``alloy`` und ``verse``, klein geschrieben, und die
+    Oberfläche zeigte sie gross. Eine ElevenLabs-Kennung ist dagegen gross- und
+    kleinempfindlich — derselbe Einzeiler hätte jede zweite unbrauchbar gemacht,
+    und zwar erst bei der Verbindung, als 404 der Gegenstelle.
     """
-    antwort = _anlegen(client, owner_cookies, csrf_token, default_voice=stimme)
+    angelegt = _anlegen(
+        client, owner_cookies, csrf_token, default_voice="  EXAVITQu4vr4xnSDxMaL "
+    )
 
-    assert antwort.status_code == 201, antwort.text
-    assert db.query(AiProvider).one().default_voice == stimme
+    assert angelegt.status_code == 201, angelegt.text
+    # Rand-Leerzeichen fallen weg — beim Kopieren kommt regelmässig eines mit.
+    # Die Schreibweise bleibt.
+    assert db.query(AiProvider).one().default_voice == "EXAVITQu4vr4xnSDxMaL"
 
 
-@pytest.mark.parametrize("erfunden", ["nova", "karl", "alloy2", "Alloy Deluxe"])
-def test_an_invented_voice_never_reaches_the_column(
-    erfunden: str, client: TestClient, owner_cookies: dict, csrf_token: str, db
+@pytest.mark.parametrize(
+    "gefaehrlich",
+    [
+        "../../../v1/user",
+        "abc/def",
+        "abc?model_id=teuer",
+        "abc#anker",
+        "abc def",
+        "a" * 65,
+    ],
+)
+def test_a_voice_id_can_never_leave_the_url_path(
+    gefaehrlich: str, client: TestClient, owner_cookies: dict, csrf_token: str, db
 ) -> None:
-    """Abgewiesen am Feld, in das er gerade getippt hat — nicht im Gespräch.
+    """Die Kennung steht in einem **Pfadsegment** — das ist keine Formfrage.
 
-    ``nova`` steht hier nicht zufällig an erster Stelle: es ist eine echte
-    OpenAI-Stimme, nur eben aus der Text-zu-Sprache-Familie und nicht aus dem
-    Realtime-Modell. Genau so entsteht der Fehlgriff, und er fiele ohne diese
-    Prüfung erst der Gegenstelle auf — die weist das ``session.update`` dann
-    ab, und das Gespräch liefe ohne Anweisungen und ohne Werkzeuge weiter.
+    ``/v1/text-to-speech/{voice}/stream-input``: ein ``/`` darin wäre ein
+    anderer Endpunkt, ein ``?`` ein angehängter Parameter, ein ``..`` ein
+    Schritt nach oben. Anders als bei den acht Stimmen davor gibt es hier keine
+    Liste, gegen die sich prüfen liesse — die Kennungen gehören dem Konto des
+    Betreibers. Geprüft wird deshalb die Form, und die Form ist hier die
+    Schranke.
     """
-    antwort = _anlegen(client, owner_cookies, csrf_token, default_voice=erfunden)
+    antwort = _anlegen(client, owner_cookies, csrf_token, default_voice=gefaehrlich)
 
     assert antwort.status_code == 422
     assert db.query(AiProvider).count() == 0
 
 
-def test_an_invented_voice_is_refused_on_the_way_in_as_well(
+def test_a_dangerous_voice_id_is_refused_on_the_way_in_as_well(
     client: TestClient, owner_cookies: dict, csrf_token: str, db
 ) -> None:
     """Und beim Ändern bleibt die alte Wahl stehen, statt beschädigt zu werden."""
-    zugang = _anlegen(client, owner_cookies, csrf_token, default_voice="coral").json()
+    zugang = _anlegen(
+        client, owner_cookies, csrf_token, default_voice="21m00Tcm4TlvDq8ikWAM"
+    ).json()
 
     antwort = _aendern(
-        client, owner_cookies, csrf_token, zugang["id"], default_voice="nova"
+        client, owner_cookies, csrf_token, zugang["id"], default_voice="../andere"
     )
 
     assert antwort.status_code == 422
-    assert db.query(AiProvider).one().default_voice == "coral"
+    assert db.query(AiProvider).one().default_voice == "21m00Tcm4TlvDq8ikWAM"
 
 
-def test_the_service_refuses_an_invented_voice_without_the_contract(db) -> None:
+def test_the_service_refuses_a_dangerous_voice_id_without_the_contract(db) -> None:
     """Der zweite Riegel, für die Schreibwege, die am Vertrag vorbeiführen.
 
     Ein Seed, ein Test, ein späterer Importweg rufen `create_provider` direkt
-    auf. Ohne diese Prüfung stünde die erfundene Stimme dann in der Spalte, und
-    der Betreiber suchte den Fehler in einem Sprachgespräch statt in seiner
-    Einrichtung.
+    auf. Zwei Prüfungen an zwei Stellen sind hier keine doppelte Kosmetik: die
+    eine sichert das Formular, die andere die Funktion.
     """
     with pytest.raises(ai_provider_service.AiProviderConfigurationError):
         ai_provider_service.create_provider(
             db,
-            name="Sprachzugang",
-            provider_kind="openai_realtime",
-            default_model="gpt-realtime-2.1",
+            name="Stimmzugang",
+            provider_kind="elevenlabs",
+            default_model="eleven_flash_v2_5",
             enabled=True,
             requires_api_key=True,
             operator_api_key=None,
-            default_voice="nova",
+            default_voice="../woanders",
         )
 
 
-def test_nothing_chosen_is_not_the_same_as_alloy(
+def test_nothing_chosen_stays_nothing(
     client: TestClient, owner_cookies: dict, csrf_token: str, db
 ) -> None:
-    """Der ganze Grund, warum die Spalte ``nullable`` ist.
+    """Es gibt keine Standardstimme, und das ist der ganze Punkt.
 
-    Es wäre bequem, beim Anlegen die Standardstimme einzutragen — ein Feld
-    weniger, das ``None`` sein kann. Der Preis stünde erst Jahre später auf der
-    Rechnung: eine neue `STANDARDSTIMME` gälte dann für keinen einzigen
-    bestehenden Zugang, und niemand fände den Grund.
+    Eine einzutragen wäre bequem — ein Feld weniger, das ``None`` sein kann.
+    Der Preis stünde auf der Rechnung des Betreibers: die Stimmen gehören
+    seinem Konto, MSM kennt sie nicht, und jede geratene wäre eine Auswahl, die
+    er nie getroffen hat. Ohne Stimme gibt es deshalb keinen Sprachmodus.
     """
     angelegt = _anlegen(client, owner_cookies, csrf_token)
 
@@ -333,14 +402,14 @@ def test_nothing_chosen_is_not_the_same_as_alloy(
     assert db.query(AiProvider).one().default_voice is None
 
 
-def test_a_dropdown_without_a_choice_sends_an_empty_string(
+def test_an_empty_field_arrives_as_nothing(
     client: TestClient, owner_cookies: dict, csrf_token: str, db
 ) -> None:
-    """``""`` ist der Weg, auf dem „nichts gewählt" hier ankommt.
+    """``""`` ist der Weg, auf dem „nichts eingetragen" hier ankommt.
 
-    Ein Auswahlfeld ohne Wahl schickt einen leeren String und kein ``null``.
-    Landete der so in der Spalte, ginge er beim Verbinden als Stimme an OpenAI
-    — und ``None`` heisst dort etwas völlig anderes als ``""``.
+    Ein Formularfeld ohne Eingabe schickt einen leeren String und kein ``null``.
+    Landete der so in der Spalte, ergäbe er beim Verbinden einen Pfad mit einem
+    leeren Segment — und ``None`` heisst dort etwas völlig anderes als ``""``.
     """
     angelegt = _anlegen(client, owner_cookies, csrf_token, default_voice="")
 
@@ -348,34 +417,20 @@ def test_a_dropdown_without_a_choice_sends_an_empty_string(
     assert db.query(AiProvider).one().default_voice is None
 
 
-def test_the_operator_may_type_what_he_reads(
-    client: TestClient, owner_cookies: dict, csrf_token: str, db
-) -> None:
-    """Nachsichtig lesen, streng speichern.
-
-    In der Oberfläche steht die Stimme gross („Alloy — neutral, ausgeglichen"),
-    die API verlangt sie klein. Wer den Wert von Hand setzt, tippt ab, was er
-    sieht; ein 422 dafür wäre eine Belehrung ohne Anlass. In der Spalte steht
-    trotzdem genau eine Schreibweise.
-    """
-    angelegt = _anlegen(client, owner_cookies, csrf_token, default_voice="  Verse ")
-
-    assert angelegt.status_code == 201, angelegt.text
-    assert db.query(AiProvider).one().default_voice == "verse"
-
-
 def test_a_field_left_out_leaves_the_voice_standing(
     client: TestClient, owner_cookies: dict, csrf_token: str, db
 ) -> None:
     """Ein Chatzugang schickt das Feld gar nicht mit — und darf nichts löschen."""
-    zugang = _anlegen(client, owner_cookies, csrf_token, default_voice="echo").json()
+    zugang = _anlegen(
+        client, owner_cookies, csrf_token, default_voice="21m00Tcm4TlvDq8ikWAM"
+    ).json()
 
     geaendert = _aendern(
-        client, owner_cookies, csrf_token, zugang["id"], default_model="gpt-realtime"
+        client, owner_cookies, csrf_token, zugang["id"], default_model="eleven_turbo_v2_5"
     )
 
     assert geaendert.status_code == 200, geaendert.text
-    assert db.query(AiProvider).one().default_voice == "echo"
+    assert db.query(AiProvider).one().default_voice == "21m00Tcm4TlvDq8ikWAM"
 
 
 def test_an_explicit_null_takes_the_voice_back(
@@ -385,15 +440,79 @@ def test_an_explicit_null_takes_the_voice_back(
 
     „Nicht mitgeschickt" und „ausdrücklich ``null``" sehen im Vertrag beide wie
     ``None`` aus; auseinander hält sie erst `model_dump(exclude_unset=True)` im
-    Router. Ohne diese Unterscheidung gäbe es keinen Weg zurück zur Vorgabe —
-    ausser den Zugang zu löschen.
+    Router.
     """
-    zugang = _anlegen(client, owner_cookies, csrf_token, default_voice="echo").json()
+    zugang = _anlegen(
+        client, owner_cookies, csrf_token, default_voice="21m00Tcm4TlvDq8ikWAM"
+    ).json()
 
     geaendert = _aendern(
         client, owner_cookies, csrf_token, zugang["id"], default_voice=None
     )
 
     assert geaendert.status_code == 200, geaendert.text
-    assert geaendert.json()["default_voice"] is None
     assert db.query(AiProvider).one().default_voice is None
+
+
+# ── Das hörende Modell am Chatzugang ──────────────────────────────────────
+
+
+def _chatzugang(
+    client: TestClient, cookies: dict, csrf: str | None, **felder
+) -> httpx.Response:
+    daten: dict = {
+        "name": "Chatzugang",
+        "provider_kind": "openrouter",
+        "default_model": "openai/gpt-5.6-luna",
+    }
+    daten.update(felder)
+    return client.post(
+        "/api/ai/settings/providers",
+        json=daten,
+        cookies=cookies,
+        headers={"X-CSRF-Token": csrf},
+    )
+
+
+def test_the_transcription_model_survives_the_round_trip(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db
+) -> None:
+    """Eine **zweite** Modellspalte, und sie darf einen Schrägstrich enthalten.
+
+    Genau darin unterscheidet sie sich von der Stimme: ``google/gemini-2.5-flash``
+    ist eine gültige Modellkennung und wäre eine unzulässige Stimm-Kennung. Ein
+    gemeinsamer Validator für beide wäre entweder zu eng für das Modell oder zu
+    weit für die Stimme — und „zu weit für die Stimme" heisst: ein Pfad, der
+    woandershin zeigt.
+    """
+    angelegt = _chatzugang(
+        client, owner_cookies, csrf_token, transcription_model="google/gemini-2.5-flash"
+    )
+
+    assert angelegt.status_code == 201, angelegt.text
+    assert angelegt.json()["transcription_model"] == "google/gemini-2.5-flash"
+    assert db.query(AiProvider).one().transcription_model == "google/gemini-2.5-flash"
+
+
+def test_no_transcription_model_is_left_at_nothing(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db
+) -> None:
+    """Ohne hinterlegtes Modell gibt es keinen Sprachmodus — und kein geratenes.
+
+    Eines einzusetzen hiesse, dem Betreiber ein Modell in Rechnung zu stellen,
+    das er nie ausgewählt hat.
+    """
+    angelegt = _chatzugang(client, owner_cookies, csrf_token)
+
+    assert angelegt.status_code == 201, angelegt.text
+    assert angelegt.json()["transcription_model"] is None
+    assert db.query(AiProvider).one().transcription_model is None
+
+
+def test_an_empty_transcription_model_arrives_as_nothing(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db
+) -> None:
+    angelegt = _chatzugang(client, owner_cookies, csrf_token, transcription_model="   ")
+
+    assert angelegt.status_code == 201, angelegt.text
+    assert db.query(AiProvider).one().transcription_model is None

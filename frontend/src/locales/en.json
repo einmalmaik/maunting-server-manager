@@ -155,22 +155,11 @@
       "reloadModels": "Reload models",
       "catalogUnavailable": "The provider's model catalog is currently unreachable. You can type the model name by hand meanwhile; reasoning levels stay unknown.",
       "catalogNeedsKey": "This provider only hands out its model list against the key. Enter the key and save the access — the selection appears here afterwards.",
-      "realtimeHint": "A voice access. It does not appear in the chat's model selection; it carries voice mode instead. Who may use it is decided by the \"Talk to the AI\" permission.",
-      "defaultVoice": "Default voice",
-      "defaultVoiceHint": "Applies to voice accesses only. Leave it unset and the standard voice is used — should that ever become a different one, this access follows along on its own.",
-      "voices": {
-        "alloy": "Alloy — neutral, balanced",
-        "ash": "Ash — calm, deep",
-        "ballad": "Ballad — soft, narrating",
-        "coral": "Coral — warm, friendly",
-        "echo": "Echo — matter-of-fact, clear",
-        "sage": "Sage — calm, measured",
-        "shimmer": "Shimmer — bright, lively",
-        "verse": "Verse — expressive, varied"
-      },
+      "defaultVoice": "Voice",
+      "defaultVoiceHint": "The voice ID from your ElevenLabs account — found in the voice library under “Voice ID”. Without it there is no voice mode; MSM does not guess a default, because it would show up on your bill.",
       "protokoll": {
-        "chat_completions": "Chat",
-        "realtime": "Voice"
+        "chat_completions": "Chat and hearing",
+        "tts": "Voice"
       },
       "recommended": "Recommended",
       "recommendationHint": "MSM is tested with {{model}} — fast enough for chat and it knows reasoning levels. Another model works too.",
@@ -181,7 +170,10 @@
         "toggleOnly": "This model reasons but knows no levels — only on or off.",
         "mandatory": "Reasoning cannot be turned off for this model."
       },
-      "tokenPriceConverted": "Stored as {{amount}} — accounting happens in dollars."
+      "tokenPriceConverted": "Stored as {{amount}} — accounting happens in dollars.",
+      "ttsHint": "A voice access. It does not appear in the chat model picker; it reads out what the chat model answers in voice mode. Who may use it is decided by the “Talk to the AI” permission.",
+      "transcriptionModel": "Model for speech",
+      "transcriptionModelHint": "Turns speech into text in voice mode, before the default model thinks about it. It has to be a model that understands audio — for example google/gemini-2.5-flash. OpenRouter has no dedicated transcription endpoint, so “whisper” does not exist there. Left empty, voice mode stays off."
     },
     "profile": {
       "title": "AI assistant",
@@ -607,6 +599,8 @@
         "AI_PROVIDER_RATE_LIMITED": "The provider is rate limiting. Try again in a moment.",
         "AI_PROVIDER_UNAVAILABLE": "The provider is unreachable.",
         "AI_PROVIDER_KEY_MISSING": "No API key is configured for this provider.",
+        "AI_PROVIDER_MODEL_MISSING": "No model is configured for this provider.",
+        "AI_PROVIDER_VOICE_MISSING": "No voice is configured for this provider.",
         "AI_PROVIDER_URL_REJECTED": "The base URL was rejected for security reasons.",
         "AI_PROVIDER_STREAM_TIMEOUT": "The provider took too long.",
         "AI_PROVIDER_STREAM_INCOMPLETE": "The provider's response ended prematurely.",
@@ -2994,32 +2988,32 @@
     },
     "voice": {
       "title": "Voice mode",
-      "intro": "Talk to the AI instead of typing — same agent, same conversation, same tools. You switch at the top right of the AI page: the chat gives way to a sphere that moves with the spoken word. For operations it is exactly one new step: a second provider access with its own key.",
+      "intro": "Talk to the AI instead of typing — with the very same agent: same conversation, same run, same tools, same permissions. It is not a second model but the ordinary chat run with a converter in front and behind. Switch at the top right of the AI page: the chat gives way to an orb that moves with the spoken word.",
       "access": {
-        "title": "Second access",
-        "body": "Settings → AI → Providers, kind “OpenAI (voice)”, a key from platform.openai.com. OpenRouter cannot do duplex — measured on 2026-08-15, /api/v1/realtime answers with a 404 there. The existing OpenRouter access stays and keeps serving the typed chat."
+        "title": "What has to be configured",
+        "body": "Two things. On the existing OpenRouter access, a “model for speech” — an audio-capable chat model such as google/gemini-2.5-flash. And a second access of type “ElevenLabs (Voice)” with key, speech model and voice ID. If either is missing, the switch does not appear at all."
       },
       "model": {
-        "title": "Model",
-        "body": "gpt-realtime-2.1. The list comes from OpenAI's catalogue rather than a constant: gpt-realtime, -mini and gpt-4o-realtime shut down on 2027-01-20. OpenAI needs the key to serve its catalogue — without a stored key the list stays empty while you create the access."
+        "title": "Models and voice",
+        "body": "Hearing: a model that understands audio. OpenRouter has no transcription endpoint (checked 2026-08-16) — so “whisper” does not exist there; speech travels as a content part inside an ordinary request. Voice: eleven_flash_v2_5, about 75 ms of inference. The voice ID comes from your voice library and is a text field — MSM does not know your voices and will not guess one."
       },
       "permission": {
         "title": "Permission ai.voice.use",
-        "body": "Separate from ai.chat.use, because speaking consumes a multiple and confirms changes by voice instead of by click. Without a configured voice access the switch does not appear at all — not greyed out."
+        "body": "Separate from ai.chat.use because confirmation happens by voice rather than by click. The AI inherits exactly the speaker's permissions and nothing more — through their role or as a directly assigned user of a server. Without both accesses the switch does not appear at all, not greyed out."
       },
       "confirm": {
         "title": "Confirming by voice",
-        "body": "The proposal card appears as always and stays visible; on top of that the AI reads out what it intends to do. That sentence comes from the panel, not from the model. Only one proposal can be open at a time, so a “yes” cannot land on the wrong one."
+        "body": "The proposal card appears as always and stays visible; in addition the AI says what it intends to do. A clear “yes” executes. Clear means literally: the utterance must be nothing but consent — “yes, but check the logs first” is a new instruction, not consent. The spoken yes replaces the click and not a single check."
       },
       "quota": {
         "title": "Quota",
-        "body": "One session is one booking, not one per answer; it ends by itself after 15 minutes and the browser reconnects. Once the token limit is used up it ends after the current sentence. The cost limit in cents only binds once a token price is maintained on the access — OpenAI's catalogue names no prices, and MSM does not invent one."
+        "body": "Every utterance is one request — the same booking as a typed message. A role limit of five requests per minute will therefore tear a conversation apart; with no limit set, nothing happens. In exchange, token and cost limits now apply exactly as they do in chat. MSM does not count ElevenLabs characters; a single answer is capped at 4,000."
       },
       "relay": {
-        "title": "Audio runs through the panel",
-        "body": "Browser → panel → OpenAI, not past it. On a direct connection the tool loop would run through the browser — it would see every call and could forge some. The operator key never leaves the panel process. No extra port; the reverse proxy must pass WebSocket upgrades under /api/, which it already does for the server console."
+        "title": "Audio travels through the panel",
+        "body": "Browser → panel → provider, not around it. With a direct connection the tool loop would run through the browser — it would see every call and could invent some. The backend also decides when someone has stopped speaking. The keys never leave the panel process. No extra port; the reverse proxy must pass WebSocket upgrades under /api/, which it already does for the server console."
       },
-      "spokenLimit": "Spoken consent is weaker than a click: a speech model cannot be forced to read out verbatim. Deleting, restoring a backup, and hoster keys and roles therefore stay unconfirmable by voice and require the card in the panel."
+      "spokenLimit": "Deleting and restoring a backup can be confirmed by voice as well since 2026-08-16 — the operator decided this explicitly. The residual risk: the audit then records a spoken confirmation, and anyone listening in the room can utter it. If that goes too far, remove ai.voice.use from the role. Speech goes to OpenRouter as audio and the answer text to ElevenLabs; their EU data residency is reserved for enterprise customers."
     }
   },
   "docsOAuth": {
