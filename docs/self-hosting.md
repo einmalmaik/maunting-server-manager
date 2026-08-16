@@ -956,6 +956,16 @@ werden.
 > den Abruf braucht er — anders als OpenRouter — den Schlüssel, solange keiner
 > hinterlegt ist bleibt die Modellliste beim Anlegen leer.
 
+> **Warum überhaupt ein zweiter Anbieter — OpenRouter kann auch sprechen.**
+> `POST /audio/speech` gibt es dort, und es liefert `pcm`, also genau das
+> Format, das der Browser abspielt. Technisch wäre ElevenLabs entbehrlich.
+> Drei Gründe sprechen dagegen, und wer den Zugang streichen will, muss alle
+> drei entkräften: OpenRouters Stimmen sind überwiegend englisch und teurer;
+> `/audio/speech` ist ein gewöhnlicher HTTP-Aufruf, der den **ganzen** Text
+> braucht, bevor der erste Ton kommt, während ElevenLabs über WebSocket schon
+> nach dem ersten Satz zu sprechen anfängt; und der zweite Zugang kostet nichts
+> als einen Schlüssel.
+
 > **Datenschutz.** Gesprochenes geht als Ton an OpenRouter, der Antworttext an
 > ElevenLabs. Die EU-Datenresidenz von ElevenLabs ist Enterprise-Kunden
 > vorbehalten; standardmässig routet der Dienst global. Das gehört in die
