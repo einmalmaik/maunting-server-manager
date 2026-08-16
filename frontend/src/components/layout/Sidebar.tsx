@@ -87,11 +87,8 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
         <Logo size="md" />
         <div>
           <h1 className="font-headline text-body-lg font-extrabold text-primary leading-tight">
-            MauntingStudios
+            MSM
           </h1>
-          <p className="font-mono-sm text-mono-sm text-on-surface-variant">
-            Server Manager
-          </p>
         </div>
         {mobile && <button type="button" onClick={onNavigate} className="ml-auto grid min-h-11 min-w-11 place-items-center rounded-lg hover:bg-surface-container-high" aria-label={t('shell.closeNavigation', 'Close navigation')}><X className="h-5 w-5" /></button>}
       </div>
