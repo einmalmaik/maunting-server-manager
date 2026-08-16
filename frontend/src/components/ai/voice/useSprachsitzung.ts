@@ -38,6 +38,22 @@ export interface Sprachzeile {
   text: string
 }
 
+/**
+ * Eine Stelle, die das Panel zum Mitlesen auf den Schirm gelegt hat.
+ *
+ * Der Betreiber wollte Logzeilen **nicht** vorgelesen bekommen: eine
+ * Fehlermeldung aus einem Serverlog ist gesprochen unverständlich und dauert
+ * zwanzig Sekunden. Sie erscheint deshalb, und die KI erklärt sie mündlich
+ * daneben. Beides ist Fremdtext — `quelle` benennt das Modell, die `zeilen`
+ * stammen aus einem Werkzeugergebnis. Hier wird nur gesammelt, nichts geprüft
+ * und nichts ausgewertet; die Echtheitsschranke sitzt im Backend.
+ */
+export interface Beleg {
+  /** Woher die Stelle stammt, in Worten des Modells: Datei, Werkzeug, Server. */
+  quelle: string
+  zeilen: string[]
+}
+
 interface Ergebnis {
   zustand: Sprachzustand
   /** Der laufende Wortwechsel, für die Anzeige. */
@@ -46,6 +62,12 @@ interface Ergebnis {
   werkzeug: string | null
   /** Was schiefging, als Übersetzungsschlüssel. `null`, wenn nichts. */
   fehler: string | null
+  /**
+   * Die gezeigten Stellen, die zuletzt gezeigte am Ende. Die Anzeige braucht
+   * nur die letzte; die davor bleiben ein paar Schritte stehen, damit ein
+   * Neuzeichnen mitten im Wechsel nicht ins Leere greift.
+   */
+  belege: Beleg[]
   /**
    * Der aktuelle Lautstärkepegel zwischen 0 und 1 — wer gerade redet, egal wer.
    *
@@ -61,6 +83,26 @@ interface Ergebnis {
 /** Wieviele Zeilen die Anzeige behält. Es ist ein Gespräch, kein Protokoll. */
 const MAX_ZEILEN = 40
 
+/**
+ * Wieviele gezeigte Stellen aufgehoben werden. Gezeigt wird ohnehin nur die
+ * letzte; mehr als eine Handvoll wäre ein Protokoll, das niemand liest, und
+ * Logzeilen sind das Größte, was hier je über die Leitung kommt.
+ */
+const MAX_BELEGE = 5
+
+/**
+ * Zustände, deren Eintreffen beweist, dass die Leitung wieder trägt.
+ *
+ * Anlass: die Überschrift blieb dauerhaft auf „Sprachverbindung verloren"
+ * stehen, obwohl Ton und Verbindung längst weiterliefen — ein einziger
+ * unkritischer Anbieterfehler (der Client schickt `response.cancel` beim
+ * Dazwischenreden auch dann, wenn gerade keine Antwort läuft) setzte `fehler`,
+ * und nichts nahm ihn je zurück. Wer hört, dass es weitergeht, darf oben nicht
+ * das Gegenteil lesen. `denkt` steht bewusst nicht dabei: dort schweigt die
+ * Gegenstelle, und ein Fehler, der genau dann kam, ist noch keiner von gestern.
+ */
+const LEITUNG_TRAEGT: ReadonlySet<string> = new Set(['bereit', 'hoert', 'spricht'])
+
 function adresse(): string {
   const basis = import.meta.env.VITE_API_URL || window.location.origin
   return `${basis.replace(/^http/, 'ws').replace(/\/$/, '')}/api/ai/voice/ws`
@@ -71,6 +113,7 @@ export function useSprachsitzung(): Ergebnis {
   const [zeilen, setZeilen] = useState<Sprachzeile[]>([])
   const [werkzeug, setWerkzeug] = useState<string | null>(null)
   const [fehler, setFehler] = useState<string | null>(null)
+  const [belege, setBelege] = useState<Beleg[]>([])
 
   const ws = useRef<WebSocket | null>(null)
   const mikro = useRef<Aufnahme | null>(null)
@@ -167,6 +210,7 @@ export function useSprachsitzung(): Ergebnis {
       }
       switch (nachricht.art) {
         case 'bereit':
+          setFehler(null)
           setZustand('bereit')
           break
         case 'zustand': {
@@ -180,6 +224,10 @@ export function useSprachsitzung(): Ergebnis {
             }
           }
           if (neu === 'bereit') setWerkzeug(null)
+          // Ein regulärer Zustand beweist, dass die Leitung trägt. Eine
+          // Fehlermeldung, die daneben stehen bleibt, widerspricht dem, was der
+          // Mensch gerade hört.
+          if (LEITUNG_TRAEGT.has(neu)) setFehler(null)
           setZustand(neu as Sprachzustand)
           break
         }
@@ -192,6 +240,20 @@ export function useSprachsitzung(): Ergebnis {
         case 'werkzeug':
           setWerkzeug(String(nachricht.name ?? ''))
           break
+        case 'beleg': {
+          // Der Rahmen kommt aus unserem Backend, sein Inhalt aber aus einem
+          // Werkzeugergebnis. Deshalb wird hier nichts geglaubt, was nicht
+          // dasteht: keine Liste, keine Anzeige — und `String` auf jede Zeile,
+          // damit eine Zahl im Array später nicht als `undefined` erscheint.
+          const roh = nachricht.zeilen
+          const gezeigt = Array.isArray(roh) ? roh.map((zeile) => String(zeile)) : []
+          if (gezeigt.length === 0) break
+          setBelege((bisher) =>
+            [...bisher, { quelle: String(nachricht.quelle ?? ''), zeilen: gezeigt }]
+              .slice(-MAX_BELEGE),
+          )
+          break
+        }
         case 'abgelaufen':
           // Planmäßiges Ende nach der Höchstdauer. Der Server schließt gleich;
           // `onclose` verbindet dann neu.
@@ -245,5 +307,5 @@ export function useSprachsitzung(): Ergebnis {
     [zustand],
   )
 
-  return { zustand, zeilen, werkzeug, fehler, pegel, starten, beenden }
+  return { zustand, zeilen, werkzeug, fehler, belege, pegel, starten, beenden }
 }

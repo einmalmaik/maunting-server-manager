@@ -11,6 +11,17 @@ export interface AiProviderAdmin {
    */
   base_url: string | null
   default_model: string
+  /**
+   * Die Stimme eines Sprachzugangs — einer aus `AI_STIMMEN`.
+   *
+   * `null` heisst „nichts hinterlegt" und loest serverseitig auf die
+   * Standardstimme auf. Es heisst ausdruecklich **nicht** „alloy": stuende der
+   * heutige Standard erst einmal als Wert in der Zeile, bliebe dieser Zugang
+   * daran haengen, wenn MSM spaeter eine andere Stimme voranstellt.
+   *
+   * Bei einem Chatzugang ohne Realtime bleibt das Feld unbeachtet.
+   */
+  default_voice: string | null
   enabled: boolean
   requires_api_key: boolean
   operator_key_configured: boolean
@@ -234,9 +245,32 @@ export interface AiVoiceConfig {
   available: boolean
   /** Nur zur Anzeige. `null`, solange nichts eingerichtet ist. */
   model: string | null
+  /**
+   * Womit gesprochen wird — bereits aufgeloest, deshalb nie `null`: hat der
+   * Zugang nichts hinterlegt, steht hier die Standardstimme. Nur sinnvoll
+   * belegt, solange `available` wahr ist.
+   */
+  voice: string
   sample_rate: number
   max_seconds: number
 }
+
+/**
+ * Die waehlbaren Stimmen des Realtime-Modells.
+ *
+ * Der Vorrat gehoert dem Backend: `services/ai_voice_session.STIMMEN` fuehrt
+ * ihn, und der Anbieter kennt keine weiteren. Einen Abruf dafuer gibt es
+ * bewusst nicht — acht feste Namen sind kein Katalog, der sich zur Laufzeit
+ * aendert, und ein Endpunkt dafuer waere ein Netzaufruf je Anbieterformular.
+ *
+ * Dieselbe Abmachung wie bei `AI_LAUFZUSTAENDE`: die Liste ist eine Kopie und
+ * sagt das. Wer hier etwas ergaenzt, ergaenzt `ai.providers.voices.*` in
+ * **allen** Sprachdateien mit — ohne Uebersetzung stuende im Auswahlfeld der
+ * rohe Schluessel.
+ */
+export const AI_STIMMEN = [
+  'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse',
+] as const
 
 /**
  * Die Schreibwerkzeuge — vollstaendig, in der Reihenfolge von
@@ -688,6 +722,13 @@ export interface AiProviderWrite {
   enabled: boolean
   requires_api_key: boolean
   token_price_micro_usd_per_million?: number | null
+  /**
+   * Nur ein Sprachzugang schickt das Feld mit; ein Chatzugang laesst es weg,
+   * statt `null` zu senden. Der Unterschied zaehlt, weil `PATCH` in die
+   * vorhandene Zeile mischt: „nicht genannt" laesst die Stimme stehen,
+   * ausdrueckliches `null` nimmt sie zurueck.
+   */
+  default_voice?: string | null
   operator_api_key?: string
   clear_operator_api_key?: boolean
 }

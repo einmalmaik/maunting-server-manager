@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { AI_STIMMEN } from '@/api/ai'
+
 import de from './de.json'
 import en from './en.json'
 
@@ -68,6 +70,31 @@ describe('Texte der KI-Aktionen', () => {
       // ist toter Ballast und verdeckt beim Suchen den echten Eintrag.
       const uebrig = Object.keys(daten.ai.actions.confirm)
         .filter((k) => !SCHREIBWERKZEUGE.includes(k as (typeof SCHREIBWERKZEUGE)[number]))
+      expect(uebrig).toEqual([])
+    })
+  }
+
+  for (const [sprache, daten] of Object.entries(SPRACHEN)) {
+    it(`${sprache}: jede Realtime-Stimme hat eine Beschriftung`, () => {
+      // Derselbe Fehlermodus wie oben bei den Werkzeugen, nur an anderer
+      // Stelle: `AI_STIMMEN` ist eine Abschrift von
+      // `ai_voice_session.STIMMEN`, und eine neunte Stimme braucht drei
+      // Schritte — Backend, Abschrift, Uebersetzung. Fehlt der dritte, steht im
+      // Auswahlfeld des Betreibers der rohe Schluessel
+      // `ai.providers.voices.ash`, weil `parseMissingKeyHandler` ihn
+      // zurueckgibt. Vergessen wird genau dieser Schritt.
+      const stimmen = daten.ai.providers.voices as Record<string, string>
+      const ohneText = AI_STIMMEN.filter((s) => !stimmen[s]?.trim())
+
+      expect(ohneText, `ohne Beschriftung in ${sprache}.json`).toEqual([])
+    })
+
+    it(`${sprache}: keine Beschriftung ohne zugehoerige Stimme`, () => {
+      // Die Gegenrichtung: eine abgekuendigte Stimme, die nur noch im
+      // Auswahlfeld steht, laesst sich speichern und wird vom Anbieter
+      // abgewiesen — erst beim naechsten Gespraech, nicht beim Speichern.
+      const uebrig = Object.keys(daten.ai.providers.voices)
+        .filter((k) => !AI_STIMMEN.includes(k as (typeof AI_STIMMEN)[number]))
       expect(uebrig).toEqual([])
     })
   }

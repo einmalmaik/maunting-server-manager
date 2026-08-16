@@ -4,7 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiVoiceConfig } from '@/api/ai'
 import i18n from '@/i18n'
 import { SprachAnsicht } from './SprachAnsicht'
-import type { Sprachzeile, Sprachzustand } from './useSprachsitzung'
+import type { Beleg, Sprachzeile, Sprachzustand } from './useSprachsitzung'
 
 const starten = vi.fn()
 const beenden = vi.fn()
@@ -14,6 +14,7 @@ let sitzung: {
   zeilen: Sprachzeile[]
   werkzeug: string | null
   fehler: string | null
+  belege: Beleg[]
 }
 
 vi.mock('./useSprachsitzung', () => ({
@@ -28,14 +29,22 @@ vi.mock('./Sprachblase', () => ({ Sprachblase: () => null }))
 const KONFIGURATION: AiVoiceConfig = {
   available: true,
   model: 'gpt-realtime-2.1',
+  // Kommt vom Server bereits aufgeloest: hat der Zugang keine Stimme
+  // hinterlegt, steht hier die Standardstimme. Die Ansicht bekommt nie `null`
+  // und muss deshalb auch nie eine einsetzen.
+  voice: 'alloy',
   sample_rate: 24_000,
   max_seconds: 900,
 }
 
-function ansicht(teil: Partial<typeof sitzung> = {}, aufChat = vi.fn()) {
-  sitzung = { zustand: 'bereit', zeilen: [], werkzeug: null, fehler: null, ...teil }
+function ansicht(
+  teil: Partial<typeof sitzung> = {},
+  aufChat = vi.fn(),
+  konfiguration: AiVoiceConfig = KONFIGURATION,
+) {
+  sitzung = { zustand: 'bereit', zeilen: [], werkzeug: null, fehler: null, belege: [], ...teil }
   const ergebnis = render(
-    <SprachAnsicht konfiguration={KONFIGURATION} aufChat={aufChat} />,
+    <SprachAnsicht konfiguration={konfiguration} aufChat={aufChat} />,
   )
   return { ...ergebnis, aufChat }
 }
@@ -132,6 +141,51 @@ describe('SprachAnsicht', () => {
     expect(bereich).toHaveAttribute('aria-live', 'polite')
   })
 
+  it('zeigt die Belegstelle als reinen Text und sagt, woher sie stammt', () => {
+    ansicht({
+      zustand: 'spricht',
+      belege: [
+        {
+          quelle: 'latest.log',
+          zeilen: [
+            '[12:03:44] [Server thread/ERROR]: **kein fetter Text**',
+            'siehe [kein Link](https://boese.example/) — Zeile 88',
+          ],
+        },
+      ],
+    })
+
+    expect(screen.getByText(i18n.t('ai.voice.beleg.heading'))).toBeInTheDocument()
+    expect(screen.getByText('latest.log')).toBeInTheDocument()
+    // Ohne diesen Hinweis kann niemand unterscheiden, was die KI *sagt* und was
+    // sie nur *zeigt* — und genau darauf beruht der ganze Kasten.
+    expect(screen.getByText(i18n.t('ai.voice.beleg.untrusted'))).toBeInTheDocument()
+
+    // Reiner Text heisst reiner Text: Sternchen und Klammern stehen so da, wie
+    // sie im Log stehen. Ein Markdown-Renderer waere hier der kuerzeste Weg von
+    // einer Logzeile zu einem klickbaren Link im Panel — geschrieben hat die
+    // Zeile irgendwer auf irgendeinem Server, nicht die KI.
+    expect(screen.getByText(/\*\*kein fetter Text\*\*/)).toBeInTheDocument()
+    expect(screen.getByText(/\[kein Link\]\(https:\/\/boese\.example\/\)/)).toBeInTheDocument()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('zeigt nur die zuletzt gezeigte Stelle', () => {
+    ansicht({
+      zustand: 'spricht',
+      belege: [
+        { quelle: 'server.properties', zeilen: ['online-mode=true'] },
+        { quelle: 'latest.log', zeilen: ['[Server thread/ERROR]: Adresse belegt'] },
+      ],
+    })
+
+    // Uebereinander waere es ein Protokoll. Die KI spricht ueber *eine* Stelle,
+    // und die muss dastehen — sonst liest der Mensch beim Zuhoeren die falsche.
+    expect(screen.getByText(/Adresse belegt/)).toBeInTheDocument()
+    expect(screen.queryByText(/online-mode=true/)).not.toBeInTheDocument()
+    expect(screen.queryByText('server.properties')).not.toBeInTheDocument()
+  })
+
   it('zeigt hinter dem Zahnrad Angaben und keine erfundenen Regler', () => {
     ansicht()
 
@@ -143,6 +197,18 @@ describe('SprachAnsicht', () => {
     // Kein Schalter, der nichts tut: es gibt am Sprachmodus nichts zu stellen,
     // und das steht auch so da.
     expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+  })
+
+  it('nennt hinter dem Zahnrad die Stimme, mit der gerade gesprochen wird', () => {
+    ansicht({}, vi.fn(), { ...KONFIGURATION, voice: 'shimmer' })
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.voice.settings') }))
+
+    // Was hier steht, kommt vom Server. Ein fest eingetragenes „alloy" waere
+    // eine zweite Wahrheit — und sie loege in dem Augenblick, in dem der
+    // Betreiber am Zugang eine andere Stimme hinterlegt.
+    expect(screen.getByText(i18n.t('ai.voice.info.voice'))).toBeInTheDocument()
+    expect(screen.getByText('shimmer')).toBeInTheDocument()
   })
 
   it('schliesst mit ESC erst die Angaben und dann das Gespraech', () => {

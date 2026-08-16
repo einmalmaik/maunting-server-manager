@@ -1,8 +1,11 @@
 """Secret-minimierte API-Vertraege fuer AI-Provider."""
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, BeforeValidator, Field, SecretStr
+
+from services.ai_voice_session import STIMMEN
 
 
 # Obergrenze fuer den gepflegten Preis: 1.000 USD je eine Million Tokens, in
@@ -10,6 +13,44 @@ from pydantic import BaseModel, Field, SecretStr
 # rund 75 USD — die Grenze faengt also Tippfehler ab, ohne einer echten
 # Preisliste im Weg zu stehen.
 MAX_TOKEN_PRICE_MICRO_USD = 1_000_000_000
+
+
+def _stimme_lesen(wert: object) -> str | None:
+    """Nachsichtig lesen, streng speichern — und Unbekanntes gar nicht erst.
+
+    Nachsichtig in zwei Punkten, und beide sind keine Falscheingabe: Ein
+    Auswahlfeld ohne Wahl schickt ``""`` und nicht ``null`` — das ist der Weg,
+    auf dem „nichts hinterlegt" hier ankommt. Und in der Oberflaeche steht die
+    Stimme gross („Alloy"), waehrend die API sie klein verlangt; wer den Wert
+    von Hand setzt, tippt ab, was er sieht. Ein 422 dafuer waere eine Belehrung
+    ohne Anlass.
+
+    Streng beim Unbekannten: eine erfundene Stimme faellt sonst erst beim
+    Verbinden auf, und zwar der Gegenstelle. Der Betreiber saehe einen
+    Anbieterfehler in einem Sprachgespraech statt einer Fehlermeldung an dem
+    Feld, in das er gerade getippt hat.
+
+    Ein leerer Wert wird zu ``None`` und nicht zu ``""``: in der Spalte heisst
+    ``None`` „nichts hinterlegt" und loest auf die Standardstimme auf — ein
+    leerer String haette dort keine Bedeutung und ginge als Stimme an OpenAI.
+    """
+    if wert is None:
+        return None
+    name = str(wert).strip().lower()
+    if not name:
+        return None
+    if name not in STIMMEN:
+        raise ValueError(
+            "Unbekannte Stimme. Waehlbar sind: " + ", ".join(sorted(STIMMEN))
+        )
+    return name
+
+
+#: Eine der acht Realtime-Stimmen, oder ``None`` fuer „nichts hinterlegt". Die
+#: Liste steht in `services.ai_voice_session` und **nur** dort: sie gehoert zum
+#: Protokoll der Gegenstelle, nicht zu diesem Vertrag. Eine Kopie hier waere die
+#: zweite Wahrheit, die beim naechsten Wechsel des Anbieters still veraltet.
+Stimme = Annotated[str | None, BeforeValidator(_stimme_lesen)]
 
 
 class AiProviderCreate(BaseModel):
@@ -29,6 +70,12 @@ class AiProviderCreate(BaseModel):
     token_price_micro_usd_per_million: int | None = Field(
         default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD
     )
+    # Nur fuer einen Sprachzugang von Bedeutung; bei einem Chatzugang bleibt das
+    # Feld schlicht leer. Es wird trotzdem nicht gegen `provider_kind` geprueft:
+    # der Anbieter laesst sich spaeter aendern, und eine hinterlegte Stimme, die
+    # dabei stillschweigend haette geloescht werden muessen, waere aergerlicher
+    # als eine, die ungenutzt dasteht.
+    default_voice: Stimme = None
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
 
 
@@ -42,6 +89,13 @@ class AiProviderUpdate(BaseModel):
     token_price_micro_usd_per_million: int | None = Field(
         default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD
     )
+    # Wie beim Preis eine Zeile darueber gibt es hier zwei verschiedene Dinge,
+    # die beide wie ``None`` aussehen: „nicht mitgeschickt" laesst die Stimme
+    # stehen, ein ausdrueckliches ``null`` loescht sie. Auseinander haelt die
+    # beiden nicht dieser Vertrag, sondern `model_dump(exclude_unset=True)` im
+    # Router — deshalb braucht dieses Feld kein eigenes ``clear_``-Flag, anders
+    # als der Schluessel darunter, den die Antwort nie zurueckgibt.
+    default_voice: Stimme = None
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
     clear_operator_api_key: bool = False
 
@@ -56,6 +110,12 @@ class AiProviderResponse(BaseModel):
     # sie soll trotzdem in der Liste erscheinen.
     base_url: str | None = None
     default_model: str
+    #: Bewusst ohne die Pruefung aus `Stimme`: gelesen wird hier, was in der
+    #: Zeile steht. Nimmt OpenAI eines Tages eine Stimme aus dem Programm, soll
+    #: der Betreiber sie in der Liste sehen und aendern koennen — eine 500 beim
+    #: blossen Anzeigen waere die schlechteste Art, ihm das mitzuteilen.
+    #: ``None`` heisst „nichts hinterlegt", nicht „alloy".
+    default_voice: str | None = None
     enabled: bool
     requires_api_key: bool
     operator_key_configured: bool

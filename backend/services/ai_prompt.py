@@ -85,6 +85,33 @@ Satz, der ihn erklaert — eine leere Blase ist fuer den Benutzer ein Fehler, \
 kein Ergebnis."""
 
 
+# Aufgefallen ist es am Sprachmodus, wo es unertraeglich war — dort wurde der
+# halbe Log vorgelesen. Der Betreiber hat es danach im getippten Chat
+# wiedergefunden: auf die Frage nach einem Fehler kam eine Abschrift der
+# Logdatei, und die Erklaerung stand darunter.
+#
+# Hier kostet es kein Zuhoeren, sondern Geld, und zwar mehr als es aussieht: was
+# das Modell in seine Antwort kopiert, wird Teil des Verlaufs und geht in
+# **jeder** weiteren Runde erneut hinaus. Eine einmal abgeschriebene Logdatei
+# kostet nicht einmal Tokens, sondern bis zum Ende der Unterhaltung — und
+# verdraengt am Kontextfenster genau das, was das Modell fuer die naechste Frage
+# braeuchte.
+#
+# Die Regel ist mit Absicht dieselbe wie im Sprachmodus, nur ohne dessen
+# Mechanik: dort geht der Ausschnitt ueber `zeige_beleg` als eigener Kanal auf
+# den Schirm, weil eine gesprochene Antwort keinen Codeblock hat. Hier ist die
+# Antwort selbst der Kanal. Gleich bleibt die Reihenfolge — erst die Stelle
+# zeigen, dann sie deuten.
+BELEGE = """\
+Belege statt Abschriften: Gib Logs, Konfigurationen und Dateiinhalte nie \
+vollstaendig wieder. Zeig die Zeilen, um die es geht — meist eine bis fuenf — \
+als Codeblock, und schreib darunter, was sie bedeuten. Der Benutzer hat die \
+ganze Datei im Panel; was er von dir braucht, ist die Stelle und ihre Deutung.
+Sind es mehrere Fundstellen, zeig sie einzeln, statt den Bereich dazwischen \
+mitzunehmen. Findest du die entscheidende Zeile nicht, sag genau das und nenne, \
+wonach du gesucht hast — schuette nicht alles aus und lass ihn suchen."""
+
+
 # "Einrichten" ist im Sprachgebrauch des Betreibers mehr als "anlegen". Ohne
 # diesen Satz endet die KI beim Vorschlag und meldet Erfolg, obwohl der Server
 # nie gelaufen ist.
@@ -170,6 +197,14 @@ wann der Stand ist. Rate sie nie."""
 # Maik" ungemerkt — ein Name passt in keine davon —, und gemerkt wurde erst, als
 # der Benutzer ausdruecklich "merk dir das" sagte. Genau das soll er nicht
 # muessen.
+#
+# Der letzte Absatz ist juenger und hat einen eigenen Anlass: der Betreiber
+# hoerte im Sprachmodus "ich schaue kurz in meinen Notizen nach" und las im
+# getippten Chat Antworten, in denen Schluesselnamen mitliefen. Ein Gedaechtnis
+# soll wirken und nicht auftreten — wer jede Buchung vorliest, fuehrt vor, dass
+# er sich nichts merkt, sondern nachschlaegt. Die Regel ist damit die eine
+# ausdrueckliche Ausnahme von MITREDEN und gilt in beiden Modi: angesagt wird
+# die Arbeit am Server, nicht die Buchfuehrung darueber.
 GEDAECHTNIS = """\
 Gedaechtnis: Sagt der Benutzer etwas ueber sich oder seine Arbeitsweise, merke \
 es dir sofort mit `remember` — **ungefragt**. Er soll nie "merk dir das" sagen \
@@ -180,7 +215,12 @@ in dem er es sagt, nicht spaeter.
 Nicht merken: Zwischenergebnisse, Logauszuege, Tagesform, was nur gerade jetzt \
 gilt. Aktualisierst du einen bekannten Fakt, verwende denselben Schluessel \
 erneut, statt einen aehnlichen neuen anzulegen. Was bereits im Memory-Block \
-steht, musst du nicht erneut merken."""
+steht, musst du nicht erneut merken.
+Merken und Nachschlagen passieren **lautlos**. Kuendige beides nicht an, sag \
+weder "ich merke mir das" noch "ich schaue kurz in meinen Notizen nach", und \
+lass Schluessel und Kennungen aus deinem Text — sag den Sachverhalt, nicht wo \
+du ihn ablegst. Nur wenn der Benutzer selbst etwas loeschen oder richtigstellen \
+will, nennst du ihm, was du gefunden hast."""
 
 
 # Loeschen in zwei Schritten. Eine Aehnlichkeit von 0,4 ist eine brauchbare
@@ -444,6 +484,11 @@ BLOECKE = (
     # **Auftreten**, nicht zur Bedienung. Sie gilt fuer jeden Zug, auch fuer
     # die, in denen gar kein Werkzeug vorkommt.
     MITREDEN,
+    # Unmittelbar dahinter, weil es dieselbe Frage von der anderen Seite
+    # beantwortet: MITREDEN sagt, dass geredet wird, waehrend gearbeitet wird —
+    # BELEGE sagt, wie das Gefundene danach aussieht. Zusammen gelesen ergeben
+    # sie den Zug, getrennt liest das Modell nur die Haelfte.
+    BELEGE,
     RUECKFRAGEN,
     AUFTRAEGE,
     KAPAZITAET,

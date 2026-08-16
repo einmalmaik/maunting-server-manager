@@ -156,6 +156,18 @@
       "catalogUnavailable": "The provider's model catalog is currently unreachable. You can type the model name by hand meanwhile; reasoning levels stay unknown.",
       "catalogNeedsKey": "This provider only hands out its model list against the key. Enter the key and save the access — the selection appears here afterwards.",
       "realtimeHint": "A voice access. It does not appear in the chat's model selection; it carries voice mode instead. Who may use it is decided by the \"Talk to the AI\" permission.",
+      "defaultVoice": "Default voice",
+      "defaultVoiceHint": "Applies to voice accesses only. Leave it unset and the standard voice is used — should that ever become a different one, this access follows along on its own.",
+      "voices": {
+        "alloy": "Alloy — neutral, balanced",
+        "ash": "Ash — calm, deep",
+        "ballad": "Ballad — soft, narrating",
+        "coral": "Coral — warm, friendly",
+        "echo": "Echo — matter-of-fact, clear",
+        "sage": "Sage — calm, measured",
+        "shimmer": "Shimmer — bright, lively",
+        "verse": "Verse — expressive, varied"
+      },
       "protokoll": {
         "chat_completions": "Chat",
         "realtime": "Voice"
@@ -660,10 +672,15 @@
       },
       "info": {
         "model": "Model",
+        "voice": "Voice",
         "sampleRate": "Sample rate",
         "maxSession": "Session length",
         "minutes": "{{count}} minutes",
         "hint": "There is nothing to adjust in voice mode: the model and key belong to the operator, and the session length follows the lifetime of your sign-in. It reconnects automatically once it expires."
+      },
+      "beleg": {
+        "heading": "Evidence",
+        "untrusted": "This text comes unchanged from the source named above — the AI picked it out, it did not write it. Read it yourself instead of taking the explanation on trust."
       }
     },
     "webSearch": {

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Mic, MicOff, Settings, Wrench, X } from 'lucide-react'
+import { FileText, Loader2, Mic, MicOff, Settings, ShieldAlert, Wrench, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { AiVoiceConfig } from '@/api/ai'
 import { Sprachblase } from './Sprachblase'
-import { useSprachsitzung } from './useSprachsitzung'
+import { useSprachsitzung, type Beleg } from './useSprachsitzung'
 
 /**
  * Der Sprachmodus als eigener Modus — der Chat tritt zurück.
@@ -29,7 +29,7 @@ export function SprachAnsicht({
   aufChat: () => void
 }) {
   const { t } = useTranslation()
-  const { zustand, zeilen, werkzeug, fehler, pegel, starten, beenden } = useSprachsitzung()
+  const { zustand, zeilen, werkzeug, fehler, belege, pegel, starten, beenden } = useSprachsitzung()
   const [einstellungenOffen, setEinstellungenOffen] = useState(false)
   const kasten = useRef<HTMLDivElement>(null)
   const gestartet = useRef(false)
@@ -65,6 +65,10 @@ export function SprachAnsicht({
 
   const laeuft = zustand !== 'aus'
   const hoert = zustand === 'hoert' || zustand === 'bereit'
+  // Gezeigt wird immer die zuletzt gezeigte Stelle. Eine Liste übereinander
+  // wäre ein Protokoll — und genau das soll der Sprachmodus nicht sein: die KI
+  // spricht über *eine* Stelle, und die steht dann da.
+  const beleg = belege.length > 0 ? belege[belege.length - 1] : null
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6 py-6">
@@ -120,6 +124,8 @@ export function SprachAnsicht({
         </div>
       )}
 
+      {beleg && <Belegkasten beleg={beleg} />}
+
       <div className="mt-8 flex items-center gap-4">
         <RunderKnopf
           label={t(laeuft ? 'ai.voice.stop' : 'ai.voice.start')}
@@ -163,6 +169,53 @@ export function SprachAnsicht({
   )
 }
 
+/**
+ * Die Stelle, über die gerade gesprochen wird — gezeigt, nicht vorgelesen.
+ *
+ * Eine Java-Ausnahme vorgelesen zu bekommen, dauert zwanzig Sekunden und sagt
+ * nichts; gelesen dauert sie zwei und sagt alles. Der Betreiber wollte deshalb
+ * beides getrennt: die Zeilen auf dem Schirm, die Erklärung im Ohr.
+ *
+ * **Fremdtext, und zwar zweifach.** Die Zeilen stammen aus einem
+ * Werkzeugergebnis — Logs, also Text, den irgendwer auf einen Server geschrieben
+ * hat. Die `quelle` benennt das Modell. Beides wird als **reiner Text**
+ * gezeichnet: kein Markdown, kein HTML, keine Verlinkung. React maskiert von
+ * sich aus, und `<pre>` gibt keine Gelegenheit, das zu vergessen — ein
+ * `AiMarkdown` an dieser Stelle wäre der kürzeste Weg von einer Logzeile zu
+ * einem klickbaren Link im Panel. Der Hinweis darunter steht dort, weil sonst
+ * niemand unterscheiden kann, was die KI *sagt* und was sie nur *zeigt*.
+ */
+function Belegkasten({ beleg }: { beleg: Beleg }) {
+  const { t } = useTranslation()
+  return (
+    <section
+      className="mt-4 w-full max-w-2xl overflow-hidden rounded-xl border border-outline-variant/40 bg-surface-container-low/50"
+      aria-live="polite"
+    >
+      <div className="flex items-baseline gap-2 border-b border-outline-variant/30 px-4 py-2">
+        <FileText className="h-3.5 w-3.5 shrink-0 self-center text-on-surface-variant/70" aria-hidden="true" />
+        <h3 className="shrink-0 text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+          {t('ai.voice.beleg.heading')}
+        </h3>
+        {/* Auch die Quelle ist Fremdtext: sie benennt das Modell, und ein Modell
+            kann dort einen ganzen Absatz hinschreiben. `min-w-0` gehört dazu —
+            ohne das greift `truncate` in einer Flexzeile nicht, und die
+            Kopfzeile wüchse mit. */}
+        <span className="ml-auto min-w-0 truncate font-mono text-xs text-on-surface-variant/70">
+          {beleg.quelle}
+        </span>
+      </div>
+      <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-xs leading-5 text-on-surface">
+        {beleg.zeilen.join('\n')}
+      </pre>
+      <p className="flex gap-2 border-t border-outline-variant/30 px-4 py-2 text-[11px] leading-4 text-on-surface-variant/70">
+        <ShieldAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        {t('ai.voice.beleg.untrusted')}
+      </p>
+    </section>
+  )
+}
+
 function RunderKnopf({
   label,
   aktiv,
@@ -196,16 +249,26 @@ function RunderKnopf({
 /**
  * Was hinter dem Zahnrad steht — und was ausdrücklich nicht.
  *
- * Es sind **Angaben**, keine Regler. Am Sprachmodus lässt sich derzeit nichts
- * einstellen: Modell und Schlüssel gehören dem Betreiber, die Stimme ist eine
- * Konstante, und die Höchstdauer hängt an der Lebensdauer des Anmeldetokens.
- * Ein Zahnrad, das drei Schalter zeigt, die nichts tun, wäre schlimmer als
- * keines — hier steht, woran man gerade dran ist, und wo man es ändert.
+ * Es sind **Angaben**, keine Regler. Am Sprachmodus lässt sich von hier aus
+ * nichts einstellen: Modell und Schlüssel gehören dem Betreiber, die Stimme
+ * auch (sie steht am Anbieter unter „Standardstimme"), und die Höchstdauer
+ * hängt an der Lebensdauer des Anmeldetokens. Ein Zahnrad, das drei Schalter
+ * zeigt, die nichts tun, wäre schlimmer als keines — hier steht, woran man
+ * gerade dran ist, und wo man es ändert.
+ *
+ * Die Stimme kam dazu, als sie wählbar wurde. Sie gehört hierher und nicht in
+ * einen Regler: wer spricht, hört sie ohnehin — er will nur wissen, *welche*
+ * es ist, wenn er sie beim Betreiber ändern lassen will.
  */
 function Einstellungen({ konfiguration }: { konfiguration: AiVoiceConfig | null }) {
   const { t } = useTranslation()
   const zeilen: [string, string][] = [
     ['ai.voice.info.model', konfiguration?.model ?? '—'],
+    // Die Stimme kommt vom Server bereits aufgelöst — hat der Zugang nichts
+    // hinterlegt, steht dort die Standardstimme. Deshalb wird hier nichts
+    // geraten und nichts eingesetzt; `—` deckt nur den Fall ab, dass die
+    // Konfiguration noch gar nicht da ist.
+    ['ai.voice.info.voice', konfiguration?.voice || '—'],
     ['ai.voice.info.sampleRate', `${(konfiguration?.sample_rate ?? 0) / 1000} kHz`],
     [
       'ai.voice.info.maxSession',

@@ -145,6 +145,84 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.fehler).toBe('ai.voice.errors.provider')
   })
 
+  it('nimmt die Stoerungsmeldung zurueck, sobald die Leitung wieder traegt', async () => {
+    const haken = await sitzung()
+
+    // Anlass: die Ueberschrift stand dauerhaft auf „Sprachverbindung verloren",
+    // obwohl Ton und Gespraech laengst weiterliefen. Ein einziger unkritischer
+    // Anbieterfehler setzte `fehler`, und nichts nahm ihn je zurueck. Wer hoert,
+    // dass es weitergeht, darf oben nicht das Gegenteil lesen.
+    for (const zustand of ['bereit', 'hoert', 'spricht'] as const) {
+      act(() => leitung().simulateMessage({ art: 'stoerung', code: 'irgendwas' }))
+      expect(haken.result.current.fehler).toBe('ai.voice.errors.provider')
+
+      act(() => leitung().simulateMessage({ art: 'zustand', zustand }))
+      expect(haken.result.current.fehler).toBeNull()
+    }
+
+    // Auch der Begruessungsrahmen einer frisch stehenden Leitung raeumt auf —
+    // nach dem Neuverbinden gilt der Fehler von vorhin nicht mehr.
+    act(() => leitung().simulateMessage({ art: 'stoerung', code: 'irgendwas' }))
+    act(() => leitung().simulateMessage({ art: 'bereit' }))
+    expect(haken.result.current.fehler).toBeNull()
+  })
+
+  it('laesst die Meldung stehen, solange die Gegenstelle nur denkt', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'stoerung', code: 'irgendwas' }))
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'denkt' }))
+
+    // `denkt` ist kein Beweis: dort schweigt die Gegenstelle ohnehin, und ein
+    // Fehler, der genau dann kam, ist noch keiner von gestern. Ihn hier
+    // wegzuraeumen hiesse, die einzige Meldung zu loeschen, die der Mensch je
+    // ueber eine wirklich abgerissene Sitzung bekommt.
+    expect(haken.result.current.fehler).toBe('ai.voice.errors.provider')
+  })
+
+  it('nimmt gezeigte Stellen auf, die zuletzt gezeigte zuletzt', async () => {
+    const haken = await sitzung()
+
+    act(() => {
+      leitung().simulateMessage({
+        art: 'beleg',
+        quelle: 'server.properties',
+        zeilen: ['online-mode=true'],
+      })
+      leitung().simulateMessage({
+        art: 'beleg',
+        quelle: 'latest.log',
+        zeilen: ['[12:03:44] [Server thread/ERROR]: Adresse belegt', '  at Server.bind(Server.java:88)'],
+      })
+    })
+
+    // Die Reihenfolge ist die Zusage: die Ansicht zeigt die letzte, und „die
+    // letzte" muss die sein, ueber die gerade gesprochen wird.
+    expect(haken.result.current.belege).toEqual([
+      { quelle: 'server.properties', zeilen: ['online-mode=true'] },
+      {
+        quelle: 'latest.log',
+        zeilen: ['[12:03:44] [Server thread/ERROR]: Adresse belegt', '  at Server.bind(Server.java:88)'],
+      },
+    ])
+  })
+
+  it('uebernimmt keinen Beleg ohne Zeilen', async () => {
+    const haken = await sitzung()
+
+    act(() => {
+      leitung().simulateMessage({ art: 'beleg', quelle: 'latest.log', zeilen: [] })
+      leitung().simulateMessage({ art: 'beleg', quelle: 'latest.log' })
+      leitung().simulateMessage({ art: 'beleg', quelle: 'latest.log', zeilen: 'eine Zeile' })
+    })
+
+    // Ein leerer Kasten mit der Ueberschrift „Belegstelle" behauptet, es gaebe
+    // etwas zu lesen. Der Rahmen kommt zwar aus unserem Backend, sein Inhalt
+    // aber aus einem Werkzeugergebnis — hier wird nichts geglaubt, was nicht
+    // dasteht.
+    expect(haken.result.current.belege).toEqual([])
+  })
+
   it('ueberspringt Rahmen, die kein JSON sind', async () => {
     const haken = await sitzung()
 

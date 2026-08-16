@@ -42,6 +42,19 @@ class AiProvider(Base):
         String(32), nullable=False, default="openrouter"
     )
     default_model: Mapped[str] = mapped_column(String(256), nullable=False)
+    # Die Stimme, mit der ein Sprachzugang antwortet — eine aus
+    # `ai_voice_session.STIMMEN`. Sie steht hier und nicht im Katalog, weil sie
+    # keine Eigenschaft des Modells ist, sondern eine Wahl des Betreibers: alle
+    # acht kann jedes Realtime-Modell, und welche davon zum Panel passt, weiß
+    # nur er.
+    #
+    # ``None`` heißt **nicht** „alloy", sondern „nichts hinterlegt";
+    # `ai_voice_session.STANDARDSTIMME` löst das bei jedem Verbinden neu auf.
+    # Der Unterschied ist erst am Tag sichtbar, an dem MSM die Standardstimme
+    # wechselt: ein eingetragenes „alloy" wäre dann eine Entscheidung, die der
+    # Betreiber nie getroffen hat. Deshalb wird hier nie ein Standard
+    # hineingeschrieben — auch nicht beim Anlegen.
+    default_voice: Mapped[str | None] = mapped_column(String(32), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     requires_api_key: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     operator_api_key_encrypted: Mapped[str | None] = mapped_column(String(4096), nullable=True)

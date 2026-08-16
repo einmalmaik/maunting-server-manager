@@ -67,6 +67,11 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
             else None
         ),
         default_model=provider.default_model,
+        # Roh aus der Zeile, ``None`` bleibt ``None``. Hier die Standardstimme
+        # einzusetzen wäre bequem und falsch: das Formular zeigte dann eine
+        # Wahl, die der Betreiber nie getroffen hat, und speicherte sie beim
+        # nächsten Klick auf „Speichern" als seine.
+        default_voice=provider.default_voice,
         enabled=provider.enabled,
         requires_api_key=provider.requires_api_key,
         operator_key_configured=bool(provider.operator_api_key_encrypted),

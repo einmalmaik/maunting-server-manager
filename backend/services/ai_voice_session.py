@@ -30,8 +30,17 @@ ohnehin als Base64 in ein JSON-Ereignis.
 **Was hier bewusst nicht passiert.** Kein `AiRun`. Der Lauf ist dafür gebaut,
 einen Browser zu überleben und nach einer Bestätigung wieder aufzuwachen; eine
 Sprachsitzung ist das Gegenteil — es sitzt jemand davor, und wenn er geht, ist
-sie vorbei. Die Nachrichten landen trotzdem in derselben Unterhaltung, damit im
-Panel steht, was gesagt wurde.
+sie vorbei.
+
+**Was gesagt wurde, bleibt trotzdem.** Das fertige Transkript des Menschen und
+der zusammengesetzte Antworttext der KI gehen als gewöhnliche `AiMessage` in
+dieselbe Unterhaltung wie der getippte Chat — je Zug eine kurzlebige
+Datenbanksitzung in einem eigenen Thread, damit die Tonpumpe dafür nicht
+stehenbleibt. Hier stand das schon einmal als Zusage, ohne dass es jemand
+umgesetzt hätte: die Sitzung schrieb nichts, und nach dem Auflegen war das
+Gespräch weg. Scheitert das Schreiben, läuft das Gespräch weiter — ein
+verlorener Satz im Verlauf ist ärgerlich, ein abgerissenes Gespräch ist
+schlimmer.
 """
 
 from __future__ import annotations
@@ -42,10 +51,16 @@ import contextlib
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect, WebSocketState
+
+from database import SessionLocal
+from models import AiConversation, AiMessage
+from services.ai_redaction import redact_sensitive_text
 
 try:
     import websockets
@@ -92,9 +107,41 @@ MAX_STEUERRAHMEN_ZEICHEN = 4_096
 #: Frist für den Verbindungsaufbau zu OpenAI.
 VERBINDUNGS_TIMEOUT = 20.0
 
+#: Wie lang eine einzelne mitgeschriebene Nachricht höchstens wird.
+#:
+#: Die Gegenstelle kann am Stück reden, und der getippte Chat zeigt hinterher
+#: jedes Zeichen davon. Achttausend sind bei normalem Sprechtempo gut sieben
+#: Minuten ununterbrochene Rede — was länger ist, ist kein Zug in einem Gespräch
+#: mehr, sondern ein Ausreisser, und der soll den Verlauf nicht sprengen.
+MAX_NACHRICHT_ZEICHEN = 8_000
+
 #: Ton- und Abtastrate. Beides ist Vereinbarung mit dem Browser **und** mit
 #: OpenAI: dessen Realtime-API spricht PCM16 bei 24 kHz mono.
 ABTASTRATE = 24_000
+
+#: Die Stimmen, die das Realtime-Modell sprechen kann.
+#:
+#: Eine Protokolltatsache wie die Abtastrate und deshalb hier: die Gegenstelle
+#: weist ein `session.update` mit einem unbekannten Namen ab, und danach läuft
+#: das Gespräch ohne Anweisungen und ohne Werkzeuge weiter — als beliebiger
+#: Assistent, nicht als das Panel. Router und Schema holen sie hier ab; im
+#: Backend gibt es sie also genau einmal.
+#:
+#: **Die Oberfläche hat eine Abschrift**, und zwar nach derselben Abmachung wie
+#: bei `AI_LAUFZUSTAENDE`: `frontend/src/api/ai.ts::AI_STIMMEN`. Eine neunte
+#: Stimme braucht deshalb drei Schritte und nicht einen — hier, dort, und
+#: `ai.providers.voices.*` in beiden Sprachdateien. Der letzte ist der, den man
+#: vergisst; ohne ihn steht im Auswahlfeld der rohe Schlüssel, und ein Test in
+#: `frontend/src/locales/actionTexts.test.ts` bricht genau dann.
+STIMMEN = ("alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse")
+
+#: Womit gesprochen wird, solange der Betreiber nichts hinterlegt hat.
+#:
+#: `ai_providers.default_voice` bleibt dafür NULL und wird **nicht** mit "alloy"
+#: befüllt. „Nichts hinterlegt" und „ausdrücklich alloy gewählt" sind zwei
+#: verschiedene Aussagen: stünde der Standard in der Spalte, bliebe ein späterer
+#: Wechsel für jeden bestehenden Zugang wirkungslos.
+STANDARDSTIMME = "alloy"
 
 
 # ── Was der Browser zu sehen bekommt ──────────────────────────────────────
@@ -126,6 +173,25 @@ class Lage:
     #: Ob die Sitzung endete, weil das Kontingent aufgebraucht war. Für das
     #: Protokoll — und damit der Anrufer nicht raten muss, warum Schluss war.
     kontingent_aus: bool = False
+    #: Was die KI in der **laufenden** Antwort bisher gesagt hat, Stück für
+    #: Stück zusammengesetzt. Die Gegenstelle liefert das Transkript in Deltas;
+    #: erst bei `response.done` ist ein Satz ein Satz und darf in den Verlauf.
+    #: Ein Text statt einer Liste von Stücken, weil der Deckel dann schon beim
+    #: Sammeln greift und nicht erst beim Schreiben.
+    antworttext: str = ""
+    #: Wann der Mensch aufgehört hat zu reden — der Zeitstempel seiner
+    #: Nachricht im Verlauf.
+    #:
+    #: Nötig, weil die Eingabetranskription bei OpenAI **nebenher** läuft und
+    #: nicht mit den `response.*`-Ereignissen synchronisiert ist. Bei einer
+    #: kurzen Frage und einer schnellen Antwort trifft `response.done` vor dem
+    #: fertigen Transkript ein; würde die Reihenfolge des Schreibens über
+    #: `created_at` entscheiden, stünde im Verlauf die Antwort über der Frage —
+    #: und `build_provider_messages` reichte sie dem Modell auch so weiter.
+    #:
+    #: `speech_stopped` liegt dagegen immer vor `response.created`. Der
+    #: Zeitstempel wird dort genommen und wartet hier auf das Transkript.
+    gesprochen_bis: datetime | None = None
 
 
 # ── Der Protokollteil ─────────────────────────────────────────────────────
@@ -161,6 +227,39 @@ _ANTWORTTEXT_EREIGNISSE = frozenset({
 
 #: Das fertige Transkript dessen, was der Mensch gesagt hat.
 _EINGABETEXT_FERTIG = "conversation.item.input_audio_transcription.completed"
+
+#: Fehler des Anbieters, die der Normalbetrieb selbst ausloest.
+#:
+#: Der Anlass ist gemeldet und war unangenehm konkret: das Panel zeigte
+#: "Sprachverbindung zum Anbieter verloren", waehrend die Verbindung stand und
+#: das Gespraech ungestoert weiterlief. Ausgeloest hat es das Dazwischenreden.
+#: Der Browser schickt dabei ein `response.cancel`, und er schickt es auch dann,
+#: wenn gerade gar keine Antwort laeuft — er kann es nicht wissen, zwischen dem
+#: letzten Tonrahmen und seiner Anzeige liegt ein Netzsprung. Die Gegenstelle
+#: antwortet mit `response_cancel_not_allowed`, und daraus wurde eine Stoerung.
+#:
+#: Dieselbe Lage haben die beiden anderen: zwei Ausloeser fuer dieselbe Antwort
+#: (`conversation_already_has_active_response`) und ein Absenden ohne Ton
+#: (`input_audio_buffer_commit_empty`). Alle drei sind Rennen um Millisekunden
+#: und keine Nachricht an den Benutzer. Sie stehen im Protokoll, weil eine
+#: Haeufung sehr wohl ein Befund waere; alles andere bleibt Warnung **und**
+#: Stoerung, denn ein stiller Fehler ist der schlechteste.
+_UNKRITISCHE_FEHLER = frozenset({
+    "response_cancel_not_allowed",
+    "conversation_already_has_active_response",
+    "input_audio_buffer_commit_empty",
+})
+
+#: Nicht tödlich, aber auch nicht in Ordnung — die Untermenge, die im Protokoll
+#: laut sein soll.
+#:
+#: `conversation_already_has_active_response` bedeutet, dass MSM um eine Antwort
+#: gebeten hat, während schon eine lief. Seit `Bruecke._antwort_anfordern` die
+#: Bitte zurückhält, darf das nicht mehr vorkommen. Käme es doch, wäre die Folge
+#: für den Sprechenden **Stille** — und Stille ist der Fehler, den man am
+#: schwersten findet. Er kostet keine Störungsmeldung, aber eine Zeile, nach der
+#: sich suchen lässt.
+_VERDAECHTIGE_FEHLER = frozenset({"conversation_already_has_active_response"})
 
 
 def sitzungskonfiguration(
@@ -293,6 +392,7 @@ async def _openai_nach_browser(
     lage: Lage,
     werkzeuge: Any | None = None,
     kontingent: Any | None = None,
+    gespraech_id: str | None = None,
 ) -> None:
     """Ereignisse der Gegenstelle in Ton und Anzeige übersetzen."""
     async for rohnachricht in oben:
@@ -304,7 +404,9 @@ async def _openai_nach_browser(
             continue
         if not isinstance(ereignis, dict):
             continue
-        await _ereignis_verarbeiten(ereignis, browser, oben, lage, werkzeuge, kontingent)
+        await _ereignis_verarbeiten(
+            ereignis, browser, oben, lage, werkzeuge, kontingent, gespraech_id
+        )
 
 
 async def _ereignis_verarbeiten(
@@ -314,6 +416,7 @@ async def _ereignis_verarbeiten(
     lage: Lage,
     werkzeuge: Any | None,
     kontingent: Any | None = None,
+    gespraech_id: str | None = None,
 ) -> None:
     art = str(ereignis.get("type") or "")
 
@@ -329,12 +432,22 @@ async def _ereignis_verarbeiten(
         stueck = ereignis.get("delta")
         if isinstance(stueck, str) and stueck:
             await _sag(browser, {"art": "antworttext", "text": stueck})
+            # Und dasselbe Stück in den Puffer, aus dem bei `response.done` die
+            # Nachricht im Verlauf wird. Der Deckel greift hier und nicht erst
+            # dort: ein Modell, das nicht aufhört zu reden, soll Speicher der
+            # Sitzung nicht in dem Tempo belegen, in dem es spricht.
+            if len(lage.antworttext) < MAX_NACHRICHT_ZEICHEN:
+                lage.antworttext += stueck
         return
 
     if art == _EINGABETEXT_FERTIG:
         gesagt = ereignis.get("transcript")
         if isinstance(gesagt, str) and gesagt.strip():
             await _sag(browser, {"art": "gehoert", "text": gesagt.strip()})
+            # Der Zeitstempel stammt vom Ende des Sprechens und nicht von
+            # jetzt: bis hierher kann die Antwort längst geschrieben sein.
+            gesagt_um, lage.gesprochen_bis = lage.gesprochen_bis, None
+            await _mitschreiben(gespraech_id, "user", gesagt, zeitpunkt=gesagt_um)
         return
 
     if art == "input_audio_buffer.speech_started":
@@ -342,15 +455,38 @@ async def _ereignis_verarbeiten(
         return
 
     if art == "input_audio_buffer.speech_stopped":
+        lage.gesprochen_bis = datetime.now(timezone.utc)
         await _sag(browser, {"art": "zustand", "zustand": ZUSTAND_DENKT})
         return
 
     if art == "response.created":
+        # Die Brücke muss das wissen, bevor der erste Werkzeugaufruf kommt:
+        # solange eine Antwort läuft, darf sie um keine zweite bitten. Siehe
+        # `Bruecke._antwort_laeuft` — dort steht, warum das der Unterschied
+        # zwischen einer Auskunft und einer Gesprächspause ist.
+        if werkzeuge is not None:
+            werkzeuge.antwort_begonnen()
         await _sag(browser, {"art": "zustand", "zustand": ZUSTAND_SPRICHT})
         return
 
     if art == "response.done":
+        # Der Puffer wird **immer** geleert, auch wenn das Schreiben gleich
+        # scheitert. Bliebe der Satz stehen, klebte er vorn an der nächsten
+        # Antwort und stünde damit ein zweites Mal im Verlauf — an einer Stelle,
+        # an der ihn niemand gesagt hat.
+        gesprochenes, lage.antworttext = lage.antworttext, ""
+        await _mitschreiben(gespraech_id, "assistant", gesprochenes)
+
         antwort = ereignis.get("response")
+
+        # Und jetzt darf die Brücke reden, falls ein Werkzeugergebnis wartete.
+        # **Vor** der Kontingentprüfung: wartet eines und ist gleichzeitig das
+        # Kontingent zu Ende, wird gleich zugemacht — dann soll die Bitte gar
+        # nicht erst hinausgehen.
+        if werkzeuge is not None:
+            zustand = antwort.get("status") if isinstance(antwort, dict) else None
+            await werkzeuge.antwort_beendet(oben, abgebrochen=zustand == "cancelled")
+
         weiter = True
         if kontingent is not None and isinstance(antwort, dict):
             verbrauch = antwort.get("usage")
@@ -372,7 +508,24 @@ async def _ereignis_verarbeiten(
         # Modellnamen, Kontingentstände und im schlechtesten Fall Teile der
         # Anweisungen enthalten. Der Benutzer erfährt, dass es hakte; das
         # Protokoll erfährt, woran.
-        logger.warning("Sprachsitzung: Fehler vom Anbieter %s", _fehlerkennung(ereignis))
+        kennung = _fehlerkennung(ereignis)
+        if kennung in _VERDAECHTIGE_FEHLER:
+            # Keine Störungsmeldung — die Leitung steht. Aber laut im
+            # Protokoll: siehe `_VERDAECHTIGE_FEHLER`.
+            logger.warning(
+                "Sprachsitzung: Antwort trotz laufender Antwort angefordert (%s) — "
+                "der Sprechende hoert an dieser Stelle nichts",
+                kennung,
+            )
+            return
+        if kennung in _UNKRITISCHE_FEHLER:
+            # Siehe `_UNKRITISCHE_FEHLER`: es ist der eigene Normalbetrieb, der
+            # diesen Fehler auslöst. Eine Störungsmeldung dafür wäre falsch —
+            # und sie war es, sichtbar als „Sprachverbindung zum Anbieter
+            # verloren" mitten in einem Gespräch, das weiterlief.
+            logger.info("Sprachsitzung: unkritischer Anbieterfehler %s", kennung)
+            return
+        logger.warning("Sprachsitzung: Fehler vom Anbieter %s", kennung)
         await _sag(browser, {"art": "stoerung"})
         return
 
@@ -397,6 +550,111 @@ async def _sag(browser: WebSocket, nutzlast: dict) -> None:
         return
     with contextlib.suppress(Exception):
         await browser.send_text(json.dumps(nutzlast, ensure_ascii=False))
+
+
+# ── Der Verlauf ───────────────────────────────────────────────────────────
+
+
+async def _mitschreiben(
+    gespraech_id: str | None,
+    rolle: str,
+    text: str,
+    *,
+    zeitpunkt: datetime | None = None,
+) -> None:
+    """Einen gesprochenen Zug in den Verlauf des getippten Chats legen.
+
+    Ohne Kennung der Unterhaltung wird nichts geschrieben. Das ist kein
+    Ausnahmefall, sondern der Vorgabewert von `fuehren`: die Tests der
+    Sitzungsmechanik führen keine Datenbank mit, und sie sollen es auch nicht
+    müssen, um die Reihenfolge zweier Ereignisse zu prüfen.
+
+    Der Text des Menschen wird geschwärzt, der der KI nicht — dieselbe
+    Asymmetrie wie im Chat und aus demselben Grund (`_finalize_stream`): in der
+    Antwort kann eine Zuweisung eine *Anleitung* sein, und `[REDACTED]` an
+    dieser Stelle wäre keine Antwort mehr. Auf dem Weg zum Anbieter geht die
+    Historie ohnehin noch einmal durch `redact_sensitive_text`.
+
+    Geschrieben wird in einem Thread. Auf der Ereignisschleife stünde in dieser
+    Zeit die Tonpumpe, und eine Sprachsitzung merkt sich das als Aussetzer.
+    Gewartet wird trotzdem darauf, damit zwei Schreibvorgänge nicht nebenher
+    laufen.
+
+    Für die **Reihenfolge** im Verlauf reicht das aber nicht, und hier stand
+    einmal, sie sei die der Gegenstelle. Das ist sie nicht: die
+    Eingabetranskription läuft bei OpenAI nebenher, und bei einer kurzen Frage
+    trifft `response.done` vor dem fertigen Transkript ein. Sortiert wird nach
+    `created_at`, also bekommt der Zug des Menschen mit ``zeitpunkt`` den
+    Stempel vom Ende seines Sprechens mitgegeben statt den vom Schreiben. Ohne
+    ihn stünde die Antwort über der Frage — im Panel und, über
+    `build_provider_messages`, auch im nächsten Prompt.
+    """
+    if not gespraech_id:
+        return
+    sauber = text.strip()
+    if rolle == "user":
+        sauber = redact_sensitive_text(sauber).strip()
+    if not sauber:
+        # Eine leere Nachricht ist keine. Die Gegenstelle schickt sowohl
+        # `response.done` für reine Werkzeugrunden als auch Transkripte, die nur
+        # aus Hintergrundgeräusch entstanden sind.
+        return
+
+    try:
+        await asyncio.to_thread(
+            _nachricht_ablegen,
+            gespraech_id,
+            rolle,
+            sauber[:MAX_NACHRICHT_ZEICHEN],
+            zeitpunkt,
+        )
+    except Exception as fehler:
+        # Ein Fehlschlag kostet einen Satz im Verlauf und nicht das Gespräch.
+        # Der Mensch redet gerade; ihm die Verbindung abzureissen, weil eine
+        # Zeile nicht in die Datenbank ging, wäre die schlechtere Antwort.
+        logger.warning(
+            "Sprachsitzung: Nachricht nicht gespeichert rolle=%s error=%s",
+            rolle, type(fehler).__name__,
+        )
+
+
+def _nachricht_ablegen(
+    gespraech_id: str, rolle: str, text: str, zeitpunkt: datetime | None = None
+) -> None:
+    """Der Schreibvorgang selbst — läuft im Thread, nie auf der Ereignisschleife.
+
+    Eine eigene, kurzlebige Sitzung je Zug. Die Sprachsitzung hält bewusst keine
+    offene Datenbanksitzung: sie läuft über Minuten, und eine Verbindung aus dem
+    Pool so lange festzuhalten kostet sie einem Request, der sie braucht.
+
+    Ist die Unterhaltung weg, wird nichts geschrieben. Der Fremdschlüssel würde
+    das ohnehin abweisen; die Abfrage davor macht aus einem Fehler im Protokoll
+    einen stillen, richtigen Nichtsttun-Fall.
+    """
+    with SessionLocal() as db:
+        gespraech = db.get(AiConversation, gespraech_id)
+        if gespraech is None:
+            return
+        nachricht = AiMessage(
+            id=str(uuid4()),
+            conversation_id=gespraech.id,
+            role=rolle,
+            content=text,
+            status="complete",
+        )
+        if zeitpunkt is not None:
+            # Nur wenn einer mitkam. Sonst gilt der Spaltendefault, und das ist
+            # für die Antwort der KI auch der richtige Zeitpunkt — sie ist in
+            # dem Moment fertig geworden.
+            nachricht.created_at = zeitpunkt
+        db.add(nachricht)
+        # Ohne das rutschte die Unterhaltung im Panel nach unten, obwohl gerade
+        # in ihr gesprochen wurde. `sections_json` bleibt NULL: die Sitzung
+        # führt keine Gliederung aus Text und Werkzeugen, und der Verlauf
+        # zeichnet solche Nachrichten als reinen Text — was gesprochener Text
+        # auch ist.
+        gespraech.updated_at = datetime.now(timezone.utc)
+        db.commit()
 
 
 # ── Der Zusammenbau ───────────────────────────────────────────────────────
@@ -498,6 +756,7 @@ async def fuehren(
     schluessel: str,
     konfiguration: dict,
     verlauf: list[dict],
+    gespraech_id: str | None = None,
     werkzeuge: Any | None = None,
     kontingent: Any | None = None,
     hoechstdauer: float = MAX_SITZUNGSSEKUNDEN,
@@ -514,6 +773,12 @@ async def fuehren(
     andere. Das ist richtig so: bricht der Browser weg, hat die Gegenstelle
     niemanden mehr; bricht die Gegenstelle weg, hat der Browser nichts mehr zu
     hören. Eine halbe Sitzung ist keine.
+
+    ``gespraech_id`` ist die Unterhaltung, in die mitgeschrieben wird — dieselbe
+    wie im getippten Chat, denn es ist derselbe Chat mit einem anderen Eingang.
+    Ohne sie spricht die Sitzung genauso, sie merkt sich nur nichts; das ist der
+    Fall in den Tests, die keine Datenbank brauchen, um die Übersetzung zwischen
+    zwei Protokollen zu prüfen.
     """
     lage = Lage()
     oben = await verbinden(adresse, schluessel)
@@ -535,7 +800,9 @@ async def fuehren(
         pumpen = [
             asyncio.create_task(_browser_nach_openai(browser, oben, lage)),
             asyncio.create_task(
-                _openai_nach_browser(browser, oben, lage, werkzeuge, kontingent)
+                _openai_nach_browser(
+                    browser, oben, lage, werkzeuge, kontingent, gespraech_id
+                )
             ),
         ]
         try:

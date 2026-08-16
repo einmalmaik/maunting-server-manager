@@ -23,6 +23,7 @@ const provider: AiProviderAdmin = {
   provider_kind: 'openrouter',
   base_url: 'https://openrouter.ai/api/v1',
   default_model: 'anthropic/claude-opus-5',
+  default_voice: null,
   enabled: true,
   requires_api_key: true,
   operator_key_configured: true,
