@@ -301,6 +301,8 @@ export interface GameInfo {
   category?: string
   mod_support: boolean
   supports_steam_workshop: boolean
+  supports_curseforge?: boolean
+  mod_provider?: 'curseforge' | 'steam' | null
   supports_server_file_updates?: boolean
   // v1.4.7+: Exec-Tab-Opt-in aus dem Blueprint (runtime.enableExec).
   enable_exec?: boolean
@@ -320,6 +322,8 @@ export interface BlueprintListEntry {
   source_type: 'steam' | 'http' | 'github' | 'dockerOnly' | 'custom' | 'manualUpload'
   supports_mods: boolean
   supports_steam_workshop: boolean
+  supports_curseforge?: boolean
+  mod_provider?: 'curseforge' | 'steam' | null
   mod_injection: 'none' | 'startupArg' | 'file'
   ports: BlueprintPortDef[]
 }
