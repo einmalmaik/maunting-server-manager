@@ -173,6 +173,7 @@ _ALLOWED_STARTUP_TOKENS: frozenset[str] = frozenset({
     "RCON_PORT",
     "VOICE_PORT",
     "WEB_PORT",
+    "PEER_PORT",
     "INSTALL_DIR",
     "MOD_ARG",
     "BIND_IP",
