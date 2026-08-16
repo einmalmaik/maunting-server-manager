@@ -42,9 +42,13 @@
     </style>
     
     <title>Maunting Service Manager</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet" />
+
+    <!--
+      Keine Schriften von Dritten. Inter, Manrope, IBM Plex Sans und JetBrains
+      Mono kommen aus src/main.tsx (@fontsource) und damit aus dem eigenen
+      Build. Hier standen bis dahin drei Zeilen, die sie zur Laufzeit bei
+      Google holten; die Begründung für den Wechsel steht in src/main.tsx.
+    -->
   </head>
   <body>
     <div id="root"></div>

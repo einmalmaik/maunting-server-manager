@@ -105,6 +105,50 @@ stehen. Das Backend benötigt für getrenntes Hosting passende CORS- und
 Cookie-Einstellungen; Details stehen in `frontend/.env.example` und
 `backend/.env.example`.
 
+## Was die Oberfläche im Browser nachlädt
+
+**Keine Schriften von Dritten.** Die vier Familien der Oberfläche — Inter,
+Manrope, IBM Plex Sans und JetBrains Mono — liegen als `woff2` im gebauten
+`dist/assets/` und kommen vom selben Origin wie das Panel. Es geht keine
+Anfrage an `fonts.googleapis.com` oder `fonts.gstatic.com`, weder beim ersten
+Aufruf noch später.
+
+Das ist eine Datenschutzentscheidung und keine Optimierung. Eine zur Laufzeit
+eingebundene Google-Schrift überträgt die IP-Adresse jedes Besuchers an einen
+Dritten, bevor die erste Zeile Oberfläche steht — das LG München I hat darin am
+20.01.2022 (Az. 3 O 17493/20) eine Verletzung des Persönlichkeitsrechts
+gesehen. Dieses Risiko hätte nicht der Betreiber gewählt, sondern das Panel für
+ihn. Also trägt das Panel es nicht ein. Der Nebeneffekt ist die
+Offlinefähigkeit: ein Panel im abgeschotteten Netz sieht aus wie eines mit
+Internetzugang, statt auf `system-ui` zurückzufallen.
+
+Die Kosten: 63 Dateien, rund 660 KB im Build. Ein Aufruf zieht davon nur, was
+`unicode-range` verlangt — eine deutschsprachige Oberfläche lädt zehn Dateien
+mit zusammen etwa 200 KB, eine russische zusätzlich die kyrillischen Schnitte.
+Die Caddy-Site liefert `/assets/*` mit `max-age=31536000, immutable` aus; ein
+Besucher lädt sie damit einmal pro Release, nicht einmal pro Seitenaufruf.
+
+Prüfen lässt sich das am gebauten Frontend. Die Ausgabe muss leer bleiben:
+
+```bash
+grep -rl "fonts.googleapis.com\|fonts.gstatic.com" frontend/dist/
+```
+
+Was das **nicht** heißt: der Browser spricht deshalb mit niemandem sonst. Drei
+Ausnahmen bleiben, und alle drei sind sichtbar:
+
+- Das **Support-Widget** (Crisp, Tawk.to oder Singra) lädt ein fremdes Skript,
+  sobald ein Betreiber es unter *Einstellungen → Support-Widget* einschaltet.
+  Ohne diese Einstellung wird nichts geladen; die erlaubten Herkünfte stehen im
+  Code und in der CSP, nicht in einem Eingabefeld.
+- Die **Versionsanzeige** fragt `api.github.com` nach dem neuesten Release —
+  aus dem Browser, ohne Einstellung und auch auf der Loginseite, also bevor
+  jemand angemeldet ist. Wer das nicht möchte, gehört mit dieser Information in
+  die eigene Datenschutzerklärung.
+- **KI und Sprachmodus** reden mit OpenRouter und ElevenLabs, sobald ein
+  Betreiber Zugänge hinterlegt. Was dabei übertragen wird, steht unter
+  *Was an den Anbieter geht* weiter unten.
+
 ## Bestehende All-in-one-Installation aufteilen
 
 Für eine bereits installierte MSM-Instanz ist der interaktive Assistent der
