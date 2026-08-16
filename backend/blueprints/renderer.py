@@ -141,10 +141,12 @@ def render_argv(
     raw_args = shlex.split(startup_template)
     rendered: list[str] = []
     for arg in raw_args:
-        had_empty_token = False
+        token_count = 0
+        empty_count = 0
 
         def _sub(match: re.Match[str]) -> str:
-            nonlocal had_empty_token
+            nonlocal token_count, empty_count
+            token_count += 1
             token = match.group(1)
             if token == "INSTALL_DIR":
                 value = install_dir
@@ -164,14 +166,20 @@ def render_argv(
                     f"Unbekanntes Startup-Token '{{{token}}}' beim Rendern."
                 )
             if value == "":
-                had_empty_token = True
+                empty_count += 1
             return value
 
         replaced = _TOKEN_RE.sub(_sub, arg)
-        # Wenn ein Token zu "" aufgeloest wurde, droppen wir das gesamte argv-
-        # Element — sonst landen Stubs wie ``-port=`` im Container. Args ohne
-        # Tokens werden 1:1 uebernommen.
-        if had_empty_token:
+        # Das argv-Element wird nur gedroppt, wenn ALLE seine Tokens leer sind —
+        # sonst landen Stubs wie ``-port=`` im Container. Args ohne Tokens
+        # werden 1:1 übernommen.
+        #
+        # Entscheidend ist das Wort "alle": UE-Spiele packen ihre komplette
+        # Options-URL in EIN argv-Element (``TheIsland?listen?Port=7777?
+        # ServerPassword={ENV.SERVER_PASSWORD}``). Löschte ein einziges leeres
+        # Token das Element, verlöre ein Server ohne Passwort — der Normalfall
+        # — Map und ``?listen`` gleich mit: Er liefe, wäre aber unsichtbar.
+        if token_count > 0 and empty_count == token_count:
             continue
         if replaced != "":
             rendered.append(replaced)

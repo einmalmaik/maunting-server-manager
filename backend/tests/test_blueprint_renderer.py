@@ -285,3 +285,38 @@ def test_curseforge_renders_with_custom_separator() -> None:
     )
     assert argv == ["/data/ArkAscendedServer", "-port=7777", "-mods=927142,928111,930222"]
 
+
+
+def test_options_url_survives_single_empty_token() -> None:
+    """Ein leeres Token darf eine UE-Options-URL nicht mitreißen.
+
+    Regression: ARK packt Map, ``?listen``, Port, RCON und beide Passwörter in
+    EIN argv-Element. Solange nur ein Teil davon leer ist (ein Server ohne
+    Passwort ist der Normalfall), muss das Element vollständig erhalten
+    bleiben — sonst startet der Server ohne Map und ohne ``?listen``, läuft
+    scheinbar, ist aber unsichtbar und nicht joinbar.
+    """
+    bp = load_blueprint_dict(_bp_with_startup(
+        "/data/server {ENV.MAP_NAME}?listen?Port={GAME_PORT}?ServerPassword={ENV.SERVER_PASSWORD}"
+    ))
+    argv = render_argv(
+        bp,
+        install_dir="/data",
+        ports={"game": 7777, "query": None, "rcon": None},
+        extra_env={"MAP_NAME": "TheIsland_WP", "SERVER_PASSWORD": ""},
+    )
+    assert argv == ["/data/server", "TheIsland_WP?listen?Port=7777?ServerPassword="]
+
+
+def test_arg_dropped_when_every_token_is_empty() -> None:
+    """Sind ALLE Tokens eines Elements leer, bleibt es gedroppt (kein Stub)."""
+    bp = load_blueprint_dict(_bp_with_startup(
+        "/data/server -port={GAME_PORT} -auth={ENV.USER}:{ENV.PASS}"
+    ))
+    argv = render_argv(
+        bp,
+        install_dir="/data",
+        ports={"game": 7777, "query": None, "rcon": None},
+        extra_env={"USER": "", "PASS": ""},
+    )
+    assert argv == ["/data/server", "-port=7777"]

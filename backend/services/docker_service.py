@@ -952,7 +952,11 @@ def run_container(
                 logs = _decode(container.logs(tail=80, stdout=True, stderr=True)).strip()
                 detail = f"Container wurde direkt nach dem Start beendet (Exit-Code {exit_code})."
                 if logs:
-                    detail = f"{detail} Letzte Logs: {logs[:700]}"
+                    # Das ENDE der Ausgabe zeigen, nicht den Anfang: Tracebacks
+                    # und Abbruchmeldungen nennen den Grund in der letzten
+                    # Zeile. Ein Schnitt von vorn liefert zuverlässig den
+                    # unbrauchbaren Teil.
+                    detail = f"{detail} Letzte Logs: {logs[-700:]}"
                 return {
                     "ok": False,
                     "error": detail[:1000],

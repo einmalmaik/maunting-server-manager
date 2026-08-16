@@ -12,21 +12,18 @@
     "workdir": "/home/container",
     "user": "1000:1000",
     "env": {
-      "STEAM_COMPAT_CLIENT_INSTALL_PATH": "/data/.steam/steam",
-      "STEAM_COMPAT_DATA_PATH": "/data/compatdata",
+      "STEAM_COMPAT_CLIENT_INSTALL_PATH": "/home/container/.steam/steam",
+      "STEAM_COMPAT_DATA_PATH": "/home/container/.steam/steam/steamapps/compatdata/2430930",
       "WINEDEBUG": "-all",
       "WINEESYNC": "1",
       "WINEFSYNC": "1",
       "SERVER_NAME": "My-ASA-Server-by-MSM",
       "MAX_PLAYERS": "70",
-      "SERVER_PASSWORD": "",
-      "ADMIN_PASSWORD": "",
       "MAP_NAME": "TheIsland_WP"
     },
-    "startup": "proton run ./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?MaxPlayers={ENV.MAX_PLAYERS}?SessionName=\"{ENV.SERVER_NAME}\"?Port={GAME_PORT}?RCONPort={RCON_PORT}?RCONEnabled=True?ServerPassword=\"{ENV.SERVER_PASSWORD}\"?ServerAdminPassword=\"{ENV.ADMIN_PASSWORD}\" -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -oldconsole -servergamelog -Port={GAME_PORT} -NoBattlEye {MOD_ARG}",
+    "startup": "proton run ./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?MaxPlayers={ENV.MAX_PLAYERS}?SessionName=\"{ENV.SERVER_NAME}\"?Port={GAME_PORT} -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -oldconsole -servergamelog -Port={GAME_PORT} -NoBattlEye {MOD_ARG}",
     "ensureDirs": [
-      "compatdata",
-      ".steam/steam",
+      ".steam/steam/steamapps/compatdata/2430930",
       "ShooterGame/Saved/Config/WindowsServer",
       "ShooterGame/Saved/SavedArks",
       "ShooterGame/Saved/Logs"
@@ -34,7 +31,15 @@
     "requiredFiles": [
       "ShooterGame/Binaries/Win64/ArkAscendedServer.exe"
     ],
-    "configPatches": [],
+    "configPatches": [
+      {
+        "type": "ini",
+        "file": "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini",
+        "section": "ServerSettings",
+        "key": "RCONPort",
+        "value": "{RCON_PORT}"
+      }
+    ],
     "stopGracePeriodSeconds": 60,
     "startupCheckSeconds": 90.0
   },
@@ -86,8 +91,10 @@
   "health": {
     "process": {},
     "startup": {
-      "grace_period_seconds": 240,
+      "grace_period_seconds": 600,
+      "timeout_seconds": 1800,
       "success_patterns": [
+        "advertising for join",
         "Server successfully started",
         "Setting breakpad minidump AppID",
         "wp.Runtime.HLOD",
