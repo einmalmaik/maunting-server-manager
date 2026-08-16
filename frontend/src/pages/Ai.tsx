@@ -128,15 +128,39 @@ export function Ai() {
   // —, aber das entscheidet das Backend: `available` ist erst wahr, wenn beide
   // stehen. Fehlt einer, gibt es keinen Knopf — nicht ausgegraut, sondern gar
   // nicht. Dieselbe Regel wie bei `web_search`.
+  //
+  // Beides landet in der Anzeige beim selben Nichts, und deshalb steht hier
+  // eine Konsolenzeile: „nicht eingerichtet" ist ein Zustand, ein Serverfehler
+  // ist ein Fehler, und stumm sahen sie identisch aus. Der Betreiber suchte
+  // dann an der Oberfläche nach einem Knopf, während in Wahrheit die Migration
+  // fehlte. Keine Meldung auf dem Schirm — es ist eine Auskunft für den, der
+  // sucht, und kein Alarm für den, der den Sprachmodus gar nicht bestellt hat.
   useEffect(() => {
     if (!canSpeak) return
     let lebt = true
     aiApi
       .getVoiceConfig()
       .then((konfiguration) => {
-        if (lebt && konfiguration.available) setSprachkonfiguration(konfiguration)
+        if (!lebt) return
+        if (konfiguration.available) {
+          setSprachkonfiguration(konfiguration)
+          return
+        }
+        console.info(
+          'Sprachmodus nicht verfuegbar: es braucht zwei Zugaenge — einen Chatzugang ' +
+            'mit hinterlegtem Modell fuer Gesprochenes und einen ElevenLabs-Zugang mit ' +
+            'Voice ID. Einzurichten unter Einstellungen → KI → Anbieter.',
+          konfiguration,
+        )
       })
-      .catch(() => undefined)
+      .catch((fehler: unknown) => {
+        console.error(
+          'Sprachmodus: /api/ai/voice/config nicht abrufbar. Steht die Migration noch ' +
+            'aus (`alembic upgrade head`)? Die Spalten `transcription_model` und ' +
+            '`default_voice` kamen am 16.08.2026 dazu.',
+          fehler,
+        )
+      })
     return () => {
       lebt = false
     }
