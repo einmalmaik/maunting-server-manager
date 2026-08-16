@@ -693,127 +693,28 @@ def aufgaben_tools(kind: str) -> frozenset[str]:
     return AUFGABEN_LESEN
 
 
-# Was im Sprachmodus gelesen werden darf.
+# Hier standen `SPRACHE_LESEN`, `SPRACHE_HANDELN` und `sprache_tools()`.
 #
-# Dritte ausgeschriebene Menge nach `GUARDIAN_HEILUNG_TOOLS` und
-# `AUFGABEN_LESEN`, und aus demselben Grund keine Ableitung: ein kuenftiges
-# Werkzeug soll sich nicht stillschweigend im Sprachweg wiederfinden. Wer eines
-# aufnehmen will, schreibt es hin.
+# Sie waren die Werkzeugmenge eines **zweiten** Modells: bis zum 16.08.2026
+# antwortete im Sprachmodus OpenAIs Realtime-API mit eigenem Werkzeuglauf, und
+# die Menge trug der Lage Rechnung, dass dort jemand redet, aber **nichts
+# sieht** — kein `ask_user` (eine Karte, die niemand hoert), keine
+# Hosterwerkzeuge, kein `learn_skill`.
 #
-# Die Bedrohungslage ist eine **dritte**. Beim Guardian sitzt niemand davor,
-# beim stehenden Auftrag hat jemand vorher zugestimmt — hier sitzt jemand davor
-# und redet, aber er **sieht nichts**. Das ist der Unterschied, der diese Menge
-# bestimmt: alles, was seine Antwort nur im Panel zeigen kann, ist hier nutzlos
-# oder irrefuehrend.
+# Beide Voraussetzungen sind entfallen. Es gibt kein zweites Modell mehr; der
+# Sprachmodus benutzt denselben Lauf wie der getippte Chat. Und der Sprechende
+# sieht sehr wohl etwas: die Sprachansicht liegt im Panel, Belege und
+# Vorschlagskarten erscheinen darin (`ai_voice_bridge`). Eine eigene Menge waere
+# heute eine vierte Liste, die niemand pflegt — und die beim naechsten neuen
+# Werkzeug still veraltet.
 #
-# Deshalb fehlt `ask_user`: es beendet den Zug und stellt eine Karte mit
-# Knoepfen hin. Im Sprachmodus fragt das Modell, indem es **fragt** — eine Karte
-# waere eine Rueckfrage, die der Sprechende nicht hoert.
-#
-# Deshalb fehlen die Hoster-Werkzeuge: Rechte und Schluessel gehoeren nicht in
-# einen Kanal, dessen Ausgabe man ueberhoert, wenn man gerade wegsieht.
-#
-# Deshalb fehlt `send_test_email`: nichts daran ist ein Gespraech.
-#
-# Das Gedaechtnis ist ausdruecklich dabei. „Merk dir, dass mein Testserver der
-# zweite ist" ist genau der Satz, den man spricht und nicht tippt — und es ist
-# dieselbe Unterhaltung desselben Menschen, geschuetzt durch dasselbe
-# `ai.memory.use`.
-#
-# `learn_skill` und `forget_skill` fehlen dagegen: ein Skill ist Prosa, die
-# kuenftige Laeufe anleitet, und was jemand nebenbei ins Mikrofon sagt, soll
-# nicht dauerhaft die Arbeitsweise der KI aendern. `read_skill` bleibt, damit
-# Gelerntes auch im Gespraech wirkt.
-SPRACHE_LESEN = frozenset({
-    # Was ist mit meinen Servern?
-    "list_my_servers",
-    "read_server_status",
-    "read_server_capacity",
-    "read_server_logs",
-    "read_config",
-    "read_server_ports",
-    "read_server_network",
-    "check_server_reachability",
-    "read_server_mods",
-    "read_mod_updates",
-    "search_workshop_mods",
-    "list_server_files",
-    "search_server_files",
-    "read_server_backups",
-    "read_guardian_incidents",
-    "read_ai_action_history",
-    # Was ist mit der Anlage?
-    "list_blueprints",
-    "read_blueprint",
-    "read_node_capacity",
-    "read_node_health",
-    # Nachschlagen.
-    "search_docs",
-    "read_docs",
-    "web_search",
-    "list_tasks",
-    # Sich etwas merken und Gemerktes wiederfinden.
-    "remember",
-    "search_memory",
-    "forget_memory",
-    "read_skill",
-})
-
-
-# Was im Sprachmodus geaendert werden darf — nach gesprochener Bestaetigung.
-#
-# Die Zusammensetzung ist fast dieselbe wie `AUFGABEN_HANDELN`, und das ist kein
-# Zufall: beide Male gilt dasselbe Kriterium, nur aus einem anderen Grund.
-#
-# Dort fehlt `propose_file_delete`, weil kein Vorfall existiert, ab dem ein
-# Backup gerechnet wuerde. Hier fehlt es aus einem zweiten Grund, der schwerer
-# wiegt: **eine gesprochene Zustimmung ist schwaecher als ein Klick.** Sie kann
-# missverstanden werden, im Hintergrund kann jemand anders „ja" sagen, und der
-# Beweis im Audit ist ein Transkript statt einer Betaetigung. Fuer alles, wovon
-# es keinen Weg zurueck gibt, ist das zu wenig.
-#
-# Deshalb steht hier **nichts** aus `ALWAYS_CONFIRM_TOOLS`, und das wird nicht
-# nur so gemeint, sondern in `ai_voice_tools.Bruecke` geprueft: Loeschen,
-# Backup-Einspielen, Hoster-Schluessel und Rollenvergabe verlangen weiterhin die
-# Karte. Die KI sagt dann „schau bitte kurz ins Panel" — und das ist die
-# richtige Antwort, nicht eine Einschraenkung.
-#
-# Ebenfalls nicht dabei, jeweils aus dem Grund, der auch bei `AUFGABEN_HANDELN`
-# steht: Servererstellung und Blueprintwechsel (Reichweite ueber das Gespraech
-# hinaus, der Wechsel leert zudem das Serververzeichnis), die Hoster-Werkzeuge
-# (Rechte und Schluessel) und die Aufgabenwerkzeuge (ein Auftrag, den man
-# nebenbei diktiert, laeuft danach jede Nacht).
-#
-# `propose_blueprint_delete` fehlt als eines der Loeschwerkzeuge aus
-# `ALWAYS_CONFIRM_TOOLS`, und hier greift der Satz oben besonders woertlich: der
-# Sprechende sieht nicht, welche Server auf dieser Vorlage liegen. Ein „ja" auf
-# eine Frage, deren Tragweite nur im Panel steht, ist keine Zustimmung — die KI
-# sagt in diesem Fall „schau bitte kurz ins Panel".
-SPRACHE_HANDELN = frozenset({
-    "propose_server_lifecycle",
-    "propose_backup",
-    "propose_config_update",
-    "propose_config_patch",
-    "propose_mod_install",
-    "propose_bind_ip_update",
-    "propose_server_repair",
-})
-
-
-def sprache_tools(*, darf_handeln: bool) -> frozenset[str]:
-    """Die Werkzeugmenge einer Sprachsitzung.
-
-    ``darf_handeln`` ist nicht die Autonomiefreigabe, sondern die Frage, ob
-    dieser Benutzer ueberhaupt Schreibwerkzeuge angeboten bekommt. Wer sie nicht
-    ausfuehren darf, soll sie auch nicht vorgeschlagen bekommen — ein Modell,
-    das sie versucht, prallt sonst ab und hat eine Runde verbraucht. Die
-    Fallunterscheidung steht hier und nicht beim Aufrufer, aus demselben Grund
-    wie bei `aufgaben_tools`: sonst gaebe es zwei Stellen, an denen jemand die
-    Vereinigung bildet, und eine davon vergaesse die Bedingung.
-    """
-    if darf_handeln:
-        return SPRACHE_LESEN | SPRACHE_HANDELN
-    return SPRACHE_LESEN
+# Mit ihnen ist der Parameter ``sprache`` aus `create_proposal` gefallen. Das
+# ist die eine Verschaerfung, die dieser Umbau **zuruecknimmt**, und der
+# Betreiber hat sie ausdruecklich verlangt: eine gesprochene Zustimmung fuehrt
+# jetzt auch aus, was in `ALWAYS_CONFIRM_TOOLS` steht. Alles andere bleibt —
+# `confirm_proposal` prueft die Rechte erneut, `execute_proposal` ein drittes
+# Mal, der Einmal-Token wird atomar entwertet, das Audit vermerkt den Vorgang.
+# Ersetzt ist genau ein Schritt: der Klick.
 
 
 GUARDIAN_BACKUP_PFLICHT_TOOLS = frozenset({

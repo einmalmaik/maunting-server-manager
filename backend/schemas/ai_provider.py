@@ -1,11 +1,10 @@
 """Secret-minimierte API-Vertraege fuer AI-Provider."""
 
+import re
 from datetime import datetime
 from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, Field, SecretStr
-
-from services.ai_voice_session import STIMMEN
 
 
 # Obergrenze fuer den gepflegten Preis: 1.000 USD je eine Million Tokens, in
@@ -15,42 +14,78 @@ from services.ai_voice_session import STIMMEN
 MAX_TOKEN_PRICE_MICRO_USD = 1_000_000_000
 
 
+#: Woraus eine Stimm-Kennung bestehen darf. Bewusst eng, und zwar nicht aus
+#: Ordnungsliebe: der Wert wird in einen **URL-Pfad** eingesetzt
+#: (``/v1/text-to-speech/{voice}/stream-input``). Ein ``/`` darin waere ein
+#: anderer Endpunkt, ein ``?`` ein angehaengter Parameter, ein ``..`` ein Schritt
+#: nach oben. Die bekannten Kennungen sind zwanzig Zeichen aus Buchstaben und
+#: Ziffern; diese Menge laesst zusaetzlich ``-`` und ``_`` zu und damit alles,
+#: was ElevenLabs plausibel je vergeben wird, aber nichts, was den Pfad verlaesst.
+_STIMME_MUSTER = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
 def _stimme_lesen(wert: object) -> str | None:
-    """Nachsichtig lesen, streng speichern — und Unbekanntes gar nicht erst.
+    """Nachsichtig lesen, streng speichern.
 
-    Nachsichtig in zwei Punkten, und beide sind keine Falscheingabe: Ein
-    Auswahlfeld ohne Wahl schickt ``""`` und nicht ``null`` — das ist der Weg,
-    auf dem „nichts hinterlegt" hier ankommt. Und in der Oberflaeche steht die
-    Stimme gross („Alloy"), waehrend die API sie klein verlangt; wer den Wert
-    von Hand setzt, tippt ab, was er sieht. Ein 422 dafuer waere eine Belehrung
-    ohne Anlass.
+    Nachsichtig beim Leeren: ein Formularfeld ohne Eingabe schickt ``""`` und
+    nicht ``null`` — das ist der Weg, auf dem „nichts hinterlegt" hier ankommt.
+    Ein 422 dafuer waere eine Belehrung ohne Anlass.
 
-    Streng beim Unbekannten: eine erfundene Stimme faellt sonst erst beim
-    Verbinden auf, und zwar der Gegenstelle. Der Betreiber saehe einen
-    Anbieterfehler in einem Sprachgespraech statt einer Fehlermeldung an dem
-    Feld, in das er gerade getippt hat.
+    Nachsichtig auch bei Rand-Leerzeichen: eine Stimm-Kennung wird kopiert und
+    eingefuegt, und beim Kopieren kommt regelmaessig ein Leerzeichen mit. Es
+    stillschweigend zu entfernen ist richtig; es stehenzulassen ergaebe ein 404
+    bei der Gegenstelle, das nach einem falschen Schluessel aussieht.
 
-    Ein leerer Wert wird zu ``None`` und nicht zu ``""``: in der Spalte heisst
-    ``None`` „nichts hinterlegt" und loest auf die Standardstimme auf — ein
-    leerer String haette dort keine Bedeutung und ginge als Stimme an OpenAI.
+    Streng bei allem anderen. Anders als bei den acht Stimmen davor gibt es hier
+    **keine Liste**, gegen die sich pruefen liesse: die Kennungen gehoeren dem
+    Konto des Betreibers, und MSM kennt sie nicht. Geprueft wird deshalb die
+    Form — und die Form ist hier eine Sicherheitsfrage und keine Kosmetik, weil
+    der Wert in einen Pfad geht.
+
+    Ausdruecklich **nicht** kleingeschrieben, anders als die Stimmen zuvor:
+    ``21m00Tcm4TlvDq8ikWAM`` ist gross- und kleinempfindlich. Ein ``.lower()``
+    hier haette jede zweite Kennung unbrauchbar gemacht.
     """
     if wert is None:
         return None
-    name = str(wert).strip().lower()
-    if not name:
+    kennung = str(wert).strip()
+    if not kennung:
         return None
-    if name not in STIMMEN:
+    if not _STIMME_MUSTER.match(kennung):
         raise ValueError(
-            "Unbekannte Stimme. Waehlbar sind: " + ", ".join(sorted(STIMMEN))
+            "Ungueltige Stimm-Kennung. Erlaubt sind Buchstaben, Ziffern, "
+            "Bindestrich und Unterstrich (hoechstens 64 Zeichen)."
         )
-    return name
+    return kennung
 
 
-#: Eine der acht Realtime-Stimmen, oder ``None`` fuer „nichts hinterlegt". Die
-#: Liste steht in `services.ai_voice_session` und **nur** dort: sie gehoert zum
-#: Protokoll der Gegenstelle, nicht zu diesem Vertrag. Eine Kopie hier waere die
-#: zweite Wahrheit, die beim naechsten Wechsel des Anbieters still veraltet.
+def _modell_lesen(wert: object) -> str | None:
+    """Wie `_stimme_lesen`, aber fuer eine Modellkennung.
+
+    Eigene Funktion und kein gemeinsamer Validator: eine Modellkennung darf
+    ``/`` enthalten (``google/gemini-2.5-flash``) und eine Stimm-Kennung darf es
+    ausdruecklich nicht. Dieselbe Pruefung fuer beide waere entweder zu eng fuer
+    das Modell oder zu weit fuer die Stimme — und „zu weit fuer die Stimme"
+    heisst hier: ein Pfad, der woandershin zeigt.
+
+    Geprueft wird nur auf leer. Welche Modelle es gibt, sagt der Katalog, und
+    der wird beim Speichern nicht befragt: der Betreiber soll ein Modell
+    eintragen koennen, das der Katalog gerade nicht fuehrt, ohne dass die
+    Einstellungsseite ihn belehrt.
+    """
+    if wert is None:
+        return None
+    kennung = str(wert).strip()
+    return kennung or None
+
+
+#: Eine Stimm-Kennung aus dem Konto des Betreibers, oder ``None`` fuer „nichts
+#: hinterlegt". Ohne sie gibt es keinen Sprachmodus — nie eine geratene Stimme,
+#: denn sie stuende in seiner Abrechnung.
 Stimme = Annotated[str | None, BeforeValidator(_stimme_lesen)]
+
+#: Eine Modellkennung, oder ``None`` fuer „nichts hinterlegt".
+Modellkennung = Annotated[str | None, BeforeValidator(_modell_lesen)]
 
 
 class AiProviderCreate(BaseModel):
@@ -76,6 +111,10 @@ class AiProviderCreate(BaseModel):
     # dabei stillschweigend haette geloescht werden muessen, waere aergerlicher
     # als eine, die ungenutzt dasteht.
     default_voice: Stimme = None
+    # Das Gegenstueck zur Stimme, und zwar am **anderen** Zugang: hier steht das
+    # hoerende Modell des Chatzugangs. Auch dieses Feld wird nicht gegen
+    # `provider_kind` geprueft, aus demselben Grund wie die Stimme darueber.
+    transcription_model: Modellkennung = Field(default=None, max_length=256)
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
 
 
@@ -96,6 +135,7 @@ class AiProviderUpdate(BaseModel):
     # Router — deshalb braucht dieses Feld kein eigenes ``clear_``-Flag, anders
     # als der Schluessel darunter, den die Antwort nie zurueckgibt.
     default_voice: Stimme = None
+    transcription_model: Modellkennung = Field(default=None, max_length=256)
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
     clear_operator_api_key: bool = False
 
@@ -111,11 +151,15 @@ class AiProviderResponse(BaseModel):
     base_url: str | None = None
     default_model: str
     #: Bewusst ohne die Pruefung aus `Stimme`: gelesen wird hier, was in der
-    #: Zeile steht. Nimmt OpenAI eines Tages eine Stimme aus dem Programm, soll
-    #: der Betreiber sie in der Liste sehen und aendern koennen — eine 500 beim
-    #: blossen Anzeigen waere die schlechteste Art, ihm das mitzuteilen.
-    #: ``None`` heisst „nichts hinterlegt", nicht „alloy".
+    #: Zeile steht. Loescht der Betreiber eine Stimme in seinem Konto, soll er
+    #: sie in der Liste sehen und aendern koennen — eine 500 beim blossen
+    #: Anzeigen waere die schlechteste Art, ihm das mitzuteilen. Und genau das
+    #: waere passiert, als am 2026-08-16 aus ``alloy`` eine Kennung wurde: jede
+    #: Bestandszeile haette die Einstellungsseite zerlegt.
+    #: ``None`` heisst „nichts hinterlegt".
     default_voice: str | None = None
+    #: Wie `default_voice` ungeprueft gelesen, aus demselben Grund.
+    transcription_model: str | None = None
     enabled: bool
     requires_api_key: bool
     operator_key_configured: bool
@@ -132,11 +176,13 @@ class AiProviderKindResponse(BaseModel):
     base_url: str
     key_url: str
     key_prefix: str | None
-    #: ``chat_completions`` oder ``realtime``. Steht hier, weil das Formular
-    #: sonst zwei Zugaenge anbietet, die verschiedene Dinge tun, und nichts
-    #: verraet welchen wofuer. Ein Realtime-Zugang taucht in der Chatauswahl
+    #: ``chat_completions`` oder ``tts``. Steht hier, weil das Formular sonst
+    #: zwei Zugaenge anbietet, die verschiedene Dinge tun, und nichts verraet
+    #: welchen wofuer. Ein Stimmzugang taucht in der Modellauswahl des Chats
     #: spaeter gar nicht auf — das soll der Betreiber beim Anlegen wissen und
-    #: nicht danach suchen muessen.
+    #: nicht danach suchen muessen. Umgekehrt entscheidet dieses Feld auch,
+    #: welche Zusatzfelder das Formular zeigt: die Stimme beim einen, das
+    #: hoerende Modell beim anderen.
     protokoll: str
     #: Ob der Modellkatalog dieses Anbieters den Betreiberschluessel braucht.
     #: Die Oberflaeche erklaert damit die leere Modelliste, statt sie als

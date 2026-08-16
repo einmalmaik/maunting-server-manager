@@ -23,8 +23,9 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from models import AiProvider, AiRun, User
+import re
+
 from services import ai_provider_registry
-from services.ai_voice_session import STIMMEN
 from services.dis_client import DisClient
 
 
@@ -92,31 +93,48 @@ def _assert_key_passt(kind: str, api_key: str | None) -> None:
         )
 
 
+#: Woraus eine Stimm-Kennung bestehen darf — dieselbe Menge wie in
+#: `schemas.ai_provider`, und aus demselben Grund: der Wert wird in einen
+#: **URL-Pfad** eingesetzt (``/v1/text-to-speech/{voice}/stream-input``). Ein
+#: ``/`` darin wäre ein anderer Endpunkt, ein ``?`` ein angehängter Parameter.
+_STIMME_MUSTER = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
 def _assert_stimme(stimme: str | None) -> str | None:
-    """Nur eine Stimme, die es wirklich gibt — oder gar keine.
+    """Nur eine Stimm-Kennung von zulässiger Form — oder gar keine.
 
     Die verbindliche Prüfung, obwohl `schemas.ai_provider.Stimme` dasselbe schon
     tut. Der Vertrag dort verschafft dem Betreiber eine 422 mit Feldbezug statt
     einer Meldung ohne Ort; hier steht sie, weil nicht jeder Schreibweg durch
     ihn führt — ein Seed, ein Test, ein späterer Importweg schreiben direkt in
-    diese Funktion. Und eine erfundene Stimme fiele sonst erst beim Verbinden
-    auf, als Anbieterfehler mitten in einem Sprachgespräch.
+    diese Funktion. Es ist damit **eine Sicherheitsprüfung an zwei Stellen**
+    und keine doppelte Kosmetik: die eine sichert das Formular, die andere die
+    Funktion.
 
-    ``None`` bleibt ``None`` und wird **nicht** zur Standardstimme aufgelöst:
-    was in der Spalte steht, ist die Wahl des Betreibers, und die hat er hier
-    nicht getroffen. Aufgelöst wird beim Verbinden, siehe
-    `ai_voice_session.STANDARDSTIMME`.
+    Geprüft wird die Form und nicht die Existenz. Anders als bei den acht
+    Stimmen, die hier bis zum 16.08.2026 standen, gibt es keine Liste: die
+    Kennungen gehören dem Konto des Betreibers, und MSM kennt sie nicht. Ob es
+    die Stimme wirklich gibt, sagt der Testknopf.
+
+    Ausdrücklich **nicht** kleingeschrieben: ``21m00Tcm4TlvDq8ikWAM`` ist
+    gross- und kleinempfindlich, und ein ``.lower()`` hätte hier jede zweite
+    Kennung unbrauchbar gemacht.
+
+    ``None`` bleibt ``None``. Eine Standardstimme gibt es nicht und soll es
+    nicht geben — ohne hinterlegte Stimme gibt es keinen Sprachmodus, statt
+    einer geratenen Stimme auf der Rechnung des Betreibers.
     """
     if stimme is None:
         return None
-    name = stimme.strip().lower()
-    if not name:
+    kennung = stimme.strip()
+    if not kennung:
         return None
-    if name not in STIMMEN:
+    if not _STIMME_MUSTER.match(kennung):
         raise AiProviderConfigurationError(
-            "Unbekannte Stimme. Wählbar sind: " + ", ".join(sorted(STIMMEN))
+            "Ungültige Stimm-Kennung. Erlaubt sind Buchstaben, Ziffern, "
+            "Bindestrich und Unterstrich (höchstens 64 Zeichen)."
         )
-    return name
+    return kennung
 
 
 def create_provider(
@@ -130,10 +148,13 @@ def create_provider(
     operator_api_key: str | None,
     # Optional: ohne Preis bleiben die Kosten bei null (siehe estimate_cost_microunits).
     token_price_micro_usd_per_million: int | None = None,
-    # Optional: ohne Stimme greift beim Verbinden `ai_voice_session.STANDARDSTIMME`.
-    # Der Standard wird bewusst **nicht** hier eingetragen — warum, steht an der
+    # Optional: ohne Stimme gibt es über diesen Zugang keinen Sprachmodus. Eine
+    # Standardstimme wird bewusst **nicht** eingetragen — warum, steht an der
     # Spalte in `models/ai_provider.py`.
     default_voice: str | None = None,
+    # Optional: das hörende Modell eines Chatzugangs. Ohne es gibt es über
+    # diesen Zugang ebenfalls keinen Sprachmodus.
+    transcription_model: str | None = None,
 ) -> AiProvider:
     if not name.strip() or not default_model.strip():
         raise AiProviderConfigurationError("Provider-Name und Modell dürfen nicht leer sein")
@@ -147,6 +168,7 @@ def create_provider(
         requires_api_key=requires_api_key,
         token_price_micro_usd_per_million=token_price_micro_usd_per_million,
         default_voice=_assert_stimme(default_voice),
+        transcription_model=(transcription_model or "").strip() or None,
     )
     db.add(provider)
     db.flush()
@@ -195,12 +217,15 @@ def update_provider(
     # Wie beim Preis darüber entscheidet die **Anwesenheit** des Schlüssels und
     # nicht sein Wert: `values` kommt aus `model_dump(exclude_unset=True)`, ein
     # nicht mitgeschicktes Feld fehlt also ganz. Ein ausdrückliches ``null``
-    # landet dagegen hier und leert die Spalte — der Zugang spricht danach
-    # wieder mit der Standardstimme. Nicht bei `name`/`default_model` oben, denn
-    # die dürfen nicht leer werden; diese Spalte schon, und leer heißt hier
-    # etwas.
+    # landet dagegen hier und leert die Spalte — über den Zugang lässt sich
+    # danach nicht mehr sprechen. Nicht bei `name`/`default_model` oben, denn
+    # die dürfen nicht leer werden; diese beiden Spalten schon, und leer heißt
+    # hier etwas.
     if "default_voice" in values:
         provider.default_voice = _assert_stimme(values["default_voice"])
+    if "transcription_model" in values:
+        rohwert = values["transcription_model"]
+        provider.transcription_model = (rohwert or "").strip() or None
     if clear_operator_api_key:
         provider.operator_api_key_encrypted = None
         provider.operator_api_key_hint = None

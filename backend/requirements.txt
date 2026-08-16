@@ -53,8 +53,9 @@ boto3==1.43.40
 model2vec==0.8.2
 
 # --- WebSocket-Client fuer den Sprachmodus ---
-# websockets: die ausgehende Verbindung zu OpenAIs Realtime-API
-# (wss://api.openai.com/v1/realtime), gekapselt in services/ai_voice_session.py.
+# websockets: die ausgehende Verbindung zur Stimme
+# (wss://api.elevenlabs.io/v1/text-to-speech/{voice}/stream-input), gekapselt in
+# services/ai_tts_elevenlabs.py.
 #
 # **Keine neue Abhaengigkeit im Baum, sondern eine bisher zufaellige.** Das Paket
 # ist laengst installiert, weil `uvicorn[standard]` es als `websockets>=10.4`
@@ -64,16 +65,21 @@ model2vec==0.8.2
 # stillschweigenden Annahme eine ueberpruefbare Zusage; der Abhaengigkeitsbaum
 # waechst dadurch um kein einziges Paket (websockets hat selbst keine).
 #
-# Warum ueberhaupt eine ausgehende WS-Verbindung: OpenRouter hat keine
-# Realtime-API (2026-08-15 geprueft, POST /api/v1/realtime -> 404), und
-# httpx spricht kein WebSocket. Das Panel leitet den Ton deshalb selbst weiter,
-# statt den Browser direkt mit OpenAI sprechen zu lassen — nur so bleibt die
-# Werkzeugschleife im Backend und der Betreiberschluessel im Prozess.
+# Der Eintrag kam am 2026-08-15 fuer OpenAIs Realtime-API und hat sie einen Tag
+# ueberlebt. Das ist kein Zufall, sondern der Grund, warum hier ein Paket steht
+# und kein Anbieter-SDK: `elevenlabs` waere ein zweites Paket samt eigenem
+# Abhaengigkeitsbaum fuer einen WebSocket, den wir schon sprechen koennen.
 #
-# Beruehrt Secrets: ja, der Betreiberschluessel geht als Authorization-Kopf
+# Warum ueberhaupt eine ausgehende WS-Verbindung: httpx spricht kein WebSocket,
+# und Text stueckweise hineinzugeben ist der ganze Punkt — wer auf die fertige
+# Antwort wartet, bevor er sie vorlesen laesst, wartet zweimal. Das Panel leitet
+# den Ton deshalb selbst weiter, statt den Browser direkt mit dem Anbieter
+# sprechen zu lassen; nur so bleibt der Betreiberschluessel im Prozess.
+#
+# Beruehrt Secrets: ja, der Betreiberschluessel geht als `xi-api-key`-Kopf
 # hinaus. Genau deshalb ist die Bibliothek gekapselt, und genau deshalb ist es
 # eine, die ohnehin schon im Prozess laeuft, statt einer zweiten daneben.
-# Exit-Plan: ai_voice_session kapselt die gesamte Nutzung; ein Wechsel auf
+# Exit-Plan: ai_tts_elevenlabs kapselt die gesamte Nutzung; ein Wechsel auf
 # aiohttp oder wsproto beruehrt nur diese eine Datei.
 websockets==16.0
 # Transitiv durch model2vec, hier gepinnt, weil ai_embedding_service direkt

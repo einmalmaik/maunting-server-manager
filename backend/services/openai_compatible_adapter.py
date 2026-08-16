@@ -375,6 +375,7 @@ async def stream_chat_completion(
     reasoning: bool = False,
     reasoning_effort: str | None = None,
     cache_marke: bool = False,
+    model: str | None = None,
 ) -> AsyncIterator[StreamChunk]:
     """Normalisiert Provider-SSE zu Antwort- und Denkschritt-Stuecken.
 
@@ -466,6 +467,17 @@ async def stream_chat_completion(
     SNI-Hostnamen. Das war noetig, solange die Zieladresse aus einem Formular
     stammte. Sie kommt jetzt aus `ai_provider_registry`, also aus dem Programm —
     es gibt keine Eingabe mehr, die auf ein internes Netz zeigen koennte.
+
+    ``model`` uebersteuert ``provider.default_model``. Es gibt genau einen
+    Aufrufer dafuer, und der erklaert den Parameter: `ai_stt_openrouter` schickt
+    Gesprochenes an das **hoerende** Modell desselben Zugangs
+    (``transcription_model``). Ohne den Parameter muesste dafuer ein zweiter
+    Zugang eingerichtet werden — mit demselben Schluessel, derselben Adresse und
+    einer anderen Modellzeile. Zwei Zeilen fuer denselben Anbieter waeren zwei
+    Stellen, an denen ein Schluessel abzulaufen droht.
+
+    Ohne Angabe bleibt es bei ``provider.default_model``: jeder bisherige
+    Aufrufer verhaelt sich unveraendert.
     """
     if provider.requires_api_key and not api_key:
         raise AiProviderRequestError("AI_PROVIDER_KEY_MISSING")
@@ -474,7 +486,7 @@ async def stream_chat_completion(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     request_body = {
-        "model": provider.default_model,
+        "model": model or provider.default_model,
         "messages": messages,
         "stream": True,
     }

@@ -9,7 +9,9 @@ Umbruch wurde, und die Datei war syntaktisch kaputt.
 Hier ist jeder Abschnitt eine eigene dreifach zitierte Konstante. Darin
 brauchen Anfuehrungszeichen keine Maskierung, und ein Umbruch ist einfach ein
 Umbruch. Die Reihenfolge steht in ``BLOECKE`` — wer eine Regel verschieben
-will, verschiebt einen Namen.
+will, verschiebt einen Namen. Daneben steht ``NUR_GETIPPT``: welche Bloecke im
+Sprachmodus **nicht** mitgehen. Wer einen Block anfasst, sieht in derselben
+Datei, ob er auch gesprochen gilt.
 
 **Der Prompt ist nicht die Sicherheitsgrenze.** Die liegt in RBAC, der
 Werkzeug-Allowlist, `_resolve_server` und der Bestaetigungspflicht. Er soll das
@@ -24,7 +26,16 @@ ROLLE = """\
 Du bist der MSM-Assistent — der Assistent eines Gameserver-Panels. Du hilfst \
 bei Servern, Logs, Konfigurationen, Mods, Netzwerk und Nodes, beantwortest \
 aber auch ganz normale Fragen. Antworte knapp, freundlich und in der Sprache \
-des Benutzers. Formatiere mit Markdown, wenn es die Antwort lesbarer macht."""
+des Benutzers."""
+
+
+# Der Satz stand bis heute am Ende von ROLLE. Herausgeloest, weil er als
+# einziger Teil davon eine **Ausgabeform** vorschreibt und nicht sagt, wer die
+# KI ist: gesprochen gibt es kein Markdown, und Sternchen und
+# Aufzaehlungszeichen koennen mitgesprochen werden. Ein eigener Block ist der
+# billigste Weg, ihn vom Sprachweg fernzuhalten — siehe `NUR_GETIPPT`.
+FORMAT = """\
+Formatiere mit Markdown, wenn es die Antwort lesbarer macht."""
 
 
 # Der eine Chat behandelt nacheinander unabhaengige Themen. Ohne diesen Hinweis
@@ -67,22 +78,50 @@ weiterkommst."""
 # (`ai_stream_service._tool_followup_messages`), kostet ein Buendel von fuenf
 # soviel wie sein langsamstes Glied — Buendeln ist ab jetzt auch technisch das
 # Guenstigere und nicht nur das Angenehmere.
+#
+# **Dieser Block ist in drei zerlegt, und der Anlass ist der Sprachmodus.** Er
+# trug drei Regeln in einem: ansagen, buendeln, nicht stumm enden. Nur die
+# **erste** ist an einen Bildschirm gebunden; die beiden anderen gelten
+# gesprochen genauso oder sogar staerker. Solange sie zusammenstanden, liess
+# sich die erste nicht wegnehmen, ohne die anderen mitzunehmen — und genau das
+# hat der Sprachprompt bisher mit einem Widerruf im Fliesstext zu heilen
+# versucht. Der Anlass steht im Protokoll vom 16.08.2026: die KI sagte
+# gesprochen "Ich schaue mir zuerst die Serverliste an, damit wir bei jedem
+# Einzelnen nur die passenden Details pruefen" — das ist fast woertlich das
+# Beispiel aus dem ersten Absatz, samt der Begruendung aus dem zweiten.
 MITREDEN = """\
 Sag, was du tust, waehrend du es tust. Bevor du Werkzeuge aufrufst, schreib \
 **einen kurzen Satz**, was du jetzt nachsiehst und warum ("Ich schau mir erst \
 den Zustand deiner Server an."). Wenn die Ergebnisse da sind, schreib in einem \
 Satz, was dabei herauskam, bevor du weitermachst. Der Benutzer sieht deinen \
 Text sofort — ein stiller Werkzeugaufruf sieht fuer ihn aus, als haenge das \
-Panel.
+Panel."""
+
+
+# Zweiter Absatz des alten MITREDEN. Gilt gesprochen **staerker** als getippt:
+# im Chat kostet eine zusaetzliche Runde Wartezeit vor einem Bildschirm, im
+# Gespraech eine Pause mitten im Satz. Deshalb steht er ausdruecklich nicht in
+# `NUR_GETIPPT`.
+BUENDELN = """\
 Ruf Werkzeuge, die nicht voneinander abhaengen, **zusammen in einer Runde** \
 auf. Status, Ports und Backups von drei Servern sind neun Aufrufe in einem \
 Zug, nicht neun Runden nacheinander — sie laufen gleichzeitig und kosten \
 zusammen kaum mehr als einer. Nacheinander gehoert nur, was aufeinander \
-aufbaut: erst `list_my_servers`, dann die Nummer, die daraus kommt.
-Beende einen Zug nie ohne sichtbaren Text. Auch wenn du nur einen Vorschlag \
-zur Bestaetigung abgibst oder eine Rueckfrage stellst, gehoert darueber ein \
-Satz, der ihn erklaert — eine leere Blase ist fuer den Benutzer ein Fehler, \
-kein Ergebnis."""
+aufbaut: erst `list_my_servers`, dann die Nummer, die daraus kommt."""
+
+
+# Dritter Absatz des alten MITREDEN, medienneutral umformuliert. Er hiess
+# "Beende einen Zug nie ohne **sichtbaren** Text … eine leere **Blase** ist fuer
+# den Benutzer ein Fehler" — die eine Regel im ganzen Prompt, die die Stille
+# nach einem Werkzeugaufruf verbietet, und sie hing an zwei Woertern, die es im
+# Gespraech nicht gibt. Gesprochen las das Modell sie damit als "gilt hier
+# nicht". Der Anlass ist derselbe Betriebsbericht: nach dem Werkzeug kam nichts
+# mehr. Die technischen Ursachen dafuer liegen anderswo; dieser Satz ist die
+# Haelfte, die der Prompt beitragen kann.
+KEIN_STUMMER_ZUG = """\
+Beende einen Zug nie stumm. Auch wenn du nur einen Vorschlag zur Bestaetigung \
+abgibst oder eine Rueckfrage stellst, gehoert ein Satz davor, der ihn erklaert \
+— nichts zu sagen ist fuer den Menschen ein Fehler, kein Ergebnis."""
 
 
 # Aufgefallen ist es am Sprachmodus, wo es unertraeglich war — dort wurde der
@@ -479,11 +518,17 @@ Weckt dich ein faelliger Auftrag, sitzt niemand davor: `ask_user` gibt es dann n
 # zwischen Regel und Verbot stehen.
 BLOECKE = (
     ROLLE,
+    FORMAT,
     EINZELCHAT,
     # Weit vorne und nicht bei den Werkzeugregeln: es ist eine Anweisung zum
     # **Auftreten**, nicht zur Bedienung. Sie gilt fuer jeden Zug, auch fuer
     # die, in denen gar kein Werkzeug vorkommt.
     MITREDEN,
+    # Die beiden Geschwister von MITREDEN, aus ihm herausgeloest. Sie stehen
+    # unmittelbar dahinter, weil sie zusammen gelesen denselben Zug beschreiben
+    # — nur haben sie im Gespraech ein anderes Schicksal als die Ansage.
+    BUENDELN,
+    KEIN_STUMMER_ZUG,
     # Unmittelbar dahinter, weil es dieselbe Frage von der anderen Seite
     # beantwortet: MITREDEN sagt, dass geredet wird, waehrend gearbeitet wird —
     # BELEGE sagt, wie das Gefundene danach aussieht. Zusammen gelesen ergeben
@@ -513,12 +558,114 @@ NACH_SKILL_INDEX = (
 )
 
 
-def build(skill_index: str = "") -> str:
+#: Was gesprochen nicht gilt.
+#:
+#: **Diese Liste war einmal achtmal so lang**, und der Grund dafuer ist mit dem
+#: 16.08.2026 entfallen. Bis dahin sprach im Sprachmodus ein zweites Modell mit
+#: einem eigenen, kleineren Werkzeugkatalog: `ask_user` gab es dort nicht,
+#: `learn_skill` nicht, die Auftragswerkzeuge nicht. Jeder Block, der eines
+#: davon verlangte, war gesprochen eine Anweisung ins Leere — im guenstigen Fall
+#: eine verlorene Runde Stille, im unguenstigen ein Aufruf, der abprallt,
+#: waehrend der Mensch wartet.
+#:
+#: Seit der Sprachmodus **denselben Lauf** benutzt wie der getippte Chat, gibt
+#: es diese Luecke nicht mehr. Es ist derselbe Katalog, dieselbe
+#: Bestaetigungspflicht, dieselben Rechte. Uebrig bleiben zwei Bloecke, und
+#: beide aus einem Grund, der nichts mit Werkzeugen zu tun hat:
+#:
+#: * `FORMAT` — Markdown. Gesprochen gibt es keins, und eine vorgelesene
+#:   Aufzaehlung mit Bindestrichen klingt nach Formular. Was gesprochen an seine
+#:   Stelle tritt, steht in `GESPROCHEN`.
+#: * `GUARDIAN` — beginnt mit "Weckt dich ein Vorfall statt eines Menschen". In
+#:   einer Sprachsitzung sitzt per Definition ein Mensch davor.
+#:
+#: **`MITREDEN` steht ausdruecklich nicht mehr hier**, und das ist die
+#: auffaelligste Umkehrung. Der Block war der Anlass fuer diese Liste: gefragt
+#: war nach dem Zustand der Server, gesprochen kam "Ich schaue mir zuerst die
+#: Serverliste an …" — und danach Stille. Die Ansage war damals das Problem.
+#: Jetzt ist sie der Hebel: sie ist das Erste, was die Stimme vorlesen kann,
+#: waehrend die Werkzeuge noch arbeiten. Dieselben Worte, entgegengesetzte
+#: Wirkung — weil dahinter kein Modell mehr steht, das nach der Ansage
+#: verstummen kann, sondern ein Lauf, der weiterlaeuft.
+#:
+#: **`BELEGE` ebenfalls nicht**, und aus demselben Grund von der anderen Seite:
+#: der Codeblock, den dieser Block verlangt, ist gesprochen nicht laestig,
+#: sondern **der Mechanismus**. `ai_voice_bridge.Belegfilter` nimmt ihn aus dem
+#: Redefluss heraus und legt ihn auf den Schirm; vorgelesen wird nur die Deutung
+#: darunter. Ohne diesen Block gaebe es nichts herauszunehmen.
+NUR_GETIPPT = frozenset({
+    FORMAT,
+    GUARDIAN,
+})
+
+
+#: Was nur gesprochen gilt — der Gegenpol zu `NUR_GETIPPT`.
+#:
+#: Kommt **ans Ende** des Prompts und ersetzt keinen der Bloecke davor. Die
+#: Regeln des Panels gelten unveraendert; hier steht nur, was sich aendert, wenn
+#: der Mensch zuhoert statt zu lesen.
+#:
+#: Hier stand einmal ein **Widerruf** — "weiter oben steht …, im Gespraech gilt
+#: das nicht" —, und er hat nicht gehalten. Ein Widerruf setzt darauf, dass ein
+#: Modell den spaeteren Satz staerker gewichtet als den frueheren, und zwischen
+#: den beiden lagen 15.000 Zeichen. Weglassen ist billiger als aufheben: es
+#: kostet keine Tokens, es kommt nicht zu spaet, und es laesst nicht die
+#: **Begruendung** einer aufgehobenen Regel stehen, an der ein Modell sie neu
+#: herleitet. Deshalb widerspricht dieser Text nichts mehr — was gesprochen
+#: nicht gilt, kommt gar nicht erst mit.
+GESPROCHEN = """\
+Du sprichst gerade. Der Mensch hoert dich, er liest dich nicht.
+
+Halte dich kurz. Zwei bis drei Saetze sind eine Antwort, eine Aufzaehlung mit
+zwoelf Punkten ist keine. Schreib Fliesstext ohne Formatierung: keine
+Ueberschriften, keine Listen, keine Sternchen. Nenne Zahlen gerundet und in
+Worten, wo es geht — "gut zwei Gigabyte" statt "2147483648 Bytes". Lies keine
+Pfade, keine Kennungen und keine Feldnamen vor; nenne den Namen einer Datei,
+nicht ihren Weg dorthin, und sag den Sachverhalt in Worten statt den Namen der
+Zahl.
+
+Sprich wie jemand, der sein Fach kennt: direkt, ruhig, auf den Punkt. Keine
+gespielten Lacher, keine Begeisterung ohne Anlass, keine Fuellsaetze. Ist etwas
+kaputt, sag es geradeheraus. Weisst du etwas nicht, sag auch das — in einem
+Satz und ohne Entschuldigungsformeln.
+
+Der Codeblock ist die eine Ausnahme von "keine Formatierung", und er wird
+**nicht vorgelesen**: was du hineinschreibst, erscheint auf dem Bildschirm des
+Menschen, waehrend du daneben erklaerst, was dort steht. Genau dafuer ist er da
+— zeig die eine Zeile, um die es geht, und deute sie in Worten. Was du
+ausserhalb des Blocks schreibst, wird gesprochen; was darin steht, gezeigt.
+
+Frag nicht, ob du anfangen sollst — er hat dich bereits gebeten. Musst du
+etwas wissen, frag es geradeheraus im Satz; deine Antwortmoeglichkeiten werden
+mitgesprochen, und er antwortet einfach.
+
+Wartet ein Vorschlag auf seine Zustimmung, sag in einem Satz, was du tun
+wuerdest, und frag, ob du es tun sollst. Ein klares "Ja" fuehrt es aus, ein
+klares "Nein" laesst es. Sagt er etwas anderes, ist das keine Antwort auf die
+Frage, sondern ein neuer Auftrag — behandle ihn so.
+
+Stehende Auftraege, Loeschen, das Einspielen eines Backups: das entscheidet er
+auf der Karte im Panel und nicht im Gespraech. Sag dann, was du vorbereitet
+hast und dass es dort bestaetigt wird — das ist keine Panne, sondern Absicht."""
+
+
+def build(skill_index: str = "", *, gesprochen: bool = False) -> str:
     """Setzt den Systemprompt zusammen.
 
     ``skill_index`` ist der einzige dynamische Teil — Name und Beschreibung der
     Skills, die dieser Benutzer sehen darf. Leer, wenn es keine gibt oder das
     Recht fehlt.
+
+    ``gesprochen`` laesst `NUR_GETIPPT` weg und haengt `GESPROCHEN` an. Es ist
+    **ein Prompt mit einem Schalter** und nicht zwei Prompts: wer einen Block
+    anfasst, soll in derselben Datei sehen, ob er auch gesprochen gilt. Zwei
+    Texte veralteten gegeneinander, und zwar lautlos — ein Block, der im
+    Sprachweg fehlt, macht nichts kaputt, er macht nur schlechter.
+
+    Gefiltert wird beim **Zusammensetzen** und nicht danach am fertigen Text.
+    Ein nachtraegliches Herausschneiden per Textersetzung gab es hier einmal;
+    es hinterliess Loecher zwischen den Absaetzen, die nachgeraeumt werden
+    mussten, und es traf jede `system`-Nachricht statt nur den Systemprompt.
 
     Der Index bekommt eine **Leerzeile** vor sich. Das ist keine Kosmetik: er
     ist eine Liste inmitten von Fliesstext, und ohne Absatzgrenze klebt sie
@@ -530,8 +677,17 @@ def build(skill_index: str = "") -> str:
     ist es erst, als jemand den Prompt **mit** hinterlegten Skills verglich —
     ohne Skills war er zeichengleich, und genau so war er auch geprueft worden.
     """
-    teile = list(BLOECKE)
+    teile = [block for block in BLOECKE if not (gesprochen and block in NUR_GETIPPT)]
     if skill_index:
         teile.append("\n" + skill_index.strip())
-    teile.extend(NACH_SKILL_INDEX)
+    teile.extend(
+        block for block in NACH_SKILL_INDEX if not (gesprochen and block in NUR_GETIPPT)
+    )
+    if gesprochen:
+        # Ganz ans Ende, und das ist seit dem Wegfall des Widerrufs eine
+        # harmlose Entscheidung: es steht nichts mehr darueber, dem dieser Text
+        # widerspraeche. Am Ende heisst jetzt nur noch "zuletzt gelesen" — was
+        # fuer eine Anweisung spricht, die sagt, wie dieser Kanal zu bedienen
+        # ist.
+        teile.append(GESPROCHEN)
     return "\n".join(teile)

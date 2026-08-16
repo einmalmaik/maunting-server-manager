@@ -211,7 +211,7 @@ def _skill_index_block(
 
 def _system_message(
     db: Session, conversation: AiConversation, user: User | None = None, query: str = "",
-    unbeaufsichtigt: bool = False,
+    unbeaufsichtigt: bool = False, gesprochen: bool = False,
 ) -> str:
     """Baut den Systemprompt des Assistenten.
 
@@ -228,7 +228,9 @@ def _system_message(
     Modell nur nicht ohne Not in die Irre laufen lassen.
     """
     del conversation  # Der Prompt haengt nicht mehr an der Unterhaltung.
-    return ai_prompt.build(_skill_index_block(db, user, query, unbeaufsichtigt))
+    return ai_prompt.build(
+        _skill_index_block(db, user, query, unbeaufsichtigt), gesprochen=gesprochen
+    )
 
 
 def _message_content_for_provider(row: AiMessage) -> str:
@@ -409,6 +411,7 @@ def build_provider_messages(
     server_id: int | None = None,
     context_chars: int | None = None,
     unbeaufsichtigt: bool = False,
+    gesprochen: bool = False,
 ) -> list[dict[str, Any]]:
     """Baut eine neueste, begrenzte Historie unter einer Zeichenobergrenze.
 
@@ -443,7 +446,9 @@ def build_provider_messages(
     result: list[dict[str, Any]] = [
         {
             "role": "system",
-            "content": _system_message(db, conversation, user, query, unbeaufsichtigt),
+            "content": _system_message(
+                db, conversation, user, query, unbeaufsichtigt, gesprochen
+            ),
         }
     ]
     if user is not None:

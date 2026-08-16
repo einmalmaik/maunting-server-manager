@@ -2703,6 +2703,7 @@ def lauf_beginnen(
     context_chars: int | None = None,
     guardian_briefing_unterdruecken: bool = False,
     unbeaufsichtigt: bool = False,
+    gesprochen: bool = False,
 ) -> tuple[AiRun | None, tuple[str, str] | None]:
     """Legt einen Lauf an: Benutzernachricht, Kontingent, Antwortnachricht.
 
@@ -2765,6 +2766,7 @@ def lauf_beginnen(
         provider_messages = build_provider_messages(
             db, conversation, query=safe_content, server_id=serverbezug,
             context_chars=context_chars, unbeaufsichtigt=unbeaufsichtigt,
+            gesprochen=gesprochen,
         )
         # Was Guardian gemeldet hat, waehrend niemand da war. Nur wenn dieser
         # Lauf nicht selbst aus einer Heilung stammt — sonst berichtete die KI
@@ -2973,6 +2975,7 @@ def _anlauf_im_thread(
     reasoning_effort: str | None,
     context_chars: int | None,
     guardian_briefing_unterdruecken: bool,
+    gesprochen: bool = False,
 ) -> tuple[str | None, tuple[str, str] | None]:
     """Der Anlauf mit **eigener** Sitzung — das ist der ganze Zweck.
 
@@ -3009,6 +3012,7 @@ def _anlauf_im_thread(
             reasoning_effort=reasoning_effort,
             context_chars=context_chars,
             guardian_briefing_unterdruecken=guardian_briefing_unterdruecken,
+            gesprochen=gesprochen,
         )
         # Nur die Kennung verlaesst den Thread. Ein ORM-Objekt aus einer gleich
         # geschlossenen Sitzung ist eine Falle: nach dem Commit sind seine
@@ -3027,6 +3031,7 @@ async def lauf_beginnen_nebenher(
     reasoning_effort: str | None = None,
     context_chars: int | None = None,
     guardian_briefing_unterdruecken: bool = False,
+    gesprochen: bool = False,
 ) -> tuple[str | None, tuple[str, str] | None]:
     """`lauf_beginnen`, aber **neben** der Ereignisschleife statt auf ihr.
 
@@ -3049,6 +3054,7 @@ async def lauf_beginnen_nebenher(
             reasoning_effort=reasoning_effort,
             context_chars=context_chars,
             guardian_briefing_unterdruecken=guardian_briefing_unterdruecken,
+            gesprochen=gesprochen,
         )
 
 

@@ -24,6 +24,15 @@ Der zweite Eintrag ist jetzt da, und er hat genau eine Sache gezeigt: **nicht
 jeder Anbieter spricht dasselbe Protokoll.** Deshalb gibt es `protokoll` — und
 nach wie vor keine Klassenhierarchie. Ein Feld genügt, um die eine Frage zu
 beantworten, die zwei verschiedene Endpunkte auseinanderhält.
+
+Der zweite Eintrag war einmal OpenAIs Realtime-API und ist es nicht mehr. Was
+sie gekostet hat, stand am Ende in zwei Zahlen: ein zweiter Werkzeuglauf mit
+eigener Bestätigung, eigener Autonomie und eigenem Gedächtnis neben dem des
+Chats — und ein Protokoll, das MSM nur für sie sprach. Der Sprachmodus macht
+seitdem dasselbe wie der getippte Chat und hängt nur zwei Wandler davor: Gehör
+davor, Stimme dahinter. `elevenlabs` ist die Stimme. Das Gehör braucht keinen
+eigenen Eintrag, weil es dasselbe `chat_completions` spricht wie alles andere
+(`ai_stt_openrouter`).
 """
 
 from __future__ import annotations
@@ -64,14 +73,18 @@ class Anbieter:
     #:
     #: * ``chat_completions`` — ``POST /chat/completions``, SSE je Anfrage,
     #:   ``reasoning:{enabled,effort}``, ``cache_control``, ``usage.cost``.
-    #:   Bedient von `openai_compatible_adapter`.
-    #: * ``realtime`` — eine stehende WebSocket-Sitzung gegen ``/realtime`` mit
-    #:   Ereignissen statt Nachrichten. Bedient von `ai_voice_session`.
+    #:   Bedient von `openai_compatible_adapter`. Das ist auch der Weg, auf dem
+    #:   gesprochene Sprache zu Text wird: als ``input_audio``-Teil in einer
+    #:   ganz gewöhnlichen Anfrage (`ai_stt_openrouter`).
+    #: * ``tts`` — Text hinein, Ton heraus. Eine WebSocket-Sitzung je Antwort
+    #:   gegen ``/text-to-speech/{voice}/stream-input``, bedient von
+    #:   `ai_tts_elevenlabs`. Kennt weder Nachrichten noch Werkzeuge und taucht
+    #:   deshalb in keiner Modellauswahl des Chats auf.
     #:
-    #: Die beiden sind **nicht** ineinander überführbar. Ein Realtime-Zugang im
-    #: Chat-Router endete nicht in einer Fehlermeldung, sondern in einem
-    #: 404 vom Anbieter — deshalb prüfen beide Wege dieses Feld, bevor sie einen
-    #: Zugang annehmen.
+    #: Die beiden sind **nicht** ineinander überführbar. Ein Zugang im falschen
+    #: Router endete nicht in einer Fehlermeldung, sondern in einem 404 vom
+    #: Anbieter — deshalb prüfen beide Wege dieses Feld, bevor sie einen Zugang
+    #: annehmen.
     protokoll: str = "chat_completions"
     #: Welches Modell MSM empfiehlt. Das ist die **einzige** Aussage in dieser
     #: Datei, die eine Meinung ist und keine Tatsache — deshalb steht sie hier
@@ -94,6 +107,19 @@ class Anbieter:
     #: Fehlversuch vermerkt, und die Ruhefrist verzögerte den ersten echten
     #: Abruf um eine Minute — für einen Fehler, der keiner war.
     katalog_braucht_schluessel: bool = False
+    #: Wie der Schlüssel an den Anbieter geht. ``Authorization: Bearer …`` ist
+    #: verbreitet genug, um Standard zu sein, aber es ist keine Regel:
+    #: ElevenLabs erwartet ihn roh in ``xi-api-key`` und antwortet auf ein
+    #: ``Bearer`` mit 401 — einem 401, das wie ein falscher Schlüssel aussieht
+    #: und keiner ist. Genau solche Fehlersuchen kostet ein fest verdrahteter
+    #: Kopf.
+    schluessel_kopf: str = "Authorization"
+    schluessel_praefix: str = "Bearer "
+    #: Unter welchem Feld die Modellliste in der Antwort steht. ``None`` heißt:
+    #: die Antwort **ist** die Liste. Auch das ist keine Marotte eines einzelnen
+    #: Anbieters, sondern die Stelle, an der ein sonst fehlerfreier Katalogabruf
+    #: als „hat kein data-Feld" endet.
+    katalog_liste_feld: str | None = "data"
 
 
 ANBIETER: dict[str, Anbieter] = {
@@ -110,45 +136,52 @@ ANBIETER: dict[str, Anbieter] = {
         # keine Bedingung.
         empfehlung="openai/gpt-5.6-luna",
     ),
-    # Der Sprachweg. **Nicht** derselbe Anbieter wie oben, obwohl OpenRouter
-    # OpenAI-Modelle vermittelt: OpenRouter hat keine Realtime-API. Am
-    # 2026-08-15 nachgesehen — `POST /api/v1/realtime` antwortet mit 404
-    # (Kontrolle: `/chat/completions` antwortet mit 401), und die vollstaendige
-    # OpenAPI-Spezifikation kennt weder `websocket` noch `webrtc`, `realtime`
-    # oder `session.update`. Es gibt dort ausschliesslich HTTP mit SSE
-    # innerhalb *einer* Anfrage. Eine stehende Sitzung, in die man
-    # hineinreden kann, ist damit nicht vermittelbar, und `gpt-realtime` liefert
-    # ueber OpenRouter folgerichtig ebenfalls ein 404.
+    # Die Stimme. Sie **antwortet nicht** — sie liest vor, was das Chatmodell
+    # oben geschrieben hat. Das ist der ganze Unterschied zum Realtime-Zugang,
+    # der hier bis zum 2026-08-16 stand: der sprach selbst, mit eigenem
+    # Werkzeuglauf, eigener Bestaetigung und eigenem Gedaechtnis neben dem des
+    # Chats. Zwei Modelle, die beide dasselbe Panel bedienen durften, waren
+    # zweimal dieselbe Arbeit und zweimal dieselbe Angriffsflaeche.
     #
-    # Sprache gaebe es dort trotzdem — rundenbasiert ueber `openai/gpt-audio`.
-    # Dagegen sprach nicht nur das fehlende Reinreden: dieses Modell steht
-    # selbst auf der Abkuendigungsliste vom 2026-07-20, Abschaltung am
-    # 2027-01-20, und seinen Nachfolger `gpt-audio-1.5` fuehrt OpenRouter nicht.
-    # Es waere eine Frist gewesen, keine Architektur.
-    "openai_realtime": Anbieter(
-        kind="openai_realtime",
-        label="OpenAI (Sprache)",
-        base_url="https://api.openai.com/v1",
-        catalog_url="https://api.openai.com/v1/models",
-        key_url="https://platform.openai.com/api-keys",
-        key_prefix="sk-",
-        protokoll="realtime",
-        # OpenAI gibt seine Modellliste nur gegen einen Schluessel heraus.
+    # Der Betreiber waehlt hier zweierlei: `default_model` ist das Sprachmodell
+    # (Flash rechnet in etwa 75 ms und ist damit das einzige, das sich wie ein
+    # Gespraech anfuehlt), `default_voice` die Stimm-Kennung aus seinem Konto.
+    # Beides steht am Zugang und nicht im Programm, weil beides eine Wahl ist
+    # und keine Tatsache — welche Stimme zu einem Panel passt, weiss nur er.
+    "elevenlabs": Anbieter(
+        kind="elevenlabs",
+        label="ElevenLabs (Stimme)",
+        base_url="https://api.elevenlabs.io/v1",
+        catalog_url="https://api.elevenlabs.io/v1/models",
+        key_url="https://elevenlabs.io/app/settings/api-keys",
+        # Ausdruecklich **keine** Praefixpruefung. Neue Schluessel beginnen mit
+        # `sk_`, aeltere Konten tragen noch blanke Hex-Ketten ohne jedes
+        # Praefix. Eine Pruefung wuerde hier also gueltige Schluessel abweisen —
+        # und der Zweck des Feldes ist, dem Betreiber einen Umweg zu ersparen,
+        # nicht ihm einen zu bauen. Der echte Testaufruf faengt den Rest.
+        key_prefix=None,
+        protokoll="tts",
+        # ElevenLabs gibt seine Modellliste nur gegen einen Schluessel heraus …
         katalog_braucht_schluessel=True,
-        # Nur `-2.1` und `-2.1-mini` haben kein Ablaufdatum. `gpt-realtime`,
-        # `gpt-realtime-mini` und alle `gpt-4o-realtime` sterben am 2027-01-20.
-        # Genau deshalb steht hier eine Empfehlung und keine gepflegte Liste:
-        # die Auswahl kommt aus dem Katalog, und eine abgeschaltete Kennung
-        # verschwindet dort von selbst.
-        empfehlung="gpt-realtime-2.1",
+        # … und zwar in `xi-api-key`, nicht als Bearer-Token.
+        schluessel_kopf="xi-api-key",
+        schluessel_praefix="",
+        # `GET /v1/models` antwortet mit einer nackten Liste. Kein `data`.
+        katalog_liste_feld=None,
+        # Am 2026-08-16 nachgesehen: rund 75 ms Rechenzeit, in Europa 100 bis
+        # 150 ms bis zum ersten Ton. Die hoeherwertigen Modelle klingen besser
+        # und kosten genau das, was ein Gespraech nicht hat. Es bleibt eine
+        # Empfehlung — fuehrt der Katalog die Kennung nicht mehr, zeigt die
+        # Oberflaeche keine an, nie eine erfundene.
+        empfehlung="eleven_flash_v2_5",
     ),
 }
 
-#: Die beiden Protokolle als Konstante. Ein vertipptes ``"chat_completion"``
-#: (ohne s) fiele sonst nirgends auf: `spricht()` gäbe schlicht ``False``
-#: zurück, und die Providerauswahl wäre leer statt kaputt.
+#: Die Protokolle als Konstante. Ein vertipptes ``"chat_completion"`` (ohne s)
+#: fiele sonst nirgends auf: `spricht()` gäbe schlicht ``False`` zurück, und die
+#: Providerauswahl wäre leer statt kaputt.
 CHAT = "chat_completions"
-REALTIME = "realtime"
+TTS = "tts"
 
 #: Der Anbieter, den die Oberfläche vorschlägt. Solange es genau einen gibt,
 #: ist die Auswahl eine Formalität — aber sie steht schon da, wo sie später
@@ -182,7 +215,7 @@ def spricht(kind: str, protokoll: str) -> bool:
     """Spricht dieser Anbieter das verlangte Protokoll?
 
     Die Frage stellen beide Wege, bevor sie einen Zugang annehmen: der
-    Chat-Router verlangt ``chat_completions``, der Sprachweg ``realtime``. Ein
+    Chat-Router verlangt ``chat_completions``, die Stimme ``tts``. Ein
     unbekannter Schlüssel ist hier ausdrücklich **kein** Fehler, sondern ein
     „nein" — anders als bei `anbieter()`. Der Unterschied hat einen Grund: hier
     wird gefiltert, dort aufgelöst. Eine Filterfunktion, die bei einer

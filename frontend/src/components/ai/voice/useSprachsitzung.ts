@@ -215,10 +215,23 @@ export function useSprachsitzung(): Ergebnis {
           break
         case 'zustand': {
           const neu = String(nachricht.zustand)
-          if (neu === 'hoert') {
-            // Der Mensch hat angefangen zu reden — was die KI gerade sagt, ist
-            // die Antwort auf die vorige Frage und damit falsch.
-            lautsprecher.current?.abbrechen()
+          if (neu === 'hoert' && lautsprecher.current?.spricht) {
+            // Der Mensch hat angefangen zu reden, **während** die KI redet —
+            // was sie gerade sagt, ist die Antwort auf die vorige Frage und
+            // damit falsch.
+            //
+            // Die Bedingung ist neu und stand hier nicht: unterbrochen wurde
+            // bedingungslos, bei jedem `hoert`. Nur redet ein Mensch meistens
+            // dann, wenn die KI schweigt — es gab also nichts abzubrechen, und
+            // das `response.cancel` traf keine laufende Antwort. Die
+            // Gegenstelle antwortete darauf mit `response_cancel_not_active`,
+            // und der Sprechende las währenddessen „Der Sprachanbieter hat die
+            // Sitzung abgebrochen". Bei jedem Satz.
+            //
+            // Der Fehler war doppelt tückisch, weil `hoert` unmittelbar davor
+            // die Fehleranzeige zurücksetzt: die Meldung erschien immer genau
+            // nach dem Zustand, der sie hätte löschen sollen.
+            lautsprecher.current.abbrechen()
             if (verbindung.readyState === WebSocket.OPEN) {
               verbindung.send(JSON.stringify({ art: 'unterbrechen' }))
             }

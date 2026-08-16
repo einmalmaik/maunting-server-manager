@@ -24,6 +24,7 @@ const provider: AiProviderAdmin = {
   base_url: 'https://openrouter.ai/api/v1',
   default_model: 'anthropic/claude-opus-5',
   default_voice: null,
+  transcription_model: null,
   enabled: true,
   requires_api_key: true,
   operator_key_configured: true,
@@ -49,12 +50,12 @@ describe('AiProvidersSettings', () => {
       // Der zweite Anbieter steht hier, damit die Auswahl im Test dieselbe
       // Entscheidung zu treffen hat wie im Betrieb: zwei Zugänge, die
       // verschiedene Dinge tun.
-      kind: 'openai_realtime',
-      label: 'OpenAI (Sprache)',
-      base_url: 'https://api.openai.com/v1',
-      key_url: 'https://platform.openai.com/api-keys',
-      key_prefix: 'sk-',
-      protokoll: 'realtime',
+      kind: 'elevenlabs',
+      label: 'ElevenLabs (Stimme)',
+      base_url: 'https://api.elevenlabs.io/v1',
+      key_url: 'https://elevenlabs.io/app/settings/api-keys',
+      key_prefix: null,
+      protokoll: 'tts',
       katalog_braucht_schluessel: true,
     }])
     vi.mocked(aiApi.getCostPolicy).mockReset().mockResolvedValue({

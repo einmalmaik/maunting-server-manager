@@ -34,7 +34,7 @@ from services import (
     ai_provider_registry,
     ai_provider_service,
     ai_reasoning,
-    ai_voice_session,
+    ai_tts_elevenlabs,
     audit_service,
 )
 from services.ai_provider_service import AiProviderConfigurationError
@@ -72,6 +72,7 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         # Wahl, die der Betreiber nie getroffen hat, und speicherte sie beim
         # nächsten Klick auf „Speichern" als seine.
         default_voice=provider.default_voice,
+        transcription_model=provider.transcription_model,
         enabled=provider.enabled,
         requires_api_key=provider.requires_api_key,
         operator_key_configured=bool(provider.operator_api_key_encrypted),
@@ -243,12 +244,12 @@ async def test_provider(
             ok=False, code="AI_PROVIDER_KEY_MISSING", detail=None
         )
 
-    # Ein Sprachzugang wird gesprochen geprüft und nicht getippt. Der Chattest
-    # unten schickt ein „ping" an `/chat/completions`, und darauf antwortet
-    # OpenAI bei einem Realtime-Modell wörtlich *„This is not a chat model"* —
-    # eine Fehlermeldung für einen völlig richtig eingerichteten Zugang.
-    if ai_provider_service.spricht(provider, ai_provider_registry.REALTIME):
-        return await _sprachzugang_pruefen(provider, api_key or "")
+    # Ein Stimmzugang wird gesprochen geprüft und nicht getippt. Der Chattest
+    # unten schickt ein „ping" an `/chat/completions` — eine Adresse, die es
+    # bei ElevenLabs gar nicht gibt. Der Betreiber bekäme eine Fehlermeldung
+    # für einen völlig richtig eingerichteten Zugang.
+    if ai_provider_service.spricht(provider, ai_provider_registry.TTS):
+        return await _stimmzugang_pruefen(provider, api_key or "")
 
     usage = StreamUsage()
     try:
@@ -275,33 +276,43 @@ async def test_provider(
         return AiProviderTestResponse(ok=False, code=exc.code, detail=exc.detail)
 
 
-async def _sprachzugang_pruefen(
+async def _stimmzugang_pruefen(
     provider: AiProvider, api_key: str
 ) -> AiProviderTestResponse:
-    """Die Probe für einen Sprachzugang: Sitzung auf, Sitzung zu.
+    """Die Probe für einen Stimmzugang: Sitzung auf, Sitzung zu.
 
-    Geprüft wird dasselbe wie im Betrieb — Adresse, Schlüssel und Modell
-    zusammen. Schon der Handschlag entscheidet, und er kostet nichts: eine
-    Sitzung, die niemand bespricht, hat keine Tokens.
+    Geprüft wird dasselbe wie im Betrieb — Adresse, Schlüssel, Stimme und
+    Modell zusammen. Schon der Handschlag entscheidet, und er kostet nichts:
+    abgerechnet werden Zeichen, und es geht keines hinaus.
+
+    Ohne hinterlegte Stimme wird gar nicht erst gefragt. Die Kennung steht im
+    Pfad der Adresse; ohne sie zeigte die Anfrage auf einen Endpunkt, den es
+    nicht gibt, und der Betreiber läse „nicht erreichbar", wo „keine Stimme
+    ausgewählt" gemeint ist.
     """
-    if not ai_voice_session.SPRACHE_MOEGLICH:
+    if not ai_tts_elevenlabs.STIMME_MOEGLICH:
         return AiProviderTestResponse(
             ok=False,
             code="AI_PROVIDER_UNAVAILABLE",
             detail="Die WebSocket-Bibliothek fehlt in dieser Installation.",
         )
-    adresse = ai_voice_session.verbindungsadresse(
-        ai_provider_service.base_url(provider), provider.default_model
+    stimme = (provider.default_voice or "").strip()
+    if not stimme:
+        return AiProviderTestResponse(
+            ok=False, code="AI_PROVIDER_VOICE_MISSING", detail=None
+        )
+    adresse = ai_tts_elevenlabs.verbindungsadresse(
+        ai_provider_service.base_url(provider), stimme, provider.default_model
     )
     try:
-        await ai_voice_session.pruefen(adresse, api_key)
+        await ai_tts_elevenlabs.pruefen(adresse, api_key)
     except Exception as fehler:
         # Der Wortlaut des Anbieters bleibt im Protokoll. Nach aussen geht der
         # Code — er sagt dem Betreiber, was zu tun ist, ohne Kontonamen und
         # Kontingentstände mitzuschicken.
-        code = ai_voice_session.probe_fehlercode(fehler)
+        code = ai_tts_elevenlabs.probe_fehlercode(fehler)
         logger.info(
-            "Sprachprobe fehlgeschlagen provider=%s code=%s error=%s",
+            "Stimmprobe fehlgeschlagen provider=%s code=%s error=%s",
             provider.id, code, type(fehler).__name__,
         )
         return AiProviderTestResponse(ok=False, code=code, detail=None)

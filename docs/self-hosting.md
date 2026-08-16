@@ -838,37 +838,70 @@ wie immer, und die steht im Chat.
 
 ### Ein zweiter Anbieterzugang, und warum
 
-Der Sprachmodus läuft **nicht** über OpenRouter. Am 2026-08-15 nachgemessen:
-`POST /api/v1/realtime` antwortet dort mit 404, die OpenAPI-Spec kennt weder
-`realtime` noch `websocket`, und `gpt-realtime` hat keinen Endpunkt-Eintrag.
-OpenRouter kann Sprache nur rundenbasiert (`openai/gpt-audio`) — kein Duplex,
-kein Reinreden. Für ein Gespräch braucht es eine stehende Sitzung, und die gibt
-es bei OpenAI direkt.
+Der Sprachmodus benutzt **dasselbe Modell wie der getippte Chat**. Es denkt,
+ruft Werkzeuge, legt Vorschläge an — genau wie sonst. Davor und dahinter stehen
+zwei Wandler:
 
-Deshalb legt der Betreiber unter *Einstellungen → KI → Anbieter* einen
-**zweiten** Zugang an:
+```
+Mikrofon ─► Gehör (OpenRouter) ─► derselbe Chatlauf ─► Stimme (ElevenLabs) ─► Lautsprecher
+```
+
+Hier stand bis zum 16.08.2026 OpenAIs Realtime-API — ein **zweites** Modell, das
+selbst sprach und dafür einen eigenen Werkzeuglauf, eine eigene Bestätigung und
+ein eigenes Gedächtnis neben denen des Chats brauchte. Zwei Wege, die dasselbe
+Panel bedienen durften, hiess: jeder Befund musste zweimal behoben werden, und
+beim zweiten Mal regelmässig anders. Der Sprachmodus kann seitdem alles, was der
+Chat kann, weil er der Chat ist.
+
+Der Betreiber braucht dafür zweierlei. Erstens **am bestehenden
+OpenRouter-Zugang** ein Modell, das zuhört:
 
 | Feld | Wert |
 |---|---|
-| Anbieter | *OpenAI (Sprache)* |
-| Schlüssel | ein OpenAI-Schlüssel (`sk-…`) von <https://platform.openai.com/api-keys> |
-| Modell | `gpt-realtime-2.1` |
+| Modell für Gesprochenes | ein hörfähiges Chatmodell, z. B. `google/gemini-2.5-flash` |
 
-Das ist ein eigener Schlüssel und eine eigene Rechnung — der Preis dafür, dass
-OpenRouter kein Duplex kann. Der bestehende OpenRouter-Zugang bleibt unberührt
-und bedient weiter den getippten Chat; die beiden Protokolle sind getrennt, und
-kein Zugang kann versehentlich für das falsche verwendet werden.
+> **Warum kein `whisper`.** OpenRouter hat keinen Transkriptions-Endpunkt
+> (2026-08-16 nachgesehen); `whisper` und `gpt-4o-transcribe` gibt es dort
+> nicht. Gesprochenes geht als Inhaltsteil (`input_audio`) in eine ganz
+> gewöhnliche Chatanfrage, und die beantwortet ein hörfähiges Modell. Welche das
+> sind, zeigt OpenRouters Modellliste unter der Modalität *Audio*.
 
-> **Modellwahl.** Die Liste kommt aus OpenAIs Modellkatalog und nicht aus einer
-> gepflegten Konstante. Das ist kein Selbstzweck: `gpt-realtime`, `-mini` und
-> `gpt-4o-realtime` werden am **20.01.2027** abgeschaltet. Eine handgeschriebene
-> Liste wäre an diesem Tag falsch. Für den Katalogabruf braucht OpenAI — anders
-> als OpenRouter — den Schlüssel; solange keiner hinterlegt ist, bleibt die
-> Modellliste beim Anlegen leer.
+Zweitens einen **zweiten Zugang** unter *Einstellungen → KI → Anbieter*:
 
-**Ohne eingerichteten Sprachzugang gibt es keinen Sprachknopf.** Nicht
-ausgegraut, sondern gar nicht — dieselbe Regel wie bei der Websuche, die ohne
-Schlüssel nicht einmal im Werkzeugkatalog steht.
+| Feld | Wert |
+|---|---|
+| Anbieter | *ElevenLabs (Stimme)* |
+| Schlüssel | ein ElevenLabs-Schlüssel von <https://elevenlabs.io/app/settings/api-keys> |
+| Modell | `eleven_flash_v2_5` |
+| Stimme | die Voice ID aus der Stimmenbibliothek, z. B. `21m00Tcm4TlvDq8ikWAM` |
+
+Das ist ein eigener Schlüssel und eine eigene Rechnung. Der OpenRouter-Zugang
+bleibt unberührt und bedient weiter den getippten Chat; die beiden Protokolle
+sind getrennt, und kein Zugang kann versehentlich für das falsche verwendet
+werden.
+
+> **Die Stimme ist ein Textfeld und keine Auswahl.** Sie gehört dem Konto des
+> Betreibers, MSM kennt sie nicht — und rät deshalb auch keine: es gibt keine
+> Standardstimme. Ohne eingetragene Voice ID gibt es keinen Sprachmodus, denn
+> eine geratene Stimme stünde auf seiner Rechnung. Geprüft wird beim Speichern
+> nur die **Form** (Buchstaben, Ziffern, `-`, `_`), und zwar aus einem
+> Sicherheitsgrund: die Kennung wird in einen URL-Pfad eingesetzt.
+
+> **Warum Flash.** Rund 75 ms Rechenzeit, in Europa 100 bis 150 ms bis zum
+> ersten Ton. Die höherwertigen Modelle klingen besser und kosten genau das, was
+> ein Gespräch nicht hat. Die Auswahl kommt aus dem Katalog von ElevenLabs; für
+> den Abruf braucht er — anders als OpenRouter — den Schlüssel, solange keiner
+> hinterlegt ist bleibt die Modellliste beim Anlegen leer.
+
+> **Datenschutz.** Gesprochenes geht als Ton an OpenRouter, der Antworttext an
+> ElevenLabs. Die EU-Datenresidenz von ElevenLabs ist Enterprise-Kunden
+> vorbehalten; standardmässig routet der Dienst global. Das gehört in die
+> Datenschutzerklärung des Betreibers.
+
+**Ohne beide Zugänge gibt es keinen Sprachknopf.** Nicht ausgegraut, sondern gar
+nicht — dieselbe Regel wie bei der Websuche, die ohne Schlüssel nicht einmal im
+Werkzeugkatalog steht. „Beide" heisst dabei vollständig: ein OpenRouter-Zugang
+ohne hörendes Modell zählt so wenig wie ein ElevenLabs-Zugang ohne Stimme.
 
 ### Recht und Grenzen
 
@@ -882,51 +915,89 @@ Access-Tokens: ein WebSocket prüft die Anmeldung nur beim Verbindungsaufbau, un
 eine stundenlang offene Leitung umginge sowohl den Ablauf als auch die
 Sperrliste abgemeldeter Sitzungen.
 
-### Bestätigen per Stimme — und was nur per Klick geht
+### Bestätigen per Stimme
 
 Soll etwas geändert werden, entsteht **dieselbe Vorschlagskarte wie immer** und
-sie ist sichtbar. Zusätzlich liest die KI vor, was sie vorhat, und fragt nach.
-Der vorgelesene Satz stammt dabei aus dem Panel und nicht vom Modell.
+sie ist sichtbar. Zusätzlich sagt die KI, was sie vorhat, und fragt nach. Ein
+klares „Ja" führt aus, ein klares „Nein" lässt es.
 
-Bei einem klaren Ja wird ausgeführt; die gesprochene Zustimmung steht im Audit.
-Es kann immer nur **ein** Vorschlag offen sein — damit ein „ja" nicht auf dem
-falschen landet.
+„Klar" heisst hier wörtlich: die Äusserung muss **nichts als** eine Zustimmung
+sein. „Ja, aber schau vorher nochmal in die Logs" ist keine — das ist ein neuer
+Auftrag, und als Zustimmung gelesen täte die KI das Gegenteil des Gesagten.
 
-Nicht per Stimme bestätigbar sind Löschen, das Einspielen eines Backups sowie
-Schlüssel und Rollen der Hoster-Anbindung. Dort verweist die KI auf die Karte im
-Panel. Der Grund steht so auch im Restrisiko: **eine gesprochene Zustimmung ist
-schwächer als ein Klick** — ein Sprachmodell lässt sich nicht zwingen, wörtlich
-vorzulesen. Die eigentliche Autorisierung bleibt die Rechteprüfung im Backend,
-die beim Einlösen ein zweites Mal stattfindet; das gesprochene Ja ersetzt den
-Klick, nicht das Recht.
+Das gesprochene Ja ersetzt genau einen Schritt: den Klick. Alles andere bleibt —
+die Rechte werden beim Bestätigen erneut geprüft, beim Ausführen ein drittes
+Mal, der Einmal-Token wird atomar entwertet, der Server-Mutex greift, das Audit
+vermerkt den Vorgang.
+
+> **Was die KI im Sprachmodus darf, darf der Sprechende auch.** Sie erbt seine
+> Rechte und keines mehr — über seine Rolle oder als direkt zugewiesener
+> Benutzer eines Servers. Der Lauf gehört ihm, und jede einzelne Prüfung läuft
+> gegen ihn. Ein Vorschlag, der ihm nicht gehört, lässt sich per Stimme nicht
+> auslösen; wird ihm der Server zwischen Frage und „Ja" entzogen, scheitert die
+> Ausführung mit `AI_ACTION_ACCESS_REVOKED`, und das Gespräch läuft weiter.
+
+Hier stand bis zum 16.08.2026, dass Löschen, Backup-Restore sowie Schlüssel und
+Rollen per Stimme **nicht** bestätigbar sind — mit der Begründung, eine
+gesprochene Zustimmung sei schwächer als ein Klick. Der Betreiber hat das
+ausdrücklich anders entschieden: er will „lösch den Server" sagen, „ist das in
+Ordnung?" hören und „ja" antworten können. Die Einschränkung ist deshalb
+entfallen. Das Restrisiko bleibt beschreibbar und steht hier: im Audit steht
+danach eine gesprochene Zustimmung, und wer im Raum mithört, kann sie
+aussprechen. Wem das zu weit geht, nimmt `ai.voice.use` aus der Rolle.
+
+**Rückfragen** funktionieren wie im Chat — dieselbe Logik, andere Ausgabe: statt
+einer Karte mit Knöpfen liest die KI Frage und Möglichkeiten vor, und die
+Antwort spricht man einfach.
+
+**Logzeilen werden gezeigt, nicht vorgelesen.** Der Systemprompt verlangt vom
+Modell ohnehin, die entscheidende Stelle als Codeblock zu zeigen und darunter zu
+deuten. Im Gespräch erscheint der Block auf dem Bildschirm, gesprochen wird nur
+die Deutung — ein Codeblock ist vorgelesen nichts als Satzzeichen.
 
 ### Kontingent
 
-Eine Sprachsitzung ist **eine** Buchung in der Verbrauchsübersicht, keine je
-Antwort. Reserviert wird beim Öffnen, abgeschlossen wird mit den Zahlen, die der
-Anbieter gemeldet hat; ist die Tages-, Wochen- oder Monatsgrenze aufgebraucht,
-endet die Sitzung nach dem laufenden Satz.
+**Jede Äusserung ist eine Anfrage.** Das ist der eine Punkt, an dem sich für den
+Betreiber etwas geändert hat: wo eine Sprachsitzung früher **eine** Buchung war,
+ist jetzt jeder Zug eine — dieselbe Buchung wie eine getippte Nachricht, über
+denselben Weg gezählt. Ein Rollenlimit *Anfragen pro Minute* von fünf zerreisst
+damit ein Gespräch, das vorher durchlief. Ohne gesetztes Limit passiert nichts.
 
-Die **Kostengrenze in Cent bindet den Sprachmodus nicht**, solange am Zugang
-kein Tokenpreis gepflegt ist: OpenAIs Modellkatalog nennt keine Preise, und MSM
-erfindet keinen. Die Tokengrenzen binden ihn sehr wohl. Wer auch die
-Kostengrenze greifen lassen will, trägt den Preis am Zugang ein. Zur
-Größenordnung: `gpt-realtime-2.1` kostet Ton mit 32 USD je Million Eingabe- und
-64 USD je Million Ausgabetokens.
+Der Gewinn ist, dass Tokengrenzen und Kostengrenze im Sprachmodus **genauso**
+greifen wie im Chat: dieselbe Rechnung, dieselben vom Anbieter gemeldeten
+Zahlen, derselbe gepflegte Rückfallpreis am Zugang. Die frühere Lücke — „die
+Kostengrenze bindet den Sprachmodus nicht" — gibt es nicht mehr.
+
+Was MSM **nicht** mitzählt, sind die Zeichen bei ElevenLabs: sie werden nach
+Zeichen abgerechnet und nicht nach Tokens, und die Grenze dafür steht im Konto
+des Betreibers. Eine einzelne Antwort ist auf 4.000 Zeichen gedeckelt, damit ein
+Modell, das sich verrennt, kein ganzes Log verliest.
 
 ### Was technisch passiert
 
 Der Ton läuft **durch das Panel** und nicht am Panel vorbei:
 
 ```
-Browser ──WSS /api/ai/voice/ws──► MSM-Backend ──WSS──► api.openai.com/v1/realtime
+Browser ──WSS /api/ai/voice/ws──► MSM-Backend ──► Gehör · Chatlauf · Stimme
        (Cookie, Origin-Check)      (Betreiberschlüssel, Werkzeuge, RBAC)
 ```
 
-OpenAI böte auch eine Direktverbindung per WebRTC an. Dann liefe die
-Werkzeugschleife aber über den Browser — er sähe jeden Werkzeugaufruf und könnte
-welche erfinden. Der Umweg über das Panel kostet rund eine Viertelsekunde und
-erspart zugleich die Ausgabe kurzlebiger Client-Geheimnisse an den Browser: der
+Binärrahmen sind Ton (PCM16, 24 kHz, mono), Textrahmen sind Zustände,
+Transkripte und gezeigte Stellen. Dasselbe Format in beide Richtungen — der
+Browser nimmt so auf, wie er abspielt, und nichts wird unterwegs umgerechnet.
+Das ist kein Zufall, sondern die Wahl des Ausgabeformats bei ElevenLabs
+(`pcm_24000`).
+
+Wann jemand aufgehört hat zu reden, entscheidet das **Backend** und nicht der
+Browser (CLAUDE.md § 4). Das kostet Bandbreite während der Stille und ist
+trotzdem richtig: die Grenzen einer Äusserung entscheiden, was als Frage an ein
+Modell mit Werkzeugen geht — ein manipulierter Browser könnte sonst Tonstücke zu
+einer Äusserung zusammensetzen, die so nie gesprochen wurde.
+
+Eine Direktverbindung des Browsers zu den Anbietern wäre schneller. Dann liefe
+die Werkzeugschleife aber über den Browser — er sähe jeden Werkzeugaufruf und
+könnte welche erfinden. Der Umweg über das Panel kostet rund eine Viertelsekunde
+und erspart zugleich die Ausgabe von Anbieterschlüsseln an den Browser: der
 Betreiberschlüssel verlässt den Panelprozess nie.
 
 Kein zusätzlicher Port, kein zusätzlicher Dienst. Der Reverse-Proxy muss

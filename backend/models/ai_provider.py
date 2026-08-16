@@ -42,19 +42,40 @@ class AiProvider(Base):
         String(32), nullable=False, default="openrouter"
     )
     default_model: Mapped[str] = mapped_column(String(256), nullable=False)
-    # Die Stimme, mit der ein Sprachzugang antwortet — eine aus
-    # `ai_voice_session.STIMMEN`. Sie steht hier und nicht im Katalog, weil sie
-    # keine Eigenschaft des Modells ist, sondern eine Wahl des Betreibers: alle
-    # acht kann jedes Realtime-Modell, und welche davon zum Panel passt, weiß
-    # nur er.
+    # Die Stimme, mit der der Sprachmodus vorliest — eine Kennung aus dem
+    # ElevenLabs-Konto des Betreibers. Sie steht hier und nicht im Katalog, weil
+    # sie keine Eigenschaft des Modells ist, sondern eine Wahl: jede Stimme kann
+    # jedes Sprachmodell sprechen, und welche zum Panel passt, weiß nur er.
     #
-    # ``None`` heißt **nicht** „alloy", sondern „nichts hinterlegt";
-    # `ai_voice_session.STANDARDSTIMME` löst das bei jedem Verbinden neu auf.
-    # Der Unterschied ist erst am Tag sichtbar, an dem MSM die Standardstimme
-    # wechselt: ein eingetragenes „alloy" wäre dann eine Entscheidung, die der
-    # Betreiber nie getroffen hat. Deshalb wird hier nie ein Standard
-    # hineingeschrieben — auch nicht beim Anlegen.
-    default_voice: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Hier stand bis zum 2026-08-16 eine der acht OpenAI-Realtime-Stimmen. Die
+    # Spalte ist geblieben und hat die Bedeutung gewechselt — deshalb ist sie
+    # jetzt 64 Zeichen breit und wird beim Speichern auf ``[A-Za-z0-9_-]``
+    # geprüft: der Wert geht in einen **URL-Pfad**
+    # (``/v1/text-to-speech/{voice}/stream-input``), und was dort ungeprüft
+    # landet, ist kein Schreibfehler mehr, sondern eine fremde Adresse.
+    #
+    # ``None`` heißt „nichts hinterlegt" und nicht „irgendeine": ohne Stimme
+    # lehnt der Sprachmodus die Verbindung ab, statt eine zu raten. Eine
+    # geratene Stimme wäre eine Entscheidung, die der Betreiber nie getroffen
+    # hat — und sie stünde in seiner Abrechnung.
+    default_voice: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Das Modell, das Gesprochenes zu Text macht. Nur an einem Chatzugang von
+    # Bedeutung, und dort auch nur, wenn jemand den Sprachmodus benutzt.
+    #
+    # Eine **zweite** Modellspalte und keine Erweiterung von `default_model`:
+    # die beiden beantworten verschiedene Fragen. `default_model` ist das
+    # Modell, das denkt und Werkzeuge ruft; dieses hier hört nur zu. Sie
+    # zusammenzulegen hieße, für jedes Gespräch das teure Modell die Audiodaten
+    # lesen zu lassen — oder das billige denken.
+    #
+    # Es gibt bei OpenRouter keinen Transkriptions-Endpunkt (am 2026-08-16
+    # nachgesehen); Audio geht als ``input_audio``-Teil in eine gewöhnliche
+    # Chatanfrage. Hier gehört deshalb ein **hörfähiges Chatmodell** hinein und
+    # nicht `whisper` oder `gpt-4o-transcribe` — die gibt es dort nicht.
+    #
+    # ``None`` heißt „nichts hinterlegt": dann gibt es keinen Sprachmodus über
+    # diesen Zugang. Auch hier wird nie ein Standard hineingeschrieben.
+    transcription_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     requires_api_key: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     operator_api_key_encrypted: Mapped[str | None] = mapped_column(String(4096), nullable=True)

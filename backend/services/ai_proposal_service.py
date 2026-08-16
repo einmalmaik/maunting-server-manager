@@ -62,7 +62,6 @@ from services import ai_task_service
 from services.ai_tool_registry import (
     GLOBAL_WRITE_TOOLS,
     GUARDIAN_HEILUNG_TOOLS,
-    SPRACHE_HANDELN,
     WERKZEUGE,
     WRITE_TOOLS,
     aufgaben_tools,
@@ -1472,15 +1471,8 @@ def create_proposal(
     rationale_fallback: tuple[str, str] | None = None,
     guardian: "GuardianKontext | None" = None,
     aufgabe: "AufgabenKontext | None" = None,
-    sprache: bool = False,
 ) -> AiActionProposal:
     """Legt einen Vorschlag an.
-
-    ``sprache`` heisst: der Vorschlag entsteht in einer Sprachsitzung und wird
-    gesprochen bestaetigt. Er engt die Werkzeugmenge auf `SPRACHE_HANDELN` ein —
-    dieselbe Bauart wie ``guardian`` und ``aufgabe``, und aus demselben Grund an
-    dieser Stelle: die Durchsetzung gehoert vor den Payload-Bau und nicht in den
-    Prompt.
 
     ``guardian`` ist gesetzt, wenn dieser Lauf von einem Guardian-Vorfall
     ausgeloest wurde und nicht von einem Menschen. Er aendert drei Dinge, und
@@ -1510,21 +1502,6 @@ def create_proposal(
         # auch dann, wenn der Benutzer die autonome Freigabe erteilt hat.
         raise AiActionValidationError(
             "Dieses Werkzeug steht in einer geplanten Aufgabe nicht zur Verfuegung"
-        )
-    if sprache and tool_name not in SPRACHE_HANDELN:
-        # Dieselbe Durchsetzung an derselben Stelle wie bei Guardian und
-        # Aufgabe — und hier faellt vor allem heraus, was in
-        # `ALWAYS_CONFIRM_TOOLS` steht. Der Grund ist nicht die Reichweite,
-        # sondern die Beweiskraft: eine gesprochene Zustimmung kann
-        # missverstanden werden, im Hintergrund kann jemand anders „ja" sagen,
-        # und im Audit steht ein Transkript statt einer Betaetigung. Fuer alles,
-        # wovon es keinen Weg zurueck gibt, ist das zu wenig.
-        #
-        # Der Prompt sagt dem Modell dasselbe. Diese Zeile sorgt dafuer, dass es
-        # auch dann nicht durchkommt, wenn es den Prompt ignoriert.
-        raise AiActionValidationError(
-            "Das laesst sich per Sprache nicht bestaetigen. Sag dem Menschen, "
-            "dass er es im Panel auf der Karte bestaetigen muss."
         )
     reason, expected_effect = _rationale(arguments, fallback=rationale_fallback)
     rest = {key: value for key, value in arguments.items() if key not in {"reason", "expected_effect"}}
