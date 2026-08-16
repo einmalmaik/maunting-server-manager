@@ -534,7 +534,7 @@ function ProviderForm({
               spellCheck={false}
               value={draft.transcription_model ?? ''}
               onChange={(ereignis) => change({ transcription_model: ereignis.target.value })}
-              placeholder="google/gemini-2.5-flash"
+              placeholder="openai/gpt-transcribe"
             />
             <p className="msm-field-help">{t('ai.providers.transcriptionModelHint')}</p>
           </div>

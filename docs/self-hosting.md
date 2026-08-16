@@ -912,13 +912,22 @@ OpenRouter-Zugang** ein Modell, das zuhört:
 
 | Feld | Wert |
 |---|---|
-| Modell für Gesprochenes | ein hörfähiges Chatmodell, z. B. `google/gemini-2.5-flash` |
+| Modell für Gesprochenes | ein Transkriptionsmodell, z. B. `openai/gpt-transcribe` |
 
-> **Warum kein `whisper`.** OpenRouter hat keinen Transkriptions-Endpunkt
-> (2026-08-16 nachgesehen); `whisper` und `gpt-4o-transcribe` gibt es dort
-> nicht. Gesprochenes geht als Inhaltsteil (`input_audio`) in eine ganz
-> gewöhnliche Chatanfrage, und die beantwortet ein hörfähiges Modell. Welche das
-> sind, zeigt OpenRouters Modellliste unter der Modalität *Audio*.
+> **Es steht nicht in der Modellliste — und das ist kein Fehler.** MSMs
+> Modellauswahl liest OpenRouters `/models`, und dort stehen Chatmodelle.
+> Transkriptionsmodelle wie `openai/gpt-transcribe` oder
+> `openai/whisper-large-v3` werden über einen eigenen Endpunkt bedient
+> (`/audio/transcriptions`) und tauchen in dieser Liste nicht auf. Deshalb ist
+> das Feld ein Textfeld: hier wird die Kennung eingetippt, nicht ausgewählt.
+>
+> Hier stand bis zum 17.08.2026 das Gegenteil — OpenRouter habe keinen
+> Transkriptions-Endpunkt, Gesprochenes müsse als Inhaltsteil in eine
+> Chatanfrage. Geprüft worden war die Modellliste, und aus „kein Whisper in der
+> Liste" wurde „kein Endpunkt". Der Umweg funktionierte, kostete aber ein
+> Chatmodell, das nachdenkt, statt eines Dienstes, der abschreibt. Wer hier ein
+> hörfähiges Chatmodell einträgt, bekommt seit dem Wechsel einen Fehler vom
+> Anbieter — der Endpunkt will ein Transkriptionsmodell.
 
 Zweitens einen **zweiten Zugang** unter *Einstellungen → KI → Anbieter*:
 
