@@ -92,16 +92,14 @@ export function AiFreigabe() {
       <div className="absolute inset-0 msm-deep-grid opacity-50" />
 
       <div className="relative z-10 w-full max-w-lg">
+        {/* Derselbe Kopf wie auf den Anmeldeseiten — diese Seite steht wie
+            sie außerhalb der angemeldeten Oberfläche und muss von sich aus
+            erkennbar sein, wenn jemand sie aus einer E-Mail heraus öffnet. */}
         <div className="flex items-center justify-center gap-3 mb-8">
           <Logo size="md" />
-          <div>
-            <h1 className="font-headline text-body-lg font-extrabold text-primary leading-tight">
-              MauntingStudios
-            </h1>
-            <p className="font-mono-sm text-mono-sm text-on-surface-variant">
-              Server Manager
-            </p>
-          </div>
+          <h1 className="font-headline text-body-lg font-extrabold text-primary leading-tight">
+            MSM
+          </h1>
         </div>
 
         <div className="msm-card p-8">
