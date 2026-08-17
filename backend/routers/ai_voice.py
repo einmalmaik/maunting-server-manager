@@ -57,8 +57,10 @@ def _ws_origin_erlaubt(websocket: WebSocket) -> bool:
     return _ws_origin_allowed(websocket.headers.get("origin"))
 
 
-def _hoerender_zugang(db: Session) -> AiProvider | None:
-    """Der Chatzugang, über den gesprochen werden kann.
+def _hoerender_zugang(
+    db: Session, bevorzugter_provider_id: int | None = None
+) -> AiProvider | None:
+    """Der Zugang, der Gesprochenes transkribiert (STT / Gehör).
 
     Verlangt wird mehr als ein Chatzugang: er muss ein **Transkriptmodell**
     hinterlegt haben. Ohne das gibt es kein Gehör, und ohne Gehör keinen
@@ -66,14 +68,24 @@ def _hoerender_zugang(db: Session) -> AiProvider | None:
     zu stellen, das er nie ausgewählt hat.
 
     Verlangt wird ausserdem, dass der **Anbieter** überhaupt zuhören kann
-    (`gehoer_wege`). Das ist keine doppelte Prüfung neben dem Transkriptmodell:
-    das Modell steht am Zugang und lässt sich überall eintragen, die Hörwege
-    stehen am Anbieter. Ein ausgefülltes Feld an einem Anbieter ohne Gehör wäre
-    sonst ein Sprachknopf, der beim ersten Satz abbricht.
+    (`gehoer_wege`).
 
-    Gibt es mehrere, gilt der mit der kleinsten Kennung — stabil und
-    nachvollziehbar, statt geraten.
+    Wurde ein bevorzugter Provider (z. B. der im Chat gewählte) übergeben und
+    besitzt er selbst ein Transkriptionsmodell, wird er bevorzugt. Andernfalls
+    greift der erste aktivierte Provider mit Transkriptionsmodell.
     """
+    if bevorzugter_provider_id:
+        bevorzugt = db.get(AiProvider, bevorzugter_provider_id)
+        if (
+            bevorzugt
+            and bevorzugt.enabled
+            and ai_provider_service.spricht(bevorzugt, ai_provider_registry.CHAT)
+            and ai_provider_registry.anbieter(bevorzugt.provider_kind).gehoer_wege
+            and bool((bevorzugt.transcription_model or "").strip())
+            and (not bevorzugt.requires_api_key or bool(bevorzugt.operator_api_key_encrypted))
+        ):
+            return bevorzugt
+
     for zugang in _zugaenge(db):
         if not ai_provider_service.spricht(zugang, ai_provider_registry.CHAT):
             continue
@@ -87,8 +99,38 @@ def _hoerender_zugang(db: Session) -> AiProvider | None:
     return None
 
 
+def _denkender_zugang(
+    db: Session, bevorzugter_provider_id: int | None = None
+) -> AiProvider | None:
+    """Der Chatzugang, der die Antwort generiert (LLM / Gehirn).
+
+    Wurde ein bevorzugter Provider übergeben, wird dieser genommen. Andernfalls
+    greift der erste aktivierte Chatzugang mit hinterlegtem Standardmodell.
+    """
+    if bevorzugter_provider_id:
+        bevorzugt = db.get(AiProvider, bevorzugter_provider_id)
+        if (
+            bevorzugt
+            and bevorzugt.enabled
+            and ai_provider_service.spricht(bevorzugt, ai_provider_registry.CHAT)
+            and bool((bevorzugt.default_model or "").strip())
+            and (not bevorzugt.requires_api_key or bool(bevorzugt.operator_api_key_encrypted))
+        ):
+            return bevorzugt
+
+    for zugang in _zugaenge(db):
+        if not ai_provider_service.spricht(zugang, ai_provider_registry.CHAT):
+            continue
+        if not (zugang.default_model or "").strip():
+            continue
+        if zugang.requires_api_key and not zugang.operator_api_key_encrypted:
+            continue
+        return zugang
+    return None
+
+
 def _sprechender_zugang(db: Session) -> AiProvider | None:
-    """Der Zugang, der vorliest — mit hinterlegter Stimme.
+    """Der Zugang, der vorliest — mit hinterlegter Stimme (TTS).
 
     Ohne Stimm-Kennung gibt es keinen Sprachmodus. Eine zu raten wäre nicht
     bloss unhöflich, sondern falsch: die Stimmen gehören dem Konto des
@@ -125,29 +167,31 @@ def _zugaenge(db: Session) -> list[AiProvider]:
     )
 
 
-def sprachzugang(db: Session, user: User) -> tuple[AiProvider, AiProvider] | None:
-    """Gehör und Stimme, oder gar nichts.
+def sprachzugang(
+    db: Session, user: User, bevorzugter_provider_id: int | None = None
+) -> tuple[AiProvider, AiProvider, AiProvider] | None:
+    """Gehör, Gehirn und Stimme, oder gar nichts.
 
-    Keine Auswahl durch den Benutzer, anders als beim Chatmodell. Der Grund ist
-    nicht Bequemlichkeit: beide Zugänge sind Betreiberentscheidungen mit
-    eigenem Schlüssel und eigener Rechnung, und es gibt keinen sinnvollen Fall,
-    in dem ein Kunde unter zweien wählt.
-
-    Ein Paar und kein einzelner Zugang, weil der Sprachmodus **beides** braucht.
-    Die Rückgabe ist deshalb ganz oder gar nicht: ein eingerichtetes Gehör ohne
-    Stimme ergäbe einen Knopf, der zuhört und schweigt.
+    Löst alle drei Rollen unabhängig auf:
+    1. hoeren: Provider für Speech-to-Text (STT)
+    2. denken: Provider für Chat/LLM (Gehirn)
+    3. sprechen: Provider für Text-to-Speech (TTS)
     """
-    hoeren = _hoerender_zugang(db)
+    hoeren = _hoerender_zugang(db, bevorzugter_provider_id)
     if hoeren is None:
+        return None
+    denken = _denkender_zugang(db, bevorzugter_provider_id)
+    if denken is None:
         return None
     sprechen = _sprechender_zugang(db)
     if sprechen is None:
         return None
-    return hoeren, sprechen
+    return hoeren, denken, sprechen
 
 
 @router.get("/config")
 def voice_config(
+    provider_id: int | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.voice.use")),
 ) -> dict:
@@ -159,13 +203,13 @@ def voice_config(
     `web_search`, das ohne hinterlegten Schlüssel nicht einmal im
     Werkzeugkatalog steht.
     """
-    zugaenge = sprachzugang(db, user)
-    hoeren, sprechen = zugaenge if zugaenge else (None, None)
+    zugaenge = sprachzugang(db, user, bevorzugter_provider_id=provider_id)
+    hoeren, denken, sprechen = zugaenge if zugaenge else (None, None, None)
     return {
         "available": zugaenge is not None,
         # Das denkende Modell, nicht das hörende: danach fragt, wer wissen will,
         # wer da antwortet.
-        "model": hoeren.default_model if hoeren else None,
+        "model": denken.default_model if denken else None,
         "sample_rate": ai_voice_vad.ABTASTRATE,
         "max_seconds": ai_voice_bridge.MAX_SITZUNGSSEKUNDEN,
         # Die Stimm-Kennung. Sie steht im Info-Dialog und ist ohne
@@ -176,7 +220,7 @@ def voice_config(
 
 
 @router.websocket("/ws")
-async def voice_ws(websocket: WebSocket) -> None:
+async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None:
     """Die Sprachsitzung.
 
     Reihenfolge der Abweisungen: Origin, dann Anmeldung, dann Recht, dann
@@ -200,14 +244,14 @@ async def voice_ws(websocket: WebSocket) -> None:
             await websocket.close(code=1008)
             return
 
-        zugaenge = sprachzugang(db, user)
+        zugaenge = sprachzugang(db, user, bevorzugter_provider_id=provider_id)
         if zugaenge is None:
             # Nicht eingerichtet. Für den Benutzer ist das dasselbe wie „gibt es
             # nicht" — er hat den Knopf nur deshalb gesehen, weil der Betreiber
             # zwischen Seitenaufruf und Klick etwas entfernt hat.
             await websocket.close(code=1008)
             return
-        hoeren, sprechen = zugaenge
+        hoeren, denken, sprechen = zugaenge
 
         # Der Schlüssel wird **vor** dem Upgrade geholt, und zwar im
         # Threadpool: `DisClient.decrypt` ist ein synchroner HTTP-Aufruf mit
@@ -233,6 +277,7 @@ async def voice_ws(websocket: WebSocket) -> None:
         )
         benutzer_id = user.id
         hoeren_id = hoeren.id
+        denken_id = denken.id
     finally:
         # Die Sitzung der Anfrage gehört dem Request-Thread. Ab hier läuft eine
         # Verbindung über Minuten; sie darf keine offene Datenbanksitzung
@@ -244,7 +289,8 @@ async def voice_ws(websocket: WebSocket) -> None:
         websocket,
         user_id=benutzer_id,
         conversation_id=gespraech,
-        chat_provider_id=hoeren_id,
+        chat_provider_id=denken_id,
+        stt_provider_id=hoeren_id,
         stimm_kind=stimm_kind,
         stimm_adresse=stimm_adresse,
         stimm_schluessel=stimm_schluessel,

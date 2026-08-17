@@ -93,7 +93,7 @@ class AiProviderCreate(BaseModel):
     # Schluessel aus `services/ai_provider_registry.ANBIETER`. Die Adresse
     # dahinter gehoert dem Programm — hier steht nur noch, *welcher* Anbieter.
     provider_kind: str = Field(min_length=1, max_length=32)
-    default_model: str = Field(min_length=1, max_length=256)
+    default_model: Modellkennung = Field(default=None, max_length=256)
     enabled: bool = True
     requires_api_key: bool = True
     # Rueckfallpreis je eine Million Tokens, in US-Cent-Microunits (1 Cent =
@@ -121,7 +121,7 @@ class AiProviderCreate(BaseModel):
 class AiProviderUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
     provider_kind: str | None = Field(default=None, min_length=1, max_length=32)
-    default_model: str | None = Field(default=None, min_length=1, max_length=256)
+    default_model: Modellkennung = Field(default=None, max_length=256)
     enabled: bool | None = None
     requires_api_key: bool | None = None
     # Siehe `AiProviderCreate`: Rueckfallpreis in US-Cent-Microunits je Million.
@@ -149,7 +149,7 @@ class AiProviderResponse(BaseModel):
     # bei einer geparkten Zeile, deren Anbieter diese Version nicht kennt —
     # sie soll trotzdem in der Liste erscheinen.
     base_url: str | None = None
-    default_model: str
+    default_model: str | None = None
     #: Bewusst ohne die Pruefung aus `Stimme`: gelesen wird hier, was in der
     #: Zeile steht. Loescht der Betreiber eine Stimme in seinem Konto, soll er
     #: sie in der Liste sehen und aendern koennen — eine 500 beim blossen

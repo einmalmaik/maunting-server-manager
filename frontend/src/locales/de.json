@@ -116,19 +116,29 @@
     "saved": "KI-Limits gespeichert.",
     "maxMemoryEntries": "Max. Memory-Einträge je Bereich",
     "maxMemoryEntriesHint": "Gilt je persönlichem Bereich — allgemein und je Server getrennt gezählt. Ein leeres Feld senkt den Vorrat nicht: die Systemgrenze von 100 Einträgen gilt erst, wenn keine Rolle des Benutzers eine Zahl trägt. Beim Teamwissen zählt die Rolle des Gründers, nicht die des Schreibenden. „Wissen dieses Servers“ und „Panelweites KI-Gedächtnis“ hängen an keiner Rolle; dort gilt immer die Systemgrenze.",
-    "maxReasoningEffort": "Höchste Denkstufe"
+    "maxReasoningEffort": "Höchste Denkstufe",
+    "tabsAriaLabel": "KI-Einstellungen Bereiche",
+    "subtabs": {
+      "providers": "KI-Anbieter",
+      "features": "Funktionen & Wissen",
+      "limits": "Rollen & Kontingente",
+      "usage": "Verbrauch & Kosten"
+    }
   },
   "ai": {
     "providers": {
       "title": "KI-Provider",
-      "description": "Wähle einen unterstützten Anbieter und ein Modell aus dessen Katalog. Anbieter und Operator-Key sind ausschließlich für Panel-Administratoren sichtbar.",
+      "description": "Wähle einen unterstützten Anbieter und ein Modell aus dessen Katalog. Anbieter und API-Key sind ausschließlich für Panel-Administratoren sichtbar.",
       "add": "Provider hinzufügen",
       "empty": "Noch kein KI-Provider konfiguriert.",
       "name": "Name",
       "model": "Standardmodell",
-      "operatorKey": "Operator-API-Key",
+      "operatorKey": "API-Key",
       "keyConfigured": "Key konfiguriert ({{hint}}); leer lassen, um ihn beizubehalten",
-      "keyOptional": "Optionaler zentraler API-Key",
+      "keyOptional": "API-Key des Anbieters",
+      "clearKey": "Key entfernen",
+      "undoClearKey": "Löschen rückgängig",
+      "keyWillBeCleared": "Wird beim Speichern entfernt",
       "clearOperatorKey": "Zentralen Operator-Key beim Speichern entfernen",
       "enabled": "Provider aktiviert",
       "requiresKey": "API-Key erforderlich",

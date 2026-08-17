@@ -207,9 +207,10 @@ def verbindungsadresse(base_url: str, voice_id: str, model_id: str) -> str:
     teile = urlparse(base_url)
     schema = "wss" if teile.scheme == "https" else "ws"
     pfad = teile.path.rstrip("/")
+    wirksames_modell = (model_id or "").strip() or "eleven_turbo_v2_5"
     frage = urlencode(
         {
-            "model_id": model_id,
+            "model_id": wirksames_modell,
             "output_format": AUSGABEFORMAT,
             "inactivity_timeout": INAKTIVITAET_SEKUNDEN,
         }

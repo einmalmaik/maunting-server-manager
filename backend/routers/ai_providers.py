@@ -262,6 +262,7 @@ async def test_provider(
     if ai_provider_service.spricht(provider, ai_provider_registry.TTS):
         return await _stimmzugang_pruefen(provider, api_key or "")
 
+    test_model = provider.default_model or provider.transcription_model
     usage = StreamUsage()
     try:
         received = False
@@ -272,6 +273,7 @@ async def test_provider(
             messages=[{"role": "user", "content": "ping"}],
             usage=usage,
             tools=None,
+            model=test_model,
         ):
             received = True
         return AiProviderTestResponse(
@@ -456,6 +458,7 @@ async def list_available_providers(
     providers = [
         provider for provider in providers
         if ai_provider_service.spricht(provider, ai_provider_registry.CHAT)
+        and bool((provider.default_model or "").strip())
     ]
     deckel = ai_limit_service.resolve_effective_limits(db, user).max_reasoning_effort
 

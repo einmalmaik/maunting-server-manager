@@ -117,6 +117,7 @@ describe('AiTab', () => {
 
   it('loads role limits and saves a complete set including unlimited', async () => {
     render(<AiTab />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Rollen & Kontingente/i }))
     await screen.findByRole('switch', {
       name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i,
     })
@@ -155,6 +156,7 @@ describe('AiTab', () => {
   it('shows only the selected role and switches to another one', async () => {
     vi.mocked(client.api).mockResolvedValue([blankRow, row])
     render(<AiTab />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Rollen & Kontingente/i }))
 
     // Vorauswahl faellt auf die bereits konfigurierte Rolle: dort gibt es
     // etwas zu sehen. Die unkonfigurierte Rolle ist gleichzeitig unsichtbar —
@@ -174,6 +176,7 @@ describe('AiTab', () => {
   it('presents an unconfigured role as unlimited, never as a silent zero', async () => {
     vi.mocked(client.api).mockResolvedValue([blankRow])
     render(<AiTab />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Rollen & Kontingente/i }))
 
     // Regression zum Quota-Blocker: eine unkonfigurierte Rolle darf hier nicht
     // wie ein gespeichertes Nulllimit aussehen. Wer das versehentlich
@@ -187,6 +190,7 @@ describe('AiTab', () => {
 
   it('hängt den Hinweis an das Memory-Feld — und nur an dieses', async () => {
     render(<AiTab />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Rollen & Kontingente/i }))
 
     // Vier Unwahrheiten trug dieses Feld: die Beschriftung las sich wie ein
     // Vorrat je Benutzer (gezählt wird je Bereich, und wieviele es davon gibt,
@@ -222,6 +226,7 @@ describe('AiTab', () => {
 
   it('sagt den Hinweis auch am Schalter an, weil das Feld daneben abgeschaltet sein kann', async () => {
     render(<AiTab />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Rollen & Kontingente/i }))
 
     const schalter = await screen.findByRole('switch', {
       name: 'Unbegrenzt: Max. Memory-Einträge je Bereich: ai-vip',
@@ -268,6 +273,7 @@ describe('AiTab', () => {
       pfad === '/ai/settings/role-limits' ? Promise.resolve([blankRow]) : respond(pfad)
     ) as never)
     render(<AiTab />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Rollen & Kontingente/i }))
 
     // Beide Sätze müssen wirklich auf dem Schirm stehen, nicht nur in der
     // Locale: `notConfiguredHint` erscheint ausschließlich an einer
@@ -318,6 +324,7 @@ describe('AiTab', () => {
 
   it('zeigt auch beim Speichern nicht die rohe Browsermeldung', async () => {
     render(<AiTab />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Rollen & Kontingente/i }))
     await screen.findByRole('switch', { name: /Unbegrenzt: Monatliches Tokenlimit: ai-vip/i })
 
     vi.mocked(client.api).mockRejectedValueOnce(new TypeError('Failed to fetch'))
@@ -343,6 +350,7 @@ describe('AiTab', () => {
     // Panelweites Gedächtnis lief bisher in jedem Gespräch mit, war aber nur
     // über die API erreichbar; panelweite Skills legte man im Profil an.
     render(<AiTab />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Funktionen & Wissen/i }))
 
     expect(await screen.findByTestId('skills')).toHaveAttribute('data-scope', 'panel')
     expect(screen.getByTestId('memory')).toHaveAttribute('data-scope', 'panel')
@@ -351,6 +359,7 @@ describe('AiTab', () => {
   it('zeigt panelweite Skills nicht ohne das Verwaltungsrecht', async () => {
     permissions.mockImplementation((key: string) => key !== 'ai.skills.manage')
     render(<AiTab />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Funktionen & Wissen/i }))
 
     await screen.findByTestId('memory')
     expect(screen.queryByTestId('skills')).not.toBeInTheDocument()
@@ -358,6 +367,7 @@ describe('AiTab', () => {
 
   it('zeigt die KI-Nutzung aller Benutzer mit dem passenden Recht', async () => {
     render(<AiTab />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Verbrauch & Kosten/i }))
 
     const tabelle = await screen.findByLabelText('KI-Nutzung')
     expect(tabelle).toHaveTextContent('viel-verbraucher')
@@ -376,7 +386,7 @@ describe('AiTab', () => {
     permissions.mockImplementation((key: string) => key !== 'ai.usage.read.all')
     render(<AiTab />)
 
-    await screen.findByTestId('memory')
+    expect(screen.queryByRole('tab', { name: /Verbrauch & Kosten/i })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('KI-Nutzung')).not.toBeInTheDocument()
     expect(client.api).not.toHaveBeenCalledWith('/ai/usage')
   })

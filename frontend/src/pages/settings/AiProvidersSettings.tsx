@@ -122,7 +122,7 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
     const payload: AiProviderWrite = {
       name: draft.name.trim(),
       provider_kind: draft.provider_kind,
-      default_model: draft.default_model.trim(),
+      default_model: draft.default_model?.trim() || null,
       enabled: draft.enabled,
       requires_api_key: draft.requires_api_key,
       token_price_micro_usd_per_million: draft.token_price_micro_usd_per_million ?? null,
@@ -304,9 +304,7 @@ function ProviderForm({
   // verschwindet von selbst — statt auf ein Modell zu zeigen, das es nicht gibt.
   const empfohlenesModell = models?.find((item) => item.recommended) ?? null
 
-  // Unser `Dropdown` ist ein Knopf, kein `<select>`. Ein umschliessendes
-  // `<label>` beschriftet ihn deshalb nicht — es braucht `htmlFor` und eine ID,
-  // die auch bei zwei Formularen auf derselben Seite eindeutig bleibt.
+  const keyId = useId()
   const kindId = useId()
   const modelId = useId()
   const stimmeId = useId()
@@ -334,10 +332,6 @@ function ProviderForm({
 
   /**
    * Schickt eine echte Mini-Anfrage an den Anbieter.
-   *
-   * Ohne das ist eine Fehlkonfiguration erst im Chat sichtbar — und dort sehen
-   * eine falsche Basis-URL, ein Tippfehler im Modellnamen und ein abgelaufener
-   * Key alle gleich aus.
    */
   const runTest = async () => {
     if (!onTest || testing) return
@@ -359,208 +353,228 @@ function ProviderForm({
     if (localDraft) setLocal((current) => ({ ...current, ...patch }))
     else onChange(patch)
   }
-  const valid = Boolean(draft.name.trim() && draft.provider_kind && draft.default_model.trim())
+  const valid = Boolean(
+    draft.name.trim() &&
+    draft.provider_kind &&
+    (draft.default_model?.trim() || draft.transcription_model?.trim() || draft.default_voice?.trim())
+  )
 
   return (
-    <form className="msm-card space-y-5 p-6" onSubmit={(event) => {
+    <form className="msm-card space-y-6 p-6" onSubmit={(event) => {
       event.preventDefault()
       if (localDraft) onSaveDraft?.(draft)
       else onSave?.()
     }}>
-      <fieldset disabled={disabled} className="grid grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2">
-        <ProviderInput label={t('ai.providers.name')} value={draft.name} onChange={(name) => change({ name })} />
-        <div className="space-y-1.5">
-          <label htmlFor={kindId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-            {t('ai.providers.kind')}
-          </label>
-          <Dropdown
-            id={kindId}
-            value={draft.provider_kind || null}
-            onChange={(kind) => change({ provider_kind: kind, default_model: '' })}
-            // Eine Zeile ohne bekannten Anbieter gibt es nur nach der Migration
-            // 20260811_01, die fremde Zugaenge geparkt hat. Der Platzhalter sagt
-            // das, statt stillschweigend auf den ersten Anbieter umzustellen —
-            // und er ist bewusst **keine** waehlbare Option: „kein Anbieter" ist
-            // ein Befund, keine Einstellung.
-            placeholder={t('ai.providers.kindMissing')}
-            // Der Hinweis je Zeile sagt, wofuer der Zugang ueberhaupt taugt.
-            // Ohne ihn stehen zwei Anbieter untereinander, die verschiedene
-            // Dinge tun — und ein Sprachzugang, der im Chat nie auftaucht,
-            // saehe wie ein Fehler aus statt wie eine Absicht.
-            options={kinds.map((item) => ({
-              value: item.kind,
-              label: item.label,
-              hint: t(`ai.providers.protokoll.${item.protokoll}`),
-            }))}
-          />
-          {spec && (
-            <p className="text-xs text-on-surface-variant">
-              {t('ai.providers.kindHint', { url: spec.base_url })}
-              {' '}
-              <a href={spec.key_url} target="_blank" rel="noreferrer" className="underline">{t('ai.providers.keyLink')}</a>
-            </p>
-          )}
-          {spec?.protokoll === 'tts' && (
-            <p className="text-xs text-on-surface-variant">{t('ai.providers.ttsHint')}</p>
-          )}
-          {!draft.provider_kind && (
-            <p className="text-xs text-status-error">{t('ai.providers.kindMissingHint')}</p>
-          )}
-        </div>
-        <div className="md:col-span-2">
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
-              {/* Ausgewaehlt statt getippt: ein Tippfehler fiel bisher erst beim
-                  Testaufruf auf, und ueber die Denkfaehigkeiten des Modells
-                  wusste MSM so oder so nichts. */}
-              {models && models.length > 0 ? (
-                <div className="space-y-1.5">
-                  <label htmlFor={modelId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                    {t('ai.providers.model')}
-                  </label>
-                  <Dropdown
-                    id={modelId}
-                    value={draft.default_model || null}
-                    onChange={(default_model) => change({ default_model })}
-                    placeholder={t('ai.providers.modelChoose')}
-                    // Das empfohlene Modell steht oben. Bei ueber 400 Eintraegen
-                    // ist eine Empfehlung, die man erst suchen muss, keine.
-                    options={[...models]
-                      .sort((a, b) => Number(b.recommended) - Number(a.recommended))
-                      .map((item) => ({
-                        value: item.model_id,
-                        // Der Anzeigename daneben: `anthropic/claude-opus-5` ist
-                        // die ID, die gespeichert wird, „Claude Opus 5" das, was
-                        // der Betreiber sucht.
-                        label: item.model_id,
-                        hint: item.recommended
-                          ? [item.name !== item.model_id ? item.name : null, t('ai.providers.recommended')]
-                              .filter(Boolean)
-                              .join(' · ')
-                          : item.name !== item.model_id
-                            ? item.name
-                            : undefined,
-                        icon: item.recommended
-                          ? <Star className="h-3.5 w-3.5 fill-current text-primary" aria-hidden="true" />
-                          : undefined,
-                      }))}
-                  />
-                </div>
-              ) : (
-                <ProviderInput
-                  label={t('ai.providers.model')}
-                  value={draft.default_model}
-                  onChange={(default_model) => change({ default_model })}
-                />
-              )}
-            </div>
-            <Button type="button" variant="ghost" disabled={!draft.provider_kind || loadingModels} onClick={() => void ladeModelle(true)}>
-              <RefreshCw className={`h-4 w-4 ${loadingModels ? 'animate-spin' : ''}`} aria-hidden="true" />
-              <span className="sr-only">{t('ai.providers.reloadModels')}</span>
-            </Button>
+      <fieldset disabled={disabled} className="space-y-5 border-0 p-0">
+        {/* Name und Anbietertyp */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <ProviderInput label={t('ai.providers.name')} value={draft.name} onChange={(name) => change({ name })} />
+          <div className="space-y-1.5">
+            <label htmlFor={kindId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('ai.providers.kind')}
+            </label>
+            <Dropdown
+              id={kindId}
+              value={draft.provider_kind || null}
+              onChange={(kind) => change({ provider_kind: kind, default_model: '' })}
+              placeholder={t('ai.providers.kindMissing')}
+              options={kinds.map((item) => ({
+                value: item.kind,
+                label: item.label,
+                hint: t(`ai.providers.protokoll.${item.protokoll}`),
+              }))}
+            />
+            {spec && (
+              <p className="text-xs text-on-surface-variant">
+                {t('ai.providers.kindHint', { url: spec.base_url })}
+                {' '}
+                <a href={spec.key_url} target="_blank" rel="noreferrer" className="underline">{t('ai.providers.keyLink')}</a>
+              </p>
+            )}
+            {spec?.protokoll === 'tts' && (
+              <p className="text-xs text-on-surface-variant">{t('ai.providers.ttsHint')}</p>
+            )}
+            {!draft.provider_kind && (
+              <p className="text-xs text-status-error">{t('ai.providers.kindMissingHint')}</p>
+            )}
           </div>
-          {models === null && !loadingModels && draft.provider_kind && (
-            <p className="msm-field-help">{t('ai.providers.catalogUnavailable')}</p>
-          )}
-          {/* Eine leere Liste ist bei diesen Anbietern kein Ausfall, sondern die
-              Reihenfolge: OpenAI gibt seinen Katalog nur gegen den Schlüssel
-              heraus, und beim Anlegen ist der noch nicht gespeichert. Ohne
-              diesen Satz sähe der Betreiber ein Textfeld und wüsste nicht,
-              warum er die Kennung selbst tippen soll. */}
-          {models !== null && models.length === 0 && !loadingModels
-            && spec?.katalog_braucht_schluessel && (
-            <p className="msm-field-help">{t('ai.providers.catalogNeedsKey')}</p>
-          )}
-          {/* Steht nur da, solange der Betreiber die Empfehlung nicht gewaehlt
-              hat. Danach waere es eine Belehrung ueber eine Entscheidung, die
-              schon gefallen ist. */}
-          {empfohlenesModell && draft.default_model !== empfohlenesModell.model_id && (
-            <p className="msm-field-help flex items-start gap-1.5">
-              <Star className="mt-0.5 h-3.5 w-3.5 shrink-0 fill-current text-primary" aria-hidden="true" />
-              <span>
-                {t('ai.providers.recommendationHint', { model: empfohlenesModell.model_id })}{' '}
+        </div>
+
+        {/* API-Key */}
+        <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <label htmlFor={keyId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('ai.providers.operatorKey')}
+            </label>
+            {draft.clear_operator_api_key ? (
+              <span className="text-xs text-status-warning flex items-center gap-1.5">
+                {t('ai.providers.keyWillBeCleared')}
                 <button
                   type="button"
-                  onClick={() => change({ default_model: empfohlenesModell.model_id })}
-                  className="underline underline-offset-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => change({ clear_operator_api_key: false })}
+                  className="font-medium text-primary hover:underline"
                 >
-                  {t('ai.providers.recommendationApply')}
+                  {t('ai.providers.undoClearKey')}
                 </button>
               </span>
-            </p>
-          )}
-          {gewaehltesModell && <ModelCapabilities model={gewaehltesModell} />}
+            ) : draft.operator_key_configured ? (
+              <button
+                type="button"
+                onClick={() => change({ clear_operator_api_key: true, operator_api_key: '' })}
+                className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                title={t('ai.providers.clearKey')}
+                aria-label={t('ai.providers.clearKey')}
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>{t('ai.providers.clearKey')}</span>
+              </button>
+            ) : null}
+          </div>
+          <input
+            id={keyId}
+            type="password"
+            autoComplete="new-password"
+            className="msm-input w-full"
+            disabled={disabled || draft.clear_operator_api_key}
+            value={draft.operator_api_key ?? ''}
+            placeholder={
+              draft.clear_operator_api_key
+                ? t('ai.providers.keyWillBeCleared')
+                : draft.operator_key_configured
+                  ? t('ai.providers.keyConfigured', { hint: draft.operator_key_hint ?? '••••' })
+                  : t('ai.providers.keyOptional')
+            }
+            aria-label={t('ai.providers.operatorKey')}
+            onChange={(event) => change({ operator_api_key: event.target.value, clear_operator_api_key: false })}
+          />
         </div>
-        {/* Nur beim Stimmzugang, an derselben Bedingung wie der Hinweis oben.
-            Ein Chatzugang haette hier eine Einstellung ohne Wirkung stehen —
-            und dahinter die Frage, warum der Chat nicht spricht.
 
-            Ein **Textfeld** und kein Auswahlfeld: bis zum 16.08.2026 standen
-            hier acht feste Namen, die dem Modell gehoerten. Eine
-            ElevenLabs-Kennung gehoert dem Konto des Betreibers, und MSM kennt
-            es nicht. Nichts eingetragen heisst deshalb nicht „Standardstimme",
-            sondern „kein Sprachmodus" — es gibt hier nichts zu erben. */}
+        {/* Modelle & Fähigkeiten */}
+        {spec?.protokoll === 'chat_completions' && (
+          <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('ai.providers.model')} & {t('ai.providers.transcriptionModel')}
+            </h4>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {/* Chat & Denken */}
+              <div className="space-y-1.5">
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    {models && models.length > 0 ? (
+                      <div className="space-y-1.5">
+                        <label htmlFor={modelId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                          🧠 {t('ai.providers.model')}
+                        </label>
+                        <Dropdown
+                          id={modelId}
+                          value={draft.default_model || null}
+                          onChange={(default_model) => change({ default_model: default_model || '' })}
+                          placeholder={t('ai.providers.modelChoose')}
+                          options={[...models]
+                            .sort((a, b) => Number(b.recommended) - Number(a.recommended))
+                            .map((item) => ({
+                              value: item.model_id,
+                              label: item.model_id,
+                              hint: item.recommended
+                                ? [item.name !== item.model_id ? item.name : null, t('ai.providers.recommended')]
+                                    .filter(Boolean)
+                                    .join(' · ')
+                                : item.name !== item.model_id
+                                  ? item.name
+                                  : undefined,
+                              icon: item.recommended
+                                ? <Star className="h-3.5 w-3.5 fill-current text-primary" aria-hidden="true" />
+                                : undefined,
+                            }))}
+                          aria-label={t('ai.providers.model')}
+                        />
+                      </div>
+                    ) : (
+                      <ProviderInput
+                        label={`🧠 ${t('ai.providers.model')}`}
+                        value={draft.default_model ?? ''}
+                        onChange={(default_model) => change({ default_model })}
+                      />
+                    )}
+                  </div>
+                  <Button type="button" variant="ghost" disabled={!draft.provider_kind || loadingModels} onClick={() => void ladeModelle(true)}>
+                    <RefreshCw className={`h-4 w-4 ${loadingModels ? 'animate-spin' : ''}`} aria-hidden="true" />
+                    <span className="sr-only">{t('ai.providers.reloadModels')}</span>
+                  </Button>
+                </div>
+                {models === null && !loadingModels && draft.provider_kind && (
+                  <p className="msm-field-help">{t('ai.providers.catalogUnavailable')}</p>
+                )}
+                {models !== null && models.length === 0 && !loadingModels
+                  && spec?.katalog_braucht_schluessel && (
+                  <p className="msm-field-help">{t('ai.providers.catalogNeedsKey')}</p>
+                )}
+                {empfohlenesModell && draft.default_model !== empfohlenesModell.model_id && (
+                  <p className="msm-field-help flex items-start gap-1.5">
+                    <Star className="mt-0.5 h-3.5 w-3.5 shrink-0 fill-current text-primary" aria-hidden="true" />
+                    <span>
+                      {t('ai.providers.recommendationHint', { model: empfohlenesModell.model_id })}{' '}
+                      <button
+                        type="button"
+                        onClick={() => change({ default_model: empfohlenesModell.model_id })}
+                        className="underline underline-offset-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {t('ai.providers.recommendationApply')}
+                      </button>
+                    </span>
+                  </p>
+                )}
+                {gewaehltesModell && <ModelCapabilities model={gewaehltesModell} />}
+              </div>
+
+              {/* Gehör / Transkription */}
+              <div className="space-y-1.5">
+                <label htmlFor={hoerenId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  👂 {t('ai.providers.transcriptionModel')}
+                </label>
+                <input
+                  id={hoerenId}
+                  type="text"
+                  className="msm-input w-full"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={draft.transcription_model ?? ''}
+                  onChange={(ereignis) => change({ transcription_model: ereignis.target.value })}
+                  placeholder={draft.provider_kind === 'openai' ? 'whisper-1' : 'openai/gpt-transcribe'}
+                  aria-label={t('ai.providers.transcriptionModel')}
+                />
+                <p className="msm-field-help">{t('ai.providers.transcriptionModelHint')}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Stimme bei TTS */}
         {spec?.protokoll === 'tts' && (
-          <div className="space-y-1.5 md:col-span-2">
+          <div className="space-y-1.5 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
             <label htmlFor={stimmeId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-              {t('ai.providers.defaultVoice')}
+              🗣️ {t('ai.providers.defaultVoice')}
             </label>
             <input
               id={stimmeId}
               type="text"
-              className="msm-input"
+              className="msm-input w-full"
               autoComplete="off"
               spellCheck={false}
               value={draft.default_voice ?? ''}
               onChange={(ereignis) => change({ default_voice: ereignis.target.value })}
               placeholder="21m00Tcm4TlvDq8ikWAM"
+              aria-label={t('ai.providers.defaultVoice')}
             />
             <p className="msm-field-help">{t('ai.providers.defaultVoiceHint')}</p>
           </div>
         )}
-        {/* Und das Gegenstueck am Chatzugang: was Gesprochenes zu Text macht.
-            Es steht unter dem Standardmodell, weil es dasselbe Konto und
-            denselben Schluessel benutzt — nur eine andere Modellzeile. */}
-        {spec?.protokoll === 'chat_completions' && (
-          <div className="space-y-1.5 md:col-span-2">
-            <label htmlFor={hoerenId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-              {t('ai.providers.transcriptionModel')}
-            </label>
-            <input
-              id={hoerenId}
-              type="text"
-              className="msm-input"
-              autoComplete="off"
-              spellCheck={false}
-              value={draft.transcription_model ?? ''}
-              onChange={(ereignis) => change({ transcription_model: ereignis.target.value })}
-              placeholder="openai/gpt-transcribe"
-            />
-            <p className="msm-field-help">{t('ai.providers.transcriptionModelHint')}</p>
-          </div>
-        )}
-        <ProviderInput
-          className="md:col-span-2"
-          type="password"
-          autoComplete="new-password"
-          label={t('ai.providers.operatorKey')}
-          value={draft.operator_api_key ?? ''}
-          placeholder={draft.operator_key_configured ? t('ai.providers.keyConfigured', { hint: draft.operator_key_hint ?? '••••' }) : t('ai.providers.keyOptional')}
-          disabled={draft.clear_operator_api_key}
-          onChange={(operator_api_key) => change({ operator_api_key, clear_operator_api_key: false })}
-        />
-        {draft.operator_key_configured && (
-          <div className="md:col-span-2">
-            <Toggle label={t('ai.providers.clearOperatorKey')} checked={Boolean(draft.clear_operator_api_key)} onChange={(clear_operator_api_key) => change({ clear_operator_api_key, operator_api_key: '' })} />
-          </div>
-        )}
+
+        {/* Provider aktivieren Toggle */}
         <Toggle label={t('ai.providers.enabled')} checked={draft.enabled} onChange={(enabled) => change({ enabled })} />
-        <Toggle label={t('ai.providers.requiresKey')} checked={draft.requires_api_key} onChange={(requires_api_key) => change({ requires_api_key })} />
-        <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
-          {/* Ein freies Textfeld und kein `NumberStepper` mehr. Der Stepper
-              zaehlte in ganzen Schritten, und genau daran scheiterte die
-              Eingabe: zwischen 1 und 2 Cent lag nichts, „1,20 €" war nicht
-              eintragbar. Ein Preis ist eine Dezimalzahl, kein Zaehler. */}
+
+        {/* Rückfallpreis */}
+        <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
           <div className="space-y-1.5">
             <label htmlFor={preisId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
               {t('ai.providers.tokenPrice', { currency: waehrung.currency })}
@@ -579,10 +593,6 @@ function ProviderForm({
               aria-label={t('ai.providers.tokenPrice', { currency: waehrung.currency })}
             />
           </div>
-          {/* Was daraus gespeichert wird, sichtbar und nicht im Verborgenen.
-              Gebucht wird in Dollar; eine Umrechnung, die der Betreiber nicht
-              sieht, waere spaeter der erste Verdaechtige, wenn eine Zahl nicht
-              stimmt. */}
           {waehrung.currency !== 'USD' && preisMicro !== null && (
             <p className="msm-field-help">
               {t('ai.providers.tokenPriceConverted', {
@@ -616,15 +626,15 @@ function ProviderForm({
         </p>
       )}
       <div className="flex flex-wrap justify-end gap-2">
-        {onDelete && <Button type="button" variant="destructive" disabled={disabled} onClick={onDelete}><Trash2 className="h-4 w-4" />{t('common.delete')}</Button>}
+        {onDelete && <Button type="button" variant="destructive" disabled={disabled} onClick={onDelete}><Trash2 className="h-4 w-4" aria-hidden="true" />{t('common.delete')}</Button>}
         {onTest && (
           <Button type="button" variant="secondary" disabled={disabled || testing} onClick={() => void runTest()}>
-            <PlugZap className="h-4 w-4" />
+            <PlugZap className="h-4 w-4" aria-hidden="true" />
             {testing ? t('common.loading') : t('ai.providers.test')}
           </Button>
         )}
         {onCancel && <Button type="button" variant="ghost" disabled={disabled} onClick={onCancel}>{t('common.cancel')}</Button>}
-        <Button type="submit" disabled={disabled || !valid}><Save className="h-4 w-4" />{saving ? t('common.loading') : t('settings.save')}</Button>
+        <Button type="submit" disabled={disabled || !valid}><Save className="h-4 w-4" aria-hidden="true" />{saving ? t('common.loading') : t('settings.save')}</Button>
       </div>
     </form>
   )
@@ -671,5 +681,10 @@ function ProviderInput({ label, value, onChange, className = '', ...props }: {
 }
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return <label className="flex min-h-10 items-center justify-between gap-4 text-sm text-on-surface"><span>{label}</span><Switch checked={checked} onCheckedChange={onChange} /></label>
+  return (
+    <div className="flex min-h-10 items-center justify-between gap-4 text-sm text-on-surface">
+      <span>{label}</span>
+      <Switch checked={checked} onCheckedChange={onChange} aria-label={label} />
+    </div>
+  )
 }

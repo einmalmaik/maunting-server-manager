@@ -143,7 +143,7 @@ def create_provider(
     *,
     name: str,
     provider_kind: str,
-    default_model: str,
+    default_model: str | None = None,
     enabled: bool,
     requires_api_key: bool,
     operator_api_key: str | None,
@@ -157,19 +157,26 @@ def create_provider(
     # diesen Zugang ebenfalls keinen Sprachmodus.
     transcription_model: str | None = None,
 ) -> AiProvider:
-    if not name.strip() or not default_model.strip():
-        raise AiProviderConfigurationError("Provider-Name und Modell dürfen nicht leer sein")
+    if not (name or "").strip():
+        raise AiProviderConfigurationError("Provider-Name darf nicht leer sein")
+    modell = (default_model or "").strip() or None
+    gehoer = (transcription_model or "").strip() or None
+    stimme = _assert_stimme(default_voice)
+    if not (modell or gehoer or stimme):
+        raise AiProviderConfigurationError(
+            "Mindestens eine Funktion (Standardmodell, Modell für Gesprochenes oder Stimme) muss hinterlegt sein"
+        )
     kind = _assert_kind(provider_kind)
     _assert_key_passt(kind, operator_api_key)
     provider = AiProvider(
         name=name.strip(),
         provider_kind=kind,
-        default_model=default_model.strip(),
+        default_model=modell,
         enabled=enabled,
         requires_api_key=requires_api_key,
         token_price_micro_usd_per_million=token_price_micro_usd_per_million,
-        default_voice=_assert_stimme(default_voice),
-        transcription_model=(transcription_model or "").strip() or None,
+        default_voice=stimme,
+        transcription_model=gehoer,
     )
     db.add(provider)
     db.flush()
@@ -190,15 +197,8 @@ def update_provider(
     operator_api_key: str | None,
     clear_operator_api_key: bool,
 ) -> AiProvider:
-    # Ein ausdrueckliches ``null`` zaehlt hier als leer: `exclude_unset` laesst
-    # es durch, und ``str(None)`` waere die wahre Zeichenkette ``"None"`` — der
-    # Fehler laendete zwei Zeilen tiefer als ``AttributeError`` im 500 statt
-    # hier in der Erklaerung.
-    if any(
-        field in values and not str(values[field] or "").strip()
-        for field in ("name", "default_model")
-    ):
-        raise AiProviderConfigurationError("Provider-Name und Modell dürfen nicht leer sein")
+    if "name" in values and not str(values["name"] or "").strip():
+        raise AiProviderConfigurationError("Provider-Name darf nicht leer sein")
     if "provider_kind" in values and values["provider_kind"] != provider.provider_kind:
         provider.provider_kind = _assert_kind(values["provider_kind"])
         # Der gespeicherte Schluessel gehoert zum **alten** Anbieter. Bliebe er
@@ -211,9 +211,18 @@ def update_provider(
         provider.operator_api_key_encrypted = None
         provider.operator_api_key_hint = None
     _assert_key_passt(provider.provider_kind, operator_api_key)
-    for field in ("name", "default_model"):
-        if field in values:
-            setattr(provider, field, values[field].strip())
+    new_name = values["name"].strip() if "name" in values else provider.name
+    new_default_model = (values["default_model"] or "").strip() or None if "default_model" in values else provider.default_model
+    new_default_voice = _assert_stimme(values["default_voice"]) if "default_voice" in values else provider.default_voice
+    new_transcription_model = (values["transcription_model"] or "").strip() or None if "transcription_model" in values else provider.transcription_model
+    if not (new_default_model or new_transcription_model or new_default_voice):
+        raise AiProviderConfigurationError(
+            "Mindestens eine Funktion (Standardmodell, Modell für Gesprochenes oder Stimme) muss hinterlegt sein"
+        )
+    provider.name = new_name
+    provider.default_model = new_default_model
+    provider.default_voice = new_default_voice
+    provider.transcription_model = new_transcription_model
     for field in ("enabled", "requires_api_key"):
         # ``null`` heisst bei einer NOT-NULL-Spalte nicht „aus", sondern
         # „nichts gesagt" — es wird wie ein fehlendes Feld behandelt, statt als
@@ -234,18 +243,6 @@ def update_provider(
         provider.token_price_micro_usd_per_million = values[
             "token_price_micro_usd_per_million"
         ]
-    # Wie beim Preis darüber entscheidet die **Anwesenheit** des Schlüssels und
-    # nicht sein Wert: `values` kommt aus `model_dump(exclude_unset=True)`, ein
-    # nicht mitgeschicktes Feld fehlt also ganz. Ein ausdrückliches ``null``
-    # landet dagegen hier und leert die Spalte — über den Zugang lässt sich
-    # danach nicht mehr sprechen. Nicht bei `name`/`default_model` oben, denn
-    # die dürfen nicht leer werden; diese beiden Spalten schon, und leer heißt
-    # hier etwas.
-    if "default_voice" in values:
-        provider.default_voice = _assert_stimme(values["default_voice"])
-    if "transcription_model" in values:
-        rohwert = values["transcription_model"]
-        provider.transcription_model = (rohwert or "").strip() or None
     if clear_operator_api_key:
         provider.operator_api_key_encrypted = None
         provider.operator_api_key_hint = None
@@ -360,18 +357,16 @@ def anbieter_ohne_auswahl(db: Session, user: User) -> AiProvider | None:
     )
     if letzter is not None:
         anbieter = db.get(AiProvider, letzter.provider_id)
-        if anbieter is not None and anbieter.enabled and spricht(anbieter, ai_provider_registry.CHAT):
+        if (
+            anbieter is not None
+            and anbieter.enabled
+            and spricht(anbieter, ai_provider_registry.CHAT)
+            and bool((anbieter.default_model or "").strip())
+        ):
             return anbieter
 
-    # Gezaehlt werden nur **Chat**zugaenge. Vorher zaehlte jeder aktive Zugang
-    # mit, und seit es den Sprachmodus gibt, war das falsch: wer einen
-    # OpenRouter-Zugang und einen ElevenLabs-Zugang aktiviert hatte, hatte in
-    # den Augen dieser Funktion zwei Anbieter und bekam deshalb `None` — obwohl
-    # es genau einen gab, der denken kann. Ein Lauf ohne Zuschauer (Uhr,
-    # Guardian) lief dann still gar nicht.
-    #
-    # Dasselbe gilt eine Zeile hoeher: ein zuletzt benutzter Zugang, der
-    # inzwischen ein Stimmzugang ist, beantwortet die Frage nicht.
+    # Gezaehlt werden nur **Chat**zugaenge mit konfiguriertem Standardmodell.
+    # Ein reiner STT- oder TTS-Zugang kann einen Hintergrundlauf nicht tragen.
     aktive = [
         zugang
         for zugang in db.query(AiProvider)
@@ -379,6 +374,7 @@ def anbieter_ohne_auswahl(db: Session, user: User) -> AiProvider | None:
         .order_by(AiProvider.id)
         .all()
         if spricht(zugang, ai_provider_registry.CHAT)
+        and bool((zugang.default_model or "").strip())
     ]
     return aktive[0] if len(aktive) == 1 else None
 

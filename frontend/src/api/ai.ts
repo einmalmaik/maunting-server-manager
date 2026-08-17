@@ -10,7 +10,7 @@ export interface AiProviderAdmin {
    * `null`, wenn das Panel diesen Anbieter nicht (mehr) kennt.
    */
   base_url: string | null
-  default_model: string
+  default_model: string | null
   /**
    * Die Stimm-Kennung eines Stimmzugangs, aus dem Konto des Betreibers.
    *
@@ -771,7 +771,7 @@ const STREAM_EVENTS: readonly AiStreamEvent['event'][] = [
 export interface AiProviderWrite {
   name: string
   provider_kind: string
-  default_model: string
+  default_model?: string | null
   enabled: boolean
   requires_api_key: boolean
   token_price_micro_usd_per_million?: number | null

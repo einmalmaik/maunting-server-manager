@@ -74,7 +74,10 @@ def _fuer_chat(provider) -> bool:
     filtert ihn), es kann ihn hier also nur nennen, wer die Kennung errät oder
     eine alte Auswahl im Tab liegen hat.
     """
-    return ai_provider_service.spricht(provider, ai_provider_registry.CHAT)
+    return (
+        ai_provider_service.spricht(provider, ai_provider_registry.CHAT)
+        and bool((provider.default_model or "").strip())
+    )
 
 
 def _art(kind: str) -> str:

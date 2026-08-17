@@ -388,8 +388,9 @@ def test_the_two_accesses_are_told_apart(db, owner_user) -> None:
     gewaehlt = ai_voice.sprachzugang(db, owner_user)
 
     assert gewaehlt is not None
-    hoeren, sprechen = gewaehlt
+    hoeren, denken, sprechen = gewaehlt
     assert hoeren.id == chat.id
+    assert denken.id == chat.id
     assert sprechen.id == stimme.id
 
 

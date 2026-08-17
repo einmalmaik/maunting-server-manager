@@ -11,6 +11,8 @@ import { AiSkillDirectory } from '@/components/ai/AiSkillDirectory'
 import { GuardianAnsicht } from '@/components/ai/GuardianAnsicht'
 import { SprachAnsicht } from '@/components/ai/voice/SprachAnsicht'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { aiChatPreferenceKeys, readAiProviderChoice } from '@/lib/aiChatPreferences'
+import { useAuthStore } from '@/stores/authStore'
 
 /** Nur, was die Bereichsauswahl des Autonomie-Knopfs braucht. */
 interface ServerOption {
@@ -99,6 +101,7 @@ function Umschalter({ aktiv, onClick, icon, label }: {
  */
 export function Ai() {
   const { t } = useTranslation()
+  const user = useAuthStore((state) => state.user)
   const canChat = useHasPermission('ai.chat.use')
   const canUseSkills = useHasPermission('ai.skills.use')
   const canSpeak = useHasPermission('ai.voice.use')
@@ -107,6 +110,8 @@ export function Ai() {
   const [sprachkonfiguration, setSprachkonfiguration] = useState<AiVoiceConfig | null>(null)
   const [servers, setServers] = useState<ServerOption[]>([])
   const [suchParameter, setzeSuchParameter] = useSearchParams()
+
+  const providerId = user?.id ? readAiProviderChoice(aiChatPreferenceKeys(user.id).provider) : null
 
   const gewuenscht = ansichtAusAbfrage(suchParameter.get('ansicht'))
   // Ohne eingerichteten Realtime-Zugang gibt es den Sprachmodus nicht — auch
@@ -128,18 +133,11 @@ export function Ai() {
   // —, aber das entscheidet das Backend: `available` ist erst wahr, wenn beide
   // stehen. Fehlt einer, gibt es keinen Knopf — nicht ausgegraut, sondern gar
   // nicht. Dieselbe Regel wie bei `web_search`.
-  //
-  // Beides landet in der Anzeige beim selben Nichts, und deshalb steht hier
-  // eine Konsolenzeile: „nicht eingerichtet" ist ein Zustand, ein Serverfehler
-  // ist ein Fehler, und stumm sahen sie identisch aus. Der Betreiber suchte
-  // dann an der Oberfläche nach einem Knopf, während in Wahrheit die Migration
-  // fehlte. Keine Meldung auf dem Schirm — es ist eine Auskunft für den, der
-  // sucht, und kein Alarm für den, der den Sprachmodus gar nicht bestellt hat.
   useEffect(() => {
     if (!canSpeak) return
     let lebt = true
     aiApi
-      .getVoiceConfig()
+      .getVoiceConfig(providerId ?? undefined)
       .then((konfiguration) => {
         if (!lebt) return
         if (konfiguration.available) {
@@ -164,7 +162,7 @@ export function Ai() {
     return () => {
       lebt = false
     }
-  }, [canSpeak])
+  }, [canSpeak, providerId])
 
   // Die Serverliste holt sich der Autonomie-Knopf nicht selbst — er bekommt
   // sie, wie im Chat. Und nur mit dem Recht: ohne es zöge jedes Öffnen der
@@ -242,6 +240,7 @@ export function Ai() {
         <SprachAnsicht
           konfiguration={sprachkonfiguration}
           aufChat={() => setzeAnsicht('text')}
+          providerId={providerId}
         />
       ) : ansicht === 'guardian' ? (
         <GuardianAnsicht />

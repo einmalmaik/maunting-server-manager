@@ -295,6 +295,7 @@ class Sprachbruecke:
         user_id: int,
         conversation_id: str,
         chat_provider_id: int,
+        stt_provider_id: int | None = None,
         stimm_kind: str,
         stimm_adresse: str,
         stimm_schluessel: str,
@@ -304,7 +305,8 @@ class Sprachbruecke:
         self._browser = browser
         self._user_id = user_id
         self._gespraech_id = conversation_id
-        self._provider_id = chat_provider_id
+        self._chat_provider_id = chat_provider_id
+        self._stt_provider_id = stt_provider_id if stt_provider_id is not None else chat_provider_id
         #: Wer vorliest. Einmal nachgeschlagen und nicht je Zug: welcher
         #: Sprachdienst gilt, steht für die Dauer der Sitzung fest, und ein
         #: Wechsel mitten im Gespräch wäre keine Funktion, sondern ein Fehler.
@@ -448,7 +450,9 @@ class Sprachbruecke:
     async def _abhoeren(self, aeusserung: ai_voice_vad.Aeusserung) -> str | None:
         from services.ai_provider_service import resolve_api_key
 
-        zugang, schluessel = await asyncio.to_thread(self._zugang_holen, resolve_api_key)
+        zugang, schluessel = await asyncio.to_thread(
+            self._zugang_holen, resolve_api_key, self._stt_provider_id
+        )
         if zugang is None:
             await self._senden({"art": "stoerung"})
             await self._zustand_melden(ZUSTAND_BEREIT)
@@ -558,10 +562,10 @@ class Sprachbruecke:
                 )
         return True
 
-    def _zugang_holen(self, resolve_api_key) -> tuple[AiProvider | None, str | None]:
+    def _zugang_holen(self, resolve_api_key, provider_id: int) -> tuple[AiProvider | None, str | None]:
         """Zugang und Schlüssel je Zug frisch — die Sitzung hält keine offene DB."""
         with SessionLocal() as db:
-            zugang = db.get(AiProvider, self._provider_id)
+            zugang = db.get(AiProvider, provider_id)
             if zugang is None or not zugang.enabled:
                 return None, None
             schluessel = resolve_api_key(db, zugang, self._user_id)
@@ -579,7 +583,7 @@ class Sprachbruecke:
         run_id, fehler = await lauf_beginnen_nebenher(
             user_id=self._user_id,
             conversation_id=self._gespraech_id,
-            provider_id=self._provider_id,
+            provider_id=self._chat_provider_id,
             request_id=uuid4(),
             content=wortlaut,
             # Nachdenken bleibt aus. Im Gespräch kostet jede Denkstufe Sekunden

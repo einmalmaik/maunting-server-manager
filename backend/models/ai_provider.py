@@ -41,7 +41,9 @@ class AiProvider(Base):
     provider_kind: Mapped[str] = mapped_column(
         String(32), nullable=False, default="openrouter"
     )
-    default_model: Mapped[str] = mapped_column(String(256), nullable=False)
+    default_model: Mapped[str | None] = mapped_column(
+        String(256), nullable=True, default=None
+    )
     # Die Stimme, mit der der Sprachmodus vorliest — eine Kennung aus dem
     # ElevenLabs-Konto des Betreibers. Sie steht hier und nicht im Katalog, weil
     # sie keine Eigenschaft des Modells ist, sondern eine Wahl: jede Stimme kann

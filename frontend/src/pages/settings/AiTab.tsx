@@ -9,11 +9,12 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Bot, Save } from 'lucide-react'
+import { BarChart3, Bot, KeyRound, Save, Sliders, Sparkles } from 'lucide-react'
 
 import { api, SanitizedApiError } from '@/api/client'
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiSkillManager } from '@/components/ai/AiSkillManager'
+import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Button, Dropdown, NumberStepper, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
@@ -23,6 +24,15 @@ import { AiLearningSettings } from './AiLearningSettings'
 import { AiProvidersSettings } from './AiProvidersSettings'
 import { AiUsageSettings } from './AiUsageSettings'
 import { AiWebSearchSettings } from './AiWebSearchSettings'
+
+export type AiSubTab = 'providers' | 'features' | 'limits' | 'usage'
+
+const AI_TABS: TabDef<AiSubTab>[] = [
+  { id: 'providers', labelKey: 'aiSettings.subtabs.providers', icon: KeyRound },
+  { id: 'features', labelKey: 'aiSettings.subtabs.features', icon: Sparkles },
+  { id: 'limits', labelKey: 'aiSettings.subtabs.limits', icon: Sliders },
+  { id: 'usage', labelKey: 'aiSettings.subtabs.usage', icon: BarChart3 },
+]
 
 export interface AiRoleLimits {
   role_id: number
@@ -177,10 +187,21 @@ export function AiTab() {
   // Eigenes Recht, nicht `panel.settings.read`: wer Verbraeuche sieht, sieht
   // das Nutzungsverhalten fremder Benutzer.
   const canReadUsage = useHasPermission('ai.usage.read.all')
+  const [activeTab, setActiveTab] = useState<AiSubTab>('providers')
   const [rows, setRows] = useState<AiRoleLimits[]>([])
   const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null)
   const [loading, setLoading] = useState(canRead)
   const [saving, setSaving] = useState(false)
+
+  const visibleTabs = useMemo(() => {
+    return AI_TABS.filter((tab) => tab.id !== 'usage' || canReadUsage)
+  }, [canReadUsage])
+
+  useEffect(() => {
+    if (!visibleTabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab('providers')
+    }
+  }, [visibleTabs, activeTab])
 
   useEffect(() => {
     if (!canRead) {
@@ -257,179 +278,181 @@ export function AiTab() {
 
   return (
     <div className="space-y-6">
-      <AiProvidersSettings canWrite={canWrite} />
-      {/* Direkt unter der Providerwahl: wie groß der Kontext ist, entscheidet
-          das dort gewählte Modell — einzustellen bleibt nur, wie voll er werden
-          darf, bevor zusammengefasst wird. */}
-      <AiContextSettings canWrite={canWrite} />
-      {/* Die Währung steht direkt hinter der Providerwahl, weil der Preis dort
-          eingetragen wird: welche Zahl „1,20" bedeutet, entscheidet sich hier. */}
-      <AiCostSettings canWrite={canWrite} />
-      <AiWebSearchSettings canWrite={canWrite} />
-      <AiLearningSettings canWrite={canWrite} />
+      <TabBar
+        tabs={visibleTabs}
+        active={activeTab}
+        onChange={setActiveTab}
+        ariaLabel={t('aiSettings.tabsAriaLabel')}
+      />
 
-      {/* Panelweite Skills gehören zum Betreiber, nicht ins Profil eines
-          Benutzers — und damit neben die Freigabe der KI-gelernten oben.
-          Bis eben wurden sie über dasselbe Panel angelegt, das im Profil
-          stand; wer dort etwas eintrug, schrieb unbemerkt für alle. */}
-      {canManageSkills && <AiSkillManager scope={{ kind: 'panel', canManage: canWrite }} />}
-
-      {/* Panelweites Gedaechtnis gilt fuer **jeden** Benutzer und lief bisher in
-          jedem Gespraech mit, ohne dass es irgendwo sichtbar war — erreichbar
-          nur ueber die API. Was fuer alle gilt, gehoert dorthin, wo der
-          Betreiber es sieht. */}
-      <AiMemoryManager scope={{ kind: 'panel', canManage: canWrite }} />
-
-      {/* Der Verbrauch steht direkt vor den Kontingenten: erst sehen, wohin die
-          Kosten fliessen, dann entscheiden, wo eine Grenze hingehoert. */}
-      {canReadUsage && <AiUsageSettings />}
-
-      <div className="msm-card p-6">
-        <div className="mb-3 flex items-center gap-2">
-          <Bot className="h-5 w-5 text-primary" aria-hidden="true" />
-          <h3 className="font-headline text-lg font-semibold text-on-surface">{t('aiSettings.title')}</h3>
+      {activeTab === 'providers' && (
+        <div className="space-y-6">
+          <AiProvidersSettings canWrite={canWrite} />
+          {/* Direkt unter der Providerwahl: wie groß der Kontext ist, entscheidet
+              das dort gewählte Modell — einzustellen bleibt nur, wie voll er werden
+              darf, bevor zusammengefasst wird. */}
+          <AiContextSettings canWrite={canWrite} />
+          {/* Die Währung steht direkt hinter der Providerwahl, weil der Preis dort
+              eingetragen wird: welche Zahl „1,20" bedeutet, entscheidet sich hier. */}
+          <AiCostSettings canWrite={canWrite} />
         </div>
-        <p className="max-w-3xl text-sm text-on-surface-variant">{t('aiSettings.description')}</p>
-        {/* Der Regeltext steht ueber dem Feldraster und wird zuerst gelesen —
-            er muss deshalb selbst sagen, wo er nicht gilt. Bis eben drehte er
-            die Sonderregel des Memory-Feldes genau um („eine explizit
-            unbegrenzte Rolle gewinnt ueber begrenzte Rollen"), waehrend der
-            Feldhinweis eine Zeile tiefer das Gegenteil sagte. Wer oben las,
-            legte an der grosszuegigen Rolle „Unbegrenzt" um — und nahm ihr
-            damit jeden Beitrag, statt ihr einen zu geben. */}
-        <p className="mt-2 max-w-3xl text-xs text-on-surface-variant">{t('aiSettings.ruleHelp')}</p>
-      </div>
-
-      {rows.length === 0 && (
-        <div className="msm-card p-6 text-sm text-on-surface-variant">{t('aiSettings.noRoles')}</div>
       )}
 
-      {selected && (
-        <section className="msm-card p-6" aria-labelledby="ai-role-limits-title">
-          <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
-            <label className="block w-full max-w-sm space-y-1.5">
-              <span id="ai-role-limits-title" className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('aiSettings.selectRole')}
-              </span>
-              <Dropdown
-                value={String(selected.role_id)}
-                onChange={(value) => setSelectedRoleId(Number(value))}
-                options={rows.map((row) => ({
-                  value: String(row.role_id),
-                  label: row.role_name,
-                  hint: row.configured ? t('aiSettings.configured') : t('aiSettings.notConfigured'),
-                }))}
-                disabled={saving}
-                aria-label={t('aiSettings.selectRole')}
-              />
-            </label>
-            {canWrite && (
-              <Button
-                type="button"
-                disabled={saving}
-                onClick={() => void save(selected)}
-                aria-label={`${t('settings.save')}: ${selected.role_name}`}
-              >
-                <Save className="h-4 w-4" aria-hidden="true" />
-                {saving ? t('common.loading') : t('settings.save')}
-              </Button>
-            )}
+      {activeTab === 'features' && (
+        <div className="space-y-6">
+          <AiWebSearchSettings canWrite={canWrite} />
+          <AiLearningSettings canWrite={canWrite} />
+
+          {/* Panelweite Skills gehören zum Betreiber, nicht ins Profil eines
+              Benutzers — und damit neben die Freigabe der KI-gelernten oben.
+              Bis eben wurden sie über dasselbe Panel angelegt, das im Profil
+              stand; wer dort etwas eintrug, schrieb unbemerkt für alle. */}
+          {canManageSkills && <AiSkillManager scope={{ kind: 'panel', canManage: canWrite }} />}
+
+          {/* Panelweites Gedaechtnis gilt fuer **jeden** Benutzer und lief bisher in
+              jedem Gespraech mit, ohne dass es irgendwo sichtbar war — erreichbar
+              nur ueber die API. Was fuer alle gilt, gehoert dorthin, wo der
+              Betreiber es sieht. */}
+          <AiMemoryManager scope={{ kind: 'panel', canManage: canWrite }} />
+        </div>
+      )}
+
+      {activeTab === 'limits' && (
+        <div className="space-y-6">
+          <div className="msm-card p-6">
+            <div className="mb-3 flex items-center gap-2">
+              <Bot className="h-5 w-5 text-primary" aria-hidden="true" />
+              <h3 className="font-headline text-lg font-semibold text-on-surface">{t('aiSettings.title')}</h3>
+            </div>
+            <p className="max-w-3xl text-sm text-on-surface-variant">{t('aiSettings.description')}</p>
+            {/* Der Regeltext steht ueber dem Feldraster und wird zuerst gelesen —
+                er muss deshalb selbst sagen, wo er nicht gilt. Bis eben drehte er
+                die Sonderregel des Memory-Feldes genau um („eine explizit
+                unbegrenzte Rolle gewinnt ueber begrenzte Rollen"), waehrend der
+                Feldhinweis eine Zeile tiefer das Gegenteil sagte. Wer oben las,
+                legte an der grosszuegigen Rolle „Unbegrenzt" um — und nahm ihr
+                damit jeden Beitrag, statt ihr einen zu geben. */}
+            <p className="mt-2 max-w-3xl text-xs text-on-surface-variant">{t('aiSettings.ruleHelp')}</p>
           </div>
 
-          {/* Derselbe Grund wie beim Regeltext darueber, nur naeher am Schaden:
-              dieser Kasten erscheint genau an einer Rolle, deren Memory-Feld
-              leer ist. „Solange keine Rolle konfiguriert ist, gilt unbegrenzt"
-              stimmt fuer die Kontingente und nicht fuer den Vorrat — wer daraus
-              schloss, ein leeres Feld lasse das Gedaechtnis offen, plante gegen
-              eine Zahl, die das Panel nie durchsetzt. */}
-          {!selected.configured && (
-            <p className="mb-5 rounded-lg border border-outline-variant/40 bg-surface-container-low/45 p-3 text-xs leading-5 text-on-surface-variant">
-              {t('aiSettings.notConfiguredHint')}
-            </p>
+          {rows.length === 0 && (
+            <div className="msm-card p-6 text-sm text-on-surface-variant">{t('aiSettings.noRoles')}</div>
           )}
 
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {FIELD_DEFINITIONS.map(({ key, labelKey, max, step, ranks, hintKey }) => {
-              const unlimited = selected[key] === null
-              const label = t(labelKey)
-              const fieldId = `ai-${selected.role_id}-${key}`
-              // Der Hinweis haengt per `aria-describedby` an **beiden**
-              // Bedienelementen der Karte, am Eingabefeld und am Schalter. Nur
-              // am Feld war er falsch aufgehoben, und zwar genau dort, wo er
-              // gebraucht wird: das Feld ist `disabled`, sobald „Unbegrenzt" an
-              // ist, und ein deaktiviertes Feld steht in keiner Tabreihenfolge.
-              // Wer die Karte nicht sieht, sondern vorgelesen bekommt, hoerte
-              // in genau dem Zustand, in dem „Unbegrenzt" die Unwahrheit sagt,
-              // nur den Schalter — und der schwieg.
-              const hintId = hintKey ? `${fieldId}-hint` : undefined
-              return (
-                <div key={key} className="space-y-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
-                  <label htmlFor={fieldId} className="block min-h-10 text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                    {label}
-                  </label>
-                  {ranks ? (
-                    <Dropdown
-                      id={fieldId}
-                      value={String(selected[key] ?? 0)}
-                      disabled={!canWrite || unlimited || saving}
-                      onChange={(wert) => updateField(selected.role_id, key, Number(wert))}
-                      options={ranks.map((rank, rang) => ({
-                        value: String(rang),
-                        label: rang === 0
-                          ? t('ai.reasoning.off')
-                          : t(`ai.reasoning.levels.${rank}`, { defaultValue: rank }),
-                      }))}
-                      aria-label={`${label}: ${selected.role_name}`}
-                      aria-describedby={hintId}
-                    />
-                  ) : (
-                    <NumberStepper
-                      id={fieldId}
-                      min={0}
-                      max={max}
-                      step={step}
-                      value={selected[key] ?? 0}
-                      disabled={!canWrite || unlimited || saving}
-                      onValueChange={(raw) => {
-                        const parsed = parseLimitValue(raw, max)
-                        if (parsed !== null) updateField(selected.role_id, key, parsed)
-                      }}
-                      aria-label={`${label}: ${selected.role_name}`}
-                      aria-describedby={hintId}
-                    />
-                  )}
-                  {/* Der Schalter bleibt technisch, wie er ist, und speichert
-                      weiter `null`. Er ist fuer alle Felder derselbe, und fuer
-                      die Kontingente stimmt „Unbegrenzt" ja auch weiterhin;
-                      allein bei der Memory-Grenze bedeutet `null` seit dem
-                      Rueckfall auf die Systemgrenze etwas anderes. Ein zweiter
-                      Schalter, der genauso aussieht und etwas anderes meint,
-                      waere schlechter als ein Satz darunter — deshalb macht ihn
-                      hier der Hinweis ehrlich und kein Sonderweg im Bauteil. */}
-                  <div className="flex min-h-10 items-center justify-between gap-3">
-                    <span className="text-xs text-on-surface-variant">{t('aiSettings.unlimited')}</span>
-                    <Switch
-                      checked={unlimited}
-                      disabled={!canWrite || saving}
-                      onCheckedChange={(next) => updateField(selected.role_id, key, next ? null : 0)}
-                      aria-label={`${t('aiSettings.unlimited')}: ${label}: ${selected.role_name}`}
-                      aria-describedby={hintId}
-                    />
-                  </div>
-                  {/* Steht unter dem Schalter, weil er zuletzt erklaert werden
-                      muss — und weil so die Hoehen von Beschriftung, Eingabe und
-                      Schalter ueber alle Karten des Rasters in einer Linie
-                      bleiben; nur diese eine Karte wird laenger. */}
-                  {hintKey && (
-                    <p id={hintId} className="text-xs leading-5 text-on-surface-variant">
-                      {t(hintKey)}
-                    </p>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </section>
+          {selected && (
+            <section className="msm-card p-6" aria-labelledby="ai-role-limits-title">
+              <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+                <label className="block w-full max-w-sm space-y-1.5">
+                  <span id="ai-role-limits-title" className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                    {t('aiSettings.selectRole')}
+                  </span>
+                  <Dropdown
+                    value={String(selected.role_id)}
+                    onChange={(value) => setSelectedRoleId(Number(value))}
+                    options={rows.map((row) => ({
+                      value: String(row.role_id),
+                      label: row.role_name,
+                      hint: row.configured ? t('aiSettings.configured') : t('aiSettings.notConfigured'),
+                    }))}
+                    disabled={saving}
+                    aria-label={t('aiSettings.selectRole')}
+                  />
+                </label>
+                {canWrite && (
+                  <Button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => void save(selected)}
+                    aria-label={`${t('settings.save')}: ${selected.role_name}`}
+                  >
+                    <Save className="h-4 w-4" aria-hidden="true" />
+                    {saving ? t('common.loading') : t('settings.save')}
+                  </Button>
+                )}
+              </div>
+
+              {/* Derselbe Grund wie beim Regeltext darueber, nur naeher am Schaden:
+                  dieser Kasten erscheint genau an einer Rolle, deren Memory-Feld
+                  leer ist. „Solange keine Rolle konfiguriert ist, gilt unbegrenzt"
+                  stimmt fuer die Kontingente und nicht fuer den Vorrat — wer daraus
+                  schloss, ein leeres Feld lasse das Gedaechtnis offen, plante gegen
+                  eine Zahl, die das Panel nie durchsetzt. */}
+              {!selected.configured && (
+                <p className="mb-5 rounded-lg border border-outline-variant/40 bg-surface-container-low/45 p-3 text-xs leading-5 text-on-surface-variant">
+                  {t('aiSettings.notConfiguredHint')}
+                </p>
+              )}
+
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+                {FIELD_DEFINITIONS.map(({ key, labelKey, max, step, ranks, hintKey }) => {
+                  const unlimited = selected[key] === null
+                  const label = t(labelKey)
+                  const fieldId = `ai-${selected.role_id}-${key}`
+                  const hintId = hintKey ? `${fieldId}-hint` : undefined
+                  return (
+                    <div key={key} className="space-y-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+                      <label htmlFor={fieldId} className="block min-h-10 text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                        {label}
+                      </label>
+                      {ranks ? (
+                        <Dropdown
+                          id={fieldId}
+                          value={String(selected[key] ?? 0)}
+                          disabled={!canWrite || unlimited || saving}
+                          onChange={(wert) => updateField(selected.role_id, key, Number(wert))}
+                          options={ranks.map((rank, rang) => ({
+                            value: String(rang),
+                            label: rang === 0
+                              ? t('ai.reasoning.off')
+                              : t(`ai.reasoning.levels.${rank}`, { defaultValue: rank }),
+                          }))}
+                          aria-label={`${label}: ${selected.role_name}`}
+                          aria-describedby={hintId}
+                        />
+                      ) : (
+                        <NumberStepper
+                          id={fieldId}
+                          min={0}
+                          max={max}
+                          step={step}
+                          value={selected[key] ?? 0}
+                          disabled={!canWrite || unlimited || saving}
+                          onValueChange={(raw) => {
+                            const parsed = parseLimitValue(raw, max)
+                            if (parsed !== null) updateField(selected.role_id, key, parsed)
+                          }}
+                          aria-label={`${label}: ${selected.role_name}`}
+                          aria-describedby={hintId}
+                        />
+                      )}
+                      <div className="flex min-h-10 items-center justify-between gap-3">
+                        <span className="text-xs text-on-surface-variant">{t('aiSettings.unlimited')}</span>
+                        <Switch
+                          checked={unlimited}
+                          disabled={!canWrite || saving}
+                          onCheckedChange={(next) => updateField(selected.role_id, key, next ? null : 0)}
+                          aria-label={`${t('aiSettings.unlimited')}: ${label}: ${selected.role_name}`}
+                          aria-describedby={hintId}
+                        />
+                      </div>
+                      {hintKey && (
+                        <p id={hintId} className="text-xs leading-5 text-on-surface-variant">
+                          {t(hintKey)}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'usage' && canReadUsage && (
+        <div className="space-y-6">
+          <AiUsageSettings />
+        </div>
       )}
     </div>
   )

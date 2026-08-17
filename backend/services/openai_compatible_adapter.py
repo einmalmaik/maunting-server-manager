@@ -588,18 +588,9 @@ async def stream_chat_completion(
         if reasoning and reasoning_effort:
             denken["effort"] = reasoning_effort
         request_body["reasoning"] = denken
-    if "reasoning_effort" in erweiterungen and reasoning_effort:
-        # OpenAIs Mundart: eine blosse Stufe, kein Schalter daneben. Das „aus"
-        # ist dort selbst eine Stufe (``"none"``), und deshalb wird ``reasoning``
-        # hier nicht gelesen — es steht schon in der Stufe. Wer beides pruefte,
-        # koennte ein ausgeschaltetes Nachdenken nicht mehr aussprechen.
-        #
-        # Und deshalb ist der leere Wert die einzige Bedingung: welche Modelle
-        # das Feld ueberhaupt vertragen, weiss `ai_reasoning.klemmen` aus dem
-        # Katalog, und ohne dieses Wissen kommt hier nichts an. An einem Modell,
-        # das nicht denken kann, waere die Stufe naemlich ein 400 — auch die
-        # Stufe ``"none"``, und selbst ``null``.
-        request_body["reasoning_effort"] = reasoning_effort
+    if "reasoning_effort" in erweiterungen:
+        if reasoning_effort:
+            request_body["reasoning_effort"] = reasoning_effort
     # Wer das Feld nicht kennt, bekommt **nichts** — keine Ersatzform, keine
     # Uebersetzung in einen anderen Dialekt. Ein stiller Rueckfall waere hier
     # besonders teuer: er saehe aus wie ein erfuellter Wunsch, waehrend der

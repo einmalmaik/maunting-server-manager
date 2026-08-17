@@ -78,7 +78,7 @@ describe('AiProvidersSettings', () => {
 
   it('never receives an existing secret and clears a replacement after save', async () => {
     render(<AiProvidersSettings canWrite />)
-    const keyInput = await screen.findByLabelText('Operator-API-Key')
+    const keyInput = await screen.findByLabelText('API-Key')
 
     expect(keyInput).toHaveValue('')
     expect(screen.queryByDisplayValue('operator-secret-value')).not.toBeInTheDocument()
@@ -103,7 +103,7 @@ describe('AiProvidersSettings', () => {
     })
     render(<AiProvidersSettings canWrite />)
 
-    fireEvent.click(await screen.findByLabelText('Zentralen Operator-Key beim Speichern entfernen'))
+    fireEvent.click(await screen.findByLabelText('Key entfernen'))
     fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
 
     await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(4, expect.objectContaining({
@@ -112,7 +112,7 @@ describe('AiProvidersSettings', () => {
 
     // Nach dem Speichern ist die Absicht verbraucht: das Feld nimmt wieder
     // einen Schlüssel an.
-    const keyInput = await screen.findByLabelText('Operator-API-Key')
+    const keyInput = await screen.findByLabelText('API-Key')
     await waitFor(() => expect(keyInput).not.toBeDisabled())
   })
 
@@ -127,8 +127,8 @@ describe('AiProvidersSettings', () => {
     // Unser `Dropdown` statt eines nativen `<select>`: ein Knopf, der eine
     // Listbox oeffnet. Am Knopf steht, was gewaehlt ist.
     await waitFor(() =>
-      expect(screen.getByLabelText('Standardmodell')).toHaveTextContent('anthropic/claude-opus-5'))
-    expect(screen.getByLabelText('Standardmodell').tagName).toBe('BUTTON')
+      expect(screen.getByLabelText(/Standardmodell/i)).toHaveTextContent('anthropic/claude-opus-5'))
+    expect(screen.getByLabelText(/Standardmodell/i).tagName).toBe('BUTTON')
 
     // Und die Denkstufen des gewaehlten Modells stehen daneben.
     expect(await screen.findByText('Maximal')).toBeInTheDocument()
@@ -150,7 +150,7 @@ describe('AiProvidersSettings', () => {
     // der Aufruf traegt sie trotzdem, und genau das haelt dieser Test fest.
     await waitFor(() => expect(aiApi.listCatalogModels)
       .toHaveBeenCalledWith('openrouter', false, provider.id))
-    expect(screen.getByLabelText('Standardmodell').tagName).toBe('INPUT')
+    expect(screen.getByLabelText(/Standardmodell/i).tagName).toBe('INPUT')
     // Und der Betreiber erfaehrt, warum er tippen muss — samt der Folge, dass
     // die Denkstufen dieses Modells damit unbekannt bleiben.
     expect(await screen.findByText(/Modellkatalog des Anbieters ist gerade nicht erreichbar/i))
@@ -171,7 +171,7 @@ describe('AiProvidersSettings', () => {
     // Umrechnung im Verborgenen passiert.
     await waitFor(() => expect(screen.getByText(/1,3043/)).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: /Speichern/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
     await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(
       4,
       expect.objectContaining({ token_price_micro_usd_per_million: 1_304_348 }),
@@ -223,7 +223,7 @@ describe('AiProvidersSettings', () => {
     // auf ein Modell, das es beim Anbieter nicht gibt.
     render(<AiProvidersSettings canWrite />)
 
-    await screen.findByLabelText('Operator-API-Key')
+    await screen.findByLabelText('API-Key')
     expect(screen.queryByRole('button', { name: 'Übernehmen' })).not.toBeInTheDocument()
   })
 })

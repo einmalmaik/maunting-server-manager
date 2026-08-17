@@ -27,13 +27,15 @@ import { useSprachsitzung, type Beleg, type Vorschlag } from './useSprachsitzung
 export function SprachAnsicht({
   konfiguration,
   aufChat,
+  providerId,
 }: {
   konfiguration: AiVoiceConfig | null
   aufChat: () => void
+  providerId?: number | null
 }) {
   const { t } = useTranslation()
   const { zustand, zeilen, werkzeug, fehler, belege, vorschlag, pegel, starten, beenden } =
-    useSprachsitzung()
+    useSprachsitzung(providerId)
   const [einstellungenOffen, setEinstellungenOffen] = useState(false)
   const kasten = useRef<HTMLDivElement>(null)
   const gestartet = useRef(false)

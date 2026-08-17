@@ -115,20 +115,30 @@
     "saveFailed": "AI limits could not be saved.",
     "saved": "AI limits saved.",
     "maxMemoryEntries": "Max memory entries per scope",
-    "maxMemoryEntriesHint": "Applies per personal scope — general and per server counted separately. An empty field does not lower the allowance: the system limit of 100 entries applies only when none of the user's roles carries a number. For team knowledge the founder's role counts, not the writer's. “This server's knowledge” and “Panel-wide AI memory” depend on no role at all; there the system limit always applies.",
-    "maxReasoningEffort": "Maximum reasoning depth"
+    "maxMemoryEntriesHint": "Applies per personal area — counted separately for general and per server. An empty field does not lower the quota: the system limit of 100 entries applies only when no role of the user carries a number. For team knowledge, the founder's role counts, not the writer's. “Server knowledge” and “Panel-wide AI memory” do not belong to any role; the system limit always applies there.",
+    "maxReasoningEffort": "Maximum reasoning depth",
+    "tabsAriaLabel": "AI Settings Sections",
+    "subtabs": {
+      "providers": "AI Providers",
+      "features": "Features & Knowledge",
+      "limits": "Roles & Limits",
+      "usage": "Usage & Costs"
+    }
   },
   "ai": {
     "providers": {
       "title": "AI providers",
-      "description": "Pick a supported provider and a model from its catalog. Provider and operator key are visible to panel administrators only.",
+      "description": "Pick a supported provider and a model from its catalog. Provider and API key are visible to panel administrators only.",
       "add": "Add provider",
       "empty": "No AI provider is configured yet.",
       "name": "Name",
       "model": "Default model",
-      "operatorKey": "Operator API key",
+      "operatorKey": "API Key",
       "keyConfigured": "Key configured ({{hint}}); leave empty to keep it",
-      "keyOptional": "Optional central API key",
+      "keyOptional": "Provider API key",
+      "clearKey": "Remove key",
+      "undoClearKey": "Undo removal",
+      "keyWillBeCleared": "Will be removed on save",
       "clearOperatorKey": "Remove the central operator key when saving",
       "enabled": "Provider enabled",
       "requiresKey": "API key required",

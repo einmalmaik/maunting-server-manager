@@ -128,12 +128,13 @@ const MAX_BELEGE = 5
  */
 const LEITUNG_TRAEGT: ReadonlySet<string> = new Set(['hoert', 'spricht'])
 
-function adresse(): string {
+function adresse(providerId?: number | null): string {
   const basis = import.meta.env.VITE_API_URL || window.location.origin
-  return `${basis.replace(/^http/, 'ws').replace(/\/$/, '')}/api/ai/voice/ws`
+  const base = `${basis.replace(/^http/, 'ws').replace(/\/$/, '')}/api/ai/voice/ws`
+  return providerId ? `${base}?provider_id=${providerId}` : base
 }
 
-export function useSprachsitzung(): Ergebnis {
+export function useSprachsitzung(providerId?: number | null): Ergebnis {
   const [zustand, setZustand] = useState<Sprachzustand>('aus')
   const [zeilen, setZeilen] = useState<Sprachzeile[]>([])
   const [werkzeug, setWerkzeug] = useState<string | null>(null)
@@ -187,7 +188,7 @@ export function useSprachsitzung(): Ergebnis {
     setFehler(null)
     setZustand('verbindet')
 
-    const verbindung = new WebSocket(adresse())
+    const verbindung = new WebSocket(adresse(providerId))
     verbindung.binaryType = 'arraybuffer'
     ws.current = verbindung
 
@@ -375,7 +376,7 @@ export function useSprachsitzung(): Ergebnis {
       }
       setZustand('aus')
     }
-  }, [beenden, zeileAnhaengen])
+  }, [beenden, providerId, zeileAnhaengen])
 
   // Wer die Seite verlässt, lässt kein offenes Mikrofon zurück.
   useEffect(() => () => {
