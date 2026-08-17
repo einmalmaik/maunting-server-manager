@@ -486,7 +486,10 @@ class Stimme:
         self._gesendet += len(stueck)
         # Das anhängende Leerzeichen verlangt das Protokoll ausdrücklich; ohne
         # es klebt der letzte an den nächsten Satz.
-        nutzlast = json.dumps({"text": f"{stueck} ", "try_trigger_generation": True, "flush": True})
+        # `try_trigger_generation` steuert die direkte Generierung; `flush: True`
+        # darf erst beim finalen Ausklingen gesendet werden, um das 5-Kontexte-Limit
+        # (Fehlercode 1008) von ElevenLabs nicht zu überschreiten.
+        nutzlast = json.dumps({"text": f"{stueck} ", "try_trigger_generation": True})
         try:
             await self._verbindung.send(nutzlast)
         except Exception as fehler:
@@ -553,7 +556,9 @@ class Stimme:
             raise
         except Exception as fehler:  # pragma: no cover - Netzabbruch
             self._fehler = fehler
-            logger.info("Stimme abgebrochen: %s", type(fehler).__name__)
+            code = getattr(fehler, "code", None) or getattr(getattr(fehler, "rcvd", None), "code", None)
+            grund = getattr(fehler, "reason", None) or getattr(getattr(fehler, "rcvd", None), "reason", None)
+            logger.warning("Stimme abgebrochen: %s (Code: %s, Grund: %s)", type(fehler).__name__, code, grund)
         finally:
             # Auch im Fehlerfall setzen: `ausklingen()` wartet darauf, und eine
             # abgerissene Verbindung ist ein Ende wie jedes andere. Ohne das

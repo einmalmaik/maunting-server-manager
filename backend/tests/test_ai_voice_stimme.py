@@ -106,7 +106,7 @@ async def test_nach_einer_langen_werkzeugrunde_spricht_die_stimme_weiter(
     # `flush`, damit er sofort erzeugt wird.
     assert any("zweite Satz" in satz for satz in _saetze(verbindungen[1]))
     assert all(
-        rahmen.get("flush") is True
+        rahmen.get("try_trigger_generation") is True
         for rahmen in verbindungen[1].rahmen
         if rahmen.get("text", " ").strip()
     )
