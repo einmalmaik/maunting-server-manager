@@ -264,6 +264,148 @@ def test_a_grown_run_is_trimmed_without_orphaning_a_tool_call(
     assert gekuerzt[0]["content"] == "Systemprompt"
 
 
+# ── Gekuerzt heisst kuerzer, nicht kaputt ────────────────────────────────
+#
+# Der Inhalt einer `role="tool"`-Nachricht ist JSON. Der Schnitt durch den Text
+# traf darin mitten in eine Zeichenkette, und beim Modell kam ein Bruchstueck
+# an, das kein Parser mehr oeffnet:
+#
+#     {"error":"AI_GUARDIAN_NO_HUMAN","message":"In einer Guar [...gekuerzt]
+#
+# Gefunden hat das ein Test, der es gar nicht suchte — `_antworten` in
+# `test_ai_guardian_kein_mensch` liest Werkzeugergebnisse mit `json.loads` und
+# fiel darueber. Die Zusage gehoert aber hierher, wo gekuerzt wird, und nicht
+# in einen Test ueber Rueckfragen in der Guardian-Heilung.
+
+
+def _werkzeugnachricht(nutzlast: dict) -> dict:
+    """Ein Werkzeugergebnis so, wie `ai_stream_service` es schreibt.
+
+    Dieselben Schalter an `json.dumps` — ohne sie misst der Test eine andere
+    Laenge als die, die im Lauf entsteht.
+    """
+    return {
+        "role": "tool",
+        "tool_call_id": "c1",
+        "content": json.dumps(nutzlast, ensure_ascii=True, separators=(",", ":")),
+    }
+
+
+def _mit_werkzeugergebnis(nutzlast: dict) -> list[dict]:
+    return [
+        {"role": "system", "content": "S" * 8_000},
+        {"role": "user", "content": "Warum stuerzt er ab?"},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "c1"}]},
+        _werkzeugnachricht(nutzlast),
+        {"role": "user", "content": "Und jetzt?"},
+    ]
+
+
+def test_ein_gekuerztes_werkzeugergebnis_bleibt_lesbares_json() -> None:
+    """Gekuerzt wird die Nutzlast, nicht der Text darum herum.
+
+    Ein Ergebnis, das das Modell nicht lesen kann, ist so gut wie keines — und
+    schlechter als eines, das ehrlich sagt, dass es nur ein Ausschnitt ist. Die
+    Marke steht deshalb **im** gekuerzten Feld und nicht hinter der
+    schliessenden Klammer.
+    """
+    messages = _mit_werkzeugergebnis(
+        {"untrusted": True, "tool": "read_server_logs", "data": "L" * 30_000}
+    )
+
+    gekuerzt = auf_budget_kuerzen(messages, 10_000)
+
+    nutzlast = json.loads(gekuerzt[3]["content"])
+    assert nutzlast["tool"] == "read_server_logs"
+    assert nutzlast["untrusted"] is True
+    assert nutzlast["data"].endswith(TOOL_RESULT_TRUNCATION_MARK)
+    assert len(nutzlast["data"]) < 30_000
+    assert message_character_count(gekuerzt) <= 10_000
+
+
+def test_der_fehlercode_ueberlebt_die_kuerzung() -> None:
+    """Zuerst die kurzen Felder, dann das lange — und darum bleibt `error` stehen.
+
+    Ein Werkzeugergebnis ohne `error` sieht aus wie ein gelungener Aufruf. Diese
+    Verwechslung ist teurer als jedes Budget: das Modell meldet dem Betreiber
+    eine Heilung, die nie stattfand. Der Fehlercode ist zwanzig Zeichen lang und
+    passt unter jedes Budget — er darf sie nicht an das Meldungsfeld verlieren,
+    nur weil das zufaellig vor ihm dran waere.
+    """
+    messages = _mit_werkzeugergebnis(
+        {"error": "AI_GUARDIAN_NO_HUMAN", "message": "In einer Heilung " * 2_000}
+    )
+
+    gekuerzt = auf_budget_kuerzen(messages, 10_000)
+
+    nutzlast = json.loads(gekuerzt[3]["content"])
+    assert nutzlast["error"] == "AI_GUARDIAN_NO_HUMAN"
+    assert nutzlast["message"].endswith(TOOL_RESULT_TRUNCATION_MARK)
+
+
+def test_ein_umlaut_zaehlt_mit_seiner_json_laenge_und_nicht_mit_einer() -> None:
+    """Unter ``ensure_ascii`` ist ein ``ö`` sechs Zeichen lang, kein eines.
+
+    Wer den Schnitt aus der Zeichenzahl der Nutzlast rechnet, kuerzt einen
+    deutschen Serverlog auf das Sechsfache seines Budgets — die Kuerzung
+    laeuft, meldet Vollzug und die Anfrage reisst das Fenster trotzdem. Der
+    Schnitt wird deshalb an der **serialisierten** Laenge gesucht.
+    """
+    messages = _mit_werkzeugergebnis({
+        "untrusted": True,
+        "tool": "read_server_logs",
+        "data": "Fehler beim Öffnen der Datei — Zugriff verweigert. " * 600,
+    })
+
+    gekuerzt = auf_budget_kuerzen(messages, 10_000)
+
+    json.loads(gekuerzt[3]["content"])
+    assert message_character_count(gekuerzt) <= 10_000
+
+
+def test_eine_ergebnisliste_bleibt_eine_liste() -> None:
+    """Form heisst Form: aus einer Liste wird keine Zeichenkette.
+
+    Sonst muesste das Modell raten, ob es ein Ergebnis liest oder eine Meldung
+    darueber. Gekuerzt wird von hinten, weil eine Ergebnisliste ihre
+    Reihenfolge meint — der erste Server, die erste Zeile, der erste Vorgang.
+    """
+    messages = _mit_werkzeugergebnis({
+        "tool": "list_servers",
+        "outcomes": [{"id": n, "name": f"server-{n}"} for n in range(2_000)],
+    })
+
+    gekuerzt = auf_budget_kuerzen(messages, 10_000)
+
+    nutzlast = json.loads(gekuerzt[3]["content"])
+    assert isinstance(nutzlast["outcomes"], list)
+    assert nutzlast["outcomes"][0] == {"id": 0, "name": "server-0"}
+    assert nutzlast["outcomes"][-1] == TOOL_RESULT_TRUNCATION_MARK
+    assert len(nutzlast["outcomes"]) < 2_000
+
+
+def test_ein_werkzeugergebnis_ohne_json_wird_weiter_als_text_gekuerzt() -> None:
+    """Kein Rueckfall, sondern der richtige Weg fuer schlichten Text.
+
+    Werkzeugergebnisse aus der Zeit vor der Serialisierung tragen ihn, und die
+    uebrigen Tests dieser Datei bauen ihre Nachrichten so. Ein Textschnitt macht
+    Text nicht kaputt — kaputt ging nur JSON.
+    """
+    messages = [
+        {"role": "system", "content": "S" * 8_000},
+        {"role": "user", "content": "Warum stuerzt er ab?"},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "c1"}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "L" * 30_000},
+        {"role": "user", "content": "Und jetzt?"},
+    ]
+
+    gekuerzt = auf_budget_kuerzen(messages, 10_000)
+
+    assert gekuerzt[3]["content"].startswith("LLL")
+    assert gekuerzt[3]["content"].endswith(TOOL_RESULT_TRUNCATION_MARK)
+    assert message_character_count(gekuerzt) <= 10_000
+
+
 def test_trimming_spends_the_tool_output_before_the_conversation(
     db: Session, regular_user: User
 ) -> None:
