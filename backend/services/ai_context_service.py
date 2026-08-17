@@ -608,10 +608,162 @@ MIN_GEKUERZTE_ZEICHEN = 200
 
 
 def _gekuerzt(text: str, ziel: int) -> str:
-    """Kuerzt sichtbar. Die Marke ist Teil der Aussage, nicht Zierde."""
+    """Kuerzt sichtbar. Die Marke ist Teil der Aussage, nicht Zierde.
+
+    Der Weg fuer **Text**. Fuer den Inhalt einer ``role="tool"``-Nachricht ist er
+    falsch: der ist JSON, und ein Schnitt durch JSON ergibt kein JSON mehr.
+    Dafuer gibt es `_werkzeugergebnis_gekuerzt`.
+    """
     if len(text) <= ziel:
         return text
     return text[: max(ziel - len(TOOL_RESULT_TRUNCATION_MARK), 0)] + TOOL_RESULT_TRUNCATION_MARK
+
+
+def _als_json(wert: Any) -> str:
+    """Genau die Schreibweise, in der Werkzeugergebnisse entstehen.
+
+    `ai_stream_service` serialisiert sie an allen vier Stellen mit
+    ``ensure_ascii=True`` und ohne Leerzeichen. Wer hier anders schreibt, misst
+    beim Kuerzen eine andere Laenge, als hinterher hinausgeht — unter
+    ``ensure_ascii`` belegt ein ``ä`` als ``\\u00e4`` das Sechsfache seiner
+    selbst, und ein Log mit Umlauten waere nach dem Kuerzen groesser als das
+    Budget, das ihn kuerzen sollte.
+    """
+    return json.dumps(wert, ensure_ascii=True, separators=(",", ":"))
+
+
+def _text_auf(text: str, ziel: int) -> str:
+    """Der laengste Anfang von ``text``, dessen JSON-Form in ``ziel`` passt.
+
+    Gesucht und nicht gerechnet: wieviel ein Ausschnitt in JSON belegt, haengt
+    an seinem Inhalt — ein Zeilenumbruch wird zu zwei Zeichen, ein Umlaut zu
+    sechs. Ein aus der Zeichenzahl geschaetzter Schnitt liegt darum mal zu kurz
+    und verschenkt Platz, mal zu lang und reisst das Budget. Die Binaersuche
+    trifft in rund fuenfzehn Versuchen genau.
+
+    Bleibt am Ende nichts uebrig, geht die Marke allein hinaus. Sie ist dann
+    laenger als ``ziel`` — bei einem Budget unter sechzehn Zeichen ist aber
+    ohnehin nichts mehr zu retten, und die Aussage „hier stand mehr" ist das
+    Letzte, was man aufgibt.
+    """
+    if len(_als_json(text)) <= ziel:
+        return text
+    tief, hoch = 0, len(text)
+    while tief < hoch:
+        mitte = (tief + hoch + 1) // 2
+        if len(_als_json(text[:mitte] + TOOL_RESULT_TRUNCATION_MARK)) <= ziel:
+            tief = mitte
+        else:
+            hoch = mitte - 1
+    return text[:tief] + TOOL_RESULT_TRUNCATION_MARK
+
+
+def _geschrumpft(wert: Any, ziel: int) -> Any:
+    """Verkleinert einen JSON-Wert, ohne seine **Form** zu verlassen.
+
+    Form heisst: aus einem Objekt wird ein Objekt, aus einer Liste eine Liste,
+    aus einer Zeichenkette eine Zeichenkette. Das ist der ganze Unterschied zum
+    Schnitt durch den Text — ein Modell, das ``{"error": …}`` erwartet, findet
+    es danach immer noch, nur kuerzer.
+    """
+    if len(_als_json(wert)) <= ziel:
+        return wert
+    if isinstance(wert, str):
+        return _text_auf(wert, ziel)
+    if isinstance(wert, dict):
+        return _objekt_geschrumpft(wert, ziel)
+    if isinstance(wert, list):
+        return _liste_geschrumpft(wert, ziel)
+    # Zahlen, `true`, `null`: da ist nichts zu holen. Laenger als das Budget
+    # sind sie nur, wenn das Budget bei drei Zeichen liegt.
+    return wert
+
+
+def _objekt_geschrumpft(wert: dict[str, Any], ziel: int) -> dict[str, Any]:
+    """Alle Felder bleiben; das laengste zahlt.
+
+    Bedient wird von der kleinsten Angabe zur groessten, und das ist die ganze
+    Absicht: ``error``, ``tool`` und ``untrusted`` sind kurz und tragen die
+    Auskunft, ``data`` ist lang und traegt das Material. Wer die kurzen zuerst
+    bedient, verliert sie nicht an das lange Feld — sie passen unter jedes
+    Budget und kommen unveraendert zurueck, und was dann noch uebrig ist, geht
+    an das Material.
+
+    Kein Feld faellt weg. Ein Werkzeugergebnis ohne ``error`` sieht aus wie ein
+    gelungener Aufruf, und diese Verwechslung ist teurer als jedes Budget.
+    """
+    geschrumpft: dict[str, Any] = {}
+    rest = ziel - len("{}")
+    for nummer, schluessel in enumerate(
+        sorted(wert, key=lambda name: len(_als_json(wert[name])))
+    ):
+        # Der Schluessel, sein Doppelpunkt und — ausser beim ersten — das Komma.
+        kopf = len(_als_json(schluessel)) + 1 + (1 if nummer else 0)
+        geschrumpft[schluessel] = _geschrumpft(wert[schluessel], max(rest - kopf, 0))
+        rest -= kopf + len(_als_json(geschrumpft[schluessel]))
+    # Aufgebaut nach Groesse, ausgegeben in der urspruenglichen Reihenfolge: die
+    # Reihenfolge der Felder ist fuer JSON bedeutungslos, fuer den Leser eines
+    # Protokolls nicht.
+    return {schluessel: geschrumpft[schluessel] for schluessel in wert}
+
+
+def _liste_geschrumpft(wert: list[Any], ziel: int) -> list[Any]:
+    """Von vorne, soweit es reicht — und die Marke sagt, dass es nicht reichte.
+
+    Vorne beginnt, weil eine Ergebnisliste ihre Reihenfolge meint: der erste
+    Server, die erste Zeile, der erste Vorgang. Die Marke steht als letzter
+    Eintrag darin und nicht daneben, denn eine Liste, die zur Zeichenkette
+    wird, waere eine andere Form — das Modell muesste raten, ob es ein Ergebnis
+    liest oder eine Meldung.
+    """
+    ergebnis: list[Any] = []
+    rest = ziel - len("[]") - len(_als_json(TOOL_RESULT_TRUNCATION_MARK)) - len(",")
+    for teil in wert:
+        stueck = _geschrumpft(teil, max(rest, 0))
+        laenge = len(_als_json(stueck)) + (1 if ergebnis else 0)
+        if laenge > rest:
+            break
+        ergebnis.append(stueck)
+        rest -= laenge
+    ergebnis.append(TOOL_RESULT_TRUNCATION_MARK)
+    return ergebnis
+
+
+def _werkzeugergebnis_gekuerzt(text: str, ziel: int) -> str:
+    """Kuerzt ein Werkzeugergebnis, ohne es unlesbar zu machen.
+
+    Der Inhalt einer ``role="tool"``-Nachricht ist JSON. Der Schnitt durch den
+    Text traf darum mitten in eine Zeichenkette, und was beim Modell ankam, war
+    kein Ergebnis mehr, sondern ein Bruchstueck:
+
+        {"error":"AI_GUARDIAN_NO_HUMAN","message":"In einer Guar [...gekuerzt]
+
+    Keine schliessende Klammer, kein schliessendes Anfuehrungszeichen. Das
+    Modell kann daraus nicht einmal mehr entnehmen, dass es ein Fehler war —
+    der Fehlercode steht zwar noch da, aber er steht in etwas, das kein Parser
+    oeffnet. Gekuerzt wird deshalb die **Nutzlast**, und serialisiert wird
+    danach neu.
+
+    Zwei Wege fuehren am Kuerzen vorbei, beide mit Absicht:
+
+    * Was kein JSON ist, wird als Text gekuerzt. Das ist kein Rueckfall,
+      sondern der richtige Weg — Werkzeugergebnisse aus der Zeit vor der
+      Serialisierung und die Nachrichten der Tests sind schlichter Text, und
+      ein Textschnitt macht Text nicht kaputt.
+    * Wuerde die gekuerzte Fassung **laenger** als das Original — die Marke ist
+      vierzehn Zeichen, bei einem winzigen Budget kostet sie mehr, als sie
+      spart —, geht das Original hinaus. Ueber dem Budget zu liegen ist die
+      bekannte, bewusste Abwaegung dieser Datei (siehe `auf_budget_kuerzen`);
+      unlesbar hinauszugehen ist es nicht.
+    """
+    if len(text) <= ziel:
+        return text
+    try:
+        nutzlast = json.loads(text)
+    except ValueError:
+        return _gekuerzt(text, ziel)
+    kurz = _als_json(_geschrumpft(nutzlast, ziel))
+    return kurz if len(kurz) < len(text) else text
 
 
 def _ist_werkzeugdaten(item: dict[str, Any]) -> bool:
@@ -688,6 +840,13 @@ def auf_budget_kuerzen(
     Cache-Umstellung hinter der Historie; ohne diese Zuordnung wäre er das
     Letzte, was gekürzt wird, und die gerade gestellte Frage das Vorletzte.
 
+    Gekürzt wird auf **zwei** Weisen, und die Rolle sagt welche. Der Inhalt
+    einer ``role="tool"``-Nachricht ist JSON; ein Schnitt durch den Text traf
+    darin mitten in eine Zeichenkette und machte aus dem Ergebnis ein
+    Bruchstück, das kein Parser mehr öffnet. Dort wird deshalb die Nutzlast
+    verkleinert und neu serialisiert (`_werkzeugergebnis_gekuerzt`), überall
+    sonst der Text geschnitten (`_gekuerzt`).
+
     Reicht das nicht, geht die Liste über das Budget hinaus. Das ist dieselbe
     Abwägung wie vorher: eine Absage des Anbieters ist sichtbar, eine still
     halbierte Frage nicht.
@@ -713,7 +872,17 @@ def auf_budget_kuerzen(
             if not isinstance(inhalt, str) or len(inhalt) <= MIN_GEKUERZTE_ZEICHEN:
                 continue
             ziel = max(len(inhalt) - (gesamt - zeichen), MIN_GEKUERZTE_ZEICHEN)
-            gekuerzt = _gekuerzt(inhalt, ziel)
+            # Hier und nicht in `_gekuerzt`: die Rolle entscheidet, und nur die
+            # Aufrufstelle kennt sie. `_ist_werkzeugdaten` taugt dafuer nicht —
+            # es sagt bei beiden Formen ja, und der Werkzeugkontext ist Prosa
+            # mit eingebettetem JSON, kein JSON. Ihn als Nutzlast zu lesen
+            # schluege fehl, und der Fehlschlag fuehrte zurueck zum Textschnitt:
+            # derselbe Weg, ein Umweg mehr.
+            gekuerzt = (
+                _werkzeugergebnis_gekuerzt(inhalt, ziel)
+                if item.get("role") == "tool"
+                else _gekuerzt(inhalt, ziel)
+            )
             gesamt -= len(inhalt) - len(gekuerzt)
             item["content"] = gekuerzt
     return ergebnis
