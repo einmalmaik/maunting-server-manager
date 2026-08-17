@@ -33,43 +33,37 @@ export type Entry =
 // Nachricht, nicht daneben. Ein eigener Eintrag könnte diese Stelle nicht
 // benennen.
 
-/** Hängt Text an den letzten Textabschnitt an — oder fängt einen neuen an. */
-function mitText(abschnitte: AiSection[] | null | undefined, stueck: string): AiSection[] {
+/**
+ * Hängt ein Stück an den letzten Abschnitt gleicher Art an — oder fängt einen
+ * neuen an.
+ *
+ * **Eine** Funktion für Antwort- und Denktext, weil die Regel dieselbe ist und
+ * zwei Abschriften davon auseinanderliefen. Dass der Denktext überhaupt hier
+ * durchläuft, hat seinen eigenen Grund: er lief früher in ein flaches Feld
+ * neben den Abschnitten. Damit gab es nur eine mögliche Stelle, ihn zu
+ * zeichnen: ganz oben. Die Gedanken der dritten Runde standen dann über dem
+ * Text der ersten, der dort seit zwölf Sekunden stand.
+ */
+function mitStueck(
+  abschnitte: AiSection[] | null | undefined,
+  art: 'text' | 'denken',
+  stueck: string,
+): AiSection[] {
   const bisher = abschnitte ?? []
   const letzter = bisher[bisher.length - 1]
-  if (letzter?.art === 'text') {
+  if (letzter?.art === art) {
     return [
       ...bisher.slice(0, -1),
       { ...letzter, inhalt: (letzter.inhalt ?? '') + stueck },
     ]
   }
-  return [...bisher, { art: 'text', inhalt: stueck }]
+  return [...bisher, { art, inhalt: stueck }]
 }
 
 function mitWerkzeug(
   abschnitte: AiSection[] | null | undefined, werkzeug: AiToolUse,
 ): AiSection[] {
   return [...(abschnitte ?? []), { art: 'tool', werkzeug }]
-}
-
-/**
- * Dasselbe für den Denktext — anhängen, solange gedacht wird.
- *
- * Er lief früher in ein flaches Feld neben den Abschnitten. Damit gab es nur
- * eine mögliche Stelle, ihn zu zeichnen: ganz oben. Die Gedanken der dritten
- * Runde standen dann über dem Text der ersten, der dort seit zwölf Sekunden
- * stand.
- */
-function mitDenken(abschnitte: AiSection[] | null | undefined, stueck: string): AiSection[] {
-  const bisher = abschnitte ?? []
-  const letzter = bisher[bisher.length - 1]
-  if (letzter?.art === 'denken') {
-    return [
-      ...bisher.slice(0, -1),
-      { ...letzter, inhalt: (letzter.inhalt ?? '') + stueck },
-    ]
-  }
-  return [...bisher, { art: 'denken', inhalt: stueck }]
 }
 
 /**
@@ -342,7 +336,7 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
         aendere(aktuell!, (message) => ({
           ...message,
           content: message.content + data.content,
-          sections: mitText(message.sections, data.content),
+          sections: mitStueck(message.sections, 'text', data.content),
         }))
       } else if (name === 'reasoning') {
         // In die Gliederung, an ihre Stelle — nicht in ein flaches Feld
@@ -351,7 +345,7 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
         // und zwei mitgeführte Fassungen desselben Textes liefen früher oder
         // später auseinander.
         aendere(aktuell!, (message) => ({
-          ...message, sections: mitDenken(message.sections, data.content),
+          ...message, sections: mitStueck(message.sections, 'denken', data.content),
         }))
       } else if (name === 'question') {
         // Die Frage gehört an die Antwort, nicht neben sie. Als eigener
@@ -411,6 +405,17 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
     const controller = new AbortController()
     abortRef.current = controller
     const { verarbeite, istGescheitert } = machVerarbeiter(optimistischeId, optimistischeBenutzerId)
+    // Zwei Wege enden im selben Bild: der Wurf aus dem Strom und der
+    // `error`-Rahmen, hinter dem der Strom regulär ausläuft. In beiden Fällen
+    // behauptet die halb geschriebene Blase sonst eine Antwort, die nie fertig
+    // wurde — dieselbe Markierung, deshalb eine Funktion.
+    const markiereGescheitert = () => {
+      setEntries((current) => current.map((entry) => (
+        entry.kind === 'message' && entry.message.status === 'streaming'
+          ? { ...entry, message: { ...entry.message, status: 'failed' } }
+          : entry
+      )))
+    }
     let abgebrochen = false
     try {
       await beginne(verarbeite, controller.signal)
@@ -419,11 +424,7 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
         abgebrochen = true
       } else {
         toast.error(error instanceof SanitizedApiError ? error.message : t('ai.chat.errors.stream'))
-        setEntries((current) => current.map((entry) => (
-          entry.kind === 'message' && entry.message.status === 'streaming'
-            ? { ...entry, message: { ...entry.message, status: 'failed' } }
-            : entry
-        )))
+        markiereGescheitert()
       }
     } finally {
       abortRef.current = null
@@ -432,13 +433,7 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
         // Der Rückhalt für den Strom, der einfach abreißt: dann kommt kein
         // `error` und kein ruhendes `run`, und die Ankündigung bliebe stehen.
         setLaufendeWerkzeuge([])
-        if (istGescheitert()) {
-          setEntries((current) => current.map((entry) => (
-            entry.kind === 'message' && entry.message.status === 'streaming'
-              ? { ...entry, message: { ...entry.message, status: 'failed' } }
-              : entry
-          )))
-        }
+        if (istGescheitert()) markiereGescheitert()
       }
     }
   }, [machVerarbeiter, t])

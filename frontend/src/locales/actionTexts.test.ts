@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { SCHREIBWERKZEUGE as API_WERKZEUGE } from '@/api/ai'
 
 import de from './de.json'
 import en from './en.json'
@@ -84,6 +85,16 @@ describe('Texte der KI-Aktionen', () => {
   // des Betreibers, er traegt ihre Kennung als Text ein, und geprueft wird
   // nicht ihr Name, sondern ihre **Form**: sie steht in einem URL-Pfad
   // (`backend/tests/test_ai_voice_provider.py`).
+
+  it('api/ai.ts kennt dieselben Werkzeuge wie diese Abschrift', () => {
+    // Die dritte Drift in Folge: `propose_guardian_tuning` fehlte im Typ von
+    // `api/ai.ts`, und die Karte fiel stumm auf das Standardsymbol zurueck —
+    // kein Uebersetzungsloch, kein Fehler, nur ein falsches Bild. Ein Typ ist
+    // zur Laufzeit weg; abgleichen laesst sich nur das `const`-Array, aus dem
+    // er seit dem Umbau abgeleitet wird. Die Reihenfolge ist dort Registry-,
+    // hier Pflege-Reihenfolge — verglichen wird deshalb sortiert.
+    expect([...API_WERKZEUGE].sort()).toEqual([...SCHREIBWERKZEUGE].sort())
+  })
 
   it('die unumkehrbaren Werkzeuge sagen im Text, dass es unumkehrbar ist', () => {
     // Kein Stilcheck: der Dialog färbt diese Werkzeuge rot, und die Farbe ohne

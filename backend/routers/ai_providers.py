@@ -10,6 +10,7 @@ einem gehosteten Panel ein zweiter Abrechnungspfad neben dem kalkulierten waere.
 """
 
 import logging
+from contextlib import contextmanager
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
@@ -91,6 +92,28 @@ def list_provider_settings(
     return [_admin_response(provider) for provider in providers]
 
 
+@contextmanager
+def _provider_fehler_uebersetzen(db: Session):
+    """Uebersetzt die Fehler des Provider-Service in HTTP-Antworten.
+
+    Stand woertlich gleich in `create_provider` und `update_provider`. Eine
+    neue Fehlerklasse im Service musste an beiden Orten nachgezogen werden;
+    vergisst man einen, antwortet derselbe Fehler einmal mit 400 und einmal
+    als nackter 500.
+    """
+    try:
+        yield
+    except ai_provider_service.AiProviderConfigurationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Provider-Name ist bereits vergeben") from exc
+    except DisSidecarError as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Provider-Key konnte nicht sicher gespeichert werden") from exc
+
+
 @router.post("/settings/providers", response_model=AiProviderResponse, status_code=status.HTTP_201_CREATED)
 def create_provider(
     payload: AiProviderCreate,
@@ -98,7 +121,7 @@ def create_provider(
     actor: User = Depends(require_global("panel.settings.write")),
     _: None = Depends(verify_csrf),
 ) -> AiProviderResponse:
-    try:
+    with _provider_fehler_uebersetzen(db):
         provider = ai_provider_service.create_provider(
             db,
             **payload.model_dump(exclude={"operator_api_key"}),
@@ -122,15 +145,6 @@ def create_provider(
         db.commit()
         db.refresh(provider)
         return _admin_response(provider)
-    except ai_provider_service.AiProviderConfigurationError as exc:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Provider-Name ist bereits vergeben") from exc
-    except DisSidecarError as exc:
-        db.rollback()
-        raise HTTPException(status_code=503, detail="Provider-Key konnte nicht sicher gespeichert werden") from exc
 
 
 @router.patch("/settings/providers/{provider_id}", response_model=AiProviderResponse)
@@ -148,7 +162,7 @@ def update_provider(
         exclude_unset=True,
         exclude={"operator_api_key", "clear_operator_api_key"},
     )
-    try:
+    with _provider_fehler_uebersetzen(db):
         ai_provider_service.update_provider(
             db,
             provider,
@@ -172,15 +186,6 @@ def update_provider(
         db.commit()
         db.refresh(provider)
         return _admin_response(provider)
-    except ai_provider_service.AiProviderConfigurationError as exc:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Provider-Name ist bereits vergeben") from exc
-    except DisSidecarError as exc:
-        db.rollback()
-        raise HTTPException(status_code=503, detail="Provider-Key konnte nicht sicher gespeichert werden") from exc
 
 
 @router.delete("/settings/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -234,7 +239,13 @@ async def test_provider(
     if provider is None:
         raise HTTPException(status_code=404, detail="Provider nicht gefunden")
     try:
-        api_key = ai_provider_service.resolve_api_key(db, provider, actor.id)
+        # Im Threadpool wie an jeder anderen Stelle dieses Routers: die
+        # Entschluesselung ist ein synchroner HTTP-Gang zum DIS-Sidecar mit
+        # 15-s-Timeout, und ein haengender Sidecar friere sonst den gesamten
+        # Event-Loop ein.
+        api_key = await run_in_threadpool(
+            ai_provider_service.resolve_api_key, db, provider, actor.id
+        )
     except DisSidecarError as exc:
         raise HTTPException(
             status_code=503, detail="Provider-Key konnte nicht gelesen werden"

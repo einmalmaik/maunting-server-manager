@@ -88,9 +88,10 @@ def test_eine_gesprochene_zustimmung_greift_nur_auf_eigene_vorschlaege(
     )
 
     bruecke = _Attrappe(owner_user.id)
-    erfolg = bruecke._ausfuehren(["fremde-kennung"])
+    erfolg, fortgesetzt = bruecke._ausfuehren("fremde-kennung")
 
     assert erfolg is False
+    assert fortgesetzt is None
     assert gerufen == []
 
 
@@ -134,9 +135,12 @@ def test_bestaetigen_und_ausfuehren_laufen_auf_den_sprechenden(
     monkeypatch.setattr(ai_proposal_service, "execute_proposal", _execute)
 
     bruecke = _Attrappe(owner_user.id)
-    erfolg = bruecke._ausfuehren(["eigene-kennung"])
+    erfolg, fortgesetzt = bruecke._ausfuehren("eigene-kennung")
 
     assert erfolg is True
+    # Kein Lauf am Vorschlag — also auch nichts, dem sich die Bruecke
+    # anschliessend anhaengen muesste.
+    assert fortgesetzt is None
     assert gesehen["confirm"] == owner_user.id
     assert gesehen["execute"] == owner_user.id
     # Und der Token aus dem ersten Schritt geht in den zweiten. Ein neu
@@ -170,9 +174,10 @@ def test_ein_abgewiesener_vorschlag_reisst_die_sitzung_nicht_ab(
     monkeypatch.setattr(ai_proposal_service, "confirm_proposal", _confirm)
 
     bruecke = _Attrappe(owner_user.id)
-    erfolg = bruecke._ausfuehren(["kennung"])
+    erfolg, fortgesetzt = bruecke._ausfuehren("kennung")
 
     assert erfolg is False
+    assert fortgesetzt is None
 
 
 @pytest.mark.parametrize(

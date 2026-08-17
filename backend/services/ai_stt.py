@@ -34,18 +34,16 @@ wie eine getippte Zeile — mit derselben Skepsis und denselben Rechten, nicht m
 mehr. Ein hörendes Modell, das aus dem Gesagten Schlüsse zöge, wäre eine zweite
 Denkstelle neben Luna, und genau die ist am 16.08.2026 abgeschafft worden.
 
-**Gebucht wird die Abschrift nicht**, und das ist eine Lücke und keine
-Feinheit. Gebucht wird über `reserve_ai_usage` beim Aufrufer; der einzige
-Aufrufer hier ist `ai_voice_bridge`, und der übergibt kein `StreamUsage`: die
-Abschrift gehört zu keinem Lauf, sie geht ihm voraus. Für den Betreiber heisst
-das: die Tokengrenze und die Kostengrenze decken den **Denk**- und den
-Sprechweg, nicht das Zuhören. Das steht so auch in `docs/self-hosting.md` unter
-„Kontingent", damit es niemand aus einer Rechnung erfahren muss.
-
-Wer es ändern will, braucht mehr als ein Argument mehr: eine abgelehnte
-Reservierung würde die Äusserung verwerfen, **bevor** irgendwer weiss, was
-gesagt wurde — der Sprechende bekäme dann nicht einmal die Auskunft, dass sein
-Kontingent erschöpft ist.
+**Gebucht wird die Abschrift beim Aufrufer**, nicht hier. `ai_voice_bridge`
+übergibt ein `StreamUsage` und verbucht es nach gelungener Abschrift als
+eigenen Verbrauch (`_abschrift_verbuchen`) — das Zuhören zählt damit gegen
+dieselben Tages- und Monatsgrenzen wie der Denk- und der Sprechweg. Die
+Buchung steht bewusst **nach** dem Hören: eine Reservierung davor würde die
+Äusserung verwerfen, bevor irgendwer weiss, was gesagt wurde — der Sprechende
+bekäme dann nicht einmal die Auskunft, dass sein Kontingent erschöpft ist.
+Dieses Modul selbst bucht nichts: es kennt keinen Benutzer, und eine zweite
+Buchungsstelle neben `reserve_ai_usage` wäre eine zweite Wahrheit über
+dieselben Grenzen.
 
 **Zum Mithören:** was der Mensch spricht, geht als Ton an den Anbieter. Das ist
 dieselbe Aussage wie beim getippten Chat, nur unangenehmer zu lesen — und sie
@@ -279,9 +277,10 @@ async def hoeren(
     weiss, wo er endet.
 
     ``usage`` nimmt die vom Anbieter gemeldeten Tokenzahlen auf, wenn der
-    Aufrufer sie sehen will. Ohne Angabe werden sie verworfen — das ist
-    ausdrücklich der Fall für Aufrufe, die zu keinem Lauf gehören, und genau der
-    Fall aus `ai_voice_bridge` (siehe die Lücke im Modulkopf).
+    Aufrufer sie sehen will — `ai_voice_bridge` verbucht sie damit nach
+    gelungener Abschrift als eigenen Verbrauch (siehe Modulkopf). Ohne Angabe
+    werden sie verworfen; das ist der Fall für Aufrufe ohne Buchungspflicht,
+    etwa einen Testlauf.
 
     Wirft `NichtsVerstanden`, wenn nichts Verständliches zu hören war, und
     `AiProviderRequestError` bei allem, was der Anbieter ablehnt.

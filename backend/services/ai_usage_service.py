@@ -292,6 +292,54 @@ def abrechnung(
     return tokens, 0, "none"
 
 
+def reservierung_abrechnen(
+    db: Session,
+    request_id: str | UUID,
+    *,
+    usage: "StreamUsage",
+    estimated_actual_tokens: int,
+    token_price_micro_usd_per_million: int | None,
+    gescheitert: bool = False,
+) -> bool:
+    """Findet die Reservierung zu ``request_id`` und schliesst sie ab.
+
+    Der Dreischritt „Ereignis suchen → `abrechnung` → `complete_ai_usage`
+    (bzw. `fail_ai_usage`)" stand woertlich gleich in der Verdichtung und im
+    Mailtext, und in genau dieser Abschrift ist schon einmal Drift passiert:
+    die Verdichtung buchte fest den reservierten Betrag und damit **nie** echte
+    Kosten, weil eine Kopie nicht nachgezogen wurde. Deshalb steht der Schritt
+    jetzt hier — neben den Funktionen, aus denen er besteht.
+
+    **Committet nicht.** Der Aufrufer entscheidet, was mit in die Transaktion
+    gehoert — die Verdichtung schreibt ihre Zusammenfassung im selben Commit.
+    ``False`` heisst: keine offene Reservierung gefunden, nichts gebucht.
+    """
+    event = (
+        db.query(AiUsageEvent)
+        .filter(AiUsageEvent.request_id == _canonical_request_id(request_id))
+        .first()
+    )
+    if event is None or event.status != "reserved":
+        return False
+    if gescheitert:
+        fail_ai_usage(db, event)
+        return True
+    tokens, kosten, herkunft = abrechnung(
+        usage,
+        reserved_tokens=event.reserved_tokens,
+        estimated_actual_tokens=estimated_actual_tokens,
+        token_price_micro_usd_per_million=token_price_micro_usd_per_million,
+    )
+    complete_ai_usage(
+        db, event,
+        actual_tokens=tokens,
+        actual_cost_microunits=kosten,
+        aufschluesselung=usage,
+        cost_source=herkunft,
+    )
+    return True
+
+
 def complete_ai_usage(
     db: Session,
     event: AiUsageEvent,

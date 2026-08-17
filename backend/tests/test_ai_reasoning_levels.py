@@ -235,6 +235,28 @@ def test_a_non_thinking_model_gets_no_field_at_all() -> None:
     assert ai_reasoning.klemmen(modell, wunsch="high", aktiv=True, deckel=None) == (False, None)
 
 
-@pytest.mark.parametrize("wert", [0, 7, -1])
-def test_ranks_outside_the_scale_have_no_word(wert: int) -> None:
-    assert ai_reasoning.stufe_fuer_rang(wert) is None
+def test_the_frontend_dropdown_carries_the_same_rank_words() -> None:
+    """Die Rollen-Deckel-Auswahl pflegt die Rangwoerter als zweite Kopie.
+
+    `AiTab.tsx` verspricht per Kommentar „dieselbe Reihenfolge wie
+    `services/ai_reasoning.RANGFOLGE`" — geprueft hat das bisher niemand.
+    Kommt in `RANGFOLGE` eine Stufe dazu oder faellt eine weg, zeigte die
+    Auswahl still falsche Woerter zu falschen Raengen. Rang 0 ist „aus" und
+    traegt im Backend bewusst kein Wort; vorn steht deshalb ``off``.
+
+    Der Test liest die Frontend-Datei als Text. Das ist grob, aber die
+    ehrlichste Bruecke, die es zwischen den beiden Sprachen gibt — eine
+    API dafuer waere ein Endpunkt fuer sieben Woerter.
+    """
+    import re
+    from pathlib import Path
+
+    pfad = (
+        Path(__file__).resolve().parents[2]
+        / "frontend" / "src" / "pages" / "settings" / "AiTab.tsx"
+    )
+    quelle = pfad.read_text(encoding="utf-8")
+    treffer = re.search(r"const REASONING_RANKS = \[(.*?)\]", quelle)
+    assert treffer is not None, "REASONING_RANKS steht nicht mehr in AiTab.tsx"
+    woerter = re.findall(r"'([a-z]+)'", treffer.group(1))
+    assert woerter == ["off", *ai_reasoning.RANGFOLGE]

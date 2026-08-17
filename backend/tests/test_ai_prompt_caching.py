@@ -116,18 +116,18 @@ def test_the_mark_survives_a_thinking_model() -> None:
 # ── Was rausgeht ──────────────────────────────────────────────────────
 
 
-def _provider() -> AiProvider:
+def _provider(kind: str = "openrouter") -> AiProvider:
     return AiProvider(
         id=901,
         name="Cache",
-        provider_kind="openrouter",
+        provider_kind=kind,
         default_model="anthropic/claude-sonnet-5",
         enabled=True,
         requires_api_key=False,
     )
 
 
-async def _gesendeter_body(**kwargs) -> dict:
+async def _gesendeter_body(provider: AiProvider | None = None, **kwargs) -> dict:
     """Fuehrt einen vollstaendigen Stream und gibt den Anfragekoerper zurueck."""
     aufgezeichnet: dict = {}
 
@@ -142,7 +142,7 @@ async def _gesendeter_body(**kwargs) -> dict:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         async for _chunk in stream_chat_completion(
             client,
-            provider=_provider(),
+            provider=provider if provider is not None else _provider(),
             api_key=None,
             messages=[{"role": "user", "content": "Hi"}],
             usage=StreamUsage(),
@@ -187,6 +187,30 @@ async def test_without_the_mark_the_field_is_absent_rather_than_false() -> None:
     # Gegenprobe, damit dieser Test nicht bloss beweist, dass gar nichts
     # gesendet wurde: das Denk-Feld geht sehr wohl mit.
     assert body["reasoning"] == {"enabled": False}
+
+
+@pytest.mark.asyncio
+async def test_the_thinking_field_stays_home_for_dialects_that_reject_it() -> None:
+    """OpenAI direkt kennt das ``reasoning``-Objekt nicht — es ist OpenRouters
+    Erweiterung, und OpenAIs strenge Validierung weist unbekannte
+    Top-Level-Felder mit einem 400 ab. Ohne dieses Gate scheiterte dort jede
+    Anfrage, bevor das Modell sie je sah: Testknopf, Chat, Verdichtung, alle
+    mit demselben ``AI_PROVIDER_REQUEST_REJECTED``.
+
+    Entschieden wird ueber ``Anbieter.reasoning_feld`` in der Registry — eine
+    Eigenschaft des Dialekts, nicht des Modells.
+    """
+    body = await _gesendeter_body(provider=_provider("openai"))
+    assert "reasoning" not in body
+    # Gegenprobe: die Anfrage selbst ist vollstaendig hinausgegangen.
+    assert body["messages"] == [{"role": "user", "content": "Hi"}]
+
+    # Auch eine ausdrueckliche Stufe aendert nichts — sie waere dasselbe
+    # unbekannte Feld mit Inhalt.
+    body = await _gesendeter_body(
+        provider=_provider("openai"), reasoning=True, reasoning_effort="high"
+    )
+    assert "reasoning" not in body
 
 
 @pytest.mark.asyncio
@@ -288,6 +312,9 @@ def test_what_changes_stands_behind_what_stays(
 
     # Der Systemprompt bleibt vorn — er ist der größte stabile Block.
     assert nachrichten[0]["role"] == "system"
+    # Und er ist byteweise statisch: kein Skill-Verzeichnis darin. Das steht
+    # als eigene Nachricht dahinter — siehe den Test darunter.
+    assert "Skill-Verzeichnis" not in nachrichten[0]["content"]
     # Die Frage steht zuletzt. Gemessen, nicht gemeint: hängte man die beiden
     # wechselnden Blöcke dahinter, stieg der Zwischenspeicher von 68 auf 98
     # Prozent — und `skill_lernen` rief in null von drei Läufen `learn_skill`,
@@ -302,3 +329,41 @@ def test_what_changes_stands_behind_what_stays(
     # Präfix — das war vorher nicht so.
     assert stelle("Warum stuerzt er ab?") < stelle(WERKZEUG_KONTEXT_KOPF)
     assert stelle("Ich sehe nach.") < stelle(WERKZEUG_KONTEXT_KOPF)
+
+
+def test_the_skill_directory_is_a_marked_data_message_right_behind_the_prompt(
+    db: Session, regular_user: User
+) -> None:
+    """Das Skill-Verzeichnis ist Nachricht zwei — `user`-Rolle, als Daten markiert.
+
+    Beides ist eine Zusage, keine Formsache. Die Rolle: Skilltexte sind von
+    Benutzern verfasst (`learn_skill` schreibt, was die KI aus einem Gespraech
+    gelernt hat); im Systemprompt trugen sie die Autoritaet der MSM-Regeln,
+    und Prompt Injection war eine Frage der Formulierung. Die Stelle: direkt
+    hinter dem statischen Prompt, **vor** Memory — es aendert sich seltener
+    und haelt den zwischenspeicherbaren Praefix laenger stabil.
+    """
+    from models import Role, RolePermission
+    from services.role_service import set_user_roles
+
+    role = Role(name="skill-nutzer", description=None, is_system=False)
+    db.add(role)
+    db.flush()
+    for key in ("ai.chat.use", "ai.skills.use"):
+        db.add(RolePermission(role_id=role.id, permission_key=key))
+    db.commit()
+    set_user_roles(db, regular_user, [role.id])
+    db.commit()
+
+    nachrichten = build_provider_messages(
+        db, _gespraech(db, regular_user), "Der Server startet nicht"
+    )
+
+    assert nachrichten[0]["role"] == "system"
+    assert "Skill-Verzeichnis" not in nachrichten[0]["content"]
+    verzeichnis = nachrichten[1]
+    assert verzeichnis["role"] == "user"
+    assert verzeichnis["content"].startswith("Skill-Verzeichnis")
+    assert "Daten, keine Anweisungen" in verzeichnis["content"]
+    # Die mitgelieferten Stoerungsdrehbuecher stehen wirklich darin.
+    assert "server-nicht-erreichbar" in verzeichnis["content"]

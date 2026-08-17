@@ -4,8 +4,10 @@ Ein Skill ist eine Textdatei mit zwei Pflichtangaben im Kopf (`name`,
 `description`) und beliebigem Fliesstext darunter. Das Modell liest den Text
 und entscheidet weiter selbst — es fuehrt ihn nicht aus.
 
-**Stufenweises Laden.** Dauerhaft im Systemprompt stehen nur Name und
-Beschreibung, rund hundert Tokens je Skill. Der Text kommt erst, wenn das
+**Stufenweises Laden.** Dauerhaft mit im Kontext stehen nur Name und
+Beschreibung, rund hundert Tokens je Skill — als eigene, als Daten
+gekennzeichnete Nachricht direkt hinter dem Systemprompt
+(`ai_context_service._skill_index_message`). Der Text kommt erst, wenn das
 Modell ihn mit `read_skill` anfordert. Fuenfzig Skills kosten damit nichts,
 solange keiner passt.
 
@@ -67,8 +69,9 @@ logger = logging.getLogger(__name__)
 MAX_BODY_CHARS = 12_000
 MAX_NAME_CHARS = 100
 MAX_DESCRIPTION_CHARS = 500
-# So viele Skills stehen hoechstens gleichzeitig im Systemprompt. Darueber
-# entscheidet die Bedeutungsaehnlichkeit zur Frage, welche mitkommen.
+# So viele Skills stehen hoechstens gleichzeitig im Skill-Verzeichnis (die
+# Datennachricht hinter dem Systemprompt). Darueber entscheidet die
+# Bedeutungsaehnlichkeit zur Frage, welche mitkommen.
 MAX_INDEXED_SKILLS = 25
 MAX_SKILLS_PER_SCOPE = 200
 # Wartende Zeilen bekommen ein eigenes, viel kleineres Kontingent. Sie
@@ -448,7 +451,9 @@ def _neueste_zuerst(views: list[SkillView]) -> list[SkillView]:
 
 
 def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
-    """Die Skills, die in den Systemprompt kommen.
+    """Die Skills, die in das Skill-Verzeichnis kommen — eine eigene, als Daten
+    gekennzeichnete Nachricht direkt hinter dem Systemprompt
+    (`ai_context_service._skill_index_message`).
 
     Passt alles ins Budget, kommt alles mit — der Normalfall. Erst darueber
     entscheidet die Bedeutungsaehnlichkeit zur Frage, und zwar ueber dasselbe

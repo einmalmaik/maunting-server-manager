@@ -262,8 +262,9 @@ async def test_eine_kaputte_antwort_reisst_das_gespraech_nicht_mit():
 async def test_gemeldete_tokenzahlen_landen_im_messwert():
     """Was der Anbieter meldet, wird uebernommen — mehr nicht.
 
-    Gebucht wird die Abschrift nicht (siehe Modulkopf); wer die Zahlen sehen
-    will, gibt ein `StreamUsage` mit.
+    Gebucht wird hier nichts — das tut `ai_voice_bridge` nach gelungener
+    Abschrift (siehe Modulkopf); wer die Zahlen sehen will, gibt ein
+    `StreamUsage` mit.
     """
     def handler(_request: httpx.Request) -> httpx.Response:
         return _antwort(usage={"prompt_tokens": 120, "completion_tokens": 8, "total_tokens": 128})

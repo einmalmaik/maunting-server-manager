@@ -120,8 +120,13 @@ const MAX_BELEGE = 5
  * `fehler`, und nichts nahm ihn je zurück. Wer hört, dass es weitergeht, darf oben nicht
  * das Gegenteil lesen. `denkt` steht bewusst nicht dabei: dort schweigt die
  * Gegenstelle, und ein Fehler, der genau dann kam, ist noch keiner von gestern.
+ *
+ * `bereit` fehlt aus dem entgegengesetzten Grund: das Backend sendet in jedem
+ * Fehlerpfad erst die Störung und unmittelbar danach `zustand=bereit` — stünde
+ * `bereit` hier, löschte jede Störung sich selbst, bevor ein Mensch sie lesen
+ * kann. Erst echtes Weiterleben (hören oder sprechen) beweist etwas.
  */
-const LEITUNG_TRAEGT: ReadonlySet<string> = new Set(['bereit', 'hoert', 'spricht'])
+const LEITUNG_TRAEGT: ReadonlySet<string> = new Set(['hoert', 'spricht'])
 
 function adresse(): string {
   const basis = import.meta.env.VITE_API_URL || window.location.origin
@@ -194,7 +199,12 @@ export function useSprachsitzung(): Ergebnis {
         if (verbindung.readyState === WebSocket.OPEN) verbindung.send(paket)
       })
         .then((laufend) => {
-          if (!gewollt.current) {
+          // `gewollt` allein genügt nicht: reißt die Verbindung ab, während
+          // getUserMedia noch auf die Freigabe wartet, bleibt es wahr — das
+          // Mikrofon liefe dann bei Zustand „aus" weiter, und der nächste
+          // starten() überschriebe den Stream kommentarlos. Nur die Verbindung,
+          // für die aufgenommen wurde, darf den Stream übernehmen.
+          if (!gewollt.current || ws.current !== verbindung) {
             laufend.beenden()
             return
           }
@@ -261,9 +271,11 @@ export function useSprachsitzung(): Ergebnis {
             }
           }
           if (neu === 'bereit') setWerkzeug(null)
-          // Ein regulärer Zustand beweist, dass die Leitung trägt. Eine
-          // Fehlermeldung, die daneben stehen bleibt, widerspricht dem, was der
-          // Mensch gerade hört.
+          // Nur ein Zustand, in dem wirklich gesprochen oder gehört wird,
+          // beweist, dass die Leitung trägt — ein `bereit` folgt auch auf jede
+          // Störung und darf sie deshalb nicht wegräumen (siehe
+          // LEITUNG_TRAEGT). Eine Fehlermeldung neben laufendem Ton dagegen
+          // widerspricht dem, was der Mensch gerade hört.
           if (LEITUNG_TRAEGT.has(neu)) setFehler(null)
           setZustand(neu as Sprachzustand)
           break
@@ -320,7 +332,15 @@ export function useSprachsitzung(): Ergebnis {
           planmaessig.current = true
           break
         case 'stoerung':
-          setFehler('ai.voice.errors.provider')
+          // `grund` wird nicht als Schluessel durchgereicht, nur der eine
+          // bekannte Wert waehlt die eigene Meldung: „warte kurz" ist eine
+          // andere Auskunft als „etwas ist kaputt", und ein unbekannter Grund
+          // soll nicht in `de.json` spazieren gehen.
+          setFehler(
+            nachricht.grund === 'kontingent'
+              ? 'ai.voice.errors.quota'
+              : 'ai.voice.errors.provider',
+          )
           break
         default:
           break

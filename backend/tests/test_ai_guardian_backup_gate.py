@@ -89,6 +89,7 @@ SERVERRECHTE = (
     "server.view",
     "server.files.read",
     "server.files.write",
+    "server.files.delete",
     "server.config.write",
     "server.mods.write",
     "server.network.manage",

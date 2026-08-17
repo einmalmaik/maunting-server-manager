@@ -95,6 +95,13 @@ PROBE_TIMEOUT = 8.0
 #: Wie lange die Gegenstelle eine stille Sitzung offenhält, in Sekunden. Der
 #: Wert deckt die Denkpause zwischen zwei Sätzen einer Antwort ab — nicht die
 #: Pause zwischen zwei Antworten, denn dazwischen gibt es keine Sitzung.
+#:
+#: Eine **Werkzeugrunde** kann länger dauern als das: während die KI arbeitet,
+#: bekommt die Stimme keinen Text, und die Gegenstelle legt still auf. Das ist
+#: kein Fehler der Antwort — der Rest gehört trotzdem gesprochen. Deshalb
+#: verbindet `sagen()` in diesem Fall einmal transparent neu (`_neu_verbinden`),
+#: statt den Wert hier hochzudrehen: die Frist gehört der Gegenstelle, und eine
+#: Zahl, die jede denkbare Werkzeugrunde abdeckt, gibt es nicht.
 INAKTIVITAET_SEKUNDEN = 20
 
 #: Wie lange auf das Schlusszeichen der Gegenstelle gewartet wird, nachdem der
@@ -254,6 +261,23 @@ async def _verbinden(adresse: str, schluessel: str):
     )
 
 
+def _verbindung_zu(fehler: BaseException) -> bool:
+    """Ob dieser Fehler nichts weiter sagt als: die Verbindung ist zu.
+
+    Die Unterscheidung trägt die ganze Wiederverbindungslogik: eine zugegangene
+    Verbindung ist der Alltagsfall nach einer langen Werkzeugrunde
+    (`INAKTIVITAET_SEKUNDEN`) und wird transparent repariert. Alles andere —
+    ein abgelehnter Schlüssel, ein Protokollfehler — bleibt ein Fehler und
+    fällt beim Aufrufer auf.
+    """
+    if websockets is None:  # pragma: no cover - ohne Bibliothek keine Verbindung
+        return False
+    # Der Top-Level-Alias und nicht `websockets.exceptions`: das Unterpaket
+    # existiert als Attribut erst, wenn es irgendwer eigens importiert hat —
+    # `ConnectionClosed` dagegen ist der dokumentierte öffentliche Name.
+    return isinstance(fehler, websockets.ConnectionClosed)
+
+
 async def pruefen(adresse: str, schluessel: str) -> None:
     """Öffnet die Sitzung einmal und legt sofort wieder auf.
 
@@ -331,22 +355,71 @@ class Stimme:
         self._fertig = asyncio.Event()
 
     async def __aenter__(self) -> "Stimme":
-        self._verbindung = await _verbinden(self._adresse, self._schluessel)
-        # Die Eröffnung. Laut Protokoll muss der erste Text ein einzelnes
-        # Leerzeichen sein.
-        #
-        # **Ohne `voice_settings`**, und das ist eine Entscheidung: die
-        # Gegenstelle nimmt dann die Einstellungen, die der Betreiber an seiner
-        # Stimme gespeichert hat. Werte hier hineinzuschreiben hiesse, seine
-        # Wahl im Panel stillschweigend zu überstimmen — an einer Stelle, an
-        # der er sie nicht vermuten würde.
-        #
-        # Auch **ohne** `generation_config`: die Puffergrenzen der Gegenstelle
-        # spielen keine Rolle, weil hier ohnehin jeder Satz sofort mit `flush`
-        # erzeugt wird.
-        await self._verbindung.send(json.dumps({"text": " "}))
+        self._verbindung = await self._eroeffnen()
         self._empfang = asyncio.create_task(self._empfangen())
         return self
+
+    async def _eroeffnen(self):
+        """Verbindet und schickt die Eröffnung — oder räumt vollständig auf.
+
+        Laut Protokoll muss der erste Text ein einzelnes Leerzeichen sein.
+
+        **Ohne `voice_settings`**, und das ist eine Entscheidung: die
+        Gegenstelle nimmt dann die Einstellungen, die der Betreiber an seiner
+        Stimme gespeichert hat. Werte hier hineinzuschreiben hiesse, seine
+        Wahl im Panel stillschweigend zu überstimmen — an einer Stelle, an
+        der er sie nicht vermuten würde.
+
+        Auch **ohne** `generation_config`: die Puffergrenzen der Gegenstelle
+        spielen keine Rolle, weil hier ohnehin jeder Satz sofort mit `flush`
+        erzeugt wird.
+
+        Der Eröffnungs-send steht unter ``except BaseException``, und das ist
+        keine Übervorsicht: scheitert er, oder wird die Aufgabe zwischen
+        Connect und Rückgabe abgebrochen (`CancelledError` erbt nicht von
+        `Exception`), läuft `__aexit__` nie — die Verbindung bliebe offen, bis
+        die Gegenstelle sie irgendwann aufgibt. Geschlossen wird deshalb hier,
+        bevor die Ausnahme weitergeht.
+        """
+        verbindung = await _verbinden(self._adresse, self._schluessel)
+        try:
+            await verbindung.send(json.dumps({"text": " "}))
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await verbindung.close()
+            raise
+        return verbindung
+
+    async def _neu_verbinden(self) -> None:
+        """Einmal transparent neu verbinden — die Gegenstelle hat still aufgelegt.
+
+        Der Alltagsfall dahinter ist die Werkzeugrunde: solange die KI
+        arbeitet, bekommt die Stimme keinen Text, und nach
+        `INAKTIVITAET_SEKUNDEN` schliesst ElevenLabs die stille Sitzung von
+        selbst. Das ist kein Fehler der Antwort — der Rest gehört gesprochen,
+        nicht als Störung gemeldet. Der Zeichenzähler (`_gesendet`) läuft
+        weiter: die Grenze gilt je Antwort, nicht je Verbindung.
+        """
+        logger.info("Stimme verbindet neu: die Gegenstelle hatte still aufgelegt")
+        if self._empfang is not None:
+            self._empfang.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._empfang
+            self._empfang = None
+        if self._verbindung is not None:
+            with contextlib.suppress(Exception):
+                await self._verbindung.close()
+            self._verbindung = None
+        self._fehler = None
+        verbindung = await self._eroeffnen()
+        # Das frische Schlusszeichen erst **nach** gelungener Verbindung: das
+        # alte hat der Empfänger beim Abriss gesetzt, und scheitert die neue,
+        # soll `ausklingen()` sofort zurückkehren statt auf ein Ereignis zu
+        # warten, das nie jemand setzt. Gelingt sie, wartet es auf das Ende
+        # **dieser** Sitzung.
+        self._fertig = asyncio.Event()
+        self._verbindung = verbindung
+        self._empfang = asyncio.create_task(self._empfangen())
 
     async def __aexit__(self, *_ausnahme) -> None:
         await self.schliessen()
@@ -430,7 +503,19 @@ class Stimme:
         self._gesendet += len(stueck)
         # Das anhängende Leerzeichen verlangt das Protokoll ausdrücklich; ohne
         # es klebt der letzte an den nächsten Satz.
-        await self._verbindung.send(json.dumps({"text": f"{stueck} ", "flush": True}))
+        nutzlast = json.dumps({"text": f"{stueck} ", "flush": True})
+        try:
+            await self._verbindung.send(nutzlast)
+        except Exception as fehler:
+            if not _verbindung_zu(fehler):
+                raise
+            # Genau **ein** zweiter Versuch, kein Kreisen: die Verbindung ist
+            # am eigenen `inactivity_timeout` gestorben, weil eine
+            # Werkzeugrunde länger schwieg — der Satz selbst ist einwandfrei.
+            # Scheitert auch die neue Verbindung, ist es eine echte Störung
+            # und fällt wie bisher beim Aufrufer auf.
+            await self._neu_verbinden()
+            await self._verbindung.send(nutzlast)
         if self._abgeschnitten:
             logger.info(
                 "Sprachantwort gekuerzt: Grenze von %d Zeichen erreicht",
@@ -438,10 +523,18 @@ class Stimme:
             )
 
     def _pruefe_fehler(self) -> None:
-        if self._fehler is not None:
-            fehler = self._fehler
-            self._fehler = None
-            raise fehler
+        if self._fehler is None:
+            return
+        fehler = self._fehler
+        self._fehler = None
+        if _verbindung_zu(fehler):
+            # Kein Fehler der Antwort: die Gegenstelle hat nach
+            # `INAKTIVITAET_SEKUNDEN` Textstille von selbst aufgelegt —
+            # typischerweise, weil eine Werkzeugrunde so lange dauerte. Das
+            # nächste Stück verbindet neu (`_stueck_senden`); ihn hier zu
+            # werfen hiesse, die restliche Antwort als „stoerung" wegzuwerfen.
+            return
+        raise fehler
 
     async def _empfangen(self) -> None:
         """Nimmt Tonstücke entgegen, solange die Gegenstelle welche schickt."""

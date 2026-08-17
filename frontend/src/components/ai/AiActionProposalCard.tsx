@@ -1,4 +1,4 @@
-import { AlertTriangle, Blocks, Bot, CalendarClock, FilePenLine, FileX, HardDriveDownload, HardDriveUpload, Network, Package, Plug, Power, ServerCog, ShieldCheck, Trash2, Wrench } from 'lucide-react'
+import { AlertTriangle, Blocks, Bot, CalendarClock, FilePenLine, FileX, HardDriveDownload, HardDriveUpload, Network, Package, Plug, Power, ServerCog, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -160,6 +160,9 @@ export function AiActionProposalCard({
     propose_hoster_product: Plug,
     propose_ai_tarif_role: ShieldCheck,
     propose_server_repair: Wrench,
+    // Regler, kein Werkzeugkasten: das Tuning stellt Werte am Autopiloten ein,
+    // es repariert nichts — der `Wrench` daneben wuerde genau das behaupten.
+    propose_guardian_tuning: SlidersHorizontal,
     propose_file_delete: FileX,
     // Ein stehender Auftrag ist eine Uhr, kein Serververhalten — deshalb
     // dasselbe Symbol fuers Anlegen wie fuers Loeschen, aber ein anderes als

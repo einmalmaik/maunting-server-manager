@@ -14,21 +14,28 @@ Die Aufgabenteilung, damit sie nicht wieder verschwimmt:
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import logging
 import threading
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import httpx
 from sqlalchemy.orm import Session
 
-from models import AiActionProposal, AiRun, User
+from models import AiActionProposal, AiProvider, AiRun, User
 # Die Wartezustaende kommen aus dem Modell und nicht aus einer Literalkopie:
 # wer dort einen Zustand ergaenzt, soll ihn hier nicht ein zweites Mal
 # eintragen muessen — sonst sieht die Konstante wie die Wahrheitsquelle aus und
 # ist doch nur eine Beschreibung.
 from models.ai_run import BEENDET, WARTEND
+
+if TYPE_CHECKING:
+    # Nur fuer die Signatur von `Vorflug`. Zur Laufzeit bleibt der Import spaet
+    # im Funktionsrumpf — ein harter Import waere der naechste Importzyklus.
+    from services.ai_context_window import Fenster
 
 
 logger = logging.getLogger(__name__)
@@ -553,12 +560,7 @@ def lauf_fortsetzen(db: Session, *, run_id: str) -> bool:
     # Bestaetigungsaufruf. Die Oberflaeche haengt sich unmittelbar danach an;
     # saehe sie den Lauf dort noch als "geparkt", wuerde sie sofort wieder
     # aufhoeren und die Fortsetzung verpassen.
-    from services import ai_run_broker
-
-    ai_run_broker.eroeffnen(run.id)
-    ai_run_broker.veroeffentlichen(
-        run.id, "run", {"run_id": run.id, "status": "running", "stop_reason": None}
-    )
+    _broker_melden(run.id, status="running", stop_reason=None)
     if not _aufgabe_planen(run.id):
         # Keine Anwendung, also niemand, der das Segment ausfuehren koennte. Der
         # Lauf faellt in den Wartezustand zurueck, statt als "laufend" liegen zu
@@ -568,12 +570,116 @@ def lauf_fortsetzen(db: Session, *, run_id: str) -> bool:
         db.commit()
         # Die Meldung oben zuruecknehmen, sonst wartet die Oberflaeche auf eine
         # Fortsetzung, die nie anlaeuft.
-        ai_run_broker.veroeffentlichen(
-            run.id,
-            "run",
-            {"run_id": run.id, "status": "waiting_confirmation",
-             "stop_reason": "no_runtime"},
+        _broker_melden(
+            run.id, status="waiting_confirmation", stop_reason="no_runtime"
         )
+        return False
+    return True
+
+
+def _broker_melden(run_id: str, *, status: str, stop_reason: str | None) -> None:
+    """Kanal eroeffnen und den Laufzustand melden — aus jedem Thread heraus.
+
+    Der Vermittler vertraegt nur **einen** Schreiber, und der sitzt auf der
+    Ereignisschleife (`ai_run_broker.veroeffentlichen`). `lauf_fortsetzen`
+    laeuft aber im Threadpool eines synchronen Bestaetigungs-Endpunkts; ein
+    direkter Aufruf von dort mutierte `_KANAELE` und die Warteschlangen,
+    waehrend die Schleife dieselben Strukturen bedient — im Rennen gingen
+    Wakeups des `run: running`-Ereignisses verloren. Derselbe Handschlag wie
+    in `aufgabe_abbrechen`: auf der Schleife direkt, sonst per
+    ``call_soon_threadsafe``. Die Reihenfolge bleibt gewahrt — Rueckrufe
+    laufen in Einreihungsreihenfolge, also meldet „running" vor allem, was
+    die geplante Aufgabe danach veroeffentlicht.
+    """
+    from services import ai_run_broker
+
+    def _senden() -> None:
+        ai_run_broker.eroeffnen(run_id)
+        ai_run_broker.veroeffentlichen(
+            run_id, "run",
+            {"run_id": run_id, "status": status, "stop_reason": stop_reason},
+        )
+
+    schleife = _SCHLEIFE
+    try:
+        laufende_schleife = asyncio.get_running_loop()
+    except RuntimeError:
+        laufende_schleife = None
+    if schleife is None or laufende_schleife is schleife:
+        _senden()
+    else:
+        schleife.call_soon_threadsafe(_senden)
+
+
+# ── Unbeaufsichtigter Laufstart ──────────────────────────────────────────
+#
+# Guardian-Heilung und faellige Auftraege bauen denselben Laufstart nach, den
+# sonst der Streamendpunkt fuehrt. Ein gemeinsames Geruest haben die beiden
+# bewusst nicht (siehe `aufgabenlauf_starten`) — hier wohnen nur die zwei
+# Segmente, die in beiden Aufrufern woertlich gleich waren: der Vorflug vor
+# `lauf_beginnen` und der Anlauf-Schwanz danach.
+
+
+@dataclass(frozen=True)
+class Vorflug:
+    """Was `lauf_beginnen` vom Anbieter wissen muss — vorab ermittelt."""
+
+    anbieter: AiProvider
+    denken: bool
+    stufe: str | None
+    fenster: Fenster
+
+
+async def vorflug(
+    client: httpx.AsyncClient, db: Session, user: User
+) -> tuple[Vorflug | None, AiProvider | None]:
+    """Der Vorflug eines unbeaufsichtigten Laufs: Anbieter, Denkstufe, Fenster.
+
+    ``None`` als erster Wert heisst woertlich: es wurde nichts angelegt und
+    nichts verbraucht. Darauf verlassen sich die Aufrufer — die Reparatur bucht
+    ihren Versuchszaehler nur dann zurueck.
+
+    Geloggt wird hier nichts: die Aufrufer nennen in ihren Zeilen den eigenen
+    Anlass (Guardian-Heilung vs. Aufgabenlauf) und unterscheiden den Grund. Der
+    zweite Wert traegt dafuer den gefundenen Anbieter mit, denn die Zeile
+    "ohne API-Schluessel" braucht dessen Kennung:
+
+    * ``(None, None)``        — kein Anbieter eingestellt.
+    * ``(None, anbieter)``    — Anbieter da, aber ohne Betreiber-Schluessel.
+    * ``(vorflug, anbieter)`` — vollstaendig, der Lauf kann beginnen.
+    """
+    # Spaete Imports: die drei Dienste haengen ihrerseits an halben Diensten
+    # dieses Pakets — ein harter Import hier waere der naechste Importzyklus.
+    from services import ai_context_window, ai_provider_service, ai_reasoning
+
+    anbieter = ai_provider_service.anbieter_ohne_auswahl(db, user)
+    if anbieter is None:
+        return None, None
+    if anbieter.requires_api_key and not anbieter.operator_api_key_encrypted:
+        return None, anbieter
+
+    denken, stufe = await ai_reasoning.vorgabe(
+        client, db, user=user, provider=anbieter, aktiv=False, wunsch=None
+    )
+    fenster = await ai_context_window.ermitteln(client, anbieter)
+    return Vorflug(anbieter=anbieter, denken=denken, stufe=stufe, fenster=fenster), anbieter
+
+
+def anlauf(db: Session, run: AiRun) -> bool:
+    """Der Anlauf-Schwanz: Kanal eroeffnen, Segment planen — oder ehrlich scheitern.
+
+    `lauf_starten` hat — anders als `lauf_fortsetzen` — keinen Rueckfall. Ohne
+    die Korrektur hier stuende der Lauf bis zum naechsten Prozessstart auf
+    'running' und blockierte ueber `aktiver_lauf` jede weitere Heilung und jede
+    weitere Aufgabe dieses Benutzers, weil der Lauf als beschaeftigt gaelte.
+    """
+    from services import ai_run_broker
+
+    ai_run_broker.eroeffnen(run.id)
+    if not lauf_starten(run.id):
+        run.status = "failed"
+        run.stop_reason = "no_runtime"
+        db.commit()
         return False
     return True
 

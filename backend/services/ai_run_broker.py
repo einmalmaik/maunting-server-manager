@@ -216,6 +216,16 @@ class _Kanal:
 
 
 _KANAELE: "OrderedDict[str, _Kanal]" = OrderedDict()
+#: Laeufe, deren **laufender** Kanal der Kanalgrenze geopfert wurde. Ihr Abzug
+#: ist ab da unvollstaendig: der Lauf legt beim naechsten `veroeffentlichen`
+#: einen leeren Kanal an, und `abschnitte()` saehe nur den Rest seit dem
+#: Verwerfen. `_finalize_stream` schriebe diese Restliste als `sections_json`,
+#: und die Oberflaeche zeichnete nach dem Neuladen aus ihr statt aus `content`
+#: — der Anfang der Antwort waere weg, obwohl er daneben steht. Die Marke
+#: laesst `abschnitte()` fuer solche Laeufe leer antworten; leer heisst am
+#: Speicherort "nimm den content". Ein neues Segment desselben Laufs beginnt
+#: bei null und hebt die Marke wieder auf.
+_ABZUG_UNVOLLSTAENDIG: set[str] = set()
 
 
 def _kanal(run_id: str) -> _Kanal:
@@ -254,6 +264,7 @@ def _aufraeumen() -> None:
             # Kommentar darüber verspricht „ohne Live-Bild“, nicht „hängend“.
             beenden(aeltester)
             del _KANAELE[aeltester]
+            _ABZUG_UNVOLLSTAENDIG.add(aeltester)
 
 
 def eroeffnen(run_id: str) -> None:
@@ -305,6 +316,9 @@ def veroeffentlichen(run_id: str, ereignis: str, daten: dict) -> None:
     if ereignis == "segment":
         abzug.abschnitte = []
         abzug.frage = None
+        # Ein neues Segment ist eine neue Nachricht: ab hier ist der Abzug
+        # wieder vollstaendig, auch wenn ein frueherer Kanal geopfert wurde.
+        _ABZUG_UNVOLLSTAENDIG.discard(run_id)
 
     for warteschlange in list(kanal.zuhoerer):
         if warteschlange.qsize() >= MAX_RUECKSTAU:
@@ -341,6 +355,11 @@ def abmelden(run_id: str, warteschlange: asyncio.Queue) -> None:
 
 def beenden(run_id: str) -> None:
     """Meldet: hier kommt nichts mehr. Weckt alle Zuhoerer ein letztes Mal."""
+    # Die Unvollstaendigkeits-Marke endet mit dem Lauf, sonst wuechse die Menge
+    # mit jeder Opferung um eine Kennung, die nie wieder gebraucht wird. Beim
+    # Opfern selbst ist die Reihenfolge in `_aufraeumen` entscheidend: erst
+    # dieses `beenden`, dann die Marke — sie ueberlebt diesen Aufruf also.
+    _ABZUG_UNVOLLSTAENDIG.discard(run_id)
     kanal = _KANAELE.get(run_id)
     if kanal is None:
         return
@@ -366,6 +385,12 @@ def abschnitte(run_id: str) -> list[dict]:
     kanal = _KANAELE.get(run_id)
     if kanal is None:
         return []
+    if run_id in _ABZUG_UNVOLLSTAENDIG:
+        # Der laufende Kanal wurde der Kanalgrenze geopfert; was hier steht,
+        # ist nur der Rest seit dem Verwerfen. Lieber keine Gliederung als
+        # eine, die den Anfang der Antwort verschluckt — leer heisst beim
+        # Speichern "nimm den content".
+        return []
     return [dict(abschnitt) for abschnitt in kanal.abzug.abschnitte]
 
 
@@ -375,4 +400,5 @@ def neues_segment(run_id: str) -> None:
 
 
 def zuruecksetzen_fuer_tests() -> None:
+    _ABZUG_UNVOLLSTAENDIG.clear()
     _KANAELE.clear()

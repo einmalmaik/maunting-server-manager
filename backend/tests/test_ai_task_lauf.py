@@ -373,17 +373,29 @@ async def test_der_faellige_lauf_sieht_kein_skill_verzeichnis(
     run = await ai_task_service.aufgabenlauf_starten(db, aufgabe=aufgabe)
 
     assert run is not None
-    systemnachricht = ai_run_service.zustand_lesen(run)["provider_messages"][0]
-    assert systemnachricht["role"] == "system"
-    assert "Skill-Verzeichnis" not in systemnachricht["content"]
-    assert "read_skill" not in systemnachricht["content"]
+    # Ueber **alle** Nachrichten des Laufs: das Verzeichnis ist keine Zeile im
+    # Systemprompt mehr, sondern eine eigene Datennachricht — es darf also
+    # auch als solche nicht auftauchen.
+    lauf_kontext = "\n".join(
+        nachricht["content"]
+        for nachricht in ai_run_service.zustand_lesen(run)["provider_messages"]
+        if isinstance(nachricht.get("content"), str)
+    )
+    assert "Skill-Verzeichnis" not in lauf_kontext
+    assert "read_skill" not in lauf_kontext
 
-    # Gegenprobe an derselben Unterhaltung: im Chat bleibt das Verzeichnis.
+    # Gegenprobe an derselben Unterhaltung: im Chat bleibt das Verzeichnis —
+    # als eigene Nachricht hinter dem Systemprompt.
     conversation = (
         db.query(AiConversation).filter(AiConversation.user_id == user.id).first()
     )
     assert conversation is not None
-    assert "Skill-Verzeichnis" in build_provider_messages(db, conversation)[0]["content"]
+    chat_kontext = "\n".join(
+        nachricht["content"]
+        for nachricht in build_provider_messages(db, conversation)
+        if isinstance(nachricht.get("content"), str)
+    )
+    assert "Skill-Verzeichnis" in chat_kontext
 
 
 @pytest.mark.asyncio

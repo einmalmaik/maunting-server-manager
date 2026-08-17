@@ -150,6 +150,78 @@ def test_a_parked_provider_cannot_be_reactivated_by_a_mere_checkbox(
     assert provider.enabled is True
 
 
+def test_switching_the_kind_never_carries_the_old_key_along(db: Session) -> None:
+    """Der gespeicherte Schluessel gehoert zum alten Anbieter.
+
+    Ohne diese Regel genuegte ein Dropdown-Wechsel von OpenRouter auf OpenAI,
+    und der naechste Test oder Chat schickte den ``sk-or-…``-Schluessel als
+    ``Authorization: Bearer`` an ``api.openai.com`` — ein Geheimnis an eine
+    Partei, fuer die es nie ausgestellt wurde. Die Praefixpruefung beim
+    Anlegen verhindert genau das; sie darf beim Wechsel nicht wirkungslos sein.
+    """
+    provider = ai_provider_service.create_provider(
+        db, name="Wechselt", provider_kind="openrouter",
+        default_model="anthropic/claude-opus-5", enabled=True,
+        requires_api_key=True, operator_api_key="sk-or-v1-abcdef",
+    )
+    assert provider.operator_api_key_encrypted is not None
+
+    ai_provider_service.update_provider(
+        db, provider, values={"provider_kind": "openai"},
+        operator_api_key=None, clear_operator_api_key=False,
+    )
+    assert provider.provider_kind == "openai"
+    assert provider.operator_api_key_encrypted is None
+    assert provider.operator_api_key_hint is None
+
+    # Ein im selben Aufruf mitgeschickter neuer Schluessel wird regulaer
+    # gespeichert — und gegen den **neuen** Anbieter geprueft.
+    ai_provider_service.update_provider(
+        db, provider,
+        values={"provider_kind": "openrouter"},
+        operator_api_key="sk-or-v1-neu", clear_operator_api_key=False,
+    )
+    assert provider.operator_api_key_hint is not None
+
+    # Derselbe Anbieter noch einmal ist kein Wechsel — der Schluessel bleibt.
+    ai_provider_service.update_provider(
+        db, provider, values={"provider_kind": "openrouter"},
+        operator_api_key=None, clear_operator_api_key=False,
+    )
+    assert provider.operator_api_key_encrypted is not None
+
+
+def test_an_explicit_null_is_an_explanation_not_a_500(db: Session) -> None:
+    """`exclude_unset` laesst ein ausdrueckliches ``null`` durch.
+
+    ``str(None)`` ist die wahre Zeichenkette ``"None"`` — die Leerpruefung
+    schlug nicht an, und zwei Zeilen tiefer endete ``None.strip()`` als
+    ``AttributeError`` im 500. Bei ``enabled`` setzte dasselbe ``null`` eine
+    NOT-NULL-Spalte und endete als ``IntegrityError`` mit der irrefuehrenden
+    Meldung „Provider-Name ist bereits vergeben".
+    """
+    provider = ai_provider_service.create_provider(
+        db, name="Null", provider_kind="openrouter",
+        default_model="anthropic/claude-opus-5", enabled=True,
+        requires_api_key=False, operator_api_key=None,
+    )
+
+    for field in ("name", "default_model"):
+        with pytest.raises(ai_provider_service.AiProviderConfigurationError):
+            ai_provider_service.update_provider(
+                db, provider, values={field: None},
+                operator_api_key=None, clear_operator_api_key=False,
+            )
+
+    # ``null`` bei einer NOT-NULL-Spalte heisst „nichts gesagt", nicht „aus".
+    ai_provider_service.update_provider(
+        db, provider, values={"enabled": None, "requires_api_key": None},
+        operator_api_key=None, clear_operator_api_key=False,
+    )
+    assert provider.enabled is True
+    assert provider.requires_api_key is False
+
+
 def test_the_recommendation_is_a_model_id_and_nothing_else() -> None:
     """Die Empfehlung ist eine Kennung, die der Katalog fuehren kann.
 

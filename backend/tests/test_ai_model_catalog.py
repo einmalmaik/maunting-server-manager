@@ -296,6 +296,43 @@ async def test_the_pause_ends_and_the_reload_button_never_waits_for_it() -> None
 
 
 @pytest.mark.asyncio
+async def test_a_keyless_call_to_a_keyed_catalog_never_even_tries() -> None:
+    """Ohne Schluessel waere der Abruf ein garantiertes 401 — also gibt es keinen.
+
+    Die Sendepfade (`finde` aus Stream, Kontextfenster, Denkstufen) fragen ohne
+    Schluessel. Vor dieser Regel lief ihr Versuch in ein 401, setzte
+    ``fehler_am`` — und der **Schluessel-Weg** der Einstellungsseite lieferte
+    eine Ruhefrist lang die leere Liste aus, obwohl der Schluessel gespeichert
+    war. Die Oberflaeche behauptete dann „erst Schluessel speichern".
+    """
+    abrufe = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal abrufe
+        abrufe += 1
+        assert request.headers.get("Authorization") == "Bearer sk-test"
+        return httpx.Response(200, json={"data": [{"id": "gpt-5.6"}]})
+
+    async with _client(handler) as client:
+        # Ohne Schluessel: keine Anfrage, kein Fehlervermerk — nur der Bestand,
+        # und der ist hier leer.
+        assert await ai_model_catalog.modelle(client, "openai") == []
+        assert abrufe == 0
+        # Der Schluessel-Weg direkt danach ist nicht vergiftet: er ruft ab,
+        # statt eine gespeicherte Absage auszuliefern.
+        modelle = await ai_model_catalog.modelle(
+            client, "openai", schluessel="sk-test"
+        )
+        assert [m.model_id for m in modelle] == ["gpt-5.6"]
+        assert abrufe == 1
+        # Und der schluessellose Aufrufer bekommt danach den Bestand — nicht
+        # nichts, und ohne einen weiteren Abruf anzustossen.
+        bestand = await ai_model_catalog.modelle(client, "openai")
+        assert [m.model_id for m in bestand] == ["gpt-5.6"]
+        assert abrufe == 1
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_model_is_none_rather_than_a_guess() -> None:
     async with _client(lambda _r: httpx.Response(200, json=ANTWORT)) as client:
         assert await ai_model_catalog.finde(client, "openrouter", "gibt/es-nicht") is None

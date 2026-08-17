@@ -190,16 +190,35 @@ def update_provider(
     operator_api_key: str | None,
     clear_operator_api_key: bool,
 ) -> AiProvider:
-    if any(field in values and not str(values[field]).strip() for field in ("name", "default_model")):
+    # Ein ausdrueckliches ``null`` zaehlt hier als leer: `exclude_unset` laesst
+    # es durch, und ``str(None)`` waere die wahre Zeichenkette ``"None"`` — der
+    # Fehler laendete zwei Zeilen tiefer als ``AttributeError`` im 500 statt
+    # hier in der Erklaerung.
+    if any(
+        field in values and not str(values[field] or "").strip()
+        for field in ("name", "default_model")
+    ):
         raise AiProviderConfigurationError("Provider-Name und Modell dürfen nicht leer sein")
-    if "provider_kind" in values:
+    if "provider_kind" in values and values["provider_kind"] != provider.provider_kind:
         provider.provider_kind = _assert_kind(values["provider_kind"])
+        # Der gespeicherte Schluessel gehoert zum **alten** Anbieter. Bliebe er
+        # stehen, ginge er beim naechsten Test oder Chat als ``Authorization``
+        # an den neuen — ein Geheimnis an eine Partei, fuer die es nie
+        # ausgestellt wurde. Die Praefixpruefung beim Anlegen verhindert genau
+        # das; ohne diese Zeile waere sie beim Wechsel wirkungslos. Ein im
+        # selben Aufruf mitgeschickter neuer Schluessel wird unten regulaer
+        # gespeichert.
+        provider.operator_api_key_encrypted = None
+        provider.operator_api_key_hint = None
     _assert_key_passt(provider.provider_kind, operator_api_key)
     for field in ("name", "default_model"):
         if field in values:
             setattr(provider, field, values[field].strip())
     for field in ("enabled", "requires_api_key"):
-        if field in values:
+        # ``null`` heisst bei einer NOT-NULL-Spalte nicht „aus", sondern
+        # „nichts gesagt" — es wird wie ein fehlendes Feld behandelt, statt als
+        # `IntegrityError` mit irrefuehrender 409-Meldung zu enden.
+        if field in values and values[field] is not None:
             setattr(provider, field, values[field])
     # Ein Zugang, dessen Anbieter MSM nicht kennt, darf nicht aktiv werden.
     # Der Fall entsteht durch die Migration 20260811_01: sie parkt alles, was

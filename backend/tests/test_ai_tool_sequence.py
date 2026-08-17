@@ -1150,15 +1150,24 @@ async def test_other_calls_in_the_question_round_are_dropped(
 
 
 @pytest.mark.asyncio
-async def test_a_malformed_question_is_refused(
+async def test_a_malformed_question_costs_the_round_not_the_run(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Zwei gleich beschriftete Knoepfe sind keine Wahl."""
+    """Zwei gleich beschriftete Knoepfe sind keine Wahl — aber kein Laufabbruch.
+
+    Nachsicht am Werkzeugrand: `question_payload` ist bewusst streng, und
+    Formfehler (Optionen als Strings, doppelte Beschriftungen) sind uebliche
+    Modellausgaben. Hier stand die Zusage `AI_TOOL_REJECTED` — die Ausnahme
+    lief ungefangen bis in den aeusseren Fehlerzweig, die Nachricht fiel auf
+    `failed`, und aller bis dahin gestreamter Text war fuer Neuladen und
+    Folgekontext verloren. Jetzt bekommt das Modell die Ablehnung als
+    Werkzeugantwort (`AI_ASK_INVALID`) und darf die Frage neu stellen.
+    """
     server = _server(db, "frage-kaputt")
     _grant(db, regular_user, server=server, server_keys=("server.view",))
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
-    _fake_stream(monkeypatch, [[
+    seen = _fake_stream(monkeypatch, [[
         ProviderToolCall(id="a", name="ask_user", arguments={
             "question": "Welche Version?",
             "options": [{"label": "gleich"}, {"label": "gleich"}],
@@ -1167,7 +1176,18 @@ async def test_a_malformed_question_is_refused(
 
     events = await _collect(db, regular_user, conversation, provider)
 
-    assert "AI_TOOL_REJECTED" in _error_codes(events)
+    # Kein Fehlercode und keine gestellte Frage — der Lauf endet regulaer.
+    assert _error_codes(events) == []
+    assert not any(event.startswith("event: question") for event in events)
+    assert any('"status": "completed"' in event for event in events)
+    # Die Folgerunde traegt die Ablehnung als Werkzeugantwort auf genau die
+    # `tool_call_id` der kaputten Frage.
+    folgerunde = seen[1]
+    antworten = [item for item in folgerunde if item.get("role") == "tool"]
+    assert any(
+        item.get("tool_call_id") == "a" and "AI_ASK_INVALID" in item.get("content", "")
+        for item in antworten
+    )
 
 
 @pytest.mark.asyncio

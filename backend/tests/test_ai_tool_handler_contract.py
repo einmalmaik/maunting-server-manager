@@ -79,10 +79,20 @@ def test_every_write_tool_has_its_own_payload_branch() -> None:
     Ein Vorschlag, der unter dem Namen A die Nutzlast von B traegt, entsteht
     ohne Fehler, sieht in der Karte plausibel aus und tut beim Ausfuehren etwas
     anderes, als sein Name sagt.
+
+    Seit die globalen Schreibwerkzeuge in der Tabelle `_GLOBALE_PAYLOADS`
+    stehen statt in einer elif-Kette, gibt es **zwei** gueltige Orte fuer einen
+    Nutzlastbau: ein Tabelleneintrag oder ein namentlicher Zweig in
+    `create_proposal`. Ein Werkzeug, das an keinem von beiden vorkommt, faellt
+    dort in den Waechterzweig ("Kein Payload-Bau fuer Werkzeug") — dieser Test
+    sorgt dafuer, dass das beim Bauen auffaellt und nicht erst beim Benutzer.
     """
     quelle = inspect.getsource(ai_proposal_service.create_proposal)
     fehlend = sorted(
-        name for name in ai_tool_registry.WRITE_TOOLS if f'"{name}"' not in quelle
+        name
+        for name in ai_tool_registry.WRITE_TOOLS
+        if name not in ai_proposal_service._GLOBALE_PAYLOADS
+        and f'"{name}"' not in quelle
     )
     assert fehlend == []
 
@@ -277,9 +287,19 @@ def test_every_write_tool_has_an_execution_branch() -> None:
     gelesen, den Bestaetigungsdialog weggeklickt und einen Einmal-Token
     verbraucht — und bekommt dann eine Meldung, die nach fehlendem Recht
     aussieht statt nach fehlendem Code.
+
+    Seit die Ausfuehrung in der Tabelle `_AUSFUEHRUNGEN` steht statt in einer
+    elif-Kette, gibt es — wie beim Payload-Test oben — **zwei** gueltige Orte
+    fuer die Verdrahtung: ein Tabelleneintrag oder ein namentlicher Zweig in
+    `execute_proposal`. Ein Werkzeug, das an keinem von beiden vorkommt,
+    faellt dort in den Waechterzweig — dieser Test sorgt dafuer, dass das
+    beim Bauen auffaellt und nicht erst nach der Bestaetigung.
     """
     quelle = inspect.getsource(ai_proposal_service.execute_proposal)
     fehlend = sorted(
-        name for name in ai_tool_registry.WRITE_TOOLS if f'"{name}"' not in quelle
+        name
+        for name in ai_tool_registry.WRITE_TOOLS
+        if name not in ai_proposal_service._AUSFUEHRUNGEN
+        and f'"{name}"' not in quelle
     )
     assert fehlend == []

@@ -253,22 +253,49 @@ def test_die_beiden_heilungswerkzeuge_sind_eingeordnet() -> None:
     diese Einordnung falsch geworden — und dieser Test die Stelle, an der das
     auffaellt.
 
-    Die Rechte sind bewusst schon vorhandene: `server.config.write` ist dasselbe
-    Recht wie am Panel-Knopf, hinter dem dieselben Reparaturfunktionen liegen,
-    `server.files.write` dasselbe wie beim Schreiben derselben Datei. Ein eigens
-    erfundenes Recht haette eine Handlung mit zwei Rechten erzeugt — der Fehler,
-    der bei `propose_server_blueprint_switch` zweimal gemacht wurde.
+    Die Rechte sind bewusst schon vorhandene, und sie spiegeln die Panel-Routen
+    fuer **denselben Vorgang** — nicht ein aehnliches Werkzeug. Hier stand
+    `server.config.write` fuer die Reparatur („dasselbe Recht wie am
+    Panel-Knopf") und `server.files.write` fuer das Loeschen. Beides war
+    nachgeprueft falsch: einen Reparatur-Knopf gibt es im Panel nicht, die
+    einzige Route, die Ports aendert, verlangt `server.network.manage`, der
+    Root-Chown laeuft dort nur innerhalb einer `server.files.write`-Operation —
+    und Loeschen verlangt am Panel `server.files.delete`, nicht das
+    Schreibrecht. Der Chat war damit der Umweg, auf dem ein Benutzer ohne
+    Loesch- bzw. Netzrecht doch loeschte bzw. Firewallregeln umbaute. Die
+    Reparatur haengt deshalb wie der Lebenszyklus am **Vorgang**
+    (`ai_proposal_service._permission_for` am `action`-Argument), nicht an
+    einer Tabellenzeile.
     """
+    from services.ai_proposal_service import _permission_for
+
     reparatur = ai_tool_registry.WERKZEUGE["propose_server_repair"]
     loeschen = ai_tool_registry.WERKZEUGE["propose_file_delete"]
 
     assert reparatur.art == "server_write"
-    assert reparatur.recht == "server.config.write"
+    # Kein Tabellenrecht: die Zuordnung steht am Vorgang. `angebot` nennt beide,
+    # weil eines genuegt, damit das Werkzeug angeboten wird.
+    assert reparatur.recht is None
+    assert reparatur.angebot == ("server.files.write", "server.network.manage")
+    assert _permission_for(
+        "propose_server_repair", {"action": "repair_permissions"}
+    ) == ("server.files.write",)
+    assert _permission_for(
+        "propose_server_repair", {"action": "reallocate_port"}
+    ) == ("server.network.manage",)
+    # Ein unbekannter Vorgang verlangt die Vereinigung beider Rechte — strenger
+    # als jede gueltige Wahl. Kein Recht (die leere Menge) waere hier falsch:
+    # dann braeche die Ausfuehrung schon an der Rechtepruefung ab, statt die
+    # manipulierte Nutzlast als `AI_ACTION_TOOL_NOT_ALLOWED` mit `failed` zu
+    # beenden (siehe `_permission_for`-Docstring).
+    assert _permission_for("propose_server_repair", {"action": "anders"}) == (
+        "server.files.write", "server.network.manage",
+    )
     assert reparatur.recht_global is False
     assert reparatur.immer_bestaetigen is False
 
     assert loeschen.art == "server_write"
-    assert loeschen.recht == "server.files.write"
+    assert loeschen.recht == "server.files.delete"
     assert loeschen.recht_global is False
     assert loeschen.immer_bestaetigen is False
 

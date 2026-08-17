@@ -723,14 +723,17 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
     und bleibt trotzdem eine eigene Funktion: die beiden unterscheiden sich in
     jedem zweiten Schritt — kein Vorfall, keine Notiz, keine Serverbindung,
     dafuer eine Rechtepruefung, die die Aufgabe abschalten kann. Ein
-    gemeinsames Geruest haette sechs Schalter.
+    gemeinsames Geruest haette sechs Schalter. Nur die zwei woertlich
+    identischen Segmente wohnen in `ai_run_service`: der Vorflug
+    (`vorflug` — Anbieter, Denkstufe, Fenster) und der Anlauf-Schwanz
+    (`anlauf` — Kanal eroeffnen, Segment planen, Rueckfall auf 'failed').
+    Das ist die Grenze; alles dazwischen bleibt hier.
 
     ``None`` heisst immer: es wurde nichts angelegt und nichts verbraucht. Ob
     der Termin danach verfaellt oder gleich erneut versucht wird, entscheidet
     der Takt — nicht diese Funktion.
     """
-    from services import ai_chat_service, ai_context_window, ai_provider_service
-    from services import ai_reasoning, ai_run_broker, ai_run_service
+    from services import ai_chat_service, ai_run_service
     from services.ai_stream_service import lauf_beginnen
 
     user = db.get(User, aufgabe.user_id)
@@ -785,29 +788,26 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
         )
         return None
 
-    anbieter = ai_provider_service.anbieter_ohne_auswahl(db, user)
-    if anbieter is None:
-        logger.info("Aufgabenlauf ohne Anbieter (task_id=%s)", aufgabe.id)
+    flug, anbieter = await ai_run_service.vorflug(client, db, user)
+    if flug is None:
+        if anbieter is None:
+            logger.info("Aufgabenlauf ohne Anbieter (task_id=%s)", aufgabe.id)
+        else:
+            logger.info(
+                "Aufgabenlauf ohne API-Schluessel (provider_id=%s)", anbieter.id
+            )
         return None
-    if anbieter.requires_api_key and not anbieter.operator_api_key_encrypted:
-        logger.info("Aufgabenlauf ohne API-Schluessel (provider_id=%s)", anbieter.id)
-        return None
-
-    denken, stufe = await ai_reasoning.vorgabe(
-        client, db, user=user, provider=anbieter, aktiv=False, wunsch=None
-    )
-    fenster = await ai_context_window.ermitteln(client, anbieter)
 
     run, fehler = lauf_beginnen(
         db,
         user=user,
         conversation=conversation,
-        provider=anbieter,
+        provider=flug.anbieter,
         request_id=uuid4(),
         content=_auftragstext(aufgabe),
-        reasoning=denken,
-        reasoning_effort=stufe,
-        context_chars=fenster.zeichen if fenster.bekannt else None,
+        reasoning=flug.denken,
+        reasoning_effort=flug.stufe,
+        context_chars=flug.fenster.zeichen if flug.fenster.bekannt else None,
         # Sonst haengte der faellige Lauf dem Auftrag eine Vorfallsmeldung an
         # und markierte sie dabei als besprochen, obwohl kein Mensch sie gesehen
         # hat. Der Betreiber erfaehrt von der Stoerung dann nie.
@@ -843,15 +843,7 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
     aufgabe.last_run_id = run.id
     db.commit()
 
-    ai_run_broker.eroeffnen(run.id)
-    if not ai_run_service.lauf_starten(run.id):
-        # `lauf_starten` hat — anders als `lauf_fortsetzen` — keinen Rueckfall.
-        # Ohne diese Zeilen stuende der Lauf bis zum naechsten Prozessstart auf
-        # 'running' und blockierte ueber `aktiver_lauf` jede weitere Aufgabe
-        # dieses Benutzers.
-        run.status = "failed"
-        run.stop_reason = "no_runtime"
-        db.commit()
+    if not ai_run_service.anlauf(db, run):
         return None
     return run
 

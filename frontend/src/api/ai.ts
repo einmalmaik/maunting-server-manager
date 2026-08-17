@@ -309,33 +309,42 @@ export interface AiVoiceConfig {
  * Schluessel `ai.actions.confirm.propose_server_delete` — an genau der Stelle,
  * an der stehen muss, was gleich unwiderruflich passiert.
  *
+ * Ein `const`-Array und kein reiner Union-Typ: ein Typ ist zur Laufzeit weg,
+ * gegen ihn kann kein Test pruefen. Diese Liste ist inzwischen dreimal
+ * gedriftet — zuletzt fehlte `propose_guardian_tuning`, davor
+ * `propose_file_delete` und `propose_server_repair` — und jedes Mal fiel es
+ * erst in der Oberflaeche auf. Jetzt gleicht `actionTexts.test.ts` das Array
+ * gegen seine Abschrift der Registry ab, und die vierte Drift bricht einen
+ * Test statt einer Karte.
+ *
  * Wer hier etwas ergaenzt, ergaenzt auch `ai.actions.tools.*` und
  * `ai.actions.confirm.*` in **allen** Sprachdateien und prueft, ob das Werkzeug
  * in `UNUMKEHRBAR` gehoert (AiActionProposalCard).
  */
-export type AiWriteTool =
-  | 'propose_server_lifecycle'
-  | 'propose_backup'
-  | 'propose_backup_restore'
-  | 'propose_config_update'
-  | 'propose_config_patch'
-  | 'propose_mod_install'
-  | 'propose_bind_ip_update'
-  | 'propose_server_create'
-  | 'propose_server_delete'
-  | 'propose_blueprint_change'
-  | 'propose_blueprint_delete'
-  | 'propose_server_blueprint_switch'
-  | 'propose_hoster_integration'
-  | 'propose_hoster_product'
-  | 'propose_ai_tarif_role'
-  | 'propose_task_set'
-  | 'propose_task_delete'
-  // Beide standen nicht in dieser Liste, obwohl es sie im Backend laengst gibt.
-  // Genau der Fehler, vor dem der Kommentar oben warnt — nachgetragen, damit
-  // die Liste wieder das ist, was sie behauptet zu sein.
-  | 'propose_file_delete'
-  | 'propose_server_repair'
+export const SCHREIBWERKZEUGE = [
+  'propose_server_lifecycle',
+  'propose_backup',
+  'propose_backup_restore',
+  'propose_config_update',
+  'propose_config_patch',
+  'propose_mod_install',
+  'propose_bind_ip_update',
+  'propose_server_create',
+  'propose_server_delete',
+  'propose_blueprint_change',
+  'propose_blueprint_delete',
+  'propose_server_blueprint_switch',
+  'propose_hoster_integration',
+  'propose_hoster_product',
+  'propose_ai_tarif_role',
+  'propose_task_set',
+  'propose_task_delete',
+  'propose_server_repair',
+  'propose_guardian_tuning',
+  'propose_file_delete',
+] as const
+
+export type AiWriteTool = (typeof SCHREIBWERKZEUGE)[number]
 
 /**
  * Ein Aktionsvorschlag — genau ein Vertrag für beide Wege.

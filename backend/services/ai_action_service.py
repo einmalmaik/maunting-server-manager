@@ -1154,7 +1154,8 @@ def provider_tool_definitions() -> list[dict]:
         ),
         _server_function(
             "read_ai_action_history",
-            "Liest frueher vorgeschlagene und ausgefuehrte KI-Aktionen dieses Servers.",
+            "Liest die vom aktuellen Benutzer frueher vorgeschlagenen und "
+            "ausgefuehrten KI-Aktionen dieses Servers.",
         ),
         _server_function(
             "read_mod_updates",
@@ -2812,7 +2813,15 @@ def _execute_server_context_tool(
         _require_no_arguments(tool_name, arguments)
         rows = (
             db.query(AiActionProposal)
-            .filter(AiActionProposal.server_id == server.id)
+            .filter(
+                AiActionProposal.server_id == server.id,
+                # Nur die eigenen: das Werkzeug haengt an `server.view`, und
+                # ein Gast auf einem geteilten Server erfuehre sonst, dass ein
+                # anderer Benutzer hier `propose_server_delete` versucht hat
+                # und woran es scheiterte. Der REST-Weg daneben
+                # (`GET /api/ai/conversation/actions`) filtert genauso.
+                AiActionProposal.user_id == user.id,
+            )
             .order_by(AiActionProposal.created_at.desc())
             .limit(MAX_LISTED_ACTIONS)
             .all()

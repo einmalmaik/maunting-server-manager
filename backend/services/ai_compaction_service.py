@@ -60,10 +60,8 @@ from services.ai_provider_service import estimate_cost_microunits, resolve_api_k
 from services.ai_usage_service import (
     AiQuotaExceeded,
     AiUsageConflict,
-    abrechnung,
-    complete_ai_usage,
-    fail_ai_usage,
     reserve_ai_usage,
+    reservierung_abrechnen,
 )
 from services.openai_compatible_adapter import (
     AiProviderRequestError,
@@ -109,6 +107,14 @@ def _summary_prompt(saetze: int) -> str:
         "Behalte: welche Server und Spiele besprochen wurden, welche Probleme "
         "auftraten, welche Ursachen gefunden wurden, welche Aktionen ausgefuehrt "
         "oder abgelehnt wurden, und offene Punkte.\n"
+        # Ohne diesen Satz war die bisherige Zusammenfassung nur Eingabe, nicht
+        # Auftrag: ein Modell, das die Anweisung woertlich nimmt, fasste nur
+        # den neuen Verlauf — und der Name des Benutzers oder eine abgelehnte
+        # Aktion aus der ersten Faltung verschwand endgueltig, weil die
+        # Originalnachrichten hinter `summarized_until` liegen.
+        "Steht eine bisherige Zusammenfassung dabei, arbeite sie vollstaendig "
+        "ein — nichts daraus darf entfallen; widerspricht ihr der neue "
+        "Verlauf, gilt der neue Verlauf.\n"
         "Lass weg: Hoeflichkeitsfloskeln, Wiederholungen, roh zitierte Logzeilen "
         "und Konfigurationsinhalte.\n"
         "Nenne niemals Passwoerter, Schluessel oder Tokens.\n"
@@ -191,7 +197,9 @@ def _pending_messages(db, conversation: AiConversation) -> list[AiMessage]:
     )
     if conversation.summarized_until is not None:
         query = query.filter(AiMessage.created_at > conversation.summarized_until)
-    return query.order_by(AiMessage.created_at.asc()).all()
+    # `id` als zweites Kriterium, wie im GET-Endpunkt (`routers/ai_chat`):
+    # bei gleichem Zeitstempel kippte die Reihenfolge sonst je nach Datenbank.
+    return query.order_by(AiMessage.created_at.asc(), AiMessage.id.asc()).all()
 
 
 def _foldable_window(
@@ -276,6 +284,30 @@ async def compact_conversation(
         # einer Zusammenfassung gelandet zu sein. `window` ist nie leer:
         # `needs_compaction` hat bereits mehr als KEEP_RECENT_MESSAGES
         # Nachrichten gesehen, und die erste kommt immer mit.
+        #
+        # Und sie ist ein Zeitstempel mit striktem `>`-Filter dahinter: teilt
+        # eine **nicht** gefaltete Nachricht denselben Zeitstempel wie das
+        # Fensterende, fiele sie fuer immer heraus — weder Zusammenfassung
+        # noch Historie saehen sie je. Deshalb schrumpft das Fenster in dem
+        # Fall um alle Nachrichten des Grenzzeitstempels (Transkript wird
+        # mitgebaut, sonst stuende Geschrumpftes doppelt: im Text der
+        # Zusammenfassung und ungefaltet im Kontext); sie kommen beim
+        # naechsten Durchlauf dran. Eine **Schleife** und kein einzelner
+        # Blick: das neu gebaute Fenster kann durch die Zeichengrenze wieder
+        # inmitten einer Zeitstempelgruppe enden — derselbe Fehler, eine
+        # Verschachtelung tiefer. Jeder Durchlauf verkuerzt das Fenster um
+        # mindestens eine Zeile, die Schleife endet also. Bleibt nichts
+        # uebrig — alle faltbaren Zeilen in derselben Mikrosekunde, praktisch
+        # nur in Testdaten —, wird ehrlich nicht gefaltet statt still verloren.
+        while True:
+            naechste = rows[len(window)] if len(window) < len(rows) else None
+            if naechste is None or window[-1].created_at != naechste.created_at:
+                break
+            grenzzeit = window[-1].created_at
+            gekuerzt = [row for row in window if row.created_at != grenzzeit]
+            if not gekuerzt:
+                return False
+            window, transcript = _foldable_window(gekuerzt, _quellgrenze(context_chars))
         boundary = window[-1].created_at
         previous = conversation.summary or ""
         api_key = resolve_api_key(db, provider, user.id)
@@ -327,36 +359,25 @@ async def compact_conversation(
     except (AiProviderRequestError, httpx.HTTPError) as exc:
         logger.info("AI-Kompression fehlgeschlagen error=%s", type(exc).__name__)
         with SessionLocal() as db:
-            event = _usage_event(db, request_id)
-            if event is not None and event.status == "reserved":
-                fail_ai_usage(db, event)
-                db.commit()
+            reservierung_abrechnen(
+                db, request_id, usage=usage, estimated_actual_tokens=estimated,
+                token_price_micro_usd_per_million=None, gescheitert=True,
+            )
+            db.commit()
         return False
 
     summary = redact_sensitive_text("".join(summary_parts)).strip()[:summary_grenze]
     with SessionLocal() as db:
-        event = _usage_event(db, request_id)
-        if event is not None and event.status == "reserved":
-            # Dieselbe Abrechnung wie im Chat. Hier stand fest
-            # `actual_cost_microunits=event.reserved_cost_microunits` — die
-            # Verdichtung buchte damit **nie** echte Kosten, sondern immer die
-            # Schaetzung von vor dem Aufruf, selbst wenn der Anbieter den
-            # tatsaechlichen Betrag daneben gemeldet hatte.
-            tokens, kosten, herkunft = abrechnung(
-                usage,
-                reserved_tokens=event.reserved_tokens,
-                estimated_actual_tokens=estimated,
-                token_price_micro_usd_per_million=(
-                    provider.token_price_micro_usd_per_million
-                ),
-            )
-            complete_ai_usage(
-                db, event,
-                actual_tokens=tokens,
-                actual_cost_microunits=kosten,
-                aufschluesselung=usage,
-                cost_source=herkunft,
-            )
+        # Dieselbe Abrechnung wie im Chat und im Mailtext — **eine** Funktion,
+        # keine Abschrift. Hier stand fest
+        # `actual_cost_microunits=event.reserved_cost_microunits` — die
+        # Verdichtung buchte damit **nie** echte Kosten, sondern immer die
+        # Schaetzung von vor dem Aufruf, selbst wenn der Anbieter den
+        # tatsaechlichen Betrag daneben gemeldet hatte.
+        reservierung_abrechnen(
+            db, request_id, usage=usage, estimated_actual_tokens=estimated,
+            token_price_micro_usd_per_million=provider.token_price_micro_usd_per_million,
+        )
         if not summary:
             # Leere Antwort: nichts als zusammengefasst markieren, sonst waeren
             # die Nachrichten weg und nichts an ihrer Stelle.
@@ -374,11 +395,3 @@ async def compact_conversation(
     return True
 
 
-def _usage_event(db, request_id: UUID):
-    from models import AiUsageEvent
-
-    return (
-        db.query(AiUsageEvent)
-        .filter(AiUsageEvent.request_id == str(request_id))
-        .first()
-    )

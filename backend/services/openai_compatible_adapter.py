@@ -11,6 +11,7 @@ from typing import Any, AsyncIterator
 import httpx
 
 from models import AiProvider
+from services import ai_provider_registry
 from services.ai_provider_service import base_url as provider_base_url
 from services.ai_redaction import redact_sensitive_text
 
@@ -401,8 +402,15 @@ async def stream_chat_completion(
     zweite die meisten OpenAI-kompatiblen Server (vLLM, DeepSeek, Ollama), das
     dritte ist der dokumentierte Streamingweg fuer die Modellfamilien, die ihre
     Ueberlegungen nur zusammengefasst herausgeben (siehe
-    `_denktext_aus_details`). Ein Anbieter, der nichts davon kennt, ignoriert das
-    zusaetzliche Feld.
+    `_denktext_aus_details`).
+
+    **Gesendet wird das Feld nur an Anbieter, deren Dialekt es kennt**
+    (``Anbieter.reasoning_feld`` in `ai_provider_registry`). Hier stand „ein
+    Anbieter, der es nicht kennt, ignoriert es" — das stimmt fuer die milden
+    Server, aber nicht fuer OpenAI direkt: dort weist die strenge Validierung
+    unbekannte Top-Level-Felder mit einem 400 ab, und jede Anfrage scheiterte,
+    bevor das Modell sie je sah. Gelesen wird dagegen weiterhin alles, was
+    ankommt — die Lesewege oben haengen nicht am gesendeten Feld.
 
     **Kein Denktext ist kein Fehler.** Ein Modell kann nachdenken, es abrechnen
     und trotzdem nichts davon herausgeben — die OpenAI-Modelle verschluesseln
@@ -411,16 +419,18 @@ async def stream_chat_completion(
     dann trotzdem. Die beiden Faelle sind verschieden und sehen von aussen
     gleich aus.
 
-    **Das Feld geht in beide Richtungen mit, auch bei ``False``.** Vorher wurde
-    es nur bei ``True`` gesendet — bei „aus“ ging gar nichts hinaus, und das ist
-    nicht dasselbe. Die Mehrheit der aktuellen Modelle denkt von sich aus:
-    OpenRouter meldet fuer Claude Opus 5, Sonnet 5 und Gemini 3.5 Flash
-    ``default_enabled: true``, und OpenAI setzt ab GPT-5.5 den Default auf
-    ``medium``. Ohne ausdrueckliches ``enabled: false`` dachte das Modell also
-    weiter und wurde abgerechnet — der Schalter blendete nur die Denkschritte
-    aus. Fuer ein Panel mit Kostenlimits je Rolle ist das die falsche
-    Voreinstellung; ein Kostenschalter darf sich nicht auf Anbieterdefaults
-    verlassen.
+    **Wo das Feld mitgeht, geht es in beide Richtungen mit, auch bei
+    ``False``.** Vorher wurde es nur bei ``True`` gesendet — bei „aus“ ging gar
+    nichts hinaus, und das ist nicht dasselbe. Die Mehrheit der aktuellen
+    Modelle denkt von sich aus: OpenRouter meldet fuer Claude Opus 5, Sonnet 5
+    und Gemini 3.5 Flash ``default_enabled: true``. Ohne ausdrueckliches
+    ``enabled: false`` dachte das Modell also weiter und wurde abgerechnet —
+    der Schalter blendete nur die Denkschritte aus. Fuer ein Panel mit
+    Kostenlimits je Rolle ist das die falsche Voreinstellung; ein
+    Kostenschalter darf sich nicht auf Anbieterdefaults verlassen. Bei
+    Anbietern ohne das Feld bleibt genau dieses Restrisiko bestehen — dort
+    kann MSM das Denken schlicht nicht abschalten, und ein Feld zu senden, das
+    die Anfrage toetet, schaltet es auch nicht ab.
 
     ``cache_marke`` laesst den Anbieter den Prompt zwischenspeichern. Gesendet
     wird das **oberste** ``cache_control`` neben ``model`` und ``messages``, nicht
@@ -493,20 +503,21 @@ async def stream_chat_completion(
         # Erzwungen wird nur dort, wo der Aufruf gar keine Antwort in Prosa
         # will, sondern ein ausgefuelltes Formular — siehe `ai_mail_text`.
         request_body["tool_choice"] = tool_choice or "auto"
-    # Immer setzen, nie weglassen: "nichts senden" heisst beim Anbieter nicht
+    # Nur an Anbieter, deren Dialekt das Feld kennt (siehe Docstring) — und
+    # dort immer, nie weglassen: "nichts senden" heisst beim Anbieter nicht
     # "aus", sondern "nimm deinen Default" — und der ist bei den meisten
     # aktuellen Modellen an.
-    denken: dict[str, Any] = {"enabled": bool(reasoning)}
-    # Die Stufe nur mitgeben, wenn auch gedacht werden soll. Ein `effort` neben
-    # `enabled: false` sind zwei widerspruechliche Angaben in einer Anfrage —
-    # welche gewinnt, entscheidet dann der Anbieter und nicht MSM.
-    if reasoning and reasoning_effort:
-        denken["effort"] = reasoning_effort
-    request_body["reasoning"] = denken
+    if ai_provider_registry.anbieter(provider.provider_kind).reasoning_feld:
+        denken: dict[str, Any] = {"enabled": bool(reasoning)}
+        # Die Stufe nur mitgeben, wenn auch gedacht werden soll. Ein `effort`
+        # neben `enabled: false` sind zwei widerspruechliche Angaben in einer
+        # Anfrage — welche gewinnt, entscheidet dann der Anbieter und nicht MSM.
+        if reasoning and reasoning_effort:
+            denken["effort"] = reasoning_effort
+        request_body["reasoning"] = denken
     if cache_marke:
         request_body["cache_control"] = {"type": "ephemeral"}
     target = httpx.URL(provider_base_url(provider).rstrip("/") + "/chat/completions")
-    extensions: dict[str, Any] = {}
     deadline = time.monotonic() + MAX_STREAM_SECONDS
     frames = 0
     try:
@@ -515,7 +526,6 @@ async def stream_chat_completion(
             target,
             headers=headers,
             json=request_body,
-            extensions=extensions,
         ) as response:
             if response.status_code != 200:
                 detail = await _error_detail(response)

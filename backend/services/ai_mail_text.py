@@ -55,10 +55,8 @@ from services.ai_redaction import redact_sensitive_text
 from services.ai_usage_service import (
     AiQuotaExceeded,
     AiUsageConflict,
-    abrechnung,
-    complete_ai_usage,
-    fail_ai_usage,
     reserve_ai_usage,
+    reservierung_abrechnen,
 )
 from services.openai_compatible_adapter import (
     AiProviderRequestError,
@@ -322,16 +320,6 @@ def _vorbereiten(
     return provider, api_key, messages, request_id, geschaetzt
 
 
-def _usage_event(db, request_id: UUID):
-    from models import AiUsageEvent
-
-    return (
-        db.query(AiUsageEvent)
-        .filter(AiUsageEvent.request_id == str(request_id))
-        .first()
-    )
-
-
 def _abrechnen(
     request_id: UUID, provider: AiProvider, usage: StreamUsage, geschaetzt: int,
     *, gescheitert: bool,
@@ -341,29 +329,15 @@ def _abrechnen(
     Ein abgebrochener Providerruf kann trotzdem Tokens gekostet haben. Die
     Reservierung offen stehen zu lassen waere schlimmer als beides: sie zaehlt
     dann dauerhaft gegen das Kontingent des Benutzers, ohne je abzulaufen.
+
+    Der Dreischritt selbst liegt in `ai_usage_service.reservierung_abrechnen`
+    — dieselbe Funktion wie in der Verdichtung, keine Abschrift.
     """
     with SessionLocal() as db:
-        ereignis = _usage_event(db, request_id)
-        if ereignis is None or ereignis.status != "reserved":
-            return
-        if gescheitert:
-            fail_ai_usage(db, ereignis)
-            db.commit()
-            return
-        tokens, kosten, herkunft = abrechnung(
-            usage,
-            reserved_tokens=ereignis.reserved_tokens,
-            estimated_actual_tokens=geschaetzt,
-            token_price_micro_usd_per_million=(
-                provider.token_price_micro_usd_per_million
-            ),
-        )
-        complete_ai_usage(
-            db, ereignis,
-            actual_tokens=tokens,
-            actual_cost_microunits=kosten,
-            aufschluesselung=usage,
-            cost_source=herkunft,
+        reservierung_abrechnen(
+            db, request_id, usage=usage, estimated_actual_tokens=geschaetzt,
+            token_price_micro_usd_per_million=provider.token_price_micro_usd_per_million,
+            gescheitert=gescheitert,
         )
         db.commit()
 

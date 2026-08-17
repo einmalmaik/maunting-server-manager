@@ -653,6 +653,7 @@
         "microphone": "Kein Zugriff auf das Mikrofon. Erlaube ihn in den Browsereinstellungen.",
         "audio": "Der Browser konnte die Tonverbindung nicht aufbauen. Einzelheiten stehen in der Entwicklerkonsole.",
         "provider": "Das hat gerade nicht geklappt.",
+        "quota": "Kontingent erschöpft — das Gespräch pausiert. Warte kurz oder erhöhe dein Limit.",
         "connection": "Verbindung zum Sprachmodus verloren."
       },
       "toVoiceMode": "Realtime-Modus",
@@ -1661,7 +1662,7 @@
     },
     "server_config_write": {
       "title": "Einstellungen anpassen",
-      "desc": "Erlaubt das Ändern von Servername, Auto-Restart und Startparametern."
+      "desc": "Erlaubt das Ändern von Servername, Auto-Restart und Startparametern — und auch den Blueprint-/Spielwechsel, der den Server neu installiert: Welt, Configs und Mods werden dabei ersetzt, ein Backup wird vorher erzwungen."
     },
     "server_network_manage": {
       "title": "Netzwerk bearbeiten",

@@ -167,14 +167,30 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.fehler).toBe('ai.voice.errors.provider')
   })
 
+  it('meldet ein erschoepftes Kontingent mit eigener Meldung, die „bereit" ueberlebt', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'stoerung', grund: 'kontingent' }))
+
+    // „Warte kurz" ist eine andere Auskunft als „etwas ist kaputt" — der Grund
+    // waehlt den Schluessel, wird aber nie selbst als Schluessel durchgereicht.
+    expect(haken.result.current.fehler).toBe('ai.voice.errors.quota')
+
+    // Das Backend meldet direkt nach der Stoerung `zustand=bereit`. Die
+    // Auskunft muss das ueberleben, sonst liest sie niemand.
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'bereit' }))
+    expect(haken.result.current.fehler).toBe('ai.voice.errors.quota')
+  })
+
   it('nimmt die Stoerungsmeldung zurueck, sobald die Leitung wieder traegt', async () => {
     const haken = await sitzung()
 
     // Anlass: die Ueberschrift stand dauerhaft auf „Sprachverbindung verloren",
     // obwohl Ton und Gespraech laengst weiterliefen. Ein einziger unkritischer
     // Anbieterfehler setzte `fehler`, und nichts nahm ihn je zurueck. Wer hoert,
-    // dass es weitergeht, darf oben nicht das Gegenteil lesen.
-    for (const zustand of ['bereit', 'hoert', 'spricht'] as const) {
+    // dass es weitergeht, darf oben nicht das Gegenteil lesen. `bereit` steht
+    // bewusst nicht in der Liste — siehe den Test darunter.
+    for (const zustand of ['hoert', 'spricht'] as const) {
       act(() => leitung().simulateMessage({ art: 'stoerung', code: 'irgendwas' }))
       expect(haken.result.current.fehler).toBe('ai.voice.errors.provider')
 
@@ -186,6 +202,23 @@ describe('useSprachsitzung', () => {
     // nach dem Neuverbinden gilt der Fehler von vorhin nicht mehr.
     act(() => leitung().simulateMessage({ art: 'stoerung', code: 'irgendwas' }))
     act(() => leitung().simulateMessage({ art: 'bereit' }))
+    expect(haken.result.current.fehler).toBeNull()
+  })
+
+  it('laesst die Meldung stehen, wenn nach der Stoerung nur „bereit" kommt', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'stoerung', code: 'irgendwas' }))
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'bereit' }))
+
+    // Das Backend sendet in jedem Fehlerpfad erst die Stoerung und unmittelbar
+    // danach `zustand=bereit`. Raeumte `bereit` die Meldung weg, loeschte jede
+    // Stoerung sich selbst, bevor ein Mensch sie lesen kann — genau so blieb
+    // jeder Anbieterfehler unsichtbar.
+    expect(haken.result.current.fehler).toBe('ai.voice.errors.provider')
+
+    // Erst echtes Weiterleben nimmt sie zurueck.
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'hoert' }))
     expect(haken.result.current.fehler).toBeNull()
   })
 
@@ -365,6 +398,27 @@ describe('useSprachsitzung', () => {
     })
 
     expect(sockets.instances).toHaveLength(1)
+    expect(haken.result.current.zustand).toBe('aus')
+  })
+
+  it('schliesst das Mikrofon, wenn die Leitung waehrend der Freigabe abreisst', async () => {
+    const haken = renderHook(() => useSprachsitzung())
+    act(() => haken.result.current.starten())
+
+    act(() => {
+      leitung().simulateOpen()
+      // Der Abriss kommt, waehrend getUserMedia noch auf die Freigabe wartet —
+      // `gewollt` bleibt dabei wahr, denn beendet hat niemand. Vorher lief das
+      // Mikrofon dann bei Zustand „aus" weiter, und der naechste starten()
+      // ueberschrieb den Stream kommentarlos.
+      leitung().simulateClose(1006)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(audio.letzterStrom()?.getTracks()[0].gestoppt).toBe(true)
     expect(haken.result.current.zustand).toBe('aus')
   })
 

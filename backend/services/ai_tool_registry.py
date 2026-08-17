@@ -374,12 +374,22 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Sollzustand her, den MSM ohnehin kennt. Keine loescht Spieldaten — das
     # Serververzeichnis ist ein Bind-Mount und ueberlebt den Container.
     #
-    # `server.config.write` ist dasselbe Recht wie am Panel-Knopf, hinter dem
-    # dieselben Funktionen liegen. Ein eigenes Recht zu erfinden hiesse, eine
-    # Handlung mit zwei Rechten zu haben — der Fehler, der bei
-    # `propose_server_blueprint_switch` zweimal gemacht und dokumentiert wurde.
+    # Traegt wie `propose_server_lifecycle` **kein** `recht`: es haengt vom
+    # Vorgang ab, und die Zuordnung steht als ausdrueckliche Ausnahme in
+    # `ai_proposal_service._permission_for`. Hier stand `server.config.write`
+    # mit der Begruendung, das sei „dasselbe Recht wie am Panel-Knopf, hinter
+    # dem dieselben Funktionen liegen" — diesen Knopf gibt es nicht:
+    # `reassign_conflicting_ports` hat ausser der KI keinen Aufrufer, und die
+    # einzige Panel-Route, die Ports aendert (`PATCH /api/servers/{id}`),
+    # verlangt `server.network.manage`; den Root-Chown loest das Panel nur
+    # innerhalb einer `server.files.write`-Operation aus (`routers/files.py`).
+    # Ein Benutzer mit blossem `server.config.write` („Servername, Auto-Restart,
+    # Startparameter") konnte hier also Firewallregeln umbauen lassen.
+    # `angebot` zaehlt beide auf, weil eines genuegt; welches Recht der einzelne
+    # Aufruf braucht, entscheidet `_permission_for` am `action`-Argument.
     "propose_server_repair": Werkzeug(
-        "server_write", recht="server.config.write"
+        "server_write",
+        angebot=("server.files.write", "server.network.manage"),
     ),
     # Guardian **fuer diesen einen Server** anders einstellen.
     #
@@ -439,8 +449,13 @@ WERKZEUGE: dict[str, Werkzeug] = {
     #    und alles ueber 512 KiB. Zuvor gab `snapshot` dort stillschweigend
     #    `False` zurueck, der Wert wurde verworfen, und eine zwei Megabyte grosse
     #    Regionsdatei verschwand ohne jede Spur.
+    # `server.files.delete`, nicht `server.files.write`: das Panel verlangt
+    # fuer denselben Vorgang (`DELETE /api/servers/{id}/delete`) ausdruecklich
+    # das Loeschrecht, und die Rechtebeschreibung von `server_files_write`
+    # nennt Loeschen nicht. Mit `write` hier waere der Chat der Umweg, auf dem
+    # ein Benutzer ohne Loeschrecht doch loescht — eine Handlung, zwei Rechte.
     "propose_file_delete": Werkzeug(
-        "server_write", recht="server.files.write"
+        "server_write", recht="server.files.delete"
     ),
 
     # ── Shop-Anbindung einrichten ─────────────────────────────────────

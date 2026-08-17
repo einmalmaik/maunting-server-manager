@@ -152,6 +152,14 @@ class Anbieter:
     #: Beides ist Standard, nur nicht derselbe, und die falsche Form endet in
     #: einem ``400``, das wie ein kaputter Ton aussieht und keiner ist.
     gehoer_form: str = "json"
+    #: Ob dieser Anbieter das ``reasoning``-Objekt in ``/chat/completions``
+    #: versteht. Es ist eine OpenRouter-Erweiterung des Protokolls, kein Teil
+    #: davon: OpenAI weist unbekannte Top-Level-Felder mit einem 400 ab — jede
+    #: Anfrage scheiterte dort, bevor das Modell sie je sah. Das ist eine
+    #: Eigenschaft des **Dialekts**, nicht eines Modells, deshalb steht sie hier
+    #: und nicht im Katalog; welche Stufen ein Modell kennt, sagt weiterhin nur
+    #: der Katalog.
+    reasoning_feld: bool = False
 
 
 ANBIETER: dict[str, Anbieter] = {
@@ -174,6 +182,8 @@ ANBIETER: dict[str, Anbieter] = {
         # weiter und hoert nicht mehr. Siehe `ai_stt_chat`.
         gehoer_wege=("endpunkt", "chat"),
         gehoer_form="json",
+        # OpenRouter hat das Feld erfunden; nur hier geht es mit.
+        reasoning_feld=True,
     ),
     # OpenAI direkt, ohne Vermittler. Der Eintrag stand hier schon einmal und
     # ist am 2026-08-16 geflogen — damals allerdings als **Realtime**-Zugang mit

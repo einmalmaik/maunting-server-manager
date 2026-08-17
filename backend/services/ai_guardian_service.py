@@ -68,8 +68,12 @@ from models import (
     Server,
     User,
 )
-from services import ai_chat_service, ai_context_window, ai_provider_service
-from services import ai_reasoning, ai_run_service
+from services import ai_chat_service, ai_run_service
+# Seit der Vorflug (Anbieter, Denkstufe, Fenster) in `ai_run_service.vorflug`
+# wohnt, fragt dieses Modul die beiden nicht mehr selbst — importiert bleiben
+# sie trotzdem: die Testsuite ersetzt die Katalogabfragen ueber genau diese
+# Namen (`patch.object(ai_guardian_service.ai_reasoning, "vorgabe", ...)`).
+from services import ai_context_window, ai_reasoning  # noqa: F401
 from services import permission_service
 from services.ai_autonomy_service import resolve_grant
 from services.ai_redaction import redact_sensitive_text
@@ -504,7 +508,6 @@ async def heilungslauf_starten(
     ``None`` heisst immer: es wurde nichts angelegt und nichts verbraucht.
     """
     from services.ai_stream_service import lauf_beginnen
-    from services import ai_run_broker
 
     client = ai_run_service.http_client()
     if client is None:
@@ -537,29 +540,26 @@ async def heilungslauf_starten(
         )
         return None
 
-    anbieter = ai_provider_service.anbieter_ohne_auswahl(db, user)
-    if anbieter is None:
-        logger.info("Guardian-Heilung ohne Anbieter (user_id=%s)", user.id)
+    flug, anbieter = await ai_run_service.vorflug(client, db, user)
+    if flug is None:
+        if anbieter is None:
+            logger.info("Guardian-Heilung ohne Anbieter (user_id=%s)", user.id)
+        else:
+            logger.info(
+                "Guardian-Heilung ohne API-Schluessel (provider_id=%s)", anbieter.id
+            )
         return None
-    if anbieter.requires_api_key and not anbieter.operator_api_key_encrypted:
-        logger.info("Guardian-Heilung ohne API-Schluessel (provider_id=%s)", anbieter.id)
-        return None
-
-    denken, stufe = await ai_reasoning.vorgabe(
-        client, db, user=user, provider=anbieter, aktiv=False, wunsch=None
-    )
-    fenster = await ai_context_window.ermitteln(client, anbieter)
 
     run, fehler = lauf_beginnen(
         db,
         user=user,
         conversation=conversation,
-        provider=anbieter,
+        provider=flug.anbieter,
         request_id=uuid4(),
         content=_auftragstext(server, vorfall, auftrag),
-        reasoning=denken,
-        reasoning_effort=stufe,
-        context_chars=fenster.zeichen if fenster.bekannt else None,
+        reasoning=flug.denken,
+        reasoning_effort=flug.stufe,
+        context_chars=flug.fenster.zeichen if flug.fenster.bekannt else None,
         # Sonst berichtete die KI sich selbst von dem Vorfall, an dem sie
         # gerade arbeitet — und markierte ihn dabei als besprochen, obwohl ihn
         # kein Mensch gesehen hat.
@@ -665,15 +665,7 @@ async def heilungslauf_starten(
     ai_run_service.zustand_schreiben(run, zustand)
     db.commit()
 
-    ai_run_broker.eroeffnen(run.id)
-    if not ai_run_service.lauf_starten(run.id):
-        # `lauf_starten` hat — anders als `lauf_fortsetzen` — keinen Rueckfall.
-        # Ohne diese Zeile stuende der Lauf bis zum naechsten Prozessstart auf
-        # 'running' und blockierte jede weitere Heilung dieses Benutzers, weil
-        # `aktiver_lauf` ihn fuer beschaeftigt hielte.
-        run.status = "failed"
-        run.stop_reason = "no_runtime"
-        db.commit()
+    if not ai_run_service.anlauf(db, run):
         return None
     return run
 

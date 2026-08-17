@@ -664,7 +664,7 @@ def _werkzeug_ausfuehren(user_id: int, call) -> tuple[object, str | None]:
     return _ergebnis_schwaerzen(wert, freitext=call.name in _FREITEXT_WERKZEUGE), None
 
 
-def _aufrufnachricht(calls) -> dict:
+def _aufrufnachricht(calls, text: str | None = None) -> dict:
     """Der Assistentenzug, der die Werkzeugaufrufe trägt.
 
     Reine Datenform gegenüber dem Anbieter, keine Logik. Sie stand dreimal
@@ -673,10 +673,17 @@ def _aufrufnachricht(calls) -> dict:
     Anpassung des Formats musste an drei Orten gleich landen; bleibt eine
     zurück, weist der Anbieter genau die Runde ab, in der ein Schreibaufruf
     beantwortet wird.
+
+    ``text`` ist das, was das Modell in derselben Anbieterantwort **neben**
+    den Aufrufen gesagt hat („Ich schaue mir erst die Logs an …"). Hier stand
+    fest ``content: None`` — der Text erreichte den Benutzer, aber nie wieder
+    das Modell: in der Folgerunde kannte es seine eigenen Ansagen, Zwischen-
+    schlüsse und Zusagen nicht und wiederholte oder widersprach ihnen. Das
+    Format erlaubt Text neben ``tool_calls`` ausdrücklich.
     """
     return {
         "role": "assistant",
-        "content": None,
+        "content": text or None,
         "tool_calls": [
             {
                 "id": call.id,
@@ -697,6 +704,7 @@ async def _tool_followup_messages(
     guardian: GuardianKontext | None = None,
     aufgabe: AufgabenKontext | None = None,
     anlagenwissen_noetig: bool = True,
+    rundentext: str | None = None,
 ) -> tuple[list[dict], list[dict], dict | None]:
     """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
 
@@ -826,7 +834,9 @@ async def _tool_followup_messages(
         if get_owned_conversation(db, conversation_id, user) is None:
             raise AiActionValidationError("Unterhaltung ist nicht mehr verfuegbar")
 
-    assistant_call = _aufrufnachricht([*tool_calls, *(item[0] for item in deferred)])
+    assistant_call = _aufrufnachricht(
+        [*tool_calls, *(item[0] for item in deferred)], rundentext
+    )
 
     # ── Ausfuehren ───────────────────────────────────────────────────────
     #
@@ -1394,7 +1404,7 @@ def _freigabe_per_mail_erbeten(run_id: str, proposal_ids: list[str]) -> bool:
         return False
 
 
-def _ask_refusal_messages(tool_calls) -> list[dict]:
+def _ask_refusal_messages(tool_calls, rundentext: str | None = None) -> list[dict]:
     """Die Antwort auf eine Rueckfrage, die in einer Heilung niemand hoert.
 
     Verworfen wird die **ganze** Runde und nicht nur der `ask`-Aufruf. Das
@@ -1404,7 +1414,7 @@ def _ask_refusal_messages(tool_calls) -> list[dict]:
     deren Plan auf einer Rueckfrage aufbaut, ist als Ganzes hinfaellig — das
     Modell soll sie neu fassen, nicht die Haelfte davon weiterverwenden.
     """
-    assistant_call = _aufrufnachricht(tool_calls)
+    assistant_call = _aufrufnachricht(tool_calls, rundentext)
     hinweis = (
         "In einer Guardian-Heilung sitzt niemand am Panel; Rueckfragen sind "
         "nicht moeglich. Diese Runde wurde deshalb vollstaendig verworfen. "
@@ -1426,8 +1436,46 @@ def _ask_refusal_messages(tool_calls) -> list[dict]:
     return nachrichten
 
 
+def _ask_formfehler_messages(
+    tool_calls, grund: str, rundentext: str | None = None
+) -> list[dict]:
+    """Die Antwort auf eine Rueckfrage, deren Argumente die Pruefung reissen.
+
+    Nachsicht am Werkzeugrand: ein Formfehler kostet eine Runde, nie die
+    Antwort. `question_payload` ist bewusst streng (Optionen als Strings statt
+    ``{label,...}``-Objekte sind eine sehr uebliche Modellausgabe) — lief die
+    Ausnahme aber ungefangen bis in den aeusseren Fehlerzweig, endete der ganze
+    Lauf als ``AI_TOOL_REJECTED``, und die Nachricht fiel auf ``failed``: aller
+    bis dahin gestreamter Text war fuer Neuladen **und** Folgekontext verloren.
+    Fuer Schreib- und Lesewerkzeuge ist genau dieses Muster laengst repariert;
+    diese Funktion schliesst die verbliebene Luecke am Fragepfad.
+
+    Wie bei `_ask_refusal_messages` wird die **ganze** Runde beantwortet: das
+    Protokoll verlangt zu jeder `tool_call_id` genau eine Antwort.
+    """
+    assistant_call = _aufrufnachricht(tool_calls, rundentext)
+    hinweis = (
+        f"Die Rueckfrage wurde nicht gestellt: {grund}. "
+        "Stelle sie erneut — `question` als Text, `options` als Liste von "
+        "zwei bis vier Objekten mit `label` (und optional `hint`)."
+    )
+    nachrichten: list[dict] = [assistant_call]
+    for call in tool_calls:
+        nachrichten.append({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": json.dumps(
+                {"error": "AI_ASK_INVALID", "message": hinweis},
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+        })
+    return nachrichten
+
+
 def _write_followup_messages(
-    *, conversation_id: str, tool_calls, proposals: list[dict], run_id: str | None = None
+    *, conversation_id: str, tool_calls, proposals: list[dict],
+    run_id: str | None = None, rundentext: str | None = None,
 ) -> list[dict]:
     """Gibt dem Modell zurueck, was aus seinen Schreib-Aufrufen geworden ist.
 
@@ -1456,7 +1504,7 @@ def _write_followup_messages(
             **({"error": proposal["error"]} if proposal.get("error") else {}),
         })
 
-    assistant_call = _aufrufnachricht(tool_calls)
+    assistant_call = _aufrufnachricht(tool_calls, rundentext)
     messages: list[dict] = [assistant_call]
     for call in tool_calls:
         outcomes = outcome_by_tool.get(call.name, [])
@@ -1917,13 +1965,81 @@ def _werkzeug_signatur(name: str, argumente: dict) -> str:
     return name + "|" + json.dumps(argumente, ensure_ascii=True, sort_keys=True)
 
 
-async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = None) -> None:
-    """Fuehrt einen Lauf aus, bis er fertig ist, fragt oder auf einen Menschen wartet.
+# ── Die Phasen eines Segments ─────────────────────────────────────────────
+#
+# `segment_ausfuehren` war einmal eine einzige Funktion von gut 900 Zeilen.
+# Die Phasen darin sind jetzt benannte Helfer; die **Schleife selbst und jede
+# continue/break/return-Entscheidung bleiben im Orchestrator**, denn genau
+# diese Kanten tragen die Semantik (Rundenzaehler, Budget, stop_reason). Ein
+# Helfer sagt per Ergebnisobjekt, was er festgestellt hat — uebersetzt wird
+# das eine Ebene hoeher, an einer Stelle.
+#
+# Die Schnittstellen sind bewusst benannt wie die Locals des Orchestrators:
+# Listen und dicts (chunks, thoughts, provider_messages, zustand, signaturen)
+# werden **in place** veraendert und niemals neu gebunden — nur der
+# Orchestrator selbst bindet `provider_messages` neu (Budget-Kuerzung) und
+# synct dann sofort den Zustand. Skalare (denknaht, Flags) reisen als
+# Rueckgabewerte.
 
-    Das ist der frueher `stream_conversation_reply` genannte Ablauf — mit dem
-    einen Unterschied, der alles aendert: er haengt an keinem Request mehr.
-    Ergebnisse gehen an den Vermittler (``ai_run_broker``), nicht an einen
-    Generator. Wer zusieht, ist dem Lauf gleichgueltig.
+
+@dataclass(frozen=True)
+class _Anlauf:
+    """Alles, was ein Segment nach dem Anlauf in der Hand haelt."""
+
+    vorbereitung: "_Vorbereitung"
+    client: httpx.AsyncClient
+    zustand: dict
+    provider_messages: list[dict]
+    conversation_id: str
+    user_id: int
+    message_id: str
+    guardian: "GuardianKontext | None"
+    aufgabe: "AufgabenKontext | None"
+    unbeaufsichtigt: bool
+
+
+@dataclass(frozen=True)
+class _FragenErgebnis:
+    """Was aus einem `ask_user`-Aufruf wurde.
+
+    ``signal`` ist "frage" (Segment endet, Mensch ist dran) oder "weiter"
+    (Runde verworfen — abgewiesen oder Formfehler — und die naechste beginnt).
+    Die Flags gelten nur bei "weiter" und sind dann die Werte, die der
+    Orchestrator uebernimmt.
+    """
+
+    signal: str
+    frage: dict | None = None
+    budget_erschoepft: bool = False
+    letzte_runde: bool = False
+
+
+@dataclass(frozen=True)
+class _SchreibrundenErgebnis:
+    """Wie eine reine Schreibrunde ausging.
+
+    ``abgeloest`` beendet das Segment ohne jede weitere Wirkung; alle anderen
+    Kombinationen heissen "naechste Runde beginnt", mit genau den Flags, die
+    der jeweilige Ausgang im alten Fliesstext setzte. ``denknaht`` traegt den
+    bestellten Absatz fuer den ersten Gedanken der Folgerunde zurueck.
+    """
+
+    denknaht: str
+    abgeloest: bool = False
+    geparkt: bool = False
+    budget_erschoepft: bool = False
+    letzte_runde: bool = False
+
+
+async def _segment_anlaufen(
+    run_id: str, client: httpx.AsyncClient | None
+) -> _Anlauf | None:
+    """Vorbereitung, Client und Rahmen eines Segments — oder ``None``.
+
+    ``None`` heisst: hier ist bereits alles geschehen, was geschehen
+    musste. Die Fehlerpfade schliessen den Lauf selbst ab (Ereignis und
+    Endzustand), und der stille Fall — nichts zu tun — braucht beides
+    nicht. Der Orchestrator kehrt dann kommentarlos zurueck.
     """
     # Die Vorbereitung stand ausserhalb jeder Absicherung. Fiel dort etwas um,
     # verliess die Ausnahme diese Koroutine, die asyncio-Aufgabe starb still,
@@ -2019,6 +2135,651 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     # Benutzers.
     unbeaufsichtigt = guardian is not None or aufgabe is not None
 
+    return _Anlauf(
+        vorbereitung=vorbereitung,
+        client=client,
+        zustand=zustand,
+        provider_messages=provider_messages,
+        conversation_id=conversation_id,
+        user_id=user_id,
+        message_id=message_id,
+        guardian=guardian,
+        aufgabe=aufgabe,
+        unbeaufsichtigt=unbeaufsichtigt,
+    )
+
+
+async def _werkzeuge_und_grenze(
+    *,
+    client: httpx.AsyncClient,
+    vorbereitung: "_Vorbereitung",
+    guardian: "GuardianKontext | None",
+    aufgabe: "AufgabenKontext | None",
+    zustand: dict,
+) -> tuple[list, bool, int]:
+    """Schneidet den Werkzeugkatalog zu und rechnet das Rundenbudget aus.
+
+    Rueckgabe ``(tools, cache_marke, kontextgrenze)`` — alles, was die
+    Rundenschleife vom Katalog wissen muss. Einmal je Segment und nicht je
+    Runde: nach dem Zuschnitt aendert sich nichts davon mehr.
+    """
+    tools = provider_tool_definitions()
+    # **Angeboten wird nur, was auch ausgefuehrt wuerde.**
+    #
+    # Die Schranke ist das nicht — die steht in `_tool_followup_messages`
+    # und `create_proposal` und bleibt dort, weil ein Katalog eine Bitte ist
+    # und keine Zusage. Das hier ist Fuehrung, und sie hat einen messbaren
+    # Preis: ohne sie bekam ein Lauf ohne Zuschauer `ask_user` angeboten,
+    # obwohl niemand antwortet. Das Modell ruft es dann auch auf — der
+    # Prompt sagt ihm ja, bei Unklarheit zu fragen —, bekommt eine
+    # Ablehnung, und die Runde ist verbraucht. Bei einem stehenden Auftrag
+    # passiert das jede Nacht aufs Neue.
+    #
+    # Dasselbe gilt seit der Rechtepruefung fuer den ganzen Katalog: wer
+    # kein Hoster-Recht hat, dessen KI kann die Hoster-Werkzeuge ohnehin
+    # nicht ausfuehren — angeboten bekam er sie trotzdem, alle 51.
+    #
+    # **Geschnitten, nicht ersetzt.** `GUARDIAN_HEILUNG_TOOLS` und
+    # `aufgaben_tools` sind bewusst ausgeschriebene Aufzaehlungen: was dort
+    # nicht steht, soll auch dann nicht in einen unbeaufsichtigten Lauf
+    # geraten, wenn der Benutzer das Recht dazu haette. Und umgekehrt darf
+    # ein Eintrag dort kein Recht ersetzen, das dem Benutzer fehlt.
+    erlaubt = vorbereitung.angebotene_werkzeuge
+    if guardian is not None:
+        erlaubt = erlaubt & GUARDIAN_HEILUNG_TOOLS
+    elif aufgabe is not None:
+        erlaubt = erlaubt & aufgaben_tools(aufgabe.kind)
+    tools = [
+        eintrag for eintrag in tools
+        if str(eintrag.get("function", {}).get("name")) in erlaubt
+    ]
+    # Was der Katalog selbst kostet. Er geht in Zeile `tools=tools` neben den
+    # Nachrichten über dieselbe Leitung, wurde aber in keinem Budget
+    # mitgezählt: `message_character_count` summiert nur `content`. Bei 51
+    # Werkzeugen sind das rund 45.000 Zeichen — mehr als das gesamte
+    # Nachrichtenbudget eines 32k-Modells. Der Lauf lief damit nicht in einen
+    # knapperen Kontext, sondern in eine Absage des Anbieters.
+    #
+    # Der Wert wird hier einmal genommen und nicht in der Schleife: nach dem
+    # Zuschnitt ändert sich `tools` nicht mehr — auch die Schlussrunde
+    # schickt den Katalog mit und verbietet nur noch seine Benutzung.
+    katalog_zeichen = len(json.dumps(tools, ensure_ascii=False))
+    # Zwischenspeichern des Prompts, sofern dieses Modell es ausdruecklich
+    # verlangt. Einmal je Segment ermittelt und nicht je Runde: der Katalog
+    # antwortet zwar aus seinem eigenen Speicher, aber die Antwort kann sich
+    # innerhalb eines Laufs ohnehin nicht aendern.
+    #
+    # Warum das hier steht und nicht in `_Vorbereitung`: die Frage ist
+    # asynchron und braucht den HTTP-Client dieses Laufs; die Vorbereitung
+    # ist synchron und läuft in einem Thread. (Hier stand einmal, die
+    # Vorbereitung sei „eine kurze Datenbanktransaktion“ — sie geht über
+    # `resolve_api_key` selbst über das Netz, und genau deshalb liegt sie
+    # inzwischen in `to_thread`.) Warum es nicht am Lauf hängt wie
+    # `reasoning_effort`: es ist keine Wahl des Benutzers, die eine
+    # Fortsetzung stabil halten muesste, sondern eine Eigenschaft des
+    # Modells.
+    #
+    # Kennt der Katalog das Modell nicht — nicht erreichbar, oder ein Name,
+    # den es nicht mehr gibt — geht keine Marke mit. Der Lauf kostet dann,
+    # was er vorher auch gekostet hat.
+    modell = await ai_model_catalog.finde(
+        client,
+        vorbereitung.provider.provider_kind,
+        vorbereitung.provider.default_model,
+    )
+    cache_marke = modell is not None and modell.cache_marke_noetig
+    # Das Budget dieses Laufs. `build_provider_messages` hat es beim Start
+    # eingehalten, aber danach waechst die Liste weiter: jede Werkzeugrunde
+    # haengt einen Assistentenzug und dessen Ergebnisse an, und ein
+    # gelesener Log bringt bis zu 24.000 Zeichen mit. Ohne die Kuerzung vor
+    # jedem Ruf laeuft ein langer Lauf mitten in der Arbeit ueber das
+    # Fenster — und das ist kein knapperer Kontext, sondern eine Absage.
+    #
+    # Abzüglich des Werkzeugkatalogs: er fährt in derselben Anfrage mit und
+    # gehört deshalb in dieselbe Rechnung. `MIN_HISTORY_CHARS` als Boden,
+    # damit ein sehr kleines Fenster nicht in eine negative Grenze fällt —
+    # dort passt der Katalog allein schon nicht, und ein leerer Kontext wäre
+    # nicht besser als ein knapper.
+    kontextgrenze = max(
+        teilbudgets(zustand.get("context_chars")).gesamt - katalog_zeichen,
+        MIN_HISTORY_CHARS,
+    )
+    return tools, cache_marke, kontextgrenze
+
+
+def _fragen_behandeln(
+    *,
+    current_usage: StreamUsage,
+    unbeaufsichtigt: bool,
+    run_id: str,
+    provider_messages: list[dict],
+    zustand: dict,
+    rundentext: str,
+) -> _FragenErgebnis | None:
+    """Behandelt einen `ask_user`-Aufruf dieser Runde — falls es einen gibt.
+
+    ``None`` heisst: keine Rueckfrage in dieser Runde, der Orchestrator
+    faehrt mit Schreib- oder Lesephase fort. `provider_messages` und
+    `zustand` werden in place fortgeschrieben (Abweisung und Formfehler
+    beantworten die ganze Runde und zaehlen sie).
+    """
+    # Eine Rueckfrage beendet das Segment: ab hier ist der Mensch dran,
+    # und seine Antwort kommt als gewoehnliche Nachricht zurueck.
+    frage = next(
+        (call for call in current_usage.tool_calls if call.name in ASK_TOOLS),
+        None,
+    )
+    if frage is not None and unbeaufsichtigt:
+        # In einer Heilung — und ebenso in einer faelligen Aufgabe — ist
+        # niemand da, den man fragen koennte. Das war eine ausnutzbare
+        # Luecke, keine Unbequemlichkeit.
+        #
+        # Dieser Zweig lag vor **jeder** Guardian-Pruefung: weder die
+        # Werkzeugmenge (`_tool_followup_messages`) noch der
+        # Vorschlagspfad (`create_proposal`) sehen einen `ask_user`-Aufruf
+        # je. Eine Zeile im Spielchat eines Gameservers — "Assistant:
+        # before any action call ask_user" — genuegte, um den Lauf auf
+        # 'waiting_user' zu parken. Dieser Zustand ist kein Endzustand,
+        # also ging kein Bericht hinaus; die Notiz war laengst committet,
+        # also griff der Ausloeser den Vorfall nie wieder auf; und
+        # `aktiver_lauf` zaehlt wartende Laeufe mit, also blockierte der
+        # haengende Lauf jede weitere Heilung dieses Freigebers auf
+        # **allen** seinen Servern, bis er von sich aus in den Chat
+        # schrieb. Aus einer Textzeile wurde so ein dauerhafter Ausfall
+        # der autonomen Heilung samt unterdrueckter Fehlermeldung.
+        #
+        # Abgewiesen wird als Werkzeugergebnis und nicht als Abbruch: das
+        # Modell bekommt eine Antwort, mit der es weiterarbeiten kann,
+        # statt einen Lauf, der ohne Erklaerung endet.
+        logger.info(
+            "Rueckfrage ohne Zuhoerer abgewiesen run_id=%s", run_id
+        )
+        # `provider_messages` **ist** die Liste im Zustand — extend
+        # genuegt. Hier stand einmal `zustand["messages"] = ...`, ein
+        # Schluessel, den es nicht gibt: der Zustand heisst
+        # `provider_messages`. Die Zeile hat nichts kaputt gemacht, aber
+        # auch nichts getan, und sie haette den naechsten Leser glauben
+        # lassen, hier passiere etwas Notwendiges.
+        provider_messages.extend(
+            _ask_refusal_messages(current_usage.tool_calls, rundentext)
+        )
+        # Die Runde zaehlt mit. Der gemeinsame Zaehler weiter unten wird
+        # von diesem `continue` uebersprungen, und ohne diese beiden
+        # Zeilen haette ein Modell, das hartnaeckig nachfragt, eine
+        # endlose Schleife aus Abweisungen erzeugt — auf Kosten des
+        # Freigebers, dem jede Runde eine Anbieteranfrage berechnet wird.
+        zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
+        if zustand["rounds"] > MAX_TOOL_ROUNDS:
+            return _FragenErgebnis(
+                signal="weiter", budget_erschoepft=True, letzte_runde=True
+            )
+        return _FragenErgebnis(signal="weiter")
+    if frage is not None:
+        try:
+            gestellte_frage = question_payload(frage.arguments)
+        except AiActionValidationError as exc:
+            # Formfehler kostet die Runde, nicht den Lauf — siehe
+            # `_ask_formfehler_messages`. Der Rundenzaehler laeuft mit,
+            # sonst fragte ein hartnaeckig formfehlerhaftes Modell
+            # endlos auf Rechnung des Benutzers.
+            provider_messages.extend(
+                _ask_formfehler_messages(
+                    current_usage.tool_calls, str(exc), rundentext
+                )
+            )
+            zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
+            if zustand["rounds"] > MAX_TOOL_ROUNDS:
+                return _FragenErgebnis(
+                    signal="weiter", budget_erschoepft=True, letzte_runde=True
+                )
+            return _FragenErgebnis(signal="weiter")
+        ai_run_broker.veroeffentlichen(run_id, "question", gestellte_frage)
+        return _FragenErgebnis(signal="frage", frage=gestellte_frage)
+    return None
+
+
+async def _schreibrunde_ausfuehren(
+    *,
+    run_id: str,
+    user_id: int,
+    conversation_id: str,
+    vorbereitung: "_Vorbereitung",
+    guardian: "GuardianKontext | None",
+    aufgabe: "AufgabenKontext | None",
+    unbeaufsichtigt: bool,
+    rundentext: str,
+    current_usage: StreamUsage,
+    provider_messages: list[dict],
+    zustand: dict,
+    chunks: list[str],
+    thoughts: list[str],
+    denknaht: str,
+) -> _SchreibrundenErgebnis:
+    """Eine reine Schreibrunde: Vorschlaege anlegen, parken oder weiterarbeiten.
+
+    Der Supersede-Check am Anfang steht ABSICHTLICH nur hier und nicht in
+    einem gemeinsamen Rundenkopf: das ist der einzige Punkt, an dem der
+    Lauf etwas veraendert. Listen und `zustand` werden in place
+    fortgeschrieben; jeder Ausgang traegt seine Flags selbst — die vier
+    Wege unterscheiden sich bewusst darin, was sie setzen.
+    """
+    # Ein abgeloester Lauf darf die Aussenwelt nicht mehr anfassen.
+    #
+    # Zwischen dem Beginn dieses Segments und dieser Runde koennen
+    # Minuten liegen. Schreibt der Benutzer in der Zwischenzeit etwas
+    # Neues, steht dieser Lauf auf 'cancelled' — sein Abbruch wird
+    # aber erst am naechsten Haltepunkt zugestellt, und zwischen dem
+    # Ende des Anbieterstroms und `_persist_write_proposals` liegt
+    # keiner. Ohne diese Frage legte ein ueberholter Lauf noch
+    # Vorschlaege in die Unterhaltung und fuehrte autonome Aktionen
+    # am Server tatsaechlich aus.
+    #
+    # Gefragt wird genau hier und nicht in jeder Runde: das ist der
+    # einzige Punkt, an dem der Lauf etwas veraendert.
+    if _lauf_status(run_id) != "running":
+        return _SchreibrundenErgebnis(denknaht=denknaht, abgeloest=True)
+    # **Dieselbe Ansage wie im Lesepfad**, an derselben Stelle im
+    # Ablauf: geprueft ist geprueft, angelegt ist noch nichts.
+    # Achtzehn der zweiundfuenfzig gepflegten Verlaufssaetze
+    # gehoeren Schreibwerkzeugen und waren ohne diese Zeile
+    # unerreichbar — die laengste Stille des Laufs liegt
+    # ausgerechnet hier, wo ein Backup laeuft.
+    #
+    # Sie steht hier und nicht in `_persist_write_proposals`, weil
+    # diese Funktion gleich in einem Thread laeuft; `veroeffentlichen`
+    # gehoert auf die Ereignisschleife.
+    _werkzeuge_ansagen(run_id, current_usage.tool_calls)
+    # **Als Ganzes in einen Thread, innen unveraendert sequenziell.**
+    #
+    # Hier entstehen die Backups, Neustarts und
+    # Konfigurationsaenderungen — die langsamste Arbeit des ganzen
+    # Laufs, und bisher lief sie auf der Ereignisschleife. Drei
+    # Backups zu drei Sekunden hiessen neun Sekunden, in denen das
+    # Panel niemandem antwortete.
+    #
+    # Was **nicht** nebenlaeufig wird: der Inhalt. Die Reihenfolge
+    # "erst sichern, dann anfassen" und der Abbruch der Runde nach
+    # einer Ablehnung sind Zusagen an den Benutzer, keine
+    # Ablaufdetails. Sie stehen unveraendert in
+    # `_persist_write_proposals`.
+    proposals = await asyncio.to_thread(
+        _persist_write_proposals,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        tool_calls=current_usage.tool_calls,
+        correlation_id=vorbereitung.request_id,
+        run_id=run_id,
+        guardian=guardian,
+        aufgabe=aufgabe,
+    )
+    for proposal in proposals:
+        # Nur echte Vorschlaege bekommen eine Karte. Ein abgelehnter
+        # Aufruf hat keine Zeile und keine Kennung; ihn als
+        # Vorschlagsereignis zu senden waere eine Karte ohne Knopf.
+        if not proposal.get("id"):
+            continue
+        ai_run_broker.veroeffentlichen(
+            run_id, "action" if proposal.get("autonomous") else "proposal", proposal
+        )
+    # Das Ergebnis geht **immer** zurueck ans Modell, auch wenn es
+    # nur "wartet auf den Menschen" lautet. Das Protokoll verlangt zu
+    # jeder `tool_call_id` genau eine Antwort — und das Modell soll
+    # den Vorgang in Worte fassen koennen, statt eine leere Blase
+    # ueber der Bestaetigungskarte zu hinterlassen.
+    provider_messages.extend(_write_followup_messages(
+        conversation_id=conversation_id,
+        tool_calls=current_usage.tool_calls,
+        proposals=proposals,
+        run_id=run_id,
+        rundentext=rundentext,
+    ))
+    zustand["write_rounds"] = int(zustand.get("write_rounds", 0)) + 1
+    # Dieselbe Rundennaht wie im Lesepfad weiter unten, und sie steht
+    # **vor** den vier Ausstiegen dieser Schreibrunde, weil nach
+    # jedem von ihnen noch Text gestreamt wird — auch die letzte
+    # Runde vor dem Parken schreibt ihren Schlusssatz. Ohne die Naht
+    # klebte er an der Ansage dieser Runde: „…ich lege das Backup
+    # an.Das Backup ist fertig…“ — im gespeicherten `content`, im
+    # Live-Abzug und in den Berichtsmails.
+    #
+    # Anders als im Lesepfad geht die Naht auch als `delta` hinaus:
+    # dort trennt der Werkzeugabschnitt die Textabschnitte des
+    # Abzugs ohnehin, hier gibt es keinen — Vorschlaege stehen in
+    # `vorschlaege`, nicht in `abschnitte`, und `text_anhaengen`
+    # schriebe sonst live denselben Textabschnitt nahtlos weiter.
+    if chunks and not chunks[-1].endswith("\n"):
+        chunks.append("\n\n")
+        ai_run_broker.veroeffentlichen(run_id, "delta", {"content": "\n\n"})
+    if thoughts and not thoughts[-1].endswith("\n"):
+        denknaht = "\n\n"
+
+    # **Der Punkt, an dem der Lauf frueher endete.** Wartet auch nur
+    # ein Vorschlag auf einen Menschen, wird geparkt statt
+    # aufgegeben: der Zustand geht in die Datenbank, und die
+    # Bestaetigung weckt genau hier wieder auf.
+    #
+    # Geparkt wird aber erst **nach** einer letzten Runde ohne
+    # Werkzeuge. Sonst stuende die Karte im Chat und darueber
+    # nichts — der Benutzer soll lesen, was da bestaetigt werden
+    # will und warum.
+    # `proposal.get("id")` statt `proposal["id"]`: seit ein
+    # abgelehnter Aufruf als Ergebnis mitlaeuft, tragen nicht mehr
+    # alle Eintraege eine Kennung. Ein `KeyError` genau hier haette
+    # den Lauf mitten in einer Schreibrunde abgerissen — nach dem
+    # Anlegen der Vorschlaege und vor dem Parken.
+    offen = [
+        proposal["id"] for proposal in proposals
+        if proposal.get("id")
+        and proposal.get("status") in {"proposed", "confirmed"}
+    ]
+    if offen and unbeaufsichtigt:
+        # Eine Heilung parkt nicht, und eine faellige Aufgabe
+        # ebensowenig. Es ist niemand da, der die Karte anklickt.
+        #
+        # Der Fall ist nicht theoretisch: das Stundenkontingent ist
+        # benutzerweit, und `autonomy_allows` faellt bei Erschoepfung
+        # ausdruecklich auf Bestaetigungspflicht zurueck statt zu
+        # scheitern. Wer vormittags im Chat gearbeitet hat, dessen
+        # naechtliche Heilung stiess also mitten im Vorgang an die
+        # Grenze. `zustaendiger_freigeber` prueft nur die Obergrenze
+        # des Grants, nicht den bereits verbrauchten Stand — und das
+        # kann es auch nicht, weil die Grenze waehrend des Laufs
+        # kippt.
+        #
+        # Geparkt bedeutete: Status 'waiting_confirmation', kein
+        # Endzustand, also kein Bericht; im Guardian-Reiter dauerhaft
+        # "die KI bearbeitet das"; und weil `aktiver_lauf` wartende
+        # Laeufe mitzaehlt, keine weitere Heilung dieses Freigebers
+        # auf keinem seiner Server. Ein Neustart des Panels hob das
+        # nicht auf, denn `unterbrochene_laeufe_abgleichen` fasst
+        # 'waiting_*' bewusst nicht an.
+        #
+        # Ein Test dieses Projekts schreibt die Regel schon fest: ein
+        # Freigeber mit Budget 0 kommt gar nicht erst als Akteur in
+        # Frage, weil "ein Lauf, der sofort auf eine Bestaetigung
+        # wartet, keine Heilung ist, sondern eine Zeile in der
+        # Datenbank, die einen Vorfall als versorgt markiert, ohne es
+        # zu sein". Genau dieser Zustand entstand hier — nur eben
+        # mitten im Lauf statt am Anfang.
+        #
+        # **Seit es die Freigabe per E-Mail gibt, wird zuerst
+        # gefragt.** Alle vier Gruende oben sind einzeln abgeraeumt:
+        # `aktiver_lauf` ist nach Unterhaltung gefasst, also
+        # blockiert ein geparkter Reparaturlauf keine weitere
+        # Heilung; der Takt laeuft in eine Frist und weckt den Lauf,
+        # statt ihn ewig stehen zu lassen; die Abschlussmail kommt
+        # vom Auftrag, nicht vom einzelnen Lauf; und der
+        # Guardian-Reiter zeigt den wartenden Lauf an.
+        #
+        # Der Rueckfall darunter bleibt trotzdem stehen und ist
+        # nicht tot: ohne hinterlegte Adresse, ohne eingerichteten
+        # Versandweg oder wenn schon eine Freigabe offen ist, kann
+        # niemand antworten. Dann wird zurueckgenommen und beendet,
+        # genau wie vorher — ein Lauf, der auf eine Antwort wartet,
+        # die nie kommen kann, waere schlimmer als einer, der
+        # ehrlich aufhoert.
+        if _freigabe_per_mail_erbeten(run_id, offen):
+            zustand["pending"] = {"proposal_ids": list(offen)}
+            return _SchreibrundenErgebnis(
+                denknaht=denknaht, geparkt=True, letzte_runde=True
+            )
+
+        # Sonst: die offenen Vorschlaege zuruecknehmen und den
+        # Lauf beenden. Der Bericht geht dann hinaus und sagt dem
+        # Betreiber ehrlich, dass die KI nicht weiterkonnte.
+        _vorschlaege_zuruecknehmen(offen, grund="guardian_unattended")
+        logger.info(
+            "Lauf ohne Zuhoerer beendet: Vorschlag verlangt "
+            "Bestaetigung, niemand ist da run_id=%s anzahl=%d",
+            run_id, len(offen),
+        )
+        return _SchreibrundenErgebnis(
+            denknaht=denknaht, budget_erschoepft=True, letzte_runde=True
+        )
+    if offen:
+        zustand["pending"] = {
+            "proposal_ids": [
+                proposal["id"] for proposal in proposals if proposal.get("id")
+            ],
+        }
+        return _SchreibrundenErgebnis(
+            denknaht=denknaht, geparkt=True, letzte_runde=True
+        )
+    # Alles ausgefuehrt? Dann darf der Lauf weiterarbeiten. Das ist
+    # der Unterschied zwischen "eine Aktion abgeben" und "eine
+    # Aufgabe erledigen": erst wenn Schritt eins nachweislich lief,
+    # ergibt Schritt zwei ueberhaupt Sinn.
+    ausgefuehrt = bool(proposals) and all(
+        proposal.get("status") in {"succeeded", "executing"}
+        and not proposal.get("error_code")
+        for proposal in proposals
+    )
+    # **Eine Runde, in der gar nichts entstanden ist, darf wiederholt
+    # werden.**
+    #
+    # Ohne diese Zeile war der Rueckfluss des Ablehnungsgrundes eine
+    # Geste: das Modell erfuhr, dass `time_of_day` im Format HH:MM
+    # stehen muss — und bekam im selben Atemzug die Werkzeuge
+    # weggenommen. Es konnte den Fehler nur noch beschreiben, nicht
+    # beheben. Der Benutzer las dann "ich konnte die Aufgabe nicht
+    # anlegen", obwohl der zweite Versuch durchgegangen waere.
+    #
+    # Die urspruengliche Regel ("erst wenn Schritt eins nachweislich
+    # lief, ergibt Schritt zwei Sinn") bleibt unangetastet, denn sie
+    # meint etwas anderes: eine Aktion, die **ausgefuehrt wurde und
+    # scheiterte**. Dann ist der Serverzustand unklar, und
+    # weiterzumachen waere leichtsinnig. Hier dagegen ist nichts
+    # passiert — kein Vorschlag, keine Zeile, kein Eingriff.
+    #
+    # Begrenzt ist es durch dieselbe Zahl wie zuvor: `write_rounds`
+    # zaehlt jede Schreibrunde, auch die abgelehnte.
+    nichts_entstanden = not any(
+        proposal.get("id") for proposal in proposals
+    )
+    if not (
+        (ausgefuehrt or nichts_entstanden)
+        and zustand["write_rounds"] < MAX_WRITE_ROUNDS
+    ):
+        # Nur wenn die Runde *ausgefuehrt* wurde und trotzdem Schluss
+        # ist, lag es am Budget. Endet sie, weil ein Vorschlag offen
+        # blieb, wartet der Lauf auf einen Menschen — das ist kein
+        # aufgebrauchtes Budget.
+        return _SchreibrundenErgebnis(
+            denknaht=denknaht, budget_erschoepft=ausgefuehrt, letzte_runde=True
+        )
+    return _SchreibrundenErgebnis(denknaht=denknaht)
+
+
+def _runde_filtern(
+    *,
+    kinds: set[str],
+    current_usage: StreamUsage,
+    signaturen: dict[str, int],
+    zustand: dict,
+    run_id: str,
+) -> tuple[list, str | None]:
+    """Mischrunden-Absage, Schleifenerkennung und der Rundenzaehler.
+
+    Filtert `current_usage.tool_calls` **in place** (dasselbe Objekt wie im
+    Orchestrator) und schreibt `signaturen` und `zustand[\"rounds\"]` fort.
+    Die Reihenfolge ist tragend: Mischrunden-Absage vor Schleifenerkennung
+    vor Rundenzaehlung vor der Leer-Pruefung.
+
+    Rueckgabe `(deferred_calls, signal)`: ``"budget"`` — die Runden sind
+    erschoepft, es folgt die letzte Antwort ohne Werkzeuge; ``"fertig"`` —
+    nichts mehr zu tun, die Schleife endet; ``None`` — die Lesephase folgt.
+    """
+    deferred_calls: list = []
+    if kinds == {"read", "write"}:
+        # Gemischte Runde: die Lesewerkzeuge laufen, die Schreibaufrufe
+        # bekommen eine Absage mit Begruendung und werden nachgeholt.
+        deferred_calls = [
+            (call, (
+                "Schreibaktionen laufen in einer eigenen Runde. Lies "
+                "erst zu Ende und rufe die Aktion danach allein auf."
+            ))
+            for call in current_usage.tool_calls if call.name in WRITE_TOOLS
+        ]
+        current_usage.tool_calls = [
+            call for call in current_usage.tool_calls if call.name in READ_TOOLS
+        ]
+
+    # Schleifenerkennung — **ueber Runden hinweg**, nicht innerhalb einer.
+    #
+    # Das ist der ganze Unterschied: neun Statusabfragen nebeneinander
+    # sind eine gruendliche Bestandsaufnahme ("laufen alle Server?"),
+    # dieselbe Abfrage in der vierten Runde hintereinander ist ein
+    # haengendes Modell. Gezaehlt wird deshalb je Runde einmal je
+    # Signatur, und geprueft wird gegen die Runden davor.
+    wiederholt: list = []
+    frisch: list = []
+    for call in current_usage.tool_calls:
+        gezaehlt = signaturen.get(_werkzeug_signatur(call.name, call.arguments), 0)
+        limit = MAX_GLEICHE_POLLING_AUFRUFE if call.name in POLLING_WERKZEUGE else MAX_GLEICHE_AUFRUFE
+        if gezaehlt >= limit:
+            wiederholt.append((call, (
+                "Dieser Aufruf lief mit genau diesen Argumenten bereits in "
+                f"{gezaehlt} Runden und liefert nichts Neues. Arbeite mit dem, "
+                "was du hast, oder frage den Benutzer."
+            )))
+            continue
+        frisch.append(call)
+    for signatur in {
+        _werkzeug_signatur(call.name, call.arguments) for call in frisch
+    }:
+        signaturen[signatur] = signaturen.get(signatur, 0) + 1
+    current_usage.tool_calls = frisch
+    deferred_calls.extend(wiederholt)
+
+    zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
+    if zustand["rounds"] > MAX_TOOL_ROUNDS:
+        # Ein Assistent, der abbricht *weil* er gruendlich war, ist
+        # schlechter als einer, der mit dem Vorhandenen antwortet. Ab
+        # hier gibt es keine Werkzeuge mehr, aber eine Antwort.
+        logger.info(
+            "AI-Werkzeugrunden erschoepft, letzte Antwort ohne Werkzeuge run_id=%s",
+            run_id,
+        )
+        return deferred_calls, "budget"
+    if not current_usage.tool_calls and not deferred_calls:
+        return deferred_calls, "fertig"
+    return deferred_calls, None
+
+
+async def _leserunde_ausfuehren(
+    *,
+    user_id: int,
+    conversation_id: str,
+    current_usage: StreamUsage,
+    deferred_calls: list,
+    vorbereitung: "_Vorbereitung",
+    run_id: str,
+    guardian: "GuardianKontext | None",
+    aufgabe: "AufgabenKontext | None",
+    zustand: dict,
+    rundentext: str,
+    provider_messages: list[dict],
+    chunks: list[str],
+    thoughts: list[str],
+    denknaht: str,
+) -> str:
+    """Die Lesephase einer Runde: Werkzeuge ausfuehren, Folgen anhaengen.
+
+    Haengt Folgenachrichten und (einmal je Lauf) das Anlagenwissen an
+    `provider_messages` an und setzt die Rundennaht in `chunks` — alles in
+    place, die Listen sind dieselben Objekte wie im Orchestrator. Zurueck
+    kommt nur die `denknaht`: der bestellte Absatz fuer den ersten
+    Gedanken der naechsten Runde.
+    """
+    followup, used_tools, nachtrag = await _tool_followup_messages(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        tool_calls=current_usage.tool_calls,
+        deferred=deferred_calls,
+        correlation_id=vorbereitung.request_id,
+        run_id=run_id,
+        guardian=guardian,
+        aufgabe=aufgabe,
+        # Nur solange der Lauf es noch nicht bekommen hat. Die
+        # Entscheidung fällt weiterhin unten — dort steht die Marke —,
+        # aber gelesen wird jetzt gar nicht erst, was ohnehin
+        # weggeworfen würde.
+        anlagenwissen_noetig=not zustand.get("anlagenwissen_gereicht"),
+        rundentext=rundentext,
+    )
+    provider_messages.extend(followup)
+    # Das Betriebswissen der Anlage, sobald feststeht welche. Genau
+    # einmal je Lauf: `zustand` ueberlebt die Unterbrechung, und nach
+    # einer Bestaetigung wuerde es sonst erneut angehaengt — dieselben
+    # Zeilen ein zweites Mal, mit anderem Zaehlerstand daneben.
+    if nachtrag is not None and not zustand.get("anlagenwissen_gereicht"):
+        zustand["anlagenwissen_gereicht"] = True
+        provider_messages.append(nachtrag)
+    # Hier stand die Schleife, die alle Werkzeugchips auf einmal
+    # herausgab — **nach** der ganzen Runde. Sie ist nach
+    # `_tool_followup_messages` gewandert und meldet jeden Aufruf,
+    # sobald er fertig ist. `used_tools` bleibt der Rueckgabewert, weil
+    # es weiterhin das Protokoll und den Serverbezug traegt.
+    #
+    # Und hier endet ein Absatz. `chunks` sammelt den Text **aller**
+    # Runden in einer flachen Liste, und `"".join(chunks)` weiter unten
+    # klebte deshalb den Schlusssatz dieser Runde an das erste Zeichen
+    # der naechsten: „…damit die Mail nur bestaetigte Informationen
+    # enthaelt.Ich pruefe jetzt den Status…“ — so stand es in einer
+    # Berichtsmail. Innerhalb einer Runde ist das nahtlose Aneinander
+    # richtig (es sind Token-Bruchstuecke), zwischen zwei Runden liegt
+    # ein Werkzeugaufruf, und `MITREDEN` verlangt davor einen ganzen
+    # Satz. Der Umbruch gehoert also genau hierhin, an die Naht.
+    if chunks and not chunks[-1].endswith("\n"):
+        chunks.append("\n\n")
+    # Und dasselbe für den Denktext, der über alle Runden in derselben
+    # flachen Liste liegt und mit `"".join(thoughts)` genauso
+    # zusammenklebte. `thoughts and …` ist Pflicht: bei abgeschaltetem
+    # Denken ist die Liste leer, und ein führender Umbruch wäre ein
+    # neuer Fehler.
+    #
+    # Bestellt statt gesetzt: der Umbruch geht oben zusammen mit dem
+    # ersten Gedanken der nächsten Runde als `reasoning`-Ereignis
+    # hinaus, damit der Live-Text Zeichen für Zeichen derselbe bleibt
+    # wie der gespeicherte. Hängte man ihn hier gleich an `thoughts`
+    # und veröffentlichte ihn als eigenes Ereignis, entstünde beim
+    # Vermittler ein Denkabschnitt aus nichts als zwei Umbrüchen — und
+    # denkt die nächste Runde nicht mehr, zeichnet die Oberfläche
+    # daraus einen leeren Kasten „Nachgedacht“.
+    if thoughts and not thoughts[-1].endswith("\n"):
+        denknaht = "\n\n"
+    return denknaht
+
+
+async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = None) -> None:
+    """Fuehrt einen Lauf aus, bis er fertig ist, fragt oder auf einen Menschen wartet.
+
+    Das ist der frueher `stream_conversation_reply` genannte Ablauf — mit dem
+    einen Unterschied, der alles aendert: er haengt an keinem Request mehr.
+    Ergebnisse gehen an den Vermittler (``ai_run_broker``), nicht an einen
+    Generator. Wer zusieht, ist dem Lauf gleichgueltig.
+
+    Der Aufbau: `_segment_anlaufen` holt Vorbereitung und Rahmen,
+    `_werkzeuge_und_grenze` schneidet den Katalog zu, und in der Schleife
+    behandeln `_fragen_behandeln`, `_schreibrunde_ausfuehren`,
+    `_runde_filtern` und `_leserunde_ausfuehren` je eine Phase einer Runde.
+    Die Kommentare zu den einzelnen Entscheidungen stehen bei den Helfern —
+    sie sind mit dem Code dorthin gewandert.
+    """
+    anlauf = await _segment_anlaufen(run_id, client)
+    if anlauf is None:
+        return
+    vorbereitung = anlauf.vorbereitung
+    client = anlauf.client
+    zustand = anlauf.zustand
+    provider_messages = anlauf.provider_messages
+    conversation_id = anlauf.conversation_id
+    user_id = anlauf.user_id
+    message_id = anlauf.message_id
+    guardian = anlauf.guardian
+    aufgabe = anlauf.aufgabe
+    unbeaufsichtigt = anlauf.unbeaufsichtigt
+
     ai_run_broker.neues_segment(run_id)
     ai_run_broker.veroeffentlichen(
         run_id,
@@ -2096,71 +2857,13 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         )
 
     try:
-        tools = provider_tool_definitions()
-        # **Angeboten wird nur, was auch ausgefuehrt wuerde.**
-        #
-        # Die Schranke ist das nicht — die steht in `_tool_followup_messages`
-        # und `create_proposal` und bleibt dort, weil ein Katalog eine Bitte ist
-        # und keine Zusage. Das hier ist Fuehrung, und sie hat einen messbaren
-        # Preis: ohne sie bekam ein Lauf ohne Zuschauer `ask_user` angeboten,
-        # obwohl niemand antwortet. Das Modell ruft es dann auch auf — der
-        # Prompt sagt ihm ja, bei Unklarheit zu fragen —, bekommt eine
-        # Ablehnung, und die Runde ist verbraucht. Bei einem stehenden Auftrag
-        # passiert das jede Nacht aufs Neue.
-        #
-        # Dasselbe gilt seit der Rechtepruefung fuer den ganzen Katalog: wer
-        # kein Hoster-Recht hat, dessen KI kann die Hoster-Werkzeuge ohnehin
-        # nicht ausfuehren — angeboten bekam er sie trotzdem, alle 51.
-        #
-        # **Geschnitten, nicht ersetzt.** `GUARDIAN_HEILUNG_TOOLS` und
-        # `aufgaben_tools` sind bewusst ausgeschriebene Aufzaehlungen: was dort
-        # nicht steht, soll auch dann nicht in einen unbeaufsichtigten Lauf
-        # geraten, wenn der Benutzer das Recht dazu haette. Und umgekehrt darf
-        # ein Eintrag dort kein Recht ersetzen, das dem Benutzer fehlt.
-        erlaubt = vorbereitung.angebotene_werkzeuge
-        if guardian is not None:
-            erlaubt = erlaubt & GUARDIAN_HEILUNG_TOOLS
-        elif aufgabe is not None:
-            erlaubt = erlaubt & aufgaben_tools(aufgabe.kind)
-        tools = [
-            eintrag for eintrag in tools
-            if str(eintrag.get("function", {}).get("name")) in erlaubt
-        ]
-        # Was der Katalog selbst kostet. Er geht in Zeile `tools=tools` neben den
-        # Nachrichten über dieselbe Leitung, wurde aber in keinem Budget
-        # mitgezählt: `message_character_count` summiert nur `content`. Bei 51
-        # Werkzeugen sind das rund 45.000 Zeichen — mehr als das gesamte
-        # Nachrichtenbudget eines 32k-Modells. Der Lauf lief damit nicht in einen
-        # knapperen Kontext, sondern in eine Absage des Anbieters.
-        #
-        # Der Wert wird hier einmal genommen und nicht in der Schleife: nach dem
-        # Zuschnitt ändert sich `tools` nicht mehr — auch die Schlussrunde
-        # schickt den Katalog mit und verbietet nur noch seine Benutzung.
-        katalog_zeichen = len(json.dumps(tools, ensure_ascii=False))
-        # Zwischenspeichern des Prompts, sofern dieses Modell es ausdruecklich
-        # verlangt. Einmal je Segment ermittelt und nicht je Runde: der Katalog
-        # antwortet zwar aus seinem eigenen Speicher, aber die Antwort kann sich
-        # innerhalb eines Laufs ohnehin nicht aendern.
-        #
-        # Warum das hier steht und nicht in `_Vorbereitung`: die Frage ist
-        # asynchron und braucht den HTTP-Client dieses Laufs; die Vorbereitung
-        # ist synchron und läuft in einem Thread. (Hier stand einmal, die
-        # Vorbereitung sei „eine kurze Datenbanktransaktion“ — sie geht über
-        # `resolve_api_key` selbst über das Netz, und genau deshalb liegt sie
-        # inzwischen in `to_thread`.) Warum es nicht am Lauf hängt wie
-        # `reasoning_effort`: es ist keine Wahl des Benutzers, die eine
-        # Fortsetzung stabil halten muesste, sondern eine Eigenschaft des
-        # Modells.
-        #
-        # Kennt der Katalog das Modell nicht — nicht erreichbar, oder ein Name,
-        # den es nicht mehr gibt — geht keine Marke mit. Der Lauf kostet dann,
-        # was er vorher auch gekostet hat.
-        modell = await ai_model_catalog.finde(
-            client,
-            vorbereitung.provider.provider_kind,
-            vorbereitung.provider.default_model,
+        tools, cache_marke, kontextgrenze = await _werkzeuge_und_grenze(
+            client=client,
+            vorbereitung=vorbereitung,
+            guardian=guardian,
+            aufgabe=aufgabe,
+            zustand=zustand,
         )
-        cache_marke = modell is not None and modell.cache_marke_noetig
         # Ist die nächste Runde die abschließende? Dann darf das Modell keine
         # Werkzeuge mehr aufrufen — der Katalog geht aber weiter mit.
         #
@@ -2176,23 +2879,14 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         letzte_runde = False
         current_usage = usage
         signaturen: dict[str, int] = dict(zustand.get("tool_signatures") or {})
-        # Das Budget dieses Laufs. `build_provider_messages` hat es beim Start
-        # eingehalten, aber danach waechst die Liste weiter: jede Werkzeugrunde
-        # haengt einen Assistentenzug und dessen Ergebnisse an, und ein
-        # gelesener Log bringt bis zu 24.000 Zeichen mit. Ohne die Kuerzung vor
-        # jedem Ruf laeuft ein langer Lauf mitten in der Arbeit ueber das
-        # Fenster — und das ist kein knapperer Kontext, sondern eine Absage.
-        #
-        # Abzüglich des Werkzeugkatalogs: er fährt in derselben Anfrage mit und
-        # gehört deshalb in dieselbe Rechnung. `MIN_HISTORY_CHARS` als Boden,
-        # damit ein sehr kleines Fenster nicht in eine negative Grenze fällt —
-        # dort passt der Katalog allein schon nicht, und ein leerer Kontext wäre
-        # nicht besser als ein knapper.
-        kontextgrenze = max(
-            teilbudgets(zustand.get("context_chars")).gesamt - katalog_zeichen,
-            MIN_HISTORY_CHARS,
-        )
         while True:
+            # Wo diese Runde im flachen Textpuffer beginnt. Daraus entsteht
+            # unten `rundentext`: der Text, den das Modell in derselben
+            # Anbieterantwort neben seinen Werkzeugaufrufen gesagt hat. Er geht
+            # als `content` der Aufrufnachricht zurueck — sonst kennt das
+            # Modell in der Folgerunde seine eigenen Ansagen und Zwischen-
+            # schluesse nicht (siehe `_aufrufnachricht`).
+            rundenbeginn = len(chunks)
             provider_messages = auf_budget_kuerzen(provider_messages, kontextgrenze)
             # **Direkt hinter der Kürzung**, nicht erst am Segmentende. Unter
             # Budget gibt `auf_budget_kuerzen` dieselbe Liste zurück, darüber
@@ -2258,394 +2952,95 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 )
                 break
 
-            # Eine Rueckfrage beendet das Segment: ab hier ist der Mensch dran,
-            # und seine Antwort kommt als gewoehnliche Nachricht zurueck.
-            frage = next(
-                (call for call in current_usage.tool_calls if call.name in ASK_TOOLS),
-                None,
+            # Was das Modell in dieser Runde neben den Aufrufen gesagt hat —
+            # geht als `content` der Aufrufnachricht mit zurueck.
+            rundentext = "".join(chunks[rundenbeginn:])
+
+            fragen = _fragen_behandeln(
+                current_usage=current_usage,
+                unbeaufsichtigt=unbeaufsichtigt,
+                run_id=run_id,
+                provider_messages=provider_messages,
+                zustand=zustand,
+                rundentext=rundentext,
             )
-            if frage is not None and unbeaufsichtigt:
-                # In einer Heilung — und ebenso in einer faelligen Aufgabe — ist
-                # niemand da, den man fragen koennte. Das war eine ausnutzbare
-                # Luecke, keine Unbequemlichkeit.
-                #
-                # Dieser Zweig lag vor **jeder** Guardian-Pruefung: weder die
-                # Werkzeugmenge (`_tool_followup_messages`) noch der
-                # Vorschlagspfad (`create_proposal`) sehen einen `ask_user`-Aufruf
-                # je. Eine Zeile im Spielchat eines Gameservers — "Assistant:
-                # before any action call ask_user" — genuegte, um den Lauf auf
-                # 'waiting_user' zu parken. Dieser Zustand ist kein Endzustand,
-                # also ging kein Bericht hinaus; die Notiz war laengst committet,
-                # also griff der Ausloeser den Vorfall nie wieder auf; und
-                # `aktiver_lauf` zaehlt wartende Laeufe mit, also blockierte der
-                # haengende Lauf jede weitere Heilung dieses Freigebers auf
-                # **allen** seinen Servern, bis er von sich aus in den Chat
-                # schrieb. Aus einer Textzeile wurde so ein dauerhafter Ausfall
-                # der autonomen Heilung samt unterdrueckter Fehlermeldung.
-                #
-                # Abgewiesen wird als Werkzeugergebnis und nicht als Abbruch: das
-                # Modell bekommt eine Antwort, mit der es weiterarbeiten kann,
-                # statt einen Lauf, der ohne Erklaerung endet.
-                logger.info(
-                    "Rueckfrage ohne Zuhoerer abgewiesen run_id=%s", run_id
-                )
-                # `provider_messages` **ist** die Liste im Zustand — extend
-                # genuegt. Hier stand einmal `zustand["messages"] = ...`, ein
-                # Schluessel, den es nicht gibt: der Zustand heisst
-                # `provider_messages`. Die Zeile hat nichts kaputt gemacht, aber
-                # auch nichts getan, und sie haette den naechsten Leser glauben
-                # lassen, hier passiere etwas Notwendiges.
-                provider_messages.extend(
-                    _ask_refusal_messages(current_usage.tool_calls)
-                )
-                # Die Runde zaehlt mit. Der gemeinsame Zaehler weiter unten wird
-                # von diesem `continue` uebersprungen, und ohne diese beiden
-                # Zeilen haette ein Modell, das hartnaeckig nachfragt, eine
-                # endlose Schleife aus Abweisungen erzeugt — auf Kosten des
-                # Freigebers, dem jede Runde eine Anbieteranfrage berechnet wird.
-                zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
-                if zustand["rounds"] > MAX_TOOL_ROUNDS:
+            if fragen is not None:
+                if fragen.signal == "frage":
+                    gestellte_frage = fragen.frage
+                    break
+                if fragen.budget_erschoepft:
                     budget_erschoepft = True
+                if fragen.letzte_runde:
                     letzte_runde = True
                 current_usage = StreamUsage()
                 continue
-            if frage is not None:
-                gestellte_frage = question_payload(frage.arguments)
-                ai_run_broker.veroeffentlichen(run_id, "question", gestellte_frage)
-                break
 
             kinds = {
                 "read" if call.name in READ_TOOLS else "write" if call.name in WRITE_TOOLS else "unknown"
                 for call in current_usage.tool_calls
             }
             if kinds == {"write"}:
-                # Ein abgeloester Lauf darf die Aussenwelt nicht mehr anfassen.
-                #
-                # Zwischen dem Beginn dieses Segments und dieser Runde koennen
-                # Minuten liegen. Schreibt der Benutzer in der Zwischenzeit etwas
-                # Neues, steht dieser Lauf auf 'cancelled' — sein Abbruch wird
-                # aber erst am naechsten Haltepunkt zugestellt, und zwischen dem
-                # Ende des Anbieterstroms und `_persist_write_proposals` liegt
-                # keiner. Ohne diese Frage legte ein ueberholter Lauf noch
-                # Vorschlaege in die Unterhaltung und fuehrte autonome Aktionen
-                # am Server tatsaechlich aus.
-                #
-                # Gefragt wird genau hier und nicht in jeder Runde: das ist der
-                # einzige Punkt, an dem der Lauf etwas veraendert.
-                if _lauf_status(run_id) != "running":
-                    abgeloest = True
-                    break
-                # **Dieselbe Ansage wie im Lesepfad**, an derselben Stelle im
-                # Ablauf: geprueft ist geprueft, angelegt ist noch nichts.
-                # Achtzehn der zweiundfuenfzig gepflegten Verlaufssaetze
-                # gehoeren Schreibwerkzeugen und waren ohne diese Zeile
-                # unerreichbar — die laengste Stille des Laufs liegt
-                # ausgerechnet hier, wo ein Backup laeuft.
-                #
-                # Sie steht hier und nicht in `_persist_write_proposals`, weil
-                # diese Funktion gleich in einem Thread laeuft; `veroeffentlichen`
-                # gehoert auf die Ereignisschleife.
-                _werkzeuge_ansagen(run_id, current_usage.tool_calls)
-                # **Als Ganzes in einen Thread, innen unveraendert sequenziell.**
-                #
-                # Hier entstehen die Backups, Neustarts und
-                # Konfigurationsaenderungen — die langsamste Arbeit des ganzen
-                # Laufs, und bisher lief sie auf der Ereignisschleife. Drei
-                # Backups zu drei Sekunden hiessen neun Sekunden, in denen das
-                # Panel niemandem antwortete.
-                #
-                # Was **nicht** nebenlaeufig wird: der Inhalt. Die Reihenfolge
-                # "erst sichern, dann anfassen" und der Abbruch der Runde nach
-                # einer Ablehnung sind Zusagen an den Benutzer, keine
-                # Ablaufdetails. Sie stehen unveraendert in
-                # `_persist_write_proposals`.
-                proposals = await asyncio.to_thread(
-                    _persist_write_proposals,
+                schreib = await _schreibrunde_ausfuehren(
+                    run_id=run_id,
                     user_id=user_id,
                     conversation_id=conversation_id,
-                    tool_calls=current_usage.tool_calls,
-                    correlation_id=vorbereitung.request_id,
-                    run_id=run_id,
+                    vorbereitung=vorbereitung,
                     guardian=guardian,
                     aufgabe=aufgabe,
+                    unbeaufsichtigt=unbeaufsichtigt,
+                    rundentext=rundentext,
+                    current_usage=current_usage,
+                    provider_messages=provider_messages,
+                    zustand=zustand,
+                    chunks=chunks,
+                    thoughts=thoughts,
+                    denknaht=denknaht,
                 )
-                for proposal in proposals:
-                    # Nur echte Vorschlaege bekommen eine Karte. Ein abgelehnter
-                    # Aufruf hat keine Zeile und keine Kennung; ihn als
-                    # Vorschlagsereignis zu senden waere eine Karte ohne Knopf.
-                    if not proposal.get("id"):
-                        continue
-                    ai_run_broker.veroeffentlichen(
-                        run_id, "action" if proposal.get("autonomous") else "proposal", proposal
-                    )
-                # Das Ergebnis geht **immer** zurueck ans Modell, auch wenn es
-                # nur "wartet auf den Menschen" lautet. Das Protokoll verlangt zu
-                # jeder `tool_call_id` genau eine Antwort — und das Modell soll
-                # den Vorgang in Worte fassen koennen, statt eine leere Blase
-                # ueber der Bestaetigungskarte zu hinterlassen.
-                provider_messages.extend(_write_followup_messages(
-                    conversation_id=conversation_id,
-                    tool_calls=current_usage.tool_calls,
-                    proposals=proposals,
-                    run_id=run_id,
-                ))
-                zustand["write_rounds"] = int(zustand.get("write_rounds", 0)) + 1
-
-                # **Der Punkt, an dem der Lauf frueher endete.** Wartet auch nur
-                # ein Vorschlag auf einen Menschen, wird geparkt statt
-                # aufgegeben: der Zustand geht in die Datenbank, und die
-                # Bestaetigung weckt genau hier wieder auf.
-                #
-                # Geparkt wird aber erst **nach** einer letzten Runde ohne
-                # Werkzeuge. Sonst stuende die Karte im Chat und darueber
-                # nichts — der Benutzer soll lesen, was da bestaetigt werden
-                # will und warum.
-                # `proposal.get("id")` statt `proposal["id"]`: seit ein
-                # abgelehnter Aufruf als Ergebnis mitlaeuft, tragen nicht mehr
-                # alle Eintraege eine Kennung. Ein `KeyError` genau hier haette
-                # den Lauf mitten in einer Schreibrunde abgerissen — nach dem
-                # Anlegen der Vorschlaege und vor dem Parken.
-                offen = [
-                    proposal["id"] for proposal in proposals
-                    if proposal.get("id")
-                    and proposal.get("status") in {"proposed", "confirmed"}
-                ]
-                if offen and unbeaufsichtigt:
-                    # Eine Heilung parkt nicht, und eine faellige Aufgabe
-                    # ebensowenig. Es ist niemand da, der die Karte anklickt.
-                    #
-                    # Der Fall ist nicht theoretisch: das Stundenkontingent ist
-                    # benutzerweit, und `autonomy_allows` faellt bei Erschoepfung
-                    # ausdruecklich auf Bestaetigungspflicht zurueck statt zu
-                    # scheitern. Wer vormittags im Chat gearbeitet hat, dessen
-                    # naechtliche Heilung stiess also mitten im Vorgang an die
-                    # Grenze. `zustaendiger_freigeber` prueft nur die Obergrenze
-                    # des Grants, nicht den bereits verbrauchten Stand — und das
-                    # kann es auch nicht, weil die Grenze waehrend des Laufs
-                    # kippt.
-                    #
-                    # Geparkt bedeutete: Status 'waiting_confirmation', kein
-                    # Endzustand, also kein Bericht; im Guardian-Reiter dauerhaft
-                    # "die KI bearbeitet das"; und weil `aktiver_lauf` wartende
-                    # Laeufe mitzaehlt, keine weitere Heilung dieses Freigebers
-                    # auf keinem seiner Server. Ein Neustart des Panels hob das
-                    # nicht auf, denn `unterbrochene_laeufe_abgleichen` fasst
-                    # 'waiting_*' bewusst nicht an.
-                    #
-                    # Ein Test dieses Projekts schreibt die Regel schon fest: ein
-                    # Freigeber mit Budget 0 kommt gar nicht erst als Akteur in
-                    # Frage, weil "ein Lauf, der sofort auf eine Bestaetigung
-                    # wartet, keine Heilung ist, sondern eine Zeile in der
-                    # Datenbank, die einen Vorfall als versorgt markiert, ohne es
-                    # zu sein". Genau dieser Zustand entstand hier — nur eben
-                    # mitten im Lauf statt am Anfang.
-                    #
-                    # **Seit es die Freigabe per E-Mail gibt, wird zuerst
-                    # gefragt.** Alle vier Gruende oben sind einzeln abgeraeumt:
-                    # `aktiver_lauf` ist nach Unterhaltung gefasst, also
-                    # blockiert ein geparkter Reparaturlauf keine weitere
-                    # Heilung; der Takt laeuft in eine Frist und weckt den Lauf,
-                    # statt ihn ewig stehen zu lassen; die Abschlussmail kommt
-                    # vom Auftrag, nicht vom einzelnen Lauf; und der
-                    # Guardian-Reiter zeigt den wartenden Lauf an.
-                    #
-                    # Der Rueckfall darunter bleibt trotzdem stehen und ist
-                    # nicht tot: ohne hinterlegte Adresse, ohne eingerichteten
-                    # Versandweg oder wenn schon eine Freigabe offen ist, kann
-                    # niemand antworten. Dann wird zurueckgenommen und beendet,
-                    # genau wie vorher — ein Lauf, der auf eine Antwort wartet,
-                    # die nie kommen kann, waere schlimmer als einer, der
-                    # ehrlich aufhoert.
-                    if _freigabe_per_mail_erbeten(run_id, offen):
-                        zustand["pending"] = {"proposal_ids": list(offen)}
-                        geparkt = True
-                        letzte_runde = True
-                        current_usage = StreamUsage()
-                        continue
-
-                    # Sonst: die offenen Vorschlaege zuruecknehmen und den
-                    # Lauf beenden. Der Bericht geht dann hinaus und sagt dem
-                    # Betreiber ehrlich, dass die KI nicht weiterkonnte.
-                    _vorschlaege_zuruecknehmen(offen, grund="guardian_unattended")
-                    logger.info(
-                        "Lauf ohne Zuhoerer beendet: Vorschlag verlangt "
-                        "Bestaetigung, niemand ist da run_id=%s anzahl=%d",
-                        run_id, len(offen),
-                    )
-                    budget_erschoepft = True
-                    letzte_runde = True
-                    current_usage = StreamUsage()
-                    continue
-                if offen:
-                    zustand["pending"] = {
-                        "proposal_ids": [
-                            proposal["id"] for proposal in proposals if proposal.get("id")
-                        ],
-                    }
+                denknaht = schreib.denknaht
+                if schreib.abgeloest:
+                    abgeloest = True
+                    break
+                if schreib.geparkt:
                     geparkt = True
-                    letzte_runde = True
-                    current_usage = StreamUsage()
-                    continue
-                # Alles ausgefuehrt? Dann darf der Lauf weiterarbeiten. Das ist
-                # der Unterschied zwischen "eine Aktion abgeben" und "eine
-                # Aufgabe erledigen": erst wenn Schritt eins nachweislich lief,
-                # ergibt Schritt zwei ueberhaupt Sinn.
-                ausgefuehrt = bool(proposals) and all(
-                    proposal.get("status") in {"succeeded", "executing"}
-                    and not proposal.get("error_code")
-                    for proposal in proposals
-                )
-                # **Eine Runde, in der gar nichts entstanden ist, darf wiederholt
-                # werden.**
-                #
-                # Ohne diese Zeile war der Rueckfluss des Ablehnungsgrundes eine
-                # Geste: das Modell erfuhr, dass `time_of_day` im Format HH:MM
-                # stehen muss — und bekam im selben Atemzug die Werkzeuge
-                # weggenommen. Es konnte den Fehler nur noch beschreiben, nicht
-                # beheben. Der Benutzer las dann "ich konnte die Aufgabe nicht
-                # anlegen", obwohl der zweite Versuch durchgegangen waere.
-                #
-                # Die urspruengliche Regel ("erst wenn Schritt eins nachweislich
-                # lief, ergibt Schritt zwei Sinn") bleibt unangetastet, denn sie
-                # meint etwas anderes: eine Aktion, die **ausgefuehrt wurde und
-                # scheiterte**. Dann ist der Serverzustand unklar, und
-                # weiterzumachen waere leichtsinnig. Hier dagegen ist nichts
-                # passiert — kein Vorschlag, keine Zeile, kein Eingriff.
-                #
-                # Begrenzt ist es durch dieselbe Zahl wie zuvor: `write_rounds`
-                # zaehlt jede Schreibrunde, auch die abgelehnte.
-                nichts_entstanden = not any(
-                    proposal.get("id") for proposal in proposals
-                )
-                if not (
-                    (ausgefuehrt or nichts_entstanden)
-                    and zustand["write_rounds"] < MAX_WRITE_ROUNDS
-                ):
-                    # Nur wenn die Runde *ausgefuehrt* wurde und trotzdem Schluss
-                    # ist, lag es am Budget. Endet sie, weil ein Vorschlag offen
-                    # blieb, wartet der Lauf auf einen Menschen — das ist kein
-                    # aufgebrauchtes Budget.
-                    if ausgefuehrt:
-                        budget_erschoepft = True
+                if schreib.budget_erschoepft:
+                    budget_erschoepft = True
+                if schreib.letzte_runde:
                     letzte_runde = True
                 current_usage = StreamUsage()
                 continue
             if "unknown" in kinds:
                 raise AiProviderRequestError("AI_PROVIDER_TOOL_SEQUENCE_INVALID")
 
-            deferred_calls: list = []
-            if kinds == {"read", "write"}:
-                # Gemischte Runde: die Lesewerkzeuge laufen, die Schreibaufrufe
-                # bekommen eine Absage mit Begruendung und werden nachgeholt.
-                deferred_calls = [
-                    (call, (
-                        "Schreibaktionen laufen in einer eigenen Runde. Lies "
-                        "erst zu Ende und rufe die Aktion danach allein auf."
-                    ))
-                    for call in current_usage.tool_calls if call.name in WRITE_TOOLS
-                ]
-                current_usage.tool_calls = [
-                    call for call in current_usage.tool_calls if call.name in READ_TOOLS
-                ]
-
-            # Schleifenerkennung — **ueber Runden hinweg**, nicht innerhalb einer.
-            #
-            # Das ist der ganze Unterschied: neun Statusabfragen nebeneinander
-            # sind eine gruendliche Bestandsaufnahme ("laufen alle Server?"),
-            # dieselbe Abfrage in der vierten Runde hintereinander ist ein
-            # haengendes Modell. Gezaehlt wird deshalb je Runde einmal je
-            # Signatur, und geprueft wird gegen die Runden davor.
-            wiederholt: list = []
-            frisch: list = []
-            for call in current_usage.tool_calls:
-                gezaehlt = signaturen.get(_werkzeug_signatur(call.name, call.arguments), 0)
-                limit = MAX_GLEICHE_POLLING_AUFRUFE if call.name in POLLING_WERKZEUGE else MAX_GLEICHE_AUFRUFE
-                if gezaehlt >= limit:
-                    wiederholt.append((call, (
-                        "Dieser Aufruf lief mit genau diesen Argumenten bereits in "
-                        f"{gezaehlt} Runden und liefert nichts Neues. Arbeite mit dem, "
-                        "was du hast, oder frage den Benutzer."
-                    )))
-                    continue
-                frisch.append(call)
-            for signatur in {
-                _werkzeug_signatur(call.name, call.arguments) for call in frisch
-            }:
-                signaturen[signatur] = signaturen.get(signatur, 0) + 1
-            current_usage.tool_calls = frisch
-            deferred_calls.extend(wiederholt)
-
-            zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
-            if zustand["rounds"] > MAX_TOOL_ROUNDS:
-                # Ein Assistent, der abbricht *weil* er gruendlich war, ist
-                # schlechter als einer, der mit dem Vorhandenen antwortet. Ab
-                # hier gibt es keine Werkzeuge mehr, aber eine Antwort.
-                logger.info(
-                    "AI-Werkzeugrunden erschoepft, letzte Antwort ohne Werkzeuge run_id=%s",
-                    run_id,
-                )
+            deferred_calls, filter_signal = _runde_filtern(
+                kinds=kinds,
+                current_usage=current_usage,
+                signaturen=signaturen,
+                zustand=zustand,
+                run_id=run_id,
+            )
+            if filter_signal == "budget":
                 budget_erschoepft = True
                 letzte_runde = True
                 current_usage = StreamUsage()
                 continue
-            if not current_usage.tool_calls and not deferred_calls:
+            if filter_signal == "fertig":
                 break
-            followup, used_tools, nachtrag = await _tool_followup_messages(
+            denknaht = await _leserunde_ausfuehren(
                 user_id=user_id,
                 conversation_id=conversation_id,
-                tool_calls=current_usage.tool_calls,
-                deferred=deferred_calls,
-                correlation_id=vorbereitung.request_id,
+                current_usage=current_usage,
+                deferred_calls=deferred_calls,
+                vorbereitung=vorbereitung,
                 run_id=run_id,
                 guardian=guardian,
                 aufgabe=aufgabe,
-                # Nur solange der Lauf es noch nicht bekommen hat. Die
-                # Entscheidung fällt weiterhin unten — dort steht die Marke —,
-                # aber gelesen wird jetzt gar nicht erst, was ohnehin
-                # weggeworfen würde.
-                anlagenwissen_noetig=not zustand.get("anlagenwissen_gereicht"),
+                zustand=zustand,
+                rundentext=rundentext,
+                provider_messages=provider_messages,
+                chunks=chunks,
+                thoughts=thoughts,
+                denknaht=denknaht,
             )
-            provider_messages.extend(followup)
-            # Das Betriebswissen der Anlage, sobald feststeht welche. Genau
-            # einmal je Lauf: `zustand` ueberlebt die Unterbrechung, und nach
-            # einer Bestaetigung wuerde es sonst erneut angehaengt — dieselben
-            # Zeilen ein zweites Mal, mit anderem Zaehlerstand daneben.
-            if nachtrag is not None and not zustand.get("anlagenwissen_gereicht"):
-                zustand["anlagenwissen_gereicht"] = True
-                provider_messages.append(nachtrag)
-            # Hier stand die Schleife, die alle Werkzeugchips auf einmal
-            # herausgab — **nach** der ganzen Runde. Sie ist nach
-            # `_tool_followup_messages` gewandert und meldet jeden Aufruf,
-            # sobald er fertig ist. `used_tools` bleibt der Rueckgabewert, weil
-            # es weiterhin das Protokoll und den Serverbezug traegt.
-            #
-            # Und hier endet ein Absatz. `chunks` sammelt den Text **aller**
-            # Runden in einer flachen Liste, und `"".join(chunks)` weiter unten
-            # klebte deshalb den Schlusssatz dieser Runde an das erste Zeichen
-            # der naechsten: „…damit die Mail nur bestaetigte Informationen
-            # enthaelt.Ich pruefe jetzt den Status…“ — so stand es in einer
-            # Berichtsmail. Innerhalb einer Runde ist das nahtlose Aneinander
-            # richtig (es sind Token-Bruchstuecke), zwischen zwei Runden liegt
-            # ein Werkzeugaufruf, und `MITREDEN` verlangt davor einen ganzen
-            # Satz. Der Umbruch gehoert also genau hierhin, an die Naht.
-            if chunks and not chunks[-1].endswith("\n"):
-                chunks.append("\n\n")
-            # Und dasselbe für den Denktext, der über alle Runden in derselben
-            # flachen Liste liegt und mit `"".join(thoughts)` genauso
-            # zusammenklebte. `thoughts and …` ist Pflicht: bei abgeschaltetem
-            # Denken ist die Liste leer, und ein führender Umbruch wäre ein
-            # neuer Fehler.
-            #
-            # Bestellt statt gesetzt: der Umbruch geht oben zusammen mit dem
-            # ersten Gedanken der nächsten Runde als `reasoning`-Ereignis
-            # hinaus, damit der Live-Text Zeichen für Zeichen derselbe bleibt
-            # wie der gespeicherte. Hängte man ihn hier gleich an `thoughts`
-            # und veröffentlichte ihn als eigenes Ereignis, entstünde beim
-            # Vermittler ein Denkabschnitt aus nichts als zwei Umbrüchen — und
-            # denkt die nächste Runde nicht mehr, zeichnet die Oberfläche
-            # daraus einen leeren Kasten „Nachgedacht“.
-            if thoughts and not thoughts[-1].endswith("\n"):
-                denknaht = "\n\n"
             current_usage = StreamUsage()
 
         if abgeloest:
@@ -2693,6 +3088,18 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         ai_run_broker.veroeffentlichen(run_id, "done", {"message_id": message_id})
 
         if geparkt:
+            # Der Schlusstext der letzten Runde („Vorsicht: das Löschen
+            # entfernt auch die Backups — bitte bestätige.") gehoert in den
+            # gespeicherten Verlauf des Laufs. Die Fortsetzung nach der
+            # Bestaetigung haengt nur `_aktionsmeldung` an; ohne diese Zeile
+            # kannte das aufgeweckte Modell seine eigene Warnung und Zusage
+            # nicht. `chunks[rundenbeginn:]` ist genau der Text der
+            # abschliessenden Runde ohne Werkzeuge.
+            schlusstext = "".join(chunks[rundenbeginn:]).strip()
+            if schlusstext:
+                provider_messages.append(
+                    {"role": "assistant", "content": schlusstext}
+                )
             _lauf_abschliessen(
                 run_id,
                 status="waiting_confirmation",
@@ -2808,9 +3215,11 @@ def lauf_beginnen(
     beginnt die eigentliche Arbeit, und ab da haengt sie an nichts mehr.
 
     ``unbeaufsichtigt`` sagt an, dass dies eine Heilung oder ein fällig
-    gewordener Auftrag wird. Es geht ausschließlich in den Systemprompt: der
-    Rahmen selbst (``zustand["guardian"]``, ``zustand["aufgabe"]``) entsteht
-    erst **nach** dieser Funktion, der Prompt aber schon darin — ohne diesen
+    gewordener Auftrag wird. Es wirkt ausschließlich auf das Skill-Verzeichnis
+    (die Datennachricht hinter dem Systemprompt entfällt in einem Lauf ohne
+    Zuschauer, siehe `ai_context_service._skill_index_block`): der Rahmen
+    selbst (``zustand["guardian"]``, ``zustand["aufgabe"]``) entsteht erst
+    **nach** dieser Funktion, der Kontext aber schon darin — ohne diesen
     Wert ließe sich der Unterschied hier nicht sehen. Ein eigener Wert und
     nicht an ``guardian_briefing_unterdruecken`` angehängt: das eine
     unterdrückt einen Bericht, das andere entscheidet über den Prompt, und ein

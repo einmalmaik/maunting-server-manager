@@ -479,10 +479,12 @@ def _modell_aus_openai(rohdaten: dict) -> Modell | None:
     **Was das für den Betreiber heisst**, und es steht auch in der Oberfläche:
     an einem OpenAI-Zugang gibt es keine Denkstufenauswahl und kein bekanntes
     Kontextfenster. ``denkt=False`` ist dabei die einzige Angabe, die aussieht
-    wie eine Behauptung und keine ist — sie bewirkt nur, dass MSM kein
-    ``reasoning``-Feld sendet. Das Modell denkt dann so, wie OpenAI es
-    voreingestellt hat; MSM stellt es bloss nicht ein. ``kontext_tokens=None``
-    heisst überall im Code „unbekannt" und nie „klein"
+    wie eine Behauptung und keine ist — sie sagt nur: keine Stufenauswahl. Ob
+    überhaupt ein ``reasoning``-Feld hinausgeht, entscheidet nicht sie, sondern
+    ``Anbieter.reasoning_feld`` in `ai_provider_registry` (für OpenAI: nein,
+    dessen strenge Validierung wiese es mit einem 400 ab). Das Modell denkt
+    dann so, wie OpenAI es voreingestellt hat; MSM stellt es bloss nicht ein.
+    ``kontext_tokens=None`` heisst überall im Code „unbekannt" und nie „klein"
     (`ai_context_window.ermitteln`).
 
     **Es wird nicht gefiltert**, obwohl die Liste auch ``whisper-1``,
@@ -601,6 +603,17 @@ async def _besorgen(
     jetzt = datetime.now(timezone.utc)
 
     eintrag = _cache.get(kind)
+    # Ohne Schluessel ist der Abruf eines schluesselpflichtigen Katalogs ein
+    # garantiertes 401 — dieselbe Begruendung wie am Vorwaermen, nur dass sie
+    # vorher nur dort galt. Die Sendepfade (`finde` aus Stream, Kontextfenster,
+    # Reasoning) fragen ohne Schluessel; ihr Fehlversuch setzte ``fehler_am``
+    # und liess damit sogar den **Schluessel-Weg** der Einstellungsseite eine
+    # Ruhefrist lang die leere Liste ausliefern. Hier gibt es deshalb nur den
+    # Bestand: frisch, alt oder leer — aber nie einen Abruf und nie einen
+    # Fehlervermerk fuer einen Fehler, den niemand gemacht hat.
+    if spec.katalog_braucht_schluessel and not schluessel:
+        return eintrag.modelle if eintrag is not None else []
+
     if not erzwingen and eintrag is not None and _antwortet_ohne_abruf(eintrag, jetzt):
         return eintrag.modelle
 

@@ -1842,17 +1842,28 @@ async def test_die_heilung_wird_nicht_zu_etwas_aufgefordert_das_sie_nicht_darf(
         .order_by(AiRun.created_at.desc()).first()
     )
     assert run is not None
-    systemnachricht = ai_run_service.zustand_lesen(run)["provider_messages"][0]
-    assert systemnachricht["role"] == "system"
-    assert "Skill-Verzeichnis" not in systemnachricht["content"]
-    assert "read_skill" not in systemnachricht["content"]
+    # Ueber **alle** Nachrichten der Heilung: das Verzeichnis ist keine Zeile
+    # im Systemprompt mehr, sondern eine eigene Datennachricht — es darf also
+    # auch als solche nicht auftauchen.
+    in_der_heilung = "\n".join(
+        nachricht["content"]
+        for nachricht in ai_run_service.zustand_lesen(run)["provider_messages"]
+        if isinstance(nachricht.get("content"), str)
+    )
+    assert "Skill-Verzeichnis" not in in_der_heilung
+    assert "read_skill" not in in_der_heilung
 
     # Gegenprobe an derselben Unterhaltung: im Chat sieht dieser Benutzer das
-    # Verzeichnis unverändert. Sonst prüfte der Test nur, dass es niemand hat.
+    # Verzeichnis unverändert — als eigene Nachricht hinter dem Systemprompt.
+    # Sonst prüfte der Test nur, dass es niemand hat.
     conversation = (
         db.query(AiConversation).filter(AiConversation.user_id == user.id).first()
     )
     assert conversation is not None
-    im_chat = build_provider_messages(db, conversation)[0]["content"]
+    im_chat = "\n".join(
+        nachricht["content"]
+        for nachricht in build_provider_messages(db, conversation)
+        if isinstance(nachricht.get("content"), str)
+    )
     assert "Skill-Verzeichnis" in im_chat
     assert "read_skill" in im_chat

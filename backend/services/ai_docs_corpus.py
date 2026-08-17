@@ -351,13 +351,6 @@ def abschnitte(seiten_schluessel: str) -> list[Abschnitt]:
     return eintrag.abschnitte
 
 
-def seiten_uebersicht() -> list[dict]:
-    return [
-        {"page": s.schluessel, "title": s.titel, "panel_page": s.route}
-        for s in SEITEN.values()
-    ]
-
-
 def verzeichnis(seiten_schluessel: str) -> dict:
     """Die Gliederung einer Seite — billig, damit das Modell nicht raten muss.
 
@@ -417,18 +410,29 @@ def suche(begriff: str, seiten_schluessel: str | None = None) -> list[dict]:
             continue
         for a in rows:
             heuhaufen = falten(f"{a.titel}\n{a.text}")
-            pos = heuhaufen.find(nadel)
-            if pos < 0:
+            if heuhaufen.find(nadel) < 0:
                 continue
-            start = max(0, pos - SCHNIPSEL_ZEICHEN // 3)
+            # Der Schnipsel kommt aus dem **ungefalteten** Text: was das
+            # Modell zu sehen bekommt, muss lesbar sein und der Seite
+            # entsprechen, nicht der Suchform.
+            #
+            # Die Fundstelle wird dafuer im Original **neu** gesucht. Hier
+            # wurde einmal die gefaltete Position weiterverwendet — zwei
+            # Koordinatenfehler auf einmal: der Titel steckt im Heuhaufen,
+            # aber nicht im Text, und die Faltung kuerzt („ue"→„u", „ss"→„s";
+            # die Docs sind durchgaengig ASCII-transkribiert). Ein Treffer
+            # 8.000 Zeichen tief lag real Hunderte Zeichen hinter der
+            # gefalteten Position, und der Schnipsel zeigte den Suchbegriff
+            # gar nicht. Findet die Rohsuche nichts (der Treffer lebt nur in
+            # der Faltung oder im Titel), zeigt der Schnipsel den
+            # Abschnittsanfang — ehrlich ungenau statt praezise falsch.
+            pos = a.text.lower().find(begriff.strip().lower())
+            start = max(0, pos - SCHNIPSEL_ZEICHEN // 3) if pos >= 0 else 0
             treffer.append({
                 "page": seite.schluessel,
                 "section": a.schluessel,
                 "title": a.titel,
                 "panel_page": seite.route,
-                # Der Schnipsel kommt aus dem **ungefalteten** Text: was das
-                # Modell zu sehen bekommt, muss lesbar sein und der Seite
-                # entsprechen, nicht der Suchform.
                 "snippet": a.text[start:start + SCHNIPSEL_ZEICHEN].strip(),
             })
             if len(treffer) >= MAX_TREFFER:

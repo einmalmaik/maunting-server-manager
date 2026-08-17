@@ -1120,27 +1120,30 @@ die Deutung — ein Codeblock ist vorgelesen nichts als Satzzeichen.
 
 ### Kontingent
 
-**Jede Äusserung ist eine Anfrage.** Das ist der eine Punkt, an dem sich für den
-Betreiber etwas geändert hat: wo eine Sprachsitzung früher **eine** Buchung war,
-ist jetzt jeder Zug eine — dieselbe Buchung wie eine getippte Nachricht, über
-denselben Weg gezählt. Ein Rollenlimit *Anfragen pro Minute* von fünf zerreisst
-damit ein Gespräch, das vorher durchlief. Ohne gesetztes Limit passiert nichts.
+**Jede Äusserung sind zwei Buchungen.** Das ist der eine Punkt, an dem sich für
+den Betreiber etwas geändert hat: wo eine Sprachsitzung früher **eine** Buchung
+war, bucht jetzt jeder Zug zweimal — einmal die Abschrift des Gesprochenen,
+einmal den Lauf selbst, beide über denselben Weg gezählt wie eine getippte
+Nachricht. Ein Rollenlimit *Anfragen pro Minute* von fünf zerreisst damit ein
+Gespräch, das vorher durchlief. Ohne gesetztes Limit passiert nichts.
 
-Der Gewinn ist, dass Tokengrenzen und Kostengrenze das **Denken** im
-Sprachmodus genauso binden wie im Chat: dieselbe Rechnung, dieselben vom
-Anbieter gemeldeten Zahlen, derselbe gepflegte Rückfallpreis am Zugang. Die
-frühere Lücke — „die Kostengrenze bindet den Sprachmodus überhaupt nicht" —
-gibt es nicht mehr.
+Der Gewinn ist, dass Tokengrenzen und Kostengrenze den Sprachmodus genauso
+binden wie den Chat: dieselbe Rechnung, dieselben vom Anbieter gemeldeten
+Zahlen, derselbe gepflegte Rückfallpreis am Zugang. Die früheren Lücken — „die
+Kostengrenze bindet den Sprachmodus überhaupt nicht" und „das Zuhören läuft an
+allen Grenzen vorbei" — gibt es nicht mehr.
 
-Zwei Posten zählt MSM aber **nicht** mit, und beide stehen trotzdem auf der
+Eine Eigenheit hat die Abschrift-Buchung: sie erfolgt **nach** dem Hören, nicht
+davor. Eine Reservierung vor dem Hören würfe die Äusserung weg, bevor irgendwer
+weiss, was gesagt wurde — der Sprechende erführe nicht einmal, dass sein
+Kontingent erschöpft ist. Deshalb wird erst gehört und dann gebucht; die
+Buchung zählt trotzdem voll gegen Tages-, Wochen- und Monatsgrenzen, nur um
+eine Äusserung versetzt. Ist das Kontingent erschöpft, endet der Zug dort, und
+die Oberfläche sagt es als das, was es ist — „warte" statt „kaputt".
+
+Einen Posten zählt MSM weiterhin **nicht** mit, und er steht trotzdem auf der
 Rechnung des Betreibers:
 
-- **Die Abschrift des Gesprochenen.** Sie geht dem Lauf voraus und gehört zu
-  keinem — es gibt keine Anfrage, der man sie zuschlagen könnte. Sie ist billig
-  (kein Nachdenken, eine kurze Antwort), aber sie fällt bei *jeder* Äusserung
-  an. Eine Reservierung davor wäre auch kein Gewinn: abgelehnt, würde sie die
-  Äusserung verwerfen, bevor irgendwer weiss, was gesagt wurde — der Sprechende
-  erführe nicht einmal, dass sein Kontingent erschöpft ist.
 - **Die Zeichen bei ElevenLabs.** Sie werden nach Zeichen abgerechnet und nicht
   nach Tokens; die Grenze dafür steht im Konto des Betreibers. Eine einzelne
   Antwort ist auf 4.000 Zeichen gedeckelt, damit ein Modell, das sich verrennt,

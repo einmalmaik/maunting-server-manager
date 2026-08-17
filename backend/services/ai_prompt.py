@@ -563,9 +563,10 @@ Ein Auftrag mit `kind: "act"` darf selbst handeln und setzt den autonomen Modus 
 Weckt dich ein faelliger Auftrag, sitzt niemand davor: `ask_user` gibt es dann nicht. Entscheide selbst oder melde ehrlich Fehlanzeige. Dein Abschlusstext wird als E-Mail gelesen — fasse in wenigen Saetzen zusammen, was du festgestellt oder getan hast."""
 
 
-# Reihenfolge des fertigen Prompts. Der Skill-Index wird zwischen SKILLS und
-# GEHEIMNISSE eingesetzt: er gehoert thematisch zu den Skills, soll aber nicht
-# zwischen Regel und Verbot stehen.
+# Reihenfolge des fertigen Prompts. Hier wurde einmal der Skill-Index zwischen
+# SKILLS und GEHEIMNISSE eingesetzt — er steht jetzt als eigene, als Daten
+# gekennzeichnete `user`-Nachricht direkt hinter dem Prompt
+# (`ai_context_service._skill_index_message`); warum, steht dort.
 BLOECKE = (
     ROLLE,
     FORMAT,
@@ -599,9 +600,6 @@ BLOECKE = (
     GEDAECHTNIS,
     GEDAECHTNIS_AUFRAEUMEN,
     SKILLS,
-)
-
-NACH_SKILL_INDEX = (
     GEHEIMNISSE,
     UNTRUSTED,
     GUARDIAN,
@@ -704,12 +702,16 @@ anderen: sag, was du tun wuerdest, frag, und handle nach der Antwort. Verweise
 ihn nicht auf einen Knopf; im Sprachmodus gibt es keinen."""
 
 
-def build(skill_index: str = "", *, gesprochen: bool = False) -> str:
-    """Setzt den Systemprompt zusammen.
+def build(*, gesprochen: bool = False) -> str:
+    """Setzt den Systemprompt zusammen — byteweise statisch.
 
-    ``skill_index`` ist der einzige dynamische Teil — Name und Beschreibung der
-    Skills, die dieser Benutzer sehen darf. Leer, wenn es keine gibt oder das
-    Recht fehlt.
+    Hier stand ein ``skill_index``-Parameter: Name und Beschreibung der Skills
+    dieses Benutzers, mitten im Prompt. Er ist mit Absicht weg, aus zwei
+    Gruenden, die beide an `ai_context_service._skill_index_message` stehen:
+    Skilltexte sind von Benutzern verfasste Daten und trugen mit der
+    System-Rolle die Autoritaet der MSM-Regeln (Prompt Injection); und ein
+    Prompt, der sich je Benutzer und oberhalb der Skill-Kappe je Frage aendert,
+    entwertete den Anbieter-Zwischenspeicher an seiner ersten Stelle.
 
     ``gesprochen`` laesst `NUR_GETIPPT` weg und haengt `GESPROCHEN` an. Es ist
     **ein Prompt mit einem Schalter** und nicht zwei Prompts: wer einen Block
@@ -721,23 +723,8 @@ def build(skill_index: str = "", *, gesprochen: bool = False) -> str:
     Ein nachtraegliches Herausschneiden per Textersetzung gab es hier einmal;
     es hinterliess Loecher zwischen den Absaetzen, die nachgeraeumt werden
     mussten, und es traf jede `system`-Nachricht statt nur den Systemprompt.
-
-    Der Index bekommt eine **Leerzeile** vor sich. Das ist keine Kosmetik: er
-    ist eine Liste inmitten von Fliesstext, und ohne Absatzgrenze klebt sie
-    unmittelbar an der Skill-Regel darueber. Genau daran erkennt ein Modell, wo
-    ein Block endet und der naechste beginnt.
-
-    Die Zeile war in der ersten Fassung dieser Datei verlorengegangen, weil
-    ``.strip()`` den fuehrenden Umbruch des Blocks mit entfernte. Aufgefallen
-    ist es erst, als jemand den Prompt **mit** hinterlegten Skills verglich —
-    ohne Skills war er zeichengleich, und genau so war er auch geprueft worden.
     """
     teile = [block for block in BLOECKE if not (gesprochen and block in NUR_GETIPPT)]
-    if skill_index:
-        teile.append("\n" + skill_index.strip())
-    teile.extend(
-        block for block in NACH_SKILL_INDEX if not (gesprochen and block in NUR_GETIPPT)
-    )
     if gesprochen:
         # Ganz ans Ende, und das ist seit dem Wegfall des Widerrufs eine
         # harmlose Entscheidung: es steht nichts mehr darueber, dem dieser Text

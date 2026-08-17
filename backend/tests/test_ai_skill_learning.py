@@ -63,13 +63,24 @@ def _conversation(db: Session, user: User) -> AiConversation:
     return conversation
 
 
-def _system_prompt(
+def _frueher_kontext(
     db: Session, user: User, query: str = "", unbeaufsichtigt: bool = False
 ) -> str:
+    """Systemprompt plus Skill-Verzeichnis — die beiden fruehen Bloecke.
+
+    Das Verzeichnis steht seit seinem Umzug nicht mehr **im** Systemprompt,
+    sondern als eigene, als Daten gekennzeichnete `user`-Nachricht direkt
+    dahinter (`ai_context_service._skill_index_message`). Fuer die Zusagen
+    dieser Tests — wer sieht welchen Skill, und wann gar keinen — zaehlt
+    beides zusammen; wo genau es steht, prueft `test_ai_prompt_caching`.
+    """
     messages = build_provider_messages(
         db, _conversation(db, user), query, unbeaufsichtigt=unbeaufsichtigt
     )
-    return next(item["content"] for item in messages if item["role"] == "system")
+    teile = [messages[0]["content"]]
+    if len(messages) > 1 and "Skill-Verzeichnis" in str(messages[1].get("content", "")):
+        teile.append(messages[1]["content"])
+    return "\n".join(teile)
 
 
 @pytest.fixture(autouse=True)
@@ -86,7 +97,7 @@ def test_the_system_prompt_lists_available_skills(db: Session, regular_user: Use
     """Ohne dieses Verzeichnis waeren die mitgelieferten Skills totes Gewicht."""
     _allow(db, regular_user, "ai.chat.use", "ai.skills.use")
 
-    prompt = _system_prompt(db, regular_user)
+    prompt = _frueher_kontext(db, regular_user)
 
     assert "Skill-Verzeichnis" in prompt
     assert "server-nicht-erreichbar" in prompt
@@ -99,7 +110,7 @@ def test_the_index_carries_descriptions_but_no_bodies(
     """Stufe eins kostet rund hundert Tokens je Skill, nicht den ganzen Text."""
     _allow(db, regular_user, "ai.chat.use", "ai.skills.use")
 
-    prompt = _system_prompt(db, regular_user)
+    prompt = _frueher_kontext(db, regular_user)
 
     shipped = ai_skill_service.shipped_skills()["server-nicht-erreichbar"]
     assert shipped.description[:40] in prompt
@@ -110,7 +121,7 @@ def test_the_index_carries_descriptions_but_no_bodies(
 def test_without_the_permission_there_is_no_index(db: Session, regular_user: User) -> None:
     _allow(db, regular_user, "ai.chat.use")
 
-    assert "Skill-Verzeichnis" not in _system_prompt(db, regular_user)
+    assert "Skill-Verzeichnis" not in _frueher_kontext(db, regular_user)
 
 
 def test_a_run_without_witnesses_is_not_asked_to_read_what_it_cannot_read(
@@ -133,18 +144,21 @@ def test_a_run_without_witnesses_is_not_asked_to_read_what_it_cannot_read(
     # Dieselbe Unterhaltung für beide Prompts: ein Benutzer hat genau eine.
     conversation = _conversation(db, regular_user)
 
-    def systemprompt(unbeaufsichtigt: bool) -> str:
+    def gesamter_kontext(unbeaufsichtigt: bool) -> str:
         nachrichten = build_provider_messages(
             db, conversation, unbeaufsichtigt=unbeaufsichtigt
         )
-        return next(item["content"] for item in nachrichten if item["role"] == "system")
+        # Über **alle** Nachrichten, nicht nur den Systemprompt: seit dem
+        # Umzug in eine eigene Nachricht dürfte das Verzeichnis sonst dort
+        # weiterleben, und dieser Test sähe es nicht.
+        return "\n".join(str(item.get("content", "")) for item in nachrichten)
 
-    ohne_zeugen = systemprompt(True)
+    ohne_zeugen = gesamter_kontext(True)
     assert "Skill-Verzeichnis" not in ohne_zeugen
     assert "server-nicht-erreichbar" not in ohne_zeugen
     assert "read_skill" not in ohne_zeugen
     # Der Chat des Menschen daneben behält es unverändert.
-    assert "Skill-Verzeichnis" in systemprompt(False)
+    assert "Skill-Verzeichnis" in gesamter_kontext(False)
 
 
 def test_a_foreign_team_skill_never_reaches_the_prompt(
@@ -162,8 +176,8 @@ def test_a_foreign_team_skill_never_reaches_the_prompt(
 
     # Auf den Namen pruefen, nicht auf den Schluessel: "intern" steckt auch
     # in "interne Pfade" weiter oben im Prompt.
-    assert "Interne Vorgehensweise" in _system_prompt(db, regular_user)
-    assert "Interne Vorgehensweise" not in _system_prompt(db, stranger)
+    assert "Interne Vorgehensweise" in _frueher_kontext(db, regular_user)
+    assert "Interne Vorgehensweise" not in _frueher_kontext(db, stranger)
 
 
 # ── read_skill ────────────────────────────────────────────────────────

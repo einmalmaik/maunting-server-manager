@@ -71,11 +71,12 @@ def rang(stufe: str) -> int | None:
         return None
 
 
-def stufe_fuer_rang(wert: int) -> str | None:
-    """Das Wort zu einem Rang. ``0`` ist „aus“ und hat keines."""
-    if wert <= MIN_RANG or wert > MAX_RANG:
-        return None
-    return RANGFOLGE[wert - 1]
+# Hier stand ``stufe_fuer_rang(wert)`` — das Wort zu einem Rang. Geschrieben
+# fuer einen Aufrufer, der nie kam: die Oberflaeche pflegt die Woerter selbst
+# (`AiTab.tsx`, per Test gegen `RANGFOLGE` gehalten), und der Server rechnet
+# ueberall vom Wort zum Rang, nie zurueck. Entfernt, weil eine ungenutzte
+# Funktion beim naechsten Umbau mitwandert und dabei aussieht, als hinge etwas
+# an ihr.
 
 
 def waehlbare_stufen(modell: Modell, deckel: int | None) -> list[str]:

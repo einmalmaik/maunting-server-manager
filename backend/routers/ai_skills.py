@@ -48,8 +48,9 @@ def list_skills(
 ) -> list[AiSkillSummary]:
     """Das Verzeichnis, das dieser Benutzer sieht — ohne die Texte.
 
-    Dieselbe Liste, die auch in den Systemprompt geht. Wer sie hier abruft,
-    sieht genau das, was die KI ueber verfuegbare Skills weiss.
+    Dieselbe Liste, die auch als Skill-Verzeichnis in den Kontext geht (eine
+    Datennachricht hinter dem Systemprompt). Wer sie hier abruft, sieht genau
+    das, was die KI ueber verfuegbare Skills weiss.
     """
     return [_summary(view) for view in ai_skill_service.visible_skills(db, user)]
 

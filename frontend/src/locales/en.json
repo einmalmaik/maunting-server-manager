@@ -653,6 +653,7 @@
         "microphone": "No access to the microphone. Allow it in your browser settings.",
         "audio": "The browser could not set up the audio chain. Details are in the developer console.",
         "provider": "That didn't work just now.",
+        "quota": "Quota exhausted — the conversation is paused. Wait a moment or raise your limit.",
         "connection": "Lost the connection to voice mode."
       },
       "toVoiceMode": "Realtime mode",
@@ -1661,7 +1662,7 @@
     },
     "server_config_write": {
       "title": "Adjust settings",
-      "desc": "Allows changing the server name, auto-restart and startup parameters."
+      "desc": "Allows changing the server name, auto-restart and startup parameters — and also the blueprint/game switch, which reinstalls the server: world, configs and mods are replaced, and a backup is forced beforehand."
     },
     "server_network_manage": {
       "title": "Edit network",

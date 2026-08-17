@@ -57,8 +57,9 @@ class AiSkill(Base):
     skill_key: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     # Entscheidet, ob das Modell den Skill ueberhaupt anfasst: nur `name` und
-    # `description` stehen dauerhaft im Systemprompt. Die Beschreibung muss
-    # deshalb sagen, *was* der Skill tut und *wann* er passt.
+    # `description` stehen dauerhaft im Kontext (das Skill-Verzeichnis, eine
+    # Datennachricht hinter dem Systemprompt). Die Beschreibung muss deshalb
+    # sagen, *was* der Skill tut und *wann* er passt.
     description: Mapped[str] = mapped_column(String(500), nullable=False)
     # Der eigentliche Text. Wird erst geladen, wenn das Modell ihn anfordert.
     body: Mapped[str] = mapped_column(Text, nullable=False)

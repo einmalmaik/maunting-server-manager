@@ -38,9 +38,10 @@ nichts davon. Sie übersetzt nur zwischen „gesprochen" und „getippt", und di
 
 **Eine Äusserung ist eine Anfrage.** Das ist der eine Punkt, an dem sich für
 den Betreiber etwas ändert: wo eine Sprachsitzung früher **eine** Buchung war,
-ist jetzt jeder Zug eine. Ein Rollenlimit ``requests_per_minute`` von fünf
-zerreisst damit ein Gespräch, das vorher durchlief. Ohne gesetztes Limit
-(``None``, die Vorgabe) passiert nichts.
+sind es jetzt **zwei je Zug** — eine für die Abschrift
+(`_abschrift_verbuchen`) und eine für den Lauf. Ein Rollenlimit
+``requests_per_minute`` von fünf zerreisst damit ein Gespräch, das vorher
+durchlief. Ohne gesetztes Limit (``None``, die Vorgabe) passiert nichts.
 """
 
 from __future__ import annotations
@@ -67,6 +68,8 @@ from services import (
     ai_tts_elevenlabs,
     ai_voice_vad,
 )
+# Kein neues Paket: `ai_stt` oben importiert den Adapter bereits hart.
+from services.openai_compatible_adapter import StreamUsage
 
 logger = logging.getLogger(__name__)
 
@@ -423,7 +426,17 @@ class Sprachbruecke:
                 "Sprachzug gescheitert user=%s error=%s code=%s detail=%s",
                 self._user_id, type(fehler).__name__, kennung or "-", einzelheit or "-",
             )
-            await self._senden({"art": "stoerung"})
+            # Ein erschoepftes Kontingent ist keine Panne, sondern eine Grenze
+            # — und sie trifft den Sprachmodus haerter als den Chat, weil jeder
+            # Zug **zwei** Buchungen kostet (Abschrift + Lauf, siehe
+            # Modulkopf). `grund` laesst den Browser das unterscheiden: „warte
+            # eine Minute" ist eine andere Auskunft als „etwas ist kaputt".
+            from services.ai_usage_service import AiQuotaExceeded
+
+            if isinstance(fehler, AiQuotaExceeded):
+                await self._senden({"art": "stoerung", "grund": "kontingent"})
+            else:
+                await self._senden({"art": "stoerung"})
             await self._zustand_melden(ZUSTAND_BEREIT)
 
     async def _abhoeren(self, aeusserung: ai_voice_vad.Aeusserung) -> str | None:
@@ -434,9 +447,11 @@ class Sprachbruecke:
             await self._senden({"art": "stoerung"})
             await self._zustand_melden(ZUSTAND_BEREIT)
             return None
+        messwerte = StreamUsage()
         try:
-            return await ai_stt.hoeren(
-                self._client, provider=zugang, api_key=schluessel, pcm=aeusserung.pcm
+            wortlaut = await ai_stt.hoeren(
+                self._client, provider=zugang, api_key=schluessel, pcm=aeusserung.pcm,
+                usage=messwerte,
             )
         except ai_stt.NichtsVerstanden:
             # Kein Fehler, sondern ein Alltagsfall: Husten, Räuspern, ein Wort
@@ -444,6 +459,98 @@ class Sprachbruecke:
             # dafür wäre lauter als das Ereignis.
             await self._zustand_melden(ZUSTAND_BEREIT)
             return None
+        if not await asyncio.to_thread(self._abschrift_verbuchen, zugang, messwerte, wortlaut):
+            # Das Kontingent ist erschöpft. Die Äusserung fällt weg, aber der
+            # Mensch erfährt es — mit `grund`, denn „warte eine Minute" ist
+            # eine andere Auskunft als „etwas ist kaputt".
+            await self._senden({"art": "stoerung", "grund": "kontingent"})
+            await self._zustand_melden(ZUSTAND_BEREIT)
+            return None
+        return wortlaut
+
+    def _abschrift_verbuchen(
+        self, zugang: AiProvider, messwerte: StreamUsage, wortlaut: str
+    ) -> bool:
+        """Bucht das Zuhören als eigenen Verbrauch — **nach** der Abschrift.
+
+        Die Reihenfolge ist eine Entscheidung und keine Nachlässigkeit: eine
+        Reservierung **vor** dem Hören würfe die Äusserung weg, bevor irgendwer
+        weiss, was gesagt wurde — der Sprechende bekäme nicht einmal die
+        Auskunft, dass sein Kontingent erschöpft ist. Deshalb wird erst gehört
+        und dann gebucht; die Buchung zählt trotzdem voll gegen Tages-, Wochen-
+        und Monatsgrenzen, nur um eine Äusserung versetzt.
+
+        ``False`` heisst ausschliesslich: das Kontingent ist erschöpft, dieser
+        Zug endet hier. Jeder **andere** Buchungsfehler lässt das Gespräch
+        weiterlaufen — die Anbieterkosten sind längst entstanden, und den
+        Sprechenden für einen Buchhaltungsfehler zu bestrafen zöge die falsche
+        Konsequenz. Er landet im Protokoll statt auf dem Ohr.
+        """
+        from services import ai_usage_service
+        from services.ai_provider_service import estimate_cost_microunits
+
+        geschaetzt = messwerte.total_tokens
+        if geschaetzt is None:
+            # Der Anbieter schweigt: dieselbe Näherung wie überall sonst,
+            # Zeichen durch vier. Der Tonanteil bleibt dabei ungezählt — MSM
+            # erfindet keine Zahl für etwas, das der Anbieter nicht meldet.
+            geschaetzt = max(1, len(wortlaut) // 4)
+        geschaetzt = min(geschaetzt, ai_usage_service.TOKEN_LIMIT_MAX)
+        with SessionLocal() as db:
+            benutzer = db.get(User, self._user_id)
+            if benutzer is None:
+                # Kein Kontingentfall: das Konto ist mitten in der Sitzung
+                # verschwunden. `False` hiesse „warte eine Minute" — eine
+                # falsche Auskunft. Wie jeder andere Buchungsfehler: ins
+                # Protokoll, das Gespraech laeuft weiter; beendet wird die
+                # Sitzung ohnehin an der naechsten Stelle, die den Benutzer
+                # wirklich braucht (der Lauf selbst).
+                logger.warning(
+                    "Abschrift nicht verbucht user=%s: Benutzer existiert nicht mehr",
+                    self._user_id,
+                )
+                return True
+            try:
+                ereignis = ai_usage_service.reserve_ai_usage(
+                    db,
+                    benutzer,
+                    request_id=uuid4(),
+                    estimated_tokens=geschaetzt,
+                    estimated_cost_microunits=estimate_cost_microunits(zugang, geschaetzt),
+                    provider_id=zugang.id,
+                    model=zugang.transcription_model,
+                )
+                # Dieselbe Abrechnung wie im Chat und in der Verdichtung: was
+                # der Anbieter meldet, sticht die Schätzung.
+                tokens, kosten, herkunft = ai_usage_service.abrechnung(
+                    messwerte,
+                    reserved_tokens=ereignis.reserved_tokens,
+                    estimated_actual_tokens=geschaetzt,
+                    token_price_micro_usd_per_million=(
+                        zugang.token_price_micro_usd_per_million
+                    ),
+                )
+                ai_usage_service.complete_ai_usage(
+                    db, ereignis,
+                    actual_tokens=tokens,
+                    actual_cost_microunits=kosten,
+                    aufschluesselung=messwerte,
+                    cost_source=herkunft,
+                )
+                db.commit()
+            except ai_usage_service.AiQuotaExceeded as grenze:
+                db.rollback()
+                logger.info(
+                    "Abschrift ohne Kontingent user=%s grund=%s",
+                    self._user_id, grenze.reason,
+                )
+                return False
+            except Exception:
+                db.rollback()
+                logger.warning(
+                    "Abschrift nicht verbucht user=%s", self._user_id, exc_info=True
+                )
+        return True
 
     def _zugang_holen(self, resolve_api_key) -> tuple[AiProvider | None, str | None]:
         """Zugang und Schlüssel je Zug frisch — die Sitzung hält keine offene DB."""
@@ -482,7 +589,17 @@ class Sprachbruecke:
         if run_id is None:
             code = fehler[0] if fehler else "AI_PROVIDER_UNAVAILABLE"
             logger.info("Sprachlauf abgelehnt user=%s code=%s", self._user_id, code)
-            await self._senden({"art": "stoerung"})
+            # Ein erschoepftes Kontingent kommt hier als **Rueckgabewert** an,
+            # nicht als Ausnahme: `lauf_beginnen_nebenher` faengt
+            # `AiQuotaExceeded` selbst und liefert `(None, ("AI_QUOTA_…", …))`.
+            # Genau diese zweite Buchung des Zugs (die erste ist die Abschrift)
+            # trifft ein `requests_per_minute`-Limit zuerst — ohne den `grund`
+            # hoerte der Sprechende „etwas ist kaputt", wo „warte eine Minute"
+            # die Auskunft ist.
+            if code.startswith("AI_QUOTA_"):
+                await self._senden({"art": "stoerung", "grund": "kontingent"})
+            else:
+                await self._senden({"art": "stoerung"})
             await self._zustand_melden(ZUSTAND_BEREIT)
             return
 
@@ -691,11 +808,30 @@ class Sprachbruecke:
         offene = self._offene_vorschlaege
         if ist_zustimmung(wortlaut):
             self._offene_vorschlaege = []
+            # Ein Ja meint **einen** Vorschlag, nicht alle. Der Browser zeigt
+            # nur die zuletzt geschickte Karte (`useSprachsitzung.ts` hält
+            # genau einen `vorschlag`) — ein Ja auf alle offenen anzuwenden
+            # hiesse, Dinge auszuführen, die der Mensch nie gesehen hat.
+            # Die übrigen verhalten sich wie beim Nein: die Kennung wird
+            # vergessen, der Vorschlag bleibt in der Datenbank ausführbar, bis
+            # seine Frist abläuft. Und es wird angesagt, damit niemand glaubt,
+            # alles sei bestätigt worden.
+            letzter, verworfene = offene[-1], offene[:-1]
+            if verworfene:
+                await self._senden({
+                    "art": "antworttext",
+                    "text": (
+                        f"Bestätigt wurde nur der zuletzt gezeigte Vorschlag; "
+                        f"{len(verworfene)} weitere wurden verworfen."
+                    ),
+                })
             await self._zustand_melden(ZUSTAND_DENKT)
-            erledigt = await asyncio.to_thread(self._ausfuehren, offene)
+            erledigt, lauf_id = await asyncio.to_thread(self._ausfuehren, letzter)
             if not erledigt:
                 await self._senden({"art": "stoerung"})
                 await self._zustand_melden(ZUSTAND_BEREIT)
+                return True
+            await self._fortsetzung_verfolgen(lauf_id)
             return True
         if ist_ablehnung(wortlaut):
             # Nichts an der Datenbank. Ein abgelehnter Vorschlag verhält sich
@@ -710,7 +846,7 @@ class Sprachbruecke:
         self._offene_vorschlaege = []
         return False
 
-    def _ausfuehren(self, kennungen: list[str]) -> bool:
+    def _ausfuehren(self, kennung: str) -> tuple[bool, str | None]:
         """Bestätigen und ausführen — **derselbe** Weg wie der Klick auf die Karte.
 
         `confirm_proposal` prüft die Rechte erneut und erzeugt den Einmal-Token,
@@ -724,56 +860,83 @@ class Sprachbruecke:
         Anweisung des Betreibers gefallen. Ob ein Vorschlag überhaupt bestätigt
         werden muss, entscheidet unverändert `create_proposal` über
         ``immer_bestaetigen`` — hier wird nur der Klick durch ein Wort ersetzt.
+
+        Zurück kommt neben dem Erfolg der **geweckte Lauf**: `lauf_fortsetzen`
+        hat ihn wieder auf „running" gestellt, und der Aufrufer muss sich
+        anhängen (`_fortsetzung_verfolgen`), sonst bleibt das Ergebnis stumm.
+        ``None`` heisst: es gibt nichts zu verfolgen — der Vorschlag hing an
+        keinem Lauf, oder die Fortsetzung kam nicht zustande.
         """
         from services import ai_action_errors, ai_proposal_service, ai_run_service
 
-        erfolg = False
         with SessionLocal() as db:
             benutzer = db.get(User, self._user_id)
             if benutzer is None:
-                return False
-            for kennung in kennungen:
-                try:
-                    vorschlag = ai_proposal_service.owned_proposal(db, kennung, benutzer)
-                    if vorschlag is None:
-                        # Nicht seiner. `confirm_proposal` würde das gleich
-                        # darauf ebenfalls feststellen und ablehnen — aber ein
-                        # Aufruf, von dem hier schon feststeht, dass er
-                        # scheitern muss, liest sich wie einer, der gelingen
-                        # könnte. Die Kennung stammt aus einem Ereignis dieser
-                        # Sitzung; steht sie trotzdem nicht in seinem Bestand,
-                        # ist das kein Alltagsfall, sondern einer fürs
-                        # Protokoll.
-                        logger.info(
-                            "Gesprochene Bestaetigung fuer fremden Vorschlag user=%s",
-                            self._user_id,
-                        )
-                        continue
-                    lauf_id = getattr(vorschlag, "run_id", None)
-                    _, token = ai_proposal_service.confirm_proposal(
-                        db, proposal_id=kennung, user=benutzer
-                    )
-                    ai_proposal_service.execute_proposal(
-                        db, proposal_id=kennung, user=benutzer, confirmation_token=token
-                    )
-                    db.commit()
-                    erfolg = True
-                    if lauf_id:
-                        with contextlib.suppress(Exception):
-                            ai_run_service.lauf_fortsetzen(db, run_id=lauf_id)
-                            db.commit()
-                except ai_action_errors.AiActionStateError as fehler:
-                    db.rollback()
+                return False, None
+            try:
+                vorschlag = ai_proposal_service.owned_proposal(db, kennung, benutzer)
+                if vorschlag is None:
+                    # Nicht seiner. `confirm_proposal` würde das gleich
+                    # darauf ebenfalls feststellen und ablehnen — aber ein
+                    # Aufruf, von dem hier schon feststeht, dass er
+                    # scheitern muss, liest sich wie einer, der gelingen
+                    # könnte. Die Kennung stammt aus einem Ereignis dieser
+                    # Sitzung; steht sie trotzdem nicht in seinem Bestand,
+                    # ist das kein Alltagsfall, sondern einer fürs
+                    # Protokoll.
                     logger.info(
-                        "Gesprochene Bestaetigung abgewiesen user=%s code=%s",
-                        self._user_id, fehler.args[0] if fehler.args else "?",
+                        "Gesprochene Bestaetigung fuer fremden Vorschlag user=%s",
+                        self._user_id,
                     )
-                except Exception:
-                    db.rollback()
-                    logger.warning(
-                        "Gesprochene Bestaetigung gescheitert user=%s", self._user_id
-                    )
-        return erfolg
+                    return False, None
+                lauf_id = getattr(vorschlag, "run_id", None)
+                _, token = ai_proposal_service.confirm_proposal(
+                    db, proposal_id=kennung, user=benutzer
+                )
+                ai_proposal_service.execute_proposal(
+                    db, proposal_id=kennung, user=benutzer, confirmation_token=token
+                )
+                db.commit()
+                fortgesetzt: str | None = None
+                if lauf_id:
+                    with contextlib.suppress(Exception):
+                        if ai_run_service.lauf_fortsetzen(db, run_id=lauf_id):
+                            fortgesetzt = lauf_id
+                        db.commit()
+                return True, fortgesetzt
+            except ai_action_errors.AiActionStateError as fehler:
+                db.rollback()
+                logger.info(
+                    "Gesprochene Bestaetigung abgewiesen user=%s code=%s",
+                    self._user_id, fehler.args[0] if fehler.args else "?",
+                )
+            except Exception:
+                db.rollback()
+                logger.warning(
+                    "Gesprochene Bestaetigung gescheitert user=%s", self._user_id
+                )
+        return False, None
+
+    async def _fortsetzung_verfolgen(self, lauf_id: str | None) -> None:
+        """Nach dem gesprochenen Ja dem geweckten Lauf zuhören.
+
+        Derselbe Weg wie in `_antworten`, und er fehlte hier: die Bestätigung
+        weckte den Lauf, aber niemand hörte ihm zu — das Ergebnis blieb stumm,
+        und der Zustand hing für den Rest der Sitzung auf „denkt". Nur
+        `eroeffnen` entfällt: das hat `lauf_fortsetzen` schon getan, bevor es
+        das Segment plante.
+        """
+        if lauf_id is None:
+            # Nichts zu verfolgen — aber der Zustand muss zurück, sonst zeigt
+            # der Browser „denkt" für etwas, das längst erledigt ist.
+            await self._zustand_melden(ZUSTAND_BEREIT)
+            return
+        abo = ai_run_broker.abonnieren(lauf_id)
+        try:
+            await self._lauf_verfolgen(abo)
+        finally:
+            if abo is not None:
+                ai_run_broker.abmelden(lauf_id, abo[1])
 
     # ── zum Browser ───────────────────────────────────────────────────────
 

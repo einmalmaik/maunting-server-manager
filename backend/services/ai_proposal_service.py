@@ -19,6 +19,7 @@ Zuordnung macht die Nutzlast unlesbar, statt sie umzuhaengen.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import difflib
@@ -149,35 +150,62 @@ def _json_object(value: str) -> dict:
     return decoded
 
 
-def _permission_for(tool_name: str, payload: dict) -> str:
-    """Der Permission-Key, den dieses Werkzeug verlangt.
+#: Welches Recht jede Reparatur verlangt. Die Zuordnung spiegelt die
+#: Panel-Routen: Ports aendern verlangt dort `server.network.manage`, den
+#: Root-Chown loest das Panel nur innerhalb einer `server.files.write`-Operation
+#: aus. Ein Ort fuer beide Stellen, die sie brauchen — `_permission_for` und
+#: die Formpruefung in `create_proposal`.
+_REPARATUR_RECHTE = {
+    "repair_permissions": "server.files.write",
+    "reallocate_port": "server.network.manage",
+}
 
-    Er steht in `ai_tool_registry.WERKZEUGE` — dort, wo auch alles andere ueber
-    ein Werkzeug steht. Vorher war das hier eine if-Kette: ein zweiter Ort, an
-    dem ein neues Werkzeug eingetragen werden musste, und der Ort, an dem man
-    es am ehesten vergisst. Ein vergessener Eintrag lieferte den leeren String
-    und damit eine Ablehnung — immerhin die sichere Richtung, aber erst
+
+def _permission_for(tool_name: str, payload: dict) -> tuple[str, ...]:
+    """Die Permission-Keys, die dieses Werkzeug verlangt — alle zugleich.
+
+    Sie stehen in `ai_tool_registry.WERKZEUGE` — dort, wo auch alles andere
+    ueber ein Werkzeug steht. Vorher war das hier eine if-Kette: ein zweiter
+    Ort, an dem ein neues Werkzeug eingetragen werden musste, und der Ort, an
+    dem man es am ehesten vergisst. Ein vergessener Eintrag lieferte die leere
+    Menge und damit eine Ablehnung — immerhin die sichere Richtung, aber erst
     bemerkbar, wenn ein Benutzer davorsteht.
 
-    Eine Ausnahme bleibt: der Lebenszyklus haengt am *Vorgang*, nicht am
-    Werkzeug. Starten, Stoppen und Neustarten sind drei verschiedene Rechte, und
-    das laesst sich in einer Tabellenzeile nicht ausdruecken.
+    Zwei Ausnahmen bleiben, beide haengen am *Vorgang* statt am Werkzeug und
+    lassen sich in einer Tabellenzeile nicht ausdruecken: der Lebenszyklus
+    (Starten, Stoppen und Neustarten sind drei verschiedene Rechte) und die
+    Reparatur (`_REPARATUR_RECHTE`).
+
+    Eine **unbekannte** Reparatur-Kennung verlangt die Vereinigung beider
+    Rechte. Sie ist kein gueltiger Vorgang und wird nie ausgefuehrt — der
+    Ausfuehrungszweig weist sie als `AI_ACTION_TOOL_NOT_ALLOWED` ab und der
+    Vorschlag endet als `failed`, sichtbar fuer den Menschen davor. Eine leere
+    Menge staende dem im Weg: Bestaetigung und Ausfuehrung braechen dann schon
+    an der Rechtepruefung mit `AI_ACTION_ACCESS_REVOKED` ab — eine Meldung, die
+    von entzogenen Rechten spricht, wo eine manipulierte Nutzlast vorliegt.
+    Strenger als jede gueltige Wahl bleibt die Vereinigung trotzdem.
     """
     if tool_name == "propose_server_lifecycle":
-        return {
+        recht = {
             "start": "server.start",
             "stop": "server.stop",
             "restart": "server.restart",
         }.get(str(payload.get("operation")), "")
+        return (recht,) if recht else ()
+    if tool_name == "propose_server_repair":
+        recht = _REPARATUR_RECHTE.get(str(payload.get("action")), "")
+        if recht:
+            return (recht,)
+        return tuple(_REPARATUR_RECHTE.values())
     werkzeug = WERKZEUGE.get(tool_name)
-    return werkzeug.recht if werkzeug and werkzeug.recht else ""
+    return (werkzeug.recht,) if werkzeug and werkzeug.recht else ()
 
 
 def _require_tool_permission(
     db: Session, user: User, server_id: int | None, tool_name: str, payload: dict
 ) -> None:
-    permission = _permission_for(tool_name, payload)
-    if not permission:
+    permissions = _permission_for(tool_name, payload)
+    if not permissions:
         raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
 
     werkzeug = WERKZEUGE.get(tool_name)
@@ -190,14 +218,16 @@ def _require_tool_permission(
         # hat vorher `server.view` geprueft, sonst waere die Server-ID ein Weg,
         # die Existenz fremder Server zu erraten. Sehen duerfen und loeschen
         # duerfen sind zwei Huerden, nicht eine.
-        if not permission_service.has_global_permission(db, user, permission):
-            raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
+        for permission in permissions:
+            if not permission_service.has_global_permission(db, user, permission):
+                raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
         return
 
     if server_id is None:
         raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
-    if not permission_service.has_server_permission(db, user, server_id, permission):
-        raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
+    for permission in permissions:
+        if not permission_service.has_server_permission(db, user, server_id, permission):
+            raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
     if tool_name in {
         "propose_config_update",
         "propose_config_patch",
@@ -1518,25 +1548,27 @@ def guardian_aus_lauf(db: Session, run_id: str | None) -> "GuardianKontext | Non
         return None
     from models import AiRun
     from services import ai_run_service
+    # Verzoegert wegen des Importzyklus: der Stream-Service importiert dieses
+    # Modul beim Laden.
+    from services.ai_stream_service import GuardianRahmenUnlesbar, guardian_aus_zustand
 
     run = db.get(AiRun, run_id)
     if run is None:
         return None
-    rahmen = (ai_run_service.zustand_lesen(run) or {}).get("guardian")
-    if not isinstance(rahmen, dict):
-        return None
-    anker = rahmen.get("backup_anker") or rahmen.get("incident_created_at")
     try:
-        return GuardianKontext(
-            server_id=int(rahmen["server_id"]),
-            incident_id=int(rahmen["incident_id"]),
-            incident_created_at=datetime.fromisoformat(str(anker)),
-        )
-    except (KeyError, TypeError, ValueError):
+        # **Derselbe** Parser wie in jeder Laufrunde, keine zweite Auslegung.
+        # Hier stand eine Abschrift mit eigener Semantik, und sie war bereits
+        # gedriftet: ein vorhandener, aber nicht-dict Rahmen galt hier als
+        # „kein Guardian" und liess `execute_proposal` ohne Backup-Nachweis
+        # und ohne Serverbindung weiterlaufen — waehrend dieselbe Lage im
+        # Stream ausdruecklich wirft, weil der Verlust des Rahmens die
+        # gefaehrliche Richtung ist.
+        return guardian_aus_zustand(ai_run_service.zustand_lesen(run) or {})
+    except GuardianRahmenUnlesbar as exc:
         # Ein unlesbarer Rahmen ist kein Freibrief. Er heisst: dieser Vorschlag
         # stammt aus einem Lauf, dessen Bedingungen nicht mehr feststellbar sind
         # — und dann wird nicht ausgefuehrt.
-        raise AiActionStateError("AI_BACKUP_UNVERIFIED")
+        raise AiActionStateError("AI_BACKUP_UNVERIFIED") from exc
 
 
 def proposal_response(proposal: AiActionProposal) -> AiActionProposalResponse:
@@ -1579,6 +1611,52 @@ def proposal_response(proposal: AiActionProposal) -> AiActionProposalResponse:
         run_id=proposal.run_id,
         created_at=proposal.created_at,
     )
+
+
+#: Der Payload-Bau der **globalen** Schreibwerkzeuge — Werkzeugname → Bauer.
+#:
+#: Hier standen acht `elif`-Zweige mit woertlich demselben Vier-Zeilen-Rumpf,
+#: in dem nur die Payload-Funktion variierte. Die beiden dokumentierten
+#: Vergangenheitsfehler dieser Kette (eine Sammelklausel schickte jedes zweite
+#: Werkzeug in die falsche Payload; die Rechtepruefung stand einmal **hinter**
+#: dem Payload-Bau und machte die Ablehnung zum Orakel ueber fremden Bestand)
+#: musste jeder neue Zweig aufs Neue vermeiden. Die Tabelle macht beides
+#: strukturell: einen Eintrag ohne eigenen Bauer gibt es nicht, und die eine
+#: Aufrufstelle prueft das Recht **vor** jedem Bau.
+#:
+#: Jeder Bauer bekommt dieselben fuenf Groessen; was er nicht braucht, laesst
+#: er liegen. Zwei Feinheiten sind Absicht und keine Nachlaessigkeit:
+#: `propose_server_create` liest `arguments` (mit `reason`/`expected_effect`),
+#: alle anderen `rest` — ohne die beiden Schluessel behalten deren
+#: Schluesselmengenpruefungen ihre exakte Form. Und nur der Blueprint-Wechsel
+#: fragt nach dem Guardian-Rahmen: in einer Reparatur ist er ein anderer
+#: Vorgang.
+_GLOBALE_PAYLOADS: dict = {
+    "propose_blueprint_change": lambda db, user, rest, arguments, guardian: (
+        _blueprint_change_payload(db, rest, reparatur=guardian is not None)
+    ),
+    "propose_blueprint_delete": lambda db, user, rest, arguments, guardian: (
+        _blueprint_delete_payload(db, rest)
+    ),
+    "propose_server_create": lambda db, user, rest, arguments, guardian: (
+        _server_create_payload(db, arguments)
+    ),
+    "propose_hoster_integration": lambda db, user, rest, arguments, guardian: (
+        _hoster_integration_payload(db, user, rest)
+    ),
+    "propose_hoster_product": lambda db, user, rest, arguments, guardian: (
+        _hoster_product_payload(db, user, rest)
+    ),
+    "propose_ai_tarif_role": lambda db, user, rest, arguments, guardian: (
+        _ai_tarif_role_payload(db, user, rest)
+    ),
+    "propose_task_set": lambda db, user, rest, arguments, guardian: (
+        _task_set_payload(db, user, rest)
+    ),
+    "propose_task_delete": lambda db, user, rest, arguments, guardian: (
+        _task_delete_payload(db, user, rest)
+    ),
+}
 
 
 def create_proposal(
@@ -1628,59 +1706,28 @@ def create_proposal(
     rest = {key: value for key, value in arguments.items() if key not in {"reason", "expected_effect"}}
 
     server: Server | None = None
-    if tool_name == "propose_blueprint_change":
-        # Das Recht vor der Nutzlast, aus demselben Grund wie 150 Zeilen tiefer:
-        # `_blueprint_change_payload` liest den Bestand und reicht die Meldung
-        # des Blueprint-Dienstes wörtlich durch. Ohne diese Zeile unterschiede
-        # ein Benutzer ohne `blueprints.manage` vorhandene von erfundenen
-        # Blueprint-Kennungen an der Fehlermeldung.
-        _require_tool_permission(db, user, None, tool_name, rest)
-        payload, preview = _blueprint_change_payload(
-            db, rest, reparatur=guardian is not None
-        )
-        expected_revision = None
-    elif tool_name == "propose_blueprint_delete":
-        _require_tool_permission(db, user, None, tool_name, rest)
-        payload, preview = _blueprint_delete_payload(db, rest)
-        expected_revision = None
-    elif tool_name == "propose_server_create":
-        # Dasselbe: `_server_create_payload` schlägt die `node_id` im Bestand
-        # nach, "Unbekannte Node" wäre sonst eine Auskunft an jemanden ohne
+    bauer = _GLOBALE_PAYLOADS.get(tool_name)
+    if bauer is not None:
+        # **Das Recht vor der Nutzlast**, fuer jeden Tabelleneintrag an genau
+        # dieser einen Stelle: die Bauer lesen den Bestand, ueber den sie
+        # urteilen, und ihre Fehlermeldungen reichen ihn woertlich durch. Ohne
+        # diese Reihenfolge unterschiede ein Benutzer ohne `blueprints.manage`
+        # vorhandene von erfundenen Blueprint-Kennungen an der Meldung, und
+        # "Unbekannte Node" waere eine Auskunft an jemanden ohne
         # `servers.create`.
         _require_tool_permission(db, user, None, tool_name, rest)
-        payload, preview = _server_create_payload(db, arguments)
-        expected_revision = None
-    elif tool_name == "propose_hoster_integration":
-        # `rest` statt `arguments`: ohne `reason`/`expected_effect` behalten die
-        # Schluesselmengenpruefungen darunter ihre exakte Form.
-        _require_tool_permission(db, user, None, tool_name, rest)
-        payload, preview = _hoster_integration_payload(db, user, rest)
-        expected_revision = None
-    elif tool_name == "propose_hoster_product":
-        _require_tool_permission(db, user, None, tool_name, rest)
-        payload, preview = _hoster_product_payload(db, user, rest)
-        expected_revision = None
-    elif tool_name == "propose_ai_tarif_role":
-        _require_tool_permission(db, user, None, tool_name, rest)
-        payload, preview = _ai_tarif_role_payload(db, user, rest)
-        expected_revision = None
-    elif tool_name == "propose_task_set":
-        _require_tool_permission(db, user, None, tool_name, rest)
-        payload, preview = _task_set_payload(db, user, rest)
-        expected_revision = None
-    elif tool_name == "propose_task_delete":
-        _require_tool_permission(db, user, None, tool_name, rest)
-        payload, preview = _task_delete_payload(db, user, rest)
+        payload, preview = bauer(db, user, rest, arguments, guardian)
         expected_revision = None
     elif tool_name in GLOBAL_WRITE_TOOLS:
-        # **Nicht als Sammelklausel schreiben.** Hier stand frueher
+        # **Der Waechter hinter der Tabelle.** Hier stand frueher
         # `elif tool_name in GLOBAL_WRITE_TOOLS: _server_create_payload(...)`.
         # Das las sich wie eine Mengenzugehoerigkeit, meinte aber genau ein
         # Werkzeug — und jedes zweite globale Schreibwerkzeug waere still in
         # der Servererstellung gelandet und mit "Servererstellung hat
         # ungueltige Argumente" gescheitert, einer Meldung, die auf die
         # falsche Stelle zeigt. Ein neues globales Schreibwerkzeug bekommt
-        # einen eigenen `elif` darueber; wer das vergisst, faellt hier auf.
+        # einen Eintrag in `_GLOBALE_PAYLOADS`; wer das vergisst, faellt hier
+        # auf, statt in der falschen Payload zu landen.
         raise AiActionValidationError(f"Kein Payload-Bau fuer Werkzeug: {tool_name}")
     else:
         # Dieselbe zentrale Rechtepruefung wie bei den Lesewerkzeugen. `rest`
@@ -1713,13 +1760,20 @@ def create_proposal(
         # Die Zusage ist "die KI kann nur, was der Benutzer kann". Sie gilt erst,
         # wenn schon der *Versuch* nichts verraet.
         #
-        # Fuer den Lebenszyklus haengt das Recht am Vorgang, deshalb wird der
-        # hier vorgezogen — sonst bekaeme ein ungueltiger Vorgang die
-        # Rechte-Ablehnung statt der Formmeldung, die dem Modell weiterhilft.
+        # Fuer Lebenszyklus und Reparatur haengt das Recht am Vorgang, deshalb
+        # wird deren Formpruefung hier vorgezogen — sonst bekaeme ein
+        # ungueltiger Vorgang die Rechte-Ablehnung statt der Formmeldung, die
+        # dem Modell weiterhilft. Beide Pruefungen lesen keinen Zustand; sie
+        # verraten also nichts, was die Rechtepruefung schuetzen muesste.
         if tool_name == "propose_server_lifecycle" and rest.get("operation") not in {
             "start", "stop", "restart",
         }:
             raise AiActionValidationError("Ungueltige Lifecycle-Aktion")
+        if tool_name == "propose_server_repair":
+            if set(rest) != {"action"}:
+                raise AiActionValidationError("Reparatur-Tool hat ungueltige Argumente")
+            if rest["action"] not in REPARATUREN:
+                raise AiActionValidationError("Unbekannte Reparatur")
         _require_tool_permission(db, user, server.id, tool_name, rest)
 
         if tool_name == "propose_server_lifecycle":
@@ -2496,6 +2550,396 @@ def _execute_guardian_tuning(
     return {"overrides": neu, "generation": server.desired_state_generation}
 
 
+@dataclass(frozen=True)
+class _AusfuehrungsRahmen:
+    """Die gemeinsamen Groessen einer bestaetigten Ausfuehrung — ein Rahmen.
+
+    Jede Ausfuehrungsfunktion bekommt denselben Rahmen und laesst liegen, was
+    sie nicht braucht. Die Felder sind die festen Kopien aus
+    `execute_proposal` (dort angelegt, damit die Fehlerbehandlung nach einem
+    Rollback nicht auf ein abgelaufenes ORM-Objekt greifen muss) plus der
+    handelnde Benutzer und der Guardian-Rahmen des Laufs. Die Session geht
+    daneben als eigener Parameter mit: sie ist kein Wert des Vorschlags,
+    sondern der Ort, an dem dieser Request arbeitet.
+    """
+
+    payload: dict
+    server_id: int | None
+    active_user: User
+    correlation_id: str | None
+    expected_revision: str | None
+    row_id: str
+    guardian: GuardianKontext | None
+    tool_name: str
+
+
+@dataclass(frozen=True)
+class _Ausgefuehrt:
+    """Das Ergebnis einer Ausfuehrung — vollstaendig per Konstruktion.
+
+    In der frueheren elif-Kette waren `result`, `task_id` und `queued`
+    nirgends vorinitialisiert; jeder Zweig musste alle drei setzen, und ein
+    vergessenes Feld fiel erst beim Bestaetigen als `NameError` auf. Hier
+    erzwingt der Konstruktor `result`, und die uebrigen Felder tragen die
+    Werte, die fast alle Zweige meinen: nur der Lifecycle reiht ein
+    (`queued`, `task_id`), und nur die Servererstellung liefert mit
+    `neuer_server_id` einen frisch vergebenen Server zurueck.
+    """
+
+    result: dict
+    task_id: str | None = None
+    queued: bool = False
+    neuer_server_id: int | None = None
+
+
+def _ausfuehren_server_lifecycle(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from services.server_action_service import request_lifecycle_operation
+
+    result = request_lifecycle_operation(
+        db,
+        server_id=rahmen.server_id,
+        operation=str(rahmen.payload["operation"]),
+        actor=ActorContext.for_user(
+            rahmen.active_user, origin="ai", correlation_id=rahmen.correlation_id
+        ),
+        idempotency_key=rahmen.row_id,
+    )
+    # Start/Stop/Restart laufen in einem Hintergrund-Thread weiter.
+    # Zum Zeitpunkt dieser Antwort ist die Aktion nur eingereiht,
+    # nicht ausgefuehrt. Der Vorschlag bleibt deshalb "executing";
+    # den Endzustand setzt `finish_lifecycle_task`, sobald der
+    # Vorgang wirklich fertig ist. Ein bereits abgeschlossener Task
+    # (Wiederverwendung derselben Idempotency-ID) bleibt terminal.
+    return _Ausgefuehrt(
+        result=result,
+        task_id=result.get("task_id"),
+        queued=result.get("status") == "queued",
+    )
+
+
+def _ausfuehren_backup(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from services.backup_orchestrator import create_server_backup
+
+    backup = create_server_backup(
+        rahmen.server_id,
+        db,
+        # Ohne eigenen Namen bleibt der bisherige Standard stehen:
+        # er sagt in der Backup-Liste wenigstens, woher der Eintrag
+        # stammt.
+        name=str(rahmen.payload.get("name") or "AI-confirmed snapshot"),
+    )
+    return _Ausgefuehrt(result={"backup_id": backup.id})
+
+
+def _ausfuehren_backup_restore(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    # Derselbe Aufruf wie der Panel-Endpunkt. Die Reihenfolge darin
+    # ist der Grund, warum die KI keinen eigenen Weg bekommt:
+    # S3-Download und Entschluesselung laufen **vor** dem
+    # Container-Stop, damit ein falsches Passwort den Server
+    # unberuehrt laesst.
+    from services.backup_restore_service import restore_server_backup
+
+    result = restore_server_backup(
+        db,
+        server_id=rahmen.server_id,
+        backup_id=int(rahmen.payload["backup_id"]),
+        actor=ActorContext.for_user(
+            rahmen.active_user, origin="ai", correlation_id=rahmen.correlation_id
+        ),
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_server_blueprint_switch(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    # Derselbe Aufruf, den der Panel-Knopf "Spiel / Blueprint
+    # wechseln" nimmt.
+    #
+    # Der erste Entwurf setzte hier `server.game_type = ziel_id` und
+    # war damit fertig. Das war kein vereinfachter Weg, sondern ein
+    # kaputter: der echte Wechsel legt ein Pflicht-Backup an,
+    # **loescht das Serververzeichnis**, vergibt die Ports neu und
+    # installiert das neue Spiel. Ein Server, bei dem nur die Spalte
+    # umgeschrieben wird, traegt danach das Image des neuen
+    # Blueprints ueber den Dateien des alten — Datenbank und
+    # Wirklichkeit laufen auseinander, und niemand merkt es bis zum
+    # naechsten Start.
+    from services.server_lifecycle_service import switch_server_blueprint
+
+    server_row = db.query(Server).filter(Server.id == rahmen.server_id).first()
+    if server_row is None:
+        raise AiActionStateError("AI_ACTION_TARGET_MISSING")
+    try:
+        result = switch_server_blueprint(
+            db,
+            server_row,
+            str(rahmen.payload["blueprint_id"]),
+            user_id=rahmen.active_user.id,
+        )
+    except HTTPException as exc:
+        # Die Vorbedingungen werden dort verbindlich geprueft —
+        # zwischen Vorschlag und Bestaetigung koennen Minuten
+        # liegen, und der Server kann inzwischen gestartet worden
+        # sein. Ein fehlgeschlagenes Pflicht-Backup bricht ebenfalls
+        # hier ab, **bevor** Dateien geloescht werden.
+        kennung = exc.detail.get("code") if isinstance(exc.detail, dict) else None
+        logger.info(
+            "Blueprint-Wechsel abgelehnt server_id=%s code=%s",
+            rahmen.server_id, kennung,
+        )
+        raise AiActionStateError(
+            "AI_ACTION_SERVER_BUSY"
+            if kennung == "server_must_be_stopped"
+            else "AI_ACTION_BLUEPRINT_SWITCH_FAILED"
+        ) from exc
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_server_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    # Derselbe Aufruf, den der Panel-Router und die Hoster-Anbindung
+    # nehmen. `delete_server_completely` prueft `servers.delete`
+    # selbst noch einmal — die dritte Pruefung nach `_resolve_server`
+    # beim Vorschlagen und `_require_tool_permission` beim
+    # Bestaetigen. Eine davon zu ueberspringen, waere ein eigener
+    # Loeschpfad fuer die KI, und genau den soll es nicht geben.
+    from services.server_deletion_service import delete_server_completely
+
+    result = delete_server_completely(
+        db,
+        server_id=rahmen.server_id,
+        actor=ActorContext.for_user(
+            rahmen.active_user, origin="ai", correlation_id=rahmen.correlation_id
+        ),
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_config_update(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    result = write_server_text(
+        db,
+        user=rahmen.active_user,
+        server_id=rahmen.server_id,
+        relative_path=str(rahmen.payload["path"]),
+        content=str(rahmen.payload["content"]),
+        expected_revision=rahmen.expected_revision,
+        create_only=bool(rahmen.payload.get("create_only")),
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_config_patch(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    # Erneut anwenden statt den fertigen Inhalt mitzuschleppen. Es
+    # kommt dasselbe heraus: `expected_revision` laesst nur genau
+    # den Stand zu, auf dem die Ersetzungen beim Vorschlagen schon
+    # einmal aufgegangen sind — und dieselbe Revision geht gleich
+    # noch einmal in `write_server_text`, das den Schreibvorgang
+    # unter der Dateisperre gegen sie prueft.
+    pfad = str(rahmen.payload["path"])
+    aktuell = read_server_text(db, server_id=rahmen.server_id, relative_path=pfad)
+    try:
+        neu = apply_edits(
+            str(aktuell["content"]),
+            [(str(e["find"]), str(e["replace"])) for e in rahmen.payload["edits"]],
+        )
+    except EditNotApplicable as exc:
+        raise AiActionStateError("AI_ACTION_FILE_CHANGED") from exc
+    result = write_server_text(
+        db,
+        user=rahmen.active_user,
+        server_id=rahmen.server_id,
+        relative_path=pfad,
+        content=neu,
+        expected_revision=rahmen.expected_revision,
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_bind_ip_update(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    result = _execute_bind_ip_update(
+        db, server_id=rahmen.server_id, payload=rahmen.payload
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_mod_install(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    # Anders als beim Lifecycle gibt es fuer den Mod-Download keinen
+    # Rueckkanal, der den Vorschlag spaeter abschliesst. Ein
+    # dauerhaftes "executing" waere deshalb kein ehrlicherer Zustand,
+    # sondern ein fuer immer offener Vorgang. Abgeschlossen ist hier
+    # das, was der Vorschlag zugesagt hat: die Installation ist
+    # angestossen. Ihren Ausgang traegt die Mod-Zeile.
+    result = _execute_mod_install(db, server_id=rahmen.server_id, payload=rahmen.payload)
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_server_repair(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    result = _execute_server_repair(
+        db, server_id=rahmen.server_id, payload=rahmen.payload,
+        user=rahmen.active_user, correlation_id=rahmen.correlation_id,
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_guardian_tuning(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    result = _execute_guardian_tuning(
+        db, server_id=rahmen.server_id, payload=rahmen.payload,
+        user=rahmen.active_user, correlation_id=rahmen.correlation_id,
+        incident_id=rahmen.guardian.incident_id if rahmen.guardian else None,
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_file_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    result = _execute_file_delete(
+        db, user=rahmen.active_user, server_id=rahmen.server_id,
+        payload=rahmen.payload, expected_revision=rahmen.expected_revision,
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_server_create(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    # Ebenso wie beim Mod-Download: `provision_server` kehrt zurueck, sobald
+    # der Server existiert und die Installation laeuft — exakt der Punkt, an
+    # dem auch `POST /api/servers` dem Panel antwortet. Der weitere Verlauf
+    # haengt an der Operation-Task, deren ID mitgegeben wird.
+    result, created_server_id, task_id = _execute_server_create(
+        db, user=rahmen.active_user, payload=rahmen.payload,
+        correlation_id=rahmen.correlation_id, proposal_id=rahmen.row_id,
+    )
+    # Nur dieses Werkzeug setzt `neuer_server_id`: `execute_proposal`
+    # uebernimmt damit die frisch vergebene Nummer — daran haengen der
+    # Fixup-Block des Erstellungsvorschlags und das Audit.
+    return _Ausgefuehrt(
+        result=result, task_id=task_id, neuer_server_id=created_server_id
+    )
+
+
+def _ausfuehren_blueprint_change(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    # Gespeichert wird die Nutzlast, die beim **Vorschlagen**
+    # entstanden ist — nicht eine neu berechnete. Der Mensch hat
+    # genau dieses Ergebnis gesehen und bestaetigt; zwischenzeitlich
+    # geaenderte Vorlagen duerfen daran nichts mehr drehen.
+    from services import blueprint_service
+
+    try:
+        blueprint_id = blueprint_service.save_community_blueprint(
+            dict(rahmen.payload["blueprint"])
+        )
+    except HTTPException as exc:
+        logger.info("Blueprint-Vorschlag abgelehnt: %s", exc.detail)
+        raise AiActionStateError("AI_ACTION_BLUEPRINT_REJECTED") from exc
+    return _Ausgefuehrt(result={"blueprint_id": blueprint_id})
+
+
+def _ausfuehren_blueprint_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    # Die Session dieses Requests geht mit. `delete_community_blueprint`
+    # zaehlt vor dem Loeschen die Server, die den Blueprint noch
+    # verwenden — und zwar erneut, denn zwischen Vorschlag und Klick
+    # kann ein Server angelegt worden sein. Diese Zaehlung muss den
+    # Stand sehen, auf dem dieser Request arbeitet; eine eigene
+    # Verbindung daneben antwortete auf eine andere Frage als die,
+    # die hier gestellt wird.
+    from services import blueprint_service
+
+    try:
+        blueprint_service.delete_community_blueprint(
+            str(rahmen.payload["blueprint_id"]), db=db
+        )
+    except HTTPException as exc:
+        logger.info("Blueprint-Loeschvorschlag abgelehnt: %s", exc.detail)
+        raise AiActionStateError("AI_ACTION_BLUEPRINT_DELETE_REJECTED") from exc
+    return _Ausgefuehrt(
+        result={"deleted": True, "blueprint_id": str(rahmen.payload["blueprint_id"])}
+    )
+
+
+def _ausfuehren_hoster_schreiben(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    result = _execute_hoster_write(
+        db, user=rahmen.active_user, tool_name=rahmen.tool_name, payload=rahmen.payload
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_task_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    # **Die Felder werden hier erneut geprueft**, nicht nur
+    # angewandt. Zwischen Vorschlag und Bestaetigung liegt ein
+    # Zeitfenster ohne Obergrenze, und in ihm kann der Betreiber die
+    # autonome Freigabe zurueckgenommen haben. Ohne die zweite
+    # Pruefung entstuende hier eine handelnde Aufgabe auf Grundlage
+    # einer Freigabe, die es nicht mehr gibt — und sie liefe von da
+    # an jede Nacht.
+    #
+    # `ai_task_service` prueft beides in `_anwenden`; deshalb steht
+    # hier nur der Aufruf und keine eigene Kette.
+    gemerkt = rahmen.payload.get("task_id")
+    felder = dict(rahmen.payload.get("felder") or {})
+    if gemerkt:
+        aufgabe = ai_task_service.aendern(
+            db, user=rahmen.active_user, task_id=str(gemerkt), felder=felder
+        )
+    else:
+        aufgabe = ai_task_service.anlegen(
+            db, user=rahmen.active_user, felder=felder
+        )
+    # `task_id` im Ergebnis ist die ID der **KI-Aufgabe**. Das gleichnamige
+    # Feld von `_Ausgefuehrt` bleibt bewusst leer: es meint die
+    # Operation-Task eines Lifecycles, und eine KI-Aufgabe ist keine.
+    return _Ausgefuehrt(result={
+        "task_id": aufgabe.id,
+        "title": aufgabe.title,
+        "plan": ai_task_service.plan_text(aufgabe),
+        "enabled": bool(aufgabe.enabled),
+        "next_run": (
+            ai_task_service.utc(aufgabe.next_run_at).isoformat()
+            if aufgabe.next_run_at is not None else None
+        ),
+    })
+
+
+def _ausfuehren_task_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    geloescht = ai_task_service.loeschen(
+        db, user=rahmen.active_user, task_id=str(rahmen.payload["task_id"])
+    )
+    return _Ausgefuehrt(result={"deleted": True, "title": geloescht})
+
+
+#: Die Ausfuehrung der bestaetigten Schreibwerkzeuge — Werkzeugname → Funktion.
+#:
+#: Hier stand eine Kette aus 19 `elif`-Zweigen in `execute_proposal`, und jeder
+#: Zweig musste `result`, `task_id` und `queued` selbst setzen —
+#: vorinitialisiert war nichts, ein vergessenes Feld fiel erst beim Bestaetigen
+#: als `NameError` auf. Die Tabelle macht das strukturell, nach demselben
+#: Muster wie `_GLOBALE_PAYLOADS`: einen Eintrag ohne benannte Funktion gibt es
+#: nicht, und `_Ausgefuehrt` erzwingt die Vollstaendigkeit per Konstruktion.
+#:
+#: Ein unbekannter Name faellt an der einen Aufrufstelle weiterhin in
+#: `AI_ACTION_TOOL_NOT_ALLOWED` — derselbe Waechter, der vorher der letzte
+#: `else`-Zweig der Kette war.
+_AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]] = {
+    "propose_server_lifecycle": _ausfuehren_server_lifecycle,
+    "propose_backup": _ausfuehren_backup,
+    "propose_backup_restore": _ausfuehren_backup_restore,
+    "propose_server_blueprint_switch": _ausfuehren_server_blueprint_switch,
+    "propose_server_delete": _ausfuehren_server_delete,
+    "propose_config_update": _ausfuehren_config_update,
+    "propose_config_patch": _ausfuehren_config_patch,
+    "propose_bind_ip_update": _ausfuehren_bind_ip_update,
+    "propose_mod_install": _ausfuehren_mod_install,
+    "propose_server_repair": _ausfuehren_server_repair,
+    "propose_guardian_tuning": _ausfuehren_guardian_tuning,
+    "propose_file_delete": _ausfuehren_file_delete,
+    "propose_server_create": _ausfuehren_server_create,
+    "propose_blueprint_change": _ausfuehren_blueprint_change,
+    "propose_blueprint_delete": _ausfuehren_blueprint_delete,
+    # Die drei Shop-Einrichtungswerkzeuge teilen sich eine Funktion; welche
+    # der drei gemeint ist, sagt `rahmen.tool_name`.
+    "propose_hoster_integration": _ausfuehren_hoster_schreiben,
+    "propose_hoster_product": _ausfuehren_hoster_schreiben,
+    "propose_ai_tarif_role": _ausfuehren_hoster_schreiben,
+    "propose_task_set": _ausfuehren_task_set,
+    "propose_task_delete": _ausfuehren_task_delete,
+}
+
+
 def execute_proposal(
     db: Session,
     *,
@@ -2591,295 +3035,30 @@ def execute_proposal(
             raise AiActionStateError("AI_ACTION_NOT_CONFIRMED")
 
         try:
-            if tool_name == "propose_server_lifecycle":
-                from services.server_action_service import request_lifecycle_operation
-
-                result = request_lifecycle_operation(
-                    db,
-                    server_id=server_id,
-                    operation=str(payload["operation"]),
-                    actor=ActorContext.for_user(
-                        active_user, origin="ai", correlation_id=correlation_id
-                    ),
-                    idempotency_key=row_id,
-                )
-                task_id = result.get("task_id")
-                # Start/Stop/Restart laufen in einem Hintergrund-Thread weiter.
-                # Zum Zeitpunkt dieser Antwort ist die Aktion nur eingereiht,
-                # nicht ausgefuehrt. Der Vorschlag bleibt deshalb "executing";
-                # den Endzustand setzt `finish_lifecycle_task`, sobald der
-                # Vorgang wirklich fertig ist. Ein bereits abgeschlossener Task
-                # (Wiederverwendung derselben Idempotency-ID) bleibt terminal.
-                queued = result.get("status") == "queued"
-            elif tool_name == "propose_backup":
-                from services.backup_orchestrator import create_server_backup
-
-                backup = create_server_backup(
-                    server_id,
-                    db,
-                    # Ohne eigenen Namen bleibt der bisherige Standard stehen:
-                    # er sagt in der Backup-Liste wenigstens, woher der Eintrag
-                    # stammt.
-                    name=str(payload.get("name") or "AI-confirmed snapshot"),
-                )
-                result = {"backup_id": backup.id}
-                task_id = None
-                queued = False
-            elif tool_name == "propose_backup_restore":
-                # Derselbe Aufruf wie der Panel-Endpunkt. Die Reihenfolge darin
-                # ist der Grund, warum die KI keinen eigenen Weg bekommt:
-                # S3-Download und Entschluesselung laufen **vor** dem
-                # Container-Stop, damit ein falsches Passwort den Server
-                # unberuehrt laesst.
-                from services.backup_restore_service import restore_server_backup
-
-                result = restore_server_backup(
-                    db,
-                    server_id=server_id,
-                    backup_id=int(payload["backup_id"]),
-                    actor=ActorContext.for_user(
-                        active_user, origin="ai", correlation_id=correlation_id
-                    ),
-                )
-                task_id = None
-                queued = False
-            elif tool_name == "propose_server_blueprint_switch":
-                # Derselbe Aufruf, den der Panel-Knopf "Spiel / Blueprint
-                # wechseln" nimmt.
-                #
-                # Der erste Entwurf setzte hier `server.game_type = ziel_id` und
-                # war damit fertig. Das war kein vereinfachter Weg, sondern ein
-                # kaputter: der echte Wechsel legt ein Pflicht-Backup an,
-                # **loescht das Serververzeichnis**, vergibt die Ports neu und
-                # installiert das neue Spiel. Ein Server, bei dem nur die Spalte
-                # umgeschrieben wird, traegt danach das Image des neuen
-                # Blueprints ueber den Dateien des alten — Datenbank und
-                # Wirklichkeit laufen auseinander, und niemand merkt es bis zum
-                # naechsten Start.
-                from services.server_lifecycle_service import switch_server_blueprint
-
-                server_row = db.query(Server).filter(Server.id == server_id).first()
-                if server_row is None:
-                    raise AiActionStateError("AI_ACTION_TARGET_MISSING")
-                try:
-                    result = switch_server_blueprint(
-                        db,
-                        server_row,
-                        str(payload["blueprint_id"]),
-                        user_id=active_user.id,
-                    )
-                except HTTPException as exc:
-                    # Die Vorbedingungen werden dort verbindlich geprueft —
-                    # zwischen Vorschlag und Bestaetigung koennen Minuten
-                    # liegen, und der Server kann inzwischen gestartet worden
-                    # sein. Ein fehlgeschlagenes Pflicht-Backup bricht ebenfalls
-                    # hier ab, **bevor** Dateien geloescht werden.
-                    kennung = exc.detail.get("code") if isinstance(exc.detail, dict) else None
-                    logger.info(
-                        "Blueprint-Wechsel abgelehnt server_id=%s code=%s",
-                        server_id, kennung,
-                    )
-                    raise AiActionStateError(
-                        "AI_ACTION_SERVER_BUSY"
-                        if kennung == "server_must_be_stopped"
-                        else "AI_ACTION_BLUEPRINT_SWITCH_FAILED"
-                    ) from exc
-                task_id = None
-                queued = False
-            elif tool_name == "propose_server_delete":
-                # Derselbe Aufruf, den der Panel-Router und die Hoster-Anbindung
-                # nehmen. `delete_server_completely` prueft `servers.delete`
-                # selbst noch einmal — die dritte Pruefung nach `_resolve_server`
-                # beim Vorschlagen und `_require_tool_permission` beim
-                # Bestaetigen. Eine davon zu ueberspringen, waere ein eigener
-                # Loeschpfad fuer die KI, und genau den soll es nicht geben.
-                from services.server_deletion_service import delete_server_completely
-
-                result = delete_server_completely(
-                    db,
-                    server_id=server_id,
-                    actor=ActorContext.for_user(
-                        active_user, origin="ai", correlation_id=correlation_id
-                    ),
-                )
-                task_id = None
-                queued = False
-            elif tool_name == "propose_config_update":
-                result = write_server_text(
-                    db,
-                    user=active_user,
-                    server_id=server_id,
-                    relative_path=str(payload["path"]),
-                    content=str(payload["content"]),
-                    expected_revision=expected_revision,
-                    create_only=bool(payload.get("create_only")),
-                )
-                task_id = None
-                queued = False
-            elif tool_name == "propose_config_patch":
-                # Erneut anwenden statt den fertigen Inhalt mitzuschleppen. Es
-                # kommt dasselbe heraus: `expected_revision` laesst nur genau
-                # den Stand zu, auf dem die Ersetzungen beim Vorschlagen schon
-                # einmal aufgegangen sind — und dieselbe Revision geht gleich
-                # noch einmal in `write_server_text`, das den Schreibvorgang
-                # unter der Dateisperre gegen sie prueft.
-                pfad = str(payload["path"])
-                aktuell = read_server_text(db, server_id=server_id, relative_path=pfad)
-                try:
-                    neu = apply_edits(
-                        str(aktuell["content"]),
-                        [(str(e["find"]), str(e["replace"])) for e in payload["edits"]],
-                    )
-                except EditNotApplicable as exc:
-                    raise AiActionStateError("AI_ACTION_FILE_CHANGED") from exc
-                result = write_server_text(
-                    db,
-                    user=active_user,
-                    server_id=server_id,
-                    relative_path=pfad,
-                    content=neu,
-                    expected_revision=expected_revision,
-                )
-                task_id = None
-                queued = False
-            elif tool_name == "propose_bind_ip_update":
-                result = _execute_bind_ip_update(
-                    db, server_id=server_id, payload=payload
-                )
-                task_id = None
-                queued = False
-            elif tool_name == "propose_mod_install":
-                # Anders als beim Lifecycle gibt es fuer den Mod-Download keinen
-                # Rueckkanal, der den Vorschlag spaeter abschliesst. Ein
-                # dauerhaftes "executing" waere deshalb kein ehrlicherer Zustand,
-                # sondern ein fuer immer offener Vorgang. Abgeschlossen ist hier
-                # das, was der Vorschlag zugesagt hat: die Installation ist
-                # angestossen. Ihren Ausgang traegt die Mod-Zeile.
-                result = _execute_mod_install(db, server_id=server_id, payload=payload)
-                task_id = None
-                queued = False
-            elif tool_name == "propose_server_repair":
-                result = _execute_server_repair(
-                    db, server_id=server_id, payload=payload,
-                    user=active_user, correlation_id=correlation_id,
-                )
-                task_id = None
-                queued = False
-            elif tool_name == "propose_guardian_tuning":
-                result = _execute_guardian_tuning(
-                    db, server_id=server_id, payload=payload,
-                    user=active_user, correlation_id=correlation_id,
-                    incident_id=guardian.incident_id if guardian else None,
-                )
-                task_id = None
-                queued = False
-            elif tool_name == "propose_file_delete":
-                result = _execute_file_delete(
-                    db, user=active_user, server_id=server_id, payload=payload,
-                    expected_revision=expected_revision,
-                )
-                task_id = None
-                queued = False
-            elif tool_name == "propose_server_create":
-                # Ebenso: `provision_server` kehrt zurueck, sobald der Server
-                # existiert und die Installation laeuft — exakt der Punkt, an dem
-                # auch `POST /api/servers` dem Panel antwortet. Der weitere
-                # Verlauf haengt an der Operation-Task, deren ID mitgegeben wird.
-                result, created_server_id, task_id = _execute_server_create(
-                    db, user=active_user, payload=payload, correlation_id=correlation_id,
-                    proposal_id=row_id,
-                )
-                server_id = created_server_id
-                queued = False
-            elif tool_name == "propose_blueprint_change":
-                # Gespeichert wird die Nutzlast, die beim **Vorschlagen**
-                # entstanden ist — nicht eine neu berechnete. Der Mensch hat
-                # genau dieses Ergebnis gesehen und bestaetigt; zwischenzeitlich
-                # geaenderte Vorlagen duerfen daran nichts mehr drehen.
-                from services import blueprint_service
-
-                try:
-                    blueprint_id = blueprint_service.save_community_blueprint(
-                        dict(payload["blueprint"])
-                    )
-                except HTTPException as exc:
-                    logger.info("Blueprint-Vorschlag abgelehnt: %s", exc.detail)
-                    raise AiActionStateError("AI_ACTION_BLUEPRINT_REJECTED") from exc
-                result = {"blueprint_id": blueprint_id}
-                task_id = None
-                queued = False
-            elif tool_name == "propose_blueprint_delete":
-                # Die Session dieses Requests geht mit. `delete_community_blueprint`
-                # zaehlt vor dem Loeschen die Server, die den Blueprint noch
-                # verwenden — und zwar erneut, denn zwischen Vorschlag und Klick
-                # kann ein Server angelegt worden sein. Diese Zaehlung muss den
-                # Stand sehen, auf dem dieser Request arbeitet; eine eigene
-                # Verbindung daneben antwortete auf eine andere Frage als die,
-                # die hier gestellt wird.
-                from services import blueprint_service
-
-                try:
-                    blueprint_service.delete_community_blueprint(
-                        str(payload["blueprint_id"]), db=db
-                    )
-                except HTTPException as exc:
-                    logger.info("Blueprint-Loeschvorschlag abgelehnt: %s", exc.detail)
-                    raise AiActionStateError("AI_ACTION_BLUEPRINT_DELETE_REJECTED") from exc
-                result = {"deleted": True, "blueprint_id": str(payload["blueprint_id"])}
-                task_id = None
-                queued = False
-            elif tool_name in {
-                "propose_hoster_integration",
-                "propose_hoster_product",
-                "propose_ai_tarif_role",
-            }:
-                result = _execute_hoster_write(
-                    db, user=active_user, tool_name=tool_name, payload=payload
-                )
-                task_id = None
-                queued = False
-            elif tool_name == "propose_task_set":
-                # **Die Felder werden hier erneut geprueft**, nicht nur
-                # angewandt. Zwischen Vorschlag und Bestaetigung liegt ein
-                # Zeitfenster ohne Obergrenze, und in ihm kann der Betreiber die
-                # autonome Freigabe zurueckgenommen haben. Ohne die zweite
-                # Pruefung entstuende hier eine handelnde Aufgabe auf Grundlage
-                # einer Freigabe, die es nicht mehr gibt — und sie liefe von da
-                # an jede Nacht.
-                #
-                # `ai_task_service` prueft beides in `_anwenden`; deshalb steht
-                # hier nur der Aufruf und keine eigene Kette.
-                gemerkt = payload.get("task_id")
-                felder = dict(payload.get("felder") or {})
-                if gemerkt:
-                    aufgabe = ai_task_service.aendern(
-                        db, user=active_user, task_id=str(gemerkt), felder=felder
-                    )
-                else:
-                    aufgabe = ai_task_service.anlegen(
-                        db, user=active_user, felder=felder
-                    )
-                result = {
-                    "task_id": aufgabe.id,
-                    "title": aufgabe.title,
-                    "plan": ai_task_service.plan_text(aufgabe),
-                    "enabled": bool(aufgabe.enabled),
-                    "next_run": (
-                        ai_task_service.utc(aufgabe.next_run_at).isoformat()
-                        if aufgabe.next_run_at is not None else None
-                    ),
-                }
-                task_id = None
-                queued = False
-            elif tool_name == "propose_task_delete":
-                geloescht = ai_task_service.loeschen(
-                    db, user=active_user, task_id=str(payload["task_id"])
-                )
-                result = {"deleted": True, "title": geloescht}
-                task_id = None
-                queued = False
-            else:
+            ausfuehrung = _AUSFUEHRUNGEN.get(tool_name)
+            if ausfuehrung is None:
                 raise AiActionStateError("AI_ACTION_TOOL_NOT_ALLOWED")
+            ausgefuehrt = ausfuehrung(
+                db,
+                _AusfuehrungsRahmen(
+                    payload=payload,
+                    server_id=server_id,
+                    active_user=active_user,
+                    correlation_id=correlation_id,
+                    expected_revision=expected_revision,
+                    row_id=row_id,
+                    guardian=guardian,
+                    tool_name=tool_name,
+                ),
+            )
+            result = ausgefuehrt.result
+            task_id = ausgefuehrt.task_id
+            queued = ausgefuehrt.queued
+            # Nur die Servererstellung traegt eine neue Server-ID zurueck. Ab
+            # hier meint `server_id` den frisch angelegten Server — daran
+            # haengen der Fixup-Block gleich unten und das Audit.
+            if ausgefuehrt.neuer_server_id is not None:
+                server_id = ausgefuehrt.neuer_server_id
 
             proposal = db.get(AiActionProposal, row_id)
             if proposal is None:
@@ -2906,22 +3085,18 @@ def execute_proposal(
                 and server_id is not None
             ):
                 proposal.server_id = server_id
-            audit_service.record_privileged_action(
+            _ausfuehrung_protokollieren(
                 db,
                 user_id=active_user.id,
-                action="ai.action.executed",
-                target_type="server" if server_id is not None else "ai_action",
-                target_id=server_id,
-                details={
-                    "proposal_id": row_id,
-                    "tool": tool_name,
-                    "confirmed": True,
-                    "succeeded": not queued,
+                server_id=server_id,
+                row_id=row_id,
+                tool_name=tool_name,
+                correlation_id=correlation_id,
+                succeeded=not queued,
+                extra={
                     **({"queued": True} if queued else {}),
                     **({"task_id": task_id} if task_id else {}),
                 },
-                origin="ai",
-                correlation_id=correlation_id,
             )
             db.commit()
             db.refresh(proposal)
@@ -2935,21 +3110,15 @@ def execute_proposal(
                     exc.code if isinstance(exc, AiActionStateError) else "AI_ACTION_EXECUTION_FAILED"
                 )
                 failed.executed_at = datetime.now(timezone.utc)
-                audit_service.record_privileged_action(
+                _ausfuehrung_protokollieren(
                     db,
                     user_id=active_user.id,
-                    action="ai.action.executed",
-                    target_type="server" if server_id is not None else "ai_action",
-                    target_id=server_id,
-                    details={
-                        "proposal_id": row_id,
-                        "tool": tool_name,
-                        "confirmed": True,
-                        "succeeded": False,
-                        "error_code": failed.error_code,
-                    },
-                    origin="ai",
+                    server_id=server_id,
+                    row_id=row_id,
+                    tool_name=tool_name,
                     correlation_id=correlation_id,
+                    succeeded=False,
+                    extra={"error_code": failed.error_code},
                 )
                 db.commit()
             if isinstance(exc, AiActionStateError):
@@ -2960,6 +3129,42 @@ def execute_proposal(
     finally:
         if lock is not None:
             lock.release()
+
+
+def _ausfuehrung_protokollieren(
+    db: Session,
+    *,
+    user_id: int,
+    server_id: int | None,
+    row_id: str,
+    tool_name: str,
+    correlation_id: str | None,
+    succeeded: bool,
+    extra: dict | None = None,
+) -> None:
+    """Der Audit-Eintrag einer Ausfuehrung — Erfolg und Fehlschlag, eine Form.
+
+    Stand als Zehn-Zeilen-Paar zweimal in `execute_proposal`, unterschieden
+    nur durch `succeeded` und die Zusatzfelder. Ein neues Detail-Feld musste
+    zweimal ergaenzt werden; vergisst man eines, erzaehlen Erfolgs- und
+    Fehlerprotokoll verschieden viel.
+    """
+    audit_service.record_privileged_action(
+        db,
+        user_id=user_id,
+        action="ai.action.executed",
+        target_type="server" if server_id is not None else "ai_action",
+        target_id=server_id,
+        details={
+            "proposal_id": row_id,
+            "tool": tool_name,
+            "confirmed": True,
+            "succeeded": succeeded,
+            **(extra or {}),
+        },
+        origin="ai",
+        correlation_id=correlation_id,
+    )
 
 
 def reconcile_interrupted_actions(db: Session) -> int:
