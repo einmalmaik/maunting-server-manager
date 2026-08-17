@@ -250,6 +250,10 @@ def probe_fehlercode(fehler: BaseException) -> str:
             return "AI_PROVIDER_REQUEST_REJECTED"
         if status == 429:
             return "AI_PROVIDER_RATE_LIMITED"
+    if "AI_PROVIDER_AUTH_FAILED" in str(fehler):
+        return "AI_PROVIDER_AUTH_FAILED"
+    if "AI_PROVIDER_REQUEST_REJECTED" in str(fehler) or "payment_required" in str(fehler).lower():
+        return "AI_PROVIDER_REQUEST_REJECTED"
     if isinstance(fehler, (asyncio.TimeoutError, TimeoutError)):
         return "AI_PROVIDER_STREAM_TIMEOUT"
     return "AI_PROVIDER_UNAVAILABLE"
@@ -289,15 +293,36 @@ def _verbindung_zu(fehler: BaseException) -> bool:
 async def pruefen(adresse: str, schluessel: str) -> None:
     verbindung = await _verbinden(adresse, schluessel)
     try:
-        await verbindung.send(json.dumps({"text": " ", "xi_api_key": schluessel}))
-        # Auf die erste Antwort warten. Ohne das ginge eine Gegenstelle, die
-        # erst nach dem Handschlag ablehnt, als Erfolg durch. Ein Ausbleiben
-        # ist hier **kein** Fehlschlag: ein blosses Leerzeichen muss keinen Ton
-        # ergeben, und eine schweigende Gegenstelle hat den Handschlag ja
-        # angenommen. Abgelehnt hätte sie mit einem Schliessen, und das kommt
-        # als Ausnahme aus `recv()`.
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(verbindung.recv(), PROBE_TIMEOUT)
+        await verbindung.send(
+            json.dumps(
+                {
+                    "text": " ",
+                    "voice_settings": {
+                        "stability": 0.5,
+                        "similarity_boost": 0.8,
+                    },
+                    "xi_api_key": schluessel,
+                }
+            )
+        )
+        # Kleinen Testsatz senden, um Stimmberechtigungen (z. B. Free-Tier-Einschränkungen
+        # auf Community-Library-Stimmen) direkt beim Verbindungstest abzufangen
+        await verbindung.send(json.dumps({"text": "Test ", "try_trigger_generation": True}))
+        await verbindung.send(json.dumps({"text": ""}))
+        while True:
+            antwort = await asyncio.wait_for(verbindung.recv(), PROBE_TIMEOUT)
+            if isinstance(antwort, bytes):
+                break
+            try:
+                ereignis = json.loads(antwort)
+            except (TypeError, ValueError):
+                break
+            if isinstance(ereignis, dict):
+                if "error" in ereignis:
+                    fehler_text = ereignis.get("message") or ereignis.get("error")
+                    raise RuntimeError(f"AI_PROVIDER_REQUEST_REJECTED: {fehler_text}")
+                if ereignis.get("audio") or ereignis.get("isFinal"):
+                    break
     finally:
         with contextlib.suppress(Exception):
             await verbindung.close()
