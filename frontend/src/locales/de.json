@@ -596,6 +596,7 @@
         "AI_PROVIDER_AUTH_FAILED": "Der API-Key wurde vom Anbieter abgelehnt. Prüfe den Operator-Key oder deinen eigenen Key im Profil.",
         "AI_PROVIDER_ENDPOINT_NOT_FOUND": "Der Anbieter kennt diese Adresse nicht. Die Basis-URL endet auf /v1 — nicht auf /chat/completions.",
         "AI_PROVIDER_REQUEST_REJECTED": "Der Anbieter hat die Anfrage abgelehnt. Meist stimmt der Modellname nicht.",
+        "AI_PROVIDER_PAYMENT_REQUIRED": "Der Anbieter meldet aufgebrauchtes Guthaben. Der Schlüssel ist in Ordnung — das Konto braucht Geld.",
         "AI_PROVIDER_RATE_LIMITED": "Der Anbieter drosselt gerade. Versuche es in einem Moment erneut.",
         "AI_PROVIDER_UNAVAILABLE": "Der Anbieter ist nicht erreichbar.",
         "AI_PROVIDER_KEY_MISSING": "Für diesen Provider ist kein API-Key hinterlegt.",

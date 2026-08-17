@@ -37,7 +37,7 @@ import httpx
 
 from models import AiProvider
 from services import ai_model_catalog
-from services.ai_model_catalog import Modell
+from services.ai_provider_registry import Modell
 
 
 logger = logging.getLogger(__name__)

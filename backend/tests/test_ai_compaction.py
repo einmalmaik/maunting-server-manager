@@ -32,7 +32,7 @@ from models import (
 from services import ai_compaction_service, ai_context_window, ai_usage_service
 from services.ai_context_service import build_provider_messages
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
-from services.ai_model_catalog import Modell
+from services.ai_provider_registry import Modell
 from services.panel_settings_service import PanelSettingsService
 from services.openai_compatible_adapter import AiProviderRequestError, StreamChunk
 from services.role_service import set_user_roles
@@ -89,9 +89,10 @@ def _conversation(db: Session, user: User, *, messages: int, chars: int) -> AiCo
 def _fake_summary(monkeypatch: pytest.MonkeyPatch, text: str) -> dict:
     seen: dict = {}
 
-    async def fake(_client, *, provider, api_key, messages, usage, **_kwargs):
+    async def fake(_client, *, provider, api_key, messages, usage, **kwargs):
         del provider, api_key
         seen["messages"] = messages
+        seen.update(kwargs)
         usage.total_tokens = 30
         yield StreamChunk("content", text)
 
@@ -142,6 +143,40 @@ async def test_compaction_keeps_the_recent_messages_verbatim(
     assert "Es ging um einen Minecraft-Server" in serialized
     assert "Nachricht 0 " not in serialized
     assert "Nachricht 39 " in serialized
+
+
+@pytest.mark.asyncio
+async def test_folding_never_pays_for_thinking(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eine Zusammenfassung ist eine Fleissaufgabe, keine Ueberlegung.
+
+    Das war immer gemeint, stand aber nur darin, dass hier **nichts** gesetzt
+    war — und nichts zu setzen heisst bei einem Anbieter ohne Schalter „nimm
+    deine Vorgabe". Bei OpenAI wurde also jede Faltung mit Denkschritten
+    bezahlt, die niemand bestellt hatte und niemand zu sehen bekam. Geprueft
+    wird deshalb, dass die Entscheidung **mitgeht**, nicht bloss dass sie
+    stimmt: das Weglassen war der Fehler.
+    """
+    _enable(db, regular_user)
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, messages=40, chars=2_000)
+    seen = _fake_summary(monkeypatch, "Kurz und knapp.")
+
+    async def kein_denken(_client, _provider, *, api_key=None, model_id=None):
+        return False, "none"
+
+    monkeypatch.setattr(ai_compaction_service.ai_reasoning, "aus_fuer", kein_denken)
+
+    assert await ai_compaction_service.compact_conversation(
+        client=None, user_id=regular_user.id,
+        conversation_id=conversation.id, provider_id=provider.id,
+    ) is True
+
+    assert seen["reasoning"] is False
+    assert seen["reasoning_effort"] == "none", (
+        "Ohne das Wort geht bei einem Anbieter ohne Schalter gar nichts hinaus"
+    )
 
 
 @pytest.mark.asyncio

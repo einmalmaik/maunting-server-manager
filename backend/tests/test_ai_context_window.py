@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from models import AiProvider, Role, RolePermission, User
 from services import ai_context_service, ai_context_window
-from services.ai_model_catalog import Modell
+from services.ai_provider_registry import Modell
 from services.panel_settings_service import PanelSettingsService
 from services.role_service import set_user_roles
 

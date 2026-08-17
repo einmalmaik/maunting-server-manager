@@ -663,6 +663,10 @@ export type AiStreamEvent =
   // sie ist keine Anfrage an den Benutzer, sondern eine Meldung.
   | { event: 'action'; data: AiActionProposal }
   | { event: 'done'; data: { message_id: string; replayed?: boolean } }
+  // Nur der Code, kein Wortlaut. Hier stand kurzzeitig ein `detail` mit dem
+  // Satz des Anbieters; es ist bewusst wieder weg, weil dieser Satz das Konto
+  // des Betreibers beschreibt und der Lauf einem Benutzer gehoert
+  // (`ai_stream_service`, Ausnahmezweig). Der Code traegt die Erklaerung.
   | { event: 'error'; data: { code: string; message_key: string } }
   // Der vollstaendige Stand eines Laufs beim Anhaengen. Kommt immer zuerst.
   //

@@ -35,7 +35,7 @@ from services import (
     ai_chat_service,
     ai_provider_registry,
     ai_provider_service,
-    ai_tts_elevenlabs,
+    ai_tts,
     ai_voice_bridge,
     ai_voice_vad,
 )
@@ -95,14 +95,18 @@ def _sprechender_zugang(db: Session) -> AiProvider | None:
     Betreibers, MSM kennt sie nicht, und jede geratene stünde auf seiner
     Rechnung.
     """
-    if not ai_tts_elevenlabs.STIMME_MOEGLICH:
-        # Die WebSocket-Bibliothek fehlt in dieser Installation. Für den
-        # Benutzer ist das dasselbe wie ein fehlender Zugang: die Funktion gibt
-        # es nicht. Ein Knopf, der beim Klick abbricht, wäre die schlechtere
-        # Auskunft.
-        return None
     for zugang in _zugaenge(db):
         if not ai_provider_service.spricht(zugang, ai_provider_registry.TTS):
+            continue
+        if not ai_tts.moeglich(zugang.provider_kind):
+            # Der Sprachdienst dieses Anbieters läuft hier nicht — meist, weil
+            # eine weich importierte Bibliothek fehlt. Für den Benutzer ist das
+            # dasselbe wie ein fehlender Zugang: die Funktion gibt es nicht,
+            # und ein Knopf, der beim Klick abbricht, wäre die schlechtere
+            # Auskunft.
+            #
+            # Die Frage steht **je Zugang** und nicht einmal davor: der eine
+            # Sprachdienst kann fehlen, während ein zweiter läuft.
             continue
         if not (zugang.default_voice or "").strip():
             continue
@@ -221,7 +225,8 @@ async def voice_ws(websocket: WebSocket) -> None:
             return
 
         gespraech = await run_in_threadpool(_gespraech_holen, db, user)
-        stimm_adresse = ai_tts_elevenlabs.verbindungsadresse(
+        stimm_kind = sprechen.provider_kind
+        stimm_adresse = ai_tts.stimmweg(stimm_kind).verbindungsadresse(
             ai_provider_service.base_url(sprechen),
             sprechen.default_voice or "",
             sprechen.default_model,
@@ -240,6 +245,7 @@ async def voice_ws(websocket: WebSocket) -> None:
         user_id=benutzer_id,
         conversation_id=gespraech,
         chat_provider_id=hoeren_id,
+        stimm_kind=stimm_kind,
         stimm_adresse=stimm_adresse,
         stimm_schluessel=stimm_schluessel,
         http_client=websocket.app.state.ai_http_client,

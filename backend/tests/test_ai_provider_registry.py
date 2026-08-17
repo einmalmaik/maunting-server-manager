@@ -247,7 +247,6 @@ def test_the_recommendation_is_a_model_id_and_nothing_else() -> None:
     schlicht kein Praefix.
     """
     from services import ai_provider_registry
-    from services.ai_model_catalog import _LESER
 
     # Wie ein Katalogeintrag dieses Anbieters mindestens aussieht. Je Anbieter
     # eine eigene Form, und das ist keine Umstaendlichkeit, sondern die Lage:
@@ -270,7 +269,8 @@ def test_the_recommendation_is_a_model_id_and_nothing_else() -> None:
             f"Neuer Anbieter {kind!r} ohne Probeeintrag — ohne ihn prueft diese "
             f"Zusage seine Empfehlung nicht mit."
         )
-        assert _LESER[kind](probe[kind](spec.empfehlung)) is not None, (
+        leser = ai_provider_registry.katalog_leser(kind)
+        assert leser(probe[kind](spec.empfehlung)) is not None, (
             f"Der Katalogleser von {kind} wuerde die Empfehlung "
             f"{spec.empfehlung!r} verwerfen — sie kann dort nie erscheinen."
         )

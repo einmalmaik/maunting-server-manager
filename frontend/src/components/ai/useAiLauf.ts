@@ -383,9 +383,17 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
         // Der stabile Code sagt konkret, was fehlt (falscher Key, falsches
         // Modell, falsche Basis-URL). Der allgemeine `message_key` bleibt
         // nur der Rückfall für Codes ohne eigenen Text.
-        toast.error(t(`ai.errors.codes.${data.code}`, {
+        const erklaerung = t(`ai.errors.codes.${data.code}`, {
           defaultValue: t(data.message_key, { defaultValue: t('ai.chat.errors.stream') }),
-        }))
+        })
+        // Hier stand einmal der Wortlaut des Anbieters unter der Erklärung.
+        // Er ist wieder weg: er nennt den konkreten Fall, aber eben auch
+        // Kontingentstand, Kontoname und den maskierten Schlüssel — und ein
+        // Chat gehört einem Benutzer, das Konto dahinter dem Betreiber. Das
+        // Backend schickt ihn deshalb nicht mehr mit, sondern legt ihn ins
+        // Protokoll; hinaus geht der Code, und zu jedem steht ein eigener Satz
+        // in `ai.errors.codes`.
+        toast.error(erklaerung)
       }
     }
     return { verarbeite, istGescheitert: () => gescheitert }

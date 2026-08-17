@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 
 from services import ai_limit_service, ai_reasoning
-from services.ai_model_catalog import Modell
+from services.ai_provider_registry import Modell
 
 
 def _modell(**overrides) -> Modell:
@@ -226,6 +226,96 @@ def test_a_model_without_levels_still_sends_no_level() -> None:
     ) == (True, None)
 
 
+# ── „Aus“ als Wort, für Anbieter ohne Schalter ────────────────────────
+#
+# OpenRouter kennt einen Schalter (``reasoning: {"enabled": false}``); dort
+# genügt das ``False``. OpenAI kennt keinen — dort ist „aus“ die Stufe
+# ``reasoning_effort: "none"``, und ohne dieses Wort geht gar nichts hinaus.
+# Das Modell denkt dann in OpenAIs Voreinstellung weiter (``medium`` bei
+# ``gpt-5.5``): abgeschaltet in der Oberfläche, bezahlt auf der Rechnung.
+#
+# Ob ein Modell das Wort verträgt, sagt **nur der Katalog**. Es aus ``zwingend``
+# zu folgern wäre falsch: ``gpt-5.1-codex-mini`` ist abschaltbar im Sinne von
+# `darf_abschalten` und führt trotzdem kein ``none`` in seinen Stufen.
+
+
+def test_off_is_named_when_the_model_knows_a_word_for_it() -> None:
+    """Abgeschaltet heißt abgeschaltet — auch beim Anbieter ohne Schalter."""
+    modell = _modell(stufen=("high", "medium", "low", "none"))
+    assert ai_reasoning.klemmen(
+        modell, wunsch=None, aktiv=False, deckel=None
+    ) == (False, "none")
+
+
+def test_off_stays_wordless_when_the_model_lists_no_such_level() -> None:
+    """Kein Wort im Katalog, kein Wort in der Anfrage.
+
+    Der Gegenbeleg ist ``openai/gpt-5.1-codex-mini``: abschaltbar, aber ohne
+    ``none`` in ``supported_efforts``. Eines zu senden hiesse, eine Stufe zu
+    erfinden — und der Anbieter antwortet darauf mit einem 400, das die ganze
+    Anfrage verwirft.
+    """
+    modell = _modell(stufen=("high", "medium", "low"))
+    assert ai_reasoning.klemmen(
+        modell, wunsch=None, aktiv=False, deckel=None
+    ) == (False, None)
+
+
+def test_a_cap_that_cuts_everything_also_says_off_out_loud() -> None:
+    """Der Deckel schaltet ab — und muss das genauso deutlich sagen.
+
+    Die Rolle darf höchstens ``low``, das Modell fängt bei ``high`` an. Ohne das
+    Wort bliebe es bei der Vorgabe des Anbieters, also genau bei der Tiefe, die
+    der Deckel verbietet.
+    """
+    modell = _modell(stufen=("max", "xhigh", "high", "none"), standard_stufe="high")
+    assert ai_reasoning.klemmen(
+        modell, wunsch="max", aktiv=True, deckel=ai_reasoning.rang("low")
+    ) == (False, "none")
+
+
+def test_a_model_whose_only_level_is_off_still_switches_off() -> None:
+    """``('none',)`` ist eine leere Auswahl und trotzdem ein Wort.
+
+    ``none`` fällt aus der Auswahl heraus (`waehlbare_stufen`), das Modell
+    landet damit im Zweig „kennt keine Stufen" — dort muss das Wort trotzdem
+    ankommen, sonst wirkt ein Rollendeckel von 0 bei genau diesen Modellen
+    nicht.
+    """
+    modell = _modell(stufen=("none",), standard_stufe=None)
+    assert ai_reasoning.waehlbare_stufen(modell, None) == []
+    assert ai_reasoning.klemmen(modell, wunsch=None, aktiv=False, deckel=None) == (
+        False,
+        "none",
+    )
+    assert ai_reasoning.klemmen(modell, wunsch=None, aktiv=True, deckel=0) == (
+        False,
+        "none",
+    )
+
+
+def test_a_mandatory_model_is_never_told_to_stop() -> None:
+    """Denkzwang schlägt das Wort. Sonst ginge ein ``none`` an ein Modell, das es ablehnt."""
+    modell = _modell(stufen=("high", "none"), zwingend=True)
+    aktiv, stufe = ai_reasoning.klemmen(modell, wunsch=None, aktiv=False, deckel=None)
+    assert aktiv is True
+    assert stufe != ai_reasoning.AUS_STUFE
+
+
+def test_a_non_thinking_model_says_nothing_at_all() -> None:
+    """Weder Schalter noch Wort: wer nicht denkt, bekommt das Feld nicht.
+
+    Der Zweig steht **vor** allen anderen, und das ist wichtig: ein Modell ohne
+    Denkfähigkeit antwortet auf ``reasoning_effort`` mit einem 400, gleich
+    welchen Wert man nennt — ``none`` eingeschlossen.
+    """
+    modell = _modell(denkt=False, stufen=("none",))
+    assert ai_reasoning.klemmen(modell, wunsch=None, aktiv=False, deckel=None) == (
+        False,
+        None,
+    )
+
+
 # ── Modelle, die gar nicht denken ─────────────────────────────────────
 
 
@@ -260,3 +350,191 @@ def test_the_frontend_dropdown_carries_the_same_rank_words() -> None:
     assert treffer is not None, "REASONING_RANKS steht nicht mehr in AiTab.tsx"
     woerter = re.findall(r"'([a-z]+)'", treffer.group(1))
     assert woerter == ["off", *ai_reasoning.RANGFOLGE]
+
+
+@pytest.mark.parametrize("wert", [0, 7, -1])
+def test_ranks_outside_the_scale_have_no_word(wert: int) -> None:
+    assert ai_reasoning.stufe_fuer_rang(wert) is None
+
+
+# ── Nebenaufträge: Falten, Mailtext, Diktat ───────────────────────────
+#
+# Drei Aufrufer gehen am Chat vorbei direkt an den Adapter. Sie wollen alle
+# dasselbe — nicht nachdenken —, und sie sagten es alle drei so, dass es nur
+# bei einem Anbieter mit Schalter ankam: `reasoning=False` und sonst nichts.
+# Bei OpenAI ging damit gar keine Zeile hinaus, und keine Zeile heisst dort
+# „nimm deine Vorgabe". Jede Faltung, jede Betreibermail und jedes Diktat
+# wurde also mit Denkschritten bezahlt, die niemand bestellt hatte.
+
+
+def _provider(kind: str = "openai", model: str = "gpt-5.5"):
+    from models import AiProvider
+
+    return AiProvider(
+        id=1, name="P", provider_kind=kind, default_model=model,
+        enabled=True, requires_api_key=False,
+    )
+
+
+def _katalog(monkeypatch: pytest.MonkeyPatch, modell: Modell | None) -> dict:
+    """Ersetzt den Katalog und merkt sich, wonach gefragt wurde."""
+    gefragt: dict = {}
+
+    async def finde(_client, kind, model_id, *, schluessel=None):
+        gefragt.update(kind=kind, model_id=model_id, schluessel=schluessel)
+        return modell
+
+    monkeypatch.setattr(ai_reasoning.ai_model_catalog, "finde", finde)
+    return gefragt
+
+
+@pytest.mark.asyncio
+async def test_a_side_job_says_off_in_the_providers_own_words(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kennt das Modell ein Wort für „aus“, geht es mit — auch ohne Chat."""
+    _katalog(monkeypatch, _modell(stufen=("high", "medium", "none")))
+    assert await ai_reasoning.aus_fuer(None, _provider()) == (
+        False, ai_reasoning.AUS_STUFE,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_side_job_at_a_mandatory_model_takes_the_shallowest_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Abschalten geht nicht — dann wenigstens nicht die teure Vorgabe.
+
+    Dieselbe Regel wie im Chat, und aus demselben Grund: sie steht nur einmal
+    da, nämlich in `klemmen`. `aus_fuer` holt den Katalog und fragt.
+    """
+    _katalog(monkeypatch, _modell(
+        stufen=("max", "high", "medium", "low"), standard_stufe="high", zwingend=True,
+    ))
+    assert await ai_reasoning.aus_fuer(None, _provider()) == (True, "low")
+
+
+@pytest.mark.asyncio
+async def test_a_side_job_at_a_silent_catalog_sends_no_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unbekanntes Modell: nichts erfinden.
+
+    ``none`` blind mitzuschicken wäre schlimmer als der verlorene Deckel — ein
+    Modell ohne Denkvermögen weist die Zeile hart ab (*Unrecognized request
+    argument supplied: reasoning_effort*), und ob es eines ist, weiss genau die
+    Quelle nicht, die hier schweigt.
+    """
+    _katalog(monkeypatch, None)
+    assert await ai_reasoning.aus_fuer(None, _provider()) == (False, None)
+
+
+@pytest.mark.asyncio
+async def test_a_side_job_asks_the_catalog_with_the_key_it_uses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kontogebundene Kataloge brauchen den Schlüssel des Auftrags.
+
+    OpenAIs ``/v1/models`` antwortet je Zugang verschieden. Ohne den Schlüssel
+    käme hier gar keine Liste — und damit nie ein Wort für „aus“.
+    """
+    gefragt = _katalog(monkeypatch, _modell(stufen=("none", "low")))
+    await ai_reasoning.aus_fuer(
+        None, _provider(), api_key="sk-geheim", model_id="gpt-5.5-mini",
+    )
+    assert gefragt == {
+        "kind": "openai", "model_id": "gpt-5.5-mini", "schluessel": "sk-geheim",
+    }
+
+
+# ── Das Modell wechselt mitten im Lauf ────────────────────────────────
+#
+# Die Denkstufe eines Laufs steht in `AiRun` und bleibt über alle Segmente
+# stehen; der Zugang wird je Segment frisch gelesen. Der Betreiber darf also
+# das ``default_model`` austauschen, während ein Lauf auf eine Bestätigung
+# wartet — und die eingefrorene Stufe gehört dann zum alten Modell.
+
+
+def _vorbereitung(*, reasoning: bool, effort: str | None):
+    from services.ai_stream_service import _Vorbereitung
+
+    return _Vorbereitung(
+        run_id="r", user_id=1, conversation_id="c", provider=_provider(),
+        api_key=None, message_id="m", usage_event_id=1, request_id="q",
+        reasoning=reasoning, reasoning_effort=effort,
+        token_price_micro_usd_per_million=None, zustand={},
+        angebotene_werkzeuge=frozenset(),
+    )
+
+
+def _pruefe(modell: Modell | None, *, reasoning=True, effort="xhigh"):
+    from services.ai_stream_service import _denken_am_modell
+
+    return _denken_am_modell(_vorbereitung(reasoning=reasoning, effort=effort), modell)
+
+
+def test_a_frozen_level_the_new_model_knows_goes_out_unchanged() -> None:
+    assert _pruefe(_modell(stufen=("max", "xhigh", "high"))) == (True, "xhigh")
+
+
+def test_a_frozen_level_the_new_model_lacks_is_lowered_never_raised() -> None:
+    """Sonst ist jedes weitere Segment ein ``400`` — der Lauf läuft nie wieder an.
+
+    Gesenkt und nicht verworfen: ohne Stufe nähme der Anbieter seine eigene
+    Vorgabe, und die kann über der stehen, die dieser Lauf einmal zugeteilt
+    bekam. Die eingefrorene Stufe ist hier die **Decke**.
+    """
+    assert _pruefe(_modell(stufen=("high", "low"))) == (True, "high")
+    assert _pruefe(_modell(stufen=("max",))) == (False, None), (
+        "Das neue Modell kann nur tiefer als die eingefrorene Stufe — dann gar "
+        "nicht denken statt teurer denken als der Lauf einmal zugeteilt bekam"
+    )
+
+
+def test_a_frozen_level_at_a_model_that_stopped_thinking_is_dropped() -> None:
+    """Getauscht gegen ein Modell ohne Denkvermögen: dort ist jedes Wort ein 400."""
+    assert _pruefe(_modell(denkt=False, stufen=())) == (False, None)
+
+
+def test_a_frozen_off_stays_off_in_the_new_models_words() -> None:
+    """„Aus“ ist auch nur ein Wort, und das neue Modell führt es womöglich nicht."""
+    assert _pruefe(_modell(stufen=("high", "low")), reasoning=False, effort="none") == (
+        False, None,
+    )
+    assert _pruefe(
+        _modell(stufen=("high", "none")), reasoning=False, effort="none",
+    ) == (False, "none")
+    # Denkzwang: abschalten geht nicht, dann wenigstens die flachste Stufe.
+    assert _pruefe(
+        _modell(stufen=("max", "high", "low"), zwingend=True),
+        reasoning=False, effort="none",
+    ) == (True, "low")
+
+
+def test_a_silent_catalog_changes_nothing_about_the_frozen_level() -> None:
+    """Eine Netzstörung darf keine Stufe abräumen — das wäre stille Verteuerung."""
+    assert _pruefe(None) == (True, "xhigh")
+
+
+def test_a_missing_level_is_never_filled_in_from_the_model() -> None:
+    """``None`` heisst „kein Feld“ und darf nicht zur Vorgabe des Modells werden.
+
+    Das wäre eine Erhöhung nach oben, am ursprünglichen Rollendeckel vorbei —
+    genau der Grund, warum hier geprüft und nicht neu geklemmt wird.
+    """
+    assert _pruefe(_modell(stufen=("max", "high"), standard_stufe="max"), effort=None) == (
+        True, None,
+    )
+
+
+def test_only_a_provider_with_a_switch_can_be_off_without_a_word() -> None:
+    """Woran MSM erkennt, dass ``(False, None)`` wirklich „aus“ heisst.
+
+    Nicht am Namen des Anbieters, sondern an seinem Wortschatz. Genau diese
+    Frage entscheidet, ob ein Rollendeckel von 0 bei unbekanntem Modell greift
+    — bei OpenRouter tut er es, bei OpenAI nicht (`vorgabe`).
+    """
+    assert ai_reasoning._kennt_schalter("openrouter") is True
+    assert ai_reasoning._kennt_schalter("openai") is False
+    # Und ein Schlüssel, den es nicht gibt, nimmt keinen Lauf mit.
+    assert ai_reasoning._kennt_schalter("gibtesnicht") is False

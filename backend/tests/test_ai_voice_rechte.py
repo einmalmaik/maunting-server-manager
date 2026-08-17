@@ -49,6 +49,7 @@ class _Attrappe(ai_voice_bridge.Sprachbruecke):
             user_id=benutzer_id,
             conversation_id="egal",
             chat_provider_id=1,
+            stimm_kind="elevenlabs",
             stimm_adresse="wss://example.invalid/",
             stimm_schluessel="egal",
             http_client=None,  # type: ignore[arg-type]

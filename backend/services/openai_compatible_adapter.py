@@ -57,6 +57,14 @@ class AiProviderRequestError(RuntimeError):
 
     Der Text stammt von aussen und wird deshalb wie jeder Fremdtext behandelt:
     redigiert, einzeilig und hart auf ``MAX_PROVIDER_DETAIL_CHARS`` gekuerzt.
+
+    „Secret-frei" heisst dabei **nicht** „fuer jeden Leser". Die Redaktion trifft
+    Schluesselmuster; Kontingentstand, Kontoname und Fine-Tune-Bezeichnungen
+    sehen aus wie gewoehnlicher Text und bleiben stehen — und ein maskierter
+    Schluessel (``sk-pr***…xyZ4``) passt auf keines der Muster. Der Satz gehoert
+    darum ins Protokoll des Betreibers, nicht in eine Meldung an den Benutzer;
+    wer ihn weiterreicht, reicht den Zugang des Panels mit. `ai_stream_service`
+    und `routers.ai_providers._stimmzugang_pruefen` halten sich beide daran.
     """
 
     def __init__(self, code: str, detail: str | None = None) -> None:
@@ -326,11 +334,73 @@ def _error_code(status_code: int) -> str:
         # oder der Modellname nicht existiert. Das ist eine andere Handlung fuer
         # den Betreiber als eine inhaltlich abgelehnte Anfrage.
         return "AI_PROVIDER_ENDPOINT_NOT_FOUND"
+    if status_code == 402:
+        # Eigener Code, weil die Handlung eine voellig andere ist: hier ist nichts
+        # falsch konfiguriert, es ist bezahlt worden. Unter
+        # `AI_PROVIDER_REQUEST_REJECTED` las der Betreiber „Meist stimmt der
+        # Modellname nicht" und suchte tagelang am falschen Ende.
+        return "AI_PROVIDER_PAYMENT_REQUIRED"
     if status_code == 429:
         return "AI_PROVIDER_RATE_LIMITED"
     if status_code >= 500:
         return "AI_PROVIDER_UNAVAILABLE"
     return "AI_PROVIDER_REQUEST_REJECTED"
+
+
+def _kurzfassung(message: str) -> str | None:
+    """Fremdtext zu einer Zeile, die man einem Betreiber zeigen kann.
+
+    Redigiert, einzeilig, hart gekuerzt. Steht als eigene Funktion, weil derselbe
+    Text auf zwei Wegen hereinkommt: aus dem Body einer Fehlerantwort
+    (`_error_detail`) und aus einem Fehlerrahmen mitten im Strom
+    (`_fehler_im_rahmen`). Zweimal dieselbe Behandlung, einmal geschrieben.
+    """
+    single_line = " ".join(redact_sensitive_text(message).split())
+    return single_line[:MAX_PROVIDER_DETAIL_CHARS] or None
+
+
+def _fehler_im_rahmen(frame: dict) -> tuple[str, str | None] | None:
+    """Der Fehler, den ein Anbieter **mitten im Strom** meldet — oder ``None``.
+
+    Hier lag der teuerste blinde Fleck dieser Schicht. OpenRouter dokumentiert es
+    ausdruecklich: sind die Kopfzeilen erst einmal draussen, steht der Status auf
+    ``200`` und laesst sich nicht mehr aendern. Ein Fehler kommt dann als ganz
+    gewoehnliches ``data:``-Ereignis mit einem ``error``-Feld **auf oberster
+    Ebene**, daneben ein ``choices``-Eintrag mit ``finish_reason: "error"``, und
+    danach endet die Verbindung — ohne ``[DONE]``.
+
+    Was diese Schicht daraus machte, war die Meldung „Die Antwort des Anbieters
+    brach vorzeitig ab": ``choices`` war vorhanden, ``delta.content`` leer, also
+    lief die Schleife durch, ``saw_done`` blieb ``False``, und der einzige Satz,
+    der die Ursache genannt haette — „Insufficient credits", „No endpoints found
+    for X", „Provider disconnected unexpectedly" — wurde nie gelesen. Der
+    Betreiber sah einen Abbruch ohne Grund und musste raten, welcher seiner
+    Zugaenge, welches Modell oder welches Guthaben gemeint war.
+
+    ``code`` kommt in beiden Formen vor, und beide sind gemeint: OpenRouter
+    schickt bei einem durchgereichten HTTP-Fehler die **Zahl** (``402``), bei
+    einem eigenen Zustand ein **Wort** (``"server_error"``). Eine Zahl geht
+    deshalb durch dieselbe Uebersetzung wie ein Status — ein 402 mitten im Strom
+    ist derselbe Sachverhalt wie ein 402 in der Kopfzeile und verdient dieselbe
+    Handlungsanweisung. Ein Wort taugt dafuer nicht und endet als
+    ``AI_PROVIDER_REQUEST_REJECTED``; die Einzelheit traegt dann der Text.
+    """
+    fehler = frame.get("error")
+    if isinstance(fehler, str):
+        return "AI_PROVIDER_REQUEST_REJECTED", _kurzfassung(fehler)
+    if not isinstance(fehler, dict):
+        return None
+    code = fehler.get("code")
+    if isinstance(code, bool) or not isinstance(code, int):
+        marke = "AI_PROVIDER_REQUEST_REJECTED"
+    else:
+        marke = _error_code(code)
+    nachricht = fehler.get("message")
+    if not isinstance(nachricht, str) or not nachricht:
+        # Ohne Text bleibt wenigstens die Marke. Sie ist immer noch mehr als
+        # „brach vorzeitig ab", weil sie sagt, auf welcher Seite gesucht wird.
+        nachricht = str(code) if code is not None else ""
+    return marke, _kurzfassung(nachricht)
 
 
 async def _error_detail(response: httpx.Response) -> str | None:
@@ -360,8 +430,7 @@ async def _error_detail(response: httpx.Response) -> str | None:
                 message = parsed["message"]
         if message is None:
             message = text
-    single_line = " ".join(redact_sensitive_text(message).split())
-    return single_line[:MAX_PROVIDER_DETAIL_CHARS] or None
+    return _kurzfassung(message)
 
 
 async def stream_chat_completion(
@@ -405,7 +474,7 @@ async def stream_chat_completion(
     `_denktext_aus_details`).
 
     **Gesendet wird das Feld nur an Anbieter, deren Dialekt es kennt**
-    (``Anbieter.reasoning_feld`` in `ai_provider_registry`). Hier stand „ein
+    (Marke ``"reasoning"`` in ``Anbieter.anfrage_erweiterungen``). Hier stand „ein
     Anbieter, der es nicht kennt, ignoriert es" — das stimmt fuer die milden
     Server, aber nicht fuer OpenAI direkt: dort weist die strenge Validierung
     unbekannte Top-Level-Felder mit einem 400 ab, und jede Anfrage scheiterte,
@@ -428,9 +497,10 @@ async def stream_chat_completion(
     der Schalter blendete nur die Denkschritte aus. Fuer ein Panel mit
     Kostenlimits je Rolle ist das die falsche Voreinstellung; ein
     Kostenschalter darf sich nicht auf Anbieterdefaults verlassen. Bei
-    Anbietern ohne das Feld bleibt genau dieses Restrisiko bestehen — dort
-    kann MSM das Denken schlicht nicht abschalten, und ein Feld zu senden, das
-    die Anfrage toetet, schaltet es auch nicht ab.
+    Anbietern ohne eine Denk-Marke in ``anfrage_erweiterungen`` bleibt genau
+    dieses Restrisiko bestehen — dort kann MSM das Denken schlicht nicht
+    abschalten, und ein Feld zu senden, das die Anfrage toetet, schaltet es
+    auch nicht ab.
 
     ``cache_marke`` laesst den Anbieter den Prompt zwischenspeichern. Gesendet
     wird das **oberste** ``cache_control`` neben ``model`` und ``messages``, nicht
@@ -503,19 +573,38 @@ async def stream_chat_completion(
         # Erzwungen wird nur dort, wo der Aufruf gar keine Antwort in Prosa
         # will, sondern ein ausgefuelltes Formular — siehe `ai_mail_text`.
         request_body["tool_choice"] = tool_choice or "auto"
-    # Nur an Anbieter, deren Dialekt das Feld kennt (siehe Docstring) — und
-    # dort immer, nie weglassen: "nichts senden" heisst beim Anbieter nicht
-    # "aus", sondern "nimm deinen Default" — und der ist bei den meisten
-    # aktuellen Modellen an.
-    if ai_provider_registry.anbieter(provider.provider_kind).reasoning_feld:
+    # Welche Zusatzfelder dieser Anbieter vertraegt, sagt sein Eintrag — nicht
+    # diese Datei. Der Adapter bedient alle; sobald er einen einzelnen beim Namen
+    # kennt, sammelt er mit jedem weiteren eine Verzweigung an.
+    erweiterungen = ai_provider_registry.anbieter(provider.provider_kind).anfrage_erweiterungen
+    if "reasoning" in erweiterungen:
+        # Immer setzen, nie weglassen: "nichts senden" heisst bei einem Anbieter,
+        # der das Feld kennt, nicht "aus", sondern "nimm deinen Default" — und
+        # der ist bei den meisten aktuellen Modellen an.
         denken: dict[str, Any] = {"enabled": bool(reasoning)}
         # Die Stufe nur mitgeben, wenn auch gedacht werden soll. Ein `effort`
         # neben `enabled: false` sind zwei widerspruechliche Angaben in einer
-        # Anfrage — welche gewinnt, entscheidet dann der Anbieter und nicht MSM.
+        # Anfrage — welche gewinnt, entschiede dann der Anbieter und nicht MSM.
         if reasoning and reasoning_effort:
             denken["effort"] = reasoning_effort
         request_body["reasoning"] = denken
-    if cache_marke:
+    if "reasoning_effort" in erweiterungen and reasoning_effort:
+        # OpenAIs Mundart: eine blosse Stufe, kein Schalter daneben. Das „aus"
+        # ist dort selbst eine Stufe (``"none"``), und deshalb wird ``reasoning``
+        # hier nicht gelesen — es steht schon in der Stufe. Wer beides pruefte,
+        # koennte ein ausgeschaltetes Nachdenken nicht mehr aussprechen.
+        #
+        # Und deshalb ist der leere Wert die einzige Bedingung: welche Modelle
+        # das Feld ueberhaupt vertragen, weiss `ai_reasoning.klemmen` aus dem
+        # Katalog, und ohne dieses Wissen kommt hier nichts an. An einem Modell,
+        # das nicht denken kann, waere die Stufe naemlich ein 400 — auch die
+        # Stufe ``"none"``, und selbst ``null``.
+        request_body["reasoning_effort"] = reasoning_effort
+    # Wer das Feld nicht kennt, bekommt **nichts** — keine Ersatzform, keine
+    # Uebersetzung in einen anderen Dialekt. Ein stiller Rueckfall waere hier
+    # besonders teuer: er saehe aus wie ein erfuellter Wunsch, waehrend der
+    # Anbieter nach seinem eigenen Default denkt und abrechnet.
+    if cache_marke and "cache_control" in erweiterungen:
         request_body["cache_control"] = {"type": "ephemeral"}
     target = httpx.URL(provider_base_url(provider).rstrip("/") + "/chat/completions")
     deadline = time.monotonic() + MAX_STREAM_SECONDS
@@ -530,8 +619,11 @@ async def stream_chat_completion(
             if response.status_code != 200:
                 detail = await _error_detail(response)
                 logger.warning(
-                    "AI provider request failed provider_id=%s status=%s",
+                    # Das Modell gehoert dazu: dieselbe Anlage bedient mehrere,
+                    # und „abgelehnt" ohne den Namen zwingt zum Raten, welches.
+                    "AI provider request failed provider_id=%s model=%s status=%s",
                     provider.id,
+                    model or provider.default_model,
                     response.status_code,
                 )
                 raise AiProviderRequestError(
@@ -548,13 +640,22 @@ async def stream_chat_completion(
             async for line in _iter_sse_lines(response, deadline=deadline):
                 if time.monotonic() > deadline:
                     raise AiProviderRequestError("AI_PROVIDER_STREAM_TIMEOUT")
-                frames += 1
-                if frames > MAX_STREAM_FRAMES:
-                    raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
                 if not line:
                     continue
                 if not line.startswith("data:"):
                     continue
+                # Gezaehlt wird erst hier, und das ist eine Korrektur: vorher
+                # zaehlte jede gelesene Zeile mit. In SSE folgt auf jedes
+                # Ereignis eine Leerzeile, OpenRouter schiebt ausserdem
+                # `: OPENROUTER PROCESSING` als Lebenszeichen dazwischen — die
+                # Grenze war damit in Wahrheit weniger als halb so hoch wie die
+                # Zahl behauptet, und eine lange Antwort konnte an
+                # `AI_PROVIDER_RESPONSE_TOO_LARGE` sterben, obwohl sie keine
+                # war. Gegen eine Flut aus reinen Leerzeilen schuetzt die Frist
+                # oben, nicht diese Zahl.
+                frames += 1
+                if frames > MAX_STREAM_FRAMES:
+                    raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
                 payload = line[5:].strip()
                 if payload == "[DONE]":
                     saw_done = True
@@ -564,6 +665,19 @@ async def stream_chat_completion(
                 except (TypeError, json.JSONDecodeError) as exc:
                     raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
                 usage_uebernehmen(usage, frame.get("usage"))
+                # Vor `choices`, denn ein Fehlerrahmen bringt beides mit: das
+                # `error`-Feld und ein leeres Delta mit `finish_reason: "error"`.
+                # Wer zuerst auf `choices` schaut, sieht nur das leere Delta,
+                # springt weiter und verliert den Grund. Siehe `_fehler_im_rahmen`.
+                if (gemeldet := _fehler_im_rahmen(frame)) is not None:
+                    marke, text = gemeldet
+                    logger.warning(
+                        "AI provider stream error provider_id=%s model=%s code=%s",
+                        provider.id,
+                        model or provider.default_model,
+                        marke,
+                    )
+                    raise AiProviderRequestError(marke, text)
                 choices = frame.get("choices")
                 if not isinstance(choices, list) or not choices:
                     continue

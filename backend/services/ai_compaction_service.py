@@ -50,7 +50,7 @@ from models import AiConversation, AiMessage, AiProvider, User
 # Bezug — die Originalnachrichten liegen danach hinter `summarized_until`.
 # Der fuehrende Unterstrich bleibt: die Funktion gehoert dem Kontextaufbau, die
 # Verdichtung borgt sie sich nur, statt eine zweite Fassung zu pflegen.
-from services import ai_context_window
+from services import ai_context_window, ai_reasoning
 from services.ai_context_service import (
     _message_content_for_provider,
     teilbudgets,
@@ -350,9 +350,17 @@ async def compact_conversation(
 
     summary_parts: list[str] = []
     usage = StreamUsage()
+    # Eine Zusammenfassung ist eine Fleissaufgabe, keine Ueberlegung. Das war
+    # immer schon gemeint, stand aber nur darin, dass hier nichts gesetzt war —
+    # und „nichts gesetzt" heisst bei einem Anbieter ohne Schalter „nimm deine
+    # Vorgabe". Bei OpenAI wurde jede Faltung mit Denkschritten bezahlt.
+    denken, denkstufe = await ai_reasoning.aus_fuer(
+        client, provider, api_key=api_key
+    )
     try:
         async for chunk in stream_chat_completion(
             client, provider=provider, api_key=api_key, messages=messages, usage=usage,
+            reasoning=denken, reasoning_effort=denkstufe,
         ):
             if chunk.kind == "content":
                 summary_parts.append(chunk.text)

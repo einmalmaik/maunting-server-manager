@@ -144,8 +144,16 @@ async def lifespan(app: FastAPI):
     # wissen.
     if not is_testing:
         from services import ai_model_catalog as _ai_model_catalog
+        from services import ai_provider_service as _ai_provider_service
 
         _ai_model_catalog.laufzeit_setzen(app.state.ai_http_client)
+        # Und woher ein schluesselpflichtiger Katalog seinen Schluessel bekommt.
+        # Eine eingehaengte Funktion statt eines Imports: der Katalog soll von
+        # Datenbank und DIS-Sidecar nichts wissen. Muss **vor** dem Vorwaermen
+        # stehen, sonst laeuft dessen erster Durchgang ohne sie.
+        _ai_model_catalog.schluesselquelle_setzen(
+            _ai_provider_service.katalogschluessel
+        )
         _ai_model_catalog.vorwaermen_anstossen()
 
     # Der Ausgangskorb der KI-Mails. Eine einzige Aufgabe auf dieser Schleife

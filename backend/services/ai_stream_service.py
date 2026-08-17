@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import logging
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 from uuid import UUID, uuid4
 
 import httpx
@@ -36,6 +36,7 @@ from services.ai_chat_service import get_owned_conversation
 from services import (
     ai_attachment_service,
     ai_model_catalog,
+    ai_reasoning,
     ai_run_broker,
     ai_run_service,
     audit_service,
@@ -1564,6 +1565,57 @@ class _Vorbereitung:
     angebotene_werkzeuge: frozenset[str]
 
 
+def _denken_am_modell(
+    vorbereitung: _Vorbereitung, modell
+) -> tuple[bool, str | None]:
+    """Die eingefrorene Denkstufe, geprüft gegen das Modell von **jetzt**.
+
+    Zwei Dinge in diesem Lauf haben verschiedene Lebensdauern, und das ist
+    Absicht: die Denkstufe kommt aus `AiRun` und bleibt über alle Segmente
+    stehen, damit eine Fortsetzung nach einer Bestätigung dieselbe Tiefe
+    behält (`_segment_vorbereiten`). Der Zugang dagegen wird je Segment frisch
+    gelesen — der Betreiber darf ihn korrigieren, während ein Lauf geparkt ist.
+
+    Beides zusammen ergibt eine Lage, die keiner der beiden Regeln einfällt:
+    das ``default_model`` wechselt mitten im Lauf, und die gespeicherte Stufe
+    gehört zum alten Modell. ``xhigh`` an einem Modell, das nur ``low`` und
+    ``high`` führt, ist ein ``400`` — und zwar bei **jedem** weiteren Segment,
+    also ein Lauf, der nie wieder anläuft.
+
+    Deshalb hier eine Prüfung und keine Neuberechnung. Der Unterschied ist
+    wichtig: neu geklemmt würde auch ein zwischenzeitlich geänderter
+    Rollendeckel mitten in einer Aufgabe wirken, und schlimmer noch, ein
+    fehlendes Wort (`None`) würde plötzlich zur Vorgabe des Modells aufgefüllt
+    — nach **oben**, am ursprünglichen Deckel vorbei. Angefasst wird also nur,
+    was das jetzige Modell nicht annehmen kann, und die eingefrorene Stufe ist
+    dabei die Decke: ``deckel=rang(stufe)``. Tiefer geht immer, teurer nie.
+
+    Schweigt der Katalog, bleibt alles wie eingefroren. Eine Stufe wegen einer
+    Netzstörung fallen zu lassen wäre dieselbe stille Verteuerung, gegen die
+    `ai_reasoning._aus` geschrieben ist.
+    """
+    aktiv, stufe = vorbereitung.reasoning, vorbereitung.reasoning_effort
+    if modell is None:
+        return aktiv, stufe
+    if not modell.denkt:
+        # Getauscht gegen ein Modell ohne Denkvermögen: dort ist jedes
+        # ``reasoning_effort`` ein ``400``, ``none`` eingeschlossen.
+        return False, None
+    if stufe is None or stufe in modell.stufen:
+        return aktiv, stufe
+    if stufe == ai_reasoning.AUS_STUFE:
+        # „Aus“ ist selbst nur ein Wort, und nicht jedes Modell führt es. Beim
+        # neuen Modell heißt dasselbe womöglich „gar kein Feld“ — oder, bei
+        # Denkzwang, „so flach wie es geht“. Ein Deckel von ``MIN_RANG`` sagt
+        # genau das, und zwar in derselben Funktion wie überall sonst.
+        return ai_reasoning.klemmen(
+            modell, wunsch=None, aktiv=False, deckel=ai_reasoning.MIN_RANG
+        )
+    return ai_reasoning.klemmen(
+        modell, wunsch=stufe, aktiv=aktiv, deckel=ai_reasoning.rang(stufe)
+    )
+
+
 def _vorschlag_ergebnisse(db, proposal_ids: list[str]) -> list[dict]:
     """Was aus den Vorschlaegen einer geparkten Runde geworden ist.
 
@@ -2156,12 +2208,14 @@ async def _werkzeuge_und_grenze(
     guardian: "GuardianKontext | None",
     aufgabe: "AufgabenKontext | None",
     zustand: dict,
-) -> tuple[list, bool, int]:
+) -> tuple[list, bool, int, bool, str | None]:
     """Schneidet den Werkzeugkatalog zu und rechnet das Rundenbudget aus.
 
-    Rueckgabe ``(tools, cache_marke, kontextgrenze)`` — alles, was die
-    Rundenschleife vom Katalog wissen muss. Einmal je Segment und nicht je
-    Runde: nach dem Zuschnitt aendert sich nichts davon mehr.
+    Rueckgabe ``(tools, cache_marke, kontextgrenze, denken, denkstufe)`` —
+    alles, was die Rundenschleife vom Katalog wissen muss. Einmal je Segment
+    und nicht je Runde: nach dem Zuschnitt aendert sich nichts davon mehr, und
+    auch die am Modell geklemmte Denkstufe (`_denken_am_modell`) gilt fuer das
+    ganze Segment.
     """
     tools = provider_tool_definitions()
     # **Angeboten wird nur, was auch ausgefuehrt wuerde.**
@@ -2222,12 +2276,21 @@ async def _werkzeuge_und_grenze(
     # Kennt der Katalog das Modell nicht — nicht erreichbar, oder ein Name,
     # den es nicht mehr gibt — geht keine Marke mit. Der Lauf kostet dann,
     # was er vorher auch gekostet hat.
+    #
+    # Der Schlüssel geht mit, weil er hier ohnehin schon entschlüsselt
+    # danebenliegt. Ein schlüsselpflichtiger Katalog käme sonst zwar auch an
+    # seinen (`ai_model_catalog.schluesselquelle_setzen`), aber über einen
+    # zweiten Gang zum DIS-Sidecar für dasselbe Geheimnis.
     modell = await ai_model_catalog.finde(
         client,
         vorbereitung.provider.provider_kind,
         vorbereitung.provider.default_model,
+        schluessel=vorbereitung.api_key,
     )
     cache_marke = modell is not None and modell.cache_marke_noetig
+    # Die eingefrorene Denkstufe gilt weiter — aber nur, solange sie zu dem
+    # Modell passt, das **jetzt** am Zugang steht.
+    denken, denkstufe = _denken_am_modell(vorbereitung, modell)
     # Das Budget dieses Laufs. `build_provider_messages` hat es beim Start
     # eingehalten, aber danach waechst die Liste weiter: jede Werkzeugrunde
     # haengt einen Assistentenzug und dessen Ergebnisse an, und ein
@@ -2244,7 +2307,7 @@ async def _werkzeuge_und_grenze(
         teilbudgets(zustand.get("context_chars")).gesamt - katalog_zeichen,
         MIN_HISTORY_CHARS,
     )
-    return tools, cache_marke, kontextgrenze
+    return tools, cache_marke, kontextgrenze, denken, denkstufe
 
 
 def _fragen_behandeln(
@@ -2857,7 +2920,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         )
 
     try:
-        tools, cache_marke, kontextgrenze = await _werkzeuge_und_grenze(
+        tools, cache_marke, kontextgrenze, denken, denkstufe = await _werkzeuge_und_grenze(
             client=client,
             vorbereitung=vorbereitung,
             guardian=guardian,
@@ -2904,8 +2967,8 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 usage=current_usage,
                 tools=tools,
                 tool_choice="none" if letzte_runde else None,
-                reasoning=vorbereitung.reasoning,
-                reasoning_effort=vorbereitung.reasoning_effort,
+                reasoning=denken,
+                reasoning_effort=denkstufe,
                 cache_marke=cache_marke,
             ):
                 if chunk.kind == "reasoning":
@@ -3166,6 +3229,37 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     except Exception as exc:
         if isinstance(exc, AiProviderRequestError):
             code, message_key = exc.code, "ai.chat.errors.provider"
+            # Der Satz des Anbieters endete hier lange im Nichts: der Adapter zog
+            # ihn sorgfaeltig aus der Antwort, redigierte und kuerzte ihn — und
+            # dann nahm diese Zeile nur `.code`. Uebrig blieb ein uebersetzter
+            # Allgemeinplatz, waehrend der Anbieter praezise geantwortet hatte
+            # („Insufficient credits", „No endpoints found for X"). Genau daran
+            # ist eine Ferndiagnose gescheitert.
+            #
+            # Behoben ist das eine Schicht frueher: `exc.code` ist seither nicht
+            # mehr pauschal `AI_PROVIDER_REQUEST_REJECTED`, sondern benennt den
+            # Fall (`AI_PROVIDER_PAYMENT_REQUIRED`, `AI_PROVIDER_RATE_LIMITED`,
+            # `AI_PROVIDER_AUTH_FAILED`), und zu jedem Code steht ein eigener
+            # Satz in `de.json`. Der Benutzer erfaehrt damit dasselbe — nur in
+            # MSMs Worten statt in denen des Anbieters.
+            #
+            # Der Wortlaut selbst geht **nicht** mit hinaus, sondern nur ins
+            # Protokoll. Er wurde einmal mitgeschickt, unter der Zusage, er sei
+            # „in `_kurzfassung` bereits von Schluesseln befreit". Die Zusage
+            # hielt nicht: `redact_sensitive_text` trifft `sk-` nur mit 16
+            # Folgezeichen aus `[A-Za-z0-9_-]`, und ein Anbieter nennt den
+            # Schluessel maskiert (`sk-pr***…xyZ4`) — das `*` bricht die Klasse.
+            # Und selbst mit dichterem Muster blieben Kontingentstand, Kontoname
+            # und Fine-Tune-Bezeichnungen stehen; die traegt kein Muster aus,
+            # weil sie wie gewoehnlicher Text aussehen. Ein Lauf gehoert einem
+            # Benutzer mit `ai.chat.use`, nicht dem Betreiber — der Zugang, an
+            # dem er haengt, gehoert aber dem Betreiber. Dieselbe Abwaegung ist
+            # bei `_stimmzugang_pruefen` schon getroffen, und die dort ist die
+            # strengere Probe: sie schweigt sogar gegenueber dem Betreiber.
+            logger.warning(
+                "AI-Lauf am Anbieter gescheitert run_id=%s code=%s grund=%s",
+                run_id, code, redact_sensitive_text(exc.detail or "")[:200],
+            )
         elif isinstance(exc, AiActionValidationError):
             # Der Grund gehoert ins Log. Vorher stand hier gar nichts: der
             # Benutzer sah `AI_TOOL_REJECTED` und der Betreiber hatte keine
@@ -3187,7 +3281,9 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             code, message_key = "AI_STREAM_FAILED", "ai.chat.errors.unavailable"
         if not abgerechnet:
             _abbruch_abrechnen()
-        ai_run_broker.veroeffentlichen(run_id, "error", {"code": code, "message_key": message_key})
+        ai_run_broker.veroeffentlichen(
+            run_id, "error", {"code": code, "message_key": message_key}
+        )
         _lauf_abschliessen(run_id, status="failed", stop_reason=code)
 
 

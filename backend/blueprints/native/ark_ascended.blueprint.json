@@ -5,7 +5,7 @@
     "name": "ARK: Survival Ascended (ASA)",
     "category": "steam_game",
     "author": "Maunting Studios",
-    "description": "ARK: Survival Ascended Dedicated Server (App-ID 2430930) via SteamCMD. Windows-Binary wird ueber GE-Proton/Wine gestartet. Maps: TheIsland_WP, ScorchedEarth_WP, TheCenter_WP, Aberration_WP, Extinction_WP, Ragnarok_WP, Valguero_WP, Astraeos_WP, LostColony_WP, Fjordur_WP, ClubArk_WP."
+    "description": "ARK: Survival Ascended Dedicated Server (App-ID 2430930) via SteamCMD. Windows-Binary wird über GE-Proton in einem virtuellen Display (Xvfb) gestartet. Maps: TheIsland_WP, ScorchedEarth_WP, TheCenter_WP, Aberration_WP, Extinction_WP, Ragnarok_WP, Valguero_WP, Astraeos_WP, LostColony_WP, Fjordur_WP, ClubArk_WP."
   },
   "runtime": {
     "image": "ghcr.io/ptero-eggs/steamcmd:proton",
@@ -17,11 +17,12 @@
       "WINEDEBUG": "-all",
       "WINEESYNC": "1",
       "WINEFSYNC": "1",
+      "PROTON_USE_WINED3D": "1",
       "SERVER_NAME": "My-ASA-Server-by-MSM",
       "MAX_PLAYERS": "70",
       "MAP_NAME": "TheIsland_WP"
     },
-    "startup": "proton run ./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?MaxPlayers={ENV.MAX_PLAYERS}?SessionName=\"{ENV.SERVER_NAME}\"?Port={GAME_PORT} -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -oldconsole -servergamelog -Port={GAME_PORT} -NoBattlEye {MOD_ARG}",
+    "startup": "xvfb-run -a proton run ./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?MaxPlayers={ENV.MAX_PLAYERS}?SessionName=\"{ENV.SERVER_NAME}\"?Port={GAME_PORT} -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -oldconsole -servergamelog -Port={GAME_PORT} -NoBattlEye -server -dx11 {MOD_ARG}",
     "ensureDirs": [
       ".steam/steam/steamapps/compatdata/2430930",
       "ShooterGame/Saved/Config/WindowsServer",
@@ -102,7 +103,9 @@
       ],
       "failure_patterns": [
         "Address already in use",
-        "Could not bind"
+        "Could not bind",
+        "System\\.PlatformNotSupportedException",
+        "No displays available"
       ]
     }
   },

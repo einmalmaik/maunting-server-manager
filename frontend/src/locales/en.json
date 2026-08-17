@@ -596,6 +596,7 @@
         "AI_PROVIDER_AUTH_FAILED": "The provider rejected the API key. Check the operator key or your own key in your profile.",
         "AI_PROVIDER_ENDPOINT_NOT_FOUND": "The provider does not know this address. The base URL ends in /v1 — not /chat/completions.",
         "AI_PROVIDER_REQUEST_REJECTED": "The provider rejected the request. Usually the model name is wrong.",
+        "AI_PROVIDER_PAYMENT_REQUIRED": "The provider reports an exhausted balance. The key is fine — the account needs funds.",
         "AI_PROVIDER_RATE_LIMITED": "The provider is rate limiting. Try again in a moment.",
         "AI_PROVIDER_UNAVAILABLE": "The provider is unreachable.",
         "AI_PROVIDER_KEY_MISSING": "No API key is configured for this provider.",
