@@ -438,8 +438,8 @@ class Stimme:
             with contextlib.suppress(Exception):
                 await self._stueck_senden(rest)
         with contextlib.suppress(Exception):
-            # Die leere Zeichenkette ist das vereinbarte „ich bin fertig".
-            await self._verbindung.send(json.dumps({"text": ""}))
+            # Die leere Zeichenkette mit flush=True ist das vereinbarte „ich bin fertig".
+            await self._verbindung.send(json.dumps({"text": "", "flush": True}))
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._fertig.wait(), ABSCHLUSS_TIMEOUT)
 

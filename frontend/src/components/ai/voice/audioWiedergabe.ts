@@ -72,15 +72,15 @@ export class Wiedergabe {
     return Math.min(1, Math.sqrt(summe / probe.length) * 4)
   }
 
-  /**
-   * Ein Tonstück einreihen. `pcm` ist Int16 Little Endian bei 24 kHz — genau
-   * das, was das Backend binär durchreicht.
-   */
   spiele(pcm: ArrayBuffer): void {
-    if (pcm.byteLength < 2) return
+    const byteLength = pcm.byteLength - (pcm.byteLength % 2)
+    if (byteLength < 2) return
     const kontext = this.hole()
+    if (kontext.state === 'suspended') {
+      void kontext.resume().catch(() => undefined)
+    }
 
-    const roh = new Int16Array(pcm)
+    const roh = new Int16Array(pcm, 0, byteLength / 2)
     const puffer = kontext.createBuffer(1, roh.length, ABTASTRATE)
     const kanal = puffer.getChannelData(0)
     for (let i = 0; i < roh.length; i += 1) {
@@ -91,7 +91,10 @@ export class Wiedergabe {
 
     const quelle = kontext.createBufferSource()
     quelle.buffer = puffer
-    quelle.connect(this.messer ?? kontext.destination)
+    if (this.messer) {
+      quelle.connect(this.messer)
+    }
+    quelle.connect(kontext.destination)
 
     const jetzt = kontext.currentTime
     if (this.naechsterStart < jetzt) {
