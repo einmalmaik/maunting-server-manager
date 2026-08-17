@@ -109,7 +109,7 @@ PROBE_TIMEOUT = 8.0
 #: verbindet `sagen()` in diesem Fall einmal transparent neu (`_neu_verbinden`),
 #: statt den Wert hier hochzudrehen: die Frist gehört der Gegenstelle, und eine
 #: Zahl, die jede denkbare Werkzeugrunde abdeckt, gibt es nicht.
-INAKTIVITAET_SEKUNDEN = 20
+INAKTIVITAET_SEKUNDEN = 60
 
 #: Wie lange auf das Schlusszeichen der Gegenstelle gewartet wird, nachdem der
 #: letzte Satz hinausging. Ohne Frist hinge das Auflegen an einer Gegenstelle,
@@ -438,8 +438,8 @@ class Stimme:
             with contextlib.suppress(Exception):
                 await self._stueck_senden(rest)
         with contextlib.suppress(Exception):
-            # Die leere Zeichenkette mit flush=True ist das vereinbarte „ich bin fertig".
-            await self._verbindung.send(json.dumps({"text": "", "flush": True}))
+            # Die leere Zeichenkette ohne Parameter ist das offizielle EOS (End of Stream).
+            await self._verbindung.send(json.dumps({"text": ""}))
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._fertig.wait(), ABSCHLUSS_TIMEOUT)
 
