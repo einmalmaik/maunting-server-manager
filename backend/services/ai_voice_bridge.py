@@ -63,7 +63,7 @@ from database import SessionLocal
 from models import AiProvider, User
 from services import (
     ai_run_broker,
-    ai_stt_openrouter,
+    ai_stt,
     ai_tts_elevenlabs,
     ai_voice_vad,
 )
@@ -435,10 +435,10 @@ class Sprachbruecke:
             await self._zustand_melden(ZUSTAND_BEREIT)
             return None
         try:
-            return await ai_stt_openrouter.hoeren(
+            return await ai_stt.hoeren(
                 self._client, provider=zugang, api_key=schluessel, pcm=aeusserung.pcm
             )
-        except ai_stt_openrouter.NichtsVerstanden:
+        except ai_stt.NichtsVerstanden:
             # Kein Fehler, sondern ein Alltagsfall: Husten, Räuspern, ein Wort
             # ins Leere. Stillschweigend zurück auf „bereit" — eine Meldung
             # dafür wäre lauter als das Ereignis.

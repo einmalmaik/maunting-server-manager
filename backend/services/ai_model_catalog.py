@@ -468,11 +468,45 @@ def _modell_aus_elevenlabs(rohdaten: dict) -> Modell | None:
     )
 
 
+def _modell_aus_openai(rohdaten: dict) -> Modell | None:
+    """Liest einen Katalogeintrag von OpenAI — und weiss dabei fast nichts.
+
+    Der Eintrag hat laut OpenAIs offizieller ``openapi.yaml`` genau fünf Felder:
+    ``id``, ``object``, ``created``, ``owned_by`` und ``shutdown_date``. Keine
+    Modalitäten, kein Kontextfenster, keine Preise, keine Denkstufen. Das ist
+    kein Fehler in dieser Funktion, sondern der Umfang der Auskunft.
+
+    **Was das für den Betreiber heisst**, und es steht auch in der Oberfläche:
+    an einem OpenAI-Zugang gibt es keine Denkstufenauswahl und kein bekanntes
+    Kontextfenster. ``denkt=False`` ist dabei die einzige Angabe, die aussieht
+    wie eine Behauptung und keine ist — sie bewirkt nur, dass MSM kein
+    ``reasoning``-Feld sendet. Das Modell denkt dann so, wie OpenAI es
+    voreingestellt hat; MSM stellt es bloss nicht ein. ``kontext_tokens=None``
+    heisst überall im Code „unbekannt" und nie „klein"
+    (`ai_context_window.ermitteln`).
+
+    **Es wird nicht gefiltert**, obwohl die Liste auch ``whisper-1``,
+    ``tts-1``, ``dall-e-3`` und Einbettungsmodelle führt — Einträge also, die
+    als Chatmodell beim ersten Satz scheitern. Bei ElevenLabs entscheidet
+    darüber ein Feld des Anbieters (``can_do_text_to_speech``); hier gibt es
+    keines. Bliebe eine Liste bekannter Präfixe im Code — und gegen genau die
+    ist `ai_provider_registry` gebaut worden. MSM reicht die Liste des Anbieters
+    unverändert durch und behauptet nichts über sie. Was hier stünde, wäre eine
+    Vermutung im Gewand einer Tatsache, und die erste umbenannte Modellreihe
+    würde sie still falsch machen.
+    """
+    model_id = rohdaten.get("id")
+    if not isinstance(model_id, str) or not model_id.strip():
+        return None
+    return Modell(model_id=model_id, name=model_id, denkt=False)
+
+
 #: Je Anbieter ein Leser. Ein zweiter Anbieter ist eine Zeile hier und ein
 #: Eintrag in `ai_provider_registry` — kein Umbau.
 _LESER = {
     "openrouter": _modell_aus_openrouter,
     "elevenlabs": _modell_aus_elevenlabs,
+    "openai": _modell_aus_openai,
 }
 
 

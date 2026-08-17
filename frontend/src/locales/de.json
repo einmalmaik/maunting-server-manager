@@ -173,7 +173,7 @@
       "tokenPriceConverted": "Gespeichert wird {{amount}} — gebucht wird in Dollar.",
       "ttsHint": "Ein Stimmzugang. Er erscheint nicht in der Modellauswahl des Chats, sondern liest im Sprachmodus vor, was das Chatmodell antwortet. Wer ihn nutzen darf, entscheidet das Recht „Mit der KI sprechen“.",
       "transcriptionModel": "Modell für Gesprochenes",
-      "transcriptionModelHint": "Wandelt im Sprachmodus Gesprochenes in Text, bevor das Standardmodell darüber nachdenkt. Hier gehört ein Transkriptionsmodell hinein, etwa openai/gpt-transcribe oder openai/whisper-large-v3 — kein Chatmodell. Solche Modelle stehen nicht in der Auswahlliste oben, weil OpenRouter sie über einen eigenen Endpunkt bedient; deshalb ist das hier ein Textfeld. Ohne Eintrag bleibt der Sprachmodus aus."
+      "transcriptionModelHint": "Wandelt im Sprachmodus Gesprochenes in Text, bevor das Standardmodell darüber nachdenkt. Ohne Eintrag bleibt der Sprachmodus aus. Solche Modelle stehen nicht in der Auswahlliste oben, weil sie über einen eigenen Endpunkt bedient werden; deshalb ist das hier ein Textfeld. Bei OpenRouter gehört openai/gpt-transcribe hinein, bei OpenAI gpt-transcribe oder whisper-1. Achtung bei OpenRouter: dieser Endpunkt wird aus deinem Guthaben bezahlt und nicht über deinen hinterlegten Fremdschlüssel — ohne Guthaben chattet der Zugang weiter und hört nicht mehr. Für diesen Fall gibt es MSM_AI_STT_WEG=chat; dann trägst du hier stattdessen ein hörfähiges Chatmodell ein, etwa nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free."
     },
     "profile": {
       "title": "KI-Assistent",
@@ -3026,11 +3026,11 @@
       "intro": "Mit der KI reden statt tippen — und zwar mit demselben Agenten: dieselbe Unterhaltung, derselbe Lauf, dieselben Werkzeuge, dieselben Rechte. Es ist kein zweites Modell, sondern der gewöhnliche Chatlauf mit zwei Wandlern davor und dahinter. Umgeschaltet wird oben rechts auf der KI-Seite: der Chat weicht einer Kugel, die sich zum gesprochenen Wort bewegt.",
       "access": {
         "title": "Was eingerichtet sein muss",
-        "body": "Zweierlei. Am bestehenden OpenRouter-Zugang ein „Modell für Gesprochenes\" — ein hörfähiges Chatmodell wie google/gemini-2.5-flash. Und ein zweiter Zugang der Art „ElevenLabs (Stimme)\" mit Schlüssel, Sprachmodell und Voice ID. Fehlt eines davon, erscheint der Umschalter gar nicht."
+        "body": "Zweierlei. An einem Chatzugang — OpenRouter oder OpenAI — ein „Modell für Gesprochenes\". Und ein zweiter Zugang der Art „ElevenLabs (Stimme)\" mit Schlüssel, Sprachmodell und Voice ID. Fehlt eines davon, erscheint der Umschalter gar nicht."
       },
       "model": {
         "title": "Modelle und Stimme",
-        "body": "Gehör: ein Transkriptionsmodell wie openai/gpt-transcribe, angesprochen über OpenRouters Endpunkt /audio/transcriptions. Es steht nicht in der Modellauswahl — die liest /models, und dort stehen Chatmodelle. Deshalb ist das Feld ein Textfeld. Stimme: eleven_flash_v2_5, rund 75 ms Rechenzeit. Die Voice ID stammt aus deiner Stimmenbibliothek und ist ebenfalls ein Textfeld — MSM kennt deine Stimmen nicht und rät deshalb keine."
+        "body": "Gehör: ein Transkriptionsmodell wie openai/gpt-transcribe, angesprochen über /audio/transcriptions. Es steht nicht in der Modellauswahl — die liest /models, und dort stehen Chatmodelle. Deshalb ist das Feld ein Textfeld. Eine Falle bei OpenRouter: dieser Endpunkt wird aus Guthaben bezahlt, nicht über deinen hinterlegten Fremdschlüssel — ohne Guthaben chattet der Zugang weiter und hört nicht mehr. Dann hilft MSM_AI_STT_WEG=chat: der Ton geht als input_audio an ein hörfähiges Chatmodell, und davon gibt es kostenlose. Stimme: eleven_flash_v2_5, rund 75 ms Rechenzeit. Die Voice ID stammt aus deiner Stimmenbibliothek und ist ebenfalls ein Textfeld — MSM kennt deine Stimmen nicht und rät deshalb keine."
       },
       "permission": {
         "title": "Recht ai.voice.use",
@@ -3048,7 +3048,7 @@
         "title": "Der Ton läuft durch das Panel",
         "body": "Browser → Panel → Anbieter, nicht daran vorbei. Bei einer Direktverbindung liefe die Werkzeugschleife über den Browser — er sähe jeden Aufruf und könnte welche erfinden. Auch wann jemand aufgehört hat zu reden, entscheidet das Backend. Die Schlüssel verlassen den Panelprozess nie. Kein zusätzlicher Port; der Reverse-Proxy muss WebSocket-Upgrades unter /api/ durchlassen, was er für die Server-Konsole ohnehin tut."
       },
-      "spokenLimit": "Löschen und das Einspielen eines Backups sind seit dem 16.08.2026 auch per Stimme bestätigbar — der Betreiber hat das ausdrücklich so entschieden. Das Restrisiko: im Audit steht danach eine gesprochene Zustimmung, und wer im Raum mithört, kann sie aussprechen. Wem das zu weit geht, nimmt ai.voice.use aus der Rolle. Gesprochenes geht als Ton an OpenRouter, der Antworttext an ElevenLabs; deren EU-Datenresidenz ist Enterprise-Kunden vorbehalten."
+      "spokenLimit": "Löschen und das Einspielen eines Backups sind seit dem 16.08.2026 auch per Stimme bestätigbar — der Betreiber hat das ausdrücklich so entschieden. Das Restrisiko: im Audit steht danach eine gesprochene Zustimmung, und wer im Raum mithört, kann sie aussprechen. Wem das zu weit geht, nimmt ai.voice.use aus der Rolle. Gesprochenes geht als Ton an den Chatanbieter, der Antworttext an ElevenLabs; deren EU-Datenresidenz ist Enterprise-Kunden vorbehalten."
     }
   },
   "docsOAuth": {

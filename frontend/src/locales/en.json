@@ -173,7 +173,7 @@
       "tokenPriceConverted": "Stored as {{amount}} — accounting happens in dollars.",
       "ttsHint": "A voice access. It does not appear in the chat model picker; it reads out what the chat model answers in voice mode. Who may use it is decided by the “Talk to the AI” permission.",
       "transcriptionModel": "Model for speech",
-      "transcriptionModelHint": "Turns speech into text in voice mode, before the default model thinks about it. This takes a transcription model such as openai/gpt-transcribe or openai/whisper-large-v3 — not a chat model. Those do not appear in the dropdown above because OpenRouter serves them through a separate endpoint, which is why this is a text field. Left empty, voice mode stays off."
+      "transcriptionModelHint": "Turns speech into text in voice mode, before the default model thinks about it. Left empty, voice mode stays off. Such models do not appear in the dropdown above because they are served through a separate endpoint, which is why this is a text field. On OpenRouter this takes openai/gpt-transcribe, on OpenAI gpt-transcribe or whisper-1. Careful with OpenRouter: that endpoint is paid from your credits and not through your stored bring-your-own key — without credits the access keeps chatting but stops hearing. For that case there is MSM_AI_STT_WEG=chat; you then enter a hearing-capable chat model here instead, such as nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free."
     },
     "profile": {
       "title": "AI assistant",
@@ -3026,11 +3026,11 @@
       "intro": "Talk to the AI instead of typing — with the very same agent: same conversation, same run, same tools, same permissions. It is not a second model but the ordinary chat run with a converter in front and behind. Switch at the top right of the AI page: the chat gives way to an orb that moves with the spoken word.",
       "access": {
         "title": "What has to be configured",
-        "body": "Two things. On the existing OpenRouter access, a “model for speech” — an audio-capable chat model such as google/gemini-2.5-flash. And a second access of type “ElevenLabs (Voice)” with key, speech model and voice ID. If either is missing, the switch does not appear at all."
+        "body": "Two things. On a chat access — OpenRouter or OpenAI — a “model for speech”. And a second access of type “ElevenLabs (Voice)” with key, speech model and voice ID. If either is missing, the switch does not appear at all."
       },
       "model": {
         "title": "Models and voice",
-        "body": "Hearing: a transcription model such as openai/gpt-transcribe, called through OpenRouter's /audio/transcriptions endpoint. It does not appear in the model dropdown — that reads /models, which lists chat models. Hence the text field. Voice: eleven_flash_v2_5, about 75 ms of inference. The voice ID comes from your voice library and is a text field too — MSM does not know your voices and will not guess one."
+        "body": "Hearing: a transcription model such as openai/gpt-transcribe, called through /audio/transcriptions. It does not appear in the model dropdown — that reads /models, which lists chat models. Hence the text field. One trap on OpenRouter: that endpoint is paid from credits, not through your stored bring-your-own key — without credits the access keeps chatting but stops hearing. MSM_AI_STT_WEG=chat helps then: the audio goes as input_audio to a hearing-capable chat model, and free ones exist. Voice: eleven_flash_v2_5, about 75 ms of inference. The voice ID comes from your voice library and is a text field too — MSM does not know your voices and will not guess one."
       },
       "permission": {
         "title": "Permission ai.voice.use",
@@ -3048,7 +3048,7 @@
         "title": "Audio travels through the panel",
         "body": "Browser → panel → provider, not around it. With a direct connection the tool loop would run through the browser — it would see every call and could invent some. The backend also decides when someone has stopped speaking. The keys never leave the panel process. No extra port; the reverse proxy must pass WebSocket upgrades under /api/, which it already does for the server console."
       },
-      "spokenLimit": "Deleting and restoring a backup can be confirmed by voice as well since 2026-08-16 — the operator decided this explicitly. The residual risk: the audit then records a spoken confirmation, and anyone listening in the room can utter it. If that goes too far, remove ai.voice.use from the role. Speech goes to OpenRouter as audio and the answer text to ElevenLabs; their EU data residency is reserved for enterprise customers."
+      "spokenLimit": "Deleting and restoring a backup can be confirmed by voice as well since 2026-08-16 — the operator decided this explicitly. The residual risk: the audit then records a spoken confirmation, and anyone listening in the room can utter it. If that goes too far, remove ai.voice.use from the role. Speech goes to the chat provider as audio and the answer text to ElevenLabs; their EU data residency is reserved for enterprise customers."
     }
   },
   "docsOAuth": {

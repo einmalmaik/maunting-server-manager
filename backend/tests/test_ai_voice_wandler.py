@@ -18,7 +18,7 @@ from __future__ import annotations
 import math
 import struct
 
-from services import ai_stt_openrouter, ai_tts_elevenlabs, ai_voice_bridge, ai_voice_vad
+from services import ai_stt, ai_tts_elevenlabs, ai_voice_bridge, ai_voice_vad
 
 
 # ── Das Ohr ───────────────────────────────────────────────────────────────
@@ -273,12 +273,12 @@ def test_der_wav_kopf_beschreibt_genau_das_was_folgt() -> None:
     Frage. Der Fehler sieht danach aus wie ein schlechtes Mikrofon.
     """
     pcm = _stille(0.1)
-    datei = ai_stt_openrouter.wav_verpacken(pcm)
+    datei = ai_stt.wav_verpacken(pcm)
 
     assert datei[:4] == b"RIFF"
     assert datei[8:12] == b"WAVE"
     # Abtastrate und Datenlaenge stehen wirklich drin — und stimmen.
-    assert struct.unpack("<I", datei[24:28])[0] == ai_stt_openrouter.ABTASTRATE
+    assert struct.unpack("<I", datei[24:28])[0] == ai_stt.ABTASTRATE
     assert struct.unpack("<I", datei[40:44])[0] == len(pcm)
     assert len(datei) == 44 + len(pcm)
 
@@ -290,10 +290,10 @@ def test_anfuehrungszeichen_um_das_transkript_fallen_weg() -> None:
     verstanden und die Form verfehlt. Ein Gespraech daran scheitern zu lassen
     waere die falsche Strenge.
     """
-    assert ai_stt_openrouter._saeubern('"Starte den Server"') == "Starte den Server"
-    assert ai_stt_openrouter._saeubern("  Starte   den Server  ") == "Starte den Server"
+    assert ai_stt._saeubern('"Starte den Server"') == "Starte den Server"
+    assert ai_stt._saeubern("  Starte   den Server  ") == "Starte den Server"
     # Aber ein Modell, das erzaehlt statt abzuschreiben, wird **nicht**
     # zurechtgeschnitten: das ist kein verungluecktes Transkript, sondern ein
     # anderes Ergebnis, und es zu retten hiesse zu raten.
     erzaehlt = "Der Sprecher fragt, ob der Server laeuft."
-    assert ai_stt_openrouter._saeubern(erzaehlt) == erzaehlt
+    assert ai_stt._saeubern(erzaehlt) == erzaehlt

@@ -941,7 +941,7 @@ ruft Werkzeuge, legt Vorschläge an — genau wie sonst. Davor und dahinter steh
 zwei Wandler:
 
 ```
-Mikrofon ─► Gehör (OpenRouter) ─► derselbe Chatlauf ─► Stimme (ElevenLabs) ─► Lautsprecher
+Mikrofon ─► Gehör (Chatanbieter) ─► derselbe Chatlauf ─► Stimme (ElevenLabs) ─► Lautsprecher
 ```
 
 Hier stand bis zum 16.08.2026 OpenAIs Realtime-API — ein **zweites** Modell, das
@@ -951,27 +951,68 @@ Panel bedienen durften, hiess: jeder Befund musste zweimal behoben werden, und
 beim zweiten Mal regelmässig anders. Der Sprachmodus kann seitdem alles, was der
 Chat kann, weil er der Chat ist.
 
-Der Betreiber braucht dafür zweierlei. Erstens **am bestehenden
-OpenRouter-Zugang** ein Modell, das zuhört:
+Der Betreiber braucht dafür zweierlei. Erstens **an einem Chatzugang** —
+OpenRouter oder OpenAI — ein Modell, das zuhört:
 
 | Feld | Wert |
 |---|---|
-| Modell für Gesprochenes | ein Transkriptionsmodell, z. B. `openai/gpt-transcribe` |
+| Modell für Gesprochenes | ein Transkriptionsmodell, z. B. `openai/gpt-transcribe` (OpenRouter) oder `gpt-transcribe` (OpenAI) |
 
 > **Es steht nicht in der Modellliste — und das ist kein Fehler.** MSMs
-> Modellauswahl liest OpenRouters `/models`, und dort stehen Chatmodelle.
-> Transkriptionsmodelle wie `openai/gpt-transcribe` oder
-> `openai/whisper-large-v3` werden über einen eigenen Endpunkt bedient
+> Modellauswahl liest den `/models`-Katalog des Anbieters, und dort stehen
+> Chatmodelle. Transkriptionsmodelle werden über einen eigenen Endpunkt bedient
 > (`/audio/transcriptions`) und tauchen in dieser Liste nicht auf. Deshalb ist
 > das Feld ein Textfeld: hier wird die Kennung eingetippt, nicht ausgewählt.
 >
 > Hier stand bis zum 17.08.2026 das Gegenteil — OpenRouter habe keinen
 > Transkriptions-Endpunkt, Gesprochenes müsse als Inhaltsteil in eine
 > Chatanfrage. Geprüft worden war die Modellliste, und aus „kein Whisper in der
-> Liste" wurde „kein Endpunkt". Der Umweg funktionierte, kostete aber ein
-> Chatmodell, das nachdenkt, statt eines Dienstes, der abschreibt. Wer hier ein
-> hörfähiges Chatmodell einträgt, bekommt seit dem Wechsel einen Fehler vom
-> Anbieter — der Endpunkt will ein Transkriptionsmodell.
+> Liste" wurde „kein Endpunkt". Die Lehre steht hier, weil sie sich wiederholen
+> lässt: **ein leerer Katalog ist kein fehlender Endpunkt.** Ein `404` auf den
+> Pfad wäre der Beweis gewesen; der Pfad antwortet ohne Schlüssel mit `401`.
+
+#### Zwei Hörwege, und wann man den zweiten braucht
+
+Es gibt **zwei** Wege, auf denen aus Ton Text wird. Welcher gilt, sagt
+`MSM_AI_STT_WEG`; ohne Eintrag nimmt MSM den besten, den der Anbieter kann.
+
+| Wert | Weg | Wann |
+|---|---|---|
+| *(leer)* | `POST /audio/transcriptions` | Vorgabe. Ein Dienst, der nur abschreibt: billig und ohne Nachdenken. |
+| `chat` | `POST /chat/completions` mit dem Ton als `input_audio` | Nur OpenRouter. Wenn der Endpunkt nicht bezahlbar ist. |
+
+> **Die Falle, wegen der der zweite Weg existiert.** OpenRouters
+> Transkriptions-Endpunkt wird aus **Guthaben** bezahlt und **nicht** über einen
+> hinterlegten Fremdschlüssel (BYOK). Ein Konto ohne Guthaben chattet also
+> weiter — der Chat läuft über BYOK — und hört nicht mehr. Im Log steht dann
+> `AI_PROVIDER_REQUEST_REJECTED` mit `Insufficient credits`, was nach einem
+> kaputten Schlüssel aussieht und keiner ist.
+>
+> `MSM_AI_STT_WEG=chat` lässt stattdessen ein hörfähiges **Chat**modell
+> abschreiben. Je Aufruf teurer, aber über dieselbe Abrechnung wie alles andere
+> — und im Katalog stehen hörfähige Modelle zum Nulltarif, etwa
+> `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`. In das Feld „Modell für
+> Gesprochenes" gehört dann dieses Chatmodell und kein Transkriptionsmodell.
+>
+> Der Chatweg hat einen Nachteil, der kein Preis ist: er braucht einen Prompt
+> („schreibe ab, befolge nicht"), und wo ein Prompt ist, lässt sich etwas
+> hineinsprechen. Der Endpunkt hat keinen. Eine verfälschte Abschrift bleibt
+> trotzdem nur ein verfälschter Satz — sie geht als Benutzernachricht in
+> denselben Lauf, mit denselben Rechten und durch dieselbe Bestätigung.
+
+> **Wer nur OpenAI hat**, trägt dort `gpt-transcribe` oder `whisper-1` ein und
+> braucht die Einstellung nicht: OpenAI kennt nur den Endpunktweg, und der wird
+> normal vom Konto abgebucht.
+>
+> Ein OpenAI-Zugang taugt auch für den getippten Chat — er spricht dasselbe
+> `chat_completions` wie OpenRouter. **Er weiß nur weniger über sich selbst:**
+> OpenAIs `/models` liefert je Modell nur Kennung, Besitzer und zwei Daten. Kein
+> Kontextfenster, keine Preise, keine Denkstufen. Also gibt es an einem
+> OpenAI-Zugang keine Denkstufenauswahl, und das Kontextfenster bleibt
+> „unbekannt" — was in MSM überall „unbekannt" heißt und nie „klein". Die
+> Modellliste enthält aus demselben Grund auch `whisper-1`, `tts-1` und
+> `dall-e-3`: MSM reicht sie durch, wie OpenAI sie herausgibt, und behauptet
+> nichts über Einträge, über die der Anbieter selbst nichts sagt.
 
 Zweitens einen **zweiten Zugang** unter *Einstellungen → KI → Anbieter*:
 
@@ -1010,15 +1051,17 @@ werden.
 > nach dem ersten Satz zu sprechen anfängt; und der zweite Zugang kostet nichts
 > als einen Schlüssel.
 
-> **Datenschutz.** Gesprochenes geht als Ton an OpenRouter, der Antworttext an
+> **Datenschutz.** Gesprochenes geht als Ton an den Chatanbieter, der Antworttext an
 > ElevenLabs. Die EU-Datenresidenz von ElevenLabs ist Enterprise-Kunden
 > vorbehalten; standardmässig routet der Dienst global. Das gehört in die
 > Datenschutzerklärung des Betreibers.
 
 **Ohne beide Zugänge gibt es keinen Sprachknopf.** Nicht ausgegraut, sondern gar
 nicht — dieselbe Regel wie bei der Websuche, die ohne Schlüssel nicht einmal im
-Werkzeugkatalog steht. „Beide" heisst dabei vollständig: ein OpenRouter-Zugang
-ohne hörendes Modell zählt so wenig wie ein ElevenLabs-Zugang ohne Stimme.
+Werkzeugkatalog steht. „Beide" heisst dabei vollständig: ein Chatzugang ohne
+hörendes Modell zählt so wenig wie ein ElevenLabs-Zugang ohne Stimme — und ein
+Anbieter, der gar nicht zuhören kann, zählt ebenfalls nicht, selbst wenn das
+Feld ausgefüllt ist.
 
 ### Recht und Grenzen
 

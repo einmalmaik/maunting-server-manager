@@ -30,9 +30,19 @@ sie gekostet hat, stand am Ende in zwei Zahlen: ein zweiter Werkzeuglauf mit
 eigener Bestätigung, eigener Autonomie und eigenem Gedächtnis neben dem des
 Chats — und ein Protokoll, das MSM nur für sie sprach. Der Sprachmodus macht
 seitdem dasselbe wie der getippte Chat und hängt nur zwei Wandler davor: Gehör
-davor, Stimme dahinter. `elevenlabs` ist die Stimme. Das Gehör braucht keinen
-eigenen Eintrag, weil es dasselbe `chat_completions` spricht wie alles andere
-(`ai_stt_openrouter`).
+davor, Stimme dahinter. `elevenlabs` ist die Stimme.
+
+**OpenAI steht seit dem 17.08.2026 wieder hier, und der Unterschied ist der
+ganze Punkt:** als gewöhnlicher `chat_completions`-Zugang, ohne eine einzige
+Zeile Code, die nur ihm gehört. Was damals flog, war nicht der Anbieter, es war
+sein Sonderweg. Ein Eintrag ohne Sonderweg kostet nichts, wenn ihn niemand
+benutzt — und das ist die Bedingung, unter der die Liste wachsen darf.
+
+**Das Gehör hat keinen eigenen Eintrag.** Es hängt an einem Chatzugang, weil es
+entweder dessen ``/audio/transcriptions`` benutzt oder dessen
+``/chat/completions`` (`ai_stt`). Welche Wege ein Anbieter dafür kennt, sagt
+`gehoer_wege` — und dass das ein zusätzliches Feld ist und keine Fähigkeitsmenge
+neben `protokoll`, ist am Feld selbst begründet.
 """
 
 from __future__ import annotations
@@ -73,9 +83,8 @@ class Anbieter:
     #:
     #: * ``chat_completions`` — ``POST /chat/completions``, SSE je Anfrage,
     #:   ``reasoning:{enabled,effort}``, ``cache_control``, ``usage.cost``.
-    #:   Bedient von `openai_compatible_adapter`. Das ist auch der Weg, auf dem
-    #:   gesprochene Sprache zu Text wird: als ``input_audio``-Teil in einer
-    #:   ganz gewöhnlichen Anfrage (`ai_stt_openrouter`).
+    #:   Bedient von `openai_compatible_adapter`. An einem solchen Zugang hängt
+    #:   auch das Gehör — auf welchem Weg, sagt `gehoer_wege`.
     #: * ``tts`` — Text hinein, Ton heraus. Eine WebSocket-Sitzung je Antwort
     #:   gegen ``/text-to-speech/{voice}/stream-input``, bedient von
     #:   `ai_tts_elevenlabs`. Kennt weder Nachrichten noch Werkzeuge und taucht
@@ -120,6 +129,29 @@ class Anbieter:
     #: Anbieters, sondern die Stelle, an der ein sonst fehlerfreier Katalogabruf
     #: als „hat kein data-Feld" endet.
     katalog_liste_feld: str | None = "data"
+    #: Auf welchen Wegen dieser Anbieter zuhören kann, **nach Güte sortiert**.
+    #: Leer heisst: er kann es nicht.
+    #:
+    #: Das Feld ist der Grund, warum `protokoll` hier nicht zu einer Menge von
+    #: Fähigkeiten ausgebaut wurde. Der Anlass wäre da: OpenRouter steht als
+    #: ``chat_completions`` und schreibt trotzdem ab — ein Anbieter kann also
+    #: mehr als eine Sache. Ein solcher Umbau berührt aber drei Router, ein
+    #: Schema, die Provider-Einstellungen und beide Sprachdateien. Solange die
+    #: einzige Zusatzfähigkeit das Zuhören ist, ist ein Feld dafür die
+    #: ehrlichere Antwort als eine Abstraktion, die genau einen Fall kennt.
+    #:
+    #: Welcher Weg gilt, entscheidet `ai_stt.weg_fuer` — ohne Zutun der erste
+    #: hier, mit ``MSM_AI_STT_WEG`` der gewählte. Die Reihenfolge ist deshalb
+    #: eine Aussage: vorne steht, was MSM empfehlen würde, wenn das Konto des
+    #: Betreibers es hergibt.
+    gehoer_wege: tuple[str, ...] = ()
+    #: Wie der Transkriptionsendpunkt seine Nutzlast will — ``"json"`` mit dem
+    #: Ton als Base64 (OpenRouter) oder ``"multipart"`` mit einer Datei
+    #: (OpenAI). Ohne ``"endpunkt"`` in `gehoer_wege` bedeutungslos.
+    #:
+    #: Beides ist Standard, nur nicht derselbe, und die falsche Form endet in
+    #: einem ``400``, das wie ein kaputter Ton aussieht und keiner ist.
+    gehoer_form: str = "json"
 
 
 ANBIETER: dict[str, Anbieter] = {
@@ -135,6 +167,59 @@ ANBIETER: dict[str, Anbieter] = {
         # etwas anderes waehlt, bekommt keine Warnung — es ist ein Vorschlag,
         # keine Bedingung.
         empfehlung="openai/gpt-5.6-luna",
+        # Beide Hoerwege, Endpunkt zuerst — er ist der billigere. Dass der
+        # Chatweg ueberhaupt danebensteht, hat einen Grund aus dem Betrieb: der
+        # Endpunkt wird aus **Guthaben** bezahlt und nicht ueber den
+        # hinterlegten Fremdschluessel. Ein Konto ohne Guthaben chattet also
+        # weiter und hoert nicht mehr. Siehe `ai_stt_chat`.
+        gehoer_wege=("endpunkt", "chat"),
+        gehoer_form="json",
+    ),
+    # OpenAI direkt, ohne Vermittler. Der Eintrag stand hier schon einmal und
+    # ist am 2026-08-16 geflogen — damals allerdings als **Realtime**-Zugang mit
+    # eigenem Protokoll, eigenem Werkzeuglauf und eigenem Gedaechtnis. Das ist
+    # der ganze Unterschied zu jetzt: hier spricht OpenAI dasselbe
+    # `chat_completions` wie jeder andere, es gibt keine Zeile Code, die nur
+    # ihm gehoert. Ein Anbieter, der nichts eigenes braucht, sammelt auch
+    # keinen toten Code an.
+    #
+    # **Was der Betreiber hier verliert, und es steht bewusst offen:** OpenAIs
+    # `/v1/models` liefert je Modell nur `id`, `object`, `created`, `owned_by`
+    # und `shutdown_date` — nachgesehen in deren offizieller `openapi.yaml`.
+    # Keine Modalitaeten, kein Kontextfenster, keine Preise, keine Denkstufen.
+    # Der Katalog ist bei MSM aber die einzige erlaubte Quelle fuer genau diese
+    # Angaben (siehe `ai_model_catalog`), und eine Tabelle im Code waere die
+    # gepflegte Liste, gegen die diese Datei gebaut wurde. Also: an einem
+    # OpenAI-Zugang gibt es keine Denkstufenauswahl und kein bekanntes
+    # Kontextfenster. Beides heisst "unbekannt", nie "klein" oder "kann er
+    # nicht".
+    "openai": Anbieter(
+        kind="openai",
+        label="OpenAI",
+        base_url="https://api.openai.com/v1",
+        catalog_url="https://api.openai.com/v1/models",
+        key_url="https://platform.openai.com/api-keys",
+        key_prefix="sk-",
+        # Anders als OpenRouter gibt OpenAI seine Modellliste nur gegen einen
+        # Schluessel heraus.
+        katalog_braucht_schluessel=True,
+        # Nur der Endpunkt. Der Chatweg funktionierte technisch auch hier
+        # (`input_audio` ist OpenAIs eigene Form), waere aber sinnlos: es gibt
+        # bei OpenAI kein kostenloses hoerfaehiges Modell, und damit faellt der
+        # einzige Grund weg, ein Chatmodell abschreiben zu lassen.
+        gehoer_wege=("endpunkt",),
+        # `multipart/form-data` mit `file` und `model` — OpenAIs Form. Nicht
+        # OpenRouters JSON mit Base64.
+        gehoer_form="multipart",
+        # **Keine Empfehlung fuer den Chat**, und das ist keine Nachlaessigkeit.
+        # Die Empfehlung wird gegen den Katalog geprueft und faellt weg, wenn
+        # die Kennung dort nicht steht — sie waere hier also im besten Fall
+        # wirkungslos. Vor allem aber weiss MSM ueber OpenAIs Katalog nichts
+        # ausser Kennungen: welches Modell sich im Betrieb bewaehrt, laesst sich
+        # von hier aus nicht sagen, und eine geratene Empfehlung ist eine
+        # Meinung ohne Grundlage. Fuer das Gehoer nennt der Feldhinweis in der
+        # Oberflaeche `gpt-transcribe` und `whisper-1`; die stehen so in OpenAIs
+        # `openapi.yaml` und sind damit belegt und keine Meinung.
     ),
     # Die Stimme. Sie **antwortet nicht** — sie liest vor, was das Chatmodell
     # oben geschrieben hat. Das ist der ganze Unterschied zum Realtime-Zugang,
@@ -226,6 +311,9 @@ def spricht(kind: str, protokoll: str) -> bool:
     return spec is not None and spec.protokoll == protokoll
 
 
-def mit_protokoll(protokoll: str) -> list[Anbieter]:
-    """Alle Anbieter, die dieses Protokoll sprechen."""
-    return [spec for spec in alle() if spec.protokoll == protokoll]
+#: Hier stand ``mit_protokoll(protokoll)`` — „alle Anbieter, die dieses
+#: Protokoll sprechen". Geschrieben für einen Aufrufer, der nie kam: gefiltert
+#: wird überall über `spricht()` an einer bereits vorliegenden Zeile, nicht über
+#: eine Vorauswahl der Liste. Entfernt beim Einbau des dritten Anbieters, weil
+#: eine ungenutzte Funktion beim nächsten Umbau mitwandert und dabei aussieht,
+#: als hinge etwas an ihr.

@@ -9,7 +9,7 @@ zwei Wege, die dasselbe Panel bedienen durften, und jeder Befund musste zweimal
 behoben werden.
 
 Jetzt antwortet im Sprachmodus dasselbe Modell wie im getippten Chat, über
-denselben `AiRun`. Davor sitzt das Gehör (`ai_stt_openrouter`), dahinter diese
+denselben `AiRun`. Davor sitzt das Gehör (`ai_stt`), dahinter diese
 Stimme. Was hier fehlt, ist der Punkt.
 
 **Warum die Verbindung früh aufgeht.** Ein Handschlag kostet rund 150

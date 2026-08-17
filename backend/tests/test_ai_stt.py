@@ -21,7 +21,7 @@ import json
 import httpx
 import pytest
 
-from services import ai_stt_openrouter
+from services import ai_stt
 from services.openai_compatible_adapter import AiProviderRequestError, StreamUsage
 
 
@@ -36,7 +36,7 @@ class _Zugang:
 
 def _ton(sekunden: float) -> bytes:
     """Stille der gewuenschten Laenge — `hoeren` misst Bytes, nicht Inhalt."""
-    return b"\x00\x00" * int(ai_stt_openrouter.ABTASTRATE * sekunden)
+    return b"\x00\x00" * int(ai_stt.ABTASTRATE * sekunden)
 
 
 def _antwort(text: str = "Starte den Server neu", **rest) -> httpx.Response:
@@ -45,7 +45,7 @@ def _antwort(text: str = "Starte den Server neu", **rest) -> httpx.Response:
 
 async def _hoeren(handler, *, zugang=None, pcm=None, **rest) -> str:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        return await ai_stt_openrouter.hoeren(
+        return await ai_stt.hoeren(
             client,
             provider=zugang or _Zugang(),
             api_key="sk-or-testschluessel",
@@ -122,7 +122,7 @@ async def test_der_ton_geht_als_wav_mit_kopf_und_nicht_als_rohes_pcm():
     assert roh[:4] == b"RIFF"
     assert roh[8:12] == b"WAVE"
     # Die Abtastrate steht im Kopf an Byte 24 und muss die des Browsers sein.
-    assert int.from_bytes(roh[24:28], "little") == ai_stt_openrouter.ABTASTRATE
+    assert int.from_bytes(roh[24:28], "little") == ai_stt.ABTASTRATE
 
 
 @pytest.mark.asyncio
@@ -175,7 +175,7 @@ async def test_ein_huster_kostet_keine_anfrage():
     def handler(_request: httpx.Request) -> httpx.Response:  # pragma: no cover
         raise AssertionError("Zu kurzer Ton darf nicht hinausgehen")
 
-    with pytest.raises(ai_stt_openrouter.NichtsVerstanden):
+    with pytest.raises(ai_stt.NichtsVerstanden):
         await _hoeren(handler, pcm=_ton(0.1))
 
 
@@ -187,21 +187,21 @@ async def test_eine_zu_lange_aufnahme_verliert_ihren_anfang_und_nicht_ihr_ende()
     behalten.
     """
     gesehen: dict = {}
-    laenge = ai_stt_openrouter.MAX_SEKUNDEN + 10
+    laenge = ai_stt.MAX_SEKUNDEN + 10
 
     def handler(request: httpx.Request) -> httpx.Response:
         gesehen["body"] = json.loads(request.content)
         return _antwort()
 
     # Erkennbarer Anfang, damit „vorne abgeschnitten" pruefbar ist.
-    pcm = b"\x11\x11" * ai_stt_openrouter.ABTASTRATE + _ton(laenge)
+    pcm = b"\x11\x11" * ai_stt.ABTASTRATE + _ton(laenge)
     await _hoeren(handler, pcm=pcm)
 
     roh = base64.b64decode(gesehen["body"]["input_audio"]["data"])
     nutzdaten = roh[44:]
     assert b"\x11\x11" not in nutzdaten, "Der Anfang haette wegfallen muessen"
-    sekunden = len(nutzdaten) / (ai_stt_openrouter.ABTASTRATE * 2)
-    assert sekunden <= ai_stt_openrouter.MAX_SEKUNDEN + 0.01
+    sekunden = len(nutzdaten) / (ai_stt.ABTASTRATE * 2)
+    assert sekunden <= ai_stt.MAX_SEKUNDEN + 0.01
 
 
 @pytest.mark.asyncio
@@ -215,7 +215,7 @@ async def test_stille_ist_kein_anbieterfehler():
     def handler(_request: httpx.Request) -> httpx.Response:
         return _antwort(text="   ")
 
-    with pytest.raises(ai_stt_openrouter.NichtsVerstanden):
+    with pytest.raises(ai_stt.NichtsVerstanden):
         await _hoeren(handler)
 
 

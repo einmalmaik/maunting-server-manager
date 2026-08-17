@@ -289,10 +289,26 @@ def anbieter_ohne_auswahl(db: Session, user: User) -> AiProvider | None:
     )
     if letzter is not None:
         anbieter = db.get(AiProvider, letzter.provider_id)
-        if anbieter is not None and anbieter.enabled:
+        if anbieter is not None and anbieter.enabled and spricht(anbieter, ai_provider_registry.CHAT):
             return anbieter
 
-    aktive = db.query(AiProvider).filter(AiProvider.enabled.is_(True)).order_by(AiProvider.id).all()
+    # Gezaehlt werden nur **Chat**zugaenge. Vorher zaehlte jeder aktive Zugang
+    # mit, und seit es den Sprachmodus gibt, war das falsch: wer einen
+    # OpenRouter-Zugang und einen ElevenLabs-Zugang aktiviert hatte, hatte in
+    # den Augen dieser Funktion zwei Anbieter und bekam deshalb `None` — obwohl
+    # es genau einen gab, der denken kann. Ein Lauf ohne Zuschauer (Uhr,
+    # Guardian) lief dann still gar nicht.
+    #
+    # Dasselbe gilt eine Zeile hoeher: ein zuletzt benutzter Zugang, der
+    # inzwischen ein Stimmzugang ist, beantwortet die Frage nicht.
+    aktive = [
+        zugang
+        for zugang in db.query(AiProvider)
+        .filter(AiProvider.enabled.is_(True))
+        .order_by(AiProvider.id)
+        .all()
+        if spricht(zugang, ai_provider_registry.CHAT)
+    ]
     return aktive[0] if len(aktive) == 1 else None
 
 

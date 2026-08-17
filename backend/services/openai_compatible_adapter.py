@@ -370,6 +370,7 @@ async def stream_chat_completion(
     api_key: str | None,
     messages: list[dict[str, Any]],
     usage: StreamUsage,
+    model: str | None = None,
     tools: list[dict] | None = None,
     tool_choice: str | dict | None = None,
     reasoning: bool = False,
@@ -475,7 +476,13 @@ async def stream_chat_completion(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     request_body = {
-        "model": provider.default_model,
+        # ``model`` uebersteuert das Standardmodell des Zugangs. Es gibt genau
+        # einen Aufrufer dafuer, und der begruendet den Parameter: das Gehoer
+        # (`ai_stt_chat`) schickt Ton an ein **hoerfaehiges** Modell, waehrend
+        # derselbe Zugang zum Denken ein anderes benutzt. Zwei Zugaenge auf
+        # dieselbe Adresse anzulegen waere die Alternative gewesen — mit zwei
+        # Schluesseln, zwei Kontingenten und zwei Stellen zum Vergessen.
+        "model": model or provider.default_model,
         "messages": messages,
         "stream": True,
     }

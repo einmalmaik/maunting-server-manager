@@ -65,11 +65,19 @@ def _hoerender_zugang(db: Session) -> AiProvider | None:
     Sprachmodus — eines zu raten hiesse, dem Betreiber ein Modell in Rechnung
     zu stellen, das er nie ausgewählt hat.
 
+    Verlangt wird ausserdem, dass der **Anbieter** überhaupt zuhören kann
+    (`gehoer_wege`). Das ist keine doppelte Prüfung neben dem Transkriptmodell:
+    das Modell steht am Zugang und lässt sich überall eintragen, die Hörwege
+    stehen am Anbieter. Ein ausgefülltes Feld an einem Anbieter ohne Gehör wäre
+    sonst ein Sprachknopf, der beim ersten Satz abbricht.
+
     Gibt es mehrere, gilt der mit der kleinsten Kennung — stabil und
     nachvollziehbar, statt geraten.
     """
     for zugang in _zugaenge(db):
         if not ai_provider_service.spricht(zugang, ai_provider_registry.CHAT):
+            continue
+        if not ai_provider_registry.anbieter(zugang.provider_kind).gehoer_wege:
             continue
         if not (zugang.transcription_model or "").strip():
             continue

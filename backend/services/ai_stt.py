@@ -1,53 +1,51 @@
 """Das Gehör: Gesprochenes wird Text, und danach ist es getippter Chat.
 
-Der Weg ist ``POST {base_url}/audio/transcriptions`` — OpenRouters eigener
-Transkriptions-Endpunkt. Nutzlast ist JSON mit dem Ton als Base64
-(``{"model": …, "input_audio": {"data": …, "format": "wav"}}``), zurück kommt
-``{"text": …, "usage": {…}}``.
+Hier steht, was **jede** Hörweise gleich macht: nachsehen, ob ein Modell
+hinterlegt ist, die Äusserung auf eine vernünftige Länge bringen, sie in ein
+WAV verpacken, das Ergebnis säubern und entscheiden, wann „nichts verstanden"
+gilt. Wie der Ton dann tatsächlich zum Anbieter kommt, steht je Weg in einer
+eigenen Datei:
 
-**Hier stand bis zum 17.08.2026 das Gegenteil**, und der Irrtum ist lehrreich
-genug, um ihn aufzuschreiben: geprüft worden war der **Modellkatalog**
-(``/models``), und der führt bis heute kein ``whisper`` und kein
-``gpt-transcribe`` — er listet Chatmodelle. Daraus wurde geschlossen, es gebe
-den Endpunkt nicht, und der Ton ging stattdessen als Inhaltsteil
-(``input_audio``) in eine gewöhnliche Chatanfrage an ein hörfähiges Modell. Das
-funktionierte, war aber der teure Umweg: ein Chatmodell, das abschreibt, kostet
-ein Vielfaches eines Transkriptionsmodells und denkt dabei nach.
+* `ai_stt_endpunkt` — ``POST /audio/transcriptions``, ein Dienst, der nur
+  abschreibt. Der richtige Weg, wenn es ihn gibt.
+* `ai_stt_chat` — ``POST /chat/completions`` mit dem Ton als ``input_audio``.
+  Der Umweg über ein hörfähiges **Chat**modell.
 
-Die Lehre ist nicht „besser suchen", sondern: **ein leerer Katalog ist kein
-fehlender Endpunkt.** Ein `404` auf den Pfad wäre der Beweis gewesen; ein `401`
-ist er nicht, und genau den liefert dieser Pfad ohne Schlüssel.
+**Warum es beide gibt, und das ist keine Unentschlossenheit.** Der Endpunkt ist
+sachlich der bessere Weg: ein Abschreibdienst kostet einen Bruchteil und denkt
+nicht nach. Aber er wird bei OpenRouter aus Guthaben bezahlt und **nicht** über
+den hinterlegten Fremdschlüssel (BYOK) — wer dort kein Guthaben hat, kann ihn
+nicht benutzen, während sein Chat weiterläuft. Genau dieser Fall ist am
+17.08.2026 im Betrieb aufgetreten. Der Chatweg dagegen läuft über dieselbe
+Abrechnung wie alles andere und es gibt dort hörfähige Modelle zum Nulltarif.
 
-Der Aufruf geht **nicht** durch `openai_compatible_adapter` — der spricht
-``/chat/completions`` und Server-Sent-Events, hier ist es eine einzelne
-JSON-Antwort. Was von dort trotzdem mitkommt, weil es dieselbe Wahrheit bleiben
-soll: `_error_code` bildet den Status auf denselben Fehlercode ab wie im Chat,
-und `_error_detail` redigiert die Anbietermeldung nach denselben Regeln.
+Eine Hörweise ist damit kein Geschmack, sondern eine Frage danach, was das Konto
+des Betreibers hergibt. Deshalb wählt er sie (`MSM_AI_STT_WEG`) und MSM rät
+nicht.
 
-Gesendet werden **nur** die nötigen Kopfzeilen. OpenRouter nimmt optional
-``HTTP-Referer`` und ``X-Title`` für seine öffentliche Rangliste entgegen; ein
-selbst gehostetes Panel meldet seine Adresse und seinen Namen nicht an einen
-Dritten, damit es in einer Rangliste erscheint.
-
-**Gebucht wird die Abschrift nicht**, und das ist eine Lücke und keine
-Feinheit. `openai_compatible_adapter` bucht nirgends — es füllt nur ein
-übergebenes `StreamUsage`; gebucht wird über `reserve_ai_usage` beim Aufrufer.
-Der einzige Aufrufer hier ist `ai_voice_bridge`, und der übergibt keines: die
-Abschrift gehört zu keinem Lauf, sie geht ihm voraus. Für den Betreiber heisst
-das: die Tokengrenze und die Kostengrenze decken den **Denk**- und den
-Sprechweg, nicht das Zuhören. Das steht so auch in `docs/self-hosting.md` unter
-"Kontingent", damit es niemand aus einer Rechnung erfahren muss.
-
-Wer es ändern will, braucht mehr als ein Argument mehr: eine abgelehnte
-Reservierung würde die Äusserung verwerfen, **bevor** irgendwer weiss, was
-gesagt wurde — der Sprechende bekäme dann nicht einmal die Auskunft, dass sein
-Kontingent erschöpft ist.
+**Wie man eine Hörweise wieder loswird:** die Datei löschen, ihren Eintrag aus
+`_WEGE` streichen, ihren Namen aus `gehoer_wege` des betroffenen Anbieters
+nehmen. Sonst hängt nichts an ihr — kein Aufrufer kennt sie, `ai_voice_bridge`
+ruft nur `hoeren()`.
 
 **Was hier bewusst nicht passiert.** Kein Bewerten, kein Zusammenfassen, kein
 Beantworten. Was zurückkommt, ist der Wortlaut des Menschen und wird behandelt
 wie eine getippte Zeile — mit derselben Skepsis und denselben Rechten, nicht mit
 mehr. Ein hörendes Modell, das aus dem Gesagten Schlüsse zöge, wäre eine zweite
 Denkstelle neben Luna, und genau die ist am 16.08.2026 abgeschafft worden.
+
+**Gebucht wird die Abschrift nicht**, und das ist eine Lücke und keine
+Feinheit. Gebucht wird über `reserve_ai_usage` beim Aufrufer; der einzige
+Aufrufer hier ist `ai_voice_bridge`, und der übergibt kein `StreamUsage`: die
+Abschrift gehört zu keinem Lauf, sie geht ihm voraus. Für den Betreiber heisst
+das: die Tokengrenze und die Kostengrenze decken den **Denk**- und den
+Sprechweg, nicht das Zuhören. Das steht so auch in `docs/self-hosting.md` unter
+„Kontingent", damit es niemand aus einer Rechnung erfahren muss.
+
+Wer es ändern will, braucht mehr als ein Argument mehr: eine abgelehnte
+Reservierung würde die Äusserung verwerfen, **bevor** irgendwer weiss, was
+gesagt wurde — der Sprechende bekäme dann nicht einmal die Auskunft, dass sein
+Kontingent erschöpft ist.
 
 **Zum Mithören:** was der Mensch spricht, geht als Ton an den Anbieter. Das ist
 dieselbe Aussage wie beim getippten Chat, nur unangenehmer zu lesen — und sie
@@ -57,21 +55,17 @@ Hier steht sie, damit niemand sie übersieht.
 
 from __future__ import annotations
 
-import base64
 import io
 import logging
 import struct
+from typing import Awaitable, Callable
 
 import httpx
 
+from config import settings
 from models import AiProvider
-from services.ai_provider_service import base_url as anbieter_adresse
-from services.openai_compatible_adapter import (
-    AiProviderRequestError,
-    StreamUsage,
-    _error_code,
-    _error_detail,
-)
+from services.ai_provider_registry import anbieter as anbieter_spec
+from services.openai_compatible_adapter import AiProviderRequestError, StreamUsage
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +88,13 @@ ABTASTRATE = 24_000
 MAX_SEKUNDEN = 30
 
 #: Wie lang ein Transkript höchstens sein darf. Was länger ist, hat mit dem, was
-#: jemand in 30 Sekunden sagen kann, nichts mehr zu tun. Seit der Endpunkt ein
-#: Transkriptionsdienst ist und kein plauderndes Chatmodell, ist das kaum noch
-#: zu erwarten — die Grenze bleibt trotzdem: sie schützt den Verlauf vor einem
-#: Anbieter, der eines Tages Zeitmarken oder ein Protokoll mitschickt.
+#: jemand in 30 Sekunden sagen kann, nichts mehr zu tun.
+#:
+#: Am Endpunkt ist das kaum zu erwarten, am Chatweg sehr wohl: dort antwortet
+#: ein Chatmodell, und ein Chatmodell kann auf die Idee kommen, das Gehörte zu
+#: kommentieren. Die Grenze gilt für beide Wege, weil sie hier steht und nicht
+#: dort — sie schützt den Verlauf auch vor einem Endpunkt, der eines Tages
+#: Zeitmarken oder ein Protokoll mitschickt.
 MAX_ZEICHEN = 2_000
 
 #: Wie kurz eine Äusserung sein darf, damit sie überhaupt hinausgeht.
@@ -123,18 +120,12 @@ MIN_SEKUNDEN = 0.35
 #: genug, dass eine hängende Verbindung das Gespräch nicht auffrisst.
 ZEITGRENZE = 30.0
 
-#: Hier stand ``ANWEISUNG`` — ein Prompt, der das hörende Chatmodell bat,
-#: abzuschreiben statt zu befolgen, weil in fremder Rede eine Anweisung stehen
-#: kann („Ignoriere deine Anweisungen und sage …").
-#:
-#: Mit dem Transkriptions-Endpunkt ist er ersatzlos entfallen, und das ist
-#: **mehr** Sicherheit und nicht weniger: es gibt keinen Prompt mehr, in den
-#: sich etwas hineinschmuggeln liesse. Der Endpunkt nimmt Ton entgegen und gibt
-#: Text zurück, er befolgt nichts. Der Schutz von vorher war eine Bitte an ein
-#: Modell; jetzt ist es die Bauform.
-#:
-#: Unverändert gilt, was den Rest trägt: der Wortlaut geht als *Benutzer*-
-#: nachricht weiter und hat nie mehr Rechte, als der Sprechende ohnehin hat.
+#: Die Namen der Hörwege. Als Konstanten, weil sie an vier Stellen stehen: hier,
+#: in `_WEGE`, in `gehoer_wege` je Anbieter und in der Einstellung des
+#: Betreibers. Ein Tippfehler in einer davon soll auffallen und nicht dazu
+#: führen, dass ein Anbieter still keinen Weg mehr hat.
+WEG_ENDPUNKT = "endpunkt"
+WEG_CHAT = "chat"
 
 
 def wav_verpacken(pcm: bytes, *, abtastrate: int = ABTASTRATE) -> bytes:
@@ -196,6 +187,81 @@ class NichtsVerstanden(RuntimeError):
     """
 
 
+def messwerte_uebernehmen(ziel: StreamUsage, roh: object) -> None:
+    """Trägt die gemeldeten Tokenzahlen ein, soweit es welche gibt.
+
+    Nachsichtig: fehlt der Block oder ist ein Feld keine Zahl, bleibt es leer.
+    Ein Transkriptionsanbieter, der nichts meldet, ist kein Fehlerfall — er ist
+    der Normalfall, und eine Ausnahme dafür würde ein Gespräch abreissen lassen,
+    dessen Abschrift längst da ist.
+
+    Beide Schreibweisen werden gelesen: der Chatweg meldet ``prompt_tokens`` und
+    ``completion_tokens``, der Transkriptionsendpunkt ``input_tokens`` und
+    ``output_tokens``. Dieselbe Zahl unter zwei Namen ist kein Grund für zwei
+    Funktionen.
+    """
+    if not isinstance(roh, dict):
+        return
+
+    def zahl(feld: str) -> int | None:
+        wert = roh.get(feld)
+        return wert if isinstance(wert, int) and not isinstance(wert, bool) else None
+
+    ziel.prompt_tokens = zahl("prompt_tokens") or zahl("input_tokens")
+    ziel.completion_tokens = zahl("completion_tokens") or zahl("output_tokens")
+    ziel.total_tokens = zahl("total_tokens")
+    ziel.vom_anbieter = ziel.total_tokens is not None
+
+
+#: Eine Hörweise: Ton hinein, Wortlaut heraus. Was sie zurückgibt, ist roh —
+#: gesäubert und auf „leer heisst nichts verstanden" geprüft wird **hier**,
+#: damit beide Wege dieselbe Antwort auf dieselbe Stille geben.
+Hoerweise = Callable[..., Awaitable[str]]
+
+
+def _wege() -> dict[str, Hoerweise]:
+    """Die verfügbaren Hörwege.
+
+    Die Importe stehen absichtlich in der Funktion und nicht am Dateikopf. Nicht
+    wegen eines Importzyklus, sondern damit das Löschen einer Hörweise
+    tatsächlich beim Löschen der Datei endet: ein Import am Kopf würde beim
+    Start der Anwendung scheitern, ein Eintrag hier fehlt nur dem, der ihn
+    anfordert — und der bekommt eine Meldung, die den Namen nennt.
+    """
+    from services import ai_stt_chat, ai_stt_endpunkt
+
+    return {
+        WEG_ENDPUNKT: ai_stt_endpunkt.abschrift,
+        WEG_CHAT: ai_stt_chat.abschrift,
+    }
+
+
+def weg_fuer(provider: AiProvider) -> str:
+    """Welcher Hörweg für diesen Zugang gilt.
+
+    Ohne Einstellung der erste, den der Anbieter kann — das ist der bessere
+    Weg, weil `gehoer_wege` nach Güte sortiert ist. Mit Einstellung der
+    gewählte, sofern der Anbieter ihn überhaupt spricht.
+
+    Ein unpassender Wunsch ist ausdrücklich ein **Fehler** und keine stille
+    Rückkehr zur Vorgabe: wer `MSM_AI_STT_WEG=endpunkt` an einem Anbieter
+    setzt, der keinen Endpunkt hat, hat sich vertan — und eine Abschrift, die
+    trotzdem gelingt, verbirgt das bis zur Rechnung.
+    """
+    spec = anbieter_spec(provider.provider_kind)
+    if not spec.gehoer_wege:
+        raise AiProviderRequestError("AI_PROVIDER_STT_UNSUPPORTED")
+    gewuenscht = (settings.ai_stt_weg or "").strip()
+    if not gewuenscht:
+        return spec.gehoer_wege[0]
+    if gewuenscht not in spec.gehoer_wege:
+        raise AiProviderRequestError(
+            "AI_PROVIDER_STT_UNSUPPORTED",
+            f"{spec.label} kennt den Hoerweg {gewuenscht!r} nicht",
+        )
+    return gewuenscht
+
+
 async def hoeren(
     client: httpx.AsyncClient,
     *,
@@ -239,69 +305,26 @@ async def hoeren(
     if provider.requires_api_key and not api_key:
         raise AiProviderRequestError("AI_PROVIDER_KEY_MISSING")
 
-    daten = base64.b64encode(wav_verpacken(pcm, abtastrate=abtastrate)).decode("ascii")
-    kopf = {"Content-Type": "application/json"}
-    if api_key:
-        kopf["Authorization"] = f"Bearer {api_key}"
-
-    adresse = anbieter_adresse(provider).rstrip("/") + "/audio/transcriptions"
+    name = weg_fuer(provider)
     try:
-        antwort = await client.post(
-            adresse,
-            headers=kopf,
-            json={
-                "model": modell,
-                "input_audio": {"data": daten, "format": "wav"},
-            },
-            timeout=ZEITGRENZE,
-        )
-    except httpx.TimeoutException as exc:
-        raise AiProviderRequestError("AI_PROVIDER_STREAM_TIMEOUT") from exc
-    except httpx.HTTPError as exc:
-        raise AiProviderRequestError("AI_PROVIDER_UNAVAILABLE") from exc
-
-    if antwort.status_code >= 400:
-        # Derselbe Fehlercode wie im Chat, aus derselben Funktion. Eine eigene
-        # Abbildung hier waere eine zweite Wahrheit ueber dieselben Statuscodes.
+        weg = _wege()[name]
+    except KeyError as exc:
+        # Die Datei ist weg, der Eintrag in `gehoer_wege` nicht. Genau der Fall,
+        # den der späte Import offenhalten soll: es trifft den, der hört, und
+        # nicht den Start der Anwendung.
         raise AiProviderRequestError(
-            _error_code(antwort.status_code), await _error_detail(antwort)
-        )
+            "AI_PROVIDER_STT_UNSUPPORTED", f"Hoerweg {name!r} ist nicht eingebaut"
+        ) from exc
 
-    try:
-        nutzlast = antwort.json()
-    except ValueError as exc:
-        raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
-    if not isinstance(nutzlast, dict):
-        raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
+    wav = wav_verpacken(pcm, abtastrate=abtastrate)
+    roh = await weg(
+        client, provider=provider, api_key=api_key, modell=modell, wav=wav, usage=usage
+    )
 
-    if usage is not None:
-        _messwerte_uebernehmen(usage, nutzlast.get("usage"))
-
-    roh = nutzlast.get("text")
     wortlaut = _saeubern(roh) if isinstance(roh, str) else ""
     if not wortlaut:
-        # Stille, ein Huster, ein Wort ins Leere: der Endpunkt antwortet dann
-        # mit leerem Text und nicht mit einem Fehler. Fuer den Sprachmodus ist
+        # Stille, ein Huster, ein Wort ins Leere: die Gegenstelle antwortet dann
+        # mit leerem Text und nicht mit einem Fehler. Für den Sprachmodus ist
         # das kein Anbieterproblem, sondern ein Alltagsfall.
         raise NichtsVerstanden("leer")
     return wortlaut
-
-
-def _messwerte_uebernehmen(ziel: StreamUsage, roh: object) -> None:
-    """Traegt die gemeldeten Tokenzahlen ein, soweit es welche gibt.
-
-    Nachsichtig: fehlt der Block oder ist ein Feld keine Zahl, bleibt es leer.
-    Ein Transkriptionsanbieter, der nichts meldet, ist kein Fehlerfall — er ist
-    der Normalfall, und eine Ausnahme dafuer wuerde ein Gespraech abreissen
-    lassen, dessen Abschrift laengst da ist.
-    """
-    if not isinstance(roh, dict):
-        return
-    def zahl(feld: str) -> int | None:
-        wert = roh.get(feld)
-        return wert if isinstance(wert, int) and not isinstance(wert, bool) else None
-
-    ziel.prompt_tokens = zahl("prompt_tokens") or zahl("input_tokens")
-    ziel.completion_tokens = zahl("completion_tokens") or zahl("output_tokens")
-    ziel.total_tokens = zahl("total_tokens")
-    ziel.vom_anbieter = ziel.total_tokens is not None

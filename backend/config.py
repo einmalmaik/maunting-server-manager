@@ -101,6 +101,22 @@ class Settings(BaseSettings):
     # Fehlt das Modell, laeuft die Suche ohne Vektoren weiter.
     ai_embedding_model_dir: str = ""
 
+    # Auf welchem Weg der Sprachmodus zuhoert. Leer heisst: der beste, den der
+    # gewaehlte Anbieter kann (`Anbieter.gehoer_wege`, nach Guete sortiert).
+    #
+    # Es gibt genau einen Grund, hier etwas einzutragen, und er ist kein
+    # technischer: OpenRouters Transkriptionsendpunkt wird aus **Guthaben**
+    # bezahlt und nicht ueber den hinterlegten Fremdschluessel. Ein Konto ohne
+    # Guthaben chattet also weiter und hoert nicht mehr. `MSM_AI_STT_WEG=chat`
+    # laesst stattdessen ein hoerfaehiges Chatmodell abschreiben — teurer je
+    # Aufruf, aber ueber dieselbe Abrechnung wie alles andere, und im Katalog
+    # gibt es solche Modelle zum Nulltarif.
+    #
+    # Ein Weg, den der Anbieter nicht kennt, ist ein **Fehler** und keine stille
+    # Rueckkehr zur Vorgabe: sonst laeuft ein Panel monatelang auf dem teuren
+    # Weg, weil sich jemand vertippt hat. Siehe `ai_stt.weg_fuer`.
+    ai_stt_weg: str = ""
+
     # Verwaltetes PostgreSQL fuer Game-Server-Datenbanken.
     # Der Host-Port ist absichtlich nur an Loopback gebunden. Game-Container
     # erreichen PostgreSQL ueber das interne Docker-Netz und msm-postgres:5432.
