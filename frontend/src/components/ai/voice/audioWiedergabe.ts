@@ -135,6 +135,16 @@ export class Wiedergabe {
   }
 
   /**
+   * Bereitet den AudioContext direkt bei Nutzergeste vor (Browser-Autoplay-Richtlinien).
+   */
+  bereitMachen(): void {
+    const kontext = this.hole()
+    if (kontext.state === 'suspended') {
+      void kontext.resume().catch(() => undefined)
+    }
+  }
+
+  /**
    * Der Kontext entsteht erst beim ersten Ton.
    *
    * Ein `AudioContext`, den keine Nutzergeste gestartet hat, bleibt in den

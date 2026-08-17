@@ -164,6 +164,12 @@ class Belegfilter:
             beleg = self._zeile(zeile, gesprochen)
             if beleg is not None:
                 belege.append(beleg)
+        if not self._im_block and not self._puffer.lstrip().startswith("`"):
+            treffer = re.search(r"([.!?…:;])\s+", self._puffer)
+            if treffer is not None and treffer.end() >= 10:
+                satz = self._puffer[: treffer.end()]
+                self._puffer = self._puffer[treffer.end() :]
+                gesprochen.append(satz)
         return "".join(gesprochen), belege
 
     def ausklingen(self) -> tuple[str, list[dict]]:
@@ -956,6 +962,8 @@ class Sprachbruecke:
         with contextlib.suppress(Exception):
             await self._browser.send_bytes(pcm)
             self._lage.rahmen_zurueck += 1
+            if self._lage.rahmen_zurueck == 1:
+                logger.info("Erster Tonrahmen (TTS) an Browser gesendet (%d Bytes)", len(pcm))
 
     async def _senden(self, nutzlast: dict) -> None:
         if self._browser.client_state is not WebSocketState.CONNECTED:

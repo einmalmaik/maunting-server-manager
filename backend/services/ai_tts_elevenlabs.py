@@ -207,7 +207,7 @@ def verbindungsadresse(base_url: str, voice_id: str, model_id: str) -> str:
     teile = urlparse(base_url)
     schema = "wss" if teile.scheme == "https" else "ws"
     pfad = teile.path.rstrip("/")
-    wirksames_modell = (model_id or "").strip() or "eleven_turbo_v2_5"
+    wirksames_modell = (model_id or "").strip() or "eleven_flash_v2_5"
     frage = urlencode(
         {
             "model_id": wirksames_modell,
@@ -287,25 +287,9 @@ def _verbindung_zu(fehler: BaseException) -> bool:
 
 
 async def pruefen(adresse: str, schluessel: str) -> None:
-    """Öffnet die Sitzung einmal und legt sofort wieder auf.
-
-    Das Gegenstück zum Chattest, und es muss ein eigenes sein: der Chattest
-    schickt ein „ping" an ``/chat/completions``, und diese Adresse gibt es bei
-    ElevenLabs gar nicht. Der Betreiber bekäme eine Fehlermeldung für einen
-    richtig eingerichteten Zugang.
-
-    Geprüft wird genau das, was später auch passiert: Adresse, Schlüssel,
-    Stimme und Modell zusammen. Schon der Handschlag entscheidet — ein falscher
-    Schlüssel endet in einem 401, eine unbekannte Stimme in einem 400 oder 404.
-
-    **Es wird nichts gesprochen.** Die Eröffnungsnachricht trägt laut Protokoll
-    ein einzelnes Leerzeichen, und ein Leerzeichen erzeugt keinen Ton und kostet
-    keine Zeichen. Ein Testsatz stünde dagegen auf der Rechnung des Betreibers —
-    jedes Mal, wenn er auf „Testen" klickt.
-    """
     verbindung = await _verbinden(adresse, schluessel)
     try:
-        await verbindung.send(json.dumps({"text": " "}))
+        await verbindung.send(json.dumps({"text": " ", "xi_api_key": schluessel}))
         # Auf die erste Antwort warten. Ohne das ginge eine Gegenstelle, die
         # erst nach dem Handschlag ablehnt, als Erfolg durch. Ein Ausbleiben
         # ist hier **kein** Fehlschlag: ein blosses Leerzeichen muss keinen Ton
@@ -368,30 +352,21 @@ class Stimme:
         return self
 
     async def _eroeffnen(self):
-        """Verbindet und schickt die Eröffnung — oder räumt vollständig auf.
-
-        Laut Protokoll muss der erste Text ein einzelnes Leerzeichen sein.
-
-        **Ohne `voice_settings`**, und das ist eine Entscheidung: die
-        Gegenstelle nimmt dann die Einstellungen, die der Betreiber an seiner
-        Stimme gespeichert hat. Werte hier hineinzuschreiben hiesse, seine
-        Wahl im Panel stillschweigend zu überstimmen — an einer Stelle, an
-        der er sie nicht vermuten würde.
-
-        Auch **ohne** `generation_config`: die Puffergrenzen der Gegenstelle
-        spielen keine Rolle, weil hier ohnehin jeder Satz sofort mit `flush`
-        erzeugt wird.
-
-        Der Eröffnungs-send steht unter ``except BaseException``, und das ist
-        keine Übervorsicht: scheitert er, oder wird die Aufgabe zwischen
-        Connect und Rückgabe abgebrochen (`CancelledError` erbt nicht von
-        `Exception`), läuft `__aexit__` nie — die Verbindung bliebe offen, bis
-        die Gegenstelle sie irgendwann aufgibt. Geschlossen wird deshalb hier,
-        bevor die Ausnahme weitergeht.
-        """
         verbindung = await _verbinden(self._adresse, self._schluessel)
         try:
-            await verbindung.send(json.dumps({"text": " "}))
+            # Eröffnungsnachricht (BOS) mit voice_settings und xi_api_key
+            await verbindung.send(
+                json.dumps(
+                    {
+                        "text": " ",
+                        "voice_settings": {
+                            "stability": 0.5,
+                            "similarity_boost": 0.8,
+                        },
+                        "xi_api_key": self._schluessel,
+                    }
+                )
+            )
         except BaseException:
             with contextlib.suppress(Exception):
                 await verbindung.close()
@@ -511,7 +486,7 @@ class Stimme:
         self._gesendet += len(stueck)
         # Das anhängende Leerzeichen verlangt das Protokoll ausdrücklich; ohne
         # es klebt der letzte an den nächsten Satz.
-        nutzlast = json.dumps({"text": f"{stueck} ", "flush": True})
+        nutzlast = json.dumps({"text": f"{stueck} ", "try_trigger_generation": True, "flush": True})
         try:
             await self._verbindung.send(nutzlast)
         except Exception as fehler:
@@ -562,6 +537,8 @@ class Stimme:
                     continue
                 if not isinstance(ereignis, dict):
                     continue
+                if "error" in ereignis or ("message" in ereignis and not ereignis.get("audio")):
+                    logger.warning("ElevenLabs TTS Rueckmeldung: %s", ereignis)
                 ton = ereignis.get("audio")
                 if isinstance(ton, str) and ton:
                     try:
@@ -572,7 +549,6 @@ class Stimme:
                         await self._senden(roh)
                 if ereignis.get("isFinal") is True:
                     self._fertig.set()
-                    return
         except asyncio.CancelledError:
             raise
         except Exception as fehler:  # pragma: no cover - Netzabbruch

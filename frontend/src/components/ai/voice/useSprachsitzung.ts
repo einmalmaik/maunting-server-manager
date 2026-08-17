@@ -188,12 +188,18 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     setFehler(null)
     setZustand('verbindet')
 
+    // Audio-Wiedergabe direkt bei der Nutzergeste (Klick) initialisieren,
+    // um den AudioContext sofort im Zustand 'running' zu haben.
+    const spiele = new Wiedergabe()
+    spiele.bereitMachen()
+    lautsprecher.current = spiele
+
     const verbindung = new WebSocket(adresse(providerId))
     verbindung.binaryType = 'arraybuffer'
     ws.current = verbindung
 
     verbindung.onopen = () => {
-      lautsprecher.current = new Wiedergabe()
+      lautsprecher.current?.bereitMachen()
       void starteAufnahme((paket) => {
         // Nur senden, wenn die Leitung wirklich offen ist. Ein Paket auf einen
         // schliessenden Socket wirft, und das mitten im Sprechen.
@@ -233,6 +239,12 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     verbindung.onmessage = (ereignis) => {
       if (ereignis.data instanceof ArrayBuffer) {
         lautsprecher.current?.spiele(ereignis.data)
+        return
+      }
+      if (typeof Blob !== 'undefined' && ereignis.data instanceof Blob) {
+        void ereignis.data.arrayBuffer().then((buffer) => {
+          lautsprecher.current?.spiele(buffer)
+        })
         return
       }
       let nachricht: Record<string, unknown>
