@@ -38,7 +38,12 @@ from models import (
 )
 from services import ai_run_broker, ai_run_service, ai_stream_service
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
-from services.openai_compatible_adapter import ProviderToolCall, StreamChunk, StreamUsage
+from services.openai_compatible_adapter import (
+    AiProviderRequestError,
+    ProviderToolCall,
+    StreamChunk,
+    StreamUsage,
+)
 from services.role_service import set_user_roles
 
 
@@ -525,6 +530,65 @@ async def test_a_run_never_stays_stuck_on_running_when_the_quota_runs_out(
     assert run.status == "failed", "Der Lauf haengt auf `running` fest"
     # Und der Grund steht dran, statt dass jemand raten muss.
     assert run.stop_reason == "AI_QUOTA_DAILY_TOKEN_LIMIT"
+
+
+@pytest.mark.asyncio
+async def test_the_provider_wording_stays_in_the_log_and_never_reaches_the_user(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Lauf gehoert einem Benutzer, das Konto dahinter dem Betreiber.
+
+    Es gab eine Zwischenfassung, die den Satz des Anbieters als ``detail`` in
+    dieses Ereignis legte, und die Oberflaeche zeigte ihn unter der Erklaerung
+    an. Der Gedanke war richtig — „Der Anbieter hat die Anfrage abgelehnt" half
+    bei einer Ferndiagnose niemandem —, der Weg war es nicht: was der Anbieter
+    schreibt, beschreibt **sein Konto**, nicht die Anfrage. Kontingentstand,
+    Kontoname, die Namen privater Fine-Tunes und der maskierte Schluessel gingen
+    damit an jeden mit `ai.chat.use`.
+
+    Die Redaktion faengt das nicht auf, und sie kann es nicht: sie sucht
+    Schluesselmuster, und ``sk-pr***…xyZ4`` ist keines mehr — genau darum steht
+    hier ein maskierter Schluessel im Text. Die Erklaerung traegt seither der
+    Code, zu dem `de.json` einen eigenen Satz hat.
+    """
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+
+    geheim = (
+        "You exceeded your current quota for org Muster GmbH (12,80 of 15,00 USD "
+        "used). Key sk-pr***************************xyZ4, model ft:muster-intern-v3."
+    )
+
+    async def fake(*_args, **_kwargs):
+        raise AiProviderRequestError("AI_PROVIDER_PAYMENT_REQUIRED", geheim)
+        yield  # pragma: no cover - macht die Funktion zum Generator
+
+    monkeypatch.setattr(ai_stream_service, "stream_chat_completion", fake)
+
+    run, fehler = ai_stream_service.lauf_beginnen(
+        db, user=regular_user, conversation=conversation, provider=provider,
+        request_id=uuid4(), content="Was ist los?", reasoning=False,
+    )
+    assert run is not None, f"Lauf konnte nicht beginnen: {fehler}"
+    ai_run_broker.eroeffnen(run.id)
+    _abzug, warteschlange = ai_run_broker.abonnieren(run.id)
+    await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
+
+    fehlerereignisse = []
+    while not warteschlange.empty():
+        ereignis, daten = warteschlange.get_nowait()
+        if ereignis == "error":
+            fehlerereignisse.append(daten)
+
+    assert len(fehlerereignisse) == 1, "Genau ein Fehlerereignis erwartet"
+    meldung = fehlerereignisse[0]
+    # Der Code benennt den Fall — das ist die Diagnose, die bleiben muss.
+    assert meldung["code"] == "AI_PROVIDER_PAYMENT_REQUIRED"
+    assert "detail" not in meldung
+    # Und kein Bruchstueck des Fremdtextes auf einem anderen Feld.
+    hinaus = json.dumps(meldung, ensure_ascii=False)
+    for bruchstueck in ("Muster GmbH", "sk-pr", "ft:muster-intern-v3", "15,00"):
+        assert bruchstueck not in hinaus, f"{bruchstueck!r} ging an den Benutzer"
 
 
 @pytest.mark.asyncio

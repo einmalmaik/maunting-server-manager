@@ -193,6 +193,77 @@ def test_the_operator_key_is_the_only_source(
     assert ai_provider_service.resolve_api_key(db, provider, regular_user.id) is None
 
 
+# ── Der Schluessel fuer den Modellkatalog ─────────────────────────────
+#
+# `ai_model_catalog` haengt diese Funktion ein und ruft sie **nur** dort, wo
+# ohnehin abgerufen wird. Der Umweg ist noetig, weil OpenAI seine Modelliste nur
+# gegen einen Schluessel herausgibt, die Leser des Katalogs ihn aber nicht zur
+# Hand haben — `ai_reasoning.vorgabe`, `ai_context_window.ermitteln` und die
+# Providerliste im Chat fragen alle ohne.
+
+
+def test_the_catalog_key_comes_from_an_enabled_access_of_that_kind(
+    db: Session, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nach Anbieter gefragt, nicht nach Zugang — welche Modelle es gibt, haengt nicht daran, wer fragt."""
+    _provider(db, monkeypatch)
+    assert ai_provider_service.katalogschluessel("openrouter") == "sk-or-v1-operator-secret"
+
+
+def test_a_catalog_key_never_travels_to_another_provider(
+    db: Session, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Der Schluessel eines Zugangs geht nur an die Adresse, fuer die er ausgestellt ist.
+
+    Sonst holte der Abruf fuer OpenAI den OpenRouter-Schluessel und schickte ihn
+    an ``api.openai.com`` — ein Geheimnis an einen fremden Dienst, fuer eine
+    Liste, die dort ohnehin abgelehnt wird.
+    """
+    _provider(db, monkeypatch)
+    assert ai_provider_service.katalogschluessel("openai") is None
+
+
+def test_a_disabled_access_stops_the_background_fetch_too(
+    db: Session, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Abschalten ist auch eine Aussage ueber ausgehende Verbindungen.
+
+    Ein deaktivierter Zugang darf nicht im Hintergrund weiter beim Anbieter
+    nachfragen — der Betreiber hat ihn abgeschaltet, und die Auffrischung des
+    Katalogs sieht niemand.
+    """
+    provider = _provider(db, monkeypatch)
+    provider.enabled = False
+    db.commit()
+    assert ai_provider_service.katalogschluessel("openrouter") is None
+
+
+def test_an_access_without_a_key_is_no_answer_at_all(
+    db: Session, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ein Zugang ohne Schluessel darf keinen mit verdecken.
+
+    Gaebe die Abfrage ihn heraus, endete sie bei ``None`` — obwohl daneben ein
+    zweiter Zugang desselben Anbieters mit Schluessel steht. Der Katalog bliebe
+    leer, und zwar dauerhaft.
+    """
+    ohne = ai_provider_service.create_provider(
+        db,
+        name="Ohne Schluessel",
+        provider_kind="openrouter",
+        default_model="test-model",
+        enabled=True,
+        requires_api_key=False,
+        operator_api_key=None,
+    )
+    db.commit()
+    assert ohne.id is not None
+    assert ai_provider_service.katalogschluessel("openrouter") is None
+
+    _provider(db, monkeypatch)
+    assert ai_provider_service.katalogschluessel("openrouter") == "sk-or-v1-operator-secret"
+
+
 @pytest.mark.asyncio
 async def test_adapter_normalizes_sse_and_never_exposes_provider_frames(
     monkeypatch: pytest.MonkeyPatch,

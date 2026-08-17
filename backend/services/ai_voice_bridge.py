@@ -64,7 +64,7 @@ from models import AiProvider, User
 from services import (
     ai_run_broker,
     ai_stt,
-    ai_tts_elevenlabs,
+    ai_tts,
     ai_voice_vad,
 )
 
@@ -292,6 +292,7 @@ class Sprachbruecke:
         user_id: int,
         conversation_id: str,
         chat_provider_id: int,
+        stimm_kind: str,
         stimm_adresse: str,
         stimm_schluessel: str,
         http_client: httpx.AsyncClient,
@@ -301,6 +302,11 @@ class Sprachbruecke:
         self._user_id = user_id
         self._gespraech_id = conversation_id
         self._provider_id = chat_provider_id
+        #: Wer vorliest. Einmal nachgeschlagen und nicht je Zug: welcher
+        #: Sprachdienst gilt, steht für die Dauer der Sitzung fest, und ein
+        #: Wechsel mitten im Gespräch wäre keine Funktion, sondern ein Fehler.
+        #: Die Brücke nennt ihn nirgends beim Namen — sie kennt nur `ai_tts`.
+        self._stimmweg = ai_tts.stimmweg(stimm_kind)
         self._stimm_adresse = stimm_adresse
         self._stimm_schluessel = stimm_schluessel
         self._client = http_client
@@ -313,7 +319,7 @@ class Sprachbruecke:
         #: Äusserung als Dazwischenreden behandelt und nicht als zweite Frage.
         self._laufende: asyncio.Task | None = None
         #: Die Stimme des laufenden Zuges. Zum Abwürgen beim Dazwischenreden.
-        self._stimme: ai_tts_elevenlabs.Stimme | None = None
+        self._stimme: ai_tts.Stimmsitzung | None = None
         #: Vorschläge, die auf ein gesprochenes Ja warten.
         self._offene_vorschlaege: list[str] = []
 
@@ -515,7 +521,7 @@ class Sprachbruecke:
         filter_ = Belegfilter()
         gesprochen = False
 
-        async with ai_tts_elevenlabs.Stimme(
+        async with self._stimmweg.Stimme(
             adresse=self._stimm_adresse,
             schluessel=self._stimm_schluessel,
             senden=self._ton_senden,
@@ -554,7 +560,7 @@ class Sprachbruecke:
         self,
         ereignis: str,
         daten: dict,
-        stimme: ai_tts_elevenlabs.Stimme,
+        stimme: ai_tts.Stimmsitzung,
         filter_: Belegfilter,
     ) -> bool:
         """Ein Ereignis des Laufs. ``False`` heisst: dieser Zug ist zu Ende."""
@@ -620,7 +626,7 @@ class Sprachbruecke:
     # ── Rückfrage und Bestätigung ─────────────────────────────────────────
 
     async def _frage_vorlesen(
-        self, daten: dict, stimme: ai_tts_elevenlabs.Stimme
+        self, daten: dict, stimme: ai_tts.Stimmsitzung
     ) -> None:
         """Eine `ask_user`-Karte als gesprochene Frage.
 

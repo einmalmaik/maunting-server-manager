@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from models import AiConversation, AiMessage, AiProvider, AiToolResult, User
 from services import ai_model_catalog
+from services.ai_provider_registry import openrouter
 from services.ai_context_service import (
     WERKZEUG_KONTEXT_KOPF,
     build_provider_messages,
@@ -58,7 +59,7 @@ def test_a_write_price_means_the_model_wants_an_explicit_mark() -> None:
     Sie rechnen das Anlegen des Zwischenspeichers gesondert ab und legen ihn
     nur an, wenn die Anfrage es verlangt.
     """
-    modell = ai_model_catalog._modell_aus_openrouter(_eintrag(
+    modell = openrouter.katalog_lesen(_eintrag(
         input_cache_read="0.0000002", input_cache_write="0.0000025",
     ))
     assert modell is not None
@@ -71,7 +72,7 @@ def test_a_read_price_alone_means_the_provider_already_does_it() -> None:
     Hier waere eine Marke bestenfalls wirkungslos. Der Unterschied zu „kann es
     gar nicht“ ist fuer den Sendepfad keiner: beide Male geht nichts raus.
     """
-    modell = ai_model_catalog._modell_aus_openrouter(
+    modell = openrouter.katalog_lesen(
         _eintrag(input_cache_read="0.0000005")
     )
     assert modell is not None
@@ -80,7 +81,7 @@ def test_a_read_price_alone_means_the_provider_already_does_it() -> None:
 
 def test_no_cache_price_at_all_means_no_mark() -> None:
     """Die 166 ohne jedes Cache-Feld."""
-    modell = ai_model_catalog._modell_aus_openrouter(_eintrag())
+    modell = openrouter.katalog_lesen(_eintrag())
     assert modell is not None
     assert modell.cache_marke_noetig is False
 
@@ -94,7 +95,7 @@ def test_a_broken_pricing_block_does_not_take_the_entry_down() -> None:
     """
     for kaputt in ({}, {"pricing": None}, {"pricing": []}, {"pricing": {"input_cache_write": 5}}):
         rohdaten = {"id": "a/b", "name": "B", **kaputt}
-        modell = ai_model_catalog._modell_aus_openrouter(rohdaten)
+        modell = openrouter.katalog_lesen(rohdaten)
         assert modell is not None, kaputt
         assert modell.cache_marke_noetig is False, kaputt
 
@@ -107,7 +108,7 @@ def test_the_mark_survives_a_thinking_model() -> None:
     """
     rohdaten = _eintrag(input_cache_write="0.0000025")
     rohdaten["reasoning"] = {"mandatory": False, "supported_efforts": ["high", "low"]}
-    modell = ai_model_catalog._modell_aus_openrouter(rohdaten)
+    modell = openrouter.katalog_lesen(rohdaten)
     assert modell is not None
     assert modell.denkt is True
     assert modell.cache_marke_noetig is True

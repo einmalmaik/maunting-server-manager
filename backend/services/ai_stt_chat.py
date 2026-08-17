@@ -55,6 +55,7 @@ import logging
 import httpx
 
 from models import AiProvider
+from services import ai_reasoning
 from services.openai_compatible_adapter import StreamUsage, stream_chat_completion
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,14 @@ async def abschrift(
 
     stuecke: list[str] = []
     laenge = 0
+    # Abschreiben ist kein Denken. Der Satz stand hier schon, nur folgte ihm
+    # keine Zeile: `reasoning=False` allein ist ein Schalter, und den kennt
+    # nicht jeder Anbieter. Wo es ihn nicht gibt, ging gar nichts hinaus —
+    # also genau das „nichts senden", vor dem der Kommentar warnte.
+    # `ai_reasoning.aus_fuer` sagt das Aus in der Mundart dieses Anbieters.
+    denken, denkstufe = await ai_reasoning.aus_fuer(
+        client, provider, api_key=api_key, model_id=modell
+    )
     async for stueck in stream_chat_completion(
         client,
         provider=provider,
@@ -116,11 +125,8 @@ async def abschrift(
         messages=nachrichten,
         usage=messwerte,
         model=modell,
-        # Abschreiben ist kein Denken. Ausdrücklich `False` und nicht
-        # weggelassen: „nichts senden" heisst beim Anbieter „nimm deinen
-        # Default", und der ist bei den meisten aktuellen Modellen an — das
-        # kostet Zeit und Geld für eine Aufgabe ohne jede Überlegung.
-        reasoning=False,
+        reasoning=denken,
+        reasoning_effort=denkstufe,
     ):
         if stueck.kind != "content":
             continue

@@ -25,7 +25,11 @@ Was hier zugesichert wird:
   eine geratene Kennung.
 * Der Katalogschlüssel geht nur an den Anbieter, der ihn verlangt, und im Kopf,
   den dieser Anbieter versteht.
-* Das Vorwärmen beim Start fasst schlüsselpflichtige Kataloge nicht an.
+* Das Vorwärmen beim Start fasst **jeden** Katalog an, auch den hinter einem
+  Schlüssel. Bis zum 17.08.2026 stand hier das Gegenteil, und es stimmte auch —
+  bis der Abruf lernte, sich den Schlüssel selbst zu holen und ohne einen gar
+  nicht erst loszulaufen. Damit war die Ausnahme ohne Grund und der Katalog
+  eines OpenAI-Zugangs nach jedem Neustart leer.
 * Eine hinterlegte Stimme kommt zurück, wie sie hineinging — **gross wie
   klein**; eine, die den URL-Pfad verlassen könnte, kommt gar nicht erst hinein.
 """
@@ -42,6 +46,7 @@ from services import (
     ai_provider_registry,
     ai_provider_service,
 )
+from services.ai_provider_registry import elevenlabs as elevenlabs_anbieter
 
 
 # ── Die Registry ──────────────────────────────────────────────────────────
@@ -110,14 +115,14 @@ def test_only_speaking_models_survive_the_elevenlabs_reader() -> None:
     Eines davon in der Auswahl für den Sprachmodus wäre ein Eintrag, der beim
     ersten Satz scheitert — und zwar erst dort, mitten im Gespräch.
     """
-    kann = ai_model_catalog._modell_aus_elevenlabs(
+    kann = elevenlabs_anbieter.katalog_lesen(
         {"model_id": "eleven_flash_v2_5", "name": "Flash v2.5", "can_do_text_to_speech": True}
     )
     assert kann is not None
     assert kann.model_id == "eleven_flash_v2_5"
     assert kann.name == "Flash v2.5"
 
-    umwandler = ai_model_catalog._modell_aus_elevenlabs(
+    umwandler = elevenlabs_anbieter.katalog_lesen(
         {"model_id": "eleven_voice_changer", "can_do_text_to_speech": False}
     )
     assert umwandler is None
@@ -130,7 +135,7 @@ def test_a_model_that_does_not_say_what_it_can_is_left_out() -> None:
     halten kann. Das Gegenteil — im Zweifel aufnehmen — sähe grosszügig aus und
     verschöbe den Fehlschlag in das Gespräch.
     """
-    assert ai_model_catalog._modell_aus_elevenlabs({"model_id": "was-auch-immer"}) is None
+    assert elevenlabs_anbieter.katalog_lesen({"model_id": "was-auch-immer"}) is None
 
 
 def test_the_elevenlabs_reader_admits_what_it_does_not_know() -> None:
@@ -140,7 +145,7 @@ def test_the_elevenlabs_reader_admits_what_it_does_not_know() -> None:
     und nie „klein" (`ai_context_window.ermitteln`) — hier heisst es zusätzlich
     „gibt es nicht", und beides führt zum selben Verhalten.
     """
-    modell = ai_model_catalog._modell_aus_elevenlabs(
+    modell = elevenlabs_anbieter.katalog_lesen(
         {"model_id": "eleven_flash_v2_5", "can_do_text_to_speech": True}
     )
     assert modell is not None
@@ -155,10 +160,10 @@ def test_the_elevenlabs_reader_admits_what_it_does_not_know() -> None:
 
 
 def test_a_broken_entry_is_skipped_and_not_fatal() -> None:
-    assert ai_model_catalog._modell_aus_elevenlabs({}) is None
-    assert ai_model_catalog._modell_aus_elevenlabs({"model_id": None}) is None
-    assert ai_model_catalog._modell_aus_elevenlabs({"model_id": 42}) is None
-    assert ai_model_catalog._modell_aus_elevenlabs({"model_id": ""}) is None
+    assert elevenlabs_anbieter.katalog_lesen({}) is None
+    assert elevenlabs_anbieter.katalog_lesen({"model_id": None}) is None
+    assert elevenlabs_anbieter.katalog_lesen({"model_id": 42}) is None
+    assert elevenlabs_anbieter.katalog_lesen({"model_id": ""}) is None
 
 
 # ── Der Schlüssel im Katalogabruf ─────────────────────────────────────────
@@ -224,12 +229,24 @@ async def test_elevenlabs_gets_its_key_in_its_own_header() -> None:
 # ── Das Vorwärmen beim Start ──────────────────────────────────────────────
 
 
-def test_prewarming_leaves_key_bound_catalogs_alone(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`vorwaermen_anstossen()` läuft ohne Datenbank — und damit ohne Schlüssel.
+def test_prewarming_covers_key_bound_catalogs_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Seit dem 17.08.2026 wärmt der Start **alle** Kataloge vor, auch die mit Schlüssel.
 
-    Ein Versuch ohne ihn endete in einem 401, würde als Fehlversuch vermerkt,
-    und `FEHLER_RUHE` verzögerte anschließend den ersten echten Abruf um eine
-    Minute. Für einen Fehler, den niemand gemacht hat.
+    Vorher blieben sie aussen vor, und die Begründung war richtig: ohne
+    Schlüssel endete der Abruf in einem 401, wurde als Fehlversuch vermerkt, und
+    `FEHLER_RUHE` verzögerte anschliessend den ersten echten Abruf um eine
+    Minute — für einen Fehler, den niemand gemacht hatte.
+
+    Der Preis dafür stand nur nicht daneben: an einem OpenAI-Zugang war der
+    Katalog nach jedem Neustart leer, bis jemand die Provider-Einstellungen
+    öffnete. Und leer heisst dort mehr als „keine Auswahl": keine Denkstufe,
+    kein Kontextfenster, für jede Nachricht bis dahin.
+
+    Der 401 ist inzwischen unmöglich geworden — der Abruf besorgt sich den
+    Schlüssel selbst und unterbleibt, wenn es keinen gibt. Damit fällt der
+    Grund für die Ausnahme weg. Die Stelle, an der das wirklich hängt, hält
+    `test_ai_model_catalog.test_without_a_key_a_key_bound_catalog_is_not_even_asked`
+    — dort, wo der Abruf steht, und nicht hier, wo nur das Anstossen steht.
     """
     angestossen: list[str] = []
     monkeypatch.setattr(
@@ -240,8 +257,14 @@ def test_prewarming_leaves_key_bound_catalogs_alone(monkeypatch: pytest.MonkeyPa
 
     ai_model_catalog.vorwaermen_anstossen()
 
-    assert "openrouter" in angestossen
-    assert "elevenlabs" not in angestossen
+    # Gegen die Registry und nicht gegen zwei Namen: „alle" ist die Zusage,
+    # und eine Namensliste im Test hiesse, dass ein neuer Anbieter still
+    # herausfällt — der schluesselpflichtige `openai` fehlte hier genau so.
+    assert set(angestossen) == set(ai_provider_registry.ANBIETER)
+    assert any(
+        ai_provider_registry.anbieter(kind).katalog_braucht_schluessel
+        for kind in angestossen
+    ), "Ohne einen schluesselpflichtigen Anbieter prueft dieser Test seinen Namen nicht"
 
 
 # ── Die Stimme am Zugang ──────────────────────────────────────────────────

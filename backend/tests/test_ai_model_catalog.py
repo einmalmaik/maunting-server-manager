@@ -522,6 +522,450 @@ async def test_shutdown_waits_for_the_refresh_it_cancels() -> None:
         assert ai_model_catalog._auffrischen_anstossen("openrouter") is False
 
 
+# ── Der Schlüssel für einen schlüsselpflichtigen Katalog ─────────────────
+#
+# OpenAI und ElevenLabs geben ihre Listen nur gegen einen Schlüssel heraus. Der
+# steht in der Datenbank und ist mit dem DIS-Sidecar verschlüsselt — zur Hand
+# hat ihn nur die Provider-Einstellungsseite. Alle übrigen Leser des Katalogs
+# (`ai_reasoning.vorgabe`, `ai_context_window.ermitteln`, die Providerliste im
+# Chat) haben ihn nicht.
+#
+# Bis zum 17.08.2026 hiess das: ohne Einstellungsseite kein Katalog. Der Abruf
+# lief trotzdem los, kassierte ein 401, und der Vermerk darüber hielt die
+# nächste Minute frei von weiteren Versuchen — ein Fehlschlag, der sich selbst
+# am Leben hielt. Praktisch war der OpenAI-Katalog nach jedem Neustart leer.
+
+
+@pytest.mark.asyncio
+async def test_without_a_key_a_key_bound_catalog_is_not_even_asked() -> None:
+    """Kein Schlüssel heisst **kein Abruf** — und nicht „Abruf, der scheitert".
+
+    Das ist die eigentliche Zusage hinter dem Vorwärmen aller Anbieter beim
+    Start. Ein 401 an dieser Stelle wäre kein Ausfall des Anbieters, sondern
+    eine Frage, die MSM gar nicht hätte stellen dürfen; ihn danach als Ausfall
+    zu vermerken machte aus dem Missverständnis eine Wartezeit.
+    """
+    versuche = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal versuche
+        versuche += 1
+        return httpx.Response(401, json={})
+
+    async with _client(handler) as client:
+        assert await ai_model_catalog.modelle(client, "openai") == []
+    assert versuche == 0
+
+
+@pytest.mark.asyncio
+async def test_the_catalog_gets_its_own_key_when_the_caller_has_none() -> None:
+    """Der Abruf fragt selbst nach dem Schlüssel, statt auf einen Aufrufer zu warten.
+
+    Der eingehängte Weg dorthin (`schluesselquelle_setzen`) ist eine Funktion
+    und kein Import: der Katalog soll von Datenbank und DIS-Sidecar nichts
+    wissen. Gefragt wird **nur**, wenn wirklich abgerufen wird — sonst kostete
+    jede Chatnachricht eine Entschlüsselung für eine Angabe, die sechs Stunden
+    gilt.
+    """
+    gefragt: list[str] = []
+    gesehen: dict[str, str | None] = {}
+
+    def quelle(kind: str) -> str | None:
+        gefragt.append(kind)
+        return "sk-aus-der-datenbank"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        gesehen[request.url.host] = request.headers.get("authorization")
+        return httpx.Response(200, json={"data": [{"id": "gpt-5.5"}]})
+
+    ai_model_catalog.schluesselquelle_setzen(quelle)
+    async with _client(handler) as client:
+        modelle = await ai_model_catalog.modelle(client, "openai")
+
+    assert [m.model_id for m in modelle] == ["gpt-5.5"]
+    assert gefragt == ["openai"]
+    assert gesehen["api.openai.com"] == "Bearer sk-aus-der-datenbank"
+    # Und nur dorthin. OpenRouter gibt seine Liste offen heraus; ein
+    # OpenAI-Schluessel an fremder Adresse waere ein Geheimnis auf Reisen.
+    assert gesehen.get("openrouter.ai") is None
+
+
+@pytest.mark.asyncio
+async def test_the_quiet_period_after_a_missing_key_does_not_bind_who_brings_one() -> None:
+    """Der Vermerk „kein Schlüssel" sperrt den, der einen hat, ausdrücklich nicht.
+
+    Die Ruhefrist gilt Ausfällen des Anbieters — die kann niemand herbeireden,
+    und ein zweiter Versuch im selben Atemzug kostet dieselbe Wartezeit noch
+    einmal. „Kein Schlüssel zu beschaffen" ist kein solcher Ausfall: wer selbst
+    einen mitbringt, stellt nicht denselben Versuch noch einmal, sondern einen
+    anderen.
+
+    Ohne diese Unterscheidung sah die Einstellungsseite eine Minute lang „dieser
+    Anbieter kennt keine Modelle" — mit dem Schlüssel im Feld daneben. Genau die
+    Seite, die den Fehlschlag hätte beheben können, bekam ihn vorgehalten.
+    """
+    abrufe: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Der fremde Katalog wird hier nicht mitgezaehlt: er gehoert zur
+        # Ergaenzung der Faehigkeiten und haengt an keinem Schluessel.
+        if request.url.host == "openrouter.ai":
+            return httpx.Response(200, json={"data": []})
+        abrufe.append(request.headers.get("authorization"))
+        return httpx.Response(200, json={"data": [{"id": "gpt-5.5"}]})
+
+    async with _client(handler) as client:
+        # Erster Aufruf: keine Quelle eingehängt, also kein Schlüssel und kein
+        # Abruf — und ein Vermerk, der die nächste Minute beansprucht.
+        assert await ai_model_catalog.modelle(client, "openai") == []
+        assert abrufe == []
+        vermerk = ai_model_catalog._cache["openai"]
+        assert vermerk.fehler_am is not None and vermerk.schluessel_fehlte is True
+
+        # Zweiter Aufruf, unmittelbar danach, mit Schlüssel: geht durch.
+        modelle = await ai_model_catalog.modelle(
+            client, "openai", schluessel="sk-von-der-einstellungsseite"
+        )
+
+    assert [m.model_id for m in modelle] == ["gpt-5.5"]
+    assert abrufe == ["Bearer sk-von-der-einstellungsseite"]
+
+
+@pytest.mark.asyncio
+async def test_a_real_outage_still_holds_the_quiet_period_even_with_a_key() -> None:
+    """Die Gegenprobe — sonst wäre die Ausnahme ein Loch in der Ruhefrist.
+
+    Ein 500 des Anbieters bleibt ein 500, gleich wer als Nächster fragt. Nur der
+    Grund „kein Schlüssel" ist in der Hand des Fragenden; ein Ausfall ist es
+    nicht, und ihn erneut zu versuchen kostet nur dieselbe Wartezeit noch einmal.
+    """
+    versuche: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        versuche.append((request.headers.get("authorization") or "").removeprefix("Bearer "))
+        return httpx.Response(500, json={})
+
+    ai_model_catalog.schluesselquelle_setzen(lambda kind: "sk-konto-a")
+    async with _client(handler) as client:
+        assert await ai_model_catalog.modelle(client, "openai") == []
+        assert versuche == ["sk-konto-a"]
+        assert ai_model_catalog._cache["openai"].schluessel_fehlte is False
+
+        # Derselbe Zugang, unmittelbar danach: er wartet.
+        assert await ai_model_catalog.modelle(
+            client, "openai", schluessel="sk-konto-a"
+        ) == []
+        assert versuche == ["sk-konto-a"], (
+            "Ein Ausfall des Anbieters ruht auch vor einem Schlüssel"
+        )
+
+        # Ein **anderer** Zugang nicht: ein abgelehnter Schlüssel ist die Sache
+        # seines Kontos, und ein Konto sperrt das andere nicht aus.
+        assert await ai_model_catalog.modelle(
+            client, "openai", schluessel="sk-konto-b"
+        ) == []
+
+    assert versuche == ["sk-konto-a", "sk-konto-b"]
+
+
+@pytest.mark.asyncio
+async def test_a_key_bound_list_is_never_handed_to_another_account() -> None:
+    """Zwei Zugänge desselben Anbieters teilen sich keinen Stand.
+
+    OpenAIs ``/v1/models`` antwortet nicht mit „was es gibt", sondern mit „was
+    **dieses Konto** sehen darf" — samt seiner Feinabstimmungen, deren Kennungen
+    der Betreiber selbst vergeben hat und die den Firmennamen tragen. Der
+    Speicher liegt trotzdem unter dem Anbieter und nicht unter dem Schlüssel;
+    getrennt wird durch einen Abdruck **im** Eintrag. Fehlt er, sieht Konto B
+    die Modellauswahl von Konto A, und das ist ein Datenleck in einem
+    Auswahlfeld.
+    """
+    listen = {
+        "sk-konto-a": {"data": [{"id": "ft:muster-intern-v3"}]},
+        "sk-konto-b": {"data": [{"id": "gpt-5.5"}]},
+    }
+    abrufe: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "openrouter.ai":
+            return httpx.Response(200, json={"data": []})
+        kopf = (request.headers.get("authorization") or "").removeprefix("Bearer ")
+        abrufe.append(kopf)
+        return httpx.Response(200, json=listen[kopf])
+
+    async with _client(handler) as client:
+        a = await ai_model_catalog.modelle(client, "openai", schluessel="sk-konto-a")
+        b = await ai_model_catalog.modelle(client, "openai", schluessel="sk-konto-b")
+        # Und A bekommt beim nächsten Mal wieder seine eigene.
+        a_nochmal = await ai_model_catalog.modelle(
+            client, "openai", schluessel="sk-konto-a"
+        )
+
+    assert [m.model_id for m in a] == ["ft:muster-intern-v3"]
+    assert [m.model_id for m in b] == ["gpt-5.5"]
+    assert [m.model_id for m in a_nochmal] == ["ft:muster-intern-v3"]
+    assert abrufe == ["sk-konto-a", "sk-konto-b", "sk-konto-a"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_lookup_does_not_hand_out_the_other_accounts_list() -> None:
+    """Auch der Fehlerweg trennt die Konten — er ist der leisere von beiden.
+
+    „Der alte Stand überlebt den Fehlversuch" ist eine gute Regel, solange es
+    einen alten Stand gibt. Bei einem kontogebundenen Katalog liegt dort aber
+    der Stand, den zuletzt **irgendwer** geholt hat. Reicht der Fehlerweg ihn
+    weiter, bekommt Konto B die Modelle von Konto A — und zwar an genau der
+    Stelle, an der niemand hinsieht, weil sie nach „Anbieter gerade nicht
+    erreichbar" aussieht.
+    """
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "openrouter.ai":
+            return httpx.Response(200, json={"data": []})
+        schluessel = (request.headers.get("authorization") or "").removeprefix("Bearer ")
+        if schluessel == "sk-konto-a":
+            return httpx.Response(200, json={"data": [{"id": "ft:muster-intern-v3"}]})
+        return httpx.Response(500, json={})
+
+    async with _client(handler) as client:
+        a = await ai_model_catalog.modelle(client, "openai", schluessel="sk-konto-a")
+        b = await ai_model_catalog.modelle(client, "openai", schluessel="sk-konto-b")
+
+    assert [m.model_id for m in a] == ["ft:muster-intern-v3"]
+    assert b == [], "Ein Fehlschlag darf nicht die Liste des anderen Kontos zurückgeben"
+
+
+@pytest.mark.asyncio
+async def test_an_open_catalog_is_shared_by_everyone_who_asks() -> None:
+    """Die Gegenprobe: OpenRouters Liste ist für jeden dieselbe.
+
+    Ohne diesen Test wäre die Trennung oben auch dann erfüllt, wenn jeder
+    Zwischenspeicher an jedem Schlüssel hinge — und dann kostete jede Frage
+    einen Abruf. Getrennt wird nur, wo die Antwort wirklich vom Fragenden
+    abhängt (`Anbieter.katalog_braucht_schluessel`).
+    """
+    abrufe = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal abrufe
+        abrufe += 1
+        return httpx.Response(200, json=ANTWORT)
+
+    async with _client(handler) as client:
+        await ai_model_catalog.modelle(client, "openrouter", schluessel="sk-eins")
+        await ai_model_catalog.modelle(client, "openrouter", schluessel="sk-zwei")
+        await ai_model_catalog.modelle(client, "openrouter")
+
+    assert abrufe == 1
+
+
+@pytest.mark.asyncio
+async def test_a_key_from_the_caller_spares_the_lookup() -> None:
+    """Wer den Schlüssel schon hat, reicht ihn herein — die Einstellungsseite tut das.
+
+    Ein zweiter Gang zum DIS-Sidecar für dasselbe Geheimnis wäre reine
+    Wartezeit; dessen Frist beträgt 15 Sekunden.
+    """
+    gefragt: list[str] = []
+    ai_model_catalog.schluesselquelle_setzen(lambda kind: gefragt.append(kind) or "x")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"id": "gpt-5.5"}]})
+
+    async with _client(handler) as client:
+        await ai_model_catalog.modelle(client, "openai", schluessel="sk-vom-aufrufer")
+
+    assert gefragt == []
+
+
+# ── Fähigkeiten aus einem fremden Katalog ────────────────────────────────
+#
+# OpenAIs ``/v1/models`` nennt je Modell ``id``, ``object``, ``created``,
+# ``owned_by`` und ``shutdown_date`` — kein Kontextfenster, keine Denkstufen.
+# Eine Tabelle im Programm wäre der Rückfall in genau das, wogegen es diesen
+# Katalog gibt. OpenRouter beschreibt dieselben Modelle unter ``openai/…`` und
+# mit demselben Wortschatz für die Stufen.
+
+#: Ein OpenRouter-Ausschnitt mit zwei OpenAI-Modellen. ``gpt-5.1-codex-mini``
+#: steht hier nicht zur Zierde: es ist abschaltbar und führt trotzdem kein
+#: ``none`` in seinen Stufen — der Beleg dafür, dass „aus" eine Angabe ist und
+#: keine Folgerung aus ``mandatory``.
+FREMD = {
+    "data": [
+        {
+            "id": "openai/gpt-5.5",
+            "name": "OpenAI: GPT-5.5",
+            "context_length": 1_050_000,
+            "top_provider": {"context_length": 1_050_000, "max_completion_tokens": 128_000},
+            "reasoning": {
+                "mandatory": False,
+                "supported_efforts": ["none", "low", "medium", "high"],
+                "default_effort": "medium",
+            },
+            "pricing": {"input_cache_write": "0.00000125"},
+        },
+        {
+            "id": "openai/gpt-5.1-codex-mini",
+            "name": "OpenAI: GPT-5.1 Codex Mini",
+            "top_provider": {"context_length": 400_000},
+            "reasoning": {
+                "mandatory": False,
+                "supported_efforts": ["high", "medium", "low"],
+            },
+        },
+    ]
+}
+
+EIGEN = {"data": [{"id": "gpt-5.5"}, {"id": "gpt-5.1-codex-mini"}, {"id": "whisper-1"}]}
+
+
+def _zwei_kataloge(fremd=None):
+    """Ein Transport, der OpenAI und OpenRouter auseinanderhält."""
+
+    def verteile(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "openrouter.ai":
+            return fremd(request) if fremd else httpx.Response(200, json=FREMD)
+        return httpx.Response(200, json=EIGEN)
+
+    return _client(verteile)
+
+
+@pytest.mark.asyncio
+async def test_capabilities_are_filled_in_from_the_foreign_catalog() -> None:
+    """Denkstufen und Fenster kommen aus einem Katalog — nur nicht aus dem eigenen."""
+    ai_model_catalog.schluesselquelle_setzen(lambda kind: "sk-test")
+    async with _zwei_kataloge() as client:
+        modelle = await ai_model_catalog.modelle(client, "openai")
+
+    nach_id = {m.model_id: m for m in modelle}
+    gpt = nach_id["gpt-5.5"]
+    assert gpt.denkt is True
+    assert gpt.stufen == ("none", "low", "medium", "high")
+    assert gpt.standard_stufe == "medium"
+    assert gpt.kontext_tokens == 1_050_000
+    assert gpt.max_ausgabe_tokens == 128_000
+
+    # Die Kennung bleibt die eigene: an einem OpenAI-Zugang heisst das Modell
+    # ``gpt-5.5`` und nicht ``openai/gpt-5.5``. Der Name auch — ``OpenAI:
+    # GPT-5.5`` ist die Beschriftung eines Vermittlers, den der Betreiber
+    # gerade nicht benutzt.
+    assert gpt.name == "gpt-5.5"
+
+    # Was der fremde Katalog nicht führt, bleibt unbekannt. Auch das ist eine
+    # Zusage: ergänzt wird, nicht geraten.
+    assert nach_id["whisper-1"].denkt is False
+    assert nach_id["whisper-1"].kontext_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_the_billing_marker_of_a_middleman_does_not_travel() -> None:
+    """``cache_marke_noetig`` bleibt zurück — es ist keine Eigenschaft des Modells.
+
+    OpenRouter setzt es, wenn sein Katalog ``input_cache_write`` führt, also
+    wenn **dort** ein Preis fürs Zwischenspeichern anfällt. Die Marke, die
+    daraufhin mitginge, heisst ``cache_control`` und ist eine
+    OpenRouter-Erweiterung; OpenAI antwortet darauf mit einem 400 und lehnt
+    damit die ganze Anfrage ab.
+    """
+    ai_model_catalog.schluesselquelle_setzen(lambda kind: "sk-test")
+    async with _zwei_kataloge() as client:
+        durch_openrouter = await ai_model_catalog.modelle(client, "openrouter")
+        eigen = await ai_model_catalog.finde(client, "openai", "gpt-5.5")
+
+    # Beim Vermittler steht die Marke — dort ist sie richtig.
+    fremd = {m.model_id: m for m in durch_openrouter}["openai/gpt-5.5"]
+    assert fremd.cache_marke_noetig is True
+    assert eigen is not None and eigen.cache_marke_noetig is False
+
+
+@pytest.mark.asyncio
+async def test_a_missing_foreign_catalog_costs_knowledge_not_the_provider() -> None:
+    """Die Ergänzung ist eine Ergänzung und keine Bedingung.
+
+    Ein Anbieter, den MSM direkt anspricht, darf nicht daran hängen, dass ein
+    anderer erreichbar ist. Fällt der fremde Katalog aus, bleibt es beim
+    eigenen Wissen — also bei „unbekannt", und unbekannt heisst nie „klein".
+    """
+    ai_model_catalog.schluesselquelle_setzen(lambda kind: "sk-test")
+    async with _zwei_kataloge(lambda _r: httpx.Response(503, json={})) as client:
+        modelle = await ai_model_catalog.modelle(client, "openai")
+
+    assert [m.model_id for m in modelle] == [
+        "gpt-5.1-codex-mini",
+        "gpt-5.5",
+        "whisper-1",
+    ]
+    assert all(m.kontext_tokens is None and not m.denkt for m in modelle)
+
+
+@pytest.mark.asyncio
+async def test_the_foreign_lookup_cannot_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Zwei Anbieter, die aufeinander zeigen, drehen sich nicht im Kreis.
+
+    Der fremde Katalog wird über `_besorgen` geholt und nicht über `modelle` —
+    `modelle` ist genau `_besorgen` plus die Ergänzung, ein Aufruf von dort
+    wäre also der Kreis. So gibt es genau einen Sprung und keinen zweiten, ohne
+    Zähler und ohne Merkliste.
+
+    Gebaut wird der Kreis hier absichtlich: im Programm gibt es ihn nicht, und
+    genau deshalb würde ihn sonst nichts bemerken, bis ihn jemand einträgt.
+
+    **Gezählt wird, nicht abgewartet.** Der Test stand hier schon einmal, und er
+    blieb grün, wenn man `_besorgen` durch `modelle` ersetzte — also genau bei
+    dem Fehler, den er verhindern soll. Der Grund ist das ``except Exception``
+    in `_mit_faehigkeiten`: die Rekursion läuft in die Tiefenbegrenzung, der
+    `RecursionError` ist eine Ausnahme wie jede andere, wird dort gefangen und
+    zu „der fremde Katalog fiel aus" — und der eigene Katalog kam trotzdem
+    zurück. Nur eben ohne Ergänzung, in Sekundenbruchteilen, unter der
+    Zeitgrenze. Deshalb prüft dieser Test jetzt zwei Dinge, die ein Kreis
+    beide bricht: **wie oft** die Ergänzung betreten wird, und **ob** sie
+    tatsächlich etwas eingetragen hat.
+    """
+    from dataclasses import replace as _ersetzen
+
+    from services import ai_provider_registry
+
+    monkeypatch.setitem(
+        ai_provider_registry.ANBIETER,
+        "openrouter",
+        _ersetzen(
+            ai_provider_registry.anbieter("openrouter"),
+            faehigkeiten_aus="openai",
+            faehigkeiten_praefix="",
+        ),
+    )
+    ai_model_catalog.schluesselquelle_setzen(lambda kind: "sk-test")
+
+    betreten: list[str] = []
+    echt = ai_model_catalog._mit_faehigkeiten
+
+    async def zaehlend(client, spec, eigene):
+        betreten.append(spec.kind)
+        return await echt(client, spec, eigene)
+
+    monkeypatch.setattr(ai_model_catalog, "_mit_faehigkeiten", zaehlend)
+
+    async with _zwei_kataloge() as client:
+        durch = await asyncio.wait_for(
+            ai_model_catalog.modelle(client, "openai"), 5.0
+        )
+
+    assert {m.model_id for m in durch} >= {"gpt-5.5", "whisper-1"}
+
+    # Ein Sprung, kein zweiter: `_besorgen` holt die fremde Liste und kommt
+    # zurück, ohne selbst wieder zu ergänzen.
+    assert betreten == ["openai"], (
+        f"Die Ergänzung wurde {len(betreten)}× betreten ({betreten}) — über "
+        "`modelle` statt `_besorgen` zeigen zwei Anbieter aufeinander und "
+        "drehen sich, bis die Tiefenbegrenzung greift."
+    )
+
+    # Und sie hat wirklich ergänzt. Ohne diese Zeile bliebe der Test grün,
+    # solange der Kreis nur schnell genug in eine gefangene Ausnahme läuft.
+    nach_id = {m.model_id: m for m in durch}
+    assert nach_id["gpt-5.5"].denkt is True
+    assert nach_id["gpt-5.5"].kontext_tokens == 1_050_000
+
+
 @pytest.mark.asyncio
 async def test_a_hanging_provider_does_not_stall_a_healthy_one(
     monkeypatch: pytest.MonkeyPatch,
@@ -531,9 +975,12 @@ async def test_a_hanging_provider_does_not_stall_a_healthy_one(
     Vorher hielten sich alle Anbieter **ein** Schloss. Ein haengender staute
     damit die Abrufe der uebrigen mit, obwohl sie nichts miteinander zu tun
     haben. Der Test baut den zweiten Anbieter, den es heute noch nicht gibt —
-    laut ``ai_provider_registry`` ist das ein Eintrag und ein Leser.
+    laut ``ai_provider_registry`` ist das eine Datei mit einem Eintrag und einem
+    Leser; hier steht beides zusammen, weil eine Datei fuer einen Test zu viel
+    waere.
     """
-    from services.ai_provider_registry import Anbieter
+    from services import ai_provider_registry
+    from services.ai_provider_registry import Anbieter, openrouter
 
     zweiter = Anbieter(
         kind="zweiter",
@@ -543,9 +990,7 @@ async def test_a_hanging_provider_does_not_stall_a_healthy_one(
         key_url="https://zweiter.example/keys",
     )
     echt = ai_model_catalog.anbieter
-    monkeypatch.setitem(
-        ai_model_catalog._LESER, "zweiter", ai_model_catalog._modell_aus_openrouter
-    )
+    monkeypatch.setitem(ai_provider_registry._LESER, "zweiter", openrouter.katalog_lesen)
     monkeypatch.setattr(
         ai_model_catalog,
         "anbieter",

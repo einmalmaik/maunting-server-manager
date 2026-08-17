@@ -69,9 +69,16 @@ except ImportError:  # pragma: no cover - im Betrieb immer vorhanden
 
 logger = logging.getLogger(__name__)
 
-#: Ob überhaupt vorgelesen werden kann. Der Router fragt das, bevor er den
-#: Sprachmodus anbietet — dieselbe Antwort wie bei einem fehlenden Zugang.
+#: Ob überhaupt vorgelesen werden kann. Der Router fragt das über `ai_tts`,
+#: bevor er den Sprachmodus anbietet — dieselbe Antwort wie bei einem fehlenden
+#: Zugang.
 STIMME_MOEGLICH = websockets is not None
+
+#: Warum nicht, falls nicht. Der Satz steht hier und nicht im Router, weil nur
+#: dieses Modul den Grund kennt: es ist der weiche Import oben. Der Betreiber
+#: bekommt ihn im Einstellungsdialog zu sehen und weiss dann, dass er eine
+#: Bibliothek nachinstalliert und keinen Schlüssel sucht.
+UNMOEGLICH_GRUND = "Die WebSocket-Bibliothek fehlt in dieser Installation."
 
 
 # ── Vereinbarungen mit der Gegenstelle ────────────────────────────────────

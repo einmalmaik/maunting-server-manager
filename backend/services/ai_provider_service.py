@@ -261,6 +261,58 @@ def resolve_api_key(db: Session, provider: AiProvider, user_id: int) -> str | No
     return None
 
 
+def katalogschluessel(kind: str) -> str | None:
+    """Ein Betreiberschlüssel, mit dem sich der Modellkatalog dieses Anbieters lesen lässt.
+
+    Eingehängt in `ai_model_catalog.schluesselquelle_setzen` und **nur** dort
+    gerufen. Der Grund für diesen Umweg steht dort ausführlich; kurz: nur die
+    Provider-Einstellungsseite hat den Schlüssel zur Hand, alle übrigen Leser
+    des Katalogs müssten ihn je Anfrage neu entschlüsseln.
+
+    Nach ``kind`` und nicht nach Zugang, weil die Frage keinen Zugang kennt:
+    sie fällt in einer Hintergrundaufgabe, die nur den Anbieter kennt. Genommen
+    wird der erste, der überhaupt eine Antwort verspricht — der mit der
+    kleinsten Kennung, stabil und nachvollziehbar statt geraten.
+
+    Hier stand einmal, das sei auch inhaltlich gleichgültig, weil zwei
+    Betreiberschlüssel dieselbe Liste lieferten. Das gilt für OpenRouters offen
+    liegenden Katalog und **nicht** für einen hinter einem Schlüssel: der
+    antwortet mit dem, was dieses Konto sehen darf. Die Antwort von hier ist
+    deshalb nicht „die Liste des Anbieters", sondern „die Liste *irgendeines*
+    seiner Zugänge" — welcher, hält `ai_model_catalog` am Eintrag fest, und ein
+    Leser mit einem anderen Schlüssel bekommt sie nicht zu sehen.
+
+    Nur **aktivierte** Zugänge. Ein abgeschalteter Anbieter soll nicht im
+    Hintergrund weiter abgefragt werden; abschalten ist auch eine Aussage über
+    ausgehende Verbindungen.
+
+    Öffnet eine **eigene** Datenbanksitzung. Der Aufrufer ist eine
+    Hintergrundaufgabe ohne Anfrage und damit ohne ``Depends(get_db)``, und die
+    Sitzung wird sofort wieder geschlossen: die Funktion läuft in einem Thread
+    des Threadpools, und eine dort hängengebliebene Sitzung gehörte danach
+    niemandem mehr.
+    """
+    from database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        zugang = (
+            db.query(AiProvider)
+            .filter(
+                AiProvider.provider_kind == kind,
+                AiProvider.enabled.is_(True),
+                AiProvider.operator_api_key_encrypted.isnot(None),
+            )
+            .order_by(AiProvider.id)
+            .first()
+        )
+        if zugang is None:
+            return None
+        return resolve_api_key(db, zugang, 0)
+    finally:
+        db.close()
+
+
 def anbieter_ohne_auswahl(db: Session, user: User) -> AiProvider | None:
     """Welcher Anbieter, wenn niemand einen aussucht?
 

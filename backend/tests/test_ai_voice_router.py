@@ -201,7 +201,7 @@ def test_the_test_button_speaks_instead_of_chatting(
     es bei ElevenLabs gar nicht gibt. Der Betreiber haette daraufhin an seiner
     Konfiguration gesucht, an der nichts war.
     """
-    from routers import ai_providers
+    from services import ai_tts_elevenlabs
 
     _, stimme = _beide(db)
     gesprochen: list[str] = []
@@ -209,7 +209,7 @@ def test_the_test_button_speaks_instead_of_chatting(
     async def probe(adresse: str, schluessel: str) -> None:
         gesprochen.append(adresse)
 
-    monkeypatch.setattr(ai_providers.ai_tts_elevenlabs, "pruefen", probe)
+    monkeypatch.setattr(ai_tts_elevenlabs, "pruefen", probe)
 
     antwort = client.post(
         f"/api/ai/settings/providers/{stimme.id}/test",
@@ -239,7 +239,7 @@ def test_the_test_button_says_when_no_voice_is_configured(
     Stimme ausgewaehlt" gemeint ist. Genau die Art Fehlermeldung, die eine
     halbe Stunde Suche an der falschen Stelle kostet.
     """
-    from routers import ai_providers
+    from services import ai_tts_elevenlabs
 
     stimme = _zugang(db, stimme=None)
     gefragt: list[str] = []
@@ -247,7 +247,7 @@ def test_the_test_button_says_when_no_voice_is_configured(
     async def probe(adresse: str, schluessel: str) -> None:
         gefragt.append(adresse)
 
-    monkeypatch.setattr(ai_providers.ai_tts_elevenlabs, "pruefen", probe)
+    monkeypatch.setattr(ai_tts_elevenlabs, "pruefen", probe)
 
     antwort = client.post(
         f"/api/ai/settings/providers/{stimme.id}/test",
@@ -264,7 +264,7 @@ def test_a_failed_probe_answers_in_a_code_and_not_in_the_providers_words(
     client: TestClient, owner_cookies: dict, csrf_token: str, db, monkeypatch
 ) -> None:
     """Der Wortlaut kann Kontingentstaende und Kontonamen tragen."""
-    from routers import ai_providers
+    from services import ai_tts_elevenlabs
 
     _, stimme = _beide(db)
 
@@ -274,7 +274,7 @@ def test_a_failed_probe_answers_in_a_code_and_not_in_the_providers_words(
     async def probe(adresse: str, schluessel: str) -> None:
         raise Abgelehnt("Incorrect API key provided: sk_abc***. Account acct-geheim")
 
-    monkeypatch.setattr(ai_providers.ai_tts_elevenlabs, "pruefen", probe)
+    monkeypatch.setattr(ai_tts_elevenlabs, "pruefen", probe)
 
     antwort = client.post(
         f"/api/ai/settings/providers/{stimme.id}/test",
@@ -364,8 +364,10 @@ def test_without_the_websocket_library_there_is_no_voice_mode(
     (`test_startup_dependencies.py`). Fehlt die Bibliothek, sieht der Benutzer
     dasselbe wie ohne eingerichteten Zugang: nichts.
     """
+    from services import ai_tts_elevenlabs
+
     _beide(db)
-    monkeypatch.setattr(ai_voice.ai_tts_elevenlabs, "STIMME_MOEGLICH", False)
+    monkeypatch.setattr(ai_tts_elevenlabs, "STIMME_MOEGLICH", False)
 
     assert ai_voice.sprachzugang(db, owner_user) is None
 

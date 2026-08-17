@@ -253,3 +253,252 @@ async def test_switching_off_says_so_explicitly(
             pass
 
     assert sent["reasoning"] == {"enabled": False}
+
+
+@pytest.mark.parametrize(
+    ("fehler", "code", "detail"),
+    [
+        (
+            {"code": 402, "message": "Insufficient credits. Add more using https://openrouter.ai/settings/credits"},
+            "AI_PROVIDER_PAYMENT_REQUIRED",
+            "Insufficient credits. Add more using https://openrouter.ai/settings/credits",
+        ),
+        (
+            {"code": 404, "message": "No endpoints found for openai/gpt-5.6-luna."},
+            "AI_PROVIDER_ENDPOINT_NOT_FOUND",
+            "No endpoints found for openai/gpt-5.6-luna.",
+        ),
+        (
+            {"code": 429, "message": "Rate limit exceeded"},
+            "AI_PROVIDER_RATE_LIMITED",
+            "Rate limit exceeded",
+        ),
+        (
+            {"code": "server_error", "message": "Provider disconnected unexpectedly"},
+            "AI_PROVIDER_REQUEST_REJECTED",
+            "Provider disconnected unexpectedly",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_an_error_in_the_middle_of_the_stream_keeps_its_reason(
+    fehler: dict, code: str, detail: str
+) -> None:
+    """Der teuerste blinde Fleck dieser Schicht — er kostete eine Ferndiagnose.
+
+    Sind die Kopfzeilen erst draussen, steht der Status auf `200` und laesst sich
+    nicht mehr aendern. OpenRouter meldet einen Fehler ab da als gewoehnliches
+    `data:`-Ereignis mit `error` auf oberster Ebene, dazu ein `choices`-Eintrag
+    mit leerem Delta und `finish_reason: "error"`, und beendet die Verbindung
+    ohne `[DONE]`.
+
+    MSM las nur `choices`, fand ein leeres Delta, sprang weiter — und meldete am
+    Schleifenende „Die Antwort des Anbieters brach vorzeitig ab". Der einzige
+    Satz, der die Ursache benannt haette, wurde nie gelesen. Im Betrieb sah das
+    aus wie ein kaputtes Panel und war ein leeres Guthaben.
+    """
+    rahmen = {
+        "id": "cmpl-abc123",
+        "object": "chat.completion.chunk",
+        "model": "openai/gpt-4o",
+        "provider": "openai",
+        "error": fehler,
+        "choices": [{"index": 0, "delta": {"content": ""}, "finish_reason": "error"}],
+    }
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text='data: {"choices":[{"delta":{"content":"Hallo"}}]}\n\n'
+            f"data: {json.dumps(rahmen)}\n\n",
+            headers={"content-type": "text/event-stream"},
+        )
+
+    usage = StreamUsage()
+    async with _client(handler) as client:
+        with pytest.raises(AiProviderRequestError) as excinfo:
+            async for _chunk in stream_chat_completion(
+                client, provider=_provider(), api_key=None,
+                messages=[{"role": "user", "content": "ping"}], usage=usage,
+            ):
+                pass
+
+    assert excinfo.value.code == code
+    assert excinfo.value.detail == detail
+
+
+@pytest.mark.asyncio
+async def test_a_bare_error_frame_without_any_choices_is_read_too() -> None:
+    """Ein Fehler vor dem ersten Token bringt manchmal gar kein `choices` mit.
+
+    Die alte Schleife stieg genau hier aus (`choices` fehlt → `continue`) und
+    landete wieder bei „brach vorzeitig ab". Der Rahmen ist trotzdem eindeutig.
+    """
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text='data: {"error":{"code":401,"message":"No auth credentials found"}}\n\n',
+            headers={"content-type": "text/event-stream"},
+        )
+
+    usage = StreamUsage()
+    async with _client(handler) as client:
+        with pytest.raises(AiProviderRequestError) as excinfo:
+            async for _chunk in stream_chat_completion(
+                client, provider=_provider(), api_key=None,
+                messages=[{"role": "user", "content": "ping"}], usage=usage,
+            ):
+                pass
+
+    assert excinfo.value.code == "AI_PROVIDER_AUTH_FAILED"
+    assert excinfo.value.detail == "No auth credentials found"
+
+
+@pytest.mark.asyncio
+async def test_a_provider_message_in_the_stream_is_redacted_like_any_other() -> None:
+    """Auch mitten im Strom ist die Anbietermeldung Fremdtext."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text='data: {"error":{"code":401,"message":"key api_key=sk-abcdefghijklmnopqrstuvwxyz012345 '
+            + "x" * 400
+            + '"}}\n\n',
+            headers={"content-type": "text/event-stream"},
+        )
+
+    usage = StreamUsage()
+    async with _client(handler) as client:
+        with pytest.raises(AiProviderRequestError) as excinfo:
+            async for _chunk in stream_chat_completion(
+                client, provider=_provider(), api_key=None,
+                messages=[{"role": "user", "content": "ping"}], usage=usage,
+            ):
+                pass
+
+    detail = excinfo.value.detail or ""
+    assert len(detail) <= 200
+    assert "sk-abcdefghijklmnopqrstuvwxyz012345" not in detail
+
+
+async def _abschicken(kind: str, **wuensche) -> dict:
+    """Eine Anfrage an einen Anbieter stellen und ansehen, was hinausging."""
+    gesendet: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        gesendet.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            text='data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+            headers={"content-type": "text/event-stream"},
+        )
+
+    provider = AiProvider(
+        id=1, name="Zugang", provider_kind=kind, default_model="m",
+        enabled=True, requires_api_key=False,
+    )
+    usage = StreamUsage()
+    async with _client(handler) as client:
+        async for _chunk in stream_chat_completion(
+            client, provider=provider, api_key=None,
+            messages=[{"role": "user", "content": "ping"}], usage=usage,
+            **wuensche,
+        ):
+            pass
+    return gesendet
+
+
+@pytest.mark.parametrize(
+    ("kind", "erwartet"),
+    [("openrouter", True), ("openai", False)],
+)
+@pytest.mark.asyncio
+async def test_only_a_provider_that_knows_the_word_gets_it(
+    kind: str, erwartet: bool
+) -> None:
+    """`reasoning` ist OpenRouters Wortschatz und ging trotzdem an alle hinaus.
+
+    Das hat den OpenAI-Zugang vom ersten Tag an vollstaendig unbrauchbar
+    gemacht — OpenAI antwortet auf ein unbekanntes Argument mit
+    ``400 Unrecognized request argument supplied: reasoning``, und zwar bei
+    **jeder** Anfrage: `{"enabled": false}` ist genauso unbekannt wie `true`.
+    Der Betreiber sah davon nichts, weil eine Schicht tiefer der Grund starb.
+
+    Dasselbe gilt fuer `cache_control` — ebenfalls OpenRouters Erweiterung,
+    ebenfalls ein 400 anderswo.
+    """
+    gesendet = await _abschicken(
+        kind, reasoning=True, reasoning_effort="high", cache_marke=True
+    )
+
+    assert ("reasoning" in gesendet) is erwartet
+    assert ("cache_control" in gesendet) is erwartet
+    # Was alle koennen, geht auch an alle.
+    assert gesendet["model"] == "m"
+    assert gesendet["stream"] is True
+
+
+@pytest.mark.asyncio
+async def test_each_provider_gets_the_wish_in_its_own_dialect() -> None:
+    """Derselbe Wunsch, zwei Formen — und niemals beide in einer Anfrage.
+
+    Bis zum 17.08.2026 bekam OpenAI hier **gar nichts**, mit einer Begruendung,
+    die damals stimmte: `reasoning_effort` an einem nicht denkfaehigen Modell
+    ist wieder ein 400, und OpenAIs Katalog verriet nicht, welche Modelle
+    denkfaehig sind. Genau diese Luecke schliesst `faehigkeiten_aus`
+    (`ai_model_catalog`) — jetzt weiss MSM es, und was es nicht weiss, kommt
+    hier als leere Stufe an und geht weiterhin nicht hinaus.
+
+    Uebersetzt wird dabei nichts: beide Anbieter benutzen denselben Wortschatz
+    fuer die Stufen (``minimal|low|medium|high|xhigh|max``, dazu ``none``), was
+    am 2026-08-17 an OpenAIs `openapi.json` und an OpenRouters Katalog
+    nachgesehen wurde. Eine Uebersetzungstabelle waere eine Liste im Code, die
+    beim ersten neuen Wort eines Anbieters still falsch wird.
+    """
+    an_openai = await _abschicken(
+        "openai", reasoning=True, reasoning_effort="high", cache_marke=True
+    )
+    assert an_openai["reasoning_effort"] == "high"
+    assert "reasoning" not in an_openai
+
+    an_openrouter = await _abschicken(
+        "openrouter", reasoning=True, reasoning_effort="high", cache_marke=True
+    )
+    assert an_openrouter["reasoning"] == {"enabled": True, "effort": "high"}
+    assert "reasoning_effort" not in an_openrouter
+
+
+@pytest.mark.asyncio
+async def test_switching_thinking_off_is_a_level_where_there_is_no_switch() -> None:
+    """Beim Anbieter ohne Schalter ist „aus" das Wort ``none`` — sonst nichts.
+
+    Der Fall ist der teure: `reasoning=False` mit einer leeren Stufe saehe hier
+    aus wie eine sparsame Anfrage und waere das Gegenteil. OpenAI denkt dann in
+    seiner Voreinstellung weiter (bei `gpt-5.5` ``medium``) und rechnet es ab —
+    der Betreiber hat abgeschaltet und bezahlt trotzdem. Welche Modelle das Wort
+    vertragen, entscheidet `ai_reasoning.klemmen` am Katalog; hier zaehlt nur,
+    dass es nicht unterwegs verlorengeht.
+    """
+    an_openai = await _abschicken("openai", reasoning=False, reasoning_effort="none")
+    assert an_openai["reasoning_effort"] == "none"
+
+    # OpenRouter sagt dasselbe mit seinem Schalter. Die Stufe daneben waere dort
+    # eine zweite, widersprechende Angabe — welche gewinnt, entschiede dann der
+    # Anbieter und nicht MSM.
+    an_openrouter = await _abschicken(
+        "openrouter", reasoning=False, reasoning_effort="none"
+    )
+    assert an_openrouter["reasoning"] == {"enabled": False}
+
+
+@pytest.mark.asyncio
+async def test_no_known_level_means_no_field_at_all() -> None:
+    """Was MSM nicht weiss, spricht es nicht aus.
+
+    Ein Modell, das der fremde Katalog nicht fuehrt, kommt hier ohne Stufe an.
+    Dann geht bei OpenAI **nichts** hinaus — auch kein ``null``, auf das
+    `CreateChatCompletionRequest` ebenfalls mit einem 400 antwortet.
+    """
+    an_openai = await _abschicken("openai", reasoning=True, reasoning_effort=None)
+    assert "reasoning_effort" not in an_openai

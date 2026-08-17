@@ -46,6 +46,7 @@ import httpx
 
 from database import SessionLocal
 from models import AiProvider, User
+from services import ai_reasoning
 from services.ai_provider_service import (
     anbieter_ohne_auswahl,
     estimate_cost_microunits,
@@ -423,6 +424,13 @@ async def verfassen(
                 follow_redirects=False,
             )
             client = eigener
+        # Ein Mailsatz aus einem festen Schema ist keine Ueberlegung. Bisher
+        # ging dazu nichts hinaus, und „nichts" heisst bei einem Anbieter ohne
+        # Schalter „nimm deine Vorgabe" — jede Betreibermail wurde also mit
+        # Denkschritten bezahlt, die kein Mensch je zu sehen bekam.
+        denken, denkstufe = await ai_reasoning.aus_fuer(
+            client, provider, api_key=api_key
+        )
         try:
             async for _stueck in stream_chat_completion(
                 client,
@@ -430,6 +438,8 @@ async def verfassen(
                 api_key=api_key,
                 messages=messages,
                 usage=usage,
+                reasoning=denken,
+                reasoning_effort=denkstufe,
                 tools=[WERKZEUG],
                 # Der eigentliche Zwang. Ohne diese Zeile waere das Schema eine
                 # Bitte, und ein Modell, das stattdessen einen freundlichen

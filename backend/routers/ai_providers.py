@@ -34,7 +34,7 @@ from services import (
     ai_provider_registry,
     ai_provider_service,
     ai_reasoning,
-    ai_tts_elevenlabs,
+    ai_tts,
     audit_service,
 )
 from services.ai_provider_service import AiProviderConfigurationError
@@ -290,27 +290,27 @@ async def _stimmzugang_pruefen(
     nicht gibt, und der Betreiber läse „nicht erreichbar", wo „keine Stimme
     ausgewählt" gemeint ist.
     """
-    if not ai_tts_elevenlabs.STIMME_MOEGLICH:
+    grund = ai_tts.unmoeglich(provider.provider_kind)
+    if grund is not None:
         return AiProviderTestResponse(
-            ok=False,
-            code="AI_PROVIDER_UNAVAILABLE",
-            detail="Die WebSocket-Bibliothek fehlt in dieser Installation.",
+            ok=False, code="AI_PROVIDER_UNAVAILABLE", detail=grund
         )
     stimme = (provider.default_voice or "").strip()
     if not stimme:
         return AiProviderTestResponse(
             ok=False, code="AI_PROVIDER_VOICE_MISSING", detail=None
         )
-    adresse = ai_tts_elevenlabs.verbindungsadresse(
+    weg = ai_tts.stimmweg(provider.provider_kind)
+    adresse = weg.verbindungsadresse(
         ai_provider_service.base_url(provider), stimme, provider.default_model
     )
     try:
-        await ai_tts_elevenlabs.pruefen(adresse, api_key)
+        await weg.pruefen(adresse, api_key)
     except Exception as fehler:
         # Der Wortlaut des Anbieters bleibt im Protokoll. Nach aussen geht der
         # Code — er sagt dem Betreiber, was zu tun ist, ohne Kontonamen und
         # Kontingentstände mitzuschicken.
-        code = ai_tts_elevenlabs.probe_fehlercode(fehler)
+        code = weg.probe_fehlercode(fehler)
         logger.info(
             "Stimmprobe fehlgeschlagen provider=%s code=%s error=%s",
             provider.id, code, type(fehler).__name__,
