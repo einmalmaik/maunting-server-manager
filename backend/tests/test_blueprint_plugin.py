@@ -264,6 +264,31 @@ def test_native_enshrouded_builds_wine_command_with_query_port_runtime() -> None
     }
 
 
+def test_native_ark_ascended_starts_under_virtual_display() -> None:
+    """ASA baut seit dem Genesis-Build v91 beim Start ein Fenster und DirectX 12 auf.
+
+    Headless unter Proton gibt es weder Display noch GPU. Der Server stirbt dann
+    sofort mit ``System.PlatformNotSupportedException`` und lässt ein halb
+    angelegtes Proton-Prefix zurück — der nächste Start scheitert schon im
+    Proton-Wrapper. Drei Dinge zusammen halten ihn am Leben: ein virtuelles
+    Display (``xvfb-run``), Direct3D über OpenGL statt Vulkan
+    (``PROTON_USE_WINED3D``) und der Rückfall auf DX11 (``-server -dx11``).
+    Fehlt eines davon, startet kein ASA-Server mehr.
+    """
+    native_dir = Path(__file__).resolve().parents[1] / "blueprints" / "native"
+    blueprint = load_blueprint_file(native_dir / "ark_ascended.blueprint.json")
+    plugin = BlueprintPlugin(blueprint)
+    server = _FakeServer(game_port=7777, rcon_port=37015)
+
+    with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+        argv = plugin.build_container_command(server)
+
+    assert argv[:4] == ["xvfb-run", "-a", "proton", "run"]
+    assert "-server" in argv
+    assert "-dx11" in argv
+    assert plugin.build_container_env(server)["PROTON_USE_WINED3D"] == "1"
+
+
 def test_native_enshrouded_prepares_query_port_and_runtime_directories(tmp_path) -> None:
     native_dir = Path(__file__).resolve().parents[1] / "blueprints" / "native"
     blueprint = load_blueprint_file(native_dir / "enshrouded.blueprint.json")
