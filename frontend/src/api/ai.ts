@@ -824,7 +824,8 @@ export const aiApi = {
    * Ob gesprochen werden kann. Braucht nur `ai.voice.use` — die Antwort nennt
    * keinen Schlüssel und keinen Zugang, nur die Modellkennung.
    */
-  getVoiceConfig: () => api<AiVoiceConfig>('/ai/voice/config'),
+  getVoiceConfig: (providerId?: number | null) =>
+    api<AiVoiceConfig>(providerId ? `/ai/voice/config?provider_id=${providerId}` : '/ai/voice/config'),
   /**
    * Der eigene Verbrauch. Ohne Sonderrecht — wer von der KI wegen des
    * Kontingents abgewiesen wird, muss nachsehen können, woran es lag.
