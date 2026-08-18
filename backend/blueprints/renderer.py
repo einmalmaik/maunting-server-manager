@@ -111,6 +111,7 @@ def render_argv(
     install_dir: str,
     ports: Mapping[str, int | None],
     bind_ip: str | None = None,
+    server_name: str | None = None,
     active_mod_ids: list[str] | None = None,
     extra_env: Mapping[str, str] | None = None,
     host_install_dir: str | None = None,
@@ -154,6 +155,8 @@ def render_argv(
                 value = mod_arg
             elif token == "BIND_IP":
                 value = bind_ip or ""
+            elif token == "SERVER_NAME":
+                value = server_name or ""
             elif token in ports_map:
                 value = ports_map[token]
             elif token.startswith("ENV."):

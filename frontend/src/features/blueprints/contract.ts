@@ -392,6 +392,7 @@ export function validateBlueprintDraft(draft: BlueprintDraft): BlueprintValidati
 export function normalizeBlueprintDraft(draft: BlueprintDraft): BlueprintDraft {
   const clean = structuredClone(draft)
   const normalizeLines = (values: string[]) => values.map(value => value.trim()).filter(Boolean)
+  clean.meta.id = clean.meta.id.trim().toLowerCase().replace(/ +/g, '_')
   clean.runtime.ensureDirs = normalizeLines(clean.runtime.ensureDirs)
   clean.runtime.requiredFiles = normalizeLines(clean.runtime.requiredFiles)
   clean.runtime.seedFiles = (clean.runtime.seedFiles ?? [])

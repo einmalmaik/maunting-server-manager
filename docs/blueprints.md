@@ -315,6 +315,7 @@ Erlaubte Platzhalter:
 - `{CUSTOM_PORT_1}`, `{CUSTOM_PORT_2}`, ... `{CUSTOM_PORT_<N>}` (für zusätzliche custom Ports in Blueprints)
 - `{INSTALL_DIR}`
 - `{MOD_ARG}`
+- `{SERVER_NAME}` für den individuellen Namen des MSM-Servers
 - `{ENV.<KEY>}` für eigene Werte aus `runtime.env`, z. B. `{ENV.SERVER_NAME}`
 
 `runtime.env`-Werte dürfen nur Port-Platzhalter nutzen:

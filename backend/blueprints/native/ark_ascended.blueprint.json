@@ -13,11 +13,10 @@
     "user": "1000:1000",
     "env": {
       "WINEPREFIX": "/home/container/.umu-prefix-2430930",
-      "SERVER_NAME": "My-ASA-Server-by-MSM",
       "MAX_PLAYERS": "70",
       "MAP_NAME": "TheIsland_WP"
     },
-    "startup": "xvfb-run -a /opt/umu-launcher/umu-run ./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?MaxPlayers={ENV.MAX_PLAYERS}?SessionName=\"{ENV.SERVER_NAME}\"?Port={GAME_PORT}?QueryPort={QUERY_PORT}?RCONPort={RCON_PORT}?RCONEnabled=True -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -oldconsole -servergamelog -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RCONPort={RCON_PORT} -RCONEnabled=True -NoBattlEye -crossplay -server -game -log {MOD_ARG}",
+    "startup": "xvfb-run -a /opt/umu-launcher/umu-run ./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?MaxPlayers={ENV.MAX_PLAYERS}?SessionName=\"{SERVER_NAME}\"?Port={GAME_PORT}?QueryPort={QUERY_PORT}?RCONPort={RCON_PORT}?RCONEnabled=True -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -oldconsole -servergamelog -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RCONPort={RCON_PORT} -RCONEnabled=True -NoBattlEye -crossplay -server -game -log {MOD_ARG}",
     "ensureDirs": [
       ".local/share/umu",
       "ShooterGame/Saved/Config/WindowsServer",

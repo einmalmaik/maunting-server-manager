@@ -480,6 +480,7 @@ class BlueprintPlugin(GamePlugin):
             install_dir=self._runtime_data_dir(),
             ports=self._server_ports(server),
             bind_ip=server.public_bind_ip or None,
+            server_name=server.name,
             active_mod_ids=active_mod_ids(server),
             extra_env=self._blueprint.runtime.env,
             host_install_dir=server.install_dir,

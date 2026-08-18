@@ -1069,7 +1069,7 @@
       "body": "Alle Felder werden beim Upload streng gegen das Pydantic-Schema des Backends validiert.",
       "yes": "Ja",
       "no": "Nein",
-      "metaId": "Eindeutiger Identifier (a-z, 0-9, _). Darf nicht mit nativen Blueprints kollidieren.",
+      "metaId": "Eindeutige technische ID. Grossbuchstaben und Leerzeichen werden beim Speichern automatisch zu Kleinbuchstaben und Unterstrichen normalisiert. Darf nicht mit nativen Blueprints kollidieren.",
       "metaName": "Anzeigename in der UI.",
       "metaCategory": "steam_game, non_steam_game, voice_server, bot.",
       "metaAuthor": "Ersteller der Blueprint.",
@@ -1077,7 +1077,7 @@
       "runtimeImage": "Gültiges Docker-Image (z.B. ubuntu:24.04).",
       "runtimeWorkdir": "Arbeitsverzeichnis im Container.",
       "runtimeEnv": "Umgebungsvariablen als Key-Value-Dict. Werte dürfen Port-Platzhalter enthalten: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Kein {INSTALL_DIR} oder {ENV.<KEY>} in env-Werten.",
-      "runtimeStartup": "Startbefehl (wird als argv übergeben, KEINE Shell). Gültige Platzhalter: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. Zusätzlich {ENV.<KEY>} für eigene Env-Variablen (z. B. {ENV.SERVER_NAME}). Verbotene Zeichen: $, Backtick.",
+      "runtimeStartup": "Startbefehl (wird als argv übergeben, KEINE Shell). Gültige Platzhalter: {SERVER_NAME}, {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. {SERVER_NAME} übernimmt den individuellen Namen des MSM-Servers. Zusätzlich {ENV.<KEY>} für eigene Env-Variablen. Verbotene Zeichen: $, Backtick.",
       "runtimeEnsureDirs": "Relative Ordner, die vor jedem Start im Server-Verzeichnis angelegt werden. Geeignet für Profile-, Log-, Cache- oder Runtime-Ordner, die der Startbefehl erwartet.",
       "runtimeConfigPatches": "Liste von Konfigurations-Patches, die vor dem Start angewendet werden. Jeder Patch muss type, file und value enthalten (sowie section/key für 'ini' oder regex für 'regex').",
       "runtimeEnableExec": "Exec-Tab aktivieren. Default: false. Self-Hosted, aber Befehle laufen NUR im MSM-verwalteten Container dieses Servers, NIEMALS auf dem Host oder in fremden Containern.",
@@ -3886,7 +3886,7 @@
       }
     },
     "validation": {
-      "metaId": "1–64 Kleinbuchstaben, Ziffern oder Unterstriche verwenden.",
+      "metaId": "1–64 Buchstaben, Ziffern, Leerzeichen oder Unterstriche verwenden; der technische Slug wird automatisch normalisiert.",
       "metaName": "Einen Namen mit maximal 128 Zeichen angeben.",
       "image": "Einen gültigen Docker-Image-Namen angeben.",
       "startup": "Einen Startbefehl mit maximal 2048 Zeichen angeben.",

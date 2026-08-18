@@ -177,6 +177,7 @@ _ALLOWED_STARTUP_TOKENS: frozenset[str] = frozenset({
     "INSTALL_DIR",
     "MOD_ARG",
     "BIND_IP",
+    "SERVER_NAME",
 })
 
 # Tokens, die in ``runtime.env``-Werten substituiert werden duerfen.
@@ -289,15 +290,22 @@ class BlueprintMeta(BaseModel):
     author: str | None = Field(default=None, max_length=128)
     description: str | None = Field(default=None, max_length=1024)
 
-    @field_validator("id")
+    @field_validator("id", mode="before")
     @classmethod
-    def _check_id(cls, v: str) -> str:
-        if not _ID_RE.match(v):
+    def _check_id(cls, v: object) -> object:
+        if not isinstance(v, str):
+            return v
+        # Der sichtbare Name bleibt in ``meta.name``. Fuer Uploads darf die ID
+        # trotzdem wie ein Name eingegeben werden; intern wird sie auf den
+        # weiterhin pfad- und registry-sicheren Slug reduziert.
+        normalized = re.sub(r" +", "_", v.strip().lower())
+        if not _ID_RE.fullmatch(normalized):
             raise ValueError(
-                "meta.id muss aus Kleinbuchstaben, Ziffern oder Unterstrich bestehen "
-                "(Regex ^[a-z0-9_]{1,64}$)."
+                "meta.id darf Buchstaben, Ziffern, Leerzeichen oder Unterstriche "
+                "enthalten; Leerzeichen und Grossbuchstaben werden automatisch "
+                "normalisiert."
             )
-        return v
+        return normalized
 
 
 class BlueprintRuntime(BaseModel):
@@ -1560,7 +1568,7 @@ BlueprintRuntime.model_rebuild()
 COMMENTED_TEMPLATE_DE: str = """{
   "version": 1,
   "meta": {
-    // Eindeutige ID (nur Kleinbuchstaben, Zahlen, Unterstrich). MSM leitet den gespeicherten Dateinamen daraus ab.
+    // Eindeutige ID. Grossbuchstaben und Leerzeichen werden zu Kleinbuchstaben und Unterstrichen normalisiert.
     "id": "my_custom_server",
     // Name, der in der UI (z.B. im Dropdown) angezeigt wird.
     "name": "Mein Eigener Server",
@@ -1705,7 +1713,7 @@ COMMENTED_TEMPLATE_DE: str = """{
 COMMENTED_TEMPLATE_EN: str = """{
   "version": 1,
   "meta": {
-    // Unique ID (lowercase letters, numbers, underscores only). MSM derives the stored filename from this ID.
+    // Unique ID. Uppercase letters and spaces are normalized to lowercase letters and underscores.
     "id": "my_custom_server",
     // Name displayed in the UI (e.g., in the server creation dropdown).
     "name": "My Custom Server",
