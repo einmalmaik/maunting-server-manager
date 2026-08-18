@@ -406,6 +406,26 @@ async def zustellung_anstossen(db: Session, *, user: User, ruhe_noetig: bool = T
 OHNE_MELDUNG = (
     "superseded", "answered", "worker_cancel", "berechtigung_entzogen",
     "process_restart",
+    # `cancelled` setzt der Stream, wenn die asyncio-Aufgabe eines Laufs
+    # angehalten wird (`ai_stream_service`, `except asyncio.CancelledError`).
+    # Das passiert bei jedem Abloesen: `aufgabe_abbrechen` markiert die Zeile
+    # als `superseded` und haelt gleich darauf die Aufgabe an — der Abschluss
+    # im Stream ueberschreibt den Grund dann mit `cancelled`.
+    #
+    # Gemeldet am 18.08.2026: der Betreiber reichte einem laufenden Auftrag
+    # Werte nach, alles lief sauber durch, und trotzdem sagte ihm die KI
+    # "Der Auftrag zur ASA-Konfiguration wurde abgebrochen und hat keine
+    # Zusammenfassung hinterlassen." Der Bestand zeigte, warum:
+    #
+    #   cancelled/cancelled  MELDET   <- die Falschmeldung
+    #   completed/done       MELDET   <- das echte Ergebnis
+    #
+    # Die erste Meldung war die abgeloeste Runde, die zweite ihr Nachfolger.
+    # Das Gehirn hat beide korrekt wiedergegeben — es bekam nur eine Meldung
+    # zu viel. Ein angehaltener Lauf hat nichts zu berichten: entweder loest
+    # ihn ein Nachfolger ab, der selbst meldet, oder der Mensch hat ihn
+    # abgebrochen und weiss es bereits.
+    "cancelled",
 )
 
 

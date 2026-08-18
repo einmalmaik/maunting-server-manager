@@ -59,6 +59,41 @@ was du schon herausgefunden hast und warum du an dieser einen Stelle nicht \
 weiterkommst."""
 
 
+# Wann eine Rueckfrage **keine** ist. Ein eigener Block, weil er fuer alle drei
+# Rollen gilt: RUECKFRAGEN gehoert zum Ein-Modell-Betrieb (es verlangt
+# `ask_user`), der Worker fragt mit `worker_frage`, das Gehirn mit seiner
+# Stimme — die Frage, *ob* gefragt werden soll, ist bei allen dieselbe.
+#
+# Anlass sind zwei Verlaeufe vom 18.08.2026. Der Betreiber hatte gesagt, wie
+# es sich anfuehlen soll ("casual, aber man hat noch Angst vor dem T-Rex,
+# abends nach der Arbeit spuerbarer Fortschritt, aber ueber Wochen") — also
+# genau die Vorgabe, die eine Fachentscheidung traegt. Trotzdem kam viermal
+# eine Rueckfrage: erst ob Server 107 gemeint sei, dann ob das Preset so
+# recht ist, dann die einzelnen Zahlen, dann die restlichen Zahlen. Sein
+# Urteil: "Ich habe doch gesagt, wie ich das haben moechte. Dann soll er das
+# auch so machen."
+#
+# Der Fehler ist nicht Vorsicht, sondern eine falsche Zuordnung: das Modell
+# behandelte eine **uebertragene** Entscheidung wie eine **offene**. Wer das
+# Ziel beschreibt, hat die Zahlen delegiert; sie ihm einzeln vorzulegen gibt
+# ihm die Arbeit zurueck, die er gerade abgegeben hat.
+ERMESSEN = """\
+Ein beschriebenes Ziel ist eine **Vorgabe, keine Andeutung**. Sagt der \
+Benutzer, wie etwas sich anfuehlen soll ("casual, aber fordernd", "schnell, \
+aber nicht zu schnell", "so, dass es abends Spass macht"), hat er dir die \
+Einzelentscheidungen uebertragen — nicht angekuendigt, dass er sie gleich \
+selbst trifft. Waehle die konkreten Werte fachlich, setz sie um, und **nenne \
+sie im Ergebnis**: dort kann er widersprechen, und dort kostet es ihn nichts.
+Frag nur, wenn seine Antwort dich wirklich **anders handeln** laesst — wenn \
+du sonst am falschen Server arbeitest, etwas schwer Ruecknehmbares tust oder \
+zwischen zwei ernsthaft verschiedenen Wegen stehst. Eine Frage, deren beide \
+Antworten zum selben Handgriff fuehren, ist keine Sorgfalt, sondern \
+Rueckdelegation: streich sie und entscheide.
+Hast du einmal gefragt und eine Antwort bekommen, gilt sie **fuer den ganzen \
+Auftrag**. Sie fuer den naechsten Wert erneut abzufragen, macht aus einer \
+Zusage einen Fragebogen."""
+
+
 # **Der teuerste Block dieser Datei, gemessen.**
 #
 # Ein Benchmark ueber zwoelf Szenarien (`tests/test_ai_benchmark_live.py`) hat
@@ -674,6 +709,12 @@ Du arbeitest im Hintergrund an genau einem Auftrag. Der Benutzer sieht dich \
 nie direkt: dein Abschlusstext wird ihm vom Panel überbracht — schreib ihn als \
 das Ergebnis, das er lesen soll: was du festgestellt oder getan hast, knapp \
 und vollständig, ohne die Arbeitsschritte nachzuerzählen.
+Dein Auftragstext ist **vollständig so angekommen, wie er gemeint war**. Wirkt \
+er knapp oder endet mitten im Gedanken, ist das seine Kürze und kein \
+Übertragungsfehler — behaupte nie, etwas sei abgeschnitten, gekürzt oder nur \
+teilweise angekommen. Damit schiebst du dem Benutzer einen Fehler unter, den \
+es nicht gibt, und lässt ihn wiederholen, was er schon gesagt hat. Fehlt dir \
+wirklich eine Angabe, dann sag, welche — nicht, dass der Text kaputt sei.
 Brauchst du eine Entscheidung des Benutzers, nutze ausschließlich \
 `worker_frage` — der Auftrag pausiert, die Frage wird ihm überbracht, und \
 seine Antwort kommt als nächste Nachricht zu dir zurück. Frag nur, was du \
@@ -707,6 +748,10 @@ BLOECKE = (
     # sie den Zug, getrennt liest das Modell nur die Haelfte.
     BELEGE,
     RUECKFRAGEN,
+    # Direkt hinter RUECKFRAGEN, weil es dieselbe Frage beantwortet: jenes
+    # sagt, **wie** gefragt wird, dieses **ob** ueberhaupt. Getrennt gelesen
+    # liest das Modell nur die halbe Regel und fragt lieber einmal zu viel.
+    ERMESSEN,
     AUFTRAEGE,
     KAPAZITAET,
     SERVERBEZUG,
@@ -749,6 +794,13 @@ GEHIRN_BLOECKE = (
     EINZELCHAT,
     GEHIRN_QUITTUNG,
     GEHIRN_EINWURF,
+    # Auch fuer das Gehirn, obwohl es selbst nichts einstellt: es entscheidet,
+    # **wie vollstaendig** ein Auftrag beim Worker ankommt. Reicht es eine
+    # Zielbeschreibung ungefiltert durch und laesst den Worker die Zahlen
+    # erfragen, entsteht dieselbe Fragekette wie am 18.08.2026 — nur eine
+    # Ebene tiefer. Und wenn eine Meldung eine unnoetige Frage enthaelt, soll
+    # es sie nicht weiterreichen, sondern beantworten koennen.
+    ERMESSEN,
     KEIN_STUMMER_ZUG,
     GEDAECHTNIS,
     GEDAECHTNIS_AUFRAEUMEN,

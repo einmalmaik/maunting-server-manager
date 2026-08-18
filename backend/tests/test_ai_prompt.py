@@ -335,3 +335,94 @@ def test_the_ordinary_chat_is_untouched() -> None:
 
     assert ai_prompt.MITREDEN in voll
     assert ai_prompt.GEHIRN_QUITTUNG not in voll
+
+
+# ── Wann eine Rueckfrage keine ist ────────────────────────────────────
+#
+# Gemeldet am 18.08.2026 anhand zweier Verlaeufe. Der Betreiber hatte gesagt,
+# wie es sich anfuehlen soll ("casual, aber man hat noch Angst vor dem T-Rex,
+# abends nach der Arbeit spuerbarer Fortschritt, aber ueber Wochen") und
+# bekam vier Rueckfragen: welcher Server, ob das Preset recht ist, die
+# einzelnen Zahlen, die restlichen Zahlen. Sein Urteil: "Ich habe doch gesagt,
+# wie ich das haben moechte. Dann soll er das auch so machen."
+
+
+def test_every_role_knows_when_not_to_ask() -> None:
+    """`ERMESSEN` gilt fuer alle drei Rollen — die Frage ist ueberall dieselbe.
+
+    `RUECKFRAGEN` gehoert zum Ein-Modell-Betrieb (es verlangt `ask_user`), der
+    Worker fragt mit `worker_frage`, das Gehirn mit seiner Stimme. **Wie**
+    gefragt wird, ist je Rolle verschieden; **ob** gefragt werden soll, nicht.
+    Stuende die Regel nur an einer Stelle, faende die Fragekette den Weg ueber
+    die anderen beiden.
+    """
+    for rolle in ("voll", "gehirn", "worker"):
+        prompt = ai_prompt.build(rolle=rolle) if rolle != "voll" else ai_prompt.build()
+        assert "Vorgabe, keine Andeutung" in prompt, (
+            f"Rolle {rolle!r} kennt die Ermessensregel nicht"
+        )
+
+
+def test_a_described_goal_counts_as_an_instruction() -> None:
+    """Wer das Ziel beschreibt, hat die Einzelwerte uebertragen.
+
+    Der Fehler war keine Vorsicht, sondern eine falsche Zuordnung: das Modell
+    behandelte eine **uebertragene** Entscheidung wie eine **offene**.
+    """
+    assert "Einzelentscheidungen uebertragen" in ai_prompt.ERMESSEN
+    # Und der Ausweg, der keine Rueckfrage ist: entscheiden und die Werte im
+    # Ergebnis nennen. Dort kann der Betreiber widersprechen, ohne dass es ihn
+    # eine Gespraechsrunde kostet.
+    assert "im Ergebnis" in ai_prompt.ERMESSEN
+    assert "Waehle die konkreten Werte" in ai_prompt.ERMESSEN
+
+
+def test_a_question_with_one_outcome_is_not_a_question() -> None:
+    """Die Pruefregel: aendert die Antwort das Handeln?
+
+    Ohne dieses Kriterium bleibt "frag nur im Zweifel" Auslegungssache — und
+    im Zweifel fragt ein Modell lieber einmal mehr.
+    """
+    assert "anders handeln" in ai_prompt.ERMESSEN
+    assert "Rueckdelegation" in ai_prompt.ERMESSEN
+
+
+def test_an_answer_holds_for_the_whole_job() -> None:
+    """Einmal gefragt, einmal beantwortet — nicht pro Wert erneut.
+
+    Im gemeldeten Verlauf kam nach jeder Freigabe die naechste Frage. Aus
+    einer Zusage wurde ein Fragebogen.
+    """
+    assert "fuer den ganzen" in ai_prompt.ERMESSEN
+    assert "Fragebogen" in ai_prompt.ERMESSEN
+
+
+def test_the_worker_never_blames_a_truncated_order() -> None:
+    """Der Auftragstext ist vollstaendig — der Worker soll das wissen.
+
+    Im gemeldeten Verlauf behauptete der Worker dreimal, die Nachricht sei
+    "nur gekuerzt angekommen" oder breche "bei Dino-Futterverbra..." ab, und
+    verlangte deshalb die Werte erneut. Nachgemessen: der laengste
+    Auftragstext hatte 1127 Zeichen bei einer Grenze von 2000 — abgeschnitten
+    wurde nichts.
+
+    Die Behauptung schiebt dem Betreiber einen Fehler unter, den es nicht
+    gibt, und laesst ihn wiederholen, was er schon gesagt hat.
+    """
+    worker = ai_prompt.build(rolle="worker")
+
+    assert "vollständig so angekommen" in worker
+    assert "abgeschnitten, gekürzt" in worker
+    # Und der erlaubte Weg: sagen, **welche** Angabe fehlt.
+    assert "sag, welche" in worker
+
+
+def test_only_the_worker_gets_the_truncation_rule() -> None:
+    """Gehirn und Ein-Modell-Betrieb brauchen sie nicht.
+
+    Nur der Worker bekommt einen Auftragstext gereicht. Die Regel in jeden
+    Prompt zu haengen, waere Text ohne Anlass — und jeder Block kostet in
+    **jeder** Anfrage Tokens.
+    """
+    assert "abgeschnitten, gekürzt" not in ai_prompt.build()
+    assert "abgeschnitten, gekürzt" not in ai_prompt.build(rolle="gehirn")

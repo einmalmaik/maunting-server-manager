@@ -499,6 +499,61 @@ def test_abgeloeste_und_eingefangene_laeufe_melden_nichts(db: Session) -> None:
     assert db.query(AiMeldung).count() == 0
 
 
+def test_eine_angehaltene_runde_meldet_keinen_abbruch(db: Session) -> None:
+    """Der gemeldete Fall: nachgereichte Werte, sauberer Lauf, Abbruchmeldung.
+
+    Der Betreiber reichte einem laufenden Auftrag Werte nach. Alles lief
+    durch — und trotzdem sagte ihm die KI:
+
+        "Der Auftrag zur ASA-Konfiguration wurde abgebrochen und hat keine
+        Zusammenfassung hinterlassen."
+
+    Der Bestand zeigte, warum. Beim Abloesen markiert `aufgabe_abbrechen` die
+    Zeile als `superseded` und haelt gleich darauf die asyncio-Aufgabe an; der
+    Abschluss im Stream ueberschreibt den Grund dann mit `cancelled`. Und
+    `cancelled` stand nicht in der stillen Liste:
+
+        cancelled/cancelled  MELDET   <- die Falschmeldung
+        completed/done       MELDET   <- das echte Ergebnis
+
+    Das Gehirn hat beide Meldungen korrekt wiedergegeben. Es bekam nur eine
+    zu viel.
+    """
+    user = _benutzer(db, "angehalten", mit_chat=False)
+    run = _beendeter_worker(db, user, status="cancelled", stop_reason="cancelled")
+
+    ai_meldestelle.lauf_beendet(
+        db, run=run,
+        zustand={"worker": {"conversation_id": run.conversation_id,
+                            "titel": "ASA-XP-und-Ernte konfigurieren",
+                            "kanal": "chat"}},
+    )
+
+    assert db.query(AiMeldung).count() == 0, (
+        "die angehaltene Runde hat gemeldet — genau daraus entstand die "
+        "erfundene Abbruchmeldung an den Betreiber"
+    )
+
+
+def test_ein_echtes_ergebnis_meldet_weiterhin(db: Session) -> None:
+    """Die Gegenprobe: der Nachfolger berichtet ganz normal.
+
+    Ohne sie koennte `OHNE_MELDUNG` unbemerkt so weit wachsen, dass gar nichts
+    mehr beim Benutzer ankommt.
+    """
+    user = _benutzer(db, "berichtet", mit_chat=False)
+    run = _beendeter_worker(db, user, status="completed", stop_reason="done")
+
+    ai_meldestelle.lauf_beendet(
+        db, run=run,
+        zustand={"worker": {"conversation_id": run.conversation_id,
+                            "titel": "ASA-XP-und-Ernte konfigurieren",
+                            "kanal": "chat"}},
+    )
+
+    assert db.query(AiMeldung).count() == 1
+
+
 # ── Schema-Zusagen der neuen Tabelle ──────────────────────────────────────
 
 
