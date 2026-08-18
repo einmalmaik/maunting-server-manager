@@ -158,11 +158,36 @@ MAX_TOOL_ROUNDS = 48
 # endet die Werkzeugnutzung, nicht der Lauf.
 MAX_WRITE_ROUNDS = 24
 
+# Wie lange **ein einzelner** Werkzeugaufruf antworten darf, in Sekunden.
+#
+# Ein Rückhalt, keine Regel. Wer unterwegs ist, meldet sich selbst: der
+# `node_client` wartet 30 s, die Websuche 15 s. Diese Grenze liegt bewusst über
+# beiden — sie soll nie vor der zuständigen Stelle greifen, sondern nur dort,
+# wo es keine gibt: eine SSH-Sitzung ohne Gegenstelle, ein Wiederholungslauf,
+# eine Datenbank unter Sperre.
+#
+# Ohne sie hält ein einziger hängender Aufruf die **ganze** Antwort fest, und
+# zwar bis `MAX_STREAM_SECONDS` (300 s) im Adapter. Gemessen wurde das nicht —
+# im Benchmark liegt die gesamte Werkzeugzeit bei 0,00–0,10 s je Lauf. Es ist
+# der Ausreisser, gegen den hier nichts stand.
+#
+# **Was sie nicht kann:** einen Thread abbrechen. `asyncio.wait_for` bricht das
+# Warten ab, nicht die Arbeit. Der Aufruf läuft im Threadpool weiter und darf
+# zu Ende committen — bei `remember`, `learn_skill` und `forget_memory` ist das
+# eine echte Schreibung, von der das Modell nichts mehr erfährt. Genau deshalb
+# sagt die Meldung an das Modell *nicht* "fehlgeschlagen", sondern "nicht
+# abgewartet, prüfe nach".
+WERKZEUG_ZEITGRENZE = 60.0
+
 # Was diese Runden **nicht** begrenzen — damit sie niemand für eine Schranke
 # hält, die sie nicht ist: Es gibt keine Wanduhr-, keine Token- und keine
 # Kostengrenze **je Lauf**. Ein Lauf darf achtundvierzig Leserunden lang dauern;
 # gezählt wird hier nur, wie oft der Anbieter gefragt wird und wieviel
 # Ergebnistext eine Runde erzeugt.
+#
+# `WERKZEUG_ZEITGRENZE` darüber ist keine Ausnahme davon: sie begrenzt den
+# einzelnen Aufruf, nicht den Lauf. Vierundsechzig hängende Aufrufe kosten
+# weiterhin vierundsechzig mal diese Grenze.
 #
 # Deckel gibt es trotzdem, nur zählen sie etwas anderes. `reserve_ai_usage`
 # (`ai_usage_service`) erzwingt an den beiden Stellen weiter unten die
@@ -798,6 +823,12 @@ async def _tool_followup_messages(
     Antwort wegzunehmen. Die Rechtepruefung hat ihre Arbeit getan: ausgefuehrt
     wurde nichts.
 
+    Und ein **einzelner** hängender Aufruf hält die Antwort nicht mehr fest:
+    `WERKZEUG_ZEITGRENZE` deckelt jeden für sich. Was danach zurückgeht, ist
+    keine Fehlermeldung, sondern eine Aussage über den Zustand — der Aufruf
+    läuft im Threadpool weiter, und was er schreibt, schreibt er. Warum das so
+    formuliert ist und was es nicht leistet, steht bei der Konstanten.
+
     Der dritte Rueckgabewert ist ein **Nachtrag zum Kontext**: das Wissen der
     Anlage, um die es in dieser Runde ging. Vorher konnte es nicht dabei sein —
     beim Anlegen des Laufs war der Server noch nicht bekannt. Ist nichts
@@ -951,9 +982,32 @@ async def _tool_followup_messages(
 
     async def _einer(call):
         async with schloss:
-            wert, fehlgeschlagen = await asyncio.to_thread(
-                _werkzeug_ausfuehren, user_id, call
-            )
+            try:
+                wert, fehlgeschlagen = await asyncio.wait_for(
+                    asyncio.to_thread(_werkzeug_ausfuehren, user_id, call),
+                    timeout=WERKZEUG_ZEITGRENZE,
+                )
+            except TimeoutError:
+                # **Nicht "fehlgeschlagen", sondern "nicht abgewartet".** Der
+                # Unterschied ist der ganze Grund für den Wortlaut: der Thread
+                # läuft weiter und darf zu Ende committen. Ein Modell, dem hier
+                # "fehlgeschlagen" gesagt wird, wiederholt den Aufruf — und
+                # legt bei `remember` einen zweiten Eintrag an oder löscht bei
+                # `forget_memory` etwas, das schon weg ist. Die Formulierung
+                # ist die einzige Stelle, an der diese Doppelung verhindert
+                # wird; eine Sperre dagegen gibt es nicht.
+                #
+                # Die Form ist dieselbe wie beim Rechtefehler oben
+                # (`{"error": …}` plus Grund): so bleiben Anzeige, Protokoll
+                # und Rückgabe an den Anbieter unverändert.
+                grund = (
+                    f"Der Aufruf antwortete nicht innerhalb von "
+                    f"{WERKZEUG_ZEITGRENZE:.0f} Sekunden und wurde nicht "
+                    "weiter abgewartet. Er kann im Hintergrund noch "
+                    "durchlaufen — wiederhole ihn nicht blind, sondern prüfe "
+                    "erst nach, ob er gewirkt hat."
+                )
+                wert, fehlgeschlagen = {"error": grund}, grund
         anzeige = _anzeigeeintrag(call, wert, fehlgeschlagen)
         # **Sofort melden.** Hier stand nichts — die Chips gingen erst raus,
         # nachdem die ganze Runde fertig war (die Schleife im Aufrufer). Bei

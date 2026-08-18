@@ -22,6 +22,7 @@ niemandem auf.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from uuid import uuid4
 
@@ -29,7 +30,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from models import AiConversation, User
-from services import ai_stream_service
+from services import ai_stream_service, node_client
 from services.openai_compatible_adapter import ProviderToolCall
 
 
@@ -162,6 +163,94 @@ async def test_werkzeuge_einer_runde_laufen_nebeneinander(
         f"Vier Aufrufe zu {WERKZEUGDAUER}s brauchten {dauer:.2f}s — sie laufen "
         "nacheinander"
     )
+
+
+@pytest.mark.asyncio
+async def test_ein_haengender_aufruf_haelt_die_runde_nicht_fest(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Einer antwortet nie — die anderen drei kommen trotzdem an.
+
+    Ohne `WERKZEUG_ZEITGRENZE` gab es gegen diesen Fall nichts: der Aufruf
+    hing, `gather` wartete, und die Antwort stand bis `MAX_STREAM_SECONDS`
+    (300 s) im Adapter. Gemessen wurde das nie — im Benchmark ist jedes
+    Werkzeug in Millisekunden fertig, weil dort weder Node noch Docker
+    antworten müssen. Es ist der Ausreisser, und Ausreisser sieht ein Median
+    nicht.
+
+    Geprüft wird gleich dreierlei, weil es dieselbe Sache ist: die Runde endet,
+    jeder Aufruf bekommt seine Antwort, und der abgelaufene bekommt die
+    **richtige**.
+    """
+    monkeypatch.setattr(ai_stream_service, "WERKZEUG_ZEITGRENZE", 0.2)
+    monkeypatch.setattr(
+        ai_stream_service, "_werkzeug_nebenlaeufigkeit", lambda: AUFRUFE
+    )
+    conversation = _unterhaltung(db, regular_user)
+
+    # Ein Ereignis statt eines langen Schlafs: der Thread lässt sich nicht
+    # abbrechen — das ist ja der Punkt —, also muss der Test ihn selbst
+    # freilassen. Sonst hängt am Ende der Suite ein Threadpool, den
+    # `concurrent.futures` beim Beenden brav abwartet.
+    freigabe = threading.Event()
+
+    def _einer_haengt(_user_id: int, call: ProviderToolCall):
+        if call.id == "c0":
+            freigabe.wait(timeout=5)
+        return {"servers": [], "tool": call.name}, None
+
+    monkeypatch.setattr(ai_stream_service, "_werkzeug_ausfuehren", _einer_haengt)
+
+    try:
+        beginn = time.perf_counter()
+        nachrichten, benutzt, _ = await ai_stream_service._tool_followup_messages(
+            user_id=regular_user.id,
+            conversation_id=conversation.id,
+            tool_calls=_aufrufe(AUFRUFE),
+        )
+        dauer = time.perf_counter() - beginn
+    finally:
+        freigabe.set()
+
+    assert dauer < 1.0, (
+        f"Die Runde brauchte {dauer:.2f}s — ein einzelner haengender Aufruf "
+        "haelt weiterhin die ganze Antwort fest"
+    )
+    # Zu jeder `tool_call_id` genau eine Antwort. Fehlt eine, weist der Anbieter
+    # die naechste Anfrage ab — der abgelaufene Aufruf darf also nicht einfach
+    # verschwinden.
+    assert len(nachrichten) == AUFRUFE + 1
+    assert len(benutzt) == AUFRUFE
+    assert benutzt[0].get("failed") is True
+
+    abgelaufen = nachrichten[1]["content"]
+    # **Der Wortlaut ist die Zusage, nicht die Verzierung.** `wait_for` bricht
+    # das Warten ab, nicht den Thread: `remember` darf danach noch committen.
+    # Ein Modell, dem hier "fehlgeschlagen" gesagt wird, wiederholt den Aufruf
+    # und legt den Eintrag ein zweites Mal an. Es gibt gegen diese Doppelung
+    # keine Sperre — nur diesen Satz.
+    assert "nicht weiter abgewartet" in abgelaufen
+    assert "wiederhole ihn nicht blind" in abgelaufen
+    # Und die uebrigen drei haben ihre Daten.
+    for nachricht in nachrichten[2:]:
+        assert "list_my_servers" in nachricht["content"]
+
+
+def test_die_zeitgrenze_liegt_ueber_den_eigenen_fristen() -> None:
+    """Ein Rückhalt darf nie vor der zuständigen Stelle greifen.
+
+    Der `node_client` wartet 30 s auf eine Anlage und meldet sich dann selbst —
+    mit einer Fehlermeldung, die sagt, *was* nicht ging. `WERKZEUG_ZEITGRENZE`
+    weiss das nicht; sie kann nur sagen "hat zu lange gedauert". Läge sie
+    darunter, bekäme das Modell bei jedem langsamen Node die schlechtere von
+    zwei Auskünften, und die genauere käme nie zum Zug.
+
+    Der Test steht hier, weil die Zahl verlockend klein aussieht: wer die
+    Antwortzeit drücken will, dreht zuerst an ihr. Sie ist aber kein
+    Latenzhebel — die gesamte Werkzeugzeit liegt im Benchmark bei
+    0,00–0,10 s je Lauf.
+    """
+    assert ai_stream_service.WERKZEUG_ZEITGRENZE > node_client._DEFAULT_TIMEOUT
 
 
 def test_auf_sqlite_laeuft_genau_einer(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -41,6 +41,47 @@ kostet Millisekunden, waehrend hier Sekunden gesucht werden.
     ist der Rest: Vorbereitung, Werkzeuge, Datenbank, Kompression. Das ist der
     Teil, der uns gehoert.
 
+**Die Phasen: wo die Zeit hingeht, nicht nur dass sie hingeht.**
+
+Die vier Zahlen oben beschreiben das Symptom. Sie sagen nicht, welche
+Aenderung hilft — und zwei davon sind Sammelposten, in denen sich sehr
+verschiedene Ursachen verstecken. ``anbieterzeit`` und ``msm_zeit`` sind
+deshalb zusaetzlich in sieben Stationen zerlegt, die zusammen wieder die
+Gesamtzeit ergeben:
+
+    Anlauf → Ruest → [ Netz → Prefill → Dekod → Zwisch ]* → Nacharb
+
+``Netz`` ist Verbindung und Warteschlange bis zu den Antwortkopfzeilen,
+``Prefill`` das Lesen der Eingabe durch das Modell, ``Dekod`` das Schreiben
+der Antwort, ``Zwisch`` alles zwischen zwei Runden (Werkzeuge, Schwaerzung,
+Datenbank). Die Unterscheidung ist nicht akademisch: eine kleinere Anfrage
+senkt ``Prefill`` und sonst nichts, weniger Runden senken ``Netz`` und
+``Zwisch``, eine kuerzere Antwort senkt ``Dekod``. Wer nur die Summe sieht,
+waehlt den Hebel per Vermutung.
+
+``Prefill`` steht dabei neben ``katalog`` in der Rueckflusszeile: der
+Werkzeugkatalog geht als ``tools`` ueber dieselbe Leitung wie die
+Nachrichten, zaehlt in ``anfrage`` aber nicht mit. Beide Zahlen zusammen
+beantworten die Frage, ob ein geschrumpfter Katalog ueberhaupt Sekunden
+brächte oder nur Tokens spart.
+
+``nb`` schliesslich ist die Werkzeugsumme geteilt durch die belegte
+Wanduhrzeit — **1,0 heisst, es lief nie mehr als ein Werkzeug gleichzeitig**.
+Zusammen mit ``Rd/Wz`` (Runden gegen Werkzeugaufrufe) trennt sie zwei Fehler,
+die sich gleich anfuehlen: ein Dienst, der nebeneinander koennte und es nicht
+tut, gegen ein Modell, das je Runde nur ein Werkzeug bestellt. Beim zweiten
+ist Nebenlaeufigkeit im Ausfuehren wirkungslos.
+
+**``ttfs`` — was der Sprachmodus wartet.** ``ttft_text`` ist die Zahl des
+Chats: dort erscheint jedes Zeichen sofort. Die Stimme braucht einen
+abgeschlossenen Satz, und ``ai_voice_bridge.Belegfilter`` gibt Codebloecke
+gar nicht heraus. ``ttfs`` misst mit **demselben** Filter, wann das erste Wort
+an die Stimme gehen koennte. Nicht gemessen sind die zwei Posten davor und
+danach, die es nur im Sprachmodus gibt: die Stillepause der Spracherkennung
+(``ai_voice_vad.STILLE_SEKUNDEN``, 0,7 s) und der Verbindungsaufbau zur
+Sprachausgabe. Sie stehen hier, damit niemand ``ttfs`` fuer die ganze
+Wartezeit des Sprechers haelt.
+
 **Ein Szenario hat ein Gedächtnis, die übrigen nicht.** Vor jeder Messung wird
 der Verlauf geleert, und das muss so bleiben — sonst misst das zwölfte Szenario
 den Kontext der elf davor mit. Der Preis dafür war, dass **jede** gemessene
@@ -159,6 +200,7 @@ from services import (
     ai_stream_service,
 )
 from services.ai_provider_service import _operator_aad
+from services.ai_voice_bridge import Belegfilter
 from services.dis_client import DisClient
 
 
@@ -301,6 +343,34 @@ async def _waechter(
         letzte = jetzt
 
 
+#: Wann die Kopfzeilen der zuletzt gestellten Anbieteranfrage eintrafen.
+#:
+#: **Warum ein Modulwert und kein Rueckgabewert.** Die Zeit bis zu den
+#: Kopfzeilen entsteht in `httpx`, drei Schichten unter dem gemessenen Code —
+#: `stream_chat_completion` bekommt sie nie zu sehen und kann sie folglich auch
+#: nicht durchreichen. Der Ereignishaken von `httpx` ist die einzige Stelle, an
+#: der dieser Zeitpunkt existiert. Ein Wert je Prozess reicht, weil die Messung
+#: die Szenarien nacheinander faehrt und ein Lauf seine Runden ebenfalls
+#: nacheinander stellt: zwei Anfragen an `/chat/completions` sind hier nie
+#: gleichzeitig offen.
+_KOPFZEIT: dict[str, float] = {}
+
+
+async def _kopfzeit_mitschreiben(response: httpx.Response) -> None:
+    """Haelt fest, wann der Anbieter geantwortet hat — vor dem ersten Zeichen.
+
+    Der Haken laeuft bei `stream=True`, sobald die Kopfzeilen da sind und bevor
+    der Rumpf gelesen wird. Genau dazwischen liegt die Grenze, um die es geht:
+    davor Netz und Warteschlange des Anbieters, danach das Modell.
+
+    Gefiltert auf `/chat/completions`, weil derselbe Client auch den
+    Modellkatalog holt. Ohne den Filter truege die naechste Runde die Kopfzeit
+    eines Katalogabrufs und meldete ein negatives Prefill.
+    """
+    if response.request.url.path.endswith("/chat/completions"):
+        _KOPFZEIT["letzte"] = perf_counter()
+
+
 def _sichtbar_ab(zeitpunkt: float, blockaden: list[tuple[float, float]]) -> float:
     """Wann ein zu ``zeitpunkt`` erzeugtes Ereignis fruehestens beim Browser ist.
 
@@ -384,6 +454,35 @@ class Runde:
     anfrage_zeichen: int = 0
     praefix_zeichen: int | None = None
 
+    #: Der Werkzeugkatalog dieser Anfrage in Zeichen.
+    #:
+    #: Er geht als ``tools`` über dieselbe Leitung wie die Nachrichten, zählt
+    #: aber in ``anfrage_zeichen`` nicht mit (``message_character_count``
+    #: summiert nur ``content``). Ohne diese Zahl fehlt der Anfrage genau der
+    #: Teil, der laut ``local-plans/ai-performance-plan.md`` **94 %** der
+    #: Eingabetokens ausmacht — und eine Anfragegrösse, die ihren grössten
+    #: Posten nicht enthält, führt jede Optimierung in die Irre.
+    katalog_zeichen: int = 0
+
+    #: Wieviele Werkzeugaufrufe diese Runde erzeugt hat.
+    #:
+    #: Die Zahl beantwortet zwei der gestellten Fragen unmittelbar: eine Runde
+    #: mit **einem** Aufruf kann per Konstruktion nicht parallelisiert werden,
+    #: egal wieviel Nebenläufigkeit der Dienst anbietet; und eine lange Kette
+    #: von Runden mit je einem Aufruf ist genau die sequenzielle Planung, nach
+    #: der gefragt wurde.
+    werkzeug_zahl: int = 0
+
+    #: Wann die Antwortkopfzeilen des Anbieters eintrafen.
+    #:
+    #: Trennt die zwei Hälften der Wartezeit bis zum ersten Zeichen, die vorher
+    #: als eine Zahl dastanden: **Netz** (Verbindung, TLS, Warteschlange des
+    #: Anbieters, bis die Kopfzeilen da sind) gegen **Prefill** (das Modell
+    #: liest die Eingabe und hat noch kein Zeichen erzeugt). Nur die zweite
+    #: Hälfte schrumpft, wenn die Anfrage kleiner wird — wer beide zusammen
+    #: misst, optimiert womöglich am falschen Ende.
+    kopf: float | None = None
+
     @property
     def dauer(self) -> float:
         return (self.ende or self.start) - self.start
@@ -393,6 +492,27 @@ class Runde:
         if self.erstes_zeichen is None:
             return None
         return self.erstes_zeichen - self.start
+
+    @property
+    def netz(self) -> float | None:
+        """Anfrage raus bis Kopfzeilen rein."""
+        if self.kopf is None:
+            return None
+        return self.kopf - self.start
+
+    @property
+    def prefill(self) -> float | None:
+        """Kopfzeilen rein bis erstes Zeichen — das Modell liest."""
+        if self.kopf is None or self.erstes_zeichen is None:
+            return None
+        return max(0.0, self.erstes_zeichen - self.kopf)
+
+    @property
+    def dekodier(self) -> float | None:
+        """Erstes Zeichen bis Stromende — das Modell schreibt."""
+        if self.erstes_zeichen is None or self.ende is None:
+            return None
+        return max(0.0, self.ende - self.erstes_zeichen)
 
     @property
     def praefix_anteil(self) -> float | None:
@@ -406,6 +526,15 @@ class Werkzeuglauf:
     name: str
     dauer: float
     art: str = "read"
+
+    #: Anfang und Ende auf der Zeitachse des Laufs, in Sekunden ab Segmentstart.
+    #:
+    #: Die Dauer allein sagt nicht, **ob zwei Werkzeuge gleichzeitig liefen**.
+    #: Drei Aufrufe zu je zwei Sekunden ergeben dieselbe Summe, ob sie
+    #: nacheinander sechs Sekunden brauchten oder nebeneinander zwei. Genau
+    #: dieser Unterschied war gefragt, und er ist nur aus den Fenstern zu lesen.
+    start: float = 0.0
+    ende: float = 0.0
 
 
 @dataclass
@@ -425,10 +554,43 @@ class Messung:
     #: (beide ueber den Modellkatalog, also potenziell HTTP) und `lauf_beginnen`,
     #: das den vollstaendigen Kontext synchron im Request aufbaut.
     anlauf: float = 0.0
+    #: Segmentstart bis zur **ersten** Anbieteranfrage.
+    #:
+    #: Was `segment_ausfuehren` tut, bevor irgendetwas gefragt wird: Sitzung
+    #: aufmachen, Schlüssel beim Beistelldienst holen (HTTP), Modellkatalog
+    #: befragen, Werkzeugkatalog nach Rechten zuschneiden, Kontextbudget
+    #: rechnen. In `msm_zeit` steckte das bisher mit allem anderen in einer
+    #: Zahl — dabei ist es der einzige Posten, den der Benutzer **vor** jedem
+    #: Lebenszeichen wartet, und damit der teuerste.
+    ruestzeit: float = 0.0
+    #: Ende der letzten Anbieterrunde bis Laufende: Aufräumen, Abschnitte
+    #: bauen, Nachricht schreiben, Verbrauch buchen. Der Teil, den niemand
+    #: sieht und der trotzdem zur Gesamtzeit zählt.
+    nacharbeit: float = 0.0
     ttfe: float | None = None            # erstes Ereignis ueberhaupt
     ttft_denken: float | None = None     # erster Denkschritt, sichtbar
     ttft_text: float | None = None       # erstes Antwortzeichen, sichtbar
     ttfw: float | None = None            # erstes Werkzeug im Verlauf, sichtbar
+    #: Wann der **Sprachmodus** das erste Wort an die Stimme geben könnte.
+    #:
+    #: Nicht dasselbe wie ``ttft_text``, und der Unterschied ist der ganze
+    #: Grund für diese Zahl: der Chat zeigt jedes Zeichen sofort, die Stimme
+    #: braucht einen abgeschlossenen Satz. `ai_voice_bridge.Belegfilter` gibt
+    #: erst frei, wenn eine Zeile fertig ist oder ein Satzzeichen mit
+    #: mindestens zehn Zeichen davor kommt — und Codeblöcke gar nicht. Beginnt
+    #: die Antwort mit einem Beleg, hört der Mensch minutenlang nichts,
+    #: während im Chat längst Text steht. Gemessen wird mit **demselben**
+    #: Filter, den die Brücke benutzt; eine nachgebaute Regel wäre eine zweite
+    #: Wahrheit.
+    ttfs: float | None = None
+    #: Wieviel Text durch den Filter lief, bevor das erste Wort sprechbar war.
+    #:
+    #: ``ttfs`` allein sagt „die Stimme wartete", nicht warum. Diese Zahl
+    #: trennt die beiden möglichen Gründe: ein paar Dutzend Zeichen heisst,
+    #: der erste Satz war einfach noch nicht zu Ende geschrieben — mehrere
+    #: hundert heisst, ein Codeblock am Anfang der Antwort hat alles
+    #: verschluckt. Das sind verschiedene Fehler mit verschiedenen Antworten.
+    stummzeichen: int = 0
     stille_max: float = 0.0
 
     loop_block_max: float = 0.0
@@ -469,6 +631,76 @@ class Messung:
     def werkzeugzeit(self) -> float:
         return sum(w.dauer for w in self.werkzeuge)
 
+    # ── Die Anbieterzeit, aufgeteilt ─────────────────────────────────────
+    #
+    # ``anbieterzeit`` war eine Zahl und damit als Befund unbrauchbar: sie
+    # sagt "das Modell war langsam", ohne zu sagen, woran. Diese drei sagen
+    # es. Netz schrumpft nur ueber weniger Runden, Prefill ueber kleinere
+    # Anfragen, Dekodier ueber kuerzere Antworten — drei verschiedene Hebel.
+
+    @property
+    def netzzeit(self) -> float:
+        return sum(r.netz or 0.0 for r in self.runden)
+
+    @property
+    def prefillzeit(self) -> float:
+        return sum(r.prefill or 0.0 for r in self.runden)
+
+    @property
+    def dekodierzeit(self) -> float:
+        return sum(r.dekodier or 0.0 for r in self.runden)
+
+    @property
+    def zwischenzeit(self) -> float:
+        """Die Luecken zwischen den Anbieterrunden.
+
+        Alles, was MSM zwischen zwei Anfragen tut: Werkzeuge ausfuehren,
+        Ergebnisse schwaerzen, in die Datenbank schreiben, Verlauf kuerzen.
+        Zusammen mit ``ruestzeit`` und ``nacharbeit`` ergibt das ``msm_zeit``
+        — nur eben aufgeteilt auf die drei Stellen, an denen sie entsteht.
+        """
+        return sum(
+            max(0.0, spaeter.start - (frueher.ende or frueher.start))
+            for frueher, spaeter in zip(self.runden, self.runden[1:])
+        )
+
+    @property
+    def werkzeug_wand(self) -> float:
+        """Wieviel Wanduhrzeit die Werkzeuge belegt haben, Ueberlappung nur einmal.
+
+        Die Gegenzahl zu ``werkzeugzeit``. Sind beide gleich, lief jedes
+        Werkzeug allein; ist die Wanduhr kleiner, liefen welche nebeneinander.
+        """
+        fenster = sorted(
+            (w.start, w.ende) for w in self.werkzeuge if w.ende > w.start
+        )
+        summe = 0.0
+        offen_ab, offen_bis = None, None
+        for beginn, ende in fenster:
+            if offen_bis is not None and beginn <= offen_bis:
+                offen_bis = max(offen_bis, ende)
+                continue
+            if offen_bis is not None:
+                summe += offen_bis - offen_ab
+            offen_ab, offen_bis = beginn, ende
+        if offen_bis is not None:
+            summe += offen_bis - offen_ab
+        return summe
+
+    @property
+    def nebenlaeufigkeit(self) -> float | None:
+        """Wieviele Werkzeuge im Schnitt gleichzeitig liefen. 1,0 heisst: keines.
+
+        **Die Antwort auf "werden unabhaengige Werkzeuge parallel gerufen?"**
+        — als Zahl statt als Codelektuere. Sie faellt auch dann auf 1,0, wenn
+        der Dienst durchaus nebenlaeufig koennte, das Modell aber je Runde nur
+        ein Werkzeug bestellt: dann liegt der Fehler nicht im Ausfuehren,
+        sondern im Planen, und das ist ein anderer Fix.
+        """
+        if not self.werkzeuge or self.werkzeug_wand <= 0:
+            return None
+        return self.werkzeugzeit / self.werkzeug_wand
+
     def als_dict(self) -> dict:
         return {
             "szenario": self.szenario,
@@ -483,12 +715,32 @@ class Messung:
                 round(self.ttft_text, 3) if self.ttft_text is not None else None
             ),
             "ttfw": round(self.ttfw, 3) if self.ttfw is not None else None,
+            "ttfs": round(self.ttfs, 3) if self.ttfs is not None else None,
+            "stummzeichen": self.stummzeichen,
             "stille_max": round(self.stille_max, 3),
             "loop_block_max": round(self.loop_block_max, 3),
             "loop_block_summe": round(self.loop_block_summe, 3),
             "anbieterzeit": round(self.anbieterzeit, 3),
             "msm_zeit": round(self.msm_zeit, 3),
             "werkzeugzeit": round(self.werkzeugzeit, 3),
+            # Die Gesamtzeit, restlos aufgeteilt. `anlauf` + `ruestzeit` +
+            # `netz` + `prefill` + `dekodier` + `zwischen` + `nacharbeit`
+            # ergibt `anlauf` + `gesamt`; bleibt ein Rest, fehlt eine Phase.
+            "phasen": {
+                "anlauf": round(self.anlauf, 3),
+                "ruestzeit": round(self.ruestzeit, 3),
+                "netz": round(self.netzzeit, 3),
+                "prefill": round(self.prefillzeit, 3),
+                "dekodier": round(self.dekodierzeit, 3),
+                "zwischen": round(self.zwischenzeit, 3),
+                "nacharbeit": round(self.nacharbeit, 3),
+                "werkzeug_summe": round(self.werkzeugzeit, 3),
+                "werkzeug_wand": round(self.werkzeug_wand, 3),
+                "nebenlaeufigkeit": (
+                    round(self.nebenlaeufigkeit, 2)
+                    if self.nebenlaeufigkeit is not None else None
+                ),
+            },
             "runden": len(self.runden),
             # Je Runde und nicht nur als Summe: eine Summe beantwortet nicht,
             # **welche** Runde den Zwischenspeicher traf. Die Summen oben bleiben
@@ -497,11 +749,20 @@ class Messung:
                 {
                     "dauer": round(r.dauer, 3),
                     "ttft": round(r.ttft, 3) if r.ttft is not None else None,
+                    "netz": round(r.netz, 3) if r.netz is not None else None,
+                    "prefill": (
+                        round(r.prefill, 3) if r.prefill is not None else None
+                    ),
+                    "dekodier": (
+                        round(r.dekodier, 3) if r.dekodier is not None else None
+                    ),
                     "prompt_tokens": r.prompt_tokens,
                     "completion_tokens": r.completion_tokens,
                     "cached_tokens": r.cached_tokens,
                     "reasoning_tokens": r.reasoning_tokens,
                     "anfrage_zeichen": r.anfrage_zeichen,
+                    "katalog_zeichen": r.katalog_zeichen,
+                    "werkzeug_zahl": r.werkzeug_zahl,
                     "praefix_zeichen": r.praefix_zeichen,
                     "praefix_anteil": (
                         round(r.praefix_anteil, 4)
@@ -511,7 +772,13 @@ class Messung:
                 for r in self.runden
             ],
             "werkzeuge": [
-                {"name": w.name, "dauer": round(w.dauer, 3), "art": w.art}
+                {
+                    "name": w.name,
+                    "dauer": round(w.dauer, 3),
+                    "art": w.art,
+                    "ab": round(w.start, 3),
+                    "bis": round(w.ende, 3),
+                }
                 for w in self.werkzeuge
             ],
             "status": self.status,
@@ -939,6 +1206,12 @@ async def _messen(
     # Entstehungszeitpunkt und nicht der Empfang.
     echt_veroeffentlichen = ai_run_broker.veroeffentlichen
 
+    # Derselbe Filter, den die Sprachbruecke je Lauf anlegt. Er entscheidet,
+    # wann aus fliessendem Text ein sprechbarer Satz wird — und damit, wann der
+    # Mensch im Sprachmodus das erste Wort hoert.
+    belegfilter = Belegfilter()
+    sprechbar: list[float] = []
+
     def _veroeffentlichen(rid: str, ereignis: str, daten: dict) -> None:
         if rid == run_id:
             ereignisse.append((ereignis, perf_counter()))
@@ -952,7 +1225,17 @@ async def _messen(
             # Der Strom ist ohnehin die ehrlichere Quelle: gefragt ist, wieviel
             # Text der Mensch zu sehen bekam.
             if ereignis == "delta":
-                messung.antwortlaenge += len(str(daten.get("content") or ""))
+                stueck = str(daten.get("content") or "")
+                messung.antwortlaenge += len(stueck)
+                # Denselben Weg wie im Sprachmodus mitlaufen lassen. Der
+                # Filter ist zustandsbehaftet und billig; er kostet hier
+                # nichts ausser dem Aufruf und liefert die einzige Zahl, die
+                # fuer das Gehoer zaehlt.
+                if not sprechbar:
+                    messung.stummzeichen += len(stueck)
+                    gesprochen, _ = belegfilter.fuettern(stueck)
+                    if gesprochen.strip():
+                        sprechbar.append(perf_counter())
             elif ereignis == "reasoning":
                 messung.denklaenge += len(str(daten.get("content") or ""))
         echt_veroeffentlichen(rid, ereignis, daten)
@@ -977,9 +1260,21 @@ async def _messen(
         # kostet nichts und friert die Reihenfolge ein.
         nachrichten = list(kwargs.get("messages") or [])
         runde.anfrage_zeichen = ai_context_service.message_character_count(nachrichten)
+        # Genauso gezaehlt wie in `ai_stream_service._werkzeuge_und_grenze`,
+        # das mit derselben Zeile sein Kontextbudget kuerzt. Zwei Zaehlweisen
+        # fuer dieselbe Groesse waeren zwei Wahrheiten.
+        werkzeugkatalog = kwargs.get("tools") or []
+        runde.katalog_zeichen = (
+            len(json.dumps(werkzeugkatalog, ensure_ascii=False))
+            if werkzeugkatalog else 0
+        )
         if vorige:
             runde.praefix_zeichen = _gemeinsamer_praefix(nachrichten, vorige)
         vorige = nachrichten
+        # Der Haken schreibt gleich hinein; ein Rest der vorigen Runde wuerde
+        # sonst als deren Kopfzeit durchgehen, falls diese hier vor dem ersten
+        # Zeichen stirbt.
+        _KOPFZEIT.pop("letzte", None)
         # Der Verbrauchszähler **dieser** Runde. Der Lauf legt für jede
         # Werkzeugrunde ein frisches `StreamUsage` an und addiert es hinterher
         # in die Laufsumme; wer hier hineinsieht, sieht die Runde allein.
@@ -988,6 +1283,7 @@ async def _messen(
             async for chunk in echt_stream(*args, **kwargs):
                 if runde.erstes_zeichen is None:
                     runde.erstes_zeichen = perf_counter()
+                    runde.kopf = _KOPFZEIT.get("letzte")
                 yield chunk
         finally:
             runde.ende = perf_counter()
@@ -998,6 +1294,10 @@ async def _messen(
                 runde.completion_tokens = int(verbrauch.completion_tokens or 0)
                 runde.cached_tokens = int(verbrauch.cached_tokens or 0)
                 runde.reasoning_tokens = int(verbrauch.reasoning_tokens or 0)
+                # Die Bestellung dieser Runde. `usage.tool_calls` gehoert der
+                # Runde allein — der Lauf legt fuer jede ein frisches
+                # `StreamUsage` an.
+                runde.werkzeug_zahl = len(verbrauch.tool_calls or [])
 
     # Werkzeuge einzeln vermessen. Die Summe gegen die Wanduhr zeigt, ob sie
     # nacheinander oder nebeneinander liefen.
@@ -1013,7 +1313,10 @@ async def _messen(
                 # Synchron und ohne `await` — so verhaelt sich jeder echte
                 # Aufruf an einen Node auch.
                 time.sleep(BENCH_TOOL_DELAY)
-            werkzeuge.append(Werkzeuglauf(name, perf_counter() - start, "read"))
+            ende = perf_counter()
+            werkzeuge.append(
+                Werkzeuglauf(name, ende - start, "read", start=start, ende=ende)
+            )
 
     echt_write = ai_stream_service._persist_write_proposals
 
@@ -1027,13 +1330,24 @@ async def _messen(
                 # Je Aufruf, nicht je Runde: eine Schreibrunde ueber drei Server
                 # legt auch drei Backups an.
                 time.sleep(BENCH_TOOL_DELAY * max(1, len(aufrufe)))
-            dauer = perf_counter() - start
+            ende = perf_counter()
+            dauer = ende - start
             namen = [getattr(c, "name", "?") for c in aufrufe] or ["propose_*"]
             # Die Dauer der ganzen Schreibrunde auf ihre Aufrufe verteilt: sie
             # laufen ohnehin in einer Schleife, und die einzelne Zuordnung
             # brauchte einen Eingriff tiefer im Vorschlagsdienst.
-            for name in namen:
-                werkzeuge.append(Werkzeuglauf(name, dauer / len(namen), "write"))
+            #
+            # Die **Fenster** dagegen werden nicht verteilt, sondern hinter-
+            # einander gelegt: die Schleife im Vorschlagsdienst ist
+            # nachweislich sequenziell, und ein Nebenlaeufigkeitswert von 3,0
+            # aus drei identischen Fenstern waere eine erfundene Zahl.
+            for nummer, name in enumerate(namen):
+                teil = dauer / len(namen)
+                werkzeuge.append(Werkzeuglauf(
+                    name, teil, "write",
+                    start=start + nummer * teil,
+                    ende=start + (nummer + 1) * teil,
+                ))
 
     monkeypatch.setattr(ai_run_broker, "veroeffentlichen", _veroeffentlichen)
     monkeypatch.setattr(ai_stream_service.ai_run_broker, "veroeffentlichen", _veroeffentlichen)
@@ -1066,8 +1380,22 @@ async def _messen(
     # ── Auswertung ───────────────────────────────────────────────────────
 
     messung.runden = runden
+    # Die Werkzeugfenster auf die Zeitachse des Laufs umrechnen. Gesammelt
+    # werden sie als rohe `perf_counter`-Werte, weil `t0` erst nach den
+    # Attrappen feststeht; im Protokoll waeren solche Zahlen unlesbar und
+    # zwischen zwei Messungen nicht vergleichbar.
+    for werkzeug in werkzeuge:
+        werkzeug.start -= t0
+        werkzeug.ende -= t0
     messung.werkzeuge = werkzeuge
     messung.anbieterzeit = sum(r.dauer for r in runden)
+    if runden:
+        # Vor der ersten Anfrage: Sitzung, Schluessel, Modellkatalog,
+        # Werkzeugkatalog, Kontextbudget. Nach der letzten: Abschnitte,
+        # Nachricht, Verbrauch.
+        messung.ruestzeit = max(0.0, runden[0].start - t0)
+        letztes_ende = runden[-1].ende or runden[-1].start
+        messung.nacharbeit = max(0.0, (t0 + messung.gesamt) - letztes_ende)
     # Weitergereicht an die nächste Frage derselben Unterhaltung. Kam dieser
     # Lauf gar nicht bis zu einer Anfrage, steht hier weiter die des Vorgängers
     # — die Kette bricht dann nicht zusätzlich noch an einer leeren Liste.
@@ -1087,6 +1415,18 @@ async def _messen(
     messung.ttft_denken = _seit_start(lambda a: a == "reasoning")
     messung.ttft_text = _seit_start(lambda a: a == "delta")
     messung.ttfw = _seit_start(lambda a: a in {"tool", "proposal", "action"})
+    if sprechbar:
+        messung.ttfs = _sichtbar_ab(sprechbar[0], blockaden) - t0
+    else:
+        # Kein Satzende im Strom heisst nicht „nicht gemessen", sondern
+        # „nicht vor Schluss". Die Bruecke ruft am Laufende `ausklingen()`;
+        # gibt der Filter dort noch Text her, war genau das der frueheste
+        # Moment, in dem die Stimme haette sprechen koennen. Ein Strich in
+        # der Spalte laese die kurzen Antworten als die schnellsten
+        # erscheinen, obwohl sie im Sprachmodus die langsamsten sind.
+        rest, _ = belegfilter.ausklingen()
+        if rest.strip():
+            messung.ttfs = messung.gesamt
 
     # Die Ereignisfolge selbst, zusammengefasst. Zwei Zahlen (`ttft_denken`
     # gegen `ttft_text`) sagen, **ob** der Denktext zu spaet kam; sie sagen
@@ -1214,6 +1554,83 @@ def _tabelle(nach_szenario: dict[str, list[Messung]]) -> str:
     return "\n".join(zeilen)
 
 
+def _phasentabelle(nach_szenario: dict[str, list[Messung]]) -> str:
+    """Die Wartezeit, restlos auf ihre Stationen aufgeteilt.
+
+    Die Tabelle darueber sagt **wie lange**, diese sagt **wo**. Der Unterschied
+    ist der ganze Zweck: eine Gesamtzeit von 30 Sekunden ist kein Befund,
+    solange offen ist, ob sie im Netz, im Modell, in den Werkzeugen oder in
+    unserem eigenen Code entstanden ist — und die vier verlangen vier
+    verschiedene Aenderungen.
+
+    Die Stationen in der Reihenfolge, in der sie durchlaufen werden:
+
+    ``Anlauf``
+        Vor dem Lauf: Denkvorgabe, Kontextfenster, Kontextaufbau. Router.
+    ``Ruest``
+        Segmentstart bis zur ersten Anbieteranfrage: Schluessel, Modellkatalog,
+        Werkzeugkatalog, Budget.
+    ``Netz``
+        Anfrage raus bis Kopfzeilen rein, ueber alle Runden summiert.
+    ``Prefill``
+        Kopfzeilen bis erstes Zeichen: das Modell liest die Eingabe. **Die
+        Zahl, die mit der Anfragegroesse waechst** — und damit die, an der ein
+        geschrumpfter Werkzeugkatalog sichtbar wuerde.
+    ``Dekod``
+        Erstes Zeichen bis Stromende: das Modell schreibt.
+    ``Zwisch``
+        Zwischen zwei Anbieterrunden: Werkzeuge, Schwaerzung, Datenbank.
+    ``Nacharb``
+        Nach der letzten Runde: Abschnitte, Nachricht, Verbrauch.
+
+    ``Wz Sum/Wand`` stellt die Summe der Werkzeugdauern der belegten Wanduhr
+    gegenueber, ``nb`` ist ihr Quotient: **1,0 heisst, es lief nie mehr als
+    eines gleichzeitig**. ``Rd/Wz`` sind Runden und Werkzeugaufrufe — stehen
+    dort 6/6, hat das Modell in jeder Runde genau eines bestellt, und dann ist
+    Nebenlaeufigkeit im Ausfuehren per Konstruktion wirkungslos.
+
+    ``TTFS`` ist der Sprachmodus, ``stumm`` sein Grund: soviele Zeichen liefen
+    durch den Filter, bevor das erste Wort sprechbar war. Steht ``TTFS`` auf
+    ``Gesamt`` und ``stumm`` auf der ganzen Antwortlaenge, gab der Filter
+    waehrend des Stroms nie etwas frei — die Stimme begann erst, als der Lauf
+    schon fertig war.
+    """
+    kopf = (
+        f"{'Szenario':<20} {'Anlauf':>7} {'Ruest':>7} {'Netz':>7} {'Prefill':>7} "
+        f"{'Dekod':>7} {'Zwisch':>7} {'Nacharb':>7} {'Gesamt':>7} "
+        f"{'WzSumme':>7} {'WzWand':>7} {'nb':>5} {'TTFS':>7} {'stumm':>6} "
+        f"{'Rd/Wz':>7}"
+    )
+    zeilen = [kopf, "-" * len(kopf)]
+    for name, messungen in nach_szenario.items():
+        gelungen = [m for m in messungen if m.ok]
+        if not gelungen:
+            continue
+        neben = _median([m.nebenlaeufigkeit for m in gelungen])
+        werkzeugzahl = statistics.median(
+            [sum(r.werkzeug_zahl for r in m.runden) for m in gelungen]
+        )
+        zeilen.append(
+            f"{name:<20}"
+            f" {_z(_median([m.anlauf for m in gelungen]))}"
+            f" {_z(_median([m.ruestzeit for m in gelungen]))}"
+            f" {_z(_median([m.netzzeit for m in gelungen]))}"
+            f" {_z(_median([m.prefillzeit for m in gelungen]))}"
+            f" {_z(_median([m.dekodierzeit for m in gelungen]))}"
+            f" {_z(_median([m.zwischenzeit for m in gelungen]))}"
+            f" {_z(_median([m.nacharbeit for m in gelungen]))}"
+            f" {_z(_median([m.gesamt for m in gelungen]))}"
+            f" {_z(_median([m.werkzeugzeit for m in gelungen]))}"
+            f" {_z(_median([m.werkzeug_wand for m in gelungen]))}"
+            f" {(f'{neben:.1f}' if neben is not None else '-'):>5}"
+            f" {_z(_median([m.ttfs for m in gelungen]))}"
+            f" {statistics.median([m.stummzeichen for m in gelungen]):>6.0f}"
+            f" {statistics.median([len(m.runden) for m in gelungen]):>3.0f}"
+            f"/{werkzeugzahl:<3.0f}"
+        )
+    return "\n".join(zeilen)
+
+
 def _k(zeichen: int) -> str:
     """Tausender kurz — die Tabelle ist eng und ASCII."""
     return f"{zeichen / 1000:.1f}k"
@@ -1265,9 +1682,17 @@ def _rueckfluss(nach_szenario: dict[str, list[Messung]]) -> list[str]:
         reihe = " ".join(
             f"{_k(r.cached_tokens)}/{_k(r.prompt_tokens)}" for r in gelungen[0].runden
         )
+        # Der Werkzeugkatalog daneben, weil er **nicht** in `anfrage` steckt und
+        # trotzdem ueber dieselbe Leitung geht. Ohne ihn liest sich eine Anfrage
+        # von 20.000 Zeichen als klein, waehrend in Wahrheit 65.000 zum Anbieter
+        # gehen und der groessere Teil davon der Katalog ist.
+        katalog = int(_median([float(r.katalog_zeichen) for r in erste]) or 0)
+        gesamtzeichen = int(_median([float(r.anfrage_zeichen) for r in erste]) or 0)
         zeilen.append(
             f"  {name:<20} "
-            f"anfrage={_k(int(_median([float(r.anfrage_zeichen) for r in erste]) or 0)):>7} Z  "
+            f"anfrage={_k(gesamtzeichen):>7} Z  "
+            f"katalog={_k(katalog):>7} Z"
+            f" ({katalog / max(1, katalog + gesamtzeichen) * 100:3.0f}%)  "
             f"{praefix}  Rd cache/prompt Tk: {reihe}"
         )
     return zeilen
@@ -1360,7 +1785,12 @@ async def test_ai_benchmark(
 
     nach_szenario: dict[str, list[Messung]] = {}
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=15.0)) as client:
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(180.0, connect=15.0),
+        # Der einzige Ort, an dem die Zeit bis zu den Antwortkopfzeilen
+        # ueberhaupt existiert — siehe `_kopfzeit_mitschreiben`.
+        event_hooks={"response": [_kopfzeit_mitschreiben]},
+    ) as client:
         # Genau das, was `main.lifespan` beim Start tut. Ohne diese zwei Zeilen
         # misst der Benchmark einen Prozess, den es so nicht gibt: der
         # Modellkatalog haette keinen Hintergrund-Client, wuerde also nie
@@ -1378,13 +1808,29 @@ async def test_ai_benchmark(
         # nicht in den Median eines Szenarios — sonst traegt `chat_trivial` als
         # erstes Szenario dauerhaft Kosten, die keinem Szenario gehoeren.
         aufwaermen = perf_counter()
-        await _messen(
+        erster = await _messen(
             db, user=owner_user, provider=provider,
             szenario=Szenario(name="_aufwaermen", auftrag="Sag Hallo."),
             client=client, monkeypatch=monkeypatch,
         )
         kaltstart = perf_counter() - aufwaermen
         print(f"\n\n  Aufwaermlauf (Kaltstart inkl. Modellkatalog): {kaltstart:.2f}s\n")
+
+        # Ein abgelehnter Schluessel wird nicht besser, wenn man es
+        # sechsunddreissig Mal versucht. Genau das ist aber passiert: der
+        # hinterlegte Schluessel war abgelaufen, und der Durchlauf lief bis zum
+        # Ende durch, um eine Tabelle aus lauter AUSFALL-Zeilen auszugeben —
+        # in denen der eigentliche Grund als eine von zwoelf Fussnoten stand.
+        #
+        # **Nur bei Authentifizierung, nicht bei jedem Fehler.** Ein 503 des
+        # Anbieters heilt sich von selbst und darf keinen zwanzigminuetigen
+        # Durchlauf abbrechen; ein 401 heilt nie.
+        if not erster.ok and "AI_PROVIDER_AUTH_FAILED" in (erster.fehler or ""):
+            pytest.fail(
+                "Der Anbieter lehnt MSM_BENCH_AI_KEY ab (401/403). Der "
+                "Benchmark misst nichts, solange der Schluessel nicht gilt — "
+                "abgebrochen vor dem ersten Szenario."
+            )
 
         for szenario in SZENARIEN:
             if BENCH_NUR and szenario.name not in BENCH_NUR:
@@ -1457,6 +1903,11 @@ async def test_ai_benchmark(
           f"n={BENCH_WIEDERHOLUNGEN} je Szenario (Median)")
     print(linie)
     print(_tabelle(nach_szenario))
+    print(linie)
+
+    # Wo die Zeit hingeht — die Tabelle darueber sagt nur, dass sie hingeht.
+    print("  Phasen je Lauf   (nb = Werkzeuge gleichzeitig, 1.0 = keine)")
+    print(_phasentabelle(nach_szenario))
     print(linie)
 
     rueckfluss = _rueckfluss(nach_szenario)
@@ -1566,7 +2017,7 @@ def _gefaelschter_strom(latenz: float):
 
     async def _strom(
         _client, *, provider, api_key, messages, usage, tools=None, tool_choice=None,
-        reasoning=False, reasoning_effort=None, cache_marke=False,
+        reasoning=False, reasoning_effort=None, cache_marke=False, model=None,
     ):
         del provider, api_key, reasoning, reasoning_effort, cache_marke
         await asyncio.sleep(latenz)
