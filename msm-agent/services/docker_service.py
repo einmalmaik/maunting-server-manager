@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import select
 import subprocess
 from functools import wraps
 from pathlib import Path
@@ -956,23 +957,71 @@ def send_stdin(name: str, data: str) -> dict[str, Any]:
         return {"ok": False, "error": _safe_error(exc)}
 
 
-def stream_logs_sync(name: str, tail: int = 200):
-    """Generator yielding log lines (blocking). Used from WS background thread."""
-    container = _get_container(name)
+def stream_logs_sync(name: str, tail: int = 200, *, stop_event: Any | None = None):
+    """Yield Docker log lines while remaining promptly interruptible."""
+    assert_msm_container_name(name)
+    proc: subprocess.Popen[str] | None = None
     try:
-        for chunk in container.logs(stream=True, follow=True, tail=tail, stdout=True, stderr=True):
-            line = _decode(chunk).rstrip("\r\n")
-            if line:
-                yield line
-    except (DockerException, OSError):
+        proc = subprocess.Popen(
+            ["docker", "logs", "--follow", "--tail", str(max(1, min(tail, 2000))), name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        assert proc.stdout is not None
+        while stop_event is None or not stop_event.is_set():
+            ready, _, _ = select.select([proc.stdout], [], [], 0.2)
+            if not ready:
+                if proc.poll() is not None:
+                    break
+                continue
+            line = proc.stdout.readline()
+            if not line:
+                if proc.poll() is not None:
+                    break
+                continue
+            text = line.rstrip("\r\n")
+            if text and not text.startswith("Error response from daemon:"):
+                yield text
+    except (FileNotFoundError, OSError):
         logger.warning("docker log stream ended")
-        return
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=2)
 
 
 def container_logs(name: str, tail: int = 200) -> str:
     container = _get_container(name)
     data = container.logs(tail=max(1, min(tail, 2000)), stdout=True, stderr=True)
     return data.decode("utf-8", errors="replace") if isinstance(data, bytes) else str(data)
+
+
+def managed_bind_root(name: str) -> Path:
+    """Ermittelt den Server-Root aus dem tatsächlichen sicheren Bind-Mount."""
+    container = _get_container(name)
+    root = settings.servers_path()
+    workdir = str((container.attrs.get("Config") or {}).get("WorkingDir") or "")
+    candidates: list[tuple[int, Path]] = []
+    for mount in container.attrs.get("Mounts") or []:
+        if mount.get("Type") != "bind" or not mount.get("RW", False):
+            continue
+        source = Path(str(mount.get("Source") or "")).resolve(strict=False)
+        destination = str(mount.get("Destination") or "").rstrip("/")
+        try:
+            source.relative_to(root)
+        except ValueError:
+            continue
+        contains_workdir = workdir == destination or workdir.startswith(destination + "/")
+        candidates.append((1 if contains_workdir else 0, source))
+    if not candidates:
+        raise DockerUnavailableError("Managed server bind mount not found")
+    return max(candidates, key=lambda item: item[0])[1]
 
 
 def _decode(data: bytes | str | None) -> str:

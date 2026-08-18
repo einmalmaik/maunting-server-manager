@@ -27,14 +27,14 @@ type ConsoleLogLine = {
   marker: number
   text: string
   timestamp: string | null
-  source: 'msm' | 'docker' | 'exec' | 'unknown'
+  source: 'msm' | 'docker' | 'file' | 'exec' | 'unknown'
 }
 type ConsoleFrame = {
   id?: number
   line?: string
   text?: string
   timestamp?: string
-  source?: 'msm' | 'docker'
+  source?: 'msm' | 'docker' | 'file'
 }
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g

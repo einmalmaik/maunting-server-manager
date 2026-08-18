@@ -732,12 +732,20 @@ können weder über JSON noch über den Webeditor aktiviert werden.
 
 `logs.sources` enthält maximal 16 Einträge: `stdout` oder sichere relative Pfade
 mit höchstens einem einfachen Dateinamen-Wildcard, beispielsweise
-`logs/*.log`. `max_tail_bytes` liegt zwischen 1.024 und 1.048.576.
+`logs/*.log`. `stdout` bleibt der Docker-/Container-Stream. Relative Dateipfade
+werden zusätzlich live in der Server-Konsole angezeigt und weiterhin vom
+Guardian für Diagnose und Recovery genutzt. `max_tail_bytes` liegt zwischen
+1.024 und 1.048.576.
 
 Vor Persistierung oder Übertragung werden die in `logs.redact` gewählten
 Redactoren angewendet. Erlaubt sind `discord_token`, `api_key`,
 `authorization_header`, `database_url`, `jwt` sowie geprüfte Einträge mit dem
 Präfix `regex:`.
+
+Unabhängig von der Blueprint-Liste redigiert die sichtbare Konsole bekannte
+Passwort-, Token-, Secret-, API-Key- und Authorization-Zuweisungen. So darf eine
+Game-Logzeile mit vollständiger Startzeile keine Zugangsdaten an den Browser
+ausliefern.
 
 `diagnostics.parsers` erlaubt ausschließlich `linux-oom`, `java-stacktrace`,
 `nodejs-stacktrace`, `port-conflict`, `missing-runtime`, `corrupted-config` und

@@ -37,7 +37,7 @@ from services.server_lifecycle_service import (
     is_lifecycle_job_active,
     should_preserve_lifecycle_status,
 )
-from services.console_stream_service import connect as ws_connect
+from services.console_stream_service import DeclaredLogConfig, connect as ws_connect
 from services.install_update_lock_service import (
     release_install_update_lock,
     force_release_install_update_lock,
@@ -1034,6 +1034,7 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
 
     db = SessionLocal()
     node = None
+    declared_logs = None
     try:
         try:
             user = get_current_user_for_ws(websocket, db)
@@ -1047,6 +1048,16 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
             if node is not None:
                 # Touch attributes while session is open
                 _ = (node.id, node.host, node.is_local, node.auth_token_enc)
+            plugin = get_plugin(server.game_type)
+            blueprint = plugin.get_blueprint() if plugin and hasattr(plugin, "get_blueprint") else None
+            logs = getattr(blueprint, "logs", None)
+            if logs is not None:
+                declared_logs = DeclaredLogConfig(
+                    root=server.install_dir,
+                    sources=tuple(logs.sources),
+                    redactors=tuple(logs.redact),
+                    max_tail_bytes=logs.max_tail_bytes,
+                )
         except HTTPException:
             await websocket.close(code=1008)
             return
@@ -1070,6 +1081,7 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
             log_path=log_path,
             last_id=last_id,
             node=node,
+            declared_logs=declared_logs,
         )
     finally:
         if db.is_active:

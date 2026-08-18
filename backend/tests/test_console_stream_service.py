@@ -12,6 +12,7 @@ from services.console_stream_service import (
     ingest_line,
     connect,
     reset_state_for_tests,
+    decode_agent_console_message,
 )
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
@@ -21,6 +22,19 @@ def setup_teardown():
     reset_state_for_tests()
     yield
     reset_state_for_tests()
+
+
+def test_agent_file_envelope_is_classified_without_reclassifying_plain_json() -> None:
+    file_message = json.dumps({
+        "msm_console_source": "file",
+        "text": "Game server ready",
+    })
+
+    assert decode_agent_console_message(file_message) == ("Game server ready", "file")
+    assert decode_agent_console_message('{"game":"json-log"}') == (
+        '{"game":"json-log"}',
+        "docker",
+    )
 
 
 @pytest.mark.asyncio

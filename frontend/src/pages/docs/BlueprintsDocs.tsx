@@ -492,6 +492,13 @@ export function BlueprintsDocs() {
               <FieldRow field="mods.postInstall" type="list" required={false}>{t('docs.reference.modsPostInstall')}</FieldRow>
               <FieldRow field="backup.includePaths" type="list" required={false}>{t('docs.reference.backupIncludePaths')}</FieldRow>
             </FieldTable>
+
+            <h3 className="font-bold text-primary mt-6 mb-2">logs</h3>
+            <FieldTable>
+              <FieldRow field="logs.sources" type="list" required={false}>{t('docs.reference.logsSources')}</FieldRow>
+              <FieldRow field="logs.redact" type="list" required={false}>{t('docs.reference.logsRedact')}</FieldRow>
+              <FieldRow field="logs.max_tail_bytes" type="integer" required={false}>{t('docs.reference.logsMaxTailBytes')}</FieldRow>
+            </FieldTable>
           </section>
 
           <section id="docs-howto" className="msm-card p-6 scroll-mt-20">
