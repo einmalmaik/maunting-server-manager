@@ -20,6 +20,26 @@ Blueprints sind Daten, keine Skripte:
 
 Erlaubt sind nur whitelisted Runtime-Fähigkeiten.
 
+### Unprivilegierte User-Namespaces
+
+`runtime.allowUnprivilegedUserNamespaces` ist standardmäßig `false`. Das Feld
+ist nur für Container-Runtimes wie UMU/pressure-vessel gedacht, die innerhalb
+des bereits rootless laufenden Game-Containers einen eigenen unprivilegierten
+User-Namespace erzeugen müssen. Bei `true` ergänzt MSM ausschließlich
+`seccomp=unconfined`.
+
+Die übrigen Grenzen bleiben hart: `cap-drop=ALL`, `no-new-privileges`, ein
+numerischer Nicht-root-User sowie die Verbote für `privileged` und Host-Netz.
+Das Opt-in darf nicht als allgemeiner Kompatibilitäts-Fallback verwendet werden.
+
+Die ASA-Runtime unter `containers/asa-runtime` pinnt beide Basisimages per
+Digest, UMU 1.4.0 per SHA-256 und GE-Proton10-34 per im Basisimage geprüfter
+Versionsdatei. Das Image enthält keine Server-Credentials und kapselt nur den
+Kompatibilitäts-Layer, Steam-SDK-Bibliotheken und den ASA-Preflight. UMU ist
+GPL-3.0; der Build veröffentlicht SBOM und Provenance. Ein Versionswechsel
+erfordert erneut einen vollständigen ASA-Kaltstart bis Weltdatei, gebundenen
+Ports und `advertising for join`.
+
 ## Für Einsteiger: Was trägst du wo ein?
 
 Eine Blueprint beschreibt einen Server-Typ, nicht einen einzelnen Server. Der

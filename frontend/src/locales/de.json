@@ -1123,6 +1123,7 @@
       "runtimeRequiredFiles": "Relative Dateipfade, die nach der Installation zwingend vorhanden sein müssen (z. B. 7DaysToDieServer.x86_64). Fehlt eine Datei, bricht MSM den Start mit verständlicher Fehlermeldung ab.",
       "runtimeStopGracePeriodSeconds": "Wartezeit in Sekunden (5..600) beim Stoppen des Containers vor SIGKILL. Default: 30.",
       "runtimeStartupCheckSeconds": "Wartezeit in Sekunden (0..300) vor der ersten Log-Prüfung beim Start (wichtig für große Proton/Wine-Images). Default: 5.0.",
+      "runtimeAllowUnprivilegedUserNamespaces": "Erlaubt verschachtelte unprivilegierte User-Namespaces für Runtimes wie UMU/pressure-vessel. Default: false. Nur Docker-Seccomp wird gelockert; cap-drop=ALL, no-new-privileges, der Nicht-root-User sowie die Verbote für Host-Netz und privileged bleiben aktiv.",
       "runtimeSeedFiles": "Liste von Default-Dateien, die nur geschrieben werden wenn sie fehlen (seed-once). Jeder Eintrag: file + content. Port-Tokens erlaubt. Läuft vor configPatches."
     },
     "howto": {

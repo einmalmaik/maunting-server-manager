@@ -415,6 +415,9 @@ export function BlueprintsDocs() {
               <FieldRow field="runtime.configPatches" type="list" required={false}>{t('docs.reference.runtimeConfigPatches')}</FieldRow>
               <FieldRow field="runtime.stopGracePeriodSeconds" type="integer" required={false}>{t('docs.reference.runtimeStopGracePeriodSeconds')}</FieldRow>
               <FieldRow field="runtime.startupCheckSeconds" type="float" required={false}>{t('docs.reference.runtimeStartupCheckSeconds')}</FieldRow>
+              <FieldRow field="runtime.allowUnprivilegedUserNamespaces" type="boolean" required={false}>
+                {t('docs.reference.runtimeAllowUnprivilegedUserNamespaces', 'Allows nested unprivileged user namespaces for runtimes such as UMU/pressure-vessel. Default: false. Only Docker seccomp is relaxed; cap-drop=ALL, no-new-privileges, non-root user, and the host-network/privileged bans remain active.')}
+              </FieldRow>
               {/* v1.4.7+: Exec-Tab-Opt-in. Default false. Erlaubt authentifizierten
                   Usern mit Permission ``server.console.exec``, One-Shot-Befehle
                   im MSM-Container auszufuehren (argv, kein Shell). Siehe

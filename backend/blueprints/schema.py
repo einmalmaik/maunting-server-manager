@@ -1593,6 +1593,9 @@ COMMENTED_TEMPLATE_DE: str = """{
     // Grace-Period für docker stop (SIGTERM dann SIGKILL). Default 30s, 5..600 erlaubt.
     // Höher bei persistenter Welt (Save/Snapshot), damit keine Daten verloren gehen.
     "stopGracePeriodSeconds": 30,
+    // Nur fuer Runtimes wie UMU/pressure-vessel. Default false. Lockert ausschliesslich Docker-Seccomp;
+    // cap-drop=ALL, no-new-privileges, Nicht-root-User und das Host-Netz/privileged-Verbot bleiben aktiv.
+    "allowUnprivilegedUserNamespaces": false,
     // Dateien, die vor dem Start automatisch gepatcht werden sollen (z.B. INI-Dateien)
     "configPatches": []
   },
@@ -1735,6 +1738,9 @@ COMMENTED_TEMPLATE_EN: str = """{
     // Grace-Period for docker stop (SIGTERM then SIGKILL). Default 30s, range 5..600.
     // Raise for persistent-world servers (save/snapshot) to avoid data loss.
     "stopGracePeriodSeconds": 30,
+    // Only for runtimes such as UMU/pressure-vessel. Defaults to false. Relaxes Docker seccomp only;
+    // cap-drop=ALL, no-new-privileges, non-root user, and host-network/privileged bans remain active.
+    "allowUnprivilegedUserNamespaces": false,
     // Files that should be automatically patched before startup (e.g., INI files)
     "configPatches": []
   },
