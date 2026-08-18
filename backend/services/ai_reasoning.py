@@ -157,25 +157,6 @@ def _kennt_schalter(kind: str) -> bool:
         return False
 
 
-def _vertraegt_werkzeuge_mit_stufe(kind: str) -> bool:
-    """Ob dieser Anbieter ``tools`` und eine Denkstufe in **einer** Anfrage nimmt.
-
-    Gefragt wird wieder der Anbieter selbst und nicht sein Name — die Marke
-    steht in `ai_provider_registry.basis.Anbieter.werkzeuge_mit_denkstufe`, samt
-    der Messung, die sie begründet. Der Wortlaut der Ablehnung („use
-    /v1/responses or set reasoning_effort to 'none'") steht dort ebenfalls.
-
-    Ein unbekannter Schlüssel ergibt ``True`` und nicht ``KeyError``: das ist
-    der Zustand von vor dieser Marke, also das Verhalten jedes Anbieters, der
-    sie nicht führt. Eine Einschränkung zu raten, wäre schlimmer als sie zu
-    verpassen — sie kostet Denkleistung, die der Anbieter angeboten hätte.
-    """
-    try:
-        return ai_provider_registry.anbieter(kind).werkzeuge_mit_denkstufe
-    except KeyError:
-        return True
-
-
 def _aus(modell: Modell) -> tuple[bool, str | None]:
     """„Nicht nachdenken“ — und, falls das Modell ein Wort dafür führt, welches.
 
@@ -201,13 +182,7 @@ def _aus(modell: Modell) -> tuple[bool, str | None]:
 
 
 def klemmen(
-    modell: Modell,
-    *,
-    wunsch: str | None,
-    aktiv: bool,
-    deckel: int | None,
-    mit_werkzeugen: bool = False,
-    kind: str | None = None,
+    modell: Modell, *, wunsch: str | None, aktiv: bool, deckel: int | None
 ) -> tuple[bool, str | None]:
     """Was tatsächlich an den Anbieter geht: (nachdenken, Stufe).
 
@@ -235,34 +210,20 @@ def klemmen(
     einen Schalter kennt, liest das Wort nicht. Warum es überhaupt gebraucht
     wird, steht bei `_aus`.
 
-    **``mit_werkzeugen`` ist die einzige Grenze, die nicht vom Modell kommt,
-    sondern vom Endpunkt.** OpenAIs ``/chat/completions`` lehnt eine Anfrage
-    ab, die ``tools`` und eine echte Stufe zugleich trägt (Marke
-    `werkzeuge_mit_denkstufe`; die Messung steht in der Anbieterdatei). Sie
-    trotzdem hinauszuschicken hiesse, ein ``400`` zu erzeugen, dessen Ursache
-    MSM vorher kennt — deshalb fällt hier auf „aus“ zurück, mit derselben
-    Mundart wie überall (`_aus`), und der Lauf antwortet statt zu scheitern.
-
-    Das ist ausdrücklich eine **Einschränkung und kein Ersatz**: bei diesem
-    Anbieter denkt das Modell im Werkzeuglauf nicht. Der Betreiber sieht die
-    Stufen in der Oberfläche trotzdem — sie gelten für die Läufe ohne
-    Werkzeuge, und wer beides zugleich braucht, nimmt denselben Modellnamen
-    über OpenRouter.
+    **Werkzeuge spielen hier keine Rolle**, und das ist eine bewusste Grenze
+    zwischen zwei Schichten. Hier stand kurzzeitig eine Ausnahme für OpenAI:
+    dessen ``/chat/completions`` lehnt ``tools`` neben einer echten Stufe ab,
+    also wurde die Stufe gesenkt. Das war die Antwort auf die falsche Frage —
+    ein Endpunkt, der etwas nicht kann, ist ein Fall für den Adapter und nicht
+    für die Rechteschicht. Seit OpenAI über ``/responses`` läuft
+    (`Anbieter.protokoll_chat`), kommen Denkschritte und Werkzeugaufruf dort in
+    derselben Runde, und die Ausnahme wäre eine stille Verschlechterung
+    geworden: der Worker soll gerade denken dürfen, während er arbeitet.
     """
     if not modell.denkt:
         return False, None
     if not aktiv and darf_abschalten(modell):
         return _aus(modell)
-    # Vor allem anderen: verträgt dieser Anbieter überhaupt eine Stufe neben
-    # Werkzeugen? Wenn nicht, ist jede Rechnung darunter gegenstandslos — die
-    # Anfrage würde abgelehnt, egal welche Stufe herauskäme. `darf_abschalten`
-    # bleibt trotzdem die Bedingung: ein Modell mit Denkzwang lässt sich nicht
-    # abschalten, und dort ist die Vorgabe des Anbieters die einzige Wahl, die
-    # der Endpunkt noch zulässt.
-    if mit_werkzeugen and kind is not None and not _vertraegt_werkzeuge_mit_stufe(kind):
-        if darf_abschalten(modell):
-            return _aus(modell)
-        return True, None
 
     # Ohne Deckel: was das Modell überhaupt kann. Mit Deckel: was diese Rolle
     # davon darf. Der Vergleich der beiden trennt zwei Zustände, die sich von
@@ -325,7 +286,6 @@ async def vorgabe(
     provider: AiProvider,
     aktiv: bool,
     wunsch: str | None,
-    mit_werkzeugen: bool = True,
 ) -> tuple[bool, str | None]:
     """Was für diesen Benutzer, diesen Provider und diesen Wunsch tatsächlich gilt.
 
@@ -333,13 +293,6 @@ async def vorgabe(
     erreichbar, oder der Betreiber hat einen Namen eingetragen, den es nicht
     mehr gibt — bleibt es beim reinen An/Aus **ohne Stufe**. Das erfindet keine
     Tiefe, die niemand geprüft hat.
-
-    ``mit_werkzeugen`` ist hier ``True`` als Vorgabe, und das ist die ehrliche
-    Beschreibung des einzigen Aufrufers: ein Chatlauf trägt den Werkzeugkatalog
-    immer mit. Der Parameter steht trotzdem da, weil die Vorgabe eine Annahme
-    über den Aufrufer ist und keine Eigenschaft der Funktion — ein Lauf ohne
-    Werkzeuge bekäme sonst still eine Stufe weniger, als ihm zusteht. Was die
-    Angabe bewirkt, steht bei `klemmen`.
 
     **Und es ist die Stelle, an der ein Deckel von 0 nicht überall greift.**
     Hier stand einmal, ohne Stufe sei „die einzige Annahme, die bei jedem
@@ -371,14 +324,7 @@ async def vorgabe(
                 )
             return False, None
         return bool(aktiv), None
-    return klemmen(
-        modell,
-        wunsch=wunsch,
-        aktiv=aktiv,
-        deckel=deckel,
-        mit_werkzeugen=mit_werkzeugen,
-        kind=provider.provider_kind,
-    )
+    return klemmen(modell, wunsch=wunsch, aktiv=aktiv, deckel=deckel)
 
 
 async def aus_fuer(

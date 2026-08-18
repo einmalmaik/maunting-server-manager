@@ -82,26 +82,29 @@ ANBIETER = Anbieter(
     # `openai_compatible_adapter` sendet die Marke nur dann, wenn eine Stufe
     # feststeht. Kein Wissen, keine Stufe, keine Marke.
     anfrage_erweiterungen=frozenset({"reasoning_effort"}),
-    # **Werkzeuge und Denkstufe schliessen sich hier aus**, und zwar nicht als
-    # Eigenheit eines Modells, sondern als Regel dieses Endpunkts. Gemessen am
-    # 2026-08-18 gegen OpenAI direkt, jeweils mit einem Werkzeugkatalog:
+    # **Der Chatweg ist `/responses` und nicht `/chat/completions`.**
+    #
+    # Gemessen am 2026-08-18 gegen OpenAI direkt, jeweils mit Werkzeugkatalog
+    # auf `/chat/completions`:
     #
     #   gpt-5.6-luna   none=OK   low=400  medium=400
     #   gpt-5.2        none=OK   low=OK   medium=OK
     #   gpt-5.1        none=OK   low=OK   medium=OK
     #   gpt-5-mini     none=400  low=OK   medium=OK
     #
-    # Die Meldung nennt den Ausweg selbst: „use /v1/responses or set
-    # reasoning_effort to 'none'". Weil MSM im Chat immer Werkzeuge mitschickt,
-    # waere der Zugang sonst an `gpt-5.6-luna` — dem Modell, das der Betreiber
-    # hier eingetragen hat — bei jeder gewaehlten Stufe tot.
+    # Die Ablehnung nennt den Ausweg selbst: „use /v1/responses or set
+    # reasoning_effort to 'none'". Der zweite Teil waere die billigere
+    # Aenderung gewesen und ist verworfen — MSM schickt im Chat immer
+    # Werkzeuge mit, und ein Zugang, an dem Nachdenken und Werkzeuge einander
+    # ausschliessen, taugt nicht fuer den Hintergrund-Worker: der soll gerade
+    # denken duerfen, waehrend er arbeitet.
     #
-    # Dass `gpt-5-mini` genau andersherum faellt, ist der Grund, warum hier
-    # nicht einfach `none` erzwungen wird: `ai_reasoning.klemmen` nimmt bei
-    # ausgeschaltetem Denken ohnehin nur ein Wort, das der Katalog fuehrt, und
-    # laesst es sonst weg. Die Marke sagt also „keine **Stufe** neben
-    # Werkzeugen", nicht „sende none".
-    werkzeuge_mit_denkstufe=False,
+    # Auf `/responses` kommt beides in derselben Runde. Nachgemessen mit
+    # `effort: high`: 424 Zeichen Denkzusammenfassung **und** ein
+    # `function_call read_server_status`, dazu `reasoning_tokens: 32` in der
+    # Abrechnung. Eine zweite Runde mit `function_call_output` fuehrt den Lauf
+    # sauber fort (145 Eingabe-, 147 Ausgabetokens).
+    protokoll_chat="responses",
     # **Keine Empfehlung fuer den Chat**, und das ist keine Nachlaessigkeit.
     # Die Empfehlung wird gegen den Katalog geprueft und faellt weg, wenn die
     # Kennung dort nicht steht — sie waere hier also im besten Fall wirkungslos.

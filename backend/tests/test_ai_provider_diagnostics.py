@@ -383,14 +383,27 @@ async def test_a_provider_message_in_the_stream_is_redacted_like_any_other() -> 
 
 
 async def _abschicken(kind: str, **wuensche) -> dict:
-    """Eine Anfrage an einen Anbieter stellen und ansehen, was hinausging."""
+    """Eine Anfrage an einen Anbieter stellen und ansehen, was hinausging.
+
+    Die Antwort deckt **beide** Chatwege ab: den Rahmen von Chat Completions
+    (``choices[].delta``) und den von Responses (``response.*``). Welcher
+    gelesen wird, entscheidet der Anbieter — ein Zugang mit
+    ``protokoll_chat="responses"`` schaut am Chat-Completions-Rahmen vorbei
+    und umgekehrt, und ein unbeantworteter Strom endete in
+    ``AI_PROVIDER_STREAM_INCOMPLETE`` statt in einer Aussage über den Body.
+    """
     gesendet: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         gesendet.update(json.loads(request.content))
         return httpx.Response(
             200,
-            text='data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+            text=(
+                'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+                'data: {"type":"response.output_text.delta","delta":"ok"}\n\n'
+                'data: {"type":"response.completed","response":{"usage":{}}}\n\n'
+                "data: [DONE]\n\n"
+            ),
             headers={"content-type": "text/event-stream"},
         )
 
@@ -427,12 +440,20 @@ async def test_only_a_provider_that_knows_the_word_gets_it(
 
     Dasselbe gilt fuer `cache_control` — ebenfalls OpenRouters Erweiterung,
     ebenfalls ein 400 anderswo.
+
+    Seit OpenAI ueber ``/responses`` laeuft, kennt **dieser** Weg ein eigenes
+    ``reasoning``-Objekt (``{"effort": ..., "summary": "auto"}``) — deshalb
+    fragt der Fall unten nach OpenRouters Form und nicht nur nach dem
+    Feldnamen. Zwei Anbieter, zwei Bedeutungen fuer dasselbe Wort.
     """
     gesendet = await _abschicken(
         kind, reasoning=True, reasoning_effort="high", cache_marke=True
     )
 
-    assert ("reasoning" in gesendet) is erwartet
+    if erwartet:
+        assert gesendet["reasoning"] == {"enabled": True, "effort": "high"}
+    else:
+        assert gesendet.get("reasoning") != {"enabled": True, "effort": "high"}
     assert ("cache_control" in gesendet) is erwartet
     # Was alle koennen, geht auch an alle.
     assert gesendet["model"] == "m"
@@ -443,30 +464,33 @@ async def test_only_a_provider_that_knows_the_word_gets_it(
 async def test_each_provider_gets_the_wish_in_its_own_dialect() -> None:
     """Derselbe Wunsch, zwei Formen — und niemals beide in einer Anfrage.
 
-    Bis zum 17.08.2026 bekam OpenAI hier **gar nichts**, mit einer Begruendung,
-    die damals stimmte: `reasoning_effort` an einem nicht denkfaehigen Modell
-    ist wieder ein 400, und OpenAIs Katalog verriet nicht, welche Modelle
-    denkfaehig sind. Genau diese Luecke schliesst `faehigkeiten_aus`
-    (`ai_model_catalog`) — jetzt weiss MSM es, und was es nicht weiss, kommt
-    hier als leere Stufe an und geht weiterhin nicht hinaus.
+    Uebersetzt wird dabei kein **Wort**: beide Anbieter benutzen denselben
+    Wortschatz fuer die Stufen (``minimal|low|medium|high|xhigh|max``, dazu
+    ``none``), was am 2026-08-17 an OpenAIs `openapi.json` und an OpenRouters
+    Katalog nachgesehen wurde. Verschieden ist nur, wohin die Stufe gehoert.
 
-    Uebersetzt wird dabei nichts: beide Anbieter benutzen denselben Wortschatz
-    fuer die Stufen (``minimal|low|medium|high|xhigh|max``, dazu ``none``), was
-    am 2026-08-17 an OpenAIs `openapi.json` und an OpenRouters Katalog
-    nachgesehen wurde. Eine Uebersetzungstabelle waere eine Liste im Code, die
-    beim ersten neuen Wort eines Anbieters still falsch wird.
+    Bei OpenAI hing sie bis zum 18.08.2026 als ``reasoning_effort`` am
+    Chat-Completions-Body. Der Zugang spricht jetzt ``/responses``, weil jener
+    Endpunkt Werkzeuge und Denkstufe nicht zusammen nimmt; dort steht sie in
+    ``reasoning.effort``, mit ``summary: "auto"`` daneben — ohne die Zeile
+    schweigt der Strom ueber die Denkschritte, obwohl sie abgerechnet werden.
     """
     an_openai = await _abschicken(
         "openai", reasoning=True, reasoning_effort="high", cache_marke=True
     )
-    assert an_openai["reasoning_effort"] == "high"
-    assert "reasoning" not in an_openai
+    assert an_openai["reasoning"] == {"effort": "high", "summary": "auto"}
+    assert "reasoning_effort" not in an_openai
+    # Der Verlauf heisst hier `input`, nicht `messages` — der ganze Unterschied
+    # zwischen den beiden Wegen an einer Stelle.
+    assert "messages" not in an_openai
+    assert an_openai["input"] == [{"role": "user", "content": "ping"}]
 
     an_openrouter = await _abschicken(
         "openrouter", reasoning=True, reasoning_effort="high", cache_marke=True
     )
     assert an_openrouter["reasoning"] == {"enabled": True, "effort": "high"}
     assert "reasoning_effort" not in an_openrouter
+    assert an_openrouter["messages"] == [{"role": "user", "content": "ping"}]
 
 
 @pytest.mark.asyncio
@@ -479,9 +503,11 @@ async def test_switching_thinking_off_is_a_level_where_there_is_no_switch() -> N
     der Betreiber hat abgeschaltet und bezahlt trotzdem. Welche Modelle das Wort
     vertragen, entscheidet `ai_reasoning.klemmen` am Katalog; hier zaehlt nur,
     dass es nicht unterwegs verlorengeht.
+
+    Ohne ``summary``, denn es gibt keine: wer nicht denkt, fasst nichts zusammen.
     """
     an_openai = await _abschicken("openai", reasoning=False, reasoning_effort="none")
-    assert an_openai["reasoning_effort"] == "none"
+    assert an_openai["reasoning"] == {"effort": "none"}
 
     # OpenRouter sagt dasselbe mit seinem Schalter. Die Stufe daneben waere dort
     # eine zweite, widersprechende Angabe — welche gewinnt, entschiede dann der
@@ -497,8 +523,9 @@ async def test_no_known_level_means_no_field_at_all() -> None:
     """Was MSM nicht weiss, spricht es nicht aus.
 
     Ein Modell, das der fremde Katalog nicht fuehrt, kommt hier ohne Stufe an.
-    Dann geht bei OpenAI **nichts** hinaus — auch kein ``null``, auf das
-    `CreateChatCompletionRequest` ebenfalls mit einem 400 antwortet.
+    Dann geht bei OpenAI **nichts** hinaus — auch kein ``null``, auf das beide
+    Wege mit einem 400 antworten.
     """
     an_openai = await _abschicken("openai", reasoning=True, reasoning_effort=None)
     assert "reasoning_effort" not in an_openai
+    assert "reasoning" not in an_openai

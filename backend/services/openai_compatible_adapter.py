@@ -552,6 +552,34 @@ async def stream_chat_completion(
     if provider.requires_api_key and not api_key:
         raise AiProviderRequestError("AI_PROVIDER_KEY_MISSING")
 
+    # **Die Weiche zwischen den beiden Chatwegen.** Sie steht hier und nicht
+    # bei den fuenf Aufrufern: die wollen einen Chatzug, nicht einen Dialekt.
+    # Welchen ein Zugang spricht, sagt seine Anbieterdatei
+    # (`Anbieter.protokoll_chat`) — OpenAI direkt spricht `responses`, weil
+    # sein `/chat/completions` Werkzeuge und Denkstufe nicht zusammen nimmt.
+    #
+    # Spaeter Import, kein Zyklus: `openai_responses_adapter` holt sich von
+    # hier die Grenzwerte, die Fehlerklasse und die Stueck-Datentypen. Ein
+    # Import am Dateikopf zeigte damit im Kreis.
+    from services.openai_responses_adapter import spricht_responses, stream_responses
+
+    if spricht_responses(provider):
+        async for stueck in stream_responses(
+            client,
+            provider=provider,
+            api_key=api_key,
+            messages=messages,
+            usage=usage,
+            model=model,
+            tools=tools,
+            tool_choice=tool_choice,
+            reasoning=reasoning,
+            reasoning_effort=reasoning_effort,
+            cache_marke=cache_marke,
+        ):
+            yield stueck
+        return
+
     headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"

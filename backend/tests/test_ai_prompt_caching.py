@@ -129,14 +129,27 @@ def _provider(kind: str = "openrouter") -> AiProvider:
 
 
 async def _gesendeter_body(provider: AiProvider | None = None, **kwargs) -> dict:
-    """Fuehrt einen vollstaendigen Stream und gibt den Anfragekoerper zurueck."""
+    """Fuehrt einen vollstaendigen Stream und gibt den Anfragekoerper zurueck.
+
+    Die Antwort bedient **beide** Chatwege: den Rahmen von Chat Completions
+    und den von Responses. Ein Zugang mit ``protokoll_chat="responses"``
+    (OpenAI direkt) liest den ersten nicht und braucht sein eigenes
+    ``response.completed``, sonst endet der Lauf in
+    ``AI_PROVIDER_STREAM_INCOMPLETE``, bevor irgendetwas ueber den Body
+    gesagt werden kann.
+    """
     aufgezeichnet: dict = {}
 
     async def handler(request: httpx.Request) -> httpx.Response:
         aufgezeichnet.update(json.loads(request.content))
         return httpx.Response(
             200,
-            text='data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+            text=(
+                'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+                'data: {"type":"response.output_text.delta","delta":"ok"}\n\n'
+                'data: {"type":"response.completed","response":{"usage":{}}}\n\n'
+                "data: [DONE]\n\n"
+            ),
             headers={"content-type": "text/event-stream"},
         )
 
@@ -192,27 +205,37 @@ async def test_without_the_mark_the_field_is_absent_rather_than_false() -> None:
 
 @pytest.mark.asyncio
 async def test_the_thinking_field_stays_home_for_dialects_that_reject_it() -> None:
-    """OpenAI direkt kennt das ``reasoning``-Objekt nicht — es ist OpenRouters
-    Erweiterung, und OpenAIs strenge Validierung weist unbekannte
-    Top-Level-Felder mit einem 400 ab. Ohne dieses Gate scheiterte dort jede
-    Anfrage, bevor das Modell sie je sah: Testknopf, Chat, Verdichtung, alle
-    mit demselben ``AI_PROVIDER_REQUEST_REJECTED``.
+    """OpenRouters ``reasoning``-Objekt ist OpenRouters — und bleibt dort.
+
+    ``{"enabled": ..., "effort": ...}`` ist eine Erweiterung von OpenRouter.
+    OpenAIs strenge Validierung weist unbekannte Top-Level-Felder mit einem
+    400 ab; ohne dieses Gate scheiterte dort jede Anfrage, bevor das Modell
+    sie je sah: Testknopf, Chat, Verdichtung, alle mit demselben
+    ``AI_PROVIDER_REQUEST_REJECTED``.
 
     Entschieden wird ueber ``Anbieter.anfrage_erweiterungen`` in der Registry —
     eine Eigenschaft des Dialekts, nicht des Modells.
+
+    Seit OpenAI ueber ``/responses`` laeuft (`Anbieter.protokoll_chat`), heisst
+    das Feld dort zwar ebenfalls ``reasoning``, meint aber etwas anderes:
+    ``{"effort": ..., "summary": "auto"}``, ohne Schalter. Deshalb prueft
+    dieser Test die **Form** und nicht den Feldnamen — ein Test auf
+    „``reasoning`` kommt nicht vor\" wuerde beim naechsten Leser den falschen
+    Schluss nahelegen.
     """
     body = await _gesendeter_body(provider=_provider("openai"))
-    assert "reasoning" not in body
-    # Gegenprobe: die Anfrage selbst ist vollstaendig hinausgegangen.
-    assert body["messages"] == [{"role": "user", "content": "Hi"}]
+    assert body.get("reasoning") != {"enabled": True}
+    assert "enabled" not in (body.get("reasoning") or {})
+    # Gegenprobe: die Anfrage selbst ist vollstaendig hinausgegangen — auf
+    # diesem Weg als ``input``, nicht als ``messages``.
+    assert body["input"] == [{"role": "user", "content": "Hi"}]
 
-    # Eine ausdrueckliche Stufe geht dagegen mit — aber in OpenAIs eigener
-    # Mundart (``reasoning_effort``), nie als OpenRouters ``reasoning``-Objekt.
+    # Eine ausdrueckliche Stufe geht mit, in der Mundart dieses Weges.
     body = await _gesendeter_body(
         provider=_provider("openai"), reasoning=True, reasoning_effort="high"
     )
-    assert "reasoning" not in body
-    assert body["reasoning_effort"] == "high"
+    assert body["reasoning"] == {"effort": "high", "summary": "auto"}
+    assert "reasoning_effort" not in body
 
 
 @pytest.mark.asyncio
