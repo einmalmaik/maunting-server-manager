@@ -47,15 +47,3 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:${{ env.STABLE_TAG }}
             ${{ env.IMAGE }}:sha-${{ github.sha }}
-
-      - name: Make repository runtime image public
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          curl --fail-with-body --silent --show-error \
-            --request PATCH \
-            --header "Accept: application/vnd.github+json" \
-            --header "Authorization: Bearer ${GH_TOKEN}" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/users/${{ github.repository_owner }}/packages/container/msm-asa-runtime" \
-            --data '{"visibility":"public"}'
