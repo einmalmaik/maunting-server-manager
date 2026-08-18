@@ -144,7 +144,23 @@ def write_text(
         if expected_revision is not None and current_revision != expected_revision:
             raise FileRevisionConflict(current_revision)
 
-        previous_mode = stat_module.S_IMODE(target.stat().st_mode) if target.exists() else 0o644
+        # `lstat` und nicht `stat`: Letzteres **folgt Symlinks**, und dann
+        # stammten Modus und Eigentuemer von der Datei, auf die der Link
+        # zeigt. Wer im Serververzeichnis schreiben darf, koennte damit einen
+        # fremden Eigentuemer auf die neu geschriebene Datei uebertragen —
+        # eine stille Rechteverschiebung. `os.replace` ersetzt ohnehin den
+        # Link selbst und nicht sein Ziel; die Werte muessen deshalb vom Link
+        # kommen, damit beides dieselbe Sache meint.
+        vorheriges: os.stat_result | None = None
+        if target.is_symlink() or target.exists():
+            try:
+                vorheriges = target.lstat()
+            except OSError:
+                vorheriges = None
+
+        previous_mode = (
+            stat_module.S_IMODE(vorheriges.st_mode) if vorheriges is not None else 0o644
+        )
         # Wem die Datei bisher gehoerte. Unter Rootless Docker ist das der
         # **Spielprozess** (gemappte UID aus /etc/subuid) und nicht das Panel.
         #
@@ -159,10 +175,9 @@ def write_text(
         #
         # `None` heisst „Datei ist neu“ — dann gibt es keinen vorherigen
         # Eigentuemer, den man erhalten koennte.
-        previous_owner: tuple[int, int] | None = None
-        if target.exists():
-            info = target.stat()
-            previous_owner = (info.st_uid, info.st_gid)
+        previous_owner: tuple[int, int] | None = (
+            (vorheriges.st_uid, vorheriges.st_gid) if vorheriges is not None else None
+        )
         temp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(

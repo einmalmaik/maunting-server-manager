@@ -81,6 +81,51 @@ def test_a_failing_chown_does_not_lose_the_content(tmp_path: Path, monkeypatch) 
     assert ergebnis["revision"]
 
 
+def test_a_symlink_does_not_donate_a_foreign_owner(tmp_path: Path, monkeypatch) -> None:
+    """Der Eigentuemer stammt vom **Link**, nicht von seinem Ziel.
+
+    ``os.stat`` folgt Symlinks, ``os.lstat`` nicht. Mit ``stat`` haette ein
+    Link auf eine fremde Datei deren ``uid``/``gid`` auf die neu geschriebene
+    Datei uebertragen — wer im Serververzeichnis schreiben darf, koennte damit
+    eine stille Rechteverschiebung ausloesen.
+
+    ``os.replace`` ersetzt ohnehin den Link selbst und nicht sein Ziel; die
+    gelesenen Werte muessen deshalb auch vom Link kommen, damit beide Seiten
+    dieselbe Sache meinen.
+    """
+    ziel = tmp_path / "fremd.conf"
+    ziel.write_text("fremd\n", encoding="utf-8")
+    link = tmp_path / "server.ini"
+    link.symlink_to(ziel)
+
+    # Fremde Eigentuemer lassen sich ohne root nicht erzeugen — also wird
+    # beobachtet, **welcher Pfad** befragt wird. Genau daran haengt der Fehler.
+    befragt: list[str] = []
+    echtes_lstat = Path.lstat
+    echtes_stat = Path.stat
+
+    def lstat_merken(self):
+        befragt.append(f"lstat:{self.name}")
+        return echtes_lstat(self)
+
+    def stat_merken(self, *a, **k):
+        befragt.append(f"stat:{self.name}")
+        return echtes_stat(self, *a, **k)
+
+    monkeypatch.setattr(Path, "lstat", lstat_merken)
+    monkeypatch.setattr(Path, "stat", stat_merken)
+    monkeypatch.setattr(file_edit_service.os, "chown", lambda *a: None)
+
+    file_edit_service.write_text(link, "neu\n", expected_revision=None)
+
+    assert any(e == "lstat:server.ini" for e in befragt), (
+        "der Link selbst wurde nie mit lstat befragt — dann stammen Modus und "
+        "Eigentuemer vom Ziel des Symlinks"
+    )
+    # Und die Fremddatei ist unangetastet: `os.replace` hat den Link ersetzt.
+    assert ziel.read_text(encoding="utf-8") == "fremd\n"
+
+
 def test_a_new_file_has_no_owner_to_preserve(tmp_path: Path, monkeypatch) -> None:
     """Bei einer neuen Datei gibt es nichts zu erhalten — also kein `chown`."""
     ziel = tmp_path / "neu.ini"

@@ -125,16 +125,23 @@ Panel."""
 # Quittung ist kurz und kommt nebenbei, und danach ist das Gespraech offen —
 # der Mensch soll weiterreden koennen, nicht auf ein Ergebnis warten.
 GEHIRN_QUITTUNG = """\
-Kuendige nichts an. Gibst du einen Auftrag in den Hintergrund, bestaetige ihn \
-in **einem kurzen, beilaeufigen Satz** und lass es dabei ("Schau ich mir an." \
-/ "Bin dran." / "Mach ich, melde mich."). Kein Arbeitsplan, keine Aufzaehlung \
-dessen, was du gleich pruefst, keine Begruendung, warum du es pruefst — der \
-Benutzer hat dich gerade darum gebeten, er weiss es schon. Nenne nur dann eine \
-Einzelheit, wenn sie ihn wirklich betrifft: dass es laenger dauert, oder dass \
-du etwas anders verstanden hast als er es vielleicht meinte.
-Nach der Quittung ist das Gespraech **offen**. Er darf sofort weiterreden, \
-ohne auf ein Ergebnis zu warten — antworte auf das, was er sagt, und komm auf \
-den Auftrag erst zurueck, wenn er berichtet hat."""
+Kuendige nichts an. Gibst du einen Auftrag in den Hintergrund, antworte wie \
+ein Mensch, den man um etwas gebeten hat: **zusagen und aufhoeren zu reden**. \
+"Alles klar, mach ich." / "Schau ich mir an, dauert ein paar Minuten." / \
+"Bin dran, sag dir Bescheid."
+Verboten ist der Arbeitsbericht in der Zukunftsform. Faengt dein Satz mit \
+"Ich pruefe", "Ich schaue mir jetzt an", "Ich werde", "Zuerst" an oder \
+enthaelt er "damit ich dir ... sagen kann", hast du angekuendigt statt \
+zugesagt — streich ihn und schreib die Zusage. Zaehl auch nicht auf, worum es \
+geht: der Benutzer hat es gerade selbst gesagt, ihm das zurueckzureferieren \
+wirkt, als haettest du es nicht verstanden.
+Nenne nur, was ihn wirklich betrifft: dass es laenger dauert, dass du etwas \
+anders verstanden hast, oder eine Angabe, die dir zum Loslegen fehlt. Fehlt \
+sie, frag **eine** kurze Frage statt sie zu erfinden.
+Nach der Quittung ist das Gespraech offen. Er darf sofort weiterreden, ohne \
+auf ein Ergebnis zu warten — antworte auf das, was er sagt. Faellt ihm zum \
+laufenden Auftrag noch etwas ein, gib es mit `worker_antwort` an genau diesen \
+Auftrag weiter und bestaetige genauso knapp ("Hab ich ihm durchgegeben.")."""
 
 
 # Wie ein Ergebnis hereinkommt, das niemand gerade erfragt hat.

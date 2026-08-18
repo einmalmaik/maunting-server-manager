@@ -95,6 +95,184 @@ def test_die_worker_zeile_kommt_nur_auf_bestellung(db: Session) -> None:
     assert fenster.id in voll
 
 
+def test_ein_fertiger_auftrag_verschwindet_nicht_spurlos(db: Session) -> None:
+    """Erledigte Aufträge bleiben eine Weile sichtbar — sonst wird geraten.
+
+    Gemeldet am 18.08.2026: ein Worker hatte sauber gearbeitet und berichtet,
+    das Gehirn erzählte dem Betreiber danach, der Auftrag sei **abgebrochen**
+    worden. Abgebrochen war nichts.
+
+    Die Zeile führte nur laufende Aufträge. Ein fertiger verschwand daraus
+    spurlos, und zwar genau in der Runde, in der das Gehirn sein Ergebnis
+    lieferte — für das Modell sah das aus wie "war eben noch da, ist jetzt
+    weg". Die naheliegendste Erklärung dafür ist ein Abbruch. Es hat also
+    nicht halluziniert, sondern die einzige Lücke gefüllt, die der Lageblock
+    ihm gelassen hat.
+    """
+    from models import AiRun
+
+    user = _benutzer(db, "fertigerauftrag")
+    fenster = AiConversation(
+        id=f"lg-{uuid4().hex[:8]}", user_id=user.id, kind="worker",
+        title="XP-Multiplikatoren setzen",
+    )
+    db.add(fenster)
+    db.flush()
+    db.add(AiRun(
+        id=f"lgr-{uuid4().hex[:8]}", conversation_id=fenster.id,
+        user_id=user.id, status="completed",
+    ))
+    db.commit()
+
+    block = ai_lage.lageblock(db, user, mit_workern=True)
+
+    assert "'XP-Multiplikatoren setzen'" in block, (
+        "der fertige Auftrag fehlt in der Lage — genau daraus entstand die "
+        "erfundene Abbruchmeldung"
+    )
+    assert "fertig" in block
+    assert "keine." not in block
+
+
+def test_eine_abgeloeste_runde_gilt_nicht_als_abbruch(db: Session) -> None:
+    """Ein Auftrag zeigt seinen **juengsten** Lauf, nicht seine Vorgeschichte.
+
+    Reicht der Benutzer einem laufenden Worker etwas nach, wird die laufende
+    Runde abgeloest (`cancelled`) und eine neue beginnt. Das ist Innenleben,
+    kein Ereignis. Im gemeldeten Fall sah der Bestand so aus:
+
+        66e656de  cancelled  geaendert 23:27:15.995
+        14adf4b7  completed  erstellt  23:27:15.989
+
+    Beide gehoeren zu **einem** Auftrag, der sauber fertig wurde. Zeigt man
+    dem Gehirn beide, laesst man es zwischen "abgebrochen" und "fertig"
+    waehlen — und es waehlt das Auffaelligere. Genau das hat es getan.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from models import AiRun
+
+    user = _benutzer(db, "abgeloest")
+    fenster = AiConversation(
+        id=f"lg-{uuid4().hex[:8]}", user_id=user.id, kind="worker",
+        title="ASA-XP-und-Ernte konfigurieren",
+    )
+    db.add(fenster)
+    db.flush()
+
+    jetzt = datetime.now(timezone.utc)
+    alt = AiRun(
+        id=f"lgr-{uuid4().hex[:8]}", conversation_id=fenster.id,
+        user_id=user.id, status="cancelled",
+    )
+    neu = AiRun(
+        id=f"lgr-{uuid4().hex[:8]}", conversation_id=fenster.id,
+        user_id=user.id, status="completed",
+    )
+    db.add_all([alt, neu])
+    db.commit()
+
+    alt.updated_at = jetzt - timedelta(seconds=40)
+    neu.updated_at = jetzt - timedelta(seconds=5)
+    db.commit()
+
+    block = ai_lage.lageblock(db, user, mit_workern=True)
+
+    assert "fertig" in block
+    assert "wurde abgebrochen" not in block, (
+        "die abgeloeste Runde erscheint als Abbruch — genau daraus entstand "
+        "die Falschmeldung an den Betreiber"
+    )
+    # Und der Auftrag steht genau einmal da, nicht zweimal.
+    assert block.count("'ASA-XP-und-Ernte konfigurieren'") == 1
+
+
+def test_ein_laufender_lauf_gewinnt_gegen_seine_vorgeschichte(db: Session) -> None:
+    """Ein Auftrag mit offener Runde ist offen — egal was davor war."""
+    from models import AiRun
+
+    user = _benutzer(db, "laufendgewinnt")
+    fenster = AiConversation(
+        id=f"lg-{uuid4().hex[:8]}", user_id=user.id, kind="worker",
+        title="Laeuft noch",
+    )
+    db.add(fenster)
+    db.flush()
+    db.add_all([
+        AiRun(
+            id=f"lgr-{uuid4().hex[:8]}", conversation_id=fenster.id,
+            user_id=user.id, status="cancelled",
+        ),
+        AiRun(
+            id=f"lgr-{uuid4().hex[:8]}", conversation_id=fenster.id,
+            user_id=user.id, status="running",
+        ),
+    ])
+    db.commit()
+
+    block = ai_lage.lageblock(db, user, mit_workern=True)
+    assert "arbeitet" in block
+    assert "wurde abgebrochen" not in block
+    assert block.count("'Laeuft noch'") == 1
+
+
+def test_ein_abgebrochener_auftrag_sagt_das_auch(db: Session) -> None:
+    """"Abgebrochen" soll das Gehirn **lesen**, nicht erraten."""
+    from models import AiRun
+
+    user = _benutzer(db, "abgebrochen")
+    fenster = AiConversation(
+        id=f"lg-{uuid4().hex[:8]}", user_id=user.id, kind="worker",
+        title="Mods aktualisieren",
+    )
+    db.add(fenster)
+    db.flush()
+    db.add(AiRun(
+        id=f"lgr-{uuid4().hex[:8]}", conversation_id=fenster.id,
+        user_id=user.id, status="cancelled",
+    ))
+    db.commit()
+
+    block = ai_lage.lageblock(db, user, mit_workern=True)
+    assert "wurde abgebrochen" in block
+
+
+def test_alte_auftraege_wachsen_dem_block_nicht_zu(db: Session) -> None:
+    """Nach dem Zeitfenster fallen beendete Aufträge wieder heraus.
+
+    Der Lageblock fließt in **jede** Anfrage des Gehirns ein. Bliebe jeder je
+    erledigte Auftrag darin stehen, wüchse er mit der Nutzungsdauer und
+    verteuerte still jede einzelne Anfrage.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from models import AiRun
+
+    user = _benutzer(db, "alteauftraege")
+    fenster = AiConversation(
+        id=f"lg-{uuid4().hex[:8]}", user_id=user.id, kind="worker",
+        title="Uraltes",
+    )
+    db.add(fenster)
+    db.flush()
+    lauf = AiRun(
+        id=f"lgr-{uuid4().hex[:8]}", conversation_id=fenster.id,
+        user_id=user.id, status="completed",
+    )
+    db.add(lauf)
+    db.commit()
+
+    # Weit ausserhalb des Fensters.
+    lauf.updated_at = datetime.now(timezone.utc) - timedelta(
+        minutes=ai_lage._BEENDET_SICHTBAR_MINUTEN + 10
+    )
+    db.commit()
+
+    block = ai_lage.lageblock(db, user, mit_workern=True)
+    assert "'Uraltes'" not in block
+    assert "Aufträge im Hintergrund: keine." in block
+
+
 # ── Die Uhr ───────────────────────────────────────────────────────────────
 
 

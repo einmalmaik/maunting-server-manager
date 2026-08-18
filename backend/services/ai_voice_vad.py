@@ -45,7 +45,36 @@ ABTASTRATE = 24_000
 RAHMEN_MS = 20
 
 #: Wie lange es still sein muss, damit die Äusserung als beendet gilt.
+#:
+#: **Der Wert wächst mit der Länge der Äusserung** (`_stille_grenze`). Der
+#: Anlass ist eine Meldung vom 18.08.2026: der Betreiber wurde beim Diktieren
+#: eines längeren Auftrags mitten im Satz abgeschnitten, weil er kurz Luft
+#: geholt hat. Sein Bild dafür: „ich erzähle was, trinke einen Schluck, das
+#: dauert vielleicht 10–20 Sekunden".
+#:
+#: Eine feste Zahl kann beides nicht: klein genug, damit ein „Ja" sofort
+#: durchgeht, und gross genug, damit eine Denkpause mitten im dritten Satz
+#: nicht als Ende gilt. 0,7 s waren für das Erste richtig und für das Zweite
+#: viel zu knapp.
+#:
+#: Deshalb ist das hier nur noch der **Ausgangswert** für kurze Äusserungen.
 STILLE_SEKUNDEN = 0.7
+
+#: Die Obergrenze, auf die die Stillegrenze bei langer Rede anwächst.
+#:
+#: Wer zwei Sätze am Stück gesprochen hat, ist erkennbar beim Diktieren und
+#: nicht beim Zurufen — dort darf eine Atempause zwei Sekunden dauern, ohne
+#: dass der Satz abgeschickt wird. Höher wäre es nicht mehr angenehm: nach dem
+#: letzten Wort wartet der Mensch diese Zeit tatsächlich ab.
+STILLE_SEKUNDEN_MAX = 2.0
+
+#: Ab welcher gesprochenen Dauer die volle Stillegrenze gilt.
+#:
+#: Dazwischen wird linear interpoliert: ein 1-Sekunden-„Ja" wird nach 0,7 s
+#: abgegeben, ein 6-Sekunden-Satz erst nach 2,0 s. Der Übergang ist gleitend,
+#: damit es keine Schwelle gibt, an der sich das Verhalten sprunghaft ändert —
+#: so etwas fühlt sich für den Sprechenden wie ein Fehler an.
+STILLE_VOLL_AB_SEKUNDEN = 6.0
 
 #: Wie lange am Stück laut sein muss, damit Rede beginnt. Drei Rahmen sind
 #: 60 ms — ein Türklappen ist kürzer, die kürzeste gesprochene Silbe länger.
@@ -79,7 +108,13 @@ NACHFUEHRUNG = 0.05
 #: Wie lange eine Äusserung höchstens dauert, bevor sie auch ohne Pause
 #: abgegeben wird. Die Schranke dahinter, falls jemand ohne Punkt und Komma
 #: spricht oder das Mikrofon in einer lauten Umgebung steht.
-MAX_SEKUNDEN = 30.0
+#:
+#: 30 s waren dafür zu knapp: der Betreiber diktiert längere Aufträge am
+#: Stück, und die wurden mitten im Satz zerteilt — sichtbar wurde das nicht
+#: einmal, denn `Aeusserung.abgeschnitten` wertet die Brücke nicht aus. Zwei
+#: Minuten decken auch einen langen zusammenhängenden Auftrag ab und bleiben
+#: eine wirksame Schranke gegen ein dauerlautes Mikrofon.
+MAX_SEKUNDEN = 120.0
 
 #: Wieviel **laute** Zeit eine Äusserung mindestens enthalten muss.
 #:
@@ -132,6 +167,8 @@ class Pausenerkennung:
         *,
         abtastrate: int = ABTASTRATE,
         stille_sekunden: float = STILLE_SEKUNDEN,
+        stille_sekunden_max: float = STILLE_SEKUNDEN_MAX,
+        stille_voll_ab_sekunden: float = STILLE_VOLL_AB_SEKUNDEN,
         vorlauf_sekunden: float = VORLAUF_SEKUNDEN,
         max_sekunden: float = MAX_SEKUNDEN,
         min_sekunden: float = MIN_SEKUNDEN,
@@ -139,6 +176,12 @@ class Pausenerkennung:
         self._abtastrate = abtastrate
         self._rahmen_bytes = abtastrate * RAHMEN_MS // 1000 * 2
         self._stille_rahmen = max(1, int(stille_sekunden * 1000 / RAHMEN_MS))
+        # Die Obergrenze darf nie unter dem Ausgangswert liegen — sonst würde
+        # längeres Sprechen die Pause *verkürzen*, also genau das Gegenteil.
+        self._stille_rahmen_max = max(
+            self._stille_rahmen, int(stille_sekunden_max * 1000 / RAHMEN_MS)
+        )
+        self._voll_ab_rahmen = max(1, int(stille_voll_ab_sekunden * 1000 / RAHMEN_MS))
         self._vorlauf_rahmen = max(0, int(vorlauf_sekunden * 1000 / RAHMEN_MS))
         self._max_bytes = int(max_sekunden * abtastrate * 2)
         self._min_laute_rahmen = max(1, int(min_sekunden * 1000 / RAHMEN_MS))
@@ -204,6 +247,24 @@ class Pausenerkennung:
 
     # ── innen ─────────────────────────────────────────────────────────────
 
+    def _stille_grenze(self) -> int:
+        """Wie viele stille Rahmen das Ende bedeuten — je nach bisheriger Länge.
+
+        Ein „Ja" soll sofort durchgehen, ein diktierter Absatz eine Atempause
+        vertragen. Eine feste Zahl kann nur eines von beidem. Deshalb wächst
+        die Grenze linear mit der **laut gesprochenen** Zeit: bei kurzer
+        Äusserung `STILLE_SEKUNDEN`, ab `STILLE_VOLL_AB_SEKUNDEN` der volle
+        Wert `STILLE_SEKUNDEN_MAX`, dazwischen anteilig.
+
+        Gemessen wird die laute Zeit und nicht die Gesamtlänge: Pausen sollen
+        die Geduld nicht auch noch selbst verlängern, sonst wartet die
+        Erkennung nach einer langen Pause noch länger und der Sprechende
+        bekommt gar keine Antwort mehr.
+        """
+        anteil = min(1.0, self._laute_gesamt / self._voll_ab_rahmen)
+        spanne = self._stille_rahmen_max - self._stille_rahmen
+        return self._stille_rahmen + int(spanne * anteil)
+
     def _rahmen_verarbeiten(self, rahmen: bytes) -> Aeusserung | None:
         pegel = _effektivwert(rahmen)
         schwelle = max(MINDESTPEGEL, self._grundpegel * PEGELFAKTOR)
@@ -242,7 +303,7 @@ class Pausenerkennung:
             self._laute_gesamt += 1
         else:
             self._stille_zaehler += 1
-            if self._stille_zaehler >= self._stille_rahmen:
+            if self._stille_zaehler >= self._stille_grenze():
                 return self._abgeben(abgeschnitten=False)
         if self._aufnahme_bytes >= self._max_bytes:
             return self._abgeben(abgeschnitten=True)

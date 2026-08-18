@@ -247,7 +247,23 @@ def test_the_brain_does_not_announce_what_it_is_about_to_do() -> None:
     )
     # Und der Ersatz ist da — samt der Zusage, dass das Gespräch weitergeht.
     assert "Kuendige nichts an." in gehirn
-    assert "Kein Arbeitsplan" in gehirn
+    # Die Verschärfung vom 18.08.2026: der Ton kam trotz des ersten Anlaufs
+    # zurück ("Ich prüfe den ASA-Server auf die richtigen Konfigurationswerte").
+    # Ein Verbot mit Beispielen wirkt, wo eine Beschreibung es nicht tat.
+    assert "Arbeitsbericht in der Zukunftsform" in gehirn
+    assert '"Ich pruefe"' in gehirn
+
+
+def test_the_brain_is_told_not_to_repeat_the_request_back() -> None:
+    """Das Thema aufzuzählen ist die zweite Haelfte des gemeldeten Tons.
+
+    "Ich prüfe den ASA-Server auf die richtigen Konfigurationswerte" sagt dem
+    Betreiber genau das zurück, was er gerade selbst gesagt hat. Menschen tun
+    das nicht — es klingt, als hätte man nicht zugehört.
+    """
+    gehirn = ai_prompt.build(rolle="gehirn")
+
+    assert "Zaehl auch nicht auf, worum es geht" in gehirn
 
 
 def test_the_brain_keeps_the_conversation_open_after_a_receipt() -> None:
@@ -258,7 +274,10 @@ def test_the_brain_keeps_the_conversation_open_after_a_receipt() -> None:
     """
     gehirn = ai_prompt.build(rolle="gehirn")
 
-    assert "Nach der Quittung ist das Gespraech **offen**" in gehirn
+    assert "Nach der Quittung ist das Gespraech offen" in gehirn
+    # Und der Nachtrag: was ihm zum laufenden Auftrag noch einfaellt, geht an
+    # den Worker weiter, statt bis zum Ergebnis zu warten.
+    assert "worker_antwort" in gehirn
 
 
 def test_an_incoming_result_gets_a_transition_not_a_dump() -> None:
@@ -285,7 +304,7 @@ def test_the_receipt_duty_is_stated_once_and_not_twice() -> None:
     einer Stelle.
     """
     assert "das ist die Quittung, und es gibt keine zweite" not in ai_prompt.GEHIRN
-    assert "bestaetige ihn" in ai_prompt.GEHIRN_QUITTUNG
+    assert "antworte wie" in ai_prompt.GEHIRN_QUITTUNG
 
 
 def test_the_worker_still_narrates_its_own_run() -> None:

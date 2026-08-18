@@ -25,7 +25,7 @@ am dringendsten: dort sitzt niemand daneben, den man fragen könnte.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import or_
@@ -139,19 +139,59 @@ _WORKER_WORTE = {
     "waiting_wake": "schläft bis zum nächsten Wecken",
 }
 
+#: Aufträge, die **fertig** sind — und trotzdem in die Lage gehören.
+#:
+#: Gemeldet am 18.08.2026: ein Worker hatte sauber gearbeitet und berichtet,
+#: das Gehirn sagte dem Betreiber danach trotzdem, der Auftrag sei
+#: abgebrochen worden. Abgebrochen war nichts.
+#:
+#: Der Grund steckte in der Auswahl: die Zeile führte ausschließlich laufende
+#: Aufträge. Ein fertiger verschwand daraus spurlos — im selben Zug, in dem
+#: das Gehirn sein Ergebnis lieferte. Für das Modell sah das aus wie „war
+#: eben noch da, ist jetzt weg", und die naheliegendste Erklärung dafür ist
+#: ein Abbruch. Es hat also nichts halluziniert, sondern die einzige Lücke
+#: gefüllt, die der Lageblock ihm gelassen hat.
+#:
+#: Deshalb stehen erledigte Aufträge jetzt eine Weile weiter drin, mit
+#: ausdrücklichem Wort. `cancelled` ist bewusst dabei: „wurde abgebrochen"
+#: soll das Gehirn *lesen* können, statt es zu erraten.
+_WORKER_WORTE_BEENDET = {
+    "completed": "fertig",
+    "cancelled": "wurde abgebrochen",
+    "failed": "ist gescheitert",
+}
+
+#: Wie lange ein beendeter Auftrag noch in der Lage steht.
+#:
+#: Lang genug, dass die Runde, in der das Gehirn das Ergebnis liefert, ihn
+#: noch sieht — und die zwei, drei Rückfragen danach ebenfalls. Kurz genug,
+#: dass der Block nicht mit alten Aufträgen zuwächst; er fließt in **jede**
+#: Anfrage des Gehirns ein.
+_BEENDET_SICHTBAR_MINUTEN = 30
+
 
 def _worker_zeile(db: Session, user: User) -> str:
-    """Die laufenden Hintergrund-Aufträge dieses Benutzers, in einer Zeile.
+    """Die Hintergrund-Aufträge dieses Benutzers, in einer Zeile.
 
     Damit beantwortet das Gehirn "Wie weit bist du?" ohne Werkzeugrunde
     (docs/agentic-framework.md, §3). Auch der Leerfall wird gesagt: ein Gehirn,
     das die Zeile nur bei laufenden Aufträgen sähe, könnte "keine" nicht von
     "weiß ich nicht" unterscheiden — und genau aus dieser Lücke erfindet ein
     Modell Fortschritt.
+
+    Aus demselben Grund stehen **kürzlich beendete** Aufträge mit drin
+    (`_WORKER_WORTE_BEENDET`). Ohne sie verschwand ein fertiger Auftrag
+    spurlos aus der Lage, und zwar genau in der Runde, in der das Gehirn sein
+    Ergebnis lieferte — woraufhin es dem Betreiber erzählte, der Auftrag sei
+    abgebrochen worden. Was verschwindet, ohne dass jemand sagt warum, wird
+    geraten.
     """
     from models import AiConversation, AiRun
 
-    zeilen = (
+    jetzt = datetime.now(timezone.utc)
+    seit_grenze = jetzt - timedelta(minutes=_BEENDET_SICHTBAR_MINUTEN)
+
+    offene = (
         db.query(AiRun, AiConversation.title)
         .join(AiConversation, AiConversation.id == AiRun.conversation_id)
         .filter(
@@ -163,18 +203,78 @@ def _worker_zeile(db: Session, user: User) -> str:
         .limit(10)
         .all()
     )
-    if not zeilen:
+    # Beendete getrennt und mit Zeitfenster: sie sollen die laufenden nicht
+    # aus der Liste draengen, wenn ein Benutzer viele Aufträge hintereinander
+    # gestellt hat.
+    beendete = (
+        db.query(AiRun, AiConversation.title)
+        .join(AiConversation, AiConversation.id == AiRun.conversation_id)
+        .filter(
+            AiConversation.kind == "worker",
+            AiRun.user_id == user.id,
+            AiRun.status.in_(tuple(_WORKER_WORTE_BEENDET)),
+            AiRun.updated_at >= seit_grenze,
+        )
+        .order_by(AiRun.updated_at.desc())
+        .limit(5)
+        .all()
+    )
+
+    if not offene and not beendete:
         return "Aufträge im Hintergrund: keine."
-    jetzt = datetime.now(timezone.utc)
-    teile = []
-    for run, titel in zeilen:
+
+    # **Pro Auftrag nur der juengste Lauf.**
+    #
+    # Ein Auftrag kann mehrere Laeufe haben: reicht der Benutzer etwas nach,
+    # wird der laufende abgeloest (`cancelled`) und ein neuer beginnt. Diese
+    # Abloesung ist Innenleben, kein Ereignis — genau daraus ist am
+    # 18.08.2026 die Falschmeldung entstanden. Der Bestand zeigt es:
+    #
+    #   66e656de  cancelled  geaendert 23:27:15.995
+    #   14adf4b7  completed  erstellt  23:27:15.989
+    #
+    # Beide gehoeren zu einem einzigen Auftrag, der sauber fertig wurde. Wer
+    # dem Gehirn beide zeigt, laesst es zwischen "abgebrochen" und "fertig"
+    # waehlen — und es waehlt das Auffaelligere.
+    #
+    # Der Zustand eines Auftrags ist deshalb der Zustand seines juengsten
+    # Laufs. Ein laufender gewinnt immer, denn ein Auftrag mit offenem Lauf
+    # ist offen, egal was seine Vorgaenger taten.
+    je_fenster: dict[str, tuple] = {}
+    for run, titel in list(offene) + list(beendete):
+        vorhanden = je_fenster.get(run.conversation_id)
+        if vorhanden is None:
+            je_fenster[run.conversation_id] = (run, titel)
+            continue
+        alt = vorhanden[0]
+        alt_offen = str(alt.status) in _WORKER_WORTE
+        neu_offen = str(run.status) in _WORKER_WORTE
+        if neu_offen and not alt_offen:
+            je_fenster[run.conversation_id] = (run, titel)
+        elif neu_offen == alt_offen:
+            neuer = run.updated_at or run.created_at
+            aelter = alt.updated_at or alt.created_at
+            if neuer is not None and aelter is not None and neuer > aelter:
+                je_fenster[run.conversation_id] = (run, titel)
+
+    def _beschreiben(run, titel: str | None) -> str:
         seit = run.created_at
         if seit is not None and seit.tzinfo is None:
             seit = seit.replace(tzinfo=timezone.utc)
         minuten = max(0, int((jetzt - seit).total_seconds() // 60)) if seit else 0
         dauer = f"seit {minuten} min" if minuten < 120 else f"seit {minuten // 60} h"
-        wort = _WORKER_WORTE.get(str(run.status), str(run.status))
-        teile.append(f"'{titel or 'Auftrag'}' ({wort}, {dauer}, id {run.conversation_id})")
+        schluessel = str(run.status)
+        wort = _WORKER_WORTE.get(
+            schluessel, _WORKER_WORTE_BEENDET.get(schluessel, schluessel)
+        )
+        return f"'{titel or 'Auftrag'}' ({wort}, {dauer}, id {run.conversation_id})"
+
+    # Laufende zuerst: sie sind das, wonach gefragt wird.
+    sortiert = sorted(
+        je_fenster.values(),
+        key=lambda paar: (str(paar[0].status) not in _WORKER_WORTE, paar[0].created_at),
+    )
+    teile = [_beschreiben(run, titel) for run, titel in sortiert]
     return "Aufträge im Hintergrund: " + "; ".join(teile) + "."
 
 

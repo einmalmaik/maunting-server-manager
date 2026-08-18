@@ -297,3 +297,96 @@ def test_anfuehrungszeichen_um_das_transkript_fallen_weg() -> None:
     # anderes Ergebnis, und es zu retten hiesse zu raten.
     erzaehlt = "Der Sprecher fragt, ob der Server laeuft."
     assert ai_stt._saeubern(erzaehlt) == erzaehlt
+
+
+# ── Die Geduld waechst mit der Laenge ─────────────────────────────────
+#
+# Gemeldet am 18.08.2026: der Betreiber wurde beim Diktieren eines laengeren
+# Auftrags mitten im Satz abgeschnitten, weil er kurz Luft geholt hat. Sein
+# Bild dafuer: "ich erzaehle was, trinke einen Schluck, das dauert vielleicht
+# 10-20 Sekunden". Gleichzeitig soll ein kurzes "Ja" weiterhin sofort
+# durchgehen — eine feste Nachlaufzeit kann nur eines von beidem.
+
+
+def test_ein_kurzes_ja_geht_weiterhin_sofort_durch() -> None:
+    """Die Geduld darf die schnelle Antwort nicht ausbremsen.
+
+    Wer nur zustimmt, wartet sonst zwei Sekunden auf die Reaktion — im
+    Gespraech ist das eine Ewigkeit und fuehlt sich an, als haenge das Panel.
+    """
+    erkennung = ai_voice_vad.Pausenerkennung()
+
+    erkennung.fuettern(_stille(0.5))
+    erkennung.fuettern(_ton(0.4, pegel=6000))
+    assert erkennung.spricht is True
+
+    # Knapp ueber STILLE_SEKUNDEN: bei kurzer Rede reicht das.
+    aeusserung = erkennung.fuettern(_stille(0.9))
+
+    assert aeusserung is not None, (
+        "ein kurzes Ja wartet auf die volle Geduld — dann fuehlt sich jede "
+        "schnelle Antwort langsam an"
+    )
+
+
+def test_eine_atempause_im_diktat_beendet_den_satz_nicht() -> None:
+    """Nach laengerem Sprechen darf die Pause deutlich laenger sein.
+
+    Das ist der gemeldete Fall: ein diktierter Auftrag, mitten darin ein
+    Schluck Wasser. Mit der alten festen Nachlaufzeit von 0,7 s war der Satz
+    an dieser Stelle weg.
+    """
+    erkennung = ai_voice_vad.Pausenerkennung()
+
+    erkennung.fuettern(_stille(0.5))
+    # Lange genug fuer die volle Geduld (STILLE_VOLL_AB_SEKUNDEN).
+    erkennung.fuettern(_ton(7.0, pegel=6000))
+    assert erkennung.spricht is True
+
+    # Eine Pause, die frueher das Ende bedeutet haette.
+    assert erkennung.fuettern(_stille(1.2)) is None, (
+        "die Atempause hat den Satz beendet — genau der gemeldete Fehler"
+    )
+
+    # Weiterreden geht, und der Satz bleibt einer.
+    erkennung.fuettern(_ton(1.0, pegel=6000))
+    aeusserung = erkennung.fuettern(_stille(2.5))
+
+    assert aeusserung is not None
+    assert aeusserung.sekunden > 8.0, "der Satz wurde in Stuecke zerlegt"
+
+
+def test_die_geduld_waechst_und_bleibt_begrenzt() -> None:
+    """Die Grenze steigt mit der lauten Zeit — und nicht darueber hinaus.
+
+    Ohne Deckel wuerde ein langes Diktat die Wartezeit immer weiter
+    verlaengern, bis am Ende gar keine Antwort mehr kaeme.
+    """
+    erkennung = ai_voice_vad.Pausenerkennung()
+
+    # Frisch: der Ausgangswert.
+    assert erkennung._stille_grenze() == erkennung._stille_rahmen
+
+    erkennung.fuettern(_stille(0.5))
+    erkennung.fuettern(_ton(1.0, pegel=6000))
+    nach_kurz = erkennung._stille_grenze()
+
+    erkennung.fuettern(_ton(6.0, pegel=6000))
+    nach_lang = erkennung._stille_grenze()
+
+    assert nach_kurz > erkennung._stille_rahmen or nach_kurz == erkennung._stille_rahmen
+    assert nach_lang > nach_kurz, "die Geduld ist nicht mitgewachsen"
+    assert nach_lang <= erkennung._stille_rahmen_max, "die Geduld kennt keinen Deckel"
+
+
+def test_ein_langes_diktat_wird_nicht_mitten_im_satz_zerteilt() -> None:
+    """`MAX_SEKUNDEN` schneidet erst weit jenseits eines normalen Auftrags.
+
+    Die Schranke bleibt noetig (ein dauerlautes Mikrofon soll nicht endlos
+    aufnehmen), darf aber kein zusammenhaengendes Diktat treffen. Dass sie
+    zuschlaegt, merkt der Sprechende naemlich nicht: `abgeschnitten` wertet
+    die Bruecke gar nicht aus.
+    """
+    assert ai_voice_vad.MAX_SEKUNDEN >= 90.0, (
+        "unter anderthalb Minuten wird ein diktierter Auftrag zerteilt"
+    )
