@@ -132,7 +132,13 @@ def aus_modell(modell: Modell | None) -> Fenster:
     )
 
 
-async def ermitteln(client: httpx.AsyncClient, provider: AiProvider) -> Fenster:
+async def ermitteln(
+    client: httpx.AsyncClient,
+    provider: AiProvider,
+    *,
+    db=None,
+    user_id: int | None = None,
+) -> Fenster:
     """Das Fenster des eingestellten Modells dieses Providers.
 
     Die **einzige** Stelle, die Katalog und Rechnung zusammenfuehrt — genau wie
@@ -143,11 +149,29 @@ async def ermitteln(client: httpx.AsyncClient, provider: AiProvider) -> Fenster:
     nichts. Faellt er aus, faengt ``ai_model_catalog`` das bereits ab und
     liefert den letzten Stand oder eine leere Liste; hier kommt dann ``None``
     an und daraus ``unbekannt()``.
+
+    ``db`` und ``user_id`` sind der Weg zum **Katalogschluessel**. Ohne sie
+    wird ohne Schluessel gefragt, und ein Katalog hinter einem Schluessel
+    (OpenAI) antwortet dann mit 401 — was hier als „Modell unbekannt\" ankommt
+    und auf ``RUECKFALL_NUTZBAR_TOKENS`` fuehrt. Gemessen am 19.08.2026:
+
+        OpenAI ohne Schluessel -> bekannt=False, nutzbar=6.000
+        OpenAI mit Schluessel  -> bekannt=True,  nutzbar=829.800
+
+    Der Chat wurde also bei einem Hundertachtunddreissigstel des tatsaechlichen
+    Fensters zusammengefasst. Beide Werte sind optional, damit Aufrufer ohne
+    Sitzung (Tests, reine Anzeigepfade) nichts mitschleppen muessen, was sie
+    nicht haben.
     """
     try:
-        modell = await ai_model_catalog.finde(
-            client, provider.provider_kind, provider.default_model
-        )
+        if db is not None and user_id is not None:
+            modell = await ai_model_catalog.fuer_provider(
+                client, db, provider, user_id=user_id
+            )
+        else:
+            modell = await ai_model_catalog.finde(
+                client, provider.provider_kind, provider.default_model or ""
+            )
     except Exception as exc:
         # Der Katalog faengt seine eigenen Fehler ab; was hier noch ankommt,
         # ist unerwartet. Es darf trotzdem keinen Chat anhalten.

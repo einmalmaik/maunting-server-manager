@@ -384,7 +384,7 @@ async def get_context_status(
     db.commit()
 
     fenster = await ai_context_window.ermitteln(
-        request.app.state.ai_http_client, provider
+        request.app.state.ai_http_client, provider, db=db, user_id=user.id
     )
     context_chars = fenster.zeichen if fenster.bekannt else None
     grenzen = ai_context_service.teilbudgets(context_chars)
@@ -631,7 +631,7 @@ async def stream_message(
         # mit demselben Budget rechnen wie der erste Zug, auch wenn der
         # Betreiber zwischendurch das Modell wechselt.
         fenster = await ai_context_window.ermitteln(
-            request.app.state.ai_http_client, provider
+            request.app.state.ai_http_client, provider, db=db, user_id=user.id
         )
         # Ab hier reisen nur noch **Kennungen** weiter. Der Anlauf legt sich
         # gleich eine eigene Sitzung in einem eigenen Thread an, und die des

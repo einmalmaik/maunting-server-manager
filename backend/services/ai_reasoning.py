@@ -310,8 +310,8 @@ async def vorgabe(
     greift wieder, sobald der Katalog antwortet; bis dahin steht es im
     Protokoll, statt still zu passieren.
     """
-    modell = await ai_model_catalog.finde(
-        client, provider.provider_kind, provider.default_model,
+    modell = await ai_model_catalog.fuer_provider(
+        client, db, provider, user_id=user.id
     )
     deckel = ai_limit_service.resolve_effective_limits(db, user).max_reasoning_effort
     if modell is None:

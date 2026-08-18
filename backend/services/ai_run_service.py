@@ -805,7 +805,9 @@ async def vorflug(
     denken, stufe = await ai_reasoning.vorgabe(
         client, db, user=user, provider=anbieter, aktiv=False, wunsch=None
     )
-    fenster = await ai_context_window.ermitteln(client, anbieter)
+    fenster = await ai_context_window.ermitteln(
+        client, anbieter, db=db, user_id=user.id
+    )
     return Vorflug(anbieter=anbieter, denken=denken, stufe=stufe, fenster=fenster), anbieter
 
 

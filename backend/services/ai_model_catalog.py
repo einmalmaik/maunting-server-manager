@@ -787,6 +787,61 @@ async def finde(
     return None
 
 
+async def fuer_provider(
+    client: httpx.AsyncClient,
+    db,
+    provider,
+    *,
+    user_id: int,
+) -> Modell | None:
+    """Das eingestellte Modell eines Providers — mit Schlüssel, wenn nötig.
+
+    **Die eine Stelle, die weiß, dass manche Kataloge einen Schlüssel wollen.**
+    Ohne sie musste jeder Aufrufer daran denken, und wer es vergaß, bekam kein
+    Fehlerbild, sondern ein stilles ``None``: der Katalog antwortet mit 401,
+    `modelle` faengt das ab, und uebrig bleibt "dieses Modell kenne ich nicht".
+
+    Genau das ist zweimal passiert. Bei den Denkstufen fehlten daraufhin im
+    Panel alle Stufen (behoben am 18.08.2026 in `routers/ai_providers.py`), und
+    beim Kontextfenster rechnete MSM statt mit 829.800 nutzbaren Token mit dem
+    Rueckfall von 6.000 — bei einem Modell mit 1.050.000 Token Fenster. Der
+    Betreiber sah "Das Kontextfenster dieses Modells ist nicht bekannt" und
+    einen Chat, der viel zu frueh zusammengefasst wurde.
+
+    Der Schluesselabruf laeuft im Threadpool: `resolve_api_key` geht ueber den
+    DIS-Sidecar und macht dort ein synchrones ``httpx.post``. In der
+    Ereignisschleife waere das eine blockierende Runde fuer alle.
+
+    Schlaegt der Abruf fehl, wird **ohne** Schluessel gefragt statt gar nicht:
+    bei Anbietern mit offener Liste (OpenRouter) ist das die richtige Antwort,
+    und bei den anderen ist ein stilles ``None`` immer noch besser als ein
+    Fehler, der den Chat anhaelt.
+    """
+    from starlette.concurrency import run_in_threadpool
+
+    from services import ai_provider_registry
+    from services.ai_provider_service import resolve_api_key
+
+    kind = provider.provider_kind
+    modell_id = provider.default_model or ""
+    if not modell_id:
+        return None
+
+    schluessel: str | None = None
+    if ai_provider_registry.anbieter(kind).katalog_braucht_schluessel:
+        try:
+            schluessel = await run_in_threadpool(
+                resolve_api_key, db, provider, user_id
+            )
+        except Exception as exc:
+            logger.warning(
+                "Katalogschluessel nicht ladbar kind=%s error=%s",
+                kind, type(exc).__name__,
+            )
+
+    return await finde(client, kind, modell_id, schluessel=schluessel)
+
+
 async def aufraeumen() -> None:
     """Laufende Auffrischungen beenden, bevor die Anwendung schliesst.
 

@@ -268,3 +268,147 @@ def test_an_ordinary_user_cannot_move_the_mark(
 
     assert antwort.status_code == 403
     assert ai_context_window.schwelle_prozent() == ai_context_window.STANDARD_SCHWELLE
+
+
+# ── Der Katalogschluessel ─────────────────────────────────────────────
+#
+# Gemeldet am 19.08.2026: im Panel stand "Das Kontextfenster dieses Modells
+# ist nicht bekannt. MSM rechnet mit einem vorsichtigen Rueckfallwert." — bei
+# einem Modell mit 1.050.000 Token Fenster. Gemessen:
+#
+#     OpenAI ohne Schluessel -> bekannt=False, nutzbar=6.000
+#     OpenAI mit Schluessel  -> bekannt=True,  nutzbar=829.800
+#
+# Der Chat wurde also bei einem Hundertachtunddreissigstel des tatsaechlichen
+# Fensters zusammengefasst. Ursache: `ermitteln` fragte den Katalog ohne
+# Schluessel, OpenAI antwortete mit 401, und `modelle` faengt das ab — uebrig
+# blieb ein stilles "Modell unbekannt". Derselbe Fehler wie bei den
+# Denkstufen, nur an einer zweiten Stelle.
+
+
+@pytest.mark.asyncio
+async def test_the_window_is_fetched_with_a_key_when_the_catalog_needs_one(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein Katalog hinter einem Schluessel bekommt ihn auch.
+
+    Ohne den Schluessel ist die Antwort nicht "Fehler", sondern "unbekannt" —
+    und "unbekannt" fuehrt auf den Rueckfall. Ein stiller Faktor 138.
+    """
+    from services import ai_model_catalog
+
+    provider = AiProvider(
+        name="OpenAI", provider_kind="openai",
+        default_model="gpt-5.6-luna", enabled=True, requires_api_key=True,
+    )
+    db.add(provider)
+    db.commit()
+    db.refresh(provider)
+
+    gesehen: dict = {}
+
+    async def gefaelschtes_finde(client, kind, model_id, *, schluessel=None):
+        gesehen["schluessel"] = schluessel
+        if not schluessel:
+            return None  # genau das tut OpenAI: 401 -> None
+        return Modell(
+            model_id=model_id, name=model_id, kontext_tokens=1_050_000,
+            max_ausgabe_tokens=128_000, denkt=True,
+        )
+
+    monkeypatch.setattr(ai_model_catalog, "finde", gefaelschtes_finde)
+    monkeypatch.setattr(
+        "services.ai_provider_service.resolve_api_key",
+        lambda db_, p, uid: "sk-geheim-nicht-loggen",
+    )
+
+    fenster = await ai_context_window.ermitteln(
+        None, provider, db=db, user_id=1  # type: ignore[arg-type]
+    )
+
+    assert gesehen["schluessel"], "der Katalog wurde ohne Schluessel gefragt"
+    assert fenster.bekannt is True
+    assert fenster.fenster_tokens == 1_050_000
+    assert fenster.nutzbar_tokens > 500_000, (
+        "das Fenster fiel auf den Rueckfall zurueck"
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_open_catalog_is_not_asked_for_a_key(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OpenRouters Liste ist offen — dort waere ein Schluesselabruf Aufwand ohne Zweck.
+
+    Der Abruf geht ueber den DIS-Sidecar und kostet einen Threadpool-Sprung.
+    Ihn fuer einen Katalog zu tun, der ihn gar nicht auswertet, waere Arbeit
+    bei jeder einzelnen Anfrage.
+    """
+    from services import ai_model_catalog
+
+    provider = AiProvider(
+        name="OpenRouter", provider_kind="openrouter",
+        default_model="openai/gpt-5.6-luna", enabled=True, requires_api_key=False,
+    )
+    db.add(provider)
+    db.commit()
+    db.refresh(provider)
+
+    gesehen: dict = {}
+
+    async def gefaelschtes_finde(client, kind, model_id, *, schluessel=None):
+        gesehen["schluessel"] = schluessel
+        return Modell(
+            model_id=model_id, name=model_id, kontext_tokens=1_050_000,
+            max_ausgabe_tokens=128_000, denkt=True,
+        )
+
+    def kein_abruf(db_, p, uid):
+        raise AssertionError("resolve_api_key darf hier nicht gerufen werden")
+
+    monkeypatch.setattr(ai_model_catalog, "finde", gefaelschtes_finde)
+    monkeypatch.setattr("services.ai_provider_service.resolve_api_key", kein_abruf)
+
+    fenster = await ai_context_window.ermitteln(
+        None, provider, db=db, user_id=1  # type: ignore[arg-type]
+    )
+
+    assert gesehen["schluessel"] is None
+    assert fenster.bekannt is True
+
+
+@pytest.mark.asyncio
+async def test_a_failing_key_lookup_does_not_stop_the_chat(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Faellt der Sidecar aus, wird ohne Schluessel gefragt statt gar nicht.
+
+    Das Ergebnis ist dann der Rueckfall — knapp, aber nutzbar. Eine Ausnahme
+    an dieser Stelle haette den Chat angehalten, und zwar wegen einer
+    Nebensache: MSM wollte nur wissen, wie gross das Fenster ist.
+    """
+    from services import ai_model_catalog
+
+    provider = AiProvider(
+        name="OpenAI", provider_kind="openai",
+        default_model="gpt-5.6-luna", enabled=True, requires_api_key=True,
+    )
+    db.add(provider)
+    db.commit()
+    db.refresh(provider)
+
+    async def gefaelschtes_finde(client, kind, model_id, *, schluessel=None):
+        return None
+
+    def kaputt(db_, p, uid):
+        raise RuntimeError("Sidecar nicht erreichbar")
+
+    monkeypatch.setattr(ai_model_catalog, "finde", gefaelschtes_finde)
+    monkeypatch.setattr("services.ai_provider_service.resolve_api_key", kaputt)
+
+    fenster = await ai_context_window.ermitteln(
+        None, provider, db=db, user_id=1  # type: ignore[arg-type]
+    )
+
+    assert fenster.bekannt is False
+    assert fenster.nutzbar_tokens == ai_context_window.RUECKFALL_NUTZBAR_TOKENS
