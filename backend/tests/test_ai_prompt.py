@@ -18,6 +18,8 @@ Datei weiter.
 
 from __future__ import annotations
 
+import re
+
 from services import ai_prompt
 
 
@@ -426,6 +428,70 @@ def test_only_the_worker_gets_the_truncation_rule() -> None:
     """
     assert "abgeschnitten, gekürzt" not in ai_prompt.build()
     assert "abgeschnitten, gekürzt" not in ai_prompt.build(rolle="gehirn")
+
+
+# ── Keine Mustersaetze im Prompt ──────────────────────────────────────
+#
+# Der Betreiber am 19.08.2026: "er scheint das Wort 'Alles klar' sehr zu
+# moegen xD ich hasse das". Fuenfmal woertlich in einem Verlauf — und die
+# Wendung stand als Beispiel in GEHIRN_QUITTUNG ("Alles klar, mach ich."),
+# zusammen mit "Hab ich ihm durchgegeben.", das obendrein den Worker verriet.
+#
+# Dasselbe war schon am 16.08.2026 passiert: die KI sagte fast woertlich das
+# Beispiel aus MITREDEN. Der Befund wurde damals im Kommentar festgehalten —
+# das Beispiel blieb trotzdem stehen.
+#
+# Ein Mustersatz im Prompt ist fuer ein Sprachmodell keine Illustration,
+# sondern die wahrscheinlichste Fortsetzung.
+
+
+def test_no_role_prompt_hands_the_model_a_ready_made_sentence() -> None:
+    """Was in Anfuehrungszeichen im Prompt steht, kommt woertlich zurueck.
+
+    Der Test sucht vollstaendige Saetze in doppelten Anfuehrungszeichen —
+    also genau die Form, in der ein Beispiel dasteht. Verbote wie "Ich
+    pruefe" oder Aufzaehlungen einzelner Woerter bleiben erlaubt: sie sind
+    kuerzer als die Grenze und tragen kein Satzzeichen.
+
+    Faellt dieser Test, steht wieder eine Formel im Prompt. Die Loesung ist
+    nicht, die Grenze zu lockern, sondern die **Form** zu beschreiben statt
+    den Satz.
+    """
+    muster = re.compile(r'"([A-ZÄÖÜ][^"]{8,70}?[.!?])"')
+
+    for rolle in ("voll", "gehirn", "worker"):
+        prompt = ai_prompt.build(rolle=rolle) if rolle != "voll" else ai_prompt.build()
+        treffer = list(dict.fromkeys(muster.findall(prompt)))
+        assert not treffer, (
+            f"Rolle {rolle!r} bekommt fertige Saetze mitgeliefert und wird sie "
+            f"nachplappern: {treffer}"
+        )
+
+
+def test_the_brain_is_told_to_vary_its_acknowledgement() -> None:
+    """Statt eines Beispielsatzes steht dort jetzt die Anforderung selbst.
+
+    Ein Verbot allein reicht nicht — ohne Ersatz greift das Modell zur
+    naechstliegenden Formel und wiederholt die.
+    """
+    assert "jedes Mal ein anderer" in ai_prompt.GEHIRN_QUITTUNG
+    assert "Standardformel" in ai_prompt.GEHIRN_QUITTUNG
+    assert "schon einmal benutzt" in ai_prompt.GEHIRN_QUITTUNG
+
+
+def test_the_brain_never_mentions_the_machinery() -> None:
+    """"Hab ich ihm durchgegeben." verriet den Worker.
+
+    Der Betreiber sieht die Worker nicht und soll sie nicht sehen. Ein "ihm"
+    macht aus einer Zusage einen Hinweis auf einen Dritten, von dem er nichts
+    weiss.
+    """
+    quittung = ai_prompt.GEHIRN_QUITTUNG
+
+    assert "durchgegeben" in quittung, "das Verbot nennt das gemeldete Wort"
+    assert "ohne den Apparat zu erwaehnen" in quittung
+    # Und es steht als Verbot da, nicht als Beispiel.
+    assert '"Hab ich ihm durchgegeben."' not in quittung
 
 
 # ── Wen der Worker eigentlich anspricht ───────────────────────────────

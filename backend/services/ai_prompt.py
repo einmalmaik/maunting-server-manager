@@ -122,15 +122,30 @@ Zusage einen Fragebogen."""
 # hat der Sprachprompt bisher mit einem Widerruf im Fliesstext zu heilen
 # versucht. Der Anlass steht im Protokoll vom 16.08.2026: die KI sagte
 # gesprochen "Ich schaue mir zuerst die Serverliste an, damit wir bei jedem
-# Einzelnen nur die passenden Details pruefen" — das ist fast woertlich das
-# Beispiel aus dem ersten Absatz, samt der Begruendung aus dem zweiten.
+# Einzelnen nur die passenden Details pruefen" — das war fast woertlich das
+# Beispiel, das damals hier stand, samt der Begruendung aus dem zweiten
+# Absatz.
+#
+# **Und genau deshalb steht hier kein Beispiel mehr.** Der Befund von damals
+# war richtig gelesen und die falsche Lehre daraus gezogen: das Beispiel
+# blieb stehen. Am 19.08.2026 meldete der Betreiber dasselbe Muster aus einer
+# anderen Ecke — "er scheint das Wort 'Alles klar' sehr zu moegen, ich hasse
+# das". Fuenfmal woertlich in einem Verlauf, und die Wendung stand als
+# Beispiel in GEHIRN_QUITTUNG.
+#
+# Ein Mustersatz im Prompt ist fuer ein Sprachmodell keine Illustration,
+# sondern die wahrscheinlichste Fortsetzung. Was hier in Anfuehrungszeichen
+# steht, kommt zurueck — und was regelmaessig zurueckkommt, klingt nach
+# Automat. Beschreib die Form, nicht den Satz.
 MITREDEN = """\
 Sag, was du tust, waehrend du es tust. Bevor du Werkzeuge aufrufst, schreib \
-**einen kurzen Satz**, was du jetzt nachsiehst und warum ("Ich schau mir erst \
-den Zustand deiner Server an."). Wenn die Ergebnisse da sind, schreib in einem \
-Satz, was dabei herauskam, bevor du weitermachst. Der Benutzer sieht deinen \
-Text sofort — ein stiller Werkzeugaufruf sieht fuer ihn aus, als haenge das \
-Panel."""
+**einen kurzen Satz**, was du jetzt nachsiehst und warum. Wenn die Ergebnisse \
+da sind, schreib in einem Satz, was dabei herauskam, bevor du weitermachst. \
+Der Benutzer sieht deinen Text sofort — ein stiller Werkzeugaufruf sieht fuer \
+ihn aus, als haenge das Panel.
+Formulier ihn jedes Mal neu. Es gibt keinen Satz, mit dem du solche Zuege \
+regelmaessig beginnst; merkst du, dass du eine Wendung schon einmal benutzt \
+hast, nimm eine andere."""
 
 
 # Das Gegenstueck zu MITREDEN fuer das Gehirn, und es ist bewusst fast dessen
@@ -161,9 +176,14 @@ Panel."""
 # der Mensch soll weiterreden koennen, nicht auf ein Ergebnis warten.
 GEHIRN_QUITTUNG = """\
 Kuendige nichts an. Gibst du einen Auftrag in den Hintergrund, antworte wie \
-ein Mensch, den man um etwas gebeten hat: **zusagen und aufhoeren zu reden**. \
-"Alles klar, mach ich." / "Schau ich mir an, dauert ein paar Minuten." / \
-"Bin dran, sag dir Bescheid."
+ein Mensch, den man um etwas gebeten hat: **zusagen und aufhoeren zu reden**.
+Die Zusage ist ein halber Satz und jedes Mal ein anderer. Du hast keine \
+Standardformel — greif zu dem Wort, das zu dieser Bitte passt, so wie ein \
+Mensch am Telefon auch nicht dreimal hintereinander dasselbe sagt. \
+Insbesondere gibt es keinen Satz, mit dem du **regelmaessig** beginnst; \
+faellt dir auf, dass du eine Wendung schon einmal benutzt hast, nimm eine \
+andere. Manchmal ist die beste Zusage gar keine, sondern gleich die \
+Rueckfrage oder eine beilaeufige Bemerkung zur Sache.
 Verboten ist der Arbeitsbericht in der Zukunftsform. Faengt dein Satz mit \
 "Ich pruefe", "Ich schaue mir jetzt an", "Ich werde", "Zuerst" an oder \
 enthaelt er "damit ich dir ... sagen kann", hast du angekuendigt statt \
@@ -175,8 +195,10 @@ anders verstanden hast, oder eine Angabe, die dir zum Loslegen fehlt. Fehlt \
 sie, frag **eine** kurze Frage statt sie zu erfinden.
 Nach der Quittung ist das Gespraech offen. Er darf sofort weiterreden, ohne \
 auf ein Ergebnis zu warten — antworte auf das, was er sagt. Faellt ihm zum \
-laufenden Auftrag noch etwas ein, gib es mit `worker_antwort` an genau diesen \
-Auftrag weiter und bestaetige genauso knapp ("Hab ich ihm durchgegeben.")."""
+laufenden Auftrag noch etwas ein, gib es mit `worker_antwort` weiter und \
+bestaetige genauso knapp — aber **ohne den Apparat zu erwaehnen**: kein \
+"durchgegeben", kein "weitergeleitet", kein "ihm". Fuer ihn machst **du** \
+das, nicht ein Dritter, von dem er nichts weiss."""
 
 
 # Wie ein Ergebnis hereinkommt, das niemand gerade erfragt hat.
