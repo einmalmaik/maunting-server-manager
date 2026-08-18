@@ -1746,6 +1746,14 @@ def _denken_am_modell(
     Schweigt der Katalog, bleibt alles wie eingefroren. Eine Stufe wegen einer
     Netzstörung fallen zu lassen wäre dieselbe stille Verteuerung, gegen die
     `ai_reasoning._aus` geschrieben ist.
+
+    **Die Anbietergrenze wird dagegen auch hier geprüft**, und zwar vor der
+    Stufe: OpenAIs ``/chat/completions`` nimmt neben ``tools`` gar keine Stufe
+    an (`ai_provider_registry.basis.Anbieter.werkzeuge_mit_denkstufe`). Ein Lauf,
+    der unter OpenRouter mit ``medium`` begann und nach einem Zugangswechsel bei
+    OpenAI fortgesetzt wird, träfe sonst bei **jedem** Segment auf dasselbe
+    ``400`` — genau der Fall, gegen den diese Funktion überhaupt geschrieben
+    wurde, nur mit dem Anbieter statt dem Modell als Ursache.
     """
     aktiv, stufe = vorbereitung.reasoning, vorbereitung.reasoning_effort
     if modell is None:
@@ -1754,7 +1762,21 @@ def _denken_am_modell(
         # Getauscht gegen ein Modell ohne Denkvermögen: dort ist jedes
         # ``reasoning_effort`` ein ``400``, ``none`` eingeschlossen.
         return False, None
+    kind = vorbereitung.provider.provider_kind
     if stufe is None or stufe in modell.stufen:
+        # Auch eine Stufe, die zum Modell passt, muss noch am Endpunkt
+        # vorbei — deshalb hier durch `klemmen` statt geradewegs zurück.
+        # ``deckel=rang(stufe)`` hält die Decke, wo sie war: tiefer geht
+        # immer, teurer nie.
+        if stufe is not None and aktiv:
+            return ai_reasoning.klemmen(
+                modell,
+                wunsch=stufe,
+                aktiv=aktiv,
+                deckel=ai_reasoning.rang(stufe),
+                mit_werkzeugen=True,
+                kind=kind,
+            )
         return aktiv, stufe
     if stufe == ai_reasoning.AUS_STUFE:
         # „Aus“ ist selbst nur ein Wort, und nicht jedes Modell führt es. Beim
@@ -1762,10 +1784,20 @@ def _denken_am_modell(
         # Denkzwang, „so flach wie es geht“. Ein Deckel von ``MIN_RANG`` sagt
         # genau das, und zwar in derselben Funktion wie überall sonst.
         return ai_reasoning.klemmen(
-            modell, wunsch=None, aktiv=False, deckel=ai_reasoning.MIN_RANG
+            modell,
+            wunsch=None,
+            aktiv=False,
+            deckel=ai_reasoning.MIN_RANG,
+            mit_werkzeugen=True,
+            kind=kind,
         )
     return ai_reasoning.klemmen(
-        modell, wunsch=stufe, aktiv=aktiv, deckel=ai_reasoning.rang(stufe)
+        modell,
+        wunsch=stufe,
+        aktiv=aktiv,
+        deckel=ai_reasoning.rang(stufe),
+        mit_werkzeugen=True,
+        kind=kind,
     )
 
 

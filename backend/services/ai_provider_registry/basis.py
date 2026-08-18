@@ -194,6 +194,38 @@ class Anbieter:
     #:   nur mit, wenn der Katalog `input_cache_write` führt; hier steht sie,
     #:   damit die Bedingung nicht an zwei Stellen halb gilt.
     anfrage_erweiterungen: frozenset[str] = frozenset()
+    #: Ob dieser Anbieter **Werkzeuge und Denkstufe zugleich** verträgt.
+    #:
+    #: Für fast alle ist das selbstverständlich, für OpenAIs
+    #: ``/chat/completions`` nicht. Dort antwortet die Validierung auf eine
+    #: Anfrage mit ``tools`` *und* einer echten Stufe mit::
+    #:
+    #:     Function tools with reasoning_effort are not supported for
+    #:     <modell> in /v1/chat/completions. To use function tools, use
+    #:     /v1/responses or set reasoning_effort to 'none'.
+    #:
+    #: Gemessen am 2026-08-18 gegen OpenAI direkt, und es ist **keine Eigenheit
+    #: eines einzelnen Modells**: ``gpt-5.6-luna`` lehnt jede Stufe ausser
+    #: ``none`` ab, ``gpt-5.2`` und ``gpt-5.1`` nehmen alle an, ``gpt-5-mini``
+    #: umgekehrt jede ausser ``none``. Der Katalog kennt diese Grenze nicht —
+    #: er führt für ``gpt-5.6-luna`` sechs Stufen, und sechs sind es auch, nur
+    #: eben nicht zusammen mit Werkzeugen.
+    #:
+    #: MSM schickt im Chat praktisch immer Werkzeuge mit. Ohne dieses Feld ist
+    #: der Zugang deshalb an jedem denkenden Modell unbrauchbar, sobald jemand
+    #: eine Stufe wählt — und zwar mit einem ``400``, das wie ein kaputter
+    #: Schlüssel aussieht. Steht es auf ``False``, senkt `ai_reasoning.klemmen`
+    #: die Stufe für Läufe mit Werkzeugen auf „aus“, statt eine Anfrage
+    #: hinauszuschicken, die sicher abgelehnt wird.
+    #:
+    #: Warum nicht ``/v1/responses``: das ist ein **anderes Protokoll** — andere
+    #: Nutzlast (``input`` statt ``messages``), anderes Werkzeugformat, andere
+    #: Ereignisse im Strom. Es wäre ein zweiter Adapter neben dem bestehenden,
+    #: also genau der Sonderweg, gegen den dieses Paket gebaut ist. Der Preis
+    #: dieser Entscheidung ist ehrlich zu benennen: bei OpenAI direkt gibt es
+    #: mit Werkzeugen kein sichtbares Nachdenken. Wer beides zugleich will,
+    #: nimmt denselben Modellnamen über OpenRouter.
+    werkzeuge_mit_denkstufe: bool = True
 
 
 @dataclass(frozen=True)

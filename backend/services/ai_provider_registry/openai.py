@@ -82,6 +82,26 @@ ANBIETER = Anbieter(
     # `openai_compatible_adapter` sendet die Marke nur dann, wenn eine Stufe
     # feststeht. Kein Wissen, keine Stufe, keine Marke.
     anfrage_erweiterungen=frozenset({"reasoning_effort"}),
+    # **Werkzeuge und Denkstufe schliessen sich hier aus**, und zwar nicht als
+    # Eigenheit eines Modells, sondern als Regel dieses Endpunkts. Gemessen am
+    # 2026-08-18 gegen OpenAI direkt, jeweils mit einem Werkzeugkatalog:
+    #
+    #   gpt-5.6-luna   none=OK   low=400  medium=400
+    #   gpt-5.2        none=OK   low=OK   medium=OK
+    #   gpt-5.1        none=OK   low=OK   medium=OK
+    #   gpt-5-mini     none=400  low=OK   medium=OK
+    #
+    # Die Meldung nennt den Ausweg selbst: „use /v1/responses or set
+    # reasoning_effort to 'none'". Weil MSM im Chat immer Werkzeuge mitschickt,
+    # waere der Zugang sonst an `gpt-5.6-luna` — dem Modell, das der Betreiber
+    # hier eingetragen hat — bei jeder gewaehlten Stufe tot.
+    #
+    # Dass `gpt-5-mini` genau andersherum faellt, ist der Grund, warum hier
+    # nicht einfach `none` erzwungen wird: `ai_reasoning.klemmen` nimmt bei
+    # ausgeschaltetem Denken ohnehin nur ein Wort, das der Katalog fuehrt, und
+    # laesst es sonst weg. Die Marke sagt also „keine **Stufe** neben
+    # Werkzeugen", nicht „sende none".
+    werkzeuge_mit_denkstufe=False,
     # **Keine Empfehlung fuer den Chat**, und das ist keine Nachlaessigkeit.
     # Die Empfehlung wird gegen den Katalog geprueft und faellt weg, wenn die
     # Kennung dort nicht steht — sie waere hier also im besten Fall wirkungslos.

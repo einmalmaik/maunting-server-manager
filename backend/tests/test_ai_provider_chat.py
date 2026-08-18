@@ -661,6 +661,59 @@ def test_provider_catalog_hides_admin_metadata_from_chat_user(
     assert "operator-secret-value" not in serialized
 
 
+def test_the_choice_list_passes_the_key_to_a_catalog_that_needs_one(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sonst fehlen bei OpenAI die Denkstufen — ohne dass irgendwo ein Fehler steht.
+
+    OpenAIs ``/v1/models`` gibt seine Liste nur gegen einen Schlüssel heraus
+    (`Anbieter.katalog_braucht_schluessel`). Der Aufruf hier lief ohne, `finde`
+    endete im 401 und gab ``None`` zurück — und weil die drei Denkfelder nur
+    innerhalb von ``if modell is not None`` gesetzt werden, blieben sie auf
+    ihren Vorgaben stehen. Die Oberfläche zeigte deshalb keine Denkstufen, und
+    zwar **still**: kein 500, keine Meldung, nur eine Auswahl, die es nicht gab.
+
+    Geprüft wird die Weitergabe und nicht die Anzeige — was der Katalog daraus
+    macht, ist in `test_ai_model_catalog` festgenagelt.
+    """
+    _enable_chat(db, regular_user)
+    provider = ai_provider_service.create_provider(
+        db,
+        name="OpenAI direkt",
+        provider_kind="openai",
+        default_model="gpt-5.5",
+        enabled=True,
+        requires_api_key=True,
+        operator_api_key="sk-geheim-nicht-loggen",
+    )
+    db.commit()
+
+    gesehen: dict = {}
+
+    async def fake_finde(_client, kind, model_id, *, schluessel=None):
+        gesehen["kind"] = kind
+        gesehen["hat_schluessel"] = bool(schluessel)
+        return None
+
+    monkeypatch.setattr("services.ai_model_catalog.finde", fake_finde)
+
+    response = client.get("/api/ai/providers", cookies=user_cookies)
+
+    assert response.status_code == 200
+    assert gesehen["kind"] == "openai"
+    assert gesehen["hat_schluessel"] is True, (
+        "Ohne Schluessel antwortet OpenAIs Katalog mit 401 — und die Denkstufen "
+        "fehlen in der Oberflaeche, ohne dass ein Fehler sichtbar wird"
+    )
+    # Und der Schluessel bleibt, wo er hingehoert: nicht in der Antwort.
+    assert "sk-geheim" not in response.text
+    assert provider.id in [eintrag["id"] for eintrag in response.json()]
+
+
 def test_every_user_has_exactly_one_conversation_and_cannot_create_a_second(
     client: TestClient,
     db: Session,

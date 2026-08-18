@@ -477,10 +477,37 @@ async def list_available_providers(
                 or bool(provider.operator_api_key_encrypted)
             ),
         )
+        # Der Schluessel gehoert zum Katalogabruf, sobald der Anbieter seine
+        # Liste nur gegen einen herausgibt. Hier stand der Aufruf ohne — und
+        # das war fuer OpenRouter folgenlos (dessen Liste liegt offen), fuer
+        # OpenAI aber der Grund, warum die Denkstufen in der Oberflaeche
+        # fehlten: `finde` lief ins 401, gab `None` zurueck, und die drei
+        # Felder darunter blieben auf ihren Vorgaben stehen. Sichtbar war davon
+        # nichts — kein Fehler, nur eine Auswahl, die es nicht gab.
+        #
+        # `run_in_threadpool`, weil `resolve_api_key` ueber den DIS-Sidecar geht
+        # und das ein **synchrones** `httpx.post` ist; direkt aufgerufen stuende
+        # die Ereignisschleife des Panels so lange still (dieselbe Naht wie in
+        # `ai_run_service.lauf_beginnen_nebenher` und `_segment_anlaufen`).
+        # Genommen wird derselbe Weg wie beim Katalogendpunkt oben, nicht
+        # `asyncio.to_thread` — zwei Wege in einer Datei fuer dieselbe Sache
+        # sind eine Frage mehr, als der Leser beantworten muss.
+        #
+        # Nur wenn der Anbieter ihn wirklich braucht: fuer die uebrigen bleibt
+        # es beim schluessellosen Abruf, und ein Zugang ohne hinterlegten
+        # Schluessel laeuft weiter wie bisher — `finde` vertraegt `None`.
+        schluessel: str | None = None
+        if ai_provider_registry.anbieter(
+            provider.provider_kind
+        ).katalog_braucht_schluessel and provider.operator_api_key_encrypted:
+            schluessel = await run_in_threadpool(
+                ai_provider_service.resolve_api_key, db, provider, user.id
+            )
         modell = await ai_model_catalog.finde(
             request.app.state.ai_http_client,
             provider.provider_kind,
             provider.default_model,
+            schluessel=schluessel,
         )
         if modell is not None:
             antwort.reasoning = ai_reasoning.darf_nachdenken(modell, deckel)

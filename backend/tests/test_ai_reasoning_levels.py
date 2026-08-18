@@ -455,11 +455,11 @@ async def test_a_side_job_asks_the_catalog_with_the_key_it_uses(
 # wartet — und die eingefrorene Stufe gehört dann zum alten Modell.
 
 
-def _vorbereitung(*, reasoning: bool, effort: str | None):
+def _vorbereitung(*, reasoning: bool, effort: str | None, kind: str = "openrouter"):
     from services.ai_stream_service import _Vorbereitung
 
     return _Vorbereitung(
-        run_id="r", user_id=1, conversation_id="c", provider=_provider(),
+        run_id="r", user_id=1, conversation_id="c", provider=_provider(kind=kind),
         api_key=None, message_id="m", usage_event_id=1, request_id="q",
         reasoning=reasoning, reasoning_effort=effort,
         token_price_micro_usd_per_million=None, zustand={},
@@ -467,10 +467,21 @@ def _vorbereitung(*, reasoning: bool, effort: str | None):
     )
 
 
-def _pruefe(modell: Modell | None, *, reasoning=True, effort="xhigh"):
+def _pruefe(modell: Modell | None, *, reasoning=True, effort="xhigh", kind="openrouter"):
+    """Die eingefrorene Stufe gegen ein Modell — standardmäßig bei OpenRouter.
+
+    ``kind`` steht hier, seit die Anbietergrenze mitgeprüft wird: bei OpenAI
+    verträgt der Endpunkt neben Werkzeugen gar keine Stufe, und ein Segment
+    trägt den Werkzeugkatalog immer mit. Die Fälle unten fragen nach dem
+    **Modell**wechsel und brauchen dafür einen Anbieter, der ihnen nicht
+    vorher schon dazwischenfährt; die Anbietergrenze selbst prüft
+    `test_openai_drops_the_level_next_to_tools`.
+    """
     from services.ai_stream_service import _denken_am_modell
 
-    return _denken_am_modell(_vorbereitung(reasoning=reasoning, effort=effort), modell)
+    return _denken_am_modell(
+        _vorbereitung(reasoning=reasoning, effort=effort, kind=kind), modell
+    )
 
 
 def test_a_frozen_level_the_new_model_knows_goes_out_unchanged() -> None:
@@ -538,3 +549,103 @@ def test_only_a_provider_with_a_switch_can_be_off_without_a_word() -> None:
     assert ai_reasoning._kennt_schalter("openai") is False
     # Und ein Schlüssel, den es nicht gibt, nimmt keinen Lauf mit.
     assert ai_reasoning._kennt_schalter("gibtesnicht") is False
+
+
+# ── Werkzeuge und Denkstufe zugleich ──────────────────────────────────
+#
+# OpenAIs `/chat/completions` lehnt eine Anfrage ab, die `tools` **und** eine
+# echte Stufe trägt:
+#
+#   Function tools with reasoning_effort are not supported for <modell> in
+#   /v1/chat/completions. To use function tools, use /v1/responses or set
+#   reasoning_effort to 'none'.
+#
+# Gemessen am 2026-08-18 gegen OpenAI direkt. Weil MSM im Chat immer Werkzeuge
+# mitschickt, war der Zugang damit an jedem denkenden Modell unbrauchbar,
+# sobald jemand eine Stufe wählte — mit einem 400, das wie ein kaputter
+# Schlüssel aussah.
+
+
+def test_the_registry_knows_which_provider_takes_tools_with_a_level() -> None:
+    """Die Grenze steht beim Anbieter, nicht als ``if`` im Adapter."""
+    assert ai_reasoning._vertraegt_werkzeuge_mit_stufe("openrouter") is True
+    assert ai_reasoning._vertraegt_werkzeuge_mit_stufe("openai") is False
+    # Ein unbekannter Anbieter erbt das Verhalten von vor dieser Marke.
+    # ``True`` und nicht ``False``: eine Einschränkung zu raten kostet
+    # Denkleistung, die der Anbieter angeboten hätte.
+    assert ai_reasoning._vertraegt_werkzeuge_mit_stufe("gibtesnicht") is True
+
+
+def test_openai_drops_the_level_next_to_tools() -> None:
+    """Bei OpenAI geht neben Werkzeugen „aus“ hinaus statt einer Stufe.
+
+    Und zwar in der Mundart des Modells: führt es ``none`` in seinen Stufen,
+    ist das das Wort dafür — sonst gar kein Feld. Genau die Unterscheidung,
+    die `_aus` trifft.
+    """
+    mit_none = _modell(stufen=("high", "medium", "none"))
+    assert ai_reasoning.klemmen(
+        mit_none, wunsch="high", aktiv=True, deckel=None,
+        mit_werkzeugen=True, kind="openai",
+    ) == (False, "none")
+
+    ohne_none = _modell(stufen=("high", "medium"))
+    assert ai_reasoning.klemmen(
+        ohne_none, wunsch="high", aktiv=True, deckel=None,
+        mit_werkzeugen=True, kind="openai",
+    ) == (False, None)
+
+
+def test_openrouter_keeps_the_level_next_to_tools() -> None:
+    """Die Einschränkung gilt **nur** dort, wo sie gemessen wurde.
+
+    Sonst hätte ein Fix für OpenAI stillschweigend jedem anderen Anbieter das
+    Nachdenken im Werkzeuglauf genommen — und niemand hätte es bemerkt, weil
+    eine fehlende Denkstufe keinen Fehler auslöst, sondern nur eine schlechtere
+    Antwort.
+    """
+    modell = _modell(stufen=("high", "medium", "low"))
+    assert ai_reasoning.klemmen(
+        modell, wunsch="high", aktiv=True, deckel=None,
+        mit_werkzeugen=True, kind="openrouter",
+    ) == (True, "high")
+
+
+def test_openai_keeps_the_level_without_tools() -> None:
+    """Ohne Werkzeuge nimmt derselbe Endpunkt jede Stufe an — gemessen.
+
+    Deshalb ist die Grenze an ``mit_werkzeugen`` geknüpft und nicht am
+    Anbieter allein: eine Zusammenfassung oder ein Mailsatz darf bei OpenAI
+    weiterhin so tief denken, wie der Betreiber es erlaubt.
+    """
+    modell = _modell(stufen=("high", "medium", "none"))
+    assert ai_reasoning.klemmen(
+        modell, wunsch="high", aktiv=True, deckel=None,
+        mit_werkzeugen=False, kind="openai",
+    ) == (True, "high")
+
+
+def test_a_mandatory_thinker_at_openai_falls_back_to_the_providers_default() -> None:
+    """Denkzwang plus Werkzeuge: abschalten geht nicht, eine Stufe auch nicht.
+
+    Übrig bleibt „an, ohne Wort“ — die Vorgabe des Anbieters. Das ist die
+    einzige Anfrage, die dieser Endpunkt in dieser Lage noch annimmt, und
+    ehrlicher als ein ``none``, das er mit einem 400 zurückwiese.
+    """
+    modell = _modell(stufen=("high", "medium"), zwingend=True)
+    assert ai_reasoning.klemmen(
+        modell, wunsch="high", aktiv=True, deckel=None,
+        mit_werkzeugen=True, kind="openai",
+    ) == (True, None)
+
+
+def test_a_frozen_level_is_dropped_when_the_provider_switches_to_openai() -> None:
+    """Der Zugangswechsel mitten im Lauf — dieselbe Naht wie beim Modellwechsel.
+
+    Ein Lauf, der unter OpenRouter mit ``xhigh`` begann und nach einer
+    Bestätigung bei OpenAI fortgesetzt wird, träfe sonst bei **jedem** Segment
+    auf dasselbe 400 und liefe nie wieder an.
+    """
+    modell = _modell(stufen=("max", "xhigh", "high", "none"))
+    assert _pruefe(modell, kind="openrouter") == (True, "xhigh")
+    assert _pruefe(modell, kind="openai") == (False, "none")
