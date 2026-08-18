@@ -51,12 +51,28 @@ def test_die_rollen_teilen_bloecke_statt_sie_zu_kopieren() -> None:
     """Kein Blocktext existiert doppelt — die Invariante des build-Docstrings.
 
     Kopierte Texte veralten lautlos gegeneinander; die Rollen-Tupel duerfen
-    deshalb nur Konstanten referenzieren, die es schon gibt, plus je einen
-    eigenen Rollenblock.
+    deshalb nur Konstanten referenzieren, die es schon gibt, plus die Bloecke,
+    die **ausschliesslich** einer Rolle gehoeren.
+
+    Von denen gibt es beim Gehirn drei statt einem, seit MITREDEN dort nicht
+    mehr steht: GEHIRN sagt, was es ist, GEHIRN_QUITTUNG, wie es einen Auftrag
+    bestaetigt, GEHIRN_EINWURF, wie ein Ergebnis hereinkommt. Alle drei sind
+    an eine Rolle ohne Server- und Panelwerkzeuge gebunden und haetten in
+    BLOECKE nichts zu suchen — dort gelesen wuerden sie dem Ein-Modell-Betrieb
+    das Ankuendigen verbieten, das ihn vor stillen Werkzeugrunden schuetzt.
     """
-    bekannte = set(ai_prompt.BLOECKE) | {ai_prompt.GEHIRN, ai_prompt.WORKER}
+    eigene = {
+        ai_prompt.GEHIRN,
+        ai_prompt.GEHIRN_QUITTUNG,
+        ai_prompt.GEHIRN_EINWURF,
+        ai_prompt.WORKER,
+    }
+    bekannte = set(ai_prompt.BLOECKE) | eigene
     assert set(ai_prompt.GEHIRN_BLOECKE) <= bekannte
     assert set(ai_prompt.WORKER_BLOECKE) <= bekannte
+    # Und sie bleiben rollengebunden: kein eigener Block darf in die
+    # gemeinsame Liste rutschen.
+    assert not (eigene & set(ai_prompt.BLOECKE))
 
 
 def test_das_gehirn_liest_keine_werkzeugbloecke() -> None:

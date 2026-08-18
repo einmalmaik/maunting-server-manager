@@ -1016,6 +1016,11 @@ async def _wiederanlauf_versuchen(db: Session, run: AiRun, rahmen: dict) -> bool
         context_chars=flug.fenster.zeichen if flug.fenster.bekannt else None,
         guardian_briefing_unterdruecken=True,
         unbeaufsichtigt=True,
+        # Der Wiederanlauf ist eine Panel-Meldung an die KI ("das Panel wurde
+        # neu gestartet, nimm den Auftrag wieder auf") und kein Satz des
+        # Benutzers. Er soll den Auftrag fortsetzen sehen, nicht die Notiz,
+        # mit der das Panel ihn dazu bringt.
+        intern=True,
     )
     if neuer is None:
         _melden(

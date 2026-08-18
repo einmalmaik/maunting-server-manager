@@ -98,6 +98,68 @@ Text sofort — ein stiller Werkzeugaufruf sieht fuer ihn aus, als haenge das \
 Panel."""
 
 
+# Das Gegenstueck zu MITREDEN fuer das Gehirn, und es ist bewusst fast dessen
+# Umkehrung.
+#
+# MITREDEN loest ein echtes Problem: wer sechs Werkzeugrunden lang still
+# arbeitet, laesst den Menschen vor einem haengenden Panel sitzen. Das Gehirn
+# hat diese Lage nicht. Es besitzt **keine** Server- oder Panelwerkzeuge; sein
+# einziger Zug nach aussen ist `worker_start`, und der dauert Millisekunden.
+# Es gibt hier keine Stille zu ueberbruecken.
+#
+# Trotzdem stand MITREDEN im Gehirn-Prompt, und zusammen mit der Quittungspflicht
+# aus GEHIRN ergab das den Ton, den der Betreiber am 18.08.2026 als "dumm"
+# gemeldet hat: auf "was sagen die Server?" kam "Ich pruefe jetzt den aktuellen
+# Zustand aller deiner Server, damit ich dir Laufstatus und auffaellige Fehler
+# zusammenfassen kann." — eine Ankuendigung dessen, was gleich passiert,
+# formuliert wie ein Arbeitsplan.
+#
+# Menschen reden so nicht. Die Sprechakttheorie (Austin/Searle) beschreibt
+# genau das: eine Bitte wird mit einer **Handlung** beantwortet, nicht mit
+# einer Beschreibung der bevorstehenden Handlung. "Wird gemacht." ist die
+# vollstaendige Antwort; "Ich werde jetzt damit beginnen, X zu tun, damit Y"
+# ist eine Selbstauskunft, um die niemand gebeten hat. Wer sie gibt, wirkt
+# nicht sorgfaeltig, sondern umstaendlich.
+#
+# Der Block heisst nicht "sag weniger", sondern sagt, **was stattdessen**: die
+# Quittung ist kurz und kommt nebenbei, und danach ist das Gespraech offen —
+# der Mensch soll weiterreden koennen, nicht auf ein Ergebnis warten.
+GEHIRN_QUITTUNG = """\
+Kuendige nichts an. Gibst du einen Auftrag in den Hintergrund, bestaetige ihn \
+in **einem kurzen, beilaeufigen Satz** und lass es dabei ("Schau ich mir an." \
+/ "Bin dran." / "Mach ich, melde mich."). Kein Arbeitsplan, keine Aufzaehlung \
+dessen, was du gleich pruefst, keine Begruendung, warum du es pruefst — der \
+Benutzer hat dich gerade darum gebeten, er weiss es schon. Nenne nur dann eine \
+Einzelheit, wenn sie ihn wirklich betrifft: dass es laenger dauert, oder dass \
+du etwas anders verstanden hast als er es vielleicht meinte.
+Nach der Quittung ist das Gespraech **offen**. Er darf sofort weiterreden, \
+ohne auf ein Ergebnis zu warten — antworte auf das, was er sagt, und komm auf \
+den Auftrag erst zurueck, wenn er berichtet hat."""
+
+
+# Wie ein Ergebnis hereinkommt, das niemand gerade erfragt hat.
+#
+# Der zweite Teil derselben Meldung vom 18.08.2026: "wenn man gerade im Flow
+# ist und redet, kann die KI dann vielleicht sagen: ey warte mal, hier sind die
+# Ergebnisse". Technisch wartet die Zustellung bereits auf Ruhe
+# (`ai_meldestelle.ruhe`) — was fehlte, war die sprachliche Seite: das Ergebnis
+# fiel ohne Uebergang in den Chat, mitten in ein laufendes Thema.
+#
+# Der Bericht des Betreibers zur menschlichen Sprechweise nennt dafuer den
+# Mechanismus: eine Wortmeldung, die das Thema wechselt, braucht ein
+# **Uebergangssignal**, sonst liest der Zuhoerer sie als Antwort auf das
+# Vorherige. Im Gespraech leisten das eine kurze Pause und eine Wendung wie
+# "ach, uebrigens" — ein Marker, der sagt: neues Thema, und ich weiss, dass ich
+# dich unterbreche.
+GEHIRN_EINWURF = """\
+Kommt ein Ergebnis herein, waehrend ihr ueber etwas anderes redet, fang mit \
+einem kurzen Uebergang an ("Ach, kurz dazwischen —", "Uebrigens,"). Nenne den \
+Auftrag beim Thema, nicht bei seiner Kennung, und liefere dann das Ergebnis. \
+Danach fuehr das Gespraech dahin zurueck, wo es war. Nie \"hier liegt eine \
+Meldung vor\", nie das Wort Auftrag, Worker oder Panel — der Benutzer hat dich \
+etwas gefragt, du antwortest jetzt darauf, mehr ist es fuer ihn nicht."""
+
+
 # Zweiter Absatz des alten MITREDEN. Gilt gesprochen **staerker** als getippt:
 # im Chat kostet eine zusaetzliche Runde Wartezeit vor einem Bildschirm, im
 # Gespraech eine Pause mitten im Satz. Deshalb steht er ausdruecklich nicht in
@@ -583,10 +645,9 @@ den Hintergrund. Smalltalk, persönliche Fragen und alles, was du aus dem \
 Gespräch oder deinem Gedächtnis weißt, beantwortest du direkt und ohne Auftrag.
 Schreib den Auftrag so, dass er allein verständlich ist: was zu tun ist, \
 worauf es ankommt, was der Benutzer wörtlich wollte — der Worker sieht dieses \
-Gespräch nicht. Sag beim Deklarieren in einem Satz, was du angestoßen hast; \
-das ist die Quittung, und es gibt keine zweite. Klingt ein Wunsch nach langer \
-Dauer (Wartezeiten, Zeitpunkte, "heute Nacht"), sag ehrlich, dass es dauert, \
-und kläre, ob das Ergebnis zusätzlich per E-Mail kommen soll (`kanal`).
+Gespräch nicht. Klingt ein Wunsch nach langer Dauer (Wartezeiten, Zeitpunkte, \
+"heute Nacht"), sag ehrlich, dass es dauert, und kläre, ob das Ergebnis \
+zusätzlich per E-Mail kommen soll (`kanal`).
 Berichtet ein Auftrag (Meldung des Panels), liefere das Ergebnis in deiner \
 eigenen Stimme, als wäre es dein eigenes — nie "hier liegt eine Nachricht \
 vor", nie Prozessbeschreibung, keine erneute Quittung. Enthält die Meldung \
@@ -667,12 +728,20 @@ BLOECKE = (
 # fehlt mit Grund: die Werkzeugblöcke (WERKZEUGE bis WEBSUCHE) beschreiben
 # Werkzeuge, die es nicht hat; RUECKFRAGEN verlangt `ask_user`; BUENDELN und
 # BELEGE argumentieren mit Serverabfragen und Logzeilen.
+#
+# **MITREDEN stand hier und ist durch GEHIRN_QUITTUNG ersetzt.** Der Block ist
+# gegen stille Werkzeugrunden geschrieben — eine Lage, die das Gehirn nicht
+# hat: es besitzt keine Server- oder Panelwerkzeuge, sein einziger Zug nach
+# aussen ist `worker_start`, und der dauert Millisekunden. Was er hier bewirkte,
+# war das Gegenteil seines Zwecks: eine Ankuendigung vor einer Handlung, die
+# ohnehin sofort vorbei ist. Die Begruendung steht bei GEHIRN_QUITTUNG.
 GEHIRN_BLOECKE = (
     ROLLE,
     GEHIRN,
     FORMAT,
     EINZELCHAT,
-    MITREDEN,
+    GEHIRN_QUITTUNG,
+    GEHIRN_EINWURF,
     KEIN_STUMMER_ZUG,
     GEDAECHTNIS,
     GEDAECHTNIS_AUFRAEUMEN,

@@ -216,8 +216,32 @@ def get_conversation(
 def _verlauf_seite(
     db: Session, conversation: AiConversation, before: str | None
 ) -> AiConversationDetail:
-    """Eine Seite des Verlaufs, rueckwaerts ab ``before`` — fuer alle Fenster."""
-    query = db.query(AiMessage).filter(AiMessage.conversation_id == conversation.id)
+    """Eine Seite des Verlaufs, rueckwaerts ab ``before`` — fuer alle Fenster.
+
+    **Interne Zeilen bleiben draussen.** Vier Stellen schreiben eine
+    Benutzernachricht, die kein Mensch getippt hat: die Zustellung der
+    Worker-Meldungen, das Guardian-Briefing, der Wiederanlauf nach einem
+    Neustart und der Pruefauftrag eines faelligen Auftrags. Der Betreiber las
+    dort JSON-Nutzlasten und Anweisungen an die KI, adressiert an ihn selbst —
+    "Meldung des Panels (nicht vom Benutzer geschrieben): deine
+    Hintergrund-Auftraege haben berichtet…". Ein Worker arbeitet im
+    Hintergrund; seine Zettel gehoeren nicht ins Gespraech.
+
+    Gefiltert wird **nur hier**, auf dem Weg in den Browser. Der Kontext, der
+    zum Anbieter geht (`ai_context_service`), bleibt vollstaendig: sonst
+    bekaeme das Gehirn den Auftrag zu liefern und wuesste eine Runde spaeter
+    nicht mehr, warum es geliefert hat.
+
+    Der Filter sitzt vor der Seitengrenze und nicht danach. Andersherum zaehlte
+    eine unsichtbare Zeile gegen ``HISTORY_LIMIT``, und eine Seite kaeme mit
+    neunzehn statt zwanzig Nachrichten zurueck — oder, schlimmer, ``weitere``
+    sagte "es geht weiter", obwohl die letzte sichtbare Zeile bereits gezeigt
+    war.
+    """
+    query = db.query(AiMessage).filter(
+        AiMessage.conversation_id == conversation.id,
+        AiMessage.intern.is_(False),
+    )
     if before is not None:
         anker = db.get(AiMessage, before)
         if anker is None or anker.conversation_id != conversation.id:

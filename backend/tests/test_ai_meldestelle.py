@@ -246,9 +246,94 @@ def test_zustellung_buendelt_und_markiert_vor_dem_lauf(db: Session) -> None:
     assert "Meldung des Panels" in nachricht.content
     assert "Backups geprueft" in nachricht.content
     assert "Kalender aufgeraeumt" in nachricht.content
+    # **Und sie ist Maschinerie, kein Gespraech.** Der Text traegt eine
+    # JSON-Nutzlast und eine Anweisung an das Gehirn; der Betreiber las das im
+    # eigenen Chat, an sich selbst adressiert. Ein Worker arbeitet im
+    # Hintergrund — seine Zettel gehoeren nicht in den Verlauf.
+    assert nachricht.intern is True
     # Der Rahmen macht den Lauf als Lieferlauf kenntlich.
     ids = ai_run_service.zustand_lesen(run).get("meldung", {}).get("ids")
     assert sorted(ids) == sorted(m.id for m in db.query(AiMeldung).all())
+
+
+def test_der_lieferauftrag_verlaesst_den_sichtbaren_verlauf(db: Session) -> None:
+    """Sichtbar für das Modell, unsichtbar für den Menschen — beides zugleich.
+
+    Das ist die eigentliche Zusage der Spalte, und sie hat zwei Hälften, die
+    leicht auseinanderfallen:
+
+    * Der **Verlauf** (`routers/ai_chat._verlauf_seite`) filtert sie heraus.
+      Ohne das las der Betreiber im eigenen Chat eine JSON-Nutzlast und eine
+      Anweisung an die KI, adressiert an ihn selbst.
+    * Der **Kontext** (`ai_context_service.build_provider_messages`) behält
+      sie. Nähme man sie auch dort weg, bekäme das Gehirn den Auftrag zu
+      liefern und wüsste eine Runde später nicht mehr, warum es geliefert hat
+      — es würde seine eigene Antwort für unbegründet halten.
+
+    Deshalb prüft dieser Test beide Wege in einem Durchgang: die Hälften
+    getrennt zu prüfen hieße, genau den Fehler zuzulassen, bei dem eine von
+    beiden mitwandert.
+    """
+    from routers.ai_chat import _verlauf_seite
+    from services import ai_context_service
+
+    user = _benutzer(db, "leser")
+    ai_meldestelle.melden(db, user=user, text="Backups geprueft: alles gut.")
+
+    with (
+        patch.object(ai_run_service, "http_client", lambda: object()),
+        patch.object(ai_run_service, "vorflug", _vorflug_faelschen(db)),
+        patch.object(ai_run_service, "anlauf", lambda db_, run: True),
+    ):
+        run = asyncio.run(ai_meldestelle.zustellung_anstossen(db, user=user))
+
+    assert run is not None
+    conversation = db.get(AiConversation, run.conversation_id)
+
+    # 1) Der Browser sieht die Zeile nicht.
+    seite = _verlauf_seite(db, conversation, None)
+    sichtbar = [m.content for m in seite.messages]
+    assert not any("Meldung des Panels" in text for text in sichtbar), (
+        "die Maschinerie steht wieder im Verlauf"
+    )
+    assert not any("worker_meldungen" in text for text in sichtbar)
+
+    # 2) Das Modell sieht sie sehr wohl.
+    provider_messages = ai_context_service.build_provider_messages(
+        db, conversation, query="Was ist mit den Backups?", rolle="gehirn",
+    )
+    im_kontext = "\n".join(
+        str(nachricht.get("content") or "") for nachricht in provider_messages
+    )
+    assert "Backups geprueft" in im_kontext, (
+        "ohne den Lieferauftrag im Kontext weiss das Gehirn nicht, warum es "
+        "gerade berichtet"
+    )
+
+
+def test_eine_echte_nutzernachricht_bleibt_sichtbar(db: Session) -> None:
+    """Die Gegenprobe: ``intern`` ist die Ausnahme, nicht die Regel.
+
+    Ohne diesen Fall bestünde der Filter oben auch dann, wenn er versehentlich
+    den ganzen Verlauf verschluckte.
+    """
+    from routers.ai_chat import _verlauf_seite
+    from services import ai_chat_service
+
+    user = _benutzer(db, "tipper")
+    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    db.add(AiMessage(
+        id="msg-echt",
+        conversation_id=conversation.id,
+        role="user",
+        content="Wie geht es meinen Servern?",
+        status="complete",
+    ))
+    db.commit()
+
+    seite = _verlauf_seite(db, conversation, None)
+
+    assert [m.content for m in seite.messages] == ["Wie geht es meinen Servern?"]
 
 
 def test_ohne_ruhe_wird_nichts_zugestellt(db: Session) -> None:

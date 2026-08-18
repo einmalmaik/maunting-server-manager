@@ -3809,6 +3809,7 @@ def lauf_beginnen(
     unbeaufsichtigt: bool = False,
     gesprochen: bool = False,
     rolle: str | None = None,
+    intern: bool = False,
 ) -> tuple[AiRun | None, tuple[str, str] | None]:
     """Legt einen Lauf an: Benutzernachricht, Kontingent, Antwortnachricht.
 
@@ -3835,6 +3836,15 @@ def lauf_beginnen(
     eingefroren — jede Fortsetzung arbeitet unter derselben Rolle wie der
     erste Zug. Explizit setzt sie nur die Meldestelle: ihr Lieferlauf ist ein
     Gehirn-Zug im Dauerchat, obwohl niemand davor sitzt.
+
+    ``intern`` markiert die Benutzernachricht als **Maschinerie**: eine Zeile,
+    die kein Mensch getippt hat und die er deshalb auch nicht lesen soll. Sie
+    entsteht trotzdem und geht vollständig in den Kontext — nur der Weg in den
+    Browser filtert sie (`routers/ai_chat.list_messages`). Vier Aufrufer
+    setzen sie: die Zustellung der Worker-Meldungen, das Guardian-Briefing,
+    der Wiederanlauf nach einem Neustart und die Notiz über eine abgebrochene
+    Runde. Ohne sie las der Betreiber im eigenen Chat Anweisungen an die KI,
+    adressiert an ihn selbst.
     """
     safe_content = redact_sensitive_text(content).strip()
     if not safe_content:
@@ -3861,6 +3871,7 @@ def lauf_beginnen(
             role="user",
             content=safe_content,
             status="complete",
+            intern=intern,
         ))
         # Hochgeladene Anhaenge gehoeren ab jetzt zu **dieser** Frage. Vorher
         # hingen sie nur an der Unterhaltung: sie blieben als Chip stehen und

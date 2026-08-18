@@ -220,3 +220,99 @@ def test_drei_werkzeuge_beziehen_ihren_anlass_aus_diesen_bloecken() -> None:
     # SKILLS trägt den von learn_skill, samt Bauplan des Skilltextes.
     assert "Halte mit `learn_skill` fest" in prompt
     assert "was zu pruefen ist, in welcher Reihenfolge" in prompt
+
+
+# ── Die Sprechweise des Gehirns ───────────────────────────────────────
+#
+# Gemeldet am 18.08.2026: auf "was sagen die Server?" antwortete das Gehirn mit
+# "Ich prüfe jetzt den aktuellen Zustand aller deiner Server, damit ich dir
+# Laufstatus und auffällige Fehler zusammenfassen kann." — ein Arbeitsplan
+# statt einer Antwort. Ursache war MITREDEN im Gehirn-Prompt: ein Block gegen
+# stille Werkzeugrunden, in einer Rolle, die gar keine Werkzeugrunden hat.
+
+
+def test_the_brain_does_not_announce_what_it_is_about_to_do() -> None:
+    """MITREDEN gehört nicht ins Gehirn — es hat keine Stille zu überbrücken.
+
+    Der Block verlangt wörtlich einen Satz *bevor* Werkzeuge laufen, samt
+    Begründung. Das Gehirn besitzt aber nur `worker_start`; dessen einziger
+    Zug dauert Millisekunden. Übrig blieb die Ankündigung ohne den Anlass,
+    für den sie geschrieben wurde.
+    """
+    gehirn = ai_prompt.build(rolle="gehirn")
+
+    assert ai_prompt.MITREDEN not in gehirn
+    assert "Ich schau mir erst" not in gehirn, (
+        "das Beispiel aus MITREDEN ist genau der Ton, der gemeldet wurde"
+    )
+    # Und der Ersatz ist da — samt der Zusage, dass das Gespräch weitergeht.
+    assert "Kuendige nichts an." in gehirn
+    assert "Kein Arbeitsplan" in gehirn
+
+
+def test_the_brain_keeps_the_conversation_open_after_a_receipt() -> None:
+    """Nach der Quittung darf der Mensch weiterreden, statt zu warten.
+
+    Das ist die zweite Hälfte derselben Meldung: der Benutzer will nach
+    "mach mal" sofort weitersprechen können und das Ergebnis später bekommen.
+    """
+    gehirn = ai_prompt.build(rolle="gehirn")
+
+    assert "Nach der Quittung ist das Gespraech **offen**" in gehirn
+
+
+def test_an_incoming_result_gets_a_transition_not_a_dump() -> None:
+    """Ein Ergebnis mitten im Gespräch braucht ein Übergangssignal.
+
+    Ohne Marker liest der Mensch die Wortmeldung als Antwort auf das, worüber
+    gerade geredet wurde. Die Zustellung wartet technisch bereits auf Ruhe
+    (`ai_meldestelle.ruhe`); dies ist die sprachliche Hälfte davon.
+    """
+    gehirn = ai_prompt.build(rolle="gehirn")
+
+    assert "Ach, kurz dazwischen" in gehirn
+    # Und die Maschinerie bleibt aus der Antwort heraus: der Benutzer hat
+    # gefragt, nicht ein Auftrag berichtet.
+    assert "nie das Wort Auftrag, Worker oder Panel" in gehirn
+
+
+def test_the_receipt_duty_is_stated_once_and_not_twice() -> None:
+    """Zwei Quittungsregeln nebeneinander waren die halbe Ursache.
+
+    GEHIRN verlangte "sag beim Deklarieren in einem Satz, was du angestoßen
+    hast", MITREDEN verlangte einen Satz vor dem Werkzeug — zusammen ergab das
+    die Doppelung aus Ankündigung und Quittung. Die Regel steht jetzt an genau
+    einer Stelle.
+    """
+    assert "das ist die Quittung, und es gibt keine zweite" not in ai_prompt.GEHIRN
+    assert "bestaetige ihn" in ai_prompt.GEHIRN_QUITTUNG
+
+
+def test_the_worker_still_narrates_its_own_run() -> None:
+    """Die Änderung gilt **nur** dem Gehirn.
+
+    Ein Worker ruft echte Werkzeuge auf, oft über mehrere Runden. Dort ist
+    MITREDEN weiterhin richtig — nähme man es ihm weg, säße der Betreiber
+    wieder vor einem Panel, das minutenlang nichts sagt. Der Worker-Text geht
+    ohnehin nicht live an den Benutzer, aber sein Lauf wird mitgelesen.
+    """
+    worker = ai_prompt.build(rolle="worker")
+
+    assert ai_prompt.MITREDEN in worker
+    # Und die Gehirn-Blöcke gehören ihm nicht: er quittiert nichts, er arbeitet.
+    assert ai_prompt.GEHIRN_QUITTUNG not in worker
+    assert ai_prompt.GEHIRN_EINWURF not in worker
+
+
+def test_the_ordinary_chat_is_untouched() -> None:
+    """Der Ein-Modell-Betrieb (ohne Worker-Modell) behält seine Sprechweise.
+
+    Ohne `worker_model` läuft MSM weiter wie vor dem Agentic Framework: ein
+    Lauf mit vollem Katalog, der selbst Werkzeuge ruft. Dort ist die
+    Ankündigung genau richtig — sie ist der Unterschied zwischen "arbeitet"
+    und "hängt".
+    """
+    voll = ai_prompt.build()
+
+    assert ai_prompt.MITREDEN in voll
+    assert ai_prompt.GEHIRN_QUITTUNG not in voll

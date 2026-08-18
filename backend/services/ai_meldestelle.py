@@ -361,6 +361,13 @@ async def zustellung_anstossen(db: Session, *, user: User, ruhe_noetig: bool = T
         # "voll", aber die Lieferung ist ein Gehirn-Zug — dieselbe Stimme,
         # derselbe Katalog wie im Gespraech, nur ohne Menschen davor.
         rolle="gehirn",
+        # **Der Auftrag selbst ist Maschinerie.** Er traegt eine JSON-Nutzlast
+        # und eine Anweisung an das Gehirn ("liefere jetzt die Ergebnisse") —
+        # beides an den Betreiber adressiert zu sehen, war der Grund fuer
+        # diese Marke. Ein Worker arbeitet im Hintergrund; man sieht seine
+        # Zettel so wenig wie die eines Assistenten. Der Kontext des Modells
+        # bekommt die Zeile weiterhin vollstaendig.
+        intern=True,
     )
     if run is None:
         # Kontrolliertes Scheitern, kein Absturz: Marke zurueck, naechste

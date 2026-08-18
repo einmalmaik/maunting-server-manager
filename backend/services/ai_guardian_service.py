@@ -567,6 +567,12 @@ async def heilungslauf_starten(
         # Niemand sitzt davor: kein Skill-Verzeichnis im Systemprompt, denn
         # `GUARDIAN_HEILUNG_TOOLS` bietet kein `read_skill` an.
         unbeaufsichtigt=True,
+        # Der Auftragstext ist eine Panel-Meldung, kein Satz eines Menschen —
+        # er gehoert in den Kontext des Laufs, aber nicht in den sichtbaren
+        # Verlauf. Das Guardian-Fenster ist ohnehin die Hintergrundbuehne;
+        # sichtbar wird die Heilung ueber ihren Bericht, nicht ueber ihren
+        # Arbeitsauftrag.
+        intern=True,
     )
     if run is None:
         # Kontingent erschoepft, Schluessel nicht lesbar, Anfragekonflikt. Alles

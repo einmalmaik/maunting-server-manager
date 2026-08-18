@@ -2,7 +2,18 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    false,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -175,6 +186,37 @@ class AiMessage(Base):
     # `None` heisst "aus der Zeit vor dieser Spalte", nicht "keine Abschnitte".
     # Der Verlauf zeigt solche Nachrichten weiterhin als reinen Text.
     sections_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Ob diese Nachricht **Maschinerie** ist und nicht Gespraech.
+    #
+    # Vier Stellen schreiben eine Zeile in den Chat, die kein Mensch getippt
+    # hat: die Zustellung der Worker-Meldungen (`ai_meldestelle`), das
+    # Guardian-Briefing, der Wiederanlauf nach einem Neustart und die Notiz
+    # ueber eine abgebrochene Runde. Alle vier brauchen die Zeile — das Modell
+    # muss lesen koennen, warum es gerade dran ist —, und alle vier standen
+    # bis zum 2026-08-18 als ``role="user"`` sichtbar im Verlauf. Der Betreiber
+    # las dort JSON-Nutzlasten und Anweisungen an die KI, adressiert an ihn
+    # selbst: "Meldung des Panels (nicht vom Benutzer geschrieben): deine
+    # Hintergrund-Auftraege haben berichtet…".
+    #
+    # Ein Worker ist ein **Hintergrund**-Auftrag. Man sieht seine Maschinerie
+    # so wenig wie den Zettel, den ein Assistent sich selbst schreibt.
+    #
+    # Warum eine Spalte und kein Vergleich auf den Textanfang: der Praefix ist
+    # Anzeigetext, er wird uebersetzt und umformuliert, und ein Filter darauf
+    # waere beim ersten Komma still kaputt. Die Absicht gehoert an die Zeile,
+    # nicht in ein Muster.
+    #
+    # **Der Verlauf des Modells sieht sie weiterhin.** Gefiltert wird nur der
+    # Weg in den Browser (`routers/ai_chat.list_messages`); der Kontext, der
+    # zum Anbieter geht (`ai_context_service`), bleibt vollstaendig. Sonst
+    # bekaeme das Gehirn den Auftrag, die Ergebnisse zu liefern, und wuesste
+    # in der naechsten Runde nicht mehr, warum es sie geliefert hat.
+    #
+    # ``False`` als Vorgabe und ``server_default``: die Zeilen aus der Zeit vor
+    # dieser Spalte sind echtes Gespraech.
+    intern: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="complete")
     provider_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("ai_providers.id", ondelete="SET NULL"), nullable=True
