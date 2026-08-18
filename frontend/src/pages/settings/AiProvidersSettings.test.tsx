@@ -228,4 +228,45 @@ describe('AiProvidersSettings', () => {
     await screen.findByLabelText('API-Key')
     expect(screen.queryByRole('button', { name: 'Übernehmen' })).not.toBeInTheDocument()
   })
+
+  it('zeigt einem TTS-Zugang weiterhin die Sprachmodell-Auswahl', async () => {
+    // Die Regression vom 17.08.: der Umbau in Sub-Tabs hatte die Modellwahl
+    // hinter das chat_completions-Gate geschoben — ElevenLabs verlor damit
+    // das Feld, obwohl der TTS-Adapter `default_model` weiterhin liest.
+    vi.mocked(aiApi.listProviderSettings).mockResolvedValue([{
+      ...provider,
+      id: 7,
+      name: 'Stimme',
+      provider_kind: 'elevenlabs',
+      base_url: 'https://api.elevenlabs.io/v1',
+      default_model: 'eleven_flash_v2_5',
+      default_voice: '21m00Tcm4TlvDq8ikWAM',
+    }])
+    vi.mocked(aiApi.listCatalogModels).mockResolvedValue([{
+      model_id: 'eleven_flash_v2_5',
+      name: 'Eleven Flash v2.5',
+      reasoning: false,
+      efforts: [],
+      default_effort: null,
+      mandatory: false,
+      recommended: true,
+    }, {
+      model_id: 'eleven_multilingual_v2',
+      name: 'Eleven Multilingual v2',
+      reasoning: false,
+      efforts: [],
+      default_effort: null,
+      mandatory: false,
+      recommended: false,
+    }])
+    render(<AiProvidersSettings canWrite />)
+
+    // Auswahl statt Textfeld, sobald der Katalog da ist — und am Knopf steht,
+    // was gewaehlt ist.
+    await waitFor(() =>
+      expect(screen.getByLabelText('Sprachmodell')).toHaveTextContent('eleven_flash_v2_5'))
+    expect(screen.getByLabelText('Sprachmodell').tagName).toBe('BUTTON')
+    // Die Stimme bleibt daneben bestehen.
+    expect(screen.getByLabelText('Stimme')).toHaveValue('21m00Tcm4TlvDq8ikWAM')
+  })
 })

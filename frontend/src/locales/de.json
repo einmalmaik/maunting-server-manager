@@ -178,6 +178,7 @@
       "reloadModels": "Modelle neu laden",
       "catalogUnavailable": "Der Modellkatalog des Anbieters ist gerade nicht erreichbar. Du kannst den Modellnamen so lange von Hand eintragen; die Denkstufen bleiben dann unbekannt.",
       "catalogNeedsKey": "Dieser Anbieter gibt seine Modelliste nur gegen den Schlüssel heraus. Trage den Schlüssel ein und speichere den Zugang — danach steht die Auswahl hier.",
+      "ttsModel": "Sprachmodell",
       "defaultVoice": "Stimme",
       "defaultVoiceHint": "Die Stimm-Kennung aus deinem ElevenLabs-Konto — zu finden in der Stimmenbibliothek unter „Voice ID“. Ohne sie gibt es keinen Sprachmodus; eine Standardstimme rät MSM nicht, denn sie stünde auf deiner Rechnung.",
       "protokoll": {

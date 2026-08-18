@@ -178,6 +178,7 @@
       "reloadModels": "Reload models",
       "catalogUnavailable": "The provider's model catalog is currently unreachable. You can type the model name by hand meanwhile; reasoning levels stay unknown.",
       "catalogNeedsKey": "This provider only hands out its model list against the key. Enter the key and save the access — the selection appears here afterwards.",
+      "ttsModel": "Speech model",
       "defaultVoice": "Voice",
       "defaultVoiceHint": "The voice ID from your ElevenLabs account — found in the voice library under “Voice ID”. Without it there is no voice mode; MSM does not guess a default, because it would show up on your bill.",
       "protokoll": {

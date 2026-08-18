@@ -340,6 +340,7 @@ function ProviderForm({
   const preisId = useId()
   const workerModellId = useId()
   const workerStufeId = useId()
+  const ttsModellId = useId()
 
   // Solange die Politik nicht geladen ist, gilt USD 1:1 — die Waehrung der
   // Buchung. Ein Rueckfall auf Euro wuerde einen getippten Preis stillschweigend
@@ -666,22 +667,96 @@ function ProviderForm({
 
         {/* Stimme bei TTS */}
         {spec?.protokoll === 'tts' && (
-          <div className="space-y-1.5 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
-            <label htmlFor={stimmeId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-              🗣️ {t('ai.providers.defaultVoice')}
-            </label>
-            <input
-              id={stimmeId}
-              type="text"
-              className="msm-input w-full"
-              autoComplete="off"
-              spellCheck={false}
-              value={draft.default_voice ?? ''}
-              onChange={(ereignis) => change({ default_voice: ereignis.target.value })}
-              placeholder="21m00Tcm4TlvDq8ikWAM"
-              aria-label={t('ai.providers.defaultVoice')}
-            />
-            <p className="msm-field-help">{t('ai.providers.defaultVoiceHint')}</p>
+          <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+            {/* Dasselbe Feld wie beim Chat-Zugang (`default_model`) — hier ist
+                es das Modell, das vorliest. Der TTS-Adapter liest es am Zugang
+                (leer gilt sein eigener Rueckfall); die Empfehlung kommt wie
+                ueberall aus dem Katalog, nie aus der Oberflaeche. */}
+            <div className="space-y-1.5">
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  {models && models.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <label htmlFor={ttsModellId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                        🎙️ {t('ai.providers.ttsModel')}
+                      </label>
+                      <Dropdown
+                        id={ttsModellId}
+                        value={draft.default_model || null}
+                        onChange={(default_model) => change({ default_model: default_model || '' })}
+                        placeholder={t('ai.providers.modelChoose')}
+                        options={[...models]
+                          .sort((a, b) => Number(b.recommended) - Number(a.recommended))
+                          .map((item) => ({
+                            value: item.model_id,
+                            label: item.model_id,
+                            hint: item.recommended
+                              ? [item.name !== item.model_id ? item.name : null, t('ai.providers.recommended')]
+                                  .filter(Boolean)
+                                  .join(' · ')
+                              : item.name !== item.model_id
+                                ? item.name
+                                : undefined,
+                            icon: item.recommended
+                              ? <Star className="h-3.5 w-3.5 fill-current text-primary" aria-hidden="true" />
+                              : undefined,
+                          }))}
+                        aria-label={t('ai.providers.ttsModel')}
+                      />
+                    </div>
+                  ) : (
+                    <ProviderInput
+                      label={`🎙️ ${t('ai.providers.ttsModel')}`}
+                      value={draft.default_model ?? ''}
+                      onChange={(default_model) => change({ default_model })}
+                    />
+                  )}
+                </div>
+                <Button type="button" variant="ghost" disabled={!draft.provider_kind || loadingModels} onClick={() => void ladeModelle(true)}>
+                  <RefreshCw className={`h-4 w-4 ${loadingModels ? 'animate-spin' : ''}`} aria-hidden="true" />
+                  <span className="sr-only">{t('ai.providers.reloadModels')}</span>
+                </Button>
+              </div>
+              {models === null && !loadingModels && draft.provider_kind && (
+                <p className="msm-field-help">{t('ai.providers.catalogUnavailable')}</p>
+              )}
+              {models !== null && models.length === 0 && !loadingModels
+                && spec?.katalog_braucht_schluessel && (
+                <p className="msm-field-help">{t('ai.providers.catalogNeedsKey')}</p>
+              )}
+              {empfohlenesModell && draft.default_model !== empfohlenesModell.model_id && (
+                <p className="msm-field-help flex items-start gap-1.5">
+                  <Star className="mt-0.5 h-3.5 w-3.5 shrink-0 fill-current text-primary" aria-hidden="true" />
+                  <span>
+                    {t('ai.providers.recommendationHint', { model: empfohlenesModell.model_id })}{' '}
+                    <button
+                      type="button"
+                      onClick={() => change({ default_model: empfohlenesModell.model_id })}
+                      className="underline underline-offset-2 hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {t('ai.providers.recommendationApply')}
+                    </button>
+                  </span>
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor={stimmeId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                🗣️ {t('ai.providers.defaultVoice')}
+              </label>
+              <input
+                id={stimmeId}
+                type="text"
+                className="msm-input w-full"
+                autoComplete="off"
+                spellCheck={false}
+                value={draft.default_voice ?? ''}
+                onChange={(ereignis) => change({ default_voice: ereignis.target.value })}
+                placeholder="21m00Tcm4TlvDq8ikWAM"
+                aria-label={t('ai.providers.defaultVoice')}
+              />
+              <p className="msm-field-help">{t('ai.providers.defaultVoiceHint')}</p>
+            </div>
           </div>
         )}
 
