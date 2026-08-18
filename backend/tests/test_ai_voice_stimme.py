@@ -102,13 +102,22 @@ async def test_nach_einer_langen_werkzeugrunde_spricht_die_stimme_weiter(
 
     assert len(verbindungen) == 2, "Es haette genau eine neue Verbindung gebraucht"
     assert verbindungen[0].geschlossen is True
-    # Der zweite Satz ging vollstaendig ueber die neue Verbindung — mitsamt
-    # `flush`, damit er sofort erzeugt wird.
+    # Der zweite Satz ging vollstaendig ueber die neue Verbindung.
     assert any("zweite Satz" in satz for satz in _saetze(verbindungen[1]))
-    assert all(
-        rahmen.get("try_trigger_generation") is True
-        for rahmen in verbindungen[1].rahmen
-        if rahmen.get("text", " ").strip()
+    # **Ohne `try_trigger_generation`**: es zwang den Anbieter, jeden Satz
+    # sofort zu vertonen, ohne den folgenden zu kennen — und genau daher kam
+    # das gemeldete "erst langsam, dann schnell". Wann genug Text beisammen
+    # ist, entscheidet jetzt `chunk_length_schedule` aus der BOS-Nachricht.
+    assert not any(
+        "try_trigger_generation" in rahmen for rahmen in verbindungen[1].rahmen
+    ), "der Sendepfad erzwingt wieder Stueck fuer Stueck eine eigene Vertonung"
+    # Und die neue Verbindung eroeffnet mit denselben Vorgaben wie die erste:
+    # eine Wiederverbindung mitten in der Antwort darf nicht anders klingen.
+    bos = verbindungen[1].rahmen[0]
+    assert bos["voice_settings"] == ai_tts_elevenlabs.STIMMEINSTELLUNGEN
+    assert (
+        bos["generation_config"]["chunk_length_schedule"]
+        == ai_tts_elevenlabs.KONTEXTRAMPE
     )
 
 
@@ -251,3 +260,89 @@ async def test_ein_abbruch_zwischen_connect_und_rueckgabe_leckt_auch_nicht(
         await stimme.__aenter__()
 
     assert verbindung.geschlossen is True
+
+
+# ── Wie die Stimme klingt ─────────────────────────────────────────────
+#
+# Gemeldet am 19.08.2026: "erst redet er ganz langsam, dann wieder schnell",
+# "das wirkt jetzt gerade noch sehr stark wie Text-to-Speech". Nachgemessen
+# gegen die echte API mit drei Saetzen:
+#
+#     try_trigger_generation je Satz -> 7 Audiostuecke, 109968 Bytes
+#     chunk_length_schedule          -> 6 Audiostuecke, 102445 Bytes
+#
+# Jedes Stueck ist eine Stelle, an der die Stimme neu ansetzt — ohne zu
+# wissen, was folgt.
+
+
+def test_die_klangvorgaben_stehen_an_einer_stelle() -> None:
+    """Eine Quelle fuer beide Sendewege.
+
+    `voice_settings` stand wortgleich im Verbindungstest **und** im
+    Sendepfad. Zwei Kopien derselben Zahlen laufen auseinander, sobald jemand
+    eine davon anfasst — und dann prueft der Einstellungsdialog etwas
+    anderes, als der Betrieb spaeter spricht.
+    """
+    werte = ai_tts_elevenlabs.STIMMEINSTELLUNGEN
+
+    # Die fuenf Werte, die die API kennt (`/v1/voices/settings/default`).
+    assert set(werte) == {
+        "stability", "similarity_boost", "style", "use_speaker_boost", "speed",
+    }
+    # In den erlaubten Grenzen — ein Wert daneben wird stillschweigend
+    # ignoriert, und dann sucht man den Klang an der falschen Stelle.
+    assert 0.0 <= werte["stability"] <= 1.0
+    assert 0.0 <= werte["similarity_boost"] <= 1.0
+    assert 0.7 <= werte["speed"] <= 1.2
+
+
+def test_die_kontextrampe_faengt_klein_an() -> None:
+    """Frueh anfangen, dann groesser werden.
+
+    Das erste Stueck entscheidet, wie lange der Mensch auf den ersten Ton
+    wartet; die spaeteren entscheiden, wie zusammenhaengend es klingt. Eine
+    Rampe bedient beides, ein fester Wert nur eines davon.
+
+    Der Anbieter erlaubt 50 bis 500 Zeichen je Eintrag.
+    """
+    rampe = ai_tts_elevenlabs.KONTEXTRAMPE
+
+    assert rampe == sorted(rampe), "die Rampe muss steigen"
+    assert all(50 <= wert <= 500 for wert in rampe), (
+        "ausserhalb der erlaubten Spanne wird der Wert stillschweigend verworfen"
+    )
+    assert rampe[0] <= 120, "das erste Stueck darf den ersten Ton nicht verzoegern"
+
+
+@pytest.mark.asyncio
+async def test_die_eroeffnung_traegt_klang_und_rampe(monkeypatch) -> None:
+    """Beides geht in der BOS-Nachricht raus, nicht je Textstueck.
+
+    `chunk_length_schedule` gilt fuer die ganze Sitzung. Es je Stueck
+    mitzuschicken waere wirkungslos — und genau die Verwechslung fuehrte
+    dazu, dass stattdessen `try_trigger_generation` an jedem Satz hing.
+    """
+    verbindungen: list = []
+
+    async def verbinden(adresse: str, schluessel: str):
+        verbindung = _Verbindung()
+        verbindungen.append(verbindung)
+        return verbindung
+
+    monkeypatch.setattr(ai_tts_elevenlabs, "_verbinden", verbinden)
+
+    async with ai_tts_elevenlabs.Stimme(
+        adresse="wss://example.invalid/", schluessel="egal", senden=_nichts
+    ) as stimme:
+        await stimme.sagen("Ein Satz, der lang genug zum Senden ist. ")
+
+    bos = verbindungen[0].rahmen[0]
+    assert bos["voice_settings"] == ai_tts_elevenlabs.STIMMEINSTELLUNGEN
+    assert (
+        bos["generation_config"]["chunk_length_schedule"]
+        == ai_tts_elevenlabs.KONTEXTRAMPE
+    )
+    # Und die Textstuecke tragen nichts davon.
+    for rahmen in verbindungen[0].rahmen[1:]:
+        assert "generation_config" not in rahmen
+        assert "try_trigger_generation" not in rahmen

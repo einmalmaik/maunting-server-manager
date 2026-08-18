@@ -153,6 +153,67 @@ MAX_STUECK_ZEICHEN = 240
 _SATZENDE = re.compile(r"[.!?…:;\n]")
 
 
+#: Wie die Stimme klingen soll — **eine** Stelle, nicht zwei.
+#:
+#: Hier standen einmal nur ``stability`` und ``similarity_boost``, wortgleich
+#: an zwei Stellen (Verbindungstest und Sendepfad). Die API kennt fünf Werte;
+#: ihre eigene Vorgabe (``/v1/voices/settings/default``) lautet:
+#:
+#:     stability 0.5, similarity_boost 0.75, style 0.0,
+#:     use_speaker_boost true, speed 1.0
+#:
+#: Nachgemessen am 19.08.2026 gegen ``eleven_flash_v2_5``:
+#:
+#: * ``speed`` **wirkt** — dieselbe Zeile wurde bei 0.95 messbar länger
+#:   (61902 statt 59812 Bytes).
+#: * ``style`` und ``use_speaker_boost`` kann dieses Modell laut
+#:   ``/v1/models`` nicht (``can_use_style: false``). Die API nimmt sie
+#:   trotzdem an und ignoriert sie still. Sie stehen hier, weil dieselben
+#:   Einstellungen für ``eleven_multilingual_v2`` gelten, das beides kann —
+#:   wer dort umschaltet, bekommt sie ohne zweite Codestelle.
+#:
+#: Die Werte weichen bewusst von der Vorgabe ab:
+#:
+#: * ``stability 0.45`` statt 0.5 — etwas unter der Mitte klingt lebendiger.
+#:   Zu weit runter kippt es ins Schwankende, und genau das war die Klage.
+#: * ``similarity_boost 0.75`` ist die Vorgabe des Anbieters; MSM stand auf
+#:   0.8. Höher heisst „näher an der Aufnahme“ und übernimmt dabei auch deren
+#:   Atem- und Raumgeräusche.
+#: * ``speed 0.96`` — ein Hauch langsamer als Vorgabe. Vorgelesene
+#:   Serverauskünfte enthalten Zahlen und Kennungen; die verschluckt eine
+#:   Stimme bei 1.0 gern.
+STIMMEINSTELLUNGEN: dict[str, float | bool] = {
+    "stability": 0.45,
+    "similarity_boost": 0.75,
+    "style": 0.0,
+    "use_speaker_boost": True,
+    "speed": 0.96,
+}
+
+
+#: Wieviel Text ElevenLabs sammelt, bevor es zu sprechen anfängt (in Zeichen).
+#:
+#: **Das ist die Stellschraube gegen „erst langsam, dann schnell“.** MSM hat
+#: bis zum 19.08.2026 jeden Satz mit ``try_trigger_generation: True``
+#: abgeschickt und damit erzwungen, dass er **sofort** vertont wird — ohne
+#: dass das Modell den folgenden Satz kennt. Betonung und Tempo entstehen aber
+#: aus dem Zusammenhang: wer nicht weiss, wie es weitergeht, setzt am Ende
+#: jedes Stücks neu an. Gemessen mit drei Sätzen:
+#:
+#:     try_trigger_generation je Satz -> 7 Audiostücke, 109968 Bytes
+#:     chunk_length_schedule          -> 6 Audiostücke, 102445 Bytes
+#:
+#: Ein Schnitt weniger bei gleichem Text — und jeder Schnitt ist eine Stelle,
+#: an der die Stimme neu ansetzt.
+#:
+#: Die Zahlen sind eine Rampe: das **erste** Stück ist klein (90 Zeichen),
+#: damit der Ton früh beginnt und die Antwort nicht hängt; die späteren sind
+#: grösser, weil dann ohnehin schon gesprochen wird und Zusammenhang mehr
+#: wiegt als Reaktionszeit. Der Anbieter erlaubt 50–500.
+KONTEXTRAMPE = [90, 160, 250, 290]
+
+
+
 def _naechstes_stueck(puffer: str, *, letzter: bool = False) -> tuple[str, str]:
     """Trennt vorne ein sprechbares Stück ab. Gibt (Stück, Rest) zurück.
 
@@ -297,10 +358,9 @@ async def pruefen(adresse: str, schluessel: str) -> None:
             json.dumps(
                 {
                     "text": " ",
-                    "voice_settings": {
-                        "stability": 0.5,
-                        "similarity_boost": 0.8,
-                    },
+                    # Dieselben Einstellungen wie im Echtbetrieb: ein Test, der
+                    # etwas anderes schickt, prueft etwas anderes.
+                    "voice_settings": STIMMEINSTELLUNGEN,
                     "xi_api_key": schluessel,
                 }
             )
@@ -384,9 +444,13 @@ class Stimme:
                 json.dumps(
                     {
                         "text": " ",
-                        "voice_settings": {
-                            "stability": 0.5,
-                            "similarity_boost": 0.8,
+                        "voice_settings": STIMMEINSTELLUNGEN,
+                        # Ohne diese Rampe entscheidet der Anbieter selbst,
+                        # wann er anfängt — und `try_trigger_generation` im
+                        # Sendepfad hat ihm die Entscheidung ganz abgenommen.
+                        # Warum das den Rhythmus kostete, steht bei KONTEXTRAMPE.
+                        "generation_config": {
+                            "chunk_length_schedule": KONTEXTRAMPE,
                         },
                         "xi_api_key": self._schluessel,
                     }
@@ -511,10 +575,18 @@ class Stimme:
         self._gesendet += len(stueck)
         # Das anhängende Leerzeichen verlangt das Protokoll ausdrücklich; ohne
         # es klebt der letzte an den nächsten Satz.
-        # `try_trigger_generation` steuert die direkte Generierung; `flush: True`
-        # darf erst beim finalen Ausklingen gesendet werden, um das 5-Kontexte-Limit
-        # (Fehlercode 1008) von ElevenLabs nicht zu überschreiten.
-        nutzlast = json.dumps({"text": f"{stueck} ", "try_trigger_generation": True})
+        #
+        # **Kein `try_trigger_generation` mehr.** Es zwang den Anbieter, jeden
+        # Satz sofort zu vertonen — ohne den folgenden zu kennen. Betonung und
+        # Tempo entstehen aber aus dem Zusammenhang, und so setzte die Stimme
+        # an jeder Satzgrenze neu an: „erst redet er ganz langsam, dann wieder
+        # schnell“ (Betreiber, 19.08.2026). Wann genug Text beisammen ist,
+        # entscheidet jetzt `chunk_length_schedule` aus der BOS-Nachricht; die
+        # Messung dazu steht bei KONTEXTRAMPE.
+        #
+        # `flush: True` bleibt dem finalen Ausklingen vorbehalten — sonst
+        # reisst es das 5-Kontexte-Limit von ElevenLabs (Fehlercode 1008).
+        nutzlast = json.dumps({"text": f"{stueck} "})
         try:
             await self._verbindung.send(nutzlast)
         except Exception as fehler:
