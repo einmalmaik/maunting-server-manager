@@ -279,8 +279,9 @@ def test_native_ark_ascended_uses_pinned_umu_runtime_and_all_declared_ports() ->
         "xvfb-run",
         "-a",
         "/opt/umu-launcher/umu-run",
-        "./ArkAscendedServer.exe",
+        "./ShooterGame/Binaries/Win64/ArkAscendedServer.exe",
     ]
+    assert plugin.container_workdir(server) == "/home/container"
     assert "-Port=7777" in argv
     assert "-QueryPort=27015" in argv
     assert "-RCONPort=37015" in argv
