@@ -1004,18 +1004,42 @@ async def _ai_tasks_task() -> None:
     Der Takt betraegt 60 Sekunden und ist damit zugleich die Genauigkeit, mit
     der ein Termin eingehalten wird. Feiner waere unehrlich: der Lauf selbst
     dauert laenger als eine Minute.
+
+    **Drei Handgriffe, einzeln gekapselt** (die Zwei-Block-Form aus
+    `_ai_guardian_task`): faellige Auftraege starten, geparkte Worker wecken
+    (``waiting_wake`` mit verstrichener Frist), offene Meldungen zustellen,
+    wenn das Gespraech Ruhe hat. Scheitert einer, laufen die anderen trotzdem.
     """
     from database import SessionLocal
     from services.ai_task_service import faellige_aufgaben_bearbeiten
 
     db = SessionLocal()
     try:
-        anzahl = await faellige_aufgaben_bearbeiten(db)
-        if anzahl:
-            logger.info("KI-Aufgaben: %s Lauf/Laeufe begonnen", anzahl)
-    except Exception as exc:
-        db.rollback()
-        logger.warning("Error in AI tasks scheduler: %s", exc)
+        try:
+            anzahl = await faellige_aufgaben_bearbeiten(db)
+            if anzahl:
+                logger.info("KI-Aufgaben: %s Lauf/Laeufe begonnen", anzahl)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in AI tasks scheduler: %s", exc)
+        try:
+            from services import ai_run_service
+
+            geweckt = ai_run_service.faellige_wecken(db)
+            if geweckt:
+                logger.info("KI-Worker: %s Lauf/Laeufe geweckt", geweckt)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in AI wake task: %s", exc)
+        try:
+            from services import ai_meldestelle
+
+            geliefert = await ai_meldestelle.faellige_zustellungen(db)
+            if geliefert:
+                logger.info("KI-Meldungen: %s Zustellung(en) begonnen", geliefert)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in AI delivery task: %s", exc)
     finally:
         db.close()
 

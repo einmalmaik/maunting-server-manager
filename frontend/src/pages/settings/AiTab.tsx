@@ -20,6 +20,7 @@ import { Button, Dropdown, NumberStepper, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { AiContextSettings } from './AiContextSettings'
 import { AiCostSettings } from './AiCostSettings'
+import { AiWorkerSettings } from './AiWorkerSettings'
 import { AiLearningSettings } from './AiLearningSettings'
 import { AiProvidersSettings } from './AiProvidersSettings'
 import { AiUsageSettings } from './AiUsageSettings'
@@ -288,6 +289,10 @@ export function AiTab() {
       {activeTab === 'providers' && (
         <div className="space-y-6">
           <AiProvidersSettings canWrite={canWrite} />
+          {/* Die Deckel der Hintergrund-Aufträge stehen bei den Zugängen, weil
+              sie zusammen die Worker-Rolle ergeben: das Modell je Zugang oben,
+              wie viel davon gleichzeitig laufen darf hier. */}
+          <AiWorkerSettings canWrite={canWrite} />
           {/* Direkt unter der Providerwahl: wie groß der Kontext ist, entscheidet
               das dort gewählte Modell — einzustellen bleibt nur, wie voll er werden
               darf, bevor zusammengefasst wird. */}

@@ -117,6 +117,19 @@
     "maxMemoryEntries": "Max. Memory-Einträge je Bereich",
     "maxMemoryEntriesHint": "Gilt je persönlichem Bereich — allgemein und je Server getrennt gezählt. Ein leeres Feld senkt den Vorrat nicht: die Systemgrenze von 100 Einträgen gilt erst, wenn keine Rolle des Benutzers eine Zahl trägt. Beim Teamwissen zählt die Rolle des Gründers, nicht die des Schreibenden. „Wissen dieses Servers“ und „Panelweites KI-Gedächtnis“ hängen an keiner Rolle; dort gilt immer die Systemgrenze.",
     "maxReasoningEffort": "Höchste Denkstufe",
+    "worker": {
+      "title": "Worker-Deckel",
+      "description": "Wie viel Hintergrundarbeit ein einzelner Benutzer gleichzeitig auslösen darf. Beide Deckel gelten panelweit — welche Modelle die Worker benutzen, steht am jeweiligen Zugang.",
+      "maxParallel": "Worker je Benutzer",
+      "maxParallelHint": "Gleichzeitig laufende oder wartende Aufträge. Ein geparkter Langläufer belegt seinen Platz, bis er fertig ist.",
+      "roundsPerWorker": "Runden je Worker",
+      "roundsHint": "Anbieter-Anfragen, die ein einzelner Auftrag höchstens verbraucht, bevor er ehrlich aufgibt.",
+      "saved": "Worker-Deckel gespeichert.",
+      "errors": {
+        "load": "Worker-Deckel konnten nicht geladen werden.",
+        "save": "Worker-Deckel konnten nicht gespeichert werden."
+      }
+    },
     "tabsAriaLabel": "KI-Einstellungen Bereiche",
     "subtabs": {
       "providers": "KI-Anbieter",
@@ -172,6 +185,13 @@
         "tts": "Stimme"
       },
       "recommended": "Empfohlen",
+      "workerSection": "Worker (Hintergrund-Aufträge)",
+      "workerHint": "Mit diesem Modell und dieser festen Denkstufe arbeiten die Worker im Hintergrund — es darf langsam und gründlich sein. Leer gelassen gilt der Ein-Modell-Betrieb: das Chat-Modell oben erledigt dann auch die Hintergrundarbeit.",
+      "workerModel": "Worker-Modell",
+      "workerOff": "Kein eigenes Worker-Modell",
+      "workerEffort": "Feste Denkstufe",
+      "workerEffortOff": "Nicht nachdenken",
+      "workerEffortHint": "Gilt für jeden Worker-Lauf. Der Kunde wählt sie nicht — die Hintergrundarbeit zahlt der Betreiber.",
       "recommendationHint": "MSM ist mit {{model}} erprobt — schnell genug für den Chat und mit Denkstufen. Ein anderes Modell geht auch.",
       "recommendationApply": "Übernehmen",
       "caps": {
@@ -543,7 +563,12 @@
       "search_server_files": "In Dateien gesucht",
       "search_workshop_mods": "Workshop durchsucht",
       "send_test_email": "Testmail verschickt",
-      "web_search": "Im Web gesucht"
+      "wait_until": "Wartezeit eingeplant",
+      "web_search": "Im Web gesucht",
+      "worker_antwort": "Antwort an den Worker übergeben",
+      "worker_cancel": "Worker abgebrochen",
+      "worker_frage": "Rückfrage gestellt",
+      "worker_start": "Worker gestartet"
     },
     "toolsRunning": {
       "ask_user": "Ich frage kurz nach",
@@ -599,7 +624,12 @@
       "search_server_files": "Ich suche in den Dateien",
       "search_workshop_mods": "Ich durchsuche den Workshop",
       "send_test_email": "Ich verschicke eine Testmail",
-      "web_search": "Ich suche im Web"
+      "wait_until": "Ich lege eine Wartezeit ein",
+      "web_search": "Ich suche im Web",
+      "worker_antwort": "Ich gebe deine Antwort an den Worker weiter",
+      "worker_cancel": "Ich halte den Worker an",
+      "worker_frage": "Ich stelle dir eine Frage",
+      "worker_start": "Ich starte einen Worker im Hintergrund"
     },
     "errors": {
       "codes": {
@@ -810,7 +840,25 @@
       "open": "Zum Assistenten",
       "guardianCompleted": "Die KI hat eine Guardian-Störung bearbeitet.",
       "guardianWaiting": "Eine Guardian-Reparatur wartet auf deine Freigabe.",
-      "guardianFailed": "Eine Guardian-Reparatur ist fehlgeschlagen."
+      "guardianFailed": "Eine Guardian-Reparatur ist fehlgeschlagen.",
+      "workerReported": "Ein Worker hat berichtet.",
+      "workerWaiting": "Ein Worker wartet auf deine Freigabe.",
+      "workerQuestion": "Ein Worker hat eine Rückfrage."
+    },
+    "worker": {
+      "title": "Worker",
+      "subtitle": "Ein Auftrag im Hintergrund — hier liest du mit.",
+      "listLabel": "Worker",
+      "running": "arbeitet",
+      "waitingApproval": "wartet auf deine Freigabe",
+      "waitingUser": "wartet auf deine Antwort",
+      "waitingWake": "schläft bis zum nächsten Wecken",
+      "finished": "abgeschlossen",
+      "readOnly": "Hier schreibt nur der Worker. Gesteuert wird im Gespräch — sag der KI zum Beispiel „Stopp diesen Auftrag“.",
+      "emptyTitle": "Noch nichts zu lesen",
+      "emptyDescription": "Der Worker hat noch nichts geschrieben. Sobald er arbeitet, steht sein Verlauf hier — jede Werkzeugrunde eingeschlossen.",
+      "notFoundTitle": "Diesen Worker gibt es nicht",
+      "notFoundDescription": "Der Auftrag wurde aufgeräumt, gehört einem anderen Benutzer oder die Adresse ist veraltet."
     },
     "reasoning": {
       "off": "Kein Nachdenken",
@@ -1606,6 +1654,10 @@
     "ai_tasks_manage": {
       "title": "Wiederkehrende KI-Aufgaben verwalten",
       "desc": "Erlaubt es, der KI im Chat stehende Aufträge zu geben — etwa täglich um 8 Uhr eine Zusammenfassung per E-Mail. Ein fälliger Auftrag läuft ohne anwesenden Benutzer, aber mit dessen Berechtigungen und aus dessen Kontingent. Aufträge, die selbst etwas ändern, setzen zusätzlich den autonomen Modus voraus."
+    },
+    "ai_background_use": {
+      "title": "KI-Worker im Hintergrund verwenden",
+      "desc": "Erlaubt der KI, Aufträge an Worker zu übergeben, die im Hintergrund weiterarbeiten — auch während das Gespräch weitergeht oder der Browser geschlossen ist. Ein Worker läuft mit den Berechtigungen und aus dem Kontingent des Auftraggebers; jede Änderung an Servern bleibt bestätigungspflichtig wie im Chat. Ohne dieses Recht arbeitet die KI wie bisher in einem einzelnen Lauf."
     },
     "ai_usage_read_all": {
       "title": "Gesamte KI-Nutzung einsehen",
@@ -3030,7 +3082,7 @@
       },
       "kubernetes": {
         "title": "Kubernetes",
-        "body": "Die Manifeste unter deploy/kubernetes betreiben die Control Plane. Gameserver bleiben Docker-Container auf den angebundenen Nodes. Genau eine Panel-Replica, der DIS-Sidecar läuft im selben Pod."
+        "body": "Die Manifeste unter deploy/kubernetes betreiben die Control Plane. Gameserver bleiben Docker-Container auf den angebundenen Nodes. Genau eine Panel-Replica, der DIS-Sidecar läuft im selben Pod. Auch KI-Laufvermittler und KI-Meldestelle sind prozesslokal: Meldungen der Hintergrund-Aufträge stehen in der Datenbank und überleben einen Neustart, nur das Live-Zusehen reisst kurz ab."
       }
     },
     "voice": {

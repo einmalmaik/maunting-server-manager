@@ -32,10 +32,10 @@ from services import ai_run_broker, ai_tts_elevenlabs, ai_voice_bridge
 class _Attrappe(ai_voice_bridge.Sprachbruecke):
     """Eine Brücke ohne Browser: gesendete Ereignisse landen in einer Liste."""
 
-    def __init__(self) -> None:  # noqa: D107 - siehe Klassendoku
+    def __init__(self, user_id: int = 1) -> None:  # noqa: D107 - siehe Klassendoku
         super().__init__(
             browser=None,  # type: ignore[arg-type]
-            user_id=1,
+            user_id=user_id,
             conversation_id="egal",
             chat_provider_id=1,
             stimm_kind="elevenlabs",
@@ -186,3 +186,72 @@ async def test_ein_ja_bestaetigt_nur_den_zuletzt_gezeigten_vorschlag() -> None:
         if ereignis.get("art") == "antworttext"
     ]
     assert any("2" in ansage and "verworfen" in ansage for ansage in ansagen)
+
+
+@pytest.mark.parametrize(
+    "fensterart, verfolgt",
+    [("primary", True), ("worker", False)],
+)
+def test_ein_geweckter_worker_wird_geweckt_aber_nicht_verfolgt(
+    db, owner_user, monkeypatch, fensterart: str, verfolgt: bool
+) -> None:
+    """Das Ja weckt auch einen Worker — aber die Stimme folgt ihm nicht.
+
+    Ein Vorschlag kann an einem Worker-Lauf hängen: der Auftrag hat um eine
+    Freigabe gebeten, und die Karte kam als Meldung ins Gespräch. Das
+    gesprochene Ja weckt ihn wie im Chat — wer sich danach aber anhängte,
+    läse dem Menschen das rohe Protokoll eines Hintergrund-Auftrags vor.
+    Die Stimme spricht ausschliesslich Gehirn-Ausgaben
+    (docs/agentic-framework.md, §12); das Ergebnis des Workers kommt als
+    Meldung, und die spricht der Zusteller. Der `primary`-Fall daneben
+    beweist, dass die Ausnahme eng bleibt: ein gewöhnlicher Lauf wird
+    weiterhin verfolgt.
+    """
+    from models import AiConversation, AiRun
+    from services import ai_proposal_service, ai_run_service
+
+    fenster = AiConversation(
+        id=str(uuid4()), user_id=owner_user.id, kind=fensterart, title="Auftrag"
+    )
+    db.add(fenster)
+    db.flush()
+    lauf = AiRun(
+        id=str(uuid4()),
+        conversation_id=fenster.id,
+        user_id=owner_user.id,
+        status="waiting_confirmation",
+    )
+    db.add(lauf)
+    db.commit()
+
+    class _Vorschlag:
+        run_id = lauf.id
+
+    geweckt: list[str] = []
+
+    monkeypatch.setattr(
+        ai_proposal_service, "owned_proposal", lambda db_, kennung, user: _Vorschlag()
+    )
+    monkeypatch.setattr(
+        ai_proposal_service,
+        "confirm_proposal",
+        lambda db_, *, proposal_id, user: (_Vorschlag(), "einmal-token"),
+    )
+    monkeypatch.setattr(
+        ai_proposal_service,
+        "execute_proposal",
+        lambda db_, *, proposal_id, user, confirmation_token: (_Vorschlag(), {}),
+    )
+    monkeypatch.setattr(
+        ai_run_service,
+        "lauf_fortsetzen",
+        lambda db_, *, run_id: geweckt.append(run_id) or True,
+    )
+
+    bruecke = _Attrappe(user_id=owner_user.id)
+    erfolg, fortgesetzt = bruecke._ausfuehren("kennung")
+
+    assert erfolg is True
+    # Das Wecken selbst bleibt in beiden Fällen — nur das Zuhören entfällt.
+    assert geweckt == [lauf.id]
+    assert fortgesetzt == (lauf.id if verfolgt else None)

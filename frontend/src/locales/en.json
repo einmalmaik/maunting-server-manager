@@ -117,6 +117,19 @@
     "maxMemoryEntries": "Max memory entries per scope",
     "maxMemoryEntriesHint": "Applies per personal area — counted separately for general and per server. An empty field does not lower the quota: the system limit of 100 entries applies only when no role of the user carries a number. For team knowledge, the founder's role counts, not the writer's. “Server knowledge” and “Panel-wide AI memory” do not belong to any role; the system limit always applies there.",
     "maxReasoningEffort": "Maximum reasoning depth",
+    "worker": {
+      "title": "Worker limits",
+      "description": "How much background work a single user may trigger at once. Both limits apply panel-wide — which models the workers use is set on each provider.",
+      "maxParallel": "Workers per user",
+      "maxParallelHint": "Tasks running or waiting at the same time. A parked long-runner keeps its slot until it finishes.",
+      "roundsPerWorker": "Rounds per worker",
+      "roundsHint": "The maximum number of provider requests a single task may spend before it honestly gives up.",
+      "saved": "Worker limits saved.",
+      "errors": {
+        "load": "Worker limits could not be loaded.",
+        "save": "Worker limits could not be saved."
+      }
+    },
     "tabsAriaLabel": "AI Settings Sections",
     "subtabs": {
       "providers": "AI Providers",
@@ -172,6 +185,13 @@
         "tts": "Voice"
       },
       "recommended": "Recommended",
+      "workerSection": "Workers (background tasks)",
+      "workerHint": "Workers do the background work with this model and this fixed reasoning effort — it may be slow and thorough. Left empty, single-model operation applies: the chat model above also handles the background work.",
+      "workerModel": "Worker model",
+      "workerOff": "No separate worker model",
+      "workerEffort": "Fixed reasoning effort",
+      "workerEffortOff": "No reasoning",
+      "workerEffortHint": "Applies to every worker run. Customers do not choose it — the operator pays for background work.",
       "recommendationHint": "MSM is tested with {{model}} — fast enough for chat and it knows reasoning levels. Another model works too.",
       "recommendationApply": "Use it",
       "caps": {
@@ -543,7 +563,12 @@
       "search_server_files": "Searched files",
       "search_workshop_mods": "Search the Workshop",
       "send_test_email": "Test email sent",
-      "web_search": "Searched the web"
+      "wait_until": "Wait scheduled",
+      "web_search": "Searched the web",
+      "worker_antwort": "Answer passed to the worker",
+      "worker_cancel": "Worker cancelled",
+      "worker_frage": "Question raised",
+      "worker_start": "Worker started"
     },
     "toolsRunning": {
       "ask_user": "Asking a quick question",
@@ -599,7 +624,12 @@
       "search_server_files": "Searching the files",
       "search_workshop_mods": "Searching the Workshop",
       "send_test_email": "Sending a test email",
-      "web_search": "Searching the web"
+      "wait_until": "Scheduling a wait",
+      "web_search": "Searching the web",
+      "worker_antwort": "Passing your answer to the worker",
+      "worker_cancel": "Stopping the worker",
+      "worker_frage": "Asking you a question",
+      "worker_start": "Starting a worker in the background"
     },
     "errors": {
       "codes": {
@@ -810,7 +840,25 @@
       "open": "Open assistant",
       "guardianCompleted": "The AI worked on a Guardian incident.",
       "guardianWaiting": "A Guardian repair is waiting for your approval.",
-      "guardianFailed": "A Guardian repair failed."
+      "guardianFailed": "A Guardian repair failed.",
+      "workerReported": "A worker has reported back.",
+      "workerWaiting": "A worker is waiting for your approval.",
+      "workerQuestion": "A worker has a question for you."
+    },
+    "worker": {
+      "title": "Worker",
+      "subtitle": "A background task — read along here.",
+      "listLabel": "Workers",
+      "running": "working",
+      "waitingApproval": "waiting for your approval",
+      "waitingUser": "waiting for your reply",
+      "waitingWake": "sleeping until the next wake-up",
+      "finished": "finished",
+      "readOnly": "Only the worker writes here. You steer it in the conversation — for example, tell the AI “stop this task”.",
+      "emptyTitle": "Nothing to read yet",
+      "emptyDescription": "The worker has not written anything yet. Once it works, its transcript appears here — every tool round included.",
+      "notFoundTitle": "This worker does not exist",
+      "notFoundDescription": "The task has been cleaned up, belongs to another user, or the address is outdated."
     },
     "reasoning": {
       "off": "No reasoning",
@@ -1606,6 +1654,10 @@
     "ai_tasks_manage": {
       "title": "Manage recurring AI tasks",
       "desc": "Allows giving the AI standing orders in the chat — a daily summary by email at 8 a.m., for example. A due order runs without the user present, but with that user's permissions and from that user's quota. Orders that change something also require autonomous mode."
+    },
+    "ai_background_use": {
+      "title": "Use AI workers in the background",
+      "desc": "Allows the AI to hand orders to workers that keep working in the background — even while the conversation continues or the browser is closed. A worker runs with the permissions and from the quota of the user who gave the order; every change to servers still requires confirmation, exactly as in the chat. Without this permission the AI works in a single run, as before."
     },
     "ai_usage_read_all": {
       "title": "View overall AI usage",
@@ -3030,7 +3082,7 @@
       },
       "kubernetes": {
         "title": "Kubernetes",
-        "body": "The manifests under deploy/kubernetes run the control plane. Game servers remain Docker containers on the connected nodes. Exactly one panel replica, and the DIS sidecar runs in the same pod."
+        "body": "The manifests under deploy/kubernetes run the control plane. Game servers remain Docker containers on the connected nodes. Exactly one panel replica, and the DIS sidecar runs in the same pod. The AI run broker and AI report office are process-local too: reports from background tasks live in the database and survive a restart, only live-following breaks off briefly."
       }
     },
     "voice": {

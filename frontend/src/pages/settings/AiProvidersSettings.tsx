@@ -23,6 +23,16 @@ interface ProviderDraft extends AiProviderWrite {
   operator_key_hint?: string | null
 }
 
+/**
+ * Der Auswahlwert für „kein Worker-Modell" bzw. „nicht nachdenken".
+ *
+ * Unser `Dropdown` trägt Zeichenketten; `null` wäre dort „nichts gewählt" und
+ * zeigte den Platzhalter statt einer Entscheidung — dasselbe Muster wie
+ * `AUS`/`AN_OHNE_STUFE` im Chat-Kopf. Der Wert kann keine echte Kennung
+ * verdecken: kein Anbieter führt ein Modell dieses Namens.
+ */
+const KEIN_WORKER = '__aus__'
+
 const EMPTY_PROVIDER: ProviderDraft = {
   name: '',
   provider_kind: '',
@@ -35,6 +45,10 @@ const EMPTY_PROVIDER: ProviderDraft = {
   // ein geratenes Hoermodell stuende auf der Rechnung des Betreibers.
   default_voice: null,
   transcription_model: null,
+  // Ohne Worker-Modell gilt der heutige Ein-Modell-Betrieb — der dokumentierte
+  // Fallback (docs/agentic-framework.md, §5), keine Pflichtangabe.
+  worker_model: null,
+  worker_reasoning_effort: null,
   operator_api_key: '',
 }
 
@@ -49,6 +63,8 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     token_price_micro_usd_per_million: provider.token_price_micro_usd_per_million,
     default_voice: provider.default_voice,
     transcription_model: provider.transcription_model,
+    worker_model: provider.worker_model,
+    worker_reasoning_effort: provider.worker_reasoning_effort,
     operator_api_key: '',
     operator_key_configured: provider.operator_key_configured,
     operator_key_hint: provider.operator_key_hint,
@@ -128,7 +144,15 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
       token_price_micro_usd_per_million: draft.token_price_micro_usd_per_million ?? null,
       ...(protokoll === 'tts' ? { default_voice: draft.default_voice?.trim() || null } : {}),
       ...(protokoll === 'chat_completions'
-        ? { transcription_model: draft.transcription_model?.trim() || null }
+        ? {
+            transcription_model: draft.transcription_model?.trim() || null,
+            worker_model: draft.worker_model?.trim() || null,
+            // Eine Denkstufe ohne Arbeitsmodell ist keine Einstellung — sie
+            // geht mit dem Modell und faellt mit ihm.
+            worker_reasoning_effort: draft.worker_model?.trim()
+              ? draft.worker_reasoning_effort || null
+              : null,
+          }
         : {}),
       ...(draft.operator_api_key ? { operator_api_key: draft.operator_api_key } : {}),
       ...(draft.clear_operator_api_key ? { clear_operator_api_key: true } : {}),
@@ -299,6 +323,10 @@ function ProviderForm({
   }, [draft.provider_kind, draft.id])
 
   const gewaehltesModell = models?.find((item) => item.model_id === draft.default_model) ?? null
+  // Das Arbeitsmodell der Worker — aus demselben Katalog. `null`, wenn keines
+  // gewaehlt ist oder der Katalog es nicht (mehr) fuehrt; die Stufenwahl
+  // verschwindet dann mit, denn Stufen kommen immer aus dem Katalog.
+  const workerModell = models?.find((item) => item.model_id === draft.worker_model) ?? null
   // Kommt aus dem Katalog, nicht aus der Oberflaeche: fuehrt der Anbieter die
   // empfohlene Kennung nicht mehr, gibt es hier `null` und die Empfehlung
   // verschwindet von selbst — statt auf ein Modell zu zeigen, das es nicht gibt.
@@ -310,6 +338,8 @@ function ProviderForm({
   const stimmeId = useId()
   const hoerenId = useId()
   const preisId = useId()
+  const workerModellId = useId()
+  const workerStufeId = useId()
 
   // Solange die Politik nicht geladen ist, gilt USD 1:1 — die Waehrung der
   // Buchung. Ein Rueckfall auf Euro wuerde einen getippten Preis stillschweigend
@@ -545,6 +575,91 @@ function ProviderForm({
                 />
                 <p className="msm-field-help">{t('ai.providers.transcriptionModelHint')}</p>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Worker-Rolle: die zweite Hälfte der Provider-Zweiteilung. Das
+            Gehirn antwortet mit dem Modell oben (Denkstufe wählt der Kunde im
+            Chat-Kopf); die Worker arbeiten im Hintergrund mit diesem Modell
+            und dieser **festen** Stufe — beides bestimmt der Betreiber, denn
+            er zahlt. Leer heisst: heutiger Ein-Modell-Betrieb, kein Fehler. */}
+        {spec?.protokoll === 'chat_completions' && (
+          <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                🛠️ {t('ai.providers.workerSection')}
+              </h4>
+              <p className="msm-field-help mt-1">{t('ai.providers.workerHint')}</p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                {models && models.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <label htmlFor={workerModellId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                      {t('ai.providers.workerModel')}
+                    </label>
+                    <Dropdown
+                      id={workerModellId}
+                      value={draft.worker_model || KEIN_WORKER}
+                      onChange={(worker_model) => change({
+                        worker_model: worker_model === KEIN_WORKER ? null : worker_model,
+                        worker_reasoning_effort: null,
+                      })}
+                      options={[
+                        { value: KEIN_WORKER, label: t('ai.providers.workerOff') },
+                        ...[...models]
+                          .sort((a, b) => Number(b.recommended) - Number(a.recommended))
+                          .map((item) => ({
+                            value: item.model_id,
+                            label: item.model_id,
+                            hint: item.name !== item.model_id ? item.name : undefined,
+                          })),
+                      ]}
+                      aria-label={t('ai.providers.workerModel')}
+                    />
+                  </div>
+                ) : (
+                  <ProviderInput
+                    label={t('ai.providers.workerModel')}
+                    value={draft.worker_model ?? ''}
+                    onChange={(worker_model) => change({
+                      worker_model: worker_model || null,
+                      worker_reasoning_effort: null,
+                    })}
+                  />
+                )}
+                {workerModell && <ModelCapabilities model={workerModell} />}
+              </div>
+              {/* Die feste Denkstufe — nur wählbar, wenn der Katalog das
+                  Modell kennt und es Stufen hat: die Stufen kommen immer aus
+                  dem Katalog, nie aus einer Liste im Code. */}
+              {workerModell?.reasoning && workerModell.efforts.length > 0 && (
+                <div className="space-y-1.5">
+                  <label htmlFor={workerStufeId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                    {t('ai.providers.workerEffort')}
+                  </label>
+                  <Dropdown
+                    id={workerStufeId}
+                    value={draft.worker_reasoning_effort || KEIN_WORKER}
+                    onChange={(stufe) => change({
+                      worker_reasoning_effort: stufe === KEIN_WORKER ? null : stufe,
+                    })}
+                    options={[
+                      // „Nicht nachdenken" nur, wenn das Modell das zulaesst.
+                      ...(workerModell.mandatory
+                        ? []
+                        : [{ value: KEIN_WORKER, label: t('ai.providers.workerEffortOff') }]),
+                      ...workerModell.efforts.map((effort) => ({
+                        value: effort,
+                        label: t(`ai.reasoning.levels.${effort}`, { defaultValue: effort }),
+                      })),
+                    ]}
+                    aria-label={t('ai.providers.workerEffort')}
+                  />
+                  <p className="msm-field-help">{t('ai.providers.workerEffortHint')}</p>
+                </div>
+              )}
             </div>
           </div>
         )}

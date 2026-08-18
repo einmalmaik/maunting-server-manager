@@ -74,6 +74,8 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         # nächsten Klick auf „Speichern" als seine.
         default_voice=provider.default_voice,
         transcription_model=provider.transcription_model,
+        worker_model=provider.worker_model,
+        worker_reasoning_effort=provider.worker_reasoning_effort,
         enabled=provider.enabled,
         requires_api_key=provider.requires_api_key,
         operator_key_configured=bool(provider.operator_api_key_encrypted),

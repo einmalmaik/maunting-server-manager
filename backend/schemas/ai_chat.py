@@ -97,6 +97,25 @@ class AiConversationDetail(AiConversationResponse):
     has_more: bool = False
 
 
+class AiWorkerInfo(BaseModel):
+    """Ein Hintergrund-Auftrag, wie die Worker-Leiste des Chats ihn zeigt.
+
+    Bewusst nur das Nötigste: Kennung (führt zur lesbaren Unterhaltung),
+    geschwärzter Titel, Laufzustand und Beginn. Keine Serverdaten, kein
+    Auftragstext — die Leiste ist eine Übersicht, kein zweiter Verlauf
+    (docs/agentic-framework.md, §4: die Meldung ist das Ergebnis, nie der
+    Prozess; Werkzeugschritte sieht nur, wer die Worker-Ansicht öffnet).
+    """
+
+    conversation_id: str
+    title: str
+    #: Laufzustand: ``running`` oder eine der Parkstellen aus
+    #: `models.ai_run.WARTEND`. Beendete Aufträge stehen nie in der Liste —
+    #: so „räumt sie sich auf", ohne dass etwas gelöscht würde.
+    status: str
+    created_at: datetime
+
+
 class AiChatRequest(BaseModel):
     content: str = Field(min_length=1, max_length=16_000)
     provider_id: int = Field(ge=1)

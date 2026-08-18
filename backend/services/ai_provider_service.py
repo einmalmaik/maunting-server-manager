@@ -26,6 +26,7 @@ from models import AiProvider, AiRun, User
 import re
 
 from services import ai_provider_registry
+from services.ai_reasoning import RANGFOLGE
 from services.dis_client import DisClient
 
 
@@ -138,6 +139,47 @@ def _assert_stimme(stimme: str | None) -> str | None:
     return kennung
 
 
+def _assert_worker_rolle(
+    worker_model: str | None,
+    worker_reasoning_effort: str | None,
+    default_model: str | None,
+) -> tuple[str | None, str | None]:
+    """Die Worker-Rolle eines Zugangs — schlüssig oder gar nicht.
+
+    Drei Regeln, alle drei gegen tote Konfiguration:
+
+    * Die Denkstufe muss ein Wort aus `ai_reasoning.RANGFOLGE` sein. Ein
+      erfundenes Wort fiele sonst erst zur Laufzeit auf — als 400 des
+      Anbieters bei jedem Worker-Segment, ohne Bezug zu dem Feld, in das der
+      Betreiber getippt hat.
+    * Eine Denkstufe ohne Worker-Modell gibt es nicht: die Stufe gehört zum
+      Arbeitsmodell, und ob die Worker-Rolle konfiguriert ist, entscheidet
+      allein ``worker_model`` — zwei halbe Schalter wären zwei Auslegungen.
+    * Ein Worker-Modell ohne Standardmodell gibt es nicht: Worker erben den
+      Zugang des Gehirns, ein Zugang ohne ``default_model`` trägt kein
+      Gespräch und damit auch keinen `worker_start`. Die Zeile sähe
+      konfiguriert aus und täte nie etwas.
+
+    Nachsichtig gelesen (Rand-Leerzeichen, leer heißt „nichts hinterlegt"),
+    streng gespeichert — dasselbe Muster wie bei der Stimme darüber.
+    """
+    modell = (worker_model or "").strip() or None
+    stufe = (worker_reasoning_effort or "").strip() or None
+    if stufe is not None and stufe not in RANGFOLGE:
+        raise AiProviderConfigurationError(
+            "Unbekannte Worker-Denkstufe. Zulässig sind: " + ", ".join(RANGFOLGE)
+        )
+    if stufe is not None and modell is None:
+        raise AiProviderConfigurationError(
+            "Eine Worker-Denkstufe braucht ein Worker-Modell"
+        )
+    if modell is not None and not (default_model or "").strip():
+        raise AiProviderConfigurationError(
+            "Ein Worker-Modell braucht ein Standardmodell am selben Zugang"
+        )
+    return modell, stufe
+
+
 def create_provider(
     db: Session,
     *,
@@ -156,6 +198,12 @@ def create_provider(
     # Optional: das hörende Modell eines Chatzugangs. Ohne es gibt es über
     # diesen Zugang ebenfalls keinen Sprachmodus.
     transcription_model: str | None = None,
+    # Optional: die Worker-Rolle dieses Zugangs (docs/agentic-framework.md,
+    # Abschnitt 5). Ohne Worker-Modell gilt der heutige Ein-Modell-Betrieb.
+    # Zählt bewusst **nicht** als Funktion im Sinne der Prüfung unten: Worker
+    # erben den Zugang des Gehirns, allein trüge das Modell nichts.
+    worker_model: str | None = None,
+    worker_reasoning_effort: str | None = None,
 ) -> AiProvider:
     if not (name or "").strip():
         raise AiProviderConfigurationError("Provider-Name darf nicht leer sein")
@@ -166,6 +214,9 @@ def create_provider(
         raise AiProviderConfigurationError(
             "Mindestens eine Funktion (Standardmodell, Modell für Gesprochenes oder Stimme) muss hinterlegt sein"
         )
+    arbeitsmodell, arbeitsstufe = _assert_worker_rolle(
+        worker_model, worker_reasoning_effort, modell
+    )
     kind = _assert_kind(provider_kind)
     _assert_key_passt(kind, operator_api_key)
     provider = AiProvider(
@@ -177,6 +228,8 @@ def create_provider(
         token_price_micro_usd_per_million=token_price_micro_usd_per_million,
         default_voice=stimme,
         transcription_model=gehoer,
+        worker_model=arbeitsmodell,
+        worker_reasoning_effort=arbeitsstufe,
     )
     db.add(provider)
     db.flush()
@@ -219,10 +272,22 @@ def update_provider(
         raise AiProviderConfigurationError(
             "Mindestens eine Funktion (Standardmodell, Modell für Gesprochenes oder Stimme) muss hinterlegt sein"
         )
+    # Gegen den **Zielzustand** geprüft, nicht gegen die Eingabe allein: auch
+    # wer nur das Standardmodell leert, darf kein verwaistes Worker-Modell
+    # zurücklassen.
+    new_worker_model, new_worker_effort = _assert_worker_rolle(
+        values["worker_model"] if "worker_model" in values else provider.worker_model,
+        values["worker_reasoning_effort"]
+        if "worker_reasoning_effort" in values
+        else provider.worker_reasoning_effort,
+        new_default_model,
+    )
     provider.name = new_name
     provider.default_model = new_default_model
     provider.default_voice = new_default_voice
     provider.transcription_model = new_transcription_model
+    provider.worker_model = new_worker_model
+    provider.worker_reasoning_effort = new_worker_effort
     for field in ("enabled", "requires_api_key"):
         # ``null`` heisst bei einer NOT-NULL-Spalte nicht „aus", sondern
         # „nichts gesagt" — es wird wie ein fehlendes Feld behandelt, statt als

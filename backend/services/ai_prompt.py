@@ -563,6 +563,59 @@ Ein Auftrag mit `kind: "act"` darf selbst handeln und setzt den autonomen Modus 
 Weckt dich ein faelliger Auftrag, sitzt niemand davor: `ask_user` gibt es dann nicht. Entscheide selbst oder melde ehrlich Fehlanzeige. Dein Abschlusstext wird als E-Mail gelesen — fasse in wenigen Saetzen zusammen, was du festgestellt oder getan hast."""
 
 
+# ── Die Rollen des Agentic Framework (docs/agentic-framework.md, §3) ─────────
+#
+# Zwei zusätzliche Blöcke und zwei zusätzliche Reihenfolge-Tupel — **kein**
+# zweiter Prompt. Die Tupel referenzieren dieselben Blockkonstanten; wer einen
+# Block anfasst, ändert ihn für jede Rolle, in der er vorkommt. Kopierte
+# Blocktexte veralteten lautlos gegeneinander (siehe `build`-Docstring).
+#
+# Auch diese Blöcke sind keine Schranke. Die Rollentrennung sitzt mechanisch in
+# `ai_tool_registry.GEHIRN_TOOLS` / `worker_ausschluss()` und deren Durchsetzung
+# im Stream-Service — hier steht nur, was das Modell wissen muss, um seine Rolle
+# nicht in verlorene Runden laufen zu lassen.
+GEHIRN = """\
+Du bist hier das Gehirn des Gesprächs: der Charakter, mit dem der Benutzer \
+dauerhaft redet. Die eigentliche Arbeit erledigst du nie selbst — du hast \
+keine Server- oder Panelwerkzeuge. Alles, was Arbeit erfordert (nachsehen, \
+prüfen, ändern, überwachen), gibst du sofort mit `worker_start` als Auftrag in \
+den Hintergrund. Smalltalk, persönliche Fragen und alles, was du aus dem \
+Gespräch oder deinem Gedächtnis weißt, beantwortest du direkt und ohne Auftrag.
+Schreib den Auftrag so, dass er allein verständlich ist: was zu tun ist, \
+worauf es ankommt, was der Benutzer wörtlich wollte — der Worker sieht dieses \
+Gespräch nicht. Sag beim Deklarieren in einem Satz, was du angestoßen hast; \
+das ist die Quittung, und es gibt keine zweite. Klingt ein Wunsch nach langer \
+Dauer (Wartezeiten, Zeitpunkte, "heute Nacht"), sag ehrlich, dass es dauert, \
+und kläre, ob das Ergebnis zusätzlich per E-Mail kommen soll (`kanal`).
+Berichtet ein Auftrag (Meldung des Panels), liefere das Ergebnis in deiner \
+eigenen Stimme, als wäre es dein eigenes — nie "hier liegt eine Nachricht \
+vor", nie Prozessbeschreibung, keine erneute Quittung. Enthält die Meldung \
+eine Frage, stelle sie dem Benutzer menschlich und gib seine Antwort mit \
+`worker_antwort` an genau diesen Auftrag zurück. "Stopp den Auftrag" heißt \
+`worker_cancel`. Was gerade läuft, steht in der Lage — lies es dort ab, statt \
+zu raten. Erfinde nie Ergebnisse oder Fortschritt: was kein Auftrag gemeldet \
+hat, weißt du nicht."""
+
+
+# Das Gegenstück: der Prompt-Anteil des unbeaufsichtigten Arbeiters. Er ersetzt
+# RUECKFRAGEN (das wörtlich `ask_user` verlangt — ein Werkzeug, das der Worker
+# nicht hat; jeder Versuch kostete eine Runde, derselbe Fehlermodus, den der
+# `NUR_GETIPPT`-Docstring für den alten Sprachmodus beschreibt).
+WORKER = """\
+Du arbeitest im Hintergrund an genau einem Auftrag. Der Benutzer sieht dich \
+nie direkt: dein Abschlusstext wird ihm vom Panel überbracht — schreib ihn als \
+das Ergebnis, das er lesen soll: was du festgestellt oder getan hast, knapp \
+und vollständig, ohne die Arbeitsschritte nachzuerzählen.
+Brauchst du eine Entscheidung des Benutzers, nutze ausschließlich \
+`worker_frage` — der Auftrag pausiert, die Frage wird ihm überbracht, und \
+seine Antwort kommt als nächste Nachricht zu dir zurück. Frag nur, was du \
+nicht aus den Werkzeugen holen kannst, und schreib davor, was du schon weißt. \
+Musst du auf etwas warten, das Zeit braucht (ein Backup, ein Neustart, ein \
+Zeitpunkt), parke mit `wait_until`, statt in Schleifen nachzufragen — \
+Ausführungen wecken dich von selbst, `wait_until` ist die Obergrenze.
+Starte keine weiteren Aufträge — du bist der Auftrag."""
+
+
 # Reihenfolge des fertigen Prompts. Hier wurde einmal der Skill-Index zwischen
 # SKILLS und GEHEIMNISSE eingesetzt — er steht jetzt als eigene, als Daten
 # gekennzeichnete `user`-Nachricht direkt hinter dem Prompt
@@ -605,6 +658,47 @@ BLOECKE = (
     GUARDIAN,
     AUFGABEN,
 )
+
+
+# Der Prompt des Gehirns: eine **Aufzählung**, kein Ausschlussset. Nur rund ein
+# Drittel der Blöcke betrifft eine Rolle ohne Server- und Panelwerkzeuge, und
+# ein Ausschlussset mit siebzehn Einträgen wäre die fehleranfälligere Liste —
+# jeder künftige Block landete dort stillschweigend im Gehirn. Was hier fehlt,
+# fehlt mit Grund: die Werkzeugblöcke (WERKZEUGE bis WEBSUCHE) beschreiben
+# Werkzeuge, die es nicht hat; RUECKFRAGEN verlangt `ask_user`; BUENDELN und
+# BELEGE argumentieren mit Serverabfragen und Logzeilen.
+GEHIRN_BLOECKE = (
+    ROLLE,
+    GEHIRN,
+    FORMAT,
+    EINZELCHAT,
+    MITREDEN,
+    KEIN_STUMMER_ZUG,
+    GEDAECHTNIS,
+    GEDAECHTNIS_AUFRAEUMEN,
+    GEHEIMNISSE,
+    UNTRUSTED,
+)
+
+
+#: Was ein Worker-Lauf **nicht** liest. Als Ausschlussset, umgekehrt zum
+#: Gehirn: der Worker hat fast den vollen Katalog, also gilt fast der volle
+#: Prompt. EINZELCHAT beschreibt den Dauerchat (ein Worker-Fenster hat genau
+#: ein Thema), GEDAECHTNIS/GEDAECHTNIS_AUFRAEUMEN verlangen Memory-Werkzeuge,
+#: die dem Charakter gehören, RUECKFRAGEN verlangt `ask_user` (ersetzt durch
+#: die `worker_frage`-Regel im WORKER-Block), und GUARDIAN beschreibt einen
+#: Rahmen, in dem ein Worker nie läuft.
+NICHT_IM_WORKER = frozenset({
+    EINZELCHAT,
+    RUECKFRAGEN,
+    GEDAECHTNIS,
+    GEDAECHTNIS_AUFRAEUMEN,
+    GUARDIAN,
+})
+
+WORKER_BLOECKE = tuple(
+    block for block in BLOECKE if block not in NICHT_IM_WORKER
+) + (WORKER,)
 
 
 #: Was gesprochen nicht gilt.
@@ -702,7 +796,17 @@ anderen: sag, was du tun wuerdest, frag, und handle nach der Antwort. Verweise
 ihn nicht auf einen Knopf; im Sprachmodus gibt es keinen."""
 
 
-def build(*, gesprochen: bool = False) -> str:
+#: Die drei Rollen und ihre Blockfolgen — die einzige Stelle, an der ein
+#: Rollenname in einen Prompt übersetzt wird. "voll" ist der heutige
+#: Ein-Modell-Betrieb und bleibt byteweise unverändert.
+ROLLEN_BLOECKE = {
+    "voll": BLOECKE,
+    "gehirn": GEHIRN_BLOECKE,
+    "worker": WORKER_BLOECKE,
+}
+
+
+def build(*, gesprochen: bool = False, rolle: str = "voll") -> str:
     """Setzt den Systemprompt zusammen — byteweise statisch.
 
     Hier stand ein ``skill_index``-Parameter: Name und Beschreibung der Skills
@@ -723,8 +827,21 @@ def build(*, gesprochen: bool = False) -> str:
     Ein nachtraegliches Herausschneiden per Textersetzung gab es hier einmal;
     es hinterliess Loecher zwischen den Absaetzen, die nachgeraeumt werden
     mussten, und es traf jede `system`-Nachricht statt nur den Systemprompt.
+
+    ``rolle`` wählt die Blockfolge (``ROLLEN_BLOECKE``): "voll" ist der
+    heutige Ein-Modell-Betrieb, "gehirn" der Orchestrator, "worker" der
+    unbeaufsichtigte Auftrag (docs/agentic-framework.md, §3). Ein unbekannter
+    Name wirft — eine Rolle, die stillschweigend auf "voll" fiele, bekäme
+    stillschweigend den vollen Prompt. ``gesprochen`` zusammen mit "worker"
+    wirft ebenfalls: die Stimme spricht ausschließlich Gehirn-Ausgaben, ein
+    gesprochener Worker wäre ein Konstruktionsfehler des Aufrufers.
     """
-    teile = [block for block in BLOECKE if not (gesprochen and block in NUR_GETIPPT)]
+    if rolle not in ROLLEN_BLOECKE:
+        raise ValueError(f"Unbekannte Prompt-Rolle: {rolle}")
+    if gesprochen and rolle == "worker":
+        raise ValueError("Ein Worker-Lauf wird nie gesprochen")
+    basis = ROLLEN_BLOECKE[rolle]
+    teile = [block for block in basis if not (gesprochen and block in NUR_GETIPPT)]
     if gesprochen:
         # Ganz ans Ende, und das ist seit dem Wegfall des Widerrufs eine
         # harmlose Entscheidung: es steht nichts mehr darueber, dem dieser Text

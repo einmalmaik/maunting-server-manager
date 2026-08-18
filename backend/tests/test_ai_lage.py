@@ -57,6 +57,44 @@ def _zone_merken(db: Session, user: User, wert: str) -> None:
     db.commit()
 
 
+# ── Die Worker-Zeile des Gehirns ──────────────────────────────────────────
+
+
+def test_die_worker_zeile_kommt_nur_auf_bestellung(db: Session) -> None:
+    """Nur das Gehirn sieht seine Auftraege — und auch den ehrlichen Leerfall.
+
+    `mit_workern=False` (die Vorgabe) haelt den Block byteweise beim Alten;
+    ohne Autonomie-Freigabe darf die Zeile trotzdem erscheinen — sie steht
+    vor dem fruehen Return des inaktiven Autonomiezweigs.
+    """
+    user = _benutzer(db, "workerzeile")
+
+    ohne = ai_lage.lageblock(db, user)
+    assert "Aufträge im Hintergrund" not in ohne
+
+    leer = ai_lage.lageblock(db, user, mit_workern=True)
+    assert "Aufträge im Hintergrund: keine." in leer
+
+    from models import AiRun
+
+    fenster = AiConversation(
+        id=f"lg-{uuid4().hex[:8]}", user_id=user.id, kind="worker",
+        title="Backups prüfen",
+    )
+    db.add(fenster)
+    db.flush()
+    db.add(AiRun(
+        id=f"lgr-{uuid4().hex[:8]}", conversation_id=fenster.id,
+        user_id=user.id, status="waiting_wake",
+    ))
+    db.commit()
+
+    voll = ai_lage.lageblock(db, user, mit_workern=True)
+    assert "'Backups prüfen'" in voll
+    assert "schläft" in voll
+    assert fenster.id in voll
+
+
 # ── Die Uhr ───────────────────────────────────────────────────────────────
 
 

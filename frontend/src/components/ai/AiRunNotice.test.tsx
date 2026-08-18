@@ -24,15 +24,17 @@ import {
   aiApi,
   type AiConversationKind,
   type AiRunInfo,
+  type AiWorkerInfo,
 } from '@/api/ai'
 import i18n from '@/i18n'
+import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { useAuthStore } from '@/stores/authStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { AiRunNotice } from './AiRunNotice'
 
 vi.mock('@/api/ai', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/api/ai')>()
-  return { ...original, aiApi: { getActiveRun: vi.fn() } }
+  return { ...original, aiApi: { getActiveRun: vi.fn(), listWorkers: vi.fn() } }
 })
 
 const lauf = (
@@ -65,6 +67,21 @@ function antworten(plan: Partial<Record<AiConversationKind, (AiRunInfo | null)[]
 /** Wie oft ein bestimmtes Fenster gefragt wurde. */
 function fragen(kind: AiConversationKind): number {
   return vi.mocked(aiApi.getActiveRun).mock.calls.filter(([art]) => art === kind).length
+}
+
+const worker = (status: AiWorkerInfo['status']): AiWorkerInfo => ({
+  conversation_id: 'konv-worker-1',
+  title: 'Backups prüfen',
+  status,
+  created_at: '2026-08-10T12:00:00Z',
+})
+
+/** Antwortfolge für die Worker-Liste — der letzte Stand bleibt, wie oben. */
+function workerAntworten(folge: AiWorkerInfo[][]) {
+  const rest = [...folge]
+  vi.mocked(aiApi.listWorkers).mockReset().mockImplementation(async () => (
+    rest.length > 1 ? (rest.shift() ?? []) : (rest[0] ?? [])
+  ))
 }
 
 function nutzer(aiNotifications: boolean) {
@@ -108,11 +125,15 @@ describe('AiRunNotice', () => {
       error: null,
     })
     vi.useFakeTimers({ shouldAdvanceTime: true })
+    // Ohne Hintergrund-Auftraege — die Tests, die welche brauchen, legen sie
+    // sich selbst hin.
+    vi.mocked(aiApi.listWorkers).mockReset().mockResolvedValue([])
   })
 
   afterEach(() => {
     vi.useRealTimers()
     vi.mocked(aiApi.getActiveRun).mockReset()
+    vi.mocked(aiApi.listWorkers).mockReset()
   })
 
   it('meldet, wenn ein laufender Auftrag auf eine Bestätigung wartet', async () => {
@@ -285,6 +306,53 @@ describe('AiRunNotice', () => {
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent('Die KI ist mit deinem Auftrag fertig.')
     })
+  })
+
+  it('meldet einen wartenden Worker und führt in sein Fenster', async () => {
+    // Die Karte hängt im Fenster des Auftrags — `/ai` allein öffnete den
+    // Dauerchat, in dem von diesem Auftrag keine Karte steht. Der Verweis
+    // trägt deshalb die Kennung; in der Adresse steht nur die UUID.
+    antworten({ primary: [null], guardian: [null] })
+    workerAntworten([[worker('running')], [worker('waiting_confirmation')]])
+
+    zeichnen('/notes')
+
+    await waitFor(() => expect(fragen('primary')).toBe(1))
+    // Ein lebender Auftrag hält den schnellen Takt — seine Zustellung soll
+    // nicht erst nach dem Ruhetakt ankommen.
+    await vi.advanceTimersByTimeAsync(9_000)
+    await waitFor(() => {
+      expect(screen.getByRole('status'))
+        .toHaveTextContent('Ein Worker wartet auf deine Freigabe.')
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Zum Assistenten' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('standort'))
+        .toHaveTextContent('/ai?ansicht=worker&id=konv-worker-1')
+    })
+  })
+
+  it('meldet einen fertigen Worker und stößt das Nachladen an', async () => {
+    // Verschwinden aus der Liste heisst beendet — ob gelungen oder
+    // gescheitert, sagt die Glocke nicht (das weiss sie nicht), sondern das
+    // Gehirn im Chat. Deshalb feuert sie zusätzlich das Zustell-Ereignis:
+    // der offene Chat lädt nach, statt auf ein Neuladen zu warten.
+    antworten({ primary: [null], guardian: [null] })
+    workerAntworten([[worker('running')], []])
+    const zugestellt = vi.fn()
+    window.addEventListener(AI_ZUSTELLUNG_EVENT, zugestellt)
+    try {
+      zeichnen('/notes')
+
+      await waitFor(() => expect(fragen('primary')).toBe(1))
+      await vi.advanceTimersByTimeAsync(9_000)
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Ein Worker hat berichtet.')
+      })
+      expect(zugestellt).toHaveBeenCalled()
+    } finally {
+      window.removeEventListener(AI_ZUSTELLUNG_EVENT, zugestellt)
+    }
   })
 
   it('meldet jeden ruhenden Zustand, auch einen später hinzugekommenen', async () => {

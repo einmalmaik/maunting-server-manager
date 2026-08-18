@@ -17,6 +17,7 @@ from .ai_guardian_repair import AiGuardianRepair
 from .ai_action_approval import AiActionApproval
 from .ai_task import AiTask
 from .ai_mail_outbox import AiMailOutbox
+from .ai_meldung import AiMeldung
 from .server import Server
 from .node import Node
 from .node_enrollment import NodeEnrollment
@@ -67,7 +68,7 @@ __all__ = [
     "AiMemoryEntry", "AiMemoryPreference", "AiSkill", "AiAttachment",
     "AiAutonomyGrant", "AiToolResult", "AiRun", "AiGuardianNotice",
     "AiGuardianRepair", "AiTask", "AiActionApproval",
-    "AiMailOutbox",
+    "AiMailOutbox", "AiMeldung",
     "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
     "Team", "TeamMember", "TeamServerGrant",
     "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",

@@ -580,6 +580,10 @@ def test_je_benutzer_und_art_genau_eine_unterhaltung(db: Session) -> None:
     Art muss scheitern (sonst waere aus dem Fenster eine Ablage geworden, und
     `get_or_create_conversation` griffe irgendeine davon), eine Zeile der
     **anderen** Art muss durchgehen (sonst gaebe es das Fenster nicht).
+
+    Seit v3 ist der Index partiell: ``worker``-Fenster sind von der
+    Eindeutigkeit ausgenommen — zwei Auftraege desselben Benutzers muessen
+    nebeneinander existieren koennen, sonst gaebe es keine parallelen Worker.
     """
     from models import User
 
@@ -609,7 +613,23 @@ def test_je_benutzer_und_art_genau_eine_unterhaltung(db: Session) -> None:
         {"uid": user.id},
     )
 
-    # Dieselbe Art ein zweites Mal: nicht erlaubt.
+    # Worker-Fenster: zwei Auftraege desselben Benutzers sind erlaubt.
+    db.execute(
+        text(
+            "INSERT INTO ai_conversations (id, user_id, kind, title, created_at, updated_at) "
+            "VALUES ('k-w1', :uid, 'worker', 'Auftrag 1', '2026-08-18', '2026-08-18')"
+        ),
+        {"uid": user.id},
+    )
+    db.execute(
+        text(
+            "INSERT INTO ai_conversations (id, user_id, kind, title, created_at, updated_at) "
+            "VALUES ('k-w2', :uid, 'worker', 'Auftrag 2', '2026-08-18', '2026-08-18')"
+        ),
+        {"uid": user.id},
+    )
+
+    # Dieselbe Einzelfenster-Art ein zweites Mal: nicht erlaubt.
     with pytest.raises(IntegrityError):
         db.execute(
             text(
@@ -621,7 +641,7 @@ def test_je_benutzer_und_art_genau_eine_unterhaltung(db: Session) -> None:
     db.rollback()
 
 
-def test_die_datenbank_kennt_genau_zwei_unterhaltungsarten(db: Session) -> None:
+def test_die_datenbank_kennt_genau_drei_unterhaltungsarten(db: Session) -> None:
     """``kind`` ist eine Aufzaehlung, und die Datenbank haelt sie.
 
     Dieselbe Ueberlegung wie beim Gedaechtnisbereich darunter: eine Art, die nur
@@ -631,9 +651,12 @@ def test_die_datenbank_kennt_genau_zwei_unterhaltungsarten(db: Session) -> None:
     schriebe an einen Ort, den niemand aufmachen kann.
     """
     from models import User
-    from models.ai_conversation import ARTEN
+    from models.ai_conversation import ARTEN, EINZELFENSTER
 
-    assert ARTEN == ("primary", "guardian")
+    assert ARTEN == ("primary", "guardian", "worker")
+    # Die Eindeutigkeit gilt nur fuer die Einzelfenster — `worker` steht
+    # bewusst nicht darin (mehrere Auftraege gleichzeitig sind der Zweck).
+    assert EINZELFENSTER == ("primary", "guardian")
 
     user = User(
         username="artenpruefung",
@@ -702,6 +725,112 @@ def test_die_migration_traegt_die_unterhaltungsart(tmp_path: Path) -> None:
             "user_id",
             "kind",
         ]
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
+def test_die_laufzustaende_kennen_waiting_wake(db: Session) -> None:
+    """``waiting_wake`` ist ein gueltiger Wartezustand — und nur er ist neu.
+
+    Der Zustand traegt das Parken der Worker (docs/agentic-framework.md, v3):
+    ein Lauf, der auf die Zeit oder ein Ereignis wartet, ist eine Zeile. Ein
+    erfundener Zustand muss weiterhin an der Datenbank scheitern, nicht erst
+    an einer Route.
+    """
+    from models import User
+    from models.ai_run import WARTEND
+
+    assert WARTEND == ("waiting_confirmation", "waiting_user", "waiting_wake")
+
+    user = User(
+        username="wakepruefung",
+        email_encrypted="x",
+        email_hash="wakepruefung",
+        password_hash="x",
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+    db.execute(
+        text(
+            "INSERT INTO ai_conversations (id, user_id, kind, title, created_at, updated_at) "
+            "VALUES ('kw-1', :uid, 'worker', 'Auftrag', '2026-08-18', '2026-08-18')"
+        ),
+        {"uid": user.id},
+    )
+
+    db.execute(
+        text(
+            "INSERT INTO ai_runs (id, conversation_id, user_id, status, wake_at, "
+            "reasoning, created_at, updated_at) "
+            "VALUES ('rw-1', 'kw-1', :uid, 'waiting_wake', '2026-08-18 12:00:00', "
+            "0, '2026-08-18', '2026-08-18')"
+        ),
+        {"uid": user.id},
+    )
+
+    with pytest.raises(IntegrityError):
+        db.execute(
+            text(
+                "INSERT INTO ai_runs (id, conversation_id, user_id, status, "
+                "reasoning, created_at, updated_at) "
+                "VALUES ('rw-2', 'kw-1', :uid, 'waiting_wak', 0, '2026-08-18', '2026-08-18')"
+            ),
+            {"uid": user.id},
+        )
+    db.rollback()
+
+
+def test_die_migration_traegt_worker_und_waiting_wake(tmp_path: Path) -> None:
+    """Modell und Migration 20260818_01 tragen dasselbe.
+
+    Der Rueckbau auf ``20260817_01`` beweist, dass ``wake_at`` und der
+    partielle Index aus der Kette stammen und nicht bloss aus ``create_all``
+    (die Lektion der SQLite-Fremdschluesselblindheit: create_all-Tests waeren
+    gruen, waehrend eine echte Anlage ``waiting_wake`` am alten CHECK
+    abwiese). Das Downgrade muss den vollen Unique-Index wiederherstellen und
+    die Spalte entfernen.
+    """
+    db_url = f"sqlite:///{tmp_path / 'worker_constraint.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        command.downgrade(config, "20260817_01")
+        inspector = _frisch(engine)
+        assert "wake_at" not in {
+            spalte["name"] for spalte in inspector.get_columns("ai_runs")
+        }
+        indizes = {
+            index["name"]: index for index in inspector.get_indexes("ai_conversations")
+        }
+        assert indizes["uq_ai_conversations_user_kind"]["unique"]
+        assert "sqlite_where" not in indizes["uq_ai_conversations_user_kind"].get(
+            "dialect_options", {}
+        )
+
+        command.upgrade(config, "head")
+        inspector = _frisch(engine)
+        spalten = {
+            spalte["name"]: spalte for spalte in inspector.get_columns("ai_runs")
+        }
+        assert spalten["wake_at"]["nullable"] is True
+        indizes = {
+            index["name"]: index for index in inspector.get_indexes("ai_conversations")
+        }
+        assert indizes["uq_ai_conversations_user_kind"]["unique"]
+        praedikat = indizes["uq_ai_conversations_user_kind"]["dialect_options"][
+            "sqlite_where"
+        ]
+        assert "'primary'" in str(praedikat) and "'guardian'" in str(praedikat)
+        assert "'worker'" not in str(praedikat)
     finally:
         engine.dispose()
         settings.database_url = vorher

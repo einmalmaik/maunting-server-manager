@@ -30,7 +30,10 @@ from dataclasses import dataclass
 # - `server_write` — erzeugt einen bestaetigungspflichtigen Vorschlag zu einem Server
 # - `global_write` — erzeugt einen Vorschlag ohne Serverbezug (Servererstellung)
 # - `ask`          — beendet den Zug und uebergibt an den Menschen
-ARTEN = ("server_read", "global_read", "server_write", "global_write", "ask")
+# - `delegation`   — laeuft sofort im Handler, ohne Vorschlagskarte: reine
+#                    MSM-interne Orchestrierung (Gehirn↔Worker), keine
+#                    Aussenwirkung auf einen Server (docs/agentic-framework.md)
+ARTEN = ("server_read", "global_read", "server_write", "global_write", "ask", "delegation")
 
 
 @dataclass(frozen=True)
@@ -97,6 +100,16 @@ class Werkzeug:
             raise ValueError(f"Unbekannte Werkzeugart: {self.art}")
         if self.recht_global and not self.recht:
             raise ValueError("recht_global ohne recht ist sinnlos")
+        if self.art == "delegation" and (self.recht or self.immer_bestaetigen):
+            # `recht` prueft der Vorschlagspfad, `immer_bestaetigen` der
+            # autonome Modus — durch beide kommt eine Delegation nie. Ein Wert
+            # hier saehe nach einer Schranke aus, die nirgends greift; das
+            # Angebots-Gate leistet `angebot`, die Ausfuehrungspruefung der
+            # Handler selbst (Muster der Lesewerkzeuge).
+            raise ValueError(
+                "delegation läuft ohne Vorschlagspfad — recht/immer_bestaetigen "
+                "würden dort nie geprüft"
+            )
 
 
 WERKZEUGE: dict[str, Werkzeug] = {
@@ -192,6 +205,42 @@ WERKZEUGE: dict[str, Werkzeug] = {
 
     # ── Rueckfrage ────────────────────────────────────────────────────
     "ask_user": Werkzeug("ask"),
+
+    # ── Delegation: Gehirn und Worker (docs/agentic-framework.md) ─────
+    #
+    # `worker_start` und `worker_cancel` sind die beiden Handgriffe des
+    # Gehirns: einen Auftrag als eigenen Hintergrundlauf deklarieren und ihn
+    # wieder einfangen. Beide fuehren nichts aus — der Worker selbst arbeitet
+    # unter dem vollen Vorschlagsfluss mit den Rechten des Benutzers. Das
+    # `angebot` haelt sie aus dem Katalog jedes Benutzers heraus, dem das
+    # Recht fehlt: dessen Chat arbeitet wie bisher in einem Lauf.
+    "worker_start": Werkzeug(
+        "delegation", gruppe="worker", angebot=("ai.background.use",)
+    ),
+    "worker_cancel": Werkzeug(
+        "delegation", gruppe="worker", angebot=("ai.background.use",)
+    ),
+    # Der Rueckweg fuer Rueckfragen: hat ein Worker mit `worker_frage`
+    # gefragt, gibt das Gehirn die Antwort des Benutzers hiermit an genau
+    # dieses Fenster zurueck. Mechanisch dieselbe Abloesung wie im Dauerchat
+    # (neue Nachricht ueberholt den wartenden Lauf und erbt seine
+    # Schleifensignaturen) — nur eben im Worker-Fenster, in das der Benutzer
+    # selbst nicht schreiben kann.
+    "worker_antwort": Werkzeug(
+        "delegation", gruppe="worker", angebot=("ai.background.use",)
+    ),
+    # `wait_until` parkt den eigenen Lauf bis zu einem Zeitpunkt
+    # (`waiting_wake` + `wake_at`) statt zu schleifen. Kein `angebot`: es ist
+    # nur fuer Worker-Laeufe gedacht, und das entscheidet der Laufart-Schnitt
+    # in `_werkzeuge_und_grenze` — ein Rechteschluessel waere die falsche
+    # Achse, denn das Recht haengt am Delegieren, nicht am Warten.
+    "wait_until": Werkzeug("delegation", gruppe="worker"),
+    # Die Rueckfrage eines Workers. `art="ask"` mit Absicht: sie faehrt damit
+    # in ASK_TOOLS/READ_TOOLS mit und wird wie `ask_user` vor der Lesephase
+    # abgefangen — nur die Zustellung (Meldestelle mit Worker-ID statt
+    # Broker-Frage) und das Park-Ziel unterscheiden sich. Kein `angebot` aus
+    # demselben Grund wie bei `wait_until`.
+    "worker_frage": Werkzeug("ask", gruppe="worker"),
 
     # ── Schreiben: erzeugen ausschliesslich Vorschlaege ───────────────
     #
@@ -546,7 +595,12 @@ def _mit_gruppe(gruppe: str) -> set[str]:
 
 
 SERVER_READ_TOOLS = _mit_art("server_read")
-GLOBAL_READ_TOOLS = _mit_art("global_read", "ask")
+# `ask` und `delegation` fahren bewusst im Lesepfad mit: beide fassen keinen
+# Server an und brauchen keine Vorschlagskarte. `ask` wird vor der Lesephase
+# abgefangen; `delegation` laeuft ueber denselben Dispatch wie die globalen
+# Lesewerkzeuge (eigene Session, Commit, 60-s-Grenze) — genau die Umgebung,
+# die "laeuft sofort im Handler" braucht.
+GLOBAL_READ_TOOLS = _mit_art("global_read", "ask", "delegation")
 READ_TOOLS = SERVER_READ_TOOLS | GLOBAL_READ_TOOLS
 SERVER_WRITE_TOOLS = _mit_art("server_write")
 GLOBAL_WRITE_TOOLS = _mit_art("global_write")
@@ -555,10 +609,58 @@ MEMORY_TOOLS = _mit_gruppe("memory")
 SKILL_TOOLS = _mit_gruppe("skill")
 DOCS_TOOLS = _mit_gruppe("docs")
 ASK_TOOLS = _mit_art("ask")
+DELEGATION_TOOLS = _mit_art("delegation")
 ALWAYS_CONFIRM_TOOLS = (
     {name for name, spec in WERKZEUGE.items() if spec.immer_bestaetigen}
     | set(GEPLANT_IMMER_BESTAETIGEN)
 )
+
+
+# ── Gehirn und Worker (docs/agentic-framework.md, Abschnitt 3) ────────────
+#
+# Die Steuerwerkzeuge des Gehirns — ausgeschrieben und nicht als
+# `_mit_gruppe("worker")` abgeleitet: `wait_until` und `worker_frage` tragen
+# dieselbe Gruppe, sind aber ausdruecklich **keine** Gehirn-Werkzeuge.
+WORKER_STEUERUNG = frozenset({"worker_start", "worker_cancel", "worker_antwort"})
+
+# Was nur in einem Worker-Lauf etwas zu suchen hat.
+NUR_WORKER = frozenset({"wait_until", "worker_frage"})
+
+# Der komplette Katalog des Gehirns. Eine Aufzaehlung wie bei den
+# unbeaufsichtigten Laeufen, und hier ist sie die Sicherheitsinvariante
+# selbst: das Gehirn ist die schnelle, dauerpraesente Instanz und darf
+# strukturell keine Aussenwirkung entfalten — kein Server-Werkzeug, kein
+# Vorschlag, keine Websuche. Es erinnert sich (der Charakter gehoert ihm)
+# und delegiert; alles andere tun die Worker mit den Rechten des Benutzers.
+GEHIRN_TOOLS = frozenset(MEMORY_TOOLS) | WORKER_STEUERUNG
+
+
+def worker_ausschluss() -> frozenset[str]:
+    """Was ein Worker-Lauf vom vollen Katalog **nicht** bekommt.
+
+    Ein Worker ist der beauftragte Stellvertreter eines Chats — deshalb wird
+    hier subtrahiert statt aufgezaehlt, anders als bei Guardian und Aufgaben:
+    dort loest ein Ereignis ohne Menschen den Lauf aus, hier hat ein Mensch
+    den Auftrag soeben getippt und das Gehirn ihn deklariert. Ein kuenftiges
+    Werkzeug soll dem Worker automatisch zufallen, wie es dem Chat zufaellt.
+
+    Ausgeschlossen sind:
+
+    * die Gehirn-Steuerung — keine Worker-Tiefe > 1: ein Auftrag, der
+      Auftraege anlegt, waere ein Auftrag ohne Ende (dieselbe Regel, die
+      `AUFGABEN_*` fuer die Aufgabenwerkzeuge ausschreibt);
+    * `ask_user` **namentlich** und nicht als `ASK_TOOLS` — `worker_frage`
+      liegt selbst darin und ist gerade der Ersatz: der Worker fragt ueber
+      die Meldestelle, nie direkt in ein Gespraech hinein;
+    * die Memory-Werkzeuge — Datenminimierung: ein Worker arbeitet einen
+      Auftrag ab und soll weder persoenliche Erinnerungen lesen noch aus
+      unbeaufsichtigt gelesenem Material dauerhafte anlegen. Sein Wissen
+      steht im Auftragstext, den das Gehirn formuliert hat.
+
+    Als Funktion nach dem Vorbild von `aufgaben_tools`: die Fallunterscheidung
+    wohnt in der Registry, nicht beim Aufrufer.
+    """
+    return frozenset(MEMORY_TOOLS) | WORKER_STEUERUNG | {"ask_user"}
 
 
 # Was ein von Guardian ausgeloester Heilungslauf ueberhaupt aufrufen darf.

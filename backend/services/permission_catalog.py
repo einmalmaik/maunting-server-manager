@@ -75,6 +75,17 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # `ai.autonomous.use` zu eng: eine Aufgabe, die nur liest und berichtet,
     # verlangt keine Autonomie. Handelnde Aufgaben prüfen sie zusätzlich.
     PermissionDef("ai.tasks.manage",           "ai",      "Wiederkehrende KI-Aufgaben anlegen und verwalten"),
+    # Durchgesetzt im worker_start-Handler (services/ai_action_service.py) und
+    # bei jedem Wecken eines Worker-Laufs (services/ai_run_service.py). Ein
+    # eigenes Recht, weil ein Worker etwas Eigenes ist: er arbeitet weiter,
+    # waehrend das Gespraech laeuft oder der Browser zu ist — mit den Rechten
+    # und aus dem Kontingent des Auftraggebers, jede Schreibaktion bleibt
+    # bestaetigungspflichtig. `ai.chat.use` waere zu weit (jeder Chatbenutzer
+    # haette Hintergrundlaeufe), `ai.tasks.manage` das Falsche: ein Auftrag
+    # entsteht im Gespraech, eine Aufgabe an der Uhr. Ohne dieses Recht sieht
+    # das Modell die Worker-Werkzeuge gar nicht und arbeitet wie bisher in
+    # einem Lauf (docs/agentic-framework.md, Abschnitt 5).
+    PermissionDef("ai.background.use",         "ai",      "KI-Worker im Hintergrund verwenden"),
     # Durchgesetzt in routers/ai_voice.py beim WebSocket-Upgrade. Ein eigenes
     # Recht und nicht `ai.chat.use`, obwohl es dieselbe KI mit denselben
     # Werkzeugen und denselben Rechten ist: der Sprachweg bestaetigt

@@ -271,6 +271,7 @@ def _anbieter_taeuschen(
         _client, *, provider, api_key, messages, usage: StreamUsage,
         tools=None, tool_choice=None, reasoning=False, reasoning_effort=None,
         cache_marke=False,
+        model=None,
     ):
         del provider, api_key, messages, tools, reasoning, reasoning_effort, cache_marke
         # Die Schlussrunde erkennt man an `tool_choice="none"`: dort gibt es

@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 from typing import Any, AsyncIterator
@@ -60,13 +60,17 @@ from services.ai_proposal_service import (
 )
 from services.ai_tool_registry import (
     ASK_TOOLS,
+    GEHIRN_TOOLS,
     GUARDIAN_HEILUNG_TOOLS,
+    NUR_WORKER,
     READ_TOOLS,
     SERVER_READ_TOOLS,
     SKILL_TOOLS,
     WERKZEUGE,
+    WORKER_STEUERUNG,
     WRITE_TOOLS,
     aufgaben_tools,
+    worker_ausschluss,
 )
 from services.ai_context_service import (
     MIN_HISTORY_CHARS,
@@ -502,6 +506,60 @@ def aufgabe_aus_zustand(zustand: dict) -> AufgabenKontext | None:
         raise GuardianRahmenUnlesbar("Aufgabenrahmen im Laufzustand unlesbar") from exc
 
 
+def rolle_aus_zustand(zustand: dict) -> str:
+    """Die Rolle dieses Laufs — eingefroren wie Denkstufe und Kontextfenster.
+
+    ``lauf_beginnen`` schreibt sie beim Anlegen; ein Lauf ohne den Schluessel
+    stammt aus der Zeit davor und ist ein gewoehnlicher Chatlauf ("voll").
+    Eingefroren mit Absicht: der Systemprompt in den `provider_messages` ist
+    bereits nach dieser Rolle geschnitten, und ein Katalog, der mitten im Lauf
+    die Rolle wechselte (weil der Betreiber `worker_model` umgestellt hat),
+    passte nicht mehr zu dem Prompt, unter dem der Lauf angefangen hat.
+
+    Ein unbekannter Wert faellt auf "worker" — die **engste** Rolle. Der
+    Verlust des Rahmens ist die gefaehrliche Richtung, nicht die sichere
+    (dieselbe Ueberlegung wie bei `guardian_aus_zustand`): ein Tippfehler, der
+    stillschweigend den vollen Katalog oeffnete, waere genau die Luecke, die
+    die Rollentrennung schliessen soll.
+    """
+    roh = zustand.get("rolle")
+    if roh is None:
+        return "voll"
+    rolle = str(roh)
+    if rolle not in ("voll", "gehirn", "worker"):
+        return "worker"
+    return rolle
+
+
+def worker_aus_zustand(zustand: dict) -> dict | None:
+    """Der Worker-Rahmen: Fenster, Titel und Meldekanal des Auftrags.
+
+    Anders als Guardian- und Aufgabenrahmen traegt er keine Verschaerfung —
+    die haengt an der Rolle (`rolle_aus_zustand`), die `lauf_beginnen` aus der
+    Fensterart ableitet und einfriert. Der Rahmen traegt nur die Zustelldaten
+    der Meldung. Ein unlesbarer Rahmen ist deshalb kein Abbruchgrund: der
+    Lauf bleibt eingeengt, nur die Meldung faellt auf ihre Rueckfaelle
+    (Kanal "chat", Titel des Fensters).
+    """
+    roh = zustand.get("worker")
+    return roh if isinstance(roh, dict) else None
+
+
+def _modell_fuer(provider: AiProvider, rolle: str) -> str:
+    """Das Modell dieses Laufs: Worker arbeiten auf dem Arbeitsmodell.
+
+    `worker_model` ist die vierte Funktion eines Zugangs (docs/agentic-
+    framework.md, §5); ``None`` heisst Ein-Modell-Betrieb, und dann faehrt
+    auch ein Worker auf `default_model`. Alle vier Stellen, die ein Modell
+    nennen (zwei Reservierungen, zwei Nachrichten), und der Katalog-Abgleich
+    gehen durch diese eine Funktion — eine vergessene Stelle hiesse: gebucht
+    wird das eine Modell, gearbeitet auf dem anderen.
+    """
+    if rolle == "worker" and provider.worker_model:
+        return str(provider.worker_model)
+    return str(provider.default_model)
+
+
 def _werkzeug_nebenlaeufigkeit() -> int:
     """Wieviele Lesewerkzeuge gleichzeitig laufen duerfen.
 
@@ -704,6 +762,7 @@ async def _tool_followup_messages(
     correlation_id: str | None = None, run_id: str | None = None,
     guardian: GuardianKontext | None = None,
     aufgabe: AufgabenKontext | None = None,
+    rolle: str = "voll",
     anlagenwissen_noetig: bool = True,
     rundentext: str | None = None,
 ) -> tuple[list[dict], list[dict], dict | None]:
@@ -758,6 +817,46 @@ async def _tool_followup_messages(
         raise AiActionValidationError("Ungueltige Read-Tool-Sequenz")
     if any(call.name not in READ_TOOLS for call in tool_calls):
         raise AiActionValidationError("Ungueltige Read-Tool-Sequenz")
+    # Der Rollen-Spiegel (docs/agentic-framework.md, §7). Der Katalogschnitt
+    # in `_werkzeuge_und_grenze` ist Fuehrung, keine Zusage — die Schranke
+    # steht hier, je Aufruf, nach demselben Muster wie bei Guardian und
+    # Aufgabe darunter: **aussortiert, nicht geworfen**. Ohne diesen Spiegel
+    # koennte ein Gehirn-Lauf einen halluzinierten Server-Werkzeugnamen
+    # durchbekommen, und die Invariante "das Gehirn hat strukturell keine
+    # Aussenwirkung" hinge allein an einer Bitte an das Modell.
+    if rolle == "gehirn":
+        erlaubte = []
+        for call in tool_calls:
+            if call.name not in GEHIRN_TOOLS:
+                deferred.append((call, (
+                    "Dieses Werkzeug steht dem Gehirn nicht zur Verfügung. "
+                    "Der Aufruf lief nicht — gib die Arbeit mit worker_start "
+                    "als Auftrag in den Hintergrund."
+                )))
+                continue
+            erlaubte.append(call)
+        tool_calls = erlaubte
+    else:
+        if rolle == "worker":
+            rollen_gesperrt = worker_ausschluss()
+            rollen_grund = (
+                "Dieses Werkzeug steht einem Worker nicht zur Verfügung. "
+                "Der Aufruf lief nicht — arbeite ohne ihn weiter."
+            )
+        else:
+            rollen_gesperrt = WORKER_STEUERUNG | NUR_WORKER
+            rollen_grund = (
+                "Dieses Werkzeug gehört zum Hintergrund-Betrieb und steht in "
+                "diesem Lauf nicht zur Verfügung. Der Aufruf lief nicht — "
+                "arbeite ohne ihn weiter."
+            )
+        erlaubte = []
+        for call in tool_calls:
+            if call.name in rollen_gesperrt:
+                deferred.append((call, rollen_grund))
+                continue
+            erlaubte.append(call)
+        tool_calls = erlaubte
     if guardian is not None:
         # In einer Heilung ist die Werkzeugmenge kleiner und der Server fest.
         # Beides steht hier und nicht im Prompt: die Eingabe dieses Laufs stammt
@@ -1675,6 +1774,9 @@ def _segment_beginnen(db, run: AiRun, zustand: dict) -> tuple[str, int, str] | N
     provider = db.get(AiProvider, run.provider_id) if run.provider_id else None
     if provider is None:
         return None
+    # Das Modell der Rolle, nicht pauschal `default_model`: ein Worker-Segment
+    # bucht und beschriftet mit dem Arbeitsmodell des Betreibers.
+    modell = _modell_fuer(provider, rolle_aus_zustand(zustand))
     request_id = str(uuid4())
     usage_event = reserve_ai_usage(
         db,
@@ -1686,7 +1788,7 @@ def _segment_beginnen(db, run: AiRun, zustand: dict) -> tuple[str, int, str] | N
         ),
         server_id=None,
         provider_id=provider.id,
-        model=provider.default_model,
+        model=modell,
     )
     message_id = str(uuid4())
     db.add(AiMessage(
@@ -1696,7 +1798,7 @@ def _segment_beginnen(db, run: AiRun, zustand: dict) -> tuple[str, int, str] | N
         content="",
         status="streaming",
         provider_id=provider.id,
-        model=provider.default_model,
+        model=modell,
         request_id=request_id,
     ))
     db.flush()
@@ -1822,7 +1924,8 @@ def _segment_vorbereiten(run_id: str) -> tuple[_Vorbereitung | None, tuple[str, 
 
 
 def _lauf_abschliessen(
-    run_id: str, *, status: str, stop_reason: str, zustand: dict | None = None
+    run_id: str, *, status: str, stop_reason: str, zustand: dict | None = None,
+    wake_at: datetime | None = None,
 ) -> None:
     with SessionLocal() as db:
         run = db.get(AiRun, run_id)
@@ -1883,6 +1986,11 @@ def _lauf_abschliessen(
             return
         run.status = status
         run.stop_reason = stop_reason
+        if wake_at is not None:
+            # Nur beim Parken auf `waiting_wake` gesetzt (dritte Parkstelle,
+            # `wait_until`). Der Takt (`faellige_wecken`) liest genau diese
+            # Spalte; das Wecken selbst raeumt sie wieder ab.
+            run.wake_at = wake_at
         if zustand is not None:
             ai_run_service.zustand_schreiben(run, zustand)
         if status in AUSGELAUFEN:
@@ -1928,6 +2036,9 @@ def _lauf_nachbereiten(db, run: AiRun, zustand: dict | None) -> None:
       schlechteste Eigenschaft dieser ganzen Kopplung.
     * War es ein faelliger stehender Auftrag, geht dessen Bericht hinaus — nach
       derselben Regel und mit derselben Begruendung.
+    * War es ein Worker, reicht er sein Ergebnis bei der Meldestelle ein —
+      wieder dieselbe Regel; nur die Endzustaende, deren Auskunft ein anderer
+      gibt, uebergeht `ai_meldestelle.lauf_beendet` selbst.
 
     Kapselt alles ab: der Lauf ist zu diesem Zeitpunkt fertig und committet.
     Ein Fehler beim Vermerken oder beim Versand darf ihn nicht nachtraeglich in
@@ -1969,7 +2080,7 @@ def _lauf_nachbereiten(db, run: AiRun, zustand: dict | None) -> None:
         db.rollback()
         logger.warning("Reparaturauftrag nicht fortgeschrieben run_id=%s", run.id)
 
-    from services import ai_guardian_report, ai_task_report
+    from services import ai_guardian_report, ai_meldestelle, ai_task_report
 
     _bericht_zustellen(
         db, run, zustand,
@@ -1980,6 +2091,18 @@ def _lauf_nachbereiten(db, run: AiRun, zustand: dict | None) -> None:
         db, run, zustand,
         rahmen="aufgabe", marke="aufgabe_berichtet",
         versenden=ai_task_report.bericht_versenden,
+    )
+    # Der dritte Rahmen: ein beendeter Worker meldet sein Ergebnis an die
+    # Meldestelle (docs/agentic-framework.md, §4). Dieselbe Marke-vor-Versand-
+    # Mechanik wie bei den beiden anderen — und `lauf_beendet` uebergeht
+    # selbst die Endzustaende, die kein Ergebnis sind (abgeloest durch eine
+    # Antwort, abgebrochen per worker_cancel, Neustart mit anstehendem
+    # Wiederanlauf): dort ist die Marke dann gesetzt, ohne dass eine Meldung
+    # entsteht, und genau so soll es sein.
+    _bericht_zustellen(
+        db, run, zustand,
+        rahmen="worker", marke="worker_gemeldet",
+        versenden=ai_meldestelle.lauf_beendet,
     )
 
 
@@ -2047,6 +2170,8 @@ class _Anlauf:
     message_id: str
     guardian: "GuardianKontext | None"
     aufgabe: "AufgabenKontext | None"
+    rolle: str
+    worker: dict | None
     unbeaufsichtigt: bool
 
 
@@ -2174,6 +2299,12 @@ async def _segment_anlaufen(
         _lauf_abschliessen(run_id, status="failed", stop_reason="laufrahmen_unlesbar")
         return
 
+    # Die Rolle und der Worker-Rahmen — aus dem Zustand, wie die beiden
+    # Rahmen darueber, und aus demselben Grund: was mitten in einer Aufgabe
+    # gilt, kommt aus derselben Quelle wie am Anfang.
+    rolle = rolle_aus_zustand(zustand)
+    worker = worker_aus_zustand(zustand)
+
     # **Der gemeinsame Nenner beider Rahmen: es sitzt niemand davor.**
     #
     # Drei Stellen im Segment haengen daran, und alle drei galten bisher nur
@@ -2185,7 +2316,13 @@ async def _segment_anlaufen(
     # Aufgabenlauf dauerhaft auf 'waiting_user'. Weil `aktiver_lauf` wartende
     # Laeufe mitzaehlt, blockierte er von da an jede weitere Aufgabe dieses
     # Benutzers.
-    unbeaufsichtigt = guardian is not None or aufgabe is not None
+    #
+    # Ein Worker zaehlt hier mit — mit einer Ausnahme, die keine ist: seine
+    # Rueckfrage laeuft nicht ueber `ask_user`, sondern ueber `worker_frage`
+    # und die Meldestelle, und genau dieser Weg wird in `_fragen_behandeln`
+    # eigens freigehalten. Bestaetigungspflichtige Vorschlaege eines Workers
+    # nehmen den E-Mail-Freigabeweg wie eine Heilung.
+    unbeaufsichtigt = guardian is not None or aufgabe is not None or rolle == "worker"
 
     return _Anlauf(
         vorbereitung=vorbereitung,
@@ -2197,6 +2334,8 @@ async def _segment_anlaufen(
         message_id=message_id,
         guardian=guardian,
         aufgabe=aufgabe,
+        rolle=rolle,
+        worker=worker,
         unbeaufsichtigt=unbeaufsichtigt,
     )
 
@@ -2207,6 +2346,7 @@ async def _werkzeuge_und_grenze(
     vorbereitung: "_Vorbereitung",
     guardian: "GuardianKontext | None",
     aufgabe: "AufgabenKontext | None",
+    rolle: str = "voll",
     zustand: dict,
 ) -> tuple[list, bool, int, bool, str | None]:
     """Schneidet den Werkzeugkatalog zu und rechnet das Rundenbudget aus.
@@ -2239,6 +2379,19 @@ async def _werkzeuge_und_grenze(
     # geraten, wenn der Benutzer das Recht dazu haette. Und umgekehrt darf
     # ein Eintrag dort kein Recht ersetzen, das dem Benutzer fehlt.
     erlaubt = vorbereitung.angebotene_werkzeuge
+    # Der Rollenschnitt zuerst (docs/agentic-framework.md, §3): das Gehirn
+    # behaelt nur Gedaechtnis und Worker-Steuerung, ein Worker verliert genau
+    # diese beiden Gruppen plus `ask_user`, und der heutige Voll-Betrieb
+    # verliert alles, was zum Hintergrund-Betrieb gehoert — ohne
+    # `worker_model` am Zugang gibt es kein Gehirn und damit auch keine
+    # Auftraege. Geschnitten, nicht ersetzt: die Rechtepruefung darueber
+    # bleibt die Autoritaet, keine Menge hier ersetzt ein fehlendes Recht.
+    if rolle == "gehirn":
+        erlaubt = erlaubt & GEHIRN_TOOLS
+    elif rolle == "worker":
+        erlaubt = erlaubt - worker_ausschluss()
+    else:
+        erlaubt = erlaubt - (WORKER_STEUERUNG | NUR_WORKER)
     if guardian is not None:
         erlaubt = erlaubt & GUARDIAN_HEILUNG_TOOLS
     elif aufgabe is not None:
@@ -2284,7 +2437,10 @@ async def _werkzeuge_und_grenze(
     modell = await ai_model_catalog.finde(
         client,
         vorbereitung.provider.provider_kind,
-        vorbereitung.provider.default_model,
+        # Das Modell der Rolle: ein Worker-Segment fragt den Katalog nach dem
+        # Arbeitsmodell — Cache-Marke und Denkstufen-Klemme gehoeren zu dem
+        # Modell, das gleich wirklich antwortet.
+        _modell_fuer(vorbereitung.provider, rolle),
         schluessel=vorbereitung.api_key,
     )
     cache_marke = modell is not None and modell.cache_marke_noetig
@@ -2318,6 +2474,8 @@ def _fragen_behandeln(
     provider_messages: list[dict],
     zustand: dict,
     rundentext: str,
+    rolle: str = "voll",
+    rundendeckel: int = MAX_TOOL_ROUNDS,
 ) -> _FragenErgebnis | None:
     """Behandelt einen `ask_user`-Aufruf dieser Runde — falls es einen gibt.
 
@@ -2325,6 +2483,12 @@ def _fragen_behandeln(
     faehrt mit Schreib- oder Lesephase fort. `provider_messages` und
     `zustand` werden in place fortgeschrieben (Abweisung und Formfehler
     beantworten die ganze Runde und zaehlen sie).
+
+    Ein Worker fragt **ueber die Meldestelle**: sein `worker_frage` faehrt in
+    `ASK_TOOLS` mit und nimmt hier denselben Park-Pfad wie `ask_user` im Chat
+    — nur die Zustellung uebernimmt der Orchestrator (Meldung mit Worker-ID
+    statt eines Menschen vor dem Bildschirm). Die Abweisung darunter bleibt
+    fuer alles andere Unbeaufsichtigte bestehen.
     """
     # Eine Rueckfrage beendet das Segment: ab hier ist der Mensch dran,
     # und seine Antwort kommt als gewoehnliche Nachricht zurueck.
@@ -2332,7 +2496,10 @@ def _fragen_behandeln(
         (call for call in current_usage.tool_calls if call.name in ASK_TOOLS),
         None,
     )
-    if frage is not None and unbeaufsichtigt:
+    worker_frage = (
+        frage is not None and rolle == "worker" and frage.name == "worker_frage"
+    )
+    if frage is not None and unbeaufsichtigt and not worker_frage:
         # In einer Heilung — und ebenso in einer faelligen Aufgabe — ist
         # niemand da, den man fragen koennte. Das war eine ausnutzbare
         # Luecke, keine Unbequemlichkeit.
@@ -2372,7 +2539,7 @@ def _fragen_behandeln(
         # endlose Schleife aus Abweisungen erzeugt — auf Kosten des
         # Freigebers, dem jede Runde eine Anbieteranfrage berechnet wird.
         zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
-        if zustand["rounds"] > MAX_TOOL_ROUNDS:
+        if zustand["rounds"] > rundendeckel:
             return _FragenErgebnis(
                 signal="weiter", budget_erschoepft=True, letzte_runde=True
             )
@@ -2391,7 +2558,7 @@ def _fragen_behandeln(
                 )
             )
             zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
-            if zustand["rounds"] > MAX_TOOL_ROUNDS:
+            if zustand["rounds"] > rundendeckel:
                 return _FragenErgebnis(
                     signal="weiter", budget_erschoepft=True, letzte_runde=True
                 )
@@ -2399,6 +2566,124 @@ def _fragen_behandeln(
         ai_run_broker.veroeffentlichen(run_id, "question", gestellte_frage)
         return _FragenErgebnis(signal="frage", frage=gestellte_frage)
     return None
+
+
+@dataclass(frozen=True)
+class _WartenErgebnis:
+    """Was aus einem `wait_until`-Aufruf wurde.
+
+    ``signal`` ist "parken" (Segment endet, der Takt weckt zu ``wake_at``)
+    oder "weiter" (Formfehler — Runde beantwortet und gezaehlt, die naechste
+    beginnt). Die Flags gelten nur bei "weiter", wie bei `_FragenErgebnis`.
+    """
+
+    signal: str
+    wake_at: datetime | None = None
+    budget_erschoepft: bool = False
+    letzte_runde: bool = False
+
+
+def _warten_behandeln(
+    *,
+    current_usage: StreamUsage,
+    rolle: str,
+    run_id: str,
+    provider_messages: list[dict],
+    zustand: dict,
+    rundentext: str,
+    rundendeckel: int,
+) -> _WartenErgebnis | None:
+    """Behandelt einen `wait_until`-Aufruf dieser Runde — nur in Worker-Laeufen.
+
+    ``None`` heisst: kein `wait_until` (oder keine Worker-Rolle — dort faellt
+    der Aufruf in den Lese-Dispatch und bekommt dessen benannte Erklaerung).
+
+    Wie bei der Rueckfrage wird die **ganze** Runde beantwortet: das Protokoll
+    verlangt zu jeder `tool_call_id` genau eine Antwort, und ein Plan, der auf
+    dem Parken aufbaut, soll nach dem Wecken neu gefasst werden — die uebrigen
+    Aufrufe der Runde laufen deshalb nicht "noch schnell vorher".
+    """
+    if rolle != "worker":
+        return None
+    wunsch = next(
+        (call for call in current_usage.tool_calls if call.name == "wait_until"),
+        None,
+    )
+    if wunsch is None:
+        return None
+
+    from services.ai_worker_service import WAIT_MAX_MINUTEN, WAIT_MIN_MINUTEN
+
+    roh = wunsch.arguments.get("minuten")
+    minuten: int | None
+    try:
+        minuten = int(roh) if not isinstance(roh, bool) else None
+    except (TypeError, ValueError):
+        minuten = None
+    if minuten is None or not WAIT_MIN_MINUTEN <= minuten <= WAIT_MAX_MINUTEN:
+        # Nachsicht am Werkzeugrand: ein Formfehler kostet eine Runde, nie
+        # den Lauf — dasselbe Muster wie `_ask_formfehler_messages`.
+        hinweis = (
+            "Der Lauf wurde nicht geparkt: `minuten` muss eine ganze Zahl "
+            f"zwischen {WAIT_MIN_MINUTEN} und {WAIT_MAX_MINUTEN} sein. "
+            "Rufe wait_until erneut auf oder arbeite ohne das Warten weiter."
+        )
+        nachrichten = [_aufrufnachricht(current_usage.tool_calls, rundentext)]
+        for call in current_usage.tool_calls:
+            nachrichten.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": json.dumps(
+                    {"error": "AI_WAIT_INVALID", "message": hinweis},
+                    ensure_ascii=True, separators=(",", ":"),
+                ),
+            })
+        provider_messages.extend(nachrichten)
+        zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
+        if zustand["rounds"] > rundendeckel:
+            return _WartenErgebnis(
+                signal="weiter", budget_erschoepft=True, letzte_runde=True
+            )
+        return _WartenErgebnis(signal="weiter")
+
+    wake_at = datetime.now(timezone.utc) + timedelta(minutes=minuten)
+    grund = str(wunsch.arguments.get("grund") or "")[:200]
+    # Die Antworten kommen **vor** dem Parken in den Verlauf: nach dem Wecken
+    # setzt das Segment auf genau diesen `provider_messages` auf, und eine
+    # Aufrufnachricht ohne Ergebnis waere eine formal kaputte Anfrage.
+    nachrichten = [_aufrufnachricht(current_usage.tool_calls, rundentext)]
+    for call in current_usage.tool_calls:
+        if call is wunsch:
+            inhalt: dict = {
+                "geparkt": True,
+                "wake_at": wake_at.strftime("%Y-%m-%dT%H:%MZ"),
+                "hinweis": (
+                    "Der Lauf wurde geparkt. Wenn du das hier liest, ist die "
+                    "Wartezeit vorbei oder ein Ereignis hat dich früher "
+                    "geweckt — prüfe den Stand, statt blind zu wiederholen."
+                ),
+            }
+        else:
+            inhalt = {
+                "error": "AI_RUN_PARKED",
+                "message": (
+                    "Nicht ausgeführt: der Lauf parkt zuerst (wait_until in "
+                    "derselben Runde). Rufe das Werkzeug nach dem Aufwachen "
+                    "erneut auf, wenn es dann noch gebraucht wird."
+                ),
+            }
+        nachrichten.append({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": json.dumps(inhalt, ensure_ascii=True, separators=(",", ":")),
+        })
+    provider_messages.extend(nachrichten)
+    zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
+    logger.info(
+        "Worker parkt per wait_until run_id=%s minuten=%d grund=%s",
+        run_id, minuten, redact_sensitive_text(grund)[:100],
+    )
+    return _WartenErgebnis(signal="parken", wake_at=wake_at)
 
 
 async def _schreibrunde_ausfuehren(
@@ -2410,6 +2695,8 @@ async def _schreibrunde_ausfuehren(
     guardian: "GuardianKontext | None",
     aufgabe: "AufgabenKontext | None",
     unbeaufsichtigt: bool,
+    rolle: str,
+    rundendeckel: int,
     rundentext: str,
     current_usage: StreamUsage,
     provider_messages: list[dict],
@@ -2441,6 +2728,37 @@ async def _schreibrunde_ausfuehren(
     # einzige Punkt, an dem der Lauf etwas veraendert.
     if _lauf_status(run_id) != "running":
         return _SchreibrundenErgebnis(denknaht=denknaht, abgeloest=True)
+    # **Das Gehirn schreibt nie.** GEHIRN_TOOLS enthaelt kein einziges
+    # Schreibwerkzeug — dieser Zweig ist der Spiegel dazu im Vorschlagspfad,
+    # denn der Katalogschnitt ist eine Bitte und keine Zusage. Ohne ihn
+    # liefe ein halluzinierter Schreibaufruf mit den vollen Rechten des
+    # Benutzers in `create_proposal`, und die Invariante "das Gehirn hat
+    # strukturell keine Aussenwirkung" waere nur noch Prompt-Prosa.
+    # Beantwortet statt geworfen, wie ueberall am Werkzeugrand: die Runde
+    # zaehlt, das Modell erfaehrt den Weg (worker_start), der Lauf lebt.
+    if rolle == "gehirn":
+        hinweis = (
+            "Das Gehirn führt keine Aktionen aus. Der Aufruf lief nicht — "
+            "gib die Arbeit mit worker_start als Auftrag in den Hintergrund."
+        )
+        provider_messages.append(
+            _aufrufnachricht(current_usage.tool_calls, rundentext)
+        )
+        for call in current_usage.tool_calls:
+            provider_messages.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": json.dumps(
+                    {"error": "AI_GEHIRN_READONLY", "message": hinweis},
+                    ensure_ascii=True, separators=(",", ":"),
+                ),
+            })
+        zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
+        if zustand["rounds"] > rundendeckel:
+            return _SchreibrundenErgebnis(
+                denknaht=denknaht, budget_erschoepft=True, letzte_runde=True
+            )
+        return _SchreibrundenErgebnis(denknaht=denknaht)
     # **Dieselbe Ansage wie im Lesepfad**, an derselben Stelle im
     # Ablauf: geprueft ist geprueft, angelegt ist noch nichts.
     # Achtzehn der zweiundfuenfzig gepflegten Verlaufssaetze
@@ -2660,6 +2978,7 @@ def _runde_filtern(
     signaturen: dict[str, int],
     zustand: dict,
     run_id: str,
+    rundendeckel: int = MAX_TOOL_ROUNDS,
 ) -> tuple[list, str | None]:
     """Mischrunden-Absage, Schleifenerkennung und der Rundenzaehler.
 
@@ -2715,7 +3034,7 @@ def _runde_filtern(
     deferred_calls.extend(wiederholt)
 
     zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
-    if zustand["rounds"] > MAX_TOOL_ROUNDS:
+    if zustand["rounds"] > rundendeckel:
         # Ein Assistent, der abbricht *weil* er gruendlich war, ist
         # schlechter als einer, der mit dem Vorhandenen antwortet. Ab
         # hier gibt es keine Werkzeuge mehr, aber eine Antwort.
@@ -2739,6 +3058,7 @@ async def _leserunde_ausfuehren(
     run_id: str,
     guardian: "GuardianKontext | None",
     aufgabe: "AufgabenKontext | None",
+    rolle: str,
     zustand: dict,
     rundentext: str,
     provider_messages: list[dict],
@@ -2763,11 +3083,15 @@ async def _leserunde_ausfuehren(
         run_id=run_id,
         guardian=guardian,
         aufgabe=aufgabe,
+        rolle=rolle,
         # Nur solange der Lauf es noch nicht bekommen hat. Die
         # Entscheidung fällt weiterhin unten — dort steht die Marke —,
         # aber gelesen wird jetzt gar nicht erst, was ohnehin
-        # weggeworfen würde.
-        anlagenwissen_noetig=not zustand.get("anlagenwissen_gereicht"),
+        # weggeworfen würde. Ein Gehirn bekommt es nie: Anlagenwissen
+        # ist Serverwissen, und das gehoert den Workern (§7).
+        anlagenwissen_noetig=(
+            rolle != "gehirn" and not zustand.get("anlagenwissen_gereicht")
+        ),
         rundentext=rundentext,
     )
     provider_messages.extend(followup)
@@ -2841,7 +3165,22 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     message_id = anlauf.message_id
     guardian = anlauf.guardian
     aufgabe = anlauf.aufgabe
+    rolle = anlauf.rolle
+    worker = anlauf.worker
     unbeaufsichtigt = anlauf.unbeaufsichtigt
+    # Das Rundenbudget dieses Laufs: fuer Worker der Betreiber-Deckel, sonst
+    # die Hauskonstante. Einmal je Segment gelesen — der Deckel eines
+    # laufenden Segments soll sich nicht mitten in der Schleife aendern.
+    rundendeckel = MAX_TOOL_ROUNDS
+    if rolle == "worker":
+        from services import ai_worker_limits
+
+        try:
+            rundendeckel = min(
+                ai_worker_limits.rundenbudget_je_worker(), MAX_TOOL_ROUNDS
+            )
+        except Exception:
+            logger.warning("Worker-Rundenbudget nicht lesbar run_id=%s", run_id)
 
     ai_run_broker.neues_segment(run_id)
     ai_run_broker.veroeffentlichen(
@@ -2884,6 +3223,9 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     abgerechnet = False
     gestellte_frage: dict | None = None
     geparkt = False
+    # Parkt der Lauf per `wait_until`? Dann traegt `wecker` den Zeitpunkt,
+    # zu dem der Takt ihn spaetestens weckt (dritte Parkstelle).
+    wecker: datetime | None = None
     # Wurde dieser Lauf waehrend der Arbeit von einer neuen Nachricht abgeloest?
     # Dann gehoert er nicht mehr uns: abgerechnet wird noch ehrlich, geschrieben
     # wird nichts mehr.
@@ -2925,8 +3267,12 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             vorbereitung=vorbereitung,
             guardian=guardian,
             aufgabe=aufgabe,
+            rolle=rolle,
             zustand=zustand,
         )
+        # Das Modell dieses Laufs — je Rolle, siehe `_modell_fuer`. Einmal je
+        # Segment: dieselbe Lebensdauer wie der Katalogzuschnitt darueber.
+        modellname = _modell_fuer(vorbereitung.provider, rolle)
         # Ist die nächste Runde die abschließende? Dann darf das Modell keine
         # Werkzeuge mehr aufrufen — der Katalog geht aber weiter mit.
         #
@@ -2965,6 +3311,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 api_key=vorbereitung.api_key,
                 messages=provider_messages,
                 usage=current_usage,
+                model=modellname,
                 tools=tools,
                 tool_choice="none" if letzte_runde else None,
                 reasoning=denken,
@@ -3026,6 +3373,8 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 provider_messages=provider_messages,
                 zustand=zustand,
                 rundentext=rundentext,
+                rolle=rolle,
+                rundendeckel=rundendeckel,
             )
             if fragen is not None:
                 if fragen.signal == "frage":
@@ -3034,6 +3383,26 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 if fragen.budget_erschoepft:
                     budget_erschoepft = True
                 if fragen.letzte_runde:
+                    letzte_runde = True
+                current_usage = StreamUsage()
+                continue
+
+            warten = _warten_behandeln(
+                current_usage=current_usage,
+                rolle=rolle,
+                run_id=run_id,
+                provider_messages=provider_messages,
+                zustand=zustand,
+                rundentext=rundentext,
+                rundendeckel=rundendeckel,
+            )
+            if warten is not None:
+                if warten.signal == "parken":
+                    wecker = warten.wake_at
+                    break
+                if warten.budget_erschoepft:
+                    budget_erschoepft = True
+                if warten.letzte_runde:
                     letzte_runde = True
                 current_usage = StreamUsage()
                 continue
@@ -3051,6 +3420,8 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     guardian=guardian,
                     aufgabe=aufgabe,
                     unbeaufsichtigt=unbeaufsichtigt,
+                    rolle=rolle,
+                    rundendeckel=rundendeckel,
                     rundentext=rundentext,
                     current_usage=current_usage,
                     provider_messages=provider_messages,
@@ -3080,6 +3451,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 signaturen=signaturen,
                 zustand=zustand,
                 run_id=run_id,
+                rundendeckel=rundendeckel,
             )
             if filter_signal == "budget":
                 budget_erschoepft = True
@@ -3097,6 +3469,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 run_id=run_id,
                 guardian=guardian,
                 aufgabe=aufgabe,
+                rolle=rolle,
                 zustand=zustand,
                 rundentext=rundentext,
                 provider_messages=provider_messages,
@@ -3139,9 +3512,13 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             estimated_actual_tokens=estimated_actual,
             failed=False,
             # Eine Rueckfrage ist eine vollwertige Antwort, und ein Vorschlag
-            # ebenso. Ohne das galten sie als "nichts geliefert" — genau der
-            # Fall, in dem der Chat "Keine Antwort erhalten" anzeigte.
-            had_output=bool(chunks) or gestellte_frage is not None or geparkt,
+            # ebenso — und ein geplantes Parken (`wait_until`) auch. Ohne das
+            # galten sie als "nichts geliefert" — genau der Fall, in dem der
+            # Chat "Keine Antwort erhalten" anzeigte.
+            had_output=(
+                bool(chunks) or gestellte_frage is not None or geparkt
+                or wecker is not None
+            ),
             token_price_micro_usd_per_million=vorbereitung.token_price_micro_usd_per_million,
             reasoning="".join(thoughts),
             abschnitte=ai_run_broker.abschnitte(run_id),
@@ -3170,10 +3547,55 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 zustand=zustand,
             )
             return
+        if wecker is not None:
+            # Die dritte Parkstelle: `wait_until` hat den Lauf schlafen
+            # gelegt. Anders als beim Bestaetigungsparken darueber wird hier
+            # **kein** Schlusstext angehaengt: das Parken faellt in derselben
+            # Runde, und deren Text traegt bereits die Aufrufnachricht aus
+            # `_warten_behandeln` — ein zweites Anhaengen hiesse, das Modell
+            # laese nach dem Wecken seinen eigenen Satz doppelt.
+            _lauf_abschliessen(
+                run_id,
+                status="waiting_wake",
+                stop_reason="wait_until",
+                zustand=zustand,
+                wake_at=wecker,
+            )
+            return
         if gestellte_frage is not None:
             _lauf_abschliessen(
                 run_id, status="waiting_user", stop_reason="question", zustand=zustand
             )
+            if worker is not None:
+                # Die Frage eines Workers erreicht den Menschen nie direkt —
+                # sie geht als Meldung mit Worker-ID an die Meldestelle, und
+                # das Gehirn stellt sie in der naechsten Ruhephase
+                # (docs/agentic-framework.md, §3). Erst parken, dann melden:
+                # die Wahrheit ueber den Laufzustand kommt vor der Zustellung,
+                # und eine gescheiterte Meldung laesst die Frage im
+                # Worker-Fenster stehen, wo sie lesbar bleibt.
+                try:
+                    from services import ai_meldestelle
+
+                    with SessionLocal() as db:
+                        benutzer = db.get(User, user_id)
+                        if benutzer is not None:
+                            ai_meldestelle.melden(
+                                db,
+                                user=benutzer,
+                                text=str(gestellte_frage.get("question") or ""),
+                                art="frage",
+                                kanal=str(worker.get("kanal") or "chat"),
+                                worker_id=str(
+                                    worker.get("conversation_id") or conversation_id
+                                ),
+                                worker_titel=str(worker.get("titel") or "") or None,
+                                question=gestellte_frage,
+                            )
+                except Exception:
+                    logger.warning(
+                        "Worker-Frage nicht gemeldet run_id=%s", run_id
+                    )
             return
         # Falten, **bevor** der Lauf abgeschlossen wird. Der Text steht bereits
         # vollständig auf dem Bildschirm: `done` ist raus und `_finalize_stream`
@@ -3287,6 +3709,37 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         _lauf_abschliessen(run_id, status="failed", stop_reason=code)
 
 
+def _rolle_ableiten(
+    db, user: User, conversation, provider: AiProvider, unbeaufsichtigt: bool
+) -> str:
+    """Welche Rolle ein neuer Lauf bekommt (docs/agentic-framework.md, §3/§5).
+
+    Ein Worker-Fenster traegt seine Rolle in der Fensterart — das ist die
+    verlaesslichste Quelle, und sie gilt auch fuer die Antwort auf eine
+    Rueckfrage (`worker_antwort`). Der Dauerchat wird zum Gehirn, sobald der
+    Betreiber ein Arbeitsmodell hinterlegt hat — aber nur fuer Zuege mit
+    einem Menschen davor: faellige Auftraege und Heilungen behalten den
+    heutigen Voll-Betrieb samt ihrer eigenen Werkzeugschnitte. Ohne
+    `worker_model` gilt der Ein-Modell-Betrieb ("voll"), kein Hard-Stop.
+
+    Das Recht `ai.background.use` gehoert mit in die Ableitung, nicht nur in
+    das Werkzeugangebot: ein Gehirn, dessen Benutzer keine Worker starten
+    darf, haette **gar keinen** Arbeitsweg mehr — sein Katalog schrumpfte
+    auf das Gedaechtnis, und jede Sachfrage endete in einer Entschuldigung.
+    Wem das Recht fehlt, dessen Chat arbeitet wie bisher in einem Lauf
+    (derselbe Fallback wie ohne `worker_model`).
+    """
+    kind = str(getattr(conversation, "kind", "primary") or "primary")
+    if kind == "worker":
+        return "worker"
+    if kind == "primary" and not unbeaufsichtigt and provider.worker_model:
+        from services import permission_service
+
+        if permission_service.has_global_permission(db, user, "ai.background.use"):
+            return "gehirn"
+    return "voll"
+
+
 def lauf_beginnen(
     db,
     *,
@@ -3301,6 +3754,7 @@ def lauf_beginnen(
     guardian_briefing_unterdruecken: bool = False,
     unbeaufsichtigt: bool = False,
     gesprochen: bool = False,
+    rolle: str | None = None,
 ) -> tuple[AiRun | None, tuple[str, str] | None]:
     """Legt einen Lauf an: Benutzernachricht, Kontingent, Antwortnachricht.
 
@@ -3321,10 +3775,18 @@ def lauf_beginnen(
     unterdrückt einen Bericht, das andere entscheidet über den Prompt, und ein
     Aufrufer, der nur das eine will, soll nicht stillschweigend das andere
     bekommen.
+
+    ``rolle`` (voll/gehirn/worker) wird ohne Angabe aus Fensterart, Zugang und
+    ``unbeaufsichtigt`` abgeleitet (`_rolle_ableiten`) und im Laufzustand
+    eingefroren — jede Fortsetzung arbeitet unter derselben Rolle wie der
+    erste Zug. Explizit setzt sie nur die Meldestelle: ihr Lieferlauf ist ein
+    Gehirn-Zug im Dauerchat, obwohl niemand davor sitzt.
     """
     safe_content = redact_sensitive_text(content).strip()
     if not safe_content:
         return None, ("AI_MESSAGE_EMPTY", "ai.chat.errors.empty")
+    if rolle is None:
+        rolle = _rolle_ableiten(db, user, conversation, provider, unbeaufsichtigt)
     try:
         # Wer eine neue Nachricht schreibt, statt einen Vorschlag zu bestaetigen,
         # hat die Richtung gewechselt. Ein alter, geparkter Lauf darf danach
@@ -3359,13 +3821,20 @@ def lauf_beginnen(
         # starte ihn neu" nennt keinen Server, gemeint ist der aus der Frage
         # davor. Einmal ermittelt und zweimal gebraucht — fuer den Kontext
         # dieser Nachricht und als Startwert des neuen Laufs.
-        serverbezug = ai_run_service.letzter_serverbezug(
-            db, conversation_id=conversation.id
-        )
+        #
+        # **Nie fuer das Gehirn.** Der Dauerchat traegt Serverbezuege aus der
+        # Ein-Modell-Zeit, und ueber `server_id` zoege der Kontext das
+        # Anlagenwissen (`server_shared`) in eine Rolle, die strukturell kein
+        # Serverwissen hat (§7 Datenminimierung).
+        serverbezug = None
+        if rolle != "gehirn":
+            serverbezug = ai_run_service.letzter_serverbezug(
+                db, conversation_id=conversation.id
+            )
         provider_messages = build_provider_messages(
             db, conversation, query=safe_content, server_id=serverbezug,
             context_chars=context_chars, unbeaufsichtigt=unbeaufsichtigt,
-            gesprochen=gesprochen,
+            gesprochen=gesprochen, rolle=rolle,
         )
         # Was Guardian gemeldet hat, waehrend niemand da war. Nur wenn dieser
         # Lauf nicht selbst aus einer Heilung stammt — sonst berichtete die KI
@@ -3385,6 +3854,9 @@ def lauf_beginnen(
                 text, gebrieft = briefing
                 provider_messages.append({"role": "user", "content": text})
         estimated_tokens = estimate_reserved_tokens(provider_messages)
+        # Das Modell der Rolle — ein Worker bucht und beschriftet mit dem
+        # Arbeitsmodell des Betreibers, nicht mit `default_model`.
+        modell = _modell_fuer(provider, rolle)
         usage_event = reserve_ai_usage(
             db,
             user,
@@ -3393,7 +3865,7 @@ def lauf_beginnen(
             estimated_cost_microunits=estimate_cost_microunits(provider, estimated_tokens),
             server_id=None,
             provider_id=provider.id,
-            model=provider.default_model,
+            model=modell,
         )
         message_id = str(uuid4())
         db.add(AiMessage(
@@ -3403,7 +3875,7 @@ def lauf_beginnen(
             content="",
             status="streaming",
             provider_id=provider.id,
-            model=provider.default_model,
+            model=modell,
             request_id=str(request_id),
         ))
         conversation.updated_at = datetime.now(timezone.utc)
@@ -3416,6 +3888,10 @@ def lauf_beginnen(
         zustand["usage_event_id"] = usage_event.id
         zustand["tool_signatures"] = geerbte_signaturen
         zustand["guardian_briefed"] = gebrieft
+        # Die Rolle, eingefroren wie die Denkstufe: der Systemprompt in den
+        # `provider_messages` ist bereits nach ihr geschnitten, und jede
+        # Fortsetzung muss denselben Katalogschnitt sehen wie der erste Zug.
+        zustand["rolle"] = rolle
         # Das Budget dieses Laufs, festgehalten fuer alle Fortsetzungen. Es hier
         # abzulegen statt es je Segment neu zu ermitteln ist dieselbe
         # Entscheidung wie bei `reasoning_effort`: was mitten in einer Aufgabe

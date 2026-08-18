@@ -33,10 +33,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from database import Base
 
 
-# Ein Lauf, der auf einen Menschen wartet, haelt keine Ressourcen — er ist eine
-# Zeile. Diese beiden Zustaende sind deshalb bewusst nicht befristet: wer eine
-# Bestaetigung eine Stunde liegen laesst, findet sie danach noch vor.
-WARTEND = ("waiting_confirmation", "waiting_user")
+# Ein Lauf, der wartet, haelt keine Ressourcen — er ist eine Zeile.
+# ``waiting_confirmation`` und ``waiting_user`` warten auf einen Menschen und
+# sind deshalb bewusst nicht befristet: wer eine Bestaetigung eine Stunde
+# liegen laesst, findet sie danach noch vor. ``waiting_wake`` wartet auf die
+# Zeit oder ein Ereignis: ``wake_at`` traegt den Zeitpunkt, der Takt und
+# ``finish_lifecycle_task`` wecken (docs/agentic-framework.md, v3).
+WARTEND = ("waiting_confirmation", "waiting_user", "waiting_wake")
 # Endzustaende. Ab hier weckt nichts den Lauf mehr auf.
 BEENDET = ("completed", "failed", "cancelled")
 ZUSTAENDE = ("running", *WARTEND, *BEENDET)
@@ -85,6 +88,13 @@ class AiRun(Base):
         Integer, ForeignKey("ai_providers.id", ondelete="SET NULL"), nullable=True
     )
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="running")
+
+    # Wann ein ``waiting_wake``-Lauf spaetestens geweckt wird. Als Spalte und
+    # nicht im ``state_json``, weil der Takt faellige Laeufe per SQL finden
+    # muss (status='waiting_wake' AND wake_at <= now). Ein Ereignis
+    # (``finish_lifecycle_task``, Freigabe) darf frueher wecken; ``wake_at``
+    # ist die Obergrenze, kein Versprechen auf die Sekunde.
+    wake_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Die Nachricht, die dieses Segment gerade schreibt. Nach einer Unterbrechung
     # zeigt sie auf die **neue** Nachricht der Fortsetzung; die vorherige bleibt

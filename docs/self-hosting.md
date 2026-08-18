@@ -1203,7 +1203,11 @@ Zwei Punkte, die man nicht ändern sollte, ohne die Folgen zu kennen:
 - **Genau eine Panel-Replica**, Rollout-Strategie `Recreate`. Scheduler-Jobs,
   Lifecycle-Sperren und der Settings-Cache liegen im Prozessspeicher — zwei
   gleichzeitige Panels würden Auto-Restarts, Backups und Webhook-Zustellungen
-  doppelt ausführen.
+  doppelt ausführen. Dasselbe gilt für den KI-Laufvermittler und die
+  KI-Meldestelle (Tipp-Signal, Live-Ströme): beide sind prozesslokal. Die
+  Zustellung der Hintergrund-Aufträge verliert dadurch bei einem Neustart
+  nichts — Meldungen stehen in der Datenbank, die Oberfläche pollt und lädt
+  die persistierte Chat-Nachricht nach; nur das Live-Zusehen reisst kurz ab.
 
 ---
 

@@ -32,7 +32,9 @@ import { AiMemoryNotice } from './AiMemoryNotice'
 // der KI aussieht. Die Schleife hier bleibt: an ihr hängen Bearbeiten und
 // Anhänge, und die gehören nicht in einen Verlauf, den man nur liest.
 import { AiAntwortblase, KEINE_AUFRUFE, mergeEntries } from './AiVerlauf'
+import { WorkerLeiste } from './WorkerLeiste'
 import { useAiLauf } from './useAiLauf'
+import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
 interface ServerOption {
@@ -41,6 +43,16 @@ interface ServerOption {
 }
 
 const ATTACHMENT_ACCEPT = '.txt,.log,.cfg,.conf,.ini,.json,.properties,.toml,.yaml,.yml,.png,.jpg,.jpeg'
+
+/**
+ * Wie oft das Tipp-Signal höchstens gesendet wird.
+ *
+ * Die Ruhe-Karenz der Meldestelle liegt bei 10–20 Sekunden
+ * (docs/agentic-framework.md, §4) — ein Signal je zehn Sekunden hält sie
+ * zuverlässig offen, ohne je Tastendruck einen Request zu erzeugen.
+ * Übertragen wird nur der Zeitpunkt, nie der Text.
+ */
+const TIPP_TAKT_MS = 10_000
 
 /**
  * Die Denkwahl — dieselben zwei Felder, die auch auf der Leitung stehen und in
@@ -175,6 +187,9 @@ export function AiChat() {
   const verlaufRef = useRef<HTMLDivElement | null>(null)
   const mountedRef = useRef(true)
   const dragDepthRef = useRef(0)
+  // Wann zuletzt „der Mensch tippt" gemeldet wurde — die Drossel des
+  // Tipp-Signals. Ein Ref und kein State: der Wert soll nichts neu zeichnen.
+  const letztesTippSignalRef = useRef(0)
   // Welches Modell **jetzt** gewählt ist. `ladeKontext` braucht das, um eine
   // Antwort zu erkennen, die zu einer älteren Wahl gehört. Zuweisung beim
   // Render, dasselbe Muster wie `autoscrollRef` in ServerConsolePanel.
@@ -449,6 +464,46 @@ export function AiChat() {
     void haengeAn(laufBeimOeffnen.id)
   }, [haengeAn, laufBeimOeffnen, setRunId])
 
+  /**
+   * Nachladen bei Zustellung: die Meldestelle liefert in den Dauerchat, ohne
+   * dass hier jemand etwas getippt hätte.
+   *
+   * Der offene Chat pollt selbst nicht — er erfuhr von einer zugestellten
+   * Worker-Meldung schlicht nichts, bis man die Seite neu lud. Die Glocke
+   * pollt ohnehin (sie ist global gemountet) und feuert das Ereignis; hier
+   * wird nur nachgeladen, und zwar aus der Datenbank statt aus dem Ereignis —
+   * das Signal trägt bewusst keine Nutzlast.
+   *
+   * Nicht während eines Stroms: dann ist SSE die Wahrheit, und ein Nachladen
+   * mittendrin ersetzte den halb gezeichneten Zug durch seinen alten Stand.
+   */
+  useEffect(() => {
+    if (streaming) return
+    const nachladen = () => {
+      void Promise.all([aiApi.getConversation(), aiApi.listActions()])
+        .then(([conversation, actions]) => {
+          if (mountedRef.current) setEntries(mergeEntries(conversation.messages, actions))
+        })
+        .catch(() => undefined)
+    }
+    window.addEventListener(AI_ZUSTELLUNG_EVENT, nachladen)
+    return () => window.removeEventListener(AI_ZUSTELLUNG_EVENT, nachladen)
+  }, [setEntries, streaming])
+
+  /**
+   * Das Tipp-Signal: gedrosselt, ohne Inhalt, ohne Fehlerbehandlung nach aussen.
+   *
+   * Die Meldestelle hält Worker-Meldungen zurück, solange der Mensch schreibt
+   * (Ruhe-Regel). Was sie dafür braucht, ist genau ein Zeitstempel — der Text
+   * verlässt den Browser nicht, nicht einmal seine Länge.
+   */
+  const tippSignal = useCallback(() => {
+    const jetzt = Date.now()
+    if (jetzt - letztesTippSignalRef.current < TIPP_TAKT_MS) return
+    letztesTippSignalRef.current = jetzt
+    void aiApi.typing().catch(() => undefined)
+  }, [])
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center" aria-label={t('common.loading')}>
@@ -522,6 +577,9 @@ export function AiChat() {
           </Button>
         </div>
       </header>
+
+      {/* ── Die Worker-Leiste: lebende Hintergrund-Aufträge, einsehbar ── */}
+      <WorkerLeiste />
 
       {/* ── Verlauf ───────────────────────────────────────────────────── */}
       <div
@@ -768,6 +826,9 @@ export function AiChat() {
               value={input}
               onChange={(event) => {
                 setInput(event.target.value)
+                // Nur bei tatsächlichem Inhalt: ein geleertes Feld ist kein
+                // Schreiben, und die Karenz soll dann normal ablaufen.
+                if (event.target.value.trim()) tippSignal()
                 // Waechst mit dem Text, wie man es von einem Chat kennt.
                 event.target.style.height = 'auto'
                 event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`

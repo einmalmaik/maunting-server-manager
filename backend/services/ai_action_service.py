@@ -879,6 +879,7 @@ def _global_tool_definitions() -> list[dict]:
             ],
         ),
         *_aufgaben_tool_definitions(),
+        *_worker_tool_definitions(),
     ]
 
 
@@ -1024,6 +1025,141 @@ def _aufgaben_tool_definitions() -> list[dict]:
                 **_RATIONALE_SCHEMA,
             },
             ["task_id", *_RATIONALE_REQUIRED],
+        ),
+    ]
+
+
+def _worker_tool_definitions() -> list[dict]:
+    """Gehirn und Worker (docs/agentic-framework.md).
+
+    Fuenf Werkzeuge, zwei Adressaten: `worker_start`/`worker_cancel`/
+    `worker_antwort` gehoeren dem Gehirn, `wait_until`/`worker_frage` nur den
+    Workern selbst. Welcher Lauf welche sieht, entscheidet der
+    Laufart-Schnitt — hier stehen nur die Schemata, und die stehen wie alle
+    im einen Katalog.
+    """
+    from services.ai_worker_service import (
+        MAX_AUFTRAG_CHARS,
+        MAX_TITEL_CHARS,
+        WAIT_MAX_MINUTEN,
+        WAIT_MIN_MINUTEN,
+    )
+
+    return [
+        _function(
+            "worker_start",
+            "Übergibt einen Auftrag an einen Worker, der ihn im Hintergrund "
+            "erledigt, während du weiter im Gespräch bleibst. Der "
+            "`auftrag` ist dessen **einzige** Wissensquelle — schreib alles "
+            "hinein, was er braucht: was zu tun ist, woran der Erfolg zu "
+            "erkennen ist, und jede Angabe des Benutzers. Nach dem Start "
+            "antworte sofort weiter; das Ergebnis kommt später als Meldung. "
+            "Versprich nichts über die Dauer.",
+            {
+                "auftrag": {
+                    "type": "string",
+                    "maxLength": MAX_AUFTRAG_CHARS,
+                    "description": "Vollständiger, aus sich heraus verständlicher Auftrag.",
+                },
+                "titel": {
+                    "type": "string",
+                    "maxLength": MAX_TITEL_CHARS,
+                    "description": "Kurzer Name für die Auftragsliste des Benutzers.",
+                },
+                "kanal": {
+                    "type": "string",
+                    "enum": list(_KANAELE),
+                    "description": (
+                        "Wohin das Ergebnis gemeldet wird. chat = nur im "
+                        "Panel (Standard), email = zusätzlich per Mail, "
+                        "both = beides. Im Chat steht das Ergebnis immer."
+                    ),
+                },
+            },
+            ["auftrag"],
+        ),
+        _function(
+            "worker_cancel",
+            "Bricht einen laufenden Auftrag ab. `worker_id` stammt aus der "
+            "Antwort von worker_start oder aus der Lage. Nutze das, wenn der "
+            "Benutzer einen Auftrag stoppen will oder er sich erledigt hat.",
+            {
+                "worker_id": {"type": "string", "maxLength": 36},
+            },
+            ["worker_id"],
+        ),
+        _function(
+            "worker_antwort",
+            "Gibt die Antwort des Benutzers an einen Auftrag zurück, der "
+            "eine Frage gestellt hat. `worker_id` steht in der Meldung mit "
+            "der Frage. Schreib in `antwort`, was der Benutzer entschieden "
+            "hat — wörtlich genug, dass der Auftrag danach handeln kann. "
+            "Nicht nutzen, wenn kein Auftrag gefragt hat.",
+            {
+                "worker_id": {"type": "string", "maxLength": 36},
+                "antwort": {
+                    "type": "string",
+                    "maxLength": MAX_AUFTRAG_CHARS,
+                    "description": "Die Entscheidung des Benutzers, vollständig.",
+                },
+            },
+            ["worker_id", "antwort"],
+        ),
+        _function(
+            "wait_until",
+            "Parkt **diesen** Lauf und weckt ihn nach der angegebenen Zeit "
+            "wieder — für Aufträge, die auf etwas warten (\"in 30 Minuten "
+            "nachsehen\", \"heute Nacht prüfen\"). Während des Wartens "
+            "kostet der Lauf nichts. Nach dem Wecken prüfst du den Stand im "
+            "Verlauf, statt blind zu wiederholen. Nicht für Wartezeiten "
+            "unter einer Minute — arbeite dann einfach weiter.",
+            {
+                "minuten": {
+                    "type": "integer",
+                    "minimum": WAIT_MIN_MINUTEN,
+                    "maximum": WAIT_MAX_MINUTEN,
+                },
+                "grund": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Worauf gewartet wird. Erscheint in der Auftragsliste.",
+                },
+            },
+            ["minuten"],
+        ),
+        _function(
+            "worker_frage",
+            "Stellt dem Benutzer eine Frage, obwohl er dieses Fenster nie "
+            "sieht: dein Lauf parkt, die Frage wird ihm im Gespräch gestellt, "
+            "und die Antwort weckt genau diesen Lauf. Nutze sie **nur**, wenn "
+            "du ohne die Entscheidung nicht weiterkommst — Raten wäre teuer, "
+            "Warten sinnlos. Rechne damit, dass die Antwort dauert.",
+            {
+                "question": {
+                    "type": "string",
+                    "maxLength": MAX_QUESTION_CHARS,
+                    "description": "Die Frage, vollständig und aus sich heraus verständlich.",
+                },
+                "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": MAX_QUESTION_OPTIONS,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "maxLength": MAX_OPTION_CHARS},
+                            "hint": {
+                                "type": "string",
+                                "maxLength": MAX_OPTION_HINT_CHARS,
+                                "description": "Was diese Wahl bedeutet. Kurz.",
+                            },
+                        },
+                        "required": ["label"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            ["question", "options"],
         ),
     ]
 
@@ -2537,6 +2673,32 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
 
     if tool_name == "read_docs":
         return _execute_read_docs(arguments)
+
+    if tool_name == "worker_start":
+        from services import ai_worker_service
+
+        return ai_worker_service.worker_start(db, user=user, arguments=arguments)
+
+    if tool_name == "worker_cancel":
+        from services import ai_worker_service
+
+        return ai_worker_service.worker_cancel(db, user=user, arguments=arguments)
+
+    if tool_name == "worker_antwort":
+        from services import ai_worker_service
+
+        return ai_worker_service.worker_antwort(db, user=user, arguments=arguments)
+
+    if tool_name == "wait_until":
+        # Wird wie `ask_user` im Rundenlauf abgefangen, bevor ein Werkzeug
+        # laeuft: der Lauf parkt (`waiting_wake`), dieser Dispatch sieht das
+        # Werkzeug nie. Der Zweig steht trotzdem hier — als benannte Antwort
+        # statt des Durchfall-raise, damit ein Aufruf ausserhalb eines
+        # parkfaehigen Laufs eine Erklaerung bekommt und kein Raetsel.
+        raise AiActionValidationError(
+            "wait_until parkt den Lauf und wird im Rundenlauf behandelt — "
+            "in diesem Lauf steht es nicht zur Verfügung"
+        )
 
     if tool_name == "list_tasks":
         from services import ai_task_service

@@ -659,6 +659,20 @@ async def lifespan(app: FastAPI):
                 "%d unterbrochene(r) KI-Lauf/Laeufe nach Panel-Start abgeschlossen.",
                 unterbrochene,
             )
+        # Unterbrochene **Worker** bekommen genau einen automatischen
+        # Wiederanlauf: ein neuer Lauf im selben Fenster mit Pruefauftrag —
+        # die persistierte Unterhaltung ist der Checkpoint
+        # (docs/agentic-framework.md). Die Laufzeit steht hier bereits
+        # (`laufzeit_setzen` frueh im Lifespan), der Vorflug kann also fliegen.
+        from services.ai_run_service import worker_wiederanlauf_saehen
+
+        gesaet = await worker_wiederanlauf_saehen(_ai_recovery_db)
+        if gesaet:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "%d Worker nach Panel-Start wiederangelaufen.", gesaet
+            )
     finally:
         _ai_recovery_db.close()
 

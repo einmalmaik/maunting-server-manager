@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -35,6 +36,8 @@ vi.mock('@/api/ai', async (importOriginal) => {
       listAutonomyGrants: vi.fn(),
       saveAutonomyGrant: vi.fn(),
       getContextStatus: vi.fn(),
+      listWorkers: vi.fn(),
+      typing: vi.fn(),
     },
     streamAiMessage: vi.fn(),
     attachAiRun: vi.fn(),
@@ -139,11 +142,15 @@ describe('AiChat', () => {
     // sich an einen weiterlaufenden Lauf wieder anhaengen zu koennen.
     vi.mocked(aiApi.getActiveRun).mockReset().mockResolvedValue(null)
     vi.mocked(aiApi.getContextStatus).mockReset().mockResolvedValue(kontextStand)
+    // Keine Hintergrund-Auftraege: die Worker-Leiste bleibt dann unsichtbar,
+    // und der Chat sieht aus wie vor ihrer Einfuehrung.
+    vi.mocked(aiApi.listWorkers).mockReset().mockResolvedValue([])
+    vi.mocked(aiApi.typing).mockReset().mockResolvedValue(undefined)
     vi.mocked(attachAiRun).mockReset().mockResolvedValue(undefined)
   })
 
   it('offers exactly one conversation and no way to create another', async () => {
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     // Der Kern der Aenderung: kein "Neue Unterhaltung", keine Chatliste.
@@ -156,7 +163,7 @@ describe('AiChat', () => {
     // `ai.autonomous.use` wird der gar nicht gezeichnet — die Abfrage holte
     // trotzdem alle sichtbaren Server samt Bind-IP, Spiel-, Query- und
     // RCON-Port in den Browser und warf sie weg.
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     expect(client.api).not.toHaveBeenCalled()
@@ -174,14 +181,14 @@ describe('AiChat', () => {
       error: null,
     })
     vi.mocked(aiApi.listAutonomyGrants).mockResolvedValue([])
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     await waitFor(() => expect(client.api).toHaveBeenCalledWith('/servers'))
   })
 
   it('uploads through the attachment endpoint of the single conversation', async () => {
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     const file = new File(['synthetic content'], 'another-synthetic.txt', { type: 'text/plain' })
@@ -196,7 +203,7 @@ describe('AiChat', () => {
     // OpenRouter 20 verschiedene Stufenlisten, eine feste Skala waere falsch.
     const { streamAiMessage } = await import('@/api/ai')
     vi.mocked(streamAiMessage).mockResolvedValue(undefined)
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.click(screen.getByLabelText('Denktiefe'))
@@ -221,7 +228,7 @@ describe('AiChat', () => {
     // gleichgueltig was vorher gewaehlt war. Die Wahl gilt fuer die naechste
     // Frage und nicht fuer die vorige Antwort — sie gehoert deshalb in den
     // Browser und nicht in die Unterhaltung.
-    const ersteAnsicht = render(<AiChat />)
+    const ersteAnsicht = render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.click(screen.getByLabelText('Denktiefe'))
@@ -231,7 +238,7 @@ describe('AiChat', () => {
     // Ein Neuladen der Seite: dieselbe Herkunft, derselbe localStorage, aber
     // ein frisch aufgebauter Baum ohne jeden Zustand von vorhin.
     ersteAnsicht.unmount()
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     expect(screen.getByLabelText('Denktiefe')).toHaveTextContent('Hoch')
@@ -242,7 +249,7 @@ describe('AiChat', () => {
     // stehenbleiben, wo es sie nicht gibt — der Server senkte sie sonst
     // stillschweigend, und die Anzeige loege.
     localStorage.setItem('msm_ai_chat:reasoning:anonym', JSON.stringify({ an: true, stufe: 'xhigh' }))
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     expect(screen.getByLabelText('Denktiefe')).toHaveTextContent('Mittel')
@@ -262,7 +269,7 @@ describe('AiChat', () => {
         reasoning: false, efforts: [], can_disable: true, default_effort: null,
       },
     ])
-    const ersteAnsicht = render(<AiChat />)
+    const ersteAnsicht = render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.click(screen.getByLabelText('Provider auswählen'))
@@ -270,7 +277,7 @@ describe('AiChat', () => {
     expect(screen.getByLabelText('Provider auswählen')).toHaveTextContent('Synthetic Lab')
 
     ersteAnsicht.unmount()
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     // Ohne das Merken stuende hier wieder das erste benutzbare Modell.
@@ -282,7 +289,7 @@ describe('AiChat', () => {
     // entfernt oder dem Benutzer die Rolle entzogen worden sein. Ein Verweis
     // darauf ergaebe eine Auswahlliste, deren Wert in keiner Option vorkommt.
     localStorage.setItem('msm_ai_chat:provider:anonym', '99')
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     expect(screen.getByLabelText('Provider auswählen')).toHaveTextContent('Synthetic AI')
@@ -316,7 +323,7 @@ describe('AiChat', () => {
             used_tokens: 50_000, compaction_percent: 75, summarized: false,
           })
     ))
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     // Weiter zum zweiten Modell, während die Auskunft zum ersten noch hängt.
@@ -347,13 +354,16 @@ describe('AiChat', () => {
         can_disable: false, default_effort: 'low',
       },
     ])
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     // Die Vorauswahl faellt auf die Vorgabe des Modells, nicht auf nichts —
-    // sichtbar am Knopf, bevor die Liste ueberhaupt aufgeklappt wird.
+    // sichtbar am Knopf, bevor die Liste ueberhaupt aufgeklappt wird. Das
+    // Nachziehen laeuft in einem eigenen Effekt (`denkwahlFuer` haengt am
+    // geladenen Provider) — deshalb `waitFor` statt eines synchronen Blicks
+    // direkt nach dem ersten sichtbaren Render.
     const stufen = screen.getByLabelText('Denktiefe')
-    expect(stufen).toHaveTextContent('Niedrig')
+    await waitFor(() => expect(stufen).toHaveTextContent('Niedrig'))
 
     fireEvent.click(stufen)
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Niedrig', 'Hoch'])
@@ -374,7 +384,7 @@ describe('AiChat', () => {
         code: 'AI_TOOL_REJECTED', message_key: 'ai.chat.errors.toolRejected',
       } })
     })
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Lösch den Server' } })
@@ -398,7 +408,7 @@ describe('AiChat', () => {
         skill_status: null, skill_learned: false,
       } })
     })
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Hilfe' } })
@@ -416,7 +426,7 @@ describe('AiChat', () => {
         skill_status: 'pending', skill_learned: true,
       } })
     })
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Hilfe' } })
@@ -433,7 +443,7 @@ describe('AiChat', () => {
     vi.mocked(streamAiMessage).mockReset().mockImplementation(async (_payload, onEvent) => {
       onEvent({ event: 'reasoning', data: { content: 'Ich pruefe die Ports.' } })
     })
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
@@ -456,7 +466,7 @@ describe('AiChat', () => {
       } })
       onEvent({ event: 'reasoning', data: { content: 'Jetzt die Logs.' } })
     })
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
@@ -485,7 +495,7 @@ describe('AiChat', () => {
     const { streamAiMessage } = await import('@/api/ai')
     // Der Lauf hängt: genau der Zustand, in dem beide Anzeigen standen.
     vi.mocked(streamAiMessage).mockReset().mockImplementation(() => new Promise(() => {}))
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
@@ -502,7 +512,7 @@ describe('AiChat', () => {
     // schlechtere Auskunft als ein Satz, der sagt, was gerade läuft.
     const { streamAiMessage } = await import('@/api/ai')
     vi.mocked(streamAiMessage).mockReset().mockImplementation(() => new Promise(() => {}))
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.click(screen.getByLabelText('Denktiefe'))
@@ -524,7 +534,7 @@ describe('AiChat', () => {
       onEvent({ event: 'reasoning', data: { content: 'Ich pruefe die Ports.' } })
       await new Promise(() => {})
     })
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
@@ -546,7 +556,7 @@ describe('AiChat', () => {
       ] } })
       await new Promise(() => {})
     })
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
@@ -570,7 +580,7 @@ describe('AiChat', () => {
       ] } })
       await new Promise(() => {})
     })
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
@@ -594,7 +604,7 @@ describe('AiChat', () => {
       } })
       await new Promise(() => {})
     })
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })
@@ -619,7 +629,7 @@ describe('AiChat', () => {
         provider_id: 1, model: 'test-model', created_at: '2026-08-01T12:00:01Z',
       }],
     })
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.click(screen.getByRole('button', { name: /Nachgedacht/ }))
@@ -633,7 +643,7 @@ describe('AiChat', () => {
     const { streamAiMessage } = await import('@/api/ai')
     vi.mocked(aiApi.editMessage).mockResolvedValue({ removed: 2 })
     vi.mocked(streamAiMessage).mockResolvedValue(undefined)
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.click(screen.getByRole('button', { name: 'Nachricht bearbeiten' }))
@@ -658,7 +668,7 @@ describe('AiChat', () => {
     const { streamAiMessage } = await import('@/api/ai')
     vi.mocked(aiApi.editMessage).mockRejectedValue(new Error('offline'))
     vi.mocked(streamAiMessage).mockReset().mockResolvedValue(undefined)
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.click(screen.getByRole('button', { name: 'Nachricht bearbeiten' }))
@@ -683,7 +693,7 @@ describe('AiChat', () => {
         ],
       } })
     }).mockResolvedValue(undefined)
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'server anlegen' } })
@@ -734,7 +744,7 @@ describe('AiChat', () => {
       melde = onEvent as typeof melde
       return new Promise(() => {})
     })
-    const { container } = render(<AiChat />)
+    const { container } = render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     const kasten = container.querySelector('[aria-live="polite"]') as HTMLElement
@@ -763,7 +773,7 @@ describe('AiChat', () => {
       melde = onEvent as typeof melde
       return new Promise(() => {})
     })
-    const { container } = render(<AiChat />)
+    const { container } = render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     const kasten = container.querySelector('[aria-live="polite"]') as HTMLElement
@@ -794,7 +804,7 @@ describe('AiChat', () => {
     })
     vi.mocked(attachAiRun).mockResolvedValue(undefined)
 
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
 
     await waitFor(() => {
       expect(attachAiRun).toHaveBeenCalledWith('lauf-42', expect.any(Function), expect.any(AbortSignal))
@@ -811,7 +821,7 @@ describe('AiChat', () => {
       kind: 'primary', conversation_id: CONVERSATION.id, server_id: null,
     })
 
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
 
     await screen.findByLabelText('Nachricht')
     expect(attachAiRun).not.toHaveBeenCalled()
@@ -841,7 +851,7 @@ describe('AiChat', () => {
     }])
     vi.mocked(attachAiRun).mockResolvedValue(undefined)
 
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     const knopf = await screen.findByText('bestaetigen-attrappe')
     fireEvent.click(knopf)
 
@@ -901,7 +911,7 @@ describe('AiChat', () => {
       onEvent({ event: 'snapshot', data: abzug([werkzeug]) })
     })
 
-    render(<AiChat />)
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
     fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Was ist los?' } })

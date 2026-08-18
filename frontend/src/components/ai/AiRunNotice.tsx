@@ -9,6 +9,7 @@ import {
   type AiConversationKind,
   type AiRunStatus,
 } from '@/api/ai'
+import { zustellungMelden } from '@/lib/aiZustellung'
 import { useAuthStore } from '@/stores/authStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
@@ -53,10 +54,31 @@ const GUARDIAN_TEXTE: Record<string, { key: string; fallback: string }> = {
   failed: { key: 'ai.notice.guardianFailed', fallback: 'Eine Guardian-Reparatur ist fehlgeschlagen.' },
 }
 
-/** Wohin die Meldung zeigt. Der Dauerchat ist die Seite ohne Zusatz. */
+/**
+ * Ein dritter Anlass, ein dritter Satz: die Hintergrund-Aufträge.
+ *
+ * `completed` steht hier für „aus der Liste verschwunden" — ob der Auftrag
+ * gelang oder scheiterte, weiß die Glocke nicht, und sie behauptet es auch
+ * nicht: die ehrliche Auskunft liefert das Gehirn im Chat. Ein schlafender
+ * Langläufer (`waiting_wake`) wird bewusst nie gemeldet — er hat angekündigt,
+ * sich zu melden, und genau das tut er dann auch.
+ */
+const WORKER_TEXTE: Record<string, { key: string; fallback: string }> = {
+  completed: { key: 'ai.notice.workerReported', fallback: 'Ein Worker hat berichtet.' },
+  waiting_confirmation: { key: 'ai.notice.workerWaiting', fallback: 'Ein Worker wartet auf deine Freigabe.' },
+  waiting_user: { key: 'ai.notice.workerQuestion', fallback: 'Ein Worker hat eine Rückfrage.' },
+}
+
+/**
+ * Wohin die Meldung zeigt. Der Dauerchat ist die Seite ohne Zusatz.
+ *
+ * Für `worker` steht hier nur der Rückfall: ein Auftrag hat viele Fenster,
+ * das echte Ziel (mit Kennung) trägt die Meldung selbst in `ziel`.
+ */
 const ZIEL: Record<AiConversationKind, string> = {
   primary: '/ai',
   guardian: '/ai?ansicht=guardian',
+  worker: '/ai',
 }
 
 /**
@@ -81,7 +103,7 @@ export function AiRunNotice() {
   const meldungenAn = user?.ai_notifications !== false
 
   const [meldung, setMeldung] = useState<
-    { status: AiRunStatus; kind: AiConversationKind } | null
+    { status: AiRunStatus; kind: AiConversationKind; ziel?: string } | null
   >(null)
   // Der zuletzt gesehene Zustand — **je Fenster**. Gemeldet wird der
   // *Uebergang*, nicht der Zustand: sonst kaeme bei jedem Takt dieselbe
@@ -94,15 +116,24 @@ export function AiRunNotice() {
   const letzterRef = useRef<
     Partial<Record<AiConversationKind, { id: string; status: AiRunStatus }>>
   >({})
+  // Dasselbe fuer die Hintergrund-Auftraege, nur je **Fenster-Kennung**: es
+  // gibt beliebig viele gleichzeitig, und jeder wechselt fuer sich.
+  const workerRef = useRef<Record<string, AiRunStatus>>({})
 
   // **Unterdrueckt wird nur das Fenster, in das man gerade sieht.** Vorher
   // genuegte der Pfad `/ai`: wer im Chat stand, bekam auch von einer beendeten
   // Reparatur nichts mit, obwohl er sie gar nicht sehen konnte.
+  const suchParameter = new URLSearchParams(ort.search)
+  const ansichtParam = ort.pathname.startsWith('/ai') ? suchParameter.get('ansicht') : null
   const offenesFenster: AiConversationKind | null = ort.pathname.startsWith('/ai')
-    ? (new URLSearchParams(ort.search).get('ansicht') === 'guardian'
+    ? (ansichtParam === 'guardian'
         ? 'guardian'
-        : 'primary')
+        : ansichtParam === 'worker'
+          ? 'worker'
+          : 'primary')
     : null
+  // Bei `worker` reicht die Art nicht: man sieht **einen** Auftrag, nicht alle.
+  const offeneWorkerId = offenesFenster === 'worker' ? suchParameter.get('id') : null
 
   const nachsehen = useCallback(async () => {
     const fenster: AiConversationKind[] = ['primary', 'guardian']
@@ -122,6 +153,11 @@ export function AiRunNotice() {
         if (vorher && vorher.status === 'running' && !stumm) {
           setMeldung({ status: 'completed', kind: art })
         }
+        // Ein beendeter Dauerchat-Lauf heisst auch: dort steht jetzt etwas
+        // Neues — zum Beispiel die Lieferung der Meldestelle, die niemand
+        // getippt hat. Der offene Chat laedt daraufhin nach; deshalb feuert
+        // das Signal auch (gerade!) dann, wenn die Meldung selbst stumm bleibt.
+        if (art === 'primary' && vorher) zustellungMelden()
         delete letzterRef.current[art]
         continue
       }
@@ -137,8 +173,58 @@ export function AiRunNotice() {
       letzterRef.current[art] = { id: lauf.id, status: lauf.status }
       if (lauf.status === 'running') laeuftNoch = true
     }
-    return laeuftNoch
-  }, [offenesFenster])
+
+    // Die Hintergrund-Auftraege: Uebergaenge je Fenster-Kennung. Die Liste
+    // traegt nur Lebende — Verschwinden heisst beendet, und der Bericht ist
+    // als Meldung unterwegs (docs/agentic-framework.md, §4).
+    let workerLebt = false
+    try {
+      const workers = await aiApi.listWorkers()
+      workerLebt = workers.length > 0
+      const jetzt = new Set(workers.map((w) => w.conversation_id))
+      let zustellung = false
+      for (const kennung of Object.keys(workerRef.current)) {
+        if (jetzt.has(kennung)) continue
+        delete workerRef.current[kennung]
+        zustellung = true
+        if (offenesFenster !== 'primary') {
+          setMeldung({ status: 'completed', kind: 'worker', ziel: '/ai' })
+        }
+      }
+      for (const worker of workers) {
+        const vorher = workerRef.current[worker.conversation_id]
+        if (vorher && vorher !== worker.status) {
+          if (worker.status === 'waiting_confirmation') {
+            // Die Karte haengt im Fenster des Auftrags — dorthin zeigen,
+            // ausser man sieht genau dieses Fenster ohnehin an.
+            if (!(offenesFenster === 'worker' && offeneWorkerId === worker.conversation_id)) {
+              setMeldung({
+                status: worker.status,
+                kind: 'worker',
+                ziel: `/ai?ansicht=worker&id=${encodeURIComponent(worker.conversation_id)}`,
+              })
+            }
+          } else if (worker.status === 'waiting_user') {
+            // Die Frage stellt das Gehirn im Dauerchat — dorthin zeigen und
+            // den offenen Chat nachladen lassen.
+            zustellung = true
+            if (offenesFenster !== 'primary') {
+              setMeldung({ status: worker.status, kind: 'worker', ziel: '/ai' })
+            }
+          }
+        }
+        workerRef.current[worker.conversation_id] = worker.status
+      }
+      if (zustellung) zustellungMelden()
+    } catch {
+      // Auch hier: eine gescheiterte Nachfrage ist keine Meldung wert.
+    }
+    // Schnell weiter, solange etwas arbeitet und man nicht im Chat steht
+    // (dort meldet der Ereignisstrom selbst) — **oder** ein Auftrag lebt:
+    // dessen Zustellung soll den offenen Chat nicht erst nach dem Ruhetakt
+    // erreichen, denn der Chat pollt selbst nicht.
+    return (laeuftNoch && offenesFenster === null) || workerLebt
+  }, [offeneWorkerId, offenesFenster])
 
   useEffect(() => {
     if (!darfChatten || !meldungenAn) return
@@ -147,29 +233,36 @@ export function AiRunNotice() {
 
     const takt = async () => {
       if (!aktiv) return
-      const laeuftNoch = await nachsehen()
+      const schnell = await nachsehen()
       if (!aktiv) return
-      // Schnell nachsehen, solange etwas arbeitet und man nicht im Chat steht;
-      // sonst langsam weiter, statt aufzuhören. Der langsame Takt ist die
-      // einzige Art, wie eine offene Seite von einem Lauf erfährt, den niemand
-      // ausgelöst hat.
-      timer = setTimeout(
-        takt,
-        laeuftNoch && offenesFenster === null ? TAKT_MS : RUHETAKT_MS,
-      )
+      // Schnell nachsehen, solange `nachsehen` das verlangt; sonst langsam
+      // weiter, statt aufzuhören. Der langsame Takt ist die einzige Art, wie
+      // eine offene Seite von einem Lauf erfährt, den niemand ausgelöst hat.
+      timer = setTimeout(takt, schnell ? TAKT_MS : RUHETAKT_MS)
     }
     void takt()
     return () => {
       aktiv = false
       if (timer) clearTimeout(timer)
     }
-  }, [darfChatten, meldungenAn, nachsehen, offenesFenster])
+  }, [darfChatten, meldungenAn, nachsehen])
 
   // Wer in **dieses** Fenster sieht, sieht es ohnehin. Wer im Chat steht,
   // sieht eine laufende Reparatur dagegen nicht — und soll sie gemeldet
-  // bekommen.
-  if (!meldung || meldung.kind === offenesFenster || !darfChatten || !meldungenAn) return null
-  const tabelle = meldung.kind === 'guardian' ? GUARDIAN_TEXTE : TEXTE
+  // bekommen. Worker-Meldungen entscheiden das feiner schon bei der
+  // Erzeugung (welcher Auftrag, welches Ziel) — die Art allein sagt hier
+  // nichts: man sieht **einen** Auftrag, nicht alle.
+  if (
+    !meldung
+    || (meldung.kind === offenesFenster && meldung.kind !== 'worker')
+    || !darfChatten
+    || !meldungenAn
+  ) return null
+  const tabelle = meldung.kind === 'guardian'
+    ? GUARDIAN_TEXTE
+    : meldung.kind === 'worker'
+      ? WORKER_TEXTE
+      : TEXTE
   const text = tabelle[meldung.status] ?? tabelle.completed
 
   return (
@@ -185,7 +278,7 @@ export function AiRunNotice() {
         <button
           type="button"
           className="mt-1 text-xs font-medium text-primary hover:underline"
-          onClick={() => { setMeldung(null); navigate(ZIEL[meldung.kind]) }}
+          onClick={() => { setMeldung(null); navigate(meldung.ziel ?? ZIEL[meldung.kind]) }}
         >
           {t('ai.notice.open', 'Zum Assistenten')}
         </button>

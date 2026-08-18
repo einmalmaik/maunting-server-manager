@@ -730,7 +730,7 @@ async def test_the_tool_catalogue_counts_against_the_same_window(
 
     async def fake(_client, *, provider, api_key, messages, usage, tools=None,
                    tool_choice=None, reasoning=False, reasoning_effort=None,
-                   cache_marke=False):
+                   cache_marke=False, model=None):
         del provider, api_key, tool_choice, reasoning, reasoning_effort, cache_marke
         gesehen["messages"] = [dict(item) for item in messages]
         gesehen["tools"] = tools

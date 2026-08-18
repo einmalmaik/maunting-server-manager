@@ -47,7 +47,7 @@ def test_the_sets_are_derived_not_maintained() -> None:
     }
     erwartet_lesend = {
         name for name, art in aus_tabelle.items()
-        if art in {"server_read", "global_read", "ask"}
+        if art in {"server_read", "global_read", "ask", "delegation"}
     }
     erwartet_schreibend = {
         name for name, art in aus_tabelle.items()
@@ -68,6 +68,9 @@ def test_the_sets_are_derived_not_maintained() -> None:
     assert ai_tool_registry.SKILL_TOOLS == {
         name for name, spec in ai_tool_registry.WERKZEUGE.items()
         if spec.gruppe == "skill"
+    }
+    assert ai_tool_registry.DELEGATION_TOOLS == {
+        name for name, art in aus_tabelle.items() if art == "delegation"
     }
     assert ai_tool_registry.ALWAYS_CONFIRM_TOOLS == (
         {
@@ -436,3 +439,86 @@ def test_die_backup_pflicht_gilt_nur_fuer_erreichbare_werkzeuge() -> None:
         "propose_guardian_tuning",
         "propose_blueprint_change",
     }
+
+
+# ── Gehirn und Worker (docs/agentic-framework.md) ─────────────────────────
+
+
+def test_das_gehirn_hat_nie_server_werkzeuge() -> None:
+    """Die Rollentrennung ist die Sicherheitsinvariante von v3.
+
+    Das Gehirn ist die schnelle, dauerpraesente Instanz — es darf strukturell
+    keine Aussenwirkung entfalten. Sein Katalog besteht aus genau zwei Dingen:
+    dem Gedaechtnis (der Charakter gehoert ihm) und den drei Handgriffen,
+    Auftraege zu deklarieren, ihnen Antworten zuzustellen und sie einzufangen.
+    Kein Lese-, kein Schreib-, kein Frage-Werkzeug eines Servers — auch kein
+    kuenftiges: die Menge ist eine Aufzaehlung, kein Filter.
+    """
+    assert ai_tool_registry.GEHIRN_TOOLS == (
+        ai_tool_registry.MEMORY_TOOLS
+        | {"worker_start", "worker_cancel", "worker_antwort"}
+    )
+    assert ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.SERVER_READ_TOOLS == set()
+    assert ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.WRITE_TOOLS == set()
+    assert "ask_user" not in ai_tool_registry.GEHIRN_TOOLS
+    assert "web_search" not in ai_tool_registry.GEHIRN_TOOLS
+
+
+def test_keine_worker_tiefe_ueber_eins() -> None:
+    """Ein Auftrag, der Auftraege anlegt, waere ein Auftrag ohne Ende.
+
+    Drei Laufarten duerfen nie delegieren: der Worker selbst (Ausschluss ueber
+    `worker_ausschluss()`), die Guardian-Heilung und die stehenden Aufgaben
+    (beide ausgeschriebene Mengen — die neuen Werkzeuge duerfen dort nie
+    hineingeraten).
+    """
+    steuerung = ai_tool_registry.WORKER_STEUERUNG
+    assert steuerung <= ai_tool_registry.worker_ausschluss()
+    assert steuerung & ai_tool_registry.GUARDIAN_HEILUNG_TOOLS == set()
+    assert steuerung & ai_tool_registry.aufgaben_tools("act") == set()
+
+
+def test_der_worker_fragt_ueber_die_meldestelle_nie_direkt() -> None:
+    """`ask_user` faellt namentlich weg, `worker_frage` bleibt.
+
+    Der Ausschluss darf nie als `-= ASK_TOOLS` geschrieben werden — dann
+    verschwaende die Worker-Frage gleich mit, und der Worker koennte gar nicht
+    mehr fragen. Dieser Test haelt beide Haelften fest.
+    """
+    ausschluss = ai_tool_registry.worker_ausschluss()
+    assert "ask_user" in ausschluss
+    assert "worker_frage" not in ausschluss
+    assert "wait_until" not in ausschluss
+    assert "worker_frage" in ai_tool_registry.ASK_TOOLS
+
+
+def test_delegation_traegt_weder_recht_noch_bestaetigung() -> None:
+    """Ein `recht` an einer Delegation waere eine Schranke, die nie greift.
+
+    Der Vorschlagspfad prueft `recht`, der autonome Modus `immer_bestaetigen` —
+    durch beide kommt eine Delegation nie. `__post_init__` weist beides ab,
+    damit niemand eine Pruefung hinschreibt, die nirgends laeuft; das
+    Angebots-Gate leistet `angebot`.
+    """
+    with pytest.raises(ValueError, match="delegation"):
+        ai_tool_registry.Werkzeug("delegation", recht="ai.background.use")
+    with pytest.raises(ValueError, match="delegation"):
+        ai_tool_registry.Werkzeug("delegation", immer_bestaetigen=True)
+
+    for name in ai_tool_registry.DELEGATION_TOOLS:
+        spec = ai_tool_registry.WERKZEUGE[name]
+        assert spec.recht is None and not spec.immer_bestaetigen
+
+
+def test_die_worker_steuerung_haengt_am_hintergrundrecht() -> None:
+    """Ohne `ai.background.use` sieht das Modell die Worker-Werkzeuge nicht.
+
+    Das ist der Fallback aus Abschnitt 5 der Doku: wem das Recht fehlt, dessen
+    Chat arbeitet wie bisher in einem Lauf. `wait_until` und `worker_frage`
+    tragen bewusst kein Angebotsrecht — sie existieren nur im Laufart-Schnitt
+    eines Worker-Laufs, und ein Rechteschluessel waere die falsche Achse.
+    """
+    for name in ("worker_start", "worker_cancel", "worker_antwort"):
+        assert ai_tool_registry.angebotsrechte(name) == ("ai.background.use",)
+    for name in ("wait_until", "worker_frage"):
+        assert ai_tool_registry.angebotsrechte(name) == ()

@@ -117,7 +117,7 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, runden: list[list[ProviderTool
 
     async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
                    tools=None, tool_choice=None, reasoning=False,
-                   reasoning_effort=None, cache_marke=False):
+                   reasoning_effort=None, cache_marke=False, model=None):
         del provider, api_key, reasoning
         gesehen.append([dict(item) for item in messages])
         if denken:
@@ -1430,7 +1430,7 @@ async def test_a_superseded_run_performs_no_write_actions(
 
     async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
                    tools=None, tool_choice=None, reasoning=False,
-                   reasoning_effort=None, cache_marke=False):
+                   reasoning_effort=None, cache_marke=False, model=None):
         del provider, api_key, messages, reasoning, reasoning_effort
         usage.total_tokens = 10
         if tool_choice != "none" and tools and not stand["abgeloest"]:
@@ -1663,7 +1663,7 @@ async def test_a_round_without_thoughts_leaves_no_empty_thought_box(
 
     async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
                    tools=None, tool_choice=None, reasoning=False,
-                   reasoning_effort=None, cache_marke=False):
+                   reasoning_effort=None, cache_marke=False, model=None):
         del provider, api_key, messages, tool_choice, reasoning, reasoning_effort
         del cache_marke
         # Nur die erste Runde denkt — danach schweigt das Modell und arbeitet.

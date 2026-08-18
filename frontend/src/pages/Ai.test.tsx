@@ -47,6 +47,11 @@ vi.mock('@/components/ai/AiSkillDirectory', () => ({
 vi.mock('@/components/ai/GuardianAnsicht', () => ({
   GuardianAnsicht: () => <div>guardian-attrappe</div>,
 }))
+vi.mock('@/components/ai/WorkerAnsicht', () => ({
+  WorkerAnsicht: ({ conversationId }: { conversationId: string }) => (
+    <div>{`worker-attrappe:${conversationId}`}</div>
+  ),
+}))
 
 // Der Schalter zaehlt hier als Vorkommen und nicht als Bedienelement. Die echte
 // Komponente laedt beim Zeichnen ihre Freigaben — genau der Nebeneffekt, der
@@ -83,9 +88,9 @@ function rechte(...global_keys: string[]) {
  * zeigen. Ein Zustand allein in der Komponente waere von dort nicht
  * erreichbar, und `useSearchParams` wirft ohne Router.
  */
-function zeichnen() {
+function zeichnen(pfad = '/ai') {
   render(
-    <MemoryRouter initialEntries={['/ai']}>
+    <MemoryRouter initialEntries={[pfad]}>
       <Ai />
     </MemoryRouter>,
   )
@@ -102,6 +107,25 @@ describe('Ai', () => {
     vi.clearAllMocks()
     vi.mocked(aiApi.getVoiceConfig).mockResolvedValue(KONFIGURATION)
     vi.mocked(client.api).mockResolvedValue([])
+  })
+
+  it('zeigt die Worker-Ansicht nur mit Kennung in der Adresse', async () => {
+    // `?ansicht=worker` allein ist keine Ansicht: es gibt beliebig viele
+    // Auftraege, und ein Fenster ohne Kennung wuesste nicht, wessen Verlauf
+    // es zeigt. In der Adresse steht nur die UUID — nie Titel oder Inhalt.
+    rechte('ai.chat.use')
+    zeichnen('/ai?ansicht=worker&id=konv-worker-1')
+
+    await screen.findByText('worker-attrappe:konv-worker-1')
+    expect(screen.queryByText('chat-attrappe')).toBeNull()
+  })
+
+  it('faellt ohne Worker-Kennung auf den Chat zurueck', async () => {
+    rechte('ai.chat.use')
+    zeichnen('/ai?ansicht=worker')
+
+    await screen.findByText('chat-attrappe')
+    expect(screen.queryByText(/worker-attrappe/)).toBeNull()
   })
 
   it('zeigt im getippten Modus keinen zweiten Autonomie-Schalter', async () => {

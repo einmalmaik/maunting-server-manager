@@ -25,6 +25,8 @@ const provider: AiProviderAdmin = {
   default_model: 'anthropic/claude-opus-5',
   default_voice: null,
   transcription_model: null,
+  worker_model: null,
+  worker_reasoning_effort: null,
   enabled: true,
   requires_api_key: true,
   operator_key_configured: true,

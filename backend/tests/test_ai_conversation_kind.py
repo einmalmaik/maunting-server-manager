@@ -214,6 +214,42 @@ class TestUnterhaltungenAnlegen:
         with pytest.raises(ValueError):
             ai_chat_service.get_or_create_conversation(db, user, "gardian")
 
+    def test_worker_gehen_nicht_durch_die_einzelfenster_fabrik(
+        self, db: Session
+    ) -> None:
+        """`worker` ist eine gueltige Art, aber kein Einzelfenster.
+
+        Die Fabrik hier beantwortet "gib mir *die* Unterhaltung dieser Art" —
+        fuer Worker gibt es kein "die". Ein Aufrufer, der hier mit `worker`
+        ankommt, haette sonst stillschweigend ein einzelnes, wiederverwendetes
+        Worker-Fenster bekommen und die Ein-Fenster-je-Auftrag-Zusage gebrochen.
+        """
+        user = _benutzer(db, "workerfabrik")
+
+        with pytest.raises(ValueError, match="Einzelfenster"):
+            ai_chat_service.get_or_create_conversation(db, user, "worker")
+
+    def test_jeder_auftrag_bekommt_sein_eigenes_fenster(self, db: Session) -> None:
+        user = _benutzer(db, "auftraege")
+
+        erster = ai_chat_service.worker_unterhaltung_anlegen(db, user, "Backup pruefen")
+        zweiter = ai_chat_service.worker_unterhaltung_anlegen(db, user, "Backup pruefen")
+        db.commit()
+
+        assert erster.id != zweiter.id
+        assert erster.kind == "worker" and zweiter.kind == "worker"
+        assert erster.title == "Backup pruefen"
+        assert erster.server_id is None
+
+    def test_ein_leerer_auftragstitel_wird_ersetzt(self, db: Session) -> None:
+        """Das Fenster traegt den Namen in der Worker-Liste — leer geht nicht."""
+        user = _benutzer(db, "ohnetitel")
+
+        fenster = ai_chat_service.worker_unterhaltung_anlegen(db, user, "   ")
+        db.commit()
+
+        assert fenster.title == "Auftrag"
+
     def test_der_wiedereinstieg_nach_einem_rennen_filtert_auf_die_art(
         self, db: Session
     ) -> None:

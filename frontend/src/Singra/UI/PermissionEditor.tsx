@@ -59,6 +59,7 @@ const SUBGROUPS = [
       'ai.web_search.use',
       'ai.autonomous.use',
       'ai.tasks.manage',
+      'ai.background.use',
       'ai.usage.read.all',
     ],
   },

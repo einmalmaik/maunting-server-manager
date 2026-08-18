@@ -9,6 +9,7 @@ import { AiAutonomyButton } from '@/components/ai/AiAutonomyButton'
 import { AiChat } from '@/components/ai/AiChat'
 import { AiSkillDirectory } from '@/components/ai/AiSkillDirectory'
 import { GuardianAnsicht } from '@/components/ai/GuardianAnsicht'
+import { WorkerAnsicht } from '@/components/ai/WorkerAnsicht'
 import { SprachAnsicht } from '@/components/ai/voice/SprachAnsicht'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { aiChatPreferenceKeys, readAiProviderChoice } from '@/lib/aiChatPreferences'
@@ -27,13 +28,25 @@ interface ServerOption {
  * gesprochen. `guardian` ist etwas anderes: ein zweiter Verlauf, in den nur die
  * Läufe schreiben, die eine Störung ausgelöst hat. Er steht trotzdem in
  * derselben Reihe, weil er dasselbe Bild ausfüllt und man dazwischen wechselt.
+ *
+ * `worker` ist das Fenster **eines** Hintergrund-Auftrags und braucht darum
+ * eine Kennung dazu (`?ansicht=worker&id=<uuid>`) — in der Adresse steht nur
+ * die UUID, nie Titel oder Inhalt (keine sensiblen Daten in URLs). Einen
+ * Umschalt-Knopf gibt es dafür nicht: es gibt beliebig viele Aufträge, ein
+ * statischer Knopf wüsste nicht, wohin. Hin führen die Worker-Leiste im Chat
+ * und die Glocke.
  */
-type Ansicht = 'text' | 'sprache' | 'guardian'
+type Ansicht = 'text' | 'sprache' | 'guardian' | 'worker'
 
-const ANSICHTEN: readonly Ansicht[] = ['text', 'sprache', 'guardian']
+const ANSICHTEN: readonly Ansicht[] = ['text', 'sprache', 'guardian', 'worker']
 
-function ansichtAusAbfrage(wert: string | null): Ansicht {
-  return (ANSICHTEN as readonly string[]).includes(wert ?? '') ? (wert as Ansicht) : 'text'
+function ansichtAusAbfrage(wert: string | null, id: string | null): Ansicht {
+  const ansicht = (ANSICHTEN as readonly string[]).includes(wert ?? '')
+    ? (wert as Ansicht)
+    : 'text'
+  // Ein Worker ohne Kennung ist keine Ansicht — dann eben der Chat, statt
+  // eines leeren Fensters, das nicht sagen kann, wessen Verlauf es zeigt.
+  return ansicht === 'worker' && !id ? 'text' : ansicht
 }
 
 /** Ein Knopf der Umschaltreihe. Aktiv heisst: diese Ansicht steht gerade. */
@@ -113,7 +126,8 @@ export function Ai() {
 
   const providerId = user?.id ? readAiProviderChoice(aiChatPreferenceKeys(user.id).provider) : null
 
-  const gewuenscht = ansichtAusAbfrage(suchParameter.get('ansicht'))
+  const workerId = suchParameter.get('id')
+  const gewuenscht = ansichtAusAbfrage(suchParameter.get('ansicht'), workerId)
   // Ohne eingerichteten Realtime-Zugang gibt es den Sprachmodus nicht — auch
   // dann nicht, wenn er in der Adresse steht. Dieselbe Regel wie beim Knopf.
   const ansicht: Ansicht =
@@ -123,6 +137,10 @@ export function Ai() {
     const naechste = new URLSearchParams(suchParameter)
     if (neu === 'text') naechste.delete('ansicht')
     else naechste.set('ansicht', neu)
+    // Die Worker-Kennung gehört zur Worker-Ansicht — wer wegwechselt, nimmt
+    // sie nicht mit, sonst zeigte ein späteres `?ansicht=worker` einen
+    // Auftrag, den niemand gemeint hat.
+    if (neu !== 'worker') naechste.delete('id')
     // `replace`, damit der Zurück-Knopf des Browsers aus der KI-Seite
     // herausführt und nicht durch drei Ansichten davon.
     setzeSuchParameter(naechste, { replace: true })
@@ -244,6 +262,10 @@ export function Ai() {
         />
       ) : ansicht === 'guardian' ? (
         <GuardianAnsicht />
+      ) : ansicht === 'worker' && workerId ? (
+        // `key`, damit ein Wechsel zwischen zwei Aufträgen die Ansicht neu
+        // aufbaut, statt den Verlauf des einen in den anderen zu mischen.
+        <WorkerAnsicht key={workerId} conversationId={workerId} />
       ) : (
         <AiChat />
       )}

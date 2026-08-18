@@ -402,7 +402,7 @@ def test_chat_stream_persists_usage_and_replays_without_second_provider_call(
 
     async def fake_stream(
         _client, *, provider, api_key, messages, usage, tools=None, tool_choice=None,
-        reasoning=False, reasoning_effort=None, cache_marke=False,
+        reasoning=False, reasoning_effort=None, cache_marke=False, model=None,
     ):
         nonlocal calls
         calls += 1

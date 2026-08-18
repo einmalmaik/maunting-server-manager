@@ -125,6 +125,31 @@ class AiContextPolicyStatus(BaseModel):
     max_percent: int
 
 
+class AiWorkerPolicyUpdate(BaseModel):
+    """Die Betreiber-Deckel der Worker (docs/agentic-framework.md, Abschnitt 5).
+
+    Die Grenzen stehen verbindlich in `services/ai_worker_limits.py`; hier
+    wiederholt, damit ein Tippfehler eine 422 mit Feldbezug ergibt statt einer
+    Fehlermeldung ohne Ort.
+    """
+
+    max_parallel_workers: int = Field(ge=1, le=16)
+    rounds_per_worker: int = Field(ge=4, le=48)
+
+
+class AiWorkerPolicyStatus(BaseModel):
+    max_parallel_workers: int
+    rounds_per_worker: int
+    #: Die zulaessigen Grenzen, damit die Oberflaeche sie nicht selbst kennen
+    #: muss. Das Rundenmaximum ist die harte Code-Kappe je Lauf
+    #: (`MAX_TOOL_ROUNDS`) — ein Betreiber kann Worker knapper halten als den
+    #: Chat, nie grosszuegiger.
+    min_workers: int
+    max_workers: int
+    min_rounds: int
+    max_rounds: int
+
+
 class AiCostPolicyUpdate(BaseModel):
     """Waehrung und Kurs fuer die **Anzeige**. Gebucht wird weiter in USD.
 

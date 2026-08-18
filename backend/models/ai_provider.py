@@ -78,6 +78,32 @@ class AiProvider(Base):
     # ``None`` heißt „nichts hinterlegt": dann gibt es keinen Sprachmodus über
     # diesen Zugang. Auch hier wird nie ein Standard hineingeschrieben.
     transcription_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # Das Modell, mit dem die Worker dieses Zugangs arbeiten — die vierte
+    # Funktion an derselben Zeile (docs/agentic-framework.md, Abschnitt 5):
+    # `default_model` denkt im Gespräch (Gehirn), `transcription_model` hört,
+    # `default_voice` spricht, dieses hier **arbeitet**. Eine eigene Spalte für
+    # eine eigene Frage, aus demselben Grund wie beim Gehör: das Gehirn muss
+    # schnell sein, ein Worker darf langsam und gründlich sein — dasselbe Feld
+    # für beide hieße, für jede Begrüßung das gründliche Modell zu bezahlen
+    # oder jeden Auftrag dem schnellen anzuvertrauen.
+    #
+    # ``None`` heißt „keine Worker-Rolle konfiguriert": dann gilt der heutige
+    # Ein-Modell-Betrieb (ein Lauf, volles Werkzeugangebot, kein Gehirn/Worker-
+    # Schnitt). Kein Hard-Stop, kein geratenes Modell.
+    worker_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # Die **feste** Denkstufe der Worker — ein Stufenwort aus
+    # `ai_reasoning.RANGFOLGE`, beim Speichern geprüft. Anders als im Chat
+    # wählt sie nicht der Kunde je Nachricht, sondern der Betreiber einmal am
+    # Zugang: er zahlt die Arbeit und legt fest, wie gründlich sie ist. Der
+    # Rollendeckel `max_reasoning_effort` klemmt weiterhin nur die **Wahl des
+    # Kunden** im Gespräch; auf diese Betreiberentscheidung wird er bewusst
+    # nicht angewandt. Zur Laufzeit wird das Wort trotzdem gegen den Katalog
+    # des Worker-Modells geklemmt (nie teurer, nie unbekannt) — ein Stufenwort,
+    # das das Modell nicht führt, darf keine Segmente mit 400 töten.
+    #
+    # ``None`` heißt „nicht nachdenken" — derselbe Standard wie heute bei
+    # unbeaufsichtigten Läufen, keine geratene Tiefe.
+    worker_reasoning_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     requires_api_key: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     operator_api_key_encrypted: Mapped[str | None] = mapped_column(String(4096), nullable=True)

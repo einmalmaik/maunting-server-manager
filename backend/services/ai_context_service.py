@@ -417,6 +417,7 @@ def build_provider_messages(
     context_chars: int | None = None,
     unbeaufsichtigt: bool = False,
     gesprochen: bool = False,
+    rolle: str = "voll",
 ) -> list[dict[str, Any]]:
     """Baut eine neueste, begrenzte Historie unter einer Zeichenobergrenze.
 
@@ -451,25 +452,40 @@ def build_provider_messages(
     ``unbeaufsichtigt`` sagt, dass niemand vor diesem Lauf sitzt — eine Heilung
     oder ein fällig gewordener Auftrag. Es wirkt nur auf das Skill-Verzeichnis:
     das entfällt, weil solche Läufe kein ``read_skill`` angeboten bekommen.
+
+    ``rolle`` (voll/gehirn/worker, docs/agentic-framework.md §3) wählt den
+    Prompt und schneidet die Datenblöcke der Rolle entsprechend: das Gehirn
+    bekommt kein Skill-Verzeichnis (kein ``read_skill`` im Angebot), der
+    Worker keinen persönlichen Gedächtnisblock (Sicherheitsinvariante §7 —
+    persönliche und Team-Erinnerungen gehören dem Charakter; sein Anlagen-
+    wissen kommt wie bisher über `anlagenwissen_nachtrag`, sobald das erste
+    Werkzeug den Server klärt). Ein Worker ist zwar unbeaufsichtigt, behält
+    aber das Skill-Verzeichnis — er hat ``read_skill``, anders als Heilung
+    und fälliger Auftrag.
     """
     grenzen = teilbudgets(context_chars)
     user = db.get(User, conversation.user_id)
     result: list[dict[str, Any]] = [
         # Der Systemprompt ist byteweise statisch (bis auf den `gesprochen`-
-        # Schalter, der je Sitzung feststeht) — er ist der groesste stabile
-        # Block und der Anker des Anbieter-Zwischenspeichers. Er ist **nicht**
-        # die Sicherheitsgrenze; die liegt in RBAC, der Tool-Allowlist,
-        # `_resolve_server` und der Bestaetigungspflicht.
-        {"role": "system", "content": ai_prompt.build(gesprochen=gesprochen)}
+        # Schalter, der je Sitzung feststeht, und die Rolle, die je Lauf
+        # feststeht) — er ist der groesste stabile Block und der Anker des
+        # Anbieter-Zwischenspeichers. Er ist **nicht** die Sicherheitsgrenze;
+        # die liegt in RBAC, der Tool-Allowlist, `_resolve_server` und der
+        # Bestaetigungspflicht.
+        {"role": "system", "content": ai_prompt.build(gesprochen=gesprochen, rolle=rolle)}
     ]
     # Direkt dahinter das Skill-Verzeichnis: es aendert sich seltener als
     # Memory und haelt den Praefix deshalb laenger stabil, wenn dahinter etwas
     # wechselt. Warum es eine `user`-Nachricht ist und kein Teil des
     # Systemprompts, steht an `_skill_index_message`.
-    skill_verzeichnis = _skill_index_message(db, user, query, unbeaufsichtigt)
+    skill_verzeichnis = None
+    if rolle != "gehirn":
+        skill_verzeichnis = _skill_index_message(
+            db, user, query, unbeaufsichtigt and rolle != "worker"
+        )
     if skill_verzeichnis is not None:
         result.append(skill_verzeichnis)
-    if user is not None:
+    if user is not None and rolle != "worker":
         from services import ai_memory_service, permission_service
 
         if permission_service.has_global_permission(db, user, "ai.memory.use"):
@@ -557,7 +573,10 @@ def build_provider_messages(
         # tragen. Und **ohne** `redact_sensitive_text`: der Block ist Ausgabe an
         # das Modell, nicht Eingabe von ihm. Sein einziger Wert aus fremder Hand
         # ist der Zonenname, und der ist bereits eine geprüfte IANA-Kennung.
-        nachspann.append({"role": "system", "content": ai_lage.lageblock(db, user)})
+        nachspann.append({
+            "role": "system",
+            "content": ai_lage.lageblock(db, user, mit_workern=(rolle == "gehirn")),
+        })
 
     selected: list[dict[str, str]] = []
     # `len(item["content"])` war fuer Bildanhaenge die Zahl der Listenelemente

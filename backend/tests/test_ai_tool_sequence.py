@@ -122,6 +122,7 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, rounds: list[list[ProviderTool
         _client, *, provider, api_key, messages, usage: StreamUsage,
         tools=None, tool_choice=None, reasoning=False, reasoning_effort=None,
         cache_marke=False,
+        model=None,
     ):
         del provider, api_key, reasoning
         seen.append([dict(item) for item in messages])
@@ -589,7 +590,7 @@ async def test_die_schlussrunde_verbietet_werkzeuge_und_behaelt_den_katalog(
 
     async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
                    tools=None, tool_choice=None, reasoning=False,
-                   reasoning_effort=None, cache_marke=False):
+                   reasoning_effort=None, cache_marke=False, model=None):
         del provider, api_key, messages, reasoning, reasoning_effort, cache_marke
         anfragen.append((tools, tool_choice))
         usage.total_tokens = 10

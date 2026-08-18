@@ -352,7 +352,11 @@ def serverbezug_merken(db: Session, *, run_id: str | None, server_id: int | None
 
 
 def aktiver_lauf(
-    db: Session, *, user_id: int, kind: str | None = None
+    db: Session,
+    *,
+    user_id: int,
+    kind: str | None = None,
+    conversation_id: str | None = None,
 ) -> AiRun | None:
     """Der juengste Lauf, der noch etwas vorhat. Fuer Glocke und Wiederanschluss.
 
@@ -367,21 +371,32 @@ def aktiver_lauf(
     weitere Reparatur und keinen faelligen Auftrag mehr beginnen, auf **allen**
     Anlagen dieses Benutzers.
 
-    Gefragt wird ueber die **Art** und nicht ueber eine Kennung: eine
-    Unterhaltung gehoert genau einem Benutzer und genau einer Art
-    (`uq_ai_conversations_user_kind`), beides ist also dasselbe — aber wer nach
-    der Art fragt, muss die Zeile nicht vorher anlegen lassen. Das ist der
-    Unterschied zwischen einer Auskunft und einer Nebenwirkung.
+    Gefragt wird ueber die **Art** und nicht ueber eine Kennung. Fuer
+    ``primary`` und ``guardian`` ist beides dasselbe (der partielle Index
+    `uq_ai_conversations_user_kind` erzwingt eine Zeile je Art) — aber wer
+    nach der Art fragt, muss die Zeile nicht vorher anlegen lassen. Fuer
+    ``worker`` gilt das **nicht** mehr: es gibt beliebig viele Fenster, und
+    diese Funktion liefert nur den juengsten offenen Lauf darueber. Wer einen
+    bestimmten Auftrag meint, fragt ueber dessen ``conversation_id``
+    (`ai_worker_service.aktive_worker` zaehlt sie alle).
 
     ``None`` bleibt erlaubt und heisst weiterhin "ueber alle Fenster". Es gibt
     eine Frage, die so gestellt gehoert: die Glocke will wissen, ob ueberhaupt
     etwas laeuft. Wer sie stellt, muss anschliessend selbst entscheiden, wohin
-    er zeigt.
+    er zeigt — ein stundenlang geparkter Worker (``waiting_wake``) zaehlt hier
+    bewusst als "etwas laeuft": er ist ein offener Auftrag, und die Antwort
+    traegt ``kind``, damit die Oberflaeche ihn als solchen zeigt statt als
+    haengenden Chat.
     """
     query = db.query(AiRun).filter(
         AiRun.user_id == user_id,
         AiRun.status.in_(("running", *WARTEND)),
     )
+    if conversation_id is not None:
+        # Der Weg fuer Worker-Fenster: die Art ist dort mehrdeutig, die
+        # Kennung nicht. Der user_id-Filter oben bleibt die Besitzpruefung —
+        # ein fremdes Fenster liefert schlicht nichts.
+        query = query.filter(AiRun.conversation_id == conversation_id)
     if kind is not None:
         from models import AiConversation
 
@@ -406,6 +421,12 @@ def darf_fortsetzen(db: Session, run: AiRun) -> bool:
     entschieden sind. Sonst liefe er los, waehrend die zweite Karte noch offen
     im Chat steht — und meldete eine halbe Arbeit als fertig.
     """
+    if run.status == "waiting_wake":
+        # Der Zustand erlaubt das Wecken immer — **ob** geweckt wird, wissen
+        # nur die Aufrufer: der Takt filtert auf faellige `wake_at`, und
+        # `finish_lifecycle_task` ist selbst das Ereignis, auf das gewartet
+        # wurde. Eine Fristpruefung hier waere eine zweite Uhr.
+        return True
     if run.status != "waiting_confirmation":
         return False
     offen = (
@@ -547,13 +568,28 @@ def lauf_fortsetzen(db: Session, *, run_id: str) -> bool:
 
     Das ist die Antwort auf "die KI arbeitet nach dem Bestaetigen nicht weiter".
     Gerufen wird sie aus ``execute_proposal`` — also genau in dem Moment, in dem
-    der Mensch seinen Teil getan hat.
+    der Mensch seinen Teil getan hat. Seit ``waiting_wake`` auch vom Takt, von
+    `finish_lifecycle_task` und vom Startabgleich: **alle** Weckwege laufen
+    durch diese eine Stelle, deshalb sitzt hier auch die Rechte-Neupruefung der
+    Worker — kein Aufrufer kann sie vergessen.
     """
     run = db.get(AiRun, run_id)
     if run is None or not darf_fortsetzen(db, run):
         return False
+    if not _wecken_erlaubt(db, run):
+        return False
+    # Den Vorzustand merken: der no_runtime-Rueckfall unten muss **ihn**
+    # wiederherstellen. Ein gewecktes waiting_wake, das auf
+    # waiting_confirmation zurueckfiele, waere eine Zustandsluege — es hat
+    # null offene Vorschlaege, und jeder spaetere Bestaetigungspfad weckte es
+    # faelschlich.
+    vorher = run.status
     run.status = "running"
     run.stop_reason = None
+    # Die Frist ist eingeloest — ob die Uhr geweckt hat oder ein Ereignis
+    # frueher kam. Stehenbliebe sie, weckte der Takt denselben Lauf im
+    # naechsten Durchlauf erneut.
+    run.wake_at = None
     run.updated_at = _jetzt()
     db.commit()
     # Erst melden, dann planen — und beides **vor** der Antwort auf den
@@ -563,18 +599,121 @@ def lauf_fortsetzen(db: Session, *, run_id: str) -> bool:
     _broker_melden(run.id, status="running", stop_reason=None)
     if not _aufgabe_planen(run.id):
         # Keine Anwendung, also niemand, der das Segment ausfuehren koennte. Der
-        # Lauf faellt in den Wartezustand zurueck, statt als "laufend" liegen zu
-        # bleiben und beim naechsten Start als abgebrochen zu gelten.
-        run.status = "waiting_confirmation"
+        # Lauf faellt in **seinen** Wartezustand zurueck, statt als "laufend"
+        # liegen zu bleiben und beim naechsten Start als abgebrochen zu gelten.
+        run.status = vorher
         run.updated_at = _jetzt()
         db.commit()
         # Die Meldung oben zuruecknehmen, sonst wartet die Oberflaeche auf eine
         # Fortsetzung, die nie anlaeuft.
-        _broker_melden(
-            run.id, status="waiting_confirmation", stop_reason="no_runtime"
-        )
+        _broker_melden(run.id, status=vorher, stop_reason="no_runtime")
         return False
     return True
+
+
+def _wecken_erlaubt(db: Session, run: AiRun) -> bool:
+    """Die Rechte-Neupruefung beim Wecken eines Worker-Laufs.
+
+    Dasselbe Muster wie bei den faelligen Aufgaben (`aufgabenlauf_starten`):
+    zwischen Parken und Wecken koennen Stunden liegen, und ein Recht, das
+    inzwischen entzogen wurde, gilt. Ein Lauf hat aber kein ``enabled`` —
+    bei Wegfall endet er ehrlich als ``cancelled`` mit benanntem Grund, und
+    der Mensch erfaehrt es ueber die Meldestelle.
+
+    Nur Worker-Fenster: die uebrigen Laeufe wecken Menschen ueber
+    Bestaetigungen, und deren Rechte prueft der Vorschlagspfad ohnehin je
+    Aufruf. Spaete Imports — dieser Dienst ist bewusst importarm.
+    """
+    from models import AiConversation, User
+    from services import permission_service
+
+    fenster = db.get(AiConversation, run.conversation_id)
+    if fenster is None or fenster.kind != "worker":
+        return True
+
+    user = db.get(User, run.user_id)
+    grund: str | None = None
+    if user is None or not user.is_active:
+        grund = "benutzer_inaktiv"
+    elif not permission_service.has_global_permission(db, user, "ai.chat.use"):
+        grund = "kein_chatrecht"
+    elif not permission_service.has_global_permission(db, user, "ai.background.use"):
+        grund = "berechtigung_entzogen"
+    if grund is None:
+        return True
+
+    run.status = "cancelled"
+    run.stop_reason = grund
+    run.wake_at = None
+    arbeitsspeicher_leeren(run)
+    run.updated_at = _jetzt()
+    db.commit()
+    _broker_melden(run.id, status="cancelled", stop_reason=grund)
+    logger.info("Worker-Lauf nicht geweckt (run_id=%s): %s", run.id, grund)
+    if user is not None and grund != "benutzer_inaktiv":
+        # Der Mensch soll erfahren, dass sein Auftrag nicht weiterlief — als
+        # Meldung, nie als stiller Schwund. Ein Fehler hier darf das Wecken
+        # der uebrigen Laeufe nicht mitnehmen.
+        try:
+            from services import ai_meldestelle
+
+            rahmen = zustand_lesen(run).get("worker") or {}
+            ai_meldestelle.melden(
+                db,
+                user=user,
+                text=(
+                    f'Der Auftrag "{rahmen.get("titel") or "Auftrag"}" wurde '
+                    "angehalten: die Berechtigung für Hintergrund-Worker "
+                    "fehlt inzwischen."
+                ),
+                kanal=str(rahmen.get("kanal") or "chat"),
+                worker_id=run.conversation_id,
+                worker_titel=rahmen.get("titel"),
+            )
+        except Exception:
+            db.rollback()
+            logger.warning("Meldung zum entzogenen Recht fehlgeschlagen run_id=%s", run.id)
+    return False
+
+
+#: Wieviele faellige Weckfristen ein Takt-Durchlauf hoechstens einloest.
+#: Dieselbe Ueberlegung wie MAX_AUFGABEN_JE_DURCHLAUF bei den Aufgaben: jeder
+#: geweckte Lauf ist ein Anbieteraufruf, und der Takt kommt jede Minute wieder.
+MAX_WECKEN_JE_DURCHLAUF = 20
+
+
+def faellige_wecken(db: Session) -> int:
+    """Der Takt-Handgriff: weckt Laeufe, deren ``wake_at`` verstrichen ist.
+
+    ``wake_at IS NULL`` heisst "nur ein Ereignis weckt" und wird hier nie
+    angefasst. Ohne Laufzeit passiert gar nichts — sonst fiele jeder Lauf in
+    den no_runtime-Rueckfall und produzierte je Takt zwei Commits und zwei
+    Broker-Meldungen Rauschen.
+
+    Ein zu spaetes Wecken (Panel war aus) wird bewusst nicht uebersprungen,
+    anders als bei den Aufgaben mit ihrem MAX_VERZUG: eine Aufgabe hat den
+    naechsten Termin, ein geparkter Lauf hat nur diesen einen. Der Lauf sieht
+    die Uhr im Lageblock und beurteilt selbst, was von seinem Plan noch gilt.
+    """
+    if http_client() is None:
+        return 0
+    faellige = (
+        db.query(AiRun)
+        .filter(AiRun.status == "waiting_wake", AiRun.wake_at.isnot(None),
+                AiRun.wake_at <= _jetzt())
+        .order_by(AiRun.wake_at.asc())
+        .limit(MAX_WECKEN_JE_DURCHLAUF)
+        .all()
+    )
+    geweckt = 0
+    for run in faellige:
+        try:
+            if lauf_fortsetzen(db, run_id=run.id):
+                geweckt += 1
+        except Exception:
+            db.rollback()
+            logger.warning("Wecken fehlgeschlagen run_id=%s", run.id)
+    return geweckt
 
 
 def _broker_melden(run_id: str, *, status: str, stop_reason: str | None) -> None:
@@ -605,7 +744,12 @@ def _broker_melden(run_id: str, *, status: str, stop_reason: str | None) -> None
         laufende_schleife = asyncio.get_running_loop()
     except RuntimeError:
         laufende_schleife = None
-    if schleife is None or laufende_schleife is schleife:
+    # `is_closed` wie in `_platz_belegen`: eine gemerkte, aber geschlossene
+    # Schleife (Shutdown, Testsuite) bedient nichts mehr — dann gibt es auch
+    # keinen zweiten Schreiber, und der direkte Weg ist gefahrlos. Ohne die
+    # Pruefung riss `call_soon_threadsafe` mit "Event loop is closed" das
+    # Wecken ab, obwohl die Datenbankarbeit laengst getan war.
+    if schleife is None or laufende_schleife is schleife or schleife.is_closed():
         _senden()
     else:
         schleife.call_soon_threadsafe(_senden)
@@ -731,6 +875,172 @@ def unterbrochene_laeufe_abgleichen(db: Session) -> int:
             db.rollback()
             logger.warning("Lauf nach Neustart nicht nachbereitet run_id=%s", run.id)
     return len(laeufe)
+
+
+#: Der Inhalt eines Wiederanlaufs. Eine Panel-Meldung, kein Nutzersatz — und
+#: ausdruecklich der Pruefauftrag aus docs/agentic-framework.md: die
+#: persistierte Unterhaltung ist der Checkpoint, nicht das Gedaechtnis des
+#: gestorbenen Prozesses.
+_PRUEFAUFTRAG = (
+    "Meldung des Panels (nicht vom Benutzer geschrieben): das Panel wurde neu "
+    "gestartet, dein voriger Lauf zu diesem Auftrag wurde dabei unterbrochen. "
+    "Der Auftrag und alles bisher Getane stehen im Verlauf dieser "
+    "Unterhaltung. Prüfe zuerst den Stand — im Verlauf und, wo nötig, an "
+    "den Systemen — und wiederhole nichts blind, was bereits geschehen ist. "
+    "Führe den Auftrag dann zu Ende."
+)
+
+
+async def worker_wiederanlauf_saehen(db: Session) -> int:
+    """Saet nach einem Neustart je unterbrochenem Worker **einen** neuen Lauf.
+
+    Laeuft im Lifespan unmittelbar nach `unterbrochene_laeufe_abgleichen`. Der
+    dort gesetzte ``failed/process_restart``-Endzustand bleibt woertlich
+    stehen — er ist der ehrliche Beleg. Der Wiederanlauf ist ein **neuer**
+    Lauf in derselben Worker-Unterhaltung, mit dem Pruefauftrag als Inhalt.
+
+    Die Zusage "maximal ein automatischer Wiederanlauf" erzwingt der Zaehler
+    ``anlauf`` im Worker-Rahmen des Nachfolgers, nicht eine zweite Tabelle:
+    betrachtet wird nur der **juengste** Lauf eines Fensters, und wer schon
+    mit ``anlauf >= 1`` gestorben ist, wird nicht erneut gesaet — der Mensch
+    bekommt stattdessen eine Meldung.
+    """
+    from models import AiConversation
+
+    client = http_client()
+    if client is None:
+        return 0
+
+    kandidaten = (
+        db.query(AiRun)
+        .join(AiConversation, AiConversation.id == AiRun.conversation_id)
+        .filter(
+            AiConversation.kind == "worker",
+            AiRun.status == "failed",
+            AiRun.stop_reason == "process_restart",
+        )
+        .order_by(AiRun.created_at.asc())
+        .all()
+    )
+    gesaet = 0
+    for run in kandidaten:
+        # Nur der juengste Lauf seines Fensters zaehlt: aeltere failed-Zeilen
+        # stammen aus frueheren Neustarts und wurden damals behandelt.
+        juengster = (
+            db.query(AiRun.id)
+            .filter(AiRun.conversation_id == run.conversation_id)
+            .order_by(AiRun.created_at.desc())
+            .first()
+        )
+        if juengster is None or juengster[0] != run.id:
+            continue
+        rahmen = zustand_lesen(run).get("worker")
+        if not isinstance(rahmen, dict):
+            continue
+        try:
+            if await _wiederanlauf_versuchen(db, run, dict(rahmen)):
+                gesaet += 1
+        except Exception:
+            db.rollback()
+            logger.warning("Wiederanlauf nicht gesaet run_id=%s", run.id)
+    return gesaet
+
+
+async def _wiederanlauf_versuchen(db: Session, run: AiRun, rahmen: dict) -> bool:
+    """Ein einzelner Wiederanlauf — oder eine ehrliche Meldung, warum nicht."""
+    from models import AiConversation, User
+    from services import ai_meldestelle, permission_service
+    from services.ai_stream_service import lauf_beginnen
+
+    user = db.get(User, run.user_id)
+    titel = str(rahmen.get("titel") or "Auftrag")
+    kanal = str(rahmen.get("kanal") or "chat")
+
+    def _melden(text: str) -> None:
+        if user is None:
+            return
+        try:
+            ai_meldestelle.melden(
+                db, user=user, text=text, kanal=kanal,
+                worker_id=run.conversation_id, worker_titel=titel,
+            )
+        except Exception:
+            db.rollback()
+            logger.warning("Wiederanlauf-Meldung fehlgeschlagen run_id=%s", run.id)
+
+    if int(rahmen.get("anlauf", 0) or 0) >= 1:
+        # Schon einmal automatisch wiederangelaufen und wieder gestorben —
+        # ab hier entscheidet ein Mensch. Der Endzustand steht bereits.
+        _melden(
+            f'Der Auftrag "{titel}" wurde durch einen Neustart erneut '
+            "unterbrochen und wird nicht noch einmal automatisch "
+            "aufgenommen. Der bisherige Stand steht im Auftragsverlauf."
+        )
+        return False
+    if user is None or not user.is_active:
+        return False
+    if not permission_service.has_global_permission(db, user, "ai.chat.use") or (
+        not permission_service.has_global_permission(db, user, "ai.background.use")
+    ):
+        _melden(
+            f'Der Auftrag "{titel}" konnte nach dem Neustart nicht wieder '
+            "aufgenommen werden: die Berechtigung für Hintergrund-Worker "
+            "fehlt inzwischen."
+        )
+        return False
+
+    client = http_client()
+    flug, anbieter = await vorflug(client, db, user)
+    if flug is None:
+        _melden(
+            f'Der Auftrag "{titel}" konnte nach dem Neustart nicht wieder '
+            "aufgenommen werden: es steht kein KI-Zugang bereit."
+        )
+        return False
+
+    conversation = db.get(AiConversation, run.conversation_id)
+    if conversation is None:
+        return False
+    # Die Denkstufe der Worker kommt aus der Betreiber-Konfiguration des
+    # Zugangs, nicht aus dem Vorflug (der beantwortet die Chat-Frage).
+    stufe = flug.anbieter.worker_reasoning_effort
+    neuer, fehler = lauf_beginnen(
+        db,
+        user=user,
+        conversation=conversation,
+        provider=flug.anbieter,
+        request_id=uuid4(),
+        content=_PRUEFAUFTRAG,
+        reasoning=bool(stufe),
+        reasoning_effort=stufe,
+        context_chars=flug.fenster.zeichen if flug.fenster.bekannt else None,
+        guardian_briefing_unterdruecken=True,
+        unbeaufsichtigt=True,
+    )
+    if neuer is None:
+        _melden(
+            f'Der Auftrag "{titel}" konnte nach dem Neustart nicht wieder '
+            "aufgenommen werden ("
+            + (fehler or ("unbekannt",))[0]
+            + "). Der bisherige Stand steht im Auftragsverlauf."
+        )
+        return False
+
+    # Der Rahmen nach `lauf_beginnen` — Rollback-Sicherheit wie ueberall. Der
+    # Zaehler wandert **in den Nachfolger**: stirbt auch er im Neustart, sieht
+    # der naechste Abgleich anlauf=1 und saet nicht mehr.
+    zustand = zustand_lesen(neuer)
+    zustand["worker"] = {**rahmen, "anlauf": int(rahmen.get("anlauf", 0) or 0) + 1}
+    zustand_schreiben(neuer, zustand)
+    db.commit()
+
+    if not anlauf(db, neuer):
+        return False
+    logger.info(
+        "Worker wiederangelaufen (conversation_id=%s, run_id=%s)",
+        run.conversation_id, neuer.id,
+    )
+    return True
 
 
 def zuruecksetzen_fuer_tests() -> None:

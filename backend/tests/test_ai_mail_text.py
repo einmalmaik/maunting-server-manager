@@ -84,7 +84,7 @@ def _fake_modell(
 
     async def fake(_client, *, provider, api_key, messages, usage, tools=None,
                    tool_choice=None, reasoning=False, reasoning_effort=None,
-                   cache_marke=False):
+                   cache_marke=False, model=None):
         del provider, api_key, reasoning, reasoning_effort, cache_marke
         gesehen["tools"] = tools
         gesehen["tool_choice"] = tool_choice

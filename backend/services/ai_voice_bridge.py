@@ -61,7 +61,7 @@ from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from config import settings
 from database import SessionLocal
-from models import AiProvider, User
+from models import AiConversation, AiProvider, AiRun, User
 from services import (
     ai_run_broker,
     ai_stt,
@@ -119,6 +119,16 @@ MAX_STEUERRAHMEN_ZEICHEN = 4_096
 #: grosszügig, weil ein Lauf mit mehreren Werkzeugrunden echte Minuten braucht —
 #: sie fängt nur den Fall ab, dass die Gegenstelle gar nicht mehr antwortet.
 LAUF_TIMEOUT = 300.0
+
+#: Wie oft der Zusteller nach offenen Meldungen sieht. Ein Poll und kein Abo,
+#: mit Absicht: Meldestelle wie Broker sind ohnehin prozesslokal (Doku §10),
+#: und die eine gezählte Abfrage alle paar Sekunden je **offener Sprachsitzung**
+#: ist billiger als ein Pub/Sub über die Threadgrenze — `melden()` läuft mal
+#: auf der Schleife, mal im Threadpool, und genau diese Weiche hat bei
+#: `_broker_melden` schon einmal einen geschlossenen Loop getroffen. Kürzer
+#: als der 60-s-Chat-Takt, damit die Stimme die Zustellung gewinnt, solange
+#: die Sitzung offen ist — der Chat bleibt der Kanal, der immer trägt.
+ZUSTELL_TAKT_S = 3.0
 
 
 # ── Belege: was gezeigt und nicht gesprochen wird ─────────────────────────
@@ -333,10 +343,16 @@ class Sprachbruecke:
         self._stimme: ai_tts.Stimmsitzung | None = None
         #: Vorschläge, die auf ein gesprochenes Ja warten.
         self._offene_vorschlaege: list[str] = []
+        #: Der Zusteller: spricht Worker-Meldungen, sobald das Gespräch Ruhe
+        #: hat. Lebt neben der Sitzungsschleife, weil die in
+        #: `browser.receive()` blockiert und nur bei Browser-Rahmen aufwacht —
+        #: eine Meldung käme sonst erst zu Wort, wenn der Mensch etwas sagt.
+        self._zusteller: asyncio.Task | None = None
 
     async def fuehren(self) -> Lage:
         """Die Sitzung, bis der Browser geht oder die Zeit um ist."""
         await self._zustand_melden(ZUSTAND_BEREIT, erstmalig=True)
+        self._zusteller = asyncio.create_task(self._meldungen_zustellen())
         ende = time.monotonic() + self._hoechstdauer
         try:
             while True:
@@ -358,6 +374,15 @@ class Sprachbruecke:
         except WebSocketDisconnect:
             pass
         finally:
+            # Erst der Zusteller, dann der laufende Zug: der Zusteller wartet
+            # womöglich gerade auf eine Lieferung in `self._laufende`, und
+            # andersherum spräche er nach dem Abwürgen munter weiter.
+            zusteller = self._zusteller
+            self._zusteller = None
+            if zusteller is not None:
+                zusteller.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await zusteller
             await self._abwuergen()
         return self._lage
 
@@ -919,6 +944,18 @@ class Sprachbruecke:
                         if ai_run_service.lauf_fortsetzen(db, run_id=lauf_id):
                             fortgesetzt = lauf_id
                         db.commit()
+                if fortgesetzt:
+                    # Ein geweckter **Worker** wird nicht verfolgt: die Stimme
+                    # spricht ausschliesslich Gehirn-Ausgaben (Doku §12). Das
+                    # Wecken selbst ist richtig und bleibt — sein Ergebnis
+                    # kommt als Meldung, und die spricht der Zusteller.
+                    lauf = db.get(AiRun, fortgesetzt)
+                    fenster = (
+                        db.get(AiConversation, lauf.conversation_id)
+                        if lauf is not None else None
+                    )
+                    if fenster is not None and fenster.kind == "worker":
+                        fortgesetzt = None
                 return True, fortgesetzt
             except ai_action_errors.AiActionStateError as fehler:
                 db.rollback()
@@ -953,6 +990,117 @@ class Sprachbruecke:
         finally:
             if abo is not None:
                 ai_run_broker.abmelden(lauf_id, abo[1])
+
+    # ── Der Zusteller: Worker-Meldungen als gesprochener Zwischenruf ───────
+
+    def _ruhe(self) -> bool:
+        """Darf die Stimme von sich aus sprechen? Vier Bedingungen, alle vier.
+
+        Der VAD-Zustand „bereit" ersetzt im Sprachmodus die Chat-Ruhe der
+        Meldestelle (docs/agentic-framework.md, §4). `erkennung.spricht`
+        schliesst die Mikroluecke zwischen VAD-Flanke und Zustandsmeldung,
+        die Vorschlagsliste haelt den Zusteller aus dem Fenster zwischen
+        Vorschlag und gesprochenem Ja heraus — ein Zwischenruf dort, und das
+        naechste „Ja" bestaetigte etwas anderes, als der Mensch meint.
+        """
+        return (
+            self._zustand == ZUSTAND_BEREIT
+            and not self._erkennung.spricht
+            and (self._laufende is None or self._laufende.done())
+            and not self._offene_vorschlaege
+        )
+
+    def _meldungen_offen(self) -> bool:
+        from services import ai_meldestelle
+
+        with SessionLocal() as db:
+            benutzer = db.get(User, self._user_id)
+            if benutzer is None or not benutzer.is_active:
+                return False
+            return bool(ai_meldestelle.offene_meldungen(db, user_id=self._user_id))
+
+    async def _meldungen_zustellen(self) -> None:
+        """Die Schleife des Zustellers: nachsehen, Ruhe abwarten, liefern.
+
+        Die Lieferung selbst liegt in `self._laufende` — demselben Feld wie
+        ein gewoehnlicher Zug. Nur dieses Feld cancelt `_abwuergen`, und nur
+        so bricht Dazwischenreden auch eine laufende Zustellansage ab (§4:
+        Barge-in bricht Zwischenmeldungen und Abschlussansagen).
+        """
+        while True:
+            await asyncio.sleep(ZUSTELL_TAKT_S)
+            if not self._ruhe():
+                continue
+            try:
+                if not await asyncio.to_thread(self._meldungen_offen):
+                    continue
+            except Exception:
+                continue
+            # Zwischen `to_thread` und hier kann der Mensch angefangen haben
+            # zu sprechen — noch einmal fragen, dann ohne await starten:
+            # zwischen dieser Pruefung und `create_task` liegt kein
+            # Haltepunkt, an dem sich die Lage aendern koennte.
+            if not self._ruhe():
+                continue
+            aufgabe = asyncio.create_task(self._meldung_liefern())
+            self._laufende = aufgabe
+            try:
+                await aufgabe
+            except asyncio.CancelledError:
+                # Zwei Auslöser, zwei Richtungen: hat Barge-in die
+                # **Lieferung** gecancelt, lebt der Zusteller weiter und
+                # wartet auf die nächste Ruhe. Wurde der **Zusteller selbst**
+                # gecancelt (Sitzungsende), muss der Abbruch hinaus — ihn zu
+                # schlucken machte die Schleife zum Zombie, und `fuehren()`
+                # hinge beim Aufräumen für immer an `await zusteller`.
+                if aufgabe.cancelled() and not asyncio.current_task().cancelling():
+                    continue
+                raise
+            except Exception:
+                # `_meldung_liefern` fängt seine Fehler selbst; das hier ist
+                # nur die Rückversicherung, dass die Schleife weiterlebt.
+                pass
+
+    async def _meldung_liefern(self) -> None:
+        """Ein Lieferzug: die Meldestelle baut den Gehirn-Lauf, die Bruecke spricht ihn.
+
+        Gesprochen wird nicht der rohe Meldungstext, sondern die Lieferung des
+        Gehirns — dieselbe Nachricht, die auch im Chat steht (kein zweiter
+        Wortlaut, keine Phrase). ``ruhe_noetig=False``, weil die Chat-Ruhe
+        eine offene Sprachsitzung faelschlich blockierte; das Ruhe-Praedikat
+        dieser Sitzung ist `_ruhe()` und wurde vom Zusteller geprueft.
+        """
+        from services import ai_meldestelle, ai_run_service
+
+        await self._zustand_melden(ZUSTAND_DENKT)
+        try:
+            with SessionLocal() as db:
+                benutzer = db.get(User, self._user_id)
+                if benutzer is None:
+                    await self._zustand_melden(ZUSTAND_BEREIT)
+                    return
+                run = await ai_meldestelle.zustellung_anstossen(
+                    db, user=benutzer, ruhe_noetig=False
+                )
+            if run is None:
+                await self._zustand_melden(ZUSTAND_BEREIT)
+                return
+            self._lage.laeufe += 1
+            # `zustellung_anstossen` hat den Lauf ueber `anlauf` bereits
+            # eroeffnet und sein Segment geplant — die Aufgabe laeuft aber
+            # erst am naechsten Haltepunkt an, und bis hierher gibt es
+            # keinen: das Abo kommt nie zu spaet.
+            abo = ai_run_broker.abonnieren(run.id)
+            try:
+                await self._lauf_verfolgen(abo)
+            finally:
+                if abo is not None:
+                    ai_run_broker.abmelden(run.id, abo[1])
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Zustellung in der Sprachsitzung gescheitert user=%s", self._user_id)
+            await self._zustand_melden(ZUSTAND_BEREIT)
 
     # ── zum Browser ───────────────────────────────────────────────────────
 

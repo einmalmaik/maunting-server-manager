@@ -28,6 +28,8 @@ from schemas.ai_settings import (
     AiUsageOverview,
     AiWebSearchKeyUpdate,
     AiWebSearchStatus,
+    AiWorkerPolicyStatus,
+    AiWorkerPolicyUpdate,
     EffectiveAiLimitsResponse,
 )
 from services import ai_kosten, ai_limit_service, ai_usage_service, audit_service
@@ -302,6 +304,63 @@ def set_context_policy(
         min_percent=ai_context_window.MIN_SCHWELLE,
         max_percent=ai_context_window.MAX_SCHWELLE,
     )
+
+
+def _worker_policy_status() -> AiWorkerPolicyStatus:
+    from services import ai_worker_limits
+
+    return AiWorkerPolicyStatus(
+        max_parallel_workers=ai_worker_limits.max_worker_je_benutzer(),
+        rounds_per_worker=ai_worker_limits.rundenbudget_je_worker(),
+        min_workers=ai_worker_limits.MIN_WORKER,
+        max_workers=ai_worker_limits.MAX_WORKER,
+        min_rounds=ai_worker_limits.MIN_RUNDEN,
+        max_rounds=ai_worker_limits.MAX_RUNDEN,
+    )
+
+
+@router.get("/settings/worker", response_model=AiWorkerPolicyStatus)
+def get_worker_policy(
+    _: User = Depends(require_global("panel.settings.read")),
+) -> AiWorkerPolicyStatus:
+    return _worker_policy_status()
+
+
+@router.put("/settings/worker", response_model=AiWorkerPolicyStatus)
+def set_worker_policy(
+    payload: AiWorkerPolicyUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("panel.settings.write")),
+    _: None = Depends(verify_csrf),
+) -> AiWorkerPolicyStatus:
+    """Die Betreiber-Deckel der Worker: wie viele je Benutzer, wie viele Runden je Lauf.
+
+    Panelweit und nicht je Rolle — die Deckel muessen ohne jede Konfiguration
+    gelten (Vorgabe im Service), und der Kunde stellt Worker ohnehin nicht ein
+    (docs/agentic-framework.md, Abschnitt 5). Warum nicht `role_ai_limits`,
+    steht in `services/ai_worker_limits.py`.
+    """
+    from services import ai_worker_limits
+
+    try:
+        ai_worker_limits.set_max_worker_je_benutzer(payload.max_parallel_workers)
+        ai_worker_limits.set_rundenbudget_je_worker(payload.rounds_per_worker)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Ungültiger Worker-Deckel") from exc
+
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor.id,
+        action="ai.worker.limits.updated",
+        target_type="panel_setting",
+        target_id=None,
+        details={
+            "max_parallel_workers": payload.max_parallel_workers,
+            "rounds_per_worker": payload.rounds_per_worker,
+        },
+    )
+    db.commit()
+    return _worker_policy_status()
 
 
 @router.get("/limits/me", response_model=EffectiveAiLimitsResponse)

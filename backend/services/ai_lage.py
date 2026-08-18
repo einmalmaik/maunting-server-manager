@@ -129,7 +129,56 @@ def _versatz(jetzt: datetime) -> str:
     return f"UTC{roh[:3]}:{roh[3:5]}"
 
 
-def lageblock(db: Session, user: User) -> str:
+#: Wie ein Laufzustand in der Worker-Zeile heißt. Verbalisiert, nicht der rohe
+#: Statusname: das Modell soll "wartet auf deine Antwort" weitergeben können,
+#: nicht "waiting_user" vorlesen.
+_WORKER_WORTE = {
+    "running": "arbeitet",
+    "waiting_confirmation": "wartet auf eine Freigabe",
+    "waiting_user": "wartet auf eine Antwort des Benutzers",
+    "waiting_wake": "schläft bis zum nächsten Wecken",
+}
+
+
+def _worker_zeile(db: Session, user: User) -> str:
+    """Die laufenden Hintergrund-Aufträge dieses Benutzers, in einer Zeile.
+
+    Damit beantwortet das Gehirn "Wie weit bist du?" ohne Werkzeugrunde
+    (docs/agentic-framework.md, §3). Auch der Leerfall wird gesagt: ein Gehirn,
+    das die Zeile nur bei laufenden Aufträgen sähe, könnte "keine" nicht von
+    "weiß ich nicht" unterscheiden — und genau aus dieser Lücke erfindet ein
+    Modell Fortschritt.
+    """
+    from models import AiConversation, AiRun
+
+    zeilen = (
+        db.query(AiRun, AiConversation.title)
+        .join(AiConversation, AiConversation.id == AiRun.conversation_id)
+        .filter(
+            AiConversation.kind == "worker",
+            AiRun.user_id == user.id,
+            AiRun.status.in_(tuple(_WORKER_WORTE)),
+        )
+        .order_by(AiRun.created_at.asc())
+        .limit(10)
+        .all()
+    )
+    if not zeilen:
+        return "Aufträge im Hintergrund: keine."
+    jetzt = datetime.now(timezone.utc)
+    teile = []
+    for run, titel in zeilen:
+        seit = run.created_at
+        if seit is not None and seit.tzinfo is None:
+            seit = seit.replace(tzinfo=timezone.utc)
+        minuten = max(0, int((jetzt - seit).total_seconds() // 60)) if seit else 0
+        dauer = f"seit {minuten} min" if minuten < 120 else f"seit {minuten // 60} h"
+        wort = _WORKER_WORTE.get(str(run.status), str(run.status))
+        teile.append(f"'{titel or 'Auftrag'}' ({wort}, {dauer}, id {run.conversation_id})")
+    return "Aufträge im Hintergrund: " + "; ".join(teile) + "."
+
+
+def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
     """Uhrzeit, Zeitzone und autonomer Modus in wenigen Zeilen.
 
     Die Uhrzeit steht in der Zone des Benutzers, wenn sie bekannt ist, sonst in
@@ -141,6 +190,10 @@ def lageblock(db: Session, user: User) -> str:
     UTC steht daneben, weil jedes Werkzeugergebnis in UTC spricht — ``next_run``,
     ``last_started``, Backupstände, Logzeilen. Ohne Bezugspunkt sind das Zahlen
     ohne Bedeutung.
+
+    ``mit_workern`` hängt die Zeile über die Hintergrund-Aufträge an — nur für
+    Gehirn-Läufe (`_worker_zeile`); die Vorgabe False hält den Block für alle
+    anderen Aufrufer byteweise beim Alten.
     """
     from services import ai_autonomy_service, ai_task_service
 
@@ -163,6 +216,13 @@ def lageblock(db: Session, user: User) -> str:
         zeilen.append(
             f"Zeitzone des Benutzers: unbekannt, Panel läuft in {panelzone}."
         )
+
+    # Die Worker-Zeile steht **vor** dem Autonomie-Teil, weil der bei
+    # inaktivem Modus früh zurückkehrt — sonst fehlte sie genau den Benutzern
+    # ohne Autonomie-Freigabe. Nur für das Gehirn (`mit_workern`): Worker
+    # sehen einander nicht, und der heutige Voll-Betrieb kennt keine Worker.
+    if mit_workern:
+        zeilen.append(_worker_zeile(db, user))
 
     if not ai_task_service.darf_handeln(db, user):
         zeilen.append(

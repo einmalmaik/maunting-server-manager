@@ -2,19 +2,21 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
 
 
-#: Die Arten von Unterhaltungen, die es geben darf — und mehr als eine je Art
-#: gibt es nie.
+#: Die Arten von Unterhaltungen, die es geben darf.
 #:
 #: ``primary`` ist der Dauerchat: der eine Gespraechspartner, in den der Mensch
 #: tippt und in dem ein faellig gewordener stehender Auftrag berichtet.
 #: ``guardian`` ist der Hintergrund: dort und nur dort schreiben die Laeufe, die
 #: eine Guardian-Stoerung ausgeloest hat.
+#: ``worker`` ist ein Auftrag: jede vom Gehirn deklarierte Arbeit bekommt ihr
+#: eigenes Fenster — davon gibt es je Benutzer beliebig viele gleichzeitig,
+#: eines je Auftrag (docs/agentic-framework.md, v3).
 #:
 #: Die Trennung ist keine Ordnungsfrage, sondern der Grund, warum ueberhaupt
 #: repariert werden kann. Solange beides in derselben Zeile stand, galt: eine
@@ -24,20 +26,28 @@ from database import Base
 #: durfte tagsueber nicht mit der KI reden.
 #:
 #: Diese Aufzaehlung ist die Wahrheitsquelle: der CheckConstraint unten wird
-#: daraus **erzeugt**, `ai_chat_service` nimmt sie entgegen. Wer eine dritte Art
+#: daraus **erzeugt**, `ai_chat_service` nimmt sie entgegen. Wer eine weitere Art
 #: braucht, traegt sie hier ein — und bekommt die Schranke geschenkt.
-ARTEN = ("primary", "guardian")
+ARTEN = ("primary", "guardian", "worker")
+
+#: Die Arten, von denen es je Benutzer hoechstens **eine** Unterhaltung gibt.
+#: Der eindeutige Index unten wird aus dieser Aufzaehlung erzeugt; ``worker``
+#: steht bewusst nicht darin — mehrere gleichzeitige Auftraege sind der Zweck.
+EINZELFENSTER = ("primary", "guardian")
 
 
 class AiConversation(Base):
     """Eine dauerhafte Unterhaltung eines Benutzers mit dem Assistenten.
 
-    Genau eine Zeile je Benutzer **und Art** — erzwungen ueber den eindeutigen
-    Index ``uq_ai_conversations_user_kind``. Es sind bewusst nicht beliebig
-    viele: der Assistent soll wie ein Gespraechspartner funktionieren und nicht
-    wie eine Ablage, in der man erst den richtigen Ordner suchen muss. Was hier
+    Fuer die Arten in ``EINZELFENSTER`` gilt: genau eine Zeile je Benutzer und
+    Art — erzwungen ueber den eindeutigen (partiellen) Index
+    ``uq_ai_conversations_user_kind``. Es sind bewusst nicht beliebig viele:
+    der Assistent soll wie ein Gespraechspartner funktionieren und nicht wie
+    eine Ablage, in der man erst den richtigen Ordner suchen muss. Was hier
     aufgeteilt wird, ist deshalb kein Ordner, sondern ein *Anlass* — der Mensch
-    fragt, oder eine Stoerung weckt.
+    fragt, eine Stoerung weckt, oder das Gehirn deklariert einen Auftrag.
+    ``worker``-Zeilen sind von der Eindeutigkeit ausgenommen: ein Fenster je
+    Auftrag, mehrere gleichzeitig.
 
     Der Serverbezug haengt nicht hier, sondern am einzelnen Werkzeugaufruf: ein
     Assistent, dem man erst sagen muss, welchen Server er ansehen darf, bevor man
@@ -58,7 +68,21 @@ class AiConversation(Base):
             name="ck_ai_conversations_kind",
         ),
         Index("ix_ai_conversations_user_updated", "user_id", "updated_at"),
-        Index("uq_ai_conversations_user_kind", "user_id", "kind", unique=True),
+        # Partiell: Eindeutigkeit gilt nur fuer die EINZELFENSTER-Arten.
+        # Worker-Fenster gibt es je Benutzer beliebig oft — die Kappe dafuer
+        # liegt im Werkzeug-Handler und beim Betreiber-Deckel, nicht im Schema.
+        Index(
+            "uq_ai_conversations_user_kind",
+            "user_id",
+            "kind",
+            unique=True,
+            sqlite_where=text(
+                "kind IN (" + ", ".join(f"'{art}'" for art in EINZELFENSTER) + ")"
+            ),
+            postgresql_where=text(
+                "kind IN (" + ", ".join(f"'{art}'" for art in EINZELFENSTER) + ")"
+            ),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)

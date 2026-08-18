@@ -313,6 +313,27 @@ def finish_lifecycle_task(
     )
     db.commit()
 
+    # Ein Lauf, der auf genau diese Ausfuehrung wartet (`waiting_wake`), wird
+    # geweckt — bei Erfolg **und** Fehlschlag: auch ein gescheiterter Neustart
+    # ist die Antwort, auf die der Auftrag wartet (docs/agentic-framework.md).
+    # Zwingend NACH dem Commit und fehlertolerant (Muster
+    # `ai_approval_service._lauf_wecken`): ein Weckfehler darf den
+    # Task-Abschluss und das Audit nie zurueckrollen. Dieser Handler laeuft im
+    # Thread des Agent-Callbacks; `lauf_fortsetzen` ist dafuer gebaut.
+    if proposal is not None and proposal.run_id:
+        from models import AiRun
+        from services import ai_run_service
+
+        run = db.get(AiRun, proposal.run_id)
+        if run is not None and run.status == "waiting_wake":
+            try:
+                ai_run_service.lauf_fortsetzen(db, run_id=run.id)
+            except Exception as exc:  # noqa: BLE001 - Wecken ist Zugabe, nie Pflichtteil
+                logger.warning(
+                    "Lauf nach Lifecycle-Abschluss nicht geweckt run_id=%s: %s",
+                    proposal.run_id, exc,
+                )
+
 
 def recover_interrupted_tasks(db: Session) -> int:
     """Markiert nach Prozessneustart nicht fortsetzbare Tasks eindeutig fehlgeschlagen."""

@@ -37,6 +37,7 @@ from schemas.ai_chat import (
     AiQuestionPayload,
     AiRunResponse,
     AiSection,
+    AiWorkerInfo,
 )
 from services import (
     ai_chat_service,
@@ -201,10 +202,21 @@ def get_conversation(
     geliefert und andere ausgelassen. Der Index
     ``ix_ai_messages_conversation_created`` traegt genau diese Ordnung.
     """
+    if kind == "worker":
+        # Worker-Fenster gibt es viele je Benutzer — "das" Worker-Fenster
+        # existiert nicht, und diese Fabrik legte sonst eines an. Gelesen
+        # werden sie ueber ihre Kennung (`GET /conversation/worker/{id}`).
+        raise HTTPException(status_code=404, detail="Unterhaltung nicht gefunden")
     conversation = ai_chat_service.get_or_create_conversation(db, user, _art(kind))
     db.commit()
     db.refresh(conversation)
+    return _verlauf_seite(db, conversation, before)
 
+
+def _verlauf_seite(
+    db: Session, conversation: AiConversation, before: str | None
+) -> AiConversationDetail:
+    """Eine Seite des Verlaufs, rueckwaerts ab ``before`` — fuer alle Fenster."""
     query = db.query(AiMessage).filter(AiMessage.conversation_id == conversation.id)
     if before is not None:
         anker = db.get(AiMessage, before)
@@ -237,6 +249,89 @@ def get_conversation(
         messages=[_message_response(message) for message in reversed(messages)],
         has_more=weitere,
     )
+
+
+@router.get("/workers", response_model=list[AiWorkerInfo])
+def list_workers(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+) -> list[AiWorkerInfo]:
+    """Die lebenden Hintergrund-Auftraege — die Worker-Leiste des Chats.
+
+    Nur nicht beendete Laeufe: die Leiste "raeumt sich auf", indem
+    Endzustaende beim naechsten Blick schlicht herausfallen
+    (docs/agentic-framework.md, Frontend-Zeile). Geloescht wird dabei nichts —
+    die Unterhaltung bleibt ueber `GET /conversation/worker/{id}` lesbar,
+    solange die Aufbewahrung sie traegt (Audit-Regel).
+
+    Kein eigenes Recht: es sind die eigenen Auftraege dieses Benutzers, und
+    gestartet werden sie nur, wenn seine Rolle `ai.background.use` traegt.
+    """
+    from services import ai_worker_service
+
+    eintraege: list[AiWorkerInfo] = []
+    for lauf in ai_worker_service.aktive_worker(db, user_id=user.id):
+        fenster = db.get(AiConversation, lauf.conversation_id)
+        if fenster is None:
+            continue
+        eintraege.append(
+            AiWorkerInfo(
+                conversation_id=fenster.id,
+                title=fenster.title,
+                status=lauf.status,
+                created_at=lauf.created_at,
+            )
+        )
+    return eintraege
+
+
+@router.get("/worker/{conversation_id}", response_model=AiConversationDetail)
+def get_worker_conversation(
+    conversation_id: str,
+    before: str | None = Query(
+        None,
+        description=(
+            "Kennung der aeltesten bereits geladenen Nachricht. Liefert die "
+            "Seite davor."
+        ),
+    ),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+) -> AiConversationDetail:
+    """Liest ein Worker-Fenster ueber seine Kennung — nur lesend.
+
+    Es gibt bewusst keinen Schreibweg in ein Worker-Fenster: eine getippte
+    Nachricht loeste ueber `vorgaenger_abloesen` den laufenden Auftrag ab
+    (dieselbe Begruendung wie beim Guardian-Fenster im Modul-Docstring).
+    Gesteuert wird im Gespraech — "Stopp den Auftrag" geht an das Gehirn,
+    das `worker_cancel` ruft (docs/agentic-framework.md, §6).
+
+    Ein fremdes oder andersartiges Fenster ist dasselbe 404 wie ein
+    unbekanntes: aus Sicht dieses Benutzers gibt es diese Unterhaltung nicht.
+    """
+    fenster = db.get(AiConversation, conversation_id)
+    if fenster is None or fenster.user_id != user.id or fenster.kind != "worker":
+        raise HTTPException(status_code=404, detail="Unterhaltung nicht gefunden")
+    return _verlauf_seite(db, fenster, before)
+
+
+@router.post("/typing", status_code=status.HTTP_204_NO_CONTENT)
+def typing_signal(
+    user: User = Depends(require_global("ai.chat.use")),
+    _: None = Depends(verify_csrf),
+) -> Response:
+    """Das Tipp-Signal der Ruhe-Regel: "der Mensch schreibt gerade".
+
+    Uebertragen wird ausschliesslich der Zeitpunkt — nie der Text und nicht
+    einmal seine Laenge (Datenminimierung: das Eingabefeld kann Secrets
+    enthalten). Die Meldestelle haelt je Benutzer nur den letzten Zeitstempel
+    im Speicher (`tippen_melden`); solange er frisch ist, stellt sie keine
+    Worker-Meldungen zu (docs/agentic-framework.md, §4).
+    """
+    from services import ai_meldestelle
+
+    ai_meldestelle.tippen_melden(user.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/context", response_model=AiContextStatus)
@@ -373,6 +468,13 @@ def get_active_run(
             "gelassen (kind=) ueber alle Fenster — das fragt die Glocke."
         ),
     ),
+    conversation_id: str | None = Query(
+        None,
+        description=(
+            "Kennung eines bestimmten Fensters — der Weg der Worker-Ansicht, "
+            "denn kind=worker ist mehrdeutig. Hat Vorrang vor kind."
+        ),
+    ),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
 ) -> AiRunResponse | None:
@@ -389,9 +491,14 @@ def get_active_run(
     darf die Frage weit stellen (``kind=``), muss dann aber ueber ``kind`` in
     der Antwort entscheiden, wohin sie zeigt.
     """
-    run = ai_run_service.aktiver_lauf(
-        db, user_id=user.id, kind=_art(kind) if kind else None
-    )
+    if conversation_id is not None:
+        run = ai_run_service.aktiver_lauf(
+            db, user_id=user.id, conversation_id=conversation_id
+        )
+    else:
+        run = ai_run_service.aktiver_lauf(
+            db, user_id=user.id, kind=_art(kind) if kind else None
+        )
     if run is None:
         return None
     return _run_response(db, run)

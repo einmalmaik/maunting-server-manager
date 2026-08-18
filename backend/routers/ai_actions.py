@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import require_global, verify_csrf
-from models import AiActionProposal, User
+from models import AiActionProposal, AiConversation, User
 from models.ai_conversation import ARTEN
 from schemas.ai_action import (
     AiActionConfirmationResponse,
@@ -79,6 +79,13 @@ def _art(kind: str) -> str:
 @router.get("/conversation/actions", response_model=list[AiActionProposalResponse])
 def list_conversation_actions(
     kind: str = Query("primary"),
+    conversation_id: str | None = Query(
+        None,
+        description=(
+            "Kennung eines Worker-Fensters — dort ist kind mehrdeutig. "
+            "Hat Vorrang vor kind."
+        ),
+    ),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
 ) -> list[AiActionProposalResponse]:
@@ -91,9 +98,25 @@ def list_conversation_actions(
     Vorschlaege mit **seiner** Unterhaltungskennung an — ohne den Parameter
     liefert dieser Endpunkt sie nie, und die Karte, auf deren Klick der Lauf
     wartet, waere im ganzen Panel nirgends zu sehen.
+
+    ``conversation_id`` ist derselbe Weg fuer Worker-Fenster: ein wartender
+    Auftrag zeigt seine Karte in der Worker-Ansicht, und die laedt ueber die
+    Kennung. Nur eigene Worker-Fenster — alles andere ist dasselbe 404 wie
+    ein unbekanntes.
     """
-    conversation = ai_chat_service.get_or_create_conversation(db, user, _art(kind))
-    db.commit()
+    if conversation_id is not None:
+        conversation = db.get(AiConversation, conversation_id)
+        if (
+            conversation is None
+            or conversation.user_id != user.id
+            or conversation.kind != "worker"
+        ):
+            raise HTTPException(
+                status_code=404, detail="ai.errors.codes.AI_ACTION_NOT_FOUND"
+            )
+    else:
+        conversation = ai_chat_service.get_or_create_conversation(db, user, _art(kind))
+        db.commit()
     rows = db.query(AiActionProposal).filter(
         AiActionProposal.conversation_id == conversation.id,
         AiActionProposal.user_id == user.id,

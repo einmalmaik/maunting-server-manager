@@ -841,6 +841,31 @@ Maunting Service Manager — Guardian Engine
             ),
         }
 
+    @staticmethod
+    def ai_rahmen_worker(username: str, *, auftrag_titel: str, frage: bool) -> dict:
+        """Der Panelanteil einer Worker-Meldung (docs/agentic-framework.md).
+
+        Bewusst ohne Zustandswort im Titel: ob der Auftrag gelang, steht im
+        geschwaerzten Meldungstext, den das Modell verfasst — die Meldestelle
+        weiss es nicht, und ein geratenes "erledigt" im Betreff waere eine
+        Behauptung des Panels ueber etwas, das nur der Bericht selbst sagt.
+        """
+        titel = (
+            "Dein KI-Auftrag hat eine Frage" if frage
+            else "Dein KI-Auftrag hat berichtet"
+        )
+        return {
+            "username": str(username or ""),
+            "titel": titel,
+            "betreff_praefix": EmailService._ai_betreff_praefix(titel),
+            "betreff_ersatz": str(auftrag_titel or ""),
+            "fakt": (
+                f'Dein Auftrag "{auftrag_titel}" an den KI-Assistenten hat '
+                + ("eine Rückfrage gestellt." if frage else "ein Ergebnis gemeldet.")
+            ),
+            "fusszeile": "Den vollständigen Verlauf findest du im KI-Chat des Panels.",
+        }
+
     #: Der feste Text der Testmail. Steht als Konstante da, seit ihn zwei
     #: Stellen brauchen: `send_ai_test_email` und der Werkzeughandler, der die
     #: Mail in den Ausgangskorb legt und dabei den Rueckfall gleich mitrendert.

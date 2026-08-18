@@ -140,9 +140,20 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     in derselben Anfrage schon sagen. Welche Stelle welche ersetzt, steht als
     Kommentar über dem jeweiligen Werkzeug; dass die Blöcke dabeibleiben
     müssen, hält `test_ai_prompt` fest.
+
+    Stand 18.08.2026, nachgemessen: **52.404** Zeichen mit den vier
+    Gehirn/Worker-Werkzeugen (`worker_start`, `worker_cancel`, `wait_until`,
+    `worker_frage` — zusammen rund 3.900 Zeichen, docs/agentic-framework.md).
+    Die Grenze steht deshalb bei 55.000. Wichtig fuer die Einordnung: dieser
+    Volltext ist ab jetzt der **Worst Case eines Ein-Modell-Chats** — sobald
+    der Laufart-Schnitt greift, sieht das Gehirn nur noch etwa sieben
+    Werkzeuge (sein Katalog schrumpft um mehr als 90 Prozent, das war das
+    erklaerte Latenzziel), und die Worker verlieren die Gehirn- und
+    Gedaechtniswerkzeuge. Wer die Grenze erneut anhebt, misst vorher nach und
+    schreibt es hin.
     """
     katalog = json.dumps(ai_action_service.provider_tool_definitions(), ensure_ascii=False)
-    assert len(katalog) < 50_000, (
+    assert len(katalog) < 55_000, (
         f"Der Werkzeugkatalog ist auf {len(katalog)} Zeichen gewachsen. "
         "Er geht in jeder Runde mit und taucht in keiner Budgetrechnung auf."
     )

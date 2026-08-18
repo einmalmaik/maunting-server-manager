@@ -327,6 +327,7 @@ def _fake_stream(monkeypatch: pytest.MonkeyPatch, runden: list[list[ProviderTool
         _client, *, provider, api_key, messages, usage: StreamUsage,
         tools=None, tool_choice=None, reasoning=False, reasoning_effort=None,
         cache_marke=False,
+        model=None,
     ):
         del provider, api_key, reasoning, reasoning_effort, cache_marke
         gesehen.append([dict(item) for item in messages])
@@ -362,6 +363,7 @@ def _fake_stream_fragt_immer(monkeypatch: pytest.MonkeyPatch):
         _client, *, provider, api_key, messages, usage: StreamUsage,
         tools=None, tool_choice=None, reasoning=False, reasoning_effort=None,
         cache_marke=False,
+        model=None,
     ):
         del provider, api_key, reasoning, reasoning_effort, cache_marke
         gesehen.append([dict(item) for item in messages])

@@ -87,6 +87,13 @@ Stimme = Annotated[str | None, BeforeValidator(_stimme_lesen)]
 #: Eine Modellkennung, oder ``None`` fuer „nichts hinterlegt".
 Modellkennung = Annotated[str | None, BeforeValidator(_modell_lesen)]
 
+#: Ein Denkstufenwort, oder ``None`` fuer „nicht nachdenken". Gleiche Lesart
+#: wie die Modellkennung (Rand-Leerzeichen weg, leer heisst nichts), eigener
+#: Name, weil es etwas anderes ist. Ob das Wort eine Stufe aus
+#: `ai_reasoning.RANGFOLGE` ist, prueft der Service — die Rangfolge hierher zu
+#: importieren hiesse, sie an zwei Orten zu pruefen.
+Stufenwort = Annotated[str | None, BeforeValidator(_modell_lesen)]
+
 
 class AiProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
@@ -115,6 +122,14 @@ class AiProviderCreate(BaseModel):
     # hoerende Modell des Chatzugangs. Auch dieses Feld wird nicht gegen
     # `provider_kind` geprueft, aus demselben Grund wie die Stimme darueber.
     transcription_model: Modellkennung = Field(default=None, max_length=256)
+    # Die Worker-Rolle dieses Zugangs: das Modell, mit dem Auftraege im
+    # Hintergrund arbeiten, und seine **feste** Denkstufe. Leer heisst „keine
+    # Worker-Rolle" — dann gilt der heutige Ein-Modell-Betrieb. Die Stufe wird
+    # hier nur der Form nach gelesen; ob das Wort eine Stufe ist und ob sie
+    # ohne Modell dasteht, prueft der Service (`_assert_worker_rolle`) — dort
+    # laufen auch Schreibwege vorbei, die dieses Formular nie sehen.
+    worker_model: Modellkennung = Field(default=None, max_length=256)
+    worker_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
 
 
@@ -136,6 +151,11 @@ class AiProviderUpdate(BaseModel):
     # als der Schluessel darunter, den die Antwort nie zurueckgibt.
     default_voice: Stimme = None
     transcription_model: Modellkennung = Field(default=None, max_length=256)
+    # Wie bei Stimme und Gehoer: „nicht mitgeschickt" laesst den Wert stehen,
+    # ein ausdrueckliches ``null`` (bzw. leeres Feld) loescht ihn — getrennt
+    # durch `model_dump(exclude_unset=True)` im Router.
+    worker_model: Modellkennung = Field(default=None, max_length=256)
+    worker_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
     clear_operator_api_key: bool = False
 
@@ -160,6 +180,12 @@ class AiProviderResponse(BaseModel):
     default_voice: str | None = None
     #: Wie `default_voice` ungeprueft gelesen, aus demselben Grund.
     transcription_model: str | None = None
+    #: Die Worker-Rolle des Zugangs, roh aus der Zeile. ``None`` heisst „keine
+    #: Worker-Rolle konfiguriert" (Ein-Modell-Betrieb). Nur der Betreiber sieht
+    #: das — `AiProviderAvailableResponse` traegt es bewusst nicht: der Kunde
+    #: stellt Worker nicht ein.
+    worker_model: str | None = None
+    worker_reasoning_effort: str | None = None
     enabled: bool
     requires_api_key: bool
     operator_key_configured: bool

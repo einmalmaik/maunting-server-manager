@@ -1,11 +1,14 @@
 """Ownership- und Recovery-Regeln fuer die persistenten AI-Unterhaltungen.
 
-Jeder Benutzer hat genau einen Chat **je Anlass**, und es gibt genau zwei
-Anlaesse (`AiConversation.ARTEN`): der Mensch tippt (`primary`), oder eine
-Guardian-Stoerung weckt die KI (`guardian`). Es gibt weiterhin keinen Weg, sich
-einen dritten Chat anzulegen — der Assistent soll wie ein Gespraechspartner
-funktionieren, nicht wie eine Ablage, in der man erst den richtigen Ordner
-suchen muss.
+Fuer die `EINZELFENSTER`-Arten hat jeder Benutzer genau einen Chat je Anlass:
+der Mensch tippt (`primary`), oder eine Guardian-Stoerung weckt die KI
+(`guardian`). Es gibt weiterhin keinen Weg, sich einen weiteren solchen Chat
+anzulegen — der Assistent soll wie ein Gespraechspartner funktionieren, nicht
+wie eine Ablage, in der man erst den richtigen Ordner suchen muss.
+
+`worker`-Fenster sind die Ausnahme mit eigener Fabrik
+(`worker_unterhaltung_anlegen`): ein Fenster je deklariertem Auftrag, mehrere
+gleichzeitig (docs/agentic-framework.md, v3).
 
 Warum die Trennung ueberhaupt sein muss, steht am Modell: solange beides in
 derselben Zeile stand, schlossen sich Reparatur und Gespraech gegenseitig aus.
@@ -25,7 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models import AiConversation, AiMessage, AiUsageEvent, User
-from models.ai_conversation import ARTEN
+from models.ai_conversation import ARTEN, EINZELFENSTER
 from services.ai_usage_service import complete_ai_usage
 
 
@@ -83,11 +86,20 @@ def get_or_create_conversation(
     ein `.first()` lieferte die falsche. Ein Reparaturlauf, der in den Dauerchat
     schreibt, ist genau der Zustand, den diese Aenderung beseitigt.
 
-    ``kind`` wird gegen `ARTEN` geprueft, obwohl die Datenbank denselben CHECK
-    traegt: ein Tippfehler soll hier auffallen und nicht als
-    Integritaetsverletzung mitten in einer fremden Transaktion.
+    ``kind`` wird gegen `EINZELFENSTER` geprueft, obwohl die Datenbank einen
+    CHECK traegt: ein Tippfehler soll hier auffallen und nicht als
+    Integritaetsverletzung mitten in einer fremden Transaktion. ``worker`` ist
+    hier bewusst ebenfalls ein Fehler: get-or-create setzt Eindeutigkeit
+    voraus — ``.first()`` gaebe irgendeinen Worker zurueck und der
+    Wiedereinstieg wuerfe ``MultipleResultsFound``. Wer ein Worker-Fenster
+    braucht, ruft `worker_unterhaltung_anlegen`.
     """
-    if kind not in ARTEN:
+    if kind not in EINZELFENSTER:
+        if kind in ARTEN:
+            raise ValueError(
+                f"Unterhaltungsart {kind!r} ist kein Einzelfenster — "
+                "worker_unterhaltung_anlegen benutzen"
+            )
         raise ValueError(f"Unbekannte Unterhaltungsart: {kind!r}")
 
     existing = (
@@ -116,6 +128,32 @@ def get_or_create_conversation(
             .one()
         )
     return conversation
+
+
+def worker_unterhaltung_anlegen(db: Session, user: User, titel: str) -> AiConversation:
+    """Legt das Fenster eines neuen Worker-Auftrags an — immer eine neue Zeile.
+
+    Bewusst kein get-or-create: mehrere gleichzeitige Auftraege sind der Zweck
+    der Art ``worker``, der eindeutige Index nimmt sie aus. Der Titel kommt aus
+    ``worker_start(titel)`` und macht das Fenster in der Liste erkennbar; die
+    Kappe (wie viele Auftraege gleichzeitig) liegt beim Aufrufer und beim
+    Betreiber-Deckel, nicht hier.
+    """
+    # Der Titel kommt aus einer Modellausgabe und geht später ungefiltert an
+    # die Oberfläche (Worker-Leiste, Fensterkopf) — geschwärzt wird deshalb
+    # hier beim Anlegen, nicht bei jedem Leser einzeln.
+    from services.ai_redaction import redact_sensitive_text
+
+    fenster = AiConversation(
+        id=str(uuid4()),
+        user_id=user.id,
+        server_id=None,
+        kind="worker",
+        title=redact_sensitive_text(titel or "Auftrag").strip()[:160] or "Auftrag",
+    )
+    db.add(fenster)
+    db.flush()
+    return fenster
 
 
 def get_or_create_primary_conversation(db: Session, user: User) -> AiConversation:

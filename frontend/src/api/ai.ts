@@ -40,6 +40,19 @@ export interface AiProviderAdmin {
    * Bei einem Stimmzugang bleibt das Feld unbeachtet.
    */
   transcription_model: string | null
+  /**
+   * Das Arbeitsmodell der Worker — die zweite Hälfte der Provider-Zweiteilung
+   * (docs/agentic-framework.md, §5). `null` heisst: kein Hintergrund-Betrieb
+   * über diesen Zugang, es gilt der heutige Ein-Modell-Betrieb. Kein Fehler,
+   * sondern der dokumentierte Fallback.
+   */
+  worker_model: string | null
+  /**
+   * Die **feste** Denkstufe der Worker. Der Betreiber wählt sie, nie der
+   * Kunde und nie das Modell selbst — er zahlt die Arbeit im Hintergrund.
+   * `null` heisst: nicht nachdenken.
+   */
+  worker_reasoning_effort: string | null
   enabled: boolean
   requires_api_key: boolean
   operator_key_configured: boolean
@@ -122,12 +135,16 @@ export interface AiCatalogModel {
 
 /**
  * Welches Fenster. `primary` ist der Dauerchat, in den der Mensch tippt;
- * `guardian` sammelt die Reparaturen, die eine Störung ausgelöst hat.
+ * `guardian` sammelt die Reparaturen, die eine Störung ausgelöst hat;
+ * `worker` ist ein Hintergrund-Auftrag, den das Gehirn gestartet hat.
  *
- * Es sind zwei feste Anlässe und keine Ablage: mehr als eine Unterhaltung je
- * Art gibt es nicht, erzwungen über `uq_ai_conversations_user_kind`.
+ * `primary` und `guardian` sind feste Anlässe — je Benutzer genau eine
+ * Unterhaltung, erzwungen über den (partiellen) `uq_ai_conversations_user_kind`.
+ * Worker-Fenster gibt es dagegen **viele**: je Auftrag eines. Sie werden
+ * deshalb nie über die Art geladen, sondern über ihre Kennung
+ * (`getWorkerConversation`, `listWorkers`).
  */
-export type AiConversationKind = 'primary' | 'guardian'
+export type AiConversationKind = 'primary' | 'guardian' | 'worker'
 
 export interface AiConversation {
   id: string
@@ -698,6 +715,10 @@ export const AI_LAUFZUSTAENDE = [
   'running',
   'waiting_confirmation',
   'waiting_user',
+  // Die dritte Parkstelle: ein Langläufer schläft bis `wake_at` (nur in
+  // Worker-Fenstern). Ruhend wie die anderen Parkstellen — er tut nichts von
+  // selbst, bis der Takt ihn weckt.
+  'waiting_wake',
   'completed',
   'failed',
   'cancelled',
@@ -783,8 +804,39 @@ export interface AiProviderWrite {
    */
   default_voice?: string | null
   transcription_model?: string | null
+  /**
+   * Wie `default_voice`: „nicht genannt" lässt den Stand stehen,
+   * ausdrückliches `null` schaltet den Hintergrund-Betrieb ab.
+   */
+  worker_model?: string | null
+  worker_reasoning_effort?: string | null
   operator_api_key?: string
   clear_operator_api_key?: boolean
+}
+
+/**
+ * Ein Hintergrund-Auftrag, wie die Worker-Leiste des Chats ihn zeigt.
+ *
+ * Bewusst nur das Nötigste: Kennung, geschwärzter Titel, Laufzustand, Beginn.
+ * Kein Auftragstext, keine Serverdaten — die Leiste ist eine Übersicht, kein
+ * zweiter Verlauf.
+ */
+export interface AiWorkerInfo {
+  conversation_id: string
+  title: string
+  /** `running` oder eine Parkstelle (`waiting_*`); Beendete stehen nie hier. */
+  status: AiRunStatus
+  created_at: string
+}
+
+/** Die Betreiber-Deckel der Worker: wie viele je Benutzer, wie viele Runden je Lauf. */
+export interface AiWorkerPolicy {
+  max_parallel_workers: number
+  rounds_per_worker: number
+  min_workers: number
+  max_workers: number
+  min_rounds: number
+  max_rounds: number
 }
 
 export const aiApi = {
@@ -884,6 +936,39 @@ export const aiApi = {
    */
   listActions: (kind: AiConversationKind = 'primary') =>
     api<AiActionProposal[]>(`/ai/conversation/actions?kind=${kind}`),
+  /**
+   * Die Vorschläge eines Worker-Fensters — über die Kennung, denn
+   * `kind=worker` ist mehrdeutig: es gibt je Auftrag ein Fenster.
+   */
+  listWorkerActions: (conversationId: string) =>
+    api<AiActionProposal[]>(
+      `/ai/conversation/actions?conversation_id=${encodeURIComponent(conversationId)}`,
+    ),
+  /**
+   * Die lebenden Hintergrund-Aufträge — die Worker-Leiste des Chats.
+   * Beendete fallen beim nächsten Blick heraus („räumt sich auf");
+   * ihre Unterhaltung bleibt über `getWorkerConversation` lesbar.
+   */
+  listWorkers: () => api<AiWorkerInfo[]>('/ai/conversation/workers'),
+  /** Ein Worker-Fenster, nur lesend. Fremde und Unbekannte sind dasselbe 404. */
+  getWorkerConversation: (conversationId: string, before?: string) => {
+    const suche = new URLSearchParams()
+    if (before) suche.set('before', before)
+    const rest = suche.toString()
+    return api<AiConversationDetail>(
+      `/ai/conversation/worker/${encodeURIComponent(conversationId)}${rest ? `?${rest}` : ''}`,
+    )
+  },
+  /** Der aktive Lauf eines bestimmten Fensters — der Weg der Worker-Ansicht. */
+  getWorkerRun: (conversationId: string) =>
+    api<AiRunInfo | null>(
+      `/ai/conversation/run?conversation_id=${encodeURIComponent(conversationId)}`,
+    ),
+  /**
+   * Das Tipp-Signal der Ruhe-Regel: „der Mensch schreibt gerade".
+   * Übertragen wird nur der Zeitpunkt — nie Text und nicht einmal seine Länge.
+   */
+  typing: () => api('/ai/conversation/typing', { method: 'POST' }),
   getAction: (proposalId: string) => api<AiActionProposal>(`/ai/actions/${proposalId}`),
   confirmAction: (proposalId: string) => api<{ proposal_id: string; confirmation_token: string; expires_at: string }>(`/ai/actions/${proposalId}/confirm`, {
     method: 'POST',
@@ -961,6 +1046,15 @@ export const aiApi = {
   setContextPolicy: (percent: number) => api<AiContextPolicy>('/ai/settings/context', {
     method: 'PUT', body: JSON.stringify({ compaction_percent: percent }),
   }),
+  getWorkerPolicy: () => api<AiWorkerPolicy>('/ai/settings/worker'),
+  setWorkerPolicy: (maxParallelWorkers: number, roundsPerWorker: number) =>
+    api<AiWorkerPolicy>('/ai/settings/worker', {
+      method: 'PUT',
+      body: JSON.stringify({
+        max_parallel_workers: maxParallelWorkers,
+        rounds_per_worker: roundsPerWorker,
+      }),
+    }),
   /**
    * Der Provider steht im Query, weil die Frage schon vor der ersten Nachricht
    * beantwortet sein muss — und weil ein Modellwechsel die Antwort sofort

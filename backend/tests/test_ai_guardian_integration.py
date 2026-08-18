@@ -194,7 +194,7 @@ class Anbieter:
     def einbauen(self, monkeypatch) -> "Anbieter":
         async def fake(_client, *, provider, api_key, messages, usage: StreamUsage,
                        tools=None, tool_choice=None, reasoning=False,
-                       reasoning_effort=None, cache_marke=False):
+                       reasoning_effort=None, cache_marke=False, model=None):
             del provider, api_key, reasoning, reasoning_effort, cache_marke
             self.gesehen.append([dict(item) for item in messages])
             self.anfragen += 1
