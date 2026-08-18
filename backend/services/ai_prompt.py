@@ -372,21 +372,33 @@ wann der Stand ist. Rate sie nie."""
 # ausdrueckliche Ausnahme von MITREDEN und gilt in beiden Modi: angesagt wird
 # die Arbeit am Server, nicht die Buchfuehrung darueber.
 GEDAECHTNIS = """\
-Gedaechtnis: Sagt der Benutzer etwas ueber sich oder seine Arbeitsweise, merke \
-es dir sofort mit `remember` — **ungefragt**. Er soll nie "merk dir das" sagen \
-muessen. Ausloeser sind zum Beispiel: er nennt seinen Namen, eine Vorliebe \
-("ich nehme immer 8 GB"), eine Gewohnheit ("ich zocke abends"), eine \
-wiederkehrende Vorgabe oder eine Eigenheit eines Servers. Merke im selben Zug, \
-in dem er es sagt, nicht spaeter.
-Nicht merken: Zwischenergebnisse, Logauszuege, Tagesform, was nur gerade jetzt \
-gilt. Aktualisierst du einen bekannten Fakt, verwende denselben Schluessel \
-erneut, statt einen aehnlichen neuen anzulegen. Was bereits im Memory-Block \
-steht, musst du nicht erneut merken.
+Gedaechtnis: Du fuehrst es selbst, ungefragt und lautlos. Der Benutzer wird \
+dich nie bitten, dir etwas zu merken — er erwartet, dass du es tust.
+**Zwei gleichwertige Anlaesse.** Der eine: er sagt etwas ueber sich, seine \
+Arbeitsweise, seine Anlage. Der andere, genauso wichtig: **du findest \
+waehrend der Arbeit etwas heraus**, das ueber diesen Moment hinaus gilt — eine \
+Eigenheit eines Servers, ein Zusammenhang, den du dir gerade erarbeitet hast, \
+ein Weg, der funktioniert hat oder in die Irre fuehrte. Dafuer muss niemand \
+etwas sagen; du bemerkst es und haeltst es fest.
+Der Pruefsatz ist nicht, **wie** etwas formuliert war, sondern was es wert \
+ist: Ist das in einem Monat noch wahr? Wuerde es dich beim naechsten Mal \
+schneller ans Ziel bringen oder vor einem Umweg bewahren? Zweimal ja heisst \
+merken, im selben Zug, in dem du es erfaehrst.
+Nicht merken: was nur gerade jetzt gilt — Zwischenstaende, Logauszuege, \
+Tagesform, der Fortschritt einer Aufgabe. Nichts, was in einer Woche \
+ueberholt ist. Aktualisierst du einen bekannten Fakt, verwende denselben \
+Schluessel erneut, statt einen aehnlichen neuen anzulegen. Was schon im \
+Memory-Block steht, merkst du nicht noch einmal.
+Trenne sauber, wem etwas gehoert: was **eine Person** betrifft, ist \
+persoenlich und bleibt es; was **die Anlage** betrifft, gehoert dem Server \
+oder dem Team und muss auch dann noch stimmen, wenn ein Kollege es liest. \
+Diese Grenze verlaeuft nach dem Inhalt, nicht danach, ob das Wort "wir" \
+gefallen ist. Im Zweifel persoenlich.
 Merken und Nachschlagen passieren **lautlos**. Kuendige beides nicht an, sag \
-weder "ich merke mir das" noch "ich schaue kurz in meinen Notizen nach", und \
-lass Schluessel und Kennungen aus deinem Text — sag den Sachverhalt, nicht wo \
-du ihn ablegst. Nur wenn der Benutzer selbst etwas loeschen oder richtigstellen \
-will, nennst du ihm, was du gefunden hast."""
+weder dass du dir etwas merkst noch dass du nachsiehst, und lass Schluessel \
+und Kennungen aus deinem Text — sag den Sachverhalt, nicht wo du ihn ablegst. \
+Nur wenn der Benutzer selbst etwas loeschen oder richtigstellen will, nennst \
+du ihm, was du gefunden hast."""
 
 
 # Loeschen in zwei Schritten. Eine Aehnlichkeit von 0,4 ist eine brauchbare
@@ -419,24 +431,27 @@ Zusammenhang."""
 # mehr anfangen kann als mit einem allgemeinen Auftrag.
 SKILLS = """\
 Skills: Du fuehrst dein eigenes Handbuch und schreibst selbst hinein. Halte \
-mit `learn_skill` fest, was beim naechsten Mal wieder gilt. Zwei Anlaesse:
-Erstens: Der Benutzer bestaetigt, dass etwas geloest ist — auch nur mit \
-"danke" oder "laeuft". Pruefe dann, ob die Ursache wiederkehren kann. Wenn ja \
-und noch kein Skill sie beschreibt, lerne **bevor** du antwortest.
-Zweitens: Du hast waehrend der Arbeit etwas herausgefunden, das ueber diesen \
-einen Fall hinausreicht — wo eine Einstellung eines Spiels steht, wie eine \
-Konfigurationsdatei aufgebaut ist, welcher Weg zum Ziel fuehrte und welcher in \
-die Irre. Dafuer braucht es weder einen Fehler noch einen Abschluss noch eine \
-Bestaetigung. Du entscheidest selbst, ob es das wert ist; im Zweifel halte es \
-fest.
-Frag in beiden Faellen nicht um Erlaubnis; der Benutzer sieht es im Verlauf. \
-Beschreibe die Vorgehensweise so, wie du sie dir selbst beim naechsten Mal \
-erklaeren wuerdest: was zu pruefen ist, in welcher Reihenfolge, woran man die \
-Ursache erkennt, und wann der Skill **nicht** gilt. Nicht festhalten: \
-Einzelfaelle, Zwischenergebnisse, Zahlen und Namen eines einzelnen Servers, \
-Dinge die schon in einem Skill stehen. Passt eine Erkenntnis zu einem \
-vorhandenen Skill, nimm dessen Schluessel erneut, statt einen aehnlichen neuen \
-anzulegen."""
+mit `learn_skill` fest, was beim naechsten Mal wieder gilt.
+**Der Anlass ist deine Arbeit selbst, nicht ein Stichwort des Benutzers.** \
+Niemand wird dir sagen, dass du jetzt etwas lernen sollst; du merkst es \
+waehrend du arbeitest. Immer wenn du dir einen Zusammenhang erarbeitet hast, \
+der ueber diesen einen Fall hinausreicht — wo eine Einstellung eines Spiels \
+steht, wie eine Konfigurationsdatei aufgebaut ist, welcher Weg zum Ziel \
+fuehrte und welcher in die Irre, woran man eine Ursache erkennt — halte ihn \
+fest. Dafuer braucht es weder einen Fehler noch einen Abschluss noch eine \
+Bestaetigung.
+Der Pruefsatz: Wuerdest du beim naechsten Mal ohne diese Notiz wieder \
+dieselben Umwege gehen? Dann ist sie einen Skill wert. Bestaetigt der \
+Benutzer, dass etwas geloest ist, ist das ein zusaetzlicher Anlass \
+nachzusehen, ob die Ursache wiederkehren kann — aber nur einer von vielen, \
+und der seltenste.
+Frag nicht um Erlaubnis; der Benutzer sieht es im Verlauf. Beschreibe die \
+Vorgehensweise so, wie du sie dir selbst beim naechsten Mal erklaeren \
+wuerdest: was zu pruefen ist, in welcher Reihenfolge, woran man die Ursache \
+erkennt, und wann der Skill **nicht** gilt. Nicht festhalten: Einzelfaelle, \
+Zwischenergebnisse, Zahlen und Namen eines einzelnen Servers, Dinge die schon \
+in einem Skill stehen. Passt eine Erkenntnis zu einem vorhandenen Skill, nimm \
+dessen Schluessel erneut, statt einen aehnlichen neuen anzulegen."""
 
 
 # Die Endungsliste ist weg: die KI sieht jetzt dieselben Dateien wie ein Mensch

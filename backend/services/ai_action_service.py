@@ -441,16 +441,33 @@ def _global_tool_definitions() -> list[dict]:
             # Bereichs — "eine Eigenschaft der Anlage, die fuer alle Kollegen
             # gilt" — und zeigte auf `team`. Bliebe der Satz stehen, aenderte
             # sich am beobachteten Verhalten gar nichts.
-            "Wahl des Bereichs, in dieser Reihenfolge pruefen:\n"
-            "1. Steht \"ich\", \"mein\", \"mir\" oder ein Personenname darin, "
-            "ist es persoenlich: mit genanntem Server scope=server, sonst "
-            "scope=user (\"ich nehme immer 8 GB\").\n"
-            "2. Sonst, wenn es um genau einen Server geht, dessen Nummer aus "
-            "einem Werkzeugergebnis stammt: scope=server_shared mit dieser "
-            "server_id (\"dieser Server braucht nach dem Start zwei Minuten\", "
-            "\"hier muss man die Whitelist neu laden\").\n"
-            "3. Sonst, wenn \"wir\", \"bei uns\" oder \"unsere Server\" darin "
-            "steht: scope=team (\"wir sichern immer vor einem Update\").\n"
+            #
+            # **Die Merkmale waren aber rein sprachlich, und das war zu eng.**
+            # Sie setzten voraus, dass der Benutzer den Satz gesagt hat: Regel
+            # 1 sucht "ich"/"mein", Regel 3 sucht "wir"/"bei uns". Was die KI
+            # selbst herausfindet, enthaelt keines dieser Woerter — es landete
+            # ueber Regel 4 pauschal bei `user` oder wurde gar nicht erst
+            # gemerkt. Gemessen am 19.08.2026: 7 Eintraege insgesamt, davon
+            # **null** im Team-Bereich, juengster vom 16.08. Deshalb steht vor
+            # der sprachlichen Reihenfolge jetzt die inhaltliche Frage, wem
+            # eine Erkenntnis gehoert.
+            "Wahl des Bereichs:\n"
+            "Zuerst inhaltlich: Betrifft es **eine Person** (ihre Vorliebe, "
+            "ihre Arbeitsweise, ihre Ausstattung), ist es persoenlich. "
+            "Betrifft es **die Anlage** — wie ein Server sich verhaelt, wie "
+            "hier gearbeitet wird, was du selbst ueber eine Einrichtung "
+            "herausgefunden hast —, gehoert es dem Server oder dem Team, auch "
+            "wenn niemand \"wir\" gesagt hat.\n"
+            "Dann genauer, in dieser Reihenfolge pruefen:\n"
+            "1. Persoenlich und zu genau einem Server: scope=server. "
+            "Persoenlich ohne Serverbezug: scope=user (\"ich nehme immer "
+            "8 GB\").\n"
+            "2. Es geht um genau einen Server, dessen Nummer aus einem "
+            "Werkzeugergebnis stammt, und gilt fuer jeden, der ihn bedient: "
+            "scope=server_shared mit dieser server_id (\"dieser Server "
+            "braucht nach dem Start zwei Minuten\").\n"
+            "3. Es gilt fuer die ganze Anlage oder die Arbeitsweise des Teams: "
+            "scope=team (\"vor einem Update wird gesichert\").\n"
             "4. Sonst scope=user.\n"
             "Pruefsatz fuer 2 und 3: der Eintrag muss wahr bleiben, egal wer "
             "ihn liest. Im Zweifel persoenlich.",
