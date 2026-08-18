@@ -2,7 +2,9 @@ name: Publish ASA runtime image
 
 on:
   push:
-    branches: ["main"]
+    # Der Feature-Branch bootstrapped das erste Image, bevor der Workflow auf
+    # dem Default-Branch existierte. Nach dem ersten Publish wieder entfernen.
+    branches: ["main", "feature/ai-intelligent-engine"]
     paths:
       - "containers/asa-runtime/**"
       - ".github/workflows/asa-runtime-image.yml"
