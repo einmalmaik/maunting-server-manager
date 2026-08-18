@@ -414,7 +414,12 @@ class TestBrowseReadWrite:
         assert kwargs["volumes"][0].container_path == PERMISSION_REPAIR_CONTAINER_DIR
         script = kwargs["command"][1]
         assert f"find {PERMISSION_REPAIR_CONTAINER_DIR} -xdev -type f" in script
-        assert "chmod a+rwX" in script
+        # Geteilte **Gruppe** statt Weltrechte: `a+rwX` machte jede Serverdatei
+        # fuer jeden Prozess auf dem Host beschreibbar, und weil diese
+        # Reparatur vor jedem Serverstart laeuft, war ein aufgeraeumtes
+        # Verzeichnis beim naechsten Start wieder offen.
+        assert "g+rwxs" in script
+        assert "a+rwX" not in script
         assert "chown" not in script
 
     def test_file_permission_repair_does_not_change_runtime_owner(self, server_with_dir: Server):
@@ -426,7 +431,8 @@ class TestBrowseReadWrite:
 
         assert result == {"ok": True}
         script = mock_run.call_args.kwargs["command"][1]
-        assert "chmod a+rwX" in script
+        assert "g+rwxs" in script
+        assert "a+rwX" not in script
         assert "chown" not in script
 
     def test_apply_permissions_uses_owner_scoped_modes_and_preserves_execute_bit(
