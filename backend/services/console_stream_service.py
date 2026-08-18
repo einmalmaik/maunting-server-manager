@@ -17,14 +17,17 @@ KISS:
 from __future__ import annotations
 
 import asyncio
+import glob
 import json
 import logging
 import os
+import re
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Deque  # noqa: F401 — Any used by node proxy path
 
 from fastapi import WebSocket
@@ -65,7 +68,18 @@ class _ServerState:
     tasks: list[asyncio.Task] = field(default_factory=list)
     agent_ws: Any = None
     file_pos: int = 0
+    declared_file_positions: dict[str, int] = field(default_factory=dict)
     last_disconnected_at: float | None = None
+
+
+@dataclass(frozen=True)
+class DeclaredLogConfig:
+    """Bereits schema-validierter Blueprint-Logvertrag für einen Server."""
+
+    root: str
+    sources: tuple[str, ...]
+    redactors: tuple[str, ...]
+    max_tail_bytes: int
 
 
 _STATES: dict[int, _ServerState] = {}
@@ -250,7 +264,7 @@ async def _tail_file_loop(log_path: str, state: _ServerState, on_line) -> None:
             await on_line(text, "msm", ts)
 
 
-async def _tail_docker_loop(container: str, on_line) -> None:
+async def _tail_docker_loop(container: str, on_line, redactors: tuple[str, ...] = ()) -> None:
     """Tail-Loop fuer `docker logs --follow` mit Polling auf Container-Readiness."""
     backoff = 0.5
     while True:
@@ -273,13 +287,113 @@ async def _tail_docker_loop(container: str, on_line) -> None:
                             text = rest
                         except Exception:
                             pass
-                await on_line(text, "docker", ts)
+                await on_line(redact_console_text(text, redactors), "docker", ts)
             await asyncio.sleep(1.0)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.warning("ws docker tailing failed for %s: %s", container, exc)
             await asyncio.sleep(2.0)
+
+
+_SENSITIVE_VALUE_RE = re.compile(
+    r"(?i)((?:serveradminpassword|serverpassword|admin_password|password|passwd|token|secret|api[_-]?key|authorization)\s*[=:]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s?&,;]+)"
+)
+_BUILTIN_REDACTORS = {
+    "discord_token": re.compile(r"(?i)(?:mfa\.[\w-]{20,}|[\w-]{20,}\.[\w-]{6,}\.[\w-]{20,})"),
+    "api_key": re.compile(r"(?i)(api[_-]?key\s*[:=]\s*)[^\s,;]+"),
+    "authorization_header": re.compile(r"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?)\S+"),
+    "database_url": re.compile(r"(?i)\b(?:postgres(?:ql)?|mysql)://[^\s]+"),
+    "jwt": re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
+}
+
+
+def redact_console_text(text: str, redactors: tuple[str, ...] = ()) -> str:
+    """Redigiert Pflichtmuster und danach deklarierte Blueprint-Muster."""
+    result = _SENSITIVE_VALUE_RE.sub(r"\1[REDACTED]", text)
+    for redactor in redactors:
+        try:
+            pattern = (
+                re.compile(redactor[6:])
+                if redactor.startswith("regex:")
+                else _BUILTIN_REDACTORS.get(redactor)
+            )
+        except re.error:
+            continue
+        if pattern is not None:
+            result = pattern.sub("[REDACTED]", result)
+    return result
+
+
+def _read_declared_log_updates(
+    config: DeclaredLogConfig,
+    positions: dict[str, int],
+) -> list[str]:
+    """Liest neue Zeilen aus sicheren relativen Blueprint-Logpfaden."""
+    root = Path(config.root).resolve(strict=False)
+    remaining = config.max_tail_bytes
+    lines: list[str] = []
+    for source in config.sources:
+        if source == "stdout" or remaining <= 0:
+            continue
+        for raw in glob.glob(str(root / source), recursive=False)[:8]:
+            candidate = Path(raw)
+            if candidate.is_symlink() or not candidate.is_file():
+                continue
+            try:
+                resolved = candidate.resolve(strict=True)
+                resolved.relative_to(root)
+            except (FileNotFoundError, OSError, ValueError):
+                continue
+            key = str(resolved)
+            try:
+                size = resolved.stat().st_size
+                previous = positions.get(key)
+                start = max(0, size - remaining) if previous is None else previous
+                if size < start:
+                    start = 0
+                if size - start > remaining:
+                    start = size - remaining
+                if size <= start:
+                    positions[key] = size
+                    continue
+                with resolved.open("rb") as stream:
+                    stream.seek(start)
+                    chunk = stream.read(min(size - start, remaining))
+                positions[key] = size
+            except OSError:
+                continue
+            remaining -= len(chunk)
+            decoded = chunk.decode("utf-8", errors="replace")
+            split = decoded.splitlines()
+            if start > 0 and split:
+                split = split[1:]
+            lines.extend(redact_console_text(line, config.redactors) for line in split if line)
+            if remaining <= 0:
+                break
+    return lines
+
+
+async def _tail_declared_file_loop(config: DeclaredLogConfig, state: _ServerState, on_line) -> None:
+    while True:
+        for line in _read_declared_log_updates(config, state.declared_file_positions):
+            await on_line(line, "file", None)
+        await asyncio.sleep(0.2)
+
+
+def decode_agent_console_message(message: str) -> tuple[str, str]:
+    """Erkennt ausschließlich das interne Dateilog-Envelope des Node-Agents."""
+    try:
+        envelope = json.loads(message)
+    except json.JSONDecodeError:
+        return message, "docker"
+    if (
+        isinstance(envelope, dict)
+        and envelope.get("msm_console_source") == "file"
+        and isinstance(envelope.get("text"), str)
+    ):
+        return envelope["text"], "file"
+    return message, "docker"
 
 
 async def _close_safely(ws: WebSocket, code: int = 1000) -> None:
@@ -325,7 +439,8 @@ async def _agent_proxy_loop(server_id: int, container: str, node: Any) -> None:
                 backoff = 0.5
                 async for message in agent_ws:
                     text = message if isinstance(message, str) else message.decode("utf-8", errors="replace")
-                    await ingest_line(server_id, text, "docker")
+                    text, source = decode_agent_console_message(text)
+                    await ingest_line(server_id, text, source)
                     
         except asyncio.CancelledError:
             raise
@@ -345,6 +460,7 @@ async def connect(
     log_path: str,
     last_id: int | None = None,
     node: Any | None = None,
+    declared_logs: DeclaredLogConfig | None = None,
 ) -> None:
     """Hauptcoroutine: akzeptiert die WS-Verbindung, spult Replay ab, streamed live."""
     async with _STATES_LOCK:
@@ -384,8 +500,20 @@ async def connect(
                 ))
             else:
                 state.tasks.append(asyncio.create_task(
-                    _tail_docker_loop(container, lambda txt, src, ts: ingest_line(server_id, txt, src, ts))
+                    _tail_docker_loop(
+                        container,
+                        lambda txt, src, ts: ingest_line(server_id, txt, src, ts),
+                        declared_logs.redactors if declared_logs else (),
+                    )
                 ))
+                if declared_logs and any(source != "stdout" for source in declared_logs.sources):
+                    state.tasks.append(asyncio.create_task(
+                        _tail_declared_file_loop(
+                            declared_logs,
+                            state,
+                            lambda txt, src, ts: ingest_line(server_id, txt, src, ts),
+                        )
+                    ))
                 
         # Send replay to THIS client only
         async with _STATES_LOCK:

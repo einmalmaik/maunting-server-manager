@@ -1117,7 +1117,7 @@
       "body": "Alle Felder werden beim Upload streng gegen das Pydantic-Schema des Backends validiert.",
       "yes": "Ja",
       "no": "Nein",
-      "metaId": "Eindeutiger Identifier (a-z, 0-9, _). Darf nicht mit nativen Blueprints kollidieren.",
+      "metaId": "Eindeutige technische ID. Grossbuchstaben und Leerzeichen werden beim Speichern automatisch zu Kleinbuchstaben und Unterstrichen normalisiert. Darf nicht mit nativen Blueprints kollidieren.",
       "metaName": "Anzeigename in der UI.",
       "metaCategory": "steam_game, non_steam_game, voice_server, bot.",
       "metaAuthor": "Ersteller der Blueprint.",
@@ -1125,11 +1125,14 @@
       "runtimeImage": "Gültiges Docker-Image (z.B. ubuntu:24.04).",
       "runtimeWorkdir": "Arbeitsverzeichnis im Container.",
       "runtimeEnv": "Umgebungsvariablen als Key-Value-Dict. Werte dürfen Port-Platzhalter enthalten: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Kein {INSTALL_DIR} oder {ENV.<KEY>} in env-Werten.",
-      "runtimeStartup": "Startbefehl (wird als argv übergeben, KEINE Shell). Gültige Platzhalter: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. Zusätzlich {ENV.<KEY>} für eigene Env-Variablen (z. B. {ENV.SERVER_NAME}). Verbotene Zeichen: $, Backtick.",
+      "runtimeStartup": "Startbefehl (wird als argv übergeben, KEINE Shell). Gültige Platzhalter: {SERVER_NAME}, {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. {SERVER_NAME} übernimmt den individuellen Namen des MSM-Servers. Zusätzlich {ENV.<KEY>} für eigene Env-Variablen. Verbotene Zeichen: $, Backtick.",
       "runtimeEnsureDirs": "Relative Ordner, die vor jedem Start im Server-Verzeichnis angelegt werden. Geeignet für Profile-, Log-, Cache- oder Runtime-Ordner, die der Startbefehl erwartet.",
       "runtimeConfigPatches": "Liste von Konfigurations-Patches, die vor dem Start angewendet werden. Jeder Patch muss type, file und value enthalten (sowie section/key für 'ini' oder regex für 'regex').",
       "runtimeEnableExec": "Exec-Tab aktivieren. Default: false. Self-Hosted, aber Befehle laufen NUR im MSM-verwalteten Container dieses Servers, NIEMALS auf dem Host oder in fremden Containern.",
       "runtimeExecTimeoutSeconds": "Timeout pro Exec-Aufruf in Sekunden (1..600). Default: 60.",
+      "logsSources": "Logquellen für Guardian und sichtbare Server-Konsole. stdout zeigt Docker-Ausgabe; sichere relative Dateipfade und einfache Dateinamen-Wildcards werden zusätzlich live verfolgt.",
+      "logsRedact": "Redactoren für alle ausgegebenen Logquellen. Unterstützt eingebaute Typen und sichere regex:-Muster; bekannte Secret-Zuweisungen werden immer maskiert.",
+      "logsMaxTailBytes": "Maximale Dateilogmenge pro Lesevorgang (1.024 bis 1.048.576 Bytes).",
       "configPatchFields": "↳ configPatches[ ] — Felder",
       "configPatchType": "Patch-Typ. Gültige Werte: ini, regex.",
       "configPatchFile": "Relativer Pfad zur Datei, z. B. Config/Server.ini. Keine absoluten Pfade und kein '..'.",
@@ -1171,6 +1174,7 @@
       "runtimeRequiredFiles": "Relative Dateipfade, die nach der Installation zwingend vorhanden sein müssen (z. B. 7DaysToDieServer.x86_64). Fehlt eine Datei, bricht MSM den Start mit verständlicher Fehlermeldung ab.",
       "runtimeStopGracePeriodSeconds": "Wartezeit in Sekunden (5..600) beim Stoppen des Containers vor SIGKILL. Default: 30.",
       "runtimeStartupCheckSeconds": "Wartezeit in Sekunden (0..300) vor der ersten Log-Prüfung beim Start (wichtig für große Proton/Wine-Images). Default: 5.0.",
+      "runtimeAllowUnprivilegedUserNamespaces": "Erlaubt verschachtelte unprivilegierte User-Namespaces für Runtimes wie UMU/pressure-vessel. Default: false. Nur Docker-Seccomp wird gelockert; cap-drop=ALL, no-new-privileges, der Nicht-root-User sowie die Verbote für Host-Netz und privileged bleiben aktiv.",
       "runtimeSeedFiles": "Liste von Default-Dateien, die nur geschrieben werden wenn sie fehlen (seed-once). Jeder Eintrag: file + content. Port-Tokens erlaubt. Läuft vor configPatches."
     },
     "howto": {
@@ -3937,7 +3941,7 @@
       }
     },
     "validation": {
-      "metaId": "1–64 Kleinbuchstaben, Ziffern oder Unterstriche verwenden.",
+      "metaId": "1–64 Buchstaben, Ziffern, Leerzeichen oder Unterstriche verwenden; der technische Slug wird automatisch normalisiert.",
       "metaName": "Einen Namen mit maximal 128 Zeichen angeben.",
       "image": "Einen gültigen Docker-Image-Namen angeben.",
       "startup": "Einen Startbefehl mit maximal 2048 Zeichen angeben.",

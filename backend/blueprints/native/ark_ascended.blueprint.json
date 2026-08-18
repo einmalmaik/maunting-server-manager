@@ -8,23 +8,17 @@
     "description": "ARK: Survival Ascended Dedicated Server (App-ID 2430930) via SteamCMD. Windows-Binary wird über GE-Proton in einem virtuellen Display (Xvfb) gestartet. Maps: TheIsland_WP, ScorchedEarth_WP, TheCenter_WP, Aberration_WP, Extinction_WP, Ragnarok_WP, Valguero_WP, Astraeos_WP, LostColony_WP, Fjordur_WP, ClubArk_WP."
   },
   "runtime": {
-    "image": "ghcr.io/ptero-eggs/steamcmd:proton",
+    "image": "ghcr.io/einmalmaik/msm-asa-runtime:ge-proton10-34-umu1.4.0",
     "workdir": "/home/container",
     "user": "1000:1000",
     "env": {
-      "STEAM_COMPAT_CLIENT_INSTALL_PATH": "/home/container/.steam/steam",
-      "STEAM_COMPAT_DATA_PATH": "/home/container/.steam/steam/steamapps/compatdata/2430930",
-      "WINEDEBUG": "-all",
-      "WINEESYNC": "1",
-      "WINEFSYNC": "1",
-      "PROTON_USE_WINED3D": "1",
-      "SERVER_NAME": "My-ASA-Server-by-MSM",
+      "WINEPREFIX": "/home/container/.umu-prefix-2430930",
       "MAX_PLAYERS": "70",
       "MAP_NAME": "TheIsland_WP"
     },
-    "startup": "xvfb-run -a proton run ./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?MaxPlayers={ENV.MAX_PLAYERS}?SessionName=\"{ENV.SERVER_NAME}\"?Port={GAME_PORT} -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -oldconsole -servergamelog -Port={GAME_PORT} -NoBattlEye -server -dx11 {MOD_ARG}",
+    "startup": "xvfb-run -a /opt/umu-launcher/umu-run ./ShooterGame/Binaries/Win64/ArkAscendedServer.exe {ENV.MAP_NAME}?listen?MaxPlayers={ENV.MAX_PLAYERS}?SessionName=\"{SERVER_NAME}\"?Port={GAME_PORT}?QueryPort={QUERY_PORT}?RCONPort={RCON_PORT}?RCONEnabled=True -WinLiveMaxPlayers={ENV.MAX_PLAYERS} -oldconsole -servergamelog -Port={GAME_PORT} -QueryPort={QUERY_PORT} -RCONPort={RCON_PORT} -RCONEnabled=True -NoBattlEye -crossplay -server -game -log {MOD_ARG}",
     "ensureDirs": [
-      ".steam/steam/steamapps/compatdata/2430930",
+      ".local/share/umu",
       "ShooterGame/Saved/Config/WindowsServer",
       "ShooterGame/Saved/SavedArks",
       "ShooterGame/Saved/Logs"
@@ -42,7 +36,8 @@
       }
     ],
     "stopGracePeriodSeconds": 60,
-    "startupCheckSeconds": 90.0
+    "startupCheckSeconds": 90.0,
+    "allowUnprivilegedUserNamespaces": true
   },
   "ports": [
     {
@@ -95,6 +90,8 @@
       "grace_period_seconds": 600,
       "timeout_seconds": 1800,
       "success_patterns": [
+        "Server has completed startup and is now advertising for join",
+        "Full Startup:",
         "advertising for join",
         "Server successfully started",
         "Setting breakpad minidump AppID",

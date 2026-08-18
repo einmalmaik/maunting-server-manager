@@ -221,6 +221,27 @@ class TestRunContainer:
         kwargs = client.containers.run.call_args.kwargs
         assert kwargs["tty"] is False
 
+    def test_user_namespace_opt_in_only_relaxes_seccomp(self):
+        """UMU/bwrap erhält User-Namespaces ohne Privileged oder neue Caps."""
+        client = MagicMock()
+        client.images.get.return_value = SimpleNamespace(id="local-image")
+        client.containers.get.side_effect = docker_service.NotFound("missing")
+        client.containers.run.return_value = SimpleNamespace(id="abc")
+
+        with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
+            result = docker_service.run_container(
+                name="msm-srv-105",
+                image="ghcr.io/einmalmaik/msm-asa-runtime:test",
+                allow_unprivileged_user_namespaces=True,
+            )
+
+        assert result["ok"] is True
+        kwargs = client.containers.run.call_args.kwargs
+        assert kwargs["security_opt"] == ["no-new-privileges", "seccomp=unconfined"]
+        assert kwargs["cap_drop"] == ["ALL"]
+        assert kwargs.get("cap_add") is None
+        assert kwargs.get("privileged", False) is False
+
     def test_run_container_tty_true_when_requested(self):
         """Opt-in: tty=True wird durchgereicht fuer interaktive Auth-Recovery-Container."""
         client = MagicMock()

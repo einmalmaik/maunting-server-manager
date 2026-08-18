@@ -284,6 +284,55 @@ class TestConsoleStreamService:
         assert "first-run-log" in texts
         assert "after-restart-log" in texts
 
+    def test_declared_file_log_is_streamed_and_secrets_are_redacted(self, tmp_path):
+        """Blueprint-Dateilogs ergänzen Docker/MSM, ohne Secrets offenzulegen."""
+        game_log = tmp_path / "logs" / "server.log"
+        game_log.parent.mkdir()
+        game_log.write_text(
+            "Server booted\nCommandline: ?ServerPassword=synthetic-secret-not-real\n",
+            encoding="utf-8",
+        )
+        ws = _MockWebSocket()
+
+        async def _block_forever() -> None:
+            await asyncio.sleep(10)
+
+        ws.receive_text = AsyncMock(side_effect=_block_forever)
+
+        async def _run() -> None:
+            declared = console_stream_service.DeclaredLogConfig(
+                root=str(tmp_path),
+                sources=("logs/server.log", "stdout"),
+                redactors=("regex:ServerPassword",),
+                max_tail_bytes=4096,
+            )
+            with patch.object(console_stream_service.docker_service, "is_running", return_value=False):
+                task = asyncio.create_task(
+                    console_stream_service.connect(
+                        ws,
+                        server_id=6,
+                        container="msm-srv-6",
+                        log_path="/nonexistent",
+                        declared_logs=declared,
+                    )
+                )
+                await asyncio.sleep(0.4)
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        asyncio.run(_run())
+        file_lines = [
+            json.loads(raw) for raw in ws.sent
+            if json.loads(raw).get("source") == "file"
+        ]
+        text = "\n".join(line["text"] for line in file_lines)
+        assert "Server booted" in text
+        assert "synthetic-secret-not-real" not in text
+        assert "[REDACTED]" in text
+
 
 # ── Endpoint-Layer Tests (TestClient, durch FastAPI) ───────────────────────
 

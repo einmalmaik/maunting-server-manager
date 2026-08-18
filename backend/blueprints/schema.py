@@ -177,6 +177,7 @@ _ALLOWED_STARTUP_TOKENS: frozenset[str] = frozenset({
     "INSTALL_DIR",
     "MOD_ARG",
     "BIND_IP",
+    "SERVER_NAME",
 })
 
 # Tokens, die in ``runtime.env``-Werten substituiert werden duerfen.
@@ -289,15 +290,22 @@ class BlueprintMeta(BaseModel):
     author: str | None = Field(default=None, max_length=128)
     description: str | None = Field(default=None, max_length=1024)
 
-    @field_validator("id")
+    @field_validator("id", mode="before")
     @classmethod
-    def _check_id(cls, v: str) -> str:
-        if not _ID_RE.match(v):
+    def _check_id(cls, v: object) -> object:
+        if not isinstance(v, str):
+            return v
+        # Der sichtbare Name bleibt in ``meta.name``. Fuer Uploads darf die ID
+        # trotzdem wie ein Name eingegeben werden; intern wird sie auf den
+        # weiterhin pfad- und registry-sicheren Slug reduziert.
+        normalized = re.sub(r" +", "_", v.strip().lower())
+        if not _ID_RE.fullmatch(normalized):
             raise ValueError(
-                "meta.id muss aus Kleinbuchstaben, Ziffern oder Unterstrich bestehen "
-                "(Regex ^[a-z0-9_]{1,64}$)."
+                "meta.id darf Buchstaben, Ziffern, Leerzeichen oder Unterstriche "
+                "enthalten; Leerzeichen und Grossbuchstaben werden automatisch "
+                "normalisiert."
             )
-        return v
+        return normalized
 
 
 class BlueprintRuntime(BaseModel):
@@ -319,6 +327,11 @@ class BlueprintRuntime(BaseModel):
     # Erlaubt pro-Blueprint Tuning. Default niedrig; für SCUM/Wine oft 45-120s nötig,
     # bis erste Console-Logs erscheinen (KISS: zentrale Config statt harter Defaults pro Game).
     startupCheckSeconds: float = Field(default=5.0, ge=0.0, le=300.0)
+    # Enges Opt-in fuer Runtimes wie UMU/pressure-vessel, die innerhalb des
+    # bereits rootless laufenden Containers einen User-Namespace erzeugen.
+    # Aktiviert ausschliesslich seccomp=unconfined; cap_drop=ALL,
+    # no-new-privileges und das Verbot von privileged/host-network bleiben.
+    allowUnprivilegedUserNamespaces: bool = Field(default=False)
     # Opt-in fuer den Exec-Tab (POST /servers/{id}/exec). Default aus,
     # weil Exec sicherheitsrelevant ist (User fuehrt Befehle im Container
     # aus). 1.4.7+
@@ -1555,7 +1568,7 @@ BlueprintRuntime.model_rebuild()
 COMMENTED_TEMPLATE_DE: str = """{
   "version": 1,
   "meta": {
-    // Eindeutige ID (nur Kleinbuchstaben, Zahlen, Unterstrich). MSM leitet den gespeicherten Dateinamen daraus ab.
+    // Eindeutige ID. Grossbuchstaben und Leerzeichen werden zu Kleinbuchstaben und Unterstrichen normalisiert.
     "id": "my_custom_server",
     // Name, der in der UI (z.B. im Dropdown) angezeigt wird.
     "name": "Mein Eigener Server",
@@ -1588,6 +1601,9 @@ COMMENTED_TEMPLATE_DE: str = """{
     // Grace-Period für docker stop (SIGTERM dann SIGKILL). Default 30s, 5..600 erlaubt.
     // Höher bei persistenter Welt (Save/Snapshot), damit keine Daten verloren gehen.
     "stopGracePeriodSeconds": 30,
+    // Nur fuer Runtimes wie UMU/pressure-vessel. Default false. Lockert ausschliesslich Docker-Seccomp;
+    // cap-drop=ALL, no-new-privileges, Nicht-root-User und das Host-Netz/privileged-Verbot bleiben aktiv.
+    "allowUnprivilegedUserNamespaces": false,
     // Dateien, die vor dem Start automatisch gepatcht werden sollen (z.B. INI-Dateien)
     "configPatches": []
   },
@@ -1697,7 +1713,7 @@ COMMENTED_TEMPLATE_DE: str = """{
 COMMENTED_TEMPLATE_EN: str = """{
   "version": 1,
   "meta": {
-    // Unique ID (lowercase letters, numbers, underscores only). MSM derives the stored filename from this ID.
+    // Unique ID. Uppercase letters and spaces are normalized to lowercase letters and underscores.
     "id": "my_custom_server",
     // Name displayed in the UI (e.g., in the server creation dropdown).
     "name": "My Custom Server",
@@ -1730,6 +1746,9 @@ COMMENTED_TEMPLATE_EN: str = """{
     // Grace-Period for docker stop (SIGTERM then SIGKILL). Default 30s, range 5..600.
     // Raise for persistent-world servers (save/snapshot) to avoid data loss.
     "stopGracePeriodSeconds": 30,
+    // Only for runtimes such as UMU/pressure-vessel. Defaults to false. Relaxes Docker seccomp only;
+    // cap-drop=ALL, no-new-privileges, non-root user, and host-network/privileged bans remain active.
+    "allowUnprivilegedUserNamespaces": false,
     // Files that should be automatically patched before startup (e.g., INI files)
     "configPatches": []
   },

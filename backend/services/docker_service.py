@@ -58,6 +58,13 @@ _SYSTEM_ENV = {
 _LOG_CONFIG = {"max-size": "10m", "max-file": "3"}
 _HARDENING_CAP_DROP = ["ALL"]
 _HARDENING_SECURITY_OPT = ["no-new-privileges"]
+
+
+def _container_security_options(allow_unprivileged_user_namespaces: bool) -> list[str]:
+    options = list(_HARDENING_SECURITY_OPT)
+    if allow_unprivileged_user_namespaces:
+        options.append("seccomp=unconfined")
+    return options
 # Dedicated image for permission repair (runs as root to chown bind mounts).
 #
 # Purpose of repair_bind_mount_permissions():
@@ -837,6 +844,7 @@ def run_container(
     cap_adds: list[str] | None = None,
     tty: bool = False,  # opt-in for interactive auth/setup flows; default off (existing callers unchanged)
     restart_policy_name: str = "no",
+    allow_unprivileged_user_namespaces: bool = False,
     node: Any | None = None,
 ) -> dict:
     """Startet einen langlebigen Game-Server-Container.
@@ -877,6 +885,7 @@ def run_container(
             tty=tty,
             restart_policy_name=restart_policy_name,
             startup_check_seconds=startup_check_seconds,
+            allow_unprivileged_user_namespaces=allow_unprivileged_user_namespaces,
         )
 
     client, error = _client_or_error()
@@ -914,7 +923,7 @@ def run_container(
         "log_config": LogConfig(type=LogConfig.types.JSON, config=_LOG_CONFIG) if LogConfig else None,
         "cap_drop": _HARDENING_CAP_DROP,
         "cap_add": cap_adds or None,
-        "security_opt": _HARDENING_SECURITY_OPT,
+        "security_opt": _container_security_options(allow_unprivileged_user_namespaces),
         "read_only": read_only_rootfs,
         "environment": env or None,
         "ports": _ports_dict(ports),
@@ -1118,6 +1127,7 @@ def _run_container_via_node(
     tty: bool,
     restart_policy_name: str,
     startup_check_seconds: float,
+    allow_unprivileged_user_namespaces: bool,
 ) -> dict:
     """Map local PortPublish/VolumeBind to agent create payload."""
     from services.node_client import NodeClient, NodeClientError
@@ -1156,6 +1166,7 @@ def _run_container_via_node(
         "tty": tty,
         "restart_policy_name": restart_policy_name,
         "startup_check_seconds": startup_check_seconds,
+        "allow_unprivileged_user_namespaces": allow_unprivileged_user_namespaces,
     }
     body = {k: v for k, v in body.items() if v is not None}
     try:

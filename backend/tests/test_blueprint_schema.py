@@ -117,6 +117,25 @@ def test_minimal_blueprint_is_valid() -> None:
     assert bp.source.type.value == "steam"
 
 
+def test_display_style_blueprint_id_is_normalized_to_safe_slug() -> None:
+    data = _minimal_valid_dict()
+    data["meta"]["id"] = "ARK Survival Ascended ASA MauntARK"
+    data["meta"]["name"] = "ARK Survival Ascended ASA MauntARK"
+
+    blueprint = load_blueprint_dict(data)
+
+    assert blueprint.meta.id == "ark_survival_ascended_asa_mauntark"
+    assert blueprint.meta.name == "ARK Survival Ascended ASA MauntARK"
+
+
+def test_blueprint_id_still_rejects_path_and_shell_characters() -> None:
+    for value in ("../ark", "ark/asa", "ark;asa", "ark$asa"):
+        data = _minimal_valid_dict()
+        data["meta"]["id"] = value
+        with pytest.raises(BlueprintValidationError):
+            load_blueprint_dict(data)
+
+
 def test_runtime_user_accepts_numeric_non_root_uid_gid() -> None:
     d = _minimal_valid_dict()
     d["runtime"]["user"] = "1000:1000"

@@ -79,6 +79,18 @@ describe('BlueprintsDocs page', () => {
     expect(screen.getByText(/Relative directories created inside the server directory/)).toBeInTheDocument()
   })
 
+  it('documents the narrowly scoped user-namespace opt-in', () => {
+    renderDocs()
+    expect(screen.getByText('runtime.allowUnprivilegedUserNamespaces')).toBeInTheDocument()
+    expect(screen.getByText(/Only Docker seccomp is relaxed/)).toBeInTheDocument()
+  })
+
+  it('documents that declared file logs also stream to the visible console', () => {
+    renderDocs()
+    expect(screen.getByText('logs.sources')).toBeInTheDocument()
+    expect(screen.getByText(/visible server console/i)).toBeInTheDocument()
+  })
+
   it('links to the Blueprints page for upload / replace / delete', () => {
     renderDocs()
     const link = screen.getByTestId('docs-link-blueprints') as HTMLAnchorElement

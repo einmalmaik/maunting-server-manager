@@ -210,6 +210,31 @@ describe('Blueprints page', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
+  it('replace accepts a display-style id equivalent to the stored normalized id', async () => {
+    setMe(ownerMe)
+    fetchSpy
+      .mockReturnValueOnce(mockJson(200, sampleList))
+      .mockReturnValueOnce(mockJson(200, { id: 'my_custom' }))
+      .mockReturnValueOnce(mockJson(200, sampleList))
+    renderPage()
+    fireEvent.click(await screen.findByTestId('blueprint-replace-my_custom'))
+
+    const input = screen.getByTestId('blueprints-replace-input') as HTMLInputElement
+    const file = new File(
+      [JSON.stringify({ meta: { id: 'My Custom' } })],
+      'my-custom.blueprint.json',
+      { type: 'application/json' },
+    )
+    Object.defineProperty(input, 'files', { value: [file], configurable: true })
+    fireEvent.change(input)
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3))
+    const [url, options] = fetchSpy.mock.calls[1] as [string, RequestInit]
+    expect(url).toBe('/api/blueprints/import')
+    expect(options.method).toBe('POST')
+    expect(JSON.parse(String(options.body)).meta.id).toBe('My Custom')
+  })
+
   it('replace rejects file with mismatching meta.id (client-side guard)', async () => {
     setMe(ownerMe)
     fetchSpy.mockReturnValueOnce(mockJson(200, sampleList))

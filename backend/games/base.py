@@ -1319,6 +1319,13 @@ class GamePlugin(ABC):
             tmpfs_paths=self.container_tmpfs_paths(server),
             extra_networks=self.container_extra_networks(server),
             startup_check_seconds=getattr(getattr(self.get_blueprint(), "runtime", None), "startupCheckSeconds", None) or 2.0,
+            allow_unprivileged_user_namespaces=bool(
+                getattr(
+                    getattr(self.get_blueprint(), "runtime", None),
+                    "allowUnprivilegedUserNamespaces",
+                    False,
+                )
+            ),
             server_id=server.id,  # enables pull progress in console
             node=node,
         )

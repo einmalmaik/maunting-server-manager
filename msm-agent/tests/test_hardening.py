@@ -51,6 +51,33 @@ def test_cap_add_rejected() -> None:
         )
 
 
+def test_user_namespace_opt_in_only_relaxes_seccomp(monkeypatch) -> None:
+    """UMU darf unshare nutzen, ohne Privileged, Host-Netz oder Caps zu bekommen."""
+    container = MagicMock(id="abc123", attrs={"State": {"Status": "running"}})
+    docker_client = SimpleNamespace(
+        images=SimpleNamespace(get=MagicMock()),
+        containers=SimpleNamespace(
+            get=MagicMock(side_effect=NotFound("missing")),
+            run=MagicMock(return_value=container),
+        ),
+        networks=SimpleNamespace(get=MagicMock()),
+    )
+    monkeypatch.setattr("services.docker_service._get_client", lambda: docker_client)
+
+    result = create_container(
+        name="msm-srv-105",
+        image="example.invalid/asa-runtime:test",
+        allow_unprivileged_user_namespaces=True,
+    )
+
+    assert result["ok"] is True
+    kwargs = docker_client.containers.run.call_args.kwargs
+    assert kwargs["security_opt"] == ["no-new-privileges", "seccomp=unconfined"]
+    assert kwargs["cap_drop"] == ["ALL"]
+    assert kwargs.get("cap_add") is None
+    assert kwargs.get("privileged", False) is False
+
+
 def test_api_rejects_privileged(client: TestClient, auth_headers: dict, monkeypatch) -> None:
     # Ensure we don't hit real docker
     r = client.post(

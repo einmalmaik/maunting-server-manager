@@ -20,6 +20,26 @@ Blueprints sind Daten, keine Skripte:
 
 Erlaubt sind nur whitelisted Runtime-Fähigkeiten.
 
+### Unprivilegierte User-Namespaces
+
+`runtime.allowUnprivilegedUserNamespaces` ist standardmäßig `false`. Das Feld
+ist nur für Container-Runtimes wie UMU/pressure-vessel gedacht, die innerhalb
+des bereits rootless laufenden Game-Containers einen eigenen unprivilegierten
+User-Namespace erzeugen müssen. Bei `true` ergänzt MSM ausschließlich
+`seccomp=unconfined`.
+
+Die übrigen Grenzen bleiben hart: `cap-drop=ALL`, `no-new-privileges`, ein
+numerischer Nicht-root-User sowie die Verbote für `privileged` und Host-Netz.
+Das Opt-in darf nicht als allgemeiner Kompatibilitäts-Fallback verwendet werden.
+
+Die ASA-Runtime unter `containers/asa-runtime` pinnt beide Basisimages per
+Digest, UMU 1.4.0 per SHA-256 und GE-Proton10-34 per im Basisimage geprüfter
+Versionsdatei. Das Image enthält keine Server-Credentials und kapselt nur den
+Kompatibilitäts-Layer, Steam-SDK-Bibliotheken und den ASA-Preflight. UMU ist
+GPL-3.0; der Build veröffentlicht SBOM und Provenance. Ein Versionswechsel
+erfordert erneut einen vollständigen ASA-Kaltstart bis Weltdatei, gebundenen
+Ports und `advertising for join`.
+
 ## Für Einsteiger: Was trägst du wo ein?
 
 Eine Blueprint beschreibt einen Server-Typ, nicht einen einzelnen Server. Der
@@ -295,6 +315,7 @@ Erlaubte Platzhalter:
 - `{CUSTOM_PORT_1}`, `{CUSTOM_PORT_2}`, ... `{CUSTOM_PORT_<N>}` (für zusätzliche custom Ports in Blueprints)
 - `{INSTALL_DIR}`
 - `{MOD_ARG}`
+- `{SERVER_NAME}` für den individuellen Namen des MSM-Servers
 - `{ENV.<KEY>}` für eigene Werte aus `runtime.env`, z. B. `{ENV.SERVER_NAME}`
 
 `runtime.env`-Werte dürfen nur Port-Platzhalter nutzen:
@@ -711,12 +732,20 @@ können weder über JSON noch über den Webeditor aktiviert werden.
 
 `logs.sources` enthält maximal 16 Einträge: `stdout` oder sichere relative Pfade
 mit höchstens einem einfachen Dateinamen-Wildcard, beispielsweise
-`logs/*.log`. `max_tail_bytes` liegt zwischen 1.024 und 1.048.576.
+`logs/*.log`. `stdout` bleibt der Docker-/Container-Stream. Relative Dateipfade
+werden zusätzlich live in der Server-Konsole angezeigt und weiterhin vom
+Guardian für Diagnose und Recovery genutzt. `max_tail_bytes` liegt zwischen
+1.024 und 1.048.576.
 
 Vor Persistierung oder Übertragung werden die in `logs.redact` gewählten
 Redactoren angewendet. Erlaubt sind `discord_token`, `api_key`,
 `authorization_header`, `database_url`, `jwt` sowie geprüfte Einträge mit dem
 Präfix `regex:`.
+
+Unabhängig von der Blueprint-Liste redigiert die sichtbare Konsole bekannte
+Passwort-, Token-, Secret-, API-Key- und Authorization-Zuweisungen. So darf eine
+Game-Logzeile mit vollständiger Startzeile keine Zugangsdaten an den Browser
+ausliefern.
 
 `diagnostics.parsers` erlaubt ausschließlich `linux-oom`, `java-stacktrace`,
 `nodejs-stacktrace`, `port-conflict`, `missing-runtime`, `corrupted-config` und

@@ -415,6 +415,9 @@ export function BlueprintsDocs() {
               <FieldRow field="runtime.configPatches" type="list" required={false}>{t('docs.reference.runtimeConfigPatches')}</FieldRow>
               <FieldRow field="runtime.stopGracePeriodSeconds" type="integer" required={false}>{t('docs.reference.runtimeStopGracePeriodSeconds')}</FieldRow>
               <FieldRow field="runtime.startupCheckSeconds" type="float" required={false}>{t('docs.reference.runtimeStartupCheckSeconds')}</FieldRow>
+              <FieldRow field="runtime.allowUnprivilegedUserNamespaces" type="boolean" required={false}>
+                {t('docs.reference.runtimeAllowUnprivilegedUserNamespaces', 'Allows nested unprivileged user namespaces for runtimes such as UMU/pressure-vessel. Default: false. Only Docker seccomp is relaxed; cap-drop=ALL, no-new-privileges, non-root user, and the host-network/privileged bans remain active.')}
+              </FieldRow>
               {/* v1.4.7+: Exec-Tab-Opt-in. Default false. Erlaubt authentifizierten
                   Usern mit Permission ``server.console.exec``, One-Shot-Befehle
                   im MSM-Container auszufuehren (argv, kein Shell). Siehe
@@ -488,6 +491,13 @@ export function BlueprintsDocs() {
               <FieldRow field="mods.modListContent" type="enum" required={false}>{t('docs.reference.modsModListContent')}</FieldRow>
               <FieldRow field="mods.postInstall" type="list" required={false}>{t('docs.reference.modsPostInstall')}</FieldRow>
               <FieldRow field="backup.includePaths" type="list" required={false}>{t('docs.reference.backupIncludePaths')}</FieldRow>
+            </FieldTable>
+
+            <h3 className="font-bold text-primary mt-6 mb-2">logs</h3>
+            <FieldTable>
+              <FieldRow field="logs.sources" type="list" required={false}>{t('docs.reference.logsSources')}</FieldRow>
+              <FieldRow field="logs.redact" type="list" required={false}>{t('docs.reference.logsRedact')}</FieldRow>
+              <FieldRow field="logs.max_tail_bytes" type="integer" required={false}>{t('docs.reference.logsMaxTailBytes')}</FieldRow>
             </FieldTable>
           </section>
 

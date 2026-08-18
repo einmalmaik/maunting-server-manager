@@ -21,6 +21,7 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import type { BlueprintListEntry } from '@/types'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { BlueprintBuilder, type BlueprintBuilderMode } from '@/features/blueprints/BlueprintBuilder'
+import { normalizeBlueprintId } from '@/features/blueprints/contract'
 
 /** Hilfsfunktion: lesbarer Label pro source_type */
 function sourceLabel(src: string): string {
@@ -115,7 +116,10 @@ export function Blueprints() {
         body && typeof body === 'object' && 'meta' in body
           ? ((body as { meta?: { id?: unknown } }).meta?.id ?? null)
           : null
-      if (incomingId !== expectedId) {
+      if (
+        typeof incomingId !== 'string'
+        || normalizeBlueprintId(incomingId) !== normalizeBlueprintId(expectedId)
+      ) {
         toast.error(t('blueprints.replaceIdMismatch', { expected: expectedId }))
         return
       }

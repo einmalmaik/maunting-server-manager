@@ -25,6 +25,20 @@ describe('Blueprint builder contract', () => {
     expect(validateBlueprintDraft(draft).map(issue => issue.path)).toEqual(expect.arrayContaining(['meta.id', 'runtime.startup', 'ports.1', 'source.http.url']))
   })
 
+  it('normalizes display-style blueprint ids without changing the visible name', () => {
+    const draft = createBlueprintDraft()
+    draft.meta.id = 'ARK Survival Ascended ASA MauntARK'
+    draft.meta.name = 'ARK Survival Ascended ASA MauntARK'
+
+    const normalized = normalizeBlueprintDraft(draft)
+
+    expect(normalized.meta.id).toBe('ark_survival_ascended_asa_mauntark')
+    expect(normalized.meta.name).toBe('ARK Survival Ascended ASA MauntARK')
+    expect(validateBlueprintDraft(normalized)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: 'meta.id' })]),
+    )
+  })
+
   it('omits optional empty blocks without changing the schema version', () => {
     const normalized = normalizeBlueprintDraft(createBlueprintDraft())
     expect(normalized.version).toBe(1)

@@ -127,6 +127,24 @@ def test_install_dir_substitution() -> None:
     assert argv == ["/srv/app/server", "-port=80"]
 
 
+def test_server_name_substitution_keeps_spaces_inside_one_argv_element() -> None:
+    bp = load_blueprint_dict(_bp_with_startup(
+        "/data/server TheIsland?listen?SessionName={SERVER_NAME}?Port={GAME_PORT}"
+    ))
+
+    argv = render_argv(
+        bp,
+        install_dir="/data",
+        ports={"game": 7777, "query": None, "rcon": None},
+        server_name="Maunt ARK",
+    )
+
+    assert argv == [
+        "/data/server",
+        "TheIsland?listen?SessionName=Maunt ARK?Port=7777",
+    ]
+
+
 def test_env_token_substitution() -> None:
     bp = load_blueprint_dict({
         "version": 1,

@@ -374,6 +374,7 @@ Stand: 2026-05-29. Diese Sektion ist MSM-spezifisch und gilt für alle Game-/Voi
 - Der `msm`-User darf nicht Mitglied der globalen `docker`-Gruppe sein. `/var/run/docker.sock` ist für MSM tabu.
 - Jeder Server erhält einen stabilen Container-Namen `msm-srv-<server_id>`. Das ist auch `server.container_name` in der DB.
 - Container starten mit `--cap-drop=ALL --security-opt=no-new-privileges --restart=on-failure:5 --log-driver=json-file --log-opt max-size=10m --log-opt max-file=3`.
+- `runtime.allowUnprivilegedUserNamespaces=true` ist ein enges, standardmäßig deaktiviertes Opt-in für UMU/pressure-vessel. Es ergänzt ausschließlich `seccomp=unconfined`; `cap-drop=ALL`, `no-new-privileges`, Nicht-root-User sowie die Verbote für `privileged` und Host-Netz bleiben unverändert. Panel und Node-Agent müssen denselben Vertrag erzwingen.
 - Bind-Mounts: Host `<install_dir>` → Container `/data` oder den in der Blueprint gesetzten `runtime.workdir` (z. B. `/home/container` bei Pterodactyl/Wine-Images). Vor jedem Container-Start normalisiert `docker_service.repair_bind_mount_permissions()` Owner/Rechte im Container-Kontext. Der Runtime-Owner ist standardmäßig die Panel-UID/GID; Blueprints dürfen mit `runtime.user` einen numerischen nicht-root User wie `1000:1000` setzen. Für `/home/container`/Pterodactyl-Yolks gilt `1000:1000` als sicherer Default, damit Wine-Profile wie `.wine` dem tatsächlich laufenden Container-User gehören.
 - Game-Server-Ports müssen `>1024` bleiben. Rootless Docker bekommt keinen `setcap`-Workaround für privilegierte Ports.
 
