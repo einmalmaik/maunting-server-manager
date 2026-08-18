@@ -1,0 +1,59 @@
+name: Publish ASA runtime image
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "containers/asa-runtime/**"
+      - ".github/workflows/asa-runtime-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: asa-runtime-image
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/msm-asa-runtime
+  STABLE_TAG: ge-proton10-34-umu1.4.0
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push pinned ASA runtime
+        uses: docker/build-push-action@v6
+        with:
+          context: containers/asa-runtime
+          push: true
+          platforms: linux/amd64
+          provenance: true
+          sbom: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.STABLE_TAG }}
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+
+      - name: Make repository runtime image public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request PATCH \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/user/packages/container/msm-asa-runtime" \
+            --data '{"visibility":"public"}'

@@ -120,6 +120,7 @@ def test_remote_container_payload_preserves_runtime_contract():
             tty=True,
             restart_policy_name="on-failure",
             startup_check_seconds=2,
+            allow_unprivileged_user_namespaces=True,
             node=node,
         )
 
@@ -131,6 +132,7 @@ def test_remote_container_payload_preserves_runtime_contract():
     assert body["tty"] is True
     assert body["restart_policy_name"] == "on-failure"
     assert body["startup_check_seconds"] == 2
+    assert body["allow_unprivileged_user_namespaces"] is True
 
 
 def test_remote_ephemeral_container_runs_on_selected_node():

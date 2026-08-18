@@ -38,6 +38,7 @@ class CreateContainerRequest(BaseModel):
     tty: bool = False
     restart_policy_name: str = Field(default="no", pattern="^(no|on-failure|unless-stopped)$")
     startup_check_seconds: float = Field(default=0.0, ge=0, le=300)
+    allow_unprivileged_user_namespaces: bool = False
     # Hardening traps — if clients send these, we reject explicitly
     privileged: bool | None = None
     cap_add: list[str] | None = None
@@ -116,6 +117,7 @@ def create_container(body: CreateContainerRequest) -> dict[str, Any]:
             tty=body.tty,
             restart_policy_name=body.restart_policy_name,
             startup_check_seconds=body.startup_check_seconds,
+            allow_unprivileged_user_namespaces=body.allow_unprivileged_user_namespaces,
             privileged=body.privileged,
             cap_add=body.cap_add,
             network_mode=body.network_mode,

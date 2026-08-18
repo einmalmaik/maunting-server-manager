@@ -220,6 +220,7 @@ def create_container(
     tty: bool = False,
     restart_policy_name: str = "no",
     startup_check_seconds: float = 0.0,
+    allow_unprivileged_user_namespaces: bool = False,
     privileged: bool | None = None,
     cap_add: list[str] | None = None,
     network_mode: str | None = None,
@@ -294,7 +295,9 @@ def create_container(
         ),
         "cap_drop": list(_HARDENING_CAP_DROP),
         "cap_add": sorted(requested_caps) or None,
-        "security_opt": list(_HARDENING_SECURITY_OPT),
+        "security_opt": list(_HARDENING_SECURITY_OPT) + (
+            ["seccomp=unconfined"] if allow_unprivileged_user_namespaces else []
+        ),
         "read_only": bool(read_only_rootfs),
         "environment": env or None,
         "ports": ports or None,

@@ -319,6 +319,11 @@ class BlueprintRuntime(BaseModel):
     # Erlaubt pro-Blueprint Tuning. Default niedrig; für SCUM/Wine oft 45-120s nötig,
     # bis erste Console-Logs erscheinen (KISS: zentrale Config statt harter Defaults pro Game).
     startupCheckSeconds: float = Field(default=5.0, ge=0.0, le=300.0)
+    # Enges Opt-in fuer Runtimes wie UMU/pressure-vessel, die innerhalb des
+    # bereits rootless laufenden Containers einen User-Namespace erzeugen.
+    # Aktiviert ausschliesslich seccomp=unconfined; cap_drop=ALL,
+    # no-new-privileges und das Verbot von privileged/host-network bleiben.
+    allowUnprivilegedUserNamespaces: bool = Field(default=False)
     # Opt-in fuer den Exec-Tab (POST /servers/{id}/exec). Default aus,
     # weil Exec sicherheitsrelevant ist (User fuehrt Befehle im Container
     # aus). 1.4.7+
