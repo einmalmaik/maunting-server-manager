@@ -414,7 +414,7 @@ def test_the_worker_never_blames_a_truncated_order() -> None:
     assert "vollständig so angekommen" in worker
     assert "abgeschnitten, gekürzt" in worker
     # Und der erlaubte Weg: sagen, **welche** Angabe fehlt.
-    assert "sag, welche" in worker
+    assert "dann nenne, welche" in worker
 
 
 def test_only_the_worker_gets_the_truncation_rule() -> None:
@@ -426,3 +426,61 @@ def test_only_the_worker_gets_the_truncation_rule() -> None:
     """
     assert "abgeschnitten, gekürzt" not in ai_prompt.build()
     assert "abgeschnitten, gekürzt" not in ai_prompt.build(rolle="gehirn")
+
+
+# ── Wen der Worker eigentlich anspricht ───────────────────────────────
+#
+# Der Betreiber am 19.08.2026: "Nee, er spricht nicht mit mir. Ich sehe die
+# Texte vom Worker nicht. Ich kann zwar in diesen Chat reingehen, um zu sehen,
+# was er macht, einfach nur wenn man neugierig ist, aber man selber sieht das
+# nicht. Er schickt das zum Orchestrator, der Orchestrator formuliert es fuer
+# den User."
+#
+# Der Prompt sagte bis dahin "der Benutzer sieht dich nie direkt: dein
+# Abschlusstext wird ihm vom Panel ueberbracht" — und legte damit genau die
+# falsche Adressierung nahe. Der Worker schrieb daraufhin "Deine Nachricht
+# bricht ab" und "Welche Werte soll ich setzen?", als saesse der Mensch davor.
+# Tatsaechlich liest `ai_meldestelle.lauf_beendet` den Bericht und reicht ihn
+# als Meldung an das Gehirn, das daraus in eigener Stimme formuliert.
+
+
+def test_the_worker_reports_to_the_brain_not_to_the_human() -> None:
+    """Der Worker schreibt eine Meldung, keine Nachricht an einen Menschen.
+
+    Sein Text geht an die beauftragende KI (`ai_meldestelle`), nie direkt an
+    den Betreiber. Eine Anrede im Du ist dort nicht nur ueberfluessig, sie ist
+    an die falsche Stelle gerichtet — und liest sich im Worker-Fenster, in das
+    der Betreiber aus Neugier hineinschaut, wie ein Gespraech, das gar keines
+    ist.
+    """
+    worker = ai_prompt.build(rolle="worker")
+
+    assert "Dein Gegenüber ist nicht" in worker
+    assert "die KI, die dich beauftragt hat" in worker
+    assert "keine Anrede" in worker
+    # Und der alte, irrefuehrende Satz ist weg.
+    assert "dein Abschlusstext wird ihm vom Panel überbracht" not in worker
+
+
+def test_the_worker_question_goes_to_the_brain() -> None:
+    """Auch `worker_frage` adressiert die KI, nicht den Menschen.
+
+    Die Frage wandert ueber dieselbe Meldestelle; das Gehirn stellt sie dem
+    Menschen dann in seiner eigenen Stimme. Stuende hier "wird ihm
+    ueberbracht", formulierte der Worker sie wieder als Du-Frage.
+    """
+    worker = ai_prompt.build(rolle="worker")
+
+    assert "die Frage geht an die beauftragende KI" in worker
+
+
+def test_only_the_brain_speaks_to_the_human() -> None:
+    """Die Gegenprobe: das Gehirn behaelt seine menschliche Ansprache.
+
+    Der Umbau des Worker-Tons darf nicht auf die Rolle abfaerben, die
+    tatsaechlich mit dem Betreiber redet.
+    """
+    gehirn = ai_prompt.build(rolle="gehirn")
+
+    assert "Dein Gegenüber ist nicht" not in gehirn
+    assert "der Charakter, mit dem der Benutzer" in gehirn

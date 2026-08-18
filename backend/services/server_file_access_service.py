@@ -736,22 +736,34 @@ def _apply_permissions(install_dir: str, target: Path) -> None:
         # Was der Eigentuemer mindestens koennen muss, damit das Panel
         # weiterarbeiten kann: Verzeichnisse betreten und lesen, Dateien lesen
         # und schreiben.
-        mindestens = 0o700 if path.is_dir() or jetzt & 0o111 else 0o600
-        ziel = jetzt | mindestens
-        # **Und der Spielprozess muss drankommen.** Gehoert der Pfad dem Panel,
-        # obwohl der Server unter einer anderen UID laeuft, ist der Modus die
-        # einzige verbliebene Bruecke: `chown` scheitert fuer einen
-        # unprivilegierten Prozess (Linux erlaubt kein Verschenken von
-        # Dateien), und ohne Gruppen-/Weltrechte kann der Server seine eigene
-        # Konfiguration danach nicht mehr lesen. Genau daran ist am 18.08.2026
-        # ein ARK-Server nicht mehr gestartet.
+        ausfuehrbar = path.is_dir() or bool(jetzt & 0o111)
+        ziel = jetzt | (0o700 if ausfuehrbar else 0o600)
+        # **Und der Spielprozess muss drankommen.** Er laeuft unter einer
+        # anderen UID (Rootless Docker), und `chown` scheitert fuer einen
+        # unprivilegierten Prozess — Linux erlaubt kein Verschenken von
+        # Dateien. Bleibt der Modus.
         #
-        # Der Zugriffsschutz haengt nicht hier, sondern eine Ebene hoeher:
-        # `/opt/msm` darf nur `msm` betreten, und wer im Panel an die Dateien
-        # kommt, entscheidet `server.files.read`/`.write`.
+        # Der saubere Weg dafuer ist die **Gruppe**: `scripts/fix-server-permissions.sh`
+        # legt je gemappter GID eine Host-Gruppe an, macht `msm` zum Mitglied
+        # und setzt `g+s` auf die Verzeichnisse, damit neue Dateien sie erben.
+        # Teilen sich Panel und Spielprozess also bereits eine Gruppe, reichen
+        # Gruppenrechte — und "alle anderen" bleiben aussen vor.
+        #
+        # Weltrechte sind nur der **Notnagel** fuer den Fall, dass diese
+        # Gruppe fehlt: ein frisch angelegter Server vor dem ersten Lauf des
+        # Skripts, oder eine Installation, die es nie ausgefuehrt hat. Ohne
+        # ihn koennte der Server seine eigene Konfiguration nicht lesen — daran
+        # ist am 18.08.2026 ein ARK-Server nicht mehr gestartet. Mit ihm steht
+        # die Datei einen Moment lang offener als noetig, bis das Skript sie
+        # einsammelt.
+        #
+        # Der Zugriffsschutz haengt ohnehin nicht an diesem Modus, sondern eine
+        # Ebene hoeher: `/opt/msm` darf nur `msm` betreten, und wer im Panel an
+        # die Dateien kommt, entscheidet `server.files.read`/`.write`.
         if info.st_uid == os.getuid():
-            ziel |= 0o070 if path.is_dir() or jetzt & 0o111 else 0o060
-            ziel |= 0o007 if path.is_dir() or jetzt & 0o111 else 0o006
+            ziel |= 0o070 if ausfuehrbar else 0o060
+            if info.st_gid not in os.getgroups():
+                ziel |= 0o007 if ausfuehrbar else 0o006
         if ziel == jetzt:
             return
         try:

@@ -170,6 +170,70 @@ def test_a_panel_owned_file_stays_reachable_for_the_game_process(
     )
 
 
+def test_a_shared_group_makes_world_permissions_unnecessary(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Teilen sich Panel und Spielprozess eine Gruppe, bleibt die Welt aussen vor.
+
+    Das ist der Unterschied zwischen "funktioniert" und "sauber". Weltweite
+    Schreibrechte loesen das Problem auch, aber sie oeffnen die Datei fuer
+    jeden Prozess auf dem Host. `scripts/fix-server-permissions.sh` legt
+    stattdessen je gemappter GID eine Gruppe an und macht `msm` zum Mitglied —
+    danach reichen Gruppenrechte.
+    """
+    install = tmp_path / "srv"
+    install.mkdir()
+    datei = install / "GameUserSettings.ini"
+    datei.write_text("x=1\n", encoding="utf-8")
+    datei.chmod(0o600)
+
+    # Der Prozess ist Mitglied in der Gruppe der Datei.
+    monkeypatch.setattr(
+        file_edit_service.os, "getgroups", lambda: [datei.stat().st_gid]
+    )
+    monkeypatch.setattr(
+        "services.server_file_access_service.os.getgroups",
+        lambda: [datei.stat().st_gid],
+    )
+
+    _apply_permissions(str(install), datei)
+
+    modus = datei.stat().st_mode & 0o777
+    assert modus & 0o060 == 0o060, "die Gruppe muss lesen und schreiben duerfen"
+    assert modus & 0o007 == 0, (
+        "mit geteilter Gruppe sind Weltrechte unnoetig — und damit falsch"
+    )
+
+
+def test_without_a_shared_group_the_world_bit_is_the_fallback(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Fehlt die Gruppe, bleibt nur der Notnagel — sonst startet der Server nicht.
+
+    Das ist der Zustand eines frisch angelegten Servers, bevor
+    `fix-server-permissions.sh` ihn eingesammelt hat. Ohne Weltrechte koennte
+    der Spielprozess seine eigene Konfiguration nicht lesen; genau daran ist
+    am 18.08.2026 ein ARK-Server nicht mehr gestartet.
+    """
+    install = tmp_path / "srv"
+    install.mkdir()
+    datei = install / "GameUserSettings.ini"
+    datei.write_text("x=1\n", encoding="utf-8")
+    datei.chmod(0o600)
+
+    # Keine gemeinsame Gruppe.
+    monkeypatch.setattr(
+        "services.server_file_access_service.os.getgroups", lambda: [4242]
+    )
+
+    _apply_permissions(str(install), datei)
+
+    modus = datei.stat().st_mode & 0o777
+    assert modus & 0o006 == 0o006, (
+        "ohne gemeinsame Gruppe sperrt die Datei den Spielprozess aus"
+    )
+
+
 def test_permissions_are_never_narrowed_below_what_the_game_needs(
     tmp_path: Path,
 ) -> None:
