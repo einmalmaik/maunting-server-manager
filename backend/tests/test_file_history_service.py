@@ -84,3 +84,91 @@ def test_history_fails_closed_without_plaintext_fallback(
 
     assert list(history_root.rglob("*.enc")) == []
     assert list(history_root.rglob("index.json")) == []
+
+
+# ── Fremder Eigentuemer im Versionsverlauf ────────────────────────────
+#
+# Gemeldet am 18.08.2026: der Betreiber konnte in **keinem** Server mehr eine
+# Datei speichern, ueberall "Datei konnte nicht gespeichert werden" (HTTP 500).
+# Ursache war nicht die Zieldatei, sondern der Verlauf daneben:
+#
+#   os.chmod('/opt/msm/.msm-file-history/89/f1209d4b…')
+#   PermissionError: [Errno 1] Operation not permitted
+#
+# Ein als root gelaufenes Wartungsskript hatte den Verlauf angelegt. `chmod`
+# wirft `EPERM` bei fremdem Eigentuemer — auch dann, wenn die Rechte laengst
+# stimmen und hineingeschrieben werden darf. Weil der Verlauf allen Servern
+# gemeinsam ist, fiel damit das Speichern ueberall gleichzeitig aus.
+
+
+def test_a_foreign_owner_does_not_block_saving(
+    history_root: Path,
+    fake_dis: dict[str, tuple[str, str | None]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ein nicht setzbarer Modus verhindert den Snapshot nicht.
+
+    Der Modus ist eine Absicherung, kein Selbstzweck: der Verlauf enthaelt
+    verschluesselte Dateiinhalte, deshalb 0700. Duerfen wir ihn nicht setzen,
+    ist das eine Meldung wert — aber kein Grund, dem Menschen das Speichern
+    der Datei zu verweigern, um die es ihm gerade geht.
+    """
+    def kein_chmod(_pfad, _modus):
+        raise PermissionError(1, "Operation not permitted")
+
+    # Nur das **Verzeichnis** ist fremd. Die Snapshot-Datei legt der Dienst
+    # gleich selbst an (`os.fchmod` auf dem offenen Deskriptor), sie gehoert
+    # also immer uns — genau wie im gemeldeten Fall, wo der Verlaufsordner
+    # root gehoerte, aber jede neu geschriebene Datei dem Panel.
+    echtes_chmod = file_history_service.os.chmod
+
+    def nur_verzeichnis_gesperrt(pfad, modus):
+        if Path(pfad).is_dir():
+            return kein_chmod(pfad, modus)
+        return echtes_chmod(pfad, modus)
+
+    monkeypatch.setattr(file_history_service.os, "chmod", nur_verzeichnis_gesperrt)
+
+    assert file_history_service.snapshot(11, "server.ini", "Wert=1", 4)
+    versionen = file_history_service.list_versions(11, "server.ini")
+    assert len(versionen) == 1
+    # Und der Inhalt ist trotzdem verschluesselt abgelegt — der Fallback macht
+    # den Verlauf nicht unsicherer, er macht ihn nur nicht zur Sperre.
+    verschluesselt = list(history_root.rglob("*.enc"))
+    assert len(verschluesselt) == 1
+    assert "Wert=1" not in verschluesselt[0].read_text(encoding="utf-8")
+
+
+def test_a_correct_mode_is_not_set_again(
+    history_root: Path,
+    fake_dis: dict[str, tuple[str, str | None]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stimmt der Modus schon, wird gar nicht erst `chmod` gerufen.
+
+    Das ist die Haelfte des Fixes, die den Fehler ueberhaupt vermeidet statt
+    ihn nur abzufangen: im Normalbetrieb legt das Panel das Verzeichnis selbst
+    an, der Modus stimmt ab der ersten Sekunde, und ein `chmod` waere bei
+    jedem einzelnen Speichervorgang ein unnoetiger Systemaufruf, der bei
+    fremdem Eigentuemer wirft.
+    """
+    aufrufe: list[int] = []
+    echtes_chmod = file_history_service.os.chmod
+
+    def zaehlend(pfad, modus):
+        # Nur Verzeichnisse zaehlen: die Snapshot-Dateien bekommen ihren Modus
+        # ohnehin bei jedem Schreiben neu, und um die geht es hier nicht.
+        if Path(pfad).is_dir():
+            aufrufe.append(modus)
+        return echtes_chmod(pfad, modus)
+
+    monkeypatch.setattr(file_history_service.os, "chmod", zaehlend)
+
+    file_history_service.snapshot(12, "a.ini", "x=1", 4)
+    erste_runde = len(aufrufe)
+    # Zweiter Snapshot in dasselbe Verzeichnis: der Modus stimmt bereits.
+    file_history_service.snapshot(12, "a.ini", "x=2", 4)
+
+    assert len(aufrufe) == erste_runde, (
+        "chmod wurde erneut gerufen, obwohl der Modus schon stimmte"
+    )

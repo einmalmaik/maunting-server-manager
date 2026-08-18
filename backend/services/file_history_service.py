@@ -10,8 +10,10 @@ import base64
 import gzip
 import hashlib
 import json
+import logging
 import os
 import re
+import stat
 import tempfile
 import threading
 import time
@@ -22,6 +24,8 @@ from typing import Any
 from config import settings
 from services.dis_client import DisClient
 from services.file_edit_service import content_revision
+
+logger = logging.getLogger(__name__)
 
 MAX_HISTORY_EDIT_SIZE = 512 * 1024
 MAX_VERSIONS_PER_FILE = 3
@@ -47,7 +51,29 @@ def _directory(server_id: int, relative_path: str) -> Path:
         raise ValueError("Invalid server id")
     directory = _root() / str(server_id) / _file_key(relative_path)
     directory.mkdir(parents=True, exist_ok=True)
-    os.chmod(directory, 0o700)
+    # `chmod` nur, wenn es noetig **und** erlaubt ist.
+    #
+    # `os.chmod` wirft `EPERM`, sobald das Verzeichnis einem anderen Benutzer
+    # gehoert — selbst dann, wenn die Rechte laengst stimmen und das Panel
+    # hineinschreiben darf. Genau das ist am 18.08.2026 passiert: ein als root
+    # gelaufenes Wartungsskript hatte den Versionsverlauf angelegt, danach
+    # scheiterte **jeder** Speichervorgang im Panel mit einem 500 — und zwar
+    # bei allen Servern gleichzeitig, weil der Verlauf allen gemeinsam ist.
+    #
+    # Der Modus ist eine Absicherung (0700, der Verlauf enthaelt
+    # verschluesselte Dateiinhalte), kein Selbstzweck. Stimmt er bereits, gibt
+    # es nichts zu tun. Stimmt er nicht und wir duerfen ihn nicht setzen, ist
+    # das eine Meldung wert — aber kein Grund, das Speichern der Datei
+    # abzubrechen, um die es dem Menschen gerade geht.
+    try:
+        if stat.S_IMODE(directory.stat().st_mode) != 0o700:
+            os.chmod(directory, 0o700)
+    except PermissionError:
+        logger.warning(
+            "Versionsverlauf: Rechte nicht setzbar (fremder Eigentuemer) "
+            "server_id=%s",
+            server_id,
+        )
     return directory
 
 

@@ -145,6 +145,24 @@ def write_text(
             raise FileRevisionConflict(current_revision)
 
         previous_mode = stat_module.S_IMODE(target.stat().st_mode) if target.exists() else 0o644
+        # Wem die Datei bisher gehoerte. Unter Rootless Docker ist das der
+        # **Spielprozess** (gemappte UID aus /etc/subuid) und nicht das Panel.
+        #
+        # Geschrieben wird ueber eine temporaere Datei mit `os.replace`, und
+        # die neue gehoert dem, der sie angelegt hat — also dem Panel. Ohne
+        # das `chown` unten wechselt jede gespeicherte Datei stillschweigend
+        # den Eigentuemer, und der Server kann seine eigene Konfiguration
+        # danach nicht mehr lesen. Genau so ist am 18.08.2026 ein ARK-Server
+        # nach einer Konfigurationsaenderung nicht mehr gestartet:
+        #
+        #   Permission denied: '…/WindowsServer/GameUserSettings.ini'
+        #
+        # `None` heisst „Datei ist neu“ — dann gibt es keinen vorherigen
+        # Eigentuemer, den man erhalten koennte.
+        previous_owner: tuple[int, int] | None = None
+        if target.exists():
+            info = target.stat()
+            previous_owner = (info.st_uid, info.st_gid)
         temp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
@@ -158,6 +176,20 @@ def write_text(
                 temp_file.flush()
                 os.fsync(temp_file.fileno())
                 temp_path = Path(temp_file.name)
+            # Eigentuemer **vor** dem Ersetzen setzen: danach traegt das Ziel
+            # schon den endgueltigen Namen, und ein Fehlschlag hinterliesse
+            # eine Datei, die der Server nicht lesen kann.
+            #
+            # Scheitert es (kein CAP_CHOWN, fremder Eigentuemer), bleibt es
+            # beim Panel als Eigentuemer — der Modus unten oeffnet die Datei
+            # dann fuer Gruppe und Andere, damit der Server sie trotzdem
+            # lesen kann. Ein harter Abbruch waere hier falsch: der Inhalt
+            # ist geschrieben, und der Mensch wartet auf ein Ergebnis.
+            if previous_owner is not None:
+                try:
+                    os.chown(temp_path, previous_owner[0], previous_owner[1])
+                except (PermissionError, OSError):
+                    pass
             os.replace(temp_path, target)
             temp_path = None
             os.chmod(target, previous_mode)

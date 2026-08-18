@@ -696,11 +696,71 @@ def delete_server_text(
 
 
 def _apply_permissions(install_dir: str, target: Path) -> None:
+    """Haelt die Rechte so eng wie moeglich — **ohne** den Spielprozess auszusperren.
+
+    Die Regel war einmal hart: jede geschriebene Datei bekam ``0640``, jedes
+    Verzeichnis darueber ``0750``. Das stimmt, solange Panel und Spielprozess
+    derselbe Benutzer sind. Unter Rootless Docker sind sie es nicht — das
+    Panel laeuft als ``msm``, der Spielprozess als gemappte UID aus
+    ``/etc/subuid``. ``0640`` heisst dort: **der Server kann seine eigene
+    Konfiguration nicht mehr lesen.**
+
+    Gemeldet am 18.08.2026, und zwar von beiden Seiten: erst startete ARK
+    nicht mehr (``Permission denied`` auf ``GameUserSettings.ini``), dann
+    liess sich im Panel nirgends mehr etwas speichern. Der Betreiber hat es
+    knapp zusammengefasst: was das Panel schreibt, muss der Server danach
+    noch lesen koennen.
+
+    Deshalb wird der Modus jetzt nur noch **verschaerft, nie zurueckgedreht**:
+    vorhandene Zugriffsbits fuer Gruppe und Andere bleiben erhalten, es kommen
+    hoechstens Lese-/Schreibrechte fuer den Eigentuemer hinzu. Was der
+    Spielprozess selbst gesetzt hat (typisch ``0664`` oder ``0666``), bleibt
+    damit stehen; eine Datei, die vorher nur der Eigentuemer lesen durfte,
+    wird durch einen Speichervorgang nicht ploetzlich oeffentlich.
+
+    Die Absicherung gegen fremde Blicke leistet ohnehin nicht dieser Modus,
+    sondern das Serververzeichnis darueber: es liegt unter ``/opt/msm``, das
+    nur ``msm`` betreten darf, und der Zugang zu den Dateien haengt an
+    ``server.files.read``/``.write`` im Panel.
+
+    ``chmod`` kann ausserdem an einem fremden Eigentuemer scheitern (``EPERM``)
+    — auch wenn die Rechte laengst passen. Das ist kein Grund, den bereits
+    erfolgreichen Schreibvorgang zu einem Fehler zu machen; deshalb faengt
+    ``normalize`` das ab und laesst den Pfad, wie er ist.
+    """
     def normalize(path: Path) -> None:
         info = path.lstat()
         if stat.S_ISLNK(info.st_mode):
             return
-        path.chmod(0o750 if path.is_dir() or stat.S_IMODE(info.st_mode) & 0o111 else 0o640)
+        jetzt = stat.S_IMODE(info.st_mode)
+        # Was der Eigentuemer mindestens koennen muss, damit das Panel
+        # weiterarbeiten kann: Verzeichnisse betreten und lesen, Dateien lesen
+        # und schreiben.
+        mindestens = 0o700 if path.is_dir() or jetzt & 0o111 else 0o600
+        ziel = jetzt | mindestens
+        # **Und der Spielprozess muss drankommen.** Gehoert der Pfad dem Panel,
+        # obwohl der Server unter einer anderen UID laeuft, ist der Modus die
+        # einzige verbliebene Bruecke: `chown` scheitert fuer einen
+        # unprivilegierten Prozess (Linux erlaubt kein Verschenken von
+        # Dateien), und ohne Gruppen-/Weltrechte kann der Server seine eigene
+        # Konfiguration danach nicht mehr lesen. Genau daran ist am 18.08.2026
+        # ein ARK-Server nicht mehr gestartet.
+        #
+        # Der Zugriffsschutz haengt nicht hier, sondern eine Ebene hoeher:
+        # `/opt/msm` darf nur `msm` betreten, und wer im Panel an die Dateien
+        # kommt, entscheidet `server.files.read`/`.write`.
+        if info.st_uid == os.getuid():
+            ziel |= 0o070 if path.is_dir() or jetzt & 0o111 else 0o060
+            ziel |= 0o007 if path.is_dir() or jetzt & 0o111 else 0o006
+        if ziel == jetzt:
+            return
+        try:
+            path.chmod(ziel)
+        except PermissionError:
+            # Fremder Eigentuemer. Die Rechte stimmen dann in aller Regel
+            # bereits — und selbst wenn nicht, ist ein geschriebener Inhalt
+            # mehr wert als ein exakter Modus.
+            return
 
     try:
         normalize(target)

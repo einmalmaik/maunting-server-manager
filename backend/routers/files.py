@@ -342,7 +342,45 @@ def browse_directory(
 
     target = _safe_path(server.install_dir, path)
 
-    if not target.exists():
+    # `exists()` ist ein `stat()`, und das schlaegt fehl, sobald ein
+    # **Elternverzeichnis** dem Panel verschlossen ist. Genau das passiert
+    # unter Rootless Docker: der Spielprozess legt seine Verzeichnisse als
+    # gemappter Benutzer mit `0750` an, das Panel laeuft als `msm` und ist
+    # weder Eigentuemer noch in dessen Gruppe. Gemeldet am 18.08.2026:
+    #
+    #   File "routers/files.py", line 345, in browse_directory
+    #   PermissionError: [Errno 13] Permission denied:
+    #     '…/ark_ascended_107/ShooterGame/Saved/Config/WindowsServer'
+    #
+    # Der Schutz im `try` weiter unten griff dafuer nicht — er beginnt erst
+    # nach dieser Zeile. Der Betreiber sah einen 500er ohne Erklaerung, und
+    # zwar fuer ein Verzeichnis, das es gibt und auf das er ein Recht hat.
+    #
+    # Dieselbe Antwort wie am Schreibpfad (`_write_text_with_permission_repair`):
+    # einmal die Rechte reparieren und den Zugriff wiederholen. Die Reparatur
+    # laeuft in einem kurzlebigen Container als root und kann deshalb, was das
+    # Panel nicht kann — sie setzt `a+rwX`, ohne Eigentuemer zu verschieben.
+    # Ein Aufruf ohne vorherigen Fehler waere teuer und unnoetig; deshalb
+    # steht sie hier wie dort im `except` und nicht davor.
+    def _existiert() -> bool:
+        return target.exists()
+
+    try:
+        vorhanden = _existiert()
+    except PermissionError:
+        reparatur = _repair_install_permissions(server.install_dir)
+        if not reparatur.get("ok"):
+            raise HTTPException(
+                status_code=403, detail="Keine Berechtigung für dieses Verzeichnis"
+            )
+        try:
+            vorhanden = _existiert()
+        except PermissionError:
+            raise HTTPException(
+                status_code=403, detail="Keine Berechtigung für dieses Verzeichnis"
+            )
+
+    if not vorhanden:
         return {"path": path, "entries": [], "exists": False}
     if not target.is_dir():
         raise HTTPException(status_code=400, detail="Pfad ist kein Verzeichnis")

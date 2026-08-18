@@ -152,6 +152,80 @@ class TestBrowseReadWrite:
         assert res.status_code == 200
         assert res.json() == {"path": "", "entries": [], "exists": True}
 
+    def test_browse_repairs_permissions_before_giving_up(
+        self, client: TestClient, owner_cookies: dict, server_with_dir: Server
+    ):
+        """Ein verschlossenes Verzeichnis wird repariert statt mit 500 quittiert.
+
+        Unter Rootless Docker legt der Spielprozess seine Verzeichnisse als
+        gemappter Benutzer mit ``0750`` an. Das Panel laeuft als ``msm``, ist
+        weder Eigentuemer noch in dessen Gruppe — und schon ein ``stat()`` auf
+        einen Pfad darunter wirft. Gemeldet am 18.08.2026 als 500 ohne
+        Erklaerung, ausgeloest in ``browse_directory`` an genau der Zeile
+        ``target.exists()``, die **vor** dem schuetzenden ``try`` stand.
+
+        Der Schreibpfad kannte die Antwort schon: einmal die Rechte reparieren
+        und den Zugriff wiederholen. Dieser Test haelt fest, dass das Lesen es
+        jetzt auch tut — sonst konnte der Betreiber eine Datei speichern, die
+        er im selben Verzeichnis nicht auflisten kann.
+        """
+        versuche = {"n": 0}
+        echtes_exists = Path.exists
+
+        def _erst_gesperrt_dann_offen(self_pfad: Path) -> bool:
+            # Nur der geprueften Pfad blockiert, und nur beim ersten Mal:
+            # danach hat die Reparatur ihn geoeffnet.
+            if str(self_pfad) == server_with_dir.install_dir:
+                versuche["n"] += 1
+                if versuche["n"] == 1:
+                    raise PermissionError(13, "Permission denied")
+            return echtes_exists(self_pfad)
+
+        with (
+            patch.object(Path, "exists", _erst_gesperrt_dann_offen),
+            patch(
+                "routers.files._repair_install_permissions",
+                return_value={"ok": True},
+            ) as reparatur,
+        ):
+            res = client.get(
+                f"/api/files/{server_with_dir.id}/browse", cookies=owner_cookies
+            )
+
+        assert res.status_code == 200
+        assert res.json()["exists"] is True
+        # Und die Reparatur lief genau einmal — sie ist teuer (ein Container)
+        # und gehoert deshalb in den Fehlerfall, nicht vor jeden Zugriff.
+        assert reparatur.call_count == 1
+
+    def test_browse_answers_403_when_the_repair_fails(
+        self, client: TestClient, owner_cookies: dict, server_with_dir: Server
+    ):
+        """Bleibt es verschlossen, ist das ein 403 — kein 500.
+
+        Ein 500 heisst „MSM ist kaputt“ und schickt den Betreiber in die Logs.
+        Ein verschlossenes Verzeichnis ist aber eine Aussage ueber Rechte, und
+        genau die soll er lesen.
+        """
+        def _immer_gesperrt(self_pfad: Path) -> bool:
+            raise PermissionError(13, "Permission denied")
+
+        with (
+            patch.object(Path, "exists", _immer_gesperrt),
+            patch(
+                "routers.files._repair_install_permissions",
+                return_value={"ok": False, "error": "Container nicht startbar"},
+            ),
+        ):
+            res = client.get(
+                f"/api/files/{server_with_dir.id}/browse", cookies=owner_cookies
+            )
+
+        assert res.status_code == 403
+        # Und der Grund verraet nichts ueber Hostpfade oder Container.
+        assert "Berechtigung" in res.json()["detail"]
+        assert server_with_dir.install_dir not in res.text
+
     def test_write_then_read(self, client: TestClient, owner_cookies: dict, csrf_token: str, server_with_dir: Server):
         res = client.put(
             f"/api/files/{server_with_dir.id}/write?path=config.json",
