@@ -2486,38 +2486,34 @@ def _execute_learn_skill(db: Session, *, user: User, arguments: dict) -> dict:
     }
 
 
-def docs_searchable(db: Session, game_type: str) -> bool:
-    """Ob zu dieser Software oeffentlich nachgeschlagen werden darf.
-
-    Die Vorgabe des Betreibers: die KI soll offizielle Dokumentation holen, wenn
-    es um ein Spiel geht — aber **nicht**, wenn der Server etwas Selbstgebautes
-    faehrt, etwa einen eigenen Discord-Bot. Dann soll sie nachfragen.
-
-    Entschieden wird das an einer Tatsache aus den Daten, nicht an der
-    Einschaetzung des Modells: **mitgelieferte Blueprints beschreiben oeffentlich
-    dokumentierte Software.** Die 27 nativen sind Minecraft, Valheim, Rust und
-    ihresgleichen — zu jedem gibt es ein Wiki. Was ein Benutzer selbst importiert
-    hat, kann alles sein.
-
-    Ein unbekannter `game_type` gilt als nicht durchsuchbar. Die vorsichtige
-    Richtung ist hier die richtige: eine unnoetige Rueckfrage kostet einen Klick,
-    eine unnoetige Suche traegt den Namen einer privaten Software nach draussen.
-    """
-    from blueprints.registry import BlueprintSourceOrigin, get_registry
-
-    eintrag = get_registry().get(game_type)
-    return eintrag is not None and eintrag.origin == BlueprintSourceOrigin.NATIVE
-
-
 def _execute_web_search(db: Session, *, user: User, arguments: dict) -> dict:
     """Websuche im Namen des Benutzers.
 
-    Die Rechtegrenze ist `ai.web_search.use`. Bis hierher stand dieses Recht im
-    Katalog, ohne an irgendeiner Stelle geprueft zu werden.
+    Die Rechtegrenze ist `ai.web_search.use` — und sie ist die **einzige**.
+    Wer das Recht hat, darf suchen lassen; wer es nicht hat, nicht. Sonst
+    entscheidet nichts mehr mit.
 
-    ``server_id`` ist freiwillig, aber der Prompt verlangt es fuer
-    serverbezogene Fragen. Ist es gesetzt und faehrt der Server etwas, das nicht
-    mitgeliefert ist, gibt es keine Treffer, sondern den Hinweis nachzufragen.
+    **Hier stand einmal eine zweite Grenze, und sie ist ersatzlos gefallen.**
+    `docs_searchable` liess die Herkunft des Blueprints darueber entscheiden:
+    mitgeliefert hiess suchbar, selbst importiert hiess gesperrt, mit der
+    Annahme "nativ = oeffentlich dokumentiert, community = privater
+    Discord-Bot". Im Betrieb ist sie umgekippt. Ein selbst gepflegter
+    ARK-Blueprint ist community und beschreibt trotzdem ein Spiel mit
+    oeffentlichem Wiki — die Suche war dort gesperrt, das Modell fiel auf sein
+    Trainingswissen zurueck und schrieb Werte in eine Datei, die es so nicht
+    gab.
+
+    Die Vorgabe des Betreibers ist deshalb ausnahmslos: die Websuche ist ein
+    Merkmal, das immer funktioniert. Sie gilt nicht nur fuer Spielserver,
+    sondern fuer alles, was MSM verwaltet — und je weiter das reicht (Anwendungs-
+    server, spaeter Geraete im Haus), desto weniger laesst sich vorab
+    aufzaehlen, wozu es oeffentliche Dokumentation gibt. Eine Erlaubnisliste
+    waere genau die Sorte Pflegeposten, deren Vergessen still die
+    Antwortqualitaet senkt.
+
+    Was den Wegfall traegt: die Anfrage wird geschwaerzt, bevor sie das Panel
+    verlaesst (siehe unten). Der Schutz haengt damit an dem, was tatsaechlich
+    hinausgeht, statt an einer Vermutung darueber, was ein Servertyp wohl ist.
     """
     from services import ai_web_search_service
 
@@ -2526,23 +2522,13 @@ def _execute_web_search(db: Session, *, user: User, arguments: dict) -> dict:
     if set(arguments) - {"query", "count", "server_id"}:
         raise AiActionValidationError("Websuche hat ungueltige Argumente")
 
+    # `server_id` bleibt zulaessig und laeuft weiter ueber `_resolve_server`.
+    # Sie entscheidet nichts mehr, aber sie darf auch kein Orakel werden: wer
+    # keinen Zugriff auf den Server hat, soll an der Antwort nicht ablesen
+    # koennen, ob es ihn gibt.
     server_id = arguments.get("server_id")
     if server_id is not None:
-        # Ueber `_resolve_server`, damit eine fremde Server-ID hier nicht zum
-        # Orakel wird: ohne `server.view` gibt es keine Auskunft, auch keine
-        # ueber die eingesetzte Software.
-        server, _ = _resolve_server(db, user, {"server_id": server_id})
-        if not docs_searchable(db, server.game_type):
-            return {
-                "available": False,
-                "reason": "AI_WEB_SEARCH_PRIVATE_SOFTWARE",
-                "results": [],
-                "note": (
-                    "Dieser Server nutzt keine mitgelieferte Vorlage. Was er "
-                    "faehrt, steht in keiner oeffentlichen Dokumentation — frag "
-                    "den Benutzer statt zu suchen."
-                ),
-            }
+        _resolve_server(db, user, {"server_id": server_id})
 
     query = arguments.get("query")
     if not isinstance(query, str) or not query.strip():
@@ -2551,13 +2537,25 @@ def _execute_web_search(db: Session, *, user: User, arguments: dict) -> dict:
     if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= ai_web_search_service.MAX_RESULTS:
         raise AiActionValidationError("Ungueltige Trefferanzahl")
 
+    # Die Anfrage geht an einen fremden Dienst und wird dort protokolliert.
+    # Solange die Herkunftssperre bestand, war sie der faktische Schutz davor,
+    # dass dabei etwas Vertrauliches mitfaehrt; sie faellt weg, der Schutz
+    # nicht. Dieselbe Schwaerzung wie bei den Treffern, nur eine Richtung
+    # frueher.
+    #
+    # Sie ist bewusst wertbezogen: `ServerAdminPassword` als *Wort* bleibt
+    # stehen, `ServerAdminPassword=Maik1234` verliert den Wert. Andersherum
+    # waere die Suche fuer ihren haeufigsten Zweck unbrauchbar — nach dem Namen
+    # einer Einstellung zu suchen ist der Normalfall, nicht die Ausnahme.
+    sichere_anfrage = redact_sensitive_text(query.strip())
+
     try:
-        results = ai_web_search_service.search(query, count)
+        results = ai_web_search_service.search(sichere_anfrage, count)
     except ai_web_search_service.WebSearchUnavailable as exc:
         # Ehrlich melden statt eine leere Trefferliste liefern: "nichts
         # gefunden" waere eine falsche Aussage ueber das Web.
         return {"available": False, "reason": exc.code, "results": []}
-    return {"available": True, "query": query.strip()[:200], "results": results}
+    return {"available": True, "query": sichere_anfrage[:200], "results": results}
 
 
 def _node_health(db: Session) -> dict:
@@ -2847,12 +2845,6 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
                     "name": redact_sensitive_text(str(server.name or ""))[:128],
                     "game_type": server.game_type,
                     "status": server.status,
-                    # Ob zu dieser Software oeffentlich nachgeschlagen werden
-                    # darf. Steht hier, damit das Modell die Tatsache vor sich
-                    # hat, statt sie am Namen erraten zu muessen — "mein_bot"
-                    # sieht privat aus, "minecraft_forge_1_20" nicht, und beide
-                    # koennen das Gegenteil sein.
-                    "docs_searchable": docs_searchable(db, server.game_type),
                 }
                 for server in servers
             ],
@@ -3297,10 +3289,6 @@ def execute_read_tool(
             "cpu_limit_percent": server.cpu_limit_percent,
             "ram_limit_mb": server.ram_limit_mb,
             "disk_limit_gb": server.disk_limit_gb,
-            # Mitgeliefert oder selbst importiert. Entscheidet, ob zu dieser
-            # Software oeffentlich nachgeschlagen werden darf — und die
-            # Spielversion steht ohnehin dort, nicht hier.
-            "docs_searchable": docs_searchable(db, server.game_type),
         }
     if tool_name == "read_server_capacity":
         if arguments:

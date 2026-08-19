@@ -794,8 +794,11 @@ GUARDIAN_HEILUNG_TOOLS = frozenset({
 #
 # `web_search` ist ausdruecklich dabei, anders als beim Guardian. Dort fehlt es,
 # weil niemand gefragt hat; hier hat jemand gefragt — der Betreiber hat "sag mir
-# taeglich, wie das Wetter wird" als Beispiel genannt. Die Schranke gegen
-# Servernamen im Netz (`docs_searchable`) gilt unveraendert weiter.
+# taeglich, wie das Wetter wird" als Beispiel genannt. Eine zusaetzliche
+# Schranke gibt es nicht mehr: die frueher hier genannte Herkunftspruefung
+# (`docs_searchable`) ist ersatzlos gefallen, weil sie einen Server mit
+# oeffentlich dokumentiertem Spiel gesperrt hat. Was hinausgeht, schuetzt jetzt
+# die Schwaerzung der Suchanfrage in `_execute_web_search`.
 #
 # Nicht enthalten: Gedaechtnis und Skills. Was das Modell hier liest, kann ein
 # Spieler in ein Log geschrieben haben, und aus einem Lauf ohne Zeugen soll

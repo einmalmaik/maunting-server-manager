@@ -17,8 +17,8 @@ Mal aufs Neue.
 Image und Ports.
 
 Jede Änderung braucht eine Quelle: eine Logzeile aus `read_server_logs`, die
-offizielle Dokumentation des Spiels (`web_search`, nur bei
-`docs_searchable: true`) oder die MSM-Dokumentation. Ein Parameter, den du
+offizielle Dokumentation des Spiels (`web_search`) oder die
+MSM-Dokumentation. Ein Parameter, den du
 "mal probierst", beweist nichts — du weißt hinterher weder, ob er geholfen hat,
 noch warum.
 
