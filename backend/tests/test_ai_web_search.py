@@ -240,25 +240,105 @@ def _server_mit_typ(db: Session, user: User, game_type: str) -> Server:
     return row
 
 
-def test_a_search_about_a_self_built_server_asks_instead_of_searching(
+def test_a_search_about_a_self_built_server_goes_through_as_well(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Der Name der privaten Software darf nicht nach draussen gehen."""
+    """Die Websuche haengt am Recht des Benutzers, an sonst nichts.
+
+    Frueher entschied die **Herkunft des Blueprints** darueber: mitgeliefert
+    hiess suchbar, selbst importiert hiess gesperrt. Die Annahme dahinter war
+    "nativ = oeffentlich dokumentiert, community = privater Discord-Bot" — und
+    sie ist im Betrieb umgekippt. Ein selbst gepflegter ARK-Blueprint ist
+    community und beschreibt trotzdem ein Spiel mit oeffentlichem Wiki; die
+    Suche war dort gesperrt, und das Modell fiel auf sein Trainingswissen
+    zurueck. Genau das war der Anlass: falsche Werte in einer Datei, die es
+    nicht gab.
+
+    Die Vorgabe des Betreibers ist deshalb ausnahmslos: wer das Recht hat,
+    darf suchen lassen — unabhaengig von Blueprint, Spiel oder Geraet. Der
+    Schutz sensibler Werte haengt nicht mehr an einer Herkunftsvermutung,
+    sondern an der Schwaerzung der Anfrage (Test unten).
+    """
     _allow_search(db, regular_user)
     server = _server_mit_typ(db, regular_user, "mein_discord_bot")
     gesucht: list[str] = []
-    monkeypatch.setattr(
-        ai_web_search_service, "search", lambda q, c: gesucht.append(q) or [],
-    )
+
+    def merken(q: str, c: int) -> list[dict]:
+        gesucht.append(q)
+        return [{"title": "T", "url": "https://x.invalid", "snippet": "s"}]
+
+    monkeypatch.setattr(ai_web_search_service, "search", merken)
 
     ergebnis = ai_action_service.execute_read_tool(
         db, user=regular_user, tool_name="web_search",
         arguments={"query": "discord bot config", "server_id": server.id},
     )
 
-    assert ergebnis["available"] is False
-    assert ergebnis["reason"] == "AI_WEB_SEARCH_PRIVATE_SOFTWARE"
-    assert gesucht == [], "Die Suchanfrage haette den Namen nach draussen getragen"
+    assert ergebnis["available"] is True
+    assert ergebnis["results"]
+    assert gesucht == ["discord bot config"]
+
+
+def test_the_search_query_is_redacted_before_it_leaves_the_panel(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein echter Wert in der Anfrage geht nicht an den Suchanbieter.
+
+    Solange die Herkunftssperre bestand, war sie der faktische Schutz davor,
+    dass etwas Vertrauliches nach draussen wandert. Sie faellt weg — der
+    Schutz darf es nicht. Die Anfrage laeuft deshalb durch dieselbe
+    Schwaerzung wie die Treffer.
+
+    Die Grenze ist bewusst eng gezogen: geschwaerzt wird der **Wert hinter dem
+    Schluessel**, nicht der Schluessel selbst. Ohne diese Trennung waere die
+    Websuche fuer ihren haeufigsten Zweck unbrauchbar — nach einem
+    Konfigurationsnamen zu suchen ist der Normalfall.
+    """
+    _allow_search(db, regular_user)
+    gesucht: list[str] = []
+
+    def merken(q: str, c: int) -> list[dict]:
+        gesucht.append(q)
+        return []
+
+    monkeypatch.setattr(ai_web_search_service, "search", merken)
+
+    ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="web_search",
+        arguments={"query": "warum geht ServerAdminPassword=Maik1234 nicht"},
+    )
+
+    assert gesucht, "Die Suche haette laufen muessen"
+    assert "Maik1234" not in gesucht[0]
+    # Der Schluesselname bleibt stehen, sonst sucht niemand mehr etwas.
+    assert "ServerAdminPassword" in gesucht[0]
+
+
+def test_a_harmless_query_reaches_the_provider_unchanged(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Gegenprobe zur Schwaerzung — ohne sie waere sie nicht messbar.
+
+    Eine Schwaerzung, die zu viel greift, macht die Suche schlechter statt
+    sicherer. Fachbegriffe wie `ServerAdminPassword` oder `RCONPort` sind
+    genau das, wonach jemand sucht.
+    """
+    _allow_search(db, regular_user)
+    gesucht: list[str] = []
+
+    def merken(q: str, c: int) -> list[dict]:
+        gesucht.append(q)
+        return []
+
+    monkeypatch.setattr(ai_web_search_service, "search", merken)
+
+    frage = "ARK ServerAdminPassword in welcher Datei RCONPort Standardwert"
+    ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="web_search",
+        arguments={"query": frage},
+    )
+
+    assert gesucht == [frage]
 
 
 def test_a_search_about_a_shipped_game_goes_through(
@@ -307,13 +387,19 @@ def test_a_foreign_server_id_reveals_nothing(
         )
 
 
-def test_the_server_list_says_whether_docs_may_be_searched(
+def test_the_server_list_no_longer_carries_a_search_verdict(
     db: Session, regular_user: User
 ) -> None:
-    """Die Tatsache steht vor dem Modell, statt am Namen erraten zu werden.
+    """`docs_searchable` ist ersatzlos weg — es gibt kein Urteil mehr zu faellen.
 
-    "mein_bot" sieht privat aus, "minecraft_forge_1_20" nicht — und beide
-    koennen das Gegenteil sein.
+    Das Feld trug frueher die Herkunftsvermutung in die Serverliste, damit das
+    Modell die Tatsache vor sich hat, statt sie am Namen zu erraten. Der
+    Gedanke war richtig; die Tatsache war es nicht. Sie hat einen Server
+    gesperrt, dessen Spiel ein oeffentliches Wiki hat.
+
+    Ein Feld, das immer `true` waere, ist keine Information — es ist Ballast
+    im Kontextfenster und eine Einladung, die Sperre spaeter wieder
+    einzufuehren. Deshalb faellt es ganz.
     """
     _allow_search(db, regular_user)
     _server_mit_typ(db, regular_user, "minecraft_forge")
@@ -323,6 +409,6 @@ def test_the_server_list_says_whether_docs_may_be_searched(
         db, user=regular_user, tool_name="list_my_servers", arguments={},
     )
 
-    nach_typ = {row["game_type"]: row["docs_searchable"] for row in liste["servers"]}
-    assert nach_typ["minecraft_forge"] is True
-    assert nach_typ["mein_discord_bot"] is False
+    assert liste["servers"]
+    for row in liste["servers"]:
+        assert "docs_searchable" not in row

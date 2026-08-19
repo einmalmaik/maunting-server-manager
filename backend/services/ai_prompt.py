@@ -670,19 +670,50 @@ offen" noch "von aussen dicht", sondern was du gemessen hast und welche Ursache 
 danach am wahrscheinlichsten bleibt."""
 
 
-# Der Betreiber will offizielle Dokumentation genutzt sehen — aber nicht, dass
-# der Name seines selbstgebauten Discord-Bots als Suchanfrage nach draussen
-# geht. Die Unterscheidung haengt an einer Tatsache aus den Daten
-# (`docs_searchable`), nicht am Urteil des Modells. Vollstaendig erzwingen laesst
-# sie sich nicht: wer `server_id` weglaesst, sucht frei. Der naheliegende Weg
-# ist aber der richtige, und die Tatsache steht vor dem Modell statt in seiner
-# Einschaetzung.
+# Der Block hat seine Richtung umgekehrt, und zwar auf ausdrueckliche Vorgabe
+# des Betreibers: **die Websuche ist ein Merkmal, das immer funktioniert.**
+#
+# Vorher stand hier eine Sperre. Sie haengte an `docs_searchable`, einer
+# Tatsache aus den Daten: mitgelieferter Blueprint hiess suchbar, selbst
+# importierter hiess "das ist etwas Selbstgebautes, frag lieber nach". Der
+# Gedanke war der Schutz privater Softwarenamen, und er war ehrenwert. Nur ist
+# die Annahme dahinter im Betrieb umgekippt: ein selbst gepflegter
+# ARK-Blueprint ist community und beschreibt trotzdem ein Spiel mit
+# oeffentlichem Wiki. Die Suche war dort gesperrt, das Modell nahm sein
+# Trainingswissen und schrieb Werte in eine Datei, die es so gar nicht gab.
+#
+# Eine Erlaubnisliste — welcher Servertyp darf nachgeschlagen werden — waere
+# auch der falsche Weg gewesen: MSM verwaltet nicht nur Spielserver, und je
+# weiter das reicht, desto weniger laesst sich vorab aufzaehlen. Ein
+# vergessener Eintrag senkt dann still die Antwortqualitaet, ohne dass jemand
+# den Zusammenhang sieht.
+#
+# Was den Wegfall traegt, steht nicht im Prompt, sondern im Backend: die
+# Suchanfrage wird geschwaerzt, bevor sie hinausgeht. Der Prompt ist hier also
+# kein Schutz und soll auch keiner sein — er sagt nur, wann Nachschlagen
+# Arbeit ist und wann Raten Pfusch.
+#
+# **Der letzte Absatz ist der eigentliche Anlass.** Der gemessene Fehler war
+# nicht, dass die KI zu selten suchte, sondern dass sie eine Wissensluecke wie
+# Wissen behandelt hat: Werte in eine nicht existierende Datei geschrieben und
+# Vollzug gemeldet. Deshalb steht hier nicht "such oft", sondern die Grenze,
+# ab der ein Wert unbelegt ist.
 WEBSUCHE = """\
-Websuche: Geht es um einen bestimmten Server, gib `web_search` seine \
-`server_id` mit. Steht in den Serverdaten `docs_searchable: false`, laeuft dort \
-etwas Selbstgebautes — dazu gibt es keine oeffentliche Dokumentation. Dann \
-**nicht suchen**, sondern mit `ask_user` fragen, wie es eingerichtet ist. Bei \
-`true` such nach der offiziellen Doku des Spiels und nenne die Quelle."""
+Websuche: `web_search` ist kein letzter Ausweg, sondern ein Arbeitsschritt. \
+Sie steht dir immer offen — fuer jedes Spiel, jede Anwendung, jedes Geraet, \
+gleich ob mitgelieferte Vorlage oder selbst eingerichtet.
+Schlag nach, bevor du einen Wert setzt, den du nicht gerade in einer Datei \
+gelesen hast: wie der Schluessel genau heisst, in welche Datei und welchen \
+Abschnitt er gehoert, ob es die Datei ueberhaupt schon gibt und ob sich das \
+mit einer Version geaendert hat. Nenne die Quelle, wenn du danach etwas \
+behauptest.
+Dein Trainingsstand ist aelter als die Software, die hier laeuft. Ein \
+Schluessel, den du aus dem Gedaechtnis kennst, kann umbenannt, verschoben oder \
+abgeschafft worden sein — und ein Wert in der falschen Datei wirkt nicht, \
+sondern sieht nur so aus.
+Findest du zu einer Sache nichts Belastbares, ist das ein Ergebnis: sag, dass \
+du es nicht belegen konntest, und frag nach. Einen Wert zu erfinden und \
+Vollzug zu melden ist der eine Fehler, der hier nicht passieren darf."""
 
 
 # Hier stand einmal ein einziger Satz ohne Aufzaehlung, und danach eine
