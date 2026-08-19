@@ -22,12 +22,13 @@ eigenen Test:
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from models import (
     AiActionApproval,
@@ -245,11 +246,109 @@ class TestEntscheidung:
             )
 
         assert ergebnis["decision"] == "approved"
-        assert ausfuehren.called
-        # Bestaetigt wurde ueber den regulaeren Weg: der Vorschlag traegt
-        # danach einen Token-Hash.
+        aufruf = ausfuehren.call_args.kwargs
+        assert aufruf["proposal_id"] == vorschlag.id
+        # **Der Akteur ist der Mensch aus der Freigabezeile.** Nicht der
+        # Dienstbenutzer eines Laufs und nicht der Betreiber — wer per Mail
+        # zustimmt, handelt unter seinen eigenen Rechten.
+        assert aufruf["user"].id == user.id
+        # Weitergereicht wird genau der Token, den `confirm_proposal` eben
+        # erzeugt hat. Der Beweis geht ohne zweiten Mock: der Hash steht an der
+        # Vorschlagszeile, und der Mock löscht ihn nicht.
         db.refresh(vorschlag)
-        assert vorschlag.confirmation_token_hash
+        assert vorschlag.confirmation_token_hash == hashlib.sha256(
+            aufruf["confirmation_token"].encode()
+        ).hexdigest()
+
+    def test_die_freigabe_fuehrt_wirklich_aus_und_entwertet_den_token(
+        self, db: Session, lage
+    ) -> None:
+        """Derselbe Weg, aber ohne `execute_proposal` wegzumocken.
+
+        Gemockt wird allein die letzte Naht zum Server
+        (`request_lifecycle_operation`). Rechteprüfung, Server-Mutex und der
+        atomare Einmalverbrauch des Bestätigungstokens laufen damit echt —
+        erst so ist der Anspruch dieses Moduls belegt und nicht nur behauptet.
+        """
+        from services import ai_proposal_service
+
+        user, server, conversation, run = lage
+        vorschlag = ai_proposal_service.create_proposal(
+            db,
+            user=user,
+            conversation=conversation,
+            tool_name="propose_server_lifecycle",
+            arguments={
+                "server_id": server.id,
+                "operation": "restart",
+                "reason": "Der Server hängt.",
+                "expected_effect": "Er läuft wieder.",
+            },
+            correlation_id=str(uuid4()),
+        )
+        vorschlag.run_id = run.id
+        db.commit()
+        _, token = _freigabe(db, lage, vorschlag)
+
+        gesehen: dict = {}
+
+        def _einreihen(db_, *, server_id, operation, actor, idempotency_key):
+            gesehen["server_id"] = server_id
+            gesehen["operation"] = operation
+            gesehen["actor_user_id"] = actor.user.id
+            gesehen["origin"] = actor.origin
+            return {"status": "queued", "task_id": "t-1"}
+
+        with patch("services.ai_run_service.lauf_fortsetzen"), patch(
+            "services.server_action_service.request_lifecycle_operation",
+            side_effect=_einreihen,
+        ):
+            ergebnis = ai_approval_service.entscheiden(
+                db, token=token, entscheidung="approved"
+            )
+
+        assert ergebnis["decision"] == "approved"
+        assert gesehen["server_id"] == server.id
+        assert gesehen["operation"] == "restart"
+        assert gesehen["actor_user_id"] == user.id
+        assert gesehen["origin"] == "ai"
+        # Der Bestätigungstoken ist beim Ausführen atomar verbraucht worden.
+        db.refresh(vorschlag)
+        assert vorschlag.confirmation_token_hash is None
+        # Und der Freigabelink ebenso: ein zweiter Klick findet nichts mehr.
+        with pytest.raises(AiActionStateError) as fehler:
+            ai_approval_service.entscheiden(db, token=token, entscheidung="approved")
+        assert str(fehler.value) == "AI_APPROVAL_INVALID"
+
+    def test_ein_verbrannter_link_weckt_den_lauf_trotzdem(
+        self, db: Session, lage
+    ) -> None:
+        """Ab dem Anspruch ist das Token weg — der wartende Lauf muss das erfahren.
+
+        `_anspruch_nehmen` verbraucht die Zeile, bevor der Vorschlagszustand
+        geprüft wird. Scheitert `confirm_proposal` danach, blieb der Lauf früher
+        stumm auf ``waiting_confirmation`` stehen: der Link war verbrannt,
+        niemand konnte mehr zustimmen, und weil die Zeile jetzt ``consumed_at``
+        trägt, galt der Auftrag beim Fristende als aufgegeben statt als
+        eskaliert. Der Betreiber erfuhr nicht einmal, dass eine Freigabe offen
+        gewesen war.
+        """
+        _, _, _, run = lage
+        # Im Panel wurde derselbe Vorschlag inzwischen bestätigt und
+        # ausgeführt — der Link aus der Mail kommt zu spät.
+        vorschlag = _vorschlag(db, lage, status="succeeded")
+        zeile, token = _freigabe(db, lage, vorschlag)
+
+        with patch("services.ai_run_service.lauf_fortsetzen") as wecken:
+            with pytest.raises(AiActionStateError) as fehler:
+                ai_approval_service.entscheiden(
+                    db, token=token, entscheidung="approved"
+                )
+
+        assert str(fehler.value) == "AI_ACTION_NOT_PROPOSED"
+        db.refresh(zeile)
+        assert zeile.consumed_at is not None, "Das Token bleibt bewusst verbraucht"
+        assert wecken.call_args.kwargs["run_id"] == run.id
 
     def test_ein_entzogenes_recht_kommt_auch_mit_link_nicht_durch(
         self, db: Session, lage
@@ -401,6 +500,55 @@ class TestAnfordern:
             assert not ai_approval_service.freigabe_anfordern(
                 db, proposal=zweiter, user=user, run_id=run.id
             )
+
+    def test_die_grenze_wird_unter_der_benutzersperre_geprueft(
+        self, db: Session, lage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nachsehen und Anlegen gehören in eine Sperre.
+
+        Ein Benutzer kann mehrere unbeaufsichtigte Läufe gleichzeitig haben —
+        bis zu drei Worker plus die Guardian-Heilung —, und jeder fragt in einer
+        eigenen Sitzung. Ohne Sperre sähen zwei davon beide "keine offene
+        Freigabe" und schrieben beide eine Mail. Echte Nebenläufigkeit ist auf
+        SQLite nicht herstellbar — ``FOR UPDATE`` ist dort eine leere Anweisung
+        —, deshalb hält dieser Test die Reihenfolge statt des Rennens.
+        """
+        user, _, _, run = lage
+        vorschlag = _vorschlag(db, lage)
+
+        ablauf: list[str] = []
+        echte_sperre = Query.with_for_update
+        echtes_nachsehen = ai_approval_service.offene_freigabe
+
+        def _sperre(self, *args, **kwargs):
+            ablauf.append("sperre")
+            return echte_sperre(self, *args, **kwargs)
+
+        def _nachsehen(db_, *, user_id):
+            ablauf.append("nachsehen")
+            return echtes_nachsehen(db_, user_id=user_id)
+
+        monkeypatch.setattr(Query, "with_for_update", _sperre)
+        monkeypatch.setattr(ai_approval_service, "offene_freigabe", _nachsehen)
+
+        with patch("services.ai_mail.empfaenger", return_value="a@b.de"), patch(
+            "services.ai_mail.einreihen", return_value="outbox-1"
+        ):
+            assert ai_approval_service.freigabe_anfordern(
+                db, proposal=vorschlag, user=user, run_id=run.id
+            )
+
+        assert ablauf == ["sperre", "nachsehen"]
+
+    def test_die_grenze_steht_im_code_und_nicht_in_einer_konstanten(self) -> None:
+        """Eine Konstante, die nichts durchsetzt, ist irreführender als keine.
+
+        `MAX_OFFENE = 1` stand mit Begründung im Modul und wurde nirgends
+        ausgewertet — die Grenze lebt allein in der Prüfung auf
+        `offene_freigabe`. Der Test hält die Aufräumung fest; die Wirkung der
+        Grenze deckt `test_eine_zweite_frage_wartet` weiterhin ab.
+        """
+        assert not hasattr(ai_approval_service, "MAX_OFFENE")
 
     def test_eine_nicht_eingereihte_mail_verwirft_das_token(
         self, db: Session, lage

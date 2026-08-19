@@ -1070,7 +1070,7 @@ class Sprachbruecke:
         eine offene Sprachsitzung faelschlich blockierte; das Ruhe-Praedikat
         dieser Sitzung ist `_ruhe()` und wurde vom Zusteller geprueft.
         """
-        from services import ai_meldestelle, ai_run_service
+        from services import ai_meldestelle
 
         await self._zustand_melden(ZUSTAND_DENKT)
         try:

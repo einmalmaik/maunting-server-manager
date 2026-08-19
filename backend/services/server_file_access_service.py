@@ -662,7 +662,17 @@ def delete_server_text(
             if expected_revision is not None and current.get("revision") != expected_revision:
                 raise HTTPException(status_code=409, detail={"code": "FILE_REVISION_CONFLICT"})
             _rueckweg_sichern(str(current.get("content", "")))
-            agent.files_delete(_agent_key(server), relative_path)
+            # Gelöscht wird genau das, was gerade gesichert wurde — nicht das,
+            # was der Aufrufer erwartet hat. Zwischen dem Lesen oben und dem
+            # Löschen liegt der Schnappschuss, und der kostet Zeit; schreibt
+            # der Spielprozess in diesem Fenster, meldet der Agent 409 und die
+            # Datei bleibt liegen, statt mit einem Rückweg auf einen fremden
+            # Inhalt zu verschwinden.
+            agent.files_delete(
+                _agent_key(server),
+                relative_path,
+                expected_revision=current.get("revision"),
+            )
             return {"path": relative_path, "deleted": True}
         except NodeClientError as exc:
             raise _agent_error(exc) from exc
@@ -674,24 +684,50 @@ def delete_server_text(
     target = safe_path(server.install_dir, relative_path)
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Datei nicht gefunden")
-    try:
-        current = file_edit_service.read_text(target)
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail="Datei konnte nicht gelesen werden") from exc
-    if expected_revision is not None and current.get("revision") != expected_revision:
-        raise HTTPException(status_code=409, detail={"code": "FILE_REVISION_CONFLICT"})
-    try:
-        _rueckweg_sichern(str(current["content"]))
-    except (DisSidecarError, RuntimeError) as exc:
-        # Ohne Schnappschuss wird nicht geloescht. Der Weg zurueck ist Teil
-        # dieser Handlung, nicht ihr Beiwerk.
-        raise HTTPException(
-            status_code=503, detail="Versionsspeicher ist nicht verfuegbar"
-        ) from exc
-    try:
-        target.unlink()
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail="Datei konnte nicht geloescht werden") from exc
+    # Lesen, Sichern und Löschen liegen unter derselben Sperre wie das
+    # Schreiben (`file_edit_service.write_text` nimmt sie ebenfalls). Ohne sie
+    # konnte ein gleichzeitiger Speichervorgang zwischen Schnappschuss und
+    # `unlink` schlüpfen: der Rückweg zeigte dann auf den alten Inhalt, und
+    # weg war der neue.
+    with file_edit_service.lock_for(target):
+        try:
+            current = file_edit_service.read_text(target)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500, detail="Datei konnte nicht gelesen werden"
+            ) from exc
+        if expected_revision is not None and current.get("revision") != expected_revision:
+            raise HTTPException(status_code=409, detail={"code": "FILE_REVISION_CONFLICT"})
+        try:
+            _rueckweg_sichern(str(current["content"]))
+        except (DisSidecarError, RuntimeError) as exc:
+            # Ohne Schnappschuss wird nicht geloescht. Der Weg zurueck ist Teil
+            # dieser Handlung, nicht ihr Beiwerk.
+            raise HTTPException(
+                status_code=503, detail="Versionsspeicher ist nicht verfuegbar"
+            ) from exc
+        # Ein zweiter Blick unmittelbar vor dem `unlink`. Die Sperre hält nur
+        # das Panel zurück; der Spielprozess läuft ausserhalb dieses
+        # Prozesses und kann während des Schnappschusses (Verschlüsselung,
+        # Sidecar — Millisekunden, keine Mikrosekunden) geschrieben haben.
+        # Restlücke bleibt: zwischen dieser Prüfung und dem `unlink` liegen
+        # ein paar Mikrosekunden, die nur `renameat2` schliessen würde. Die
+        # Zusage lautet deshalb nicht "atomar", sondern: gelöscht wird nie
+        # ein Inhalt, den MSM als neuer erkannt hat.
+        try:
+            aktuell = file_edit_service.content_revision(target.read_bytes())
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500, detail="Datei konnte nicht gelesen werden"
+            ) from exc
+        if aktuell != current.get("revision"):
+            raise HTTPException(status_code=409, detail={"code": "FILE_REVISION_CONFLICT"})
+        try:
+            target.unlink()
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500, detail="Datei konnte nicht geloescht werden"
+            ) from exc
     return {"path": relative_path, "deleted": True}
 
 
@@ -728,6 +764,16 @@ def apply_permissions(install_dir: str, target: Path) -> None:
     erfolgreichen Schreibvorgang zu einem Fehler zu machen; deshalb faengt
     ``normalize`` das ab und laesst den Pfad, wie er ist.
     """
+    # Ausserhalb von POSIX gibt es weder ``os.getuid`` noch die Modusbits,
+    # um die es hier geht — der Aufruf brach dort mit einem ``AttributeError``
+    # ab, und weil der kein ``OSError`` ist, riss er den bereits gelungenen
+    # Schreibvorgang mit sich (500 statt 200). Betroffen war nur die
+    # Entwicklungsmaschine; der Preis war trotzdem hoch, weil dadurch elf
+    # Tests des Datei-Routers dauerhaft rot standen und dort keine Regression
+    # mehr auffiel. Auf Windows gibt es schlicht nichts zu tun.
+    if os.name != "posix":
+        return
+
     def normalize(path: Path) -> None:
         info = path.lstat()
         if stat.S_ISLNK(info.st_mode):
@@ -749,21 +795,37 @@ def apply_permissions(install_dir: str, target: Path) -> None:
         # Teilen sich Panel und Spielprozess also bereits eine Gruppe, reichen
         # Gruppenrechte — und "alle anderen" bleiben aussen vor.
         #
-        # Weltrechte sind nur der **Notnagel** fuer den Fall, dass diese
+        # Weltrechte sind nur der **Notnagel** für den Fall, dass diese
         # Gruppe fehlt: ein frisch angelegter Server vor dem ersten Lauf des
-        # Skripts, oder eine Installation, die es nie ausgefuehrt hat. Ohne
-        # ihn koennte der Server seine eigene Konfiguration nicht lesen — daran
-        # ist am 18.08.2026 ein ARK-Server nicht mehr gestartet. Mit ihm steht
-        # die Datei einen Moment lang offener als noetig, bis das Skript sie
-        # einsammelt.
+        # Skripts, oder eine Installation, die es nie ausgeführt hat. Ohne
+        # ihn könnte der Server seine eigene Konfiguration nicht lesen — daran
+        # ist am 18.08.2026 ein ARK-Server nicht mehr gestartet.
         #
-        # Der Zugriffsschutz haengt ohnehin nicht an diesem Modus, sondern eine
-        # Ebene hoeher: `/opt/msm` darf nur `msm` betreten, und wer im Panel an
+        # Der Notnagel gibt **Lese-, niemals Schreibrecht**. Der Ausfall vom
+        # 18.08.2026 war ein Lesefehler (`Permission denied` beim Öffnen von
+        # `GameUserSettings.ini`); schreiben kann der Spielprozess über die
+        # Gruppe (die Zeile darüber setzt sie bedingungslos) und über die
+        # Reparatur beim Serverstart in `docker_service`. Ein weltschreibbares
+        # `0666` auf einer Spielkonfiguration ist durch keinen dieser Fälle
+        # gedeckt — es hiesse, jeder beliebige Host-Prozess dürfte sie
+        # umschreiben. Bleibt `0644` bzw. `0755` als Übergangszustand, bis
+        # `fix-server-permissions.sh` die Gruppe nachzieht.
+        #
+        # Eine Ehrlichkeit zu `os.getgroups()`: die Gruppenliste eines
+        # laufenden Prozesses ändert sich nicht mehr. Läuft
+        # `fix-server-permissions.sh` ohne anschliessenden Panel-Neustart,
+        # hält dieser Prozess die Gruppe weiter für fremd und greift zum
+        # Notnagel, obwohl er längst Mitglied ist. Das kostet seit dieser
+        # Änderung nur noch ein Weltlesebit unterhalb von `/opt/msm` — vorher
+        # kostete es Weltschreibrecht auf jeder angefassten Datei.
+        #
+        # Der Zugriffsschutz hängt ohnehin nicht an diesem Modus, sondern eine
+        # Ebene höher: `/opt/msm` darf nur `msm` betreten, und wer im Panel an
         # die Dateien kommt, entscheidet `server.files.read`/`.write`.
         if info.st_uid == os.getuid():
             ziel |= 0o070 if ausfuehrbar else 0o060
             if info.st_gid not in os.getgroups():
-                ziel |= 0o007 if ausfuehrbar else 0o006
+                ziel |= 0o005 if ausfuehrbar else 0o004
         if ziel == jetzt:
             return
         try:

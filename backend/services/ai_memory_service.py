@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from models import AiMemoryEntry, AiMemoryPreference, Server, Team, User
 from services import (
@@ -29,8 +29,17 @@ logger = logging.getLogger(__name__)
 #: Was diesem Benutzer gehoert und deshalb an seiner Einwilligung haengt.
 #: `team` und `panel` gehoeren dem Team bzw. dem Betreiber.
 PERSOENLICHE_SCOPES = ("user", "server")
+# Der **Sockel** des Blocks: soviel Platz bekommt das Gedächtnis, wenn der
+# Aufrufer kein Kontextfenster nennt. Wer eines kennt, reicht es als `budget`
+# an `provider_memory_context` durch — die Zahl kommt dann aus
+# `ai_context_service.teilbudgets(...).gedaechtnis_zeichen` und wächst mit dem
+# Fenster des Modells. Vorher war diese Konstante die einzige Wahrheit, und das
+# Gedächtnis blieb als einziger Kontextblock bei 6.000 Zeichen stehen, auch wo
+# 200.000 zur Verfügung standen.
 MAX_CONTEXT_CHARS = 6_000
-# Wieviele Eintraege eine *einzelne Anfrage* hoechstens entschluesselt.
+# Wieviele Einträge eine *einzelne Anfrage* höchstens entschlüsselt — beim
+# Sockelbudget. Wächst das Budget, wächst der Deckel im selben Verhältnis mit
+# (`provider_memory_context`), denn er ist gegen genau dieses Budget gerechnet.
 #
 # Das ist eine andere Zusage als `max_memory_entries`, und die eine ersetzt die
 # andere nicht: jenes Rollenlimit deckelt einen **Bereich**, dieser Wert deckelt
@@ -46,9 +55,12 @@ MAX_CONTEXT_CHARS = 6_000
 #
 # 300 ist gegen genau dieses Budget gewaehlt: bei kurzen Eintraegen passen
 # hoechstens rund 150 Zeilen in 6.000 Zeichen, der Deckel liegt also beim
-# Doppelten dessen, was ueberhaupt je gezeigt werden koennte. Unterhalb davon
-# aendert sich **nichts** — `_vorauswahl` reicht die Zeilen dann unveraendert
-# durch. Er greift nur dort, wo das Budget ohnehin das meiste weggeworfen haette.
+# Doppelten dessen, was ueberhaupt je gezeigt werden koennte. Genau deshalb
+# darf er nicht stehenbleiben, wenn das Budget wächst — sonst wäre die
+# Begründung dieser Zahl bei einem großen Fenster schlicht falsch. Unterhalb
+# davon aendert sich **nichts** — `_vorauswahl` reicht die Zeilen dann
+# unveraendert durch. Er greift nur dort, wo das Budget ohnehin das meiste
+# weggeworfen haette.
 MAX_CONTEXT_ROWS = 300
 # Nach so vielen Tagen ohne Nutzung haelbiert sich der Aktualitaetsbonus. Grob
 # an "eine Arbeitswoche" angelehnt; der Wert entscheidet nur bei Platzmangel.
@@ -475,6 +487,30 @@ def _bereichsname(
     return "dieser Bereich"
 
 
+def _bestandsabfrage(db: Session, identity: str) -> Query:
+    """Die Zeilen eines Bereichs — gezählt **und** bis zum Commit gesperrt.
+
+    Zwischen der Zählung in `upsert_entry` und dem `db.add()` danach lag keine
+    Sperre. Zwei gleichzeitige Läufe mit verschiedenen Schlüsseln — Chat und
+    Sprachsitzung sind ausdrücklich möglich — sahen beide denselben Bestand und
+    legten beide an; die einzige Datenbankzusage ist der UNIQUE auf
+    (scope_identity, key) und greift bei verschiedenen Schlüsseln gar nicht.
+    Die Bereichsgrenze war damit eine Bitte, keine Grenze.
+
+    `count()` verträgt kein `FOR UPDATE`, deshalb die Liste der IDs statt einer
+    Zahl: bei höchstens 1.000 Zeilen je Bereich ist das eine billige Abfrage.
+    Das `order_by` ist gegen Verklemmungen — zwei Schreiber sperren dieselben
+    Zeilen dann in derselben Reihenfolge. Auf SQLite (Testsuite) ist `FOR
+    UPDATE` ein No-Op; das Verhalten dort bleibt unverändert.
+    """
+    return (
+        db.query(AiMemoryEntry.id)
+        .filter(AiMemoryEntry.scope_identity == identity)
+        .order_by(AiMemoryEntry.id)
+        .with_for_update()
+    )
+
+
 def upsert_entry(
     db: Session, *, user: User, scope: str, server_id: int | None, key: str, value: str,
     origin: str = "user", team_id: int | None = None, replace_user_entry: bool = False,
@@ -517,9 +553,7 @@ def upsert_entry(
         grenze = ai_limit_service.resolve_scope_memory_limit(
             db, scope, user, team_id=normalized_team_id, server_id=normalized_server_id,
         )
-        bestand = db.query(AiMemoryEntry).filter(
-            AiMemoryEntry.scope_identity == identity
-        ).count()
+        bestand = len(_bestandsabfrage(db, identity).all())
         if bestand >= grenze:
             # Hier steht die **Tatsache**, in Sätzen, die ein Mensch versteht —
             # und nichts sonst. Vorher stand hier eine Regieanweisung an das
@@ -827,6 +861,28 @@ def _tokens(text: str) -> set[str]:
     return {word for word in _WORD_RE.findall(text.lower()) if len(word) > 2}
 
 
+def _reiz(similarity: float | None, overlap: int) -> float:
+    """Wie stark die aktuelle Frage einen Eintrag trifft — zwischen 0.0 und 1.0.
+
+    Steht als eigene Funktion da, weil derselbe Wert an zwei Stellen gebraucht
+    wird und dieselbe Zahl sein muss: `abrufstaerke` benutzt ihn als Untergrenze
+    für die Darstellung, und `provider_memory_context` entscheidet an ihm, ob
+    ein Eintrag als **gebraucht** vermerkt wird. Zwei getrennt gepflegte
+    Fassungen hießen, dass ein Eintrag voll gezeigt wird, ohne als benutzt zu
+    gelten — oder umgekehrt.
+    """
+    # `similarity` liegt in [-1, 1]; negativ heißt "hat nichts miteinander zu
+    # tun" und darf nicht als Beitrag zählen.
+    reiz = max(0.0, similarity) if similarity is not None else 0.0
+    if overlap:
+        # Wortüberlappung ist ein gröberes, aber sehr sicheres Signal — im
+        # Gameserver-Umfeld stehen Lehnwörter (Backup, RAM, Ports) wörtlich
+        # in deutschen Einträgen. Ein Treffer hebt auf mindestens die Hälfte,
+        # zwei auf volle Präsenz.
+        reiz = max(reiz, min(1.0, 0.5 + 0.25 * overlap))
+    return reiz
+
+
 def abrufstaerke(
     row: AiMemoryEntry,
     now: datetime,
@@ -862,15 +918,7 @@ def abrufstaerke(
     Gemessen wird ab dem **letzten Gebrauch**, nicht ab dem Anlegen: ein
     Eintrag, der regelmaessig zum Zug kommt, altert gar nicht.
     """
-    # Der Reiz. `similarity` liegt in [-1, 1]; negativ heisst "hat nichts
-    # miteinander zu tun" und darf nicht als Beitrag zaehlen.
-    reiz = max(0.0, similarity) if similarity is not None else 0.0
-    if overlap:
-        # Wortueberlappung ist ein groberes, aber sehr sicheres Signal — im
-        # Gameserver-Umfeld stehen Lehnwoerter (Backup, RAM, Ports) woertlich
-        # in deutschen Eintraegen. Ein Treffer hebt auf mindestens die Haelfte,
-        # zwei auf volle Praesenz.
-        reiz = max(reiz, min(1.0, 0.5 + 0.25 * overlap))
+    reiz = _reiz(similarity, overlap)
 
     vertrautheit = min(row.use_count or 0, 20) / 20.0
 
@@ -1023,10 +1071,10 @@ def refresh_embedding(row: AiMemoryEntry, value: str) -> None:
 
     Das Verwerfen ist der Punkt: bliebe der alte Vektor stehen, beschriebe er
     dauerhaft den *alten* Text. Ein von "Minecraft" auf "Factorio" berichtigter
-    Eintrag würde bei knappem Platz weiterhin für Minecraft-Fragen hochgezogen —
-    und nichts rechnet ihn je nach, denn `upsert_entry` ist der einzige Aufrufer
-    und eine Nachberechnung gibt es für das Gedächtnis nicht. ``None`` heißt
-    laut Modell "noch nicht berechnet"; `_stored_vector` kommt damit zurecht.
+    Eintrag würde bei knappem Platz weiterhin für Minecraft-Fragen hochgezogen.
+    ``None`` heißt laut Modell "noch nicht berechnet"; `_stored_vector` kommt
+    damit zurecht — und `_vektoren_nachziehen` holt es beim nächsten Abruf in
+    den Kontext nach, sobald wieder ein Modell da ist.
     """
     vectors = ai_embedding_service.encode([_embedding_source(row.key, value)])
     if not vectors:
@@ -1035,6 +1083,44 @@ def refresh_embedding(row: AiMemoryEntry, value: str) -> None:
         return
     row.embedding_json = json.dumps(vectors[0], separators=(",", ":"))
     row.embedding_model = _EMBEDDING_MODEL_TAG
+
+
+def _vektoren_nachziehen(decoded: list[tuple[AiMemoryEntry, str]]) -> None:
+    """Berechnet fehlende Vektoren nach, solange der Klartext ohnehin vorliegt.
+
+    `refresh_embedding` verwirft den Vektor, wenn `encode` beim Schreiben nichts
+    liefert — richtig, denn ein stehengebliebener Vektor beschriebe danach den
+    *alten* Text. Falsch war allein, dass es nie jemand nachholte: eine
+    Ausfallphase des Modells (abgebrochener Download, zu wenig Speicher, ein
+    einzelner Stolperer) machte jeden in dieser Zeit geschriebenen Eintrag
+    **dauerhaft** blind für Bedeutungsrang und Verblassen-Reiz, denn
+    `upsert_entry` ist der einzige Aufrufer und niemand fasst die Zeile je
+    wieder an.
+
+    Kein Hintergrundlauf, kein Skript, kein Kommando: nachgezogen wird genau
+    dort, wo der entschlüsselte Wert schon in der Hand liegt — beim Abruf in
+    den Kontext. Damit holt die erste Anfrage nach einem Neustart mit
+    funktionierendem Modell alles auf, und zwar höchstens einmal je Zeile.
+    Ein Aufruf für alle offenen Zeilen, wie `aehnlicher_eintrag` es auch tut.
+
+    Bewusst nur an dieser einen Stelle: `list_entries` und `personal_entries`
+    sind Verwaltungsansichten ohne Deckel, dort gehört kein Rechenschritt hin.
+    Fehlt das Modell weiterhin, passiert schlicht nichts.
+    """
+    offen = [(row, value) for row, value in decoded if _stored_vector(row) is None]
+    if not offen:
+        return
+    vektoren = ai_embedding_service.encode(
+        [_embedding_source(row.key, value) for row, value in offen]
+    )
+    # Die Längenprüfung ist keine Formsache: käme weniger zurück als
+    # hineingegeben, schriebe das `zip` den Vektor der einen Zeile an die
+    # andere — eine falsche Bedeutung unter dem richtigen Schlüssel.
+    if not vektoren or len(vektoren) != len(offen):
+        return
+    for (row, _value), vektor in zip(offen, vektoren):
+        row.embedding_json = json.dumps(vektor, separators=(",", ":"))
+        row.embedding_model = _EMBEDDING_MODEL_TAG
 
 
 def _utc(value: datetime) -> datetime:
@@ -1243,6 +1329,21 @@ def _memory_line(
         # "anlage" statt "shared", weil das Etikett das Modell erreicht und der
         # Rest der Zeile ebenfalls deutsch ist.
         scope = f"server:{row.server_id}:anlage"
+        # **Hier zaehlt die Herkunft anders als ueberall sonst.** Bei den
+        # persoenlichen Bereichen heisst "gemerkt", dass die KI es sich im
+        # Gespraech mit *diesem* Benutzer notiert hat — er war dabei. Wissen
+        # der Anlage liest dagegen jeder Kollege mit `server.view`, und keiner
+        # von ihnen war dabei: die Zeile kann aus einem fremden Lauf stammen,
+        # der eine Logzeile oder eine Konfigdatei gelesen hat. Bestaetigt hat
+        # sie dort niemand.
+        #
+        # Deshalb sagt die Marke an dieser Stelle nicht, *wie* der Eintrag
+        # entstanden ist, sondern *worauf er sich stuetzt*: "eingetragen" hat
+        # ihn ein Mensch ueber die Oberflaeche, "unbestätigt" ist er, solange
+        # nur eine KI ihn notiert hat. Das nimmt der KI nichts weg — sie darf
+        # weiter selbst schreiben —, aber der naechste Lauf weiss, wie fest
+        # der Boden ist, auf dem er steht.
+        origin = "eingetragen" if row.origin == "user" else "unbestätigt"
     elif row.scope == "team":
         # Die Nummer, nicht der Name — anders als in der Absage
         # (`_bereichsname`) und im Suchergebnis (`_execute_search_memory`), und
@@ -1318,8 +1419,11 @@ def server_shared_context(
     `_visible_scope_rows`; hier steht keine zweite Kopie davon, und deshalb
     kann sie hier auch nicht abweichen.
 
-    Der Nutzungszaehler laeuft mit. Diese Zeilen sind gelesen worden wie jede
-    andere auch, und bei knappem Platz soll das mitentscheiden.
+    Der Nutzungszähler läuft nach derselben Regel mit wie im Gesamtkontext:
+    vermerkt wird, wen die Frage getroffen hat, nicht wer mitgegangen ist.
+    Ohne diese Einschränkung zählte Anlagenwissen bei **jedem** Nachtrag hoch
+    und gewänne im Engpass gegen persönliche Vorlieben — nicht weil es
+    gebraucht wurde, sondern weil es häufiger nachgereicht wird.
     """
     rows = [
         row
@@ -1337,7 +1441,12 @@ def server_shared_context(
     if not decoded:
         return None
     jetzt = datetime.now(timezone.utc)
-    for row, _wert in decoded:
+    query_tokens = _tokens(query)
+    aehnlichkeiten = _similarities(query, [row for row, _ in decoded])
+    for (row, wert), aehnlichkeit in zip(decoded, aehnlichkeiten):
+        treffer = _reiz(aehnlichkeit, len(query_tokens & _tokens(f"{row.key} {wert}")))
+        if treffer < VERBLASSEN_AB:
+            continue
         row.use_count = int(row.use_count or 0) + 1
         row.last_used_at = jetzt
     db.flush()
@@ -1357,6 +1466,7 @@ def provider_memory_context(
     user: User,
     query: str = "",
     server_id: int | None = None,
+    budget: int | None = None,
 ) -> str | None:
     """Baut den Memory-Block fuer eine konkrete Anfrage.
 
@@ -1384,10 +1494,22 @@ def provider_memory_context(
     ein Eintrag "zeitzone" fiel damit systematisch raus, "backup" blieb immer
     drin.
 
-    Ausgewaehlte Eintraege werden als benutzt vermerkt. Dieses Zaehlwerk ist
-    das Gedaechtnis des Gedaechtnisses: es entscheidet beim naechsten Engpass
-    mit, was bleibt — und es ist zugleich der Weg zurueck aus dem Verblassen.
+    Als benutzt vermerkt werden dabei nur die Einträge, die die Frage
+    tatsächlich **getroffen** hat — nicht alles, was mitgegangen ist. Dieses
+    Zählwerk ist das Gedächtnis des Gedächtnisses: es entscheidet beim nächsten
+    Engpass mit, was bleibt, und es ist der Weg zurück aus dem Verblassen.
+    Genau deshalb darf es nicht am bloßen Danebenliegen hängen.
+
+    ``budget`` ist der Platz in Zeichen, den der Block bekommen darf. Er kommt
+    aus derselben Rechnung wie der aller anderen Kontextblöcke
+    (``ai_context_service.teilbudgets(...).gedaechtnis_zeichen``) und wächst
+    damit mit dem Fenster des Modells. ``None`` heißt "der Aufrufer kennt kein
+    Fenster" und führt auf ``MAX_CONTEXT_CHARS`` — dieselben 6.000 Zeichen wie
+    vor der Fensterberechnung. Der Vorgabewert steht bewusst als ``None`` in der
+    Signatur und nicht als Konstante: nur so wirkt ein Test, der
+    ``MAX_CONTEXT_CHARS`` heruntersetzt, weiterhin auch hier.
     """
+    zeichen = budget if budget is not None else MAX_CONTEXT_CHARS
     # Die Einwilligung gilt dem **eigenen** Gedaechtnis. Teamwissen gehoert dem
     # Team und panelweites dem Betreiber; wer diesen Schalter umlegt, trifft
     # eine Entscheidung ueber sich, nicht ueber seine Kollegen. Vorher endete
@@ -1398,7 +1520,7 @@ def provider_memory_context(
     #
     # Sichtbar sind einem Betreiber leicht zwanzig Server. Faende alles
     # Anlagenwissen dieser zwanzig gleichzeitig in den Kontext, waere das Budget
-    # von 6.000 Zeichen von Betriebsanleitungen aufgebraucht, die mit der Frage
+    # des Blocks von Betriebsanleitungen aufgebraucht, die mit der Frage
     # nichts zu tun haben — und die persoenlichen Vorlieben des Benutzers fielen
     # als Erstes heraus. Schlimmer noch: das Modell saehe zwanzig Anleitungen
     # nebeneinander und wendete die Eigenheit des einen auf den anderen an.
@@ -1418,22 +1540,45 @@ def provider_memory_context(
     # Die zweite Engstelle, und die einzige, die vor der Entschluesselung
     # greifen kann. Der Budgetschnitt weiter unten braucht den Klartext, um zu
     # messen — er kommt also zwangslaeufig zu spaet, um Roundtrips zu sparen.
-    rows, vorgekuerzt = _vorauswahl(rows, query, now, MAX_CONTEXT_ROWS)
+    #
+    # Der Zeilendeckel wandert im selben Verhältnis mit wie das Budget, denn er
+    # steht nicht für sich: 300 ist gegen genau 6.000 Zeichen gewählt
+    # (Begründung an `MAX_CONTEXT_ROWS`), nämlich als das Doppelte dessen, was
+    # bei kurzen Einträgen überhaupt hineinpasst. Bliebe er fest, während das
+    # Budget mit dem Fenster wächst, meldete der Block bei vielen kurzen
+    # Einträgen "ausgelassen", obwohl daneben noch Platz frei ist. Der Preis
+    # wandert mit: beim Deckel von 24.000 Zeichen sind es bis zu 1.200
+    # Sidecar-Roundtrips statt 300 — proportional zu dem Fenster, das der
+    # Betreiber sich ausgesucht hat.
+    zeilen = max(1, MAX_CONTEXT_ROWS * zeichen // MAX_CONTEXT_CHARS)
+    rows, vorgekuerzt = _vorauswahl(rows, query, now, zeilen)
     decoded = _entschluesseln(rows)
+    # Zeilen aus einer Ausfallphase des Modells tragen keinen Vektor. Hier
+    # liegt ihr Klartext ohnehin offen, also ist hier die Stelle, an der es
+    # nichts extra kostet, ihn nachzurechnen — sonst blieben sie für immer
+    # blind für Bedeutungsrang und Reiz.
+    _vektoren_nachziehen(decoded)
     # **Die Abrufstaerke je Zeile**, einmal berechnet und danach zweimal
     # gebraucht: fuer die Darstellung (blass oder voll) und, falls das Budget
     # nicht reicht, als Teil der Auswahl. Die Vektoren liegen ohnehin schon an
     # den Zeilen; teuer ist hier nichts.
     query_tokens = _tokens(query)
     aehnlichkeiten = _similarities(query, [row for row, _ in decoded])
+    ueberlappungen = [
+        len(query_tokens & _tokens(f"{row.key} {value}")) for row, value in decoded
+    ]
+    # Der Reiz steht getrennt daneben, weil er zwei verschiedene Fragen
+    # beantwortet: `abrufstaerke` braucht ihn als Untergrenze für die
+    # Darstellung, und weiter unten entscheidet er darüber, ob dieser Eintrag
+    # als **gebraucht** gilt.
+    reize = [
+        _reiz(aehnlichkeit, overlap)
+        for aehnlichkeit, overlap in zip(aehnlichkeiten, ueberlappungen)
+    ]
     staerken = [
-        abrufstaerke(
-            row,
-            now,
-            aehnlichkeit,
-            len(query_tokens & _tokens(f"{row.key} {value}")),
-        )
-        for (row, value), aehnlichkeit in zip(decoded, aehnlichkeiten)
+        abrufstaerke(row, now, aehnlichkeit, overlap)
+        for (row, _value), aehnlichkeit, overlap
+        in zip(decoded, aehnlichkeiten, ueberlappungen)
     ]
     lines = [
         _memory_line(row, value, staerke)
@@ -1441,7 +1586,7 @@ def provider_memory_context(
     ]
     total = sum(len(line) + 1 for line in lines)
 
-    if total <= MAX_CONTEXT_CHARS:
+    if total <= zeichen:
         selected = decoded
         truncated = vorgekuerzt
     else:
@@ -1464,7 +1609,7 @@ def provider_memory_context(
         }
         for (row, value), _score in ranked:
             line = _memory_line(row, value, staerke_je_zeile.get(id(row)))
-            if used + len(line) + 1 > MAX_CONTEXT_CHARS:
+            if used + len(line) + 1 > zeichen:
                 continue
             selected.append((row, value))
             used += len(line) + 1
@@ -1479,14 +1624,29 @@ def provider_memory_context(
     if not selected:
         return None
 
-    # **Die Nutzung wird vor dem Bauen vermerkt, aber nach dem Bewerten.**
-    # Die Staerken oben stammen aus dem Zustand *vor* dieser Runde — sonst
-    # haette sich jeder Eintrag durch das blosse Gezeigtwerden selbst
-    # aufgefrischt, und "verblasst" gaebe es nie.
+    # **Gebraucht ist, wen die Frage getroffen hat — Anzeigen ist kein
+    # Gebrauch.**
+    #
+    # Bis hierher zählte jede gezeigte Zeile hoch, und weil unterhalb des
+    # Budgets *jede* sichtbare Zeile mitgeht, hieß das: eine Chatnachricht,
+    # ein Zählschritt für alles. Das hob das Verblassen auf, und zwar
+    # zweifach. Erstens sofort: `last_used_at = now` setzt die Frische auf 1.0,
+    # ein blasser Eintrag stand nach genau einer Anzeige wieder voll da.
+    # Zweitens dauerhaft: ab `use_count` 13 liegt allein die Vertrautheit über
+    # `VERBLASSEN_AB`, danach kann der Eintrag nie wieder verblassen — und
+    # dreizehn Nachrichten sind ein Vormittag. Ein Gedächtnis, das sich durch
+    # bloßes Danebenliegen selbst auffrischt, verblasst nie.
+    #
+    # Die Regel ist deshalb dieselbe, an der auch die Darstellung hängt: nur
+    # wer über Bedeutung oder Wortbezug getroffen wurde, war gebraucht. Der
+    # Reiz stammt wie die Stärken aus dem Zustand *vor* dieser Runde.
     staerke_final = {
         id(row): staerke for (row, _v), staerke in zip(decoded, staerken)
     }
+    reiz_je_zeile = {id(row): reiz for (row, _v), reiz in zip(decoded, reize)}
     for row, _value in selected:
+        if reiz_je_zeile.get(id(row), 0.0) < VERBLASSEN_AB:
+            continue
         row.use_count = int(row.use_count or 0) + 1
         row.last_used_at = now
     db.flush()
@@ -1530,6 +1690,12 @@ def search_entries(
 
     Der Rueckgabewert enthaelt den Klartext. Er ist die Grundlage der
     Entscheidung — wer loeschen soll, muss sehen was.
+
+    Die gemeldeten Treffer gelten als **benutzt**, und das ist die eine Stelle,
+    an der das unstrittig ist: hier hat jemand ausdrücklich gesucht und bekommt
+    genau diese Zeilen vorgelegt. Der Abruf in den Kontext vermerkt dagegen nur,
+    wen die Frage getroffen hat — dort geht vieles mit, um das niemand gebeten
+    hat.
     """
     rows = _visible_scope_rows(db, user, persoenlich=preference(db, user.id))
     if not rows or not query.strip():
@@ -1543,6 +1709,11 @@ def search_entries(
     # Die Vorauswahl bewertet nach denselben Kriterien, die auch hier gleich
     # angelegt werden, nur ohne den Wert; sie nimmt also nicht "irgendwelche
     # 300", sondern dieselben, die auch danach vorn laegen.
+    #
+    # Hier bleibt es bei der festen Zahl, während sie beim Abruf in den Kontext
+    # mit dem Budget wächst: eine Suche meldet höchstens `MAX_SEARCH_RESULTS`
+    # Treffer in den Chat und hängt an der Lesbarkeit, nicht am Kontextfenster
+    # des Modells. Mehr Kandidaten zu öffnen kaufte hier nichts.
     rows, _vorgekuerzt = _vorauswahl(rows, query, now, MAX_CONTEXT_ROWS)
     decoded = _entschluesseln(rows)
     query_tokens = _tokens(query)
@@ -1552,10 +1723,15 @@ def search_entries(
         key=lambda item: _relevance(item[0][0], item[0][1], query_tokens, now, item[1]),
         reverse=True,
     )
-    return [
+    treffer = [
         (row, value, _relevance(row, value, query_tokens, now, score))
         for (row, value), score in ranked[:limit]
     ]
+    for row, _value, _rang in treffer:
+        row.use_count = int(row.use_count or 0) + 1
+        row.last_used_at = now
+    db.flush()
+    return treffer
 
 
 def delete_by_keys(

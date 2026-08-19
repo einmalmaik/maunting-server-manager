@@ -123,6 +123,18 @@ class AiContextPolicyStatus(BaseModel):
     #: fuer die Anfrage, die das Falten ausloest.
     min_percent: int
     max_percent: int
+    #: Ob die Bedeutungssuche des Gedächtnisses gerade rechnen kann
+    #: (``ai_embedding_service.is_ready``). Nur eine Anzeige, nichts zum
+    #: Einstellen: das lokale Modell kommt mit dem Update, nicht über die API.
+    #:
+    #: Steht in dieser Antwort statt in einer eigenen, weil sie dieselbe Frage
+    #: beantwortet — wie MSM mit dem Kontext einer Anfrage umgeht — und weil
+    #: eine zweite Route für ein einzelnes Ja/Nein reine Fläche wäre. Fehlt oder
+    #: bricht das Modell, arbeitet das Gedächtnis ohne Vektoren weiter
+    #: (Wortabgleich, Nutzung, Aktualität), findet aber über Sprachgrenzen
+    #: hinweg nichts mehr. Sichtbar war das bisher allein als eine Warnzeile im
+    #: Log beim ersten Ladeversuch.
+    memory_search_ready: bool
 
 
 class AiWorkerPolicyUpdate(BaseModel):

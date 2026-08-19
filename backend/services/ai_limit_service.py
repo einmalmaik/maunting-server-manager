@@ -60,26 +60,38 @@ MAX_REASONING_EFFORT_MAX = 6
 # deshalb ist sie das Gefaehrlichste, was hier stehen konnte: sie beruhigt an
 # der Stelle, an der jemand nachrechnen muesste.
 #
-# Gezaehlt wird je ``scope_identity``: der persoenliche Vorrat ist ein Bereich,
-# jeder sichtbare Server einer und jedes gegruendete Team einer. Wieviele
-# Bereiche ein Benutzer hat, bestimmt damit er selbst, und die Menge je Anfrage
-# ist Bereiche × Deckel. Ein VIP mit 1_000 und `server.view` auf zwanzig
-# Anlagen bringt so ueber 21.000 Eintraege mit; fuenf sichtbare Server reichen
-# fuer 6.000. Dagegen hilft eine Zahl je Bereich grundsaetzlich nicht.
+# Gezählt wird je ``scope_identity``: der persönliche Vorrat ist ein Bereich,
+# jeder sichtbare Server einer und jedes gegründete Team einer. Wieviele
+# Bereiche ein Benutzer hat, bestimmt damit er selbst, und die Zeilenmenge, die
+# eine Anfrage aus der Datenbank holt, ist Bereiche × Deckel. Ein VIP mit 1_000
+# und `server.view` auf zwanzig Anlagen bringt so über 21.000 Zeilen mit; fünf
+# sichtbare Server reichen für 6.000. Dagegen hilft eine Zahl je Bereich
+# grundsätzlich nicht.
 #
-# Der Leseweg faengt es auch nicht auf, denn er hat gar keine Obergrenze:
-# `provider_memory_context` laedt ueber `_visible_scope_rows` alle sichtbaren
-# Zeilen und gibt sie an `_entschluesseln`, das je Zeile einen synchronen
-# DIS-Sidecar-Roundtrip absetzt — **vor** dem Budgetschnitt, weil erst der
-# Klartext messbar ist. Nur `server_shared` wird vorher auf den einen gerade
-# behandelten Server gefiltert; die rollengebundenen Serverzeilen kommen
-# ausdruecklich fuer alle sichtbaren Anlagen mit. Dass der Block danach auf
-# MAX_CONTEXT_CHARS zusammenfaellt, spart keine einzige Entschluesselung.
+# Teuer sind davon aber nur die Zeilen, die auch entschlüsselt werden, und die
+# sind gedeckelt: `provider_memory_context` kürzt die geladene Menge in
+# `_vorauswahl` auf `MAX_CONTEXT_ROWS`, **bevor** `_entschluesseln` je Zeile
+# einen synchronen DIS-Sidecar-Roundtrip absetzt. Bewerten kann `_vorauswahl`
+# ohne Klartext, weil Vektor, Nutzung, Aktualität und der Schlüssel
+# unverschlüsselt an der Zeile stehen. Eine Chatanfrage kostet damit so viele
+# Roundtrips und nicht „Bereiche × Deckel". Die Zahl steht bewusst nicht hier:
+# sie gehört zum Kontextaufbau und wird dort begründet.
 #
-# Das ist eine bewusst offene Flanke und kein Versehen: ob der Leseweg eine
-# eigene Obergrenze bekommt, ist eine Betreiberentscheidung und hier nicht zu
-# treffen. Wer die 1_000 anhebt, soll nur wissen, dass er Bereiche × Deckel
-# anhebt und nicht 1_000.
+# Hier stand bis eben das Gegenteil — der Leseweg habe „gar keine Obergrenze"
+# und der Budgetschnitt auf MAX_CONTEXT_CHARS spare „keine einzige
+# Entschlüsselung" —, und das war die tragende Begründung für genau diese
+# 1_000. Ein Kommentar, der die Begründung einer Grenze falsch wiedergibt, ist
+# schlimmer als keiner: er beruhigt an der Stelle, an der jemand nachrechnen
+# müsste. Nachzulesen statt zu glauben ist die heutige Zusage in
+# `test_eine_anfrage_entschluesselt_nie_mehr_als_der_deckel_erlaubt`
+# (backend/tests/test_ai_memory_recall.py).
+#
+# Ungedeckelt bleiben zwei Dinge, und nur für sie wiegt die Zahl hier noch: der
+# Bestand in der Datenbank und die Verwaltungsansicht `personal_entries`
+# (ai_memory_service.py), die bewusst alles entschlüsselt, weil man dort
+# aufräumen will und eine Liste, die einen Teil der Einträge stillschweigend
+# verschweigt, schlimmer wäre als eine langsame. Wer die 1_000 anhebt, hebt
+# beides an — nicht die Kosten einer Chatanfrage.
 MAX_MEMORY_ENTRIES_MAX = 1_000
 # Feste Systemgrenze fuer die Bereiche, die an keiner Benutzerrolle haengen:
 # `server_shared` gehoert der Anlage, `panel` dem Betreiber. Das Kontingent des

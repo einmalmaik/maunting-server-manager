@@ -130,6 +130,63 @@ def test_der_chat_kanal_erzeugt_keine_mail(db: Session) -> None:
     assert db.query(AiMailOutbox).count() == 0
 
 
+# ── Die Karenz: gelesen, nie gesetzt ──────────────────────────────────────
+
+
+class TestKarenz:
+    """Der einzige Weg, den Wert zu ändern, ist die Panel-Einstellung.
+
+    Hier stand einmal ein `set_karenz_sekunden()`, das niemand rief — kein
+    Router, kein Frontend, kein Test. Es ist gelöscht; geblieben ist der Leser
+    samt Bereichswächter. Diese Tests halten fest, was er zusagt: eine Zahl
+    innerhalb der Grenzen wird übernommen, alles andere fällt auf die Vorgabe
+    zurück statt eine unsinnige Karenz in Betrieb zu nehmen.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _einstellung_leeren(self):
+        from services.panel_settings_service import PanelSettingsService
+
+        PanelSettingsService.invalidate_cache()
+        yield
+        PanelSettingsService.invalidate_cache()
+
+    def test_ohne_eintrag_gilt_die_vorgabe(self, db: Session) -> None:
+        assert ai_meldestelle.karenz_sekunden() == ai_meldestelle.STANDARD_KARENZ_S
+
+    def test_ein_gepflegter_wert_wird_uebernommen(self, db: Session) -> None:
+        from services.panel_settings_service import PanelSettingsService
+
+        PanelSettingsService.set(ai_meldestelle.KARENZ_KEY, "7")
+
+        assert ai_meldestelle.karenz_sekunden() == 7
+
+    @pytest.mark.parametrize("roh", ["0", "999", "abc", "", "  "])
+    def test_ein_unsinniger_wert_faellt_auf_die_vorgabe_zurueck(
+        self, db: Session, roh: str
+    ) -> None:
+        """Notbremse gegen einen von Hand verdrehten Eintrag.
+
+        Null Sekunden hiesse „grätsche sofort ins Gespräch", 999 hiesse
+        „schweige eine Viertelstunde" — beides ist keine Karenz mehr. Weil es
+        keine Maske gibt, die den Wert prüft, prüft ihn der Leser.
+        """
+        from services.panel_settings_service import PanelSettingsService
+
+        PanelSettingsService.set(ai_meldestelle.KARENZ_KEY, roh)
+
+        assert ai_meldestelle.karenz_sekunden() == ai_meldestelle.STANDARD_KARENZ_S
+
+    def test_die_karenz_wird_nirgends_geschrieben(self) -> None:
+        """Der tote Setter bleibt tot — und die Doku sagt dasselbe.
+
+        Ein Setter ohne Aufrufer ist eine Zusage an den nächsten Leser, die
+        niemand einlöst. Wer ihn wieder einführt, soll ihn im selben Zug auch
+        verdrahten (Endpunkt, Recht, Maske) — dieser Test erinnert daran.
+        """
+        assert not hasattr(ai_meldestelle, "set_karenz_sekunden")
+
+
 # ── Die Ruhe-Regel ────────────────────────────────────────────────────────
 
 

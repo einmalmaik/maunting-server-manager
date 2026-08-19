@@ -31,6 +31,17 @@ import pytest
 from services import file_edit_service
 from services.server_file_access_service import apply_permissions as _apply_permissions
 
+# Diese Datei misst POSIX-Modi am echten Dateisystem und ruft `os.getuid`,
+# `os.getgroups` und `os.chown` — Windows kennt keins davon. Ohne diesen
+# Riegel meldete sie dort zehn Fehlschläge, und dauerhaft rote Tests trägt
+# irgendwann niemand mehr nach. Übersprungen sagt die Wahrheit: auf Windows
+# ist die Rechtevergabe ungeprüft. Die Attrappen wegzupatchen wäre der
+# schlechtere Weg — dann prüfte die Datei sich selbst statt das Dateisystem.
+pytestmark = pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX-Modi und os.getuid/getgroups/chown gibt es auf Windows nicht",
+)
+
 
 # ── Der Eigentuemer bleibt erhalten ───────────────────────────────────
 
@@ -164,9 +175,14 @@ def test_a_panel_owned_file_stays_reachable_for_the_game_process(
     _apply_permissions(str(install), datei)
 
     modus = datei.stat().st_mode & 0o777
-    assert modus & 0o066 == 0o066, (
-        "eine Datei des Panels muss fuer Gruppe und Andere les- und "
-        "schreibbar sein, sonst sperrt sie den Spielprozess aus"
+    assert modus & 0o060 == 0o060, (
+        "eine Datei des Panels muss fuer die Gruppe les- und schreibbar sein, "
+        "sonst sperrt sie den Spielprozess aus"
+    )
+    assert modus & 0o002 == 0, (
+        "die Bruecke zum Spielprozess ist die Gruppe, nicht die ganze Welt — "
+        "ein weltschreibbares 0666 auf einer Spielkonfiguration hiesse, jeder "
+        "Host-Prozess duerfte sie umschreiben"
     )
 
 
@@ -208,12 +224,19 @@ def test_a_shared_group_makes_world_permissions_unnecessary(
 def test_without_a_shared_group_the_world_bit_is_the_fallback(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Fehlt die Gruppe, bleibt nur der Notnagel — sonst startet der Server nicht.
+    """Fehlt die Gruppe, bleibt der Notnagel — aber nur lesend.
 
     Das ist der Zustand eines frisch angelegten Servers, bevor
-    `fix-server-permissions.sh` ihn eingesammelt hat. Ohne Weltrechte koennte
-    der Spielprozess seine eigene Konfiguration nicht lesen; genau daran ist
-    am 18.08.2026 ein ARK-Server nicht mehr gestartet.
+    `fix-server-permissions.sh` ihn eingesammelt hat. Ohne Weltleserecht
+    koennte der Spielprozess seine eigene Konfiguration nicht lesen; genau
+    daran ist am 18.08.2026 ein ARK-Server nicht mehr gestartet.
+
+    Weltschreibrecht deckt dieser Ausfall aber nicht: er war ein Lesefehler.
+    Ein `0666` auf `GameUserSettings.ini` hiesse, jeder Prozess auf dem Host
+    duerfte die Serverkonfiguration umschreiben — und der Notnagel greift
+    oefter als gedacht, weil `os.getgroups()` sich in einem laufenden Prozess
+    nicht mehr aendert: nach `fix-server-permissions.sh` ohne Panel-Neustart
+    haelt das Panel die geteilte Gruppe weiter fuer fremd.
     """
     install = tmp_path / "srv"
     install.mkdir()
@@ -229,8 +252,14 @@ def test_without_a_shared_group_the_world_bit_is_the_fallback(
     _apply_permissions(str(install), datei)
 
     modus = datei.stat().st_mode & 0o777
-    assert modus & 0o006 == 0o006, (
-        "ohne gemeinsame Gruppe sperrt die Datei den Spielprozess aus"
+    assert modus & 0o004 == 0o004, (
+        "ohne gemeinsame Gruppe kann der Spielprozess seine Konfiguration "
+        "nicht lesen — der Notnagel muss das Leserecht geben"
+    )
+    assert modus & 0o002 == 0, (
+        "der Notnagel gibt nie Weltschreibrecht: der Ausfall vom 18.08.2026 "
+        "war ein Lesefehler, und 0666 auf einer Spielkonfiguration ist durch "
+        "nichts gedeckt"
     )
 
 

@@ -106,22 +106,27 @@ def _denkender_zugang(
 
     Wurde ein bevorzugter Provider übergeben, wird dieser genommen. Andernfalls
     greift der erste aktivierte Chatzugang mit hinterlegtem Standardmodell.
+
+    Zwei Fragen, bewusst getrennt gestellt: `fuer_chat()` beantwortet, ob der
+    Zugang überhaupt einen Chatlauf tragen kann — dieselbe Antwort wie in der
+    Providerliste und im Chat-Router. Die Schlüsselprüfung darunter ist die
+    zweite Frage: ist er auch betriebsbereit? Sie bleibt hier und wandert nicht
+    in `fuer_chat()`, denn die Providerliste zeigt einen Zugang ohne Schlüssel
+    absichtlich an. Hier dagegen wird sofort losgesprochen, und ein Zugang ohne
+    Schlüssel führte nur zu einer Stille, die niemand erklärt.
     """
     if bevorzugter_provider_id:
         bevorzugt = db.get(AiProvider, bevorzugter_provider_id)
         if (
             bevorzugt
             and bevorzugt.enabled
-            and ai_provider_service.spricht(bevorzugt, ai_provider_registry.CHAT)
-            and bool((bevorzugt.default_model or "").strip())
+            and ai_provider_service.fuer_chat(bevorzugt)
             and (not bevorzugt.requires_api_key or bool(bevorzugt.operator_api_key_encrypted))
         ):
             return bevorzugt
 
     for zugang in _zugaenge(db):
-        if not ai_provider_service.spricht(zugang, ai_provider_registry.CHAT):
-            continue
-        if not (zugang.default_model or "").strip():
+        if not ai_provider_service.fuer_chat(zugang):
             continue
         if zugang.requires_api_key and not zugang.operator_api_key_encrypted:
             continue

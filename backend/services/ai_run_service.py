@@ -156,18 +156,41 @@ def leerer_zustand(
 
 
 def zustand_lesen(run: AiRun) -> dict:
+    """Das Arbeitsgedaechtnis eines Laufs — und die Marke, wenn es fehlt.
+
+    Kein ``state_json`` heisst: frischer Lauf, der leere Zustand ist die
+    Wahrheit. Ein **vorhandenes, aber unlesbares** ist etwas anderes, und der
+    leere Zustand ist dafuer die falsche Antwort: in ihm steht keine Rolle,
+    kein Guardian- und kein Aufgabenrahmen. Ein Worker- oder Heilungslauf liefe
+    damit als gewoehnlicher Chatlauf weiter — mit dem vollen Werkzeugsatz, ohne
+    Serverbindung und ohne jemanden, der mitliest. Der Verlust des Rahmens ist
+    die gefaehrliche Richtung, nicht die sichere (dieselbe Ueberlegung wie bei
+    `ai_stream_service.guardian_aus_zustand`).
+
+    Geworfen wird trotzdem nicht: diese Funktion hat auch reine Anzeigepfade
+    als Aufrufer, und die sollen einen kaputten Zustand zeigen koennen statt
+    mit 500 zu antworten. Stattdessen traegt der Rueckfall die Marke
+    ``unlesbar``; wer damit **arbeiten** will, steigt daran aus.
+    """
     if not run.state_json:
         return leerer_zustand([], request_id=str(uuid4()))
     try:
         geladen = json.loads(run.state_json)
     except (TypeError, ValueError):
         logger.warning("Laufzustand unlesbar run_id=%s", run.id)
-        return leerer_zustand([], request_id=str(uuid4()))
+        return _unlesbarer_zustand()
     if not isinstance(geladen, dict):
-        return leerer_zustand([], request_id=str(uuid4()))
+        logger.warning("Laufzustand ist kein Woerterbuch run_id=%s", run.id)
+        return _unlesbarer_zustand()
     grund = leerer_zustand([], request_id=str(uuid4()))
     grund.update(geladen)
     return grund
+
+
+def _unlesbarer_zustand() -> dict:
+    zustand = leerer_zustand([], request_id=str(uuid4()))
+    zustand["unlesbar"] = True
+    return zustand
 
 
 def zustand_schreiben(run: AiRun, zustand: dict) -> None:

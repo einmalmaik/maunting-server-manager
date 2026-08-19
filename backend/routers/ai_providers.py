@@ -459,8 +459,7 @@ async def list_available_providers(
     # erst dort, damit gar nicht erst auswaehlbar ist, was nicht funktioniert.
     providers = [
         provider for provider in providers
-        if ai_provider_service.spricht(provider, ai_provider_registry.CHAT)
-        and bool((provider.default_model or "").strip())
+        if ai_provider_service.fuer_chat(provider)
     ]
     deckel = ai_limit_service.resolve_effective_limits(db, user).max_reasoning_effort
 

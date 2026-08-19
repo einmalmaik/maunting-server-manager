@@ -510,12 +510,20 @@ class NodeClient:
             json=payload,
         )
 
-    def files_delete(self, server_id: int | str, path: str) -> dict[str, Any]:
-        return self._request(
-            "DELETE",
-            "/files/delete",
-            params={"server_id": str(server_id), "path": path},
-        )
+    def files_delete(
+        self,
+        server_id: int | str,
+        path: str,
+        expected_revision: str | None = None,
+    ) -> dict[str, Any]:
+        # `expected_revision` ist freiwillig: Aufrufer, die nur aufräumen
+        # (Manifeste, `.bak`-Reste), haben keinen Inhalt gelesen und können
+        # keine Revision nennen. Wer eine nennt, bekommt vom Agenten ein 409,
+        # falls die Datei sich zwischen Lesen und Löschen geändert hat.
+        params = {"server_id": str(server_id), "path": path}
+        if expected_revision is not None:
+            params["expected_revision"] = expected_revision
+        return self._request("DELETE", "/files/delete", params=params)
 
     def files_rename(self, server_id: int | str, old_path: str, new_path: str) -> dict[str, Any]:
         return self._request(

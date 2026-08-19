@@ -8,13 +8,21 @@ Zwei Dinge muessen deshalb gleichzeitig stimmen: die Bedeutungssuche muss ueber
 Sprachgrenzen tragen, **und** ihr Ausfall darf nichts kaputtmachen. Ein
 fehlendes Modell — abgebrochener Download, Airgap, unvollstaendiges Update —
 ist ein Betriebszustand, kein Fehler.
+
+Ein Betriebszustand ist aber nichts, was heimlich bis zum nächsten Neustart
+gilt. Deshalb prüft diese Datei zusätzlich beides, was ihn erträglich macht: er
+heilt von selbst, sobald das Verzeichnis wieder in Ordnung ist, und der
+Betreiber sieht ihn über die Einstellungen statt nur im Log.
 """
 
 from __future__ import annotations
 
 import json
+import sys
+import types
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, Role, RolePermission, User
@@ -73,7 +81,12 @@ def test_without_a_model_nothing_breaks(
 def test_a_broken_model_directory_is_reported_once_and_then_ignored(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    """Ein defektes Modellverzeichnis darf nicht bei jeder Anfrage neu scheitern."""
+    """Ein defektes Modellverzeichnis darf nicht bei jeder Anfrage neu scheitern.
+
+    „Gemerkt" heißt seit dem Neuversuch: für die Dauer von
+    ``NEUVERSUCH_NACH_SEKUNDEN``. Innerhalb dieser Frist verhält sich der
+    Dienst wie vorher — keine zweite Warnung, kein zweiter Ladeversuch.
+    """
     from config import settings
 
     ai_embedding_service.reset_for_tests()
@@ -83,8 +96,95 @@ def test_a_broken_model_directory_is_reported_once_and_then_ignored(
         assert ai_embedding_service.encode(["irgendwas"]) is None
         # Zweiter Aufruf: der Fehlschlag ist gemerkt, es wird nicht erneut geladen.
         assert ai_embedding_service.encode(["irgendwas"]) is None
+        # Und er ist abfragbar, statt nur im Log zu stehen.
+        assert ai_embedding_service.is_ready() is False
     finally:
         ai_embedding_service.reset_for_tests()
+
+
+class _FakeModel:
+    """Ein Modell, das genau so viel kann, wie ``encode`` von ihm verlangt."""
+
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        erste_achse = [1.0] + [0.0] * (ai_embedding_service.EMBEDDING_DIMENSIONS - 1)
+        return [list(erste_achse) for _ in texts]
+
+
+def test_a_stumbled_load_is_retried_after_the_window(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein einmal gescheitertes Laden darf nicht bis zum Neustart gelten.
+
+    Der Fall aus dem Betrieb: die Gewichte werden gerade entpackt, ein Update
+    läuft, der Speicher ist für einen Moment knapp — ``from_pretrained`` wirft.
+    Vorher merkte sich der Dienst das für den Rest des Prozesslebens; das
+    Gedächtnis arbeitete bis zum nächsten Neustart des Panels ohne
+    Bedeutungssuche weiter, und niemand erfuhr davon.
+
+    Die Uhr wird hier nicht gefälscht, sondern der gemerkte Zeitpunkt
+    zurückdatiert — das ist dasselbe Ereignis („die Frist ist abgelaufen") mit
+    einem Bruchteil des Aufwands.
+    """
+    versuche: list[str] = []
+
+    class FakeStaticModel:
+        @staticmethod
+        def from_pretrained(pfad: str) -> _FakeModel:
+            versuche.append(pfad)
+            if len(versuche) == 1:
+                raise RuntimeError("Gewichte unvollstaendig")
+            return _FakeModel()
+
+    fake_modul = types.ModuleType("model2vec")
+    fake_modul.StaticModel = FakeStaticModel  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "model2vec", fake_modul)
+    # Die Dateien liegen da — genau der Fall, den `is_available` nicht sieht.
+    monkeypatch.setattr(ai_embedding_service, "is_available", lambda: True)
+
+    ai_embedding_service.reset_for_tests()
+    try:
+        assert ai_embedding_service.encode(["irgendwas"]) is None
+        assert ai_embedding_service.is_ready() is False
+        # Innerhalb der Frist wird nicht erneut geladen: sonst waere ein
+        # defektes Modell ein Ladeversuch je Chatnachricht.
+        assert ai_embedding_service.encode(["irgendwas"]) is None
+        assert len(versuche) == 1
+
+        ai_embedding_service._letzter_fehlschlag -= (
+            ai_embedding_service.NEUVERSUCH_NACH_SEKUNDEN + 1
+        )
+
+        vektoren = ai_embedding_service.encode(["irgendwas"])
+        assert vektoren is not None
+        assert len(vektoren[0]) == ai_embedding_service.EMBEDDING_DIMENSIONS
+        assert len(versuche) == 2
+        assert ai_embedding_service.is_ready() is True
+    finally:
+        ai_embedding_service.reset_for_tests()
+
+
+def test_the_operator_sees_whether_the_search_can_compute(
+    client: TestClient, owner_cookies: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Zustand gehört an eine Oberfläche, nicht nur ins Log.
+
+    Ohne dieses Feld war ein fehlendes oder beschädigtes Modell für den
+    Betreiber genau eine Zeile im Log beim Start — danach fand sein Gedächtnis
+    über Sprachgrenzen hinweg nichts mehr, ohne dass irgendwo etwas anders
+    aussah.
+    """
+    monkeypatch.setattr(ai_embedding_service, "is_ready", lambda: False)
+
+    antwort = client.get("/api/ai/settings/context", cookies=owner_cookies)
+
+    assert antwort.status_code == 200
+    assert antwort.json()["memory_search_ready"] is False
+
+    monkeypatch.setattr(ai_embedding_service, "is_ready", lambda: True)
+
+    assert client.get(
+        "/api/ai/settings/context", cookies=owner_cookies
+    ).json()["memory_search_ready"] is True
 
 
 def test_a_failed_write_discards_the_old_vector(
@@ -113,6 +213,69 @@ def test_a_failed_write_discards_the_old_vector(
     assert row.embedding_json is None
     assert row.embedding_model is None
     assert ai_memory_service._stored_vector(row) is None
+
+
+def _vektoren_fuer(texts: list[str]) -> list[list[float]]:
+    """Ein Modellersatz: je Text ein brauchbarer, normierter Vektor.
+
+    Bewusst einer je Eingabe — genau die Zusage, auf die sich das Nachziehen
+    verlässt, wenn es Vektoren und Zeilen wieder zusammenführt.
+    """
+    return [
+        [1.0] + [0.0] * (ai_embedding_service.EMBEDDING_DIMENSIONS - 1)
+        for _ in texts
+    ]
+
+
+def test_a_missing_vector_is_recomputed_on_the_next_recall(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eine Ausfallphase des Modells darf keinen Eintrag dauerhaft blind machen.
+
+    `refresh_embedding` verwirft den Vektor, wenn `encode` beim Schreiben
+    nichts liefert — richtig, denn ein stehengebliebener Vektor beschriebe
+    danach den *alten* Text. Nachgeholt wurde es aber nie: `upsert_entry` ist
+    der einzige Aufrufer, und niemand fasst die Zeile je wieder an. Wer während
+    eines abgebrochenen Downloads etwas merkte, hatte einen Eintrag, der für
+    Bedeutungsrang und Verblassen-Reiz für immer unsichtbar blieb.
+
+    Nachgezogen wird dort, wo der Klartext ohnehin offenliegt: beim Abruf in
+    den Kontext.
+    """
+    _allow_memory(db, regular_user)
+    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
+    row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
+    assert row.embedding_json is None, "ohne Modell entsteht kein Vektor"
+
+    # Das Modell ist wieder da — die nächste Anfrage muss aufholen.
+    monkeypatch.setattr(ai_embedding_service, "encode", _vektoren_fuer)
+    ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
+
+    db.refresh(row)
+    assert row.embedding_model == ai_memory_service._EMBEDDING_MODEL_TAG
+    vektor = ai_memory_service._stored_vector(row)
+    assert vektor is not None
+    assert len(vektor) == ai_embedding_service.EMBEDDING_DIMENSIONS
+
+
+def test_without_a_model_the_recall_leaves_the_missing_vector_alone(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fehlt das Modell weiterhin, passiert schlicht nichts — und nichts wirft.
+
+    Das Nachziehen darf kein zweiter Weg sein, auf dem ein fehlendes Modell
+    das Gedächtnis kaputtmacht.
+    """
+    _allow_memory(db, regular_user)
+    monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
+    row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
+
+    block = ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
+
+    assert block is not None and "Europe/Berlin" in block
+    db.refresh(row)
+    assert row.embedding_json is None
+    assert row.embedding_model is None
 
 
 def test_a_vector_from_a_different_model_is_ignored(

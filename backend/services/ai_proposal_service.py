@@ -2054,6 +2054,25 @@ def execute_autonomously(
         raise AiActionStateError("AI_ACTION_NOT_FOUND")
     if not proposal.autonomous or proposal.requires_confirmation:
         raise AiActionStateError("AI_ACTION_NOT_AUTONOMOUS")
+    # Später Import wie beim Anlegen: `ai_autonomy_service` liest
+    # `ALWAYS_CONFIRM_TOOLS` aus diesem Modul, am Dateikopf wäre das ein Zirkel.
+    from services.ai_autonomy_service import autonomie_grundlage
+
+    # **Die Autonomie wird beim Anlegen entschieden, aber nicht eingefroren.**
+    # Zwischen dem Vorschlag und diesem Punkt liegt ein Zeitfenster ohne
+    # Obergrenze — ein Vorschlag im Status 'proposed' altert nicht. Ohne diese
+    # Prüfung überlebte eine erteilte Autonomie ihren eigenen Widerruf: der
+    # Betreiber nimmt `ai.autonomous.use` weg oder schaltet die Freigabe für
+    # diesen Server ab, und die bereits angelegte Aktion liefe trotzdem noch
+    # ohne Rückfrage. Dieselbe Überlegung wie beim zweiten Backup-Nachweis in
+    # `execute_proposal`, nur eine Ebene früher.
+    if (
+        autonomie_grundlage(
+            db, user=user, server_id=proposal.server_id, tool_name=proposal.tool_name
+        )
+        is None
+    ):
+        raise AiActionStateError("AI_ACTION_NOT_AUTONOMOUS")
     _, token = confirm_proposal(db, proposal_id=proposal_id, user=user)
     return execute_proposal(
         db, proposal_id=proposal_id, user=user, confirmation_token=token

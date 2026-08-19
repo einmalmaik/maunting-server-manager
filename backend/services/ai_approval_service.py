@@ -44,13 +44,6 @@ logger = logging.getLogger(__name__)
 #: ohnehin eine eigene Frist (`FRIST_STUNDEN`), die frueher greift.
 GUELTIG_STUNDEN = 24
 
-#: Wieviele Freigaben ein Auftrag hoechstens gleichzeitig offen haben darf.
-#:
-#: Ohne Deckel schriebe ein Lauf, der in jeder Runde denselben Vorschlag neu
-#: aufsetzt, eine Mail je Runde. Der Empfaenger bekaeme acht gleichlautende
-#: Nachrichten und wuesste bei keiner, ob sie noch gilt.
-MAX_OFFENE = 1
-
 
 def _jetzt() -> datetime:
     return datetime.now(timezone.utc)
@@ -117,6 +110,16 @@ def freigabe_anfordern(
         )
         return False
 
+    # **Eine offene Frage je Benutzer, und die Grenze hält auch im Rennen.**
+    # Ohne sie schriebe ein Lauf, der in jeder Runde denselben Vorschlag neu
+    # aufsetzt, eine Mail je Runde; der Empfänger bekäme acht gleichlautende
+    # Nachrichten und wüsste bei keiner, ob sie noch gilt. Und weil derselbe
+    # Benutzer mehrere unbeaufsichtigte Läufe gleichzeitig haben kann — bis zu
+    # drei Worker plus die Guardian-Heilung, jeder in einer eigenen Sitzung —,
+    # muss zwischen dem Nachsehen und dem Anlegen dieselbe Zeilensperre liegen,
+    # die `ai_usage_service.reserve_ai_usage` benutzt. Sie hält bis zum Commit
+    # weiter unten; danach sieht der zweite Thread die Zeile des ersten.
+    db.query(User.id).filter(User.id == user.id).with_for_update().one()
     if offene_freigabe(db, user_id=user.id) is not None:
         logger.info(
             "Freigabemail unterbleibt: es wartet schon eine user_id=%s", user.id
@@ -167,7 +170,8 @@ def freigabe_anfordern(
     if not eingereiht:
         # Ohne Mail gibt es niemanden, der antworten koennte. Das Token wieder
         # wegzunehmen ist wichtiger als es zu behalten: eine offene Freigabe
-        # ohne Link blockiert `MAX_OFFENE` und damit jeden weiteren Versuch.
+        # ohne Link gilt als die eine offene Frage und blockiert damit jeden
+        # weiteren Versuch.
         db.delete(zeile)
         db.commit()
         logger.warning(
@@ -258,8 +262,18 @@ def entscheiden(db: Session, *, token: str, entscheidung: str) -> dict:
     if not _anspruch_nehmen(db, zeile, entscheidung):
         raise AiActionStateError("AI_APPROVAL_INVALID")
 
+    # **Ab hier ist das Token verbrannt.** Jeder Ausstieg unterhalb dieser
+    # Zeile muss den geparkten Lauf trotzdem wecken, sonst stünde er bis zu
+    # seiner Frist auf `waiting_confirmation` — und weil
+    # `ai_guardian_repair_service._wartet_auf_freigabe` an `consumed_at IS NULL`
+    # misst, gälte der Auftrag beim Fristende als aufgegeben statt als
+    # eskaliert: der Betreiber erführe nicht einmal, dass eine Freigabe offen
+    # war. Deshalb steht die Laufkennung schon hier bereit, vor dem Vorschlag.
+    run_id = zeile.run_id
+
     user = db.query(User).filter(User.id == zeile.user_id).first()
     if user is None or not getattr(user, "is_active", False):
+        _lauf_wecken(db, run_id)
         raise AiActionStateError("AI_APPROVAL_INVALID")
 
     proposal = (
@@ -268,9 +282,10 @@ def entscheiden(db: Session, *, token: str, entscheidung: str) -> dict:
         .first()
     )
     if proposal is None:
+        _lauf_wecken(db, run_id)
         raise AiActionStateError("AI_ACTION_NOT_FOUND")
 
-    run_id = zeile.run_id or proposal.run_id
+    run_id = run_id or proposal.run_id
 
     if entscheidung == "rejected":
         if proposal.status in ("proposed", "confirmed"):
@@ -295,9 +310,19 @@ def entscheiden(db: Session, *, token: str, entscheidung: str) -> dict:
         _lauf_wecken(db, run_id)
         return {"decision": "rejected", "tool_name": proposal.tool_name}
 
-    bestaetigt, bestaetigungstoken = ai_proposal_service.confirm_proposal(
-        db, proposal_id=proposal.id, user=user
-    )
+    try:
+        bestaetigt, bestaetigungstoken = ai_proposal_service.confirm_proposal(
+            db, proposal_id=proposal.id, user=user
+        )
+    except Exception:
+        db.rollback()
+        # Derselbe Griff wie bei der Ausführung weiter unten. Das Token bleibt
+        # bewusst verbraucht — es zurückzugeben öffnete das Einmal-Rennen
+        # wieder. Der Gewinn ist, dass der wartende Lauf die Absage erfährt:
+        # er kann weiterarbeiten und, weil die Zeile jetzt `consumed_at` trägt,
+        # über `offene_freigabe` sofort eine neue Freigabe anfordern.
+        _lauf_wecken(db, run_id)
+        raise
     audit_service.record_privileged_action(
         db,
         user_id=user.id,

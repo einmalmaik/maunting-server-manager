@@ -66,8 +66,15 @@ export interface AiRoleLimits {
    * fest, dieser Docblock lag ausserhalb dessen, was sie lesen, und haette die
    * alte Zahl ueberlebt. Ohne diesen Rueckfall waere die Grenze auf jeder
    * Bestandsanlage ersatzlos weggefallen, denn nach der Migration traegt jede
-   * Rolle NULL — und der Leseweg hat keinen Deckel: jeder sichtbare Eintrag
-   * wird bei jeder Chatanfrage einzeln entschluesselt.
+   * Rolle NULL — und ein Vorrat ohne jede Grenze wächst weiter, solange die KI
+   * schreibt.
+   *
+   * Hier stand als Begründung „und der Leseweg hat keinen Deckel: jeder
+   * sichtbare Eintrag wird bei jeder Chatanfrage einzeln entschlüsselt". Das
+   * stimmt seit `MAX_CONTEXT_ROWS` nicht mehr: der Kontextaufbau kürzt die
+   * Zeilen auf diesen Deckel, bevor er sie entschlüsselt. Ungedeckelt sind
+   * seither nur noch der Bestand selbst und die Verwaltungsansicht im Profil,
+   * die bewusst alles zeigt, weil man dort aufräumen will.
    *
    * Der Rueckfall greift benutzerweit, nicht je Rollenkarte: ein leeres Feld
    * traegt in der Rollenaufloesung nichts mehr bei (FELDER_OHNE_UNBEGRENZT),
@@ -149,9 +156,13 @@ const FIELD_DEFINITIONS: Array<{
   { key: 'concurrent_operations', labelKey: 'aiSettings.concurrentOperations', max: 100, step: 1 },
   { key: 'monthly_cost_limit_cents', labelKey: 'aiSettings.monthlyCostCents', max: 1_000_000_000, step: 100 },
   // 1_000 muss `MAX_MEMORY_ENTRIES_MAX` im Backend entsprechen: dort ist der
-  // Deckel bewusst niedrig, weil jeder Eintrag beim Promptaufbau einzeln
-  // entschlüsselt wird. Ein hier großzügigeres Maximum ließe den Betreiber
-  // Werte eintragen, die das Backend abweist.
+  // Deckel bewusst niedrig, weil er den gespeicherten Bestand begrenzt — und
+  // der wächst je Bereich, von denen ein Benutzer beliebig viele haben kann.
+  // Als Begründung stand hier „weil jeder Eintrag beim Promptaufbau einzeln
+  // entschlüsselt wird"; seit `MAX_CONTEXT_ROWS` entschlüsselt eine Chatanfrage
+  // nur noch so viele Zeilen, egal wie groß der Vorrat ist. Ein hier
+  // großzügigeres Maximum ließe den Betreiber Werte eintragen, die das Backend
+  // abweist.
   // „Muss entsprechen" war bis eben eine blosse Bitte: die Zahl steht hier,
   // die Konstante dort, und keine Prüfung sah beide. `test_ai_role_limits.py`
   // liest diese Zeile jetzt und vergleicht sie — wer den Backend-Deckel

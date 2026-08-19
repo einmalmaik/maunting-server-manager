@@ -386,7 +386,7 @@ def _abholen(warteschlange) -> list[str]:
         name, daten = warteschlange.get_nowait()
         if name is None:
             break
-        ereignisse.append(ai_stream_service.sse_event(name, daten))
+        ereignisse.append(ai_run_broker.sse_event(name, daten))
     return ereignisse
 
 

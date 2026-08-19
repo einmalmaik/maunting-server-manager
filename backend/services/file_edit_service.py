@@ -40,7 +40,14 @@ _locks_guard = threading.Lock()
 _locks: dict[str, threading.Lock] = {}
 
 
-def _lock_for(target: Path) -> threading.Lock:
+def lock_for(target: Path) -> threading.Lock:
+    """Die Sperre zu einem Pfad — dieselbe für jeden, der sie anfasst.
+
+    Öffentlich, weil nicht nur das Schreiben sie braucht: `delete_server_text`
+    liest, sichert einen Versionsschnappschuss und löscht danach, und in dem
+    Zeitfenster darf kein Schreibvorgang dazwischenrutschen. Zwei getrennte
+    Sperren wären keine.
+    """
     key = str(target)
     with _locks_guard:
         return _locks.setdefault(key, threading.Lock())
@@ -137,7 +144,7 @@ def write_text(
     """Atomically replace a text file after an optimistic revision check."""
     target.parent.mkdir(parents=True, exist_ok=True)
     encoded = content.encode("utf-8")
-    with _lock_for(target):
+    with lock_for(target):
         if create_only and target.exists():
             raise FileExistsError("Target file already exists")
         current_revision = content_revision(target.read_bytes()) if target.is_file() else None
@@ -200,7 +207,13 @@ def write_text(
             # dann fuer Gruppe und Andere, damit der Server sie trotzdem
             # lesen kann. Ein harter Abbruch waere hier falsch: der Inhalt
             # ist geschrieben, und der Mensch wartet auf ein Ergebnis.
-            if previous_owner is not None:
+            #
+            # ``os.chown`` gibt es nur auf POSIX. Ohne diese Abfrage brach das
+            # Speichern auf der Entwicklungsmaschine mit einem
+            # ``AttributeError`` ab — der ist kein ``OSError`` und lief am
+            # ``except`` darunter vorbei, obwohl der Inhalt laengst auf der
+            # Platte lag.
+            if previous_owner is not None and os.name == "posix":
                 try:
                     os.chown(temp_path, previous_owner[0], previous_owner[1])
                 except (PermissionError, OSError):

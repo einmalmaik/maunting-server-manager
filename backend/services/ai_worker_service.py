@@ -108,6 +108,14 @@ def worker_start(db: Session, *, user: User, arguments: dict) -> dict:
             "Unbekannter Meldekanal. Zulässig sind: " + ", ".join(KANAELE)
         )
 
+    # **Zählen und Anlegen unter einer Sperre.** Das Gehirn ruft die Werkzeuge
+    # einer Welle nebenläufig auf, bis zu acht gleichzeitig und jedes in einer
+    # eigenen Sitzung: zwei `worker_start` derselben Runde sähen ohne diese
+    # Zeile beide denselben freien Platz und belegten ihn beide. Dieselbe
+    # Zeilensperre wie in `ai_usage_service.reserve_ai_usage` — auf PostgreSQL
+    # serialisiert sie den Abschnitt, auf SQLite ist sie wirkungslos, und dort
+    # läuft die Welle ohnehin nacheinander.
+    db.query(User.id).filter(User.id == user.id).with_for_update().one()
     deckel = ai_worker_limits.max_worker_je_benutzer()
     laufend = aktive_worker(db, user_id=user.id)
     if len(laufend) >= deckel:
@@ -141,8 +149,12 @@ def worker_start(db: Session, *, user: User, arguments: dict) -> dict:
             "detail": "Am KI-Zugang fehlt der Schlüssel des Betreibers.",
         }
 
+    # Nur geflusht, nicht committet: ein Commit hier gäbe die Benutzersperre
+    # frei, bevor der neue Lauf überhaupt existiert — genau in dem Fenster,
+    # das die Sperre schließen soll. Den einen Commit setzt `lauf_beginnen`
+    # am Ende, und der schließt dann Fenster und Lauf gemeinsam ab.
     fenster = ai_chat_service.worker_unterhaltung_anlegen(db, user, titel)
-    db.commit()
+    db.flush()
 
     # Spaeter Import: `ai_stream_service` importiert `ai_action_service`, und
     # der Dispatch dort ruft dieses Modul — ein Import am Dateikopf waere der
@@ -176,9 +188,11 @@ def worker_start(db: Session, *, user: User, arguments: dict) -> dict:
     if run is None:
         # Das eben angelegte Fenster wieder wegraeumen: ohne Lauf ist es in
         # keiner Liste sichtbar, aber jeder gescheiterte Versuch liesse sonst
-        # eine Leiche zurueck.
-        db.delete(fenster)
-        db.commit()
+        # eine Leiche zurueck. Weil es nur geflusht ist, genügt das
+        # Zurücknehmen der Transaktion — ein `db.delete` auf einem Objekt,
+        # das `lauf_beginnen` in seinen Fehlerzweigen bereits weggerollt hat,
+        # würde stattdessen selbst werfen.
+        db.rollback()
         return {
             "started": False,
             "reason": (fehler or ("unbekannt",))[0],

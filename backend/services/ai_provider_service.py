@@ -63,6 +63,32 @@ def spricht(provider: AiProvider, protokoll: str) -> bool:
     return ai_provider_registry.spricht(provider.provider_kind, protokoll)
 
 
+def fuer_chat(provider: AiProvider) -> bool:
+    """Taugt dieser Zugang, um einen Chatlauf zu tragen?
+
+    Zwei Bedingungen und keine dritte: er spricht ``/chat/completions``, und es
+    ist ein Standardmodell hinterlegt. Ein Stimmzugang fällt an der ersten, ein
+    halb eingerichteter Chatzugang an der zweiten.
+
+    Die Regel stand vorher an sechs Stellen ausgeschrieben — in der Auswahlliste
+    der Provider, im Chat-Router, im Sprach-Router und zweimal hier. Sie war
+    dabei schon auseinandergelaufen: eine Fassung prüfte zusätzlich den
+    Betreiberschlüssel, die anderen nicht. Wer eine Auswahl anders beantwortet
+    als die Annahme dahinter, baut genau den Fall, in dem der Benutzer einen
+    Zugang wählen kann, der ihn danach mit einem 404 abweist.
+
+    Ausdrücklich **nicht** enthalten ist die Frage, ob der Zugang betriebsbereit
+    ist (Schlüssel hinterlegt, sofern verlangt). Das ist eine zweite Frage mit
+    einer eigenen Antwort: die Providerliste zeigt einen Zugang ohne Schlüssel
+    bewusst an — als ``available: false``, damit der Betreiber sieht, dass er
+    noch etwas zu tun hat.
+    """
+    return (
+        spricht(provider, ai_provider_registry.CHAT)
+        and bool((provider.default_model or "").strip())
+    )
+
+
 def _hint(secret: str) -> str:
     return "********" + secret[-4:] if len(secret) >= 4 else "********"
 
@@ -422,12 +448,7 @@ def anbieter_ohne_auswahl(db: Session, user: User) -> AiProvider | None:
     )
     if letzter is not None:
         anbieter = db.get(AiProvider, letzter.provider_id)
-        if (
-            anbieter is not None
-            and anbieter.enabled
-            and spricht(anbieter, ai_provider_registry.CHAT)
-            and bool((anbieter.default_model or "").strip())
-        ):
+        if anbieter is not None and anbieter.enabled and fuer_chat(anbieter):
             return anbieter
 
     # Gezaehlt werden nur **Chat**zugaenge mit konfiguriertem Standardmodell.
@@ -438,8 +459,7 @@ def anbieter_ohne_auswahl(db: Session, user: User) -> AiProvider | None:
         .filter(AiProvider.enabled.is_(True))
         .order_by(AiProvider.id)
         .all()
-        if spricht(zugang, ai_provider_registry.CHAT)
-        and bool((zugang.default_model or "").strip())
+        if fuer_chat(zugang)
     ]
     return aktive[0] if len(aktive) == 1 else None
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -231,7 +232,7 @@ async def test_a_late_watcher_still_sees_the_whole_answer(
 
     # Erst **jetzt** schaut jemand hin.
     ereignisse = [
-        stueck async for stueck in ai_stream_service.lauf_verfolgen(run.id)
+        stueck async for stueck in ai_run_broker.lauf_verfolgen(run.id)
     ]
     verbunden = "".join(ereignisse)
     assert "event: snapshot" in verbunden
@@ -1795,7 +1796,7 @@ async def test_the_compaction_reports_itself_before_the_run_ends(
     await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
 
     ereignisse = [
-        stueck async for stueck in ai_stream_service.lauf_verfolgen(run.id, abo=abo)
+        stueck async for stueck in ai_run_broker.lauf_verfolgen(run.id, abo=abo)
     ]
     verbunden = "".join(ereignisse)
     assert "event: compacted" in verbunden, (
@@ -1805,3 +1806,80 @@ async def test_the_compaction_reports_itself_before_the_run_ends(
         "Die Anzeige ist beim Endereignis schon ausgestiegen"
     )
 
+
+
+# ── 7. Der Rahmen des Laufs geht nie still verloren ───────────────────────
+
+
+def test_ein_kaputter_laufzustand_traegt_die_marke() -> None:
+    """Unlesbar ist nicht dasselbe wie leer — und muss sich unterscheiden lassen.
+
+    Ein frischer Lauf hat noch keinen Zustand; das ist der harmlose Fall. Ein
+    vorhandener, aber kaputter Zustand ist der gefaehrliche: in ihm steht
+    keine Rolle, kein Guardian- und kein Aufgabenrahmen mehr. Wer beides
+    gleich beantwortet, kann den einen Fall nicht abfangen.
+    """
+    frisch = SimpleNamespace(id="r-frisch", state_json=None)
+    assert "unlesbar" not in ai_run_service.zustand_lesen(frisch)
+
+    kaputt = SimpleNamespace(id="r-kaputt", state_json="{kaputt")
+    assert ai_run_service.zustand_lesen(kaputt)["unlesbar"] is True
+
+    kein_woerterbuch = SimpleNamespace(id="r-liste", state_json="[1, 2, 3]")
+    assert ai_run_service.zustand_lesen(kein_woerterbuch)["unlesbar"] is True
+
+
+@pytest.mark.asyncio
+async def test_ein_unlesbarer_laufzustand_beendet_den_lauf(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ohne Rahmen faehrt niemand weiter — auch nicht als gewoehnlicher Chatlauf.
+
+    Der Rueckfall auf den leeren Zustand war fail-open: ein Worker- oder
+    Heilungslauf verlor damit Rolle, Serverbindung und Werkzeugeinengung und
+    lief mit dem vollen Katalog weiter, im Namen des Freigebers und ohne
+    jemanden, der mitliest. Der Verlust des Rahmens ist die gefaehrliche
+    Richtung, nicht die sichere.
+    """
+    server = _server(db, "rahmenlos")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user)
+    gesehen = _fake_stream(monkeypatch, [], text="Das darf nie gesagt werden.")
+
+    run, fehler = ai_stream_service.lauf_beginnen(
+        db, user=regular_user, conversation=conversation, provider=provider,
+        request_id=uuid4(), content="Sieh nach den Servern", reasoning=False,
+    )
+    assert run is not None, f"Lauf konnte nicht beginnen: {fehler}"
+    run.state_json = "{kaputt"
+    db.commit()
+
+    ai_run_broker.eroeffnen(run.id)
+    await ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
+    db.expire_all()
+    run = db.get(AiRun, run.id)
+
+    assert run.status == "failed"
+    assert run.stop_reason == "laufrahmen_unlesbar"
+    assert gesehen == [], "Der Anbieter wurde trotz verlorenem Rahmen gefragt"
+
+
+# ── 8. Wer zusieht, geht die Schleife nichts an ───────────────────────────
+
+
+def test_das_fenster_wohnt_beim_vermittler() -> None:
+    """Der Modulvertrag als Zusage, nicht als Absichtserklaerung.
+
+    ``ai_stream_service`` sagt in seinem Kopf: "``ai_run_broker`` — wer
+    zusehen darf". Solange ``lauf_verfolgen`` und ``sse_event`` in der
+    Schleife standen, war dieser Satz an genau der Stelle unwahr. Auch eine
+    bequeme Wiederausfuhr zaehlt nicht: sie waere ein zweiter Name fuer
+    dieselbe Sache, und der naechste Umzug faende sie nicht.
+    """
+    for name in ("sse_event", "lauf_verfolgen", "lauf_status"):
+        assert hasattr(ai_run_broker, name), f"{name} fehlt beim Vermittler"
+        assert not hasattr(ai_stream_service, name), (
+            f"{name} gehoert in den Vermittler, nicht in die Schleife"
+        )
+    assert not hasattr(ai_stream_service, "_lauf_status")

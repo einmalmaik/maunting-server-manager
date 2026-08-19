@@ -1224,6 +1224,57 @@ def test_systembereiche_kennen_das_rollenlimit_nicht(
     ) == MAX_SYSTEM_SCOPE_ENTRIES
 
 
+def test_die_bestandszaehlung_sperrt_den_bereich_bis_zum_commit(
+    db: Session, regular_user: User
+) -> None:
+    """Die Bereichsgrenze war eine Bitte, solange sie ungesperrt zählte.
+
+    Zwischen der Zählung in `upsert_entry` und dem `db.add()` danach lag nichts.
+    Zwei gleichzeitige Läufe mit **verschiedenen** Schlüsseln — Chat und
+    Sprachsitzung laufen ausdrücklich nebeneinander — sahen beide denselben
+    Bestand und legten beide an; die einzige Datenbankzusage ist der UNIQUE auf
+    (scope_identity, key) und greift bei verschiedenen Schlüsseln gar nicht.
+
+    Geprüft wird das erzeugte SQL und nicht das Verhalten, und das gehört
+    ehrlich gesagt: SQLite kennt keine Zeilensperre, `FOR UPDATE` ist dort ein
+    No-Op. Ein Verhaltenstest wäre hier grün, egal was der Code tut. Die Zusage,
+    die wirklich trägt, ist die gegen den PostgreSQL-Dialekt kompilierte
+    Abfrage — fällt die Sperre weg, wird dieser Test rot.
+    """
+    from sqlalchemy.dialects import postgresql
+
+    abfrage = ai_memory_service._bestandsabfrage(db, f"user:{regular_user.id}")
+
+    sql = str(abfrage.statement.compile(dialect=postgresql.dialect()))
+
+    assert "FOR UPDATE" in sql, "ohne Zeilensperre zählen zwei Schreiber denselben Stand"
+    # Die Reihenfolge ist kein Schmuck: zwei Schreiber sperren dieselben Zeilen
+    # nur dann verklemmungsfrei, wenn sie sie in derselben Reihenfolge nehmen.
+    assert "ORDER BY" in sql
+
+
+def test_die_gesperrte_zaehlung_liefert_dieselbe_zahl_wie_vorher(
+    db: Session, regular_user: User
+) -> None:
+    """Die Sperre ist eine Sperre und keine andere Abfrage.
+
+    `count()` ging nicht weiter, weil PostgreSQL `FOR UPDATE` nur an einer
+    Abfrage über echte Zeilen erlaubt. Dass die Liste der IDs danach dieselbe
+    Zahl ergibt, ist die Bedingung dafür, dass alle Grenztests darüber weiterhin
+    dasselbe messen.
+    """
+    _memory_role(db, regular_user, "ai-memory-sperre", 10)
+    for nummer in range(4):
+        _merken(db, regular_user, f"notiz.{nummer}")
+
+    identity = f"user:{regular_user.id}"
+
+    assert len(ai_memory_service._bestandsabfrage(db, identity).all()) == 4
+    assert db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == identity
+    ).count() == 4
+
+
 def test_memory_limit_ueberlebt_den_weg_durch_die_api(
     client: TestClient,
     db: Session,

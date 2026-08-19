@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 import logging
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 from uuid import UUID, uuid4
 
 import httpx
@@ -95,7 +95,6 @@ from services.ai_usage_service import (
     fail_ai_usage,
     reserve_ai_usage,
 )
-from services.ai_limit_service import TOKEN_LIMIT_MAX
 from services.dis_client import DisSidecarError
 from services.openai_compatible_adapter import (
     MAX_REASONING_CHARS,
@@ -232,10 +231,6 @@ MAX_GLEICHE_AUFRUFE = 4
 # Danach gilt dieselbe begründete Ablehnung wie oben.
 MAX_GLEICHE_POLLING_AUFRUFE = 8
 POLLING_WERKZEUGE = {"read_server_status", "read_server_logs", "check_server_reachability"}
-
-
-def sse_event(event: str, payload: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=True)}\n\n"
 
 
 def _abschnitt_fuer_ablage(abschnitt: dict) -> dict:
@@ -782,6 +777,28 @@ def _aufrufnachricht(calls, text: str | None = None) -> dict:
     }
 
 
+def _aussortieren(tool_calls: list, deferred: list, *, erlaubt, grund: str) -> list:
+    """Aussortieren statt werfen: was nicht darf, wandert mit Begruendung weg.
+
+    Der Aufruf laeuft nicht, aber das Modell bekommt eine Antwort und arbeitet
+    weiter. Ein `raise` an dieser Stelle riss frueher ganze Heilungslaeufe ab —
+    ein einziges Werkzeug ausserhalb der Menge beendete den Lauf mit 'failed',
+    der gestoerte Server blieb stehen, und der Bericht an den Betreiber war
+    leer.
+
+    ``erlaubt`` bekommt den Werkzeugnamen und antwortet mit ja oder nein. Die
+    vier Rollenschnitte darunter unterscheiden sich genau darin und sonst in
+    nichts: drei fragen eine Erlaubtliste, einer eine Sperrliste.
+    """
+    behalten = []
+    for call in tool_calls:
+        if erlaubt(call.name):
+            behalten.append(call)
+        else:
+            deferred.append((call, grund))
+    return behalten
+
+
 async def _tool_followup_messages(
     *, user_id: int, conversation_id: str, tool_calls, deferred=(),
     correlation_id: str | None = None, run_id: str | None = None,
@@ -856,17 +873,15 @@ async def _tool_followup_messages(
     # durchbekommen, und die Invariante "das Gehirn hat strukturell keine
     # Aussenwirkung" hinge allein an einer Bitte an das Modell.
     if rolle == "gehirn":
-        erlaubte = []
-        for call in tool_calls:
-            if call.name not in GEHIRN_TOOLS:
-                deferred.append((call, (
-                    "Dieses Werkzeug steht dem Gehirn nicht zur Verfügung. "
-                    "Der Aufruf lief nicht — gib die Arbeit mit worker_start "
-                    "als Auftrag in den Hintergrund."
-                )))
-                continue
-            erlaubte.append(call)
-        tool_calls = erlaubte
+        tool_calls = _aussortieren(
+            tool_calls, deferred,
+            erlaubt=lambda name: name in GEHIRN_TOOLS,
+            grund=(
+                "Dieses Werkzeug steht dem Gehirn nicht zur Verfügung. "
+                "Der Aufruf lief nicht — gib die Arbeit mit worker_start "
+                "als Auftrag in den Hintergrund."
+            ),
+        )
     else:
         if rolle == "worker":
             rollen_gesperrt = worker_ausschluss()
@@ -881,13 +896,11 @@ async def _tool_followup_messages(
                 "diesem Lauf nicht zur Verfügung. Der Aufruf lief nicht — "
                 "arbeite ohne ihn weiter."
             )
-        erlaubte = []
-        for call in tool_calls:
-            if call.name in rollen_gesperrt:
-                deferred.append((call, rollen_grund))
-                continue
-            erlaubte.append(call)
-        tool_calls = erlaubte
+        tool_calls = _aussortieren(
+            tool_calls, deferred,
+            erlaubt=lambda name: name not in rollen_gesperrt,
+            grund=rollen_grund,
+        )
     if guardian is not None:
         # In einer Heilung ist die Werkzeugmenge kleiner und der Server fest.
         # Beides steht hier und nicht im Prompt: die Eingabe dieses Laufs stammt
@@ -905,14 +918,21 @@ async def _tool_followup_messages(
         # ein Fall: es liegt in `READ_TOOLS`, kommt an der Prüfung oben vorbei,
         # und der Systemprompt bewirbt es. Die Allowlist bleibt unverändert
         # scharf — ausgeführt wird nach wie vor nichts.
-        erlaubte: list = []
+        tool_calls = _aussortieren(
+            tool_calls, deferred,
+            erlaubt=lambda name: name in GUARDIAN_HEILUNG_TOOLS,
+            grund=(
+                "Dieses Werkzeug steht in einer Guardian-Heilung nicht zur "
+                "Verfügung. Der Aufruf lief nicht — arbeite ohne ihn weiter."
+            ),
+        )
+        # Die Serverbindung erst danach und in einer eigenen Schleife: sie
+        # **wirft**, und sie soll nur die Aufrufe treffen, die ueberhaupt
+        # laufen duerften. Ein fremder Server in einer Heilung ist keine
+        # Nachlaessigkeit des Modells, sondern der Fall, in dem der Lauf
+        # stehenbleiben soll — deshalb wandert dieser Zweig nicht mit ins
+        # Aussortieren.
         for call in tool_calls:
-            if call.name not in GUARDIAN_HEILUNG_TOOLS:
-                deferred.append((call, (
-                    "Dieses Werkzeug steht in einer Guardian-Heilung nicht zur "
-                    "Verfügung. Der Aufruf lief nicht — arbeite ohne ihn weiter."
-                )))
-                continue
             genannt = call.arguments.get("server_id")
             if call.name in SERVER_READ_TOOLS and genannt is not None:
                 # `int(genannt)` stand hier ohne Typpruefung. Die Argumente
@@ -932,8 +952,6 @@ async def _tool_followup_messages(
                     raise AiActionValidationError(
                         "In einer Guardian-Heilung ist nur der betroffene Server erlaubt"
                     )
-            erlaubte.append(call)
-        tool_calls = erlaubte
     if aufgabe is not None:
         # Dieselbe Durchsetzung wie oben, mit einem Unterschied: **keine**
         # Serverbindung. Ein stehender Auftrag gehoert keinem Server — "sieh
@@ -944,16 +962,14 @@ async def _tool_followup_messages(
         # Aussortiert statt geworfen, aus demselben Grund wie oben: der
         # nächtliche Auftrag soll an einem Werkzeug scheitern, nicht am Lauf.
         menge = aufgaben_tools(aufgabe.kind)
-        erlaubte = []
-        for call in tool_calls:
-            if call.name not in menge:
-                deferred.append((call, (
-                    "Dieses Werkzeug steht in einer geplanten Aufgabe nicht zur "
-                    "Verfügung. Der Aufruf lief nicht — arbeite ohne ihn weiter."
-                )))
-                continue
-            erlaubte.append(call)
-        tool_calls = erlaubte
+        tool_calls = _aussortieren(
+            tool_calls, deferred,
+            erlaubt=lambda name: name in menge,
+            grund=(
+                "Dieses Werkzeug steht in einer geplanten Aufgabe nicht zur "
+                "Verfügung. Der Aufruf lief nicht — arbeite ohne ihn weiter."
+            ),
+        )
     # Zugriff und Unterhaltung **einmal** pruefen, bevor irgendetwas laeuft.
     # Eine kurze eigene Transaktion: die Ausfuehrung bringt jetzt ihre eigenen
     # Sitzungen mit, und eine ueber die ganze Runde offene waere genau das, was
@@ -2336,6 +2352,14 @@ async def _segment_anlaufen(
     # — auch die nach einer Bestaetigung Stunden spaeter — arbeitet unter
     # denselben Verschaerfungen wie der erste Zug.
     try:
+        # Der Zustand selbst war nicht zu lesen. Dann steht in ihm auch kein
+        # Rahmen mehr, den die beiden Funktionen darunter bemaengeln koennten —
+        # sie saehen einen sauberen Chatlauf und schwiegen. Die Marke aus
+        # `zustand_lesen` ist der einzige Hinweis darauf, dass hier etwas
+        # verlorengegangen ist, und sie fuehrt in denselben Ausstieg wie ein
+        # kaputter Rahmen.
+        if zustand.get("unlesbar"):
+            raise GuardianRahmenUnlesbar("Laufzustand unlesbar")
         guardian = guardian_aus_zustand(zustand)
         aufgabe = aufgabe_aus_zustand(zustand)
     except GuardianRahmenUnlesbar:
@@ -2780,7 +2804,7 @@ async def _schreibrunde_ausfuehren(
     #
     # Gefragt wird genau hier und nicht in jeder Runde: das ist der
     # einzige Punkt, an dem der Lauf etwas veraendert.
-    if _lauf_status(run_id) != "running":
+    if ai_run_broker.lauf_status(run_id) != "running":
         return _SchreibrundenErgebnis(denknaht=denknaht, abgeloest=True)
     # **Das Gehirn schreibt nie.** GEHIRN_TOOLS enthaelt kein einziges
     # Schreibwerkzeug — dieser Zweig ist der Spiegel dazu im Vorschlagspfad,
@@ -4196,66 +4220,3 @@ async def lauf_beginnen_nebenher(
             guardian_briefing_unterdruecken=guardian_briefing_unterdruecken,
             gesprochen=gesprochen,
         )
-
-
-async def lauf_verfolgen(run_id: str, *, abo=None) -> AsyncIterator[str]:
-    """Der Datenstrom zum Browser — ein **Fenster** auf den Lauf, nicht sein Motor.
-
-    Bricht diese Verbindung ab, passiert dem Lauf nichts. Genau das war die
-    Beschwerde: *"wenn ich den Browser schliesse, bricht die Anfrage ab."* Sie
-    bricht jetzt nur noch die Anzeige ab.
-
-    Wer sich spaeter wieder anhaengt, bekommt zuerst einen ``snapshot`` mit dem
-    vollstaendigen bisherigen Stand und danach die Fortsetzung live.
-    """
-    # ``abo`` kommt vom Endpunkt, wenn dieser bereits **vor** dem Start des Laufs
-    # abonniert hat. Das schliesst ein Wettrennen, das sonst unvermeidbar waere:
-    # der Lauf arbeitet auf der Ereignisschleife los, waehrend der Rumpf der
-    # Antwort erst beim ersten Lesen anlaeuft — die ersten Zeichen waeren durch,
-    # bevor jemand zuhoert.
-    abo = abo or ai_run_broker.abonnieren(run_id)
-    if abo is None:
-        # Der Lauf arbeitet in diesem Prozess nicht (mehr). Der Verlauf steht in
-        # der Datenbank; die Oberflaeche laedt ihn ohnehin beim Oeffnen.
-        yield sse_event("run", {"run_id": run_id, "status": _lauf_status(run_id), "live": False})
-        return
-    abzug, warteschlange = abo
-    yield sse_event("snapshot", abzug.als_ereignis())
-    if abzug.status != "running":
-        # Der Lauf ruht bereits — er wartet auf einen Menschen oder ist fertig.
-        # Die Verbindung offenzuhalten waere ein Warten auf nichts, und im
-        # Browser bliebe die Eingabe gesperrt, solange "es laeuft noch" gilt.
-        ai_run_broker.abmelden(run_id, warteschlange)
-        return
-    try:
-        while True:
-            # Erst leerlaufen lassen, dann aufhoeren. Die Reihenfolge ist der
-            # ganze Punkt: der Rumpf einer StreamingResponse laeuft oft erst an,
-            # wenn der Lauf schon fertig ist. Ein "laeuft der noch?" vor dem
-            # Auslesen wuerde dann eine volle Warteschlange wegwerfen und nur
-            # den (leeren) Abzug vom Zeitpunkt des Abonnements zeigen.
-            if warteschlange.empty() and not ai_run_broker.laeuft(run_id):
-                break
-            ereignis, daten = await warteschlange.get()
-            if ereignis is None:
-                break
-            if ereignis == "segment":
-                # Ein neues Segment beginnt: der Text davor gehoert zur
-                # abgeschlossenen Nachricht und darf nicht weiterwachsen.
-                yield sse_event("segment", daten)
-                continue
-            yield sse_event(ereignis, daten)
-            if ereignis == "run" and daten.get("status") != "running":
-                # Fertig **oder** geparkt. Beides beendet die Anzeige: ein
-                # geparkter Lauf tut von selbst nichts mehr, und eine offene
-                # Verbindung wuerde im Browser als "arbeitet noch" gelesen —
-                # die Eingabe bliebe gesperrt, obwohl der Mensch dran ist.
-                break
-    finally:
-        ai_run_broker.abmelden(run_id, warteschlange)
-
-
-def _lauf_status(run_id: str) -> str:
-    with SessionLocal() as db:
-        run = db.get(AiRun, run_id)
-        return run.status if run is not None else "failed"

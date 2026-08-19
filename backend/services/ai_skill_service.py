@@ -468,7 +468,7 @@ def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
 
     **Die Aehnlichkeit ordnet, sie waehlt nicht aus.** Der naheliegende Ausbau
     — eine Mindestaehnlichkeit, unter der ein Skill aus dem Verzeichnis faellt —
-    ist gemessen worden und traegt nicht. Gegen die sechs mitgelieferten Skills:
+    ist gemessen worden und trägt nicht. Gegen die neun mitgelieferten Skills:
     eine reine Konfigurationsfrage ("wieviel Holz bekomme ich pro Baum") liegt
     bei `node-problem` auf 0,49, waehrend die passende Frage nach Erreichbarkeit
     ihren eigenen Skill nur auf 0,37 bringt. Statische Embeddings messen die
@@ -478,6 +478,16 @@ def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
     Die Unterscheidung steht deshalb dort, wo sie hingehoert: in den
     Beschreibungen (jede sagt auch, wann sie *nicht* gilt) und in der Kopfzeile
     des Verzeichnisses (`ai_context_service._skill_index_block`).
+
+    **Deshalb ordnet die Ähnlichkeit nur die änderbaren Skills.** Die
+    mitgelieferten sind gesetzt, genau wie im Notschnitt (`_neueste_zuerst`):
+    sie sind die Störungsdrehbücher, und dass ausgerechnet sie bei einer
+    Störungsfrage niedrige Werte bekommen, ist oben gemessen. Ohne die
+    Reservierung konnten fünfundzwanzig thematisch nahe eigene Skills alle
+    neun gleichzeitig aus dem Verzeichnis drängen — das Modell erfuhr ihre
+    Existenz dann nicht und konnte sie auch nicht mit `read_skill` nachfordern.
+    Die Reservierung wäre selbst wieder eine Auswahl, sobald mehr als
+    `MAX_INDEXED_SKILLS` Dateien mitgeliefert werden; bei neun ist das weit weg.
     """
     views = visible_skills(db, user)
     if len(views) <= MAX_INDEXED_SKILLS or not query.strip():
@@ -493,7 +503,14 @@ def skill_index(db: Session, user: User, query: str = "") -> list[SkillView]:
     scores = ai_embedding_service.similarity(query_vectors[0], candidates)
     if len(scores) != len(views):
         return _neueste_zuerst(views)
-    ranked = sorted(zip(views, scores), key=lambda item: item[1], reverse=True)
+    # Erster Schlüsselteil: mitgeliefert (`updated_at is None`) vor änderbar.
+    # Zweiter: die Ähnlichkeit, absteigend. Damit steht dieselbe Reservierung
+    # hier wie im Notschnitt, ohne eine Schwelle, einen Parameter oder eine
+    # zweite Funktion.
+    ranked = sorted(
+        zip(views, scores),
+        key=lambda paar: (paar[0].updated_at is not None, -paar[1]),
+    )
     selected = [view for view, _score in ranked[:MAX_INDEXED_SKILLS]]
     # Lesbare Reihenfolge wiederherstellen statt die Rangfolge zu zeigen.
     return sorted(selected, key=lambda item: item.skill_key)

@@ -18,10 +18,15 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from models import AiConversation, AiRun, Role, RolePermission, User
-from services import ai_provider_service, ai_run_service, ai_worker_service
+from services import (
+    ai_provider_service,
+    ai_run_service,
+    ai_stream_service,
+    ai_worker_service,
+)
 from services.ai_action_service import AiActionValidationError
 from services.role_service import set_user_roles
 
@@ -160,6 +165,61 @@ class TestWorkerStart:
 
         assert zweiter["started"] is False
         assert zweiter["reason"] == "worker_limit"
+
+    def test_zaehlung_und_anlegen_liegen_unter_einer_sperre(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Der Deckel muss auch dann halten, wenn zwei Aufträge zugleich starten.
+
+        Das Gehirn ruft die Werkzeuge einer Welle nebenläufig auf, jedes in
+        einer eigenen Sitzung: ohne Sperre sähen zwei `worker_start` derselben
+        Runde denselben freien Platz und belegten ihn beide. Echte
+        Nebenläufigkeit ist auf SQLite nicht herstellbar — dort ist
+        ``FOR UPDATE`` eine leere Anweisung —, deshalb hält dieser Test die
+        Invariante statt des Rennens: die Zeilensperre auf den Benutzer steht
+        **vor** der Zählung, und zwischen Zählung und Lauf liegt kein Commit,
+        der sie vorzeitig wieder lösen würde. Das echte Rennen bleibt eine
+        PostgreSQL-Frage.
+        """
+        user = _benutzer(db, "gesperrt")
+        _provider(db)
+
+        ablauf: list[str] = []
+        echte_sperre = Query.with_for_update
+        echte_zaehlung = ai_worker_service.aktive_worker
+        echter_lauf = ai_stream_service.lauf_beginnen
+        echtes_commit = Session.commit
+
+        def _sperre(self, *args, **kwargs):
+            ablauf.append("sperre")
+            return echte_sperre(self, *args, **kwargs)
+
+        def _zaehlung(db_, *, user_id):
+            ablauf.append("zaehlung")
+            return echte_zaehlung(db_, user_id=user_id)
+
+        def _lauf(*args, **kwargs):
+            ablauf.append("lauf")
+            return echter_lauf(*args, **kwargs)
+
+        def _commit(self):
+            ablauf.append("commit")
+            return echtes_commit(self)
+
+        monkeypatch.setattr(Query, "with_for_update", _sperre)
+        monkeypatch.setattr(ai_worker_service, "aktive_worker", _zaehlung)
+        monkeypatch.setattr(ai_stream_service, "lauf_beginnen", _lauf)
+        monkeypatch.setattr(Session, "commit", _commit)
+
+        assert _start(db, user)["started"] is True
+
+        assert "sperre" in ablauf, "Die Zählung läuft ohne Benutzersperre"
+        assert ablauf.index("sperre") < ablauf.index("zaehlung")
+        dazwischen = ablauf[ablauf.index("zaehlung") : ablauf.index("lauf")]
+        assert "commit" not in dazwischen, (
+            "Ein Commit zwischen Zählung und Lauf gibt die Sperre frei, bevor "
+            "der neue Auftrag sichtbar ist"
+        )
 
     def test_ein_leerer_auftrag_kostet_nur_eine_runde(self, db: Session) -> None:
         user = _benutzer(db, "leerauftrag")

@@ -23,12 +23,19 @@ Nutzung und Aktualitaet.
 **Fehlt das Modell, faellt nichts aus.** Ein abgebrochener Download oder ein
 unvollstaendiges Update darf das Panel nicht lahmlegen: dann liefert
 ``encode`` schlicht ``None`` und der Abruf nutzt die Kriterien ohne Vektoren.
+Dieser Zustand ist aber weder endgültig noch unsichtbar: ``_load`` versucht es
+nach ``NEUVERSUCH_NACH_SEKUNDEN`` erneut, und ``is_ready`` sagt jederzeit, ob
+gerade gerechnet werden kann. Vorher war beides nicht so — ein einziger
+schlechter Moment beim Laden schaltete die Bedeutungssuche bis zum
+Prozess-Neustart ab, und der Betreiber erfuhr davon nur als eine Warnzeile im
+Log.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+import time
 from pathlib import Path
 
 from config import settings
@@ -48,9 +55,26 @@ EMBEDDING_DIMENSIONS = 256
 # übersieht, bekommt in genau einem der beiden Bereiche stille Falschtreffer.
 MODEL_TAG = "potion-multilingual-128M"
 
+# Wie lange ein gescheiterter Ladeversuch gilt, bevor MSM es noch einmal
+# probiert. Vorher galt er für immer: wer die halb entpackten Gewichte
+# nachträglich vervollständigte oder den knappen Speicher freiräumte, bekam die
+# Bedeutungssuche trotzdem erst nach einem Neustart des Panels zurück. Zehn
+# Minuten sind so gewählt, dass die ursprüngliche Sorge — ein Ladeversuch von
+# rund fünf Sekunden je Chatnachricht — ausgeschlossen bleibt: schlimmstenfalls
+# kostet ein dauerhaft defektes Modell alle zehn Minuten einmal diese fünf
+# Sekunden, und in der Zwischenzeit läuft alles wie bisher ohne Vektoren.
+NEUVERSUCH_NACH_SEKUNDEN = 600.0
+
 _lock = threading.Lock()
 _model = None
-_load_failed = False
+#: Zeitpunkt des letzten gescheiterten Ladeversuchs auf der monotonen Uhr, oder
+#: ``None``, solange es keinen gab. Ein einziger Merker für beide Fehlerarten —
+#: fehlende Dateien wie beschädigte Gewichte —, weil beide auf demselben Weg
+#: heilen: jemand legt das Verzeichnis in Ordnung, ohne das Panel anzufassen.
+#: Der frühere ``_load_failed`` unterschied sie ebenfalls nicht, hielt aber bis
+#: zum Prozess-Neustart. Teuer ist ohnehin nur das Laden selbst; ``is_available``
+#: kostet zwei Dateiblicke und darf deshalb bei jedem Versuch neu antworten.
+_letzter_fehlschlag: float | None = None
 
 
 def model_path() -> Path:
@@ -79,6 +103,10 @@ def is_available() -> bool:
 
     `find_spec` importiert nicht, es sucht nur — die Kosten sind ein
     Dateisystemblick, nicht das Laden der Bibliothek.
+
+    Was diese Funktion **nicht** beantwortet: ob das Laden dieser Dateien auch
+    gelingt. Beschädigte Gewichte bestehen sie anstandslos. Wer den tatsächlich
+    einsatzbereiten Zustand braucht, fragt ``is_ready``.
     """
     from importlib.util import find_spec
 
@@ -91,30 +119,68 @@ def is_available() -> bool:
         return False
 
 
-def _load():
-    """Laedt das Modell genau einmal; ein Fehlschlag wird nicht wiederholt.
+def _fehlschlag_gilt_noch() -> bool:
+    """Ist der letzte Fehlschlag jung genug, um einen neuen Versuch zu sparen?
 
-    Das Laden dauert rund fuenf Sekunden. Ohne die Merker wuerde jede Anfrage
-    es erneut versuchen — bei einem defekten Modellverzeichnis waere das ein
-    Timeout je Chatnachricht statt einer einzelnen Warnung.
+    Dieselbe Frist beantwortet zwei Fragen: ob ``_load`` es noch einmal
+    probiert und was ``is_ready`` meldet. Zwei Fristen wären zwei Wahrheiten
+    über denselben Zustand.
     """
-    global _model, _load_failed
-    if _model is not None or _load_failed:
+    if _letzter_fehlschlag is None:
+        return False
+    return (time.monotonic() - _letzter_fehlschlag) < NEUVERSUCH_NACH_SEKUNDEN
+
+
+def is_ready() -> bool:
+    """Kann die Bedeutungssuche gerade rechnen? Einschließlich Ladefehlern.
+
+    Der Unterschied zu ``is_available``: dort zählt nur, was auf der Platte und
+    im Interpreter liegt, hier zählt zusätzlich, ob das Laden zuletzt
+    gescheitert ist. Beschädigte Gewichte bestehen ``is_available`` nämlich —
+    die Dateien sind ja da — und scheitern erst in ``from_pretrained``. Genau
+    dieser Fall war bisher nirgends sichtbar außer als eine Warnzeile im Log
+    beim ersten Versuch; der Betreiber sah an keiner Stelle, dass sein
+    Gedächtnis seither ohne Bedeutungssuche arbeitet.
+
+    Geladen wird hier nichts — die Antwort muss auch in einem GET billig sein.
+    Ist die Frist des Fehlschlags abgelaufen, entscheidet wieder allein, was im
+    Verzeichnis liegt: der nächste Abruf wird es ohnehin erneut versuchen.
+    """
+    if _model is not None:
+        return True
+    if _fehlschlag_gilt_noch():
+        return False
+    return is_available()
+
+
+def _load():
+    """Laedt das Modell; ein Fehlschlag gilt, bis die Frist abgelaufen ist.
+
+    Das Laden dauert rund fuenf Sekunden. Ohne den Merker wuerde jede Anfrage
+    es erneut versuchen — bei einem defekten Modellverzeichnis waere das ein
+    Timeout je Chatnachricht statt einer einzelnen Warnung. Ohne Frist am
+    Merker wäre es das andere Extrem, und das war der Zustand bis eben: ein
+    einziger schlechter Moment — halb entpackte Gewichte, kurzzeitig zu wenig
+    Speicher — schaltete die Bedeutungssuche bis zum Prozess-Neustart ab.
+    """
+    global _model, _letzter_fehlschlag
+    if _model is not None:
         return _model
     with _lock:
-        if _model is not None or _load_failed:
+        if _model is not None or _fehlschlag_gilt_noch():
             return _model
         path = model_path()
         if not is_available():
             logger.warning(
                 "AI-Embeddingmodell fehlt unter %s — Gedaechtnissuche laeuft ohne Vektoren", path
             )
-            _load_failed = True
+            _letzter_fehlschlag = time.monotonic()
             return None
         try:
             from model2vec import StaticModel
 
             _model = StaticModel.from_pretrained(str(path))
+            _letzter_fehlschlag = None
             logger.info("AI-Embeddingmodell geladen: %s", path)
         except Exception as exc:
             # Beschaedigte Gewichte, fehlende Bibliothek, zu wenig Speicher:
@@ -123,7 +189,7 @@ def _load():
                 "AI-Embeddingmodell konnte nicht geladen werden (%s) — "
                 "Gedaechtnissuche laeuft ohne Vektoren", type(exc).__name__,
             )
-            _load_failed = True
+            _letzter_fehlschlag = time.monotonic()
             return None
     return _model
 
@@ -176,7 +242,7 @@ def similarity(query_vector: list[float], vectors: list[list[float]]) -> list[fl
 
 def reset_for_tests() -> None:
     """Vergisst den geladenen Zustand. Nur fuer Tests."""
-    global _model, _load_failed
+    global _model, _letzter_fehlschlag
     with _lock:
         _model = None
-        _load_failed = False
+        _letzter_fehlschlag = None

@@ -267,7 +267,17 @@ def _worker_zeile(db: Session, user: User) -> str:
         wort = _WORKER_WORTE.get(
             schluessel, _WORKER_WORTE_BEENDET.get(schluessel, schluessel)
         )
-        return f"'{titel or 'Auftrag'}' ({wort}, {dauer}, id {run.conversation_id})"
+        # Abgeflacht wie im Gedächtnis (`ai_memory_service._memory_line`): der
+        # Lageblock ist zeilenbasiert und geht als ``system`` hinaus. Ein Titel
+        # mit Zeilenumbruch könnte darin eine eigene Zeile öffnen und dem
+        # Modell eine Auskunft des Panels andichten — etwa einen anderen
+        # Autonomiezustand. Den Titel schreibt der Benutzer, und weder `_text`
+        # noch `worker_unterhaltung_anlegen` fassen innere Umbrüche an.
+        # Abgeflacht wird beim Rendern, weil die Zeilenstruktur erst hier
+        # Bedeutung bekommt — und weil so auch die Titel erfasst sind, die
+        # heute schon in der Datenbank stehen.
+        titel_flach = " ".join(str(titel or "Auftrag").splitlines())
+        return f"'{titel_flach}' ({wort}, {dauer}, id {run.conversation_id})"
 
     # Laufende zuerst: sie sind das, wonach gefragt wird.
     sortiert = sorted(

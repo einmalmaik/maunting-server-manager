@@ -27,6 +27,9 @@ from sqlalchemy.orm import Session
 
 from models import AiConversation, AiProvider, AiRun, Role, RolePermission, User
 from services import ai_prompt, ai_run_broker, ai_run_service, ai_stream_service
+from services.ai_action_errors import AiActionValidationError
+from services.ai_proposal_service import AufgabenKontext, GuardianKontext
+from services.ai_tool_registry import GUARDIAN_HEILUNG_TOOLS
 from services.openai_compatible_adapter import (
     ProviderToolCall,
     StreamChunk,
@@ -233,7 +236,7 @@ def _vorbereitung() -> ai_stream_service._Vorbereitung:
     )
 
 
-def _katalog(rolle: str) -> set[str]:
+def _katalog(rolle: str, *, guardian=None) -> set[str]:
     async def _kein_modell(*args, **kwargs):
         return None
 
@@ -241,7 +244,7 @@ def _katalog(rolle: str) -> set[str]:
         tools, *_ = asyncio.run(ai_stream_service._werkzeuge_und_grenze(
             client=None,
             vorbereitung=_vorbereitung(),
-            guardian=None,
+            guardian=guardian,
             aufgabe=None,
             rolle=rolle,
             zustand={},
@@ -273,6 +276,28 @@ class TestKatalogschnitt:
             "worker_start", "worker_cancel", "worker_antwort",
             "wait_until", "worker_frage",
         } == set()
+
+    def test_ein_guardian_lauf_sieht_nur_die_heilungswerkzeuge(self) -> None:
+        """Die Angebotsgrenze der Heilung — nicht dieselbe wie die Ausfuehrungsgrenze.
+
+        Dass ein Werkzeug ausserhalb von `GUARDIAN_HEILUNG_TOOLS` nicht
+        *ausgefuehrt* wird, sichern die Tests in test_ai_guardian_tools.py.
+        Hier geht es um das, was der Heilungslauf ueberhaupt **angeboten**
+        bekommt: faellt der Guardian-Schnitt aus dem Katalog, sieht er alles,
+        ruft es auf und verbraucht seine Runden mit Absagen — waehrend der
+        gestoerte Server steht.
+        """
+        guardian = GuardianKontext(
+            server_id=1,
+            incident_id=1,
+            incident_created_at=datetime.now(timezone.utc),
+        )
+        namen = _katalog("voll", guardian=guardian)
+
+        assert namen == set(_ANGEBOT) & GUARDIAN_HEILUNG_TOOLS
+        assert namen, "Der Schnitt darf nicht leer sein, sonst sagt der Test nichts"
+        assert "ask_user" not in namen
+        assert "remember" not in namen
 
 
 # ── Spiegelschranke (die Zusage hinter der Fuehrung) ──────────────────────
@@ -373,6 +398,99 @@ def test_die_spiegelschranke_haelt_worker_werkzeuge_aus_dem_voll_betrieb(
     assert "Hintergrund-Betrieb" in ergebnisse[0]["content"]
 
 
+def test_alle_vier_schnitte_sortieren_aus_statt_zu_werfen(db: Session) -> None:
+    """Vier Wege, ein Muster — und genau das soll nicht auseinanderdriften.
+
+    Gehirn, Voll-Betrieb, Guardian-Heilung und geplante Aufgabe schneiden
+    unterschiedlich zu, antworten aber gleich: der Aufruf laeuft nicht, er
+    bekommt trotzdem ein Werkzeugergebnis mit Begruendung, und der Lauf lebt
+    weiter. Faellt einer der vier zurueck auf ein `raise`, reisst er den Lauf
+    ab — bei einer Heilung heisst das: der gestoerte Server bleibt stehen und
+    der Bericht an den Betreiber ist leer.
+    """
+    user, fenster = _benutzer_mit_fenster(db, "aussortiert")
+    guardian = GuardianKontext(
+        server_id=1, incident_id=1, incident_created_at=datetime.now(timezone.utc),
+    )
+    aufgabe = AufgabenKontext(
+        task_id="t1", kind="report", channel="email", title="Nachtlauf",
+    )
+    faelle = {
+        "Gehirn": dict(rolle="gehirn", name="read_server_status",
+                       arguments={"server_id": 1}),
+        "Voll-Betrieb": dict(rolle="voll", name="worker_start",
+                             arguments={"auftrag": "x"}),
+        "Worker": dict(rolle="worker", name="search_memory",
+                       arguments={"query": "x"}),
+        "Heilung": dict(rolle="voll", name="read_skill",
+                        arguments={"skill_key": "x"}, guardian=guardian),
+        "Aufgabe": dict(rolle="voll", name="read_skill",
+                        arguments={"skill_key": "x"}, aufgabe=aufgabe),
+    }
+
+    def _niemals(*args, **kwargs):
+        raise AssertionError("Der Aufruf haette aussortiert werden muessen")
+
+    for beschriftung, fall in faelle.items():
+        with patch.object(ai_stream_service, "_werkzeug_ausfuehren", _niemals):
+            followup, used, _ = asyncio.run(
+                ai_stream_service._tool_followup_messages(
+                    user_id=user.id,
+                    conversation_id=fenster.id,
+                    tool_calls=[ProviderToolCall(
+                        id="call1", name=fall["name"], arguments=fall["arguments"],
+                    )],
+                    guardian=fall.get("guardian"),
+                    aufgabe=fall.get("aufgabe"),
+                    rolle=fall["rolle"],
+                    anlagenwissen_noetig=False,
+                )
+            )
+
+        assert used == [], f"{beschriftung}: es wurde doch etwas ausgefuehrt"
+        ergebnisse = [m for m in followup if m.get("role") == "tool"]
+        assert len(ergebnisse) == 1, f"{beschriftung}: keine Antwort auf den Aufruf"
+        assert ergebnisse[0]["tool_call_id"] == "call1", (
+            f"{beschriftung}: die Antwort gehoert zu einem anderen Aufruf"
+        )
+        inhalt = ergebnisse[0]["content"]
+        assert '"executed":false' in inhalt, f"{beschriftung}: falsche Antwortform"
+        assert "Der Aufruf lief nicht" in inhalt, (
+            f"{beschriftung}: die Begruendung nennt nicht, was passiert ist"
+        )
+
+
+def test_die_serverbindung_der_heilung_wirft_weiterhin(db: Session) -> None:
+    """Der eine Fall, in dem ein Heilungslauf stehenbleiben **soll**.
+
+    Ein fremder Server in einer Heilung ist keine Nachlaessigkeit des
+    Modells, sondern die Grenze, die der Rahmen setzt — sie wandert deshalb
+    nicht mit ins Aussortieren. Geprueft wird sie erst nach der Werkzeugmenge:
+    ein Aufruf, der ohnehin nicht laufen duerfte, wird aussortiert und nicht
+    zusaetzlich an der Serverbindung gemessen.
+    """
+    user, fenster = _benutzer_mit_fenster(db, "serverbindung")
+    guardian = GuardianKontext(
+        server_id=7, incident_id=1, incident_created_at=datetime.now(timezone.utc),
+    )
+
+    with pytest.raises(AiActionValidationError) as fehler:
+        asyncio.run(
+            ai_stream_service._tool_followup_messages(
+                user_id=user.id,
+                conversation_id=fenster.id,
+                tool_calls=[ProviderToolCall(
+                    id="call1", name="read_server_status",
+                    arguments={"server_id": 99},
+                )],
+                guardian=guardian,
+                rolle="voll",
+                anlagenwissen_noetig=False,
+            )
+        )
+    assert "nur der betroffene Server" in str(fehler.value)
+
+
 def test_das_gehirn_schreibt_nie(db: Session) -> None:
     """Der Spiegel im Vorschlagspfad: kein Proposal aus einem Gehirn-Lauf."""
     usage = StreamUsage()
@@ -386,7 +504,7 @@ def test_das_gehirn_schreibt_nie(db: Session) -> None:
     def _niemals(*args, **kwargs):
         raise AssertionError("Ein Gehirn-Lauf darf keine Vorschlaege anlegen")
 
-    with patch.object(ai_stream_service, "_lauf_status", lambda run_id: "running"), \
+    with patch.object(ai_run_broker, "lauf_status", lambda run_id: "running"), \
          patch.object(ai_stream_service, "_persist_write_proposals", _niemals):
         ergebnis = asyncio.run(ai_stream_service._schreibrunde_ausfuehren(
             run_id="r1",

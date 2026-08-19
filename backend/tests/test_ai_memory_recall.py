@@ -86,6 +86,72 @@ def test_a_tight_budget_selects_by_relevance_instead_of_alphabet(
     assert "ausgelassen" in block
 
 
+def test_ein_großes_fenster_trägt_mehr_erinnerungen(
+    db: Session, regular_user: User
+) -> None:
+    """Der Platz des Gedächtnisses kommt vom Aufrufer, nicht aus einer Konstante.
+
+    Bis hierher rechnete dieser Block als einziger gegen feste 6.000 Zeichen,
+    während Werkzeugdaten, Zusammenfassung und Historie mit dem Fenster des
+    Modells wuchsen. Bei neunzig Notizen hieß das: das Modell bekam gut die
+    Hälfte davon und dazu den Satz, dass etwas fehle — obwohl im Fenster
+    daneben Zehntausende Zeichen frei blieben.
+
+    Der Vorgabefall bleibt dieselbe Zusage wie vorher und steht hier als
+    Gegenprobe daneben.
+    """
+    _allow_memory(db, regular_user)
+    for nummer in range(90):
+        _write(
+            db, regular_user, f"notiz{nummer:03d}",
+            f"Eine ausführliche Notiz Nummer {nummer}, {'Wortfüllung ' * 6}",
+        )
+
+    weit = ai_memory_service.provider_memory_context(
+        db, regular_user, query="Was weisst du?", budget=60_000
+    )
+    eng = ai_memory_service.provider_memory_context(
+        db, regular_user, query="Was weisst du?"
+    )
+
+    assert len(weit.splitlines()) == 90
+    assert "ausgelassen" not in weit
+    # Ohne Budget gilt weiterhin der Sockel — und der reicht nicht für alle.
+    assert "ausgelassen" in eng
+
+
+def test_der_zeilendeckel_wandert_mit_dem_budget(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Deckel vor der Entschlüsselung hängt am Budget, nicht an sich selbst.
+
+    `MAX_CONTEXT_ROWS` ist gegen das Sockelbudget gerechnet — das Doppelte
+    dessen, was bei kurzen Einträgen überhaupt hineinpasst. Bliebe er stehen,
+    während das Budget mit dem Fenster wächst, wäre die Begründung der Zahl
+    falsch: der Block meldete "ausgelassen", obwohl daneben Platz frei ist,
+    und zwar genau bei den vielen kurzen Einträgen, für die der Deckel
+    überhaupt gemacht ist.
+    """
+    _allow_memory(db, regular_user)
+    for nummer in range(20):
+        _write(db, regular_user, f"eintrag{nummer:02d}", f"Wert {nummer}")
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 3)
+    zaehler = _zaehle_entschluesselungen(monkeypatch)
+
+    ai_memory_service.provider_memory_context(
+        db, regular_user, query="Was weisst du?"
+    )
+    beim_sockel = zaehler[0]
+    ai_memory_service.provider_memory_context(
+        db, regular_user, query="Was weisst du?",
+        budget=4 * ai_memory_service.MAX_CONTEXT_CHARS,
+    )
+
+    assert beim_sockel == 3
+    # Viermal soviel Platz, viermal soviele Kandidaten — und nicht mehr.
+    assert zaehler[0] - beim_sockel == 12
+
+
 def test_frequently_used_entries_survive_a_foreign_language_question(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -112,7 +178,11 @@ def test_frequently_used_entries_survive_a_foreign_language_question(
 
 
 def test_reading_the_memory_records_the_usage(db: Session, regular_user: User) -> None:
-    """Das Zaehlwerk ist das Gedaechtnis des Gedaechtnisses."""
+    """Das Zählwerk ist das Gedächtnis des Gedächtnisses.
+
+    Gezählt wird, wen die Frage getroffen hat: "Wert?" und der Eintrag
+    überlappen im Wort, also ist er gebraucht worden.
+    """
     _allow_memory(db, regular_user)
     row = _write(db, regular_user, "gezaehlt", "Wert")
     assert row.use_count == 0
@@ -121,6 +191,26 @@ def test_reading_the_memory_records_the_usage(db: Session, regular_user: User) -
         db, regular_user, query="Wert?")
     db.refresh(row)
 
+    assert row.use_count == 1
+    assert row.last_used_at is not None
+
+
+def test_a_search_hit_counts_as_usage(db: Session, regular_user: User) -> None:
+    """Die Suche ist der eine unstrittige Gebrauch.
+
+    Hier hat jemand ausdrücklich gesucht und bekommt genau diese Zeilen
+    vorgelegt — anders als beim Abruf in den Kontext, wo vieles mitgeht, um das
+    niemand gebeten hat. Ohne diesen Vermerk wäre `search_memory` der einzige
+    echte Zugriff, der spurlos bliebe.
+    """
+    _allow_memory(db, regular_user)
+    row = _write(db, regular_user, "hund", "Der Hund heisst Bello")
+
+    treffer = ai_memory_service.search_entries(db, regular_user, query="Hund")
+
+    assert [gefunden.key for gefunden, _wert, _rang in treffer] == ["hund"]
+    # Die Suche schreibt, sonst bliebe der einzige echte Zugriff spurlos.
+    db.refresh(row)
     assert row.use_count == 1
     assert row.last_used_at is not None
 

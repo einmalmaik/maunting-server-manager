@@ -326,6 +326,123 @@ def test_autonomous_execution_still_rechecks_the_permission(
     assert excinfo.value.code == "AI_ACTION_ACCESS_REVOKED"
 
 
+def test_a_revoked_autonomy_permission_stops_the_execution(
+    db: Session, regular_user: User
+) -> None:
+    """Autonomie darf ihren eigenen Widerruf nicht überleben.
+
+    Zwischen dem Anlegen des Vorschlags und seiner Ausführung liegt ein
+    Zeitfenster ohne Obergrenze — ein Vorschlag im Status 'proposed' altert
+    nicht. Nimmt der Betreiber in dieser Zeit `ai.autonomous.use` weg, muss das
+    sofort wirken; die Werkzeug- und Serverrechte bleiben hier ausdrücklich
+    stehen, sonst prüfte der Test nur die schon vorhandene Rechteschranke.
+    """
+    server, conversation = _setup(
+        db,
+        regular_user,
+        global_keys=("ai.chat.use", "ai.autonomous.use"),
+        server_keys=("server.view", "server.backups.create"),
+    )
+    ai_autonomy_service.set_grant(
+        db, user=regular_user, server_id=server.id, enabled=True,
+        max_actions_per_hour=10, granted_by=regular_user.id,
+    )
+    db.commit()
+    proposal = _propose(db, regular_user, conversation, server)
+    assert proposal.autonomous is True
+
+    db.query(RolePermission).filter(
+        RolePermission.permission_key == "ai.autonomous.use"
+    ).delete()
+    db.commit()
+
+    with pytest.raises(ai_action_errors.AiActionStateError) as excinfo:
+        ai_proposal_service.execute_autonomously(
+            db, proposal_id=proposal.id, user=regular_user
+        )
+
+    assert excinfo.value.code == "AI_ACTION_NOT_AUTONOMOUS"
+    db.refresh(proposal)
+    assert proposal.status == "proposed", "Fail-closed: der Vorschlag bleibt liegen"
+
+
+def test_a_grant_switched_off_after_the_proposal_stops_the_execution(
+    db: Session, regular_user: User
+) -> None:
+    """Dieselbe Zusage von der anderen Seite: die Freigabe selbst wird abgeschaltet."""
+    server, conversation = _setup(
+        db,
+        regular_user,
+        global_keys=("ai.chat.use", "ai.autonomous.use"),
+        server_keys=("server.view", "server.backups.create"),
+    )
+    ai_autonomy_service.set_grant(
+        db, user=regular_user, server_id=server.id, enabled=True,
+        max_actions_per_hour=10, granted_by=regular_user.id,
+    )
+    db.commit()
+    proposal = _propose(db, regular_user, conversation, server)
+    assert proposal.autonomous is True
+
+    ai_autonomy_service.set_grant(
+        db, user=regular_user, server_id=server.id, enabled=False,
+        max_actions_per_hour=10, granted_by=regular_user.id,
+    )
+    db.commit()
+
+    with pytest.raises(ai_action_errors.AiActionStateError) as excinfo:
+        ai_proposal_service.execute_autonomously(
+            db, proposal_id=proposal.id, user=regular_user
+        )
+
+    assert excinfo.value.code == "AI_ACTION_NOT_AUTONOMOUS"
+
+
+def test_the_last_action_of_an_hour_still_executes(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Nachprüfung fragt die Grundlage, nicht das Budget.
+
+    Der Vorschlag zählt selbst schon in `hourly_usage` mit. Würde vor der
+    Ausführung noch einmal das volle `autonomy_allows` gefragt, verweigerte ein
+    Budget von eins genau die eine Aktion, für die es erteilt wurde — die
+    Autonomie wäre bei jeder Einstellung um eins zu klein.
+    """
+    server, conversation = _setup(
+        db,
+        regular_user,
+        global_keys=("ai.chat.use", "ai.autonomous.use"),
+        server_keys=("server.view", "server.backups.create"),
+    )
+    ai_autonomy_service.set_grant(
+        db, user=regular_user, server_id=server.id, enabled=True,
+        max_actions_per_hour=1, granted_by=regular_user.id,
+    )
+    db.commit()
+    proposal = _propose(db, regular_user, conversation, server)
+    assert proposal.autonomous is True
+    # Das Budget ist jetzt aufgebraucht — durch diesen Vorschlag selbst.
+    assert not ai_autonomy_service.autonomy_allows(
+        db, user=regular_user, server_id=server.id, tool_name="propose_backup"
+    )
+    assert ai_autonomy_service.autonomie_grundlage(
+        db, user=regular_user, server_id=server.id, tool_name="propose_backup"
+    ) is not None
+
+    # Nur die Ausführung selbst wird ersetzt: geprüft wird der Weg dorthin,
+    # nicht das Anlegen eines echten Backups.
+    monkeypatch.setattr(
+        ai_proposal_service,
+        "execute_proposal",
+        lambda db_, **kwargs: (proposal, {"ok": True}),
+    )
+
+    _, ergebnis = ai_proposal_service.execute_autonomously(
+        db, proposal_id=proposal.id, user=regular_user
+    )
+    assert ergebnis == {"ok": True}
+
+
 def test_a_confirmable_proposal_can_not_be_executed_autonomously(
     db: Session, regular_user: User
 ) -> None:

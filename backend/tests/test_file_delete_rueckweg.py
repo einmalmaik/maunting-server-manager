@@ -120,13 +120,19 @@ class _Agent:
         self.revision = revision or content_revision(inhalt.encode("utf-8"))
         self.gelesen: list[tuple[str, str]] = []
         self.geloescht: list[tuple[str, str]] = []
+        #: Welche Revision beim Loeschen mitging. Getrennt gefuehrt, damit die
+        #: bestehenden Zusagen ueber `geloescht` unveraendert lesbar bleiben.
+        self.geloescht_mit: list[str | None] = []
 
     def files_read_info(self, key: str, pfad: str) -> dict:
         self.gelesen.append((str(key), pfad))
         return {"content": self.inhalt, "revision": self.revision, "size": len(self.inhalt)}
 
-    def files_delete(self, key: str, pfad: str) -> dict:
+    def files_delete(
+        self, key: str, pfad: str, expected_revision: str | None = None
+    ) -> dict:
         self.geloescht.append((str(key), pfad))
+        self.geloescht_mit.append(expected_revision)
         return {"deleted": True}
 
 
@@ -488,6 +494,77 @@ def test_passende_revision_laesst_das_loeschen_zu(
 
     assert ergebnis["deleted"] is True
     assert not ziel.exists()
+
+
+# ── Das Zeitfenster zwischen Schnappschuss und Loeschen ───────────────────
+
+
+def test_ein_schreiber_im_schnappschussfenster_verhindert_das_loeschen_lokal(
+    db: Session,
+    regular_user: User,
+    datei_server: Server,
+    versionsspeicher: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Zwischen Lesen und Loeschen liegt der Schnappschuss — und der dauert.
+
+    Die Revisionspruefung stand ganz vorne, das `unlink` ganz hinten, und
+    dazwischen laeuft der Versionsspeicher: verschluesseln, komprimieren,
+    Sidecar. Das sind Millisekunden, keine Mikrosekunden. Schreibt der
+    Spielprozess in genau diesem Fenster, zeigte der Rueckweg danach auf den
+    alten Inhalt — und der neue war ersatzlos weg. Genau das ist der Schaden,
+    vor dem die Bestaetigungsfreiheit von `propose_file_delete` mit dem
+    Rueckweg begruendet wird.
+
+    Der Test stellt das Fenster her, indem er den Schnappschuss selbst
+    schreiben laesst. Ohne die zweite Pruefung unmittelbar vor dem `unlink`
+    ist die Datei danach weg.
+    """
+    ziel = Path(datei_server.install_dir) / "server.cfg"
+    _schreiben(ziel, KONFIG)
+    dazwischen = KONFIG + "adminPassword=neu\n"
+    echter_schnappschuss = file_history_service.snapshot
+
+    def schnappschuss_mit_zwischenfall(*args, **kwargs):
+        ergebnis = echter_schnappschuss(*args, **kwargs)
+        # Der Spielprozess schreibt. Er kennt keine Sperre des Panels.
+        _schreiben(ziel, dazwischen)
+        return ergebnis
+
+    monkeypatch.setattr(
+        file_history_service, "snapshot", schnappschuss_mit_zwischenfall
+    )
+
+    with pytest.raises(HTTPException) as fehler:
+        _loeschen(db, regular_user, datei_server, "server.cfg")
+
+    assert fehler.value.status_code == 409
+    assert fehler.value.detail["code"] == "FILE_REVISION_CONFLICT"
+    assert ziel.exists(), "die neu geschriebene Fassung wurde geloescht"
+    assert _lesen(ziel) == dazwischen
+
+
+def test_agentenpfad_loescht_genau_die_gesicherte_fassung(
+    db: Session,
+    regular_user: User,
+    datei_server: Server,
+    versionsspeicher: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Entfernt kann das Panel nicht nachsehen — also nennt es die Revision.
+
+    Auf der Node liegt die Datei ausser Reichweite; ob sie sich waehrend des
+    Schnappschusses geaendert hat, weiss nur der Agent. Deshalb geht die
+    gerade gesicherte Revision mit dem Loeschauftrag mit, und der Agent
+    entscheidet dort. Mitgegeben wird ausdruecklich die **gesicherte** und
+    nicht die vom Aufrufer erwartete: die Zusage lautet, dass genau der
+    Inhalt verschwindet, der im Versionsspeicher steht.
+    """
+    agent = _agent_einsetzen(monkeypatch, _Agent(KONFIG))
+
+    _loeschen(db, regular_user, datei_server, "server.cfg")
+
+    assert agent.geloescht_mit == [content_revision(KONFIG.encode("utf-8"))]
 
 
 # ── Das zweite Tor: schon der Vorschlag weist ab ─────────────────────────

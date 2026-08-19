@@ -63,6 +63,37 @@ def hourly_usage(db: Session, *, user_id: int, now: datetime | None = None) -> i
     )
 
 
+def autonomie_grundlage(
+    db: Session, *, user: User, server_id: int | None, tool_name: str
+) -> AiAutonomyGrant | None:
+    """Die Freigabe, die diese Aktion trägt — oder ``None``, wenn keine sie trägt.
+
+    Hier stehen genau die Bedingungen, die **dauerhaft** gelten müssen:
+    erlaubtes Werkzeug, `ai.autonomous.use` und eine aktive Freigabe mit einem
+    Budget größer Null. Sie sind Zusagen, die ein Betreiber jederzeit
+    zurückziehen kann, und ein Widerruf muss sofort wirken — deshalb werden sie
+    nicht nur beim Anlegen eines Vorschlags gefragt, sondern auch unmittelbar
+    vor seiner Ausführung.
+
+    Das Stundenbudget steht bewusst **nicht** hier, sondern nur in
+    `autonomy_allows`: der Vorschlag selbst zählt bereits in `hourly_usage` mit,
+    und eine zweite Zählung vor der Ausführung würde bei
+    ``max_actions_per_hour = 1`` die eigene Aktion verweigern.
+    """
+    from services.ai_tool_registry import ALWAYS_CONFIRM_TOOLS
+
+    if tool_name in ALWAYS_CONFIRM_TOOLS:
+        return None
+    if not permission_service.has_global_permission(db, user, "ai.autonomous.use"):
+        return None
+    grant = resolve_grant(db, user_id=user.id, server_id=server_id)
+    if grant is None or not grant.enabled:
+        return None
+    if grant.max_actions_per_hour <= 0:
+        return None
+    return grant
+
+
 def autonomy_allows(
     db: Session,
     *,
@@ -72,16 +103,10 @@ def autonomy_allows(
     now: datetime | None = None,
 ) -> bool:
     """Entscheidet, ob dieser eine Vorschlag ohne Bestaetigung laufen darf."""
-    from services.ai_tool_registry import ALWAYS_CONFIRM_TOOLS
-
-    if tool_name in ALWAYS_CONFIRM_TOOLS:
-        return False
-    if not permission_service.has_global_permission(db, user, "ai.autonomous.use"):
-        return False
-    grant = resolve_grant(db, user_id=user.id, server_id=server_id)
-    if grant is None or not grant.enabled:
-        return False
-    if grant.max_actions_per_hour <= 0:
+    grant = autonomie_grundlage(
+        db, user=user, server_id=server_id, tool_name=tool_name
+    )
+    if grant is None:
         return False
     # Die Obergrenze begrenzt nicht die Berechtigung, sondern die Menge: ein in
     # eine Schleife geratenes Modell soll nicht in einer Minute vierzig Backups

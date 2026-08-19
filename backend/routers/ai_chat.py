@@ -43,18 +43,17 @@ from services import (
     ai_chat_service,
     ai_context_service,
     ai_context_window,
-    ai_provider_registry,
     ai_provider_service,
     ai_reasoning,
     ai_run_broker,
     ai_run_service,
 )
 from services.ai_redaction import redact_sensitive_text
-from services.ai_stream_service import (
-    lauf_beginnen_nebenher,
-    lauf_verfolgen,
-    sse_event,
-)
+# Das Fenster auf einen Lauf kommt vom Vermittler, die Arbeit von der Schleife.
+# Frueher kam beides aus `ai_stream_service` — der Umzug macht die
+# Aufgabenteilung, die dort im Modulkopf steht, hier an der Importzeile sichtbar.
+from services.ai_run_broker import lauf_verfolgen, sse_event
+from services.ai_stream_service import lauf_beginnen_nebenher
 
 
 router = APIRouter(prefix="/api/ai/conversation", tags=["ai-chat"])
@@ -74,11 +73,12 @@ def _fuer_chat(provider) -> bool:
     nicht. Er steht auch in keiner Auswahl (`/api/ai/providers/available`
     filtert ihn), es kann ihn hier also nur nennen, wer die Kennung errät oder
     eine alte Auswahl im Tab liegen hat.
+
+    Die Bedingung selbst steht im Service — dieselbe, nach der die Auswahlliste
+    filtert. Beides hier auszuschreiben hiesse, dieselbe Frage zweimal zu
+    beantworten, und die zweite Antwort veraltet.
     """
-    return (
-        ai_provider_service.spricht(provider, ai_provider_registry.CHAT)
-        and bool((provider.default_model or "").strip())
-    )
+    return ai_provider_service.fuer_chat(provider)
 
 
 def _art(kind: str) -> str:

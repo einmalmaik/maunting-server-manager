@@ -24,10 +24,12 @@ from sqlalchemy.orm import Session
 from models import (
     AiConversation, AiMessage, AiRun, AiToolResult, Role, RolePermission, User,
 )
+from services import ai_memory_service
 from services.ai_context_service import (
     MAX_TOOL_RESULT_CONTEXT_CHARS,
     TOOL_RESULT_TRUNCATION_MARK,
     WERKZEUG_KONTEXT_KOPF,
+    _juengste_gespraechszeile,
     _recent_tool_results,
     auf_budget_kuerzen,
     build_provider_messages,
@@ -47,6 +49,20 @@ def _enable_attachments(db: Session, user: User) -> None:
     ])
     db.commit()
     set_user_roles(db, user, [role.id])
+
+
+def _enable_memory(db: Session, user: User) -> None:
+    """Recht und Einwilligung — beides braucht es, damit das Memory mitgeht."""
+    role = Role(name=f"budget-memory-{user.id}", is_system=False)
+    db.add(role)
+    db.flush()
+    db.add_all([
+        RolePermission(role_id=role.id, permission_key="ai.chat.use"),
+        RolePermission(role_id=role.id, permission_key="ai.memory.use"),
+    ])
+    db.commit()
+    set_user_roles(db, user, [role.id])
+    ai_memory_service.set_preference(db, user, True)
 
 
 def _conversation(db: Session, user: User) -> AiConversation:
@@ -193,6 +209,86 @@ def test_der_rückfluss_wächst_nicht_mit_dem_kontextfenster(
     # steht die Marke am Blockende, weil es genau eine Zeile gibt; bei mehreren
     # trägt sie die gekürzte Zeile, und die ist nach `reversed()` die älteste.
     assert weit.endswith(TOOL_RESULT_TRUNCATION_MARK)
+
+
+def test_das_gedächtnis_wächst_mit_dem_kontextfenster() -> None:
+    """Der einzige Block, der stehenblieb, obwohl nichts dagegen sprach.
+
+    Werkzeugdaten, Zusammenfassung und Historie wachsen mit dem Fenster; das
+    Gedächtnis rechnete daneben gegen feste 6.000 Zeichen und meldete "weitere
+    Einträge wurden aus Platzgründen ausgelassen", während im Fenster daneben
+    180.000 Zeichen frei blieben. Anders als beim Werkzeugrückfluss gibt es
+    dafür keine Begründung: der Block steht vor der Frage und geht
+    zwischengespeichert mit, er kostet Platz und nicht Geld.
+
+    Der Deckel gehört mit dazu — ohne ihn bekäme ein Millionenfenster einen
+    Kontext, der zu weiten Teilen aus alten Notizen besteht.
+    """
+    assert (
+        teilbudgets(200_000).gedaechtnis_zeichen
+        > teilbudgets(None).gedaechtnis_zeichen
+    )
+    assert teilbudgets(3_319_200).gedaechtnis_zeichen == 24_000
+
+
+def test_der_kontextaufbau_reicht_das_gedächtnisbudget_durch(
+    db: Session, regular_user: User
+) -> None:
+    """Die Rechnung nützt nichts, wenn sie den Gedächtnisdienst nicht erreicht.
+
+    Genau das war der Befund: `build_provider_messages` kannte das Fenster,
+    rechnete `teilbudgets(context_chars)` und reichte an
+    `provider_memory_context` trotzdem nur Frage und Server weiter. Der Block
+    schnitt danach gegen seine eigene Konstante — ein Test auf die Zahlen
+    allein hätte das nie bemerkt.
+    """
+    _enable_memory(db, regular_user)
+    conversation = _conversation(db, regular_user)
+    for nummer in range(90):
+        ai_memory_service.upsert_entry(
+            db, user=regular_user, scope="user", server_id=None,
+            key=f"notiz{nummer:03d}",
+            value=f"Eine ausfuehrliche Notiz Nummer {nummer}, {'Wortfuellung ' * 6}",
+            origin="user",
+        )
+
+    def memory_block(context_chars: int | None) -> str:
+        messages = build_provider_messages(
+            db, conversation, "Was weisst du?", context_chars=context_chars
+        )
+        treffer = [
+            item["content"] for item in messages
+            if isinstance(item.get("content"), str)
+            and item["content"].startswith("Unvertrauenswuerdige Praeferenzdaten")
+        ]
+        assert len(treffer) == 1
+        return treffer[0]
+
+    weit = memory_block(200_000)
+    eng = memory_block(None)
+
+    assert len([zeile for zeile in weit.splitlines() if zeile.startswith("[user/")]) == 90
+    assert "ausgelassen" not in weit
+    assert "ausgelassen" in eng
+
+
+def test_der_gedächtnissockel_ist_das_heutige_verhalten() -> None:
+    """Ohne Fensterwissen bleibt alles, wie es war — und ein enges Fenster auch.
+
+    Die zwei Zahlen stehen in zwei Dateien: der Sockel hier bei den übrigen
+    Sockeln, der Rückfall des Gedächtnisdienstes dort, wo er ohne Budget
+    greift. Dieser Test hält sie zusammen. Wer nur eine von beiden anfasst,
+    bekommt hier rot statt einer stillen Verschiebung im Kontext.
+    """
+    assert (
+        teilbudgets(None).gedaechtnis_zeichen == ai_memory_service.MAX_CONTEXT_CHARS
+    )
+    # Ein 4.096-Token-Modell (rund 16.000 Zeichen) fällt nicht unter den
+    # Sockel: mitwachsen heißt wachsen, nicht schrumpfen. Was insgesamt zu viel
+    # ist, schneidet danach `auf_budget_kuerzen` gegen `gesamt`.
+    assert (
+        teilbudgets(16_000).gedaechtnis_zeichen == ai_memory_service.MAX_CONTEXT_CHARS
+    )
 
 
 def test_a_large_window_lets_more_than_twenty_messages_through(
@@ -485,6 +581,46 @@ def test_the_question_survives_even_when_the_budget_does_not(
 
     assert gekuerzt[1]["content"] == frage
     assert len(gekuerzt[2]["content"]) < 300
+
+
+def test_eine_frage_kann_sich_nicht_als_werkzeugdaten_ausgeben(
+    db: Session, regular_user: User
+) -> None:
+    """Ob eine Nachricht Material ist, darf nicht am Benutzertext hängen.
+
+    `_ist_werkzeugdaten` erkennt den Rückfluss an seiner Kopfzeile — die eine
+    Stelle, an der eine Nachricht in dieser Liste noch an ihrem Text hängt.
+    Schreibt ein Benutzer genau diese Kopfzeile an den Anfang seiner Frage,
+    gilt seine Frage als ersetzbares Material: `_juengste_gespraechszeile`
+    überspringt sie und schützt stattdessen eine ältere Assistentenzeile,
+    und `auf_budget_kuerzen` opfert sie im ersten Durchgang zusammen mit den
+    Logauszügen — also vor dem übrigen Gespräch statt danach.
+    """
+    conversation = _conversation(db, regular_user)
+    start = datetime.now(timezone.utc) - timedelta(hours=1)
+    db.add(AiMessage(
+        id=str(uuid4()), conversation_id=conversation.id, role="assistant",
+        content="Früher Zug " + "a" * 3_000, status="complete",
+        created_at=start,
+    ))
+    frage = WERKZEUG_KONTEXT_KOPF + "Warum startet der Server nicht? " + "F" * 3_000
+    db.add(AiMessage(
+        id=str(uuid4()), conversation_id=conversation.id, role="user",
+        content=frage, status="complete",
+        created_at=start + timedelta(minutes=1),
+    ))
+    db.commit()
+
+    nachrichten = build_provider_messages(db, conversation, context_chars=200_000)
+
+    stelle = _juengste_gespraechszeile(nachrichten)
+    assert stelle == len(nachrichten) - 1, (
+        "die gerade gestellte Frage gilt als Werkzeugmaterial und ist damit "
+        "die erste, die eine Kürzung opfert"
+    )
+    # Der Text bleibt vollständig lesbar — neutralisiert wird nur der Anfang.
+    assert "Warum startet der Server nicht?" in nachrichten[stelle]["content"]
+    assert nachrichten[stelle]["content"].endswith("F" * 3_000)
 
 
 def test_the_nachspann_still_counts_against_the_window(

@@ -17,6 +17,13 @@ Abonnement in *einem* Ausdruck ohne ``await`` dazwischen — es gibt kein Loch.
 
 Das Vorbild ist die Server-Konsole (``console_stream_service``): auch dort
 ueberlebt der Inhalt die Verbindung, und beim Wiederverbinden wird nachgeliefert.
+
+**Auch das Fenster selbst wohnt hier**, ganz unten: ``lauf_verfolgen`` und
+``sse_event``. Es stand lange in ``ai_stream_service``, und damit war die
+Aufgabenteilung, die dort im Modulkopf steht, an genau einer Stelle unwahr —
+die Schleife eines Laufs kannte ihre Zuschauer. Der Umzug hat daran nichts
+inhaltlich geaendert; er stellt nur den Satz "``ai_run_broker`` — wer zusehen
+darf" wieder her.
 """
 
 from __future__ import annotations
@@ -24,7 +31,12 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass, field
+import json
 import logging
+from typing import AsyncIterator
+
+from database import SessionLocal
+from models import AiRun
 
 
 logger = logging.getLogger(__name__)
@@ -402,3 +414,80 @@ def neues_segment(run_id: str) -> None:
 def zuruecksetzen_fuer_tests() -> None:
     _ABZUG_UNVOLLSTAENDIG.clear()
     _KANAELE.clear()
+
+
+# ── Das Fenster zum Browser ───────────────────────────────────────────────
+
+
+def sse_event(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=True)}\n\n"
+
+
+def lauf_status(run_id: str) -> str:
+    """Was die Datenbank ueber diesen Lauf sagt.
+
+    Gefragt wird sie nur dort, wo der Speicher hier nichts weiss: bei einem
+    Lauf, der in diesem Prozess nicht (mehr) arbeitet. Der Vermittler kennt
+    dafuer die Tabelle, aber weiterhin keinen der beiden Dienste — er liest
+    eine Spalte, er plant nichts und er fuehrt nichts aus.
+    """
+    with SessionLocal() as db:
+        run = db.get(AiRun, run_id)
+        return run.status if run is not None else "failed"
+
+
+async def lauf_verfolgen(run_id: str, *, abo=None) -> AsyncIterator[str]:
+    """Der Datenstrom zum Browser — ein **Fenster** auf den Lauf, nicht sein Motor.
+
+    Bricht diese Verbindung ab, passiert dem Lauf nichts. Genau das war die
+    Beschwerde: *"wenn ich den Browser schliesse, bricht die Anfrage ab."* Sie
+    bricht jetzt nur noch die Anzeige ab.
+
+    Wer sich spaeter wieder anhaengt, bekommt zuerst einen ``snapshot`` mit dem
+    vollstaendigen bisherigen Stand und danach die Fortsetzung live.
+    """
+    # ``abo`` kommt vom Endpunkt, wenn dieser bereits **vor** dem Start des Laufs
+    # abonniert hat. Das schliesst ein Wettrennen, das sonst unvermeidbar waere:
+    # der Lauf arbeitet auf der Ereignisschleife los, waehrend der Rumpf der
+    # Antwort erst beim ersten Lesen anlaeuft — die ersten Zeichen waeren durch,
+    # bevor jemand zuhoert.
+    abo = abo or abonnieren(run_id)
+    if abo is None:
+        # Der Lauf arbeitet in diesem Prozess nicht (mehr). Der Verlauf steht in
+        # der Datenbank; die Oberflaeche laedt ihn ohnehin beim Oeffnen.
+        yield sse_event("run", {"run_id": run_id, "status": lauf_status(run_id), "live": False})
+        return
+    abzug, warteschlange = abo
+    yield sse_event("snapshot", abzug.als_ereignis())
+    if abzug.status != "running":
+        # Der Lauf ruht bereits — er wartet auf einen Menschen oder ist fertig.
+        # Die Verbindung offenzuhalten waere ein Warten auf nichts, und im
+        # Browser bliebe die Eingabe gesperrt, solange "es laeuft noch" gilt.
+        abmelden(run_id, warteschlange)
+        return
+    try:
+        while True:
+            # Erst leerlaufen lassen, dann aufhoeren. Die Reihenfolge ist der
+            # ganze Punkt: der Rumpf einer StreamingResponse laeuft oft erst an,
+            # wenn der Lauf schon fertig ist. Ein "laeuft der noch?" vor dem
+            # Auslesen wuerde dann eine volle Warteschlange wegwerfen und nur
+            # den (leeren) Abzug vom Zeitpunkt des Abonnements zeigen.
+            if warteschlange.empty() and not laeuft(run_id):
+                break
+            ereignis, daten = await warteschlange.get()
+            if ereignis is None:
+                break
+            if ereignis == "segment":
+                # Ein neues Segment beginnt: der Text davor gehoert zur
+                # abgeschlossenen Nachricht und darf nicht weiterwachsen.
+                yield sse_event("segment", daten)
+                continue
+            yield sse_event(ereignis, daten)
+            if ereignis == "run" and daten.get("status") != "running":
+                # Fertig **oder** geparkt. Beides beendet die Anzeige: ein
+                # geparkter Lauf tut von selbst nichts mehr, und eine offene
+                # Verbindung wuerde im Browser als "arbeitet noch" gelesen —
+                # die Eingabe bliebe gesperrt, obwohl der Mensch dran ist.
+                break
+    finally:
+        abmelden(run_id, warteschlange)

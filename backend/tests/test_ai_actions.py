@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -1058,6 +1060,116 @@ def test_expired_confirmation_cannot_execute(
         raise AssertionError("expired confirmation was accepted")
     db.refresh(proposal)
     assert proposal.status == "expired"
+
+
+def _bestaetigungspflichtiger_vorschlag(
+    db: Session, owner_user: User, tmp_path: Path
+) -> AiActionProposal:
+    """Ein Backup-Vorschlag im Zustand 'proposed'.
+
+    `propose_backup` mit Absicht: die Bestätigungspflicht fällt vor jedem
+    Datei- und Containerzugriff, die Tests darunter fassen also nie eine Platte
+    an und laufen auch auf Windows durch.
+    """
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=owner_user,
+        conversation=conversation,
+        tool_name="propose_backup",
+        arguments={
+            "server_id": server.id,
+            "reason": "Testbegruendung",
+            "expected_effect": "Testwirkung",
+        },
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+    return proposal
+
+
+def test_an_unconfirmed_proposal_cannot_execute(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Ohne Bestätigung läuft nichts — auch nicht mit einem erfundenen Token.
+
+    Die Schranke war bisher mutations-ungedeckt: nahm man die Statusprüfung
+    heraus, fiel kein Test um. Sie ist aber der einzige Ort, an dem der Weg
+    "Vorschlag angelegt, Mensch nie gefragt, trotzdem ausgeführt" verschlossen
+    wird.
+    """
+    proposal = _bestaetigungspflichtiger_vorschlag(db, owner_user, tmp_path)
+
+    with pytest.raises(ai_action_errors.AiActionStateError) as excinfo:
+        ai_proposal_service.execute_proposal(
+            db,
+            proposal_id=proposal.id,
+            user=owner_user,
+            confirmation_token="irgendetwas",
+        )
+
+    assert excinfo.value.code == "AI_ACTION_NOT_CONFIRMED"
+    db.refresh(proposal)
+    assert proposal.status == "proposed"
+
+
+def test_a_foreign_confirmation_token_is_refused(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Der Bestätigungstoken ist der Beweis, dass **dieser** Klick stattfand.
+
+    Und ein Fehlversuch darf ihn nicht verbrauchen: sonst wäre ein geratener
+    Token ein Weg, eine fremde Bestätigung zu entwerten, ohne sie zu besitzen.
+    """
+    proposal = _bestaetigungspflichtiger_vorschlag(db, owner_user, tmp_path)
+    proposal, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+
+    with pytest.raises(ai_action_errors.AiActionStateError) as excinfo:
+        ai_proposal_service.execute_proposal(
+            db,
+            proposal_id=proposal.id,
+            user=owner_user,
+            confirmation_token="nicht-der-echte-token",
+        )
+
+    assert excinfo.value.code == "AI_ACTION_CONFIRMATION_INVALID"
+    db.refresh(proposal)
+    assert proposal.status == "confirmed"
+    assert proposal.confirmation_token_hash == hashlib.sha256(token.encode()).hexdigest()
+
+
+def test_the_atomic_update_is_the_second_barrier(
+    db: Session, owner_user: User, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Auch wenn der Vergleich durchwinkt, hält das bedingte UPDATE.
+
+    Der Einmalverbrauch filtert selbst noch auf ``status = 'confirmed'`` und den
+    passenden Tokenhash — das ist die Schranke, die im Rennen zweier
+    gleichzeitiger Ausführungen entscheidet. Hier wird sie ohne Nebenläufigkeit
+    sichtbar gemacht, indem der vorgelagerte Vergleich stillgelegt wird.
+    """
+    proposal = _bestaetigungspflichtiger_vorschlag(db, owner_user, tmp_path)
+    proposal, _ = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+    monkeypatch.setattr(
+        ai_proposal_service,
+        "hmac",
+        SimpleNamespace(compare_digest=lambda a, b: True),
+    )
+
+    with pytest.raises(ai_action_errors.AiActionStateError) as excinfo:
+        ai_proposal_service.execute_proposal(
+            db,
+            proposal_id=proposal.id,
+            user=owner_user,
+            confirmation_token="nicht-der-echte-token",
+        )
+
+    assert excinfo.value.code == "AI_ACTION_NOT_CONFIRMED"
 
 
 def test_startup_recovery_fails_closed(db: Session, owner_user: User, tmp_path: Path) -> None:

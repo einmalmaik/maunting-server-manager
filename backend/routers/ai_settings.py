@@ -256,12 +256,16 @@ def set_learning_policy(
 def get_context_policy(
     _: User = Depends(require_global("panel.settings.read")),
 ) -> AiContextPolicyStatus:
-    from services import ai_context_window
+    from services import ai_context_window, ai_embedding_service
 
     return AiContextPolicyStatus(
         compaction_percent=ai_context_window.schwelle_prozent(),
         min_percent=ai_context_window.MIN_SCHWELLE,
         max_percent=ai_context_window.MAX_SCHWELLE,
+        # Der einzige Ort, an dem der Betreiber erfährt, dass die
+        # Bedeutungssuche des Gedächtnisses gerade nicht läuft. `is_ready`
+        # lädt nichts nach und kostet höchstens zwei Dateiblicke.
+        memory_search_ready=ai_embedding_service.is_ready(),
     )
 
 
@@ -283,7 +287,7 @@ def set_context_policy(
     Sie wirkt panelweit und nicht je Rolle: sonst waere dieselbe Unterhaltung
     je nachdem, wer sie zuletzt fortgesetzt hat, verschieden stark gefaltet.
     """
-    from services import ai_context_window
+    from services import ai_context_window, ai_embedding_service
 
     try:
         current = ai_context_window.set_schwelle_prozent(payload.compaction_percent)
@@ -303,6 +307,7 @@ def set_context_policy(
         compaction_percent=current,
         min_percent=ai_context_window.MIN_SCHWELLE,
         max_percent=ai_context_window.MAX_SCHWELLE,
+        memory_search_ready=ai_embedding_service.is_ready(),
     )
 
 

@@ -50,9 +50,12 @@ MAX_MELDUNG_CHARS = 4000
 #: mehr, sondern ein Protokoll; der Rest kommt in der naechsten Ruhephase.
 MAX_BUENDEL = 10
 
-#: Die Ruhe-Karenz: so viele Sekunden muss die letzte Aktivitaet des Menschen
-#: zurueckliegen, bevor das Gehirn von sich aus spricht. Konfigurierbar
-#: (Doku: Startwert 10-20 s, Feintuning offen), Muster `ai_context_window`.
+#: Die Ruhe-Karenz: so viele Sekunden muss die letzte Aktivität des Menschen
+#: zurückliegen, bevor das Gehirn von sich aus spricht. Der Wert kommt aus der
+#: Panel-Einstellung `ai_meldung_karenz_sekunden`, für die es bewusst **keine**
+#: Oberfläche gibt: einen Regler zu bauen, nach dem niemand gefragt hat, kostet
+#: Endpunkt, Recht, Maske und zwei Übersetzungen. Ohne Eintrag gelten 15 s; die
+#: Grenzen darunter sind die Notbremse gegen einen von Hand verdrehten Wert.
 KARENZ_KEY = "ai_meldung_karenz_sekunden"
 STANDARD_KARENZ_S = 15
 MIN_KARENZ_S = 3
@@ -73,17 +76,6 @@ def karenz_sekunden() -> int:
     except ValueError:
         return STANDARD_KARENZ_S
     return wert if MIN_KARENZ_S <= wert <= MAX_KARENZ_S else STANDARD_KARENZ_S
-
-
-def set_karenz_sekunden(wert: int) -> int:
-    if isinstance(wert, bool) or not isinstance(wert, int):
-        raise ValueError("Die Karenz muss eine Zahl sein")
-    if not MIN_KARENZ_S <= wert <= MAX_KARENZ_S:
-        raise ValueError("Die Karenz liegt ausserhalb des zulässigen Bereichs")
-    from services.panel_settings_service import PanelSettingsService
-
-    PanelSettingsService.set(KARENZ_KEY, str(wert))
-    return wert
 
 
 # ── Das Tipp-Signal ───────────────────────────────────────────────────────

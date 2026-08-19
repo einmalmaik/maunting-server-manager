@@ -594,6 +594,24 @@ def test_the_worker_is_the_one_who_learns_skills() -> None:
     assert ai_prompt.GEDAECHTNIS_AUFRAEUMEN not in worker
 
 
+def test_der_skillblock_nennt_den_fall_ohne_werkzeug() -> None:
+    """Eine Anweisung ohne Werkzeug ist eine Anweisung ins Leere.
+
+    Der Block steht in jedem Prompt — `BLOECKE` kennt keine Bedingung, und
+    `NICHT_IM_WORKER` nimmt ihn nicht heraus. `learn_skill` und `read_skill`
+    hängen dagegen am Recht `ai.skills.use` und fehlen im Katalog, wenn es
+    fehlt. Ein Benutzer ohne dieses Recht las also die Aufforderung, sein
+    Handbuch zu führen, ohne den Stift dafür zu haben: das kostet im
+    schlimmsten Fall eine Runde und eine Erwähnung, die niemand einlösen kann.
+
+    Gelöst wird das im Prompt und nicht mit einer vierten Rolle: der Vorbehalt
+    ist byteweise statisch und lässt den Anbieter-Zwischenspeicher in Ruhe.
+    """
+    assert "Werkzeugkatalog" in ai_prompt.SKILLS
+    for rolle in ("voll", "worker"):
+        assert "gilt dieser Abschnitt nicht" in ai_prompt.build(rolle=rolle), rolle
+
+
 def test_the_brain_keeps_the_memory_not_the_skills() -> None:
     """Das Gedaechtnis gehoert zum Charakter, und der ist das Gehirn.
 

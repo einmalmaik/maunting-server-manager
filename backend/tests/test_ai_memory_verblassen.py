@@ -291,14 +291,86 @@ def test_a_matching_query_restores_the_faded_entry(db: Session) -> None:
     ohne = mem.provider_memory_context(db, user, query="", server_id=None)
     assert ohne is not None and "blass" in ohne
 
-    # Zuruecksetzen, was der erste Aufruf an Nutzung vermerkt hat: geprueft
-    # werden soll der Reiz, nicht der Nebeneffekt des vorigen Aufrufs.
-    alt.last_used_at = _jetzt() - timedelta(days=120)
-    alt.use_count = 0
-    db.flush()
-
+    # Kein Zurücksetzen von Hand mehr: der erste Aufruf hat den Eintrag nur
+    # **gezeigt**, nicht gebraucht, und darf deshalb nichts vermerkt haben.
     mit = mem.provider_memory_context(db, user, query="zeitzone", server_id=None)
 
     assert mit is not None
     assert "Europe/Berlin" in mit, "der Reiz haette den Eintrag zurueckholen muessen"
     assert "blass" not in mit
+
+
+# ── Anzeigen ist kein Gebrauch ────────────────────────────────────────
+
+
+@pytest.mark.usefixtures("db")
+def test_being_shown_in_the_context_is_not_being_used(db: Session) -> None:
+    """**Der schwerste Fehler des Verblassens: es hob sich selbst auf.**
+
+    Unterhalb des Budgets geht *jede* sichtbare Zeile mit, und jede gezeigte
+    Zeile zählte bisher hoch. Eine Chatnachricht war damit ein Zählschritt für
+    alles, und das wirkte doppelt: `last_used_at` sprang auf jetzt, der blasse
+    Eintrag stand nach genau einer Anzeige wieder voll da — und ab `use_count`
+    13 trug ihn allein die Vertrautheit über die Schwelle, danach war
+    Verblassen dauerhaft unmöglich. Dreizehn Nachrichten sind ein Vormittag.
+
+    Hier laufen zwanzig Nachrichten über eine Frage, die den Eintrag nicht
+    trifft. Danach muss er unverändert blass sein.
+    """
+    user = _benutzer(db, "anzeigen")
+
+    alt, _ = mem.upsert_entry(
+        db, user=user, scope="user", server_id=None,
+        key="zeitzone",
+        value=(
+            "Die Zeitzone der Anlage steht auf Europe/Berlin und wird von den "
+            "Spielservern uebernommen."
+        ),
+    )
+    alt.last_used_at = _jetzt() - timedelta(days=90)
+    alt.updated_at = alt.last_used_at
+    alt.created_at = alt.last_used_at
+    alt.use_count = 0
+    db.flush()
+
+    for _ in range(20):
+        block = mem.provider_memory_context(
+            db, user, query="wie ist das Wetter", server_id=None
+        )
+        assert block is not None
+
+    db.refresh(alt)
+    assert alt.use_count == 0, "bloßes Anzeigen darf keine Nutzung sein"
+    assert "blass" in mem.provider_memory_context(
+        db, user, query="wie ist das Wetter", server_id=None
+    ), "nach zwanzig Anzeigen ohne Treffer muss der Eintrag weiter blass sein"
+
+
+@pytest.mark.usefixtures("db")
+def test_a_question_that_hits_counts_as_use(db: Session) -> None:
+    """Die Gegenprobe: ein Treffer ist sehr wohl ein Gebrauch.
+
+    Sonst wäre der Zähler tot und jeder Eintrag verblasste mit der Zeit, egal
+    wie oft er wirklich gebraucht wurde.
+    """
+    user = _benutzer(db, "getroffen")
+
+    alt, _ = mem.upsert_entry(
+        db, user=user, scope="user", server_id=None,
+        key="zeitzone",
+        value=(
+            "Die Zeitzone der Anlage steht auf Europe/Berlin und wird von den "
+            "Spielservern uebernommen."
+        ),
+    )
+    alt.last_used_at = _jetzt() - timedelta(days=90)
+    alt.updated_at = alt.last_used_at
+    alt.created_at = alt.last_used_at
+    alt.use_count = 0
+    db.flush()
+
+    mem.provider_memory_context(db, user, query="welche zeitzone?", server_id=None)
+
+    db.refresh(alt)
+    assert alt.use_count == 1
+    assert alt.last_used_at is not None

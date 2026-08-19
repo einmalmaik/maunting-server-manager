@@ -387,6 +387,11 @@ def test_the_whole_minecraft_case_end_to_end(
     Lesen, ableiten, bestaetigen, umstellen. Vorher war jeder dieser Schritte
     unmoeglich.
     """
+    # Start-Guard: liegt aus einem abgebrochenen Lauf noch eine Datei dieses
+    # Namens auf der Platte, überschreibt `save_community_blueprint` sie
+    # kommentarlos — der Test liefe dann gegen Fremdzustand statt gegen den,
+    # den er selbst herstellt.
+    _blueprint_entfernen("minecraft_forge_1_20_1")
     _rechte(
         db, regular_user,
         global_keys=("ai.chat.use", "blueprints.manage", "servers.create"),
@@ -495,14 +500,7 @@ def test_the_whole_minecraft_case_end_to_end(
         db.refresh(server)
         assert server.game_type == "minecraft_forge_1_20_1"
     finally:
-        # Blueprints sind Dateien auf der Platte, keine Datenbankzeilen: die
-        # `clean_db`-Fixture raeumt sie nicht mit weg.
-        try:
-            server.game_type = "minecraft_forge"
-            db.commit()
-            blueprint_service.delete_community_blueprint("minecraft_forge_1_20_1", db=db)
-        except Exception:
-            pass
+        _blueprint_entfernen("minecraft_forge_1_20_1")
 
 
 def test_managing_blueprints_does_not_let_you_restructure_foreign_servers(
@@ -625,6 +623,9 @@ def test_propose_blueprint_delete_blocks_active_servers(
     db: Session, regular_user: User, tmp_path: Path
 ) -> None:
     """Loeschen eines Blueprints, der noch von einem Server genutzt wird, muss geblockt werden."""
+    # Start-Guard: eine liegengebliebene Datei gleichen Namens würde still
+    # überschrieben, und der Test prüfte gegen Fremdzustand.
+    _blueprint_entfernen("custom_active_bp")
     _rechte(db, regular_user, global_keys=("ai.chat.use", "blueprints.manage"))
     conversation = _conversation(db, regular_user)
 
@@ -649,7 +650,8 @@ def test_propose_blueprint_delete_blocks_active_servers(
     _, token = ai_proposal_service.confirm_proposal(db, proposal_id=vorschlag.id, user=regular_user)
     ai_proposal_service.execute_proposal(db, proposal_id=vorschlag.id, user=regular_user, confirmation_token=token)
 
-    server = _server(db, regular_user, tmp_path, "custom_active_bp", server_keys=("server.view",))
+    # Auf der Vorlage liegt ein Server — genau darum muss das Löschen fallen.
+    _server(db, regular_user, tmp_path, "custom_active_bp", server_keys=("server.view",))
 
     try:
         with pytest.raises(ai_proposal_service.AiActionValidationError) as exc:
@@ -672,18 +674,19 @@ def test_propose_blueprint_delete_blocks_active_servers(
             blueprint_service.delete_community_blueprint("custom_active_bp", db=db)
         assert http_exc.value.status_code == 409
     finally:
-        try:
-            server.game_type = "minecraft_forge"
-            db.commit()
-            blueprint_service.delete_community_blueprint("custom_active_bp", db=db)
-        except Exception:
-            pass
+        # Nicht über den Dienst: der weigert sich hier zu Recht, solange der
+        # Server auf der Vorlage liegt — genau das hat der Test eben bewiesen.
+        _blueprint_entfernen("custom_active_bp")
 
 
 def test_propose_blueprint_delete_succeeds_for_unused_blueprint(
     db: Session, regular_user: User
 ) -> None:
     """Loeschen eines ungenutzten Community-Blueprints klappt nach Bestaetigung."""
+    # Start-Guard: auf einer liegengebliebenen Fremddatei liegt kein Server,
+    # sie würde still überschrieben und der Test bewiese nichts über die Datei,
+    # die er selbst angelegt hat.
+    _blueprint_entfernen("unused_bp")
     _rechte(db, regular_user, global_keys=("ai.chat.use", "blueprints.manage"))
     conversation = _conversation(db, regular_user)
 
@@ -734,10 +737,7 @@ def test_propose_blueprint_delete_succeeds_for_unused_blueprint(
         assert ergebnis["deleted"] is True
         assert blueprint_service.get_registry().get("unused_bp") is None
     finally:
-        try:
-            blueprint_service.delete_community_blueprint("unused_bp", db=db)
-        except Exception:
-            pass
+        _blueprint_entfernen("unused_bp")
 
 
 def test_a_failing_usage_check_prevents_the_delete(db: Session) -> None:

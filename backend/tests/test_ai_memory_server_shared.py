@@ -130,7 +130,50 @@ def test_the_label_names_the_server(db: Session, regular_user: User) -> None:
 
     _merken(db, regular_user, server, "port", "Aussen 30015, innen 27015.")
 
-    assert f"[server:{server.id}:anlage/gemerkt]" in _kontext(db, regular_user, server)
+    assert f"[server:{server.id}:anlage/" in _kontext(db, regular_user, server)
+
+
+def test_a_note_the_ai_wrote_says_that_nobody_confirmed_it(
+    db: Session, regular_user: User
+) -> None:
+    """Wer die Zeile liest, war beim Aufschreiben nicht dabei.
+
+    Bei den persoenlichen Bereichen heisst "gemerkt", dass die KI es sich im
+    Gespraech mit genau diesem Benutzer notiert hat. Anlagenwissen liest
+    dagegen jeder Kollege mit `server.view`, und die Zeile kann aus einem
+    fremden Lauf stammen, der eine Logzeile oder eine Konfigdatei gelesen hat.
+    Deshalb sagt die Marke hier, worauf sich der Eintrag stuetzt — und nicht,
+    wie er entstanden ist.
+    """
+    server = _server(db, "herkunft")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+
+    _merken(db, regular_user, server, "java", "Der Start bricht ohne Java 21 ab.")
+
+    assert f"[server:{server.id}:anlage/unbestätigt]" in _kontext(
+        db, regular_user, server
+    )
+
+
+def test_a_note_a_human_entered_is_not_marked_unconfirmed(
+    db: Session, regular_user: User
+) -> None:
+    """Die Gegenprobe: was ein Mensch eingetragen hat, steht fest.
+
+    Ohne diesen Fall waere die Marke wertlos — eine Kennzeichnung, die auf
+    jeder Zeile steht, unterscheidet nichts mehr.
+    """
+    server = _server(db, "von-hand")
+    _allow(db, regular_user, server, "server.view", "server.config.write")
+
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="server_shared", server_id=server.id,
+        key="wartung", value="Wartungsfenster sonntags ab 04:00.", origin="user",
+    )
+
+    zeile = _kontext(db, regular_user, server)
+    assert f"[server:{server.id}:anlage/eingetragen]" in zeile
+    assert "unbestätigt" not in zeile
 
 
 def test_a_server_only_shows_its_own_knowledge(
@@ -827,11 +870,17 @@ async def test_the_manual_is_read_once_per_run_not_once_per_round(
     achtmal das komplette sichtbare Gedächtnis, prüfte jede Zeile einzeln gegen
     die Rechte und entschlüsselte sie über den Sidecar.
 
-    Der Nutzungszähler ist der bleibende Schaden davon, nicht die Rechenzeit:
-    `server_shared_context` zählt bei jedem Aufruf hoch, und der Zähler
-    entscheidet beim nächsten Engpass mit, was im Kontext bleibt. Achtmal
-    gezählt für einmal gezeigt verschiebt das Gewicht zwischen Anlagenwissen,
-    Teamwissen und persönlichen Vorlieben ohne jeden Grund.
+    Gemessen wird das an den Aufrufen selbst und nicht mehr am Nutzungszähler.
+    Der Zähler taugte dafür, solange das blosse Anzeigen als Gebrauch galt —
+    achtmal gezählt für einmal gezeigt verschob damals das Gewicht zwischen
+    Anlagenwissen, Teamwissen und persönlichen Vorlieben ohne jeden Grund.
+    Seit "gebraucht ist, wen die Frage getroffen hat" zählt der Nachtrag
+    ueberhaupt nicht mehr hoch: er fragt mit leerer Frage, also trifft nichts,
+    und der Zähler bliebe auch bei acht Runden auf null. Er kann den Unterschied
+    zwischen einem Lesen und acht deshalb nicht mehr zeigen — der Zähler ist
+    genesen, die Verschwendung wäre geblieben. Was bleibt, ist der Aufwand
+    selbst: acht Runden lesen achtmal das komplette sichtbare Gedächtnis, prüfen
+    jede Zeile gegen die Rechte und entschlüsseln sie über den Sidecar.
     """
     from uuid import uuid4
 
@@ -869,11 +918,24 @@ async def test_the_manual_is_read_once_per_run_not_once_per_round(
         )
         return nachtrag
 
+    gelesen: list[int] = []
+    echtes_lesen = ai_memory_service.server_shared_context
+
+    def _mitzaehlen(*args: object, **kwargs: object):
+        gelesen.append(1)
+        return echtes_lesen(*args, **kwargs)
+
+    monkeypatch.setattr(ai_memory_service, "server_shared_context", _mitzaehlen)
+
     assert await _runde(True) is not None
     assert await _runde(False) is None
 
+    assert len(gelesen) == 1
+    # Und der Eintrag, den der Nachtrag mitgebracht hat, gilt weiterhin nicht
+    # als gebraucht: gezeigt zu werden ist kein Gebrauch, und die leere Frage
+    # des Nachtrags trifft ohnehin nichts.
     db.expire_all()
-    assert db.get(AiMemoryEntry, eintrag_id).use_count == 1
+    assert db.get(AiMemoryEntry, eintrag_id).use_count == 0
 
 
 def test_the_permission_is_asked_once_per_server_not_once_per_row(

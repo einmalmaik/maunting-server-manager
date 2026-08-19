@@ -174,7 +174,7 @@ async def _collect(
     )
     if run is None:
         code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")
-        return [ai_stream_service.sse_event("error", {"code": code, "message_key": message_key})]
+        return [ai_run_broker.sse_event("error", {"code": code, "message_key": message_key})]
 
     ai_run_broker.eroeffnen(run.id)
     _, warteschlange = ai_run_broker.abonnieren(run.id)
@@ -190,7 +190,7 @@ def _abholen(warteschlange) -> list[str]:
         name, daten = warteschlange.get_nowait()
         if name is None:
             break
-        ereignisse.append(ai_stream_service.sse_event(name, daten))
+        ereignisse.append(ai_run_broker.sse_event(name, daten))
     return ereignisse
 
 

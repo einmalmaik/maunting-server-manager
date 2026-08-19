@@ -153,9 +153,11 @@ Text (`redact_sensitive_text`) und stellt zu. Neu in v3: Sie ist auch **Sammelst
 - **Nie ins Gespräch grätschen:** Fertige Ergebnisse und Rückfragen werden pending gehalten, bis das
   Gespräch Ruhe hat. Ruhe heißt: kein aktiver Zug **und** keine laufende Nutzereingabe **und** eine
   kurze Karenz. Feste Sekunden allein sind wackelig (manche tippen langsam) — das Frontend liefert das
-  Tipp-Signal (Eingabefeld nicht leer/kürzliche Eingaben), die Karenz ist konfigurierbar (Startwert
-  10-20 s, Feintuning offen). Im Voice-Modus gilt der VAD-Zustand „bereit" — nie sprechen, während der
-  Mensch spricht oder ein Zug läuft; Barge-in bricht auch Zwischenmeldungen und Abschlussansagen ab.
+  Tipp-Signal (Eingabefeld nicht leer/kürzliche Eingaben), die Karenz beträgt fest 15 s. Einen
+  Betreiber-Regler dafür gibt es bewusst nicht; wer den Wert verschieben will, setzt die
+  Panel-Einstellung `ai_meldung_karenz_sekunden` (3-120 s, sonst gilt wieder die Vorgabe). Im
+  Voice-Modus gilt der VAD-Zustand „bereit" — nie sprechen, während der Mensch spricht oder ein Zug
+  läuft; Barge-in bricht auch Zwischenmeldungen und Abschlussansagen ab.
 - **Bündelung:** Werden mehrere Worker fertig, während der Nutzer beschäftigt ist, liefert das Gehirn
   sie in **einer** Wortmeldung gebündelt, nicht als Salve.
 - **Kanäle:** Chat (Standard, nie abwählbar — persistierte Nachricht im Dauerchat plus Briefing für den
@@ -258,7 +260,9 @@ verbaler Rückweg Promptregel.
 
 - **TTFT des Gehirns** (Luna, Standard vs. Fast mode) unter Produktionslast, getrennt für Chat und
   Voice (inkl. Cloud-STT-Vorlauf 1-2 s). Erst die Messung zeigt, ob „< 5 s" zuverlässig hält.
-- **Ruhe-Karenz:** Startwert und Tipp-Signal-Definition im Frontend (10-20 s, konfigurierbar).
+- **Ruhe-Karenz:** Startwert 15 s, feste Vorgabe; ein Betreiber-Regler ist offen. Ob die
+  Tipp-Signal-Definition im Frontend (Eingabefeld nicht leer/kürzliche Eingaben) im Alltag reicht,
+  muss beobachtet werden.
 - **server_shared-Zuordnung bestätigen:** Empfehlung ist Worker (Arbeitswissen); persönliche/Team-
   Memories bleiben beim Gehirn. Vom Betreiber noch nicht final bestätigt.
 - **Worker-Aufbewahrung:** Wie lange bleiben abgeschlossene Worker-Unterhaltungen lesbar (Vorschlag:
