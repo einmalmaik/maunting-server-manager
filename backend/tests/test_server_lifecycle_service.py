@@ -899,22 +899,35 @@ def test_lease_cleanup_failure_does_not_fail_completed_operation(db: Session) ->
     db.commit()
     db.refresh(server)
 
-    saved_json = [None]
+    # Der erste Sync bestätigt den Lease, der zweite — die Aufräumung im
+    # finally — scheitert am Transport. Genau dieser Fehlschlag fehlte hier
+    # bisher: ohne ihn lief der Test den Erfolgspfad ab und hätte einen
+    # durchschlagenden Fehler nie bemerkt.
+    aufrufe = {"n": 0}
 
     def fake_reconcile(_db, _server):
-        if _server.guardian_recovery_suspension:
-            saved_json[0] = _server.guardian_recovery_suspension
-        _server.guardian_agent_recovery_suspension_json = saved_json[0]
-        return {
-            "payload_hash": "sha256:dummy",
-            "recovery_suspension": (
-                json.loads(saved_json[0]) if saved_json[0] else None
-            ),
-        }
+        aufrufe["n"] += 1
+        if aufrufe["n"] == 1:
+            return {
+                "payload_hash": "sha256:dummy",
+                "recovery_suspension": json.loads(_server.guardian_recovery_suspension),
+            }
+        raise RuntimeError("guardian sync transport failed")
 
+    block_gelaufen = []
     with patch("services.guardian_sync_service.compile_and_sync_desired_state", side_effect=fake_reconcile):
         with guardian_recovery_suspension_lease(db, server, "unit-test-removal"):
-            pass
+            block_gelaufen.append(True)
+
+    # Die Operation im Block gilt als abgeschlossen: kein Fehler dringt nach
+    # aussen, obwohl die Aufräumung wirklich versucht wurde.
+    assert block_gelaufen == [True]
+    assert aufrufe["n"] == 2
+
+    # Die dauerhafte Absicht im Panel ist trotzdem gelöscht — nur die
+    # Zustellung an den Agenten fehlt, und die holt die Reconciliation nach.
+    db.refresh(server)
+    assert server.guardian_recovery_suspension is None
 
 
 def test_restart_server_sync_success(db: Session) -> None:

@@ -26,12 +26,31 @@ def test_list_nodes_rbac_denied(client: TestClient, user_cookies: dict):
 
 def test_list_nodes_rbac_allowed_read(db: Session, client: TestClient, regular_user: User, user_cookies: dict, setup_rbac_user):
     setup_rbac_user(["nodes.read"])
-    node = Node(name="Test Node", host="http://12.0.0.1:9000", auth_token_enc="enc", is_local=True, status="online")
+    node = Node(
+        name="Test Node",
+        host="http://12.0.0.1:9000",
+        auth_token_enc="synthetic-encrypted-token",
+        is_local=True,
+        status="online",
+    )
     db.add(node)
     db.commit()
 
     r = client.get("/api/nodes", cookies=user_cookies)
     assert r.status_code == 200
+    # Die 200 allein wäre keine Zusage: `nodes.read` muss den Knoten auch
+    # herausgeben — eine Route, die stets eine leere Liste liefert, wäre kein
+    # Lesezugriff. Und `nodes.read` sieht mehr als der Server-Anleger, dessen
+    # reduzierte Auswahl der Nachbartest festschreibt.
+    listed = next(item for item in r.json() if item["id"] == node.id)
+    assert listed["name"] == "Test Node"
+    assert listed["host"] == "http://12.0.0.1:9000"
+    assert listed["is_local"] is True
+    # Das Agent-Token verlässt das Backend nie — weder roh noch verschlüsselt.
+    assert "auth_token_enc" not in listed
+    assert "auth_token" not in listed
+    assert "synthetic-encrypted-token" not in r.text
+
     db.delete(node)
     db.commit()
 

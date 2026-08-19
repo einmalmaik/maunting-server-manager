@@ -2,8 +2,10 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { aiApi, type AiActionProposal } from '@/api/ai'
+import { SanitizedApiError } from '@/api/client'
 import i18n from '@/i18n'
 import { useConfirmStore } from '@/stores/confirmStore'
+import { toast } from '@/stores/toastStore'
 import { AiActionProposalCard } from './AiActionProposalCard'
 
 vi.mock('@/api/ai', () => ({
@@ -13,6 +15,7 @@ vi.mock('@/api/ai', () => ({
     getAction: vi.fn(),
   },
 }))
+vi.mock('@/stores/toastStore', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const proposal: AiActionProposal = {
   id: 'proposal-1',
@@ -45,6 +48,9 @@ describe('AiActionProposalCard', () => {
       proposal: { ...proposal, status: 'succeeded' },
       result: {},
     })
+    vi.mocked(aiApi.getAction).mockReset().mockResolvedValue(proposal)
+    vi.mocked(toast.success).mockReset()
+    vi.mocked(toast.error).mockReset()
   })
 
   it('requires explicit confirmation and passes the one-time token only to execute', async () => {
@@ -64,6 +70,75 @@ describe('AiActionProposalCard', () => {
       'one-time-secret-token-value-123456789',
     ))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ status: 'succeeded' }))
+    expect(screen.queryByText(/one-time-secret/)).not.toBeInTheDocument()
+  })
+
+  /**
+   * Das Nein ist die eigentliche Zusage dieser Karte.
+   *
+   * Sie ist die Stelle, an der ein Mensch einen Modellvorschlag ausfuehrt —
+   * Server loeschen, Backup ueberspielen, Datei entfernen. Alles davor ist
+   * Anzeige; erst hier faellt die Entscheidung. Ein `if (!accepted) return`,
+   * das niemand prueft, laesst sich beim naechsten Umbau streichen, ohne dass
+   * eine Zeile rot wird.
+   */
+  it('leaves the API untouched when the confirmation is declined', async () => {
+    render(<AiActionProposalCard proposal={proposal} onChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prüfen und ausführen' }))
+    await act(async () => useConfirmStore.getState().resolve(false))
+
+    expect(aiApi.confirmAction).not.toHaveBeenCalled()
+    expect(aiApi.executeAction).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+    // Ein Nein ist kein laufender Vorgang: der Knopf bleibt bedienbar, sonst
+    // waere die Karte nach einem Fehlklick tot.
+    expect(screen.getByRole('button', { name: 'Prüfen und ausführen' })).toBeEnabled()
+  })
+
+  it('never reaches execute when the confirmation call itself fails', async () => {
+    // Der Token ist die Autorisierung. Bricht sein Abruf ab — abgelaufener
+    // Vorschlag, entzogenes Recht —, darf `executeAction` gar nicht erst
+    // versucht werden; ein Ersatzwert an dieser Stelle waere ein Ausfuehren
+    // ohne Freigabe.
+    vi.mocked(aiApi.confirmAction).mockRejectedValue(
+      new SanitizedApiError('Die Freigabe ist abgelaufen.', { status: 410 }),
+    )
+    render(<AiActionProposalCard proposal={proposal} onChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prüfen und ausführen' }))
+    await act(async () => useConfirmStore.getState().resolve(true))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Die Freigabe ist abgelaufen.'))
+    expect(aiApi.executeAction).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('reports a failed execution and reloads the proposal instead of claiming success', async () => {
+    // Ohne das Nachladen bliebe die Karte auf „proposed" stehen und boete den
+    // Knopf ein zweites Mal an — obwohl der Vorschlag im Backend laengst
+    // verbraucht oder fehlgeschlagen ist.
+    vi.mocked(aiApi.executeAction).mockRejectedValue(
+      new SanitizedApiError('Der Server ist gesperrt.', { status: 409 }),
+    )
+    vi.mocked(aiApi.getAction).mockResolvedValue({
+      ...proposal, status: 'failed', error_code: 'server_locked',
+    })
+    const onChange = vi.fn()
+    render(<AiActionProposalCard proposal={proposal} onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prüfen und ausführen' }))
+    await act(async () => useConfirmStore.getState().resolve(true))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Der Server ist gesperrt.'))
+    expect(toast.success).not.toHaveBeenCalled()
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'failed', error_code: 'server_locked' }),
+    ))
+    // Kein halb ausgefuehrter Zustand: der Token ist verbraucht, die Karte ist
+    // wieder bedienbar, und ein Geheimnis aus einem gescheiterten Lauf gibt es
+    // nicht.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Prüfen und ausführen' })).toBeEnabled())
     expect(screen.queryByText(/one-time-secret/)).not.toBeInTheDocument()
   })
 

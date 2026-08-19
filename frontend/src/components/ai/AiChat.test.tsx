@@ -15,6 +15,7 @@ import {
 } from '@/api/ai'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
+import { useAuthStore } from '@/stores/authStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { AiChat } from './AiChat'
 
@@ -111,6 +112,10 @@ describe('AiChat', () => {
     // Leeren truege ein Test die Wahl des vorigen in den naechsten — genau
     // das, was die Speicherung im Browser fuer den Benutzer ja bewirken soll.
     localStorage.clear()
+    // Angemeldet ist hier niemand: die gemerkte Wahl liegt dann unter
+    // `anonym`. Ein Test, der jemanden anmeldet, muss den nächsten deshalb
+    // wieder allein lassen — sonst suchte der seine Schlüssel woanders.
+    useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false })
     await i18n.changeLanguage('de')
     usePermissionsStore.setState({
       me: {
@@ -293,6 +298,62 @@ describe('AiChat', () => {
     await screen.findByText('synthetic-note.txt')
 
     expect(screen.getByLabelText('Provider auswählen')).toHaveTextContent('Synthetic AI')
+  })
+
+  it('merkt die Wahl unter der Benutzerkennung und liest keine fremde', async () => {
+    // Warum die Kennung im Schlüssel steht: localStorage gehört der Herkunft
+    // und nicht der Anmeldung. An einem festen Schlüssel fände der nächste
+    // Benutzer am selben Rechner Modell und Denkstufe des vorigen vor — und
+    // beide hängen an dessen Rolle (welche Provider er sehen darf, welche
+    // Stufen für ihn freigegeben sind), nicht an seiner.
+    //
+    // `aiChatPreferences.test.ts` prüft, dass zwei Kennungen zwei Schlüssel
+    // ergeben. Hier steht die andere Hälfte: dass der Chat überhaupt die
+    // Kennung des angemeldeten Benutzers einsetzt.
+    useAuthStore.setState({
+      user: { id: 42, username: 'test' } as any,
+      isAuthenticated: true,
+      isLoading: false,
+    })
+    // Was ein anderer an diesem Rechner hinterlassen hat.
+    localStorage.setItem('msm_ai_chat:provider:anonym', '2')
+    localStorage.setItem('msm_ai_chat:reasoning:anonym', JSON.stringify({ an: true, stufe: 'low' }))
+    vi.mocked(aiApi.listProviders).mockResolvedValue([
+      {
+        id: 1, name: 'Synthetic AI', default_model: 'test-model',
+        requires_api_key: false, operator_key_available: true, available: true,
+        reasoning: true, efforts: ['low', 'medium', 'high'],
+        can_disable: true, default_effort: 'medium',
+      },
+      {
+        id: 2, name: 'Synthetic Lab', default_model: 'lab-model',
+        requires_api_key: false, operator_key_available: true, available: true,
+        reasoning: false, efforts: [], can_disable: true, default_effort: null,
+      },
+    ])
+
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
+    await screen.findByText('synthetic-note.txt')
+
+    // Nichts davon wird gelesen: sonst stünde hier „Synthetic Lab" und
+    // „Niedrig" statt der Vorgaben für einen Benutzer ohne gemerkte Wahl.
+    expect(screen.getByLabelText('Provider auswählen')).toHaveTextContent('Synthetic AI')
+    expect(screen.getByLabelText('Denktiefe')).toHaveTextContent('Kein Nachdenken')
+
+    // Erst die Denktiefe, dann das Modell: „Synthetic Lab" denkt gar nicht,
+    // danach gäbe es die Stufenwahl nicht mehr.
+    fireEvent.click(screen.getByLabelText('Denktiefe'))
+    fireEvent.click(screen.getByRole('option', { name: 'Hoch' }))
+    fireEvent.click(screen.getByLabelText('Provider auswählen'))
+    fireEvent.click(screen.getByRole('option', { name: /Synthetic Lab/ }))
+
+    expect(localStorage.getItem('msm_ai_chat:reasoning:42'))
+      .toBe(JSON.stringify({ an: true, stufe: 'high' }))
+    expect(localStorage.getItem('msm_ai_chat:provider:42')).toBe('2')
+    // Und der fremde Eintrag bleibt, wie er war — nicht überschrieben.
+    expect(localStorage.getItem('msm_ai_chat:reasoning:anonym'))
+      .toBe(JSON.stringify({ an: true, stufe: 'low' }))
+    expect(localStorage.getItem('msm_ai_chat:provider:anonym')).toBe('2')
   })
 
   it('lässt den Kontextring nicht von der Antwort des alten Modells überschreiben', async () => {

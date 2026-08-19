@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { installFakeAudio } from '@/test/fakeAudio'
+import { installFakeAudio, type FakeAudioContext } from '@/test/fakeAudio'
 import { FakeWebSocket, installFakeWebSocket } from '@/test/fakeWebSocket'
 import { useSprachsitzung } from './useSprachsitzung'
 
@@ -10,6 +10,18 @@ let sockets: ReturnType<typeof installFakeWebSocket>
 
 function leitung(index = 0): FakeWebSocket {
   return sockets.instances[index]
+}
+
+/**
+ * Aufnahme und Wiedergabe haben je einen eigenen Kontext. Auseinandergehalten
+ * werden sie am Prozessor: den baut nur die Aufnahme.
+ */
+function tonKontext(): FakeAudioContext {
+  return audio.kontexte.filter((kontext) => kontext.prozessoren.length === 0)[0]
+}
+
+function mikroKontext(): FakeAudioContext {
+  return audio.kontexte.filter((kontext) => kontext.prozessoren.length > 0)[0]
 }
 
 /** Startet die Sitzung und wartet, bis das Mikrofon wirklich laeuft. */
@@ -429,6 +441,82 @@ describe('useSprachsitzung', () => {
 
     expect(audio.letzterStrom()?.getTracks()[0].gestoppt).toBe(true)
     expect(leitung().readyState).toBe(FakeWebSocket.CLOSED)
+  })
+
+  it('meldet eine abgewiesene Leitung, statt stumm auszugehen', async () => {
+    const haken = renderHook(() => useSprachsitzung())
+    act(() => haken.result.current.starten())
+
+    // Das Backend weist ab, **bevor** es das Upgrade annimmt: fehlendes Recht
+    // `ai.voice.use`, kein eingerichteter Zugang, kein entschluesselbarer
+    // Schluessel — jedes Mal `close(1008)` vor `accept()`
+    // (`routers/ai_voice.py::voice_ws`). Fuer den Browser ist das kein
+    // Abbruch, sondern ein gescheiterter Handschlag, und der sieht genau so
+    // aus: erst `onerror`, dann ein Abbruch mit 1006. Den 1008 des Servers
+    // bekommt der Client nie zu sehen — deshalb wertet der Hook zu Recht
+    // keinen Code aus, sondern haengt die Meldung an `onerror`.
+    act(() => {
+      leitung().onerror?.({} as Event)
+      leitung().simulateClose(1006)
+    })
+
+    // Die Abweisung ist die sichtbare Seite einer Rechtepruefung. Ohne diese
+    // Meldung drueckt jemand ohne `ai.voice.use` auf den Knopf, der Knopf geht
+    // wieder aus, und nichts sagt ihm, warum. Sie muss den unmittelbar
+    // folgenden Abbruch ueberleben, sonst loescht der Abbruch sie weg, bevor
+    // ein Mensch sie liest.
+    expect(haken.result.current.fehler).toBe('ai.voice.errors.connection')
+    expect(haken.result.current.zustand).toBe('aus')
+
+    // Der Lautsprecher wurde bei der Geste schon geoeffnet und darf nicht
+    // offen bleiben. Das Mikrofon wurde nie erfragt — danach fragt der Hook
+    // erst, wenn die Leitung steht, und eine Abweisung ist kein Anlass, ein
+    // Mikrofon aufzumachen.
+    expect(tonKontext().geschlossen).toBe(true)
+    expect(audio.letzterStrom()).toBeNull()
+
+    // Und kein selbsttaetiger zweiter Versuch gegen eine Tuer, die zu ist.
+    await act(async () => {
+      vi.advanceTimersByTime(5_000)
+    })
+    expect(sockets.instances).toHaveLength(1)
+    expect(haken.result.current.fehler).toBe('ai.voice.errors.connection')
+  })
+
+  it('macht den Lautsprecher schon bei der Nutzergeste bereit', () => {
+    audio.restore()
+    audio = installFakeAudio({ gesperrt: true })
+    const haken = renderHook(() => useSprachsitzung())
+
+    act(() => haken.result.current.starten())
+
+    // Browser entsperren Ton nur in einer Nutzergeste. Der Klick auf den
+    // Sprachknopf ist die einzige, die diese Sitzung je bekommt: wer den
+    // Kontext erst beim ersten Tonstueck oeffnet, oeffnet ihn in einem
+    // Netzwerkereignis — und dann bleibt er gesperrt. Der Mensch saehe eine
+    // laufende Sitzung und hoerte nichts.
+    expect(audio.kontexte).toHaveLength(1)
+    expect(audio.kontexte[0].state).toBe('running')
+  })
+
+  it('misst beim Sprechen die Stimme und beim Zuhoeren das Mikrofon', async () => {
+    const haken = await sitzung()
+
+    // Ein lauter Block durchs Mikrofon. Der Pegel ist geglaettet, nach dem
+    // ersten Block steht er deshalb bei einem Drittel des Ausschlags.
+    mikroKontext().prozessoren[0].sende(new Float32Array(64).fill(0.5))
+    // Und ein Tonstueck der KI laeuft, mit vollem Ausschlag am Messpunkt.
+    act(() => leitung().onmessage?.({ data: new Int16Array(64).buffer } as MessageEvent))
+    tonKontext().messer[0].welle = 32
+
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'spricht' }))
+    expect(haken.result.current.pegel()).toBe(1)
+
+    // Wer gerade redet, bestimmt die Quelle. Ein Maximum ueber beide waere
+    // bequemer und falsch — dann atmete die Blase auch dann, wenn nur ein
+    // Luefter neben dem Mikrofon steht.
+    act(() => leitung().simulateMessage({ art: 'zustand', zustand: 'hoert' }))
+    expect(haken.result.current.pegel()).toBeCloseTo(0.3, 5)
   })
 
   it('meldet eine verweigerte Mikrofonfreigabe und raeumt auf', async () => {

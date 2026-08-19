@@ -31,4 +31,41 @@ describe('AiMarkdown', () => {
       expect(überschrift.className).toContain('font-headline')
     }
   })
+
+  /**
+   * Modellausgabe ist Fremdtext, und sie hat vorher Serverlogs, Configs und
+   * Dateianhänge gelesen. Wer dort HTML unterbringt, schreibt in unsere Seite,
+   * sobald jemand `rehype-raw` einbindet oder auf `dangerouslySetInnerHTML`
+   * umstellt — beides sieht wie eine Verbesserung aus („die Formatierung geht
+   * verloren"). Dieser Test ist die Stelle, an der es auffällt.
+   */
+  it('lässt rohes HTML aus der Modellantwort Text bleiben', () => {
+    const { container } = render(
+      <AiMarkdown
+        content={'<img src=x onerror="alert(1)">\n\nEin <b>fetter</b> Satz.\n\n<script>alert(2)</script>'}
+      />,
+    )
+
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('script')).toBeNull()
+    expect(container.querySelector('b')).toBeNull()
+    // Verschluckt wird es aber auch nicht: was das Modell geschrieben hat, soll
+    // lesbar dastehen — nur eben als Zeichen und nicht als Markup.
+    expect(container.textContent).toContain('<img src=x onerror="alert(1)">')
+    expect(container.textContent).toContain('<b>fetter</b>')
+  })
+
+  it('gibt einem vom Modell erzeugten Link weder Fenster noch Herkunft mit', () => {
+    render(<AiMarkdown content={'[Zur Anleitung](https://example.invalid/pfad)'} />)
+
+    const link = screen.getByRole('link', { name: 'Zur Anleitung' })
+    // Ein neues Fenster, damit ein Klick die Panelsitzung nicht ersetzt.
+    expect(link).toHaveAttribute('target', '_blank')
+    // `noopener` nimmt der Zielseite `window.opener`, über den sie unsere Seite
+    // sonst umleiten könnte; `noreferrer` hält die Panel-URL zurück, in der
+    // Server-IDs stehen. Beide gehören zusammen — `target="_blank"` ohne sie ist
+    // eine offene Tür für einen Link, den ein Modell aus einem Serverlog
+    // abgeschrieben hat.
+    expect(link).toHaveAttribute('rel', 'noreferrer noopener')
+  })
 })

@@ -15,6 +15,7 @@ import os
 import struct
 import uuid
 
+import httpx
 import pytest
 
 from services.backup_crypto_service import BackupCryptoError, BackupCryptoService
@@ -47,16 +48,55 @@ def test_init_key_multiple_distinct():
     assert k1 != k2
 
 
-def test_invalidate_key_succeeds():
-    key_id = BackupCryptoService.init_key(TEST_PASSWORD, TEST_SALT)
-    BackupCryptoService.invalidate_key(key_id)  # should not raise
+def test_invalidate_key_kills_only_the_given_key(tmp_path):
+    """Entwertet wird der übergebene Key — und nur der.
+
+    Ein Backup-Lauf hält oft mehrere Keys gleichzeitig. Ein invalidate, das
+    den falschen Key trifft, liesse den benutzten Key im DIS-Speicher stehen
+    und würde den fremden Lauf mitten im Stream abwürgen. Beide Hälften
+    gehören deshalb in denselben Test.
+    """
+    datei = tmp_path / "probe.bin"
+    datei.write_bytes(b"probe")
+
+    key_a = BackupCryptoService.init_key(TEST_PASSWORD, TEST_SALT)
+    key_b = BackupCryptoService.init_key(TEST_PASSWORD, TEST_SALT)
+    try:
+        BackupCryptoService.invalidate_key(key_a)
+
+        with pytest.raises(BackupCryptoError):
+            list(BackupCryptoService.encrypt_file_stream(str(datei), key_a))
+        assert list(BackupCryptoService.encrypt_file_stream(str(datei), key_b))
+    finally:
+        BackupCryptoService.invalidate_key(key_b)
 
 
-def test_invalidate_key_idempotent():
+def test_invalidate_key_idempotent(tmp_path):
+    """Der zweite Aufruf bleibt still, und der Key bleibt entwertet."""
+    datei = tmp_path / "idem.bin"
+    datei.write_bytes(b"idem")
+
     key_id = BackupCryptoService.init_key(TEST_PASSWORD, TEST_SALT)
     BackupCryptoService.invalidate_key(key_id)
-    # Second invalidation should not raise (DIS is idempotent)
     BackupCryptoService.invalidate_key(key_id)
+
+    with pytest.raises(BackupCryptoError):
+        list(BackupCryptoService.encrypt_file_stream(str(datei), key_id))
+
+
+def test_invalidate_key_raises_when_dis_refuses(monkeypatch):
+    """Lehnt DIS die Entwertung ab, schweigt die Fassade nicht.
+
+    Das ist die Kehrseite der Idempotenz oben: der zweite Aufruf ist still,
+    weil DIS mit 200 antwortet — nicht, weil die Fassade Fehler schluckt. Ein
+    verschluckter Fehlschlag liesse den Backup-Key im DIS-Speicher stehen,
+    obwohl der Aufrufer ihn für entwertet hält.
+    """
+    monkeypatch.setattr(
+        httpx, "post", lambda url, **kwargs: httpx.Response(500, json={"error": "nope"})
+    )
+    with pytest.raises(BackupCryptoError):
+        BackupCryptoService.invalidate_key("f0000000-0000-4000-8000-000000000000")
 
 
 # ── VAL-DIS-022: Round-trip ───────────────────────────────────────────────

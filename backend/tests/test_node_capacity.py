@@ -140,6 +140,15 @@ def test_sum_allocated_excludes_null_limits_and_other_nodes(db):
 
 
 def test_ensure_ram_limit_fits_allows_overbook(db, monkeypatch):
+    """Überbuchung ist eine Betreiberentscheidung, keine Lücke im Code.
+
+    Bis e9ae9847 wies `ensure_ram_limit_fits` jeden Wunsch mit 400 ab, der die
+    Node überbucht. Seitdem ist die Funktion bewusst leer: gewarnt wird im
+    Frontend (`servers.overcommitWarning`), entschieden wird vom Menschen.
+    Deshalb prüft dieser Test nicht "wirft nicht" — das täte auch eine
+    gelöschte Funktion —, sondern belegt zuerst, dass der Wunsch die Node
+    wirklich überbucht, und erst dann, dass er trotzdem durchgeht.
+    """
     monkeypatch.setattr(node_capacity, "ram_headroom_mb", lambda: 1024)
     node = Node(
         name="n",
@@ -163,47 +172,17 @@ def test_ensure_ram_limit_fits_allows_overbook(db, monkeypatch):
     )
     db.commit()
 
-    # Overcommit is allowed (no exception raised)
-    node_capacity.ensure_ram_limit_fits(
-        db, node, new_ram_limit_mb=2048, exclude_server_id=None
+    # Die Buchung ist nachweislich eine Überbuchung: 8192 MB Node minus
+    # 1024 MB Headroom minus 6144 MB bereits gebucht lassen 1024 MB frei.
+    frei = node_capacity.allocatable_ram_mb(
+        node, node_capacity.sum_allocated_ram_mb(db, node.id)
     )
-    node_capacity.ensure_ram_limit_fits(
-        db, node, new_ram_limit_mb=1024, exclude_server_id=None
-    )
+    assert frei == 1024
 
-
-def test_ensure_ram_limit_skips_when_total_unknown(db):
-    node = Node(
-        name="n",
-        host="https://n:9000",
-        auth_token_enc="enc",
-        is_local=False,
-        status="unknown",
-        ram_total=None,
-    )
-    db.add(node)
-    db.commit()
-    db.refresh(node)
-    # Must not raise
+    # Und genau diese Überbuchung darf nicht abgewiesen werden. Wer die
+    # Schranke von damals zurückholt, macht hier rot.
     node_capacity.ensure_ram_limit_fits(
-        db, node, new_ram_limit_mb=999_999, exclude_server_id=None
-    )
-
-
-def test_ensure_ram_limit_skips_unlimited(db):
-    node = Node(
-        name="n",
-        host="https://n:9000",
-        auth_token_enc="enc",
-        is_local=False,
-        status="online",
-        ram_total=4096,
-    )
-    db.add(node)
-    db.commit()
-    db.refresh(node)
-    node_capacity.ensure_ram_limit_fits(
-        db, node, new_ram_limit_mb=None, exclude_server_id=None
+        db, node, new_ram_limit_mb=frei * 2, exclude_server_id=None
     )
 
 

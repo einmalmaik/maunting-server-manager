@@ -199,21 +199,31 @@ class TestCreateServer:
 
 
 class TestDeleteServer:
-    def test_owner_can_delete(self, client: TestClient, owner_user: User, owner_cookies: dict, test_server: Server, csrf_token: str):
+    def test_owner_can_delete(self, client: TestClient, owner_user: User, owner_cookies: dict, test_server: Server, csrf_token: str, db: Session):
+        server_id = test_server.id
         response = client.delete(
-            f"/api/servers/{test_server.id}",
+            f"/api/servers/{server_id}",
             cookies=owner_cookies,
             headers={"X-CSRF-Token": csrf_token},
         )
         assert response.status_code == 200
+        # Die 200 ist nicht die Zusage — gelöscht heißt: die Zeile ist weg.
+        db.expire_all()
+        assert db.query(Server).filter(Server.id == server_id).first() is None
+        # Und der Endpunkt bestätigt das Aufräumen, statt nur still 200 zu sagen.
+        assert "cleanup" in response.json()
 
-    def test_regular_user_cannot_delete(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_csrf_token: str):
+    def test_regular_user_cannot_delete(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server, user_csrf_token: str, db: Session):
+        server_id = test_server.id
         response = client.delete(
-            f"/api/servers/{test_server.id}",
+            f"/api/servers/{server_id}",
             cookies=user_cookies,
             headers={"X-CSRF-Token": user_csrf_token},
         )
         assert response.status_code == 403
+        # Die Abweisung muss folgenlos bleiben: kein halb gelöschter Server.
+        db.expire_all()
+        assert db.query(Server).filter(Server.id == server_id).first() is not None
 
 
 class TestStartServer:

@@ -194,6 +194,7 @@ class TestRolePermissionEscalation:
     def test_owner_can_grant_any_permission(
         self,
         client: TestClient,
+        db: Session,
         owner_cookies: dict,
     ):
         # Owner-Bypass: jede Permission ist erlaubt, auch wenn die Permission
@@ -209,6 +210,21 @@ class TestRolePermissionEscalation:
             headers=_csrf(owner_cookies),
         )
         assert r.status_code == 201
+        # 201 allein wäre keine Zusage: der Owner-Bypass muss die Keys auch
+        # wirklich vergeben. `role_permission_keys` liefert sortiert.
+        assert r.json()["permissions"] == [
+            "panel.settings.write",
+            "servers.delete",
+            "users.manage",
+        ]
+        # Und sie müssen in der Datenbank stehen, nicht nur im Antwort-Echo.
+        keys_in_db = {
+            rp.permission_key
+            for rp in db.query(RolePermission)
+            .filter(RolePermission.role_id == r.json()["id"])
+            .all()
+        }
+        assert keys_in_db == {"users.manage", "servers.delete", "panel.settings.write"}
 
     def test_cannot_strip_powerful_permissions_via_update(
         self,

@@ -9,7 +9,9 @@ import {
   type AiStreamEvent,
   type AiToolUse,
 } from '@/api/ai'
-import '@/i18n'
+import { SanitizedApiError } from '@/api/client'
+import i18n from '@/i18n'
+import { useToastStore } from '@/stores/toastStore'
 import { useAiLauf, type Entry } from './useAiLauf'
 
 vi.mock('@/api/ai', async (importOriginal) => {
@@ -64,6 +66,9 @@ describe('useAiLauf', () => {
   beforeEach(() => {
     vi.mocked(streamAiMessage).mockReset().mockResolvedValue(undefined)
     vi.mocked(attachAiRun).mockReset().mockResolvedValue(undefined)
+    // Der Toast-Stapel ist hier eine Zusicherung und kein Beiwerk: zweimal
+    // wird geprüft, was darin steht, und einmal, dass er leer bleibt.
+    useToastStore.setState({ toasts: [] })
   })
 
   it('setzt die Abschnitte aus dem Abzug, statt sie anzuhängen', async () => {
@@ -203,5 +208,76 @@ describe('useAiLauf', () => {
 
     expect(antworten(result.current.entries).map((m) => m.status)).toEqual(['failed'])
     expect(result.current.streaming).toBe(false)
+  })
+
+  it('zeigt die Abweisung des Servers, statt sie zu verschlucken', async () => {
+    // Der zweite Weg, auf dem ein Lauf endet, und der einzige ohne Strom:
+    // `apiStream` wirft, wo der Server ihn gar nicht erst aufmacht — 403, wenn
+    // das Recht entzogen wurde, 429, wenn das Kontingent erschöpft ist. Ein
+    // `error`-Rahmen kann hier nicht kommen, es gibt keine Leitung, auf der er
+    // stünde. Verschluckte der Hook den Wurf, drehte sich der Ladepunkt bis
+    // zum Neuladen weiter, und niemand erführe, dass er nichts mehr darf.
+    vi.mocked(streamAiMessage).mockRejectedValue(
+      new SanitizedApiError('Kontingent erschöpft', { status: 429 }),
+    )
+    const { result } = baueLauf()
+
+    await act(async () => { await result.current.sendContent('Was ist los?') })
+
+    // Der Wortlaut kommt vom Server und ist bereits geschwärzt — er wird
+    // durchgereicht und nicht durch einen allgemeinen Satz ersetzt.
+    expect(useToastStore.getState().toasts.map((eintrag) => eintrag.message))
+      .toEqual(['Kontingent erschöpft'])
+    expect(antworten(result.current.entries).map((m) => m.status)).toEqual(['failed'])
+    expect(result.current.streaming).toBe(false)
+  })
+
+  it('gibt fremden Fehlertext nicht an den Benutzer weiter', async () => {
+    // Das Gegenstück: was nicht durch `apiStream` gegangen ist, hat niemand
+    // geschwärzt — ein Netzwerkfehler des Browsers, ein Tippfehler im Code.
+    // Sein Wortlaut kann interne Pfade nennen und gehört deshalb nicht in den
+    // Toast (CLAUDE.md, Abschnitt 4).
+    vi.mocked(streamAiMessage).mockRejectedValue(
+      new Error('fetch failed at /opt/msm/backend/app/services/ai_stream_service.py:812'),
+    )
+    const { result } = baueLauf()
+
+    await act(async () => { await result.current.sendContent('Was ist los?') })
+
+    const meldungen = useToastStore.getState().toasts.map((eintrag) => eintrag.message)
+    expect(meldungen).toEqual([i18n.t('ai.chat.errors.stream')])
+    expect(meldungen[0]).not.toMatch(/backend|\.py/)
+    expect(meldungen[0]).not.toMatch(/^ai\./)
+    expect(antworten(result.current.entries).map((m) => m.status)).toEqual(['failed'])
+  })
+
+  it('bricht beim Verlassen der Seite still ab', async () => {
+    // Weggehen ist kein Fehlschlag. Der Lauf arbeitet auf dem Server weiter,
+    // abgebrochen wird allein die Anzeige — ein Toast wäre hier eine
+    // Falschmeldung über eine Antwort, die es noch gibt.
+    const signale: (AbortSignal | undefined)[] = []
+    vi.mocked(streamAiMessage).mockImplementation((_payload, _onEvent, signal) => (
+      new Promise((_erfuellen, verwerfen) => {
+        signale.push(signal)
+        // Genau das tut `fetch`, wenn sein Signal fällt.
+        signal?.addEventListener('abort', () => {
+          verwerfen(new DOMException('Aborted', 'AbortError'))
+        })
+      })
+    ))
+    const { result, unmount } = baueLauf()
+
+    void act(() => { void result.current.sendContent('Was ist los?') })
+    await act(async () => {})
+    expect(result.current.streaming).toBe(true)
+
+    unmount()
+    await act(async () => {})
+
+    // Erst der Beleg, dass überhaupt abgebrochen wurde — sonst bewiese die
+    // leere Toastliste darunter nur, dass nie ein Strom lief.
+    expect(signale).toHaveLength(1)
+    expect(signale[0]?.aborted).toBe(true)
+    expect(useToastStore.getState().toasts).toEqual([])
   })
 })

@@ -318,7 +318,16 @@ def test_update_strategy_override_on_steam_is_respected(tmp_path):
 
 
 def test_restart_uses_blueprint_grace_period(tmp_path):
-    """Restart-Flow nutzt stopGracePeriodSeconds aus realem Blueprint (nicht Hardcode 30)."""
+    """Restart-Flow nutzt stopGracePeriodSeconds aus realem Blueprint (nicht Hardcode 30).
+
+    Gemockt wird `docker_service.stop` und **nicht** `plugin.stop`: die Zusage
+    dieses Tests ist, dass die Zahl aus dem Blueprint bis an den Container
+    durchkommt, und `Base.stop` ist genau das Stück, das sie dorthin trägt.
+    Wer es wegmockt, hat nur noch die Frage "wurde überhaupt gestoppt?" übrig —
+    die bestünde auch mit fest verdrahteten 30 Sekunden, also mit dem Fehler,
+    den der Testname ausschliesst. Ein zu kurzer Timeout heisst SIGKILL mitten
+    im Speichern der Welt.
+    """
     # Custom Grace via Dict (kein nativer BP hat abweichenden Wert)
     data = _minimal_docker_blueprint()
     data["runtime"]["stopGracePeriodSeconds"] = 90
@@ -336,13 +345,14 @@ def test_restart_uses_blueprint_grace_period(tmp_path):
          patch("services.server_lifecycle_service.iptables_revoke_server"), \
          patch("services.server_lifecycle_service.iptables_accept_server"), \
          patch("services.server_lifecycle_service.open_ports"), \
-         patch.object(plugin, "stop", return_value={"message": "stopped"}) as mock_stop, \
+         patch("games.base.docker_service.stop", return_value={"ok": True}) as mock_docker_stop, \
          patch.object(plugin, "start", return_value={"message": "started"}):
         _run_restart(db, srv, plugin)
 
-    # Der Stop im Restart-Pfad muss mit dem aus Blueprint gelesenen Timeout gerufen worden sein.
-    # (Base.stop liest es und reicht an docker_service weiter; hier mocken wir plugin.stop)
-    assert mock_stop.called
+    # Der Stop im Restart-Pfad muss mit dem aus dem Blueprint gelesenen Timeout
+    # am Docker-Rand ankommen — nicht mit dem Default 30.
+    assert mock_docker_stop.call_count == 1
+    assert mock_docker_stop.call_args.kwargs["timeout"] == 90
 
 
 # ── Error-Pfade (real Flow) ────────────────────────────────────────────────

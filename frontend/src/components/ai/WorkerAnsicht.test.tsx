@@ -17,7 +17,9 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { aiApi, attachAiRun, type AiMessage, type AiWorkerInfo } from '@/api/ai'
+import { SanitizedApiError } from '@/api/client'
 import i18n from '@/i18n'
+import { useToastStore } from '@/stores/toastStore'
 import { WorkerAnsicht } from './WorkerAnsicht'
 import { WorkerLeiste } from './WorkerLeiste'
 
@@ -67,6 +69,7 @@ describe('WorkerAnsicht', () => {
     vi.mocked(aiApi.listWorkerActions).mockReset().mockResolvedValue([])
     vi.mocked(aiApi.getWorkerRun).mockReset().mockResolvedValue(null)
     vi.mocked(attachAiRun).mockReset().mockResolvedValue(undefined)
+    useToastStore.setState({ toasts: [] })
   })
 
   it('liest über die Kennung und zeigt den Verlauf des Auftrags', async () => {
@@ -101,8 +104,12 @@ describe('WorkerAnsicht', () => {
   })
 
   it('sagt ruhig, wenn es diesen Auftrag nicht gibt', async () => {
+    // Der echte Fehler und nicht ein `Error` mit passend gesetztem `name`: die
+    // Ansicht unterscheidet die beiden Fälle über `instanceof`, und eine
+    // Attrappe daneben prüfte den lauten Zweig, während der Name dieses Tests
+    // das Gegenteil verspricht.
     vi.mocked(aiApi.getWorkerConversation).mockRejectedValue(
-      Object.assign(new Error('nicht gefunden'), { name: 'SanitizedApiError' }),
+      new SanitizedApiError('nicht gefunden', { status: 404 }),
     )
 
     render(
@@ -112,6 +119,27 @@ describe('WorkerAnsicht', () => {
     )
 
     expect(await screen.findByText('Diesen Worker gibt es nicht')).toBeInTheDocument()
+    // „Ruhig" ist die halbe Zusage und die einzige, die man nicht sieht: ein
+    // fremdes Lesezeichen ist kein Störfall, und ein roter Toast dazu wäre
+    // eine Falschmeldung.
+    expect(useToastStore.getState().toasts).toEqual([])
+  })
+
+  it('meldet einen echten Störfall trotzdem laut', async () => {
+    // Das Gegenstück. Ein abgerissenes Netz oder ein Fehler im Bauteil ist
+    // keine Aussage über diesen Auftrag — bliebe auch er still, stünde
+    // „Diesen Worker gibt es nicht" da, obwohl es ihn gibt.
+    vi.mocked(aiApi.getWorkerConversation).mockRejectedValue(new Error('Failed to fetch'))
+
+    render(
+      <MemoryRouter>
+        <WorkerAnsicht conversationId="konv-worker-1" />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('Diesen Worker gibt es nicht')
+    expect(useToastStore.getState().toasts.map((eintrag) => eintrag.message))
+      .toEqual([i18n.t('ai.chat.errors.load')])
   })
 })
 

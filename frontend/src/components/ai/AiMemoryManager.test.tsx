@@ -25,7 +25,7 @@ vi.mock('@/api/client', async () => {
   return { ...actual, api: vi.fn().mockResolvedValue([]) }
 })
 
-vi.mock('@/stores/confirmStore', () => ({ confirm: vi.fn().mockResolvedValue(true) }))
+vi.mock('@/stores/confirmStore', () => ({ confirm: vi.fn() }))
 
 const entry: AiMemoryEntry = {
   id: '00000000-0000-0000-0000-000000000101',
@@ -101,7 +101,34 @@ describe('AiMemoryManager', () => {
     vi.mocked(aiApi.setMemoryPreference).mockReset().mockResolvedValue({ enabled: false, notice_due: false, notice_hidden: false })
     vi.mocked(aiApi.saveMemory).mockReset().mockResolvedValue(entry)
     vi.mocked(aiApi.clearMemory).mockReset().mockResolvedValue({ removed: 4 })
-    vi.mocked(confirm).mockClear()
+    // Die Antwort auf die Rückfrage setzt der einzelne Test. Stünde sie in der
+    // Attrappe, könnte kein Test mehr zeigen, dass überhaupt gefragt wird.
+    vi.mocked(confirm).mockReset().mockResolvedValue(true)
+  })
+
+  it('löscht nichts, wenn die Rückfrage verneint wird', async () => {
+    // Beide Wege sind endgültig — der einzelne Eintrag wie der ganze Bereich —
+    // und beide gehen durch dieselbe Rückfrage. Alle übrigen Tests stimmen ihr
+    // zu; ohne diesen hier liesse sich das `if (!await confirm(…)) return` aus
+    // beiden Funktionen streichen, ohne dass eine Zeile rot wird.
+    vi.mocked(confirm).mockResolvedValue(false)
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite(viele))
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Memory-Eintrag löschen: ram.bevorzugt' }))
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      // Der Schlüssel steht in der Frage: „wirklich löschen?" allein sagt nicht,
+      // was gleich verschwindet.
+      message: 'Den Memory-Eintrag „ram.bevorzugt“ wirklich löschen?',
+      danger: true,
+    })))
+    expect(aiApi.deleteMemory).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Alle löschen' }))
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2))
+    expect(aiApi.clearMemory).not.toHaveBeenCalled()
+    // Und der Eintrag steht danach noch da.
+    expect(screen.getByText('8 GB')).toBeInTheDocument()
   })
 
   it('loads explicit entries and persists the opt-out without exposing hidden values', async () => {

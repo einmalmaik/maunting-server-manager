@@ -206,6 +206,11 @@ OHNE_RAUCHTEST = {
 # Argumente, ohne die ein Werkzeug schon an seiner eigenen Formprüfung endet.
 # Ein Aufruf, der dort abbricht, hat den Handler nie erreicht und würde nichts
 # beweisen.
+#
+# Diese Tabelle ist die einzige Antwort des Rauchtests auf die Frage "braucht
+# dieses Werkzeug noch etwas?". Wer ein Werkzeug ergänzt, dessen Formprüfung
+# mehr verlangt als eine `server_id`, trägt es hier ein — der Test selbst rät
+# nicht.
 BEISPIELARGUMENTE: dict[str, dict] = {
     "read_config": {"path": "server.cfg"},
     "search_server_files": {"query": "hostname"},
@@ -259,9 +264,19 @@ def test_every_server_read_tool_survives_being_called(
     vor und war trotzdem kaputt — ein `NameError` in seinem Zweig fiel erst im
     Betrieb auf, in einem Lauf, bei dem niemand zusah.
 
-    Verlangt wird deshalb nur das Mindeste, aber das für jedes Werkzeug: es
-    kommt ein `dict` heraus, oder es kommt ein `AiActionValidationError`
-    heraus. Jede andere Ausnahme ist ein Baufehler.
+    Verlangt wird das Mindeste, aber das für jedes Werkzeug: ein Ergebnis, das
+    beim Modell ankommen kann.
+
+    **Ein `AiActionValidationError` gilt ausdrücklich nicht als bestanden.**
+    Für diesen Fall stand hier ein stilles `return`, und damit war der Test
+    nicht mehr zu widerlegen: ein Werkzeug, das an seiner Formprüfung *immer*
+    abbricht — vertippter Argumentname, verdrehte Bedingung —, erreichte seinen
+    Handler nie und bestand trotzdem. Genau das soll der Rauchtest fangen.
+
+    Ob so ein Abbruch „dem Aufruf fehlen Argumente" oder „der Handler ist
+    kaputt" heisst, kann der Test nicht wissen. Also entscheidet er es nicht,
+    sondern legt es dem vor, der das Werkzeug gebaut hat: fehlende Argumente
+    gehören nach `BEISPIELARGUMENTE`, alles andere ist ein Baufehler.
 
     Der Benutzer hat bewusst jedes Recht: sonst endete die Kette an der ersten
     Rechteprüfung, und geprüft wäre wieder nur die Prüfung.
@@ -274,9 +289,31 @@ def test_every_server_read_tool_survives_being_called(
         ergebnis = ai_action_service.execute_read_tool(
             db, user=owner_user, tool_name=tool_name, arguments=arguments
         )
-    except AiActionValidationError:
-        return
-    assert isinstance(ergebnis, dict)
+    except AiActionValidationError as fehler:
+        pytest.fail(
+            f"{tool_name} endet an einer Formprüfung: {fehler}. Entweder fehlen "
+            "dem Aufruf Argumente — dann gehören sie nach BEISPIELARGUMENTE —, "
+            "oder der Handler ist kaputt. Weggesehen wird hier nicht."
+        )
+    assert isinstance(ergebnis, dict) and ergebnis, (
+        f"{tool_name} liefert kein befülltes Wörterbuch, sondern {ergebnis!r}"
+    )
+    # Derselbe Schritt, den jedes Ergebnis im Betrieb nimmt (`ai_stream_service`
+    # serialisiert es mit `json.dumps(..., ensure_ascii=True)`, bevor es als
+    # Werkzeugantwort zum Anbieter geht). Ein Handler, der ein `datetime`, einen
+    # `Path` oder ein ORM-Objekt durchreicht, fällt im Test nicht auf und
+    # reisst im Lauf die ganze Runde ab — dort fängt es niemand mehr auf.
+    json.dumps(ergebnis, ensure_ascii=True)
+    # Und es ist der Server, nach dem gefragt wurde. Nicht jedes Ergebnis nennt
+    # einen — `read_config` nennt nur den Pfad —, aber wer einen nennt, nennt
+    # den richtigen: ein Handler, der die Server-ID des Aufrufs verliert und
+    # einen anderen auflöst, gibt fremde Serverdaten unter der Frage nach
+    # diesem heraus.
+    if "server_id" in ergebnis:
+        assert ergebnis["server_id"] == rauchtest_server.id, (
+            f"{tool_name} antwortet über Server {ergebnis['server_id']}, "
+            f"gefragt war {rauchtest_server.id}"
+        )
 
 
 def test_the_smoke_test_exceptions_are_still_real_tools() -> None:

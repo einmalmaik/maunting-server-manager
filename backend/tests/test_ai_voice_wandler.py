@@ -361,6 +361,15 @@ def test_die_geduld_waechst_und_bleibt_begrenzt() -> None:
 
     Ohne Deckel wuerde ein langes Diktat die Wartezeit immer weiter
     verlaengern, bis am Ende gar keine Antwort mehr kaeme.
+
+    Geprüft wird die Rampe und nicht nur ihre Richtung: nach einer Sekunde Rede
+    muss die Grenze **echt** über dem Ausgangswert und **echt** unter dem
+    Deckel liegen. Für den ersten Punkt stand hier ein `> oder ==`, also ein
+    `>=` — das hätte auch eine Grenze bestanden, die bis
+    `STILLE_VOLL_AB_SEKUNDEN` unverändert bleibt und dann springt. Genau dieses
+    Sprunghafte soll die Interpolation vermeiden: eine Schwelle, an der sich
+    das Verhalten plötzlich ändert, fühlt sich für den Sprechenden wie ein
+    Fehler an.
     """
     erkennung = ai_voice_vad.Pausenerkennung()
 
@@ -374,7 +383,14 @@ def test_die_geduld_waechst_und_bleibt_begrenzt() -> None:
     erkennung.fuettern(_ton(6.0, pegel=6000))
     nach_lang = erkennung._stille_grenze()
 
-    assert nach_kurz > erkennung._stille_rahmen or nach_kurz == erkennung._stille_rahmen
+    assert nach_kurz > erkennung._stille_rahmen, (
+        "eine Sekunde Rede lässt die Geduld unverändert — die Grenze wächst "
+        "nicht mit, sondern schaltet um"
+    )
+    assert nach_kurz < erkennung._stille_rahmen_max, (
+        "eine Sekunde Rede springt schon auf den Deckel — dann ist die Rampe "
+        "eine Schwelle, und ein kurzes Ja wartet die volle Geduld ab"
+    )
     assert nach_lang > nach_kurz, "die Geduld ist nicht mitgewachsen"
     assert nach_lang <= erkennung._stille_rahmen_max, "die Geduld kennt keinen Deckel"
 
