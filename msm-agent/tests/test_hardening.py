@@ -236,7 +236,15 @@ def test_bind_mount_outside_managed_root_is_rejected(monkeypatch, servers_dir: P
         )
 
 
-def test_permission_repair_uses_owner_scoped_modes(monkeypatch, servers_dir: Path) -> None:
+def test_permission_repair_uses_group_model_not_world_or_hard_modes(monkeypatch, servers_dir: Path) -> None:
+    """Gruppenmodell wie im Backend: g+rwxs/o-rwx statt hartem 0750/0640.
+
+    Die alte Fassung hier setzte chown auf einen Default plus exakt
+    ``0750``/``0640`` — das nahm der Gruppe das Schreibrecht, loeschte das
+    setgid-Bit und brach damit das geteilte-Gruppe-Modell des Backends
+    (`msm-srv-<gid>` + setgid). Der Default rief zudem eine nie definierte
+    Funktion auf (NameError, verschluckt vom except an der Aufrufstelle).
+    """
     target = servers_dir / "42"
     target.mkdir()
     run = MagicMock(return_value={"ok": True})
@@ -247,10 +255,24 @@ def test_permission_repair_uses_owner_scoped_modes(monkeypatch, servers_dir: Pat
     repair_bind_mount_permissions(str(target), owner_uid_gid=(1000, 1000))
 
     script = run.call_args.kwargs["command"][1]
-    assert "chown -h 1000:1000" in script
-    assert "chmod 0750" in script
-    assert "chmod 0640" in script
-    assert "a+rwx" not in script
+    # Geteilte Gruppe + setgid halten das Modell; "andere" bleiben draussen.
+    assert "g+rwxs" in script
+    assert "o-rwx" in script
+    assert "chgrp -R" in script
+    # Keine Weltrechte, keine harten Modi mehr.
+    assert "a+rwx" not in script and "a+rwX" not in script
+    assert "chmod 0750" not in script
+    assert "chmod 0640" not in script
+    # chown nur, weil der Aufrufer die Ziel-UID explizit genannt hat.
+    assert "chown 1000:1000" in script
+
+    # Ohne explizite UID: kein chown — frueher warf genau dieser Pfad den
+    # NameError (container_runtime_uid_gid existierte im Agenten nie).
+    run.reset_mock()
+    repair_bind_mount_permissions(str(target))
+    script = run.call_args.kwargs["command"][1]
+    assert "chown" not in script
+    assert "g+rwxs" in script
 
 
 def test_managed_postgres_avoids_default_bridge_and_attaches_internal_network(

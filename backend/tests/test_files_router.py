@@ -435,29 +435,60 @@ class TestBrowseReadWrite:
         assert "a+rwX" not in script
         assert "chown" not in script
 
-    def test_apply_permissions_uses_owner_scoped_modes_and_preserves_execute_bit(
+    def test_apply_permissions_never_locks_out_the_game_process(
         self,
         server_with_dir: Server,
     ):
+        """Der Router benutzt die nur-verschärfende Service-Fassung.
+
+        Hier stand vorher ein Test, der das Gegenteil zementierte: Er verlangte
+        exakt ``0750``/``0640`` — also genau die harte Fassung, die dem
+        Spielprozess (andere UID unter Rootless Docker) das Gruppen-Schreibrecht
+        nahm und mit dem exakten Modus das setgid-Bit der geteilten Verzeichnisse
+        löschte. Nach jedem Upload/Extract/Rename/Move/Restore konnte der Server
+        seine eigenen Dateien nicht mehr ändern, und neue Dateien erbten die
+        geteilte Gruppe nicht mehr.
+
+        Jetzt gilt die Service-Invariante (`server_file_access_service.
+        apply_permissions`): Modi werden nur **verschärft, nie zurückgedreht** —
+        vorhandene Gruppen-/Weltbits und setgid bleiben stehen.
+        """
         if os.name != "posix":
             pytest.skip("POSIX permission modes are not represented on Windows")
         from routers.files import _apply_permissions
+        from services.server_file_access_service import apply_permissions
+
+        # Router und Service teilen sich dieselbe Funktion — die alte
+        # Doppelimplementierung war der Grund, warum der Router die harte
+        # Fassung behielt, nachdem der Service längst repariert war.
+        assert _apply_permissions is apply_permissions
 
         root = Path(server_with_dir.install_dir)
         target = root / "runtime"
         target.mkdir()
+        # Geteiltes Verzeichnis wie nach fix-server-permissions.sh: setgid + g+rwx.
+        target.chmod(0o2770)
         executable = target / "PalServer.sh"
         executable.write_text("#!/bin/sh\n", encoding="utf-8")
         executable.chmod(0o711)
         config = target / "PalWorldSettings.ini"
         config.write_text("setting=value\n", encoding="utf-8")
-        config.chmod(0o666)
+        # Vom Spielprozess angelegt: Gruppe darf schreiben.
+        config.chmod(0o660)
 
         _apply_permissions(server_with_dir.install_dir, target)
 
-        assert target.stat().st_mode & 0o777 == 0o750
-        assert executable.stat().st_mode & 0o777 == 0o750
-        assert config.stat().st_mode & 0o777 == 0o640
+        # setgid und Gruppenrechte des geteilten Verzeichnisses bleiben.
+        assert target.stat().st_mode & 0o7777 & 0o2000, "setgid wurde geloescht"
+        assert target.stat().st_mode & 0o070 == 0o070, "Gruppenrechte wurden entzogen"
+        # Execute-Bit bleibt, Eigentuemer bekommt volle Rechte dazu.
+        assert executable.stat().st_mode & 0o100, "Execute-Bit des Eigentuemers weg"
+        assert executable.stat().st_mode & 0o010, "Execute-Bit der Gruppe weg"
+        # Das Gruppen-Schreibrecht der Spielprozess-Datei bleibt erhalten.
+        assert config.stat().st_mode & 0o060 == 0o060, (
+            "Gruppen-Lese/Schreibrecht wurde zurueckgedreht — der Spielprozess "
+            "kann seine eigene Konfiguration nicht mehr aendern"
+        )
 
 
 # ── Upload (Single-Shot) + Blocked Extensions ─────────────────────────────

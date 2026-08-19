@@ -1039,21 +1039,59 @@ def repair_bind_mount_permissions(
     owner_uid_gid: tuple[int, int] | None = None,
     timeout: int = 600,
 ) -> dict:
+    """Normalisiert Rechte eines Server-Bind-Mounts — Gruppenmodell wie im Backend.
+
+    Hier stand die alte harte Fassung: ``chown`` auf einen Default plus
+    ``chmod 0750/0640`` exakt. Das brach das Gruppenmodell des Backends in
+    beide Richtungen — ``0640`` nahm der Gruppe das Schreibrecht, der exakte
+    Modus loeschte das setgid-Bit, und neue Dateien erbten die geteilte
+    Gruppe ``msm-srv-<gid>`` nicht mehr. Obendrein rief der Default
+    ``container_runtime_uid_gid()`` auf, das es im Agenten nie gab: ohne
+    expliziten ``user`` warf jede Reparatur ``NameError``, den das
+    ``except Exception`` an der Aufrufstelle verschluckte — die Funktion war
+    dort seit jeher tot.
+
+    Jetzt gilt dieselbe Regel wie in `backend/services/docker_service.py`:
+    Gruppe des Serververzeichnisses uebernehmen, ``g+rwxs`` auf Verzeichnisse,
+    ``g+rw`` (+``g+x`` wo der Eigentuemer x hat) auf Dateien, ``o-rwx`` —
+    und ``chown`` nur, wenn der Aufrufer die Ziel-UID ausdruecklich kennt
+    (der Fall "Game-Container laeuft als user=X:Y").
+    """
     import shlex
-    uid, gid = owner_uid_gid or container_runtime_uid_gid()
-    target = shlex.quote(container_path)
-    cmd = [
-        "-c",
-        f"find {target} -xdev -exec chown -h {uid}:{gid} {{}} + 2>/dev/null || true; "
-        f"find {target} -xdev -type d -exec chmod 0750 {{}} + 2>/dev/null || true; "
-        f"find {target} -xdev -type f -perm /111 -exec chmod 0750 {{}} + 2>/dev/null || true; "
-        f"find {target} -xdev -type f ! -perm /111 -exec chmod 0640 {{}} + 2>/dev/null || true",
-    ]
+    base = os.path.realpath(host_path)
+    if not os.path.isdir(base):
+        return {"ok": False, "error": "Server-Verzeichnis existiert nicht", "stdout": "", "stderr": ""}
+    try:
+        geteilte_gid: int | None = os.stat(base).st_gid
+    except OSError:
+        geteilte_gid = None
+
+    target = shlex.quote(container_path.rstrip("/") or "/data")
+    script_parts = []
+    if geteilte_gid is not None:
+        # Gruppe **vor** den Rechten: sonst traegt eine Datei kurz g+rw fuer
+        # eine Gruppe, der sie gleich nicht mehr gehoert.
+        script_parts.append(f"chgrp -R {int(geteilte_gid)} {target} 2>/dev/null || true")
+    script_parts.extend([
+        f"find {target} -xdev -type d -exec chmod u+rwx,g+rwxs,o-rwx {{}} + 2>/dev/null || true",
+        f"find {target} -xdev -type f -exec chmod u+rw,g+rw,o-rwx {{}} + 2>/dev/null || true",
+        f"find {target} -xdev -type f -perm -u+x -exec chmod g+x {{}} + 2>/dev/null || true",
+    ])
+    if owner_uid_gid is not None:
+        uid, gid = owner_uid_gid
+        owner = f"{int(uid)}:{int(gid)}"
+        script_parts.extend([
+            f"find {target} -xdev -type d -exec chown {owner} {{}} + 2>/dev/null || true",
+            f"find {target} -xdev -type f -exec chown {owner} {{}} + 2>/dev/null || true",
+            f"find {target} -xdev -type l -exec chown -h {owner} {{}} + 2>/dev/null || true",
+        ])
+    script = "; ".join(script_parts) + "; exit 0"
     return run_ephemeral(
         image="alpine:3.21",
-        command=cmd,
-        volumes={host_path: {"bind": container_path, "mode": "rw"}},
+        command=["-c", script],
+        volumes={base: {"bind": container_path, "mode": "rw"}},
         user="0:0",
         entrypoint="sh",
+        cap_add=["CHOWN", "FOWNER", "DAC_OVERRIDE"],
         timeout=timeout,
     )

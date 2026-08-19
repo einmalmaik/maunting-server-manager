@@ -8,7 +8,7 @@ laufenden Betrieb lahmgelegt:
 1. ``file_edit_service.write_text`` schreibt ueber eine temporaere Datei und
    ersetzt das Ziel per ``os.replace``. Die neue Datei gehoerte damit dem
    Panel — jeder Speichervorgang enteignete den Spielprozess still.
-2. ``server_file_access_service._apply_permissions`` setzte danach hart
+2. ``server_file_access_service.apply_permissions`` setzte danach hart
    ``0640``. Fuer eine Datei, die nun dem Panel gehoert, heisst das: der
    Server kann seine eigene Konfiguration nicht mehr lesen.
 
@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 
 from services import file_edit_service
-from services.server_file_access_service import _apply_permissions
+from services.server_file_access_service import apply_permissions as _apply_permissions
 
 
 # ── Der Eigentuemer bleibt erhalten ───────────────────────────────────

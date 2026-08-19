@@ -240,7 +240,14 @@ def write_text_if_revision(
         if expected_revision is not None and current_revision != expected_revision:
             raise RevisionConflictError(current_revision)
 
-        previous_mode = stat_module.S_IMODE(target.stat().st_mode) if target.exists() else 0o644
+        # Bestandsdateien behalten ihren Modus. Neue Dateien bekommen 0660 —
+        # das Gruppenmodell des Panels: Panel und Spielprozess teilen sich die
+        # Dateien ueber die Gruppe des Serververzeichnisses (setgid vererbt
+        # sie), "andere" bleiben aussen vor. Hier stand 0644: die Gruppe
+        # durfte nicht schreiben (der Spielprozess konnte eine vom Panel
+        # angelegte Konfiguration nicht aendern), dafuer durfte jeder
+        # Host-Prozess mitlesen.
+        previous_mode = stat_module.S_IMODE(target.stat().st_mode) if target.exists() else 0o660
         temp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(

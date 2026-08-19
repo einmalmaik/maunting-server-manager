@@ -43,6 +43,7 @@ from services.node_client import NodeClient, NodeClientError
 from services.node_service import resolve_server_node
 from services.server_file_access_service import (
     CHUNK_TMP_DIRNAME,
+    apply_permissions as _apply_permissions,
     read_server_text,
     search_file_contents,
     write_server_text,
@@ -166,46 +167,6 @@ def _ensure_allowed_extension(filename: str) -> None:
     ext = os.path.splitext(filename)[1].lower()
     if ext in BLOCKED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Dateityp {ext} ist nicht erlaubt")
-
-
-def _apply_permissions(install_dir: str, target: Path) -> None:
-    """Apply owner-scoped modes without destroying existing execute bits."""
-    def _normalize(path: Path) -> None:
-        info = path.lstat()
-        if stat.S_ISLNK(info.st_mode):
-            return
-        if stat.S_ISDIR(info.st_mode):
-            path.chmod(0o750)
-        elif stat.S_ISREG(info.st_mode):
-            path.chmod(0o750 if stat.S_IMODE(info.st_mode) & 0o111 else 0o640)
-
-    try:
-        if target.is_dir():
-            _normalize(target)
-            for root, dirs, files in os.walk(target):
-                for d in dirs:
-                    try:
-                        _normalize(Path(root) / d)
-                    except OSError:
-                        pass
-                for f in files:
-                    try:
-                        _normalize(Path(root) / f)
-                    except OSError:
-                        pass
-        else:
-            _normalize(target)
-
-        base = Path(install_dir).resolve()
-        p = target.parent.resolve()
-        while p != base and p != p.parent:
-            try:
-                _normalize(p)
-            except OSError:
-                pass
-            p = p.parent
-    except Exception:
-        pass
 
 
 def _repair_install_permissions(install_dir: str) -> dict:

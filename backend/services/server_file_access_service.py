@@ -695,7 +695,7 @@ def delete_server_text(
     return {"path": relative_path, "deleted": True}
 
 
-def _apply_permissions(install_dir: str, target: Path) -> None:
+def apply_permissions(install_dir: str, target: Path) -> None:
     """Haelt die Rechte so eng wie moeglich — **ohne** den Spielprozess auszusperren.
 
     Die Regel war einmal hart: jede geschriebene Datei bekam ``0640``, jedes
@@ -776,6 +776,20 @@ def _apply_permissions(install_dir: str, target: Path) -> None:
 
     try:
         normalize(target)
+        # Bei einem Verzeichnis auch der Inhalt: ein Zip-Extract legt Dateien
+        # mit den Modi aus dem Archiv an, und ein Archiv von einem fremden
+        # Rechner bringt gerne 0600 mit — der Spielprozess (andere UID unter
+        # Rootless Docker) koennte die entpackte Konfiguration dann nicht
+        # lesen. Symlinks werden nicht verfolgt (`normalize` laesst sie aus,
+        # `os.walk` folgt ihnen nicht): ein Link auf /etc/shadow bekaeme sonst
+        # per Missbrauch neue Modi auf dem Ziel.
+        if target.is_dir() and not target.is_symlink():
+            for wurzel, verzeichnisse, dateien in os.walk(target):
+                for name in verzeichnisse + dateien:
+                    try:
+                        normalize(Path(wurzel) / name)
+                    except OSError:
+                        continue
         base = Path(install_dir).resolve()
         parent = target.parent.resolve()
         while parent != base and parent != parent.parent:
@@ -855,7 +869,7 @@ def write_server_text(
                 expected_revision=expected_revision,
                 create_only=create_only,
             )
-        _apply_permissions(server.install_dir, target)
+        apply_permissions(server.install_dir, target)
         return {"path": relative_path, **result}
     except FileRevisionConflict as exc:
         raise HTTPException(
