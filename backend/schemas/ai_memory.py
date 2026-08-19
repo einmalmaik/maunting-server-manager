@@ -59,27 +59,32 @@ class AiMemoryResponse(BaseModel):
     updated_at: datetime
 
 
-class AiMemoryPersonalPage(BaseModel):
-    """Ein Ausschnitt der persoenlichen Erinnerungen — und was daneben steht.
+class AiMemoryPage(BaseModel):
+    """Ein Ausschnitt einer Erinnerungsliste — und was daneben steht.
 
-    Eine nackte Liste haette hier gereicht, solange ein Benutzer hundert
-    Eintraege hatte. Bei 5.000 nicht mehr: jede Zeile kostet einen eigenen
-    Roundtrip zum DIS-Sidecar, und die Seite waere nach zehn Sekunden noch
-    nicht da. Sie kommt deshalb in Stuecken — und weil ein Stueck fuer sich
-    genommen luegen wuerde ("das ist alles"), tragen die drei Zahlen die
-    Wahrheit daneben.
+    Eine nackte Liste hätte hier gereicht, solange ein Bereich hundert Einträge
+    fasste. Bei 5.000 nicht mehr: jede Zeile kostet einen eigenen Roundtrip zum
+    DIS-Sidecar, und die Seite wäre nach zehn Sekunden noch nicht da. Sie kommt
+    deshalb in Stücken — und weil ein Stück für sich genommen lügen würde ("das
+    ist alles"), tragen die drei Zahlen die Wahrheit daneben.
+
+    Eine Form für beide Seitenansichten, das eigene Profil und einen einzelnen
+    Bereich. Zwei Formen wären zwei Rechnungen für Seitenzahl und nächsten
+    Offset, und die Oberfläche müsste beide führen.
     """
 
     entries: list[AiMemoryResponse]
-    #: Alle persoenlichen Zeilen zusammen, allgemeine und serverbezogene. Steht
-    #: sichtbar ueber der Liste, damit die Seitenweise kein stiller Deckel ist.
+    #: Alle Zeilen dieser Ansicht zusammen. Steht sichtbar über der Liste, damit
+    #: die Seitenweise kein stiller Deckel ist.
     total: int
-    #: Davon die allgemeinen (``scope='user'``) — genau die, und nur die, nimmt
-    #: "Alle loeschen" mit. Die Bestaetigungsfrage nennt diese Zahl.
+    #: Davon das, was "Alle löschen" wirklich mitnimmt. Im Profil sind das nur
+    #: die allgemeinen Einträge (``scope='user'``) — die Notizen zu einzelnen
+    #: Servern stehen in derselben Liste und bleiben stehen. In der Ansicht
+    #: eines Bereichs sind es alle. Die Bestätigungsfrage nennt diese Zahl.
     clearable: int
-    #: Wie gross eine Seite ist. Bestimmt der Server, weil er sie in
-    #: Sidecar-Roundtrips bezahlt; die Oberflaeche rechnet daraus ihre
-    #: Seitenzahl und den naechsten Offset.
+    #: Wie groß eine Seite ist. Bestimmt der Server, weil er sie in
+    #: Sidecar-Roundtrips bezahlt; die Oberfläche rechnet daraus ihre Seitenzahl
+    #: und den nächsten Offset.
     limit: int
 
 

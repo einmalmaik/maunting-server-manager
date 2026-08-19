@@ -11,6 +11,7 @@ Relevanz auswaehlen, und Herkunft respektieren.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -20,6 +21,7 @@ from models import AiMemoryEntry, Role, RolePermission, User
 from services import (
     ai_action_errors,
     ai_action_service,
+    ai_embedding_service,
     ai_memory_service,
     permission_service,
 )
@@ -175,6 +177,50 @@ def test_frequently_used_entries_survive_a_foreign_language_question(
 
     assert "dauerhaft Wichtiges" in block
     assert "nie Gebrauchtes" not in block
+
+
+def test_nutzung_schlaegt_nie_den_bezug_zur_frage(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Gegenprobe zum Test darüber: bei Gleichstand ja, gegen die Frage nie.
+
+    Nutzung ist der Ausschlag, wenn nichts anderes trägt — nicht der Maßstab.
+    Genau das ging verloren, weil sie als einzige als **rohe Zahl** in die Summe
+    ging: `min(use_count, 20)` reicht bis 20, während Bedeutung und Aktualität
+    zwischen 0 und 1 liegen. Mit dem Gewicht 0,5 waren das bis zu 10,0 Punkte
+    allein dafür, dass ein Eintrag oft abgerufen wurde, gegen höchstens 6,0 aus
+    der Bedeutung.
+
+    Gemessen am 19.08.2026 an 5.000 Einträgen: von den 65 Zeilen im Block
+    standen 65 überwiegend wegen ihrer Nutzung dort. Zwei der zehn gesuchten
+    Antworten fielen deshalb heraus, obwohl die Vorauswahl sie auf Platz 1
+    gesetzt hatte — die zweite Stufe warf weg, was die erste als das Passendste
+    ausgewählt hatte.
+
+    Der Aufbau hier ist derselbe Fall im Kleinen: ein Eintrag, der die Frage
+    trifft und noch nie gebraucht wurde, gegen drei vielgenutzte ohne jeden
+    Bezug. Nimmt man die Normierung heraus, gewinnt der Ballast mit 12,0 gegen
+    8,0 und dieser Test wird rot.
+    """
+    _allow_memory(db, regular_user)
+    # Ein Wort Überlappung mit der Frage ("Sicherung"), sonst nichts.
+    _write(db, regular_user, "sicherung.zeitpunkt", "Nachts um drei Uhr")
+    for nummer in range(3):
+        ballast = _write(
+            db, regular_user, f"ballast{nummer}", "Ein oft gebrauchter Merksatz"
+        )
+        ballast.use_count = 20
+        ballast.last_used_at = datetime.now(timezone.utc)
+    db.commit()
+    # Platz für genau eine Zeile — die Rangfolge entscheidet allein.
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_CHARS", 60)
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, query="Wann laeuft meine Sicherung?"
+    )
+
+    assert "Nachts um drei Uhr" in block
+    assert "Merksatz" not in block
 
 
 def test_reading_the_memory_records_the_usage(db: Session, regular_user: User) -> None:
@@ -723,6 +769,62 @@ def test_die_vorauswahl_folgt_der_frage_und_nicht_der_nutzung(
 
     block = ai_memory_service.provider_memory_context(
         db, regular_user, query="Wann ist das wartungsfenster?"
+    )
+
+    assert "Sonntags ab drei Uhr" in block
+    assert "Blau" not in block
+
+
+def _achsen_encode(texts: list[str]) -> list[list[float]]:
+    """Ein Modellersatz mit genau zwei Bedeutungen: Wartung und Farbe.
+
+    Reicht für die eine Frage, um die es hier geht — trägt der Vektor die
+    Auswahl —, und ist unabhängig davon, ob das echte Modell installiert ist.
+    """
+    vektoren = []
+    for text in texts:
+        gesenkt = text.lower()
+        achse = 0 if ("wartung" in gesenkt or "maintenance" in gesenkt) else 1
+        vektor = [0.0] * ai_embedding_service.EMBEDDING_DIMENSIONS
+        vektor[achse] = 1.0
+        vektoren.append(vektor)
+    return vektoren
+
+
+def test_die_vorauswahl_liest_auch_bestandszeilen_im_alten_format(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Während des Formatwechsels muss das Gedächtnis weiter finden.
+
+    Seit dem 19.08.2026 liegen die Vektoren als float32-Bytes statt als JSON —
+    das Lesen kostete bei 5.000 Einträgen 381 ms von 717 ms Gesamtrechenzeit.
+    Zwischen dem Einspielen des Codes und dem Durchlauf der Migration
+    `20260819_01` steht der Bestand aber noch im alten Format, und in dieser
+    Zeit darf die Vorauswahl nicht auf Aktualität zurückfallen: sie
+    entscheidet, was überhaupt entschlüsselt wird, und was sie wegwirft,
+    holt keine spätere Stufe zurück.
+
+    Die Frage ist englisch und teilt mit beiden Einträgen kein Wort — es gibt
+    also nichts außer dem Vektor, was sie mit dem richtigen verbindet. Der
+    falsche ist zusätzlich der frischere und gewänne jede Rangfolge, die die
+    Bedeutung nicht lesen kann.
+    """
+    _allow_memory(db, regular_user)
+    monkeypatch.setattr(ai_embedding_service, "encode", _achsen_encode)
+    gesucht = _write(db, regular_user, "wartungsfenster", "Sonntags ab drei Uhr")
+    frisch = _write(db, regular_user, "lieblingsfarbe", "Blau, seit jeher")
+    gesucht.last_used_at = datetime.now(timezone.utc) - timedelta(days=30)
+    frisch.last_used_at = datetime.now(timezone.utc)
+    # Der Stand vor der Migration: Vektor als Text, Byte-Spalte noch leer.
+    for row in (gesucht, frisch):
+        row.embedding_json = json.dumps(list(_achsen_encode([row.key])[0]))
+        row.embedding_bytes = None
+    db.commit()
+    # Genau eine Zeile überlebt die Vorauswahl. Welche, ist die ganze Frage.
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 1)
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, query="When is the next maintenance?"
     )
 
     assert "Sonntags ab drei Uhr" in block

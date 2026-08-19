@@ -10,7 +10,7 @@ import { AiMemoryManager } from './AiMemoryManager'
 
 vi.mock('@/api/ai', () => ({
   aiApi: {
-    listMemory: vi.fn(),
+    listScopeMemory: vi.fn(),
     listPersonalMemory: vi.fn(),
     getMemoryPreference: vi.fn(),
     setMemoryPreference: vi.fn(),
@@ -68,6 +68,16 @@ const seite = (rows: AiMemoryEntry[], rest: Partial<AiMemoryPage> = {}): AiMemor
   ...rest,
 })
 
+/**
+ * Dieselbe Hülle für einen Bereich (`GET /ai/memory/page`) — dort räumt „Alle
+ * löschen" die ganze Kennung ab, `clearable` ist also `total`.
+ */
+const bereichsSeite = (
+  rows: AiMemoryEntry[], rest: Partial<AiMemoryPage> = {},
+): AiMemoryPage => ({
+  entries: rows, total: rows.length, clearable: rows.length, limit: 200, ...rest,
+})
+
 /** Genug Einträge, damit Suche, Filter und Zähler überhaupt erscheinen. */
 const viele: AiMemoryEntry[] = [
   entry,
@@ -84,7 +94,7 @@ describe('AiMemoryManager', () => {
       isLoading: false,
       error: null,
     })
-    vi.mocked(aiApi.listMemory).mockReset().mockResolvedValue([entry])
+    vi.mocked(aiApi.listScopeMemory).mockReset().mockResolvedValue(bereichsSeite([entry]))
     vi.mocked(aiApi.listPersonalMemory).mockReset().mockResolvedValue(seite([entry]))
     vi.mocked(aiApi.deleteMemory).mockClear()
     vi.mocked(aiApi.getMemoryPreference).mockReset().mockResolvedValue({ enabled: true, notice_due: false, notice_hidden: false })
@@ -113,7 +123,6 @@ describe('AiMemoryManager', () => {
     // Ohne diese Kennzeichnung waere nicht erkennbar, ob ein Eintrag eine
     // eigene Ansage ist oder eine Ableitung der KI — und genau daran haengt,
     // wie sehr man ihm trauen sollte.
-    vi.mocked(aiApi.listMemory).mockResolvedValue([entry, learned])
     vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([entry, learned]))
     render(<AiMemoryManager />)
 
@@ -127,7 +136,6 @@ describe('AiMemoryManager', () => {
     // Der Herkunftsfilter beantwortet die Frage, die sonst niemand beantwortet:
     // "was hat sich die KI ueber mich gemerkt?" — etwas anderes als "was habe
     // ich ihr gesagt?".
-    vi.mocked(aiApi.listMemory).mockResolvedValue(viele)
     vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite(viele))
     render(<AiMemoryManager />)
 
@@ -155,7 +163,6 @@ describe('AiMemoryManager', () => {
       ...viele,
       { ...entry, id: '...-108', scope: 'server', server_id: 62, key: 'startzeit', value: 'Braucht längeren Timeout' },
     ]
-    vi.mocked(aiApi.listMemory).mockResolvedValue(mitServernotiz)
     vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite(mitServernotiz))
     render(<AiMemoryManager />)
 
@@ -188,12 +195,11 @@ describe('AiMemoryManager', () => {
     // Lesen darf jedes Mitglied — `scope_identity` verlangt fuer Team nur
     // Mitgliedschaft. Aendern verlangt den Schalter, und was man nicht darf,
     // soll gar nicht erst als Knopf dastehen.
-    vi.mocked(aiApi.listMemory).mockResolvedValue([entry])
-    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([entry]))
+    vi.mocked(aiApi.listScopeMemory).mockResolvedValue(bereichsSeite([entry]))
     render(<AiMemoryManager scope={{ kind: 'team', teamId: 7, canManage: false }} />)
 
     expect(await screen.findByText('Synthetic test preference')).toBeInTheDocument()
-    expect(aiApi.listMemory).toHaveBeenCalledWith('team', undefined, 7)
+    expect(aiApi.listScopeMemory).toHaveBeenCalledWith('team', undefined, 7, 0)
     expect(screen.queryByRole('button', { name: 'Hinzufügen' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Memory-Eintrag löschen/ })).not.toBeInTheDocument()
     // Der Gedaechtnis-Schalter ist eine persoenliche Einstellung und hat in
@@ -209,7 +215,8 @@ describe('AiMemoryManager', () => {
     })
     const { container } = render(<AiMemoryManager />)
     expect(container).toBeEmptyDOMElement()
-    expect(aiApi.listMemory).not.toHaveBeenCalled()
+    expect(aiApi.listPersonalMemory).not.toHaveBeenCalled()
+    expect(aiApi.listScopeMemory).not.toHaveBeenCalled()
   })
   it('zeigt serverbezogene Notizen im persoenlichen Bereich, mit Servernamen', async () => {
     // Sie sind persoenlich (`server:{id}:user:{uid}`), die KI schreibt sie, und
@@ -272,11 +279,11 @@ describe('AiMemoryManager', () => {
   const serverBereich = { kind: 'server_shared', serverId: 62, canManage: true } as const
 
   it('lädt und speichert das Wissen genau eines Servers', async () => {
-    vi.mocked(aiApi.listMemory).mockResolvedValue([wissen])
+    vi.mocked(aiApi.listScopeMemory).mockResolvedValue(bereichsSeite([wissen]))
     render(<AiMemoryManager scope={serverBereich} />)
 
     expect(await screen.findByText('Nach dem Start neu laden')).toBeInTheDocument()
-    expect(aiApi.listMemory).toHaveBeenCalledWith('server_shared', 62)
+    expect(aiApi.listScopeMemory).toHaveBeenCalledWith('server_shared', 62, undefined, 0)
 
     fireEvent.change(screen.getByLabelText('Schlüssel, z. B. response.language'), { target: { value: 'ports' } })
     fireEvent.change(screen.getByLabelText('Präferenz'), { target: { value: 'Aussen 30015' } })
@@ -295,7 +302,7 @@ describe('AiMemoryManager', () => {
     // `clearMemory` fehlte die Nummer als einzigem der Memory-Aufrufe. Ohne
     // sie löst das Backend `server_shared` gar nicht erst auf und antwortet
     // 404 — der Knopf „alles löschen" wäre auf diesem Reiter tot gewesen.
-    vi.mocked(aiApi.listMemory).mockResolvedValue([wissen])
+    vi.mocked(aiApi.listScopeMemory).mockResolvedValue(bereichsSeite([wissen]))
     render(<AiMemoryManager scope={serverBereich} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Alle löschen' }))
@@ -308,13 +315,15 @@ describe('AiMemoryManager', () => {
     // Hinge das Laden allein an `scope.kind`, zeigte der zweite Server
     // schweigend die Betriebsanleitung des ersten. Das ist genau die
     // Verwechslung, gegen die auch das Etikett im Kontext steht.
-    vi.mocked(aiApi.listMemory).mockResolvedValue([wissen])
+    vi.mocked(aiApi.listScopeMemory).mockResolvedValue(bereichsSeite([wissen]))
     const { rerender } = render(<AiMemoryManager scope={serverBereich} />)
-    await waitFor(() => expect(aiApi.listMemory).toHaveBeenCalledWith('server_shared', 62))
+    await waitFor(() => expect(aiApi.listScopeMemory)
+      .toHaveBeenCalledWith('server_shared', 62, undefined, 0))
 
     rerender(<AiMemoryManager scope={{ kind: 'server_shared', serverId: 84, canManage: true }} />)
 
-    await waitFor(() => expect(aiApi.listMemory).toHaveBeenCalledWith('server_shared', 84))
+    await waitFor(() => expect(aiApi.listScopeMemory)
+      .toHaveBeenCalledWith('server_shared', 84, undefined, 0))
   })
 
   it('sagt auf dem Serverreiter, dass die Kollegen mitlesen', async () => {
@@ -334,7 +343,7 @@ describe('AiMemoryManager', () => {
       ...entry, id: '...-202', scope: 'server_shared', server_id: 62,
       key: 'whitelist', value: 'Nach dem Start neu laden',
     }
-    vi.mocked(aiApi.listMemory).mockResolvedValue([wissen])
+    vi.mocked(aiApi.listScopeMemory).mockResolvedValue(bereichsSeite([wissen]))
     render(<AiMemoryManager scope={{ kind: 'server_shared', serverId: 62, canManage: false }} />)
 
     expect(await screen.findByText('Nach dem Start neu laden')).toBeInTheDocument()
@@ -446,11 +455,48 @@ describe('AiMemoryManager', () => {
     expect(screen.queryByRole('navigation', { name: 'Seitennavigation' })).toBeNull()
   })
 
-  it('blättert nicht, wo es nichts zu blättern gibt', async () => {
-    // Die geteilten Bereiche kommen weiterhin auf einmal. Eine Leiste mit zwei
-    // toten Knöpfen wäre dort nur Kulisse.
-    vi.mocked(aiApi.listMemory).mockResolvedValue(viele)
+  it('blättert auch im Teamwissen', async () => {
+    // Der Teambereich hängt am Rollenlimit seines Gründers und darf 5.000
+    // Einträge fassen — dieselbe Zehn-Sekunden-Wartezeit wie im Profil, denn
+    // jede Zeile kostet beim Öffnen einen eigenen Aufruf an den DIS-Sidecar.
+    // Er lud trotzdem alles auf einmal, während das Profil längst blätterte.
+    vi.mocked(aiApi.listScopeMemory)
+      .mockResolvedValue(bereichsSeite(viele, { total: 5000, clearable: 5000, limit: 4 }))
     render(<AiMemoryManager scope={{ kind: 'team', teamId: 7, canManage: true }} />)
+
+    expect(await screen.findByText('5000 Einträge insgesamt')).toBeInTheDocument()
+    expect(screen.getByText('Seite 1 von 1250')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Weiter' }))
+
+    await waitFor(() => expect(aiApi.listScopeMemory)
+      .toHaveBeenLastCalledWith('team', undefined, 7, 4))
+    expect(await screen.findByText('Seite 2 von 1250')).toBeInTheDocument()
+  })
+
+  it('fragt beim Leeren eines Bereichs nach dessen ganzem Bestand', async () => {
+    // Im Profil ist `clearable` kleiner als `total` — die Servernotizen stehen
+    // in derselben Liste und bleiben stehen. In einem Bereich räumt „Alle
+    // löschen" die ganze Kennung ab, und die Frage muss das sagen, statt nach
+    // den vier Zeilen zu fragen, die gerade vor einem liegen.
+    vi.mocked(aiApi.listScopeMemory)
+      .mockResolvedValue(bereichsSeite(viele, { total: 5000, clearable: 5000, limit: 4 }))
+    render(<AiMemoryManager scope={{ kind: 'team', teamId: 7, canManage: true }} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Alle löschen' }))
+
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Wirklich alle 5000 Einträge löschen? Das lässt sich nicht rückgängig machen.',
+    })))
+  })
+
+  it('blättert nicht, wo es nichts zu blättern gibt', async () => {
+    // Panel und Serverwissen sind bei hundert Einträgen fest gedeckelt und
+    // passen immer auf eine Seite. Sie gehen trotzdem denselben Weg — eine
+    // Ansicht mit zwei Leseroutinen liefe irgendwann auseinander. Eine Leiste
+    // mit zwei toten Knöpfen wäre dort aber nur Kulisse.
+    vi.mocked(aiApi.listScopeMemory).mockResolvedValue(bereichsSeite(viele))
+    render(<AiMemoryManager scope={{ kind: 'panel', canManage: true }} />)
 
     expect(await screen.findByText('Europe/Berlin')).toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: 'Seitennavigation' })).toBeNull()

@@ -1,5 +1,6 @@
 """Ownership, DIS-Schutz, Secret-Abweisung und Abruf fuer AI-Memory."""
 
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -31,18 +32,22 @@ logger = logging.getLogger(__name__)
 #: Was diesem Benutzer gehoert und deshalb an seiner Einwilligung haengt.
 #: `team` und `panel` gehoeren dem Team bzw. dem Betreiber.
 PERSOENLICHE_SCOPES = ("user", "server")
-#: Wieviele Eintraege eine Seite der Profilansicht traegt.
+#: Wieviele Einträge eine Seite trägt — in **jeder** blätternden Ansicht.
+#:
+#: Der Name stammt von der Profilansicht, die als erste blättern musste; seit
+#: die Bereichsansicht (`scope_entries`) dasselbe tut, gilt die Zahl für beide.
+#: Zwei Seitengrößen nebeneinander wären zwei Zahlen mit derselben Begründung,
+#: und eine davon liefe der anderen irgendwann davon.
 #:
 #: Die Zahl steht hier und nicht in der Anfrage. Jede Zeile dieser Seite kostet
-#: einen eigenen Roundtrip zum DIS-Sidecar; wer die Grenze selbst setzen
-#: duerfte, koennte sich 5.000 davon auf einmal bestellen — gemessen am
-#: 19.08.2026 sind das 10,3 s bei 2 ms je Roundtrip, genug fuer ein
-#: Gateway-Timeout. Der Aufrufer sagt also nur, *wo* er weiterlesen will, nie
-#: *wieviel*.
+#: einen eigenen Roundtrip zum DIS-Sidecar; wer die Grenze selbst setzen dürfte,
+#: könnte sich 5.000 davon auf einmal bestellen — gemessen am 19.08.2026 sind
+#: das 10,3 s bei 2 ms je Roundtrip, genug für ein Gateway-Timeout. Der Aufrufer
+#: sagt also nur, *wo* er weiterlesen will, nie *wieviel*.
 #:
 #: 200 bleibt bei 0,1 bis 0,4 s und ist immer noch eine Seite, die ein Mensch
-#: ueberfliegen kann. Der Deckel je Bereich liegt bei 5.000 — das sind 25
-#: Seiten und damit eine Zahl, die man auch durchblaettert.
+#: überfliegen kann. Der Deckel je Bereich liegt bei 5.000 — das sind 25 Seiten
+#: und damit eine Zahl, die man auch durchblättert.
 PERSONAL_PAGE_SIZE = 200
 # Der **Sockel** des Blocks: soviel Platz bekommt das Gedächtnis, wenn der
 # Aufrufer kein Kontextfenster nennt. Wer eines kennt, reicht es als `budget`
@@ -369,36 +374,168 @@ def list_entries(
     db: Session, user: User, scope: str, server_id: int | None,
     team_id: int | None = None,
 ) -> list[tuple[AiMemoryEntry, str]]:
+    """Ein ganzer Bereich auf einmal — eine Entschlüsselung je Zeile.
+
+    Der ungeblätterte Leseweg, und damit der teuerste. Die Oberfläche nimmt ihn
+    nicht mehr: sie liest Seiten (`scope_entries`), seit ein Teambereich 5.000
+    Einträge fassen darf. Wer ihn ruft, sollte den Bereich kennen, den er
+    aufmacht.
+    """
     identity, _, _, _ = scope_identity(db, user, scope, server_id, team_id)
     rows = db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity).order_by(AiMemoryEntry.key).all()
     return _entschluesseln_lesbare(rows)
 
 
+def entries_by_key_pattern(
+    db: Session, user: User, scope: str, muster: Sequence[str]
+) -> list[tuple[AiMemoryEntry, str]]:
+    """Nur die Einträge eines Bereichs, deren **Schlüssel** auf ein Muster passt.
+
+    Der Schlüssel steht im Klartext in der Tabelle, der Wert nicht. Wer etwas
+    sucht, das sich schon am Schlüssel erkennen lässt, kann die Menge deshalb in
+    der Datenbank einschränken und danach eine Handvoll Zeilen öffnen — statt
+    den ganzen Bereich zu entschlüsseln und das meiste gleich wieder
+    wegzuwerfen.
+
+    Gebaut für den Lageblock (`ai_lage.zone_des_benutzers`), und der ist auch
+    die Begründung: er sucht bei **jeder** Chatnachricht die Zeitzone und las
+    dafür den ganzen persönlichen Vorrat — bei 5.000 Einträgen 5.000
+    Sidecar-Roundtrips vor dem ersten Byte an den Anbieter, für eine einzige
+    Zeile, und derselbe Preis bei den vielen Benutzern, die gar keine Zeitzone
+    hinterlegt haben.
+
+    ``muster`` sind SQL-``LIKE``-Formen (``%zeitzone%``), verglichen ohne
+    Rücksicht auf Groß- und Kleinschreibung. Sortiert wird wie in `list_entries`
+    nach Schlüssel: wer unter mehreren Treffern den ersten nimmt, bekommt damit
+    denselben wie vorher.
+
+    Eine Mengenbegrenzung, keine Rechteprüfung — die besorgt `scope_identity`
+    wie überall sonst.
+    """
+    identity, _, _, _ = scope_identity(db, user, scope, None)
+    rows = (
+        db.query(AiMemoryEntry)
+        .filter(
+            AiMemoryEntry.scope_identity == identity,
+            or_(*(AiMemoryEntry.key.ilike(form) for form in muster)),
+        )
+        .order_by(AiMemoryEntry.key)
+        .all()
+    )
+    return _entschluesseln_lesbare(rows)
+
+
 @dataclass(frozen=True)
-class PersoenlicheSeite:
-    """Ein Ausschnitt der Profilansicht und die zwei Zahlen daneben.
+class Gedaechtnisseite:
+    """Ein Ausschnitt einer Gedächtnisansicht und die zwei Zahlen daneben.
 
-    Beide Zahlen zaehlen etwas anderes, und beide werden gebraucht:
+    Beide Zahlen zählen etwas anderes, und beide werden gebraucht:
 
-    * ``gesamt`` traegt die Ansage ueber der Liste ("5.000 Eintraege, Seite 1
-      von 25"). Ohne sie waere die Seitenweise genau der stille Deckel, den sie
-      ersetzen soll — der Benutzer saehe 200 Zeilen und nichts, was ihm sagt,
+    * ``gesamt`` trägt die Ansage über der Liste ("5.000 Einträge, Seite 1 von
+      25"). Ohne sie wäre die Seitenweise genau der stille Deckel, den sie
+      ersetzen soll — der Benutzer sähe 200 Zeilen und nichts, was ihm sagt,
       dass 4.800 dahinterliegen.
-    * ``allgemein`` sind davon die mit ``scope='user'``. Genau die und nur die
-      raeumt "Alle loeschen" ab: geloescht wird ueber die Kennung ``user:{id}``,
-      die Servernotizen liegen unter ``server:{sid}:user:{uid}`` und bleiben
-      stehen. Die Bestaetigungsfrage muss die Zahl nennen, die sie danach
-      wirklich trifft — sonst fragt sie nach 200 und meldet 4.800.
+    * ``loeschbar`` ist davon das, was "Alle löschen" wirklich trifft. In der
+      Profilansicht sind das nur die allgemeinen Einträge (``scope='user'``):
+      gelöscht wird über die Kennung ``user:{id}``, die Servernotizen liegen
+      unter ``server:{sid}:user:{uid}`` und bleiben stehen. In der Ansicht eines
+      einzelnen Bereichs sind es alle, denn dort *ist* die Kennung die Ansicht.
+      Die Bestätigungsfrage muss die Zahl nennen, die sie danach wirklich
+      trifft — sonst fragt sie nach 200 und meldet 4.800.
     """
 
     eintraege: list[tuple[AiMemoryEntry, str]]
     gesamt: int
-    allgemein: int
+    loeschbar: int
+
+
+#: Die Reihenfolge, in der eine Seite geschnitten wird: zuletzt genutzt zuerst,
+#: nie Genutztes hinten, dann nach Schlüssel.
+#:
+#: Dieselbe Reihenfolge, die die Oberfläche schon immer herstellte — nur ist sie
+#: seit der Seitenweise keine Geschmacksfrage mehr, sondern die Schnittkante:
+#: welche Zeile auf Seite 3 landet, entscheidet allein sie. Wer sie hier ändert,
+#: ändert die Seiteneinteilung, und wer in der Oberfläche anders sortiert,
+#: bekommt eine Seite in einer anderen Reihenfolge angezeigt, als sie
+#: geschnitten wurde.
+#:
+#: ``last_used_at IS NULL`` als erstes Kriterium statt ``NULLS LAST``: das ist
+#: auf SQLite wie auf PostgreSQL dasselbe Ergebnis, während die beiden ohne
+#: Angabe entgegengesetzt sortieren (PostgreSQL stellt NULL bei DESC nach vorn,
+#: SQLite nach hinten). Bei einer Seiteneinteilung wäre das nicht Kosmetik,
+#: sondern eine andere Seite je Datenbank.
+_SEITENORDNUNG = (
+    AiMemoryEntry.last_used_at.is_(None),
+    AiMemoryEntry.last_used_at.desc(),
+    AiMemoryEntry.key,
+)
+
+
+def _seite(
+    basis: Query, offset: int, *, loeschbar: int | None = None
+) -> Gedaechtnisseite:
+    """Eine Seite aus einer Bestandsabfrage — der gemeinsame Rumpf aller Ansichten.
+
+    ``basis`` ist die ungeschnittene Abfrage und wird zweimal gebraucht: einmal
+    für die Zeilen dieser Seite und einmal für die Gesamtzahl daneben. Nur die
+    Zeilen der Seite gehen durch den Sidecar; die Zahl kommt aus der Datenbank
+    und kostet nichts.
+
+    ``loeschbar`` bestimmt der Aufrufer, denn nur er weiß, was sein "Alle
+    löschen" trifft (siehe `Gedaechtnisseite`). ``None`` heißt "alles, was diese
+    Abfrage findet" — dann wird nicht zweimal dasselbe gezählt.
+
+    Die Seitengröße steht bewusst **nicht** in der Signatur: sie wird in
+    Sidecar-Roundtrips bezahlt, und eine Größe, die der Aufrufer wählen darf,
+    ist keine Grenze.
+    """
+    rows = (
+        basis.order_by(*_SEITENORDNUNG)
+        .offset(max(0, offset))
+        .limit(PERSONAL_PAGE_SIZE)
+        .all()
+    )
+    gesamt = basis.count()
+    return Gedaechtnisseite(
+        eintraege=_entschluesseln_lesbare(rows),
+        gesamt=gesamt,
+        loeschbar=gesamt if loeschbar is None else loeschbar,
+    )
+
+
+def scope_entries(
+    db: Session, user: User, scope: str, server_id: int | None = None,
+    team_id: int | None = None, *, offset: int = 0,
+) -> Gedaechtnisseite:
+    """Eine Seite **eines** Bereichs — Team, Panel oder das Wissen einer Anlage.
+
+    Dieselbe Auswahl wie `list_entries`, nur in Stücken. Von den drei Bereichen
+    braucht das heute genau einer: `panel` und `server_shared` hängen an der
+    festen `ai_limit_service.MAX_SYSTEM_SCOPE_ENTRIES` und passen damit immer
+    auf eine Seite, `team` hängt am Rollenlimit seines Gründers und darf seit
+    dem 19.08.2026 bis zu 5.000 Einträge fassen. Jeder davon kostet beim Öffnen
+    einen eigenen Roundtrip zum DIS-Sidecar — gemessen 10,3 s bei 5.000 Zeilen,
+    also dieselbe Wartezeit, gegen die die Profilansicht längst geschützt ist.
+
+    Ein stiller Deckel wäre hier so falsch wie dort: wer diese Liste aufruft,
+    will aufräumen, und eine Ansicht, die 300 von 5.000 zeigt, versteckt genau
+    die Zeilen, wegen denen er gekommen ist. `gesamt` steht deshalb daneben, und
+    die nächste Seite ist einen Klick entfernt.
+
+    ``loeschbar`` bleibt hier ``None`` und ist damit gleich ``gesamt``:
+    `delete_all_entries` räumt genau diese eine Kennung ab. In der Profilansicht
+    ist das anders — dort liegen zwei Bereiche in einer Liste.
+    """
+    identity, _, _, _ = scope_identity(db, user, scope, server_id, team_id)
+    return _seite(
+        db.query(AiMemoryEntry).filter(AiMemoryEntry.scope_identity == identity),
+        offset,
+    )
 
 
 def personal_entries(
     db: Session, user: User, *, offset: int = 0
-) -> PersoenlicheSeite:
+) -> Gedaechtnisseite:
     """Eine Seite von allem, was diesem Benutzer selbst gehoert.
 
     `list_entries` fragt genau eine Scope-Kennung ab und braucht dafuer bei
@@ -428,36 +565,21 @@ def personal_entries(
     einzige, was der Aufrufer bestimmt — die Groesse gehoert dem Dienst
     (`PERSONAL_PAGE_SIZE`), weil sie in Sidecar-Roundtrips bezahlt wird.
 
-    Sortiert wird nach zuletzt genutzt, Ungenutztes hinten, dann nach
-    Schluessel — dieselbe Reihenfolge, die die Oberflaeche schon immer
-    herstellte. Das ist ab jetzt keine Geschmacksfrage mehr, sondern die
-    Schnittkante: welche Zeile auf Seite 3 landet, entscheidet allein diese
-    Sortierung. Wer sie hier aendert, aendert die Seiteneinteilung.
+    Geschnitten wird wie in jeder anderen Seitenansicht (`_SEITENORDNUNG`); den
+    Unterschied macht allein die Abfrage darunter — sie geht über den
+    **Besitzer** und nicht über eine Bereichskennung, denn genau diesen Bereich
+    gibt es als Kennung nicht.
     """
     basis = db.query(AiMemoryEntry).filter(
         AiMemoryEntry.owner_user_id == user.id,
         AiMemoryEntry.scope.in_(PERSOENLICHE_SCOPES),
     )
-    rows = (
-        basis
-        # `last_used_at IS NULL` als erstes Kriterium statt `NULLS LAST`: das
-        # ist auf SQLite wie auf PostgreSQL dasselbe Ergebnis, waehrend die
-        # beiden ohne Angabe entgegengesetzt sortieren (PostgreSQL stellt NULL
-        # bei DESC nach vorn, SQLite nach hinten). Bei einer Seiteneinteilung
-        # waere das nicht Kosmetik, sondern eine andere Seite je Datenbank.
-        .order_by(
-            AiMemoryEntry.last_used_at.is_(None),
-            AiMemoryEntry.last_used_at.desc(),
-            AiMemoryEntry.key,
-        )
-        .offset(max(0, offset))
-        .limit(PERSONAL_PAGE_SIZE)
-        .all()
-    )
-    return PersoenlicheSeite(
-        eintraege=_entschluesseln_lesbare(rows),
-        gesamt=basis.count(),
-        allgemein=basis.filter(AiMemoryEntry.scope == "user").count(),
+    return _seite(
+        basis,
+        offset,
+        # Die einzige Ansicht, in der "Alle löschen" weniger trifft, als die
+        # Liste zeigt: die Servernotizen stehen mit drin und bleiben stehen.
+        loeschbar=basis.filter(AiMemoryEntry.scope == "user").count(),
     )
 
 
@@ -858,8 +980,8 @@ def aehnlicher_eintrag(
 
     # Vektor und Zeile zusammen halten: die Filterung oben hat `None`
     # ausgeschlossen, aber der Typpruefer sieht das nicht — und ein zweites
-    # `_stored_vector` je Zeile waere ein zweites JSON-Parsen.
-    paare: list[tuple[AiMemoryEntry, list[float]]] = []
+    # `_stored_vector` je Zeile wäre ein zweites Lesen der Vektorspalte.
+    paare: list[tuple[AiMemoryEntry, Sequence[float]]] = []
     for row in db.query(AiMemoryEntry).filter(
         AiMemoryEntry.scope_identity == scope_kennung,
         AiMemoryEntry.key != key,
@@ -1087,7 +1209,10 @@ def _relevance(
       RAM, Mods, Ports stehen woertlich in deutschen Eintraegen. Gemessen
       erkennt der Wortabgleich diese Faelle sicherer als das statische
       Embedding — die beiden Signale ergaenzen sich.
-    - **Nutzung.** Was oft abgerufen wurde, ist erfahrungsgemaess wichtig.
+    - **Nutzung.** Was oft abgerufen wurde, ist erfahrungsgemaess wichtig —
+      aber nur als Ausschlag bei Gleichstand. Sie wiegt höchstens ihr Gewicht,
+      genau wie die anderen Anteile; warum das ausdrücklich dasteht, erklärt
+      `_bewertung`.
     - **Aktualitaet.** Frisch Gemerktes gewinnt gegen Altes, das nie gebraucht
       wurde — sonst kaeme ein neuer Eintrag nie zum Zug, weil ihm die
       Nutzungshistorie fehlt.
@@ -1132,6 +1257,18 @@ def _relevance(
 #: sprachunabhaengige Anteil, wenn jemand auf Englisch nach deutschen Notizen
 #: fragt. Falsch war allein, sie darueber entscheiden zu lassen, was die KI
 #: ueberhaupt zu sehen bekommt.
+#:
+#: **Nachgemessen am 19.08.2026 — sie entschied es trotzdem.** Die Vorauswahl
+#: lieferte 7 von 10 gesuchten Einträgen ab, im fertigen Block standen aber nur
+#: 5: zwei Ziele, die die Vorauswahl auf Platz 1 gesetzt hatte, fielen hier auf
+#: Rang 74 von 300 und damit aus dem Budget. Der Grund lag nicht im Gewicht,
+#: sondern im Maßstab — die Nutzung ging als rohe Zahl 0 bis 20 in die Summe,
+#: während Bedeutung und Aktualität zwischen 0 und 1 liegen. Seit sie wie in
+#: `abrufstaerke` normiert wird (Begründung in `_bewertung`), stehen 7 von 10
+#: im Block, und die geretteten Ziele stehen dort auf Rang 1 statt 74. Die vier
+#: Zahlen unten sind deshalb unverändert: gemessen wurde ein Rechenfehler, keine
+#: Geschmacksfrage. Wer stattdessen an ihnen dreht, dreht an einer Zahl, die
+#: zwischen 0,0 und 0,3 dasselbe Ergebnis liefert — auch das gemessen.
 GEWICHTE_AUSWAHL = (6.0, 3.0, 0.5, 2.0)
 GEWICHTE_VORAUSWAHL = (12.0, 3.0, 0.0, 2.0)
 
@@ -1166,10 +1303,26 @@ def _bewertung(
     # Negative Aehnlichkeit heisst "hat nichts miteinander zu tun" und darf
     # einen Eintrag nicht unter einen ohne Vektor druecken.
     meaning = max(0.0, similarity) if similarity is not None else 0.0
+    # **Die Nutzung wird normiert wie in `abrufstaerke`, und das ist der Punkt.**
+    # Bedeutung und Aktualität liegen zwischen 0 und 1; das Gewicht daneben sagt
+    # also, wieviel dieser Anteil höchstens wiegen darf. Die Nutzung stand hier
+    # als rohe Zahl von 0 bis 20 — mit demselben Gewicht 0,5 waren das bis zu
+    # 10,0 Punkte gegen höchstens 6,0 aus der Bedeutung, und die Zahl hatte mit
+    # der Frage nichts zu tun. Gemessen am 19.08.2026 an 5.000 Einträgen: von
+    # den 65 Zeilen, die ins Budget passten, standen 65 überwiegend wegen ihrer
+    # Nutzung dort, und zwei der zehn gesuchten Antworten fielen deshalb heraus,
+    # obwohl die Vorauswahl sie auf Platz 1 gesetzt hatte.
+    #
+    # Nicht das Gewicht ist gefallen, sondern der Maßstab: durch 20 geteilt
+    # wiegt die Nutzung wie jeder andere Anteil höchstens ihr Gewicht. Sie
+    # bleibt damit, was sie sein sollte — ein Ausschlag bei Gleichstand, der
+    # auch dann noch trägt, wenn jemand auf Englisch nach deutschen Notizen
+    # fragt und weder Wortabgleich noch Vektor etwas hergeben.
+    familiarity = min(row.use_count or 0, 20) / 20.0
     return (
         meaning * w_bedeutung
         + overlap * w_bezug
-        + min(row.use_count, 20) * w_nutzung
+        + familiarity * w_nutzung
         + recency * w_aktualitaet
     )
 
@@ -1224,17 +1377,56 @@ def _vorauswahl(
     return [row for row, _score in ranked[:limit]], True
 
 
-def _stored_vector(row: AiMemoryEntry) -> list[float] | None:
-    """Liest den gespeicherten Vektor, wenn er zum aktuellen Modell passt."""
-    if not row.embedding_json or row.embedding_model != _EMBEDDING_MODEL_TAG:
+def _stored_vector(row: AiMemoryEntry) -> Sequence[float] | None:
+    """Liest den gespeicherten Vektor, wenn er zum aktuellen Modell passt.
+
+    Zwei Spalten, eine Wahrheit. Geschrieben wird seit dem 19.08.2026 als
+    float32-Bytes, und von dort wird zuerst gelesen; ``embedding_json`` ist der
+    Rückfall für Bestandszeilen. Beide Formen tragen dieselben Zahlen —
+    unterschiedlich ist nur, was das Lesen kostet: 4 ms gegen 381 ms bei 5.000
+    Einträgen.
+
+    Der Rückfall bleibt, bis die Migration `20260819_01` überall gelaufen
+    ist. Zwischen dem Einspielen des Codes und diesem Lauf liegen bei jedem
+    Betreiber ein paar Sekunden, und in denen fände ein Gedächtnis ohne
+    Rückfall zu keiner Frage mehr etwas.
+
+    Dass eine beschädigte Byteszeile ebenfalls auf JSON zurückfällt, ist
+    Absicht und keine Nachlässigkeit: beide Spalten beschreiben denselben
+    Text, also ist die unversehrte von beiden die richtige Antwort.
+    """
+    if row.embedding_model != _EMBEDDING_MODEL_TAG:
+        return None
+    vektor = ai_embedding_service.bytes_zu_vektor(row.embedding_bytes)
+    if vektor is not None:
+        return vektor
+    if not row.embedding_json:
         return None
     try:
-        vector = json.loads(row.embedding_json)
+        alt = json.loads(row.embedding_json)
     except (TypeError, ValueError):
         return None
-    if not isinstance(vector, list) or len(vector) != EMBEDDING_DIMENSIONS:
+    if not isinstance(alt, list) or len(alt) != EMBEDDING_DIMENSIONS:
         return None
-    return vector
+    return alt
+
+
+def _vektor_setzen(row: AiMemoryEntry, vektor: Sequence[float] | None) -> None:
+    """Schreibt den Vektor einer Zeile — in genau einer Form.
+
+    ``embedding_json`` wird dabei immer geleert, auch wenn gar nichts
+    geschrieben wird. Das ist dieselbe Regel, die `refresh_embedding` schon
+    für das Verwerfen begründet: eine Zeile trägt einen Vektor, und zwar den
+    zu ihrem aktuellen Text. Bliebe der alte JSON-Stand daneben stehen,
+    beschriebe er nach einer Berichtigung den *alten* Text — und der Rückfall
+    in `_stored_vector` griffe genau dann darauf zurück, wenn die Bytes einmal
+    fehlen.
+    """
+    row.embedding_bytes = (
+        None if vektor is None else ai_embedding_service.vektor_zu_bytes(vektor)
+    )
+    row.embedding_json = None
+    row.embedding_model = None if vektor is None else _EMBEDDING_MODEL_TAG
 
 
 def _embedding_source(key: str, value: str) -> str:
@@ -1263,12 +1455,7 @@ def refresh_embedding(row: AiMemoryEntry, value: str) -> None:
     den Kontext nach, sobald wieder ein Modell da ist.
     """
     vectors = ai_embedding_service.encode([_embedding_source(row.key, value)])
-    if not vectors:
-        row.embedding_json = None
-        row.embedding_model = None
-        return
-    row.embedding_json = json.dumps(vectors[0], separators=(",", ":"))
-    row.embedding_model = _EMBEDDING_MODEL_TAG
+    _vektor_setzen(row, vectors[0] if vectors else None)
 
 
 def _vektoren_nachziehen(decoded: list[tuple[AiMemoryEntry, str]]) -> None:
@@ -1289,10 +1476,11 @@ def _vektoren_nachziehen(decoded: list[tuple[AiMemoryEntry, str]]) -> None:
     funktionierendem Modell alles auf, und zwar höchstens einmal je Zeile.
     Ein Aufruf für alle offenen Zeilen, wie `aehnlicher_eintrag` es auch tut.
 
-    Bewusst nur an dieser einen Stelle: `list_entries` und `personal_entries`
-    sind Verwaltungsansichten, dort gehört kein Rechenschritt hin — auch nicht,
-    seit die zweite seitenweise lädt und damit eine überschaubare Menge vor
-    sich hat. Fehlt das Modell weiterhin, passiert schlicht nichts.
+    Bewusst nur an dieser einen Stelle: `list_entries`, `scope_entries` und
+    `personal_entries` sind Verwaltungsansichten, dort gehört kein Rechenschritt
+    hin — auch nicht, seit die beiden letzten seitenweise laden und damit eine
+    überschaubare Menge vor sich haben. Fehlt das Modell weiterhin, passiert
+    schlicht nichts.
     """
     offen = [(row, value) for row, value in decoded if _stored_vector(row) is None]
     if not offen:
@@ -1306,8 +1494,7 @@ def _vektoren_nachziehen(decoded: list[tuple[AiMemoryEntry, str]]) -> None:
     if not vektoren or len(vektoren) != len(offen):
         return
     for (row, _value), vektor in zip(offen, vektoren):
-        row.embedding_json = json.dumps(vektor, separators=(",", ":"))
-        row.embedding_model = _EMBEDDING_MODEL_TAG
+        _vektor_setzen(row, vektor)
 
 
 def _utc(value: datetime) -> datetime:

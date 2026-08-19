@@ -21,9 +21,23 @@ vi.mock('@/api/teams', () => ({
   },
 }))
 
+// Diese Datei prueft die Teamseite, nicht das Gedaechtnis — der eine Mock
+// steht fuer alles, was die eingebetteten KI-Bauteile nebenher holen. Seit dem
+// 19.08.2026 antwortet der Gedaechtnisweg aber mit einer **Seite** und nicht
+// mehr mit einer Liste (ein Teambereich fasst jetzt bis zu 5.000 Eintraege,
+// und jede Zeile kostet beim Oeffnen eine Entschluesselung). Ein pauschales
+// `[]` liess `AiMemoryManager` deshalb an `seite.entries` auflaufen und nahm
+// die halbe Seite mit — sichtbar als vier Tests, die ihre Beschriftungen nicht
+// mehr fanden.
 vi.mock('@/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client')
-  return { ...actual, api: vi.fn().mockResolvedValue([]) }
+  const leereSeite = { entries: [], total: 0, clearable: 0, limit: 200 }
+  return {
+    ...actual,
+    api: vi.fn().mockImplementation(async (pfad: string) =>
+      typeof pfad === 'string' && pfad.includes('/ai/memory/') ? leereSeite : []
+    ),
+  }
 })
 
 vi.mock('@/stores/confirmStore', () => ({ confirm: vi.fn().mockResolvedValue(true) }))

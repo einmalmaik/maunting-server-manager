@@ -28,10 +28,9 @@ import os
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from models import AiMemoryEntry, User
+from models import User
 
 
 #: Ausgeschriebene Wochentage. Bewusst nicht ``%A``: das hängt an der Locale des
@@ -42,7 +41,8 @@ WOCHENTAGE = (
 
 #: Wonach im Gedächtnis gesucht wird. Der Schlüssel steht im Klartext in der
 #: Tabelle, der Wert nicht — deshalb ist er der einzige billige Filter, den es
-#: hier gibt.
+#: hier gibt. Beide Sprachen, weil beide vorkommen: die Oberfläche ist deutsch,
+#: die Modelle schreiben ihre Schlüssel gern englisch.
 _ZONENSCHLUESSEL = ("%zeitzone%", "%timezone%")
 
 #: Ungefähre Länge des fertigen Blocks in Zeichen. Für den Ring am Absendeknopf
@@ -84,11 +84,20 @@ def zone_des_benutzers(db: Session, user: User) -> tuple[str, str] | None:
     den Umweg des Lageblocks in den Kontext geraten, wenn der Mensch sein
     Gedächtnis abgeschaltet hat oder das Recht dazu gar nicht besitzt.
 
-    Zuerst eine Abfrage über die Schlüssel, dann erst das Entschlüsseln. Der
-    Schlüssel steht im Klartext, der Wert nicht: ohne diesen Vorfilter kostete
-    jede Chatnachricht einen Sidecar-Aufruf je Eintrag — auch bei den vielen
-    Benutzern, die nie eine Zeitzone hinterlegt haben. Er begrenzt die Menge, er
-    prüft kein Recht; das tut `list_entries` weiterhin selbst.
+    **Gesucht wird über den Schlüssel, geöffnet wird eine Zeile.** Der Schlüssel
+    steht im Klartext in der Tabelle, der Wert nicht — und diese Funktion läuft
+    bei *jeder* Chatnachricht, weil der Lageblock in jede Anfrage geht. Sie las
+    dafür bis zuletzt den ganzen persönlichen Vorrat auf einmal: bei 5.000
+    Einträgen 5.000 Roundtrips zum DIS-Sidecar (gemessen 10,3 s) vor dem ersten
+    Byte an den Anbieter, für eine einzige Zeile — und derselbe Preis bei allen,
+    die nie eine Zeitzone hinterlegt haben.
+
+    `entries_by_key_pattern` schneidet dieselbe Menge in der Datenbank zu und
+    entschlüsselt nur die Treffer. Die Bedeutung bleibt Zeichen für Zeichen
+    dieselbe: dieselbe Sortierung nach Schlüssel, derselbe erste brauchbare
+    Treffer, dasselbe ``None``, wenn es keinen gibt. Es ist eine
+    Mengenbegrenzung und keine Rechteprüfung — die stehen darüber und gelten
+    unverändert.
     """
     from services import ai_memory_service, permission_service
 
@@ -96,19 +105,9 @@ def zone_des_benutzers(db: Session, user: User) -> tuple[str, str] | None:
         return None
     if not ai_memory_service.preference(db, user.id):
         return None
-    treffer = {
-        row.key
-        for row in db.query(AiMemoryEntry.key).filter(
-            AiMemoryEntry.owner_user_id == user.id,
-            AiMemoryEntry.scope == "user",
-            or_(*(AiMemoryEntry.key.ilike(muster) for muster in _ZONENSCHLUESSEL)),
-        )
-    }
-    if not treffer:
-        return None
-    for eintrag, wert in ai_memory_service.list_entries(db, user, "user", None):
-        if eintrag.key not in treffer:
-            continue
+    for _eintrag, wert in ai_memory_service.entries_by_key_pattern(
+        db, user, "user", _ZONENSCHLUESSEL
+    ):
         sauber = (wert or "").strip()
         if not sauber:
             continue

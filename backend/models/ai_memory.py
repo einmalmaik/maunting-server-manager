@@ -2,7 +2,18 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -43,7 +54,7 @@ class AiMemoryEntry(Base):
       zuerst weg, was nie abgerufen wurde — statt dessen, was zufaellig hinten
       im Alphabet steht.
 
-    Das Vektorfeld ``embedding_json`` weiter unten stand hier lange als
+    Das Vektorfeld weiter unten stand hier lange als
     ausdrueckliches *Nein*: bei hoechstens 100 Eintraegen je Scope passe ohnehin
     alles gleichzeitig in den Kontext. Die Annahme fiel zweimal — erst am
     Sprachwechsel (ein deutscher Eintrag und eine englische Frage teilen kein
@@ -54,9 +65,11 @@ class AiMemoryEntry(Base):
 
     Ihr zweiter Teil traegt weiter: der Vektor kam als zusaetzliche Spalte und
     nicht als Umbau, und einen Vektor*index* gibt es nach wie vor bewusst nicht.
-    Bei 5.000 Zeilen kostet das Skalarprodukt in numpy gemessene 38 ms und ist
-    damit weiterhin schneller als der Weg in die Datenbank — teuer ist an dieser
-    Stelle nicht das Rechnen, sondern das Lesen der Vektoren. Dünner begründet
+    Bei 5.000 Zeilen kostet das Lesen der Vektoren gemessene 3 ms und das
+    Skalarprodukt in numpy 5 ms — beides zusammen weniger als ein Zwanzigstel
+    des Wegs in die Datenbank, der dieselben Zeilen ohnehin holen muss. Teuer
+    war an dieser Stelle nie das Rechnen, sondern bis zum 19.08.2026 das
+    Format: als JSON kosteten dieselben Vektoren 381 ms. Dünner begründet
     ist die Absage trotzdem: zur Menge, ab der sich ein Index lohnt, ist es
     keine Zehnerpotenz mehr, sondern Faktor zwei. Der nächste Anstieg des
     Deckels ist die Prüfung, die diesmal noch ausgegangen ist; sie steht in
@@ -104,12 +117,25 @@ class AiMemoryEntry(Base):
     aad_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Lokal berechneter Vektor als JSON-Liste. Bewusst *nicht* verschlüsselt:
-    # der `key` daneben steht ohnehin im Klartext und verrät mehr, und die
-    # Rangfolge kann ihn so ohne einen weiteren Sidecar-Aufruf je Zeile lesen.
-    # Die Auswahl selbst findet **nach** dem Entschlüsseln statt — sie bewertet
-    # neben der Bedeutung auch die Wortüberschneidung im Wert und braucht ihn
-    # dafür im Klartext. NULL heißt: noch nicht berechnet.
+    # Lokal berechneter Vektor als rohe float32-Bytes, Little-Endian. Bewusst
+    # *nicht* verschlüsselt: der `key` daneben steht ohnehin im Klartext und
+    # verrät mehr, und die Rangfolge kann ihn so ohne einen weiteren
+    # Sidecar-Aufruf je Zeile lesen. Die Auswahl selbst findet **nach** dem
+    # Entschlüsseln statt — sie bewertet neben der Bedeutung auch die
+    # Wortüberschneidung im Wert und braucht ihn dafür im Klartext. NULL heißt:
+    # noch nicht berechnet.
+    embedding_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Dieselben Zahlen in der alten Form. Sie steht hier nur noch für den
+    # Bestand: 5.000 Vektoren als Text zu lesen kostete gemessen 381 ms und
+    # 26,7 MB, als Bytes sind es 4 ms und 5,1 MB — über die Hälfte der
+    # Rechenzeit eines Chatabrufs für einen reinen Formatwechsel.
+    #
+    # Warum die Spalte trotzdem bleibt: zwischen dem Einspielen des neuen Codes
+    # und dem Durchlauf der Migration liegen bei jedem Betreiber ein paar
+    # Sekunden, und in denen darf das Gedächtnis nicht blind werden.
+    # `_stored_vector` liest deshalb bevorzugt Bytes und fällt auf diese Spalte
+    # zurück. Geschrieben wird sie nicht mehr; sie verschwindet, wenn kein
+    # unterstützter Bestand sie mehr braucht.
     embedding_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Womit gerechnet wurde. Passt es nicht zum geladenen Modell, wird der
     # Vektor ignoriert statt falsche Aehnlichkeiten zu liefern.

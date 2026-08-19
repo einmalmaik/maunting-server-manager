@@ -13,6 +13,7 @@ gefunden hat, und loescht danach benannte Schluessel.
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from models import AiMemoryEntry, Role, RolePermission, Team, User
@@ -700,3 +701,157 @@ def test_eine_erlaubte_korrektur_nimmt_dem_eintrag_nicht_dauerhaft_den_schutz(
     assert "replace_user_entry" in str(exc.value)
     _row, wert = ai_memory_service.list_entries(db, regular_user, "user", None)[0]
     assert "8 GB" in wert
+
+
+# ── Blättern ─────────────────────────────────────────────────────────
+
+
+def _team_mit_wissen(db: Session, user: User, anzahl: int) -> Team:
+    """Ein Team und `anzahl` Einträge darin, alle vom Gründer."""
+    team = team_service.create_team(db, user=user, name="Betriebsteam")
+    for nummer in range(anzahl):
+        ai_memory_service.upsert_entry(
+            db, user=user, scope="team", server_id=None, team_id=team.id,
+            key=f"regel.{nummer:02d}", value=f"Betriebsregel Nummer {nummer}",
+        )
+    db.commit()
+    return team
+
+
+def test_die_teamansicht_blaettert_statt_alles_auf_einmal_zu_oeffnen(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dieselbe Zusage wie im Profil, für den zweiten Bereich, der wachsen darf.
+
+    `panel` und `server_shared` hängen an der festen
+    `MAX_SYSTEM_SCOPE_ENTRIES` und passen immer auf eine Seite. Ein Team hängt
+    am Rollenlimit seines Gründers und darf seit dem 19.08.2026 bis zu 5.000
+    Einträge fassen — und jeder davon kostet beim Öffnen einen eigenen
+    HTTP-POST an den DIS-Sidecar. Gemessen sind das bei 5.000 Zeilen 10,3 s,
+    also genau die Wartezeit, gegen die die Profilansicht längst geschützt
+    ist. Über `list_entries` wäre die Teamansicht ungeschützt geblieben.
+
+    Gezählt werden die Sidecar-Aufrufe und nicht nur die Zeilen der Antwort:
+    eine kurze Liste bewiese sonst nur, dass wenig ankam — nicht, dass wenig
+    geöffnet wurde.
+
+    Die Seitengröße ist kleingesetzt. Die Zusage lautet "es wird nicht mehr
+    entschlüsselt als gezeigt", und die gilt für jede Größe; mit den echten
+    200 bräuchte der Test 205 Einträge und ein angehobenes Rollenlimit und
+    prüfte dann zwei Dinge auf einmal.
+    """
+    from services.dis_client import DisClient
+
+    _allow(db, regular_user, "ai.memory.use", "teams.create")
+    team = _team_mit_wissen(db, regular_user, 5)
+    monkeypatch.setattr(ai_memory_service, "PERSONAL_PAGE_SIZE", 3)
+
+    echt = DisClient.decrypt
+    geoeffnet: list[str] = []
+
+    def zaehlend(payload, *, aad):
+        geoeffnet.append(aad)
+        return echt(payload, aad=aad)
+
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(zaehlend))
+
+    erste = ai_memory_service.scope_entries(
+        db, regular_user, "team", None, team.id
+    )
+    aufrufe_erste = len(geoeffnet)
+    zweite = ai_memory_service.scope_entries(
+        db, regular_user, "team", None, team.id, offset=3
+    )
+
+    assert len(erste.eintraege) == 3
+    assert erste.gesamt == 5
+    # Genau eine Entschlüsselung je gezeigter Zeile — nicht je vorhandener.
+    assert aufrufe_erste == 3
+
+    # Zusammen genau die fünf, ohne Überlappung und ohne Lücke.
+    assert len(zweite.eintraege) == 2
+    schluessel = [row.key for row, _wert in erste.eintraege]
+    schluessel += [row.key for row, _wert in zweite.eintraege]
+    assert len(set(schluessel)) == 5
+
+
+def test_eine_bereichsseite_meldet_alles_als_loeschbar(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """"Alle löschen" trifft hier wirklich alles — anders als im Profil.
+
+    Die Bestätigungsfrage nennt diese Zahl, und sie darf nicht die Länge der
+    angezeigten Seite sein: die Ansicht sieht drei von fünf. Im Profil ist
+    `loeschbar` kleiner als `gesamt`, weil die Servernotizen in derselben Liste
+    stehen und stehenbleiben; in einem Bereich räumt `delete_all_entries`
+    genau die eine Kennung ab, die die Ansicht zeigt.
+    """
+    _allow(db, regular_user, "ai.memory.use", "teams.create")
+    team = _team_mit_wissen(db, regular_user, 5)
+    monkeypatch.setattr(ai_memory_service, "PERSONAL_PAGE_SIZE", 3)
+
+    seite = ai_memory_service.scope_entries(db, regular_user, "team", None, team.id)
+
+    assert len(seite.eintraege) == 3
+    assert seite.loeschbar == seite.gesamt == 5
+    assert ai_memory_service.delete_all_entries(
+        db, regular_user, "team", None, team.id
+    ) == 5
+
+
+def test_die_bereichsseite_kommt_ueber_die_route_mit_ihren_drei_zahlen(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Der Weg, den die Oberfläche wirklich nimmt — einmal ganz durch.
+
+    Die Zahlen daneben sind kein Beiwerk: aus `total` und `limit` rechnet die
+    Ansicht ihre Seitenzahl und den nächsten Offset, und `clearable` steht in
+    der Frage vor dem Leeren. Fehlt eine davon, blättert die Oberfläche ins
+    Leere oder fragt nach der falschen Menge.
+
+    Der negative Offset gehört dazu: er ist eine Abweisung und kein Rücklauf
+    ins Nichts — dieselbe Zusage wie auf der Profilseite.
+    """
+    _allow(db, regular_user, "ai.memory.use", "teams.create")
+    team = _team_mit_wissen(db, regular_user, 5)
+    monkeypatch.setattr(ai_memory_service, "PERSONAL_PAGE_SIZE", 3)
+    adresse = f"/api/ai/memory/page?scope=team&team_id={team.id}"
+
+    erste = client.get(adresse, cookies=user_cookies)
+    zweite = client.get(f"{adresse}&offset=3", cookies=user_cookies)
+    negativ = client.get(f"{adresse}&offset=-1", cookies=user_cookies)
+
+    assert erste.status_code == 200
+    seite = erste.json()
+    assert len(seite["entries"]) == 3
+    assert seite["total"] == 5
+    # Im Bereich räumt "Alle löschen" alles ab, anders als im Profil.
+    assert seite["clearable"] == 5
+    assert seite["limit"] == 3
+    assert len(zweite.json()["entries"]) == 2
+    assert negativ.status_code == 422
+
+
+def test_eine_bereichsseite_bleibt_hinter_der_mitgliedschaft(
+    db: Session, regular_user: User
+) -> None:
+    """Der neue Leseweg erbt die Grenze, er baut keine eigene.
+
+    `scope_entries` fragt dieselbe `scope_identity` wie `list_entries`; ein
+    Außenstehender bekommt deshalb dasselbe 404 wie dort — und zwar 404 und
+    nicht 403, weil ihn die Existenz eines fremden Teams nichts angeht.
+    """
+    from fastapi import HTTPException
+
+    fremder = _user(db, "fremder")
+    _allow(db, fremder, "ai.memory.use")
+    _allow(db, regular_user, "ai.memory.use", "teams.create")
+    team = _team_mit_wissen(db, regular_user, 2)
+
+    with pytest.raises(HTTPException) as fehler:
+        ai_memory_service.scope_entries(db, fremder, "team", None, team.id)
+    assert fehler.value.status_code == 404

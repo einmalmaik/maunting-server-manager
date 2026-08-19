@@ -9,7 +9,7 @@ from models import AiMemoryEntry, AiMemoryPreference, User
 from schemas.ai_memory import (
     AiMemoryClearResponse,
     AiMemoryNoticeAnswer,
-    AiMemoryPersonalPage,
+    AiMemoryPage,
     AiMemoryPreferenceResponse,
     AiMemoryPreferenceWrite,
     AiMemoryResponse,
@@ -33,6 +33,21 @@ def _response(row: AiMemoryEntry, value: str) -> AiMemoryResponse:
     )
 
 
+def _page(seite: ai_memory_service.Gedaechtnisseite) -> AiMemoryPage:
+    """Eine Seite des Dienstes als Antwort — für beide Seitenrouten dieselbe.
+
+    ``limit`` kommt aus dem Dienst und nicht aus der Anfrage: er bezahlt eine
+    Seite in Sidecar-Roundtrips. Die Oberfläche rechnet daraus ihre Seitenzahl
+    und den nächsten Offset, statt die Zahl noch einmal zu kennen.
+    """
+    return AiMemoryPage(
+        entries=[_response(row, value) for row, value in seite.eintraege],
+        total=seite.gesamt,
+        clearable=seite.loeschbar,
+        limit=ai_memory_service.PERSONAL_PAGE_SIZE,
+    )
+
+
 @router.get("", response_model=list[AiMemoryResponse])
 def list_memory(
     scope: MemoryScope = Query(...),
@@ -41,6 +56,13 @@ def list_memory(
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.memory.use")),
 ) -> list[AiMemoryResponse]:
+    """Ein ganzer Bereich auf einmal.
+
+    Die Oberfläche liest hier nicht mehr — sie nimmt `/page`, seit ein
+    Teambereich 5.000 Einträge fassen darf und jede Zeile eine Entschlüsselung
+    kostet. Der Weg bleibt für Aufrufer, die einen kleinen Bereich am Stück
+    brauchen; wieviel er öffnet, entscheidet der Bereich.
+    """
     try:
         return [_response(row, value) for row, value in ai_memory_service.list_entries(
             db, user, scope, server_id, team_id
@@ -49,12 +71,12 @@ def list_memory(
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
 
 
-@router.get("/personal", response_model=AiMemoryPersonalPage)
+@router.get("/personal", response_model=AiMemoryPage)
 def list_personal_memory(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.memory.use")),
-) -> AiMemoryPersonalPage:
+) -> AiMemoryPage:
     """Eine Seite von allem, was diesem Benutzer selbst gehoert.
 
     `GET /?scope=server` verlangt eine konkrete `server_id`; wer alle seine
@@ -62,22 +84,51 @@ def list_personal_memory(
     sie ueber die Oberflaeche bisher unerreichbar, obwohl die KI sie schreibt
     und sie in jedem Gespraech mitlaufen.
 
+    Eine eigene Route neben `/page` und nicht deren Sonderfall: dieser Bereich
+    hat keine Kennung, über die man ihn abfragen könnte — er spannt zwei
+    (``user`` und ``server``) und geht deshalb über den Besitzer. Die Seite
+    darum ist dieselbe.
+
     ``offset`` ist der einzige Stellhebel von aussen. Die Seitengroesse bleibt
     beim Dienst: sie wird in Sidecar-Roundtrips bezahlt, und ein ``limit`` in
     der Anfrage waere die Einladung, sich 5.000 Entschluesselungen auf einmal zu
-    bestellen. Was gerade gilt, steht als ``limit`` in der Antwort — daraus
-    rechnet die Oberflaeche Seitenzahl und naechsten Offset.
+    bestellen.
     """
     try:
-        seite = ai_memory_service.personal_entries(db, user, offset=offset)
+        return _page(ai_memory_service.personal_entries(db, user, offset=offset))
     except DisSidecarError as exc:
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
-    return AiMemoryPersonalPage(
-        entries=[_response(row, value) for row, value in seite.eintraege],
-        total=seite.gesamt,
-        clearable=seite.allgemein,
-        limit=ai_memory_service.PERSONAL_PAGE_SIZE,
-    )
+
+
+@router.get("/page", response_model=AiMemoryPage)
+def list_memory_page(
+    scope: MemoryScope = Query(...),
+    server_id: int | None = Query(default=None, ge=1),
+    team_id: int | None = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.memory.use")),
+) -> AiMemoryPage:
+    """Eine Seite eines Bereichs — der Leseweg der Team-, Panel- und Serveransicht.
+
+    Dieselbe Auswahl wie `list_memory`, nur in Stücken und mit der Gesamtzahl
+    daneben. Gebraucht wird sie heute vom Teamwissen: `panel` und
+    `server_shared` sind bei hundert Einträgen fest gedeckelt und passen immer
+    auf eine Seite, ein Team hängt am Rollenlimit seines Gründers und darf 5.000
+    fassen — dieselbe Zehn-Sekunden-Wartezeit, gegen die die Profilseite längst
+    geschützt ist.
+
+    Dass die gedeckelten Bereiche denselben Weg nehmen, ist Absicht: eine
+    Ansicht mit zwei Leseroutinen wäre eine Gelegenheit, sie auseinanderlaufen
+    zu lassen. Wo es nichts zu blättern gibt, meldet die Antwort schlicht eine
+    Seite.
+    """
+    try:
+        return _page(ai_memory_service.scope_entries(
+            db, user, scope, server_id, team_id, offset=offset
+        ))
+    except DisSidecarError as exc:
+        raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
 
 
 @router.put("", response_model=AiMemoryResponse)

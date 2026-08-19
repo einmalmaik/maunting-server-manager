@@ -18,6 +18,7 @@ Betreiber sieht ihn über die Einstellungen statt nur im Log.
 from __future__ import annotations
 
 import json
+import struct
 import sys
 import types
 
@@ -71,6 +72,7 @@ def test_without_a_model_nothing_breaks(
     _allow_memory(db, regular_user)
     row = _write(db, regular_user, "ram.bevorzugt", "8 GB fuer Minecraft")
 
+    assert row.embedding_bytes is None
     assert row.embedding_json is None
     block = ai_memory_service.provider_memory_context(
         db, regular_user, query="Wieviel RAM?"
@@ -210,6 +212,7 @@ def test_a_failed_write_discards_the_old_vector(
     monkeypatch.setattr(ai_embedding_service, "encode", lambda texts: None)
     row = _write(db, regular_user, "lieblingsspiel", "Am liebsten spiele ich Factorio")
 
+    assert row.embedding_bytes is None
     assert row.embedding_json is None
     assert row.embedding_model is None
     assert ai_memory_service._stored_vector(row) is None
@@ -284,7 +287,9 @@ def test_a_vector_from_a_different_model_is_ignored(
     """Ein Modellwechsel darf keine falschen Aehnlichkeiten erzeugen."""
     _allow_memory(db, regular_user)
     row = _write(db, regular_user, "test", "Wert")
-    row.embedding_json = json.dumps([0.1] * ai_embedding_service.EMBEDDING_DIMENSIONS)
+    row.embedding_bytes = ai_embedding_service.vektor_zu_bytes(
+        [0.1] * ai_embedding_service.EMBEDDING_DIMENSIONS
+    )
     row.embedding_model = "irgendein-anderes-modell"
     db.commit()
 
@@ -297,11 +302,111 @@ def test_a_vector_with_the_wrong_length_is_ignored(
     """Eine beschaedigte Zeile darf die Rechnung nicht sprengen."""
     _allow_memory(db, regular_user)
     row = _write(db, regular_user, "test", "Wert")
-    row.embedding_json = json.dumps([0.1, 0.2, 0.3])
+    row.embedding_bytes = ai_embedding_service.vektor_zu_bytes([0.1, 0.2, 0.3])
+    row.embedding_json = None
     row.embedding_model = ai_memory_service._EMBEDDING_MODEL_TAG
     db.commit()
 
     assert ai_memory_service._stored_vector(row) is None
+
+
+# ── Die Speicherform des Vektors ──────────────────────────────────────────
+#
+# Gemessen am 19.08.2026: 5.000 Vektoren aus JSON zu lesen kostete 381 ms von
+# 717 ms Gesamtrechenzeit eines Chatabrufs, dieselben Zahlen als float32-Bytes
+# 4 ms. Der Wechsel ist ein reiner Formatwechsel — und genau deshalb muss er
+# an drei Stellen festgehalten werden: geschrieben wird die neue Form, gelesen
+# werden beide, und was auf der Platte liegt, hängt nicht an der Maschine.
+
+def test_a_written_vector_lands_in_the_byte_column(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Geschrieben wird als Bytes — und die alte Textspalte bleibt leer.
+
+    Beides gehört zusammen. Bliebe der JSON-Stand daneben stehen, trüge die
+    Zeile zwei Vektoren; nach einer Berichtigung beschriebe der zweite den
+    alten Text, und der Rückfall in `_stored_vector` griffe genau dann darauf
+    zurück, wenn die Bytes einmal fehlen.
+    """
+    _allow_memory(db, regular_user)
+    monkeypatch.setattr(ai_embedding_service, "encode", _vektoren_fuer)
+
+    row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
+
+    assert row.embedding_json is None, "die alte Form darf nicht mitgeschrieben werden"
+    assert row.embedding_bytes is not None
+    assert len(row.embedding_bytes) == ai_embedding_service.EMBEDDING_BYTES
+    vektor = ai_memory_service._stored_vector(row)
+    assert vektor is not None and len(vektor) == ai_embedding_service.EMBEDDING_DIMENSIONS
+
+
+def test_an_entry_from_before_the_migration_is_still_read(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zwischen Code-Update und Migrationslauf darf nichts blind werden.
+
+    Der Zeitraum ist kurz, aber er ist echt: der neue Code läuft schon, die
+    Migration hat die Bestandszeilen noch nicht umgerechnet. Ohne den Rückfall
+    auf ``embedding_json`` fände das Gedächtnis in diesen Sekunden zu keiner
+    Frage mehr etwas — und der Betreiber sähe nur einen Assistenten, der ihn
+    plötzlich nicht mehr kennt.
+    """
+    _allow_memory(db, regular_user)
+    monkeypatch.setattr(ai_embedding_service, "encode", _vektoren_fuer)
+    row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
+    # Der Stand vor der Migration: Vektor als Text, Byte-Spalte noch leer.
+    row.embedding_json = json.dumps(list(_vektoren_fuer(["egal"])[0]))
+    row.embedding_bytes = None
+    db.commit()
+
+    vektor = ai_memory_service._stored_vector(row)
+
+    assert vektor is not None
+    assert len(vektor) == ai_embedding_service.EMBEDDING_DIMENSIONS
+
+
+def test_a_truncated_byte_vector_counts_as_missing(db: Session) -> None:
+    """Eine falsche Byteslänge ist ein beschädigter Vektor, kein kurzer.
+
+    Die Länge steht fest bei 256 Zahlen. Würde eine abgeschnittene Zeile
+    klaglos als drei Zahlen gelesen, verglichen numpy sie gegen 256 — und der
+    ganze Stapel scheiterte an einer Stelle, die mit der Ursache nichts mehr zu
+    tun hat. Fehlend ist die einzige ehrliche Lesart.
+    """
+    voll = [1.0] + [0.0] * (ai_embedding_service.EMBEDDING_DIMENSIONS - 1)
+    roh = ai_embedding_service.vektor_zu_bytes(voll)
+
+    assert ai_embedding_service.bytes_zu_vektor(roh) is not None
+    assert ai_embedding_service.bytes_zu_vektor(roh[:-4]) is None, "zu kurz"
+    assert ai_embedding_service.bytes_zu_vektor(roh + roh[:4]) is None, "zu lang"
+    assert ai_embedding_service.bytes_zu_vektor(b"") is None
+    assert ai_embedding_service.bytes_zu_vektor(None) is None
+
+
+def test_the_stored_form_is_a_bare_run_of_float32() -> None:
+    """Die Form auf der Platte ist eine Zusage über Versionen hinweg.
+
+    Sie steht in der Datenbank und wird von einem späteren Stand des Panels
+    wieder gelesen. Ohne diesen Test wäre ein Wechsel des Zahlentyps — von
+    ``float`` auf ``double`` etwa — eine Zeile Code und ein Bestand, den
+    danach niemand mehr entziffert. Festgehalten ist deshalb genau das, was
+    ein anderer Leser annehmen darf: 256 Zahlen zu vier Bytes, hintereinander,
+    ohne Rahmen und ohne Kopf.
+
+    Der Vergleich läuft über ``struct`` und nicht über dieselbe Funktion,
+    die geprüft wird — sonst bestätigte sich hier nur der Code selbst.
+    """
+    werte = [1.5, -2.25, 0.75] + [0.0] * (
+        ai_embedding_service.EMBEDDING_DIMENSIONS - 3
+    )
+
+    roh = ai_embedding_service.vektor_zu_bytes(werte)
+
+    assert len(roh) == ai_embedding_service.EMBEDDING_BYTES
+    assert roh == struct.pack(
+        f"<{ai_embedding_service.EMBEDDING_DIMENSIONS}f", *werte
+    )
+    assert list(ai_embedding_service.bytes_zu_vektor(roh)) == werte
 
 
 # ── Mit Modell ────────────────────────────────────────────────────────────

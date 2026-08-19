@@ -395,6 +395,82 @@ def test_ohne_das_recht_bleibt_das_gedaechtnis_zu(db: Session) -> None:
     assert ai_lage.zone_des_benutzers(db, user) is None
 
 
+def test_die_zone_oeffnet_nicht_das_ganze_gedaechtnis(
+    db: Session, monkeypatch,
+) -> None:
+    """Eine Frage nach einer Zeile darf nicht fünftausend Zeilen kosten.
+
+    Der Lageblock hängt in **jeder** Anfrage, und diese Funktion sucht in jeder
+    davon die Zeitzone. Sie las dafür den ganzen persönlichen Vorrat auf einmal;
+    jede Zeile darin ist ein eigener HTTP-POST an den DIS-Sidecar. Seit ein
+    Bereich 5.000 Einträge fassen darf, sind das gemessen 10,3 s vor dem ersten
+    Byte an den Anbieter — für eine Zeile, deren Schlüssel unverschlüsselt
+    daneben steht.
+
+    Gezählt werden die Entschlüsselungen und nicht das Ergebnis: eine richtige
+    Zone bewiese nur, dass gefunden wurde, nicht wie teuer.
+    """
+    from services.dis_client import DisClient
+
+    user = _benutzer(db, "zonesparsam", "ai.chat.use", "ai.memory.use")
+    _zone_merken(db, user, "Europe/Berlin")
+    for nummer in range(12):
+        ai_memory_service.upsert_entry(
+            db, user=user, scope="user", server_id=None,
+            key=f"notiz.{nummer:02d}", value=f"Irgendein Merksatz Nummer {nummer}",
+        )
+    db.commit()
+
+    echt = DisClient.decrypt
+    geoeffnet: list[str] = []
+
+    def zaehlend(payload, *, aad):
+        geoeffnet.append(aad)
+        return echt(payload, aad=aad)
+
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(zaehlend))
+
+    assert ai_lage.zone_des_benutzers(db, user) == (
+        "Europe/Berlin", "aus dem Gedächtnis"
+    )
+    assert len(geoeffnet) == 1, (
+        "es wurde mehr geöffnet als der eine Zeitzonen-Eintrag — "
+        f"{len(geoeffnet)} Entschlüsselungen für eine Zeile"
+    )
+
+
+def test_ohne_zonenschluessel_wird_gar_nichts_geoeffnet(
+    db: Session, monkeypatch,
+) -> None:
+    """Der häufigste Fall überhaupt: es gibt keine hinterlegte Zone.
+
+    Dann darf der Lageblock den Vorrat nicht einmal anfassen. Er tut es auch
+    nicht — der Schlüssel steht im Klartext, die Abfrage findet nichts, und
+    entschlüsselt wird nichts.
+    """
+    from services.dis_client import DisClient
+
+    user = _benutzer(db, "keinezone", "ai.chat.use", "ai.memory.use")
+    ai_memory_service.set_preference(db, user, True)
+    for nummer in range(5):
+        ai_memory_service.upsert_entry(
+            db, user=user, scope="user", server_id=None,
+            key=f"vorliebe.{nummer}", value=f"Irgendetwas {nummer}",
+        )
+    db.commit()
+
+    geoeffnet: list[str] = []
+
+    def zaehlend(payload, *, aad):
+        geoeffnet.append(aad)
+        raise AssertionError("hier darf nichts entschlüsselt werden")
+
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(zaehlend))
+
+    assert ai_lage.zone_des_benutzers(db, user) is None
+    assert geoeffnet == []
+
+
 def test_freier_text_unter_dem_schluessel_zeitzone_ist_keine_zone(
     db: Session,
 ) -> None:

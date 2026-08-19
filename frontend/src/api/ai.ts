@@ -440,15 +440,23 @@ export interface AiMemoryEntry {
  * gemessen rund zehn Sekunden. Die Seite kommt deshalb in Stücken; die drei
  * Zahlen sorgen dafür, dass ein Stück nicht wie das Ganze aussieht.
  */
+/**
+ * Eine Seite einer Erinnerungsliste — dieselbe Form für das eigene Profil und
+ * für einen einzelnen Bereich (Team, Panel, Anlage).
+ *
+ * Zwei Formen wären zwei Rechnungen für Seitenzahl und nächsten Offset, und die
+ * Oberfläche müsste beide führen.
+ */
 export interface AiMemoryPage {
   entries: AiMemoryEntry[]
-  /** Alle eigenen Einträge, allgemeine und serverbezogene zusammen. */
+  /** Alle Einträge dieser Ansicht, nicht nur die dieser Seite. */
   total: number
   /**
-   * Davon die allgemeinen. Genau die nimmt „Alle löschen" mit — die Notizen zu
-   * einzelnen Servern liegen in eigenen Bereichen und bleiben stehen. Die Zahl
-   * kommt vom Server, weil die Oberfläche seit der Seitenweise nur noch einen
-   * Ausschnitt sieht und sie nicht mehr selbst zählen kann.
+   * Davon das, was „Alle löschen" wirklich mitnimmt. Im Profil sind das nur die
+   * allgemeinen Einträge — die Notizen zu einzelnen Servern stehen in derselben
+   * Liste und bleiben stehen; in der Ansicht eines Bereichs sind es alle. Die
+   * Zahl kommt vom Server, weil die Oberfläche seit der Seitenweise nur noch
+   * einen Ausschnitt sieht und sie nicht mehr selbst zählen kann.
    */
   clearable: number
   /** Wie groß eine Seite ist. Bestimmt der Server, denn er bezahlt sie. */
@@ -1015,16 +1023,40 @@ export const aiApi = {
    */
   saveAutonomyGrant: (payload: { server_id: number | null; enabled: boolean; max_actions_per_hour: number }) =>
     api<AiAutonomyGrant>('/ai/autonomy', { method: 'PUT', body: JSON.stringify(payload) }),
+  /**
+   * Ein ganzer Bereich auf einmal. Die Oberfläche liest so nicht mehr — sie
+   * nimmt `listScopeMemory`, seit ein Teambereich 5.000 Einträge fassen darf
+   * und jede Zeile beim Öffnen eine Entschlüsselung kostet.
+   */
   listMemory: (scope: AiMemoryEntry['scope'], serverId?: number, teamId?: number) => api<AiMemoryEntry[]>(
     `/ai/memory?scope=${scope}${serverId ? `&server_id=${serverId}` : ''}${teamId ? `&team_id=${teamId}` : ''}`,
+  ),
+  /**
+   * Eine Seite eines Bereichs: Teamwissen, panelweites Wissen, das Wissen einer
+   * Anlage.
+   *
+   * Gebraucht wird das Blättern heute nur vom Team — es hängt am Rollenlimit
+   * seines Gründers und darf 5.000 Einträge fassen, während Panel und Anlage
+   * bei hundert fest gedeckelt sind. Trotzdem gehen alle drei denselben Weg:
+   * eine Ansicht mit zwei Leseroutinen ist eine Gelegenheit, sie auseinander
+   * laufen zu lassen. Wo es nichts zu blättern gibt, meldet der Server eine
+   * Seite und die Leiste bleibt weg.
+   */
+  listScopeMemory: (
+    scope: AiMemoryEntry['scope'], serverId?: number, teamId?: number, offset = 0,
+  ) => api<AiMemoryPage>(
+    `/ai/memory/page?scope=${scope}${serverId ? `&server_id=${serverId}` : ''}`
+    + `${teamId ? `&team_id=${teamId}` : ''}&offset=${offset}`,
   ),
   /**
    * Eine Seite von allem, was einem selbst gehört: persönlich **und**
    * serverbezogen.
    *
-   * `listMemory('server', …)` verlangt eine konkrete Server-ID — wer alle seine
-   * Notizen sehen wollte, hätte die Server raten müssen. Genau deshalb waren
-   * sie in der Oberfläche nicht auffindbar, obwohl die KI sie schreibt.
+   * Ein eigener Aufruf neben `listScopeMemory` und nicht dessen Sonderfall:
+   * diesen Bereich gibt es als Kennung nicht. Er spannt zwei (`user` und
+   * `server`) und geht deshalb über den Besitzer — `listMemory('server', …)`
+   * verlangt dagegen eine konkrete Server-ID, und wer alle seine Notizen sehen
+   * wollte, hätte die Server raten müssen.
    *
    * Übergeben wird nur der Offset. Wie groß eine Seite ist, entscheidet der
    * Server und sagt es in `limit` — er bezahlt sie in Entschlüsselungen, und
