@@ -55,4 +55,47 @@ describe('AiLearningSettings', () => {
 
     expect(await screen.findByText(i18n.t('ai.skills.pendingEmpty'))).toBeInTheDocument()
   })
+
+  it('schickt bei der Freigabe den gelesenen Inhalts-Abdruck mit (TOCTOU-Schutz)', async () => {
+    const zeile = {
+      id: 'a3a4c1de-0000-4000-8000-000000000001',
+      skill_key: 'harmlos',
+      name: 'Harmlos',
+      description: 'Wartet.',
+      body: 'Text, der gelesen wurde.',
+      scope: 'global',
+      origin: 'ai',
+      team_id: null,
+      status: 'pending',
+      enabled: true,
+      created_by: 1,
+      created_at: '2026-08-19T00:00:00Z',
+      updated_at: '2026-08-19T00:00:00Z',
+      fingerprint: 'f'.repeat(64),
+    }
+    api.mockImplementation(((path: string, init?: RequestInit) => {
+      if (path === '/ai/settings/learning') {
+        return Promise.resolve({ policy: 'review', pending_count: 1 })
+      }
+      if (path === '/ai/skills/pending') return Promise.resolve([zeile])
+      if (path === `/ai/skills/${zeile.id}/approve`) {
+        // Die Zusicherung: der Abdruck aus der Liste geht im Body zurück.
+        expect(JSON.parse(String(init?.body))).toEqual({ fingerprint: zeile.fingerprint })
+        return Promise.resolve({ ...zeile, status: 'active' })
+      }
+      return Promise.resolve(null)
+    }) as unknown as typeof client.api)
+
+    render(<AiLearningSettings canWrite />)
+
+    const knopf = await screen.findByRole('button', { name: i18n.t('ai.skills.approve') })
+    knopf.click()
+
+    await vi.waitFor(() => {
+      expect(api).toHaveBeenCalledWith(
+        `/ai/skills/${zeile.id}/approve`,
+        expect.objectContaining({ method: 'POST' }),
+      )
+    })
+  })
 })

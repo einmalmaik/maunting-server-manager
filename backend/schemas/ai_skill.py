@@ -69,3 +69,12 @@ class AiSkillManaged(BaseModel):
     created_by: int | None
     created_at: datetime
     updated_at: datetime
+    # Abdruck ueber Name+Beschreibung+Text. Die Freigabe schickt ihn zurueck
+    # und bestaetigt damit den gelesenen Inhalt, nicht bloss die Zeile —
+    # sonst liesse sich der Text im Zeitfenster zwischen Lesen und Klicken
+    # unbemerkt austauschen (TOCTOU).
+    fingerprint: str
+
+
+class AiSkillApprove(BaseModel):
+    fingerprint: str = Field(min_length=64, max_length=64)

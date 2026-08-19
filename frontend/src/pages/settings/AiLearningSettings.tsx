@@ -63,10 +63,14 @@ export function AiLearningSettings({ canWrite }: { canWrite: boolean }) {
   const approve = async (row: AiSkillManaged) => {
     setBusy(true)
     try {
-      await aiApi.approveSkill(row.id)
+      // Der Abdruck bestätigt genau den Text, der hier auf dem Schirm stand.
+      // Wurde der Skill zwischen Lesen und Klick überschrieben, kommt 409 —
+      // dann wird die Liste neu geladen und der Betreiber liest erneut.
+      await aiApi.approveSkill(row.id, row.fingerprint)
       await reloadPending()
       toast.success(t('ai.skills.approved'))
     } catch (error: unknown) {
+      await reloadPending()
       toast.error(error instanceof SanitizedApiError ? error.message : t('ai.skills.errors.save'))
     } finally {
       setBusy(false)

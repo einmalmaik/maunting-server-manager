@@ -614,6 +614,13 @@ export interface AiSkillManaged {
   created_by: number | null
   created_at: string
   updated_at: string
+  /**
+   * Abdruck über Name+Beschreibung+Text. Die Freigabe schickt ihn zurück und
+   * bestätigt damit den gelesenen Inhalt — wurde der Skill zwischen Lesen und
+   * Klick überschrieben, antwortet das Backend mit 409 statt fremden Text
+   * panelweit freizugeben.
+   */
+  fingerprint: string
 }
 
 /**
@@ -1034,8 +1041,8 @@ export const aiApi = {
   toggleSkill: (skillId: string, enabled: boolean) => api<AiSkillManaged>(`/ai/skills/${skillId}/enabled`, {
     method: 'PUT', body: JSON.stringify({ enabled }),
   }),
-  approveSkill: (skillId: string) => api<AiSkillManaged>(`/ai/skills/${skillId}/approve`, {
-    method: 'POST',
+  approveSkill: (skillId: string, fingerprint: string) => api<AiSkillManaged>(`/ai/skills/${skillId}/approve`, {
+    method: 'POST', body: JSON.stringify({ fingerprint }),
   }),
   deleteSkill: (skillId: string) => api(`/ai/skills/${skillId}`, { method: 'DELETE' }),
   getLearningPolicy: () => api<AiLearningPolicy>('/ai/settings/learning'),

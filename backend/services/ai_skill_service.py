@@ -33,6 +33,7 @@ automatische Erzeugen ausfuehrbarer Schrittfolgen es nicht waere.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -658,6 +659,13 @@ def upsert_skill(
         row.origin = origin
         row.status = status
         row.enabled = enabled
+        # Wer zuletzt geschrieben hat, steht auch dran. Vorher blieb
+        # `created_by` beim urspruenglichen Einreicher stehen — eine wartende
+        # Zeile liess sich ueberschreiben, und in der Freigabe-Ansicht stand
+        # weiter der Name dessen, der den harmlosen Erstentwurf geschickt
+        # hatte. Zusammen mit dem Inhalts-Abdruck in `approve` ist damit
+        # nachvollziehbar, *wessen* Text der Betreiber freigibt.
+        row.created_by = user.id
     refresh_embedding(row)
     row.updated_at = datetime.now(timezone.utc)
 
@@ -688,6 +696,21 @@ def get_skill(db: Session, skill_id: str) -> AiSkill:
     return row
 
 
+def content_fingerprint(row: AiSkill) -> str:
+    """Abdruck des Inhalts, den eine Freigabe bestaetigt.
+
+    Ueber alles, was panelweit wirkt: Name und Beschreibung stehen dauerhaft
+    im Skill-Verzeichnis jedes Kontexts, der Text kommt bei `read_skill` —
+    wer eines der drei Felder nach dem Lesen austauscht, muss die Freigabe
+    verlieren. Laengenpraefixe statt blossem Aneinanderhaengen, damit sich
+    Feldgrenzen nicht verschieben lassen ("ab"+"c" == "a"+"bc").
+    """
+    quelle = "\x1f".join(
+        f"{len(teil)}:{teil}" for teil in (row.name, row.description, row.body)
+    )
+    return hashlib.sha256(quelle.encode("utf-8")).hexdigest()
+
+
 def set_enabled(db: Session, *, user: User, skill_id: str, enabled: bool) -> AiSkill:
     row = get_skill(db, skill_id)
     assert_may_write(db, user, row.team_id)
@@ -703,18 +726,43 @@ def set_enabled(db: Session, *, user: User, skill_id: str, enabled: bool) -> AiS
     return row
 
 
-def approve(db: Session, *, user: User, skill_id: str) -> AiSkill:
-    """Gibt einen global gelernten Skill frei, der auf Freigabe wartet."""
+def approve(db: Session, *, user: User, skill_id: str, fingerprint: str) -> AiSkill:
+    """Gibt einen global gelernten Skill frei — genau den Text, der gelesen wurde.
+
+    ``fingerprint`` ist die Schutzschranke gegen das Zeitfenster zwischen
+    Lesen und Klicken (TOCTOU): bis zur Freigabe kann jeder mit
+    `ai.skills.use` die wartende Zeile ueber `learn_skill` unter demselben
+    Schluessel ueberschreiben — die Suche in `upsert_skill` filtert nur nach
+    Scope und Schluessel, nie nach dem Einreicher, und beide 409-Schranken
+    lassen ai→ai-pending ausdruecklich durch (die KI darf ihren eigenen
+    Vorschlag verfeinern). Eine Freigabe nur per ID haette dann Text
+    panelweit wirksam gemacht, den der Betreiber nie gesehen hat — genau
+    die persistente Prompt-Injection, gegen die die Warteschlange gebaut ist.
+
+    Deshalb bestaetigt der Betreiber nicht die Zeile, sondern den Inhalt:
+    stimmt der Abdruck nicht mehr mit der Datenbank ueberein, kommt 409 und
+    die Oberflaeche zeigt die neue Fassung zum erneuten Lesen.
+    """
     row = get_skill(db, skill_id)
     if row.team_id is not None:
         raise HTTPException(status_code=409, detail="Nur globale Skills brauchen eine Freigabe")
     if not permission_service.has_global_permission(db, user, "ai.skills.manage"):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    if fingerprint != content_fingerprint(row):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Der Skill wurde geaendert, seit du ihn gelesen hast. "
+                "Lies die neue Fassung und gib dann frei."
+            ),
+        )
     row.status = "active"
     row.updated_at = datetime.now(timezone.utc)
     audit_service.record_privileged_action(
         db, user_id=user.id, action="ai.skill.approved", target_type="ai_skill",
-        target_id=row.id, details={"skill_key": row.skill_key}, origin="direct",
+        target_id=row.id,
+        details={"skill_key": row.skill_key, "fingerprint": fingerprint},
+        origin="direct",
     )
     db.commit()
     db.refresh(row)

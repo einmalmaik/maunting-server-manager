@@ -12,6 +12,7 @@ from database import get_db
 from dependencies import get_current_user, require_global, verify_csrf
 from models import AiSkill, User
 from schemas.ai_skill import (
+    AiSkillApprove,
     AiSkillDetail,
     AiSkillManaged,
     AiSkillSummary,
@@ -38,6 +39,7 @@ def _managed(row: AiSkill) -> AiSkillManaged:
         body=row.body, scope="global" if row.team_id is None else "team",
         origin=row.origin, team_id=row.team_id, status=row.status, enabled=row.enabled,
         created_by=row.created_by, created_at=row.created_at, updated_at=row.updated_at,
+        fingerprint=ai_skill_service.content_fingerprint(row),
     )
 
 
@@ -120,11 +122,21 @@ def toggle_skill(
 @router.post("/{skill_id}/approve", response_model=AiSkillManaged)
 def approve_skill(
     skill_id: str,
+    payload: AiSkillApprove,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.skills.manage")),
     _: None = Depends(verify_csrf),
 ) -> AiSkillManaged:
-    return _managed(ai_skill_service.approve(db, user=user, skill_id=skill_id))
+    """Freigabe bestaetigt den gelesenen Inhalt, nicht nur die Zeile.
+
+    Der Abdruck kommt aus `/pending` mit und geht hier zurueck. Wurde der
+    Text dazwischen ueberschrieben (das kann jeder mit `ai.skills.use` ueber
+    `learn_skill`), antwortet der Service mit 409 statt fremden Text
+    panelweit freizugeben.
+    """
+    return _managed(ai_skill_service.approve(
+        db, user=user, skill_id=skill_id, fingerprint=payload.fingerprint
+    ))
 
 
 @router.delete("/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
