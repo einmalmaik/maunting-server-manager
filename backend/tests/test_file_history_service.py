@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -139,6 +140,26 @@ def test_a_foreign_owner_does_not_block_saving(
     assert "Wert=1" not in verschluesselt[0].read_text(encoding="utf-8")
 
 
+# Dieser eine Test braucht ein Dateisystem, auf dem ein Modus haftet.
+#
+# Er misst nicht, was der Dienst *rechnet*, sondern was er nach einem echten
+# `chmod` vorfindet. Auf Windows haftet `chmod(0700)` nicht: ein Verzeichnis
+# meldet dort unverändert `0o40777`, weil NTFS-ACLs sich nicht auf drei
+# POSIX-Tripel abbilden lassen. Der Vergleich im Dienst ist trotzdem richtig —
+# `stat.S_IMODE` blendet die Typbits sauber aus, `0o40700` wird zu `0o700` —
+# nur wird der Soll-Zustand hier eben nie erreicht. Die Abfrage trifft
+# dauerhaft zu, `chmod` läuft bei jedem Speichervorgang, und der Test fällt.
+#
+# Das ist eine Aussage über Windows, nicht über MSM. Übersprungen sagt die
+# Wahrheit: auf dieser Maschine ist die Sparsamkeit beim Setzen des Modus
+# ungeprüft. Rot sagt etwas Falsches — und ein dauerhaft roter Test trägt
+# irgendwann niemand mehr nach. Die vier Nachbarn in dieser Datei laufen auf
+# Windows durch und prüfen dort echte Zusagen, deshalb steht der Riegel an
+# diesem Test statt als `pytestmark` über der ganzen Datei.
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="Auf Windows haftet chmod(0700) nicht — der Modus stimmt dort nie",
+)
 def test_a_correct_mode_is_not_set_again(
     history_root: Path,
     fake_dis: dict[str, tuple[str, str | None]],

@@ -17,11 +17,28 @@ from blueprints.schema import load_blueprint_file
 from games.blueprint_plugin import BlueprintPlugin
 
 
-# Server-Stubs — wir brauchen keinen DB-Round-Trip, weil
-# build_container_command nur server.game_port/query_port/rcon_port liest.
+# Server-Stubs — kein DB-Round-Trip nötig, weil build_container_command nur
+# lesend auf wenige Felder zugreift: die drei Ports, install_dir, public_bind_ip
+# — und seit 980c7ce4 zusätzlich den Namen.
+#
+# Der Name gehört hier hinein, obwohl dieser Test ihn nirgends erwartet: Der
+# Renderer bindet ihn seit 980c7ce4 an das Token ``{SERVER_NAME}`` (für ASAs
+# ``?SessionName=``), und blueprint_plugin liest ihn deshalb bei JEDEM Blueprint
+# aus — auch bei denen, deren Startzeile das Token gar nicht kennt. Genau so
+# liegt der Fall bei dayz und conan: Beide Startzeilen enthalten kein
+# ``{SERVER_NAME}``, ihre argv sind vom Namen also nachweislich unabhängig. Der
+# Legacy-Pfad rief denselben Renderer ohne ``server_name`` auf und kam auf
+# dasselbe Ergebnis — die Zusage dieser Datei ist damit unberührt. Fehlte das
+# Feld, scheiterten die Snapshots an einem AttributeError statt an einem echten
+# Unterschied. ``Server.name`` ist in der Datenbank ``nullable=False``; der
+# direkte Zugriff im Produktivcode ist korrekt, nur der Stub war unvollständig.
 def _stub_server(game_port=None, query_port=None, rcon_port=None, public_bind_ip=None) -> SimpleNamespace:
     return SimpleNamespace(
         id=1,
+        # Auffälliger Name mit Absicht: Taucht er je in einem der Snapshots
+        # unten auf, hat jemand ``{SERVER_NAME}`` in eine dieser Startzeilen
+        # geholt und damit die Legacy-Gleichheit gebrochen.
+        name="MSM Snapshot Server",
         install_dir="/tmp/srv",
         game_port=game_port,
         query_port=query_port,
@@ -118,6 +135,28 @@ def test_conan_missing_query_omits_arg() -> None:
         "-Port=27015",
         "-RconPort=27017",
     ]
+
+
+def test_server_name_does_not_change_dayz_or_conan_argv() -> None:
+    """Der Servername darf diese beiden argv nicht beeinflussen.
+
+    Das ist die Zusage, die der Stub oben stillschweigend voraussetzt: Weil der
+    Legacy-Pfad den Renderer ohne ``server_name`` aufrief, sind die Snapshots
+    nur dann weiterhin Legacy-gleich, wenn der Name folgenlos bleibt. Holt
+    jemand ``{SERVER_NAME}`` in eine dieser Startzeilen, fällt es hier auf und
+    nicht erst im Betrieb.
+    """
+    for blueprint_id, server in (
+        ("dayz", _stub_server(game_port=2302)),
+        ("conan_exiles_ue5", _stub_server(game_port=27015, query_port=27016, rcon_port=27017)),
+    ):
+        plugin = _native_plugin(blueprint_id)
+        with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
+            server.name = "Server A"
+            argv_a = plugin.build_container_command(server)
+            server.name = "Ein völlig anderer Name"
+            argv_b = plugin.build_container_command(server)
+        assert argv_a == argv_b, f"{blueprint_id}: argv hängt am Servernamen"
 
 
 def test_native_blueprints_use_generic_plugin() -> None:
