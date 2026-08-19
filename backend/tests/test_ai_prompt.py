@@ -639,3 +639,75 @@ def test_the_team_boundary_follows_content_not_pronouns() -> None:
     assert "nicht danach, ob das Wort" in ai_prompt.GEDAECHTNIS
     # Die Zusage, die dabei nicht fallen darf.
     assert "Im Zweifel persoenlich" in ai_prompt.GEDAECHTNIS
+
+
+# ── Die Sprechweise ───────────────────────────────────────────────────
+#
+# Der Betreiber am 19.08.2026:
+#
+#     "Das Memory-System soll sich nicht nur Fakten merken, sondern es soll
+#     auch die Sprechweise vom User mitnehmen. […] nicht imitieren, sondern
+#     sich dem User anpassen. […] wenn man mit einer Person zusammenlebt,
+#     dann bist du irgendwann so ähnlich wie diese Person."
+#
+# Vorgefunden wurde Stil nur als **Fakt** im Gedaechtnis ("bevorzugt knappe
+# Antworten") — eine Vorliebe, die jemand einmal geaeussert hat. Sprechweise
+# ist etwas anderes: sie steht in jedem Satz, ohne dass jemand darueber redet.
+
+
+def test_the_assistant_adapts_the_form_not_the_words() -> None:
+    """**Angleichen ist nicht nachaeffen.**
+
+    Formulierungen zurueckzuspielen wirkt wie ein Papagei — und genau davor
+    hat der Betreiber gewarnt. Angeglichen wird die Form: Tempo, Direktheit,
+    Naehe. Der Wortlaut bleibt eigen.
+    """
+    block = ai_prompt.SPRECHWEISE
+
+    assert "nicht seine" in block and "Woerter" in block
+    assert "sein Tempo und seine Direktheit" in block
+    assert "Nachaeffen" in block
+    assert "Deine Stimme bleibt deine" in block
+
+
+def test_style_observation_is_a_lasting_note_not_a_mood() -> None:
+    """Eine Laune ist keine Sprechweise.
+
+    Ohne diese Abgrenzung wuerde jede schlechtgelaunte Nachricht als
+    dauerhafter Charakterzug abgelegt — und die KI zoege daraus Schluesse
+    ueber einen Menschen, die er nie gezogen haben wollte.
+    """
+    block = ai_prompt.SPRECHWEISE
+
+    assert "nicht eine Laune eines Abends" in block
+    assert "ueber Tage gilt" in block
+    # Und sie gehoert der Person, nicht der Anlage.
+    assert "persoenlich" in block
+
+
+def test_the_tone_adapts_but_never_the_substance() -> None:
+    """**Die Grenze.** Ein knapper Ton darf keine Warnung verschlucken.
+
+    Das ist die Stelle, an der Angleichung gefaehrlich wuerde: wer knapp
+    redet, bekommt knappe Antworten — aber keine, die eine Warnung
+    weglaesst, weil die Warnung lang waere.
+    """
+    block = ai_prompt.SPRECHWEISE
+
+    assert "Der Ton passt sich an, die Sache nie" in block
+    assert "Warnung weglaesst" in block
+    # Eine ausdrueckliche Ansage sticht die Beobachtung.
+    assert "ausdruecklich verlangt, sticht immer" in block
+
+
+def test_only_the_one_who_talks_to_the_human_adapts() -> None:
+    """Der Worker bekommt den Block nicht.
+
+    Er redet nie mit dem Menschen — sein Bericht geht an das Gehirn, das
+    daraus in eigener Stimme formuliert. Eine Sprechweise anzugleichen, die
+    er nie zu hoeren bekommt, waere sinnlos; und festhalten koennte er sie
+    ohnehin nicht, ihm fehlen die Gedaechtniswerkzeuge.
+    """
+    assert ai_prompt.SPRECHWEISE in ai_prompt.build()
+    assert ai_prompt.SPRECHWEISE in ai_prompt.build(rolle="gehirn")
+    assert ai_prompt.SPRECHWEISE not in ai_prompt.build(rolle="worker")

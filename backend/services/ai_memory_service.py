@@ -83,6 +83,22 @@ VERBLASSEN_AB = 0.35
 #: den ein Mensch nimmt, wenn ihm etwas "auf der Zunge liegt".
 VERBLASST_ZEICHEN = 60
 
+#: Wieviel Aehnlichkeit einen bestehenden Eintrag zum Duplikat macht.
+#:
+#: Konflikte loest das Gedaechtnis ueber den Schluessel: derselbe Key wird
+#: ueberschrieben. Das ist sauber, solange die KI den vorhandenen Schluessel
+#: wiederfindet — und genau das ist die Schwachstelle. `ram.vorgabe`,
+#: `standard_ram`, `speicher.default` sind drei Namen fuer denselben Fakt, und
+#: keiner faellt jemandem auf, bis der Bereich voll ist und sich drei Antworten
+#: widersprechen.
+#:
+#: 0,70 ist bewusst hoch. Das Modell trennt Unverwandtes sicher (`Zeitzone` zu
+#: `Pizza` 0,04), aber Verwandtes traegt es nicht immer weit genug (`Sicherung`
+#: zu `backup` nur 0,27). Eine niedrige Schwelle wuerde deshalb echte,
+#: verschiedene Eintraege zusammenwerfen — und ein faelschlich
+#: zusammengelegter Fakt ist teurer als ein doppelter.
+DUPLIKAT_AB = 0.70
+
 #: Wieviel Abrufstaerke ein frisch gemerkter Eintrag mitbringt.
 #:
 #: Ohne diesen Startwert waere jeder neue Eintrag sofort blass: er hat noch
@@ -634,6 +650,62 @@ def upsert_entry(
         ) from exc
     db.refresh(row)
     return row, safe_value
+
+
+def aehnlicher_eintrag(
+    db: Session,
+    *,
+    scope_kennung: str,
+    key: str,
+    value: str,
+    schwelle: float = DUPLIKAT_AB,
+) -> tuple[AiMemoryEntry, float] | None:
+    """Der naechstliegende Bestandseintrag im selben Bereich — oder ``None``.
+
+    **Wozu:** Das Ueberschreiben ueber den Schluessel loest Konflikte nur,
+    wenn derselbe Schluessel wiedergefunden wird. Legt die KI stattdessen
+    einen aehnlichen neuen an, stehen zwei Antworten auf dieselbe Frage
+    nebeneinander — und beim naechsten Abruf gewinnt der Zufall.
+
+    Verglichen wird **Schluessel und Wert** zusammen, wie beim Einbetten
+    (`_embedding_source`). Der Schluessel allein truege zu wenig ("ram" gegen
+    "speicher"), der Wert allein zu viel Rauschen.
+
+    Ohne Modell gibt die Funktion ``None`` zurueck statt zu raten. Ein
+    Wortabgleich als Ersatz waere hier gefaehrlich: zwei Eintraege ueber
+    denselben Server teilen fast alle Woerter, ohne dasselbe zu sagen.
+
+    Sucht **nur im eigenen Bereich** (`scope_kennung`). Ein persoenlicher
+    Eintrag darf nie gegen einen fremden oder geteilten geprueft werden — das
+    waere ein Leseweg ueber die Bereichsgrenze hinweg, und sei es nur ueber
+    ein Aehnlichkeitsmass.
+    """
+    vektoren = ai_embedding_service.encode([_embedding_source(key, value)])
+    if not vektoren:
+        return None
+
+    # Vektor und Zeile zusammen halten: die Filterung oben hat `None`
+    # ausgeschlossen, aber der Typpruefer sieht das nicht — und ein zweites
+    # `_stored_vector` je Zeile waere ein zweites JSON-Parsen.
+    paare: list[tuple[AiMemoryEntry, list[float]]] = []
+    for row in db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == scope_kennung,
+        AiMemoryEntry.key != key,
+    ).all():
+        vektor = _stored_vector(row)
+        if vektor is not None:
+            paare.append((row, vektor))
+    if not paare:
+        return None
+
+    werte = ai_embedding_service.similarity(
+        vektoren[0], [vektor for _row, vektor in paare]
+    )
+    bester: tuple[AiMemoryEntry, float] | None = None
+    for (row, _vektor), wert in zip(paare, werte):
+        if wert >= schwelle and (bester is None or wert > bester[1]):
+            bester = (row, float(wert))
+    return bester
 
 
 def delete_entry(db: Session, user: User, entry_id: str) -> None:

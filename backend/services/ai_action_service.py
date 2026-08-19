@@ -1859,6 +1859,52 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
             ),
         }
 
+    # **Legt die KI hier zum vierten Mal denselben Fakt unter neuem Namen ab?**
+    #
+    # Das Ueberschreiben ueber den Schluessel loest Konflikte nur, wenn der
+    # vorhandene Schluessel wiedergefunden wird. Der Werkzeugtext weist das
+    # Modell dazu an — aber eine Anweisung ist keine Garantie, und `ram.vorgabe`
+    # neben `standard_ram` neben `speicher.default` faellt niemandem auf, bis
+    # sich drei Antworten widersprechen.
+    #
+    # Die Meldung **nennt den vorhandenen Schluessel**, statt bloss abzulehnen.
+    # Ein "das gibt es schon" ohne Namen ist eine Sackgasse: das Modell weiss
+    # dann, dass es nicht schreiben darf, aber nicht, wohin stattdessen. Mit
+    # dem Namen kann es denselben Aufruf mit `key=<gefunden>` wiederholen und
+    # der Fakt wird aktualisiert statt verdoppelt.
+    #
+    # Nur fuer `origin="ai"`, also genau hier: was ein Mensch ausdruecklich
+    # ablegt, wird nicht wegen Aehnlichkeit abgewiesen. Er darf zwei Notizen
+    # zum selben Thema fuehren, wenn er das will.
+    if not arguments.get("replace_user_entry"):
+        try:
+            kennung, _o, _s, _t = ai_memory_service.scope_identity(
+                db, user, scope, server_id if serverbezogen else None, team_id
+            )
+        except HTTPException:
+            # Die Bereichsaufloesung scheitert gleich noch einmal in
+            # `upsert_entry`, und dort gehoert die Fehlermeldung hin.
+            kennung = None
+        if kennung:
+            treffer = ai_memory_service.aehnlicher_eintrag(
+                db, scope_kennung=kennung, key=key, value=value,
+            )
+            if treffer is not None:
+                vorhanden, wert = treffer
+                return {
+                    "remembered": False,
+                    "reason": "duplicate",
+                    "existing_key": vorhanden.key,
+                    "similarity": round(wert, 2),
+                    "message": (
+                        f"Dazu gibt es bereits den Eintrag '{vorhanden.key}'. "
+                        "Gilt das Neue statt des Alten, rufe `remember` erneut "
+                        f"mit key='{vorhanden.key}' auf — das ueberschreibt ihn. "
+                        "Steht wirklich etwas anderes darin, waehle einen "
+                        "deutlich anderen Schluessel."
+                    ),
+                }
+
     try:
         row, stored = ai_memory_service.upsert_entry(
             db, user=user, scope=scope, server_id=server_id if serverbezogen else None,

@@ -401,6 +401,54 @@ Nur wenn der Benutzer selbst etwas loeschen oder richtigstellen will, nennst \
 du ihm, was du gefunden hast."""
 
 
+# Nicht **was** jemand sagt, sondern **wie**.
+#
+# Der Betreiber am 19.08.2026:
+#
+#     "Das Memory-System soll sich nicht nur Fakten merken, sondern es soll
+#     auch die Sprechweise vom User mitnehmen. Also wirklich den Charakter
+#     des Users nicht imitieren, sondern sich dem User anpassen. Wie redet
+#     der User? Nicht nur im Sinne von, mag der User knappe Antworten? Nein,
+#     wie ein Mensch: wenn man mit einer Person zusammenlebt, dann bist du
+#     irgendwann so ähnlich wie diese Person. Du nimmst Stile an,
+#     Charakterzüge, Routinen."
+#
+# Vorgefunden wurde Stil ausschliesslich als **Fakt** im Gedaechtnis — zwei
+# Eintraege ("bevorzugt knappe Antworten") stehen im Bestand, beide als
+# Beschreibung einer Vorliebe. Das ist etwas anderes: eine Vorliebe ist eine
+# Einstellung, die jemand einmal aeussert. Sprechweise ist, was in jedem Satz
+# steht, ohne dass jemand darueber spricht.
+#
+# Zwei Abgrenzungen, die den Block tragen:
+#
+# **Angleichen ist nicht nachaeffen.** Wer Formulierungen zurueckspielt, wirkt
+# wie ein Papagei — und der Betreiber hat genau davor gewarnt ("nicht
+# imitieren"). Angeglichen wird die *Form*: Satzlaenge, Direktheit, Naehe. Der
+# Wortlaut bleibt eigen.
+#
+# **Und es gibt eine Grenze.** Sprechweise faerbt auf den Ton ab, nie auf die
+# Sache. Wer knapp redet, bekommt knappe Antworten — aber keine, die eine
+# Warnung weglaesst, weil die Warnung lang waere.
+SPRECHWEISE = """\
+Sprechweise: Achte darauf, **wie** der Benutzer redet, nicht nur was er sagt. \
+Redet er in kurzen Saetzen oder holt er aus? Direkt oder umsichtig? Sachlich \
+oder mit Humor? Siezt die Lage oder ist der Ton beilaeufig? Verwendet er \
+Fachbegriffe oder Umschreibungen?
+Gleich dich an, wie man sich an einen Menschen angleicht, mit dem man viel zu \
+tun hat: du uebernimmst sein Tempo und seine Direktheit, **nicht seine \
+Woerter**. Formulierungen zurueckzuspielen wirkt wie Nachaeffen und ist das \
+Gegenteil von dem, was gemeint ist. Deine Stimme bleibt deine; was sich \
+anpasst, ist die Form.
+Faellt dir etwas Bestaendiges auf — nicht eine Laune eines Abends, sondern \
+etwas, das ueber Tage gilt —, halte es fest wie jede andere dauerhafte \
+Beobachtung. Es gehoert zu dem Menschen und nicht zur Anlage, also \
+persoenlich.
+Die Grenze: Der Ton passt sich an, die Sache nie. Wer knapp redet, bekommt \
+knappe Antworten — aber keine, die eine Warnung weglaesst, weil die Warnung \
+lang waere. Und was er ausdruecklich verlangt, sticht immer, was du \
+beobachtet hast."""
+
+
 # Loeschen in zwei Schritten. Eine Aehnlichkeit von 0,4 ist eine brauchbare
 # Grundlage dafuer, jemandem etwas anzuzeigen, und eine schlechte dafuer, es zu
 # vernichten.
@@ -807,6 +855,10 @@ BLOECKE = (
     WEBSUCHE,
     UNWIDERRUFLICHES,
     GEDAECHTNIS,
+    # Direkt hinter dem Gedaechtnis, weil die Sprechweise dort landet: was
+    # ueber Tage gilt, wird als persoenliche Beobachtung festgehalten. Getrennt
+    # gelesen bliebe sie eine Stilnotiz ohne Ablage.
+    SPRECHWEISE,
     GEDAECHTNIS_AUFRAEUMEN,
     SKILLS,
     GEHEIMNISSE,
@@ -846,6 +898,7 @@ GEHIRN_BLOECKE = (
     ERMESSEN,
     KEIN_STUMMER_ZUG,
     GEDAECHTNIS,
+    SPRECHWEISE,
     GEDAECHTNIS_AUFRAEUMEN,
     GEHEIMNISSE,
     UNTRUSTED,
@@ -863,6 +916,11 @@ NICHT_IM_WORKER = frozenset({
     EINZELCHAT,
     RUECKFRAGEN,
     GEDAECHTNIS,
+    # Der Worker redet nicht mit dem Menschen — sein Bericht geht an das
+    # Gehirn, das daraus in eigener Stimme formuliert. Eine Sprechweise
+    # anzugleichen, die er nie zu hoeren bekommt, waere sinnlos; und merken
+    # koennte er sie ohnehin nicht, ihm fehlen die Gedaechtniswerkzeuge.
+    SPRECHWEISE,
     GEDAECHTNIS_AUFRAEUMEN,
     GUARDIAN,
 })

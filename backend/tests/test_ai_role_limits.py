@@ -501,10 +501,44 @@ def _zwei_memory_rollen(
     return eine, andere
 
 
+#: Sachlich verschiedene Inhalte fuer die Testeintraege.
+#:
+#: Gebraucht seit der Duplikatpruefung (`ai_memory_service.aehnlicher_eintrag`,
+#: 19.08.2026): stuenden in allen Eintraegen Varianten desselben Satzes, wuerde
+#: der naechste Aufruf an der Aehnlichkeit scheitern statt an der Mengengrenze,
+#: um die es hier geht. Die Themen sind bewusst weit auseinander.
+_THEMEN = (
+    "Startzeit liegt bei vier Minuten.",
+    "Der Kartenwechsel braucht eine Bestaetigung.",
+    "Mods werden nur sonntags aktualisiert.",
+    "Die Zeitzone steht auf Europe/Berlin.",
+    "Zwoelf Spielerplaetze sind vergeben.",
+    "Backups laufen um drei Uhr nachts.",
+    "Der Weltordner heisst Nordkueste.",
+    "Sprachchat ist abgeschaltet.",
+    "RCON hoert auf einem eigenen Port.",
+    "Die Whitelist wird von Hand gepflegt.",
+)
+
+
 def _merken(db: Session, user: User, key: str, **bezug: int | None) -> None:
-    """Legt einen Eintrag ueber denselben Weg an, den auch die KI nimmt."""
+    """Legt einen Eintrag ueber denselben Weg an, den auch die KI nimmt.
+
+    Der Wert traegt den Schluessel **und** einen sachlich anderen Inhalt. Bis
+    zum 19.08.2026 stand hier schlicht ``f"Wert zu {key}"`` — mit der neuen
+    Duplikatpruefung (`aehnlicher_eintrag`) waeren `notiz.0` bis `notiz.6`
+    damit sieben Fassungen desselben Satzes, und der achte Aufruf scheiterte
+    an der Aehnlichkeit statt an der Mengengrenze, um die es diesen Tests
+    geht. Verschiedene Themen halten die Faelle auseinander.
+
+    Der Index kommt aus einer **stabilen** Zeichensumme und nicht aus
+    ``hash()``: Pythons Zeichenketten-Hash ist je Prozess zufaellig
+    (PYTHONHASHSEED), und ein Test, der mal so und mal anders zuordnet, ist
+    schlimmer als gar keiner.
+    """
+    thema = _THEMEN[sum(key.encode()) % len(_THEMEN)]
     ai_memory_service.upsert_entry(
-        db, user=user, key=key, value=f"Wert zu {key}",
+        db, user=user, key=key, value=f"{key}: {thema}",
         scope=bezug.pop("scope", "user"), server_id=bezug.pop("server_id", None),
         **bezug,
     )
