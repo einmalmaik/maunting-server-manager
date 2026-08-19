@@ -53,6 +53,42 @@ MAX_CONTEXT_ROWS = 300
 # Nach so vielen Tagen ohne Nutzung haelbiert sich der Aktualitaetsbonus. Grob
 # an "eine Arbeitswoche" angelehnt; der Wert entscheidet nur bei Platzmangel.
 RECENCY_HALFLIFE_DAYS = 7.0
+
+#: Ab welcher Abrufstaerke ein Eintrag **verkuerzt** in den Block geht.
+#:
+#: **Das Gedaechtnis vergisst nicht, es verblasst.** Bis hierher galt: passt
+#: alles ins Budget, kommt alles gleich stark mit — und erst wenn es nicht
+#: passt, wird ausgewaehlt. Gemessen am 19.08.2026 lag die Auslastung bei
+#: 14,6 % (874 von 6.000 Zeichen); es haette rund 41 Eintraege gebraucht,
+#: bevor ueberhaupt irgendetwas bewertet worden waere. Bis dahin steht der
+#: Eintrag von gestern gleichberechtigt neben dem von vor drei Monaten.
+#:
+#: Der Betreiber hat das Ziel so beschrieben: aeltere Eintraege sollen "in den
+#: Hintergrund" treten und "verwaschen nach der Zeit, aber sie verschwinden
+#: nicht komplett" — und wenn ein Reiz kommt, sind sie wieder da. Ausdruecklich
+#: nicht nur nach Alter: auch ein junger Eintrag, der nie gebraucht wurde,
+#: gehoert nach hinten.
+#:
+#: Das ist der Unterschied zwischen **Speicherstaerke** und **Abrufstaerke**.
+#: Gespeichert bleibt alles, unveraendert und vollstaendig; was sich aendert,
+#: ist die Praesenz im Kontext. Ein verblasster Eintrag steht weiter da, nur
+#: kuerzer — und sobald die Frage ihn trifft (ueber Bedeutung oder Wortbezug),
+#: ist er sofort wieder vollstaendig.
+VERBLASSEN_AB = 0.35
+
+#: Wieviele Zeichen ein verblasster Eintrag noch bekommt.
+#:
+#: Nicht null: er soll auffindbar bleiben. Das Modell sieht Schluessel und
+#: Anfang und kann bei Bedarf mit `search_memory` nachfassen — genau der Weg,
+#: den ein Mensch nimmt, wenn ihm etwas "auf der Zunge liegt".
+VERBLASST_ZEICHEN = 60
+
+#: Wieviel Abrufstaerke ein frisch gemerkter Eintrag mitbringt.
+#:
+#: Ohne diesen Startwert waere jeder neue Eintrag sofort blass: er hat noch
+#: keine Nutzung, und `use_count` ist der staerkste Anteil der Formel. Genau
+#: das war beim Vorgaenger der Fehler, gegen den `recency` eingebaut wurde.
+NEUHEITSSCHUTZ_TAGE = 3.0
 _WORD_RE = re.compile(r"[\w]+", re.UNICODE)
 
 
@@ -712,6 +748,68 @@ def _tokens(text: str) -> set[str]:
     return {word for word in _WORD_RE.findall(text.lower()) if len(word) > 2}
 
 
+def abrufstaerke(
+    row: AiMemoryEntry,
+    now: datetime,
+    similarity: float | None = None,
+    overlap: int = 0,
+) -> float:
+    """Wie praesent ein Eintrag gerade ist — zwischen 0.0 und 1.0.
+
+    **Der Unterschied zu `_bewertung`:** jene ordnet Eintraege
+    *untereinander*, wenn zu wenig Platz ist. Diese sagt fuer einen einzelnen
+    Eintrag, wie stark er *an sich* gerade abrufbar ist — unabhaengig davon,
+    wie viele andere es gibt. Deshalb ist sie normiert und nicht offen nach
+    oben; nur so laesst sich eine feste Schwelle (`VERBLASSEN_AB`) daran
+    haengen.
+
+    Drei Beitraege, und die Reihenfolge ist Absicht:
+
+    * **Der Reiz** (`similarity`, `overlap`). Er sticht alles. Trifft die
+      aktuelle Frage einen Eintrag, ist er sofort voll da — egal wie lange er
+      geschlafen hat. Das ist die Haelfte, die aus "vergessen" ein
+      "verblasst" macht: nichts ist weg, es liegt nur weiter hinten, bis es
+      gebraucht wird.
+    * **Vertrautheit** (`use_count`). Was oft gebraucht wurde, bleibt praesent,
+      auch ohne Reiz. Beim Menschen dasselbe: die eigene Telefonnummer faellt
+      einem ein, ohne dass jemand danach fragt.
+    * **Frische** (Zeit seit dem letzten Gebrauch). Der schwaechste Anteil,
+      und bewusst so: **Alter allein soll nicht verblassen lassen.** Ein
+      Eintrag von vor einem Jahr, der jede Woche gebraucht wird, ist praesent;
+      ein Eintrag von gestern, den nie jemand abgerufen hat, ist es nicht. Der
+      Betreiber hat genau darauf bestanden ("nicht nur fuer aeltere Eintraege,
+      sondern auch Eintraege, die nicht so oft genutzt werden").
+
+    Gemessen wird ab dem **letzten Gebrauch**, nicht ab dem Anlegen: ein
+    Eintrag, der regelmaessig zum Zug kommt, altert gar nicht.
+    """
+    # Der Reiz. `similarity` liegt in [-1, 1]; negativ heisst "hat nichts
+    # miteinander zu tun" und darf nicht als Beitrag zaehlen.
+    reiz = max(0.0, similarity) if similarity is not None else 0.0
+    if overlap:
+        # Wortueberlappung ist ein groberes, aber sehr sicheres Signal — im
+        # Gameserver-Umfeld stehen Lehnwoerter (Backup, RAM, Ports) woertlich
+        # in deutschen Eintraegen. Ein Treffer hebt auf mindestens die Haelfte,
+        # zwei auf volle Praesenz.
+        reiz = max(reiz, min(1.0, 0.5 + 0.25 * overlap))
+
+    vertrautheit = min(row.use_count or 0, 20) / 20.0
+
+    referenz = row.last_used_at or row.updated_at or row.created_at
+    alter_tage = max(0.0, (now - _utc(referenz)).total_seconds() / 86_400)
+    # Der Neuheitsschutz verschiebt die Kurve, statt sie zu skalieren: die
+    # ersten Tage kosten gar nichts, danach faellt es wie gehabt.
+    wirksames_alter = max(0.0, alter_tage - NEUHEITSSCHUTZ_TAGE)
+    frische = 1.0 / (1.0 + wirksames_alter / RECENCY_HALFLIFE_DAYS)
+
+    # Der Reiz steht **nicht** in der Summe, sondern als Untergrenze daneben.
+    # In einer Summe koennte ein blasser Eintrag trotz perfektem Treffer unter
+    # der Schwelle bleiben, weil ihm Nutzung und Frische fehlen — und genau
+    # dieser Fall ist der, um den es geht.
+    ruhewert = vertrautheit * 0.55 + frische * 0.45
+    return max(reiz, ruhewert)
+
+
 def _relevance(
     row: AiMemoryEntry,
     value: str,
@@ -1041,7 +1139,9 @@ def _entschluesseln_lesbare(rows: list[AiMemoryEntry]) -> list[tuple[AiMemoryEnt
     return entschluesselt
 
 
-def _memory_line(row: AiMemoryEntry, value: str) -> str:
+def _memory_line(
+    row: AiMemoryEntry, value: str, staerke: float | None = None
+) -> str:
     # Der Block ist zeilenbasiert und jede Zeile traegt ihren Scope. Ein Wert
     # mit Zeilenumbruch koennte deshalb beliebig viele gefaelschte
     # "[panel] ..."-Zeilen vortaeuschen — ein Benutzer wuerde sich damit im
@@ -1084,6 +1184,14 @@ def _memory_line(row: AiMemoryEntry, value: str) -> str:
         scope = f"team:{row.team_id}"
     else:
         scope = row.scope
+    # **Verblasst statt weg.** Liegt die Abrufstaerke unter der Schwelle, geht
+    # nur der Anfang mit — der Schluessel bleibt immer vollstaendig, damit das
+    # Modell weiss, *dass* es die Notiz gibt, und mit `search_memory`
+    # nachfassen kann. Genau der Weg, den ein Mensch nimmt, wenn ihm etwas
+    # "auf der Zunge liegt".
+    if staerke is not None and staerke < VERBLASSEN_AB and len(flattened) > VERBLASST_ZEICHEN:
+        flattened = flattened[:VERBLASST_ZEICHEN].rstrip() + " …"
+        return f"[{scope}/{origin}/blass] {row.key}: {flattened}"
     return f"[{scope}/{origin}] {row.key}: {flattened}"
 
 
@@ -1178,14 +1286,28 @@ def provider_memory_context(
     sprachunabhaengigste Fall: das Sprachmodell sieht jeden Eintrag und stellt
     den Bezug selbst her, egal in welcher Sprache er formuliert ist.
 
-    Erst wenn es *nicht* passt, wird ausgewaehlt — nach Bedeutung, Bezug zur
-    Frage, Nutzung und Aktualitaet. Vorher wurde an dieser Stelle alphabetisch
-    nach Schluessel sortiert und bei 6.000 Zeichen abgeschnitten: ein Eintrag
-    "zeitzone" fiel damit systematisch raus, "backup" blieb immer drin.
+    **Mitkommen heisst aber nicht gleich stark.** Jede Zeile bekommt ihre
+    Abrufstaerke (`abrufstaerke`); was darunter liegt, geht verkuerzt mit —
+    Schluessel und Anfang statt des ganzen Werts. Der Eintrag ist damit nicht
+    weg, sondern blass: das Modell sieht, *dass* es ihn gibt, und kann mit
+    `search_memory` nachfassen. Trifft die Frage ihn, ist er in derselben
+    Runde wieder vollstaendig da.
+
+    Ohne diesen Schritt war das System binaer: bis zur Budgetgrenze alles
+    gleich stark, danach Auswahl. Gemessen am 19.08.2026 lag die Auslastung
+    bei 14,6 % — es haette rund 41 Eintraege gebraucht, bevor ueberhaupt etwas
+    bewertet worden waere, und bis dahin stand der Eintrag von gestern
+    gleichberechtigt neben dem von vor drei Monaten.
+
+    Erst wenn es *nicht* passt, wird zusaetzlich ausgewaehlt — nach Bedeutung,
+    Bezug zur Frage, Nutzung und Aktualitaet. Vorher wurde an dieser Stelle
+    alphabetisch nach Schluessel sortiert und bei 6.000 Zeichen abgeschnitten:
+    ein Eintrag "zeitzone" fiel damit systematisch raus, "backup" blieb immer
+    drin.
 
     Ausgewaehlte Eintraege werden als benutzt vermerkt. Dieses Zaehlwerk ist
     das Gedaechtnis des Gedaechtnisses: es entscheidet beim naechsten Engpass
-    mit, was bleibt.
+    mit, was bleibt — und es ist zugleich der Weg zurueck aus dem Verblassen.
     """
     # Die Einwilligung gilt dem **eigenen** Gedaechtnis. Teamwissen gehoert dem
     # Team und panelweites dem Betreiber; wer diesen Schalter umlegt, trifft
@@ -1219,15 +1341,32 @@ def provider_memory_context(
     # messen — er kommt also zwangslaeufig zu spaet, um Roundtrips zu sparen.
     rows, vorgekuerzt = _vorauswahl(rows, query, now, MAX_CONTEXT_ROWS)
     decoded = _entschluesseln(rows)
-    lines = [_memory_line(row, value) for row, value in decoded]
+    # **Die Abrufstaerke je Zeile**, einmal berechnet und danach zweimal
+    # gebraucht: fuer die Darstellung (blass oder voll) und, falls das Budget
+    # nicht reicht, als Teil der Auswahl. Die Vektoren liegen ohnehin schon an
+    # den Zeilen; teuer ist hier nichts.
+    query_tokens = _tokens(query)
+    aehnlichkeiten = _similarities(query, [row for row, _ in decoded])
+    staerken = [
+        abrufstaerke(
+            row,
+            now,
+            aehnlichkeit,
+            len(query_tokens & _tokens(f"{row.key} {value}")),
+        )
+        for (row, value), aehnlichkeit in zip(decoded, aehnlichkeiten)
+    ]
+    lines = [
+        _memory_line(row, value, staerke)
+        for (row, value), staerke in zip(decoded, staerken)
+    ]
     total = sum(len(line) + 1 for line in lines)
 
     if total <= MAX_CONTEXT_CHARS:
         selected = decoded
         truncated = vorgekuerzt
     else:
-        query_tokens = _tokens(query)
-        scores = _similarities(query, [row for row, _ in decoded])
+        scores = aehnlichkeiten
         ranked = sorted(
             zip(decoded, scores),
             key=lambda item: _relevance(
@@ -1237,8 +1376,15 @@ def provider_memory_context(
         )
         selected = []
         used = 0
+        # Die Staerken nach Zeile nachschlagbar machen: `ranked` hat die
+        # Reihenfolge geaendert, und ohne Zuordnung faende die Darstellung
+        # unten ihre Staerke nicht wieder — der Eintrag stuende dann wieder
+        # in voller Laenge da, obwohl er blass ist.
+        staerke_je_zeile = {
+            id(row): staerke for (row, _v), staerke in zip(decoded, staerken)
+        }
         for (row, value), _score in ranked:
-            line = _memory_line(row, value)
+            line = _memory_line(row, value, staerke_je_zeile.get(id(row)))
             if used + len(line) + 1 > MAX_CONTEXT_CHARS:
                 continue
             selected.append((row, value))
@@ -1254,12 +1400,22 @@ def provider_memory_context(
     if not selected:
         return None
 
+    # **Die Nutzung wird vor dem Bauen vermerkt, aber nach dem Bewerten.**
+    # Die Staerken oben stammen aus dem Zustand *vor* dieser Runde — sonst
+    # haette sich jeder Eintrag durch das blosse Gezeigtwerden selbst
+    # aufgefrischt, und "verblasst" gaebe es nie.
+    staerke_final = {
+        id(row): staerke for (row, _v), staerke in zip(decoded, staerken)
+    }
     for row, _value in selected:
         row.use_count = int(row.use_count or 0) + 1
         row.last_used_at = now
     db.flush()
 
-    block = "\n".join(_memory_line(row, value) for row, value in selected)
+    block = "\n".join(
+        _memory_line(row, value, staerke_final.get(id(row)))
+        for row, value in selected
+    )
     if truncated:
         # Ehrlich bleiben: das Modell soll wissen, dass es nicht alles sieht,
         # statt aus einer Luecke zu schliessen, es gebe nichts.
