@@ -180,7 +180,13 @@ class DisClient:
 #
 # Dasselbe Muster hält node_client.py mit `get_shared_sync_client` schon vor;
 # httpx.Client ist threadsicher und passt damit zu den Aufrufen aus
-# `asyncio.to_thread`. Der Preis der Wiederverwendung: eine im Pool wartende
+# `asyncio.to_thread`. **Auf diese Zusage stützt sich inzwischen mehr als das
+# Wiederverwenden:** `ai_memory_service._entschluesseln_nebenlaeufig` schickt
+# beim Aufbau des Gedächtnisblocks mehrere `decrypt` gleichzeitig hier hinein,
+# weil deren Zahl sonst eins zu eins in der Wartezeit des Benutzers landet. Wer
+# diesen einen Client durch etwas ersetzt, das nur ein Aufrufer zur Zeit
+# verträgt, nimmt dem Gedächtnis damit still die Nebenläufigkeit weg.
+# Der Preis der Wiederverwendung: eine im Pool wartende
 # Keep-alive-Verbindung überlebt einen Neustart des Sidecars nicht. Der
 # betroffene Aufruf fällt dann in `except httpx.HTTPError` und damit
 # fail-closed — richtig, aber einmal spürbar.

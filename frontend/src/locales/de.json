@@ -259,7 +259,12 @@
         "panel": "Gilt für jeden Benutzer dieses Panels und läuft in jedem Gespräch mit. Nichts Persönliches — es sieht jeder."
       },
       "forServer": "Server: {{name}}",
-      "serverSharedHint": "Das hier ist geteilt: alle Kollegen, die diesen Server sehen dürfen, lesen es mit. Was nur dich betrifft, gehört in dein persönliches Gedächtnis im Profil."
+      "serverSharedHint": "Das hier ist geteilt: alle Kollegen, die diesen Server sehen dürfen, lesen es mit. Was nur dich betrifft, gehört in dein persönliches Gedächtnis im Profil.",
+      "searchPage": "Diese Seite durchsuchen",
+      "total": "{{count}} Eintrag insgesamt",
+      "total_one": "{{count}} Eintrag insgesamt",
+      "total_other": "{{count}} Einträge insgesamt",
+      "countPage": "{{shown}} von {{total}} auf dieser Seite"
     },
     "skills": {
       "title": "Skills",
@@ -2844,7 +2849,11 @@
     "next": "Weiter",
     "remove": "Entfernen",
     "select": "Auswählen",
-    "working": "Wird verarbeitet …"
+    "working": "Wird verarbeitet …",
+    "pagination": {
+      "label": "Seitennavigation",
+      "page": "Seite {{page}} von {{pages}}"
+    }
   },
   "serverDetail": {
     "showServerOverview": "Server-Übersicht",

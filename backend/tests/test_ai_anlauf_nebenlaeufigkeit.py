@@ -99,6 +99,43 @@ def _langsamer_anlauf(monkeypatch: pytest.MonkeyPatch) -> dict:
     return protokoll
 
 
+def _langsamer_anlauf_ohne_sitzung(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Wie `_langsamer_anlauf`, aber eine Schicht hoeher — ohne jede Datenbank.
+
+    Der Unterschied ist nicht Bequemlichkeit, sondern Notwendigkeit, und er
+    gilt fuer genau einen Fall: zwei **verschiedene** Unterhaltungen laufen
+    wirklich gleichzeitig, das ist ja die Zusage. `_anlauf_im_thread` oeffnet
+    aber vor `lauf_beginnen` eine eigene Sitzung und holt Benutzer,
+    Unterhaltung und Anbieter — auf SQLite teilen sich alle Sitzungen eine
+    Verbindung, und zwei Threads darauf sind kein langsamer Zugriff, sondern
+    ein Datenfehler (`IndexError` aus dem Zeilenbau von SQLAlchemy). Genau das
+    haelt `test_auf_sqlite_laeuft_genau_ein_anlauf` weiter unten fest, und
+    dieser Test hebelt es per `_anlauf_nebenlaeufigkeit` bewusst aus.
+
+    Bei derselben Unterhaltung faellt das nicht auf: dort reiht das Schloss die
+    Threads ohnehin, sie kommen nie gleichzeitig an die Verbindung. Deshalb
+    braucht nur dieser eine Test die Sitzung gar nicht erst — gemessen wird
+    die Ablaufsteuerung, und die kennt keine Datenbank.
+    """
+    protokoll: dict = {"drin": 0, "hoechstens": 0}
+    schloss = __import__("threading").Lock()
+
+    def _schlafen(**kwargs):
+        del kwargs
+        with schloss:
+            protokoll["drin"] += 1
+            protokoll["hoechstens"] = max(protokoll["hoechstens"], protokoll["drin"])
+        try:
+            time.sleep(ANLAUFDAUER)
+        finally:
+            with schloss:
+                protokoll["drin"] -= 1
+        return str(uuid4()), None
+
+    monkeypatch.setattr(ai_stream_service, "_anlauf_im_thread", _schlafen)
+    return protokoll
+
+
 @pytest.mark.asyncio
 async def test_der_laufbeginn_blockiert_die_ereignisschleife_nicht(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
@@ -263,8 +300,12 @@ async def test_zwei_unterhaltungen_stehen_sich_nicht_im_weg(
     Sonst waere die Reihung von oben ein globaler Flaschenhals: bei 200
     gleichzeitigen Nachrichten von 200 Benutzern liefe der Anlauf wieder
     streng nacheinander, nur woanders.
+
+    Als einziger Test dieser Datei haelt er die Datenbank ganz heraus — die
+    Begruendung steht bei `_langsamer_anlauf_ohne_sitzung`: er ist auch der
+    einzige, bei dem zwei Threads wirklich gleichzeitig ankommen.
     """
-    protokoll = _langsamer_anlauf(monkeypatch)
+    protokoll = _langsamer_anlauf_ohne_sitzung(monkeypatch)
     monkeypatch.setattr(ai_stream_service, "_anlauf_nebenlaeufigkeit", lambda: 2)
     eine = _unterhaltung(db, regular_user)
     andere = _unterhaltung(db, owner_user)

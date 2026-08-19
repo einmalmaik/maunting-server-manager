@@ -561,14 +561,23 @@ Alternativen (gemessen, nicht geschätzt):
   - Postgres-Volltextsuche: sprachgebunden und damit am Problem vorbei.
   - pgvector: MSM verwaltet seinen PostgreSQL selbst mit `postgres:17-alpine`
     (config.managed_postgres_image), das die Erweiterung nicht enthält. Ein
-    Image-Wechsel träfe jede Installation. Bei bis zu 1.000 Einträgen je Bereich
+    Image-Wechsel träfe jede Installation. Bei bis zu 5.000 Einträgen je Bereich
     (`ai_limit_service.MAX_MEMORY_ENTRIES_MAX` — die 100, die hier ursprünglich
     stand, ist seit 2026-08-15 nur noch der Ausgangswert je Rolle) ist ein
-    Skalarprodukt in Python weiterhin schneller als der Datenbank-Roundtrip. Die
-    Absage bleibt, ihr Abstand nicht: bis zur Index-Schwelle von etwa 10.000
-    Einträgen sind es statt zwei Zehnerpotenzen noch eine, und in einen Prompt
-    fließen mehrere Bereiche nebeneinander. Steigt der Deckel erneut, ist
-    pgvector neu zu prüfen.
+    Skalarprodukt in Python weiterhin schneller als der Datenbank-Roundtrip.
+    Der Deckel stieg am 2026-08-19 von 1.000 auf 5.000, und damit war die hier
+    verlangte Neuprüfung fällig; sie ging noch einmal für Python aus. Gemessen
+    an diesem Tag bei 5.000 Zeilen: das Skalarprodukt selbst kostet 38 ms, das
+    Einbetten der Frage 0,4 ms — die Zeit geht mit 381 ms in das Lesen der
+    Vektoren aus ihrer JSON-Spalte. pgvector löste beides, aber die Rechnung
+    klemmt nicht, und das Format ist eine Entscheidung in unserer eigenen
+    Tabelle: dieselben Zahlen als float32-Bytes brauchen 4,0 ms statt 381 ms,
+    ohne Erweiterung und ohne fremdes Image. Der Abstand ist trotzdem
+    aufgebraucht: bis
+    zur Index-Schwelle von etwa 10.000 Einträgen ist es keine Zehnerpotenz
+    mehr, sondern Faktor zwei, und in einen Prompt fließen mehrere Bereiche
+    nebeneinander. Steigt der Deckel erneut, ist pgvector neu zu prüfen — und
+    dann ohne den Ausweg, dass zuerst das Format an der Reihe wäre.
 
 Security:
   `model2vec` berührt weder Secrets noch Server-Verbindungen. Der Dienst

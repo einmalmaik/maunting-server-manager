@@ -432,6 +432,29 @@ export interface AiMemoryEntry {
   updated_at: string
 }
 
+/**
+ * Ein Ausschnitt der eigenen Erinnerungen — und was daneben steht.
+ *
+ * Der Vorrat darf bis 5.000 Einträge groß werden, und jede Zeile kostet beim
+ * Öffnen einen eigenen Aufruf an den DIS-Sidecar. Alles auf einmal wären
+ * gemessen rund zehn Sekunden. Die Seite kommt deshalb in Stücken; die drei
+ * Zahlen sorgen dafür, dass ein Stück nicht wie das Ganze aussieht.
+ */
+export interface AiMemoryPage {
+  entries: AiMemoryEntry[]
+  /** Alle eigenen Einträge, allgemeine und serverbezogene zusammen. */
+  total: number
+  /**
+   * Davon die allgemeinen. Genau die nimmt „Alle löschen" mit — die Notizen zu
+   * einzelnen Servern liegen in eigenen Bereichen und bleiben stehen. Die Zahl
+   * kommt vom Server, weil die Oberfläche seit der Seitenweise nur noch einen
+   * Ausschnitt sieht und sie nicht mehr selbst zählen kann.
+   */
+  clearable: number
+  /** Wie groß eine Seite ist. Bestimmt der Server, denn er bezahlt sie. */
+  limit: number
+}
+
 export interface AiMemoryPreference {
   enabled: boolean
   /**
@@ -996,13 +1019,18 @@ export const aiApi = {
     `/ai/memory?scope=${scope}${serverId ? `&server_id=${serverId}` : ''}${teamId ? `&team_id=${teamId}` : ''}`,
   ),
   /**
-   * Alles, was einem selbst gehört: persönlich **und** serverbezogen.
+   * Eine Seite von allem, was einem selbst gehört: persönlich **und**
+   * serverbezogen.
    *
    * `listMemory('server', …)` verlangt eine konkrete Server-ID — wer alle seine
    * Notizen sehen wollte, hätte die Server raten müssen. Genau deshalb waren
    * sie in der Oberfläche nicht auffindbar, obwohl die KI sie schreibt.
+   *
+   * Übergeben wird nur der Offset. Wie groß eine Seite ist, entscheidet der
+   * Server und sagt es in `limit` — er bezahlt sie in Entschlüsselungen, und
+   * eine Grenze, die der Client setzen darf, ist keine.
    */
-  listPersonalMemory: () => api<AiMemoryEntry[]>('/ai/memory/personal'),
+  listPersonalMemory: (offset = 0) => api<AiMemoryPage>(`/ai/memory/personal?offset=${offset}`),
   saveMemory: (payload: { scope: AiMemoryEntry['scope']; server_id?: number; team_id?: number; key: string; value: string }) => api<AiMemoryEntry>('/ai/memory', {
     method: 'PUT', body: JSON.stringify(payload),
   }),

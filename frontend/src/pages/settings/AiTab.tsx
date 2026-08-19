@@ -155,14 +155,16 @@ const FIELD_DEFINITIONS: Array<{
   { key: 'requests_per_minute', labelKey: 'aiSettings.requestsPerMinute', max: 10_000, step: 1 },
   { key: 'concurrent_operations', labelKey: 'aiSettings.concurrentOperations', max: 100, step: 1 },
   { key: 'monthly_cost_limit_cents', labelKey: 'aiSettings.monthlyCostCents', max: 1_000_000_000, step: 100 },
-  // 1_000 muss `MAX_MEMORY_ENTRIES_MAX` im Backend entsprechen: dort ist der
-  // Deckel bewusst niedrig, weil er den gespeicherten Bestand begrenzt — und
-  // der wächst je Bereich, von denen ein Benutzer beliebig viele haben kann.
+  // 5_000 muss `MAX_MEMORY_ENTRIES_MAX` im Backend entsprechen: dort steht die
+  // Zahl nicht höher, weil sie den gespeicherten Bestand begrenzt — und der
+  // wächst je Bereich, von denen ein Benutzer beliebig viele haben kann.
   // Als Begründung stand hier „weil jeder Eintrag beim Promptaufbau einzeln
   // entschlüsselt wird"; seit `MAX_CONTEXT_ROWS` entschlüsselt eine Chatanfrage
-  // nur noch so viele Zeilen, egal wie groß der Vorrat ist. Ein hier
-  // großzügigeres Maximum ließe den Betreiber Werte eintragen, die das Backend
-  // abweist.
+  // nur noch so viele Zeilen, egal wie groß der Vorrat ist. Was der Bestand
+  // dagegen wirklich kostet — Ladezeit vor jeder Antwort und eine
+  // Verwaltungsansicht, die jede Zeile einzeln entschlüsselt —, steht bei der
+  // Konstante im Backend. Ein hier großzügigeres Maximum ließe den Betreiber
+  // Werte eintragen, die das Backend abweist.
   // „Muss entsprechen" war bis eben eine blosse Bitte: die Zahl steht hier,
   // die Konstante dort, und keine Prüfung sah beide. `test_ai_role_limits.py`
   // liest diese Zeile jetzt und vergleicht sie — wer den Backend-Deckel
@@ -171,7 +173,7 @@ const FIELD_DEFINITIONS: Array<{
   {
     key: 'max_memory_entries',
     labelKey: 'aiSettings.maxMemoryEntries',
-    max: 1_000,
+    max: 5_000,
     step: 10,
     hintKey: 'aiSettings.maxMemoryEntriesHint',
   },

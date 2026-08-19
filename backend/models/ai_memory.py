@@ -48,15 +48,19 @@ class AiMemoryEntry(Base):
     alles gleichzeitig in den Kontext. Die Annahme fiel zweimal — erst am
     Sprachwechsel (ein deutscher Eintrag und eine englische Frage teilen kein
     Wort), dann an der Zahl: 100 ist seit dem konfigurierbaren Rollenlimit nur
-    noch der Ausgangswert, ein Bereich fasst bis zu 1.000 Eintraege
+    noch der Ausgangswert, ein Bereich fasst bis zu 5.000 Einträge
     (``ai_limit_service.MAX_MEMORY_ENTRIES_MAX``). So viel geht nicht mehr am
     Stueck mit, deshalb waehlt ``provider_memory_context`` aus.
 
     Ihr zweiter Teil traegt weiter: der Vektor kam als zusaetzliche Spalte und
     nicht als Umbau, und einen Vektor*index* gibt es nach wie vor bewusst nicht.
-    Bei 1.000 Zeilen ist ein Skalarprodukt in numpy schneller als der Weg in die
-    Datenbank. Duenner begruendet ist er trotzdem: bis zu der Menge, ab der sich
-    ein Index lohnt, lag frueher eine Zehnerpotenz mehr als heute.
+    Bei 5.000 Zeilen kostet das Skalarprodukt in numpy gemessene 38 ms und ist
+    damit weiterhin schneller als der Weg in die Datenbank — teuer ist an dieser
+    Stelle nicht das Rechnen, sondern das Lesen der Vektoren. Dünner begründet
+    ist die Absage trotzdem: zur Menge, ab der sich ein Index lohnt, ist es
+    keine Zehnerpotenz mehr, sondern Faktor zwei. Der nächste Anstieg des
+    Deckels ist die Prüfung, die diesmal noch ausgegangen ist; sie steht in
+    ``docs/agent-rules/dependencies.md`` bei ``model2vec``.
     """
 
     __tablename__ = "ai_memory_entries"

@@ -441,11 +441,17 @@ def test_one_unreadable_entry_does_not_take_the_whole_chat_down(
     _allow_memory(db, regular_user)
     kaputt = _write(db, regular_user, "kaputt", "Unlesbarer Wert")
     _write(db, regular_user, "heil", "Lesbarer Wert")
+    # Die Kennung **hier** festhalten und nicht in der Attrappe von der Zeile
+    # lesen: die Attrappe laeuft in einem Arbeitsthread von
+    # `_entschluesseln_nebenlaeufig`, und ein Zugriff auf ein SQLAlchemy-Objekt
+    # koennte dort nachladen — auf einer Sitzung, die nur dem Hauptthread
+    # gehoert. Genau die Trennung, die der Dienst selbst einhaelt.
+    kaputte_id = kaputt.id
 
     echt = DisClient.decrypt
 
     def stolpert(payload, *, aad):
-        if aad.endswith(kaputt.id):
+        if aad.endswith(kaputte_id):
             raise DisDecryptionError("AAD passt nicht mehr")
         return echt(payload, aad=aad)
 
@@ -561,18 +567,28 @@ def test_recency_beats_an_old_never_used_entry(
 def _zaehle_entschluesselungen(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     """Zaehlt die Aufrufe von `DisClient.decrypt` — die Groesse, um die es geht.
 
-    Jeder Aufruf ist ein synchroner HTTP-Roundtrip zum DIS-Sidecar. An der
+    Jeder Aufruf ist ein eigener HTTP-Roundtrip zum DIS-Sidecar. An der
     Laenge des Ergebnisses laesst sich das nicht ablesen: der Block wird danach
     ohnehin auf `MAX_CONTEXT_CHARS` gekuerzt und sieht mit und ohne Deckel
     gleich aus. Gemessen werden muss der Aufwand, nicht das Ergebnis.
+
+    Die Sperre ist keine Vorsicht auf Vorrat: seit `_entschluesseln` die Zeilen
+    zu mehreren gleichzeitig oeffnet, laeuft diese Attrappe in mehreren Threads,
+    und `zaehler[0] += 1` ist Lesen, Rechnen und Schreiben in drei Schritten.
+    Ohne sie zaehlte der Test gelegentlich zu wenig und waere launisch statt
+    aussagekraeftig.
     """
+    import threading
+
     from services.dis_client import DisClient
 
     zaehler = [0]
+    sperre = threading.Lock()
     echt = DisClient.decrypt
 
     def mitzaehlen(payload, *, aad):
-        zaehler[0] += 1
+        with sperre:
+            zaehler[0] += 1
         return echt(payload, aad=aad)
 
     monkeypatch.setattr(DisClient, "decrypt", staticmethod(mitzaehlen))
@@ -658,16 +674,14 @@ def test_die_vorauswahl_nimmt_die_passenden_und_nicht_die_ersten(
     """Gekuerzt wird nach Rang, nicht nach Reihenfolge.
 
     Die Vorauswahl laeuft vor der Entschluesselung und kennt den Wert deshalb
-    nicht — wohl aber den Schluessel, die Nutzung und das Alter. Genau davon
-    muss sie Gebrauch machen: ein blosses "nimm die ersten N" waere hier rot,
-    weil der gesuchte Eintrag zuletzt angelegt wurde.
+    nicht — wohl aber den Schluessel, den gespeicherten Vektor und das Alter.
+    Genau davon muss sie Gebrauch machen: ein blosses "nimm die ersten N" waere
+    hier rot, weil der gesuchte Eintrag zuletzt angelegt wurde.
     """
     _allow_memory(db, regular_user)
     for nummer in range(6):
         _write(db, regular_user, f"belanglos{nummer}", f"Fuellwert {nummer}")
-    gesucht = _write(db, regular_user, "wartungsfenster", "Sonntags ab drei Uhr")
-    gesucht.use_count = 15
-    db.commit()
+    _write(db, regular_user, "wartungsfenster", "Sonntags ab drei Uhr")
     monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 2)
 
     block = ai_memory_service.provider_memory_context(
@@ -675,6 +689,44 @@ def test_die_vorauswahl_nimmt_die_passenden_und_nicht_die_ersten(
     )
 
     assert "Sonntags ab drei Uhr" in block
+
+
+def test_die_vorauswahl_folgt_der_frage_und_nicht_der_nutzung(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Vor dem Entschluesseln zaehlt nur, was mit der Frage zu tun hat.
+
+    Diese Stufe entscheidet nicht, welcher Eintrag *besser* ist, sondern welcher
+    ueberhaupt geoeffnet und damit dem Modell gezeigt wird. Solange die Nutzung
+    dort mitzaehlte, gewann eine oft gebrauchte Zeile gegen eine, die die Frage
+    woertlich trifft — und zwar umso sicherer, je groesser der Vorrat wird: bei
+    5.000 Eintraegen bildeten Nutzung und Aktualitaet die Schwelle des letzten
+    Platzes allein, waehrend die Bedeutung hoechstens ein Drittel davon
+    beisteuern konnte. Gemessen ueberlebten damit 4 von 10 gesuchten Eintraegen
+    den Schnitt, ohne den Nutzungsterm 7.
+
+    Der Nutzungsanteil ist damit nicht abgeschafft, er steht eine Stufe spaeter
+    (siehe `test_frequently_used_entries_survive_a_foreign_language_question`).
+    Hier ist er falsch, weil er nichts ueber die Frage aussagt.
+    """
+    _allow_memory(db, regular_user)
+    vielgenutzt = _write(db, regular_user, "lieblingsfarbe", "Blau, seit jeher")
+    vielgenutzt.use_count = 20
+    vielgenutzt.last_used_at = datetime.now(timezone.utc)
+    gesucht = _write(db, regular_user, "wartungsfenster", "Sonntags ab drei Uhr")
+    # Der gesuchte Eintrag ist zusaetzlich der aeltere und nie gebrauchte —
+    # nach jedem Massstab ausser dem Bezug zur Frage der schlechtere.
+    gesucht.last_used_at = datetime.now(timezone.utc) - timedelta(days=30)
+    db.commit()
+    # Genau eine Zeile ueberlebt die Vorauswahl. Welche, ist die ganze Frage.
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 1)
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, query="Wann ist das wartungsfenster?"
+    )
+
+    assert "Sonntags ab drei Uhr" in block
+    assert "Blau" not in block
 
 
 def test_wer_gekuerzt_bekommt_erfaehrt_es_auch(
@@ -705,6 +757,54 @@ def test_wer_gekuerzt_bekommt_erfaehrt_es_auch(
     # Der Hinweis steht im gekuerzten Block und fehlt im vollstaendigen.
     zusatz = set(gekuerzt.splitlines()) - set(vollstaendig.splitlines())
     assert zusatz, "der gekuerzte Block traegt keinen Hinweis auf das Fehlende"
+
+
+def test_der_abruf_oeffnet_die_zeilen_gleichzeitig(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Wartezeit am Sidecar darf nicht mit der Zahl der Eintraege wachsen.
+
+    Jede Zeile ist ein eigener HTTP-Roundtrip, und daran ist fast nichts
+    Rechnung — der Sidecar oeffnet ein paar hundert Byte, alles andere ist der
+    Weg hin und zurueck. Nacheinander addiert sich genau diese Wartezeit vor dem
+    ersten Byte der Antwort: gemessen 150 bis 600 ms bei 300 Zeilen, und in der
+    ungedeckelten Profilansicht (`personal_entries`) 10,3 s bei 5.000.
+
+    Die Sperre in diesem Test ist zugleich die Pruefung. Jede der ersten beiden
+    Entschluesselungen wartet an derselben Schranke, und die oeffnet nur, wenn
+    beide zugleich davorstehen. Liefe der Abruf wieder Zeile fuer Zeile, kaeme
+    die zweite nie an — die erste liefe in den Zeitablauf der Schranke und der
+    Test schluege fehl, statt lediglich langsamer zu sein.
+    """
+    import threading
+
+    from services.dis_client import DisClient
+
+    _allow_memory(db, regular_user)
+    for nummer in range(4):
+        _write(db, regular_user, f"eintrag{nummer}", f"Wert {nummer}")
+
+    schranke = threading.Barrier(2, timeout=5)
+    sperre = threading.Lock()
+    gesehen: list[str] = []
+    echt = DisClient.decrypt
+
+    def wartet_aufeinander(payload, *, aad):
+        with sperre:
+            zuerst = len(gesehen) < 2
+            gesehen.append(aad)
+        if zuerst:
+            schranke.wait()
+        return echt(payload, aad=aad)
+
+    monkeypatch.setattr(DisClient, "decrypt", staticmethod(wartet_aufeinander))
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, query="Was weisst du?"
+    )
+
+    assert block is not None
+    assert len(block.splitlines()) == 4
 
 
 def test_die_suche_entschluesselt_ebenfalls_nicht_alles(

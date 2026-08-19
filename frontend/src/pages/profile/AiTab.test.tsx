@@ -19,6 +19,14 @@ vi.mock('@/api/client', async () => {
   return {
     ...actual,
     api: vi.fn((path: string) => {
+      // Die persönlichen Erinnerungen kommen seitenweise: eine Liste plus die
+      // Zahlen, aus denen die Ansicht „5.000 Einträge, Seite 1 von 25" bildet.
+      // Ein `[]` an dieser Stelle wäre genau der Fall, den der Kommentar oben
+      // meint — die Komponente läse `entries` aus einem Array und bekäme
+      // `undefined`.
+      if (path.startsWith('/ai/memory/personal')) {
+        return Promise.resolve({ entries: [], total: 0, clearable: 0, limit: 200 })
+      }
       if (path === '/ai/usage/me') {
         return Promise.resolve({
           user_id: 1, username: 'tester',

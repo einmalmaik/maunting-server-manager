@@ -9,6 +9,7 @@ from models import AiMemoryEntry, AiMemoryPreference, User
 from schemas.ai_memory import (
     AiMemoryClearResponse,
     AiMemoryNoticeAnswer,
+    AiMemoryPersonalPage,
     AiMemoryPreferenceResponse,
     AiMemoryPreferenceWrite,
     AiMemoryResponse,
@@ -48,25 +49,35 @@ def list_memory(
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
 
 
-@router.get("/personal", response_model=list[AiMemoryResponse])
+@router.get("/personal", response_model=AiMemoryPersonalPage)
 def list_personal_memory(
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.memory.use")),
-) -> list[AiMemoryResponse]:
-    """Alles, was diesem Benutzer selbst gehoert — persoenlich und serverbezogen.
+) -> AiMemoryPersonalPage:
+    """Eine Seite von allem, was diesem Benutzer selbst gehoert.
 
     `GET /?scope=server` verlangt eine konkrete `server_id`; wer alle seine
     Servernotizen sehen will, muesste die Server erst raten. Genau deshalb waren
     sie ueber die Oberflaeche bisher unerreichbar, obwohl die KI sie schreibt
     und sie in jedem Gespraech mitlaufen.
+
+    ``offset`` ist der einzige Stellhebel von aussen. Die Seitengroesse bleibt
+    beim Dienst: sie wird in Sidecar-Roundtrips bezahlt, und ein ``limit`` in
+    der Anfrage waere die Einladung, sich 5.000 Entschluesselungen auf einmal zu
+    bestellen. Was gerade gilt, steht als ``limit`` in der Antwort — daraus
+    rechnet die Oberflaeche Seitenzahl und naechsten Offset.
     """
     try:
-        return [
-            _response(row, value)
-            for row, value in ai_memory_service.personal_entries(db, user)
-        ]
+        seite = ai_memory_service.personal_entries(db, user, offset=offset)
     except DisSidecarError as exc:
         raise HTTPException(status_code=503, detail="Memory ist nicht verfuegbar") from exc
+    return AiMemoryPersonalPage(
+        entries=[_response(row, value) for row, value in seite.eintraege],
+        total=seite.gesamt,
+        clearable=seite.allgemein,
+        limit=ai_memory_service.PERSONAL_PAGE_SIZE,
+    )
 
 
 @router.put("", response_model=AiMemoryResponse)

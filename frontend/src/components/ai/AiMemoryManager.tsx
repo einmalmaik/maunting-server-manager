@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { aiApi, type AiMemoryEntry } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { Button, Switch } from '@/Singra/UI'
+import { Button, Pagination, Switch } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
@@ -23,6 +23,21 @@ type Herkunft = 'all' | 'user' | 'ai'
 interface ServerOption {
   id: number
   name: string
+}
+
+/**
+ * Ein Ladeergebnis, gleich aus welchem Bereich es kommt.
+ *
+ * Nur der persönliche Bereich blättert; die geteilten liefern weiterhin alles
+ * auf einmal. Beides hier auf dieselbe Form zu bringen, ist billiger als zwei
+ * Ansichten mit denselben Knöpfen — die Unterscheidung steckt danach in genau
+ * einer Zahl: `seitengroesse` 0 heißt „kam auf einmal".
+ */
+interface Ladung {
+  rows: AiMemoryEntry[]
+  gesamt: number
+  loeschbar: number
+  seitengroesse: number
 }
 
 interface Props {
@@ -51,6 +66,16 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const serverId = scopeServerId(scope)
 
   const [entries, setEntries] = useState<AiMemoryEntry[]>([])
+  // Die angezeigte Seite und die drei Zahlen, die nur der Server kennt. Der
+  // persönliche Bereich darf 5.000 Einträge fassen, und jeder davon kostet beim
+  // Öffnen einen eigenen Aufruf an den DIS-Sidecar — gemessen rund zehn
+  // Sekunden für alle. Er kommt deshalb seitenweise. `seitengroesse` ist 0,
+  // solange nichts geladen wurde und in allen Bereichen, die weiterhin auf
+  // einmal kommen; daraus wird eine Seite, und die Blätterleiste bleibt weg.
+  const [seite, setSeite] = useState(1)
+  const [gesamt, setGesamt] = useState(0)
+  const [loeschbar, setLoeschbar] = useState(0)
+  const [seitengroesse, setSeitengroesse] = useState(0)
   const [enabled, setEnabled] = useState(false)
   const [suche, setSuche] = useState('')
   const [herkunft, setHerkunft] = useState<Herkunft>('all')
@@ -65,32 +90,60 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   const [serverNamen, setServerNamen] = useState<Map<number, string>>(new Map())
   const [busy, setBusy] = useState(false)
 
-  // Der persönliche Bereich holt beides auf einmal: allgemeine Einträge und
-  // die Notizen zu einzelnen Servern. Beides gehört dem Benutzer, beides geht
-  // in jedes Gespräch — und die serverbezogenen waren bisher nirgends sichtbar,
-  // weil `listMemory('server', …)` je Aufruf einen konkreten Server verlangt.
-  const laden = async () => {
-    if (scope.kind === 'user') return setEntries(await aiApi.listPersonalMemory())
-    if (scope.kind === 'panel') return setEntries(await aiApi.listMemory('panel'))
-    if (scope.kind === 'server_shared') {
-      return setEntries(await aiApi.listMemory('server_shared', scope.serverId))
+  // Der persönliche Bereich holt beides: allgemeine Einträge und die Notizen zu
+  // einzelnen Servern. Beides gehört dem Benutzer, beides geht in jedes
+  // Gespräch — und die serverbezogenen waren lange nirgends sichtbar, weil
+  // `listMemory('server', …)` je Aufruf einen konkreten Server verlangt.
+  //
+  // Er ist zugleich der einzige, der blättert. Die geteilten Bereiche kommen
+  // weiterhin auf einmal; für sie ist `gesamt` schlicht die Länge der Liste und
+  // `loeschbar` dasselbe, weil eine Bereichsabfrage dort genau den Bereich
+  // liefert, den „Alle löschen" auch abräumt.
+  const holen = async (offset: number): Promise<Ladung> => {
+    if (scope.kind === 'user') {
+      const seiteDaten = await aiApi.listPersonalMemory(offset)
+      return {
+        rows: seiteDaten.entries,
+        gesamt: seiteDaten.total,
+        loeschbar: seiteDaten.clearable,
+        seitengroesse: seiteDaten.limit,
+      }
     }
-    setEntries(await aiApi.listMemory('team', undefined, scope.teamId))
+    const rows = scope.kind === 'panel'
+      ? await aiApi.listMemory('panel')
+      : scope.kind === 'server_shared'
+        ? await aiApi.listMemory('server_shared', scope.serverId)
+        : await aiApi.listMemory('team', undefined, scope.teamId)
+    return { rows, gesamt: rows.length, loeschbar: rows.length, seitengroesse: 0 }
+  }
+
+  const uebernehmen = (ladung: Ladung, zielSeite: number) => {
+    setEntries(ladung.rows)
+    setGesamt(ladung.gesamt)
+    setLoeschbar(ladung.loeschbar)
+    setSeitengroesse(ladung.seitengroesse)
+    setSeite(zielSeite)
+  }
+
+  const laden = async (zielSeite = seite, groesse = seitengroesse) => {
+    const ladung = await holen(Math.max(0, zielSeite - 1) * groesse)
+    const letzte = ladung.seitengroesse > 0
+      ? Math.max(1, Math.ceil(ladung.gesamt / ladung.seitengroesse))
+      : 1
+    // Wer die letzte Zeile der letzten Seite löscht, stünde sonst vor „Seite 25
+    // von 24" und einer leeren Liste, die aussieht wie ein leeres Gedächtnis.
+    // Statt dessen rutscht die Ansicht auf die letzte Seite, die es noch gibt.
+    // Nur ein Nachschlag, denn `letzte` ist danach gültig.
+    if (zielSeite > letzte) return laden(letzte, ladung.seitengroesse)
+    uebernehmen(ladung, zielSeite)
   }
 
   useEffect(() => {
     if (!allowed) return
     let active = true
     setSuche(''); setHerkunft('all'); setKey(''); setValue(''); setBearbeitet(null)
-    const liste = scope.kind === 'user'
-      ? aiApi.listPersonalMemory()
-      : scope.kind === 'panel'
-        ? aiApi.listMemory('panel')
-        : scope.kind === 'server_shared'
-          ? aiApi.listMemory('server_shared', scope.serverId)
-          : aiApi.listMemory('team', undefined, scope.teamId)
     Promise.all([
-      liste,
+      holen(0),
       // Der Schalter ist eine Einstellung des Benutzers, kein Merkmal des
       // Bereichs — er wird auch in der Teamansicht geladen, aber nur in der
       // persönlichen angezeigt.
@@ -101,9 +154,9 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
         ? api<ServerOption[]>('/servers').catch(() => [] as ServerOption[])
         : Promise.resolve([] as ServerOption[]),
     ])
-      .then(([rows, preference, servers]) => {
+      .then(([ladung, preference, servers]) => {
         if (!active) return
-        setEntries(rows)
+        uebernehmen(ladung, 1)
         setEnabled(preference.enabled)
         setServerNamen(new Map(servers.map((row) => [row.id, row.name])))
       })
@@ -121,6 +174,12 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
         || entry.value.toLowerCase().includes(nadel))
       // Zuletzt genutzt zuerst: was die KI gerade heranzieht, ist das, was man
       // prüfen will. Nie genutzte Einträge stehen hinten, nach Schlüssel sortiert.
+      //
+      // Im persönlichen Bereich sortiert `personal_entries` schon genauso, und
+      // dort ist es keine Anzeigefrage mehr, sondern die Schnittkante zwischen
+      // den Seiten. Diese Sortierung hier ist deshalb ein Nachziehen, kein
+      // Umsortieren — wer sie ändert, muss die dortige mitändern, sonst kommt
+      // eine Seite in einer anderen Reihenfolge an, als sie geschnitten wurde.
       .sort((a, b) => {
         const links = a.last_used_at ? Date.parse(a.last_used_at) : 0
         const rechts = b.last_used_at ? Date.parse(b.last_used_at) : 0
@@ -138,7 +197,16 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
   // nicht wieder auseinanderlaufen.
   const werkzeugleiste = entries.length > 3 || suche !== '' || herkunft !== 'all'
 
+  const seitenzahl = seitengroesse > 0 ? Math.max(1, Math.ceil(gesamt / seitengroesse)) : 1
+
   if (!allowed) return null
+
+  const blaettern = (naechste: number) => {
+    setBusy(true)
+    void laden(naechste)
+      .catch(() => toast.error(t('ai.memory.errors.load')))
+      .finally(() => setBusy(false))
+  }
 
   const speichern = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -200,10 +268,13 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
     // Servern mit, gelöscht werden aber nur die allgemeinen Einträge (siehe
     // unten). Mit `entries.length` fragte die Bestätigung nach „alle 12" und
     // meldete danach „8 gelöscht".
-    const betroffen = entries.filter((eintrag) => eintrag.scope === memoryScopeName(scope))
+    //
+    // Seit die Ansicht blättert, kann sie das nicht mehr selbst zählen: sie
+    // sieht 200 von 5.000. `loeschbar` kommt deshalb vom Server, der beides
+    // kennt — den Bestand und die Kennung, über die gelöscht wird.
     if (!await confirm({
       title: t('ai.memory.clearTitle'),
-      message: t('ai.memory.clearConfirm', { count: betroffen.length }),
+      message: t('ai.memory.clearConfirm', { count: loeschbar }),
       confirmText: t('common.delete'), danger: true,
     })) return
     setBusy(true)
@@ -214,7 +285,9 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
       // der beides mitnimmt, wäre weiter, als er aussieht.
       const { removed } = await aiApi.clearMemory(memoryScopeName(scope), teamId, serverId)
       setKey(''); setValue(''); setBearbeitet(null)
-      await laden()
+      // Zurück auf Seite 1: nach dem Abräumen der allgemeinen Einträge bleiben
+      // höchstens die Servernotizen übrig, und die passen wieder auf eine Seite.
+      await laden(1)
       toast.success(t('ai.memory.cleared', { count: removed }))
     } catch (error: unknown) {
       toast.error(error instanceof SanitizedApiError ? error.message : t('ai.memory.errors.delete'))
@@ -281,8 +354,18 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
         : scope.kind === 'server_shared'
           ? t('ai.memory.serverSharedHint')
           : undefined}
+      // Die Suche liest, was geladen ist — und geladen ist bei mehreren Seiten
+      // nur diese eine. Sie könnte es auch gar nicht anders: der Wert liegt
+      // verschlüsselt in der Datenbank, eine Suche über den ganzen Bestand
+      // hieße, alle 5.000 Zeilen zu öffnen, also genau das, wogegen die
+      // Seitenweise gebaut ist. Statt so zu tun, als suchte sie überall, sagt
+      // die Beschriftung, worin sie sucht.
       search={werkzeugleiste
-        ? { value: suche, onChange: setSuche, label: t('ai.memory.search') }
+        ? {
+          value: suche,
+          onChange: setSuche,
+          label: seitenzahl > 1 ? t('ai.memory.searchPage') : t('ai.memory.search'),
+        }
         : undefined}
       filters={(
         <>
@@ -295,8 +378,14 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           )}
         </>
       )}
+      // Der Zähler zählt, was der Filter von der geladenen Liste übrig lässt —
+      // und die ist bei mehreren Seiten nur ein Ausschnitt. „3 von 4 angezeigt"
+      // neben „5.000 Einträge insgesamt" läse sich wie ein Widerspruch, also
+      // sagt er dann dazu, worauf er sich bezieht.
       count={werkzeugleiste
-        ? t('ai.memory.count', { shown: sichtbar.length, total: entries.length })
+        ? (seitenzahl > 1
+          ? t('ai.memory.countPage', { shown: sichtbar.length, total: entries.length })
+          : t('ai.memory.count', { shown: sichtbar.length, total: entries.length }))
         : undefined}
     >
       <div className="space-y-2">
@@ -365,6 +454,18 @@ export function AiMemoryManager({ scope = { kind: 'user' } }: Props) {
           </p>
         )}
       </div>
+
+      {/* Die Gesamtzahl steht links daneben und nicht im Zähler über der Liste:
+          der zählt, was der Filter von dieser Seite übrig lässt, und beides in
+          einem Satz läse sich wie ein Widerspruch. Hier gehört sie hin, weil sie
+          erklärt, wozu die Knöpfe daneben da sind. */}
+      <Pagination
+        page={seite}
+        pageCount={seitenzahl}
+        label={t('ai.memory.total', { count: gesamt })}
+        disabled={busy}
+        onChange={blaettern}
+      />
 
       {darfAendern && (
         <form className="space-y-3 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4" onSubmit={speichern}>

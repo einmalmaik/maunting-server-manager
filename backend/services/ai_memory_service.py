@@ -1,5 +1,7 @@
 """Ownership, DIS-Schutz, Secret-Abweisung und Abruf fuer AI-Memory."""
 
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import logging
@@ -7,7 +9,7 @@ import re
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Query, Session
 
@@ -18,7 +20,7 @@ from services import (
     audit_service,
     permission_service,
 )
-from services.ai_redaction import enthaelt_zugangsdaten, redact_sensitive_text
+from services.ai_redaction import enthaelt_zugangsdaten
 from services.ai_embedding_service import EMBEDDING_DIMENSIONS
 from services.ai_embedding_service import MODEL_TAG as _EMBEDDING_MODEL_TAG
 from services.dis_client import DisClient, DisDecryptionError, DisSidecarError
@@ -29,6 +31,19 @@ logger = logging.getLogger(__name__)
 #: Was diesem Benutzer gehoert und deshalb an seiner Einwilligung haengt.
 #: `team` und `panel` gehoeren dem Team bzw. dem Betreiber.
 PERSOENLICHE_SCOPES = ("user", "server")
+#: Wieviele Eintraege eine Seite der Profilansicht traegt.
+#:
+#: Die Zahl steht hier und nicht in der Anfrage. Jede Zeile dieser Seite kostet
+#: einen eigenen Roundtrip zum DIS-Sidecar; wer die Grenze selbst setzen
+#: duerfte, koennte sich 5.000 davon auf einmal bestellen — gemessen am
+#: 19.08.2026 sind das 10,3 s bei 2 ms je Roundtrip, genug fuer ein
+#: Gateway-Timeout. Der Aufrufer sagt also nur, *wo* er weiterlesen will, nie
+#: *wieviel*.
+#:
+#: 200 bleibt bei 0,1 bis 0,4 s und ist immer noch eine Seite, die ein Mensch
+#: ueberfliegen kann. Der Deckel je Bereich liegt bei 5.000 — das sind 25
+#: Seiten und damit eine Zahl, die man auch durchblaettert.
+PERSONAL_PAGE_SIZE = 200
 # Der **Sockel** des Blocks: soviel Platz bekommt das Gedächtnis, wenn der
 # Aufrufer kein Kontextfenster nennt. Wer eines kennt, reicht es als `budget`
 # an `provider_memory_context` durch — die Zahl kommt dann aus
@@ -48,10 +63,14 @@ MAX_CONTEXT_CHARS = 6_000
 # sehen darf, und jedem Team, das er gruendet, kommt ein weiterer Bereich hinzu.
 # `provider_memory_context` filtert nur `server_shared` auf den einen aktuellen
 # Server — die persoenlichen Servernotizen kommen fuer *alle* sichtbaren Server
-# mit. Bei einem Rollenlimit von 1.000 und zwanzig Anlagen waren das ueber
-# 21.000 Zeilen, und jede kostet in `_entschluesseln` einen synchronen
+# mit. Bei einem Rollenlimit an der Obergrenze
+# (`ai_limit_service.MAX_MEMORY_ENTRIES_MAX`, heute 5.000) und zwanzig Anlagen
+# sind das über 105.000 Zeilen, und jede kostet in `_entschluesseln` einen eigenen
 # HTTP-Roundtrip zum DIS-Sidecar — vor dem Schnitt auf `MAX_CONTEXT_CHARS`,
-# weil sich erst am Klartext messen laesst, was ins Budget passt.
+# weil sich erst am Klartext messen laesst, was ins Budget passt. Die
+# Roundtrips laufen inzwischen zu mehreren gleichzeitig
+# (`_ENTSCHLUESSELN_GLEICHZEITIG`); das teilt den Aufwand, es begrenzt ihn
+# nicht — dafuer ist dieser Deckel da.
 #
 # 300 ist gegen genau dieses Budget gewaehlt: bei kurzen Eintraegen passen
 # hoechstens rund 150 Zeilen in 6.000 Zeichen, der Deckel liegt also beim
@@ -118,6 +137,26 @@ DUPLIKAT_AB = 0.70
 #: das war beim Vorgaenger der Fehler, gegen den `recency` eingebaut wurde.
 NEUHEITSSCHUTZ_TAGE = 3.0
 _WORD_RE = re.compile(r"[\w]+", re.UNICODE)
+
+#: Wieviele Zeilen gleichzeitig beim DIS-Sidecar liegen duerfen.
+#:
+#: An einer Entschluesselung ist fast nichts Rechnung: der Sidecar oeffnet ein
+#: paar hundert Byte AES-GCM, alles andere ist der Weg hin und zurueck. Gehen
+#: die Zeilen nacheinander, addiert sich genau diese Wartezeit — gemessen am
+#: 19.08.2026 bei 300 Zeilen 150 ms (0,5 ms je Roundtrip) bis 600 ms (2 ms),
+#: die der Benutzer vor dem ersten Byte der Antwort absitzt. `personal_entries`
+#: traegt denselben Aufschlag je Eintrag und war deshalb der teurere Weg: ohne
+#: Grenze waren es dort bei 5.000 Zeilen 10,3 s. Seit die Profilansicht
+#: seitenweise laedt (`PERSONAL_PAGE_SIZE`), sind es 200 Zeilen je Klick.
+#: Nebenlaeufig faellt davon der Bruchteil an.
+#:
+#: Acht ist bewusst eine kleine feste Zahl und keine Einstellung. Der Sidecar
+#: ist ein einzelner Node-Prozess auf demselben Rechner; mehr gleichzeitige
+#: Verbindungen kaufen dort nichts, weil die Zeit im Roundtrip liegt und nicht
+#: in seiner Rechenzeit. Wirklich billiger waere ein Sammelendpunkt — den gibt
+#: es heute nicht: `dis-sidecar/server.mjs` kennt unter `/decrypt` genau einen
+#: Ciphertext je Anfrage.
+_ENTSCHLUESSELN_GLEICHZEITIG = 8
 
 
 class MemoryScopeVoll(HTTPException):
@@ -335,8 +374,32 @@ def list_entries(
     return _entschluesseln_lesbare(rows)
 
 
-def personal_entries(db: Session, user: User) -> list[tuple[AiMemoryEntry, str]]:
-    """Alles, was diesem Benutzer selbst gehoert — persoenlich und serverbezogen.
+@dataclass(frozen=True)
+class PersoenlicheSeite:
+    """Ein Ausschnitt der Profilansicht und die zwei Zahlen daneben.
+
+    Beide Zahlen zaehlen etwas anderes, und beide werden gebraucht:
+
+    * ``gesamt`` traegt die Ansage ueber der Liste ("5.000 Eintraege, Seite 1
+      von 25"). Ohne sie waere die Seitenweise genau der stille Deckel, den sie
+      ersetzen soll — der Benutzer saehe 200 Zeilen und nichts, was ihm sagt,
+      dass 4.800 dahinterliegen.
+    * ``allgemein`` sind davon die mit ``scope='user'``. Genau die und nur die
+      raeumt "Alle loeschen" ab: geloescht wird ueber die Kennung ``user:{id}``,
+      die Servernotizen liegen unter ``server:{sid}:user:{uid}`` und bleiben
+      stehen. Die Bestaetigungsfrage muss die Zahl nennen, die sie danach
+      wirklich trifft — sonst fragt sie nach 200 und meldet 4.800.
+    """
+
+    eintraege: list[tuple[AiMemoryEntry, str]]
+    gesamt: int
+    allgemein: int
+
+
+def personal_entries(
+    db: Session, user: User, *, offset: int = 0
+) -> PersoenlicheSeite:
+    """Eine Seite von allem, was diesem Benutzer selbst gehoert.
 
     `list_entries` fragt genau eine Scope-Kennung ab und braucht dafuer bei
     serverbezogenen Notizen eine konkrete `server_id`. Damit war der Bereich
@@ -350,24 +413,52 @@ def personal_entries(db: Session, user: User) -> list[tuple[AiMemoryEntry, str]]
     `server.view` geprueft: es ist der eigene Eintrag, und wer den Zugriff auf
     einen Server verliert, soll seine Notiz dazu weiterhin loeschen koennen.
 
-    Bewusst **ohne** `MAX_CONTEXT_ROWS`: dieser Weg traegt denselben
-    Multiplikator wie der Kontextaufbau (ein Bereich je sichtbarem Server), aber
-    nicht dieselbe Frage. Hier hat der Benutzer genau diese Liste angefordert,
-    einmal, und will sie aufraeumen — eine Ansicht, die stillschweigend 300 von
-    400 Eintraegen zeigt, waere schlimmer als eine langsame: sie verstecke
-    genau die Zeilen, die zu loeschen er gekommen ist. Der Deckel dort schuetzt
-    *jede* Chatnachricht, dieser Aufruf geschieht auf Klick.
+    **Seitenweise statt gedeckelt.** Bis der Bereich 1.000 Eintraege fasste,
+    ging hier alles auf einmal durch den Sidecar; bei 5.000 sind das gemessen
+    10,3 s (2 ms je Roundtrip) und der Multiplikator je sichtbarem Server kommt
+    noch obendrauf. Ein `MAX_CONTEXT_ROWS` wie im Chatweg waere hier trotzdem
+    die falsche Antwort und bleibt es: dort schuetzt der Deckel *jede*
+    Nachricht und schneidet an einer Rangfolge, die zur Frage passt — hier hat
+    der Benutzer genau diese Liste angefordert, um sie aufzuraeumen, und eine
+    Ansicht, die stillschweigend 300 von 5.000 zeigt, versteckte genau die
+    Zeilen, wegen denen er gekommen ist.
+
+    Der Unterschied ist, dass eine Seite nichts verschweigt: `gesamt` steht
+    daneben, und die naechste Seite ist einen Klick entfernt. `offset` ist das
+    einzige, was der Aufrufer bestimmt — die Groesse gehoert dem Dienst
+    (`PERSONAL_PAGE_SIZE`), weil sie in Sidecar-Roundtrips bezahlt wird.
+
+    Sortiert wird nach zuletzt genutzt, Ungenutztes hinten, dann nach
+    Schluessel — dieselbe Reihenfolge, die die Oberflaeche schon immer
+    herstellte. Das ist ab jetzt keine Geschmacksfrage mehr, sondern die
+    Schnittkante: welche Zeile auf Seite 3 landet, entscheidet allein diese
+    Sortierung. Wer sie hier aendert, aendert die Seiteneinteilung.
     """
+    basis = db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.owner_user_id == user.id,
+        AiMemoryEntry.scope.in_(PERSOENLICHE_SCOPES),
+    )
     rows = (
-        db.query(AiMemoryEntry)
-        .filter(
-            AiMemoryEntry.owner_user_id == user.id,
-            AiMemoryEntry.scope.in_(PERSOENLICHE_SCOPES),
+        basis
+        # `last_used_at IS NULL` als erstes Kriterium statt `NULLS LAST`: das
+        # ist auf SQLite wie auf PostgreSQL dasselbe Ergebnis, waehrend die
+        # beiden ohne Angabe entgegengesetzt sortieren (PostgreSQL stellt NULL
+        # bei DESC nach vorn, SQLite nach hinten). Bei einer Seiteneinteilung
+        # waere das nicht Kosmetik, sondern eine andere Seite je Datenbank.
+        .order_by(
+            AiMemoryEntry.last_used_at.is_(None),
+            AiMemoryEntry.last_used_at.desc(),
+            AiMemoryEntry.key,
         )
-        .order_by(AiMemoryEntry.scope, AiMemoryEntry.server_id, AiMemoryEntry.key)
+        .offset(max(0, offset))
+        .limit(PERSONAL_PAGE_SIZE)
         .all()
     )
-    return _entschluesseln_lesbare(rows)
+    return PersoenlicheSeite(
+        eintraege=_entschluesseln_lesbare(rows),
+        gesamt=basis.count(),
+        allgemein=basis.filter(AiMemoryEntry.scope == "user").count(),
+    )
 
 
 def _assert_may_write(
@@ -487,27 +578,67 @@ def _bereichsname(
     return "dieser Bereich"
 
 
-def _bestandsabfrage(db: Session, identity: str) -> Query:
-    """Die Zeilen eines Bereichs — gezählt **und** bis zum Commit gesperrt.
+def _sperrzeile(db: Session, identity: str) -> Query:
+    """Die eine Zeile, auf der zwei gleichzeitige Schreiber aufeinandertreffen.
 
-    Zwischen der Zählung in `upsert_entry` und dem `db.add()` danach lag keine
-    Sperre. Zwei gleichzeitige Läufe mit verschiedenen Schlüsseln — Chat und
-    Sprachsitzung sind ausdrücklich möglich — sahen beide denselben Bestand und
-    legten beide an; die einzige Datenbankzusage ist der UNIQUE auf
+    Zwischen der Zählung in `upsert_entry` und dem `db.add()` danach lag einmal
+    keine Sperre. Zwei gleichzeitige Läufe mit verschiedenen Schlüsseln — Chat
+    und Sprachsitzung sind ausdrücklich möglich — sahen beide denselben Bestand
+    und legten beide an; die einzige Datenbankzusage ist der UNIQUE auf
     (scope_identity, key) und greift bei verschiedenen Schlüsseln gar nicht.
     Die Bereichsgrenze war damit eine Bitte, keine Grenze.
 
-    `count()` verträgt kein `FOR UPDATE`, deshalb die Liste der IDs statt einer
-    Zahl: bei höchstens 1.000 Zeilen je Bereich ist das eine billige Abfrage.
-    Das `order_by` ist gegen Verklemmungen — zwei Schreiber sperren dieselben
-    Zeilen dann in derselben Reihenfolge. Auf SQLite (Testsuite) ist `FOR
-    UPDATE` ein No-Op; das Verhalten dort bleibt unverändert.
+    Gesperrt wird dafür **eine** Zeile und nicht der ganze Bereich. Bis
+    `MAX_MEMORY_ENTRIES_MAX` auf 5.000 stieg, war das dasselbe in teuer: beide
+    Schreiber lesen in derselben Reihenfolge, sie treffen sich also ohnehin an
+    der ersten Zeile — wer danach noch 4.999 weitere sperrt, kauft damit keine
+    zusätzliche Ausschließlichkeit, nur Arbeit. Gemessen gegen PostgreSQL 17
+    (local-plans/mess-bestandssperre.py): alle 5.000 Zeilen sperren kostet
+    10–18 ms und 281 KB WAL **je gemerktem Satz**, diese eine Zeile 0,5 ms und
+    56 Bytes. Der Rest des Bereichs bleibt dabei schreibbar — der Abrufweg
+    zählt Nutzung hoch und schreibt Vektoren nach, und das lief bisher gegen
+    die Sperre des Schreibenden.
+
+    Dass der Treffpunkt hält, hängt am `LIMIT` **über** der Sperre: geliefert
+    wird die erste Zeile, die sich auch wirklich sperren lässt. Wurde die
+    bisher erste gerade gelöscht, rücken alle Wartenden gemeinsam auf die
+    nächste. Und eine Zeile, die sich davor einsortiert, kann nur anlegen, wer
+    selbst durch diese Sperre gegangen ist — die Reihenfolge ist deshalb kein
+    Schmuck, sondern die Zusage.
+
+    Zwei Grenzen, unverändert zu vorher: ein **leerer** Bereich hat keine Zeile
+    zum Sperren, dort können zwei erste Einträge nebeneinander entstehen. Und
+    auf SQLite (Testsuite) ist `FOR UPDATE` ein No-Op.
     """
     return (
         db.query(AiMemoryEntry.id)
         .filter(AiMemoryEntry.scope_identity == identity)
         .order_by(AiMemoryEntry.id)
+        .limit(1)
         .with_for_update()
+    )
+
+
+def _bestand_unter_sperre(db: Session, identity: str) -> int:
+    """Wieviele Einträge der Bereich führt — gezählt hinter der Sperre.
+
+    Erst sperren, dann zählen, und diese Reihenfolge ist der eigentliche Punkt.
+    Vorher taten beides eine einzige Abfrage, weil `count()` kein `FOR UPDATE`
+    verträgt und deshalb die Liste der IDs herhalten musste. Das kostete nicht
+    nur — es zählte auch falsch: der wartende Schreiber bekam die Zeilen aus
+    dem Schnappschuss von **vor** dem Warten. Gemessen (siehe `_sperrzeile`)
+    zählte er 5.001, während in der Datenbank bereits 5.002 standen, und legte
+    darauf den 5.003. an. Als eigene Anweisung **nach** der Sperre sieht die
+    Zählung den fremden Eintrag; dieselbe Messung ergibt dann 5.001 von 5.001.
+
+    Der Bereich ist bis zum Commit gesperrt, die Zahl gilt also bis dahin.
+    """
+    _sperrzeile(db, identity).first()
+    return int(
+        db.query(func.count(AiMemoryEntry.id))
+        .filter(AiMemoryEntry.scope_identity == identity)
+        .scalar()
+        or 0
     )
 
 
@@ -553,7 +684,7 @@ def upsert_entry(
         grenze = ai_limit_service.resolve_scope_memory_limit(
             db, scope, user, team_id=normalized_team_id, server_id=normalized_server_id,
         )
-        bestand = len(_bestandsabfrage(db, identity).all())
+        bestand = _bestand_unter_sperre(db, identity)
         if bestand >= grenze:
             # Hier steht die **Tatsache**, in Sätzen, die ein Mensch versteht —
             # und nichts sonst. Vorher stand hier eine Regieanweisung an das
@@ -968,12 +1099,50 @@ def _relevance(
     return _bewertung(row, f"{row.key} {value}", query_tokens, now, similarity)
 
 
+#: Die vier Gewichte von `_bewertung`: Bedeutung, Bezug zur Frage, Nutzung,
+#: Aktualitaet — einmal fuer die Auswahl **mit** Klartext und einmal fuer die
+#: Vorauswahl davor.
+#:
+#: **Es bleibt eine Formel.** Was wechselt, sind die Gewichte, nicht die
+#: Rechnung; der Docstring von `_bewertung` erklaert, warum zwei getrennt
+#: gepflegte Kopien hier besonders tueckisch waeren.
+#:
+#: **Warum die Vorauswahl die Nutzung nicht mitzaehlt.** Gemessen am 19.08.2026
+#: an 5.000 Eintraegen und zehn Fragen mit bekannter Antwort: mit den Gewichten
+#: der Auswahl ueberlebten 4 von 10 gesuchten Eintraegen den Schnitt auf
+#: `MAX_CONTEXT_ROWS` — ohne den Nutzungsterm 6, ohne Nutzung und mit doppelter
+#: Bedeutung 7. Der Grund steht in den Groessenordnungen: bei 5.000 Zeilen liegt
+#: die Punktschwelle des 300. Platzes bei 10,31 bis 11,18, und Nutzung (bis
+#: 10,0) und Aktualitaet (bis 2,0) bilden sie allein. Die Bedeutung bringt
+#: gegen diese Schwelle hoechstens 6,0 und real 1,03 bis 3,91 — ein perfekter
+#: Bedeutungstreffer reichte also nicht gegen eine oft gebrauchte Zeile, die mit
+#: der Frage nichts zu tun hat. Bei hundert Eintraegen fiel das nicht auf, weil
+#: da noch alles mitging; die Formel skaliert nicht mit der Menge, sie kippt.
+#:
+#: **Warum die Aktualitaet trotzdem stehenbleibt.** Ohne den Nutzungsterm kann
+#: sie die Bedeutung nicht mehr ueberstimmen (2,0 gegen 12,0). Dafuer ist sie
+#: der einzige Anteil, der Zeilen **ohne** Vektor noch sinnvoll ordnet — ohne
+#: geladenes Modell ist die Bedeutung fuer jede Zeile 0,0 und der Wortbezug
+#: sieht nur den Schluessel. Genau das sichert `_vorauswahl` zu: wer noch nie
+#: eingebettet wurde, soll nicht schon deshalb herausfallen. Die reine
+#: Bedeutung haette 8 von 10 gerettet und diese Zusage aufgegeben.
+#:
+#: **Und warum die Nutzung nach dem Entschluesseln bleibt.** Sie ist dort
+#: richtig: das Feld ist klein, der Klartext liegt vor, und sie ist der einzige
+#: sprachunabhaengige Anteil, wenn jemand auf Englisch nach deutschen Notizen
+#: fragt. Falsch war allein, sie darueber entscheiden zu lassen, was die KI
+#: ueberhaupt zu sehen bekommt.
+GEWICHTE_AUSWAHL = (6.0, 3.0, 0.5, 2.0)
+GEWICHTE_VORAUSWAHL = (12.0, 3.0, 0.0, 2.0)
+
+
 def _bewertung(
     row: AiMemoryEntry,
     text: str,
     query_tokens: set[str],
     now: datetime,
     similarity: float | None = None,
+    gewichte: tuple[float, float, float, float] = GEWICHTE_AUSWAHL,
 ) -> float:
     """Die Formel hinter `_relevance` — mit dem Vergleichstext als Parameter.
 
@@ -984,7 +1153,12 @@ def _bewertung(
     hier besonders tueckisch — die Vorauswahl entschiede dann nach anderen
     Massstaeben, als die Auswahl unmittelbar danach anlegt, und die Zeile fiele
     in der ersten Runde heraus, die in der zweiten gewonnen haette.
+
+    Genau deshalb sind die Gewichte ein Parameter und keine zweite Kopie: die
+    beiden Zeitpunkte wiegen verschieden schwer (`GEWICHTE_VORAUSWAHL` gegen
+    `GEWICHTE_AUSWAHL`, Begruendung dort), aber sie rechnen dasselbe.
     """
+    w_bedeutung, w_bezug, w_nutzung, w_aktualitaet = gewichte
     overlap = len(query_tokens & _tokens(text))
     reference = row.last_used_at or row.updated_at or row.created_at
     age_days = max(0.0, (now - _utc(reference)).total_seconds() / 86_400)
@@ -992,7 +1166,12 @@ def _bewertung(
     # Negative Aehnlichkeit heisst "hat nichts miteinander zu tun" und darf
     # einen Eintrag nicht unter einen ohne Vektor druecken.
     meaning = max(0.0, similarity) if similarity is not None else 0.0
-    return meaning * 6.0 + overlap * 3.0 + min(row.use_count, 20) * 0.5 + recency * 2.0
+    return (
+        meaning * w_bedeutung
+        + overlap * w_bezug
+        + min(row.use_count, 20) * w_nutzung
+        + recency * w_aktualitaet
+    )
 
 
 def _vorauswahl(
@@ -1004,10 +1183,9 @@ def _vorauswahl(
     """Kuerzt die Zeilenmenge, **bevor** sie entschluesselt wird.
 
     Der Trick liegt darin, dass die Rangfolge den Klartext fast nicht braucht:
-    `_similarities` liest den gespeicherten Vektor von der Zeile, Nutzung und
-    Aktualitaet stehen als Spalten daneben, und `row.key` ist ohnehin Klartext —
-    verschluesselt ist allein der Wert. Von den vier Kriterien in `_bewertung`
-    sind hier also drei in voller Staerke da; nur die Wortueberlappung sieht den
+    `_similarities` liest den gespeicherten Vektor von der Zeile, die
+    Aktualitaet steht als Spalte daneben, und `row.key` ist ohnehin Klartext —
+    verschluesselt ist allein der Wert. Nur die Wortueberlappung sieht hier den
     Schluessel statt Schluessel und Wert.
 
     Das ist der Preis, und er ist der richtige: die Alternative waere, alles zu
@@ -1015,6 +1193,12 @@ def _vorauswahl(
     den dieser Deckel steht. Und er faellt nur an, wo er kaum wiegt: unterhalb
     von ``limit`` gibt die Funktion die Liste **unveraendert** zurueck, nicht
     einmal neu sortiert.
+
+    **Was hier bewusst nicht mitzaehlt, ist die Nutzung.** Sie stuende als
+    Spalte bereit, aber diese Stufe entscheidet, was die KI ueberhaupt zu sehen
+    bekommt, und dafuer taugt nur, was mit der *Frage* zu tun hat. Gemessen
+    ueberlebten mit ihr 4 von 10 gesuchten Eintraegen den Schnitt, ohne sie 7 —
+    die Begruendung mit allen Zahlen steht an `GEWICHTE_VORAUSWAHL`.
 
     Hat ein Eintrag keinen Vektor, liefert `_similarities` fuer ihn ``None``.
     Das heisst dort ausdruecklich "kein Vergleich moeglich" und nicht
@@ -1032,7 +1216,9 @@ def _vorauswahl(
     scores = _similarities(query, rows)
     ranked = sorted(
         zip(rows, scores),
-        key=lambda paar: _bewertung(paar[0], paar[0].key, query_tokens, now, paar[1]),
+        key=lambda paar: _bewertung(
+            paar[0], paar[0].key, query_tokens, now, paar[1], GEWICHTE_VORAUSWAHL
+        ),
         reverse=True,
     )
     return [row for row, _score in ranked[:limit]], True
@@ -1104,8 +1290,9 @@ def _vektoren_nachziehen(decoded: list[tuple[AiMemoryEntry, str]]) -> None:
     Ein Aufruf für alle offenen Zeilen, wie `aehnlicher_eintrag` es auch tut.
 
     Bewusst nur an dieser einen Stelle: `list_entries` und `personal_entries`
-    sind Verwaltungsansichten ohne Deckel, dort gehört kein Rechenschritt hin.
-    Fehlt das Modell weiterhin, passiert schlicht nichts.
+    sind Verwaltungsansichten, dort gehört kein Rechenschritt hin — auch nicht,
+    seit die zweite seitenweise lädt und damit eine überschaubare Menge vor
+    sich hat. Fehlt das Modell weiterhin, passiert schlicht nichts.
     """
     offen = [(row, value) for row, value in decoded if _stored_vector(row) is None]
     if not offen:
@@ -1259,16 +1446,7 @@ def _entschluesseln(rows: list[AiMemoryEntry]) -> list[tuple[AiMemoryEntry, str]
     einen Assistenten ohne Gedaechtnis statt gar keinen. Sichtbar bleibt es
     ueber das Protokoll — je Zeile eine Warnung.
     """
-    entschluesselt: list[tuple[AiMemoryEntry, str]] = []
-    for row in rows:
-        try:
-            entschluesselt.append((row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))))
-        except DisSidecarError as exc:
-            logger.warning(
-                "Gedaechtniseintrag %s (%s) nicht lesbar, wird uebersprungen: %s",
-                row.id, row.scope, type(exc).__name__,
-            )
-    return entschluesselt
+    return _entschluesseln_nebenlaeufig(rows, uebergehen=DisSidecarError)
 
 
 def _entschluesseln_lesbare(rows: list[AiMemoryEntry]) -> list[tuple[AiMemoryEntry, str]]:
@@ -1292,15 +1470,71 @@ def _entschluesseln_lesbare(rows: list[AiMemoryEntry]) -> list[tuple[AiMemoryEnt
     Der Chatweg (`_entschluesseln`) wählt genau andersherum, und aus demselben
     Grund: dort ist ein Assistent ohne Gedächtnis besser als gar keiner.
     """
-    entschluesselt: list[tuple[AiMemoryEntry, str]] = []
-    for row in rows:
+    return _entschluesseln_nebenlaeufig(rows, uebergehen=DisDecryptionError)
+
+
+def _entschluesseln_nebenlaeufig(
+    rows: list[AiMemoryEntry], *, uebergehen: type[DisSidecarError]
+) -> list[tuple[AiMemoryEntry, str]]:
+    """Der gemeinsame Rumpf der beiden Helfer darueber — mehrere Zeilen zugleich.
+
+    Die beiden unterscheiden sich in genau einer Ausnahmeklasse, und diese
+    Funktion nimmt sie als ``uebergehen`` entgegen: was darunter faellt, wird
+    still uebersprungen, alles andere fliegt weiter zum Aufrufer. Zwei getrennt
+    gepflegte Schleifen waeren hier dieselbe Falle wie zwei getrennte
+    Bewertungsformeln — eine davon bekaeme eine Verbesserung, die andere nicht.
+
+    **Warum ueberhaupt nebenlaeufig.** Jede Zeile ist ein eigener HTTP-POST an
+    den DIS-Sidecar; sequenziell schlaegt deren Zahl eins zu eins in die
+    Wartezeit des Benutzers durch (Begruendung und Zahlen an
+    `_ENTSCHLUESSELN_GLEICHZEITIG`). `httpx.Client` ist threadsicher und wird
+    in `dis_client` ohnehin als einer gehalten — mehr als ein paar Threads
+    braucht es dafuer nicht.
+
+    **Was nicht in die Threads darf: die Sitzung.** `_aad` liest
+    `aad_version`, `scope_identity` und `id` von einem SQLAlchemy-Objekt, und
+    eine abgelaufene Zeile laedt dabei nach. Ein solcher Zugriff aus einem
+    Thread waere ein zweiter Benutzer derselben Session, und die ist nicht
+    threadsicher. Deshalb werden Ciphertext und AAD **hier** fertiggestellt;
+    was hinuebergeht, sind reine Zeichenketten.
+
+    Der Fehler kommt aus dem Thread als Rueckgabewert zurueck und nicht als
+    Ausnahme: ob er uebergangen oder weitergereicht wird, entscheidet der
+    Aufrufer, und diese Entscheidung gehoert hierher.
+    """
+    if not rows:
+        return []
+    auftraege = [(row.value_encrypted, _aad(row)) for row in rows]
+
+    def oeffnen(ciphertext: str, aad: str) -> str | DisSidecarError:
         try:
-            entschluesselt.append((row, DisClient.decrypt(row.value_encrypted, aad=_aad(row))))
-        except DisDecryptionError as exc:
-            logger.warning(
-                "Gedächtniseintrag %s (%s) nicht lesbar, wird übersprungen: %s",
-                row.id, row.scope, type(exc).__name__,
-            )
+            return DisClient.decrypt(ciphertext, aad=aad)
+        except DisSidecarError as exc:
+            return exc
+
+    entschluesselt: list[tuple[AiMemoryEntry, str]] = []
+    with ThreadPoolExecutor(
+        max_workers=min(_ENTSCHLUESSELN_GLEICHZEITIG, len(auftraege)),
+        thread_name_prefix="dis-decrypt",
+    ) as pool:
+        offen = [pool.submit(oeffnen, ciphertext, aad) for ciphertext, aad in auftraege]
+        for row, auftrag in zip(rows, offen):
+            ergebnis = auftrag.result()
+            if isinstance(ergebnis, DisSidecarError):
+                if not isinstance(ergebnis, uebergehen):
+                    # Der tote Sidecar in der Verwaltungsansicht: dann scheitert
+                    # ohnehin jede Zeile. Sequenziell hoerte die Schleife bei
+                    # der ersten auf; ohne das Abraeumen liefe jede uebrige noch
+                    # in ihren eigenen 15-Sekunden-Zeitablauf, und aus einem
+                    # ehrlichen 503 wuerde eine Seite, die minutenlang haengt.
+                    pool.shutdown(cancel_futures=True)
+                    raise ergebnis
+                logger.warning(
+                    "Gedächtniseintrag %s (%s) nicht lesbar, wird übersprungen: %s",
+                    row.id, row.scope, type(ergebnis).__name__,
+                )
+                continue
+            entschluesselt.append((row, ergebnis))
     return entschluesselt
 
 

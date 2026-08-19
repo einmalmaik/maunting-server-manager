@@ -59,6 +59,30 @@ class AiMemoryResponse(BaseModel):
     updated_at: datetime
 
 
+class AiMemoryPersonalPage(BaseModel):
+    """Ein Ausschnitt der persoenlichen Erinnerungen — und was daneben steht.
+
+    Eine nackte Liste haette hier gereicht, solange ein Benutzer hundert
+    Eintraege hatte. Bei 5.000 nicht mehr: jede Zeile kostet einen eigenen
+    Roundtrip zum DIS-Sidecar, und die Seite waere nach zehn Sekunden noch
+    nicht da. Sie kommt deshalb in Stuecken — und weil ein Stueck fuer sich
+    genommen luegen wuerde ("das ist alles"), tragen die drei Zahlen die
+    Wahrheit daneben.
+    """
+
+    entries: list[AiMemoryResponse]
+    #: Alle persoenlichen Zeilen zusammen, allgemeine und serverbezogene. Steht
+    #: sichtbar ueber der Liste, damit die Seitenweise kein stiller Deckel ist.
+    total: int
+    #: Davon die allgemeinen (``scope='user'``) — genau die, und nur die, nimmt
+    #: "Alle loeschen" mit. Die Bestaetigungsfrage nennt diese Zahl.
+    clearable: int
+    #: Wie gross eine Seite ist. Bestimmt der Server, weil er sie in
+    #: Sidecar-Roundtrips bezahlt; die Oberflaeche rechnet daraus ihre
+    #: Seitenzahl und den naechsten Offset.
+    limit: int
+
+
 class AiMemoryPreferenceResponse(BaseModel):
     enabled: bool
     # Ob die Oberflaeche den Hinweis vor der naechsten Nachricht zeigen soll.

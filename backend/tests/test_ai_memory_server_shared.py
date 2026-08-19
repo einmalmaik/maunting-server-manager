@@ -774,7 +774,7 @@ def test_the_shared_area_does_not_show_up_in_a_personal_profile(
 
     eigene = ai_memory_service.personal_entries(db, regular_user)
 
-    assert [wert for _row, wert in eigene] == ["Gehoert mir."]
+    assert [wert for _row, wert in eigene.eintraege] == ["Gehoert mir."]
 
 
 def test_two_colleagues_share_one_key_instead_of_doubling_it(

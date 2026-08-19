@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { aiApi, type AiMemoryEntry } from '@/api/ai'
+import { aiApi, type AiMemoryEntry, type AiMemoryPage } from '@/api/ai'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { confirm } from '@/stores/confirmStore'
@@ -52,6 +52,22 @@ const learned: AiMemoryEntry = {
   last_used_at: '2026-08-05T09:00:00Z',
 }
 
+/**
+ * Die Seitenhülle um eine Liste, wie sie `GET /ai/memory/personal` liefert.
+ *
+ * `clearable` wird hier ausgerechnet statt gesetzt, weil das Backend genau das
+ * tut: „Alle löschen" trifft im Profil nur die allgemeinen Einträge, die
+ * Notizen zu einzelnen Servern stehen daneben und bleiben stehen. Ein
+ * hartkodierter Wert ließe die Tests grün, die diese Unterscheidung prüfen.
+ */
+const seite = (rows: AiMemoryEntry[], rest: Partial<AiMemoryPage> = {}): AiMemoryPage => ({
+  entries: rows,
+  total: rows.length,
+  clearable: rows.filter((row) => row.scope === 'user').length,
+  limit: 200,
+  ...rest,
+})
+
 /** Genug Einträge, damit Suche, Filter und Zähler überhaupt erscheinen. */
 const viele: AiMemoryEntry[] = [
   entry,
@@ -69,7 +85,8 @@ describe('AiMemoryManager', () => {
       error: null,
     })
     vi.mocked(aiApi.listMemory).mockReset().mockResolvedValue([entry])
-    vi.mocked(aiApi.listPersonalMemory).mockReset().mockResolvedValue([entry])
+    vi.mocked(aiApi.listPersonalMemory).mockReset().mockResolvedValue(seite([entry]))
+    vi.mocked(aiApi.deleteMemory).mockClear()
     vi.mocked(aiApi.getMemoryPreference).mockReset().mockResolvedValue({ enabled: true, notice_due: false, notice_hidden: false })
     vi.mocked(aiApi.setMemoryPreference).mockReset().mockResolvedValue({ enabled: false, notice_due: false, notice_hidden: false })
     vi.mocked(aiApi.saveMemory).mockReset().mockResolvedValue(entry)
@@ -97,7 +114,7 @@ describe('AiMemoryManager', () => {
     // eigene Ansage ist oder eine Ableitung der KI — und genau daran haengt,
     // wie sehr man ihm trauen sollte.
     vi.mocked(aiApi.listMemory).mockResolvedValue([entry, learned])
-    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue([entry, learned])
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([entry, learned]))
     render(<AiMemoryManager />)
 
     expect(await screen.findByText('von der KI gemerkt')).toBeInTheDocument()
@@ -111,7 +128,7 @@ describe('AiMemoryManager', () => {
     // "was hat sich die KI ueber mich gemerkt?" — etwas anderes als "was habe
     // ich ihr gesagt?".
     vi.mocked(aiApi.listMemory).mockResolvedValue(viele)
-    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(viele)
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite(viele))
     render(<AiMemoryManager />)
 
     expect(await screen.findByText('Europe/Berlin')).toBeInTheDocument()
@@ -139,7 +156,7 @@ describe('AiMemoryManager', () => {
       { ...entry, id: '...-108', scope: 'server', server_id: 62, key: 'startzeit', value: 'Braucht längeren Timeout' },
     ]
     vi.mocked(aiApi.listMemory).mockResolvedValue(mitServernotiz)
-    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(mitServernotiz)
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite(mitServernotiz))
     render(<AiMemoryManager />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Alle löschen' }))
@@ -172,7 +189,7 @@ describe('AiMemoryManager', () => {
     // Mitgliedschaft. Aendern verlangt den Schalter, und was man nicht darf,
     // soll gar nicht erst als Knopf dastehen.
     vi.mocked(aiApi.listMemory).mockResolvedValue([entry])
-    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue([entry])
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([entry]))
     render(<AiMemoryManager scope={{ kind: 'team', teamId: 7, canManage: false }} />)
 
     expect(await screen.findByText('Synthetic test preference')).toBeInTheDocument()
@@ -200,10 +217,10 @@ describe('AiMemoryManager', () => {
     // sichtbar oder loeschbar gewesen waeren: `listMemory('server', ...)` will
     // je Aufruf einen konkreten Server, den niemand raten kann.
     vi.mocked(client.api).mockResolvedValue([{ id: 62, name: 'DayZ-1' }])
-    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue([
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([
       entry,
       { ...entry, id: '...-105', scope: 'server', server_id: 62, key: 'startzeit', value: 'Braucht längeren Timeout' },
-    ])
+    ]))
     render(<AiMemoryManager />)
 
     expect(await screen.findByText('Braucht längeren Timeout')).toBeInTheDocument()
@@ -217,9 +234,9 @@ describe('AiMemoryManager', () => {
     // loeschbar — eigene Daten, die man nicht mehr loeschen kann, waeren das
     // schlechtere Ergebnis.
     vi.mocked(client.api).mockRejectedValue(new Error('kein Zugriff'))
-    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue([
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([
       { ...entry, id: '...-106', scope: 'server', server_id: 84, key: 'startzeit', value: 'Notiz zu einem entzogenen Server' },
-    ])
+    ]))
     render(<AiMemoryManager />)
 
     expect(await screen.findByText('Notiz zu einem entzogenen Server')).toBeInTheDocument()
@@ -233,9 +250,9 @@ describe('AiMemoryManager', () => {
     // wirkt mit dem alten Wert weiter, und ab da gehen beide Werte gemeinsam in
     // jedes Gespräch über diesen Server.
     vi.mocked(client.api).mockResolvedValue([{ id: 62, name: 'DayZ-1' }])
-    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue([
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(seite([
       { ...entry, id: '...-107', scope: 'server', server_id: 62, key: 'start-timeout', value: 'braucht 120s' },
-    ])
+    ]))
     render(<AiMemoryManager />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Erinnerung bearbeiten: start-timeout' }))
@@ -333,8 +350,8 @@ describe('AiMemoryManager', () => {
     const ohneTreffer = viele.filter((row) => row.id !== learned.id)
     vi.mocked(aiApi.listPersonalMemory)
       .mockReset()
-      .mockResolvedValueOnce(viele)
-      .mockResolvedValue(ohneTreffer)
+      .mockResolvedValueOnce(seite(viele))
+      .mockResolvedValue(seite(ohneTreffer))
     render(<AiMemoryManager />)
 
     fireEvent.change(await screen.findByLabelText('Erinnerungen durchsuchen'), { target: { value: 'ram' } })
@@ -347,5 +364,96 @@ describe('AiMemoryManager', () => {
     // Und man kommt auch wieder heraus.
     fireEvent.change(feld, { target: { value: '' } })
     expect(screen.getByText('Europe/Berlin')).toBeInTheDocument()
+  })
+
+  /**
+   * 5.000 Einträge, vier je Seite. Die Seitengröße kommt aus der Antwort, nicht
+   * aus der Oberfläche — deshalb steht sie hier und nicht als Konstante im Code.
+   */
+  const grosserVorrat = seite(viele, { total: 5000, clearable: 5000, limit: 4 })
+
+  it('nennt die Gesamtzahl und blättert, statt still zu deckeln', async () => {
+    // Der Vorrat darf 5.000 Einträge fassen, und jeder kostet beim Öffnen einen
+    // eigenen Aufruf an den DIS-Sidecar — alles auf einmal wären gemessen rund
+    // zehn Sekunden. Ein stiller Deckel wäre hier trotzdem die falsche Antwort:
+    // wer aufräumen will, darf nicht 200 von 5.000 zu sehen bekommen, ohne dass
+    // es irgendwo steht. Also eine Seite, die Gesamtzahl daneben, und ein Weg
+    // zur nächsten.
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(grosserVorrat)
+    render(<AiMemoryManager />)
+
+    expect(await screen.findByText('5000 Einträge insgesamt')).toBeInTheDocument()
+    expect(screen.getByText('Seite 1 von 1250')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Weiter' }))
+
+    // Der Offset ist die zweite Seite, nicht der zweite Eintrag: die Größe
+    // bestimmt der Server und sagt sie in `limit`.
+    await waitFor(() => expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(4))
+    expect(await screen.findByText('Seite 2 von 1250')).toBeInTheDocument()
+  })
+
+  it('sagt in der Suchbeschriftung, dass sie nur diese Seite kennt', async () => {
+    // Der Wert liegt verschlüsselt in der Datenbank; eine Suche über den ganzen
+    // Bestand hieße, alle 5.000 Zeilen zu öffnen — genau das, wogegen die
+    // Seitenweise gebaut ist. Sie kann also nur die geladene Seite durchsuchen,
+    // und dann muss sie das auch sagen.
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(grosserVorrat)
+    render(<AiMemoryManager />)
+
+    expect(await screen.findByLabelText('Diese Seite durchsuchen')).toBeInTheDocument()
+    // Und der Filter bleibt beim Blättern stehen, statt sich stillschweigend zu
+    // leeren: die Suche gilt weiter, nur eben für die nächste Seite.
+    fireEvent.change(screen.getByLabelText('Diese Seite durchsuchen'), { target: { value: 'berlin' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Weiter' }))
+
+    await waitFor(() => expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(4))
+    expect(screen.getByLabelText('Diese Seite durchsuchen')).toHaveValue('berlin')
+  })
+
+  it('fragt beim Leeren nach der Zahl des Servers, nicht nach der Seitenlänge', async () => {
+    // Die Ansicht sieht vier von 5.000. Rechnete sie die Frage aus dem aus, was
+    // vor ihr liegt, fragte sie nach vier und löschte 5.000 — und der Benutzer
+    // hätte genau einmal Gelegenheit, das zu bemerken.
+    vi.mocked(aiApi.listPersonalMemory).mockResolvedValue(grosserVorrat)
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Alle löschen' }))
+
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Wirklich alle 5000 Einträge löschen? Das lässt sich nicht rückgängig machen.',
+    })))
+  })
+
+  it('rutscht auf die letzte Seite, wenn die eigene beim Löschen verschwindet', async () => {
+    // Wer die letzte Zeile der letzten Seite löscht, stünde sonst vor „Seite 2
+    // von 1" und einer leeren Liste — die aussieht wie ein leeres Gedächtnis,
+    // obwohl vier Einträge da sind.
+    vi.mocked(aiApi.listPersonalMemory)
+      .mockReset()
+      .mockResolvedValueOnce(seite(viele, { total: 8, limit: 4, clearable: 8 }))
+      // Die zweite Seite ist inzwischen weg: nur noch vier Einträge insgesamt.
+      .mockResolvedValueOnce(seite([], { total: 4, limit: 4, clearable: 4 }))
+      .mockResolvedValue(seite(viele, { total: 4, limit: 4, clearable: 4 }))
+    render(<AiMemoryManager />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Weiter' }))
+
+    // Ein Nachschlag auf Offset 0 statt einer leeren Seite 2.
+    await waitFor(() => expect(aiApi.listPersonalMemory).toHaveBeenLastCalledWith(0))
+    expect(await screen.findByText('Europe/Berlin')).toBeInTheDocument()
+    // Eine Seite bleibt übrig, also verschwindet die Leiste ganz.
+    expect(screen.queryByRole('navigation', { name: 'Seitennavigation' })).toBeNull()
+  })
+
+  it('blättert nicht, wo es nichts zu blättern gibt', async () => {
+    // Die geteilten Bereiche kommen weiterhin auf einmal. Eine Leiste mit zwei
+    // toten Knöpfen wäre dort nur Kulisse.
+    vi.mocked(aiApi.listMemory).mockResolvedValue(viele)
+    render(<AiMemoryManager scope={{ kind: 'team', teamId: 7, canManage: true }} />)
+
+    expect(await screen.findByText('Europe/Berlin')).toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Seitennavigation' })).toBeNull()
+    expect(screen.getByLabelText('Erinnerungen durchsuchen')).toBeInTheDocument()
   })
 })

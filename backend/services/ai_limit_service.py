@@ -54,45 +54,65 @@ MONTHLY_COST_LIMIT_CENTS_MAX = 1_000_000_000
 # hier statt als Import: dieses Modul soll nicht von der Denklogik abhaengen,
 # und `test_ai_reasoning_limits.py` sichert zu, dass beide Werte gleich bleiben.
 MAX_REASONING_EFFORT_MAX = 6
-# Deckel fuer das konfigurierbare Rollenlimit. Er begrenzt **einen Bereich**,
-# nicht eine Anfrage. Hier stand vorher, 1_000 statt 10_000 verhindere eine
-# Selbst-DoS — eine Schutzwirkung, die diese Zahl nicht leisten kann, und
-# deshalb ist sie das Gefaehrlichste, was hier stehen konnte: sie beruhigt an
-# der Stelle, an der jemand nachrechnen muesste.
+# Deckel für das konfigurierbare Rollenlimit. Er begrenzt **einen Bereich**,
+# nicht eine Anfrage — und er ist eine Obergrenze für das, was der Betreiber
+# überhaupt einstellen darf, nicht eine Zahl, die irgendwo von selbst gilt. Wer
+# nichts hinterlegt, bleibt bei `MAX_SYSTEM_SCOPE_ENTRIES`; das Anheben dieser
+# Zahl verändert deshalb keine bestehende Installation, es macht nur mehr
+# einstellbar. Hier stand vorher, 1_000 statt 10_000 verhindere eine Selbst-DoS
+# — eine Schutzwirkung, die diese Zahl nicht leisten kann, und deshalb war sie
+# das Gefährlichste, was hier stehen konnte: sie beruhigt an der Stelle, an der
+# jemand nachrechnen müsste.
 #
 # Gezählt wird je ``scope_identity``: der persönliche Vorrat ist ein Bereich,
 # jeder sichtbare Server einer und jedes gegründete Team einer. Wieviele
 # Bereiche ein Benutzer hat, bestimmt damit er selbst, und die Zeilenmenge, die
-# eine Anfrage aus der Datenbank holt, ist Bereiche × Deckel. Ein VIP mit 1_000
-# und `server.view` auf zwanzig Anlagen bringt so über 21.000 Zeilen mit; fünf
-# sichtbare Server reichen für 6.000. Dagegen hilft eine Zahl je Bereich
+# eine Anfrage aus der Datenbank holt, ist Bereiche × Deckel. Ein VIP mit 5_000
+# und `server.view` auf zwanzig Anlagen bringt so über 105.000 Zeilen mit; fünf
+# sichtbare Server reichen für 30.000. Dagegen hilft eine Zahl je Bereich
 # grundsätzlich nicht.
 #
 # Teuer sind davon aber nur die Zeilen, die auch entschlüsselt werden, und die
 # sind gedeckelt: `provider_memory_context` kürzt die geladene Menge in
-# `_vorauswahl` auf `MAX_CONTEXT_ROWS`, **bevor** `_entschluesseln` je Zeile
-# einen synchronen DIS-Sidecar-Roundtrip absetzt. Bewerten kann `_vorauswahl`
+# `_vorauswahl` auf `MAX_CONTEXT_ROWS`, **bevor** `_entschluesseln` sie beim
+# DIS-Sidecar öffnet — seit dem 19.08.2026 zu acht gleichzeitig statt Zeile für
+# Zeile, was die Wartezeit teilt, aber nichts an der Zahl der Roundtrips
+# ändert: gedeckelt bleibt sie durch `MAX_CONTEXT_ROWS`. Bewerten kann `_vorauswahl`
 # ohne Klartext, weil Vektor, Nutzung, Aktualität und der Schlüssel
 # unverschlüsselt an der Zeile stehen. Eine Chatanfrage kostet damit so viele
 # Roundtrips und nicht „Bereiche × Deckel". Die Zahl steht bewusst nicht hier:
-# sie gehört zum Kontextaufbau und wird dort begründet.
-#
-# Hier stand bis eben das Gegenteil — der Leseweg habe „gar keine Obergrenze"
-# und der Budgetschnitt auf MAX_CONTEXT_CHARS spare „keine einzige
-# Entschlüsselung" —, und das war die tragende Begründung für genau diese
-# 1_000. Ein Kommentar, der die Begründung einer Grenze falsch wiedergibt, ist
-# schlimmer als keiner: er beruhigt an der Stelle, an der jemand nachrechnen
-# müsste. Nachzulesen statt zu glauben ist die heutige Zusage in
-# `test_eine_anfrage_entschluesselt_nie_mehr_als_der_deckel_erlaubt`
+# sie gehört zum Kontextaufbau und wird dort begründet. Nachzulesen statt zu
+# glauben ist das in `test_eine_anfrage_entschluesselt_nie_mehr_als_der_deckel_erlaubt`
 # (backend/tests/test_ai_memory_recall.py).
 #
-# Ungedeckelt bleiben zwei Dinge, und nur für sie wiegt die Zahl hier noch: der
-# Bestand in der Datenbank und die Verwaltungsansicht `personal_entries`
-# (ai_memory_service.py), die bewusst alles entschlüsselt, weil man dort
-# aufräumen will und eine Liste, die einen Teil der Einträge stillschweigend
-# verschweigt, schlimmer wäre als eine langsame. Wer die 1_000 anhebt, hebt
-# beides an — nicht die Kosten einer Chatanfrage.
-MAX_MEMORY_ENTRIES_MAX = 1_000
+# Warum dann überhaupt eine Grenze, und warum diese? Drei Kosten wachsen mit
+# dem Bestand, und zwei davon zahlt nicht der, der ihn angehäuft hat. Gemessen
+# am 19.08.2026 (local-plans/mess-gedaechtnis.py, SQLite im Speicher):
+#
+#   - Der Abruf lädt **alle** Zeilen der sichtbaren Bereiche, bevor
+#     `_vorauswahl` überhaupt auswählen kann — 208 ms Rechenzeit bei 1.000
+#     Einträgen, 717 ms bei 5.000, linear mit dem Bestand. Das ist Zeit vor dem
+#     ersten Byte an den Anbieter, in **jeder** Anfrage, auch in denen, die mit
+#     dem Vorrat nichts zu tun haben.
+#   - Die Verwaltungsansicht `personal_entries` (ai_memory_service.py)
+#     entschlüsselt bewusst jede Zeile — mit gutem Grund, siehe dort — und das
+#     ist je Zeile ein Sidecar-Roundtrip ohne jeden Deckel: 5.000 Einträge sind
+#     dort 2,8 s bei 0,5 ms je Roundtrip und 10,3 s bei 2 ms, und das mal der
+#     Zahl der Bereiche. Sie ist die erste Stelle, die eine Anhebung merkt.
+#   - In geteilten Bereichen (`team`, `server_shared`, `panel`) trägt beides
+#     jeder mit, der den Bereich sieht, und nicht der Schreiber.
+#
+# Was dabei **nicht** wächst, ist das, was beim Modell ankommt: der Block ist
+# auf `MAX_CONTEXT_CHARS` begrenzt und war in derselben Messung bei 100 wie bei
+# 5.000 Einträgen rund 6.060 Zeichen lang, also etwa 90 Zeilen. Ein größerer
+# Vorrat macht die KI nicht klüger — er gibt der Auswahl mehr zu tun. Wer diese
+# Zahl weiter anhebt, verschiebt also nicht die Antwortqualität, sondern nur
+# die drei Kosten oben; ab hier lohnt sich zuerst eine bessere Auswahl.
+#
+# 5.000 ist danach die Zahl, bei der der Abruf im Zehntelsekundenbereich
+# bleibt und die Verwaltungsansicht in Sekunden statt Minuten. „Unbegrenzt"
+# wäre keine dieser beiden.
+MAX_MEMORY_ENTRIES_MAX = 5_000
 # Feste Systemgrenze fuer die Bereiche, die an keiner Benutzerrolle haengen:
 # `server_shared` gehoert der Anlage, `panel` dem Betreiber. Das Kontingent des
 # gerade schreibenden Benutzers waere dort das falsche Mass — es haengt daran,

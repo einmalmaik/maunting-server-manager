@@ -1243,25 +1243,39 @@ def test_die_bestandszaehlung_sperrt_den_bereich_bis_zum_commit(
     """
     from sqlalchemy.dialects import postgresql
 
-    abfrage = ai_memory_service._bestandsabfrage(db, f"user:{regular_user.id}")
+    abfrage = ai_memory_service._sperrzeile(db, f"user:{regular_user.id}")
 
-    sql = str(abfrage.statement.compile(dialect=postgresql.dialect()))
+    sql = str(
+        abfrage.statement.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
 
     assert "FOR UPDATE" in sql, "ohne Zeilensperre zählen zwei Schreiber denselben Stand"
-    # Die Reihenfolge ist kein Schmuck: zwei Schreiber sperren dieselben Zeilen
-    # nur dann verklemmungsfrei, wenn sie sie in derselben Reihenfolge nehmen.
+    # Die Reihenfolge ist kein Schmuck, sondern der Treffpunkt: beide Schreiber
+    # lesen aufsteigend und landen deshalb auf derselben Zeile.
     assert "ORDER BY" in sql
+    # Und es bleibt bei dieser einen Zeile. Gesperrt wurde früher der ganze
+    # Bereich; seit `MAX_MEMORY_ENTRIES_MAX` bei 5.000 steht, wären das 5.000
+    # Zeilensperren je gemerktem Satz — ohne einen Gramm mehr
+    # Ausschließlichkeit, weil sich zwei Schreiber ohnehin an der ersten Zeile
+    # begegnen.
+    assert "LIMIT 1" in sql, (
+        "ohne LIMIT sperrt eine Neuanlage den gesamten Bereich"
+    )
 
 
 def test_die_gesperrte_zaehlung_liefert_dieselbe_zahl_wie_vorher(
     db: Session, regular_user: User
 ) -> None:
-    """Die Sperre ist eine Sperre und keine andere Abfrage.
+    """Die Sperre ist eine Sperre und die Zählung eine Zählung.
 
-    `count()` ging nicht weiter, weil PostgreSQL `FOR UPDATE` nur an einer
-    Abfrage über echte Zeilen erlaubt. Dass die Liste der IDs danach dieselbe
-    Zahl ergibt, ist die Bedingung dafür, dass alle Grenztests darüber weiterhin
-    dasselbe messen.
+    Beides tat einmal eine einzige Abfrage: `count()` verträgt kein
+    `FOR UPDATE`, also musste die Liste der IDs die Zahl liefern. Seit die
+    Sperre nur noch eine Zeile nimmt, kann sie das nicht mehr, und die Zahl
+    kommt aus einem eigenen `count()` **hinter** der Sperre. Dass dabei
+    dieselbe Zahl herauskommt, ist die Bedingung dafür, dass alle Grenztests
+    darüber weiterhin dasselbe messen.
     """
     _memory_role(db, regular_user, "ai-memory-sperre", 10)
     for nummer in range(4):
@@ -1269,10 +1283,13 @@ def test_die_gesperrte_zaehlung_liefert_dieselbe_zahl_wie_vorher(
 
     identity = f"user:{regular_user.id}"
 
-    assert len(ai_memory_service._bestandsabfrage(db, identity).all()) == 4
+    assert ai_memory_service._bestand_unter_sperre(db, identity) == 4
     assert db.query(AiMemoryEntry).filter(
         AiMemoryEntry.scope_identity == identity
     ).count() == 4
+    # Und die Sperre greift nur den Bereich, um den es geht: ein Nachbarbereich
+    # mit demselben Präfix darf weder mitgezählt noch mitgesperrt werden.
+    assert ai_memory_service._bestand_unter_sperre(db, f"{identity}0") == 0
 
 
 def test_memory_limit_ueberlebt_den_weg_durch_die_api(
@@ -1308,6 +1325,20 @@ def test_memory_limit_ueberlebt_den_weg_durch_die_api(
     listed = client.get("/api/ai/settings/role-limits", cookies=owner_cookies)
     row = next(item for item in listed.json() if item["role_id"] == role.id)
     assert row["max_memory_entries"] == 250
+
+    # Der Deckel selbst muss erreichbar sein — sonst wäre er nicht der Deckel,
+    # sondern die erste abgewiesene Zahl. Zwei Stellen entscheiden darüber, das
+    # Pydantic-Feld (`le=`) und `set_role_limit`; ein `<` statt `<=` in einer
+    # von beiden bliebe ohne diese Zeile unbemerkt.
+    genau_am_deckel = client.put(
+        f"/api/ai/settings/role-limits/{role.id}",
+        json=_limits(max_memory_entries=MAX_MEMORY_ENTRIES_MAX),
+        cookies=owner_cookies,
+        headers=_csrf(owner_cookies),
+    )
+
+    assert genau_am_deckel.status_code == 200
+    assert genau_am_deckel.json()["max_memory_entries"] == MAX_MEMORY_ENTRIES_MAX
 
 
 def test_die_null_ueberlebt_den_weg_durch_die_api_und_sperrt(

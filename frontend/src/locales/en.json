@@ -259,7 +259,12 @@
         "panel": "Applies to every user of this panel and travels with every conversation. Nothing personal — everyone sees it."
       },
       "forServer": "Server: {{name}}",
-      "serverSharedHint": "This is shared: every colleague who may see this server reads it too. Anything that concerns only you belongs in your personal memory under your profile."
+      "serverSharedHint": "This is shared: every colleague who may see this server reads it too. Anything that concerns only you belongs in your personal memory under your profile.",
+      "searchPage": "Search this page",
+      "total": "{{count}} entry in total",
+      "total_one": "{{count}} entry in total",
+      "total_other": "{{count}} entries in total",
+      "countPage": "Showing {{shown}} of {{total}} on this page"
     },
     "skills": {
       "title": "Skills",
@@ -2844,7 +2849,11 @@
     "next": "Next",
     "remove": "Remove",
     "select": "Select",
-    "working": "Working…"
+    "working": "Working…",
+    "pagination": {
+      "label": "Pagination",
+      "page": "Page {{page}} of {{pages}}"
+    }
   },
   "serverDetail": {
     "showServerOverview": "Server overview",

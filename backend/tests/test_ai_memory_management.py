@@ -478,7 +478,7 @@ def test_servernotizen_stehen_im_persoenlichen_bereich(
     db.commit()
 
     zeilen = ai_memory_service.personal_entries(db, regular_user)
-    nach_scope = {row.scope: (row, wert) for row, wert in zeilen}
+    nach_scope = {row.scope: (row, wert) for row, wert in zeilen.eintraege}
     assert set(nach_scope) == {"user", "server"}
     assert nach_scope["server"][0].server_id == server.id
     assert "Timeout" in nach_scope["server"][1]
@@ -523,7 +523,11 @@ def test_ein_unlesbarer_eintrag_nimmt_nicht_die_ganze_uebersicht_mit(
     assert [row.key for row, _wert in uebersicht] == ["heil"]
 
     persoenlich = ai_memory_service.personal_entries(db, regular_user)
-    assert [row.key for row, _wert in persoenlich] == ["heil"]
+    assert [row.key for row, _wert in persoenlich.eintraege] == ["heil"]
+    # Die Gesamtzahl kommt aus der Datenbank, nicht aus der Liste: die kaputte
+    # Zeile ist immer noch da und zaehlt gegen den Bereich. Wer sie unterschluege,
+    # meldete "1 Eintrag" und liesse den Benutzer raten, wo sein zweiter blieb.
+    assert persoenlich.gesamt == 2
 
 
 def test_ein_toter_sidecar_bleibt_ein_ehrlicher_fehler(
