@@ -18,7 +18,7 @@ from services import (
     audit_service,
     permission_service,
 )
-from services.ai_redaction import redact_sensitive_text
+from services.ai_redaction import enthaelt_zugangsdaten, redact_sensitive_text
 from services.ai_embedding_service import EMBEDDING_DIMENSIONS
 from services.ai_embedding_service import MODEL_TAG as _EMBEDDING_MODEL_TAG
 from services.dis_client import DisClient, DisDecryptionError, DisSidecarError
@@ -302,7 +302,14 @@ def _safe_value(value: str) -> str:
     normalized = value.strip()
     if not normalized or len(normalized) > 2_000:
         raise HTTPException(status_code=422, detail="Memory-Inhalt ist leer oder zu gross")
-    if redact_sensitive_text(normalized) != normalized:
+    # `enthaelt_zugangsdaten`, nicht "Schwaerzung veraendert etwas": die
+    # Schwaerzung ersetzt auch E-Mail-Adressen und Zahlenkontingente
+    # ("Serverwechsel-Token: 2"), und beides sind keine Zugangsdaten. Wer
+    # "Rechnungen gehen an billing@firma.de" merken will, legt die Adresse
+    # absichtlich in seinen eigenen Vorrat — die Abweisung log ihn an
+    # ("darf keine Zugangsdaten enthalten") und die KI erklaerte ihm dann,
+    # er habe ein Passwort geschickt.
+    if enthaelt_zugangsdaten(normalized):
         raise HTTPException(status_code=422, detail="Memory darf keine Zugangsdaten enthalten")
     return normalized
 

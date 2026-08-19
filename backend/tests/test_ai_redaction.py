@@ -23,6 +23,7 @@ from __future__ import annotations
 import pytest
 
 from services.ai_redaction import (
+    enthaelt_zugangsdaten,
     redact_and_count,
     redact_freetext,
     redact_sensitive_text,
@@ -63,6 +64,22 @@ from services.ai_redaction import (
         ("rconPassword: swordfish", "swordfish"),
         ("MyApiKey=sk-test-value", "sk-test-value"),
         ('{"ServerAdminPassword": "hunter2"}', "hunter2"),
+        # Vier Löcher aus der Review vom 19.08.2026: `secret` musste am Ende
+        # stehen, `pass`/`pwd` fehlten ganz, `…_KEY` zählte nur nach `api`,
+        # und die deutschen Wörter fehlten. Jede Zeile hier ging vorher im
+        # Klartext an den Anbieter.
+        ("SECRET_KEY=abc123xyz", "abc123xyz"),
+        ("AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI", "wJalrXUtnFEMI"),
+        ("SECRET_KEY_BASE=deadbeefcafe", "deadbeefcafe"),
+        ("LICENSE_KEY=XXXX-YYYY-ZZZZ", "XXXX-YYYY-ZZZZ"),
+        ("db_pass=hunter2", "hunter2"),
+        ("db_pwd=hunter2", "hunter2"),
+        ("EncryptionKey=abcdef", "abcdef"),
+        ("SessionKey: qwertz", "qwertz"),
+        ('{"encryption_key": "s3cr3tval"}', "s3cr3tval"),
+        ("credentials=user:passwort123", "user:passwort123"),
+        ("passwort: hunter2", "hunter2"),
+        ("Kennwort=geheim42", "geheim42"),
     ],
 )
 def test_a_secret_assignment_never_survives(eingabe: str, geheimnis: str) -> None:
@@ -130,10 +147,59 @@ def test_the_count_reports_every_replacement_not_every_secret() -> None:
         "tokenCount=42",
         "MaxTokens=100",
         "PasswordPolicy_MinLength=8",
+        # Gegenproben zu den vier Nachträgen vom 19.08.2026: `pass`/`pwd` und
+        # `…key` zählen nur als eigenes Wortteil mit Geheimnis-Bedeutung.
+        "Compass=enabled",
+        "bypass=true",
+        "hotkey=F5",
+        "MapKey=tab",
+        "monkey: banana",
     ],
 )
 def test_ordinary_text_is_left_alone(harmlos: str) -> None:
     assert redact_sensitive_text(harmlos) == harmlos
+
+
+# ── Die Abweisung beim Merken: enger als die Schwärzung ───────────────
+#
+# `enthaelt_zugangsdaten` entscheidet, ob ein Memory-/Skill-Text abgewiesen
+# wird. Die Schwärzung darf großzügig sein (ihr Ergebnis bleibt lesbar); eine
+# Abweisung macht den Eintrag unspeicherbar und behauptet einen Grund. Zwei
+# reproduzierte Fehlabweisungen vom 19.08.2026 stehen unten als Zusicherung.
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "RCON_PASSWORD=hunter2",
+        "das passwort: hunter2 bitte merken",
+        "api_key=sk-test-1234567890",
+        "Bearer eyJhbGciOiJIUzI1NiJ9",
+        "AKIA" + "B" * 16,
+        "db_pass=hunter2",
+        "SECRET_KEY=abc123xyz",
+    ],
+)
+def test_real_credentials_are_rejected(text: str) -> None:
+    assert enthaelt_zugangsdaten(text), f"{text!r} hätte als Zugangsdatum gelten müssen"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Die zwei gemessenen Fehlabweisungen: E-Mail-Adresse und
+        # Zahlenkontingent. Beide scheiterten mit „Memory darf keine
+        # Zugangsdaten enthalten“, und die KI erklärte dem Benutzer dann,
+        # er habe ein Passwort geschickt.
+        "Rechnungen gehen an billing@firma.de",
+        "Serverwechsel-Token: 2 pro Monat",
+        "Token-Budget: 100000",
+        "Der Benutzer mag kurze Antworten",
+        "Das Passwort wird über den Passwortmanager verwaltet",
+    ],
+)
+def test_memorable_facts_are_not_rejected(text: str) -> None:
+    assert not enthaelt_zugangsdaten(text), f"{text!r} ist kein Zugangsdatum"
 
 
 def test_the_authorization_header_keeps_its_established_shape() -> None:

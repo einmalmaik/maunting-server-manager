@@ -61,7 +61,7 @@ from models import AiSkill, User
 from services import ai_embedding_service, audit_service, permission_service, team_service
 from services.ai_embedding_service import EMBEDDING_DIMENSIONS
 from services.ai_embedding_service import MODEL_TAG as _EMBEDDING_MODEL_TAG
-from services.ai_redaction import redact_sensitive_text
+from services.ai_redaction import enthaelt_zugangsdaten
 
 
 logger = logging.getLogger(__name__)
@@ -505,7 +505,11 @@ def _safe_text(value: str, limit: int, label: str) -> str:
     text = (value or "").strip()
     if not text or len(text) > limit:
         raise HTTPException(status_code=422, detail=f"{label} ist leer oder zu lang")
-    if redact_sensitive_text(text) != text:
+    # Dieselbe Pruefung wie beim Gedaechtnis (`_safe_value`): abgewiesen wird,
+    # was Zugangsdaten TRAEGT — nicht alles, was die Schwaerzung anfassen
+    # wuerde. Ein Skill "Rechnungslauf" mit einer Beispieladresse oder einem
+    # Zahlenkontingent ist kein Geheimnis­transport.
+    if enthaelt_zugangsdaten(text):
         raise HTTPException(status_code=422, detail=f"{label} darf keine Zugangsdaten enthalten")
     return text
 

@@ -72,12 +72,55 @@ import re
 #: Wortzeichen — wie sie in einer Logzeile oder einer Konfigurationsdatei
 #: vorkommt — waren das 101 Sekunden statt 0,002. Mit der Grenze gibt es je Wort
 #: genau einen Ansatzpunkt.
+#: Der Wortkern, der einen Schluessel zu einem Geheimnis macht — **eine**
+#: Liste fuer beide Muster (Zuweisung und alleinstehender Woerterbuchschluessel).
+#: Waeren es zwei, wuerde die eine irgendwann erweitert und die andere nicht;
+#: genau so fehlte hier `credentials` im Plural, waehrend der Kommentar in
+#: `ai_stream_service._ergebnis_schwaerzen` die Teilbaum-Schwaerzung
+#: ausgerechnet mit diesem Wort begruendete.
+#:
+#: Vier Nachtraege vom 19.08.2026, jeder ein gemessenes Loch:
+#:
+#: * ``secret`` durfte kein Suffix tragen: ``SECRET_KEY``, ``SECRET_KEY_BASE``
+#:   und ``AWS_SECRET_ACCESS_KEY`` gingen unveraendert an den Anbieter, weil
+#:   das Kernwort am Ende stehen musste. Wortteile hinter ``secret`` zaehlen
+#:   jetzt mit, aber nur nach einem Trenner — ``secretary=anna`` ist ein Name
+#:   und bleibt stehen (der Bestandstest haelt das fest). ``SecretKey`` ohne
+#:   Trenner faengt die ``…key``-Regel darunter.
+#: * ``pass``/``pwd`` fehlten ganz (``db_pass=…``). Sie zaehlen nur als
+#:   eigenes Wortteil (Trenner davor oder Wortanfang): ``Compass=N`` und
+#:   ``bypass=true`` sind Spieleinstellungen und bleiben lesbar.
+#: * ``…_KEY`` zaehlt, wenn das Wort davor Geheimnis- oder Krypto-Bedeutung
+#:   traegt (``LICENSE_KEY``, ``EncryptionKey``, ``SessionKey``). Bewusst
+#:   **keine** generische ``_key``-Regel: ``skill_key``, ``message_key`` und
+#:   ``external_product_key`` sind Verweise, keine Geheimnisse, und
+#:   ``api_key_hint`` ist die absichtlich zeigbare Kurzform. Eine Denyliste
+#:   laesst schlimmstenfalls etwas durch — eine generische Regel macht
+#:   Werkzeugantworten unlesbar, und das faellt erst auf, wenn ein Feature
+#:   bricht.
+#: * ``credential`` galt nur im Singular; ``credentials`` traegt jetzt auch
+#:   Wortteile dahinter (``credentials_file``).
+#: * ``passwort``/``kennwort`` fehlten ganz — das Panel ist deutschsprachig,
+#:   und "das passwort: hunter2 bitte merken" ist genau der Satz, den ein
+#:   Benutzer in den Chat schreibt.
+_GEHEIM_KERN = (
+    r"(?:password|passwd|passwort|kennwort"
+    r"|(?:(?<=[._-])|(?<![A-Za-z0-9._-]))(?:pass|pwd)"
+    r"|secret(?:[._-][A-Za-z0-9._-]*)?"
+    r"|token"
+    r"|api[_-]?key"
+    r"|authorization"
+    r"|credentials?(?:[._-][A-Za-z0-9._-]*)?"
+    r"|(?:license|licence|access|encryption|signing|session|master|private|auth|secret)[._-]?key"
+    r")"
+)
+
 _SECRET_ASSIGNMENT_RE = re.compile(
     r"(?i)"
     r"(?<![A-Za-z0-9._-])"
     r"(?P<key>"
     r"[A-Za-z0-9._-]*"
-    r"(?:password|passwd|secret|token|api[_-]?key|authorization|credential)"
+    + _GEHEIM_KERN +
     r")"
     # Trennzeichen, davor optional das schliessende Anführungszeichen des
     # Schlüssels. Es wird mitgenommen und unverändert wieder ausgegeben.
@@ -86,7 +129,10 @@ _SECRET_ASSIGNMENT_RE = re.compile(
     # Mit Anführungszeichen läuft der Wert bis zum nächsten; ohne bis zum
     # nächsten Trennzeichen. Ein Wert in Anführungszeichen darf Leerzeichen
     # enthalten — ein Passwort mit Leerzeichen wäre sonst nur halb entfernt.
-    r"(?(quote)[^\"'\n]*[\"']|[^\s,;]+)"
+    # Der Wert steht in einer eigenen Gruppe, damit `enthaelt_zugangsdaten`
+    # ihn ansehen kann: die Schwaerzung ersetzt auch "Token: 2", die
+    # Abweisung beim Merken soll das nicht (siehe dort).
+    r"(?(quote)(?P<wq>[^\"'\n]*)[\"']|(?P<wu>[^\s,;]+))"
 )
 _AUTHORIZATION_BEARER_RE = re.compile(
     r"(?i)\bauthorization\b\s*[:=]\s*bearer\s+[A-Za-z0-9._~+\-/]+=*"
@@ -153,16 +199,65 @@ _IPV6_RE = re.compile(
 #: Zuweisungsmuster. Das Passwort ging im Klartext an den Modellanbieter.
 #:
 #: Ein zweites Muster und keine zweite Wortliste: waeren es zwei Listen, wuerde
-#: die eine irgendwann um `credential` erweitert und die andere nicht.
+#: die eine irgendwann um `credential` erweitert und die andere nicht. Genau das
+#: war passiert — hier stand `credential` nur im Singular, und der Teilbaum
+#: unter ``credentials`` ging im Klartext hinaus, waehrend der Kommentar an der
+#: Aufrufstelle die Schwaerzung ausgerechnet mit diesem Wort begruendete.
+#: Seitdem teilen sich beide Muster den Kern `_GEHEIM_KERN`.
 _SECRET_KEY_RE = re.compile(
-    r"(?i)^[A-Za-z0-9._-]*"
-    r"(?:password|passwd|secret|token|api[_-]?key|authorization|credential)$"
+    r"(?i)^[A-Za-z0-9._-]*" + _GEHEIM_KERN + r"$"
 )
 
 
 def ist_geheimer_schluessel(name: object) -> bool:
     """Ob ein Woerterbuchschluessel einen Wert bezeichnet, der nicht hinausdarf."""
     return isinstance(name, str) and bool(_SECRET_KEY_RE.match(name.strip()))
+
+
+def _wert_ist_geheimnis(match: re.Match[str]) -> bool:
+    """Ob der Wert einer getroffenen Zuweisung nach einem echten Geheimnis aussieht.
+
+    Das Zuweisungsmuster kennt nur den Schluessel; ob dahinter ein Passwort
+    steht oder eine Zahl, sieht erst der Wert. Reine Zahlen sind Kontingente,
+    Jahreszahlen und Budgets ("Serverwechsel-Token: 2", "Token-Budget: 100000")
+    — kein Mensch legt sie als Zugangsdatum an, aber jede davon machte einen
+    Gedaechtniseintrag unspeicherbar. Sehr kurze Werte ("ja", "an") sind
+    Schalter. Alles andere gilt als Geheimnis — im Zweifel wird abgewiesen.
+    """
+    wert = (match.group("wq") if match.group("quote") else match.group("wu")) or ""
+    wert = wert.strip()
+    if not wert or wert.isdigit():
+        return False
+    return len(wert) >= 4
+
+
+def enthaelt_zugangsdaten(text: str) -> bool:
+    """Ob ein Text echte Zugangsdaten traegt — fuer die Abweisung beim Merken.
+
+    Bewusst **enger** als `redact_sensitive_text`, und das ist kein
+    Widerspruch, sondern die Folge der verschiedenen Ausgaenge. Die
+    Schwaerzung darf grosszuegig sein: ihr Ergebnis bleibt lesbar, ein
+    faelschlich ersetzter Wert kostet eine Logzeile. Eine Abweisung hat
+    diesen Ausweg nicht — sie macht den ganzen Eintrag unspeicherbar und
+    behauptet dem Benutzer gegenueber einen Grund. Zwei gemessene
+    Fehlabweisungen (19.08.2026), beide mit der Meldung "keine Zugangsdaten":
+
+    * "Rechnungen gehen an billing@firma.de" — eine E-Mail-Adresse ist ein
+      personenbezogenes Datum, aber kein Zugangsdatum. Beim Merken legt der
+      Benutzer sie **absichtlich** in seinen eigenen, einwilligungspflichtigen
+      Vorrat; die Schwaerzung fuer Logs und Werkzeugtext bleibt davon
+      unberuehrt.
+    * "Serverwechsel-Token: 2 pro Monat" — ein Kontingent, kein Token. Der
+      Schluessel klingt nach Geheimnis, der Wert ist eine Ziffer.
+
+    Die Fehlermeldung an beiden Aufrufstellen stimmt damit wieder: was diese
+    Funktion abweist, **sind** Zugangsdaten.
+    """
+    if _PRIVATE_KEY_RE.search(text) or _AUTHORIZATION_BEARER_RE.search(text):
+        return True
+    if _BEARER_RE.search(text) or _KNOWN_TOKEN_RE.search(text):
+        return True
+    return any(_wert_ist_geheimnis(m) for m in _SECRET_ASSIGNMENT_RE.finditer(text))
 
 
 def _ersetze_zuweisung(match: re.Match[str]) -> str:
