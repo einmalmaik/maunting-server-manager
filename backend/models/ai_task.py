@@ -36,19 +36,18 @@ Bewusst **kein** Feld fuer den Ausgang des letzten Laufs. Der steht am Lauf
 (``ai_runs.status``, ``stop_reason``), und ihn hier zu spiegeln hiesse, zwei
 Wahrheiten zu pflegen — derselbe Verzicht wie in ``ai_guardian_notice``.
 
-Bewusst **keine** ``conversation_id``. Es gibt je Benutzer und Art genau eine
-Unterhaltung (``uq_ai_conversations_user_kind``), und ein faelliger Auftrag
-schreibt immer in dieselbe: den Dauerchat. Sie ist damit aus ``user_id``
-ableitbar, und eine gespeicherte Kennung waere nur die Gelegenheit, irgendwann
-auf eine geloeschte zu zeigen. Der faellige Lauf holt sie ueber
-``get_or_create_primary_conversation``.
-
-Das ist seit ``20260816_11`` der Unterschied zur Guardian-Heilung, die vorher
-denselben Weg ging: die laeuft jetzt im Fenster ``kind='guardian'``. Fuer einen
-stehenden Auftrag waere das falsch — er ist ein Satz, den ein Mensch im Chat
-diktiert hat, und sein Ergebnis gehoert dorthin zurueck, wo er ihn gegeben hat
-(die Doku sagt: "Der Verlauf steht **immer** im Chat"). Eine Guardian-Stoerung
-hat dagegen niemand bestellt.
+``conversation_id`` zeigt seit ``20260820_03`` auf das **eigene
+Hintergrundfenster** der Aufgabe (``kind='worker'``). Hier stand vorher das
+Gegenteil — „ein faelliger Auftrag schreibt immer in den Dauerchat" — und der
+Betreiber hat es am 20.08.2026 umgedreht: im Dauerchat steht nur, was der
+Mensch schreibt; Aufgaben laufen im Hintergrund wie Worker und Guardian und
+unterbrechen nie das laufende Gespraech. Ihr Ergebnis kommt als Meldung ueber
+die Meldestelle in den Chat, sobald dort Ruhe ist — plus optional als E-Mail
+(``channel``). **Ein** Fenster je Aufgabe, ueber alle Laeufe wiederverwendet:
+eine taegliche Aufgabe hinterliesse sonst 365 Fenster im Jahr, und im
+gemeinsamen Verlauf sieht das Modell, was es gestern festgestellt hat.
+``SET NULL`` wie bei ``last_run_id``: verschwindet das Fenster, legt sich die
+Aufgabe beim naechsten Termin ein neues an.
 """
 
 from datetime import datetime, timezone
@@ -78,10 +77,12 @@ ARTEN = ("report", "act")
 #: diktiert und die die KI raten muesste.
 PLANARTEN = ("daily", "interval", "once")
 
-#: Wohin das Ergebnis geht. ``chat`` ist nie abwaehlbar — auch bei ``email``
-#: steht der Verlauf im Chat. ``EmailService.is_configured()`` prueft nur, ob
-#: Zugangsdaten dastehen, nicht ob sie funktionieren; eine Aufgabe, deren
-#: Ergebnis ausschliesslich per Mail existierte, koennte still ins Leere laufen.
+#: Wohin das Ergebnis geht. ``chat`` ist nie abwaehlbar — der Verlauf steht im
+#: Aufgabenfenster, und die Meldestelle bringt das Ergebnis in den Dauerchat,
+#: sobald dort Ruhe ist. ``email`` heisst *zusaetzlich*, nie ausschliesslich:
+#: ``EmailService.is_configured()`` prueft nur, ob Zugangsdaten dastehen, nicht
+#: ob sie funktionieren; eine Aufgabe, deren Ergebnis ausschliesslich per Mail
+#: existierte, koennte still ins Leere laufen.
 KANAELE = ("chat", "email", "both")
 
 
@@ -139,6 +140,11 @@ class AiTask(Base):
     # Aufgabe bestehen. Der Lauf ist hier ein Beleg, kein Besitz.
     last_run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("ai_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    #: Das Hintergrundfenster der Aufgabe (``kind='worker'``) — beim ersten
+    #: faelligen Lauf angelegt, danach wiederverwendet. Siehe Docstring oben.
+    conversation_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("ai_conversations.id", ondelete="SET NULL"), nullable=True
     )
 
     created_at: Mapped[datetime] = mapped_column(

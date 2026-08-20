@@ -99,6 +99,26 @@ def get_next_restart_run_time(server_id: int) -> datetime | None:
     return next_run
 
 
+def get_next_backup_run_time(server_id: int) -> datetime | None:
+    """Liefert den nächsten APScheduler-Run für das Auto-Backup eines Servers.
+
+    Gleiche Zeitzonen-Vorsicht wie ``get_next_restart_run_time``: naive
+    Datetimes werden als UTC interpretiert (Defense-in-Depth für Mock- und
+    Legacy-Pfade).
+    """
+    scheduler = get_scheduler()
+    for job in scheduler.get_jobs():
+        if job.id != f"backup_server_{server_id}":
+            continue
+        run_time = getattr(job, "next_run_time", None)
+        if run_time is None:
+            return None
+        if run_time.tzinfo is None:
+            run_time = run_time.replace(tzinfo=timezone.utc)
+        return run_time.astimezone(timezone.utc)
+    return None
+
+
 def stop_scheduler():
     """Stop the scheduler."""
     global _scheduler

@@ -817,20 +817,25 @@ Konfiguration.
 
 Erlaubt ist eine geschlossene Menge von Skalaren mit Ober- und Untergrenze:
 
+Die Bereiche sind die des **Agent-Vertrags** (`msm-agent/services/guardian_contract.py`):
+der Agent klemmt nicht, er lehnt eine Nutzlast außerhalb seiner Grenzen komplett
+ab. Ein Vertragstest (`test_guardian_stellschrauben_vertrag.py`) hält beide
+Mengen aneinander.
+
 | Feld | Bereich | Wirkung |
 | --- | --- | --- |
-| `startup_grace_period_seconds` | 1–3600 | Ruhe nach dem Start, bevor Proben zählen |
-| `startup_timeout_seconds` | 10–7200 | Wann ein Start als gescheitert gilt |
+| `startup_grace_period_seconds` | 1–600 | Ruhe nach dem Start, bevor Proben zählen |
+| `startup_timeout_seconds` | 10–3600 | Wann ein Start als gescheitert gilt; muss über der Ruhezeit liegen, sonst rückt er automatisch mit |
 | `probe_interval_seconds` | 1–600 | Abstand zwischen zwei Proben |
-| `probe_timeout_seconds` | 1–120 | Geduld einer Probe (nicht für `process`) |
+| `probe_timeout_seconds` | 1–30 | Geduld einer Probe (nicht für `process`) |
 | `probe_failure_threshold` | 1–20 | Fehlschläge bis zum Alarm |
 | `probe_success_threshold` | 1–20 | Erfolge bis zur Entwarnung |
-| `recovery_max_attempts` | 0–20 | Guardians eigene Leiter; `0` heißt „nur melden" |
+| `recovery_max_attempts` | 0–10 | Guardians eigene Leiter; `0` heißt „nur melden" (übersetzt in eine leere Policy-Liste) |
 | `recovery_attempt_window_seconds` | 60–86400 | Zeitfenster für die Versuche |
-| `recovery_cooldown_seconds` | 0–86400 | Pause zwischen zwei Versuchen |
-| `verification_min_healthy_seconds` | 0–3600 | Mindestdauer gesund nach einer Heilung |
+| `recovery_cooldown_seconds` | 1–3600 | Pause zwischen zwei Versuchen |
+| `verification_min_healthy_seconds` | 0–600 | Mindestdauer gesund nach einer Heilung |
 | `verification_required_successes` | 1–20 | Nötige Erfolge in Folge |
-| `verification_timeout_seconds` | 10–7200 | Frist der Verifikation |
+| `verification_timeout_seconds` | 10–3600 | Frist der Verifikation |
 
 Keine Listen, keine Regexe, keine Probentypen — dieselbe Begründung, aus der der
 Blueprint-Editor listenwertige Pfade ausschließt: was sich in einer Zahl mit

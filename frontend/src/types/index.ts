@@ -34,6 +34,9 @@ export interface Server {
   last_auto_restart_completed_at: string | null
   last_auto_restart_status: string | null
   next_auto_restart_at: string | null
+  // „Von der KI verwaltet": die KI hat den Neustart-Zeitplan zuletzt gesetzt.
+  // Manuelles Speichern nimmt die Verwaltung zurück (Backend).
+  restart_ai_managed: boolean
   started_at: string | null
   uptime_seconds: number | null
   cpu_limit_percent: number | null

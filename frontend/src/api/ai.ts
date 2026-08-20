@@ -359,6 +359,8 @@ export const SCHREIBWERKZEUGE = [
   'propose_task_delete',
   'propose_server_repair',
   'propose_guardian_tuning',
+  'propose_restart_schedule_set',
+  'propose_backup_schedule_set',
   'propose_file_delete',
 ] as const
 
@@ -868,6 +870,59 @@ export interface AiWorkerInfo {
   created_at: string
 }
 
+/**
+ * Ein stehender Auftrag, wie `GET /ai/tasks` ihn liefert — dieselbe Form, die
+ * auch das Chat-Werkzeug `list_tasks` sieht (`ai_task_service.eintrag`).
+ *
+ * `plan` ist der fertige Satz des Backends (deutsch, mit Zeitzone); die
+ * Aufgabenliste baut ihre Anzeige aus den strukturierten Feldern daneben, um
+ * beide Sprachen bedienen zu können. `conversation_id` ist das
+ * Hintergrundfenster der Aufgabe — der Link auf `?ansicht=worker&id=…`.
+ */
+export interface AiTaskEntry {
+  task_id: string
+  title: string
+  instruction: string
+  /** `act` heisst: darf Schreibwerkzeuge nutzen — setzt den autonomen Modus voraus. */
+  kind: 'report' | 'act'
+  plan: string
+  plan_kind: 'daily' | 'interval' | 'once'
+  /** ``"HH:MM"`` in der Zeitzone der Aufgabe; nur bei `daily`. */
+  time_of_day: string | null
+  /** ISO-Wochentage als ``"1,3,5"`` (Montag = 1); `null` heisst täglich. */
+  weekdays: string | null
+  interval_hours: number | null
+  /** ISO-8601 in UTC; nur bei `once`. */
+  once_at: string | null
+  timezone: string
+  channel: 'chat' | 'email' | 'both'
+  enabled: boolean
+  conversation_id: string | null
+  next_run: string | null
+  last_started: string | null
+}
+
+/**
+ * Was beim Anlegen oder Ändern übertragen wird — Teilangaben sind erlaubt.
+ *
+ * `JSON.stringify` lässt `undefined`-Felder weg, und genau darauf baut das
+ * Backend (`exclude_unset`): nur was genannt ist, wird angefasst. Wer eine
+ * Aufgabe nur pausieren will, schickt allein `enabled`.
+ */
+export interface AiTaskWrite {
+  title?: string
+  instruction?: string
+  kind?: 'report' | 'act'
+  plan_kind?: 'daily' | 'interval' | 'once'
+  time_of_day?: string
+  weekdays?: number[]
+  interval_hours?: number
+  once_at?: string
+  timezone?: string
+  channel?: 'chat' | 'email' | 'both'
+  enabled?: boolean
+}
+
 /** Die Betreiber-Deckel der Worker: wie viele je Benutzer, wie viele Runden je Lauf. */
 export interface AiWorkerPolicy {
   max_parallel_workers: number
@@ -1003,6 +1058,23 @@ export const aiApi = {
     api<AiRunInfo | null>(
       `/ai/conversation/run?conversation_id=${encodeURIComponent(conversationId)}`,
     ),
+  /**
+   * Die Aufgabenliste — dieselben Dienstfunktionen, durch die auch die
+   * Chat-Werkzeuge gehen. Alles, was die KI kann, kann der Benutzer hier auch;
+   * alle vier verlangen `ai.tasks.manage`.
+   */
+  listTasks: () => api<AiTaskEntry[]>('/ai/tasks'),
+  createTask: (payload: AiTaskWrite) =>
+    api<AiTaskEntry>('/ai/tasks', { method: 'POST', body: JSON.stringify(payload) }),
+  updateTask: (taskId: string, payload: AiTaskWrite) =>
+    api<AiTaskEntry>(`/ai/tasks/${encodeURIComponent(taskId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteTask: (taskId: string) =>
+    api<{ deleted: boolean; title: string }>(`/ai/tasks/${encodeURIComponent(taskId)}`, {
+      method: 'DELETE',
+    }),
   /**
    * Das Tipp-Signal der Ruhe-Regel: „der Mensch schreibt gerade".
    * Übertragen wird nur der Zeitpunkt — nie Text und nicht einmal seine Länge.

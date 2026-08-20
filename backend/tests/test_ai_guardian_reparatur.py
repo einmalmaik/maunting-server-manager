@@ -402,6 +402,88 @@ class TestBremse:
         db.refresh(auftrag)
         assert auftrag.phase == "aufgegeben"
 
+    def _sync_fehlschlag(
+        self, db: Session, user: User, server: Server, auftrag: AiGuardianRepair
+    ) -> None:
+        """Ein an der Node gescheiterter Eingriff aus einem Lauf dieses Auftrags.
+
+        Der Lauf ist kein Beiwerk: der Zaehler ordnet Vorschlaege ueber
+        ``run_id`` und die ``repair_id`` im Laufzustand zu — genau wie der
+        Dienst im Betrieb.
+        """
+        fenster = _fenster(db, user)
+        lauf = _lauf(db, user, auftrag)
+        db.add(AiActionProposal(
+            id=str(uuid4()),
+            conversation_id=fenster.id,
+            user_id=user.id,
+            server_id=server.id,
+            tool_name="propose_guardian_tuning",
+            payload_encrypted="test-enc-v1::7b7d",
+            correlation_id=str(uuid4()),
+            preview_json="{}",
+            status="failed",
+            error_code="AI_ACTION_GUARDIAN_SYNC_FAILED",
+            run_id=lauf.id,
+        ))
+        db.commit()
+
+    def test_zwei_sync_fehlschlaege_beenden_den_auftrag(self, db: Session):
+        """Eine Node, die zweimal nicht quittiert, quittiert auch beim dritten Mal nicht.
+
+        Vorfall 66 vom 20.08.2026: der Agent lehnte die Uebersteuerung ab, sie
+        wurde zurueckgerollt, der naechste Lauf sah denselben Ausgangszustand
+        und schlug dasselbe vor — bis zu acht zahlungspflichtige Anlaeufe im
+        13-Minuten-Takt gegen dieselbe Wand. Die Leiter ist sonst bewusst
+        ergebnisblind; dieser eine deterministische Fehlercode ist die Ausnahme.
+        """
+        user = _benutzer(db)
+        server = _server(db)
+        vorfall = _vorfall(db, server)
+        auftrag = _auftrag(db, vorfall, server, user, phase="eingriff")
+        self._sync_fehlschlag(db, user, server, auftrag)
+        self._sync_fehlschlag(db, user, server, auftrag)
+        run = _lauf(db, user, auftrag)
+
+        reparatur.lauf_beendet(db, run, _zustand(run))
+
+        db.refresh(auftrag)
+        assert auftrag.phase == "aufgegeben"
+        assert auftrag.next_run_at is None
+
+    def test_ein_einzelner_sync_fehlschlag_bremst_nicht(self, db: Session):
+        """Einmal kann ein Timeout sein — erst die Wiederholung ist ein Muster."""
+        user = _benutzer(db)
+        server = _server(db)
+        vorfall = _vorfall(db, server)
+        auftrag = _auftrag(db, vorfall, server, user, phase="eingriff")
+        self._sync_fehlschlag(db, user, server, auftrag)
+        run = _lauf(db, user, auftrag)
+
+        reparatur.lauf_beendet(db, run, _zustand(run))
+
+        db.refresh(auftrag)
+        assert auftrag.phase == "beobachtung"
+
+    def test_fremde_sync_fehlschlaege_bremsen_nicht(self, db: Session):
+        """Zwei Auftraege am selben Server teilen Fenster, Server und Zeitraum.
+
+        Die Fehlschlaege des einen duerfen den anderen nicht beenden — sonst
+        gaebe ein Auftrag auf, der selbst nie an der Node gescheitert ist.
+        """
+        user = _benutzer(db)
+        server = _server(db)
+        fremder = _auftrag(db, _vorfall(db, server), server, user, phase="eingriff")
+        self._sync_fehlschlag(db, user, server, fremder)
+        self._sync_fehlschlag(db, user, server, fremder)
+        auftrag = _auftrag(db, _vorfall(db, server), server, user, phase="eingriff")
+        run = _lauf(db, user, auftrag)
+
+        reparatur.lauf_beendet(db, run, _zustand(run))
+
+        db.refresh(auftrag)
+        assert auftrag.phase == "beobachtung"
+
     def test_ein_belegter_erfolg_schlaegt_die_bremse(self, db: Session):
         """Erst die Frage, ob es gut ist — dann erst Frist und Deckel.
 
@@ -508,6 +590,7 @@ class TestNachweis:
         vorfall = _vorfall(db, server)
         auftrag = _auftrag(db, vorfall, server, user, phase="eingriff")
         fenster = _fenster(db, user)
+        lauf = _lauf(db, user, auftrag)
         db.add(AiActionProposal(
             id=str(uuid4()),
             conversation_id=fenster.id,
@@ -518,6 +601,7 @@ class TestNachweis:
             correlation_id=str(uuid4()),
             preview_json="{}",
             status="succeeded",
+            run_id=lauf.id,
         ))
         db.commit()
 
@@ -558,6 +642,36 @@ class TestNachweis:
         db.commit()
 
         assert reparatur._eingriff_nachweisen(db, auftrag) is None
+
+    def test_der_eingriff_eines_parallelen_auftrags_ist_kein_nachweis(self, db: Session):
+        """Auch das Guardian-Fenster selbst reicht nicht als Grenze.
+
+        Zwei Auftraege am selben Server schreiben in dasselbe Fenster. Der
+        ausgefuehrte Eingriff des einen darf die Quarantaene nicht fuer den
+        anderen aufheben — der hat nichts getan, das man belegen koennte.
+        """
+        user = _benutzer(db)
+        server = _server(db, guardian_quarantine_status="quarantined")
+        fremder = _auftrag(db, _vorfall(db, server), server, user, phase="eingriff")
+        fenster = _fenster(db, user)
+        fremder_lauf = _lauf(db, user, fremder)
+        db.add(AiActionProposal(
+            id=str(uuid4()),
+            conversation_id=fenster.id,
+            user_id=user.id,
+            server_id=server.id,
+            tool_name="propose_config_update",
+            payload_encrypted="test-enc-v1::7b7d",
+            correlation_id=str(uuid4()),
+            preview_json="{}",
+            status="succeeded",
+            run_id=fremder_lauf.id,
+        ))
+        db.commit()
+        auftrag = _auftrag(db, _vorfall(db, server), server, user, phase="eingriff")
+
+        assert reparatur._eingriff_nachweisen(db, auftrag) is None
+        assert reparatur._quarantaene_aufheben(db, auftrag, server) is False
 
 
 # ── Der Takt ──────────────────────────────────────────────────────────────

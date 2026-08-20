@@ -1409,6 +1409,24 @@ def _server_repair_payload(server: Server, arguments: dict) -> tuple[dict, dict]
     return payload, preview
 
 
+def _blueprint_startwerte(server: Server) -> tuple[int, int]:
+    """Ruhezeit und Timeout, wie der Compiler sie ohne Uebersteuerung setzt.
+
+    Dieselben Rueckfallwerte wie in `compile_guardian_config` (30/300): eine
+    Blueprint ohne Startfenster bekommt dort genau diese Zahlen, also sind sie
+    auch hier die Wahrheit.
+    """
+    from games import get_plugin
+
+    plugin = get_plugin(server.game_type)
+    blueprint = plugin.get_blueprint() if plugin else None
+    health = blueprint.health if blueprint else None
+    start = health.startup if health and health.startup else None
+    if start is None:
+        return 30, 300
+    return int(start.grace_period_seconds), int(start.timeout_seconds)
+
+
 def _guardian_tuning_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
     """Nutzlast fuer `propose_guardian_tuning` — Zahlen aus einer festen Menge.
 
@@ -1470,6 +1488,32 @@ def _guardian_tuning_payload(server: Server, arguments: dict) -> tuple[dict, dic
     # Sonst hiesse jede Anpassung einer einzelnen Zahl, alle anderen zu
     # verlieren — und das Modell muesste sie in jedem Aufruf mitschreiben.
     nachher: dict[str, int] = {} if zuruecksetzen else {**vorher, **werte}
+
+    # Der Agent-Vertrag verlangt startup timeout > grace. Geprueft wird gegen
+    # die **wirksamen** Werte: was die Uebersteuerung nicht setzt, kommt aus
+    # der Blueprint — genau wie beim Kompilieren. Nur so faellt auch der Fall
+    # auf, in dem das Modell einen Timeout unter eine Ruhezeit senkt, die
+    # allein in der Blueprint steht; sonst wuerde der Compiler die explizite
+    # Absenkung stillschweigend wieder hochziehen. Die Abweisung ist die
+    # Rueckmeldung, aus der das Modell den naechsten Versuch baut. Geprueft
+    # wird nur, wenn dieser Aufruf eine der beiden Schrauben anfasst — ein
+    # Altbestand ist Sache der Compiler-Klemmung, nicht dieser Aenderung.
+    if not zuruecksetzen and (
+        "startup_grace_period_seconds" in werte or "startup_timeout_seconds" in werte
+    ):
+        grace = nachher.get("startup_grace_period_seconds")
+        timeout = nachher.get("startup_timeout_seconds")
+        if grace is None or timeout is None:
+            blueprint_grace, blueprint_timeout = _blueprint_startwerte(server)
+            grace = blueprint_grace if grace is None else grace
+            timeout = blueprint_timeout if timeout is None else timeout
+        if timeout <= grace:
+            raise AiActionValidationError(
+                "startup_timeout_seconds muss groesser sein als "
+                f"startup_grace_period_seconds — wirksam waeren timeout={timeout} "
+                f"und grace={grace} (nicht gesetzte Werte kommen aus der "
+                "Blueprint); der Agent lehnt die Kombination ab"
+            )
     payload = {"overrides": nachher, "reset": zuruecksetzen}
     preview = {
         "operation": "guardian_tuning",
@@ -1483,6 +1527,153 @@ def _guardian_tuning_payload(server: Server, arguments: dict) -> tuple[dict, dic
         "before": vorher,
         "after": nachher,
         "changed": sorted(werte) if not zuruecksetzen else sorted(vorher),
+        "current_status": server.status,
+        "restart_required": False,
+    }
+    return payload, preview
+
+
+def _aktuelle_restart_zeiten(server: Server) -> list[str]:
+    """Die heute gesetzten festen Neustartzeiten — für die Vorher-Spalte der Karte."""
+    roh = server.restart_times_utc or server.restart_time_utc or ""
+    return [teil.strip() for teil in roh.split(",") if teil.strip()]
+
+
+def _restart_schedule_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
+    """Nutzlast für `propose_restart_schedule_set` — die Panel-Felder, nichts sonst.
+
+    Dieselben Grenzen wie am Panel-Endpunkt (`schemas/server.py`): Intervall
+    1–168 Stunden, höchstens 12 feste Zeiten, striktes ``HH:MM`` beim
+    Speichern. Gelesen wird nachsichtig (``"8:00"`` ist eindeutig,
+    `ai_task_service.uhrzeit_pruefen`), gespeichert streng — ein Formfehler
+    kostet das Modell eine Runde, nie den Zeitplan.
+
+    Intervall und feste Zeiten schließen sich aus, wie überall sonst: der
+    Vorschlag verlangt **genau eines** von beiden, solange eingeschaltet wird.
+    Beim Ausschalten bleibt der Plan stehen (Wiedereinschalten erinnert ihn),
+    aber neue Planangaben wären eine Aussage ohne Wirkung und werden abgewiesen.
+    """
+    unbekannt = set(arguments) - {"enabled", "interval_hours", "times"}
+    if unbekannt:
+        raise AiActionValidationError(
+            "Unbekanntes Feld im Neustart-Zeitplan: " + ", ".join(sorted(unbekannt))
+        )
+    enabled = arguments.get("enabled")
+    if not isinstance(enabled, bool):
+        raise AiActionValidationError("enabled muss wahr oder falsch sein")
+
+    intervall = arguments.get("interval_hours")
+    zeiten = arguments.get("times")
+    if enabled:
+        if (intervall is None) == (zeiten is None):
+            raise AiActionValidationError(
+                "Gib genau eines an: interval_hours (alle N Stunden) oder "
+                "times (feste Uhrzeiten)."
+            )
+    elif intervall is not None or zeiten is not None:
+        raise AiActionValidationError(
+            "enabled:false schaltet den Auto-Neustart aus — ohne Planangaben. "
+            "Der bisherige Plan bleibt für ein späteres Einschalten stehen."
+        )
+
+    times_csv: str | None = None
+    if intervall is not None:
+        if isinstance(intervall, bool) or not isinstance(intervall, int):
+            raise AiActionValidationError("interval_hours muss eine ganze Zahl sein")
+        if not 1 <= intervall <= 168:
+            raise AiActionValidationError(
+                "Das Neustart-Intervall muss zwischen 1 und 168 Stunden liegen"
+            )
+    if zeiten is not None:
+        if not isinstance(zeiten, list) or not zeiten:
+            raise AiActionValidationError("times muss eine Liste von 'HH:MM'-Zeiten sein")
+        normalisiert = [ai_task_service.uhrzeit_pruefen(zeit) for zeit in zeiten]
+        from schemas.server import _validate_restart_times
+
+        try:
+            times_csv = _validate_restart_times(",".join(normalisiert))
+        except ValueError as exc:
+            raise AiActionValidationError(str(exc)) from exc
+        if not times_csv:
+            raise AiActionValidationError("times muss mindestens eine Uhrzeit enthalten")
+
+    payload: dict = {"enabled": enabled}
+    if intervall is not None:
+        payload["interval_hours"] = intervall
+    if times_csv is not None:
+        payload["times_csv"] = times_csv
+
+    preview = {
+        "operation": "restart_schedule",
+        "enabled": enabled,
+        "mode": "interval" if intervall is not None else ("fixed" if times_csv else None),
+        "interval_hours": intervall,
+        "times": times_csv.split(",") if times_csv else [],
+        # Beide Stände auf der Karte: wer bestätigt, soll sehen, was sich
+        # ändert — nicht nur, was danach gilt.
+        "before": {
+            "enabled": bool(server.auto_restart),
+            "interval_hours": server.restart_interval_hours,
+            "times": _aktuelle_restart_zeiten(server),
+        },
+        "current_status": server.status,
+        "restart_required": False,
+    }
+    return payload, preview
+
+
+def _backup_schedule_payload(server: Server, arguments: dict) -> tuple[dict, dict]:
+    """Nutzlast für `propose_backup_schedule_set` — ein Nachtrag, kein Vollbild.
+
+    Was das Modell nicht nennt, bleibt stehen: „Aufbewahrung auf 10" soll
+    nicht verlangen, dass es Intervall und Vor-Start-Schalter fehlerfrei
+    mitschreibt. Dieselben Grenzen wie am Panel-Endpunkt
+    (`routers/backups.py::BackupSettingsRequest`): Intervall 0–720 Stunden
+    (0 = aus), Aufbewahrung 1–100.
+    """
+    unbekannt = set(arguments) - {"backup_on_start", "interval_hours", "retention_count"}
+    if unbekannt:
+        raise AiActionValidationError(
+            "Unbekanntes Feld im Backup-Zeitplan: " + ", ".join(sorted(unbekannt))
+        )
+    if not arguments:
+        raise AiActionValidationError(
+            "Keine Änderung angegeben. Nenne mindestens eines von "
+            "backup_on_start, interval_hours, retention_count."
+        )
+
+    payload: dict = {}
+    if "backup_on_start" in arguments:
+        if not isinstance(arguments["backup_on_start"], bool):
+            raise AiActionValidationError("backup_on_start muss wahr oder falsch sein")
+        payload["backup_on_start"] = arguments["backup_on_start"]
+    if "interval_hours" in arguments:
+        wert = arguments["interval_hours"]
+        if isinstance(wert, bool) or not isinstance(wert, int):
+            raise AiActionValidationError("interval_hours muss eine ganze Zahl sein")
+        if not 0 <= wert <= 720:
+            raise AiActionValidationError(
+                "Das Backup-Intervall muss zwischen 0 (aus) und 720 Stunden liegen"
+            )
+        payload["interval_hours"] = wert
+    if "retention_count" in arguments:
+        wert = arguments["retention_count"]
+        if isinstance(wert, bool) or not isinstance(wert, int):
+            raise AiActionValidationError("retention_count muss eine ganze Zahl sein")
+        if not 1 <= wert <= 100:
+            raise AiActionValidationError(
+                "Die Aufbewahrung muss zwischen 1 und 100 Backups liegen"
+            )
+        payload["retention_count"] = wert
+
+    preview = {
+        "operation": "backup_schedule",
+        "changes": dict(payload),
+        "before": {
+            "backup_on_start": bool(server.backup_on_start),
+            "interval_hours": server.backup_interval_hours,
+            "retention_count": server.backup_retention_count,
+        },
         "current_status": server.status,
         "restart_required": False,
     }
@@ -1974,6 +2165,19 @@ def create_proposal(
             expected_revision = None
         elif tool_name == "propose_guardian_tuning":
             payload, preview = _guardian_tuning_payload(server, rest)
+            expected_revision = None
+        elif tool_name == "propose_restart_schedule_set":
+            payload, preview = _restart_schedule_payload(server, rest)
+            # Kommt der Vorschlag aus einem stehenden Auftrag, wird der Server
+            # mit ihm verknüpft: das Panel zeigt dann „Von der KI verwaltet
+            # (Aufgabe X)", und eine manuelle Änderung deaktiviert genau X.
+            if aufgabe is not None:
+                payload["ai_task_id"] = aufgabe.task_id
+            expected_revision = None
+        elif tool_name == "propose_backup_schedule_set":
+            payload, preview = _backup_schedule_payload(server, rest)
+            if aufgabe is not None:
+                payload["ai_task_id"] = aufgabe.task_id
             expected_revision = None
         elif tool_name == "propose_file_delete":
             payload, preview, expected_revision = _file_delete_payload(db, server, rest)
@@ -3096,6 +3300,98 @@ def _ausfuehren_hoster_schreiben(db: Session, rahmen: _AusfuehrungsRahmen) -> _A
     return _Ausgefuehrt(result=result)
 
 
+def _ausfuehren_restart_schedule_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    """Setzt den eingebauten Auto-Neustart-Zeitplan — derselbe Weg wie das Panel.
+
+    Normalisierung und Scheduler-Sync sind wörtlich die des Panel-PATCH
+    (`routers/servers.py`): erst `normalize_server_restart_mode` (Intervall
+    und feste Zeiten schließen sich aus), dann `sync_server_restart_schedule`
+    **vor** dem Commit, damit Datenbank und APScheduler nicht driften.
+    Zusätzlich bekommt der Server das „Von der KI verwaltet"-Abzeichen; die
+    Aufgaben-Kennung kommt mit, wenn der Vorschlag aus einem stehenden
+    Auftrag stammt.
+    """
+    if rahmen.server_id is None:
+        raise AiActionStateError("AI_ACTION_INVALID")
+    server = db.get(Server, rahmen.server_id)
+    if server is None:
+        raise AiActionStateError("AI_ACTION_INVALID")
+
+    p = rahmen.payload
+    server.auto_restart = bool(p.get("enabled"))
+    if p.get("interval_hours") is not None:
+        server.restart_interval_hours = int(p["interval_hours"])
+    elif p.get("times_csv"):
+        zeiten = str(p["times_csv"])
+        server.restart_times_utc = zeiten
+        # Legacy-Spiegel wie im Panel: die erste Zeit landet zusätzlich im
+        # Einzelfeld, das ältere Leser noch kennen.
+        server.restart_time_utc = zeiten.split(",")[0]
+        server.restart_interval_hours = None
+
+    from services.server_provisioning_service import normalize_server_restart_mode
+
+    normalize_server_restart_mode(server)
+    server.restart_ai_managed = True
+    server.restart_ai_task_id = str(p["ai_task_id"]) if p.get("ai_task_id") else None
+
+    from services.scheduler_service import sync_server_restart_schedule
+
+    sync_server_restart_schedule(server)
+    db.flush()
+    return _Ausgefuehrt(result={
+        "enabled": bool(server.auto_restart),
+        "interval_hours": server.restart_interval_hours,
+        "times": [
+            teil for teil in (server.restart_times_utc or "").split(",") if teil
+        ],
+        "ai_managed": True,
+    })
+
+
+def _ausfuehren_backup_schedule_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    """Setzt den eingebauten Auto-Backup-Zeitplan — derselbe Weg wie das Panel.
+
+    Ein Nachtrag: nur die Felder aus der Nutzlast werden angefasst. Der
+    Scheduler wird bei einer Intervall-Änderung sofort synchronisiert, wie am
+    Panel-Endpunkt (`routers/backups.py`).
+    """
+    if rahmen.server_id is None:
+        raise AiActionStateError("AI_ACTION_INVALID")
+    server = db.get(Server, rahmen.server_id)
+    if server is None:
+        raise AiActionStateError("AI_ACTION_INVALID")
+
+    p = rahmen.payload
+    if "backup_on_start" in p:
+        server.backup_on_start = bool(p["backup_on_start"])
+    if "interval_hours" in p:
+        wert = int(p["interval_hours"])
+        server.backup_interval_hours = wert if wert > 0 else None
+        from services.scheduler_service import remove_job, schedule_backup
+
+        if server.backup_interval_hours:
+            schedule_backup(
+                server.id,
+                interval_hours=server.backup_interval_hours,
+                job_id=f"backup_server_{server.id}",
+            )
+        else:
+            remove_job(f"backup_server_{server.id}")
+    if "retention_count" in p:
+        server.backup_retention_count = int(p["retention_count"])
+
+    server.backup_ai_managed = True
+    server.backup_ai_task_id = str(p["ai_task_id"]) if p.get("ai_task_id") else None
+    db.flush()
+    return _Ausgefuehrt(result={
+        "backup_on_start": bool(server.backup_on_start),
+        "interval_hours": server.backup_interval_hours,
+        "retention_count": server.backup_retention_count,
+        "ai_managed": True,
+    })
+
+
 def _ausfuehren_task_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     # **Die Felder werden hier erneut geprueft**, nicht nur
     # angewandt. Zwischen Vorschlag und Bestaetigung liegt ein
@@ -3164,6 +3460,8 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_mod_install": _ausfuehren_mod_install,
     "propose_server_repair": _ausfuehren_server_repair,
     "propose_guardian_tuning": _ausfuehren_guardian_tuning,
+    "propose_restart_schedule_set": _ausfuehren_restart_schedule_set,
+    "propose_backup_schedule_set": _ausfuehren_backup_schedule_set,
     "propose_file_delete": _ausfuehren_file_delete,
     "propose_server_create": _ausfuehren_server_create,
     "propose_blueprint_change": _ausfuehren_blueprint_change,

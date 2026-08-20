@@ -193,6 +193,9 @@ class ServerResponse(BaseModel):
     last_auto_restart_completed_at: datetime | None = None
     last_auto_restart_status: str | None = None
     next_auto_restart_at: datetime | None = None
+    # „Von der KI verwaltet": die KI hat den Neustart-Zeitplan zuletzt gesetzt.
+    # Eine manuelle Änderung nimmt das Flag zurück (routers/servers.py).
+    restart_ai_managed: bool = False
     started_at: datetime | None = None
     uptime_seconds: int | None = None
     cpu_limit_percent: int | None

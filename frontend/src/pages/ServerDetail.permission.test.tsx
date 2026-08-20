@@ -83,6 +83,7 @@ const SYNTHETIC_SERVER: Server = {
   last_auto_restart_completed_at: null,
   last_auto_restart_status: null,
   next_auto_restart_at: null,
+  restart_ai_managed: false,
   started_at: null,
   uptime_seconds: null,
   cpu_limit_percent: 100,

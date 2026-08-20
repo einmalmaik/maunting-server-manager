@@ -428,6 +428,19 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
                 setattr(server, key, val)
         _normalize_server_restart_mode(server)
 
+        # Manuelle Änderung am Neustart-Zeitplan gewinnt: „Von der KI
+        # verwaltet" wird zurückgenommen und der verknüpfte stehende Auftrag
+        # deaktiviert. Nur die Zeitplan-Felder zählen — ein Umbenennen des
+        # Servers ist keine Zeitplan-Entscheidung. Das KI-Werkzeug
+        # propose_restart_schedule_set geht nicht über diesen Endpunkt.
+        restart_zeitplan_felder = {
+            "auto_restart", "restart_interval_hours", "restart_time_utc", "restart_times_utc",
+        }
+        if restart_zeitplan_felder & set(payload.keys()):
+            from services.ai_task_service import ki_zeitplan_verwaltung_aufheben
+
+            ki_zeitplan_verwaltung_aufheben(db, server, bereich="restart")
+
         # ── Live CPU/RAM-Update und/oder Disk-Soft-Limit-Re-evaluation ──
         # Mixed resource/disk + network payloads wurden VOR diesem Punkt
         # mit 409 abgelehnt (scrutiny round 2 fix). Hier sind nur noch

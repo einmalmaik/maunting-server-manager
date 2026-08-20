@@ -439,7 +439,9 @@
         "propose_guardian_tuning": "Autopilot-Einstellungen ändern",
         "propose_server_repair": "Anlage reparieren",
         "propose_task_delete": "Wiederkehrende Aufgabe löschen",
-        "propose_task_set": "Wiederkehrende Aufgabe einrichten"
+        "propose_task_set": "Wiederkehrende Aufgabe einrichten",
+        "propose_restart_schedule_set": "Auto-Neustart des Servers einstellen",
+        "propose_backup_schedule_set": "Auto-Backup des Servers einstellen"
       },
       "status": {
         "proposed": "Prüfung erforderlich",
@@ -475,7 +477,9 @@
         "propose_server_repair": "Die Reparatur „{{operation}}“ an der Anlage dieses Servers ausführen? „repair_permissions“ setzt die Besitzrechte am Serververzeichnis neu, „reallocate_port“ vergibt belegte Ports neu und startet den Server dafür. Spieldateien werden in beiden Fällen nicht angefasst.",
         "propose_file_delete": "Die Datei „{{path}}“ löschen? Sie ist danach nur noch aus einem Backup zurückzuholen. Vor dem Löschen wird ein Schnappschuss in der Dateihistorie angelegt.",
         "propose_task_set": "Diese Aufgabe läuft ab jetzt von selbst — auch dann, wenn du nicht im Panel bist. Sie handelt mit deinen Berechtigungen und aus deinem KI-Kontingent. Du kannst sie jederzeit im Chat pausieren oder löschen.",
-        "propose_task_delete": "Diese Aufgabe wird endgültig entfernt und läuft nicht mehr. Soll sie nur eine Weile ruhen, lass sie stattdessen pausieren."
+        "propose_task_delete": "Diese Aufgabe wird endgültig entfernt und läuft nicht mehr. Soll sie nur eine Weile ruhen, lass sie stattdessen pausieren.",
+        "propose_restart_schedule_set": "Den Auto-Neustart dieses Servers so einstellen? Der Zeitplan steht danach im Neustart-Bereich des Servers und bleibt dort von Hand änderbar. Änderst du ihn später manuell, endet die Verwaltung durch die KI und die zuständige Aufgabe wird pausiert.",
+        "propose_backup_schedule_set": "Das Auto-Backup dieses Servers so einstellen? Die Einstellungen stehen danach im Backup-Bereich des Servers und bleiben dort von Hand änderbar. Änderst du sie später manuell, endet die Verwaltung durch die KI und die zuständige Aufgabe wird pausiert."
       },
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
@@ -607,6 +611,8 @@
       "propose_server_lifecycle": "Ich bereite die Änderung am Serverbetrieb vor",
       "propose_guardian_tuning": "Ich bereite die Autopilot-Einstellungen vor",
       "propose_server_repair": "Ich bereite die Reparatur der Anlage vor",
+      "propose_restart_schedule_set": "Ich stelle den Auto-Neustart des Servers ein",
+      "propose_backup_schedule_set": "Ich stelle das Auto-Backup des Servers ein",
       "propose_task_delete": "Ich bereite das Löschen der Aufgabe vor",
       "propose_task_set": "Ich bereite die wiederkehrende Aufgabe vor",
       "read_ai_action_history": "Ich sehe mir frühere KI-Aktionen an",
@@ -750,6 +756,63 @@
       "takeOverDone": "Übernommen. Die Reparatur ist beendet.",
       "waitingApproval": "Wartet auf deine Freigabe per E-Mail",
       "takeOverFailed": "Die Reparatur ließ sich nicht beenden."
+    },
+    "tasks": {
+      "toTasks": "Aufgabenliste",
+      "title": "Aufgabenliste",
+      "subtitle": "Stehende Aufträge — sie laufen im Hintergrund und unterbrechen den Chat nie.",
+      "emptyTitle": "Noch keine Aufgaben",
+      "emptyDescription": "Leg hier eine Aufgabe an oder bitte die KI im Chat darum — etwa „prüf jeden Morgen die Logs“. Drei Angaben genügen: Name, Auftrag, Zeitplan.",
+      "new": "Neue Aufgabe",
+      "editTitle": "Aufgabe bearbeiten",
+      "name": "Aufgabenname",
+      "prompt": "Auftrag an die KI",
+      "promptHint": "Der Name ist für dich und die Sortierung — die KI liest den Auftragstext.",
+      "schedule": "Zeitplan",
+      "planKindDaily": "Täglich / Wochentage",
+      "planKindInterval": "Intervall",
+      "planKindOnce": "Einmalig",
+      "timeOfDay": "Uhrzeit",
+      "weekdaysHint": "Keine Auswahl bedeutet: jeden Tag.",
+      "intervalHours": "Stundenabstand (1–168)",
+      "onceAt": "Zeitpunkt",
+      "timezone": "Zeitzone",
+      "timezoneHint": "IANA-Name, zum Beispiel Europe/Berlin. Der Zeitplan richtet sich danach.",
+      "email": "Ergebnis zusätzlich per E-Mail",
+      "act": "Darf dabei handeln",
+      "actHint": "Nur mit freigegebenem autonomem Modus — ohne Häkchen berichtet die Aufgabe nur.",
+      "create": "Aufgabe anlegen",
+      "created": "Aufgabe angelegt.",
+      "saved": "Aufgabe gespeichert.",
+      "resumed": "Aufgabe wieder aktiv.",
+      "pausedToast": "Aufgabe pausiert.",
+      "deleted": "Aufgabe „{{title}}“ gelöscht.",
+      "deleteConfirm": "Diese Aufgabe endgültig löschen? Soll sie nur eine Weile ruhen, pausiere sie stattdessen.",
+      "openWindow": "Verlauf öffnen",
+      "nextRun": "Nächster Lauf: {{when}}",
+      "paused": "Pausiert",
+      "actBadge": "Handelt",
+      "emailBadge": "E-Mail",
+      "enabledAria": "Aufgabe aktiv",
+      "planDaily": "Täglich um {{time}} ({{zone}})",
+      "planWeekdays": "{{days}} um {{time}} ({{zone}})",
+      "planInterval_one": "Stündlich",
+      "planInterval_other": "Alle {{count}} Stunden",
+      "planOnce": "Einmalig am {{when}}",
+      "weekday": {
+        "1": "Mo",
+        "2": "Di",
+        "3": "Mi",
+        "4": "Do",
+        "5": "Fr",
+        "6": "Sa",
+        "7": "So"
+      },
+      "errors": {
+        "load": "Aufgaben konnten nicht geladen werden",
+        "save": "Aufgabe konnte nicht gespeichert werden",
+        "delete": "Aufgabe konnte nicht gelöscht werden"
+      }
     },
     "webSearch": {
       "title": "Websuche",
@@ -1666,7 +1729,7 @@
     },
     "ai_tasks_manage": {
       "title": "Wiederkehrende KI-Aufgaben verwalten",
-      "desc": "Erlaubt es, der KI im Chat stehende Aufträge zu geben — etwa täglich um 8 Uhr eine Zusammenfassung per E-Mail. Ein fälliger Auftrag läuft ohne anwesenden Benutzer, aber mit dessen Berechtigungen und aus dessen Kontingent. Aufträge, die selbst etwas ändern, setzen zusätzlich den autonomen Modus voraus."
+      "desc": "Erlaubt es, stehende Aufträge anzulegen — im Chat oder von Hand in der Aufgabenliste auf der KI-Seite; ohne das Recht gibt es dort weder Knopf noch Liste. Ein fälliger Auftrag läuft im Hintergrund ohne anwesenden Benutzer, aber mit dessen Berechtigungen und aus dessen Kontingent. Aufträge, die selbst etwas ändern, setzen zusätzlich den autonomen Modus voraus."
     },
     "ai_background_use": {
       "title": "KI-Worker im Hintergrund verwenden",
@@ -2202,7 +2265,23 @@
     "uploadToCloud": "In Cloud hochladen",
     "uploadedToCloud": "Backup in Cloud hochgeladen",
     "restoreFromCloud": "Aus Cloud wiederherstellen",
-    "confirmRestoreFromCloud": "Backup aus der Cloud wiederherstellen? Aktuelle Daten werden überschrieben. Das Backup wird dafür heruntergeladen und entschlüsselt."
+    "confirmRestoreFromCloud": "Backup aus der Cloud wiederherstellen? Aktuelle Daten werden überschrieben. Das Backup wird dafür heruntergeladen und entschlüsselt.",
+    "seconds": "{{count}} Sekunden",
+    "estimatedSize": "Geschätzte Größe",
+    "intervalOff": "Deaktiviert",
+    "intervalHourly": "Stündlich",
+    "intervalHours": "Alle {{count}} Stunden",
+    "intervalDaily": "Täglich",
+    "intervalDays": "Alle {{count}} Tage",
+    "intervalWeekly": "Wöchentlich",
+    "intervalWeeks": "Alle {{count}} Wochen",
+    "intervalMonthly": "Alle 30 Tage",
+    "retentionHint": "Es werden höchstens {{count}} Backups aufbewahrt; ältere werden automatisch gelöscht, sobald ein neues entsteht. Gilt für manuelle und automatische Backups.",
+    "nextAutoBackup": "Nächstes Auto-Backup",
+    "aiManaged": "Von der KI verwaltet",
+    "aiManagedByTask": "Von der KI verwaltet ({{title}})",
+    "aiManagedHint": "Die KI hat diesen Backup-Zeitplan eingestellt. Du kannst ihn jederzeit ändern — dann übernimmst du die Verwaltung wieder.",
+    "aiManagedSaveHint": "Beim Speichern übernimmst du die Verwaltung: der zuständige KI-Auftrag wird automatisch deaktiviert."
   },
   "tabs": {
     "files": "Dateimanager",
@@ -2240,7 +2319,9 @@
     "maxTimesReached": "Maximum von 12 Zeiten erreicht",
     "lastAutoAttempt": "Letzter Versuch",
     "lastAutoRestart": "Letzter Auto-Restart",
-    "nextAutoRestart": "Nächster Auto-Restart"
+    "nextAutoRestart": "Nächster Auto-Restart",
+    "aiManaged": "Von der KI verwaltet",
+    "aiManagedHint": "Die KI hat diesen Neustart-Zeitplan eingestellt. Du kannst ihn jederzeit ändern — beim Speichern übernimmst du die Verwaltung, und der zuständige KI-Auftrag wird automatisch deaktiviert."
   },
   "settings": {
     "title": "Einstellungen",
@@ -3363,7 +3444,7 @@
           "autonomy": "Der autonome Modus ist optional und muss pro Server oder panelweit ausdrücklich freigegeben werden; freigegebene Aktionen laufen ohne weitere Rückfrage, werden aber unverändert gegen die Berechtigungen des Nutzers geprüft und vollständig im Audit-Log als automatisch ausgeführt festgehalten",
           "tools": "Beim Einsatz von Werkzeugen können begrenzte, redigierte Ausschnitte aus Serverlogs, Konfigurationsdateien, Mod- und Backup-Listen sowie Guardian-Vorfällen an den Modellanbieter übertragen werden; diese Ergebnisse werden für Rückfragen im selben Chat gespeichert und mit dem Chat gelöscht",
           "guardian": "Bei erteilter Autonomiefreigabe kann ein Guardian-Vorfall eine Verarbeitung auslösen, ohne dass der Nutzer anwesend ist: übertragen werden Vorfallart, Status und die ohnehin freigegebenen Serverdaten; Logauszüge werden dabei zusätzlich um öffentliche IP-Adressen und E-Mail-Adressen bereinigt. Verbrauch und Verantwortung liegen beim Freigeber. Der Ergebnisbericht per E-Mail enthält modellerzeugten Text.",
-          "tasks": "Ein im Chat angelegter stehender Auftrag („KI-Aufgabe“) speichert Name, Auftragstext, Zeitplan, Zeitzone und Zustellweg und löst zum vereinbarten Zeitpunkt eine Verarbeitung aus, ohne dass der Nutzer anwesend ist. Sie läuft mit den Rechten und dem Kontingent des Anlegenden; bei jedem fälligen Lauf werden Auftragstext und die abgerufenen Serverdaten an den gewählten Modellanbieter übertragen. Auf Wunsch geht das Ergebnis zusätzlich per E-Mail an die hinterlegte Adresse und enthält modellerzeugten Text. Aufträge sind im Chat jederzeit auflistbar, pausierbar und löschbar."
+          "tasks": "Ein im Chat oder in der Aufgabenliste angelegter stehender Auftrag („KI-Aufgabe“) speichert Name, Auftragstext, Zeitplan, Zeitzone und Zustellweg und löst zum vereinbarten Zeitpunkt eine Verarbeitung aus, ohne dass der Nutzer anwesend ist. Sie läuft im Hintergrund mit den Rechten und dem Kontingent des Anlegenden; bei jedem fälligen Lauf werden Auftragstext und die abgerufenen Serverdaten an den gewählten Modellanbieter übertragen. Auf Wunsch geht das Ergebnis zusätzlich per E-Mail an die hinterlegte Adresse und enthält modellerzeugten Text. Aufträge sind im Chat und in der Aufgabenliste jederzeit auflistbar, pausierbar und löschbar."
         }
       },
       "storage": {

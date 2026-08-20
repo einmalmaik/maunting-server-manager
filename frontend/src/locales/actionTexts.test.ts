@@ -53,6 +53,11 @@ const SCHREIBWERKZEUGE = [
   // Fall „der Blueprint erwartet etwas, das diese Node nicht leisten kann"
   // beheben darf, ohne die Vorlage für alle Server dieses Spiels zu ändern.
   'propose_guardian_tuning',
+  // Die eingebauten Zeitpläne des Servers: Auto-Neustart und Auto-Backup. Für
+  // genau diese zwei Fälle legt die KI keinen stehenden Auftrag an, sondern
+  // stellt ein, was der Benutzer am Server sieht und selbst ändern kann.
+  'propose_restart_schedule_set',
+  'propose_backup_schedule_set',
 ] as const
 
 const SPRACHEN = { de, en } as Record<string, typeof de>

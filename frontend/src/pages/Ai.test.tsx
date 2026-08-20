@@ -47,6 +47,9 @@ vi.mock('@/components/ai/AiSkillDirectory', () => ({
 vi.mock('@/components/ai/GuardianAnsicht', () => ({
   GuardianAnsicht: () => <div>guardian-attrappe</div>,
 }))
+vi.mock('@/components/ai/AufgabenAnsicht', () => ({
+  AufgabenAnsicht: () => <div>aufgaben-attrappe</div>,
+}))
 vi.mock('@/components/ai/WorkerAnsicht', () => ({
   WorkerAnsicht: ({ conversationId }: { conversationId: string }) => (
     <div>{`worker-attrappe:${conversationId}`}</div>
@@ -126,6 +129,27 @@ describe('Ai', () => {
 
     await screen.findByText('chat-attrappe')
     expect(screen.queryByText(/worker-attrappe/)).toBeNull()
+  })
+
+  it('zeigt die Aufgabenliste mit ai.tasks.manage', async () => {
+    rechte('ai.chat.use', 'ai.tasks.manage')
+    zeichnen()
+
+    fireEvent.click(await screen.findByRole('button', { name: i18n.t('ai.tasks.toTasks') }))
+    await screen.findByText('aufgaben-attrappe')
+    expect(screen.queryByText('chat-attrappe')).toBeNull()
+  })
+
+  it('kennt ohne ai.tasks.manage weder Knopf noch Ansicht', async () => {
+    // Die Wahrheit liegt im Backend (die Liste antwortet ohne das Recht 403);
+    // hier geht es darum, keine Ansicht anzubieten, die nur einen Fehler
+    // zeigen kann — auch nicht ueber die Adresse.
+    rechte('ai.chat.use')
+    zeichnen('/ai?ansicht=aufgaben')
+
+    await screen.findByText('chat-attrappe')
+    expect(screen.queryByText('aufgaben-attrappe')).toBeNull()
+    expect(screen.queryByRole('button', { name: i18n.t('ai.tasks.toTasks') })).toBeNull()
   })
 
   it('zeigt im getippten Modus keinen zweiten Autonomie-Schalter', async () => {

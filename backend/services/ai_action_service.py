@@ -1571,19 +1571,22 @@ def provider_tool_definitions() -> list[dict]:
             "Blueprint gelten. Aendert keine Datei und keinen Spielstand.",
             {
                 "startup_grace_period_seconds": {
-                    "type": "integer", "minimum": 1, "maximum": 3600,
+                    "type": "integer", "minimum": 1, "maximum": 600,
                     "description": "Ruhe nach dem Start, bevor Proben zaehlen.",
                 },
                 "startup_timeout_seconds": {
-                    "type": "integer", "minimum": 10, "maximum": 7200,
-                    "description": "Ab wann ein Start als gescheitert gilt.",
+                    "type": "integer", "minimum": 10, "maximum": 3600,
+                    "description": (
+                        "Ab wann ein Start als gescheitert gilt. "
+                        "Muss ueber der Ruhezeit liegen."
+                    ),
                 },
                 "probe_interval_seconds": {
                     "type": "integer", "minimum": 1, "maximum": 600,
                     "description": "Abstand zwischen zwei Proben (alle Proben).",
                 },
                 "probe_timeout_seconds": {
-                    "type": "integer", "minimum": 1, "maximum": 120,
+                    "type": "integer", "minimum": 1, "maximum": 30,
                     "description": "Geduld einer Netzprobe.",
                 },
                 "probe_failure_threshold": {
@@ -1595,7 +1598,7 @@ def provider_tool_definitions() -> list[dict]:
                     "description": "Erfolge in Folge bis 'gesund'.",
                 },
                 "recovery_max_attempts": {
-                    "type": "integer", "minimum": 0, "maximum": 20,
+                    "type": "integer", "minimum": 0, "maximum": 10,
                     "description": (
                         "Wieviele Selbstheilungsversuche Guardian unternimmt. "
                         "0 heisst: gar keine mehr, nur noch melden."
@@ -1606,11 +1609,11 @@ def provider_tool_definitions() -> list[dict]:
                     "description": "Zeitfenster, in dem die Versuche gezaehlt werden.",
                 },
                 "recovery_cooldown_seconds": {
-                    "type": "integer", "minimum": 0, "maximum": 86400,
+                    "type": "integer", "minimum": 1, "maximum": 3600,
                     "description": "Pause zwischen zwei Versuchen.",
                 },
                 "verification_min_healthy_seconds": {
-                    "type": "integer", "minimum": 0, "maximum": 3600,
+                    "type": "integer", "minimum": 0, "maximum": 600,
                     "description": "Wie lange gesund, damit es als geheilt gilt.",
                 },
                 "verification_required_successes": {
@@ -1618,7 +1621,7 @@ def provider_tool_definitions() -> list[dict]:
                     "description": "Erfolge in Folge fuer die Bestaetigung.",
                 },
                 "verification_timeout_seconds": {
-                    "type": "integer", "minimum": 10, "maximum": 7200,
+                    "type": "integer", "minimum": 10, "maximum": 3600,
                     "description": "Ab wann die Bestaetigung als gescheitert gilt.",
                 },
                 "reset": {
@@ -1627,6 +1630,66 @@ def provider_tool_definitions() -> list[dict]:
                         "Alle Uebersteuerungen zuruecknehmen. Schliesst jede "
                         "andere Angabe aus."
                     ),
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            [*_RATIONALE_REQUIRED],
+        ),
+        # ── Die eingebauten Zeitpläne: Auto-Neustart und Auto-Backup ──────
+        #
+        # Der Durchgriff statt einer stehenden Aufgabe: was hier gesetzt wird,
+        # sieht der Benutzer im Panel unter dem Server und kann es dort selbst
+        # ändern. Eine manuelle Änderung nimmt der KI die Verwaltung wieder ab.
+        #
+        # Der **Anlass** — wann diese zwei Werkzeuge statt `propose_task_set`
+        # gelten, dass je Server ein Aufruf reicht und dass nicht nachgefragt
+        # wird — steht in `ai_prompt.AUFGABEN` und geht mit derselben Anfrage
+        # mit. Hier steht nur die Feldkunde; die Wiederholung des Anlasses
+        # kostete den Katalog knapp 1.000 Zeichen je Runde (siehe
+        # test_ai_tool_handler_contract zum Katalogbudget).
+        _server_function(
+            "propose_restart_schedule_set",
+            "Setzt den eingebauten Auto-Neustart-Zeitplan dieses Servers. "
+            "Entweder `interval_hours` oder `times`, nie beides; "
+            "`enabled: false` schaltet aus und braucht keinen Plan. "
+            "`times` sind UTC und gelten täglich — rechne die Ortszeit des "
+            "Benutzers um und nenne ihm beide Werte.",
+            {
+                "enabled": {"type": "boolean"},
+                "interval_hours": {
+                    "type": "integer", "minimum": 1, "maximum": 168,
+                    "description": "Neustart alle N Stunden (1-168).",
+                },
+                "times": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 12,
+                    "items": {"type": "string", "maxLength": 5},
+                    "description": "Bis zu 12 Neustartzeiten 'HH:MM' in UTC, gelten täglich.",
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            ["enabled", *_RATIONALE_REQUIRED],
+        ),
+        _server_function(
+            "propose_backup_schedule_set",
+            "Setzt den eingebauten Auto-Backup-Zeitplan dieses Servers. "
+            "Nur genannte Felder werden angefasst; die übrigen bleiben stehen.",
+            {
+                "backup_on_start": {
+                    "type": "boolean",
+                    "description": "Vor jedem Serverstart automatisch sichern.",
+                },
+                "interval_hours": {
+                    "type": "integer", "minimum": 0, "maximum": 720,
+                    "description": (
+                        "Backup alle N Stunden; 0 = aus, 24 = täglich, "
+                        "168 = wöchentlich, 720 = alle 30 Tage."
+                    ),
+                },
+                "retention_count": {
+                    "type": "integer", "minimum": 1, "maximum": 100,
+                    "description": "Aufbewahrte Backups (1-100); ältere werden gelöscht.",
                 },
                 **_RATIONALE_SCHEMA,
             },

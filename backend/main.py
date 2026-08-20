@@ -50,6 +50,7 @@ from routers import (
     ai_approvals_router,
     ai_autonomy_router,
     ai_memory_router,
+    ai_tasks_router,
     ai_skills_router,
     ai_attachments_router,
     credentials_router,
@@ -862,6 +863,7 @@ app.include_router(ai_actions_router)
 # prueft, gehoert hinter dieselbe Drossel wie der Login.
 app.include_router(ai_approvals_router, dependencies=[Depends(auth_rate_limit)])
 app.include_router(ai_memory_router)
+app.include_router(ai_tasks_router)
 app.include_router(ai_autonomy_router)
 app.include_router(ai_skills_router)
 app.include_router(ai_attachments_router)

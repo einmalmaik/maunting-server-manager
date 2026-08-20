@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AudioLines, ChevronDown, MessageSquare, ShieldAlert, Sparkles } from 'lucide-react'
+import { AudioLines, CalendarClock, ChevronDown, MessageSquare, ShieldAlert, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiVoiceConfig } from '@/api/ai'
@@ -8,6 +8,7 @@ import { api } from '@/api/client'
 import { AiAutonomyButton } from '@/components/ai/AiAutonomyButton'
 import { AiChat } from '@/components/ai/AiChat'
 import { AiSkillDirectory } from '@/components/ai/AiSkillDirectory'
+import { AufgabenAnsicht } from '@/components/ai/AufgabenAnsicht'
 import { GuardianAnsicht } from '@/components/ai/GuardianAnsicht'
 import { WorkerAnsicht } from '@/components/ai/WorkerAnsicht'
 import { SprachAnsicht } from '@/components/ai/voice/SprachAnsicht'
@@ -35,10 +36,15 @@ interface ServerOption {
  * Umschalt-Knopf gibt es dafür nicht: es gibt beliebig viele Aufträge, ein
  * statischer Knopf wüsste nicht, wohin. Hin führen die Worker-Leiste im Chat
  * und die Glocke.
+ *
+ * `aufgaben` ist die Aufgabenliste: die stehenden Aufträge dieses Benutzers,
+ * manuell verwaltbar mit denselben Dienstfunktionen, durch die auch die KI
+ * geht. Sie steht in derselben Reihe wie das Guardian-Fenster und braucht
+ * `ai.tasks.manage` — ohne das Recht gibt es weder Knopf noch Ansicht.
  */
-type Ansicht = 'text' | 'sprache' | 'guardian' | 'worker'
+type Ansicht = 'text' | 'sprache' | 'guardian' | 'worker' | 'aufgaben'
 
-const ANSICHTEN: readonly Ansicht[] = ['text', 'sprache', 'guardian', 'worker']
+const ANSICHTEN: readonly Ansicht[] = ['text', 'sprache', 'guardian', 'worker', 'aufgaben']
 
 function ansichtAusAbfrage(wert: string | null, id: string | null): Ansicht {
   const ansicht = (ANSICHTEN as readonly string[]).includes(wert ?? '')
@@ -119,6 +125,7 @@ export function Ai() {
   const canUseSkills = useHasPermission('ai.skills.use')
   const canSpeak = useHasPermission('ai.voice.use')
   const canUseAutonomy = useHasPermission('ai.autonomous.use')
+  const canManageTasks = useHasPermission('ai.tasks.manage')
   const [skillsOpen, setSkillsOpen] = useState(false)
   const [sprachkonfiguration, setSprachkonfiguration] = useState<AiVoiceConfig | null>(null)
   const [servers, setServers] = useState<ServerOption[]>([])
@@ -130,8 +137,14 @@ export function Ai() {
   const gewuenscht = ansichtAusAbfrage(suchParameter.get('ansicht'), workerId)
   // Ohne eingerichteten Realtime-Zugang gibt es den Sprachmodus nicht — auch
   // dann nicht, wenn er in der Adresse steht. Dieselbe Regel wie beim Knopf.
+  // Und ohne `ai.tasks.manage` keine Aufgabenliste: das Backend wiese den
+  // Abruf ohnehin mit 403 ab, aber eine Ansicht, die nur einen Fehler zeigen
+  // kann, ist keine.
   const ansicht: Ansicht =
-    gewuenscht === 'sprache' && !sprachkonfiguration ? 'text' : gewuenscht
+    (gewuenscht === 'sprache' && !sprachkonfiguration)
+      || (gewuenscht === 'aufgaben' && !canManageTasks)
+      ? 'text'
+      : gewuenscht
 
   const setzeAnsicht = (neu: Ansicht) => {
     const naechste = new URLSearchParams(suchParameter)
@@ -238,6 +251,17 @@ export function Ai() {
             label={t('ai.voice.toTextMode')}
           />
         )}
+        {/* Die Aufgabenliste steht vor dem Guardian-Knopf — der Wunsch des
+            Betreibers. Ohne `ai.tasks.manage` gibt es sie gar nicht: das
+            Backend gibt der Liste ohne das Recht nichts heraus. */}
+        {canManageTasks && (
+          <Umschalter
+            aktiv={ansicht === 'aufgaben'}
+            onClick={() => setzeAnsicht(ansicht === 'aufgaben' ? 'text' : 'aufgaben')}
+            icon={<CalendarClock className="h-4 w-4" aria-hidden="true" />}
+            label={t('ai.tasks.toTasks')}
+          />
+        )}
         <Umschalter
           aktiv={ansicht === 'guardian'}
           onClick={() => setzeAnsicht(ansicht === 'guardian' ? 'text' : 'guardian')}
@@ -262,6 +286,8 @@ export function Ai() {
         />
       ) : ansicht === 'guardian' ? (
         <GuardianAnsicht />
+      ) : ansicht === 'aufgaben' ? (
+        <AufgabenAnsicht />
       ) : ansicht === 'worker' && workerId ? (
         // `key`, damit ein Wechsel zwischen zwei Aufträgen die Ansicht neu
         // aufbaut, statt den Verlauf des einen in den anderen zu mischen.

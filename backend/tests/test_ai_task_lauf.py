@@ -13,9 +13,12 @@ Befund, bevor es eine Zusage war:
 * Die Werkzeugmenge ist enger als im Chat, und sie wird im Code durchgesetzt,
   nicht im Prompt. Die Eingabe eines Aufgabenlaufs enthaelt Serverlogs, also
   Text, den ein Spieler geschrieben haben kann.
-* `ask_user` gibt es nicht. Ein Lauf, der darauf wartet, steht auf
-  'waiting_user' — und weil `aktiver_lauf` wartende Laeufe mitzaehlt, blockiert
-  er von da an **jede** weitere Aufgabe dieses Benutzers.
+* `ask_user` gibt es nicht. Ein Lauf, der darauf wartet, stuende auf
+  'waiting_user' — und niemand wuerde je antworten.
+* Seit dem 20.08.2026 laeuft der Auftrag in einem **eigenen Hintergrundfenster**
+  (kind='worker', je Aufgabe wiederverwendet) statt im Dauerchat: das Gespraech
+  des Menschen wird nie unterbrochen, und das Ergebnis geht als Meldung ueber
+  die Meldestelle in den Chat, sobald dort Ruhe ist.
 
 Gefaelscht wird genau das, was in einem Test nicht echt sein kann: der Anbieter
 und die Laufzeit der Anwendung. Alles dazwischen ist Produktivcode.
@@ -449,32 +452,43 @@ async def test_ohne_laufzeit_entsteht_gar_nichts(db: Session, monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_ein_aktiver_lauf_vertagt_statt_abzuloesen(db: Session, monkeypatch) -> None:
-    """Der Mensch chattet gerade — ihm mitten im Satz die Antwort abzuschneiden
-    waere der teuerste denkbare Weg, ein Backup anzustossen.
+async def test_ein_aktiver_chatlauf_wird_weder_abgeloest_noch_vertagt(
+    db: Session, monkeypatch
+) -> None:
+    """Der Mensch chattet gerade — und merkt vom faelligen Auftrag nichts.
 
-    Der Ersatz nimmt ``kind`` entgegen und prueft es mit: gefragt werden darf
-    hier nur nach dem **Dauerchat**. Eine Frage ohne Fenster faende auch eine
-    Guardian-Reparatur auf einer ganz anderen Anlage und vertagte das
-    naechtliche Backup deswegen — zwei Vorgaenge, die einander nie in die Quere
-    kommen.
+    Bis zum 20.08.2026 wurde hier vertagt, weil der Aufgabenlauf in den
+    Dauerchat schrieb und dem Menschen sonst mitten im Satz die Antwort
+    abgeschnitten haette. Seit die Aufgabe ihr eigenes Hintergrundfenster hat,
+    gilt beides zugleich: der Auftrag startet sofort, **und** der laufende
+    Chat-Zug bleibt unberuehrt — der neue Lauf haengt an einem anderen Fenster,
+    `vorgaenger_abloesen` kann ihn gar nicht treffen.
     """
+    from services import ai_chat_service
+
     user = _benutzer(db, "chattet")
     _anbieter(db)
     _laufzeit_faelschen(monkeypatch)
     aufgabe = _aufgabe(db, user)
 
-    def _laeuft(db, *, user_id, kind=None):
-        assert kind == "primary", "ein Aufgabenlauf fragt nur nach dem Dauerchat"
-        return AiRun(id="laeuft-schon")
+    dauerchat = ai_chat_service.get_or_create_primary_conversation(db, user)
+    db.commit()
+    chatlauf = AiRun(
+        id="laeuft-schon",
+        user_id=user.id,
+        conversation_id=dauerchat.id,
+        status="running",
+    )
+    db.add(chatlauf)
+    db.commit()
 
-    monkeypatch.setattr(ai_run_service, "aktiver_lauf", _laeuft)
+    run = await ai_task_service.aufgabenlauf_starten(db, aufgabe=aufgabe)
 
-    assert await ai_task_service.aufgabenlauf_starten(db, aufgabe=aufgabe) is None
-    assert db.query(AiRun).count() == 0
-    db.refresh(aufgabe)
-    # **Vertagt, nicht abgeschaltet.** Der naechste Takt versucht es erneut.
-    assert aufgabe.enabled is True
+    assert run is not None
+    assert run.conversation_id != dauerchat.id
+    db.refresh(chatlauf)
+    # Der Zug des Menschen laeuft weiter, als waere nichts gewesen.
+    assert chatlauf.status == "running"
 
 
 @pytest.mark.asyncio
@@ -808,10 +822,16 @@ async def test_ein_bestaetigungspflichtiger_vorschlag_wird_zurueckgenommen(
 
 
 @pytest.mark.asyncio
-async def test_zwei_faellige_aufgaben_desselben_benutzers_laufen_nacheinander(
+async def test_zwei_faellige_aufgaben_desselben_benutzers_laufen_gleichzeitig(
     db: Session, monkeypatch
 ) -> None:
-    """Nicht durch eine Sperre, sondern weil `aktiver_lauf` schon gefragt wird."""
+    """Jede in ihrem eigenen Fenster — keine wartet mehr auf die andere.
+
+    Bis zum 20.08.2026 teilten sich alle Aufgaben den Dauerchat, und die zweite
+    musste warten, bis die erste fertig war. Zwei getrennte Fenster koennen
+    einander nicht abloesen; die Obergrenze setzt der Takt
+    (MAX_AUFGABEN_JE_DURCHLAUF), nicht ein gemeinsames Fenster.
+    """
     user = _benutzer(db, "zweiaufgaben")
     _anbieter(db)
     _laufzeit_faelschen(monkeypatch)
@@ -821,37 +841,78 @@ async def test_zwei_faellige_aufgaben_desselben_benutzers_laufen_nacheinander(
 
     run = await ai_task_service.aufgabenlauf_starten(db, aufgabe=erste)
     assert run is not None
-    # Der erste Lauf steht auf 'running', das Segment ist noch nicht gefahren.
-    assert await ai_task_service.aufgabenlauf_starten(db, aufgabe=zweite) is None
-
-    await _lauf_fahren(db, run)
-    db.refresh(zweite)
     zweiter_lauf = await ai_task_service.aufgabenlauf_starten(db, aufgabe=zweite)
     assert zweiter_lauf is not None
-    assert zweiter_lauf.id != run.id
+    assert zweiter_lauf.conversation_id != run.conversation_id
+
+    db.refresh(run)
+    # Der erste Lauf laeuft noch — der Start des zweiten hat ihn nicht abgeloest.
+    assert run.status == "running"
 
 
 @pytest.mark.asyncio
-async def test_der_lauf_haengt_an_der_einen_unterhaltung_des_benutzers(
+async def test_der_lauf_bekommt_ein_eigenes_fenster_und_verwendet_es_wieder(
     db: Session, monkeypatch
 ) -> None:
-    """Deshalb traegt `ai_tasks` keine `conversation_id`.
+    """Ein Fenster je Aufgabe, ueber alle Laeufe hinweg — nie der Dauerchat.
 
-    Der Verlauf soll dort stehen, wo der Betreiber ohnehin liest — und eine
-    zweite Wahrheit ueber "wohin gehoert das" waere eine Spalte, die still
-    veraltet, sobald jemand die Unterhaltung loescht.
+    Betreiber-Vorgabe vom 20.08.2026: im Dauerchat steht nur, was der Mensch
+    schreibt. Die Aufgabe merkt sich ihr Fenster in `conversation_id`; der
+    zweite Lauf schreibt in dasselbe, damit das Modell dort sieht, was es
+    gestern festgestellt hat — und die Fensterliste nicht mit jedem Termin
+    waechst.
     """
     from services import ai_chat_service
 
-    user = _benutzer(db, "eineunterhaltung")
+    user = _benutzer(db, "eigenesfenster")
     _anbieter(db)
     _laufzeit_faelschen(monkeypatch)
-    aufgabe = _aufgabe(db, user)
+    Anbieter([]).einbauen(monkeypatch)
+    aufgabe = _aufgabe(db, user, title="Wetterbericht")
 
     run = await ai_task_service.aufgabenlauf_starten(db, aufgabe=aufgabe)
-    erwartet = ai_chat_service.get_or_create_primary_conversation(db, user)
+    dauerchat = ai_chat_service.get_or_create_primary_conversation(db, user)
 
-    assert run.conversation_id == erwartet.id
+    assert run.conversation_id != dauerchat.id
+    fenster = db.get(AiConversation, run.conversation_id)
+    assert fenster.kind == "worker"
+    assert "Wetterbericht" in (fenster.title or "")
+    db.refresh(aufgabe)
+    assert aufgabe.conversation_id == fenster.id
+
+    await _lauf_fahren(db, run)
+    zweiter = await ai_task_service.aufgabenlauf_starten(db, aufgabe=aufgabe)
+    assert zweiter.conversation_id == fenster.id
+
+
+@pytest.mark.asyncio
+async def test_das_ergebnis_geht_als_meldung_an_die_meldestelle(
+    db: Session, monkeypatch
+) -> None:
+    """Der Weg des Ergebnisses in den Dauerchat — ohne je hineinzugraetschen.
+
+    Der Lauf traegt neben dem Aufgabenrahmen den Worker-Rahmen; ueber ihn
+    reicht `_lauf_nachbereiten` den Abschluss bei der Meldestelle ein, und die
+    stellt zu, sobald das Gespraech Ruhe hat. `kanal` ist dabei fest "chat":
+    die E-Mail des Zustellwegs verschickt der Aufgabenbericht — sonst kaemen
+    zwei Mails zu einem Lauf.
+    """
+    from models import AiMeldung
+
+    user = _benutzer(db, "meldestelle")
+    _anbieter(db)
+    _laufzeit_faelschen(monkeypatch)
+    Anbieter([]).einbauen(monkeypatch)
+    aufgabe = _aufgabe(db, user, title="Wetterbericht", channel="both")
+
+    run = await ai_task_service.aufgabenlauf_starten(db, aufgabe=aufgabe)
+    await _lauf_fahren(db, run)
+
+    meldungen = db.query(AiMeldung).filter(AiMeldung.user_id == user.id).all()
+    assert len(meldungen) == 1
+    assert meldungen[0].worker_id == run.conversation_id
+    assert meldungen[0].kanal == "chat"
+    assert (meldungen[0].text or "").strip()
 
 
 @pytest.mark.asyncio

@@ -61,27 +61,37 @@ _ANY_TOKEN_RE = re.compile(r"{{[^{}]+}}")
 #: Schranke gegen alles, was nicht durch das Werkzeug kam — eine von Hand
 #: bearbeitete Zeile etwa. Ein Startfenster von zehn Tagen waere ein Guardian,
 #: der nie wieder etwas meldet.
+#: Die Obergrenzen sind **die des Agent-Vertrags**
+#: (msm-agent/services/guardian_contract.py), nicht eigene: der Agent klemmt
+#: nicht, er lehnt eine Nutzlast ausserhalb seiner pydantic-Grenzen komplett
+#: mit 422 ab. Bis zum 20.08.2026 waren 7 der 12 Bereiche hier weiter als
+#: dort — jede KI-Uebersteuerung in der Differenzzone scheiterte deshalb
+#: deterministisch als AI_ACTION_GUARDIAN_SYNC_FAILED und wurde zurueckgerollt.
+#: `test_guardian_stellschrauben_vertrag.py` haelt beide Mengen aneinander.
 GUARDIAN_STELLSCHRAUBEN: dict[str, tuple[int, int]] = {
     # Wie lange ein Server nach dem Start Ruhe hat, bevor Proben zaehlen.
-    "startup_grace_period_seconds": (1, 3_600),
-    # Und wann ein Start endgueltig als gescheitert gilt.
-    "startup_timeout_seconds": (10, 7_200),
+    "startup_grace_period_seconds": (1, 600),
+    # Und wann ein Start endgueltig als gescheitert gilt. Der Agent verlangt
+    # zusaetzlich timeout > grace — das stellt `_uebersteuern` sicher.
+    "startup_timeout_seconds": (10, 3_600),
     # Der Abstand zwischen zwei Proben und ihre Geduld.
     "probe_interval_seconds": (1, 600),
-    "probe_timeout_seconds": (1, 120),
+    "probe_timeout_seconds": (1, 30),
     # Wieviele Fehlschlaege beziehungsweise Erfolge zaehlen.
     "probe_failure_threshold": (1, 20),
     "probe_success_threshold": (1, 20),
     # Guardians eigene Leiter. ``0`` ist erlaubt und heisst: gar kein
     # Selbstheilungsversuch mehr — der Fall "haende weg, ich habe es von Hand
-    # gerichtet, melde nur noch".
-    "recovery_max_attempts": (0, 20),
+    # gerichtet, melde nur noch". Der Agent kennt keine 0 (min 1); die
+    # Uebersetzung — leere Policy-Liste, es gibt nichts auszufuehren — macht
+    # `_uebersteuern`.
+    "recovery_max_attempts": (0, 10),
     "recovery_attempt_window_seconds": (60, 86_400),
-    "recovery_cooldown_seconds": (0, 86_400),
+    "recovery_cooldown_seconds": (1, 3_600),
     # Wie lange ein Server gesund sein muss, damit er als geheilt gilt.
-    "verification_min_healthy_seconds": (0, 3_600),
+    "verification_min_healthy_seconds": (0, 600),
     "verification_required_successes": (1, 20),
-    "verification_timeout_seconds": (10, 7_200),
+    "verification_timeout_seconds": (10, 3_600),
 }
 
 
@@ -337,6 +347,23 @@ def _uebersteuern(config: dict[str, Any], werte: dict[str, int]) -> dict[str, An
         startup["grace_period_seconds"] = werte["startup_grace_period_seconds"]
     if "startup_timeout_seconds" in werte:
         startup["timeout_seconds"] = werte["startup_timeout_seconds"]
+    if (
+        ("startup_grace_period_seconds" in werte or "startup_timeout_seconds" in werte)
+        and startup["timeout_seconds"] <= startup["grace_period_seconds"]
+    ):
+        # Der Agent-Vertrag verlangt timeout > grace und lehnt sonst die ganze
+        # Nutzlast ab. Der Fall entsteht ausgerechnet beim kanonischen
+        # Anwendungsfall — "volle Node braucht laenger", nur die Ruhezeit wird
+        # angehoben und erreicht den Blueprint-Timeout. Der Timeout rueckt
+        # dann mit: die Absicht war "laenger warten", nicht "frueher scheitern".
+        # grace ist auf 600 gedeckelt, 660 liegt sicher unter dem Agent-Maximum.
+        #
+        # KI-Vorschlaege kommen hier nicht mehr an: `_guardian_tuning_payload`
+        # prueft dieselbe Regel gegen die wirksamen Werte und weist ab, damit
+        # das Modell es erfaehrt. Der Bump bleibt als Schranke fuer alles, was
+        # nicht durch das Werkzeug kam — handbearbeitete Uebersteuerungen und
+        # Altbestand.
+        startup["timeout_seconds"] = int(startup["grace_period_seconds"]) + 60
 
     for probe in config["health_checks"]:
         if "probe_interval_seconds" in werte:
@@ -365,7 +392,17 @@ def _uebersteuern(config: dict[str, Any], werte: dict[str, int]) -> dict[str, An
 
     recovery = config["recovery"]
     if "recovery_max_attempts" in werte:
-        recovery["max_attempts"] = werte["recovery_max_attempts"]
+        if werte["recovery_max_attempts"] == 0:
+            # "Haende weg, melde nur noch." Der Agent-Vertrag kennt keine 0
+            # (max_attempts >= 1), aber eine leere Policy-Liste: ohne Policy
+            # findet seine Recovery nichts auszufuehren
+            # (msm-agent/services/guardian_service.py, Abgleich ueber
+            # policy.match) — Proben und Vorfaelle laufen weiter. Genau die
+            # gemeinte Bedeutung, in Vertragsworten.
+            recovery["policies"] = []
+            recovery["max_attempts"] = 1
+        else:
+            recovery["max_attempts"] = werte["recovery_max_attempts"]
     if "recovery_attempt_window_seconds" in werte:
         recovery["attempt_window_seconds"] = werte["recovery_attempt_window_seconds"]
     if "recovery_cooldown_seconds" in werte:

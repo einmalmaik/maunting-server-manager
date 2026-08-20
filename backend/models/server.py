@@ -110,6 +110,16 @@ class Server(Base):
     last_auto_restart_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     last_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Von der KI verwaltet: True, solange die KI diesen Zeitplan zuletzt gesetzt
+    # hat. Eine manuelle Änderung über das Panel gewinnt immer — sie nimmt das
+    # Flag zurück und deaktiviert den verknüpften stehenden Auftrag
+    # (ai_task_service.ki_zeitplan_verwaltung_aufheben). Die Task-Kennung ist
+    # ein weicher Verweis ohne DB-Fremdschlüssel (Migration 20260820_02 erklärt
+    # warum); ai_task_service.loeschen räumt die Verweise auf, Leser behandeln
+    # verschwundene Aufträge tolerant.
+    restart_ai_managed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    restart_ai_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
     # Backup-Scheduling
     # Hinweis für zukünftige Erweiterung (analog zu Restart):
     # - Aktuell nur backup_interval_hours (IntervalTrigger).
@@ -122,6 +132,9 @@ class Server(Base):
     backup_on_start: Mapped[bool] = mapped_column(Boolean, default=False)
     backup_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 24=daily, 168=weekly, 720=monthly
     backup_retention_count: Mapped[int] = mapped_column(Integer, default=5)
+    # Von der KI verwaltet — gleiches Muster wie restart_ai_managed/-task_id.
+    backup_ai_managed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    backup_ai_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     # Ressourcen
     cpu_limit_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -228,5 +241,15 @@ class Server(Base):
         try:
             from services.scheduler_service import get_next_restart_run_time
             return get_next_restart_run_time(self.id)
+        except Exception:
+            return None
+
+    @property
+    def next_auto_backup_at(self) -> datetime | None:
+        if not self.backup_interval_hours:
+            return None
+        try:
+            from services.scheduler_service import get_next_backup_run_time
+            return get_next_backup_run_time(self.id)
         except Exception:
             return None

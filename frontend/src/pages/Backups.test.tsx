@@ -55,6 +55,9 @@ const DEFAULT_SETTINGS = {
   backup_on_start: false,
   backup_interval_hours: 0,
   backup_retention_count: 3,
+  backup_ai_managed: false,
+  backup_ai_task_title: null,
+  next_auto_backup_at: null,
 }
 
 function baseBackup(over: Partial<any> = {}) {
@@ -270,6 +273,73 @@ describe('Backups — S3 Cloud Features', () => {
     expect(await screen.findByRole('button', { name: /Backup erstellen/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Einstellungen/ })).toBeInTheDocument()
     expect(screen.getByTitle('Löschen')).toBeInTheDocument()
+  })
+
+  it('zeigt im Einstellungs-Panel das KI-Abzeichen nur, wenn die KI verwaltet', async () => {
+    // Das Abzeichen ist die halbe Konfliktregel: wer hier manuell speichert,
+    // nimmt der KI die Verwaltung ab, und der zuständige Auftrag wird
+    // pausiert (Backend). Damit das jemand weiss, bevor er speichert, müssen
+    // Abzeichen und Hinweis stehen — aber nur, wenn es stimmt.
+    mockApi((p) => {
+      if (p.startsWith('/backups/1/settings')) {
+        return {
+          ...DEFAULT_SETTINGS,
+          backup_interval_hours: 24,
+          backup_ai_managed: true,
+          backup_ai_task_title: 'Tägliche Sicherung',
+        }
+      }
+      if (p.startsWith('/backups/1/status')) return INACTIVE_STATUS
+      if (p === '/backup-config/status') return STATUS_RESPONSE
+      if (p === '/backups/1') return []
+      return undefined
+    })
+    renderBackups()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Einstellungen/ }))
+    expect(
+      await screen.findByText(i18n.t('backups.aiManagedByTask', { title: 'Tägliche Sicherung' })),
+    ).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('backups.aiManagedSaveHint'))).toBeInTheDocument()
+  })
+
+  it('zeigt ein Intervall ausserhalb des Rasters am Dropdown-Trigger an', async () => {
+    // Die KI darf jedes Intervall bis 720 h setzen — das Optionsraster kennt
+    // nur feste Stufen. Ein gespeicherter Wert wie 4 h muss trotzdem am
+    // Trigger stehen; ohne die Einspeisung zeigte die Dropdown-Komponente nur
+    // den Platzhalter 'Auswählen'.
+    mockApi((p) => {
+      if (p.startsWith('/backups/1/settings')) {
+        return { ...DEFAULT_SETTINGS, backup_interval_hours: 4 }
+      }
+      if (p.startsWith('/backups/1/status')) return INACTIVE_STATUS
+      if (p === '/backup-config/status') return STATUS_RESPONSE
+      if (p === '/backups/1') return []
+      return undefined
+    })
+    renderBackups()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Einstellungen/ }))
+    const trigger = await screen.findByRole('button', {
+      name: i18n.t('backups.interval', 'Intervall'),
+    })
+    expect(trigger).toHaveTextContent(i18n.t('backups.intervalHours', { count: 4 }))
+  })
+
+  it('zeigt ohne KI-Verwaltung kein Abzeichen', async () => {
+    mockApi((p) => {
+      if (p.startsWith('/backups/1/settings')) return DEFAULT_SETTINGS
+      if (p.startsWith('/backups/1/status')) return INACTIVE_STATUS
+      if (p === '/backup-config/status') return STATUS_RESPONSE
+      if (p === '/backups/1') return []
+      return undefined
+    })
+    renderBackups()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Einstellungen/ }))
+    await screen.findByText(i18n.t('backups.schedulingTitle', 'Backup-Einstellungen'))
+    expect(screen.queryByText(i18n.t('backups.aiManaged'))).toBeNull()
+    expect(screen.queryByText(i18n.t('backups.aiManagedSaveHint'))).toBeNull()
   })
 
   it('uses msm-* Design-DNA classes and no raw hex colors', async () => {

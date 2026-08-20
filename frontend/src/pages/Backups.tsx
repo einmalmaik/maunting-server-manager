@@ -1,9 +1,12 @@
 import { useEffect, useState, useRef } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { api } from "@/api/client";
 import { toast } from "@/stores/toastStore";
 import { confirm } from "@/stores/confirmStore";
-import { AlertTriangle, HardDrive, Plus, RotateCcw, Trash2, Settings, Cloud, CloudOff, UploadCloud } from "lucide-react";
+import { useHasPermission } from "@/hooks/useHasPermission";
+import { Dropdown, Switch } from "@/Singra/UI";
+import { AlertTriangle, Bot, HardDrive, Plus, RotateCcw, Trash2, Settings, Cloud, CloudOff, UploadCloud } from "lucide-react";
 
 interface Backup {
   id: number;
@@ -25,6 +28,12 @@ interface BackupSettings {
   backup_on_start: boolean;
   backup_interval_hours: number | null;
   backup_retention_count: number;
+  // „Von der KI verwaltet": die KI hat den Zeitplan zuletzt gesetzt.
+  // Manuelles Speichern nimmt die Verwaltung zurück und deaktiviert den
+  // verknüpften KI-Auftrag (Backend).
+  backup_ai_managed: boolean;
+  backup_ai_task_title: string | null;
+  next_auto_backup_at: string | null;
 }
 
 interface BackupStatus {
@@ -46,15 +55,20 @@ interface CreateBackupResponse {
   size_mb: number | null;
 }
 
-const INTERVAL_OPTIONS = [
-  { value: 0, label: "Deaktiviert" },
-  { value: 1, label: "Stündlich" },
-  { value: 2, label: "Alle 2 Stunden" },
-  { value: 3, label: "Alle 3 Stunden" },
-  { value: 6, label: "Alle 6 Stunden" },
-  { value: 12, label: "Alle 12 Stunden" },
-  { value: 24, label: "Täglich" },
-];
+// Bis 30 Tage (720 h) — dieselbe Obergrenze wie im Backend
+// (BackupSettingsRequest und propose_backup_schedule_set).
+const INTERVAL_VALUES = [0, 1, 2, 3, 6, 12, 24, 48, 72, 168, 336, 504, 720];
+
+function intervalLabel(value: number, t: TFunction): string {
+  if (value === 0) return t("backups.intervalOff", "Deaktiviert");
+  if (value === 1) return t("backups.intervalHourly", "Stündlich");
+  if (value === 24) return t("backups.intervalDaily", "Täglich");
+  if (value === 168) return t("backups.intervalWeekly", "Wöchentlich");
+  if (value === 720) return t("backups.intervalMonthly", "Alle 30 Tage");
+  if (value % 168 === 0) return t("backups.intervalWeeks", { count: value / 168 });
+  if (value % 24 === 0) return t("backups.intervalDays", { count: value / 24 });
+  return t("backups.intervalHours", { count: value });
+}
 
 interface BackupsProps {
   serverId: number;
@@ -62,6 +76,10 @@ interface BackupsProps {
 
 export function Backups({ serverId }: BackupsProps) {
   const { t } = useTranslation();
+  // Dieselbe Wahrheit wie im Backend (PATCH /backups/{id}/settings verlangt
+  // server.config.write): ohne das Recht ist das Einstellungs-Panel sichtbar
+  // gesperrt statt still wirkungslos.
+  const canWrite = useHasPermission("server.config.write", serverId);
   const [backups, setBackups] = useState<Backup[]>([]);
   const [loading, setLoading] = useState(true);
   // Ohne dieses Flag wird aus einem fehlgeschlagenen Laden die Aussage
@@ -305,11 +323,20 @@ export function Backups({ serverId }: BackupsProps) {
     if (!settings) return;
     setSettingsSaving(true);
     try {
+      // Nur die drei einstellbaren Felder — die Verwaltungs-Auskunft
+      // (backup_ai_managed, next_auto_backup_at) gehört dem Backend.
       await api(`/backups/${serverId}/settings`, {
         method: "PATCH",
-        body: JSON.stringify(settings),
+        body: JSON.stringify({
+          backup_on_start: settings.backup_on_start,
+          backup_interval_hours: settings.backup_interval_hours ?? 0,
+          backup_retention_count: settings.backup_retention_count,
+        }),
       });
       toast.success(t("backups.settingsSaved", "Einstellungen gespeichert"));
+      // Neu laden: manuelles Speichern nimmt „Von der KI verwaltet" zurück,
+      // und der nächste Auto-Backup-Termin kann sich verschoben haben.
+      await fetchSettings();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : t("common.error"));
     } finally {
@@ -333,7 +360,7 @@ export function Backups({ serverId }: BackupsProps) {
         ? t("backups.restoring")
         : "";
   const elapsedLabel = isActive
-    ? `${elapsedSeconds} Sekunden`
+    ? t("backups.seconds", { count: elapsedSeconds })
     : "";
 
   if (loading) {
@@ -359,7 +386,7 @@ export function Backups({ serverId }: BackupsProps) {
             )}
             {backupStatus?.estimated_size_mb != null && backupStatus.estimated_size_mb > 0 && (
               <span className="text-on-surface-variant">
-                Geschätzte Größe: {backupStatus.estimated_size_mb} MB
+                {t("backups.estimatedSize", "Geschätzte Größe")}: {backupStatus.estimated_size_mb} MB
               </span>
             )}
           </div>
@@ -423,31 +450,41 @@ export function Backups({ serverId }: BackupsProps) {
       {/* Scheduling Settings Panel */}
       {showSettings && settings && (
         <div className="msm-card p-5 space-y-4">
-          <h2 className="font-headline text-body-lg text-on-surface">
-            {t("backups.schedulingTitle", "Backup-Einstellungen")}
-          </h2>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h2 className="font-headline text-body-lg text-on-surface">
+              {t("backups.schedulingTitle", "Backup-Einstellungen")}
+            </h2>
+            {settings.backup_ai_managed && (
+              <span
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-primary/40 bg-primary/10 text-primary"
+                title={t("backups.aiManagedHint")}
+              >
+                <Bot className="w-3.5 h-3.5" />
+                {settings.backup_ai_task_title
+                  ? t("backups.aiManagedByTask", { title: settings.backup_ai_task_title })
+                  : t("backups.aiManaged")}
+              </span>
+            )}
+          </div>
+          {settings.next_auto_backup_at && (
+            <p className="font-body-md text-sm text-on-surface-variant">
+              {t("backups.nextAutoBackup", "Nächstes Auto-Backup")}: {formatDate(settings.next_auto_backup_at)}
+            </p>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {/* Backup on start */}
-            <label className="flex items-center gap-2 cursor-pointer self-end pb-1">
-              <div
-                className={`relative w-10 h-6 rounded-full transition-colors ${settings.backup_on_start ? "bg-secondary" : "bg-surface-container-highest"}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={settings.backup_on_start}
-                  onChange={(e) =>
-                    setSettings({
-                      ...settings,
-                      backup_on_start: e.target.checked,
-                    })
-                  }
-                  className="sr-only"
-                />
-                <span
-                  className={`absolute top-1 left-1 w-4 h-4 rounded-full transition-transform ${settings.backup_on_start ? "translate-x-4 bg-on-secondary" : "bg-on-surface"}`}
-                />
-              </div>
+            {/* Backup on start — Singra-Switch statt Handbau: der gesperrte
+                Zustand ist sichtbar und als role="switch" lesbar (dasselbe
+                Muster wie im ServerRestartPanel dokumentiert). */}
+            <label className="inline-flex items-center gap-3 self-end pb-1">
+              <Switch
+                checked={settings.backup_on_start}
+                onCheckedChange={(checked: boolean) =>
+                  setSettings({ ...settings, backup_on_start: checked })
+                }
+                disabled={!canWrite}
+                aria-label={t("backups.backupOnStart", "Backup vor dem Start erstellen")}
+              />
               <span className="font-body-md text-sm text-on-surface-variant">
                 {t("backups.backupOnStart", "Backup vor dem Start erstellen")}
               </span>
@@ -458,22 +495,31 @@ export function Backups({ serverId }: BackupsProps) {
               <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider text-xs">
                 {t("backups.interval", "Intervall")}
               </label>
-              <select
-                value={settings.backup_interval_hours ?? 0}
-                onChange={(e) =>
+              {/* Design-DNA: kein natives <select>. `Number(wert) || null`
+                  bleibt — 0 (Deaktiviert) wird als null gespeichert. Der
+                  gespeicherte Wert kann ausserhalb des Rasters liegen (die KI
+                  darf jedes Intervall bis 720 h setzen) und wird als Option
+                  eingespeist, sonst zeigte der Trigger nur den Platzhalter. */}
+              <Dropdown
+                value={String(settings.backup_interval_hours ?? 0)}
+                onChange={(wert) =>
                   setSettings({
                     ...settings,
-                    backup_interval_hours: parseInt(e.target.value) || null,
+                    backup_interval_hours: Number(wert) || null,
                   })
                 }
-                className="msm-input"
-              >
-                {INTERVAL_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+                options={(INTERVAL_VALUES.includes(settings.backup_interval_hours ?? 0)
+                  ? INTERVAL_VALUES
+                  : [...INTERVAL_VALUES, settings.backup_interval_hours ?? 0].sort(
+                      (a, b) => a - b,
+                    )
+                ).map((value) => ({
+                  value: String(value),
+                  label: intervalLabel(value, t),
+                }))}
+                disabled={!canWrite}
+                aria-label={t("backups.interval", "Intervall")}
+              />
             </div>
 
             {/* Retention */}
@@ -484,31 +530,36 @@ export function Backups({ serverId }: BackupsProps) {
               <input
                 type="number"
                 min={1}
-                max={50}
+                max={100}
+                disabled={!canWrite}
                 value={settings.backup_retention_count}
                 onChange={(e) =>
                   setSettings({
                     ...settings,
-                    backup_retention_count: Math.max(
-                      1,
-                      parseInt(e.target.value) || 1,
+                    backup_retention_count: Math.min(
+                      100,
+                      Math.max(1, parseInt(e.target.value) || 1),
                     ),
                   })
                 }
-                className="msm-input"
+                className="msm-input disabled:opacity-50"
               />
               <p className="mt-1 text-xs text-on-surface-variant">
-                Die {settings.backup_retention_count} ältesten Backups werden
-                automatisch gelöscht, wenn ein neues erstellt wird. Gilt für
-                manuelle und automatische Backups.
+                {t("backups.retentionHint", { count: settings.backup_retention_count })}
               </p>
             </div>
           </div>
 
+          {settings.backup_ai_managed && (
+            <p className="font-body-md text-xs text-on-surface-variant">
+              {t("backups.aiManagedSaveHint")}
+            </p>
+          )}
+
           <div className="flex justify-end">
             <button
               onClick={saveSettings}
-              disabled={isActive || settingsSaving}
+              disabled={isActive || settingsSaving || !canWrite}
               className="msm-btn-primary px-4 py-2 disabled:opacity-50"
             >
               {settingsSaving ? t("common.loading") : t("common.save")}

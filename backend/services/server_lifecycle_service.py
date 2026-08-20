@@ -1163,10 +1163,15 @@ def sync_desired_state_to_agent(db: Session, server: Server) -> bool:
         return True
     except Exception as exc:
         db.rollback()
+        # `code` UND die Meldung: bei einer Agent-Ablehnung ist `exc.code`
+        # None, und der Grund (welches Feld, welche Regel) steht nur im Text.
+        # Ohne ihn stand hier woertlich "code=None" — der Betreiber von
+        # Vorfall 66 sah zweimal denselben Fehlschlag ohne jede Auskunft.
         logger.warning(
-            "Guardian desired-state sync failed for server_id=%s code=%s",
+            "Guardian desired-state sync failed for server_id=%s code=%s detail=%s",
             server.id,
             getattr(exc, "code", type(exc).__name__),
+            str(exc)[:400],
         )
         return False
 

@@ -191,32 +191,39 @@ async def test_ohne_laufzeit_sieht_der_takt_gar_nicht_erst_nach(
     assert aufgabe.next_run_at == vorher
 
 
-# ── Vertagen ──────────────────────────────────────────────────────────────
+# ── Kein Vertagen mehr ────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_ein_chattender_mensch_vertagt_und_verbrennt_den_termin_nicht(
+async def test_ein_chattender_mensch_haelt_den_takt_nicht_mehr_auf(
     db: Session, monkeypatch
 ) -> None:
+    """Hier stand bis zum 20.08.2026 das Vertagen: solange im Dauerchat ein
+    Lauf aktiv war, blieb der Termin stehen. Seit die Aufgaben in einem
+    eigenen Hintergrundfenster laufen (Betreiber-Vorgabe: das Gespraech wird
+    nie unterbrochen, im Dauerchat steht nur, was der Mensch schreibt), ist
+    ein aktiver Chat-Lauf kein Grund mehr — die Aufgabe startet, der Termin
+    schaltet weiter. Dass der Lauf dem Gespraech nicht ins Wort faellt,
+    sichert test_ai_task_lauf ueber das eigene Fenster zu.
+    """
     user = _benutzer(db, "chattet")
     _anbieter(db)
     _laufzeit_faelschen(monkeypatch)
     starts = Starts().einbauen(monkeypatch)
     aufgabe = _aufgabe(db, user)
     vorher = _faellig_machen(db, aufgabe)
+
     def _laeuft(db, *, user_id, kind=None):
-        # Nur der Dauerchat vertagt. Eine Reparatur in ihrem eigenen Fenster
-        # geht diesen Auftrag nichts an.
-        assert kind == "primary"
         return AiRun(id="laeuft")
 
     monkeypatch.setattr(ai_run_service, "aktiver_lauf", _laeuft)
 
-    assert await ai_task_service.faellige_aufgaben_bearbeiten(db) == 0
-    assert starts.gestartet == []
+    assert await ai_task_service.faellige_aufgaben_bearbeiten(db) == 1
+    assert starts.gestartet == [aufgabe.id]
     db.refresh(aufgabe)
-    # **Der Termin steht noch.** Eine Minute spaeter wird es erneut versucht.
-    assert aufgabe.next_run_at == vorher
+    # Der Termin ist weitergeschaltet — nicht verbrannt und nicht stehen
+    # geblieben.
+    assert ai_task_service.utc(aufgabe.next_run_at) > ai_task_service.utc(vorher)
 
 
 # ── Anspruch nehmen ───────────────────────────────────────────────────────

@@ -1,8 +1,9 @@
 import logging
 import os
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -29,14 +30,22 @@ class CreateBackupRequest(BaseModel):
 
 class BackupSettingsRequest(BaseModel):
     backup_on_start: bool | None = None
-    backup_interval_hours: int | None = None
-    backup_retention_count: int | None = None
+    # 0 heißt deaktivieren; Obergrenze 720 h = 30 Tage. Dieselben Grenzen
+    # prüft das KI-Werkzeug propose_backup_schedule_set — wer eine ändert,
+    # muss beide anfassen.
+    backup_interval_hours: int | None = Field(default=None, ge=0, le=720)
+    backup_retention_count: int | None = Field(default=None, ge=1, le=100)
 
 
 class BackupSettingsResponse(BaseModel):
     backup_on_start: bool
     backup_interval_hours: int | None
     backup_retention_count: int
+    # „Von der KI verwaltet": zuletzt hat die KI diesen Zeitplan gesetzt.
+    # Der Aufgabentitel steht dabei, wenn ein stehender Auftrag verknüpft ist.
+    backup_ai_managed: bool
+    backup_ai_task_title: str | None
+    next_auto_backup_at: datetime | None
 
 router = APIRouter(prefix="/api/backups", tags=["backups"])
 
@@ -91,10 +100,19 @@ def get_backup_settings(server_id: int, db: Session = Depends(get_db), user: Use
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    task_title = None
+    if server.backup_ai_task_id:
+        from models import AiTask
+
+        aufgabe = db.query(AiTask).filter(AiTask.id == server.backup_ai_task_id).first()
+        task_title = aufgabe.title if aufgabe is not None else None
     return BackupSettingsResponse(
         backup_on_start=server.backup_on_start,
         backup_interval_hours=server.backup_interval_hours,
         backup_retention_count=server.backup_retention_count,
+        backup_ai_managed=bool(server.backup_ai_managed),
+        backup_ai_task_title=task_title,
+        next_auto_backup_at=server.next_auto_backup_at,
     )
 
 
@@ -127,12 +145,43 @@ def update_backup_settings(server_id: int, body: BackupSettingsRequest, db: Sess
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    geaendert = any(
+        wert is not None
+        for wert in (body.backup_on_start, body.backup_interval_hours, body.backup_retention_count)
+    )
     if body.backup_on_start is not None:
         server.backup_on_start = body.backup_on_start
     if body.backup_interval_hours is not None:
         server.backup_interval_hours = body.backup_interval_hours if body.backup_interval_hours > 0 else None
     if body.backup_retention_count is not None:
         server.backup_retention_count = max(1, body.backup_retention_count)
+    if geaendert:
+        # Manuelle Änderung gewinnt: nimmt das „Von der KI verwaltet"-Abzeichen
+        # zurück und deaktiviert den verknüpften stehenden Auftrag. Das
+        # KI-Werkzeug geht nicht über diesen Endpunkt — hier sitzt immer ein
+        # Mensch.
+        from services.ai_task_service import ki_zeitplan_verwaltung_aufheben
+
+        ki_zeitplan_verwaltung_aufheben(db, server, bereich="backup")
+    if body.backup_interval_hours is not None:
+        # Scheduler sofort synchronisieren — vor dem Commit, wie beim
+        # Restart-PATCH in servers.py. Ohne diesen Aufruf griffe ein
+        # geändertes Intervall erst nach einem Backend-Neustart.
+        from services.scheduler_service import schedule_backup, remove_job
+
+        try:
+            if server.backup_interval_hours:
+                schedule_backup(
+                    server.id,
+                    interval_hours=server.backup_interval_hours,
+                    job_id=f"backup_server_{server.id}",
+                )
+            else:
+                remove_job(f"backup_server_{server.id}")
+        except Exception:
+            db.rollback()
+            logger.warning("Backup-Zeitplan-Sync fehlgeschlagen (Server %s)", server_id)
+            raise HTTPException(status_code=500, detail="Zeitplan konnte nicht übernommen werden")
     db.commit()
     return {"message": "Einstellungen gespeichert"}
 

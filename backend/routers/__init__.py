@@ -31,6 +31,7 @@ from .ai_actions import router as ai_actions_router
 from .ai_approvals import router as ai_approvals_router
 from .ai_autonomy import router as ai_autonomy_router
 from .ai_memory import router as ai_memory_router
+from .ai_tasks import router as ai_tasks_router
 from .ai_skills import router as ai_skills_router
 from .ai_attachments import router as ai_attachments_router
 from .credentials import router as credentials_router
@@ -72,6 +73,7 @@ __all__ = [
     "ai_approvals_router",
     "ai_autonomy_router",
     "ai_memory_router",
+    "ai_tasks_router",
     "ai_skills_router",
     "ai_attachments_router",
     "credentials_router",

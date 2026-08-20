@@ -871,9 +871,15 @@ Bestätigungspflicht.
 Der zweite Anlass, zu dem die KI ohne anwesenden Menschen arbeitet — neben der
 Guardian-Heilung. Dort weckt sie eine Störung, hier die Uhr.
 
-Ein stehender Auftrag entsteht **ausschließlich im Chat**. Es gibt keinen
-Bildschirm dafür und keine Tabelle: man sagt der KI, was regelmäßig geschehen
-soll, und bestätigt die Karte, die sie daraufhin vorlegt.
+Ein stehender Auftrag entsteht im Chat — man sagt der KI, was regelmäßig
+geschehen soll, und bestätigt die Karte — **oder von Hand in der
+Aufgabenliste**: der Knopf neben dem Guardian-Fenster auf der KI-Seite öffnet
+eine kleine Seite im Stil des Chats. Drei Angaben genügen dort: Name (für dich
+und die Sortierung), Auftragstext (für die KI) und Zeitplan. Beide Wege rufen
+dieselben Dienstfunktionen mit denselben Prüfungen (`/api/ai/tasks`); alles,
+was die KI kann — anlegen, ändern, pausieren, löschen —, kann der Benutzer
+dort auch. Deaktiviert die KI (oder eine manuelle Zeitplan-Änderung am Server)
+eine Aufgabe, steht das dort sichtbar.
 
 ```
 „Benachrichtige mich jeden Tag um 8 Uhr per Mail über den Zustand meiner Server."
@@ -910,8 +916,12 @@ Adresse, nie eine genannte.
 
 **Was beim Fälligwerden gilt.** Ein Takt sieht jede Minute in der Tabelle nach;
 der Zeitplan lebt also nicht im Scheduler, sondern in der Datenbank und
-überlebt jeden Neustart. Läuft gerade ein Chat desselben Benutzers, wird
-vertagt statt unterbrochen. Ein Termin, der mehr als eine Stunde alt ist, wird
+überlebt jeden Neustart. Der Lauf passiert **im Hintergrund**, in einem
+eigenen Fenster je Aufgabe (wiederverwendet, wie ein Worker-Fenster) — der
+Dauerchat wird weder unterbrochen noch vertagt, dort steht nur, was der Mensch
+schreibt. Das Ergebnis bringt die Meldestelle in den Chat, sobald dort Ruhe
+ist; der volle Verlauf ist über die Aufgabenliste erreichbar. Ein Termin, der
+mehr als eine Stunde alt ist, wird
 **übersprungen** und nicht nachgeholt — ein um elf Uhr nachgeholtes
 Nachtbackup ist schlechter als keines. Im Lauf selbst ist die Werkzeugmenge
 enger als im Chat: keine Rückfragen (es sitzt niemand da), kein Gedächtnis- und
@@ -922,10 +932,18 @@ an. Verlangt ein Vorschlag trotzdem eine Bestätigung, wird er zurückgenommen
 und der Lauf endet mit einer ehrlichen Fehlanzeige — statt auf einen Klick zu
 warten, den niemand tut.
 
-**Abgrenzung.** Das ist etwas anderes als *Auto-Neustart* und *Auto-Backup* am
-einzelnen Server (siehe Servereinstellungen). Die bleiben, wie sie sind: fester
-Zweck, kein Modell, kein Kontingent. Ein stehender Auftrag ist an nichts davon
-gebunden.
+**Abgrenzung — und die Ausnahme für Neustarts und Backups.** *Auto-Neustart*
+und *Auto-Backup* am einzelnen Server bleiben, was sie sind: fester Zweck, kein
+Modell, kein Kontingent. Genau deshalb legt die KI für „starte den Server alle
+sechs Stunden neu" oder „mach jeden Tag ein Backup" **keinen** stehenden
+Auftrag an, sondern stellt die eingebauten Zeitpläne des Servers ein
+(`propose_restart_schedule_set`, `propose_backup_schedule_set`; Recht
+`server.config.write`). Das Ergebnis steht am Server, trägt dort das Abzeichen
+„von der KI verwaltet" und bleibt von Hand änderbar — eine manuelle Änderung
+nimmt der KI die Verwaltung ab und pausiert die verknüpfte Aufgabe, falls eine
+dahintersteht. Das Backup-Intervall reicht bis 720 Stunden (30 Tage), die
+Aufbewahrung bis 100 Stände. Nur was die eingebauten Zeitpläne nicht ausdrücken
+können — etwa „Mo/Mi/Fr um 10 Uhr" —, wird weiterhin ein stehender Auftrag.
 
 Recht: `ai.tasks.manage` (Gruppe *KI*), zusätzlich `ai.chat.use`. Für
 handelnde Aufträge kommt `ai.autonomous.use` samt Freigabe dazu.

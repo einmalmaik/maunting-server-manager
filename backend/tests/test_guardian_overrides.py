@@ -40,7 +40,7 @@ from services.guardian_runtime_compiler import (
 )
 
 
-def _blueprint():
+def _blueprint(grace: int = 10, timeout: int = 120):
     return load_blueprint_dict(
         {
             "version": 1,
@@ -66,7 +66,7 @@ def _blueprint():
                     "timeout": "2s",
                     "interval": "15s",
                 },
-                "startup": {"grace_period_seconds": 10, "timeout_seconds": 120},
+                "startup": {"grace_period_seconds": grace, "timeout_seconds": timeout},
             },
             "recovery": {
                 "policies": [{"match": "process_not_running", "action": "restart"}],
@@ -114,7 +114,9 @@ class TestKlemmung:
             }
         )
         werte = gelesene_uebersteuerung(server)
-        assert werte["startup_grace_period_seconds"] == 3_600
+        # 600 und nicht mehr 3.600: die Deckel sind seit dem 20.08.2026 die des
+        # Agent-Vertrags — alles darueber lehnte der Agent ohnehin mit 422 ab.
+        assert werte["startup_grace_period_seconds"] == 600
         assert werte["probe_interval_seconds"] == 1
 
     def test_unbekannte_schluessel_fallen_weg(self) -> None:
@@ -186,14 +188,14 @@ class TestWirkung:
         Agent prueft seine Felder.
         """
         config = compile_guardian_config(
-            _server({"probe_timeout_seconds": 77}), _blueprint()
+            _server({"probe_timeout_seconds": 25}), _blueprint()
         )
         proben = {p["type"]: p for p in config["health_checks"]}
         assert "process" in proben
         assert "timeout_seconds" not in proben["process"] or (
-            proben["process"].get("timeout_seconds") != 77
+            proben["process"].get("timeout_seconds") != 25
         )
-        assert proben["tcp"]["timeout_seconds"] == 77
+        assert proben["tcp"]["timeout_seconds"] == 25
 
     def test_startfenster_und_leiter_kommen_an(self) -> None:
         config = compile_guardian_config(
@@ -209,12 +211,39 @@ class TestWirkung:
         )
         assert config["startup"]["grace_period_seconds"] == 600
         assert config["startup"]["timeout_seconds"] == 1_800
-        # ``0`` ist erlaubt und heisst "haende weg, melde nur noch". Ein
-        # Rueckfall auf den Blueprint-Wert waere hier die schlimmste Auslegung:
-        # der Betreiber haette die Selbstheilung abgeschaltet und bekaeme sie
-        # unveraendert weiter.
-        assert config["recovery"]["max_attempts"] == 0
+        # ``0`` ist erlaubt und heisst "haende weg, melde nur noch". Der
+        # Agent-Vertrag kennt keine 0 (max_attempts >= 1) und lehnte die
+        # Nutzlast frueher komplett ab — die Uebersetzung ist eine **leere
+        # Policy-Liste**: es gibt nichts auszufuehren, Proben und Vorfaelle
+        # laufen weiter. Ein Rueckfall auf den Blueprint-Wert waere die
+        # schlimmste Auslegung: der Betreiber haette die Selbstheilung
+        # abgeschaltet und bekaeme sie unveraendert weiter.
+        assert config["recovery"]["policies"] == []
+        assert config["recovery"]["max_attempts"] == 1
         assert config["recovery"]["cooldown_seconds"] == 900
+
+    def test_null_versuche_lassen_andere_policies_unberuehrt(self) -> None:
+        """Die Gegenprobe zur 0-Uebersetzung: jede andere Zahl behaelt die Liste."""
+        config = compile_guardian_config(
+            _server({"recovery_max_attempts": 2}), _blueprint()
+        )
+        assert config["recovery"]["max_attempts"] == 2
+        assert config["recovery"]["policies"], "Blueprint-Policies muessen stehen bleiben"
+
+    def test_die_ruhezeit_zieht_den_startup_timeout_mit(self) -> None:
+        """Der Agent verlangt timeout > grace — und das Panel liefert es.
+
+        Der kanonische Anwendungsfall ("volle Node braucht laenger") hebt nur
+        die Ruhezeit an. Erreicht sie den Blueprint-Timeout (hier 120 s),
+        lehnte der Agent frueher die **gesamte** Nutzlast ab — jeder
+        KI-Tuning-Versuch endete als AI_ACTION_GUARDIAN_SYNC_FAILED
+        (Vorfall 66, 20.08.2026). Jetzt rueckt der Timeout mit.
+        """
+        config = compile_guardian_config(
+            _server({"startup_grace_period_seconds": 550}), _blueprint()
+        )
+        assert config["startup"]["grace_period_seconds"] == 550
+        assert config["startup"]["timeout_seconds"] == 610
 
 
 class TestGeneration:
@@ -261,6 +290,54 @@ class TestNutzlast:
             _guardian_tuning_payload(
                 _server(), {"startup_grace_period_seconds": 99_999}
             )
+
+    def test_widerspruechliche_startwerte_werden_abgewiesen(self) -> None:
+        """timeout <= grace lehnte der Agent ab — jetzt sagt es das Werkzeug.
+
+        Die Abweisung ist die Rueckmeldung, aus der das Modell den naechsten
+        Versuch baut; frueher erfuhr es nur AI_ACTION_GUARDIAN_SYNC_FAILED und
+        schlug dieselben Werte erneut vor.
+        """
+        from services.ai_proposal_service import _guardian_tuning_payload
+
+        with pytest.raises(AiActionValidationError, match="muss groesser"):
+            _guardian_tuning_payload(
+                _server(),
+                {
+                    "startup_grace_period_seconds": 500,
+                    "startup_timeout_seconds": 400,
+                },
+            )
+
+    def test_ein_timeout_unter_der_blueprint_ruhezeit_wird_abgewiesen(self) -> None:
+        """Die Ruhezeit muss nicht in der Uebersteuerung stehen, um zu gelten.
+
+        Genau so entstand die Anzeige-Divergenz: das Modell senkte nur den
+        Timeout, die Ruhezeit stand allein in der Blueprint, und der Compiler
+        zog die explizite Absenkung stillschweigend wieder hoch — gespeichert
+        stand 200, wirksam war 610. Jetzt erfaehrt es das Modell als Abweisung
+        samt der wirksamen Zahlen.
+        """
+        from types import SimpleNamespace
+
+        from services.ai_proposal_service import _guardian_tuning_payload
+
+        plugin = SimpleNamespace(get_blueprint=lambda: _blueprint(grace=550, timeout=600))
+        with patch("games.get_plugin", return_value=plugin):
+            with pytest.raises(AiActionValidationError, match="muss groesser"):
+                _guardian_tuning_payload(_server(), {"startup_timeout_seconds": 200})
+            # Und die Gegenprobe: ueber der Blueprint-Ruhezeit geht es durch.
+            payload, _ = _guardian_tuning_payload(
+                _server(), {"startup_timeout_seconds": 700}
+            )
+            assert payload["overrides"] == {"startup_timeout_seconds": 700}
+
+    def test_ohne_blueprint_zaehlen_die_compiler_rueckfallwerte(self) -> None:
+        """Kein Plugin heisst 30/300 — dieselben Zahlen, die der Compiler setzt."""
+        from services.ai_proposal_service import _guardian_tuning_payload
+
+        with pytest.raises(AiActionValidationError, match="muss groesser"):
+            _guardian_tuning_payload(_server(), {"startup_timeout_seconds": 25})
 
     def test_zuruecksetzen_und_setzen_schliessen_sich_aus(self) -> None:
         from services.ai_proposal_service import _guardian_tuning_payload

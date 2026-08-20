@@ -439,7 +439,9 @@
         "propose_guardian_tuning": "Change autopilot settings",
         "propose_server_repair": "Repair infrastructure",
         "propose_task_delete": "Delete recurring task",
-        "propose_task_set": "Set up recurring task"
+        "propose_task_set": "Set up recurring task",
+        "propose_restart_schedule_set": "Configure server auto-restart",
+        "propose_backup_schedule_set": "Configure server auto-backup"
       },
       "status": {
         "proposed": "Review required",
@@ -475,7 +477,9 @@
         "propose_server_repair": "Run the “{{operation}}” repair on this server's infrastructure? “repair_permissions” resets ownership of the server directory, “reallocate_port” reassigns occupied ports and restarts the server for it. Neither touches game files.",
         "propose_file_delete": "Delete the file “{{path}}”? Afterwards it can only be recovered from a backup. A snapshot is written to the file history before deleting.",
         "propose_task_set": "This task will run on its own from now on, even when you are not in the panel. It acts with your permissions and from your AI quota. You can pause or delete it any time from the chat.",
-        "propose_task_delete": "This task will be removed for good and will no longer run. If it should only rest for a while, have it paused instead."
+        "propose_task_delete": "This task will be removed for good and will no longer run. If it should only rest for a while, have it paused instead.",
+        "propose_restart_schedule_set": "Configure this server's auto-restart like this? The schedule then appears in the server's restart section and stays editable by hand. If you later change it manually, AI management ends and the responsible task is paused.",
+        "propose_backup_schedule_set": "Configure this server's auto-backup like this? The settings then appear in the server's backup section and stay editable by hand. If you later change them manually, AI management ends and the responsible task is paused."
       },
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",
@@ -607,6 +611,8 @@
       "propose_server_lifecycle": "Preparing the change to the server state",
       "propose_guardian_tuning": "Preparing the autopilot settings",
       "propose_server_repair": "Preparing the infrastructure repair",
+      "propose_restart_schedule_set": "Configuring the server's auto-restart",
+      "propose_backup_schedule_set": "Configuring the server's auto-backup",
       "propose_task_delete": "Preparing to delete the task",
       "propose_task_set": "Preparing the recurring task",
       "read_ai_action_history": "Looking at earlier AI actions",
@@ -750,6 +756,63 @@
       "takeOverDone": "Taken over. The repair has ended.",
       "waitingApproval": "Waiting for your approval by email",
       "takeOverFailed": "The repair could not be ended."
+    },
+    "tasks": {
+      "toTasks": "Task list",
+      "title": "Task list",
+      "subtitle": "Standing orders — they run in the background and never interrupt the chat.",
+      "emptyTitle": "No tasks yet",
+      "emptyDescription": "Create a task here or ask the AI in the chat — for example “check the logs every morning”. Three inputs are enough: name, instruction, schedule.",
+      "new": "New task",
+      "editTitle": "Edit task",
+      "name": "Task name",
+      "prompt": "Instruction for the AI",
+      "promptHint": "The name is for you and for sorting — the AI reads the instruction.",
+      "schedule": "Schedule",
+      "planKindDaily": "Daily / weekdays",
+      "planKindInterval": "Interval",
+      "planKindOnce": "Once",
+      "timeOfDay": "Time",
+      "weekdaysHint": "No selection means: every day.",
+      "intervalHours": "Every … hours (1–168)",
+      "onceAt": "Date and time",
+      "timezone": "Time zone",
+      "timezoneHint": "IANA name, for example Europe/Berlin. The schedule follows it.",
+      "email": "Also send the result by email",
+      "act": "May act on its own",
+      "actHint": "Requires autonomous mode to be granted — unchecked, the task only reports.",
+      "create": "Create task",
+      "created": "Task created.",
+      "saved": "Task saved.",
+      "resumed": "Task active again.",
+      "pausedToast": "Task paused.",
+      "deleted": "Task “{{title}}” deleted.",
+      "deleteConfirm": "Delete this task for good? If it should only rest for a while, pause it instead.",
+      "openWindow": "Open history",
+      "nextRun": "Next run: {{when}}",
+      "paused": "Paused",
+      "actBadge": "Acts",
+      "emailBadge": "Email",
+      "enabledAria": "Task active",
+      "planDaily": "Daily at {{time}} ({{zone}})",
+      "planWeekdays": "{{days}} at {{time}} ({{zone}})",
+      "planInterval_one": "Hourly",
+      "planInterval_other": "Every {{count}} hours",
+      "planOnce": "Once on {{when}}",
+      "weekday": {
+        "1": "Mon",
+        "2": "Tue",
+        "3": "Wed",
+        "4": "Thu",
+        "5": "Fri",
+        "6": "Sat",
+        "7": "Sun"
+      },
+      "errors": {
+        "load": "Tasks could not be loaded",
+        "save": "The task could not be saved",
+        "delete": "The task could not be deleted"
+      }
     },
     "webSearch": {
       "title": "Web search",
@@ -1666,7 +1729,7 @@
     },
     "ai_tasks_manage": {
       "title": "Manage recurring AI tasks",
-      "desc": "Allows giving the AI standing orders in the chat — a daily summary by email at 8 a.m., for example. A due order runs without the user present, but with that user's permissions and from that user's quota. Orders that change something also require autonomous mode."
+      "desc": "Allows creating standing orders — in the chat or by hand in the task list on the AI page; without this permission there is neither a button nor a list there. A due order runs in the background without the user present, but with that user's permissions and from that user's quota. Orders that change something also require autonomous mode."
     },
     "ai_background_use": {
       "title": "Use AI workers in the background",
@@ -2214,7 +2277,23 @@
     "uploadToCloud": "Upload to Cloud",
     "uploadedToCloud": "Backup uploaded to cloud",
     "restoreFromCloud": "Restore from Cloud",
-    "confirmRestoreFromCloud": "Restore backup from the cloud? Current data will be overwritten. The backup will be downloaded and decrypted."
+    "confirmRestoreFromCloud": "Restore backup from the cloud? Current data will be overwritten. The backup will be downloaded and decrypted.",
+    "seconds": "{{count}} seconds",
+    "estimatedSize": "Estimated size",
+    "intervalOff": "Disabled",
+    "intervalHourly": "Hourly",
+    "intervalHours": "Every {{count}} hours",
+    "intervalDaily": "Daily",
+    "intervalDays": "Every {{count}} days",
+    "intervalWeekly": "Weekly",
+    "intervalWeeks": "Every {{count}} weeks",
+    "intervalMonthly": "Every 30 days",
+    "retentionHint": "At most {{count}} backups are kept; older ones are deleted automatically whenever a new one is created. Applies to manual and automatic backups.",
+    "nextAutoBackup": "Next automatic backup",
+    "aiManaged": "Managed by the AI",
+    "aiManagedByTask": "Managed by the AI ({{title}})",
+    "aiManagedHint": "The AI set up this backup schedule. You can change it at any time - saving takes back control.",
+    "aiManagedSaveHint": "Saving takes back control: the AI task responsible for this schedule is deactivated automatically."
   },
   "scheduler": {
     "title": "Scheduler",
@@ -2240,7 +2319,9 @@
     "maxTimesReached": "Max. 12 times reached",
     "lastAutoAttempt": "Last automatic attempt",
     "lastAutoRestart": "Last automatic restart",
-    "nextAutoRestart": "Next automatic restart"
+    "nextAutoRestart": "Next automatic restart",
+    "aiManaged": "Managed by the AI",
+    "aiManagedHint": "The AI set up this restart schedule. You can change it at any time - saving takes back control and deactivates the responsible AI task."
   },
   "settings": {
     "title": "Settings",
@@ -3363,7 +3444,7 @@
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
           "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat",
           "guardian": "With autonomy granted, a Guardian incident can trigger processing while the user is not present: the incident type, its status and the server data already shared with the assistant are transmitted; log excerpts are additionally stripped of public IP addresses and email addresses. Usage and responsibility remain with the grantor. The result report sent by email contains model-generated text.",
-          "tasks": "A standing task created in chat (“AI task”) stores its name, instruction, schedule, time zone and delivery channel, and triggers processing at the agreed time while the user is not present. It runs with the permissions and quota of whoever created it; on each due run the instruction and the server data it retrieves are transmitted to the selected model provider. On request the result is additionally sent by email to the stored address and contains model-generated text. Tasks can be listed, paused and deleted from the chat at any time."
+          "tasks": "A standing task created in chat or in the task list (“AI task”) stores its name, instruction, schedule, time zone and delivery channel, and triggers processing at the agreed time while the user is not present. It runs in the background with the permissions and quota of whoever created it; on each due run the instruction and the server data it retrieves are transmitted to the selected model provider. On request the result is additionally sent by email to the stored address and contains model-generated text. Tasks can be listed, paused and deleted from the chat and the task list at any time."
         }
       },
       "storage": {

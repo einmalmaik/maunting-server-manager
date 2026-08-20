@@ -82,6 +82,28 @@ describe('ServerRestartPanel', () => {
     expect(schalter).toBeDisabled()
   })
 
+  it('zeigt das Abzeichen „von der KI verwaltet" nur, wenn es stimmt', async () => {
+    // Das Abzeichen ist die halbe Konfliktregel: die andere Hälfte (manuelles
+    // Speichern nimmt der KI die Verwaltung ab und pausiert die Aufgabe) liegt
+    // im Backend. Stünde das Abzeichen immer da, wäre es keine Auskunft.
+    usePermissionsStore.setState({ me: nurAmServer(['server.config.read']), isLoading: false })
+    const { rerender } = render(
+      <ServerRestartPanel server={server} serverId={SERVER_ID} onSaved={() => {}} />,
+    )
+
+    await screen.findByRole('switch', { name: i18n.t('restarts.enabled') })
+    expect(screen.queryByText(i18n.t('restarts.aiManaged'))).toBeNull()
+
+    rerender(
+      <ServerRestartPanel
+        server={{ ...server, restart_ai_managed: true } as Server}
+        serverId={SERVER_ID}
+        onSaved={() => {}}
+      />,
+    )
+    expect(screen.getByText(i18n.t('restarts.aiManaged'))).toBeInTheDocument()
+  })
+
   it('schaltet mit server.config.write um und gibt den Zeitplan frei', async () => {
     usePermissionsStore.setState({ me: nurAmServer(['server.config.write']), isLoading: false })
     render(<ServerRestartPanel server={server} serverId={SERVER_ID} onSaved={() => {}} />)
@@ -89,14 +111,68 @@ describe('ServerRestartPanel', () => {
     const schalter = await screen.findByRole('switch', { name: i18n.t('restarts.enabled') })
     expect(schalter).toBeEnabled()
     expect(schalter).toHaveAttribute('aria-checked', 'false')
-    // Solange der Schalter aus ist, sperrt das <fieldset> die Intervallauswahl.
-    expect(screen.getByRole('combobox')).toBeDisabled()
+    // Solange der Schalter aus ist, ist die Intervallauswahl gesperrt. Seit
+    // dem Wechsel auf die Dropdown-Komponente (Design-DNA: kein natives
+    // <select>) ist sie ein <button aria-haspopup="listbox"> — die Rolle
+    // 'combobox' gibt es hier nicht mehr, gefunden wird über das aria-label.
+    const intervall = screen.getByRole('button', { name: i18n.t('restarts.interval') })
+    expect(intervall).toBeDisabled()
 
     fireEvent.click(schalter)
 
     // Der Baustein muss denselben Zustand führen wie vorher der Nachbau —
     // sonst wäre der Tausch ein Funktionsverlust.
     expect(schalter).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('combobox')).toBeEnabled()
+    expect(intervall).toBeEnabled()
+  })
+
+  it('waehlt ein Intervall ueber die Dropdown-Optionen', async () => {
+    // Die Optionen liegen per Portal an document.body — wer sie nach dem
+    // Klick sucht, nimmt screen, nicht den container. Geprüft wird, dass die
+    // Auswahl wirklich im Zustand ankommt (der Trigger zeigt danach das neue
+    // Label), nicht nur, dass ein Menü aufgeht.
+    usePermissionsStore.setState({ me: nurAmServer(['server.config.write']), isLoading: false })
+    render(<ServerRestartPanel server={{ ...server, auto_restart: true } as Server} serverId={SERVER_ID} onSaved={() => {}} />)
+
+    const intervall = await screen.findByRole('button', { name: i18n.t('restarts.interval') })
+    fireEvent.click(intervall)
+    fireEvent.click(await screen.findByRole('option', { name: i18n.t('restarts.everyHours', { count: 24 }) }))
+
+    expect(intervall).toHaveTextContent(i18n.t('restarts.everyHours', { count: 24 }))
+  })
+
+  it('zeigt auch Werte ausserhalb des Rasters an statt des Platzhalters', async () => {
+    // Die KI darf jedes Intervall (1–168 h) und jede Uhrzeit setzen — das
+    // Optionsraster kennt aber nur feste Stufen bzw. halbe Stunden. Ein
+    // gespeicherter Wert wie 5 h oder 04:17 muss trotzdem am Trigger stehen;
+    // ohne die Einspeisung zeigte die Dropdown-Komponente nur 'Auswählen'.
+    usePermissionsStore.setState({ me: nurAmServer(['server.config.read']), isLoading: false })
+    // Zwei getrennte Renders statt rerender: Modus und Zeiten sind
+    // useState-Initialwerte und folgen einem neuen Server-Prop nicht.
+    const erster = render(
+      <ServerRestartPanel
+        server={{ ...server, auto_restart: true, restart_interval_hours: 5 } as Server}
+        serverId={SERVER_ID}
+        onSaved={() => {}}
+      />,
+    )
+    const intervall = await screen.findByRole('button', { name: i18n.t('restarts.interval') })
+    expect(intervall).toHaveTextContent(i18n.t('restarts.everyHours', { count: 5 }))
+    erster.unmount()
+
+    render(
+      <ServerRestartPanel
+        server={{
+          ...server,
+          auto_restart: true,
+          restart_interval_hours: null,
+          restart_times_utc: '04:17',
+        } as Server}
+        serverId={SERVER_ID}
+        onSaved={() => {}}
+      />,
+    )
+    const zeit = await screen.findByRole('button', { name: i18n.t('restarts.fixedTimes') })
+    expect(zeit).toHaveTextContent('04:17')
   })
 })

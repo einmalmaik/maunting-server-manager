@@ -1061,6 +1061,13 @@ async def _wiederanlauf_versuchen(db: Session, run: AiRun, rahmen: dict) -> bool
     # der naechste Abgleich anlauf=1 und saet nicht mehr.
     zustand = zustand_lesen(neuer)
     zustand["worker"] = {**rahmen, "anlauf": int(rahmen.get("anlauf", 0) or 0) + 1}
+    # War der gestorbene Lauf ein stehender Auftrag (Aufgaben laufen seit
+    # 20.08.2026 in Worker-Fenstern), muss dessen Rahmen mitwandern: ohne ihn
+    # verloere der Nachfolger den Aufgaben-Werkzeugschnitt und den
+    # E-Mail-Bericht — der Verlust des Rahmens ist die gefaehrliche Richtung.
+    alter_zustand = zustand_lesen(run)
+    if isinstance(alter_zustand.get("aufgabe"), dict):
+        zustand["aufgabe"] = dict(alter_zustand["aufgabe"])
     zustand_schreiben(neuer, zustand)
     db.commit()
 

@@ -170,6 +170,10 @@ export function AiActionProposalCard({
     // fuer alles, was einen Server anfasst.
     propose_task_set: CalendarClock,
     propose_task_delete: CalendarClock,
+    // Auch die eingebauten Zeitplaene sind Uhren: eingestellt wird, **wann**
+    // neu gestartet oder gesichert wird — nicht der Vorgang selbst.
+    propose_restart_schedule_set: CalendarClock,
+    propose_backup_schedule_set: CalendarClock,
   }[proposal.tool_name] ?? Power
   // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb
   // eine eigene, neutrale Farbgebung statt der warnenden — und keinen Knopf.

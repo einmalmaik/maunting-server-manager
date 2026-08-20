@@ -481,6 +481,27 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "propose_guardian_tuning": Werkzeug(
         "server_write", recht="server.config.write"
     ),
+    # ── Auto-Neustart und Auto-Backup eines Servers einstellen ────────
+    #
+    # Der Durchgriff auf die **eingebaute** Zeitplanlogik: „starte den Server
+    # alle acht Stunden neu" oder „mach täglich ein Backup" wird hier zu genau
+    # den Feldern, die der Benutzer im Panel sieht und selbst ändern kann —
+    # statt zu einem stehenden Auftrag, der unsichtbar unter `ai_tasks` läge
+    # und je Lauf einen Anbieteraufruf kostete. Ein stehender Auftrag bleibt
+    # nur für das richtig, was diese Felder nicht ausdrücken (z. B. Neustarts
+    # nur an bestimmten Wochentagen).
+    #
+    # `server.config.write` ist dasselbe Recht wie an den Panel-Endpunkten
+    # (`PATCH /api/servers/{id}` für den Neustart-Zeitplan,
+    # `PATCH /api/backups/{id}/settings` für den Backup-Zeitplan) — eine
+    # Handlung, ein Recht. Kein `immer_bestaetigen`: ein Zeitplan ist eine
+    # Zeile, die man zurückstellt; nichts daran vernichtet Daten.
+    "propose_restart_schedule_set": Werkzeug(
+        "server_write", recht="server.config.write"
+    ),
+    "propose_backup_schedule_set": Werkzeug(
+        "server_write", recht="server.config.write"
+    ),
     # Loeschen einer **einzelnen** Datei unterhalb des Serververzeichnisses.
     #
     # Warum kein `immer_bestaetigen`, obwohl Loeschen sonst immer bestaetigt
@@ -895,6 +916,11 @@ AUFGABEN_HANDELN = frozenset({
     "propose_mod_install",
     "propose_bind_ip_update",
     "propose_server_repair",
+    # Der Durchgriff auf die eingebauten Zeitpläne. Anders als die
+    # Aufgabenwerkzeuge (bewusst ausgeschlossen, siehe oben) legt das keinen
+    # neuen Auftrag an — es stellt die Felder, die der Benutzer im Panel sieht.
+    "propose_restart_schedule_set",
+    "propose_backup_schedule_set",
 })
 
 

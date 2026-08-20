@@ -612,9 +612,60 @@ def loeschen(db: Session, *, user: User, task_id: str) -> str:
         )
     aufgabe = eigene_aufgabe(db, user=user, task_id=task_id)
     name = str(aufgabe.title)
+    _server_verweise_aufraeumen(db, task_id=aufgabe.id)
     db.delete(aufgabe)
     db.flush()
     return name
+
+
+def _server_verweise_aufraeumen(db: Session, *, task_id: str) -> None:
+    """Leert die weichen Verweise auf diese Aufgabe an den Servern.
+
+    Die ``*_ai_task_id``-Spalten haben bewusst keinen DB-Fremdschlüssel
+    (Migration 20260820_02); dieses Aufräumen ist der Ersatz dafür. Nur die
+    Kennung wird geleert — das ``*_ai_managed``-Abzeichen bleibt stehen, denn
+    der Zeitplan selbst kam weiterhin von der KI.
+    """
+    from models import Server
+
+    db.query(Server).filter(Server.restart_ai_task_id == task_id).update(
+        {"restart_ai_task_id": None}, synchronize_session=False
+    )
+    db.query(Server).filter(Server.backup_ai_task_id == task_id).update(
+        {"backup_ai_task_id": None}, synchronize_session=False
+    )
+
+
+def ki_zeitplan_verwaltung_aufheben(db: Session, server, *, bereich: str) -> None:
+    """Manuelle Änderung gewinnt: nimmt die KI-Verwaltung eines Zeitplans zurück.
+
+    Wird von den Panel-Endpunkten gerufen, sobald ein Mensch den Auto-Neustart-
+    oder Auto-Backup-Zeitplan eines Servers anfasst. Der verknüpfte stehende
+    Auftrag wird dabei **deaktiviert** (nicht gelöscht): der Benutzer soll in
+    der Aufgabenliste sehen, was da nicht mehr läuft, und es bewusst wieder
+    einschalten können. Committet nichts — die Transaktion gehört dem Endpunkt.
+    """
+    if bereich == "restart":
+        task_id = server.restart_ai_task_id
+        server.restart_ai_managed = False
+        server.restart_ai_task_id = None
+    elif bereich == "backup":
+        task_id = server.backup_ai_task_id
+        server.backup_ai_managed = False
+        server.backup_ai_task_id = None
+    else:  # pragma: no cover - Programmierfehler, kein Laufzeitfall
+        raise ValueError(f"Unbekannter Bereich {bereich!r}")
+    if not task_id:
+        return
+    aufgabe = db.query(AiTask).filter(AiTask.id == task_id).first()
+    if aufgabe is not None and aufgabe.enabled:
+        aufgabe.enabled = False
+        aufgabe.next_run_at = None
+        aufgabe.updated_at = _jetzt()
+        logger.info(
+            "KI-Aufgabe deaktiviert, Zeitplan manuell geändert (task_id=%s, server_id=%s)",
+            task_id, server.id,
+        )
 
 
 def auflisten(db: Session, *, user: User) -> list[dict]:
@@ -632,27 +683,43 @@ def auflisten(db: Session, *, user: User) -> list[dict]:
         .order_by(AiTask.created_at.asc())
         .all()
     )
-    return [
-        {
-            "task_id": aufgabe.id,
-            "title": aufgabe.title,
-            "instruction": aufgabe.instruction,
-            "kind": aufgabe.kind,
-            "plan": plan_text(aufgabe),
-            "timezone": aufgabe.time_zone,
-            "channel": aufgabe.channel,
-            "enabled": bool(aufgabe.enabled),
-            "next_run": (
-                utc(aufgabe.next_run_at).isoformat()
-                if aufgabe.next_run_at is not None else None
-            ),
-            "last_started": (
-                utc(aufgabe.last_started_at).isoformat()
-                if aufgabe.last_started_at is not None else None
-            ),
-        }
-        for aufgabe in zeilen
-    ]
+    return [eintrag(aufgabe) for aufgabe in zeilen]
+
+
+def eintrag(aufgabe: AiTask) -> dict:
+    """Eine Aufgabe als Wörterbuch — für `list_tasks` und die Aufgabenliste.
+
+    Eine Form für beide Leser (Modell und Oberfläche): zwei Serialisierer
+    wären zwei Gelegenheiten, verschiedene Dinge über dieselbe Aufgabe zu
+    behaupten. `conversation_id` ist das Hintergrundfenster der Aufgabe —
+    die Oberfläche verlinkt damit auf den Verlauf (?ansicht=worker&id=…).
+    """
+    return {
+        "task_id": aufgabe.id,
+        "title": aufgabe.title,
+        "instruction": aufgabe.instruction,
+        "kind": aufgabe.kind,
+        "plan": plan_text(aufgabe),
+        "plan_kind": aufgabe.plan_kind,
+        "time_of_day": aufgabe.time_of_day,
+        "weekdays": aufgabe.weekdays,
+        "interval_hours": aufgabe.interval_hours,
+        "once_at": (
+            utc(aufgabe.once_at).isoformat() if aufgabe.once_at is not None else None
+        ),
+        "timezone": aufgabe.time_zone,
+        "channel": aufgabe.channel,
+        "enabled": bool(aufgabe.enabled),
+        "conversation_id": aufgabe.conversation_id,
+        "next_run": (
+            utc(aufgabe.next_run_at).isoformat()
+            if aufgabe.next_run_at is not None else None
+        ),
+        "last_started": (
+            utc(aufgabe.last_started_at).isoformat()
+            if aufgabe.last_started_at is not None else None
+        ),
+    }
 
 
 # ── Der faellige Lauf ─────────────────────────────────────────────────────
@@ -767,26 +834,24 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
         _stilllegen(db, aufgabe, grund="autonomie_entzogen")
         return None
 
-    # **Ein stehender Auftrag bleibt im Dauerchat.** Das ist keine Nachlaessigkeit
-    # gegenueber dem Guardian-Fenster daneben, sondern die Zusage aus der Doku:
-    # "Der Verlauf steht **immer** im Chat — `email` heisst *zusaetzlich*, nicht
-    # *ausschliesslich*." Ein Auftrag ist etwas, das ein Mensch bestellt hat; er
-    # gehoert in dessen Gespraech. Eine Reparatur hat niemand bestellt.
-    conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
-    db.commit()
+    # **Ein stehender Auftrag laeuft im Hintergrund.** Hier stand bis zum
+    # 20.08.2026 der Dauerchat samt Vertagen, solange der Mensch dort arbeitete
+    # — der Betreiber hat es umgedreht: im Dauerchat steht nur, was der Mensch
+    # schreibt, und ein faelliger Auftrag unterbricht nie das Gespraech. Die
+    # Aufgabe bekommt ein eigenes Fenster (kind='worker', wiederverwendet ueber
+    # alle Laeufe) und meldet ihr Ergebnis ueber die Meldestelle, sobald der
+    # Chat Ruhe hat. Vertagen braucht es damit nicht mehr.
+    conversation = None
+    if aufgabe.conversation_id:
+        from models import AiConversation
 
-    laufend = ai_run_service.aktiver_lauf(db, user_id=user.id, kind="primary")
-    if laufend is not None:
-        # Der Mensch chattet gerade. Ein Aufgabenlauf, der jetzt startet, riefe
-        # `vorgaenger_abloesen` und braeche ihm mitten im Satz die Antwort ab.
-        #
-        # Gefragt wird nach **diesem** Fenster. Ohne die Einschraenkung vertagte
-        # sich das naechtliche Backup, weil auf einer ganz anderen Anlage eine
-        # Reparatur lief — zwei Vorgaenge, die einander nie in die Quere kommen.
-        logger.debug(
-            "Aufgabenlauf vertagt: Lauf %s ist aktiv (task_id=%s)", laufend.id, aufgabe.id
+        conversation = db.get(AiConversation, aufgabe.conversation_id)
+    if conversation is None:
+        conversation = ai_chat_service.worker_unterhaltung_anlegen(
+            db, user, f"Aufgabe: {aufgabe.title}"
         )
-        return None
+        aufgabe.conversation_id = conversation.id
+    db.commit()
 
     flug, anbieter = await ai_run_service.vorflug(client, db, user)
     if flug is None:
@@ -815,6 +880,12 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
         # Niemand sitzt davor: kein Skill-Verzeichnis im Systemprompt, denn
         # `AUFGABEN_LESEN` bietet kein `read_skill` an.
         unbeaufsichtigt=True,
+        # Ausdruecklich "voll", obwohl das Fenster kind='worker' traegt: die
+        # Ableitung aus der Fensterart gaebe die Worker-Rolle samt Worker-Prompt
+        # ("Rueckfragen ueber worker_frage") — und genau dieses Werkzeug nimmt
+        # der Aufgabenschnitt gleich wieder weg. Der Aufgabenrahmen unten ist
+        # die Schranke, nicht die Rolle.
+        rolle="voll",
     )
     if run is None:
         # Kontingent erschoepft, Schluessel nicht lesbar, Anfragekonflikt. Alles
@@ -838,6 +909,17 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
         "kind": aufgabe.kind,
         "channel": aufgabe.channel,
         "title": aufgabe.title,
+    }
+    # Zusaetzlich der Worker-Rahmen: ueber ihn reicht `_lauf_nachbereiten` das
+    # Ergebnis bei der Meldestelle ein (Zustellung in den Dauerchat, sobald
+    # dort Ruhe ist), und ueber ihn erscheint der Lauf in der Worker-Leiste.
+    # `kanal` bleibt fest "chat": die E-Mail des Zustellwegs `email`/`both`
+    # verschickt der Aufgabenbericht (`ai_task_report`), nicht die Meldestelle
+    # — sonst kaemen zwei Mails zu einem Lauf.
+    zustand["worker"] = {
+        "conversation_id": conversation.id,
+        "titel": f"Aufgabe: {aufgabe.title}"[:120],
+        "kanal": "chat",
     }
     ai_run_service.zustand_schreiben(run, zustand)
     aufgabe.last_run_id = run.id
@@ -866,9 +948,9 @@ MAX_ZEILEN_JE_DURCHLAUF = 20
 MAX_AUFGABEN_JE_DURCHLAUF = 5
 
 #: Ab wann ein verpasster Termin nicht mehr nachgeholt, sondern uebersprungen
-#: wird. Das Panel war aus, oder der Mensch chattete den ganzen Morgen — ein um
-#: elf Uhr nachgeholtes Nachtbackup ist schlechter als gar keines, und eine
-#: Wetterauskunft von heute Nacht ist um elf schlicht falsch.
+#: wird. Das Panel war aus — ein um elf Uhr nachgeholtes Nachtbackup ist
+#: schlechter als gar keines, und eine Wetterauskunft von heute Nacht ist um
+#: elf schlicht falsch.
 MAX_VERZUG_MINUTEN = 60
 
 
@@ -949,23 +1031,16 @@ async def faellige_aufgaben_bearbeiten(db: Session) -> int:
 
 
 async def _eine_aufgabe_bearbeiten(db: Session, aufgabe: AiTask, *, jetzt: datetime) -> int:
-    """Eine faellige Aufgabe: vertagen, ueberspringen oder starten."""
-    from services import ai_run_service
+    """Eine faellige Aufgabe: ueberspringen oder starten.
 
+    Hier stand bis zum 20.08.2026 ein Vertagungsgrund: solange im Dauerchat ein
+    Lauf aktiv war, blieb der Termin stehen. Seit die Aufgaben in einem eigenen
+    Hintergrundfenster laufen, koennen sie niemandem mehr ins Wort fallen — der
+    Grund ist mitsamt seiner Wartezeit entfallen.
+    """
     gelesen = aufgabe.next_run_at
     faellig = utc(gelesen)
     if faellig is None:
-        return 0
-
-    # **Vertagungsgruende vor dem Anspruch.** Wer vertagt, laesst den Termin
-    # stehen — der naechste Durchlauf versucht es in einer Minute erneut. Wer
-    # den Anspruch schon genommen haette, haette den Termin verbrannt, nur weil
-    # der Mensch gerade einen Satz tippte.
-    # Nur der Dauerchat zaehlt: dort schreibt der faellige Lauf hin, und nur
-    # dort kann er jemandem ins Wort fallen. Eine Guardian-Reparatur laeuft in
-    # einem anderen Fenster und geht diesen Auftrag nichts an.
-    if ai_run_service.aktiver_lauf(db, user_id=aufgabe.user_id, kind="primary") is not None:
-        logger.debug("Aufgabe vertagt, Benutzer arbeitet (task_id=%s)", aufgabe.id)
         return 0
 
     # Weitergerechnet wird vom **faellig gewordenen Termin**, nicht von jetzt.

@@ -151,9 +151,21 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     erklaerte Latenzziel), und die Worker verlieren die Gehirn- und
     Gedaechtniswerkzeuge. Wer die Grenze erneut anhebt, misst vorher nach und
     schreibt es hin.
+
+    Stand 20.08.2026, nachgemessen: **56.962** Zeichen mit den zwei
+    Zeitplan-Werkzeugen (`propose_restart_schedule_set`,
+    `propose_backup_schedule_set` — zusammen rund 2.000 Zeichen). Der Katalog
+    stand vorher bei 54.940, also 60 Zeichen unter der Grenze; jedes neue
+    Werkzeug haette sie gerissen. Beide Beschreibungen sind bereits nach dem
+    Muster vom 14.08. entschlackt (der Anlass steht einmal, in
+    `ai_prompt.AUFGABEN`), und ein Zusammenlegen scheidet aus: die Schemata
+    sind verschieden (Neustart: enabled/interval/times, Backup:
+    on_start/interval/retention). Die Grenze steht deshalb bei 58.000 — mit
+    bewusst nur einem Tausender Luft, damit der Naechste wieder hier landet
+    und dieselbe Entscheidung trifft.
     """
     katalog = json.dumps(ai_action_service.provider_tool_definitions(), ensure_ascii=False)
-    assert len(katalog) < 55_000, (
+    assert len(katalog) < 58_000, (
         f"Der Werkzeugkatalog ist auf {len(katalog)} Zeichen gewachsen. "
         "Er geht in jeder Runde mit und taucht in keiner Budgetrechnung auf."
     )

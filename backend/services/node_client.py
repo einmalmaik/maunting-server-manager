@@ -862,6 +862,19 @@ def _safe_detail(resp: httpx.Response) -> str:
         detail = body.get("detail") if isinstance(body, dict) else None
         if isinstance(detail, str) and detail:
             return detail[:300]
+        # Der Agent meldet Ablehnungen als {"code": ..., "message": ...} —
+        # etwa jede Guardian-Desired-State-Abweisung (msm-agent/routers/
+        # guardian.py). Ohne diesen Zweig degenerierte genau diese Auskunft zu
+        # "Agent error HTTP 422", und im Panel-Log stand nie, WAS der Agent
+        # abgelehnt hat.
+        if isinstance(detail, dict):
+            teile = [
+                str(detail[k])[:150]
+                for k in ("code", "message")
+                if isinstance(detail.get(k), str) and detail[k]
+            ]
+            if teile:
+                return f"Agent error HTTP {resp.status_code}: " + " — ".join(teile)
         # FastAPI/Pydantic validation errors: list of {loc, msg, type}
         if isinstance(detail, list) and detail:
             parts: list[str] = []

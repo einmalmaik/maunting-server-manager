@@ -432,27 +432,44 @@ def _aussetzung_freigeben(db: Session, auftrag: AiGuardianRepair) -> None:
 # ── Quarantaene: nur gegen Nachweis ───────────────────────────────────────
 
 
-def _eingriff_nachweisen(db: Session, auftrag: AiGuardianRepair) -> AiActionProposal | None:
-    """Der Beleg, dass dieser Auftrag ueberhaupt etwas veraendert hat.
+def _vom_auftrag(
+    db: Session, auftrag: AiGuardianRepair, vorschlag: AiActionProposal
+) -> bool:
+    """Gehoert dieser Vorschlag zu einem Lauf **dieses** Auftrags?
 
-    Gesucht wird eine **ausgefuehrte** Schreibaktion auf diesem Server, die
-    juenger ist als der Auftrag. Nicht ein Satz des Modells, nicht ein
-    Werkzeugaufruf, der abgelehnt wurde — eine Zeile, die sagt: hier wurde etwas
-    getan.
+    Fenster, Server und Zeitraum reichen als Eingrenzung nicht: zwei parallele
+    Auftraege am selben Server (verschiedene Vorfaelle, je ein Fingerprint)
+    teilen sich alle drei. Die einzige Verbindung vom Vorschlag zum Auftrag
+    fuehrt ueber seinen Lauf — jeder Vorschlag aus einem Lauf traegt dessen
+    ``run_id``, und der Laufzustand traegt die ``repair_id``, ueber die auch
+    `auftrag_aus_zustand` den Auftrag findet.
+    """
+    from services import ai_run_service
 
-    Und sie muss aus dem **Guardian-Fenster** stammen. Ohne diese Einschraenkung
-    zaehlte eine Aktion, die der Betreiber nebenher im Chat ausgeloest hat, als
-    Nachweis fuer den Eingriff des Auftrags — die Quarantaene fiele wegen einer
-    Arbeit, die dieser Auftrag nie getan hat.
+    if not vorschlag.run_id:
+        return False
+    run = db.get(AiRun, str(vorschlag.run_id))
+    if run is None:
+        return False
+    rahmen = ai_run_service.zustand_lesen(run).get("guardian")
+    if not isinstance(rahmen, dict):
+        return False
+    return str(rahmen.get("repair_id") or "") == str(auftrag.id)
 
-    Das ist der Nachweis, gegen den die Quarantaene aufgehoben wird. Ohne ihn
-    hiesse "Quarantaene aufheben" nur, dem Agenten dieselbe Leiter noch einmal
-    hochzuschicken, die er schon einmal bis zum Ende gelaufen ist.
+
+def _vorschlaege_des_auftrags(
+    db: Session, auftrag: AiGuardianRepair, *, status: str
+) -> list[AiActionProposal]:
+    """Alle Vorschlaege dieses Auftrags in einem Status, juengste zuerst.
+
+    Fenster, Server und Zeitraum sind der billige SQL-Vorfilter; die ehrliche
+    Zuordnung zum Auftrag macht `_vom_auftrag` je Kandidat. Die Kandidatenmenge
+    ist klein — hoechstens eine Handvoll Schreibaktionen je Auftrag.
     """
     from models import AiConversation
 
     if auftrag.server_id is None:
-        return None
+        return []
     fenster = (
         db.query(AiConversation.id)
         .filter(
@@ -462,17 +479,61 @@ def _eingriff_nachweisen(db: Session, auftrag: AiGuardianRepair) -> AiActionProp
         .scalar()
     )
     if fenster is None:
-        return None
-    return (
+        return []
+    kandidaten = (
         db.query(AiActionProposal)
         .filter(
             AiActionProposal.conversation_id == str(fenster),
             AiActionProposal.server_id == int(auftrag.server_id),
-            AiActionProposal.status == "succeeded",
+            AiActionProposal.status == status,
             AiActionProposal.created_at >= _utc(auftrag.created_at),
         )
         .order_by(AiActionProposal.created_at.desc())
-        .first()
+        .all()
+    )
+    return [zeile for zeile in kandidaten if _vom_auftrag(db, auftrag, zeile)]
+
+
+def _eingriff_nachweisen(db: Session, auftrag: AiGuardianRepair) -> AiActionProposal | None:
+    """Der Beleg, dass dieser Auftrag ueberhaupt etwas veraendert hat.
+
+    Gesucht wird eine **ausgefuehrte** Schreibaktion aus einem Lauf **dieses**
+    Auftrags. Nicht ein Satz des Modells, nicht ein Werkzeugaufruf, der
+    abgelehnt wurde — eine Zeile, die sagt: hier wurde etwas getan.
+
+    Die Zuordnung ueber den Lauf ist der Punkt: ohne sie zaehlte eine Aktion,
+    die der Betreiber nebenher im Chat ausgeloest hat oder die ein **paralleler
+    Auftrag** am selben Server ausgefuehrt hat, als Nachweis fuer den Eingriff
+    dieses Auftrags — die Quarantaene fiele wegen einer Arbeit, die dieser
+    Auftrag nie getan hat.
+
+    Das ist der Nachweis, gegen den die Quarantaene aufgehoben wird. Ohne ihn
+    hiesse "Quarantaene aufheben" nur, dem Agenten dieselbe Leiter noch einmal
+    hochzuschicken, die er schon einmal bis zum Ende gelaufen ist.
+    """
+    zeilen = _vorschlaege_des_auftrags(db, auftrag, status="succeeded")
+    return zeilen[0] if zeilen else None
+
+
+def _sync_fehlschlaege(db: Session, auftrag: AiGuardianRepair) -> int:
+    """Wie oft **dieser Auftrag** schon an der Agent-Synchronisation gescheitert ist.
+
+    Gezaehlt werden ausgefuehrte, aber mit ``AI_ACTION_GUARDIAN_SYNC_FAILED``
+    gescheiterte Vorschlaege aus den Laeufen dieses Auftrags — dieselbe
+    Eingrenzung wie in `_eingriff_nachweisen`, nur mit umgekehrtem Vorzeichen.
+    Der Fehlercode heisst: die Node hat die Konfiguration nicht quittiert, und
+    die Uebersteuerung wurde zurueckgerollt.
+
+    Bewusstes Restrisiko: der Zaehler unterscheidet nicht zwischen einer
+    deterministischen Ablehnung und zwei zufaellig aufeinanderfolgenden
+    transienten Fehlern (Netz, Node-Neustart). Auch dann ist Aufgeben
+    vertretbar — der Vorfall bleibt offen und wird weiter gebrieft, und die
+    Abschlussmail sagt ehrlich "nicht behoben".
+    """
+    return sum(
+        1
+        for zeile in _vorschlaege_des_auftrags(db, auftrag, status="failed")
+        if zeile.error_code == "AI_ACTION_GUARDIAN_SYNC_FAILED"
     )
 
 
@@ -693,6 +754,19 @@ def _naechste_phase_setzen(db: Session, auftrag: AiGuardianRepair, run: AiRun) -
         return
     if int(auftrag.attempt or 0) >= MAX_VERSUCHE:
         _abschliessen(db, auftrag, phase="aufgegeben", grund=f"versuche_{grund}")
+        return
+    if _sync_fehlschlaege(db, auftrag) >= 2:
+        # Zweimal hat die Node dieselbe Konfiguration nicht quittiert. Das ist
+        # kein Zustand, den ein weiterer KI-Anlauf beheben kann: die
+        # Uebersteuerung wird nach jedem Fehlschlag zurueckgerollt, der
+        # naechste Lauf sieht denselben Ausgangszustand und schlaegt dasselbe
+        # vor. Die Leiter ist sonst bewusst ergebnisblind (siehe Docstring) —
+        # dieser eine Fehlercode ist die Ausnahme, weil er deterministisch
+        # ist. Ohne den Riegel liefen bis zu acht zahlungspflichtige Anlaeufe
+        # im 13-Minuten-Takt gegen dieselbe Wand (Vorfall 66, 20.08.2026).
+        # Der Vorfall bleibt offen und wird weiter gebrieft; nur der teure
+        # Heilungsversuch endet.
+        _abschliessen(db, auftrag, phase="aufgegeben", grund="agent_sync")
         return
 
     if auftrag.phase == "diagnose":
