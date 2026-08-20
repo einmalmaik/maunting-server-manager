@@ -882,7 +882,10 @@ den **Namen deiner Azure-Ressource**, nicht ihre Adresse:
 | Standardmodell | der Name deines **Deployments**, so wie du es angelegt hast |
 
 Daraus baut MSM `https://mein-ai-hub.services.ai.azure.com/openai/v1` bzw.
-`…/anthropic/v1`. Schema, Suffix und Pfad gehören dem Programm; aus der
+`…/anthropic` — dieselben zwei Adressen, die dir das Azure-Portal anzeigt. Die
+Anfrage geht dann an `…/openai/v1/chat/completions` bzw. `…/anthropic/v1/messages`;
+die Version steht bei Claude im Pfad der Operation und nicht in der Adresse, so
+wie Anthropic selbst sie schneidet. Schema, Suffix und Pfad gehören dem Programm; aus der
 Einstellung kommt ein einzelnes DNS-Label, geprüft gegen Buchstaben, Ziffern und
 Bindestriche (2 bis 63 Zeichen, keiner am Rand, kein `xn--`). Das ist der eine
 Ort, an dem MSM überhaupt noch Betreibereingaben in eine Zieladresse lässt — und

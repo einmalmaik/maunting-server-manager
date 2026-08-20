@@ -464,7 +464,12 @@ async def stream_messages(
         request_body["thinking"] = {"type": "adaptive"}
         request_body["output_config"] = {"effort": reasoning_effort}
 
-    target = httpx.URL(provider_base_url(provider).rstrip("/") + "/messages")
+    # ``/v1/messages`` und nicht nur ``/messages``: die Adresse des Anbieters
+    # endet bei Anthropic **vor** der Version. Azure zeigt sie im Portal genau
+    # so an (``…/anthropic``), Anthropics eigenes SDK haengt ebenfalls
+    # ``/v1/messages`` an eine ``base_url`` — ein ``/v1`` in der Registry
+    # ergaebe mit beiden zusammen ``…/anthropic/v1/v1/messages``.
+    target = httpx.URL(provider_base_url(provider).rstrip("/") + "/v1/messages")
     deadline = time.monotonic() + MAX_STREAM_SECONDS
     frames = 0
     # Aufrufe werden ueber den ``index`` ihres Inhaltsblocks gesammelt: die

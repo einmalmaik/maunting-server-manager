@@ -182,9 +182,11 @@ def test_only_a_dns_label_ever_reaches_a_host() -> None:
     assert ai_provider_service.base_url(provider) == (
         "https://mein-ai-hub.services.ai.azure.com/openai/v1"
     )
+    # Claude endet vor der Version: ``/v1/messages`` haengt der Adapter an, so
+    # wie Azure die Adresse im Portal zeigt und Anthropics SDK sie erwartet.
     provider.provider_kind = "azure_anthropic"
     assert ai_provider_service.base_url(provider) == (
-        "https://mein-ai-hub.services.ai.azure.com/anthropic/v1"
+        "https://mein-ai-hub.services.ai.azure.com/anthropic"
     )
 
     # Ein abschliessender Zeilenumbruch ist kein Angriff, sondern ein

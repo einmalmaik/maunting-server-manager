@@ -10,6 +10,11 @@ belegt von beiden Seiten wörtlich:
 * Anthropic: „Both methods use Azure-hosted endpoints in the format
   ``https://{resource}.services.ai.azure.com/anthropic/v1/*``."
 
+Die **Adresse des Anbieters** endet dabei vor der Version — Azure zeigt sie im
+Portal als ``https://<resource>.services.ai.azure.com/anthropic`` an, und genau
+diese Form nimmt auch Anthropics SDK als ``base_url``. ``/v1/messages`` gehört
+zur Operation und steht deshalb im Adapter, nicht hier.
+
 **Warum ein eigener ``kind`` und keine Weiche im Adapter.** Der vorgelegte Plan
 wollte Claude im `openai_compatible_adapter` an den Anthropic-Weg abzweigen,
 sobald das Modell nach Claude aussieht. Das geht aus zwei Gründen nicht: der
@@ -57,7 +62,14 @@ ANBIETER = Anbieter(
     label="Azure · Anthropic Claude",
     # Dieselbe Vorlage wie bei `azure_openai`, anderer Pfad. Derselbe
     # Ressourcenname des Betreibers passt auf beide.
-    base_url="https://{ressource}.services.ai.azure.com/anthropic/v1",
+    #
+    # **Ohne ``/v1``**, anders als bei `azure_openai`. Das ist kein Versehen und
+    # keine Unsauberkeit, sondern der Schnitt, den Anthropic selbst zieht: die
+    # Version gehört zum Pfad der Operation, nicht zur Adresse des Anbieters.
+    # Azure zeigt im Portal genau diese Form (``…/anthropic``), Anthropics SDK
+    # nimmt sie als ``base_url``, und `anthropic_messages_adapter` hängt
+    # ``/v1/messages`` an. Ein ``/v1`` hier ergäbe ``…/anthropic/v1/v1/messages``.
+    base_url="https://{ressource}.services.ai.azure.com/anthropic",
     # Belegt kein Katalog: die Models API ist auf Foundry nicht unterstützt.
     catalog_url=None,
     key_url="https://ai.azure.com/",
@@ -80,7 +92,7 @@ ANBIETER = Anbieter(
     anfrage_erweiterungen=frozenset(),
     protokoll_chat="anthropic_messages",
     # Claude hört nicht zu; einen Transkriptionsendpunkt gibt es unter
-    # ``/anthropic/v1`` nicht.
+    # ``/anthropic`` nicht.
     gehoer_wege=(),
     # Keine Empfehlung, aus demselben Grund wie bei `azure_openai`: die Kennung
     # ist ein Deployment-Name aus dem Konto des Betreibers.
