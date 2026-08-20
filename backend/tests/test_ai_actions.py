@@ -2250,3 +2250,222 @@ def test_the_server_list_stops_at_the_cap(db: Session, owner_user: User) -> None
     sichtbar = ai_action_service._visible_servers(db, owner_user)
 
     assert len(sichtbar) == ai_action_service.MAX_LISTED_SERVERS
+
+
+# ── Dauerhafte Spieleinstellungen (propose_config_set) ────────────────────
+
+
+def _set(db: Session, user: User, conversation: AiConversation, server: Server, **rest):
+    return ai_proposal_service.create_proposal(
+        db,
+        user=user,
+        conversation=conversation,
+        tool_name="propose_config_set",
+        arguments={
+            "server_id": server.id,
+            "reason": "Testbegruendung",
+            "expected_effect": "Testwirkung",
+            **rest,
+        },
+        correlation_id=str(uuid4()),
+    )
+
+
+def test_set_traegt_einen_fehlenden_schluessel_nach(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Der gemessene Anlass, woertlich.
+
+    Der Benutzer bat, das Zaehmen zu beschleunigen. `TamingSpeedMultiplier`
+    stand nicht in der Datei, und die KI sagte deshalb ab. Einen fehlenden
+    Schluessel anzulegen ist bei Spielkonfigurationen der Regelfall — die
+    Dateien enthalten meist nur, was einmal veraendert wurde.
+    """
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    datei = Path(server.install_dir) / "GameUserSettings.ini"
+    datei.write_bytes(b"[ServerSettings]\r\nXPMultiplier=1.0\r\n\r\n[Startup]\r\nFoo=1\r\n")
+
+    proposal = _set(
+        db, owner_user, conversation, server,
+        path="GameUserSettings.ini",
+        expected_revision=content_revision(datei.read_bytes()),
+        entries=[{"section": "ServerSettings", "key": "TamingSpeedMultiplier", "value": "5.0"}],
+    )
+    db.commit()
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+    _, ergebnis = ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
+    )
+
+    roh = datei.read_bytes()
+    assert b"TamingSpeedMultiplier=5.0" in roh
+    # In der richtigen Sektion — sonst waeren die Werte richtig und wirkungslos.
+    assert roh.index(b"TamingSpeedMultiplier") < roh.index(b"[Startup]")
+    assert roh.count(b"[ServerSettings]") == 1
+    # Die CRLF-Zeilenenden der echten Spieldatei bleiben.
+    assert roh.replace(b"\r\n", b"").count(b"\n") == 0
+    # Nachweis statt Behauptung: das Werkzeug hat zurueckgelesen.
+    assert ergebnis["verifiziert"] is True
+
+
+def test_set_hinterlegt_den_wert_dauerhaft_am_server(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Die eigentliche Zusage: die Aenderung bleibt.
+
+    Ein geschriebener Wert haelt nur, solange der Prozess ihn laesst, dem die
+    Datei gehoert (gemessen auf Server 107, wo ein ausgefuehrter Vorschlag nach
+    vier Tagen verschwunden war). Deshalb ist das Setzen zweiteilig — die Datei
+    jetzt, und der Wunsch fuer jeden kuenftigen Start.
+    """
+    from services import server_config_wishes
+
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    datei = Path(server.install_dir) / "GameUserSettings.ini"
+    datei.write_bytes(b"[ServerSettings]\r\n")
+
+    proposal = _set(
+        db, owner_user, conversation, server,
+        path="GameUserSettings.ini",
+        expected_revision=content_revision(datei.read_bytes()),
+        entries=[{"section": "ServerSettings", "key": "TamingSpeedMultiplier", "value": "5.0"}],
+    )
+    db.commit()
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+    ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
+    )
+    db.refresh(server)
+
+    gemerkt = server_config_wishes.lese(server.config_wishes_json)
+    assert len(gemerkt) == 1
+    assert gemerkt[0].schluessel == "TamingSpeedMultiplier"
+    assert gemerkt[0].wert == "5.0"
+
+    # Und der Beweis, dass das etwas nuetzt: das Spiel ueberschreibt die Datei,
+    # der naechste Start stellt den Wert wieder her.
+    datei.write_bytes(b"[ServerSettings]\r\nXPMultiplier=1.0\r\n")
+    server_config_wishes.wuensche_durchsetzen(server)
+    assert b"TamingSpeedMultiplier=5.0" in datei.read_bytes()
+
+
+def test_set_laeuft_auch_am_laufenden_server(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Ein laufender Server ist kein Hindernis.
+
+    Die Absage \"dafuer muss der Server aus sein\" stammte aus dem Modell, nicht
+    aus dem Backend: MSM prueft beim Config-Schreiben an keiner Stelle den
+    Serverzustand. Dieser Test haelt fest, dass das so bleibt — eine spaeter
+    eingefuegte Statuspruefung wuerde genau die Absage zurueckbringen, die der
+    Betreiber abgestellt haben wollte.
+    """
+    server = _server(db, owner_user, tmp_path)
+    server.status = "running"
+    db.commit()
+    conversation = _conversation(db, owner_user, server)
+    datei = Path(server.install_dir) / "GameUserSettings.ini"
+    datei.write_bytes(b"[ServerSettings]\r\n")
+
+    proposal = _set(
+        db, owner_user, conversation, server,
+        path="GameUserSettings.ini",
+        expected_revision=content_revision(datei.read_bytes()),
+        entries=[{"section": "ServerSettings", "key": "XPMultiplier", "value": "2.0"}],
+    )
+    db.commit()
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+    ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
+    )
+
+    assert b"XPMultiplier=2.0" in datei.read_bytes()
+
+
+def test_set_legt_eine_fehlende_datei_an(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Ein frisch installierter Server hat die Konfigurationsdatei oft noch nicht."""
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+
+    proposal = _set(
+        db, owner_user, conversation, server,
+        path="GameUserSettings.ini",
+        expected_revision=None,
+        entries=[{"section": "ServerSettings", "key": "XPMultiplier", "value": "2.0"}],
+    )
+    db.commit()
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+    ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
+    )
+
+    inhalt = (Path(server.install_dir) / "GameUserSettings.ini").read_text(encoding="utf-8")
+    assert "[ServerSettings]" in inhalt
+    assert "XPMultiplier=2.0" in inhalt
+
+
+def test_set_weist_passwortfelder_ab(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Die Geheimnisgrenze gilt hier wie ueberall.
+
+    Sonst waere das neue Werkzeug der Umweg um eine bestehende Invariante: was
+    `propose_config_patch` abweist, muss auch hier scheitern — und zwar bevor
+    ein Vorschlag entsteht, sonst laege das Passwort in der Vorschau.
+    """
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    datei = Path(server.install_dir) / "GameUserSettings.ini"
+    datei.write_bytes(b"[ServerSettings]\r\n")
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        _set(
+            db, owner_user, conversation, server,
+            path="GameUserSettings.ini",
+            expected_revision=content_revision(datei.read_bytes()),
+            entries=[{"section": "ServerSettings", "key": "ServerAdminPassword", "value": "geheim"}],
+        )
+    db.rollback()
+
+    assert db.query(AiActionProposal).count() == 0
+
+
+def test_set_verlangt_schreibrecht(
+    db: Session, regular_user: User, owner_user: User, tmp_path: Path
+) -> None:
+    """Das neue Werkzeug erbt die Rechte, es umgeht sie nicht."""
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, regular_user, server)
+    datei = Path(server.install_dir) / "GameUserSettings.ini"
+    datei.write_bytes(b"[ServerSettings]\r\n")
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view"
+    ))
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.files.read"
+    ))
+    db.commit()
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        _set(
+            db, regular_user, conversation, server,
+            path="GameUserSettings.ini",
+            expected_revision=content_revision(datei.read_bytes()),
+            entries=[{"section": "ServerSettings", "key": "XPMultiplier", "value": "2.0"}],
+        )
+    db.rollback()
+
+    assert db.query(AiActionProposal).count() == 0
+    assert datei.read_bytes() == b"[ServerSettings]\r\n"

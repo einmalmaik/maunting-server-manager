@@ -567,6 +567,28 @@ nicht — dann lernst du in diesem Lauf nichts und erwaehnst es auch nicht."""
 # Mit `propose_config_patch` gibt es den Weg. Der Block beschreibt ihn deshalb
 # als Ablauf und nicht als Erlaubnis — ein Modell, dem man nur sagt "du darfst",
 # faengt trotzdem beim Anfang der Datei an zu lesen.
+#
+# Der dritte Teil (20.08.2026) hat drei gemessene Anlaesse, alle aus demselben
+# Vorfall: der Benutzer bat, das Zaehmen zu beschleunigen, und bekam eine
+# Absage.
+#
+# 1. **"Dafuer muss der Server aus sein."** Diese Regel gibt es im Code nicht —
+#    MSM prueft beim Config-Schreiben an keiner Stelle `server.status`. Das
+#    Modell hatte sie aus BLUEPRINTS uebertragen, wo sie stimmt, weil ein
+#    Blueprint-Wechsel das Serververzeichnis loescht. Deshalb steht die
+#    Ausnahme jetzt ausdruecklich dabei: sonst verallgemeinert das naechste
+#    Modell sie wieder.
+# 2. **"Den Eintrag gibt es nicht."** `TamingSpeedMultiplier` stand
+#    tatsaechlich nicht in der Datei. Einen fehlenden Schluessel anzulegen ist
+#    bei INI-Dateien der Regelfall — als Grund fuer eine Absage taugt er nicht.
+# 3. **Der Benutzer hatte es angeordnet.** Eine beschriebene Vorgabe ist eine
+#    Anweisung, keine Anfrage. Was hier fehlte, war nicht Vorsicht, sondern
+#    Ausfuehrung.
+#
+# Der Verweis auf `propose_config_set` traegt den zweiten Teil des Vorfalls:
+# ein Patch vom 18.08. hatte einen zweiten `[ServerSettings]`-Block ans
+# Dateiende gehaengt, und ARK liest nur den ersten — Werte richtig, Wirkung
+# null. Ohne die Nennung hier greift das Modell weiter zum Textersetzen.
 DATEIEN = """\
 Dateien: `list_server_files` zeigt, was da ist — nutze es, bevor du eine Datei \
 liest, statt Namen zu raten. `read_config` liest jede Textdatei des Servers, \
@@ -580,6 +602,23 @@ Aendern: `propose_config_patch` ersetzt einzelne Stellen und laesst den Rest \
 unberuehrt — das ist der Normalfall. `propose_config_update` ersetzt die \
 **ganze** Datei und passt nur, wenn du sie ganz gelesen hast (`editable: true`) \
 oder sie neu anlegst.
+Fuer Spieleinstellungen in INI-artigen Dateien nimmst du stattdessen \
+`propose_config_set`: du nennst Sektion, Schluessel und Wert, statt Text zu \
+suchen. Damit kann weder ein zweiter gleichnamiger Abschnitt entstehen noch \
+ein Suchtext an den Zeilenenden scheitern, und der Wert wird vor jedem Start \
+erneut geschrieben — er haelt also auch bei Spielen, die ihre Konfiguration \
+beim Beenden selbst zurueckschreiben.
+Fehlt die Einstellung in der Datei, legst du sie an. Ein nicht vorhandener \
+Schluessel ist der Regelfall, kein Hindernis, und kein Grund, dem Benutzer \
+abzusagen.
+Ein laufender Server ist ebenfalls kein Hindernis: du aenderst die Datei \
+trotzdem und sagst dazu, dass es mit dem naechsten Neustart wirkt. Stoppen \
+musst du ihn dafuer nicht, und du verlangst es auch nicht vom Benutzer. \
+Ausgenommen ist allein der Blueprint-Wechsel, der das Serververzeichnis \
+loescht.
+Sagt der Benutzer, du sollst etwas aendern, aenderst du es. Was er dabei \
+beschreibt, ist die Vorgabe — such dir die passenden Werte und nenne sie im \
+Ergebnis, statt sie einzeln zurueckzufragen.
 Stehen die gewuenschten Werte schon im Text des Benutzers, frag nicht noch \
 einmal mit `ask_user` nach — leg die Patches vor.
 **Passwortwerte gehen nicht durch**: `ServerPassword`, `ServerAdminPassword`, \

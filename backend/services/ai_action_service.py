@@ -131,7 +131,7 @@ MAX_LISTED_SERVERS = 60
 # vorhandenen, nicht blockierenden Server-Lifecycle-Mutex. Lifecycle-Aktionen
 # brauchen ihn nicht: `request_lifecycle_operation` hat eine eigene Job-Sperre.
 # Mod-Installation ebenso wenig: `install_mod_bg` haelt den Install-Lock selbst.
-_MUTEX_TOOLS = {"propose_backup", "propose_config_update", "propose_config_patch"}
+_MUTEX_TOOLS = {"propose_backup", "propose_config_update", "propose_config_patch", "propose_config_set"}
 
 
 # Ein "reason" beschreibt, warum die KI die Aenderung vorschlaegt, ein
@@ -1458,6 +1458,59 @@ def provider_tool_definitions() -> list[dict]:
                 },
             },
             ["path", "expected_revision", "edits", *_RATIONALE_REQUIRED],
+        ),
+        _server_function(
+            "propose_config_set",
+            "Setzt einzelne Schluessel in einer INI-artigen Datei — **der "
+            "Normalfall fuer Spieleinstellungen** (Multiplikatoren, Slots, "
+            "Servername, Schwierigkeit). Du suchst keinen Text, sondern nennst "
+            "Sektion, Schluessel und Wert. Die Sektion wird gefunden oder "
+            "angelegt, ein vorhandener Schluessel wird ueberschrieben statt "
+            "gedoppelt, und die Zeilenenden der Datei bleiben unveraendert. "
+            "Fehlt der Schluessel bisher, legst du ihn damit an — das ist der "
+            "Regelfall und kein Hindernis. "
+            "Der Wert wird ausserdem dauerhaft hinterlegt und vor **jedem** "
+            "Start erneut geschrieben. Damit haelt er auch bei Spielen, die "
+            "ihre Konfiguration beim Beenden selbst zurueckschreiben; du musst "
+            "den Server dafuer weder stoppen noch wissen, wie das jeweilige "
+            "Spiel damit umgeht. Wirksam wird die Aenderung mit dem naechsten "
+            "Neustart — sag das dazu, statt die Aenderung abzulehnen. "
+            "`expected_revision` stammt aus read_config; `null` legt eine noch "
+            "fehlende Datei an. Passwortfelder weist das Backend ab.",
+            {
+                **_RATIONALE_SCHEMA,
+                "path": {"type": "string", "maxLength": 256},
+                "expected_revision": {"type": ["string", "null"], "maxLength": 71},
+                "entries": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": MAX_PATCH_EDITS,
+                    "description": "Zu setzende Schluessel, der Reihe nach.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "section": {
+                                "type": "string",
+                                "maxLength": 128,
+                                "description": "Abschnitt ohne Klammern, z. B. ServerSettings.",
+                            },
+                            "key": {
+                                "type": "string",
+                                "maxLength": 128,
+                                "description": "Name der Einstellung.",
+                            },
+                            "value": {
+                                "type": "string",
+                                "maxLength": 512,
+                                "description": "Der Wert, der dastehen soll.",
+                            },
+                        },
+                        "required": ["section", "key", "value"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            ["path", "expected_revision", "entries", *_RATIONALE_REQUIRED],
         ),
         _server_function(
             "propose_bind_ip_update",

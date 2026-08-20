@@ -275,6 +275,21 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Schreiben einen Versionsschnappschuss an, aus dem der Dateimanager den
     # alten Stand zurueckholt.
     "propose_config_patch": Werkzeug("server_write", recht="server.files.write"),
+    # Der Normalfall fuer Spielkonfigurationen — und dasselbe Recht wie die
+    # beiden darueber, weil es dieselbe Sache tut: eine Datei des Servers
+    # aendern.
+    #
+    # Es gibt ihn, weil Textersetzung fuer eine Formatdatei messbar das falsche
+    # Verfahren ist. Am 18.08.2026 hing ein ausgefuehrter Patch einen zweiten
+    # `[ServerSettings]`-Block ans Dateiende; ARK liest nur den ersten. Die
+    # Werte waren richtig, die Wirkung war null, und im Diff sah alles korrekt
+    # aus. Mit Sektion und Schluessel als Argument kann das nicht passieren.
+    #
+    # Umkehrbar wie der Patch (Versionsschnappschuss vor jedem Schreiben) und
+    # damit autonomiefaehig. Dass der Wert zusaetzlich als dauerhafter Wunsch
+    # hinterlegt wird, aendert daran nichts: `propose_config_set` mit dem alten
+    # Wert stellt beides zurueck.
+    "propose_config_set": Werkzeug("server_write", recht="server.files.write"),
     "propose_mod_install": Werkzeug("server_write", recht="server.mods.write"),
     # Eine falsche Bind-IP macht den Server unerreichbar — aber nur, bis jemand
     # sie zurueckstellt, und das kann die KI selbst. Kein Datenverlust, also
@@ -740,6 +755,7 @@ GUARDIAN_HEILUNG_TOOLS = frozenset({
     "propose_backup",
     "propose_server_lifecycle",
     "propose_config_patch",
+    "propose_config_set",
     "propose_config_update",
     "propose_file_delete",
     "propose_server_repair",
@@ -875,6 +891,7 @@ AUFGABEN_HANDELN = frozenset({
     "propose_backup",
     "propose_config_update",
     "propose_config_patch",
+    "propose_config_set",
     "propose_mod_install",
     "propose_bind_ip_update",
     "propose_server_repair",
@@ -920,6 +937,7 @@ def aufgaben_tools(kind: str) -> frozenset[str]:
 
 GUARDIAN_BACKUP_PFLICHT_TOOLS = frozenset({
     "propose_config_patch",
+    "propose_config_set",
     "propose_config_update",
     "propose_file_delete",
     "propose_server_repair",

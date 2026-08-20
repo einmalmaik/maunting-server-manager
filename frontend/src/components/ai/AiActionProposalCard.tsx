@@ -139,6 +139,7 @@ export function AiActionProposalCard({
   const Icon = {
     propose_config_update: FilePenLine,
     propose_config_patch: FilePenLine,
+    propose_config_set: FilePenLine,
     propose_backup: HardDriveDownload,
     propose_mod_install: Package,
     propose_server_create: ServerCog,

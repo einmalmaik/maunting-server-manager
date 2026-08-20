@@ -344,6 +344,7 @@ export const SCHREIBWERKZEUGE = [
   'propose_backup_restore',
   'propose_config_update',
   'propose_config_patch',
+  'propose_config_set',
   'propose_mod_install',
   'propose_bind_ip_update',
   'propose_server_create',

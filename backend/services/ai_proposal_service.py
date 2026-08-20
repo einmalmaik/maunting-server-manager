@@ -59,7 +59,9 @@ from services.file_edit_service import EditNotApplicable, apply_edits
 # nicht sichern kann, und beide muessen dieselbe Zahl meinen.
 from services.file_history_service import MAX_HISTORY_EDIT_SIZE
 from services.ai_redaction import redact_sensitive_text
+from services.ai_ini_edit import ini_setzen
 from services import ai_task_service
+from services import server_config_wishes
 from services.ai_tool_registry import (
     GLOBAL_WRITE_TOOLS,
     GUARDIAN_HEILUNG_TOOLS,
@@ -231,6 +233,7 @@ def _require_tool_permission(
     if tool_name in {
         "propose_config_update",
         "propose_config_patch",
+        "propose_config_set",
     } and not permission_service.has_server_permission(
         db, user, server_id, "server.files.read"
     ):
@@ -515,6 +518,130 @@ def _config_patch_payload(
     # — auf denselben Stand, denn `expected_revision` laesst keinen anderen zu.
     return (
         {"path": path, "edits": [{"find": f, "replace": r} for f, r in edits]},
+        preview,
+        expected,
+    )
+
+
+def _config_set_payload(
+    db: Session, server: Server, arguments: dict
+) -> tuple[dict, dict, str | None]:
+    """Prueft ein sektionsbewusstes Setzen und baut Nutzlast und Vorschau.
+
+    **Warum dieses Werkzeug neben dem Patch existiert.** Der Patch sucht Text
+    und ersetzt ihn. Fuer eine Formatdatei ist das messbar das falsche
+    Verfahren: am 18.08.2026 hing ein ausgefuehrter Patch einen zweiten
+    ``[ServerSettings]``-Block ans Dateiende, und ARK liest nur den ersten. Die
+    Werte waren richtig, die Wirkung war null. Mit Sektion und Schluessel als
+    Argument kann das nicht passieren.
+
+    **Und warum er den Wunsch mitspeichert.** Ein geschriebener Wert haelt nur,
+    solange der Prozess ihn laesst, dem die Datei gehoert — gemessen auf Server
+    107, wo ein ausgefuehrter Vorschlag vier Tage spaeter nicht mehr in der
+    Datei stand. Deshalb ist das Setzen hier zweiteilig: die Datei jetzt, und
+    der Wunsch fuer jeden kuenftigen Start.
+
+    ``expected_revision: null`` legt eine fehlende Datei an — derselbe Weg wie
+    bei ``propose_config_update``.
+    """
+    if set(arguments) != {"path", "expected_revision", "entries"}:
+        raise AiActionValidationError("Set-Tool hat ungueltige Argumente")
+    path = _config_path(arguments["path"])
+    expected = arguments["expected_revision"]
+    if expected is not None and (
+        not isinstance(expected, str)
+        or not expected.startswith("sha256:")
+        or len(expected) != 71
+    ):
+        raise AiActionValidationError(
+            "expected_revision fehlt oder ist ungueltig. Zuerst read_config aufrufen."
+        )
+
+    roh = arguments["entries"]
+    if not isinstance(roh, list) or not roh:
+        raise AiActionValidationError("Es fehlt mindestens ein Eintrag")
+    if len(roh) > MAX_PATCH_EDITS:
+        raise AiActionValidationError(
+            f"Hoechstens {MAX_PATCH_EDITS} Eintraege je Vorschlag"
+        )
+
+    eintraege: list[tuple[str, str, str]] = []
+    for nummer, eintrag in enumerate(roh, start=1):
+        if not isinstance(eintrag, dict) or set(eintrag) != {"section", "key", "value"}:
+            raise AiActionValidationError(
+                f"Eintrag {nummer} braucht genau 'section', 'key' und 'value'"
+            )
+        sektion, schluessel, wert = eintrag["section"], eintrag["key"], eintrag["value"]
+        if not isinstance(sektion, str) or not isinstance(schluessel, str):
+            raise AiActionValidationError(f"Eintrag {nummer} ist unvollstaendig")
+        if not isinstance(wert, str):
+            raise AiActionValidationError(f"Eintrag {nummer} hat keinen Wert")
+        eintraege.append((sektion, schluessel, wert))
+
+    try:
+        current = read_server_text(db, server_id=server.id, relative_path=path)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        current = None
+    current_revision = str(current["revision"]) if current is not None else None
+    if expected is None and current is not None:
+        raise AiActionValidationError(
+            "Fuer eine vorhandene Datei ist expected_revision Pflicht"
+        )
+    if current_revision != expected:
+        raise AiActionValidationError("Config wurde seit der Analyse veraendert")
+
+    alt = str(current["content"]) if current is not None else ""
+    neu = alt
+    for sektion, schluessel, wert in eintraege:
+        # `ini_setzen` traegt hier die Geheimnisgrenze und die
+        # Struktur-Pruefung; ein unzulaessiger Eintrag wirft, bevor irgendetwas
+        # geschrieben wird.
+        neu = ini_setzen(neu, sektion, schluessel, wert)
+
+    # Der Wunschspeicher prueft dieselben Werte noch einmal gegen seine eigenen
+    # Grenzen (Pfadform, Dateiendung, Anzahl). Das geschieht **vor** dem
+    # Vorschlag, damit ein Wunsch, der spaeter nicht gespeichert werden koennte,
+    # gar nicht erst als Vorschlag im Chat steht.
+    #
+    # Ohne Schalter: ein gesetzter Wert ist immer auch ein gewollter Wert. Ein
+    # Feld "dauerhaft ja/nein" waere eine Entscheidung, die das Modell bei jedem
+    # Aufruf neu faellen muesste — und beim ersten Vergessen stuende der
+    # Benutzer wieder vor einer Aenderung, die still verschwindet.
+    server_config_wishes.setze(
+        server.config_wishes_json, datei=path, eintraege=eintraege
+    )
+
+    diff_lines = list(
+        difflib.unified_diff(
+            redact_sensitive_text(alt).splitlines(),
+            redact_sensitive_text(neu).splitlines(),
+            fromfile=f"{path}:vorher",
+            tofile=f"{path}:nachher",
+            lineterm="",
+        )
+    )
+    gekuerzt = len(diff_lines) > MAX_DIFF_LINES
+    preview = {
+        "path": path,
+        "change": "create" if current is None else "set",
+        "diff": "\n".join(diff_lines[:MAX_DIFF_LINES])[:MAX_DIFF_CHARS],
+        "diff_truncated": gekuerzt,
+        "entries": len(eintraege),
+        # Der Wert wird beim naechsten Start erneut geschrieben, deshalb ist ein
+        # Neustart hier kein Nebensatz, sondern der Weg, auf dem die Aenderung
+        # wirksam wird.
+        "restart_required": True,
+        "persistent": True,
+    }
+    return (
+        {
+            "path": path,
+            "entries": [
+                {"section": s, "key": k, "value": v} for s, k, v in eintraege
+            ],
+        },
         preview,
         expected,
     )
@@ -1838,6 +1965,8 @@ def create_proposal(
             expected_revision = None
         elif tool_name == "propose_config_patch":
             payload, preview, expected_revision = _config_patch_payload(db, server.id, rest)
+        elif tool_name == "propose_config_set":
+            payload, preview, expected_revision = _config_set_payload(db, server, rest)
         elif tool_name == "propose_config_update":
             payload, preview, expected_revision = _config_payload(db, server.id, rest)
         elif tool_name == "propose_server_repair":
@@ -2772,6 +2901,75 @@ def _ausfuehren_config_patch(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausge
     return _Ausgefuehrt(result=result)
 
 
+def _ausfuehren_config_set(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    """Schreibt die Werte — und merkt sie fuer jeden kuenftigen Start.
+
+    Beides gehoert zusammen: die Datei allein haelt nur, solange der
+    Spielprozess sie laesst (gemessen auf Server 107, wo ein ausgefuehrter
+    Vorschlag nach vier Tagen verschwunden war), und der Wunsch allein wirkt
+    erst beim naechsten Start.
+
+    Die Reihenfolge ist nicht beliebig. Erst die Datei, dann der Wunsch: schlaegt
+    das Schreiben fehl, steht kein Wunsch in der Datenbank, der bei jedem Start
+    etwas verspricht, das nie ankam. Andersherum entstuende genau diese
+    Geisterzusage.
+    """
+    pfad = str(rahmen.payload["path"])
+    eintraege = [
+        (str(e["section"]), str(e["key"]), str(e["value"]))
+        for e in rahmen.payload["entries"]
+    ]
+    # Ein serverbezogenes Werkzeug ohne Server ist ein Programmierfehler, kein
+    # Benutzerfehler — `_resolve_server` hat ihn beim Anlegen laengst gesetzt.
+    if rahmen.server_id is None:
+        raise AiActionStateError("AI_ACTION_INVALID")
+    server_id = rahmen.server_id
+
+    if rahmen.expected_revision is None:
+        alt = ""
+    else:
+        alt = str(
+            read_server_text(db, server_id=server_id, relative_path=pfad)["content"]
+        )
+    neu = alt
+    for sektion, schluessel, wert in eintraege:
+        neu = ini_setzen(neu, sektion, schluessel, wert)
+
+    result = write_server_text(
+        db,
+        user=rahmen.active_user,
+        server_id=server_id,
+        relative_path=pfad,
+        content=neu,
+        expected_revision=rahmen.expected_revision,
+        create_only=rahmen.expected_revision is None,
+    )
+
+    server = db.get(Server, server_id)
+    if server is not None:
+        server.config_wishes_json = server_config_wishes.setze(
+            server.config_wishes_json, datei=pfad, eintraege=eintraege
+        )
+        db.flush()
+
+    # Nachweis statt Behauptung: `write_server_text` meldet Erfolg, sobald der
+    # Schreibaufruf durchlief. Wo ein fremder Prozess dieselbe Datei besitzt,
+    # ist das keine Aussage ueber ihren Inhalt. Einmal zuruecklesen kostet einen
+    # Lesevorgang und erspart dem Benutzer das Nachsehen im Dateimanager, das er
+    # sich bisher nicht sparen konnte.
+    try:
+        nachher = read_server_text(db, server_id=server_id, relative_path=pfad)
+        inhalt = str(nachher["content"])
+        result = dict(result)
+        result["verifiziert"] = all(
+            f"{schluessel}={wert}" in inhalt for _, schluessel, wert in eintraege
+        )
+    except HTTPException:
+        result = dict(result)
+        result["verifiziert"] = False
+    return _Ausgefuehrt(result=result)
+
+
 def _ausfuehren_bind_ip_update(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     result = _execute_bind_ip_update(
         db, server_id=rahmen.server_id, payload=rahmen.payload
@@ -2941,6 +3139,7 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_server_delete": _ausfuehren_server_delete,
     "propose_config_update": _ausfuehren_config_update,
     "propose_config_patch": _ausfuehren_config_patch,
+    "propose_config_set": _ausfuehren_config_set,
     "propose_bind_ip_update": _ausfuehren_bind_ip_update,
     "propose_mod_install": _ausfuehren_mod_install,
     "propose_server_repair": _ausfuehren_server_repair,

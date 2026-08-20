@@ -229,6 +229,11 @@ def _argumente(server: Server, werkzeug: str) -> dict:
             "expected_revision": content_revision(datei.read_bytes()),
             "edits": [{"find": "port=2302", "replace": "port=2402"}],
         },
+        "propose_config_set": {
+            "path": "server.cfg",
+            "expected_revision": content_revision(datei.read_bytes()),
+            "entries": [{"section": "Server", "key": "maxPlayers", "value": "40"}],
+        },
         "propose_file_delete": {"path": "server.cfg"},
         "propose_server_repair": {"action": "repair_permissions"},
         "propose_mod_install": {"workshop_id": "1559212036", "action": "install"},
