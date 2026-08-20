@@ -99,6 +99,8 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
   return `${hour}:${minute}`
 })
 
+const INTERVAL_OPTIONS = [1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168]
+
 /**
  * Die Aufgabenliste: stehende Aufträge sehen, anlegen, ändern, pausieren,
  * löschen — dieselben Dienstfunktionen, durch die auch die KI geht. Alles,
@@ -126,6 +128,15 @@ export function AufgabenAnsicht() {
       label: option,
     }))
   }, [formular?.time_of_day])
+
+  const intervallOptionen = useMemo(() => {
+    const custom = formular?.interval_hours ?? 24
+    const werte = [...new Set([...INTERVAL_OPTIONS, custom])].sort((a, b) => a - b)
+    return werte.map((stunden) => ({
+      value: String(stunden),
+      label: t('ai.tasks.planInterval', { count: stunden }),
+    }))
+  }, [formular?.interval_hours, t])
 
   const laden = useCallback(async () => {
     const liste = await aiApi.listTasks()
@@ -393,15 +404,13 @@ export function AufgabenAnsicht() {
                     >
                       {t('ai.tasks.intervalHours')}
                     </label>
-                    <input
+                    <Dropdown
                       id="aufgabe-intervall"
-                      type="number"
-                      min={1}
-                      max={168}
-                      className="msm-input max-w-40"
-                      value={formular.interval_hours}
-                      onChange={(event) => setze('interval_hours', Number(event.target.value))}
-                      required
+                      value={String(formular.interval_hours)}
+                      onChange={(wert) => setze('interval_hours', Number(wert) || 1)}
+                      options={intervallOptionen}
+                      className="max-w-60"
+                      aria-label={t('ai.tasks.intervalHours')}
                     />
                   </div>
                 )}

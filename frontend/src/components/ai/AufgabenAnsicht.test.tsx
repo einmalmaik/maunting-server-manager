@@ -121,6 +121,38 @@ describe('AufgabenAnsicht', () => {
     })
   })
 
+  it('legt eine Intervall-Aufgabe über das Dropdown-Menü an', async () => {
+    zeichnen()
+    await waitFor(() => expect(aiApi.listTasks).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: /Neue Aufgabe/ }))
+    fireEvent.change(screen.getByLabelText(i18n.t('ai.tasks.name')), {
+      target: { value: 'Stündliche Logs' },
+    })
+    fireEvent.change(screen.getByLabelText(i18n.t('ai.tasks.prompt')), {
+      target: { value: 'Logs prüfen' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.tasks.planKindInterval') }))
+    const intervallButton = screen.getByRole('button', { name: i18n.t('ai.tasks.intervalHours') })
+    fireEvent.click(intervallButton)
+    fireEvent.click(await screen.findByRole('option', { name: i18n.t('ai.tasks.planInterval', { count: 6 }) }))
+    fireEvent.change(screen.getByLabelText(i18n.t('ai.tasks.timezone')), {
+      target: { value: 'Europe/Berlin' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.tasks.create') }))
+
+    await waitFor(() => expect(aiApi.createTask).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(aiApi.createTask).mock.calls[0][0]).toEqual({
+      title: 'Stündliche Logs',
+      instruction: 'Logs prüfen',
+      kind: 'report',
+      channel: 'chat',
+      timezone: 'Europe/Berlin',
+      plan_kind: 'interval',
+      interval_hours: 6,
+    })
+  })
+
   it('pausiert mit einer Teilangabe statt den ganzen Plan zu schicken', async () => {
     // Das Backend fasst nur an, was genannt ist (`exclude_unset`). Schickte
     // der Schalter das ganze Formular mit, würde jeder Klick den Plan neu
