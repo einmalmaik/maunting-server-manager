@@ -2469,3 +2469,52 @@ def test_set_verlangt_schreibrecht(
 
     assert db.query(AiActionProposal).count() == 0
     assert datei.read_bytes() == b"[ServerSettings]\r\n"
+
+
+def test_auch_eine_teilaenderung_ist_dauerhaft(
+    db: Session, owner_user: User, tmp_path: Path
+) -> None:
+    """Bestaendigkeit haengt nicht am gewaehlten Werkzeug.
+
+    Ohne das waere derselbe Wert per `propose_config_set` dauerhaft und per
+    `propose_config_patch` nicht — ein Unterschied, den kein Benutzer sehen
+    kann und den niemand erklaeren koennte. Gerade XML- und JSON-Konfigurationen
+    laufen ueber den Patch, und auch die schreiben manche Spiele beim Start
+    zurueck.
+    """
+    from services import server_config_wishes
+
+    server = _server(db, owner_user, tmp_path)
+    conversation = _conversation(db, owner_user, server)
+    datei = Path(server.install_dir) / "buffs.xml"
+    original = '<buffs>\n  <buff name="xp" value="1.0"/>\n</buffs>\n'
+    datei.write_text(original, encoding="utf-8")
+
+    proposal = _patch(
+        db, owner_user, conversation, server,
+        path="buffs.xml",
+        expected_revision=content_revision(datei.read_bytes()),
+        edits=[{
+            "find": '<buff name="xp" value="1.0"/>',
+            "replace": '<buff name="xp" value="3.0"/>',
+        }],
+    )
+    db.commit()
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=owner_user
+    )
+    ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal.id, user=owner_user, confirmation_token=token
+    )
+    db.refresh(server)
+
+    assert '<buff name="xp" value="3.0"/>' in datei.read_text(encoding="utf-8")
+
+    gemerkt = server_config_wishes.lese(server.config_wishes_json)
+    assert len(gemerkt) == 1
+    assert gemerkt[0].art == "text"
+
+    # Das Spiel schreibt beim Start zurueck — der naechste Start stellt her.
+    datei.write_text(original, encoding="utf-8")
+    server_config_wishes.wuensche_durchsetzen(server)
+    assert '<buff name="xp" value="3.0"/>' in datei.read_text(encoding="utf-8")

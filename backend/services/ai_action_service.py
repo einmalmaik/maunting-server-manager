@@ -189,10 +189,7 @@ def _global_tool_definitions() -> list[dict]:
             "web_search",
             "Sucht im Web. Fuer aktuelle Informationen, die nicht aus dem "
             "Panel kommen — Fehlermeldungen, Modkompatibilitaet, "
-            "Spielversionen. Liefert Titel, Adresse und Kurztext. **Geht es um "
-            "einen bestimmten Server, gib `server_id` mit**: bei selbst "
-            "importierten Vorlagen wird dann nicht gesucht, sondern nachgefragt "
-            "— was dort laeuft, steht in keiner oeffentlichen Dokumentation.",
+            "Spielversionen. Liefert Titel, Adresse und Kurztext.",
             {
                 "query": {"type": "string", "maxLength": 200},
                 "count": {"type": "integer", "minimum": 1, "maximum": MAX_RESULTS},

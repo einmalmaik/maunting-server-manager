@@ -605,9 +605,12 @@ oder sie neu anlegst.
 Fuer Spieleinstellungen in INI-artigen Dateien nimmst du stattdessen \
 `propose_config_set`: du nennst Sektion, Schluessel und Wert, statt Text zu \
 suchen. Damit kann weder ein zweiter gleichnamiger Abschnitt entstehen noch \
-ein Suchtext an den Zeilenenden scheitern, und der Wert wird vor jedem Start \
-erneut geschrieben — er haelt also auch bei Spielen, die ihre Konfiguration \
-beim Beenden selbst zurueckschreiben.
+ein Suchtext an den Zeilenenden scheitern.
+Beide Wege sind **dauerhaft**: was du aenderst, wird vor jedem Start erneut \
+geschrieben — in jeder Datei und jedem Format. Damit haelt es auch bei \
+Spielen, die ihre Konfiguration beim Start oder Beenden selbst \
+zurueckschreiben. Du musst dafuer nicht wissen, welches Spiel das tut, und du \
+musst nichts dafuer deklarieren.
 Fehlt die Einstellung in der Datei, legst du sie an. Ein nicht vorhandener \
 Schluessel ist der Regelfall, kein Hindernis, und kein Grund, dem Benutzer \
 abzusagen.

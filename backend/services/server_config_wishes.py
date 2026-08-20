@@ -21,15 +21,29 @@ Fehler; er laesst nur irgendwann wieder eine Aenderung verschwinden, und
 niemand sieht den Zusammenhang. MSM soll ausserdem perspektivisch mehr als
 Spielserver verwalten — was eine Aufzaehlung braucht, waechst nicht mit.
 
-**Der Weg stattdessen:** Der gewuenschte Wert wird hier gespeichert und vor
-jedem Start in die Datei geschrieben (``games/base.py``). Ob das Spiel
-zurueckschreibt, muss dann niemand wissen: beim naechsten Start steht der Wert
-wieder da. Das Verfahren ist dasselbe wie bei ``guardian_overrides_json`` —
-eine Handvoll Skalare, die **nach** der Blueprint-Ableitung darueberliegen.
+**Und warum es fuer jedes Dateiformat gilt.** Eine erste Fassung nahm nur
+INI-artige Dateien an. Das war dieselbe Sorte Einschraenkung eine Ebene tiefer:
+Spiele schreiben auch XML, JSON, YAML und Properties beim Start zurueck, und wer
+die Endungsliste pflegen muss, vergisst sie. Deshalb entscheidet hier nicht das
+Format, sondern der **Anker**:
+
+* ``ini`` — Sektion und Schluessel. Der staerkere Anker, weil er unabhaengig
+  vom aktuellen Wert trifft: egal was das Spiel hineingeschrieben hat, der
+  Schluessel wird gefunden und gesetzt.
+* ``text`` — ein exakter Textausschnitt, der genau einmal vorkommt, und der
+  Text, der stattdessen dastehen soll. Funktioniert in **jedem** Textformat,
+  weil er nichts ueber die Struktur annimmt.
+
+Der Weg stattdessen: Der gewuenschte Wert wird hier gespeichert und vor jedem
+Start in die Datei geschrieben (``games/base.py``). Das Verfahren ist dasselbe
+wie bei ``guardian_overrides_json`` — eine Handvoll Skalare, die **nach** der
+Blueprint-Ableitung darueberliegen. Die Blueprints selbst deklarieren dafuer
+nichts: der Wunsch haengt am Server, nicht an der Vorlage.
 """
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,30 +63,50 @@ MAX_WUENSCHE = 64
 
 MAX_PFAD_CHARS = 256
 
-#: Der Durchsetzer beim Start kann heute INI. Ein Wunsch fuer eine andere
-#: Formatfamilie waere ein Versprechen, das beim Start still gebrochen wird —
-#: deshalb wird er hier abgewiesen statt spaeter ignoriert.
-INI_ENDUNGEN = (".ini", ".cfg", ".conf")
+#: Laenge eines Textankers. Grosszuegig genug fuer ein umschliessendes
+#: XML-Element, klein genug, dass der Speicher nicht zur zweiten Kopie der
+#: Datei wird.
+MAX_ANKER_CHARS = 2000
+
+ART_INI = "ini"
+ART_TEXT = "text"
 
 
 @dataclass(frozen=True)
 class Wunsch:
-    """Ein Wert, der nach jedem Start dastehen soll."""
+    """Ein Wert, der nach jedem Start dastehen soll.
+
+    Ein Diskriminator statt zweier Klassen, weil genau diese Form schon durch
+    das Panel reist: ``runtime.configPatches`` eines Blueprints hat dieselbe
+    Gestalt (``type``, ``section``, ``key``, ``regex``, ``value``). Ein Wunsch
+    unterscheidet sich davon nur in der Reichweite — ein Server statt aller
+    Server eines Spiels.
+    """
 
     datei: str
-    sektion: str
-    schluessel: str
-    wert: str
+    art: str = ART_INI
+    sektion: str = ""
+    schluessel: str = ""
+    wert: str = ""
+    finde: str = ""
+    setze: str = ""
 
-    def kennung(self) -> tuple[str, str, str]:
+    def kennung(self) -> tuple[str, ...]:
         """Was denselben Wunsch ausmacht.
 
-        Schreibweisenunabhaengig, weil ASA seine Sektionen klein schreibt und
-        die Dokumentation gross. Ohne das entstuenden zwei Wuensche fuer
-        denselben Wert, und beim Start gewaenne der zufaellig letzte.
+        Bei INI schreibweisenunabhaengig, weil ASA seine Sektionen klein
+        schreibt und die Dokumentation gross. Ohne das entstuenden zwei
+        Wuensche fuer denselben Wert, und beim Start gewaenne der zufaellig
+        letzte.
+
+        Bei Text ist der Anker die Kennung — derselbe Ausschnitt kann nur
+        einmal ein Ziel haben.
         """
+        if self.art == ART_TEXT:
+            return (self.datei.casefold(), ART_TEXT, self.finde)
         return (
             self.datei.casefold(),
+            ART_INI,
             self.sektion.casefold(),
             self.schluessel.casefold(),
         )
@@ -86,6 +120,9 @@ def _pruefe_pfad(datei: str) -> str:
     laeuft spaeter erneut durch die echte Pfadpruefung — das hier ist die
     fruehe Absage, damit ein unmoeglicher Wunsch gar nicht erst in der
     Datenbank landet.
+
+    **Keine Endungspruefung.** Welches Format eine Datei hat, entscheidet
+    nicht, ob ihr Inhalt dauerhaft sein darf — das entscheidet der Anker.
     """
     if not isinstance(datei, str) or not datei.strip():
         raise AiActionValidationError("Der Dateipfad fehlt")
@@ -96,15 +133,24 @@ def _pruefe_pfad(datei: str) -> str:
         raise AiActionValidationError("Ungueltiger relativer Dateipfad")
     if "\x00" in datei:
         raise AiActionValidationError("Ungueltiger relativer Dateipfad")
-    if not datei.lower().endswith(INI_ENDUNGEN):
-        raise AiActionValidationError(
-            "Dauerhafte Werte gibt es zurzeit nur fuer INI-artige Dateien "
-            f"({', '.join(INI_ENDUNGEN)}). Andere Formate aenderst du direkt."
-        )
     return datei
 
 
-def _pruefe_eintrag(sektion: str, schluessel: str, wert: str) -> tuple[str, str, str]:
+def _pruefe_geheimnis(probe: str) -> None:
+    """Dieselbe Grenze wie bei ``apply_edits`` und ``ini_setzen``.
+
+    Ohne sie waere der Wunschspeicher der Umweg um eine bestehende Invariante:
+    ein Passwort, das ``propose_config_patch`` abweist, laege hier dauerhaft in
+    der Datenbank und wuerde bei jedem Start neu geschrieben.
+    """
+    if redact_sensitive_text(probe) != probe:
+        raise AiActionValidationError(
+            "Der Eintrag enthaelt moegliche Zugangsdaten und wird abgewiesen. "
+            "Passwortfelder traegt der Benutzer selbst im Dateimanager ein."
+        )
+
+
+def _pruefe_ini(sektion: str, schluessel: str, wert: str) -> tuple[str, str, str]:
     for name, roh, grenze, verboten in (
         ("Die Sektion", sektion, MAX_SEKTION_CHARS, "[]\r\n"),
         ("Der Schluessel", schluessel, MAX_SCHLUESSEL_CHARS, "=[]\r\n"),
@@ -121,17 +167,28 @@ def _pruefe_eintrag(sektion: str, schluessel: str, wert: str) -> tuple[str, str,
         raise AiActionValidationError("Der Wert ist zu lang")
     if any(z in wert for z in "\r\n"):
         raise AiActionValidationError("Der Wert enthaelt einen Zeilenumbruch")
-
-    # Ohne diese Grenze waere der Wunschspeicher der Umweg um eine bestehende
-    # Invariante: ein Passwort, das `propose_config_patch` abweist, laege hier
-    # dauerhaft in der Datenbank und wuerde bei jedem Start neu geschrieben.
-    probe = f"{schluessel}={wert}"
-    if redact_sensitive_text(probe) != probe:
-        raise AiActionValidationError(
-            "Der Eintrag enthaelt moegliche Zugangsdaten und wird abgewiesen. "
-            "Passwortfelder traegt der Benutzer selbst im Dateimanager ein."
-        )
+    _pruefe_geheimnis(f"{schluessel}={wert}")
     return sektion.strip(), schluessel.strip(), wert
+
+
+def _pruefe_text(finde: str, setze: str) -> tuple[str, str]:
+    """Anker und Ziel eines Textwunsches.
+
+    Der Anker darf leer werden wollen (``setze=""`` loescht die Stelle), der
+    Anker selbst nie: ein leerer Suchtext kommt unendlich oft vor.
+    """
+    if not isinstance(finde, str) or not finde:
+        raise AiActionValidationError("Der Suchtext fehlt")
+    if not isinstance(setze, str):
+        raise AiActionValidationError("Der Ersatztext fehlt")
+    for name, roh in (("Der Suchtext", finde), ("Der Ersatztext", setze)):
+        if len(roh) > MAX_ANKER_CHARS:
+            raise AiActionValidationError(f"{name} ist zu lang (max. {MAX_ANKER_CHARS})")
+        if "\x00" in roh:
+            raise AiActionValidationError(f"{name} enthaelt ein unzulaessiges Zeichen")
+    _pruefe_geheimnis(finde)
+    _pruefe_geheimnis(setze)
+    return finde, setze
 
 
 def lese(roh: str | None) -> list[Wunsch]:
@@ -154,29 +211,71 @@ def lese(roh: str | None) -> list[Wunsch]:
         if not isinstance(eintrag, dict):
             continue
         datei = eintrag.get("datei")
+        if not isinstance(datei, str) or not datei:
+            continue
+        # Ohne `art` ist es ein Eintrag aus der ersten Fassung: die kannte nur
+        # INI. Kein Migrationsschritt noetig, kein Datenverlust.
+        art = eintrag.get("art", ART_INI)
+        if art == ART_TEXT:
+            finde = eintrag.get("finde")
+            setze = eintrag.get("setze")
+            if not isinstance(finde, str) or not finde:
+                continue
+            if not isinstance(setze, str):
+                continue
+            ergebnis.append(Wunsch(datei=datei, art=ART_TEXT, finde=finde, setze=setze))
+            continue
         sektion = eintrag.get("sektion")
         schluessel = eintrag.get("schluessel")
         wert = eintrag.get("wert")
-        if not isinstance(datei, str) or not datei:
-            continue
         if not isinstance(sektion, str) or not sektion:
             continue
         if not isinstance(schluessel, str) or not schluessel:
             continue
         if not isinstance(wert, str):
             continue
-        ergebnis.append(Wunsch(datei=datei, sektion=sektion, schluessel=schluessel, wert=wert))
+        ergebnis.append(Wunsch(
+            datei=datei, art=ART_INI, sektion=sektion, schluessel=schluessel, wert=wert
+        ))
     return ergebnis
 
 
 def _schreibe(wuensche: list[Wunsch]) -> str:
-    return json.dumps(
-        [
-            {"datei": w.datei, "sektion": w.sektion, "schluessel": w.schluessel, "wert": w.wert}
-            for w in wuensche
-        ],
-        ensure_ascii=False,
-    )
+    daten: list[dict] = []
+    for w in wuensche:
+        if w.art == ART_TEXT:
+            daten.append({"datei": w.datei, "art": ART_TEXT, "finde": w.finde, "setze": w.setze})
+        else:
+            daten.append({
+                "datei": w.datei, "art": ART_INI,
+                "sektion": w.sektion, "schluessel": w.schluessel, "wert": w.wert,
+            })
+    return json.dumps(daten, ensure_ascii=False)
+
+
+def _einfuegen(vorhanden: list[Wunsch], neu: Wunsch) -> None:
+    """Ersetzt einen gleichen Wunsch, sonst anhaengen — mit Ablaufkette.
+
+    Die Kette ist der Grund, warum das nicht bloss ein `append` ist: aendert
+    jemand denselben Wert zweimal (``1.0`` → ``2.0``, spaeter ``2.0`` → ``3.0``),
+    haetten beide Textwuensche verschiedene Anker und stuenden nebeneinander.
+    Der zweite loest den ersten ab — sein Anker ist genau dessen Ziel.
+    """
+    if neu.art == ART_TEXT:
+        vorhanden[:] = [
+            w for w in vorhanden
+            if not (w.art == ART_TEXT and w.datei == neu.datei and w.setze == neu.finde)
+        ]
+    for i, alt in enumerate(vorhanden):
+        if alt.kennung() == neu.kennung():
+            vorhanden[i] = neu
+            return
+    if len(vorhanden) >= MAX_WUENSCHE:
+        raise AiActionValidationError(
+            f"Hoechstens {MAX_WUENSCHE} dauerhafte Werte je Server. "
+            "Entferne einen bestehenden, bevor du einen neuen anlegst."
+        )
+    vorhanden.append(neu)
 
 
 def setze(
@@ -185,32 +284,53 @@ def setze(
     datei: str,
     eintraege: list[tuple[str, str, str]],
 ) -> str:
-    """Legt Wuensche an oder aktualisiert sie und gibt den neuen Speicher zurueck."""
+    """Legt INI-Wuensche an oder aktualisiert sie (Sektion, Schluessel, Wert)."""
     datei = _pruefe_pfad(datei)
     if not eintraege:
         raise AiActionValidationError("Es fehlt mindestens ein Eintrag")
 
     vorhanden = lese(roh)
     for sektion, schluessel, wert in eintraege:
-        sektion, schluessel, wert = _pruefe_eintrag(sektion, schluessel, wert)
-        neu = Wunsch(datei=datei, sektion=sektion, schluessel=schluessel, wert=wert)
-        for i, alt in enumerate(vorhanden):
-            if alt.kennung() == neu.kennung():
-                vorhanden[i] = neu
-                break
-        else:
-            if len(vorhanden) >= MAX_WUENSCHE:
-                raise AiActionValidationError(
-                    f"Hoechstens {MAX_WUENSCHE} dauerhafte Werte je Server. "
-                    "Entferne einen bestehenden, bevor du einen neuen anlegst."
-                )
-            vorhanden.append(neu)
+        sektion, schluessel, wert = _pruefe_ini(sektion, schluessel, wert)
+        _einfuegen(vorhanden, Wunsch(
+            datei=datei, art=ART_INI, sektion=sektion, schluessel=schluessel, wert=wert
+        ))
     return _schreibe(vorhanden)
 
 
-def entferne(roh: str | None, *, datei: str, sektion: str, schluessel: str) -> str:
+def setze_text(
+    roh: str | None,
+    *,
+    datei: str,
+    ersetzungen: list[tuple[str, str]],
+) -> str:
+    """Legt Textwuensche an oder aktualisiert sie (Suchtext, Ersatztext).
+
+    Der Weg fuer jedes Format, das keine INI ist — XML, JSON, YAML, Properties,
+    Lua, was auch immer. Der Anker macht keine Annahme ueber die Struktur.
+    """
+    datei = _pruefe_pfad(datei)
+    if not ersetzungen:
+        raise AiActionValidationError("Es fehlt mindestens eine Ersetzung")
+
+    vorhanden = lese(roh)
+    for finde, setze_text_ in ersetzungen:
+        finde, setze_text_ = _pruefe_text(finde, setze_text_)
+        _einfuegen(vorhanden, Wunsch(
+            datei=datei, art=ART_TEXT, finde=finde, setze=setze_text_
+        ))
+    return _schreibe(vorhanden)
+
+
+def entferne(roh: str | None, *, datei: str, sektion: str = "", schluessel: str = "",
+             finde: str = "") -> str:
     """Nimmt einen Wunsch heraus. Unbekannt zu sein ist kein Fehler."""
-    ziel = Wunsch(datei=datei, sektion=sektion, schluessel=schluessel, wert="").kennung()
+    if finde:
+        ziel = Wunsch(datei=datei, art=ART_TEXT, finde=finde).kennung()
+    else:
+        ziel = Wunsch(
+            datei=datei, art=ART_INI, sektion=sektion, schluessel=schluessel
+        ).kennung()
     return _schreibe([w for w in lese(roh) if w.kennung() != ziel])
 
 
@@ -231,22 +351,42 @@ def als_patches(wuensche: list[Wunsch]) -> list[dict[str, str | None]]:
     erst Wochen spaeter, dass sein Wert nie ankam.
 
     Statt dafuer einen zweiten Uebertragungsweg zu bauen, reisen die Wuensche
-    als das, was sie ohnehin sind: INI-Patches im vorhandenen
-    ``prepare_runtime``-Kanal, den der Agent seit jeher anwendet. Ein Wunsch
-    unterscheidet sich von einem Blueprint-Patch nur in der Reichweite — ein
-    Server statt aller Server eines Spiels.
+    im vorhandenen ``prepare_runtime``-Kanal, den der Agent seit jeher
+    anwendet: INI-Wuensche als ``ini``-Patch, Textwuensche als ``regex``-Patch.
+
+    **Der Regex kommt nie vom Modell.** ``re.escape`` macht aus dem exakten
+    Suchtext ein literales Muster — damit kann keine Zeichenklasse, kein
+    Quantor und damit auch kein ReDoS entstehen. Im Ersatztext werden
+    Rueckwaertsverweise entschaerft (``\\1``, ``\\g<name>``), indem jeder
+    Backslash verdoppelt wird; sonst koennte ein Wert wie ``C:\\1`` unterwegs
+    zu etwas anderem werden.
+
+    Bekannter Unterschied zum lokalen Weg: ``re.sub`` im Agenten ersetzt
+    **alle** Vorkommen, der lokale Durchsetzer nur ein eindeutiges. Der
+    Suchtext war beim Anlegen eindeutig; wird er es spaeter nicht mehr, faellt
+    die entfernte Node strenger aus als die lokale.
     """
-    return [
-        {
-            "type": "ini",
-            "file": w.datei,
-            "section": w.sektion,
-            "key": w.schluessel,
-            "regex": None,
-            "value": w.wert,
-        }
-        for w in wuensche
-    ]
+    patches: list[dict[str, str | None]] = []
+    for w in wuensche:
+        if w.art == ART_TEXT:
+            patches.append({
+                "type": "regex",
+                "file": w.datei,
+                "section": None,
+                "key": None,
+                "regex": re.escape(w.finde),
+                "value": w.setze.replace("\\", "\\\\"),
+            })
+        else:
+            patches.append({
+                "type": "ini",
+                "file": w.datei,
+                "section": w.sektion,
+                "key": w.schluessel,
+                "regex": None,
+                "value": w.wert,
+            })
+    return patches
 
 
 def _oeffne_sicher(basis: Path, relativ: str) -> Path:
@@ -269,6 +409,35 @@ def _oeffne_sicher(basis: Path, relativ: str) -> Path:
     return ziel
 
 
+def _text_anwenden(inhalt: str, wunsch: Wunsch) -> tuple[str, str | None]:
+    """Setzt einen Textwunsch durch. Gibt Inhalt und ggf. eine Meldung zurueck.
+
+    Die Reihenfolge der Pruefungen ist die Zusage:
+
+    1. Steht das Ziel schon da, ist nichts zu tun — das ist die Definition von
+       "erfuellt" und macht den Durchsetzer idempotent.
+    2. Sonst muss der Anker **genau einmal** vorkommen. Mehrfach heisst
+       abgewiesen, nicht "die erste Stelle": bei ``value="1"`` in einer
+       XML-Konfiguration traefe das Raten neunundneunzig unbeteiligte Stellen.
+    3. Gar nicht vorhanden heisst: das Spiel hat die Stelle anders
+       umgeschrieben, als wir sie kannten. Dann wird gemeldet statt geraten.
+    """
+    if wunsch.setze and wunsch.setze in inhalt:
+        return inhalt, None
+    treffer = inhalt.count(wunsch.finde)
+    if treffer == 1:
+        return inhalt.replace(wunsch.finde, wunsch.setze, 1), None
+    if treffer == 0:
+        return inhalt, (
+            f"Dauerhafter Wert in {wunsch.datei} nicht gesetzt: die bekannte "
+            "Stelle steht so nicht mehr in der Datei"
+        )
+    return inhalt, (
+        f"Dauerhafter Wert in {wunsch.datei} nicht gesetzt: die Stelle kommt "
+        f"{treffer}-mal vor und ist nicht eindeutig"
+    )
+
+
 def wuensche_durchsetzen(server) -> None:
     """Schreibt die gewuenschten Werte in die Dateien. Laeuft vor jedem Start.
 
@@ -285,7 +454,7 @@ def wuensche_durchsetzen(server) -> None:
     if not roh:
         return
     # Auf einer entfernten Node liegen die Dateien nicht hier. Dort reisen die
-    # Wuensche als INI-Patches im `prepare_runtime`-Kanal (siehe `als_patches`);
+    # Wuensche als Patches im `prepare_runtime`-Kanal (siehe `als_patches`);
     # lokal zu schreiben wuerde nur ein leeres Verzeichnis auf dem Panel-Host
     # anlegen und den echten Fehlschlag verdecken.
     node = getattr(server, "node", None)
@@ -302,9 +471,6 @@ def wuensche_durchsetzen(server) -> None:
         except (ValueError, OSError):
             _melde(server, f"Dauerhafter Wert uebersprungen: {relativ} liegt ausserhalb des Servers")
             continue
-        # Symlinks am Ziel selbst weist `resolve()` oben nicht ab — es folgt
-        # ihnen ja gerade. Ein Link, der *innerhalb* der Basis bleibt, ist
-        # harmlos; einer nach draussen ist schon abgefangen.
         try:
             if ziel.exists():
                 # `newline=""` ist tragend, nicht kosmetisch: ohne das uebersetzt
@@ -323,6 +489,11 @@ def wuensche_durchsetzen(server) -> None:
 
         neu = inhalt
         for wunsch in gruppe:
+            if wunsch.art == ART_TEXT:
+                neu, meldung = _text_anwenden(neu, wunsch)
+                if meldung:
+                    _melde(server, meldung)
+                continue
             try:
                 neu = ini_setzen(neu, wunsch.sektion, wunsch.schluessel, wunsch.wert)
             except AiActionValidationError as fehler:

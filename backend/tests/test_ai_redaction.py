@@ -306,3 +306,60 @@ def test_the_plain_redaction_keeps_addresses() -> None:
     assert redact_sensitive_text("bind_address=93.184.216.34") == (
         "bind_address=93.184.216.34"
     )
+
+
+# ── XML-Formen ────────────────────────────────────────────────────────────
+
+
+def test_die_schwaerzung_kennt_xml_elemente() -> None:
+    """Ein Passwort zwischen Tags ist dasselbe Passwort.
+
+    Die Muster kannten `key=wert`, `"key": "wert"` und `key: wert` — also die
+    INI-, JSON- und YAML-Formen. XML fehlte, und das fiel nicht auf, solange
+    dauerhafte Werte nur fuer INI-artige Dateien moeglich waren.
+
+    Mit dem Schritt auf **jedes** Dateiformat wird daraus eine Luecke: ein
+    Spiel, das seine Zugangsdaten in einer XML-Konfiguration haelt, haette
+    sie ueber den Wunschspeicher im Klartext in die Datenbank bekommen.
+    """
+    for probe in (
+        "<ServerAdminPassword>geheim</ServerAdminPassword>",
+        "<password>geheim</password>",
+        "<rcon_password>geheim</rcon_password>",
+        "<api_key>geheim</api_key>",
+        "<token>geheim</token>",
+    ):
+        assert redact_sensitive_text(probe) != probe, probe
+        assert "geheim" not in redact_sensitive_text(probe), probe
+
+
+def test_die_schwaerzung_kennt_xml_attribute() -> None:
+    """`<property name="password" value="geheim"/>` ist die zweite XML-Form.
+
+    Sie steht so in Minecraft-, Terraria- und diversen UE-Konfigurationen —
+    der Schluessel steht dabei im Wert eines *anderen* Attributs.
+    """
+    for probe in (
+        '<ServerPassword value="geheim"/>',
+        '<property name="password" value="geheim"/>',
+        "<setting key='rcon_password' value='geheim'/>",
+    ):
+        assert redact_sensitive_text(probe) != probe, probe
+        assert "geheim" not in redact_sensitive_text(probe), probe
+
+
+def test_xml_gegenprobe_harmlose_elemente_bleiben() -> None:
+    """Ohne Gegenprobe belegt der Test oben nur, dass etwas geschwaerzt wird.
+
+    `passthrough`, `compass` und `hotkey` enthalten dieselben Buchstabenfolgen
+    und sind keine Zugangsdaten — dieselben Faelle, die auch bei den
+    Zuweisungsformen gelten.
+    """
+    for probe in (
+        "<passthrough>an</passthrough>",
+        "<compass>1</compass>",
+        '<hotkey value="F5"/>',
+        '<buff name="xp" value="2.0"/>',
+        "<maxPlayers>40</maxPlayers>",
+    ):
+        assert redact_sensitive_text(probe) == probe, probe

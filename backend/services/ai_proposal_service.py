@@ -2883,11 +2883,11 @@ def _ausfuehren_config_patch(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausge
     # unter der Dateisperre gegen sie prueft.
     pfad = str(rahmen.payload["path"])
     aktuell = read_server_text(db, server_id=rahmen.server_id, relative_path=pfad)
+    ersetzungen = [
+        (str(e["find"]), str(e["replace"])) for e in rahmen.payload["edits"]
+    ]
     try:
-        neu = apply_edits(
-            str(aktuell["content"]),
-            [(str(e["find"]), str(e["replace"])) for e in rahmen.payload["edits"]],
-        )
+        neu = apply_edits(str(aktuell["content"]), ersetzungen)
     except EditNotApplicable as exc:
         raise AiActionStateError("AI_ACTION_FILE_CHANGED") from exc
     result = write_server_text(
@@ -2898,6 +2898,26 @@ def _ausfuehren_config_patch(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausge
         content=neu,
         expected_revision=rahmen.expected_revision,
     )
+
+    # **Auch eine Teilaenderung ist dauerhaft.** Ohne das haette die
+    # Bestaendigkeit am gewaehlten Werkzeug gehangen: derselbe Wert, per
+    # `propose_config_set` gesetzt, ueberlebt den naechsten Autosave — per
+    # Patch gesetzt nicht. Ein Unterschied, den kein Benutzer sehen kann und
+    # den niemand erklaeren koennte.
+    #
+    # Ein Fehlschlag hier darf die bereits geschriebene Datei nicht
+    # zurueckdrehen: der Wert steht, nur seine Wiederherstellung beim naechsten
+    # Start fehlt. Das ist der schwaechere von zwei Zustaenden, aber ein
+    # ehrlicher — und der Grund steht im Konsolenlog.
+    server = db.get(Server, rahmen.server_id) if rahmen.server_id else None
+    if server is not None:
+        try:
+            server.config_wishes_json = server_config_wishes.setze_text(
+                server.config_wishes_json, datei=pfad, ersetzungen=ersetzungen
+            )
+            db.flush()
+        except AiActionValidationError as fehler:
+            logger.info("Dauerhafter Wert nicht hinterlegt (%s): %s", pfad, fehler)
     return _Ausgefuehrt(result=result)
 
 

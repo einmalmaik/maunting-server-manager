@@ -457,8 +457,8 @@
       "confirm": {
         "propose_server_lifecycle": "Die Aktion „{{operation}}“ wirkt auf den Serverbetrieb. Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.",
         "propose_backup": "Jetzt ein Server-Backup erstellen? Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.",
-        "propose_config_patch": "Nur die angezeigten Stellen in „{{path}}“ ersetzen? Der übrige Inhalt der Datei bleibt unverändert. Bei zwischenzeitlicher Änderung wird die Ausführung blockiert.",
-        "propose_config_set": "Die angezeigten Einstellungen in „{{path}}“ setzen? Sie werden zusätzlich dauerhaft hinterlegt und vor jedem Start erneut geschrieben — auch wenn das Spiel seine Konfiguration selbst zurückschreibt. Wirksam mit dem nächsten Neustart.",
+        "propose_config_patch": "Nur die angezeigten Stellen in „{{path}}“ ersetzen? Der übrige Inhalt der Datei bleibt unverändert. Die Änderung wird dauerhaft hinterlegt und vor jedem Start erneut geschrieben. Bei zwischenzeitlicher Änderung wird die Ausführung blockiert.",
+        "propose_config_set": "Die angezeigten Einstellungen in „{{path}}“ setzen? Sie werden dauerhaft hinterlegt und vor jedem Start erneut geschrieben — auch wenn das Spiel seine Konfiguration selbst zurückschreibt. Wirksam mit dem nächsten Neustart.",
         "propose_config_update": "Die angezeigte Änderung an „{{path}}“ revisionsgebunden schreiben? Bei zwischenzeitlicher Änderung wird die Ausführung blockiert.",
         "propose_mod_install": "Die Mod „{{path}}“ über den vorhandenen Installationspfad einspielen? Der Download läuft im Hintergrund, die Mod wirkt erst nach einem Neustart.",
         "propose_server_create": "Einen neuen Server anlegen? Blueprint, Kapazität, Ports und Rechte werden dabei genauso geprüft wie beim Anlegen über das Panel.",

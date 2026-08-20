@@ -134,6 +134,40 @@ _SECRET_ASSIGNMENT_RE = re.compile(
     # Abweisung beim Merken soll das nicht (siehe dort).
     r"(?(quote)(?P<wq>[^\"'\n]*)[\"']|(?P<wu>[^\s,;]+))"
 )
+
+#: XML-Element: ``<password>geheim</password>``.
+#:
+#: Die Zuweisungsform oben deckt INI (``key=wert``), JSON (``"key": "wert"``)
+#: und YAML (``key: wert``) ab — XML fiel durch, weil dort weder ``=`` noch
+#: ``:`` zwischen Schluessel und Wert steht. Das blieb unbemerkt, solange
+#: dauerhafte Werte nur fuer INI-artige Dateien moeglich waren; mit dem Schritt
+#: auf jedes Dateiformat waere es eine Luecke geworden.
+#:
+#: Der Schluessel kommt aus derselben ``_GEHEIM_KERN``-Liste wie die uebrigen
+#: Muster — ein neues Geheimniswort wird an genau einer Stelle eingetragen und
+#: wirkt in allen Formen.
+_SECRET_XML_ELEMENT_RE = re.compile(
+    r"(?i)"
+    r"(?P<open><\s*(?P<key>[A-Za-z0-9._-]*" + _GEHEIM_KERN + r")\b[^>]*>)"
+    r"(?P<wert>[^<]*)"
+    r"(?P<close></\s*(?P=key)\s*>)"
+)
+
+#: XML-Attribut in zwei Auspraegungen:
+#:   ``<ServerPassword value="geheim"/>``          — Schluessel ist der Tagname
+#:   ``<property name="password" value="geheim"/>`` — Schluessel im Nachbarattribut
+#:
+#: Die zweite Form steht so in Minecraft-, Terraria- und diversen
+#: UE-Konfigurationen. Gesucht wird deshalb nicht nach dem Tag, sondern nach
+#: einem Geheimniswort **irgendwo im Element** vor einem ``value=``.
+_SECRET_XML_ATTRIBUT_RE = re.compile(
+    r"(?i)"
+    r"(?P<vorn><[^>]*?[A-Za-z0-9._-]*" + _GEHEIM_KERN + r"\b[^>]*?"
+    r"\bvalue\s*=\s*)"
+    r"(?P<quote>[\"'])"
+    r"(?P<wert>[^\"']*)"
+    r"(?P=quote)"
+)
 _AUTHORIZATION_BEARER_RE = re.compile(
     r"(?i)\bauthorization\b\s*[:=]\s*bearer\s+[A-Za-z0-9._~+\-/]+=*"
 )
@@ -272,6 +306,22 @@ def _ersetze_zuweisung(match: re.Match[str]) -> str:
     return f"{match.group('key')}{match.group('sep')}{quote}[REDACTED]{quote}"
 
 
+def _ersetze_xml_element(match: re.Match[str]) -> str:
+    """``<password>geheim</password>`` → ``<password>[REDACTED]</password>``.
+
+    Wie bei der Zuweisung bleibt die Form erhalten und nur der Wert geht: der
+    Text geht als Kontext an ein Modell, und eine zerschossene XML-Datei ist
+    dort weniger wert als eine mit geschwaerztem Feld.
+    """
+    return f"{match.group('open')}[REDACTED]{match.group('close')}"
+
+
+def _ersetze_xml_attribut(match: re.Match[str]) -> str:
+    """``<ServerPassword value="geheim"/>`` → ``… value="[REDACTED]"/>``."""
+    quote = match.group("quote")
+    return f"{match.group('vorn')}{quote}[REDACTED]{quote}"
+
+
 def redact_and_count(value: str) -> tuple[str, int]:
     """Wie `redact_sensitive_text`, aber sagt auch, wie oft es zugeschlagen hat.
 
@@ -287,10 +337,14 @@ def redact_and_count(value: str) -> tuple[str, int]:
     text, a = _PRIVATE_KEY_RE.subn("[REDACTED_PRIVATE_KEY]", value)
     text, b = _AUTHORIZATION_BEARER_RE.subn("Authorization=[REDACTED]", text)
     text, c = _SECRET_ASSIGNMENT_RE.subn(_ersetze_zuweisung, text)
+    # Die XML-Formen laufen **nach** der Zuweisung: `<a key="k" value="v"/>`
+    # traefe sonst schon dort zu, und das Ergebnis waere zweimal geschwaerzt.
+    text, g = _SECRET_XML_ELEMENT_RE.subn(_ersetze_xml_element, text)
+    text, h = _SECRET_XML_ATTRIBUT_RE.subn(_ersetze_xml_attribut, text)
     text, d = _BEARER_RE.subn("Bearer [REDACTED]", text)
     text, e = _KNOWN_TOKEN_RE.subn("[REDACTED_TOKEN]", text)
     text, f = _EMAIL_RE.subn("[REDACTED_EMAIL]", text)
-    return text, a + b + c + d + e + f
+    return text, a + b + c + d + e + f + g + h
 
 
 def redact_sensitive_text(value: str) -> str:

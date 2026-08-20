@@ -59,12 +59,16 @@ mit dem nächsten Neustart wirkt, und biete ihn mit `propose_server_lifecycle`
 (`operation: "restart"`) an — aber verlange nicht, dass der Benutzer den Server
 vorher stoppt, und lehne die Änderung nicht deswegen ab.
 
-Manche Spiele — ARK ist das bekannteste — halten ihre Einstellungen im Speicher
-und schreiben die Konfigurationsdatei beim Beenden oder beim Autosave komplett
-neu. Eine Änderung an der Datei allein wäre dort nach kurzer Zeit wieder weg.
-Genau deshalb hinterlegt `propose_config_set` den Wert zusätzlich dauerhaft: er
-wird vor **jedem** Start erneut geschrieben. Du musst dafür nicht wissen, wie
-das jeweilige Spiel damit umgeht.
+Manche Spiele halten ihre Einstellungen im Speicher und schreiben die
+Konfigurationsdatei beim Beenden oder beim Start wieder auf den alten Stand —
+ARK ist das bekannteste Beispiel, aber es betrifft ebenso XML- und
+JSON-Konfigurationen anderer Titel. Eine Änderung an der Datei allein wäre dort
+nach kurzer Zeit wieder weg.
+
+Darum merkt MSM sich jede Änderung, die du machst, und schreibt sie vor **jedem**
+Start erneut — in jeder Datei und jedem Format, ganz gleich mit welchem der
+beiden Werkzeuge du sie gesetzt hast. Du musst dafür weder wissen, wie das
+jeweilige Spiel damit umgeht, noch irgendetwas deklarieren.
 
 Die einzige Ausnahme ist der Blueprint-Wechsel: der löscht das gesamte
 Serververzeichnis und verlangt einen gestoppten Server. Das ist eine andere
