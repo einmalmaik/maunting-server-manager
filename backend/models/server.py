@@ -72,6 +72,25 @@ class Server(Base):
     # in `blueprint_service` listenwertige Pfade ausschliesst.
     guardian_overrides_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Konfigurationswerte, die **nach jedem Start** dastehen sollen.
+    #
+    # Der Anlass ist gemessen (Server 107, 15.–19.08.2026): ein ausgefuehrter
+    # Konfigurationsvorschlag stand vier Tage spaeter nicht mehr in der Datei.
+    # ARK haelt seine Einstellungen im Speicher und schreibt
+    # `GameUserSettings.ini` beim Autosave vollstaendig neu — was der laufende
+    # Prozess nicht kennt, verwirft er dabei.
+    #
+    # Deshalb merkt sich der Server den *Wunsch*, nicht nur das Ergebnis:
+    # `prepare_runtime` schreibt ihn vor jedem Start erneut in die Datei. Damit
+    # muss niemand wissen, welches Spiel seine Konfiguration zurueckschreibt —
+    # eine Liste dieser Art muesste gepflegt werden und wuerde beim ersten
+    # vergessenen Eintrag still wieder Werte verlieren.
+    #
+    # Aufbau und Grenzen in `services/server_config_wishes.py`; dieselbe
+    # Bauform wie `guardian_overrides_json`: Skalare, die **nach** der
+    # Blueprint-Ableitung darueberliegen.
+    config_wishes_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Auto-Restart
     # WICHTIG: Nur EIN Modus aktiv (Intervall oder feste Zeiten).
     # Die _normalize_server_restart_mode im Router stellt Exklusivitaet sicher.

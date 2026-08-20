@@ -560,6 +560,20 @@ class BlueprintPlugin(GamePlugin):
         node = getattr(server, "node", None)
         if node is not None and not getattr(node, "is_local", False):
             from services.node_client import NodeClient
+            from services import server_config_wishes
+
+            # Die dauerhaften Werte dieses Servers reisen im selben Kanal —
+            # sie sind strukturell dasselbe wie ein Blueprint-Patch, nur fuer
+            # einen Server statt fuer alle seines Spiels. **Hinten angehaengt**,
+            # damit ein Serverwunsch einen Blueprint-Patch ueberschreibt und
+            # nicht umgekehrt; der Agent wendet die Liste der Reihe nach an.
+            #
+            # Ohne das waere `wuensche_durchsetzen` auf einer entfernten Node
+            # ein stiller Fehlschlag: es schreibt lokal, wo die Datei gar nicht
+            # liegt.
+            wuensche = server_config_wishes.lese(
+                getattr(server, "config_wishes_json", None)
+            )
 
             NodeClient.from_node(node).files_prepare_runtime(
                 server.id,
@@ -568,7 +582,7 @@ class BlueprintPlugin(GamePlugin):
                     "required_files": self._blueprint.runtime.requiredFiles,
                     "executable_files": executable_files,
                     "seed_files": resolved_seeds,
-                    "patches": resolved_patches,
+                    "patches": resolved_patches + server_config_wishes.als_patches(wuensche),
                 },
             )
             return

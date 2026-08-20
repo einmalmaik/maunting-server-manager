@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from services import docker_service
+from services import server_config_wishes
 from services.docker_service import PortPublish, VolumeBind
 
 from blueprints.schema import Blueprint, BlueprintModInjection
@@ -1298,6 +1299,21 @@ class GamePlugin(ABC):
                 server.id, f"[MSM] prepare_runtime fehlgeschlagen: {e}\n"
             )
             return {"error": str(e)}
+
+        # Die Werte, die dieser eine Server dauerhaft haben soll — **nach**
+        # prepare_runtime, damit ein Serverwunsch einen Blueprint-Patch
+        # ueberschreiben kann und nicht umgekehrt.
+        #
+        # Der Anlass ist gemessen (Server 107, 15.–19.08.2026): ein
+        # ausgefuehrter Konfigurationsvorschlag stand vier Tage spaeter nicht
+        # mehr in der Datei, weil der laufende Spielprozess sie beim Autosave
+        # vollstaendig neu geschrieben hatte. Seitdem merkt sich der Server den
+        # Wunsch statt nur das Ergebnis, und diese Zeile ist die Stelle, an der
+        # daraus eine Zusage wird.
+        #
+        # Bewusst ohne try/except: die Funktion faengt selbst und meldet in die
+        # Konsole. Ein Zusatzwunsch darf keinen Serverstart verhindern.
+        server_config_wishes.wuensche_durchsetzen(server)
 
         # Rechte NACH prepare_runtime erneut normalisieren, damit neu erstellte
         # Ordner (ensureDirs wie logs/, UserData/) und Seed-Dateien die Rechte
