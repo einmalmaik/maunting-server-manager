@@ -231,6 +231,42 @@ def test_a_key_with_the_wrong_prefix_is_caught_before_the_provider_sees_it(
     assert provider.operator_api_key_hint == "********cdef"
 
 
+def test_a_copied_key_survives_the_whitespace_that_came_with_it(db: Session) -> None:
+    """Ränder weg, Inneres unangetastet.
+
+    Ein Schlüssel wird aus einem Portal kopiert, und dabei kommt regelmässig
+    ein Leerzeichen oder ein Zeilenumbruch mit. Ungetrimmt endete das in der
+    unverständlichsten aller Meldungen: der Anbieter erklärt den Schlüssel für
+    falsch, obwohl der richtige dransteht. Bei einem Kopfzeilenwert wie Azures
+    ``api-key`` ist ein Zeilenumbruch sogar gar keine gültige Anfrage mehr.
+
+    Der Hinweis beweist es mit: er wird aus dem **gespeicherten** Schlüssel
+    gebildet, und ein mitgeschleppter Umbruch stünde sonst darin.
+    """
+    provider = ai_provider_service.create_provider(
+        db, name="Azure", provider_kind="azure_openai", default_model="gpt-5.1",
+        enabled=False, requires_api_key=True,
+        operator_api_key="  Ein-Azure-Schluessel-abcd \n",
+        azure_resource_name="mein-ai-hub",
+    )
+    assert provider.operator_api_key_hint == "********abcd"
+
+    # Ein Schlüssel aus lauter Leerraum ist keiner — und darf keinen
+    # vorhandenen ersetzen.
+    ai_provider_service.update_provider(
+        db, provider, values={}, operator_api_key="   ", clear_operator_api_key=False
+    )
+    assert provider.operator_api_key_hint == "********abcd"
+
+    # Was innen steht, gehört dem Anbieter. MSM hat dazu keine Meinung.
+    ai_provider_service.update_provider(
+        db, provider, values={},
+        operator_api_key="ein schluessel mit leerzeichen",
+        clear_operator_api_key=False,
+    )
+    assert provider.operator_api_key_hint == "********chen"
+
+
 def test_a_parked_provider_cannot_be_reactivated_by_a_mere_checkbox(
     db: Session,
 ) -> None:

@@ -142,21 +142,39 @@ def _assert_kind(kind: str) -> str:
     return normalized
 
 
-def _assert_key_passt(kind: str, api_key: str | None) -> None:
-    """Prüft den Schlüssel gegen das Präfix des Anbieters, falls er eines hat.
+def _assert_key_passt(kind: str, api_key: str | None) -> str | None:
+    """Nimmt den Schlüssel entgegen, säubert ihn und prüft sein Präfix.
 
-    Bewusst nur eine Plausibilitätsprüfung: ein Schlüssel mit falschem Präfix
-    ist mit Sicherheit falsch, einer mit richtigem damit noch lange nicht
-    gültig. Sie erspart dem Betreiber den Umweg über eine Fehlermeldung des
-    Anbieters — der echte Testaufruf bleibt der Beweis.
+    **Die Ränder fallen weg.** Ein Schlüssel wird aus einem Portal kopiert, und
+    dabei kommt regelmässig ein Leerzeichen oder ein Zeilenumbruch mit. Jedes
+    andere Feld hier wird längst getrimmt; dieses war die Ausnahme, und die
+    Folge war die unverständlichste aller Fehlermeldungen: der Anbieter
+    antwortet mit einem 401, das den Schlüssel für falsch erklärt, obwohl der
+    richtige dransteht. Bei Azure wäre es sogar schlimmer als ein 401 — ein
+    Zeilenumbruch in einem Kopfzeilenwert ist gar keine gültige Anfrage mehr.
+
+    Nachsichtig lesen, streng speichern: die Ränder sind ein Tippfehler und
+    kein Angriff, also werden sie entfernt statt abgewiesen. Was **innen**
+    steht, bleibt unangetastet — ein Schlüssel gehört dem Anbieter, und MSM hat
+    keine Meinung über seine Form.
+
+    Die Präfixprüfung ist bewusst nur eine Plausibilitätsprüfung: ein Schlüssel
+    mit falschem Präfix ist mit Sicherheit falsch, einer mit richtigem damit
+    noch lange nicht gültig. Sie erspart dem Betreiber den Umweg über eine
+    Fehlermeldung des Anbieters — der echte Testaufruf bleibt der Beweis.
+
+    Rückgabe ist der zu speichernde Schlüssel, oder ``None`` für „keiner
+    dabei". Ein Schlüssel, der nur aus Leerraum bestand, ist keiner.
     """
-    if not api_key:
-        return
+    schluessel = (api_key or "").strip()
+    if not schluessel:
+        return None
     praefix = ai_provider_registry.anbieter(kind).key_prefix
-    if praefix and not api_key.startswith(praefix):
+    if praefix and not schluessel.startswith(praefix):
         raise AiProviderConfigurationError(
             f"Der Schlüssel dieses Anbieters beginnt mit „{praefix}“"
         )
+    return schluessel
 
 
 #: Woraus eine Stimm-Kennung bestehen darf — dieselbe Menge wie in
@@ -353,7 +371,7 @@ def create_provider(
         worker_model, worker_reasoning_effort, modell
     )
     kind = _assert_kind(provider_kind)
-    _assert_key_passt(kind, operator_api_key)
+    schluessel = _assert_key_passt(kind, operator_api_key)
     ressource = _assert_ressource(
         azure_resource_name,
         # Beim Anlegen gleich verlangt, statt eine Zeile zuzulassen, die
@@ -376,11 +394,11 @@ def create_provider(
     )
     db.add(provider)
     db.flush()
-    if operator_api_key:
+    if schluessel:
         provider.operator_api_key_encrypted = DisClient.encrypt(
-            operator_api_key, aad=_operator_aad(provider.id)
+            schluessel, aad=_operator_aad(provider.id)
         )
-        provider.operator_api_key_hint = _hint(operator_api_key)
+        provider.operator_api_key_hint = _hint(schluessel)
     db.flush()
     return provider
 
@@ -425,7 +443,7 @@ def update_provider(
     if schluessel_verfaellt:
         provider.operator_api_key_encrypted = None
         provider.operator_api_key_hint = None
-    _assert_key_passt(provider.provider_kind, operator_api_key)
+    schluessel = _assert_key_passt(provider.provider_kind, operator_api_key)
     new_name = values["name"].strip() if "name" in values else provider.name
     new_default_model = (values["default_model"] or "").strip() or None if "default_model" in values else provider.default_model
     new_default_voice = _assert_stimme(values["default_voice"]) if "default_voice" in values else provider.default_voice
@@ -485,11 +503,11 @@ def update_provider(
     if clear_operator_api_key:
         provider.operator_api_key_encrypted = None
         provider.operator_api_key_hint = None
-    elif operator_api_key:
+    elif schluessel:
         provider.operator_api_key_encrypted = DisClient.encrypt(
-            operator_api_key, aad=_operator_aad(provider.id)
+            schluessel, aad=_operator_aad(provider.id)
         )
-        provider.operator_api_key_hint = _hint(operator_api_key)
+        provider.operator_api_key_hint = _hint(schluessel)
     db.flush()
     return provider
 
