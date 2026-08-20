@@ -31,7 +31,7 @@ import { AiMemoryNotice } from './AiMemoryNotice'
 // Verlauf zeichnet — zwei Zeichner wären zwei Wahrheiten darüber, wie ein Zug
 // der KI aussieht. Die Schleife hier bleibt: an ihr hängen Bearbeiten und
 // Anhänge, und die gehören nicht in einen Verlauf, den man nur liest.
-import { AiAntwortblase, KEINE_AUFRUFE, mergeEntries } from './AiVerlauf'
+import { AiAntwortblase, formatMessageTime, KEINE_AUFRUFE, mergeEntries } from './AiVerlauf'
 import { WorkerLeiste } from './WorkerLeiste'
 import { useAiLauf } from './useAiLauf'
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
@@ -715,8 +715,8 @@ export function AiChat() {
                         >
                           <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
                         </button>
-                        <div className="max-w-[85%] rounded-2xl rounded-br-md border border-primary/25 bg-primary/10 px-4 py-2.5">
-                          <p className="whitespace-pre-wrap break-words text-sm leading-6 text-on-surface">
+                        <div className="flex max-w-[85%] flex-col items-end rounded-2xl rounded-br-md border border-primary/25 bg-primary/10 px-4 py-2.5">
+                          <p className="w-full whitespace-pre-wrap break-words text-sm leading-6 text-on-surface">
                             {message.content}
                           </p>
                           {/* Die Anhaenge stehen **in** der Nachricht, mit der
@@ -727,6 +727,11 @@ export function AiChat() {
                             anhaenge={anhaengeJeNachricht.get(message.id) ?? []}
                             t={t}
                           />
+                          {message.created_at && (
+                            <span className="mt-1 text-[10px] text-on-surface-variant/70">
+                              {formatMessageTime(message.created_at)}
+                            </span>
+                          )}
                         </div>
                       </>
                     )}

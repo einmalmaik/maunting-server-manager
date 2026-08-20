@@ -895,3 +895,31 @@ async def test_the_tool_catalogue_counts_against_the_same_window(
         "der Anbieter lehnt die Anfrage ab"
     )
     assert gesehen.get("messages"), "Es gingen keine Nachrichten hinaus"
+
+
+def test_message_content_includes_static_timestamp_prefix(db: Session, regular_user: User) -> None:
+    """Nachrichten im Verlauf tragen einen statischen Zeitstempel-Praefix."""
+    conversation = AiConversation(
+        id=str(uuid4()), user_id=regular_user.id, kind="primary", title="Chat"
+    )
+    db.add(conversation)
+    db.commit()
+
+    dt = datetime(2026, 8, 20, 14, 30, 0, tzinfo=timezone.utc)
+    msg = AiMessage(
+        id=str(uuid4()),
+        conversation_id=conversation.id,
+        role="user",
+        content="Mein ARK Server laeuft nicht.",
+        status="complete",
+        created_at=dt,
+    )
+    db.add(msg)
+    db.commit()
+
+    nachrichten = build_provider_messages(db, conversation)
+    user_msgs = [m for m in nachrichten if m.get("role") == "user" and "Mein ARK Server" in m.get("content", "")]
+    assert len(user_msgs) == 1
+    assert user_msgs[0]["content"].startswith("[20.08. 14:30] ")
+    assert "Mein ARK Server laeuft nicht." in user_msgs[0]["content"]
+

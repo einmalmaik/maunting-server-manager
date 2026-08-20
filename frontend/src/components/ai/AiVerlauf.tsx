@@ -54,6 +54,52 @@ function entryTimestamp(entry: Entry): string {
   return ''
 }
 
+/**
+ * Formatiert den Sendezeitpunkt einer Chatnachricht lesbar und kompakt.
+ * - Heute: 14:05
+ * - Gestern: Gestern 14:05
+ * - Älter (gleiches Jahr): 20.08. 14:05
+ * - Anderes Jahr: 20.08.2025 14:05
+ */
+export function formatMessageTime(dateInput: string | Date | undefined | null): string {
+  if (!dateInput) return ''
+  const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput
+  if (isNaN(date.getTime())) return ''
+
+  const now = new Date()
+  const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+  const isToday =
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear()
+
+  if (isToday) {
+    return timeStr
+  }
+
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  const isYesterday =
+    date.getDate() === yesterday.getDate() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getFullYear() === yesterday.getFullYear()
+
+  if (isYesterday) {
+    return `Gestern ${timeStr}`
+  }
+
+  const isSameYear = date.getFullYear() === now.getFullYear()
+  const day = String(date.getDate()).padStart(2, '0')
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+
+  if (isSameYear) {
+    return `${day}.${month}. ${timeStr}`
+  }
+
+  return `${day}.${month}.${date.getFullYear()} ${timeStr}`
+}
+
 /** Ein gezeichneter Block: ein Absatz, ein Denkkasten oder eine Werkzeuggruppe. */
 type Teil =
   | { art: 'text'; inhalt: string }
@@ -208,6 +254,11 @@ export const AiAntwortblase = memo(function AiAntwortblase({
             disabled={busy}
             onAnswer={onAnswer}
           />
+        )}
+        {message.created_at && !isStreaming && (
+          <p className="mt-1 text-[10px] text-on-surface-variant/60">
+            {formatMessageTime(message.created_at)}
+          </p>
         )}
         {message.status === 'failed' && (
           <p className="mt-2 text-xs text-status-error">{t('ai.chat.failed')}</p>
@@ -429,10 +480,15 @@ export function AiVerlauf({ entries, laufendeWerkzeuge, onProposalChange }: {
           // wie eine: sie ist der Anlass, aus dem alles Folgende entstand.
           return (
             <article key={entry.id} className="flex justify-end gap-3">
-              <div className="max-w-[85%] rounded-2xl rounded-br-md border border-primary/25 bg-primary/10 px-4 py-2.5">
-                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-on-surface">
+              <div className="flex max-w-[85%] flex-col items-end rounded-2xl rounded-br-md border border-primary/25 bg-primary/10 px-4 py-2.5">
+                <p className="w-full whitespace-pre-wrap break-words text-sm leading-6 text-on-surface">
                   {message.content}
                 </p>
+                {message.created_at && (
+                  <span className="mt-1 text-[10px] text-on-surface-variant/70">
+                    {formatMessageTime(message.created_at)}
+                  </span>
+                )}
               </div>
               <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-surface-container-high text-on-surface-variant">
                 <User className="h-3.5 w-3.5" aria-hidden="true" />

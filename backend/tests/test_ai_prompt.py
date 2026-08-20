@@ -729,3 +729,22 @@ def test_only_the_one_who_talks_to_the_human_adapts() -> None:
     assert ai_prompt.SPRECHWEISE in ai_prompt.build()
     assert ai_prompt.SPRECHWEISE in ai_prompt.build(rolle="gehirn")
     assert ai_prompt.SPRECHWEISE not in ai_prompt.build(rolle="worker")
+
+
+def test_einzelchat_enthaelt_begruessungsregeln_und_momentaufnahmen_grenze() -> None:
+    """Begruessungen waermen keine alten Themen auf, und Chatstatus ist kein Live-Status."""
+    prompt = ai_prompt.build()
+
+    assert "Gruesst der Benutzer lediglich" in prompt
+    assert "Greife von dir aus keine frueheren Serverprobleme" in prompt
+    assert "veraltete Momentaufnahmen aus der Vergangenheit" in prompt
+    assert "Server koennen in der Zwischenzeit gestartet, gestoppt oder repariert worden sein" in prompt
+
+
+def test_gehirn_darf_keine_serverzustaende_vermuten() -> None:
+    """Das Gehirn hat keine Werkzeuge und darf keinen Laufstatus erfinden."""
+    gehirn = ai_prompt.build(rolle="gehirn")
+
+    assert "Du hast keine Server-Werkzeuge und kennst den aktuellen Live-Status der Server nicht" in gehirn
+    assert "behaupte oder vermute nie von dir aus den Laufstatus eines Servers" in gehirn
+

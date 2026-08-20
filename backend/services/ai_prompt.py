@@ -41,9 +41,23 @@ Formatiere mit Markdown, wenn es die Antwort lesbarer macht."""
 # Der eine Chat behandelt nacheinander unabhaengige Themen. Ohne diesen Hinweis
 # zieht das Modell den Server aus einer frueheren Frage in eine voellig andere
 # weiter.
+#
+# Erweitert am 20.08.2026: Sagt der Benutzer nach einer Pause lediglich "Hallo",
+# griffen kompakte Modelle (wie GPT-5.6-Luna) nach dem Support-Reflex ungefragt
+# alte Serverprobleme aus dem Verlauf auf und behaupteten, der Server laufe
+# nicht. Vergangene Aussagen im Verlauf sind Momentaufnahmen, keine Live-Daten.
 EINZELCHAT = """\
 Dieser Chat laeuft dauerhaft und behandelt nacheinander unabhaengige Themen. \
-Beziehe dich nicht automatisch auf den Server eines frueheren Themas."""
+Beziehe dich nicht automatisch auf den Server eines frueheren Themas. \
+Gruesst der Benutzer lediglich ("Hallo", "Hi", "Moin", "Guten Tag") oder haelt \
+Smalltalk, antworte nur mit einer kurzen, freundlichen Begruessung. Greife von \
+dir aus keine frueheren Serverprobleme, Stoerungen, Fehler oder alten Auftraege \
+aus dem Verlauf auf — warte ab, was der Benutzer dir sagt. \
+Aussagen ueber Server, Stoerungen oder Fehler in frueheren Chatnachrichten sind \
+veraltete Momentaufnahmen aus der Vergangenheit, keine Live-Messungen. Behaupte \
+niemals von dir aus, wie ein Server aktuell laeuft oder ob ein Fehler noch \
+besteht — Server koennen in der Zwischenzeit gestartet, gestoppt oder \
+repariert worden sein."""
 
 
 # Die Regel muss die *Schwelle* nennen, nicht nur die Moeglichkeit. Ein Modell,
@@ -907,7 +921,10 @@ eine Frage, stelle sie dem Benutzer menschlich und gib seine Antwort mit \
 `worker_antwort` an genau diesen Auftrag zurück. "Stopp den Auftrag" heißt \
 `worker_cancel`. Was gerade läuft, steht in der Lage — lies es dort ab, statt \
 zu raten. Erfinde nie Ergebnisse oder Fortschritt: was kein Auftrag gemeldet \
-hat, weißt du nicht."""
+hat, weißt du nicht. Du hast keine Server-Werkzeuge und kennst den aktuellen \
+Live-Status der Server nicht — behaupte oder vermute nie von dir aus den \
+Laufstatus eines Servers. Fragt der Benutzer nach einem Zustand, starte einen \
+Auftrag."""
 
 
 # Das Gegenstück: der Prompt-Anteil des unbeaufsichtigten Arbeiters. Er ersetzt

@@ -345,7 +345,7 @@ def test_what_changes_stands_behind_what_stays(
     # Prozent — und `skill_lernen` rief in null von drei Läufen `learn_skill`,
     # dafür dreimal `list_my_servers`. Das Modell antwortete auf den
     # Betriebszustand statt auf die Frage.
-    assert nachrichten[-1]["content"] == "Und jetzt?"
+    assert "Und jetzt?" in nachrichten[-1]["content"]
     # Direkt davor das Wechselnde, also hinter der gesamten übrigen Historie.
     assert nachrichten[-2]["role"] == "system"
     assert nachrichten[-2]["content"].startswith("Lage (Auskunft des Panels")

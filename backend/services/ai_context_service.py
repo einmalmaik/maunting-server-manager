@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import json
 from typing import Any
 
@@ -288,23 +289,38 @@ def _message_content_for_provider(row: AiMessage) -> str:
     Der Fragetext geht mitsamt den angebotenen Vorschlaegen zurueck: welche
     Auswahl zur Debatte stand, gehoert zum Verstaendnis der Antwort. Ein blosses
     "ja" oder "die erste" ist sonst nicht aufloesbar.
+
+    Jede Nachricht erhaelt einen statischen, absoluten Zeitstempel-Praefix
+    (z. B. `[20.08. 14:30] `). Er ist byte-stabil fuer das Prompt-Caching
+    und gibt dem Modell zusammen mit dem Lageblock den Zeitabstand zwischen
+    den Nachrichten.
     """
     text = row.content or ""
-    if row.role != "assistant" or not row.question_json:
-        return text
-    try:
-        frage = json.loads(row.question_json)
-    except (ValueError, TypeError):
-        # Eine unlesbare Zeile darf den Verlauf nicht sprengen. Ohne den
-        # Fragetext ist der Kontext duenner, aber der Chat laeuft weiter.
-        return text
-    zeilen = [f"Rueckfrage an den Benutzer: {frage.get('question', '')}"]
-    for option in frage.get("options") or []:
-        beschriftung = option.get("label", "")
-        hinweis = option.get("hint")
-        zeilen.append(f"- {beschriftung}" + (f" ({hinweis})" if hinweis else ""))
-    frageblock = "\n".join(zeilen)
-    return f"{text}\n{frageblock}" if text else frageblock
+    if row.role == "assistant" and getattr(row, "question_json", None):
+        try:
+            frage = json.loads(row.question_json)
+            zeilen = [f"Rueckfrage an den Benutzer: {frage.get('question', '')}"]
+            for option in frage.get("options") or []:
+                beschriftung = option.get("label", "")
+                hinweis = option.get("hint")
+                zeilen.append(f"- {beschriftung}" + (f" ({hinweis})" if hinweis else ""))
+            frageblock = "\n".join(zeilen)
+            text = f"{text}\n{frageblock}" if text else frageblock
+        except (ValueError, TypeError):
+            # Eine unlesbare Zeile darf den Verlauf nicht sprengen. Ohne den
+            # Fragetext ist der Kontext duenner, aber der Chat laeuft weiter.
+            pass
+    created_at = getattr(row, "created_at", None)
+    if created_at is not None:
+        if isinstance(created_at, datetime):
+            return f"[{created_at:%d.%m. %H:%M}] {text}"
+        if isinstance(created_at, str) and created_at:
+            try:
+                dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                return f"[{dt:%d.%m. %H:%M}] {text}"
+            except Exception:
+                pass
+    return text
 
 
 def _recent_tool_results(
