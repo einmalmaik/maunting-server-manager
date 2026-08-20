@@ -171,18 +171,24 @@
       "testFailed": "The test failed.",
       "kind": "Provider",
       "kindHint": "Requests go to {{url}}.",
+      "azureResource": "Azure resource name",
+      "azureResourcePlaceholder": "my-ai-hub",
+      "azureResourceHint": "Just the name of your Azure resource, not a full address. MSM will talk to {{url}}. Letters, digits and hyphens only (2 to 63 characters).",
+      "azureResourceMissing": "Without a resource name this access has no address.",
       "keyLink": "Create a key",
       "kindMissing": "— no supported provider —",
       "kindMissingHint": "This access pointed at an address MSM no longer supports. Pick a provider before enabling it.",
       "modelChoose": "Choose a model …",
       "reloadModels": "Reload models",
       "catalogUnavailable": "The provider's model catalog is currently unreachable. You can type the model name by hand meanwhile; reasoning levels stay unknown.",
+      "catalogNone": "Azure does not publish a model list. Enter the name of your deployment — exactly as you created it in Azure.",
       "catalogNeedsKey": "This provider only hands out its model list against the key. Enter the key and save the access — the selection appears here afterwards.",
       "ttsModel": "Speech model",
       "defaultVoice": "Voice",
       "defaultVoiceHint": "The voice ID from your ElevenLabs account — found in the voice library under “Voice ID”. Without it there is no voice mode; MSM does not guess a default, because it would show up on your bill.",
       "protokoll": {
         "chat_completions": "Chat and hearing",
+        "chat_only": "Chat only",
         "tts": "Voice"
       },
       "recommended": "Recommended",
@@ -204,7 +210,7 @@
       "tokenPriceConverted": "Stored as {{amount}} — accounting happens in dollars.",
       "ttsHint": "A voice access. It does not appear in the chat model picker; it reads out what the chat model answers in voice mode. Who may use it is decided by the “Talk to the AI” permission.",
       "transcriptionModel": "Model for speech",
-      "transcriptionModelHint": "Turns speech into text in voice mode, before the default model thinks about it. Left empty, voice mode stays off. Such models do not appear in the dropdown above because they are served through a separate endpoint, which is why this is a text field. On OpenRouter this takes openai/gpt-transcribe, on OpenAI gpt-transcribe or whisper-1. Careful with OpenRouter: that endpoint is paid from your credits and not through your stored bring-your-own key — without credits the access keeps chatting but stops hearing. For that case there is MSM_AI_STT_WEG=chat; you then enter a hearing-capable chat model here instead, such as nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free."
+      "transcriptionModelHint": "Converts speech to text in voice mode (e.g. openai/gpt-transcribe or whisper-1). Left empty, voice mode remains disabled."
     },
     "profile": {
       "title": "AI assistant",

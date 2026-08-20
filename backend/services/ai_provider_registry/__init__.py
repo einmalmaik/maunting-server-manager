@@ -12,13 +12,29 @@ gehört damit MSM und nicht der Eingabe, und mit dem Anbieter steht auch fest, w
 sein Modellkatalog liegt. Aus dem Katalog kommen die Fähigkeiten des gewählten
 Modells — statt sie zu raten oder eine Liste von Hand zu pflegen.
 
+**Mit einer Ausnahme, seit es Azure gibt.** Dort hat jede Ressource ihren
+eigenen Host, und ohne dessen Namen ist der Anbieter nicht erreichbar. Diese
+Anbieter tragen ``ressource_noetig`` und in `base_url` eine **Vorlage** mit
+genau einer Lücke; Schema, Suffix und Pfad bleiben im Programm, der Betreiber
+steuert ein einzelnes DNS-Label bei. Das ist ausdrücklich nicht die Rückkehr
+der freien Basis-URL — was der Unterschied wert ist und welches Restrisiko
+bleibt, steht am Feld `basis.Anbieter.ressource_noetig`. Ein Anbieter ohne
+diese Marke hat weiterhin gar keine Eingabe in seiner Adresse.
+
+Ein Anbieter **ohne Katalog** (``catalog_url=None``) ist die zweite Neuerung
+aus derselben Ecke: bei Azure heisst ein Modell so, wie der Betreiber sein
+Deployment genannt hat, und eine Liste dafür gibt es nicht. Die Fähigkeiten
+kommen dann über `faehigkeiten_aus` aus einem fremden Katalog — oder gar nicht,
+und „gar nicht" heisst wie immer „unbekannt" und nie „klein".
+
 **Die Bauart, und sie ist der eigentliche Inhalt dieser Datei:**
 
 * `basis` — was ein Anbieter ist (`Anbieter`) und was aus seinem Katalog
   herauskommt (`Modell`). Keine Logik, kein Anbietername.
-* Je Anbieter **eine Datei** (`openrouter`, `openai`, `elevenlabs`). Darin sein
-  ``ANBIETER``-Eintrag und sein ``katalog_lesen``. Alles, was MSM über diesen
-  Anbieter weiß, steht dort und nirgends sonst.
+* Je Anbieter **eine Datei** (`openrouter`, `openai`, `elevenlabs`,
+  `azure_openai`, `azure_anthropic`). Darin sein ``ANBIETER``-Eintrag und sein
+  ``katalog_lesen``. Alles, was MSM über diesen Anbieter weiß, steht dort und
+  nirgends sonst.
 * Diese Datei — der Controller. Sie sammelt die Module ein und beantwortet die
   vier Fragen, die der Rest des Programms stellt: *welche gibt es*, *wer ist
   das*, *kennst du den*, *spricht der mein Protokoll*.
@@ -52,7 +68,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from . import elevenlabs, openai, openrouter
+from . import azure_anthropic, azure_openai, elevenlabs, openai, openrouter
 from .basis import Anbieter, Modell, positive_zahl
 
 
@@ -74,7 +90,7 @@ __all__ = [
 #: fällt hier heraus — sonst nichts. Die Reihenfolge ist die Reihenfolge der
 #: Einführung und hat keine Bedeutung; ausgeliefert wird nach Beschriftung
 #: sortiert (`alle`).
-_MODULE = (openrouter, openai, elevenlabs)
+_MODULE = (openrouter, openai, elevenlabs, azure_openai, azure_anthropic)
 
 #: Alle Anbieter, nach ihrem gespeicherten Schlüssel. Gebaut aus den Modulen,
 #: nicht von Hand geführt: eine zweite Liste wäre eine zweite Wahrheit, und die

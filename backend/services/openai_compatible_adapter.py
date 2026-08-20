@@ -144,6 +144,34 @@ class ProviderToolCall:
     arguments: dict
 
 
+def schluesselkopf(
+    spec: ai_provider_registry.Anbieter, api_key: str | None
+) -> dict[str, str]:
+    """Die Kopfzeilen einer Chatanfrage, samt Schluessel im richtigen Kopf.
+
+    Hier stand ein fest verdrahtetes ``Authorization: Bearer`` — in **beiden**
+    Chat-Adaptern, obwohl `Anbieter.schluessel_kopf` und
+    `Anbieter.schluessel_praefix` seit ElevenLabs genau dafuer da sind und
+    `ai_stt_endpunkt` sie laengst benutzt. Zwei Wahrheiten ueber dieselbe Frage,
+    und die falsche haette bei Azure zugeschlagen: dort traegt der
+    Ressourcenschluessel den Kopf ``api-key``, waehrend ``Authorization:
+    Bearer`` bei Claude auf Azure fuer ein Entra-ID-Token reserviert ist. Ein
+    Schluessel im falschen Kopf endet in einem 401, das wie ein falscher
+    Schluessel aussieht und keiner ist.
+
+    Eine gemeinsame Funktion statt derselben zwei Zeilen in drei Adaptern: der
+    naechste Dialekt soll den Kopf nicht erneut erfinden muessen.
+
+    ``Accept: text/event-stream`` steht mit drin, weil alle drei Wege streamen.
+    Ohne Schluessel bleibt der Kopf weg — ob das erlaubt ist, hat der Aufrufer
+    ueber ``provider.requires_api_key`` bereits entschieden.
+    """
+    headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
+    if api_key:
+        headers[spec.schluessel_kopf] = f"{spec.schluessel_praefix}{api_key}"
+    return headers
+
+
 def _ganzzahl(wert: Any) -> int | None:
     """Nimmt eine Zahl aus Fremddaten nur an, wenn sie eine nichtnegative ganze ist.
 
@@ -544,27 +572,51 @@ async def stream_chat_completion(
 
     **Kein SSRF-Pinning mehr.** Hier stand eine Revalidierung des Ziels vor
     jedem Request, samt Festnageln auf die gepruefte IP und eigenem
-    SNI-Hostnamen. Das war noetig, solange die Zieladresse aus einem Formular
-    stammte. Sie kommt jetzt aus `ai_provider_registry`, also aus dem Programm —
-    es gibt keine Eingabe mehr, die auf ein internes Netz zeigen koennte.
+    SNI-Hostnamen. Das war noetig, solange die **ganze** Zieladresse aus einem
+    Formular stammte. Sie kommt jetzt aus `ai_provider_registry`, also aus dem
+    Programm.
+
+    Seit Azure gilt der Satz „es gibt gar keine Eingabe mehr" nicht mehr
+    uneingeschraenkt, und er steht deshalb hier nicht mehr: ein Anbieter mit
+    ``ressource_noetig`` traegt in seiner Adresse eine Luecke, die der
+    Betreiber fuellt. Was er beitraegt, ist ein einzelnes DNS-Label — Schema,
+    Suffix und Pfad bleiben im Programm, und `ai_provider_service.base_url`
+    prueft das Label mit ``re.fullmatch``, bevor es hier ankommt. Der
+    verbleibende Fall — Azure Private Link loest einen gueltigen Namen im VNet
+    auf eine private Adresse auf — ist an
+    `ai_provider_registry.basis.Anbieter.ressource_noetig` benannt.
 
     """
     if provider.requires_api_key and not api_key:
         raise AiProviderRequestError("AI_PROVIDER_KEY_MISSING")
 
-    # **Die Weiche zwischen den beiden Chatwegen.** Sie steht hier und nicht
-    # bei den fuenf Aufrufern: die wollen einen Chatzug, nicht einen Dialekt.
-    # Welchen ein Zugang spricht, sagt seine Anbieterdatei
-    # (`Anbieter.protokoll_chat`) — OpenAI direkt spricht `responses`, weil
-    # sein `/chat/completions` Werkzeuge und Denkstufe nicht zusammen nimmt.
+    # **Die Weiche zwischen den Chatwegen.** Sie steht hier und nicht bei den
+    # fuenf Aufrufern: die wollen einen Chatzug, nicht einen Dialekt. Welchen
+    # ein Zugang spricht, sagt seine Anbieterdatei (`Anbieter.protokoll_chat`)
+    # — OpenAI direkt spricht `responses`, weil sein `/chat/completions`
+    # Werkzeuge und Denkstufe nicht zusammen nimmt; Claude auf Azure spricht
+    # `anthropic_messages`, weil es gar kein `/chat/completions` hat.
     #
-    # Spaeter Import, kein Zyklus: `openai_responses_adapter` holt sich von
-    # hier die Grenzwerte, die Fehlerklasse und die Stueck-Datentypen. Ein
-    # Import am Dateikopf zeigte damit im Kreis.
+    # Gefragt wird **die Anbieterdatei und nie das Modell**. Bei Azure kann
+    # dieselbe Ressource GPT- und Claude-Deployments fuehren, und wie ein
+    # Deployment heisst, entscheidet der Betreiber: aus `model` laesst sich der
+    # Dialekt grundsaetzlich nicht ablesen. Ein `"claude" in model` waere
+    # geraten — und stuende ausgerechnet in der Datei, die keinen einzelnen
+    # Anbieter kennen darf.
+    #
+    # Spaeter Import, kein Zyklus: beide Schwestermodule holen sich von hier
+    # die Grenzwerte, die Fehlerklasse und die Stueck-Datentypen. Ein Import am
+    # Dateikopf zeigte damit im Kreis.
+    from services.anthropic_messages_adapter import spricht_messages, stream_messages
     from services.openai_responses_adapter import spricht_responses, stream_responses
 
-    if spricht_responses(provider):
-        async for stueck in stream_responses(
+    for spricht_er, senden in (
+        (spricht_responses, stream_responses),
+        (spricht_messages, stream_messages),
+    ):
+        if not spricht_er(provider):
+            continue
+        async for stueck in senden(
             client,
             provider=provider,
             api_key=api_key,
@@ -580,9 +632,8 @@ async def stream_chat_completion(
             yield stueck
         return
 
-    headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    spec = ai_provider_registry.anbieter(provider.provider_kind)
+    headers = schluesselkopf(spec, api_key)
     request_body = {
         # ``model`` uebersteuert das Standardmodell des Zugangs. Es gibt genau
         # einen Aufrufer dafuer, und der begruendet den Parameter: das Gehoer
@@ -604,7 +655,7 @@ async def stream_chat_completion(
     # Welche Zusatzfelder dieser Anbieter vertraegt, sagt sein Eintrag — nicht
     # diese Datei. Der Adapter bedient alle; sobald er einen einzelnen beim Namen
     # kennt, sammelt er mit jedem weiteren eine Verzweigung an.
-    erweiterungen = ai_provider_registry.anbieter(provider.provider_kind).anfrage_erweiterungen
+    erweiterungen = spec.anfrage_erweiterungen
     if "reasoning" in erweiterungen:
         # Immer setzen, nie weglassen: "nichts senden" heisst bei einem Anbieter,
         # der das Feld kennt, nicht "aus", sondern "nimm deinen Default" — und

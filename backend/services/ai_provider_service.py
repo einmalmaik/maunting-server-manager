@@ -8,14 +8,33 @@ Zieladresse eine Eingabe, und eine Eingabe, die das Panel zu einem HTTP-Aufruf
 bewegt, ist eine Angriffsfläche.
 
 Seit der Betreiber einen Anbieter aus `ai_provider_registry` **auswählt**,
-stammt die Adresse aus dem Programm. Es gibt keine Eingabe mehr, die auf ein
-internes Netz zeigen könnte, und damit nichts mehr zu verteidigen. Der Apparat
-ist ersatzlos entfallen; `assert_provider_destination` und
-`validate_provider_base_url` gibt es nicht mehr.
+stammt die Adresse aus dem Programm. Der Apparat ist ersatzlos entfallen;
+`assert_provider_destination` und `validate_provider_base_url` gibt es nicht
+mehr.
 
 Das ist der eigentliche Gewinn des Umbaus und nicht nur ein Nebeneffekt: eine
 Schutzmaßnahme, die man löschen kann, weil die Gefahr weg ist, schlägt jede,
 die man pflegen muss.
+
+**Seit Azure stimmt der Satz „es gibt gar keine Eingabe mehr" nicht mehr, und
+er steht deshalb hier nicht mehr.** Bei Azure ist jede Ressource ihr eigener
+Host; ohne dessen Namen ist der Anbieter nicht erreichbar. Was der Betreiber
+beiträgt, ist aber ein **einzelnes DNS-Label** und keine Adresse: Schema,
+Suffix und Pfad stehen als Vorlage in der Anbieterdatei, und `_assert_ressource`
+prüft das Label mit ``re.fullmatch`` gegen die Form eines Labels — kein Punkt,
+kein Schrägstrich, kein Doppelpunkt, kein Zeilenumbruch am Ende.
+
+Die Prüfung steht **hier** und nicht nur im Schema, aus demselben Grund wie bei
+der Stimme weiter unten: nicht jeder Schreibweg führt durch ein Formular. Und
+sie kommt in `base_url()` ein zweites Mal zum Tragen — eine Zeile, die auf
+einem anderen Weg in die Datenbank gelangt ist, darf nicht bis zum HTTP-Aufruf
+durchkommen.
+
+Was damit **nicht** ausgeschlossen ist, steht ausführlich an
+`ai_provider_registry.basis.Anbieter.ressource_noetig`: Azure Private Link
+lenkt einen gültigen Namen innerhalb eines VNet auf eine private Adresse. Eine
+Suffixprüfung beweist über das Ziel nichts; wer das ausschließen will, braucht
+wieder eine Prüfung nach der Namensauflösung.
 """
 
 from __future__ import annotations
@@ -41,8 +60,27 @@ def base_url(provider: AiProvider) -> str:
     gibt. Als gespeicherter Wert wäre sie eine Kopie, die nach einer Änderung
     an der Registry still veraltet: der Anbieter zieht auf einen neuen Pfad um,
     das Programm weiß es, die Datenbank nicht.
+
+    Bei einem Anbieter mit ``ressource_noetig`` ist der Eintrag eine **Vorlage**
+    und die Zeile steuert genau ein DNS-Label bei. Geprüft wird es hier
+    **erneut**, obwohl `create_provider` und `update_provider` es schon getan
+    haben: diese Funktion ist die letzte Station vor dem HTTP-Aufruf, und eine
+    Zeile aus einem Seed, einem Import oder einer Zukunftsversion soll nicht
+    ungeprüft in einen Hostnamen geraten. Ein ungeprüfter Wert in
+    ``httpx.URL`` wirft nämlich **nicht** — er ergibt einen prozentkodierten
+    Host und stirbt erst als DNS-Fehler, an dem niemand die Ursache abliest.
+
+    ``AiProviderConfigurationError``, nicht ``KeyError``: anders als ein
+    unbekannter Anbieter ist ein fehlender Ressourcenname etwas, das der
+    Betreiber selbst beheben kann — und die Router übersetzen diese Klasse
+    bereits in eine 400 mit Text.
     """
-    return ai_provider_registry.anbieter(provider.provider_kind).base_url
+    spec = ai_provider_registry.anbieter(provider.provider_kind)
+    if not spec.ressource_noetig:
+        return spec.base_url
+    return spec.base_url.format(
+        ressource=_assert_ressource(provider.azure_resource_name, pflicht=True)
+    )
 
 
 def spricht(provider: AiProvider, protokoll: str) -> bool:
@@ -165,6 +203,70 @@ def _assert_stimme(stimme: str | None) -> str | None:
     return kennung
 
 
+#: Woraus ein Azure-Ressourcenname bestehen darf — die Form eines **DNS-Labels**
+#: und nicht die eines Azure-Namens, und der Unterschied ist Absicht: der Wert
+#: wird zum ersten Teil eines Hostnamens, nicht zu einem Bezeichner in einem
+#: Portal.
+#:
+#: * Anfang und Ende alphanumerisch. Azure verbietet den abschliessenden
+#:   Bindestrich ausdrücklich; der führende wäre zusätzlich ein
+#:   Argument-Präfix, sobald der Wert je in eine Kommandozeile geriete.
+#: * Mindestens 2 Zeichen, weil Azure kürzere Namen nicht vergibt. Ein
+#:   einzelnes Zeichen wäre ein gültiges DNS-Label und trotzdem mit Sicherheit
+#:   kein Ressourcenname — dieselbe Art Plausibilitätsprüfung wie beim
+#:   Schlüsselpräfix: sie erspart den Umweg über eine Fehlermeldung des
+#:   Anbieters, sie ersetzt sie nicht.
+#: * Höchstens 63 Zeichen. Azure erlaubt 64, ein DNS-Label nicht
+#:   (RFC 1035 §2.3.4) — es gilt die engere Grenze, denn hierhin geht der Wert.
+#: * Kein Punkt, kein Schrägstrich, kein Doppelpunkt: alles drei wären ein
+#:   anderes Ziel und nicht ein anderer Name.
+#:
+#: Geprüft wird mit ``fullmatch`` und **nicht** mit ``match``. Pythons ``$``
+#: passt auch vor einem abschliessenden Zeilenumbruch; ``"meineressource\n"``
+#: käme sonst durch und stünde anschliessend in einem Hostnamen.
+_RESSOURCE_MUSTER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]")
+
+#: Reserviert für Punycode. Passiert das Muster oben mühelos, wird aber von
+#: IDNA-Bibliotheken uneinheitlich behandelt — ein Name, dessen Auflösung von
+#: der Bibliothek abhängt, gehört nicht in einen Hostnamen.
+_PUNYCODE_PRAEFIX = "xn--"
+
+
+def _assert_ressource(name: str | None, *, pflicht: bool = False) -> str | None:
+    """Ein Azure-Ressourcenname von zulässiger Form — oder gar keiner.
+
+    Nachsichtig lesen, streng speichern, wie bei `_assert_stimme` darüber: ein
+    leeres Formularfeld heisst „nichts hinterlegt", Rand-Leerzeichen aus einem
+    Copy-and-paste fallen weg. Alles andere ist streng, denn der Wert wird zu
+    einem Hostnamen und nicht zu einer Beschriftung.
+
+    Ausdrücklich **nicht** kleingeschrieben. DNS ist zwar unempfindlich, aber
+    der Wert steht auch in der Oberfläche, und ein stillschweigend verändertes
+    ``Mein-AI-Hub`` sähe nach einem Fehler aus. Für die Auflösung macht es
+    keinen Unterschied.
+
+    ``pflicht=True`` verlangt einen Namen. Getrennt vom Formatfehler, weil es
+    zwei verschiedene Auskünfte sind: „du hast nichts eingetragen" und „das ist
+    kein Name". Wer beides in eine Meldung wirft, lässt den Betreiber raten.
+    """
+    kennung = (name or "").strip()
+    if not kennung:
+        if pflicht:
+            raise AiProviderConfigurationError(
+                "Dieser Anbieter braucht den Namen deiner Azure-Ressource"
+            )
+        return None
+    if not _RESSOURCE_MUSTER.fullmatch(kennung) or kennung.lower().startswith(
+        _PUNYCODE_PRAEFIX
+    ):
+        raise AiProviderConfigurationError(
+            "Ungültiger Azure-Ressourcenname. Erlaubt sind Buchstaben, Ziffern "
+            "und Bindestriche (2 bis 63 Zeichen, Bindestrich nicht am Rand). "
+            "Trage nur den Namen ein, keine vollständige Adresse."
+        )
+    return kennung
+
+
 def _assert_worker_rolle(
     worker_model: str | None,
     worker_reasoning_effort: str | None,
@@ -230,6 +332,13 @@ def create_provider(
     # erben den Zugang des Gehirns, allein trüge das Modell nichts.
     worker_model: str | None = None,
     worker_reasoning_effort: str | None = None,
+    # Optional: der Name der Azure-Ressource dieses Zugangs. Nur Anbieter mit
+    # ``ressource_noetig`` brauchen ihn; bei allen anderen bleibt er leer und
+    # unbeachtet. Er wird trotzdem **nicht** gegen `provider_kind` geprüft —
+    # dieselbe Begründung wie bei der Stimme: der Anbieter lässt sich später
+    # ändern, und ein stillschweigend gelöschter Name wäre ärgerlicher als ein
+    # ungenutzter.
+    azure_resource_name: str | None = None,
 ) -> AiProvider:
     if not (name or "").strip():
         raise AiProviderConfigurationError("Provider-Name darf nicht leer sein")
@@ -245,6 +354,13 @@ def create_provider(
     )
     kind = _assert_kind(provider_kind)
     _assert_key_passt(kind, operator_api_key)
+    ressource = _assert_ressource(
+        azure_resource_name,
+        # Beim Anlegen gleich verlangt, statt eine Zeile zuzulassen, die
+        # niemand benutzen kann: ohne Namen gibt es für diesen Anbieter keine
+        # Adresse, und der Fehler fiele erst beim ersten Chat auf.
+        pflicht=ai_provider_registry.anbieter(kind).ressource_noetig,
+    )
     provider = AiProvider(
         name=name.strip(),
         provider_kind=kind,
@@ -256,6 +372,7 @@ def create_provider(
         transcription_model=gehoer,
         worker_model=arbeitsmodell,
         worker_reasoning_effort=arbeitsstufe,
+        azure_resource_name=ressource,
     )
     db.add(provider)
     db.flush()
@@ -278,15 +395,34 @@ def update_provider(
 ) -> AiProvider:
     if "name" in values and not str(values["name"] or "").strip():
         raise AiProviderConfigurationError("Provider-Name darf nicht leer sein")
+    # Der gespeicherte Schluessel gehoert zu **einer** Gegenstelle. Wechselt
+    # die, muss er weg: sonst ginge er beim naechsten Test oder Chat an eine
+    # Partei, fuer die er nie ausgestellt wurde. Ein im selben Aufruf
+    # mitgeschickter neuer Schluessel wird unten regulaer gespeichert.
+    #
+    # Zwei Wege fuehren zu einer anderen Gegenstelle, und beide zaehlen:
+    schluessel_verfaellt = False
     if "provider_kind" in values and values["provider_kind"] != provider.provider_kind:
+        # Ein anderer Anbieter. Die Praefixpruefung beim Anlegen verhindert
+        # genau diesen Fall; ohne die Zeile hier waere sie beim Wechsel
+        # wirkungslos.
         provider.provider_kind = _assert_kind(values["provider_kind"])
-        # Der gespeicherte Schluessel gehoert zum **alten** Anbieter. Bliebe er
-        # stehen, ginge er beim naechsten Test oder Chat als ``Authorization``
-        # an den neuen — ein Geheimnis an eine Partei, fuer die es nie
-        # ausgestellt wurde. Die Praefixpruefung beim Anlegen verhindert genau
-        # das; ohne diese Zeile waere sie beim Wechsel wirkungslos. Ein im
-        # selben Aufruf mitgeschickter neuer Schluessel wird unten regulaer
-        # gespeichert.
+        schluessel_verfaellt = True
+    neue_ressource = (
+        _assert_ressource(values["azure_resource_name"])
+        if "azure_resource_name" in values
+        else provider.azure_resource_name
+    )
+    if neue_ressource != provider.azure_resource_name:
+        # **Dieselbe Invariante, zweite Lücke.** Bei Azure ist ein Schluessel an
+        # genau eine Ressource gebunden, und der Namensraum ist global und frei
+        # belegbar. Bliebe der Schluessel beim Wechsel stehen, schickte ein
+        # Tippfehler im Ressourcennamen den Betreiberschluessel an eine fremde
+        # Azure-Ressource — bei gleichbleibendem `provider_kind`, an dem die
+        # Regel darueber nicht anschlaegt.
+        schluessel_verfaellt = True
+    provider.azure_resource_name = neue_ressource
+    if schluessel_verfaellt:
         provider.operator_api_key_encrypted = None
         provider.operator_api_key_hint = None
     _assert_key_passt(provider.provider_kind, operator_api_key)
@@ -329,6 +465,18 @@ def update_provider(
         raise AiProviderConfigurationError(
             "Für diesen Zugang ist kein unterstützter Anbieter hinterlegt. "
             "Wähle einen Anbieter aus, bevor du ihn aktivierst."
+        )
+    # Und dieselbe Regel für die Adresse: ein aktivierter Azure-Zugang ohne
+    # Ressourcennamen hat keine. Ohne diese Prüfung sähe die Zeile
+    # betriebsbereit aus, stünde in der Providerauswahl des Chats und liefe
+    # beim ersten Absenden in einen Fehler aus `base_url()` — weit entfernt von
+    # dem Feld, das leer geblieben ist.
+    if provider.enabled and ai_provider_registry.bekannt(provider.provider_kind):
+        _assert_ressource(
+            provider.azure_resource_name,
+            pflicht=ai_provider_registry.anbieter(
+                provider.provider_kind
+            ).ressource_noetig,
         )
     if "token_price_micro_usd_per_million" in values:
         provider.token_price_micro_usd_per_million = values[

@@ -52,21 +52,42 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ai", tags=["ai-providers"])
 
 
+def _adresse_zum_anzeigen(provider: AiProvider) -> str | None:
+    """Die Adresse dieses Zugangs, oder ``None`` — aber nie ein Fehler.
+
+    ``None`` deckt zwei Fälle ab, und beide sind Zeilen, die der Betreiber
+    **sehen** muss, um sie zu reparieren:
+
+    * Diese Version kennt den Anbieter nicht. Genau solche Zeilen parkt die
+      Migration `20260811_01` mit leerem `provider_kind`.
+    * Der Anbieter braucht einen Ressourcennamen, und in der Zeile steht
+      keiner oder ein unbrauchbarer. Das kann eine halb angelegte Zeile sein
+      oder eine, die auf einem anderen Weg als über das Formular entstanden
+      ist.
+
+    Der zweite Fall ist der Grund für diese Funktion. `base_url()` wirft dort
+    inzwischen — richtig so, denn sie steht unmittelbar vor dem HTTP-Aufruf —,
+    und ein geworfener Fehler beim blossen **Auflisten** hätte die ganze
+    Einstellungsseite mit einer 500 beantwortet: eine unbrauchbare Zeile hätte
+    alle anderen mitgenommen, und ausgerechnet die Seite, auf der man sie
+    korrigiert, wäre nicht mehr erreichbar gewesen.
+    """
+    if not ai_provider_registry.bekannt(provider.provider_kind):
+        return None
+    try:
+        return ai_provider_service.base_url(provider)
+    except AiProviderConfigurationError:
+        return None
+
+
 def _admin_response(provider: AiProvider) -> AiProviderResponse:
     return AiProviderResponse(
         id=provider.id,
         name=provider.name,
         provider_kind=provider.provider_kind,
         # Abgeleitet, nicht gespeichert — eine Kopie in der Zeile wuerde nach
-        # einer Änderung an der Registry still veralten. ``None``, wenn diese
-        # Version den Anbieter nicht kennt: genau solche Zeilen parkt die
-        # Migration mit leerem `provider_kind`, und der Betreiber muss sie
-        # sehen können, um sie umzustellen oder zu löschen.
-        base_url=(
-            ai_provider_service.base_url(provider)
-            if ai_provider_registry.bekannt(provider.provider_kind)
-            else None
-        ),
+        # einer Änderung an der Registry still veralten.
+        base_url=_adresse_zum_anzeigen(provider),
         default_model=provider.default_model,
         # Roh aus der Zeile, ``None`` bleibt ``None``. Hier die Standardstimme
         # einzusetzen wäre bequem und falsch: das Formular zeigte dann eine
@@ -76,6 +97,7 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         transcription_model=provider.transcription_model,
         worker_model=provider.worker_model,
         worker_reasoning_effort=provider.worker_reasoning_effort,
+        azure_resource_name=provider.azure_resource_name,
         enabled=provider.enabled,
         requires_api_key=provider.requires_api_key,
         operator_key_configured=bool(provider.operator_api_key_encrypted),
@@ -349,6 +371,17 @@ def list_provider_kinds(
             key_url=spec.key_url, key_prefix=spec.key_prefix,
             protokoll=spec.protokoll,
             katalog_braucht_schluessel=spec.katalog_braucht_schluessel,
+            ressource_noetig=spec.ressource_noetig,
+            # Aus der Registry abgeleitet und nicht als eigenes Feld dort
+            # gefuehrt: „hat eine Katalogadresse" **ist** die Antwort auf
+            # „fuehrt eine Modelliste". Ein zweites Feld waere eine zweite
+            # Wahrheit, die irgendwann auseinanderliefe.
+            fuehrt_katalog=spec.catalog_url is not None,
+            # Dieselbe Ableitung wie oben und aus demselben Grund: „hat einen
+            # Weg zum Zuhoeren" **ist** die Antwort auf „kann hoeren". Es ist
+            # genau die Bedingung, an der `routers/ai_voice.py` einen Zugang
+            # fuer den Sprachmodus annimmt oder ueberspringt.
+            kann_hoeren=bool(spec.gehoer_wege),
         )
         for spec in ai_provider_registry.alle()
     ]

@@ -171,18 +171,24 @@
       "testFailed": "Der Test ist fehlgeschlagen.",
       "kind": "Anbieter",
       "kindHint": "Anfragen gehen an {{url}}.",
+      "azureResource": "Azure-Ressourcenname",
+      "azureResourcePlaceholder": "mein-ai-hub",
+      "azureResourceHint": "Nur der Name deiner Azure-Ressource, keine vollständige Adresse. MSM spricht damit {{url}} an. Erlaubt sind Buchstaben, Ziffern und Bindestriche (2 bis 63 Zeichen).",
+      "azureResourceMissing": "Ohne Ressourcennamen hat dieser Zugang keine Adresse.",
       "keyLink": "Schlüssel erstellen",
       "kindMissing": "— kein unterstützter Anbieter —",
       "kindMissingHint": "Dieser Zugang zeigte auf eine Adresse, die MSM nicht mehr unterstützt. Wähle einen Anbieter, bevor du ihn aktivierst.",
       "modelChoose": "Modell wählen …",
       "reloadModels": "Modelle neu laden",
       "catalogUnavailable": "Der Modellkatalog des Anbieters ist gerade nicht erreichbar. Du kannst den Modellnamen so lange von Hand eintragen; die Denkstufen bleiben dann unbekannt.",
+      "catalogNone": "Azure führt keine Modelliste. Trage den Namen deines Deployments ein — so, wie du es in Azure angelegt hast.",
       "catalogNeedsKey": "Dieser Anbieter gibt seine Modelliste nur gegen den Schlüssel heraus. Trage den Schlüssel ein und speichere den Zugang — danach steht die Auswahl hier.",
       "ttsModel": "Sprachmodell",
       "defaultVoice": "Stimme",
       "defaultVoiceHint": "Die Stimm-Kennung aus deinem ElevenLabs-Konto — zu finden in der Stimmenbibliothek unter „Voice ID“. Ohne sie gibt es keinen Sprachmodus; eine Standardstimme rät MSM nicht, denn sie stünde auf deiner Rechnung.",
       "protokoll": {
         "chat_completions": "Chat und Gehör",
+        "chat_only": "Nur Chat",
         "tts": "Stimme"
       },
       "recommended": "Empfohlen",
@@ -204,7 +210,7 @@
       "tokenPriceConverted": "Gespeichert wird {{amount}} — gebucht wird in Dollar.",
       "ttsHint": "Ein Stimmzugang. Er erscheint nicht in der Modellauswahl des Chats, sondern liest im Sprachmodus vor, was das Chatmodell antwortet. Wer ihn nutzen darf, entscheidet das Recht „Mit der KI sprechen“.",
       "transcriptionModel": "Modell für Gesprochenes",
-      "transcriptionModelHint": "Wandelt im Sprachmodus Gesprochenes in Text, bevor das Standardmodell darüber nachdenkt. Ohne Eintrag bleibt der Sprachmodus aus. Solche Modelle stehen nicht in der Auswahlliste oben, weil sie über einen eigenen Endpunkt bedient werden; deshalb ist das hier ein Textfeld. Bei OpenRouter gehört openai/gpt-transcribe hinein, bei OpenAI gpt-transcribe oder whisper-1. Achtung bei OpenRouter: dieser Endpunkt wird aus deinem Guthaben bezahlt und nicht über deinen hinterlegten Fremdschlüssel — ohne Guthaben chattet der Zugang weiter und hört nicht mehr. Für diesen Fall gibt es MSM_AI_STT_WEG=chat; dann trägst du hier stattdessen ein hörfähiges Chatmodell ein, etwa nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free."
+      "transcriptionModelHint": "Wandelt im Sprachmodus Gesprochenes in Text um (z. B. openai/gpt-transcribe oder whisper-1). Ohne Eintrag bleibt der Sprachmodus deaktiviert."
     },
     "profile": {
       "title": "KI-Assistent",

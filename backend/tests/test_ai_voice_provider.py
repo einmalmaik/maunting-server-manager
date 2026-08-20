@@ -260,11 +260,25 @@ def test_prewarming_covers_key_bound_catalogs_too(monkeypatch: pytest.MonkeyPatc
     # Gegen die Registry und nicht gegen zwei Namen: „alle" ist die Zusage,
     # und eine Namensliste im Test hiesse, dass ein neuer Anbieter still
     # herausfällt — der schluesselpflichtige `openai` fehlte hier genau so.
-    assert set(angestossen) == set(ai_provider_registry.ANBIETER)
+    #
+    # „Alle **Kataloge**" heisst seit Azure nicht mehr „alle Anbieter": ein
+    # Anbieter ohne ``catalog_url`` hat nichts vorzuwärmen, und ihn anzustossen
+    # ergäbe eine Aufgabe je Start, die sofort mit der leeren Liste
+    # zurückkäme. Die Zusage dieses Tests bleibt davon unberührt — sie lautet
+    # „kein Katalog bleibt aussen vor, weil er einen Schlüssel verlangt" und
+    # nicht „jede Zeile der Registry wird abgefragt".
+    mit_katalog = {
+        kind for kind, spec in ai_provider_registry.ANBIETER.items()
+        if spec.catalog_url is not None
+    }
+    assert set(angestossen) == mit_katalog
     assert any(
         ai_provider_registry.anbieter(kind).katalog_braucht_schluessel
         for kind in angestossen
     ), "Ohne einen schluesselpflichtigen Anbieter prueft dieser Test seinen Namen nicht"
+    assert mit_katalog != set(ai_provider_registry.ANBIETER), (
+        "Ohne einen kataloglosen Anbieter prueft dieser Test die Ausnahme nicht mit"
+    )
 
 
 # ── Die Stimme am Zugang ──────────────────────────────────────────────────

@@ -87,6 +87,52 @@ Stimme = Annotated[str | None, BeforeValidator(_stimme_lesen)]
 #: Eine Modellkennung, oder ``None`` fuer „nichts hinterlegt".
 Modellkennung = Annotated[str | None, BeforeValidator(_modell_lesen)]
 
+#: Woraus ein Azure-Ressourcenname bestehen darf — dieselbe Menge wie in
+#: `services.ai_provider_service`, und aus demselben Grund wie bei der Stimme:
+#: der Wert wird zum ersten Teil eines **Hostnamens**
+#: (``https://{ressource}.services.ai.azure.com/…``). Ein Punkt darin waere eine
+#: andere Domaene, ein Schraegstrich ein Pfad, ein Doppelpunkt ein Port.
+#:
+#: ``fullmatch`` und nicht ``match``: Pythons ``$`` passt auch vor einem
+#: abschliessenden Zeilenumbruch, und ``"meineressource\n"`` gehoert nicht in
+#: einen Hostnamen. 2 bis 63 Zeichen — Azure vergibt keine kuerzeren, und ein
+#: DNS-Label darf nicht laenger sein (RFC 1035 §2.3.4).
+_RESSOURCE_MUSTER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]")
+
+
+def _ressource_lesen(wert: object) -> str | None:
+    """Wie `_stimme_lesen`, aber fuer einen Azure-Ressourcennamen.
+
+    Eigene Funktion und kein gemeinsamer Validator mit der Stimme, obwohl die
+    Muster einander aehneln: eine Stimm-Kennung darf mit einem Bindestrich
+    beginnen, ein DNS-Label nicht, und ein Unterstrich ist umgekehrt in einer
+    Stimm-Kennung erlaubt und in einem Hostnamen nicht. Ein gemeinsames Muster
+    waere fuer beide entweder zu eng oder zu weit.
+
+    Der Vertrag hier verschafft dem Betreiber eine 422 mit Feldbezug statt einer
+    Meldung ohne Ort. Verbindlich prueft der Service — dort laufen auch
+    Schreibwege vorbei, die dieses Formular nie sehen, und dort faellt
+    ausserdem die Entscheidung, ob der Name ueberhaupt **noetig** ist. Das
+    haengt am Anbieter und nicht am Feld, und die Registry hierher zu
+    importieren hiesse, sie an zwei Orten zu befragen.
+    """
+    if wert is None:
+        return None
+    kennung = str(wert).strip()
+    if not kennung:
+        return None
+    if not _RESSOURCE_MUSTER.fullmatch(kennung) or kennung.lower().startswith("xn--"):
+        raise ValueError(
+            "Ungültiger Azure-Ressourcenname. Erlaubt sind Buchstaben, Ziffern "
+            "und Bindestriche (2 bis 63 Zeichen, Bindestrich nicht am Rand). "
+            "Trage nur den Namen ein, keine vollständige Adresse."
+        )
+    return kennung
+
+
+#: Ein Azure-Ressourcenname, oder ``None`` fuer „nichts hinterlegt".
+Ressourcenname = Annotated[str | None, BeforeValidator(_ressource_lesen)]
+
 #: Ein Denkstufenwort, oder ``None`` fuer „nicht nachdenken". Gleiche Lesart
 #: wie die Modellkennung (Rand-Leerzeichen weg, leer heisst nichts), eigener
 #: Name, weil es etwas anderes ist. Ob das Wort eine Stufe aus
@@ -130,6 +176,10 @@ class AiProviderCreate(BaseModel):
     # laufen auch Schreibwege vorbei, die dieses Formular nie sehen.
     worker_model: Modellkennung = Field(default=None, max_length=256)
     worker_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
+    # Der Name der Azure-Ressource. Wie Stimme und Gehoer nicht gegen
+    # `provider_kind` geprueft: **ob** er noetig ist, entscheidet die Registry,
+    # und das tut der Service.
+    azure_resource_name: Ressourcenname = Field(default=None, max_length=64)
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
 
 
@@ -156,6 +206,11 @@ class AiProviderUpdate(BaseModel):
     # durch `model_dump(exclude_unset=True)` im Router.
     worker_model: Modellkennung = Field(default=None, max_length=256)
     worker_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
+    # Wie die Felder darueber: „nicht mitgeschickt" laesst den Namen stehen,
+    # ausdrueckliches ``null`` (bzw. leeres Feld) nimmt ihn zurueck. Der
+    # Unterschied zaehlt hier doppelt — ein geaenderter Ressourcenname loescht
+    # den gespeicherten Schluessel, ein nicht mitgeschickter nicht.
+    azure_resource_name: Ressourcenname = Field(default=None, max_length=64)
     operator_api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
     clear_operator_api_key: bool = False
 
@@ -186,6 +241,12 @@ class AiProviderResponse(BaseModel):
     #: stellt Worker nicht ein.
     worker_model: str | None = None
     worker_reasoning_effort: str | None = None
+    #: Der Azure-Ressourcenname, roh aus der Zeile — wie `default_voice`
+    #: ungeprueft gelesen und aus demselben Grund: eine 500 beim blossen
+    #: Anzeigen waere die schlechteste Art, dem Betreiber einen Formfehler
+    #: mitzuteilen. ``None`` heisst „nichts hinterlegt", und bei jedem Anbieter
+    #: ohne ``ressource_noetig`` ist das der Normalfall.
+    azure_resource_name: str | None = None
     enabled: bool
     requires_api_key: bool
     operator_key_configured: bool
@@ -199,6 +260,10 @@ class AiProviderKindResponse(BaseModel):
 
     kind: str
     label: str
+    #: Bei einem Anbieter mit ``ressource_noetig`` ist das eine **Vorlage** mit
+    #: ``{ressource}`` darin und keine fertige Adresse. Das ist Absicht: die
+    #: Oberflaeche zeigt damit, wo der eingetippte Name landet, statt ihn nur
+    #: abzufragen.
     base_url: str
     key_url: str
     key_prefix: str | None
@@ -215,6 +280,26 @@ class AiProviderKindResponse(BaseModel):
     #: Stoerung aussehen zu lassen: erst Schluessel speichern, dann Modell
     #: waehlen.
     katalog_braucht_schluessel: bool
+    #: Ob dieser Anbieter den Namen einer Ressource des Betreibers braucht.
+    #: Steht hier, damit das Formular das Feld zeigen kann, **ohne** einen
+    #: Anbieter beim Namen zu kennen — ein ``provider_kind === 'azure…'`` im
+    #: Frontend waere die Registry an einem zweiten Ort, und der erste
+    #: vergessene Eintrag darin ein Anbieter, den man nicht einrichten kann.
+    ressource_noetig: bool
+    #: Ob dieser Anbieter ueberhaupt eine Modelliste fuehrt. ``False`` heisst
+    #: **nicht** „Katalog gerade nicht erreichbar": bei Azure heisst ein Modell
+    #: so, wie der Betreiber sein Deployment genannt hat, und eine Liste dafuer
+    #: gibt es nicht. Ohne dieses Feld saehe die Oberflaeche einen leeren
+    #: Katalog und meldete eine Stoerung, die keine ist.
+    fuehrt_katalog: bool
+    #: Ob dieser Anbieter Gesprochenes in Text wandeln kann (`gehoer_wege`).
+    #: Ein Chatanbieter ohne Gehoer ist seit Azure moeglich, und ohne dieses
+    #: Feld verspraeche das Formular an zwei Stellen etwas, das dieser Zugang
+    #: nicht halten kann: der Anbieterhinweis sagte „Chat und Gehoer", und das
+    #: Feld fuer das hoerende Modell liesse sich ausfuellen, ohne dass der
+    #: Sprachmodus je darauf zugreift (`routers/ai_voice.py` ueberspringt
+    #: Zugaenge ohne `gehoer_wege`, gleich was dort steht).
+    kann_hoeren: bool
 
 
 class AiCatalogModelResponse(BaseModel):

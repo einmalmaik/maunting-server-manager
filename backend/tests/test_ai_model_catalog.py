@@ -1057,3 +1057,101 @@ async def test_a_hanging_provider_does_not_stall_a_healthy_one(
 
         weiter.set()
         assert len(await haengt) == 4
+
+
+# ── Anbieter ohne eigenen Katalog (Azure) ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_provider_without_a_catalog_never_asks_anyone() -> None:
+    """Kein Katalog ist kein Fehlschlag, sondern eine Tatsache.
+
+    Bei Azure heisst ein Modell so, wie der Betreiber sein Deployment genannt
+    hat, und eine Liste dafuer gibt es nicht. Ein Abrufversuch endete in einem
+    Fehler, der als Stoerung vermerkt wuerde — samt Ruhefrist und einer
+    Oberflaeche, die einen Ausfall meldet, den es nicht gibt.
+    """
+    gefragt: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        gefragt.append(str(request.url))
+        return httpx.Response(200, json=ANTWORT)
+
+    async with _client(handler) as client:
+        assert await ai_model_catalog.modelle(client, "azure_openai") == []
+        assert await ai_model_catalog.modelle(client, "azure_anthropic") == []
+
+    assert gefragt == []
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_named_after_its_model_inherits_the_capabilities() -> None:
+    """**Die Zusage dieses Nachschlags.**
+
+    Ohne ihn bliebe an einem Azure-Zugang jedes Modell unbekannt, und der Chat
+    rechnete mit `ai_context_window.RUECKFALL_NUTZBAR_TOKENS` — 6.000 Token an
+    einem Modell mit 200.000. Getroffen wird die Konvention, die Microsoft in
+    seinen eigenen Beispielen verwendet: das Deployment heisst wie das Modell.
+    """
+    async with _client(lambda _r: httpx.Response(200, json=ANTWORT)) as client:
+        modell = await ai_model_catalog.finde(
+            client, "azure_anthropic", "claude-opus-5"
+        )
+
+    assert modell is not None
+    # Die **eigene** Kennung bleibt: unter ihr spricht MSM das Deployment an.
+    assert modell.model_id == "claude-opus-5"
+    assert modell.kontext_tokens == 200_000
+    assert modell.stufen == ("max", "xhigh", "high", "medium", "low")
+    assert modell.denkt is True
+
+
+@pytest.mark.asyncio
+async def test_a_freely_named_deployment_stays_unknown_instead_of_guessed() -> None:
+    """„Unbekannt" heisst hier wie ueberall nie „klein" und nie „kann er nicht"."""
+    async with _client(lambda _r: httpx.Response(200, json=ANTWORT)) as client:
+        assert await ai_model_catalog.finde(
+            client, "azure_anthropic", "prod-chat"
+        ) is None
+
+
+@pytest.mark.asyncio
+async def test_a_provider_with_its_own_catalog_never_borrows_an_entry() -> None:
+    """Sonst saehe ein Tippfehler aus wie ein gueltiges Modell.
+
+    OpenAI borgt sich seine **Faehigkeiten** von OpenRouter, aber nie die
+    **Existenz** eines Modells: was sein eigener Katalog nicht fuehrt, gibt es
+    fuer diesen Zugang nicht (`ai_provider_registry.openai`, „erfindet nichts").
+    """
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if "api.openai.com" in str(request.url):
+            return httpx.Response(200, json={"data": [{"id": "gpt-4o-mini"}]})
+        return httpx.Response(200, json=ANTWORT)
+
+    async with _client(handler) as client:
+        # Steht in OpenRouters Katalog als ``openai/gpt-4o-mini``, aber nicht in
+        # OpenAIs eigener Liste unter diesem Namen.
+        assert await ai_model_catalog.finde(
+            client, "openai", "gpt-4o-vertippt", schluessel="sk-test"
+        ) is None
+        # Und der Fall, den es wirklich gibt, funktioniert weiterhin.
+        eigenes = await ai_model_catalog.finde(
+            client, "openai", "gpt-4o-mini", schluessel="sk-test"
+        )
+        assert eigenes is not None
+
+
+@pytest.mark.asyncio
+async def test_a_failing_foreign_catalog_leaves_the_answer_unknown() -> None:
+    """Der fremde Katalog ist eine Ergaenzung und keine Bedingung."""
+    async with _client(lambda _r: httpx.Response(503)) as client:
+        assert await ai_model_catalog.finde(
+            client, "azure_anthropic", "claude-opus-5"
+        ) is None
+
+
+#: Dass das Vorwaermen kataloglose Anbieter ueberspringt, steht **nicht** hier,
+#: sondern in `test_ai_voice_provider.test_prewarming_covers_key_bound_catalogs_too`
+#: — dort, wo die Zusage ueber das Vorwaermen ohnehin gefuehrt wird. Zwei Tests
+#: ueber dieselbe Zeile waeren zwei Wahrheiten, und die zweite liefe beim
+#: naechsten Umbau der ersten hinterher.

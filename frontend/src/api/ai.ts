@@ -53,6 +53,16 @@ export interface AiProviderAdmin {
    * `null` heisst: nicht nachdenken.
    */
   worker_reasoning_effort: string | null
+  /**
+   * Der Name der Azure-Ressource dieses Zugangs — das eine Stueck Adresse, das
+   * MSM nicht selbst weiss. Nur Anbieter mit `ressource_noetig` brauchen ihn;
+   * bei allen anderen ist `null` der Normalfall und das Feld unbeachtet.
+   *
+   * Ausdruecklich **keine** Adresse: Schema, Suffix und Pfad stehen im
+   * Backend, hier steht ein einzelnes DNS-Label. Das Formular prueft die Form
+   * nur der Bequemlichkeit halber — verbindlich prueft der Server.
+   */
+  azure_resource_name: string | null
   enabled: boolean
   requires_api_key: boolean
   operator_key_configured: boolean
@@ -95,6 +105,11 @@ export interface AiProviderAvailable {
 export interface AiProviderKind {
   kind: string
   label: string
+  /**
+   * Bei einem Anbieter mit `ressource_noetig` eine **Vorlage** mit
+   * `{ressource}` darin und keine fertige Adresse. Absicht: der Hinweis unter
+   * der Anbieterauswahl zeigt damit, wo der eingetippte Name landet.
+   */
   base_url: string
   key_url: string
   key_prefix: string | null
@@ -115,6 +130,33 @@ export interface AiProviderKind {
    * das ist kein Fehler, sondern die Reihenfolge.
    */
   katalog_braucht_schluessel: boolean
+  /**
+   * Ob dieser Anbieter den Namen einer Ressource des Betreibers braucht.
+   *
+   * Das Feld steht hier, damit das Formular das Eingabefeld zeigen kann,
+   * **ohne** einen Anbieter beim Namen zu kennen. Ein
+   * `provider_kind === 'azure_openai'` waere die Registry an einem zweiten
+   * Ort, und der erste vergessene Eintrag darin ein Anbieter, den man nicht
+   * einrichten kann.
+   */
+  ressource_noetig: boolean
+  /**
+   * Ob dieser Anbieter ueberhaupt eine Modelliste fuehrt.
+   *
+   * `false` heisst **nicht** „Katalog gerade nicht erreichbar": bei Azure
+   * heisst ein Modell so, wie der Betreiber sein Deployment genannt hat, und
+   * eine Liste dafuer gibt es nicht. Ohne diese Unterscheidung meldete die
+   * Oberflaeche eine Stoerung, die keine ist.
+   */
+  fuehrt_katalog: boolean
+  /**
+   * Ob dieser Anbieter Gesprochenes in Text wandeln kann.
+   *
+   * Ein Chatanbieter ohne Gehoer gibt es seit Azure. `false` heisst: der
+   * Sprachmodus greift auf diesen Zugang nie zu, gleich was im Feld fuer das
+   * hoerende Modell steht — deshalb zeigt das Formular es dann gar nicht erst.
+   */
+  kann_hoeren: boolean
 }
 
 /** Ein Modell aus dem Katalog des Anbieters, mit seinen Denkfaehigkeiten. */
@@ -851,6 +893,13 @@ export interface AiProviderWrite {
    */
   worker_model?: string | null
   worker_reasoning_effort?: string | null
+  /**
+   * Wie `default_voice`: „nicht genannt" laesst den Namen stehen,
+   * ausdrueckliches `null` nimmt ihn zurueck. Der Unterschied zaehlt hier
+   * doppelt — ein **geaenderter** Ressourcenname loescht serverseitig den
+   * gespeicherten Schluessel, ein nicht mitgeschickter nicht.
+   */
+  azure_resource_name?: string | null
   operator_api_key?: string
   clear_operator_api_key?: boolean
 }

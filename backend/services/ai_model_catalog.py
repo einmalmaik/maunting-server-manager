@@ -316,13 +316,19 @@ def vorwaermen_anstossen() -> None:
     Versuch noch einmal. Ohne diese zweite Haelfte waere die Frist genau der
     Fehler geblieben, den dieser Absatz beschreibt — nur eine Schicht tiefer.
 
-    Die Anbieter stehen deshalb alle gleich hier, ohne Unterscheidung.
+    Die Anbieter stehen deshalb alle gleich hier, ohne Unterscheidung — mit
+    einer Ausnahme, und die ist keine Politik, sondern eine Tatsache: ein
+    Anbieter **ohne Katalogadresse** hat nichts zum Vorwaermen. Ihn trotzdem
+    anzustossen kostete eine Aufgabe je Start, die sofort mit der leeren Liste
+    zurueckkaeme.
 
     Der Aufruf bleibt trotzdem frei von Datenbankwissen: die Frage nach dem
     Schluessel faellt nicht hier, sondern in der Hintergrundaufgabe, also erst
     nachdem der ``lifespan`` weitergelaufen ist.
     """
-    for kind in ANBIETER:
+    for kind, spec in ANBIETER.items():
+        if spec.catalog_url is None:
+            continue
         _auffrischen_anstossen(kind)
 
 
@@ -549,15 +555,43 @@ async def _mit_faehigkeiten(
     Ergaenzung und keine Bedingung; ein Anbieter, den MSM direkt anspricht, darf
     nicht daran haengen, dass ein anderer erreichbar ist.
     """
-    if spec.faehigkeiten_aus is None or not eigene:
+    if not eigene:
         return eigene
+    nach_kennung = await _fremdkatalog(client, spec)
+    if not nach_kennung:
+        return eigene
+    return [
+        _anreichern(
+            modell, nach_kennung.get(f"{spec.faehigkeiten_praefix}{modell.model_id}")
+        )
+        for modell in eigene
+    ]
+
+
+async def _fremdkatalog(
+    client: httpx.AsyncClient, spec: Anbieter
+) -> dict[str, Modell]:
+    """Der Katalog, aus dem dieser Anbieter seine Faehigkeiten borgt.
+
+    Nach Kennung geschluesselt, leer wenn es nichts zu borgen gibt oder der
+    fremde Katalog gerade ausfaellt. **Nie eine Ausnahme**: er ist eine
+    Ergaenzung und keine Bedingung — ein Anbieter, den MSM direkt anspricht,
+    darf nicht daran haengen, dass ein anderer erreichbar ist.
+
+    Eigene Funktion, seit es zwei Leser gibt: `_mit_faehigkeiten` reichert damit
+    eine **Liste** an, `finde` ein **einzelnes** Modell bei einem Anbieter, der
+    gar keine Liste hat. Zweimal derselbe Abruf mit denselben drei
+    Fehlerfaellen, einmal geschrieben.
+    """
+    if spec.faehigkeiten_aus is None:
+        return {}
     if spec.faehigkeiten_aus not in ANBIETER:
         logger.warning(
             "Anbieter %s verweist fuer Faehigkeiten auf %s — den gibt es nicht",
             spec.kind,
             spec.faehigkeiten_aus,
         )
-        return eigene
+        return {}
     try:
         fremde = await _besorgen(
             client, spec.faehigkeiten_aus, erzwingen=False, sofort=True
@@ -569,17 +603,8 @@ async def _mit_faehigkeiten(
             spec.faehigkeiten_aus,
             type(exc).__name__,
         )
-        return eigene
-    if not fremde:
-        return eigene
-
-    nach_kennung = {modell.model_id: modell for modell in fremde}
-    return [
-        _anreichern(
-            modell, nach_kennung.get(f"{spec.faehigkeiten_praefix}{modell.model_id}")
-        )
-        for modell in eigene
-    ]
+        return {}
+    return {modell.model_id: modell for modell in fremde}
 
 
 async def _besorgen(
@@ -599,6 +624,20 @@ async def _besorgen(
     sie gerade ersetzen soll, und taete nichts.
     """
     spec = anbieter(kind)
+
+    if spec.catalog_url is None:
+        # **Kein Katalog ist kein Fehlschlag.** Der Unterschied ist der ganze
+        # Grund fuer diesen frueh gesetzten Ausstieg: ein Fehlschlag wuerde
+        # vermerkt, brächte eine Ruhefrist mit sich und liesse die Oberflaeche
+        # eine Stoerung melden. Hier gibt es aber nichts zu holen und nichts,
+        # was spaeter besser waere — bei Azure heisst ein Modell so, wie der
+        # Betreiber sein Deployment genannt hat, und eine Liste dafuer fuehrt
+        # der Anbieter nicht (`basis.Anbieter.catalog_url`).
+        #
+        # Vor dem Schloss und vor jedem Zwischenspeicherzugriff, weil weder das
+        # eine noch das andere hier etwas beitraegt: die Antwort ist immer
+        # dieselbe und kostet nichts.
+        return []
 
     def bedient(eintrag: _Eintrag, schluessel: str | None) -> bool:
         """Antwortet dieser Stand **diesem** Frager, ohne den Anbieter zu fragen?
@@ -777,6 +816,25 @@ async def finde(
 
     Geht über `modelle` und damit über dieselbe Ergänzung — die Frage „was kann
     dieses eine Modell?" ist genau die, für die `_mit_faehigkeiten` da ist.
+
+    **Der zweite Weg gilt nur für Anbieter ohne eigenen Katalog** (Azure). Dort
+    gibt es keine Liste, die sich anreichern liesse, und ohne diesen Nachschlag
+    bliebe jedes Modell unbekannt — der Chat rechnete dann mit
+    `ai_context_window.RUECKFALL_NUTZBAR_TOKENS`, also mit 6.000 Token an einem
+    Modell mit 200.000. Gefragt wird derselbe fremde Katalog wie sonst, nur
+    eben nach genau dieser einen Kennung.
+
+    Getroffen wird damit die Konvention, die Microsoft in seinen eigenen
+    Beispielen verwendet: das Deployment heisst wie das Modell. Heisst es
+    ``prod-chat``, findet der fremde Katalog nichts, und die Antwort ist wieder
+    ``None`` — unbekannt, nie geraten.
+
+    Die Bedingung „kein eigener Katalog" ist **tragend** und keine Optimierung.
+    Bei einem Anbieter mit Katalog wäre dieser Zweig genau das, was
+    `ai_provider_registry.openai` ausschliesst: MSM behauptete die Existenz
+    eines Modells, das der Anbieter nicht führt, weil ein Vermittler es kennt.
+    Ein Tippfehler im Modellnamen sähe dann aus wie ein gültiges Modell mit
+    fremden Fähigkeiten.
     """
     gesucht = (model_id or "").strip()
     if not gesucht:
@@ -784,7 +842,21 @@ async def finde(
     for modell in await modelle(client, kind, schluessel=schluessel):
         if modell.model_id == gesucht:
             return modell
-    return None
+
+    spec = anbieter(kind)
+    if spec.catalog_url is not None:
+        return None
+    fremd = (await _fremdkatalog(client, spec)).get(
+        f"{spec.faehigkeiten_praefix}{gesucht}"
+    )
+    if fremd is None:
+        return None
+    # Die **eigene** Kennung behalten und nur die Fähigkeiten borgen: der Name,
+    # unter dem MSM dieses Modell anspricht, ist der Deployment-Name des
+    # Betreibers. Der Weg durch `_anreichern` ist derselbe wie bei einer
+    # angereicherten Liste — damit gelten dort auch dieselben Ausnahmen
+    # (``cache_marke_noetig`` und ``name`` wandern nicht mit).
+    return _anreichern(Modell(model_id=gesucht, name=gesucht, denkt=False), fremd)
 
 
 async def fuer_provider(

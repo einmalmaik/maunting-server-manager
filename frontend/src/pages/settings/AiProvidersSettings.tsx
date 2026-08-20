@@ -49,6 +49,9 @@ const EMPTY_PROVIDER: ProviderDraft = {
   // Fallback (docs/agentic-framework.md, §5), keine Pflichtangabe.
   worker_model: null,
   worker_reasoning_effort: null,
+  // Nur Anbieter mit `ressource_noetig` brauchen ihn; ohne Vorbelegung, weil
+  // MSM die Ressourcen des fremden Kontos nicht kennt.
+  azure_resource_name: null,
   operator_api_key: '',
 }
 
@@ -65,6 +68,7 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     transcription_model: provider.transcription_model,
     worker_model: provider.worker_model,
     worker_reasoning_effort: provider.worker_reasoning_effort,
+    azure_resource_name: provider.azure_resource_name,
     operator_api_key: '',
     operator_key_configured: provider.operator_key_configured,
     operator_key_hint: provider.operator_key_hint,
@@ -134,7 +138,8 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
     // nicht erst: sonst stuende in seiner Zeile eine Angabe, die er nie
     // verwendet, und beim naechsten Blick in die Datenbank saehe es aus wie
     // eine Einstellung.
-    const protokoll = kinds.find((item) => item.kind === draft.provider_kind)?.protokoll
+    const gewaehlt = kinds.find((item) => item.kind === draft.provider_kind)
+    const protokoll = gewaehlt?.protokoll
     const payload: AiProviderWrite = {
       name: draft.name.trim(),
       provider_kind: draft.provider_kind,
@@ -145,7 +150,12 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
       ...(protokoll === 'tts' ? { default_voice: draft.default_voice?.trim() || null } : {}),
       ...(protokoll === 'chat_completions'
         ? {
-            transcription_model: draft.transcription_model?.trim() || null,
+            // Kann der Anbieter nicht zuhoeren, zeigt das Formular das Feld
+            // nicht — dann darf auch kein alter Wert stehen bleiben, den
+            // niemand mehr sehen und keiner mehr loeschen kann.
+            transcription_model: gewaehlt?.kann_hoeren
+              ? draft.transcription_model?.trim() || null
+              : null,
             worker_model: draft.worker_model?.trim() || null,
             // Eine Denkstufe ohne Arbeitsmodell ist keine Einstellung — sie
             // geht mit dem Modell und faellt mit ihm.
@@ -153,6 +163,12 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
               ? draft.worker_reasoning_effort || null
               : null,
           }
+        : {}),
+      // Wie die Felder darueber: nur mit dem Zugang, der ihn braucht. Ein
+      // mitgeschickter `null` an einem Anbieter ohne Ressource waere zwar
+      // harmlos, stuende aber als Einstellung in seiner Zeile.
+      ...(gewaehlt?.ressource_noetig
+        ? { azure_resource_name: draft.azure_resource_name?.trim() || null }
         : {}),
       ...(draft.operator_api_key ? { operator_api_key: draft.operator_api_key } : {}),
       ...(draft.clear_operator_api_key ? { clear_operator_api_key: true } : {}),
@@ -287,6 +303,20 @@ function ProviderForm({
   const [loadingModels, setLoadingModels] = useState(false)
   const draft = localDraft ? local : initialDraft
   const spec = kinds.find((item) => item.kind === draft.provider_kind) ?? null
+  // Als eigener Wert und nicht als `spec?.…` in der Abhaengigkeitsliste: `spec`
+  // ist bei jedem Rendern ein neues Objekt und loeste den Effekt endlos aus.
+  // `null` heisst „Anbieterliste noch nicht geladen" und nicht „fuehrt keinen".
+  const fuehrtKatalog = spec?.fuehrt_katalog ?? null
+  // Die Adresse, wie der Betreiber sie sehen soll. Traegt `base_url` eine
+  // Vorlage, steht dort sein eigener Name statt des rohen `{ressource}` —
+  // solange er noch keinen eingetragen hat, das Beispiel aus dem Platzhalter.
+  // Ohne Vorlage laeuft `replace` ins Leere, deshalb ein Ausdruck fuer alle.
+  const adresse = spec
+    ? spec.base_url.replace(
+        '{ressource}',
+        draft.azure_resource_name?.trim() || t('ai.providers.azureResourcePlaceholder'),
+      )
+    : ''
 
   /**
    * Der Modellkatalog des gewaehlten Anbieters.
@@ -295,9 +325,14 @@ function ProviderForm({
    * Modell ein Textfeld statt einer Auswahl. Ein leeres Dropdown waere die
    * schlechtere Antwort: der Betreiber koennte nichts mehr eintragen, obwohl
    * sein Modell existiert.
+   *
+   * Bei einem Anbieter **ohne** Katalog wird gar nicht erst gefragt. Die
+   * Antwort waere immer die leere Liste, und der Hinweis darunter sagt bereits,
+   * warum — ein Abruf dafuer waere eine Ladeanzeige ohne Ergebnis.
    */
   const ladeModelle = async (refresh = false) => {
     if (!draft.provider_kind || loadingModels) return
+    if (spec && !spec.fuehrt_katalog) return
     setLoadingModels(true)
     try {
       setModels(await aiApi.listCatalogModels(draft.provider_kind, refresh, draft.id))
@@ -311,6 +346,11 @@ function ProviderForm({
   useEffect(() => {
     let active = true
     if (!draft.provider_kind) { setModels(null); return }
+    // Ein Anbieter ohne Katalog wird nicht gefragt — siehe `ladeModelle`.
+    // ``[]`` und nicht ``null``: „führt keine Liste" ist eine Auskunft, „noch
+    // nicht geladen" ein Zustand, und nur der zweite darf eine Ladeanzeige
+    // rechtfertigen.
+    if (fuehrtKatalog === false) { setModels([]); return }
     setLoadingModels(true)
     // `draft.id` geht mit, weil manche Anbieter ihren Katalog nur gegen den
     // Schlüssel herausgeben. Beim Anlegen gibt es die Kennung noch nicht — dann
@@ -320,7 +360,7 @@ function ProviderForm({
       .catch(() => { if (active) setModels(null) })
       .finally(() => { if (active) setLoadingModels(false) })
     return () => { active = false }
-  }, [draft.provider_kind, draft.id])
+  }, [draft.provider_kind, draft.id, fuehrtKatalog])
 
   const gewaehltesModell = models?.find((item) => item.model_id === draft.default_model) ?? null
   // Das Arbeitsmodell der Worker — aus demselben Katalog. `null`, wenn keines
@@ -341,6 +381,7 @@ function ProviderForm({
   const workerModellId = useId()
   const workerStufeId = useId()
   const ttsModellId = useId()
+  const ressourceId = useId()
 
   // Solange die Politik nicht geladen ist, gilt USD 1:1 — die Waehrung der
   // Buchung. Ein Rueckfall auf Euro wuerde einen getippten Preis stillschweigend
@@ -387,7 +428,11 @@ function ProviderForm({
   const valid = Boolean(
     draft.name.trim() &&
     draft.provider_kind &&
-    (draft.default_model?.trim() || draft.transcription_model?.trim() || draft.default_voice?.trim())
+    (draft.default_model?.trim() || draft.transcription_model?.trim() || draft.default_voice?.trim()) &&
+    // Ein Azure-Zugang ohne Ressourcennamen hat keine Adresse. Der Server
+    // lehnt ihn ohnehin ab; hier gesperrt, damit der Betreiber die Absage
+    // nicht erst nach dem Klick liest.
+    (!spec?.ressource_noetig || Boolean(draft.azure_resource_name?.trim()))
   )
 
   return (
@@ -412,12 +457,19 @@ function ProviderForm({
               options={kinds.map((item) => ({
                 value: item.kind,
                 label: item.label,
-                hint: t(`ai.providers.protokoll.${item.protokoll}`),
+                // Ein Chatanbieter ohne Gehoer bekommt den kuerzeren Hinweis.
+                // „Chat und Gehoer" waere bei Azure ein Versprechen, das der
+                // Sprachmodus nicht einloest.
+                hint: t(
+                  item.protokoll === 'chat_completions' && !item.kann_hoeren
+                    ? 'ai.providers.protokoll.chat_only'
+                    : `ai.providers.protokoll.${item.protokoll}`,
+                ),
               }))}
             />
             {spec && (
               <p className="text-xs text-on-surface-variant">
-                {t('ai.providers.kindHint', { url: spec.base_url })}
+                {t('ai.providers.kindHint', { url: adresse })}
                 {' '}
                 <a href={spec.key_url} target="_blank" rel="noreferrer" className="underline">{t('ai.providers.keyLink')}</a>
               </p>
@@ -430,6 +482,35 @@ function ProviderForm({
             )}
           </div>
         </div>
+
+        {/* Ressourcenname — das eine Stück Adresse, das MSM nicht selbst weiss.
+            Erscheint nur, wenn der gewählte Anbieter es angemeldet hat
+            (`ressource_noetig`); ein Vergleich auf einen Anbieternamen stünde
+            hier als zweite Registry und liefe irgendwann auseinander. */}
+        {spec?.ressource_noetig && (
+          <div className="space-y-1.5 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+            <label htmlFor={ressourceId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+              {t('ai.providers.azureResource')}
+            </label>
+            <input
+              id={ressourceId}
+              type="text"
+              className="msm-input w-full"
+              autoComplete="off"
+              spellCheck={false}
+              value={draft.azure_resource_name ?? ''}
+              onChange={(ereignis) => change({ azure_resource_name: ereignis.target.value })}
+              placeholder={t('ai.providers.azureResourcePlaceholder')}
+              aria-label={t('ai.providers.azureResource')}
+            />
+            <p className="msm-field-help">
+              {t('ai.providers.azureResourceHint', { url: adresse })}
+            </p>
+            {!draft.azure_resource_name?.trim() && (
+              <p className="text-xs text-status-error">{t('ai.providers.azureResourceMissing')}</p>
+            )}
+          </div>
+        )}
 
         {/* API-Key */}
         <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4 space-y-2">
@@ -484,7 +565,9 @@ function ProviderForm({
         {spec?.protokoll === 'chat_completions' && (
           <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
             <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-              {t('ai.providers.model')} & {t('ai.providers.transcriptionModel')}
+              {spec.kann_hoeren
+                ? `${t('ai.providers.model')} & ${t('ai.providers.transcriptionModel')}`
+                : t('ai.providers.model')}
             </h4>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {/* Chat & Denken */}
@@ -528,17 +611,30 @@ function ProviderForm({
                       />
                     )}
                   </div>
-                  <Button type="button" variant="ghost" disabled={!draft.provider_kind || loadingModels} onClick={() => void ladeModelle(true)}>
+                  <Button type="button" variant="ghost" disabled={!draft.provider_kind || loadingModels || fuehrtKatalog === false} onClick={() => void ladeModelle(true)}>
                     <RefreshCw className={`h-4 w-4 ${loadingModels ? 'animate-spin' : ''}`} aria-hidden="true" />
                     <span className="sr-only">{t('ai.providers.reloadModels')}</span>
                   </Button>
                 </div>
-                {models === null && !loadingModels && draft.provider_kind && (
-                  <p className="msm-field-help">{t('ai.providers.catalogUnavailable')}</p>
-                )}
-                {models !== null && models.length === 0 && !loadingModels
-                  && spec?.katalog_braucht_schluessel && (
-                  <p className="msm-field-help">{t('ai.providers.catalogNeedsKey')}</p>
+                {/* Drei verschiedene Gründe für eine leere Liste, drei
+                    verschiedene Sätze. „Führt keine Liste" steht zuerst, weil
+                    es der einzige ist, der **kein** Zustand ist, den man
+                    beheben könnte: bei Azure heisst ein Modell so, wie der
+                    Betreiber sein Deployment genannt hat. Ohne diese
+                    Unterscheidung meldete die Seite dort eine Störung, die
+                    keine ist. */}
+                {spec && !spec.fuehrt_katalog ? (
+                  <p className="msm-field-help">{t('ai.providers.catalogNone')}</p>
+                ) : (
+                  <>
+                    {models === null && !loadingModels && draft.provider_kind && (
+                      <p className="msm-field-help">{t('ai.providers.catalogUnavailable')}</p>
+                    )}
+                    {models !== null && models.length === 0 && !loadingModels
+                      && spec?.katalog_braucht_schluessel && (
+                      <p className="msm-field-help">{t('ai.providers.catalogNeedsKey')}</p>
+                    )}
+                  </>
                 )}
                 {empfohlenesModell && draft.default_model !== empfohlenesModell.model_id && (
                   <p className="msm-field-help flex items-start gap-1.5">
@@ -558,7 +654,11 @@ function ProviderForm({
                 {gewaehltesModell && <ModelCapabilities model={gewaehltesModell} />}
               </div>
 
-              {/* Gehör / Transkription */}
+              {/* Gehör / Transkription — nur bei Anbietern, die zuhören
+                  können. Ein ausfüllbares Feld, das der Sprachmodus nie liest
+                  (`routers/ai_voice.py` überspringt Zugänge ohne
+                  `gehoer_wege`), wäre eine Zusage ohne Deckung. */}
+              {spec.kann_hoeren && (
               <div className="space-y-1.5">
                 <label htmlFor={hoerenId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
                   👂 {t('ai.providers.transcriptionModel')}
@@ -576,6 +676,7 @@ function ProviderForm({
                 />
                 <p className="msm-field-help">{t('ai.providers.transcriptionModelHint')}</p>
               </div>
+              )}
             </div>
           </div>
         )}
@@ -712,7 +813,7 @@ function ProviderForm({
                     />
                   )}
                 </div>
-                <Button type="button" variant="ghost" disabled={!draft.provider_kind || loadingModels} onClick={() => void ladeModelle(true)}>
+                <Button type="button" variant="ghost" disabled={!draft.provider_kind || loadingModels || fuehrtKatalog === false} onClick={() => void ladeModelle(true)}>
                   <RefreshCw className={`h-4 w-4 ${loadingModels ? 'animate-spin' : ''}`} aria-hidden="true" />
                   <span className="sr-only">{t('ai.providers.reloadModels')}</span>
                 </Button>

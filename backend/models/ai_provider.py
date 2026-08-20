@@ -30,6 +30,11 @@ class AiProvider(Base):
     Programm, und mit ihr kommt der Modellkatalog. Was ein Modell kann, steht
     deshalb **nicht** in dieser Tabelle: es kommt bei Bedarf aus
     `ai_model_catalog` und wäre hier eine Kopie, die still veraltet.
+
+    Seit Azure trägt die Tabelle mit `azure_resource_name` wieder **ein Stück**
+    Adresse — ein DNS-Label, keine URL. Warum das nötig ist, was daran anders
+    ist als die alte `base_url` und was an Restrisiko bleibt, steht bei der
+    Spalte selbst.
     """
 
     __tablename__ = "ai_providers"
@@ -104,6 +109,33 @@ class AiProvider(Base):
     # ``None`` heißt „nicht nachdenken" — derselbe Standard wie heute bei
     # unbeaufsichtigten Läufen, keine geratene Tiefe.
     worker_reasoning_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Der Name der Azure-Ressource dieses Zugangs — das eine Stück Adresse, das
+    # MSM nicht selbst weiß.
+    #
+    # **Das ist ausdrücklich nicht die Rückkehr der `base_url` von oben.** Dort
+    # stand eine ganze Adresse: Schema, Host, Port, Pfad — alles Eingabe, und
+    # damit alles Angriffsfläche. Hier steht ein einzelnes DNS-Label. Schema,
+    # Suffix und Pfad bleiben als Vorlage in der Anbieterdatei
+    # (``https://{ressource}.services.ai.azure.com/openai/v1``), und geprüft
+    # wird das Label mit ``re.fullmatch`` gegen die Form eines Labels — kein
+    # Punkt, kein Schrägstrich, kein Zeilenumbruch, nicht länger als 63 Zeichen
+    # (`ai_provider_service._assert_ressource`).
+    #
+    # Ohne diese Spalte gäbe es Azure nicht: dort hat jede Ressource ihren
+    # eigenen Host, und einen gemeinsamen Einstieg für alle Kunden gibt es
+    # nicht. Was dabei an Restrisiko bleibt — Private Link kann einen gültigen
+    # Namen innerhalb eines VNet auf eine private Adresse lenken —, steht bei
+    # `ai_provider_registry.basis.Anbieter.ressource_noetig`.
+    #
+    # ``None`` heißt „nicht hinterlegt". Für jeden Anbieter ohne
+    # ``ressource_noetig`` ist das der Normalfall und die Spalte bleibt
+    # unbeachtet; für Azure lehnt der Service Anlegen und Aktivieren ohne
+    # Namen ab, statt eine Zeile zu führen, die niemand benutzen kann.
+    #
+    # 64 Zeichen breit, obwohl 63 die Grenze ist: Azure vergibt Namen bis 64,
+    # und eine Spalte, die knapper ist als das Erlaubte, verwandelte einen
+    # erklärbaren Formfehler in einen Datenbankfehler.
+    azure_resource_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     requires_api_key: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     operator_api_key_encrypted: Mapped[str | None] = mapped_column(String(4096), nullable=True)

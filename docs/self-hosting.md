@@ -145,9 +145,12 @@ Ausnahmen bleiben, und alle drei sind sichtbar:
   aus dem Browser, ohne Einstellung und auch auf der Loginseite, also bevor
   jemand angemeldet ist. Wer das nicht möchte, gehört mit dieser Information in
   die eigene Datenschutzerklärung.
-- **KI und Sprachmodus** reden mit OpenRouter und ElevenLabs, sobald ein
-  Betreiber Zugänge hinterlegt. Was dabei übertragen wird, steht unter
-  *Was an den Anbieter geht* weiter unten.
+- **KI und Sprachmodus** reden mit OpenRouter, OpenAI, ElevenLabs oder Azure,
+  sobald ein Betreiber Zugänge hinterlegt. Bei Azure ist die Gegenstelle
+  `https://<deine-ressource>.services.ai.azure.com` — der einzige Fall, in dem
+  ein Stück der Zieladresse aus einer Einstellung kommt und nicht aus dem Code.
+  Was dabei übertragen wird, steht unter *Was an den Anbieter geht* weiter
+  unten.
 
 ## Bestehende All-in-one-Installation aufteilen
 
@@ -864,6 +867,50 @@ einer in ein Gameserver-Log geschriebenen Anweisung folgt, scheitert die
 Umsetzung an RBAC, der Tool-Allowlist, den Pfadgrenzen und der
 Bestätigungspflicht.
 
+### Azure als Anbieter
+
+Zwei Einträge unter *Einstellungen → KI → Anbieter*: **Azure OpenAI** für die
+Modelle von OpenAI und die Foundry-Modelle (Llama, Mistral, DeepSeek), **Azure ·
+Anthropic Claude** für Claude. Beide brauchen zwei Angaben — den Schlüssel und
+den **Namen deiner Azure-Ressource**, nicht ihre Adresse:
+
+| Feld | Wert |
+|---|---|
+| Anbieter | *Azure OpenAI* oder *Azure · Anthropic Claude* |
+| Azure-Ressourcenname | nur der Name, z. B. `mein-ai-hub` |
+| Schlüssel | ein Schlüssel aus <https://ai.azure.com/> |
+| Standardmodell | der Name deines **Deployments**, so wie du es angelegt hast |
+
+Daraus baut MSM `https://mein-ai-hub.services.ai.azure.com/openai/v1` bzw.
+`…/anthropic/v1`. Schema, Suffix und Pfad gehören dem Programm; aus der
+Einstellung kommt ein einzelnes DNS-Label, geprüft gegen Buchstaben, Ziffern und
+Bindestriche (2 bis 63 Zeichen, keiner am Rand, kein `xn--`). Das ist der eine
+Ort, an dem MSM überhaupt noch Betreibereingaben in eine Zieladresse lässt — und
+der Grund, warum ein geänderter Ressourcenname den hinterlegten Schlüssel
+verwirft: er gehörte der alten Ressource.
+
+> **Verbleibendes Risiko.** In einem Netz mit Azure Private Link kann derselbe
+> gültige Name auf eine private Adresse im VNet zeigen. Die Formprüfung sieht
+> das nicht; das ist eine Frage der Netzkonfiguration und keine der Eingabe.
+
+Drei Unterschiede zu OpenRouter, die im Formular sichtbar sind:
+
+- **Keine Modelliste.** Ein Modell heisst bei Azure so, wie du dein Deployment
+  genannt hast — `prod-chat` ist ein gültiger Name. Eine Liste dafür gibt es
+  nicht, also bleibt das Modell ein Textfeld und „Modelle neu laden" ist
+  gesperrt. Heisst dein Deployment wie das Modell (`claude-sonnet-5`), leiht
+  sich MSM Kontextfenster und Denkstufen aus dem Katalog von OpenRouter;
+  heisst es anders, bleiben sie ehrlich unbekannt und nie geraten.
+- **Kein Gehör.** Azures Transkription liegt hinter einer Vorschau-API. Der
+  Anbieter erscheint deshalb als *Nur Chat*, und das Feld für das hörende
+  Modell wird gar nicht erst angeboten. Für den Sprachmodus braucht es
+  weiterhin OpenRouter oder OpenAI.
+- **Claude spricht seinen eigenen Dialekt.** Die Messages-API von Anthropic ist
+  kein `chat_completions`: `system` steht neben den Nachrichten statt als Rolle,
+  Werkzeuge tragen `input_schema`, und der Strom besteht aus benannten
+  Ereignissen ohne `[DONE]`. MSM übersetzt das; für dich ändert sich nichts
+  ausser der Wahl des Anbieters.
+
 ---
 
 ## KI-Aufgaben (stehende Aufträge)
@@ -1099,8 +1146,8 @@ werden.
 nicht — dieselbe Regel wie bei der Websuche, die ohne Schlüssel nicht einmal im
 Werkzeugkatalog steht. „Beide" heisst dabei vollständig: ein Chatzugang ohne
 hörendes Modell zählt so wenig wie ein ElevenLabs-Zugang ohne Stimme — und ein
-Anbieter, der gar nicht zuhören kann, zählt ebenfalls nicht, selbst wenn das
-Feld ausgefüllt ist.
+Anbieter, der gar nicht zuhören kann (Azure), zählt ebenfalls nicht. Bei ihm
+steht das Feld deshalb gar nicht erst im Formular.
 
 ### Recht und Grenzen
 

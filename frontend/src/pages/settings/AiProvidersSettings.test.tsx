@@ -27,6 +27,7 @@ const provider: AiProviderAdmin = {
   transcription_model: null,
   worker_model: null,
   worker_reasoning_effort: null,
+  azure_resource_name: null,
   enabled: true,
   requires_api_key: true,
   operator_key_configured: true,
@@ -48,6 +49,9 @@ describe('AiProvidersSettings', () => {
       key_prefix: 'sk-or-',
       protokoll: 'chat_completions',
       katalog_braucht_schluessel: false,
+      ressource_noetig: false,
+      fuehrt_katalog: true,
+      kann_hoeren: true,
     }, {
       // Der zweite Anbieter steht hier, damit die Auswahl im Test dieselbe
       // Entscheidung zu treffen hat wie im Betrieb: zwei Zugänge, die
@@ -59,6 +63,22 @@ describe('AiProvidersSettings', () => {
       key_prefix: null,
       protokoll: 'tts',
       katalog_braucht_schluessel: true,
+      ressource_noetig: false,
+      fuehrt_katalog: true,
+      kann_hoeren: false,
+    }, {
+      // Und der dritte: der einzige, der eine Adresse braucht und keine
+      // Modelliste führt. Beides zusammen gibt es nur bei Azure.
+      kind: 'azure_openai',
+      label: 'Azure OpenAI',
+      base_url: 'https://{ressource}.services.ai.azure.com/openai/v1',
+      key_url: 'https://ai.azure.com/',
+      key_prefix: null,
+      protokoll: 'chat_completions',
+      katalog_braucht_schluessel: false,
+      ressource_noetig: true,
+      fuehrt_katalog: false,
+      kann_hoeren: false,
     }])
     vi.mocked(aiApi.getCostPolicy).mockReset().mockResolvedValue({
       currency: 'EUR',
@@ -268,5 +288,83 @@ describe('AiProvidersSettings', () => {
     expect(screen.getByLabelText('Sprachmodell').tagName).toBe('BUTTON')
     // Die Stimme bleibt daneben bestehen.
     expect(screen.getByLabelText('Stimme')).toHaveValue('21m00Tcm4TlvDq8ikWAM')
+  })
+
+  it('verlangt bei Azure den Ressourcennamen und fragt keinen Katalog ab', async () => {
+    // Der einzige Anbieter, bei dem der Betreiber ein Stueck der Adresse
+    // beitraegt — und der einzige ohne Modelliste. Beides haengt am Anbieter
+    // und nicht an seinem Namen: das Formular liest `ressource_noetig` und
+    // `fuehrt_katalog`, nie `provider_kind === 'azure_openai'`.
+    vi.mocked(aiApi.listProviderSettings).mockResolvedValue([{
+      ...provider,
+      id: 7,
+      name: 'Azure',
+      provider_kind: 'azure_openai',
+      base_url: null,
+      default_model: 'gpt-5.1',
+      azure_resource_name: null,
+    }])
+    render(<AiProvidersSettings canWrite />)
+
+    const feld = await screen.findByLabelText('Azure-Ressourcenname')
+    expect(feld).toHaveValue('')
+    // Ohne Namen hat der Zugang keine Adresse — Speichern bleibt gesperrt.
+    expect(screen.getByRole('button', { name: 'Speichern' })).toBeDisabled()
+
+    // Und ein Anbieter ohne Modelliste wird gar nicht erst gefragt: die
+    // Antwort waere immer leer, und der Hinweis darunter sagt bereits, warum.
+    expect(aiApi.listCatalogModels).not.toHaveBeenCalled()
+    expect(screen.getByText(/keine Modelliste/i)).toBeInTheDocument()
+    // Das Modell bleibt deshalb ein Textfeld — der Deployment-Name gehoert
+    // hinein, und den kennt nur der Betreiber.
+    expect(screen.getByLabelText(/Standardmodell/i).tagName).toBe('INPUT')
+
+    fireEvent.change(feld, { target: { value: 'mein-ai-hub' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+
+    await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(7, expect.objectContaining({
+      azure_resource_name: 'mein-ai-hub',
+    })))
+  })
+
+  it('schickt den Ressourcennamen nicht an einen Anbieter, der keinen hat', async () => {
+    // Sonst stuende in der Zeile eines OpenRouter-Zugangs eine Angabe, die er
+    // nie verwendet — und beim naechsten Blick in die Datenbank saehe sie aus
+    // wie eine Einstellung.
+    render(<AiProvidersSettings canWrite />)
+
+    expect(await screen.findByLabelText('API-Key')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Azure-Ressourcenname')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+
+    await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalled())
+    const [, nutzlast] = vi.mocked(aiApi.updateProvider).mock.calls[0]
+    expect(nutzlast).not.toHaveProperty('azure_resource_name')
+  })
+
+  it('zeigt kein hoerendes Modell bei einem Anbieter, der nicht zuhoert', async () => {
+    // Der Sprachmodus ueberspringt einen Zugang ohne `gehoer_wege` — gleich
+    // was in diesem Feld steht. Ein ausfuellbares Feld waere also eine Zusage
+    // ohne Deckung, und ein alter Wert darin blieb unsichtbar bestehen.
+    vi.mocked(aiApi.listProviderSettings).mockResolvedValue([{
+      ...provider,
+      id: 7,
+      name: 'Azure',
+      provider_kind: 'azure_openai',
+      base_url: null,
+      default_model: 'gpt-5.1',
+      azure_resource_name: 'mein-ai-hub',
+      transcription_model: 'whisper-1',
+    }])
+    render(<AiProvidersSettings canWrite />)
+
+    expect(await screen.findByLabelText('Azure-Ressourcenname')).toHaveValue('mein-ai-hub')
+    expect(screen.queryByLabelText('Modell für Gesprochenes')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+
+    await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(7, expect.objectContaining({
+      transcription_model: null,
+    })))
   })
 })

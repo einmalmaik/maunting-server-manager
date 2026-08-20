@@ -30,10 +30,16 @@ class Anbieter:
     ``kind`` ist der in der Datenbank gespeicherte Schlüssel und darf sich nie
     ändern — er steht in ``ai_providers.provider_kind``.
 
-    ``base_url`` ist fest. Das ist der eigentliche Gewinn gegenüber der freien
-    Eingabe: die Adresse stammt aus dem Programm, nicht aus einem Formular, und
-    kann deshalb weder auf ein internes Netz noch auf einen umgeschriebenen
-    Host zeigen.
+    ``base_url`` gehört dem Programm. Das ist der eigentliche Gewinn gegenüber
+    der freien Eingabe: die Adresse stammt nicht aus einem Formular und kann
+    deshalb weder auf ein internes Netz noch auf einen umgeschriebenen Host
+    zeigen.
+
+    Bei einem Anbieter mit ``ressource_noetig`` ist sie eine **Vorlage** mit
+    genau einer Lücke — ``{ressource}`` — und die füllt der Betreiber. Schema,
+    Suffix und Pfad bleiben trotzdem hier stehen; was er beiträgt, ist ein
+    einzelnes DNS-Label, kein Ziel. Warum das nötig ist und was daran anders
+    ist als früher, steht bei `ressource_noetig`.
 
     ``key_prefix`` prüft nur die Plausibilität. Ein Schlüssel mit falschem
     Präfix ist mit Sicherheit falsch; einer mit richtigem ist damit noch nicht
@@ -45,12 +51,61 @@ class Anbieter:
     kind: str
     label: str
     base_url: str
-    #: Woher die Modellliste kommt. Ohne Katalog gibt es keine Modellauswahl —
-    #: einen solchen Anbieter nimmt MSM derzeit nicht auf.
-    catalog_url: str
+    #: Woher die Modellliste kommt, oder ``None`` für „dieser Anbieter führt
+    #: keine".
+    #:
+    #: Hier stand „ohne Katalog nimmt MSM einen Anbieter nicht auf", und für
+    #: jeden Anbieter mit einem festen Modellangebot gilt das weiter. Azure hat
+    #: keines: dort heißt ein Modell so, wie der Betreiber sein **Deployment**
+    #: genannt hat (``prod-chat``, ``gpt5-eu``), und Microsoft dokumentiert
+    #: nirgends, ob ``GET /openai/v1/models`` diese Namen zurückgibt oder die
+    #: Basismodelle der Region. Eine Liste anzubieten, deren Einträge Azure mit
+    #: einem 404 beantwortet, wäre schlimmer als keine — und sie verdrängt im
+    #: Formular ausgerechnet das Textfeld, in das der richtige Name gehört.
+    #:
+    #: ``None`` heißt deshalb: **kein Abruf**, leere Liste, Textfeld. Nicht
+    #: „Katalog gerade nicht erreichbar" — das ist ein anderer Zustand mit
+    #: eigener Ruhefrist (`ai_model_catalog`).
+    #:
+    #: Die Fähigkeiten sind damit nicht verloren: `faehigkeiten_aus` greift für
+    #: einen solchen Anbieter direkt beim Nachschlagen eines einzelnen Modells
+    #: (`ai_model_catalog.finde`), statt eine Liste anzureichern, die es nicht
+    #: gibt.
+    catalog_url: str | None
     #: Wo der Betreiber seinen Schlüssel bekommt. Steht in der Oberfläche.
     key_url: str
     key_prefix: str | None = None
+    #: Ob `base_url` eine Vorlage ist, in die ein **Ressourcenname** des
+    #: Betreibers gehört (``{ressource}``). Ohne diese Marke ist die Adresse
+    #: vollständig und die Zeile trägt nichts dazu bei.
+    #:
+    #: **Das ist die eine Stelle, an der die alte Zusage nicht mehr gilt.** Bis
+    #: hierher stimmte: „es gibt keine Eingabe mehr, die zu einer Adresse
+    #: wird". Bei Azure gibt es keinen gemeinsamen Host — jede Ressource ist
+    #: ihr eigener (``https://mein-ai-hub.services.ai.azure.com/…``), und ohne
+    #: den Namen ist der Anbieter nicht erreichbar. Ihn wegzulassen hieße, den
+    #: Anbieter nicht zu unterstützen.
+    #:
+    #: Was übrig bleibt, ist trotzdem etwas anderes als die frühere freie
+    #: Basis-URL, und der Unterschied ist der Grund, warum hier kein
+    #: SSRF-Apparat zurückkommt:
+    #:
+    #: * Schema, Suffix und Pfad stehen im Programm. Der Betreiber schreibt
+    #:   **ein DNS-Label**, keine URL — kein ``http://``, kein Port, kein Pfad,
+    #:   kein Punkt.
+    #: * Geprüft wird mit ``re.fullmatch`` gegen die Form eines Labels
+    #:   (`ai_provider_service._assert_ressource`), und zwar im Service, nicht
+    #:   nur im Formular: ein Seed oder ein späterer Importweg geht am Schema
+    #:   vorbei, am Service nicht.
+    #:
+    #: **Restrisiko, benannt statt verschwiegen:** Azure Private Link lenkt
+    #: ``{name}.services.ai.azure.com`` per CNAME auf eine private Adresse.
+    #: Innerhalb eines VNet zeigt ein gültiger Name also auf ein internes Netz
+    #: — dokumentiertes Verhalten des Anbieters, nicht des Betreibers. Wer das
+    #: ausschließen will, braucht wieder eine Prüfung nach der Namensauflösung;
+    #: sie ist bewusst nicht gebaut, weil der Namensraum ``*.azure.com`` MSM
+    #: nicht gehört und die Suffixprüfung über das Ziel nichts beweist.
+    ressource_noetig: bool = False
     #: Welche API hinter dieser Adresse steht. Das ist **keine** Feinheit,
     #: sondern die Grenze zwischen zwei Adaptern:
     #:
@@ -197,14 +252,20 @@ class Anbieter:
     #: Welchen **Chatweg** dieser Anbieter spricht.
     #:
     #: * ``"chat_completions"`` — ``POST /chat/completions``, ``messages``,
-    #:   ``delta``-Rahmen. Der verbreitete Weg; alles ausser OpenAI direkt.
+    #:   ``delta``-Rahmen. Der verbreitete Weg; alles ausser OpenAI direkt und
+    #:   Claude.
     #: * ``"responses"`` — ``POST /responses``, ``input`` statt ``messages``,
     #:   getippte Ereignisse statt Deltas. OpenAIs eigener, neuerer Weg.
+    #: * ``"anthropic_messages"`` — ``POST /messages``, ``system`` neben
+    #:   ``messages`` statt als Rolle, ``tools`` mit ``input_schema``,
+    #:   benannte SSE-Ereignisse ohne ``[DONE]``. Anthropics eigener Weg,
+    #:   bedient von `anthropic_messages_adapter`.
     #:
     #: Das ist **nicht** dasselbe wie `protokoll`: das trennt Chat von
-    #: Tonerzeugung, also zwei verschiedene Aufgaben. Hier geht es um zwei
-    #: Dialekte **derselben** Aufgabe, und beide bedient
-    #: `openai_compatible_adapter` hinter einer Signatur.
+    #: Tonerzeugung, also zwei verschiedene Aufgaben. Hier geht es um Dialekte
+    #: **derselben** Aufgabe, und alle bedient `openai_compatible_adapter`
+    #: hinter einer Signatur — es leitet an das jeweilige Schwestermodul
+    #: weiter, und der Aufrufer merkt nichts davon.
     #:
     #: **Der Anlass ist gemessen und keine Geschmacksfrage.** OpenAIs
     #: ``/chat/completions`` lehnt eine Anfrage ab, die ``tools`` *und* eine

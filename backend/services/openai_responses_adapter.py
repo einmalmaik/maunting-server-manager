@@ -68,6 +68,7 @@ from services.openai_compatible_adapter import (
     _iter_sse_lines,
     _kurzfassung,
     _teilmenge,
+    schluesselkopf,
 )
 
 
@@ -289,9 +290,13 @@ async def stream_responses(
     if provider.requires_api_key and not api_key:
         raise AiProviderRequestError("AI_PROVIDER_KEY_MISSING")
 
-    headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    # Der Kopf kommt aus der Anbieterdatei und steht nicht mehr fest hier —
+    # siehe `openai_compatible_adapter.schluesselkopf`. Fuer OpenAI direkt
+    # aendert das nichts (``Authorization: Bearer`` ist dessen Vorgabe); es ist
+    # die Zeile, die einen Anbieter mit anderem Kopf ueberhaupt erst zulaesst.
+    headers = schluesselkopf(
+        ai_provider_registry.anbieter(provider.provider_kind), api_key
+    )
 
     request_body: dict[str, Any] = {
         "model": model or provider.default_model,
