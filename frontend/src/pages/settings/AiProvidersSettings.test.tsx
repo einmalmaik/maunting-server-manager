@@ -10,6 +10,7 @@ vi.mock('@/api/ai', () => ({
     listProviderSettings: vi.fn(),
     listProviderKinds: vi.fn(),
     listCatalogModels: vi.fn(),
+    findCatalogModel: vi.fn(),
     createProvider: vi.fn(),
     updateProvider: vi.fn(),
     deleteProvider: vi.fn(),
@@ -80,6 +81,7 @@ describe('AiProvidersSettings', () => {
       fuehrt_katalog: false,
       kann_hoeren: false,
     }])
+    vi.mocked(aiApi.findCatalogModel).mockReset().mockResolvedValue(null)
     vi.mocked(aiApi.getCostPolicy).mockReset().mockResolvedValue({
       currency: 'EUR',
       usd_rate: '0.92',
@@ -366,5 +368,47 @@ describe('AiProvidersSettings', () => {
     await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(7, expect.objectContaining({
       transcription_model: null,
     })))
+  })
+  it('holt die Denkstufen einzeln, wo es keinen Katalog gibt', async () => {
+    // Die Luecke, die den Worker eines Azure-Zugangs stumpf liess: die
+    // Stufenauswahl haengt an der Katalogliste, und die ist dort leer. Der
+    // Chat wusste es laengst besser — dasselbe Modell hatte je nach Bildschirm
+    // Stufen oder keine.
+    vi.mocked(aiApi.listProviderSettings).mockResolvedValue([{
+      ...provider,
+      id: 7,
+      name: 'Azure',
+      provider_kind: 'azure_openai',
+      base_url: null,
+      default_model: 'gpt-5.6-luna',
+      worker_model: 'gpt-5.6-luna',
+      azure_resource_name: 'mein-ai-hub',
+    }])
+    vi.mocked(aiApi.findCatalogModel).mockResolvedValue({
+      model_id: 'gpt-5.6-luna',
+      name: 'GPT-5.6 Luna',
+      reasoning: true,
+      efforts: ['low', 'medium', 'high'],
+      default_effort: 'medium',
+      mandatory: false,
+      recommended: false,
+    })
+    render(<AiProvidersSettings canWrite />)
+
+    // Der Katalog wird gar nicht erst gefragt — die Antwort waere immer leer.
+    expect(await screen.findByLabelText('Azure-Ressourcenname')).toBeInTheDocument()
+    expect(aiApi.listCatalogModels).not.toHaveBeenCalled()
+
+    await waitFor(() =>
+      expect(aiApi.findCatalogModel).toHaveBeenCalledWith('azure_openai', 'gpt-5.6-luna'))
+
+    // Und damit steht die feste Stufe des Workers zur Wahl.
+    const stufe = await screen.findByLabelText('Feste Denkstufe')
+    expect(stufe).toBeInTheDocument()
+
+    // Das Modell bleibt trotzdem ein Textfeld: ein einzelner Treffer ist kein
+    // Katalog, und ein Auswahlfeld mit genau einem Eintrag naehme dem
+    // Betreiber die Moeglichkeit, seinen Deployment-Namen einzutragen.
+    expect(screen.getByLabelText(/Standardmodell/i).tagName).toBe('INPUT')
   })
 })

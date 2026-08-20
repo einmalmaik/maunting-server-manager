@@ -883,7 +883,7 @@ den **Namen deiner Azure-Ressource**, nicht ihre Adresse:
 
 Daraus baut MSM `https://mein-ai-hub.services.ai.azure.com/openai/v1` bzw.
 `…/anthropic` — dieselben zwei Adressen, die dir das Azure-Portal anzeigt. Die
-Anfrage geht dann an `…/openai/v1/chat/completions` bzw. `…/anthropic/v1/messages`;
+Anfrage geht dann an `…/openai/v1/responses` bzw. `…/anthropic/v1/messages`;
 die Version steht bei Claude im Pfad der Operation und nicht in der Adresse, so
 wie Anthropic selbst sie schneidet. Schema, Suffix und Pfad gehören dem Programm; aus der
 Einstellung kommt ein einzelnes DNS-Label, geprüft gegen Buchstaben, Ziffern und
@@ -913,6 +913,24 @@ Drei Unterschiede zu OpenRouter, die im Formular sichtbar sind:
   Werkzeuge tragen `input_schema`, und der Strom besteht aus benannten
   Ereignissen ohne `[DONE]`. MSM übersetzt das; für dich ändert sich nichts
   ausser der Wahl des Anbieters.
+
+**Nachdenken funktioniert an beiden Zugängen** — und darauf kommt es an, denn
+alle aktuellen Modelle arbeiten mit Stufen statt mit einem Schalter. Zwei
+Dinge stehen dahinter, die man sonst als Fehler erlebt statt als Entwurf:
+
+- **Der GPT-Weg ist `/responses` und nicht `/chat/completions`.** Azure lehnt
+  dort — wie OpenAI direkt — jede Anfrage ab, die Werkzeuge *und* eine echte
+  Denkstufe trägt. Sichtbar war das als „Zugang läuft, bis ich eine Stufe
+  wähle". MSM nimmt deshalb denselben Weg wie bei OpenAI: `/openai/v1/responses`,
+  wo Denken und Werkzeugaufruf in dieselbe Runde passen. Für Claude gilt das
+  nicht, dessen Messages-API kennt die Einschränkung nicht.
+- **Die Stufen kommen aus dem geliehenen Katalog.** Azure führt keine
+  Modelliste, also schlägt MSM die eingetippte Kennung einzeln nach. Heisst
+  dein Deployment wie das Modell (`gpt-5.6-luna`, `claude-sonnet-5`), stehen
+  Stufen und Kontextfenster zur Verfügung — im Chat **und** bei der festen
+  Stufe des Hintergrund-Workers. Heisst es anders, bleibt beides ehrlich
+  unbekannt und die Stufenauswahl verschwindet, statt eine erfundene zu zeigen.
+  Wer die Stufen braucht, benennt sein Deployment wie das Modell.
 
 ---
 
