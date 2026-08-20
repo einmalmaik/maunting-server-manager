@@ -386,45 +386,6 @@ def list_entries(
     return _entschluesseln_lesbare(rows)
 
 
-def entries_by_key_pattern(
-    db: Session, user: User, scope: str, muster: Sequence[str]
-) -> list[tuple[AiMemoryEntry, str]]:
-    """Nur die Einträge eines Bereichs, deren **Schlüssel** auf ein Muster passt.
-
-    Der Schlüssel steht im Klartext in der Tabelle, der Wert nicht. Wer etwas
-    sucht, das sich schon am Schlüssel erkennen lässt, kann die Menge deshalb in
-    der Datenbank einschränken und danach eine Handvoll Zeilen öffnen — statt
-    den ganzen Bereich zu entschlüsseln und das meiste gleich wieder
-    wegzuwerfen.
-
-    Gebaut für den Lageblock (`ai_lage.zone_des_benutzers`), und der ist auch
-    die Begründung: er sucht bei **jeder** Chatnachricht die Zeitzone und las
-    dafür den ganzen persönlichen Vorrat — bei 5.000 Einträgen 5.000
-    Sidecar-Roundtrips vor dem ersten Byte an den Anbieter, für eine einzige
-    Zeile, und derselbe Preis bei den vielen Benutzern, die gar keine Zeitzone
-    hinterlegt haben.
-
-    ``muster`` sind SQL-``LIKE``-Formen (``%zeitzone%``), verglichen ohne
-    Rücksicht auf Groß- und Kleinschreibung. Sortiert wird wie in `list_entries`
-    nach Schlüssel: wer unter mehreren Treffern den ersten nimmt, bekommt damit
-    denselben wie vorher.
-
-    Eine Mengenbegrenzung, keine Rechteprüfung — die besorgt `scope_identity`
-    wie überall sonst.
-    """
-    identity, _, _, _ = scope_identity(db, user, scope, None)
-    rows = (
-        db.query(AiMemoryEntry)
-        .filter(
-            AiMemoryEntry.scope_identity == identity,
-            or_(*(AiMemoryEntry.key.ilike(form) for form in muster)),
-        )
-        .order_by(AiMemoryEntry.key)
-        .all()
-    )
-    return _entschluesseln_lesbare(rows)
-
-
 @dataclass(frozen=True)
 class Gedaechtnisseite:
     """Ein Ausschnitt einer Gedächtnisansicht und die zwei Zahlen daneben.

@@ -1,7 +1,19 @@
 from datetime import datetime
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, field_validator
+
+
+def _validate_time_zone(value: str | None) -> str | None:
+    if value is None or value.strip() == "":
+        return None
+    cleaned = value.strip()
+    try:
+        ZoneInfo(cleaned)
+        return cleaned
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"'{cleaned}' ist keine gültige IANA-Zeitzone.") from exc
 
 
 class UserCreate(BaseModel):
@@ -9,6 +21,12 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
     captcha_token: str | None = None
+    time_zone: str | None = None
+
+    @field_validator("time_zone")
+    @classmethod
+    def check_time_zone(cls, v: str | None) -> str | None:
+        return _validate_time_zone(v)
 
 
 class UserUpdate(BaseModel):
@@ -17,6 +35,21 @@ class UserUpdate(BaseModel):
     two_factor_enabled: bool | None = None
     email_notifications: bool | None = None
     ai_notifications: bool | None = None
+    time_zone: str | None = None
+
+    @field_validator("time_zone")
+    @classmethod
+    def check_time_zone(cls, v: str | None) -> str | None:
+        return _validate_time_zone(v)
+
+
+class TimezoneUpdateRequest(BaseModel):
+    time_zone: str | None = None
+
+    @field_validator("time_zone")
+    @classmethod
+    def check_time_zone(cls, v: str | None) -> str | None:
+        return _validate_time_zone(v)
 
 
 class UserResponse(BaseModel):
@@ -29,6 +62,7 @@ class UserResponse(BaseModel):
     two_factor_enabled: bool
     email_notifications: bool
     ai_notifications: bool = True
+    time_zone: str | None = None
     role_id: int | None = None
     role_ids: list[int] = Field(default_factory=list)
     created_at: datetime

@@ -1155,3 +1155,46 @@ async def test_a_failing_foreign_catalog_leaves_the_answer_unknown() -> None:
 #: — dort, wo die Zusage ueber das Vorwaermen ohnehin gefuehrt wird. Zwei Tests
 #: ueber dieselbe Zeile waeren zwei Wahrheiten, und die zweite liefe beim
 #: naechsten Umbau der ersten hinterher.
+
+
+@pytest.mark.asyncio
+async def test_the_form_gets_reasoning_levels_where_there_is_no_catalog() -> None:
+    """Die Luecke, die den Worker eines Azure-Zugangs stumpf liess.
+
+    Das Formular las die Denkstufen aus der **Katalogliste**, und die ist bei
+    Azure leer. Der Chat wusste es laengst besser — er fragt `finde` —, also
+    hatte dasselbe Modell je nach Bildschirm Stufen oder keine. Ein Anbieter,
+    an dem sich die Stufe des Hintergrund-Workers nicht einstellen laesst, ist
+    genau so weit unbrauchbar wie einer ohne Nachdenken.
+
+    Der Endpunkt geht denselben Weg wie der Chat. Kennt der geliehene Katalog
+    die Kennung nicht, kommt `None` — keine erfundene Auswahl.
+    """
+    from routers.ai_providers import find_catalog_model
+
+    class _Anfrage:
+        def __init__(self, client: httpx.AsyncClient) -> None:
+            self.app = type("A", (), {"state": type("S", (), {"ai_http_client": client})})
+
+    async with _client(lambda _r: httpx.Response(200, json=ANTWORT)) as client:
+        antwort = await find_catalog_model(
+            kind="azure_anthropic", name="  claude-opus-5  ",
+            request=_Anfrage(client), _=None,  # type: ignore[arg-type]
+        )
+        assert antwort is not None
+        assert antwort.model_id == "claude-opus-5"
+        assert antwort.reasoning is True
+        # Genau die Stufen des geliehenen Eintrags, in der Rangfolge von
+        # `ai_reasoning` — nie eine Liste aus dem Code.
+        assert antwort.efforts == ["low", "medium", "high", "xhigh", "max"]
+
+        # Ein frei benanntes Deployment bleibt unbekannt, statt geraten zu werden.
+        assert await find_catalog_model(
+            kind="azure_anthropic", name="prod-chat",
+            request=_Anfrage(client), _=None,  # type: ignore[arg-type]
+        ) is None
+        # Und eine leere Kennung fragt gar nicht erst.
+        assert await find_catalog_model(
+            kind="azure_anthropic", name="   ",
+            request=_Anfrage(client), _=None,  # type: ignore[arg-type]
+        ) is None

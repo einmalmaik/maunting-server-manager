@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ChevronDown, Search } from 'lucide-react'
 import { cx } from '@/utils/classNames'
 
 // Unter dieser Hoehe lohnt sich "nach unten" nicht mehr — dann sieht man eine
@@ -24,6 +24,9 @@ interface DropdownProps {
   onChange: (value: string) => void
   options: DropdownOption[]
   placeholder?: string
+  searchable?: boolean
+  searchPlaceholder?: string
+  emptyText?: string
   disabled?: boolean
   className?: string
   buttonClassName?: string
@@ -42,6 +45,9 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
       onChange,
       options,
       placeholder = 'Auswählen',
+      searchable = false,
+      searchPlaceholder = 'Suchen …',
+      emptyText = 'Keine Einträge',
       disabled = false,
       className = '',
       buttonClassName = '',
@@ -54,12 +60,20 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
     ref,
   ) => {
     const [open, setOpen] = useState(false)
+    const [query, setQuery] = useState('')
     const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null)
     const rootRef = useRef<HTMLDivElement | null>(null)
     const menuRef = useRef<HTMLDivElement | null>(null)
     const listId = useId()
     const safeOptions = Array.isArray(options) ? options : []
     const selected = safeOptions.find((option) => option.value === value)
+
+    const filteredOptions = searchable && query.trim()
+      ? safeOptions.filter((option) =>
+          option.label.toLowerCase().includes(query.toLowerCase().trim()) ||
+          (option.hint && option.hint.toLowerCase().includes(query.toLowerCase().trim())),
+        )
+      : safeOptions
 
     useEffect(() => {
       if (!open) return
@@ -218,42 +232,65 @@ export const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
                   data-msm-dropdown-menu=""
                   className="flex flex-col overflow-hidden rounded-lg border border-outline-variant bg-surface-container-high shadow-panel"
                 >
-                  {/* `max-h-64` stand hier fest verdrahtet und ueberstimmte die
-                      gemessene Hoehe. Jetzt erbt die Liste den Platz, den die
-                      Positionierung oben tatsaechlich ermittelt hat. */}
+                  {searchable && (
+                    <div className="border-b border-outline-variant/60 p-1.5">
+                      <div className="relative">
+                        <Search
+                          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant/50"
+                          aria-hidden="true"
+                        />
+                        <input
+                          type="text"
+                          autoFocus
+                          value={query}
+                          onChange={(e) => setQuery(e.target.value)}
+                          placeholder={searchPlaceholder}
+                          className="msm-input w-full py-1.5 pl-8 pr-2 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        />
+                      </div>
+                    </div>
+                  )}
                   <ul id={listId} role="listbox" className="min-h-0 flex-1 overflow-y-auto p-1">
-                    {options.map((option) => {
-                      const active = option.value === value
-                      return (
-                        <li key={option.value}>
-                          <button
-                            type="button"
-                            role="option"
-                            aria-selected={active}
-                            disabled={option.disabled}
-                            onClick={() => {
-                              onChange(option.value)
-                              setOpen(false)
-                            }}
-                            className={cx(
-                              'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:cursor-not-allowed disabled:opacity-40',
-                              active
-                                ? 'bg-primary/10 text-primary'
-                                : 'text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface',
-                            )}
-                          >
-                            {option.icon}
-                            <span className="min-w-0 flex-1 truncate">
-                              {option.label}
-                              {option.hint && (
-                                <span className="ml-2 text-xs text-on-surface-variant/60">{option.hint}</span>
+                    {filteredOptions.length === 0 ? (
+                      <li className="px-3 py-4 text-center text-xs text-on-surface-variant/60">
+                        {emptyText}
+                      </li>
+                    ) : (
+                      filteredOptions.map((option) => {
+                        const active = option.value === value
+                        return (
+                          <li key={option.value}>
+                            <button
+                              type="button"
+                              role="option"
+                              aria-selected={active}
+                              disabled={option.disabled}
+                              onClick={() => {
+                                onChange(option.value)
+                                setOpen(false)
+                              }}
+                              className={cx(
+                                'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:cursor-not-allowed disabled:opacity-40',
+                                active
+                                  ? 'bg-primary/10 text-primary'
+                                  : 'text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface',
                               )}
-                            </span>
-                            {active && <Check className="h-4 w-4 shrink-0 text-secondary" aria-hidden="true" />}
-                          </button>
-                        </li>
-                      )
-                    })}
+                            >
+                              {option.icon}
+                              <span className="min-w-0 flex-1 truncate">
+                                {option.label}
+                                {option.hint && (
+                                  <span className="ml-2 text-xs text-on-surface-variant/60">{option.hint}</span>
+                                )}
+                              </span>
+                              {active && <Check className="h-4 w-4 shrink-0 text-secondary" aria-hidden="true" />}
+                            </button>
+                          </li>
+                        )
+                      })
+                    )}
                   </ul>
                 </div>,
                 document.body,

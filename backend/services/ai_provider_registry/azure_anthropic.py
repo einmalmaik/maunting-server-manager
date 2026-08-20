@@ -75,12 +75,24 @@ ANBIETER = Anbieter(
     key_url="https://ai.azure.com/",
     key_prefix=None,
     ressource_noetig=True,
-    # ``api-key`` — so im cURL-Beispiel der Anthropic-Doku. Microsofts eigenes
-    # Beispiel nimmt ``x-api-key``; Anthropic nennt beide ausdrücklich
-    # („Use either the ``api-key`` or ``x-api-key`` header"). ``Authorization:
-    # Bearer`` ist hier **nicht** gleichwertig: dieser Kopf trägt bei Claude auf
-    # Azure ein Entra-ID-Token, nicht den Ressourcenschlüssel.
-    schluessel_kopf="api-key",
+    # ``x-api-key`` — so in Microsofts eigenem cURL-Beispiel für Claude auf
+    # Foundry. Anthropic nennt zwar beide Köpfe („Use either the ``api-key`` or
+    # ``x-api-key`` header") und benutzt im eigenen Beispiel ``api-key``; hier
+    # stand deshalb bis zum 20.08.2026 ``api-key``.
+    #
+    # **Der Betrieb sagt etwas anderes.** Derselbe Schlüssel, der an
+    # ``…/openai/v1`` durchgeht, wurde an ``…/anthropic/v1/messages`` mit
+    # ``api-key`` abgewiesen — und zwar mit der Meldung des Azure-Gateways
+    # („Access denied due to invalid subscription key or wrong API endpoint"),
+    # nicht mit einer Antwort von Anthropic. Ein Gateway, das den Schlüssel im
+    # erwarteten Kopf nicht findet, antwortet genau so. Bei zwei Belegen, von
+    # denen einer nachweislich nicht funktioniert, gilt der andere.
+    #
+    # ``Authorization: Bearer`` ist hier **nicht** gleichwertig: dieser Kopf
+    # trägt bei Claude auf Azure ein Entra-ID-Token, nicht den
+    # Ressourcenschlüssel. Deshalb tragen die beiden Azure-Zugänge trotz
+    # derselben Ressource verschiedene Köpfe — genau dafür ist das Feld da.
+    schluessel_kopf="x-api-key",
     schluessel_praefix="",
     faehigkeiten_aus="openrouter",
     faehigkeiten_praefix="anthropic/",

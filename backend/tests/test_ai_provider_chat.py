@@ -409,7 +409,7 @@ def test_chat_stream_persists_usage_and_replays_without_second_provider_call(
         assert api_key == "sk-or-v1-operator-secret"
         # Ganz am Ende steht seit der Cache-Umstellung der Lageblock, davor die
         # Frage. Gesucht wird sie deshalb im Gespräch und nicht an einem Index.
-        assert any(item.get("content") == "Wie geht es?" for item in messages)
+        assert any("Wie geht es?" in (item.get("content") or "") for item in messages)
         usage.total_tokens = 42
         yield StreamChunk("content", "Alles ")
         yield StreamChunk("content", "gut.")

@@ -55,19 +55,23 @@ names") —, kennt MSM Kontextfenster und Denkstufen. Heißt es ``prod-chat``,
 bleibt beides unbekannt, und „unbekannt" heißt hier wie überall nie „klein"
 oder „kann er nicht".
 
-**Zwei Dinge sind ausdrücklich ungemessen** und stehen hier, damit der nächste
-Leser sie nicht für geprüft hält:
+**Die erste offene Frage ist beantwortet — vom Betrieb.** Hier stand, es sei
+ungemessen, ob Azures ``/chat/completions`` wie OpenAIs eigenes eine Anfrage
+mit ``tools`` *und* echter Denkstufe ablehnt. Es tut es: ein Zugang mit
+``gpt-5.6-luna`` lief ohne Stufe und ging mit jeder Stufe nicht mehr durch.
+Azures Referenz behauptet für ``gpt-5.1`` das Gegenteil („Tool calls are
+supported for all reasoning values") — sie stimmt für diesen Endpunkt nicht.
+Der Eintrag steht deshalb auf ``protokoll_chat="responses"``.
 
-* Ob Azures ``/chat/completions`` — wie OpenAIs eigenes — eine Anfrage mit
-  ``tools`` *und* echter Denkstufe ablehnt. Bei OpenAI direkt war das der
-  Grund für ``protokoll_chat="responses"``; gemessen wurde es dort, nicht hier.
-  Azures Referenz sagt für ``gpt-5.1`` sogar das Gegenteil („Tool calls are
-  supported for all reasoning values"). Sollte es doch scheitern, ist die
-  Korrektur eine Zeile: ``protokoll_chat="responses"`` — ``/openai/v1/responses``
-  ist auf Azure belegt. Sie steht hier bewusst noch nicht, weil ``/responses``
-  bei den Nicht-OpenAI-Modellen derselben Ressource (Llama, Mistral, DeepSeek)
-  nach aller Wahrscheinlichkeit fehlt und der Eintrag dann weniger könnte als
-  jetzt.
+Der damalige Vorbehalt gegen ``/responses`` — es fehle womöglich bei den
+Nicht-OpenAI-Modellen derselben Ressource — ist ebenfalls ausgeräumt, und zwar
+von Microsoft selbst: „Responses API also works with Foundry Models sold by
+Azure, such as Microsoft AI, DeepSeek, and Grok models." Ein Eintrag deckt
+weiterhin beide Familien.
+
+**Ungemessen bleibt eines**, und es steht hier, damit der nächste Leser es
+nicht für geprüft hält:
+
 * Ob eine aus OpenRouter geerbte Stufe ``max`` durchgeht. Azures Enum ist
   ``none|minimal|low|medium|high|xhigh``. Getroffen wird der Fall nur, wenn das
   Deployment wie das Modell heißt, OpenRouter für dieses Modell ``max`` führt
@@ -116,7 +120,28 @@ ANBIETER = Anbieter(
     # OpenRouters ``reasoning`` und ``cache_control`` stehen hier bewusst
     # **nicht** — das sind deren Erweiterungen.
     anfrage_erweiterungen=frozenset({"reasoning_effort"}),
-    protokoll_chat="chat_completions",
+    # **Der Chatweg ist `/responses`**, aus demselben gemessenen Grund wie bei
+    # `openai`. Hier stand bis zum 20.08.2026 ``chat_completions`` mit dem
+    # ausdrücklichen Vermerk, es sei ungemessen, ob Azure sich wie OpenAI
+    # verhält. Es tut es: der Betreiber hat einen Azure-Zugang mit
+    # ``gpt-5.6-luna`` eingerichtet, und **sobald im Chat eine Denkstufe
+    # gewählt war, ging keine Anfrage mehr durch**. Ohne Stufe lief derselbe
+    # Zugang. Das ist genau die Grenze, die OpenAIs eigene Ablehnung benennt:
+    #
+    #     Function tools with reasoning_effort are not supported for <modell>
+    #     in /v1/chat/completions. To use function tools, use /v1/responses
+    #     or set reasoning_effort to 'none'.
+    #
+    # Die Grenze gehört dem Endpunkt und nicht dem Anbieter — Azure führt
+    # denselben Code. Der zweite Ausweg (``reasoning_effort`` auf ``none``
+    # festnageln) ist hier so verworfen wie dort: MSM schickt im Chat immer
+    # Werkzeuge mit, und ein Zugang, an dem Nachdenken und Werkzeuge einander
+    # ausschliessen, ist für den Hintergrund-Worker wertlos.
+    #
+    # Die Adresse passt ohne Zutun: `openai_responses_adapter` hängt
+    # ``/responses`` an, was ``…/openai/v1/responses`` ergibt — wortgleich mit
+    # Microsofts cURL-Beispiel zur v1-API.
+    protokoll_chat="responses",
     # **Kein Gehör.** Azure hat ``/openai/v1/audio/transcriptions``, aber nur
     # unter ``?api-version=preview`` — und für einen Query-Parameter hat weder
     # diese Registry ein Feld noch `ai_stt_endpunkt` einen Weg. Leer heisst

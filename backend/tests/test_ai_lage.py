@@ -325,8 +325,9 @@ def test_der_block_nennt_datum_wochentag_und_zone(db: Session) -> None:
     auf einen Termin abbilden. Und UTC steht daneben, weil jedes
     Werkzeugergebnis in UTC spricht.
     """
-    user = _benutzer(db, "mituhr", "ai.chat.use", "ai.memory.use")
-    _zone_merken(db, user, "Europe/Berlin")
+    user = _benutzer(db, "mituhr", "ai.chat.use")
+    user.time_zone = "Europe/Berlin"
+    db.commit()
 
     block = ai_lage.lageblock(db, user)
     jetzt = datetime.now(timezone.utc)
@@ -340,151 +341,39 @@ def test_der_block_nennt_datum_wochentag_und_zone(db: Session) -> None:
     assert any(tag in block for tag in ai_lage.WOCHENTAGE)
 
 
-def test_eine_hinterlegte_zone_kommt_mit_ihrer_herkunft(db: Session) -> None:
-    """Woher die Zone stammt, gehört zur Zone dazu.
-
-    Heute ist das Gedächtnis die einzige Quelle; kommt morgen eine
-    Benutzerspalte dazu, ändert sich der Text und nicht der Aufbau.
-    """
-    user = _benutzer(db, "zonebekannt", "ai.chat.use", "ai.memory.use")
-    _zone_merken(db, user, "America/New_York")
-
-    assert ai_lage.zone_des_benutzers(db, user) == (
-        "America/New_York", "aus dem Gedächtnis"
-    )
-    assert "Zeitzone des Benutzers: America/New_York (aus dem Gedächtnis)." in (
-        ai_lage.lageblock(db, user)
-    )
-
-
-def test_ohne_hinterlegte_zone_sagt_der_block_unbekannt(db: Session) -> None:
-    """Der Kern des Ganzen: eine Annahme, die das Modell kennt.
-
-    Ohne diesen Satz führe der Block eine Zone vor, die niemand bestätigt hat,
-    und `zone_pruefen` dürfte nicht mehr streng sein.
-    """
-    user = _benutzer(db, "ohnezone", "ai.chat.use", "ai.memory.use")
-
-    assert ai_lage.zone_des_benutzers(db, user) is None
-    assert "Zeitzone des Benutzers: unbekannt, Panel läuft in " in (
-        ai_lage.lageblock(db, user)
-    )
-
-
-def test_ohne_einwilligung_bleibt_das_gedaechtnis_zu(db: Session) -> None:
-    """Der Lageblock ist kein Seitenweg am Einwilligungsschalter vorbei.
-
-    Der Eintrag existiert, das Recht auch — nur der Schalter steht auf aus.
-    Dann gilt die Zone als unbekannt, wie alles andere aus diesem Bereich auch.
-    """
-    user = _benutzer(db, "ohnejawort", "ai.chat.use", "ai.memory.use")
-    _zone_merken(db, user, "Europe/Berlin")
-    ai_memory_service.set_preference(db, user, False)
-
-    assert ai_lage.zone_des_benutzers(db, user) is None
-    assert "unbekannt" in ai_lage.lageblock(db, user)
-
-
-def test_ohne_das_recht_bleibt_das_gedaechtnis_zu(db: Session) -> None:
-    """Dasselbe eine Ebene höher: ohne `ai.memory.use` wird nicht gelesen."""
-    user = _benutzer(db, "ohnerecht", "ai.chat.use", "ai.memory.use")
-    _zone_merken(db, user, "Europe/Berlin")
-    set_user_roles(db, user, [])
-    db.refresh(user)
-
-    assert ai_lage.zone_des_benutzers(db, user) is None
-
-
-def test_die_zone_oeffnet_nicht_das_ganze_gedaechtnis(
-    db: Session, monkeypatch,
-) -> None:
-    """Eine Frage nach einer Zeile darf nicht fünftausend Zeilen kosten.
-
-    Der Lageblock hängt in **jeder** Anfrage, und diese Funktion sucht in jeder
-    davon die Zeitzone. Sie las dafür den ganzen persönlichen Vorrat auf einmal;
-    jede Zeile darin ist ein eigener HTTP-POST an den DIS-Sidecar. Seit ein
-    Bereich 5.000 Einträge fassen darf, sind das gemessen 10,3 s vor dem ersten
-    Byte an den Anbieter — für eine Zeile, deren Schlüssel unverschlüsselt
-    daneben steht.
-
-    Gezählt werden die Entschlüsselungen und nicht das Ergebnis: eine richtige
-    Zone bewiese nur, dass gefunden wurde, nicht wie teuer.
-    """
-    from services.dis_client import DisClient
-
-    user = _benutzer(db, "zonesparsam", "ai.chat.use", "ai.memory.use")
-    _zone_merken(db, user, "Europe/Berlin")
-    for nummer in range(12):
-        ai_memory_service.upsert_entry(
-            db, user=user, scope="user", server_id=None,
-            key=f"notiz.{nummer:02d}", value=f"Irgendein Merksatz Nummer {nummer}",
-        )
+def test_hinterlegte_benutzer_zeitzone_wird_im_lageblock_verwendet(db: Session) -> None:
+    """Die Zeitzone kommt direkt und sauber aus user.time_zone."""
+    user = _benutzer(db, "zonebekannt", "ai.chat.use")
+    user.time_zone = "America/New_York"
     db.commit()
 
-    echt = DisClient.decrypt
-    geoeffnet: list[str] = []
-
-    def zaehlend(payload, *, aad):
-        geoeffnet.append(aad)
-        return echt(payload, aad=aad)
-
-    monkeypatch.setattr(DisClient, "decrypt", staticmethod(zaehlend))
-
-    assert ai_lage.zone_des_benutzers(db, user) == (
-        "Europe/Berlin", "aus dem Gedächtnis"
-    )
-    assert len(geoeffnet) == 1, (
-        "es wurde mehr geöffnet als der eine Zeitzonen-Eintrag — "
-        f"{len(geoeffnet)} Entschlüsselungen für eine Zeile"
-    )
+    assert ai_lage.zone_des_benutzers(user) == "America/New_York"
+    block = ai_lage.lageblock(db, user)
+    assert "America/New_York" in block
+    assert "Zeitzone des Benutzers: America/New_York." in block
 
 
-def test_ohne_zonenschluessel_wird_gar_nichts_geoeffnet(
-    db: Session, monkeypatch,
-) -> None:
-    """Der häufigste Fall überhaupt: es gibt keine hinterlegte Zone.
-
-    Dann darf der Lageblock den Vorrat nicht einmal anfassen. Er tut es auch
-    nicht — der Schlüssel steht im Klartext, die Abfrage findet nichts, und
-    entschlüsselt wird nichts.
-    """
-    from services.dis_client import DisClient
-
-    user = _benutzer(db, "keinezone", "ai.chat.use", "ai.memory.use")
-    ai_memory_service.set_preference(db, user, True)
-    for nummer in range(5):
-        ai_memory_service.upsert_entry(
-            db, user=user, scope="user", server_id=None,
-            key=f"vorliebe.{nummer}", value=f"Irgendetwas {nummer}",
-        )
+def test_ohne_hinterlegte_zone_wird_utc_als_fallback_verwendet(db: Session) -> None:
+    """Hat der Benutzer keine Zeitzone gewählt, fällt das Panel deterministisch auf UTC zurück."""
+    user = _benutzer(db, "ohnezone", "ai.chat.use")
+    user.time_zone = None
     db.commit()
 
-    geoeffnet: list[str] = []
-
-    def zaehlend(payload, *, aad):
-        geoeffnet.append(aad)
-        raise AssertionError("hier darf nichts entschlüsselt werden")
-
-    monkeypatch.setattr(DisClient, "decrypt", staticmethod(zaehlend))
-
-    assert ai_lage.zone_des_benutzers(db, user) is None
-    assert geoeffnet == []
+    assert ai_lage.zone_des_benutzers(user) == "UTC"
+    block = ai_lage.lageblock(db, user)
+    assert "Zeitzone des Benutzers: UTC." in block
 
 
-def test_freier_text_unter_dem_schluessel_zeitzone_ist_keine_zone(
-    db: Session,
-) -> None:
-    """Im Gedächtnis steht, was ein Mensch hineinschreibt.
+def test_ungueltige_zeitzone_am_benutzer_faellt_auf_utc_zurueck(db: Session) -> None:
+    """Ein ungültiger String fällt sicher auf UTC zurück."""
+    user = _benutzer(db, "freitext", "ai.chat.use")
+    user.time_zone = "abends meist müde"
+    db.commit()
 
-    „abends meist müde“ unter dem Schlüssel „zeitzone“ darf nicht als Zone
-    weitergereicht werden — `zone_pruefen` wiese sie ohnehin ab, und das Modell
-    hätte eine Runde verloren.
-    """
-    user = _benutzer(db, "freitext", "ai.chat.use", "ai.memory.use")
-    _zone_merken(db, user, "abends meist müde")
+    assert ai_lage.zone_des_benutzers(user) == "UTC"
+    block = ai_lage.lageblock(db, user)
+    assert "Zeitzone des Benutzers: UTC." in block
 
-    assert ai_lage.zone_des_benutzers(db, user) is None
-    assert "unbekannt" in ai_lage.lageblock(db, user)
 
 
 # ── Der autonome Modus ────────────────────────────────────────────────────

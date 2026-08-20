@@ -362,11 +362,51 @@ function ProviderForm({
     return () => { active = false }
   }, [draft.provider_kind, draft.id, fuehrtKatalog])
 
-  const gewaehltesModell = models?.find((item) => item.model_id === draft.default_model) ?? null
+  /*
+   * Anbieter ohne Katalog: die zwei eingetippten Kennungen einzeln nachschlagen.
+   *
+   * Sonst bliebe bei Azure die Auswahl der Worker-Denkstufe leer — sie haengt
+   * an der Katalogliste, und die ist dort leer. Der Chat wusste es laengst
+   * besser (er fragt `finde`), das Formular nicht: dasselbe Modell hatte je
+   * nach Bildschirm Stufen oder keine.
+   *
+   * Nur bei `fuehrt_katalog === false`. Ein Anbieter **mit** Katalog behaelt
+   * seine Liste als einzige Wahrheit — sonst zeigte das Formular Stufen zu
+   * einem Modell, das seine Liste nicht fuehrt.
+   */
+  const [einzelmodelle, setEinzelmodelle] = useState<Record<string, AiCatalogModel | null>>({})
+  const kennungen = [draft.default_model?.trim(), draft.worker_model?.trim()]
+    .filter((wert): wert is string => Boolean(wert))
+    .join(' ')
+  useEffect(() => {
+    if (fuehrtKatalog !== false || !draft.provider_kind || !kennungen) return
+    let active = true
+    // Kurz warten: die Kennung ist ein Textfeld, und ohne diese Pause liefe je
+    // Tastendruck eine Anfrage.
+    const timer = window.setTimeout(() => {
+      void Promise.all(
+        kennungen.split(' ').map((kennung) =>
+          aiApi.findCatalogModel(draft.provider_kind, kennung)
+            .then((modell) => [kennung, modell] as const)
+            .catch(() => [kennung, null] as const),
+        ),
+      ).then((paare) => {
+        if (active) setEinzelmodelle((alt) => ({ ...alt, ...Object.fromEntries(paare) }))
+      })
+    }, 400)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [draft.provider_kind, fuehrtKatalog, kennungen])
+
+  const nachgeschlagen = (kennung: string | null | undefined): AiCatalogModel | null =>
+    (kennung?.trim() ? einzelmodelle[kennung.trim()] : null) ?? null
+
+  const gewaehltesModell = models?.find((item) => item.model_id === draft.default_model)
+    ?? nachgeschlagen(draft.default_model)
   // Das Arbeitsmodell der Worker — aus demselben Katalog. `null`, wenn keines
   // gewaehlt ist oder der Katalog es nicht (mehr) fuehrt; die Stufenwahl
   // verschwindet dann mit, denn Stufen kommen immer aus dem Katalog.
-  const workerModell = models?.find((item) => item.model_id === draft.worker_model) ?? null
+  const workerModell = models?.find((item) => item.model_id === draft.worker_model)
+    ?? nachgeschlagen(draft.worker_model)
   // Kommt aus dem Katalog, nicht aus der Oberflaeche: fuehrt der Anbieter die
   // empfohlene Kennung nicht mehr, gibt es hier `null` und die Empfehlung
   // verschwindet von selbst — statt auf ein Modell zu zeigen, das es nicht gibt.

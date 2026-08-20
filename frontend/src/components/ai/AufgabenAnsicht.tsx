@@ -5,9 +5,11 @@ import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiTaskEntry, type AiTaskWrite } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
-import { Button, DateTimePicker, Dropdown, Switch } from '@/Singra/UI'
+import { Button, DateTimePicker, Dropdown, type DropdownOption, Switch } from '@/Singra/UI'
+import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
+import { formatPanelTime, getAvailableTimezones } from '@/utils/timeFormat'
 
 /**
  * Was das Formular hält — bewusst flach und vollständig, nicht die Teilangaben
@@ -28,7 +30,8 @@ interface FormularDaten {
   act: boolean
 }
 
-function leeresFormular(): FormularDaten {
+function leeresFormular(defaultTz?: string | null): FormularDaten {
+  const browserTz = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : ''
   return {
     title: '',
     instruction: '',
@@ -37,7 +40,7 @@ function leeresFormular(): FormularDaten {
     weekdays: [],
     interval_hours: 24,
     once_at: '',
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+    timezone: defaultTz || browserTz || 'UTC',
     email: false,
     act: false,
   }
@@ -114,6 +117,7 @@ const INTERVAL_OPTIONS = [1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168]
  */
 export function AufgabenAnsicht() {
   const { t, i18n } = useTranslation()
+  const { user } = useAuthStore()
   const [aufgaben, setAufgaben] = useState<AiTaskEntry[]>([])
   const [laedt, setLaedt] = useState(true)
   const [formular, setFormular] = useState<FormularDaten | null>(null)
@@ -137,6 +141,14 @@ export function AufgabenAnsicht() {
       label: t('ai.tasks.planInterval', { count: stunden }),
     }))
   }, [formular?.interval_hours, t])
+
+  const zeitzonenOptionen: DropdownOption[] = useMemo(() => {
+    const zones = getAvailableTimezones()
+    const current = formular?.timezone ? [formular.timezone] : []
+    const userTz = user?.time_zone ? [user.time_zone] : []
+    const all = [...new Set([...userTz, ...current, ...zones])].sort()
+    return all.map((tz) => ({ value: tz, label: tz }))
+  }, [user?.time_zone, formular?.timezone])
 
   const laden = useCallback(async () => {
     const liste = await aiApi.listTasks()
@@ -171,7 +183,7 @@ export function AufgabenAnsicht() {
         : '—'
       return t('ai.tasks.planOnce', { when: wann })
     }
-    const zeit = aufgabe.time_of_day ?? '—'
+    const zeit = aufgabe.time_of_day ? formatPanelTime(aufgabe.time_of_day, '24h') : '—'
     if (aufgabe.weekdays) {
       const tage = aufgabe.weekdays
         .split(',')
@@ -264,7 +276,7 @@ export function AufgabenAnsicht() {
               type="button" variant="primary" size="sm"
               onClick={() => {
                 setBearbeitet(null)
-                setFormular(leeresFormular())
+                setFormular(leeresFormular(user?.time_zone))
               }}
             >
               <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
@@ -441,12 +453,15 @@ export function AufgabenAnsicht() {
                   >
                     {t('ai.tasks.timezone')}
                   </label>
-                  <input
+                  <Dropdown
                     id="aufgabe-zeitzone"
-                    className="msm-input max-w-64"
                     value={formular.timezone}
-                    onChange={(event) => setze('timezone', event.target.value)}
-                    required
+                    onChange={(wert) => setze('timezone', wert)}
+                    options={zeitzonenOptionen}
+                    searchable={true}
+                    searchPlaceholder={t('ai.tasks.timezoneSearch', 'Zeitzone suchen …')}
+                    className="max-w-64"
+                    aria-label={t('ai.tasks.timezone')}
                   />
                   <p className="mt-1 text-xs text-on-surface-variant">
                     {t('ai.tasks.timezoneHint')}

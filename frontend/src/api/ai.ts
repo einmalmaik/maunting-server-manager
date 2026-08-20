@@ -1012,6 +1012,19 @@ export const aiApi = {
       `/ai/settings/provider-kinds/${encodeURIComponent(kind)}/models${anhang ? `?${anhang}` : ''}`,
     )
   },
+  /**
+   * Ein **einzelnes** Modell — für Anbieter, die keine Liste führen.
+   *
+   * Bei Azure heisst ein Modell so, wie der Betreiber sein Deployment genannt
+   * hat; einen Katalog zum Durchblättern gibt es nicht. Ohne diesen Weg bliebe
+   * die Auswahl der Worker-Denkstufe dort leer, weil sie an der Katalogliste
+   * hängt. `null` heisst „unter dieser Kennung ist nichts bekannt" — dann
+   * zeigt die Oberfläche keine Stufen statt erfundener.
+   */
+  findCatalogModel: (kind: string, name: string) =>
+    api<AiCatalogModel | null>(
+      `/ai/settings/provider-kinds/${encodeURIComponent(kind)}/model?name=${encodeURIComponent(name)}`,
+    ),
   testProvider: (id: number) => api<AiProviderTestResult>(`/ai/settings/providers/${id}/test`, {
     method: 'POST',
   }),

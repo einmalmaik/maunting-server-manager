@@ -16,7 +16,7 @@ from models import User, EmailVerification
 from services.dis_client import DisClient
 from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest
 from schemas import ResendVerificationRequest
-from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest
+from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest
 from services import AuthService, EmailService
 from services.email_verification_service import EmailVerificationService
 from services.jwt_blacklist_service import blacklist_jwt
@@ -477,6 +477,22 @@ def update_notifications(
         "email_notifications": user.email_notifications,
         "ai_notifications": user.ai_notifications,
     }
+
+
+@router.patch("/me/timezone")
+def update_timezone(
+    req: TimezoneUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Setzt die kanonische IANA-Zeitzone des Benutzers (z. B. 'Europe/Berlin')."""
+    user.time_zone = req.time_zone
+    db.commit()
+    return {
+        "time_zone": user.time_zone,
+    }
+
 
 
 @router.post("/change-password")

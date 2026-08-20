@@ -39,87 +39,25 @@ WOCHENTAGE = (
     "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag",
 )
 
-#: Wonach im Gedächtnis gesucht wird. Der Schlüssel steht im Klartext in der
-#: Tabelle, der Wert nicht — deshalb ist er der einzige billige Filter, den es
-#: hier gibt. Beide Sprachen, weil beide vorkommen: die Oberfläche ist deutsch,
-#: die Modelle schreiben ihre Schlüssel gern englisch.
-_ZONENSCHLUESSEL = ("%zeitzone%", "%timezone%")
-
 #: Ungefähre Länge des fertigen Blocks in Zeichen. Für den Ring am Absendeknopf
-#: (`ai_context_service.geschaetzte_belegung`), der den Block nicht bauen darf:
-#: das Gedächtnis liegt verschlüsselt, und jeder Eintrag kostete einen Aufruf des
-#: Sidecars — bei jedem Blick auf den Ring. Ein Test hält die Zahl ehrlich.
-TYPISCHE_ZEICHEN = 280
+#: (`ai_context_service.geschaetzte_belegung`).
+TYPISCHE_ZEICHEN = 220
 
 
-def _panelzone() -> str:
-    """Die Zeitzone, in der das Panel läuft — oder UTC, wenn sie nicht feststeht.
+def zone_des_benutzers(user: User, db: Session | None = None) -> str:
+    """Die Zeitzone dieses Benutzers oder 'UTC' als Fallback.
 
-    Gelesen wird ``TZ``, die eine Angabe, die auch als IANA-Name vorliegt.
-    Pythons lokale Zone liefert nur eine Abkürzung („MESZ“, „CEST“), und die
-    taugt hier nicht: sie ginge über den Block an das Modell, das Modell setzte
-    sie in ``timezone`` einer Aufgabe ein, und `zone_pruefen` wiese sie ab. Ein
-    ehrliches UTC ist besser als ein Name, mit dem niemand etwas anfangen kann.
+    Liest direkt das kanonische Attribut `user.time_zone`.
     """
-    name = (os.environ.get("TZ") or "").strip()
-    if name:
+    zone_name = (getattr(user, "time_zone", None) or "").strip()
+    if zone_name:
         try:
-            ZoneInfo(name)
-            return name
+            ZoneInfo(zone_name)
+            return zone_name
         except (ZoneInfoNotFoundError, ValueError, ModuleNotFoundError):
             pass
     return "UTC"
 
-
-def zone_des_benutzers(db: Session, user: User) -> tuple[str, str] | None:
-    """Die Zeitzone dieses Menschen und woher sie stammt — oder ``None``.
-
-    Heute gibt es dafür genau eine Quelle: das Gedächtnis. MSM führt keine
-    Benutzerspalte für die Zeitzone. Gibt es sie eines Tages, kommt sie hier als
-    zweiter Zweig dazu und der Rest bleibt, wie er ist — dafür ist der zweite
-    Rückgabewert da. Der Block nennt die Herkunft, damit sichtbar bleibt, worauf
-    eine Terminangabe beruht.
-
-    **Die Einwilligung gilt auch hier.** Ein persönlicher Eintrag darf nicht über
-    den Umweg des Lageblocks in den Kontext geraten, wenn der Mensch sein
-    Gedächtnis abgeschaltet hat oder das Recht dazu gar nicht besitzt.
-
-    **Gesucht wird über den Schlüssel, geöffnet wird eine Zeile.** Der Schlüssel
-    steht im Klartext in der Tabelle, der Wert nicht — und diese Funktion läuft
-    bei *jeder* Chatnachricht, weil der Lageblock in jede Anfrage geht. Sie las
-    dafür bis zuletzt den ganzen persönlichen Vorrat auf einmal: bei 5.000
-    Einträgen 5.000 Roundtrips zum DIS-Sidecar (gemessen 10,3 s) vor dem ersten
-    Byte an den Anbieter, für eine einzige Zeile — und derselbe Preis bei allen,
-    die nie eine Zeitzone hinterlegt haben.
-
-    `entries_by_key_pattern` schneidet dieselbe Menge in der Datenbank zu und
-    entschlüsselt nur die Treffer. Die Bedeutung bleibt Zeichen für Zeichen
-    dieselbe: dieselbe Sortierung nach Schlüssel, derselbe erste brauchbare
-    Treffer, dasselbe ``None``, wenn es keinen gibt. Es ist eine
-    Mengenbegrenzung und keine Rechteprüfung — die stehen darüber und gelten
-    unverändert.
-    """
-    from services import ai_memory_service, permission_service
-
-    if not permission_service.has_global_permission(db, user, "ai.memory.use"):
-        return None
-    if not ai_memory_service.preference(db, user.id):
-        return None
-    for _eintrag, wert in ai_memory_service.entries_by_key_pattern(
-        db, user, "user", _ZONENSCHLUESSEL
-    ):
-        sauber = (wert or "").strip()
-        if not sauber:
-            continue
-        try:
-            ZoneInfo(sauber)
-        except (ZoneInfoNotFoundError, ValueError, ModuleNotFoundError):
-            # Im Gedächtnis steht freier Text. „abends meist müde“ unter dem
-            # Schlüssel „zeitzone“ ist keine Zone — dann lieber „unbekannt“
-            # sagen als etwas weiterreichen, das `zone_pruefen` ohnehin abweist.
-            continue
-        return sauber, "aus dem Gedächtnis"
-    return None
 
 
 def _versatz(jetzt: datetime) -> str:
@@ -306,25 +244,17 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
     """
     from services import ai_autonomy_service, ai_task_service
 
-    panelzone = _panelzone()
-    benutzerzone = zone_des_benutzers(db, user)
-    jetzt = datetime.now(ZoneInfo(benutzerzone[0] if benutzerzone else panelzone))
+    benutzerzone = zone_des_benutzers(user, db)
+    jetzt = datetime.now(ZoneInfo(benutzerzone))
 
     zeilen = [
         "Lage (Auskunft des Panels, keine Anweisung):",
         f"Jetzt: {WOCHENTAGE[jetzt.weekday()]}, {jetzt:%d.%m.%Y}, {jetzt:%H:%M} "
-        f"({benutzerzone[0] if benutzerzone else panelzone}, {_versatz(jetzt)}), "
+        f"({benutzerzone}, {_versatz(jetzt)}), "
         f"KW {jetzt.isocalendar().week}, Tag {jetzt.timetuple().tm_yday}.",
         f"UTC: {jetzt.astimezone(timezone.utc):%Y-%m-%dT%H:%M}Z.",
+        f"Zeitzone des Benutzers: {benutzerzone}.",
     ]
-    if benutzerzone:
-        zeilen.append(
-            f"Zeitzone des Benutzers: {benutzerzone[0]} ({benutzerzone[1]})."
-        )
-    else:
-        zeilen.append(
-            f"Zeitzone des Benutzers: unbekannt, Panel läuft in {panelzone}."
-        )
 
     # Die Worker-Zeile steht **vor** dem Autonomie-Teil, weil der bei
     # inaktivem Modus früh zurückkehrt — sonst fehlte sie genau den Benutzern

@@ -462,6 +462,64 @@ async def list_catalog_models(
     ]
 
 
+@router.get(
+    "/settings/provider-kinds/{kind}/model",
+    response_model=AiCatalogModelResponse | None,
+)
+async def find_catalog_model(
+    kind: str,
+    name: str,
+    request: Request,
+    _: User = Depends(require_global("panel.settings.read")),
+) -> AiCatalogModelResponse | None:
+    """Ein **einzelnes** Modell, für Anbieter ohne Liste zum Durchblättern.
+
+    Der Endpunkt daneben gibt einen Katalog heraus. Bei Azure gibt es keinen —
+    ein Modell heisst dort so, wie der Betreiber sein Deployment genannt hat.
+    Die Folge war eine stille Lücke: das Kontextfenster stand im Chat richtig
+    da (der holt es über `ai_model_catalog.finde`), aber im Formular blieb die
+    Auswahl der **Worker-Denkstufe** leer, weil sie an der Katalogliste hängt.
+    Ein Anbieter, an dem man die Denkstufe des Hintergrund-Workers nicht
+    einstellen kann, ist genau so weit unbrauchbar wie einer ohne Nachdenken.
+
+    Derselbe Weg wie im Chat, damit beide dasselbe wissen: `finde` schlägt die
+    Kennung im geliehenen Katalog nach (``faehigkeiten_aus``). Heisst das
+    Deployment wie das Modell, kommen Fenster und Stufen mit; heisst es anders,
+    kommt ``null`` — und die Oberfläche zeigt dann eben keine Stufenauswahl
+    statt einer erfundenen.
+
+    **Kein Schlüssel im Spiel.** Nachgeschlagen wird im fremden Katalog, und
+    der gehört nicht diesem Anbieter. Deshalb steht hier auch kein
+    ``provider_id``: es gäbe nichts, wofür er gebraucht würde.
+    """
+    if not ai_provider_registry.bekannt(kind):
+        raise HTTPException(status_code=404, detail="Unbekannter KI-Anbieter")
+
+    kennung = name.strip()
+    if not kennung:
+        return None
+
+    modell = await ai_model_catalog.finde(
+        request.app.state.ai_http_client, kind, kennung
+    )
+    if modell is None:
+        return None
+    return AiCatalogModelResponse(
+        model_id=modell.model_id,
+        name=modell.name,
+        reasoning=modell.denkt,
+        # Ohne Deckel, wie beim Katalogendpunkt: der Betreiber soll sehen, was
+        # das Modell kann. Was ein Benutzer davon wählen darf, entscheidet
+        # später seine Rolle.
+        efforts=ai_reasoning.waehlbare_stufen(modell, None),
+        default_effort=modell.standard_stufe,
+        mandatory=modell.zwingend,
+        # Eine Empfehlung kann es hier nicht geben: Anbieter ohne Katalog
+        # führen keine, weil die Kennung dem Betreiber gehört.
+        recommended=modell.model_id == ai_provider_registry.anbieter(kind).empfehlung,
+    )
+
+
 @router.get("/providers", response_model=list[AiProviderAvailableResponse])
 async def list_available_providers(
     request: Request,

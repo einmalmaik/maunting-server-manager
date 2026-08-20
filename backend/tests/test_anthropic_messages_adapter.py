@@ -72,7 +72,7 @@ class _FakeClient:
 
     Haelt zusaetzlich die **Kopfzeilen** fest, anders als der Zwilling im
     Responses-Test: hier haengt an ihnen eine Zusage, die sonst niemand prueft
-    (`api-key` statt `Authorization`, dazu `anthropic-version`).
+    (`x-api-key` statt `Authorization`, dazu `anthropic-version`).
     """
 
     def __init__(self, koerper: bytes, status: int = 200) -> None:
@@ -364,7 +364,11 @@ async def test_the_request_carries_the_right_headers_address_and_fields() -> Non
     ):
         pass
 
-    assert client.koepfe["api-key"] == "azure-key"
+    # `x-api-key` und nicht `api-key`: Microsofts eigenes cURL-Beispiel nimmt
+    # diesen Kopf, und mit dem anderen wies das Azure-Gateway denselben
+    # Schluessel ab, der an `/openai/v1` durchging.
+    assert client.koepfe["x-api-key"] == "azure-key"
+    assert "api-key" not in client.koepfe
     assert "Authorization" not in client.koepfe
     assert client.koepfe["anthropic-version"] == ANTHROPIC_VERSION
     assert str(client.adresse) == (

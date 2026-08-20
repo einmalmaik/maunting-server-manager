@@ -95,12 +95,12 @@ def test_die_dienstpruefung_wird_als_400_uebersetzt(
     client: TestClient, db: Session, regular_user: User, user_cookies: dict,
     user_csrf_token: str | None,
 ) -> None:
-    """Ohne Zeitzone keine Uhrzeit — dieselbe Regel wie im Chat, nur als HTTP-Fehler."""
+    """Ungültige Zeitzone wird als 400 Bad Request gemeldet."""
     _rolle_mit_aufgabenrecht(db, regular_user)
-    ohne_zone = {schluessel: wert for schluessel, wert in AUFGABE.items() if schluessel != "timezone"}
+    ungueltig = {**AUFGABE, "timezone": "Ungueltige/Zeitzone"}
 
     antwort = client.post(
-        "/api/ai/tasks", json=ohne_zone,
+        "/api/ai/tasks", json=ungueltig,
         cookies=user_cookies, headers=_kopf(user_csrf_token),
     )
 

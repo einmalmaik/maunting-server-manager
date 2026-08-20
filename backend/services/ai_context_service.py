@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -277,7 +278,29 @@ def _skill_index_message(
     return {"role": "user", "content": block}
 
 
-def _message_content_for_provider(row: AiMessage) -> str:
+def _format_message_timestamp(created_at: datetime | str | None, user_zone: str = "UTC") -> str:
+    if created_at is None:
+        return ""
+    dt: datetime | None = None
+    if isinstance(created_at, datetime):
+        dt = created_at
+    elif isinstance(created_at, str) and created_at:
+        try:
+            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        except Exception:
+            return ""
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        local_dt = dt.astimezone(ZoneInfo(user_zone))
+        return f"[{local_dt:%d.%m. %H:%M}] "
+    except Exception:
+        return f"[{dt:%d.%m. %H:%M}] "
+
+
+def _message_content_for_provider(row: AiMessage, user_zone: str = "UTC") -> str:
     """Der Text einer Nachricht, wie das Modell ihn sehen soll.
 
     Bei einer Rueckfrage steht der eigentliche Inhalt nicht in `content`,
@@ -291,9 +314,9 @@ def _message_content_for_provider(row: AiMessage) -> str:
     "ja" oder "die erste" ist sonst nicht aufloesbar.
 
     Jede Nachricht erhaelt einen statischen, absoluten Zeitstempel-Praefix
-    (z. B. `[20.08. 14:30] `). Er ist byte-stabil fuer das Prompt-Caching
-    und gibt dem Modell zusammen mit dem Lageblock den Zeitabstand zwischen
-    den Nachrichten.
+    in der Zeitzone des Benutzers (z. B. `[20.08. 14:30] `). Er ist byte-stabil
+    fuer das Prompt-Caching und gibt dem Modell zusammen mit dem Lageblock den
+    Zeitabstand zwischen den Nachrichten.
     """
     text = row.content or ""
     if row.role == "assistant" and getattr(row, "question_json", None):
@@ -310,17 +333,8 @@ def _message_content_for_provider(row: AiMessage) -> str:
             # Eine unlesbare Zeile darf den Verlauf nicht sprengen. Ohne den
             # Fragetext ist der Kontext duenner, aber der Chat laeuft weiter.
             pass
-    created_at = getattr(row, "created_at", None)
-    if created_at is not None:
-        if isinstance(created_at, datetime):
-            return f"[{created_at:%d.%m. %H:%M}] {text}"
-        if isinstance(created_at, str) and created_at:
-            try:
-                dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                return f"[{dt:%d.%m. %H:%M}] {text}"
-            except Exception:
-                pass
-    return text
+    prefix = _format_message_timestamp(getattr(row, "created_at", None), user_zone)
+    return f"{prefix}{text}" if prefix else text
 
 
 def _recent_tool_results(
@@ -668,10 +682,11 @@ def build_provider_messages(
     # `MIN_HISTORY_CHARS` ueber dem Ziel — neben einem Bildanhang faellt das
     # nicht ins Gewicht, eine Frage ohne Frage dagegen schon.
     budget = max(grenzen.gesamt - used, MIN_HISTORY_CHARS)
+    user_zone = ai_lage.zone_des_benutzers(user) if user else "UTC"
     for row in rows:
         if budget <= 0:
             break
-        content = redact_sensitive_text(_message_content_for_provider(row))
+        content = redact_sensitive_text(_message_content_for_provider(row, user_zone))
         if content.startswith(WERKZEUG_KONTEXT_KOPF):
             # Ein einzelnes führendes Leerzeichen, damit kein Benutzertext die
             # Kopfzeile des Werkzeugkontexts vortäuschen kann.

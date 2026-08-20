@@ -170,16 +170,21 @@ def test_die_websuche_ist_dabei() -> None:
 # ── Der Vorschlagspfad ────────────────────────────────────────────────────
 
 
-def test_ohne_zeitzone_entsteht_kein_vorschlag(db: Session) -> None:
-    """Die mechanische Seite der Zusage, dass die KI vorher gefragt hat.
-
-    Der Systemprompt sagt es dem Modell; ein Prompt ist aber keine Schranke.
-    Hier laeuft der Versuch auf, **bevor** eine Karte im Chat steht — und der
-    Fehlertext nennt `ask_user`, damit der naechste Versuch der richtige ist.
-    """
-    user = _benutzer(db, "ohnezone", "ai.tasks.manage")
+def test_ohne_explizite_zeitzone_erbt_der_vorschlag_die_benutzerzone(db: Session) -> None:
+    """Wird keine Zeitzone im Werkzeugaufruf übergeben, erbt der Vorschlag automatisch die Benutzer-Zeitzone."""
+    user = _benutzer(db, "autozone", "ai.tasks.manage")
+    user.time_zone = "America/New_York"
+    db.commit()
     felder = {name: wert for name, wert in ANLEGEN.items() if name != "timezone"}
-    with pytest.raises(AiActionValidationError, match="ask_user"):
+    payload, preview = ai_proposal_service._task_set_payload(db, user, felder)
+    assert preview["plan"] == "taeglich um 08:00 (America/New_York)"
+
+
+def test_ungueltige_zeitzone_im_vorschlag_wird_abgewiesen(db: Session) -> None:
+    """Ein ungültiger IANA-String führt zu einem Validierungsfehler."""
+    user = _benutzer(db, "ungueltigzone", "ai.tasks.manage")
+    felder = {**ANLEGEN, "timezone": "Ungueltig/Zone"}
+    with pytest.raises(AiActionValidationError):
         ai_proposal_service._task_set_payload(db, user, felder)
 
 

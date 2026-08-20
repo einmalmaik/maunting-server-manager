@@ -175,6 +175,8 @@ def update_user(
         user.is_active = req.is_active
     if req.two_factor_enabled is not None:
         user.two_factor_enabled = req.two_factor_enabled
+    if req.time_zone is not None:
+        user.time_zone = req.time_zone
     db.commit()
     db.refresh(user)
     return user

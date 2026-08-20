@@ -470,8 +470,11 @@ def _anwenden(db: Session, *, user: User, ziel: AiTask, felder: dict, neu: bool)
                 f"Unbekannter Zustellweg. Moeglich sind: {', '.join(KANAELE)}"
             )
         ziel.channel = channel
-    if neu or "timezone" in felder:
-        ziel.time_zone = zone_pruefen(felder.get("timezone"))
+    if neu or "timezone" in felder or "time_zone" in felder:
+        tz_val = felder.get("timezone") if "timezone" in felder else felder.get("time_zone")
+        if tz_val is None and neu:
+            tz_val = user.time_zone or "UTC"
+        ziel.time_zone = zone_pruefen(tz_val)
     if "enabled" in felder:
         wert = felder["enabled"]
         if not isinstance(wert, bool):
@@ -483,7 +486,7 @@ def _anwenden(db: Session, *, user: User, ziel: AiTask, felder: dict, neu: bool)
     # Neu rechnen, sobald etwas den Termin beeinflusst haben kann. Auch beim
     # Wiedereinschalten: eine pausierte Aufgabe traegt einen Termin von vor der
     # Pause, und der liegt in der Vergangenheit.
-    if neu or (_PLANFELDER | {"timezone", "enabled"}) & set(felder):
+    if neu or (_PLANFELDER | {"timezone", "time_zone", "enabled"}) & set(felder):
         ziel.next_run_at = (
             naechste_faelligkeit(ziel, ab=_jetzt()) if ziel.enabled else None
         )
@@ -493,13 +496,7 @@ def _anwenden(db: Session, *, user: User, ziel: AiTask, felder: dict, neu: bool)
 
 
 def _leere_aufgabe(user: User) -> AiTask:
-    """Der Entwurf, auf dem `_anwenden` arbeitet.
-
-    ``channel="chat"`` ist der wirksame Standard: wer nichts sagt, bekommt den
-    Chat. ``time_zone="UTC"`` ist dagegen nur ein Platzhalter — `zone_pruefen`
-    verlangt beim Anlegen eine echte Angabe, und der Platzhalter überlebt
-    keinen einzigen Aufruf.
-    """
+    """Der Entwurf, auf dem `_anwenden` arbeitet."""
     return AiTask(
         id=str(uuid4()),
         user_id=user.id,
@@ -507,7 +504,11 @@ def _leere_aufgabe(user: User) -> AiTask:
         instruction="",
         kind="report",
         plan_kind="daily",
-        time_zone="UTC",
+        time_zone=user.time_zone or "UTC",
+        time_of_day="08:00",
+        weekdays=None,
+        interval_hours=None,
+        once_at=None,
         channel="chat",
         enabled=True,
     )
