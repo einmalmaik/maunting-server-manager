@@ -100,9 +100,9 @@ describe('AufgabenAnsicht', () => {
     fireEvent.change(screen.getByLabelText(i18n.t('ai.tasks.prompt')), {
       target: { value: 'Mach ein Backup von allen Servern.' },
     })
-    fireEvent.change(screen.getByLabelText(i18n.t('ai.tasks.timeOfDay')), {
-      target: { value: '07:30' },
-    })
+    const uhrzeitButton = screen.getByRole('button', { name: i18n.t('ai.tasks.timeOfDay') })
+    fireEvent.click(uhrzeitButton)
+    fireEvent.click(await screen.findByRole('option', { name: '07:30' }))
     fireEvent.change(screen.getByLabelText(i18n.t('ai.tasks.timezone')), {
       target: { value: 'Europe/Berlin' },
     })

@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CalendarClock, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiTaskEntry, type AiTaskWrite } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
-import { Button, Switch } from '@/Singra/UI'
+import { Button, DateTimePicker, Dropdown, Switch } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
@@ -93,6 +93,12 @@ function alsPayload(daten: FormularDaten): AiTaskWrite {
 
 const WOCHENTAGE = [1, 2, 3, 4, 5, 6, 7] as const
 
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
+  const hour = String(Math.floor(i / 2)).padStart(2, '0')
+  const minute = i % 2 === 0 ? '00' : '30'
+  return `${hour}:${minute}`
+})
+
 /**
  * Die Aufgabenliste: stehende Aufträge sehen, anlegen, ändern, pausieren,
  * löschen — dieselben Dienstfunktionen, durch die auch die KI geht. Alles,
@@ -111,6 +117,15 @@ export function AufgabenAnsicht() {
   const [formular, setFormular] = useState<FormularDaten | null>(null)
   const [bearbeitet, setBearbeitet] = useState<string | null>(null)
   const [speichert, setSpeichert] = useState(false)
+
+  const zeitOptionen = useMemo(() => {
+    const timeVal = formular?.time_of_day || '08:00'
+    const werte = [...new Set([...TIME_OPTIONS, timeVal])].sort()
+    return werte.map((option) => ({
+      value: option,
+      label: option,
+    }))
+  }, [formular?.time_of_day])
 
   const laden = useCallback(async () => {
     const liste = await aiApi.listTasks()
@@ -323,16 +338,19 @@ export function AufgabenAnsicht() {
                       >
                         {t('ai.tasks.timeOfDay')}
                       </label>
-                      <input
+                      <Dropdown
                         id="aufgabe-uhrzeit"
-                        type="time"
-                        className="msm-input max-w-40"
                         value={formular.time_of_day}
-                        onChange={(event) => setze('time_of_day', event.target.value)}
-                        required
+                        onChange={(wert) => setze('time_of_day', wert)}
+                        options={zeitOptionen}
+                        className="max-w-40"
+                        aria-label={t('ai.tasks.timeOfDay')}
                       />
                     </div>
                     <div>
+                      <span className="mb-1.5 block text-xs text-on-surface-variant">
+                        {t('ai.tasks.weekdays', 'Wochentage')}
+                      </span>
                       <div className="flex flex-wrap gap-1.5">
                         {WOCHENTAGE.map((tag) => {
                           const aktiv = formular.weekdays.includes(tag)
@@ -396,13 +414,13 @@ export function AufgabenAnsicht() {
                     >
                       {t('ai.tasks.onceAt')}
                     </label>
-                    <input
+                    <DateTimePicker
                       id="aufgabe-zeitpunkt"
-                      type="datetime-local"
-                      className="msm-input max-w-64"
                       value={formular.once_at}
-                      onChange={(event) => setze('once_at', event.target.value)}
-                      required
+                      onChange={(wert) => setze('once_at', wert)}
+                      locale={i18n.language.startsWith('de') ? 'de' : 'en'}
+                      className="max-w-72"
+                      aria-label={t('ai.tasks.onceAt')}
                     />
                   </div>
                 )}
