@@ -1462,21 +1462,16 @@ def provider_tool_definitions() -> list[dict]:
         _server_function(
             "propose_config_set",
             "Setzt einzelne Schluessel in einer INI-artigen Datei — **der "
-            "Normalfall fuer Spieleinstellungen** (Multiplikatoren, Slots, "
-            "Servername, Schwierigkeit). Du suchst keinen Text, sondern nennst "
-            "Sektion, Schluessel und Wert. Die Sektion wird gefunden oder "
-            "angelegt, ein vorhandener Schluessel wird ueberschrieben statt "
-            "gedoppelt, und die Zeilenenden der Datei bleiben unveraendert. "
-            "Fehlt der Schluessel bisher, legst du ihn damit an — das ist der "
-            "Regelfall und kein Hindernis. "
-            "Der Wert wird ausserdem dauerhaft hinterlegt und vor **jedem** "
-            "Start erneut geschrieben. Damit haelt er auch bei Spielen, die "
-            "ihre Konfiguration beim Beenden selbst zurueckschreiben; du musst "
-            "den Server dafuer weder stoppen noch wissen, wie das jeweilige "
-            "Spiel damit umgeht. Wirksam wird die Aenderung mit dem naechsten "
-            "Neustart — sag das dazu, statt die Aenderung abzulehnen. "
-            "`expected_revision` stammt aus read_config; `null` legt eine noch "
-            "fehlende Datei an. Passwortfelder weist das Backend ab.",
+            "Normalfall fuer Spieleinstellungen**. Du nennst Sektion, "
+            "Schluessel und Wert statt Text zu suchen: die Sektion wird "
+            "gefunden oder angelegt, ein vorhandener Schluessel ueberschrieben "
+            "statt gedoppelt, die Zeilenenden bleiben. Einen fehlenden "
+            "Schluessel legst du damit an — Regelfall, kein Hindernis. Der Wert "
+            "gilt dauerhaft und wird vor jedem Start neu geschrieben, haelt "
+            "also auch bei Spielen, die ihre Konfiguration selbst "
+            "zurueckschreiben. Ein laufender Server hindert dich nicht; es "
+            "wirkt mit dem naechsten Neustart. `expected_revision` aus "
+            "read_config, `null` legt die Datei an. Keine Passwortfelder.",
             {
                 **_RATIONALE_SCHEMA,
                 "path": {"type": "string", "maxLength": 256},
@@ -1485,25 +1480,16 @@ def provider_tool_definitions() -> list[dict]:
                     "type": "array",
                     "minItems": 1,
                     "maxItems": MAX_PATCH_EDITS,
-                    "description": "Zu setzende Schluessel, der Reihe nach.",
                     "items": {
                         "type": "object",
                         "properties": {
                             "section": {
                                 "type": "string",
                                 "maxLength": 128,
-                                "description": "Abschnitt ohne Klammern, z. B. ServerSettings.",
+                                "description": "Abschnitt ohne Klammern.",
                             },
-                            "key": {
-                                "type": "string",
-                                "maxLength": 128,
-                                "description": "Name der Einstellung.",
-                            },
-                            "value": {
-                                "type": "string",
-                                "maxLength": 512,
-                                "description": "Der Wert, der dastehen soll.",
-                            },
+                            "key": {"type": "string", "maxLength": 128},
+                            "value": {"type": "string", "maxLength": 512},
                         },
                         "required": ["section", "key", "value"],
                         "additionalProperties": False,

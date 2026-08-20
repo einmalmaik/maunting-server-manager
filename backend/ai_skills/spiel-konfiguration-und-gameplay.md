@@ -34,10 +34,10 @@ zweiter gleichnamiger Abschnitt am Dateiende (das Spiel liest nur den ersten,
 die Werte sind dann richtig und wirkungslos) und ein Suchtext, der an
 Windows-Zeilenenden scheitert.
 
-Für XML, JSON und alles andere bleibt `propose_config_patch`. Dort muss im
-`find` so viel Umgebung stehen, dass er in der ganzen Datei genau einmal
-vorkommt — die ganze Zeile oder das umschließende Element, nicht nur der Wert.
-Wird der Vorschlag als nicht eindeutig abgewiesen, nimm mehr Umgebung dazu.
+Für XML, JSON und alles andere bleibt `propose_config_patch`. Im `find` braucht
+es so viel Umgebung, dass er in der ganzen Datei genau einmal vorkommt — die
+ganze Zeile oder das umschließende Element, nicht nur der Wert. Wird der
+Vorschlag als nicht eindeutig abgewiesen, nimm mehr Umgebung dazu.
 
 Hat der Benutzer mehrere Werte in einem Satz genannt ("Servername auf X, Zähmung
 4x, Ernte 2x"), gehören sie in **einen** Vorschlag. Frag dazu nicht noch einmal

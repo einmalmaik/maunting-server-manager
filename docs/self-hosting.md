@@ -621,6 +621,19 @@ steht, ist eine bewusste Entscheidung und keine Lücke: das Pflicht-Backup
 entsteht, bevor irgendetwas angefasst wird, und genau dieses Backup ist der Weg
 zurück.
 
+Eine Spieleinstellung setzt die KI dabei nicht als Textersetzung, sondern über
+Abschnitt und Schlüssel (`propose_config_set`, Recht `server.files.write`). Der
+Wert wird zusätzlich **am Server hinterlegt und vor jedem Start erneut
+geschrieben**. Das ist kein Komfort, sondern die Bedingung dafür, dass eine
+Änderung bleibt: Spiele wie ARK halten ihre Einstellungen im Speicher und
+schreiben die Konfigurationsdatei beim Autosave vollständig neu — ein Wert, den
+der laufende Prozess nicht kennt, verschwindet dabei. Welches Spiel das tut,
+muss niemand pflegen; der Wunsch wird ausnahmslos bei jedem Start durchgesetzt.
+Ein laufender Server ist deshalb kein Hindernis für eine Konfigurationsänderung
+(anders als beim Blueprint-Wechsel, der das Serververzeichnis löscht) — sie
+wirkt mit dem nächsten Neustart. Passwortfelder bleiben ausgeschlossen, und die
+hinterlegten Werte stehen im Serververzeichnis wie jede andere Konfiguration.
+
 Die Reparatur (`propose_server_repair`) nimmt **eine Kennung aus einer festen
 Liste** entgegen — `repair_permissions` oder `reallocate_port` — und niemals
 einen Pfad, ein Kommando oder einen Containernamen. Der Containername entsteht
