@@ -581,6 +581,38 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="roles.manage",
         recht_global=True,
     ),
+
+    # ── Der Rechner des Benutzers (Smart System) ────────────────────────────
+    #
+    # `delegation` und nicht `global_write`, obwohl geschrieben wird: eine
+    # Vorschlagskarte je Datei waere hier das Gegenteil von hilfreich — der
+    # Benutzer hat einen Ordner freigegeben, damit dort ohne Rueckfrage
+    # gearbeitet wird. Die Grenze ist der Ordner, nicht die einzelne Aktion,
+    # und sie steht auf dem Rechner (Rust), wo sie hingehoert. Das Panel kann
+    # sie gar nicht pruefen: es kennt weder den Pfad noch das Dateisystem.
+    #
+    # Alle vier laufen ueber `desktop_jobs` und parken den Lauf, bis der
+    # Rechner geantwortet hat. Vier statt siebzehn Werkzeuge ist Absicht: der
+    # Katalog ist gemessen der groesste Posten im Prompt, und eine `aktion`
+    # im Argument kostet nichts.
+    "desktop_dateien": Werkzeug(
+        "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
+    ),
+    "desktop_launch_app": Werkzeug(
+        "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
+    ),
+    # Der Handschlag. Er *fragt* nur — freigeben kann allein der Mensch am
+    # Rechner, und zwar in der App. Das Panel kann diese Freigabe weder
+    # erteilen noch verlaengern.
+    "desktop_takeover_control": Werkzeug(
+        "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
+    ),
+    # Maus, Tastatur, Bildschirm. Ohne gueltige Freigabe weist die App jeden
+    # Aufruf ab — das Panel schickt ihn trotzdem los, weil nur der Rechner
+    # weiss, ob die Freigabe noch laeuft.
+    "desktop_steuern": Werkzeug(
+        "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
+    ),
 }
 
 
@@ -646,6 +678,10 @@ SKILL_TOOLS = _mit_gruppe("skill")
 DOCS_TOOLS = _mit_gruppe("docs")
 ASK_TOOLS = _mit_art("ask")
 DELEGATION_TOOLS = _mit_art("delegation")
+# Die Werkzeuge, die nicht im Panel laufen, sondern auf dem Rechner des
+# Benutzers (`desktop_jobs`). Sie sind der Grund, warum ein Lauf parken kann,
+# ohne dass jemand etwas bestaetigen muss.
+DESKTOP_TOOLS = _mit_gruppe("desktop")
 ALWAYS_CONFIRM_TOOLS = (
     {name for name, spec in WERKZEUGE.items() if spec.immer_bestaetigen}
     | set(GEPLANT_IMMER_BESTAETIGEN)
@@ -922,6 +958,28 @@ AUFGABEN_HANDELN = frozenset({
     "propose_restart_schedule_set",
     "propose_backup_schedule_set",
 })
+
+
+def herkunft_schnitt(erlaubt: frozenset[str], herkunft: str) -> frozenset[str]:
+    """Was eine Herkunft vom Katalog abzieht — die Grenze zwischen den Welten.
+
+    Zwei Richtungen, und beide sind Betreiberbeschluesse:
+
+    * Aus der Smart-System-App erreicht die KI **kein** Serverwerkzeug. Der
+      Desktop-Client ist ausdruecklich keine zweite Serververwaltung
+      (Hoster-Neutralitaet). Wer seine Server bedienen will, nimmt das Panel —
+      dieselbe Unterhaltung, dieselbe KI, nur der andere Weg hinein.
+    * Aus dem Panel erreicht sie **keinen** fremden Rechner. Die Desktop-
+      Werkzeuge setzen voraus, dass jemand vor dem Rechner sitzt und die App
+      laeuft; aus dem Browser abgeschickt liefen sie in eine Frist statt in
+      eine Antwort.
+
+    Das ist ein Schnitt, keine Ersetzung: ein fehlendes Recht holt hier
+    niemand zurueck.
+    """
+    if herkunft == "desktop":
+        return frozenset(erlaubt) - SERVER_READ_TOOLS - SERVER_WRITE_TOOLS
+    return frozenset(erlaubt) - DESKTOP_TOOLS
 
 
 def aufgaben_tools(kind: str) -> frozenset[str]:

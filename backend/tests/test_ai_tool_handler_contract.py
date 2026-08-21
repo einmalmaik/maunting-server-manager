@@ -36,6 +36,7 @@ from services import (
     ai_tool_registry,
 )
 from services.ai_action_errors import AiActionValidationError
+from services.ai_tool_registry import herkunft_schnitt
 
 
 def test_a_global_read_tool_without_a_handler_raises_instead_of_returning_nodes(
@@ -163,12 +164,44 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     on_start/interval/retention). Die Grenze steht deshalb bei 58.000 — mit
     bewusst nur einem Tausender Luft, damit der Naechste wieder hier landet
     und dieselbe Entscheidung trifft.
+
+    **Stand 21.08.2026 misst der Test etwas anderes als vorher**, und das ist
+    der Kern dieser Aenderung: nicht mehr den Rohkatalog, sondern das, was ein
+    Lauf tatsaechlich zu sehen bekommt. Mit den vier Desktop-Werkzeugen gibt es
+    keinen Lauf mehr, der alle Werkzeuge sieht — `herkunft_schnitt` teilt den
+    Katalog in zwei Welten, und jede Bitte gehoert genau einer davon an.
+    Nachgemessen:
+
+    * Rohkatalog (kein Lauf sieht ihn): **60.456** Zeichen, 65 Werkzeuge,
+    * aus dem Panel: **56.990** Zeichen, 61 Werkzeuge — die vier Desktop-
+      Werkzeuge fehlen,
+    * aus der Smart-System-App: **35.113** Zeichen, 35 Werkzeuge — dort fehlen
+      die rund dreissig Serverwerkzeuge.
+
+    Die Grenze bleibt deshalb bei 58.000 und wird **nicht** angehoben: der
+    Panel-Fall liegt mit 56.990 knapp darunter, und das ist der teuerste Fall,
+    den es gibt. Haette der Test weiter den Rohkatalog gemessen, waere die
+    Grenze gerissen worden fuer Zeichen, die nie jemand bezahlt — und die
+    naheliegende Reaktion (Grenze hoch) haette die Zahl entwertet, die hier
+    seit dem 13.08. bewusst wehtut.
     """
-    katalog = json.dumps(ai_action_service.provider_tool_definitions(), ensure_ascii=False)
-    assert len(katalog) < 58_000, (
-        f"Der Werkzeugkatalog ist auf {len(katalog)} Zeichen gewachsen. "
-        "Er geht in jeder Runde mit und taucht in keiner Budgetrechnung auf."
-    )
+    for herkunft in ("panel", "desktop"):
+        erlaubt = herkunft_schnitt(
+            frozenset(ai_tool_registry.WERKZEUGE), herkunft
+        )
+        katalog = json.dumps(
+            [
+                eintrag
+                for eintrag in ai_action_service.provider_tool_definitions()
+                if eintrag["function"]["name"] in erlaubt
+            ],
+            ensure_ascii=False,
+        )
+        assert len(katalog) < 58_000, (
+            f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
+            f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
+            "taucht in keiner Budgetrechnung auf."
+        )
 
 
 def test_a_failed_tool_call_is_marked_in_the_history() -> None:

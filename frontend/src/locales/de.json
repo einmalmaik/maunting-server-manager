@@ -554,6 +554,10 @@
     "tools": {
       "ask_user": "Nachgefragt",
       "check_server_reachability": "Erreichbarkeit geprüft",
+      "desktop_dateien": "Dateien auf deinem Rechner",
+      "desktop_launch_app": "Programm gestartet",
+      "desktop_steuern": "Rechner bedient",
+      "desktop_takeover_control": "Übernahme angefragt",
       "forget_memory": "Erinnerungen gelöscht",
       "forget_skill": "Skill gelöscht",
       "learn_skill": "Skill gelernt",
@@ -595,6 +599,10 @@
     "toolsRunning": {
       "ask_user": "Ich frage kurz nach",
       "check_server_reachability": "Ich prüfe, ob der Server erreichbar ist",
+      "desktop_dateien": "Ich arbeite in deiner Sandbox",
+      "desktop_launch_app": "Ich starte das Programm",
+      "desktop_steuern": "Ich bediene deinen Rechner",
+      "desktop_takeover_control": "Ich warte auf deine Freigabe",
       "forget_memory": "Ich lösche die Erinnerung",
       "forget_skill": "Ich lösche den Skill",
       "learn_skill": "Ich lerne den Skill",

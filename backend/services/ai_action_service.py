@@ -100,6 +100,12 @@ MAX_QUESTION_OPTIONS = 4
 MAX_QUESTION_CHARS = 300
 MAX_OPTION_CHARS = 60
 MAX_OPTION_HINT_CHARS = 120
+# Was die KI in einem Zug in eine Datei auf dem Rechner des Benutzers
+# schreiben darf. Grosszuegig genug fuer eine Quelldatei, klein genug, dass ein
+# Schreibauftrag nicht das halbe Kontextfenster verbraucht. Die eigentliche
+# Grenze zieht der Rechner selbst (Sandbox); das hier haelt nur den Prompt
+# beisammen.
+MAX_DESKTOP_INHALT_CHARS = 60_000
 
 # ── Tool-Mengen ───────────────────────────────────────────────────────────
 # Abgeleitet aus `services/ai_tool_registry.py`. Dort steht **eine** Zeile je
@@ -1118,6 +1124,120 @@ def _worker_tool_definitions() -> list[dict]:
                 },
             },
             ["worker_id", "antwort"],
+        ),
+        # ── Der Rechner des Benutzers (Smart System) ────────────────────────
+        #
+        # Nur im Katalog, wenn die Bitte aus der Smart-System-App kam
+        # (`herkunft_schnitt`). Alle vier parken den Lauf, bis der Rechner
+        # geantwortet hat; das Ergebnis kommt danach als Meldung des Panels.
+        _function(
+            "desktop_dateien",
+            "Arbeitet mit Dateien im Sandbox-Ordner auf dem Rechner des "
+            "Benutzers. Pfade sind **immer** relativ zu diesem Ordner; "
+            "außerhalb geht nichts, und der Rechner weist es ab. Nutze das "
+            "für alles, was der Benutzer an seinen eigenen Dateien möchte — "
+            "lesen, anlegen, ändern, aufräumen. Gelöschtes landet im "
+            "Papierkorb, nicht im Nichts. "
+            "Nicht nutzen für Serverdateien; dafür gibt es eigene Werkzeuge "
+            "im Panel.",
+            {
+                "aktion": {
+                    "type": "string",
+                    "enum": ["auflisten", "lesen", "schreiben", "loeschen", "verschieben"],
+                },
+                "pfad": {
+                    "type": "string",
+                    "maxLength": 400,
+                    "description": "Relativ zum Sandbox-Ordner. Leer = der Ordner selbst.",
+                },
+                "ziel": {
+                    "type": "string",
+                    "maxLength": 400,
+                    "description": "Nur bei verschieben: der neue Pfad, ebenfalls relativ.",
+                },
+                "inhalt": {
+                    "type": "string",
+                    "maxLength": MAX_DESKTOP_INHALT_CHARS,
+                    "description": "Nur bei schreiben: der vollständige neue Dateiinhalt.",
+                },
+            },
+            ["aktion"],
+        ),
+        _function(
+            "desktop_launch_app",
+            "Startet ein Programm oder öffnet eine Adresse im Standardbrowser "
+            "des Benutzers. Für \"mach mir Discord auf\", \"öffne die Seite\". "
+            "Der Rechner entscheidet, was startbar ist; Systemwerkzeuge von "
+            "Windows sind ausgeschlossen.",
+            {
+                "programm": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Name des Programms, z. B. 'discord'.",
+                },
+                "url": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "Adresse (http/https). Statt programm.",
+                },
+            },
+            [],
+        ),
+        _function(
+            "desktop_takeover_control",
+            "Bittet um die Freigabe für Maus und Tastatur. Der Benutzer "
+            "bestätigt an seinem Rechner; erteilt wird sie befristet und nur "
+            "von ihm. Erkläre in `anliegen` in einem Satz, was du tun willst "
+            "— genau das liest er auf der Karte. Nutze das erst, wenn eine "
+            "Aufgabe wirklich nicht anders geht: Dateien, Programme und "
+            "Adressen laufen ohne Übernahme.",
+            {
+                "anliegen": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "description": "Was du übernehmen willst und wofür, in einem Satz.",
+                },
+                "minuten": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 30,
+                    "description": "Wie lange die Freigabe gelten soll.",
+                },
+            },
+            ["anliegen"],
+        ),
+        _function(
+            "desktop_steuern",
+            "Bedient den Rechner: Bildschirm ansehen, klicken, tippen, "
+            "scrollen. Setzt eine gültige Freigabe voraus "
+            "(desktop_takeover_control) — ohne sie wird jeder Aufruf "
+            "abgewiesen. Koordinaten sind Bildpunkte des zuletzt gelieferten "
+            "Bildschirmfotos, Ursprung links oben; nur der Hauptbildschirm. "
+            "Sieh vor jedem Klick nach, statt aus dem Gedächtnis zu klicken.",
+            {
+                "aktion": {
+                    "type": "string",
+                    "enum": [
+                        "bildschirm", "klick", "doppelklick", "rechtsklick",
+                        "maus_bewegen", "tippen", "taste", "scrollen", "warten",
+                    ],
+                },
+                "x": {"type": "integer", "description": "Bildpunkt von links."},
+                "y": {"type": "integer", "description": "Bildpunkt von oben."},
+                "text": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": (
+                        "Bei tippen der Text, bei taste die Tastenfolge "
+                        "(z. B. 'ctrl+s', 'Return')."
+                    ),
+                },
+                "menge": {
+                    "type": "integer",
+                    "description": "Bei scrollen die Rasten, bei warten die Sekunden.",
+                },
+            },
+            ["aktion"],
         ),
         _function(
             "wait_until",
@@ -2858,6 +2978,25 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
         raise AiActionValidationError(
             "wait_until parkt den Lauf und wird im Rundenlauf behandelt — "
             "in diesem Lauf steht es nicht zur Verfügung"
+        )
+
+    if tool_name in (
+        "desktop_dateien",
+        "desktop_launch_app",
+        "desktop_takeover_control",
+        "desktop_steuern",
+    ):
+        # Dieselbe Lage wie bei `wait_until`: die vier werden im Rundenlauf
+        # abgefangen (`_desktop_behandeln`), werden zu einem Auftrag an den
+        # Rechner des Benutzers, und der Lauf parkt. Dieser Dispatch sieht sie
+        # nur, wenn die Bitte gar nicht von einem Rechner kam — dann sortiert
+        # sie schon der Herkunfts-Spiegel aus, und wenn selbst der umgangen
+        # waere, ist ein benannter Fehlschlag die einzig ehrliche Antwort. Ein
+        # stiller Durchfall lieferte dem Modell ein "erledigt" fuer etwas, das
+        # nie passiert ist.
+        raise AiActionValidationError(
+            "Werkzeuge für den Rechner des Benutzers laufen nur aus der "
+            "Smart-System-App — in diesem Lauf stehen sie nicht zur Verfügung"
         )
 
     if tool_name == "list_tasks":

@@ -554,6 +554,10 @@
     "tools": {
       "ask_user": "Asked a question",
       "check_server_reachability": "Checked reachability",
+      "desktop_dateien": "Files on your computer",
+      "desktop_launch_app": "Application launched",
+      "desktop_steuern": "Computer operated",
+      "desktop_takeover_control": "Takeover requested",
       "forget_memory": "Deleted memories",
       "forget_skill": "Deleted a skill",
       "learn_skill": "Learned a skill",
@@ -595,6 +599,10 @@
     "toolsRunning": {
       "ask_user": "Asking a quick question",
       "check_server_reachability": "Checking whether the server is reachable",
+      "desktop_dateien": "Working in your sandbox",
+      "desktop_launch_app": "Launching the application",
+      "desktop_steuern": "Operating your computer",
+      "desktop_takeover_control": "Waiting for your approval",
       "forget_memory": "Deleting the memory",
       "forget_skill": "Deleting the skill",
       "learn_skill": "Learning the skill",

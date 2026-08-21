@@ -486,6 +486,7 @@ def build_provider_messages(
     unbeaufsichtigt: bool = False,
     gesprochen: bool = False,
     rolle: str = "voll",
+    herkunft: str = "panel",
 ) -> list[dict[str, Any]]:
     """Baut eine neueste, begrenzte Historie unter einer Zeichenobergrenze.
 
@@ -530,6 +531,11 @@ def build_provider_messages(
     Werkzeug den Server klärt). Ein Worker ist zwar unbeaufsichtigt, behält
     aber das Skill-Verzeichnis — er hat ``read_skill``, anders als Heilung
     und fälliger Auftrag.
+
+    ``herkunft`` (panel/desktop) entscheidet nur über den `DESKTOP`-Block im
+    Systemprompt. Der Werkzeugschnitt dazu liegt anderswo
+    (`ai_tool_registry.herkunft_schnitt`) — hier steht kein zweiter Ort, an
+    dem jemand die Grenze setzen könnte.
     """
     grenzen = teilbudgets(context_chars)
     user = db.get(User, conversation.user_id)
@@ -540,7 +546,9 @@ def build_provider_messages(
         # Anbieter-Zwischenspeichers. Er ist **nicht** die Sicherheitsgrenze;
         # die liegt in RBAC, der Tool-Allowlist, `_resolve_server` und der
         # Bestaetigungspflicht.
-        {"role": "system", "content": ai_prompt.build(gesprochen=gesprochen, rolle=rolle)}
+        {"role": "system", "content": ai_prompt.build(
+            gesprochen=gesprochen, rolle=rolle, desktop=herkunft == "desktop",
+        )}
     ]
     # Direkt dahinter das Skill-Verzeichnis: es aendert sich seltener als
     # Memory und haelt den Praefix deshalb laenger stabil, wenn dahinter etwas

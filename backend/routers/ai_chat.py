@@ -656,6 +656,9 @@ async def stream_message(
             # Rueckfallzahl: nur so kann die Kompression den Unterschied
             # zwischen "kleines Fenster" und "kein Wissen" noch sehen.
             context_chars=fenster.zeichen if fenster.bekannt else None,
+            # Von wo die Bitte kam. Entscheidet den Werkzeugkatalog des Laufs
+            # (`herkunft_schnitt`) und wird darin eingefroren.
+            herkunft=payload.herkunft,
         )
         if run_id is None:
             code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")
