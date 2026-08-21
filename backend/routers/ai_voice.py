@@ -29,7 +29,12 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from dependencies import get_current_user_for_ws, require_global
+from dependencies import (
+    get_current_user_for_ws,
+    require_global,
+    ws_session_herkunft,
+    ws_subprotokoll,
+)
 from models import AiProvider, User
 from services import (
     ai_chat_service,
@@ -283,13 +288,20 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
         benutzer_id = user.id
         hoeren_id = hoeren.id
         denken_id = denken.id
+        # Aus demselben Token wie die Identitaet — eine gekoppelte App traegt
+        # `geraet="desktop"` im Anspruch, und ihre Sprachlaeufe bekommen damit
+        # dieselbe Werkzeugmenge wie ihr getippter Chat.
+        herkunft = ws_session_herkunft(websocket)
     finally:
         # Die Sitzung der Anfrage gehört dem Request-Thread. Ab hier läuft eine
         # Verbindung über Minuten; sie darf keine offene Datenbanksitzung
         # mitschleppen.
         db.close()
 
-    await websocket.accept()
+    # Hat der Client sein Token als Subprotokoll angeboten, muss die Antwort
+    # es spiegeln — ein Browser-WebSocket bricht sonst ab, obwohl der Server
+    # laengst angenommen hat. Cookie-Clients bekommen das unveraenderte `None`.
+    await websocket.accept(subprotocol=ws_subprotokoll(websocket))
     bruecke = ai_voice_bridge.Sprachbruecke(
         websocket,
         user_id=benutzer_id,
@@ -300,6 +312,7 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
         stimm_adresse=stimm_adresse,
         stimm_schluessel=stimm_schluessel,
         http_client=websocket.app.state.ai_http_client,
+        herkunft=herkunft,
     )
     try:
         lage = await bruecke.fuehren()

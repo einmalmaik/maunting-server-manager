@@ -63,17 +63,72 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return _user_from_token(token, db)
 
 
+#: Das Subprotokoll, unter dem ein nativer Client sein Access-Token in den
+#: WS-Handshake legt: ``Sec-WebSocket-Protocol: msm.bearer, <token>``.
+#:
+#: Ein Header und keine URL — CLAUDE.md § 4 verbietet Tokens in Query-Strings,
+#: weil sie in Zugriffs- und Proxy-Logs landen. Einen Authorization-Header kann
+#: ein Browser-WebSocket dagegen gar nicht setzen; das Subprotokoll-Feld ist
+#: der eine Header, den `new WebSocket(url, protokolle)` erreicht. Wer es
+#: anbietet, dem muss der Endpunkt ``msm.bearer`` in `accept(subprotocol=…)`
+#: spiegeln (`ws_subprotokoll`), sonst bricht der Client die Verbindung ab.
+WS_BEARER_PROTOKOLL = "msm.bearer"
+
+
+def _ws_bearer_token(ws: WebSocket) -> str | None:
+    """Das Access-Token aus dem Subprotokoll-Header, falls angeboten.
+
+    Der Header traegt eine kommagetrennte Liste; das Token ist der Eintrag
+    **nach** ``msm.bearer``. Eine fremde Seite kann diesen Header zwar setzen
+    (WebSockets kennen kein CORS), aber nicht fuellen: ohne das Token des
+    Opfers steht dort nichts, was `_user_from_token` gelten laesst — anders
+    als beim Cookie, das der Browser ungefragt mitschickt (dafuer gibt es den
+    Origin-Check der Endpunkte).
+    """
+    roh = ws.headers.get("sec-websocket-protocol", "")
+    eintraege = [teil.strip() for teil in roh.split(",") if teil.strip()]
+    for stelle, eintrag in enumerate(eintraege):
+        if eintrag == WS_BEARER_PROTOKOLL and stelle + 1 < len(eintraege):
+            return eintraege[stelle + 1]
+    return None
+
+
+def ws_subprotokoll(ws: WebSocket) -> str | None:
+    """Was der Endpunkt in ``accept(subprotocol=…)`` spiegeln muss.
+
+    ``None`` fuer Cookie-Clients (Browser ohne Protokollangebot) — genau der
+    Vorgabewert von `accept()`, der Handshake bleibt dort unveraendert.
+    """
+    return WS_BEARER_PROTOKOLL if _ws_bearer_token(ws) is not None else None
+
+
 def get_current_user_for_ws(ws: WebSocket, db: Session) -> User:
     """Auth fuer WebSocket-Endpoints. Wirft HTTPException(401) wie der HTTP-Pfad,
     muss im Endpoint aber in einen sauberen WS-Close (1008) umgesetzt werden.
 
-    Liest das Access-Token-Cookie aus dem WS-Handshake-Header (Browser sendet
-    Cookies bei WS-Upgrade automatisch mit). Keine CSRF-Pruefung noetig, weil
-    WS-Frames keine "simple requests" sind und der Origin-Header im Endpoint
-    explizit geprueft wird.
+    Zwei Wege, dieselbe Rangfolge wie bei HTTP (`get_current_user`): erst das
+    Bearer-Token aus dem Subprotokoll (native Clients, die kein Cookie haben),
+    dann das Access-Token-Cookie (Browser senden es beim WS-Upgrade von
+    selbst). Keine CSRF-Pruefung noetig, weil WS-Frames keine "simple requests"
+    sind und der Origin-Header im Endpoint explizit geprueft wird.
     """
-    token = ws.cookies.get("__Secure-access_token")
+    token = _ws_bearer_token(ws) or ws.cookies.get("__Secure-access_token")
     return _user_from_token(token, db)
+
+
+def ws_session_herkunft(ws: WebSocket) -> str:
+    """`session_herkunft` fuer WebSocket-Handshakes: ``"panel"`` oder ``"desktop"``.
+
+    Liest denselben Anspruch aus demselben Token wie `get_current_user_for_ws`
+    — Subprotokoll vor Cookie, damit Herkunft und Identitaet immer demselben
+    Token gehoeren. Alles, was nicht ausdruecklich ``"desktop"`` sagt, ist
+    ``"panel"`` — die engere Seite.
+    """
+    token = _ws_bearer_token(ws) or ws.cookies.get("__Secure-access_token")
+    if not token:
+        return "panel"
+    payload = AuthService.decode_token(token) or {}
+    return "desktop" if payload.get("geraet") == "desktop" else "panel"
 
 
 def session_herkunft(request: Request) -> str:

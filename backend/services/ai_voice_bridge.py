@@ -317,6 +317,7 @@ class Sprachbruecke:
         stimm_schluessel: str,
         http_client: httpx.AsyncClient,
         hoechstdauer: float = MAX_SITZUNGSSEKUNDEN,
+        herkunft: str = "panel",
     ) -> None:
         self._browser = browser
         self._user_id = user_id
@@ -332,6 +333,11 @@ class Sprachbruecke:
         self._stimm_schluessel = stimm_schluessel
         self._client = http_client
         self._hoechstdauer = hoechstdauer
+        #: Panel oder Desktop — entscheidet die Werkzeugmenge der Laeufe
+        #: (`ai_tool_registry.herkunft_schnitt`), nie Rechte. Kommt aus dem
+        #: Handshake-Token (`dependencies.ws_session_herkunft`) und steht fuer
+        #: die ganze Sitzung fest, wie alles andere an dieser Verbindung.
+        self._herkunft = herkunft
 
         self._erkennung = ai_voice_vad.Pausenerkennung()
         self._lage = Lage()
@@ -626,12 +632,10 @@ class Sprachbruecke:
             # Prompt — sonst veralten zwei Texte gegeneinander, und zwar
             # lautlos.
             gesprochen=True,
-            # `herkunft` bleibt der Vorgabewert "panel", und das ist heute
-            # richtig: der Sprachkanal ist ein WebSocket, und
-            # `get_current_user_for_ws` liest ausschliesslich das Cookie. Die
-            # Desktop-App hat keins — sie kann hier gar nicht ankommen. Wenn
-            # sie es einmal kann, gehoert die Herkunft aus dem Handshake-Token
-            # hierher, nicht ein zweiter Vorgabewert.
+            # Seit dem 21.08.2026 kommt die App auch hier an: ihr Token liegt
+            # als Subprotokoll im Handshake, und die Herkunft daraus gilt fuer
+            # jeden Lauf dieser Sitzung. Ein Browser bleibt "panel".
+            herkunft=self._herkunft,
         )
         if run_id is None:
             code = fehler[0] if fehler else "AI_PROVIDER_UNAVAILABLE"
