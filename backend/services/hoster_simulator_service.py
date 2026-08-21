@@ -56,6 +56,12 @@ def simulate_event(
     db: Session, *, integration: HosterIntegration, req: HosterSimulationRequest
 ) -> HosterSimulationResponse:
     """Fuehrt eine simulierte Shop-Aktion fuer eine Sandbox-Integration aus."""
+    if not integration.is_sandbox:
+        raise HTTPException(
+            status_code=400,
+            detail="Der Simulator kann nur fuer Sandbox-Integrationen verwendet werden.",
+        )
+
     action = req.action
 
     if action == "test_webhook":
@@ -288,7 +294,11 @@ def clean_sandbox_data(db: Session, *, integration: HosterIntegration) -> int:
         user = db.query(User).filter(User.id == ident.user_id).first()
         db.delete(ident)
         if user is not None and not user.is_owner and (user.email or "").startswith("sim-"):
-            db.delete(user)
+            try:
+                db.delete(user)
+            except Exception as exc:
+                logger.warning("Sandbox-User %s konnte nicht geloescht werden: %s", user.id, exc)
+                user.is_active = False
 
     db.commit()
     return count

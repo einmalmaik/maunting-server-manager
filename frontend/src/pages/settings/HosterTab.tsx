@@ -245,7 +245,7 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
                 <Fact
                   label={t('hoster.environment')}
                   value={selected.is_sandbox ? t('hoster.sandboxBadge') : t('hoster.liveBadge')}
-                  hint={selected.is_sandbox ? 'Testumgebung & Simulator aktiv' : 'Produktivbetrieb'}
+                  hint={selected.is_sandbox ? t('hoster.sandboxEnvHint') : t('hoster.liveEnvHint')}
                 />
                 <Fact
                   label={t('hoster.apiKey')}
@@ -400,7 +400,7 @@ function IntegrationForm({
             required
           >
             {users.length === 0 && (
-              <option value="">{loadingUsers ? t('common.loading') : 'Keine Benutzer gefunden'}</option>
+              <option value="">{loadingUsers ? t('common.loading') : t('hoster.noUsersFound')}</option>
             )}
             {users
               .filter((u) => u.is_active)
@@ -1019,7 +1019,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
       toast.success(t('hoster.simulator.copiedAiPrompt'))
       setTimeout(() => setCopiedPrompt(false), 3000)
     } catch {
-      toast.error('Zwischenablage nicht verfügbar')
+      toast.error(t('common.clipboardError', 'Zwischenablage nicht verfügbar'))
     }
   }
 
@@ -1065,7 +1065,7 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
               {copiedPrompt ? (
                 <>
                   <Check className="h-3.5 w-3.5 text-emerald-400" />
-                  Kopiert!
+                  {t('hoster.copied', 'Kopiert')}
                 </>
               ) : (
                 <>
