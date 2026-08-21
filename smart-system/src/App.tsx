@@ -7,7 +7,7 @@
  * Chat (derselbe Dauerchat wie im Panel) und daneben die Einstellungen
  * (Desktop-Integration, Wake-Word).
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { abmelden, ich, type Benutzer } from "./api/auth";
 import { setzeBackendUrl, stillAnmelden } from "./api/client";
@@ -21,6 +21,7 @@ import {
   type AgentStatus,
   type AppKonfig,
 } from "./lib/tauri";
+import Splash from "./Splash";
 import { Karte, Knopf } from "./ui";
 import WakewordEinrichtung from "./WakewordEinrichtung";
 
@@ -30,6 +31,9 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>("laedt");
   const [konfig, setKonfig] = useState<AppKonfig | null>(null);
   const [benutzer, setBenutzer] = useState<Benutzer | null>(null);
+  // Die Boot-Sequenz läuft über allem, während darunter Konfiguration und
+  // stille Anmeldung schon laden — wie bei einem Spielstart.
+  const [splash, setSplash] = useState(true);
 
   useEffect(() => {
     void (async () => {
@@ -68,25 +72,31 @@ export default function App() {
     }
   }
 
+  let inhalt: ReactNode;
   if (phase === "laedt" || konfig === null) {
-    return (
+    inhalt = (
       <main className="flex h-full items-center justify-center bg-background text-muted-foreground">
         <p className="text-sm">Startet …</p>
       </main>
     );
-  }
-
-  if (phase === "einrichtung" || phase === "anmeldung") {
-    return (
+  } else if (phase === "einrichtung" || phase === "anmeldung") {
+    inhalt = (
       <Wizard
         konfig={konfig}
         startSchritt={phase === "anmeldung" ? "anmeldung" : "backend"}
         onFertig={fertig}
       />
     );
+  } else {
+    inhalt = <Hauptansicht benutzer={benutzer} onAbmelden={() => void abmeldenUndZurueck()} />;
   }
 
-  return <Hauptansicht benutzer={benutzer} onAbmelden={() => void abmeldenUndZurueck()} />;
+  return (
+    <>
+      {inhalt}
+      {splash && <Splash onFertig={() => setSplash(false)} />}
+    </>
+  );
 }
 
 const STATUS_TEXTE: Record<AgentStatus, string> = {

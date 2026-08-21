@@ -265,6 +265,15 @@ describe("Chat", () => {
   });
 });
 
+describe("Boot-Sequenz", () => {
+  it("zeigt das DIS-Logo zuerst und laesst sich per Klick ueberspringen", async () => {
+    render(<App />);
+    expect(await screen.findByAltText("DIS")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("splash"));
+    expect(screen.queryByTestId("splash")).not.toBeInTheDocument();
+  });
+});
+
 describe("Overlay (Sprachblase)", () => {
   it("rendert die pulsierende Blase", () => {
     render(<Overlay />);
