@@ -1,0 +1,118 @@
+name: Smart System Release
+
+# Baut den NSIS-Installer der Singra-Smart-System-App und haengt ihn an den
+# GitHub-Release.
+#
+# **Eigenes Tag-Praefix, kein `v*`.** Auf `v*` liegen bereits zwei Workflows
+# (release-artifacts, recovery-release), und jeder von ihnen legt ueber
+# tauri-action bzw. gh einen Draft-Release zum selben Tag an. Ein dritter
+# Nebenlaeufer waere ein Wettlauf um dieselbe Release-Kennung. Die
+# Desktop-App hat ohnehin ihren eigenen Takt: sie folgt der Panel-Version
+# nicht, und ein Panel-Update erzwingt keinen neuen Installer.
+#
+# Windows only: die App ist es auch. Ducking (WASAPI), Uebernahme (enigo,
+# xcap) und der Tresor (Credential Manager) sind unter `cfg(windows)`
+# gebaut, und ein Linux-Installer waere eine Huelle ohne Inhalt.
+
+on:
+  push:
+    tags:
+      - "smart-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release-Tag (z. B. smart-v0.1.0)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: smart-system-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build Smart System (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: smart-system
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: smart-system/package-lock.json
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-system/src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: TypeCheck
+        run: npx tsc --noEmit
+
+      - name: Run vitest
+        run: npx vitest run
+
+      # Die Sandbox-Grenze und die Freigabe der Uebernahme haengen an diesen
+      # Tests. Ein Installer, der sie nicht bestanden hat, soll nicht
+      # entstehen — deshalb vor dem Bau und nicht daneben.
+      - name: Run Rust tests
+        working-directory: smart-system/src-tauri
+        run: cargo test
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: smart-system
+          tagName: ${{ github.ref_name }}
+          releaseName: "Singra Smart System ${{ github.ref_name }}"
+          releaseBody: |
+            Desktop-Begleiter fuer das MSM-Panel: derselbe Dauerchat wie im
+            Browser, Wake-Word offline auf dem Rechner, Arbeit im
+            freigegebenen Sandbox-Ordner.
+
+            Serververwaltung gehoert nicht dazu und wird es nicht: eine
+            Bitte aus dieser App erreicht im Panel kein Serverwerkzeug.
+
+            **Hinweis:** Der Installer ist nicht signiert. Windows SmartScreen
+            meldet deshalb einen unbekannten Herausgeber — ueber "Weitere
+            Informationen" laesst er sich trotzdem starten. Pruefe vorher die
+            SHA256-Summe aus den Release-Notizen.
+          releaseDraft: true
+          prerelease: false
+          args: --target x86_64-pc-windows-msvc
+
+      # Die Summe gehoert in den Release, nicht in eine Anleitung: ein
+      # unsignierter Installer ist genau dann vertrauenswuerdig, wenn sich
+      # nachrechnen laesst, dass er der gebaute ist.
+      - name: SHA256-Summe des Installers
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter *.exe `
+            -Path src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis |
+            Select-Object -First 1
+          if (-not $exe) { throw "Kein NSIS-Installer gefunden" }
+          $summe = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          Write-Host "$summe  $($exe.Name)"
+          "$summe  $($exe.Name)" | Out-File -Encoding ascii SHA256SUMS.txt
+
+      - name: SHA256SUMS als Artefakt
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-system-sha256
+          path: smart-system/SHA256SUMS.txt

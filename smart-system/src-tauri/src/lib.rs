@@ -9,6 +9,7 @@
 //! welche bekommen — Server-Verwaltung bleibt exklusiv dem Web-Panel.
 
 mod auftrag;
+mod deinstallation;
 #[cfg(windows)]
 mod ducking;
 mod geheimnisse;
@@ -115,6 +116,20 @@ fn uebernahme_rest() -> Result<u64, String> {
     Ok(uebernahme::restsekunden())
 }
 
+/// Entfernt alle lokalen Spuren (Konfiguration, Sprachaufnahmen, Tresor,
+/// Autostart) und berichtet einzeln, was geklappt hat. Startet den
+/// Uninstaller **nicht** — das ist ein eigener Schritt, damit die Oberflaeche
+/// den Bericht vorher zeigen kann.
+#[tauri::command]
+fn deinstallation_aufraeumen(app: tauri::AppHandle) -> deinstallation::Aufraeumbericht {
+    deinstallation::aufraeumen(&app)
+}
+
+#[tauri::command]
+fn deinstallation_starten(app: tauri::AppHandle) -> Result<(), String> {
+    deinstallation::uninstaller_starten(&app)
+}
+
 #[tauri::command]
 fn wakeword_stand(app: tauri::AppHandle) -> Result<wakeword::WakewordStand, String> {
     wakeword::stand(&app)
@@ -213,7 +228,9 @@ pub fn run() {
             auftrag_ausfuehren,
             uebernahme_freigeben,
             uebernahme_widerrufen,
-            uebernahme_rest
+            uebernahme_rest,
+            deinstallation_aufraeumen,
+            deinstallation_starten
         ])
         .setup(|app| {
             tray::erstellen(app.handle())?;

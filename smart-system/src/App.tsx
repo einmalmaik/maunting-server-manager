@@ -14,6 +14,7 @@ import { setzeBackendUrl, stillAnmelden } from "./api/client";
 import Uebernahmekarte from "./auftraege/Uebernahmekarte";
 import { useAuftragsschleife } from "./auftraege/useAuftragsschleife";
 import Chat from "./chat/Chat";
+import Gefahrenzone from "./einstellungen/Gefahrenzone";
 import Wizard from "./einrichtung/Wizard";
 import {
   duckingSetzen,
@@ -232,6 +233,7 @@ function Einstellungen({ agentName }: { agentName: string }) {
       </Karte>
 
       <WakewordEinrichtung wortVorschlag={agentName} />
+      <Gefahrenzone />
     </div>
   );
 }

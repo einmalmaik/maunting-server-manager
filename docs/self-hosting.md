@@ -105,6 +105,49 @@ stehen. Das Backend benötigt für getrenntes Hosting passende CORS- und
 Cookie-Einstellungen; Details stehen in `frontend/.env.example` und
 `backend/.env.example`.
 
+### Singra Smart System (Desktop-App, optional)
+
+Der Workflow `.github/workflows/smart-system-release.yml` baut den
+Windows-Installer der Desktop-App. Er läuft auf **`smart-v*`-Tags** und
+bewusst nicht auf `v*`: auf `v*` liegen bereits zwei Workflows, die je einen
+Draft-Release zum selben Tag anlegen, und die Desktop-App folgt ohnehin einem
+eigenen Takt — ein Panel-Update erzwingt keinen neuen Installer.
+
+- `Singra Smart System_<VERSION>_x64-setup.exe`: NSIS-Installer, nur Windows.
+  Die App ist Windows-spezifisch (Audio-Ducking über WASAPI, Übernahme von
+  Maus und Tastatur, Anmeldeinformations-Manager als Tresor).
+- `SHA256SUMS.txt`: Prüfsumme des Installers, als Actions-Artefakt.
+
+**Der Installer ist nicht signiert.** Windows SmartScreen meldet deshalb einen
+unbekannten Herausgeber; über „Weitere Informationen“ lässt er sich starten.
+Die Prüfsumme aus dem Release ist der Ersatz für die fehlende Signatur — sie
+gehört vor der Installation verglichen.
+
+Was die App zum Betrieb braucht:
+
+- Die Panel-Adresse (wird im Einrichtungs-Assistenten eingetragen) und einen
+  Benutzer mit `ai.chat.use`.
+- Für die Werkzeuge auf dem eigenen Rechner zusätzlich `ai.desktop.use`. Ohne
+  dieses Recht ist die App ein Chatfenster: sie holt keine Aufträge ab, und
+  die KI bekommt die Desktop-Werkzeuge gar nicht erst angeboten.
+- Panelseitig müssen `tauri://localhost`, `http://tauri.localhost` und
+  `https://tauri.localhost` als Origins erlaubt sein. Das ist in
+  `backend/config.py` fest hinterlegt (`TAURI_ORIGINS`) und braucht keine
+  Konfiguration.
+
+Was die App **nicht** kann und nicht bekommen wird: Serververwaltung. Eine
+Bitte aus der Smart-System-App erreicht im Panel kein Serverwerkzeug — der
+Katalog wird nach der Herkunft geschnitten, und zusätzlich weist die
+Ausführung jeden solchen Aufruf einzeln ab
+(`services/ai_tool_registry.herkunft_schnitt`). Wer Server bedienen will,
+nimmt das Panel; es ist dieselbe Unterhaltung.
+
+Deinstalliert wird in der App selbst (Einstellungen → Gefahrenzone) oder über
+Windows. Der Weg in der App räumt zusätzlich auf, was der Windows-Uninstaller
+stehen lässt: Einstellungen, die Stimmaufnahmen des Wake-Words, den Eintrag im
+Anmeldeinformations-Manager und den Autostart. Der Sandbox-Ordner bleibt — er
+gehört dem Benutzer.
+
 ## Was die Oberfläche im Browser nachlädt
 
 **Keine Schriften von Dritten.** Die vier Familien der Oberfläche — Inter,

@@ -85,4 +85,17 @@ describe('SelfHostingDocs', () => {
     expect(screen.getByText(/must never be active on two nodes at once/i)).toBeInTheDocument()
     expect(screen.getByText(/Stop the agent, restore the path/i)).toBeInTheDocument()
   })
+
+  it('nennt die Desktop-App samt ihrer Grenze zur Serververwaltung', () => {
+    renderPage()
+
+    // Die Grenze ist der Punkt, der hier stehen muss: wer die App
+    // ausrollt, soll nicht erst im Betrieb merken, dass sie bewusst keine
+    // zweite Serververwaltung ist.
+    expect(document.querySelector('a[href="#smart-system"]')).toBeInTheDocument()
+    expect(screen.getByText(/never reaches a server tool/i)).toBeInTheDocument()
+    // Und der unsignierte Installer, weil SmartScreen sonst wie ein Fehler
+    // aussieht statt wie eine bekannte Eigenschaft.
+    expect(screen.getByText(/installer is not signed/i)).toBeInTheDocument()
+  })
 })

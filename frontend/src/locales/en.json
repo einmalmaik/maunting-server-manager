@@ -3151,6 +3151,35 @@
         "sums": "SHA-256 checksums for verifying all three archives before installation."
       }
     },
+    "smartSystem": {
+      "title": "Singra Smart System (desktop app)",
+      "intro": "Optional Windows companion: the same ongoing chat as in the browser, a wake word trained offline, and work inside a folder the user picks. The app does not replace the panel â it is a second way into the same conversation.",
+      "artifact": {
+        "title": "Installer",
+        "body": "The smart-system-release.yml workflow builds the NSIS installer on smart-v* tags, deliberately separate from the panel releases. Windows only: audio ducking, takeover and the credential vault are Windows features."
+      },
+      "permission": {
+        "title": "Permissions",
+        "body": "Signing in and chatting needs ai.chat.use. Tools on the user's own computer additionally need ai.desktop.use; without it the app fetches no jobs, and the AI is not even offered those tools."
+      },
+      "sandbox": {
+        "title": "Sandbox",
+        "body": "The AI works exclusively inside a folder the user selects. The resolved path is checked, not the requested one â a link pointing outward does not lead out either. Deleted files go to the recycle bin."
+      },
+      "takeover": {
+        "title": "Mouse and keyboard",
+        "body": "The AI may ask to take over; only the human at the machine can grant it, on a confirmation card and for a limited time. The deadline lives in the app, not in the panel, and can be ended at any moment."
+      },
+      "noServers": {
+        "title": "No server management",
+        "body": "A request from the app never reaches a server tool. The tool catalogue is cut by origin, and execution additionally rejects every such call individually. Servers are operated in the panel."
+      },
+      "uninstall": {
+        "title": "Uninstalling",
+        "body": "In the app under Settings â Danger zone. It also removes what Windows leaves behind: settings, voice recordings, the credential entry and autostart. The sandbox folder stays â it belongs to the user."
+      },
+      "unsigned": "The installer is not signed. Windows SmartScreen reports an unknown publisher; it can be started via “More info”. Compare the SHA256 sum from the release first â it replaces the missing signature."
+    },
     "compatibility": {
       "title": "PostgreSQL only for new installations",
       "description": "PostgreSQL is the only supported panel runtime database. SQLite code exists solely for a one-time, verified migration of legacy installations. A first install interrupted after role and database creation can be validated and continued without deletion using --resume-partial; foreign PostgreSQL state remains blocked."

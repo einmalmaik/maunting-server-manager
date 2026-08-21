@@ -104,3 +104,24 @@ export async function uebernahmeWiderrufen(): Promise<void> {
 export async function uebernahmeRest(): Promise<number> {
   return await invoke<number>("uebernahme_rest");
 }
+
+// ── Deinstallation ───────────────────────────────────────────────────────
+
+export interface Aufraeumbericht {
+  konfiguration_entfernt: boolean;
+  sprachdaten_entfernt: boolean;
+  tresor_geleert: boolean;
+  autostart_entfernt: boolean;
+  /** Der Ordner des Benutzers bleibt — er gehört ihm, nicht der App. */
+  sandbox_bleibt: string | null;
+  fehler: string[];
+}
+
+export async function deinstallationAufraeumen(): Promise<Aufraeumbericht> {
+  return await invoke<Aufraeumbericht>("deinstallation_aufraeumen");
+}
+
+/** Startet den Windows-Uninstaller und beendet die App. */
+export async function deinstallationStarten(): Promise<void> {
+  await invoke("deinstallation_starten");
+}

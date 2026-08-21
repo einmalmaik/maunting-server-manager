@@ -74,3 +74,43 @@ jobs:
 
       - name: Test (vitest)
         run: npm test
+
+  smart-system:
+    name: Smart System (Node 22 + vitest + cargo test)
+    # Windows, weil die App es ist: Ducking, Uebernahme und Tresor stehen
+    # unter `cfg(windows)`, und auf Linux waeren genau die Tests unbaubar,
+    # die hier zaehlen — die Sandbox-Grenze und die Freigabe.
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: smart-system
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: smart-system/package-lock.json
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-system/src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (tsc + vite)
+        run: npm run build
+
+      - name: Test (vitest)
+        run: npm test
+
+      - name: Rust tests
+        working-directory: smart-system/src-tauri
+        run: cargo test

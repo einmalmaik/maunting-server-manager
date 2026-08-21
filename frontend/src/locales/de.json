@@ -3151,6 +3151,35 @@
         "sums": "SHA-256-Prüfsummen zur Prüfung aller drei Archive vor der Installation."
       }
     },
+    "smartSystem": {
+      "title": "Singra Smart System (Desktop-App)",
+      "intro": "Optionaler Begleiter für Windows: derselbe Dauerchat wie im Browser, ein offline trainiertes Wake-Wort und Arbeit in einem Ordner, den der Benutzer selbst freigibt. Die App ersetzt das Panel nicht — sie ist ein zweiter Weg in dieselbe Unterhaltung.",
+      "artifact": {
+        "title": "Installer",
+        "body": "Der Workflow smart-system-release.yml baut den NSIS-Installer auf smart-v*-Tags, bewusst getrennt von den Panel-Releases. Nur Windows: Audio-Ducking, Übernahme und Tresor sind Windows-Funktionen."
+      },
+      "permission": {
+        "title": "Rechte",
+        "body": "Anmelden und Chatten braucht ai.chat.use. Für die Werkzeuge auf dem eigenen Rechner kommt ai.desktop.use dazu; ohne dieses Recht holt die App keine Aufträge ab, und die KI bekommt die Werkzeuge gar nicht erst angeboten."
+      },
+      "sandbox": {
+        "title": "Sandbox",
+        "body": "Die KI arbeitet ausschließlich in einem Ordner, den der Benutzer auswählt. Geprüft wird der aufgelöste Pfad, nicht der angefragte — auch eine Verknüpfung nach außen führt nicht hinaus. Gelöschtes landet im Papierkorb."
+      },
+      "takeover": {
+        "title": "Maus und Tastatur",
+        "body": "Die KI kann um die Übernahme bitten; erteilen kann sie allein der Mensch am Rechner, auf einer Bestätigungskarte und befristet. Die Frist liegt in der App, nicht im Panel, und lässt sich jederzeit beenden."
+      },
+      "noServers": {
+        "title": "Keine Serververwaltung",
+        "body": "Eine Bitte aus der App erreicht kein Serverwerkzeug. Der Werkzeugkatalog wird nach der Herkunft geschnitten, und zusätzlich weist die Ausführung jeden solchen Aufruf einzeln ab. Server bedient man im Panel."
+      },
+      "uninstall": {
+        "title": "Deinstallation",
+        "body": "In der App unter Einstellungen → Gefahrenzone. Sie entfernt zusätzlich, was Windows stehen lässt: Einstellungen, Stimmaufnahmen, den Tresor-Eintrag und den Autostart. Der Sandbox-Ordner bleibt — er gehört dem Benutzer."
+      },
+      "unsigned": "Der Installer ist nicht signiert. Windows SmartScreen meldet einen unbekannten Herausgeber; über „Weitere Informationen“ lässt er sich starten. Vergleiche vorher die SHA256-Summe aus dem Release — sie ersetzt die fehlende Signatur."
+    },
     "compatibility": {
       "title": "Neue Installationen ausschließlich mit PostgreSQL",
       "description": "PostgreSQL ist die einzige unterstützte Panel-Runtime-Datenbank. SQLite-Code existiert ausschließlich für die einmalige, geprüfte Migration bestehender Altinstallationen. Eine nach dem Anlegen von Rolle und Datenbank abgebrochene Erstinstallation kann geprüft und ohne Löschen mit --resume-partial fortgesetzt werden; fremde PostgreSQL-Zustände bleiben blockiert."
