@@ -4820,7 +4820,23 @@
       "overlayAus": "Overlay ausblenden",
       "duckingTesten": "Ducking testen (3 s)",
       "duckingLaeuft": "Ducking läuft …",
-      "fussnote": "MSS — Maunting Smart System. Tray-Status und Overlay laufen über das Rust-Backend."
+      "fussnote": "MSS — Maunting Smart System. Tray-Status und Overlay laufen über das Rust-Backend.",
+      "hotkey": {
+        "titel": "Globale Tastenkürzel",
+        "hinweis": "Wirken überall, auch wenn das Fenster im Tray liegt. Jedes Kürzel lässt sich einzeln abschalten.",
+        "fenster": "Hauptfenster zeigen/verstecken",
+        "sprache": "Sprachsitzung im Overlay",
+        "aendern": "Ändern",
+        "druecken": "Taste drücken …",
+        "aus": "Deaktiviert"
+      }
+    },
+    "schliessen": {
+      "titel": "MSS schließen?",
+      "frage": "In den Hintergrund heißt: das Fenster verschwindet, Wake-Word und Aufträge laufen weiter. Beenden stoppt alles.",
+      "hintergrund": "In den Hintergrund",
+      "beenden": "Beenden",
+      "abbrechen": "Abbrechen"
     }
   }
 }

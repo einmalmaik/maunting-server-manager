@@ -13,7 +13,12 @@ use tauri::{AppHandle, Manager};
 
 const DATEI: &str = "konfig.json";
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+/// Vorgaben der beiden globalen Hotkeys — Konstanten, damit `Default`,
+/// Registrierung und Doku dieselbe Wahrheit tragen.
+pub const HOTKEY_FENSTER_VORGABE: &str = "Alt+Space";
+pub const HOTKEY_SPRACHE_VORGABE: &str = "Alt+Shift+Space";
+
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct AppKonfig {
     /// Basis-URL des MSM-Backends (z. B. https://panel.example.com).
@@ -22,6 +27,25 @@ pub struct AppKonfig {
     pub sandbox_pfad: Option<String>,
     /// Der Einrichtungs-Assistent wurde vollständig durchlaufen.
     pub eingerichtet: bool,
+    /// Globaler Hotkey: Hauptfenster zeigen/verstecken. `None` heißt bewusst
+    /// deaktiviert. Fehlt das Feld in einer alten Datei, gilt die Vorgabe —
+    /// deshalb der eigene `Default` unten statt `#[derive(Default)]`, dessen
+    /// `None` hieße „abgeschaltet" statt „wie bisher".
+    pub hotkey_fenster: Option<String>,
+    /// Globaler Hotkey: Sprachsitzung im Overlay starten/beenden.
+    pub hotkey_sprache: Option<String>,
+}
+
+impl Default for AppKonfig {
+    fn default() -> Self {
+        Self {
+            backend_url: None,
+            sandbox_pfad: None,
+            eingerichtet: false,
+            hotkey_fenster: Some(HOTKEY_FENSTER_VORGABE.into()),
+            hotkey_sprache: Some(HOTKEY_SPRACHE_VORGABE.into()),
+        }
+    }
 }
 
 fn pfad(app: &AppHandle) -> Result<PathBuf, String> {
@@ -74,7 +98,35 @@ pub fn speichern(app: &AppHandle, konfig: &AppKonfig) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::sandbox_pfad_verboten;
+    use super::{
+        sandbox_pfad_verboten, AppKonfig, HOTKEY_FENSTER_VORGABE, HOTKEY_SPRACHE_VORGABE,
+    };
+
+    #[test]
+    fn alte_datei_ohne_hotkey_felder_bekommt_die_vorgaben() {
+        // Die Felder kamen später dazu. Eine Datei aus der Zeit davor darf
+        // die Hotkeys nicht verlieren — `Alt+Space` war immer an.
+        let alt = r#"{"backend_url":"https://panel.example.com","sandbox_pfad":null,"eingerichtet":true}"#;
+        let konfig: AppKonfig = serde_json::from_str(alt).unwrap();
+        assert_eq!(konfig.hotkey_fenster.as_deref(), Some(HOTKEY_FENSTER_VORGABE));
+        assert_eq!(konfig.hotkey_sprache.as_deref(), Some(HOTKEY_SPRACHE_VORGABE));
+    }
+
+    #[test]
+    fn null_heisst_deaktiviert_und_ueberlebt_den_roundtrip() {
+        // `null` ist eine Entscheidung, kein fehlendes Feld: der Benutzer hat
+        // den Hotkey abgeschaltet, und Speichern + Laden darf daraus nicht
+        // wieder die Vorgabe machen.
+        let text = r#"{"hotkey_fenster":null,"hotkey_sprache":"Ctrl+Shift+K"}"#;
+        let konfig: AppKonfig = serde_json::from_str(text).unwrap();
+        assert_eq!(konfig.hotkey_fenster, None);
+        assert_eq!(konfig.hotkey_sprache.as_deref(), Some("Ctrl+Shift+K"));
+
+        let gespeichert = serde_json::to_string(&konfig).unwrap();
+        let wieder: AppKonfig = serde_json::from_str(&gespeichert).unwrap();
+        assert_eq!(wieder.hotkey_fenster, None);
+        assert_eq!(wieder.hotkey_sprache.as_deref(), Some("Ctrl+Shift+K"));
+    }
 
     #[test]
     fn windows_verzeichnis_ist_tabu() {

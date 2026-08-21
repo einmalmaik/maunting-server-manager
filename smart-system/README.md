@@ -51,9 +51,13 @@ zeigt sie unter Einstellungen → Allgemein und noch einmal beim Koppeln.
 
 - `src-tauri/` — das ganze Zuhause der App: Fensterverwaltung (Haupt + Overlay),
   System-Tray mit Statusfarben (Grün: bereit, Blau: hört zu, Lila: denkt,
-  Gelb: spricht), globaler Hotkey, Autostart, Wake-Word (rustpotter, offline),
-  Audio-Ducking (WASAPI), Sandbox-Dateizugriff, Übernahme von Maus und
-  Tastatur, Tresor (Anmeldeinformations-Manager).
+  Gelb: spricht), zwei konfigurierbare globale Hotkeys (Fenster: `Alt+Space`,
+  Sprachsitzung im Overlay: `Alt+Shift+Space` — beide in den Einstellungen
+  änderbar und einzeln abschaltbar), Autostart, Wake-Word (rustpotter,
+  offline), Audio-Ducking (WASAPI), Sandbox-Dateizugriff, Übernahme von Maus
+  und Tastatur, Tresor (Anmeldeinformations-Manager). Das X schließt nicht:
+  ein kleiner Dialog fragt, ob die App in den Hintergrund geht (Standard)
+  oder wirklich endet.
 - `frontend/src/desktop/` (im Nachbarordner) — der Desktop-Einstieg der
   gemeinsamen Oberfläche: Bootstrap mit Laufzeit-API-Adresse, Splash,
   Einrichtungs-Assistent, Desktop-Einstellungen, Overlay-Sprachblase,

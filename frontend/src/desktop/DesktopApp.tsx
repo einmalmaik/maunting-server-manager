@@ -35,7 +35,13 @@ import {
   sprachstartMelden,
   sprachzustandVerdrahten,
 } from './sprachKoordination'
-import { konfigLaden, overlaySichtbar, type AppKonfig } from './tauri'
+import {
+  appBeenden,
+  hauptfensterVerstecken,
+  konfigLaden,
+  overlaySichtbar,
+  type AppKonfig,
+} from './tauri'
 import { stillAnmelden } from './transport'
 import { useAuftragsschleife } from './useAuftragsschleife'
 
@@ -153,6 +159,9 @@ export function DesktopApp() {
         {/* Über allem außer der Boot-Sequenz: eine Bitte um die Übernahme von
             Maus und Tastatur darf nicht hinter einem Reiter verschwinden. */}
         <Uebernahmekarte offenerAuftragId={offeneUebernahme} />
+        {/* Immer gemountet, nicht erst ab `bereit`: das X gibt es auch im
+            Assistenten. */}
+        <SchliessenDialog />
         <ToastContainer />
         <ConfirmDialog />
         <PromptDialog />
@@ -168,6 +177,65 @@ function Startbild() {
     <main className="flex flex-1 items-center justify-center text-on-surface-variant">
       <p className="text-sm">{t('mss.app.startet')}</p>
     </main>
+  )
+}
+
+/**
+ * Der kleine Dialog hinter dem X. Rust hält das Fenster an
+ * (`mss:schliessen-angefragt`) und hier entscheidet der Mensch: in den
+ * Hintergrund (Standard — ein Companion, der beim Wegklicken stirbt, wäre
+ * keiner) oder wirklich beenden. Escape heißt: nichts von beidem.
+ */
+function SchliessenDialog() {
+  const { t } = useTranslation()
+  const [offen, setOffen] = useState(false)
+
+  useEffect(() => {
+    const abo = listen('mss:schliessen-angefragt', () => setOffen(true))
+    return () => {
+      void abo.then((weg) => weg())
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!offen) return
+    const taste = (ereignis: KeyboardEvent) => {
+      if (ereignis.key === 'Escape') setOffen(false)
+    }
+    window.addEventListener('keydown', taste)
+    return () => window.removeEventListener('keydown', taste)
+  }, [offen])
+
+  if (!offen) return null
+
+  function hintergrund() {
+    setOffen(false)
+    void hauptfensterVerstecken()
+  }
+
+  return (
+    <div
+      className="msm-modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('mss.schliessen.titel')}
+    >
+      <div className="msm-card w-full max-w-sm p-5">
+        <h2 className="text-sm font-medium text-on-surface">{t('mss.schliessen.titel')}</h2>
+        <p className="mt-1 text-xs text-on-surface-variant">{t('mss.schliessen.frage')}</p>
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" onClick={() => setOffen(false)}>
+            {t('mss.schliessen.abbrechen')}
+          </Button>
+          <Button variant="destructive" onClick={() => void appBeenden()}>
+            {t('mss.schliessen.beenden')}
+          </Button>
+          <Button autoFocus onClick={hintergrund}>
+            {t('mss.schliessen.hintergrund')}
+          </Button>
+        </div>
+      </div>
+    </div>
   )
 }
 

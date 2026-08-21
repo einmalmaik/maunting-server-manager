@@ -28,7 +28,13 @@ vi.mock('./WakewordEinrichtung', () => ({
 import { Wizard } from './Wizard'
 import { setzeAccessToken } from './transport'
 
-const KONFIG = { backend_url: 'https://api.example.com', sandbox_pfad: null, eingerichtet: true }
+const KONFIG = {
+  backend_url: 'https://api.example.com',
+  sandbox_pfad: null,
+  eingerichtet: true,
+  hotkey_fenster: 'Alt+Space',
+  hotkey_sprache: 'Alt+Shift+Space',
+}
 
 function json(status: number, koerper: unknown): Response {
   return new Response(JSON.stringify(koerper), {

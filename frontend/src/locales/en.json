@@ -4820,7 +4820,23 @@
       "overlayAus": "Hide overlay",
       "duckingTesten": "Test ducking (3 s)",
       "duckingLaeuft": "Ducking running …",
-      "fussnote": "MSS — Maunting Smart System. Tray status and overlay run through the Rust backend."
+      "fussnote": "MSS — Maunting Smart System. Tray status and overlay run through the Rust backend.",
+      "hotkey": {
+        "titel": "Global shortcuts",
+        "hinweis": "Work everywhere, even with the window in the tray. Each shortcut can be disabled individually.",
+        "fenster": "Show/hide main window",
+        "sprache": "Voice session in the overlay",
+        "aendern": "Change",
+        "druecken": "Press a key …",
+        "aus": "Disabled"
+      }
+    },
+    "schliessen": {
+      "titel": "Close MSS?",
+      "frage": "Background means the window disappears while wake word and jobs keep running. Quit stops everything.",
+      "hintergrund": "Keep in background",
+      "beenden": "Quit",
+      "abbrechen": "Cancel"
     }
   }
 }

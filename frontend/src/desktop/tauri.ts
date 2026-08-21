@@ -15,6 +15,10 @@ export interface AppKonfig {
   backend_url: string | null
   sandbox_pfad: string | null
   eingerichtet: boolean
+  /** Globaler Hotkey fürs Hauptfenster — `null` heißt bewusst deaktiviert. */
+  hotkey_fenster: string | null
+  /** Globaler Hotkey für die Sprachsitzung im Overlay. */
+  hotkey_sprache: string | null
 }
 
 export async function konfigLaden(): Promise<AppKonfig> {
@@ -38,6 +42,28 @@ export async function overlaySichtbar(sichtbar: boolean): Promise<void> {
 /** Senkt Hintergrundton um 60 % ab (an=true) bzw. stellt ihn wieder her. */
 export async function duckingSetzen(an: boolean): Promise<void> {
   await invoke('ducking', { an })
+}
+
+/**
+ * Stellt beide globalen Hotkeys um und speichert sie; `null` = deaktiviert.
+ * Eine belegte oder ungültige Kombination kommt als Fehler zurück, und der
+ * alte Stand bleibt registriert.
+ */
+export async function hotkeysSetzen(
+  fenster: string | null,
+  sprache: string | null,
+): Promise<void> {
+  await invoke('hotkeys_setzen', { fenster, sprache })
+}
+
+/** Beendet die App wirklich — der eine Ausgang des Schließen-Dialogs. */
+export async function appBeenden(): Promise<void> {
+  await invoke('app_beenden')
+}
+
+/** Versteckt das Hauptfenster im Tray — der andere Ausgang. */
+export async function hauptfensterVerstecken(): Promise<void> {
+  await invoke('hauptfenster_verstecken')
 }
 
 // ── Wake-Word ────────────────────────────────────────────────────────────

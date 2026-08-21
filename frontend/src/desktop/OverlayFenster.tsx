@@ -23,6 +23,7 @@ import { aiChatPreferenceKeys, readAiProviderChoice } from '@/lib/aiChatPreferen
 import { useAuthStore } from '@/stores/authStore'
 import { istAngemeldet, stillAnmelden } from './transport'
 import {
+  OVERLAY_SPRACHE_ENDE,
   OVERLAY_SPRACHE_START,
   beiFremdemSprachstart,
   sprachstartMelden,
@@ -87,6 +88,16 @@ export function OverlayFenster() {
     }
     window.addEventListener('keydown', taste)
     return () => window.removeEventListener('keydown', taste)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Der Sprach-Hotkey drückt auch „aus": Rust sieht nur, dass das Fenster
+  // sichtbar ist, und bittet hierher — beendet wird wie über X und ESC.
+  useEffect(() => {
+    const abo = listen(OVERLAY_SPRACHE_ENDE, () => schliessen())
+    return () => {
+      void abo.then((weg) => weg())
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

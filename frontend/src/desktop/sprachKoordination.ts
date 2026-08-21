@@ -22,6 +22,12 @@ import { duckingSetzen, setzeStatus, type AgentStatus } from './tauri'
 export const SPRACHE_STARTET = 'mss:sprache-startet'
 /** Bitte an das Overlay: zeig dich und beginne eine Sitzung. */
 export const OVERLAY_SPRACHE_START = 'mss:overlay-sprache-start'
+/**
+ * Bitte an das Overlay: beende die Sitzung und versteck dich. Kommt aus Rust
+ * (Sprach-Hotkey, zweiter Druck) — Rust sieht nur die Fenstersichtbarkeit,
+ * die Sitzung selbst gehört dem Frontend.
+ */
+export const OVERLAY_SPRACHE_ENDE = 'mss:overlay-sprache-ende'
 
 export type Sprachort = 'haupt' | 'overlay'
 

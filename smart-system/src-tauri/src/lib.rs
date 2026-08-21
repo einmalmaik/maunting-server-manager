@@ -1,9 +1,11 @@
 //! MSS — Maunting Smart System, Tauri-v2-Einstieg.
 //!
 //! Zwei Fenster (Hauptfenster + frameless Overlay), Tray mit Statusfarben,
-//! globaler Hotkey Alt+Space, Autostart. Zero-Resource-Prinzip: hier läuft
-//! keine einzige Schleife — alles ist ereignisgetrieben (Tray-Events,
-//! Hotkey-Events, Commands aus dem Frontend), im Leerlauf schläft der Prozess.
+//! zwei konfigurierbare globale Hotkeys (Fenster umschalten, Sprachsitzung
+//! im Overlay — je einzeln abschaltbar), Autostart. Zero-Resource-Prinzip:
+//! hier läuft keine einzige Schleife — alles ist ereignisgetrieben
+//! (Tray-Events, Hotkey-Events, Commands aus dem Frontend), im Leerlauf
+//! schläft der Prozess.
 //!
 //! Harte Grenze: dieses Backend kennt keine Server-Werkzeuge und wird nie
 //! welche bekommen — Server-Verwaltung bleibt exklusiv dem Web-Panel.
@@ -19,9 +21,9 @@ mod tray;
 mod uebernahme;
 mod wakeword;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[tauri::command]
 fn setze_status(app: tauri::AppHandle, status: String) -> Result<(), String> {
@@ -176,8 +178,8 @@ fn overlay_sichtbar(app: tauri::AppHandle, sichtbar: bool) -> Result<(), String>
     Ok(())
 }
 
-/// Alt+Space: Fenster nach vorn, wenn es nicht fokussiert ist — sonst weg.
-/// So ist derselbe Griff „öffnen“ und „aus dem Weg“, wie man es von
+/// Fenster-Hotkey: Fenster nach vorn, wenn es nicht fokussiert ist — sonst
+/// weg. So ist derselbe Griff „öffnen“ und „aus dem Weg“, wie man es von
 /// Spotlight-artigen Overlays kennt.
 fn hauptfenster_umschalten(app: &tauri::AppHandle) {
     if let Some(fenster) = app.get_webview_window("main") {
@@ -191,6 +193,100 @@ fn hauptfenster_umschalten(app: &tauri::AppHandle) {
     }
 }
 
+/// Sprach-Hotkey: Sitzung im Overlay starten — oder beenden, wenn das
+/// Overlay schon offen ist. Die Sichtbarkeit des Fensters **ist** der
+/// Zustand: das Overlay versteckt sich selbst, wenn seine Sitzung endet.
+/// Rust zeigt nur das Fenster und schickt Ereignisse — die Sitzung selbst
+/// (Mikrofon, Leitung) gehört dem Frontend.
+fn sprachsitzung_umschalten(app: &tauri::AppHandle) {
+    let Some(overlay) = app.get_webview_window("overlay") else {
+        return;
+    };
+    if overlay.is_visible().unwrap_or(false) {
+        let _ = app.emit("mss:overlay-sprache-ende", ());
+    } else {
+        let _ = overlay.show();
+        let _ = app.emit("mss:overlay-sprache-start", ());
+    }
+}
+
+/// Prüft eine Tastenkombination, bevor irgendetwas umgestellt wird — die
+/// Fehlermeldung nennt die Kombination, nicht nur den Parserfehler.
+fn hotkey_pruefen(kombi: &str) -> Result<Shortcut, String> {
+    kombi
+        .parse::<Shortcut>()
+        .map_err(|e| format!("Ungültige Tastenkombination „{kombi}“: {e}"))
+}
+
+/// Meldet die konfigurierten Hotkeys an: erst alles abmelden, dann neu.
+/// `None` heißt bewusst deaktiviert. Eine belegte oder ungültige Kombination
+/// ist ein Fehler an den Aufrufer — beim Start wird er nur protokolliert
+/// (die App bleibt über das Tray erreichbar), beim Umstellen rollt
+/// `hotkeys_setzen` auf den alten Stand zurück.
+fn hotkeys_registrieren(
+    app: &tauri::AppHandle,
+    fenster: Option<&str>,
+    sprache: Option<&str>,
+) -> Result<(), String> {
+    let kuerzel = app.global_shortcut();
+    kuerzel.unregister_all().map_err(|e| e.to_string())?;
+    if let Some(kombi) = fenster {
+        kuerzel
+            .on_shortcut(hotkey_pruefen(kombi)?, |app, _s, ereignis| {
+                if ereignis.state() == ShortcutState::Pressed {
+                    hauptfenster_umschalten(app);
+                }
+            })
+            .map_err(|e| format!("Hotkey „{kombi}“ nicht verfügbar: {e}"))?;
+    }
+    if let Some(kombi) = sprache {
+        kuerzel
+            .on_shortcut(hotkey_pruefen(kombi)?, |app, _s, ereignis| {
+                if ereignis.state() == ShortcutState::Pressed {
+                    sprachsitzung_umschalten(app);
+                }
+            })
+            .map_err(|e| format!("Hotkey „{kombi}“ nicht verfügbar: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Stellt beide Hotkeys um und speichert sie. Scheitert die Registrierung
+/// (belegt, ungültig, doppelt), kommt der alte Stand zurück — halb
+/// umgestellte Hotkeys wären schlimmer als die Fehlermeldung.
+#[tauri::command]
+fn hotkeys_setzen(
+    app: tauri::AppHandle,
+    fenster: Option<String>,
+    sprache: Option<String>,
+) -> Result<(), String> {
+    let mut konfig = konfig::laden(&app)?;
+    if let Err(fehler) = hotkeys_registrieren(&app, fenster.as_deref(), sprache.as_deref()) {
+        let _ = hotkeys_registrieren(
+            &app,
+            konfig.hotkey_fenster.as_deref(),
+            konfig.hotkey_sprache.as_deref(),
+        );
+        return Err(fehler);
+    }
+    konfig.hotkey_fenster = fenster;
+    konfig.hotkey_sprache = sprache;
+    konfig::speichern(&app, &konfig)
+}
+
+/// Beendet die App wirklich — der eine Ausgang des Schließen-Dialogs.
+#[tauri::command]
+fn app_beenden(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+/// Versteckt das Hauptfenster im Tray — der andere Ausgang.
+#[tauri::command]
+fn hauptfenster_verstecken(app: tauri::AppHandle) -> Result<(), String> {
+    let fenster = app.get_webview_window("main").ok_or("Hauptfenster fehlt")?;
+    fenster.hide().map_err(|e| e.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         // "--autostart" markiert Boot-Starts: Crash-Guard und sanfter Start
@@ -199,15 +295,10 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             Some(vec!["--autostart"]),
         ))
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        hauptfenster_umschalten(app);
-                    }
-                })
-                .build(),
-        )
+        // Die Handler hängen an den einzelnen Hotkeys (`on_shortcut` in
+        // `hotkeys_registrieren`) — ein globaler Handler müsste selbst
+        // auseinanderhalten, welcher der beiden gedrückt wurde.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         // Programme, Dateien und Adressen oeffnen — der offizielle Weg in
         // Tauri v2 (tauri-plugin-shell::open ist deprecated).
@@ -226,6 +317,9 @@ pub fn run() {
             wakeword_trainieren,
             wakeword_lauschen,
             wakeword_zuruecksetzen,
+            hotkeys_setzen,
+            app_beenden,
+            hauptfenster_verstecken,
             auftrag_ausfuehren,
             uebernahme_freigeben,
             uebernahme_widerrufen,
@@ -237,8 +331,13 @@ pub fn run() {
             tray::erstellen(app.handle())?;
             // Ein belegter Hotkey (anderes Tool nutzt Alt+Space) darf den
             // Start nicht verhindern — die App bleibt ueber Tray erreichbar.
-            if let Err(fehler) = app.global_shortcut().register("Alt+Space") {
-                eprintln!("Globaler Hotkey Alt+Space nicht verfuegbar: {fehler}");
+            let konfig = konfig::laden(app.handle()).unwrap_or_default();
+            if let Err(fehler) = hotkeys_registrieren(
+                app.handle(),
+                konfig.hotkey_fenster.as_deref(),
+                konfig.hotkey_sprache.as_deref(),
+            ) {
+                eprintln!("Globale Hotkeys nicht verfuegbar: {fehler}");
             }
             // Sanfter Start: beim Boot-Autostart bleibt das Fenster im Tray —
             // niemand will nach dem Hochfahren eine Boot-Sequenz vor der Nase.
@@ -249,17 +348,40 @@ pub fn run() {
             }
             Ok(())
         })
-        // Schliessen heisst „in den Tray“, nicht „beenden“ — beenden geht
-        // ausdruecklich ueber das Tray-Menue. Ein Companion, der beim
-        // Wegklicken stirbt, waere keiner.
+        // Das X entscheidet nicht selbst: das Fenster wird angehalten und
+        // das Frontend fragt den Menschen — in den Hintergrund (Standard,
+        // ein Companion, der beim Wegklicken stirbt, waere keiner) oder
+        // wirklich beenden (`app_beenden`).
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
-                    let _ = window.hide();
+                    let _ = window.emit("mss:schliessen-angefragt", ());
                 }
             }
         })
         .run(tauri::generate_context!())
         .expect("Fehler beim Start des Maunting Smart Systems");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hotkey_pruefen;
+
+    #[test]
+    fn gaengige_kombinationen_gehen_durch() {
+        // Die Vorgaben und das, was die Aufnahme in den Einstellungen baut.
+        assert!(hotkey_pruefen("Alt+Space").is_ok());
+        assert!(hotkey_pruefen("Alt+Shift+Space").is_ok());
+        assert!(hotkey_pruefen("Ctrl+Shift+K").is_ok());
+        assert!(hotkey_pruefen("F5").is_ok());
+    }
+
+    #[test]
+    fn unsinn_wird_mit_der_kombination_im_text_abgelehnt() {
+        // Die Meldung landet unverändert in der Oberfläche — sie muss sagen,
+        // **was** abgelehnt wurde, nicht nur dass.
+        let fehler = hotkey_pruefen("Foo+Bar").unwrap_err();
+        assert!(fehler.contains("Foo+Bar"), "{fehler}");
+    }
 }
