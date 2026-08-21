@@ -24,6 +24,14 @@ tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Lokales Wake-Word (Phase 3): rustpotter erkennt ein aus eigenen Aufnahmen
+# gebautes Referenz-Wakeword komplett offline (Apache-2.0, kein Netzwerk).
+# cpal ist der Standard fuer plattformuebergreifendes Audio-I/O in Rust,
+# hound schreibt die Kalibrierungs-WAVs. Keiner der drei beruehrt Secrets.
+rustpotter = "3.0.2"
+cpal = "0.18"
+hound = "3.5"
+
 [target.'cfg(windows)'.dependencies]
 # Offizielle Microsoft-Bindings — nur fuer das WASAPI-Audio-Ducking
 # (Session-Lautstaerken). Eng feature-gegated, kein Netzwerk, kein Storage.

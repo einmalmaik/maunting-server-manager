@@ -9,6 +9,7 @@
 import { useState } from "react";
 
 import { duckingSetzen, overlaySichtbar, setzeStatus, type AgentStatus } from "./lib/tauri";
+import WakewordEinrichtung from "./WakewordEinrichtung";
 
 const STATUS_TEXTE: Record<AgentStatus, string> = {
   bereit: "Bereit",
@@ -89,6 +90,8 @@ export default function App() {
           Tray-Status und Overlay laufen über das Rust-Backend — Hotkey: Alt+Space.
         </p>
       </section>
+
+      <WakewordEinrichtung />
     </main>
   );
 }

@@ -11,6 +11,7 @@
 #[cfg(windows)]
 mod ducking;
 mod tray;
+mod wakeword;
 
 use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
@@ -39,6 +40,38 @@ fn ducking(an: bool) -> Result<(), String> {
         let _ = an;
         Ok(())
     }
+}
+
+#[tauri::command]
+fn wakeword_stand(app: tauri::AppHandle) -> Result<wakeword::WakewordStand, String> {
+    wakeword::stand(&app)
+}
+
+/// Blockiert für die Dauer der Aufnahme (~2,2 s) — Tauri-Commands laufen
+/// auf eigenen Threads, das Fenster bleibt bedienbar.
+#[tauri::command]
+fn wakeword_aufnehmen(app: tauri::AppHandle, nummer: u8) -> Result<String, String> {
+    wakeword::aufnehmen(&app, nummer)
+}
+
+#[tauri::command]
+fn wakeword_trainieren(app: tauri::AppHandle, wort: String) -> Result<(), String> {
+    wakeword::trainieren(&app, &wort)
+}
+
+#[tauri::command]
+fn wakeword_lauschen(app: tauri::AppHandle, an: bool) -> Result<(), String> {
+    if an {
+        wakeword::lauschen_starten(app)
+    } else {
+        wakeword::lauschen_stoppen();
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn wakeword_zuruecksetzen(app: tauri::AppHandle) -> Result<(), String> {
+    wakeword::zuruecksetzen(&app)
 }
 
 #[tauri::command]
@@ -86,7 +119,16 @@ pub fn run() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![setze_status, overlay_sichtbar, ducking])
+        .invoke_handler(tauri::generate_handler![
+            setze_status,
+            overlay_sichtbar,
+            ducking,
+            wakeword_stand,
+            wakeword_aufnehmen,
+            wakeword_trainieren,
+            wakeword_lauschen,
+            wakeword_zuruecksetzen
+        ])
         .setup(|app| {
             tray::erstellen(app.handle())?;
             // Ein belegter Hotkey (anderes Tool nutzt Alt+Space) darf den

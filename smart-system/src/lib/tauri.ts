@@ -22,3 +22,32 @@ export async function overlaySichtbar(sichtbar: boolean): Promise<void> {
 export async function duckingSetzen(an: boolean): Promise<void> {
   await invoke("ducking", { an });
 }
+
+// ── Wake-Word ────────────────────────────────────────────────────────────
+
+export interface WakewordStand {
+  aufnahmen: number;
+  trainiert: boolean;
+  lauscht: boolean;
+}
+
+export async function wakewordStand(): Promise<WakewordStand> {
+  return await invoke<WakewordStand>("wakeword_stand");
+}
+
+/** Nimmt Kalibrierungs-Aufnahme Nr. `nummer` auf (blockiert ~2,2 s). */
+export async function wakewordAufnehmen(nummer: number): Promise<string> {
+  return await invoke<string>("wakeword_aufnehmen", { nummer });
+}
+
+export async function wakewordTrainieren(wort: string): Promise<void> {
+  await invoke("wakeword_trainieren", { wort });
+}
+
+export async function wakewordLauschen(an: boolean): Promise<void> {
+  await invoke("wakeword_lauschen", { an });
+}
+
+export async function wakewordZuruecksetzen(): Promise<void> {
+  await invoke("wakeword_zuruecksetzen");
+}
