@@ -605,7 +605,8 @@
       "worker_antwort": "Antwort an den Worker übergeben",
       "worker_cancel": "Worker abgebrochen",
       "worker_frage": "Rückfrage gestellt",
-      "worker_start": "Worker gestartet"
+      "worker_start": "Worker gestartet",
+      "set_agent_name": "Rufname geändert"
     },
     "toolsRunning": {
       "ask_user": "Ich frage kurz nach",
@@ -673,7 +674,8 @@
       "worker_antwort": "Ich gebe deine Antwort an den Worker weiter",
       "worker_cancel": "Ich halte den Worker an",
       "worker_frage": "Ich stelle dir eine Frage",
-      "worker_start": "Ich starte einen Worker im Hintergrund"
+      "worker_start": "Ich starte einen Worker im Hintergrund",
+      "set_agent_name": "Ich gebe mir den neuen Namen"
     },
     "errors": {
       "codes": {
@@ -739,7 +741,8 @@
         "audio": "Der Browser konnte die Tonverbindung nicht aufbauen. Einzelheiten stehen in der Entwicklerkonsole.",
         "provider": "Das hat gerade nicht geklappt.",
         "quota": "Kontingent erschöpft — das Gespräch pausiert. Warte kurz oder erhöhe dein Limit.",
-        "connection": "Verbindung zum Sprachmodus verloren."
+        "connection": "Verbindung zum Sprachmodus verloren.",
+        "veraltet": "Das Panel ist zu alt für den Sprachmodus der App — bitte den Server aktualisieren."
       },
       "toVoiceMode": "Realtime-Modus",
       "toTextMode": "Text-Modus",
@@ -3182,7 +3185,7 @@
       },
       "oberflaeche": {
         "title": "Eine Oberfläche",
-        "body": "Die App rendert dieselbe KI-Seite wie der Browser — Chat, Realtime-Modus, Guardian-Fenster, Aufgabenliste, Denkstufen-Wahl —, gebaut aus demselben Frontend-Code (npm run build:desktop). Es gibt keine zweite Chat-Implementierung, die veralten könnte; der einzige Unterschied ist der Transport: Bearer-Token statt Cookies, auch am Sprach-WebSocket."
+        "body": "Die App rendert dieselbe KI-Seite wie der Browser — Chat, Realtime-Modus, Guardian-Fenster, Aufgabenliste, Denkstufen-Wahl —, gebaut aus demselben Frontend-Code (npm run build:desktop). Es gibt keine zweite Chat-Implementierung, die veralten könnte; der einzige Unterschied ist der Transport: Bearer-Token statt Cookies, auch am Sprach-WebSocket. Scheitert der Sprach-Handshake, fragt die App das Backend nach seinen Fähigkeiten und meldet auf einem älteren Stand „Das Panel ist zu alt für den Sprachmodus der App“ — die Abhilfe ist ein Panel-Update."
       },
       "permission": {
         "title": "Rechte",
@@ -4776,7 +4779,6 @@
       "stand": "{{aufnahmen}}/{{gesamt}} Aufnahmen",
       "keinMikrofon": "Kein Mikrofon gefunden. Schließ eines an oder wähl in Windows ein Standard-Aufnahmegerät — vorher kann hier nichts aufgenommen werden.",
       "mikrofon": "Mikrofon: {{name}}",
-      "wortLabel": "Wake-Word",
       "kalibrierungStarten": "Kalibrierung starten",
       "weiterKalibrieren": "Weiter kalibrieren",
       "abbrechen": "Abbrechen",
@@ -4784,11 +4786,14 @@
       "kalibrierungFertig": "Alle Aufnahmen sind da. Jetzt trainieren.",
       "trainieren": "Trainieren",
       "trainiert": "Trainiert …",
-      "lauschenStarten": "Lauschen starten",
-      "lauschenStoppen": "Lauschen stoppen",
       "zuruecksetzen": "Zurücksetzen",
       "erkannt": "Erkannt: „{{name}}“ (Score {{score}})",
-      "datenschutz": "Alles bleibt auf diesem Rechner: Aufnahmen und Modell liegen im App-Datenverzeichnis, kein Audio verlässt den Prozess."
+      "datenschutz": "Alles bleibt auf diesem Rechner: Aufnahmen und Modell liegen im App-Datenverzeichnis, kein Audio verlässt den Prozess.",
+      "wortIstName": "Dein Wake-Word ist der Name deines Assistenten: „{{name}}“. Umbenennen kannst du ihn im Chat („nenn dich …“) oder im Panel unter Profil → KI.",
+      "neuKalibrieren": "Das Modell ist noch auf „{{alt}}“ trainiert, dein Assistent heißt inzwischen „{{neu}}“. Schalte das Wake-Word aus, setz die Kalibrierung zurück und sprich den neuen Namen ein — bis dahin hört die App weiter auf „{{alt}}“.",
+      "aktiv": "Wake-Word aktiv",
+      "aktivHinweis": "An: Sag „{{name}}“, und das Overlay öffnet sich über allem, was gerade läuft. Aus heißt aus — das Mikrofon ist frei, und nichts schaltet das Lauschen von selbst wieder ein.",
+      "lauschtNicht": "Der Schalter steht auf An, aber das Lauschen läuft nicht — prüfe das Mikrofon und schalte einmal aus und wieder ein."
     },
     "gefahrenzone": {
       "titel": "Gefahrenzone",
@@ -4810,15 +4815,13 @@
       "autostartHinweis": "Die App startet minimiert im Tray — nur so hört das Wake-Word von Anfang an zu.",
       "autostartFehler": "Autostart ließ sich nicht umstellen.",
       "diagnose": "Diagnose",
-      "diagnoseHinweis": "Testknöpfe für Tray, Overlay und Ducking. Ducking senkt nur den Ton anderer Programme — ohne laufende Musik ist der Test unhörbar. Im Betrieb steuert die Sprachsitzung all das von selbst.",
+      "diagnoseHinweis": "Die Knöpfe färben nur das Tray-Symbol um — zum Prüfen, dass die Zustandsfarben ankommen. Im Ruhezustand zeigt das Tray das Logo.",
       "status": {
         "bereit": "Bereit",
         "hoert": "Hört zu",
         "denkt": "Denkt",
         "spricht": "Spricht"
       },
-      "overlayAn": "Overlay einblenden",
-      "overlayAus": "Overlay ausblenden",
       "duckingTesten": "Ducking testen (3 s)",
       "duckingLaeuft": "Ducking läuft …",
       "fussnote": "MSS — Maunting Smart System. Tray-Status und Overlay laufen über das Rust-Backend.",
@@ -4830,7 +4833,15 @@
         "aendern": "Ändern",
         "druecken": "Taste drücken …",
         "aus": "Deaktiviert"
-      }
+      },
+      "tab": {
+        "desktop": "Desktop-Integration",
+        "wakeword": "Wake-Word",
+        "audio": "Audio",
+        "gefahr": "Gefahrenzone"
+      },
+      "overlayTesten": "Overlay testen",
+      "overlayTestenHinweis": "Startet die Sprachsitzung im Overlay — derselbe Weg wie Sprach-Hotkey und Wake-Word. Noch ein Klick beendet sie wieder."
     },
     "schliessen": {
       "titel": "MSS schließen?",
@@ -4838,6 +4849,25 @@
       "hintergrund": "In den Hintergrund",
       "beenden": "Beenden",
       "abbrechen": "Abbrechen"
+    },
+    "audio": {
+      "titel": "Audio",
+      "hinweis": "Welches Mikrofon hört und welcher Lautsprecher spricht — unabhängig vom Windows-Standard. Die Wahl gilt für Wake-Word und Sprachsitzung und bleibt gespeichert.",
+      "eingabe": "Eingabegerät (Mikrofon)",
+      "eingabeHinweis": "Fehlt das gewählte Gerät gerade (abgezogen), nimmt die App den Windows-Standard, bis es wieder da ist — die Wahl bleibt bestehen.",
+      "ausgabe": "Ausgabegerät (Lautsprecher)",
+      "ausgabeHinweis": "Darüber spricht die KI in der Sprachsitzung.",
+      "standard": "Windows-Standard",
+      "standardMit": "Windows-Standard ({{name}})",
+      "fehlt": "{{name}} (zurzeit nicht gefunden)",
+      "ducking": "Ton absenken (Ducking)",
+      "duckingHinweis": "Spricht die KI, senkt die App die Lautstärke aller anderen Programme um 60 % ab — Musik wird leiser, statt übertönt zu werden. Der Test senkt drei Sekunden lang ab: ohne laufende Musik oder Video ist er unhörbar."
+    },
+    "kalibrierung": {
+      "titel": "Neues Wake-Word?",
+      "frage": "Dein Assistent heißt jetzt „{{neu}}“ — das Wake-Word ist noch auf „{{alt}}“ kalibriert. Du kannst es neu einsprechen; bis dahin hört die App weiter auf „{{alt}}“. Das ist optional.",
+      "spaeter": "Später",
+      "jetzt": "Neu kalibrieren"
     }
   }
 }

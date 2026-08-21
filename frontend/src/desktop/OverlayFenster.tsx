@@ -18,6 +18,7 @@ import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Sprachblase } from '@/components/ai/voice/Sprachblase'
+import { registriereAudioGeraete } from '@/components/ai/voice/audioGeraete'
 import { useSprachsitzung } from '@/components/ai/voice/useSprachsitzung'
 import { aiChatPreferenceKeys, readAiProviderChoice } from '@/lib/aiChatPreferences'
 import { useAuthStore } from '@/stores/authStore'
@@ -29,7 +30,7 @@ import {
   sprachstartMelden,
   sprachzustandVerdrahten,
 } from './sprachKoordination'
-import { overlaySichtbar } from './tauri'
+import { konfigLaden, overlaySichtbar } from './tauri'
 
 export function OverlayFenster() {
   const { t } = useTranslation()
@@ -58,6 +59,12 @@ export function OverlayFenster() {
         if (!istAngemeldet()) {
           await stillAnmelden()
         }
+        // Die Gerätewahl wird im Hauptfenster geändert — dieses Fenster
+        // erfährt davon nichts. Frisch laden, damit die Sitzung das heute
+        // gewählte Mikrofon nimmt, nicht das vom App-Start.
+        await konfigLaden()
+          .then((k) => registriereAudioGeraete(k.audio_eingabe, k.audio_ausgabe))
+          .catch(() => undefined)
         await sprachstartMelden('overlay')
         await starten()
       })()

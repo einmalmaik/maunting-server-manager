@@ -10,6 +10,7 @@
 //! Harte Grenze: dieses Backend kennt keine Server-Werkzeuge und wird nie
 //! welche bekommen — Server-Verwaltung bleibt exklusiv dem Web-Panel.
 
+mod audio;
 mod auftrag;
 mod deinstallation;
 #[cfg(windows)]
@@ -145,19 +146,32 @@ fn wakeword_aufnehmen(app: tauri::AppHandle, nummer: u8) -> Result<String, Strin
     wakeword::aufnehmen(&app, nummer)
 }
 
+/// Trainiert das Modell und merkt sich das Wort in der Konfiguration —
+/// daran erkennt die App später, dass der Assistent inzwischen anders heißt,
+/// und schlägt die Neukalibrierung vor.
 #[tauri::command]
 fn wakeword_trainieren(app: tauri::AppHandle, wort: String) -> Result<(), String> {
-    wakeword::trainieren(&app, &wort)
+    wakeword::trainieren(&app, &wort)?;
+    let mut konfig = konfig::laden(&app)?;
+    konfig.wakeword_wort = Some(wort.trim().to_string());
+    konfig::speichern(&app, &konfig)
 }
 
+/// Der **eine** Schalter fürs Wake-Word: startet/stoppt den Lausch-Thread und
+/// speichert den Wunsch. „Aus" heißt physisch aus — der App-Start liest nur
+/// diesen Wert, nichts anderes schaltet das Mikrofon wieder ein. Gespeichert
+/// wird „an" erst nach erfolgreichem Start: ein Schalter, der an zeigt,
+/// während nichts lauscht, wäre gelogen.
 #[tauri::command]
 fn wakeword_lauschen(app: tauri::AppHandle, an: bool) -> Result<(), String> {
     if an {
-        wakeword::lauschen_starten(app)
+        wakeword::lauschen_starten(app.clone())?;
     } else {
         wakeword::lauschen_stoppen();
-        Ok(())
     }
+    let mut konfig = konfig::laden(&app)?;
+    konfig.wakeword_aktiv = an;
+    konfig::speichern(&app, &konfig)
 }
 
 #[tauri::command]
@@ -193,11 +207,24 @@ fn hauptfenster_umschalten(app: &tauri::AppHandle) {
     }
 }
 
-/// Sprach-Hotkey: Sitzung im Overlay starten — oder beenden, wenn das
-/// Overlay schon offen ist. Die Sichtbarkeit des Fensters **ist** der
-/// Zustand: das Overlay versteckt sich selbst, wenn seine Sitzung endet.
-/// Rust zeigt nur das Fenster und schickt Ereignisse — die Sitzung selbst
-/// (Mikrofon, Leitung) gehört dem Frontend.
+/// Startet die Sprachsitzung im Overlay, falls dort keine läuft. Die
+/// Sichtbarkeit des Fensters **ist** der Zustand: das Overlay versteckt sich
+/// selbst, wenn seine Sitzung endet. Rust zeigt nur das Fenster und schickt
+/// Ereignisse — die Sitzung selbst (Mikrofon, Leitung) gehört dem Frontend.
+/// Aufrufer: der Sprach-Hotkey, der Testknopf und das erkannte Wake-Word.
+pub(crate) fn sprachsitzung_starten(app: &tauri::AppHandle) {
+    let Some(overlay) = app.get_webview_window("overlay") else {
+        return;
+    };
+    if overlay.is_visible().unwrap_or(false) {
+        return;
+    }
+    let _ = overlay.show();
+    let _ = app.emit("mss:overlay-sprache-start", ());
+}
+
+/// Sprach-Hotkey und Testknopf: Sitzung im Overlay starten — oder beenden,
+/// wenn das Overlay schon offen ist.
 fn sprachsitzung_umschalten(app: &tauri::AppHandle) {
     let Some(overlay) = app.get_webview_window("overlay") else {
         return;
@@ -205,9 +232,23 @@ fn sprachsitzung_umschalten(app: &tauri::AppHandle) {
     if overlay.is_visible().unwrap_or(false) {
         let _ = app.emit("mss:overlay-sprache-ende", ());
     } else {
-        let _ = overlay.show();
-        let _ = app.emit("mss:overlay-sprache-start", ());
+        sprachsitzung_starten(app);
     }
+}
+
+/// Der Testknopf in den Einstellungen — exakt derselbe Weg wie Hotkey und
+/// Wake-Word. Vorher zeigte er nur das leere Fenster: die Overlay-Komponente
+/// zeichnet nichts, solange keine Sitzung angefordert wurde, und „nichts
+/// passiert" war die korrekte Beschreibung.
+#[tauri::command]
+fn overlay_testen(app: tauri::AppHandle) {
+    sprachsitzung_umschalten(&app);
+}
+
+/// Alle Audiogeräte mit Namen — für die Auswahl in den Einstellungen.
+#[tauri::command]
+fn audio_geraete() -> audio::AudioGeraete {
+    audio::geraete()
 }
 
 /// Nur die eigene Oberfläche: die gebaute App (`tauri.localhost`) und der
@@ -370,6 +411,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             setze_status,
             overlay_sichtbar,
+            overlay_testen,
+            audio_geraete,
             ducking,
             konfig_laden,
             konfig_speichern,
@@ -406,6 +449,15 @@ pub fn run() {
                 konfig.hotkey_sprache.as_deref(),
             ) {
                 eprintln!("Globale Hotkeys nicht verfuegbar: {fehler}");
+            }
+            // Wake-Word: nur wenn der Benutzer den Schalter selbst auf „an"
+            // gestellt hat (konfig.wakeword_aktiv) — das ist der einzige Pfad,
+            // der das Lauschen beim Start weckt. Ein Fehler (Modell weg,
+            // Mikrofon weg) darf den App-Start nicht verhindern.
+            if konfig.wakeword_aktiv {
+                if let Err(fehler) = wakeword::lauschen_starten(app.handle().clone()) {
+                    eprintln!("Wake-Word-Lauschen nicht gestartet: {fehler}");
+                }
             }
             // Sanfter Start: beim Boot-Autostart bleibt das Fenster im Tray —
             // niemand will nach dem Hochfahren eine Boot-Sequenz vor der Nase.

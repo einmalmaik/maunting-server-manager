@@ -422,6 +422,26 @@ def _global_tool_definitions() -> list[dict]:
             {},
             [],
         ),
+        _function(
+            "set_agent_name",
+            "Setzt deinen Rufnamen fuer diesen Benutzer — nur auf seinen "
+            "ausdruecklichen Wunsch (\"nenn dich ab jetzt …\"). Ein leerer "
+            "Name stellt den Standardnamen Singra wieder her. In der "
+            "Desktop-App ist der Name zugleich das Wake-Word; der Benutzer "
+            "bekommt dort von selbst den Vorschlag, es neu zu kalibrieren.",
+            {
+                "name": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": (
+                        "Der neue Rufname: 2-32 Zeichen, Buchstaben, Ziffern, "
+                        "Leerzeichen, Punkt, Apostroph oder Bindestrich. "
+                        "Leer = Standardname."
+                    ),
+                },
+            },
+            ["name"],
+        ),
         # Wann gemerkt wird und was **nicht** gemerkt wird, steht in
         # `ai_prompt.GEDAECHTNIS` und geht in derselben Anfrage mit: "Nicht
         # merken: Zwischenergebnisse, Logauszuege, Tagesform …" und
@@ -1978,6 +1998,44 @@ def _resolve_server(db: Session, user: User, arguments: dict) -> tuple[Server, d
 _MEMORY_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 
+def _execute_set_agent_name(db: Session, *, user: User, arguments: dict) -> dict:
+    """Setzt den Rufnamen des Assistenten — dasselbe Feld wie der Router
+    PATCH /auth/me/agent-name (users.agent_name), mit derselben Prüfung.
+
+    Kein eigenes Recht: es ist eine persönliche, jederzeit umkehrbare
+    Einstellung des Benutzers, die er im Panel ohnehin selbst ändern darf.
+    Sofort ausgeführt statt vorgeschlagen — dieselbe Einordnung wie
+    `remember` (ai_tool_registry erklärt sie).
+
+    Der neue Name wirkt ab dem nächsten Zug (Lageblock, services/ai_lage.py);
+    das Ergebnis sagt das dem Modell, damit es nichts Falsches verspricht.
+    """
+    from schemas.user import AgentNameUpdateRequest
+
+    if set(arguments) != {"name"}:
+        raise AiActionValidationError("set_agent_name erwartet genau das Feld name")
+    roh = arguments.get("name")
+    if roh is not None and not isinstance(roh, str):
+        raise AiActionValidationError("name muss eine Zeichenkette sein")
+    try:
+        # Dieselbe Wahrheit wie der Router: was das Schema ablehnt, lehnt
+        # auch das Werkzeug ab — ein Formfehler kostet eine Runde, nie mehr.
+        geprueft = AgentNameUpdateRequest(agent_name=roh).agent_name
+    except ValueError as fehler:
+        raise AiActionValidationError(str(fehler)) from fehler
+
+    user.agent_name = geprueft
+    db.commit()
+    return {
+        "agent_name": geprueft,
+        "hinweis": (
+            "Gespeichert. Der Name gilt ab dem naechsten Zug; in der "
+            "Desktop-App schlaegt die App dem Benutzer selbst vor, das "
+            "Wake-Word neu zu kalibrieren."
+        ),
+    }
+
+
 def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
     """Laesst die KI einen dauerhaften Fakt im Memory des Benutzers ablegen.
 
@@ -3033,6 +3091,9 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
 
     if tool_name == "remember":
         return _execute_remember(db, user=user, arguments=arguments)
+
+    if tool_name == "set_agent_name":
+        return _execute_set_agent_name(db, user=user, arguments=arguments)
 
     if tool_name == "web_search":
         return _execute_web_search(db, user=user, arguments=arguments)

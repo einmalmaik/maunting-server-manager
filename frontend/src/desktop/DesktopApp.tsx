@@ -13,7 +13,7 @@
  */
 import { useEffect, useState, type ReactNode } from 'react'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { emit, listen } from '@tauri-apps/api/event'
+import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
 
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
@@ -31,7 +31,6 @@ import { Splash } from './Splash'
 import { Uebernahmekarte } from './Uebernahmekarte'
 import { Wizard } from './Wizard'
 import {
-  OVERLAY_SPRACHE_START,
   beiFremdemSprachstart,
   sprachstartMelden,
   sprachzustandVerdrahten,
@@ -40,7 +39,7 @@ import {
   appBeenden,
   hauptfensterVerstecken,
   konfigLaden,
-  overlaySichtbar,
+  wakewordStand,
   type AppKonfig,
 } from './tauri'
 import { stillAnmelden } from './transport'
@@ -89,20 +88,10 @@ export function DesktopApp() {
     }
   }, [phase, angemeldet])
 
-  // Wake-Word erkannt → Overlay zeigen und dort die Sprachsitzung beginnen.
-  // Der Lausch-Thread läuft in Rust; hier kommt nur `{name, score}` an.
-  useEffect(() => {
-    if (phase !== 'bereit') return
-    const abo = listen('wakeword-erkannt', () => {
-      void (async () => {
-        await overlaySichtbar(true)
-        await emit(OVERLAY_SPRACHE_START)
-      })()
-    })
-    return () => {
-      void abo.then((weg) => weg())
-    }
-  }, [phase])
+  // Das erkannte Wake-Word öffnet das Overlay direkt in Rust
+  // (wakeword.rs → sprachsitzung_starten) — ein verstecktes Hauptfenster
+  // darf gedrosselt sein, das Wake-Word muss trotzdem tragen. Hier läuft
+  // deshalb kein Listener mehr.
 
   // Tray-Farbe und Ducking folgen auch einer Sitzung in diesem Fenster.
   useEffect(() => {
@@ -153,6 +142,7 @@ export function DesktopApp() {
         {phase === 'bereit' && (
           <>
             <SprachwacheHaupt />
+            <KalibrierungsHinweis />
             {/* Die Glocke ist mehr als eine Meldung: ihr Takt feuert das
                 Zustell-Ereignis, über das der offene Chat Fremdes nachlädt. */}
             <AiRunNotice />
@@ -234,6 +224,64 @@ function SchliessenDialog() {
           </Button>
           <Button autoFocus onClick={hintergrund}>
             {t('mss.schliessen.hintergrund')}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Der freundliche Hinweis nach einer Umbenennung: das Wake-Word ist immer der
+ * Name des Assistenten — wurde er geändert (im Chat, im Panel-Profil, egal
+ * wo), ist das trainierte Modell noch auf den alten Namen kalibriert. Einmal
+ * je App-Start wird das angeboten, nie erzwungen: „Später" heißt später, und
+ * das alte Wort funktioniert weiter.
+ */
+function KalibrierungsHinweis() {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const agentName = useAuthStore((s) => s.user?.agent_name?.trim() || 'Singra')
+  const [altesWort, setAltesWort] = useState<string | null>(null)
+
+  useEffect(() => {
+    void wakewordStand()
+      .then((stand) => {
+        if (stand.trainiert && stand.wort && stand.wort !== agentName) {
+          setAltesWort(stand.wort)
+        }
+      })
+      .catch(() => undefined)
+    // Bewusst nur einmal je Start — nicht bei jedem Namenswechsel im Store.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (altesWort === null) return null
+
+  return (
+    <div
+      className="msm-modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('mss.kalibrierung.titel')}
+    >
+      <div className="msm-card w-full max-w-sm p-5">
+        <h2 className="text-sm font-medium text-on-surface">{t('mss.kalibrierung.titel')}</h2>
+        <p className="mt-1 text-xs text-on-surface-variant">
+          {t('mss.kalibrierung.frage', { neu: agentName, alt: altesWort })}
+        </p>
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" onClick={() => setAltesWort(null)}>
+            {t('mss.kalibrierung.spaeter')}
+          </Button>
+          <Button
+            autoFocus
+            onClick={() => {
+              setAltesWort(null)
+              navigate('/einstellungen?tab=wakeword')
+            }}
+          >
+            {t('mss.kalibrierung.jetzt')}
           </Button>
         </div>
       </div>

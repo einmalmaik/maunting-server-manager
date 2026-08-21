@@ -1,5 +1,12 @@
 /**
- * Wake-Word-Kalibrierung: zehnmal einsprechen, trainieren, lauschen.
+ * Wake-Word-Kalibrierung: zehnmal einsprechen, trainieren, einschalten.
+ *
+ * **Das Wake-Word ist immer der Name des Assistenten** — es gibt kein
+ * eigenes Wortfeld. Wer den Namen ändert (im Chat, im Panel-Profil), bekommt
+ * hier den Hinweis, einmal neu zu kalibrieren; bis dahin hört das Modell
+ * weiter auf den alten Namen. Der Aktiv-Schalter ist persistent
+ * (konfig.json): „an" überlebt den Neustart, „aus" heißt aus — nichts
+ * schaltet das Mikrofon von selbst wieder ein.
  *
  * Die Runden laufen von selbst weiter: einmal starten, zehnmal sprechen.
  * Jede Aufnahme prüft in Rust, ob wirklich gesprochen wurde (RMS-Tor in
@@ -13,8 +20,7 @@ import { listen } from '@tauri-apps/api/event'
 import { Mic } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/Singra/UI'
-import { Input } from '@/components/ui/Input'
+import { Button, Switch } from '@/Singra/UI'
 import { useAuthStore } from '@/stores/authStore'
 import {
   wakewordAufnehmen,
@@ -37,7 +43,6 @@ export function WakewordEinrichtung() {
     trainiert: false,
     lauscht: false,
   })
-  const [wort, setWort] = useState(agentName)
   const [beschaeftigt, setBeschaeftigt] = useState<'kalibrierung' | 'training' | 'lauschen' | 'reset' | null>(null)
   const [meldung, setMeldung] = useState<string | null>(null)
   /** Bricht die laufende Kalibrierungsschleife ab, ohne zu rendern. */
@@ -157,13 +162,18 @@ export function WakewordEinrichtung() {
         </p>
       )}
 
-      <Input
-        id="mss-wakeword-wort"
-        label={t('mss.wakeword.wortLabel')}
-        value={wort}
-        onChange={(e) => setWort(e.target.value)}
-        placeholder={agentName}
-      />
+      {/* Kein Wortfeld: das Wake-Word ist immer der Name des Assistenten. */}
+      <p className="text-sm text-on-surface">
+        {t('mss.wakeword.wortIstName', { name: agentName })}
+      </p>
+
+      {/* Der Name hat sich seit dem Training geändert — anbieten, nie
+          erzwingen: das Modell hört bis zur Neukalibrierung auf den alten. */}
+      {stand.trainiert && stand.wort && stand.wort !== agentName && (
+        <p className="msm-alert-warning">
+          {t('mss.wakeword.neuKalibrieren', { alt: stand.wort, neu: agentName })}
+        </p>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {laeuftKalibrierung ? (
@@ -187,17 +197,10 @@ export function WakewordEinrichtung() {
         )}
         <Button
           variant="secondary"
-          onClick={() => void aktion('training', () => wakewordTrainieren(wort))}
-          disabled={beschaeftigt !== null || stand.aufnahmen < 3 || wort.trim() === ''}
+          onClick={() => void aktion('training', () => wakewordTrainieren(agentName))}
+          disabled={beschaeftigt !== null || stand.aufnahmen < 3}
         >
           {beschaeftigt === 'training' ? t('mss.wakeword.trainiert') : t('mss.wakeword.trainieren')}
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => void aktion('lauschen', () => wakewordLauschen(!stand.lauscht))}
-          disabled={beschaeftigt !== null || !stand.trainiert}
-        >
-          {stand.lauscht ? t('mss.wakeword.lauschenStoppen') : t('mss.wakeword.lauschenStarten')}
         </Button>
         <Button
           variant="ghost"
@@ -207,6 +210,29 @@ export function WakewordEinrichtung() {
           {t('mss.wakeword.zuruecksetzen')}
         </Button>
       </div>
+
+      {/* Der eine, persistente Schalter: „an" überlebt den App-Neustart,
+          „aus" heißt physisch aus — kein Pfad schaltet das Mikrofon von
+          selbst wieder ein (konfig.wakeword_aktiv, gelesen nur beim Start). */}
+      <div className="flex items-center justify-between gap-3 border-t border-outline-variant/40 pt-4">
+        <div className="min-w-0">
+          <p className="text-sm text-on-surface">{t('mss.wakeword.aktiv')}</p>
+          <p className="text-xs text-on-surface-variant">
+            {t('mss.wakeword.aktivHinweis', { name: stand.wort ?? agentName })}
+          </p>
+        </div>
+        <Switch
+          checked={stand.aktiv ?? stand.lauscht}
+          disabled={beschaeftigt !== null || !stand.trainiert}
+          onCheckedChange={(an) => void aktion('lauschen', () => wakewordLauschen(an))}
+          aria-label={t('mss.wakeword.aktiv')}
+        />
+      </div>
+      {/* Schalter an, aber kein Thread dahinter: der Lausch-Thread ist
+          gestorben (Mikrofon weg, Modell kaputt) — sagen statt so tun. */}
+      {stand.aktiv === true && !stand.lauscht && beschaeftigt === null && (
+        <p className="msm-alert-warning">{t('mss.wakeword.lauschtNicht')}</p>
+      )}
 
       {meldung && (
         <p className="text-xs text-on-surface-variant" aria-live="polite">

@@ -50,18 +50,33 @@ zeigt sie unter Einstellungen → Allgemein und noch einmal beim Koppeln.
 ## Aufbau
 
 - `src-tauri/` — das ganze Zuhause der App: Fensterverwaltung (Haupt + Overlay),
-  System-Tray mit Statusfarben (Grün: bereit, Blau: hört zu, Lila: denkt,
-  Gelb: spricht), zwei konfigurierbare globale Hotkeys (Fenster: `Alt+Space`,
-  Sprachsitzung im Overlay: `Alt+Shift+Space` — beide in den Einstellungen
-  änderbar und einzeln abschaltbar), Autostart, Wake-Word (rustpotter,
-  offline), Audio-Ducking (WASAPI), Sandbox-Dateizugriff, Übernahme von Maus
-  und Tastatur, Tresor (Anmeldeinformations-Manager). Das X schließt nicht:
-  ein kleiner Dialog fragt, ob die App in den Hintergrund geht (Standard)
-  oder wirklich endet.
+  System-Tray (im Ruhezustand das App-Logo — Farbe hieße „nimmt auf"; aktiv:
+  Blau: hört zu, Lila: denkt, Gelb: spricht), zwei konfigurierbare globale
+  Hotkeys (Fenster: `Alt+Space`, Sprachsitzung im Overlay: `Alt+Shift+Space`
+  — beide in den Einstellungen änderbar und einzeln abschaltbar), Autostart,
+  Wake-Word (rustpotter, offline), Audiogeräte-Auswahl (Ein- und
+  Ausgabegerät unabhängig vom Windows-Standard, `audio.rs`), Audio-Ducking
+  (WASAPI), Sandbox-Dateizugriff, Übernahme von Maus und Tastatur, Tresor
+  (Anmeldeinformations-Manager). Das X schließt nicht: ein kleiner Dialog
+  fragt, ob die App in den Hintergrund geht (Standard) oder wirklich endet.
 - `frontend/src/desktop/` (im Nachbarordner) — der Desktop-Einstieg der
   gemeinsamen Oberfläche: Bootstrap mit Laufzeit-API-Adresse, Splash,
-  Einrichtungs-Assistent, Desktop-Einstellungen, Overlay-Sprachblase,
+  Einrichtungs-Assistent, Desktop-Einstellungen (Reiter wie im Panel:
+  Desktop-Integration, Wake-Word, Audio, Gefahrenzone), Overlay-Sprachblase,
   Auftragsschleife und Übernahmekarte.
+
+## Wake-Word
+
+Das Wake-Word ist **immer der Name des Assistenten** (Profil → KI im Panel,
+oder im Chat: „nenn dich …") — ein eigenes Wortfeld gibt es bewusst nicht.
+Nach einer Umbenennung schlägt die App einmal je Start die Neukalibrierung
+vor; das ist optional, bis dahin hört das Modell auf den alten Namen.
+
+Der Aktiv-Schalter ist persistent (`wakeword_aktiv` in konfig.json): „an"
+überlebt den Neustart und startet das Lauschen beim App-Start, „aus" heißt
+physisch aus — das Mikrofon ist frei, und kein Pfad schaltet das Lauschen
+ohne den Schalter wieder ein. Ein erkanntes Wort öffnet das Overlay direkt
+aus Rust (`wakeword.rs` → `sprachsitzung_starten`), über allen Fenstern.
 
 ## Logos
 

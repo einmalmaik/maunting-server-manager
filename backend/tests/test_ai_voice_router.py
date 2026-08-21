@@ -421,3 +421,18 @@ def test_the_spoken_conversation_is_the_one_that_is_typed(
 
     assert kennung == vorhandene.id
     assert db.query(AiConversation).count() == 1
+
+
+def test_config_traegt_den_bearer_ws_marker(
+    client: TestClient, owner_cookies: dict
+) -> None:
+    """Der Faehigkeitsmarker der Desktop-App.
+
+    Ein gescheiterter WS-Handshake verraet dem Browser nichts; die App fragt
+    dann diesen Endpunkt und unterscheidet am Marker "Panel zu alt" von "Netz
+    weg". Er muss deshalb auch **ohne** eingerichtete Zugaenge da sein — die
+    Frage stellt sich genau dann, wenn sonst nichts geht."""
+    antwort = client.get("/api/ai/voice/config", cookies=owner_cookies)
+
+    assert antwort.status_code == 200
+    assert antwort.json()["bearer_ws"] is True

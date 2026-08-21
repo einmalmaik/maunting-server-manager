@@ -2518,3 +2518,46 @@ def test_auch_eine_teilaenderung_ist_dauerhaft(
     datei.write_text(original, encoding="utf-8")
     server_config_wishes.wuensche_durchsetzen(server)
     assert '<buff name="xp" value="3.0"/>' in datei.read_text(encoding="utf-8")
+
+
+def test_die_ki_darf_ihren_rufnamen_aendern(db: Session, regular_user: User) -> None:
+    """`set_agent_name` schreibt dasselbe Feld wie Profil -> KI im Panel
+    (users.agent_name) und prueft mit demselben Schema. Ein leerer Name
+    stellt den Standardnamen wieder her — dieselbe Semantik wie der Router
+    PATCH /auth/me/agent-name."""
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="set_agent_name", arguments={"name": "Jarvis"},
+    )
+    assert ergebnis["agent_name"] == "Jarvis"
+    db.refresh(regular_user)
+    assert regular_user.agent_name == "Jarvis"
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="set_agent_name", arguments={"name": ""},
+    )
+    assert ergebnis["agent_name"] is None
+    db.refresh(regular_user)
+    assert regular_user.agent_name is None
+
+
+def test_ein_unbrauchbarer_rufname_kostet_nur_die_runde(
+    db: Session, regular_user: User
+) -> None:
+    """Was das Schema ablehnt (zu lang, falsche Zeichen, Zusatzfelder), lehnt
+    auch das Werkzeug ab — als Rundenfehler an das Modell, nie als Wert in
+    der Datenbank."""
+    regular_user.agent_name = "Singra"
+    db.commit()
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="set_agent_name",
+            arguments={"name": "X" * 40},
+        )
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="set_agent_name",
+            arguments={"name": "Jarvis", "extra": True},
+        )
+    db.refresh(regular_user)
+    assert regular_user.agent_name == "Singra"

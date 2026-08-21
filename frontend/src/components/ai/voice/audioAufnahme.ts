@@ -25,6 +25,8 @@
  * sondern der Normalfall an einem Laptop ohne Kopfhörer.
  */
 
+import { eingabeGeraetId } from './audioGeraete'
+
 /** Dieselbe Rate wie im Backend (`ai_voice_vad.ABTASTRATE`). */
 export const ABTASTRATE = 24_000
 
@@ -88,6 +90,10 @@ const VERWEIGERT = new Set([
 export async function starteAufnahme(
   aufPaket: (paket: ArrayBuffer) => void,
 ): Promise<Aufnahme> {
+  // Die Gerätewahl der Desktop-App; im Panel immer `null` (Standard).
+  // `ideal` statt `exact`: ein abgezogenes Wunschgerät soll auf den Standard
+  // zurückfallen, nicht mit „Mikrofon verweigert" enden.
+  const geraet = await eingabeGeraetId().catch(() => null)
   let strom: MediaStream
   try {
     strom = await navigator.mediaDevices.getUserMedia({
@@ -96,6 +102,7 @@ export async function starteAufnahme(
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
+        ...(geraet ? { deviceId: { ideal: geraet } } : {}),
       },
     })
   } catch (fehler) {

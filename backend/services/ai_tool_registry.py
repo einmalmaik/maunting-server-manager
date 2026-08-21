@@ -194,6 +194,14 @@ WERKZEUGE: dict[str, Werkzeug] = {
         "global_read", gruppe="memory", angebot=("ai.memory.use",)
     ),
 
+    # Der Rufname des Assistenten — dasselbe Feld wie Profil → KI im Panel
+    # (users.agent_name). Wie `remember` sofort ausgefuehrt statt
+    # vorgeschlagen: eine persoenliche, jederzeit umkehrbare Einstellung des
+    # Benutzers, kein Eingriff in einen Server. Die Desktop-App leitet daraus
+    # das Wake-Word ab und schlaegt nach einer Umbenennung die
+    # Neukalibrierung vor.
+    "set_agent_name": Werkzeug("global_read"),
+
     # Dasselbe fuer Skills, mit einem zweiten Grund: **Prosa fuehrt nichts
     # aus.** Ein gelernter Skill kann nichts, was das Modell nicht ohnehin
     # duerfte — er aendert nur, wie es an eine Aufgabe herangeht.

@@ -605,7 +605,8 @@
       "worker_antwort": "Answer passed to the worker",
       "worker_cancel": "Worker cancelled",
       "worker_frage": "Question raised",
-      "worker_start": "Worker started"
+      "worker_start": "Worker started",
+      "set_agent_name": "Name changed"
     },
     "toolsRunning": {
       "ask_user": "Asking a quick question",
@@ -673,7 +674,8 @@
       "worker_antwort": "Passing your answer to the worker",
       "worker_cancel": "Stopping the worker",
       "worker_frage": "Asking you a question",
-      "worker_start": "Starting a worker in the background"
+      "worker_start": "Starting a worker in the background",
+      "set_agent_name": "Taking on my new name"
     },
     "errors": {
       "codes": {
@@ -739,7 +741,8 @@
         "audio": "The browser could not set up the audio chain. Details are in the developer console.",
         "provider": "That didn't work just now.",
         "quota": "Quota exhausted — the conversation is paused. Wait a moment or raise your limit.",
-        "connection": "Lost the connection to voice mode."
+        "connection": "Lost the connection to voice mode.",
+        "veraltet": "The panel is too old for the app’s voice mode — please update the server."
       },
       "toVoiceMode": "Realtime mode",
       "toTextMode": "Text mode",
@@ -3182,7 +3185,7 @@
       },
       "oberflaeche": {
         "title": "One interface",
-        "body": "The app renders the same AI page as the browser — chat, realtime mode, guardian window, task list, reasoning picker — built from the same frontend code (npm run build:desktop). There is no second chat implementation that could go stale; the only difference is the transport: bearer tokens instead of cookies, including on the voice WebSocket."
+        "body": "The app renders the same AI page as the browser — chat, realtime mode, guardian window, task list, reasoning picker — built from the same frontend code (npm run build:desktop). There is no second chat implementation that could go stale; the only difference is the transport: bearer tokens instead of cookies, including on the voice WebSocket. If the voice handshake fails, the app asks the backend about its capabilities and, on an older deployment, reports “The panel is too old for the app’s voice mode” — the fix is a panel update."
       },
       "permission": {
         "title": "Permissions",
@@ -4776,7 +4779,6 @@
       "stand": "{{aufnahmen}}/{{gesamt}} recordings",
       "keinMikrofon": "No microphone found. Connect one or pick a default recording device in Windows — nothing can be recorded here until then.",
       "mikrofon": "Microphone: {{name}}",
-      "wortLabel": "Wake word",
       "kalibrierungStarten": "Start calibration",
       "weiterKalibrieren": "Continue calibrating",
       "abbrechen": "Cancel",
@@ -4784,11 +4786,14 @@
       "kalibrierungFertig": "All recordings are in. Now train.",
       "trainieren": "Train",
       "trainiert": "Training …",
-      "lauschenStarten": "Start listening",
-      "lauschenStoppen": "Stop listening",
       "zuruecksetzen": "Reset",
       "erkannt": "Recognised: “{{name}}” (score {{score}})",
-      "datenschutz": "Everything stays on this computer: recordings and model live in the app data directory, no audio ever leaves the process."
+      "datenschutz": "Everything stays on this computer: recordings and model live in the app data directory, no audio ever leaves the process.",
+      "wortIstName": "Your wake word is always your assistant’s name: “{{name}}”. Rename it in chat (“call yourself …”) or in the panel under Profile → AI.",
+      "neuKalibrieren": "The model is still trained on “{{alt}}”, but your assistant is now called “{{neu}}”. Turn the wake word off, reset the calibration and record the new name — until then the app keeps listening for “{{alt}}”.",
+      "aktiv": "Wake word active",
+      "aktivHinweis": "On: say “{{name}}” and the overlay opens above everything. Off means off — the microphone is released and nothing turns listening back on by itself.",
+      "lauschtNicht": "The switch is on, but listening is not running — check the microphone and toggle it off and on again."
     },
     "gefahrenzone": {
       "titel": "Danger zone",
@@ -4810,15 +4815,13 @@
       "autostartHinweis": "The app starts minimised to the tray — only then does the wake word listen from the start.",
       "autostartFehler": "Autostart could not be changed.",
       "diagnose": "Diagnostics",
-      "diagnoseHinweis": "Test buttons for tray, overlay and ducking. Ducking only lowers the audio of other programs — without music playing the test is inaudible. In normal use the voice session drives all of this itself.",
+      "diagnoseHinweis": "These buttons only recolour the tray icon — to verify the state colours arrive. When idle, the tray shows the logo.",
       "status": {
         "bereit": "Ready",
         "hoert": "Listening",
         "denkt": "Thinking",
         "spricht": "Speaking"
       },
-      "overlayAn": "Show overlay",
-      "overlayAus": "Hide overlay",
       "duckingTesten": "Test ducking (3 s)",
       "duckingLaeuft": "Ducking running …",
       "fussnote": "MSS — Maunting Smart System. Tray status and overlay run through the Rust backend.",
@@ -4830,7 +4833,15 @@
         "aendern": "Change",
         "druecken": "Press a key …",
         "aus": "Disabled"
-      }
+      },
+      "tab": {
+        "desktop": "Desktop integration",
+        "wakeword": "Wake word",
+        "audio": "Audio",
+        "gefahr": "Danger zone"
+      },
+      "overlayTesten": "Test overlay",
+      "overlayTestenHinweis": "Starts the voice session in the overlay — the same path as the voice hotkey and the wake word. Click again to end it."
     },
     "schliessen": {
       "titel": "Close MSS?",
@@ -4838,6 +4849,25 @@
       "hintergrund": "Keep in background",
       "beenden": "Quit",
       "abbrechen": "Cancel"
+    },
+    "audio": {
+      "titel": "Audio",
+      "hinweis": "Which microphone listens and which speaker talks — independent of the Windows default. The choice applies to wake word and voice sessions and is saved.",
+      "eingabe": "Input device (microphone)",
+      "eingabeHinweis": "If the chosen device is missing (unplugged), the app falls back to the Windows default until it returns — your choice is kept.",
+      "ausgabe": "Output device (speaker)",
+      "ausgabeHinweis": "The AI speaks through this device during voice sessions.",
+      "standard": "Windows default",
+      "standardMit": "Windows default ({{name}})",
+      "fehlt": "{{name}} (currently not found)",
+      "ducking": "Lower other audio (ducking)",
+      "duckingHinweis": "While the AI speaks, the app lowers the volume of all other programs by 60% — music gets quieter instead of being drowned out. The test lowers it for three seconds: without music or video playing you will not hear anything."
+    },
+    "kalibrierung": {
+      "titel": "New wake word?",
+      "frage": "Your assistant is now called “{{neu}}” — the wake word is still calibrated to “{{alt}}”. You can record it again; until then the app keeps listening for “{{alt}}”. This is optional.",
+      "spaeter": "Later",
+      "jetzt": "Recalibrate"
     }
   }
 }

@@ -168,7 +168,11 @@ Denkstufen-Wahl), gebaut aus `frontend/` über einen eigenen Einstieg
 Tauri-Hülle (Rust + Konfiguration). Der Unterschied zum Browser ist der
 Transport: statt Cookies trägt jede Anfrage das Bearer-Token der Kopplung,
 und der Sprach-WebSocket legt es als Subprotokoll (`msm.bearer`) in den
-Handshake — nie in die URL.
+Handshake — nie in die URL. Ob das Backend diesen Weg kennt, meldet
+`GET /api/ai/voice/config` als `bearer_ws: true`; scheitert der Handshake,
+fragt die App dort nach und zeigt auf einem älteren Backend „Das Panel ist
+zu alt für den Sprachmodus der App" statt eines nichtssagenden
+Verbindungsfehlers. Die Abhilfe ist dann schlicht: Panel aktualisieren.
 
 Was die App **als Oberfläche** nicht hat: eine Serververwaltung. Sie zeigt die
 KI-Seite und die Desktop-Einstellungen, keine Serverliste und keine Konsole.

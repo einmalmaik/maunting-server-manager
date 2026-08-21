@@ -34,6 +34,20 @@ pub struct AppKonfig {
     pub hotkey_fenster: Option<String>,
     /// Globaler Hotkey: Sprachsitzung im Overlay starten/beenden.
     pub hotkey_sprache: Option<String>,
+    /// Ob das Wake-Word-Lauschen laufen soll — der **eine** Schalter, an dem
+    /// alles hängt: der App-Start liest ihn, die Einstellungen stellen ihn.
+    /// `false` heißt physisch aus — kein Pfad startet das Mikrofon, solange
+    /// der Benutzer den Schalter nicht selbst umlegt. Vorgabe ist aus.
+    pub wakeword_aktiv: bool,
+    /// Auf welches Wort das Modell trainiert wurde (der Assistenten-Name zum
+    /// Zeitpunkt der Kalibrierung). Weicht er vom heutigen Namen ab, schlägt
+    /// die App eine Neukalibrierung vor — mehr nicht.
+    pub wakeword_wort: Option<String>,
+    /// Bevorzugtes Eingabegerät (Name, wie Windows ihn führt). `None` heißt:
+    /// dem Windows-Standard folgen. Gilt für Wake-Word und Sprachsitzung.
+    pub audio_eingabe: Option<String>,
+    /// Bevorzugtes Ausgabegerät für die Stimme der KI. `None` = Windows-Standard.
+    pub audio_ausgabe: Option<String>,
 }
 
 impl Default for AppKonfig {
@@ -44,6 +58,10 @@ impl Default for AppKonfig {
             eingerichtet: false,
             hotkey_fenster: Some(HOTKEY_FENSTER_VORGABE.into()),
             hotkey_sprache: Some(HOTKEY_SPRACHE_VORGABE.into()),
+            wakeword_aktiv: false,
+            wakeword_wort: None,
+            audio_eingabe: None,
+            audio_ausgabe: None,
         }
     }
 }
@@ -126,6 +144,19 @@ mod tests {
         let wieder: AppKonfig = serde_json::from_str(&gespeichert).unwrap();
         assert_eq!(wieder.hotkey_fenster, None);
         assert_eq!(wieder.hotkey_sprache.as_deref(), Some("Ctrl+Shift+K"));
+    }
+
+    #[test]
+    fn wakeword_ist_in_alten_dateien_aus_und_ohne_geraetewahl() {
+        // Anders als bei den Hotkeys ist die richtige Vorgabe hier **aus**:
+        // ein Mikrofon, das nach einem Update von selbst zu lauschen beginnt,
+        // wäre genau das falsche Verhalten für ein Werkzeug, das mithört.
+        let alt = r#"{"eingerichtet":true}"#;
+        let konfig: AppKonfig = serde_json::from_str(alt).unwrap();
+        assert!(!konfig.wakeword_aktiv);
+        assert_eq!(konfig.wakeword_wort, None);
+        assert_eq!(konfig.audio_eingabe, None);
+        assert_eq!(konfig.audio_ausgabe, None);
     }
 
     #[test]

@@ -34,6 +34,10 @@ const KONFIG = {
   eingerichtet: true,
   hotkey_fenster: 'Alt+Space',
   hotkey_sprache: 'Alt+Shift+Space',
+  wakeword_aktiv: false,
+  wakeword_wort: null,
+  audio_eingabe: null,
+  audio_ausgabe: null,
 }
 
 function json(status: number, koerper: unknown): Response {

@@ -68,8 +68,14 @@ pub struct WakewordStand {
     pub aufnahmen: u8,
     pub trainiert: bool,
     pub lauscht: bool,
-    /// Name des Standard-Eingabegeräts — `None` heißt: kein Mikrofon da.
-    /// Die UI zeigt dann eine Warnung statt Knöpfen, die nur scheitern können.
+    /// Ob das Lauschen laufen **soll** (konfig.json). `lauscht` sagt, ob der
+    /// Thread wirklich läuft — nach einem Mikrofonfehler gehen beide auseinander.
+    pub aktiv: bool,
+    /// Auf welches Wort trainiert wurde. Weicht es vom heutigen
+    /// Assistenten-Namen ab, schlägt die UI eine Neukalibrierung vor.
+    pub wort: Option<String>,
+    /// Name des Eingabegeräts, das benutzt würde — `None` heißt: kein Mikrofon
+    /// da. Die UI zeigt dann eine Warnung statt Knöpfen, die nur scheitern können.
     pub geraet: Option<String>,
 }
 
@@ -105,29 +111,39 @@ fn aufnahme_dateien(verzeichnis: &Path) -> Vec<String> {
 
 pub fn stand(app: &AppHandle) -> Result<WakewordStand, String> {
     let verzeichnis = wakeword_verzeichnis(app)?;
+    let konfig = crate::konfig::laden(app).unwrap_or_default();
     Ok(WakewordStand {
         aufnahmen: aufnahme_dateien(&verzeichnis).len().min(u8::MAX as usize) as u8,
         trainiert: verzeichnis.join(MODELL_DATEI).exists(),
         lauscht: LAUSCHT.load(Ordering::SeqCst),
-        geraet: mikrofon_name(),
+        aktiv: konfig.wakeword_aktiv,
+        wort: konfig.wakeword_wort,
+        geraet: mikrofon_name(konfig.audio_eingabe.as_deref()),
     })
 }
 
-/// Name des Standard-Eingabegeräts, wie Windows ihn führt. Nur der Name
-/// verlässt das Modul — kein Audio, keine Geräte-IDs.
-fn mikrofon_name() -> Option<String> {
-    cpal::default_host()
-        .default_input_device()
+/// Name des Eingabegeräts, das benutzt würde (Wunsch des Benutzers oder
+/// Windows-Standard). Nur der Name verlässt das Modul — kein Audio,
+/// keine Geräte-IDs.
+fn mikrofon_name(bevorzugt: Option<&str>) -> Option<String> {
+    crate::audio::eingang_finden(bevorzugt)
         .and_then(|geraet| geraet.description().ok())
         .map(|beschreibung| beschreibung.name().to_string())
 }
 
 /// Löscht Aufnahmen und Modell — für „Wake-Word neu einrichten“ und für den
-/// Uninstaller (temporäre Audiodaten restlos entfernen).
+/// Uninstaller (temporäre Audiodaten restlos entfernen). Der Aktiv-Schalter
+/// und das trainierte Wort fallen mit: ein Schalter auf „an" ohne Modell
+/// dahinter wäre eine Anzeige, die lügt.
 pub fn zuruecksetzen(app: &AppHandle) -> Result<(), String> {
     lauschen_stoppen();
     let verzeichnis = wakeword_verzeichnis(app)?;
     std::fs::remove_dir_all(&verzeichnis).map_err(|e| e.to_string())?;
+    if let Ok(mut konfig) = crate::konfig::laden(app) {
+        konfig.wakeword_aktiv = false;
+        konfig.wakeword_wort = None;
+        let _ = crate::konfig::speichern(app, &konfig);
+    }
     Ok(())
 }
 
@@ -170,10 +186,12 @@ fn stream_starten(
     Ok(stream)
 }
 
-fn mikrofon() -> Result<(cpal::Device, cpal::SupportedStreamConfig), String> {
-    let geraet = cpal::default_host()
-        .default_input_device()
-        .ok_or("Kein Mikrofon gefunden")?;
+/// Das Eingabegerät samt Format — das gewählte aus konfig.json oder der
+/// Windows-Standard (audio::eingang_finden erklärt den stillen Rückfall).
+fn mikrofon(app: &AppHandle) -> Result<(cpal::Device, cpal::SupportedStreamConfig), String> {
+    let bevorzugt = crate::konfig::laden(app).ok().and_then(|k| k.audio_eingabe);
+    let geraet =
+        crate::audio::eingang_finden(bevorzugt.as_deref()).ok_or("Kein Mikrofon gefunden")?;
     let konfig = geraet
         .default_input_config()
         .map_err(|e| format!("Mikrofon nicht lesbar: {e}"))?;
@@ -278,7 +296,7 @@ pub fn aufnehmen(app: &AppHandle, nummer: u8) -> Result<String, String> {
     if LAUSCHT.load(Ordering::SeqCst) {
         return Err("Erst das Lauschen stoppen, dann kalibrieren".into());
     }
-    let (geraet, konfig) = mikrofon()?;
+    let (geraet, konfig) = mikrofon(app)?;
     let rate = konfig.sample_rate();
     let kanaele = konfig.channels() as usize;
 
@@ -374,7 +392,7 @@ pub fn lauschen_stoppen() {
 }
 
 fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
-    let (geraet, konfig) = mikrofon()?;
+    let (geraet, konfig) = mikrofon(app)?;
     let rate = konfig.sample_rate();
     let kanaele = konfig.channels() as usize;
 
@@ -408,6 +426,12 @@ fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
                                 "score": erkennung.score,
                             }),
                         );
+                        // Das Overlay öffnet **hier**, nicht im Hauptfenster-JS:
+                        // ein verstecktes WebView darf gedrosselt sein, Rust
+                        // nicht — das Wake-Word muss auch dann tragen, wenn
+                        // kein Fenster offen ist. Läuft dort schon eine
+                        // Sitzung, passiert nichts.
+                        crate::sprachsitzung_starten(app);
                     }
                 }
             }

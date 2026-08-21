@@ -1,9 +1,12 @@
 //! System-Tray mit Statusfarben.
 //!
 //! Der Tray ist die einzige Stelle, an der der Zustand des Assistenten
-//! sichtbar ist, wenn kein Fenster offen ist: Grün (bereit), Blau (hört zu),
-//! Lila (denkt), Gelb (spricht). Die Icons sind zur Compile-Zeit eingebettet —
-//! kein Dateizugriff zur Laufzeit, nichts, das ein Installer vergessen kann.
+//! sichtbar ist, wenn kein Fenster offen ist: das App-Logo (bereit), Blau
+//! (hört zu), Lila (denkt), Gelb (spricht). Bereit zeigt bewusst **kein**
+//! farbiges Icon — ein grüner Punkt im Tray liest sich als „nimmt gerade
+//! auf", und genau das tut die App im Ruhezustand nicht. Die Icons sind zur
+//! Compile-Zeit eingebettet — kein Dateizugriff zur Laufzeit, nichts, das
+//! ein Installer vergessen kann.
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -16,7 +19,8 @@ const TRAY_ID: &str = "mss";
 /// (Statusname, Tooltip, Icon) — die eine Tabelle, aus der Command und
 /// Anzeige lesen. Ein neuer Status ist eine neue Zeile, kein neuer Code.
 const STATUS: &[(&str, &str, &[u8])] = &[
-    ("bereit", "MSS — bereit", include_bytes!("../icons/status-bereit.png")),
+    // Bereit = das Logo, nicht der grüne Kreis: Farbe signalisiert Aktivität.
+    ("bereit", "MSS — bereit", include_bytes!("../icons/32x32.png")),
     ("hoert", "MSS — hört zu", include_bytes!("../icons/status-hoert.png")),
     ("denkt", "MSS — denkt", include_bytes!("../icons/status-denkt.png")),
     ("spricht", "MSS — spricht", include_bytes!("../icons/status-spricht.png")),

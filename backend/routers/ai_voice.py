@@ -226,6 +226,12 @@ def voice_config(
         # eingerichteten Zugang ``null`` — es gibt hier nichts aufzulösen, weil
         # es keine Standardstimme gibt und geben soll.
         "voice": sprechen.default_voice if sprechen else None,
+        # Fähigkeitsmarker für die Desktop-App: dieses Backend nimmt das
+        # Bearer-Token als WebSocket-Subprotokoll an. Ein gescheiterter
+        # WS-Handshake verrät dem Browser nichts — die App fragt dann hier
+        # nach und kann „Panel zu alt" von „Netz weg" unterscheiden. Auf
+        # älteren Ständen fehlt das Feld, und genau das ist die Auskunft.
+        "bearer_ws": True,
     }
 
 

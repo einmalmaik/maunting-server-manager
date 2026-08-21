@@ -355,6 +355,13 @@ export interface AiVoiceConfig {
   voice: string | null
   sample_rate: number
   max_seconds: number
+  /**
+   * Fähigkeitsmarker: dieses Backend nimmt das Bearer-Token als
+   * WebSocket-Subprotokoll an (der Weg der Desktop-App). Fehlt das Feld,
+   * ist das Backend älter als der App-Sprachmodus — die App zeigt dann
+   * „Panel zu alt" statt eines nichtssagenden Verbindungsfehlers.
+   */
+  bearer_ws?: boolean
 }
 
 

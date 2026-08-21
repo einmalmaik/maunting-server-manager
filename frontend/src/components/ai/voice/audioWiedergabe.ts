@@ -19,6 +19,7 @@
  */
 
 import { ABTASTRATE } from './audioAufnahme'
+import { ausgabeGeraetId } from './audioGeraete'
 
 /**
  * Vorlauf beim Neustart nach einer Pause. Ohne ihn beginnt das erste Stück
@@ -158,6 +159,19 @@ export class Wiedergabe {
   private hole(): AudioContext {
     if (this.kontext === null) {
       this.kontext = new AudioContext({ sampleRate: ABTASTRATE })
+      // Das Wunschgerät der Desktop-App — im Panel ein No-Op (`null`).
+      // `setSinkId` gibt es erst seit Chromium 110; wo es fehlt oder das
+      // Gerät weg ist, bleibt der Systemstandard — Ton geht vor Gerätetreue.
+      void ausgabeGeraetId()
+        .then((sink) => {
+          const kontext = this.kontext as (AudioContext & {
+            setSinkId?: (id: string) => Promise<void>
+          }) | null
+          if (sink && kontext?.setSinkId) {
+            return kontext.setSinkId(sink)
+          }
+        })
+        .catch(() => undefined)
       // Der Messpunkt liegt **vor** dem Lautsprecher: alles, was klingt, geht
       // durch ihn. Ein Browser ohne `createAnalyser` verliert damit die
       // Bewegung der Blase, nicht den Ton — der Weg zum Ziel bleibt bestehen.

@@ -19,6 +19,14 @@ export interface AppKonfig {
   hotkey_fenster: string | null
   /** Globaler Hotkey für die Sprachsitzung im Overlay. */
   hotkey_sprache: string | null
+  /** Ob das Wake-Word-Lauschen laufen soll — der eine, persistente Schalter. */
+  wakeword_aktiv: boolean
+  /** Auf welches Wort das Modell trainiert wurde. */
+  wakeword_wort: string | null
+  /** Bevorzugtes Eingabegerät (Name) — `null` folgt dem Windows-Standard. */
+  audio_eingabe: string | null
+  /** Bevorzugtes Ausgabegerät für die Stimme der KI. */
+  audio_ausgabe: string | null
 }
 
 export async function konfigLaden(): Promise<AppKonfig> {
@@ -37,6 +45,28 @@ export async function setzeStatus(status: AgentStatus): Promise<void> {
 /** Zeigt oder versteckt das Overlay-Fenster (Sprachblase). */
 export async function overlaySichtbar(sichtbar: boolean): Promise<void> {
   await invoke('overlay_sichtbar', { sichtbar })
+}
+
+/**
+ * Der Overlay-Testknopf: startet die Sprachsitzung im Overlay bzw. beendet
+ * sie — exakt derselbe Weg wie der Sprach-Hotkey und das Wake-Word.
+ */
+export async function overlayTesten(): Promise<void> {
+  await invoke('overlay_testen')
+}
+
+// ── Audiogeräte ──────────────────────────────────────────────────────────
+
+export interface AudioGeraete {
+  eingaenge: string[]
+  ausgaenge: string[]
+  /** Der aktuelle Windows-Standard — zur Anzeige hinter „Windows-Standard". */
+  standard_eingang: string | null
+  standard_ausgang: string | null
+}
+
+export async function audioGeraete(): Promise<AudioGeraete> {
+  return await invoke<AudioGeraete>('audio_geraete')
 }
 
 /** Senkt Hintergrundton um 60 % ab (an=true) bzw. stellt ihn wieder her. */
@@ -72,6 +102,10 @@ export interface WakewordStand {
   aufnahmen: number
   trainiert: boolean
   lauscht: boolean
+  /** Ob das Lauschen laufen soll (konfig.json) — der persistente Schalter. */
+  aktiv?: boolean
+  /** Auf welches Wort trainiert wurde — für den Neukalibrierungs-Hinweis. */
+  wort?: string | null
   /** Name des Eingabegeräts — `null`, wenn keines gefunden wurde. */
   geraet?: string | null
 }

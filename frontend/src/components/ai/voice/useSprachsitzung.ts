@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { aiApi } from '@/api/ai'
 import { wsProtokolle } from '@/api/client'
 import { wsUrl } from '@/config/api'
 import { AufnahmeAbbruch, starteAufnahme, type Aufnahme } from './audioAufnahme'
@@ -135,6 +136,27 @@ const MAX_BELEGE = 5
  */
 const LEITUNG_TRAEGT: ReadonlySet<string> = new Set(['hoert', 'spricht'])
 
+/**
+ * Warum kam der Handshake nicht durch? Ein Browser-WebSocket verrät es nicht
+ * (kein Statuscode, kein Grund) — aber der Config-Endpunkt desselben Backends
+ * ist per HTTP erreichbar und trägt seit dem App-Sprachmodus den Marker
+ * `bearer_ws`. Fehlt er, ist das Panel schlicht zu alt für die App, und genau
+ * das soll dastehen — nicht „Verbindung verloren", mit dem niemand etwas
+ * anfangen kann. Nur die Desktop-App fragt (im Panel trägt der Cookie, dort
+ * ist ein alter Server kein Handshake-Problem).
+ */
+async function handshakeErklaeren(): Promise<string> {
+  try {
+    const konfig = await aiApi.getVoiceConfig()
+    return konfig.bearer_ws === true
+      ? 'ai.voice.errors.connection'
+      : 'ai.voice.errors.veraltet'
+  } catch {
+    // Nicht einmal HTTP kommt durch — dann ist es wirklich die Verbindung.
+    return 'ai.voice.errors.connection'
+  }
+}
+
 function adresse(providerId?: number | null): string {
   // `wsUrl` statt eigener Ableitung: es kennt als Einziges auch den
   // Laufzeit-Override der Desktop-App (`config/api.ts`) — die eigene Lesart
@@ -218,8 +240,12 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     const verbindung = new WebSocket(adresse(providerId), protokolle)
     verbindung.binaryType = 'arraybuffer'
     ws.current = verbindung
+    // Ob der Handshake je durchkam — entscheidet in `onclose`, ob eine
+    // Erklärung gesucht wird (nur die App, nur beim Scheitern vor `onopen`).
+    let verbunden = false
 
     verbindung.onopen = () => {
+      verbunden = true
       lautsprecher.current?.bereitMachen()
       void starteAufnahme((paket) => {
         // Nur senden, wenn die Leitung wirklich offen ist. Ein Paket auf einen
@@ -408,6 +434,13 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
           if (gewollt.current) void starten()
         }, 250)
         return
+      }
+      // Der Handshake selbst ist gescheitert (nie `onopen`): in der App
+      // (`protokolle` gesetzt) beim Backend nachfragen, ob es den App-Weg
+      // überhaupt kennt — die Antwort ersetzt das nichtssagende
+      // „Verbindung verloren" aus `onerror`.
+      if (!verbunden && gewollt.current && protokolle) {
+        void handshakeErklaeren().then(setFehler)
       }
       setZustand('aus')
     }
