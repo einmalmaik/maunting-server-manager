@@ -28,18 +28,18 @@ import Splash from "./Splash";
 import { Karte, Knopf } from "./ui";
 import WakewordEinrichtung from "./WakewordEinrichtung";
 
-type Phase = "laedt" | "einrichtung" | "anmeldung" | "bereit";
+type Phase = "laedt" | "einrichtung" | "kopplung" | "bereit";
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("laedt");
   const [konfig, setKonfig] = useState<AppKonfig | null>(null);
   const [benutzer, setBenutzer] = useState<Benutzer | null>(null);
   // Die Boot-Sequenz läuft über allem, während darunter Konfiguration und
-  // stille Anmeldung schon laden — wie bei einem Spielstart.
+  // die stille Sitzungserneuerung schon laden — wie bei einem Spielstart.
   const [splash, setSplash] = useState(true);
   // Die Aufträge des Panels holt der Rechner selbst ab — aber erst, wenn
-  // jemand angemeldet ist: vorher gibt es kein Token und jede Frage wäre ein
-  // 401. Läuft weiter, auch wenn das Fenster im Tray liegt.
+  // das Gerät gekoppelt ist: vorher gibt es kein Token und jede Frage wäre
+  // ein 401. Läuft weiter, auch wenn das Fenster im Tray liegt.
   const offeneUebernahme = useAuftragsschleife(phase === "bereit");
 
   useEffect(() => {
@@ -56,7 +56,7 @@ export default function App() {
           setBenutzer(await ich());
           setPhase("bereit");
         } else {
-          setPhase("anmeldung");
+          setPhase("kopplung");
         }
       } catch {
         setPhase("einrichtung");
@@ -75,7 +75,7 @@ export default function App() {
       await abmelden();
     } finally {
       setBenutzer(null);
-      setPhase("anmeldung");
+      setPhase("kopplung");
     }
   }
 
@@ -86,11 +86,11 @@ export default function App() {
         <p className="text-sm">Startet …</p>
       </main>
     );
-  } else if (phase === "einrichtung" || phase === "anmeldung") {
+  } else if (phase === "einrichtung" || phase === "kopplung") {
     inhalt = (
       <Wizard
         konfig={konfig}
-        startSchritt={phase === "anmeldung" ? "anmeldung" : "backend"}
+        startSchritt={phase === "kopplung" ? "kopplung" : "backend"}
         onFertig={fertig}
       />
     );

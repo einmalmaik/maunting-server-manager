@@ -1,7 +1,19 @@
 /**
- * Auth-Fluesse gegen dieselben Endpunkte wie das Web-Panel — nur mit
- * `native_client: true`, damit die Tokens im Body kommen statt als Cookies
- * (Phase-1-Backend: backend/routers/auth.py).
+ * Der Weg hinein — und es ist genau einer.
+ *
+ * Diese Datei kannte einmal Benutzername, Passwort, 2FA-Code und den
+ * E-Mail-Verifikationszweig. Alles davon ist am 21.08.2026 verschwunden, aus
+ * einem handfesten Grund: bei aktiviertem Captcha prüft `/api/auth/login` den
+ * Turnstile-Token als allererste Anweisung, und ein Captcha-Widget in einem
+ * Tauri-Fenster scheitert daran, dass Cloudflare-Schlüssel an Domains hängen —
+ * `tauri.localhost` ist keine, die man dort hinterlegen kann. Jede Anmeldung
+ * endete in „CAPTCHA-Verifizierung erforderlich".
+ *
+ * Stattdessen koppelt man: im Panel entsteht ein Code, hier wird er
+ * eingelöst. Passwort, 2FA und Captcha bleiben, wo sie hingehören — im
+ * Browser, hinter dem Vorhang, den diese App gar nicht erst anfasst. Und die
+ * so entstandene Sitzung trägt im Token, dass sie von einem Gerät kommt;
+ * daran hängt, ob die KI die Werkzeuge dieses Rechners angeboten bekommt.
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -10,9 +22,6 @@ import { api, setzeAccessToken, sitzungVerwerfen } from "./client";
 export interface TokenAntwort {
   access_token: string;
   refresh_token: string;
-  requires_2fa: boolean;
-  requires_verification: boolean;
-  email: string;
   expires_in: number;
 }
 
@@ -24,63 +33,31 @@ export interface Benutzer {
   time_zone: string | null;
 }
 
-export interface CaptchaConfig {
-  enabled: boolean;
-  provider: string;
-  site_key: string;
+/**
+ * Öffentlich und ohne Nebenwirkung — der Erreichbarkeits-Test beim Einrichten.
+ *
+ * Vorher diente `captcha-config` dazu. Das war naheliegend, solange die App
+ * sich mit Passwort anmeldete; jetzt interessiert sie das Captcha nicht mehr,
+ * und ein Endpunkt, dessen Antwort niemand liest, ist der falsche Beweis.
+ */
+export async function erreichbar(): Promise<void> {
+  await api("/api/auth/setup-status", { ohneAuth: true });
 }
 
-/** Öffentlich; dient dem Assistenten auch als Erreichbarkeits-Test. */
-export async function captchaConfig(): Promise<CaptchaConfig> {
-  return await api<CaptchaConfig>("/api/auth/captcha-config", { ohneAuth: true });
-}
-
-/** Übernimmt die Tokens einer erfolgreichen Anmeldung (Speicher + Tresor). */
-async function tokensUebernehmen(antwort: TokenAntwort): Promise<void> {
-  if (!antwort.access_token) {
-    return; // 2FA- oder Verifikationszwischenschritt — noch keine Sitzung.
-  }
+/**
+ * Löst einen Kopplungscode ein und übernimmt die Sitzung.
+ *
+ * Der Code wird so geschickt, wie der Mensch ihn eingegeben hat — das Panel
+ * liest ihn nachsichtig (Kleinschreibung, fehlende Striche, Leerzeichen).
+ * Streng ist erst der Vergleich dort.
+ */
+export async function koppeln(code: string, bezeichnung: string): Promise<void> {
+  const antwort = await api<TokenAntwort>("/api/auth/devices/redeem", {
+    body: { code, label: bezeichnung },
+    ohneAuth: true,
+  });
   setzeAccessToken(antwort.access_token);
   await invoke("refresh_token_speichern", { token: antwort.refresh_token });
-}
-
-export async function anmelden(
-  username: string,
-  password: string,
-  otpCode?: string,
-): Promise<TokenAntwort> {
-  const antwort = await api<TokenAntwort>("/api/auth/login", {
-    body: {
-      username,
-      password,
-      otp_code: otpCode || null,
-      native_client: true,
-    },
-    ohneAuth: true,
-  });
-  await tokensUebernehmen(antwort);
-  return antwort;
-}
-
-/** E-Mail-Verifikationszweig: 6-stelliger Code aus der Mail. */
-export async function anmeldungVerifizieren(
-  username: string,
-  password: string,
-  code: string,
-  otpCode?: string,
-): Promise<TokenAntwort> {
-  const antwort = await api<TokenAntwort>("/api/auth/login-verify", {
-    body: {
-      username,
-      password,
-      code,
-      otp_code: otpCode || null,
-      native_client: true,
-    },
-    ohneAuth: true,
-  });
-  await tokensUebernehmen(antwort);
-  return antwort;
 }
 
 export async function abmelden(): Promise<void> {

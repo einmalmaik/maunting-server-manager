@@ -51,9 +51,6 @@ const TOKENS = {
   access_token: "acc-1",
   refresh_token: "ref-1",
   token_type: "bearer",
-  requires_2fa: false,
-  requires_verification: false,
-  email: "",
   expires_in: 900,
 };
 const BENUTZER = {
@@ -98,11 +95,15 @@ const fetchMock = vi.fn(async (url: string | URL | Request, _init?: RequestInit)
       headers: { "Content-Type": "text/html" },
     });
   }
-  if (pfad.endsWith("/api/auth/captcha-config")) {
-    return json({ enabled: false, provider: "none", site_key: "" });
+  if (pfad.endsWith("/api/auth/setup-status")) {
+    return json({ needs_setup: false });
   }
-  if (pfad.endsWith("/api/auth/login")) {
-    return json(TOKENS);
+  if (pfad.endsWith("/api/auth/devices/redeem")) {
+    // Ein falscher Code wird vom Panel abgewiesen, nicht vom Client geraten.
+    const koerper = JSON.parse(String(_init?.body ?? "{}"));
+    return String(koerper.code).toUpperCase().startsWith("ABCD")
+      ? json(TOKENS)
+      : json({ detail: "Kopplungscode ungültig oder abgelaufen" }, 400);
   }
   if (pfad.endsWith("/api/auth/refresh")) {
     return tresorToken ? json(TOKENS) : json({ detail: "Kein Refresh-Token" }, 401);
@@ -191,14 +192,14 @@ beforeEach(() => {
 describe("App-Start", () => {
   it("zeigt den Einrichtungs-Assistenten bei frischer Installation", async () => {
     render(<App />);
-    expect(await screen.findByText(/Backend verbinden/)).toBeInTheDocument();
+    expect(await screen.findByText(/Panel verbinden/)).toBeInTheDocument();
   });
 
-  it("springt zur Anmeldung, wenn die Sitzung abgelaufen ist", async () => {
+  it("verlangt eine neue Kopplung, wenn der Zugang weg ist", async () => {
     konfigAntwort = { backend_url: "https://panel.test", sandbox_pfad: null, eingerichtet: true };
     tresorToken = null;
     render(<App />);
-    expect(await screen.findByRole("button", { name: "Anmelden" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Koppeln" })).toBeInTheDocument();
   });
 
   it("meldet still ueber den Tresor an und zeigt die Hauptansicht", async () => {
@@ -213,25 +214,41 @@ describe("App-Start", () => {
 });
 
 describe("Einrichtungs-Assistent", () => {
-  it("fuehrt von der Backend-URL ueber den Login zur Personalisierung", async () => {
+  it("fuehrt von der Panel-Adresse ueber die Kopplung zur Personalisierung", async () => {
     render(<App />);
     const nutzer = userEvent.setup();
 
-    // Schritt 1: Backend
+    // Schritt 1: Adresse
     await nutzer.type(await screen.findByLabelText("Panel-Adresse"), "https://panel.test");
     await nutzer.click(screen.getByRole("button", { name: "Verbinden" }));
 
-    // Schritt 2: Anmeldung — native_client muss im Login-Body stehen
-    await nutzer.type(await screen.findByLabelText("Benutzername"), "user1");
-    await nutzer.type(screen.getByLabelText("Passwort"), "geheim123");
-    await nutzer.click(screen.getByRole("button", { name: "Anmelden" }));
+    // Schritt 2: Kopplung. Kein Passwort, kein 2FA-Feld, kein Captcha —
+    // genau das ist der Punkt der Umstellung.
+    expect(screen.queryByLabelText("Passwort")).not.toBeInTheDocument();
+    await nutzer.type(await screen.findByLabelText("Kopplungscode"), "abcd efgh jklm");
+    await nutzer.click(screen.getByRole("button", { name: "Koppeln" }));
 
     expect(await screen.findByText("Name des Assistenten")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Jarvis")).toBeInTheDocument();
-    const loginAufruf = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/api/auth/login"));
-    expect(loginAufruf).toBeDefined();
-    const body = JSON.parse(String(loginAufruf![1]?.body));
-    expect(body.native_client).toBe(true);
+    // Der Code geht so hinaus, wie er eingegeben wurde: nachsichtig gelesen
+    // wird im Panel, nicht hier.
+    const aufruf = fetchMock.mock.calls.find(([url]) =>
+      String(url).endsWith("/api/auth/devices/redeem"),
+    );
+    expect(aufruf).toBeDefined();
+    expect(JSON.parse(String(aufruf![1]?.body)).code).toBe("abcd efgh jklm");
+  });
+
+  it("zeigt die Meldung des Panels bei einem falschen Code", async () => {
+    render(<App />);
+    const nutzer = userEvent.setup();
+
+    await nutzer.type(await screen.findByLabelText("Panel-Adresse"), "https://panel.test");
+    await nutzer.click(screen.getByRole("button", { name: "Verbinden" }));
+    await nutzer.type(await screen.findByLabelText("Kopplungscode"), "ZZZZ-ZZZZ-ZZZZ");
+    await nutzer.click(screen.getByRole("button", { name: "Koppeln" }));
+
+    expect(await screen.findByText(/ungültig oder abgelaufen/)).toBeInTheDocument();
   });
 
   it("erklaert eine Adresse, die eine Webseite statt Daten liefert", async () => {

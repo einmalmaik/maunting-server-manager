@@ -12,10 +12,9 @@ import { open as ordnerDialog } from "@tauri-apps/plugin-dialog";
 
 import {
   agentNamenSetzen,
-  anmelden,
-  anmeldungVerifizieren,
-  captchaConfig,
+  erreichbar,
   ich,
+  koppeln,
   zeitzoneSetzen,
   type Benutzer,
 } from "../api/auth";
@@ -24,21 +23,21 @@ import { konfigSpeichern, type AppKonfig } from "../lib/tauri";
 import { Eingabe, Fehlertext, Karte, Knopf } from "../ui";
 import WakewordEinrichtung from "../WakewordEinrichtung";
 
-export type Schritt = "backend" | "anmeldung" | "personalisierung" | "sandbox" | "wakeword";
+export type Schritt = "backend" | "kopplung" | "personalisierung" | "sandbox" | "wakeword";
 
 const SCHRITT_TITEL: Record<Schritt, string> = {
-  backend: "Backend verbinden",
-  anmeldung: "Anmelden",
+  backend: "Panel verbinden",
+  kopplung: "Gerät koppeln",
   personalisierung: "Personalisieren",
   sandbox: "Sandbox festlegen",
   wakeword: "Wake-Word einrichten",
 };
 
-const REIHENFOLGE: Schritt[] = ["backend", "anmeldung", "personalisierung", "sandbox", "wakeword"];
+const REIHENFOLGE: Schritt[] = ["backend", "kopplung", "personalisierung", "sandbox", "wakeword"];
 
 interface WizardProps {
   konfig: AppKonfig;
-  /** "anmeldung": Sitzung abgelaufen — nur neu anmelden, Rest ist eingerichtet. */
+  /** "kopplung": Zugang verloren — nur neu koppeln, Rest ist eingerichtet. */
   startSchritt?: Schritt;
   onFertig: (konfig: AppKonfig, benutzer: Benutzer) => void;
 }
@@ -47,8 +46,8 @@ export default function Wizard({ konfig, startSchritt = "backend", onFertig }: W
   const [schritt, setSchritt] = useState<Schritt>(startSchritt);
   const [stand, setStand] = useState<AppKonfig>(konfig);
   const [benutzer, setBenutzer] = useState<Benutzer | null>(null);
-  // Nur-Anmeldung-Modus: nach dem Login direkt fertig, nichts neu einrichten.
-  const nurAnmeldung = startSchritt === "anmeldung" && konfig.eingerichtet;
+  // Nur-Kopplung-Modus: danach direkt fertig, nichts neu einrichten.
+  const nurKopplung = startSchritt === "kopplung" && konfig.eingerichtet;
 
   async function weiter(neuerStand?: AppKonfig, neuerBenutzer?: Benutzer) {
     const k = neuerStand ?? stand;
@@ -56,7 +55,7 @@ export default function Wizard({ konfig, startSchritt = "backend", onFertig }: W
     if (neuerStand) setStand(neuerStand);
     if (neuerBenutzer) setBenutzer(neuerBenutzer);
 
-    if (nurAnmeldung && b) {
+    if (nurKopplung && b) {
       onFertig(k, b);
       return;
     }
@@ -83,7 +82,7 @@ export default function Wizard({ konfig, startSchritt = "backend", onFertig }: W
         </header>
         <Karte>
           {schritt === "backend" && <SchrittBackend stand={stand} onWeiter={weiter} />}
-          {schritt === "anmeldung" && <SchrittAnmeldung onWeiter={weiter} />}
+          {schritt === "kopplung" && <SchrittKopplung onWeiter={weiter} />}
           {schritt === "personalisierung" && benutzer && (
             <SchrittPersonalisierung benutzer={benutzer} onWeiter={weiter} />
           )}
@@ -129,7 +128,7 @@ function SchrittBackend({
       setzeBackendUrl(bereinigt);
       // Öffentlicher Endpunkt als Erreichbarkeits-Test — schlägt er fehl,
       // ist die URL falsch oder das Panel nicht erreichbar.
-      await captchaConfig();
+      await erreichbar();
       const neu = { ...stand, backend_url: bereinigt };
       await konfigSpeichern(neu);
       await onWeiter(neu);
@@ -172,18 +171,15 @@ function SchrittBackend({
   );
 }
 
-// ── Schritt 2: Anmeldung (Passwort, 2FA, E-Mail-Verifikation) ────────────
+// ── Schritt 2: Kopplung ──────────────────────────────────────────────────
 
-function SchrittAnmeldung({
+function SchrittKopplung({
   onWeiter,
 }: {
   onWeiter: (stand?: undefined, benutzer?: Benutzer) => Promise<void>;
 }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [otp, setOtp] = useState("");
-  const [mailCode, setMailCode] = useState("");
-  const [zweig, setZweig] = useState<"passwort" | "2fa" | "verifikation">("passwort");
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
   const [fehler, setFehler] = useState<string | null>(null);
   const [laeuft, setLaeuft] = useState(false);
 
@@ -191,18 +187,7 @@ function SchrittAnmeldung({
     setFehler(null);
     setLaeuft(true);
     try {
-      const antwort =
-        zweig === "verifikation"
-          ? await anmeldungVerifizieren(username, password, mailCode, otp || undefined)
-          : await anmelden(username, password, otp || undefined);
-      if (antwort.requires_verification) {
-        setZweig("verifikation");
-        return;
-      }
-      if (antwort.requires_2fa) {
-        setZweig("2fa");
-        return;
-      }
+      await koppeln(code.trim(), name.trim());
       await onWeiter(undefined, await ich());
     } catch (e) {
       setFehler(e instanceof Error ? e.message : String(e));
@@ -220,49 +205,29 @@ function SchrittAnmeldung({
       }}
     >
       <p className="text-sm text-muted-foreground">
-        Melde dich mit deinem Panel-Konto an. Ohne Konto auf dem gewählten Backend gibt es
-        keinen Zugriff.
+        Melde dich im Browser bei deinem Panel an und öffne{" "}
+        <strong>Profil → KI → Geräte koppeln</strong>. Der Code dort gilt zehn Minuten und
+        genau einmal.
       </p>
       <Eingabe
-        label="Benutzername"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-        autoComplete="username"
+        label="Kopplungscode"
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        placeholder="ABCD-EFGH-JKLM"
+        hinweis="Groß- und Kleinschreibung sind egal, die Striche kannst du weglassen."
         autoFocus
-        disabled={zweig !== "passwort"}
       />
       <Eingabe
-        label="Passwort"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        autoComplete="current-password"
-        disabled={zweig !== "passwort"}
+        label="Name dieses Geräts"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Arbeitsrechner"
+        hinweis="Nur zur Wiedererkennung, wenn du den Zugang später entziehen willst."
       />
-      {zweig === "2fa" && (
-        <Eingabe
-          label="2FA-Code oder Backup-Code"
-          value={otp}
-          onChange={(e) => setOtp(e.target.value)}
-          placeholder="123456 oder XXXX-XXXX"
-          hinweis="Sechsstelliger Code aus deiner Authenticator-App — oder ein Backup-Code."
-          autoFocus
-        />
-      )}
-      {zweig === "verifikation" && (
-        <Eingabe
-          label="Verifikationscode aus der E-Mail"
-          value={mailCode}
-          onChange={(e) => setMailCode(e.target.value)}
-          placeholder="123456"
-          hinweis="Deine E-Mail-Adresse ist noch nicht bestätigt — der Code wurde dir zugesandt."
-          autoFocus
-        />
-      )}
       <Fehlertext text={fehler} />
       <div className="flex justify-end">
-        <Knopf type="submit" disabled={laeuft || username === "" || password === ""}>
-          {laeuft ? "Melde an …" : "Anmelden"}
+        <Knopf type="submit" disabled={laeuft || code.trim() === ""}>
+          {laeuft ? "Koppelt …" : "Koppeln"}
         </Knopf>
       </div>
     </form>
