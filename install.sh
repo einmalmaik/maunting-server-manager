@@ -1561,7 +1561,9 @@ $DOMAIN {
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
-        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+        # microphone=(self): der Realtime-Sprachmodus braucht getUserMedia auf
+        # der eigenen Herkunft; microphone=() blockierte ihn vollstaendig.
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
     }
 
     handle /api/* {
@@ -1590,7 +1592,9 @@ $DOMAIN {
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
-        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+        # microphone=(self): der Realtime-Sprachmodus braucht getUserMedia auf
+        # der eigenen Herkunft; microphone=() blockierte ihn vollstaendig.
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
     }
 
     handle /api/* {

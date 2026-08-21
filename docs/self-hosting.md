@@ -1373,6 +1373,15 @@ Kein zusätzlicher Port, kein zusätzlicher Dienst. Der Reverse-Proxy muss
 WebSocket-Upgrades unter `/api/` durchlassen — das tut er bereits für die
 Server-Konsole.
 
+**Permissions-Policy am Reverse-Proxy:** Die von `install.sh` erzeugte
+Caddy-Site setzt `microphone=(self)` — die eigene Herkunft darf ans Mikrofon,
+fremde iframes nicht. Installationen von vor dem 22.08.2026 tragen noch
+`microphone=()`: damit blockiert der Browser `getUserMedia` vollständig
+(es erscheint nicht einmal eine Freigabefrage, der Sprachmodus meldet nur
+einen Verbindungsfehler). Wer nicht neu installieren will, ändert die Zeile
+in der eigenen Caddy-Site von Hand auf `microphone=(self)` und lädt Caddy neu
+(`systemctl reload caddy`).
+
 ---
 
 ## Kubernetes

@@ -3277,7 +3277,7 @@
       "intro": "Talk to the AI instead of typing — with the very same agent: same conversation, same run, same tools, same permissions. It is not a second model but the ordinary chat run with a converter in front and behind. Switch at the top right of the AI page: the chat gives way to an orb that moves with the spoken word.",
       "access": {
         "title": "What has to be configured",
-        "body": "Two things. On a chat access — OpenRouter or OpenAI — a “model for speech”. And a second access of type “ElevenLabs (Voice)” with key, speech model and voice ID. If either is missing, the switch does not appear at all."
+        "body": "Two things. On a chat access — OpenRouter or OpenAI — a “model for speech”. And a second access of type “ElevenLabs (Voice)” with key, speech model and voice ID. If either is missing, the switch does not appear at all. And the reverse proxy must allow the panel to use the microphone: the Caddy site from install.sh sets Permissions-Policy microphone=(self) — installations from before 2026-08-22 still carry microphone=(), which makes the browser block getUserMedia without ever asking. Edit the line by hand and reload Caddy."
       },
       "model": {
         "title": "Models and voice",

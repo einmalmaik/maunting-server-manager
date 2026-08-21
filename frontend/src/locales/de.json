@@ -3277,7 +3277,7 @@
       "intro": "Mit der KI reden statt tippen — und zwar mit demselben Agenten: dieselbe Unterhaltung, derselbe Lauf, dieselben Werkzeuge, dieselben Rechte. Es ist kein zweites Modell, sondern der gewöhnliche Chatlauf mit zwei Wandlern davor und dahinter. Umgeschaltet wird oben rechts auf der KI-Seite: der Chat weicht einer Kugel, die sich zum gesprochenen Wort bewegt.",
       "access": {
         "title": "Was eingerichtet sein muss",
-        "body": "Zweierlei. An einem Chatzugang — OpenRouter oder OpenAI — ein „Modell für Gesprochenes\". Und ein zweiter Zugang der Art „ElevenLabs (Stimme)\" mit Schlüssel, Sprachmodell und Voice ID. Fehlt eines davon, erscheint der Umschalter gar nicht."
+        "body": "Zweierlei. An einem Chatzugang — OpenRouter oder OpenAI — ein „Modell für Gesprochenes\". Und ein zweiter Zugang der Art „ElevenLabs (Stimme)\" mit Schlüssel, Sprachmodell und Voice ID. Fehlt eines davon, erscheint der Umschalter gar nicht. Und der Reverse-Proxy muss dem Panel das Mikrofon erlauben: die Caddy-Site aus install.sh setzt Permissions-Policy microphone=(self) — Installationen von vor dem 22.08.2026 tragen noch microphone=(), womit der Browser getUserMedia ohne jede Rückfrage blockiert. Die Zeile von Hand anpassen und Caddy neu laden."
       },
       "model": {
         "title": "Modelle und Stimme",
