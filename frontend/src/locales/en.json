@@ -1746,6 +1746,10 @@
       "title": "Use AI workers in the background",
       "desc": "Allows the AI to hand orders to workers that keep working in the background — even while the conversation continues or the browser is closed. A worker runs with the permissions and from the quota of the user who gave the order; every change to servers still requires confirmation, exactly as in the chat. Without this permission the AI works in a single run, as before."
     },
+    "ai_desktop_use": {
+      "title": "AI tools on your own computer",
+      "desc": "Allows the AI to work on the user's computer — through the Smart System app, never through the panel. It works only inside the sandbox folder chosen by the user; Windows directories, the registry and system files are excluded. Before it takes over mouse or keyboard, the user must confirm on their machine; that grant is time-limited and revocable at any time. An order from the Smart System app never reaches server tools, regardless of other permissions."
+    },
     "ai_usage_read_all": {
       "title": "View overall AI usage",
       "desc": "Shows under Settings → AI which user spent how many tokens and how much money. This makes other users' behaviour visible — which is why it is a permission of its own and not part of the settings permission. Everyone sees their own usage without it."

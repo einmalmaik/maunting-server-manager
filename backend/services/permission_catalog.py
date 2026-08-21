@@ -97,6 +97,14 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # Stimme bei ElevenLabs, die nach Zeichen abrechnet und deshalb in keiner
     # Tokengrenze auftaucht (Deckel: `ai_tts_elevenlabs.MAX_ZEICHEN_JE_ANTWORT`).
     PermissionDef("ai.voice.use",              "ai",      "Mit der KI sprechen (Sprachmodus)"),
+    # Durchgesetzt in routers/desktop.py (beide Endpunkte) und beim Anbieten der
+    # Desktop-Werkzeuge. Ein eigenes Recht, weil es das einzige ist, das die KI
+    # aus dem Panel herausfuehrt: auf den privaten Rechner des Benutzers. Wer es
+    # nicht hat, bekommt die Werkzeuge nicht angeboten und kann auch keine
+    # Auftraege abholen — die Desktop-App ist dann ein Chatfenster.
+    # Serverwerkzeuge erreicht ein Auftrag aus der Desktop-App nie, unabhaengig
+    # von diesem Recht (harte Grenze in ai_stream_service, Herkunft 'desktop').
+    PermissionDef("ai.desktop.use",            "ai",      "KI-Werkzeuge auf dem eigenen Rechner (Smart System)"),
     # OAuth-Provider-Konfiguration (Phase 4 — Social Login).
     # `secret_update` ist bewusst separat: erfordert zusaetzliche Audit-Bestaetigung.
     # `test` ist read-only, damit ein Operator ohne write-Rechte die Konfiguration pruefen kann.

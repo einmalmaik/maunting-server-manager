@@ -47,6 +47,7 @@ from routers import (
     ai_chat_router,
     ai_voice_router,
     ai_actions_router,
+    desktop_router,
     ai_approvals_router,
     ai_autonomy_router,
     ai_memory_router,
@@ -862,6 +863,7 @@ app.include_router(ai_providers_router)
 app.include_router(ai_chat_router)
 app.include_router(ai_voice_router)
 app.include_router(ai_actions_router)
+app.include_router(desktop_router)
 # Ohne Anmeldung, aber unter dem strengen Auth-Limit: das Token im Pfad ist
 # die ganze Berechtigung, und ein Endpunkt, der Token gegen einen Bestand
 # prueft, gehoert hinter dieselbe Drossel wie der Login.
