@@ -8,6 +8,8 @@
 //! Harte Grenze: dieses Backend kennt keine Server-Werkzeuge und wird nie
 //! welche bekommen — Server-Verwaltung bleibt exklusiv dem Web-Panel.
 
+#[cfg(windows)]
+mod ducking;
 mod tray;
 
 use tauri::Manager;
@@ -17,6 +19,26 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 #[tauri::command]
 fn setze_status(app: tauri::AppHandle, status: String) -> Result<(), String> {
     tray::set_status(&app, &status)
+}
+
+/// Senkt Hintergrundton um 60 % ab (WASAPI) bzw. stellt ihn wieder her.
+/// Auf anderen Plattformen ein stiller No-Op — die App zielt auf Windows,
+/// aber ein Linux-CI-Check soll daran nicht scheitern.
+#[tauri::command]
+fn ducking(an: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        if an {
+            ducking::starten()
+        } else {
+            ducking::stoppen()
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = an;
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -64,7 +86,7 @@ pub fn run() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![setze_status, overlay_sichtbar])
+        .invoke_handler(tauri::generate_handler![setze_status, overlay_sichtbar, ducking])
         .setup(|app| {
             tray::erstellen(app.handle())?;
             // Ein belegter Hotkey (anderes Tool nutzt Alt+Space) darf den

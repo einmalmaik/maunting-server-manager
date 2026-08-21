@@ -17,3 +17,8 @@ export async function setzeStatus(status: AgentStatus): Promise<void> {
 export async function overlaySichtbar(sichtbar: boolean): Promise<void> {
   await invoke("overlay_sichtbar", { sichtbar });
 }
+
+/** Senkt Hintergrundton um 60 % ab (an=true) bzw. stellt ihn wieder her. */
+export async function duckingSetzen(an: boolean): Promise<void> {
+  await invoke("ducking", { an });
+}

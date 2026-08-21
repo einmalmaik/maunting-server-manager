@@ -8,7 +8,7 @@
  */
 import { useState } from "react";
 
-import { overlaySichtbar, setzeStatus, type AgentStatus } from "./lib/tauri";
+import { duckingSetzen, overlaySichtbar, setzeStatus, type AgentStatus } from "./lib/tauri";
 
 const STATUS_TEXTE: Record<AgentStatus, string> = {
   bereit: "Bereit",
@@ -20,6 +20,19 @@ const STATUS_TEXTE: Record<AgentStatus, string> = {
 export default function App() {
   const [status, setStatus] = useState<AgentStatus>("bereit");
   const [overlayAn, setOverlayAn] = useState(false);
+  const [duckt, setDuckt] = useState(false);
+
+  async function duckingTesten() {
+    // Hörprobe: Musik nebenher laufen lassen — 3 Sekunden leiser, dann zurück.
+    setDuckt(true);
+    try {
+      await duckingSetzen(true);
+      await new Promise((fertig) => setTimeout(fertig, 3000));
+      await duckingSetzen(false);
+    } finally {
+      setDuckt(false);
+    }
+  }
 
   async function statusWechseln(neu: AgentStatus) {
     setStatus(neu);
@@ -57,12 +70,21 @@ export default function App() {
             </button>
           ))}
         </div>
-        <button
-          onClick={() => void overlayUmschalten()}
-          className="rounded-lg bg-neutral-800 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-700"
-        >
-          {overlayAn ? "Overlay ausblenden" : "Overlay einblenden"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => void overlayUmschalten()}
+            className="rounded-lg bg-neutral-800 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-700"
+          >
+            {overlayAn ? "Overlay ausblenden" : "Overlay einblenden"}
+          </button>
+          <button
+            onClick={() => void duckingTesten()}
+            disabled={duckt}
+            className="rounded-lg bg-neutral-800 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-700 disabled:opacity-50"
+          >
+            {duckt ? "Ducking läuft …" : "Ducking testen (3 s)"}
+          </button>
+        </div>
         <p className="text-xs text-neutral-500">
           Tray-Status und Overlay laufen über das Rust-Backend — Hotkey: Alt+Space.
         </p>
