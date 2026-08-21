@@ -1767,7 +1767,7 @@
     },
     "ai_desktop_use": {
       "title": "KI-Werkzeuge auf dem eigenen Rechner",
-      "desc": "Erlaubt der KI, auf dem Rechner des Benutzers zu arbeiten — über die Smart-System-App, nie über das Panel. Sie arbeitet ausschließlich im selbst gewählten Sandbox-Ordner; Windows-Verzeichnisse, Registry und Systemdateien sind ausgeschlossen. Bevor sie Maus oder Tastatur übernimmt, muss der Benutzer das an seinem Rechner bestätigen; die Freigabe ist befristet und jederzeit widerrufbar. Ein Auftrag aus der Smart-System-App erreicht niemals Serverwerkzeuge, unabhängig von den übrigen Rechten."
+      "desc": "Erlaubt der KI, auf dem Rechner des Benutzers zu arbeiten — über die Smart-System-App, nie über das Panel. Sie arbeitet ausschließlich im selbst gewählten Sandbox-Ordner; Windows-Verzeichnisse, Registry und Systemdateien sind ausgeschlossen. Bevor sie Maus oder Tastatur übernimmt, muss der Benutzer das an seinem Rechner bestätigen; die Freigabe ist befristet und jederzeit widerrufbar. Eine Bitte aus dem Browser erreicht diese Werkzeuge nie — die Herkunft steht im Token der gekoppelten Sitzung, kein Client kann sie behaupten."
     },
     "ai_usage_read_all": {
       "title": "Gesamte KI-Nutzung einsehen",
@@ -3166,14 +3166,14 @@
     },
     "smartSystem": {
       "title": "MSS — Maunting Smart System (Desktop-App)",
-      "intro": "Optionaler Begleiter für Windows: derselbe Dauerchat wie im Browser, ein offline trainiertes Wake-Wort und Arbeit in einem Ordner, den der Benutzer selbst freigibt. Die App ersetzt das Panel nicht — sie ist ein zweiter Weg in dieselbe Unterhaltung.",
+      "intro": "Optionaler Begleiter für Windows: derselbe Dauerchat wie im Browser, ein offline trainiertes Wake-Wort und Arbeit in einem Ordner, den der Benutzer selbst freigibt. Die App ersetzt das Panel nicht — sie ist ein zweiter Weg in dieselbe Unterhaltung, mit denselben Rechten und einem Rechner daran.",
       "artifact": {
         "title": "Installer",
         "body": "Der Workflow smart-system-release.yml baut den NSIS-Installer auf smart-v*-Tags, bewusst getrennt von den Panel-Releases. Nur Windows: Audio-Ducking, Übernahme und Tresor sind Windows-Funktionen."
       },
       "permission": {
         "title": "Rechte",
-        "body": "Anmelden und Chatten braucht ai.chat.use. Für die Werkzeuge auf dem eigenen Rechner kommt ai.desktop.use dazu; ohne dieses Recht holt die App keine Aufträge ab, und die KI bekommt die Werkzeuge gar nicht erst angeboten."
+        "body": "Koppeln und Chatten braucht ai.chat.use. Für die Werkzeuge auf dem eigenen Rechner kommt ai.desktop.use dazu; ohne dieses Recht holt die App keine Aufträge ab, und die KI bekommt die Werkzeuge gar nicht erst angeboten. Aus dem Browser bekommt sie diese Werkzeuge nie — dort sitzt niemand vor der Bestätigungskarte."
       },
       "sandbox": {
         "title": "Sandbox",
@@ -3183,9 +3183,9 @@
         "title": "Maus und Tastatur",
         "body": "Die KI kann um die Übernahme bitten; erteilen kann sie allein der Mensch am Rechner, auf einer Bestätigungskarte und befristet. Die Frist liegt in der App, nicht im Panel, und lässt sich jederzeit beenden."
       },
-      "noServers": {
-        "title": "Keine Serververwaltung",
-        "body": "Eine Bitte aus der App erreicht kein Serverwerkzeug. Der Werkzeugkatalog wird nach der Herkunft geschnitten, und zusätzlich weist die Ausführung jeden solchen Aufruf einzeln ab. Server bedient man im Panel."
+      "pairing": {
+        "title": "Anmelden per Kopplung",
+        "body": "Die App kennt weder Passwort noch 2FA-Code. Im Panel unter Profil → KI entsteht ein Code (zehn Minuten, genau einmal), der in der App eingetragen wird; gespeichert wird nur sein Hash. Das ist nötig, weil ein Captcha-Widget in einem Tauri-Fenster nicht funktioniert — so bleiben Passwort, 2FA und Captcha vollständig im Browser. Gekoppelte Geräte lassen sich dort einzeln wieder aussperren."
       },
       "uninstall": {
         "title": "Deinstallation",

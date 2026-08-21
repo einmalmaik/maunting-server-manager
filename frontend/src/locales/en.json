@@ -1767,7 +1767,7 @@
     },
     "ai_desktop_use": {
       "title": "AI tools on your own computer",
-      "desc": "Allows the AI to work on the user's computer — through the Smart System app, never through the panel. It works only inside the sandbox folder chosen by the user; Windows directories, the registry and system files are excluded. Before it takes over mouse or keyboard, the user must confirm on their machine; that grant is time-limited and revocable at any time. An order from the Smart System app never reaches server tools, regardless of other permissions."
+      "desc": "Allows the AI to work on the user's computer — through the Smart System app, never through the panel. It works only inside the sandbox folder chosen by the user; Windows directories, the registry and system files are excluded. Before it takes over mouse or keyboard, the user must confirm on their machine; that grant is time-limited and revocable at any time. A request from the browser never reaches these tools — the origin lives in the token of the paired session, no client can claim it."
     },
     "ai_usage_read_all": {
       "title": "View overall AI usage",
@@ -3166,14 +3166,14 @@
     },
     "smartSystem": {
       "title": "MSS — Maunting Smart System (desktop app)",
-      "intro": "Optional Windows companion: the same ongoing chat as in the browser, a wake word trained offline, and work inside a folder the user picks. The app does not replace the panel — it is a second way into the same conversation.",
+      "intro": "Optional Windows companion: the same ongoing chat as in the browser, a wake word trained offline, and work inside a folder the user picks. The app does not replace the panel — it is a second way into the same conversation, with the same permissions and a computer attached.",
       "artifact": {
         "title": "Installer",
         "body": "The smart-system-release.yml workflow builds the NSIS installer on smart-v* tags, deliberately separate from the panel releases. Windows only: audio ducking, takeover and the credential vault are Windows features."
       },
       "permission": {
         "title": "Permissions",
-        "body": "Signing in and chatting needs ai.chat.use. Tools on the user's own computer additionally need ai.desktop.use; without it the app fetches no jobs, and the AI is not even offered those tools."
+        "body": "Pairing and chatting needs ai.chat.use. Tools on the user's own computer additionally need ai.desktop.use; without it the app fetches no jobs, and the AI is not even offered those tools. From the browser it never gets them — nobody is sitting in front of the confirmation card there."
       },
       "sandbox": {
         "title": "Sandbox",
@@ -3183,9 +3183,9 @@
         "title": "Mouse and keyboard",
         "body": "The AI may ask to take over; only the human at the machine can grant it, on a confirmation card and for a limited time. The deadline lives in the app, not in the panel, and can be ended at any moment."
       },
-      "noServers": {
-        "title": "No server management",
-        "body": "A request from the app never reaches a server tool. The tool catalogue is cut by origin, and execution additionally rejects every such call individually. Servers are operated in the panel."
+      "pairing": {
+        "title": "Signing in by pairing",
+        "body": "The app knows neither password nor 2FA code. In the panel under Profile → AI a code is created (ten minutes, exactly once) and entered in the app; only its hash is stored. This is necessary because a captcha widget cannot work inside a Tauri window — password, 2FA and captcha therefore stay entirely in the browser. Paired devices can be locked out individually from the same place."
       },
       "uninstall": {
         "title": "Uninstalling",

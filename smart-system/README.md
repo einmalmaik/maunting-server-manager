@@ -5,12 +5,35 @@ Assistenz auf dem eigenen Rechner — als schlanke Tauri-v2-App (Rust + React).
 
 ## Harte Architektur-Grenze
 
-**Über diese App kann man unter keinen Umständen Server verwalten.** Das ist
-keine UI-Entscheidung, sondern eine Scope-Grenze im Backend: der
-Smart-System-Zugang stellt der KI keine Server-Werkzeuge zur Verfügung, egal
-welche Rechte der eingeloggte Benutzer im Panel hat. Server-Verwaltung bleibt
-zu 100 % dem Web-Panel vorbehalten. Details: `docs/smart-system-notes.md`
-(lokal) und `docs/agent-rules/`.
+Die App hat als **Oberfläche** keine Serververwaltung: Dauerchat und
+Sprachbedienung, keine Serverliste, keine Konsole, keine Dateiverwaltung. Die
+KI darin ist aber derselbe Account mit denselben Rechten — im Gespräch bedient
+sie Server genauso wie im Panel und bekommt die Werkzeuge für diesen Rechner
+zusätzlich.
+
+Die Grenze läuft in die andere Richtung: **aus dem Panel erreicht kein Werkzeug
+den Rechner.** Sie ist keine UI-Entscheidung, sondern eine Schranke im Backend
+(`services/ai_tool_registry.herkunft_schnitt` plus ein Spiegel je Aufruf), und
+die Herkunft steht im Token der gekoppelten Sitzung — kein Client kann sie
+behaupten. Der Grund ist praktisch: die Übernahme von Maus und Tastatur wird an
+einer Karte in dieser App bestätigt, und aus dem Browser abgeschickt liefe der
+Aufruf in eine Frist statt in eine Antwort.
+
+Hier stand bis zum 21.08.2026 das Gegenteil („unter keinen Umständen Server
+verwalten"). Das war eine Fehllesung eines älteren Beschlusses; gemeint war die
+Oberfläche, nicht die Rechte der KI.
+
+## Anmelden: nur per Kopplung
+
+Die App kennt weder Passwort noch 2FA-Code. Im Panel unter **Profil → KI →
+Geräte koppeln** entsteht ein Code (zwölf Zeichen, zehn Minuten, genau einmal),
+der hier eingetragen wird. Nötig ist das, weil `/api/auth/login` bei
+aktiviertem Captcha einen Turnstile-Token verlangt und Cloudflare-Schlüssel an
+Domains hängen — `tauri.localhost` lässt sich dort nicht hinterlegen. So bleiben
+Passwort, 2FA und Captcha vollständig im Browser.
+
+Einzutragen ist die **Adresse der API**, nicht die der Weboberfläche. Das Panel
+zeigt sie unter Einstellungen → Allgemein und noch einmal beim Koppeln.
 
 ## Aufbau
 
@@ -47,7 +70,8 @@ Tests: `npm run test` (Frontend) und `cargo test` in `src-tauri/`.
 
 ## Verbindung zum Panel
 
-Die App verbindet sich mit einem selbst gewählten MSM-Backend (URL beim
-ersten Start). Authentifizierung läuft über `Authorization: Bearer` gegen
-dieselben Endpunkte wie das Panel (`/api/auth/login` mit `native_client=true`);
-Tokens liegen nie im Klartext auf der Platte.
+Die App verbindet sich mit einem selbst gewählten MSM-Backend (API-Adresse beim
+ersten Start). Die Sitzung entsteht über `/api/auth/devices/redeem`, danach
+läuft alles über `Authorization: Bearer` gegen dieselben Endpunkte wie das
+Panel. Das Refresh-Token liegt im Windows-Anmeldeinformations-Manager, das
+Access-Token nur im Speicher — nichts davon im Klartext auf der Platte.

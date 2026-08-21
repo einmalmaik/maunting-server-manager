@@ -86,8 +86,9 @@ jobs:
             Browser, Wake-Word offline auf dem Rechner, Arbeit im
             freigegebenen Sandbox-Ordner.
 
-            Serververwaltung gehoert nicht dazu und wird es nicht: eine
-            Bitte aus dieser App erreicht im Panel kein Serverwerkzeug.
+            **Anmelden geht nur per Kopplung.** Im Panel unter Profil -> KI
+            einen Code erzeugen und hier eintragen; einzutragen ist die
+            Adresse der API, nicht die der Weboberflaeche.
 
             **Hinweis:** Der Installer ist nicht signiert. Windows SmartScreen
             meldet deshalb einen unbekannten Herausgeber — ueber "Weitere

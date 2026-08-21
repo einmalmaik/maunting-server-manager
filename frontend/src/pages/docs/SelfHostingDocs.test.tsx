@@ -86,14 +86,16 @@ describe('SelfHostingDocs', () => {
     expect(screen.getByText(/Stop the agent, restore the path/i)).toBeInTheDocument()
   })
 
-  it('nennt die Desktop-App samt ihrer Grenze zur Serververwaltung', () => {
+  it('nennt die Desktop-App samt Kopplung und Grenze zum Rechner', () => {
     renderPage()
 
-    // Die Grenze ist der Punkt, der hier stehen muss: wer die App
-    // ausrollt, soll nicht erst im Betrieb merken, dass sie bewusst keine
-    // zweite Serververwaltung ist.
+    // Zwei Punkte muessen hier stehen, weil sie im Betrieb sonst ueberraschen:
+    // dass die App sich nur per Kopplung anmeldet (mit Passwort kommt sie bei
+    // aktivem Captcha nicht herein), und dass die Grenze zum Rechner in die
+    // andere Richtung laeuft als frueher dokumentiert.
     expect(document.querySelector('a[href="#smart-system"]')).toBeInTheDocument()
-    expect(screen.getByText(/never reaches a server tool/i)).toBeInTheDocument()
+    expect(screen.getByText(/knows neither password nor 2FA code/i)).toBeInTheDocument()
+    expect(screen.getByText(/From the browser it never gets them/i)).toBeInTheDocument()
     // Und der unsignierte Installer, weil SmartScreen sonst wie ein Fehler
     // aussieht statt wie eine bekannte Eigenschaft.
     expect(screen.getByText(/installer is not signed/i)).toBeInTheDocument()

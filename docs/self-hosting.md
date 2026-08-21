@@ -125,22 +125,49 @@ gehört vor der Installation verglichen.
 
 Was die App zum Betrieb braucht:
 
-- Die Panel-Adresse (wird im Einrichtungs-Assistenten eingetragen) und einen
-  Benutzer mit `ai.chat.use`.
+- **Die Adresse der API**, nicht die der Weboberfläche. Bei einer
+  Standardinstallation ist das dieselbe; liegt das Frontend getrennt (eigener
+  Hoster, `VITE_API_URL` gesetzt), ist es der Wert aus `VITE_API_URL`. Das
+  Panel zeigt ihn unter **Einstellungen → Allgemein** und noch einmal direkt
+  beim Koppeln, jeweils mit Kopierknopf. Trägt man die Oberfläche ein,
+  antwortet sie mit einer Webseite statt mit Daten, und die App sagt das auch
+  so.
+- Einen Benutzer mit `ai.chat.use`.
 - Für die Werkzeuge auf dem eigenen Rechner zusätzlich `ai.desktop.use`. Ohne
   dieses Recht ist die App ein Chatfenster: sie holt keine Aufträge ab, und
   die KI bekommt die Desktop-Werkzeuge gar nicht erst angeboten.
 - Panelseitig müssen `tauri://localhost`, `http://tauri.localhost` und
   `https://tauri.localhost` als Origins erlaubt sein. Das ist in
   `backend/config.py` fest hinterlegt (`TAURI_ORIGINS`) und braucht keine
-  Konfiguration.
+  Konfiguration. **Nur im Entwicklungsmodus** (`npm run tauri dev`) lädt das
+  Fenster vom Vite-Server und meldet sich mit `http://localhost:1430`; das ist
+  nicht hinterlegt und muss bei Bedarf über `MSM_CORS_ALLOWED_ORIGINS` dazu.
 
-Was die App **nicht** kann und nicht bekommen wird: Serververwaltung. Eine
-Bitte aus der Smart-System-App erreicht im Panel kein Serverwerkzeug — der
-Katalog wird nach der Herkunft geschnitten, und zusätzlich weist die
-Ausführung jeden solchen Aufruf einzeln ab
-(`services/ai_tool_registry.herkunft_schnitt`). Wer Server bedienen will,
-nimmt das Panel; es ist dieselbe Unterhaltung.
+**Anmelden geht nur über Kopplung.** Die App kennt weder Passwort noch
+2FA-Code. Wer angemeldet ist, öffnet im Panel **Profil → KI → Geräte koppeln**,
+erzeugt dort einen Code (zwölf Zeichen, zehn Minuten, genau einmal einlösbar)
+und trägt ihn in der App ein. Der Grund ist nicht Bequemlichkeit: bei
+aktiviertem Captcha verlangt `/api/auth/login` einen Turnstile-Token, und ein
+Captcha-Widget in einem Tauri-Fenster scheitert daran, dass Cloudflare-Schlüssel
+an Domains gebunden sind. Passwort, 2FA und Captcha bleiben damit vollständig
+im Browser.
+
+In der Datenbank steht nur der SHA-256 des Codes. Gekoppelte Geräte stehen
+unter demselben Punkt im Profil; **Zugang entziehen** widerruft die
+Refresh-Familie genau dieses Geräts und lässt alle anderen Sitzungen laufen.
+Das gerade gültige Access-Token bleibt bis zu seinem Ablauf brauchbar —
+dieselbe Regel wie überall sonst, ein Widerruf wirkt spätestens beim nächsten
+Erneuern.
+
+Was die App **als Oberfläche** nicht hat: eine Serververwaltung. Sie zeigt den
+Dauerchat und die Sprachbedienung, keine Serverliste und keine Konsole. Die KI
+darin ist aber derselbe Account mit denselben Rechten — sie kann Server also
+sehr wohl bedienen, im Gespräch, und bekommt die Werkzeuge für den eigenen
+Rechner zusätzlich. Umgekehrt gilt die Grenze: **aus dem Browser erreicht kein
+Werkzeug den Rechner.** Der Katalog wird nach der Herkunft geschnitten, und die
+Ausführung weist jeden solchen Aufruf zusätzlich einzeln ab
+(`services/ai_tool_registry.herkunft_schnitt`). Die Herkunft steht im Token der
+gekoppelten Sitzung — ein Client kann sie nicht behaupten.
 
 Deinstalliert wird in der App selbst (Einstellungen → Gefahrenzone) oder über
 Windows. Der Weg in der App räumt zusätzlich auf, was der Windows-Uninstaller

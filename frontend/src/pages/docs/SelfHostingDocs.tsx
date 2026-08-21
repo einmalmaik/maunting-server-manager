@@ -365,8 +365,10 @@ export function SelfHostingDocs() {
         </div>
       </section>
 
-      {/* Die Desktop-App. Sie ist optional und bewusst keine zweite
-          Serververwaltung — der letzte Punkt sagt genau das. */}
+      {/* Die Desktop-App. Sie ist optional, und die beiden Punkte, die im
+          Betrieb überraschen, stehen hier: dass man sich nur per Kopplung
+          anmeldet, und dass aus dem Browser kein Werkzeug den Rechner
+          erreicht. */}
       <section aria-labelledby="smart-system" className="msm-card mb-10 p-5 sm:p-6">
         <div className="flex items-start gap-3">
           <MonitorSmartphone className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
@@ -380,7 +382,7 @@ export function SelfHostingDocs() {
           </div>
         </div>
         <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
-          {(['artifact', 'permission', 'sandbox', 'takeover', 'noServers', 'uninstall'] as const).map(item => (
+          {(['artifact', 'pairing', 'permission', 'sandbox', 'takeover', 'uninstall'] as const).map(item => (
             <div key={item} className="bg-surface-container p-4">
               <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.smartSystem.${item}.title`)}</dt>
               <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.smartSystem.${item}.body`)}</dd>
