@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use rustpotter::{
     Rustpotter, RustpotterConfig, WakewordRef, WakewordRefBuildFromFiles, WakewordSave,
 };
