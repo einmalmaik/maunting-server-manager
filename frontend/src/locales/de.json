@@ -216,7 +216,11 @@
       "title": "KI-Assistent",
       "description": "API-Key, Modell und Anbieter legt der Betreiber des Panels fest. Hier verwaltest du, was der Assistent über dich weiß.",
       "skillsMoved": "Skills stehen nicht mehr hier: ein Skill gilt entweder für ein Team oder panelweit, nie „für dieses Profil“. Deine eigenen findest du unter",
-      "skillsMovedLink": "Teams → Persönlich"
+      "skillsMovedLink": "Teams → Persönlich",
+      "agentNameTitle": "Name des Assistenten",
+      "agentNameDescription": "Gib deinem Assistenten einen eigenen Rufnamen. Leer gelassen heißt er Singra. Der Name gilt überall — im Panel wie in der Desktop-App.",
+      "agentNameLabel": "Rufname",
+      "agentNameSaved": "Name gespeichert."
     },
     "memory": {
       "enabled": "Memory im KI-Kontext verwenden",

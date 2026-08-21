@@ -11,6 +11,8 @@ export interface User {
   ai_notifications: boolean
   /** IANA-Zeitzone des Benutzers (z. B. 'Europe/Berlin'). */
   time_zone?: string | null
+  /** Rufname des KI-Assistenten; null heißt Standardname 'Singra'. */
+  agent_name?: string | null
   role_id: number | null
   /** Alle globalen Rollen; role_id bleibt kompatible Primärrolle. */
   role_ids?: number[]

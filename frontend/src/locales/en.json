@@ -216,7 +216,11 @@
       "title": "AI assistant",
       "description": "The panel operator provides the API key, the model and the providers. Here you manage what the assistant knows about you.",
       "skillsMoved": "Skills no longer live here: a skill applies either to a team or panel-wide, never “to this profile”. You will find your own under",
-      "skillsMovedLink": "Teams → Personal"
+      "skillsMovedLink": "Teams → Personal",
+      "agentNameTitle": "Assistant name",
+      "agentNameDescription": "Give your assistant its own name. Left empty, it is called Singra. The name applies everywhere — in the panel and in the desktop app.",
+      "agentNameLabel": "Name",
+      "agentNameSaved": "Name saved."
     },
     "memory": {
       "enabled": "Use memory in AI context",
