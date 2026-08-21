@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn benutzerordner_sind_erlaubt() {
-        assert!(!sandbox_pfad_verboten("C:\\Users\\alex\\SingraSandbox"));
+        assert!(!sandbox_pfad_verboten("C:\\Users\\alex\\MSS-Sandbox"));
         assert!(!sandbox_pfad_verboten("D:\\Projekte"));
         // "Windows" als Namensbestandteil ausserhalb des Systempfads ist ok.
         assert!(!sandbox_pfad_verboten("C:\\WindowsAppsBackup"));

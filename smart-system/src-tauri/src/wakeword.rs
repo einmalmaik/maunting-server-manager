@@ -240,7 +240,7 @@ pub fn lauschen_starten(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
     std::thread::Builder::new()
-        .name("singra-wakeword".into())
+        .name("mss-wakeword".into())
         .spawn(move || {
             if let Err(fehler) = lausch_schleife(&app, &modell) {
                 eprintln!("Wake-Word-Lauschen beendet: {fehler}");

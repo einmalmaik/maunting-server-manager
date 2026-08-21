@@ -1,4 +1,4 @@
-# Singra Smart System
+# MSS — Maunting Smart System
 
 Der Desktop-Companion zum MSM-Panel: Konversation, Sprachbedienung und lokale
 Assistenz auf dem eigenen Rechner — als schlanke Tauri-v2-App (Rust + React).

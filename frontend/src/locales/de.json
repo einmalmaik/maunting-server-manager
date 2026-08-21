@@ -3152,7 +3152,7 @@
       }
     },
     "smartSystem": {
-      "title": "Singra Smart System (Desktop-App)",
+      "title": "MSS — Maunting Smart System (Desktop-App)",
       "intro": "Optionaler Begleiter für Windows: derselbe Dauerchat wie im Browser, ein offline trainiertes Wake-Wort und Arbeit in einem Ordner, den der Benutzer selbst freigibt. Die App ersetzt das Panel nicht — sie ist ein zweiter Weg in dieselbe Unterhaltung.",
       "artifact": {
         "title": "Installer",

@@ -1,4 +1,4 @@
-//! Singra Smart System — Tauri-v2-Einstieg.
+//! MSS — Maunting Smart System, Tauri-v2-Einstieg.
 //!
 //! Zwei Fenster (Hauptfenster + frameless Overlay), Tray mit Statusfarben,
 //! globaler Hotkey Alt+Space, Autostart. Zero-Resource-Prinzip: hier läuft
@@ -260,5 +260,5 @@ pub fn run() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("Fehler beim Start des Singra Smart Systems");
+        .expect("Fehler beim Start des Maunting Smart Systems");
 }

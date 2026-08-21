@@ -194,7 +194,7 @@ mod tests {
     use std::fs;
 
     fn sandbox() -> PathBuf {
-        let pfad = std::env::temp_dir().join(format!("singra-test-{}", std::process::id()));
+        let pfad = std::env::temp_dir().join(format!("mss-test-{}", std::process::id()));
         let _ = fs::create_dir_all(&pfad);
         pfad
     }

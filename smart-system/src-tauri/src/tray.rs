@@ -11,15 +11,15 @@ use tauri::{
     AppHandle, Manager,
 };
 
-const TRAY_ID: &str = "singra";
+const TRAY_ID: &str = "mss";
 
 /// (Statusname, Tooltip, Icon) — die eine Tabelle, aus der Command und
 /// Anzeige lesen. Ein neuer Status ist eine neue Zeile, kein neuer Code.
 const STATUS: &[(&str, &str, &[u8])] = &[
-    ("bereit", "Singra — bereit", include_bytes!("../icons/status-bereit.png")),
-    ("hoert", "Singra — hört zu", include_bytes!("../icons/status-hoert.png")),
-    ("denkt", "Singra — denkt", include_bytes!("../icons/status-denkt.png")),
-    ("spricht", "Singra — spricht", include_bytes!("../icons/status-spricht.png")),
+    ("bereit", "MSS — bereit", include_bytes!("../icons/status-bereit.png")),
+    ("hoert", "MSS — hört zu", include_bytes!("../icons/status-hoert.png")),
+    ("denkt", "MSS — denkt", include_bytes!("../icons/status-denkt.png")),
+    ("spricht", "MSS — spricht", include_bytes!("../icons/status-spricht.png")),
 ];
 
 fn status_eintrag(status: &str) -> Option<&'static (&'static str, &'static str, &'static [u8])> {

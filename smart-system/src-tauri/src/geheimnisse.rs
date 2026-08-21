@@ -13,7 +13,7 @@
 
 use keyring::Entry;
 
-const DIENST: &str = "SingraSmartSystem";
+const DIENST: &str = "MauntingSmartSystem";
 const KONTO: &str = "refresh_token";
 
 fn eintrag() -> Result<Entry, String> {

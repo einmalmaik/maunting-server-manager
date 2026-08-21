@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Singra Smart System",
+  "productName": "Maunting Smart System",
   "version": "0.1.0",
-  "identifier": "com.mauntingstudios.singra-smart-system",
+  "identifier": "com.mauntingstudios.smart-system",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1430",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Singra Smart System",
+        "title": "MSS — Maunting Smart System",
         "width": 1100,
         "height": 720,
         "minWidth": 860,
@@ -23,7 +23,7 @@
       },
       {
         "label": "overlay",
-        "title": "Singra",
+        "title": "MSS",
         "url": "index.html?fenster=overlay",
         "width": 420,
         "height": 200,

@@ -2900,6 +2900,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "maunting-smart-system"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "cpal",
+ "dunce",
+ "enigo",
+ "hound",
+ "image",
+ "keyring",
+ "rustpotter",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-dialog",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-opener",
+ "trash",
+ "windows 0.62.2",
+ "xcap",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4629,31 +4654,6 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
-
-[[package]]
-name = "singra-smart-system"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "cpal",
- "dunce",
- "enigo",
- "hound",
- "image",
- "keyring",
- "rustpotter",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-dialog",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-opener",
- "trash",
- "windows 0.62.2",
- "xcap",
-]
 
 [[package]]
 name = "siphasher"

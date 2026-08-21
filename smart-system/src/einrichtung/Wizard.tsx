@@ -75,7 +75,7 @@ export default function Wizard({ konfig, startSchritt = "backend", onFertig }: W
     <main className="flex h-full items-center justify-center bg-background p-6 text-foreground">
       <div className="flex w-full max-w-lg flex-col gap-4">
         <header className="flex flex-col items-center gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Singra Smart System</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Maunting Smart System</h1>
           <p className="text-xs text-muted-foreground">
             Schritt {REIHENFOLGE.indexOf(schritt) + 1} von {REIHENFOLGE.length}:{" "}
             {SCHRITT_TITEL[schritt]}
@@ -379,7 +379,7 @@ function SchrittSandbox({
             label="Sandbox-Ordner"
             value={pfad}
             onChange={(e) => setPfad(e.target.value)}
-            placeholder="C:\\Users\\du\\SingraSandbox"
+            placeholder="C:\\Users\\du\\MSS-Sandbox"
           />
         </div>
         <Knopf stimme="leise" onClick={() => void waehlen()}>

@@ -1,9 +1,9 @@
 {
-  "name": "msm-smart-system",
+  "name": "maunting-smart-system",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Singra Smart System - Desktop Companion fuer das MSM-Panel (Tauri v2)",
+  "description": "MSS - Maunting Smart System, Desktop Companion fuer das MSM-Panel (Tauri v2)",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

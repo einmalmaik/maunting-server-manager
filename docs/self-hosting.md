@@ -105,7 +105,7 @@ stehen. Das Backend benötigt für getrenntes Hosting passende CORS- und
 Cookie-Einstellungen; Details stehen in `frontend/.env.example` und
 `backend/.env.example`.
 
-### Singra Smart System (Desktop-App, optional)
+### MSS — Maunting Smart System (Desktop-App, optional)
 
 Der Workflow `.github/workflows/smart-system-release.yml` baut den
 Windows-Installer der Desktop-App. Er läuft auf **`smart-v*`-Tags** und
@@ -113,7 +113,7 @@ bewusst nicht auf `v*`: auf `v*` liegen bereits zwei Workflows, die je einen
 Draft-Release zum selben Tag anlegen, und die Desktop-App folgt ohnehin einem
 eigenen Takt — ein Panel-Update erzwingt keinen neuen Installer.
 
-- `Singra Smart System_<VERSION>_x64-setup.exe`: NSIS-Installer, nur Windows.
+- `Maunting Smart System_<VERSION>_x64-setup.exe`: NSIS-Installer, nur Windows.
   Die App ist Windows-spezifisch (Audio-Ducking über WASAPI, Übernahme von
   Maus und Tastatur, Anmeldeinformations-Manager als Tresor).
 - `SHA256SUMS.txt`: Prüfsumme des Installers, als Actions-Artefakt.

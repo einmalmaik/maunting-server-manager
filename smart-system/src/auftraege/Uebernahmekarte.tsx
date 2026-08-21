@@ -23,7 +23,7 @@ interface Anfrage {
   auftragId: string;
 }
 
-export const EREIGNIS_UEBERNAHME = "singra:uebernahme-anfrage";
+export const EREIGNIS_UEBERNAHME = "mss:uebernahme-anfrage";
 
 export default function Uebernahmekarte({
   offenerAuftragId,
@@ -104,7 +104,7 @@ export default function Uebernahmekarte({
   if (rest > 0) {
     return (
       <div className="fixed bottom-4 right-4 z-30 flex items-center gap-3 rounded-[var(--radius-card)] border border-accent/50 bg-card px-4 py-2 text-xs shadow-panel">
-        <span className="singra-blase inline-block h-2 w-2 rounded-full bg-accent" />
+        <span className="mss-blase inline-block h-2 w-2 rounded-full bg-accent" />
         <span>
           Übernahme aktiv — noch {Math.floor(rest / 60)}:
           {String(rest % 60).padStart(2, "0")}

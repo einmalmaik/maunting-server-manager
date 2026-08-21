@@ -22,7 +22,7 @@ use crate::sandbox;
 use crate::uebernahme;
 
 /// Das Ereignis, mit dem die Oberflaeche die Bestaetigungskarte zeigt.
-pub const EREIGNIS_UEBERNAHME: &str = "singra:uebernahme-anfrage";
+pub const EREIGNIS_UEBERNAHME: &str = "mss:uebernahme-anfrage";
 
 /// Was ein ausgefuehrter Auftrag zurueckgibt. `None` heisst: das Ergebnis
 /// kommt spaeter (Uebernahme-Anfrage), die Oberflaeche meldet dann selbst.

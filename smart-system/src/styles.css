@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
- * Singra Smart System - MauntingStudios Design-DNA.
+ * MSS — Maunting Smart System, MauntingStudios Design-DNA.
  *
  * Tailwind-v4-@theme-Block mit den HSL-Tokens aus
  * maunting-design-dna/design-tokens.md (gleiches Muster wie recovery/):
@@ -54,7 +54,7 @@ body,
   background: transparent;
 }
 
-@keyframes singra-puls {
+@keyframes mss-puls {
   0%,
   100% {
     transform: scale(1);
@@ -66,13 +66,13 @@ body,
   }
 }
 
-.singra-blase {
-  animation: singra-puls 2.4s ease-in-out infinite;
+.mss-blase {
+  animation: mss-puls 2.4s ease-in-out infinite;
 }
 
 /* Boot-Sequenz: jedes Logo blendet weich ein, steht kurz und blendet aus —
    wie die Studio-Logos beim Start eines Spiels. Dauer = STUFEN_DAUER_MS. */
-@keyframes singra-splash-stufe {
+@keyframes mss-splash-stufe {
   0% {
     opacity: 0;
     transform: scale(0.96);
@@ -88,6 +88,6 @@ body,
   }
 }
 
-.singra-splash-stufe {
-  animation: singra-splash-stufe 2200ms ease-in-out both;
+.mss-splash-stufe {
+  animation: mss-splash-stufe 2200ms ease-in-out both;
 }

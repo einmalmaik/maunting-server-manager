@@ -1,6 +1,6 @@
 name: Smart System Release
 
-# Baut den NSIS-Installer der Singra-Smart-System-App und haengt ihn an den
+# Baut den NSIS-Installer des Maunting Smart Systems (MSS) und haengt ihn an den
 # GitHub-Release.
 #
 # **Eigenes Tag-Praefix, kein `v*`.** Auf `v*` liegen bereits zwei Workflows
@@ -80,7 +80,7 @@ jobs:
         with:
           projectPath: smart-system
           tagName: ${{ github.ref_name }}
-          releaseName: "Singra Smart System ${{ github.ref_name }}"
+          releaseName: "MSS — Maunting Smart System ${{ github.ref_name }}"
           releaseBody: |
             Desktop-Begleiter fuer das MSM-Panel: derselbe Dauerchat wie im
             Browser, Wake-Word offline auf dem Rechner, Arbeit im

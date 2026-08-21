@@ -18,7 +18,7 @@ interface Stufe {
 const STUFEN: Stufe[] = [
   { bild: "/dis-logo.png", alt: "DIS", untertitel: "Geschützt durch DIS" },
   { bild: "/firmen-logo.png", alt: "MauntingStudios", untertitel: "Ein Produkt von MauntingStudios" },
-  { bild: "/msm-logo.png", alt: "Maunting Server Manager", untertitel: "Singra Smart System" },
+  { bild: "/msm-logo.png", alt: "Maunting Server Manager", untertitel: "Maunting Smart System" },
 ];
 
 const STUFEN_DAUER_MS = 2200;
@@ -54,7 +54,7 @@ export default function Splash({ onFertig }: { onFertig: () => void }) {
       data-testid="splash"
     >
       {/* key erzwingt einen frischen Animationslauf je Stufe. */}
-      <div key={stufe} className="singra-splash-stufe flex flex-col items-center gap-4">
+      <div key={stufe} className="mss-splash-stufe flex flex-col items-center gap-4">
         <img
           src={aktuelle.bild}
           alt={aktuelle.alt}
