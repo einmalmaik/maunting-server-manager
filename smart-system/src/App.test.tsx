@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 
@@ -173,6 +173,7 @@ vi.stubGlobal("fetch", fetchMock);
 
 import App from "./App";
 import Overlay from "./Overlay";
+import Splash from "./Splash";
 import { setzeAccessToken } from "./api/client";
 
 beforeEach(() => {
@@ -385,11 +386,41 @@ describe("Auftragsschleife", () => {
 });
 
 describe("Boot-Sequenz", () => {
-  it("zeigt das DIS-Logo zuerst und laesst sich per Klick ueberspringen", async () => {
+  it("zeigt das DIS-Logo zuerst, rund, und laesst sich per Klick ueberspringen", async () => {
     render(<App />);
-    expect(await screen.findByAltText("DIS")).toBeInTheDocument();
+    const bild = await screen.findByAltText("DIS");
+    // Zugesagt ist: Logos sind immer rund.
+    expect(bild).toHaveClass("rounded-full");
     await userEvent.click(screen.getByTestId("splash"));
     expect(screen.queryByTestId("splash")).not.toBeInTheDocument();
+  });
+
+  it("laesst eine Stufe ohne Bilddatei trotzdem laufen", async () => {
+    render(<App />);
+    fireEvent.error(await screen.findByAltText("DIS"));
+    // Nur das Bild geht, die Stufe bleibt — sonst sieht der Betreiber sie nie.
+    expect(screen.queryByAltText("DIS")).not.toBeInTheDocument();
+    expect(screen.getByText("Geschützt durch DIS")).toBeInTheDocument();
+    expect(screen.getByTestId("splash")).toBeInTheDocument();
+  });
+
+  it("laesst sich vom Rendern des Elternteils nicht ausbremsen", () => {
+    vi.useFakeTimers();
+    try {
+      // App uebergibt onFertig als frisch gebaute Funktion. Haengt der
+      // Stufentakt an deren Identitaet, faengt er bei jedem Rendern von
+      // vorne an — und waehrend des Starts rendert App mehrfach.
+      const { rerender } = render(<Splash onFertig={() => {}} />);
+      expect(screen.getByAltText("DIS")).toBeInTheDocument();
+
+      act(() => void vi.advanceTimersByTime(3000));
+      rerender(<Splash onFertig={() => {}} />);
+      act(() => void vi.advanceTimersByTime(400));
+
+      expect(screen.queryByAltText("DIS")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

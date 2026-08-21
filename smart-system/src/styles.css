@@ -70,15 +70,19 @@ body,
   animation: mss-puls 2.4s ease-in-out infinite;
 }
 
-/* Boot-Sequenz: jedes Logo blendet weich ein, steht kurz und blendet aus —
-   wie die Studio-Logos beim Start eines Spiels. Dauer = STUFEN_DAUER_MS. */
+/* Boot-Sequenz: jedes Logo blendet weich ein, steht und blendet aus — wie
+   die Studio-Logos beim Start eines Spiels. Das Stehen ist der laengste
+   Teil: ein Logo, das nur durchhuscht, hat man nicht gesehen.
+
+   Die Dauer setzt Splash.tsx per animationDuration aus STUFEN_DAUER_MS.
+   Der Wert hier ist nur der Rueckfall, falls das mal jemand vergisst. */
 @keyframes mss-splash-stufe {
   0% {
     opacity: 0;
     transform: scale(0.96);
   }
-  18%,
-  78% {
+  14%,
+  84% {
     opacity: 1;
     transform: scale(1);
   }
@@ -89,5 +93,5 @@ body,
 }
 
 .mss-splash-stufe {
-  animation: mss-splash-stufe 2200ms ease-in-out both;
+  animation: mss-splash-stufe 3200ms ease-in-out both;
 }
