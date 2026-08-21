@@ -33,6 +33,14 @@ vi.mock('@/api/client', async () => {
       if (path === '/auth/me/agent-name') {
         return Promise.resolve({ agent_name: 'Jarvis' })
       }
+      if (path === '/auth/devices/pairing') {
+        return Promise.resolve({ code: 'ABCD-EFGH-JKLM', expires_at: '', label: '' })
+      }
+      if (path === '/auth/devices') {
+        return Promise.resolve([
+          { family: 'fam-1', label: 'Arbeitsrechner', paired_at: '2026-08-21T10:00:00Z' },
+        ])
+      }
       if (path === '/ai/usage/me') {
         return Promise.resolve({
           user_id: 1, username: 'tester',
@@ -124,6 +132,43 @@ describe('Profil → KI', () => {
     )
     // Die Antwort des Backends ist die Wahrheit — sie landet im Auth-Store.
     await waitFor(() => expect(useAuthStore.getState().user?.agent_name).toBe('Jarvis'))
+  })
+
+  it('erzeugt einen Kopplungscode und zeigt ihn genau einmal', async () => {
+    render(<MemoryRouter><AiTab /></MemoryRouter>)
+
+    const feld = await screen.findByLabelText('Name des Geräts')
+    fireEvent.change(feld, { target: { value: 'Arbeitsrechner' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Code erzeugen' }))
+
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith('/auth/devices/pairing', {
+        method: 'POST',
+        body: JSON.stringify({ label: 'Arbeitsrechner' }),
+      }),
+    )
+    // Der Code steht in der Einmal-Anzeige. Nach dem Wegklicken ist er weg —
+    // MSM kennt nur seinen Hash, ein zweiter Blick ist nicht vorgesehen.
+    expect(await screen.findByText('ABCD-EFGH-JKLM')).toBeInTheDocument()
+  })
+
+  it('nennt die API-Adresse neben dem Code, nicht in einer Anleitung', async () => {
+    // Die Adresse der Oberfläche einzutragen ist der häufigste Fehler beim
+    // Einrichten; sie steht deshalb dort, wo sie gebraucht wird.
+    render(<MemoryRouter><AiTab /></MemoryRouter>)
+    expect(await screen.findByLabelText('Diese Adresse in der App eintragen')).toBeInTheDocument()
+  })
+
+  it('listet gekoppelte Geräte und entzieht einzeln', async () => {
+    render(<MemoryRouter><AiTab /></MemoryRouter>)
+
+    expect(await screen.findByText('Arbeitsrechner')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Zugang entziehen/ }))
+
+    // Genau diese eine Familie, nicht alle Sitzungen des Benutzers.
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith('/auth/devices/fam-1', { method: 'DELETE' }),
+    )
   })
 
   it('zeigt keine Skill-Verwaltung mehr, sondern den Weg dorthin', async () => {

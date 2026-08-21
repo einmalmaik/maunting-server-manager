@@ -220,7 +220,18 @@
       "agentNameTitle": "Name des Assistenten",
       "agentNameDescription": "Gib deinem Assistenten einen eigenen Rufnamen. Leer gelassen heißt er Singra. Der Name gilt überall — im Panel wie in der Desktop-App.",
       "agentNameLabel": "Rufname",
-      "agentNameSaved": "Name gespeichert."
+      "agentNameSaved": "Name gespeichert.",
+      "devicesTitle": "Geräte koppeln",
+      "devicesDescription": "Die Desktop-App meldet sich nicht mit Passwort an, sondern mit einem Code, den du hier erzeugst. Er gilt zehn Minuten und genau einmal. Ein gekoppeltes Gerät führt dieselbe Unterhaltung wie das Panel — und die KI kann dort zusätzlich auf deinem Rechner arbeiten.",
+      "devicesApiAddress": "Diese Adresse in der App eintragen",
+      "devicesApiAddressHint": "Die Adresse der API, nicht die der Oberfläche. Trägst du die Adresse der Weboberfläche ein, antwortet sie mit einer Webseite statt mit Daten.",
+      "devicesNameLabel": "Name des Geräts",
+      "devicesNamePlaceholder": "Arbeitsrechner",
+      "devicesPair": "Code erzeugen",
+      "devicesCodeLabel": "Kopplungscode",
+      "devicesRevoke": "Zugang entziehen",
+      "devicesRevoked": "Zugang entzogen.",
+      "devicesUnnamed": "Unbenanntes Gerät"
     },
     "memory": {
       "enabled": "Memory im KI-Kontext verwenden",
@@ -2351,6 +2362,8 @@
     "subtitle": "Panel-Einstellungen",
     "panelUrl": "Panel-URL",
     "panelUrlHint": "Wird automatisch aus der aktuellen Adresse ermittelt.",
+    "apiUrl": "API-Adresse",
+    "apiUrlHint": "Die Adresse, unter der dieses Panel seine API anbietet. Genau diese trägt man im Maunting Smart System ein — nicht die der Weboberfläche.",
     "smtpHost": "SMTP-Host",
     "smtpPort": "SMTP-Port",
     "smtpUser": "SMTP-Benutzer",

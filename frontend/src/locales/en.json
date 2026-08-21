@@ -220,7 +220,18 @@
       "agentNameTitle": "Assistant name",
       "agentNameDescription": "Give your assistant its own name. Left empty, it is called Singra. The name applies everywhere — in the panel and in the desktop app.",
       "agentNameLabel": "Name",
-      "agentNameSaved": "Name saved."
+      "agentNameSaved": "Name saved.",
+      "devicesTitle": "Pair devices",
+      "devicesDescription": "The desktop app does not sign in with a password but with a code you create here. It is valid for ten minutes and exactly once. A paired device joins the same conversation as the panel — and the AI can additionally work on your computer there.",
+      "devicesApiAddress": "Enter this address in the app",
+      "devicesApiAddressHint": "The address of the API, not of the web interface. Enter the web interface and it answers with a web page instead of data.",
+      "devicesNameLabel": "Device name",
+      "devicesNamePlaceholder": "Work computer",
+      "devicesPair": "Create code",
+      "devicesCodeLabel": "Pairing code",
+      "devicesRevoke": "Revoke access",
+      "devicesRevoked": "Access revoked.",
+      "devicesUnnamed": "Unnamed device"
     },
     "memory": {
       "enabled": "Use memory in AI context",
@@ -2351,6 +2362,8 @@
     "subtitle": "Panel settings",
     "panelUrl": "Panel URL",
     "panelUrlHint": "Automatically determined from the current address.",
+    "apiUrl": "API address",
+    "apiUrlHint": "The address under which this panel serves its API. This is exactly what you enter in the Maunting Smart System — not the address of the web interface.",
     "smtpHost": "SMTP Host",
     "smtpPort": "SMTP Port",
     "smtpUser": "SMTP User",

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Clock, Save } from 'lucide-react'
+import { Clock, Copy, Save } from 'lucide-react'
 import { api } from '@/api/client'
+import { API_ORIGIN } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher'
@@ -84,6 +85,36 @@ export function GeneralTab() {
               />
               <p className="msm-field-help">
                 {t('settings.panelUrlHint')}
+              </p>
+            </div>
+            {/* Abgelesen, nicht gepflegt: das laufende Frontend spricht ohnehin
+                mit dieser Adresse (VITE_API_URL, sonst der eigene Origin). Ein
+                eigenes Einstellungsfeld daneben könnte falsch gepflegt werden
+                und wäre dann eine zweite, unwahre Wahrheit. */}
+            <div>
+              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
+                {t('settings.apiUrl', 'API-Adresse')}
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="url"
+                  value={API_ORIGIN}
+                  readOnly
+                  className="msm-input opacity-60 cursor-not-allowed"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(API_ORIGIN)
+                    toast.success(t('hoster.copied'))
+                  }}
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+              <p className="msm-field-help">
+                {t('settings.apiUrlHint')}
               </p>
             </div>
             <div>
