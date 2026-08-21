@@ -67,3 +67,40 @@ export async function wakewordLauschen(an: boolean): Promise<void> {
 export async function wakewordZuruecksetzen(): Promise<void> {
   await invoke("wakeword_zuruecksetzen");
 }
+
+// ── Aufträge vom Panel ───────────────────────────────────────────────────
+
+/**
+ * Führt einen Auftrag aus (Dateien, Programm, Übernahme).
+ *
+ * `null` heißt: das Ergebnis kommt später. Genau ein Fall — die Bitte um die
+ * Übernahme, über die ein Mensch an der Bestätigungskarte entscheidet.
+ */
+export async function auftragAusfuehren(
+  werkzeug: string,
+  argumente: Record<string, unknown>,
+): Promise<Record<string, unknown> | null> {
+  return await invoke<Record<string, unknown> | null>("auftrag_ausfuehren", {
+    werkzeug,
+    argumente,
+  });
+}
+
+// ── Übernahme von Maus und Tastatur ──────────────────────────────────────
+//
+// Die Freigabe liegt in Rust und nicht hier: eine Frist im Speicher des
+// Prozesses, die nur ein Klick des Menschen setzt. Diese Funktionen bitten
+// darum, sie halten sie nicht.
+
+export async function uebernahmeFreigeben(minuten: number): Promise<void> {
+  await invoke("uebernahme_freigeben", { minuten });
+}
+
+export async function uebernahmeWiderrufen(): Promise<void> {
+  await invoke("uebernahme_widerrufen");
+}
+
+/** Restlaufzeit der Freigabe in Sekunden; 0 heißt: keine. */
+export async function uebernahmeRest(): Promise<number> {
+  return await invoke<number>("uebernahme_rest");
+}

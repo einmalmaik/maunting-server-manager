@@ -85,6 +85,11 @@ export async function nachrichtSenden(
         provider_id: providerId,
         request_id: crypto.randomUUID(),
         reasoning: false,
+        // Von hier aus arbeitet die KI am Rechner des Benutzers und nicht an
+        // seinen Servern: das Panel schneidet den Werkzeugkatalog danach zu
+        // (ai_tool_registry.herkunft_schnitt). Die Unterhaltung bleibt
+        // dieselbe wie im Browser — nur der Weg hinein ist ein anderer.
+        herkunft: "desktop",
       },
     },
     onEreignis,

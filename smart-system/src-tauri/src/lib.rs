@@ -8,11 +8,14 @@
 //! Harte Grenze: dieses Backend kennt keine Server-Werkzeuge und wird nie
 //! welche bekommen — Server-Verwaltung bleibt exklusiv dem Web-Panel.
 
+mod auftrag;
 #[cfg(windows)]
 mod ducking;
 mod geheimnisse;
 mod konfig;
+mod sandbox;
 mod tray;
+mod uebernahme;
 mod wakeword;
 
 use tauri::Manager;
@@ -69,6 +72,47 @@ fn refresh_token_laden() -> Result<Option<String>, String> {
 #[tauri::command]
 fn refresh_token_loeschen() -> Result<(), String> {
     geheimnisse::loeschen()
+}
+
+/// Fuehrt einen Auftrag des Panels aus (Dateien, Programme, Uebernahme).
+///
+/// Der Sandbox-Ordner kommt aus der Konfiguration und nicht aus dem Auftrag:
+/// welcher Ordner freigegeben ist, entscheidet der Benutzer in der App, nie
+/// das Panel und schon gar nicht das Modell.
+///
+/// `Ok(None)` heisst: das Ergebnis kommt spaeter. Das ist genau ein Fall — die
+/// Bitte um die Uebernahme, ueber die ein Mensch entscheidet.
+#[tauri::command]
+fn auftrag_ausfuehren(
+    app: tauri::AppHandle,
+    werkzeug: String,
+    argumente: serde_json::Value,
+) -> Result<Option<serde_json::Value>, String> {
+    let pfad = konfig::laden(&app)
+        .ok()
+        .and_then(|k| k.sandbox_pfad)
+        .map(std::path::PathBuf::from);
+    auftrag::ausfuehren(&app, pfad, &werkzeug, &argumente)
+}
+
+/// Erteilt die Freigabe fuer Maus und Tastatur — nur nach einem Klick des
+/// Menschen auf der Bestaetigungskarte. Die Frist selbst liegt in `uebernahme`
+/// und damit im Prozess, nicht im Panel.
+#[tauri::command]
+fn uebernahme_freigeben(minuten: u64) -> Result<(), String> {
+    uebernahme::freigeben(minuten)
+}
+
+#[tauri::command]
+fn uebernahme_widerrufen() -> Result<(), String> {
+    uebernahme::widerrufen()
+}
+
+/// Wie lange die Freigabe noch laeuft. Die Oberflaeche zeigt es an — eine
+/// laufende Uebernahme, die man nicht sieht, waere die schlechteste Fassung.
+#[tauri::command]
+fn uebernahme_rest() -> Result<u64, String> {
+    Ok(uebernahme::restsekunden())
 }
 
 #[tauri::command]
@@ -149,6 +193,9 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
+        // Programme, Dateien und Adressen oeffnen — der offizielle Weg in
+        // Tauri v2 (tauri-plugin-shell::open ist deprecated).
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             setze_status,
             overlay_sichtbar,
@@ -162,7 +209,11 @@ pub fn run() {
             wakeword_aufnehmen,
             wakeword_trainieren,
             wakeword_lauschen,
-            wakeword_zuruecksetzen
+            wakeword_zuruecksetzen,
+            auftrag_ausfuehren,
+            uebernahme_freigeben,
+            uebernahme_widerrufen,
+            uebernahme_rest
         ])
         .setup(|app| {
             tray::erstellen(app.handle())?;

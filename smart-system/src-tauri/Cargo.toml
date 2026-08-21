@@ -41,6 +41,46 @@ rustpotter = "3.0.2"
 cpal = "0.18"
 hound = "3.5"
 
+# ── Arbeit auf dem Rechner des Benutzers (Phase 5) ────────────────────────
+# Nichts davon ist selbst gebaut; alle vier sind der jeweils gepflegte
+# Standard und beruehren weder Registry noch Kerneltreiber.
+#
+# dunce: `std::fs::canonicalize` liefert unter Windows `\\?\C:\...`, und ein
+# `starts_with` gegen einen normalen Pfad schlaegt damit fehl — genau die
+# Pruefung, die die Sandbox-Grenze traegt. dunce ist der De-facto-Ersatz.
+dunce = "1"
+# Papierkorb statt endgueltig: Geloeschtes in der Sandbox bleibt
+# wiederherstellbar. Ein `fs::remove_file` waere die unumkehrbare Fassung
+# derselben Zeile.
+trash = "5"
+# Programme, Dateien und Adressen oeffnen. Der offizielle Weg in Tauri v2;
+# `tauri-plugin-shell::open` ist deprecated und hatte GHSA-c9pr-q8gx-3mgp.
+tauri-plugin-opener = "2"
+
+[target.'cfg(windows)'.dependencies.enigo]
+# Maus und Tastatur. Version fest: enigo bricht seine API zwischen
+# Minor-Versionen regelmaessig, und die Uebernahme ist der Teil, bei dem ein
+# stiller Verhaltenswechsel am teuersten waere. `text()` sendet
+# Unicode-Ereignisse und umgeht das Tastaturlayout — Umlaute ohne Gefummel.
+version = "=0.6.1"
+
+[target.'cfg(windows)'.dependencies.xcap]
+# Bildschirmfotos ueber die Windows Graphics Capture API. Nachfolger der
+# eingestellten `screenshots`-Crate; unter 0.9.6 gab es sporadische Timeouts.
+version = "0.9"
+
+[target.'cfg(windows)'.dependencies.image]
+# Nur zum Verkleinern und PNG-Kodieren der Bildschirmfotos: ein Vollbild geht
+# sonst mit mehreren Megabyte in einen Prompt, und die Anbieter weisen zu
+# grosse Bilder ab, statt sie zu skalieren.
+version = "0.25"
+default-features = false
+features = ["png"]
+
+[target.'cfg(windows)'.dependencies.base64]
+# Das Bild reist als Text durch JSON zum Panel und weiter zum Modell.
+version = "0.22"
+
 [target.'cfg(windows)'.dependencies]
 # Offizielle Microsoft-Bindings — nur fuer das WASAPI-Audio-Ducking
 # (Session-Lautstaerken). Eng feature-gegated, kein Netzwerk, kein Storage.

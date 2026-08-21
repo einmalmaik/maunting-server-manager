@@ -9,6 +9,11 @@ import { vi, describe, it, expect, beforeEach } from "vitest";
 let konfigAntwort: Record<string, unknown> = { backend_url: null, sandbox_pfad: null, eingerichtet: false };
 let tresorToken: string | null = null;
 
+// Aufträge, die die Schleife abholen soll. Jeder wird genau einmal
+// ausgeliefert — wie im Panel, wo ein geholter Auftrag als "taken" gilt.
+let offeneAuftraege: unknown[] = [];
+const gemeldet: Array<{ pfad: string; body: unknown }> = [];
+
 const invokeMock = vi.fn(async (...args: unknown[]) => {
   switch (args[0]) {
     case "konfig_laden":
@@ -17,6 +22,15 @@ const invokeMock = vi.fn(async (...args: unknown[]) => {
       return tresorToken;
     case "wakeword_stand":
       return { aufnahmen: 0, trainiert: false, lauscht: false };
+    case "auftrag_ausfuehren": {
+      const argumente = args[1] as { werkzeug: string };
+      // Die Übernahme-Anfrage liefert bewusst nichts: über sie entscheidet
+      // ein Mensch an der Karte.
+      if (argumente.werkzeug === "desktop_takeover_control") return null;
+      return { inhalt: "Hallo aus der Sandbox" };
+    }
+    case "uebernahme_rest":
+      return 0;
     default:
       return undefined;
   }
@@ -132,6 +146,15 @@ const fetchMock = vi.fn(async (url: string | URL | Request, _init?: RequestInit)
   if (pfad.includes("/api/ai/conversation?")) {
     return json({ id: "konv-1", messages: chatNachrichten, has_more: false });
   }
+  if (pfad.endsWith("/api/desktop/jobs/next")) {
+    const naechster = offeneAuftraege.shift();
+    // 204 ohne Körper ist der Normalfall "nichts zu tun".
+    return naechster ? json(naechster) : new Response(null, { status: 204 });
+  }
+  if (pfad.includes("/api/desktop/jobs/")) {
+    gemeldet.push({ pfad, body: JSON.parse(String(_init?.body ?? "{}")) });
+    return new Response(null, { status: 204 });
+  }
   return json({ detail: `Unerwarteter Aufruf: ${pfad}` }, 500);
 });
 vi.stubGlobal("fetch", fetchMock);
@@ -147,6 +170,8 @@ beforeEach(() => {
   konfigAntwort = { backend_url: null, sandbox_pfad: null, eingerichtet: false };
   tresorToken = null;
   chatNachrichten = [];
+  offeneAuftraege = [];
+  gemeldet.length = 0;
 });
 
 describe("App-Start", () => {
@@ -262,6 +287,74 @@ describe("Chat", () => {
     const body = JSON.parse(String(streamAufruf![1]?.body));
     expect(body.provider_id).toBe(1);
     expect(typeof body.request_id).toBe("string");
+  });
+});
+
+describe("Auftragsschleife", () => {
+  beforeEach(() => {
+    konfigAntwort = {
+      backend_url: "https://panel.test",
+      sandbox_pfad: "C:\\Users\\test\\Sandbox",
+      eingerichtet: true,
+    };
+    tresorToken = "ref-alt";
+  });
+
+  it("holt einen Auftrag ab, laesst ihn ausfuehren und meldet das Ergebnis", async () => {
+    offeneAuftraege = [
+      {
+        id: "job-1",
+        tool_name: "desktop_dateien",
+        arguments: { aktion: "lesen", pfad: "notiz.txt" },
+      },
+    ];
+    render(<App />);
+
+    await vi.waitFor(
+      () => {
+        expect(invokeMock).toHaveBeenCalledWith("auftrag_ausfuehren", {
+          werkzeug: "desktop_dateien",
+          argumente: { aktion: "lesen", pfad: "notiz.txt" },
+        });
+        expect(gemeldet).toHaveLength(1);
+      },
+      { timeout: 5000 },
+    );
+
+    expect(gemeldet[0].pfad).toContain("/api/desktop/jobs/job-1/result");
+    expect(gemeldet[0].body).toMatchObject({
+      ok: true,
+      ergebnis: { inhalt: "Hallo aus der Sandbox" },
+    });
+  });
+
+  it("zeigt die Bestaetigungskarte, bevor die KI Maus und Tastatur bekommt", async () => {
+    offeneAuftraege = [
+      {
+        id: "job-2",
+        tool_name: "desktop_takeover_control",
+        arguments: { anliegen: "Ich möchte deinen Browser bedienen.", minuten: 5 },
+      },
+    ];
+    render(<App />);
+
+    // Die Karte kommt über ein Tauri-Ereignis; der Mock ruft den Hörer direkt.
+    await vi.waitFor(
+      () =>
+        expect(invokeMock).toHaveBeenCalledWith("auftrag_ausfuehren", {
+          werkzeug: "desktop_takeover_control",
+          argumente: { anliegen: "Ich möchte deinen Browser bedienen.", minuten: 5 },
+        }),
+      { timeout: 5000 },
+    );
+
+    // Entscheidend: **keine** Freigabe ohne Klick des Menschen.
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      "uebernahme_freigeben",
+      expect.anything(),
+    );
+    // Und der Auftrag bleibt offen, bis der Mensch entschieden hat.
+    expect(gemeldet).toHaveLength(0);
   });
 });
 

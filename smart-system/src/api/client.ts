@@ -111,7 +111,13 @@ async function fehlerAus(antwort: Response): Promise<ApiFehler> {
   return new ApiFehler(antwort.status, detail);
 }
 
-/** Zentrale JSON-Anfrage mit einmaligem Refresh-Versuch bei 401. */
+/**
+ * Zentrale JSON-Anfrage mit einmaligem Refresh-Versuch bei 401.
+ *
+ * Eine Antwort ohne Körper (204) kommt als `null` zurück und nicht als
+ * Ausnahme: „nichts zu tun" ist beim Abholen von Aufträgen der Normalfall,
+ * und ein `SyntaxError` aus dem JSON-Leser wäre dafür die falsche Sprache.
+ */
 export async function api<T>(pfad: string, optionen: AnfrageOptionen = {}): Promise<T> {
   let antwort = await roheAnfrage(pfad, optionen);
   if (antwort.status === 401 && !optionen.ohneAuth) {
@@ -122,7 +128,11 @@ export async function api<T>(pfad: string, optionen: AnfrageOptionen = {}): Prom
   if (!antwort.ok) {
     throw await fehlerAus(antwort);
   }
-  return (await antwort.json()) as T;
+  if (antwort.status === 204 || antwort.status === 205) {
+    return null as T;
+  }
+  const text = await antwort.text();
+  return (text ? JSON.parse(text) : null) as T;
 }
 
 /**

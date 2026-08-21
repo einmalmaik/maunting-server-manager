@@ -11,6 +11,8 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { abmelden, ich, type Benutzer } from "./api/auth";
 import { setzeBackendUrl, stillAnmelden } from "./api/client";
+import Uebernahmekarte from "./auftraege/Uebernahmekarte";
+import { useAuftragsschleife } from "./auftraege/useAuftragsschleife";
 import Chat from "./chat/Chat";
 import Wizard from "./einrichtung/Wizard";
 import {
@@ -34,6 +36,10 @@ export default function App() {
   // Die Boot-Sequenz läuft über allem, während darunter Konfiguration und
   // stille Anmeldung schon laden — wie bei einem Spielstart.
   const [splash, setSplash] = useState(true);
+  // Die Aufträge des Panels holt der Rechner selbst ab — aber erst, wenn
+  // jemand angemeldet ist: vorher gibt es kein Token und jede Frage wäre ein
+  // 401. Läuft weiter, auch wenn das Fenster im Tray liegt.
+  const offeneUebernahme = useAuftragsschleife(phase === "bereit");
 
   useEffect(() => {
     void (async () => {
@@ -94,6 +100,9 @@ export default function App() {
   return (
     <>
       {inhalt}
+      {/* Über allem außer der Boot-Sequenz: eine Bitte um die Übernahme von
+          Maus und Tastatur darf nicht hinter einem Reiter verschwinden. */}
+      <Uebernahmekarte offenerAuftragId={offeneUebernahme} />
       {splash && <Splash onFertig={() => setSplash(false)} />}
     </>
   );
