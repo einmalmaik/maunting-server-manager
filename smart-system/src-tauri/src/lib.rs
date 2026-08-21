@@ -171,6 +171,13 @@ pub fn run() {
             if let Err(fehler) = app.global_shortcut().register("Alt+Space") {
                 eprintln!("Globaler Hotkey Alt+Space nicht verfuegbar: {fehler}");
             }
+            // Sanfter Start: beim Boot-Autostart bleibt das Fenster im Tray —
+            // niemand will nach dem Hochfahren eine Boot-Sequenz vor der Nase.
+            if std::env::args().any(|arg| arg == "--autostart") {
+                if let Some(fenster) = app.get_webview_window("main") {
+                    let _ = fenster.hide();
+                }
+            }
             Ok(())
         })
         // Schliessen heisst „in den Tray“, nicht „beenden“ — beenden geht
