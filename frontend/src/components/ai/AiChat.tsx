@@ -55,6 +55,13 @@ const ATTACHMENT_ACCEPT = '.txt,.log,.cfg,.conf,.ini,.json,.properties,.toml,.ya
 const TIPP_TAKT_MS = 10_000
 
 /**
+ * Wie oft der offene Chat nach Fremdem sieht — Nachrichten aus einem zweiten
+ * Tab, der Desktop-App oder einer Meldestellen-Lieferung. Derselbe Abstand
+ * wie im Guardian-Fenster, aus demselben Grund: nachsehen, nicht streamen.
+ */
+const NACHSEHEN_MS = 20_000
+
+/**
  * Die Denkwahl — dieselben zwei Felder, die auch auf der Leitung stehen und in
  * `ai_runs` landen: **ob** nachgedacht wird und **wie tief**.
  *
@@ -465,29 +472,54 @@ export function AiChat() {
   }, [haengeAn, laufBeimOeffnen, setRunId])
 
   /**
-   * Nachladen bei Zustellung: die Meldestelle liefert in den Dauerchat, ohne
-   * dass hier jemand etwas getippt hätte.
+   * Fremdes nachladen — auf Zuruf **und** im Takt.
    *
-   * Der offene Chat pollt selbst nicht — er erfuhr von einer zugestellten
-   * Worker-Meldung schlicht nichts, bis man die Seite neu lud. Die Glocke
-   * pollt ohnehin (sie ist global gemountet) und feuert das Ereignis; hier
-   * wird nur nachgeladen, und zwar aus der Datenbank statt aus dem Ereignis —
-   * das Signal trägt bewusst keine Nutzlast.
+   * Zuruf ist das Zustell-Ereignis der Glocke (Meldestellen-Lieferungen,
+   * beobachtete Laufwechsel). Er allein hat nicht gereicht: die Glocke sieht
+   * einen Lauf nur, wenn ihr Takt ihn trifft — wer im Chat stand, pollte dort
+   * nur alle 60 Sekunden, und ein Lauf aus einem zweiten Tab oder der
+   * Desktop-App begann und endete komplett zwischen zwei Blicken. Die
+   * Nachricht stand dann in der Datenbank und nirgendwo auf dem Schirm, bis
+   * jemand hart neu lud.
+   *
+   * Deshalb zusätzlich derselbe 20-Sekunden-Takt, den das Guardian-Fenster
+   * seit jeher hat (`GuardianAnsicht.NACHSEHEN_MS`): nachsehen, nicht
+   * streamen. Er ruht, solange das Fenster verdeckt ist — eine App im Tray
+   * soll nicht alle 20 Sekunden das Panel wecken; beim Sichtbarwerden wird
+   * einmal sofort nachgeladen.
    *
    * Nicht während eines Stroms: dann ist SSE die Wahrheit, und ein Nachladen
    * mittendrin ersetzte den halb gezeichneten Zug durch seinen alten Stand.
+   * Das gilt auch für eine Antwort, die **unterwegs** ist, wenn der Strom
+   * beginnt: `veraltet` entwertet sie beim Effekt-Wechsel, sonst überschriebe
+   * sie die optimistischen Blasen, und die folgenden Deltas liefen ins Leere
+   * (`useAiLauf.aendere` findet die ID dann nicht mehr und schweigt).
    */
   useEffect(() => {
     if (streaming) return
+    let veraltet = false
     const nachladen = () => {
       void Promise.all([aiApi.getConversation(), aiApi.listActions()])
         .then(([conversation, actions]) => {
-          if (mountedRef.current) setEntries(mergeEntries(conversation.messages, actions))
+          if (veraltet || !mountedRef.current) return
+          setEntries(mergeEntries(conversation.messages, actions))
         })
         .catch(() => undefined)
     }
+    const takt = window.setInterval(() => {
+      if (document.visibilityState !== 'hidden') nachladen()
+    }, NACHSEHEN_MS)
+    const sichtbar = () => {
+      if (document.visibilityState === 'visible') nachladen()
+    }
     window.addEventListener(AI_ZUSTELLUNG_EVENT, nachladen)
-    return () => window.removeEventListener(AI_ZUSTELLUNG_EVENT, nachladen)
+    document.addEventListener('visibilitychange', sichtbar)
+    return () => {
+      veraltet = true
+      window.clearInterval(takt)
+      window.removeEventListener(AI_ZUSTELLUNG_EVENT, nachladen)
+      document.removeEventListener('visibilitychange', sichtbar)
+    }
   }, [setEntries, streaming])
 
   /**

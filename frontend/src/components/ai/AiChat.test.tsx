@@ -15,6 +15,7 @@ import {
 } from '@/api/ai'
 import * as client from '@/api/client'
 import i18n from '@/i18n'
+import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { useAuthStore } from '@/stores/authStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { AiChat } from './AiChat'
@@ -985,6 +986,72 @@ describe('AiChat', () => {
     ))
 
     await waitFor(() => expect(screen.getAllByText('Logs gelesen')).toHaveLength(1))
+  })
+
+  it('holt eine fremde Nachricht binnen eines Taktes — ohne Ereignis, ohne Neuladen', async () => {
+    // **Der gemeldete Fehler.** Eine Nachricht aus einem zweiten Tab oder der
+    // Desktop-App stand in der Datenbank und nirgendwo auf dem Schirm, bis
+    // jemand hart neu lud: die Glocke pollt nur alle 60 Sekunden, und ein
+    // kurzer fremder Lauf begann und endete komplett zwischen zwei Blicken.
+    // Der Chat sieht deshalb jetzt selbst nach — im Guardian-Takt.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      render(<MemoryRouter><AiChat /></MemoryRouter>)
+      await screen.findByText('synthetic-note.txt')
+
+      // Jetzt legt der zweite Tab eine Antwort in die Unterhaltung.
+      vi.mocked(aiApi.getConversation).mockResolvedValue({
+        ...CONVERSATION,
+        messages: [eigeneNachricht, {
+          id: 'msg-fremd', role: 'assistant', content: 'Antwort aus dem zweiten Tab.',
+          reasoning: null, question: null, status: 'complete',
+          provider_id: 1, model: 'test-model', created_at: '2026-08-01T12:00:02Z',
+        }],
+      })
+
+      await vi.advanceTimersByTimeAsync(21_000)
+      await screen.findByText('Antwort aus dem zweiten Tab.')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ein überholtes Nachladen überschreibt den laufenden Strom nicht', async () => {
+    // Die zweite Hälfte desselben Fehlers: beginnt zwischen Fetch-Start und
+    // -Auflösung ein Strom, trüge die späte Antwort den alten Verlauf über
+    // die optimistischen Blasen — und die folgenden Deltas liefen ins Leere,
+    // weil `useAiLauf.aendere` die Nachrichten-ID nicht mehr findet. Die
+    // Nachricht „verschwand" dann bis zum harten Neuladen.
+    const { streamAiMessage } = await import('@/api/ai')
+    let melde: (event: { event: 'delta'; data: { content: string } }) => void = () => {}
+    vi.mocked(streamAiMessage).mockReset().mockImplementation((_payload, onEvent) => {
+      melde = onEvent as typeof melde
+      return new Promise(() => {})
+    })
+    let antworteSpaet: (stand: Awaited<ReturnType<typeof aiApi.getConversation>>) => void = () => {}
+    vi.mocked(aiApi.getConversation).mockReset()
+      .mockResolvedValueOnce({ ...CONVERSATION, messages: [eigeneNachricht] })
+      .mockImplementationOnce(() => new Promise((resolve) => { antworteSpaet = resolve }))
+      .mockResolvedValue({ ...CONVERSATION, messages: [eigeneNachricht] })
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
+    await screen.findByText('synthetic-note.txt')
+
+    // Ein Nachladen beginnt (Zustellung) — und bleibt unterwegs hängen …
+    act(() => { window.dispatchEvent(new CustomEvent(AI_ZUSTELLUNG_EVENT)) })
+    // … während der Benutzer sendet und der Strom zu zeichnen anfängt.
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Neue Frage' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+    act(() => melde({ event: 'delta', data: { content: 'Erste Zeile der Antwort.' } }))
+    await screen.findByText('Erste Zeile der Antwort.')
+
+    // Jetzt erst trifft die alte Fassung ein — ohne die Frage von eben.
+    await act(async () => {
+      antworteSpaet({ ...CONVERSATION, messages: [eigeneNachricht] })
+    })
+
+    // Beides bleibt stehen: die optimistische Frage und der halbe Zug.
+    expect(screen.getByText('Neue Frage')).toBeInTheDocument()
+    expect(screen.getByText('Erste Zeile der Antwort.')).toBeInTheDocument()
   })
 
 })

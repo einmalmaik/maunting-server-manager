@@ -162,6 +162,12 @@ export function AiRunNotice() {
         continue
       }
       const gewechselt = !vorher || vorher.id !== lauf.id || vorher.status !== lauf.status
+      // **Jeder** beobachtete Wechsel des Dauerchat-Laufs ist eine Zustellung:
+      // auch das erste Auftauchen (ein zweiter Tab oder die Desktop-App hat
+      // etwas geschickt) und das Parken auf eine Rueckfrage. Vorher feuerte
+      // nur das Verschwinden — ein fremder Lauf, den der Takt nie zu Gesicht
+      // bekam, blieb im offenen Chat unsichtbar bis zum harten Neuladen.
+      if (art === 'primary' && gewechselt) zustellungMelden()
       if (
         gewechselt
         && vorher?.id === lauf.id

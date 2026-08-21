@@ -355,6 +355,49 @@ describe('AiRunNotice', () => {
     }
   })
 
+  it('ein fremder Lauf stößt beim ersten Anblick das Nachladen an', async () => {
+    // Der Fall der Desktop-App und des zweiten Tabs: dort schickt jemand eine
+    // Nachricht, hier steht der Chat offen. Der Takt sieht den neuen Lauf —
+    // und schon dieses erste Auftauchen muss das Zustell-Ereignis feuern,
+    // nicht erst sein Verschwinden. Vorher feuerte nur Letzteres, und ein
+    // Lauf, der zwischen zwei Blicken begann UND endete, blieb unsichtbar.
+    antworten({ primary: [null, lauf('running')], guardian: [null] })
+    const zugestellt = vi.fn()
+    window.addEventListener(AI_ZUSTELLUNG_EVENT, zugestellt)
+    try {
+      zeichnen('/notes')
+
+      await waitFor(() => expect(fragen('primary')).toBe(1))
+      expect(zugestellt).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(61_000)
+      await waitFor(() => expect(zugestellt).toHaveBeenCalled())
+      // Eine Meldung gibt es dafür nicht — der Lauf arbeitet ja noch.
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    } finally {
+      window.removeEventListener(AI_ZUSTELLUNG_EVENT, zugestellt)
+    }
+  })
+
+  it('auch das Parken auf eine Rückfrage ist eine Zustellung', async () => {
+    // running → waiting_user heißt: im Verlauf steht jetzt eine Frage, die
+    // dort vorher nicht stand. Der offene Chat muss sie nachladen — die
+    // Meldung unten rechts allein hilft dem nicht, der schon im Chat steht
+    // (dort ist sie stumm).
+    antworten({ primary: [lauf('running'), lauf('waiting_user')], guardian: [null] })
+    const zugestellt = vi.fn()
+    window.addEventListener(AI_ZUSTELLUNG_EVENT, zugestellt)
+    try {
+      zeichnen('/notes')
+
+      await waitFor(() => expect(fragen('primary')).toBe(1))
+      const vorher = zugestellt.mock.calls.length
+      await vi.advanceTimersByTimeAsync(9_000)
+      await waitFor(() => expect(zugestellt.mock.calls.length).toBeGreaterThan(vorher))
+    } finally {
+      window.removeEventListener(AI_ZUSTELLUNG_EVENT, zugestellt)
+    }
+  })
+
   it('meldet jeden ruhenden Zustand, auch einen später hinzugekommenen', async () => {
     // Der Grund für die gemeinsame Liste in `api/ai.ts`: „ruht" ist eine
     // Aussage über den Lauf, keine über diese Komponente. Stünde hier wieder
