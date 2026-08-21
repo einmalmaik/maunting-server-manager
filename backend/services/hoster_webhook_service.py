@@ -23,6 +23,7 @@ import hashlib
 import hmac
 import json
 import logging
+from uuid import uuid4
 
 import httpx
 from sqlalchemy.orm import Session
@@ -112,6 +113,41 @@ def enqueue_service_event(
         attempt=0,
         next_attempt_at=_now(),
         correlation_id=service.correlation_id,
+    )
+    db.add(delivery)
+    db.commit()
+    return delivery
+
+
+def enqueue_custom_event(
+    db: Session,
+    *,
+    integration: HosterIntegration,
+    event_type: str,
+    payload: dict,
+    correlation_id: str | None = None,
+) -> HosterWebhookDelivery | None:
+    """Stellt ein beliebiges Event (z. B. Simulation) zur Webhook-Zustellung ein."""
+    if not integration.webhook_url:
+        return None
+    body = json.dumps(
+        {"event": event_type, **payload},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    if len(body.encode("utf-8")) > MAX_PAYLOAD_BYTES:
+        logger.warning("Hoster-Webhook-Payload zu gross (integration_id=%s)", integration.id)
+        return None
+    delivery = HosterWebhookDelivery(
+        integration_id=integration.id,
+        service_id=None,
+        event_type=event_type[:64],
+        payload=body,
+        payload_hash=hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        status="pending",
+        attempt=0,
+        next_attempt_at=_now(),
+        correlation_id=correlation_id or str(uuid4()),
     )
     db.add(delivery)
     db.commit()

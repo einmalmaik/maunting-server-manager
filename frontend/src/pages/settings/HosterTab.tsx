@@ -9,7 +9,26 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { KeyRound, Pencil, Plug, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
+import {
+  Check,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  FlaskConical,
+  KeyRound,
+  Pause,
+  Pencil,
+  Play,
+  Plug,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Send,
+  Sparkles,
+  Trash2,
+  XCircle,
+} from 'lucide-react'
 
 import {
   hosterApi,
@@ -18,6 +37,7 @@ import {
   type HosterProduct,
   type HosterProductWrite,
   type HosterService,
+  type HosterSimulationResponse,
 } from '@/api/hoster'
 import { credentialsApi } from '@/api/credentials'
 import { rbacApi } from '@/api/rbac'
@@ -187,14 +207,46 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
               onChange={(event) => setSelectedId(Number(event.target.value))}
             >
               {integrations.map((row) => (
-                <option key={row.id} value={row.id}>{row.name} ({row.slug})</option>
+                <option key={row.id} value={row.id}>
+                  {row.name} ({row.slug}) {row.is_sandbox ? `[${t('hoster.sandboxBadge')}]` : `[${t('hoster.liveBadge')}]`}
+                </option>
               ))}
             </select>
           </label>
 
           {selected && (
             <>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    selected.is_sandbox
+                      ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                      : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                  }`}
+                >
+                  {selected.is_sandbox ? (
+                    <>
+                      <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
+                      {t('hoster.sandboxBadge')}
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      {t('hoster.liveBadge')}
+                    </>
+                  )}
+                </span>
+                <span className="text-xs text-on-surface-variant">
+                  {selected.is_sandbox ? t('hoster.isSandboxHint') : t('hoster.enabled')}
+                </span>
+              </div>
+
               <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                <Fact
+                  label={t('hoster.environment')}
+                  value={selected.is_sandbox ? t('hoster.sandboxBadge') : t('hoster.liveBadge')}
+                  hint={selected.is_sandbox ? 'Testumgebung & Simulator aktiv' : 'Produktivbetrieb'}
+                />
                 <Fact
                   label={t('hoster.apiKey')}
                   value={selected.api_key_hint ?? '—'}
@@ -244,6 +296,9 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
       <PanelFallbackSection canWrite={canWrite} />
 
       {selected && <ProductSection integrationId={selected.id} canWrite={canWrite} />}
+      {selected && selected.is_sandbox && (
+        <SimulatorSection integration={selected} canWrite={canWrite} onRefresh={load} />
+      )}
       {selected && <ServiceSection integrationId={selected.id} />}
       {selected && <DeliverySection integrationId={selected.id} canWrite={canWrite} />}
     </section>
@@ -275,6 +330,7 @@ function IntegrationForm({
   const [serviceUserId, setServiceUserId] = useState('')
   const [webhookUrl, setWebhookUrl] = useState('')
   const [graceDays, setGraceDays] = useState('7')
+  const [isSandbox, setIsSandbox] = useState(false)
   const [users, setUsers] = useState<User[]>([])
   const [loadingUsers, setLoadingUsers] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -317,6 +373,7 @@ function IntegrationForm({
             name: name.trim(),
             slug: slug.trim(),
             enabled: true,
+            is_sandbox: isSandbox,
             service_user_id: Number(serviceUserId),
             webhook_url: webhookUrl.trim() || null,
             terminate_grace_days: Number(graceDays) || 0,
@@ -370,6 +427,13 @@ function IntegrationForm({
           <NumberStepper value={graceDays} onValueChange={setGraceDays} min={0} max={365} step={1} />
           <p className="text-xs text-on-surface-variant">{t('hoster.graceDaysHint')}</p>
         </label>
+        <div className="flex items-center justify-between rounded-xl border border-outline-variant/40 bg-surface-container-low/40 p-4 md:col-span-2">
+          <div className="space-y-0.5">
+            <span className="block text-sm font-medium text-on-surface">{t('hoster.isSandbox')}</span>
+            <p className="text-xs text-on-surface-variant">{t('hoster.isSandboxHint')}</p>
+          </div>
+          <Switch checked={isSandbox} onCheckedChange={setIsSandbox} />
+        </div>
       </fieldset>
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="ghost" disabled={saving} onClick={onCancel}>{t('common.cancel')}</Button>
@@ -410,6 +474,7 @@ function IntegrationEditForm({
   const [webhookUrl, setWebhookUrl] = useState(integration.webhook_url ?? '')
   const [graceDays, setGraceDays] = useState(String(integration.terminate_grace_days))
   const [enabled, setEnabled] = useState(integration.enabled)
+  const [isSandbox, setIsSandbox] = useState(integration.is_sandbox ?? false)
   const [saving, setSaving] = useState(false)
 
   return (
@@ -424,6 +489,7 @@ function IntegrationEditForm({
             webhook_url: webhookUrl.trim() || null,
             terminate_grace_days: Number(graceDays) || 0,
             enabled,
+            is_sandbox: isSandbox,
           })
           .then(async () => {
             toast.success(t('hoster.updated'))
@@ -455,6 +521,13 @@ function IntegrationEditForm({
             haengt, gehoert trotzdem sichtbar erklaert. */}
         <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
           <p className="text-xs text-on-surface-variant">{t('hoster.serviceUserHint')}</p>
+        </div>
+        <div className="flex items-center justify-between rounded-xl border border-outline-variant/40 bg-surface-container-low/40 p-4 md:col-span-2">
+          <div className="space-y-0.5">
+            <span className="block text-sm font-medium text-on-surface">{t('hoster.isSandbox')}</span>
+            <p className="text-xs text-on-surface-variant">{t('hoster.isSandboxHint')}</p>
+          </div>
+          <Switch checked={isSandbox} onCheckedChange={setIsSandbox} />
         </div>
         <label className="flex min-h-10 items-center justify-between gap-4 text-sm text-on-surface md:col-span-2">
           <span>{t('hoster.enabled')}</span>
@@ -827,6 +900,308 @@ function DeliverySection({ integrationId, canWrite }: { integrationId: number; c
           </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+function SimulatorSection({
+  integration,
+  canWrite,
+  onRefresh,
+}: {
+  integration: HosterIntegration
+  canWrite: boolean
+  onRefresh: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const [products, setProducts] = useState<HosterProduct[]>([])
+  const [services, setServices] = useState<HosterService[]>([])
+  const [selectedProductKey, setSelectedProductKey] = useState<string>('')
+  const [selectedServiceId, setSelectedServiceId] = useState<string>('')
+  const [busyAction, setBusyAction] = useState<string | null>(null)
+  const [simResult, setSimResult] = useState<HosterSimulationResponse | null>(null)
+  const [copiedPrompt, setCopiedPrompt] = useState(false)
+  const [showAiModal, setShowAiModal] = useState(false)
+
+  const reloadData = useCallback(async () => {
+    try {
+      const [pList, sList] = await Promise.all([
+        hosterApi.listProducts(integration.id),
+        hosterApi.listServices(integration.id),
+      ])
+      setProducts(pList)
+      setServices(sList)
+      if (pList.length > 0 && !selectedProductKey) {
+        setSelectedProductKey(pList[0].external_product_key)
+      }
+      if (sList.length > 0 && !selectedServiceId) {
+        setSelectedServiceId(sList[0].external_service_id)
+      }
+    } catch {
+      // Ignored in simulator
+    }
+  }, [integration.id, selectedProductKey, selectedServiceId])
+
+  useEffect(() => {
+    void reloadData()
+  }, [reloadData])
+
+  const runSimulation = async (
+    action: 'order' | 'suspend' | 'reactivate' | 'terminate' | 'test_webhook'
+  ) => {
+    if (!canWrite || busyAction) return
+    setBusyAction(action)
+    try {
+      const res = await hosterApi.simulate(integration.id, {
+        action,
+        product_key: selectedProductKey || undefined,
+        external_service_id: selectedServiceId || undefined,
+      })
+      setSimResult(res)
+      toast.success(res.message)
+      await reloadData()
+      await onRefresh()
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.save'))
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const cleanSandbox = async () => {
+    if (!canWrite || busyAction) return
+    const accepted = await confirm({
+      title: t('hoster.simulator.cleanSandbox'),
+      message: t('hoster.simulator.cleanSandboxConfirm'),
+      confirmText: t('common.delete'),
+      danger: true,
+    })
+    if (!accepted) return
+    setBusyAction('clean')
+    try {
+      const res = await hosterApi.cleanSandboxData(integration.id)
+      setSimResult(null)
+      toast.success(
+        t('hoster.simulator.cleanSuccess', {
+          services: res.deleted_services_count,
+          servers: res.deleted_handoffs_count,
+        })
+      )
+      await reloadData()
+      await onRefresh()
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('hoster.errors.delete'))
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const panelOrigin = window.location.origin
+  const exampleProductKey = products[0]?.external_product_key || 'mc-8gb'
+
+  const aiStripePrompt = `Hier sind die technischen Eckdaten meines MSM (Maunting Server Manager) Backends für meine Shop-Anbindung:
+- Panel Host API: ${panelOrigin}/api/hoster/v1
+- Integration Slug: "${integration.slug}"
+- API-Key Header: X-MSM-Hoster-Key (im MSM-Panel generiert)
+- Webhook Secret Header: X-MSM-Signature (HMAC-SHA256 mit X-MSM-Timestamp)
+- Beispiel-Produktkennung: "${exampleProductKey}"
+
+Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe Webhook Handler (in Node.js mit Express oder Python mit FastAPI), der:
+1. Das Stripe Event 'checkout.session.completed' abfängt und via PUT ${panelOrigin}/api/hoster/v1/services/{subscription_or_session_id} mit dem Header "X-MSM-Hoster-Key: <MEIN_KEY>" und Body {"desired_state": "active", "external_subject": customer_id, "product_key": "${exampleProductKey}", "email": customer_email} den Gameserver im Panel anlegt.
+2. Einen Einmal-Login-Link via POST ${panelOrigin}/api/hoster/v1/handoffs mit {"external_service_id": "{subscription_or_session_id}"} erzeugt und dem Kunden anzeigt.
+3. Bei 'customer.subscription.deleted' den Status via PUT ${panelOrigin}/api/hoster/v1/services/{subscription_id} auf {"desired_state": "terminated"} setzt.
+4. Bei 'invoice.payment_failed' den Status auf {"desired_state": "suspended"} setzt.`
+
+  const copyAiPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(aiStripePrompt)
+      setCopiedPrompt(true)
+      toast.success(t('hoster.simulator.copiedAiPrompt'))
+      setTimeout(() => setCopiedPrompt(false), 3000)
+    } catch {
+      toast.error('Zwischenablage nicht verfügbar')
+    }
+  }
+
+  return (
+    <div className="msm-card space-y-5 p-6 border-amber-500/25 bg-surface-container-low/20">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-2.5">
+          <div className="rounded-lg bg-amber-500/15 p-2 text-amber-400 border border-amber-500/30">
+            <FlaskConical className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div>
+            <h4 className="font-headline text-base font-semibold text-on-surface">
+              {t('hoster.simulator.title')}
+            </h4>
+            <p className="text-xs text-on-surface-variant">
+              {t('hoster.simulator.description')}
+            </p>
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          className="gap-2 text-xs"
+          onClick={() => setShowAiModal((v) => !v)}
+        >
+          <Sparkles className="h-4 w-4 text-amber-400" aria-hidden="true" />
+          {t('hoster.simulator.aiDocsTitle')}
+        </Button>
+      </div>
+
+      {showAiModal && (
+        <div className="rounded-xl border border-outline-variant/50 bg-surface-container p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-on-surface">
+              {t('hoster.simulator.aiDocsTitle')}
+            </span>
+            <Button
+              type="button"
+              variant="secondary"
+              className="gap-1.5 text-xs py-1 px-3"
+              onClick={() => void copyAiPrompt()}
+            >
+              {copiedPrompt ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                  Kopiert!
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  {t('hoster.simulator.copyAiPrompt')}
+                </>
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-on-surface-variant">
+            {t('hoster.simulator.aiDocsDesc')}
+          </p>
+          <pre className="rounded-lg bg-surface-container-lowest p-3 text-xs text-on-surface-variant font-mono whitespace-pre-wrap break-all select-all">
+            {aiStripePrompt}
+          </pre>
+        </div>
+      )}
+
+      {products.length === 0 && (
+        <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low/50 p-3 text-xs text-amber-300/90">
+          {t('hoster.simulator.noProductsHint')}
+        </div>
+      )}
+
+      {/* Mathematisch saubere Button-Leiste / Grid */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!canWrite || Boolean(busyAction) || products.length === 0}
+          onClick={() => void runSimulation('order')}
+          className="h-11 justify-center gap-2 text-xs font-medium border-emerald-500/20 hover:border-emerald-500/50 hover:bg-emerald-500/10"
+        >
+          <Play className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+          {busyAction === 'order' ? t('common.loading') : t('hoster.simulator.simulateOrder')}
+        </Button>
+
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!canWrite || Boolean(busyAction) || services.length === 0}
+          onClick={() => void runSimulation('suspend')}
+          className="h-11 justify-center gap-2 text-xs font-medium border-amber-500/20 hover:border-amber-500/50 hover:bg-amber-500/10"
+        >
+          <Pause className="h-4 w-4 text-amber-400" aria-hidden="true" />
+          {busyAction === 'suspend' ? t('common.loading') : t('hoster.simulator.simulateSuspend')}
+        </Button>
+
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!canWrite || Boolean(busyAction) || services.length === 0}
+          onClick={() => void runSimulation('reactivate')}
+          className="h-11 justify-center gap-2 text-xs font-medium border-cyan-500/20 hover:border-cyan-500/50 hover:bg-cyan-500/10"
+        >
+          <RotateCcw className="h-4 w-4 text-cyan-400" aria-hidden="true" />
+          {busyAction === 'reactivate' ? t('common.loading') : t('hoster.simulator.simulateReactivate')}
+        </Button>
+
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!canWrite || Boolean(busyAction) || services.length === 0}
+          onClick={() => void runSimulation('terminate')}
+          className="h-11 justify-center gap-2 text-xs font-medium border-rose-500/20 hover:border-rose-500/50 hover:bg-rose-500/10"
+        >
+          <XCircle className="h-4 w-4 text-rose-400" aria-hidden="true" />
+          {busyAction === 'terminate' ? t('common.loading') : t('hoster.simulator.simulateTerminate')}
+        </Button>
+
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={!canWrite || Boolean(busyAction) || !integration.webhook_url}
+          onClick={() => void runSimulation('test_webhook')}
+          className="h-11 justify-center gap-2 text-xs font-medium"
+        >
+          <Send className="h-4 w-4 text-primary" aria-hidden="true" />
+          {busyAction === 'test_webhook' ? t('common.loading') : t('hoster.simulator.simulateWebhook')}
+        </Button>
+
+        <Button
+          type="button"
+          variant="destructive"
+          disabled={!canWrite || Boolean(busyAction)}
+          onClick={() => void cleanSandbox()}
+          className="h-11 justify-center gap-2 text-xs font-medium"
+        >
+          <Trash2 className="h-4 w-4" aria-hidden="true" />
+          {busyAction === 'clean' ? t('common.loading') : t('hoster.simulator.cleanSandbox')}
+        </Button>
+      </div>
+
+      {simResult && (
+        <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/60 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-400 border border-emerald-500/30">
+                {simResult.action.toUpperCase()}
+              </span>
+              <span className="text-sm font-medium text-on-surface">{simResult.message}</span>
+            </div>
+            {simResult.handoff_url && (
+              <a
+                href={simResult.handoff_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="msm-btn-primary inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium"
+              >
+                <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                {t('hoster.simulator.loginAsCustomer')}
+              </a>
+            )}
+          </div>
+          {simResult.service && (
+            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 pt-1">
+              <div>
+                <span className="text-on-surface-variant">Service-ID: </span>
+                <span className="font-mono text-on-surface">{simResult.service.external_service_id}</span>
+              </div>
+              <div>
+                <span className="text-on-surface-variant">Status: </span>
+                <span className="text-on-surface font-semibold">{simResult.service.status}</span>
+              </div>
+              <div>
+                <span className="text-on-surface-variant">Desired State: </span>
+                <span className="text-on-surface">{simResult.service.desired_state}</span>
+              </div>
+              <div>
+                <span className="text-on-surface-variant">Server-ID: </span>
+                <span className="font-mono text-on-surface">{simResult.service.server_id ?? '—'}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

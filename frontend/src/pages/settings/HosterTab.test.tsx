@@ -22,6 +22,8 @@ vi.mock('@/api/hoster', () => ({
     listServices: vi.fn(),
     listDeliveries: vi.fn(),
     retryDelivery: vi.fn(),
+    simulate: vi.fn(),
+    cleanSandboxData: vi.fn(),
   },
 }))
 
@@ -39,6 +41,7 @@ const integration: HosterIntegration = {
   name: 'Testshop',
   slug: 'testshop',
   enabled: true,
+  is_sandbox: false,
   service_user_id: 9,
   webhook_url: 'https://shop.example/hooks/msm',
   terminate_grace_days: 7,
@@ -141,6 +144,7 @@ describe('HosterTab', () => {
         webhook_url: 'https://shop.example/hooks/neu',
         terminate_grace_days: 7,
         enabled: true,
+        is_sandbox: false,
       }),
     )
   })

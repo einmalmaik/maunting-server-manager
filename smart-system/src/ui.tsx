@@ -29,15 +29,17 @@ interface EingabeProps extends InputHTMLAttributes<HTMLInputElement> {
 export function Eingabe({ label, hinweis, id, className = "", ...rest }: EingabeProps) {
   const feldId = id ?? label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   return (
-    <label className="flex flex-col gap-1.5" htmlFor={feldId}>
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs font-medium text-muted-foreground" htmlFor={feldId}>
+        {label}
+      </label>
       <input
         id={feldId}
         className={`rounded-[var(--radius-control)] border border-input bg-secondary px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${className}`}
         {...rest}
       />
       {hinweis && <span className="text-xs text-muted-foreground/80">{hinweis}</span>}
-    </label>
+    </div>
   );
 }
 

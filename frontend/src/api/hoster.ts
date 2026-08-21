@@ -13,6 +13,7 @@ export interface HosterIntegration {
   name: string
   slug: string
   enabled: boolean
+  is_sandbox: boolean
   service_user_id: number
   webhook_url: string | null
   terminate_grace_days: number
@@ -27,6 +28,7 @@ export interface HosterIntegrationWrite {
   name: string
   slug: string
   enabled: boolean
+  is_sandbox?: boolean
   service_user_id: number
   webhook_url: string | null
   terminate_grace_days: number
@@ -80,6 +82,31 @@ export interface HosterDelivery {
   sent_at: string | null
 }
 
+export interface HosterSimulationRequest {
+  action: 'order' | 'suspend' | 'reactivate' | 'terminate' | 'test_webhook'
+  product_key?: string
+  external_service_id?: string
+  email?: string
+}
+
+export interface HosterSimulationResponse {
+  ok: boolean
+  action: string
+  message: string
+  service?: HosterService | null
+  handoff_url?: string | null
+  webhook_status?: string | null
+}
+
+export interface HosterSandboxCleanResponse {
+  ok: boolean
+  deleted_services_count: number
+  deleted_handoffs_count: number
+  deleted_deliveries_count: number
+  deleted_identities_count: number
+  message: string
+}
+
 export const hosterApi = {
   listIntegrations: () => api<HosterIntegration[]>('/hoster/integrations'),
 
@@ -124,4 +151,15 @@ export const hosterApi = {
 
   retryDelivery: (id: number, deliveryId: number) =>
     api(`/hoster/integrations/${id}/deliveries/${deliveryId}/retry`, { method: 'POST' }),
+
+  simulate: (id: number, payload: HosterSimulationRequest) =>
+    api<HosterSimulationResponse>(`/hoster/integrations/${id}/simulate`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  cleanSandboxData: (id: number) =>
+    api<HosterSandboxCleanResponse>(`/hoster/integrations/${id}/sandbox-data`, {
+      method: 'DELETE',
+    }),
 }

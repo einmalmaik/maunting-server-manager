@@ -58,6 +58,7 @@ class HosterIntegration(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     slug: Mapped[str] = mapped_column(String(64), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_sandbox: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Der Panel-Benutzer, in dessen Namen diese Integration handelt. Ein Shop
     # kann damit nie mehr als dieser Benutzer darf; es gibt keinen namenlosen
     # Provisionierungspfad an RBAC vorbei.

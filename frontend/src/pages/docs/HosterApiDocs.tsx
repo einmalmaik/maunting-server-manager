@@ -164,6 +164,8 @@ const ADMIN_ENDPOINTS = [
   ['GET', '/integrations/{integration_id}/services', 'panel.hoster.read', 'listServices'],
   ['GET', '/integrations/{integration_id}/deliveries', 'panel.hoster.read', 'listDeliveries'],
   ['POST', '/integrations/{integration_id}/deliveries/{delivery_id}/retry', 'panel.hoster.write', 'retryDelivery'],
+  ['POST', '/integrations/{integration_id}/simulate', 'panel.hoster.write', 'simulate'],
+  ['DELETE', '/integrations/{integration_id}/sandbox-data', 'panel.hoster.write', 'cleanSandbox'],
 ] as const
 
 const SECTIONS = [

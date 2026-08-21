@@ -513,6 +513,8 @@ Basis: `/api/hoster`
 | `GET` | `/integrations/{integration_id}/services` | `panel.hoster.read` | Verträge dieser Integration |
 | `GET` | `/integrations/{integration_id}/deliveries` | `panel.hoster.read` | Webhook-Zustellprotokoll (Statuscode, Versuch — nie Signatur oder Body) |
 | `POST` | `/integrations/{integration_id}/deliveries/{delivery_id}/retry` | `panel.hoster.write` | Fehlgeschlagene Zustellung erneut einplanen |
+| `POST` | `/integrations/{integration_id}/simulate` | `panel.hoster.write` | Shop-Ereignis (Kauf, Sperre, Reaktivierung, Kündigung, Webhook) für Sandbox simulieren |
+| `DELETE` | `/integrations/{integration_id}/sandbox-data` | `panel.hoster.write` | Alle Testdaten (Verträge, Server, Handoffs) einer Sandbox-Integration bereinigen |
 
 **Produktzuordnung** (`PUT .../products`):
 

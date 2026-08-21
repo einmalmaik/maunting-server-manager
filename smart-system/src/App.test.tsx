@@ -243,7 +243,9 @@ describe("Einrichtungs-Assistent", () => {
     await nutzer.click(screen.getByRole("button", { name: "Verbinden" }));
 
     // Der rohe Parserfehler ("Unexpected token '<'") darf nie sichtbar werden.
-    expect(await screen.findByText(/antwortet mit einer Webseite statt mit Daten/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/liefert die Oberfläche des Panels, nicht seine Daten/),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Unexpected token/)).not.toBeInTheDocument();
   });
 });

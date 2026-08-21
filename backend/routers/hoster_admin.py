@@ -28,8 +28,10 @@ from schemas.hoster import (
     HosterProductWrite,
     HosterSecretResponse,
     HosterServiceResponse,
+    HosterSimulationRequest,
+    HosterSimulationResponse,
 )
-from services import audit_service, hoster_integration_service
+from services import audit_service, hoster_integration_service, hoster_simulator_service
 from services.dis_client import DisSidecarError
 from services.hoster_integration_service import (
     HosterConfigurationError,
@@ -68,6 +70,7 @@ def _integration_response(row: HosterIntegration) -> HosterIntegrationResponse:
         name=row.name,
         slug=row.slug,
         enabled=row.enabled,
+        is_sandbox=row.is_sandbox,
         service_user_id=row.service_user_id,
         webhook_url=row.webhook_url,
         terminate_grace_days=row.terminate_grace_days,
@@ -154,6 +157,7 @@ def create_integration(
             name=payload.name,
             slug=payload.slug,
             enabled=payload.enabled,
+            is_sandbox=payload.is_sandbox,
             service_user_id=payload.service_user_id,
             webhook_url=payload.webhook_url,
             terminate_grace_days=payload.terminate_grace_days,
@@ -164,7 +168,11 @@ def create_integration(
             action="hoster.integration.created",
             target_type="hoster_integration",
             target_id=integration.id,
-            details={"slug": integration.slug, "service_user_id": integration.service_user_id},
+            details={
+                "slug": integration.slug,
+                "service_user_id": integration.service_user_id,
+                "is_sandbox": integration.is_sandbox,
+            },
         )
         db.commit()
     except HosterConfigurationError as exc:
@@ -191,7 +199,7 @@ def update_integration(
             integration.webhook_url = hoster_integration_service.validate_webhook_url(
                 values["webhook_url"]
             )
-        for field in ("name", "enabled", "terminate_grace_days"):
+        for field in ("name", "enabled", "is_sandbox", "terminate_grace_days"):
             if field in values and values[field] is not None:
                 setattr(integration, field, values[field])
         audit_service.record_privileged_action(
@@ -467,3 +475,61 @@ def retry_delivery(
         raise HTTPException(status_code=404, detail="Zustellung nicht gefunden")
     retry(db, delivery)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Simulator (Sandbox) ───────────────────────────────────────────────────
+
+
+@router.post(
+    "/integrations/{integration_id}/simulate",
+    response_model=HosterSimulationResponse,
+)
+def simulate_integration_event(
+    integration_id: int,
+    payload: HosterSimulationRequest,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("panel.hoster.write")),
+    _: None = Depends(verify_csrf),
+) -> HosterSimulationResponse:
+    """Fuehrt eine simulierte Aktion (Kauf, Sperre, Kuendigung, Webhook) fuer eine Sandbox-Integration aus."""
+    integration = _get_integration(db, integration_id)
+    if not integration.is_sandbox:
+        raise HTTPException(
+            status_code=400,
+            detail="Der Simulator kann nur fuer Sandbox-Integrationen verwendet werden.",
+        )
+    result = hoster_simulator_service.simulate_event(
+        db, integration=integration, req=payload
+    )
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor.id,
+        action="hoster.sandbox.simulated",
+        target_type="hoster_integration",
+        target_id=integration.id,
+        details={"action": payload.action, "slug": integration.slug},
+    )
+    db.commit()
+    return result
+
+
+@router.delete("/integrations/{integration_id}/sandbox-data")
+def clean_sandbox_data(
+    integration_id: int,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("panel.hoster.write")),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Entfernt alle Testvertraege, Webhook-Zustellungen und Sandbox-User dieser Integration."""
+    integration = _get_integration(db, integration_id)
+    count = hoster_simulator_service.clean_sandbox_data(db, integration=integration)
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor.id,
+        action="hoster.sandbox.cleaned",
+        target_type="hoster_integration",
+        target_id=integration.id,
+        details={"deleted_services_count": count, "slug": integration.slug},
+    )
+    return {"ok": True, "deleted_services_count": count}
+

@@ -149,14 +149,17 @@ function SchrittBackend({
       }}
     >
       <p className="text-sm text-muted-foreground">
-        Verbinde die App mit deinem eigenen MSM-Panel — dieselbe Adresse, die du im Browser
-        öffnest.
+        Gesucht ist die Adresse, unter der die <strong>Panel-API</strong> antwortet. Bei
+        einer Standardinstallation ist das dieselbe Adresse, die du im Browser öffnest.
+        Liegt die Oberfläche getrennt vom Backend, ist es die Adresse des Backends —
+        lokal meist <code>http://localhost:8000</code>.
       </p>
       <Eingabe
         label="Panel-Adresse"
         placeholder="https://panel.example.com"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
+        hinweis="Nicht sicher? Panel im Browser öffnen, F12 → Netzwerk, anmelden — der Host der Anfrage auf /api/auth/login ist die richtige Adresse."
         autoFocus
       />
       <Fehlertext text={fehler} />

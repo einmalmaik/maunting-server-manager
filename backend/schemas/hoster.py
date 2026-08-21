@@ -19,6 +19,7 @@ class HosterIntegrationWrite(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     slug: str = Field(..., min_length=1, max_length=64)
     enabled: bool = True
+    is_sandbox: bool = False
     service_user_id: int = Field(..., ge=1)
     webhook_url: str | None = Field(None, max_length=2048)
     terminate_grace_days: int = Field(7, ge=0, le=365)
@@ -27,6 +28,7 @@ class HosterIntegrationWrite(BaseModel):
 class HosterIntegrationUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=128)
     enabled: bool | None = None
+    is_sandbox: bool | None = None
     service_user_id: int | None = Field(None, ge=1)
     webhook_url: str | None = Field(None, max_length=2048)
     terminate_grace_days: int | None = Field(None, ge=0, le=365)
@@ -37,6 +39,7 @@ class HosterIntegrationResponse(BaseModel):
     name: str
     slug: str
     enabled: bool
+    is_sandbox: bool
     service_user_id: int
     webhook_url: str | None
     terminate_grace_days: int
@@ -132,3 +135,23 @@ class HosterHandoffResponse(BaseModel):
 
     url: str
     expires_at: datetime
+
+
+# ── Simulator ──────────────────────────────────────────────────────────────
+
+
+class HosterSimulationRequest(BaseModel):
+    action: str = Field(..., pattern=r"^(order|suspend|reactivate|terminate|test_webhook)$")
+    product_key: str | None = Field(None, max_length=128)
+    external_service_id: str | None = Field(None, max_length=128)
+    email: str | None = Field(None, max_length=255)
+
+
+class HosterSimulationResponse(BaseModel):
+    ok: bool
+    action: str
+    message: str
+    service: HosterServiceResponse | None = None
+    handoff_url: str | None = None
+    webhook_status: str | None = None
+

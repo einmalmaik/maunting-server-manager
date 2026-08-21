@@ -254,6 +254,12 @@ async def lifespan(app: FastAPI):
         from models.singra_webhook_event import SingraWebhookEvent  # noqa: F401
         SingraWebhookEvent.__table__.create(bind=engine, checkfirst=True)
 
+    if legacy_schema_bridge and 'hoster_integrations' in inspector.get_table_names():
+        hi_cols = [c['name'] for c in inspector.get_columns('hoster_integrations')]
+        if 'is_sandbox' not in hi_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE hoster_integrations ADD COLUMN is_sandbox BOOLEAN NOT NULL DEFAULT false"))
+
     # Migration: servers.auth_required Spalte hinzufuegen (interaktive Auth-Recovery)
     if legacy_schema_bridge and 'servers' in inspector.get_table_names():
         srv_cols = [c['name'] for c in inspector.get_columns('servers')]

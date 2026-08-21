@@ -33,9 +33,9 @@ export class ApiFehler extends Error {
  * („Unexpected token '<'") sagt das niemandem.
  */
 export const ANTWORT_IST_WEBSEITE =
-  "Diese Adresse antwortet mit einer Webseite statt mit Daten. " +
-  "Trage die Adresse ein, unter der im Browser dein MSM-Panel erscheint — " +
-  "und prüfe, ob dort /api/ erreichbar ist.";
+  "Diese Adresse liefert die Oberfläche des Panels, nicht seine Daten. " +
+  "Gesucht ist die Adresse, unter der die API antwortet — bei getrenntem " +
+  "Hosting die des Backends, lokal meist http://localhost:8000.";
 
 export function setzeBackendUrl(url: string): void {
   backendUrl = url.replace(/\/+$/, "");
