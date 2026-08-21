@@ -14,6 +14,11 @@
 use keyring::Entry;
 
 const DIENST: &str = "MauntingSmartSystem";
+/// Bis zur Umbenennung am 21.08.2026 hiess der Dienst so. Angefasst wird er
+/// nur noch beim Loeschen: ein Refresh-Token unter dem alten Namen ist ein
+/// Geheimnis, das sonst fuer immer im Anmeldeinformations-Manager liegt.
+/// Darf weg, sobald niemand mehr von einem aelteren Stand aktualisiert.
+const DIENST_FRUEHER: &str = "SingraSmartSystem";
 const KONTO: &str = "refresh_token";
 
 fn eintrag() -> Result<Entry, String> {
@@ -37,8 +42,20 @@ pub fn laden() -> Result<Option<String>, String> {
 
 /// Idempotent: ein fehlender Eintrag ist kein Fehler — Logout soll nie an
 /// „war schon weg“ scheitern.
+///
+/// Der Eintrag unter dem frueheren Dienstnamen wird mitgeloescht, sein
+/// Ergebnis aber nicht gemeldet: bei jeder frischen Installation ist er
+/// ohnehin nicht da, und ein Logout soll daran nicht scheitern.
 pub fn loeschen() -> Result<(), String> {
-    match eintrag()?.delete_credential() {
+    let ergebnis = eintrag_loeschen(DIENST);
+    let _ = eintrag_loeschen(DIENST_FRUEHER);
+    ergebnis
+}
+
+fn eintrag_loeschen(dienst: &str) -> Result<(), String> {
+    let eintrag =
+        Entry::new(dienst, KONTO).map_err(|e| format!("Tresor nicht erreichbar: {e}"))?;
+    match eintrag.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(format!("Token nicht löschbar: {e}")),
     }

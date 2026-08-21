@@ -14,7 +14,15 @@
 //! weil er ein Programm deinstalliert. Genannt wird er trotzdem, damit er
 //! nicht vergessen wird.
 
+use std::path::Path;
+
 use tauri::{AppHandle, Manager};
+
+/// Vor der Umbenennung am 21.08.2026 lief die App unter einer anderen
+/// Kennung. Tauri leitet das Datenverzeichnis daraus ab — der Ordner von
+/// damals enthaelt Stimmaufnahmen und wuerde sonst nie wieder gefunden.
+/// Darf weg, sobald niemand mehr von einem aelteren Stand aktualisiert.
+const DATENORDNER_FRUEHER: &str = "com.mauntingstudios.singra-smart-system";
 
 /// Was das Aufraeumen erledigt hat. Die Oberflaeche zeigt es an, bevor der
 /// Uninstaller startet — ein „alles weg" ohne Aufzaehlung waere eine
@@ -73,14 +81,18 @@ pub fn aufraeumen(app: &AppHandle) -> Aufraeumbericht {
     // Die Konfiguration zuletzt: bis hierhin wurde der Sandbox-Pfad daraus
     // gelesen, und ein Fehlschlag oben soll noch nachvollziehbar sein.
     let konfiguration_entfernt = match app.path().app_local_data_dir() {
-        Ok(verzeichnis) => match std::fs::remove_dir_all(&verzeichnis) {
-            Ok(()) => true,
-            Err(problem) if problem.kind() == std::io::ErrorKind::NotFound => true,
-            Err(problem) => {
-                fehler.push(format!("Konfiguration: {problem}"));
-                false
+        Ok(verzeichnis) => {
+            let mut geschafft = true;
+            // Der Ordner der frueheren Kennung liegt daneben, nicht darin.
+            let frueher = verzeichnis.parent().map(|e| e.join(DATENORDNER_FRUEHER));
+            for ordner in [Some(verzeichnis), frueher].into_iter().flatten() {
+                if let Err(problem) = ordner_weg(&ordner) {
+                    fehler.push(format!("Konfiguration ({}): {problem}", ordner.display()));
+                    geschafft = false;
+                }
             }
-        },
+            geschafft
+        }
         Err(problem) => {
             fehler.push(format!("Konfiguration: {problem}"));
             false
@@ -94,6 +106,16 @@ pub fn aufraeumen(app: &AppHandle) -> Aufraeumbericht {
         autostart_entfernt,
         sandbox_bleibt: sandbox,
         fehler,
+    }
+}
+
+/// Loescht einen Ordner samt Inhalt. „War nicht da" ist der Zielzustand und
+/// kein Fehler — sonst meldete jede frische Installation einen.
+fn ordner_weg(ordner: &Path) -> Result<(), String> {
+    match std::fs::remove_dir_all(ordner) {
+        Ok(()) => Ok(()),
+        Err(problem) if problem.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(problem) => Err(problem.to_string()),
     }
 }
 
@@ -163,5 +185,19 @@ mod tests {
         assert_eq!(json["fehler"][0], "Sprachdaten: Zugriff verweigert");
         // Der Ordner des Benutzers bleibt und wird benannt.
         assert_eq!(json["sandbox_bleibt"], "C:\\Users\\test\\Sandbox");
+    }
+
+    #[test]
+    fn ein_fehlender_ordner_ist_der_zielzustand() {
+        let weg = std::env::temp_dir().join(format!("mss-nie-da-{}", std::process::id()));
+        assert!(!weg.exists());
+        // Wer das Wake-Word nie eingerichtet hat, hat keinen solchen Ordner.
+        // Daraus einen Fehlschlag zu machen, hiesse jeden zu beunruhigen.
+        assert!(ordner_weg(&weg).is_ok());
+
+        std::fs::create_dir_all(weg.join("tief")).unwrap();
+        std::fs::write(weg.join("tief/aufnahme.wav"), b"x").unwrap();
+        assert!(ordner_weg(&weg).is_ok());
+        assert!(!weg.exists());
     }
 }
