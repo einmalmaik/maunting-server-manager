@@ -1,0 +1,30 @@
+[package]
+name = "singra-smart-system"
+version = "0.1.0"
+description = "Singra Smart System - Desktop Companion fuer das MSM-Panel"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "singra_smart_system_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# tray-icon: System-Tray mit Statusfarben. image-png: Status-Icons werden als
+# PNG-Bytes eingebettet und zur Laufzeit dekodiert (tray::set_status).
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# Globaler Hotkey (Alt+Space) — Plugin statt eigener Hook: stabil, 0 % CPU.
+tauri-plugin-global-shortcut = "2"
+# Windows-Autostart; das Argument "--autostart" markiert Boot-Starts, damit
+# spaeter Crash-Guard und sanfter Start unterscheiden koennen, wer gestartet hat.
+tauri-plugin-autostart = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# This feature is used for production builds or when a dev server is not
+# specified, DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]
