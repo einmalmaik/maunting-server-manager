@@ -748,3 +748,20 @@ def test_gehirn_darf_keine_serverzustaende_vermuten() -> None:
     assert "Du hast keine Server-Werkzeuge und kennst den aktuellen Live-Status der Server nicht" in gehirn
     assert "behaupte oder vermute nie von dir aus den Laufstatus eines Servers" in gehirn
 
+
+
+def test_keine_rolle_sagt_datum_oder_uhrzeit_an() -> None:
+    """FORMAT verbietet die ungefragte Datumsansage — in jeder Rolle.
+
+    Anlass (22.08.2026): das Modell las die Uhr aus dem Lageblock und sagte
+    sie dem Benutzer auf — im Sprachmodus als vorgelesenes Datum, in
+    Meldungen ueber fertige Worker als Zeitstempel-Prosa. Die Oberflaeche
+    zeigt Datum und Uhrzeit an jeder Nachricht; die Regel muss deshalb
+    Chat, Gehirn und Worker erreichen (der Sprachmodus liest den vollen
+    Chatprompt, siehe test_gesprochen_ist_ein_schalter_und_kein_zweiter_prompt).
+    """
+    for rolle in ("voll", "gehirn", "worker"):
+        prompt = ai_prompt.build(rolle=rolle) if rolle != "voll" else ai_prompt.build()
+        assert "Nenne Datum oder Uhrzeit nie von dir aus" in prompt, (
+            f"Rolle {rolle!r} kennt die Datumsregel nicht"
+        )

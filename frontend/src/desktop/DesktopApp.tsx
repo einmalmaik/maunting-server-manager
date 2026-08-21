@@ -212,17 +212,19 @@ function SchliessenDialog() {
       aria-modal="true"
       aria-label={t('mss.schliessen.titel')}
     >
-      <div className="msm-card w-full max-w-sm p-5">
+      <div className="msm-card w-full max-w-md p-5">
         <h2 className="text-sm font-medium text-on-surface">{t('mss.schliessen.titel')}</h2>
         <p className="mt-1 text-xs text-on-surface-variant">{t('mss.schliessen.frage')}</p>
-        <div className="mt-4 flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" onClick={() => setOffen(false)}>
+        {/* Eine Zeile, drei Plätze: Abbrechen links, Beenden in der Mitte,
+            Hintergrund rechts — kein Umbruch, der die Knöpfe stapelt. */}
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setOffen(false)}>
             {t('mss.schliessen.abbrechen')}
           </Button>
-          <Button variant="destructive" onClick={() => void appBeenden()}>
+          <Button variant="destructive" size="sm" onClick={() => void appBeenden()}>
             {t('mss.schliessen.beenden')}
           </Button>
-          <Button autoFocus onClick={hintergrund}>
+          <Button autoFocus size="sm" onClick={hintergrund}>
             {t('mss.schliessen.hintergrund')}
           </Button>
         </div>

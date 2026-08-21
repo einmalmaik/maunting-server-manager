@@ -400,6 +400,23 @@ fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
     let mut rp_konfig = RustpotterConfig::default();
     rp_konfig.fmt.sample_rate = rate as usize;
     rp_konfig.fmt.channels = 1;
+    // Der Gain-Normalizer ist der Hebel für schlechte und leise Mikrofone:
+    // er zieht den Live-Pegel auf die RMS der eigenen Kalibrierungsaufnahmen
+    // (gain_ref None = Referenz aus dem Modell). Ab Werk ist er **aus**, und
+    // max_gain 1.0 hieße „nur dämpfen, nie verstärken" — ein leises Mikrofon
+    // käme nie auf den Pegel, mit dem trainiert wurde. 4.0 verstärkt kräftig,
+    // ohne aus Raumrauschen Sprache zu machen.
+    rp_konfig.filters.gain_normalizer.enabled = true;
+    rp_konfig.filters.gain_normalizer.max_gain = 4.0;
+    // Etwas unter der Werksschwelle (0,5): zehn eigene Aufnahmen streuen, und
+    // ein verpasstes Wort ist hier teurer als ein seltener Fehlgriff — der
+    // öffnet nur das Overlay, das ESC gleich wieder schließt.
+    rp_konfig.detector.threshold = 0.45;
+    // Das Durchschnitts-Vor-Tor (Werk 0,2) ist eine reine CPU-Sparmaßnahme:
+    // es bricht Erkennungen ab, bevor die eigentlichen Vergleiche laufen.
+    // Bei einem einzigen Stream ist die Ersparnis egal, die abgebrochenen
+    // Treffer sind es nicht. 0 heißt aus.
+    rp_konfig.detector.avg_threshold = 0.0;
     let mut erkenner = Rustpotter::new(&rp_konfig)?;
     erkenner.add_wakeword_from_file(
         "wakeword",
