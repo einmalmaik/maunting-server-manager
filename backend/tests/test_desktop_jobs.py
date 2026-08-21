@@ -285,6 +285,34 @@ class TestFristen:
         erneut = desktop_job_service.naechster(db, user_id=regular_user.id)
         assert erneut is not None and erneut.id == job.id
 
+    def test_der_takt_schliesst_verfallene_auch_ohne_laufende_app(
+        self, db: Session, regular_user: User
+    ):
+        """Der Fall, in dem der Rechner **aus** ist — und genau der zaehlt.
+
+        `_aufraeumen` laeuft nur, wenn jemand einen Auftrag abholt. Waere das
+        der einzige Weg, bliebe ein Lauf ewig stehen, sobald der Rechner nicht
+        mehr fragt. Der Takt (`scheduler_service`) ruft deshalb
+        `verfallene_wecken`.
+        """
+        run = _lauf(db, regular_user)
+        job = desktop_job_service.anlegen(
+            db,
+            user_id=regular_user.id,
+            run_id=run.id,
+            tool_call_id="call-1",
+            tool_name="desktop_dateien",
+            arguments={},
+        )
+        job.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+
+        assert desktop_job_service.verfallene_wecken(db) == 1
+        db.expire_all()
+        assert db.get(DesktopJob, job.id).status == "expired"
+        # Zweimal aufrufen weckt nicht zweimal — der Auftrag ist geschlossen.
+        assert desktop_job_service.verfallene_wecken(db) == 0
+
     def test_offene_zaehlt_nur_was_noch_unterwegs_ist(self, db: Session, regular_user: User):
         run = _lauf(db, regular_user)
         erster = desktop_job_service.anlegen(

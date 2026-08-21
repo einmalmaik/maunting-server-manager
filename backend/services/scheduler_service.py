@@ -1052,6 +1052,19 @@ async def _ai_tasks_task() -> None:
             db.rollback()
             logger.warning("Error in AI wake task: %s", exc)
         try:
+            from services import desktop_job_service
+
+            # Auftraege an einen Rechner, der nicht geantwortet hat. Ohne
+            # diesen Takt bemerkte den Verfall nur, wer die App **laufen**
+            # hat — ausgerechnet der Fall, in dem der Rechner aus ist, bliebe
+            # unbemerkt, und der Lauf haenge statt zu enden.
+            verfallen = desktop_job_service.verfallene_wecken(db)
+            if verfallen:
+                logger.info("Desktop-Auftraege: %s verfallen", verfallen)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in desktop job expiry: %s", exc)
+        try:
             from services import ai_meldestelle
 
             geliefert = await ai_meldestelle.faellige_zustellungen(db)
