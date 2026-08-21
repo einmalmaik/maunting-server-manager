@@ -14,7 +14,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
-from config import get_cors_origins, settings
+from config import TAURI_ORIGINS, get_cors_origins, settings
 from database import engine, Base
 from routers import (
     auth_router,
@@ -755,6 +755,10 @@ def _csp_connect_src() -> str:
     """connect-src: 'self' plus panel/CORS origins (split FE + API / Vercel)."""
     parts = ["'self'"]
     for origin in _cors_origins:
+        # Desktop-Origins (Tauri) sind CORS-erlaubt, aber der Browser des
+        # Panels verbindet sich nie dorthin — in der CSP waeren sie nur Rauschen.
+        if origin in TAURI_ORIGINS:
+            continue
         if origin and origin not in parts:
             parts.append(origin)
         # ws/wss counterpart for console streams when SPA is same CSP host

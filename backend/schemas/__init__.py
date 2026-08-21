@@ -1,4 +1,4 @@
-from .auth import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, ResendVerificationRequest, DeleteAccountRequest
+from .auth import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, ResendVerificationRequest, DeleteAccountRequest, NativeRefreshRequest, LogoutRequest
 from .user import UserCreate, UserResponse, UserUpdate, OwnerSetupRequest
 from .server import ServerCreate, ServerCreateResponse, ServerResponse, ServerUpdate, ServerStatusResponse
 from .postgres import (
@@ -27,7 +27,7 @@ from .mod import ModResponse
 from .node import NodeCreate, NodeOut, NodeUpdate
 
 __all__ = [
-    "LoginRequest", "LoginVerifyRequest", "TokenResponse", "RegistrationResponse", "PasswordResetRequest", "PasswordResetConfirm", "ChangePasswordRequest", "ChangeEmailRequest", "ResendVerificationRequest", "DeleteAccountRequest",
+    "LoginRequest", "LoginVerifyRequest", "TokenResponse", "RegistrationResponse", "PasswordResetRequest", "PasswordResetConfirm", "ChangePasswordRequest", "ChangeEmailRequest", "ResendVerificationRequest", "DeleteAccountRequest", "NativeRefreshRequest", "LogoutRequest",
     "UserCreate", "UserResponse", "UserUpdate", "OwnerSetupRequest",
     "ServerCreate", "ServerResponse", "ServerUpdate", "ServerStatusResponse",
     "PermissionCatalogResponse", "PermissionDefResponse", "MePermissionsResponse",

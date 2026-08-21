@@ -47,6 +47,13 @@ class User(Base):
     # Einzige kanonische Zeitzonen-Quelle für Lageblock, Chat-Zeitstempel und Aufgaben.
     time_zone: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # Rufname des Assistenten für dieses Konto (Panel und Smart System).
+    # NULL heisst: Standardname 'Singra' (services/ai_lage.py). Der Wert fliesst
+    # in den Lageblock als späte system-Nachricht, nie in den statischen
+    # Systemprompt — ein Name im Prompt wäre je Benutzer verschieden und
+    # entwertete das Prompt-Caching des Anbieters an erster Stelle.
+    agent_name: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     password_reset_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

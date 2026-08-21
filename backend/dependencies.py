@@ -38,8 +38,28 @@ def _user_from_token(token: str | None, db: Session) -> User:
     return user
 
 
+def _bearer_token(request: Request) -> str | None:
+    """Extrahiert das Bearer-Token aus dem Authorization-Header, falls vorhanden.
+
+    Der Header kommt von nativen Clients (Smart-System-Desktop-App): Browser
+    setzen ihn nie von selbst, und eine fremde Seite kann ihn cross-site nicht
+    mitschicken, ohne am CORS-Preflight zu scheitern.
+    """
+    auth = request.headers.get("authorization", "")
+    if auth[:7].lower() == "bearer ":
+        token = auth[7:].strip()
+        return token or None
+    return None
+
+
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
-    token = request.cookies.get("__Secure-access_token")
+    # Bearer vor Cookie: Schickt ein nativer Client ein Token mit, ist das
+    # seine Identität — auch wenn im selben WebView noch ein Cookie liegt. Nur
+    # so gehören die CSRF-Befreiung in `verify_csrf` und die Authentifizierung
+    # immer demselben Token. Für das Panel ändert sich nichts: Browser senden
+    # den Header nie von selbst. Beide Wege laufen durch `_user_from_token`,
+    # damit jti-Pflicht und Blacklist (Logout-Widerruf) auch für Bearer gelten.
+    token = _bearer_token(request) or request.cookies.get("__Secure-access_token")
     return _user_from_token(token, db)
 
 
@@ -93,7 +113,22 @@ def verify_csrf(request: Request) -> None:
 
     Loggt ohne Token-Werte, welche Komponente fehlt — sonst sieht im Log nur
     "403" und man weiss nicht, ob der Header oder das Cookie fehlt.
+
+    Native Clients (Desktop-App) sind befreit: CSRF lebt davon, dass Browser
+    Cookies ungefragt mitschicken — einen Authorization-Header kann eine
+    fremde Seite dagegen nicht setzen, ohne am CORS-Preflight zu scheitern.
+    Befreit wird aber nur, wer ein **gültig signiertes** Access-Token vorlegt
+    (Signatur, Typ, jti); ein bloß vorhandener Header befreit nicht, sonst
+    liefe ein Cookie-Request mit kaputtem Header ungeprüft durch. Ablauf und
+    Blacklist prüft `get_current_user` ohnehin — und weil der Bearer dort vor
+    dem Cookie gelesen wird, gehört die Befreiung immer demselben Token wie
+    die Authentifizierung.
     """
+    bearer = _bearer_token(request)
+    if bearer:
+        payload = AuthService.decode_token(bearer)
+        if payload and payload.get("type") == "access" and payload.get("jti"):
+            return
     csrf_header = request.headers.get("x-csrf-token")
     cookie_values = _all_cookie_values(request, "__Secure-csrf_token")
     path = request.url.path

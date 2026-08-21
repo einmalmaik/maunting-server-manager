@@ -214,6 +214,19 @@ if settings.panel_url == "http://localhost" and not settings.debug:
     )
 
 
+# Feste Origins der Desktop-App (Smart System, Tauri v2): Windows-WebViews
+# melden sich mit http(s)://tauri.localhost, macOS/Linux mit tauri://localhost.
+# Bedingungslos erlaubt, weil nur Tauri-WebViews diese Origins erzeugen — ein
+# Browser kann sie nicht vortaeuschen, und wer den Origin-Header ausserhalb
+# eines Browsers faelscht, unterliegt CORS ohnehin nicht. In die CSP des
+# Panels gehoeren sie nicht (main.py filtert sie aus connect-src heraus).
+TAURI_ORIGINS = (
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+)
+
+
 def get_cors_origins() -> list[str]:
     """Explizite CORS allowlist: panel_url + MSM_CORS_ALLOWED_ORIGINS + Dev-Defaults.
 
@@ -230,6 +243,8 @@ def get_cors_origins() -> list[str]:
             o = part.strip().rstrip("/")
             if o:
                 origins.append(o)
+
+    origins.extend(TAURI_ORIGINS)
 
     if settings.debug:
         for dev in (

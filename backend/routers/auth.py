@@ -11,12 +11,12 @@ from config import settings
 # zugesicherte `jti` erneut vergessen kann.
 from cookies import _clear_auth_cookies
 from database import get_db
-from dependencies import get_current_user, get_current_owner, verify_csrf
+from dependencies import get_current_user, get_current_owner, verify_csrf, _bearer_token
 from models import User, EmailVerification
 from services.dis_client import DisClient
-from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest
+from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
-from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest
+from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, AgentNameUpdateRequest
 from services import AuthService, EmailService
 from services.email_verification_service import EmailVerificationService
 from services.jwt_blacklist_service import blacklist_jwt
@@ -24,7 +24,7 @@ from services.backup_code_service import BackupCodeService
 from services.permission_catalog import SYSTEM_ROLE_USER
 from services.role_service import get_role_by_name, set_user_roles
 from services.panel_settings_service import PanelSettingsService
-from services.session_service import issue_session
+from services.session_service import issue_session, SessionTokens
 from services.totp_qr import qr_datenuri
 
 from services.captcha_service import CaptchaService
@@ -56,9 +56,28 @@ def _log_smtp_missing(email: str) -> None:
     logger.warning("SMTP nicht konfiguriert. Verifikations-Code fuer %s nicht versendet.", email)
 
 
-def _set_login_session(response: Response, db: Session, user: User) -> None:
+def _set_login_session(response: Response, db: Session, user: User) -> SessionTokens:
     """Duennes Alias auf die gemeinsame Sitzungsausstellung (siehe session_service)."""
-    issue_session(response, db, user)
+    return issue_session(response, db, user)
+
+
+def _native_token_body(tokens: SessionTokens) -> dict:
+    """Antwort-Body für native Clients: die Tokens selbst statt Cookies.
+
+    Der Browser-Flow bleibt cookie-only — dieser Body geht nur hinaus, wenn der
+    Request ausdrücklich `native_client=True` trug (oder das Refresh-Token im
+    Body kam). Kein csrf_token: native Clients authentifizieren per Bearer und
+    sind vom Cookie-CSRF befreit (dependencies.verify_csrf); ein CSRF-Token
+    ohne Cookie wäre nur ein Geheimnis mehr, das der Client aufbewahren müsste.
+    """
+    return {
+        "access_token": tokens.access_token,
+        "token_type": "bearer",
+        "requires_2fa": False,
+        "requires_verification": False,
+        "refresh_token": tokens.refresh_token,
+        "expires_in": settings.access_token_expire_minutes * 60,
+    }
 
 
 def _save_initial_email_config(req: OwnerSetupRequest) -> None:
@@ -250,12 +269,14 @@ async def register_verify(
 
     user.email_verified = True
     db.commit()
-    _set_login_session(response, db, user)
+    tokens = _set_login_session(response, db, user)
 
     # Email-Benachrichtigung für erfolgreiche Registrierung (normaler Flow)
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_account_registered_notification(user.email, user.username)
 
+    if req.native_client:
+        return _native_token_body(tokens)
     return {"access_token": "", "token_type": "bearer", "requires_2fa": False, "requires_verification": False}
 
 
@@ -294,7 +315,9 @@ def login_verify(
             if not backup_valid:
                 raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
 
-    _set_login_session(response, db, user)
+    tokens = _set_login_session(response, db, user)
+    if req.native_client:
+        return _native_token_body(tokens)
     return {"access_token": "", "token_type": "bearer", "requires_2fa": False, "requires_verification": False}
 
 
@@ -335,7 +358,7 @@ async def login(
             if not backup_valid:
                 raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code oder Backup-Code")
 
-    _set_login_session(response, db, user)
+    tokens = _set_login_session(response, db, user)
 
     # Sicherheitsbenachrichtigung bei Login
     if EmailService.is_configured() and user.email_notifications:
@@ -358,6 +381,8 @@ async def login(
                 type(exc).__name__,
             )
 
+    if req.native_client:
+        return _native_token_body(tokens)
     return {"access_token": "", "token_type": "bearer", "requires_2fa": False}
 
 
@@ -365,20 +390,27 @@ async def login(
 def logout(
     request: Request,
     response: Response,
+    req: LogoutRequest | None = None,
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Serverseitiges Logout: Refresh-Token revozieren, Cookies loeschen."""
-    refresh_cookie = request.cookies.get("__Secure-refresh_token")
-    if refresh_cookie:
-        rt = AuthService.validate_refresh_token(db, refresh_cookie)
+    """Serverseitiges Logout: Refresh-Token revozieren, Cookies loeschen.
+
+    Native Clients (Bearer statt Cookies) melden sich ueber denselben Endpunkt
+    ab: das Access-Token kommt aus dem Authorization-Header, das Refresh-Token
+    optional im Body. Der Widerruf laeuft danach identisch — jti auf die
+    Blacklist, alle Refresh-Tokens der Familie revozieren.
+    """
+    refresh_value = (req.refresh_token if req else None) or request.cookies.get("__Secure-refresh_token")
+    if refresh_value:
+        rt = AuthService.validate_refresh_token(db, refresh_value)
         if rt:
             AuthService.revoke_refresh_token(db, rt)
 
-    access_cookie = request.cookies.get("__Secure-access_token")
+    access_value = _bearer_token(request) or request.cookies.get("__Secure-access_token")
     user_id_to_revoke: int | None = None
-    if access_cookie:
-        payload = AuthService.decode_token(access_cookie)
+    if access_value:
+        payload = AuthService.decode_token(access_value)
         if payload:
             user_id_to_revoke = payload.get("user_id")
             if payload.get("jti"):
@@ -389,8 +421,8 @@ def logout(
 
     # Wenn Access-Token abgelaufen/ungueltig ist, versuche den User ueber den
     # Refresh-Token zu identifizieren, damit alle Sessions beendet werden.
-    if user_id_to_revoke is None and refresh_cookie:
-        rt_fallback = AuthService.validate_refresh_token(db, refresh_cookie)
+    if user_id_to_revoke is None and refresh_value:
+        rt_fallback = AuthService.validate_refresh_token(db, refresh_value)
         if rt_fallback:
             user_id_to_revoke = rt_fallback.user_id
 
@@ -405,13 +437,21 @@ def logout(
 def refresh(
     request: Request,
     response: Response,
+    req: NativeRefreshRequest | None = None,
     db: Session = Depends(get_db),
 ) -> dict:
-    """Rotiert Access-Token und Refresh-Token."""
-    refresh_cookie = request.cookies.get("__Secure-refresh_token")
-    if not refresh_cookie:
+    """Rotiert Access-Token und Refresh-Token.
+
+    Browser schicken das Refresh-Token als Cookie, native Clients im Body —
+    beide Wege laufen durch dieselbe Validierung, dieselbe Familie und
+    dieselbe Wiederverwendungserkennung. Wer das Token im Body schickt, bekommt
+    die neuen Tokens auch im Body zurueck (Cookies kann er nicht lesen).
+    """
+    body_token = req.refresh_token if req else None
+    refresh_value = body_token or request.cookies.get("__Secure-refresh_token")
+    if not refresh_value:
         raise HTTPException(status_code=401, detail="Kein Refresh-Token")
-    rt = AuthService.validate_refresh_token(db, refresh_cookie)
+    rt = AuthService.validate_refresh_token(db, refresh_value)
     if not rt:
         raise HTTPException(status_code=401, detail="Ungültiges Refresh-Token")
     family = rt.family
@@ -425,7 +465,9 @@ def refresh(
     # Logout das Access-Token nicht mehr auf die Blacklist setzen, ein
     # entwendetes Cookie blieb bis zum Ablauf voll gueltig. Die Familie wird
     # weitergereicht, damit die Wiederverwendungserkennung nicht abreisst.
-    issue_session(response, db, user, family=family)
+    tokens = issue_session(response, db, user, family=family)
+    if body_token:
+        return _native_token_body(tokens)
     return {"message": "Token refreshed"}
 
 
@@ -492,6 +534,25 @@ def update_timezone(
     return {
         "time_zone": user.time_zone,
     }
+
+
+@router.patch("/me/agent-name")
+def update_agent_name(
+    req: AgentNameUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Setzt den Rufnamen des Assistenten (None/leer = Standardname 'Singra').
+
+    Der Name landet im Lageblock (services/ai_lage.py), nie im statischen
+    Systemprompt — sonst waere der Prompt je Benutzer verschieden und das
+    Prompt-Caching des Anbieters tot. Was als Name erlaubt ist, entscheidet
+    allein das Schema (schemas/user.py): eine Zeile, keine Steuerzeichen.
+    """
+    user.agent_name = req.agent_name
+    db.commit()
+    return {"agent_name": user.agent_name}
 
 
 

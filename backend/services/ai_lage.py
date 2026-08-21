@@ -41,7 +41,25 @@ WOCHENTAGE = (
 
 #: Ungefähre Länge des fertigen Blocks in Zeichen. Für den Ring am Absendeknopf
 #: (`ai_context_service.geschaetzte_belegung`).
-TYPISCHE_ZEICHEN = 220
+TYPISCHE_ZEICHEN = 245
+
+#: Standardname des Assistenten, wenn der Benutzer keinen vergeben hat.
+STANDARD_NAME = "Singra"
+
+
+def name_des_assistenten(user: User) -> str:
+    """Der Rufname dieses Assistenten — vom Benutzer vergeben oder der Standard.
+
+    Abgeflacht auf eine Zeile, wie die Worker-Titel in `_worker_zeile`: der
+    Lageblock ist zeilenbasiert, und ein Name mit Umbruch könnte darin eine
+    eigene Panel-Auskunft eröffnen. Das Schema (schemas/user.py) lässt solche
+    Namen gar nicht erst zu; das hier ist die zweite Schranke für Bestandsdaten
+    und fremde Schreibpfade.
+    """
+    roh = (getattr(user, "agent_name", None) or "").strip()
+    if not roh:
+        return STANDARD_NAME
+    return " ".join(roh.split())
 
 
 def zone_des_benutzers(user: User, db: Session | None = None) -> str:
@@ -254,6 +272,10 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
         f"KW {jetzt.isocalendar().week}, Tag {jetzt.timetuple().tm_yday}.",
         f"UTC: {jetzt.astimezone(timezone.utc):%Y-%m-%dT%H:%M}Z.",
         f"Zeitzone des Benutzers: {benutzerzone}.",
+        # Der Rufname steht hier und nicht im Systemprompt, weil er je Benutzer
+        # verschieden ist — der Prompt muss byteweise statisch bleiben. Was der
+        # Name bedeutet und was daraus folgt, erklärt ai_prompt.IDENTITAET.
+        f"Dein Name: {name_des_assistenten(user)}.",
     ]
 
     # Die Worker-Zeile steht **vor** dem Autonomie-Teil, weil der bei
