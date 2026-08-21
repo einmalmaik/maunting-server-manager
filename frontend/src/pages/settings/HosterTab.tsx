@@ -21,12 +21,13 @@ import {
 } from '@/api/hoster'
 import { credentialsApi } from '@/api/credentials'
 import { rbacApi } from '@/api/rbac'
-import { SanitizedApiError } from '@/api/client'
+import { api, SanitizedApiError } from '@/api/client'
 import { Button, NumberStepper, Switch } from '@/Singra/UI'
 import { SecretOnce } from '@/components/ui/SecretOnce'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 import type { Role } from '@/types/permissions'
+import type { User } from '@/types'
 
 const EMPTY_PRODUCT: HosterProductWrite = {
   external_product_key: '',
@@ -274,7 +275,33 @@ function IntegrationForm({
   const [serviceUserId, setServiceUserId] = useState('')
   const [webhookUrl, setWebhookUrl] = useState('')
   const [graceDays, setGraceDays] = useState('7')
+  const [users, setUsers] = useState<User[]>([])
+  const [loadingUsers, setLoadingUsers] = useState(true)
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    api<User[]>('/admin/users')
+      .then((rows) => {
+        if (active) {
+          setUsers(rows)
+          // Default to first active owner or first user
+          const defaultUser = rows.find((u) => u.is_owner && u.is_active) ?? rows.find((u) => u.is_active)
+          if (defaultUser) {
+            setServiceUserId(String(defaultUser.id))
+          }
+        }
+      })
+      .catch(() => {
+        if (active) setUsers([])
+      })
+      .finally(() => {
+        if (active) setLoadingUsers(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const valid = Boolean(name.trim() && slug.trim() && /^\d+$/.test(serviceUserId))
 
@@ -304,12 +331,30 @@ function IntegrationForm({
       <fieldset disabled={disabled || saving} className="grid grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2">
         <Field label={t('hoster.name')} value={name} onChange={setName} hint={t('hoster.nameHint')} />
         <Field label={t('hoster.slug')} value={slug} onChange={setSlug} hint={t('hoster.slugHint')} />
-        <Field
-          label={t('hoster.serviceUserId')}
-          value={serviceUserId}
-          onChange={setServiceUserId}
-          inputMode="numeric"
-        />
+        <label className="space-y-1.5 block">
+          <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+            {t('hoster.serviceUserId')}
+          </span>
+          <select
+            className="msm-input"
+            value={serviceUserId}
+            onChange={(e) => setServiceUserId(e.target.value)}
+            disabled={loadingUsers}
+            required
+          >
+            {users.length === 0 && (
+              <option value="">{loadingUsers ? t('common.loading') : 'Keine Benutzer gefunden'}</option>
+            )}
+            {users
+              .filter((u) => u.is_active)
+              .map((u) => (
+                <option key={u.id} value={String(u.id)}>
+                  {u.username} (#{u.id}){u.is_owner ? ' — Owner' : ''}
+                </option>
+              ))}
+          </select>
+          <p className="text-xs text-on-surface-variant">{t('hoster.serviceUserHint')}</p>
+        </label>
         <Field
           label={t('hoster.webhookUrl')}
           value={webhookUrl}
@@ -318,9 +363,6 @@ function IntegrationForm({
           placeholder="https://shop.example/hooks/msm"
           hint={t('hoster.webhookUrlHint')}
         />
-        <div className="md:col-span-2 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
-          <p className="text-xs text-on-surface-variant">{t('hoster.serviceUserHint')}</p>
-        </div>
         <label className="space-y-1.5">
           <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
             {t('hoster.graceDays')}
