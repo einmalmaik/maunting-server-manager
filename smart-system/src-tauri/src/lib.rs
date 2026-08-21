@@ -10,6 +10,8 @@
 
 #[cfg(windows)]
 mod ducking;
+mod geheimnisse;
+mod konfig;
 mod tray;
 mod wakeword;
 
@@ -40,6 +42,33 @@ fn ducking(an: bool) -> Result<(), String> {
         let _ = an;
         Ok(())
     }
+}
+
+#[tauri::command]
+fn konfig_laden(app: tauri::AppHandle) -> Result<konfig::AppKonfig, String> {
+    konfig::laden(&app)
+}
+
+#[tauri::command]
+fn konfig_speichern(app: tauri::AppHandle, konfig: konfig::AppKonfig) -> Result<(), String> {
+    konfig::speichern(&app, &konfig)
+}
+
+/// Refresh-Token in den OS-Tresor. Das Access-Token wird bewusst nie
+/// gespeichert — es lebt nur im Speicher des Frontends.
+#[tauri::command]
+fn refresh_token_speichern(token: String) -> Result<(), String> {
+    geheimnisse::speichern(&token)
+}
+
+#[tauri::command]
+fn refresh_token_laden() -> Result<Option<String>, String> {
+    geheimnisse::laden()
+}
+
+#[tauri::command]
+fn refresh_token_loeschen() -> Result<(), String> {
+    geheimnisse::loeschen()
 }
 
 #[tauri::command]
@@ -119,10 +148,16 @@ pub fn run() {
                 })
                 .build(),
         )
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             setze_status,
             overlay_sichtbar,
             ducking,
+            konfig_laden,
+            konfig_speichern,
+            refresh_token_speichern,
+            refresh_token_laden,
+            refresh_token_loeschen,
             wakeword_stand,
             wakeword_aufnehmen,
             wakeword_trainieren,

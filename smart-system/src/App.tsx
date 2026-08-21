@@ -1,15 +1,92 @@
 /**
  * Hauptfenster des Smart Systems.
  *
- * Phase 2 (Grundgerüst): zeigt den Produktrahmen und den Status der
- * Desktop-Integration. Der Einrichtungs-Assistent (Backend-URL, Login/2FA,
- * Personalisierung, Sandbox, Wake-Word) kommt in Phase 4 und ersetzt den
- * Platzhalter unten — der Rahmen (Tray, Hotkey, Overlay) steht bereits.
+ * Ablauf beim Start: Konfiguration laden → wenn nicht eingerichtet, den
+ * Assistenten zeigen → sonst still über den OS-Tresor anmelden → gelingt
+ * das nicht, nur den Anmeldeschritt zeigen. Die Chat-Ansicht (1:1 wie im
+ * Panel) folgt als nächste Ausbaustufe; bis dahin zeigt die Hauptansicht
+ * die Desktop-Integration (Tray-Status, Overlay, Ducking, Wake-Word).
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { duckingSetzen, overlaySichtbar, setzeStatus, type AgentStatus } from "./lib/tauri";
+import { abmelden, ich, type Benutzer } from "./api/auth";
+import { setzeBackendUrl, stillAnmelden } from "./api/client";
+import Wizard from "./einrichtung/Wizard";
+import {
+  duckingSetzen,
+  konfigLaden,
+  overlaySichtbar,
+  setzeStatus,
+  type AgentStatus,
+  type AppKonfig,
+} from "./lib/tauri";
+import { Karte, Knopf } from "./ui";
 import WakewordEinrichtung from "./WakewordEinrichtung";
+
+type Phase = "laedt" | "einrichtung" | "anmeldung" | "bereit";
+
+export default function App() {
+  const [phase, setPhase] = useState<Phase>("laedt");
+  const [konfig, setKonfig] = useState<AppKonfig | null>(null);
+  const [benutzer, setBenutzer] = useState<Benutzer | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const geladen = await konfigLaden();
+        setKonfig(geladen);
+        if (!geladen.eingerichtet || !geladen.backend_url) {
+          setPhase("einrichtung");
+          return;
+        }
+        setzeBackendUrl(geladen.backend_url);
+        if (await stillAnmelden()) {
+          setBenutzer(await ich());
+          setPhase("bereit");
+        } else {
+          setPhase("anmeldung");
+        }
+      } catch {
+        setPhase("einrichtung");
+      }
+    })();
+  }, []);
+
+  function fertig(neueKonfig: AppKonfig, neuerBenutzer: Benutzer) {
+    setKonfig(neueKonfig);
+    setBenutzer(neuerBenutzer);
+    setPhase("bereit");
+  }
+
+  async function abmeldenUndZurueck() {
+    try {
+      await abmelden();
+    } finally {
+      setBenutzer(null);
+      setPhase("anmeldung");
+    }
+  }
+
+  if (phase === "laedt" || konfig === null) {
+    return (
+      <main className="flex h-full items-center justify-center bg-background text-muted-foreground">
+        <p className="text-sm">Startet …</p>
+      </main>
+    );
+  }
+
+  if (phase === "einrichtung" || phase === "anmeldung") {
+    return (
+      <Wizard
+        konfig={konfig}
+        startSchritt={phase === "anmeldung" ? "anmeldung" : "backend"}
+        onFertig={fertig}
+      />
+    );
+  }
+
+  return <Hauptansicht benutzer={benutzer} onAbmelden={() => void abmeldenUndZurueck()} />;
+}
 
 const STATUS_TEXTE: Record<AgentStatus, string> = {
   bereit: "Bereit",
@@ -18,22 +95,17 @@ const STATUS_TEXTE: Record<AgentStatus, string> = {
   spricht: "Spricht",
 };
 
-export default function App() {
+function Hauptansicht({
+  benutzer,
+  onAbmelden,
+}: {
+  benutzer: Benutzer | null;
+  onAbmelden: () => void;
+}) {
   const [status, setStatus] = useState<AgentStatus>("bereit");
   const [overlayAn, setOverlayAn] = useState(false);
   const [duckt, setDuckt] = useState(false);
-
-  async function duckingTesten() {
-    // Hörprobe: Musik nebenher laufen lassen — 3 Sekunden leiser, dann zurück.
-    setDuckt(true);
-    try {
-      await duckingSetzen(true);
-      await new Promise((fertig) => setTimeout(fertig, 3000));
-      await duckingSetzen(false);
-    } finally {
-      setDuckt(false);
-    }
-  }
+  const agentName = benutzer?.agent_name ?? "Singra";
 
   async function statusWechseln(neu: AgentStatus) {
     setStatus(neu);
@@ -46,52 +118,63 @@ export default function App() {
     await overlaySichtbar(neu);
   }
 
+  async function duckingTesten() {
+    setDuckt(true);
+    try {
+      await duckingSetzen(true);
+      await new Promise((fertig) => setTimeout(fertig, 3000));
+      await duckingSetzen(false);
+    } finally {
+      setDuckt(false);
+    }
+  }
+
   return (
-    <main className="flex h-full flex-col items-center justify-center gap-8 bg-neutral-950 text-neutral-100">
-      <header className="flex flex-col items-center gap-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Singra Smart System</h1>
-        <p className="text-sm text-neutral-400">
-          Dein Desktop-Companion zum MSM-Panel — Einrichtung folgt in der nächsten Ausbaustufe.
-        </p>
+    <main className="flex h-full flex-col gap-6 overflow-y-auto bg-background p-8 text-foreground">
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">{agentName}</h1>
+          <p className="text-xs text-muted-foreground">
+            {benutzer ? `Angemeldet als ${benutzer.username}` : "Nicht angemeldet"} — die
+            Chat-Ansicht folgt in der nächsten Ausbaustufe.
+          </p>
+        </div>
+        <Knopf stimme="leise" onClick={onAbmelden}>
+          Abmelden
+        </Knopf>
       </header>
 
-      <section className="flex flex-col items-center gap-4" aria-label="Desktop-Integration testen">
-        <div className="flex gap-2">
+      <Karte className="flex flex-col gap-4">
+        <h2 className="text-sm font-medium">Desktop-Integration</h2>
+        <div className="flex flex-wrap gap-2">
           {(Object.keys(STATUS_TEXTE) as AgentStatus[]).map((s) => (
             <button
               key={s}
               onClick={() => void statusWechseln(s)}
-              className={`rounded-lg px-3 py-1.5 text-sm transition ${
+              className={`rounded-[var(--radius-control)] px-3 py-1.5 text-sm transition ${
                 status === s
-                  ? "bg-blue-600 text-white"
-                  : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-muted-foreground hover:bg-muted"
               }`}
             >
               {STATUS_TEXTE[s]}
             </button>
           ))}
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => void overlayUmschalten()}
-            className="rounded-lg bg-neutral-800 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-700"
-          >
+        <div className="flex flex-wrap gap-2">
+          <Knopf stimme="leise" onClick={() => void overlayUmschalten()}>
             {overlayAn ? "Overlay ausblenden" : "Overlay einblenden"}
-          </button>
-          <button
-            onClick={() => void duckingTesten()}
-            disabled={duckt}
-            className="rounded-lg bg-neutral-800 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-700 disabled:opacity-50"
-          >
+          </Knopf>
+          <Knopf stimme="leise" onClick={() => void duckingTesten()} disabled={duckt}>
             {duckt ? "Ducking läuft …" : "Ducking testen (3 s)"}
-          </button>
+          </Knopf>
         </div>
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-muted-foreground">
           Tray-Status und Overlay laufen über das Rust-Backend — Hotkey: Alt+Space.
         </p>
-      </section>
+      </Karte>
 
-      <WakewordEinrichtung />
+      <WakewordEinrichtung wortVorschlag={agentName} />
     </main>
   );
 }

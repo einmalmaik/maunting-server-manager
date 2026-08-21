@@ -1,7 +1,51 @@
 @import "tailwindcss";
 
+/*
+ * Singra Smart System - MauntingStudios Design-DNA.
+ *
+ * Tailwind-v4-@theme-Block mit den HSL-Tokens aus
+ * maunting-design-dna/design-tokens.md (gleiches Muster wie recovery/):
+ * Komponenten nutzen ausschliesslich semantische Klassen (bg-background,
+ * text-foreground, ...), keine rohen Hexwerte.
+ */
+
+@theme {
+  --color-background: hsl(206 31% 4%);
+  --color-foreground: hsl(188 29% 95%);
+  --color-card: hsl(204 25% 10%);
+  --color-card-foreground: hsl(188 29% 95%);
+  --color-primary: hsl(193 45% 86%);
+  --color-primary-foreground: hsl(195 43% 5%);
+  --color-secondary: hsl(198 30% 12%);
+  --color-muted: hsl(201 27% 13%);
+  --color-muted-foreground: hsl(196 19% 67%);
+  --color-accent: hsl(194 31% 65%);
+  --color-border: hsl(198 22% 26%);
+  --color-input: hsl(198 22% 26%);
+  --color-ring: hsl(194 44% 68%);
+  --color-success: hsl(158 64% 52%);
+  --color-warning: hsl(38 92% 50%);
+  --color-destructive: hsl(0 70% 55%);
+
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-control: 0.65rem;
+  --radius-card: 0.9rem;
+
+  --shadow-panel: 0 20px 48px hsl(0 0% 0% / 0.38);
+  --shadow-accent-cta: 0 14px 30px hsl(194 44% 68% / 0.22);
+  --shadow-glow: 0 0 20px hsl(194 44% 68% / 0.18);
+}
+
+:root {
+  color-scheme: dark;
+  font-family: var(--font-sans);
+}
+
 /* Das Overlay-Fenster ist transparent — die Seite darf keinen eigenen
-   Hintergrund malen, sonst ist es ein schwebendes Rechteck statt einer Blase. */
+   Hintergrund malen, sonst ist es ein schwebendes Rechteck statt einer Blase.
+   Das Hauptfenster setzt seinen Hintergrund selbst (bg-background). */
 html,
 body,
 #root {

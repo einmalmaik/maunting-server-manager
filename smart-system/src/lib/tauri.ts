@@ -8,6 +8,22 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type AgentStatus = "bereit" | "hoert" | "denkt" | "spricht";
 
+// ── App-Konfiguration (keine Geheimnisse — Tokens liegen im OS-Tresor) ───
+
+export interface AppKonfig {
+  backend_url: string | null;
+  sandbox_pfad: string | null;
+  eingerichtet: boolean;
+}
+
+export async function konfigLaden(): Promise<AppKonfig> {
+  return await invoke<AppKonfig>("konfig_laden");
+}
+
+export async function konfigSpeichern(konfig: AppKonfig): Promise<void> {
+  await invoke("konfig_speichern", { konfig });
+}
+
 /** Setzt den Tray-Status (Icon-Farbe + Tooltip). */
 export async function setzeStatus(status: AgentStatus): Promise<void> {
   await invoke("setze_status", { status });

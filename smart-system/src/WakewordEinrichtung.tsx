@@ -20,9 +20,9 @@ import {
 
 const AUFNAHMEN_SOLL = 10;
 
-export default function WakewordEinrichtung() {
+export default function WakewordEinrichtung({ wortVorschlag = "" }: { wortVorschlag?: string }) {
   const [stand, setStand] = useState<WakewordStand>({ aufnahmen: 0, trainiert: false, lauscht: false });
-  const [wort, setWort] = useState("");
+  const [wort, setWort] = useState(wortVorschlag);
   const [beschaeftigt, setBeschaeftigt] = useState<string | null>(null);
   const [meldung, setMeldung] = useState<string | null>(null);
 

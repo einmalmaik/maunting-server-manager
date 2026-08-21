@@ -24,6 +24,15 @@ tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Refresh-Token im OS-Tresor (Windows Credential Manager / macOS Keychain) —
+# Projektregel: Tokens nie im Klartext auf der Platte. keyring ist die
+# etablierte, schmale Standard-Crate dafuer (MIT/Apache-2.0).
+# Default-Feature "v1" bringt die klassische Entry-API samt Windows- und
+# Apple-Store mit.
+keyring = "4"
+# Ordner-Auswahl fuer den Sandbox-Schritt des Einrichtungs-Assistenten.
+tauri-plugin-dialog = "2"
+
 # Lokales Wake-Word (Phase 3): rustpotter erkennt ein aus eigenen Aufnahmen
 # gebautes Referenz-Wakeword komplett offline (Apache-2.0, kein Netzwerk).
 # cpal ist der Standard fuer plattformuebergreifendes Audio-I/O in Rust,
