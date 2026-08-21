@@ -3180,6 +3180,10 @@
         "title": "Installer",
         "body": "The smart-system-release.yml workflow builds the NSIS installer on smart-v* tags, deliberately separate from the panel releases. Windows only: audio ducking, takeover and the credential vault are Windows features."
       },
+      "oberflaeche": {
+        "title": "One interface",
+        "body": "The app renders the same AI page as the browser — chat, realtime mode, guardian window, task list, reasoning picker — built from the same frontend code (npm run build:desktop). There is no second chat implementation that could go stale; the only difference is the transport: bearer tokens instead of cookies, including on the voice WebSocket."
+      },
       "permission": {
         "title": "Permissions",
         "body": "Pairing and chatting needs ai.chat.use. Tools on the user's own computer additionally need ai.desktop.use; without it the app fetches no jobs, and the AI is not even offered those tools. From the browser it never gets them — nobody is sitting in front of the confirmation card there."
@@ -4705,5 +4709,118 @@
     "personalMemoryElsewhere": "Your personal memories are not here but in your profile — they are none of a team's business.",
     "personalMemoryLink": "Profile → AI",
     "noTeams": "You are not a member of any team yet. A team shares skills, memories and server permissions with other users."
+  },
+  "mss": {
+    "app": {
+      "startet": "Starting …",
+      "angemeldetAls": "Signed in as {{name}}",
+      "bereiche": "View",
+      "chat": "Chat",
+      "einstellungen": "Settings",
+      "abmelden": "Sign out",
+      "keinChatrecht": "Your account lacks the permission to chat with the AI (ai.chat.use). Ask your operator to grant it — until then this window stays empty."
+    },
+    "overlay": {
+      "schliessen": "Close overlay",
+      "ich": "You:",
+      "ki": "AI:"
+    },
+    "wizard": {
+      "schrittVonBis": "Step {{nummer}} of {{gesamt}}: {{titel}}",
+      "titel": {
+        "backend": "Connect panel",
+        "kopplung": "Pair device",
+        "personalisierung": "Personalise",
+        "sandbox": "Choose sandbox",
+        "wakeword": "Set up wake word"
+      },
+      "spaeterEinrichten": "Set up later",
+      "fertigstellen": "Finish",
+      "adresseErklaerung": "We need the address where the panel API answers. On a standard installation that is the same address you open in the browser. If the interface is hosted separately from the backend, it is the backend address — locally usually http://localhost:8000.",
+      "adresseLabel": "Panel address",
+      "adresseHinweis": "Not sure? Open the panel in a browser, F12 → Network, sign in — the host of the request to /api/auth/login is the right address.",
+      "adresseSchema": "The address must start with https:// or http://",
+      "antwortIstWebseite": "This address serves the panel's interface, not its data. We need the address where the API answers — with split hosting that is the backend, locally usually http://localhost:8000.",
+      "prueft": "Checking …",
+      "verbinden": "Connect",
+      "kopplungErklaerung": "Sign in to your panel in the browser and open Profile → AI → Pair devices. The code there is valid for ten minutes and exactly once.",
+      "codeLabel": "Pairing code",
+      "codeHinweis": "Case does not matter, and you can leave out the dashes.",
+      "geraetenameLabel": "Name of this device",
+      "geraetenameBeispiel": "Work PC",
+      "geraetenameHinweis": "Only for recognising it later, should you want to revoke its access.",
+      "koppelt": "Pairing …",
+      "koppeln": "Pair",
+      "personalisierungErklaerung": "Give your assistant a name — that is how you address it and how it introduces itself. Both apply everywhere: here and in the panel.",
+      "agentnameLabel": "Assistant name",
+      "agentnameHinweis": "2–32 characters; leave empty for the default name Singra.",
+      "zeitzoneLabel": "Time zone",
+      "speichert": "Saving …",
+      "weiter": "Next",
+      "sandboxErklaerung": "The sandbox is the only folder where the AI may later create and edit files — for coding tasks, for example. System directories are always off limits.",
+      "sandboxLabel": "Sandbox folder",
+      "ordnerWaehlen": "Choose folder",
+      "spaeterFestlegen": "Choose later"
+    },
+    "uebernahme": {
+      "frage": "May I operate your computer?",
+      "erklaerung": "Approval for {{minuten}} minutes. You can end it at any time, and it expires on its own afterwards. Mouse and keyboard remain yours — move the mouse and you notice immediately.",
+      "freigeben": "Approve",
+      "ablehnen": "Decline",
+      "aktiv": "Takeover active — {{zeit}} left",
+      "beenden": "End"
+    },
+    "wakeword": {
+      "titel": "Wake word (local)",
+      "stand": "{{aufnahmen}}/{{gesamt}} recordings",
+      "keinMikrofon": "No microphone found. Connect one or pick a default recording device in Windows — nothing can be recorded here until then.",
+      "mikrofon": "Microphone: {{name}}",
+      "wortLabel": "Wake word",
+      "kalibrierungStarten": "Start calibration",
+      "weiterKalibrieren": "Continue calibrating",
+      "abbrechen": "Cancel",
+      "sprichJetzt": "Recording {{nummer}} of {{gesamt}} — say the word now.",
+      "kalibrierungFertig": "All recordings are in. Now train.",
+      "trainieren": "Train",
+      "trainiert": "Training …",
+      "lauschenStarten": "Start listening",
+      "lauschenStoppen": "Stop listening",
+      "zuruecksetzen": "Reset",
+      "erkannt": "Recognised: “{{name}}” (score {{score}})",
+      "datenschutz": "Everything stays on this computer: recordings and model live in the app data directory, no audio ever leaves the process."
+    },
+    "gefahrenzone": {
+      "titel": "Danger zone",
+      "erklaerung": "Removes the app and everything it created on this computer: settings, your wake-word voice recordings, the entry in the credential manager and the autostart. Your sandbox folder stays.",
+      "deinstallieren": "Uninstall Smart System",
+      "sicherheitsfrage": "Sure? The voice recordings and the stored sign-in will be deleted and cannot be recovered.",
+      "allesEntfernen": "Yes, remove everything",
+      "abbrechen": "Cancel",
+      "konfiguration": "Settings removed",
+      "stimmaufnahmen": "Voice recordings deleted",
+      "anmeldung": "Stored sign-in removed",
+      "autostart": "Autostart disabled",
+      "sandboxBleibt": "Left untouched: your sandbox folder at {{pfad}}",
+      "uninstallerStarten": "Start Windows uninstaller"
+    },
+    "einstellungen": {
+      "desktopIntegration": "Desktop integration",
+      "autostart": "Start with Windows",
+      "autostartHinweis": "The app starts minimised to the tray — only then does the wake word listen from the start.",
+      "autostartFehler": "Autostart could not be changed.",
+      "diagnose": "Diagnostics",
+      "diagnoseHinweis": "Test buttons for tray, overlay and ducking. In normal use the voice session drives all of this itself.",
+      "status": {
+        "bereit": "Ready",
+        "hoert": "Listening",
+        "denkt": "Thinking",
+        "spricht": "Speaking"
+      },
+      "overlayAn": "Show overlay",
+      "overlayAus": "Hide overlay",
+      "duckingTesten": "Test ducking (3 s)",
+      "duckingLaeuft": "Ducking running …",
+      "fussnote": "MSS — Maunting Smart System. Tray status and overlay run through the Rust backend."
+    }
   }
 }

@@ -1,35 +1,8 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 
-/**
- * Wirft die `woff`-Rückfallebene aus den @fontsource-Stylesheets.
- *
- * Jede `@font-face`-Regel dort nennt zwei Dateien: `woff2` und dahinter
- * dasselbe Zeichen-Set noch einmal als `woff`. Vite sieht beide Verweise und
- * legt deshalb beide Dateien in den Build — 63 Dateien, die kein Browser je
- * abruft, der dieses Panel überhaupt starten kann. `woff2` versteht jede
- * Engine, die ES-Module, Service Worker und WebSockets versteht, und ohne die
- * kommt die Oberfläche keine Zeile weit.
- *
- * Der Eingriff ist absichtlich eng: greift der Ausdruck nicht mehr, weil
- * @fontsource seine Schreibweise ändert, bleibt das Stylesheet unverändert und
- * der Build enthält wieder beide Formate. Das ist Ballast, kein Defekt.
- *
- * `enforce: 'pre'` ist Pflicht — nach Vites CSS-Auflösung stünden statt der
- * Pfade bereits Asset-Kennungen da, und die Dateien wären längst eingeplant.
- */
-function fontsourceWoff2Only(): Plugin {
-  return {
-    name: 'msm:fontsource-woff2-only',
-    enforce: 'pre',
-    transform(code, id) {
-      if (!id.includes('@fontsource') || !id.endsWith('.css')) return null
-      const stripped = code.replace(/,\s*url\([^)]+\.woff\)\s*format\(['"]woff['"]\)/g, '')
-      return stripped === code ? null : { code: stripped, map: null }
-    },
-  }
-}
+import { fontsourceWoff2Only } from './vite.fontsource'
 
 export default defineConfig({
   plugins: [fontsourceWoff2Only(), react()],

@@ -1,0 +1,20 @@
+<!doctype html>
+<!--
+  Einstieg der Desktop-App (MSS — Maunting Smart System).
+
+  Dieselbe Codebasis wie das Panel, ein zweiter Bau: `vite.desktop.config.ts`
+  baut diese Datei nach `dist-desktop/`, und Tauri zeigt seine Fenster darauf
+  (`smart-system/src-tauri/tauri.conf.json`). Das Overlay-Fenster laedt
+  dieselbe Datei mit `?fenster=overlay`.
+-->
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MSS — Maunting Smart System</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/desktop/main.tsx"></script>
+  </body>
+</html>

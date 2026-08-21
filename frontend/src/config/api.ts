@@ -11,7 +11,21 @@ function trimTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '')
 }
 
-const envApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim() || ''
+/**
+ * Laufzeit-Override für die Desktop-App (MSS).
+ *
+ * Dort ist die API-Adresse keine Build-Zeit-Entscheidung, sondern steht in der
+ * Gerätekonfiguration des Benutzers. Der Desktop-Einstieg
+ * (`src/desktop/main.tsx`) setzt `globalThis.__MSM_API_URL`, **bevor** er den
+ * restlichen Modulgraphen dynamisch importiert — nur deshalb darf dieses Modul
+ * seine Konstanten weiter beim Laden berechnen. Im Panel bleibt der Wert
+ * ungesetzt und alles beim Alten.
+ */
+const laufzeitApiUrl =
+  ((globalThis as { __MSM_API_URL?: string }).__MSM_API_URL ?? '').trim()
+
+const envApiUrl =
+  laufzeitApiUrl || (import.meta.env.VITE_API_URL as string | undefined)?.trim() || ''
 const envWsUrl = (import.meta.env.VITE_WS_URL as string | undefined)?.trim() || ''
 
 /** True when the FE talks to a different API origin (Vercel / local split). */

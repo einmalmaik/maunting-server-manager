@@ -3180,6 +3180,10 @@
         "title": "Installer",
         "body": "Der Workflow smart-system-release.yml baut den NSIS-Installer auf smart-v*-Tags, bewusst getrennt von den Panel-Releases. Nur Windows: Audio-Ducking, Übernahme und Tresor sind Windows-Funktionen."
       },
+      "oberflaeche": {
+        "title": "Eine Oberfläche",
+        "body": "Die App rendert dieselbe KI-Seite wie der Browser — Chat, Realtime-Modus, Guardian-Fenster, Aufgabenliste, Denkstufen-Wahl —, gebaut aus demselben Frontend-Code (npm run build:desktop). Es gibt keine zweite Chat-Implementierung, die veralten könnte; der einzige Unterschied ist der Transport: Bearer-Token statt Cookies, auch am Sprach-WebSocket."
+      },
       "permission": {
         "title": "Rechte",
         "body": "Koppeln und Chatten braucht ai.chat.use. Für die Werkzeuge auf dem eigenen Rechner kommt ai.desktop.use dazu; ohne dieses Recht holt die App keine Aufträge ab, und die KI bekommt die Werkzeuge gar nicht erst angeboten. Aus dem Browser bekommt sie diese Werkzeuge nie — dort sitzt niemand vor der Bestätigungskarte."
@@ -4705,5 +4709,118 @@
     "personalMemoryElsewhere": "Deine persönlichen Erinnerungen stehen nicht hier, sondern in deinem Profil — sie gehen kein Team etwas an.",
     "personalMemoryLink": "Profil → KI",
     "noTeams": "Du gehörst noch keinem Team an. Ein Team teilt Skills, Erinnerungen und Serverrechte mit anderen Benutzern."
+  },
+  "mss": {
+    "app": {
+      "startet": "Startet …",
+      "angemeldetAls": "Angemeldet als {{name}}",
+      "bereiche": "Ansicht",
+      "chat": "Chat",
+      "einstellungen": "Einstellungen",
+      "abmelden": "Abmelden",
+      "keinChatrecht": "Dein Konto hat kein Recht, mit der KI zu chatten (ai.chat.use). Bitte deinen Betreiber, es dir zu geben — vorher bleibt dieses Fenster leer."
+    },
+    "overlay": {
+      "schliessen": "Overlay schließen",
+      "ich": "Du:",
+      "ki": "KI:"
+    },
+    "wizard": {
+      "schrittVonBis": "Schritt {{nummer}} von {{gesamt}}: {{titel}}",
+      "titel": {
+        "backend": "Panel verbinden",
+        "kopplung": "Gerät koppeln",
+        "personalisierung": "Personalisieren",
+        "sandbox": "Sandbox festlegen",
+        "wakeword": "Wake-Word einrichten"
+      },
+      "spaeterEinrichten": "Später einrichten",
+      "fertigstellen": "Fertigstellen",
+      "adresseErklaerung": "Gesucht ist die Adresse, unter der die Panel-API antwortet. Bei einer Standardinstallation ist das dieselbe Adresse, die du im Browser öffnest. Liegt die Oberfläche getrennt vom Backend, ist es die Adresse des Backends — lokal meist http://localhost:8000.",
+      "adresseLabel": "Panel-Adresse",
+      "adresseHinweis": "Nicht sicher? Panel im Browser öffnen, F12 → Netzwerk, anmelden — der Host der Anfrage auf /api/auth/login ist die richtige Adresse.",
+      "adresseSchema": "Die Adresse muss mit https:// oder http:// beginnen",
+      "antwortIstWebseite": "Diese Adresse liefert die Oberfläche des Panels, nicht seine Daten. Gesucht ist die Adresse, unter der die API antwortet — bei getrenntem Hosting die des Backends, lokal meist http://localhost:8000.",
+      "prueft": "Prüfe …",
+      "verbinden": "Verbinden",
+      "kopplungErklaerung": "Melde dich im Browser bei deinem Panel an und öffne Profil → KI → Geräte koppeln. Der Code dort gilt zehn Minuten und genau einmal.",
+      "codeLabel": "Kopplungscode",
+      "codeHinweis": "Groß- und Kleinschreibung sind egal, die Striche kannst du weglassen.",
+      "geraetenameLabel": "Name dieses Geräts",
+      "geraetenameBeispiel": "Arbeitsrechner",
+      "geraetenameHinweis": "Nur zur Wiedererkennung, wenn du den Zugang später entziehen willst.",
+      "koppelt": "Koppelt …",
+      "koppeln": "Koppeln",
+      "personalisierungErklaerung": "Gib deinem Assistenten einen Namen — so sprichst du ihn an, und so meldet er sich. Beides gilt überall: hier und im Panel.",
+      "agentnameLabel": "Name des Assistenten",
+      "agentnameHinweis": "2–32 Zeichen; leer lassen für den Standardnamen Singra.",
+      "zeitzoneLabel": "Zeitzone",
+      "speichert": "Speichert …",
+      "weiter": "Weiter",
+      "sandboxErklaerung": "Die Sandbox ist der einzige Ordner, in dem die KI später Dateien anlegen und bearbeiten darf — zum Beispiel für Coding-Aufgaben. Systemverzeichnisse sind grundsätzlich tabu.",
+      "sandboxLabel": "Sandbox-Ordner",
+      "ordnerWaehlen": "Ordner wählen",
+      "spaeterFestlegen": "Später festlegen"
+    },
+    "uebernahme": {
+      "frage": "Darf ich deinen Rechner bedienen?",
+      "erklaerung": "Freigabe für {{minuten}} Minuten. Du kannst sie jederzeit beenden, und sie läuft danach von selbst ab. Maus und Tastatur bleiben deine — bewegst du die Maus, merkst du es sofort.",
+      "freigeben": "Freigeben",
+      "ablehnen": "Ablehnen",
+      "aktiv": "Übernahme aktiv — noch {{zeit}}",
+      "beenden": "Beenden"
+    },
+    "wakeword": {
+      "titel": "Wake-Word (lokal)",
+      "stand": "{{aufnahmen}}/{{gesamt}} Aufnahmen",
+      "keinMikrofon": "Kein Mikrofon gefunden. Schließ eines an oder wähl in Windows ein Standard-Aufnahmegerät — vorher kann hier nichts aufgenommen werden.",
+      "mikrofon": "Mikrofon: {{name}}",
+      "wortLabel": "Wake-Word",
+      "kalibrierungStarten": "Kalibrierung starten",
+      "weiterKalibrieren": "Weiter kalibrieren",
+      "abbrechen": "Abbrechen",
+      "sprichJetzt": "Aufnahme {{nummer}} von {{gesamt}} — sprich jetzt das Wort.",
+      "kalibrierungFertig": "Alle Aufnahmen sind da. Jetzt trainieren.",
+      "trainieren": "Trainieren",
+      "trainiert": "Trainiert …",
+      "lauschenStarten": "Lauschen starten",
+      "lauschenStoppen": "Lauschen stoppen",
+      "zuruecksetzen": "Zurücksetzen",
+      "erkannt": "Erkannt: „{{name}}“ (Score {{score}})",
+      "datenschutz": "Alles bleibt auf diesem Rechner: Aufnahmen und Modell liegen im App-Datenverzeichnis, kein Audio verlässt den Prozess."
+    },
+    "gefahrenzone": {
+      "titel": "Gefahrenzone",
+      "erklaerung": "Entfernt die App und alles, was sie auf diesem Rechner angelegt hat: Einstellungen, deine Stimmaufnahmen für das Wake-Word, den Eintrag im Anmeldeinformations-Manager und den Autostart. Dein Sandbox-Ordner bleibt.",
+      "deinstallieren": "Smart System deinstallieren",
+      "sicherheitsfrage": "Sicher? Die Stimmaufnahmen und die gespeicherte Anmeldung werden gelöscht und lassen sich nicht zurückholen.",
+      "allesEntfernen": "Ja, alles entfernen",
+      "abbrechen": "Abbrechen",
+      "konfiguration": "Einstellungen entfernt",
+      "stimmaufnahmen": "Stimmaufnahmen gelöscht",
+      "anmeldung": "Gespeicherte Anmeldung entfernt",
+      "autostart": "Autostart abgeschaltet",
+      "sandboxBleibt": "Unangetastet geblieben ist dein Sandbox-Ordner: {{pfad}}",
+      "uninstallerStarten": "Windows-Uninstaller starten"
+    },
+    "einstellungen": {
+      "desktopIntegration": "Desktop-Integration",
+      "autostart": "Mit Windows starten",
+      "autostartHinweis": "Die App startet minimiert im Tray — nur so hört das Wake-Word von Anfang an zu.",
+      "autostartFehler": "Autostart ließ sich nicht umstellen.",
+      "diagnose": "Diagnose",
+      "diagnoseHinweis": "Testknöpfe für Tray, Overlay und Ducking. Im Betrieb steuert die Sprachsitzung all das von selbst.",
+      "status": {
+        "bereit": "Bereit",
+        "hoert": "Hört zu",
+        "denkt": "Denkt",
+        "spricht": "Spricht"
+      },
+      "overlayAn": "Overlay einblenden",
+      "overlayAus": "Overlay ausblenden",
+      "duckingTesten": "Ducking testen (3 s)",
+      "duckingLaeuft": "Ducking läuft …",
+      "fussnote": "MSS — Maunting Smart System. Tray-Status und Overlay laufen über das Rust-Backend."
+    }
   }
 }

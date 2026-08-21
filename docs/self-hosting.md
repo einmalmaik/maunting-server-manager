@@ -159,15 +159,28 @@ Das gerade gültige Access-Token bleibt bis zu seinem Ablauf brauchbar —
 dieselbe Regel wie überall sonst, ein Widerruf wirkt spätestens beim nächsten
 Erneuern.
 
-Was die App **als Oberfläche** nicht hat: eine Serververwaltung. Sie zeigt den
-Dauerchat und die Sprachbedienung, keine Serverliste und keine Konsole. Die KI
-darin ist aber derselbe Account mit denselben Rechten — sie kann Server also
-sehr wohl bedienen, im Gespräch, und bekommt die Werkzeuge für den eigenen
+**Die Oberfläche der App ist die des Panels.** Seit dem 21.08.2026 gibt es
+keine zweite Chat-Implementierung mehr: die App rendert dieselbe KI-Seite wie
+der Browser (Chat, Realtime-Modus, Guardian-Fenster, Aufgabenliste,
+Denkstufen-Wahl), gebaut aus `frontend/` über einen eigenen Einstieg
+(`frontend/desktop.html`, `npm run build:desktop`,
+`frontend/vite.desktop.config.ts`). In `smart-system/` liegt nur noch die
+Tauri-Hülle (Rust + Konfiguration). Der Unterschied zum Browser ist der
+Transport: statt Cookies trägt jede Anfrage das Bearer-Token der Kopplung,
+und der Sprach-WebSocket legt es als Subprotokoll (`msm.bearer`) in den
+Handshake — nie in die URL.
+
+Was die App **als Oberfläche** nicht hat: eine Serververwaltung. Sie zeigt die
+KI-Seite und die Desktop-Einstellungen, keine Serverliste und keine Konsole.
+Die KI darin ist aber derselbe Account mit denselben Rechten — sie kann Server
+also sehr wohl bedienen, im Gespräch, und bekommt die Werkzeuge für den eigenen
 Rechner zusätzlich. Umgekehrt gilt die Grenze: **aus dem Browser erreicht kein
 Werkzeug den Rechner.** Der Katalog wird nach der Herkunft geschnitten, und die
 Ausführung weist jeden solchen Aufruf zusätzlich einzeln ab
 (`services/ai_tool_registry.herkunft_schnitt`). Die Herkunft steht im Token der
-gekoppelten Sitzung — ein Client kann sie nicht behaupten.
+gekoppelten Sitzung — ein Client kann sie nicht behaupten. Auch die
+Sprachläufe der App tragen sie: der Voice-WebSocket liest den `geraet`-Anspruch
+aus demselben Token, mit dem er authentifiziert.
 
 Deinstalliert wird in der App selbst (Einstellungen → Gefahrenzone) oder über
 Windows. Der Weg in der App räumt zusätzlich auf, was der Windows-Uninstaller

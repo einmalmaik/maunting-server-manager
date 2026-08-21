@@ -4,16 +4,17 @@
   "version": "0.1.0",
   "identifier": "com.mauntingstudios.smart-system",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1430",
-    "beforeBuildCommand": "npm run build",
-    "frontendDist": "../dist"
+    "beforeDevCommand": "npm --prefix ../frontend run dev:desktop",
+    "devUrl": "http://localhost:1430/desktop.html",
+    "beforeBuildCommand": "npm --prefix ../frontend run build:desktop",
+    "frontendDist": "../../frontend/dist-desktop"
   },
   "app": {
     "windows": [
       {
         "label": "main",
         "title": "MSS — Maunting Smart System",
+        "url": "desktop.html",
         "width": 1100,
         "height": 720,
         "minWidth": 860,
@@ -24,9 +25,9 @@
       {
         "label": "overlay",
         "title": "MSS",
-        "url": "index.html?fenster=overlay",
-        "width": 420,
-        "height": 200,
+        "url": "desktop.html?fenster=overlay",
+        "width": 460,
+        "height": 300,
         "resizable": false,
         "decorations": false,
         "transparent": true,

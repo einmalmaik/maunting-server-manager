@@ -266,6 +266,23 @@
     background-size: 40px 40px;
   }
 
+  /* MSS (Desktop-App): Boot-Sequenz und Statuspuls.
+
+     Diese Klassen nutzt nur der Desktop-Einstieg (src/desktop/) — sie liegen
+     trotzdem hier, weil es genau ein Stylesheet gibt und ein zweites nur eine
+     zweite Wahrheit über dieselben Tokens wäre. */
+  .mss-blase {
+    animation: mss-puls 2.4s ease-in-out infinite;
+  }
+
+  /* Jedes Logo blendet weich ein, steht und blendet aus — wie die
+     Studio-Logos beim Start eines Spiels. Das Stehen ist der längste Teil:
+     ein Logo, das nur durchhuscht, hat man nicht gesehen. Die Dauer setzt
+     Splash.tsx per animationDuration; der Wert hier ist nur der Rückfall. */
+  .mss-splash-stufe {
+    animation: mss-splash-stufe 3200ms ease-in-out both;
+  }
+
   /* CodeMirror Search Panel (Maunting DNA) */
   .cm-panel.cm-search {
     @apply bg-surface-container-high border-b border-outline-variant text-on-surface p-2.5 flex flex-wrap items-center gap-2.5 z-10 !important;
@@ -299,5 +316,34 @@
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
     }
+  }
+}
+
+/* MSS-Keyframes — ausserhalb der Layer, Keyframes gehoeren in keinen. */
+@keyframes mss-puls {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes mss-splash-stufe {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  14%,
+  84% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.02);
   }
 }

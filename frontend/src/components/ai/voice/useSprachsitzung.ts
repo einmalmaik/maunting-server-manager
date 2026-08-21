@@ -21,6 +21,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { wsProtokolle } from '@/api/client'
+import { wsUrl } from '@/config/api'
 import { AufnahmeAbbruch, starteAufnahme, type Aufnahme } from './audioAufnahme'
 import { Wiedergabe } from './audioWiedergabe'
 
@@ -129,8 +131,10 @@ const MAX_BELEGE = 5
 const LEITUNG_TRAEGT: ReadonlySet<string> = new Set(['hoert', 'spricht'])
 
 function adresse(providerId?: number | null): string {
-  const basis = import.meta.env.VITE_API_URL || window.location.origin
-  const base = `${basis.replace(/^http/, 'ws').replace(/\/$/, '')}/api/ai/voice/ws`
+  // `wsUrl` statt eigener Ableitung: es kennt als Einziges auch den
+  // Laufzeit-Override der Desktop-App (`config/api.ts`) — die eigene Lesart
+  // von VITE_API_URL hier hätte in der App stumm auf `tauri.localhost` gezeigt.
+  const base = wsUrl('/api/ai/voice/ws')
   return providerId ? `${base}?provider_id=${providerId}` : base
 }
 
@@ -194,7 +198,10 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     spiele.bereitMachen()
     lautsprecher.current = spiele
 
-    const verbindung = new WebSocket(adresse(providerId))
+    // Im Panel `undefined` (Cookie im Handshake); in der Desktop-App trägt das
+    // Subprotokoll das Bearer-Token — der eine Header, den ein Browser-WebSocket
+    // erreicht. Der Server spiegelt es in accept() (routers/ai_voice.py).
+    const verbindung = new WebSocket(adresse(providerId), wsProtokolle())
     verbindung.binaryType = 'arraybuffer'
     ws.current = verbindung
 
@@ -395,6 +402,15 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     gewollt.current = false
     aufraeumen()
   }, [aufraeumen])
+
+  // Den Zustand nach draussen melden — als DOM-Ereignis, nicht als Callback.
+  // Die Desktop-App (MSS) hängt daran Tray-Farbe und Audio-Ducking; im Panel
+  // hört niemand zu, und das ist in Ordnung. Ein Callback müsste durch
+  // SprachAnsicht und pages/Ai durchgereicht werden, nur damit eine Hülle ihn
+  // je nach Bau anders füllt.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('msm:sprachzustand', { detail: { zustand } }))
+  }, [zustand])
 
   // Wer gerade redet, bestimmt die Quelle: beim Zuhören das Mikrofon, sonst
   // die Stimme der KI. Ein Maximum über beide wäre bequemer und falsch — dann

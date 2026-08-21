@@ -1,15 +1,31 @@
 # MSS — Maunting Smart System
 
 Der Desktop-Companion zum MSM-Panel: Konversation, Sprachbedienung und lokale
-Assistenz auf dem eigenen Rechner — als schlanke Tauri-v2-App (Rust + React).
+Assistenz auf dem eigenen Rechner — als Tauri-v2-App (Rust-Hülle, Oberfläche
+aus `frontend/`).
+
+## Eine Oberfläche, zwei Bauten
+
+Seit dem 21.08.2026 gibt es hier **keinen eigenen React-Code mehr**: die App
+rendert dieselbe KI-Seite wie der Browser (Chat, Realtime-Modus,
+Guardian-Fenster, Aufgabenliste, Denkstufen-Wahl), gebaut aus `../frontend/`
+über den Desktop-Einstieg `frontend/desktop.html` → `frontend/src/desktop/`
+(`npm run build:desktop`, `vite.desktop.config.ts`, Ergebnis in
+`frontend/dist-desktop/`). Eine zweite Chat-Implementierung veraltete gegen
+die erste — genau das ist passiert, und deshalb wurde sie gelöscht statt
+angeglichen. Die Web-Oberfläche ist die Single Source of Truth.
+
+Der Unterschied zum Browser ist der Transport: statt Cookies trägt jede
+Anfrage das Bearer-Token der Kopplung (`frontend/src/desktop/transport.ts`
+registriert es beim Panel-API-Client), und der Sprach-WebSocket legt es als
+Subprotokoll `msm.bearer` in den Handshake — nie in die URL.
 
 ## Harte Architektur-Grenze
 
-Die App hat als **Oberfläche** keine Serververwaltung: Dauerchat und
-Sprachbedienung, keine Serverliste, keine Konsole, keine Dateiverwaltung. Die
-KI darin ist aber derselbe Account mit denselben Rechten — im Gespräch bedient
-sie Server genauso wie im Panel und bekommt die Werkzeuge für diesen Rechner
-zusätzlich.
+Die App hat als **Oberfläche** keine Serververwaltung: die KI-Seite und die
+Desktop-Einstellungen, keine Serverliste, keine Konsole. Die KI darin ist aber
+derselbe Account mit denselben Rechten — im Gespräch bedient sie Server genauso
+wie im Panel und bekommt die Werkzeuge für diesen Rechner zusätzlich.
 
 Die Grenze läuft in die andere Richtung: **aus dem Panel erreicht kein Werkzeug
 den Rechner.** Sie ist keine UI-Entscheidung, sondern eine Schranke im Backend
@@ -18,10 +34,6 @@ die Herkunft steht im Token der gekoppelten Sitzung — kein Client kann sie
 behaupten. Der Grund ist praktisch: die Übernahme von Maus und Tastatur wird an
 einer Karte in dieser App bestätigt, und aus dem Browser abgeschickt liefe der
 Aufruf in eine Frist statt in eine Antwort.
-
-Hier stand bis zum 21.08.2026 das Gegenteil („unter keinen Umständen Server
-verwalten"). Das war eine Fehllesung eines älteren Beschlusses; gemeint war die
-Oberfläche, nicht die Rechte der KI.
 
 ## Anmelden: nur per Kopplung
 
@@ -37,12 +49,15 @@ zeigt sie unter Einstellungen → Allgemein und noch einmal beim Koppeln.
 
 ## Aufbau
 
-- `src/` — React-Frontend (Vite + Tailwind). Zwei Einstiege über dasselbe
-  Bundle: das Hauptfenster (Chat/Einrichtung) und das Overlay
-  (`?fenster=overlay`, frameloses Always-on-Top-Fenster für die Sprachblase).
-- `src-tauri/` — Rust-Backend: Fensterverwaltung, System-Tray mit
-  Statusfarben (Grün: bereit, Blau: hört zu, Lila: denkt, Gelb: spricht),
-  globaler Hotkey (`Alt+Space`), Autostart.
+- `src-tauri/` — das ganze Zuhause der App: Fensterverwaltung (Haupt + Overlay),
+  System-Tray mit Statusfarben (Grün: bereit, Blau: hört zu, Lila: denkt,
+  Gelb: spricht), globaler Hotkey, Autostart, Wake-Word (rustpotter, offline),
+  Audio-Ducking (WASAPI), Sandbox-Dateizugriff, Übernahme von Maus und
+  Tastatur, Tresor (Anmeldeinformations-Manager).
+- `frontend/src/desktop/` (im Nachbarordner) — der Desktop-Einstieg der
+  gemeinsamen Oberfläche: Bootstrap mit Laufzeit-API-Adresse, Splash,
+  Einrichtungs-Assistent, Desktop-Einstellungen, Overlay-Sprachblase,
+  Auftragsschleife und Übernahmekarte.
 
 ## Logos
 
@@ -53,9 +68,9 @@ Maske beim Erzeugen.
 - `src-tauri/icons/` — App-Icon, erzeugt aus `frontend/public/logo.png`
   (Produktlogo, 1254 px). Kein `icon.icns`: die App ist Windows-only, eine
   macOS-Hülle ohne Inhalt braucht kein Icon.
-- `public/dis-logo.png`, `public/msm-logo.png` — Stufe 1 und 3 der
-  Boot-Sequenz.
-- `public/firmen-logo.png` — **fehlt noch.** Ohne die Datei läuft die
+- `frontend/src/desktop/assets/dis-logo.png`, `msm-logo.png` — Stufe 1 und 3
+  der Boot-Sequenz.
+- `frontend/public/firmen-logo.png` — **fehlt noch.** Ohne die Datei läuft die
   mittlere Stufe ("Ein Produkt von MauntingStudios") ohne Bild, nur mit
   Untertitel. Quadratisches PNG ab 512 px dort ablegen, mehr ist nicht nötig.
 
@@ -66,7 +81,14 @@ npm install
 npm run tauri dev
 ```
 
-Tests: `npm run test` (Frontend) und `cargo test` in `src-tauri/`.
+`tauri dev` startet den Vite-Dev-Server im Nachbarordner (`npm --prefix
+../frontend run dev:desktop`, Port 1430) und zeigt `desktop.html`. **CORS im
+Dev-Modus:** das Fenster meldet sich als `http://localhost:1430`, was nicht in
+`TAURI_ORIGINS` steht — API-Aufrufe gegen ein fremdes Panel blockt dessen
+CORS. Für Betriebstests die gebaute App nehmen (Origin `tauri.localhost`).
+
+Tests: UI-Belange unter `frontend/` (`npx vitest run src/desktop`), Rust unter
+`src-tauri/` (`cargo test`).
 
 ## Verbindung zum Panel
 

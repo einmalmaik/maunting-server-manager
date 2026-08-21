@@ -30,6 +30,49 @@ export class SanitizedApiError extends Error {
 }
 
 /**
+ * Die native Sitzung der Desktop-App (MSS) — im Panel immer `null`.
+ *
+ * Das Panel authentifiziert über HttpOnly-Cookies; ein Tauri-WebView bekommt
+ * auf einem fremden Origin nie welche. Die App registriert deshalb beim Start
+ * genau ein Objekt: woher das Access-Token kommt und wie rotiert wird
+ * (Refresh-Token liegt im OS-Tresor, nicht hier). Ist es gesetzt, tragen
+ * `api()`/`apiStream()` einen `Authorization: Bearer` und delegieren den
+ * 401-Refresh — alles andere (Fehlerübersetzung, 429-Toast, SESSION_EXPIRED →
+ * `clearSession`) bleibt derselbe Weg wie im Browser. CSRF entfällt nicht per
+ * Sonderfall: ohne Cookies findet `getCsrfToken()` schlicht nichts, und das
+ * Backend befreit gültige Bearer ohnehin (`dependencies.verify_csrf`).
+ */
+export interface NativeSitzung {
+  /** Das aktuelle Access-Token — `null`, solange keines da ist. */
+  token(): string | null
+  /** Rotiert über den Tresor. `false` heißt: die Sitzung ist endgültig weg. */
+  erneuern(): Promise<boolean>
+}
+
+let nativeSitzung: NativeSitzung | null = null
+
+export function registriereNativeSitzung(sitzung: NativeSitzung): void {
+  nativeSitzung = sitzung
+}
+
+/**
+ * Subprotokolle für authentifizierte WebSockets (`msm.bearer, <token>`).
+ *
+ * Ein Browser-WebSocket kann keinen Authorization-Header setzen; das
+ * Subprotokoll-Feld ist der eine Header, den er erreicht — und ein Token in
+ * der URL wäre einer in Zugriffs- und Proxy-Logs. Im Panel `undefined`:
+ * dort authentifiziert der WS-Handshake über das mitgesendete Cookie.
+ */
+export function wsProtokolle(): string[] | undefined {
+  const token = nativeSitzung?.token()
+  return token ? ['msm.bearer', token] : undefined
+}
+
+function nativesToken(): string | null {
+  return nativeSitzung?.token() ?? null
+}
+
+/**
  * CSRF value held in memory for cross-origin setups where document.cookie
  * cannot read the API host's `__Secure-csrf_token` (different site).
  * Populated from `X-CSRF-Token` response headers (login, refresh, /me).
@@ -110,6 +153,15 @@ function translateErrorCode(code: string): string | null {
 let refreshPromise: Promise<void> | null = null
 
 async function doRefresh(): Promise<void> {
+  // Nativ (Desktop-App): die Rotation läuft über den OS-Tresor, nicht über
+  // Cookies — aber durch denselben Trichter hier, damit gleichzeitige 401er
+  // weiterhin genau einen Refresh auslösen.
+  if (nativeSitzung) {
+    if (!(await nativeSitzung.erneuern())) {
+      throw new Error('Session abgelaufen')
+    }
+    return
+  }
   const res = await fetch(apiUrl('/auth/refresh'), {
     method: 'POST',
     credentials: 'include',
@@ -146,6 +198,11 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     headers['Content-Type'] = 'application/json'
   }
 
+  const bearer = nativesToken()
+  if (bearer) {
+    headers['Authorization'] = `Bearer ${bearer}`
+  }
+
   if (isStateChanging) {
     const csrf = getCsrfToken()
     if (csrf) {
@@ -173,8 +230,12 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   if (res.status === 401 && path !== '/auth/refresh' && path !== '/auth/login') {
     try {
       await refreshToken()
-      // Header neu bauen (CSRF koennte sich geaendert haben)
+      // Header neu bauen (CSRF und Bearer koennten sich geaendert haben)
       const newHeaders = { ...headers }
+      const neuesBearer = nativesToken()
+      if (neuesBearer) {
+        newHeaders['Authorization'] = `Bearer ${neuesBearer}`
+      }
       const newCsrf = getCsrfToken()
       if (newCsrf) {
         newHeaders['X-CSRF-Token'] = newCsrf
@@ -267,6 +328,8 @@ export async function apiStream(path: string, options: RequestInit): Promise<Res
     Accept: 'text/event-stream',
     ...((options.headers as Record<string, string>) || {}),
   }
+  const bearer = nativesToken()
+  if (bearer) headers['Authorization'] = `Bearer ${bearer}`
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
     const csrf = getCsrfToken()
     if (csrf) headers['X-CSRF-Token'] = csrf
@@ -287,6 +350,8 @@ export async function apiStream(path: string, options: RequestInit): Promise<Res
     try {
       await refreshToken()
       const retryHeaders = { ...headers }
+      const neuesBearer = nativesToken()
+      if (neuesBearer) retryHeaders['Authorization'] = `Bearer ${neuesBearer}`
       const csrf = getCsrfToken()
       if (csrf) retryHeaders['X-CSRF-Token'] = csrf
       else delete retryHeaders['X-CSRF-Token']

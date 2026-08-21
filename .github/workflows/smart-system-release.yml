@@ -35,19 +35,22 @@ jobs:
   build-windows:
     name: Build Smart System (Windows)
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: smart-system
 
     steps:
       - uses: actions/checkout@v4
 
+      # Die Oberflaeche der App kommt aus frontend/ (Desktop-Bau,
+      # vite.desktop.config.ts) — smart-system/ ist nur noch die Tauri-Huelle
+      # mit der CLI. Deshalb zwei npm-Installationen und die Tests dort, wo
+      # der Code liegt.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: smart-system/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            smart-system/package-lock.json
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -57,14 +60,21 @@ jobs:
         with:
           workspaces: smart-system/src-tauri
 
-      - name: Install frontend dependencies
+      - name: Install UI dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Tauri CLI
+        working-directory: smart-system
         run: npm ci
 
       - name: TypeCheck
+        working-directory: frontend
         run: npx tsc --noEmit
 
-      - name: Run vitest
-        run: npx vitest run
+      - name: Run vitest (Desktop-Belange)
+        working-directory: frontend
+        run: npx vitest run src/desktop src/api src/components/ai/voice --maxWorkers=3
 
       # Die Sandbox-Grenze und die Freigabe der Uebernahme haengen an diesen
       # Tests. Ein Installer, der sie nicht bestanden hat, soll nicht
@@ -82,9 +92,9 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "MSS — Maunting Smart System ${{ github.ref_name }}"
           releaseBody: |
-            Desktop-Begleiter fuer das MSM-Panel: derselbe Dauerchat wie im
-            Browser, Wake-Word offline auf dem Rechner, Arbeit im
-            freigegebenen Sandbox-Ordner.
+            Desktop-Begleiter fuer das MSM-Panel: dieselbe Oberflaeche wie im
+            Browser (Chat, Realtime-Modus, Guardian, Aufgaben), Wake-Word
+            offline auf dem Rechner, Arbeit im freigegebenen Sandbox-Ordner.
 
             **Anmelden geht nur per Kopplung.** Im Panel unter Profil -> KI
             einen Code erzeugen und hier eintragen; einzutragen ist die
@@ -103,6 +113,7 @@ jobs:
       # nachrechnen laesst, dass er der gebaute ist.
       - name: SHA256-Summe des Installers
         shell: pwsh
+        working-directory: smart-system
         run: |
           $exe = Get-ChildItem -Recurse -Filter *.exe `
             -Path src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis |
