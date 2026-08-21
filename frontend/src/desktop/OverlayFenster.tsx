@@ -59,7 +59,7 @@ export function OverlayFenster() {
           await stillAnmelden()
         }
         await sprachstartMelden('overlay')
-        starten()
+        await starten()
       })()
     })
     return () => {

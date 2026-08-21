@@ -56,16 +56,50 @@ export function registriereNativeSitzung(sitzung: NativeSitzung): void {
 }
 
 /**
+ * Restlaufzeit eines JWT in Sekunden — `null`, wenn die Nutzlast nicht
+ * lesbar ist. Nur gelesen, nie geprüft: die Prüfung bleibt beim Server,
+ * hier geht es allein darum, ein absehbar totes Token nicht erst in einen
+ * Handshake zu tragen.
+ */
+function tokenRestSekunden(token: string): number | null {
+  try {
+    const nutzlast = JSON.parse(
+      atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')),
+    ) as { exp?: unknown }
+    const exp = Number(nutzlast.exp)
+    if (!Number.isFinite(exp)) return null
+    return exp - Math.floor(Date.now() / 1000)
+  } catch {
+    return null
+  }
+}
+
+/**
  * Subprotokolle für authentifizierte WebSockets (`msm.bearer, <token>`).
  *
  * Ein Browser-WebSocket kann keinen Authorization-Header setzen; das
  * Subprotokoll-Feld ist der eine Header, den er erreicht — und ein Token in
  * der URL wäre einer in Zugriffs- und Proxy-Logs. Im Panel `undefined`:
  * dort authentifiziert der WS-Handshake über das mitgesendete Cookie.
+ *
+ * Async und frischegeprüft, weil ein WS-Handshake — anders als HTTP — keinen
+ * 401-Retry hat: ein abgelaufenes Token heißt close(1008) **vor** accept, und
+ * die Oberfläche sieht nur „Verbindung verloren". Genau so starb der
+ * Sprachmodus der Desktop-App: das Access-Token lebt 15 Minuten, das Overlay
+ * rotiert es nie von selbst, und der planmäßige Reconnect nach der
+ * Sitzungshöchstdauer (== Token-Laufzeit) kam damit immer mit einem toten
+ * Token an. Unter 60 s Rest — oder wenn die Nutzlast nicht lesbar ist — wird
+ * deshalb erst rotiert.
  */
-export function wsProtokolle(): string[] | undefined {
-  const token = nativeSitzung?.token()
-  return token ? ['msm.bearer', token] : undefined
+export async function wsProtokolle(): Promise<string[] | undefined> {
+  if (!nativeSitzung) return undefined
+  const token = nativeSitzung.token()
+  const rest = token ? tokenRestSekunden(token) : 0
+  if (rest === null || rest < 60) {
+    await nativeSitzung.erneuern().catch(() => false)
+  }
+  const frisch = nativeSitzung.token()
+  return frisch ? ['msm.bearer', frisch] : undefined
 }
 
 function nativesToken(): string | null {

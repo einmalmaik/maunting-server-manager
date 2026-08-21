@@ -26,7 +26,13 @@ const laufzeitApiUrl =
 
 const envApiUrl =
   laufzeitApiUrl || (import.meta.env.VITE_API_URL as string | undefined)?.trim() || ''
-const envWsUrl = (import.meta.env.VITE_WS_URL as string | undefined)?.trim() || ''
+// Der Laufzeit-Override gewinnt auch fuer WebSockets: ein zur Buildzeit
+// gesetztes VITE_WS_URL (Split-Hosting des Panels) zeigte sonst in der
+// Desktop-App stumm auf den Buildzeit-Host, waehrend HTTP laengst gegen die
+// Geraeteadresse laeuft — der Voice-WS waere dann der eine abweichende Kanal.
+const envWsUrl = laufzeitApiUrl
+  ? ''
+  : (import.meta.env.VITE_WS_URL as string | undefined)?.trim() || ''
 
 /** True when the FE talks to a different API origin (Vercel / local split). */
 export const isAbsoluteApi = Boolean(envApiUrl)

@@ -905,7 +905,7 @@
       "enable": "Enable",
       "later": "Later",
       "never": "Stop asking",
-      "hint": "You can change this any time under Profile → AI, where you can also review and delete individual entries.",
+      "hint": "You can change this any time and review or delete individual entries — in the panel under Profile → AI, in the desktop app on the “Memory” tab.",
       "enabled": "Memory enabled.",
       "failed": "Your answer could not be saved."
     },
@@ -4718,7 +4718,8 @@
       "chat": "Chat",
       "einstellungen": "Settings",
       "abmelden": "Sign out",
-      "keinChatrecht": "Your account lacks the permission to chat with the AI (ai.chat.use). Ask your operator to grant it — until then this window stays empty."
+      "keinChatrecht": "Your account lacks the permission to chat with the AI (ai.chat.use). Ask your operator to grant it — until then this window stays empty.",
+      "gedaechtnis": "Memory"
     },
     "overlay": {
       "schliessen": "Close overlay",

@@ -398,6 +398,23 @@ describe('AiRunNotice', () => {
     }
   })
 
+  it('meldet einen fertigen Worker auch in der Sprachansicht', async () => {
+    // Der Fall der Desktop-App: sie steht praktisch immer auf /ai, oft in der
+    // Sprachansicht — und die zeigt weder Chatblasen noch Worker-Leiste.
+    // Vorher zählte `ansicht=sprache` als „im Chat", und die Meldung wurde
+    // unterdrückt: Worker waren dort komplett unsichtbar.
+    antworten({ primary: [null], guardian: [null] })
+    workerAntworten([[worker('running')], []])
+
+    zeichnen('/ai?ansicht=sprache')
+
+    await waitFor(() => expect(fragen('primary')).toBe(1))
+    await vi.advanceTimersByTimeAsync(9_000)
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Ein Worker hat berichtet.')
+    })
+  })
+
   it('meldet jeden ruhenden Zustand, auch einen später hinzugekommenen', async () => {
     // Der Grund für die gemeinsame Liste in `api/ai.ts`: „ruht" ist eine
     // Aussage über den Lauf, keine über diese Komponente. Stünde hier wieder

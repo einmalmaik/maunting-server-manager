@@ -16,6 +16,7 @@ import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 
 import { emit, listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
 
+import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PromptDialog } from '@/components/ui/PromptDialog'
@@ -135,6 +136,7 @@ export function DesktopApp() {
     inhalt = (
       <Routes>
         <Route path="/ai" element={<Hauptseite bereich="ki" />} />
+        <Route path="/gedaechtnis" element={<Hauptseite bereich="gedaechtnis" />} />
         <Route path="/einstellungen" element={<Hauptseite bereich="einstellungen" />} />
         <Route path="*" element={<Navigate to="/ai" replace />} />
       </Routes>
@@ -276,11 +278,15 @@ function SprachwacheHaupt() {
  * `pages/Ai` rechnet seine Höhe als `100dvh − (Topbar + Seitenränder)`, und
  * dieselbe Rechnung soll hier aufgehen.
  */
-function Hauptseite({ bereich }: { bereich: 'ki' | 'einstellungen' }) {
+function Hauptseite({ bereich }: { bereich: 'ki' | 'gedaechtnis' | 'einstellungen' }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const darfChatten = useHasPermission('ai.chat.use')
+  // Im Panel wohnt die Ansicht unter Profil → KI; die App hat kein Profil,
+  // also bekommt sie einen eigenen Reiter. Ohne das Recht rendert die
+  // Komponente ohnehin nichts — dann lieber gar kein Reiter.
+  const darfGedaechtnis = useHasPermission('ai.memory.use')
   const agentName = user?.agent_name?.trim() || 'Singra'
 
   return (
@@ -298,6 +304,13 @@ function Hauptseite({ bereich }: { bereich: 'ki' | 'einstellungen' }) {
             onClick={() => navigate('/ai')}
             label={t('mss.app.chat')}
           />
+          {darfGedaechtnis && (
+            <Reiter
+              aktiv={bereich === 'gedaechtnis'}
+              onClick={() => navigate('/gedaechtnis')}
+              label={t('mss.app.gedaechtnis')}
+            />
+          )}
           <Reiter
             aktiv={bereich === 'einstellungen'}
             onClick={() => navigate('/einstellungen')}
@@ -316,6 +329,12 @@ function Hauptseite({ bereich }: { bereich: 'ki' | 'einstellungen' }) {
             ) : (
               <KeinChatrecht />
             )
+          ) : bereich === 'gedaechtnis' ? (
+            // Dieselbe Komponente wie im Panel unter Profil → KI, Standard-
+            // Scope „user": die persönlichen Einträge samt Servernotizen.
+            <div className="mx-auto w-full max-w-3xl">
+              <AiMemoryManager />
+            </div>
           ) : (
             <Einstellungen />
           )}

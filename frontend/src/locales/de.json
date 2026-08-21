@@ -905,7 +905,7 @@
       "enable": "Aktivieren",
       "later": "Später",
       "never": "Nicht mehr fragen",
-      "hint": "Du kannst das jederzeit unter Profil → KI ändern und einzelne Einträge dort einsehen und löschen.",
+      "hint": "Du kannst das jederzeit ändern und einzelne Einträge einsehen und löschen — im Panel unter Profil → KI, in der Desktop-App im Reiter „Gedächtnis\".",
       "enabled": "Gedächtnis aktiviert.",
       "failed": "Die Antwort konnte nicht gespeichert werden."
     },
@@ -4718,7 +4718,8 @@
       "chat": "Chat",
       "einstellungen": "Einstellungen",
       "abmelden": "Abmelden",
-      "keinChatrecht": "Dein Konto hat kein Recht, mit der KI zu chatten (ai.chat.use). Bitte deinen Betreiber, es dir zu geben — vorher bleibt dieses Fenster leer."
+      "keinChatrecht": "Dein Konto hat kein Recht, mit der KI zu chatten (ai.chat.use). Bitte deinen Betreiber, es dir zu geben — vorher bleibt dieses Fenster leer.",
+      "gedaechtnis": "Gedächtnis"
     },
     "overlay": {
       "schliessen": "Overlay schließen",

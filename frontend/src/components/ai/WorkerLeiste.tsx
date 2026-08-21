@@ -41,10 +41,13 @@ export function WorkerLeiste() {
   const laden = useCallback(async () => {
     try {
       setWorkers(await aiApi.listWorkers())
-    } catch {
+    } catch (fehler) {
       // Die Leiste ist eine Zusatzauskunft. Scheitert der Abruf, bleibt der
       // letzte Stand stehen — ein Fehlertoast wäre lästiger als eine kurz
-      // veraltete Liste.
+      // veraltete Liste. In die Konsole gehört es trotzdem: die Desktop-App
+      // spricht eine frei eingetragene Backend-Adresse, und ein 404 eines
+      // älteren Backends sähe sonst aus wie „es gibt keine Worker".
+      console.info('Worker-Liste nicht abrufbar', fehler)
     }
   }, [])
 

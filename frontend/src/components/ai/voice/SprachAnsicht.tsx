@@ -45,7 +45,7 @@ export function SprachAnsicht({
   useEffect(() => {
     if (gestartet.current) return
     gestartet.current = true
-    starten()
+    void starten()
   }, [starten])
 
   // ESC beendet das Gespräch. Es steht auch am Knopf — eine Tastenkombination,

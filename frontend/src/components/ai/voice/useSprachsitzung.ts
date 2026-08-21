@@ -99,7 +99,12 @@ interface Ergebnis {
    * eine Zahl, die kein React-Element je anzeigt.
    */
   pegel: () => number
-  starten: () => void
+  /**
+   * Async, weil vor dem Handshake das Bearer-Token der Desktop-App
+   * aufgefrischt wird — ein WebSocket kennt keinen 401-Retry. Die Auflösung
+   * heißt „Verbindungsaufbau angestoßen", nicht „verbunden".
+   */
+  starten: () => Promise<void>
   beenden: () => void
 }
 
@@ -186,7 +191,7 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     })
   }, [])
 
-  const starten = useCallback(() => {
+  const starten = useCallback(async () => {
     if (ws.current !== null) return
     gewollt.current = true
     setFehler(null)
@@ -201,7 +206,16 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     // Im Panel `undefined` (Cookie im Handshake); in der Desktop-App trägt das
     // Subprotokoll das Bearer-Token — der eine Header, den ein Browser-WebSocket
     // erreicht. Der Server spiegelt es in accept() (routers/ai_voice.py).
-    const verbindung = new WebSocket(adresse(providerId), wsProtokolle())
+    // Asynchron, weil das Token dafür frisch sein muss: ein Handshake kennt
+    // keinen 401-Retry, und mit einem abgelaufenen Token wäre die einzige
+    // Auskunft „Verbindung verloren". Die Wiedergabe oben bleibt bewusst vor
+    // dem await — sie braucht die Nutzergeste, das Warten nicht.
+    const protokolle = await wsProtokolle()
+    // Während des Wartens beendet oder anderweitig verbunden? Kein zweiter
+    // Socket — derselbe Grund wie die Sperre am Funktionsanfang.
+    if (!gewollt.current || ws.current !== null) return
+
+    const verbindung = new WebSocket(adresse(providerId), protokolle)
     verbindung.binaryType = 'arraybuffer'
     ws.current = verbindung
 
@@ -384,12 +398,14 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
       setVorschlag(null)
 
       if (planmaessig.current && gewollt.current) {
-        // Die 15 Minuten sind um. Neu verbinden heißt: erneut anmelden — genau
-        // deshalb gibt es die Grenze.
+        // Die 15 Minuten sind um. Neu verbinden heißt: erneut anmelden — das
+        // erledigt `starten` selbst (frisches Token vor dem Handshake); die
+        // Sitzungshöchstdauer ist exakt die Token-Laufzeit, ohne Erneuerung
+        // käme dieser Reconnect also immer mit einem toten Token an.
         planmaessig.current = false
         setZustand('verbindet')
         window.setTimeout(() => {
-          if (gewollt.current) starten()
+          if (gewollt.current) void starten()
         }, 250)
         return
       }

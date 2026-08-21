@@ -123,6 +123,13 @@ export function AiRunNotice() {
   // **Unterdrueckt wird nur das Fenster, in das man gerade sieht.** Vorher
   // genuegte der Pfad `/ai`: wer im Chat stand, bekam auch von einer beendeten
   // Reparatur nichts mit, obwohl er sie gar nicht sehen konnte.
+  //
+  // `sprache` und `aufgaben` zeigen den Verlauf **nicht** — wer dort steht,
+  // sieht weder Chatblasen noch Worker-Leiste und soll gemeldet bekommen, was
+  // er nicht sehen kann. Vorher zaehlten beide als „im Chat"; in der
+  // Desktop-App, die praktisch immer auf `/ai` steht, waren Worker damit aus
+  // der Sprachansicht heraus komplett unsichtbar: keine Leiste (nur im Chat
+  // gemountet) und keine Glocke (unterdrueckt).
   const suchParameter = new URLSearchParams(ort.search)
   const ansichtParam = ort.pathname.startsWith('/ai') ? suchParameter.get('ansicht') : null
   const offenesFenster: AiConversationKind | null = ort.pathname.startsWith('/ai')
@@ -130,7 +137,9 @@ export function AiRunNotice() {
         ? 'guardian'
         : ansichtParam === 'worker'
           ? 'worker'
-          : 'primary')
+          : ansichtParam === 'sprache' || ansichtParam === 'aufgaben'
+            ? null
+            : 'primary')
     : null
   // Bei `worker` reicht die Art nicht: man sieht **einen** Auftrag, nicht alle.
   const offeneWorkerId = offenesFenster === 'worker' ? suchParameter.get('id') : null

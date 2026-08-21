@@ -27,7 +27,7 @@ function mikroKontext(): FakeAudioContext {
 /** Startet die Sitzung und wartet, bis das Mikrofon wirklich laeuft. */
 async function sitzung() {
   const haken = renderHook(() => useSprachsitzung())
-  act(() => haken.result.current.starten())
+  await act(() => haken.result.current.starten())
   await act(async () => {
     leitung().simulateOpen()
     // `starteAufnahme` ist ein Promise; ohne diesen Durchlauf haengt das
@@ -69,7 +69,7 @@ describe('useSprachsitzung', () => {
 
   it('oeffnet das Mikrofon erst, wenn die Leitung steht', async () => {
     const haken = renderHook(() => useSprachsitzung())
-    act(() => haken.result.current.starten())
+    await act(() => haken.result.current.starten())
 
     expect(haken.result.current.zustand).toBe('verbindet')
     expect(audio.letzterStrom()).toBeNull()
@@ -85,7 +85,7 @@ describe('useSprachsitzung', () => {
   it('startet keine zweite Sitzung, solange eine laeuft', async () => {
     const haken = await sitzung()
 
-    act(() => haken.result.current.starten())
+    await act(() => haken.result.current.starten())
 
     expect(sockets.instances).toHaveLength(1)
   })
@@ -415,7 +415,7 @@ describe('useSprachsitzung', () => {
 
   it('schliesst das Mikrofon, wenn die Leitung waehrend der Freigabe abreisst', async () => {
     const haken = renderHook(() => useSprachsitzung())
-    act(() => haken.result.current.starten())
+    await act(() => haken.result.current.starten())
 
     act(() => {
       leitung().simulateOpen()
@@ -445,7 +445,7 @@ describe('useSprachsitzung', () => {
 
   it('meldet eine abgewiesene Leitung, statt stumm auszugehen', async () => {
     const haken = renderHook(() => useSprachsitzung())
-    act(() => haken.result.current.starten())
+    await act(() => haken.result.current.starten())
 
     // Das Backend weist ab, **bevor** es das Upgrade annimmt: fehlendes Recht
     // `ai.voice.use`, kein eingerichteter Zugang, kein entschluesselbarer
@@ -483,12 +483,14 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.fehler).toBe('ai.voice.errors.connection')
   })
 
-  it('macht den Lautsprecher schon bei der Nutzergeste bereit', () => {
+  it('macht den Lautsprecher schon bei der Nutzergeste bereit', async () => {
     audio.restore()
     audio = installFakeAudio({ gesperrt: true })
     const haken = renderHook(() => useSprachsitzung())
 
-    act(() => haken.result.current.starten())
+    // Der Kontext muss VOR dem await in starten() stehen (Nutzergeste!) —
+    // das await hier prueft nur den Rest des Aufbaus mit.
+    await act(() => haken.result.current.starten())
 
     // Browser entsperren Ton nur in einer Nutzergeste. Der Klick auf den
     // Sprachknopf ist die einzige, die diese Sitzung je bekommt: wer den
@@ -524,7 +526,7 @@ describe('useSprachsitzung', () => {
     audio = installFakeAudio({ verweigern: true })
     const haken = renderHook(() => useSprachsitzung())
 
-    act(() => haken.result.current.starten())
+    await act(() => haken.result.current.starten())
     await act(async () => {
       leitung().simulateOpen()
       await Promise.resolve()
