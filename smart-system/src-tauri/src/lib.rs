@@ -210,6 +210,70 @@ fn sprachsitzung_umschalten(app: &tauri::AppHandle) {
     }
 }
 
+/// Nur die eigene Oberfläche: die gebaute App (`tauri.localhost`) und der
+/// Dev-Server (`localhost:1430`). Präfix mit Schrägstrich statt blossem
+/// `starts_with` — „tauri.localhost.evil.example" wäre sonst auch „eigen".
+#[cfg_attr(not(windows), allow(dead_code))]
+fn ist_eigene_oberflaeche(uri: &str) -> bool {
+    const EIGENE: [&str; 3] = [
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+        "http://localhost:1430",
+    ];
+    EIGENE
+        .iter()
+        .any(|basis| uri == *basis || uri.starts_with(&format!("{basis}/")))
+}
+
+/// Beantwortet die Mikrofonfrage des WebViews — für genau die eigene
+/// Oberfläche.
+///
+/// WebView2 zeigt für `getUserMedia` auf `tauri.localhost` keinen eigenen
+/// Freigabedialog: die Anfrage blieb unbeantwortet, der Sprachmodus meldete
+/// „Mikrofon verweigert", und nie war eine Frage zu sehen. Der Handler
+/// erlaubt **nur** das Mikrofon und **nur** der eigenen Herkunft — Kamera,
+/// Standort und fremde Adressen behalten das Standardverhalten.
+#[cfg(windows)]
+fn mikrofon_freigeben(app: &tauri::AppHandle) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
+        COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+    };
+    use webview2_com::{take_pwstr, PermissionRequestedEventHandler};
+    // Bewusst nicht `windows::core::PWSTR`: unser `windows` (0.62, WASAPI)
+    // und das von webview2-com (0.61) tragen gleichnamige, inkompatible Typen.
+    use windows_strings::PWSTR;
+
+    for kennung in ["main", "overlay"] {
+        let Some(fenster) = app.get_webview_window(kennung) else {
+            continue;
+        };
+        let _ = fenster.with_webview(|webview| unsafe {
+            let Ok(kern) = webview.controller().CoreWebView2() else {
+                return;
+            };
+            let mut merkzettel = 0_i64;
+            let _ = kern.add_PermissionRequested(
+                &PermissionRequestedEventHandler::create(Box::new(|_, args| {
+                    let Some(args) = args else { return Ok(()) };
+                    let mut art = COREWEBVIEW2_PERMISSION_KIND::default();
+                    args.PermissionKind(&mut art)?;
+                    if art != COREWEBVIEW2_PERMISSION_KIND_MICROPHONE {
+                        return Ok(());
+                    }
+                    let mut uri = PWSTR::null();
+                    args.Uri(&mut uri)?;
+                    if ist_eigene_oberflaeche(&take_pwstr(uri)) {
+                        args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?;
+                    }
+                    Ok(())
+                })),
+                &mut merkzettel,
+            );
+        });
+    }
+}
+
 /// Prüft eine Tastenkombination, bevor irgendetwas umgestellt wird — die
 /// Fehlermeldung nennt die Kombination, nicht nur den Parserfehler.
 fn hotkey_pruefen(kombi: &str) -> Result<Shortcut, String> {
@@ -329,6 +393,10 @@ pub fn run() {
         ])
         .setup(|app| {
             tray::erstellen(app.handle())?;
+            // Ohne diesen Handler bleibt getUserMedia in WebView2 stumm —
+            // der Sprachmodus wäre in der App unbenutzbar.
+            #[cfg(windows)]
+            mikrofon_freigeben(app.handle());
             // Ein belegter Hotkey (anderes Tool nutzt Alt+Space) darf den
             // Start nicht verhindern — die App bleibt ueber Tray erreichbar.
             let konfig = konfig::laden(app.handle()).unwrap_or_default();
@@ -383,5 +451,19 @@ mod tests {
         // **was** abgelehnt wurde, nicht nur dass.
         let fehler = hotkey_pruefen("Foo+Bar").unwrap_err();
         assert!(fehler.contains("Foo+Bar"), "{fehler}");
+    }
+
+    #[test]
+    fn mikrofon_bekommt_nur_die_eigene_oberflaeche() {
+        use super::ist_eigene_oberflaeche;
+        assert!(ist_eigene_oberflaeche("http://tauri.localhost/desktop.html"));
+        assert!(ist_eigene_oberflaeche("https://tauri.localhost"));
+        assert!(ist_eigene_oberflaeche(
+            "http://localhost:1430/desktop.html?fenster=overlay"
+        ));
+        // Ein Präfix ist keine Herkunft: der Schrägstrich entscheidet.
+        assert!(!ist_eigene_oberflaeche("http://tauri.localhost.evil.example/"));
+        assert!(!ist_eigene_oberflaeche("http://localhost:14300/"));
+        assert!(!ist_eigene_oberflaeche("https://panel.example.com/"));
     }
 }

@@ -4809,7 +4809,7 @@
       "autostartHinweis": "The app starts minimised to the tray — only then does the wake word listen from the start.",
       "autostartFehler": "Autostart could not be changed.",
       "diagnose": "Diagnostics",
-      "diagnoseHinweis": "Test buttons for tray, overlay and ducking. In normal use the voice session drives all of this itself.",
+      "diagnoseHinweis": "Test buttons for tray, overlay and ducking. Ducking only lowers the audio of other programs — without music playing the test is inaudible. In normal use the voice session drives all of this itself.",
       "status": {
         "bereit": "Ready",
         "hoert": "Listening",

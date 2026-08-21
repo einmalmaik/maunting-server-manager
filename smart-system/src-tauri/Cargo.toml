@@ -16,7 +16,8 @@ tauri-build = { version = "2", features = [] }
 # tray-icon: System-Tray mit Statusfarben. image-png: Status-Icons werden als
 # PNG-Bytes eingebettet und zur Laufzeit dekodiert (tray::set_status).
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
-# Globaler Hotkey (Alt+Space) — Plugin statt eigener Hook: stabil, 0 % CPU.
+# Zwei globale Hotkeys (Fenster, Sprachsitzung; konfigurierbar, einzeln
+# abschaltbar) — Plugin statt eigener Hook: stabil, 0 % CPU.
 tauri-plugin-global-shortcut = "2"
 # Windows-Autostart; das Argument "--autostart" markiert Boot-Starts, damit
 # spaeter Crash-Guard und sanfter Start unterscheiden koennen, wer gestartet hat.
@@ -91,6 +92,18 @@ windows = { version = "0.62", features = [
     "Win32_System_Variant",
     "Win32_Foundation",
 ] }
+
+# Keine neue Kiste im Baum: exakt die Version, die wry/tauri ohnehin
+# mitbringen (Cargo.lock). Direkt gebraucht nur fuer den
+# PermissionRequested-Handler der Mikrofonfreigabe — WebView2 zeigt fuer
+# getUserMedia auf tauri.localhost keinen eigenen Prompt, ohne Handler
+# bliebe das Mikrofon in der App stumm.
+webview2-com = "0.38"
+# Der PWSTR-Typ, den webview2-com erwartet (windows-0.61-Familie nutzt
+# windows-strings 0.4). Unser `windows = 0.62` (WASAPI-Ducking) traegt einen
+# gleichnamigen, aber inkompatiblen Typ — dieselbe Kiste steht schon als
+# wry-Abhaengigkeit im Lock, hier wird sie nur direkt ansprechbar.
+windows-strings = "0.4"
 
 [features]
 # This feature is used for production builds or when a dev server is not

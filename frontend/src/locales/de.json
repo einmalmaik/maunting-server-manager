@@ -4809,7 +4809,7 @@
       "autostartHinweis": "Die App startet minimiert im Tray — nur so hört das Wake-Word von Anfang an zu.",
       "autostartFehler": "Autostart ließ sich nicht umstellen.",
       "diagnose": "Diagnose",
-      "diagnoseHinweis": "Testknöpfe für Tray, Overlay und Ducking. Im Betrieb steuert die Sprachsitzung all das von selbst.",
+      "diagnoseHinweis": "Testknöpfe für Tray, Overlay und Ducking. Ducking senkt nur den Ton anderer Programme — ohne laufende Musik ist der Test unhörbar. Im Betrieb steuert die Sprachsitzung all das von selbst.",
       "status": {
         "bereit": "Bereit",
         "hoert": "Hört zu",
