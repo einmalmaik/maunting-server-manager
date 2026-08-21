@@ -122,9 +122,11 @@ def einloesen(db: Session, code: str) -> DevicePairing | None:
 def familie_vermerken(db: Session, einladung: DevicePairing, family: str) -> None:
     """Haengt die Refresh-Familie der frisch entstandenen Sitzung an.
 
-    Getrennt vom Einloesen, weil die Sitzung erst danach existiert: `einloesen`
-    darf den Code schon verbraucht haben, wenn das Ausstellen scheitert — ein
-    halb benutzter Code ist besser als ein zweimal benutzter.
+    Getrennt vom Einloesen, weil die Sitzung erst danach existiert. `einloesen`
+    setzt `redeemed_at` nur per `flush`: scheitert das Ausstellen danach, rollt
+    die Anfrage zurueck und der Code bleibt bis zum Ablauf brauchbar. Fuer die
+    Einmaligkeit reicht das — sie haengt an der Sperre in `einloesen`, nicht am
+    Zeitpunkt des Commits.
     """
     einladung.family = family
     db.commit()
