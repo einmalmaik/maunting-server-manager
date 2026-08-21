@@ -561,15 +561,14 @@ def herkunft_aus_zustand(zustand: dict) -> str:
     geschnitten, und ein Lauf, der die Herkunft mitten im Zug wechselte, saehe
     Werkzeuge, unter denen er nicht angefangen hat.
 
-    Ein unbekannter Wert faellt auf "desktop", die **engere** Herkunft: sie
-    verliert die Serverwerkzeuge. Wie bei der Rolle ist der Verlust des
-    Rahmens die gefaehrliche Richtung — ein Tippfehler darf die Servergrenze
-    des Smart Systems nicht stillschweigend oeffnen.
+    Ein unbekannter Wert faellt auf "panel", die **engere** Herkunft: sie
+    verliert die Desktop-Werkzeuge. Bis zum 21.08.2026 fiel er auf "desktop",
+    weil damals dort die Serverwerkzeuge fehlten — mit der umgedrehten Matrix
+    (`ai_tool_registry.herkunft_schnitt`) ist "desktop" die weitere Seite, und
+    die Rueckfallrichtung dreht mit. Wie bei der Rolle gilt: ein Tippfehler
+    darf keinen Rahmen oeffnen, den niemand gesetzt hat.
     """
-    roh = zustand.get("herkunft")
-    if roh is None:
-        return "panel"
-    return "panel" if str(roh) == "panel" else "desktop"
+    return "desktop" if str(zustand.get("herkunft")) == "desktop" else "panel"
 
 
 def worker_aus_zustand(zustand: dict) -> dict | None:
@@ -924,21 +923,12 @@ async def _tool_followup_messages(
             grund=rollen_grund,
         )
     # Der Herkunfts-Spiegel, gleich neben dem Rollen-Spiegel und aus demselben
-    # Grund: aus der Smart-System-App darf **kein** Serverwerkzeug laufen, auch
-    # kein halluzinierter Name. Der Katalogschnitt ist Fuehrung, die Schranke
-    # steht hier. Aussortiert statt geworfen — der Lauf soll weiterarbeiten und
-    # dem Benutzer sagen koennen, wo seine Server zu bedienen sind.
-    if herkunft == "desktop":
-        tool_calls = _aussortieren(
-            tool_calls, deferred,
-            erlaubt=lambda name: name not in SERVER_READ_TOOLS,
-            grund=(
-                "Serverwerkzeuge stehen im Smart System nicht zur Verfügung — "
-                "der Rechner des Benutzers ist keine Serververwaltung. Der "
-                "Aufruf lief nicht; verweise für Server auf das Panel."
-            ),
-        )
-    else:
+    # Grund. Nur noch **eine** Richtung, seit die Matrix umgedreht ist
+    # (`ai_tool_registry.herkunft_schnitt`): aus dem Panel erreicht kein
+    # Werkzeug den Rechner des Benutzers, auch kein halluzinierter Name. Der
+    # Katalogschnitt ist Fuehrung, die Schranke steht hier. Aussortiert statt
+    # geworfen — der Lauf soll ohne den Aufruf weiterarbeiten.
+    if herkunft != "desktop":
         tool_calls = _aussortieren(
             tool_calls, deferred,
             erlaubt=lambda name: name not in DESKTOP_TOOLS,
@@ -2535,9 +2525,9 @@ async def _werkzeuge_und_grenze(
         erlaubt = erlaubt - worker_ausschluss()
     else:
         erlaubt = erlaubt - (WORKER_STEUERUNG | NUR_WORKER)
-    # Danach die Herkunft: aus der Smart-System-App kein Serverwerkzeug, aus
-    # dem Panel kein fremder Rechner (Betreiberbeschluss, siehe
-    # `herkunft_schnitt`). Der Schnitt steht **vor** Guardian und Aufgaben,
+    # Danach die Herkunft: aus dem Panel kein Zugriff auf den Rechner des
+    # Benutzers (siehe `herkunft_schnitt`; die Gegenrichtung schneidet nichts,
+    # die App bekommt alles). Der Schnitt steht **vor** Guardian und Aufgaben,
     # damit deren Aufzaehlungen ihn nicht wieder oeffnen koennen.
     erlaubt = herkunft_schnitt(frozenset(erlaubt), herkunft)
     if guardian is not None:

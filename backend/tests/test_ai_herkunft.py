@@ -1,9 +1,16 @@
-"""Die Grenze zwischen Panel und Smart System — beide Richtungen.
+"""Die Grenze zwischen Panel und Smart System — eine Richtung, nicht zwei.
 
-Ein Betreiberbeschluss vom 14.08.2026: die Desktop-App ist ausdruecklich
-**keine** zweite Serververwaltung (Hoster-Neutralitaet). Eine Bitte, die von
-dort kommt, erreicht deshalb kein Serverwerkzeug — und umgekehrt erreicht eine
-Bitte aus dem Browser keinen fremden Rechner.
+Betreiberentscheid vom 21.08.2026: die Desktop-App ist derselbe Zugang wie das
+Panel, nur mit einem Rechner daran. Die KI darin bekommt alles, was der
+Benutzer darf, **plus** die Werkzeuge fuer seinen Rechner. Hier stand bis dahin
+das Gegenteil (aus der App kein Serverwerkzeug, mit Hoster-Neutralitaet
+begruendet) — das war eine Fehllesung: gemeint war, dass die App als
+*Oberflaeche* keine Serververwaltung zeigt, nicht dass die KI dort weniger darf.
+
+Was bleibt, ist die Gegenrichtung: **aus dem Panel erreicht kein Werkzeug den
+Rechner.** Die Desktop-Werkzeuge brauchen die laufende App und einen Menschen
+vor der Bestaetigungskarte; aus dem Browser liefen sie in die Frist. Und ein
+uebernommener Browser-Tab soll nicht nach Maus und Tastatur greifen koennen.
 
 Zwei Schranken, wie ueberall im Haus:
 
@@ -15,10 +22,8 @@ Zwei Schranken, wie ueberall im Haus:
 
 Und die Herkunft selbst ist eingefroren: ein Lauf, der als Desktop-Lauf
 begonnen hat, bleibt einer. Ein unlesbarer Wert faellt auf die **engere**
-Seite, nicht auf die weitere.
+Seite, und die heisst seit der Umdrehung "panel".
 """
-
-import pytest
 
 from services import ai_prompt
 from services.ai_stream_service import herkunft_aus_zustand
@@ -35,11 +40,11 @@ ALLE = frozenset(WERKZEUGE)
 
 
 class TestKatalogschnitt:
-    def test_aus_dem_smart_system_kein_serverwerkzeug(self):
+    def test_aus_dem_smart_system_bleiben_die_serverwerkzeuge(self):
         erlaubt = herkunft_schnitt(ALLE, "desktop")
-        assert not (erlaubt & SERVER_READ_TOOLS)
-        assert not (erlaubt & SERVER_WRITE_TOOLS)
-        # Die Desktop-Werkzeuge bleiben — sonst waere der Schnitt sinnlos.
+        # Der eigentliche Punkt dieser Datei: die App ist kein kleineres Panel.
+        assert SERVER_READ_TOOLS <= erlaubt
+        assert SERVER_WRITE_TOOLS <= erlaubt
         assert DESKTOP_TOOLS <= erlaubt
 
     def test_aus_dem_panel_kein_fremder_rechner(self):
@@ -48,6 +53,10 @@ class TestKatalogschnitt:
         # Serverwerkzeuge bleiben unangetastet: das Panel ist ihr Ort.
         assert SERVER_READ_TOOLS <= erlaubt
         assert SERVER_WRITE_TOOLS <= erlaubt
+
+    def test_der_desktop_schnitt_nimmt_ueberhaupt_nichts_weg(self):
+        """Sonst ist die Umdrehung nur halb passiert."""
+        assert herkunft_schnitt(ALLE, "desktop") == ALLE
 
     def test_schnitt_holt_nie_etwas_zurueck(self):
         """Ein Schnitt, keine Ersetzung — ein fehlendes Recht bleibt fehlend."""
@@ -67,11 +76,11 @@ class TestEingefroreneHerkunft:
         assert herkunft_aus_zustand({}) == "panel"
 
     def test_unbekannter_wert_faellt_auf_die_engere_seite(self):
-        # Die gefaehrliche Richtung ist, die Servergrenze stillschweigend zu
-        # oeffnen — also faellt ein Tippfehler auf "desktop", nicht auf "panel".
-        assert herkunft_aus_zustand({"herkunft": "Panel "}) == "desktop"
-        assert herkunft_aus_zustand({"herkunft": "quatsch"}) == "desktop"
-        assert herkunft_aus_zustand({"herkunft": 7}) == "desktop"
+        # Seit der Umdrehung ist "panel" die engere Seite: sie verliert die
+        # Desktop-Werkzeuge. Ein Tippfehler darf keinen Rechner ansteuern.
+        assert herkunft_aus_zustand({"herkunft": "Desktop "}) == "panel"
+        assert herkunft_aus_zustand({"herkunft": "quatsch"}) == "panel"
+        assert herkunft_aus_zustand({"herkunft": 7}) == "panel"
 
     def test_gesetzte_werte_bleiben(self):
         assert herkunft_aus_zustand({"herkunft": "panel"}) == "panel"
@@ -92,12 +101,17 @@ class TestPrompt:
         text = ai_prompt.build(gesprochen=True, desktop=True)
         assert text.index(ai_prompt.DESKTOP) < text.index(ai_prompt.GESPROCHEN)
 
-    def test_block_nennt_die_sandbox_und_die_grenze(self):
-        # Der Block ist keine Schranke, aber er muss die drei Dinge sagen, an
-        # denen sich das Modell orientiert: Ordner, Servergrenze, Fremdtext.
+    def test_block_nennt_die_sandbox_und_den_fremdtext(self):
+        # Der Block ist keine Schranke, aber er muss sagen, woran sich das
+        # Modell orientiert: der Ordner und die Herkunft dessen, was es liest.
         assert "Sandbox" in ai_prompt.DESKTOP
-        assert "Server bedienst du von hier aus nicht" in ai_prompt.DESKTOP
         assert "Material" in ai_prompt.DESKTOP
+
+    def test_block_verbietet_die_server_nicht_mehr(self):
+        # Ein Prompt, der Server verbietet, waehrend der Katalog sie anbietet,
+        # ist schlimmer als beides einzeln: das Modell weigert sich mit einer
+        # Begruendung, die nicht mehr stimmt.
+        assert "Server bedienst du von hier aus nicht" not in ai_prompt.DESKTOP
 
 
 class TestWerkzeugkatalog:
@@ -120,9 +134,11 @@ class TestWerkzeugkatalog:
                 assert "server_id" not in felder, name
 
 
-@pytest.mark.parametrize("herkunft", ["panel", "desktop"])
-def test_jedes_werkzeug_gehoert_genau_einer_welt(herkunft):
-    """Kein Werkzeug faellt durch beide Schnitte — sonst waere es nie nutzbar."""
-    aus_panel = herkunft_schnitt(ALLE, "panel")
+def test_die_app_sieht_den_ganzen_katalog():
+    """Frueher war die Vereinigung beider Seiten der ganze Katalog, weil jede
+    Seite etwas verlor. Jetzt genuegt die App allein — und das Panel ist genau
+    um die Desktop-Werkzeuge kleiner."""
     aus_desktop = herkunft_schnitt(ALLE, "desktop")
-    assert aus_panel | aus_desktop == ALLE
+    aus_panel = herkunft_schnitt(ALLE, "panel")
+    assert aus_desktop == ALLE
+    assert aus_panel == ALLE - DESKTOP_TOOLS

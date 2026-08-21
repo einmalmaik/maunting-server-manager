@@ -961,24 +961,32 @@ AUFGABEN_HANDELN = frozenset({
 
 
 def herkunft_schnitt(erlaubt: frozenset[str], herkunft: str) -> frozenset[str]:
-    """Was eine Herkunft vom Katalog abzieht — die Grenze zwischen den Welten.
+    """Was eine Herkunft vom Katalog abzieht — nur **eine** Richtung.
 
-    Zwei Richtungen, und beide sind Betreiberbeschluesse:
+    Aus der Smart-System-App bekommt die KI alles, was der Benutzer darf, und
+    die Desktop-Werkzeuge obendrauf. Das ist derselbe Account und dieselbe
+    Unterhaltung; die App ist kein zweites, kleineres Panel, sondern derselbe
+    Zugang mit einem Rechner daran.
 
-    * Aus der Smart-System-App erreicht die KI **kein** Serverwerkzeug. Der
-      Desktop-Client ist ausdruecklich keine zweite Serververwaltung
-      (Hoster-Neutralitaet). Wer seine Server bedienen will, nimmt das Panel —
-      dieselbe Unterhaltung, dieselbe KI, nur der andere Weg hinein.
-    * Aus dem Panel erreicht sie **keinen** fremden Rechner. Die Desktop-
-      Werkzeuge setzen voraus, dass jemand vor dem Rechner sitzt und die App
-      laeuft; aus dem Browser abgeschickt liefen sie in eine Frist statt in
-      eine Antwort.
+    Hier stand bis zum 21.08.2026 das Gegenteil: aus der App seien alle
+    Serverwerkzeuge entfernt, mit Hoster-Neutralitaet begruendet. Das war eine
+    Fehllesung eines aelteren Beschlusses. Gemeint war, dass die App **als
+    Oberflaeche** keine Serververwaltung anbietet — sie zeigt Chat und
+    Sprache, keine Serverliste. Was die KI darin darf, richtet sich wie
+    ueberall nach den Rechten des Benutzers.
+
+    Umgekehrt bleibt es dabei: **aus dem Panel erreicht sie keinen Rechner.**
+    Die Desktop-Werkzeuge setzen voraus, dass die App laeuft und jemand davor
+    sitzt — die Uebernahme wird an einer Karte in der App bestaetigt, nicht im
+    Browser. Aus dem Browser abgeschickt liefen sie in die Frist statt in eine
+    Antwort. Und es haelt einen uebernommenen Browser-Tab davon ab, Maus und
+    Tastatur des Rechners zu verlangen.
 
     Das ist ein Schnitt, keine Ersetzung: ein fehlendes Recht holt hier
     niemand zurueck.
     """
     if herkunft == "desktop":
-        return frozenset(erlaubt) - SERVER_READ_TOOLS - SERVER_WRITE_TOOLS
+        return frozenset(erlaubt)
     return frozenset(erlaubt) - DESKTOP_TOOLS
 
 

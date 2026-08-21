@@ -184,6 +184,31 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     Grenze gerissen worden fuer Zeichen, die nie jemand bezahlt — und die
     naheliegende Reaktion (Grenze hoch) haette die Zahl entwertet, die hier
     seit dem 13.08. bewusst wehtut.
+
+    **Stand 21.08.2026, spaeter am selben Tag: Grenze 62.000.** Der Absatz
+    darueber ist damit ueberholt, und zwar durch einen Betreiberentscheid, nicht
+    durch Wachstum: die Smart-System-App bekommt den vollen Panel-Katalog **und**
+    die Desktop-Werkzeuge. `herkunft_schnitt` teilt den Katalog seither nicht
+    mehr in zwei Welten — die App sieht alles, das Panel alles ausser den vier
+    Desktop-Werkzeugen. Nachgemessen:
+
+    * aus der Smart-System-App: **60.456** Zeichen, 65 Werkzeuge (= Rohkatalog),
+    * aus dem Panel: **56.990** Zeichen, 61 Werkzeuge,
+    * die vier Desktop-Werkzeuge zusammen: **3.466** Zeichen.
+
+    Der teuerste Fall ist damit die App, und er liegt 2.456 Zeichen ueber der
+    alten Grenze. Zusammenlegen scheidet aus: die vier Schemata sind
+    verschieden (Dateien: aktion/pfad/inhalt, Programmstart: programm/url,
+    Uebernahme: anliegen/minuten, Steuern: aktion/x/y/text). Kuerzen der
+    Beschreibungen auch — jede traegt einen Betriebsanlass, und drei davon
+    beschreiben eine Sicherheitsgrenze (Sandbox, Frist, Bestaetigung), die das
+    Modell kennen muss.
+
+    Die 62.000 sind deshalb der ehrliche Preis der Entscheidung, mit denselben
+    gut viertausend Zeichen Luft wie vorher — und nicht der Anfang einer
+    Gewoehnung. Wer sie erneut anhebt, misst vorher nach und schreibt es hin.
+    Der Hebel ist unveraendert: zwei Werkzeuge mit demselben Schema zu einem
+    machen, nicht Text streichen.
     """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(
@@ -197,7 +222,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
             ],
             ensure_ascii=False,
         )
-        assert len(katalog) < 58_000, (
+        assert len(katalog) < 62_000, (
             f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
             f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
             "taucht in keiner Budgetrechnung auf."
