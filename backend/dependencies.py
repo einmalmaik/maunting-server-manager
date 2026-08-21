@@ -76,6 +76,32 @@ def get_current_user_for_ws(ws: WebSocket, db: Session) -> User:
     return _user_from_token(token, db)
 
 
+def session_herkunft(request: Request) -> str:
+    """Von welcher Art Client die Anfrage kommt: ``"panel"`` oder ``"desktop"``.
+
+    Steht im Token, nicht im Request-Koerper. Bis zum 21.08.2026 schickte der
+    Client das Feld selbst mit — damit war „aus dem Panel erreicht nichts den
+    Rechner des Benutzers" eine Absichtserklaerung, an die sich nur hielt, wer
+    wollte. Ein uebernommener Browser-Tab mit gueltiger Sitzung haette sich als
+    App ausgeben und Maus und Tastatur verlangen koennen.
+
+    Der Anspruch kommt aus derselben Ausstellung wie die Identitaet
+    (`services/session_service.issue_session`) und ueberlebt die Rotation ueber
+    `refresh_tokens.geraet`. Hier wird das Token **nicht** noch einmal geprueft:
+    das hat `get_current_user` bereits getan, und diese Abhaengigkeit laeuft nur
+    neben ihr. Sie entscheidet auch nichts ueber Rechte, nur ueber die
+    Werkzeugmenge (`ai_tool_registry.herkunft_schnitt`).
+
+    Alles, was nicht ausdruecklich ``"desktop"`` sagt, ist ``"panel"`` — die
+    engere Seite.
+    """
+    token = _bearer_token(request) or request.cookies.get("__Secure-access_token")
+    if not token:
+        return "panel"
+    payload = AuthService.decode_token(token) or {}
+    return "desktop" if payload.get("geraet") == "desktop" else "panel"
+
+
 def get_current_owner(user: User = Depends(get_current_user)) -> User:
     if not user.is_owner:
         raise HTTPException(status_code=403, detail="Nur Owner erlaubt")

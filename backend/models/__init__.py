@@ -19,6 +19,7 @@ from .ai_task import AiTask
 from .ai_mail_outbox import AiMailOutbox
 from .ai_meldung import AiMeldung
 from .desktop_job import DesktopJob
+from .device_pairing import DevicePairing
 from .server import Server
 from .node import Node
 from .node_enrollment import NodeEnrollment
@@ -69,7 +70,7 @@ __all__ = [
     "AiMemoryEntry", "AiMemoryPreference", "AiSkill", "AiAttachment",
     "AiAutonomyGrant", "AiToolResult", "AiRun", "AiGuardianNotice",
     "AiGuardianRepair", "AiTask", "AiActionApproval",
-    "AiMailOutbox", "AiMeldung", "DesktopJob",
+    "AiMailOutbox", "AiMeldung", "DesktopJob", "DevicePairing",
     "Server", "Node", "NodeEnrollment", "Role", "RolePermission", "ServerPermission",
     "Team", "TeamMember", "TeamServerGrant",
     "Backup", "PanelBackup", "Mod", "AuditLog", "RefreshToken", "JwtBlacklist",

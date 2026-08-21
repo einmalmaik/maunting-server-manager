@@ -127,12 +127,12 @@ class AiChatRequest(BaseModel):
     # ist ein Wunsch, keine Anweisung — `ai_reasoning.vorgabe` klemmt ihn auf
     # das, was Modell und Rolle hergeben, bevor er den Server verlaesst.
     reasoning_effort: str | None = Field(default=None, max_length=16)
-    # Von wo die Bitte kam. "desktop" sagt die Smart-System-App; daraus folgt
-    # ein anderer Werkzeugkatalog (`ai_tool_registry.herkunft_schnitt`): der
-    # Rechner des Benutzers statt seiner Server. Das Feld waehlt der Client,
-    # nicht das Modell — es kann sich seine Werkzeuge damit nicht selbst
-    # beschaffen. Ohne Angabe gilt das Panel.
-    herkunft: Literal["panel", "desktop"] = "panel"
+    # Hier stand `herkunft: Literal["panel", "desktop"]`. Das Feld ist am
+    # 21.08.2026 verschwunden, nicht umbenannt: die Herkunft entscheidet, ob
+    # die KI die Werkzeuge fuer den Rechner des Benutzers ueberhaupt angeboten
+    # bekommt, und so etwas darf kein Client von sich selbst behaupten. Sie
+    # kommt jetzt aus dem Token (`dependencies.session_herkunft`), das beim
+    # Koppeln ausgestellt wurde.
 
 
 class AiMessageEdit(BaseModel):

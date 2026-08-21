@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import require_global, verify_csrf
+from dependencies import require_global, session_herkunft, verify_csrf
 from models import AiConversation, AiMessage, AiProvider, User
 from models.ai_conversation import ARTEN
 from schemas.ai_chat import (
@@ -590,6 +590,7 @@ async def stream_message(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
+    herkunft: str = Depends(session_herkunft),
     _: None = Depends(verify_csrf),
 ) -> StreamingResponse:
     conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
@@ -657,8 +658,11 @@ async def stream_message(
             # zwischen "kleines Fenster" und "kein Wissen" noch sehen.
             context_chars=fenster.zeichen if fenster.bekannt else None,
             # Von wo die Bitte kam. Entscheidet den Werkzeugkatalog des Laufs
-            # (`herkunft_schnitt`) und wird darin eingefroren.
-            herkunft=payload.herkunft,
+            # (`herkunft_schnitt`) und wird darin eingefroren. Aus dem Token,
+            # nicht aus dem Koerper: solange der Client sie selbst erklaerte,
+            # konnte sich jeder als App ausgeben und nach Maus und Tastatur
+            # greifen (`dependencies.session_herkunft`).
+            herkunft=herkunft,
         )
         if run_id is None:
             code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")

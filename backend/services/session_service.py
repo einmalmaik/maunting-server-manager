@@ -38,6 +38,7 @@ def issue_session(
     db: Session,
     user: User,
     family: str | None = None,
+    geraet: str | None = None,
 ) -> SessionTokens:
     """Stellt Access-, Refresh- und CSRF-Token aus und setzt die Auth-Cookies.
 
@@ -58,11 +59,22 @@ def issue_session(
     ändert nichts am Cookie-Weg — Browser-Aufrufer ignorieren ihn einfach. Ein
     zweiter Ausstellungspfad nur für native Clients wäre der Fehler, gegen den
     dieses Modul existiert (siehe Modul-Docstring und die jti-Geschichte oben).
+
+    `geraet` sagt, von welcher Art Client die Sitzung stammt — `"desktop"` für
+    ein gekoppeltes Gerät, `None` für den Browser. Es geht an zwei Orte: in den
+    Token-Claim, damit jede Anfrage es ohne Datenbankfrage kennt, und an die
+    Refresh-Zeile, damit es die Rotation überlebt. Es ist der Grund, warum
+    „aus dem Panel erreicht nichts den Rechner des Benutzers" eine Schranke ist
+    und nicht eine Bitte an den Client: er kann sie nicht mehr selbst erklären
+    (`dependencies.session_herkunft`).
     """
-    access_token = AuthService.create_access_token(
-        {"sub": user.username, "user_id": user.id, "jti": str(uuid.uuid4())}
+    ansprueche = {"sub": user.username, "user_id": user.id, "jti": str(uuid.uuid4())}
+    if geraet:
+        ansprueche["geraet"] = geraet
+    access_token = AuthService.create_access_token(ansprueche)
+    refresh_token = AuthService.create_refresh_token(
+        db, user.id, family=family, geraet=geraet
     )
-    refresh_token = AuthService.create_refresh_token(db, user.id, family=family)
     csrf_token = AuthService.create_csrf_token()
     _set_auth_cookies(response, access_token, refresh_token, csrf_token)
     return SessionTokens(access_token, refresh_token, csrf_token)

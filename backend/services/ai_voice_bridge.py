@@ -626,6 +626,12 @@ class Sprachbruecke:
             # Prompt — sonst veralten zwei Texte gegeneinander, und zwar
             # lautlos.
             gesprochen=True,
+            # `herkunft` bleibt der Vorgabewert "panel", und das ist heute
+            # richtig: der Sprachkanal ist ein WebSocket, und
+            # `get_current_user_for_ws` liest ausschliesslich das Cookie. Die
+            # Desktop-App hat keins — sie kann hier gar nicht ankommen. Wenn
+            # sie es einmal kann, gehoert die Herkunft aus dem Handshake-Token
+            # hierher, nicht ein zweiter Vorgabewert.
         )
         if run_id is None:
             code = fehler[0] if fehler else "AI_PROVIDER_UNAVAILABLE"

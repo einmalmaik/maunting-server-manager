@@ -22,4 +22,12 @@ class RefreshToken(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Von welcher Art Client diese Sitzung stammt: "desktop" fuer ein
+    # gekoppeltes Geraet (Smart System), `None` fuer den Browser. Steht hier und
+    # nicht nur im Access-Token, weil die Rotation in `/api/auth/refresh` das
+    # Token neu baut und die Herkunft sonst beim ersten Erneuern verloren ginge.
+    # Sie entscheidet, ob die KI die Werkzeuge des Rechners ueberhaupt
+    # angeboten bekommt (`ai_tool_registry.herkunft_schnitt`).
+    geraet: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
     user: Mapped["User"] = relationship("User", back_populates="refresh_tokens")

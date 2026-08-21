@@ -11,13 +11,26 @@ from config import settings
 # zugesicherte `jti` erneut vergessen kann.
 from cookies import _clear_auth_cookies
 from database import get_db
-from dependencies import get_current_user, get_current_owner, verify_csrf, _bearer_token
+from dependencies import (
+    get_current_user,
+    get_current_owner,
+    require_global,
+    verify_csrf,
+    _bearer_token,
+)
 from models import User, EmailVerification
 from services.dis_client import DisClient
 from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
 from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, AgentNameUpdateRequest
+from schemas.device_pairing import (
+    PairedDevice,
+    PairingCreated,
+    PairingCreateRequest,
+    PairingRedeemRequest,
+)
 from services import AuthService, EmailService
+from services import device_pairing_service
 from services.email_verification_service import EmailVerificationService
 from services.jwt_blacklist_service import blacklist_jwt
 from services.backup_code_service import BackupCodeService
@@ -386,6 +399,111 @@ async def login(
     return {"access_token": "", "token_type": "bearer", "requires_2fa": False}
 
 
+# ── Geraetekopplung (Smart System) ───────────────────────────────────────────
+#
+# Der einzige Weg, wie die Desktop-App eine Sitzung bekommt. Sie kennt weder
+# Passwort noch 2FA-Code, und genau das ist der Punkt: bei aktivem Captcha
+# verlangt `/login` ein Turnstile-Token, das ein Tauri-WebView nicht besorgen
+# kann (Cloudflare-Schluessel haengen an Domains, `tauri.localhost` ist keine).
+# Statt die Anmeldestrecke im Desktop-Fenster nachzubauen, laedt der bereits
+# angemeldete Mensch sein Geraet ein.
+#
+# Alle vier Routen liegen bewusst in diesem Router: `main.py` haengt ihn unter
+# `auth_rate_limit`, und das gilt damit auch fuer das Einloesen — die eine
+# Stelle, an der jemand raten koennte.
+
+
+@router.post("/devices/pairing", response_model=PairingCreated)
+def create_device_pairing(
+    req: PairingCreateRequest,
+    user: User = Depends(require_global("ai.chat.use")),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Erzeugt einen Kopplungscode. Er steht **nur** in dieser Antwort.
+
+    `ai.chat.use` als Schranke: ohne dieses Recht kann die App nichts, was sie
+    ausmacht. Wer es nicht hat, soll erst gar keinen Zugang erzeugen koennen.
+    """
+    einladung, code = device_pairing_service.anlegen(db, user, req.label)
+    return {
+        "code": code,
+        "expires_at": einladung.expires_at,
+        "label": einladung.label,
+    }
+
+
+@router.post("/devices/redeem", response_model=TokenResponse)
+def redeem_device_pairing(
+    req: PairingRedeemRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Loest einen Kopplungscode ein und gibt dafuer eine Sitzung.
+
+    Kein Captcha: der Code ist der Beweis, und er stammt aus einer bereits
+    angemeldeten Sitzung — die Pruefungen, die Captcha ersetzen soll, sind dort
+    schon gelaufen.
+
+    Die Antwort auf einen unbrauchbaren Code ist immer dieselbe, egal ob er
+    unbekannt, abgelaufen oder schon benutzt ist. Wer raet, soll aus der
+    Antwort nicht lernen, ob er nah dran war.
+    """
+    einladung = device_pairing_service.einloesen(db, req.code)
+    if einladung is None:
+        raise HTTPException(status_code=400, detail="Kopplungscode ungültig oder abgelaufen")
+    user = AuthService.get_user_by_id(db, einladung.user_id)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=400, detail="Kopplungscode ungültig oder abgelaufen")
+
+    # Erst hier entsteht die Sitzung, und mit ihr die Familie. `geraet` macht
+    # sie zur Desktop-Sitzung: nur sie bekommt die Werkzeuge fuer den Rechner
+    # angeboten (`ai_tool_registry.herkunft_schnitt`).
+    tokens = issue_session(response, db, user, geraet="desktop")
+    rt = AuthService.validate_refresh_token(db, tokens.refresh_token)
+    if rt is not None:
+        if req.label.strip():
+            einladung.label = req.label.strip()[: device_pairing_service.MAX_BEZEICHNUNG]
+        device_pairing_service.familie_vermerken(db, einladung, rt.family)
+    return _native_token_body(tokens)
+
+
+@router.get("/devices", response_model=list[PairedDevice])
+def list_devices(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Die gekoppelten Geraete dieses Benutzers — Name und Familie, sonst nichts."""
+    return [
+        {
+            "family": eintrag.family,
+            "label": eintrag.label,
+            "paired_at": eintrag.redeemed_at,
+        }
+        for eintrag in device_pairing_service.geraete(db, user)
+    ]
+
+
+@router.delete("/devices/{family}")
+def revoke_device(
+    family: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Sperrt ein Geraet aus und vergisst seinen Namen.
+
+    Zwei Schritte, und der erste zaehlt: die Refresh-Familie wird widerrufen,
+    damit das Geraet keine neue Sitzung mehr holen kann. Das laufende
+    Access-Token bleibt bis zu seinem Ablauf gueltig — dieselbe Regel wie
+    ueberall sonst; ein Widerruf wirkt spaetestens beim naechsten Erneuern.
+    """
+    AuthService.revoke_refresh_family(db, user.id, family)
+    if device_pairing_service.vergessen(db, user, family) is None:
+        raise HTTPException(status_code=404, detail="Gerät nicht gefunden")
+    return {"message": "Gerät entkoppelt"}
+
+
 @router.post("/logout")
 def logout(
     request: Request,
@@ -464,8 +582,11 @@ def refresh(
     # und liess dabei die `jti` weg. Folge: ab dem ersten Refresh konnte der
     # Logout das Access-Token nicht mehr auf die Blacklist setzen, ein
     # entwendetes Cookie blieb bis zum Ablauf voll gueltig. Die Familie wird
-    # weitergereicht, damit die Wiederverwendungserkennung nicht abreisst.
-    tokens = issue_session(response, db, user, family=family)
+    # weitergereicht, damit die Wiederverwendungserkennung nicht abreisst — und
+    # das Geraet mit ihr, sonst waere eine gekoppelte Sitzung nach dem ersten
+    # Erneuern eine gewoehnliche Panel-Sitzung und verloere die Werkzeuge fuer
+    # den Rechner des Benutzers.
+    tokens = issue_session(response, db, user, family=family, geraet=rt.geraet)
     if body_token:
         return _native_token_body(tokens)
     return {"message": "Token refreshed"}
