@@ -82,10 +82,22 @@ const PROVIDER = [
   },
 ];
 
+/**
+ * Schalter für den haeufigsten Einrichtungsfehler: die eingetragene Adresse
+ * liefert fuer jeden Pfad ihre Oberflaeche aus (SPA-Fallback) statt Daten.
+ */
+let antwortetMitWebseite = false;
+
 const fetchMock = vi.fn(async (url: string | URL | Request, _init?: RequestInit) => {
   const pfad = String(url);
   const json = (daten: unknown, status = 200) =>
     new Response(JSON.stringify(daten), { status, headers: { "Content-Type": "application/json" } });
+  if (antwortetMitWebseite) {
+    return new Response("<!DOCTYPE html><html><body>Panel</body></html>", {
+      status: 200,
+      headers: { "Content-Type": "text/html" },
+    });
+  }
   if (pfad.endsWith("/api/auth/captcha-config")) {
     return json({ enabled: false, provider: "none", site_key: "" });
   }
@@ -172,6 +184,7 @@ beforeEach(() => {
   chatNachrichten = [];
   offeneAuftraege = [];
   gemeldet.length = 0;
+  antwortetMitWebseite = false;
 });
 
 describe("App-Start", () => {
@@ -218,6 +231,19 @@ describe("Einrichtungs-Assistent", () => {
     expect(loginAufruf).toBeDefined();
     const body = JSON.parse(String(loginAufruf![1]?.body));
     expect(body.native_client).toBe(true);
+  });
+
+  it("erklaert eine Adresse, die eine Webseite statt Daten liefert", async () => {
+    antwortetMitWebseite = true;
+    render(<App />);
+    const nutzer = userEvent.setup();
+
+    await nutzer.type(await screen.findByLabelText("Panel-Adresse"), "https://falsch.test");
+    await nutzer.click(screen.getByRole("button", { name: "Verbinden" }));
+
+    // Der rohe Parserfehler ("Unexpected token '<'") darf nie sichtbar werden.
+    expect(await screen.findByText(/antwortet mit einer Webseite statt mit Daten/)).toBeInTheDocument();
+    expect(screen.queryByText(/Unexpected token/)).not.toBeInTheDocument();
   });
 });
 

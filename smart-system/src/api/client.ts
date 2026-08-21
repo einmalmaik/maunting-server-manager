@@ -24,6 +24,19 @@ export class ApiFehler extends Error {
   }
 }
 
+/**
+ * Was der Benutzer liest, wenn unter `/api/…` eine Webseite zurückkommt.
+ *
+ * Genau ein Fall erzeugt das: die eingetragene Adresse liefert für jeden
+ * unbekannten Pfad ihre Oberfläche aus (SPA-Fallback), weil sie gar nicht
+ * das Panel ist oder dessen API woanders liegt. Der rohe Parserfehler
+ * („Unexpected token '<'") sagt das niemandem.
+ */
+export const ANTWORT_IST_WEBSEITE =
+  "Diese Adresse antwortet mit einer Webseite statt mit Daten. " +
+  "Trage die Adresse ein, unter der im Browser dein MSM-Panel erscheint — " +
+  "und prüfe, ob dort /api/ erreichbar ist.";
+
 export function setzeBackendUrl(url: string): void {
   backendUrl = url.replace(/\/+$/, "");
 }
@@ -92,7 +105,15 @@ export async function stillAnmelden(): Promise<boolean> {
     await invoke("refresh_token_loeschen");
     return false;
   }
-  const tokens = (await antwort.json()) as { access_token: string; refresh_token: string };
+  let tokens: { access_token: string; refresh_token: string };
+  try {
+    tokens = (await antwort.json()) as { access_token: string; refresh_token: string };
+  } catch {
+    // Keine Daten, sondern eine Webseite (falsche Adresse). Das Token im
+    // Tresor ist deswegen nicht verbrannt — es bleibt liegen, damit die
+    // Anmeldung nach korrigierter Adresse noch still gelingen kann.
+    return false;
+  }
   accessToken = tokens.access_token;
   await invoke("refresh_token_speichern", { token: tokens.refresh_token });
   return true;
@@ -117,6 +138,8 @@ async function fehlerAus(antwort: Response): Promise<ApiFehler> {
  * Eine Antwort ohne Körper (204) kommt als `null` zurück und nicht als
  * Ausnahme: „nichts zu tun" ist beim Abholen von Aufträgen der Normalfall,
  * und ein `SyntaxError` aus dem JSON-Leser wäre dafür die falsche Sprache.
+ * Eine Antwort, die gar keine Daten sind, wird aus demselben Grund zu einer
+ * lesbaren Meldung übersetzt (`ANTWORT_IST_WEBSEITE`).
  */
 export async function api<T>(pfad: string, optionen: AnfrageOptionen = {}): Promise<T> {
   let antwort = await roheAnfrage(pfad, optionen);
@@ -132,7 +155,16 @@ export async function api<T>(pfad: string, optionen: AnfrageOptionen = {}): Prom
     return null as T;
   }
   const text = await antwort.text();
-  return (text ? JSON.parse(text) : null) as T;
+  if (!text) {
+    return null as T;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // Der Körper selbst gehört nicht in die Meldung: er kann beliebig gross
+    // sein und stammt von einem fremden Server.
+    throw new ApiFehler(antwort.status, ANTWORT_IST_WEBSEITE);
+  }
 }
 
 /**
