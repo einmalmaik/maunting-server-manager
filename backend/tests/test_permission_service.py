@@ -5,10 +5,23 @@ Prueft die zentrale Permission-Logik:
 - Globale Permissions via Rolle
 - Server-Permissions via Rolle (pauschal) oder Delegation
 - list_visible_servers / set_user_server_permissions
+- Hoster-Kundenserver: pauschale Rollen brauchen `servers.hoster_customers.view`
 """
 from sqlalchemy.orm import Session
 
-from models import Role, RolePermission, Server, ServerPermission, User
+from models import (
+    HosterIdentity,
+    HosterIntegration,
+    HosterService,
+    Role,
+    RolePermission,
+    Server,
+    ServerPermission,
+    Team,
+    TeamMember,
+    TeamServerGrant,
+    User,
+)
 from services import permission_service
 from services.role_service import ensure_system_roles, get_role_by_name
 
@@ -188,6 +201,161 @@ class TestListVisibleServersLaedtDiePorts:
 
         assert sorted(ports) == sorted(erwartet)
         assert abfragen <= 6, f"{abfragen} Abfragen für acht delegierte Server"
+
+
+def _mark_as_hoster_server(
+    db: Session, server: Server, customer: User, *, status: str = "ready"
+) -> HosterService:
+    """Haengt einen Server an einen Shop-Vertrag — die Markierung, auf die der
+    Sichtbarkeitsfilter schaut. Der Vertragsstatus ist absichtlich Parameter:
+    auch suspendierte Vertraege sind Kundendaten."""
+    integration = HosterIntegration(
+        name=f"Shop {server.name}",
+        slug=f"shop-{server.id}",
+        service_user_id=customer.id,
+        api_key_hash=f"hash-{server.id}",
+    )
+    db.add(integration)
+    db.flush()
+    identity = HosterIdentity(
+        integration_id=integration.id,
+        external_subject_hash=f"subject-{server.id}",
+        user_id=customer.id,
+    )
+    db.add(identity)
+    db.flush()
+    service = HosterService(
+        integration_id=integration.id,
+        external_service_id=f"svc-{server.id}",
+        identity_id=identity.id,
+        server_id=server.id,
+        status=status,
+        correlation_id=f"corr-{server.id}",
+    )
+    db.add(service)
+    db.commit()
+    return service
+
+
+class TestHosterCustomerServerVisibility:
+    """Server aus Shop-Vertraegen sind fuer pauschale Rollenrechte unsichtbar,
+    solange die Rolle nicht `servers.hoster_customers.view` haelt.
+
+    Der Filter sitzt in `direct_server_permission` und gilt damit fuer jeden
+    server-scoped Key — nicht nur fuers Listing. Sonst waere die Liste sauber,
+    aber Konsole und Dateien blieben ueber eine erratene Server-ID offen.
+    """
+
+    def _rolle_mit(self, db: Session, user: User, *keys: str) -> Role:
+        role = Role(name=f"rolle-{user.id}-{len(keys)}", is_system=False)
+        db.add(role)
+        db.flush()
+        for key in keys:
+            db.add(RolePermission(role_id=role.id, permission_key=key))
+        user.role_id = role.id
+        db.commit()
+        return role
+
+    def test_blanket_role_does_not_see_customer_server(
+        self, db: Session, regular_user: User, owner_user: User, test_server: Server
+    ):
+        kunde = _make_server(db, "kunde")
+        _mark_as_hoster_server(db, kunde, owner_user)
+        self._rolle_mit(db, regular_user, "server.view", "server.console.read")
+
+        ids = permission_service.list_visible_server_ids(db, regular_user)
+        assert ids is not None and test_server.id in ids and kunde.id not in ids
+        # Nicht nur unsichtbar, sondern unbedienbar — fuer jeden Key.
+        assert permission_service.has_server_permission(db, regular_user, kunde.id, "server.view") is False
+        assert permission_service.has_server_permission(db, regular_user, kunde.id, "server.console.read") is False
+        # Der eigene Bestand bleibt voll bedienbar.
+        assert permission_service.has_server_permission(db, regular_user, test_server.id, "server.console.read") is True
+
+    def test_role_with_hoster_key_sees_everything(
+        self, db: Session, regular_user: User, owner_user: User, test_server: Server
+    ):
+        kunde = _make_server(db, "kunde")
+        _mark_as_hoster_server(db, kunde, owner_user)
+        self._rolle_mit(
+            db, regular_user,
+            "server.view", "server.console.read", "servers.hoster_customers.view",
+        )
+
+        assert permission_service.list_visible_server_ids(db, regular_user) is None
+        assert permission_service.has_server_permission(db, regular_user, kunde.id, "server.console.read") is True
+
+    def test_owner_is_never_filtered(self, db: Session, owner_user: User):
+        kunde = _make_server(db, "kunde")
+        _mark_as_hoster_server(db, kunde, owner_user)
+        assert permission_service.list_visible_server_ids(db, owner_user) is None
+        assert permission_service.has_server_permission(db, owner_user, kunde.id, "server.console.exec") is True
+
+    def test_customer_delegation_is_untouched(
+        self, db: Session, regular_user: User, test_server: Server
+    ):
+        """Der Kunde selbst haelt seine Rechte als Delegation — der Filter
+        betrifft nur den pauschalen Rollen-Zweig."""
+        regular_user.role_id = None
+        _mark_as_hoster_server(db, test_server, regular_user)
+        db.add(ServerPermission(user_id=regular_user.id, server_id=test_server.id, permission_key="server.view"))
+        db.add(ServerPermission(user_id=regular_user.id, server_id=test_server.id, permission_key="server.console.read"))
+        db.commit()
+
+        ids = permission_service.list_visible_server_ids(db, regular_user)
+        assert ids == [test_server.id]
+        assert permission_service.has_server_permission(db, regular_user, test_server.id, "server.console.read") is True
+
+    def test_support_who_is_also_customer_keeps_own_server(
+        self, db: Session, regular_user: User, test_server: Server
+    ):
+        """Pauschale Rolle ohne Hoster-Key plus eigener Vertrag: der eigene
+        Kundenserver bleibt ueber die Delegation sichtbar, fremde nicht."""
+        fremd = _make_server(db, "fremd")
+        _mark_as_hoster_server(db, fremd, regular_user)
+        _mark_as_hoster_server(db, test_server, regular_user)
+        db.add(ServerPermission(user_id=regular_user.id, server_id=test_server.id, permission_key="server.view"))
+        db.commit()
+        self._rolle_mit(db, regular_user, "server.view")
+
+        ids = permission_service.list_visible_server_ids(db, regular_user)
+        assert ids is not None and test_server.id in ids and fremd.id not in ids
+
+    def test_team_grant_cannot_launder_customer_server(
+        self, db: Session, regular_user: User, owner_user: User, test_server: Server
+    ):
+        """Ein Gruender mit pauschaler Rolle ohne Hoster-Key kann Kundenserver
+        nicht ueber ein Team weiterreichen — der Deckel ist sein eigenes,
+        gefiltertes Direktrecht."""
+        kunde = _make_server(db, "kunde")
+        _mark_as_hoster_server(db, kunde, owner_user)
+
+        gruender = User(username="gruender", email="gruender@test.de", password_hash="x")
+        db.add(gruender)
+        db.flush()
+        self._rolle_mit(db, gruender, "server.view")
+
+        team = Team(name="support-team", owner_user_id=gruender.id)
+        db.add(team)
+        db.flush()
+        db.add(TeamMember(team_id=team.id, user_id=regular_user.id))
+        db.add(TeamServerGrant(team_id=team.id, server_id=kunde.id, permission_key="server.view"))
+        db.commit()
+
+        regular_user.role_id = None
+        db.commit()
+        assert permission_service.has_server_permission(db, regular_user, kunde.id, "server.view") is False
+        ids = permission_service.list_visible_server_ids(db, regular_user)
+        assert ids is not None and kunde.id not in ids
+
+    def test_suspended_contract_still_counts(
+        self, db: Session, regular_user: User, owner_user: User
+    ):
+        kunde = _make_server(db, "kunde")
+        _mark_as_hoster_server(db, kunde, owner_user, status="suspended")
+        self._rolle_mit(db, regular_user, "server.view")
+
+        ids = permission_service.list_visible_server_ids(db, regular_user)
+        assert ids is not None and kunde.id not in ids
 
 
 class TestSetUserServerPermissions:

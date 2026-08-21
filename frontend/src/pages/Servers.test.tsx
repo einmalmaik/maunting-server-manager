@@ -207,6 +207,98 @@ describe('Servers — Ladefehler statt Leerzustand', () => {
   })
 })
 
+/**
+ * Trennung Eigene / Kunden-Server.
+ *
+ * Die Tabs sind datengetrieben: das Backend liefert Kundenserver nur an
+ * Berechtigte. Wer keine bekommt, sieht keine Tabs — eine eigene
+ * Permission-Abfrage im Frontend waere eine zweite, driftende Wahrheit.
+ */
+describe('Servers — Kunden-Server-Tabs und Badge', () => {
+  const serverStub = (id: number, name: string, hoster: boolean) => ({
+    id,
+    name,
+    game_type: 'dayz',
+    status: 'stopped',
+    status_message: null,
+    auth_required: false,
+    auto_restart: false,
+    restart_interval_hours: null,
+    restart_time_utc: null,
+    restart_times_utc: null,
+    last_auto_restart_attempt_at: null,
+    last_auto_restart_completed_at: null,
+    last_auto_restart_status: null,
+    next_auto_restart_at: null,
+    restart_ai_managed: false,
+    started_at: null,
+    uptime_seconds: null,
+    cpu_limit_percent: null,
+    ram_limit_mb: null,
+    disk_limit_gb: null,
+    disk_usage_mb: null,
+    game_port: null,
+    query_port: null,
+    rcon_port: null,
+    public_bind_ip: null,
+    created_at: '2026-08-21T00:00:00Z',
+    is_hoster_managed: hoster,
+  })
+
+  const mockWithServers = (servers: unknown[]) => {
+    vi.mocked(client.api).mockImplementation(async (path: string) => {
+      if (path === '/servers') return servers as any
+      if (path === '/system/games') return GAMES as any
+      if (path === '/nodes') return [] as any
+      return undefined as any
+    })
+  }
+
+  beforeEach(async () => {
+    vi.mocked(client.api).mockReset()
+    await i18n.changeLanguage('de')
+  })
+
+  it('zeigt Tabs und Kunde-Badge, sobald ein Kundenserver in der Liste ist, und filtert beim Wechsel', async () => {
+    mockWithServers([serverStub(1, 'Eigener', false), serverStub(2, 'Vertragsserver', true)])
+    renderServers()
+
+    expect(await screen.findByRole('tab', { name: 'Eigene Server' })).toBeInTheDocument()
+    // Standard-Tab: nur der eigene Server.
+    expect(screen.getByText('Eigener')).toBeInTheDocument()
+    expect(screen.queryByText('Vertragsserver')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Kunden-Server' }))
+    expect(screen.getByText('Vertragsserver')).toBeInTheDocument()
+    expect(screen.queryByText('Eigener')).not.toBeInTheDocument()
+    expect(screen.getByText('Kunde')).toBeInTheDocument()
+  })
+
+  it('startet im Kunden-Tab, wenn es nur Kundenserver gibt (der Shop-Kunde selbst)', async () => {
+    // Der Kunde besitzt oft nur seinen Vertragsserver — er darf nach dem
+    // Login nicht vor einem leeren "Eigene Server"-Tab stehen.
+    mockWithServers([serverStub(2, 'Vertragsserver', true)])
+    renderServers()
+
+    expect(await screen.findByText('Vertragsserver')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Kunden-Server' })).toHaveAttribute('aria-selected', 'true')
+    // Der leergefilterte Tab zeigt einen Leerzustand statt leerer Flaeche.
+    fireEvent.click(screen.getByRole('tab', { name: 'Eigene Server' }))
+    expect(screen.queryByText('Vertragsserver')).not.toBeInTheDocument()
+    expect(screen.getByText('Keine Server vorhanden')).toBeInTheDocument()
+  })
+
+  it('rendert ohne Kundenserver keine Tabs — auch nicht bei fehlendem Feld (alter Cache)', async () => {
+    const ohneFeld = serverStub(1, 'Bestand', false) as Record<string, unknown>
+    delete ohneFeld.is_hoster_managed
+    mockWithServers([ohneFeld])
+    renderServers()
+
+    expect(await screen.findByText('Bestand')).toBeInTheDocument()
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+  })
+})
+
 // === Strengthened AUFGABE vitest (exact required scenarios per review Issues 2/3/12) ===
 // Real component renders, button matrix, badge text, disabled states, 1500ms timer exercising create path + reset + refetch.
 // Consolidated mocks (no dups). All use existing patterns (MemoryRouter, waitFor, act, i18n, confirmStore, api mock).

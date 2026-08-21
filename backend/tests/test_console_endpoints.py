@@ -114,7 +114,8 @@ class TestConsoleInputEndpoint:
         user_csrf_token: str,
         test_server: Server,
     ):
-        # KEIN ``user_permission``-Fixture — der User hat keine Server-Rechte.
+        # KEIN ``user_permission``-Fixture — der User hat keine Server-Rechte,
+        # auch kein server.view: 404 statt 403 (kein Existenzorakel).
         with patch("routers.servers.docker_service.send_stdin") as mock_send:
             response = client.post(
                 f"/api/servers/{test_server.id}/console/input",
@@ -123,7 +124,7 @@ class TestConsoleInputEndpoint:
                 headers={"X-CSRF-Token": user_csrf_token},
             )
 
-        assert response.status_code == 403
+        assert response.status_code == 404
         # Wichtig: send_stdin DARF nicht aufgerufen worden sein.
         mock_send.assert_not_called()
 

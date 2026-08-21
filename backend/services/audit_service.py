@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -115,6 +116,60 @@ def record_privileged_action(
             db.rollback()
             raise
     return entry
+
+
+# Ein Lese-Eintrag je Benutzer, Ziel und Zugriffsart in diesem Fenster. Ohne
+# den Deckel fuellt das 5-Sekunden-Polling der Oberflaeche die Tabelle in
+# Stunden — der Erkenntniswert bleibt derselbe: "hat in dem Zeitraum gelesen".
+READ_ACCESS_DEDUPE = timedelta(minutes=10)
+
+READ_ACCESS_ACTIONS = frozenset(
+    {"server.console.read", "server.logs.read", "server.files.read"}
+)
+
+
+def record_read_access(
+    db: Session,
+    *,
+    user_id: int,
+    server_id: int,
+    action: str,
+    details: str | dict[str, Any] | None = None,
+    origin: str = "direct",
+) -> AuditLog | None:
+    """Protokolliert Lesezugriff auf Konsole, Logs oder Dateien eines Servers.
+
+    Wird an den Panel-Routern aufgerufen, nie in der Rechtepruefung — die
+    bleibt read-only. KI-Laeufe protokollieren ihre Werkzeugaufrufe bereits im
+    Lauf selbst und laufen nicht ueber diesen Helfer. Gibt None zurueck, wenn
+    im Dedupe-Fenster bereits ein gleicher Eintrag existiert.
+    """
+    if action not in READ_ACCESS_ACTIONS:
+        raise ValueError("Unbekannte Lesezugriffs-Aktion.")
+    cutoff = datetime.now(timezone.utc) - READ_ACCESS_DEDUPE
+    recent = (
+        db.query(AuditLog.id)
+        .filter(
+            AuditLog.user_id == user_id,
+            AuditLog.action == action,
+            AuditLog.target_type == "server",
+            AuditLog.target_id == str(server_id),
+            AuditLog.created_at >= cutoff,
+        )
+        .first()
+    )
+    if recent is not None:
+        return None
+    return record_privileged_action(
+        db,
+        user_id=user_id,
+        action=action,
+        target_type="server",
+        target_id=server_id,
+        details=details,
+        origin=origin,
+        commit=True,
+    )
 
 
 def list_audit_logs(

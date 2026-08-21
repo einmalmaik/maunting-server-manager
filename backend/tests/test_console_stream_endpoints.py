@@ -431,3 +431,61 @@ class TestConsoleStreamEndpoint:
         ids = [r["id"] for r in received]
         assert ids == sorted(ids)
         assert len(set(ids)) == len(ids)
+
+    def test_connect_writes_one_read_audit_entry_per_window(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        owner_user: User,
+        test_server: Server,
+        db,
+    ):
+        """Jeder Verbindungsaufbau protokolliert den Lesezugriff — aber genau
+        einmal je Dedupe-Fenster, nicht je Reconnect im 5-Sekunden-Takt."""
+        from models import AuditLog
+
+        access = owner_cookies["__Secure-access_token"]
+        with patch.object(console_stream_service.docker_service, "is_running", return_value=False):
+            for _ in range(2):
+                with client.websocket_connect(
+                    f"/api/servers/{test_server.id}/console/ws",
+                    cookies={"__Secure-access_token": access},
+                    headers=self._origin("http://localhost:3000"),
+                ) as ws:
+                    ws.receive_text()
+
+        entries = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.action == "server.console.read",
+                AuditLog.target_id == str(test_server.id),
+            )
+            .all()
+        )
+        assert len(entries) == 1
+        assert entries[0].user_id == owner_user.id
+        assert entries[0].target_type == "server"
+
+    def test_logs_endpoint_writes_read_audit_entry(
+        self,
+        client: TestClient,
+        owner_cookies: dict,
+        test_server: Server,
+        db,
+    ):
+        from models import AuditLog
+
+        first = client.get(f"/api/servers/{test_server.id}/logs", cookies=owner_cookies)
+        second = client.get(f"/api/servers/{test_server.id}/logs", cookies=owner_cookies)
+        assert first.status_code == 200 and second.status_code == 200
+
+        entries = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.action == "server.logs.read",
+                AuditLog.target_id == str(test_server.id),
+            )
+            .all()
+        )
+        # Zwei Abrufe im Dedupe-Fenster: genau ein Eintrag.
+        assert len(entries) == 1

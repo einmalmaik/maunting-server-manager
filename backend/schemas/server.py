@@ -211,6 +211,10 @@ class ServerResponse(BaseModel):
     # Phase 3 multi-node: which node hosts this server (no secrets)
     node_id: int | None = None
     node_name: str | None = None
+    # Server aus einem Shop-Vertrag (hoster_services.server_id). Nur das Flag:
+    # Integrationsname und Vertragsstatus sind Geschaeftsdaten und gehen nicht
+    # an jeden mit server.view — auch nicht an den Kunden selbst.
+    is_hoster_managed: bool = False
 
     class Config:
         from_attributes = True

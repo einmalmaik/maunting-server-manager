@@ -1372,6 +1372,11 @@
   "servers": {
     "subtitle": "Manage your game servers",
     "create": "Create Server",
+    "tabs": {
+      "own": "Own servers",
+      "customers": "Customer servers"
+    },
+    "customerBadge": "Customer",
     "overcommitTitle": "Node capacity exceeded",
     "overcommitWarning": "This node currently has {{available}} RAM available (out of {{total}}). Allocating {{requested}} RAM exceeds physical capacity. If all servers were running simultaneously, memory would not be sufficient. Do you still want to assign these resources?",
     "overcommitDiskWarning": "This node currently has {{available}} disk space available (out of {{total}}). Allocating {{requested}} disk space exceeds physical capacity. If servers require more storage than available, they may fail to start. Do you still want to assign these resources?",
@@ -1697,6 +1702,10 @@
       "title": "Delete servers",
       "desc": "Allows permanently deleting game servers from the system (global, destructive)."
     },
+    "servers_hoster_customers_view": {
+      "title": "View hoster customer servers",
+      "desc": "Without this right, servers from shop contracts are invisible and unusable for blanket role permissions — they remain visible only to owners, holders of this right, and the customer themselves. It applies to all server permissions of a role (view, console, files), not just the list."
+    },
     "blueprints_manage": {
       "title": "Manage blueprints",
       "desc": "Allows creating, editing and deleting blueprints — the templates servers are built from. This is how a different game version is made available, for example. Bundled blueprints stay unchangeable; you derive your own from them."
@@ -1847,7 +1856,7 @@
     },
     "server_console_read": {
       "title": "Read console",
-      "desc": "Allows viewing the live console and logs."
+      "desc": "Allows viewing the live console and logs. Every read access is recorded in the admin audit log (one entry per user, server and 10 minutes)."
     },
     "server_console_write": {
       "title": "Send commands",
@@ -1859,7 +1868,7 @@
     },
     "server_files_read": {
       "title": "View files",
-      "desc": "Allows browsing and downloading game files."
+      "desc": "Allows browsing and downloading game files. Every read access is recorded in the admin audit log (one entry per user, server and 10 minutes)."
     },
     "server_files_write": {
       "title": "Upload/change files",

@@ -21,7 +21,7 @@ from dependencies import (
     require_server_permission,
     verify_csrf,
 )
-from services import permission_service, postgres_service
+from services import audit_service, permission_service, postgres_service
 from games import get_plugin
 from games.base import container_name_for, _console_log_path, _append_console_log
 from services import EmailService, docker_service
@@ -198,7 +198,15 @@ def _server_response(server: Server) -> ServerResponse:
 @router.get("", response_model=list[ServerResponse])
 def list_servers(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[ServerResponse]:
     servers = permission_service.list_visible_servers(db, user)
-    return [_server_response(s) for s in servers]
+    # Ein Batch-Query fuer alle Kundenserver — kein Lookup je Server, die
+    # Liste wird alle fuenf Sekunden abgefragt.
+    hoster_ids = permission_service.hoster_customer_server_ids(db)
+    responses = []
+    for s in servers:
+        data = _server_response(s)
+        data.is_hoster_managed = s.id in hoster_ids
+        responses.append(data)
+    return responses
 
 
 @router.get("/{server_id}", response_model=ServerResponse)
@@ -207,7 +215,9 @@ def get_server(server_id: int, db: Session = Depends(get_db), user: User = Depen
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
-    return _server_response(server)
+    data = _server_response(server)
+    data.is_hoster_managed = permission_service.is_hoster_customer_server(db, server_id)
+    return data
 
 
 @router.patch("/{server_id}", response_model=ServerResponse)
@@ -603,7 +613,11 @@ def update_server(server_id: int, req: ServerUpdate, db: Session = Depends(get_d
 
         sync_desired_state_to_agent(db, server)
 
-    return _server_response(server)
+    data = _server_response(server)
+    # Dieselbe Ressource wie in GET: ohne das Flag verloere ein Konsument,
+    # der seinen Zustand aus der PATCH-Antwort aktualisiert, Badge und Tab.
+    data.is_hoster_managed = permission_service.is_hoster_customer_server(db, server_id)
+    return data
 
 
 @router.delete("/{server_id}")
@@ -1056,6 +1070,11 @@ async def server_console_ws(websocket: WebSocket, server_id: int) -> None:
                 await websocket.close(code=1008)
                 return
             require_server_permission(user, server_id, db, "server.console.read")
+            # Ein Eintrag je Verbindungsaufbau (10-min-Dedupe im Helfer) —
+            # nicht je Frame: der Stream liefe sonst als Schreiblast weiter.
+            audit_service.record_read_access(
+                db, user_id=user.id, server_id=server_id, action="server.console.read"
+            )
             # Eager-load node before session closes (avoid DetachedInstanceError)
             node = server.node
             if node is not None:
@@ -1243,6 +1262,9 @@ def server_logs(server_id: int, lines: int = 100, db: Session = Depends(get_db),
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.logs.read"
+    )
     plugin = get_plugin(server.game_type)
     if plugin:
         logs = plugin.get_logs(server, lines=lines)

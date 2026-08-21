@@ -35,6 +35,11 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("panel.database.admin",      "panel",   "Panel-Datenbank verwalten"),
     PermissionDef("servers.create",            "servers", "Neuen Server anlegen"),
     PermissionDef("servers.delete",            "servers", "Server löschen (global, nicht delegierbar)"),
+    # Server aus Shop-Verträgen sind Kundendaten. Pauschale Rollenrechte
+    # (server.view, server.console.read, ...) greifen auf ihnen nur, wenn die
+    # Rolle zusätzlich dieses Recht hält (services/permission_service.py).
+    # Owner und die explizite Delegation an den Kunden bleiben unberührt.
+    PermissionDef("servers.hoster_customers.view", "servers", "Hoster-Kundenserver über pauschale Rollenrechte sehen und verwalten"),
     # Blueprints hingen bisher an `panel.settings.write` — dem Recht, das auch
     # Steam-Zugangsdaten und E-Mail-Versand öffnet. Ein Hoster, der jemandem
     # erlauben will, eine Spielversion zu pflegen, musste ihm damit das halbe

@@ -56,6 +56,8 @@ export interface Server {
   /** Multi-node: host node id (never contains secrets) */
   node_id?: number | null
   node_name?: string | null
+  /** Server aus einem Shop-Vertrag (Hoster-Kundenserver). Nur das Flag — kein Integrationsname, kein Vertragsstatus. */
+  is_hoster_managed?: boolean
   guardian_observed_state?: string
   guardian_enabled?: boolean
   guardian_probe_timestamp?: string | null

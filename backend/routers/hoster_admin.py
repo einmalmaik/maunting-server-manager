@@ -498,9 +498,12 @@ def simulate_integration_event(
             status_code=400,
             detail="Der Simulator kann nur fuer Sandbox-Integrationen verwendet werden.",
         )
-    result = hoster_simulator_service.simulate_event(
-        db, integration=integration, req=payload
-    )
+    try:
+        result = hoster_simulator_service.simulate_event(
+            db, integration=integration, req=payload
+        )
+    except HosterConfigurationError as exc:
+        raise _config_error(exc) from exc
     audit_service.record_privileged_action(
         db,
         user_id=actor.id,
@@ -522,7 +525,12 @@ def clean_sandbox_data(
 ) -> dict:
     """Entfernt alle Testvertraege, Webhook-Zustellungen und Sandbox-User dieser Integration."""
     integration = _get_integration(db, integration_id)
-    count = hoster_simulator_service.clean_sandbox_data(db, integration=integration)
+    try:
+        count = hoster_simulator_service.clean_sandbox_data(db, integration=integration)
+    except HosterConfigurationError as exc:
+        # z.B. deaktivierter Dienstbenutzer aus `_actor`: eine Fehlkonfiguration
+        # (422 wie ueberall in dieser Datei), kein Serverfehler.
+        raise _config_error(exc) from exc
     audit_service.record_privileged_action(
         db,
         user_id=actor.id,

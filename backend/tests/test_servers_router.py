@@ -41,9 +41,10 @@ class TestGetServer:
         assert response.status_code == 200
 
     def test_user_without_permission_blocked(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server):
-        # No permission granted
+        # No permission granted: 404, nicht 403 — wer den Server nicht sehen
+        # darf, erfaehrt auch nicht, dass es ihn gibt (kein Existenzorakel).
         response = client.get(f"/api/servers/{test_server.id}", cookies=user_cookies)
-        assert response.status_code == 403
+        assert response.status_code == 404
 
 
 class TestCreateServer:
@@ -998,7 +999,8 @@ class TestResourcePatchPermissions:
         self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
         test_server: Server, db: Session,
     ):
-        # Gar keine Permissions auf diesen Server
+        # Gar keine Permissions auf diesen Server: 404 statt 403 — ohne
+        # Sichtbarkeit kein Existenzorakel per ID-Iteration.
         test_server.cpu_limit_percent = 100
         db.commit()
         response = client.patch(
@@ -1007,7 +1009,7 @@ class TestResourcePatchPermissions:
             cookies=user_cookies,
             headers={"X-CSRF-Token": user_csrf_token},
         )
-        assert response.status_code == 403
+        assert response.status_code == 404
         db.refresh(test_server)
         assert test_server.cpu_limit_percent == 100
 

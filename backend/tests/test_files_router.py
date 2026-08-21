@@ -106,27 +106,44 @@ class TestFilesPermissions:
     def test_user_without_perm_cannot_browse(
         self, client: TestClient, regular_user: User, user_cookies: dict, server_with_dir: Server
     ):
+        # 404, nicht 403: wer den Server nicht einmal sehen darf, erfaehrt auch
+        # nicht, dass es ihn gibt (kein Existenzorakel per ID-Iteration).
         res = client.get(f"/api/files/{server_with_dir.id}/browse", cookies=user_cookies)
-        assert res.status_code == 403
+        assert res.status_code == 404
 
     def test_read_requires_files_read(
         self, client: TestClient, regular_user: User, user_cookies: dict, server_with_dir: Server, db: Session
     ):
         (Path(server_with_dir.install_dir) / "a.txt").write_text("hi")
-        # Nur write-Permission → read soll trotzdem failen.
-        _grant(db, regular_user, server_with_dir, ["server.files.write"])
+        # view + write, aber kein read → 403: der Server ist sichtbar, das
+        # konkrete Recht fehlt.
+        _grant(db, regular_user, server_with_dir, ["server.view", "server.files.write"])
         res = client.get(
             f"/api/files/{server_with_dir.id}/read?path=a.txt",
             cookies=user_cookies,
         )
         assert res.status_code == 403
 
+    def test_read_without_view_answers_not_found(
+        self, client: TestClient, regular_user: User, user_cookies: dict, server_with_dir: Server, db: Session
+    ):
+        """Ohne `server.view` gibt es kein 403 — das waere die Auskunft, dass
+        es den Server gibt. Ein Nutzer mit write-Delegation, aber ohne view,
+        ist ein konstruiertes, aber erlaubtes Rechtebild."""
+        (Path(server_with_dir.install_dir) / "a.txt").write_text("hi")
+        _grant(db, regular_user, server_with_dir, ["server.files.write"])
+        res = client.get(
+            f"/api/files/{server_with_dir.id}/read?path=a.txt",
+            cookies=user_cookies,
+        )
+        assert res.status_code == 404
+
     def test_delete_requires_files_delete(
         self, client: TestClient, regular_user: User, user_cookies: dict, user_csrf_token: str,
         server_with_dir: Server, db: Session
     ):
         (Path(server_with_dir.install_dir) / "x.txt").write_text("hi")
-        _grant(db, regular_user, server_with_dir, ["server.files.read", "server.files.write"])
+        _grant(db, regular_user, server_with_dir, ["server.view", "server.files.read", "server.files.write"])
         res = client.delete(
             f"/api/files/{server_with_dir.id}/delete?path=x.txt",
             cookies=user_cookies,
@@ -825,7 +842,8 @@ class TestContentSearch:
             f"/api/files/{server_with_dir.id}/search-content?q=maxPlayers",
             cookies=user_cookies,
         )
-        assert res.status_code == 403
+        # Ohne jede Delegation (auch kein view): 404, kein Existenzorakel.
+        assert res.status_code == 404
 
         _grant(db, regular_user, server_with_dir, ["server.view", "server.files.read"])
         res = client.get(
@@ -982,7 +1000,8 @@ class TestFileHistoryEndpoints:
             f"/api/files/{server_with_dir.id}/versions?path=config.ini",
             cookies=user_cookies,
         )
-        assert res.status_code == 403
+        # Ohne jede Delegation (auch kein view): 404, kein Existenzorakel.
+        assert res.status_code == 404
 
     def test_restore_requires_csrf(
         self,
@@ -1107,3 +1126,52 @@ class TestTarExtract:
         )
         assert res.status_code == 200
         assert (Path(server_with_dir.install_dir) / "hello.txt").read_text() == "world"
+
+
+# ── Lese-Audit ────────────────────────────────────────────────────────────
+
+
+class TestReadAccessAudit:
+    """Dateilesen wird im Audit-Log festgehalten — gededuped, nicht je Klick.
+
+    Der Deckel (ein Eintrag je Benutzer, Server und Fenster) ist Teil der
+    Zusage in `permissionDetails.server_files_read.desc`: ohne ihn wuerde das
+    Durchklicken eines Ordnerbaums die Tabelle fluten.
+    """
+
+    def test_browse_writes_one_deduped_audit_entry(
+        self, client: TestClient, owner_cookies: dict, owner_user: User, server_with_dir: Server, db: Session
+    ):
+        from models import AuditLog
+
+        first = client.get(f"/api/files/{server_with_dir.id}/browse?path=", cookies=owner_cookies)
+        second = client.get(f"/api/files/{server_with_dir.id}/browse?path=", cookies=owner_cookies)
+        assert first.status_code == 200 and second.status_code == 200
+
+        entries = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.action == "server.files.read",
+                AuditLog.target_id == str(server_with_dir.id),
+            )
+            .all()
+        )
+        assert len(entries) == 1
+        assert entries[0].user_id == owner_user.id
+        assert entries[0].target_type == "server"
+
+    def test_denied_read_leaves_no_audit_entry(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict, server_with_dir: Server
+    ):
+        """Audit protokolliert Zugriffe, keine Versuche: die Rechtepruefung
+        steht davor, eine Ablehnung hinterlaesst keinen Lese-Eintrag."""
+        from models import AuditLog
+
+        res = client.get(f"/api/files/{server_with_dir.id}/browse?path=", cookies=user_cookies)
+        assert res.status_code == 404
+        assert (
+            db.query(AuditLog)
+            .filter(AuditLog.action == "server.files.read")
+            .count()
+            == 0
+        )

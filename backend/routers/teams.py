@@ -230,9 +230,22 @@ def assignable_servers(
 
     pauschal, delegiert = permission_service.direkte_rechte(db, user, set(SERVER_KEYS))
 
+    # Auf Hoster-Kundenservern zaehlt der pauschale Anspruch nur mit dem
+    # Hoster-Key — dieselbe Schranke wie in `direct_server_permission`. Ohne
+    # den Filter boete die Liste Kundenserver samt Namen an, die beim
+    # Speichern (Zeile oben: 404) wieder verschwinden — und leakte damit
+    # genau die Menge, die `list_visible_server_ids` verbirgt.
+    hoster_ids = permission_service.hoster_customer_server_ids(db)
+    hoster_zugriff = permission_service.has_global_permission(
+        db, user, permission_service.HOSTER_CUSTOMERS_VIEW_KEY
+    )
+
     result: list[TeamServerResponse] = []
     for server in db.query(Server).order_by(Server.name).all():
-        keys = pauschal | {key for sid, key in delegiert if sid == server.id}
+        pauschal_hier = (
+            pauschal if hoster_zugriff or server.id not in hoster_ids else set()
+        )
+        keys = pauschal_hier | {key for sid, key in delegiert if sid == server.id}
         if "server.view" not in keys:
             continue
         result.append(TeamServerResponse(

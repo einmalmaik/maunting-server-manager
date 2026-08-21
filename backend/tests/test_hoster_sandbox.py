@@ -15,6 +15,7 @@ from models import (
     HosterService,
     Role,
     RolePermission,
+    Server,
     User,
 )
 from services import hoster_integration_service
@@ -215,17 +216,127 @@ def test_simulator_full_flow(
             assert mock_wh.called
 
         # 6. Simulator: Testdaten aufraeumen (Clean Sandbox Data)
-        clean_res = client.delete(
-            f"/api/hoster/integrations/{integration.id}/sandbox-data",
+        # Der Loeschpfad selbst (Container, Ports, Verzeichnisse) laeuft in
+        # der Runtime; hier zaehlt, dass er mit dem Dienstbenutzer der
+        # Integration aufgerufen wird und die Server-Zeile verschwindet.
+        deletion_calls: list[tuple[int, str]] = []
+
+        def _fake_delete(db_, *, server_id, actor):
+            deletion_calls.append((actor.user.id, actor.origin))
+            db_.query(Server).filter(Server.id == server_id).delete(synchronize_session=False)
+            return {"message": "geloescht"}
+
+        with patch(
+            "services.server_deletion_service.delete_server_completely",
+            _fake_delete,
+        ):
+            clean_res = client.delete(
+                f"/api/hoster/integrations/{integration.id}/sandbox-data",
+                cookies=owner_cookies,
+                headers=_csrf(owner_cookies),
+            )
+        assert clean_res.status_code == 200
+        assert clean_res.json()["deleted_services_count"] >= 1
+        assert deletion_calls == [(service_user.id, "external")]
+
+        # Check DB is clean for this integration — auch die Server-Zeilen:
+        # frueher schluckte ein except den kaputten Loeschaufruf und liess
+        # verwaiste Server zurueck, waehrend der Test nur HosterService sah.
+        remaining = db.query(HosterService).filter(HosterService.integration_id == integration.id).count()
+        assert remaining == 0
+        assert db.query(Server).count() == 0
+
+
+def test_sandbox_reset_without_delete_permission_keeps_data(
+    client: TestClient, owner_cookies: dict, db: Session
+) -> None:
+    """Ohne `servers.delete` am Dienstbenutzer bricht der Reset mit 403 ab.
+
+    Wichtig ist der zweite Teil: die Vertragsdaten bleiben stehen. Ein halber
+    Reset (Server noch da, HosterService weg) waere schlimmer als gar keiner,
+    weil niemand mehr wuesste, zu welchem Vertrag der verwaiste Server gehoert.
+    """
+    user = AuthService.create_user(db, "sandbox-lame", "sandbox-lame@test.de", "ShopPass123!")
+    role = Role(name="sandbox-ohne-delete", is_system=False)
+    db.add(role)
+    db.flush()
+    for perm in ("servers.create", "server.start", "server.stop", "server.restart"):
+        db.add(RolePermission(role_id=role.id, permission_key=perm))
+    db.commit()
+    set_user_roles(db, user, [role.id])
+    db.refresh(user)
+
+    integration, _ = hoster_integration_service.create_integration(
+        db,
+        name="Sandbox ohne Delete",
+        slug="sandbox-ohne-delete",
+        enabled=True,
+        is_sandbox=True,
+        service_user_id=user.id,
+        webhook_url=None,
+        terminate_grace_days=7,
+    )
+    db.commit()
+    db.refresh(integration)
+    _product(db, integration)
+
+    with patch("services.server_provisioning_service.provision_server", side_effect=_fake_provision(db)):
+        order_res = client.post(
+            f"/api/hoster/integrations/{integration.id}/simulate",
+            json={"action": "order", "product_key": "dayz-test"},
             cookies=owner_cookies,
             headers=_csrf(owner_cookies),
         )
-        assert clean_res.status_code == 200
-        assert clean_res.json()["deleted_services_count"] >= 1
+        assert order_res.status_code == 200
 
-        # Check DB is clean for this integration
-        remaining = db.query(HosterService).filter(HosterService.integration_id == integration.id).count()
-        assert remaining == 0
+    clean_res = client.delete(
+        f"/api/hoster/integrations/{integration.id}/sandbox-data",
+        cookies=owner_cookies,
+        headers=_csrf(owner_cookies),
+    )
+    assert clean_res.status_code == 403
+
+    remaining = db.query(HosterService).filter(HosterService.integration_id == integration.id).count()
+    assert remaining == 1
+    assert db.query(Server).count() == 1
+
+
+def test_sandbox_reset_with_disabled_service_user_answers_422(
+    client: TestClient, owner_cookies: dict, db: Session
+) -> None:
+    """Ein deaktivierter Dienstbenutzer ist eine Fehlkonfiguration, kein 500.
+
+    `_actor` wirft dann HosterConfigurationError — die Zusage ihres Docstrings
+    ("wird am Rand zu einem 422") muss auch fuer den Reset gelten, sonst ist
+    die Sandbox bis zur Reaktivierung ueber die API nicht aufraeumbar und der
+    Betreiber liest einen Serverfehler statt der Ursache.
+    """
+    service_user = _service_user(db)
+    integration, _ = _sandbox_integration(db, service_user)
+    _product(db, integration)
+
+    with patch("services.server_provisioning_service.provision_server", side_effect=_fake_provision(db)):
+        order_res = client.post(
+            f"/api/hoster/integrations/{integration.id}/simulate",
+            json={"action": "order", "product_key": "dayz-test"},
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert order_res.status_code == 200
+
+    service_user.is_active = False
+    db.commit()
+
+    clean_res = client.delete(
+        f"/api/hoster/integrations/{integration.id}/sandbox-data",
+        cookies=owner_cookies,
+        headers=_csrf(owner_cookies),
+    )
+    assert clean_res.status_code == 422
+    assert "Dienstbenutzer" in clean_res.json()["detail"]
+    # Nichts wurde halb geloescht — der Reset bleibt wiederholbar.
+    remaining = db.query(HosterService).filter(HosterService.integration_id == integration.id).count()
+    assert remaining == 1
 
 
 def test_simulator_rejected_on_live_integration(

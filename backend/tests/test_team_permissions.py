@@ -763,3 +763,93 @@ def test_assignable_servers_does_not_ask_once_per_server(
     assert len(gesehen) <= 10, (
         f"{len(gesehen)} Abfragen für zwölf Server:\n" + "\n".join(gesehen)
     )
+
+
+# ── Hoster-Kundenserver in der Vorschlagsliste ─────────────────────────────
+
+
+def _als_kundenserver_markieren(db: Session, server: Server, kunde: User) -> None:
+    """Eine hoster_services-Zeile mit server_id ist die Markierung, auf die
+    der Sichtbarkeitsfilter schaut — mehr braucht dieser Test nicht."""
+    from models import HosterIdentity, HosterIntegration, HosterService
+
+    integration = HosterIntegration(
+        name=f"Shop {server.name}",
+        slug=f"shop-{server.id}",
+        service_user_id=kunde.id,
+        api_key_hash=f"hash-{server.id}",
+    )
+    db.add(integration)
+    db.flush()
+    identity = HosterIdentity(
+        integration_id=integration.id,
+        external_subject_hash=f"subject-{server.id}",
+        user_id=kunde.id,
+    )
+    db.add(identity)
+    db.flush()
+    db.add(HosterService(
+        integration_id=integration.id,
+        external_service_id=f"svc-{server.id}",
+        identity_id=identity.id,
+        server_id=server.id,
+        status="ready",
+        correlation_id=f"corr-{server.id}",
+    ))
+    db.commit()
+
+
+def test_assignable_servers_hides_hoster_customer_servers_from_blanket_roles(
+    db: Session, regular_user: User, owner_user: User
+) -> None:
+    """Die Vorschlagsliste darf nicht anbieten, was das Speichern verweigert.
+
+    Ohne den Filter leakte GET /teams/{id}/assignable-servers Existenz und
+    Namen aller Hoster-Kundenserver an jeden mit pauschalem `server.view` —
+    genau die Menge, die `list_visible_server_ids` verbirgt, und der Grant
+    selbst scheiterte danach mit 404. Der Aequivalenzvergleich unten rechnet
+    den Endpunkt gegen `direct_server_permission`, das den Hoster-Gate traegt.
+    """
+    eigener = _server(db, "a-eigener")
+    kunde = _server(db, "b-kundenserver")
+    _als_kundenserver_markieren(db, kunde, owner_user)
+    _grant_global(db, regular_user, "teams.create", "server.view", "server.start")
+    team = team_service.create_team(db, user=regular_user, name="supportteam")
+
+    erwartet = ["server.start", "server.view"]
+    assert _vergleiche_vorschlagsliste(db, regular_user, team) == {
+        eigener.id: erwartet,
+    }
+
+
+def test_assignable_servers_offers_customer_servers_to_hoster_key_holders(
+    db: Session, regular_user: User, owner_user: User
+) -> None:
+    """Mit dem Hoster-Key gilt die pauschale Rolle auch auf Kundenservern —
+    und eine Delegation auf dem Kundenserver zaehlt unabhaengig vom Key."""
+    kunde = _server(db, "b-kundenserver")
+    _als_kundenserver_markieren(db, kunde, owner_user)
+    _grant_global(
+        db, regular_user,
+        "teams.create", "server.view", "servers.hoster_customers.view",
+    )
+    team = team_service.create_team(db, user=regular_user, name="hosterteam")
+
+    assert _vergleiche_vorschlagsliste(db, regular_user, team) == {
+        kunde.id: ["server.view"],
+    }
+
+
+def test_assignable_servers_keeps_the_customers_own_delegation(
+    db: Session, regular_user: User, owner_user: User
+) -> None:
+    """Der Kunde selbst sieht seinen Vertragsserver ueber die Delegation."""
+    kunde = _server(db, "b-kundenserver")
+    _als_kundenserver_markieren(db, kunde, owner_user)
+    _allow(db, regular_user, kunde, "server.view", "server.console.read")
+    _grant_global(db, regular_user, "teams.create")
+    team = team_service.create_team(db, user=regular_user, name="kundenteam2")
+
+    assert _vergleiche_vorschlagsliste(db, regular_user, team) == {
+        kunde.id: ["server.console.read", "server.view"],
+    }

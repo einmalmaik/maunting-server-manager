@@ -1372,6 +1372,11 @@
   "servers": {
     "subtitle": "Verwalte deine Game-Server",
     "create": "Server erstellen",
+    "tabs": {
+      "own": "Eigene Server",
+      "customers": "Kunden-Server"
+    },
+    "customerBadge": "Kunde",
     "overcommitTitle": "Node-Kapazität überschritten",
     "overcommitWarning": "Auf diesem Node sind noch {{available}} RAM verfügbar (von {{total}}). Mit den neu zugewiesenen {{requested}} RAM wird die physische Kapazität überschritten. Wenn alle Server gleichzeitig laufen, reicht der Arbeitsspeicher nicht aus. Möchtest du die Ressourcen trotzdem so zuweisen?",
     "overcommitDiskWarning": "Auf diesem Node sind noch {{available}} Festplattenspeicher verfügbar (von {{total}}). Mit den neu zugewiesenen {{requested}} Festplattenspeicher wird die physische Kapazität überschritten. Falls Server mehr Speicher als frei benötigen, können sie nicht mehr starten. Möchtest du die Ressourcen trotzdem so zuweisen?",
@@ -1697,6 +1702,10 @@
       "title": "Server löschen",
       "desc": "Erlaubt das dauerhafte Löschen von Gameservern aus dem System (global, destruktiv)."
     },
+    "servers_hoster_customers_view": {
+      "title": "Hoster-Kundenserver einsehen",
+      "desc": "Ohne dieses Recht sind Server aus Shop-Verträgen für pauschale Rollenrechte unsichtbar und unbedienbar — sichtbar bleiben sie nur für Owner, Inhaber dieses Rechts und den Kunden selbst. Es gilt für alle Serverrechte einer Rolle (Ansicht, Konsole, Dateien), nicht nur für die Liste."
+    },
     "blueprints_manage": {
       "title": "Blueprints verwalten",
       "desc": "Erlaubt das Anlegen, Ändern und Löschen von Blueprints — den Vorlagen, aus denen Server entstehen. Damit lässt sich zum Beispiel eine andere Spielversion bereitstellen. Mitgelieferte Blueprints bleiben unveränderbar; man leitet eigene davon ab."
@@ -1847,7 +1856,7 @@
     },
     "server_console_read": {
       "title": "Konsole mitlesen",
-      "desc": "Erlaubt das Betrachten der Live-Konsole und Logs."
+      "desc": "Erlaubt das Betrachten der Live-Konsole und Logs. Jeder Lesezugriff wird im Admin-Audit-Log festgehalten (ein Eintrag je Benutzer, Server und 10 Minuten)."
     },
     "server_console_write": {
       "title": "Befehle senden",
@@ -1859,7 +1868,7 @@
     },
     "server_files_read": {
       "title": "Dateien anzeigen",
-      "desc": "Erlaubt das Browsen und Herunterladen von Spieldateien."
+      "desc": "Erlaubt das Browsen und Herunterladen von Spieldateien. Jeder Lesezugriff wird im Admin-Audit-Log festgehalten (ein Eintrag je Benutzer, Server und 10 Minuten)."
     },
     "server_files_write": {
       "title": "Dateien hochladen/ändern",

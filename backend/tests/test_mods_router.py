@@ -33,8 +33,10 @@ class TestListMods:
         assert data[0]["name"] == "Sichtbarer Mod"
 
     def test_user_without_permission_blocked(self, client: TestClient, regular_user: User, user_cookies: dict, test_server: Server):
+        # Ohne jedes Server-Recht (auch kein view): 404 statt 403 — wer den
+        # Server nicht sehen darf, erfaehrt auch nicht, dass es ihn gibt.
         response = client.get(f"/api/mods/{test_server.id}", cookies=user_cookies)
-        assert response.status_code == 403
+        assert response.status_code == 404
 
     def test_unauthorized_blocked(self, client: TestClient, test_server: Server):
         response = client.get(f"/api/mods/{test_server.id}")

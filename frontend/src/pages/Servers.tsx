@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
@@ -8,10 +8,11 @@ import { useHostInterfaces } from '@/hooks/useHostInterfaces'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import type { Server, GameInfo, PostgresCredential, ServerCreateResult, Node } from '@/types'
 import { labelRole, mapBlueprintPorts } from '@/utils/portRoles'
-import { Server as ServerIcon, Plus, Activity, AlertTriangle, Cpu, HardDrive, Database, Network } from 'lucide-react'
+import { Server as ServerIcon, Plus, Activity, AlertTriangle, Cpu, HardDrive, Database, Network, Store } from 'lucide-react'
 import { PostgresCredentialsDialog } from '@/components/server/PostgresCredentialsDialog'
 import { Badge } from '@/components/ui/Badge'
 import { Dropdown } from '@/components/ui/Dropdown'
+import { TabBar } from '@/components/ui/TabBar'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
 export function Servers() {
@@ -21,6 +22,7 @@ export function Servers() {
   const [servers, setServers] = useState<Server[]>([])
   const [games, setGames] = useState<GameInfo[]>([])
   const [nodes, setNodes] = useState<Node[]>([])
+  const [activeTab, setActiveTab] = useState<'own' | 'customers'>('own')
   const [loading, setLoading] = useState(true)
   // Ohne dieses Flag wird aus einem fehlgeschlagenen Laden die Aussage
   // "Keine Server vorhanden" — der Betreiber liest, seine Server seien weg.
@@ -304,6 +306,31 @@ export function Servers() {
 
   const gameName = (id: string) => (Array.isArray(games) ? games : []).find((g) => g.id === id)?.name || id
 
+  // Datengetrieben statt rechtegetrieben: das Backend liefert Kundenserver nur
+  // an Berechtigte — wer keine bekommt, sieht auch keine Tabs. Eine eigene
+  // Permission-Abfrage hier waere eine zweite, driftende Wahrheit.
+  const ownServers = servers.filter((s) => !s.is_hoster_managed)
+  const customerServers = servers.filter((s) => s.is_hoster_managed)
+  const hasCustomerServers = customerServers.length > 0
+  const shownServers = hasCustomerServers
+    ? activeTab === 'customers'
+      ? customerServers
+      : ownServers
+    : servers
+
+  // Der Shop-Kunde besitzt oft nur seinen Vertragsserver — auch fuer ihn traegt
+  // der eigene Server das Flag. Er soll nach dem Login nicht vor einem leeren
+  // "Eigene Server"-Tab stehen; die Erstauswahl folgt einmalig den Daten,
+  // danach gehoert der Tab dem Nutzer.
+  const tabInitialized = useRef(false)
+  useEffect(() => {
+    if (loading || tabInitialized.current) return
+    tabInitialized.current = true
+    if (hasCustomerServers && ownServers.length === 0) {
+      setActiveTab('customers')
+    }
+  }, [loading, hasCustomerServers, ownServers.length])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -347,8 +374,31 @@ export function Servers() {
         </div>
       )}
 
+      {hasCustomerServers && (
+        <TabBar
+          tabs={[
+            { id: 'own' as const, labelKey: 'servers.tabs.own', icon: ServerIcon },
+            { id: 'customers' as const, labelKey: 'servers.tabs.customers', icon: Store },
+          ]}
+          active={activeTab}
+          onChange={setActiveTab}
+          ariaLabel={t('nav.servers')}
+        />
+      )}
+
+      {/* Ein leergefilterter Tab braucht seinen eigenen Leerzustand — eine
+          Tab-Leiste ueber leerer Flaeche liest sich als "Server weg". */}
+      {!loadError && servers.length > 0 && shownServers.length === 0 && (
+        <div className="msm-card p-12 text-center border-dashed border-2 border-outline-variant">
+          <ServerIcon className="w-10 h-10 text-on-surface-variant mx-auto mb-4" />
+          <h3 className="font-headline text-body-lg text-on-surface mb-1">
+            {t('servers.noServers')}
+          </h3>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {servers.map((server) => (
+        {shownServers.map((server) => (
           <div
             key={server.id}
             className="msm-card p-5 cursor-pointer hover:border-mint-accent/40 transition-all"
@@ -362,6 +412,12 @@ export function Servers() {
                   <Badge variant="info" className="shrink-0" title={t('servers.node')}>
                     <Network className="w-3 h-3 mr-1 inline" />
                     {server.node_name}
+                  </Badge>
+                )}
+                {server.is_hoster_managed && (
+                  <Badge variant="info" className="shrink-0" title={t('servers.customerBadge')}>
+                    <Store className="w-3 h-3 mr-1 inline" />
+                    {t('servers.customerBadge')}
                   </Badge>
                 )}
               </div>

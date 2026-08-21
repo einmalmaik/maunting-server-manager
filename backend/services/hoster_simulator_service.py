@@ -255,22 +255,23 @@ def clean_sandbox_data(db: Session, *, integration: HosterIntegration) -> int:
     )
     count = len(services)
 
-    # Server loeschen
-    from services import server_deletion_service
+    # Server loeschen — derselbe Loeschpfad wie im Panel und beim Purge
+    # terminierter Vertraege, inklusive erneuter Rechtepruefung gegen den
+    # Dienstbenutzer der Integration. Fehler propagieren zum Router: die
+    # Bulk-Deletes unten laufen dann nicht, der Reset bleibt wiederholbar.
+    from services.server_deletion_service import delete_server_completely
 
     for srv in services:
         if srv.server_id is not None:
             server = db.query(Server).filter(Server.id == srv.server_id).first()
             if server is not None:
-                try:
-                    server_deletion_service.delete_server(
-                        db,
-                        server_id=server.id,
-                        principal=None,
-                        force=True,
-                    )
-                except Exception as exc:
-                    logger.warning("Sandbox-Server %s konnte nicht geloescht werden: %s", srv.server_id, exc)
+                delete_server_completely(
+                    db,
+                    server_id=server.id,
+                    actor=hoster_service_lifecycle._actor(
+                        db, integration, srv.correlation_id or str(uuid4())
+                    ),
+                )
 
     # Handoffs loeschen
     db.query(HosterHandoff).filter(HosterHandoff.integration_id == integration.id).delete(
