@@ -3,14 +3,15 @@
  *
  * Ablauf beim Start: Konfiguration laden → wenn nicht eingerichtet, den
  * Assistenten zeigen → sonst still über den OS-Tresor anmelden → gelingt
- * das nicht, nur den Anmeldeschritt zeigen. Die Chat-Ansicht (1:1 wie im
- * Panel) folgt als nächste Ausbaustufe; bis dahin zeigt die Hauptansicht
- * die Desktop-Integration (Tray-Status, Overlay, Ducking, Wake-Word).
+ * das nicht, nur den Anmeldeschritt zeigen. Angemeldet zeigt die App den
+ * Chat (derselbe Dauerchat wie im Panel) und daneben die Einstellungen
+ * (Desktop-Integration, Wake-Word).
  */
 import { useEffect, useState } from "react";
 
 import { abmelden, ich, type Benutzer } from "./api/auth";
 import { setzeBackendUrl, stillAnmelden } from "./api/client";
+import Chat from "./chat/Chat";
 import Wizard from "./einrichtung/Wizard";
 import {
   duckingSetzen,
@@ -95,6 +96,8 @@ const STATUS_TEXTE: Record<AgentStatus, string> = {
   spricht: "Spricht",
 };
 
+type Ansicht = "chat" | "einstellungen";
+
 function Hauptansicht({
   benutzer,
   onAbmelden,
@@ -102,10 +105,58 @@ function Hauptansicht({
   benutzer: Benutzer | null;
   onAbmelden: () => void;
 }) {
+  const [ansicht, setAnsicht] = useState<Ansicht>("chat");
+  const agentName = benutzer?.agent_name ?? "Singra";
+
+  return (
+    <main className="flex h-full flex-col gap-4 bg-background p-6 text-foreground">
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">{agentName}</h1>
+          <p className="text-xs text-muted-foreground">
+            {benutzer ? `Angemeldet als ${benutzer.username}` : "Nicht angemeldet"}
+          </p>
+        </div>
+        <nav className="flex items-center gap-2" aria-label="Ansicht">
+          {(
+            [
+              ["chat", "Chat"],
+              ["einstellungen", "Einstellungen"],
+            ] as const
+          ).map(([wert, text]) => (
+            <button
+              key={wert}
+              onClick={() => setAnsicht(wert)}
+              className={`rounded-[var(--radius-control)] px-3 py-1.5 text-sm transition ${
+                ansicht === wert
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {text}
+            </button>
+          ))}
+          <Knopf stimme="leise" onClick={onAbmelden}>
+            Abmelden
+          </Knopf>
+        </nav>
+      </header>
+
+      {ansicht === "chat" ? (
+        <div className="min-h-0 flex-1">
+          <Chat agentName={agentName} />
+        </div>
+      ) : (
+        <Einstellungen agentName={agentName} />
+      )}
+    </main>
+  );
+}
+
+function Einstellungen({ agentName }: { agentName: string }) {
   const [status, setStatus] = useState<AgentStatus>("bereit");
   const [overlayAn, setOverlayAn] = useState(false);
   const [duckt, setDuckt] = useState(false);
-  const agentName = benutzer?.agent_name ?? "Singra";
 
   async function statusWechseln(neu: AgentStatus) {
     setStatus(neu);
@@ -130,20 +181,7 @@ function Hauptansicht({
   }
 
   return (
-    <main className="flex h-full flex-col gap-6 overflow-y-auto bg-background p-8 text-foreground">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{agentName}</h1>
-          <p className="text-xs text-muted-foreground">
-            {benutzer ? `Angemeldet als ${benutzer.username}` : "Nicht angemeldet"} — die
-            Chat-Ansicht folgt in der nächsten Ausbaustufe.
-          </p>
-        </div>
-        <Knopf stimme="leise" onClick={onAbmelden}>
-          Abmelden
-        </Knopf>
-      </header>
-
+    <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
       <Karte className="flex flex-col gap-4">
         <h2 className="text-sm font-medium">Desktop-Integration</h2>
         <div className="flex flex-wrap gap-2">
@@ -175,6 +213,6 @@ function Hauptansicht({
       </Karte>
 
       <WakewordEinrichtung wortVorschlag={agentName} />
-    </main>
+    </div>
   );
 }

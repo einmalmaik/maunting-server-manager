@@ -124,3 +124,57 @@ export async function api<T>(pfad: string, optionen: AnfrageOptionen = {}): Prom
   }
   return (await antwort.json()) as T;
 }
+
+/**
+ * SSE über fetch — EventSource kann kein POST und keinen Authorization-
+ * Header, deshalb wird der Strom von Hand gelesen (dasselbe Muster wie
+ * `apiStream` im Panel-Frontend). Ruft `onEreignis` für jedes vollständige
+ * `event:`/`data:`-Paar; kaputte JSON-Zeilen werden übersprungen statt den
+ * Strom zu reissen.
+ */
+export async function apiStrom(
+  pfad: string,
+  optionen: AnfrageOptionen,
+  onEreignis: (ereignis: string, daten: unknown) => void,
+): Promise<void> {
+  let antwort = await roheAnfrage(pfad, optionen);
+  if (antwort.status === 401) {
+    if (await stillAnmelden()) {
+      antwort = await roheAnfrage(pfad, optionen);
+    }
+  }
+  if (!antwort.ok || !antwort.body) {
+    throw await fehlerAus(antwort);
+  }
+  const leser = antwort.body.getReader();
+  const decoder = new TextDecoder();
+  let puffer = "";
+  for (;;) {
+    const { done, value } = await leser.read();
+    if (done) {
+      break;
+    }
+    puffer += decoder.decode(value, { stream: true });
+    let schnitt: number;
+    while ((schnitt = puffer.indexOf("\n\n")) !== -1) {
+      const block = puffer.slice(0, schnitt);
+      puffer = puffer.slice(schnitt + 2);
+      let ereignis = "message";
+      let daten = "";
+      for (const zeile of block.split("\n")) {
+        if (zeile.startsWith("event:")) {
+          ereignis = zeile.slice(6).trim();
+        } else if (zeile.startsWith("data:")) {
+          daten += zeile.slice(5).trim();
+        }
+      }
+      if (daten) {
+        try {
+          onEreignis(ereignis, JSON.parse(daten));
+        } catch {
+          // Halbes JSON in einem kaputten Block — überspringen.
+        }
+      }
+    }
+  }
+}

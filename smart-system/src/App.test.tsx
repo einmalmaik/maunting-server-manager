@@ -50,6 +50,24 @@ const BENUTZER = {
   time_zone: "Europe/Berlin",
 };
 
+// Der Chat lädt Verlauf/Provider/Lauf beim Öffnen; der Bestand ist
+// veränderbar, damit der Test nach dem Stream die gespeicherte Wahrheit
+// nachladen kann (das macht die echte App genauso).
+let chatNachrichten: unknown[] = [];
+
+const PROVIDER = [
+  {
+    id: 1,
+    name: "OpenRouter",
+    default_model: "test/modell",
+    available: true,
+    reasoning: false,
+    efforts: [],
+    can_disable: false,
+    default_effort: null,
+  },
+];
+
 const fetchMock = vi.fn(async (url: string | URL | Request, _init?: RequestInit) => {
   const pfad = String(url);
   const json = (daten: unknown, status = 200) =>
@@ -72,6 +90,48 @@ const fetchMock = vi.fn(async (url: string | URL | Request, _init?: RequestInit)
   if (pfad.endsWith("/api/auth/me/timezone")) {
     return json({ time_zone: "Europe/Berlin" });
   }
+  if (pfad.endsWith("/api/ai/providers")) {
+    return json(PROVIDER);
+  }
+  if (pfad.includes("/api/ai/conversation/run?")) {
+    return json(null);
+  }
+  if (pfad.endsWith("/api/ai/conversation/messages/stream")) {
+    // Der Stream antwortet als SSE; danach liegt die Antwort im Verlauf.
+    chatNachrichten = [
+      {
+        id: "m1",
+        role: "user",
+        content: "Hallo",
+        reasoning: null,
+        question: null,
+        sections: null,
+        status: "complete",
+        provider_id: 1,
+        model: null,
+        created_at: "2026-08-21T10:00:00Z",
+      },
+      {
+        id: "m2",
+        role: "assistant",
+        content: "Hallo vom Test",
+        reasoning: null,
+        question: null,
+        sections: [{ art: "text", inhalt: "Hallo vom Test", werkzeug: null }],
+        status: "complete",
+        provider_id: 1,
+        model: "test/modell",
+        created_at: "2026-08-21T10:00:01Z",
+      },
+    ];
+    const sse =
+      'event: delta\ndata: {"content":"Hallo vom Test"}\n\n' +
+      'event: done\ndata: {"run_id":"r1","status":"completed"}\n\n';
+    return new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  }
+  if (pfad.includes("/api/ai/conversation?")) {
+    return json({ id: "konv-1", messages: chatNachrichten, has_more: false });
+  }
   return json({ detail: `Unerwarteter Aufruf: ${pfad}` }, 500);
 });
 vi.stubGlobal("fetch", fetchMock);
@@ -86,6 +146,7 @@ beforeEach(() => {
   setzeAccessToken(null);
   konfigAntwort = { backend_url: null, sandbox_pfad: null, eingerichtet: false };
   tresorToken = null;
+  chatNachrichten = [];
 });
 
 describe("App-Start", () => {
@@ -141,22 +202,66 @@ describe("Hauptansicht", () => {
     tresorToken = "ref-alt";
   });
 
-  it("setzt den Tray-Status ueber das Rust-Command", async () => {
+  async function einstellungenOeffnen() {
     render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Einstellungen" }));
+  }
+
+  it("setzt den Tray-Status ueber das Rust-Command", async () => {
+    await einstellungenOeffnen();
     await userEvent.click(await screen.findByRole("button", { name: "Denkt" }));
     expect(invokeMock).toHaveBeenCalledWith("setze_status", { status: "denkt" });
   });
 
   it("schaltet das Overlay ueber das Rust-Command um", async () => {
-    render(<App />);
+    await einstellungenOeffnen();
     await userEvent.click(await screen.findByRole("button", { name: "Overlay einblenden" }));
     expect(invokeMock).toHaveBeenCalledWith("overlay_sichtbar", { sichtbar: true });
   });
 
   it("zeigt die Wake-Word-Einrichtung mit dem Agenten-Namen als Vorschlag", async () => {
-    render(<App />);
+    await einstellungenOeffnen();
     const wortfeld = await screen.findByPlaceholderText("Agenten-Name, z. B. Singra");
     expect(wortfeld).toHaveValue("Jarvis");
+  });
+});
+
+describe("Chat", () => {
+  beforeEach(() => {
+    konfigAntwort = { backend_url: "https://panel.test", sandbox_pfad: null, eingerichtet: true };
+    tresorToken = "ref-alt";
+  });
+
+  it("zeigt den leeren Dauerchat nach dem Start", async () => {
+    render(<App />);
+    expect(await screen.findByText(/Sag Jarvis einfach/)).toBeInTheDocument();
+    // Beim Öffnen wird geprüft, ob noch ein alter Lauf weiterläuft.
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes("/api/ai/conversation/run?")),
+    ).toBe(true);
+  });
+
+  it("streamt eine Antwort und laedt danach den gespeicherten Verlauf", async () => {
+    render(<App />);
+    const nutzer = userEvent.setup();
+    const eingabe = await screen.findByPlaceholderText("Nachricht an Jarvis …");
+    await nutzer.type(eingabe, "Hallo");
+    await nutzer.click(screen.getByRole("button", { name: "Senden" }));
+
+    // Die Antwort kommt erst live aus dem Stream, dann aus dem Verlauf —
+    // sichtbar bleibt sie durchgehend.
+    expect(await screen.findByText("Hallo vom Test")).toBeInTheDocument();
+    // Der Tray-Status lief mit: denkt beim Senden, bereit am Ende.
+    expect(invokeMock).toHaveBeenCalledWith("setze_status", { status: "denkt" });
+    expect(invokeMock).toHaveBeenCalledWith("setze_status", { status: "bereit" });
+    // Der Stream-Aufruf trägt den Anbieter und eine request_id.
+    const streamAufruf = fetchMock.mock.calls.find(([url]) =>
+      String(url).endsWith("/api/ai/conversation/messages/stream"),
+    );
+    expect(streamAufruf).toBeDefined();
+    const body = JSON.parse(String(streamAufruf![1]?.body));
+    expect(body.provider_id).toBe(1);
+    expect(typeof body.request_id).toBe("string");
   });
 });
 
