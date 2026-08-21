@@ -64,9 +64,17 @@ export function WakewordEinrichtung() {
         }),
       )
     })
+    // Stirbt der Lausch-Thread (Mikrofon weg, Modell kaputt), meldet er das
+    // hierher — sonst stünde der Schalter auf „an", hinter dem nichts mehr
+    // lauscht. Der Stand wird gleich mitgeladen, damit der Schalter umspringt.
+    const abFehler = listen<{ meldung: string }>('wakeword-fehler', (ereignis) => {
+      setMeldung(ereignis.payload.meldung)
+      void standLaden()
+    })
     return () => {
       abbruch.current = true
       void abmelden.then((f) => f())
+      void abFehler.then((f) => f())
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

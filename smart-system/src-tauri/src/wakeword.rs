@@ -8,8 +8,10 @@
 //! Name ist frei wählbar.
 //!
 //! Ablauf:
-//! 1. `aufnehmen(n)` — nimmt ~2,2 s vom Standardmikrofon auf und legt sie
-//!    als Mono-WAV unter `<app-local-data>/wakeword/aufnahme-NN.wav` ab.
+//! 1. `aufnehmen(n)` — wartet auf Sprachenergie (bis ~5 s), schneidet ab
+//!    Einsatz ~2,2 s plus 300 ms Vorlauf und legt sie als Mono-WAV unter
+//!    `<app-local-data>/wakeword/aufnahme-NN.wav` ab. Stille ist ein
+//!    Fehler, keine Aufnahme.
 //! 2. `trainieren(wort)` — baut aus allen Aufnahmen ein Referenzmodell
 //!    und speichert es als `wakeword.rpw`.
 //! 3. `lauschen_starten` — ein einzelner Thread liest das Mikrofon und
@@ -39,6 +41,19 @@ pub const AUFNAHMEN_SOLL: u8 = 10;
 /// rustpotter braucht mindestens drei Aufnahmen für eine brauchbare Referenz.
 const AUFNAHMEN_MINDESTENS: usize = 3;
 const AUFNAHME_SEKUNDEN: f32 = 2.2;
+/// So lange wird auf Sprachenergie gewartet, bevor die Runde als still gilt.
+const SPRACHE_WARTEN_SEKUNDEN: f32 = 5.0;
+/// Vorlauf vor dem erkannten Einsatz — Wortanfänge sind leise, und ein
+/// Schnitt genau am Schwellendurchgang verlöre die erste Silbe.
+const VORLAUF_SEKUNDEN: f32 = 0.3;
+/// RMS-Schwelle für „hier spricht jemand" (~-40 dBFS). Fest statt adaptiv:
+/// normale Sprache liegt eine Größenordnung darüber, Raumrauschen darunter,
+/// und ein fester Wert ist testbar. Ein sehr lautes Umfeld öffnet das Tor
+/// früher — das ist dann nicht schlechter als die alte Blindaufnahme.
+const SPRACHE_RMS: f32 = 0.01;
+/// Die eine Meldung für „niemand hat gesprochen" — die UI wiederholt die
+/// Runde daraufhin, statt sie zu zählen.
+const NICHTS_GEHOERT: &str = "Nichts gehört — bitte sprich das Wort deutlich ins Mikrofon";
 const MODELL_DATEI: &str = "wakeword.rpw";
 /// MFCC-Auflösung; 16 ist der rustpotter-Standard für Referenzmodelle.
 const MFCC_GROESSE: u16 = 16;
@@ -48,11 +63,14 @@ const MFCC_GROESSE: u16 = 16;
 /// eines Channel-Timeouts erfüllt.
 static LAUSCHT: AtomicBool = AtomicBool::new(false);
 
-#[derive(Serialize, Clone, Copy)]
+#[derive(Serialize, Clone)]
 pub struct WakewordStand {
     pub aufnahmen: u8,
     pub trainiert: bool,
     pub lauscht: bool,
+    /// Name des Standard-Eingabegeräts — `None` heißt: kein Mikrofon da.
+    /// Die UI zeigt dann eine Warnung statt Knöpfen, die nur scheitern können.
+    pub geraet: Option<String>,
 }
 
 fn wakeword_verzeichnis(app: &AppHandle) -> Result<PathBuf, String> {
@@ -91,7 +109,17 @@ pub fn stand(app: &AppHandle) -> Result<WakewordStand, String> {
         aufnahmen: aufnahme_dateien(&verzeichnis).len().min(u8::MAX as usize) as u8,
         trainiert: verzeichnis.join(MODELL_DATEI).exists(),
         lauscht: LAUSCHT.load(Ordering::SeqCst),
+        geraet: mikrofon_name(),
     })
+}
+
+/// Name des Standard-Eingabegeräts, wie Windows ihn führt. Nur der Name
+/// verlässt das Modul — kein Audio, keine Geräte-IDs.
+fn mikrofon_name() -> Option<String> {
+    cpal::default_host()
+        .default_input_device()
+        .and_then(|geraet| geraet.description().ok())
+        .map(|beschreibung| beschreibung.name().to_string())
 }
 
 /// Löscht Aufnahmen und Modell — für „Wake-Word neu einrichten“ und für den
@@ -160,9 +188,89 @@ fn nach_mono(daten: &[f32], kanaele: usize, ziel: &mut Vec<f32>) {
     }
 }
 
-/// Nimmt eine Kalibrierungs-Aufnahme auf (blockiert ~2,2 s) und schreibt sie
-/// als 16-bit-Mono-WAV. Nummer 1..=10; eine vorhandene Aufnahme derselben
-/// Nummer wird ersetzt.
+/// Quadratischer Mittelwert eines Fensters — das Maß für „hier ist Energie".
+fn rms(fenster: &[f32]) -> f32 {
+    if fenster.is_empty() {
+        return 0.0;
+    }
+    (fenster.iter().map(|s| s * s).sum::<f32>() / fenster.len() as f32).sqrt()
+}
+
+/// Schneidet aus einem Mono-Strom die Aufnahme ab Spracheinsatz.
+///
+/// Vorher nahm `aufnehmen` blind die ersten 2,2 Sekunden: wer erst nach einem
+/// Atemzug sprach, lieferte ein halbes Wort, und wer schwieg, lieferte Stille
+/// — beides zählte als gültige Kalibrierung, und das Modell lernte Rauschen.
+/// Jetzt öffnet Sprachenergie das Tor: gewartet wird bis zu
+/// `SPRACHE_WARTEN_SEKUNDEN` auf ein 20-ms-Fenster über der Schwelle,
+/// geschnitten ab Einsatz minus Vorlauf, und wer nichts sagt, bekommt einen
+/// Fehler statt einer stillen Aufnahme.
+///
+/// Getrennt von cpal, damit es testbar ist: `naechster_block` liefert
+/// Mono-Blöcke, `None` heißt „das Mikrofon liefert nichts mehr".
+fn sprache_schneiden(
+    mut naechster_block: impl FnMut() -> Option<Vec<f32>>,
+    rate: u32,
+) -> Result<Vec<f32>, String> {
+    let fenster_len = (rate as usize / 50).max(1);
+    let vorlauf_len = (rate as f32 * VORLAUF_SEKUNDEN) as usize;
+    let warte_len = (rate as f32 * SPRACHE_WARTEN_SEKUNDEN) as usize;
+
+    // Noch nicht in Fenster zerlegte Samples, der Vorlauf vor dem Einsatz
+    // und die eigentliche Aufnahme. `ziel` ist erst gesetzt, wenn gesprochen
+    // wurde: Vorlauf plus 2,2 s ab Einsatz.
+    let mut rest: Vec<f32> = Vec::new();
+    let mut vorlauf: Vec<f32> = Vec::new();
+    let mut aufnahme: Vec<f32> = Vec::new();
+    let mut ziel: Option<usize> = None;
+    let mut gewartet = 0usize;
+
+    while ziel.is_none_or(|z| aufnahme.len() < z) {
+        while rest.len() < fenster_len {
+            match naechster_block() {
+                Some(block) => rest.extend(block),
+                None => {
+                    // Eine angebrochene Aufnahme ab einer halben Sekunde ist
+                    // brauchbar — dasselbe Maß wie vor dem Umbau. Alles
+                    // darunter ist ein Fehler, keine Kalibrierung.
+                    return match ziel {
+                        Some(_) if aufnahme.len() >= (rate / 2) as usize => Ok(aufnahme),
+                        Some(_) => Err("Aufnahme zu kurz — liefert das Mikrofon Daten?".into()),
+                        None => Err(NICHTS_GEHOERT.into()),
+                    };
+                }
+            }
+        }
+        let fenster: Vec<f32> = rest.drain(..fenster_len).collect();
+        if ziel.is_some() {
+            aufnahme.extend(fenster);
+        } else if rms(&fenster) >= SPRACHE_RMS {
+            // Der Einsatz: Vorlauf mitnehmen, ab hier bis zur Ziellänge sammeln.
+            aufnahme.append(&mut vorlauf);
+            ziel = Some(aufnahme.len() + (rate as f32 * AUFNAHME_SEKUNDEN) as usize);
+            aufnahme.extend(fenster);
+        } else {
+            vorlauf.extend(fenster);
+            if vorlauf.len() > vorlauf_len {
+                let ueberhang = vorlauf.len() - vorlauf_len;
+                vorlauf.drain(..ueberhang);
+            }
+            gewartet += fenster_len;
+            if gewartet >= warte_len {
+                return Err(NICHTS_GEHOERT.into());
+            }
+        }
+    }
+    if let Some(z) = ziel {
+        aufnahme.truncate(z);
+    }
+    Ok(aufnahme)
+}
+
+/// Nimmt eine Kalibrierungs-Aufnahme auf und schreibt sie als
+/// 16-bit-Mono-WAV. Nummer 1..=10; eine vorhandene Aufnahme derselben Nummer
+/// wird ersetzt. Blockiert, bis gesprochen wurde — höchstens ~7,5 s (5 s
+/// warten, 2,5 s schneiden).
 pub fn aufnehmen(app: &AppHandle, nummer: u8) -> Result<String, String> {
     if nummer == 0 || nummer > AUFNAHMEN_SOLL {
         return Err(format!("Aufnahmenummer 1..={AUFNAHMEN_SOLL} erwartet"));
@@ -177,19 +285,21 @@ pub fn aufnehmen(app: &AppHandle, nummer: u8) -> Result<String, String> {
     let (sender, empfaenger) = mpsc::channel::<Vec<f32>>();
     let stream = stream_starten(&geraet, &konfig, sender)?;
 
-    let ziel_samples = (rate as f32 * AUFNAHME_SEKUNDEN) as usize;
-    let mut mono: Vec<f32> = Vec::with_capacity(ziel_samples);
-    while mono.len() < ziel_samples {
-        match empfaenger.recv_timeout(Duration::from_secs(2)) {
-            Ok(block) => nach_mono(&block, kanaele, &mut mono),
-            Err(_) => break,
-        }
-    }
+    let mono = sprache_schneiden(
+        || {
+            empfaenger
+                .recv_timeout(Duration::from_secs(2))
+                .ok()
+                .map(|block| {
+                    let mut mono = Vec::with_capacity(block.len() / kanaele.max(1));
+                    nach_mono(&block, kanaele, &mut mono);
+                    mono
+                })
+        },
+        rate,
+    );
     drop(stream);
-    mono.truncate(ziel_samples);
-    if mono.len() < (rate / 2) as usize {
-        return Err("Aufnahme zu kurz — liefert das Mikrofon Daten?".into());
-    }
+    let mono = mono?;
 
     let pfad = wakeword_verzeichnis(app)?.join(format!("aufnahme-{nummer:02}.wav"));
     let spec = hound::WavSpec {
@@ -243,7 +353,11 @@ pub fn lauschen_starten(app: AppHandle) -> Result<(), String> {
         .name("mss-wakeword".into())
         .spawn(move || {
             if let Err(fehler) = lausch_schleife(&app, &modell) {
+                // Ohne das Event stürbe der Thread still: die UI hätte einen
+                // Schalter auf „an", hinter dem nichts mehr lauscht. Nur die
+                // Meldung geht raus — nie Audio.
                 eprintln!("Wake-Word-Lauschen beendet: {fehler}");
+                let _ = app.emit("wakeword-fehler", serde_json::json!({ "meldung": fehler }));
             }
             LAUSCHT.store(false, Ordering::SeqCst);
         })
@@ -303,4 +417,85 @@ fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
     }
     drop(stream);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RATE: u32 = 16_000;
+
+    /// Blockfolge als Closure — was sonst cpal liefert, hier von Hand.
+    fn quelle(bloecke: Vec<Vec<f32>>) -> impl FnMut() -> Option<Vec<f32>> {
+        let mut rest = bloecke.into_iter();
+        move || rest.next()
+    }
+
+    #[test]
+    fn stille_ist_keine_aufnahme() {
+        // Fünf Sekunden unter der Schwelle: vorher wäre das eine gültige
+        // Kalibrierung gewesen — das Modell hätte Stille gelernt und beim
+        // Lauschen entweder nie oder dauernd ausgelöst.
+        let bloecke = vec![vec![0.0_f32; 1_600]; 60];
+        let fehler = sprache_schneiden(quelle(bloecke), RATE).unwrap_err();
+        assert!(fehler.contains("Nichts gehört"), "{fehler}");
+    }
+
+    #[test]
+    fn schnitt_beginnt_mit_dem_vorlauf_vor_dem_einsatz() {
+        // Eine Sekunde Atemholen, dann Sprache: geschnitten wird ab Einsatz,
+        // mit 300 ms Vorlauf davor — Wortanfänge sind leise, und ein Schnitt
+        // genau am Schwellendurchgang verlöre die erste Silbe.
+        let mut bloecke = vec![vec![0.0_f32; 1_600]; 10];
+        bloecke.extend(vec![vec![0.5_f32; 1_600]; 30]);
+        let aufnahme = sprache_schneiden(quelle(bloecke), RATE).unwrap();
+
+        let vorlauf = (RATE as f32 * VORLAUF_SEKUNDEN) as usize;
+        let ziel = vorlauf + (RATE as f32 * AUFNAHME_SEKUNDEN) as usize;
+        assert_eq!(aufnahme.len(), ziel);
+        assert_eq!(aufnahme[0], 0.0, "vor dem Einsatz steht der stille Vorlauf");
+        assert!(aufnahme[vorlauf] > 0.0, "am Einsatz muss Sprache stehen");
+    }
+
+    #[test]
+    fn wer_sofort_spricht_hat_eben_keinen_vorlauf() {
+        // Der Vorlauf ist, was da war — nicht 300 ms, die es nie gab. Warten
+        // oder Auffüllen verfälschte den Einsatz.
+        let bloecke = vec![vec![0.5_f32; 1_600]; 30];
+        let aufnahme = sprache_schneiden(quelle(bloecke), RATE).unwrap();
+
+        assert_eq!(aufnahme.len(), (RATE as f32 * AUFNAHME_SEKUNDEN) as usize);
+        assert!(aufnahme[0] > 0.0);
+    }
+
+    #[test]
+    fn angebrochene_aufnahme_ab_halber_sekunde_zaehlt() {
+        // Das Mikrofon stirbt nach dem Einsatz: ab einer halben Sekunde ist
+        // die Aufnahme brauchbar — dasselbe Maß wie vor dem Umbau.
+        let mut bloecke = vec![vec![0.0_f32; 1_600]];
+        bloecke.extend(vec![vec![0.5_f32; 1_600]; 6]);
+        let aufnahme = sprache_schneiden(quelle(bloecke), RATE).unwrap();
+
+        // 1.600 Samples Vorlauf plus 9.600 gesprochene — mehr kam nicht.
+        assert_eq!(aufnahme.len(), 11_200);
+    }
+
+    #[test]
+    fn totes_mikrofon_kurz_nach_dem_einsatz_ist_zu_kurz() {
+        // Einsatz erkannt, aber nur 0,2 s Sprache: daraus lernt niemand ein
+        // Wort — der Fehler sagt „zu kurz", nicht „nichts gehört".
+        let bloecke = vec![vec![0.0_f32; 1_600], vec![0.5_f32; 3_200]];
+        let fehler = sprache_schneiden(quelle(bloecke), RATE).unwrap_err();
+        assert!(fehler.contains("zu kurz"), "{fehler}");
+    }
+
+    #[test]
+    fn totes_mikrofon_vor_dem_einsatz_ist_nichts_gehoert() {
+        // Kein einziges Fenster über der Schwelle, dann Stromende: für den
+        // Benutzer ist das dieselbe Auskunft wie Schweigen — sprich lauter,
+        // prüf das Mikrofon.
+        let bloecke = vec![vec![0.0_f32; 1_600]; 2];
+        let fehler = sprache_schneiden(quelle(bloecke), RATE).unwrap_err();
+        assert!(fehler.contains("Nichts gehört"), "{fehler}");
+    }
 }

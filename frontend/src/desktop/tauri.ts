@@ -54,7 +54,10 @@ export async function wakewordStand(): Promise<WakewordStand> {
   return await invoke<WakewordStand>('wakeword_stand')
 }
 
-/** Nimmt Kalibrierungs-Aufnahme Nr. `nummer` auf (blockiert ~2,2 s). */
+/**
+ * Nimmt Kalibrierungs-Aufnahme Nr. `nummer` auf. Blockiert, bis gesprochen
+ * wurde (höchstens ~7,5 s) — eine stille Runde ist ein Fehler, keine Aufnahme.
+ */
 export async function wakewordAufnehmen(nummer: number): Promise<string> {
   return await invoke<string>('wakeword_aufnehmen', { nummer })
 }

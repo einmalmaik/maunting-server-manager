@@ -135,8 +135,9 @@ fn wakeword_stand(app: tauri::AppHandle) -> Result<wakeword::WakewordStand, Stri
     wakeword::stand(&app)
 }
 
-/// Blockiert für die Dauer der Aufnahme (~2,2 s) — Tauri-Commands laufen
-/// auf eigenen Threads, das Fenster bleibt bedienbar.
+/// Blockiert, bis gesprochen wurde — höchstens ~7,5 s (Energie-Tor in
+/// `wakeword::aufnehmen`). Tauri-Commands laufen auf eigenen Threads,
+/// das Fenster bleibt bedienbar.
 #[tauri::command]
 fn wakeword_aufnehmen(app: tauri::AppHandle, nummer: u8) -> Result<String, String> {
     wakeword::aufnehmen(&app, nummer)
