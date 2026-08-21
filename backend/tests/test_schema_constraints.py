@@ -1310,6 +1310,66 @@ def test_die_migration_traegt_den_reparaturauftrag(tmp_path: Path) -> None:
         settings.database_url = vorher
 
 
+def test_das_audit_log_traegt_den_dedupe_index(db: Session) -> None:
+    """Der Index ist die Betriebsgrundlage von `record_read_access`.
+
+    Die Dedupe-Abfrage (user_id + action + target_id + created_at) laeuft auf
+    dem heissesten Lesepfad des Panels — Dateibrowser, Konsole, Logs — und
+    `audit_logs` waechst unbegrenzt, weil es keinen Retention-Job gibt. Ohne
+    den Index bliebe die Suite gruen und jede Interaktion zahlte beim
+    Betreiber einen wachsenden Heap-Scan.
+    """
+    indizes = {
+        index["name"]: index
+        for index in inspect(db.get_bind()).get_indexes("audit_logs")
+    }
+    assert indizes["ix_audit_logs_read_dedupe"]["column_names"] == [
+        "user_id",
+        "action",
+        "target_id",
+        "created_at",
+    ]
+
+
+def test_die_migration_traegt_den_dedupe_index(tmp_path: Path) -> None:
+    """Modell und Migration `20260821_04` tragen denselben Index.
+
+    Der Rueckbau bis vor die Revision beweist, dass er aus der Kette stammt
+    und nicht bloss aus `create_all` — sonst haette ihn nur die Testdatenbank,
+    waehrend jede echte Anlage weiter scannt.
+    """
+    db_url = f"sqlite:///{tmp_path / 'audit_index_constraint.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        command.downgrade(config, "20260821_03")
+        assert "ix_audit_logs_read_dedupe" not in {
+            index["name"] for index in _frisch(engine).get_indexes("audit_logs")
+        }
+
+        command.upgrade(config, "head")
+        indizes = {
+            index["name"]: index
+            for index in _frisch(engine).get_indexes("audit_logs")
+        }
+        assert indizes["ix_audit_logs_read_dedupe"]["column_names"] == [
+            "user_id",
+            "action",
+            "target_id",
+            "created_at",
+        ]
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
+
 def test_die_migration_traegt_die_guardian_uebersteuerung(tmp_path: Path) -> None:
     """Die Uebersteuerung muss aus der Kette kommen, nicht aus ``create_all``.
 

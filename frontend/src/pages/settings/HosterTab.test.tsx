@@ -1,12 +1,21 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { hosterApi, type HosterIntegration, type HosterProduct } from '@/api/hoster'
 import { rbacApi } from '@/api/rbac'
+import { api } from '@/api/client'
 import type { Role } from '@/types/permissions'
 import i18n from '@/i18n'
 import { HosterTab } from './HosterTab'
+
+// Der Reiter holt den Spielekatalog (/system/games) und die Benutzerliste
+// (/admin/users) ueber den generischen Client — beides hier bedient, damit
+// die DNA-Dropdowns echte Optionen zeigen.
+vi.mock('@/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/api/client')>('@/api/client')
+  return { ...actual, api: vi.fn() }
+})
 
 vi.mock('@/api/hoster', () => ({
   hosterApi: {
@@ -88,6 +97,18 @@ function renderTab(canWrite = true) {
 describe('HosterTab', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('de')
+    vi.mocked(api).mockReset().mockImplementation(async (path: string) => {
+      if (path === '/system/games') {
+        return [
+          { id: 'minecraft', name: 'Minecraft', platform: 'linux', mod_support: true, supports_steam_workshop: false, ports: [], source: 'native' },
+          { id: 'palworld', name: 'Palworld', platform: 'linux', mod_support: false, supports_steam_workshop: false, ports: [], source: 'native' },
+        ] as any
+      }
+      if (path === '/admin/users') {
+        return [{ id: 9, username: 'svc', is_owner: true, is_active: true }] as any
+      }
+      return undefined as any
+    })
     vi.mocked(hosterApi.listIntegrations).mockReset().mockResolvedValue([integration])
     vi.mocked(hosterApi.listProducts).mockReset().mockResolvedValue([])
     vi.mocked(hosterApi.listServices).mockReset().mockResolvedValue([])
@@ -195,6 +216,9 @@ describe('HosterTab', () => {
     expect(screen.getByText(/handelt im Namen dieses Panel-Benutzers/)).toBeInTheDocument()
     expect(screen.getByText(/Zustellungen sind persistent/)).toBeInTheDocument()
     expect(screen.getByText(/bevor der Aufräumlauf/)).toBeInTheDocument()
+    // Der Dienstbenutzer bleibt im Bearbeiten-Formular bewusst unveraenderbar —
+    // ein Wechsel waere eine Rechte-Neubewertung aller Produkte.
+    expect(screen.queryByTestId('hoster-service-user-select')).not.toBeInTheDocument()
   })
 
   it('explains every field of the product form', async () => {
@@ -210,18 +234,23 @@ describe('HosterTab', () => {
   it('offers the roles of the panel and sends the chosen one with the product', async () => {
     renderTab()
 
-    const select = await screen.findByLabelText(/Rolle bei Buchung/)
-    await waitFor(() => expect(within(select).getAllByRole('option')).toHaveLength(3))
-    // Die Eintraege stammen aus rbacApi.listRoles() und stehen alphabetisch.
-    expect(within(select).getAllByRole('option').map((option) => option.textContent)).toEqual([
+    // Das DNA-Dropdown oeffnet per Klick; die Eintraege stammen aus
+    // rbacApi.listRoles() und stehen alphabetisch hinter der Leer-Option.
+    const roleDropdown = await screen.findByTestId('hoster-product-role-select')
+    fireEvent.click(roleDropdown)
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(3))
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
       'Keine Zusatzrolle',
       'Basis',
       'Premium',
     ])
+    fireEvent.click(screen.getByRole('option', { name: 'Premium' }))
 
     fireEvent.change(screen.getByLabelText(/Produktkennung im Shop/), { target: { value: 'gold' } })
-    fireEvent.change(screen.getByLabelText(/Blueprint \/ Spieltyp/), { target: { value: 'minecraft' } })
-    fireEvent.change(select, { target: { value: '5' } })
+    // Der Spielekatalog kommt aus /system/games — dieselbe Quelle wie die
+    // Server-Erstellung — und schreibt die technische Kennung in game_type.
+    fireEvent.click(screen.getByTestId('hoster-product-game-select'))
+    fireEvent.click(await screen.findByRole('option', { name: /Minecraft/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Produkt speichern' }))
 
     await waitFor(() =>
@@ -251,21 +280,38 @@ describe('HosterTab', () => {
     // Ohne Liste bleibt die Kennung stehen: "Keine Zusatzrolle" waere hier eine
     // Falschaussage — das Produkt hat sehr wohl eine Rolle.
     expect(await screen.findByText(/#5/)).toBeInTheDocument()
-    const select = screen.getByLabelText(/Rolle bei Buchung/)
     await waitFor(() => expect(rbacApi.listRoles).toHaveBeenCalled())
-    expect(within(select).getAllByRole('option').map((option) => option.textContent)).toEqual([
+    fireEvent.click(screen.getByTestId('hoster-product-role-select'))
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
       'Keine Zusatzrolle',
     ])
+    fireEvent.click(screen.getByRole('option', { name: 'Keine Zusatzrolle' }))
 
     fireEvent.change(screen.getByLabelText(/Produktkennung im Shop/), { target: { value: 'silber' } })
-    fireEvent.change(screen.getByLabelText(/Blueprint \/ Spieltyp/), { target: { value: 'minecraft' } })
+    fireEvent.click(screen.getByTestId('hoster-product-game-select'))
+    fireEvent.click(await screen.findByRole('option', { name: /Minecraft/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Produkt speichern' }))
 
     await waitFor(() =>
       expect(hosterApi.saveProduct).toHaveBeenCalledWith(
         3,
-        expect.objectContaining({ external_product_key: 'silber', role_id: null }),
+        expect.objectContaining({ external_product_key: 'silber', role_id: null, game_type: 'minecraft' }),
       ),
     )
+  })
+
+  /**
+   * Der Spielekatalog ist Beiwerk wie die Rollenliste: faellt /system/games
+   * aus, rendert die Sektion die Texteingabe als Rueckfall — ein Nebenaufruf
+   * darf die Produktanlage nicht blockieren.
+   */
+  it('falls back to the text input when the game catalog fails to load', async () => {
+    vi.mocked(api).mockReset().mockRejectedValue(new Error('katalog weg'))
+    renderTab()
+
+    const input = await screen.findByLabelText(/Blueprint \/ Spieltyp/)
+    fireEvent.change(input, { target: { value: 'minecraft' } })
+    expect((input as HTMLInputElement).value).toBe('minecraft')
+    expect(screen.queryByTestId('hoster-product-game-select')).not.toBeInTheDocument()
   })
 })

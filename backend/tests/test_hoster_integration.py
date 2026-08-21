@@ -1152,6 +1152,170 @@ def test_expired_handoff_does_not_authenticate(
     assert "__Secure-access_token" not in response.headers.get("set-cookie", "")
 
 
+def test_handoff_redirect_uses_referer_only_from_the_cors_allowlist(
+    client: TestClient, db: Session, owner_user: User
+) -> None:
+    """Der Klick aus dem Panel (Dev: panel_url zeigt aufs Backend) darf zur
+    Frontend-Origin zurueckleiten — aber nur bei exaktem Allowlist-Treffer.
+    Jeder fremde Referer faellt auf panel_url zurueck: der Endpunkt setzt
+    Session-Cookies, ein offener Redirect waere ein Phishing-Werkzeug."""
+    from config import settings
+
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    _product(db, integration)
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        client.put(
+            "/api/hoster/v1/services/svc-12",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-8",
+                "product_key": "mc-8gb",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+
+    def _neuer_token() -> str:
+        created = client.post(
+            "/api/hoster/v1/handoffs",
+            json={"external_service_id": "svc-12", "target_path": "/servers"},
+            headers={API_KEY_HEADER: api_key},
+        )
+        return created.json()["url"].rsplit("/", 1)[-1]
+
+    panel_base = (settings.panel_url or "").rstrip("/")
+    vorher = settings.cors_allowed_origins
+    settings.cors_allowed_origins = "https://frontend.example"
+    try:
+        # Allowlist-Treffer: die Referer-Origin (nie deren Pfad) wird die Basis.
+        erlaubt = client.get(
+            f"/api/hoster/handoff/{_neuer_token()}",
+            headers={"Referer": "https://frontend.example/settings?tab=hoster"},
+            follow_redirects=False,
+        )
+        assert erlaubt.status_code == 302
+        assert erlaubt.headers["location"] == "https://frontend.example/servers"
+
+        # Fremder Referer (echter Shop): unveraendert panel_url.
+        fremd = client.get(
+            f"/api/hoster/handoff/{_neuer_token()}",
+            headers={"Referer": "https://boese.example/checkout"},
+            follow_redirects=False,
+        )
+        assert fremd.status_code == 302
+        assert fremd.headers["location"] == f"{panel_base}/servers"
+
+        # Auch der Fehlerfall bleibt auf der validierten Basis.
+        kaputt = client.get(
+            "/api/hoster/handoff/gibt-es-nicht",
+            headers={"Referer": "https://frontend.example/settings"},
+            follow_redirects=False,
+        )
+        assert kaputt.status_code == 302
+        assert kaputt.headers["location"] == "https://frontend.example/login?handoff=invalid"
+    finally:
+        settings.cors_allowed_origins = vorher
+
+
+# ── Loeschen von Kundenservern ─────────────────────────────────────────────
+
+
+def test_servers_delete_does_not_bypass_the_hoster_gate(
+    client: TestClient, db: Session, owner_user: User
+) -> None:
+    """`servers.delete` ist ein globaler Key und liefe sonst am Filter vorbei.
+
+    Die Zusage lautet "unsichtbar und unbedienbar" — das schliesst das Loeschen
+    ein, sonst waere ausgerechnet die extremste Bedienung die eine Luecke (und
+    per 404-vs-Erfolg auch ein Existenzorakel). Durch duerfen: Inhaber des
+    Hoster-Keys und der Dienstbenutzer der eigenen Integration; die Antwort
+    fuer alle anderen ist 404, nicht 403 — wer den Server nicht sehen darf,
+    erfaehrt auch hier nicht, dass es ihn gibt.
+    """
+    from services.server_deletion_service import delete_server_completely
+    from services.actor_context import ActorContext
+
+    service_user = _service_user(db)
+    integration, api_key = _integration(db, service_user)
+    _product(db, integration)
+    with patch("services.server_provisioning_service.provision_server", _fake_provision(db)):
+        client.put(
+            "/api/hoster/v1/services/svc-30",
+            json={
+                "desired_state": "active",
+                "external_subject": "kunde-30",
+                "product_key": "mc-8gb",
+            },
+            headers={API_KEY_HEADER: api_key},
+        )
+    server = db.query(Server).one()
+
+    def _actor_mit(keys: tuple[str, ...], name: str) -> ActorContext:
+        user = AuthService.create_user(db, name, f"{name}@test.de", "ShopPass123!")
+        role = _role(db, f"rolle-{name}", keys=keys)
+        set_user_roles(db, user, [role.id])
+        db.refresh(user)
+        return ActorContext.for_user(user)
+
+    # Rolle mit servers.delete, aber ohne Hoster-Key: der Server ist fuer sie
+    # nicht existent — 404 vor jedem destruktiven Schritt.
+    with pytest.raises(Exception) as excinfo:
+        delete_server_completely(
+            db, server_id=server.id, actor=_actor_mit(("servers.delete",), "loescher")
+        )
+    assert getattr(excinfo.value, "status_code", None) == 404
+    assert db.query(Server).count() == 1
+
+    # Mit Hoster-Key kommt derselbe Aufruf durchs Gate: die naechste Station
+    # ist die PostgreSQL-Bereinigung — ihr provozierter Fehler (503) beweist,
+    # dass nicht mehr das Gate (404) geantwortet hat.
+    with patch(
+        "services.server_deletion_service.postgres_service.drop_server_resources",
+        side_effect=RuntimeError("boom"),
+    ):
+        with pytest.raises(Exception) as excinfo:
+            delete_server_completely(
+                db,
+                server_id=server.id,
+                actor=_actor_mit(
+                    ("servers.delete", "servers.hoster_customers.view"), "befugter"
+                ),
+            )
+        assert getattr(excinfo.value, "status_code", None) == 503
+
+        # Der Dienstbenutzer der eigenen Integration ebenso — Purge und
+        # Sandbox-Reset laufen ueber genau diesen Pfad.
+        with pytest.raises(Exception) as excinfo:
+            delete_server_completely(
+                db,
+                server_id=server.id,
+                actor=ActorContext.for_user(service_user, origin="external"),
+            )
+        assert getattr(excinfo.value, "status_code", None) == 503
+
+    # Der Dienstbenutzer eines FREMDEN Shops bleibt draussen.
+    fremd_user = AuthService.create_user(db, "fremd-shop", "fremd-shop@test.de", "ShopPass123!")
+    fremd_rolle = _role(db, "fremd-shop-rolle", keys=("servers.create", "servers.delete"))
+    set_user_roles(db, fremd_user, [fremd_rolle.id])
+    db.refresh(fremd_user)
+    hoster_integration_service.create_integration(
+        db,
+        name="Fremdshop",
+        slug="fremdshop",
+        enabled=True,
+        service_user_id=fremd_user.id,
+        webhook_url=None,
+        terminate_grace_days=7,
+    )
+    db.commit()
+    with pytest.raises(Exception) as excinfo:
+        delete_server_completely(
+            db, server_id=server.id, actor=ActorContext.for_user(fremd_user)
+        )
+    assert getattr(excinfo.value, "status_code", None) == 404
+    assert db.query(Server).count() == 1
+
+
 # ── Panel-Verwaltung ───────────────────────────────────────────────────────
 
 

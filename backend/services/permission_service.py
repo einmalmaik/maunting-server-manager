@@ -12,6 +12,8 @@ from __future__ import annotations
 from sqlalchemy.orm import Session, selectinload
 
 from models import (
+    HosterIntegration,
+    HosterService,
     RolePermission,
     Server,
     ServerPermission,
@@ -41,7 +43,62 @@ def has_global_permission(db: Session, user: User, key: str) -> bool:
     return exists is not None
 
 
-def direct_server_permission(db: Session, user: User, server_id: int, key: str) -> bool:
+HOSTER_CUSTOMERS_VIEW_KEY = "servers.hoster_customers.view"
+
+
+def hoster_customer_server_ids(db: Session) -> set[int]:
+    """Server, die zu einem Shop-Vertrag gehoeren — statusagnostisch.
+
+    Auch suspendierte oder in Kuendigung befindliche Vertraege sind
+    Kundendaten. `ondelete=SET NULL` auf `hoster_services.server_id` sorgt
+    dafuer, dass geloeschte Server hier von selbst verschwinden.
+    """
+    rows = (
+        db.query(HosterService.server_id)
+        .filter(HosterService.server_id.isnot(None))
+        .distinct()
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
+def is_hoster_customer_server(db: Session, server_id: int) -> bool:
+    exists = (
+        db.query(HosterService.id)
+        .filter(HosterService.server_id == server_id)
+        .first()
+    )
+    return exists is not None
+
+
+def is_hoster_service_user_for_server(db: Session, user_id: int, server_id: int) -> bool:
+    """Ist dieser Benutzer der Dienstbenutzer der Integration dieses Kundenservers?
+
+    Der Dienstbenutzer verwaltet die Vertragsserver seiner Integration von
+    Berufs wegen (Provisionierung, Purge, Sandbox-Reset). Diese fachliche
+    Beziehung ersetzt fuer ihn den Hoster-Key — aber nur fuer Server der
+    eigenen Integration, nie fuer die eines anderen Shops.
+    """
+    exists = (
+        db.query(HosterService.id)
+        .join(HosterIntegration, HosterIntegration.id == HosterService.integration_id)
+        .filter(
+            HosterService.server_id == server_id,
+            HosterIntegration.service_user_id == user_id,
+        )
+        .first()
+    )
+    return exists is not None
+
+
+def direct_server_permission(
+    db: Session,
+    user: User,
+    server_id: int,
+    key: str,
+    *,
+    hoster_ids: set[int] | None = None,
+) -> bool:
     """Rechte **ohne** Teams: Owner, globale Rolle, Per-Server-Delegation.
 
     Diese Funktion ist die Abbruchbedingung der Rechtekette. Sie fragt bewusst
@@ -52,19 +109,41 @@ def direct_server_permission(db: Session, user: User, server_id: int, key: str) 
     Ohne diese Trennung waere zweierlei moeglich: eine Endlosschleife (Team A
     fragt B fragt A) und eine Rechte-Waescherei ueber eine Kette von Teams, an
     deren Ende niemand mehr sagen koennte, woher ein Recht eigentlich stammt.
+
+    Auf Hoster-Kundenservern zaehlt der pauschale Rollen-Zweig nur, wenn die
+    Rolle zusaetzlich `servers.hoster_customers.view` haelt — fuer **jeden**
+    server-scoped Key, nicht nur fuers Sehen: sonst waere die Liste sauber,
+    aber Konsole und Dateien blieben ueber eine erratene Server-ID offen.
+    Der Kunde selbst ist nicht betroffen, seine Rechte kommen als Delegation.
+    (`has_permission_anywhere` bleibt bewusst grosszuegiger: es entscheidet
+    nur das Werkzeug-Angebot, die Ausfuehrung laeuft immer ueber diese Kette.)
     """
     if user.is_owner:
         return True
     # Pauschale Rolle (z.B. admin oder Custom-Rolle mit server.* Keys)
     role_ids = effective_user_role_ids(db, user)
     if role_ids:
-        role_grant = (
-            db.query(RolePermission.id)
-            .filter(RolePermission.role_id.in_(role_ids), RolePermission.permission_key == key)
-            .first()
-        )
-        if role_grant is not None:
-            return True
+        granted_keys = {
+            row[0]
+            for row in db.query(RolePermission.permission_key)
+            .filter(
+                RolePermission.role_id.in_(role_ids),
+                RolePermission.permission_key.in_([key, HOSTER_CUSTOMERS_VIEW_KEY]),
+            )
+            .all()
+        }
+        if key in granted_keys:
+            # `hoster_ids` erlaubt Schleifen-Aufrufern (Team-Sichtbarkeit),
+            # die Kundenserver-Menge einmal zu holen statt EXISTS je Zeile.
+            if HOSTER_CUSTOMERS_VIEW_KEY in granted_keys:
+                return True
+            is_kunde = (
+                server_id in hoster_ids
+                if hoster_ids is not None
+                else is_hoster_customer_server(db, server_id)
+            )
+            if not is_kunde:
+                return True
     # Per-Server-Delegation
     delegated = (
         db.query(ServerPermission.id)
@@ -348,8 +427,12 @@ def _team_visible_server_ids(db: Session, user: User) -> set[int]:
         .distinct()
         .all()
     )
+    if not rows:
+        return set()
     # Je Gruender nur einmal laden: bei mehreren Servern desselben Teams waere
-    # das sonst eine Abfrage pro Server.
+    # das sonst eine Abfrage pro Server. Die Kundenserver-Menge ebenso — die
+    # Schleife sitzt im 5-Sekunden-Poll der Serverliste jedes Teammitglieds.
+    hoster_ids = hoster_customer_server_ids(db)
     owners: dict[int, User | None] = {}
     visible: set[int] = set()
     for server_id, owner_user_id in rows:
@@ -358,7 +441,9 @@ def _team_visible_server_ids(db: Session, user: User) -> set[int]:
         if owner_user_id not in owners:
             owners[owner_user_id] = db.get(User, owner_user_id)
         owner = owners[owner_user_id]
-        if owner is not None and direct_server_permission(db, owner, server_id, "server.view"):
+        if owner is not None and direct_server_permission(
+            db, owner, server_id, "server.view", hoster_ids=hoster_ids
+        ):
             visible.add(server_id)
     return visible
 
@@ -367,18 +452,22 @@ def list_visible_server_ids(db: Session, user: User) -> list[int] | None:
     """Server-IDs, die der User sehen darf. None = alle (Owner/pauschale Rolle)."""
     if user.is_owner:
         return None
+    pauschal = False
     role_ids = effective_user_role_ids(db, user)
     if role_ids:
-        pauschal = (
-            db.query(RolePermission.id)
+        granted_keys = {
+            row[0]
+            for row in db.query(RolePermission.permission_key)
             .filter(
                 RolePermission.role_id.in_(role_ids),
-                RolePermission.permission_key == "server.view",
+                RolePermission.permission_key.in_(["server.view", HOSTER_CUSTOMERS_VIEW_KEY]),
             )
-            .first()
-        )
-        if pauschal is not None:
-            return None
+            .all()
+        }
+        if "server.view" in granted_keys:
+            if HOSTER_CUSTOMERS_VIEW_KEY in granted_keys:
+                return None
+            pauschal = True
     # Nur Server, fuer die explizit `server.view` delegiert wurde, sind sichtbar.
     # So bleibt die Liste konsistent mit dem Detail-Endpoint (der ebenfalls
     # `server.view` prueft) — kein "sehe Server im Listing, kriege aber 403 im Detail".
@@ -392,6 +481,15 @@ def list_visible_server_ids(db: Session, user: User) -> list[int] | None:
         .all()
     )
     visible = {r[0] for r in rows} | _team_visible_server_ids(db, user)
+    if pauschal:
+        # Pauschales `server.view` ohne den Hoster-Key: alle Server ausser den
+        # Kundenservern — vereinigt mit den Delegationen, damit ein Support-
+        # Mitarbeiter, der selbst Kunde ist, seinen eigenen Server behaelt.
+        hoster_ids = hoster_customer_server_ids(db)
+        alle = db.query(Server.id)
+        if hoster_ids:
+            alle = alle.filter(Server.id.notin_(hoster_ids))
+        visible |= {r[0] for r in alle.all()}
     # Sortiert, damit die Reihenfolge nicht von der Mengenimplementierung
     # abhaengt — Tests und Oberflaeche sollen dasselbe sehen.
     return sorted(visible)

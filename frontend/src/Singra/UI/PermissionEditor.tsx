@@ -69,6 +69,7 @@ const SUBGROUPS = [
     keys: [
       'servers.create',
       'servers.delete',
+      'servers.hoster_customers.view',
       'blueprints.manage',
       'nodes.read',
       'nodes.manage',

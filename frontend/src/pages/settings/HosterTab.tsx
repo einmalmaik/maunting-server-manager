@@ -43,11 +43,27 @@ import { credentialsApi } from '@/api/credentials'
 import { rbacApi } from '@/api/rbac'
 import { api, SanitizedApiError } from '@/api/client'
 import { Button, NumberStepper, Switch } from '@/Singra/UI'
+import { Dropdown } from '@/components/ui/Dropdown'
 import { SecretOnce } from '@/components/ui/SecretOnce'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 import type { Role } from '@/types/permissions'
-import type { User } from '@/types'
+import type { GameInfo, User } from '@/types'
+
+/**
+ * Handoff-Link same-origin oeffnen: der absolute Link wird aus MSM_PANEL_URL
+ * gebaut und zeigt in der Dev-Umgebung am Frontend vorbei. Der Pfad ueber die
+ * eigene Origin laeuft durch den Vite-Proxy, und der mitgesendete Referer
+ * (deshalb `rel="noopener"` ohne `noreferrer`) laesst das Backend auf diese
+ * Origin zurueckleiten — nur bei exaktem Treffer in der CORS-Allowlist.
+ */
+function handoffPath(url: string): string {
+  try {
+    return new URL(url).pathname
+  } catch {
+    return url
+  }
+}
 
 const EMPTY_PRODUCT: HosterProductWrite = {
   external_product_key: '',
@@ -201,17 +217,17 @@ export function HosterTab({ canWrite }: { canWrite: boolean }) {
             <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
               {t('hoster.integration')}
             </span>
-            <select
-              className="msm-input"
-              value={selectedId ?? ''}
-              onChange={(event) => setSelectedId(Number(event.target.value))}
-            >
-              {integrations.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.name} ({row.slug}) {row.is_sandbox ? `[${t('hoster.sandboxBadge')}]` : `[${t('hoster.liveBadge')}]`}
-                </option>
-              ))}
-            </select>
+            <Dropdown
+              value={selectedId === null ? null : String(selectedId)}
+              onChange={(value) => setSelectedId(Number(value))}
+              options={integrations.map((row) => ({
+                value: String(row.id),
+                label: `${row.name} (${row.slug})`,
+                hint: row.is_sandbox ? t('hoster.sandboxBadge') : t('hoster.liveBadge'),
+              }))}
+              aria-label={t('hoster.integration')}
+              data-testid="hoster-integration-select"
+            />
           </label>
 
           {selected && (
@@ -392,24 +408,22 @@ function IntegrationForm({
           <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
             {t('hoster.serviceUserId')}
           </span>
-          <select
-            className="msm-input"
-            value={serviceUserId}
-            onChange={(e) => setServiceUserId(e.target.value)}
+          <Dropdown
+            value={serviceUserId || null}
+            onChange={setServiceUserId}
             disabled={loadingUsers}
-            required
-          >
-            {users.length === 0 && (
-              <option value="">{loadingUsers ? t('common.loading') : t('hoster.noUsersFound')}</option>
-            )}
-            {users
+            searchable
+            placeholder={loadingUsers ? t('common.loading') : t('hoster.noUsersFound')}
+            options={users
               .filter((u) => u.is_active)
-              .map((u) => (
-                <option key={u.id} value={String(u.id)}>
-                  {u.username} (#{u.id}){u.is_owner ? ' — Owner' : ''}
-                </option>
-              ))}
-          </select>
+              .map((u) => ({
+                value: String(u.id),
+                label: `${u.username} (#${u.id})`,
+                hint: u.is_owner ? 'Owner' : undefined,
+              }))}
+            aria-label={t('hoster.serviceUserId')}
+            data-testid="hoster-service-user-select"
+          />
           <p className="text-xs text-on-surface-variant">{t('hoster.serviceUserHint')}</p>
         </label>
         <Field
@@ -605,8 +619,20 @@ function ProductSection({ integrationId, canWrite }: { integrationId: number; ca
   const { t } = useTranslation()
   const [products, setProducts] = useState<HosterProduct[]>([])
   const [roles, setRoles] = useState<Role[]>([])
+  const [games, setGames] = useState<GameInfo[]>([])
   const [draft, setDraft] = useState<HosterProductWrite>(EMPTY_PRODUCT)
   const [busy, setBusy] = useState(false)
+
+  // Derselbe Katalog, gegen den die Server-Erstellung validiert
+  // (`product.game_type` wird 1:1 zu `ServerCreate.game_type`). Einmal holen
+  // reicht; faellt der Load aus, bleibt unten die Texteingabe als Rueckfall.
+  useEffect(() => {
+    let active = true
+    api<GameInfo[]>('/system/games')
+      .then((rows) => { if (active) setGames(Array.isArray(rows) ? rows : []) })
+      .catch(() => { if (active) setGames([]) })
+    return () => { active = false }
+  }, [])
 
   const load = useCallback(() => {
     hosterApi
@@ -708,12 +734,30 @@ function ProductSection({ integrationId, canWrite }: { integrationId: number; ca
             onChange={(external_product_key) => setDraft({ ...draft, external_product_key })}
             hint={t('hoster.products.keyHint')}
           />
-          <Field
-            label={t('hoster.products.gameType')}
-            value={draft.game_type}
-            onChange={(game_type) => setDraft({ ...draft, game_type })}
-            hint={t('hoster.products.gameTypeHint')}
-          />
+          {games.length > 0 ? (
+            <label className="space-y-1.5">
+              <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                {t('hoster.products.gameType')}
+              </span>
+              <Dropdown
+                value={draft.game_type || null}
+                onChange={(game_type) => setDraft({ ...draft, game_type })}
+                searchable
+                placeholder={t('hoster.products.gameType')}
+                options={games.map((g) => ({ value: g.id, label: g.name, hint: g.id }))}
+                aria-label={t('hoster.products.gameType')}
+                data-testid="hoster-product-game-select"
+              />
+              <p className="text-xs text-on-surface-variant">{t('hoster.products.gameTypeHint')}</p>
+            </label>
+          ) : (
+            <Field
+              label={t('hoster.products.gameType')}
+              value={draft.game_type}
+              onChange={(game_type) => setDraft({ ...draft, game_type })}
+              hint={t('hoster.products.gameTypeHint')}
+            />
+          )}
           {/* Eine Erklaerung fuer alle drei Grenzen: dreimal derselbe Satz waere
               nur laenger, nicht klarer. */}
           <p className="text-xs text-on-surface-variant md:col-span-2">{t('hoster.products.limitsHint')}</p>
@@ -770,19 +814,19 @@ function ProductSection({ integrationId, canWrite }: { integrationId: number; ca
             <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
               {t('hoster.products.role')}
             </span>
-            <select
-              className="msm-input"
-              value={draft.role_id ?? ''}
-              onChange={(event) => setDraft({
+            <Dropdown
+              value={draft.role_id === null ? '' : String(draft.role_id)}
+              onChange={(value) => setDraft({
                 ...draft,
-                role_id: event.target.value ? Number(event.target.value) : null,
+                role_id: value ? Number(value) : null,
               })}
-            >
-              <option value="">{t('hoster.products.roleNone')}</option>
-              {sortedRoles.map((role) => (
-                <option key={role.id} value={role.id}>{role.name}</option>
-              ))}
-            </select>
+              options={[
+                { value: '', label: t('hoster.products.roleNone') },
+                ...sortedRoles.map((role) => ({ value: String(role.id), label: role.name })),
+              ]}
+              aria-label={t('hoster.products.role')}
+              data-testid="hoster-product-role-select"
+            />
             <p className="text-xs text-on-surface-variant">{t('hoster.products.roleHint')}</p>
           </label>
           <div className="md:col-span-2 flex items-center justify-between gap-4">
@@ -1170,9 +1214,9 @@ Bitte erstelle mir einen vollständigen, sauberen und produktionsreifen Stripe W
             </div>
             {simResult.handoff_url && (
               <a
-                href={simResult.handoff_url}
+                href={handoffPath(simResult.handoff_url)}
                 target="_blank"
-                rel="noopener noreferrer"
+                rel="noopener"
                 className="msm-btn-primary inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium"
               >
                 <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />

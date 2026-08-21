@@ -80,6 +80,23 @@ def delete_server_completely(db: Session, *, server_id: int, actor: ActorContext
     if server is None:
         raise HTTPException(status_code=404, detail="Server nicht gefunden")
 
+    # Hoster-Kundenserver sind fuer pauschale Rollenrechte unsichtbar — das
+    # schliesst das Loeschen ein, sonst waere `servers.delete` der eine globale
+    # Key, der die Schranke umgeht (und per 404-vs-Erfolg die Existenz verriete).
+    # Durch duerfen: Owner, Inhaber des Hoster-Keys und der Dienstbenutzer der
+    # Integration dieses Servers (Purge, Sandbox-Reset). Die Antwort ist 404,
+    # nicht 403: wer den Server nicht sehen darf, erfaehrt auch hier nicht,
+    # dass es ihn gibt.
+    if permission_service.is_hoster_customer_server(db, server.id) and not (
+        permission_service.has_global_permission(
+            db, principal, permission_service.HOSTER_CUSTOMERS_VIEW_KEY
+        )
+        or permission_service.is_hoster_service_user_for_server(
+            db, principal.id, server.id
+        )
+    ):
+        raise HTTPException(status_code=404, detail="Server nicht gefunden")
+
     node = getattr(server, "node", None)
     install_dir = server.install_dir
     backup_dir = f"/opt/msm/backups/{server.id}"

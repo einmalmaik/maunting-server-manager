@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from config import settings
+from config import get_cors_origins, settings
 from database import get_db
 from models import HosterIntegration
 from schemas.hoster import (
@@ -141,6 +141,32 @@ def health(integration: HosterIntegration = Depends(current_integration)) -> dic
     return {"ok": True, "integration": integration.slug}
 
 
+def _redirect_base(request: Request) -> str:
+    """Redirect-Basis: `panel_url`, oder die Referer-Origin bei Allowlist-Treffer.
+
+    Kommt der Klick aus dem Panel selbst (Simulator-Button in der Dev-Umgebung,
+    wo `panel_url` auf das Backend zeigt), traegt der Referer die richtige
+    Frontend-Origin. Verwendet wird sie NUR bei exaktem Treffer in der
+    CORS-Allowlist — nie freies Header-Parsing: dieser Endpunkt setzt
+    Session-Cookies, ein offener Redirect waere hier ein Phishing-Werkzeug.
+    Der Referer eines echten Shops steht nie in der Allowlist und faellt auf
+    `panel_url` zurueck, das Verhalten fuer Kunden bleibt unveraendert.
+    """
+    referer = request.headers.get("referer") or ""
+    if referer:
+        try:
+            from urllib.parse import urlsplit
+
+            parts = urlsplit(referer)
+            if parts.scheme in ("http", "https") and parts.netloc:
+                origin = f"{parts.scheme}://{parts.netloc}"
+                if origin in get_cors_origins():
+                    return origin
+        except ValueError:
+            pass
+    return (settings.panel_url or "").rstrip("/")
+
+
 @redeem_router.get("/handoff/{token}")
 def redeem_handoff(
     token: str,
@@ -153,8 +179,7 @@ def redeem_handoff(
     Weg einheitlich auf die Loginseite. Ein Angreifer soll aus der Antwort nicht
     ableiten koennen, welcher Fall vorliegt.
     """
-    del request
-    base = (settings.panel_url or "").rstrip("/")
+    base = _redirect_base(request)
     try:
         user, target_path = hoster_handoff_service.redeem(db, token)
     except HTTPException:

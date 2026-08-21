@@ -606,7 +606,9 @@ class TestSichtbarkeit:
             cookies=user_cookies,
             headers={"X-CSRF-Token": user_csrf_token},
         )
-        assert antwort.status_code == 403
+        # 404, nicht 403: der Benutzer haelt hier auch kein `server.view` —
+        # ohne Sichtbarkeit keine Auskunft, dass es den Server gibt.
+        assert antwort.status_code == 404
         db.refresh(test_server)
         assert test_server.guardian_overrides_json is not None
 

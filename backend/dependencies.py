@@ -150,14 +150,25 @@ def verify_csrf(request: Request) -> None:
 
 
 def require_server_permission(user: User, server_id: int, db: Session, key: str) -> None:
-    """Prueft eine server-scoped Permission. Wirft 403, wenn der User keinen Zugriff hat.
+    """Prueft eine server-scoped Permission.
 
     Owner werden ungeprueft durchgelassen (Bootstrap-Override). Sonst entscheidet
     `services.permission_service.has_server_permission`: globale Rolle gewaehrt
     pauschal oder per-Server-Delegation gewaehrt einzeln.
+
+    Wer den Server nicht einmal sehen darf, bekommt 404 statt 403: die
+    Rechtepruefung laeuft an vielen Endpunkten vor dem Existenz-Lookup, und
+    ein 403 nur fuer existierende Server waere ein Existenzorakel — per
+    ID-Iteration liesse sich sonst z.B. bestimmen, welche IDs Hoster-
+    Kundenserver sind (dieselbe Regel wie in `teams.py::set_server_grants`
+    und `ai_action_service._resolve_server`). Wer sehen darf, aber das
+    konkrete Recht nicht haelt, bekommt weiterhin 403.
     """
-    if not has_server_permission(db, user, server_id, key):
+    if has_server_permission(db, user, server_id, key):
+        return
+    if key != "server.view" and has_server_permission(db, user, server_id, "server.view"):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    raise HTTPException(status_code=404, detail="Server nicht gefunden")
 
 
 def require_global(key: str) -> Callable[..., User]:

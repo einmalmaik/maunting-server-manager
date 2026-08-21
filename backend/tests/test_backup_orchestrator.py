@@ -897,9 +897,9 @@ class TestRouterIntegration:
                     cookies=user_cookies,
                     headers={"X-CSRF-Token": csrf},
                 )
-                # regular_user hat alle Permissions via user_permission fixture nicht gesetzt hier
-                # → 403 (kein server.backups.create)
-                assert resp.status_code == 403
+                # regular_user hat hier gar keine Server-Rechte, auch kein
+                # server.view → 404 statt 403 (kein Existenzorakel).
+                assert resp.status_code == 404
         finally:
             app.dependency_overrides.clear()
 

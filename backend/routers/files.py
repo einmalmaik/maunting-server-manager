@@ -34,6 +34,7 @@ from blueprints.archive_extract import ArchiveExtractError, safe_extract_archive
 from database import get_db
 from models import Server, User
 from dependencies import get_current_user, verify_csrf, require_server_permission
+from services import audit_service
 from services import docker_service
 from services import file_edit_service
 from services import file_history_service
@@ -277,6 +278,9 @@ def browse_directory(
 ) -> dict:
     """List files and directories at the given path."""
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     server = _get_server(server_id, db)
     agent = _agent_client(server, db)
     if agent is not None:
@@ -381,6 +385,9 @@ def search_paths(
     wir ``truncated=True``.
     """
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     server = _get_server(server_id, db)
     agent = _agent_client(server, db)
     if agent is not None:
@@ -441,6 +448,9 @@ def search_contents(
     unredigiert an einen Menschen, der die Datei ohnehin im Editor oeffnen darf.
     """
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     return search_file_contents(
         db, server_id=server_id, query=q, relative_path=path, context=context
     )
@@ -455,6 +465,9 @@ def read_file(
 ) -> dict:
     """Read a text file's content."""
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     return read_server_text(db, server_id=server_id, relative_path=path)
 
 
@@ -491,6 +504,9 @@ def list_file_versions(
 ) -> dict:
     """List encrypted history metadata without decrypting file content."""
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     server = _get_server(server_id, db)
     _safe_path(server.install_dir, path)
     try:
@@ -509,6 +525,9 @@ def read_file_version(
     user: User = Depends(get_current_user),
 ) -> dict:
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     server = _get_server(server_id, db)
     _safe_path(server.install_dir, path)
     try:
@@ -784,6 +803,9 @@ def chunked_upload_status(
 ) -> dict:
     """Aktueller Offset eines laufenden Chunked-Uploads (fuer Wiederaufnahme)."""
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     server = _get_server(server_id, db)
 
     if not upload_id.isalnum() or len(upload_id) != 32:
@@ -921,6 +943,9 @@ def download_file(
     from fastapi.responses import Response
 
     require_server_permission(user, server_id, db, "server.files.read")
+    audit_service.record_read_access(
+        db, user_id=user.id, server_id=server_id, action="server.files.read"
+    )
     server = _get_server(server_id, db)
     agent = _agent_client(server, db)
     if agent is not None:

@@ -351,7 +351,8 @@ class TestUploadToCloud:
                     cookies=user_cookies,
                     headers={"X-CSRF-Token": csrf},
                 )
-                assert resp.status_code == 403
+                # Ohne jedes Server-Recht (auch kein view): 404 statt 403.
+                assert resp.status_code == 404
         finally:
             app.dependency_overrides.clear()
 
