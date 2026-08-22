@@ -357,6 +357,42 @@ describe('AiChat', () => {
     expect(localStorage.getItem('msm_ai_chat:provider:anonym')).toBe('2')
   })
 
+  it('traegt eine alte Browser-Wahl beim Oeffnen einmalig ans Konto nach', async () => {
+    // Konten aus der Zeit vor `ai_provider_id` haben ihre Wahl nur im
+    // localStorage. Ohne die Uebernahme spraeche das Overlay (das nur die
+    // Konto-Wahl sieht) bis zum naechsten manuellen Wechsel mit dem
+    // erstbesten Zugang — beliebig langsam, und niemand saehe warum.
+    useAuthStore.setState({
+      user: { id: 42, username: 'test' } as any,
+      isAuthenticated: true,
+      isLoading: false,
+    })
+    localStorage.setItem('msm_ai_chat:provider:42', '2')
+    vi.mocked(aiApi.listProviders).mockResolvedValue([
+      {
+        id: 1, name: 'Synthetic AI', default_model: 'test-model',
+        requires_api_key: false, operator_key_available: true, available: true,
+        reasoning: true, efforts: ['low', 'medium', 'high'],
+        can_disable: true, default_effort: 'medium',
+      },
+      {
+        id: 2, name: 'Synthetic Lab', default_model: 'lab-model',
+        requires_api_key: false, operator_key_available: true, available: true,
+        reasoning: false, efforts: [], can_disable: true, default_effort: null,
+      },
+    ])
+    vi.mocked(client.api).mockResolvedValue({ ai_provider_id: 2 })
+
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
+    await screen.findByText('synthetic-note.txt')
+
+    await waitFor(() => expect(client.api).toHaveBeenCalledWith('/auth/me/ai-provider', {
+      method: 'PATCH',
+      body: JSON.stringify({ provider_id: 2 }),
+    }))
+    await waitFor(() => expect(useAuthStore.getState().user?.ai_provider_id).toBe(2))
+  })
+
   it('nimmt die Wahl am Konto vor der im Browser und schreibt sie beim Wechsel dorthin', async () => {
     // Die Wahl am Konto ist die eine Quelle, die auch Overlay und Desktop-App
     // sehen — den localStorage dieses Fensters kennen die nicht. Ohne den

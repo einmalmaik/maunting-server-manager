@@ -923,3 +923,38 @@ def test_message_content_includes_static_timestamp_prefix(db: Session, regular_u
     assert user_msgs[0]["content"].startswith("[20.08. 14:30] ")
     assert "Mein ARK Server laeuft nicht." in user_msgs[0]["content"]
 
+
+def test_interne_zeilen_tragen_keinen_zeitstempel(db: Session, regular_user: User) -> None:
+    """Maschinerie-Zeilen (`intern=True`) gehen ohne Zeitstempel-Praefix hinaus.
+
+    Der Praefix begruendet sich mit der Oberflaeche — und die zeigt interne
+    Zeilen nie an. Schlimmer: der Lieferauftrag der Meldestelle ist die
+    **letzte** Nachricht vor der Antwort, und ein Zeitstempel unmittelbar an
+    der Melde-Anweisung ist genau das Material, das das Modell beim Liefern
+    nachplappert („am 22.08. um 14:30 fertig geworden"). Die Uhr steht im
+    Lageblock; hier hat sie nichts verloren.
+    """
+    conversation = AiConversation(
+        id=str(uuid4()), user_id=regular_user.id, kind="primary", title="Chat"
+    )
+    db.add(conversation)
+    db.commit()
+
+    dt = datetime(2026, 8, 22, 14, 30, 0, tzinfo=timezone.utc)
+    msg = AiMessage(
+        id=str(uuid4()),
+        conversation_id=conversation.id,
+        role="user",
+        content="Meldung des Panels: der Auftrag ist fertig. Liefere die Ergebnisse.",
+        status="complete",
+        intern=True,
+        created_at=dt,
+    )
+    db.add(msg)
+    db.commit()
+
+    nachrichten = build_provider_messages(db, conversation)
+    treffer = [m for m in nachrichten if "Meldung des Panels" in m.get("content", "")]
+    assert len(treffer) == 1
+    assert not treffer[0]["content"].startswith("[")
+

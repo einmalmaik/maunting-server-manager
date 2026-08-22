@@ -19,6 +19,7 @@ import {
   writeAiProviderChoice,
   writeAiReasoningChoice,
 } from '@/lib/aiChatPreferences'
+import { browserWahlInsKontoUebernehmen } from '@/lib/aiProviderKonto'
 import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
@@ -247,6 +248,11 @@ export function AiChat() {
           providerRows,
           kontoWahl ?? readAiProviderChoice(merkSchluessel.provider),
         ))
+        // Einmalige Übernahme: eine Browser-Wahl aus der Zeit vor dem
+        // Konto-Feld wandert beim ersten Öffnen ans Konto. Ohne das spräche
+        // das Overlay bis zum nächsten manuellen Modellwechsel weiter mit dem
+        // erstbesten Zugang — und der kann beliebig langsam sein.
+        void browserWahlInsKontoUebernehmen()
         // Vorschlaege werden chronologisch zwischen die Nachrichten einsortiert,
         // damit man sieht, auf welche Antwort sie sich beziehen. Vorher standen
         // sie gesammelt am Ende und wirkten losgeloest.

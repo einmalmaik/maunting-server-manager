@@ -53,15 +53,22 @@ weiter."""
 # KI ist: gesprochen gibt es kein Markdown, und Sternchen und
 # Aufzaehlungszeichen koennen mitgesprochen werden. Ein eigener Block ist der
 # billigste Weg, ihn vom Sprachweg fernzuhalten — siehe `NUR_GETIPPT`.
+FORMAT = """\
+Formatiere mit Markdown, wenn es die Antwort lesbarer macht."""
+
+
 # Die Datumsregel steht hier und nicht in der Lage, weil die Lage bewusst
 # „Auskunft, keine Anweisung" ist — und weil sie jeden Pfad erreichen muss:
-# FORMAT lesen Chat, Gehirn, Worker und Sprachmodus. Anlass (22.08.2026): das
-# Modell las die Uhr aus der Lage und sagte sie dem Benutzer auf — im
-# Sprachmodus als vorgelesenes Datum, in Meldungen über fertige Worker als
-# Zeitstempel-Prosa. Die Oberfläche zeigt Datum und Uhrzeit ohnehin an jeder
-# Nachricht; die Ansage ist doppelt und gesprochen schlicht lästig.
-FORMAT = """\
-Formatiere mit Markdown, wenn es die Antwort lesbarer macht.
+# Chat, Gehirn, Worker **und Sprachmodus**. Anlass (22.08.2026): das Modell
+# las die Uhr aus der Lage und sagte sie dem Benutzer auf — im Sprachmodus als
+# vorgelesenes Datum, in Meldungen über fertige Worker als Zeitstempel-Prosa.
+# Die Oberfläche zeigt Datum und Uhrzeit ohnehin an jeder Nachricht; die
+# Ansage ist doppelt und gesprochen schlicht lästig.
+#
+# Ein **eigener** Block, obwohl die Regel zuerst in FORMAT stand: FORMAT ist
+# `NUR_GETIPPT` (Markdown gibt es gesprochen nicht) — und damit hätte die
+# Sprachsitzung, der lauteste Anlass der Regel, sie als einzige nie gelesen.
+ZEITANSAGE = """\
 Nenne Datum oder Uhrzeit nie von dir aus — auch nicht beim Melden fertiger \
 Hintergrund-Aufträge. Die Uhr in der Lage ist dein internes Werkzeug zum \
 Rechnen und Einordnen; der Benutzer sieht Datum und Uhrzeit längst in seiner \
@@ -1002,6 +1009,7 @@ BLOECKE = (
     # gelesen sein.
     IDENTITAET,
     FORMAT,
+    ZEITANSAGE,
     EINZELCHAT,
     # Weit vorne und nicht bei den Werkzeugregeln: es ist eine Anweisung zum
     # **Auftreten**, nicht zur Bedienung. Sie gilt fuer jeden Zug, auch fuer
@@ -1066,6 +1074,7 @@ GEHIRN_BLOECKE = (
     IDENTITAET,
     GEHIRN,
     FORMAT,
+    ZEITANSAGE,
     EINZELCHAT,
     GEHIRN_QUITTUNG,
     GEHIRN_EINWURF,

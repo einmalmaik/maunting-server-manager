@@ -14,6 +14,7 @@ import { WorkerAnsicht } from '@/components/ai/WorkerAnsicht'
 import { SprachAnsicht } from '@/components/ai/voice/SprachAnsicht'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { aiChatPreferenceKeys, readAiProviderChoice } from '@/lib/aiChatPreferences'
+import { browserWahlInsKontoUebernehmen } from '@/lib/aiProviderKonto'
 import { useAuthStore } from '@/stores/authStore'
 
 /** Nur, was die Bereichsauswahl des Autonomie-Knopfs braucht. */
@@ -136,6 +137,13 @@ export function Ai() {
   const providerId =
     user?.ai_provider_id
     ?? (user?.id ? readAiProviderChoice(aiChatPreferenceKeys(user.id).provider) : null)
+
+  // Einmalige Uebernahme Browser → Konto, auch von hier: wer nur den
+  // Sprachmodus benutzt und den Chat nie oeffnet, bekaeme sie sonst nicht —
+  // und sein Overlay spraeche weiter mit dem erstbesten Zugang.
+  useEffect(() => {
+    void browserWahlInsKontoUebernehmen()
+  }, [])
 
   const workerId = suchParameter.get('id')
   const gewuenscht = ansichtAusAbfrage(suchParameter.get('ansicht'), workerId)

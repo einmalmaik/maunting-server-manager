@@ -317,6 +317,12 @@ def _message_content_for_provider(row: AiMessage, user_zone: str = "UTC") -> str
     in der Zeitzone des Benutzers (z. B. `[20.08. 14:30] `). Er ist byte-stabil
     fuer das Prompt-Caching und gibt dem Modell zusammen mit dem Lageblock den
     Zeitabstand zwischen den Nachrichten.
+
+    **Ausser bei internen Zeilen** (`intern=True`, etwa dem Lieferauftrag der
+    Meldestelle): die zeigt die Oberflaeche nie an, ihr Praefix begruendet also
+    nichts — und ein Zeitstempel unmittelbar an der Melde-Anweisung ist genau
+    das Material, das das Modell beim Liefern nachplappert („am 22.08. um
+    14:30 ist der Auftrag fertig geworden"). Die Uhr steht im Lageblock.
     """
     text = row.content or ""
     if row.role == "assistant" and getattr(row, "question_json", None):
@@ -333,6 +339,8 @@ def _message_content_for_provider(row: AiMessage, user_zone: str = "UTC") -> str
             # Eine unlesbare Zeile darf den Verlauf nicht sprengen. Ohne den
             # Fragetext ist der Kontext duenner, aber der Chat laeuft weiter.
             pass
+    if getattr(row, "intern", False):
+        return text
     prefix = _format_message_timestamp(getattr(row, "created_at", None), user_zone)
     return f"{prefix}{text}" if prefix else text
 

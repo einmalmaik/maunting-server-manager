@@ -244,3 +244,72 @@ async def test_eine_andere_ablehnung_des_laufs_behauptet_kein_kontingent(
     assert not any(
         ereignis.get("grund") == "kontingent" for ereignis in bruecke.ereignisse
     )
+
+
+@pytest.mark.asyncio
+async def test_die_denkwahl_geht_in_der_mundart_des_modells_hinaus(
+    db, owner_user: User, monkeypatch
+) -> None:
+    """„Nicht nachdenken" wird durchgesetzt, nicht gewünscht.
+
+    Hier ging hart ``reasoning=False`` ohne Stufe hinaus. Bei Modellen mit
+    Denkzwang setzt das nichts durch — der Anbieter nimmt seine Vorgabe, und
+    der Mensch hört Sekunden Stille vor dem ersten Wort. Seit dem Fix fragt
+    die Brücke `ai_reasoning.aus_fuer` (dieselbe Klemme wie Verdichtung, Mail
+    und Diktat) und reicht deren Antwort wörtlich an den Lauf weiter.
+    """
+    from services import ai_reasoning, ai_stream_service
+
+    zugang = _zugang(db)
+
+    async def aus_fuer(_client, provider, *, api_key=None, model_id=None):
+        # Der Denkzwang-Fall: „aus" gibt es nicht, die flachste Stufe geht.
+        return True, "low"
+
+    monkeypatch.setattr(ai_reasoning, "aus_fuer", aus_fuer)
+    erfasst: dict = {}
+
+    async def lauf(**kwargs):
+        erfasst.update(kwargs)
+        return None, ("AI_PROVIDER_UNAVAILABLE", "egal")
+
+    monkeypatch.setattr(ai_stream_service, "lauf_beginnen_nebenher", lauf)
+    bruecke = _Attrappe(owner_user.id, zugang.id)
+
+    await bruecke._antworten("Starte den Server neu")
+
+    assert erfasst["reasoning"] is True
+    assert erfasst["reasoning_effort"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_ein_katalogfehler_macht_die_stimme_nicht_stumm(
+    db, owner_user: User, monkeypatch
+) -> None:
+    """Scheitert der Katalog, geht der blosse Schalter hinaus — kein Abbruch.
+
+    Die Denkwahl ist eine Zusatzauskunft. Ein Netz- oder Katalogfehler darf
+    das Gespräch nicht abreissen; schlimmstenfalls denkt ein Denkzwang-Modell
+    in seiner Vorgabe, wie vor dem Fix.
+    """
+    from services import ai_reasoning, ai_stream_service
+
+    zugang = _zugang(db)
+
+    async def kaputt(_client, provider, *, api_key=None, model_id=None):
+        raise RuntimeError("Katalog nicht erreichbar")
+
+    monkeypatch.setattr(ai_reasoning, "aus_fuer", kaputt)
+    erfasst: dict = {}
+
+    async def lauf(**kwargs):
+        erfasst.update(kwargs)
+        return None, ("AI_PROVIDER_UNAVAILABLE", "egal")
+
+    monkeypatch.setattr(ai_stream_service, "lauf_beginnen_nebenher", lauf)
+    bruecke = _Attrappe(owner_user.id, zugang.id)
+
+    await bruecke._antworten("Starte den Server neu")
+
+    assert erfasst["reasoning"] is False
+    assert erfasst["reasoning_effort"] is None

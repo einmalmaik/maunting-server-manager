@@ -613,20 +613,56 @@ class Sprachbruecke:
 
     # ── Antworten ─────────────────────────────────────────────────────────
 
+    async def _denkwahl(self) -> tuple[bool, str | None]:
+        """„Nicht nachdenken" — in der Mundart des Modells, nicht als Wunsch.
+
+        Hier stand hart ``reasoning=False`` ohne Stufe. Bei Modellen mit
+        Denkzwang setzt das nichts durch: der Anbieter nimmt seine Vorgabe
+        (meist medium), und der Mensch hört Sekunden Stille vor dem ersten
+        Wort — genau das, was der Kommentar hier auszuschließen versprach.
+        `ai_reasoning.aus_fuer` kennt die Ausnahme und schickt bei Denkzwang
+        die **flachste** Stufe hinaus, wie Verdichtung, Mail und Diktat es
+        längst tun.
+
+        Je Zug frisch aufgelöst, wie `_abhoeren` seinen Zugang: der Katalog
+        antwortet aus dem Zwischenspeicher, das kostet nichts. Ein Cache über
+        die Sitzung stand hier kurz — und hätte einen schweigenden Katalog
+        (Anbieter eine Minute down) als „dieses Modell denkt nicht" für bis
+        zu einer Stunde festgeschrieben.
+        """
+        from services import ai_reasoning
+        from services.ai_provider_service import resolve_api_key
+
+        zugang, schluessel = await asyncio.to_thread(
+            self._zugang_holen, resolve_api_key, self._chat_provider_id
+        )
+        if zugang is None:
+            return (False, None)
+        try:
+            return await ai_reasoning.aus_fuer(self._client, zugang, api_key=schluessel)
+        except Exception:
+            # Der Katalog ist eine Zusatzauskunft. Scheitert er, geht der
+            # blosse Schalter hinaus wie vor diesem Fix — ein Denkzwang-Modell
+            # denkt dann in seiner Vorgabe, aber das Gespraech laeuft. Ein
+            # Katalogfehler darf nie Stille sein.
+            return (False, None)
+
     async def _antworten(self, wortlaut: str) -> None:
         from services import ai_run_service
         from services.ai_stream_service import lauf_beginnen_nebenher
 
+        # Nachdenken bleibt aus — durchgesetzt statt gewünscht (`_denkwahl`).
+        # Im Gespräch kostet jede Denkstufe Sekunden vor dem ersten Wort, und
+        # ein Mensch, der wartet, hört nur Stille. Wer Tiefe will, tippt.
+        denken, denkstufe = await self._denkwahl()
         run_id, fehler = await lauf_beginnen_nebenher(
             user_id=self._user_id,
             conversation_id=self._gespraech_id,
             provider_id=self._chat_provider_id,
             request_id=uuid4(),
             content=wortlaut,
-            # Nachdenken bleibt aus. Im Gespräch kostet jede Denkstufe Sekunden
-            # vor dem ersten Wort, und ein Mensch, der wartet, hört nur Stille.
-            # Wer Tiefe will, tippt — dort steht der Schalter.
-            reasoning=False,
+            reasoning=denken,
+            reasoning_effort=denkstufe,
             # Der eine Unterschied im Prompt: `ai_prompt.NUR_GETIPPT` fällt weg,
             # `ai_prompt.GESPROCHEN` kommt dazu. Ein Schalter und kein zweiter
             # Prompt — sonst veralten zwei Texte gegeneinander, und zwar
