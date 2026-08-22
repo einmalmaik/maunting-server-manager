@@ -82,6 +82,12 @@ class AgentNameUpdateRequest(BaseModel):
         return _validate_agent_name(v)
 
 
+class AiProviderChoiceRequest(BaseModel):
+    """Die Modellwahl des Benutzers — `None` löscht sie (Panel-Reihenfolge gilt)."""
+
+    provider_id: int | None = None
+
+
 class UserResponse(BaseModel):
     id: int
     username: str
@@ -94,6 +100,7 @@ class UserResponse(BaseModel):
     ai_notifications: bool = True
     time_zone: str | None = None
     agent_name: str | None = None
+    ai_provider_id: int | None = None
     role_id: int | None = None
     role_ids: list[int] = Field(default_factory=list)
     created_at: datetime

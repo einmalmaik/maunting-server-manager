@@ -186,7 +186,14 @@ def sprachzugang(
     1. hoeren: Provider für Speech-to-Text (STT)
     2. denken: Provider für Chat/LLM (Gehirn)
     3. sprechen: Provider für Text-to-Speech (TTS)
+
+    Schickt der Client keine Wahl mit, gilt die im Konto gespeicherte
+    (users.ai_provider_id): das Overlay der Desktop-App kennt die
+    Providerliste nicht und soll trotzdem mit demselben Modell sprechen,
+    das der Benutzer im Chat gewählt hat — nicht mit dem erstbesten.
     """
+    if bevorzugter_provider_id is None:
+        bevorzugter_provider_id = user.ai_provider_id
     hoeren = _hoerender_zugang(db, bevorzugter_provider_id)
     if hoeren is None:
         return None

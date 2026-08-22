@@ -9,15 +9,22 @@
  * Gefahrenzone. `?tab=wakeword` wählt einen Reiter vor — der Weg des
  * Neukalibrierungs-Hinweises nach einer Umbenennung.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { AlertTriangle, Mic, MonitorCog, Volume2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { registriereAudioGeraete } from '@/components/ai/voice/audioGeraete'
+import {
+  aktuelleVerarbeitung,
+  ausgabeGeraetId,
+  eingabeGeraetId,
+  registriereAudioGeraete,
+  registriereAudioVerarbeitung,
+  type AudioVerarbeitung,
+} from '@/components/ai/voice/audioGeraete'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
-import { Button, Switch } from '@/Singra/UI'
+import { Button, ProgressBar, Slider, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { Gefahrenzone } from './Gefahrenzone'
 import { WakewordEinrichtung } from './WakewordEinrichtung'
@@ -36,6 +43,13 @@ import {
 } from './tauri'
 
 const STATUS_REIHE: AgentStatus[] = ['bereit', 'hoert', 'denkt', 'spricht']
+
+/**
+ * Wie lange nach der letzten Verarbeitungsänderung gewartet wird, bevor sie
+ * in konfig.json landet — der Verstärkungsregler feuert je Tick. Registriert
+ * (und damit hörbar) ist jede Änderung sofort, nur das Schreiben wartet.
+ */
+const VERARBEITUNG_SPEICHERN_MS = 400
 
 type EinstellungsTab = 'desktop' | 'wakeword' | 'audio' | 'gefahr'
 
@@ -182,6 +196,11 @@ function AudioEinstellungen() {
   const [geraete, setGeraete] = useState<AudioGeraete | null>(null)
   const [konfig, setKonfig] = useState<AppKonfig | null>(null)
   const [duckt, setDuckt] = useState(false)
+  // Bündelt das Speichern der Verarbeitung. Beim Unmount bewusst NICHT
+  // geräumt: die Timeout-Schließung ist in sich geschlossen (frisches Laden,
+  // Speichern, kein React-State) — räumen hieße, die letzte Änderung des
+  // Benutzers wegzuwerfen.
+  const speicherTimer = useRef<number | null>(null)
 
   useEffect(() => {
     void audioGeraete()
@@ -258,6 +277,71 @@ function AudioEinstellungen() {
     }
   }
 
+  /**
+   * Ein Verarbeitungsfeld stellen: sofort registrieren (wirkt live in Sitzung
+   * und Testhören), gebündelt speichern — der Verstärkungsregler feuert je
+   * Tick, und jeder Tick wäre sonst ein Dateischreiben. Alles lokal —
+   * Chromiums eigene Kette, kein Ton verlässt dafür den Rechner. Das
+   * Wake-Word ist nicht betroffen (eigene Rust-Kette), darum kein Neustart.
+   *
+   * Gespeichert wird über einen frischen Konfigurationsstand, in den nur die
+   * vier eigenen Felder gemischt werden: der React-State stammt vom Mount,
+   * und der Wake-Word-Neustart beim Gerätewechsel schreibt `wakeword_aktiv`
+   * parallel in dieselbe Datei.
+   */
+  function verarbeitungSetzen(
+    feld: 'audio_echo' | 'audio_rauschen' | 'audio_autogain' | 'audio_verstaerkung',
+    wert: boolean | number,
+  ) {
+    if (!konfig) return
+    const neu: AppKonfig = { ...konfig, [feld]: wert }
+    setKonfig(neu)
+    registriereAudioVerarbeitung({
+      echo: neu.audio_echo,
+      rauschen: neu.audio_rauschen,
+      autogain: neu.audio_autogain,
+      verstaerkung: neu.audio_verstaerkung,
+    })
+    if (speicherTimer.current !== null) window.clearTimeout(speicherTimer.current)
+    speicherTimer.current = window.setTimeout(() => {
+      speicherTimer.current = null
+      void (async () => {
+        try {
+          const aktuell = await konfigLaden()
+          await konfigSpeichern({
+            ...aktuell,
+            audio_echo: neu.audio_echo,
+            audio_rauschen: neu.audio_rauschen,
+            audio_autogain: neu.audio_autogain,
+            audio_verstaerkung: neu.audio_verstaerkung,
+          })
+        } catch (fehler) {
+          toast.error(String(fehler))
+        }
+      })()
+    }, VERARBEITUNG_SPEICHERN_MS)
+  }
+
+  const verarbeitungsZeile = (
+    feld: 'audio_echo' | 'audio_rauschen' | 'audio_autogain',
+  ) => {
+    const kurz = feld.slice('audio_'.length)
+    return (
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm text-on-surface">{t(`mss.audio.${kurz}`)}</p>
+          <p className="text-xs text-on-surface-variant">{t(`mss.audio.${kurz}Hinweis`)}</p>
+        </div>
+        <Switch
+          checked={konfig?.[feld] ?? true}
+          disabled={konfig === null}
+          onCheckedChange={(an) => void verarbeitungSetzen(feld, an)}
+          aria-label={t(`mss.audio.${kurz}`)}
+        />
+      </div>
+    )
+  }
+
   return (
     <section className="msm-card flex flex-col gap-4 p-5">
       <h2 className="text-sm font-medium text-on-surface">{t('mss.audio.titel')}</h2>
@@ -275,6 +359,38 @@ function AudioEinstellungen() {
         <p className="text-xs text-on-surface-variant">{t('mss.audio.ausgabeHinweis')}</p>
       </div>
 
+      <div className="flex flex-col gap-3 border-t border-outline-variant/40 pt-4">
+        <div>
+          <p className="text-sm text-on-surface">{t('mss.audio.verarbeitung')}</p>
+          <p className="text-xs text-on-surface-variant">{t('mss.audio.verarbeitungHinweis')}</p>
+        </div>
+        {verarbeitungsZeile('audio_echo')}
+        {verarbeitungsZeile('audio_rauschen')}
+        {verarbeitungsZeile('audio_autogain')}
+        <Slider
+          value={Math.round((konfig?.audio_verstaerkung ?? 1) * 100)}
+          min={25}
+          max={400}
+          step={5}
+          disabled={konfig === null}
+          onValueChange={(prozent) => void verarbeitungSetzen('audio_verstaerkung', prozent / 100)}
+          label={t('mss.audio.verstaerkung')}
+          hint={`${Math.round((konfig?.audio_verstaerkung ?? 1) * 100)} %`}
+        />
+        <p className="-mt-2 text-xs text-on-surface-variant">
+          {t('mss.audio.verstaerkungHinweis')}
+        </p>
+      </div>
+
+      <Testhoeren
+        verarbeitung={{
+          echo: konfig?.audio_echo ?? true,
+          rauschen: konfig?.audio_rauschen ?? true,
+          autogain: konfig?.audio_autogain ?? true,
+          verstaerkung: konfig?.audio_verstaerkung ?? 1,
+        }}
+      />
+
       <div className="border-t border-outline-variant/40 pt-4">
         <p className="text-sm text-on-surface">{t('mss.audio.ducking')}</p>
         <p className="mb-3 text-xs text-on-surface-variant">{t('mss.audio.duckingHinweis')}</p>
@@ -285,6 +401,153 @@ function AudioEinstellungen() {
         </Button>
       </div>
     </section>
+  )
+}
+
+/**
+ * Testhören wie in Discord: das eigene Mikrofon auf den gewählten Lautsprecher
+ * legen und dabei den Pegel sehen — mit genau der Verarbeitung, die auch die
+ * Sprachsitzung nähme. Einzige Abweichung: die Echounterdrückung ist im Test
+ * aus, weil sie sonst die eigene Wiedergabe als „Echo" erkennt und wegfiltert —
+ * man hörte sich leiser werden, je länger man spricht. Alles bleibt im
+ * Chromium-Prozess, nichts davon geht ins Netz.
+ */
+function Testhoeren({ verarbeitung }: { verarbeitung: AudioVerarbeitung }) {
+  const { t } = useTranslation()
+  const [laeuft, setLaeuft] = useState(false)
+  const [pegel, setPegel] = useState(0)
+  const [fehler, setFehler] = useState<string | null>(null)
+  const aufraeumen = useRef<(() => void) | null>(null)
+  const gainKnoten = useRef<GainNode | null>(null)
+  // Ob die Komponente noch lebt: `starten` hat zwei awaits, bevor es sein
+  // Aufräumen hinterlegt. Wer in diesem Fenster den Reiter wechselt, träfe
+  // ein Unmount-Cleanup auf `null` — und das Mikrofon bliebe offen, ohne
+  // dass irgendetwas es noch schließen könnte.
+  const verlassen = useRef(false)
+  // Laufende Nummer des jüngsten Starts. Zwei schnelle Klicks (oder Klick +
+  // Schalter-Neustart) liefen sonst nebeneinander durch getUserMedia, und der
+  // langsamere überschriebe das Aufräumen des schnelleren — dessen Mikrofon
+  // bliebe offen und wäre durch nichts mehr stoppbar.
+  const startNummer = useRef(0)
+
+  const stoppen = useCallback(() => {
+    startNummer.current += 1
+    aufraeumen.current?.()
+    aufraeumen.current = null
+    gainKnoten.current = null
+    setLaeuft(false)
+    setPegel(0)
+  }, [])
+
+  const starten = useCallback(async () => {
+    const nummer = startNummer.current + 1
+    startNummer.current = nummer
+    aufraeumen.current?.()
+    aufraeumen.current = null
+    setFehler(null)
+    try {
+      const geraet = await eingabeGeraetId().catch(() => null)
+      const strom = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: false,
+          noiseSuppression: verarbeitung.rauschen,
+          autoGainControl: verarbeitung.autogain,
+          ...(geraet ? { deviceId: { ideal: geraet } } : {}),
+        },
+      })
+      if (verlassen.current || nummer !== startNummer.current) {
+        strom.getTracks().forEach((spur) => spur.stop())
+        return
+      }
+      const kontext = new AudioContext()
+      // Dieselbe Gerätewahl wie die Stimme der KI (`audioWiedergabe`):
+      // `setSinkId` gibt es erst seit Chromium 110; wo es fehlt, bleibt der
+      // Systemstandard — Ton geht vor Gerätetreue.
+      void ausgabeGeraetId()
+        .then((sink) => {
+          const mitSink = kontext as AudioContext & {
+            setSinkId?: (id: string) => Promise<void>
+          }
+          if (sink && mitSink.setSinkId) return mitSink.setSinkId(sink)
+        })
+        .catch(() => undefined)
+      const quelle = kontext.createMediaStreamSource(strom)
+      const gain = kontext.createGain()
+      gain.gain.value = aktuelleVerarbeitung().verstaerkung
+      gainKnoten.current = gain
+      // Der Analyser hängt als Abgriff hinter der Verstärkung: der Balken
+      // zeigt, was am Lautsprecher ankommt, nicht das rohe Mikrofon.
+      const analyser = kontext.createAnalyser()
+      quelle.connect(gain)
+      gain.connect(analyser)
+      gain.connect(kontext.destination)
+      const puffer = new Float32Array(analyser.fftSize)
+      const takt = window.setInterval(() => {
+        analyser.getFloatTimeDomainData(puffer)
+        let summe = 0
+        for (let i = 0; i < puffer.length; i += 1) summe += puffer[i] * puffer[i]
+        // Dieselbe Skalierung wie der Sitzungspegel (`audioAufnahme`): RMS ×4
+        // holt gesprochene Sprache in einen sichtbaren Bereich.
+        setPegel(Math.min(1, Math.sqrt(summe / puffer.length) * 4))
+      }, 100)
+      aufraeumen.current = () => {
+        window.clearInterval(takt)
+        quelle.disconnect()
+        gain.disconnect()
+        analyser.disconnect()
+        strom.getTracks().forEach((spur) => spur.stop())
+        void kontext.close().catch(() => undefined)
+      }
+      setLaeuft(true)
+    } catch {
+      setFehler(t('mss.audio.testhoerenFehler'))
+      setLaeuft(false)
+    }
+  }, [verarbeitung.rauschen, verarbeitung.autogain, t])
+
+  // Die Verstärkung wirkt live in den laufenden Test — der Regler daneben
+  // soll hörbar sein, ohne neu zu starten.
+  useEffect(() => {
+    if (gainKnoten.current) gainKnoten.current.gain.value = aktuelleVerarbeitung().verstaerkung
+  }, [verarbeitung.verstaerkung])
+
+  // Die Schalter dagegen sind getUserMedia-Constraints: ein laufender Test
+  // startet neu, damit man hört, was man umgelegt hat.
+  useEffect(() => {
+    if (aufraeumen.current) void starten()
+  }, [starten])
+
+  // Beim Verlassen des Reiters geht das Mikrofon zu — ein Testton, der ohne
+  // sichtbaren Ursprung weiterläuft, wäre genau das falsche Gefühl für eine
+  // App, die mithören kann. `verlassen` fängt den Fall, dass `starten` noch
+  // in seinen awaits steckt und sein Aufräumen erst danach hinterlegte.
+  useEffect(() => () => {
+    verlassen.current = true
+    aufraeumen.current?.()
+  }, [])
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-outline-variant/40 pt-4">
+      <div>
+        <p className="text-sm text-on-surface">{t('mss.audio.testhoeren')}</p>
+        <p className="text-xs text-on-surface-variant">{t('mss.audio.testhoerenHinweis')}</p>
+      </div>
+      <div className="flex items-center gap-3">
+        <Button
+          variant="secondary"
+          onClick={() => (laeuft ? stoppen() : void starten())}
+        >
+          {laeuft ? t('mss.audio.testhoerenStopp') : t('mss.audio.testhoerenStart')}
+        </Button>
+        <ProgressBar
+          value={laeuft ? Math.round(pegel * 100) : null}
+          ariaLabel={t('mss.audio.testhoerenPegel')}
+          className="flex-1"
+        />
+      </div>
+      {fehler && <p className="msm-alert-warning">{fehler}</p>}
+    </div>
   )
 }
 

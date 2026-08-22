@@ -357,6 +357,49 @@ describe('AiChat', () => {
     expect(localStorage.getItem('msm_ai_chat:provider:anonym')).toBe('2')
   })
 
+  it('nimmt die Wahl am Konto vor der im Browser und schreibt sie beim Wechsel dorthin', async () => {
+    // Die Wahl am Konto ist die eine Quelle, die auch Overlay und Desktop-App
+    // sehen — den localStorage dieses Fensters kennen die nicht. Ohne den
+    // Vorrang liefe die App still auf einem anderen Modell als das Panel.
+    useAuthStore.setState({
+      user: { id: 42, username: 'test', ai_provider_id: 2 } as any,
+      isAuthenticated: true,
+      isLoading: false,
+    })
+    localStorage.setItem('msm_ai_chat:provider:42', '1')
+    vi.mocked(aiApi.listProviders).mockResolvedValue([
+      {
+        id: 1, name: 'Synthetic AI', default_model: 'test-model',
+        requires_api_key: false, operator_key_available: true, available: true,
+        reasoning: true, efforts: ['low', 'medium', 'high'],
+        can_disable: true, default_effort: 'medium',
+      },
+      {
+        id: 2, name: 'Synthetic Lab', default_model: 'lab-model',
+        requires_api_key: false, operator_key_available: true, available: true,
+        reasoning: false, efforts: [], can_disable: true, default_effort: null,
+      },
+    ])
+    vi.mocked(client.api).mockResolvedValue({ ai_provider_id: 1 })
+
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
+    await screen.findByText('synthetic-note.txt')
+
+    // Das Konto sagt 2, der Browser 1 — das Konto gewinnt.
+    expect(screen.getByLabelText('Provider auswählen')).toHaveTextContent('Synthetic Lab')
+
+    fireEvent.click(screen.getByLabelText('Provider auswählen'))
+    fireEvent.click(screen.getByRole('option', { name: /Synthetic AI/ }))
+
+    // Der Wechsel geht ans Konto zurück (PATCH) und in den Auth-Store, damit
+    // der Sprachmodus derselben Seite sofort die neue Wahl sieht.
+    await waitFor(() => expect(client.api).toHaveBeenCalledWith('/auth/me/ai-provider', {
+      method: 'PATCH',
+      body: JSON.stringify({ provider_id: 1 }),
+    }))
+    await waitFor(() => expect(useAuthStore.getState().user?.ai_provider_id).toBe(1))
+  })
+
   it('lässt den Kontextring nicht von der Antwort des alten Modells überschreiben', async () => {
     // Zwei Modellwechsel kurz hintereinander — etwa beim Vergleichen. Die
     // Auskunft ist bei kaltem Modellkatalog ein externer Abruf, die langsamere

@@ -237,7 +237,16 @@ export function AiChat() {
         setLaufBeimOeffnen(aktiverLauf)
         setMemoryNoticeDue(Boolean(memoryPreference?.notice_due))
         setProviders(providerRows)
-        setProviderId(providerBeimOeffnen(providerRows, readAiProviderChoice(merkSchluessel.provider)))
+        // Die Wahl am Konto schlägt die im Browser: sie ist die eine Quelle,
+        // die auch Overlay und Desktop-App sehen. Der localStorage bleibt als
+        // Rückfall für Konten, die noch nie hier gewählt haben. Bewusst
+        // `getState()` statt Abo — die gespeicherte Wahl ändert sich beim
+        // Wechseln unten, und ein Abo lüde dann den ganzen Chat neu.
+        const kontoWahl = useAuthStore.getState().user?.ai_provider_id ?? null
+        setProviderId(providerBeimOeffnen(
+          providerRows,
+          kontoWahl ?? readAiProviderChoice(merkSchluessel.provider),
+        ))
         // Vorschlaege werden chronologisch zwischen die Nachrichten einsortiert,
         // damit man sieht, auf welche Antwort sie sich beziehen. Vorher standen
         // sie gesammelt am Ende und wirkten losgeloest.
@@ -345,11 +354,23 @@ export function AiChat() {
    * Das Modell merken. Auch hier nur die gewaehlte Kennung — was beim naechsten
    * Oeffnen daraus wird, entscheidet `providerBeimOeffnen` gegen die dann
    * gueltige Liste.
+   *
+   * Gemerkt wird am **Konto** (PATCH), nicht nur im Browser: Overlay und
+   * Desktop-App kennen den localStorage dieses Fensters nicht und liefen sonst
+   * stillschweigend auf einem anderen Modell als das Panel. Der localStorage
+   * bleibt als Rueckfall, falls der Server die Wahl gerade nicht annimmt —
+   * dann gilt sie wenigstens in diesem Fenster weiter.
    */
   const waehleProvider = useCallback((wert: string) => {
     const id = Number(wert)
     setProviderId(id)
     writeAiProviderChoice(merkSchluessel.provider, id)
+    void api<{ ai_provider_id: number | null }>('/auth/me/ai-provider', {
+      method: 'PATCH',
+      body: JSON.stringify({ provider_id: id }),
+    })
+      .then((antwort) => useAuthStore.getState().updateUser({ ai_provider_id: antwort.ai_provider_id }))
+      .catch(() => undefined)
   }, [merkSchluessel.provider])
 
   /** Hochgeladen, aber noch nicht abgeschickt — die Chips über dem Eingabefeld. */

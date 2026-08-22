@@ -2561,3 +2561,26 @@ def test_ein_unbrauchbarer_rufname_kostet_nur_die_runde(
         )
     db.refresh(regular_user)
     assert regular_user.agent_name == "Singra"
+
+
+def test_desktop_werkzeuge_stehen_am_katalogende() -> None:
+    """Der Panel-Katalog ist ein Byte-Praefix des Desktop-Katalogs.
+
+    Anbieter-Caches arbeiten auf Praefixen. Die vier Desktop-Definitionen
+    standen mitten im Katalog (Index 27 von 61) — Panel- und App-Laeufe
+    teilten sich damit fast nichts, und jeder Wechsel zwischen beiden
+    bezahlte den vollen Prefill neu. Am Ende angehaengt teilen sie den
+    gesamten gemeinsamen Teil, wie beim Systemprompt (DESKTOP-Block)."""
+    from services.ai_tool_registry import DESKTOP_TOOLS
+
+    alle = ai_action_service.provider_tool_definitions()
+    namen = [eintrag["function"]["name"] for eintrag in alle]
+
+    assert set(namen[-len(DESKTOP_TOOLS):]) == set(DESKTOP_TOOLS)
+    assert not any(name in DESKTOP_TOOLS for name in namen[: -len(DESKTOP_TOOLS)])
+
+    panel = [
+        eintrag for eintrag in alle
+        if eintrag["function"]["name"] not in DESKTOP_TOOLS
+    ]
+    assert alle[: len(panel)] == panel

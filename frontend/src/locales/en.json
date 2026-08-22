@@ -4793,7 +4793,10 @@
       "neuKalibrieren": "The model is still trained on “{{alt}}”, but your assistant is now called “{{neu}}”. Turn the wake word off, reset the calibration and record the new name — until then the app keeps listening for “{{alt}}”.",
       "aktiv": "Wake word active",
       "aktivHinweis": "On: say “{{name}}” and the overlay opens above everything. Off means off — the microphone is released and nothing turns listening back on by itself.",
-      "lauschtNicht": "The switch is on, but listening is not running — check the microphone and toggle it off and on again."
+      "lauschtNicht": "The switch is on, but listening is not running — check the microphone and toggle it off and on again.",
+      "schwelle": "Trigger threshold",
+      "schwelleHinweis": "Low triggers more easily (including false hits), high demands a clearer match. Pause briefly after dragging — listening restarts with the new value.",
+      "pegel": "What the wake word hears"
     },
     "gefahrenzone": {
       "titel": "Danger zone",
@@ -4861,7 +4864,23 @@
       "standardMit": "Windows default ({{name}})",
       "fehlt": "{{name}} (currently not found)",
       "ducking": "Lower other audio (ducking)",
-      "duckingHinweis": "While the AI speaks, the app lowers the volume of all other programs by 60% — music gets quieter instead of being drowned out. The test lowers it for three seconds: without music or video playing you will not hear anything."
+      "duckingHinweis": "While the AI speaks, the app lowers the volume of all other programs by 60% — music gets quieter instead of being drowned out. The test lowers it for three seconds: without music or video playing you will not hear anything.",
+      "verarbeitung": "Microphone processing",
+      "verarbeitungHinweis": "Chromium's built-in, local processing — none of it leaves this machine. The defaults suit most microphones.",
+      "echo": "Echo cancellation",
+      "echoHinweis": "Filters the AI's own voice out of the microphone — without it, the AI hears itself and replies to itself (laptop without headphones).",
+      "rauschen": "Noise suppression",
+      "rauschenHinweis": "Removes fans, hum and room noise from the signal.",
+      "autogain": "Automatic gain control",
+      "autogainHinweis": "Levels quiet and loud voices automatically — helps weak microphones the most.",
+      "verstaerkung": "Input gain",
+      "verstaerkungHinweis": "Raises or lowers the microphone signal in software. 100% means: do nothing — only touch it if the mic test sounds too quiet or clipped.",
+      "testhoeren": "Mic test",
+      "testhoerenHinweis": "Plays your own microphone through the chosen speaker — with exactly the processing above. Best with headphones: over speakers it will feed back.",
+      "testhoerenStart": "Start mic test",
+      "testhoerenStopp": "Stop mic test",
+      "testhoerenPegel": "Microphone level",
+      "testhoerenFehler": "Could not open the microphone — is it connected and allowed?"
     },
     "kalibrierung": {
       "titel": "New wake word?",

@@ -22,10 +22,13 @@
  * Echounterdrückung, Rauschsperre und Pegelanpassung macht der Browser
  * (`echoCancellation`, `noiseSuppression`, `autoGainControl`). Ohne das erste
  * hört sich die KI selbst und antwortet auf sich — das ist kein Randfall,
- * sondern der Normalfall an einem Laptop ohne Kopfhörer.
+ * sondern der Normalfall an einem Laptop ohne Kopfhörer. Im Panel sind alle
+ * drei immer an; die Desktop-App kann sie abwählen und zusätzlich eine
+ * Software-Verstärkung setzen (`registriereAudioVerarbeitung`) — alles
+ * Chromium-intern, kein Ton verlässt dafür den Rechner.
  */
 
-import { eingabeGeraetId } from './audioGeraete'
+import { aktuelleVerarbeitung, eingabeGeraetId } from './audioGeraete'
 
 /** Dieselbe Rate wie im Backend (`ai_voice_vad.ABTASTRATE`). */
 export const ABTASTRATE = 24_000
@@ -94,14 +97,15 @@ export async function starteAufnahme(
   // `ideal` statt `exact`: ein abgezogenes Wunschgerät soll auf den Standard
   // zurückfallen, nicht mit „Mikrofon verweigert" enden.
   const geraet = await eingabeGeraetId().catch(() => null)
+  const verarbeitung = aktuelleVerarbeitung()
   let strom: MediaStream
   try {
     strom = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        echoCancellation: verarbeitung.echo,
+        noiseSuppression: verarbeitung.rauschen,
+        autoGainControl: verarbeitung.autogain,
         ...(geraet ? { deviceId: { ideal: geraet } } : {}),
       },
     })
@@ -135,6 +139,12 @@ function baueKette(
   const quelle = kontext.createMediaStreamSource(strom)
   const prozessor = kontext.createScriptProcessor(PAKETGROESSE, 1, 1)
 
+  // Die Software-Verstärkung sitzt **vor** dem Prozessor: was der Mensch am
+  // Regler einstellt, ist genau das, was die Gegenstelle hört — und was der
+  // Pegel unten anzeigt. Bei 1,0 ist der Knoten ein Durchlauf.
+  const eingang = kontext.createGain()
+  eingang.gain.value = aktuelleVerarbeitung().verstaerkung
+
   // Geglättet, nicht roh. Ein ungeglätteter Pegel springt bei jedem Zischlaut
   // auf Anschlag; die Blase zappelte dann, statt zu atmen.
   let geglaettet = 0
@@ -160,7 +170,8 @@ function baueKette(
   // sondern eine Rückkopplung.
   const stumm = kontext.createGain()
   stumm.gain.value = 0
-  quelle.connect(prozessor)
+  quelle.connect(eingang)
+  eingang.connect(prozessor)
   prozessor.connect(stumm)
   stumm.connect(kontext.destination)
 
@@ -173,6 +184,7 @@ function baueKette(
       prozessor.onaudioprocess = null
       prozessor.disconnect()
       stumm.disconnect()
+      eingang.disconnect()
       quelle.disconnect()
       // Ohne dieses `stop()` bleibt die Aufnahmeanzeige des Browsers stehen,
       // auch wenn niemand mehr zuhört. Das ist kein Schönheitsfehler: der

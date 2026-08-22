@@ -78,6 +78,26 @@ physisch aus — das Mikrofon ist frei, und kein Pfad schaltet das Lauschen
 ohne den Schalter wieder ein. Ein erkanntes Wort öffnet das Overlay direkt
 aus Rust (`wakeword.rs` → `sprachsitzung_starten`), über allen Fenstern.
 
+Gegen Fehlgriffe stehen drei Tore hintereinander (`wakeword.rs`): eine
+Stimmaktivitätsprüfung (VAD) verwirft Frames ohne Sprache, der Median über
+alle Trainingsaufnahmen ersetzt den Ausreißer-anfälligen Bestwert, und eine
+Mindestähnlichkeit zur gemittelten Vorlage (`avg_threshold`) filtert bloßes
+Ähnlich-Klingen. Die Auslöseschwelle selbst stellt der Benutzer im
+Wake-Word-Reiter ein (`wakeword_schwelle`, geklemmt auf 0,30–0,60); daneben
+zeigt ein Pegelbalken live, was der Lausch-Thread hört. Ein Fehltrigger
+hinterlässt kein offenes Mikrofon: bleibt die Overlay-Sitzung 20 Sekunden
+still, schließt sie sich selbst.
+
+## Mikrofon-Verarbeitung
+
+Der Audio-Reiter stellt neben den Geräten auch die Verarbeitung der
+Sprachsitzung: Echounterdrückung, Rauschunterdrückung und automatische
+Pegelanpassung (Chromiums eingebaute WebRTC-Kette — lokal, nichts geht ins
+Netz) sowie eine Software-Eingangsverstärkung (25–400 %). Testhören legt
+das eigene Mikrofon mit genau dieser Verarbeitung auf den gewählten
+Lautsprecher, mit Pegelbalken — am besten mit Kopfhörern. Das Wake-Word ist
+davon unabhängig: seine Rust-Kette normalisiert den Pegel selbst.
+
 ## Logos
 
 Alle Logos werden rund dargestellt. Die Dateien selbst bleiben quadratisch —

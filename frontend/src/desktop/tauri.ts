@@ -27,6 +27,16 @@ export interface AppKonfig {
   audio_eingabe: string | null
   /** Bevorzugtes Ausgabegerät für die Stimme der KI. */
   audio_ausgabe: string | null
+  /** Wake-Word-Empfindlichkeit (rustpotter-Schwelle, geklemmt auf 0,30–0,60). */
+  wakeword_schwelle: number
+  /** Echounterdrückung der Sprachsitzung (Chromium-Verarbeitung, lokal). */
+  audio_echo: boolean
+  /** Rauschunterdrückung der Sprachsitzung (Chromium-Verarbeitung, lokal). */
+  audio_rauschen: boolean
+  /** Automatische Pegelanpassung der Sprachsitzung (Chromium, lokal). */
+  audio_autogain: boolean
+  /** Software-Eingangsverstärkung der Sprachsitzung, 1 = neutral. */
+  audio_verstaerkung: number
 }
 
 export async function konfigLaden(): Promise<AppKonfig> {

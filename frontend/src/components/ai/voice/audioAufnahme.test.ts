@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { FakeAudioContext, installFakeAudio } from '@/test/fakeAudio'
 import { ABTASTRATE, starteAufnahme } from './audioAufnahme'
+import { registriereAudioVerarbeitung } from './audioGeraete'
 
 let audio: ReturnType<typeof installFakeAudio>
 
@@ -16,6 +17,9 @@ describe('audioAufnahme', () => {
 
   afterEach(() => {
     audio.restore()
+    // Die Verarbeitung ist Modulzustand — zurück auf die Vorgaben, sonst
+    // trägt ein Test seine Registrierung in den nächsten.
+    registriereAudioVerarbeitung({})
   })
 
   it('fragt Mono mit Echounterdrueckung an', async () => {
@@ -106,9 +110,37 @@ describe('audioAufnahme', () => {
 
     // Der Prozessor braucht ein Ziel, sonst laeuft er nicht an — aber der Weg
     // dorthin geht ueber eine Verstaerkung von null. Ohne sie waere das keine
-    // leise Panne, sondern eine Rueckkopplung.
-    expect(kontext().verstaerker).toHaveLength(1)
-    expect(kontext().verstaerker[0].gain.value).toBe(0)
+    // leise Panne, sondern eine Rueckkopplung. Zwei Verstaerker: erst die
+    // Eingangsverstaerkung (neutral 1), dann der stumme Ausgang (0).
+    expect(kontext().verstaerker).toHaveLength(2)
+    expect(kontext().verstaerker[0].gain.value).toBe(1)
+    expect(kontext().verstaerker[1].gain.value).toBe(0)
+  })
+
+  it('uebernimmt die registrierte Verarbeitung in die Anfrage', async () => {
+    // Die Desktop-App registriert die Wahl des Benutzers; das Panel laesst
+    // alles auf den Vorgaben. Was hier steht, ist genau das, was Chromium an
+    // lokaler Verarbeitung faehrt — nichts davon geht ins Netz.
+    registriereAudioVerarbeitung({ echo: false, rauschen: false, autogain: true })
+    await starteAufnahme(() => undefined)
+
+    expect(audio.letzteAnfrage()).toEqual({
+      audio: {
+        channelCount: 1,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: true,
+      },
+    })
+  })
+
+  it('legt die Eingangsverstaerkung geklemmt vor den Prozessor', async () => {
+    // 99 ist kein sinnvoller Faktor, sondern ein Tippfehler in der Konfig —
+    // die Klemme (0,25 bis 4) faengt ihn, bevor er das Signal zerreisst.
+    registriereAudioVerarbeitung({ verstaerkung: 99 })
+    await starteAufnahme(() => undefined)
+
+    expect(kontext().verstaerker[0].gain.value).toBe(4)
   })
 
   it('verbindet keinen Prozessor ohne Ausgangskanal', async () => {

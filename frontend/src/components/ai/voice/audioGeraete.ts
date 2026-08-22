@@ -23,6 +23,49 @@ export function registriereAudioGeraete(eingabe: string | null, ausgabe: string 
   ausgabeName = ausgabe
 }
 
+/**
+ * Die Mikrofon-Verarbeitung der Sprachsitzung — Chromiums eingebaute, lokale
+ * Kette (WebRTC-Audioverarbeitung): Echounterdrückung, Rauschunterdrückung,
+ * automatische Pegelanpassung, dazu eine Software-Verstärkung. Im Panel
+ * bleiben die Vorgaben (alles an, Verstärkung neutral); die Desktop-App
+ * registriert die Wahl des Benutzers aus ihrer Konfiguration.
+ */
+export interface AudioVerarbeitung {
+  echo: boolean
+  rauschen: boolean
+  autogain: boolean
+  /** Software-Eingangsverstärkung, 1 = neutral. Geklemmt auf 0,25–4. */
+  verstaerkung: number
+}
+
+const VERARBEITUNG_VORGABE: AudioVerarbeitung = {
+  echo: true,
+  rauschen: true,
+  autogain: true,
+  verstaerkung: 1,
+}
+
+let verarbeitung: AudioVerarbeitung = { ...VERARBEITUNG_VORGABE }
+
+export function registriereAudioVerarbeitung(neu: Partial<AudioVerarbeitung>): void {
+  // Feld für Feld statt Spread: ein explizit `undefined` übergebenes Feld
+  // (Konfiguration von vor diesen Feldern) fällt auf die Vorgabe, statt sie
+  // zu überschreiben.
+  verarbeitung = {
+    echo: neu.echo ?? VERARBEITUNG_VORGABE.echo,
+    rauschen: neu.rauschen ?? VERARBEITUNG_VORGABE.rauschen,
+    autogain: neu.autogain ?? VERARBEITUNG_VORGABE.autogain,
+    verstaerkung: neu.verstaerkung ?? VERARBEITUNG_VORGABE.verstaerkung,
+  }
+}
+
+/** Die aktuelle Verarbeitung, Verstärkung bereits geklemmt. */
+export function aktuelleVerarbeitung(): AudioVerarbeitung {
+  const roh = verarbeitung.verstaerkung
+  const wert = Number.isFinite(roh) ? Math.min(4, Math.max(0.25, roh)) : 1
+  return { ...verarbeitung, verstaerkung: wert }
+}
+
 async function deviceIdZuLabel(
   art: 'audioinput' | 'audiooutput',
   label: string,

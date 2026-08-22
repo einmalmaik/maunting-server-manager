@@ -54,6 +54,17 @@ class User(Base):
     # entwertete das Prompt-Caching des Anbieters an erster Stelle.
     agent_name: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
+    # Vom Benutzer gewählter KI-Zugang — für Chat **und** Sprachmodus. Die Wahl
+    # folgt dem Konto, nicht dem Browser: localStorage gehört der Herkunft, und
+    # die Desktop-App (tauri.localhost) lief vor diesem Feld still auf dem
+    # erstbesten Zugang — ein anderes (womöglich langsameres) Modell, als der
+    # Benutzer im Panel gewählt hatte. NULL heißt: keine Wahl getroffen, es
+    # gilt die bisherige Reihenfolge. SET NULL: ein gelöschter Zugang nimmt
+    # nur die Wahl mit, nie das Konto.
+    ai_provider_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("ai_providers.id", ondelete="SET NULL"), nullable=True
+    )
+
     password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     password_reset_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

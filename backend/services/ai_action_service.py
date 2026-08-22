@@ -1145,11 +1145,80 @@ def _worker_tool_definitions() -> list[dict]:
             },
             ["worker_id", "antwort"],
         ),
-        # ── Der Rechner des Benutzers (Smart System) ────────────────────────
-        #
-        # Nur im Katalog, wenn die Bitte aus der Smart-System-App kam
-        # (`herkunft_schnitt`). Alle vier parken den Lauf, bis der Rechner
-        # geantwortet hat; das Ergebnis kommt danach als Meldung des Panels.
+        _function(
+            "wait_until",
+            "Parkt **diesen** Lauf und weckt ihn nach der angegebenen Zeit "
+            "wieder — für Aufträge, die auf etwas warten (\"in 30 Minuten "
+            "nachsehen\", \"heute Nacht prüfen\"). Während des Wartens "
+            "kostet der Lauf nichts. Nach dem Wecken prüfst du den Stand im "
+            "Verlauf, statt blind zu wiederholen. Nicht für Wartezeiten "
+            "unter einer Minute — arbeite dann einfach weiter.",
+            {
+                "minuten": {
+                    "type": "integer",
+                    "minimum": WAIT_MIN_MINUTEN,
+                    "maximum": WAIT_MAX_MINUTEN,
+                },
+                "grund": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Worauf gewartet wird. Erscheint in der Auftragsliste.",
+                },
+            },
+            ["minuten"],
+        ),
+        _function(
+            "worker_frage",
+            "Stellt dem Benutzer eine Frage, obwohl er dieses Fenster nie "
+            "sieht: dein Lauf parkt, die Frage wird ihm im Gespräch gestellt, "
+            "und die Antwort weckt genau diesen Lauf. Nutze sie **nur**, wenn "
+            "du ohne die Entscheidung nicht weiterkommst — Raten wäre teuer, "
+            "Warten sinnlos. Rechne damit, dass die Antwort dauert.",
+            {
+                "question": {
+                    "type": "string",
+                    "maxLength": MAX_QUESTION_CHARS,
+                    "description": "Die Frage, vollständig und aus sich heraus verständlich.",
+                },
+                "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": MAX_QUESTION_OPTIONS,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "maxLength": MAX_OPTION_CHARS},
+                            "hint": {
+                                "type": "string",
+                                "maxLength": MAX_OPTION_HINT_CHARS,
+                                "description": "Was diese Wahl bedeutet. Kurz.",
+                            },
+                        },
+                        "required": ["label"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            ["question", "options"],
+        ),
+    ]
+
+
+def _desktop_tool_definitions() -> list[dict]:
+    """Der Rechner des Benutzers (Smart System).
+
+    Nur im Katalog, wenn die Bitte aus der Smart-System-App kam
+    (`herkunft_schnitt`). Alle vier parken den Lauf, bis der Rechner
+    geantwortet hat; das Ergebnis kommt danach als Meldung des Panels.
+
+    **Bewusst die letzten Eintraege des Katalogs** (provider_tool_definitions
+    haengt sie ans Ende): so ist der Panel-Katalog ein Byte-Praefix des
+    Desktop-Katalogs — wie der Systemprompt, an den der DESKTOP-Block auch nur
+    angehaengt wird. Anbieter-Caches arbeiten auf Praefixen; standen die vier
+    mitten im Katalog, teilten sich Panel- und App-Laeufe fast nichts
+    (test_desktop_werkzeuge_stehen_am_katalogende haelt das fest).
+    """
+    return [
         _function(
             "desktop_dateien",
             "Arbeitet mit Dateien im Sandbox-Ordner auf dem Rechner des "
@@ -1258,62 +1327,6 @@ def _worker_tool_definitions() -> list[dict]:
                 },
             },
             ["aktion"],
-        ),
-        _function(
-            "wait_until",
-            "Parkt **diesen** Lauf und weckt ihn nach der angegebenen Zeit "
-            "wieder — für Aufträge, die auf etwas warten (\"in 30 Minuten "
-            "nachsehen\", \"heute Nacht prüfen\"). Während des Wartens "
-            "kostet der Lauf nichts. Nach dem Wecken prüfst du den Stand im "
-            "Verlauf, statt blind zu wiederholen. Nicht für Wartezeiten "
-            "unter einer Minute — arbeite dann einfach weiter.",
-            {
-                "minuten": {
-                    "type": "integer",
-                    "minimum": WAIT_MIN_MINUTEN,
-                    "maximum": WAIT_MAX_MINUTEN,
-                },
-                "grund": {
-                    "type": "string",
-                    "maxLength": 200,
-                    "description": "Worauf gewartet wird. Erscheint in der Auftragsliste.",
-                },
-            },
-            ["minuten"],
-        ),
-        _function(
-            "worker_frage",
-            "Stellt dem Benutzer eine Frage, obwohl er dieses Fenster nie "
-            "sieht: dein Lauf parkt, die Frage wird ihm im Gespräch gestellt, "
-            "und die Antwort weckt genau diesen Lauf. Nutze sie **nur**, wenn "
-            "du ohne die Entscheidung nicht weiterkommst — Raten wäre teuer, "
-            "Warten sinnlos. Rechne damit, dass die Antwort dauert.",
-            {
-                "question": {
-                    "type": "string",
-                    "maxLength": MAX_QUESTION_CHARS,
-                    "description": "Die Frage, vollständig und aus sich heraus verständlich.",
-                },
-                "options": {
-                    "type": "array",
-                    "minItems": 2,
-                    "maxItems": MAX_QUESTION_OPTIONS,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "label": {"type": "string", "maxLength": MAX_OPTION_CHARS},
-                            "hint": {
-                                "type": "string",
-                                "maxLength": MAX_OPTION_HINT_CHARS,
-                                "description": "Was diese Wahl bedeutet. Kurz.",
-                            },
-                        },
-                        "required": ["label"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            ["question", "options"],
         ),
     ]
 
@@ -1853,6 +1866,7 @@ def provider_tool_definitions() -> list[dict]:
             },
             ["path", *_RATIONALE_REQUIRED],
         ),
+        *_desktop_tool_definitions(),
     ]
 
 

@@ -436,3 +436,50 @@ def test_config_traegt_den_bearer_ws_marker(
 
     assert antwort.status_code == 200
     assert antwort.json()["bearer_ws"] is True
+
+
+def test_die_gespeicherte_modellwahl_traegt_den_sprachmodus(
+    db, owner_user
+) -> None:
+    """Ohne explizite Wahl gilt die im Konto gespeicherte (users.ai_provider_id).
+
+    Das Overlay der Desktop-App schickt keine provider_id mit — es kennt die
+    Providerliste nicht. Vor diesem Feld landete es damit auf dem erstbesten
+    Chatzugang, der ein anderes (langsameres) Modell sein konnte als das im
+    Panel gewaehlte. Eine explizit mitgeschickte Wahl sticht weiterhin."""
+    from services.dis_client import DisClient
+
+    erster = _zugang(db, kind="openrouter")
+    # Von Hand statt über _zugang: der Name ist eindeutig (UNIQUE-Spalte).
+    zweiter = AiProvider(
+        name="Zweiter Chatzugang",
+        provider_kind="openrouter",
+        default_model="openai/gpt-5.6-luna",
+        enabled=True,
+        requires_api_key=True,
+        transcription_model="google/gemini-2.5-flash",
+    )
+    db.add(zweiter)
+    db.flush()
+    zweiter.operator_api_key_encrypted = DisClient.encrypt(
+        "sk-test-schluessel", aad=f"msm:ai:provider:{zweiter.id}:operator-key"
+    )
+    db.commit()
+    _zugang(db)  # die Stimme
+
+    # Ohne Wahl: die bisherige Reihenfolge — der erste Zugang.
+    zugaenge = ai_voice.sprachzugang(db, owner_user)
+    assert zugaenge is not None
+    assert zugaenge[1].id == erster.id
+
+    # Mit gespeicherter Wahl: genau dieser Zugang, fuer Hoeren und Denken.
+    owner_user.ai_provider_id = zweiter.id
+    db.commit()
+    zugaenge = ai_voice.sprachzugang(db, owner_user)
+    assert zugaenge is not None
+    assert zugaenge[1].id == zweiter.id
+
+    # Eine explizite Wahl des Clients sticht die gespeicherte.
+    zugaenge = ai_voice.sprachzugang(db, owner_user, bevorzugter_provider_id=erster.id)
+    assert zugaenge is not None
+    assert zugaenge[1].id == erster.id

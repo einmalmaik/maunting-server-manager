@@ -31,7 +31,8 @@ use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, StreamTrait};
 use rustpotter::{
-    Rustpotter, RustpotterConfig, WakewordRef, WakewordRefBuildFromFiles, WakewordSave,
+    Rustpotter, RustpotterConfig, ScoreMode, VADMode, WakewordRef, WakewordRefBuildFromFiles,
+    WakewordSave,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -58,10 +59,17 @@ const MODELL_DATEI: &str = "wakeword.rpw";
 /// MFCC-Auflösung; 16 ist der rustpotter-Standard für Referenzmodelle.
 const MFCC_GROESSE: u16 = 16;
 
-/// Ob der Lausch-Thread laufen soll. Ein Flag statt Thread-Handles: der
-/// Thread gehört sich selbst, Stoppen ist nur ein Wunsch, den er binnen
-/// eines Channel-Timeouts erfüllt.
+/// Ob der Lausch-Thread laufen soll. Stoppen ist nur ein Wunsch, den der
+/// Thread binnen eines Channel-Timeouts erfüllt.
 static LAUSCHT: AtomicBool = AtomicBool::new(false);
+/// Das Handle des laufenden Threads. Es existiert für genau einen Fall: den
+/// Durchstart (stoppen, sofort wieder starten — Gerätewechsel, neue
+/// Schwelle). `stoppen` kehrt sofort zurück, der Thread prüft das Flag aber
+/// nur je Audioblock; ohne das Join hier setzte `starten` das Flag wieder,
+/// bevor der Alte es je gesehen hätte — und zwei Threads hingen an einem
+/// Mikrofon, der alte mit der alten Konfiguration.
+static FADEN: std::sync::Mutex<Option<std::thread::JoinHandle<()>>> =
+    std::sync::Mutex::new(None);
 
 #[derive(Serialize, Clone)]
 pub struct WakewordStand {
@@ -204,6 +212,16 @@ fn nach_mono(daten: &[f32], kanaele: usize, ziel: &mut Vec<f32>) {
         let summe: f32 = rahmen.iter().sum();
         ziel.push(summe / kanaele as f32);
     }
+}
+
+/// Klemmt die Benutzer-Empfindlichkeit auf den Bereich, in dem die Erkennung
+/// noch etwas taugt: unter 0,30 feuert Median-Score auf Alltagsgeräusche,
+/// über 0,60 hört sie den eigenen Namen nicht mehr.
+pub fn schwelle_klemmen(wert: f32) -> f32 {
+    if !wert.is_finite() {
+        return crate::konfig::WAKEWORD_SCHWELLE_VORGABE;
+    }
+    wert.clamp(0.30, 0.60)
 }
 
 /// Quadratischer Mittelwert eines Fensters — das Maß für „hier ist Energie".
@@ -359,15 +377,29 @@ pub fn trainieren(app: &AppHandle, wort: &str) -> Result<(), String> {
 }
 
 /// Startet den Lausch-Thread. Idempotent: läuft schon einer, passiert nichts.
+/// Läuft ein Vorgänger gerade aus (Durchstart), wird auf ihn gewartet — das
+/// dauert höchstens einen Channel-Timeout (~500 ms) und geschieht auf einem
+/// Command-Thread, nie in der UI.
 pub fn lauschen_starten(app: AppHandle) -> Result<(), String> {
     let modell = modell_pfad(&app)?;
     if !modell.exists() {
         return Err("Kein Wake-Word trainiert — erst kalibrieren".into());
     }
-    if LAUSCHT.swap(true, Ordering::SeqCst) {
-        return Ok(());
+    let mut halter = FADEN.lock().map_err(|_| "Wake-Word-Zustand vergiftet")?;
+    if let Some(faden) = halter.take() {
+        if LAUSCHT.load(Ordering::SeqCst) && !faden.is_finished() {
+            // Läuft und soll laufen — nichts zu tun.
+            *halter = Some(faden);
+            return Ok(());
+        }
+        // Ein Stopp ist unterwegs oder der Thread ist schon zu Ende: erst zu
+        // Ende bringen, dann frisch starten. Ohne das Join sähe der Alte das
+        // gleich wieder gesetzte Flag und liefe einfach weiter.
+        LAUSCHT.store(false, Ordering::SeqCst);
+        let _ = faden.join();
     }
-    std::thread::Builder::new()
+    LAUSCHT.store(true, Ordering::SeqCst);
+    let faden = std::thread::Builder::new()
         .name("mss-wakeword".into())
         .spawn(move || {
             if let Err(fehler) = lausch_schleife(&app, &modell) {
@@ -383,6 +415,7 @@ pub fn lauschen_starten(app: AppHandle) -> Result<(), String> {
             LAUSCHT.store(false, Ordering::SeqCst);
             e.to_string()
         })?;
+    *halter = Some(faden);
     Ok(())
 }
 
@@ -404,19 +437,37 @@ fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
     // er zieht den Live-Pegel auf die RMS der eigenen Kalibrierungsaufnahmen
     // (gain_ref None = Referenz aus dem Modell). Ab Werk ist er **aus**, und
     // max_gain 1.0 hieße „nur dämpfen, nie verstärken" — ein leises Mikrofon
-    // käme nie auf den Pegel, mit dem trainiert wurde. 4.0 verstärkt kräftig,
-    // ohne aus Raumrauschen Sprache zu machen.
+    // käme nie auf den Pegel, mit dem trainiert wurde. Der Preis: er hebt
+    // auch Rauschen an — deshalb die drei Tore darunter.
     rp_konfig.filters.gain_normalizer.enabled = true;
     rp_konfig.filters.gain_normalizer.max_gain = 4.0;
-    // Etwas unter der Werksschwelle (0,5): zehn eigene Aufnahmen streuen, und
-    // ein verpasstes Wort ist hier teurer als ein seltener Fehlgriff — der
-    // öffnet nur das Overlay, das ESC gleich wieder schließt.
-    rp_konfig.detector.threshold = 0.45;
-    // Das Durchschnitts-Vor-Tor (Werk 0,2) ist eine reine CPU-Sparmaßnahme:
-    // es bricht Erkennungen ab, bevor die eigentlichen Vergleiche laufen.
-    // Bei einem einzigen Stream ist die Ersparnis egal, die abgebrochenen
-    // Treffer sind es nicht. 0 heißt aus.
-    rp_konfig.detector.avg_threshold = 0.0;
+    // Tor 1 — VAD: ohne Sprachaktivität läuft der Template-Vergleich gar
+    // nicht erst (detector.rs: process_new_mfccs). Ohne dieses Gate wurde
+    // jedes Rausch-Frame gescort, und ein zufälliger Ausreißer öffnete das
+    // Overlay, ohne dass jemand gesprochen hatte. Easy statt Medium/Hard:
+    // eine laufende Teil-Erkennung umgeht das Gate ohnehin, das strengere
+    // Gate kostete nur echte, leise Rufe.
+    rp_konfig.detector.vad_mode = Some(VADMode::Easy);
+    // Tor 2 — Median statt Max: der Einheitsscore braucht die Mehrheit der
+    // zehn Aufnahmen, nicht die eine, die dem Rauschen zufällig ähnelt.
+    rp_konfig.detector.score_mode = ScoreMode::Median;
+    // Tor 3 — das Durchschnitts-Tor auf Werkswert. Hier stand 0,0 mit der
+    // Begründung „reine CPU-Sparmaßnahme" — falsch gelesen: es verwirft
+    // Erkennungen gegen das gemittelte Template und ist damit ein zweites,
+    // unabhängiges Ähnlichkeitskriterium (wakeword_comp.rs).
+    rp_konfig.detector.avg_threshold = 0.2;
+    // Die Empfindlichkeit gehört dem Benutzer (Einstellungen → Wake-Word):
+    // kleiner = empfindlicher. Geklemmt, damit kein Wert aus einer von Hand
+    // editierten Datei die Erkennung lahmlegt oder dauerfeuern lässt.
+    rp_konfig.detector.threshold = schwelle_klemmen(
+        crate::konfig::laden(app)
+            .map(|k| k.wakeword_schwelle)
+            .unwrap_or(crate::konfig::WAKEWORD_SCHWELLE_VORGABE),
+    );
+    // Ein echtes Wort, das nur in drei, vier Frames über der Schwelle liegt,
+    // wurde mit dem Werkswert 5 stumm verworfen — „man muss es mehrmals
+    // sagen". Drei reicht als Beleg, die Tore oben fangen das Rauschen.
+    rp_konfig.detector.min_scores = 3;
     let mut erkenner = Rustpotter::new(&rp_konfig)?;
     erkenner.add_wakeword_from_file(
         "wakeword",
@@ -428,10 +479,24 @@ fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
     let stream = stream_starten(&geraet, &konfig, sender)?;
 
     let mut puffer: Vec<f32> = Vec::with_capacity(je_frame * 4);
+    // Gedrosselter Pegel für die Einstellungen: was das Wake-Word gerade
+    // hört (RMS nach Filtern) und wie stark der Normalizer verstärkt. Nur
+    // Zahlen — nie Audio — verlassen das Modul.
+    let mut letzter_pegel = std::time::Instant::now();
     while LAUSCHT.load(Ordering::SeqCst) {
         match empfaenger.recv_timeout(Duration::from_millis(500)) {
             Ok(block) => {
                 nach_mono(&block, kanaele, &mut puffer);
+                if letzter_pegel.elapsed() >= Duration::from_millis(250) {
+                    letzter_pegel = std::time::Instant::now();
+                    let _ = app.emit(
+                        "wakeword-pegel",
+                        serde_json::json!({
+                            "rms": erkenner.get_rms_level(),
+                            "gain": erkenner.get_gain(),
+                        }),
+                    );
+                }
                 while puffer.len() >= je_frame {
                     let frame: Vec<f32> = puffer.drain(..je_frame).collect();
                     if let Some(erkennung) = erkenner.process_samples(frame) {
@@ -528,6 +593,20 @@ mod tests {
         let bloecke = vec![vec![0.0_f32; 1_600], vec![0.5_f32; 3_200]];
         let fehler = sprache_schneiden(quelle(bloecke), RATE).unwrap_err();
         assert!(fehler.contains("zu kurz"), "{fehler}");
+    }
+
+    #[test]
+    fn die_schwelle_bleibt_im_brauchbaren_bereich() {
+        // Werte kommen aus konfig.json und damit potenziell von Hand: NaN,
+        // 0 oder 3 dürfen die Erkennung weder dauerfeuern lassen noch taub
+        // machen.
+        assert_eq!(schwelle_klemmen(0.45), 0.45);
+        assert_eq!(schwelle_klemmen(0.0), 0.30);
+        assert_eq!(schwelle_klemmen(3.0), 0.60);
+        assert_eq!(
+            schwelle_klemmen(f32::NAN),
+            crate::konfig::WAKEWORD_SCHWELLE_VORGABE
+        );
     }
 
     #[test]

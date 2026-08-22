@@ -6,7 +6,10 @@
  */
 import { useEffect } from 'react'
 
-import { registriereAudioGeraete } from '@/components/ai/voice/audioGeraete'
+import {
+  registriereAudioGeraete,
+  registriereAudioVerarbeitung,
+} from '@/components/ai/voice/audioGeraete'
 import { DesktopApp } from './DesktopApp'
 import { OverlayFenster } from './OverlayFenster'
 import { konfigLaden } from './tauri'
@@ -15,12 +18,21 @@ export function DesktopRoot() {
   const overlay =
     new URLSearchParams(window.location.search).get('fenster') === 'overlay'
 
-  // Die Gerätewahl gilt in **beiden** Fenstern — Sprachsitzungen laufen im
-  // Overlay wie im Hauptfenster. Die Einstellungen registrieren Änderungen
-  // sofort nach; dieses eine Laden deckt den Fensterstart ab.
+  // Gerätewahl und Mikrofon-Verarbeitung gelten in **beiden** Fenstern —
+  // Sprachsitzungen laufen im Overlay wie im Hauptfenster. Die Einstellungen
+  // registrieren Änderungen sofort nach; dieses eine Laden deckt den
+  // Fensterstart ab.
   useEffect(() => {
     void konfigLaden()
-      .then((konfig) => registriereAudioGeraete(konfig.audio_eingabe, konfig.audio_ausgabe))
+      .then((konfig) => {
+        registriereAudioGeraete(konfig.audio_eingabe, konfig.audio_ausgabe)
+        registriereAudioVerarbeitung({
+          echo: konfig.audio_echo,
+          rauschen: konfig.audio_rauschen,
+          autogain: konfig.audio_autogain,
+          verstaerkung: konfig.audio_verstaerkung,
+        })
+      })
       .catch(() => undefined)
   }, [])
 

@@ -4793,7 +4793,10 @@
       "neuKalibrieren": "Das Modell ist noch auf „{{alt}}“ trainiert, dein Assistent heißt inzwischen „{{neu}}“. Schalte das Wake-Word aus, setz die Kalibrierung zurück und sprich den neuen Namen ein — bis dahin hört die App weiter auf „{{alt}}“.",
       "aktiv": "Wake-Word aktiv",
       "aktivHinweis": "An: Sag „{{name}}“, und das Overlay öffnet sich über allem, was gerade läuft. Aus heißt aus — das Mikrofon ist frei, und nichts schaltet das Lauschen von selbst wieder ein.",
-      "lauschtNicht": "Der Schalter steht auf An, aber das Lauschen läuft nicht — prüfe das Mikrofon und schalte einmal aus und wieder ein."
+      "lauschtNicht": "Der Schalter steht auf An, aber das Lauschen läuft nicht — prüfe das Mikrofon und schalte einmal aus und wieder ein.",
+      "schwelle": "Auslöseschwelle",
+      "schwelleHinweis": "Niedrig löst leichter aus (auch mal fälschlich), hoch verlangt einen deutlicheren Treffer. Nach dem Ziehen kurz warten — das Lauschen startet mit dem neuen Wert durch.",
+      "pegel": "Was das Wake-Word hört"
     },
     "gefahrenzone": {
       "titel": "Gefahrenzone",
@@ -4861,7 +4864,23 @@
       "standardMit": "Windows-Standard ({{name}})",
       "fehlt": "{{name}} (zurzeit nicht gefunden)",
       "ducking": "Ton absenken (Ducking)",
-      "duckingHinweis": "Spricht die KI, senkt die App die Lautstärke aller anderen Programme um 60 % ab — Musik wird leiser, statt übertönt zu werden. Der Test senkt drei Sekunden lang ab: ohne laufende Musik oder Video ist er unhörbar."
+      "duckingHinweis": "Spricht die KI, senkt die App die Lautstärke aller anderen Programme um 60 % ab — Musik wird leiser, statt übertönt zu werden. Der Test senkt drei Sekunden lang ab: ohne laufende Musik oder Video ist er unhörbar.",
+      "verarbeitung": "Mikrofon-Verarbeitung",
+      "verarbeitungHinweis": "Chromiums eingebaute, lokale Verarbeitung — nichts davon geht ins Netz. Die Vorgaben passen für die meisten Mikrofone.",
+      "echo": "Echounterdrückung",
+      "echoHinweis": "Filtert die Stimme der KI aus dem Mikrofon — ohne sie hört sie sich selbst und antwortet auf sich (Laptop ohne Kopfhörer).",
+      "rauschen": "Rauschunterdrückung",
+      "rauschenHinweis": "Nimmt Lüfter, Brummen und Zimmerrauschen aus dem Signal.",
+      "autogain": "Automatische Pegelanpassung",
+      "autogainHinweis": "Gleicht leise und laute Stimmen automatisch an — hilft schwachen Mikrofonen am meisten.",
+      "verstaerkung": "Eingangsverstärkung",
+      "verstaerkungHinweis": "Hebt oder senkt das Mikrofonsignal per Software. 100 % heißt: nichts tun — erst anfassen, wenn das Testhören zu leise oder übersteuert klingt.",
+      "testhoeren": "Testhören",
+      "testhoerenHinweis": "Legt das eigene Mikrofon auf den gewählten Lautsprecher — mit genau der Verarbeitung von oben. Am besten mit Kopfhörern: über Lautsprecher koppelt es zurück.",
+      "testhoerenStart": "Testhören starten",
+      "testhoerenStopp": "Testhören beenden",
+      "testhoerenPegel": "Mikrofonpegel",
+      "testhoerenFehler": "Das Mikrofon ließ sich nicht öffnen — ist es angeschlossen und freigegeben?"
     },
     "kalibrierung": {
       "titel": "Neues Wake-Word?",

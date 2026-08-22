@@ -22,7 +22,7 @@ from models import User, EmailVerification
 from services.dis_client import DisClient
 from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
-from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, AgentNameUpdateRequest
+from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, AgentNameUpdateRequest, AiProviderChoiceRequest
 from schemas.device_pairing import (
     PairedDevice,
     PairingCreated,
@@ -674,6 +674,40 @@ def update_agent_name(
     user.agent_name = req.agent_name
     db.commit()
     return {"agent_name": user.agent_name}
+
+
+@router.patch("/me/ai-provider")
+def update_ai_provider(
+    req: AiProviderChoiceRequest,
+    # Dieselbe Schranke wie die Auswahlliste (`/api/ai/providers`): wer den
+    # Chat nicht nutzen darf, hat auch keine Modellwahl zu speichern.
+    user: User = Depends(require_global("ai.chat.use")),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Setzt den bevorzugten KI-Zugang des Benutzers (None = keine Wahl).
+
+    Die Wahl folgt dem Konto statt dem Browser: die Desktop-App hat einen
+    eigenen localStorage und lief ohne dieses Feld still auf dem erstbesten
+    Zugang. Chat (AiChat) und Sprachmodus (routers/ai_voice.sprachzugang)
+    lesen die Wahl, wenn der Client keine explizite mitschickt.
+
+    Geprüft wird dieselbe Grenze wie beim Senden einer Nachricht: der Zugang
+    muss existieren, aktiv sein und Chat sprechen — was dort ein 404 wäre,
+    wird hier gar nicht erst gespeichert.
+    """
+    if req.provider_id is not None:
+        # Weicher Import: auth darf die KI-Dienste nicht beim Modulstart laden
+        # (Startkosten, Importzyklen) — nur dieser eine Pfad braucht sie.
+        from models.ai_provider import AiProvider
+        from services import ai_provider_service
+
+        provider = db.get(AiProvider, req.provider_id)
+        if provider is None or not provider.enabled or not ai_provider_service.fuer_chat(provider):
+            raise HTTPException(status_code=404, detail="Provider nicht gefunden")
+    user.ai_provider_id = req.provider_id
+    db.commit()
+    return {"ai_provider_id": user.ai_provider_id}
 
 
 

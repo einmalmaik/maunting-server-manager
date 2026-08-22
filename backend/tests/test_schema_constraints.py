@@ -1408,3 +1408,58 @@ def test_die_migration_traegt_die_guardian_uebersteuerung(tmp_path: Path) -> Non
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+def test_die_modellwahl_ueberlebt_ihren_zugang_nicht_aber_das_konto(db: Session) -> None:
+    """`users.ai_provider_id` ist eine Vorliebe, kein Besitz.
+
+    Loescht der Betreiber einen KI-Zugang, verschwindet die Wahl (SET NULL) und
+    der Benutzer faellt auf die Panel-Reihenfolge zurueck — sein Konto bleibt
+    unberuehrt. CASCADE haette hier Konten geloescht, RESTRICT haette das
+    Loeschen eines Zugangs an einer blossen Vorliebe scheitern lassen.
+    """
+    inspector = inspect(db.get_bind())
+
+    assert _fremdschluessel(inspector, "users", "ai_provider_id")["options"] == {
+        "ondelete": "SET NULL"
+    }
+
+
+def test_die_migration_traegt_die_modellwahl(tmp_path: Path) -> None:
+    """Modell und Migration duerfen auch hier nicht auseinanderlaufen.
+
+    Der Test oben prueft das `create_all`-Schema aus den Modellen; die
+    Produktion faehrt aber die Alembic-Kette. Der Rueckbau bis vor
+    `20260822_01` beweist, dass Spalte und SET NULL wirklich aus der Kette
+    stammen — eine Migration ohne das `ondelete` fiele sonst erst im Betrieb
+    auf, wenn das Loeschen eines Zugangs an einer blossen Vorliebe scheitert.
+    """
+    db_url = f"sqlite:///{tmp_path / 'modellwahl_constraint.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        command.downgrade(config, "20260821_05")
+        inspector = _frisch(engine)
+        assert "ai_provider_id" not in {
+            spalte["name"] for spalte in inspector.get_columns("users")
+        }
+
+        command.upgrade(config, "head")
+        inspector = _frisch(engine)
+        spalten = {
+            spalte["name"]: spalte for spalte in inspector.get_columns("users")
+        }
+        assert spalten["ai_provider_id"]["nullable"] is True
+        assert _fremdschluessel(inspector, "users", "ai_provider_id")["options"] == {
+            "ondelete": "SET NULL"
+        }
+    finally:
+        engine.dispose()
+        settings.database_url = vorher

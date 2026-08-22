@@ -131,7 +131,11 @@ export function Ai() {
   const [servers, setServers] = useState<ServerOption[]>([])
   const [suchParameter, setzeSuchParameter] = useSearchParams()
 
-  const providerId = user?.id ? readAiProviderChoice(aiChatPreferenceKeys(user.id).provider) : null
+  // Die Modellwahl fuer den Sprachmodus: zuerst die am Konto gespeicherte
+  // (dieselbe, die Overlay und Desktop-App sehen), sonst die alte Browserwahl.
+  const providerId =
+    user?.ai_provider_id
+    ?? (user?.id ? readAiProviderChoice(aiChatPreferenceKeys(user.id).provider) : null)
 
   const workerId = suchParameter.get('id')
   const gewuenscht = ansichtAusAbfrage(suchParameter.get('ansicht'), workerId)

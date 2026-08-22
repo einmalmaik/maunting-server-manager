@@ -18,10 +18,11 @@ import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Sprachblase } from '@/components/ai/voice/Sprachblase'
-import { registriereAudioGeraete } from '@/components/ai/voice/audioGeraete'
+import {
+  registriereAudioGeraete,
+  registriereAudioVerarbeitung,
+} from '@/components/ai/voice/audioGeraete'
 import { useSprachsitzung } from '@/components/ai/voice/useSprachsitzung'
-import { aiChatPreferenceKeys, readAiProviderChoice } from '@/lib/aiChatPreferences'
-import { useAuthStore } from '@/stores/authStore'
 import { istAngemeldet, stillAnmelden } from './transport'
 import {
   OVERLAY_SPRACHE_ENDE,
@@ -32,14 +33,21 @@ import {
 } from './sprachKoordination'
 import { konfigLaden, overlaySichtbar } from './tauri'
 
+/**
+ * Nach so viel Stille geht das Overlay von selbst zu. Großzügig genug für
+ * eine Denkpause mitten im Gespräch, kurz genug, dass ein Fehltrigger des
+ * Wake-Words kein offenes Mikrofon hinterlässt.
+ */
+const STILLE_SCHLIESST_MS = 20_000
+
 export function OverlayFenster() {
   const { t } = useTranslation()
-  // Die Providerwahl des Chats — dieselbe Quelle wie pages/Ai. Solange dieses
-  // Fenster den Benutzer (noch) nicht kennt, entscheidet das Backend selbst,
-  // welcher Zugang spricht (`provider_id` ist am Voice-WS optional).
-  const userId = useAuthStore((s) => s.user?.id)
-  const providerId = userId ? readAiProviderChoice(aiChatPreferenceKeys(userId).provider) : null
-  const { zustand, zeilen, fehler, pegel, starten, beenden } = useSprachsitzung(providerId)
+  // Keine eigene Providerwahl: `provider_id` ist am Voice-WS optional, und
+  // ohne sie nimmt das Backend die am Konto gespeicherte Wahl — dieselbe, die
+  // das Panel beim Modellwechsel dorthin schreibt. Vorher las dieses Fenster
+  // den localStorage, der hier leer ist, und lief still auf dem ersten
+  // verfuegbaren Zugang statt auf dem gewaehlten.
+  const { zustand, zeilen, fehler, pegel, starten, beenden } = useSprachsitzung(null)
   const [sichtbar, setSichtbar] = useState(false)
   const transkriptEnde = useRef<HTMLDivElement>(null)
 
@@ -59,11 +67,19 @@ export function OverlayFenster() {
         if (!istAngemeldet()) {
           await stillAnmelden()
         }
-        // Die Gerätewahl wird im Hauptfenster geändert — dieses Fenster
-        // erfährt davon nichts. Frisch laden, damit die Sitzung das heute
-        // gewählte Mikrofon nimmt, nicht das vom App-Start.
+        // Gerätewahl und Verarbeitung werden im Hauptfenster geändert —
+        // dieses Fenster erfährt davon nichts. Frisch laden, damit die
+        // Sitzung den heutigen Stand nimmt, nicht den vom App-Start.
         await konfigLaden()
-          .then((k) => registriereAudioGeraete(k.audio_eingabe, k.audio_ausgabe))
+          .then((k) => {
+            registriereAudioGeraete(k.audio_eingabe, k.audio_ausgabe)
+            registriereAudioVerarbeitung({
+              echo: k.audio_echo,
+              rauschen: k.audio_rauschen,
+              autogain: k.audio_autogain,
+              verstaerkung: k.audio_verstaerkung,
+            })
+          })
           .catch(() => undefined)
         await sprachstartMelden('overlay')
         await starten()
@@ -107,6 +123,20 @@ export function OverlayFenster() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Stille schließt das Overlay von selbst. Ein Fehltrigger des Wake-Words
+  // öffnete sonst eine Sitzung, die nie endet — das Mikrofon streamte
+  // dauerhaft zur KI, und nach der Höchstdauer verband der Hook sogar neu.
+  // „Still" heißt: das Backend meldet über die ganze Frist weder hoert noch
+  // denkt noch spricht (Rede erkennt allein seine VAD, nicht dieses Fenster);
+  // `aus` zählt mit, damit auch ein Verbindungsfehler das Fenster nicht
+  // ewig stehen lässt. Jede echte Aktivität setzt die Frist zurück.
+  useEffect(() => {
+    if (!sichtbar || (zustand !== 'bereit' && zustand !== 'aus')) return
+    const frist = window.setTimeout(() => schliessen(), STILLE_SCHLIESST_MS)
+    return () => window.clearTimeout(frist)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sichtbar, zustand])
 
   // Solange keine Sitzung angefordert wurde, zeigt das (ohnehin versteckte)
   // Fenster nichts — sonst blitzte beim App-Start ein leerer Orb auf.

@@ -20,20 +20,32 @@ import { listen } from '@tauri-apps/api/event'
 import { Mic } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { Button, Switch } from '@/Singra/UI'
+import { Button, ProgressBar, Slider, Switch } from '@/Singra/UI'
 import { useAuthStore } from '@/stores/authStore'
 import {
+  konfigLaden,
+  konfigSpeichern,
   wakewordAufnehmen,
   wakewordLauschen,
   wakewordStand,
   wakewordTrainieren,
   wakewordZuruecksetzen,
+  type AppKonfig,
   type WakewordStand,
 } from './tauri'
 
 const AUFNAHMEN_SOLL = 10
 /** Atempause zwischen zwei Runden — sprechen, absetzen, wieder sprechen. */
 const RUNDEN_PAUSE_MS = 900
+/**
+ * Wie lange nach dem letzten Reglertick gewartet wird, bevor die Schwelle
+ * gespeichert und der Lausch-Thread durchgestartet wird — jeder Tick einzeln
+ * würde das Mikrofon im Sekundentakt schließen und öffnen.
+ */
+const SCHWELLE_SPEICHERN_MS = 600
+/** Dieselben Grenzen wie `wakeword::schwelle_klemmen` in Rust. */
+const SCHWELLE_MIN = 0.3
+const SCHWELLE_MAX = 0.6
 
 export function WakewordEinrichtung() {
   const { t } = useTranslation()
@@ -45,8 +57,12 @@ export function WakewordEinrichtung() {
   })
   const [beschaeftigt, setBeschaeftigt] = useState<'kalibrierung' | 'training' | 'lauschen' | 'reset' | null>(null)
   const [meldung, setMeldung] = useState<string | null>(null)
+  const [konfig, setKonfig] = useState<AppKonfig | null>(null)
+  /** Was der Lausch-Thread gerade hört — nur zur Anzeige (`wakeword-pegel`). */
+  const [pegel, setPegel] = useState<{ rms: number; gain: number } | null>(null)
   /** Bricht die laufende Kalibrierungsschleife ab, ohne zu rendern. */
   const abbruch = useRef(false)
+  const schwelleTimer = useRef<number | null>(null)
 
   async function standLaden(): Promise<WakewordStand | null> {
     try {
@@ -61,6 +77,9 @@ export function WakewordEinrichtung() {
 
   useEffect(() => {
     void standLaden()
+    void konfigLaden()
+      .then(setKonfig)
+      .catch(() => setKonfig(null))
     const abmelden = listen<{ name: string; score: number }>('wakeword-erkannt', (ereignis) => {
       setMeldung(
         t('mss.wakeword.erkannt', {
@@ -76,13 +95,56 @@ export function WakewordEinrichtung() {
       setMeldung(ereignis.payload.meldung)
       void standLaden()
     })
+    // Der Lausch-Thread meldet alle 250 ms, was er hört — der Balken unten
+    // zeigt, ob das Mikrofon überhaupt etwas liefert und wie stark die
+    // automatische Verstärkung nachregelt.
+    const abPegel = listen<{ rms: number; gain: number }>('wakeword-pegel', (ereignis) => {
+      setPegel(ereignis.payload)
+    })
     return () => {
       abbruch.current = true
+      // Der Schwellen-Timer wird bewusst NICHT geräumt: seine Schließung ist
+      // in sich geschlossen (frisches Laden, Speichern, Durchstart) — räumen
+      // hieße, die letzte gezogene Schwelle wegzuwerfen.
       void abmelden.then((f) => f())
       void abFehler.then((f) => f())
+      void abPegel.then((f) => f())
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  /**
+   * Die Empfindlichkeit: sofort anzeigen, erst nach einer Atempause speichern
+   * und den Lausch-Thread durchstarten — er liest die Schwelle nur beim Start.
+   *
+   * Gespeichert wird über einen **frischen** Konfigurationsstand, nicht über
+   * den React-State: der stammt vom Mount, während der Aktiv-Schalter daneben
+   * `wakeword_aktiv` direkt in Rust umschreibt. Der alte Weg (`{ ...konfig }`)
+   * hätte ein gerade abgeschaltetes Wake-Word wieder auf „an" zurückgeschrieben
+   * — und nichts darf das Mikrofon von selbst wieder einschalten. Aus demselben
+   * frischen Stand kommt auch die Entscheidung über den Durchstart.
+   */
+  function schwelleZiehen(wert: number) {
+    if (!konfig) return
+    setKonfig({ ...konfig, wakeword_schwelle: wert })
+    if (schwelleTimer.current !== null) window.clearTimeout(schwelleTimer.current)
+    schwelleTimer.current = window.setTimeout(() => {
+      schwelleTimer.current = null
+      void (async () => {
+        try {
+          const aktuell = await konfigLaden()
+          await konfigSpeichern({ ...aktuell, wakeword_schwelle: wert })
+          if (aktuell.wakeword_aktiv) {
+            await wakewordLauschen(false)
+            await wakewordLauschen(true)
+            await standLaden()
+          }
+        } catch (fehler) {
+          setMeldung(String(fehler))
+        }
+      })()
+    }, SCHWELLE_SPEICHERN_MS)
+  }
 
   /**
    * Die Kalibrierung als Schleife: aufnehmen, kurz durchatmen, weiter — bis
@@ -233,6 +295,29 @@ export function WakewordEinrichtung() {
       {stand.aktiv === true && !stand.lauscht && beschaeftigt === null && (
         <p className="msm-alert-warning">{t('mss.wakeword.lauschtNicht')}</p>
       )}
+
+      <div className="flex flex-col gap-2 border-t border-outline-variant/40 pt-4">
+        <Slider
+          value={Math.round((konfig?.wakeword_schwelle ?? 0.45) * 100)}
+          min={SCHWELLE_MIN * 100}
+          max={SCHWELLE_MAX * 100}
+          step={1}
+          disabled={konfig === null}
+          onValueChange={(wert) => schwelleZiehen(wert / 100)}
+          label={t('mss.wakeword.schwelle')}
+          hint={(konfig?.wakeword_schwelle ?? 0.45).toFixed(2)}
+        />
+        <p className="text-xs text-on-surface-variant">{t('mss.wakeword.schwelleHinweis')}</p>
+        {/* Nur solange wirklich gelauscht wird — ein eingefrorener Balken
+            sähe aus wie ein hängendes Mikrofon. */}
+        {stand.lauscht && pegel && (
+          <ProgressBar
+            value={Math.min(100, Math.round(pegel.rms * 4 * 100))}
+            label={t('mss.wakeword.pegel')}
+            hint={`×${pegel.gain.toFixed(1)}`}
+          />
+        )}
+      </div>
 
       {meldung && (
         <p className="text-xs text-on-surface-variant" aria-live="polite">

@@ -13,6 +13,8 @@ export interface User {
   time_zone?: string | null
   /** Rufname des KI-Assistenten; null heißt Standardname 'Singra'. */
   agent_name?: string | null
+  /** Gewählter KI-Zugang — am Konto, damit App und Overlay dieselbe Wahl sehen. */
+  ai_provider_id?: number | null
   role_id: number | null
   /** Alle globalen Rollen; role_id bleibt kompatible Primärrolle. */
   role_ids?: number[]

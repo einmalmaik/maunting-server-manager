@@ -38,6 +38,11 @@ const KONFIG = {
   wakeword_wort: null,
   audio_eingabe: null,
   audio_ausgabe: null,
+  wakeword_schwelle: 0.45,
+  audio_echo: true,
+  audio_rauschen: true,
+  audio_autogain: true,
+  audio_verstaerkung: 1,
 }
 
 function json(status: number, koerper: unknown): Response {

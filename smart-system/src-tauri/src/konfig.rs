@@ -17,6 +17,8 @@ const DATEI: &str = "konfig.json";
 /// Registrierung und Doku dieselbe Wahrheit tragen.
 pub const HOTKEY_FENSTER_VORGABE: &str = "Alt+Space";
 pub const HOTKEY_SPRACHE_VORGABE: &str = "Alt+Shift+Space";
+/// Vorgabe der Wake-Word-Empfindlichkeit (rustpotter-Schwelle, Median-Score).
+pub const WAKEWORD_SCHWELLE_VORGABE: f32 = 0.45;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
@@ -48,6 +50,18 @@ pub struct AppKonfig {
     pub audio_eingabe: Option<String>,
     /// Bevorzugtes Ausgabegerät für die Stimme der KI. `None` = Windows-Standard.
     pub audio_ausgabe: Option<String>,
+    /// Empfindlichkeit des Wake-Words: die rustpotter-Erkennungsschwelle.
+    /// Kleiner = empfindlicher (mehr Treffer, mehr Fehlgriffe). Der Verbraucher
+    /// klemmt auf 0,30–0,60 (`wakeword::schwelle_klemmen`).
+    pub wakeword_schwelle: f32,
+    /// Echounterdrückung der Sprachsitzung (Chromium-Verarbeitung, lokal).
+    pub audio_echo: bool,
+    /// Rauschunterdrückung der Sprachsitzung (Chromium-Verarbeitung, lokal).
+    pub audio_rauschen: bool,
+    /// Automatische Pegelanpassung der Sprachsitzung (Chromium, lokal).
+    pub audio_autogain: bool,
+    /// Software-Eingangsverstärkung der Sprachsitzung (1,0 = neutral).
+    pub audio_verstaerkung: f32,
 }
 
 impl Default for AppKonfig {
@@ -62,6 +76,11 @@ impl Default for AppKonfig {
             wakeword_wort: None,
             audio_eingabe: None,
             audio_ausgabe: None,
+            wakeword_schwelle: WAKEWORD_SCHWELLE_VORGABE,
+            audio_echo: true,
+            audio_rauschen: true,
+            audio_autogain: true,
+            audio_verstaerkung: 1.0,
         }
     }
 }
@@ -157,6 +176,20 @@ mod tests {
         assert_eq!(konfig.wakeword_wort, None);
         assert_eq!(konfig.audio_eingabe, None);
         assert_eq!(konfig.audio_ausgabe, None);
+    }
+
+    #[test]
+    fn audio_vorgaben_sind_neutral_und_die_verarbeitung_an() {
+        // Die Chromium-Verarbeitung (Echo, Rauschen, Auto-Pegel) ist der
+        // Grund, warum die Sprachsitzung ohne Kopfhörer funktioniert — sie
+        // muss in alten Dateien anbleiben. Verstärkung 1,0 heißt: nichts tun.
+        let alt = r#"{"eingerichtet":true}"#;
+        let konfig: AppKonfig = serde_json::from_str(alt).unwrap();
+        assert!(konfig.audio_echo);
+        assert!(konfig.audio_rauschen);
+        assert!(konfig.audio_autogain);
+        assert_eq!(konfig.audio_verstaerkung, 1.0);
+        assert_eq!(konfig.wakeword_schwelle, super::WAKEWORD_SCHWELLE_VORGABE);
     }
 
     #[test]
