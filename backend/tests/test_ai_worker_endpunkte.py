@@ -230,3 +230,121 @@ def test_das_tippsignal_verlangt_den_csrf_beleg(
     cookies = {k: v for k, v in user_cookies.items() if "csrf" not in k}
     antwort = client.post("/api/ai/conversation/typing", cookies=cookies)
     assert antwort.status_code == 403
+
+
+def _wartende_karte(
+    db: Session, user: User, fenster: AiConversation, lauf: AiRun,
+    *, status: str = "proposed",
+) -> AiActionProposal:
+    karte = AiActionProposal(
+        id=str(uuid4()),
+        conversation_id=fenster.id,
+        user_id=user.id,
+        server_id=None,
+        tool_name="propose_server_lifecycle",
+        payload_encrypted="test-enc-v1::7b7d",
+        preview_json='{"operation":"restart"}',
+        requires_confirmation=True,
+        status=status,
+        correlation_id=str(uuid4()),
+        run_id=lauf.id,
+        reason="Der Benutzer hat den Neustart verlangt.",
+        expected_effect="Der Server startet neu.",
+    )
+    db.add(karte)
+    db.commit()
+    return karte
+
+
+def test_der_dauerchat_zeigt_die_offenen_karten_seiner_auftraege(
+    client: TestClient, db: Session, regular_user: User, user_cookies: dict
+) -> None:
+    """Der Knopf gehoert dorthin, wo der Mensch gefragt hat.
+
+    Ein Worker arbeitet in einem eigenen, unsichtbaren Fenster. Seine
+    Bestaetigungskarte lag damit an einer Stelle, die der Mensch nur ueber
+    zwei Klicks in der Worker-Ansicht erreicht — im Chat stand stattdessen
+    ein Satz darueber, dass etwas zu bestaetigen waere (22.08.2026: „Soll
+    MauntARK trotzdem jetzt neu gestartet werden?").
+
+    Umgehaengt wird nichts: die Karte bleibt bei ihrem Auftrag und wird im
+    Dauerchat nur mitgeliefert.
+    """
+    fenster, lauf = _worker_fenster(db, regular_user, status="waiting_confirmation")
+    karte = _wartende_karte(db, regular_user, fenster, lauf)
+
+    antwort = client.get("/api/ai/conversation/actions", cookies=user_cookies)
+
+    assert antwort.status_code == 200
+    assert karte.id in [k["id"] for k in antwort.json()]
+
+    # Und sie bleibt zugleich im Auftragsfenster sichtbar.
+    im_fenster = client.get(
+        "/api/ai/conversation/actions",
+        params={"conversation_id": fenster.id},
+        cookies=user_cookies,
+    )
+    assert [k["id"] for k in im_fenster.json()] == [karte.id]
+
+
+def test_der_dauerchat_zeigt_nur_die_offenen_karten(
+    client: TestClient, db: Session, regular_user: User, user_cookies: dict
+) -> None:
+    """Erledigtes gehoert in den Auftragsverlauf, nicht in den Chat.
+
+    Sonst waechst der Dauerchat mit jeder je ausgefuehrten Worker-Aktion —
+    und der Mensch sucht den einen Knopf zwischen zwanzig grauen Karten.
+    """
+    fenster, lauf = _worker_fenster(db, regular_user)
+    erledigt = _wartende_karte(db, regular_user, fenster, lauf, status="succeeded")
+
+    antwort = client.get("/api/ai/conversation/actions", cookies=user_cookies)
+
+    assert antwort.status_code == 200
+    assert erledigt.id not in [k["id"] for k in antwort.json()]
+
+
+def test_die_karte_eines_abgebrochenen_auftrags_verlaesst_den_dauerchat(
+    client: TestClient, db: Session, regular_user: User, user_cookies: dict
+) -> None:
+    """Mitgeliefert wird nur, worauf gerade jemand wartet.
+
+    Ein Abbruch (`worker_cancel`) und ein Abloesen setzen den **Lauf** auf
+    einen Endzustand, die Karte aber bleibt auf 'proposed' stehen. Ohne die
+    Bindung an einen lebenden Lauf stuende sie von da an dauerhaft im
+    Dauerchat — und ein Klick Wochen spaeter fuehrte aus, was der Benutzer
+    ausdruecklich abgebrochen hat.
+
+    In seinem eigenen Fenster bleibt der Vorschlag sichtbar: der Auftrag ist
+    Beleg, und wer die Auftragsansicht oeffnet, hat ihn gesucht.
+    """
+    fenster, lauf = _worker_fenster(db, regular_user, status="waiting_confirmation")
+    karte = _wartende_karte(db, regular_user, fenster, lauf)
+    lauf.status = "cancelled"
+    db.commit()
+
+    antwort = client.get("/api/ai/conversation/actions", cookies=user_cookies)
+
+    assert antwort.status_code == 200
+    assert karte.id not in [k["id"] for k in antwort.json()]
+
+    im_fenster = client.get(
+        "/api/ai/conversation/actions",
+        params={"conversation_id": fenster.id},
+        cookies=user_cookies,
+    )
+    assert [k["id"] for k in im_fenster.json()] == [karte.id]
+
+
+def test_fremde_auftragskarten_bleiben_unsichtbar(
+    client: TestClient, db: Session, owner_user: User, regular_user: User,
+    user_cookies: dict,
+) -> None:
+    """Die Erweiterung darf die Eigentumsgrenze nicht aufweichen."""
+    fremd, fremder_lauf = _worker_fenster(db, owner_user)
+    fremde_karte = _wartende_karte(db, owner_user, fremd, fremder_lauf)
+
+    antwort = client.get("/api/ai/conversation/actions", cookies=user_cookies)
+
+    assert antwort.status_code == 200
+    assert fremde_karte.id not in [k["id"] for k in antwort.json()]

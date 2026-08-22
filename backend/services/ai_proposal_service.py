@@ -1332,13 +1332,85 @@ def _mod_install_payload(db: Session, server: Server, arguments: dict) -> tuple[
     payload = {"workshop_id": workshop_id, "action": action}
     if name:
         payload["name"] = name
+    bekannt = redact_sensitive_text(
+        str((existing.name if existing and existing.name else name) or "")
+    )[:128] or None
     preview = {
         "operation": f"mod_{action}",
         "workshop_id": workshop_id,
-        "known_name": redact_sensitive_text(str((existing.name if existing and existing.name else name) or ""))[:128] or None,
+        "known_name": bekannt,
+        # `path` ist das, was die Karte als Ueberschrift zeigt und was die
+        # Rueckfrage einsetzt ("Die Mod „{{path}}“ ... einspielen?"). Ohne den
+        # Schluessel stand dort ein leeres Paar Anfuehrungszeichen: der
+        # Bestaetigende sollte zustimmen, ohne zu lesen, wozu. Der Name ist die
+        # Auskunft, die Kennung der Rueckfall — eine frisch entdeckte Mod hat
+        # noch keinen Namen im Panel.
+        "path": bekannt or workshop_id,
         "already_installed": existing is not None,
+        # **Installiert heisst nicht aktiv.** Eine vorhandene, aber
+        # ausgeschaltete Mod laedt der Installationspfad zwar herunter, in die
+        # Startzeile kommt sie trotzdem nicht — der Server startet ohne sie,
+        # und eine Erfolgsmeldung waere dann falsch. Der Zustand steht deshalb
+        # in der Vorschau, damit das Modell danach `propose_mod_toggle`
+        # nachlegen kann. Ihn hier still mitzusetzen waere eine zweite
+        # Wirkung unter einem fremden Werkzeugnamen.
+        "currently_enabled": bool(existing.enabled) if existing is not None else True,
         "current_status": server.status,
         # Eine Mod wird beim Start geladen — ohne Neustart wirkt sie nicht.
+        "restart_required": True,
+    }
+    return payload, preview
+
+
+def _mod_toggle_payload(db: Session, server: Server, arguments: dict) -> tuple[dict, dict]:
+    """Erwartet die Argumente *ohne* Begruendung und ohne `server_id`.
+
+    Die Mod muss es geben: einen Schalter an etwas umzulegen, das nicht
+    installiert ist, ergibt keinen Vorschlag, sondern einen Hinweis — und der
+    ist als Formfehler die guenstigere Auskunft als ein Vorschlag, der bei der
+    Ausfuehrung scheitert.
+    """
+    from games import get_plugin
+    from models import Mod
+
+    allowed_keys = {"workshop_id", "enabled"}
+    if set(arguments) != allowed_keys:
+        raise AiActionValidationError("Mod-Schalter hat ungueltige Argumente")
+    workshop_id = arguments["workshop_id"]
+    if not isinstance(workshop_id, str) or not workshop_id.isdigit() or len(workshop_id) > 20:
+        raise AiActionValidationError("Ungueltige Workshop-Kennung")
+    enabled = arguments["enabled"]
+    if not isinstance(enabled, bool):
+        raise AiActionValidationError("`enabled` muss true oder false sein")
+
+    plugin = get_plugin(server.game_type)
+    if plugin is None or not getattr(plugin, "supports_mods", False):
+        raise AiActionValidationError("Dieses Spiel unterstuetzt keine Workshop-Mods")
+
+    vorhanden = (
+        db.query(Mod)
+        .filter(Mod.server_id == server.id, Mod.workshop_id == workshop_id)
+        .first()
+    )
+    if vorhanden is None:
+        raise AiActionValidationError(
+            "Diese Mod ist auf dem Server nicht installiert — erst "
+            "propose_mod_install, dann schalten"
+        )
+
+    payload = {"workshop_id": workshop_id, "enabled": enabled}
+    bekannt = redact_sensitive_text(str(vorhanden.name or ""))[:128] or None
+    preview = {
+        "operation": "mod_enable" if enabled else "mod_disable",
+        "workshop_id": workshop_id,
+        "known_name": bekannt,
+        # Siehe `_mod_install_payload`: die Rueckfrage der Karte setzt `path`
+        # ein, nicht `known_name`.
+        "path": bekannt or workshop_id,
+        "was_enabled": bool(vorhanden.enabled),
+        "current_status": server.status,
+        # Die aktive Modliste wird beim Bau des Containers in die Startzeile
+        # gerendert (`games/base.active_mod_ids`). Vorher aendert sich nichts.
         "restart_required": True,
     }
     return payload, preview
@@ -2154,6 +2226,9 @@ def create_proposal(
         elif tool_name == "propose_mod_install":
             payload, preview = _mod_install_payload(db, server, rest)
             expected_revision = None
+        elif tool_name == "propose_mod_toggle":
+            payload, preview = _mod_toggle_payload(db, server, rest)
+            expected_revision = None
         elif tool_name == "propose_config_patch":
             payload, preview, expected_revision = _config_patch_payload(db, server.id, rest)
         elif tool_name == "propose_config_set":
@@ -2706,6 +2781,62 @@ def _execute_mod_install(db: Session, *, server_id: int, payload: dict) -> dict:
     }
 
 
+def _execute_mod_toggle(db: Session, *, server_id: int, payload: dict) -> dict:
+    """Legt den Schalter an einer installierten Mod um.
+
+    Die drei Zeilen stehen hier und nicht in einem neuen Dienst: der Weg des
+    Panels (`routers.mods.update_mod`) haengt an FastAPI-Abhaengigkeiten und
+    laesst sich nicht wie `install_mod_bg` einfach aufrufen. Eine
+    Dienstschicht fuer einen zweiten Aufrufer waere eine Abstraktion auf
+    Vorrat; sie lohnt sich, wenn ein dritter kommt.
+
+    `update_modlist` gehoert trotzdem dazu: bei dateibasierten Mods schreibt
+    es die `.disabled`-Marken bzw. die Modlisten-Datei. Bei Spielen, die ihre
+    Mods als Startparameter uebergeben (ARK), ist der Aufruf wirkungslos —
+    dort entsteht die Liste erst beim Bau des Containers, also mit dem
+    naechsten Start.
+    """
+    from games import get_plugin
+    from models import Mod, Server
+
+    workshop_id = str(payload["workshop_id"])
+    enabled = bool(payload["enabled"])
+
+    mod = (
+        db.query(Mod)
+        .filter(Mod.server_id == server_id, Mod.workshop_id == workshop_id)
+        .first()
+    )
+    if mod is None:
+        # Zwischen Vorschlag und Klick kann jemand die Mod entfernt haben.
+        raise AiActionStateError("AI_ACTION_EXECUTION_FAILED")
+
+    mod.enabled = enabled
+    db.commit()
+
+    server = db.get(Server, server_id)
+    plugin = get_plugin(server.game_type) if server is not None else None
+    if server is not None and plugin is not None:
+        try:
+            plugin.update_modlist(server)
+        except Exception:
+            # Die Wahrheit steht in der Spalte, und die ist geschrieben. Ein
+            # gescheitertes Nachziehen der Dateien darf den Vorgang nicht als
+            # fehlgeschlagen ausweisen — sonst schaltet die KI erneut und
+            # kippt den Zustand zurueck.
+            logger.warning(
+                "Modliste nach dem Schalten nicht aktualisiert server_id=%s",
+                server_id,
+            )
+
+    return {
+        "server_id": server_id,
+        "workshop_id": workshop_id,
+        "enabled": enabled,
+        "restart_required": True,
+    }
+
+
 def _execute_file_delete(
     db: Session, *, user: User, server_id: int, payload: dict,
     expected_revision: str | None,
@@ -3212,6 +3343,11 @@ def _ausfuehren_mod_install(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgef
     return _Ausgefuehrt(result=result)
 
 
+def _ausfuehren_mod_toggle(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    result = _execute_mod_toggle(db, server_id=rahmen.server_id, payload=rahmen.payload)
+    return _Ausgefuehrt(result=result)
+
+
 def _ausfuehren_server_repair(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     result = _execute_server_repair(
         db, server_id=rahmen.server_id, payload=rahmen.payload,
@@ -3458,6 +3594,7 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_config_set": _ausfuehren_config_set,
     "propose_bind_ip_update": _ausfuehren_bind_ip_update,
     "propose_mod_install": _ausfuehren_mod_install,
+    "propose_mod_toggle": _ausfuehren_mod_toggle,
     "propose_server_repair": _ausfuehren_server_repair,
     "propose_guardian_tuning": _ausfuehren_guardian_tuning,
     "propose_restart_schedule_set": _ausfuehren_restart_schedule_set,

@@ -30,7 +30,7 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from models import AiConversation, AiRun, User
+from models import AiActionProposal, AiConversation, AiRun, User
 from models.ai_run import BEENDET
 from models.ai_task import KANAELE
 
@@ -81,7 +81,9 @@ def _text(arguments: dict, feld: str, maximum: int) -> str | None:
     return text[:maximum]
 
 
-def worker_start(db: Session, *, user: User, arguments: dict) -> dict:
+def worker_start(
+    db: Session, *, user: User, arguments: dict, herkunft: str = "panel"
+) -> dict:
     """Deklariert einen Auftrag: eigenes Fenster, eigener Lauf, sofort zurueck.
 
     Gibt bei allem, was kein Programmierfehler ist, ein **Ergebnis** zurueck
@@ -89,6 +91,19 @@ def worker_start(db: Session, *, user: User, arguments: dict) -> dict:
     die das Gehirn dem Menschen erklaeren soll — eine Ausnahme wuerde als
     Werkzeugfehler im Verlauf landen und nichts erklaeren (Nachsicht am
     Werkzeugrand: ein Formfehler kostet eine Runde, nie die Antwort).
+
+    ``herkunft`` ist die Welt des beauftragenden Laufs und wird **vererbt**.
+    Sie stand hier bis zum 22.08.2026 nicht, und der Auftrag fiel damit auf
+    den Standardwert "panel": `herkunft_schnitt` nahm ihm alle
+    Desktop-Werkzeuge, `ai_prompt.build` liess den DESKTOP-Block weg, und auf
+    "wie voll ist meine C-Platte" meldete er, er koenne auf den Rechner des
+    Benutzers nicht zugreifen. Weil das Gehirn selbst keine Desktop-Werkzeuge
+    hat (`GEHIRN_TOOLS`), waren sie damit im Gehirn/Worker-Betrieb
+    vollstaendig unerreichbar.
+
+    Der Wert kommt aus dem Laufzustand des Aufrufers und niemals aus
+    ``arguments``: was das Modell schreiben kann, ist keine Tatsache ueber die
+    Welt, aus der es spricht.
     """
     from services import ai_run_service, ai_worker_limits, permission_service
     from services.ai_action_service import AiActionValidationError
@@ -179,6 +194,7 @@ def worker_start(db: Session, *, user: User, arguments: dict) -> dict:
         # Katalog ist ein async-Abruf, dieser Handler ein Thread). ``None``
         # heisst „unbekannt" und faellt auf den bewaehrten Rueckfall zurueck.
         context_chars=None,
+        herkunft=herkunft,
         # Eine Vorfallsmeldung gehoert ins Gespraech mit dem Menschen, nicht
         # in einen Auftrag — sonst gaelte sie als besprochen, ohne dass je
         # jemand sie gesehen hat (dasselbe Argument wie bei den Aufgaben).
@@ -307,11 +323,19 @@ def worker_antwort(db: Session, *, user: User, arguments: dict) -> dict:
 
     # Der Rahmen des Vorgaengers traegt Kanal und Titel — die Antwort aendert
     # daran nichts.
-    alter_rahmen = ai_run_service.zustand_lesen(juengster).get("worker")
+    alter_zustand = ai_run_service.zustand_lesen(juengster)
+    alter_rahmen = alter_zustand.get("worker")
     if not isinstance(alter_rahmen, dict):
         alter_rahmen = {}
+    # Die Herkunft gehoert dem **Fenster**, nicht dem einzelnen Lauf: ein
+    # Auftrag, der aus der App kam, bleibt ein Auftrag aus der App, auch wenn
+    # die Antwort darauf im Panel getippt wird. Steht der Rechner dann nicht
+    # bereit, verfaellt sein Auftrag mit einer benannten Frist — das ist die
+    # ehrlichere Auskunft als ein Worker, dem seine Werkzeuge mitten im
+    # Vorgang abhandenkommen.
+    from services.ai_stream_service import herkunft_aus_zustand, lauf_beginnen
 
-    from services.ai_stream_service import lauf_beginnen
+    herkunft = herkunft_aus_zustand(alter_zustand)
 
     stufe = anbieter.worker_reasoning_effort
     run, fehler = lauf_beginnen(
@@ -324,6 +348,7 @@ def worker_antwort(db: Session, *, user: User, arguments: dict) -> dict:
         reasoning=bool(stufe),
         reasoning_effort=stufe,
         context_chars=None,
+        herkunft=herkunft,
         guardian_briefing_unterdruecken=True,
         unbeaufsichtigt=True,
     )
@@ -413,9 +438,31 @@ def worker_cancel(db: Session, *, user: User, arguments: dict) -> dict:
         run.wake_at = None
         ai_run_service.aufgabe_abbrechen(run.id)
         ai_run_service.arbeitsspeicher_leeren(run)
+
+    # Offene Karten dieses Fensters gehen mit. Seit ein Worker auf
+    # `waiting_confirmation` parkt (22.08.2026), hinterlaesst jeder Abbruch
+    # sonst einen Vorschlag auf 'proposed' — und "brich den Auftrag ab" hiesse
+    # dann, dass ein Klick Tage spaeter genau das doch noch tut. `expired`
+    # statt eines neuen Status: die Gelegenheit zur Bestaetigung ist vorbei,
+    # und genau das heisst der Wert.
+    zurueckgenommen = (
+        db.query(AiActionProposal)
+        .filter(
+            AiActionProposal.conversation_id == fenster.id,
+            AiActionProposal.status.in_(("proposed", "confirmed")),
+        )
+        .all()
+    )
+    for vorschlag in zurueckgenommen:
+        vorschlag.status = "expired"
+        vorschlag.confirmation_token_hash = None
+        vorschlag.error_code = "worker_cancel"
     db.commit()
 
-    logger.info("Worker abgebrochen (worker_id=%s, laeufe=%d)", fenster.id, len(offene))
+    logger.info(
+        "Worker abgebrochen (worker_id=%s, laeufe=%d, vorschlaege=%d)",
+        fenster.id, len(offene), len(zurueckgenommen),
+    )
     return {
         "cancelled": True,
         "worker_id": fenster.id,

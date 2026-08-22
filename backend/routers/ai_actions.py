@@ -3,12 +3,14 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import require_global, verify_csrf
-from models import AiActionProposal, AiConversation, User
+from models import AiActionProposal, AiConversation, AiRun, User
 from models.ai_conversation import ARTEN
+from models.ai_run import BEENDET
 from schemas.ai_action import (
     AiActionConfirmationResponse,
     AiActionExecuteRequest,
@@ -103,6 +105,22 @@ def list_conversation_actions(
     Auftrag zeigt seine Karte in der Worker-Ansicht, und die laedt ueber die
     Kennung. Nur eigene Worker-Fenster — alles andere ist dasselbe 404 wie
     ein unbekanntes.
+
+    **Der Dauerchat sieht zusaetzlich die offenen Karten seiner Auftraege.**
+    Ein Worker arbeitet in einem eigenen, unsichtbaren Fenster; seine
+    Vorschlaege lagen damit an einer Stelle, die der Mensch nur ueber zwei
+    Klicks in der Worker-Ansicht erreicht. Wer im Chat sagt „starte den
+    Server neu", erwartet den Knopf dort, wo er gefragt hat. Umgehaengt wird
+    nichts — die Karte bleibt bei ihrem Auftrag, sie wird hier nur
+    **mitgeliefert**, und zwar allein, solange sie offen ist. Erledigte,
+    abgelehnte und verfallene Karten bleiben im Auftragsfenster.
+
+    Sicherheitlich aendert das nichts: `conversation_id` ist an keiner
+    Rechtepruefung beteiligt. Bestaetigen und Ausfuehren gehen weiter durch
+    `owned_proposal` (Benutzer und `server.view`) und
+    `_require_tool_permission` (Werkzeug, Server, Recht); auch das
+    Bestaetigungsmerkmal bindet an die Vorschlagskennung, nicht an ein
+    Fenster.
     """
     if conversation_id is not None:
         conversation = db.get(AiConversation, conversation_id)
@@ -117,8 +135,31 @@ def list_conversation_actions(
     else:
         conversation = ai_chat_service.get_or_create_conversation(db, user, _art(kind))
         db.commit()
+    bedingung = AiActionProposal.conversation_id == conversation.id
+    if conversation_id is None and conversation.kind == "primary":
+        # Nur Fenster mit einem **lebenden** Lauf. Ein abgebrochener oder
+        # abgeloester Auftrag laesst seine Karte auf 'proposed' stehen; ohne
+        # diese Bedingung stuende sie von da an dauerhaft im Dauerchat und
+        # fuehrte auf Klick noch Wochen spaeter aus, was niemand mehr wollte.
+        # Mitgeliefert wird nur, worauf gerade wirklich jemand wartet — in
+        # seinem eigenen Fenster bleibt der Vorschlag sichtbar.
+        lebende = db.query(AiRun.conversation_id).filter(
+            AiRun.status.notin_(BEENDET)
+        )
+        eigene_worker = db.query(AiConversation.id).filter(
+            AiConversation.user_id == user.id,
+            AiConversation.kind == "worker",
+            AiConversation.id.in_(lebende),
+        )
+        bedingung = or_(
+            bedingung,
+            and_(
+                AiActionProposal.conversation_id.in_(eigene_worker),
+                AiActionProposal.status == "proposed",
+            ),
+        )
     rows = db.query(AiActionProposal).filter(
-        AiActionProposal.conversation_id == conversation.id,
+        bedingung,
         AiActionProposal.user_id == user.id,
     ).order_by(AiActionProposal.created_at.asc()).all()
     return [proposal_response(row) for row in rows]

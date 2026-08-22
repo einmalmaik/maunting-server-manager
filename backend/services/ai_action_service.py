@@ -1701,6 +1701,19 @@ def provider_tool_definitions() -> list[dict]:
             },
             ["workshop_id", "action", *_RATIONALE_REQUIRED],
         ),
+        _server_function(
+            "propose_mod_toggle",
+            "Schaltet eine bereits installierte Mod an oder aus. Welche Mods "
+            "aktiv sind, steht in der Mod-Liste des Panels (read_server_mods, "
+            "Feld `enabled`) — nie in einer Spielkonfiguration. Wirkt erst "
+            "beim naechsten Start des Servers.",
+            {
+                "workshop_id": {"type": "string", "maxLength": 20},
+                "enabled": {"type": "boolean"},
+                **_RATIONALE_SCHEMA,
+            },
+            ["workshop_id", "enabled", *_RATIONALE_REQUIRED],
+        ),
         # Die Reparatur der **Anlage** — alles unterhalb der Spieldateien.
         #
         # `action` ist ein `enum` und kein Freitext, und das ist der ganze Sinn
@@ -2169,12 +2182,30 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
     if scope in ai_memory_service.PERSOENLICHE_SCOPES and not ai_memory_service.preference(
         db, user.id
     ):
+        # **Der einzige Fehlschlag, ueber den geredet werden soll.**
+        #
+        # `ai_prompt.GEDAECHTNIS` verlangt, dass Merken und Nachschlagen
+        # lautlos passieren — zu Recht, ein Gedaechtnis soll wirken und nicht
+        # auftreten. Genau das machte diesen Fall unsichtbar: der Schalter ist
+        # ohne Zeile **aus** (Datenminimierung, `ai_memory_service.preference`),
+        # das Modell versuchte es korrekt, scheiterte korrekt und schwieg
+        # korrekt. Der Betreiber am 22.08.2026: "die KI merkt sich auch gar
+        # nichts" — er konnte es nicht wissen, ihm hat es nie jemand gesagt.
+        #
+        # Die Ausnahme steht hier und nicht im Prompt, weil nur hier bekannt
+        # ist, dass sie zutrifft. Ein Satz im Prompt kostete jeden Lauf Tokens,
+        # auch die, in denen der Schalter an ist.
         return {
             "remembered": False,
             "reason": "memory_disabled",
             "message": (
                 "Der Benutzer hat sein persoenliches Gedaechtnis abgeschaltet. "
-                "Es wurde nichts gespeichert."
+                "Es wurde nichts gespeichert — und du wirst dir bis auf "
+                "Weiteres nichts ueber ihn merken koennen. Hier gilt die Regel "
+                "der Lautlosigkeit ausnahmsweise nicht: sag ihm einmal "
+                "beilaeufig, dass du dir deshalb nichts merken kannst und dass "
+                "der Schalter unter Profil > KI sitzt (in der App im Reiter "
+                "Gedaechtnis). Einmal, nicht in jeder Antwort."
             ),
         }
 
@@ -3036,7 +3067,10 @@ def _execute_send_test_email(db: Session, *, user: User) -> dict:
     }
 
 
-def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, arguments: dict) -> dict:
+def _execute_global_read_tool(
+    db: Session, *, user: User, tool_name: str, arguments: dict,
+    herkunft: str = "panel",
+) -> dict:
     """Werkzeuge ohne Serverbezug.
 
     `list_my_servers` ist die Einstiegsfrage jedes Gespraechs und deshalb an
@@ -3057,7 +3091,13 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
     if tool_name == "worker_start":
         from services import ai_worker_service
 
-        return ai_worker_service.worker_start(db, user=user, arguments=arguments)
+        # Die Herkunft wird **vererbt**, nicht gewaehlt: ein Auftrag aus der
+        # App darf denselben Rechner sehen wie der Lauf, der ihn gestellt hat.
+        # Ohne sie fiel der Worker auf "panel" und meldete dem Benutzer, er
+        # koenne auf dessen Rechner nicht zugreifen (22.08.2026).
+        return ai_worker_service.worker_start(
+            db, user=user, arguments=arguments, herkunft=herkunft
+        )
 
     if tool_name == "worker_cancel":
         from services import ai_worker_service
@@ -3601,6 +3641,7 @@ def execute_read_tool(
     user: User,
     tool_name: str,
     arguments: dict,
+    herkunft: str = "panel",
 ) -> dict:
     """Fuehrt ein Lesewerkzeug im Namen des Benutzers aus.
 
@@ -3608,12 +3649,18 @@ def execute_read_tool(
     Kontext mehr, der die Ausfuehrung beeinflusst. Alles, was ein Werkzeug
     braucht, steht in seinen Argumenten und wird gegen die Rechte von ``user``
     geprueft.
+
+    ``herkunft`` ist die einzige Ausnahme davon, und sie steht ausdruecklich
+    **nicht** in den Argumenten: welche Welt den Aufruf gestellt hat, ist eine
+    Tatsache des Laufs. Gebraucht wird sie von genau einem Werkzeug —
+    `worker_start` gibt sie an den Auftrag weiter, den es anlegt.
     """
     if tool_name not in READ_TOOLS:
         raise AiActionValidationError("Read-Tool ist in diesem Kontext nicht erlaubt")
     if tool_name in GLOBAL_READ_TOOLS:
         return _execute_global_read_tool(
-            db, user=user, tool_name=tool_name, arguments=arguments
+            db, user=user, tool_name=tool_name, arguments=arguments,
+            herkunft=herkunft,
         )
     server, arguments = _resolve_server(db, user, arguments)
     context = _execute_server_context_tool(

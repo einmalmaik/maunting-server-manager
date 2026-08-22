@@ -299,6 +299,13 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Wert stellt beides zurueck.
     "propose_config_set": Werkzeug("server_write", recht="server.files.write"),
     "propose_mod_install": Werkzeug("server_write", recht="server.mods.write"),
+    # Der Schalter an einer bereits installierten Mod. Eigenes Recht
+    # (`server.mods.toggle`, im Katalog seit jeher) und eigenes Werkzeug, weil
+    # An- und Ausschalten etwas anderes ist als Herunterladen: es loescht
+    # nichts, laedt nichts und ist mit demselben Aufruf zurueckzunehmen —
+    # also autonomiefaehig. `read_server_mods` meldete den Zustand `enabled`
+    # schon lange, ohne dass irgendetwas ihn setzen konnte.
+    "propose_mod_toggle": Werkzeug("server_write", recht="server.mods.toggle"),
     # Eine falsche Bind-IP macht den Server unerreichbar — aber nur, bis jemand
     # sie zurueckstellt, und das kann die KI selbst. Kein Datenverlust, also
     # keine Sperre. Die Freigabe des Betreibers ist hier die Entscheidung, nicht
@@ -833,6 +840,11 @@ GUARDIAN_HEILUNG_TOOLS = frozenset({
     "propose_blueprint_change",
     "propose_bind_ip_update",
     "propose_mod_install",
+    # Eine kaputte Mod ist ein klassischer Grund, warum ein Server nicht mehr
+    # hochkommt. Sie auszuschalten ist der schonendere Eingriff als sie neu
+    # einzuspielen (`propose_mod_install`, steht schon hier): es faellt keine
+    # Datei an und keine weg, nur die Startzeile aendert sich.
+    "propose_mod_toggle",
 })
 
 
@@ -963,6 +975,11 @@ AUFGABEN_HANDELN = frozenset({
     "propose_config_patch",
     "propose_config_set",
     "propose_mod_install",
+    # "Schalte die Event-Mod am Samstag ein und am Montag wieder aus" ist eine
+    # stehende Anweisung wie jede andere. Ohne das Werkzeug haette die Aufgabe
+    # den Weg ueber `propose_mod_install` nehmen muessen — mehr Wirkung fuer
+    # weniger Absicht.
+    "propose_mod_toggle",
     "propose_bind_ip_update",
     "propose_server_repair",
     # Der Durchgriff auf die eingebauten Zeitpläne. Anders als die
@@ -994,6 +1011,20 @@ def herkunft_schnitt(erlaubt: frozenset[str], herkunft: str) -> frozenset[str]:
     Browser. Aus dem Browser abgeschickt liefen sie in die Frist statt in eine
     Antwort. Und es haelt einen uebernommenen Browser-Tab davon ab, Maus und
     Tastatur des Rechners zu verlangen.
+
+    **Eine Ausnahme, bewusst:** ein Auftrag, den der Benutzer in der App
+    erteilt hat, behaelt seine Herkunft, auch wenn die Fortsetzung aus dem
+    Panel kommt (`worker_antwort` liest sie aus dem Zustand des Vorgaengers,
+    nicht vom Aufrufer). Die Herkunft gehoert dem **Fenster**, nicht dem
+    einzelnen Lauf — sonst verloere ein App-Auftrag mitten im Vorgang seine
+    Werkzeuge, sobald ihn irgendetwas aus dem Panel weiterschiebt, und das
+    tut die Meldestelle regelmaessig von selbst.
+    Der Preis ist benannt: wer eine Panel-Sitzung uebernimmt, kann einen noch
+    offenen App-Auftrag mit neuem Text weitersteuern. Was er damit erreicht,
+    ist die Sandbox und ein lesender Blick auf das System; Maus und Tastatur
+    bleiben aussen vor, denn die Uebernahme wird unabhaengig davon an einer
+    Karte **in der App** bestaetigt. Und laeuft die App nicht, verfaellt der
+    Auftrag mit seiner Frist.
 
     Das ist ein Schnitt, keine Ersetzung: ein fehlendes Recht holt hier
     niemand zurueck.
@@ -1040,6 +1071,11 @@ def aufgaben_tools(kind: str) -> frozenset[str]:
 # Ersetzt ist genau ein Schritt: der Klick.
 
 
+# `propose_mod_toggle` fehlt hier mit Absicht, obwohl es in
+# `GUARDIAN_HEILUNG_TOOLS` steht: der Schalter beruehrt keine Datei. Die Mod
+# bleibt liegen, nur die Startzeile aendert sich — es gaebe nichts
+# zurueckzuspielen, und ein Backup zu verlangen hiesse, eine Heilung an einer
+# Bedingung scheitern zu lassen, die ihren Zweck hier nicht erfuellt.
 GUARDIAN_BACKUP_PFLICHT_TOOLS = frozenset({
     "propose_config_patch",
     "propose_config_set",

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import re
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -300,6 +301,15 @@ def _format_message_timestamp(created_at: datetime | str | None, user_zone: str 
         return f"[{dt:%d.%m. %H:%M}] "
 
 
+#: Genau die Form, die `_format_message_timestamp` erzeugt — am Textanfang.
+#:
+#: Gebraucht, um einen Praefix wieder **abzustreifen**, den das Modell selbst
+#: geschrieben hat. Solche Zeilen stehen im Bestand: bis zum 22.08.2026 sah
+#: das Modell den Praefix auch an seinen eigenen Antworten, hat ihn
+#: nachgeahmt, und `_finalize_stream` speichert die Antwort ungefiltert.
+_ZEITSTEMPEL_PRAEFIX_RE = re.compile(r"^\[\d{2}\.\d{2}\.\s+\d{2}:\d{2}\]\s*")
+
+
 def _message_content_for_provider(row: AiMessage, user_zone: str = "UTC") -> str:
     """Der Text einer Nachricht, wie das Modell ihn sehen soll.
 
@@ -313,16 +323,37 @@ def _message_content_for_provider(row: AiMessage, user_zone: str = "UTC") -> str
     Auswahl zur Debatte stand, gehoert zum Verstaendnis der Antwort. Ein blosses
     "ja" oder "die erste" ist sonst nicht aufloesbar.
 
-    Jede Nachricht erhaelt einen statischen, absoluten Zeitstempel-Praefix
-    in der Zeitzone des Benutzers (z. B. `[20.08. 14:30] `). Er ist byte-stabil
-    fuer das Prompt-Caching und gibt dem Modell zusammen mit dem Lageblock den
-    Zeitabstand zwischen den Nachrichten.
+    Jede **Benutzer**-Nachricht erhaelt einen statischen, absoluten
+    Zeitstempel-Praefix in der Zeitzone des Benutzers (z. B. `[20.08. 14:30] `).
+    Er ist byte-stabil fuer das Prompt-Caching und gibt dem Modell zusammen mit
+    dem Lageblock den Zeitabstand zwischen den Nachrichten.
 
     **Ausser bei internen Zeilen** (`intern=True`, etwa dem Lieferauftrag der
     Meldestelle): die zeigt die Oberflaeche nie an, ihr Praefix begruendet also
     nichts — und ein Zeitstempel unmittelbar an der Melde-Anweisung ist genau
     das Material, das das Modell beim Liefern nachplappert („am 22.08. um
     14:30 ist der Auftrag fertig geworden"). Die Uhr steht im Lageblock.
+
+    **Und ausser an den eigenen Antworten des Modells.** Das ist der Anlass
+    vom 22.08.2026 und der dritte Anlauf gegen dasselbe Verhalten: der
+    Benutzer las „[22.08. 20:30] Auf deinen Windows-Rechner kann ich nicht
+    zugreifen." — das Modell hatte den Praefix in seinen eigenen Text
+    geschrieben. Die beiden Anlaeufe davor waren Sprache gegen Mechanik: erst
+    eine Regel im Prompt (`ai_prompt.ZEITANSAGE`), dann der Verzicht bei
+    internen Zeilen. Keiner der beiden nahm dem Modell die **Vorlage** weg,
+    und die stand in jeder einzelnen seiner eigenen Verlaufszeilen. Was ein
+    Prompt einmal verbietet, demonstriert der Verlauf zwanzigmal; das
+    Demonstrierte gewinnt.
+
+    Weil `_finalize_stream` die Antwort ungefiltert speichert, tragen bereits
+    geschriebene Zeilen den Praefix im Text — ohne ihn abzustreifen bliebe die
+    Vorlage in jedem laufenden Gespraech stehen, bis sie aus dem Fenster
+    faellt. Deshalb wird er beim Lesen entfernt statt nur nicht mehr
+    hinzugefuegt.
+
+    Verloren geht damit, dass das Modell seine eigenen frueheren Aussagen
+    datieren kann. Das ist verschmerzbar: unmittelbar daneben steht die
+    Benutzerzeile, die es ausloeste, und die traegt ihre Uhrzeit weiterhin.
     """
     text = row.content or ""
     if row.role == "assistant" and getattr(row, "question_json", None):
@@ -339,6 +370,8 @@ def _message_content_for_provider(row: AiMessage, user_zone: str = "UTC") -> str
             # Eine unlesbare Zeile darf den Verlauf nicht sprengen. Ohne den
             # Fragetext ist der Kontext duenner, aber der Chat laeuft weiter.
             pass
+    if row.role == "assistant":
+        return _ZEITSTEMPEL_PRAEFIX_RE.sub("", text)
     if getattr(row, "intern", False):
         return text
     prefix = _format_message_timestamp(getattr(row, "created_at", None), user_zone)

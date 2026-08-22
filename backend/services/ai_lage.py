@@ -325,5 +325,18 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
             f"Autonomer Modus: aktiv für einzelne Server, {verbraucht} Aktionen "
             "in der letzten Stunde verbraucht."
         )
+    # **Was „aktiv" für das laufende Gespräch heißt.** Die beiden Zeilen
+    # darüber nennen nur eine Zahl, und der Prompt sprach bis zum 22.08.2026
+    # ausschließlich von Aufgaben der Art "act". Was im Chat passiert, stand
+    # nirgends — also fragte das Modell weiter bei jedem Schreibvorschlag
+    # nach, obwohl `ai_proposal_service` ihn längst ohne Klick ausführt
+    # (`requires_confirmation=not autonomous`). Eine eigene Zeile und kein
+    # Anhängsel an die Zahlen: die beiden Varianten oben stehen wörtlich in
+    # den Tests, und eine Tatsache gehört ohnehin nicht in eine Statistik.
+    zeilen.append(
+        "Schreibvorschläge im Gespräch laufen damit sofort, ohne Klick des "
+        "Benutzers; nur Unumkehrbares (Löschen, Backup einspielen) fragt "
+        "weiterhin."
+    )
     zeilen.append(freigabeweg)
     return "\n".join(zeilen)

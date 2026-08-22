@@ -90,6 +90,20 @@ def test_the_ai_does_not_write_while_memory_is_off(
     )
     assert ergebnis["remembered"] is False
     assert ergebnis["reason"] == "memory_disabled"
+    # **Und der Fehlschlag ist nicht mehr lautlos.**
+    #
+    # `ai_prompt.GEDAECHTNIS` verlangt, dass Merken und Nachschlagen lautlos
+    # passieren — zu Recht, ein Gedaechtnis soll wirken und nicht auftreten.
+    # Genau das machte diesen Fall unsichtbar: das Modell versuchte es
+    # korrekt, scheiterte korrekt und schwieg korrekt. Der Betreiber am
+    # 22.08.2026: "die KI merkt sich auch gar nichts" — er konnte es nicht
+    # wissen. Die Ausnahme steht hier und nicht im Prompt, weil nur hier
+    # bekannt ist, dass sie zutrifft.
+    assert "Lautlosigkeit ausnahmsweise nicht" in ergebnis["message"]
+    assert "Profil > KI" in ergebnis["message"]
+    # Einmal, nicht in jeder Antwort — sonst wird aus der Auskunft eine
+    # Mahnung.
+    assert "Einmal, nicht in jeder Antwort" in ergebnis["message"]
     # Und es liegt wirklich nichts in der Datenbank.
     assert db.query(AiMemoryEntry).count() == 0
 

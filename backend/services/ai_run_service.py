@@ -975,7 +975,11 @@ async def _wiederanlauf_versuchen(db: Session, run: AiRun, rahmen: dict) -> bool
     """Ein einzelner Wiederanlauf — oder eine ehrliche Meldung, warum nicht."""
     from models import AiConversation, User
     from services import ai_meldestelle, permission_service
-    from services.ai_stream_service import lauf_beginnen
+    from services.ai_stream_service import (
+        herkunft_aus_zustand,
+        lauf_beginnen,
+        rolle_aus_zustand,
+    )
 
     user = db.get(User, run.user_id)
     titel = str(rahmen.get("titel") or "Auftrag")
@@ -1029,6 +1033,20 @@ async def _wiederanlauf_versuchen(db: Session, run: AiRun, rahmen: dict) -> bool
     # Die Denkstufe der Worker kommt aus der Betreiber-Konfiguration des
     # Zugangs, nicht aus dem Vorflug (der beantwortet die Chat-Frage).
     stufe = flug.anbieter.worker_reasoning_effort
+    # Die Welt des Auftrags wandert mit, wie der Rahmen darunter auch. Ein
+    # Auftrag aus der Smart-System-App verloere sonst beim Wiederanlauf seine
+    # Desktop-Werkzeuge und meldete dem Benutzer, er koenne auf dessen Rechner
+    # nicht zugreifen — obwohl sich nur das Panel neu gestartet hat. Laeuft
+    # der Rechner nicht mehr, verfaellt ein Desktop-Auftrag mit seiner Frist;
+    # das ist die ehrlichere Auskunft.
+    #
+    # Dasselbe fuer die **Rolle**: ohne sie leitete `_rolle_ableiten` sie neu
+    # aus der Fensterart ab, und weil stehende Aufgaben seit dem 20.08.2026
+    # ebenfalls in Worker-Fenstern laufen, wuerde ein wiederangelaufener
+    # Aufgabenlauf zum Worker. Er verloere damit den Aufgaben-Werkzeugschnitt
+    # und wuerde in der Schreibrunde auf einen Klick parken, den bei einem um
+    # drei Uhr faellig gewordenen Auftrag niemand tut (siehe `niemand_da`).
+    alter_zustand = zustand_lesen(run)
     neuer, fehler = lauf_beginnen(
         db,
         user=user,
@@ -1039,6 +1057,8 @@ async def _wiederanlauf_versuchen(db: Session, run: AiRun, rahmen: dict) -> bool
         reasoning=bool(stufe),
         reasoning_effort=stufe,
         context_chars=flug.fenster.zeichen if flug.fenster.bekannt else None,
+        herkunft=herkunft_aus_zustand(alter_zustand),
+        rolle=rolle_aus_zustand(alter_zustand),
         guardian_briefing_unterdruecken=True,
         unbeaufsichtigt=True,
         # Der Wiederanlauf ist eine Panel-Meldung an die KI ("das Panel wurde
@@ -1065,7 +1085,6 @@ async def _wiederanlauf_versuchen(db: Session, run: AiRun, rahmen: dict) -> bool
     # 20.08.2026 in Worker-Fenstern), muss dessen Rahmen mitwandern: ohne ihn
     # verloere der Nachfolger den Aufgaben-Werkzeugschnitt und den
     # E-Mail-Bericht — der Verlust des Rahmens ist die gefaehrliche Richtung.
-    alter_zustand = zustand_lesen(run)
     if isinstance(alter_zustand.get("aufgabe"), dict):
         zustand["aufgabe"] = dict(alter_zustand["aufgabe"])
     zustand_schreiben(neuer, zustand)

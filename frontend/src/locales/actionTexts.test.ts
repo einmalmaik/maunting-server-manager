@@ -32,6 +32,11 @@ const SCHREIBWERKZEUGE = [
   'propose_config_patch',
   'propose_config_set',
   'propose_mod_install',
+  // Der Schalter an einer installierten Mod. Eigenes Werkzeug und eigenes
+  // Recht (`server.mods.toggle`), weil An- und Ausschalten nichts laedt und
+  // nichts loescht — und weil `read_server_mods` den Zustand `enabled` seit
+  // jeher meldete, ohne dass ihn irgendetwas setzen konnte.
+  'propose_mod_toggle',
   'propose_bind_ip_update',
   'propose_server_create',
   'propose_server_delete',

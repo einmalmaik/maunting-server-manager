@@ -299,6 +299,40 @@ class TestWiederanlauf:
         )
         assert "wiederhole nichts blind" in nachricht.content
 
+    def test_die_rolle_des_gestorbenen_laufs_wandert_mit(
+        self, db: Session
+    ) -> None:
+        """Ein Aufgabenlauf bleibt „voll", auch wenn er im Worker-Fenster lag.
+
+        Stehende Aufgaben laufen seit dem 20.08.2026 in Fenstern mit
+        ``kind='worker'``, und `_rolle_ableiten` liest genau daraus. Ohne die
+        mitwandernde Rolle wuerde ein wiederangelaufener Aufgabenlauf zum
+        Worker: er verloere den Aufgaben-Werkzeugschnitt, und seit dem
+        22.08.2026 wuerde er in der Schreibrunde auf einen Klick parken, den
+        um drei Uhr nachts niemand tut (`niemand_da`). Genau diese Ausnahme
+        sagt der Kommentar dort zu — hier steht sie unter Test.
+        """
+        user = _benutzer(db, "rollenerbe")
+        alter = _worker_lauf(
+            db, user, status="failed", stop_reason="process_restart",
+            rahmen={"conversation_id": "seed-w9", "titel": "Nachtlauf",
+                    "kanal": "chat", "anlauf": 0},
+            fenster_id="seed-w9",
+        )
+        zustand = ai_run_service.zustand_lesen(alter)
+        zustand["rolle"] = "voll"
+        ai_run_service.zustand_schreiben(alter, zustand)
+        db.commit()
+
+        assert self._saehen(db) == 1
+
+        neuer = (
+            db.query(AiRun)
+            .filter(AiRun.conversation_id == "seed-w9", AiRun.id != alter.id)
+            .one()
+        )
+        assert ai_run_service.zustand_lesen(neuer).get("rolle") == "voll"
+
     def test_der_zweite_neustart_saet_nicht_mehr(self, db: Session) -> None:
         user = _benutzer(db, "zweiterneustart")
         _worker_lauf(

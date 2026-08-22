@@ -142,3 +142,88 @@ def test_die_app_sieht_den_ganzen_katalog():
     aus_panel = herkunft_schnitt(ALLE, "panel")
     assert aus_desktop == ALLE
     assert aus_panel == ALLE - DESKTOP_TOOLS
+
+
+class TestRundenbudget:
+    """Ein Desktop-Auftrag parkt nicht endlos, wenn der Rechner aus ist.
+
+    Bis zum 22.08.2026 war das theoretisch: ein Lauf mit Herkunft "desktop"
+    hatte immer einen Menschen davor, der irgendwann aufhoerte. Seit ein
+    Hintergrund-Auftrag die Herkunft erbt, laeuft der Kreis ohne Zuschauer —
+    Auftrag anlegen, Frist verstreicht, Takt weckt, Modell versucht es
+    wieder. `_desktop_behandeln` zaehlte die Runde mit und **prueft** sie
+    seither auch.
+    """
+
+    def _runde(self, rounds: int, deckel: int):
+        from services.ai_stream_service import _desktop_behandeln
+        from services.openai_compatible_adapter import ProviderToolCall, StreamUsage
+
+        usage = StreamUsage()
+        usage.tool_calls = [
+            ProviderToolCall(id="c1", name="desktop_system", arguments={})
+        ]
+        nachrichten: list[dict] = []
+        zustand = {"rounds": rounds}
+        frist, budget = _desktop_behandeln(
+            current_usage=usage,
+            run_id="r-1",
+            user_id=1,
+            herkunft="desktop",
+            provider_messages=nachrichten,
+            zustand=zustand,
+            rundentext="",
+            rundendeckel=deckel,
+        )
+        return frist, budget, nachrichten, zustand
+
+    def test_die_letzte_runde_legt_keinen_auftrag_mehr_an(self):
+        frist, budget, nachrichten, zustand = self._runde(rounds=8, deckel=8)
+
+        assert budget is True
+        assert frist is None
+        # Die Runde ist trotzdem beantwortet: das Protokoll verlangt zu jeder
+        # `tool_call_id` genau eine Antwort, auch zu einer abgelehnten.
+        antworten = [n for n in nachrichten if n.get("role") == "tool"]
+        assert len(antworten) == 1
+        assert "AI_ROUND_BUDGET" in antworten[0]["content"]
+        assert zustand["rounds"] == 9
+
+    def test_unterhalb_des_deckels_geht_der_auftrag_hinaus(self):
+        """Der Beweis in die Gegenrichtung — sonst haette der Deckel den Weg
+        zum Rechner ganz zugemauert.
+
+        Gezeigt wird, dass die Anlage ueberhaupt erreicht wird: der
+        Platzhalter wirft, und dass er wirft, ist die Aussage.
+        """
+        from unittest.mock import patch
+
+        import pytest
+
+        from services import desktop_job_service
+        from services.ai_stream_service import _desktop_behandeln
+        from services.openai_compatible_adapter import ProviderToolCall, StreamUsage
+
+        class _Angekommen(RuntimeError):
+            pass
+
+        usage = StreamUsage()
+        usage.tool_calls = [
+            ProviderToolCall(id="c1", name="desktop_system", arguments={})
+        ]
+
+        def _wirft(*_args, **_kwargs):
+            raise _Angekommen()
+
+        with patch.object(desktop_job_service, "anlegen", _wirft):
+            with pytest.raises(_Angekommen):
+                _desktop_behandeln(
+                    current_usage=usage,
+                    run_id="r-1",
+                    user_id=1,
+                    herkunft="desktop",
+                    provider_messages=[],
+                    zustand={"rounds": 0},
+                    rundentext="",
+                    rundendeckel=8,
+                )

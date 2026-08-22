@@ -222,6 +222,15 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     Verwechslung, die die getrennten Beschreibungen verhindern sollen. Die
     Grenze steht deshalb bei 64.000, wieder mit unter zweitausend Zeichen
     Luft. Wer sie erneut anhebt, misst vorher nach und schreibt es hin.
+
+    **Nachtrag 22.08.2026 (spaeter am Tag): `propose_mod_toggle`** — 761
+    Zeichen, das Werkzeug, das eine installierte Mod an- und ausschaltet.
+    `read_server_mods` meldete den Zustand `enabled` seit jeher; setzen
+    konnte ihn niemand, und ein Auftrag lief deshalb ins Leere. Neu
+    nachgemessen: aus der App **62.943** Zeichen, 68 Werkzeuge; aus dem Panel
+    **58.423** Zeichen, 63 Werkzeuge. Die Grenze bleibt bei 64.000 — die Luft
+    ist damit auf rund tausend Zeichen geschrumpft. Das naechste Werkzeug
+    misst zuerst, und der Hebel bleibt derselbe: zusammenlegen, nicht kuerzen.
     """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(

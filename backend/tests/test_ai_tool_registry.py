@@ -409,7 +409,7 @@ def test_die_backup_pflicht_gilt_nur_fuer_erreichbare_werkzeuge() -> None:
     der Schranke. Ohne sie fällt ein künftig aufgenommenes Werkzeug still
     durch — es liefe im unbeaufsichtigten Lauf gegen einen Kundenserver, ohne
     dass ein Rückweg nachgewiesen wäre, und kein Test würde rot. Draußen stehen
-    genau vier, jedes mit Grund (ai_tool_registry.py bei
+    genau fünf, jedes mit Grund (ai_tool_registry.py bei
     `GUARDIAN_BACKUP_PFLICHT_TOOLS`):
 
     * `propose_backup` wegen des Zirkels,
@@ -419,7 +419,11 @@ def test_die_backup_pflicht_gilt_nur_fuer_erreichbare_werkzeuge() -> None:
     * `propose_guardian_tuning`, weil es eine Spalte am Server ändert und keine
       Datei auf ihm — der Rückweg ist `reset` und kostet nichts,
     * `propose_blueprint_change`, weil es eine neue Datei im Panel anlegt und
-      keinen Server anfasst; ein Serverbackup bewiese darüber gar nichts.
+      keinen Server anfasst; ein Serverbackup bewiese darüber gar nichts,
+    * `propose_mod_toggle`, weil der Schalter keine Datei berührt: die Mod
+      bleibt liegen, nur die Startzeile ändert sich. Es gäbe nichts
+      zurückzuspielen — und eine kaputte Mod auszuschalten ist oft genau der
+      Weg zurück, den ein Server ohne geprüftes Backup noch hat.
 
     Die Liste wächst hier bewusst mit — sie ist die Stelle, an der man sich
     festlegen muss, statt ein Werkzeug stillschweigend an der Schranke vorbei
@@ -438,6 +442,7 @@ def test_die_backup_pflicht_gilt_nur_fuer_erreichbare_werkzeuge() -> None:
         "propose_server_lifecycle",
         "propose_guardian_tuning",
         "propose_blueprint_change",
+        "propose_mod_toggle",
     }
 
 

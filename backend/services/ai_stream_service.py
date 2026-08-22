@@ -715,7 +715,9 @@ def _anzeigeeintrag(call, wert, fehlgeschlagen: str | None) -> dict:
     return eintrag
 
 
-def _werkzeug_ausfuehren(user_id: int, call) -> tuple[object, str | None]:
+def _werkzeug_ausfuehren(
+    user_id: int, call, herkunft: str = "panel"
+) -> tuple[object, str | None]:
     """Genau **ein** Lesewerkzeug, in eigener Sitzung und eigenem Thread.
 
     Eine Sitzung je Aufruf und nicht eine geteilte fuer die ganze Runde: eine
@@ -728,6 +730,12 @@ def _werkzeug_ausfuehren(user_id: int, call) -> tuple[object, str | None]:
     zusammen; jetzt steht jeder Aufruf fuer sich. Das ist die bessere
     Aufteilung — ein gescheiterter Nachbaraufruf nimmt einem gemerkten Namen
     nicht mehr die Speicherung.
+
+    ``herkunft`` ist die Welt des **aufrufenden** Laufs und geht genau ein
+    Werkzeug etwas an: `worker_start` vererbt sie an den Auftrag, den es
+    anlegt. Sie kommt aus dem Laufzustand und nie aus den Argumenten des
+    Modells — sonst schriebe sich ein Lauf selbst einen Rechner zu, den er
+    nicht hat.
     """
     with SessionLocal() as db:
         user = db.get(User, user_id)
@@ -735,7 +743,8 @@ def _werkzeug_ausfuehren(user_id: int, call) -> tuple[object, str | None]:
             raise AiActionValidationError("AI-Zugriff wurde entzogen")
         try:
             wert = execute_read_tool(
-                db, user=user, tool_name=call.name, arguments=call.arguments
+                db, user=user, tool_name=call.name, arguments=call.arguments,
+                herkunft=herkunft,
             )
             db.commit()
         except AiActionValidationError as exc:
@@ -1037,7 +1046,9 @@ async def _tool_followup_messages(
         async with schloss:
             try:
                 wert, fehlgeschlagen = await asyncio.wait_for(
-                    asyncio.to_thread(_werkzeug_ausfuehren, user_id, call),
+                    asyncio.to_thread(
+                        _werkzeug_ausfuehren, user_id, call, herkunft
+                    ),
                     timeout=WERKZEUG_ZEITGRENZE,
                 )
             except TimeoutError:
@@ -1560,6 +1571,54 @@ def _vorschlaege_zuruecknehmen(proposal_ids: list[str], *, grund: str) -> None:
             db.commit()
     except Exception:  # noqa: BLE001 - ein Aufraeumfehler beendet keinen Lauf
         logger.warning("Offene Vorschlaege nicht zurueckgenommen: %s", proposal_ids)
+
+
+def _freigabe_melden(user_id: int, conversation_id: str, zustand: dict) -> None:
+    """Sagt an, dass ein Auftrag auf einen Klick wartet.
+
+    Ein Worker parkt seit dem 22.08.2026 auf `waiting_confirmation`, statt
+    zurueckzunehmen und zu enden. Das ist richtig — nur ist ein Parken kein
+    Endzustand, und die Meldestelle spricht sonst ausschliesslich Ergebnisse
+    an. Wer per Stimme arbeitet, saehe die Karte nie und hoerte auch nichts.
+
+    Die Meldung nennt bewusst den Ort ("im Chat"): eine gesprochene Zusage
+    bestaetigt nur Vorschlaege des laufenden Gesprächs, nicht die eines
+    fremden Fensters.
+
+    Eigene Sitzung wie bei `_vorschlaege_zuruecknehmen`, und ein Fehlschlag
+    beendet nichts — der Lauf parkt auch ohne Ansage korrekt.
+    """
+    from services import ai_meldestelle
+
+    rahmen = zustand.get("worker")
+    titel = ""
+    kanal = "chat"
+    if isinstance(rahmen, dict):
+        titel = str(rahmen.get("titel") or "")[:120]
+        kanal = str(rahmen.get("kanal") or "chat")
+    benannt = f'Der Auftrag "{titel}"' if titel else "Ein Auftrag"
+
+    try:
+        with SessionLocal() as db:
+            user = db.get(User, user_id)
+            if user is None:
+                return
+            ai_meldestelle.melden(
+                db,
+                user=user,
+                text=(
+                    f"{benannt} wartet auf eine Freigabe: der nächste "
+                    "Schritt ist vorgeschlagen, aber noch nicht ausgeführt. "
+                    "Die Karte dazu steht im Chat und braucht einen Klick."
+                ),
+                kanal=kanal,
+                worker_id=conversation_id,
+                worker_titel=titel or None,
+            )
+    except Exception:  # noqa: BLE001 - eine fehlende Ansage beendet keinen Lauf
+        logger.warning(
+            "Freigabe-Meldung nicht abgesetzt conversation_id=%s", conversation_id
+        )
 
 
 def _freigabe_per_mail_erbeten(run_id: str, proposal_ids: list[str]) -> bool:
@@ -2448,11 +2507,14 @@ async def _segment_anlaufen(
     # Laeufe mitzaehlt, blockierte er von da an jede weitere Aufgabe dieses
     # Benutzers.
     #
-    # Ein Worker zaehlt hier mit — mit einer Ausnahme, die keine ist: seine
-    # Rueckfrage laeuft nicht ueber `ask_user`, sondern ueber `worker_frage`
-    # und die Meldestelle, und genau dieser Weg wird in `_fragen_behandeln`
-    # eigens freigehalten. Bestaetigungspflichtige Vorschlaege eines Workers
-    # nehmen den E-Mail-Freigabeweg wie eine Heilung.
+    # Ein Worker zaehlt hier mit — mit zwei Ausnahmen. Seine Rueckfrage laeuft
+    # nicht ueber `ask_user`, sondern ueber `worker_frage` und die
+    # Meldestelle, und genau dieser Weg wird in `_fragen_behandeln` eigens
+    # freigehalten. Und seit dem 22.08.2026 **parkt** ein Worker auf einen
+    # bestaetigungspflichtigen Vorschlag, statt den E-Mail-Freigabeweg zu
+    # nehmen: unbeaufsichtigt heisst bei ihm "niemand liest mit", nicht
+    # "niemand ist da" — jemand hat ihn gerade beauftragt. Die Unterscheidung
+    # heisst `niemand_da` und steht in `_schreibrunde_ausfuehren`.
     unbeaufsichtigt = guardian is not None or aufgabe is not None or rolle == "worker"
 
     return _Anlauf(
@@ -2833,10 +2895,12 @@ def _desktop_behandeln(
     provider_messages: list[dict],
     zustand: dict,
     rundentext: str,
-) -> datetime | None:
+    rundendeckel: int,
+) -> tuple[datetime | None, bool]:
     """Legt Auftraege fuer den Rechner des Benutzers an und parkt den Lauf.
 
-    ``None`` heisst: kein Desktop-Werkzeug in dieser Runde (oder die Bitte kam
+    Rueckgabe ist ``(Frist, budget_erschoepft)``. Eine Frist von ``None`` bei
+    ``False`` heisst: kein Desktop-Werkzeug in dieser Runde (oder die Bitte kam
     gar nicht von einem Rechner — dann faellt der Aufruf in den Lese-Dispatch
     und bekommt dessen benannte Erklaerung).
 
@@ -2847,14 +2911,51 @@ def _desktop_behandeln(
     statt einer. Aufrufe, die keine Desktop-Werkzeuge sind, laufen deshalb
     trotzdem nicht mit: sie kaemen nach dem Wecken in einen Lauf, der sie
     vielleicht gar nicht mehr braucht.
+
+    Das Rundenbudget gilt hier wie in jeder anderen Runde. Es steht nicht aus
+    Ordnungsliebe da: laeuft der Rechner nicht, verfaellt der Auftrag mit
+    seiner Frist, der Takt weckt den Lauf, und ein Modell, das es noch einmal
+    versucht, parkte sonst endlos weiter. Bis zum 22.08.2026 war das nur
+    theoretisch — ein Lauf mit Herkunft "desktop" hatte immer einen Menschen
+    davor. Seit ein Hintergrund-Auftrag die Herkunft erbt, hat er das nicht
+    mehr.
     """
     if herkunft != "desktop":
-        return None
+        return None, False
     auftraege = [
         call for call in current_usage.tool_calls if call.name in DESKTOP_TOOLS
     ]
     if not auftraege:
-        return None
+        return None, False
+
+    if int(zustand.get("rounds", 0)) + 1 > rundendeckel:
+        # Vor dem Anlegen geprueft: ein Auftrag, den niemand mehr abholen
+        # darf, waere eine Zusage an den Rechner, die dieser Lauf nicht mehr
+        # einloesen kann.
+        nachrichten = [_aufrufnachricht(current_usage.tool_calls, rundentext)]
+        for call in current_usage.tool_calls:
+            nachrichten.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": json.dumps(
+                    {
+                        "error": "AI_ROUND_BUDGET",
+                        "message": (
+                            "Nicht an den Rechner übergeben: die "
+                            "Werkzeugrunden dieses Laufs sind aufgebraucht. "
+                            "Antworte mit dem, was du hast."
+                        ),
+                    },
+                    ensure_ascii=True, separators=(",", ":"),
+                ),
+            })
+        provider_messages.extend(nachrichten)
+        zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
+        logger.info(
+            "Desktop-Runde ohne Budget run_id=%s werkzeuge=%s",
+            run_id, ",".join(sorted({call.name for call in auftraege})),
+        )
+        return None, True
 
     from services import desktop_job_service
 
@@ -2916,7 +3017,7 @@ def _desktop_behandeln(
     # Die Frist des Auftrags ist zugleich die Obergrenze des Schlafs: kommt der
     # Rechner nicht, weckt der Takt den Lauf, und das Modell erfaehrt den
     # Verfall als Ergebnis statt gar nichts.
-    return frist
+    return frist, False
 
 
 def _desktopmeldung(ergebnisse: list[dict]) -> dict:
@@ -3106,7 +3207,25 @@ async def _schreibrunde_ausfuehren(
         if proposal.get("id")
         and proposal.get("status") in {"proposed", "confirmed"}
     ]
-    if offen and unbeaufsichtigt:
+    # **Ein Worker hat einen Menschen ueber sich.** Er zaehlt als
+    # unbeaufsichtigt, weil ihm `ask_user` fehlt und niemand seinen
+    # Verlauf mitliest — aber jemand hat ihn gerade beauftragt und
+    # sitzt vor dem Chat. Ohne diese Unterscheidung lief er in den
+    # Zweig fuer Heilungen und faellige Aufgaben: erst eine
+    # Freigabe-Mail, und ohne Versandweg wurde der Vorschlag
+    # zurueckgenommen und der Auftrag beendet. Der Benutzer bekam
+    # dann keinen Knopf, sondern eine Erzaehlung darueber, dass
+    # etwas haette bestaetigt werden muessen (22.08.2026: „Soll
+    # MauntARK trotzdem jetzt neu gestartet werden?").
+    #
+    # **Faellige Aufgaben sind nicht mitgemeint**, obwohl sie seit
+    # dem 20.08.2026 ebenfalls in Fenstern mit `kind='worker'`
+    # laufen: `ai_task_service` uebergibt ausdruecklich
+    # `rolle="voll"` (die Begruendung steht dort). Um drei Uhr
+    # nachts sitzt niemand vor dem Chat — dort bleibt der Mailweg
+    # richtig, und er bleibt.
+    niemand_da = unbeaufsichtigt and rolle != "worker"
+    if offen and niemand_da:
         # Eine Heilung parkt nicht, und eine faellige Aufgabe
         # ebensowenig. Es ist niemand da, der die Karte anklickt.
         #
@@ -3176,6 +3295,16 @@ async def _schreibrunde_ausfuehren(
                 proposal["id"] for proposal in proposals if proposal.get("id")
             ],
         }
+        if rolle == "worker":
+            # Ein Worker schreibt in sein eigenes Fenster, das niemand
+            # mitliest. Solange er endete, sagte die Meldestelle wenigstens
+            # sein Ergebnis an; seit er stattdessen parkt, ist
+            # 'waiting_confirmation' kein Endzustand — und damit passierte
+            # gar nichts mehr. Wer per Stimme arbeitet oder den Chat
+            # zugeklappt hat, wartete auf eine Antwort, die nie kam.
+            await asyncio.to_thread(
+                _freigabe_melden, user_id, conversation_id, zustand
+            )
         return _SchreibrundenErgebnis(
             denknaht=denknaht, geparkt=True, letzte_runde=True
         )
@@ -3666,7 +3795,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 current_usage = StreamUsage()
                 continue
 
-            desktop_frist = _desktop_behandeln(
+            desktop_frist, desktop_budget = _desktop_behandeln(
                 current_usage=current_usage,
                 run_id=run_id,
                 user_id=user_id,
@@ -3674,7 +3803,13 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 provider_messages=provider_messages,
                 zustand=zustand,
                 rundentext=rundentext,
+                rundendeckel=rundendeckel,
             )
+            if desktop_budget:
+                budget_erschoepft = True
+                letzte_runde = True
+                current_usage = StreamUsage()
+                continue
             if desktop_frist is not None:
                 wecker = desktop_frist
                 parkgrund = "desktop_jobs"

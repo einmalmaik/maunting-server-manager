@@ -92,6 +92,25 @@ Jeder Auftrag ist ein eigener, unbeaufsichtigter Lauf — das heutige Arbeitsmod
   und jedem Wecken neu geprüft — Wegfall heißt `cancelled` plus Meldung. Voller Vorschlags-/
   Bestätigungsfluss, `immer_bestaetigen` gilt wortgleich; Autonomie (`autonomy_allows`) ersetzt höchstens
   den Klick.
+- **Herkunft:** Der Auftrag erbt die Welt seines Auftraggebers (`zustand["herkunft"]`, weitergereicht von
+  `worker_start`, `worker_antwort` und dem Wiederanlauf). Ein Auftrag aus der Smart-System-App sieht
+  deshalb den Rechner des Benutzers, ein Auftrag aus dem Panel nicht. Die Herkunft gehört dem **Fenster**,
+  nicht dem einzelnen Lauf: eine im Panel getippte Antwort stuft einen Desktop-Auftrag nicht zurück. Sie
+  kommt ausschließlich aus dem Laufzustand, nie aus den Werkzeugargumenten — sonst schriebe sich ein
+  Modell selbst einen Rechner zu.
+- **Bestätigungen:** Ein Worker zählt als unbeaufsichtigt (kein `ask_user`, niemand liest mit), aber
+  **jemand hat ihn beauftragt**. Braucht ein Vorschlag den Klick, parkt der Lauf auf
+  `waiting_confirmation` wie ein Chatlauf — er nimmt den Vorschlag nicht zurück und geht auch nicht den
+  Mailweg der Heilungen. Die Karte bleibt in seinem Fenster und wird im Dauerchat **mitgeliefert**
+  (`GET /conversation/actions` ohne Kennung, solange sie offen **und ihr Lauf am Leben** ist), damit der
+  Knopf dort steht, wo der Mensch gefragt hat. Ein abgebrochener Auftrag nimmt seine offenen Karten mit:
+  `worker_cancel` setzt sie auf `expired` — „brich ab" darf nicht heißen „aber der Knopf gilt weiter".
+  Weil ein geparkter Lauf keinen Endzustand hat und die Meldestelle sonst nur Ergebnisse anspricht, gibt
+  er beim Parken zusätzlich eine Meldung ab („wartet auf eine Freigabe … im Chat"); ohne sie hörte ein
+  Benutzer im Sprachmodus überhaupt nichts mehr.
+- **Skills:** Der Worker ist die einzige Rolle, die arbeitet, also die einzige, die aus Arbeit etwas
+  mitnehmen kann. Sein Prompt zieht das Lernen ausdrücklich **vor** den Bericht — danach ist der Lauf
+  vorbei. Das Gehirn hat `learn_skill` strukturell nicht (`GEHIRN_TOOLS`).
 - **Laufzeit:** Worker dürfen lange brauchen — Minuten bis Stunden. Langläufigkeit entsteht durch
   Parken und Wecken (`waiting_wake` + `wake_at`), nie durch Checkpoints mitten im Segment. Weckgründe:
   `timer` (Werkzeug `wait_until(minuten, grund)`, nur Workern angeboten) und `execution`
@@ -225,7 +244,7 @@ verbaler Rückweg Promptregel.
 |---|---|
 | Rollentrennung | Das Gehirn hat keinerlei Server-Werkzeuge — die schnelle, dauerpräsente Instanz kann strukturell keine Außenwirkung entfalten. Nur Worker fassen die Außenwelt an. |
 | RBAC | Jede Rolle kann nur, was der Benutzer kann. Worker: `ActorContext.for_user(origin='ai')`, `_resolve_server`/`_require_tool_permission` dreifach, Rechte-Neuprüfung bei jedem Segmentstart und Wecken. |
-| Approval | Vorschlagsfluss wörtlich unverändert; `worker_start` startet nur einen Lauf und führt nichts aus; `immer_bestaetigen` gilt im Worker exakt wie überall. |
+| Approval | Vorschlagsfluss wörtlich unverändert; `worker_start` startet nur einen Lauf und führt nichts aus; `immer_bestaetigen` gilt im Worker exakt wie überall. Dass die Karte eines Workers zusätzlich im Dauerchat erscheint, ändert daran nichts: `conversation_id` ist an keiner Rechteprüfung beteiligt — `owned_proposal`, `_require_tool_permission` und das Bestätigungsmerkmal binden an Benutzer, Server und Vorschlagskennung. Mitgeliefert wird nur, worauf ein lebender Lauf wartet; abgebrochene Aufträge nehmen ihre Karten auf `expired` mit. |
 | Redaction | Ein Choke-Point (`melden()`): jede Meldung, Rückfrage, Mail und gesprochene Ansage ist geschwärzt; Gehirn-Ausgaben durchlaufen dieselbe SSE-Schwärzung wie jeder Modelltext. |
 | Kontingente/Kosten | Jeder Lauf bucht regulär; Betreiber-Deckel (N Worker, Rundenbudget, feste Worker-Denkstufe); max. 1 Wiederanlauf, max. 1 Kontingent-Park-Retry je Worker. |
 | Audit | Worker-Verläufe und Audit-Einträge überleben das UI-Aufräumen nach Aufbewahrungsregel — Remote-Befehle bleiben nachvollziehbar. |

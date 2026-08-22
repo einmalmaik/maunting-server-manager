@@ -142,6 +142,7 @@ export function AiActionProposalCard({
     propose_config_set: FilePenLine,
     propose_backup: HardDriveDownload,
     propose_mod_install: Package,
+    propose_mod_toggle: Package,
     propose_server_create: ServerCog,
     propose_server_lifecycle: Power,
     // Fuenf Werkzeuge fielen bisher auf das Standardsymbol zurueck — ein

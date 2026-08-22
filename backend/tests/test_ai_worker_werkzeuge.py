@@ -67,11 +67,14 @@ def _provider(db: Session, **extra):
     return provider
 
 
-def _start(db: Session, user: User, **argumente) -> dict:
+def _start(
+    db: Session, user: User, *, herkunft: str = "panel", **argumente
+) -> dict:
     """Ruft worker_start mit stillgelegtem Anlauf — kein Laufzeit-Segment."""
     with patch.object(ai_run_service, "anlauf", lambda db_, run: True):
         return ai_worker_service.worker_start(
-            db, user=user, arguments={"auftrag": "Pruef die Backups", **argumente}
+            db, user=user, arguments={"auftrag": "Pruef die Backups", **argumente},
+            herkunft=herkunft,
         )
 
 
@@ -268,6 +271,49 @@ class TestWorkerCancel:
         assert run.stop_reason == "worker_cancel"
         assert run.wake_at is None
 
+    def test_der_abbruch_nimmt_die_offene_karte_mit(self, db: Session) -> None:
+        """„Brich den Auftrag ab" darf nicht heissen: „aber der Knopf gilt weiter".
+
+        Seit ein Worker auf `waiting_confirmation` parkt statt zu enden,
+        hinterlaesst jeder Abbruch sonst einen Vorschlag auf 'proposed' — und
+        ein Klick Tage spaeter fuehrte den abgebrochenen Neustart doch noch
+        aus. Gesetzt wird `expired`: die Gelegenheit ist vorbei, der Beleg
+        bleibt.
+        """
+        from models import AiActionProposal
+
+        user = _benutzer(db, "abbrecher")
+        worker_id, run = self._laufender_worker(db, user)
+        run.status = "waiting_confirmation"
+        db.commit()
+        karte = AiActionProposal(
+            id=str(uuid4()),
+            conversation_id=worker_id,
+            user_id=user.id,
+            server_id=None,
+            tool_name="propose_server_lifecycle",
+            payload_encrypted="test-enc-v1::7b7d",
+            preview_json='{"operation":"restart"}',
+            requires_confirmation=True,
+            status="proposed",
+            correlation_id=str(uuid4()),
+            run_id=run.id,
+            reason="Der Benutzer hat den Neustart verlangt.",
+            expected_effect="Der Server startet neu.",
+        )
+        db.add(karte)
+        db.commit()
+
+        ergebnis = ai_worker_service.worker_cancel(
+            db, user=user, arguments={"worker_id": worker_id}
+        )
+
+        assert ergebnis["cancelled"] is True
+        db.refresh(karte)
+        assert karte.status == "expired"
+        assert karte.error_code == "worker_cancel"
+        assert karte.confirmation_token_hash is None
+
     def test_ein_fremdes_fenster_existiert_nicht(self, db: Session) -> None:
         besitzer = _benutzer(db, "besitzer")
         fremder = _benutzer(db, "fremder")
@@ -368,6 +414,103 @@ class TestWorkerAntwort:
                 db, user=fremder,
                 arguments={"worker_id": worker_id, "antwort": "egal"},
             )
+
+
+class TestHerkunft:
+    """Ein Auftrag erbt die Welt, aus der er kam.
+
+    Der Ausfall vom 22.08.2026: der Betreiber fragte in der Smart-System-App
+    „wie voll ist meine C-Festplatte", und der Auftrag antwortete, er koenne
+    auf den Rechner nicht zugreifen. `worker_start` legte den Lauf ohne
+    Herkunft an, der Standardwert "panel" griff, `herkunft_schnitt` nahm ihm
+    alle Desktop-Werkzeuge und `ai_prompt.build` den DESKTOP-Block dazu.
+
+    Der Ausfall war vollstaendig: das Gehirn hat selbst keine
+    Desktop-Werkzeuge (`GEHIRN_TOOLS`), also war im Gehirn/Worker-Betrieb
+    **niemand** mehr da, der den Rechner des Benutzers sehen konnte.
+    """
+
+    def _zustand(self, db: Session, worker_id: str) -> dict:
+        run = (
+            db.query(AiRun).filter(AiRun.conversation_id == worker_id)
+            .order_by(AiRun.created_at.desc(), AiRun.id.desc()).first()
+        )
+        assert run is not None
+        return ai_run_service.zustand_lesen(run)
+
+    def test_ein_auftrag_aus_der_app_bleibt_am_rechner(self, db: Session) -> None:
+        user = _benutzer(db, "vomrechner")
+        _provider(db)
+
+        ergebnis = _start(db, user, herkunft="desktop")
+
+        assert self._zustand(db, ergebnis["worker_id"]).get("herkunft") == "desktop"
+
+    def test_ein_auftrag_aus_dem_panel_bekommt_keinen_rechner(
+        self, db: Session
+    ) -> None:
+        """Die Gegenrichtung, und sie ist die Sicherheitsseite: der Standard
+        ist die engere Welt, nicht die weitere."""
+        user = _benutzer(db, "vompanel")
+        _provider(db)
+
+        ergebnis = _start(db, user)
+
+        assert self._zustand(db, ergebnis["worker_id"]).get("herkunft") == "panel"
+
+    def test_die_antwort_laesst_den_auftrag_in_seiner_welt(
+        self, db: Session
+    ) -> None:
+        """Die Herkunft gehoert dem Fenster, nicht dem einzelnen Lauf.
+
+        Sonst verloere ein Auftrag aus der App mitten im Vorgang seine
+        Werkzeuge, nur weil der Mensch die Rueckfrage im Panel beantwortet
+        hat.
+        """
+        user = _benutzer(db, "antwortwelt")
+        _provider(db, name="Zugang-antwortwelt")
+        ergebnis = _start(db, user, herkunft="desktop")
+        alter_lauf = (
+            db.query(AiRun)
+            .filter(AiRun.conversation_id == ergebnis["worker_id"]).one()
+        )
+        alter_lauf.status = "waiting_user"
+        db.commit()
+
+        with patch.object(ai_run_service, "anlauf", lambda db_, run: True):
+            antwort = ai_worker_service.worker_antwort(
+                db, user=user,
+                arguments={
+                    "worker_id": ergebnis["worker_id"], "antwort": "Ja, mach.",
+                },
+            )
+
+        assert antwort["delivered"] is True
+        assert self._zustand(db, ergebnis["worker_id"]).get("herkunft") == "desktop"
+
+    def test_der_dispatch_reicht_die_herkunft_durch(self, db: Session) -> None:
+        """Der Weg vom Lauf bis zum Handler — die Stelle, an der es fehlte.
+
+        Geprueft wird die Verdrahtung, nicht `worker_start`: dass
+        `execute_read_tool` die Herkunft ueberhaupt bis dorthin traegt. Sie
+        kommt aus dem Laufzustand und darf **nie** aus den Argumenten
+        stammen; ein Modell koennte sich sonst selbst einen Rechner
+        zuschreiben.
+        """
+        from services.ai_action_service import execute_read_tool
+
+        user = _benutzer(db, "durchgereicht")
+        _provider(db)
+
+        with patch.object(ai_run_service, "anlauf", lambda db_, run: True):
+            ergebnis = execute_read_tool(
+                db, user=user, tool_name="worker_start",
+                arguments={"auftrag": "Sieh auf dem Rechner nach"},
+                herkunft="desktop",
+            )
+
+        assert ergebnis["started"] is True
+        assert self._zustand(db, ergebnis["worker_id"]).get("herkunft") == "desktop"
 
 
 def test_der_dispatch_kennt_die_delegationen(db: Session) -> None:

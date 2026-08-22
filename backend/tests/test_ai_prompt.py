@@ -801,3 +801,113 @@ def test_keine_rolle_sagt_datum_oder_uhrzeit_an() -> None:
             assert "Nenne Datum oder Uhrzeit nie von dir aus" in prompt, (
                 f"Rolle {rolle!r} (gesprochen={gesprochen}) kennt die Datumsregel nicht"
             )
+
+
+# ── Haltung, Autonomie und Mods (22.08.2026) ──────────────────────────────
+#
+# Drei Meldungen desselben Tages, drei Bloecke:
+#
+# * "die KI sagt staendig alles klar und wiederholt dann meinen Auftrag" —
+#   der gewuenschte Ton stand woertlich im Repo, aber in `GESPROCHEN` und
+#   damit nur in Sprachsitzungen.
+# * "er fragt zu oft nach, obwohl der autonome Modus an ist" — WERKZEUGE
+#   sagte pauschal zu, ein Schreibwerkzeug erzeuge "nur einen sichtbaren
+#   Vorschlag, den der Benutzer bestaetigt". Bei erteilter Freigabe stimmt
+#   das nicht (`requires_confirmation=not autonomous`).
+# * "der Worker hat die Mod nicht aktiviert" — er suchte sie in der
+#   GameUserSettings.ini, wo sie nie stand, und hatte kein Werkzeug zum
+#   Schalten.
+
+
+def test_der_grundton_gilt_getippt_wie_gesprochen() -> None:
+    """Der Ton stand nur in GESPROCHEN — getippt gab es nur das Wort freundlich.
+
+    Genau daher kamen die Hoeflichkeitsschleifen: die einzige Tonvorgabe des
+    getippten Chats war "Antworte knapp, freundlich" in ROLLE.
+    """
+    for rolle in ("voll", "gehirn"):
+        prompt = ai_prompt.build(rolle=rolle)
+        assert ai_prompt.HALTUNG in prompt, rolle
+        assert "keine Fuellsaetze" in prompt
+
+    gesprochen = ai_prompt.build(rolle="voll", gesprochen=True)
+    assert ai_prompt.HALTUNG in gesprochen
+    # Und genau einmal: eine zweite Fassung derselben Regel veraltet lautlos
+    # gegen die erste (siehe der Widerruf-Kommentar bei GESPROCHEN).
+    assert gesprochen.count("Keine gespielten Lacher") == 1
+
+
+def test_die_zustimmungsfloskel_ist_als_form_verboten_nicht_als_satz() -> None:
+    """Ein Mustersatz im Prompt ist die wahrscheinlichste Fortsetzung.
+
+    Die Lehre steht bei MITREDEN und hat das Projekt einmal Wochen gekostet:
+    "Alles klar" stand als *Beispiel* in GEHIRN_QUITTUNG und kam fuenfmal
+    woertlich zurueck. Die Regel muss deshalb die Form beschreiben.
+    """
+    assert "Zustimmungsfloskel" in ai_prompt.HALTUNG
+    assert "Alles klar" not in ai_prompt.HALTUNG
+
+
+def test_der_worker_bekommt_die_haltung_nicht() -> None:
+    """Sein Ton erreicht nie einen Menschen — das Gehirn formuliert neu.
+
+    Dieselbe Begruendung wie bei IDENTITAET und SPRECHWEISE, und derselbe
+    Gewinn: der Worker-Prompt bleibt schmal.
+    """
+    assert ai_prompt.HALTUNG not in ai_prompt.build(rolle="worker")
+
+
+def test_der_prompt_sagt_die_wahrheit_ueber_bestaetigungen() -> None:
+    """Die Zusage stimmte nur ohne Freigabe — und erzeugte die Rueckfragen.
+
+    Ein Modell, dem der Prompt eine Bestaetigungspflicht zusagt, die es nicht
+    gibt, baut sich die passende Handlung dazu: es fragt.
+    """
+    for rolle in ("voll", "worker"):
+        prompt = ai_prompt.build(rolle=rolle)
+        assert "nur einen sichtbaren Vorschlag, den der Benutzer bestaetigt" not in prompt
+        assert "Ist der autonome Modus dort aktiv" in prompt
+        # Und die Ausnahme bleibt benannt, sonst verallgemeinert das Modell
+        # sie zurueck auf alle Schreibwerkzeuge.
+        assert "was Daten vernichtet" in prompt
+
+
+def test_eine_erteilte_freigabe_gilt_wie_eine_antwort() -> None:
+    """ERMESSEN kannte den autonomen Modus nicht — jetzt schon.
+
+    Der Block traegt die Regel gegen Rueckdelegation und gilt in allen drei
+    Rollen; er ist deshalb der Ort, an dem die erteilte Freigabe steht.
+    """
+    for rolle in ("voll", "gehirn", "worker"):
+        prompt = ai_prompt.build(rolle=rolle)
+        assert "Eine erteilte Freigabe ist ebenso eine Antwort" in prompt
+
+
+def test_der_modblock_nennt_den_ort_der_wahrheit() -> None:
+    """Der Worker suchte die Modliste in der Spielkonfiguration.
+
+    Sie steht in der Panel-Datenbank (`mods.enabled`); daraus baut
+    `games/base.active_mod_ids` beim Containerbau die Startzeile. Ohne diesen
+    Satz greift ein Modell zu dem, was es aus dem Training kennt — und
+    `ActiveMods=` ist dort sehr gelaeufig.
+    """
+    voll = ai_prompt.build(rolle="voll")
+
+    assert "Welche Mods aktiv sind, steht allein in der Mod-Liste des Panels" in voll
+    assert "GameUserSettings.ini" in voll
+    assert "propose_mod_toggle" in voll
+    # Und die Folge, die den Auftrag erst wirksam macht.
+    assert "erst nach einem Neustart" in voll
+
+
+def test_der_worker_lernt_bevor_er_berichtet() -> None:
+    """Nach dem Bericht ist der Lauf vorbei — dann lernt niemand mehr.
+
+    Der Worker ist die einzige Rolle, die arbeitet, und damit die einzige,
+    die aus Arbeit etwas mitnehmen kann. Das Gehirn hat `learn_skill`
+    strukturell nicht (`GEHIRN_TOOLS`), und das ist Absicht.
+    """
+    worker = ai_prompt.build(rolle="worker")
+
+    assert "Bevor du berichtest, lernst du" in worker
+    assert "Der Bericht ist das Letzte, was du schreibst" in worker

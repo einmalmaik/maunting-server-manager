@@ -958,3 +958,97 @@ def test_interne_zeilen_tragen_keinen_zeitstempel(db: Session, regular_user: Use
     assert len(treffer) == 1
     assert not treffer[0]["content"].startswith("[")
 
+
+def test_eigene_antworten_tragen_keinen_zeitstempel(
+    db: Session, regular_user: User
+) -> None:
+    """Das Modell darf seine eigene Vorlage nicht vor sich sehen.
+
+    Der Anlass ist der dritte Anlauf gegen dasselbe Verhalten: der Betreiber
+    las am 22.08.2026 „[22.08. 20:30] Auf deinen Windows-Rechner kann ich
+    nicht zugreifen." — das Modell hatte den Praefix selbst geschrieben. Die
+    Anlaeufe davor waren Sprache gegen Mechanik (eine Regel im Prompt, dann
+    der Verzicht bei internen Zeilen); die **Vorlage** stand weiterhin an
+    jeder einzelnen seiner eigenen Verlaufszeilen. Was ein Prompt einmal
+    verbietet, demonstriert der Verlauf zwanzigmal.
+
+    Die Benutzerzeile daneben behaelt ihren Praefix — sie ist der Grund, aus
+    dem es ihn gibt (Zeitabstand zwischen den Nachrichten), und das Modell
+    schreibt keine Benutzerzeilen.
+    """
+    conversation = AiConversation(
+        id=str(uuid4()), user_id=regular_user.id, kind="primary", title="Chat"
+    )
+    db.add(conversation)
+    db.commit()
+
+    dt = datetime(2026, 8, 22, 20, 30, 0, tzinfo=timezone.utc)
+    db.add(AiMessage(
+        id=str(uuid4()),
+        conversation_id=conversation.id,
+        role="user",
+        content="Wie voll ist meine C-Platte?",
+        status="complete",
+        created_at=dt,
+    ))
+    db.add(AiMessage(
+        id=str(uuid4()),
+        conversation_id=conversation.id,
+        role="assistant",
+        content="Die Platte ist zu 82 Prozent belegt.",
+        status="complete",
+        created_at=dt,
+    ))
+    db.commit()
+
+    nachrichten = build_provider_messages(db, conversation)
+    antwort = [
+        m for m in nachrichten
+        if m.get("role") == "assistant" and "82 Prozent" in (m.get("content") or "")
+    ]
+    frage = [
+        m for m in nachrichten
+        if m.get("role") == "user" and "C-Platte" in (m.get("content") or "")
+    ]
+    assert len(antwort) == 1 and len(frage) == 1
+    assert not antwort[0]["content"].startswith("[")
+    assert frage[0]["content"].startswith("[22.08. 20:30] ")
+
+
+def test_ein_selbst_geschriebener_zeitstempel_wird_abgestreift(
+    db: Session, regular_user: User
+) -> None:
+    """Der Bestand ist schon verseucht — nur nicht mehr hinzufuegen genuegt nicht.
+
+    `_finalize_stream` speichert die Antwort ungefiltert. Was das Modell
+    bisher nachgeahmt hat, steht damit **im Text** der Zeile und bliebe als
+    Vorlage stehen, bis sie aus dem Kontextfenster faellt. Ein laufendes
+    Gespraech wuerde den Fehler also weiter demonstrieren, obwohl er behoben
+    ist.
+    """
+    conversation = AiConversation(
+        id=str(uuid4()), user_id=regular_user.id, kind="primary", title="Chat"
+    )
+    db.add(conversation)
+    db.commit()
+
+    db.add(AiMessage(
+        id=str(uuid4()),
+        conversation_id=conversation.id,
+        role="assistant",
+        content="[22.08. 20:30] Auf deinen Windows-Rechner kann ich nicht zugreifen.",
+        status="complete",
+        created_at=datetime(2026, 8, 22, 20, 30, 0, tzinfo=timezone.utc),
+    ))
+    db.commit()
+
+    nachrichten = build_provider_messages(db, conversation)
+    treffer = [
+        m for m in nachrichten
+        if m.get("role") == "assistant" and "Windows-Rechner" in (m.get("content") or "")
+    ]
+    assert len(treffer) == 1
+    assert treffer[0]["content"] == (
+        "Auf deinen Windows-Rechner kann ich nicht zugreifen."
+    )
+

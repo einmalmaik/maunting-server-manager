@@ -397,6 +397,13 @@ def test_der_autonome_modus_steht_so_im_block_wie_darf_handeln_ihn_liest(
     assert ai_task_service.darf_handeln(db, mit) is True
     block = ai_lage.lageblock(db, mit)
     assert "Autonomer Modus: aktiv, 20 Aktionen/Stunde, davon 0 verbraucht." in block
+    # Was „aktiv" fuer das laufende Gespraech heisst, stand nirgends: die
+    # Zeile nennt eine Zahl, und der Prompt sprach nur von Aufgaben der Art
+    # "act". Also fragte das Modell weiter bei jedem Schreibvorschlag nach,
+    # obwohl `ai_proposal_service` ihn laengst ohne Klick ausfuehrt
+    # (Betreibermeldung 22.08.2026: "er fragt zu oft nach").
+    assert "Schreibvorschläge im Gespräch laufen damit sofort" in block
+    assert "nur Unumkehrbares" in block
 
 
 def test_eine_abgeschaltete_freigabe_ist_keine(db: Session) -> None:

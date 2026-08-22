@@ -368,3 +368,225 @@ def test_read_server_mods_reports_install_error(
     assert result["mods"][0]["install_status"] == "failed"
     assert result["mods"][0]["install_error"] == "Installation fehlgeschlagen. — Download timeout"
 
+
+
+# ── Der Schalter ──────────────────────────────────────────────────────────
+#
+# Anlass ist ein Betriebsvorfall vom 22.08.2026: der Betreiber bat, eine Mod
+# zu aktivieren und den Server neu zu starten. Passiert ist nichts. Der
+# Auftrag suchte die Einstellung in der `GameUserSettings.ini` — dort steht
+# sie nicht und stand sie nie — und meldete, die Aenderung sei "derzeit nicht
+# pruefbar". `read_server_mods` meldete `enabled` seit jeher; setzen konnte
+# es niemand.
+
+
+def _toggle_arguments(server_id: int, enabled: bool, **overrides) -> dict:
+    values = {
+        "server_id": server_id,
+        "workshop_id": "1559212036",
+        "enabled": enabled,
+        "reason": "Der Benutzer hat darum gebeten.",
+        "expected_effect": "Nach dem Neustart laedt der Server die Mod.",
+    }
+    values.update(overrides)
+    return values
+
+
+def _installierte_mod(db: Session, server_id: int, *, enabled: bool) -> Mod:
+    mod = Mod(
+        server_id=server_id,
+        workshop_id="1559212036",
+        name="Moros Indominus",
+        enabled=enabled,
+        install_status="installed",
+        load_order=0,
+    )
+    db.add(mod)
+    db.commit()
+    return mod
+
+
+def test_mod_toggle_braucht_das_schaltrecht(db: Session, regular_user: User) -> None:
+    """`server.mods.toggle` und nicht `server.mods.write`.
+
+    Das Recht steht seit jeher im Katalog und war fuer die KI unerreichbar.
+    Wer Mods nur schalten darf, soll nichts herunterladen koennen — und
+    umgekehrt.
+    """
+    server, conversation = _setup(
+        db, regular_user, server_keys=("server.view", "server.mods.write")
+    )
+    _installierte_mod(db, server.id, enabled=False)
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_proposal_service.create_proposal(
+            db,
+            user=regular_user,
+            conversation=conversation,
+            tool_name="propose_mod_toggle",
+            arguments=_toggle_arguments(server.id, True),
+            correlation_id=str(uuid4()),
+        )
+    assert db.query(AiActionProposal).count() == 0
+
+    # Mit dem richtigen Recht geht derselbe Aufruf durch.
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id,
+        permission_key="server.mods.toggle",
+    ))
+    db.commit()
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_mod_toggle",
+        arguments=_toggle_arguments(server.id, True),
+        correlation_id=str(uuid4()),
+    )
+    assert proposal.tool_name == "propose_mod_toggle"
+
+
+def test_ein_schalter_an_einer_nicht_installierten_mod_ist_ein_formfehler(
+    db: Session, regular_user: User
+) -> None:
+    """Erst installieren, dann schalten — als Auskunft, nicht als Absturz.
+
+    Ein Formfehler kostet eine Runde und sagt dem Modell den Weg; ein
+    Vorschlag, der beim Klick scheitert, kostet den Menschen einen Klick und
+    sagt niemandem etwas.
+    """
+    server, conversation = _setup(
+        db, regular_user, server_keys=("server.view", "server.mods.toggle")
+    )
+
+    with pytest.raises(ai_action_service.AiActionValidationError, match="nicht installiert"):
+        ai_proposal_service.create_proposal(
+            db,
+            user=regular_user,
+            conversation=conversation,
+            tool_name="propose_mod_toggle",
+            arguments=_toggle_arguments(server.id, True),
+            correlation_id=str(uuid4()),
+        )
+
+
+def test_der_schalter_zeigt_den_bisherigen_stand_und_den_neustart(
+    db: Session, regular_user: User
+) -> None:
+    import json
+
+    server, conversation = _setup(
+        db, regular_user, server_keys=("server.view", "server.mods.toggle")
+    )
+    _installierte_mod(db, server.id, enabled=False)
+
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_mod_toggle",
+        arguments=_toggle_arguments(server.id, True),
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    preview = json.loads(proposal.preview_json)
+    assert preview["operation"] == "mod_enable"
+    assert preview["was_enabled"] is False
+    # Die Startzeile entsteht beim Bau des Containers — vorher wirkt nichts.
+    assert preview["restart_required"] is True
+    # Die Rueckfrage der Karte setzt `path` ein („Den Schalter der Mod
+    # „{{path}}" umlegen?"). Ohne den Schluessel stand dort ein leeres Paar
+    # Anfuehrungszeichen, und der Bestaetigende sollte zustimmen, ohne zu
+    # lesen, wozu.
+    assert preview["path"] == "Moros Indominus"
+
+
+def test_der_name_der_mod_steht_in_der_rueckfrage(
+    db: Session, regular_user: User
+) -> None:
+    """Auch beim Einspielen — und ohne bekannten Namen die Kennung.
+
+    Eine frisch in der Werkstatt gefundene Mod hat im Panel noch keinen
+    Namen; dann ist die Workshop-Kennung die ehrlichere Auskunft als eine
+    leere Zeile.
+    """
+    import json
+
+    server, conversation = _setup(
+        db, regular_user,
+        server_keys=("server.view", "server.mods.read", "server.mods.write"),
+    )
+
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_mod_install",
+        arguments=_install_arguments(server.id),
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    preview = json.loads(proposal.preview_json)
+    assert preview["path"]
+    assert preview["path"] == (preview["known_name"] or preview["workshop_id"])
+
+
+def test_der_schalter_legt_die_spalte_um(
+    db: Session, regular_user: User
+) -> None:
+    """Die Wahrheit ueber „welche Mod ist aktiv" steht in `mods.enabled`.
+
+    Von dort baut `games/base.active_mod_ids` die Startzeile — nicht aus einer
+    Spielkonfiguration. Genau diese Spalte muss der Schalter treffen; alles
+    andere (Modlisten-Dateien, `.disabled`-Marken) zieht `update_modlist`
+    hinterher und ist je nach Spiel wirkungslos.
+    """
+    server, _conversation = _setup(
+        db, regular_user, server_keys=("server.view", "server.mods.toggle")
+    )
+    mod = _installierte_mod(db, server.id, enabled=True)
+
+    ergebnis = ai_proposal_service._execute_mod_toggle(
+        db, server_id=server.id,
+        payload={"workshop_id": "1559212036", "enabled": False},
+    )
+
+    db.refresh(mod)
+    assert mod.enabled is False
+    assert ergebnis["enabled"] is False
+    assert ergebnis["restart_required"] is True
+
+
+def test_eine_installation_meldet_den_schalterstand_mit(
+    db: Session, regular_user: User
+) -> None:
+    """Installiert heisst nicht aktiv.
+
+    Eine vorhandene, aber ausgeschaltete Mod laedt der Installationspfad
+    zwar herunter — in die Startzeile kommt sie trotzdem nicht. Ohne diesen
+    Wert in der Vorschau meldet die KI Erfolg und der Server startet ohne die
+    Mod.
+    """
+    import json
+
+    server, conversation = _setup(
+        db, regular_user,
+        server_keys=("server.view", "server.mods.read", "server.mods.write"),
+    )
+    _installierte_mod(db, server.id, enabled=False)
+
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_mod_install",
+        arguments=_install_arguments(server.id, action="reinstall"),
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    preview = json.loads(proposal.preview_json)
+    assert preview["already_installed"] is True
+    assert preview["currently_enabled"] is False

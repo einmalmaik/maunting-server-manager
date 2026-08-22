@@ -50,7 +50,7 @@ from models import AiConversation, AiMessage, AiProvider, User
 # Bezug — die Originalnachrichten liegen danach hinter `summarized_until`.
 # Der fuehrende Unterstrich bleibt: die Funktion gehoert dem Kontextaufbau, die
 # Verdichtung borgt sie sich nur, statt eine zweite Fassung zu pflegen.
-from services import ai_context_window, ai_reasoning
+from services import ai_context_window, ai_lage, ai_reasoning
 from services.ai_context_service import (
     _message_content_for_provider,
     teilbudgets,
@@ -203,9 +203,16 @@ def _pending_messages(db, conversation: AiConversation) -> list[AiMessage]:
 
 
 def _foldable_window(
-    foldable: list[AiMessage], grenze: int = MAX_SOURCE_CHARS
+    foldable: list[AiMessage], grenze: int = MAX_SOURCE_CHARS,
+    user_zone: str = "UTC",
 ) -> tuple[list[AiMessage], str]:
     """Waehlt die aeltesten Nachrichten, die zusammen in ``grenze`` passen.
+
+    ``user_zone`` muss dieselbe sein wie im Kontextaufbau. Ohne sie griff die
+    Vorgabe "UTC" von `_message_content_for_provider`, und dieselbe Nachricht
+    trug in der Zusammenfassung eine andere Uhrzeit als in der Historie — bei
+    Europe/Berlin zwei Stunden Versatz. Aus zwei Uhrzeiten fuer denselben Satz
+    kann ein Modell einen Ablauf konstruieren, den es nie gab.
 
     Frueher wurde der *gesamte* faltbare Bereich zu einem Text verkettet und
     dann mit `[-MAX_SOURCE_CHARS:]` am Anfang abgeschnitten, waehrend
@@ -232,7 +239,7 @@ def _foldable_window(
         sprecher = "Benutzer" if row.role == "user" else "Assistent"
         zeile = (
             f"{sprecher}: "
-            f"{redact_sensitive_text(_message_content_for_provider(row))}"
+            f"{redact_sensitive_text(_message_content_for_provider(row, user_zone))}"
         )
         if fenster and laenge + len(zeile) + 1 > grenze:
             break
@@ -277,7 +284,13 @@ async def compact_conversation(
 
         rows = _pending_messages(db, conversation)
         foldable = rows[: len(rows) - KEEP_RECENT_MESSAGES]
-        window, transcript = _foldable_window(foldable, _quellgrenze(context_chars))
+        # Dieselbe Zone wie im Kontextaufbau (`ai_context_service`), damit
+        # dieselbe Nachricht in Zusammenfassung und Historie dieselbe Uhrzeit
+        # traegt.
+        zone = ai_lage.zone_des_benutzers(user)
+        window, transcript = _foldable_window(
+            foldable, _quellgrenze(context_chars), zone
+        )
         # Die Grenze steht auf der letzten *tatsaechlich uebertragenen*
         # Nachricht. Stuende sie wie vorher auf `foldable[-1]`, waere alles, was
         # nicht mehr ins Fenster passte, aus dem Kontext gefiltert, ohne je in
@@ -307,7 +320,9 @@ async def compact_conversation(
             gekuerzt = [row for row in window if row.created_at != grenzzeit]
             if not gekuerzt:
                 return False
-            window, transcript = _foldable_window(gekuerzt, _quellgrenze(context_chars))
+            window, transcript = _foldable_window(
+                gekuerzt, _quellgrenze(context_chars), zone
+            )
         boundary = window[-1].created_at
         previous = conversation.summary or ""
         api_key = resolve_api_key(db, provider, user.id)
