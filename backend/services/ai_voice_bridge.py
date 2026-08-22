@@ -422,13 +422,35 @@ class Sprachbruecke:
     async def _ton(self, pcm: bytes) -> None:
         vorher = self._erkennung.spricht
         aeusserung = self._erkennung.fuettern(pcm)
+        lauf_laeuft = self._laufende is not None and not self._laufende.done()
 
-        if not vorher and self._erkennung.spricht:
-            # Der Mensch hat angefangen. Redet die KI gerade, ist alles, was
-            # noch kommt, die Antwort auf die vorige Frage — und damit falsch.
-            if self._laufende is not None and not self._laufende.done():
+        if lauf_laeuft:
+            # Die KI arbeitet oder spricht gerade. Nicht jede Regung im Raum
+            # darf sie abwürgen: eine Tür, ein Huster, eine fremde Stimme im
+            # Hintergrund lösten die Rede-Kante genauso aus wie der Mensch —
+            # die Antwort war weg, und das Geräusch selbst wurde kurz darauf
+            # als Störung verworfen. Abgewürgt wird deshalb erst, wenn die
+            # laufende Äusserung dieselbe Messlatte reisst, an der auch der
+            # Huster-Filter misst: wer wirklich dazwischenredet, kommt durch —
+            # nur um die Mindestrede später. `_abwuergen` leert `_laufende`,
+            # darum feuert dieses Tor je Äusserung höchstens einmal.
+            if self._erkennung.rede_nachgewiesen:
                 await self._abwuergen()
+                await self._zustand_melden(ZUSTAND_HOERT)
+        elif not vorher and self._erkennung.spricht:
+            # Ohne laufende Antwort gibt es nichts zu schützen — „hört zu"
+            # kommt sofort mit der Rede-Kante, damit die Blase mitgeht.
             await self._zustand_melden(ZUSTAND_HOERT)
+        elif (
+            vorher
+            and not self._erkennung.spricht
+            and aeusserung is None
+            and self._zustand == ZUSTAND_HOERT
+        ):
+            # Als Störgeräusch verworfen. Ohne diese Meldung bliebe die
+            # Anzeige auf „hört zu" stehen — kein Zug dreht sie weiter, und
+            # der Zusteller wartet auf „bereit".
+            await self._zustand_melden(ZUSTAND_BEREIT)
 
         if aeusserung is None:
             return

@@ -19,6 +19,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 use crate::sandbox;
+use crate::system;
 use crate::uebernahme;
 
 /// Das Ereignis, mit dem die Oberflaeche die Bestaetigungskarte zeigt.
@@ -37,6 +38,7 @@ pub fn ausfuehren(
     match werkzeug {
         "desktop_dateien" => dateien(sandbox_pfad, argumente).map(Some),
         "desktop_launch_app" => starten(app, argumente).map(Some),
+        "desktop_system" => system::ausfuehren(argumente).map(Some),
         "desktop_steuern" => uebernahme::steuern(argumente).map(Some),
         "desktop_takeover_control" => {
             let minuten = argumente["minuten"]

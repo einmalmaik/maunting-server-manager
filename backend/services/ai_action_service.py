@@ -1224,9 +1224,10 @@ def _desktop_tool_definitions() -> list[dict]:
             "Arbeitet mit Dateien im Sandbox-Ordner auf dem Rechner des "
             "Benutzers. Pfade sind **immer** relativ zu diesem Ordner; "
             "außerhalb geht nichts, und der Rechner weist es ab. Nutze das "
-            "für alles, was der Benutzer an seinen eigenen Dateien möchte — "
-            "lesen, anlegen, ändern, aufräumen. Gelöschtes landet im "
-            "Papierkorb, nicht im Nichts. "
+            "für alles, was der Benutzer an den Dateien in diesem Ordner "
+            "möchte — lesen, anlegen, ändern, aufräumen. Gelöschtes landet "
+            "im Papierkorb, nicht im Nichts. Zum bloßen Ansehen anderswo auf "
+            "dem Rechner nimm desktop_system (absolute Pfade). "
             "Nicht nutzen für Serverdateien; dafür gibt es eigene Werkzeuge "
             "im Panel.",
             {
@@ -1324,6 +1325,33 @@ def _desktop_tool_definitions() -> list[dict]:
                 "menge": {
                     "type": "integer",
                     "description": "Bei scrollen die Rasten, bei warten die Sekunden.",
+                },
+            },
+            ["aktion"],
+        ),
+        _function(
+            "desktop_system",
+            "Sieht das Betriebssystem des Benutzers an — nur lesend. "
+            "aktion='laufwerke': alle Laufwerke mit Gesamt- und freiem Platz "
+            "(\"wie voll ist meine C-Platte\"). aktion='verzeichnis': listet "
+            "einen Ordner irgendwo auf dem Rechner. aktion='groesste': findet "
+            "die Platzfresser unter einem Pfad (größte Dateien und "
+            "Unterordner; lange Läufe werden nach Zeitbudget gekürzt und als "
+            "gekürzt gemeldet). Pfade sind hier **absolut** (z. B. "
+            "'C:\\Users\\Name\\Downloads') — anders als bei desktop_dateien. "
+            "Geschrieben wird hiermit nie; ändern und aufräumen geht nur im "
+            "Sandbox-Ordner über desktop_dateien.",
+            {
+                "aktion": {
+                    "type": "string",
+                    "enum": ["laufwerke", "verzeichnis", "groesste"],
+                },
+                "pfad": {
+                    "type": "string",
+                    "maxLength": 400,
+                    "description": (
+                        "Absoluter Pfad; nötig bei verzeichnis und groesste."
+                    ),
                 },
             },
             ["aktion"],
@@ -3057,8 +3085,9 @@ def _execute_global_read_tool(db: Session, *, user: User, tool_name: str, argume
         "desktop_launch_app",
         "desktop_takeover_control",
         "desktop_steuern",
+        "desktop_system",
     ):
-        # Dieselbe Lage wie bei `wait_until`: die vier werden im Rundenlauf
+        # Dieselbe Lage wie bei `wait_until`: die fuenf werden im Rundenlauf
         # abgefangen (`_desktop_behandeln`), werden zu einem Auftrag an den
         # Rechner des Benutzers, und der Lauf parkt. Dieser Dispatch sieht sie
         # nur, wenn die Bitte gar nicht von einem Rechner kam — dann sortiert

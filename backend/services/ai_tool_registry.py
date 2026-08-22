@@ -606,6 +606,11 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "desktop_dateien": Werkzeug(
         "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
     ),
+    # Nur lesend (Laufwerke, Ordner, Platzfresser) — die Schreibgrenze bleibt
+    # der Sandbox-Ordner, und sie steht im Rust (system.rs liest nur).
+    "desktop_system": Werkzeug(
+        "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
+    ),
     "desktop_launch_app": Werkzeug(
         "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
     ),

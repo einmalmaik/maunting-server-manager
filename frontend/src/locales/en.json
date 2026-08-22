@@ -568,6 +568,7 @@
       "desktop_dateien": "Files on your computer",
       "desktop_launch_app": "Application launched",
       "desktop_steuern": "Computer operated",
+      "desktop_system": "Looked around your computer",
       "desktop_takeover_control": "Takeover requested",
       "forget_memory": "Deleted memories",
       "forget_skill": "Deleted a skill",
@@ -614,6 +615,7 @@
       "desktop_dateien": "Working in your sandbox",
       "desktop_launch_app": "Launching the application",
       "desktop_steuern": "Operating your computer",
+      "desktop_system": "Looking around your computer",
       "desktop_takeover_control": "Waiting for your approval",
       "forget_memory": "Deleting the memory",
       "forget_skill": "Deleting the skill",
@@ -1779,7 +1781,7 @@
     },
     "ai_desktop_use": {
       "title": "AI tools on your own computer",
-      "desc": "Allows the AI to work on the user's computer — through the Smart System app, never through the panel. It works only inside the sandbox folder chosen by the user; Windows directories, the registry and system files are excluded. Before it takes over mouse or keyboard, the user must confirm on their machine; that grant is time-limited and revocable at any time. A request from the browser never reaches these tools — the origin lives in the token of the paired session, no client can claim it."
+      "desc": "Allows the AI to work on the user's computer — through the Smart System app, never through the panel. It may look at what the user can see themselves (drives, folders, disk space — read-only); creating, changing and deleting happens only inside the sandbox folder chosen by the user. Before it takes over mouse or keyboard, the user must confirm on their machine; that grant is time-limited and revocable at any time. A request from the browser never reaches these tools — the origin lives in the token of the paired session, no client can claim it."
     },
     "ai_usage_read_all": {
       "title": "View overall AI usage",
@@ -4761,7 +4763,7 @@
       "zeitzoneLabel": "Time zone",
       "speichert": "Saving …",
       "weiter": "Next",
-      "sandboxErklaerung": "The sandbox is the only folder where the AI may later create and edit files — for coding tasks, for example. System directories are always off limits.",
+      "sandboxErklaerung": "The sandbox is the only folder where the AI may later create, edit and delete files — for coding tasks, for example. It can also look at the rest of the computer (read-only, disk space for instance); writing happens exclusively here.",
       "sandboxLabel": "Sandbox folder",
       "ordnerWaehlen": "Choose folder",
       "spaeterFestlegen": "Choose later"
@@ -4818,7 +4820,7 @@
       "autostartHinweis": "The app starts minimised to the tray — only then does the wake word listen from the start.",
       "autostartFehler": "Autostart could not be changed.",
       "diagnose": "Diagnostics",
-      "diagnoseHinweis": "These buttons only recolour the tray icon — to verify the state colours arrive. When idle, the tray shows the logo.",
+      "diagnoseHinweis": "These buttons recolour the tray icon — and, while the overlay is open as a showcase, the voice orb too. When idle, the tray shows the logo.",
       "status": {
         "bereit": "Ready",
         "hoert": "Listening",
@@ -4844,7 +4846,7 @@
         "gefahr": "Danger zone"
       },
       "overlayTesten": "Test overlay",
-      "overlayTestenHinweis": "Starts the voice session in the overlay — the same path as the voice hotkey and the wake word. Click again to end it."
+      "overlayTestenHinweis": "Opens the overlay as a showcase: you see the orb and state text, but no microphone runs and nobody listens. Use the state buttons above to preview each colour. Click again (or X/ESC) to close."
     },
     "schliessen": {
       "titel": "Close MSS?",

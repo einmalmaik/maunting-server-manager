@@ -303,6 +303,12 @@ def test_zustellung_buendelt_und_markiert_vor_dem_lauf(db: Session) -> None:
     assert "Meldung des Panels" in nachricht.content
     assert "Backups geprueft" in nachricht.content
     assert "Kalender aufgeraeumt" in nachricht.content
+    # Worker-Fragen zuerst selbst beantworten (Fall MauntARK, 22.08.2026):
+    # der Betreiber hatte alle Zielwerte diktiert, und die Frage des Workers
+    # ging trotzdem ungeprueft an ihn zurueck. Der Lieferauftrag traegt die
+    # Bedingung, nicht nur die Weiterreichung.
+    assert "sieh zuerst im Gespräch nach" in nachricht.content
+    assert "behellige den Benutzer nicht" in nachricht.content
     # **Und sie ist Maschinerie, kein Gespraech.** Der Text traegt eine
     # JSON-Nutzlast und eine Anweisung an das Gehirn; der Betreiber las das im
     # eigenen Chat, an sich selbst adressiert. Ein Worker arbeitet im

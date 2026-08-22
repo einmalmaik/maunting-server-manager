@@ -22,11 +22,13 @@ import {
   registriereAudioGeraete,
   registriereAudioVerarbeitung,
 } from '@/components/ai/voice/audioGeraete'
-import { useSprachsitzung } from '@/components/ai/voice/useSprachsitzung'
+import { useSprachsitzung, type Sprachzustand } from '@/components/ai/voice/useSprachsitzung'
 import { istAngemeldet, stillAnmelden } from './transport'
 import {
+  OVERLAY_SCHAUFENSTER,
   OVERLAY_SPRACHE_ENDE,
   OVERLAY_SPRACHE_START,
+  OVERLAY_ZUSTAND_TEST,
   beiFremdemSprachstart,
   sprachstartMelden,
   sprachzustandVerdrahten,
@@ -49,6 +51,11 @@ export function OverlayFenster() {
   // verfuegbaren Zugang statt auf dem gewaehlten.
   const { zustand, zeilen, fehler, pegel, starten, beenden } = useSprachsitzung(null)
   const [sichtbar, setSichtbar] = useState(false)
+  // Schaufenster: das Fenster zeigt sich mit der Blase, aber ohne Mikrofon
+  // und ohne Leitung — der Testknopf der Einstellungen. Die Diagnose-Knöpfe
+  // färben die Blase über `testZustand`; eine echte Sitzung beendet den Modus.
+  const [schaufenster, setSchaufenster] = useState(false)
+  const [testZustand, setTestZustand] = useState<Sprachzustand>('bereit')
   const transkriptEnde = useRef<HTMLDivElement>(null)
 
   // Frameless und transparent: der Fensterhintergrund kommt vom Panel-
@@ -61,6 +68,9 @@ export function OverlayFenster() {
   useEffect(() => {
     const abo = listen(OVERLAY_SPRACHE_START, () => {
       setSichtbar(true)
+      // Ein echter Start löst ein offenes Schaufenster ab — ab jetzt zeigt
+      // die Blase den Sitzungszustand, nicht mehr die Diagnose-Farbe.
+      setSchaufenster(false)
       void (async () => {
         // Jedes Fenster hält sein eigenes Access-Token im Speicher; das
         // Overlay meldet sich erst an, wenn es wirklich sprechen soll.
@@ -90,6 +100,34 @@ export function OverlayFenster() {
     }
   }, [starten])
 
+  // Das Schaufenster (Testknopf): zeigen ohne Sitzung. Kein Mikrofon, keine
+  // Anmeldung, keine Leitung — nur die Blase und der Zustandstext.
+  useEffect(() => {
+    const abo = listen(OVERLAY_SCHAUFENSTER, () => {
+      setSichtbar(true)
+      setSchaufenster(true)
+      setTestZustand('bereit')
+    })
+    return () => {
+      void abo.then((weg) => weg())
+    }
+  }, [])
+
+  // Die Diagnose-Knöpfe der Einstellungen färben die Blase im Schaufenster.
+  // Außerhalb des Schaufensters (echte Sitzung, verstecktes Fenster) wird
+  // das Ereignis ignoriert — die Sitzung hat ihren eigenen Zustand.
+  useEffect(() => {
+    const abo = listen<string>(OVERLAY_ZUSTAND_TEST, (ereignis) => {
+      const wert = ereignis.payload
+      if (wert === 'bereit' || wert === 'hoert' || wert === 'denkt' || wert === 'spricht') {
+        setTestZustand(wert)
+      }
+    })
+    return () => {
+      void abo.then((weg) => weg())
+    }
+  }, [])
+
   // Beginnt im Hauptfenster eine Sitzung, endet die hiesige.
   useEffect(() => beiFremdemSprachstart('overlay', beenden), [beenden])
   // Tray-Farbe und Ducking folgen dem Zustand dieses Fensters.
@@ -102,6 +140,7 @@ export function OverlayFenster() {
   function schliessen() {
     beenden()
     setSichtbar(false)
+    setSchaufenster(false)
     void overlaySichtbar(false)
   }
 
@@ -132,11 +171,13 @@ export function OverlayFenster() {
   // `aus` zählt mit, damit auch ein Verbindungsfehler das Fenster nicht
   // ewig stehen lässt. Jede echte Aktivität setzt die Frist zurück.
   useEffect(() => {
-    if (!sichtbar || (zustand !== 'bereit' && zustand !== 'aus')) return
+    // Im Schaufenster gibt es kein Mikrofon, das die Frist schützen müsste —
+    // wer mit den Diagnose-Farben spielt, soll nicht nach 20 s im Dunkeln stehen.
+    if (!sichtbar || schaufenster || (zustand !== 'bereit' && zustand !== 'aus')) return
     const frist = window.setTimeout(() => schliessen(), STILLE_SCHLIESST_MS)
     return () => window.clearTimeout(frist)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sichtbar, zustand])
+  }, [sichtbar, schaufenster, zustand])
 
   // Solange keine Sitzung angefordert wurde, zeigt das (ohnehin versteckte)
   // Fenster nichts — sonst blitzte beim App-Start ein leerer Orb auf.
@@ -144,7 +185,13 @@ export function OverlayFenster() {
     return null
   }
 
-  const letzteZeilen = zeilen.slice(-3)
+  const letzteZeilen = schaufenster ? [] : zeilen.slice(-3)
+  // Im Schaufenster zeigt die Blase die Diagnose-Farbe; ein fester kleiner
+  // Pegel lässt „hört zu" und „spricht" atmen, wie sie es im Ernstfall täten.
+  const anzeigeZustand = schaufenster ? testZustand : zustand
+  const anzeigePegel = schaufenster
+    ? () => (testZustand === 'hoert' || testZustand === 'spricht' ? 0.35 : 0)
+    : pegel
 
   return (
     <div
@@ -161,10 +208,10 @@ export function OverlayFenster() {
         </button>
       </div>
       <div className="-mt-2" data-tauri-drag-region>
-        <Sprachblase zustand={zustand} pegel={pegel} breite={420} hoehe={150} />
+        <Sprachblase zustand={anzeigeZustand} pegel={anzeigePegel} breite={420} hoehe={150} />
       </div>
       <p className="-mt-2 text-sm text-on-surface" aria-live="polite">
-        {fehler ? t(fehler) : t(`ai.voice.zustand.${zustand}`)}
+        {!schaufenster && fehler ? t(fehler) : t(`ai.voice.zustand.${anzeigeZustand}`)}
       </p>
       {letzteZeilen.length > 0 && (
         <div className="mt-1 max-h-16 w-full overflow-y-auto text-xs leading-5">

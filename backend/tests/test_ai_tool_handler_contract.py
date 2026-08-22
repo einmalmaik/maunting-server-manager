@@ -209,6 +209,19 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     Gewoehnung. Wer sie erneut anhebt, misst vorher nach und schreibt es hin.
     Der Hebel ist unveraendert: zwei Werkzeuge mit demselben Schema zu einem
     machen, nicht Text streichen.
+
+    **Stand 22.08.2026, nachgemessen: Grenze 64.000.** `desktop_system`
+    (Laufwerke, Verzeichnis, Platzfresser — 964 Zeichen) ist das fuenfte
+    Desktop-Werkzeug, wieder ein Betreiberentscheid: die KI darf das
+    Betriebssystem **lesen** ("wie voll ist meine C-Platte"), waehrend
+    Schreiben in der Sandbox bleibt. Nachgemessen: aus der App **62.180**
+    Zeichen, 67 Werkzeuge; aus dem Panel **57.660** Zeichen, 62 Werkzeuge.
+    Zusammenlegen scheidet aus: `desktop_dateien` arbeitet mit relativen
+    Pfaden innerhalb der Sandbox-Grenze, `desktop_system` mit absoluten
+    ausserhalb — ein Werkzeug mit zwei Pfadwelten waere genau die
+    Verwechslung, die die getrennten Beschreibungen verhindern sollen. Die
+    Grenze steht deshalb bei 64.000, wieder mit unter zweitausend Zeichen
+    Luft. Wer sie erneut anhebt, misst vorher nach und schreibt es hin.
     """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(
@@ -222,7 +235,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
             ],
             ensure_ascii=False,
         )
-        assert len(katalog) < 62_000, (
+        assert len(katalog) < 64_000, (
             f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
             f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
             "taucht in keiner Budgetrechnung auf."

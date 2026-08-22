@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
+import { emit } from '@tauri-apps/api/event'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { AlertTriangle, Mic, MonitorCog, Volume2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -27,6 +28,7 @@ import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { Button, ProgressBar, Slider, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { Gefahrenzone } from './Gefahrenzone'
+import { OVERLAY_ZUSTAND_TEST } from './sprachKoordination'
 import { WakewordEinrichtung } from './WakewordEinrichtung'
 import {
   audioGeraete,
@@ -122,6 +124,11 @@ function DesktopIntegration() {
   async function statusWechseln(neu: AgentStatus) {
     setStatus(neu)
     await setzeStatus(neu).catch(() => {})
+    // Das Schaufenster-Ereignis kommt von hier und nur von hier — nicht aus
+    // `setze_status` in Rust: den Befehl ruft auch die Zustandsverdrahtung
+    // echter Sitzungen, und die Blase im Schaufenster folgte dann der
+    // fremden Sitzung statt der geklickten Diagnose-Farbe.
+    await emit(OVERLAY_ZUSTAND_TEST, neu).catch(() => {})
   }
 
   return (
@@ -168,10 +175,9 @@ function DesktopIntegration() {
           ))}
         </div>
         <div className="mt-3">
-          {/* Exakt derselbe Weg wie Sprach-Hotkey und Wake-Word — der Knopf
-              startet die echte Sitzung im Overlay bzw. beendet sie. Vorher
-              zeigte er nur das leere, durchsichtige Fenster: „nichts
-              passiert" war die korrekte Beschreibung. */}
+          {/* Das Schaufenster: zeigt das Overlay ohne Mikrofon und ohne
+              Sitzung — die Diagnose-Knöpfe oben färben dann die Blase.
+              Zweiter Druck (oder X/ESC am Fenster) schließt wieder. */}
           <Button variant="secondary" onClick={() => void overlayTesten().catch(() => {})}>
             {t('mss.einstellungen.overlayTesten')}
           </Button>

@@ -293,6 +293,38 @@ def test_the_brain_keeps_the_conversation_open_after_a_receipt() -> None:
     assert "worker_antwort" in gehirn
 
 
+def test_the_brain_carries_known_facts_into_the_order() -> None:
+    """Was der Benutzer schon gesagt hat, gehört in den Auftrag — wörtlich.
+
+    Gemeldet am 22.08.2026 (MauntARK): Mod, Wildspawns, Zähmen/Crafting und
+    die Zieldatei waren im Gespräch längst diktiert, der Auftrag trug sie
+    nicht — der Worker meldete "fehlen noch die konkreten Zielwerte", und der
+    Betreiber musste alles wiederholen. "Ich sollte noch mal Angaben machen
+    zu den Angaben, die ich bereits schon vorhin gemacht habe."
+    """
+    gehirn = ai_prompt.build(rolle="gehirn")
+
+    assert "wörtlich in den Auftrag" in gehirn
+    assert "fragst du nie erneut" in gehirn
+
+
+def test_the_brain_answers_worker_questions_from_the_conversation() -> None:
+    """Eine Worker-Frage geht erst durchs Gespräch, dann zum Benutzer.
+
+    Die zweite Hälfte desselben Falls: selbst wenn der Auftrag lückenhaft
+    war, steht die Antwort oft schon im Verlauf. Das Gehirn hat
+    `worker_antwort` — es soll damit selbst antworten, statt den Benutzer
+    seine eigenen Worte wiederholen zu lassen.
+    """
+    gehirn = ai_prompt.build(rolle="gehirn")
+
+    assert "sieh zuerst im Gespräch nach" in gehirn
+    assert "ohne den Benutzer zu behelligen" in gehirn
+    # Und der Fall des schon beendeten Auftrags: mit vervollständigtem Text
+    # neu starten, nicht erneut fragen.
+    assert "vervollständigtem Auftrag neu" in gehirn
+
+
 def test_an_incoming_result_gets_a_transition_not_a_dump() -> None:
     """Ein Ergebnis mitten im Gespräch braucht ein Übergangssignal.
 

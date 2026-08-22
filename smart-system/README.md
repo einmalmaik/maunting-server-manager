@@ -56,8 +56,10 @@ zeigt sie unter Einstellungen → Allgemein und noch einmal beim Koppeln.
   — beide in den Einstellungen änderbar und einzeln abschaltbar), Autostart,
   Wake-Word (rustpotter, offline), Audiogeräte-Auswahl (Ein- und
   Ausgabegerät unabhängig vom Windows-Standard, `audio.rs`), Audio-Ducking
-  (WASAPI), Sandbox-Dateizugriff, Übernahme von Maus und Tastatur, Tresor
-  (Anmeldeinformations-Manager). Das X schließt nicht: ein kleiner Dialog
+  (WASAPI), Sandbox-Dateizugriff, lesende Systemsicht (Laufwerke, Ordner,
+  Platzfresser — `system.rs`, enthält bewusst keinen schreibenden Aufruf; die
+  Schreibgrenze bleibt der Sandbox-Ordner), Übernahme von Maus und Tastatur,
+  Tresor (Anmeldeinformations-Manager). Das X schließt nicht: ein kleiner Dialog
   fragt, ob die App in den Hintergrund geht (Standard) oder wirklich endet.
 - `frontend/src/desktop/` (im Nachbarordner) — der Desktop-Einstieg der
   gemeinsamen Oberfläche: Bootstrap mit Laufzeit-API-Adresse, Splash,

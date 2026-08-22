@@ -568,6 +568,7 @@
       "desktop_dateien": "Dateien auf deinem Rechner",
       "desktop_launch_app": "Programm gestartet",
       "desktop_steuern": "Rechner bedient",
+      "desktop_system": "Auf deinem Rechner nachgesehen",
       "desktop_takeover_control": "Übernahme angefragt",
       "forget_memory": "Erinnerungen gelöscht",
       "forget_skill": "Skill gelöscht",
@@ -614,6 +615,7 @@
       "desktop_dateien": "Ich arbeite in deiner Sandbox",
       "desktop_launch_app": "Ich starte das Programm",
       "desktop_steuern": "Ich bediene deinen Rechner",
+      "desktop_system": "Ich sehe auf deinem Rechner nach",
       "desktop_takeover_control": "Ich warte auf deine Freigabe",
       "forget_memory": "Ich lösche die Erinnerung",
       "forget_skill": "Ich lösche den Skill",
@@ -1779,7 +1781,7 @@
     },
     "ai_desktop_use": {
       "title": "KI-Werkzeuge auf dem eigenen Rechner",
-      "desc": "Erlaubt der KI, auf dem Rechner des Benutzers zu arbeiten — über die Smart-System-App, nie über das Panel. Sie arbeitet ausschließlich im selbst gewählten Sandbox-Ordner; Windows-Verzeichnisse, Registry und Systemdateien sind ausgeschlossen. Bevor sie Maus oder Tastatur übernimmt, muss der Benutzer das an seinem Rechner bestätigen; die Freigabe ist befristet und jederzeit widerrufbar. Eine Bitte aus dem Browser erreicht diese Werkzeuge nie — die Herkunft steht im Token der gekoppelten Sitzung, kein Client kann sie behaupten."
+      "desc": "Erlaubt der KI, auf dem Rechner des Benutzers zu arbeiten — über die Smart-System-App, nie über das Panel. Ansehen darf sie, was der Benutzer selbst sehen kann (Laufwerke, Ordner, Speicherplatz — nur lesend); angelegt, geändert und gelöscht wird ausschließlich im selbst gewählten Sandbox-Ordner. Bevor sie Maus oder Tastatur übernimmt, muss der Benutzer das an seinem Rechner bestätigen; die Freigabe ist befristet und jederzeit widerrufbar. Eine Bitte aus dem Browser erreicht diese Werkzeuge nie — die Herkunft steht im Token der gekoppelten Sitzung, kein Client kann sie behaupten."
     },
     "ai_usage_read_all": {
       "title": "Gesamte KI-Nutzung einsehen",
@@ -4761,7 +4763,7 @@
       "zeitzoneLabel": "Zeitzone",
       "speichert": "Speichert …",
       "weiter": "Weiter",
-      "sandboxErklaerung": "Die Sandbox ist der einzige Ordner, in dem die KI später Dateien anlegen und bearbeiten darf — zum Beispiel für Coding-Aufgaben. Systemverzeichnisse sind grundsätzlich tabu.",
+      "sandboxErklaerung": "Die Sandbox ist der einzige Ordner, in dem die KI später Dateien anlegen, bearbeiten und löschen darf — zum Beispiel für Coding-Aufgaben. Ansehen kann sie den Rechner auch außerhalb (nur lesend, etwa den Speicherplatz); geschrieben wird ausschließlich hier.",
       "sandboxLabel": "Sandbox-Ordner",
       "ordnerWaehlen": "Ordner wählen",
       "spaeterFestlegen": "Später festlegen"
@@ -4818,7 +4820,7 @@
       "autostartHinweis": "Die App startet minimiert im Tray — nur so hört das Wake-Word von Anfang an zu.",
       "autostartFehler": "Autostart ließ sich nicht umstellen.",
       "diagnose": "Diagnose",
-      "diagnoseHinweis": "Die Knöpfe färben nur das Tray-Symbol um — zum Prüfen, dass die Zustandsfarben ankommen. Im Ruhezustand zeigt das Tray das Logo.",
+      "diagnoseHinweis": "Die Knöpfe färben das Tray-Symbol um — und, solange das Overlay als Schaufenster offen ist, auch die Sprachblase. Im Ruhezustand zeigt das Tray das Logo.",
       "status": {
         "bereit": "Bereit",
         "hoert": "Hört zu",
@@ -4844,7 +4846,7 @@
         "gefahr": "Gefahrenzone"
       },
       "overlayTesten": "Overlay testen",
-      "overlayTestenHinweis": "Startet die Sprachsitzung im Overlay — derselbe Weg wie Sprach-Hotkey und Wake-Word. Noch ein Klick beendet sie wieder."
+      "overlayTestenHinweis": "Öffnet das Overlay als Schaufenster: man sieht Blase und Zustandstext, aber kein Mikrofon läuft und niemand hört zu. Mit den Zustandsknöpfen oben lässt sich jede Farbe ansehen. Noch ein Klick (oder X/ESC) schließt es."
     },
     "schliessen": {
       "titel": "MSS schließen?",

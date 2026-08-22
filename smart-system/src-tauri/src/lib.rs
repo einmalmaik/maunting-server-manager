@@ -18,6 +18,7 @@ mod ducking;
 mod geheimnisse;
 mod konfig;
 mod sandbox;
+mod system;
 mod tray;
 mod uebernahme;
 mod wakeword;
@@ -28,6 +29,10 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[tauri::command]
 fn setze_status(app: tauri::AppHandle, status: String) -> Result<(), String> {
+    // Nur das Tray. Das Schaufenster-Ereignis (`mss:overlay-zustand-test`)
+    // schicken die Diagnose-Knöpfe selbst — hier stand es einmal mit, und
+    // dann folgte die Schaufenster-Blase jeder echten Sitzung des
+    // Hauptfensters, weil auch die Zustandsverdrahtung diesen Befehl ruft.
     tray::set_status(&app, &status)
 }
 
@@ -187,6 +192,9 @@ fn overlay_sichtbar(app: tauri::AppHandle, sichtbar: bool) -> Result<(), String>
     if sichtbar {
         fenster.show().map_err(|e| e.to_string())?;
     } else {
+        // X, ESC und die Selbstschließung laufen hierher — ein verstecktes
+        // Fenster ist nie mehr ein Schaufenster.
+        SCHAUFENSTER_OFFEN.store(false, std::sync::atomic::Ordering::SeqCst);
         fenster.hide().map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -207,42 +215,67 @@ fn hauptfenster_umschalten(app: &tauri::AppHandle) {
     }
 }
 
-/// Startet die Sprachsitzung im Overlay, falls dort keine läuft. Die
-/// Sichtbarkeit des Fensters **ist** der Zustand: das Overlay versteckt sich
-/// selbst, wenn seine Sitzung endet. Rust zeigt nur das Fenster und schickt
-/// Ereignisse — die Sitzung selbst (Mikrofon, Leitung) gehört dem Frontend.
-/// Aufrufer: der Sprach-Hotkey, der Testknopf und das erkannte Wake-Word.
+/// Ob das sichtbare Overlay nur das **Schaufenster** ist (Testknopf) und
+/// keine Sitzung trägt. Die Sichtbarkeit allein war einmal der Zustand
+/// („sichtbar = Sitzung läuft"); das Schaufenster bricht diese Gleichung,
+/// und ohne dieses Flag blieb das Wake-Word stumm, solange das Testfenster
+/// stand — der Frühabbruch in `sprachsitzung_starten` hielt jede echte
+/// Sitzung auf, und die 20-s-Selbstschließung ist im Schaufenster bewusst aus.
+static SCHAUFENSTER_OFFEN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Startet die Sprachsitzung im Overlay, falls dort keine läuft. Rust zeigt
+/// nur das Fenster und schickt Ereignisse — die Sitzung selbst (Mikrofon,
+/// Leitung) gehört dem Frontend. Ein offenes Schaufenster wird abgelöst:
+/// das Frontend hört auf denselben Start und schaltet um.
+/// Aufrufer: der Sprach-Hotkey und das erkannte Wake-Word.
 pub(crate) fn sprachsitzung_starten(app: &tauri::AppHandle) {
     let Some(overlay) = app.get_webview_window("overlay") else {
         return;
     };
-    if overlay.is_visible().unwrap_or(false) {
+    let sichtbar = overlay.is_visible().unwrap_or(false);
+    let schaufenster = SCHAUFENSTER_OFFEN.swap(false, std::sync::atomic::Ordering::SeqCst);
+    if sichtbar && !schaufenster {
         return;
     }
     let _ = overlay.show();
     let _ = app.emit("mss:overlay-sprache-start", ());
 }
 
-/// Sprach-Hotkey und Testknopf: Sitzung im Overlay starten — oder beenden,
-/// wenn das Overlay schon offen ist.
+/// Sprach-Hotkey: Sitzung im Overlay starten — oder beenden, wenn dort schon
+/// eine läuft. Ein offenes Schaufenster zählt nicht als laufende Sitzung:
+/// wer den Sprach-Hotkey drückt, will reden, nicht das Testfenster schließen.
 fn sprachsitzung_umschalten(app: &tauri::AppHandle) {
     let Some(overlay) = app.get_webview_window("overlay") else {
         return;
     };
-    if overlay.is_visible().unwrap_or(false) {
+    let sichtbar = overlay.is_visible().unwrap_or(false);
+    if sichtbar && !SCHAUFENSTER_OFFEN.load(std::sync::atomic::Ordering::SeqCst) {
         let _ = app.emit("mss:overlay-sprache-ende", ());
     } else {
         sprachsitzung_starten(app);
     }
 }
 
-/// Der Testknopf in den Einstellungen — exakt derselbe Weg wie Hotkey und
-/// Wake-Word. Vorher zeigte er nur das leere Fenster: die Overlay-Komponente
-/// zeichnet nichts, solange keine Sitzung angefordert wurde, und „nichts
-/// passiert" war die korrekte Beschreibung.
+/// Der Testknopf in den Einstellungen — ein **Schaufenster**, keine Sitzung:
+/// das Overlay zeigt sich mit der Sprachblase, aber ohne Mikrofon und ohne
+/// Leitung. Hier stand einmal der echte Sitzungsstart (derselbe Weg wie
+/// Hotkey und Wake-Word) — wer nur sehen wollte, wie das Overlay aussieht,
+/// sprach plötzlich mit der KI. Die vier Diagnose-Knöpfe (`setze_status`)
+/// färben zusätzlich die Blase. Zweiter Druck, X oder ESC schließen.
 #[tauri::command]
 fn overlay_testen(app: tauri::AppHandle) {
-    sprachsitzung_umschalten(&app);
+    let Some(overlay) = app.get_webview_window("overlay") else {
+        return;
+    };
+    if overlay.is_visible().unwrap_or(false) {
+        SCHAUFENSTER_OFFEN.store(false, std::sync::atomic::Ordering::SeqCst);
+        let _ = app.emit("mss:overlay-sprache-ende", ());
+    } else {
+        SCHAUFENSTER_OFFEN.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = overlay.show();
+        let _ = app.emit("mss:overlay-schaufenster", ());
+    }
 }
 
 /// Alle Audiogeräte mit Namen — für die Auswahl in den Einstellungen.

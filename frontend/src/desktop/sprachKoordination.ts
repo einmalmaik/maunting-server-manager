@@ -28,6 +28,14 @@ export const OVERLAY_SPRACHE_START = 'mss:overlay-sprache-start'
  * die Sitzung selbst gehört dem Frontend.
  */
 export const OVERLAY_SPRACHE_ENDE = 'mss:overlay-sprache-ende'
+/**
+ * Bitte an das Overlay: zeig dich als **Schaufenster** — ohne Mikrofon, ohne
+ * Leitung. Der Testknopf in den Einstellungen: man sieht die Blase, spricht
+ * aber mit niemandem.
+ */
+export const OVERLAY_SCHAUFENSTER = 'mss:overlay-schaufenster'
+/** Diagnose-Knöpfe: welche Zustandsfarbe das Schaufenster zeigen soll. */
+export const OVERLAY_ZUSTAND_TEST = 'mss:overlay-zustand-test'
 
 export type Sprachort = 'haupt' | 'overlay'
 

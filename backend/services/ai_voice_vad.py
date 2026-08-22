@@ -205,6 +205,17 @@ class Pausenerkennung:
         """Ob gerade jemand redet. Der Sprachmodus zeigt das als Zustand an."""
         return self._spricht
 
+    @property
+    def rede_nachgewiesen(self) -> bool:
+        """Ob die laufende Äusserung schon genug **Rede** trägt.
+
+        Dieselbe Messlatte wie beim Abgeben (`min_sekunden` laute Rahmen):
+        was darunter bleibt, wird dort als Huster verworfen. Die Brücke nimmt
+        das als Tor fürs Dazwischenreden — eine laufende Antwort wird erst
+        abgewürgt, wenn die Störung auch als Äusserung durchginge.
+        """
+        return self._spricht and self._laute_gesamt >= self._min_laute_rahmen
+
     def fuettern(self, pcm: bytes) -> Aeusserung | None:
         """Nimmt einen Tonrahmen beliebiger Länge entgegen.
 

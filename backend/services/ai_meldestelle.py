@@ -276,9 +276,11 @@ def _lieferauftrag(meldungen: list[AiMeldung]) -> str:
         "Hintergrund-Aufträge haben berichtet. Liefere dem Benutzer jetzt "
         "die Ergebnisse — in deiner eigenen Stimme, als eine zusammenhängende "
         "Wortmeldung, nicht als Liste von Protokollen. Enthält eine Meldung "
-        "eine Frage (art='frage'), stelle sie ihm so, dass er sie beantworten "
-        "kann, und nenne dabei, um welchen Auftrag es geht. Erfinde nichts "
-        "dazu.\n" + nutzlast
+        "eine Frage (art='frage'), sieh zuerst im Gespräch nach: steht die "
+        "Antwort dort schon, gib sie selbst mit worker_antwort zurück und "
+        "behellige den Benutzer nicht. Nur was das Gespräch nicht hergibt, "
+        "stelle ihm so, dass er es beantworten kann, und nenne dabei, um "
+        "welchen Auftrag es geht. Erfinde nichts dazu.\n" + nutzlast
     )
 
 
