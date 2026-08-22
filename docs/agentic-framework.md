@@ -188,6 +188,13 @@ Text (`redact_sensitive_text`) und stellt zu. Neu in v3: Sie ist auch **Sammelst
   woran er scheiterte, plus Kosten-Hinweis („dieser Auftrag hat N Anfragen verbraucht").
 - **Die Meldung ist das Ergebnis, nie der Prozess.** Werkzeugschritte sieht nur, wer die Worker-Ansicht
   öffnet.
+- **Der Bericht ist die letzte Werkzeugrunde — vollständig.** Er ist der Flaschenhals der ganzen
+  Architektur: das Gehirn hat keine Server- und keine Desktop-Werkzeuge, kann also nichts nachlesen.
+  Was der Bericht weglässt, ist nicht mehr im System. Die Rundengrenze kommt deshalb aus der Gliederung
+  der Antwort (`AiMessage.sections_json`) und nicht aus einer Leerzeile im Text: in `content` sind die
+  Runden mit `"\n\n"` aneinandergesetzt, und das sieht in Markdown genauso aus wie ein Absatz des
+  Modells. Wer nur den letzten Absatz nahm, verlor bei „Liste plus Schlusssatz" die Liste — am
+  22.08.2026 genau so die Speicherwerte einer Festplatte.
 
 ## 5. Provider-Zweiteilung
 

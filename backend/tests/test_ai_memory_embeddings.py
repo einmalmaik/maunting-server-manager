@@ -499,3 +499,53 @@ def test_unrelated_entries_score_lower_than_related_ones(
 
     assert scores[0] > scores[1]
     assert scores[0] > 0.2
+
+
+# ── Der Reparaturweg muss reparieren koennen ─────────────────────────────
+
+
+def test_ein_beschaedigtes_modell_gilt_nicht_als_vorhanden(tmp_path) -> None:
+    """"Datei existiert" ist keine Aussage ueber Brauchbarkeit.
+
+    Eine volle Platte hat `tokenizer.json` mitten im Text beschaedigt — die
+    Datei blieb 18 MB gross und endete korrekt, nur das JSON war ab der Mitte
+    kaputt. `scripts/fetch_embedding_model.py` prueft beim Update, ob das
+    Modell schon da ist, und meldete deshalb bei jedem Lauf "bereits
+    vorhanden": der eine Weg, der den Schaden haette beheben koennen, ging
+    an ihm vorbei. Die Gedaechtnissuche lief seither ohne Vektoren.
+    """
+    sys.path.insert(0, str(_backend_pfad()))
+    from scripts.fetch_embedding_model import vollstaendig
+
+    ordner = tmp_path / "potion"
+    ordner.mkdir()
+    (ordner / "config.json").write_text("{}", encoding="utf-8")
+    (ordner / "model.safetensors").write_bytes(b"gewichte")
+    (ordner / "tokenizer.json").write_text(
+        '{"model":{"vocab":[["a",-1.0],["b",-2.', encoding="utf-8"
+    )
+
+    assert vollstaendig(ordner) is False
+
+    (ordner / "tokenizer.json").write_text(
+        '{"model":{"vocab":[["a",-1.0]]}}', encoding="utf-8"
+    )
+    assert vollstaendig(ordner) is True
+
+
+def test_ein_fehlendes_stueck_gilt_ebenfalls_nicht_als_vorhanden(tmp_path) -> None:
+    """Die alte Zusage bleibt: fehlt eine Pflichtdatei, wird geladen."""
+    sys.path.insert(0, str(_backend_pfad()))
+    from scripts.fetch_embedding_model import vollstaendig
+
+    ordner = tmp_path / "potion"
+    ordner.mkdir()
+    (ordner / "config.json").write_text("{}", encoding="utf-8")
+
+    assert vollstaendig(ordner) is False
+
+
+def _backend_pfad():
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent.parent

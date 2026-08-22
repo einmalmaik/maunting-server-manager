@@ -15,6 +15,7 @@ etwas, das seit Wochen nicht mehr laeuft.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from sqlalchemy.orm import Session
@@ -35,8 +36,59 @@ MAX_BERICHT_ZEICHEN = 4000
 ERFOLG = ("completed",)
 
 
+def _letzte_runde(zeile: AiMessage) -> str:
+    """Der Text der **letzten Werkzeugrunde**, aus der Gliederung gelesen.
+
+    Die Gliederung (`AiMessage.sections_json`) kennt die Rundengrenze als
+    Tatsache: ein Textabschnitt waechst, bis ein Werkzeug kommt, danach faengt
+    ein neuer an (`ai_run_broker.Abzug.text_anhaengen`). Was nach dem letzten
+    Werkzeugabschnitt steht, ist der Schlussbericht — vollstaendig, mit allem,
+    was darin an Werten steht.
+
+    Der Umweg ueber `content` konnte das nicht: dort sind die Abschnitte mit
+    einer Leerzeile aneinandergesetzt (`Abzug.inhalt`), und eine Leerzeile
+    sieht in Markdown genauso aus wie ein Absatz des Modells. Wer den letzten
+    Absatz nahm, nahm bei einer Antwort aus Liste **plus** Schlusssatz nur den
+    Schlusssatz — die Zahlen darueber fielen weg. Genau so verlor der Bericht
+    am 22.08.2026 die Speicherwerte der C-Platte: der Worker hatte sie, das
+    Gehirn bekam nur noch den Satz "die Pruefung ist gelaufen".
+
+    Leer heisst: keine Gliederung (Nachricht aus der Zeit davor, oder der
+    Vermittler hat seinen Kanal der Groessengrenze geopfert) oder die Antwort
+    endete mit einem Werkzeug statt mit Text. Dann entscheidet der Aufrufer.
+    """
+    roh = getattr(zeile, "sections_json", None)
+    if not roh:
+        return ""
+    try:
+        abschnitte = json.loads(roh)
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(abschnitte, list):
+        return ""
+
+    letztes_werkzeug = -1
+    for stelle, abschnitt in enumerate(abschnitte):
+        if isinstance(abschnitt, dict) and abschnitt.get("art") == "tool":
+            letztes_werkzeug = stelle
+
+    stuecke = [
+        str(abschnitt.get("inhalt") or "").strip()
+        for abschnitt in abschnitte[letztes_werkzeug + 1:]
+        if isinstance(abschnitt, dict) and abschnitt.get("art") == "text"
+    ]
+    return "\n\n".join(stueck for stueck in stuecke if stueck)
+
+
 def abschlusstext(db: Session, run: AiRun, zustand: dict | None = None) -> str:
     """Die letzte Antwort des Modells **in diesem Lauf**.
+
+    Genauer: der Text der **letzten Werkzeugrunde**. Nicht das ganze Protokoll
+    (vorne stehen die Ankündigungen, die `MITREDEN` vor jedem Werkzeug
+    verlangt) und nicht nur dessen letzter Absatz (dann fällt bei einer
+    Antwort aus Liste plus Schlusssatz die Liste weg). Die Grenze kommt aus
+    der Gliederung der Nachricht, siehe `_letzte_runde`; nur wenn es die nicht
+    gibt, wird geraten.
 
     Öffentlich und nicht `_abschlusstext`, weil `ai_guardian_report` sie
     mitbenutzt. Dort stand einmal eine wortgleiche Kopie, und sie ist genau so
@@ -84,10 +136,21 @@ def abschlusstext(db: Session, run: AiRun, zustand: dict | None = None) -> str:
     if anker is not None:
         abfrage = abfrage.filter(AiMessage.created_at >= anker.created_at)
     zeile = abfrage.order_by(AiMessage.created_at.desc()).first()
-    if zeile is None or not zeile.content:
+    if zeile is None:
+        return ""
+
+    # Zuerst die Gliederung: sie **weiss**, wo die letzte Runde anfing.
+    schluss = _letzte_runde(zeile)
+    if schluss:
+        return redact_sensitive_text(schluss).strip()[-MAX_BERICHT_ZEICHEN:]
+
+    if not zeile.content:
         return ""
     text = redact_sensitive_text(str(zeile.content)).strip()
 
+    # Ab hier wird geraten, weil es nichts Besseres gibt — die Nachricht hat
+    # keine Gliederung.
+    #
     # **Von hinten**, nicht von vorne. Vorher stand hier `[:MAX_BERICHT_ZEICHEN]`,
     # und das war genau verkehrt herum: `content` ist das Protokoll des ganzen
     # Laufs, und `MITREDEN` verlangt vor jedem Werkzeugaufruf einen Satz. Vorne

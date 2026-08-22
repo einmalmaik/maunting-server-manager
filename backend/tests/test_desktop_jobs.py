@@ -260,6 +260,119 @@ class TestFristen:
         assert ergebnis["status"] == "expired"
         assert ergebnis["error_code"] == "DESKTOP_JOB_EXPIRED"
 
+    def test_ein_verpuffter_weckruf_wird_im_takt_nachgeholt(
+        self, db: Session, regular_user: User
+    ):
+        """Der Rechner ist oft schneller als der Lauf.
+
+        Zwischen dem Anlegen des Auftrags und dem Parken liegt das ganze
+        `_finalize_stream`; die App fragt derweil im Sekundentakt. Meldet sie
+        in dieser Spanne, steht der Lauf noch auf 'running', `darf_fortsetzen`
+        weist den Weckruf ab, und niemand holt ihn nach — geweckt haette dann
+        erst die 180-s-Frist des Auftrags. Der Betreiber wartete so bis zu
+        vier Minuten auf Zahlen, die laengst dalagen.
+
+        Nachgeholt wird es im Takt und nicht am Parken: dort laege zwischen
+        Park-Commit und Aufgabenende ein zusaetzlicher `await`, und in genau
+        dem Fenster faende ein Weckruf den Segmentplatz belegt.
+        """
+        from unittest.mock import patch
+
+        from services import ai_run_service
+
+        run = _lauf(db, regular_user)
+        run.stop_reason = "desktop_jobs"
+        job = desktop_job_service.anlegen(
+            db,
+            user_id=regular_user.id,
+            run_id=run.id,
+            tool_call_id="call-1",
+            tool_name="desktop_system",
+            arguments={"aktion": "laufwerke"},
+        )
+        db.commit()
+        # Der Rechner war schneller: das Ergebnis liegt schon da, der Weckruf
+        # des Routers ist ins Leere gelaufen.
+        desktop_job_service.ergebnis_melden(
+            db, job=job, ok=True, ergebnis={"laufwerke": []},
+        )
+
+        geweckt: list[str] = []
+        with patch.object(
+            ai_run_service, "lauf_fortsetzen",
+            lambda db_, *, run_id: geweckt.append(run_id) or True,
+        ):
+            desktop_job_service.verfallene_wecken(db)
+
+        assert geweckt == [run.id]
+
+    def test_ein_offener_auftrag_bleibt_liegen(
+        self, db: Session, regular_user: User
+    ):
+        """Die Gegenrichtung: solange der Rechner arbeitet, wird nicht geweckt.
+
+        Sonst saehe das Modell halbe Ergebnisse — dieselbe Regel wie bei den
+        Vorschlaegen.
+        """
+        from unittest.mock import patch
+
+        from services import ai_run_service
+
+        run = _lauf(db, regular_user)
+        run.stop_reason = "desktop_jobs"
+        desktop_job_service.anlegen(
+            db,
+            user_id=regular_user.id,
+            run_id=run.id,
+            tool_call_id="call-1",
+            tool_name="desktop_system",
+            arguments={"aktion": "laufwerke"},
+        )
+        db.commit()
+
+        geweckt: list[str] = []
+        with patch.object(
+            ai_run_service, "lauf_fortsetzen",
+            lambda db_, *, run_id: geweckt.append(run_id) or True,
+        ):
+            desktop_job_service.verfallene_wecken(db)
+
+        assert geweckt == []
+
+    def test_ein_fehlschlag_nennt_seinen_grund(
+        self, db: Session, regular_user: User
+    ):
+        """Der Grund steht laengst da — gelesen wurde er nicht.
+
+        Die App legt beim Scheitern `{"fehler": "..."}` ab. Die Bedingung
+        verlangte aber `status == "done"`, also erfuhr das Modell nur *dass*
+        etwas schiefging, nie *was*. Unter `grund` und nicht unter `ergebnis`:
+        ein Fehlschlag darf nie aussehen wie ein Erfolg.
+        """
+        run = _lauf(db, regular_user)
+        job = desktop_job_service.anlegen(
+            db,
+            user_id=regular_user.id,
+            run_id=run.id,
+            tool_call_id="call-1",
+            tool_name="desktop_system",
+            arguments={"aktion": "laufwerke"},
+        )
+        db.commit()
+        desktop_job_service.ergebnis_melden(
+            db, job=job, ok=False,
+            ergebnis={"fehler": "Laufwerke nicht abfragbar."},
+            error_code="DESKTOP_TOOL_FAILED",
+        )
+
+        ergebnis = desktop_job_service.ergebnisse(db, [job.id])[0]
+
+        assert ergebnis["status"] == "failed"
+        assert ergebnis["error_code"] == "DESKTOP_TOOL_FAILED"
+        assert ergebnis["grund"] == {"fehler": "Laufwerke nicht abfragbar."}
+        # Nicht als Ergebnis: sonst laese ein Modell den Fehlertext als Auskunft.
+        assert "ergebnis" not in ergebnis
+
     def test_haengender_auftrag_faellt_zurueck_in_die_schlange(
         self, db: Session, regular_user: User
     ):

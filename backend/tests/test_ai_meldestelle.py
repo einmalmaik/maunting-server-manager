@@ -531,6 +531,53 @@ def test_ein_beendeter_worker_reicht_sein_ergebnis_ein(db: Session) -> None:
     assert db.query(AiMailOutbox).count() == 1
 
 
+def test_der_bericht_traegt_die_werte_bis_zum_gehirn(db: Session) -> None:
+    """Die Uebergabe an das Gehirn ist der Flaschenhals — sie muss alles tragen.
+
+    Das Gehirn hat keine Server- und keine Desktop-Werkzeuge (`GEHIRN_TOOLS`).
+    Was der Bericht weglaesst, kann es nirgends nachlesen: es ist dann
+    schlicht nicht mehr im System. Am 22.08.2026 kam deshalb auf „wie voll ist
+    meine C-Platte" die Antwort, die Werte seien nicht uebermittelt worden —
+    der Worker hatte sie, der Bericht nicht mehr.
+
+    Der bisherige Test dieser Strecke benutzte einen einzeiligen Text und lief
+    damit nie in den Zweig, der die Zahlen wegwarf.
+    """
+    import json
+
+    user = _benutzer(db, "werte", mit_chat=False)
+    run = _beendeter_worker(db, user)
+    bericht = (
+        "Laufwerk C:\n\n"
+        "- Gesamt: 474,26 GB\n"
+        "- Frei: 113,43 GB\n\n"
+        "Die Werte stammen aus desktop_system; der Auftrag ist abgeschlossen."
+    )
+    db.add(AiMessage(
+        id="lb-werte", conversation_id=run.conversation_id, role="assistant",
+        content=f"Ich sehe auf dem Rechner nach.\n\n{bericht}",
+        status="complete",
+        sections_json=json.dumps([
+            {"art": "text", "inhalt": "Ich sehe auf dem Rechner nach."},
+            {"art": "tool", "werkzeug": {"name": "desktop_system"}},
+            {"art": "text", "inhalt": bericht},
+        ], ensure_ascii=False),
+    ))
+    db.commit()
+
+    ai_meldestelle.lauf_beendet(
+        db, run=run,
+        zustand={"worker": {"conversation_id": run.conversation_id,
+                            "titel": "Speicherstand", "kanal": "chat"}},
+    )
+
+    meldung = db.query(AiMeldung).one()
+    assert "474,26 GB" in meldung.text
+    assert "113,43 GB" in meldung.text
+    # Die Ansage aus der Runde davor bleibt draussen.
+    assert "Ich sehe auf dem Rechner nach" not in meldung.text
+
+
 def test_ein_gescheiterter_worker_meldet_ehrlich(db: Session) -> None:
     user = _benutzer(db, "ehrlich", mit_chat=False)
     run = _beendeter_worker(db, user, status="failed", stop_reason="AI_STREAM_FAILED")

@@ -17,6 +17,7 @@ meldet den Zustand im Klartext.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -39,11 +40,47 @@ def target_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "ml-models" / "potion-multilingual-128M"
 
 
+def vollstaendig(destination: Path) -> bool:
+    """Ist das Modell da **und** brauchbar?
+
+    "Datei existiert" reichte hier einmal, und das war zu wenig: eine volle
+    Platte hat `tokenizer.json` mitten im Text beschaedigt (die Datei war
+    weiterhin 18 MB gross und endete korrekt). Der Ladeversuch scheiterte
+    danach bei jedem Panelstart mit "invalid number at line 1 column
+    12226784", die Gedaechtnissuche lief monatelang ohne Vektoren — und
+    **jedes Update meldete "bereits vorhanden" und ruehrte es nicht an**. Ein
+    Reparaturweg, der die Reparatur ueberspringt, ist keiner.
+
+    Geprueft wird der Tokenizer, weil er der einzige grosse **Text** im Paket
+    ist und das ganze Laden an ihm haengt. Die Gewichte pruefen wir hier
+    bewusst nicht: sie sind binaer, ein Vollstaendigkeitstest hiesse, 507 MB
+    zu lesen, und `safetensors` meldet einen Schaden beim Laden selbst.
+    """
+    if not all((destination / name).is_file() for name in REQUIRED):
+        return False
+    try:
+        json.loads((destination / "tokenizer.json").read_bytes())
+    except Exception:  # noqa: BLE001 - jeder Lesefehler heisst: neu holen
+        print(
+            "[ai] tokenizer.json ist beschaedigt — das Modell wird neu geladen.",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
 def main() -> int:
     destination = target_dir()
-    if all((destination / name).is_file() for name in REQUIRED):
+    if vollstaendig(destination):
         print(f"[ai] Embeddingmodell bereits vorhanden: {destination}")
         return 0
+
+    # Lag schon etwas da, war es kaputt — dann ist der Zwischenspeicher
+    # verdaechtig. `snapshot_download` verlinkt sonst genau dieselbe
+    # beschaedigte Datei aus `.cache` zurueck und meldet Erfolg in
+    # Sekundenbruchteilen. Nur in diesem Fall neu ziehen: bei einer frischen
+    # Installation gibt es nichts zu erzwingen.
+    beschaedigt = any((destination / name).is_file() for name in REQUIRED)
 
     try:
         from huggingface_hub import snapshot_download
@@ -62,6 +99,7 @@ def main() -> int:
             REPO,
             local_dir=str(destination),
             allow_patterns=PATTERNS,
+            force_download=beschaedigt,
         )
     except Exception as exc:
         print(
@@ -72,10 +110,9 @@ def main() -> int:
         )
         return 0
 
-    missing = [name for name in REQUIRED if not (destination / name).is_file()]
-    if missing:
+    if not vollstaendig(destination):
         print(
-            f"[ai] Unvollstaendiger Download, es fehlen: {', '.join(missing)}. "
+            "[ai] Download unvollstaendig oder beschaedigt. "
             "Die KI-Gedaechtnissuche laeuft ohne Vektoren weiter.",
             file=sys.stderr,
         )

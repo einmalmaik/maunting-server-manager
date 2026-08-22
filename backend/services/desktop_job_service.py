@@ -147,6 +147,13 @@ def ergebnisse(db: Session, job_ids: list[str]) -> list[dict]:
     Fehlt ein Auftrag oder ist er verfallen, steht das ausdruecklich da. Ein
     stilles Weglassen waere die schlimmere Antwort: das Modell haelte den
     Schritt fuer erledigt.
+
+    **Auch ein Fehlschlag hat einen Grund, und der geht mit.** Die App legt
+    ihn beim Melden ab (`{"fehler": "..."}`, siehe `ergebnis_melden`), gelesen
+    wurde er bisher nie: die Bedingung verlangte `status == "done"`. Das
+    Modell erfuhr damit nur *dass* etwas schiefging, nie *was* — und konnte es
+    dem Benutzer nicht sagen. Der Grund steht unter `grund` und nicht unter
+    `ergebnis`, damit ein Fehlschlag nie wie ein Erfolg aussieht.
     """
     ausgabe: list[dict] = []
     for job_id in job_ids:
@@ -161,14 +168,14 @@ def ergebnisse(db: Session, job_ids: list[str]) -> list[dict]:
         eintrag: dict = {"tool_name": job.tool_name, "status": job.status}
         if job.error_code:
             eintrag["error_code"] = job.error_code
-        if job.status == "done" and job.result_encrypted:
+        if job.status in ("done", "failed") and job.result_encrypted:
             try:
                 daten = json.loads(DisClient.decrypt(job.result_encrypted, aad=_aad(job.id)))
             except Exception:  # noqa: BLE001 — kaputtes Ergebnis ist ein Fehlschlag
                 eintrag["status"] = "failed"
                 eintrag["error_code"] = "DESKTOP_JOB_RESULT_UNREADABLE"
             else:
-                eintrag["ergebnis"] = daten
+                eintrag["ergebnis" if job.status == "done" else "grund"] = daten
         elif job.status == "expired":
             eintrag["error_code"] = "DESKTOP_JOB_EXPIRED"
         ausgabe.append(eintrag)
@@ -218,6 +225,9 @@ def verfallene_wecken(db: Session) -> int:
     Der Takt ruft das: ohne ihn haette nur ein Benutzer mit laufender App
     (der ``_aufraeumen`` ausloest) je einen Verfall bemerkt — ausgerechnet
     der Fall, in dem der Rechner *aus* ist, bliebe damit unbemerkt.
+
+    Zweiter Handgriff derselben Runde: `_verpuffte_wecken` holt Laeufe nach,
+    deren Auftraege laengst fertig sind, die aber trotzdem schlafen.
     """
     jetzt = _jetzt()
     faellige = (
@@ -228,8 +238,9 @@ def verfallene_wecken(db: Session) -> int:
         )
         .all()
     )
+    nachgeholt = _verpuffte_wecken(db)
     if not faellige:
-        return 0
+        return nachgeholt
     laeufe = {job.run_id for job in faellige}
     for job in faellige:
         job.status = "expired"
@@ -243,4 +254,46 @@ def verfallene_wecken(db: Session) -> int:
         if offene(db, run_id=run_id) == 0:
             ai_run_service.lauf_fortsetzen(db, run_id=run_id)
     logger.info("Desktop-Auftraege verfallen anzahl=%d laeufe=%d", len(faellige), len(laeufe))
-    return len(faellige)
+    return len(faellige) + nachgeholt
+
+
+def _verpuffte_wecken(db: Session) -> int:
+    """Laeufe, deren Auftraege fertig sind, die aber weiterschlafen.
+
+    Der Rechner fragt im Sekundentakt und ist oft schneller als der Lauf: der
+    Auftrag ist committet (`_desktop_behandeln`), aber bis zum Parken liegt
+    noch das ganze `_finalize_stream` dazwischen. Meldet die App in dieser
+    Spanne ihr Ergebnis, ruft der Router `lauf_fortsetzen` — und
+    `darf_fortsetzen` weist es ab, weil der Lauf noch auf 'running' steht. Der
+    Weckruf ist damit weg, und geweckt haette den Lauf erst die 180-s-Frist
+    seines Auftrags. Auf "wie voll ist meine C-Platte" wartete der Betreiber
+    so bis zu vier Minuten auf Zahlen, die laengst dalagen.
+
+    Nachgeholt wird es hier und nicht am Parken selbst: dort laege zwischen
+    dem Park-Commit und dem Ende der asyncio-Aufgabe ein zusaetzlicher
+    `await`, und genau in dem Fenster faende ein Weckruf den Segmentplatz
+    belegt (`ai_run_service._platz_belegen`) — der Lauf stuende danach
+    dauerhaft auf 'running'. Der Takt hat dieses Problem nicht: dort ist die
+    Aufgabe des Laufs laengst beendet.
+
+    Ein Lauf gilt als schlafend, wenn er auf `waiting_wake` mit dem Grund
+    `desktop_jobs` steht. `lauf_fortsetzen` prueft danach selbst noch einmal
+    alles Weitere (Rechte, Zustand) — hier wird nur ausgewaehlt.
+    """
+    from models import AiRun
+    from services import ai_run_service
+
+    schlafend = (
+        db.query(AiRun)
+        .filter(AiRun.status == "waiting_wake", AiRun.stop_reason == "desktop_jobs")
+        .limit(50)
+        .all()
+    )
+    geweckt = 0
+    for run in schlafend:
+        if offene(db, run_id=run.id) > 0:
+            continue
+        if ai_run_service.lauf_fortsetzen(db, run_id=run.id):
+            geweckt += 1
+            logger.info("Verpuffter Weckruf nachgeholt run_id=%s", run.id)
+    return geweckt

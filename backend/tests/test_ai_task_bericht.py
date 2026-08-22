@@ -471,3 +471,157 @@ def test_guardian_und_aufgabe_stoeren_sich_nicht(db: Session, monkeypatch) -> No
 
     assert len(fach.briefe) == 1
     assert guardian_briefe == []
+
+
+# ── Die letzte Runde, nicht der letzte Absatz ────────────────────────────
+#
+# Betriebsvorfall vom 22.08.2026: der Betreiber fragte in der Smart-System-App
+# nach dem freien Platz auf C:. Der Worker holte die Zahlen vom Rechner und
+# schrieb sie ordentlich als Liste auf, mit einem Einordnungssatz darunter.
+# Beim Gehirn kam nur der Satz an — und das Gehirn sagte wahrheitsgemaess,
+# die Werte seien ihm nicht uebermittelt worden.
+#
+# Ursache war eine Heuristik: `content` setzt die Textabschnitte mit einer
+# Leerzeile aneinander (`ai_run_broker.Abzug.inhalt`), und die Rundennaht sieht
+# damit genauso aus wie ein Absatz des Modells. Wer den letzten Absatz nahm,
+# nahm bei "Liste plus Schlusssatz" nur den Schlusssatz.
+
+
+def _lauf_mit_gliederung(
+    db: Session, user: User, aufgabe: AiTask, *, content: str,
+    abschnitte: list[dict] | None,
+) -> AiRun:
+    """Wie `_lauf`, aber mit ausdruecklicher Gliederung der Antwort."""
+    import json
+
+    conversation = AiConversation(id=f"conv-{user.id}", user_id=user.id, title="KI")
+    db.add(conversation)
+    db.flush()
+    run = AiRun(
+        id=f"run-{aufgabe.id}",
+        user_id=user.id,
+        conversation_id=conversation.id,
+        status="completed",
+    )
+    db.add(run)
+    db.add(AiMessage(
+        id=f"msg-{aufgabe.id}",
+        conversation_id=conversation.id,
+        role="assistant",
+        content=content,
+        status="complete",
+        sections_json=(
+            json.dumps(abschnitte, ensure_ascii=False) if abschnitte else None
+        ),
+    ))
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+#: Ein Worker-Lauf, wie er wirklich aussieht: Ansage, Werkzeug, Bericht.
+_ANSAGE = "Ich hole den aktuellen Speicherstand von Laufwerk C:."
+_BERICHT = (
+    "Laufwerk C: (Festplatte)\n\n"
+    "- Gesamt: 474,26 GB\n"
+    "- Frei: 113,43 GB\n"
+    "- Belegt: 360,83 GB (76 %)\n\n"
+    "Die Platte ist zu gut drei Vierteln belegt; kritisch ist das noch nicht."
+)
+
+
+def test_der_bericht_traegt_die_werte_und_nicht_nur_den_schlusssatz(
+    db: Session
+) -> None:
+    """Die ganze letzte Runde geht hinaus, nicht ihr letzter Absatz."""
+    user = _benutzer(db, "werteträger")
+    aufgabe = _aufgabe(db, user)
+    run = _lauf_mit_gliederung(
+        db, user, aufgabe,
+        content=f"{_ANSAGE}\n\n{_BERICHT}",
+        abschnitte=[
+            {"art": "text", "inhalt": _ANSAGE},
+            {"art": "tool", "werkzeug": {"name": "desktop_system"}},
+            {"art": "text", "inhalt": _BERICHT},
+        ],
+    )
+
+    text = ai_task_report.abschlusstext(db, run, {})
+
+    assert "474,26 GB" in text
+    assert "113,43 GB" in text
+    assert "noch nicht" in text
+    # Die Ansage aus der Runde davor bleibt draussen — dafuer gab es die
+    # Heuristik ueberhaupt.
+    assert _ANSAGE not in text
+
+
+def test_ein_denkabschnitt_dazwischen_aendert_nichts(db: Session) -> None:
+    """Zwischen Werkzeug und Bericht darf ein Denkschritt stehen."""
+    user = _benutzer(db, "denker")
+    aufgabe = _aufgabe(db, user)
+    run = _lauf_mit_gliederung(
+        db, user, aufgabe,
+        content=f"{_ANSAGE}\n\n{_BERICHT}",
+        abschnitte=[
+            {"art": "text", "inhalt": _ANSAGE},
+            {"art": "tool", "werkzeug": {"name": "desktop_system"}},
+            {"art": "denken", "inhalt": "Bytes in GB umrechnen."},
+            {"art": "text", "inhalt": _BERICHT},
+        ],
+    )
+
+    text = ai_task_report.abschlusstext(db, run, {})
+
+    assert "474,26 GB" in text
+    assert "umrechnen" not in text
+
+
+def test_ohne_gliederung_bleibt_es_bei_der_alten_schaetzung(db: Session) -> None:
+    """Nachrichten ohne `sections_json` gibt es weiterhin.
+
+    Aus der Zeit vor der Spalte — und wenn der Vermittler seinen Kanal der
+    Groessengrenze opfern musste. Dann ist der letzte Absatz die beste
+    verfuegbare Vermutung, und sie bleibt: ab 80 Zeichen traegt er allein,
+    darunter geht der Schluss des ganzen Textes hinaus.
+    """
+    schluss = (
+        "Alle vier Server laufen unveraendert weiter; ich habe nichts "
+        "geaendert und sehe keinen Handlungsbedarf."
+    )
+    user = _benutzer(db, "ohnegliederung")
+    aufgabe = _aufgabe(db, user)
+    run = _lauf_mit_gliederung(
+        db, user, aufgabe,
+        content=f"{_ANSAGE}\n\n{schluss}",
+        abschnitte=None,
+    )
+
+    text = ai_task_report.abschlusstext(db, run, {})
+
+    assert text == schluss
+
+
+def test_endet_die_antwort_mit_einem_werkzeug_greift_die_schaetzung(
+    db: Session
+) -> None:
+    """Kein Text nach dem letzten Werkzeug — dann entscheidet der Rueckfall.
+
+    Sonst schickte der Bericht die Ansage *vor* dem Werkzeug hinaus, und das
+    waere schlechter als die Vermutung: eine Ankuendigung sieht aus wie ein
+    Ergebnis.
+    """
+    user = _benutzer(db, "werkzeugende")
+    aufgabe = _aufgabe(db, user)
+    run = _lauf_mit_gliederung(
+        db, user, aufgabe,
+        content="Ich sehe kurz nach und melde mich gleich mit dem Ergebnis.",
+        abschnitte=[
+            {"art": "text", "inhalt": "Ich sehe kurz nach und melde mich gleich mit dem Ergebnis."},
+            {"art": "tool", "werkzeug": {"name": "desktop_system"}},
+        ],
+    )
+
+    text = ai_task_report.abschlusstext(db, run, {})
+
+    assert text == "Ich sehe kurz nach und melde mich gleich mit dem Ergebnis."

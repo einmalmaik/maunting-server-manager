@@ -40,6 +40,7 @@ export function useAuftragsschleife(aktiv: boolean): string | null {
     let fehlschlaege = 0
 
     async function abarbeiten(auftrag: Auftrag) {
+      let ergebnis: Record<string, unknown> | null
       try {
         // Die Kennung **vor** dem Ausführen merken: Rust schickt das Ereignis
         // für die Karte noch im Aufruf los, und eine Karte ohne Auftrag könnte
@@ -47,15 +48,7 @@ export function useAuftragsschleife(aktiv: boolean): string | null {
         if (auftrag.tool_name === 'desktop_takeover_control') {
           setOffeneUebernahme(auftrag.id)
         }
-        const ergebnis = await auftragAusfuehren(auftrag.tool_name, auftrag.arguments)
-        // `null` heißt: das Ergebnis kommt später. Genau ein Fall — die Bitte
-        // um die Übernahme, über die ein Mensch entscheidet. Die Karte meldet
-        // dann selbst (Uebernahmekarte.tsx).
-        if (ergebnis === null) {
-          return
-        }
-        setOffeneUebernahme(null)
-        await ergebnisMelden(auftrag.id, true, ergebnis)
+        ergebnis = await auftragAusfuehren(auftrag.tool_name, auftrag.arguments)
       } catch (fehler) {
         setOffeneUebernahme(null)
         // Der Fehlertext geht als Werkzeugergebnis an das Modell — er nennt
@@ -64,6 +57,36 @@ export function useAuftragsschleife(aktiv: boolean): string | null {
         // wird nur, was Rust selbst formuliert hat.
         const text = fehler instanceof Error ? fehler.message : String(fehler)
         await ergebnisMelden(auftrag.id, false, { fehler: text }, 'DESKTOP_TOOL_FAILED')
+        return
+      }
+      // `null` heißt: das Ergebnis kommt später. Genau ein Fall — die Bitte
+      // um die Übernahme, über die ein Mensch entscheidet. Die Karte meldet
+      // dann selbst (Uebernahmekarte.tsx).
+      if (ergebnis === null) {
+        return
+      }
+      setOffeneUebernahme(null)
+
+      // **Melden ist nicht Ausführen.** Beides stand einmal in demselben
+      // try-Block, und ein Netzfehler beim Melden landete deshalb im
+      // Fehlerzweig darüber: der meldete denselben Auftrag ein zweites Mal —
+      // als gescheitertes Werkzeug, mit dem Transportfehler als Grund. Das
+      // fertige Ergebnis war damit weg, obwohl der Rechner es hatte.
+      //
+      // Stattdessen zweimal nachfassen. Das Ergebnis liegt noch hier, der
+      // Auftrag ist panelseitig offen, und die Frist (180 s) lässt Luft.
+      // Bleibt es dabei, wird nichts erfunden: der Auftrag verfällt, und das
+      // Modell erfährt genau das.
+      for (let versuch = 0; versuch < 3; versuch += 1) {
+        try {
+          await ergebnisMelden(auftrag.id, true, ergebnis)
+          return
+        } catch {
+          if (versuch === 2) {
+            return
+          }
+          await new Promise((weiter) => setTimeout(weiter, 800 * (versuch + 1)))
+        }
       }
     }
 
