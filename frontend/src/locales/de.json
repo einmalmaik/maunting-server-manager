@@ -3545,8 +3545,24 @@
           "tasks": "Ein im Chat oder in der Aufgabenliste angelegter stehender Auftrag („KI-Aufgabe“) speichert Name, Auftragstext, Zeitplan, Zeitzone und Zustellweg und löst zum vereinbarten Zeitpunkt eine Verarbeitung aus, ohne dass der Nutzer anwesend ist. Sie läuft im Hintergrund mit den Rechten und dem Kontingent des Anlegenden; bei jedem fälligen Lauf werden Auftragstext und die abgerufenen Serverdaten an den gewählten Modellanbieter übertragen. Auf Wunsch geht das Ergebnis zusätzlich per E-Mail an die hinterlegte Adresse und enthält modellerzeugten Text. Aufträge sind im Chat und in der Aufgabenliste jederzeit auflistbar, pausierbar und löschbar."
         }
       },
+      "desktopApp": {
+        "heading": "7. Die Desktop-App (Maunting Smart System)",
+        "body": "Das Maunting Smart System ist eine optionale Windows-App, die auf dem Rechner des Benutzers läuft und dort im Auftrag der KI arbeitet. Sie ist kein zweites Panel, sondern derselbe Zugang mit einem Rechner daran: die Kopplung erfolgt über einen Code aus dem Panel, und ohne das Recht „KI-Werkzeuge auf dem eigenen Rechner\" holt sie keine Aufträge ab. Dieser Abschnitt beschreibt, was dabei auf dem Rechner bleibt und was ihn verlässt. Alle ausgehenden Verbindungen der App gehen ausschließlich an die im Einrichtungsassistenten eingetragene Panel-Adresse — es gibt keinen Updater, keine Telemetrie und keinen fest verdrahteten Fremdanbieter.",
+        "items": {
+          "wakeword": "Wake-Word (standardmäßig aus): Wird es eingeschaltet, liest die App das Mikrofon dauerhaft mit und vergleicht das Gehörte gegen ein Referenzmodell — vollständig auf dem Rechner, ohne Netzverbindung. Solange das Wort nicht erkannt ist, verlässt kein einziges Audio-Sample den Prozess; es wird auch nichts mitgeschnitten. Der Preis dieses Zuhörens ist dauerhafte Rechenlast (gemessen etwa ein Sechstel eines Prozessorkerns).",
+          "wakewordAufnahmen": "Stimmaufnahmen der Kalibrierung: Zum Anlernen sprechen Sie den frei gewählten Namen mehrfach ein. Diese Aufnahmen sind echte Sprachaufzeichnungen und liegen als WAV-Dateien unbefristet im lokalen App-Datenverzeichnis, zusammen mit dem daraus erzeugten Referenzmodell. Sie werden nie übertragen. Entfernt werden sie durch „Zurücksetzen\" in den Wake-Word-Einstellungen oder durch die Deinstallation.",
+          "sprachsitzung": "Sprachsitzung: Erst ab dem erkannten Wake-Word (oder nach dem Drücken des Sprach-Kürzels) öffnet die App den Audiokanal zum Panel und überträgt Ihre Äußerung. Das Panel gibt sie zur Abschrift an den eingestellten Modellanbieter weiter; die gesprochene Antwort erzeugt zusätzlich ein Sprachdienstleister. Ab diesem Punkt gelten die Aussagen aus Abschnitt 6 zu externen Modellanbietern.",
+          "bildschirm": "Bildschirmfotos: Die KI kann den Hauptbildschirm ansehen. Das Bild wird verkleinert, nicht auf der Festplatte gespeichert und als Werkzeugergebnis an das Panel übertragen, das es verschlüsselt ablegt und an den Modellanbieter weitergibt. Der Anbieter sieht damit alles, was zu diesem Zeitpunkt sichtbar war — auch fremde Fenster, Nachrichten und geöffnete Dokumente. Bei jeder Aufnahme leuchtet ein Hinweis am Bildschirmrand auf; er lässt sich nicht abschalten.",
+          "dateien": "Lesender Zugriff auf den Rechner: Die KI kann Laufwerke, Ordner und Speicherplatz einsehen — so weit, wie der angemeldete Windows-Benutzer es selbst darf. Übertragen werden dabei Laufwerksangaben sowie Ordner- und Dateinamen mit Größen. Dateiinhalte werden nur aus dem selbst gewählten Sandbox-Ordner gelesen und übertragen. Ob der Windows-Systembereich mitgelesen werden darf, stellen Sie im Panel je Konto ein.",
+          "schreiben": "Schreibender Zugriff: Angelegt und geändert wird ausschließlich im Sandbox-Ordner, den Sie selbst auswählen. Geprüft wird der aufgelöste Pfad, damit eine Verknüpfung nicht aus dem Ordner herausführt.",
+          "aufraeumen": "Aufräumen außerhalb der Sandbox: Löschen ist auch außerhalb möglich. Gelöschtes geht in den Papierkorb, endgültig nur auf ausdrücklichen Wunsch. Windows selbst, Programmordner und fremde Benutzerprofile bleiben gesperrt, bis Sie sie freigeben. An Panel und Modellanbieter gehen dabei die betroffenen Dateipfade, ihre Größe und ihre Einordnung. Ist der autonome Modus aus, legt die App Ihnen vorher eine Liste zur Bestätigung vor.",
+          "virenscan": "Virenprüfung: Auf Wunsch prüft die App eine Datei mit dem lokal installierten Microsoft Defender, ohne sie zu verändern oder zu entfernen. Der geprüfte Pfad und im Fundfall ein Auszug der Defender-Ausgabe — der Dateipfade und Bedrohungsnamen enthält — gehen an den Modellanbieter.",
+          "eingabe": "Maus und Tastatur: Die App zeichnet Ihre Eingaben nicht auf — es gibt keinen Mitschnitt von Tastenanschlägen oder Mausbewegungen, weder lokal noch übertragen. Umgekehrt kann die KI Maus und Tastatur übernehmen; ist der autonome Modus aus, muss jede Übernahme an Ihrem Rechner bestätigt werden und ist zeitlich befristet. Text, den die KI tippen lässt, stammt aus dem Modell und steht im übertragenen Auftrag.",
+          "lokal": "Was lokal gespeichert wird: eine Konfigurationsdatei im Klartext (Panel-Adresse, Sandbox-Pfad, gewählter Assistentenname, Tastenkürzel, Namen der Audiogeräte, Wake-Word-Empfindlichkeit), die Wake-Word-Aufnahmen samt Modell — und im Windows-Anmeldeinformations-Manager genau ein Eintrag: das vom Betriebssystem verschlüsselte Erneuerungs-Token der gekoppelten Sitzung. Ihr Passwort und Ihr Zwei-Faktor-Code erreichen die App nie; die Anmeldung läuft ausschließlich über den Kopplungscode aus dem Panel. Die Deinstallation entfernt all das."
+        }
+      },
       "storage": {
-        "heading": "7. Cookies und lokale Browser-Speicherung",
+        "heading": "8. Cookies und lokale Browser-Speicherung",
         "body": "Das Panel nutzt Browser-Speicherung, die für den sicheren Betrieb und gewählte Einstellungen benötigt wird.",
         "items": {
           "session": "Session- oder Auth-Cookies, um Nutzer angemeldet zu halten",
@@ -3555,7 +3571,7 @@
         }
       },
       "retention": {
-        "heading": "8. Aufbewahrung und Account-Löschung",
+        "heading": "9. Aufbewahrung und Account-Löschung",
         "body": "Die Aufbewahrung hängt von Betreiberkonfiguration, Infrastruktur, Backups und rechtlichen Pflichten ab.",
         "items": {
           "operator": "Der Betreiber muss geeignete Fristen festlegen, dokumentieren und nicht mehr benötigte Daten löschen",
@@ -3564,7 +3580,7 @@
         }
       },
       "responsibility": {
-        "heading": "9. Verantwortung des Betreibers und Anfragen",
+        "heading": "10. Verantwortung des Betreibers und Anfragen",
         "body": "Nutzer richten Auskunfts-, Berichtigungs-, Lösch-, Widerspruchs- und Anbieterfragen an den Betreiber dieser MSM-Instanz. Der Betreiber ist für Veröffentlichung seiner Identität, Kontaktmöglichkeit, Rechtsgrundlage, Anbieterliste und instanzspezifischen Aufbewahrungsinformationen verantwortlich."
       },
       "hoster": {
@@ -4824,6 +4840,7 @@
       "erkannt": "Erkannt: „{{name}}“ (Score {{score}})",
       "datenschutz": "Alles bleibt auf diesem Rechner: Aufnahmen und Modell liegen im App-Datenverzeichnis, kein Audio verlässt den Prozess.",
       "wortIstName": "Dein Wake-Word ist der Name deines Assistenten: „{{name}}“. Umbenennen kannst du ihn im Chat („nenn dich …“) oder im Panel unter Profil → KI.",
+      "verfahrenAlt": "Diese Kalibrierung stammt aus einer älteren Fassung der App. Damals war jede Aufnahme fest 2,5 Sekunden lang und bestand damit überwiegend aus Raumton — die Erkennung meldete sich dadurch erst rund drei Sekunden nach dem Wort. Sprich den Namen bitte einmal neu ein: Zurücksetzen, dann die {{gesamt}} Aufnahmen. Der Empfindlichkeitsregler hilft hier nicht.",
       "neuKalibrieren": "Das Modell ist noch auf „{{alt}}“ trainiert, dein Assistent heißt inzwischen „{{neu}}“. Schalte das Wake-Word aus, setz die Kalibrierung zurück und sprich den neuen Namen ein — bis dahin hört die App weiter auf „{{alt}}“.",
       "aktiv": "Wake-Word aktiv",
       "aktivHinweis": "An: Sag „{{name}}“, und das Overlay öffnet sich über allem, was gerade läuft. Aus heißt aus — das Mikrofon ist frei, und nichts schaltet das Lauschen von selbst wieder ein.",

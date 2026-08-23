@@ -2,10 +2,23 @@
 //!
 //! Zwei Fenster (Hauptfenster + frameless Overlay), Tray mit Statusfarben,
 //! zwei konfigurierbare globale Hotkeys (Fenster umschalten, Sprachsitzung
-//! im Overlay — je einzeln abschaltbar), Autostart. Zero-Resource-Prinzip:
-//! hier läuft keine einzige Schleife — alles ist ereignisgetrieben
-//! (Tray-Events, Hotkey-Events, Commands aus dem Frontend), im Leerlauf
-//! schläft der Prozess.
+//! im Overlay — je einzeln abschaltbar), Autostart. In dieser Datei läuft
+//! keine Schleife: alles ist ereignisgetrieben (Tray-Events, Hotkey-Events,
+//! Commands aus dem Frontend).
+//!
+//! Hier stand „Zero-Resource-Prinzip … im Leerlauf schläft der Prozess".
+//! Das gilt für dieses Modul, aber nicht für die App: ist das Wake-Word
+//! eingeschaltet, liest ein Faden **dauerhaft** das Mikrofon und rechnet
+//! (gemessen am 23.08.2026: rund ein Sechstel eines Kerns). Das ist der
+//! Preis des Zuhörens und kein Fehler — aber eine Zusage, die der Prozess
+//! nicht hält, gehört nicht in einen Modulkopf.
+//!
+//! **Regel für Commands:** alles, was mehr tut als ein Feld zu lesen,
+//! braucht `#[tauri::command(async)]`. Ohne das läuft es auf dem
+//! Hauptthread und friert die ganze Oberfläche ein, solange es dauert.
+//! Umgekehrt gehören Fenster-Operationen (`overlay_*`, `hauptfenster_*`,
+//! `setze_status`, `hotkeys_setzen`) **ohne** `async` hierher: sie sind
+//! kurz, und auf dem Hauptthread blockiert kein Getter.
 //!
 //! Harte Grenze: dieses Backend kennt keine Server-Werkzeuge und wird nie
 //! welche bekommen — Server-Verwaltung bleibt exklusiv dem Web-Panel.
@@ -44,7 +57,7 @@ fn setze_status(app: tauri::AppHandle, status: String) -> Result<(), String> {
 /// Senkt Hintergrundton um 60 % ab (WASAPI) bzw. stellt ihn wieder her.
 /// Auf anderen Plattformen ein stiller No-Op — die App zielt auf Windows,
 /// aber ein Linux-CI-Check soll daran nicht scheitern.
-#[tauri::command]
+#[tauri::command(async)]
 fn ducking(an: bool) -> Result<(), String> {
     #[cfg(windows)]
     {
@@ -61,29 +74,29 @@ fn ducking(an: bool) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn konfig_laden(app: tauri::AppHandle) -> Result<konfig::AppKonfig, String> {
     konfig::laden(&app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn konfig_speichern(app: tauri::AppHandle, konfig: konfig::AppKonfig) -> Result<(), String> {
     konfig::speichern(&app, &konfig)
 }
 
 /// Refresh-Token in den OS-Tresor. Das Access-Token wird bewusst nie
 /// gespeichert — es lebt nur im Speicher des Frontends.
-#[tauri::command]
+#[tauri::command(async)]
 fn refresh_token_speichern(token: String) -> Result<(), String> {
     geheimnisse::speichern(&token)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn refresh_token_laden() -> Result<Option<String>, String> {
     geheimnisse::laden()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn refresh_token_loeschen() -> Result<(), String> {
     geheimnisse::loeschen()
 }
@@ -96,7 +109,7 @@ fn refresh_token_loeschen() -> Result<(), String> {
 ///
 /// `Ok(None)` heisst: das Ergebnis kommt spaeter. Das ist genau ein Fall — die
 /// Bitte um die Uebernahme, ueber die ein Mensch entscheidet.
-#[tauri::command]
+#[tauri::command(async)]
 fn auftrag_ausfuehren(
     app: tauri::AppHandle,
     werkzeug: String,
@@ -128,7 +141,7 @@ fn uebernahme_widerrufen() -> Result<(), String> {
 /// (`auftrag::WARTEND`), und bestaetigt wird er, nicht das, was ein Fenster
 /// gerade anzeigt. Ein Command mit Pfaden waere ein Loeschbefehl, den jeder
 /// Aufrufer dieses IPC-Kanals frei fuellen koennte.
-#[tauri::command]
+#[tauri::command(async)]
 fn aufraeumen_bestaetigen() -> Result<serde_json::Value, String> {
     auftrag::aufraeumen_bestaetigen()
 }
@@ -150,25 +163,35 @@ fn uebernahme_rest() -> Result<u64, String> {
 /// Autostart) und berichtet einzeln, was geklappt hat. Startet den
 /// Uninstaller **nicht** — das ist ein eigener Schritt, damit die Oberflaeche
 /// den Bericht vorher zeigen kann.
-#[tauri::command]
+#[tauri::command(async)]
 fn deinstallation_aufraeumen(app: tauri::AppHandle) -> deinstallation::Aufraeumbericht {
     deinstallation::aufraeumen(&app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn deinstallation_starten(app: tauri::AppHandle) -> Result<(), String> {
     deinstallation::uninstaller_starten(&app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn wakeword_stand(app: tauri::AppHandle) -> Result<wakeword::WakewordStand, String> {
     wakeword::stand(&app)
 }
 
 /// Blockiert, bis gesprochen wurde — höchstens ~7,5 s (Energie-Tor in
-/// `wakeword::aufnehmen`). Tauri-Commands laufen auf eigenen Threads,
-/// das Fenster bleibt bedienbar.
-#[tauri::command]
+/// `wakeword::aufnehmen`).
+///
+/// Hier stand „Tauri-Commands laufen auf eigenen Threads, das Fenster bleibt
+/// bedienbar". **Das war falsch, und es war teuer.** Ein Command ohne
+/// `(async)` läuft auf dem Hauptthread und blockiert damit die
+/// tao-Ereignisschleife: solange er läuft, verarbeitet Windows für diesen
+/// Prozess keine Fensternachrichten — kein Klick, kein X, kein Tray-Menü,
+/// kein Hotkey. Der Satz stand hier, und in der Folge wanderte immer mehr
+/// langlaufende Arbeit in Commands (Virenscan 120 s, Größenanalyse 60 s,
+/// Papierkorb leeren). Seit dem 23.08.2026 trägt jeder dieser Commands
+/// `(async)` — dann legt Tauri ihn auf den Blocking-Pool, und der Satz oben
+/// stimmt endlich.
+#[tauri::command(async)]
 fn wakeword_aufnehmen(app: tauri::AppHandle, nummer: u8) -> Result<String, String> {
     wakeword::aufnehmen(&app, nummer)
 }
@@ -176,7 +199,7 @@ fn wakeword_aufnehmen(app: tauri::AppHandle, nummer: u8) -> Result<String, Strin
 /// Trainiert das Modell und merkt sich das Wort in der Konfiguration —
 /// daran erkennt die App später, dass der Assistent inzwischen anders heißt,
 /// und schlägt die Neukalibrierung vor.
-#[tauri::command]
+#[tauri::command(async)]
 fn wakeword_trainieren(app: tauri::AppHandle, wort: String) -> Result<(), String> {
     wakeword::trainieren(&app, &wort)?;
     let mut konfig = konfig::laden(&app)?;
@@ -189,7 +212,7 @@ fn wakeword_trainieren(app: tauri::AppHandle, wort: String) -> Result<(), String
 /// diesen Wert, nichts anderes schaltet das Mikrofon wieder ein. Gespeichert
 /// wird „an" erst nach erfolgreichem Start: ein Schalter, der an zeigt,
 /// während nichts lauscht, wäre gelogen.
-#[tauri::command]
+#[tauri::command(async)]
 fn wakeword_lauschen(app: tauri::AppHandle, an: bool) -> Result<(), String> {
     if an {
         wakeword::lauschen_starten(app.clone())?;
@@ -201,7 +224,7 @@ fn wakeword_lauschen(app: tauri::AppHandle, an: bool) -> Result<(), String> {
     konfig::speichern(&app, &konfig)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn wakeword_zuruecksetzen(app: tauri::AppHandle) -> Result<(), String> {
     wakeword::zuruecksetzen(&app)
 }
@@ -222,9 +245,34 @@ fn overlay_sichtbar(app: tauri::AppHandle, sichtbar: bool) -> Result<(), String>
     Ok(())
 }
 
+/// Reicht eine Fensterarbeit an den Hauptthread weiter, statt sie im
+/// aufrufenden Faden zu tun.
+///
+/// **Die Regel dahinter:** Fenster-*Getter* (`is_visible`, `is_focused`,
+/// `title`, …) blockieren aus einem Nebenfaden so lange, bis die
+/// Ereignisschleife antwortet. Läuft die Schleife gerade nicht, wartet der
+/// Faden für immer — und wenn er dabei ein Schloss hält, wartet der Rest
+/// mit. Am 23.08.2026 waren so zwei echte Deadlocks belegbar: der
+/// Wake-Word-Faden gegen `wakeword_lauschen`, und der Hotkey-Faden (der das
+/// Mutex des Kürzel-Plugins hält) gegen `hotkeys_setzen`.
+///
+/// `run_on_main_thread` reiht die Arbeit nur ein und kehrt sofort zurück.
+/// Auf dem Hauptthread selbst blockiert ein Getter nie — dort *ist* er ja
+/// die Schleife. Möglich ist das, weil keiner dieser drei Aufrufer ein
+/// Ergebnis braucht: sie zeigen, verstecken und melden.
+pub(crate) fn am_hauptthread(app: &tauri::AppHandle, arbeit: impl FnOnce(&tauri::AppHandle) + Send + 'static) {
+    let kopie = app.clone();
+    // Schlägt das Einreihen fehl, ist die Schleife bereits fort — dann gibt
+    // es kein Fenster mehr, das man zeigen könnte, und Schweigen ist richtig.
+    let _ = app.run_on_main_thread(move || arbeit(&kopie));
+}
+
 /// Fenster-Hotkey: Fenster nach vorn, wenn es nicht fokussiert ist — sonst
 /// weg. So ist derselbe Griff „öffnen“ und „aus dem Weg“, wie man es von
 /// Spotlight-artigen Overlays kennt.
+///
+/// Läuft **auf dem Hauptthread** (siehe `am_hauptthread`): der Hotkey-Faden
+/// des Plugins darf hier nicht selbst fragen.
 fn hauptfenster_umschalten(app: &tauri::AppHandle) {
     if let Some(fenster) = app.get_webview_window("main") {
         let sichtbar = fenster.is_visible().unwrap_or(false);
@@ -301,7 +349,7 @@ fn overlay_testen(app: tauri::AppHandle) {
 }
 
 /// Alle Audiogeräte mit Namen — für die Auswahl in den Einstellungen.
-#[tauri::command]
+#[tauri::command(async)]
 fn audio_geraete() -> audio::AudioGeraete {
     audio::geraete()
 }
@@ -394,7 +442,9 @@ fn hotkeys_registrieren(
         kuerzel
             .on_shortcut(hotkey_pruefen(kombi)?, |app, _s, ereignis| {
                 if ereignis.state() == ShortcutState::Pressed {
-                    hauptfenster_umschalten(app);
+                    // Nicht direkt: dieser Rückruf läuft im Faden des
+                    // Kürzel-Plugins und hält dessen Mutex.
+                    am_hauptthread(app, hauptfenster_umschalten);
                 }
             })
             .map_err(|e| format!("Hotkey „{kombi}“ nicht verfügbar: {e}"))?;
@@ -403,7 +453,7 @@ fn hotkeys_registrieren(
         kuerzel
             .on_shortcut(hotkey_pruefen(kombi)?, |app, _s, ereignis| {
                 if ereignis.state() == ShortcutState::Pressed {
-                    sprachsitzung_umschalten(app);
+                    am_hauptthread(app, sprachsitzung_umschalten);
                 }
             })
             .map_err(|e| format!("Hotkey „{kombi}“ nicht verfügbar: {e}"))?;
@@ -435,9 +485,36 @@ fn hotkeys_setzen(
 }
 
 /// Beendet die App wirklich — der eine Ausgang des Schließen-Dialogs.
+///
+/// **Hart und nicht über die Ereignisschleife.** Hier stand `app.exit(0)`,
+/// und das war der Grund, warum sich eine hängende App nicht mehr schließen
+/// liess: `exit` legt die Bitte nur in die Warteschlange der Schleife
+/// (`tauri-runtime-wry::request_exit` — ausdrücklich **ohne** die harte
+/// Notbremse, weil `send_event` ja erfolgreich war). Steht die Schleife,
+/// wird die Bitte nie abgeholt. Der Betreiber sah am 23.08.2026 genau das:
+/// „ich kann es nicht schliessen, es läuft noch im Hintergrund".
+///
+/// Der eine Ausgang eines Programms darf nicht davon abhängen, dass das
+/// Programm noch gesund ist. `cleanup_before_exit` räumt auf, was sich
+/// aufräumen lässt (Tray-Icon aus der Leiste, Fenster zu); danach geht der
+/// Prozess so oder so.
 #[tauri::command]
 fn app_beenden(app: tauri::AppHandle) {
-    app.exit(0);
+    beenden_erzwingen(&app);
+}
+
+/// Der harte Ausgang, geteilt von Schließen-Dialog und Tray-Menü.
+///
+/// Steht bewusst hier und nicht in `tray.rs`: es gibt genau **einen** Weg
+/// hinaus, und zwei Fassungen davon wären zwei Gelegenheiten, die falsche
+/// zu erwischen.
+pub(crate) fn beenden_erzwingen(app: &tauri::AppHandle) {
+    // Das Mikrofon zuerst: der Lausch-Faden hält ein Gerät, und ein Prozess,
+    // der stirbt, während cpal noch liest, hinterlässt unter Windows
+    // gelegentlich eine belegte Aufnahmequelle.
+    wakeword::lauschen_stoppen();
+    app.cleanup_before_exit();
+    std::process::exit(0);
 }
 
 /// Versteckt das Hauptfenster im Tray — der andere Ausgang.
@@ -451,6 +528,18 @@ pub fn run() {
     tauri::Builder::default()
         // "--autostart" markiert Boot-Starts: Crash-Guard und sanfter Start
         // (spaetere Ausbaustufe) muessen wissen, ob ein Mensch gestartet hat.
+        //
+        // **Der Dateiname darf kein Leerzeichen enthalten.** Dieses Plugin
+        // schreibt den Run-Schluessel der Registry **ungequotet**:
+        // `C:\...\MauntingSmartSystem.exe --autostart`. Hiesse die Datei
+        // "Maunting Smart System.exe", probierte CreateProcess zuerst
+        // `Maunting.exe` und dann `Maunting Smart.exe` im selben Ordner — und
+        // der NSIS-Standardordner unter LOCALAPPDATA ist vom Benutzer
+        // beschreibbar. Wer dort eine `Maunting.exe` ablegen kann, wird beim
+        // naechsten Anmelden statt MSS gestartet. Deshalb steht in
+        // tauri.conf.json `"mainBinaryName": "MauntingSmartSystem"` ohne
+        // Leerzeichen; die lesbare Beschriftung im Task-Manager kommt
+        // ohnehin aus `productName` und nicht aus dem Dateinamen.
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec!["--autostart"]),

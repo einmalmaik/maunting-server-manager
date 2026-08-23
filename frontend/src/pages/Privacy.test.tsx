@@ -133,19 +133,19 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die zu den stehenden KI-Aufgaben gehoerende Fassung 2.5 vom 2026-08-13 aus', () => {
+  it('weist die zur Desktop-App gehoerende Fassung 2.6 vom 2026-08-23 aus', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(`${i18n.t('privacyPolicy.versionLabel')} v2.5`),
+      screen.getByText(`${i18n.t('privacyPolicy.versionLabel')} v2.6`),
     ).toBeInTheDocument();
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-08-13');
-    expect(stand).toHaveTextContent('2026-08-13');
+    expect(stand).toHaveAttribute('datetime', '2026-08-23');
+    expect(stand).toHaveTextContent('2026-08-23');
   });
 
   /**
@@ -217,6 +217,50 @@ describe('Privacy nach hartem Reload', () => {
       'href',
       '/docs',
     );
+  });
+
+  /**
+   * Die Desktop-App stand bis zum 23.08.2026 in keiner Zeile dieses
+   * Dokuments — kein Treffer fuer „Mikrofon", „Bildschirm" oder „Rechner",
+   * obwohl sie dauerhaft mithoert, den Bildschirm fotografiert und
+   * ausserhalb der Sandbox loescht. Dieser Test haelt die beiden Aussagen
+   * fest, die ein Leser am wenigsten erwartet und am dringendsten braucht.
+   */
+  it('nennt das Dauermikrofon und die liegenbleibenden Stimmaufnahmen', () => {
+    renderPrivacy();
+
+    const dauerhaft = i18n.t('privacyPolicy.sections.desktopApp.items.wakeword');
+    const aufnahmen = i18n.t(
+      'privacyPolicy.sections.desktopApp.items.wakewordAufnahmen',
+    );
+    // Kein durchgereichter Schluessel und keine Ueberschrift ohne Inhalt.
+    expect(dauerhaft).not.toContain('privacyPolicy.');
+    expect(dauerhaft.length).toBeGreaterThan(40);
+    expect(screen.getByText(dauerhaft)).toBeInTheDocument();
+    expect(screen.getByText(aufnahmen)).toBeInTheDocument();
+
+    // Und die beiden Tatsachen ausdruecklich, nicht nur irgendein Text:
+    expect(dauerhaft).toMatch(/dauerhaft/i);
+    expect(aufnahmen).toMatch(/unbefristet/i);
+  });
+
+  /**
+   * Die Nummerierung traegt die Verweise im Text („siehe Abschnitt 6").
+   * Ein eingeschobener Abschnitt, der die folgenden nicht mitverschiebt,
+   * erzeugt zwei Abschnitte mit derselben Nummer — genau das ist beim
+   * Einbau am 23.08.2026 einmal passiert.
+   */
+  it('vergibt jede Abschnittsnummer genau einmal', () => {
+    renderPrivacy();
+
+    const nummern = screen
+      .getAllByRole('heading')
+      .map((kopf) => kopf.textContent ?? '')
+      .map((text) => /^(\d+)\./.exec(text)?.[1])
+      .filter((n): n is string => Boolean(n));
+
+    expect(nummern.length).toBeGreaterThan(5);
+    expect(new Set(nummern).size).toBe(nummern.length);
   });
 });
 

@@ -44,7 +44,11 @@ pub fn erstellen(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "oeffnen" => hauptfenster_zeigen(app),
-            "beenden" => app.exit(0),
+            // Derselbe harte Ausgang wie im Schliessen-Dialog. `app.exit(0)`
+            // stand hier und reihte die Bitte nur in die Ereignisschleife
+            // ein — genau der Griff, den man benutzt, *weil* die App nicht
+            // mehr reagiert, half dann nicht.
+            "beenden" => crate::beenden_erzwingen(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

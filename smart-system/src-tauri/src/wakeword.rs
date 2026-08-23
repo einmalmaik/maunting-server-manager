@@ -2,16 +2,19 @@
 //! Rechner, ohne Cloud und ohne permanentes Streaming.
 //!
 //! Engine ist rustpotter (Apache-2.0): der Nutzer spricht seinen
-//! Agenten-Namen bis zu zehnmal ein, daraus entsteht ein Referenzmodell
+//! Agenten-Namen sechsmal ein, daraus entsteht ein Referenzmodell
 //! (MFCC + Dynamic Time Warping) — genau der Weg, den rustpotter für
 //! persönliche Wake-Words vorsieht. Kein vortrainiertes Netz nötig, der
 //! Name ist frei wählbar.
 //!
 //! Ablauf:
-//! 1. `aufnehmen(n)` — wartet auf Sprachenergie (bis ~5 s), schneidet ab
-//!    Einsatz ~2,2 s plus 300 ms Vorlauf und legt sie als Mono-WAV unter
+//! 1. `aufnehmen(n)` — wartet auf Sprachenergie (bis ~5 s), schneidet vom
+//!    Einsatz bis zum Sprachende (300 ms Vorlauf, 150 ms Nachlauf, höchstens
+//!    2,2 s) und legt sie als Mono-WAV unter
 //!    `<app-local-data>/wakeword/aufnahme-NN.wav` ab. Stille ist ein
-//!    Fehler, keine Aufnahme.
+//!    Fehler, keine Aufnahme. **Die Länge ist hier kein Nebending:** aus
+//!    der längsten Schablone leitet rustpotter Suchfenster und Nachlaufuhr
+//!    ab — zu lange Aufnahmen machen die Erkennung träge, nicht ungenau.
 //! 2. `trainieren(wort)` — baut aus allen Aufnahmen ein Referenzmodell
 //!    und speichert es als `wakeword.rpw`.
 //! 3. `lauschen_starten` — ein einzelner Thread liest das Mikrofon und
@@ -20,9 +23,13 @@
 //!    öffnet die App den Audiokanal zur KI — vorher verlässt kein Sample
 //!    den Prozess.
 //!
-//! Zero-Resource: der Lausch-Thread blockiert auf einem Channel (kein
-//! Polling); Stoppen setzt ein Flag, der Thread endet binnen 500 ms und
-//! gibt das Mikrofon frei.
+//! Der Lausch-Thread blockiert auf einem Channel (kein Polling); Stoppen
+//! setzt ein Flag, der Thread endet binnen 500 ms und gibt das Mikrofon
+//! frei. Hier stand „Zero-Resource" — das stimmt für den Leerlauf **ohne**
+//! Wake-Word. Lauscht die App, rechnet dieser Thread dauerhaft: gemessen am
+//! 23.08.2026 rund ein Sechstel eines Kerns. Das ist der Preis des
+//! Zuhörens; kürzere Schablonen (siehe `AUFNAHME_SEKUNDEN`) senken ihn
+//! deutlich, weil DTW quadratisch in der Schablonenlänge ist.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,11 +44,38 @@ use rustpotter::{
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Ziel-Anzahl der Kalibrierungs-Aufnahmen (Onboarding: „sprich den Namen 10x“).
-pub const AUFNAHMEN_SOLL: u8 = 10;
+/// Ziel-Anzahl der Kalibrierungs-Aufnahmen (Onboarding: „sprich den Namen 6x“).
+///
+/// Waren zehn. rustpotters README nennt für Referenzmodelle ausdrücklich
+/// „3 to 8 wav records" — zehn lag ausserhalb des Bereichs, für den das
+/// Verfahren gedacht ist, und jede weitere Aufnahme kostet Rechenzeit in
+/// jedem einzelnen Vergleich. Sechs liegt in der Mitte des empfohlenen
+/// Bereichs und lässt dem Median (siehe `score_mode`) noch genug Aufnahmen,
+/// um einen Ausreisser wegzustecken.
+pub const AUFNAHMEN_SOLL: u8 = 6;
 /// rustpotter braucht mindestens drei Aufnahmen für eine brauchbare Referenz.
 const AUFNAHMEN_MINDESTENS: usize = 3;
+/// Notbremse für die Länge einer Kalibrierungsaufnahme.
+///
+/// **Nicht mehr die Ziellänge.** Bis zum 23.08.2026 wurde ab dem
+/// Spracheinsatz stur so lange mitgeschnitten, egal wann der Sprecher
+/// aufhörte — jede Aufnahme war exakt 2,5 s lang, ein zwei- bis
+/// dreisilbiger Name dauert aber 0,5–0,8 s. Der Rest war Raumton, und
+/// rustpotter trimmt ihn nicht: es baut die DTW-Schablone aus **allen**
+/// Frames der Datei. Aus dieser Länge leitet es dann sein Suchfenster
+/// (`max_mfcc_frames`) und seine Nachlaufuhr (`max_mfcc_frames / 2`) ab.
+/// Geschnitten wird jetzt am Sprachende; dieser Wert greift nur noch, wenn
+/// jemand ohne Pause weiterredet.
 const AUFNAHME_SEKUNDEN: f32 = 2.2;
+/// So viel zusammenhängende Stille beendet die Aufnahme. Kürzer wäre
+/// gefährlich: zwischen zwei Silben liegt gut und gern eine Zehntelsekunde
+/// unter der Schwelle, und ein Schnitt mitten im Namen wäre schlimmer als
+/// etwas Raumton am Ende.
+const STILLE_SEKUNDEN: f32 = 0.25;
+/// Was von der gezählten Stille stehen bleibt. Der Auslaut eines Wortes ist
+/// leise und liegt oft schon unter `SPRACHE_RMS` — wer bündig am letzten
+/// lauten Fenster schneidet, verliert ihn.
+const NACHLAUF_SEKUNDEN: f32 = 0.15;
 /// So lange wird auf Sprachenergie gewartet, bevor die Runde als still gilt.
 const SPRACHE_WARTEN_SEKUNDEN: f32 = 5.0;
 /// Vorlauf vor dem erkannten Einsatz — Wortanfänge sind leise, und ein
@@ -56,6 +90,22 @@ const SPRACHE_RMS: f32 = 0.01;
 /// Runde daraufhin, statt sie zu zählen.
 const NICHTS_GEHOERT: &str = "Nichts gehört — bitte sprich das Wort deutlich ins Mikrofon";
 const MODELL_DATEI: &str = "wakeword.rpw";
+/// Neben dem Modell liegt eine Marke mit der Nummer des Schnittverfahrens.
+///
+/// Sie beantwortet genau eine Frage: **stammt diese Kalibrierung noch aus
+/// der Zeit der festen 2,5-s-Aufnahmen?** Am 23.08.2026 wurde der Schnitt
+/// vom festen Zeitmass auf das Sprachende umgestellt; alte Schablonen
+/// bestehen zu drei Vierteln aus Raumton und machen die Erkennung genauso
+/// traege wie vorher. Ein Modell weiterzubenutzen, das gerade repariert
+/// wurde, ist die stille Art, eine Reparatur wirkungslos zu machen.
+///
+/// Warum eine Datei und keine Ableitung aus der Aufnahmezahl: die Zahl ist
+/// mehrdeutig (wer damals abgebrochen hat, hat auch sechs), eine Marke ist
+/// es nicht.
+const VERFAHREN_DATEI: &str = "verfahren";
+/// Die aktuelle Nummer. Wird sie erhoeht, gilt jede aeltere Kalibrierung als
+/// veraltet und die App schlaegt eine neue vor.
+const VERFAHREN: u32 = 2;
 /// MFCC-Auflösung; 16 ist der rustpotter-Standard für Referenzmodelle.
 const MFCC_GROESSE: u16 = 16;
 
@@ -82,6 +132,10 @@ pub struct WakewordStand {
     /// Auf welches Wort trainiert wurde. Weicht es vom heutigen
     /// Assistenten-Namen ab, schlägt die UI eine Neukalibrierung vor.
     pub wort: Option<String>,
+    /// Ob die vorhandene Kalibrierung aus einem älteren Schnittverfahren
+    /// stammt (siehe `VERFAHREN`). Dann hilft nur neu einsprechen — an
+    /// überlangen Schablonen ändert keine Einstellung etwas.
+    pub veraltet: bool,
     /// Name des Eingabegeräts, das benutzt würde — `None` heißt: kein Mikrofon
     /// da. Die UI zeigt dann eine Warnung statt Knöpfen, die nur scheitern können.
     pub geraet: Option<String>,
@@ -99,6 +153,15 @@ fn wakeword_verzeichnis(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn modell_pfad(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(wakeword_verzeichnis(app)?.join(MODELL_DATEI))
+}
+
+/// Die Verfahrensnummer der vorhandenen Kalibrierung. Fehlt oder taugt die
+/// Marke nichts, ist es die Zeit vor der Marke — also 1.
+fn verfahren_lesen(verzeichnis: &Path) -> u32 {
+    std::fs::read_to_string(verzeichnis.join(VERFAHREN_DATEI))
+        .ok()
+        .and_then(|inhalt| inhalt.trim().parse().ok())
+        .unwrap_or(1)
 }
 
 fn aufnahme_dateien(verzeichnis: &Path) -> Vec<String> {
@@ -126,6 +189,8 @@ pub fn stand(app: &AppHandle) -> Result<WakewordStand, String> {
         lauscht: LAUSCHT.load(Ordering::SeqCst),
         aktiv: konfig.wakeword_aktiv,
         wort: konfig.wakeword_wort,
+        veraltet: verzeichnis.join(MODELL_DATEI).exists()
+            && verfahren_lesen(&verzeichnis) < VERFAHREN,
         geraet: mikrofon_name(konfig.audio_eingabe.as_deref()),
     })
 }
@@ -251,15 +316,19 @@ fn sprache_schneiden(
     let fenster_len = (rate as usize / 50).max(1);
     let vorlauf_len = (rate as f32 * VORLAUF_SEKUNDEN) as usize;
     let warte_len = (rate as f32 * SPRACHE_WARTEN_SEKUNDEN) as usize;
+    let stille_len = (rate as f32 * STILLE_SEKUNDEN) as usize;
+    let nachlauf_len = (rate as f32 * NACHLAUF_SEKUNDEN) as usize;
 
     // Noch nicht in Fenster zerlegte Samples, der Vorlauf vor dem Einsatz
-    // und die eigentliche Aufnahme. `ziel` ist erst gesetzt, wenn gesprochen
-    // wurde: Vorlauf plus 2,2 s ab Einsatz.
+    // und die eigentliche Aufnahme. `ziel` ist die Notbremse (Vorlauf plus
+    // AUFNAHME_SEKUNDEN ab Einsatz); der Normalfall ist der Abbruch an der
+    // Stille, gezaehlt in `stille`.
     let mut rest: Vec<f32> = Vec::new();
     let mut vorlauf: Vec<f32> = Vec::new();
     let mut aufnahme: Vec<f32> = Vec::new();
     let mut ziel: Option<usize> = None;
     let mut gewartet = 0usize;
+    let mut stille = 0usize;
 
     while ziel.is_none_or(|z| aufnahme.len() < z) {
         while rest.len() < fenster_len {
@@ -278,10 +347,28 @@ fn sprache_schneiden(
             }
         }
         let fenster: Vec<f32> = rest.drain(..fenster_len).collect();
+        let laut = rms(&fenster) >= SPRACHE_RMS;
         if ziel.is_some() {
+            // **Am Sprachende schneiden, nicht nach fester Länge.** Bis zum
+            // 23.08.2026 lief hier stur bis `AUFNAHME_SEKUNDEN` weiter, egal
+            // wann der Sprecher aufhörte. Ein Agentenname dauert 0,5–0,8 s;
+            // der Rest der Aufnahme war Raumton. Das ist nicht bloss Ballast:
+            // rustpotter leitet aus der längsten Vorlage sein Suchfenster
+            // **und** seine Nachlaufuhr ab, und beides wurde damit doppelt
+            // so gross wie nötig.
             aufnahme.extend(fenster);
-        } else if rms(&fenster) >= SPRACHE_RMS {
-            // Der Einsatz: Vorlauf mitnehmen, ab hier bis zur Ziellänge sammeln.
+            if laut {
+                stille = 0;
+            } else {
+                stille += fenster_len;
+                if stille >= stille_len {
+                    break;
+                }
+            }
+        } else if laut {
+            // Der Einsatz: Vorlauf mitnehmen, ab hier sammeln. `ziel` ist
+            // jetzt nur noch die Notbremse — normalerweise endet die
+            // Aufnahme vorher an der Stille.
             aufnahme.append(&mut vorlauf);
             ziel = Some(aufnahme.len() + (rate as f32 * AUFNAHME_SEKUNDEN) as usize);
             aufnahme.extend(fenster);
@@ -299,6 +386,14 @@ fn sprache_schneiden(
     }
     if let Some(z) = ziel {
         aufnahme.truncate(z);
+    }
+    // Die gezaehlte Stille am Ende wieder abschneiden, aber einen kurzen
+    // Nachlauf stehen lassen: der Auslaut eines Wortes ist leise und faellt
+    // sonst mit unter die Schwelle. Was hier zu viel bleibt, verlaengert
+    // Suchfenster und Nachlaufuhr von rustpotter.
+    if stille > nachlauf_len {
+        let weg = (stille - nachlauf_len).min(aufnahme.len());
+        aufnahme.truncate(aufnahme.len() - weg);
     }
     Ok(aufnahme)
 }
@@ -373,6 +468,11 @@ pub fn trainieren(app: &AppHandle, wort: &str) -> Result<(), String> {
         WakewordRef::new_from_sample_files(wort.to_string(), None, None, dateien, MFCC_GROESSE)?;
     let pfad = verzeichnis.join(MODELL_DATEI);
     referenz.save_to_file(pfad.to_str().ok_or("Modellpfad nicht darstellbar")?)?;
+    // Erst nach dem Modell und mit ignoriertem Fehler: die Marke ist ein
+    // Hinweis, kein Teil des Modells. Laesst sie sich nicht schreiben, bietet
+    // die App eine ueberfluessige Neukalibrierung an — das ist die harmlose
+    // Richtung. Umgekehrt (Marke da, Modell nicht) waere es die schaedliche.
+    let _ = std::fs::write(verzeichnis.join(VERFAHREN_DATEI), VERFAHREN.to_string());
     Ok(())
 }
 
@@ -434,8 +534,14 @@ fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
     rp_konfig.fmt.sample_rate = rate as usize;
     rp_konfig.fmt.channels = 1;
     // Der Gain-Normalizer ist der Hebel für schlechte und leise Mikrofone:
-    // er zieht den Live-Pegel auf die RMS der eigenen Kalibrierungsaufnahmen
-    // (gain_ref None = Referenz aus dem Modell). Ab Werk ist er **aus**, und
+    // er zieht den Live-Pegel auf den **Median der Frame-RMS** der eigenen
+    // Kalibrierungsaufnahmen (gain_ref None = Referenz aus dem Modell).
+    // Hier stand „auf die RMS der Aufnahmen" — das klang nach Sprachpegel,
+    // ist aber der Median über alle 30-ms-Blöcke der Datei. Solange jede
+    // Aufnahme zu drei Vierteln aus Raumton bestand, war der Median-Block
+    // ein Stille-Block, und der Filter zog live eher herunter als herauf.
+    // Mit dem Schnitt am Sprachende (siehe `AUFNAHME_SEKUNDEN`) trifft die
+    // Referenz von selbst einen Sprach-Block. Ab Werk ist er **aus**, und
     // max_gain 1.0 hieße „nur dämpfen, nie verstärken" — ein leises Mikrofon
     // käme nie auf den Pegel, mit dem trainiert wurde. Der Preis: er hebt
     // auch Rauschen an — deshalb die drei Tore darunter.
@@ -449,7 +555,9 @@ fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
     // Gate kostete nur echte, leise Rufe.
     rp_konfig.detector.vad_mode = Some(VADMode::Easy);
     // Tor 2 — Median statt Max: der Einheitsscore braucht die Mehrheit der
-    // zehn Aufnahmen, nicht die eine, die dem Rauschen zufällig ähnelt.
+    // Aufnahmen, nicht die eine, die dem Rauschen zufällig ähnelt. Median
+    // ist ein Perzentil und keine Anzahl — der geforderte Anteil bleibt
+    // derselbe, egal wie viele Aufnahmen es gibt.
     rp_konfig.detector.score_mode = ScoreMode::Median;
     // Tor 3 — das Durchschnitts-Tor auf Werkswert. Hier stand 0,0 mit der
     // Begründung „reine CPU-Sparmaßnahme" — falsch gelesen: es verwirft
@@ -465,9 +573,31 @@ fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
             .unwrap_or(crate::konfig::WAKEWORD_SCHWELLE_VORGABE),
     );
     // Ein echtes Wort, das nur in drei, vier Frames über der Schwelle liegt,
-    // wurde mit dem Werkswert 5 stumm verworfen — „man muss es mehrmals
-    // sagen". Drei reicht als Beleg, die Tore oben fangen das Rauschen.
+    // wurde mit dem Werkswert 5 stumm verworfen. Drei reicht als Beleg, die
+    // Tore oben fangen das Rauschen.
     rp_konfig.detector.min_scores = 3;
+    // **Sofort melden, statt auf das Ende einer Nachlaufuhr zu warten.**
+    //
+    // Das war am 23.08.2026 die eigentliche Ursache für „das Wake-Word
+    // funktioniert gar nicht". Ohne `eager` meldet rustpotter erst, wenn
+    // `detection_countdown` auf 0 steht (detector.rs: `is_detection_done`),
+    // und der Zähler steht auf `max_mfcc_frames / 2` — bei den damaligen
+    // Aufnahmen also 1,25 s. Gemessen kam die Meldung **3,08 s** nach dem
+    // Wort. Für einen Menschen ist das nicht „erkannt", sondern „nicht
+    // gehört".
+    //
+    // Schlimmer: der Countdown wird bei **jedem** Frame über der Schwelle
+    // neu gestellt (detector.rs:429, ausserhalb der „besserer Score"-
+    // Verzweigung). Wer den Namen aus Ungeduld noch einmal ruft, dreht die
+    // Uhr zurück — viermal gerufen ergab gemessen 7,58 s statt 3,08 s.
+    // Genau das hat der Betreiber erlebt, und genau deshalb wurde es
+    // schlimmer, je öfter er es versuchte.
+    //
+    // Der Kommentar an `min_scores` nannte das früher als Grund für „man
+    // muss es mehrmals sagen". Das war die falsche Stellschraube: solange
+    // der Countdown läuft, sieht `is_detection_done` den Zähler gar nicht
+    // an. Mit `eager` wird gemeldet, sobald `min_scores` erreicht ist.
+    rp_konfig.detector.eager = true;
     let mut erkenner = Rustpotter::new(&rp_konfig)?;
     erkenner.add_wakeword_from_file(
         "wakeword",
@@ -513,7 +643,13 @@ fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
                         // nicht — das Wake-Word muss auch dann tragen, wenn
                         // kein Fenster offen ist. Läuft dort schon eine
                         // Sitzung, passiert nichts.
-                        crate::sprachsitzung_starten(app);
+                        // Über den Hauptthread, nicht von hier aus:
+                        // `sprachsitzung_starten` fragt das Overlay nach
+                        // seiner Sichtbarkeit, und dieser Getter blockiert
+                        // aus einem Nebenfaden, bis die Ereignisschleife
+                        // antwortet. Genau daran hing der Deadlock gegen
+                        // `wakeword_lauschen`, das diesen Faden joint.
+                        crate::am_hauptthread(app, crate::sprachsitzung_starten);
                     }
                 }
             }
@@ -557,10 +693,72 @@ mod tests {
         let aufnahme = sprache_schneiden(quelle(bloecke), RATE).unwrap();
 
         let vorlauf = (RATE as f32 * VORLAUF_SEKUNDEN) as usize;
-        let ziel = vorlauf + (RATE as f32 * AUFNAHME_SEKUNDEN) as usize;
-        assert_eq!(aufnahme.len(), ziel);
+        // Hier wird ohne Pause weitergesprochen (30 laute Bloecke = 3 s),
+        // also greift die Notbremse `AUFNAHME_SEKUNDEN`.
+        let deckel = vorlauf + (RATE as f32 * AUFNAHME_SEKUNDEN) as usize;
+        assert_eq!(aufnahme.len(), deckel);
         assert_eq!(aufnahme[0], 0.0, "vor dem Einsatz steht der stille Vorlauf");
         assert!(aufnahme[vorlauf] > 0.0, "am Einsatz muss Sprache stehen");
+    }
+
+    #[test]
+    fn der_schnitt_endet_am_sprachende_nicht_an_der_uhr() {
+        // Der eigentliche Umbau vom 23.08.2026. Ein Name dauert 0,5-0,8 s;
+        // vorher wurden daraus stur 2,5 s, und die restlichen 1,8 s
+        // Raumton bestimmten anschliessend Suchfenster und Nachlaufuhr von
+        // rustpotter. Gemessen kam die Erkennung dadurch 3,08 s nach dem
+        // Wort - fuer einen Menschen ist das "reagiert nicht".
+        let mut bloecke = vec![vec![0.0_f32; 1_600]; 5]; // 0,5 s Ruhe
+        bloecke.extend(vec![vec![0.5_f32; 1_600]; 7]); // 0,7 s Wort
+        bloecke.extend(vec![vec![0.0_f32; 1_600]; 30]); // danach still
+        let aufnahme = sprache_schneiden(quelle(bloecke), RATE).unwrap();
+
+        let vorlauf = (RATE as f32 * VORLAUF_SEKUNDEN) as usize;
+        let wort = (RATE as f32 * 0.7) as usize;
+        let nachlauf = (RATE as f32 * NACHLAUF_SEKUNDEN) as usize;
+        let erwartet = vorlauf + wort + nachlauf;
+        // Auf ein 20-ms-Fenster genau: die Stille wird blockweise gezaehlt.
+        let fenster = RATE as usize / 50;
+        assert!(
+            aufnahme.len().abs_diff(erwartet) <= fenster,
+            "erwartet ~{erwartet}, bekommen {}",
+            aufnahme.len()
+        );
+        // Und ausdruecklich: deutlich kuerzer als die alte Festlaenge.
+        let alte_festlaenge = vorlauf + (RATE as f32 * AUFNAHME_SEKUNDEN) as usize;
+        assert!(aufnahme.len() < alte_festlaenge / 2);
+    }
+
+    #[test]
+    fn eine_kalibrierung_ohne_marke_gilt_als_veraltet() {
+        // Wer vor dem 23.08.2026 kalibriert hat, hat 2,5-s-Schablonen. Die
+        // App muss das anbieten koennen, sonst laeuft die Reparatur ins
+        // Leere: an ueberlangen Vorlagen aendert keine Einstellung etwas.
+        let ordner = std::env::temp_dir().join(format!("mss-verfahren-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&ordner);
+        assert_eq!(verfahren_lesen(&ordner), 1, "keine Marke heisst: von frueher");
+        std::fs::write(ordner.join(VERFAHREN_DATEI), VERFAHREN.to_string()).unwrap();
+        assert_eq!(verfahren_lesen(&ordner), VERFAHREN);
+        // Und Unsinn in der Datei zaehlt wie keine Datei — nie wie "aktuell".
+        std::fs::write(ordner.join(VERFAHREN_DATEI), "kaputt").unwrap();
+        assert_eq!(verfahren_lesen(&ordner), 1);
+        let _ = std::fs::remove_dir_all(&ordner);
+    }
+
+    #[test]
+    fn eine_pause_zwischen_zwei_silben_schneidet_nicht() {
+        // 200 ms Luftholen mitten im Wort liegen unter `STILLE_SEKUNDEN`.
+        // Waere die Grenze knapper, schnitte sie Namen in der Mitte durch -
+        // und die Schablone lernte eine halbe Silbe.
+        let mut bloecke = vec![vec![0.5_f32; 1_600]; 4]; // erste Silbe
+        bloecke.extend(vec![vec![0.0_f32; 1_600]; 2]); // 0,2 s Pause
+        bloecke.extend(vec![vec![0.5_f32; 1_600]; 4]); // zweite Silbe
+        bloecke.extend(vec![vec![0.0_f32; 1_600]; 30]);
+        let aufnahme = sprache_schneiden(quelle(bloecke), RATE).unwrap();
+
+        // Beide Silben plus die Pause dazwischen sind drin.
+        let beide = (RATE as f32 * 1.0) as usize;
+        assert!(aufnahme.len() >= beide, "die Pause hat das Wort zerschnitten");
     }
 
     #[test]

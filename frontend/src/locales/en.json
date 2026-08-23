@@ -3545,8 +3545,24 @@
           "tasks": "A standing task created in chat or in the task list (“AI task”) stores its name, instruction, schedule, time zone and delivery channel, and triggers processing at the agreed time while the user is not present. It runs in the background with the permissions and quota of whoever created it; on each due run the instruction and the server data it retrieves are transmitted to the selected model provider. On request the result is additionally sent by email to the stored address and contains model-generated text. Tasks can be listed, paused and deleted from the chat and the task list at any time."
         }
       },
+      "desktopApp": {
+        "heading": "7. The desktop app (Maunting Smart System)",
+        "body": "The Maunting Smart System is an optional Windows app that runs on the user’s computer and works there on behalf of the AI. It is not a second panel but the same account with a computer attached: pairing happens through a code issued by the panel, and without the “AI tools on your own computer” permission it fetches no jobs at all. This section describes what stays on the machine and what leaves it. All outgoing connections go exclusively to the panel address entered during setup — there is no updater, no telemetry and no hard-wired third party.",
+        "items": {
+          "wakeword": "Wake word (off by default): once enabled, the app continuously reads the microphone and compares what it hears against a reference model — entirely on the machine, with no network connection. Until the word is recognised, not a single audio sample leaves the process, and nothing is recorded. The price of this listening is continuous CPU load (measured at roughly one sixth of a core).",
+          "wakewordAufnahmen": "Calibration voice recordings: to train the model you speak your chosen name several times. These are real voice recordings and are kept indefinitely as WAV files in the local app data directory, together with the reference model derived from them. They are never transmitted. They are removed by “Reset” in the wake word settings or by uninstalling.",
+          "sprachsitzung": "Voice session: only after the wake word is recognised (or after the voice shortcut is pressed) does the app open the audio channel to the panel and transmit your utterance. The panel forwards it to the configured model provider for transcription; the spoken reply is additionally produced by a speech provider. From that point the statements in section 6 about external model providers apply.",
+          "bildschirm": "Screenshots: the AI can look at the main screen. The image is downscaled, never written to disk, and transmitted as a tool result to the panel, which stores it encrypted and passes it to the model provider. The provider therefore sees everything visible at that moment — including other windows, messages and open documents. An indicator lights up at the edge of the screen for every capture; it cannot be switched off.",
+          "dateien": "Read access to the computer: the AI can inspect drives, folders and disk space — as far as the signed-in Windows user may do so. Drive details as well as folder and file names with sizes are transmitted. File contents are only read and transmitted from the sandbox folder you select yourself. Whether the Windows system area may be read is configured per account in the panel.",
+          "schreiben": "Write access: creating and changing files happens exclusively inside the sandbox folder you select. The resolved path is checked so that a link cannot lead out of the folder.",
+          "aufraeumen": "Cleaning up outside the sandbox: deleting is possible outside it too. Deleted items go to the recycle bin; permanent deletion only on explicit request. Windows itself, program folders and other user profiles stay locked until you unlock them. The affected file paths, their size and their classification are sent to the panel and the model provider. With autonomous mode off, the app shows you the full list for confirmation first.",
+          "virenscan": "Virus check: on request the app checks a file with the locally installed Microsoft Defender, without changing or removing it. The checked path and, if something is found, an excerpt of the Defender output — which contains file paths and threat names — go to the model provider.",
+          "eingabe": "Mouse and keyboard: the app does not record your input — there is no capture of keystrokes or mouse movement, neither locally nor transmitted. Conversely the AI can take over mouse and keyboard; with autonomous mode off, every takeover must be confirmed on your machine and is time-limited. Text the AI types originates from the model and is contained in the transmitted job.",
+          "lokal": "What is stored locally: a plain-text configuration file (panel address, sandbox path, chosen assistant name, shortcuts, audio device names, wake word sensitivity), the wake word recordings and model — and exactly one entry in the Windows Credential Manager: the operating-system-encrypted refresh token of the paired session. Your password and two-factor code never reach the app; signing in works solely through the pairing code from the panel. Uninstalling removes all of it."
+        }
+      },
       "storage": {
-        "heading": "7. Cookies and local browser storage",
+        "heading": "8. Cookies and local browser storage",
         "body": "The panel uses browser storage needed for secure operation and selected preferences.",
         "items": {
           "session": "Session or authentication cookies used to keep users signed in",
@@ -3555,7 +3571,7 @@
         }
       },
       "retention": {
-        "heading": "8. Retention and account deletion",
+        "heading": "9. Retention and account deletion",
         "body": "Retention depends on the operator’s configuration, infrastructure, backups, and legal obligations.",
         "items": {
           "operator": "The operator must define and document suitable retention periods and delete data that is no longer needed",
@@ -3564,7 +3580,7 @@
         }
       },
       "responsibility": {
-        "heading": "9. Operator responsibility and requests",
+        "heading": "10. Operator responsibility and requests",
         "body": "Users should direct access, correction, deletion, objection, and provider questions to the operator of this MSM instance. The operator is responsible for publishing its identity, contact route, lawful basis, provider list, and instance-specific retention information."
       },
       "hoster": {
@@ -4824,6 +4840,7 @@
       "erkannt": "Recognised: “{{name}}” (score {{score}})",
       "datenschutz": "Everything stays on this computer: recordings and model live in the app data directory, no audio ever leaves the process.",
       "wortIstName": "Your wake word is always your assistant’s name: “{{name}}”. Rename it in chat (“call yourself …”) or in the panel under Profile → AI.",
+      "verfahrenAlt": "This calibration comes from an older version of the app. Back then every recording was a fixed 2.5 seconds and therefore mostly room tone — detection only fired about three seconds after the word. Please record the name once more: reset, then the {{gesamt}} recordings. The sensitivity slider does not help here.",
       "neuKalibrieren": "The model is still trained on “{{alt}}”, but your assistant is now called “{{neu}}”. Turn the wake word off, reset the calibration and record the new name — until then the app keeps listening for “{{alt}}”.",
       "aktiv": "Wake word active",
       "aktivHinweis": "On: say “{{name}}” and the overlay opens above everything. Off means off — the microphone is released and nothing turns listening back on by itself.",

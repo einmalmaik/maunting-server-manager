@@ -127,7 +127,7 @@ export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string |
                     {posten.pfad}
                   </span>
                   <span className="shrink-0 tabular-nums">
-                    {groesse(posten.bytes)}
+                    {posten.ungefaehr ? '≥ ' : ''}{groesse(posten.bytes)}
                     {posten.zone === 'system' ? ` · ${t('mss.aufraeumen.system')}` : ''}
                   </span>
                 </li>

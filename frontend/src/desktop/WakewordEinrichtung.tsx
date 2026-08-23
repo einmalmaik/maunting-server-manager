@@ -34,7 +34,14 @@ import {
   type WakewordStand,
 } from './tauri'
 
-const AUFNAHMEN_SOLL = 10
+/**
+ * Muss zu `wakeword::AUFNAHMEN_SOLL` in Rust passen.
+ *
+ * Waren zehn; rustpotter nennt für Referenzmodelle ausdrücklich „3 to 8 wav
+ * records", und jede weitere Aufnahme kostet Rechenzeit in jedem einzelnen
+ * Vergleich.
+ */
+const AUFNAHMEN_SOLL = 6
 /** Atempause zwischen zwei Runden — sprechen, absetzen, wieder sprechen. */
 const RUNDEN_PAUSE_MS = 900
 /**
@@ -235,6 +242,13 @@ export function WakewordEinrichtung() {
         <p className="msm-alert-warning">
           {t('mss.wakeword.neuKalibrieren', { alt: stand.wort, neu: agentName })}
         </p>
+      )}
+
+      {/* Die Kalibrierung stammt aus der Zeit der festen 2,5-s-Aufnahmen.
+          Anbieten, nicht erzwingen — aber deutlich: an überlangen Vorlagen
+          ändert weder der Empfindlichkeitsregler noch sonst etwas. */}
+      {stand.veraltet === true && (
+        <p className="msm-alert-warning">{t('mss.wakeword.verfahrenAlt', { gesamt: AUFNAHMEN_SOLL })}</p>
       )}
 
       <div className="flex flex-wrap gap-2">

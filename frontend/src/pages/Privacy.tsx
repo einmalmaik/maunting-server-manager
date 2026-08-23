@@ -10,8 +10,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-08-13',
-    version: '2.5',
+    lastUpdated: '2026-08-23',
+    version: '2.6',
     meta: 'Maunting Service Manager',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -85,6 +85,35 @@ export function Privacy() {
           // die Aufbewahrung (Auftragstext, Zeitplan, Zeitzone) ist eine
           // eigene Aussage.
           t('privacyPolicy.sections.ai.items.tasks'),
+        ],
+      },
+      {
+        // Die Desktop-App, seit dem 23.08.2026. Sie stand hier bis dahin
+        // ueberhaupt nicht — kein Treffer fuer „Mikrofon", „Bildschirm",
+        // „Rechner" oder „Tastatur" im ganzen Dokument, obwohl die App
+        // dauerhaft mithoert, den Bildschirm fotografiert, das Dateisystem
+        // liest und ausserhalb der Sandbox loescht.
+        //
+        // Der Abschnitt steht direkt hinter dem KI-Abschnitt und nicht am
+        // Ende: alles hier Beschriebene beginnt mit einer KI-Anfrage, und
+        // ab dem Punkt, an dem etwas den Rechner verlaesst, gilt Abschnitt 6
+        // weiter. Zwei Punkte sind die eigentlichen Neuigkeiten fuer den
+        // Leser und stehen deshalb zuerst: das Mikrofon laeuft dauerhaft,
+        // und die Kalibrierung hinterlaesst echte Stimmaufnahmen, die
+        // unbefristet liegen bleiben.
+        heading: t('privacyPolicy.sections.desktopApp.heading'),
+        body: t('privacyPolicy.sections.desktopApp.body'),
+        items: [
+          t('privacyPolicy.sections.desktopApp.items.wakeword'),
+          t('privacyPolicy.sections.desktopApp.items.wakewordAufnahmen'),
+          t('privacyPolicy.sections.desktopApp.items.sprachsitzung'),
+          t('privacyPolicy.sections.desktopApp.items.bildschirm'),
+          t('privacyPolicy.sections.desktopApp.items.dateien'),
+          t('privacyPolicy.sections.desktopApp.items.schreiben'),
+          t('privacyPolicy.sections.desktopApp.items.aufraeumen'),
+          t('privacyPolicy.sections.desktopApp.items.virenscan'),
+          t('privacyPolicy.sections.desktopApp.items.eingabe'),
+          t('privacyPolicy.sections.desktopApp.items.lokal'),
         ],
       },
       {

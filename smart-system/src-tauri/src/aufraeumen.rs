@@ -35,6 +35,7 @@
 //! "fehlgeschlagen" und weiss nicht, dass zwei Dateien schon weg sind.
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -56,6 +57,14 @@ struct Posten {
 /// Wie tief in Ordner hineingerechnet wird. Reicht fuer alles, was ein
 /// Mensch bewusst zum Aufraeumen benennt.
 pub const MESSTIEFE: u32 = 12;
+/// Wie lange **eine** Groessenmessung hoechstens laufen darf.
+///
+/// Fuenf Sekunden sind lang genug fuer jeden normalen Ordner und kurz genug,
+/// dass ein Mensch davor nicht denkt, das Programm sei tot. Der Wert gilt je
+/// Pfad; eine Karte mit zwanzig Posten misst also im schlimmsten Fall
+/// zwanzigmal fuenf Sekunden — dafuer laeuft sie seit demselben Tag nicht
+/// mehr auf dem Hauptthread (`#[tauri::command(async)]`).
+pub const MESSFRIST: Duration = Duration::from_secs(5);
 
 /// Die Groesse eines Pfades — bei Ordnern die Summe darunter.
 ///
@@ -67,25 +76,61 @@ pub const MESSTIEFE: u32 = 12;
 /// Ein Fehler beim Messen darf das Loeschen nicht verhindern (dann steht
 /// eben 0 da). Die Rekursion ist begrenzt, weil ein zyklischer
 /// Verknuepfungsbaum sonst nie fertig wuerde.
+///
+/// **Und sie ist seit dem 23.08.2026 auf die Uhr begrenzt.** Die Tiefe
+/// allein reichte nicht: ein breiter Baum, ein OneDrive-Ordner voller
+/// Platzhalter oder ein getrenntes Netzlaufwerk (wo schon jedes
+/// `symlink_metadata` bis zum SMB-Zeitablauf steht) laesst diese Rechnung
+/// beliebig lange laufen. Das war die einzige Stelle im Programm, deren
+/// Blockade der Laenge nach unbegrenzt war — und sie lief auf dem
+/// Hauptthread, also mit eingefrorener Oberflaeche.
+///
+/// Laeuft die Zeit ab, ist das Ergebnis eine **Untergrenze** und keine
+/// Zahl. Eine Karte, die nach fuenf Sekunden "mindestens 2,4 GB" sagt, ist
+/// besser als eine, die nie kommt.
 pub fn groesse(pfad: &Path, tiefe: u32) -> u64 {
+    let (bytes, _) = groesse_mit_frist(pfad, tiefe, Instant::now() + MESSFRIST);
+    bytes
+}
+
+/// Wie `groesse`, sagt aber dazu, ob sie fertig geworden ist.
+///
+/// `false` heisst: die Frist lief ab, die Zahl ist eine Untergrenze.
+pub fn groesse_gemessen(pfad: &Path, tiefe: u32) -> (u64, bool) {
+    groesse_mit_frist(pfad, tiefe, Instant::now() + MESSFRIST)
+}
+
+fn groesse_mit_frist(pfad: &Path, tiefe: u32, bis: Instant) -> (u64, bool) {
+    if Instant::now() >= bis {
+        return (0, false);
+    }
     let Ok(daten) = std::fs::symlink_metadata(pfad) else {
-        return 0;
+        return (0, true);
     };
     if daten.is_file() {
-        return daten.len();
+        return (daten.len(), true);
     }
     // Einer Verknuepfung folgen wir beim Messen nicht: sonst zaehlte ein Link
     // nach C:\Windows das halbe System zur Groesse eines Downloads-Ordners.
     if daten.is_symlink() || tiefe == 0 {
-        return 0;
+        return (0, true);
     }
     let Ok(eintraege) = std::fs::read_dir(pfad) else {
-        return 0;
+        return (0, true);
     };
-    eintraege
-        .flatten()
-        .map(|eintrag| groesse(&eintrag.path(), tiefe - 1))
-        .sum()
+    let mut summe = 0u64;
+    let mut vollstaendig = true;
+    for eintrag in eintraege.flatten() {
+        if Instant::now() >= bis {
+            // Nicht weiterzaehlen, aber das Bisherige behalten: eine
+            // Untergrenze ist eine Aussage, eine 0 waere eine falsche.
+            return (summe, false);
+        }
+        let (teil, fertig) = groesse_mit_frist(&eintrag.path(), tiefe - 1, bis);
+        summe = summe.saturating_add(teil);
+        vollstaendig &= fertig;
+    }
+    (summe, vollstaendig)
 }
 
 /// Prueft einen einzelnen Pfad, bevor irgendetwas passiert.

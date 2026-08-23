@@ -118,6 +118,13 @@ export interface WakewordStand {
   wort?: string | null
   /** Name des Eingabegeräts — `null`, wenn keines gefunden wurde. */
   geraet?: string | null
+  /**
+   * Ob die vorhandene Kalibrierung aus einem älteren Schnittverfahren
+   * stammt. Bis zum 23.08.2026 war jede Aufnahme fest 2,5 s lang und
+   * bestand damit überwiegend aus Raumton; daran ändert keine Einstellung
+   * etwas, es hilft nur neu einsprechen.
+   */
+  veraltet?: boolean
 }
 
 export async function wakewordStand(): Promise<WakewordStand> {
@@ -194,6 +201,13 @@ export interface Aufraeumposten {
   pfad: string
   /** Größe in Bytes; `null`, wenn sie nicht ermittelt werden konnte. */
   bytes: number | null
+  /**
+   * Ob `bytes` nur eine Untergrenze ist. Die Messung in Rust hat eine
+   * Zeitgrenze (`aufraeumen::MESSFRIST`); bei einem sehr tiefen Baum oder
+   * einem langsamen Netzpfad bricht sie ab und meldet, was sie bis dahin
+   * gezaehlt hat. Die Karte schreibt dann „mindestens" davor.
+   */
+  ungefaehr?: boolean
   /** `frei` | `muell` | `system` — nur `system` ist heikel. */
   zone: string
 }

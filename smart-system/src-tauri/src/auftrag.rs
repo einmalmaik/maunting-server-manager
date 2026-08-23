@@ -177,11 +177,17 @@ fn raeumen(app: &AppHandle, argumente: &Value) -> Result<Ergebnis, String> {
         .iter()
         .map(|pfad| {
             let ort = std::path::Path::new(pfad);
+            // Dieselbe Rechnung wie beim Ausfuehren — sonst zeigte die
+            // Karte fuer Ordner 0 B und der Mensch entschiede blind. Seit
+            // dem 23.08.2026 mit Zeitgrenze: lief sie ab, ist `bytes` eine
+            // Untergrenze, und die Karte sagt das mit einem "mindestens".
+            // Eine geschaetzte Zahl, die sich als genau ausgibt, ist bei
+            // einer Loeschentscheidung die schlechtere Sorte Ungenauigkeit.
+            let (bytes, vollstaendig) = aufraeumen::groesse_gemessen(ort, aufraeumen::MESSTIEFE);
             json!({
                 "pfad": pfad,
-                // Dieselbe Rechnung wie beim Ausfuehren — sonst zeigte die
-                // Karte fuer Ordner 0 B und der Mensch entschiede blind.
-                "bytes": aufraeumen::groesse(ort, aufraeumen::MESSTIEFE),
+                "bytes": bytes,
+                "ungefaehr": !vollstaendig,
                 "zone": zonen::zone(ort).name(),
             })
         })
