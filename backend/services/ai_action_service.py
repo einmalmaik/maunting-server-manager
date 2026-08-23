@@ -106,6 +106,12 @@ MAX_OPTION_HINT_CHARS = 120
 # Grenze zieht der Rechner selbst (Sandbox); das hier haelt nur den Prompt
 # beisammen.
 MAX_DESKTOP_INHALT_CHARS = 60_000
+# Wie viele Pfade ein Aufraeumauftrag tragen darf. Dieselbe Zahl steht in
+# `aufraeumen.rs` und gilt dort noch einmal: das Panel haelt den Prompt klein,
+# der Rechner haelt die Aktion klein. Wer eine Grenze nur oben zieht, hat sie
+# nicht gezogen — die App nimmt auch Auftraege entgegen, die nie durch dieses
+# Schema gegangen sind.
+MAX_AUFRAEUM_PFADE = 500
 
 # ── Tool-Mengen ───────────────────────────────────────────────────────────
 # Abgeleitet aus `services/ai_tool_registry.py`. Dort steht **eine** Zeile je
@@ -1274,43 +1280,37 @@ def _desktop_tool_definitions() -> list[dict]:
             [],
         ),
         _function(
-            "desktop_takeover_control",
-            "Bittet um die Freigabe für Maus und Tastatur. Der Benutzer "
-            "bestätigt an seinem Rechner; erteilt wird sie befristet und nur "
-            "von ihm. Erkläre in `anliegen` in einem Satz, was du tun willst "
-            "— genau das liest er auf der Karte. Nutze das erst, wenn eine "
-            "Aufgabe wirklich nicht anders geht: Dateien, Programme und "
-            "Adressen laufen ohne Übernahme.",
+            "desktop_steuern",
+            "Übernimmt Maus und Tastatur. Beginne **immer** mit "
+            "aktion='freigabe': der Benutzer bestätigt an seinem Rechner, "
+            "befristet, und nur er kann das. Erst danach greifen klick, "
+            "tippen und der Rest; ohne gültige Freigabe wird jeder Aufruf "
+            "abgewiesen. Nutze das erst, wenn es nicht anders geht — Dateien, "
+            "Programme und Adressen laufen ohne Übernahme. Koordinaten sind "
+            "Bildpunkte des zuletzt gelieferten Bildschirmfotos, Ursprung "
+            "links oben, nur der Hauptbildschirm; sieh vor jedem Klick mit "
+            "desktop_system(aktion='bildschirm') nach.",
             {
+                "aktion": {
+                    "type": "string",
+                    "enum": [
+                        "freigabe", "klick", "doppelklick", "rechtsklick",
+                        "maus_bewegen", "tippen", "taste", "scrollen", "warten",
+                    ],
+                },
                 "anliegen": {
                     "type": "string",
                     "maxLength": 300,
-                    "description": "Was du übernehmen willst und wofür, in einem Satz.",
+                    "description": (
+                        "Nur bei freigabe: was du tun willst, in einem Satz — "
+                        "der Benutzer liest genau das."
+                    ),
                 },
                 "minuten": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 30,
-                    "description": "Wie lange die Freigabe gelten soll.",
-                },
-            },
-            ["anliegen"],
-        ),
-        _function(
-            "desktop_steuern",
-            "Bedient den Rechner: Bildschirm ansehen, klicken, tippen, "
-            "scrollen. Setzt eine gültige Freigabe voraus "
-            "(desktop_takeover_control) — ohne sie wird jeder Aufruf "
-            "abgewiesen. Koordinaten sind Bildpunkte des zuletzt gelieferten "
-            "Bildschirmfotos, Ursprung links oben; nur der Hauptbildschirm. "
-            "Sieh vor jedem Klick nach, statt aus dem Gedächtnis zu klicken.",
-            {
-                "aktion": {
-                    "type": "string",
-                    "enum": [
-                        "bildschirm", "klick", "doppelklick", "rechtsklick",
-                        "maus_bewegen", "tippen", "taste", "scrollen", "warten",
-                    ],
+                    "description": "Nur bei freigabe: Geltungsdauer.",
                 },
                 "x": {"type": "integer", "description": "Bildpunkt von links."},
                 "y": {"type": "integer", "description": "Bildpunkt von oben."},
@@ -1331,30 +1331,66 @@ def _desktop_tool_definitions() -> list[dict]:
         ),
         _function(
             "desktop_system",
-            "Sieht das Betriebssystem des Benutzers an — nur lesend. "
+            "Sieht den Rechner des Benutzers an — nur lesend, nie ändernd. "
             "aktion='laufwerke': alle Laufwerke mit Gesamt- und freiem Platz "
             "(\"wie voll ist meine C-Platte\"). aktion='verzeichnis': listet "
             "einen Ordner irgendwo auf dem Rechner. aktion='groesste': findet "
             "die Platzfresser unter einem Pfad (größte Dateien und "
             "Unterordner; lange Läufe werden nach Zeitbudget gekürzt und als "
-            "gekürzt gemeldet). Pfade sind hier **absolut** (z. B. "
-            "'C:\\Users\\Name\\Downloads') — anders als bei desktop_dateien. "
-            "Geschrieben wird hiermit nie; ändern und aufräumen geht nur im "
-            "Sandbox-Ordner über desktop_dateien.",
+            "gekürzt gemeldet). aktion='bildschirm': ein Foto des "
+            "Hauptbildschirms — dafür, was gerade zu sehen ist, und immer "
+            "direkt vor einem Klick. aktion='virenscan': prüft Datei oder "
+            "Ordner mit dem Virenschutz; gemeldet wird nur, entfernt nichts. "
+            "Pfade sind hier **absolut** (z. B. 'C:\\Users\\Name\\Downloads') "
+            "— anders als bei desktop_dateien. Löschen geht über "
+            "desktop_aufraeumen.",
             {
                 "aktion": {
                     "type": "string",
-                    "enum": ["laufwerke", "verzeichnis", "groesste"],
+                    "enum": [
+                        "laufwerke", "verzeichnis", "groesste",
+                        "bildschirm", "virenscan",
+                    ],
                 },
                 "pfad": {
                     "type": "string",
                     "maxLength": 400,
                     "description": (
-                        "Absoluter Pfad; nötig bei verzeichnis und groesste."
+                        "Absoluter Pfad; nötig bei verzeichnis, groesste "
+                        "und virenscan."
                     ),
                 },
             },
             ["aktion"],
+        ),
+        _function(
+            "desktop_aufraeumen",
+            "Löscht auf dem Rechner, auch außerhalb des Sandbox-Ordners. "
+            "Kandidaten vorher mit desktop_system(groesste) suchen und nennen. "
+            "**'papierkorb' ist der Normalfall** — sag danach, dass es im "
+            "Papierkorb liegt und zurückgeholt werden kann. 'endgueltig' nur, "
+            "wenn der Benutzer es ausdrücklich verlangt hat (\"endgültig\", "
+            "\"ganz weg\"); sonst nie. 'papierkorb_leeren' braucht keine "
+            "Pfade und gibt den Platz erst wirklich frei. Windows und "
+            "Programmordner sind gesperrt.",
+            {
+                "aktion": {
+                    "type": "string",
+                    "enum": ["papierkorb", "endgueltig", "papierkorb_leeren"],
+                },
+                "pfade": {
+                    "type": "array",
+                    "maxItems": MAX_AUFRAEUM_PFADE,
+                    "items": {"type": "string", "maxLength": 400},
+                    "description": "Absolute Pfade.",
+                },
+                "grund": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Wofür, in einem Satz — der Benutzer liest ihn.",
+                },
+            },
+            ["aktion", "grund"],
         ),
     ]
 
@@ -3123,9 +3159,9 @@ def _execute_global_read_tool(
     if tool_name in (
         "desktop_dateien",
         "desktop_launch_app",
-        "desktop_takeover_control",
         "desktop_steuern",
         "desktop_system",
+        "desktop_aufraeumen",
     ):
         # Dieselbe Lage wie bei `wait_until`: die fuenf werden im Rundenlauf
         # abgefangen (`_desktop_behandeln`), werden zu einem Auftrag an den

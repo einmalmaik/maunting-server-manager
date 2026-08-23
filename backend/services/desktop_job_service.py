@@ -37,9 +37,28 @@ FRIST_SEKUNDEN = 180
 FRIST_BESTAETIGUNG_SEKUNDEN = 600
 ABHOLFRIST_SEKUNDEN = 90
 
-# Werkzeuge, die auf eine menschliche Entscheidung am Rechner warten und
-# deshalb die lange Frist bekommen.
-_LANGE_FRIST = frozenset({"desktop_takeover_control"})
+def _wartet_auf_menschen(tool_name: str, arguments: dict) -> bool:
+    """Kann dieser Auftrag an einer menschlichen Entscheidung haengenbleiben?
+
+    Wenn ja, bekommt er die lange Frist: 180 Sekunden reichen nicht, um eine
+    Liste von zwanzig Pfaden zu lesen und zu entscheiden.
+
+    Frueher genuegte dafuer der Werkzeugname (`desktop_takeover_control`).
+    Seit die Bitte um die Freigabe eine **Aktion** von `desktop_steuern` ist
+    (23.08.2026, Katalogbudget), muessen die Argumente mitgelesen werden —
+    sonst bekaeme auch jeder einzelne Klick zehn Minuten Frist, und ein
+    Rechner, der zwischendurch ausgeht, liesse den Lauf entsprechend lange
+    stehen.
+
+    `desktop_aufraeumen` zeigt seine Karte nur bei ausgeschaltetem autonomem
+    Modus, bekommt die lange Frist aber immer: welcher Fall eintritt, hat das
+    Panel zwar schon entschieden (`_desktop_argumente` setzt `autonom`), doch
+    eine grosszuegige Frist kostet im autonomen Fall nichts — geweckt wird der
+    Lauf vom Ergebnis, nicht vom Fristablauf.
+    """
+    if tool_name == "desktop_aufraeumen":
+        return True
+    return tool_name == "desktop_steuern" and arguments.get("aktion") == "freigabe"
 
 
 def _aad(job_id: str) -> str:
@@ -62,7 +81,11 @@ def anlegen(
 ) -> DesktopJob:
     """Legt einen Auftrag hin. Der Aufrufer parkt danach den Lauf."""
     job_id = str(uuid4())
-    frist = FRIST_BESTAETIGUNG_SEKUNDEN if tool_name in _LANGE_FRIST else FRIST_SEKUNDEN
+    frist = (
+        FRIST_BESTAETIGUNG_SEKUNDEN
+        if _wartet_auf_menschen(tool_name, arguments)
+        else FRIST_SEKUNDEN
+    )
     job = DesktopJob(
         id=job_id,
         user_id=user_id,

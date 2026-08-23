@@ -11,17 +11,22 @@
 //! welche bekommen — Server-Verwaltung bleibt exklusiv dem Web-Panel.
 
 mod audio;
+mod aufraeumen;
 mod auftrag;
+mod bildschirm;
 mod deinstallation;
 #[cfg(windows)]
 mod ducking;
 mod geheimnisse;
 mod konfig;
 mod sandbox;
+mod sichtfeld;
 mod system;
 mod tray;
 mod uebernahme;
+mod virenscan;
 mod wakeword;
+mod zonen;
 
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
@@ -115,6 +120,23 @@ fn uebernahme_freigeben(minuten: u64) -> Result<(), String> {
 #[tauri::command]
 fn uebernahme_widerrufen() -> Result<(), String> {
     uebernahme::widerrufen()
+}
+
+/// Fuehrt den wartenden Aufraeumauftrag aus — der Klick auf "Ja".
+///
+/// Nimmt bewusst **keine** Pfadliste entgegen: der Plan liegt in Rust
+/// (`auftrag::WARTEND`), und bestaetigt wird er, nicht das, was ein Fenster
+/// gerade anzeigt. Ein Command mit Pfaden waere ein Loeschbefehl, den jeder
+/// Aufrufer dieses IPC-Kanals frei fuellen koennte.
+#[tauri::command]
+fn aufraeumen_bestaetigen() -> Result<serde_json::Value, String> {
+    auftrag::aufraeumen_bestaetigen()
+}
+
+/// Verwirft den wartenden Aufraeumauftrag. Es wird nichts angefasst.
+#[tauri::command]
+fn aufraeumen_ablehnen() {
+    auftrag::aufraeumen_ablehnen()
 }
 
 /// Wie lange die Freigabe noch laeuft. Die Oberflaeche zeigt es an — eine
@@ -464,6 +486,8 @@ pub fn run() {
             uebernahme_freigeben,
             uebernahme_widerrufen,
             uebernahme_rest,
+            aufraeumen_bestaetigen,
+            aufraeumen_ablehnen,
             deinstallation_aufraeumen,
             deinstallation_starten
         ])

@@ -1,14 +1,66 @@
 from datetime import datetime, timezone
 import hashlib
 
-from sqlalchemy import Boolean, String, DateTime, ForeignKey, Integer, text
+from sqlalchemy import Boolean, CheckConstraint, String, DateTime, ForeignKey, Integer, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
 
 
+#: Wie weit die KI auf dem Rechner des Benutzers **ausserhalb** des freigegebenen
+#: Ordners gehen darf. Die drei Werte sind aufsteigend zu lesen:
+#:
+#: * ``aus``       — der Systembereich ist fuer die KI nicht da.
+#: * ``lesen``     — sie darf hineinsehen, aber nichts aendern.
+#: * ``schreiben`` — sie darf dort arbeiten (nach Bestaetigung durch den Menschen).
+#:
+#: Wahrheitsquelle wie ueberall im Haus: der CheckConstraint unten wird daraus
+#: erzeugt (`models/ai_meldung.MELDUNGSARTEN` geht denselben Weg).
+SYSTEMBEREICHE = ("aus", "lesen", "schreiben")
+
+#: Der Wert, auf den ein neues Konto und jeder unlesbare Bestandswert faellt.
+#:
+#: ``lesen`` ist hier **nicht** die goldene Mitte, sondern der heutige Zustand:
+#: ``desktop_system`` listet seit dem 21.08.2026 jedes Verzeichnis des Rechners
+#: auf, auch ``C:\Windows``. Ein Standard ``aus`` waere damit eine stille
+#: Verschaerfung von etwas, das laeuft — der Betreiber verloere ohne sein Zutun
+#: Auskuenfte, die er gestern noch bekommen hat. Ein Standard ``schreiben`` waere
+#: die stille Lockerung in die andere Richtung. Beide Schritte darf nur der
+#: Betreiber selbst gehen, und zwar sichtbar in den Einstellungen.
+SYSTEMBEREICH_STANDARD = "lesen"
+
+
+def systembereich_des_benutzers(user: "User") -> str:
+    """Was dieses Konto der KI im Systembereich erlaubt — nie mehr als hinterlegt.
+
+    Steht in der Spalte etwas, das diese Fassung des Panels nicht kennt (ein
+    Downgrade auf eine aeltere Version, ein direkter Datenbankzugriff, ein
+    Tippfehler in einer kuenftigen Migration), faellt die Antwort auf
+    `SYSTEMBEREICH_STANDARD` zurueck und nicht auf den hoechsten Wert. Ein
+    eingefrorener Wert darf nie mehr freigeben als der Betreiber gewaehlt hat —
+    dieselbe Richtung wie bei den Rollenlimits und beim Autonomiezustand.
+
+    ``getattr`` statt direktem Zugriff wie in `ai_lage.zone_des_benutzers`: die
+    Testdoubles der Werkzeugschicht sind keine echten ORM-Zeilen, und eine
+    fehlende Spalte darf dort keinen AttributeError werfen, sondern muss zur
+    engeren Antwort fuehren.
+    """
+    wert = (getattr(user, "ai_desktop_systembereich", None) or "").strip()
+    if wert in SYSTEMBEREICHE:
+        return wert
+    return SYSTEMBEREICH_STANDARD
+
+
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            "ai_desktop_systembereich IN ("
+            + ", ".join(f"'{bereich}'" for bereich in SYSTEMBEREICHE)
+            + ")",
+            name="ck_users_ai_desktop_systembereich",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
@@ -63,6 +115,23 @@ class User(Base):
     # nur die Wahl mit, nie das Konto.
     ai_provider_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("ai_providers.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Wie weit die KI auf dem Rechner dieses Benutzers aus dem freigegebenen
+    # Ordner heraus darf (`SYSTEMBEREICHE` oben). Die Einstellung haengt am
+    # Konto und nicht am Rechner: derselbe Mensch sitzt abends an einem anderen
+    # Geraet, und was er der KI ueber seine Systemordner erlaubt, ist eine
+    # Aussage ueber ihn, nicht ueber die Maschine.
+    #
+    # ``NOT NULL`` mit ``server_default``: es gibt keinen Zustand "nicht
+    # eingestellt". Ein ``NULL`` muesste an jeder Lesestelle erneut gedeutet
+    # werden, und die erste Stelle, die es als "darf alles" liest, hat die
+    # Einstellung dann ausgehebelt.
+    ai_desktop_systembereich: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=SYSTEMBEREICH_STANDARD,
+        server_default=SYSTEMBEREICH_STANDARD,
     )
 
     password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True)

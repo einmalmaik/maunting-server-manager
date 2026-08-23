@@ -22,9 +22,28 @@ const RUHE_NACH = 3
 const RUHE_MS = 15_000
 
 /**
+ * Wartet dieser Auftrag auf eine Entscheidung des Menschen am Rechner?
+ *
+ * Zwei tun das: die Bitte um Maus und Tastatur und — bei ausgeschaltetem
+ * autonomem Modus — das Aufräumen. Ob Letzteres wirklich fragt, weiß hier
+ * niemand: das entscheidet Rust anhand des `autonom`, das allein das Panel
+ * setzt. Deshalb wird die Kennung schon **vor** dem Ausführen gemerkt und
+ * hinterher wieder verworfen, wenn doch ein Ergebnis kam.
+ */
+function fragtEinenMenschen(auftrag: Auftrag): boolean {
+  if (auftrag.tool_name === 'desktop_aufraeumen') {
+    return true
+  }
+  return (
+    auftrag.tool_name === 'desktop_steuern' &&
+    (auftrag.arguments as { aktion?: unknown } | null)?.aktion === 'freigabe'
+  )
+}
+
+/**
  * Startet die Schleife und gibt die Kennung des Auftrags zurück, der gerade
- * auf einen Menschen wartet (die Übernahme-Anfrage) — oder `null`. Genau
- * diese eine Sorte Auftrag beantwortet nicht die Schleife, sondern die Karte.
+ * auf einen Menschen wartet — oder `null`. Genau diese Aufträge beantwortet
+ * nicht die Schleife, sondern die jeweilige Karte.
  */
 export function useAuftragsschleife(aktiv: boolean): string | null {
   const [offeneUebernahme, setOffeneUebernahme] = useState<string | null>(null)
@@ -45,7 +64,7 @@ export function useAuftragsschleife(aktiv: boolean): string | null {
         // Die Kennung **vor** dem Ausführen merken: Rust schickt das Ereignis
         // für die Karte noch im Aufruf los, und eine Karte ohne Auftrag könnte
         // nichts beantworten.
-        if (auftrag.tool_name === 'desktop_takeover_control') {
+        if (fragtEinenMenschen(auftrag)) {
           setOffeneUebernahme(auftrag.id)
         }
         ergebnis = await auftragAusfuehren(auftrag.tool_name, auftrag.arguments)
@@ -59,9 +78,10 @@ export function useAuftragsschleife(aktiv: boolean): string | null {
         await ergebnisMelden(auftrag.id, false, { fehler: text }, 'DESKTOP_TOOL_FAILED')
         return
       }
-      // `null` heißt: das Ergebnis kommt später. Genau ein Fall — die Bitte
-      // um die Übernahme, über die ein Mensch entscheidet. Die Karte meldet
-      // dann selbst (Uebernahmekarte.tsx).
+      // `null` heißt: das Ergebnis kommt später, weil ein Mensch entscheidet.
+      // Die jeweilige Karte meldet dann selbst (Uebernahmekarte.tsx,
+      // Aufraeumkarte.tsx). Beim Aufräumen im autonomen Modus kommt statt
+      // `null` ein fertiges Ergebnis — dann läuft es hier normal weiter.
       if (ergebnis === null) {
         return
       }

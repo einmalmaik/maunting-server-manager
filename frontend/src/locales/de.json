@@ -571,7 +571,7 @@
       "desktop_launch_app": "Programm gestartet",
       "desktop_steuern": "Rechner bedient",
       "desktop_system": "Auf deinem Rechner nachgesehen",
-      "desktop_takeover_control": "Übernahme angefragt",
+      "desktop_aufraeumen": "Aufgeräumt",
       "forget_memory": "Erinnerungen gelöscht",
       "forget_skill": "Skill gelöscht",
       "learn_skill": "Skill gelernt",
@@ -618,7 +618,7 @@
       "desktop_launch_app": "Ich starte das Programm",
       "desktop_steuern": "Ich bediene deinen Rechner",
       "desktop_system": "Ich sehe auf deinem Rechner nach",
-      "desktop_takeover_control": "Ich warte auf deine Freigabe",
+      "desktop_aufraeumen": "Ich räume auf",
       "forget_memory": "Ich lösche die Erinnerung",
       "forget_skill": "Ich lösche den Skill",
       "learn_skill": "Ich lerne den Skill",
@@ -1784,7 +1784,7 @@
     },
     "ai_desktop_use": {
       "title": "KI-Werkzeuge auf dem eigenen Rechner",
-      "desc": "Erlaubt der KI, auf dem Rechner des Benutzers zu arbeiten — über die Smart-System-App, nie über das Panel. Ansehen darf sie, was der Benutzer selbst sehen kann (Laufwerke, Ordner, Speicherplatz — nur lesend); angelegt, geändert und gelöscht wird ausschließlich im selbst gewählten Sandbox-Ordner. Bevor sie Maus oder Tastatur übernimmt, muss der Benutzer das an seinem Rechner bestätigen; die Freigabe ist befristet und jederzeit widerrufbar. Eine Bitte aus dem Browser erreicht diese Werkzeuge nie — die Herkunft steht im Token der gekoppelten Sitzung, kein Client kann sie behaupten."
+      "desc": "Erlaubt der KI, auf dem Rechner des Benutzers zu arbeiten — über die Smart-System-App, nie über das Panel. Ansehen darf sie, was der Benutzer selbst sehen kann: Laufwerke, Ordner, Speicherplatz, den Bildschirm und eine Virenprüfung — alles nur lesend, und ein Hinweis am Bildschirmrand leuchtet auf, sobald sie hinsieht. Angelegt und geändert wird ausschließlich im selbst gewählten Sandbox-Ordner. Aufräumen darf sie auch außerhalb: Gelöschtes geht in den Papierkorb, endgültig nur auf ausdrücklichen Wunsch, und bei ausgeschaltetem autonomem Modus liegt vorher eine Karte mit der vollständigen Liste vor. Windows selbst, Programmordner und fremde Benutzerprofile bleiben gesperrt, bis der Benutzer sie in den Einstellungen der App freigibt. Bevor sie Maus oder Tastatur übernimmt, muss er das an seinem Rechner bestätigen; die Freigabe ist befristet und jederzeit widerrufbar. Eine Bitte aus dem Browser erreicht diese Werkzeuge nie — die Herkunft steht im Token der gekoppelten Sitzung, kein Client kann sie behaupten."
     },
     "ai_usage_read_all": {
       "title": "Gesamte KI-Nutzung einsehen",
@@ -4729,10 +4729,38 @@
       "keinChatrecht": "Dein Konto hat kein Recht, mit der KI zu chatten (ai.chat.use). Bitte deinen Betreiber, es dir zu geben — vorher bleibt dieses Fenster leer.",
       "gedaechtnis": "Gedächtnis"
     },
+    "aufraeumen": {
+      "fragePapierkorb": "In den Papierkorb verschieben?",
+      "frageHart": "Endgültig löschen?",
+      "frageLeeren": "Papierkorb leeren?",
+      "system": "Systembereich",
+      "weitere": "… und {{anzahl}} weitere",
+      "summe": "{{anzahl}} Einträge, zusammen {{groesse}}",
+      "warnungWeich": "Alles landet im Papierkorb und lässt sich von dort zurückholen.",
+      "warnungHart": "Das ist nicht rückgängig zu machen.",
+      "jaWeich": "In den Papierkorb",
+      "jaHart": "Endgültig löschen",
+      "nein": "Abbrechen"
+    },
     "overlay": {
       "schliessen": "Overlay schließen",
       "ich": "Du:",
       "ki": "KI:"
+    },
+    "systembereich": {
+      "titel": "Windows-Systembereich",
+      "hinweis": "Wie weit Singra in Windows selbst greifen darf – also in den Windows-Ordner, in Programmordner und in fremde Benutzerprofile. Deine eigenen Dateien sind davon nicht betroffen.",
+      "fehler": "Konnte nicht gespeichert werden.",
+      "stufe": {
+        "aus": "Aus",
+        "lesen": "Nur ansehen",
+        "schreiben": "Arbeiten"
+      },
+      "erklaerung": {
+        "aus": "Singra sieht dort nichts und fasst dort nichts an.",
+        "lesen": "Singra darf hineinsehen – etwa um zu finden, was den Platz belegt –, aber nichts ändern.",
+        "schreiben": "Singra darf dort auch aufräumen. Bei ausgeschaltetem autonomem Modus fragt sie vorher; im autonomen Modus nicht."
+      }
     },
     "wizard": {
       "schrittVonBis": "Schritt {{nummer}} von {{gesamt}}: {{titel}}",

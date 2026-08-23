@@ -231,6 +231,31 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     **58.423** Zeichen, 63 Werkzeuge. Die Grenze bleibt bei 64.000 — die Luft
     ist damit auf rund tausend Zeichen geschrumpft. Das naechste Werkzeug
     misst zuerst, und der Hebel bleibt derselbe: zusammenlegen, nicht kuerzen.
+
+    **Stand 23.08.2026: die Grenze bleibt bei 64.000, und diesmal wurde
+    zusammengelegt.** Der Betreiber bestellte drei Dinge fuer den Rechner:
+    Virenscan, Bildschirmsicht und echtes Aufraeumen ausserhalb der Sandbox.
+    Die ersten beiden sind Aktionen von `desktop_system` geworden (es liest,
+    und beides ist Lesen) — zusammen rund 200 Zeichen statt zweier neuer
+    Werkzeuge. Das dritte brauchte ein eigenes: `desktop_aufraeumen`, 985
+    Zeichen, weil es als einziges Desktop-Werkzeug Daten ausserhalb eines
+    freigegebenen Ordners vernichtet und seine Regeln (Papierkorb als
+    Normalfall, endgueltig nur auf ausdruecklichen Wunsch) im Schema stehen
+    muessen.
+
+    Damit lag der App-Katalog bei **64.138** — 138 Zeichen drueber. Angehoben
+    wurde nichts. Stattdessen ist `desktop_takeover_control` in
+    `desktop_steuern` aufgegangen (`aktion="freigabe"`): 1.826 Zeichen fuer
+    zwei Werkzeuge wurden 1.487 fuer eines. Das ist zugleich die bessere
+    Einteilung — dort steht jetzt alles, was die Freigabe fuer Maus und
+    Tastatur braucht, samt der Bitte darum. Der Preis steht in
+    `desktop_job_service._wartet_auf_menschen`: welche Frist ein Auftrag
+    bekommt, haengt seither an einem Argument statt am Werkzeugnamen.
+
+    Nachgemessen: aus der App **63.797** Zeichen, 68 Werkzeuge; aus dem Panel
+    **58.423** Zeichen, 63 Werkzeuge (unveraendert — die Desktop-Werkzeuge
+    fehlen dort). Die Luft betraegt **203 Zeichen**. Das naechste Werkzeug
+    kommt nicht mehr ohne Zusammenlegen hinein, und das ist so gewollt.
     """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(

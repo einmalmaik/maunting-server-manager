@@ -28,6 +28,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { abmelden } from './auth'
 import { Einstellungen } from './Einstellungen'
 import { Splash } from './Splash'
+import { Aufraeumkarte } from './Aufraeumkarte'
 import { Uebernahmekarte } from './Uebernahmekarte'
 import { Wizard } from './Wizard'
 import {
@@ -149,8 +150,13 @@ export function DesktopApp() {
           </>
         )}
         {/* Über allem außer der Boot-Sequenz: eine Bitte um die Übernahme von
-            Maus und Tastatur darf nicht hinter einem Reiter verschwinden. */}
+            Maus und Tastatur darf nicht hinter einem Reiter verschwinden. Für
+            die Aufräumfrage gilt dasselbe — es geht um Dateien, die gleich
+            weg sind. Beide bekommen dieselbe Auftragskennung; jede Karte
+            wacht erst auf, wenn ihr eigenes Ereignis kommt, und es kann immer
+            nur eine offen sein (die Auftragsschleife arbeitet der Reihe nach). */}
         <Uebernahmekarte offenerAuftragId={offeneUebernahme} />
+        <Aufraeumkarte offenerAuftragId={offeneUebernahme} />
         {/* Immer gemountet, nicht erst ab `bereit`: das X gibt es auch im
             Assistenten. */}
         <SchliessenDialog />

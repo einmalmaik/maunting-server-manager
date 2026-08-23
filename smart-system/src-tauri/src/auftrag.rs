@@ -8,26 +8,83 @@
 //! * Programme und Adressen → `tauri-plugin-opener`,
 //! * Maus/Tastatur/Bildschirm → `uebernahme` (dort liegt die Freigabe).
 //!
-//! Die Bitte um die Uebernahme ist der einzige Auftrag, der hier gar nichts
-//! tut: sie geht als Ereignis an die Oberflaeche, der Mensch entscheidet, und
-//! erst seine Antwort meldet das Ergebnis. Deshalb liefert sie `None` statt
-//! eines Ergebnisses.
+//! Zwei Auftraege tun hier gar nichts, sondern fragen einen Menschen: die
+//! Bitte um die Uebernahme und — bei ausgeschaltetem autonomem Modus — das
+//! Aufraeumen. Sie gehen als Ereignis an die Oberflaeche, der Mensch
+//! entscheidet, und erst seine Antwort meldet das Ergebnis. Deshalb liefern
+//! sie `None` statt eines Ergebnisses.
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
+use crate::aufraeumen;
 use crate::sandbox;
 use crate::system;
 use crate::uebernahme;
+use crate::zonen;
 
 /// Das Ereignis, mit dem die Oberflaeche die Bestaetigungskarte zeigt.
 pub const EREIGNIS_UEBERNAHME: &str = "mss:uebernahme-anfrage";
+/// Dasselbe fuer das Aufraeumen — mit der vollstaendigen Liste im Gepaeck.
+pub const EREIGNIS_AUFRAEUMEN: &str = "mss:aufraeumen-anfrage";
 
 /// Was ein ausgefuehrter Auftrag zurueckgibt. `None` heisst: das Ergebnis
-/// kommt spaeter (Uebernahme-Anfrage), die Oberflaeche meldet dann selbst.
+/// kommt spaeter (eine Karte fragt gerade), die Oberflaeche meldet dann selbst.
 pub type Ergebnis = Option<Value>;
+
+/// Ein Aufraeumauftrag, der auf einen Klick wartet.
+///
+/// **Er liegt hier und nicht in der Oberflaeche**, und das ist der Grund,
+/// warum die Karte beim Bestaetigen keine Pfadliste mitschickt: bestaetigt
+/// wird, was hier steht, nicht was ein Fenster gerade anzeigt. Ein Renderer,
+/// der eine harmlose Liste zeigt und eine andere loeschen laesst, ist damit
+/// gar nicht erst moeglich.
+///
+/// Immer hoechstens einer: die Auftragsschleife arbeitet der Reihe nach, und
+/// ein zweiter Plan wuerde den ersten ueberschreiben, statt sich anzustellen.
+pub struct Wartend {
+    pub aktion: String,
+    pub pfade: Vec<String>,
+    pub system_erlaubt: bool,
+}
+
+static WARTEND: Mutex<Option<Wartend>> = Mutex::new(None);
+
+fn wartend_setzen(plan: Option<Wartend>) -> Option<Wartend> {
+    let mut stand = WARTEND
+        .lock()
+        .unwrap_or_else(|vergiftet| vergiftet.into_inner());
+    std::mem::replace(&mut *stand, plan)
+}
+
+/// Fuehrt den wartenden Plan aus. Ruft die Karte nach dem Klick auf "Ja".
+pub fn aufraeumen_bestaetigen() -> Result<Value, String> {
+    let plan = wartend_setzen(None).ok_or(
+        "Es wartet gerade kein Aufraeumauftrag. Vermutlich ist er verfallen \
+         oder wurde schon beantwortet.",
+    )?;
+    aufraeumen_ausfuehren(&plan)
+}
+
+/// Verwirft den wartenden Plan. Es wird nichts angefasst.
+pub fn aufraeumen_ablehnen() {
+    wartend_setzen(None);
+}
+
+fn aufraeumen_ausfuehren(plan: &Wartend) -> Result<Value, String> {
+    match plan.aktion.as_str() {
+        "papierkorb" => aufraeumen::papierkorb(&plan.pfade, plan.system_erlaubt),
+        "endgueltig" => aufraeumen::endgueltig(&plan.pfade, plan.system_erlaubt),
+        "papierkorb_leeren" => aufraeumen::papierkorb_leeren(),
+        andere => Err(format!(
+            "Unbekannte Aktion: '{andere}'. Moeglich sind papierkorb, \
+             endgueltig, papierkorb_leeren."
+        )),
+    }
+}
 
 pub fn ausfuehren(
     app: &AppHandle,
@@ -38,23 +95,102 @@ pub fn ausfuehren(
     match werkzeug {
         "desktop_dateien" => dateien(sandbox_pfad, argumente).map(Some),
         "desktop_launch_app" => starten(app, argumente).map(Some),
-        "desktop_system" => system::ausfuehren(argumente).map(Some),
-        "desktop_steuern" => uebernahme::steuern(argumente).map(Some),
-        "desktop_takeover_control" => {
-            let minuten = argumente["minuten"]
-                .as_u64()
-                .unwrap_or(5)
-                .clamp(1, uebernahme::MAX_MINUTEN);
-            let anliegen = argumente["anliegen"].as_str().unwrap_or("").to_string();
-            app.emit(
-                EREIGNIS_UEBERNAHME,
-                json!({ "anliegen": anliegen, "minuten": minuten }),
-            )
-            .map_err(|e| format!("Karte nicht anzeigbar: {e}"))?;
-            Ok(None)
-        }
+        "desktop_system" => system::ausfuehren(app, argumente).map(Some),
+        "desktop_steuern" => steuern(app, argumente),
+        "desktop_aufraeumen" => raeumen(app, argumente),
         andere => Err(format!("Unbekanntes Werkzeug: '{andere}'")),
     }
+}
+
+/// Maus und Tastatur — samt der Bitte um die Freigabe dafuer.
+///
+/// `aktion="freigabe"` war bis zum 23.08.2026 ein eigenes Werkzeug
+/// (`desktop_takeover_control`); zusammengelegt, weil der Werkzeugkatalog
+/// seine 64.000 Zeichen erreichte. Am Ablauf hat sich nichts geaendert: die
+/// Bitte zeigt eine Karte und liefert `None`, alles andere braucht eine
+/// gueltige Freigabe und liefert sofort.
+fn steuern(app: &AppHandle, argumente: &Value) -> Result<Ergebnis, String> {
+    if argumente["aktion"].as_str() != Some("freigabe") {
+        return uebernahme::steuern(argumente).map(Some);
+    }
+    let minuten = argumente["minuten"]
+        .as_u64()
+        .unwrap_or(5)
+        .clamp(1, uebernahme::MAX_MINUTEN);
+    let anliegen = argumente["anliegen"].as_str().unwrap_or("").to_string();
+    app.emit(
+        EREIGNIS_UEBERNAHME,
+        json!({ "anliegen": anliegen, "minuten": minuten }),
+    )
+    .map_err(|e| format!("Karte nicht anzeigbar: {e}"))?;
+    Ok(None)
+}
+
+/// Aufraeumen — sofort oder erst nach einem Klick.
+///
+/// **Die Entscheidung darueber trifft das Panel, nicht diese Datei.** Es
+/// setzt `autonom` beim Anlegen des Auftrags (`_desktop_argumente`), und die
+/// Regel dahinter ist die des Betreibers: autonomer Modus an, keine
+/// Bestaetigung; autonomer Modus aus, immer eine. Fehlt das Feld — ein alter
+/// Panelstand, ein manipulierter Auftrag —, wird gefragt. Die vorsichtige
+/// Seite ist hier die richtige.
+///
+/// Gleiches gilt fuer `systembereich`: das steht im Konto des Benutzers, und
+/// ohne den Wert `schreiben` bleibt Windows selbst gesperrt.
+fn raeumen(app: &AppHandle, argumente: &Value) -> Result<Ergebnis, String> {
+    let aktion = argumente["aktion"].as_str().unwrap_or("").to_string();
+    let pfade: Vec<String> = argumente["pfade"]
+        .as_array()
+        .map(|liste| {
+            liste
+                .iter()
+                .filter_map(|wert| wert.as_str())
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let plan = Wartend {
+        aktion,
+        pfade,
+        system_erlaubt: argumente["systembereich"].as_str() == Some("schreiben"),
+    };
+
+    if argumente["autonom"].as_bool() == Some(true) {
+        return aufraeumen_ausfuehren(&plan).map(Some);
+    }
+
+    // Die Karte zeigt, was jeder Posten kostet und wo er liegt. Das kann nur
+    // dieser Rechner beantworten — das Panel kennt weder Groessen noch Zonen.
+    let posten: Vec<Value> = plan
+        .pfade
+        .iter()
+        .map(|pfad| {
+            let ort = std::path::Path::new(pfad);
+            json!({
+                "pfad": pfad,
+                // Dieselbe Rechnung wie beim Ausfuehren — sonst zeigte die
+                // Karte fuer Ordner 0 B und der Mensch entschiede blind.
+                "bytes": aufraeumen::groesse(ort, aufraeumen::MESSTIEFE),
+                "zone": zonen::zone(ort).name(),
+            })
+        })
+        .collect();
+    let karte = json!({
+        "aktion": plan.aktion,
+        "grund": argumente["grund"].as_str().unwrap_or(""),
+        "posten": posten,
+    });
+
+    wartend_setzen(Some(plan));
+    if let Err(fehler) = app.emit(EREIGNIS_AUFRAEUMEN, karte) {
+        // Ohne Karte gibt es keinen Klick — und ein Plan, der dann liegen
+        // bliebe, wuerde beim naechsten Bestaetigen eines *anderen* Auftrags
+        // mit ausgefuehrt. Also sofort wieder wegraeumen.
+        wartend_setzen(None);
+        return Err(format!("Karte nicht anzeigbar: {fehler}"));
+    }
+    Ok(None)
 }
 
 fn dateien(sandbox_pfad: Option<PathBuf>, argumente: &Value) -> Result<Value, String> {

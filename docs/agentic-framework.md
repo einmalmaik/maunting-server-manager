@@ -257,6 +257,7 @@ verbaler Rückweg Promptregel.
 | Audit | Worker-Verläufe und Audit-Einträge überleben das UI-Aufräumen nach Aufbewahrungsregel — Remote-Befehle bleiben nachvollziehbar. |
 | Datenminimierung | Gedächtnisblock raus aus geparktem `state_json`; Meldungen tragen geschwärzten Kurztext plus Verweis; Worker sehen keine persönlichen Memories. |
 | Destruktives | Nie ohne Bestätigung — im Worker exakt wie überall. |
+| Rechner des Benutzers | Innerhalb des freigegebenen Ordners wird durchgearbeitet (der Ordner *ist* die Freigabe). Außerhalb — `desktop_aufraeumen`, seit 23.08.2026 — gilt die Regel des Betreibers wörtlich: **autonomer Modus an → kein Klick, autonomer Modus aus → immer eine Karte.** Berechnet wird das im Panel (`_desktop_argumente` → `autonomy_allows`), gezeigt auf dem Rechner (`Aufraeumkarte.tsx`), weil nur er die Liste mit Größen und Zonen füllen kann. Die App bekommt das Urteil als Argument und kann es nicht drehen: `autonom` und `systembereich` werden aus den Modellargumenten **entfernt** und vom Panel gesetzt; fehlt das Feld, wird gefragt. Windows selbst bleibt zusätzlich hinter einer Kontoeinstellung (`aus`/`lesen`/`schreiben`, Standard `lesen`), und die Zonengrenze selbst liegt kanonisiert in Rust (`zonen.rs`). |
 
 ## 8. Was bewusst nicht gebaut wird
 

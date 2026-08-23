@@ -147,10 +147,11 @@ export async function wakewordZuruecksetzen(): Promise<void> {
 // ── Aufträge vom Panel ───────────────────────────────────────────────────
 
 /**
- * Führt einen Auftrag aus (Dateien, Programm, Übernahme).
+ * Führt einen Auftrag aus (Dateien, Programm, Übernahme, Aufräumen).
  *
- * `null` heißt: das Ergebnis kommt später. Genau ein Fall — die Bitte um die
- * Übernahme, über die ein Mensch an der Bestätigungskarte entscheidet.
+ * `null` heißt: das Ergebnis kommt später, weil ein Mensch an einer
+ * Bestätigungskarte entscheidet — die Bitte um die Übernahme, und Aufräumen
+ * bei ausgeschaltetem autonomem Modus.
  */
 export async function auftragAusfuehren(
   werkzeug: string,
@@ -179,6 +180,39 @@ export async function uebernahmeWiderrufen(): Promise<void> {
 /** Restlaufzeit der Freigabe in Sekunden; 0 heißt: keine. */
 export async function uebernahmeRest(): Promise<number> {
   return await invoke<number>('uebernahme_rest')
+}
+
+// ── Aufräumen außerhalb der Sandbox ──────────────────────────────────────
+//
+// Wie bei der Übernahme liegt der Vorgang in Rust und nicht hier: der Plan
+// wartet dort, diese Funktionen entscheiden nur über ihn. Die Liste, die die
+// Karte zeigt, ist deshalb reine Anzeige — bestätigt wird der Plan, den Rust
+// hält, nicht der, den das Fenster gerade darstellt.
+
+/** Ein einzelner Posten auf der Aufräumkarte. */
+export interface Aufraeumposten {
+  pfad: string
+  /** Größe in Bytes; `null`, wenn sie nicht ermittelt werden konnte. */
+  bytes: number | null
+  /** `frei` | `muell` | `system` — nur `system` ist heikel. */
+  zone: string
+}
+
+export interface Aufraeumplan {
+  /** `papierkorb` | `endgueltig` | `papierkorb_leeren`. */
+  aktion: string
+  grund: string
+  posten: Aufraeumposten[]
+}
+
+/** Führt den wartenden Plan aus und gibt sein Ergebnis zurück. */
+export async function aufraeumenBestaetigen(): Promise<Record<string, unknown>> {
+  return await invoke<Record<string, unknown>>('aufraeumen_bestaetigen')
+}
+
+/** Verwirft den wartenden Plan. Es wird nichts angefasst. */
+export async function aufraeumenAblehnen(): Promise<void> {
+  await invoke('aufraeumen_ablehnen')
 }
 
 // ── Deinstallation ───────────────────────────────────────────────────────

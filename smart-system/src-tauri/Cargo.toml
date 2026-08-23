@@ -15,7 +15,17 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # tray-icon: System-Tray mit Statusfarben. image-png: Status-Icons werden als
 # PNG-Bytes eingebettet und zur Laufzeit dekodiert (tray::set_status).
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# webview-data-url: der Sichtfeld-Indikator (sichtfeld.rs) traegt sein HTML in
+# einer `data:`-URL statt in einer eigenen Datei im Bundle — eine Datei koennte
+# ein Installer auslassen, und genau das waere die stille Art, den Indikator
+# loszuwerden. Ohne dieses Feature weist Tauri `data:` beim Fensterbau ab. Es
+# zieht nur `data-url` neu in den Baum (Servo, MIT/Apache-2.0, reines Parsen,
+# kein I/O); `dom_query` fuer die CSP-Einbettung steht ohnehin schon im Lock.
+tauri = { version = "2", features = [
+    "tray-icon",
+    "image-png",
+    "webview-data-url",
+] }
 # Zwei globale Hotkeys (Fenster, Sprachsitzung; konfigurierbar, einzeln
 # abschaltbar) — Plugin statt eigener Hook: stabil, 0 % CPU.
 tauri-plugin-global-shortcut = "2"
@@ -94,6 +104,10 @@ windows = { version = "0.62", features = [
     "Win32_System_Variant",
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
+    # SHEmptyRecycleBinW/SHQueryRecycleBinW fuer `aufraeumen::papierkorb_leeren`.
+    # Keine neue Kiste, nur ein weiteres Modul derselben: die Bindungen sind
+    # generiert und ziehen nichts nach.
+    "Win32_UI_Shell",
 ] }
 
 # Keine neue Kiste im Baum: exakt die Version, die wry/tauri ohnehin

@@ -100,4 +100,59 @@ describe('Auftragsschleife', () => {
     expect(inhalt).toEqual({ fehler: 'Laufwerke nicht abfragbar.' })
     expect(code).toBe('DESKTOP_TOOL_FAILED')
   })
+
+  /**
+   * Seit dem 23.08.2026 warten **zwei** Sorten Auftrag auf einen Menschen,
+   * und die Bitte um die Übernahme ist keine eigene mehr, sondern eine Aktion
+   * von `desktop_steuern`. Die Schleife muss deshalb die Argumente mitlesen —
+   * ein Vergleich auf den Werkzeugnamen allein gäbe entweder jedem Klick eine
+   * Karte oder der Freigabe keine.
+   */
+  describe('wer auf einen Menschen wartet', () => {
+    async function kennung(auftrag: Record<string, unknown>) {
+      naechsterAuftragMock.mockReset()
+      naechsterAuftragMock.mockResolvedValueOnce(auftrag).mockResolvedValue(null)
+      // `null` heisst: die Karte meldet selbst.
+      auftragAusfuehrenMock.mockResolvedValue(null)
+      const { result } = renderHook(() => useAuftragsschleife(true))
+      await waitFor(() => expect(auftragAusfuehrenMock).toHaveBeenCalled())
+      return result
+    }
+
+    it('erkennt die Bitte um die Freigabe an ihrer Aktion', async () => {
+      const result = await kennung({
+        id: 'job-frei',
+        tool_name: 'desktop_steuern',
+        arguments: { aktion: 'freigabe', anliegen: 'Fenster schliessen' },
+      })
+      await waitFor(() => expect(result.current).toBe('job-frei'))
+    })
+
+    it('gibt einem gewoehnlichen Klick keine Karte', async () => {
+      const result = await kennung({
+        id: 'job-klick',
+        tool_name: 'desktop_steuern',
+        arguments: { aktion: 'klick', x: 10, y: 20 },
+      })
+      expect(result.current).toBeNull()
+    })
+
+    it('erkennt das Aufraeumen am Werkzeug', async () => {
+      const result = await kennung({
+        id: 'job-weg',
+        tool_name: 'desktop_aufraeumen',
+        arguments: { aktion: 'papierkorb', grund: 'Platz schaffen' },
+      })
+      await waitFor(() => expect(result.current).toBe('job-weg'))
+    })
+
+    it('stolpert nicht ueber fehlende Argumente', async () => {
+      const result = await kennung({
+        id: 'job-leer',
+        tool_name: 'desktop_steuern',
+        arguments: {},
+      })
+      expect(result.current).toBeNull()
+    })
+  })
 })

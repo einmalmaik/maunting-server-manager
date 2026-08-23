@@ -606,30 +606,63 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # und sie steht auf dem Rechner (Rust), wo sie hingehoert. Das Panel kann
     # sie gar nicht pruefen: es kennt weder den Pfad noch das Dateisystem.
     #
-    # Alle vier laufen ueber `desktop_jobs` und parken den Lauf, bis der
-    # Rechner geantwortet hat. Vier statt siebzehn Werkzeuge ist Absicht: der
-    # Katalog ist gemessen der groesste Posten im Prompt, und eine `aktion`
-    # im Argument kostet nichts.
+    # Alle laufen ueber `desktop_jobs` und parken den Lauf, bis der Rechner
+    # geantwortet hat. Sechs statt zwanzig Werkzeuge ist Absicht: der Katalog
+    # ist gemessen der groesste Posten im Prompt, und eine `aktion` im
+    # Argument kostet nichts.
+    #
+    # Der Satz oben ("die Grenze ist der Ordner") gilt fuer die Sandbox und
+    # **nur** fuer sie. Ausserhalb gibt es keinen freigegebenen Ordner mehr,
+    # auf den man sich berufen koennte — deshalb hat `desktop_aufraeumen`
+    # weiter unten seine eigene Begruendung und seine eigene Karte.
     "desktop_dateien": Werkzeug(
         "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
     ),
-    # Nur lesend (Laufwerke, Ordner, Platzfresser) — die Schreibgrenze bleibt
-    # der Sandbox-Ordner, und sie steht im Rust (system.rs liest nur).
+    # Nur lesend: Laufwerke, Ordner, Platzfresser, Bildschirmfoto, Virenscan.
+    # Dass Sehen und Scannen hier stehen und nicht in eigenen Werkzeugen, ist
+    # dieselbe Rechnung wie oben — eine `aktion` kostet nichts, ein Werkzeug
+    # rund tausend Zeichen Katalog.
     "desktop_system": Werkzeug(
+        "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
+    ),
+    # Aufraeumen ausserhalb der Sandbox — der einzige Weg, auf dem die KI am
+    # Rechner etwas vernichtet, das der Benutzer nicht ausdruecklich fuer sie
+    # freigegeben hat.
+    #
+    # Trotzdem `delegation` und kein `global_write`, und das ist eine bewusste
+    # Abweichung vom sonstigen Muster: die Bestaetigung steht hier nicht als
+    # Vorschlagskarte im Panel, sondern als Karte **auf dem Rechner selbst**
+    # (Aufraeumkarte.tsx, wie bei `desktop_steuern(aktion="freigabe")`). Zwei
+    # Gruende.
+    # Erstens gehoert die Frage "darf das weg?" vor die Augen dessen, dem die
+    # Dateien gehoeren — nicht in ein Panel, das vielleicht auf einem anderen
+    # Geraet offen ist. Zweitens kann nur der Rechner die Liste ueberhaupt
+    # fuellen: welcher Pfad in welcher Zone liegt und wie viele Bytes daran
+    # haengen, weiss das Panel nicht und soll es nicht wissen.
+    #
+    # Ob gefragt wird, entscheidet weiterhin **allein das Panel**
+    # (`autonomy_allows`, eingesetzt in `_desktop_behandeln`). Die App bekommt
+    # das Urteil als Argument und kann es nicht zu ihren Gunsten drehen: bei
+    # fehlendem Feld fragt sie.
+    "desktop_aufraeumen": Werkzeug(
         "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
     ),
     "desktop_launch_app": Werkzeug(
         "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
     ),
-    # Der Handschlag. Er *fragt* nur — freigeben kann allein der Mensch am
-    # Rechner, und zwar in der App. Das Panel kann diese Freigabe weder
-    # erteilen noch verlaengern.
-    "desktop_takeover_control": Werkzeug(
-        "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
-    ),
-    # Maus, Tastatur, Bildschirm. Ohne gueltige Freigabe weist die App jeden
-    # Aufruf ab — das Panel schickt ihn trotzdem los, weil nur der Rechner
-    # weiss, ob die Freigabe noch laeuft.
+    # Maus und Tastatur — samt der Bitte um die Freigabe dafuer
+    # (`aktion="freigabe"`, frueher das eigene Werkzeug
+    # `desktop_takeover_control`). Zusammengelegt am 23.08.2026, weil der
+    # Katalog beim Aufraeumwerkzeug an seine 64.000 Zeichen stiess und die
+    # Hausregel dafuer "zusammenlegen, nicht kuerzen" lautet
+    # (test_ai_tool_handler_contract). Es ist zugleich die ehrlichere
+    # Einteilung: hier steht jetzt alles, was die Freigabe braucht,
+    # einschliesslich der Bitte darum.
+    #
+    # Freigeben kann sie weiterhin allein der Mensch am Rechner. Das Panel
+    # kann sie weder erteilen noch verlaengern, und ohne gueltige Freigabe
+    # weist die App jede der uebrigen Aktionen ab — losgeschickt werden sie
+    # trotzdem, weil nur der Rechner weiss, ob die Frist noch laeuft.
     "desktop_steuern": Werkzeug(
         "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
     ),

@@ -2,7 +2,8 @@
 //!
 //! **Die Freigabe liegt hier und nirgendwo sonst.** Nicht im Panel, nicht im
 //! Modell, nicht in der Weboberflaeche: eine Frist im Speicher dieses
-//! Prozesses. Die KI kann darum bitten (`desktop_takeover_control`), und der
+//! Prozesses. Die KI kann darum bitten (`desktop_steuern` mit
+//! `aktion="freigabe"`), und der
 //! Mensch am Rechner erteilt sie — jeder Aufruf von `desktop_steuern` davor
 //! oder danach wird abgewiesen, ohne dass irgendwer etwas dagegen tun kann.
 //!
@@ -65,8 +66,10 @@ fn pruefen() -> Result<(), String> {
     if restsekunden() == 0 {
         return Err(
             "Keine gueltige Freigabe fuer Maus und Tastatur. Bitte zuerst mit \
-             desktop_takeover_control darum, und warte die Antwort des \
-             Benutzers ab — abgelaufene Freigaben leben nicht wieder auf."
+             desktop_steuern (aktion=\"freigabe\") darum, und warte die \
+             Antwort des Benutzers ab — abgelaufene Freigaben leben nicht \
+             wieder auf. Ansehen geht auch ohne: desktop_system mit \
+             aktion=\"bildschirm\"."
                 .into(),
         );
     }
@@ -76,15 +79,9 @@ fn pruefen() -> Result<(), String> {
 #[cfg(windows)]
 mod windows_impl {
     use super::*;
-    use base64::Engine;
     use enigo::{
         Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings,
     };
-
-    /// Laengste Kante eines Bildschirmfotos. Die Anbieter skalieren nicht
-    /// selbst — sie weisen zu grosse Bilder ab. Und ein Vollbild kostet
-    /// Tokens, ohne mehr zu zeigen: 1280 Punkte sind lesbar.
-    const MAX_KANTE: u32 = 1280;
 
     fn maschine() -> Result<Enigo, String> {
         // `release_keys_when_dropped` ist Vorgabe und bleibt an: sonst bliebe
@@ -148,59 +145,15 @@ mod windows_impl {
         ergebnis
     }
 
-    pub fn bildschirm() -> Result<Value, String> {
-        let monitore = xcap::Monitor::all().map_err(|e| format!("Kein Bildschirm: {e}"))?;
-        let monitor = monitore
-            .into_iter()
-            .find(|m| m.is_primary().unwrap_or(false))
-            .ok_or("Kein Hauptbildschirm gefunden")?;
-        let bild = monitor
-            .capture_image()
-            .map_err(|e| format!("Bildschirmfoto fehlgeschlagen: {e}"))?;
-
-        let (breite, hoehe) = (bild.width(), bild.height());
-        let faktor = (MAX_KANTE as f32 / breite.max(hoehe) as f32).min(1.0);
-        let klein = if faktor < 1.0 {
-            image::imageops::resize(
-                &bild,
-                (breite as f32 * faktor) as u32,
-                (hoehe as f32 * faktor) as u32,
-                image::imageops::FilterType::Triangle,
-            )
-        } else {
-            bild
-        };
-
-        let mut png = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgba8(klein.clone())
-            .write_to(&mut png, image::ImageFormat::Png)
-            .map_err(|e| format!("Bild nicht kodierbar: {e}"))?;
-
-        Ok(json!({
-            "bild_png_base64": base64::engine::general_purpose::STANDARD.encode(png.into_inner()),
-            // Die Koordinaten, in denen das Modell antworten soll: die des
-            // **verkleinerten** Bildes. Zurueckgerechnet wird beim Klicken,
-            // damit das Modell nicht rechnen muss.
-            "breite": klein.width(),
-            "hoehe": klein.height(),
-            "hinweis": "Koordinaten beziehen sich auf dieses Bild, Ursprung links oben.",
-        }))
-    }
-
     /// Rechnet Bildkoordinaten in echte Bildschirmpunkte zurueck.
+    ///
+    /// Kommt seit dem 23.08.2026 aus `bildschirm.rs`. Zwei Fassungen
+    /// derselben Skalierung waeren der Fehler, der einen Klick an die falsche
+    /// Stelle setzt: das Modell antwortet in den Koordinaten des
+    /// verkleinerten Bildes, und nur wer denselben Faktor benutzt, findet den
+    /// echten Punkt wieder.
     fn echte_punkte(x: i32, y: i32) -> Result<(i32, i32), String> {
-        let monitore = xcap::Monitor::all().map_err(|e| format!("Kein Bildschirm: {e}"))?;
-        let monitor = monitore
-            .into_iter()
-            .find(|m| m.is_primary().unwrap_or(false))
-            .ok_or("Kein Hauptbildschirm gefunden")?;
-        let breite = monitor.width().map_err(|e| format!("Kein Bildschirm: {e}"))?;
-        let hoehe = monitor.height().map_err(|e| format!("Kein Bildschirm: {e}"))?;
-        let faktor = (MAX_KANTE as f32 / breite.max(hoehe) as f32).min(1.0);
-        Ok((
-            (x as f32 / faktor).round() as i32,
-            (y as f32 / faktor).round() as i32,
-        ))
+        crate::bildschirm::echte_punkte(x, y)
     }
 
     fn zeigen(enigo: &mut Enigo, x: Option<i64>, y: Option<i64>) -> Result<(), String> {
@@ -214,9 +167,6 @@ mod windows_impl {
     }
 
     pub fn ausfuehren(aktion: &str, argumente: &Value) -> Result<Value, String> {
-        if aktion == "bildschirm" {
-            return bildschirm();
-        }
         if aktion == "warten" {
             let sekunden = argumente["menge"].as_u64().unwrap_or(1).clamp(1, 30);
             std::thread::sleep(Duration::from_secs(sekunden));
@@ -306,7 +256,9 @@ mod tests {
     #[test]
     fn ohne_freigabe_geht_nichts() {
         widerrufen().unwrap();
-        let fehler = steuern(&json!({ "aktion": "bildschirm" })).unwrap_err();
+        // Bewusst `klick` und nicht mehr `bildschirm`: sehen darf die KI
+        // seit dem 23.08.2026 ohne Freigabe (`desktop_system`), steuern nicht.
+        let fehler = steuern(&json!({ "aktion": "klick" })).unwrap_err();
         assert!(fehler.contains("Keine gueltige Freigabe"), "{fehler}");
     }
 

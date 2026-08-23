@@ -286,3 +286,14 @@ class AiLearningPolicyStatus(BaseModel):
     # damit die Einstellungsseite den Handlungsbedarf zeigt, ohne dass die
     # Oberflaeche eine zweite Abfrage braucht.
     pending_count: int = 0
+
+
+class AiDesktopSettings(BaseModel):
+    """Wie weit die KI auf dem Rechner des Benutzers gehen darf.
+
+    Eine Einstellung **je Konto**, nicht je Panel: der Rechner gehoert dem
+    Benutzer, und niemand sonst soll darueber bestimmen — auch der Betreiber
+    nicht. Die Werte kommen aus `models.user.SYSTEMBEREICHE`.
+    """
+
+    systembereich: Literal["aus", "lesen", "schreiben"]

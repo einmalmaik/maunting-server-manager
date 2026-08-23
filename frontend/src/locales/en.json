@@ -571,7 +571,7 @@
       "desktop_launch_app": "Application launched",
       "desktop_steuern": "Computer operated",
       "desktop_system": "Looked around your computer",
-      "desktop_takeover_control": "Takeover requested",
+      "desktop_aufraeumen": "Cleaned up",
       "forget_memory": "Deleted memories",
       "forget_skill": "Deleted a skill",
       "learn_skill": "Learned a skill",
@@ -618,7 +618,7 @@
       "desktop_launch_app": "Launching the application",
       "desktop_steuern": "Operating your computer",
       "desktop_system": "Looking around your computer",
-      "desktop_takeover_control": "Waiting for your approval",
+      "desktop_aufraeumen": "I am cleaning up",
       "forget_memory": "Deleting the memory",
       "forget_skill": "Deleting the skill",
       "learn_skill": "Learning the skill",
@@ -1784,7 +1784,7 @@
     },
     "ai_desktop_use": {
       "title": "AI tools on your own computer",
-      "desc": "Allows the AI to work on the user's computer — through the Smart System app, never through the panel. It may look at what the user can see themselves (drives, folders, disk space — read-only); creating, changing and deleting happens only inside the sandbox folder chosen by the user. Before it takes over mouse or keyboard, the user must confirm on their machine; that grant is time-limited and revocable at any time. A request from the browser never reaches these tools — the origin lives in the token of the paired session, no client can claim it."
+      "desc": "Allows the AI to work on the user's computer — through the Smart System app, never through the panel. It may look at whatever the user can see: drives, folders, disk space, the screen and a virus check — all read-only, and an indicator lights up at the edge of the screen whenever it looks. Creating and changing files happens only inside the self-chosen sandbox folder. Cleaning up is also allowed outside it: deleted items go to the recycle bin, permanently only on explicit request, and with autonomous mode off a card with the full list appears first. Windows itself, program folders and other user profiles stay locked until the user unlocks them in the app's settings. Before it takes over mouse or keyboard, the user must confirm that on their machine; the grant is time-limited and revocable at any time. A request from the browser never reaches these tools — the origin is in the token of the paired session, no client can claim it."
     },
     "ai_usage_read_all": {
       "title": "View overall AI usage",
@@ -4729,10 +4729,38 @@
       "keinChatrecht": "Your account lacks the permission to chat with the AI (ai.chat.use). Ask your operator to grant it — until then this window stays empty.",
       "gedaechtnis": "Memory"
     },
+    "aufraeumen": {
+      "fragePapierkorb": "Move to the recycle bin?",
+      "frageHart": "Delete permanently?",
+      "frageLeeren": "Empty the recycle bin?",
+      "system": "system area",
+      "weitere": "… and {{anzahl}} more",
+      "summe": "{{anzahl}} items, {{groesse}} in total",
+      "warnungWeich": "Everything goes to the recycle bin and can be restored from there.",
+      "warnungHart": "This cannot be undone.",
+      "jaWeich": "Move to recycle bin",
+      "jaHart": "Delete permanently",
+      "nein": "Cancel"
+    },
     "overlay": {
       "schliessen": "Close overlay",
       "ich": "You:",
       "ki": "AI:"
+    },
+    "systembereich": {
+      "titel": "Windows system area",
+      "hinweis": "How far Singra may reach into Windows itself – the Windows folder, program folders and other user profiles. Your own files are not affected by this.",
+      "fehler": "Could not be saved.",
+      "stufe": {
+        "aus": "Off",
+        "lesen": "View only",
+        "schreiben": "Work"
+      },
+      "erklaerung": {
+        "aus": "Singra neither looks nor touches anything there.",
+        "lesen": "Singra may look – to find what is taking up space, for instance – but change nothing.",
+        "schreiben": "Singra may also clean up there. With autonomous mode off it asks first; with it on, it does not."
+      }
     },
     "wizard": {
       "schrittVonBis": "Step {{nummer}} of {{gesamt}}: {{titel}}",

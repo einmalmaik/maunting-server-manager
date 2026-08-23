@@ -2886,6 +2886,65 @@ def _warten_behandeln(
     return _WartenErgebnis(signal="parken", wake_at=wake_at)
 
 
+#: Felder, die der Rechner **nur** vom Panel entgegennimmt. Sie stehen in
+#: keinem Werkzeugschema, und was das Modell unter diesen Namen mitschickt,
+#: wird verworfen, bevor es den Auftrag erreicht.
+GESETZTE_FELDER = ("autonom", "systembereich")
+
+
+def _desktop_argumente(db, *, user_id: int, call) -> dict:
+    """Die Argumente des Modells plus das, was allein das Panel weiss.
+
+    Zwei Entscheidungen faehrt der Rechner nicht selbst, weil er sie nicht
+    treffen darf:
+
+    * **`autonom`** — ob ohne Rueckfrage gehandelt werden darf. Das ist die
+      Freigabe des Betreibers (`AiAutonomyGrant`), und die Regel dazu ist
+      woertlich: autonomer Modus an, keine Bestaetigung; autonomer Modus aus,
+      immer eine. Sie hier zu berechnen und nicht in der App ist keine
+      Bequemlichkeit, sondern die Hausregel — die Wahrheit ueber Rechte liegt
+      im Backend. Das Stundenbudget faehrt mit: ein Modell in einer Schleife
+      faellt nach der zehnten Aktion von selbst auf Bestaetigungspflicht
+      zurueck, statt weiter durchzulaufen.
+    * **`systembereich`** — wie weit die KI in Windows selbst greifen darf
+      (`aus` / `lesen` / `schreiben`). Eine Kontoeinstellung, kein Werkzeugwert.
+
+    Beide werden **ueberschrieben**, nicht ergaenzt: schickte das Modell
+    `{"autonom": true}` mit, waere das sonst eine Selbstermaechtigung, die
+    genau einmal funktionieren muesste, um teuer zu werden. `GESETZTE_FELDER`
+    fliegt deshalb zuerst raus.
+
+    Fuer alle anderen Desktop-Werkzeuge aendert sich nichts — sie vernichten
+    nichts ausserhalb des freigegebenen Ordners und brauchen das Urteil nicht.
+    """
+    argumente = {
+        name: wert
+        for name, wert in (call.arguments or {}).items()
+        if name not in GESETZTE_FELDER
+    }
+    if call.name not in ("desktop_aufraeumen", "desktop_system"):
+        return argumente
+
+    from models import User
+    from models.user import systembereich_des_benutzers
+    from services import ai_autonomy_service
+
+    benutzer = db.get(User, user_id)
+    if benutzer is None:
+        # Kein Benutzer, kein Vertrauen. Der Rechner fragt dann.
+        return {**argumente, "autonom": False, "systembereich": "aus"}
+
+    argumente["systembereich"] = systembereich_des_benutzers(benutzer)
+    # Nur das Aufraeumen kann autonom laufen; `desktop_system` liest und
+    # fragt nie. Das Feld dort trotzdem zu setzen waere ein Angebot an eine
+    # kuenftige Fassung der App, es auch dort zu beachten.
+    if call.name == "desktop_aufraeumen":
+        argumente["autonom"] = ai_autonomy_service.autonomy_allows(
+            db, user=benutzer, server_id=None, tool_name=call.name
+        )
+    return argumente
+
+
 def _desktop_behandeln(
     *,
     current_usage: StreamUsage,
@@ -2968,7 +3027,7 @@ def _desktop_behandeln(
                 run_id=run_id,
                 tool_call_id=call.id,
                 tool_name=call.name,
-                arguments=call.arguments,
+                arguments=_desktop_argumente(db, user_id=user_id, call=call),
             )
             job_ids.append(job.id)
         db.commit()

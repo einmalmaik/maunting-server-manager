@@ -666,3 +666,43 @@ Exit-Plan:
   Ein eigener Parser wäre möglich, wenn man den Kopf auf ein striktes Format
   ohne Sonderzeichen festlegt. Solange das nicht entschieden ist, bleibt die
   Bibliothek — und sie kostet nichts, weil sie ohnehin installiert wird.
+
+## `data-url` (Rust, über das Tauri-Feature `webview-data-url`) — 23.08.2026
+
+Problem:
+  Der Sichtfeld-Indikator (`smart-system/src-tauri/src/sichtfeld.rs`) ist das
+  kleine rote Schild, das aufleuchtet, sobald die KI ein Bildschirmfoto macht.
+  Es ist ein eigenes, rahmenloses Tauri-Fenster und braucht Inhalt: ein
+  Fragment HTML mit einem Punkt und einem Satz.
+
+Warum nicht als Datei im Bundle:
+  Weil genau das der stille Weg wäre, den Indikator loszuwerden. Er hat
+  bewusst keinen Schalter — wer ihn abschalten will, müsste am Quelltext
+  arbeiten. Eine HTML-Datei im Bundle dagegen kann ein Installer, ein
+  Build-Schritt oder ein aufgeräumtes `dist`-Verzeichnis auslassen, und dann
+  scheitert der Fensterbau still. Der Indikator verschwindet, ohne dass jemand
+  eine Zeile Code geändert hätte, und die Aufnahme läuft weiter (so ist die
+  Fehlerbehandlung gebaut, und so muss sie sein). Als `data:`-URL steht der
+  Inhalt im Binärcode neben dem Aufruf.
+
+Warum diese:
+  Es ist keine gewählte Bibliothek, sondern das, was Tauri selbst für sein
+  Feature `webview-data-url` einzieht — `data-url` 0.3.2 aus dem
+  Servo-Projekt, MIT/Apache-2.0, reines Parsen von `data:`-URLs, kein I/O,
+  kein Netzwerk, keine eigenen Abhängigkeiten (eine einzige neue Zeile in
+  `Cargo.lock`). Die Alternative wäre ein eigener Fenstertyp gewesen — mehr
+  Code für weniger.
+
+Security:
+  Der einzige `data:`-Inhalt, der je gebaut wird, ist eine Konstante im
+  Quelltext. Kein Benutzertext, kein Modelltext, nichts aus dem Netz geht
+  dort hinein — sonst wäre es eine Stelle, an der fremder Text zu HTML wird.
+  Wer das ändern will, ändert die Zusage des Moduls mit.
+
+Kapselung:
+  Ausschließlich `sichtfeld.rs::fenster_zeigen`. Sonst nirgends im Programm.
+
+Exit-Plan:
+  Fällt das Feature weg, wird aus dem Fragment eine Datei im Bundle — mit
+  einem Test, der ihre Existenz im gebauten Paket prüft. Erst dann, denn ohne
+  diesen Test wäre die Datei genau das Risiko, das oben beschrieben ist.

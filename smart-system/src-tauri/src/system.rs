@@ -1,9 +1,15 @@
-//! Lesender Blick auf das Betriebssystem — Laufwerke, Ordner, Platzfresser.
+//! Lesender Blick auf den Rechner — Laufwerke, Ordner, Platzfresser,
+//! Bildschirm, Virenscan.
 //!
-//! Die Sandbox (`sandbox.rs`) bleibt die einzige **Schreib**grenze des
-//! Programms; dieses Modul liest nur. Es enthaelt bewusst keinen einzigen
-//! schreibenden Dateisystemaufruf, und weil keine Typgrenze das erzwingen
-//! kann, haelt der Test `lesend_bleibt_lesend` es als Quelltext-Zusage fest.
+//! Dieses Modul liest nur. Es enthaelt bewusst keinen einzigen schreibenden
+//! Dateisystemaufruf, und weil keine Typgrenze das erzwingen kann, haelt der
+//! Test `lesend_bleibt_lesend` es als Quelltext-Zusage fest.
+//!
+//! Geschrieben wird an genau zwei Stellen des Programms, jede mit ihrer
+//! eigenen Grenze: in der Sandbox (`sandbox.rs`, ein vom Benutzer
+//! freigegebener Ordner) und beim Aufraeumen (`aufraeumen.rs` mit `zonen.rs`,
+//! seit dem 23.08.2026, mit Papierkorb als Normalfall und einer Karte, wenn
+//! der autonome Modus aus ist).
 //!
 //! Warum es das Modul gibt: "wie voll ist meine C-Platte" und "was frisst
 //! den Platz" sind die haeufigsten Systemfragen — und die Antwort lag bisher
@@ -29,15 +35,72 @@ const ZEITBUDGET: Duration = Duration::from_secs(60);
 /// Wie viele Platzfresser (Dateien wie Unterordner) genannt werden.
 const TOP_ANZAHL: usize = 25;
 
-pub fn ausfuehren(argumente: &Value) -> Result<Value, String> {
+/// Alles, was der Rechner **ansehen** laesst.
+///
+/// Der `AppHandle` wird nur fuer `bildschirm` gebraucht (dort haengt der
+/// Indikator daran) und sonst nirgends — er steht trotzdem in der Signatur
+/// und nicht in einem Sonderweg, damit es genau einen Eingang gibt.
+///
+/// `bildschirm` und `virenscan` stehen hier und nicht in eigenen Werkzeugen,
+/// weil beides Ansehen ist: das eine schaut auf den Monitor, das andere
+/// laesst Defender auf eine Datei schauen. Beide veraendern nichts — der
+/// Virenscan laeuft ausdruecklich mit `-DisableRemediation`, sonst raeumte
+/// Defender den Fund selbst weg und die KI haette einen Loeschweg an jeder
+/// Bestaetigung vorbei.
+pub fn ausfuehren(app: &tauri::AppHandle, argumente: &Value) -> Result<Value, String> {
+    // Die eine Aktion, die den Griff auf die App braucht — dort haengt der
+    // Indikator dran. Sie steht vor dem uebrigen Dispatch und nicht darin,
+    // damit der Rest ohne laufende App pruefbar bleibt: einen `AppHandle`
+    // kann ein Test nicht bauen, und ein Zweig ohne Test ist der Zweig, der
+    // spaeter still falsch antwortet.
+    if argumente["aktion"].as_str() == Some("bildschirm") {
+        return crate::bildschirm::aufnehmen(app);
+    }
+    ohne_app(argumente)
+}
+
+fn ohne_app(argumente: &Value) -> Result<Value, String> {
+    let pfad = argumente["pfad"].as_str().unwrap_or("");
+    let bereich = argumente["systembereich"].as_str();
     match argumente["aktion"].as_str().unwrap_or("") {
         "laufwerke" => laufwerke_impl::alle(),
-        "verzeichnis" => verzeichnis(argumente["pfad"].as_str().unwrap_or("")),
-        "groesste" => groesste(argumente["pfad"].as_str().unwrap_or("")),
+        "verzeichnis" => zugelassen(pfad, bereich).and_then(|()| verzeichnis(pfad)),
+        "groesste" => zugelassen(pfad, bereich).and_then(|()| groesste(pfad)),
+        "virenscan" => {
+            zugelassen(pfad, bereich).and_then(|()| crate::virenscan::pruefen(pfad))
+        }
         andere => Err(format!(
-            "Unbekannte Aktion: '{andere}'. Erlaubt sind laufwerke, verzeichnis, groesste."
+            "Unbekannte Aktion: '{andere}'. Erlaubt sind laufwerke, \
+             verzeichnis, groesste, bildschirm, virenscan."
         )),
     }
+}
+
+/// Darf hier ueberhaupt hingesehen werden?
+///
+/// Die Kontoeinstellung des Benutzers kennt drei Stufen: `aus`, `lesen`,
+/// `schreiben`. Nur `aus` verschliesst auch den **Blick** in den
+/// Systembereich; `lesen` und `schreiben` lassen ihn zu, und `lesen` ist der
+/// Standard und damit der Zustand, den es vor dem 23.08.2026 immer gab.
+///
+/// Fehlt das Feld ganz — ein aelteres Panel, das es noch nicht mitschickt —,
+/// wird gelesen. Das ist hier die richtige Seite und beim Loeschen die
+/// falsche: ein fehlendes Feld darf nichts vernichten, aber es soll auch
+/// nicht heimlich Auskuenfte abschneiden, die gestern noch kamen. Die enge
+/// Seite gewinnt dort, wo etwas kaputtgehen kann.
+fn zugelassen(pfad: &str, systembereich: Option<&str>) -> Result<(), String> {
+    if systembereich != Some("aus") {
+        return Ok(());
+    }
+    if crate::zonen::zone(std::path::Path::new(pfad.trim())) != crate::zonen::Zone::System {
+        return Ok(());
+    }
+    Err(format!(
+        "'{pfad}' gehoert zum Systembereich (Windows, Programmordner, \
+         Bootdateien oder ein fremdes Benutzerprofil). Der Benutzer hat ihn \
+         in den Einstellungen der App auf 'aus' gestellt — auch das Ansehen. \
+         Das aendert nur er selbst."
+    ))
 }
 
 /// Prueft und normalisiert den Pfad. Anders als in der Sandbox ist hier ein
@@ -353,8 +416,60 @@ mod tests {
 
     #[test]
     fn eine_unbekannte_aktion_nennt_die_erlaubten() {
-        let fehler = ausfuehren(&serde_json::json!({ "aktion": "loeschen" })).unwrap_err();
+        let fehler = ohne_app(&serde_json::json!({ "aktion": "loeschen" })).unwrap_err();
         assert!(fehler.contains("laufwerke, verzeichnis, groesste"), "{fehler}");
+        // Auch die zwei neuen Aktionen stehen in der Aufzaehlung — ein Modell,
+        // das danebengreift, soll den ganzen Vorrat sehen und nicht die Haelfte.
+        assert!(fehler.contains("bildschirm"), "{fehler}");
+        assert!(fehler.contains("virenscan"), "{fehler}");
+    }
+
+    #[test]
+    fn aus_verschliesst_auch_den_blick() {
+        // Die dritte Stufe der Kontoeinstellung. Sie wirkte anfangs nur beim
+        // Loeschen — "aus" haette dann bedeutet: sie darf dort alles sehen,
+        // nur nichts wegnehmen. Das ist nicht, was der Betreiber bestellt hat.
+        let fehler = ohne_app(&serde_json::json!({
+            "aktion": "verzeichnis",
+            "pfad": r"C:\Windows\System32",
+            "systembereich": "aus",
+        }))
+        .unwrap_err();
+        assert!(fehler.contains("Systembereich"), "{fehler}");
+    }
+
+    #[test]
+    fn lesen_laesst_den_blick_zu() {
+        // Der Standard und damit der Zustand vor dem 23.08.2026: hineinsehen
+        // ja, anfassen nein. Ein Fehlschlag hier waere eine stille
+        // Verschaerfung von etwas, das laeuft.
+        let ergebnis = ohne_app(&serde_json::json!({
+            "aktion": "verzeichnis",
+            "pfad": r"C:\Windows",
+            "systembereich": "lesen",
+        }));
+        assert!(ergebnis.is_ok(), "{ergebnis:?}");
+    }
+
+    #[test]
+    fn ein_fehlendes_feld_schneidet_keine_auskunft_ab() {
+        let ergebnis = ohne_app(&serde_json::json!({
+            "aktion": "verzeichnis", "pfad": r"C:\Windows",
+        }));
+        assert!(ergebnis.is_ok(), "{ergebnis:?}");
+    }
+
+    #[test]
+    fn aus_gilt_nur_fuer_den_systembereich() {
+        // Die eigenen Dateien bleiben sichtbar — die Einstellung heisst
+        // "Systembereich" und nicht "Rechner".
+        let eigen = std::env::temp_dir();
+        let ergebnis = ohne_app(&serde_json::json!({
+            "aktion": "verzeichnis",
+            "pfad": eigen.display().to_string(),
+            "systembereich": "aus",
+        }));
+        assert!(ergebnis.is_ok(), "{ergebnis:?}");
     }
 
     #[test]

@@ -17,6 +17,7 @@ from schemas.ai_settings import (
     AiContextPolicyUpdate,
     AiCostPolicyStatus,
     AiCostPolicyUpdate,
+    AiDesktopSettings,
     AiLearningPolicyStatus,
     AiLearningPolicyUpdate,
     AiRoleLimitsResponse,
@@ -554,3 +555,44 @@ def set_cost_policy(
     )
     db.commit()
     return _kostenpolitik()
+
+
+@router.get("/settings/desktop", response_model=AiDesktopSettings)
+def get_desktop_settings(
+    user: User = Depends(require_global("ai.desktop.use")),
+) -> AiDesktopSettings:
+    from models.user import systembereich_des_benutzers
+
+    return AiDesktopSettings(systembereich=systembereich_des_benutzers(user))
+
+
+@router.put("/settings/desktop", response_model=AiDesktopSettings)
+def set_desktop_settings(
+    payload: AiDesktopSettings,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.desktop.use")),
+    _: None = Depends(verify_csrf),
+) -> AiDesktopSettings:
+    """Setzt den Systembereich — **nur fuer den Aufrufer selbst**.
+
+    Es gibt hier bewusst keinen Weg, die Einstellung eines fremden Kontos zu
+    aendern. Sie entscheidet, ob eine KI in Windows-Ordnern arbeiten darf; wer
+    sie fuer andere setzen koennte, verschoebe fremde Grenzen. Dieselbe Regel
+    wie bei den Autonomie-Freigaben (`routers/ai_autonomy.py`).
+
+    Das verlangte Recht ist `ai.desktop.use` und nicht `panel.settings.write`:
+    eingestellt wird nichts am Panel, sondern die eigene Reichweite am eigenen
+    Rechner. Wer die KI dort gar nicht benutzen darf, hat hier nichts zu
+    entscheiden.
+    """
+    user.ai_desktop_systembereich = payload.systembereich
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="ai.desktop.systembereich.updated",
+        target_type="user",
+        target_id=user.id,
+        details={"systembereich": payload.systembereich},
+    )
+    db.commit()
+    return AiDesktopSettings(systembereich=payload.systembereich)
