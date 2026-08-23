@@ -503,6 +503,12 @@ def _anreichern(eigen: Modell, fremd: Modell | None) -> Modell:
     wuerde hier also die Rechnung eines Vermittlers als Eigenschaft eines
     fremden Modells.
 
+    ``sieht`` wandert dagegen mit, und zwar nach der Fenster-Regel und nicht
+    nach der ``or``-Regel: es ist ein ``bool | None``, kann „unbekannt" also
+    selbst sagen. Ob ein Modell Bilder liest, haengt am Modell und nicht am
+    Weg dorthin — anders als die Cache-Marke, die eine Aussage ueber die
+    Abrechnung eines Vermittlers ist.
+
     ``name`` bleibt ebenfalls der eigene. Im fremden Katalog steht der Name des
     Listeneintrags dort (``OpenAI: GPT-5.5``); in der Modellauswahl eines
     OpenAI-Zugangs waere das die Beschriftung eines Vermittlers, den der
@@ -526,6 +532,7 @@ def _anreichern(eigen: Modell, fremd: Modell | None) -> Modell:
             if eigen.max_ausgabe_tokens is not None
             else fremd.max_ausgabe_tokens
         ),
+        sieht=eigen.sieht if eigen.sieht is not None else fremd.sieht,
     )
 
 

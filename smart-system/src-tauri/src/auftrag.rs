@@ -117,6 +117,16 @@ fn steuern(app: &AppHandle, argumente: &Value) -> Result<Ergebnis, String> {
         .as_u64()
         .unwrap_or(5)
         .clamp(1, uebernahme::MAX_MINUTEN);
+    // Im autonomen Modus gibt es nichts zu bestaetigen — und deshalb auch
+    // keine Karte. Die Bitte trotzdem zu stellen ist der KI nicht vorzuwerfen
+    // (die Werkzeugbeschreibung verlangt sie), sie kostet hier nur eine
+    // sofortige Antwort statt eines Wartens auf einen Klick, der nie kaeme.
+    if argumente["autonom"].as_bool() == Some(true) {
+        return Ok(Some(json!({
+            "freigegeben": true,
+            "hinweis": "Du hast Maus und Tastatur bereits. Fang an."
+        })));
+    }
     let anliegen = argumente["anliegen"].as_str().unwrap_or("").to_string();
     app.emit(
         EREIGNIS_UEBERNAHME,

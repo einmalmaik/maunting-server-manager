@@ -104,6 +104,24 @@ def _cache_marke_noetig(rohdaten: dict) -> bool:
     return isinstance(schreibpreis, str) and bool(schreibpreis.strip())
 
 
+def _sieht(rohdaten: dict) -> bool | None:
+    """Nimmt dieses Modell Bilder entgegen?
+
+    OpenRouter fuehrt das unter ``architecture.input_modalities`` — eine Liste
+    wie ``["text", "image", "file"]``. Fehlt das Feld oder ist es keine Liste,
+    ist die Antwort ``None`` (unbekannt) und nicht ``False``: ein stilles
+    „blind“ waere eine Behauptung ueber ein Modell, ueber das der Katalog hier
+    nichts sagt, und sie kostete das Bildschirmfoto.
+    """
+    architektur = rohdaten.get("architecture")
+    if not isinstance(architektur, dict):
+        return None
+    modalitaeten = architektur.get("input_modalities")
+    if not isinstance(modalitaeten, list):
+        return None
+    return any(eintrag == "image" for eintrag in modalitaeten)
+
+
 def katalog_lesen(rohdaten: dict) -> Modell | None:
     """Liest einen Katalogeintrag von OpenRouter.
 
@@ -117,6 +135,7 @@ def katalog_lesen(rohdaten: dict) -> Modell | None:
 
     kontext, ausgabe = _fenster(rohdaten)
     cache_marke = _cache_marke_noetig(rohdaten)
+    blick = _sieht(rohdaten)
     reasoning = rohdaten.get("reasoning")
     if not isinstance(reasoning, dict):
         # Kein Denk-Objekt heißt: dieses Modell denkt nicht. Der Katalog führt
@@ -129,6 +148,7 @@ def katalog_lesen(rohdaten: dict) -> Modell | None:
             kontext_tokens=kontext,
             max_ausgabe_tokens=ausgabe,
             cache_marke_noetig=cache_marke,
+            sieht=blick,
         )
 
     rohe_stufen = reasoning.get("supported_efforts")
@@ -154,4 +174,5 @@ def katalog_lesen(rohdaten: dict) -> Modell | None:
         kontext_tokens=kontext,
         max_ausgabe_tokens=ausgabe,
         cache_marke_noetig=cache_marke,
+        sieht=blick,
     )

@@ -319,6 +319,13 @@ class Modell:
     Beides darf ``None`` sein. Der Auto Router führt gar kein Fenster, manche
     Modelle keine Ausgabegrenze.
 
+    ``sieht`` heißt: dieses Modell nimmt Bilder entgegen. ``None`` heißt
+    **unbekannt** und nie „blind“ — dieselbe Regel wie bei
+    ``kontext_tokens``. Der Anlass ist praktisch: fällt der Katalog aus,
+    stünde MSM sonst vor einem Bildschirmfoto, das es aus reiner Unkenntnis
+    nicht abschickt. Ein Anbieter, der das Bild nicht mag, sagt das selbst.
+    Verweigert wird deshalb nur bei einem ausdrücklichen ``False``.
+
     ``cache_marke_noetig`` heißt: dieses Modell speichert den Prompt nur dann
     zwischen, wenn die Anfrage es ausdrücklich verlangt. ``False`` deckt **zwei**
     Fälle ab, die für den Sendepfad dasselbe bedeuten — das Modell speichert von
@@ -336,6 +343,7 @@ class Modell:
     kontext_tokens: int | None = None
     max_ausgabe_tokens: int | None = None
     cache_marke_noetig: bool = False
+    sieht: bool | None = None
 
 
 def positive_zahl(wert: object) -> int | None:

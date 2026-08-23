@@ -192,6 +192,7 @@
         "tts": "Stimme"
       },
       "recommended": "Empfohlen",
+      "vision": "Sieht Bilder",
       "workerSection": "Worker (Hintergrund-Aufträge)",
       "workerHint": "Mit diesem Modell und dieser festen Denkstufe arbeiten die Worker im Hintergrund — es darf langsam und gründlich sein. Leer gelassen gilt der Ein-Modell-Betrieb: das Chat-Modell oben erledigt dann auch die Hintergrundarbeit.",
       "workerModel": "Worker-Modell",
@@ -1784,7 +1785,7 @@
     },
     "ai_desktop_use": {
       "title": "KI-Werkzeuge auf dem eigenen Rechner",
-      "desc": "Erlaubt der KI, auf dem Rechner des Benutzers zu arbeiten — über die Smart-System-App, nie über das Panel. Ansehen darf sie, was der Benutzer selbst sehen kann: Laufwerke, Ordner, Speicherplatz, den Bildschirm und eine Virenprüfung — alles nur lesend, und ein Hinweis am Bildschirmrand leuchtet auf, sobald sie hinsieht. Angelegt und geändert wird ausschließlich im selbst gewählten Sandbox-Ordner. Aufräumen darf sie auch außerhalb: Gelöschtes geht in den Papierkorb, endgültig nur auf ausdrücklichen Wunsch, und bei ausgeschaltetem autonomem Modus liegt vorher eine Karte mit der vollständigen Liste vor. Windows selbst, Programmordner und fremde Benutzerprofile bleiben gesperrt, bis der Benutzer sie in den Einstellungen der App freigibt. Bevor sie Maus oder Tastatur übernimmt, muss er das an seinem Rechner bestätigen; die Freigabe ist befristet und jederzeit widerrufbar. Eine Bitte aus dem Browser erreicht diese Werkzeuge nie — die Herkunft steht im Token der gekoppelten Sitzung, kein Client kann sie behaupten."
+      "desc": "Erlaubt der KI, auf dem Rechner des Benutzers zu arbeiten — über die Smart-System-App, nie über das Panel. Ansehen darf sie, was der Benutzer selbst sehen kann: Laufwerke, Ordner, Speicherplatz, den Bildschirm und eine Virenprüfung — alles nur lesend, und ein Hinweis am Bildschirmrand leuchtet auf, sobald sie hinsieht. Angelegt und geändert wird ausschließlich im selbst gewählten Sandbox-Ordner. Aufräumen darf sie auch außerhalb: Gelöschtes geht in den Papierkorb, endgültig nur auf ausdrücklichen Wunsch, und bei ausgeschaltetem autonomem Modus liegt vorher eine Karte mit der vollständigen Liste vor. Windows selbst, Programmordner und fremde Benutzerprofile bleiben gesperrt, bis der Benutzer sie in den Einstellungen der App freigibt. Maus und Tastatur übernimmt sie ohne Rückfrage nur im autonomen Modus; ist er aus, muss der Benutzer das an seinem Rechner bestätigen, und die Freigabe ist dann befristet und jederzeit widerrufbar. Eine Bitte aus dem Browser erreicht diese Werkzeuge nie — die Herkunft steht im Token der gekoppelten Sitzung, kein Client kann sie behaupten."
     },
     "ai_usage_read_all": {
       "title": "Gesamte KI-Nutzung einsehen",
@@ -3202,7 +3203,7 @@
       },
       "takeover": {
         "title": "Maus und Tastatur",
-        "body": "Die KI kann um die Übernahme bitten; erteilen kann sie allein der Mensch am Rechner, auf einer Bestätigungskarte und befristet. Die Frist liegt in der App, nicht im Panel, und lässt sich jederzeit beenden."
+        "body": "Bei ausgeschaltetem autonomem Modus kann die KI um die Übernahme nur bitten; erteilen kann sie allein der Mensch am Rechner, auf einer Bestätigungskarte und befristet. Die Frist liegt in der App, nicht im Panel, und lässt sich jederzeit beenden. Im autonomen Modus entfällt die Karte — dann hat der Betreiber vorab entschieden, so wie bei jeder anderen Handlung auch."
       },
       "pairing": {
         "title": "Anmelden per Kopplung",
@@ -4794,7 +4795,7 @@
       "zeitzoneLabel": "Zeitzone",
       "speichert": "Speichert …",
       "weiter": "Weiter",
-      "sandboxErklaerung": "Die Sandbox ist der einzige Ordner, in dem die KI später Dateien anlegen, bearbeiten und löschen darf — zum Beispiel für Coding-Aufgaben. Ansehen kann sie den Rechner auch außerhalb (nur lesend, etwa den Speicherplatz); geschrieben wird ausschließlich hier.",
+      "sandboxErklaerung": "Die Sandbox ist der einzige Ordner, in dem die KI später Dateien anlegen und bearbeiten darf — zum Beispiel für Coding-Aufgaben. Ansehen kann sie den Rechner auch außerhalb (nur lesend, etwa den Speicherplatz). Aufräumen darf sie ebenfalls außerhalb, aber nur löschend und in den Papierkorb; angelegt und geändert wird ausschließlich hier.",
       "sandboxLabel": "Sandbox-Ordner",
       "ordnerWaehlen": "Ordner wählen",
       "spaeterFestlegen": "Später festlegen"

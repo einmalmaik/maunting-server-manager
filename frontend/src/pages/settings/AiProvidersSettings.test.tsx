@@ -97,6 +97,7 @@ describe('AiProvidersSettings', () => {
       default_effort: 'high',
       mandatory: false,
       recommended: false,
+      vision: null,
     }])
   })
 
@@ -215,6 +216,7 @@ describe('AiProvidersSettings', () => {
         default_effort: 'high',
         mandatory: false,
         recommended: false,
+        vision: null,
       },
       {
         model_id: 'openai/gpt-5.6-luna',
@@ -224,6 +226,7 @@ describe('AiProvidersSettings', () => {
         default_effort: 'medium',
         mandatory: false,
         recommended: true,
+        vision: null,
       },
     ])
 
@@ -272,6 +275,7 @@ describe('AiProvidersSettings', () => {
       default_effort: null,
       mandatory: false,
       recommended: true,
+      vision: null,
     }, {
       model_id: 'eleven_multilingual_v2',
       name: 'Eleven Multilingual v2',
@@ -280,6 +284,7 @@ describe('AiProvidersSettings', () => {
       default_effort: null,
       mandatory: false,
       recommended: false,
+      vision: null,
     }])
     render(<AiProvidersSettings canWrite />)
 
@@ -392,6 +397,7 @@ describe('AiProvidersSettings', () => {
       default_effort: 'medium',
       mandatory: false,
       recommended: false,
+      vision: null,
     })
     render(<AiProvidersSettings canWrite />)
 

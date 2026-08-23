@@ -173,6 +173,16 @@ export interface AiCatalogModel {
    * die empfohlene Kennung nicht mehr fuehrt.
    */
   recommended: boolean
+  /**
+   * Ob dieses Modell Bilder lesen kann. `null` heisst „der Katalog sagt nichts
+   * dazu" und nie „sieht nichts".
+   *
+   * Steht hier, weil die KI im Chat nie technisch darueber spricht: kann sie
+   * nicht hinsehen, sagt sie das als eine Faehigkeit, die ihr fehlt. Wer
+   * wissen will, woran es liegt, sieht an der Stelle nach, an der er das
+   * Modell waehlt — also hier.
+   */
+  vision: boolean | null
 }
 
 /**

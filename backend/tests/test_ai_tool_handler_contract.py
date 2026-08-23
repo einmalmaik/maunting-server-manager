@@ -252,10 +252,14 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     `desktop_job_service._wartet_auf_menschen`: welche Frist ein Auftrag
     bekommt, haengt seither an einem Argument statt am Werkzeugnamen.
 
-    Nachgemessen: aus der App **63.797** Zeichen, 68 Werkzeuge; aus dem Panel
+    Nachgemessen: aus der App **63.821** Zeichen, 68 Werkzeuge; aus dem Panel
     **58.423** Zeichen, 63 Werkzeuge (unveraendert — die Desktop-Werkzeuge
-    fehlen dort). Die Luft betraegt **203 Zeichen**. Das naechste Werkzeug
+    fehlen dort). Die Luft betraegt **179 Zeichen**. Das naechste Werkzeug
     kommt nicht mehr ohne Zusammenlegen hinein, und das ist so gewollt.
+
+    Die 24 Zeichen gegenueber dem Vortag gehen an `desktop_steuern`: seit dem
+    23.08.2026 folgt auch die Uebernahme dem autonomen Modus, und die
+    Beschreibung sagt es.
     """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(

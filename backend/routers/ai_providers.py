@@ -457,6 +457,7 @@ async def list_catalog_models(
             # Kennung umbenannt oder abgekuendigt hat —, bleibt schlicht jede
             # Zeile ohne Marke. Nie eine erfundene daneben.
             recommended=modell.model_id == ai_provider_registry.anbieter(kind).empfehlung,
+            vision=modell.sieht,
         )
         for modell in modelle
     ]
@@ -517,6 +518,10 @@ async def find_catalog_model(
         # Eine Empfehlung kann es hier nicht geben: Anbieter ohne Katalog
         # führen keine, weil die Kennung dem Betreiber gehört.
         recommended=modell.model_id == ai_provider_registry.anbieter(kind).empfehlung,
+        # Geliehen wie Fenster und Stufen: heisst das Deployment wie das
+        # Modell, steht hier die Wahrheit, sonst `null` — und `null` heisst
+        # "unbekannt", nicht "sieht nichts".
+        vision=modell.sieht,
     )
 
 

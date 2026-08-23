@@ -14,8 +14,10 @@
 //! wieder. Aus demselben Grund liegt `echte_punkte` hier und nicht dort.
 //!
 //! Beim Umzug hat sich am Verhalten nichts geaendert — dieselbe xcap-Aufnahme,
-//! dieselbe Verkleinerung auf `MAX_KANTE`, dieselbe PNG/base64-Kodierung,
-//! dieselben Rueckgabefelder. Zwei Ausdruecke haben nur einen Namen bekommen
+//! dieselbe Verkleinerung auf `MAX_KANTE`, dieselben Rueckgabefelder. Nur das
+//! Bildformat wurde noch am selben Tag getauscht (PNG → JPEG), weil das PNG
+//! die Bruecke zum Panel nie passiert hat; die Begruendung steht bei der
+//! Kodierung. Zwei Ausdruecke haben ausserdem einen Namen bekommen
 //! (`verkleinerung`, `zurueckrechnen`): dieselbe Rechnung stand vorher zweimal
 //! da, und ein Test kann sie jetzt festhalten, statt sie zu glauben.
 //!
@@ -39,6 +41,12 @@ use tauri::AppHandle;
 /// ohne mehr zu zeigen: 1280 Punkte sind lesbar.
 pub const MAX_KANTE: u32 = 1280;
 
+/// JPEG-Qualitaet des Bildschirmfotos. 75 ist der uebliche Punkt, an dem
+/// Text noch sauber lesbar ist und die Datei klein bleibt; darueber waechst
+/// sie schnell, ohne dass ein Modell mehr erkennt.
+#[cfg_attr(not(windows), allow(dead_code))]
+const JPEG_QUALITAET: u8 = 75;
+
 /// Um wie viel ein Bild dieser Groesse kleiner wird. Nie ueber 1.0: ein
 /// kleiner Bildschirm wird nicht hochgerechnet — das kostete Tokens und
 /// zeigte keinen Punkt mehr.
@@ -61,7 +69,7 @@ fn zurueckrechnen(x: i32, y: i32, faktor: f32) -> (i32, i32) {
 
 #[cfg(windows)]
 mod aufnahme_impl {
-    use super::{verkleinerung, zurueckrechnen};
+    use super::{verkleinerung, zurueckrechnen, JPEG_QUALITAET};
     use base64::Engine;
     use serde_json::{json, Value};
 
@@ -94,13 +102,30 @@ mod aufnahme_impl {
             bild
         };
 
-        let mut png = std::io::Cursor::new(Vec::new());
+        // **JPEG und nicht PNG**, und das ist der Unterschied zwischen
+        // "funktioniert" und "kommt nie an". Ein Desktop mit Text und Fenstern
+        // wird als PNG (verlustfrei) 300 KB bis 1,5 MB gross; base64 macht ein
+        // Drittel mehr daraus, und die Bruecke zum Panel liess bis zum
+        // 23.08.2026 nur 200.000 Zeichen durch — jedes Bildschirmfoto wurde
+        // abgewiesen, und die KI sah nie etwas. Dasselbe Bild als JPEG bei
+        // Qualitaet 75 sind 40 bis 150 KB.
+        //
+        // Der Qualitaetsverlust kostet hier nichts: das Bild wird ohnehin auf
+        // MAX_KANTE verkleinert, und ein Modell soll darauf Fenster, Knoepfe
+        // und Text erkennen — nicht Pixel vergleichen.
+        //
+        // `to_rgb8`, weil JPEG keinen Alphakanal kennt. Ohne die Umwandlung
+        // scheitert die Kodierung statt zu funktionieren.
+        let mut jpeg = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(klein.clone())
-            .write_to(&mut png, image::ImageFormat::Png)
+            .to_rgb8()
+            .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
+                &mut jpeg, JPEG_QUALITAET,
+            ))
             .map_err(|e| format!("Bild nicht kodierbar: {e}"))?;
 
         Ok(json!({
-            "bild_png_base64": base64::engine::general_purpose::STANDARD.encode(png.into_inner()),
+            "bild_jpeg_base64": base64::engine::general_purpose::STANDARD.encode(jpeg.into_inner()),
             // Die Koordinaten, in denen das Modell antworten soll: die des
             // **verkleinerten** Bildes. Zurueckgerechnet wird beim Klicken,
             // damit das Modell nicht rechnen muss.
@@ -135,9 +160,9 @@ mod aufnahme_impl {
     }
 }
 
-/// Ein Foto des Hauptbildschirms, verkleinert und als PNG in base64.
+/// Ein Foto des Hauptbildschirms, verkleinert und als JPEG in base64.
 ///
-/// Felder: `bild_png_base64`, `breite`, `hoehe`, `hinweis` — `breite` und
+/// Felder: `bild_jpeg_base64`, `breite`, `hoehe`, `hinweis` — `breite` und
 /// `hoehe` sind die des **verkleinerten** Bildes und damit das Raster, in dem
 /// das Modell Punkte nennt.
 ///
@@ -162,6 +187,40 @@ pub fn echte_punkte(x: i32, y: i32) -> Result<(i32, i32), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ein echtes Bildschirmfoto muss durch die Bruecke zum Panel passen.
+    ///
+    /// Diese Zahl ist der Grund, warum hier JPEG steht und nicht PNG. Bis zum
+    /// 23.08.2026 wurde als PNG kodiert, und die Bruecke liess 200.000 Zeichen
+    /// durch — jedes Foto war groesser, wurde abgewiesen, und die KI sah nie
+    /// etwas. Der Test misst am echten Bildschirm, damit die Annahme nicht
+    /// wieder ungeprueft im Kommentar steht.
+    ///
+    /// Ohne Monitor (Bauserver ohne Sitzung) faellt er still durch: dort gibt
+    /// es nichts zu messen, und ein roter Test waere eine Aussage ueber die
+    /// Umgebung statt ueber den Code.
+    #[cfg(windows)]
+    #[test]
+    fn ein_echtes_foto_passt_durch_die_bruecke() {
+        let Ok(ergebnis) = aufnahme_impl::aufnehmen() else {
+            return;
+        };
+        let bild = ergebnis["bild_jpeg_base64"].as_str().unwrap();
+        eprintln!(
+            "Bildschirmfoto: {} Zeichen base64 ({}x{})",
+            bild.len(),
+            ergebnis["breite"],
+            ergebnis["hoehe"]
+        );
+        assert!(
+            bild.len() < 900_000,
+            "Bildschirmfoto zu gross fuer die Bruecke: {} Zeichen",
+            bild.len()
+        );
+        // Ein JPEG faengt mit /9j/ an (0xFF 0xD8 0xFF). Der Test haelt damit
+        // auch fest, dass hier wirklich JPEG rauskommt und nicht PNG.
+        assert!(bild.starts_with("/9j/"), "kein JPEG: {}", &bild[..8.min(bild.len())]);
+    }
 
     #[test]
     fn kleine_bildschirme_werden_nicht_hochgerechnet() {

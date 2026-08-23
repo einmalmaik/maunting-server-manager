@@ -81,12 +81,21 @@ version = "=0.6.1"
 version = "0.9"
 
 [target.'cfg(windows)'.dependencies.image]
-# Nur zum Verkleinern und PNG-Kodieren der Bildschirmfotos: ein Vollbild geht
+# Nur zum Verkleinern und Kodieren der Bildschirmfotos: ein Vollbild geht
 # sonst mit mehreren Megabyte in einen Prompt, und die Anbieter weisen zu
 # grosse Bilder ab, statt sie zu skalieren.
+#
+# `jpeg` seit dem 23.08.2026 und `png` weiterhin daneben: das Bildschirmfoto
+# geht als JPEG zum Modell (klein genug, um die Bruecke zu passieren), die
+# Tray-Icons bleiben PNG.
+#
+# Das Feature zieht `zune-jpeg` und `zune-core` nach (zwei Zeilen in
+# Cargo.lock, MIT/Apache-2.0, reines Kodieren, kein I/O) — bewertet in
+# docs/agent-rules/dependencies.md. Dass beide Kodierer derselben Kiste
+# gehoeren, heisst *nicht*, dass nichts dazukommt.
 version = "0.25"
 default-features = false
-features = ["png"]
+features = ["png", "jpeg"]
 
 [target.'cfg(windows)'.dependencies.base64]
 # Das Bild reist als Text durch JSON zum Panel und weiter zum Modell.

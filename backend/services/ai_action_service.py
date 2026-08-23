@@ -1282,10 +1282,11 @@ def _desktop_tool_definitions() -> list[dict]:
         _function(
             "desktop_steuern",
             "Übernimmt Maus und Tastatur. Beginne **immer** mit "
-            "aktion='freigabe': der Benutzer bestätigt an seinem Rechner, "
-            "befristet, und nur er kann das. Erst danach greifen klick, "
-            "tippen und der Rest; ohne gültige Freigabe wird jeder Aufruf "
-            "abgewiesen. Nutze das erst, wenn es nicht anders geht — Dateien, "
+            "aktion='freigabe': im autonomen Modus bekommst du sie sofort, "
+            "sonst bestätigt sie der Benutzer an seinem Rechner, befristet. "
+            "Erst danach greifen klick, tippen und der Rest; ohne Freigabe "
+            "wird jeder Aufruf abgewiesen. Nutze das erst, wenn es nicht "
+            "anders geht — Dateien, "
             "Programme und Adressen laufen ohne Übernahme. Koordinaten sind "
             "Bildpunkte des zuletzt gelieferten Bildschirmfotos, Ursprung "
             "links oben, nur der Hauptbildschirm; sieh vor jedem Klick mit "

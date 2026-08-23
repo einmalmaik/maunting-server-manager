@@ -58,7 +58,13 @@ def _wartet_auf_menschen(tool_name: str, arguments: dict) -> bool:
     """
     if tool_name == "desktop_aufraeumen":
         return True
-    return tool_name == "desktop_steuern" and arguments.get("aktion") == "freigabe"
+    if tool_name != "desktop_steuern" or arguments.get("aktion") != "freigabe":
+        return False
+    # Im autonomen Modus antwortet der Rechner sofort und zeigt gar keine
+    # Karte (`auftrag::steuern`). Hier wartet dann niemand, und die lange
+    # Frist waere nur eine lange Wartezeit fuer den Fall, dass der Rechner
+    # aus ist.
+    return not arguments.get("autonom")
 
 
 def _aad(job_id: str) -> str:

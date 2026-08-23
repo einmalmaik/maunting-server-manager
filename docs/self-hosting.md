@@ -989,8 +989,8 @@ Drei Unterschiede zu OpenRouter, die im Formular sichtbar sind:
   genannt hast — `prod-chat` ist ein gültiger Name. Eine Liste dafür gibt es
   nicht, also bleibt das Modell ein Textfeld und „Modelle neu laden" ist
   gesperrt. Heisst dein Deployment wie das Modell (`claude-sonnet-5`), leiht
-  sich MSM Kontextfenster und Denkstufen aus dem Katalog von OpenRouter;
-  heisst es anders, bleiben sie ehrlich unbekannt und nie geraten.
+  sich MSM Kontextfenster, Denkstufen und die Bildsicht aus dem Katalog von
+  OpenRouter; heisst es anders, bleiben sie ehrlich unbekannt und nie geraten.
 - **Kein Gehör.** Azures Transkription liegt hinter einer Vorschau-API. Der
   Anbieter erscheint deshalb als *Nur Chat*, und das Feld für das hörende
   Modell wird gar nicht erst angeboten. Für den Sprachmodus braucht es
@@ -1018,6 +1018,15 @@ Dinge stehen dahinter, die man sonst als Fehler erlebt statt als Entwurf:
   Stufe des Hintergrund-Workers. Heisst es anders, bleibt beides ehrlich
   unbekannt und die Stufenauswahl verschwindet, statt eine erfundene zu zeigen.
   Wer die Stufen braucht, benennt sein Deployment wie das Modell.
+- **„Sieht Bilder" steht an der Modellzeile.** Nicht jedes Modell kann Bilder
+  lesen, und ein Bildschirmfoto des Benutzerrechners ist ein Bild. Die Marke
+  neben Namen und Empfehlung sagt, woran man ist; fehlt sie, sagt der Katalog
+  nichts dazu — dann fährt das Bild trotzdem mit, und der Anbieter entscheidet.
+  Steht dagegen fest, dass das Modell keine Bilder liest, wird gar kein Foto
+  aufgenommen. Die KI erklärt das im Gespräch als eine Fähigkeit, die ihr
+  gerade fehlt, und nicht als Eigenschaft eines Modells: wer mit ihr redet,
+  redet mit ihr und nicht mit einer Konfiguration. Der technische Grund steht
+  deshalb hier, an der Stelle, an der man ihn beheben kann.
 
 ---
 

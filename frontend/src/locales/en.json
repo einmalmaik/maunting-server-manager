@@ -192,6 +192,7 @@
         "tts": "Voice"
       },
       "recommended": "Recommended",
+      "vision": "Reads images",
       "workerSection": "Workers (background tasks)",
       "workerHint": "Workers do the background work with this model and this fixed reasoning effort — it may be slow and thorough. Left empty, single-model operation applies: the chat model above also handles the background work.",
       "workerModel": "Worker model",
@@ -1784,7 +1785,7 @@
     },
     "ai_desktop_use": {
       "title": "AI tools on your own computer",
-      "desc": "Allows the AI to work on the user's computer — through the Smart System app, never through the panel. It may look at whatever the user can see: drives, folders, disk space, the screen and a virus check — all read-only, and an indicator lights up at the edge of the screen whenever it looks. Creating and changing files happens only inside the self-chosen sandbox folder. Cleaning up is also allowed outside it: deleted items go to the recycle bin, permanently only on explicit request, and with autonomous mode off a card with the full list appears first. Windows itself, program folders and other user profiles stay locked until the user unlocks them in the app's settings. Before it takes over mouse or keyboard, the user must confirm that on their machine; the grant is time-limited and revocable at any time. A request from the browser never reaches these tools — the origin is in the token of the paired session, no client can claim it."
+      "desc": "Allows the AI to work on the user's computer — through the Smart System app, never through the panel. It may look at whatever the user can see: drives, folders, disk space, the screen and a virus check — all read-only, and an indicator lights up at the edge of the screen whenever it looks. Creating and changing files happens only inside the self-chosen sandbox folder. Cleaning up is also allowed outside it: deleted items go to the recycle bin, permanently only on explicit request, and with autonomous mode off a card with the full list appears first. Windows itself, program folders and other user profiles stay locked until the user unlocks them in the app's settings. It takes over mouse and keyboard without asking only in autonomous mode; with that off, the user must confirm it on their machine, and the grant is then time-limited and revocable at any time. A request from the browser never reaches these tools — the origin is in the token of the paired session, no client can claim it."
     },
     "ai_usage_read_all": {
       "title": "View overall AI usage",
@@ -3202,7 +3203,7 @@
       },
       "takeover": {
         "title": "Mouse and keyboard",
-        "body": "The AI may ask to take over; only the human at the machine can grant it, on a confirmation card and for a limited time. The deadline lives in the app, not in the panel, and can be ended at any moment."
+        "body": "With autonomous mode off, the AI can only ask to take over; only the human at the machine can grant it, on a confirmation card and for a limited time. The deadline lives in the app, not in the panel, and can be ended at any moment. In autonomous mode the card is skipped — the operator decided in advance, just as for every other action."
       },
       "pairing": {
         "title": "Signing in by pairing",
@@ -4794,7 +4795,7 @@
       "zeitzoneLabel": "Time zone",
       "speichert": "Saving …",
       "weiter": "Next",
-      "sandboxErklaerung": "The sandbox is the only folder where the AI may later create, edit and delete files — for coding tasks, for example. It can also look at the rest of the computer (read-only, disk space for instance); writing happens exclusively here.",
+      "sandboxErklaerung": "The sandbox is the only folder where the AI may later create and edit files — for coding tasks, for example. It can also look at the rest of the computer (read-only, disk space for instance). It may clean up outside as well, but only by deleting, and into the recycle bin; creating and changing happens exclusively here.",
       "sandboxLabel": "Sandbox folder",
       "ordnerWaehlen": "Choose folder",
       "spaeterFestlegen": "Choose later"

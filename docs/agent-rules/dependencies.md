@@ -706,3 +706,44 @@ Exit-Plan:
   Fällt das Feature weg, wird aus dem Fragment eine Datei im Bundle — mit
   einem Test, der ihre Existenz im gebauten Paket prüft. Erst dann, denn ohne
   diesen Test wäre die Datei genau das Risiko, das oben beschrieben ist.
+
+## `zune-jpeg` / `zune-core` (Rust, über das `image`-Feature `jpeg`) — 23.08.2026
+
+Problem:
+  Das Bildschirmfoto des Benutzerrechners muss zum Modell. Als PNG ist ein
+  Vollbild regelmäßig größer als eine Million Zeichen Base64 — es passte
+  weder durch die Größengrenze der Auftragsbrücke noch sinnvoll in ein
+  Kontextfenster. Genau daran scheiterte die Bildschirmsicht bis zu diesem
+  Tag: aufgenommen wurde, angekommen ist nie etwas.
+
+Warum diese:
+  Es ist keine gewählte Bibliothek, sondern das, was `image` für seinen
+  JPEG-Kodierer einzieht. Die Kiste `image` steht seit dem 21.08.2026 im
+  Baum (Verkleinern der Aufnahme, Tray-Icons); geändert hat sich nur die
+  Feature-Liste von `["png"]` auf `["png", "jpeg"]`. `zune-jpeg` ist der
+  reine Rust-Codec dahinter, `zune-core` sein gemeinsamer Typenspeicher —
+  beide MIT/Apache-2.0, kein I/O, kein Netzwerk, kein FFI, zwei Einträge in
+  `Cargo.lock`.
+
+  Die erste Fassung dieses Kommentars behauptete "kein neues Paket im Baum",
+  weil beide Kodierer derselben Kiste gehören. Das war falsch: ein Feature
+  zieht Abhängigkeiten nach, und `Cargo.lock` sagt es. Der Satz steht hier,
+  damit der nächste Leser nicht denselben Kurzschluss zieht.
+
+Alternativen:
+  Ein kleineres PNG (stärker verkleinern) wurde verworfen — Text auf einem
+  Bildschirmfoto ist genau das, was gelesen werden soll, und er verschwindet
+  als erstes. Gemessen liegt ein Foto mit 1280x720 als JPEG q75 bei 104.124
+  Zeichen Base64 und bleibt gut lesbar.
+
+Security:
+  Kodiert wird ausschließlich, was `bildschirm.rs` selbst aufgenommen hat.
+  Es wird nie ein fremdes JPEG **dekodiert** — der Angriffsweg eines
+  Bildparsers (fremde Datei, präparierte Header) existiert hier nicht.
+
+Kapselung:
+  Ausschließlich `smart-system/src-tauri/src/bildschirm.rs`. Sonst nirgends.
+
+Exit-Plan:
+  Fällt `image` weg, fällt beides mit. Ein eigener JPEG-Kodierer kommt nicht
+  in Frage; dann lieber wieder PNG und eine kleinere Kantenlänge.

@@ -33,6 +33,30 @@ interface ProviderDraft extends AiProviderWrite {
  */
 const KEIN_WORKER = '__aus__'
 
+/**
+ * Der Hinweis unter einer Modellzeile: Anzeigename, Empfehlung, Bildsicht.
+ *
+ * „Sieht Bilder" steht hier und in keinem Chat. Kann die KI nicht hinsehen,
+ * sagt sie das dort als eine Fähigkeit, die ihr gerade fehlt, und nicht als
+ * Eigenschaft eines Modells (`ai_stream_service.KEIN_BLICK_GRUND`). Der
+ * technische Grund gehört an die Stelle, an der man ihn beheben kann — also
+ * dorthin, wo das Modell gewählt wird.
+ *
+ * `vision === null` heißt „der Katalog sagt nichts dazu". Dann steht auch
+ * hier nichts: eine Marke wäre eine Behauptung, ihr Fehlen ist nur Schweigen.
+ */
+function modellHinweis(
+  item: AiCatalogModel,
+  t: (schluessel: string) => string,
+): string | undefined {
+  const teile = [
+    item.name !== item.model_id ? item.name : null,
+    item.recommended ? t('ai.providers.recommended') : null,
+    item.vision ? t('ai.providers.vision') : null,
+  ].filter(Boolean)
+  return teile.length > 0 ? teile.join(' · ') : undefined
+}
+
 const EMPTY_PROVIDER: ProviderDraft = {
   name: '',
   provider_kind: '',
@@ -629,13 +653,7 @@ function ProviderForm({
                             .map((item) => ({
                               value: item.model_id,
                               label: item.model_id,
-                              hint: item.recommended
-                                ? [item.name !== item.model_id ? item.name : null, t('ai.providers.recommended')]
-                                    .filter(Boolean)
-                                    .join(' · ')
-                                : item.name !== item.model_id
-                                  ? item.name
-                                  : undefined,
+                              hint: modellHinweis(item, t),
                               icon: item.recommended
                                 ? <Star className="h-3.5 w-3.5 fill-current text-primary" aria-hidden="true" />
                                 : undefined,
@@ -755,7 +773,7 @@ function ProviderForm({
                           .map((item) => ({
                             value: item.model_id,
                             label: item.model_id,
-                            hint: item.name !== item.model_id ? item.name : undefined,
+                            hint: modellHinweis(item, t),
                           })),
                       ]}
                       aria-label={t('ai.providers.workerModel')}
@@ -831,13 +849,7 @@ function ProviderForm({
                           .map((item) => ({
                             value: item.model_id,
                             label: item.model_id,
-                            hint: item.recommended
-                              ? [item.name !== item.model_id ? item.name : null, t('ai.providers.recommended')]
-                                  .filter(Boolean)
-                                  .join(' · ')
-                              : item.name !== item.model_id
-                                ? item.name
-                                : undefined,
+                            hint: modellHinweis(item, t),
                             icon: item.recommended
                               ? <Star className="h-3.5 w-3.5 fill-current text-primary" aria-hidden="true" />
                               : undefined,

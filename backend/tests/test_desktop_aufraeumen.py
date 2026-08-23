@@ -190,3 +190,69 @@ class TestEinstellung:
 
         regular_user.ai_desktop_systembereich = "alles"
         assert systembereich_des_benutzers(regular_user) == "lesen"
+
+
+class TestKlickenFolgtDemAutonomenModus:
+    """Maus und Tastatur unter derselben Regel wie das Aufraeumen.
+
+    Bis zum 23.08.2026 brauchte jeder Klick eine befristete Freigabe, auch bei
+    eingeschaltetem autonomem Modus. Das war die halbe Regel: der Betreiber
+    hat "keine Bestaetigung im autonomen Modus" fuer **alles** diktiert. Eine
+    Karte je Klick waere die Alternative gewesen — ein Formular auszufuellen
+    sind zwanzig Klicks, und damit zwanzig Karten.
+    """
+
+    def test_ohne_freigabe_bleibt_es_beim_fragen(self, db: Session, regular_user: User):
+        argumente = _desktop_argumente(
+            db,
+            user_id=regular_user.id,
+            call=_aufruf("desktop_steuern", {"aktion": "klick", "x": 10, "y": 20}),
+        )
+        assert argumente["autonom"] is False
+
+    def test_mit_freigabe_klickt_sie_ohne_karte(self, db: Session, regular_user: User):
+        _mit_autonomie(db, regular_user)
+        argumente = _desktop_argumente(
+            db,
+            user_id=regular_user.id,
+            call=_aufruf("desktop_steuern", {"aktion": "klick", "x": 10, "y": 20}),
+        )
+        assert argumente["autonom"] is True
+
+    def test_das_modell_setzt_es_nicht_selbst(self, db: Session, regular_user: User):
+        """Dieselbe Falle wie beim Aufraeumen, an einem zweiten Werkzeug."""
+        argumente = _desktop_argumente(
+            db,
+            user_id=regular_user.id,
+            call=_aufruf("desktop_steuern", {"aktion": "klick", "autonom": True}),
+        )
+        assert argumente["autonom"] is False
+
+    def test_maus_und_tastatur_haben_keinen_systembereich(
+        self, db: Session, regular_user: User
+    ):
+        """Der Systembereich betrifft Pfade — ein Klick hat keinen.
+
+        Das Feld hier trotzdem zu setzen waere ein Angebot an den naechsten
+        Leser, es in `uebernahme.rs` auszuwerten, und dort bedeutete es nichts.
+        """
+        argumente = _desktop_argumente(
+            db,
+            user_id=regular_user.id,
+            call=_aufruf("desktop_steuern", {"aktion": "klick"}),
+        )
+        assert "systembereich" not in argumente
+
+    def test_eine_freigabebitte_im_autonomen_modus_wartet_auf_niemanden(self):
+        """Die lange Frist haengt daran, dass jemand entscheiden **muss**.
+
+        Im autonomen Modus antwortet der Rechner sofort und zeigt keine Karte
+        (`auftrag::steuern`). Zehn Minuten Frist waeren dann nur zehn Minuten
+        Stillstand, falls der Rechner gerade aus ist.
+        """
+        assert not desktop_job_service._wartet_auf_menschen(
+            "desktop_steuern", {"aktion": "freigabe", "autonom": True}
+        )
+        assert desktop_job_service._wartet_auf_menschen(
+            "desktop_steuern", {"aktion": "freigabe", "autonom": False}
+        )

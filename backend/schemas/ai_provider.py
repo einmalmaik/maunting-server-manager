@@ -315,6 +315,13 @@ class AiCatalogModelResponse(BaseModel):
     steht am Modell und nicht neben der Liste, damit die Oberflaeche es dort
     zeigen kann, wo gewaehlt wird — und damit es verschwindet, wenn der Katalog
     diese Kennung nicht mehr fuehrt.
+
+    ``vision`` sagt, ob dieses Modell Bilder lesen kann; ``null`` heisst
+    "der Katalog sagt dazu nichts". Es steht hier, weil dies die Stelle ist,
+    an der ein Modell gewaehlt wird — die KI selbst spricht darueber nie in
+    technischen Worten (`ai_stream_service.KEIN_BLICK_GRUND`), und ohne diese
+    Marke haette der Betreiber keinen Ort, an dem er nachsehen koennte, warum
+    sie nicht hinsieht.
     """
 
     model_id: str
@@ -324,6 +331,7 @@ class AiCatalogModelResponse(BaseModel):
     default_effort: str | None
     mandatory: bool
     recommended: bool = False
+    vision: bool | None = None
 
 
 class AiProviderAvailableResponse(BaseModel):

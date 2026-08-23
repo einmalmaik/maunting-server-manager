@@ -239,11 +239,22 @@ mod windows_impl {
     }
 }
 
-/// Der eine Eingang. Alles darin setzt eine gueltige Freigabe voraus — auch
-/// das Bildschirmfoto: was auf dem Schirm steht, ist so privat wie das, was
-/// man darauf tippt.
+/// Der eine Eingang. Ohne autonomen Modus setzt alles darin eine gueltige
+/// Freigabe voraus.
+///
+/// **Der autonome Modus ist die Freigabe.** Die Regel des Betreibers gilt
+/// hier wie ueberall: autonomer Modus an, keine Bestaetigung; autonomer Modus
+/// aus, immer eine. Eine Karte *je Klick* waere die Alternative gewesen, und
+/// die waere unbenutzbar — ein Formular auszufuellen sind zwanzig Klicks.
+///
+/// Das Feld setzt das Panel (`_desktop_argumente`), nicht das Modell; fehlt
+/// es, wird gefragt. Die Uhr in `FREIGABE` laeuft dabei bewusst **nicht** mit:
+/// wird der autonome Modus mitten im Lauf ausgeschaltet, fragt der naechste
+/// Klick — und nicht erst in fuenf Minuten.
 pub fn steuern(argumente: &Value) -> Result<Value, String> {
-    pruefen()?;
+    if argumente["autonom"].as_bool() != Some(true) {
+        pruefen()?;
+    }
     let aktion = argumente["aktion"].as_str().unwrap_or("");
     let ergebnis = windows_impl::ausfuehren(aktion, argumente)?;
     Ok(ergebnis)
@@ -260,6 +271,21 @@ mod tests {
         // seit dem 23.08.2026 ohne Freigabe (`desktop_system`), steuern nicht.
         let fehler = steuern(&json!({ "aktion": "klick" })).unwrap_err();
         assert!(fehler.contains("Keine gueltige Freigabe"), "{fehler}");
+    }
+
+    #[test]
+    fn der_autonome_modus_ist_die_freigabe() {
+        widerrufen().unwrap();
+        // Nicht `is_ok()`: unter Windows klickt das hier wirklich, im
+        // CI-Container gibt es gar keine Maus. Geprueft wird das eine, worum
+        // es geht — die Schranke greift nicht mehr.
+        let ergebnis = steuern(&json!({ "aktion": "klick", "autonom": true }));
+        if let Err(fehler) = ergebnis {
+            assert!(!fehler.contains("Keine gueltige Freigabe"), "{fehler}");
+        }
+        // Und die Uhr laeuft trotzdem nicht: sonst klickte es weiter, wenn der
+        // autonome Modus gleich danach ausgeht.
+        assert_eq!(restsekunden(), 0);
     }
 
     #[test]

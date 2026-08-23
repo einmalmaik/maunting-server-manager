@@ -32,6 +32,25 @@ router = APIRouter(prefix="/api/desktop", tags=["desktop"])
 # weit unter jedem Kontextfenster.
 MAX_ERGEBNIS_ZEICHEN = 200_000
 
+# Das Bildschirmfoto wird **getrennt** gemessen, und das hat einen Anlass:
+# bis zum 23.08.2026 lief es unter derselben Grenze, ein PNG des Desktops war
+# regelmaessig groesser als 200.000 Zeichen, und jedes Foto wurde abgewiesen.
+# Die KI sah nie etwas und meldete "der Bildschirmzugriff ist abgelaufen".
+#
+# Seit demselben Tag kodiert `bildschirm.rs` als JPEG (gemessen 104.124 Zeichen
+# bei 1280x720), womit es auch unter der alten Grenze bliebe. Ein voller
+# Bildschirm mit Fotos und vielen Fenstern liegt aber deutlich darueber, und
+# eine Grenze, die *meistens* passt, ist genau die Sorte, die erst im Betrieb
+# auffaellt. Eine Million Zeichen sind rund 750 KB Bild — mehr, als bei dieser
+# Kantenlaenge je entstehen kann.
+#
+# Getrennt und nicht einfach hochgesetzt, damit die scharfe Grenze fuer alles
+# **andere** scharf bleibt: eine gelesene Datei mit 900.000 Zeichen gehoert
+# weiterhin nicht in einen Prompt.
+MAX_BILD_ZEICHEN = 1_000_000
+#: Dasselbe Feld wie in `bildschirm.rs` und `ai_stream_service.BILDFELD`.
+BILDFELD = "bild_jpeg_base64"
+
 
 @router.get("/jobs/next", response_model=DesktopJobResponse | None)
 def naechster_auftrag(
@@ -56,6 +75,24 @@ def naechster_auftrag(
     )
 
 
+def _zu_gross(ergebnis: dict) -> bool:
+    """Zwei Budgets: eines fuer das Bild, eines fuer alles andere.
+
+    Das Bild wird herausgerechnet und gegen `MAX_BILD_ZEICHEN` geprueft, der
+    Rest gegen `MAX_ERGEBNIS_ZEICHEN`. Ohne die Trennung faellt jedes
+    Bildschirmfoto unter eine Grenze, die fuer Text gedacht war — genau der
+    Fehler, den es bis zum 23.08.2026 gab.
+    """
+    bild = ergebnis.get(BILDFELD)
+    if isinstance(bild, str):
+        if len(bild) > MAX_BILD_ZEICHEN:
+            return True
+        rest = {name: wert for name, wert in ergebnis.items() if name != BILDFELD}
+    else:
+        rest = ergebnis
+    return len(str(rest)) > MAX_ERGEBNIS_ZEICHEN
+
+
 @router.post("/jobs/{job_id}/result", status_code=204)
 def ergebnis_melden(
     job_id: str,
@@ -75,7 +112,7 @@ def ergebnis_melden(
         return Response(status_code=204)
 
     ergebnis = req.ergebnis
-    if len(str(ergebnis)) > MAX_ERGEBNIS_ZEICHEN:
+    if _zu_gross(ergebnis):
         desktop_job_service.ergebnis_melden(
             db,
             job=job,
