@@ -534,11 +534,16 @@ def test_ein_beendeter_worker_reicht_sein_ergebnis_ein(db: Session) -> None:
 def test_der_bericht_traegt_die_werte_bis_zum_gehirn(db: Session) -> None:
     """Die Uebergabe an das Gehirn ist der Flaschenhals — sie muss alles tragen.
 
-    Das Gehirn hat keine Server- und keine Desktop-Werkzeuge (`GEHIRN_TOOLS`).
-    Was der Bericht weglaesst, kann es nirgends nachlesen: es ist dann
-    schlicht nicht mehr im System. Am 22.08.2026 kam deshalb auf „wie voll ist
-    meine C-Platte" die Antwort, die Werte seien nicht uebermittelt worden —
-    der Worker hatte sie, der Bericht nicht mehr.
+    Das Gehirn hat keine Server-Werkzeuge (`GEHIRN_TOOLS`). Was der Bericht
+    weglaesst, kann es nirgends nachlesen: es ist dann schlicht nicht mehr im
+    System. Am 22.08.2026 kam deshalb auf „wie voll ist meine C-Platte" die
+    Antwort, die Werte seien nicht uebermittelt worden — der Worker hatte sie,
+    der Bericht nicht mehr.
+
+    Ausgerechnet diese Frage koennte das Gehirn seit dem 23.08.2026 selbst
+    beantworten (`GEHIRN_DESKTOP` enthaelt `desktop_system`). Fuer alles, was
+    ein Worker tut, gilt der Flaschenhals unveraendert weiter — und das ist
+    die Mehrheit.
 
     Der bisherige Test dieser Strecke benutzte einen einzeiligen Text und lief
     damit nie in den Zweig, der die Zahlen wegwarf.

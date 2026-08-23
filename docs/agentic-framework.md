@@ -31,7 +31,9 @@ Die KI soll sich wie ein menschlicher Assistent verhalten:
 
 1. **Keine lokale Inferenz.** Kein GPU-Server, keine CPU-Reserven. Jede Latenzlösung ist cloud-basiert.
    Die Sofortreaktion entsteht strukturell: Das Gehirn hat fast keine Werkzeuge und damit fast nie eine
-   Werkzeugrunde — es antwortet in der kürzestmöglichen Zeit seines Modells.
+   Werkzeugrunde — es antwortet in der kürzestmöglichen Zeit seines Modells. Seit dem 23.08.2026 gilt
+   das mit einer benannten Ausnahme: den Rechner des Benutzers sieht es selbst an (§3), und dann
+   wartet er, solange es dort arbeitet. Genau deshalb ist die Ausnahme auf Sehen und Zeigen begrenzt.
 2. **Latenzoptimiertes Modell als Standard-Gehirn**, z. B. GPT-5.6 Luna (0,20 $/1,20 $ je 1 Mio. Token,
    positioniert für „high-volume, latency-sensitive tasks"; Fast mode/`service_tier` als Messvariante).
    Modelle und Denkstufen kommen **immer aus dem Katalog**, nie aus dem Code — das konkrete Modell ist
@@ -58,14 +60,24 @@ Das Modell, mit dem der Nutzer dauerhaft redet — in Chat und Sprachsitzung. Es
 kreativ, einfühlsam, menschlich. Und es ist der **Dirigent**: Es erledigt selbst keine Arbeit, sondern
 deklariert sie als Aufträge an Worker.
 
-- **Werkzeuge — genau zwei Gruppen, sonst nichts:**
+- **Werkzeuge — genau drei Gruppen, sonst nichts:**
   1. Die **Memory-Werkzeuge** (persönliche und Team-Erinnerungen) — Charakterwissen muss sofort
      verfügbar sein, ohne Worker-Umweg.
   2. Die **Worker-Werkzeuge**: `worker_start(auftrag, kanal, titel)`, `worker_cancel(worker_id)`.
      Werkzeugart `delegation` (läuft sofort im Handler, kein Vorschlag/Klick — es entsteht keine
      Außenwirkung, nur MSM-interne Orchestrierung).
-- **Kein Serverwissen, keine Skills, kein Serverzugriff.** Das Gehirn weiß nicht, dass es Server gibt.
-  Es kann strukturell keine Außenwirkung entfalten — das ist eine Sicherheitsinvariante, kein Zufall.
+  3. **Der Rechner des Benutzers, soweit es ihn ansieht und darauf zeigt** (`GEHIRN_DESKTOP`:
+     `desktop_system`, `desktop_steuern`) — seit 23.08.2026, Betreiber-Entscheid. Vorher lag das beim
+     Worker, und auf „schau mal auf meinen Bildschirm" bekam das Gehirn einen *Text* zurück: es
+     beschrieb dem Benutzer sein eigenes Bild aus zweiter Hand. Erreichbar ohnehin nur aus der
+     Smart-System-App (`herkunft_schnitt`); aus dem Browser bleibt der Katalog des Gehirns unverändert.
+     Dateien, Aufräumen und Programme starten bleiben beim Worker — das ist Arbeit.
+- **Kein Serverwissen, keine Skills, kein Serverzugriff.** Das Gehirn weiß nicht, dass es Server gibt,
+  und legt keinen Vorschlag an — das ist eine Sicherheitsinvariante, kein Zufall. Seine einzige
+  Außenwirkung ist der Rechner, vor dem der Benutzer gerade sitzt und zusieht.
+- **Der Preis der dritten Gruppe:** Ein Desktop-Aufruf parkt den Lauf, bis die App antwortet. Beim
+  Worker läuft das im Hintergrund weiter; beim Gehirn wartet der Gesprächspartner. Deshalb nennt der
+  Prompt das ausdrücklich und schickt lange Klickstrecken an einen Auftrag.
 - **Smalltalk bleibt beim Gehirn:** „Guten Morgen", persönliche und Charakterfragen beantwortet es
   selbst, ohne Worker. Alles, was Arbeit erfordert, wird deklariert. Die Grenze steht im Prompt und in
   den Werkzeugbeschreibungen („Nicht nutzen, wenn …"-Muster), nie im Code.
@@ -189,7 +201,8 @@ Text (`redact_sensitive_text`) und stellt zu. Neu in v3: Sie ist auch **Sammelst
 - **Die Meldung ist das Ergebnis, nie der Prozess.** Werkzeugschritte sieht nur, wer die Worker-Ansicht
   öffnet.
 - **Der Bericht ist die letzte Werkzeugrunde — vollständig.** Er ist der Flaschenhals der ganzen
-  Architektur: das Gehirn hat keine Server- und keine Desktop-Werkzeuge, kann also nichts nachlesen.
+  Architektur: das Gehirn hat keine Server-Werkzeuge, kann also nichts nachlesen. (Auf dem Rechner des
+  Benutzers kann es das seit dem 23.08.2026 — bei allem anderen bleibt der Bericht die einzige Quelle.)
   Was der Bericht weglässt, ist nicht mehr im System. Die Rundengrenze kommt deshalb aus der Gliederung
   der Antwort (`AiMessage.sections_json`) und nicht aus einer Leerzeile im Text: in `content` sind die
   Runden mit `"\n\n"` aneinandergesetzt, und das sieht in Markdown genauso aus wie ein Absatz des
@@ -249,7 +262,7 @@ verbaler Rückweg Promptregel.
 
 | Invariante | Umsetzung |
 |---|---|
-| Rollentrennung | Das Gehirn hat keinerlei Server-Werkzeuge — die schnelle, dauerpräsente Instanz kann strukturell keine Außenwirkung entfalten. Nur Worker fassen die Außenwelt an. |
+| Rollentrennung | Das Gehirn hat keinerlei Server-Werkzeuge und legt keinen Vorschlag an; die schnelle, dauerpräsente Instanz fasst keine Anlage an. Seine einzige Außenwirkung ist der Rechner, vor dem der Benutzer gerade sitzt und zusieht (`GEHIRN_DESKTOP`: sehen und Maus/Tastatur, seit 23.08.2026 — Betreiber-Entscheid, weil computer use ohnehin nur aus der App erreichbar ist). Alles Übrige fassen nur Worker an. |
 | RBAC | Jede Rolle kann nur, was der Benutzer kann. Worker: `ActorContext.for_user(origin='ai')`, `_resolve_server`/`_require_tool_permission` dreifach, Rechte-Neuprüfung bei jedem Segmentstart und Wecken. |
 | Approval | Vorschlagsfluss wörtlich unverändert; `worker_start` startet nur einen Lauf und führt nichts aus; `immer_bestaetigen` gilt im Worker exakt wie überall. Dass die Karte eines Workers zusätzlich im Dauerchat erscheint, ändert daran nichts: `conversation_id` ist an keiner Rechteprüfung beteiligt — `owned_proposal`, `_require_tool_permission` und das Bestätigungsmerkmal binden an Benutzer, Server und Vorschlagskennung. Mitgeliefert wird nur, worauf ein lebender Lauf wartet; abgebrochene Aufträge nehmen ihre Karten auf `expired` mit. |
 | Redaction | Ein Choke-Point (`melden()`): jede Meldung, Rückfrage, Mail und gesprochene Ansage ist geschwärzt; Gehirn-Ausgaben durchlaufen dieselbe SSE-Schwärzung wie jeder Modelltext. |
@@ -307,7 +320,7 @@ verbaler Rückweg Promptregel.
 
 | Anforderung | Erfüllt durch |
 |---|---|
-| A — Sofortreaktion | Gehirn ohne Werkzeugrunden (nur Memories/Delegation) → kürzestmögliche Antwortzeit des Modells; latenzoptimiertes Modell; Messung entscheidet |
+| A — Sofortreaktion | Gehirn fast ohne Werkzeugrunden (Memories, Delegation, Blick auf den eigenen Rechner) → kürzestmögliche Antwortzeit des Modells; latenzoptimiertes Modell; Messung entscheidet |
 | B — Parallelität | N Worker in eigenen Fenstern; `vorgaenger_abloesen`/`aktiver_lauf` wirken je Unterhaltung; das Gespräch blockiert nie |
 | C — Proaktiv, ohne Prozess | Meldestelle sammelt und bündelt, Ruhe-Regel, Gehirn liefert in eigener Stimme; Chips nur in der Worker-Ansicht |
 | D — Langläufer | Prompt-Kriterien + Kanalfrage; `waiting_wake` + Wecken; Neustart-Re-Seed max. 1 |

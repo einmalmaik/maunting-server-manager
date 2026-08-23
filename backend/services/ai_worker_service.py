@@ -97,9 +97,13 @@ def worker_start(
     den Standardwert "panel": `herkunft_schnitt` nahm ihm alle
     Desktop-Werkzeuge, `ai_prompt.build` liess den DESKTOP-Block weg, und auf
     "wie voll ist meine C-Platte" meldete er, er koenne auf den Rechner des
-    Benutzers nicht zugreifen. Weil das Gehirn selbst keine Desktop-Werkzeuge
-    hat (`GEHIRN_TOOLS`), waren sie damit im Gehirn/Worker-Betrieb
-    vollstaendig unerreichbar.
+    Benutzers nicht zugreifen. Weil das Gehirn damals selbst keine
+    Desktop-Werkzeuge hatte, waren sie im Gehirn/Worker-Betrieb vollstaendig
+    unerreichbar.
+
+    Seit dem 23.08.2026 sieht das Gehirn selbst hin (`GEHIRN_DESKTOP`), aber
+    die Vererbung bleibt tragend: Dateien und Aufraeumen gehoeren weiterhin
+    dem Worker, und ohne die Herkunft haette er sie nicht.
 
     Der Wert kommt aus dem Laufzustand des Aufrufers und niemals aus
     ``arguments``: was das Modell schreiben kann, ist keine Tatsache ueber die

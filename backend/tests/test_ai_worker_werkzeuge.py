@@ -425,9 +425,12 @@ class TestHerkunft:
     Herkunft an, der Standardwert "panel" griff, `herkunft_schnitt` nahm ihm
     alle Desktop-Werkzeuge und `ai_prompt.build` den DESKTOP-Block dazu.
 
-    Der Ausfall war vollstaendig: das Gehirn hat selbst keine
-    Desktop-Werkzeuge (`GEHIRN_TOOLS`), also war im Gehirn/Worker-Betrieb
-    **niemand** mehr da, der den Rechner des Benutzers sehen konnte.
+    Der Ausfall war damals vollstaendig: das Gehirn hatte selbst keine
+    Desktop-Werkzeuge, also war im Gehirn/Worker-Betrieb **niemand** mehr da,
+    der den Rechner des Benutzers sehen konnte. Seit dem 23.08.2026 koennte
+    das Gehirn wenigstens nachsehen (`GEHIRN_DESKTOP`) — die Vererbung der
+    Herkunft bleibt trotzdem tragend, denn ein Auftrag, der Dateien anfassen
+    oder aufraeumen soll, kann das nur mit ihr.
     """
 
     def _zustand(self, db: Session, worker_id: str) -> dict:

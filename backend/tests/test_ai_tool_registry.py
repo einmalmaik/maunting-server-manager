@@ -452,21 +452,64 @@ def test_die_backup_pflicht_gilt_nur_fuer_erreichbare_werkzeuge() -> None:
 def test_das_gehirn_hat_nie_server_werkzeuge() -> None:
     """Die Rollentrennung ist die Sicherheitsinvariante von v3.
 
-    Das Gehirn ist die schnelle, dauerpraesente Instanz — es darf strukturell
-    keine Aussenwirkung entfalten. Sein Katalog besteht aus genau zwei Dingen:
-    dem Gedaechtnis (der Charakter gehoert ihm) und den drei Handgriffen,
-    Auftraege zu deklarieren, ihnen Antworten zuzustellen und sie einzufangen.
-    Kein Lese-, kein Schreib-, kein Frage-Werkzeug eines Servers — auch kein
-    kuenftiges: die Menge ist eine Aufzaehlung, kein Filter.
+    Das Gehirn ist die schnelle, dauerpraesente Instanz. Sein Katalog besteht
+    aus drei Dingen: dem Gedaechtnis (der Charakter gehoert ihm), den drei
+    Handgriffen, Auftraege zu deklarieren, ihnen Antworten zuzustellen und sie
+    einzufangen — und seit dem 23.08.2026 dem Rechner, vor dem der Benutzer
+    sitzt (`GEHIRN_DESKTOP`). Kein Lese-, kein Schreib-, kein Frage-Werkzeug
+    eines Servers — auch kein kuenftiges: die Menge ist eine Aufzaehlung, kein
+    Filter.
+
+    Der Satz "das Gehirn darf strukturell keine Aussenwirkung entfalten" stand
+    hier bis zu diesem Tag und ist bewusst weg: `desktop_steuern` bewegt eine
+    echte Maus. Was traegt, ist die engere und wahre Fassung darunter — kein
+    Server, kein Vorschlag.
     """
     assert ai_tool_registry.GEHIRN_TOOLS == (
         ai_tool_registry.MEMORY_TOOLS
         | {"worker_start", "worker_cancel", "worker_antwort"}
+        | {"desktop_system", "desktop_steuern"}
     )
     assert ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.SERVER_READ_TOOLS == set()
     assert ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.WRITE_TOOLS == set()
     assert "ask_user" not in ai_tool_registry.GEHIRN_TOOLS
     assert "web_search" not in ai_tool_registry.GEHIRN_TOOLS
+
+
+def test_dem_gehirn_gehoert_das_sehen_und_zeigen_nicht_die_arbeit() -> None:
+    """Die Grenze innerhalb der Desktop-Werkzeuge.
+
+    Sehen und zeigen ist Gespraech — dafuer einen Auftrag zu starten hiesse,
+    dem Benutzer sein eigenes Bild aus zweiter Hand zu beschreiben. Dateien
+    anlegen, aufraeumen und Programme starten ist Arbeit, und Arbeit delegiert
+    das Gehirn.
+    """
+    assert ai_tool_registry.GEHIRN_DESKTOP <= ai_tool_registry.DESKTOP_TOOLS
+    for arbeit in ("desktop_dateien", "desktop_aufraeumen", "desktop_launch_app"):
+        assert arbeit in ai_tool_registry.DESKTOP_TOOLS
+        assert arbeit not in ai_tool_registry.GEHIRN_TOOLS
+
+
+def test_aus_dem_panel_bleibt_das_gehirn_ohne_rechner() -> None:
+    """Zwei Schnitte hintereinander, und der zweite ist der scharfe.
+
+    `GEHIRN_TOOLS` sagt, was dem Gehirn gehoert; `herkunft_schnitt` sagt, was
+    diese Herkunft ueberhaupt erreicht. Aus dem Browser bleibt der Katalog des
+    Gehirns damit exakt der von vor dem 23.08.2026 — dort sitzt niemand vor
+    der Bestaetigungskarte, und es gibt keinen Rechner, auf den zu zeigen
+    waere.
+    """
+    aus_dem_panel = ai_tool_registry.herkunft_schnitt(
+        ai_tool_registry.GEHIRN_TOOLS, "panel"
+    )
+    assert aus_dem_panel == (
+        ai_tool_registry.MEMORY_TOOLS
+        | {"worker_start", "worker_cancel", "worker_antwort"}
+    )
+    aus_der_app = ai_tool_registry.herkunft_schnitt(
+        ai_tool_registry.GEHIRN_TOOLS, "desktop"
+    )
+    assert ai_tool_registry.GEHIRN_DESKTOP <= aus_der_app
 
 
 def test_keine_worker_tiefe_ueber_eins() -> None:

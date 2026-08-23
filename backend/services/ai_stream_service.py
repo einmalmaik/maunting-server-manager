@@ -3274,8 +3274,13 @@ async def _schreibrunde_ausfuehren(
     # Schreibwerkzeug — dieser Zweig ist der Spiegel dazu im Vorschlagspfad,
     # denn der Katalogschnitt ist eine Bitte und keine Zusage. Ohne ihn
     # liefe ein halluzinierter Schreibaufruf mit den vollen Rechten des
-    # Benutzers in `create_proposal`, und die Invariante "das Gehirn hat
-    # strukturell keine Aussenwirkung" waere nur noch Prompt-Prosa.
+    # Benutzers in `create_proposal`, und "das Gehirn fasst keinen Server an"
+    # waere nur noch Prompt-Prosa.
+    #
+    # Nicht mehr betroffen ist der Rechner des Benutzers: `desktop_system` und
+    # `desktop_steuern` gehoeren dem Gehirn seit dem 23.08.2026 (GEHIRN_DESKTOP)
+    # und laufen ohnehin nicht hier durch — Desktop-Werkzeuge sind
+    # `art="delegation"` und werden lange vor dieser Stelle geparkt.
     # Beantwortet statt geworfen, wie ueberall am Werkzeugrand: die Runde
     # zaehlt, das Modell erfaehrt den Weg (worker_start), der Lauf lebt.
     if rolle == "gehirn":

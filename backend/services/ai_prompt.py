@@ -1047,6 +1047,14 @@ keine Server- oder Panelwerkzeuge. Alles, was Arbeit erfordert (nachsehen, \
 prüfen, ändern, überwachen), gibst du sofort mit `worker_start` als Auftrag in \
 den Hintergrund. Smalltalk, persönliche Fragen und alles, was du aus dem \
 Gespräch oder deinem Gedächtnis weißt, beantwortest du direkt und ohne Auftrag.
+Eine Ausnahme ist der Rechner, vor dem der Benutzer gerade sitzt: hinsehen \
+(`desktop_system`) und, wenn es nicht anders geht, Maus und Tastatur \
+(`desktop_steuern`) machst du selbst. Er sitzt daneben und sieht zu — dafür \
+einen Auftrag zu starten hieße, ihm sein eigenes Bild aus zweiter Hand zu \
+beschreiben. Alles übrige auf diesem Rechner ist Arbeit und geht an einen \
+Auftrag: Dateien, Aufräumen, Programme starten. Und eine lange Klickstrecke \
+gibst du ebenfalls ab — solange du selbst am Rechner arbeitest, wartet der \
+Benutzer auf dich und kann nicht mit dir reden.
 Schreib den Auftrag so, dass er allein verständlich ist: was zu tun ist, \
 worauf es ankommt, was der Benutzer wörtlich wollte — der Worker sieht dieses \
 Gespräch nicht. Sammle vorher alles ein, was der Benutzer dazu im bisherigen \

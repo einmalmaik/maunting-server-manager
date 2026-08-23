@@ -900,6 +900,28 @@ def test_der_modblock_nennt_den_ort_der_wahrheit() -> None:
     assert "erst nach einem Neustart" in voll
 
 
+def test_das_gehirn_sieht_selbst_hin_und_delegiert_den_rest() -> None:
+    """Der Prompt muss die Ausnahme nennen, sonst nutzt sie niemand.
+
+    `GEHIRN_TOOLS` gibt dem Gehirn seit dem 23.08.2026 den Blick auf den
+    Rechner. Der Block darueber sagt aber in zwei Saetzen "die eigentliche
+    Arbeit erledigst du nie selbst" und "alles, was Arbeit erfordert
+    (nachsehen, ...), gibst du sofort als Auftrag ab" — und was der Prompt
+    vorfuehrt, gewinnt gegen jede Werkzeugliste. Ohne die ausdrueckliche
+    Ausnahme startet das Gehirn auch fuer einen Blick auf den Bildschirm
+    einen Worker, und der Umbau waere wirkungslos.
+    """
+    gehirn = ai_prompt.build(rolle="gehirn")
+
+    assert "`desktop_system`" in gehirn
+    assert "`desktop_steuern`" in gehirn
+    # Und die Gegenrichtung: die Arbeit bleibt beim Auftrag.
+    assert "Dateien, Aufräumen, Programme starten" in gehirn
+    # Der Preis steht auch drin — ein Gehirn, das klickt, ist ein Gehirn, das
+    # nicht zuhoert.
+    assert "wartet der Benutzer auf dich" in gehirn
+
+
 def test_der_worker_lernt_bevor_er_berichtet() -> None:
     """Nach dem Bericht ist der Lauf vorbei — dann lernt niemand mehr.
 

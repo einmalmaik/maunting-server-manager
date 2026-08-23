@@ -751,13 +751,43 @@ WORKER_STEUERUNG = frozenset({"worker_start", "worker_cancel", "worker_antwort"}
 # Was nur in einem Worker-Lauf etwas zu suchen hat.
 NUR_WORKER = frozenset({"wait_until", "worker_frage"})
 
+# Der eigene Rechner, soweit ihn das Gehirn selbst anfasst.
+#
+# Betreiber-Entscheid 23.08.2026, woertlich: *"da computer use eh nur in der
+# Tauri-App sein wird, wird es das Orchestrator bekommen."* Vorher lag beides
+# beim Worker, und das hatte eine Folge, die im Gespraech deutlich wurde: auf
+# "schau mal auf meinen Bildschirm" musste das Gehirn einen Auftrag starten,
+# der hinsah, und bekam einen **Text** zurueck. Das Bild selbst erreichte es
+# nie — es antwortete aus zweiter Hand ueber eine Beschreibung, die ein
+# anderes Modell geschrieben hatte. Genau der Flaschenhals, den der Bericht
+# ohnehin schon darstellt, nur bei der einen Sache, bei der er am meisten
+# kostet.
+#
+# `desktop_dateien`, `desktop_aufraeumen` und `desktop_launch_app` bleiben
+# draussen: das ist Arbeit, und Arbeit delegiert das Gehirn. Sehen und zeigen
+# ist Gespraech.
+#
+# Erreichbar sind sie ohnehin nur aus der App (`herkunft_schnitt`) — aus dem
+# Panel bleibt der Katalog des Gehirns exakt der von vorher.
+GEHIRN_DESKTOP = frozenset({"desktop_system", "desktop_steuern"})
+
 # Der komplette Katalog des Gehirns. Eine Aufzaehlung wie bei den
-# unbeaufsichtigten Laeufen, und hier ist sie die Sicherheitsinvariante
-# selbst: das Gehirn ist die schnelle, dauerpraesente Instanz und darf
-# strukturell keine Aussenwirkung entfalten — kein Server-Werkzeug, kein
-# Vorschlag, keine Websuche. Es erinnert sich (der Charakter gehoert ihm)
-# und delegiert; alles andere tun die Worker mit den Rechten des Benutzers.
-GEHIRN_TOOLS = frozenset(MEMORY_TOOLS) | WORKER_STEUERUNG
+# unbeaufsichtigten Laeufen: das Gehirn ist die schnelle, dauerpraesente
+# Instanz. Kein Server-Werkzeug, kein Vorschlag, keine Websuche — es erinnert
+# sich (der Charakter gehoert ihm), sieht seinem Benutzer bei Bedarf ueber die
+# Schulter und delegiert alles andere an Worker mit den Rechten des Benutzers.
+#
+# **Hier stand bis zum 23.08.2026 "darf strukturell keine Aussenwirkung
+# entfalten".** Das gilt seit `GEHIRN_DESKTOP` nicht mehr uneingeschraenkt:
+# `desktop_steuern` bewegt eine echte Maus. Der Satz ist ersetzt und nicht
+# ergaenzt, weil eine Zusage mit einer stillen Ausnahme schlimmer ist als
+# keine — der naechste Leser haette sich weiter darauf verlassen.
+#
+# Was von der Trennung bleibt und weiterhin traegt: das Gehirn fasst **keinen
+# Server** an und legt **keinen Vorschlag** an (`_schreibrunde_ausfuehren`
+# weist es ausdruecklich ab). Seine Aussenwirkung endet am Rechner, vor dem
+# der Benutzer gerade sitzt und zusieht.
+GEHIRN_TOOLS = frozenset(MEMORY_TOOLS) | WORKER_STEUERUNG | GEHIRN_DESKTOP
 
 
 def worker_ausschluss() -> frozenset[str]:
