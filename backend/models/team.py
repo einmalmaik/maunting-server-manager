@@ -78,6 +78,9 @@ class Team(Base):
     members: Mapped[list["TeamMember"]] = relationship(
         "TeamMember", back_populates="team", cascade="all, delete-orphan"
     )
+    invitations: Mapped[list["TeamInvitation"]] = relationship(
+        "TeamInvitation", back_populates="team", cascade="all, delete-orphan"
+    )
     server_grants: Mapped[list["TeamServerGrant"]] = relationship(
         "TeamServerGrant", back_populates="team", cascade="all, delete-orphan"
     )
@@ -127,6 +130,49 @@ class TeamMember(Base):
     )
 
     team: Mapped["Team"] = relationship("Team", back_populates="members")
+
+
+class TeamInvitation(Base):
+    """Eine ausgesprochene, noch nicht angenommene Einladung.
+
+    Sie steht bewusst in einer **eigenen Tabelle** und nicht als Zustand an
+    `TeamMember`. Eine Mitgliedschaft oeffnet zwei Tueren auf einmal: die
+    Serverrechte des Teams und das gemeinsame KI-Gedaechtnis. Beide fragt der
+    Code an vielen Stellen ab — in `permission_service` mehrfach als direkter
+    Join auf `team_members`, hier ueber `membership`. Ein Zustandsfeld an der
+    Mitgliedschaft muesste an jeder dieser Stellen mitgeprueft werden, und die
+    erste vergessene waere das Loch, das diese Tabelle schliessen soll. Ohne
+    Zeile in `team_members` ist jede bestehende Abfrage ohne Zutun richtig.
+
+    Die beiden Schalter stehen hier schon, weil sie Teil des Angebots sind: wer
+    annimmt, soll wissen, was er annimmt. Beim Beitritt wandern sie
+    unveraendert in die Mitgliedschaft.
+    """
+
+    __tablename__ = "team_invitations"
+    __table_args__ = (
+        UniqueConstraint("team_id", "user_id", name="uq_team_invitations_team_user"),
+        # Der Eingeladene fragt "wer will mich haben" — das ist der Lesepfad.
+        Index("ix_team_invitations_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    team_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    can_manage_skills: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    can_manage_memory: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    invited_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    team: Mapped["Team"] = relationship("Team", back_populates="invitations")
 
 
 class TeamServerGrant(Base):

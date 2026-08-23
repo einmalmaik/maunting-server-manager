@@ -214,6 +214,70 @@ class TestFreigeberWahl:
         assert ai_guardian_service.zustaendiger_freigeber(db, server) is None
 
 
+class TestFreigabeVorfilterUndKandidatenabfrage:
+    """Der Vorfilter des Takts und die Kandidatenabfrage urteilen gleich.
+
+    Beide fragen dieselben drei Dinge, und bis zum 23.08.2026 taten sie das in
+    zwei wortgleichen Kopien — mit einem Kommentar daneben, der genau davor
+    warnte: wer den Vorfilter enger fasst, macht aus einer Beschleunigung eine
+    stille Rechteaenderung. Der Vorfall wird dann nie behandelt, der
+    Autonom-Schalter steht auf an, und es passiert nichts.
+
+    Seit die Bedingung aus `_freigabe_bedingungen` kommt, gibt es nur noch eine
+    Stelle. Dieser Test haelt fest, was das bedeuten soll: wen
+    `zustaendiger_freigeber` findet, den darf der Vorfilter nicht wegwerfen —
+    und wen sie ablehnt, darf er nicht durchlassen.
+    """
+
+    @pytest.mark.parametrize(
+        ("aktiv", "erlaubt", "panelweit"),
+        [
+            (True, True, True),
+            (True, True, False),
+            (True, False, True),
+            (True, False, False),
+            (False, True, True),
+            (False, True, False),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_beide_seiten_urteilen_gleich(
+        self, db: Session, aktiv: bool, erlaubt: bool, panelweit: bool
+    ):
+        server = _server(db)
+        user = _benutzer(db, "kandidat", aktiv=aktiv)
+        _sichtbar(db, user, server)
+        _freigabe(
+            db, user, server=None if panelweit else server, enabled=erlaubt
+        )
+        _vorfall(db, server)
+
+        zustaendig = ai_guardian_service.zustaendiger_freigeber(db, server) is not None
+        behandelt = await ai_guardian_service.vorfaelle_bearbeiten(db)
+
+        assert behandelt == (1 if zustaendig else 0)
+
+
+# ── Die Phasentexte ───────────────────────────────────────────────────────
+
+
+def test_jede_arbeitsphase_hat_ihren_eigenen_auftragstext():
+    """Eine Phase ohne Text wird still zur Nur-Lese-Diagnose.
+
+    `_PHASENTEXTE` ist eine handgepflegte Kopie von `ARBEITSPHASEN`, und der
+    Rueckfall bei einem fehlenden Schluessel ist der Diagnosetext — der
+    verbietet ausdruecklich jede Aenderung ("Aendere in dieser Phase nichts").
+    Wer eine Arbeitsphase mit Eingriffscharakter ergaenzt und den Text hier
+    vergisst, bekommt acht Anlaeufe reines Nachsehen: ohne Fehler, ohne Log,
+    und der Server bleibt stehen.
+
+    Eine neue Phase soll deshalb eine bewusste Textentscheidung kosten.
+    """
+    from models.ai_guardian_repair import ARBEITSPHASEN
+
+    assert set(ai_guardian_service._PHASENTEXTE) == set(ARBEITSPHASEN)
+
+
 # ── Entdopplung ───────────────────────────────────────────────────────────
 
 

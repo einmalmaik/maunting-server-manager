@@ -32,12 +32,20 @@ const REIHENFOLGE: Schritt[] = ['backend', 'kopplung', 'personalisierung', 'sand
 interface WizardProps {
   konfig: AppKonfig
   startSchritt?: Schritt
-  /** Zugang verloren — nur neu koppeln, der Rest ist längst eingerichtet. */
-  nurKopplung?: boolean
+  /**
+   * Nur `startSchritt`, dann zurück in die App — für alles, was einer
+   * eingerichteten Installation nachträglich fehlt: der verlorene Zugang
+   * (koppeln) und der weggefallene Sandbox-Ordner. Den Rest hat der Benutzer
+   * längst hinter sich, und ein zweiter Kopplungscode für einen Ordner wäre
+   * absurd.
+   */
+  nurDieserSchritt?: boolean
   onFertig: (konfig: AppKonfig) => void
 }
 
-export function Wizard({ konfig, startSchritt = 'backend', nurKopplung = false, onFertig }: WizardProps) {
+export function Wizard({
+  konfig, startSchritt = 'backend', nurDieserSchritt = false, onFertig,
+}: WizardProps) {
   const { t } = useTranslation()
   const [schritt, setSchritt] = useState<Schritt>(startSchritt)
   const [stand, setStand] = useState<AppKonfig>(konfig)
@@ -46,7 +54,7 @@ export function Wizard({ konfig, startSchritt = 'backend', nurKopplung = false, 
     const k = neuerStand ?? stand
     if (neuerStand) setStand(neuerStand)
 
-    if (nurKopplung) {
+    if (nurDieserSchritt) {
       onFertig(k)
       return
     }
@@ -105,6 +113,29 @@ function Fehlerzeile({ text }: { text: string | null }) {
 
 // ── Schritt 1: API-Adresse ────────────────────────────────────────────────
 
+/** Die Namen, unter denen der eigene Rechner sich selbst anspricht. */
+const LOKALE_HOSTS = ['localhost', '127.0.0.1', '[::1]']
+
+/**
+ * Dieselbe Regel wie `konfig.rs::backend_url_verboten`: `https://` ist
+ * Pflicht, `http://` nur auf dem eigenen Rechner.
+ *
+ * Über diese Adresse gehen der Kopplungscode und das Refresh-Token — ohne TLS
+ * liest sie jeder im selben Netz mit. Rust lehnt so eine Adresse beim
+ * Speichern ohnehin ab; hier fällt die Absage dort, wo der Mensch sie
+ * eintippt, statt hinter einer Erreichbarkeitsprüfung, die vorher noch
+ * bestätigt, dass dort ein Panel steht.
+ */
+function adresseErlaubt(url: string): boolean {
+  if (!/^https?:\/\/.+/.test(url)) return false
+  if (url.startsWith('https://')) return true
+  const host = url.slice('http://'.length).split(/[/?#]/)[0].toLowerCase()
+  // `http://localhost@fremder.example` wäre sonst „lokal": alles vor dem `@`
+  // ist Benutzername und nicht der Host, den die App anspricht.
+  if (host.includes('@')) return false
+  return LOKALE_HOSTS.some((lokal) => host === lokal || host.startsWith(`${lokal}:`))
+}
+
 function SchrittBackend({ stand }: { stand: AppKonfig }) {
   const { t } = useTranslation()
   const [url, setUrl] = useState(stand.backend_url ?? '')
@@ -116,7 +147,7 @@ function SchrittBackend({ stand }: { stand: AppKonfig }) {
     setPrueft(true)
     try {
       const bereinigt = url.trim().replace(/\/+$/, '')
-      if (!/^https?:\/\/.+/.test(bereinigt)) {
+      if (!adresseErlaubt(bereinigt)) {
         throw new Error(t('mss.wizard.adresseSchema'))
       }
       // Erreichbarkeit gegen die ausdrückliche Adresse prüfen — und dass dort

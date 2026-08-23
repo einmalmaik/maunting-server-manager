@@ -101,6 +101,21 @@ describe('Auftragsschleife', () => {
     expect(code).toBe('DESKTOP_TOOL_FAILED')
   })
 
+  it('schickt die Auftragskennung mit in den Aufruf', async () => {
+    // Rust legt sie in die Nutzlast der Bestätigungskarten, und erst dadurch
+    // beantwortet eine Karte den Auftrag, der gefragt hat. Ohne diesen dritten
+    // Parameter bliebe der Karte nur die Kennung im Zustand der Oberfläche —
+    // und die stimmt nur, wenn sie rechtzeitig dort ankommt.
+    renderHook(() => useAuftragsschleife(true))
+
+    await waitFor(() => expect(auftragAusfuehrenMock).toHaveBeenCalledTimes(1))
+    expect(auftragAusfuehrenMock).toHaveBeenCalledWith(
+      AUFTRAG.tool_name,
+      AUFTRAG.arguments,
+      AUFTRAG.id,
+    )
+  })
+
   /**
    * Seit dem 23.08.2026 warten **zwei** Sorten Auftrag auf einen Menschen,
    * und die Bitte um die Übernahme ist keine eigene mehr, sondern eine Aktion

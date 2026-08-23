@@ -31,8 +31,16 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from models import AiActionProposal, AiConversation, AiRun, User
+# Die Kanaele der **Meldestelle**, nicht die der stehenden Auftraege. Der Wert
+# wandert von hier in den Worker-Rahmen und wird am Ende von
+# `ai_meldestelle.melden` verbraucht; deren Liste ist bewusst eine eigene Kopie,
+# „damit eine dortige Erweiterung nicht stillschweigend hier gilt"
+# (models/ai_meldung.py). Wer hier gegen `ai_task.KANAELE` prueft, macht diese
+# Trennung zur Falle: ein dort ergaenzter Kanal kaeme durch, das Gehirn sagte
+# dem Benutzer die Zustellung darueber zu — und `melden` fiele still auf 'chat'
+# zurueck. Beide Listen sind heute gleich; das ist kein Vertrag, sondern Zufall.
+from models.ai_meldung import KANAELE
 from models.ai_run import BEENDET
-from models.ai_task import KANAELE
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +90,8 @@ def _text(arguments: dict, feld: str, maximum: int) -> str | None:
 
 
 def worker_start(
-    db: Session, *, user: User, arguments: dict, herkunft: str = "panel"
+    db: Session, *, user: User, arguments: dict, herkunft: str = "panel",
+    familie: str | None = None,
 ) -> dict:
     """Deklariert einen Auftrag: eigenes Fenster, eigener Lauf, sofort zurueck.
 
@@ -108,6 +117,15 @@ def worker_start(
     Der Wert kommt aus dem Laufzustand des Aufrufers und niemals aus
     ``arguments``: was das Modell schreiben kann, ist keine Tatsache ueber die
     Welt, aus der es spricht.
+
+    ``familie`` ist die zweite Hälfte derselben Vererbung und wird genauso
+    weitergereicht. Die Herkunft sagt „aus der App", die Familie sagt „aus
+    **dieser** App" — und ohne sie erbt der Auftrag zwar die
+    Desktop-Werkzeuge, seine Aufträge holt aber wieder der Rechner ab, der
+    zuerst fragt (`desktop_job_service.naechster`). Weil `worker_antwort` die
+    Familie des Vorgängerlaufs weiterreicht, ist dieser Aufruf hier die
+    **einzige** Stelle, an der ein Worker-Fenster sie je bekommt: fehlte sie
+    hier, bliebe sie in jeder Fortsetzung des Auftrags leer.
     """
     from services import ai_run_service, ai_worker_limits, permission_service
     from services.ai_action_service import AiActionValidationError
@@ -199,6 +217,7 @@ def worker_start(
         # heisst „unbekannt" und faellt auf den bewaehrten Rueckfall zurueck.
         context_chars=None,
         herkunft=herkunft,
+        familie=familie,
         # Eine Vorfallsmeldung gehoert ins Gespraech mit dem Menschen, nicht
         # in einen Auftrag — sonst gaelte sie als besprochen, ohne dass je
         # jemand sie gesehen hat (dasselbe Argument wie bei den Aufgaben).
@@ -337,9 +356,20 @@ def worker_antwort(db: Session, *, user: User, arguments: dict) -> dict:
     # bereit, verfaellt sein Auftrag mit einer benannten Frist — das ist die
     # ehrlichere Auskunft als ein Worker, dem seine Werkzeuge mitten im
     # Vorgang abhandenkommen.
-    from services.ai_stream_service import herkunft_aus_zustand, lauf_beginnen
+    # Und mit ihr das **Gerät**. Die Herkunft sagt „aus der App", die Familie
+    # sagt „aus dieser App": ohne sie verlöre der Auftrag beim Übergang ans
+    # Gerät genau die Bindung, die ihn zum richtigen Rechner bringt, und der
+    # nächste Blick auf den Bildschirm ginge wieder an den, der zuerst fragt
+    # (`desktop_job_service.naechster`). Sie gehört demselben Fenster wie die
+    # Herkunft und aus demselben Grund.
+    from services.ai_stream_service import (
+        familie_aus_zustand,
+        herkunft_aus_zustand,
+        lauf_beginnen,
+    )
 
     herkunft = herkunft_aus_zustand(alter_zustand)
+    familie = familie_aus_zustand(alter_zustand)
 
     stufe = anbieter.worker_reasoning_effort
     run, fehler = lauf_beginnen(
@@ -353,6 +383,7 @@ def worker_antwort(db: Session, *, user: User, arguments: dict) -> dict:
         reasoning_effort=stufe,
         context_chars=None,
         herkunft=herkunft,
+        familie=familie,
         guardian_briefing_unterdruecken=True,
         unbeaufsichtigt=True,
     )

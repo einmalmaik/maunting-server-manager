@@ -43,6 +43,7 @@ BRANCH_TABLES = (
     "ai_autonomy_grants",
     "ai_tool_results",
     "ai_tasks",
+    "team_invitations",
 )
 
 

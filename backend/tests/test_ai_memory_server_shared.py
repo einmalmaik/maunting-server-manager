@@ -874,13 +874,14 @@ async def test_the_manual_is_read_once_per_run_not_once_per_round(
     Der Zähler taugte dafür, solange das blosse Anzeigen als Gebrauch galt —
     achtmal gezählt für einmal gezeigt verschob damals das Gewicht zwischen
     Anlagenwissen, Teamwissen und persönlichen Vorlieben ohne jeden Grund.
-    Seit "gebraucht ist, wen die Frage getroffen hat" zählt der Nachtrag
-    ueberhaupt nicht mehr hoch: er fragt mit leerer Frage, also trifft nichts,
-    und der Zähler bliebe auch bei acht Runden auf null. Er kann den Unterschied
-    zwischen einem Lesen und acht deshalb nicht mehr zeigen — der Zähler ist
-    genesen, die Verschwendung wäre geblieben. Was bleibt, ist der Aufwand
-    selbst: acht Runden lesen achtmal das komplette sichtbare Gedächtnis, prüfen
-    jede Zeile gegen die Rechte und entschlüsseln sie über den Sidecar.
+    Seit "gebraucht ist, wen die Frage getroffen hat" hängt er aber davon ab,
+    **was** gefragt wurde: hochgezählt wird nur, wen die Frage trifft. Ein
+    Eintrag, der mitgeht, ohne getroffen zu werden, bleibt bei acht Runden auf
+    null; ein getroffener stünde bei acht. Der Zähler misst damit den Wortlaut
+    der Frage und nicht die Zahl der Lesevorgänge — der Zähler ist genesen, die
+    Verschwendung wäre geblieben. Was bleibt, ist der Aufwand selbst: acht
+    Runden lesen achtmal das komplette sichtbare Gedächtnis, prüfen jede Zeile
+    gegen die Rechte und entschlüsseln sie über den Sidecar.
     """
     from uuid import uuid4
 
@@ -903,7 +904,7 @@ async def test_the_manual_is_read_once_per_run_not_once_per_round(
     monkeypatch.setattr(
         ai_stream_service,
         "_werkzeug_ausfuehren",
-        lambda _user_id, call, _herkunft="panel": ({"lines": []}, None),
+        lambda _user_id, call, _herkunft="panel", _familie=None: ({"lines": []}, None),
     )
     aufruf = ProviderToolCall(
         id="c1", name="read_server_logs", arguments={"server_id": server.id}
@@ -931,9 +932,12 @@ async def test_the_manual_is_read_once_per_run_not_once_per_round(
     assert await _runde(False) is None
 
     assert len(gelesen) == 1
-    # Und der Eintrag, den der Nachtrag mitgebracht hat, gilt weiterhin nicht
-    # als gebraucht: gezeigt zu werden ist kein Gebrauch, und die leere Frage
-    # des Nachtrags trifft ohnehin nichts.
+    # Und der Eintrag, den der Nachtrag mitgebracht hat, gilt nicht als
+    # gebraucht: gezeigt zu werden ist kein Gebrauch. Hier trifft ihn ohnehin
+    # nichts — dieser Aufruf geht ohne `frage_id` hinein, sein `query` ist
+    # deshalb leer. Im Betrieb reicht `_leserunde_ausfuehren` die Frage des
+    # Laufs durch, und dann zaehlt der Nachtrag sehr wohl hoch, wen sie trifft.
+    # Diese Zusage haelt also die Regel fest, nicht den Betriebsfall.
     db.expire_all()
     assert db.get(AiMemoryEntry, eintrag_id).use_count == 0
 

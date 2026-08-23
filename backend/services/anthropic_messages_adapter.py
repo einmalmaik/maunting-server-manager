@@ -149,6 +149,50 @@ def _text_aus_inhalt(content: Any) -> str:
     return ""
 
 
+def _bildbloecke_aus_inhalt(content: Any) -> list[dict]:
+    """Die Bilder einer Nachricht, in Anthropics Blockform.
+
+    MSM baut Bilder ueberall in derselben Form, naemlich der von Chat
+    Completions: ``{"type": "image_url", "image_url": {"url": "data:…"}}``. So
+    legt `ai_stream_service._desktopmeldung` ein Bildschirmfoto ab und so
+    `ai_attachment_service` einen Bildanhang. Anthropic will an derselben
+    Stelle ``{"type": "image", "source": {"type": "base64", "media_type": …,
+    "data": …}}`` — dieselbe Angabe, in Einzelteilen.
+
+    `_text_aus_inhalt` liest diese Bloecke nicht; in einem Bildblock gibt es
+    kein ``text``. Wer sie stillschweigend fallen laesst, schickt dem Modell
+    den Begleitsatz „liegt dieser Nachricht als Bild bei" **ohne** das Bild —
+    und bekommt genau die Meldung zurueck, es liege kein auswertbares
+    Bildschirmergebnis vor.
+
+    Was keine Base64-Data-URL ist, wird ausgelassen: MSM baut ausschliesslich
+    solche, und eine erfundene Uebersetzung fuer eine Form, die es hier nicht
+    gibt, waere geraten.
+    """
+    if not isinstance(content, list):
+        return []
+    bloecke: list[dict] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "image_url":
+            continue
+        quelle = block.get("image_url")
+        adresse = quelle.get("url") if isinstance(quelle, dict) else quelle
+        if not isinstance(adresse, str):
+            continue
+        kopf, _, daten = adresse.partition(",")
+        if not daten or not kopf.startswith("data:") or not kopf.endswith(";base64"):
+            continue
+        bloecke.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": kopf[len("data:"):-len(";base64")],
+                "data": daten,
+            },
+        })
+    return bloecke
+
+
 def werkzeuge_uebersetzen(tools: list[dict] | None) -> list[dict] | None:
     """Werkzeugkatalog aus der Chat-Completions-Form in Anthropics Form.
 
@@ -250,7 +294,7 @@ def nachrichten_uebersetzen(
       ``system``-Feld. Mehrere werden mit Leerzeilen verbunden; MSM setzt zwar
       genau einen Systemtext an den Anfang, aber `ai_lage` haengt spaet eine
       zweite Systemnachricht an, und die darf nicht verlorengehen.
-    * ``user`` — ein ``text``-Block.
+    * ``user`` — ein ``text``-Block, und je Bild ein ``image``-Block daneben.
     * ``assistant`` **mit** ``tool_calls`` — ein ``text``-Block (falls etwas
       gesagt wurde) und je Aufruf ein ``tool_use``-Block. Der Text darf nicht
       wegfallen; er traegt die Ansagen, auf die sich das Modell in der
@@ -267,6 +311,8 @@ def nachrichten_uebersetzen(
     Leere Textbloecke werden ausgelassen — die API weist sie ab. Eine
     Assistentennachricht ohne Text und ohne Aufrufe faellt damit ganz weg, und
     das ist richtig: eine Nachricht mit leerem ``content`` ist ebenfalls ein 400.
+    Eine Benutzernachricht **mit** Bild bleibt dagegen stehen, auch wenn ihr
+    Text leer ist: sie ist dann nicht leer, sie ist ein Bild.
     """
     systemtexte: list[str] = []
     ausgabe: list[dict[str, Any]] = []
@@ -322,8 +368,12 @@ def nachrichten_uebersetzen(
         # als Benutzertext. Ein unbekannter Rollenname als Rolle
         # weiterzureichen waere ein 400; als Benutzertext ist er wenigstens
         # lesbar.
-        if inhalt:
-            _anhaengen(ausgabe, "user", [{"type": "text", "text": inhalt}])
+        #
+        # Bilder gehen als eigene Bloecke daneben mit, der Text zuerst — die
+        # Reihenfolge, in der `_desktopmeldung` sie baut.
+        bloecke = [{"type": "text", "text": inhalt}] if inhalt else []
+        bloecke.extend(_bildbloecke_aus_inhalt(nachricht.get("content")))
+        _anhaengen(ausgabe, "user", bloecke)
 
     return ("\n\n".join(systemtexte) or None), ausgabe
 

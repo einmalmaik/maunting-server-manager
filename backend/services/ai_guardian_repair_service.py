@@ -55,6 +55,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from models import (
@@ -336,8 +337,14 @@ def _wartende_freigabe_entwerten(db: Session, auftrag: AiGuardianRepair) -> None
     Der Lauf dazu wird nicht angefasst. Er steht auf ``waiting_confirmation``,
     und `_schlussbericht` liest ihn gleich noch, um die Abschlussmail zu
     verschicken; ihn hier zu beenden hiesse, dem Bericht seine Quelle
-    wegzuziehen. Aufgeraeumt wird er vom Verfallslauf der Laeufe, wie jeder
-    andere wartende auch.
+    wegzuziehen. Einen Verfallslauf fuer Laeufe gibt es nicht — abgeraeumt
+    wird er ueber seine Vorschlaege, die diese Funktion mitentwertet, und zwar
+    ueber **alle** offenen des Laufs und nicht nur ueber den, zu dem eine Mail
+    hinausging: sie stehen danach auf ``expired``, der Lauf hat nichts Offenes
+    mehr, und `ai_run_service.verpuffte_bestaetigungen_wecken` weckt ihn im
+    naechsten Takt. Er erfaehrt die Absage und endet ordentlich, statt ueber
+    `aktiver_lauf` fuer immer als beschaeftigt zu gelten und jede weitere
+    Heilung dieses Benutzers zu blockieren.
     """
     from models import AiActionApproval, AiActionProposal
 
@@ -349,24 +356,35 @@ def _wartende_freigabe_entwerten(db: Session, auftrag: AiGuardianRepair) -> None
         )
         .all()
     )
-    if not zeilen:
-        return
     jetzt = _jetzt()
+    kennungen: set[str] = set()
     for zeile in zeilen:
         if auftrag.last_run_id and str(zeile.run_id or "") != str(auftrag.last_run_id):
             # Eine Freigabe, die zu einem anderen Lauf gehoert, geht diesen
             # Auftrag nichts an.
             continue
         zeile.consumed_at = jetzt
-        vorschlag = (
-            db.query(AiActionProposal)
-            .filter(AiActionProposal.id == zeile.proposal_id)
-            .first()
-        )
-        if vorschlag is not None and vorschlag.status in ("proposed", "confirmed"):
-            vorschlag.status = "expired"
-            vorschlag.confirmation_token_hash = None
-            vorschlag.error_code = "AI_APPROVAL_CAMPAIGN_ENDED"
+        kennungen.add(str(zeile.proposal_id))
+    if not kennungen:
+        return
+
+    bedingung = AiActionProposal.id.in_(kennungen)
+    if auftrag.last_run_id:
+        # Und die Geschwister aus demselben Lauf dazu. Die Mail traegt nur
+        # **einen** Vorschlag hinaus; eine Schreibrunde kann zwei erzeugt
+        # haben. Bliebe der zweite auf 'proposed', haette der Lauf weiter
+        # etwas Offenes — und `verpuffte_bestaetigungen_wecken` sucht genau
+        # danach. Er uebersaehe ihn so lange, wie der Vorschlag steht: fuer
+        # immer.
+        bedingung = or_(bedingung, AiActionProposal.run_id == str(auftrag.last_run_id))
+    for vorschlag in (
+        db.query(AiActionProposal)
+        .filter(bedingung, AiActionProposal.status.in_(("proposed", "confirmed")))
+        .all()
+    ):
+        vorschlag.status = "expired"
+        vorschlag.confirmation_token_hash = None
+        vorschlag.error_code = "AI_APPROVAL_CAMPAIGN_ENDED"
     db.commit()
 
 

@@ -299,10 +299,17 @@ def test_a_vector_from_a_different_model_is_ignored(
 def test_a_vector_with_the_wrong_length_is_ignored(
     db: Session, regular_user: User
 ) -> None:
-    """Eine beschaedigte Zeile darf die Rechnung nicht sprengen."""
+    """Eine beschaedigte Zeile darf die Rechnung nicht sprengen.
+
+    Die drei Zahlen gehen ordentlich verschluesselt in die Spalte — sonst
+    scheiterte hier schon das Oeffnen, und die Laengenpruefung dahinter waere
+    gar nicht mehr die Zusage, die dieser Test festhaelt.
+    """
     _allow_memory(db, regular_user)
     row = _write(db, regular_user, "test", "Wert")
-    row.embedding_bytes = ai_embedding_service.vektor_zu_bytes([0.1, 0.2, 0.3])
+    row.embedding_bytes = ai_memory_service._vektor_verschluesseln(
+        ai_embedding_service.vektor_zu_bytes([0.1, 0.2, 0.3])
+    )
     row.embedding_json = None
     row.embedding_model = ai_memory_service._EMBEDDING_MODEL_TAG
     db.commit()
@@ -335,7 +342,8 @@ def test_a_written_vector_lands_in_the_byte_column(
 
     assert row.embedding_json is None, "die alte Form darf nicht mitgeschrieben werden"
     assert row.embedding_bytes is not None
-    assert len(row.embedding_bytes) == ai_embedding_service.EMBEDDING_BYTES
+    # Die Zahlen selbst sind es nicht mehr: Nonce und Siegel kommen dazu.
+    assert len(row.embedding_bytes) > ai_embedding_service.EMBEDDING_BYTES
     vektor = ai_memory_service._stored_vector(row)
     assert vektor is not None and len(vektor) == ai_embedding_service.EMBEDDING_DIMENSIONS
 
@@ -384,9 +392,10 @@ def test_a_truncated_byte_vector_counts_as_missing(db: Session) -> None:
 
 
 def test_the_stored_form_is_a_bare_run_of_float32() -> None:
-    """Die Form auf der Platte ist eine Zusage über Versionen hinweg.
+    """Die Form unter der Verschlüsselung ist eine Zusage über Versionen hinweg.
 
-    Sie steht in der Datenbank und wird von einem späteren Stand des Panels
+    Sie steht in der Datenbank — seit dem 23.08.2026 unter AES-GCM, aber
+    darunter unverändert — und wird von einem späteren Stand des Panels
     wieder gelesen. Ohne diesen Test wäre ein Wechsel des Zahlentyps — von
     ``float`` auf ``double`` etwa — eine Zeile Code und ein Bestand, den
     danach niemand mehr entziffert. Festgehalten ist deshalb genau das, was
@@ -407,6 +416,102 @@ def test_the_stored_form_is_a_bare_run_of_float32() -> None:
         f"<{ai_embedding_service.EMBEDDING_DIMENSIONS}f", *werte
     )
     assert list(ai_embedding_service.bytes_zu_vektor(roh)) == werte
+
+
+# ── Der Vektor verraet den Wert nicht mehr ────────────────────────────────
+#
+# Der Wert liegt DIS-verschluesselt in der Zeile, der Vektor lag im Klartext
+# daneben. Er entsteht aber aus Schluessel **und** Wert
+# (`_embedding_source`), und das Modell darunter ist ein statisches — der
+# Vektor ist im Kern das Mittel der Wortvektoren, und aus so einem Mittel
+# laesst sich der Wortbestand naeherungsweise zurueckholen. Wer nur die
+# Datenbank hatte, kam damit an den Inhalt fremder Notizen, ohne die
+# Verschluesselung des Werts anzufassen.
+
+
+def test_der_gespeicherte_vektor_steht_nicht_im_klartext(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Spalte traegt die Zahlen nicht mehr — der Dienst liest sie trotzdem.
+
+    Beides gehoert zusammen. Ohne den zweiten Teil waere die Verschluesselung
+    nur ein Weg, das Gedaechtnis blind zu machen; ohne den ersten stuende die
+    Zusage "gegen Datenbankzugriff" weiterhin nur ueber dem Wert und nicht ueber
+    dem, was aus ihm errechnet wurde.
+    """
+    _allow_memory(db, regular_user)
+    monkeypatch.setattr(ai_embedding_service, "encode", _vektoren_fuer)
+
+    row = _write(db, regular_user, "gehalt", "Verdient 4200 Euro im Monat")
+
+    klartext = ai_embedding_service.vektor_zu_bytes(_vektoren_fuer(["egal"])[0])
+    assert row.embedding_bytes is not None
+    assert klartext not in row.embedding_bytes
+    assert ai_embedding_service.bytes_zu_vektor(row.embedding_bytes) is None
+    assert list(ai_memory_service._stored_vector(row)) == list(
+        _vektoren_fuer(["egal"])[0]
+    )
+
+
+def test_ein_klartextvektor_aus_dem_bestand_wird_weiter_gelesen_und_ersetzt(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bestandszeilen brauchen keine Migration — und verlieren dabei nichts.
+
+    Bis zum 23.08.2026 lagen die rohen float32-Bytes in der Spalte. Sie
+    kurzerhand fuer ungueltig zu erklaeren waere der bequemere Weg gewesen und
+    haette das Gedaechtnis schlechter gemacht, als es war: in einem Bereich mit
+    tausenden Eintraegen kommen je Anfrage nur `MAX_CONTEXT_ROWS` Zeilen bis zum
+    Nachziehen, und was die Vorauswahl ohne Bedeutungsanteil nie nach vorn
+    bringt, kaeme dort nie an — die Zeile bliebe dauerhaft ohne Vektor.
+
+    Beide Haelften gehoeren deshalb zusammen: gelesen wie bisher, und beim
+    naechsten Abruf in den Kontext verpackt neu geschrieben.
+    """
+    _allow_memory(db, regular_user)
+    monkeypatch.setattr(ai_embedding_service, "encode", _vektoren_fuer)
+    row = _write(db, regular_user, "zeitzone", "Die Anlage steht auf Europe/Berlin")
+    klartext = ai_embedding_service.vektor_zu_bytes(_vektoren_fuer(["egal"])[0])
+    row.embedding_bytes = klartext
+    db.commit()
+
+    assert ai_memory_service._stored_vector(row) is not None, "kein Rueckschritt"
+
+    ai_memory_service.provider_memory_context(db, regular_user, query="Zeitzone?")
+    db.commit()
+    db.refresh(row)
+
+    assert row.embedding_bytes != klartext
+    assert klartext not in row.embedding_bytes
+    assert ai_memory_service._stored_vector(row) is not None
+
+
+def test_die_alte_textspalte_wird_beim_abruf_abgeraeumt(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Rueckfall darf nicht zum Dauerzustand werden.
+
+    ``embedding_json`` ist die letzte Stelle, an der ein Vektor unverschluesselt
+    liegt. Sie beim Lesen nur zu bevorzugen hiesse, dass eine Bestandszeile ihre
+    Klartextfassung behaelt, solange sie niemand von Hand anfasst — denn
+    `_vektoren_nachziehen` sah eine lesbare Zeile und ging weiter. Der Rueckfall
+    selbst bleibt: er faengt weiterhin die Sekunden zwischen Code und Migration
+    ab (`test_an_entry_from_before_the_migration_is_still_read`).
+    """
+    _allow_memory(db, regular_user)
+    monkeypatch.setattr(ai_embedding_service, "encode", _vektoren_fuer)
+    row = _write(db, regular_user, "wartung", "Sonntags ab drei Uhr")
+    row.embedding_json = json.dumps(list(_vektoren_fuer(["egal"])[0]))
+    row.embedding_bytes = None
+    db.commit()
+
+    ai_memory_service.provider_memory_context(db, regular_user, query="Wartung?")
+    db.commit()
+    db.refresh(row)
+
+    assert row.embedding_json is None
+    assert row.embedding_bytes is not None
+    assert ai_memory_service._stored_vector(row) is not None
 
 
 # ── Mit Modell ────────────────────────────────────────────────────────────

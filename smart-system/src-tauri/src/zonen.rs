@@ -126,16 +126,7 @@ fn muellorte() -> Vec<PathBuf> {
     }
     if let Some(lokal) = umgebung("LOCALAPPDATA") {
         orte.push(lokal.join("Temp"));
-        // Die Browser-Zwischenspeicher. Nur die Cache-Ordner selbst — im
-        // Profil daneben liegen Lesezeichen und Passwoerter, und die sind
-        // alles andere als Wegwerfbares.
-        for hersteller in [
-            "Google\\Chrome", "Microsoft\\Edge", "BraveSoftware\\Brave-Browser",
-            "Chromium", "Vivaldi", "Opera Software",
-        ] {
-            orte.push(lokal.join(hersteller).join("User Data"));
-        }
-        orte.push(lokal.join("Mozilla\\Firefox\\Profiles"));
+        // Die Browserprofile stehen **nicht** hier — siehe `browserprofile`.
         orte.push(lokal.join("npm-cache"));
         orte.push(lokal.join("pip\\Cache"));
         orte.push(lokal.join("CrashDumps"));
@@ -150,6 +141,76 @@ fn muellorte() -> Vec<PathBuf> {
         orte.push(windows.join("SoftwareDistribution\\Download"));
     }
     orte
+}
+
+/// Die Namen, unter denen Browser ihre Zwischenspeicher ablegen.
+///
+/// Chromium-Familie und Firefox benutzen dieselben paar Namen, und sie liegen
+/// je Profil an verschiedenen Stellen (`Default\Cache`, `Profile 2\Code
+/// Cache`, `Service Worker\CacheStorage`). Deshalb wird nicht die Liste der
+/// Ordner gefuehrt, sondern die Liste der **Namen**: ein neu angelegtes
+/// Profil ist damit von selbst mit abgedeckt.
+const BROWSER_ZWISCHENSPEICHER: [&str; 10] = [
+    "cache",
+    "cache_data",
+    "code cache",
+    "gpucache",
+    "shadercache",
+    "grshadercache",
+    "cachestorage",
+    "cache2",
+    "startupcache",
+    "thumbnails",
+];
+
+/// Wo die Browser ihre Profile fuehren. **Das ist kein Muellort.**
+///
+/// Bis zum 23.08.2026 stand genau dieser Pfad in `muellorte`, und das war der
+/// gefaehrlichste Fehler dieses Moduls: unter `User Data` liegen die
+/// gespeicherten Passwoerter (`Default\Login Data`), Lesezeichen, Cookies,
+/// Sitzungen und Erweiterungen. Als `Zone::Muell` eingeordnet wurde das ganze
+/// Profil beim Aufraeumen **ohne Papierkorb** vernichtet — auch bei
+/// `aktion="papierkorb"`, denn dort ist der Papierkorb bewusst uebersprungen.
+/// Der Kommentar an der Stelle versprach seit jeher das Gegenteil ("Nur die
+/// Cache-Ordner selbst"); jetzt tut es auch der Code.
+fn browserprofile() -> Vec<PathBuf> {
+    let Some(lokal) = umgebung("LOCALAPPDATA") else {
+        return Vec::new();
+    };
+    let mut orte = Vec::new();
+    for hersteller in [
+        "Google\\Chrome",
+        "Microsoft\\Edge",
+        "BraveSoftware\\Brave-Browser",
+        "Chromium",
+        "Vivaldi",
+        "Opera Software",
+    ] {
+        orte.push(lokal.join(hersteller).join("User Data"));
+    }
+    orte.push(lokal.join("Mozilla\\Firefox\\Profiles"));
+    orte
+}
+
+/// Liegt dieser Pfad in einem Browserprofil, und ist er dort ein
+/// Zwischenspeicher?
+///
+/// Nur dann ist er Wegwerfbares. Alles andere unterhalb eines Profils faellt
+/// durch und landet in [`Zone::Frei`] — das Profil selbst zu loeschen bleibt
+/// also erlaubt, es geht nur in den Papierkorb und ist zurueckholbar.
+fn ist_browser_zwischenspeicher(pfad: &Path) -> bool {
+    for wurzel in browserprofile() {
+        let wurzel = aufloesen(&wurzel);
+        if !liegt_unter(pfad, &wurzel) {
+            continue;
+        }
+        let tiefe = wurzel.components().count();
+        return pfad.components().skip(tiefe).any(|teil| {
+            BROWSER_ZWISCHENSPEICHER
+                .contains(&teil.as_os_str().to_string_lossy().to_lowercase().as_str())
+        });
+    }
+    false
 }
 
 /// Was Windows gehoert. Der Benutzerordner selbst steht mit drin — nicht sein
@@ -169,8 +230,15 @@ fn systemorte() -> Vec<PathBuf> {
         orte.push(daten.join("Package Cache"));
     }
     if let Some(laufwerk) = umgebung("SystemDrive") {
+        // Das angehaengte Trennzeichen ist hier kein Schoenheitsfehler.
+        // `%SystemDrive%` ist "C:" **ohne** Trennzeichen, und
+        // `PathBuf::from("C:").join("Boot")` ergibt `C:Boot` — ein
+        // laufwerks*relativer* Pfad, den Windows gegen das Arbeitsverzeichnis
+        // aufloest. Diese fuenf Orte waren damit wirkungslos: `C:\Boot` traf
+        // keinen von ihnen und galt als `Zone::Frei`.
+        let wurzel = PathBuf::from(format!("{}\\", laufwerk.to_string_lossy()));
         for name in ["Boot", "EFI", "Recovery", "System Volume Information", "$Recycle.Bin"] {
-            orte.push(PathBuf::from(&laufwerk).join(name));
+            orte.push(wurzel.join(name));
         }
     }
     orte
@@ -197,6 +265,10 @@ pub fn zone(pfad: &Path) -> Zone {
         if liegt_unter(&echt, &aufloesen(&ort)) {
             return Zone::Muell;
         }
+    }
+
+    if ist_browser_zwischenspeicher(&echt) {
+        return Zone::Muell;
     }
 
     for ort in systemorte() {
@@ -273,11 +345,63 @@ mod tests {
     }
 
     #[test]
+    fn gespeicherte_passwoerter_sind_kein_muell() {
+        // Der gefaehrlichste Fall dieses Moduls. Stand die Profilwurzel als
+        // Muellort drin, wurde das ganze Browserprofil beim Aufraeumen **ohne
+        // Papierkorb** geloescht — samt `Login Data`, Lesezeichen und
+        // Sitzungen, und die Karte versprach dabei "landet im Papierkorb".
+        let Some(lokal) = umgebung("LOCALAPPDATA") else {
+            return;
+        };
+        let profil = lokal.join("Google\\Chrome\\User Data");
+        for heikel in [
+            profil.join("Default\\Login Data"),
+            profil.join("Default\\Bookmarks"),
+            profil.join("Default\\Cookies"),
+            profil.join("Profile 2\\Login Data"),
+            profil.clone(),
+        ] {
+            assert_ne!(zone(&heikel), Zone::Muell, "{}", heikel.display());
+        }
+    }
+
+    #[test]
+    fn browser_zwischenspeicher_bleibt_muell() {
+        // Die Gegenprobe: der eigentliche Zweck der Muellzone darf nicht
+        // mitverschwinden, sonst landet ein 4-GB-Cache im Papierkorb und der
+        // Platz ist nicht gewonnen, sondern nur verschoben.
+        let Some(lokal) = umgebung("LOCALAPPDATA") else {
+            return;
+        };
+        let profil = lokal.join("Google\\Chrome\\User Data");
+        for muell in [
+            profil.join("Default\\Cache\\f_000001"),
+            profil.join("Default\\Code Cache\\js"),
+            profil.join("Profile 2\\GPUCache"),
+            profil.join("Default\\Service Worker\\CacheStorage"),
+            lokal.join("Mozilla\\Firefox\\Profiles\\abc.default\\cache2"),
+        ] {
+            assert_eq!(zone(&muell), Zone::Muell, "{}", muell.display());
+        }
+    }
+
+    #[test]
     fn programmordner_sind_system() {
         for name in ["ProgramFiles", "ProgramFiles(x86)"] {
             if let Some(pfad) = umgebung(name) {
                 assert_eq!(zone(&pfad.join("Irgendwas")), Zone::System, "{name}");
             }
+        }
+    }
+
+    #[test]
+    fn bootdateien_am_laufwerksstamm_sind_system() {
+        // Die Probe auf das fehlende Trennzeichen: mit `C:Boot` statt `C:\Boot`
+        // in `systemorte` war keiner dieser fuenf Orte je zu treffen.
+        let laufwerk = umgebung("SystemDrive").expect("SystemDrive muesste gesetzt sein");
+        let stamm = PathBuf::from(format!("{}\\", laufwerk.to_string_lossy()));
+        for name in ["Boot", "Recovery", "$Recycle.Bin"] {
+            assert_eq!(zone(&stamm.join(name)), Zone::System, "{name}");
         }
     }
 

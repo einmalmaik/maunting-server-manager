@@ -1,9 +1,12 @@
 /**
- * Der Kopplungsschritt — der einzige Weg hinein.
+ * Zwei Schritte des Assistenten.
  *
- * Geprueft wird die Kette Code → /auth/devices/redeem → Token im Tresor →
- * hydrierter authStore. Und dass ein falscher Code eine Meldung zeigt statt
- * die App zu verlassen.
+ * Der Kopplungsschritt ist der einzige Weg hinein; geprueft wird die Kette
+ * Code → /auth/devices/redeem → Token im Tresor → hydrierter authStore, und
+ * dass ein falscher Code eine Meldung zeigt statt die App zu verlassen.
+ *
+ * Der Adress-Schritt traegt die Regel, ueber welche Leitung das alles geht:
+ * `https://` ist Pflicht, `http://` nur auf dem eigenen Rechner.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -78,7 +81,7 @@ describe('Wizard: Kopplung', () => {
       }),
     )
     const fertig = vi.fn()
-    render(<Wizard konfig={KONFIG} startSchritt="kopplung" nurKopplung onFertig={fertig} />)
+    render(<Wizard konfig={KONFIG} startSchritt="kopplung" nurDieserSchritt onFertig={fertig} />)
 
     fireEvent.change(screen.getByLabelText(i18n.t('mss.wizard.codeLabel')), {
       target: { value: 'abcd efgh jklm' },
@@ -99,7 +102,7 @@ describe('Wizard: Kopplung', () => {
       vi.fn(() => Promise.resolve(json(404, { detail: 'Unbekannter oder abgelaufener Code' }))),
     )
     const fertig = vi.fn()
-    render(<Wizard konfig={KONFIG} startSchritt="kopplung" nurKopplung onFertig={fertig} />)
+    render(<Wizard konfig={KONFIG} startSchritt="kopplung" nurDieserSchritt onFertig={fertig} />)
 
     fireEvent.change(screen.getByLabelText(i18n.t('mss.wizard.codeLabel')), {
       target: { value: 'FALSCH' },
@@ -111,5 +114,60 @@ describe('Wizard: Kopplung', () => {
     })
     expect(fertig).not.toHaveBeenCalled()
     expect(invokeMock).not.toHaveBeenCalledWith('refresh_token_speichern', expect.anything())
+  })
+})
+
+describe('Wizard: Adresse', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    invokeMock.mockReset()
+    invokeMock.mockResolvedValue(null)
+    setzeAccessToken(null)
+  })
+
+  /** Adresse eintragen und auf „Verbinden" klicken. */
+  function adresseEintragen(wert: string) {
+    render(
+      <Wizard
+        konfig={{ ...KONFIG, backend_url: null, eingerichtet: false }}
+        startSchritt="backend"
+        onFertig={vi.fn()}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText(i18n.t('mss.wizard.adresseLabel')), {
+      target: { value: wert },
+    })
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('mss.wizard.verbinden') }))
+  }
+
+  it('weist Klartext ausserhalb des eigenen Rechners ab, ohne ihn anzufassen', async () => {
+    // Ueber diese Adresse gehen Kopplungscode und Refresh-Token. Rust lehnt
+    // sie beim Speichern ab (`konfig.rs::backend_url_verboten`) — vorher
+    // pruefte der Assistent aber noch die Erreichbarkeit und bestaetigte
+    // damit eine Adresse, die er gleich darauf nicht speichern konnte.
+    const holen = vi.fn(() => Promise.resolve(json(200, { setup_required: false })))
+    vi.stubGlobal('fetch', holen)
+
+    adresseEintragen('http://192.168.1.50:8000')
+
+    await waitFor(() => {
+      expect(screen.getByText(i18n.t('mss.wizard.adresseSchema'))).toBeInTheDocument()
+    })
+    expect(holen).not.toHaveBeenCalled()
+    expect(invokeMock).not.toHaveBeenCalledWith('konfig_speichern', expect.anything())
+  })
+
+  it('laesst https und den eigenen Rechner durch', async () => {
+    const holen = vi.fn(() => Promise.resolve(json(200, { setup_required: false })))
+    vi.stubGlobal('fetch', holen)
+
+    // Die Entwicklungsstrecke (Sidecar auf localhost) bleibt nutzbar: dort
+    // verlaesst nichts das Geraet.
+    adresseEintragen('http://localhost:8000')
+
+    await waitFor(() => {
+      expect(holen).toHaveBeenCalledWith('http://localhost:8000/api/auth/setup-status')
+    })
+    expect(screen.queryByText(i18n.t('mss.wizard.adresseSchema'))).not.toBeInTheDocument()
   })
 })

@@ -117,13 +117,37 @@ class AiMemoryEntry(Base):
     aad_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Lokal berechneter Vektor als rohe float32-Bytes, Little-Endian. Bewusst
-    # *nicht* verschlüsselt: der `key` daneben steht ohnehin im Klartext und
-    # verrät mehr, und die Rangfolge kann ihn so ohne einen weiteren
-    # Sidecar-Aufruf je Zeile lesen. Die Auswahl selbst findet **nach** dem
-    # Entschlüsseln statt — sie bewertet neben der Bedeutung auch die
-    # Wortüberschneidung im Wert und braucht ihn dafür im Klartext. NULL heißt:
-    # noch nicht berechnet.
+    # Lokal berechneter Vektor: 12 Byte Nonce, dahinter die 256 float32
+    # (Little-Endian) unter AES-GCM. Verpackt und geöffnet wird er in
+    # `ai_memory_service._vektor_verschluesseln`; NULL heißt: noch nicht
+    # berechnet.
+    #
+    # Er lag hier lange im Klartext, mit der Begründung, der `key` daneben
+    # verrate ohnehin mehr. Das stimmte nicht. Der Schlüssel fasst 64 Zeichen
+    # aus [A-Za-z0-9_.-]; der Vektor entsteht aus Schlüssel **und** Wert
+    # (`ai_memory_service._embedding_source`), und das Modell darunter ist ein
+    # statisches — der Vektor ist im Kern das Mittel der Wortvektoren, und aus
+    # so einem Mittel lässt sich der Wortbestand des Werts näherungsweise
+    # zurücksuchen. Wer nur die Datenbank hatte, kam damit an den Inhalt fremder
+    # Notizen, ohne die DIS-Verschlüsselung des Werts anzufassen — also an
+    # genau der Zusage vorbei, die `tests/test_ai_memory_isolation.py` "gegen
+    # Datenbankzugriff" nennt.
+    #
+    # Der Schlüssel kommt aus dem Panel-Secret und nicht aus dem DIS-Sidecar:
+    # dort kostete jede Zeile einen HTTP-Roundtrip, und die Rangfolge liest bis
+    # zu 5.000 Vektoren je Anfrage. Das ist ein schwächerer Schutz als beim
+    # Wert — wer Datenbank *und* Panel-Umgebung hat, liest beides —, aber es
+    # trennt den Vektor vom bloßen Datenbankzugriff.
+    #
+    # Bestandszeilen tragen hier weiterhin die nackten 1.024 Bytes. Sie werden
+    # gelesen wie bisher und beim nächsten Abruf in den Kontext neu und dann
+    # verpackt geschrieben (`ai_memory_service._liegt_im_klartext`) — eine
+    # Migration braucht es dafür nicht, und keine Zeile verliert unterwegs
+    # ihren Bedeutungsanteil.
+    #
+    # Die Auswahl selbst findet unverändert **nach** dem Entschlüsseln des
+    # Werts statt: sie bewertet neben der Bedeutung auch die Wortüberschneidung
+    # im Wert und braucht ihn dafür im Klartext.
     embedding_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     # Dieselben Zahlen in der alten Form. Sie steht hier nur noch für den
     # Bestand: 5.000 Vektoren als Text zu lesen kostete gemessen 381 ms und
@@ -136,6 +160,12 @@ class AiMemoryEntry(Base):
     # `_stored_vector` liest deshalb bevorzugt Bytes und fällt auf diese Spalte
     # zurück. Geschrieben wird sie nicht mehr; sie verschwindet, wenn kein
     # unterstützter Bestand sie mehr braucht.
+    #
+    # Sie trägt ihre Zahlen unverschlüsselt, und seit dem 23.08.2026 gehören
+    # sie das nicht mehr. Deshalb räumt `_vektoren_nachziehen` eine Zeile mit
+    # JSON beim nächsten Abruf in den Kontext ab und schreibt sie neu, statt
+    # sie nur zu lesen — dieselbe Regel wie für Bestandszeilen in der
+    # Bytespalte darüber.
     embedding_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Womit gerechnet wurde. Passt es nicht zum geladenen Modell, wird der
     # Vektor ignoriert statt falsche Aehnlichkeiten zu liefern.

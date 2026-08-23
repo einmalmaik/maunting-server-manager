@@ -11,10 +11,11 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import get_current_user, verify_csrf
-from models import Server, Team, TeamMember, User
+from models import Server, Team, TeamInvitation, TeamMember, User
 from schemas.team import (
     TeamCreate,
     TeamDetailResponse,
+    TeamInvitationResponse,
     TeamMemberResponse,
     TeamMemberUpdate,
     TeamMemberWrite,
@@ -45,6 +46,23 @@ def _summary(db: Session, team: Team, user: User) -> TeamResponse:
     )
 
 
+def _invitation(db: Session, einladung: TeamInvitation, team: Team) -> TeamInvitationResponse:
+    eingeladener = db.get(User, einladung.user_id)
+    einlader = (
+        db.get(User, einladung.invited_by) if einladung.invited_by is not None else None
+    )
+    return TeamInvitationResponse(
+        team_id=team.id,
+        team_name=team.name,
+        user_id=einladung.user_id,
+        username=eingeladener.username if eingeladener is not None else "",
+        invited_by_username=einlader.username if einlader is not None else None,
+        can_manage_skills=einladung.can_manage_skills,
+        can_manage_memory=einladung.can_manage_memory,
+        invited_at=einladung.created_at,
+    )
+
+
 def _detail(db: Session, team: Team, user: User) -> TeamDetailResponse:
     rows = (
         db.query(TeamMember, User.username)
@@ -72,7 +90,19 @@ def _detail(db: Session, team: Team, user: User) -> TeamDetailResponse:
             permission_keys=team_service.team_server_keys(db, team.id, server_id),
         ))
     base = _summary(db, team, user)
-    return TeamDetailResponse(**base.model_dump(), members=members, servers=servers)
+    # Offene Einladungen sieht nur der Gruender. Wer eingeladen ist, hat sich
+    # noch zu nichts bekannt — das muss nicht die halbe Mitgliederliste wissen.
+    einladungen = (
+        [
+            _invitation(db, einladung, team)
+            for einladung in team_service.team_invitations(db, team.id)
+        ]
+        if base.is_owner
+        else []
+    )
+    return TeamDetailResponse(
+        **base.model_dump(), members=members, servers=servers, invitations=einladungen,
+    )
 
 
 @router.get("", response_model=list[TeamResponse])
@@ -101,6 +131,49 @@ def create_team(
 ) -> TeamResponse:
     team = team_service.create_team(db, user=user, name=payload.name)
     return _summary(db, team, user)
+
+
+# ── Einladungen ───────────────────────────────────────────────────────
+#
+# Diese drei Routen stehen bewusst **vor** `/{team_id}`: FastAPI nimmt die
+# erste passende, und `/invitations` waere sonst ein Team mit dem Namen
+# "invitations" — also ein 422 statt einer Liste.
+
+
+@router.get("/invitations", response_model=list[TeamInvitationResponse])
+def list_invitations(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[TeamInvitationResponse]:
+    """Die Einladungen, ueber die dieser Benutzer noch entscheiden muss."""
+    return [
+        _invitation(db, einladung, einladung.team)
+        for einladung in team_service.open_invitations(db, user)
+    ]
+
+
+@router.post("/invitations/{team_id}/accept", response_model=TeamDetailResponse)
+def accept_invitation(
+    team_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> TeamDetailResponse:
+    """Beitreten. Erst hier entsteht die Mitgliedschaft — und mit ihr der
+    Zugriff auf das gemeinsame Wissen und die Server des Teams."""
+    team_service.accept_invitation(db, user=user, team_id=team_id)
+    team = team_service.get_team_for_member(db, team_id, user)
+    return _detail(db, team, user)
+
+
+@router.delete("/invitations/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
+def decline_invitation(
+    team_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _: None = Depends(verify_csrf),
+) -> None:
+    team_service.decline_invitation(db, user=user, team_id=team_id)
 
 
 @router.get("/{team_id}", response_model=TeamDetailResponse)
@@ -137,15 +210,20 @@ def delete_team(
 
 
 @router.post("/{team_id}/members", response_model=TeamDetailResponse, status_code=status.HTTP_201_CREATED)
-def add_member(
+def invite_member(
     team_id: int,
     payload: TeamMemberWrite,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     _: None = Depends(verify_csrf),
 ) -> TeamDetailResponse:
+    """Laedt einen Benutzer ein. Mitglied wird er erst, wenn er annimmt.
+
+    Die Antwort zeigt ihn deshalb unter `invitations` und nicht unter
+    `members`.
+    """
     team = team_service.get_team_for_member(db, team_id, user)
-    team_service.add_member(
+    team_service.invite_member(
         db, team=team, user=user, new_user_id=payload.user_id,
         can_manage_skills=payload.can_manage_skills,
         can_manage_memory=payload.can_manage_memory,
@@ -179,6 +257,11 @@ def remove_member(
     user: User = Depends(get_current_user),
     _: None = Depends(verify_csrf),
 ) -> TeamDetailResponse:
+    """Entlaesst ein Mitglied — oder laesst den Aufrufenden selbst gehen.
+
+    Der eigene Austritt braucht den Gruender nicht; die Antwort zeigt dann das
+    Team ohne den Ausgetretenen, also nichts, was er nicht eben noch sah.
+    """
     team = team_service.get_team_for_member(db, team_id, user)
     team_service.remove_member(db, team=team, user=user, member_user_id=member_user_id)
     return _detail(db, team, user)

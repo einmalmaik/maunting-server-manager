@@ -135,6 +135,41 @@ class TestDerAufrufWirdBeantwortet:
         assert len(usage.tool_calls) == 1
         assert deferred == []
 
+    def test_der_blick_ueberlebt_eine_gemischte_runde(self):
+        """Die Runde, in der das Modell hinsieht, liest **und** schreibt.
+
+        In der Mischrunden-Absage stand eine Zuweisung statt eines `extend`,
+        und die warf die Absage des blinden Blicks darueber wieder weg: kein
+        Ergebnis, keine Begruendung, kein Hinweis — der Aufruf verschwand
+        spurlos, und das Modell hatte eine `tool_call_id` ohne Antwort.
+
+        Nur diese eine Zusage kann das sehen. Alle anderen hier fahren mit
+        ``kinds={"read"}`` und laufen an der Absage vorbei.
+        """
+        lesen = SimpleNamespace(
+            id="ruf-2", name="desktop_system", arguments={"aktion": "prozesse"}
+        )
+        schreiben = SimpleNamespace(
+            id="ruf-3", name="propose_config_set", arguments={"server_id": 1}
+        )
+        usage = SimpleNamespace(tool_calls=[_blick(), lesen, schreiben])
+
+        deferred, signal = _runde_filtern(
+            kinds={"read", "write"},
+            current_usage=usage,
+            signaturen={},
+            zustand={"sieht": False},
+            run_id="lauf-1",
+        )
+
+        gruende = {ruf.id: grund for ruf, grund in deferred}
+        assert [ruf.id for ruf, _ in deferred] == ["ruf-1", "ruf-3"]
+        assert gruende["ruf-1"] == KEIN_BLICK_GRUND
+        assert "eigenen Runde" in gruende["ruf-3"]
+        # Gelaufen ist nur, was dieses Modell auch lesen kann.
+        assert [ruf.id for ruf in usage.tool_calls] == ["ruf-2"]
+        assert signal is None
+
     def test_ein_blinder_blick_zaehlt_nicht_als_schleife(self):
         """Der Aufruf laeuft nie — ihn zu zaehlen hiesse, dem Modell spaeter
         eine Wiederholung vorzuwerfen, die nie stattgefunden hat."""
@@ -184,7 +219,25 @@ class TestDasFeldKommtVomKatalog:
 
     def test_das_bildfeld_heisst_ueberall_gleich(self):
         """`bildschirm.rs`, der Router und der Sendepfad muessen dasselbe Feld
-        meinen; ein Tippfehler an einer Stelle ist unsichtbar."""
+        meinen; ein Tippfehler an einer Stelle ist unsichtbar.
+
+        Die dritte Stelle steht in Rust und wird deshalb als Text gelesen —
+        dasselbe Vorgehen wie in `test_ai_tool_handler_contract.py`, wo
+        `frontend/src/api/ai.ts` gegen den Backend-Vertrag gehalten wird. Ohne
+        sie prueft dieser Test nur zwei Konstanten gegeneinander, und genau die
+        gefaehrliche Richtung bliebe gruen: benennt die App das Feld um, findet
+        `ai_stream_service` das Bild nie mehr, `routers/desktop` rechnet es
+        gegen das Textbudget, und jedes Bildschirmfoto scheitert als zu gross.
+        Die Aufnahme klappt, ankommen tut nichts — der Auge-ohne-Sehnerv-Fehler,
+        dessentwegen es diese Datei gibt.
+        """
+        from pathlib import Path
+
         from routers import desktop as desktop_router
 
         assert desktop_router.BILDFELD == ai_stream_service.BILDFELD
+        rust = (
+            Path(ai_stream_service.__file__).resolve().parents[2]
+            / "smart-system" / "src-tauri" / "src" / "bildschirm.rs"
+        ).read_text(encoding="utf-8")
+        assert f'"{ai_stream_service.BILDFELD}"' in rust

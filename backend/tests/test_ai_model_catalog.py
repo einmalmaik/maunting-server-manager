@@ -227,6 +227,46 @@ async def test_an_empty_answer_is_treated_as_a_failure_not_as_an_empty_catalog()
     assert len(danach) == 4
 
 
+class _MassloseAntwort(httpx.AsyncByteStream):
+    """Eine Gegenstelle, die viel mehr schickt, als ein Katalog je hat.
+
+    Zählt mit, wieviel tatsächlich abgeholt wurde — das ist die eigentliche
+    Frage: die Grenze soll den Speicher schützen und nicht bloß das Parsen.
+    """
+
+    STUECK = 1024 * 1024
+
+    def __init__(self, stuecke: int) -> None:
+        self.angeboten = stuecke
+        self.gelesen = 0
+
+    async def __aiter__(self):
+        for _ in range(self.angeboten):
+            self.gelesen += 1
+            yield b"x" * self.STUECK
+
+
+@pytest.mark.asyncio
+async def test_an_endless_answer_is_cut_off_and_not_first_swallowed() -> None:
+    """Die Größengrenze greift **während** der Übertragung.
+
+    Vorher stand sie hinter einem ``client.get``: eine kompromittierte oder
+    fehlgeleitete Gegenstelle hätte den Panelprozess mit einer endlosen Antwort
+    in den Speicher getrieben, und die Prüfung wäre erst danach drangewesen.
+    ``ABRUF_TIMEOUT`` hilft dort nicht — es begrenzt bei httpx die Wartezeit je
+    Lesevorgang, nie die Datenmenge.
+    """
+    quelle = _MassloseAntwort(stuecke=16)
+
+    async with _client(lambda _r: httpx.Response(200, stream=quelle)) as client:
+        assert await ai_model_catalog.modelle(client, "openrouter") == []
+
+    grenze_in_stuecken = ai_model_catalog.MAX_KATALOG_BYTES // _MassloseAntwort.STUECK
+    # Ein Stück über der Grenze wird die Grenze bemerkt — danach ist Schluss.
+    assert quelle.gelesen <= grenze_in_stuecken + 1
+    assert quelle.gelesen < quelle.angeboten
+
+
 @pytest.mark.asyncio
 async def test_without_any_catalog_the_result_is_empty_not_an_exception() -> None:
     """Beim allerersten Start gibt es nichts zu retten — aber auch keinen Absturz."""

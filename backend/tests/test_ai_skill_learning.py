@@ -47,10 +47,11 @@ def _allow(db: Session, user: User, *keys: str) -> None:
 def _team(db: Session, owner: User, *members: User) -> Team:
     team = team_service.create_team(db, user=owner, name=f"team-{owner.username}")
     for member in members:
-        team_service.add_member(
+        team_service.invite_member(
             db, team=team, user=owner, new_user_id=member.id,
             can_manage_skills=True, can_manage_memory=True,
         )
+        team_service.accept_invitation(db, user=member, team_id=team.id)
     return team
 
 
@@ -577,7 +578,10 @@ def test_the_same_key_in_two_scopes_is_never_deleted_by_guessing(
             db, user=regular_user, skill_key="backup-routine",
             name="Backup-Routine",
             description="Wie ein Backup geprueft wird, bevor man sich darauf verlaesst.",
-            body=f"Fassung fuer Bereich {bereich}.", team_id=bereich,
+            # Beide Zeilen gelernt: hier geht es um die Mehrdeutigkeit der
+            # Bereiche, nicht um die Herkunft. Menschentext hat einen eigenen
+            # Test direkt darunter und wird gar nicht erst geloescht.
+            body=f"Fassung fuer Bereich {bereich}.", team_id=bereich, origin="ai",
         )
     assert db.query(AiSkill).filter(AiSkill.skill_key == "backup-routine").count() == 2
 
@@ -604,3 +608,361 @@ def test_the_same_key_in_two_scopes_is_never_deleted_by_guessing(
     assert ergebnis["bereich"] == team.name
     verbleibend = db.query(AiSkill).filter(AiSkill.skill_key == "backup-routine").all()
     assert [row.team_id for row in verbleibend] == [None]
+
+
+def test_was_ein_mensch_geschrieben_hat_loescht_die_ki_nicht(
+    db: Session, regular_user: User
+) -> None:
+    """Die Überschreib-Schranke war in zwei Zügen zu umgehen.
+
+    `upsert_skill` weist einen KI-Text ab, der einen von Hand geschriebenen
+    Skill ersetzen will. `forget_skill` prüfte die Herkunft nicht — erst
+    löschen, dann unter demselben Schlüssel neu lernen, und wo die Hausregel
+    des Betreibers stand, stand Modelltext.
+
+    Das ist die teuerste Stelle für eine präparierte Logzeile: ein Skill wirkt
+    in jedem künftigen Lauf des Panels, und `upsert_skill` führt bewusst keine
+    Versionen — zurückzuholen gibt es nichts.
+    """
+    _allow(db, regular_user, "ai.skills.use", "ai.skills.manage")
+    ai_skill_service.upsert_skill(
+        db, user=regular_user, skill_key="hausregel", name="Hausregel",
+        description="Die vom Betreiber von Hand geschriebene Vorgehensweise bei Stoerungen.",
+        body="Erst den Menschen fragen.", team_id=None, origin="operator",
+    )
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="forget_skill",
+        arguments={"skill_key": "hausregel"},
+    )
+
+    # Eine Absage mit Weg, keine Ausnahme: das Modell soll es dem Benutzer
+    # sagen und nicht eine Fehlerrunde drehen.
+    assert ergebnis["forgotten"] is False
+    assert "Mensch" in ergebnis["reason"]
+    row = db.query(AiSkill).filter(AiSkill.skill_key == "hausregel").one()
+    assert row.origin == "operator"
+    assert row.body == "Erst den Menschen fragen."
+
+    # Und der zweite Zug bleibt versperrt, wie er es immer war.
+    with pytest.raises(AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="learn_skill",
+            arguments={
+                "skill_key": "hausregel", "name": "Neue Fassung",
+                "description": "Ein gelernter Ersatz, der die Hausregel des Betreibers ablösen will.",
+                "body": "Einfach machen.", "scope": "global",
+            },
+        )
+
+
+def test_ihre_eigenen_skills_raeumt_die_ki_weiter_selbst_weg(
+    db: Session, regular_user: User
+) -> None:
+    """Die Gegenprobe zur Schranke darüber — sonst wäre sie eine Fessel.
+
+    Gelernt wird ohne Formular und ohne Knopf; weggeräumt muss es genauso
+    gehen, sonst sammelt sich überholtes Wissen an, das niemand anfasst. Der
+    Test steht hier und nicht nur bei `test_the_ai_can_delete_a_skill_it_learned`,
+    weil die Herkunftsprüfung genau diese Zusage brechen könnte.
+    """
+    _allow(db, regular_user, "ai.skills.use", "ai.skills.manage", "teams.create")
+    team = _team(db, regular_user)
+    for team_id in (None, team.id):
+        ai_skill_service.upsert_skill(
+            db, user=regular_user, skill_key=f"gelernt-{team_id}",
+            name="Gelernt",
+            description="Eine Erkenntnis, die die KI selbst aufgeschrieben hat und wieder verwirft.",
+            body="Ueberholt.", team_id=team_id, origin="ai",
+        )
+
+        ergebnis = ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="forget_skill",
+            arguments={"skill_key": f"gelernt-{team_id}"},
+        )
+
+        assert ergebnis["forgotten"] is True
+        assert db.query(AiSkill).filter(
+            AiSkill.skill_key == f"gelernt-{team_id}"
+        ).count() == 0
+
+
+def test_einen_abgeschalteten_skill_belebt_die_ki_nicht_in_zwei_zuegen(
+    db: Session, regular_user: User
+) -> None:
+    """Abschalten ist das Gegenmittel gegen einen per Injection gelernten Skill.
+
+    `upsert_skill` lässt den Schalter `enabled` nur von einem Menschen
+    anfassen — ein Lernvorgang holt eine abgeschaltete Zeile nicht zurück.
+    `forget_skill` prüfte aber allein die Herkunft: die Zeile stammte von der
+    KI, sie durfte sie also löschen, und das direkt folgende `learn_skill`
+    landete im Anlege-Zweig, wo `enabled` wieder auf ``True`` steht. Das
+    Gegenmittel war damit genauso wirkungslos wie vorher, nur einen Zug später
+    — und der Betreiber hätte denselben Skill jeden Tag erneut abgeschaltet,
+    ohne je zu erfahren, warum er zurückkommt.
+
+    Derselbe Zug geht auch eine Etage tiefer und kommt dort ganz ohne Löschen
+    aus: dieselbe Erkenntnis mit scope='team' anlegen. Die neue Zeile entstand
+    im Anlege-Zweig mit `enabled=True` und gewann nach `_overlay_rank` gegen
+    die abgeschaltete globale. Dafür braucht es nicht einmal `ai.skills.manage`
+    oder Kollegen — ohne echtes Team fällt `learning_team` auf das persönliche
+    zurück, und der Weg steht jedem mit `ai.skills.use` offen.
+    """
+    _allow(db, regular_user, "ai.skills.use", "ai.skills.manage")
+    row = ai_skill_service.upsert_skill(
+        db, user=regular_user, skill_key="vergiftet", name="Erste Fassung",
+        description="Eine gelernte Vorgehensweise, die sich als schädlich herausgestellt hat.",
+        body="Erste Fassung.", team_id=None, origin="ai",
+    )
+    kennung = row.id
+    ai_skill_service.set_enabled(db, user=regular_user, skill_id=kennung, enabled=False)
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="forget_skill",
+        arguments={"skill_key": "vergiftet"},
+    )
+
+    # Absage mit Weg, keine Ausnahme — wie bei einem von Hand geschriebenen
+    # Skill: das Modell soll es dem Benutzer sagen, nicht eine Runde drehen.
+    assert ergebnis["forgotten"] is False
+    assert "abgeschaltet" in ergebnis["reason"]
+
+    # Der zweite Zug bleibt der KI offen: sie schreibt die Zeile weiter neu.
+    # Nur ist es dieselbe Zeile, und die bleibt verdeckt, bis ein Mensch sie
+    # zurückholt.
+    gelernt = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="learn_skill",
+        arguments={
+            "skill_key": "vergiftet", "name": "Zweite Fassung",
+            "description": "Dieselbe Erkenntnis, von der KI noch einmal aufgeschrieben.",
+            "body": "Zweite Fassung.", "scope": "global",
+        },
+    )
+    assert gelernt["learned"] is True
+
+    frisch = db.query(AiSkill).filter(AiSkill.skill_key == "vergiftet").one()
+    assert frisch.id == kennung
+    assert frisch.enabled is False
+    assert "vergiftet" not in {
+        view.skill_key for view in ai_skill_service.visible_skills(db, regular_user)
+    }
+
+    # Und derselbe Zug eine Etage tiefer, der eigentliche Rest der Lücke: nicht
+    # dieselbe Zeile überschreiben, sondern eine Team-Zeile daneben anlegen.
+    # Sie entstünde im Anlege-Zweig mit `enabled=True`, und `_overlay_rank`
+    # liesse sie gegen die abgeschaltete globale gewinnen. Der Weg steht jedem
+    # mit `ai.skills.use` offen: `learning_team` fällt ohne echtes Team auf das
+    # persönliche Ein-Mann-Team zurück, es braucht dafür weder Kollegen noch
+    # `ai.skills.manage`.
+    with pytest.raises(AiActionValidationError) as exc:
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="learn_skill",
+            arguments={
+                "skill_key": "vergiftet", "name": "Dritte Fassung",
+                "description": "Dieselbe Erkenntnis, diesmal für das Team aufgeschrieben.",
+                "body": "Dritte Fassung.", "scope": "team",
+            },
+        )
+    assert "sag dem Benutzer" in str(exc.value)
+
+    assert db.query(AiSkill).filter(AiSkill.skill_key == "vergiftet").count() == 1
+    assert "vergiftet" not in {
+        view.skill_key for view in ai_skill_service.visible_skills(db, regular_user)
+    }
+
+    # Die Gegenprobe, und sie ist der Grund für die Form der Schranke: eine
+    # **eingeschaltete** globale KI-Zeile ist keine Entscheidung eines
+    # Menschen. Über die legt die KI weiterhin eine engere Team-Fassung, wie
+    # sie es immer durfte — die Schranke hängt am Abschalten, nicht daran,
+    # dass es den Schlüssel panelweit schon gibt.
+    ai_skill_service.upsert_skill(
+        db, user=regular_user, skill_key="offen", name="Globale Fassung",
+        description="Eine gelernte Vorgehensweise, die niemand abgeschaltet hat.",
+        body="Globale Fassung.", team_id=None, origin="ai",
+    )
+
+    gelernt = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="learn_skill",
+        arguments={
+            "skill_key": "offen", "name": "Team-Fassung",
+            "description": "Dieselbe Erkenntnis, für das Team genauer gefasst.",
+            "body": "Team-Fassung.", "scope": "team",
+        },
+    )
+    assert gelernt["learned"] is True
+    assert gelernt["scope"] == "team"
+    sicht = {view.skill_key: view for view in ai_skill_service.visible_skills(db, regular_user)}
+    assert sicht["offen"].name == "Team-Fassung"
+    assert sicht["offen"].scope == "team"
+
+
+def test_eine_abgeschaltete_team_zeile_belebt_die_ki_nicht_panelweit(
+    db: Session, regular_user: User
+) -> None:
+    """Dieselbe Wiederbelebung, nur nach oben statt nach unten.
+
+    Die Schranke im Anlege-Zweig war einseitig: sie sah von der neuen Team-Zeile
+    auf die panelweite Vorgabe, nie umgekehrt. Wer also einen per Injection
+    gelernten Team-Skill abschaltete, hatte ihn mit einem einzigen
+    `learn_skill(scope='global')` zurück — der globale Anlege-Zweig prüfte gar
+    keine kollidierende Zeile, und verdeckt wird dabei auch nichts: eine
+    abgeschaltete Zeile verdeckt selbst nichts (`_overlay`), die neue aktive
+    scheint schlicht durch sie hindurch. Danach stand der Text nicht mehr nur im
+    Team, sondern im Verzeichnis **jedes** Benutzers des Panels.
+
+    Damit wäre die Zusage von `set_enabled` an den Bereich gebunden gewesen:
+    "abgeschaltet" hätte "abgeschaltet, bis die KI eine Etage höher schreibt"
+    geheissen. Abschalten ist aber das Gegenmittel gegen einen per Injection
+    gelernten Skill; ein Gegenmittel, das ein Zug aushebelt, ist keines.
+    """
+    ai_learning_policy.set_policy("review")
+    # Mit `ai.skills.manage` wirkt die globale Zeile sofort statt zu warten —
+    # die schärfste Form des Wegs. Unter der Lernpolitik `instant` reicht dafür
+    # `ai.skills.use`, dann steht er jedem Gespräch offen.
+    _allow(db, regular_user, "ai.skills.use", "ai.skills.manage")
+
+    gelernt = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="learn_skill",
+        arguments={
+            "skill_key": "vergiftet", "name": "Erste Fassung",
+            "description": "Eine im Team gelernte Vorgehensweise, die sich als schädlich erwiesen hat.",
+            "body": "Erste Fassung.", "scope": "team",
+        },
+    )
+    assert gelernt["learned"] is True
+    # Ohne echtes Team fällt `learning_team` auf das persönliche zurück — dafür
+    # braucht es weder Kollegen noch einen Teamverwalter.
+    zeile = db.query(AiSkill).filter(AiSkill.skill_key == "vergiftet").one()
+    assert zeile.team_id is not None
+
+    ai_skill_service.set_enabled(db, user=regular_user, skill_id=zeile.id, enabled=False)
+    assert "vergiftet" not in {
+        view.skill_key for view in ai_skill_service.visible_skills(db, regular_user)
+    }
+
+    with pytest.raises(AiActionValidationError) as exc:
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="learn_skill",
+            arguments={
+                "skill_key": "vergiftet", "name": "Zweite Fassung",
+                "description": "Dieselbe Erkenntnis, diesmal panelweit aufgeschrieben.",
+                "body": "Zweite Fassung.", "scope": "global",
+            },
+        )
+    # Dieselbe Antwortform wie in der Gegenrichtung: eine Absage, die einen Weg
+    # nennt, statt einer nackten Ablehnung.
+    assert "sag dem Benutzer" in str(exc.value)
+
+    assert db.query(AiSkill).filter(AiSkill.skill_key == "vergiftet").count() == 1
+    assert "vergiftet" not in {
+        view.skill_key for view in ai_skill_service.visible_skills(db, regular_user)
+    }
+
+    # Die Gegenprobe, und sie ist der Preis der Schranke: eine **aktive**
+    # Team-Zeile ist keine Entscheidung eines Menschen. Über die legt die KI
+    # weiterhin eine panelweite Fassung, wie sie es immer durfte — die Schranke
+    # hängt am Abschalten, nicht daran, dass es den Schlüssel schon gibt.
+    ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="learn_skill",
+        arguments={
+            "skill_key": "offen", "name": "Team-Fassung",
+            "description": "Eine Erkenntnis fürs Team, die niemand abgeschaltet hat.",
+            "body": "Team-Fassung.", "scope": "team",
+        },
+    )
+
+    gelernt = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="learn_skill",
+        arguments={
+            "skill_key": "offen", "name": "Panelweite Fassung",
+            "description": "Dieselbe Erkenntnis, allgemeiner gefasst und für alle gültig.",
+            "body": "Panelweite Fassung.", "scope": "global",
+        },
+    )
+    assert gelernt["learned"] is True
+    assert gelernt["scope"] == "global"
+    assert db.query(AiSkill).filter(AiSkill.skill_key == "offen").count() == 2
+    # Zu sehen bekommt der Benutzer weiter die engere Fassung — `_overlay_rank`
+    # entscheidet das, nicht diese Schranke.
+    sicht = {view.skill_key: view for view in ai_skill_service.visible_skills(db, regular_user)}
+    assert sicht["offen"].scope == "team"
+
+    # Und der Zuschnitt: geprüft wird, was **dieser** Benutzer sieht. Ein
+    # abgeschalteter Skill in einem fremden Team geht ihn nichts an — würde er
+    # blocken, könnte jeder Teamverwalter der KI panelweit Schlüssel sperren,
+    # für Leute, die von seinem Team nie gehört haben.
+    fremder = _user(db, "fremder")
+    _allow(db, fremder, "ai.skills.use", "teams.create")
+    fremdes_team = _team(db, fremder)
+    fremde_zeile = ai_skill_service.upsert_skill(
+        db, user=fremder, skill_key="fremd-aus", name="Fremde Fassung",
+        description="Eine Erkenntnis in einem Team, in dem dieser Benutzer nicht ist.",
+        body="Fremde Fassung.", team_id=fremdes_team.id, origin="ai",
+    )
+    ai_skill_service.set_enabled(db, user=fremder, skill_id=fremde_zeile.id, enabled=False)
+
+    gelernt = _learn_global(db, regular_user, "fremd-aus")
+    assert gelernt["learned"] is True
+    assert "fremd-aus" in {
+        view.skill_key for view in ai_skill_service.visible_skills(db, regular_user)
+    }
+
+
+def test_eine_team_zeile_verdeckt_die_panelweite_vorgabe_nicht(
+    db: Session, regular_user: User
+) -> None:
+    """Der Weg um die Überschreib-Schranke herum: eine Etage tiefer anlegen.
+
+    `upsert_skill` sucht die Kollisionszeile über `scope_identity` und findet
+    die globale deshalb nicht. Unter dem Schlüssel einer panelweiten
+    Betreiber-Vorgabe legte `learn_skill` mit scope='team' also schlicht eine
+    **neue** Zeile an — und `_overlay_rank` lässt die engere gewinnen. Für
+    jedes Mitglied des Teams stand danach Modelltext, wo der Betreiber seine
+    Vorgabe hingeschrieben hat; die Vorgabe selbst blieb unverändert in der
+    Datenbank stehen, sodass niemandem etwas auffiel.
+
+    Abgesichert war das allein durch einen Satz im Absagetext des anderen
+    Zweigs — also durch eine Anweisung an genau das Modell, das im
+    Bedrohungsmodell fremdgesteuert ist.
+    """
+    kollege = _user(db, "teamkollege")
+    _allow(db, regular_user, "ai.skills.use", "ai.skills.manage", "teams.create")
+    _allow(db, kollege, "ai.skills.use")
+    team = _team(db, regular_user, kollege)
+    ai_skill_service.upsert_skill(
+        db, user=regular_user, skill_key="hausregel", name="Hausregel",
+        description="Die vom Betreiber von Hand geschriebene Vorgehensweise bei Störungen.",
+        body="Erst den Menschen fragen.", team_id=None, origin="operator",
+    )
+
+    with pytest.raises(AiActionValidationError) as exc:
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="learn_skill",
+            arguments={
+                "skill_key": "hausregel", "name": "Team-Fassung",
+                "description": "Ein gelernter Ersatz, der die Vorgabe des Betreibers verdecken würde.",
+                "body": "Einfach machen.", "scope": "team", "team": team.name,
+            },
+        )
+    # Dieselbe Antwortform wie beim direkten Überschreiben: die Absage nennt
+    # einen Weg, der kein Duplikat erzeugt.
+    assert "sag dem Benutzer" in str(exc.value)
+
+    assert db.query(AiSkill).filter(AiSkill.skill_key == "hausregel").count() == 1
+    for leser in (regular_user, kollege):
+        sicht = {view.skill_key: view for view in ai_skill_service.visible_skills(db, leser)}
+        assert sicht["hausregel"].name == "Hausregel"
+        assert sicht["hausregel"].scope == "global"
+
+    # Die Gegenprobe: ohne panelweite Vorgabe lernt die KI ins Team wie bisher.
+    # Die Schranke hängt an der Kollision, nicht am Bereich.
+    gelernt = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="learn_skill",
+        arguments={
+            "skill_key": "teameigen", "name": "Team-Fassung",
+            "description": "Eine Erkenntnis, zu der es keine Vorgabe des Betreibers gibt.",
+            "body": "So machen wir das hier.", "scope": "team", "team": team.name,
+        },
+    )
+    assert gelernt["learned"] is True
+    assert gelernt["scope"] == "team"

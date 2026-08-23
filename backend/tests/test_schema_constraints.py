@@ -1463,3 +1463,85 @@ def test_die_migration_traegt_die_modellwahl(tmp_path: Path) -> None:
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+def test_eine_einladung_haengt_am_team_und_am_eingeladenen(
+    db: Session, owner_user
+) -> None:
+    """Eine offene Einladung ueberlebt weder ihr Team noch ihren Menschen.
+
+    Sie ist eine Frage, keine Beziehung: verschwindet einer der beiden, die sie
+    angeht, hat sie niemanden mehr, den sie betraefe. Bliebe sie liegen, koennte
+    ein spaeteres Team mit derselben Nummer sie erben — und jemand waere
+    eingeladen, ohne dass ihn je jemand gefragt haette.
+
+    `invited_by` traegt dagegen SET NULL: die Einladung gehoert dem Team, nicht
+    dem, der sie ausgesprochen hat.
+    """
+    from models import Team, TeamInvitation
+
+    inspector = inspect(db.get_bind())
+    for spalte in ("team_id", "user_id"):
+        assert _fremdschluessel(inspector, "team_invitations", spalte)["options"] == {
+            "ondelete": "CASCADE"
+        }, f"team_invitations.{spalte} muss mit seinem Bezug verschwinden"
+    assert _fremdschluessel(inspector, "team_invitations", "invited_by")["options"] == {
+        "ondelete": "SET NULL"
+    }
+
+    team = Team(name="Einladeteam", owner_user_id=owner_user.id)
+    db.add(team)
+    db.flush()
+    db.add(TeamInvitation(
+        team_id=team.id, user_id=owner_user.id, invited_by=owner_user.id,
+    ))
+    db.commit()
+    assert db.query(TeamInvitation).count() == 1
+
+    db.execute(text("DELETE FROM teams WHERE id = :id"), {"id": team.id})
+    db.commit()
+
+    assert db.query(TeamInvitation).count() == 0
+
+
+def test_die_migration_traegt_die_einladungstabelle(tmp_path: Path) -> None:
+    """Modell und Migration muessen dieselbe Tabelle meinen.
+
+    Fehlte sie in der Kette, liefe der Betrieb in einen 500er, sobald jemand
+    einlaedt — und die Testsuite bliebe gruen, weil sie ihr Schema aus den
+    Modellen baut. Die eindeutige Bedingung gehoert mitgeprueft: ohne sie
+    sammelten sich Einladungen desselben Teams an denselben Menschen, und die
+    Annahme haette die Wahl zwischen zwei Angeboten.
+    """
+    db_url = f"sqlite:///{tmp_path / 'einladung_constraint.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        command.downgrade(config, "20260823_01")
+        assert "team_invitations" not in _frisch(engine).get_table_names()
+
+        command.upgrade(config, "head")
+        inspector = _frisch(engine)
+        assert "team_invitations" in inspector.get_table_names()
+        for spalte in ("team_id", "user_id"):
+            assert _fremdschluessel(inspector, "team_invitations", spalte)[
+                "options"
+            ] == {"ondelete": "CASCADE"}
+        assert _fremdschluessel(inspector, "team_invitations", "invited_by")[
+            "options"
+        ] == {"ondelete": "SET NULL"}
+        eindeutig = [
+            bedingung["column_names"]
+            for bedingung in inspector.get_unique_constraints("team_invitations")
+        ]
+        assert ["team_id", "user_id"] in eindeutig
+    finally:
+        engine.dispose()
+        settings.database_url = vorher

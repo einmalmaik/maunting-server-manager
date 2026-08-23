@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import require_global, session_herkunft, verify_csrf
+from dependencies import require_global, session_familie, session_herkunft, verify_csrf
 from models import AiConversation, AiMessage, AiProvider, User
 from models.ai_conversation import ARTEN
 from schemas.ai_chat import (
@@ -406,8 +406,28 @@ def clear_conversation_history(
     user: User = Depends(require_global("ai.chat.use")),
     _: None = Depends(verify_csrf),
 ) -> Response:
-    """Leert den Verlauf. Die Unterhaltung und das Audit bleiben bestehen."""
+    """Leert den Verlauf. Die Unterhaltung und das Audit bleiben bestehen.
+
+    **Offene Läufe enden mit.** Wer den Verlauf leert, erwartet, dass nichts
+    Lesbares zurückbleibt — und ein geparkter Lauf hielt genau das Gegenteil
+    fest: in `ai_runs.state_json` stehen seine vollständigen
+    `provider_messages`, darin der gesamte soeben gelöschte Verlauf und der
+    entschlüsselte Gedächtnisblock im Klartext, in einer gewöhnlichen
+    Textspalte. `arbeitsspeicher_leeren` räumt ihn nur bei einem Endzustand,
+    und ein `waiting_confirmation` ist keiner: der Klartext lag dort so lange,
+    bis irgendwann jemand die Karte anklickte.
+
+    Ein *laufender* Lauf ist der zweite Grund. Er schriebe nach dem Leeren
+    weiter in den geleerten Chat — dieselbe Geistersituation, gegen die eine
+    getippte Nachricht längst `vorgaenger_abloesen` ruft. Genau diese
+    vorhandene Maschinerie wird hier benutzt: sie beendet die offenen Läufe,
+    hält ihre asyncio-Aufgabe an und leert dabei den Arbeitsspeicher.
+
+    Erst ablösen, dann löschen: so ist im Moment, in dem die Zeilen
+    verschwinden, kein Lauf mehr da, der sie noch für seine gehalten hätte.
+    """
     conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
+    ai_run_service.vorgaenger_abloesen(db, conversation_id=conversation.id)
     ai_chat_service.clear_history(db, conversation)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -591,6 +611,7 @@ async def stream_message(
     db: Session = Depends(get_db),
     user: User = Depends(require_global("ai.chat.use")),
     herkunft: str = Depends(session_herkunft),
+    familie: str | None = Depends(session_familie),
     _: None = Depends(verify_csrf),
 ) -> StreamingResponse:
     conversation = ai_chat_service.get_or_create_primary_conversation(db, user)
@@ -663,6 +684,11 @@ async def stream_message(
             # konnte sich jeder als App ausgeben und nach Maus und Tastatur
             # greifen (`dependencies.session_herkunft`).
             herkunft=herkunft,
+            # Und von **welchem** Rechner. Die Herkunft unterscheidet App und
+            # Panel, nicht zwei gekoppelte Rechner desselben Benutzers — ohne
+            # die Familie holt sich einen Auftrag der, der zuerst fragt, und
+            # ein Blick auf "meinen Bildschirm" zeigte den des anderen.
+            familie=familie,
         )
         if run_id is None:
             code, message_key = fehler or ("AI_PREPARATION_FAILED", "ai.chat.errors.unavailable")

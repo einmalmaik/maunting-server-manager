@@ -616,11 +616,20 @@ def build_provider_messages(
             )
             if memory:
                 result.append(_memory_message(memory))
-    # Die Historie wird **vor** den Anhaengen bestimmt, obwohl sie hinter ihnen
+    # Die Historie wird **vor** den Anhaengen geladen, obwohl sie hinter ihnen
     # steht: welche Anhaenge mitgehen, haengt davon ab, welche Nachrichten
-    # ueberhaupt noch im Fenster sind. Frueher gingen schlicht die letzten fuenf
-    # der Unterhaltung mit — auch solche, deren Nachricht laengst
-    # herausgefallen war, und dieselben wieder und wieder bei jeder Folgefrage.
+    # ueberhaupt geladen werden. Frueher gingen schlicht die letzten fuenf der
+    # Unterhaltung mit — auch solche, deren Nachricht laengst herausgefallen
+    # war, und dieselben wieder und wieder bei jeder Folgefrage.
+    #
+    # „Geladen" und nicht „ausgewaehlt": der wirksame Filter ist der
+    # Zeichenschnitt weiter unten, und der laeuft erst **nach** der Anhangswahl
+    # — er braucht `used` inklusive der Anhaenge, sonst bekaeme die Historie
+    # ein Budget, das die Anhaenge danach ueberziehen. Ein Anhang, dessen
+    # Nachricht dem Schnitt zum Opfer faellt, geht deshalb weiterhin mit. Ihn
+    # danach herauszunehmen ginge nur ueber eine zweite Entschluesselung je
+    # Anhang (der Dienst gibt die Bindung nicht mit heraus); solange das nicht
+    # gemessen ist, steht hier lieber die Wahrheit als ein Versprechen.
     query_set = (
         db.query(AiMessage)
         .filter(
@@ -749,7 +758,16 @@ def build_provider_messages(
             # vollständig lesbar, und die Erkennung darf so einfach bleiben,
             # wie sie ist.
             content = " " + content
-        content = content[:budget]
+        # Sichtbar gekuerzt, nicht still abgeschnitten — dieselbe Marke wie
+        # ueberall sonst im Kontextaufbau. Hier stand ein roher Schnitt, und
+        # der traf im schlimmsten Fall die **soeben gestellte Frage**: `rows`
+        # ist absteigend sortiert, die erste Zeile der Schleife ist also die
+        # Frage, und neben einem grossen Anhang bleibt ihr nur der Sockel aus
+        # `MIN_HISTORY_CHARS`. Das Modell sah dann einen mitten im Satz
+        # endenden Auftrag, hielt ihn fuer vollstaendig und beantwortete die
+        # Haelfte — genau der Fehlermodus, den die Marke laut ihrer eigenen
+        # Begruendung verhindern soll.
+        content = _gekuerzt(content, budget)
         selected.append({"role": row.role, "content": content})
         budget -= len(content)
     # Die Reihenfolge am Ende: … Historie, Werkzeugkontext, Lage, **Frage**.

@@ -260,6 +260,16 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     Die 24 Zeichen gegenueber dem Vortag gehen an `desktop_steuern`: seit dem
     23.08.2026 folgt auch die Uebernahme dem autonomen Modus, und die
     Beschreibung sagt es.
+
+    **Nachtrag 23.08.2026: `team_id` bei `remember` und `forget_memory`** — aus
+    der App **63.878** Zeichen, aus dem Panel **58.480**. Die 57 Zeichen sind
+    der Rest einer Rechnung, die größer aussah: die neue Eigenschaft kostet je
+    Werkzeug rund 110 Zeichen, dafür ist die daneben stehende
+    `team`-Beschreibung um denselben Betrag kürzer geworden, und
+    `search_memory` nennt server_id und team_id jetzt in einem Halbsatz statt
+    server_id in einem ganzen. Die Grenze bleibt bei 64.000, die Luft beträgt
+    **122 Zeichen**. Warum die Nummer neben dem Namen stehen muss und nicht
+    statt seiner, steht bei `ai_action_service._memory_team`.
     """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(

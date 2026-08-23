@@ -32,6 +32,7 @@ from database import SessionLocal, get_db
 from dependencies import (
     get_current_user_for_ws,
     require_global,
+    ws_session_familie,
     ws_session_herkunft,
     ws_subprotokoll,
 )
@@ -305,6 +306,12 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
         # `geraet="desktop"` im Anspruch, und ihre Sprachlaeufe bekommen damit
         # dieselbe Werkzeugmenge wie ihr getippter Chat.
         herkunft = ws_session_herkunft(websocket)
+        # Und **welcher** Rechner spricht. Der Sprachmodus ist der Hauptweg der
+        # App — „schau auf meinen Bildschirm" kommt überwiegend gesprochen an,
+        # nicht getippt. Ohne diesen Wert trug jeder Sprachlauf `familie=None`,
+        # und sein Desktop-Auftrag war wieder für jedes gekoppelte Gerät
+        # abholbar (`desktop_job_service.naechster`).
+        familie = ws_session_familie(websocket)
     finally:
         # Die Sitzung der Anfrage gehört dem Request-Thread. Ab hier läuft eine
         # Verbindung über Minuten; sie darf keine offene Datenbanksitzung
@@ -326,6 +333,7 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
         stimm_schluessel=stimm_schluessel,
         http_client=websocket.app.state.ai_http_client,
         herkunft=herkunft,
+        familie=familie,
     )
     try:
         lage = await bruecke.fuehren()

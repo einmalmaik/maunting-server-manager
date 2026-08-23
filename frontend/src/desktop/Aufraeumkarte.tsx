@@ -16,7 +16,7 @@
  * Wie die Übernahmekarte meldet sie das Ergebnis des Auftrags selbst: dieser
  * eine Auftrag hat keins, solange er auf einen Menschen wartet.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
 
@@ -51,18 +51,33 @@ export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string |
   const { t } = useTranslation()
   const [plan, setPlan] = useState<(Aufraeumplan & { auftragId: string }) | null>(null)
   const [laeuft, setLaeuft] = useState(false)
+  // Der Rückfall, falls das Ereignis keine Kennung trägt. In einem Ref und
+  // nicht in den Abhängigkeiten des Listeners: der müsste sich sonst bei jeder
+  // neuen Kennung ab- und wieder anmelden, und beides ist asynchron — genau in
+  // dieses Fenster fällt das Ereignis, auf das er wartet.
+  const rueckfallId = useRef<string | null>(null)
+  useEffect(() => {
+    rueckfallId.current = offenerAuftragId
+  }, [offenerAuftragId])
 
   useEffect(() => {
     const abmelden = listen<Aufraeumplan>(EREIGNIS_AUFRAEUMEN, (ereignis) => {
-      if (!offenerAuftragId) {
+      // Die Kennung kommt aus dem Ereignis: sie gehört zu dem Auftrag, der
+      // gefragt hat. Vorher stand hier der Zustand der Oberfläche, und der
+      // stimmt nur, solange er rechtzeitig gesetzt wurde und keine ältere
+      // Kennung mehr trägt — sonst quittiert ein Klick den falschen Auftrag.
+      // Ab hier gilt allein `plan.auftragId`; die Nutzlast trägt ihr rohes
+      // `auftrag_id` zwar mit, aber gemeldet wird nie danach.
+      const auftragId = ereignis.payload.auftrag_id ?? rueckfallId.current
+      if (!auftragId) {
         return
       }
-      setPlan({ ...ereignis.payload, auftragId: offenerAuftragId })
+      setPlan({ ...ereignis.payload, auftragId })
     })
     return () => {
       void abmelden.then((weg) => weg())
     }
-  }, [offenerAuftragId])
+  }, [])
 
   const entscheiden = useCallback(
     async (ja: boolean) => {
@@ -104,6 +119,17 @@ export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string |
   const leeren = plan.aktion === 'papierkorb_leeren'
   const hart = plan.aktion === 'endgueltig'
   const summe = plan.posten.reduce((zaehler, posten) => zaehler + (posten.bytes ?? 0), 0)
+  // In Müllordnern überspringt Rust den Papierkorb bewusst (dort wäre er nur
+  // eine zweite Kopie desselben Mülls, `aufraeumen::ausfuehren`). Der Warntext
+  // muss das mitnehmen: sonst liest der Mensch „lässt sich zurückholen“ und
+  // bestätigt in Wahrheit ein endgültiges Löschen. Die Betreiberzusage lautet
+  // wörtlich „dann wird es aber auch gesagt“.
+  const sofortWeg = plan.posten.filter((posten) => posten.zone === 'muell')
+  const warnung = hart || leeren
+    ? 'mss.aufraeumen.warnungHart'
+    : sofortWeg.length > 0
+      ? 'mss.aufraeumen.warnungGemischt'
+      : 'mss.aufraeumen.warnungWeich'
 
   return (
     <div className="msm-modal-overlay">
@@ -129,6 +155,7 @@ export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string |
                   <span className="shrink-0 tabular-nums">
                     {posten.ungefaehr ? '≥ ' : ''}{groesse(posten.bytes)}
                     {posten.zone === 'system' ? ` · ${t('mss.aufraeumen.system')}` : ''}
+                    {posten.zone === 'muell' ? ` · ${t('mss.aufraeumen.sofortWeg')}` : ''}
                   </span>
                 </li>
               ))}
@@ -148,7 +175,7 @@ export function Aufraeumkarte({ offenerAuftragId }: { offenerAuftragId: string |
         )}
 
         <p className="mt-3 text-xs text-on-surface-variant">
-          {t(hart || leeren ? 'mss.aufraeumen.warnungHart' : 'mss.aufraeumen.warnungWeich')}
+          {t(warnung, { anzahl: sofortWeg.length })}
         </p>
 
         <div className="mt-5 flex gap-2">

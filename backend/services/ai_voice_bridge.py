@@ -318,6 +318,7 @@ class Sprachbruecke:
         http_client: httpx.AsyncClient,
         hoechstdauer: float = MAX_SITZUNGSSEKUNDEN,
         herkunft: str = "panel",
+        familie: str | None = None,
     ) -> None:
         self._browser = browser
         self._user_id = user_id
@@ -338,6 +339,14 @@ class Sprachbruecke:
         #: Handshake-Token (`dependencies.ws_session_herkunft`) und steht fuer
         #: die ganze Sitzung fest, wie alles andere an dieser Verbindung.
         self._herkunft = herkunft
+        #: **Welcher** Rechner spricht — die Refresh-Familie der Sitzung, aus
+        #: demselben Handshake-Token (`dependencies.ws_session_familie`). Die
+        #: Herkunft sagt „App oder Browser", diese Kennung sagt „welche App".
+        #: Ohne sie trug jeder gesprochene Lauf `familie=None`, und ein „schau
+        #: auf meinen Bildschirm" landete bei irgendeinem gekoppelten Gerät —
+        #: obwohl feststeht, in welches Mikrofon gesprochen wurde. ``None`` für
+        #: den Browser und für Token von vor dem Anspruch.
+        self._familie = familie
 
         self._erkennung = ai_voice_vad.Pausenerkennung()
         self._lage = Lage()
@@ -694,6 +703,12 @@ class Sprachbruecke:
             # als Subprotokoll im Handshake, und die Herkunft daraus gilt fuer
             # jeden Lauf dieser Sitzung. Ein Browser bleibt "panel".
             herkunft=self._herkunft,
+            # Und **welcher** Rechner. Der Sprachweg ist der Hauptweg der App:
+            # „schau auf meinen Bildschirm" und „nimm mal die Maus" kommen
+            # überwiegend gesprochen an. Ohne diese Zeile trug der Lauf
+            # `familie=None`, und sein Auftrag war wieder für jedes gekoppelte
+            # Gerät abholbar (`desktop_job_service.naechster`).
+            familie=self._familie,
         )
         if run_id is None:
             code = fehler[0] if fehler else "AI_PROVIDER_UNAVAILABLE"

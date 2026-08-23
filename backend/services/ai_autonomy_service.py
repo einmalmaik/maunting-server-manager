@@ -49,6 +49,49 @@ def resolve_grant(
     return by_scope.get(None)
 
 
+def hat_engere_server_freigabe(
+    db: Session, *, user_id: int, panelweit: AiAutonomyGrant
+) -> bool:
+    """Gibt es eine Serverzeile, die enger ist als diese panelweite Freigabe?
+
+    Die Frage stellt der Lageblock. Er fragt mit ``server_id=None``, bekommt die
+    panelweite Freigabe und sagt dem Modell daraufhin, Schreibvorschläge liefen
+    sofort. `resolve_grant` lässt aber die genauere Angabe gewinnen, und
+    `autonomy_allows` schlägt jeden Vorschlag gegen **deren** Zeile nach. Auf
+    einem so eingeschränkten Server wartet der Vorschlag also doch auf den
+    Klick — die unbedingte Zusage wäre dort eine Falschauskunft, und das Modell
+    meldete Vollzug, während die Karte unbeantwortet steht.
+
+    Enger heißt zweierlei, und beides endet gleich: abgeschaltet (dann trägt
+    `autonomie_grundlage` nicht), oder ein kleineres Budget — denn gezählt wird
+    in `hourly_usage` **benutzerweit**, gehalten wird die Zahl aber gegen das
+    Budget dieser Zeile. Erwartet wird deshalb die tragende panelweite Freigabe
+    (aktiv, Budget größer Null); ein Server-Budget von Null ist dann von selbst
+    das kleinere.
+
+    Die Bedingung steht hier und nicht beim Aufrufer: `zustaendiger_freigeber`
+    hält fest, dass eine Freigabe über `resolve_grant` gesucht wird und **nie**
+    über eine eigene Abfrage auf `ai_autonomy_grants` — eine zweite Fassung
+    derselben Lesart außerhalb dieses Dienstes ist genau die Gelegenheit, an der
+    die beiden auseinanderlaufen.
+
+    Nur das Ob, keine Namen: welcher Server gemeint ist, beantwortet erst der
+    Vorschlag selbst.
+    """
+    zeilen = (
+        db.query(AiAutonomyGrant.enabled, AiAutonomyGrant.max_actions_per_hour)
+        .filter(
+            AiAutonomyGrant.user_id == user_id,
+            AiAutonomyGrant.server_id.isnot(None),
+        )
+        .all()
+    )
+    return any(
+        not aktiv or budget < panelweit.max_actions_per_hour
+        for aktiv, budget in zeilen
+    )
+
+
 def hourly_usage(db: Session, *, user_id: int, now: datetime | None = None) -> int:
     """Zaehlt die autonom erzeugten Aktionen der letzten Stunde."""
     since = (now or _now()) - timedelta(hours=1)

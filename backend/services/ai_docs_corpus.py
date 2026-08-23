@@ -121,7 +121,7 @@ SEITEN: dict[str, Seite] = {
         # Wie `Privacy.tsx` rendert, nicht wie `de.json` sortiert.
         reihenfolge=(
             "scope", "accounts", "infrastructure", "protection", "providers",
-            "ai", "hoster", "credentials", "storage", "retention",
+            "ai", "desktopApp", "hoster", "credentials", "storage", "retention",
             "responsibility",
         ),
     ),
@@ -130,8 +130,8 @@ SEITEN: dict[str, Seite] = {
 # Stand der Datenschutzerklaerung. Er steht als Literal in `Privacy.tsx` und in
 # keiner Sprachdatei — also genau die zwei Angaben, die ein Modell sonst
 # erfindet. Ein Test haelt sie gegen die TSX-Datei.
-DATENSCHUTZ_VERSION = "2.5"
-DATENSCHUTZ_STAND = "2026-08-13"
+DATENSCHUTZ_VERSION = "2.6"
+DATENSCHUTZ_STAND = "2026-08-23"
 
 # `de.json` fuehrt neben `privacyPolicy` einen zweiten, **toten** Namensraum
 # `privacy` — sieben Schluessel, darunter "6. Verschluesselte Cloud-Backups

@@ -162,6 +162,22 @@ _REPARATUR_RECHTE = {
     "reallocate_port": "server.network.manage",
 }
 
+#: Welches Recht jeder Lebenszyklus-Vorgang verlangt. Starten, Stoppen und
+#: Neustarten sind drei verschiedene Rechte — deshalb passt der Lebenszyklus in
+#: keine Zeile von `ai_tool_registry.WERKZEUGE`, und deshalb steht die Zuordnung
+#: hier neben `_REPARATUR_RECHTE`.
+#:
+#: Die Schlüssel sind zugleich die Werteliste der Formprüfung in
+#: `create_proposal`. Vorher stand die Menge dort zweimal als Literal und hier
+#: ein drittes Mal: wer eine Operation nur an einer der Stellen ergänzt, bekommt
+#: je nach Stelle die Rechte-Ablehnung statt der Formmeldung — oder umgekehrt
+#: eine Formmeldung, obwohl die vorgezogene Prüfung eben noch bestanden wurde.
+_LIFECYCLE_RECHTE = {
+    "start": "server.start",
+    "stop": "server.stop",
+    "restart": "server.restart",
+}
+
 
 def _permission_for(tool_name: str, payload: dict) -> tuple[str, ...]:
     """Die Permission-Keys, die dieses Werkzeug verlangt — alle zugleich.
@@ -188,11 +204,7 @@ def _permission_for(tool_name: str, payload: dict) -> tuple[str, ...]:
     Strenger als jede gueltige Wahl bleibt die Vereinigung trotzdem.
     """
     if tool_name == "propose_server_lifecycle":
-        recht = {
-            "start": "server.start",
-            "stop": "server.stop",
-            "restart": "server.restart",
-        }.get(str(payload.get("operation")), "")
+        recht = _LIFECYCLE_RECHTE.get(str(payload.get("operation")), "")
         return (recht,) if recht else ()
     if tool_name == "propose_server_repair":
         recht = _REPARATUR_RECHTE.get(str(payload.get("action")), "")
@@ -2155,9 +2167,14 @@ def create_proposal(
         # ungueltiger Vorgang die Rechte-Ablehnung statt der Formmeldung, die
         # dem Modell weiterhilft. Beide Pruefungen lesen keinen Zustand; sie
         # verraten also nichts, was die Rechtepruefung schuetzen muesste.
-        if tool_name == "propose_server_lifecycle" and rest.get("operation") not in {
-            "start", "stop", "restart",
-        }:
+        #
+        # Die Schlüsselmenge wird hier mitgeprüft und nicht noch einmal im
+        # Payload-Bau weiter unten. Dieselbe Prüfung an zwei Stellen hieße:
+        # zwei Wertelisten, die auseinanderlaufen können, und eine zweite
+        # Meldung für einen Fall, über den die erste schon entschieden hat.
+        if tool_name == "propose_server_lifecycle" and (
+            set(rest) != {"operation"} or rest.get("operation") not in _LIFECYCLE_RECHTE
+        ):
             raise AiActionValidationError("Ungueltige Lifecycle-Aktion")
         if tool_name == "propose_server_repair":
             if set(rest) != {"action"}:
@@ -2167,8 +2184,8 @@ def create_proposal(
         _require_tool_permission(db, user, server.id, tool_name, rest)
 
         if tool_name == "propose_server_lifecycle":
-            if set(rest) != {"operation"} or rest.get("operation") not in {"start", "stop", "restart"}:
-                raise AiActionValidationError("Ungueltige Lifecycle-Aktion")
+            # Geprüft ist schon oben, vor der Rechteprüfung — hier bleibt der
+            # reine Bau.
             payload = {"operation": rest["operation"]}
             preview = {
                 "operation": rest["operation"],

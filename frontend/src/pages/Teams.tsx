@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Plus, Server, Trash2, User, UserPlus, Users, UsersRound } from 'lucide-react'
+import { Check, LogOut, Mail, Plus, Server, Trash2, User, UserPlus, Users, UsersRound, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
 import { api, SanitizedApiError } from '@/api/client'
-import { teamsApi, type Team, type TeamDetail, type TeamServer } from '@/api/teams'
+import {
+  teamsApi,
+  type Team,
+  type TeamDetail,
+  type TeamInvitation,
+  type TeamMember,
+  type TeamServer,
+} from '@/api/teams'
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiSkillManager } from '@/components/ai/AiSkillManager'
 import type { AiKnowledgeScope, AiSkillScope } from '@/components/ai/knowledgeScope'
@@ -12,6 +19,7 @@ import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { Button, Dropdown, MultiSelect, Switch } from '@/Singra/UI'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { useAuthStore } from '@/stores/authStore'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
@@ -70,6 +78,9 @@ export function Teams() {
   const canCreate = useHasPermission('teams.create')
   const canReadUsers = useHasPermission('users.read')
   const canUseSkills = useHasPermission('ai.skills.use')
+  // Die eigene Zeile in der Mitgliederliste trägt nicht „Mitglied entfernen",
+  // sondern „Team verlassen" — und sie trägt es auch ohne Gründerrechte.
+  const benutzerId = useAuthStore((state) => state.user?.id ?? null)
 
   const [bereich, setBereich] = useState<Bereich>('personal')
   const [teams, setTeams] = useState<Team[]>([])
@@ -77,6 +88,9 @@ export function Teams() {
   const [detail, setDetail] = useState<TeamDetail | null>(null)
   const [assignable, setAssignable] = useState<TeamServer[]>([])
   const [users, setUsers] = useState<UserOption[]>([])
+  // Die Einladungen, die an *diesen* Benutzer gehen. Sie hängen an keinem Team
+  // aus `teams` — solange er nicht angenommen hat, gehört er keinem davon an.
+  const [einladungen, setEinladungen] = useState<TeamInvitation[]>([])
   const [newName, setNewName] = useState('')
   const [newMemberId, setNewMemberId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -99,16 +113,25 @@ export function Teams() {
     let active = true
     Promise.all([
       teamsApi.list(),
-      // Ohne `users.read` kann man niemanden aufnehmen — die Liste bleibt dann
+      // Ohne `users.read` kann man niemanden einladen — die Liste bleibt dann
       // leer statt die ganze Seite scheitern zu lassen.
       canReadUsers ? api<UserOption[]>('/admin/users').catch(() => [] as UserOption[])
         : Promise.resolve([] as UserOption[]),
+      // Einladungen hängen an keinem Recht: bekommen kann sie jeder, und
+      // entscheiden darf über sie nur der Eingeladene selbst.
+      teamsApi.invitations(),
     ])
-      .then(([rows, userRows]) => {
+      .then(([rows, userRows, invitationRows]) => {
         if (!active) return
         setTeams(rows)
         setSelectedId(rows.find((row) => !row.is_personal)?.id ?? null)
         setUsers(userRows.map((row) => ({ id: row.id, username: row.username })))
+        setEinladungen(invitationRows)
+        // Wer eine Einladung offen hat, soll sie sehen und nicht suchen. Die
+        // Seite startet sonst bei „Persönlich", und genau der Benutzer, der
+        // noch keinem Team angehört, fände dort nur den Hinweis, dass er
+        // keinem Team angehört.
+        if (invitationRows.length > 0) setBereich('teams')
       })
       .catch((error: unknown) => {
         if (active) toast.error(error instanceof SanitizedApiError ? error.message : t('teams.errors.load'))
@@ -184,16 +207,104 @@ export function Teams() {
     }, 'teams.removed')
   }
 
-  const addMember = async () => {
+  /**
+   * Spricht eine Einladung aus — und nimmt **niemanden** auf.
+   *
+   * Die Antwort führt den Eingeladenen unter `invitations`; die Mitgliederliste
+   * und damit `member_count` ändern sich erst mit seiner Zusage. Deshalb steht
+   * hier auch kein `reloadTeams()` mehr: es gäbe dieselbe Liste zurück.
+   */
+  const inviteMember = async () => {
     if (!detail || !newMemberId) return
     await run(async () => {
-      const updated = await teamsApi.addMember(detail.id, {
+      setDetail(await teamsApi.inviteMember(detail.id, {
         user_id: Number(newMemberId), can_manage_skills: false, can_manage_memory: false,
-      })
-      setDetail(updated)
+      }))
       setNewMemberId(null)
+    }, 'teams.memberInvited')
+  }
+
+  /**
+   * Zusagen. Beim Beitritt entsteht hier die Mitgliedschaft, bei einer
+   * Anhebung stellt sich der Verwaltungsschalter um — auslösen kann beides
+   * nur der Betroffene, deshalb steht beides an derselben Stelle.
+   *
+   * Das zugesagte Team wird gleich das ausgewählte, sonst bliebe ein Beitritt
+   * eine Zeile, die verschwindet. Die Antwort trägt seinen frischen Stand:
+   * bei einer Anhebung ist es dasselbe Team wie eben, und ohne sie stünden
+   * darunter weiter die alten Schalter.
+   */
+  const acceptInvitation = async (invitation: TeamInvitation, anhebung: boolean) => {
+    await run(async () => {
+      const aktualisiert = await teamsApi.acceptInvitation(invitation.team_id)
+      setEinladungen((rows) => rows.filter((row) => row.team_id !== invitation.team_id))
       await reloadTeams()
-    }, 'teams.memberAdded')
+      setSelectedId(invitation.team_id)
+      setDetail(aktualisiert)
+    }, anhebung ? 'teams.upgradeAccepted' : 'teams.invitationAccepted')
+  }
+
+  const declineInvitation = async (invitation: TeamInvitation, anhebung: boolean) => {
+    await run(async () => {
+      await teamsApi.declineInvitation(invitation.team_id)
+      setEinladungen((rows) => rows.filter((row) => row.team_id !== invitation.team_id))
+    }, anhebung ? 'teams.upgradeDeclined' : 'teams.invitationDeclined')
+  }
+
+  /**
+   * Setzt die beiden Schalter eines Mitglieds — und meldet, was wirklich
+   * geschehen ist.
+   *
+   * Zurücknehmen tut das Backend sofort, anheben nicht: ein nachträglich
+   * eingeschalteter Schalter macht das Team zum Lernziel der KI des
+   * Betroffenen, und darüber entscheidet nur er. Aus der Anhebung wird
+   * deshalb eine Einladung; die Antwort führt ihn dann unter `invitations`,
+   * die Mitgliederzeile bleibt wie sie war, und der Schalter springt sichtbar
+   * zurück. „Gespeichert." wäre genau dort die Unwahrheit.
+   */
+  const setMemberSwitches = async (
+    member: TeamMember, next: { can_manage_skills: boolean; can_manage_memory: boolean },
+  ) => {
+    if (!detail) return
+    await run(async () => {
+      const aktualisiert = await teamsApi.updateMember(detail.id, member.user_id, next)
+      setDetail(aktualisiert)
+      const angefragt = aktualisiert.invitations.some((row) => row.user_id === member.user_id)
+      toast.success(angefragt
+        ? t('teams.memberConsentPending', { name: member.username })
+        : t('teams.memberSaved'))
+    })
+  }
+
+  const removeMember = async (member: TeamMember) => {
+    if (!detail) return
+    await run(async () => {
+      setDetail(await teamsApi.removeMember(detail.id, member.user_id))
+      await reloadTeams()
+    }, 'teams.memberRemoved')
+  }
+
+  /**
+   * Selbst gehen. Das Gegenstück zur Einladung: wer zustimmen muss, um
+   * beizutreten, kommt auch ohne fremde Zustimmung wieder heraus — das
+   * Backend lässt den eigenen Austritt seit dem 23.08.2026 ausdrücklich zu
+   * (`team_service.remove_member`). Danach ist das Team keins mehr von
+   * diesem Benutzer, also fällt auch die Auswahl darauf weg.
+   */
+  const leaveTeam = async (team: TeamDetail) => {
+    if (benutzerId === null) return
+    if (!await confirm({
+      title: t('teams.leaveTitle'),
+      message: t('teams.leaveConfirm', { name: team.name }),
+      confirmText: t('teams.leave'),
+      danger: true,
+    })) return
+    await run(async () => {
+      await teamsApi.removeMember(team.id, benutzerId)
+      setSelectedId(null)
+      const rows = await reloadTeams()
+      setSelectedId(rows.find((row) => !row.is_personal)?.id ?? null)
+    }, 'teams.leftTeam')
   }
 
   const setServerKeys = async (serverId: number, keys: string[]) => {
@@ -213,9 +324,32 @@ export function Teams() {
     )
   }
 
+  // Wer schon eingeladen ist, steht nicht noch einmal zur Wahl. Sonst klickt
+  // der Gründer denselben Benutzer beliebig oft an und sieht nie einen
+  // Unterschied — aufgenommen wird davon niemand, das Backend überschreibt nur
+  // dieselbe offene Einladung.
   const memberCandidates = users.filter(
-    (user) => !detail?.members.some((member) => member.user_id === user.id),
+    (user) => !detail?.members.some((member) => member.user_id === user.id)
+      && !detail?.invitations.some((invitation) => invitation.user_id === user.id),
   )
+
+  // ── Zwei Angebote in einer Liste ──────────────────────────────────
+  // `invitations` führt beides: den Beitritt eines Nichtmitglieds und die
+  // Anhebung eines Verwaltungsschalters bei einem, der längst dabei ist. Für
+  // den Angefragten ist das ein Unterschied ums Ganze — „noch kein Mitglied"
+  // stimmt beim zweiten Fall nicht, und „Team beigetreten." auch nicht.
+  // Unterscheiden lässt sich beides an der Mitgliederliste desselben Teams.
+  const istMitglied = (invitation: TeamInvitation) =>
+    detail?.members.some((member) => member.user_id === invitation.user_id) ?? false
+  const offeneBeitritte = detail?.invitations.filter((row) => !istMitglied(row)) ?? []
+  const offeneAnhebungen = detail?.invitations.filter(istMitglied) ?? []
+
+  // Dieselbe Trennung von der anderen Seite: steht das Team schon in *meiner*
+  // Teamliste, bin ich dort Mitglied — dann ist das Angebot eine Anhebung.
+  const meinTeam = (invitation: TeamInvitation) =>
+    teams.some((team) => team.id === invitation.team_id)
+  const meineBeitritte = einladungen.filter((row) => !meinTeam(row))
+  const meineAnhebungen = einladungen.filter(meinTeam)
 
   return (
     <div className="msm-page space-y-5">
@@ -263,6 +397,39 @@ export function Teams() {
           </section>
 
           {detail?.is_personal && canUseSkills && <AiSkillManager scope={skillScope(detail)} />}
+        </>
+      )}
+
+      {/* ── Angebote an dich ──────────────────────────────────────────
+          Der Gegenpart zur Einladung: weder eine Mitgliedschaft noch ein
+          Verwaltungsschalter entsteht ohne den Betroffenen. Bis eben trug ihn
+          der Gründer einfach ein — jetzt ist das hier die Stelle, an der ein
+          Team überhaupt erst zustande kommt. Sie steht deshalb vor allem
+          anderen im Teambereich.
+
+          Zwei Blöcke, weil zwei Dinge angeboten werden: der Beitritt bringt
+          Wissen und Serverrechte des Teams mit, die Anhebung nur einen
+          Schalter an einer Mitgliedschaft, die es längst gibt. */}
+      {bereich === 'teams' && (
+        <>
+          <AngebotsBlock
+            kennung="team-my-invitations"
+            titel={t('teams.myInvitations')}
+            hinweis={t('teams.myInvitationsHint')}
+            einladungen={meineBeitritte}
+            busy={busy}
+            onAnnehmen={(invitation) => void acceptInvitation(invitation, false)}
+            onAblehnen={(invitation) => void declineInvitation(invitation, false)}
+          />
+          <AngebotsBlock
+            kennung="team-my-upgrades"
+            titel={t('teams.myUpgrades')}
+            hinweis={t('teams.myUpgradesHint')}
+            einladungen={meineAnhebungen}
+            busy={busy}
+            onAnnehmen={(invitation) => void acceptInvitation(invitation, true)}
+            onAblehnen={(invitation) => void declineInvitation(invitation, true)}
+          />
         </>
       )}
 
@@ -373,11 +540,9 @@ export function Teams() {
                     <Switch
                       checked={member.can_manage_skills}
                       disabled={!detail.is_owner || busy}
-                      onCheckedChange={(next) => void run(async () => {
-                        setDetail(await teamsApi.updateMember(detail.id, member.user_id, {
-                          can_manage_skills: next, can_manage_memory: member.can_manage_memory,
-                        }))
-                      }, 'teams.memberSaved')}
+                      onCheckedChange={(next) => void setMemberSwitches(member, {
+                        can_manage_skills: next, can_manage_memory: member.can_manage_memory,
+                      })}
                       aria-label={`${t('teams.manageSkills')}: ${member.username}`}
                     />
                   </div>
@@ -386,21 +551,33 @@ export function Teams() {
                     <Switch
                       checked={member.can_manage_memory}
                       disabled={!detail.is_owner || busy}
-                      onCheckedChange={(next) => void run(async () => {
-                        setDetail(await teamsApi.updateMember(detail.id, member.user_id, {
-                          can_manage_skills: member.can_manage_skills, can_manage_memory: next,
-                        }))
-                      }, 'teams.memberSaved')}
+                      onCheckedChange={(next) => void setMemberSwitches(member, {
+                        can_manage_skills: member.can_manage_skills, can_manage_memory: next,
+                      })}
                       aria-label={`${t('teams.manageMemory')}: ${member.username}`}
                     />
                   </div>
-                  {detail.is_owner && member.role !== 'owner' && (
+                  {/* Derselbe Platz, zwei Bedeutungen: der Gründer entlässt
+                      hier ein Mitglied, jedes Mitglied geht hier selbst.
+                      Ausgenommen bleibt nur der Gründer — sein Konto ist die
+                      Obergrenze für alles, was das Team weitergibt. Ohne den
+                      Austritt käme niemand mehr heraus: hinein führt seit dem
+                      23.08.2026 nur die eigene Zusage, und die gilt für
+                      immer. */}
+                  {member.user_id === benutzerId && member.role !== 'owner' && (
                     <Button
                       type="button" variant="ghost" size="sm" disabled={busy}
-                      onClick={() => void run(async () => {
-                        setDetail(await teamsApi.removeMember(detail.id, member.user_id))
-                        await reloadTeams()
-                      }, 'teams.memberRemoved')}
+                      onClick={() => void leaveTeam(detail)}
+                      aria-label={t('teams.leave')}
+                    >
+                      <LogOut className="h-4 w-4" aria-hidden="true" />
+                      {t('teams.leave')}
+                    </Button>
+                  )}
+                  {detail.is_owner && member.user_id !== benutzerId && member.role !== 'owner' && (
+                    <Button
+                      type="button" variant="ghost" size="sm" disabled={busy}
+                      onClick={() => void removeMember(member)}
                       aria-label={`${t('teams.removeMember')}: ${member.username}`}
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -410,11 +587,36 @@ export function Teams() {
               ))}
             </ul>
 
+            {/* Offene Angebote stehen sichtbar neben den Mitgliedern, aber
+                nicht in derselben Liste. Die gestrichelte Linie sagt das ohne
+                Worte — bei den Eingeladenen, weil sie noch keine Mitglieder
+                sind, bei den Anhebungen, weil der Schalter noch nicht gilt.
+                Zurücknehmen kann der Gründer beides nicht: die Entscheidung
+                gehört dem, den sie betrifft. */}
+            {detail.is_owner && (
+              <>
+                <OffeneGruppe
+                  kennung="team-pending-invitations"
+                  titel={t('teams.pendingInvitations')}
+                  status={t('teams.invitationPending')}
+                  hinweis={t('teams.pendingInvitationsHint')}
+                  einladungen={offeneBeitritte}
+                />
+                <OffeneGruppe
+                  kennung="team-pending-upgrades"
+                  titel={t('teams.pendingUpgrades')}
+                  status={t('teams.upgradePending')}
+                  hinweis={t('teams.pendingUpgradesHint')}
+                  einladungen={offeneAnhebungen}
+                />
+              </>
+            )}
+
             {detail.is_owner && memberCandidates.length > 0 && (
               <div className="mt-4 flex flex-wrap items-end gap-3">
                 <label className="min-w-[14rem] flex-1 space-y-1.5">
                   <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                    {t('teams.addMember')}
+                    {t('teams.inviteMember')}
                   </span>
                   <Dropdown
                     value={newMemberId}
@@ -422,12 +624,12 @@ export function Teams() {
                     options={memberCandidates.map((user) => ({ value: String(user.id), label: user.username }))}
                     placeholder={t('teams.selectUser')}
                     disabled={busy}
-                    aria-label={t('teams.addMember')}
+                    aria-label={t('teams.inviteMember')}
                   />
                 </label>
-                <Button type="button" disabled={busy || !newMemberId} onClick={() => void addMember()}>
+                <Button type="button" disabled={busy || !newMemberId} onClick={() => void inviteMember()}>
                   <UserPlus className="h-4 w-4" aria-hidden="true" />
-                  {t('teams.addMember')}
+                  {t('teams.inviteMember')}
                 </Button>
               </div>
             )}
@@ -472,6 +674,137 @@ export function Teams() {
           )}
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * Was ein Angebot mitbringt. Wer zusagt, soll sehen, wozu — und der Gründer,
+ * was er angeboten hat: der Schalter in der Mitgliederzeile springt bis zur
+ * Zusage zurück und verrät es nicht.
+ */
+function AngeboteneSchalter({ invitation }: { invitation: TeamInvitation }) {
+  const { t } = useTranslation()
+  if (!invitation.can_manage_skills && !invitation.can_manage_memory) return null
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {invitation.can_manage_skills && (
+        <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs text-on-surface-variant">
+          {t('teams.manageSkills')}
+        </span>
+      )}
+      {invitation.can_manage_memory && (
+        <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs text-on-surface-variant">
+          {t('teams.manageMemory')}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Ein Block eigener Angebote — Beitritte oder Anhebungen.
+ *
+ * Zu entscheiden ist beidesmal dasselbe (annehmen oder ablehnen), verschieden
+ * ist nur, worüber: der Titel und der Hinweis darüber sagen es, die Zeilen
+ * sehen deshalb gleich aus.
+ */
+function AngebotsBlock({
+  kennung, titel, hinweis, einladungen, busy, onAnnehmen, onAblehnen,
+}: {
+  kennung: string
+  titel: string
+  hinweis: string
+  einladungen: TeamInvitation[]
+  busy: boolean
+  onAnnehmen: (invitation: TeamInvitation) => void
+  onAblehnen: (invitation: TeamInvitation) => void
+}) {
+  const { t } = useTranslation()
+  if (einladungen.length === 0) return null
+
+  return (
+    <section className="msm-card p-6" aria-labelledby={kennung}>
+      <div className="flex items-center gap-2">
+        <Mail className="h-5 w-5 text-primary" aria-hidden="true" />
+        <h2 id={kennung} className="font-headline text-lg font-semibold text-on-surface">
+          {titel}
+        </h2>
+      </div>
+      <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">{hinweis}</p>
+
+      <ul className="mt-4 space-y-2">
+        {einladungen.map((invitation) => (
+          <li
+            key={invitation.team_id}
+            className="flex flex-wrap items-center gap-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4"
+          >
+            <span className="min-w-[10rem] flex-1 text-sm text-on-surface">
+              <span className="font-medium">{invitation.team_name}</span>
+              {invitation.invited_by_username && (
+                <span className="ml-2 text-xs text-on-surface-variant">
+                  {t('teams.invitedBy', { name: invitation.invited_by_username })}
+                </span>
+              )}
+            </span>
+            <AngeboteneSchalter invitation={invitation} />
+            <div className="flex items-center gap-2">
+              <Button
+                type="button" size="sm" disabled={busy}
+                onClick={() => onAnnehmen(invitation)}
+                aria-label={`${t('teams.acceptInvitation')}: ${invitation.team_name}`}
+              >
+                <Check className="h-4 w-4" aria-hidden="true" />
+                {t('teams.acceptInvitation')}
+              </Button>
+              <Button
+                type="button" variant="ghost" size="sm" disabled={busy}
+                onClick={() => onAblehnen(invitation)}
+                aria-label={`${t('teams.declineInvitation')}: ${invitation.team_name}`}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+                {t('teams.declineInvitation')}
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+/** Die Gegenseite: was der Gründer ausgesprochen hat und was darauf noch fehlt. */
+function OffeneGruppe({
+  kennung, titel, status, hinweis, einladungen,
+}: {
+  kennung: string
+  titel: string
+  status: string
+  hinweis: string
+  einladungen: TeamInvitation[]
+}) {
+  if (einladungen.length === 0) return null
+
+  return (
+    <div className="mt-5">
+      <h3 id={kennung} className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+        {titel}
+      </h3>
+      <ul className="mt-2 space-y-2" aria-labelledby={kennung}>
+        {einladungen.map((invitation) => (
+          <li
+            key={invitation.user_id}
+            className="flex flex-wrap items-center gap-4 rounded-xl border border-dashed border-outline-variant/50 p-4"
+          >
+            <span className="min-w-[8rem] flex-1 text-sm font-medium text-on-surface">
+              {invitation.username}
+            </span>
+            <AngeboteneSchalter invitation={invitation} />
+            <span className="text-xs text-on-surface-variant">{status}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 max-w-3xl text-xs text-on-surface-variant">{hinweis}</p>
     </div>
   )
 }

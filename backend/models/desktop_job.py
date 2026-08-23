@@ -63,6 +63,23 @@ class DesktopJob(Base):
     tool_call_id: Mapped[str] = mapped_column(String(64), nullable=False)
     tool_name: Mapped[str] = mapped_column(String(64), nullable=False)
 
+    # **Welcher** Rechner. `user_id` reicht dafuer nicht: ein Benutzer darf
+    # mehrere Geraete koppeln, und jedes fragt im Sekundentakt nach Arbeit —
+    # ohne diese Spalte bekommt den Auftrag der, der zuerst fragt, und nicht
+    # der, an dem der Mensch sitzt. Fuer einen Blick auf den Bildschirm oder
+    # eine Uebernahme von Maus und Tastatur ist das der falsche Rechner.
+    #
+    # Der Wert ist die Refresh-Familie der Sitzung, aus der der Lauf kam
+    # (`dependencies.session_familie`) — derselbe Wert, unter dem die
+    # Geraeteliste das Geraet fuehrt und einzeln widerruft.
+    #
+    # `nullable`, und das bleibt es: ein Auftrag ohne Kennung ist von **jedem**
+    # Geraet abholbar (`desktop_job_service.naechster`). Das gilt fuer den
+    # Bestand aus der Zeit vor dieser Spalte — sonst haetten beim Deploy alle
+    # wartenden Auftraege bis zu ihrer Frist gehangen — und fuer Laeufe, deren
+    # Einstieg die Familie (noch) nicht mitgibt.
+    device_family: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Argumente und Ergebnis liegen verschluesselt (DIS, AAD an die Auftrags-ID
     # gebunden). Beides kann Dateiinhalte und Pfade aus dem Rechner des
     # Benutzers tragen — das ist genau die Sorte Daten, die in der Datenbank

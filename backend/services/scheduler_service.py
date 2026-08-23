@@ -1025,10 +1025,12 @@ async def _ai_tasks_task() -> None:
     der ein Termin eingehalten wird. Feiner waere unehrlich: der Lauf selbst
     dauert laenger als eine Minute.
 
-    **Drei Handgriffe, einzeln gekapselt** (die Zwei-Block-Form aus
+    **Fuenf Handgriffe, einzeln gekapselt** (die Zwei-Block-Form aus
     `_ai_guardian_task`): faellige Auftraege starten, geparkte Worker wecken
-    (``waiting_wake`` mit verstrichener Frist), offene Meldungen zustellen,
-    wenn das Gespraech Ruhe hat. Scheitert einer, laufen die anderen trotzdem.
+    (``waiting_wake`` mit verstrichener Frist), Laeufe nachholen, deren
+    Bestaetigung im falschen Moment kam, verfallene Desktop-Auftraege
+    schliessen, offene Meldungen zustellen, wenn das Gespraech Ruhe hat.
+    Scheitert einer, laufen die anderen trotzdem.
     """
     from database import SessionLocal
     from services.ai_task_service import faellige_aufgaben_bearbeiten
@@ -1051,6 +1053,23 @@ async def _ai_tasks_task() -> None:
         except Exception as exc:
             db.rollback()
             logger.warning("Error in AI wake task: %s", exc)
+        try:
+            from services import ai_run_service
+
+            # Bestätigungen, die im falschen Moment kamen. Zwischen der Karte
+            # im Chat und dem Parken des Laufs liegt eine Schlussrunde; wer
+            # dort klickt, dessen Weckruf verpufft (`darf_fortsetzen` sieht
+            # 'running'). Ohne diesen Handgriff parkte der Lauf danach für
+            # immer — dieselbe Nachhut wie `_verpuffte_wecken` bei den
+            # Desktop-Aufträgen.
+            nachgeholt = ai_run_service.verpuffte_bestaetigungen_wecken(db)
+            if nachgeholt:
+                logger.info(
+                    "KI-Laeufe: %s verpuffte Bestaetigung(en) nachgeholt", nachgeholt
+                )
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Error in AI confirmation catch-up: %s", exc)
         try:
             from services import desktop_job_service
 

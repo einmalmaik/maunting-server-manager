@@ -423,6 +423,56 @@ def test_the_spoken_conversation_is_the_one_that_is_typed(
     assert db.query(AiConversation).count() == 1
 
 
+def test_der_handshake_reicht_herkunft_und_geraet_an_die_bruecke(
+    client: TestClient, db, owner_user, monkeypatch
+) -> None:
+    """Der Produktionsweg vom Token bis zur Bruecke.
+
+    Die Bruecke selbst ist anderswo geprueft (test_ai_voice_ws_auth), und
+    genau das ist die Luecke, die dieser Test schliesst: bis zum 23.08.2026 las
+    der Endpunkt die Geraetekennung gar nicht erst aus dem Handshake. Jeder
+    Sprachlauf trug damit `familie=None`, und sein Auftrag an den Rechner war
+    wieder fuer jedes gekoppelte Geraet abholbar — auf dem Weg, auf dem "schau
+    auf meinen Bildschirm" ueberwiegend ankommt.
+
+    Die Bruecke wird ersetzt, weil hier nur die Uebergabe zaehlt: eine echte
+    Sitzung braeuchte eine Stimme am anderen Ende.
+    """
+    from dependencies import WS_BEARER_PROTOKOLL
+    from services import ai_voice_bridge
+    from services.auth_service import AuthService
+
+    _beide(db)
+    marke = AuthService.create_access_token({
+        "sub": owner_user.username,
+        "user_id": owner_user.id,
+        "jti": "ws-familie",
+        "geraet": "desktop",
+        "familie": "fam-laptop",
+    })
+
+    angekommen: dict = {}
+
+    class _StilleBruecke:
+        def __init__(self, browser, **kwargs) -> None:
+            angekommen.update(kwargs)
+
+        async def fuehren(self):
+            return ai_voice_bridge.Lage()
+
+    monkeypatch.setattr(ai_voice_bridge, "Sprachbruecke", _StilleBruecke)
+
+    with client.websocket_connect(
+        "/api/ai/voice/ws",
+        subprotocols=[WS_BEARER_PROTOKOLL, marke],
+        headers=ORIGIN,
+    ):
+        pass
+
+    assert angekommen["herkunft"] == "desktop"
+    assert angekommen["familie"] == "fam-laptop"
+
+
 def test_config_traegt_den_bearer_ws_marker(
     client: TestClient, owner_cookies: dict
 ) -> None:

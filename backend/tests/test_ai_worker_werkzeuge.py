@@ -146,6 +146,67 @@ class TestWorkerStart:
         assert run.reasoning is False
         assert run.reasoning_effort is None
 
+    def test_der_meldekanal_wird_gegen_die_liste_der_meldestelle_geprueft(
+        self,
+    ) -> None:
+        """Geprueft wird gegen die Liste, die der Konsument wirklich benutzt.
+
+        `models/ai_meldung.KANAELE` ist ausdruecklich eine eigene Kopie der
+        Aufgaben-Kanaele, „damit eine dortige Erweiterung nicht stillschweigend
+        hier gilt". Der Worker-Kanal wandert in den Rahmen und wird am Ende von
+        `ai_meldestelle.melden` verbraucht — nicht von den stehenden
+        Auftraegen.
+
+        Prueft `worker_start` gegen `ai_task.KANAELE`, dann kommt ein dort
+        ergaenzter Kanal (etwa 'webhook') durch, das Gehirn sagt dem Benutzer
+        die Zustellung darueber zu, und `melden` faellt bei unbekanntem Kanal
+        still auf 'chat' zurueck: der Benutzer wartet auf eine Meldung, die nie
+        auf dem versprochenen Weg kommt.
+
+        Beide Tupel sind heute gleich. Deshalb prueft dieser Test die Herkunft
+        und nicht den Inhalt — an der Gleichheit haengt sonst nichts.
+        """
+        from models.ai_meldung import KANAELE as MELDESTELLE
+
+        assert ai_worker_service.KANAELE is MELDESTELLE
+
+    def test_der_katalog_bietet_dieselben_kanaele_an_die_der_dienst_annimmt(
+        self,
+    ) -> None:
+        """Die andere Haelfte derselben Zusage: was angeboten wird, muss gelten.
+
+        Der Dienst gegen die richtige Liste zu pruefen genuegt nicht, solange
+        das `worker_start`-Schema dem Modell die andere anbietet — dann waere
+        der neue Kanal aus `ai_task.KANAELE` im Katalog sichtbar und am
+        Handler verboten, und das Modell liefe hinein, weil der Katalog es
+        eingeladen hat.
+
+        Auch hier die Herkunft statt des Inhalts: gleich sind beide heute
+        ohnehin.
+        """
+        from models.ai_meldung import KANAELE as MELDESTELLE
+        from services import ai_action_service
+
+        schema = next(
+            eintrag["function"]
+            for eintrag in ai_action_service._worker_tool_definitions()
+            if eintrag["function"]["name"] == "worker_start"
+        )
+        angeboten = schema["parameters"]["properties"]["kanal"]["enum"]
+        assert angeboten == list(MELDESTELLE)
+
+    def test_ein_unbekannter_kanal_wird_abgelehnt(self, db: Session) -> None:
+        """Kein stiller Rueckfall auf 'chat' im Handler.
+
+        Ein Formfehler kostet eine Runde, nie die Antwort: die Meldung nennt
+        die zulaessigen Werte, das Modell ruft noch einmal richtig auf.
+        """
+        user = _benutzer(db, "falscherkanal")
+        _provider(db)
+
+        with pytest.raises(AiActionValidationError, match="Meldekanal"):
+            _start(db, user, kanal="webhook")
+
     def test_der_deckel_zaehlt_auch_geparkte_laeufe(self, db: Session) -> None:
         user = _benutzer(db, "gedeckelt")
         _provider(db)
@@ -416,8 +477,8 @@ class TestWorkerAntwort:
             )
 
 
-class TestHerkunft:
-    """Ein Auftrag erbt die Welt, aus der er kam.
+class TestHerkunftUndGeraet:
+    """Ein Auftrag erbt die Welt, aus der er kam — und das Geraet dazu.
 
     Der Ausfall vom 22.08.2026: der Betreiber fragte in der Smart-System-App
     „wie voll ist meine C-Festplatte", und der Auftrag antwortete, er koenne
@@ -431,6 +492,13 @@ class TestHerkunft:
     das Gehirn wenigstens nachsehen (`GEHIRN_DESKTOP`) — die Vererbung der
     Herkunft bleibt trotzdem tragend, denn ein Auftrag, der Dateien anfassen
     oder aufraeumen soll, kann das nur mit ihr.
+
+    Die Herkunft allein sagt nur "aus der App". **Welche** App, sagt die
+    Refresh-Familie, und an ihr haengt, welcher von mehreren gekoppelten
+    Rechnern einen Desktop-Auftrag abholen darf
+    (`desktop_job_service.naechster`). Sie muss deshalb denselben Weg gehen:
+    geht sie zwischen zwei Laeufen desselben Fensters verloren, ist der
+    Auftrag wieder fuer jedes Geraet abholbar.
     """
 
     def _zustand(self, db: Session, worker_id: str) -> dict:
@@ -490,6 +558,132 @@ class TestHerkunft:
 
         assert antwort["delivered"] is True
         assert self._zustand(db, ergebnis["worker_id"]).get("herkunft") == "desktop"
+
+    def test_die_antwort_laesst_dem_auftrag_sein_geraet(self, db: Session) -> None:
+        """Dieselbe Uebergabe wie bei der Herkunft, eine Zeile daneben.
+
+        Der Zustand des Vorgaengers ist die einzige Quelle: die Anfrage, die
+        das Fenster geoeffnet hat, gibt es zu diesem Zeitpunkt nicht mehr.
+        Faellt die Kennung hier weg, verliert der naechste Desktop-Auftrag des
+        Auftrags seine Bindung — und der Blick auf den Bildschirm geht wieder
+        an den Rechner, der zuerst fragt.
+        """
+        user = _benutzer(db, "antwortgeraet")
+        _provider(db, name="Zugang-antwortgeraet")
+        ergebnis = _start(db, user, herkunft="desktop")
+        alter_lauf = (
+            db.query(AiRun)
+            .filter(AiRun.conversation_id == ergebnis["worker_id"]).one()
+        )
+        zustand = ai_run_service.zustand_lesen(alter_lauf)
+        zustand["familie"] = "fam-laptop"
+        ai_run_service.zustand_schreiben(alter_lauf, zustand)
+        alter_lauf.status = "waiting_user"
+        db.commit()
+
+        with patch.object(ai_run_service, "anlauf", lambda db_, run: True):
+            antwort = ai_worker_service.worker_antwort(
+                db, user=user,
+                arguments={
+                    "worker_id": ergebnis["worker_id"], "antwort": "Ja, mach.",
+                },
+            )
+
+        assert antwort["delivered"] is True
+        assert self._zustand(db, ergebnis["worker_id"]).get("familie") == "fam-laptop"
+
+    @pytest.mark.asyncio
+    async def test_der_lauf_reicht_sein_geraet_bis_in_den_auftrag(
+        self, db: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Vom Laufzustand bis in den neuen Lauf — **ohne** ein Argument von Hand.
+
+        Alle Tests darüber übergeben die Kennung selbst: an `worker_start`,
+        an `execute_read_tool` oder direkt in den Zustand des Vorgaengers. Sie
+        können deshalb prinzipiell nicht sehen, woran die Bindung bis zum
+        23.08.2026 scheiterte — die Vererbung in `worker_antwort` war da, die
+        Spalte war da, der Filter war da, und trotzdem trug **jeder**
+        Worker-Lauf `familie=None`. `worker_start` nahm die Kennung gar nicht
+        erst entgegen, und niemand auf dem Weg dorthin holte sie aus dem
+        Zustand. Weil `worker_antwort` nur weitergibt, was schon da ist,
+        vererbte sich dauerhaft nichts.
+
+        Hier geht deshalb ein **Zustand** hinein — der eines Gehirn-Laufs aus
+        der App — und der Auftrag entsteht auf dem Weg, den es in der
+        Anwendung gibt: Segment, Werkzeugrunde, Dispatch, Handler. Von Hand
+        gesetzt wird nur, was `routers/ai_chat` beim Anlegen auch setzt.
+        """
+        from services import ai_run_broker
+        from services.openai_compatible_adapter import (
+            ProviderToolCall,
+            StreamChunk,
+            StreamUsage,
+        )
+
+        user = _benutzer(db, "geraetevererbung")
+        # Mit Arbeitsmodell wird der Dauerchat zum Gehirn (`_rolle_ableiten`),
+        # und nur ein Gehirn darf `worker_start` überhaupt rufen — ein
+        # "voll"-Lauf sortiert es als Hintergrund-Werkzeug aus.
+        anbieter = _provider(
+            db, name="Zugang-geraetevererbung", worker_model="arbeitsmodell"
+        )
+        chat = AiConversation(
+            id=str(uuid4()), user_id=user.id, kind="primary", title="Chat"
+        )
+        db.add(chat)
+        db.commit()
+
+        # Genau der Aufruf, den der Chat-Endpunkt aus der App macht: Herkunft
+        # und Familie kommen aus der Sitzung, nicht aus dem Gespräch.
+        lauf, fehler = ai_stream_service.lauf_beginnen(
+            db, user=user, conversation=chat, provider=anbieter,
+            request_id=uuid4(), content="Räum bitte meinen Download-Ordner auf.",
+            reasoning=False, herkunft="desktop", familie="fam-laptop",
+        )
+        assert lauf is not None, f"Lauf konnte nicht beginnen: {fehler}"
+        assert ai_run_service.zustand_lesen(lauf).get("rolle") == "gehirn"
+
+        # Genau eine Werkzeugrunde: der Deckel für gleichzeitige Aufträge
+        # liegt bei drei, und ein Modell, das in jeder Runde erneut startet,
+        # liefe in ihn hinein statt in die Frage dieses Tests.
+        runde = {"nr": 0}
+
+        async def _fake(_client, *, usage: StreamUsage, tool_choice=None, **kwargs):
+            if tool_choice != "none" and runde["nr"] == 0:
+                usage.tool_calls = [ProviderToolCall(
+                    id="ws1", name="worker_start",
+                    arguments={
+                        "auftrag": "Räum den Download-Ordner auf",
+                        "titel": "Aufräumen",
+                    },
+                )]
+            runde["nr"] += 1
+            usage.total_tokens = 10
+            yield StreamChunk("content", "Ich gebe das als Auftrag weiter.")
+
+        monkeypatch.setattr(ai_stream_service, "stream_chat_completion", _fake)
+        ai_run_broker.zuruecksetzen_fuer_tests()
+        ai_run_broker.eroeffnen(lauf.id)
+
+        # Der neue Auftrag soll entstehen, aber nicht selbst losfahren.
+        with patch.object(ai_run_service, "anlauf", lambda db_, run: True):
+            await ai_stream_service.segment_ausfuehren(lauf.id, client=object())
+
+        db.expire_all()
+        auftrag = (
+            db.query(AiConversation)
+            .filter(
+                AiConversation.user_id == user.id,
+                AiConversation.kind == "worker",
+            )
+            .one()
+        )
+        zustand = self._zustand(db, auftrag.id)
+        # Beide zusammen adressieren erst einen Rechner: die Herkunft öffnet
+        # dem Auftrag die Desktop-Werkzeuge, die Familie sagt ihm, an welches
+        # der gekoppelten Geräte er sich damit wendet.
+        assert zustand.get("herkunft") == "desktop"
+        assert zustand.get("familie") == "fam-laptop"
 
     def test_der_dispatch_reicht_die_herkunft_durch(self, db: Session) -> None:
         """Der Weg vom Lauf bis zum Handler — die Stelle, an der es fehlte.

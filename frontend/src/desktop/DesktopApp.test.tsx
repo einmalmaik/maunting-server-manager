@@ -42,9 +42,14 @@ vi.mock('@/hooks/useHasPermission', () => ({
 vi.mock('./Splash', () => ({
   Splash: () => null,
 }))
-// Die Auftragsschleife pollt endlos — hier reicht: sie existiert.
+// Die Auftragsschleife pollt endlos — gemockt bleibt sie stumm. Womit sie
+// aufgerufen wird, ist aber genau die Frage in einem der Tests unten.
+const schleifeAktiv: boolean[] = []
 vi.mock('./useAuftragsschleife', () => ({
-  useAuftragsschleife: () => null,
+  useAuftragsschleife: (aktiv: boolean) => {
+    schleifeAktiv.push(aktiv)
+    return null
+  },
 }))
 
 import { DesktopApp } from './DesktopApp'
@@ -70,6 +75,7 @@ describe('DesktopApp', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     invokeMock.mockReset()
+    schleifeAktiv.length = 0
     setzeAccessToken(null)
     useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false })
   })
@@ -83,7 +89,13 @@ describe('DesktopApp', () => {
   })
 
   it('mit gueltigem Tresor-Token landet man in der Hauptansicht', async () => {
-    konfigMock({ backend_url: 'https://api.example.com', sandbox_pfad: null, eingerichtet: true })
+    konfigMock({
+      backend_url: 'https://api.example.com',
+      // Ein eingerichteter Sandbox-Ordner gehoert zu diesem Fall dazu: fehlt
+      // er, bietet die App zuerst den Sandbox-Schritt an (siehe unten).
+      sandbox_pfad: 'C:\\Users\\tester\\MSS-Sandbox',
+      eingerichtet: true,
+    })
     vi.stubGlobal(
       'fetch',
       vi.fn((eingabe: RequestInfo | URL) => {
@@ -120,6 +132,72 @@ describe('DesktopApp', () => {
     })
     // Der Agent-Name steht in der Kopfleiste — dieselbe Quelle wie im Panel.
     expect(screen.getByText('Jarvis')).toBeInTheDocument()
+  })
+
+  it('ohne Sandbox-Ordner bietet die App genau diesen Schritt noch einmal an', async () => {
+    // Der Bestandsnutzer, dem `konfig.rs` beim Laden einen inzwischen
+    // unzulaessigen Pfad vergessen hat. Das Feld dafuer gibt es nur im
+    // Assistenten — kaeme der nicht wieder, verloere die KI ihren
+    // Dateizugriff fuer immer, und ihre Absage („der Benutzer legt ihn fest")
+    // verwiese ins Leere.
+    konfigMock({ backend_url: 'https://api.example.com', sandbox_pfad: null, eingerichtet: true })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((eingabe: RequestInfo | URL) => {
+        const url = String(eingabe)
+        if (url.includes('/auth/refresh')) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        if (url.includes('/auth/me')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(BENUTZER), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          )
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ global_permissions: [], server_permissions: {} }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }),
+    )
+
+    render(<DesktopApp />)
+    await waitFor(() => {
+      expect(screen.getByText(i18n.t('mss.wizard.sandboxLabel'))).toBeInTheDocument()
+    })
+    // Nur dieser eine Schritt: die Kopplung ist laengst erledigt, ein zweiter
+    // Code fuer einen Ordner waere absurd. Und wer nicht will, kommt vorbei.
+    expect(screen.queryByText(i18n.t('mss.wizard.codeLabel'))).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: i18n.t('mss.wizard.spaeterFestlegen') }),
+    ).toBeInTheDocument()
+
+    // Und waehrenddessen arbeitet der Rechner weiter. Das Wake-Word startet
+    // die Sprachsitzung unabhaengig von diesem Schritt aus Rust; liefe die
+    // Auftragsschleife hier nicht, koennte die KI reden, waehrend jeder
+    // Werkzeugaufruf in die 60-Sekunden-Grenze laeuft und „nicht abgewartet"
+    // meldet, obwohl ihn niemand abgeholt hat.
+    expect(schleifeAktiv[schleifeAktiv.length - 1]).toBe(true)
+  })
+
+  it('vor der Anmeldung fragt der Rechner nicht nach Auftraegen', async () => {
+    // Die Gegenprobe: ohne Kopplung gibt es kein Token, und jede Frage waere
+    // ein 401 im Sekundentakt.
+    konfigMock({ backend_url: null, sandbox_pfad: null, eingerichtet: false })
+    render(<DesktopApp />)
+    await waitFor(() => {
+      expect(screen.getByText(i18n.t('mss.wizard.adresseLabel'))).toBeInTheDocument()
+    })
+    expect(schleifeAktiv[schleifeAktiv.length - 1]).toBe(false)
   })
 
   it('eine abgelehnte Rotation fuehrt zur Kopplung, nicht zu einer Passwortmaske', async () => {

@@ -24,6 +24,7 @@ import logging
 from typing import AsyncIterator
 from uuid import UUID, uuid4
 
+from fastapi import HTTPException
 import httpx
 from sqlalchemy.exc import IntegrityError
 
@@ -571,6 +572,25 @@ def herkunft_aus_zustand(zustand: dict) -> str:
     return "desktop" if str(zustand.get("herkunft")) == "desktop" else "panel"
 
 
+def familie_aus_zustand(zustand: dict) -> str | None:
+    """**Welches** Geraet den Lauf angestossen hat, als Refresh-Familie.
+
+    Eingefroren neben der Herkunft und aus demselben Grund: der Lauf schlaeft
+    zwischen seinen Segmenten in der Datenbank, und wenn er aufwacht, ist von
+    der Anfrage, die ihn begonnen hat, nichts mehr da. Die Herkunft sagt
+    "App oder Panel", diese hier sagt "welcher Rechner" — und nur mit ihr
+    landet ein Auftrag bei dem Geraet, an dem der Mensch sitzt, statt bei dem,
+    das zuerst nach Arbeit fragt (`desktop_job_service.naechster`).
+
+    ``None`` heisst "nicht bekannt" und ist kein Rueckfall auf eine engere
+    Seite — hier gibt es keine: die Familie entscheidet nichts ueber Rechte
+    und nichts ueber den Werkzeugkatalog, sie adressiert nur. Ein Auftrag ohne
+    sie ist von jedem Geraet des Benutzers abholbar, so wie vor dieser Spalte.
+    """
+    roh = zustand.get("familie")
+    return str(roh) if roh else None
+
+
 def worker_aus_zustand(zustand: dict) -> dict | None:
     """Der Worker-Rahmen: Fenster, Titel und Meldekanal des Auftrags.
 
@@ -716,7 +736,7 @@ def _anzeigeeintrag(call, wert, fehlgeschlagen: str | None) -> dict:
 
 
 def _werkzeug_ausfuehren(
-    user_id: int, call, herkunft: str = "panel"
+    user_id: int, call, herkunft: str = "panel", familie: str | None = None
 ) -> tuple[object, str | None]:
     """Genau **ein** Lesewerkzeug, in eigener Sitzung und eigenem Thread.
 
@@ -736,6 +756,14 @@ def _werkzeug_ausfuehren(
     anlegt. Sie kommt aus dem Laufzustand und nie aus den Argumenten des
     Modells — sonst schriebe sich ein Lauf selbst einen Rechner zu, den er
     nicht hat.
+
+    ``familie`` fährt daneben mit und aus demselben Grund. Die Herkunft sagt
+    „aus der App", die Familie sagt „aus **dieser** App", und beides zusammen
+    adressiert erst einen Rechner. Ein Auftrag, der nur die Herkunft erbt,
+    bekommt seine Desktop-Werkzeuge zurück — seine Aufträge holt aber wieder
+    der Rechner ab, der zuerst fragt (`desktop_job_service.naechster`). Auch
+    sie stammt aus dem Laufzustand und nie aus den Argumenten: welches Gerät
+    gefragt hat, ist eine Tatsache des Laufs und keine Behauptung des Modells.
     """
     with SessionLocal() as db:
         user = db.get(User, user_id)
@@ -744,15 +772,37 @@ def _werkzeug_ausfuehren(
         try:
             wert = execute_read_tool(
                 db, user=user, tool_name=call.name, arguments=call.arguments,
-                herkunft=herkunft,
+                herkunft=herkunft, familie=familie,
             )
             db.commit()
-        except AiActionValidationError as exc:
+        except (AiActionValidationError, HTTPException) as exc:
             # Fehlendes Recht, fremde Server-ID, ungueltige Argumente. Das
             # Modell soll es erfahren und weitermachen koennen; frueher riss ein
             # solcher Aufruf die gesamte Antwort ab.
+            #
+            # **`HTTPException` gehoert dazu**, auch wenn sie nach Weboberflaeche
+            # klingt: die drei Dateiwerkzeuge melden darueber ihre haeufigsten
+            # Faelle — `read_config` wirft 404 fuer "Datei nicht gefunden", 400
+            # fuer "kein regulaeres Ding" und 413 fuer "zu gross",
+            # `list_server_files` und `search_server_files` 503, wenn der Node
+            # gerade nicht erreichbar ist. Ein geratener Pfad — der eigene
+            # Katalogtext warnt ausdruecklich davor — oder ein Node im Neustart
+            # beendete damit den ganzen Lauf, in einer unbeaufsichtigten Heilung
+            # samt einem der acht Reparaturanlaeufe. Ein Formfehler kostet eine
+            # Runde, nie die Antwort.
+            #
+            # Geschwaerzt wie jedes andere Ergebnis auch. Der Fehlertext geht an
+            # den Anbieter **und** ueber `AiToolResult` in jede Folgerunde, und
+            # er zitiert oft ein Argument des Modells woertlich zurueck ("Kein
+            # Handler fuer Werkzeug: …") — das Modell wiederum hat fremden
+            # Logtext gelesen. Der Schreibpfad schwaerzt denselben Text seit
+            # jeher (`_persist_write_proposals`); hier lief er am Choke Point
+            # vorbei, weil dieser Zweig vor ihm zurueckkehrt.
             db.rollback()
-            return {"error": str(exc)}, str(exc)
+            grund = redact_sensitive_text(
+                str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+            )
+            return {"error": grund}, grund
     # **Der Choke Point.** Hier — und nur hier — verlaesst ein Werkzeugergebnis
     # das Panel Richtung Anbieter und Datenbank.
     #
@@ -806,6 +856,65 @@ def _aufrufnachricht(calls, text: str | None = None) -> dict:
     }
 
 
+def _rundenfehler_nachrichten(
+    tool_calls, rundentext: str | None, *, code: str, hinweis: str
+) -> list[dict]:
+    """Die **ganze** Runde als Fehler beantworten: Aufrufnachricht plus Absagen.
+
+    Fünf Stellen dieser Datei verwarfen eine Runde und schrieben dafür dieselben
+    zehn Zeilen ab — abgewiesene Rückfrage, Formfehler an der Rückfrage,
+    Formfehler an `wait_until`, erschöpftes Budget vor einem Desktop-Auftrag und
+    der Schreibversuch des Gehirns. Was sie durchsetzen, ist keine Formsache,
+    sondern eine Protokoll-Invariante: zu **jeder** `tool_call_id` gehört genau
+    eine Antwort, sonst weist der Anbieter die nächste Anfrage ab. Eine
+    Invariante, die an fünf Stellen per Abschrift gilt, fällt bei der sechsten —
+    dort vergisst jemand die Schleife und beantwortet nur den einen Aufruf, und
+    der Lauf scheitert erst beim Anbieter mit einer unverständlichen Meldung
+    statt im eigenen Code.
+
+    ``code`` ist der maschinenlesbare Grund (`AI_ASK_INVALID`,
+    `AI_WAIT_INVALID`, …), ``hinweis`` der Satz **an das Modell**: was schief
+    lief und wie es weitergeht.
+
+    Nicht hierher gehören die zwei gemischten Fälle (`AI_RUN_PARKED`), in denen
+    ein Aufruf gelingt und die übrigen abgesagt werden — sie sind kein reines
+    Fehlermuster.
+    """
+    nachrichten: list[dict] = [_aufrufnachricht(tool_calls, rundentext)]
+    for call in tool_calls:
+        nachrichten.append({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": json.dumps(
+                {"error": code, "message": hinweis},
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+        })
+    return nachrichten
+
+
+def _runde_zaehlen(zustand: dict, rundendeckel: int) -> bool:
+    """Zählt diese Runde und sagt, ob das Budget damit gerissen ist.
+
+    Das Rundenbudget (`MAX_TOOL_ROUNDS`) ist eine tragende Schutzgrenze des
+    Laufs, seine Buchführung stand aber achtmal von Hand in dieser Datei —
+    mehrfach mit einer eigenen Fassung des Vergleichs daneben. Zählt ein neuer
+    Behandlungspfad die Runde nicht oder prüft er mit ``>=`` statt ``>``,
+    bekommt ein Lauf eine Runde geschenkt oder verliert eine, und niemand merkt
+    es: jede Stelle sieht für sich plausibel aus.
+
+    Die Aufrufer bauen aus dem Wahrheitswert weiterhin ihr eigenes
+    Ergebnisobjekt (`_FragenErgebnis`, `_WartenErgebnis`, …) — die
+    unterschiedlichen Rückgabetypen sind kein Hindernis, gemeinsam sind nur
+    Zählung und Vergleich. Die zwei parkenden Pfade rufen sie ebenfalls und
+    verwerfen das Ergebnis: sie zählen die Runde, aber der Deckel entscheidet
+    dort nichts mehr, weil das Segment ohnehin endet.
+    """
+    zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
+    return zustand["rounds"] > rundendeckel
+
+
 def _aussortieren(tool_calls: list, deferred: list, *, erlaubt, grund: str) -> list:
     """Aussortieren statt werfen: was nicht darf, wandert mit Begruendung weg.
 
@@ -835,8 +944,10 @@ async def _tool_followup_messages(
     aufgabe: AufgabenKontext | None = None,
     rolle: str = "voll",
     herkunft: str = "panel",
+    familie: str | None = None,
     anlagenwissen_noetig: bool = True,
     rundentext: str | None = None,
+    frage_id: str | None = None,
 ) -> tuple[list[dict], list[dict], dict | None]:
     """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
 
@@ -889,6 +1000,20 @@ async def _tool_followup_messages(
     entschlüsselt hatte. Teurer als die Arbeit war die Nebenwirkung:
     `server_shared_context` zählt bei jedem Aufruf `use_count` hoch, und der
     Zähler entscheidet beim nächsten Engpass mit, was bleibt.
+
+    ``frage_id`` ist die Benutzernachricht dieses Laufs. Der Nachtrag wählt und
+    **zählt** nach der Frage; ohne sie fiel sein ``query`` auf ``""`` zurück,
+    jeder Reiz war null, und die Zählschleife in `server_shared_context` war auf
+    diesem Weg unerreichbar — ausgerechnet das Wissen, das nur über den Nachtrag
+    ankommt (der Normalfall bei der ersten Frage zu einer Anlage), wurde nie als
+    gebraucht vermerkt.
+
+    Übergeben wird die **Kennung** und nicht der Text: `arbeitsspeicher_leeren`
+    räumt am Ende eines Laufs alles Wörtliche aus `state_json`, weil dort auch
+    der entschlüsselte Gedächtnisblock stünde. Ein Laufzustand, der die Frage
+    zusätzlich im Klartext trüge, hätte genau diese Zusage gebrochen. Gelesen
+    wird sie deshalb dort, wo sie ohnehin liegt, und nur wenn der Nachtrag
+    wirklich ansteht.
     """
     deferred = [(call, reason) for call, reason in deferred]
     if len(tool_calls) + len(deferred) > MAX_TOOL_CALLS:
@@ -1047,7 +1172,7 @@ async def _tool_followup_messages(
             try:
                 wert, fehlgeschlagen = await asyncio.wait_for(
                     asyncio.to_thread(
-                        _werkzeug_ausfuehren, user_id, call, herkunft
+                        _werkzeug_ausfuehren, user_id, call, herkunft, familie
                     ),
                     timeout=WERKZEUG_ZEITGRENZE,
                 )
@@ -1227,11 +1352,19 @@ async def _tool_followup_messages(
             # `nachtrag` faehrt als dritter Rueckgabewert mit, statt hier an
             # `provider_messages` zu haengen: die Funktion kennt die Liste nicht,
             # und sie soll sie auch nicht kennen — sie fuehrt Werkzeuge aus.
-            nachtrag = (
-                anlagenwissen_nachtrag(db, user_id=user_id, server_id=bezug)
-                if bezug is not None and anlagenwissen_noetig
-                else None
-            )
+            nachtrag = None
+            if bezug is not None and anlagenwissen_noetig:
+                # Die Frage erst hier holen — sie wird nur fuer die Auswahl und
+                # den Nutzungszaehler des Anlagenwissens gebraucht.
+                nachricht = (
+                    db.get(AiMessage, frage_id) if frage_id is not None else None
+                )
+                nachtrag = anlagenwissen_nachtrag(
+                    db,
+                    user_id=user_id,
+                    server_id=bezug,
+                    query=str(nachricht.content or "") if nachricht is not None else "",
+                )
             db.commit()
             return nachtrag
 
@@ -1350,6 +1483,17 @@ def _persist_write_proposals(
     run_id: str | None = None, guardian: GuardianKontext | None = None,
     aufgabe: AufgabenKontext | None = None,
 ) -> list[dict]:
+    """Legt die Vorschlaege einer Schreibrunde an und meldet ihren Ausgang.
+
+    Jeder Eintrag der Rueckgabe traegt neben dem Vorschlagsvertrag ein
+    ``call_id``: die Kennung des Aufrufs, aus dem er entstanden ist. Ohne sie
+    liess sich der Ausgang nur ueber den Werkzeugnamen zuordnen, und zwei
+    gleichnamige Aufrufe in einer Runde (zwei `propose_task_set` fuer zwei
+    Aufgaben) bekamen beide beide Ausgaenge — bei globalen Werkzeugen ohne
+    `server_id` war danach nicht mehr erkennbar, welcher der beiden gescheitert
+    ist. Das Feld gehoert **nicht** in die Vorschlagskarte: sie traegt denselben
+    Vertrag wie die REST-Antwort, und der Aufrufer laesst es dort weg.
+    """
     if len(tool_calls) > MAX_TOOL_CALLS or any(call.name not in WRITE_TOOLS for call in tool_calls):
         raise AiActionValidationError("Ungueltige Write-Tool-Sequenz")
     with SessionLocal() as db:
@@ -1366,18 +1510,22 @@ def _persist_write_proposals(
         # antworten kann ("dann lege ich erst ein Backup an"). Deshalb reissen
         # sie den Lauf nicht ab, sondern gehen als Ergebnis zurueck.
         abgelehnt: list[dict] = []
-        uebersprungen: list[str] = []
-        for index, call in enumerate(tool_calls):
+        uebersprungen: list[tuple[str, str]] = []
+        # Welcher Aufruf welchen Vorschlag ausgeloest hat. Die Zuordnung
+        # entsteht hier, wo sie noch eindeutig ist — spaeter gibt es nur noch
+        # Werkzeugnamen, und die kommen in einer Runde mehrfach vor.
+        aufruf_je_vorschlag: dict[str, str] = {}
+        for call in tool_calls:
             if abgelehnt:
                 # **Die Runde bricht ab.** Ohne diese Zeile fuehrte ein
                 # gescheitertes Backup nicht dazu, dass der Loeschvorgang
                 # dahinter unterbleibt — die Schleife lief weiter, und die
                 # Reihenfolge "erst sichern, dann anfassen" waere eine
                 # Absichtserklaerung statt einer Zusage.
-                uebersprungen.append(call.name)
+                uebersprungen.append((call.name, call.id))
                 continue
             try:
-                proposals.append(create_proposal(
+                vorschlag = create_proposal(
                     db,
                     user=user,
                     conversation=conversation,
@@ -1386,7 +1534,9 @@ def _persist_write_proposals(
                     correlation_id=correlation_id,
                     guardian=guardian,
                     aufgabe=aufgabe,
-                ))
+                )
+                proposals.append(vorschlag)
+                aufruf_je_vorschlag[vorschlag.id] = call.id
             except AiActionStateError as exc:
                 _ablehnung_protokollieren(
                     user_id=user_id,
@@ -1395,6 +1545,7 @@ def _persist_write_proposals(
                     correlation_id=correlation_id,
                 )
                 abgelehnt.append({
+                    "call_id": call.id,
                     "tool_name": call.name,
                     "status": "rejected",
                     "autonomous": False,
@@ -1447,6 +1598,7 @@ def _persist_write_proposals(
                     run_id, call.name, redact_sensitive_text(str(exc))[:200],
                 )
                 abgelehnt.append({
+                    "call_id": call.id,
                     "tool_name": call.name,
                     "status": "rejected",
                     "autonomous": False,
@@ -1520,6 +1672,7 @@ def _persist_write_proposals(
                 # ausgefuehrt wird. Sie stehen deshalb nicht an der Zeile und
                 # gingen ohne diese Zeile verloren.
                 ereignis["error_code"] = error_code
+            ereignis["call_id"] = aufruf_je_vorschlag.get(proposal_id)
             results.append(ereignis)
         # Abgelehnte und uebersprungene Aufrufe hinten dran. Sie tragen kein
         # `id`, gehen also nicht als Vorschlagskarte an die Oberflaeche — es
@@ -1528,12 +1681,13 @@ def _persist_write_proposals(
         # gelaufen ist und was zuerst zu tun waere.
         results.extend(abgelehnt)
         results.extend({
+            "call_id": call_id,
             "tool_name": name,
             "status": "skipped",
             "autonomous": False,
             "server_id": None,
             "error_code": "AI_ACTION_ROUND_ABORTED",
-        } for name in uebersprungen)
+        } for name, call_id in uebersprungen)
         return results
 
 
@@ -1680,26 +1834,18 @@ def _ask_refusal_messages(tool_calls, rundentext: str | None = None) -> list[dic
     deren Plan auf einer Rueckfrage aufbaut, ist als Ganzes hinfaellig — das
     Modell soll sie neu fassen, nicht die Haelfte davon weiterverwenden.
     """
-    assistant_call = _aufrufnachricht(tool_calls, rundentext)
-    hinweis = (
-        "In einer Guardian-Heilung sitzt niemand am Panel; Rueckfragen sind "
-        "nicht moeglich. Diese Runde wurde deshalb vollstaendig verworfen. "
-        "Entscheide selbst und rufe die Werkzeuge ohne Rueckfrage erneut auf, "
-        "oder beende mit einer Zusammenfassung deiner Vermutung — sie geht als "
-        "E-Mail an den Betreiber."
+    return _rundenfehler_nachrichten(
+        tool_calls,
+        rundentext,
+        code="AI_GUARDIAN_NO_HUMAN",
+        hinweis=(
+            "In einer Guardian-Heilung sitzt niemand am Panel; Rueckfragen sind "
+            "nicht moeglich. Diese Runde wurde deshalb vollstaendig verworfen. "
+            "Entscheide selbst und rufe die Werkzeuge ohne Rueckfrage erneut "
+            "auf, oder beende mit einer Zusammenfassung deiner Vermutung — sie "
+            "geht als E-Mail an den Betreiber."
+        ),
     )
-    nachrichten: list[dict] = [assistant_call]
-    for call in tool_calls:
-        nachrichten.append({
-            "role": "tool",
-            "tool_call_id": call.id,
-            "content": json.dumps(
-                {"error": "AI_GUARDIAN_NO_HUMAN", "message": hinweis},
-                ensure_ascii=True,
-                separators=(",", ":"),
-            ),
-        })
-    return nachrichten
 
 
 def _ask_formfehler_messages(
@@ -1719,24 +1865,16 @@ def _ask_formfehler_messages(
     Wie bei `_ask_refusal_messages` wird die **ganze** Runde beantwortet: das
     Protokoll verlangt zu jeder `tool_call_id` genau eine Antwort.
     """
-    assistant_call = _aufrufnachricht(tool_calls, rundentext)
-    hinweis = (
-        f"Die Rueckfrage wurde nicht gestellt: {grund}. "
-        "Stelle sie erneut — `question` als Text, `options` als Liste von "
-        "zwei bis vier Objekten mit `label` (und optional `hint`)."
+    return _rundenfehler_nachrichten(
+        tool_calls,
+        rundentext,
+        code="AI_ASK_INVALID",
+        hinweis=(
+            f"Die Rueckfrage wurde nicht gestellt: {grund}. "
+            "Stelle sie erneut — `question` als Text, `options` als Liste von "
+            "zwei bis vier Objekten mit `label` (und optional `hint`)."
+        ),
     )
-    nachrichten: list[dict] = [assistant_call]
-    for call in tool_calls:
-        nachrichten.append({
-            "role": "tool",
-            "tool_call_id": call.id,
-            "content": json.dumps(
-                {"error": "AI_ASK_INVALID", "message": hinweis},
-                ensure_ascii=True,
-                separators=(",", ":"),
-            ),
-        })
-    return nachrichten
 
 
 def _write_followup_messages(
@@ -1755,10 +1893,17 @@ def _write_followup_messages(
     Der Ergebnistext wird zusaetzlich als `AiToolResult` abgelegt. Die
     Abschlussrunde koennte auch ohne Text enden; die Zeile stellt sicher, dass
     die Historie den Vorgang trotzdem kennt.
+
+    Zugeordnet wird **je Aufruf** und nicht je Werkzeugname. Vorher bekam bei
+    zwei gleichnamigen Aufrufen in einer Runde jeder von beiden beide Ausgaenge:
+    bei serverbezogenen Werkzeugen half noch die `server_id`, bei globalen wie
+    `propose_task_set` (dort ist sie immer ``None``) war nicht mehr erkennbar,
+    welche der beiden Aufgaben angelegt wurde und welche nicht — falsche Daten
+    unter richtigem Namen.
     """
-    outcome_by_tool: dict[str, list[dict]] = {}
+    outcome_by_call: dict[str, list[dict]] = {}
     for proposal in proposals:
-        outcome_by_tool.setdefault(proposal["tool_name"], []).append({
+        outcome_by_call.setdefault(proposal.get("call_id") or "", []).append({
             "status": proposal.get("status"),
             "autonomous": proposal.get("autonomous"),
             "server_id": proposal.get("server_id"),
@@ -1773,7 +1918,7 @@ def _write_followup_messages(
     assistant_call = _aufrufnachricht(tool_calls, rundentext)
     messages: list[dict] = [assistant_call]
     for call in tool_calls:
-        outcomes = outcome_by_tool.get(call.name, [])
+        outcomes = outcome_by_call.get(call.id, [])
         # `succeeded` heisst ausgefuehrt, `proposed` heisst: wartet auf den
         # Menschen. Die Unterscheidung muss beim Modell ankommen, sonst meldet
         # es einen Vorschlag als erledigt.
@@ -1786,12 +1931,19 @@ def _write_followup_messages(
 
     try:
         with SessionLocal() as db:
-            for tool_name, outcomes in outcome_by_tool.items():
+            # Eine Zeile je Aufruf, nicht je Werkzeugname — dieselbe Aufteilung
+            # wie oben, damit die Historie spaeter dasselbe erzaehlt wie der
+            # Rueckfluss. Aufrufe ohne Ausgang bekommen keine Zeile: sie gab es
+            # vorher auch nicht.
+            for call in tool_calls:
+                outcomes = outcome_by_call.get(call.id, [])
+                if not outcomes:
+                    continue
                 db.add(AiToolResult(
                     id=str(uuid4()),
                     conversation_id=conversation_id,
                     run_id=run_id,
-                    tool_name=tool_name,
+                    tool_name=call.name,
                     result_json=json.dumps(
                         {"outcomes": outcomes}, ensure_ascii=True, separators=(",", ":")
                     ),
@@ -2749,12 +2901,11 @@ def _fragen_behandeln(
             _ask_refusal_messages(current_usage.tool_calls, rundentext)
         )
         # Die Runde zaehlt mit. Der gemeinsame Zaehler weiter unten wird
-        # von diesem `continue` uebersprungen, und ohne diese beiden
-        # Zeilen haette ein Modell, das hartnaeckig nachfragt, eine
+        # von diesem `continue` uebersprungen, und ohne diese Zeile
+        # haette ein Modell, das hartnaeckig nachfragt, eine
         # endlose Schleife aus Abweisungen erzeugt — auf Kosten des
         # Freigebers, dem jede Runde eine Anbieteranfrage berechnet wird.
-        zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
-        if zustand["rounds"] > rundendeckel:
+        if _runde_zaehlen(zustand, rundendeckel):
             return _FragenErgebnis(
                 signal="weiter", budget_erschoepft=True, letzte_runde=True
             )
@@ -2772,8 +2923,7 @@ def _fragen_behandeln(
                     current_usage.tool_calls, str(exc), rundentext
                 )
             )
-            zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
-            if zustand["rounds"] > rundendeckel:
+            if _runde_zaehlen(zustand, rundendeckel):
                 return _FragenErgebnis(
                     signal="weiter", budget_erschoepft=True, letzte_runde=True
                 )
@@ -2838,24 +2988,17 @@ def _warten_behandeln(
     if minuten is None or not WAIT_MIN_MINUTEN <= minuten <= WAIT_MAX_MINUTEN:
         # Nachsicht am Werkzeugrand: ein Formfehler kostet eine Runde, nie
         # den Lauf — dasselbe Muster wie `_ask_formfehler_messages`.
-        hinweis = (
-            "Der Lauf wurde nicht geparkt: `minuten` muss eine ganze Zahl "
-            f"zwischen {WAIT_MIN_MINUTEN} und {WAIT_MAX_MINUTEN} sein. "
-            "Rufe wait_until erneut auf oder arbeite ohne das Warten weiter."
-        )
-        nachrichten = [_aufrufnachricht(current_usage.tool_calls, rundentext)]
-        for call in current_usage.tool_calls:
-            nachrichten.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": json.dumps(
-                    {"error": "AI_WAIT_INVALID", "message": hinweis},
-                    ensure_ascii=True, separators=(",", ":"),
-                ),
-            })
-        provider_messages.extend(nachrichten)
-        zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
-        if zustand["rounds"] > rundendeckel:
+        provider_messages.extend(_rundenfehler_nachrichten(
+            current_usage.tool_calls,
+            rundentext,
+            code="AI_WAIT_INVALID",
+            hinweis=(
+                "Der Lauf wurde nicht geparkt: `minuten` muss eine ganze Zahl "
+                f"zwischen {WAIT_MIN_MINUTEN} und {WAIT_MAX_MINUTEN} sein. "
+                "Rufe wait_until erneut auf oder arbeite ohne das Warten weiter."
+            ),
+        ))
+        if _runde_zaehlen(zustand, rundendeckel):
             return _WartenErgebnis(
                 signal="weiter", budget_erschoepft=True, letzte_runde=True
             )
@@ -2893,7 +3036,9 @@ def _warten_behandeln(
             "content": json.dumps(inhalt, ensure_ascii=True, separators=(",", ":")),
         })
     provider_messages.extend(nachrichten)
-    zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
+    # Gezaehlt wird auch hier; der Deckel entscheidet nur nichts mehr, weil das
+    # Segment gleich parkt und erst nach dem Wecken weiterzaehlt.
+    _runde_zaehlen(zustand, rundendeckel)
     logger.info(
         "Worker parkt per wait_until run_id=%s minuten=%d grund=%s",
         run_id, minuten, redact_sensitive_text(grund)[:100],
@@ -3008,29 +3153,21 @@ def _desktop_behandeln(
     if not auftraege:
         return None, False
 
-    if int(zustand.get("rounds", 0)) + 1 > rundendeckel:
-        # Vor dem Anlegen geprueft: ein Auftrag, den niemand mehr abholen
-        # darf, waere eine Zusage an den Rechner, die dieser Lauf nicht mehr
-        # einloesen kann.
-        nachrichten = [_aufrufnachricht(current_usage.tool_calls, rundentext)]
-        for call in current_usage.tool_calls:
-            nachrichten.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": json.dumps(
-                    {
-                        "error": "AI_ROUND_BUDGET",
-                        "message": (
-                            "Nicht an den Rechner übergeben: die "
-                            "Werkzeugrunden dieses Laufs sind aufgebraucht. "
-                            "Antworte mit dem, was du hast."
-                        ),
-                    },
-                    ensure_ascii=True, separators=(",", ":"),
-                ),
-            })
-        provider_messages.extend(nachrichten)
-        zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
+    # Gezaehlt und geprueft in einem, **bevor** ein Auftrag entsteht: einer, den
+    # niemand mehr abholen darf, waere eine Zusage an den Rechner, die dieser
+    # Lauf nicht mehr einloesen kann. Die Runde zaehlt in beiden Faellen — sie
+    # hat den Anbieter dasselbe gekostet.
+    if _runde_zaehlen(zustand, rundendeckel):
+        provider_messages.extend(_rundenfehler_nachrichten(
+            current_usage.tool_calls,
+            rundentext,
+            code="AI_ROUND_BUDGET",
+            hinweis=(
+                "Nicht an den Rechner übergeben: die "
+                "Werkzeugrunden dieses Laufs sind aufgebraucht. "
+                "Antworte mit dem, was du hast."
+            ),
+        ))
         logger.info(
             "Desktop-Runde ohne Budget run_id=%s werkzeuge=%s",
             run_id, ",".join(sorted({call.name for call in auftraege})),
@@ -3038,6 +3175,13 @@ def _desktop_behandeln(
         return None, True
 
     from services import desktop_job_service
+
+    # An welches Geraet. Aus dem Zustand und nicht aus einem Parameter: hier
+    # laeuft vielleicht das fuenfte Segment eines Laufs, der vor Minuten in
+    # der App begonnen hat — die Anfrage von damals gibt es nicht mehr, wohl
+    # aber ihre eingefrorene Familie. Ohne sie bekaeme den Auftrag der
+    # Rechner, der zuerst fragt.
+    familie = familie_aus_zustand(zustand)
 
     job_ids: list[str] = []
     with SessionLocal() as db:
@@ -3049,6 +3193,7 @@ def _desktop_behandeln(
                 tool_call_id=call.id,
                 tool_name=call.name,
                 arguments=_desktop_argumente(db, user_id=user_id, call=call),
+                familie=familie,
             )
             job_ids.append(job.id)
         db.commit()
@@ -3088,7 +3233,6 @@ def _desktop_behandeln(
             "content": json.dumps(inhalt, ensure_ascii=True, separators=(",", ":")),
         })
     provider_messages.extend(nachrichten)
-    zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
     zustand["desktop"] = {"job_ids": job_ids}
     logger.info(
         "Lauf wartet auf den Rechner run_id=%s auftraege=%d werkzeuge=%s",
@@ -3284,24 +3428,16 @@ async def _schreibrunde_ausfuehren(
     # Beantwortet statt geworfen, wie ueberall am Werkzeugrand: die Runde
     # zaehlt, das Modell erfaehrt den Weg (worker_start), der Lauf lebt.
     if rolle == "gehirn":
-        hinweis = (
-            "Das Gehirn führt keine Aktionen aus. Der Aufruf lief nicht — "
-            "gib die Arbeit mit worker_start als Auftrag in den Hintergrund."
-        )
-        provider_messages.append(
-            _aufrufnachricht(current_usage.tool_calls, rundentext)
-        )
-        for call in current_usage.tool_calls:
-            provider_messages.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": json.dumps(
-                    {"error": "AI_GEHIRN_READONLY", "message": hinweis},
-                    ensure_ascii=True, separators=(",", ":"),
-                ),
-            })
-        zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
-        if zustand["rounds"] > rundendeckel:
+        provider_messages.extend(_rundenfehler_nachrichten(
+            current_usage.tool_calls,
+            rundentext,
+            code="AI_GEHIRN_READONLY",
+            hinweis=(
+                "Das Gehirn führt keine Aktionen aus. Der Aufruf lief nicht — "
+                "gib die Arbeit mit worker_start als Auftrag in den Hintergrund."
+            ),
+        ))
+        if _runde_zaehlen(zustand, rundendeckel):
             return _SchreibrundenErgebnis(
                 denknaht=denknaht, budget_erschoepft=True, letzte_runde=True
             )
@@ -3346,8 +3482,12 @@ async def _schreibrunde_ausfuehren(
         # Vorschlagsereignis zu senden waere eine Karte ohne Knopf.
         if not proposal.get("id"):
             continue
+        # `call_id` ist die interne Buchfuehrung des Rueckflusses und bleibt
+        # draussen: die Karte traegt genau den Vertrag der REST-Antwort, und
+        # derselbe Abzug ersetzt beim Wiederanhaengen die vollstaendige Liste.
+        karte = {name: wert for name, wert in proposal.items() if name != "call_id"}
         ai_run_broker.veroeffentlichen(
-            run_id, "action" if proposal.get("autonomous") else "proposal", proposal
+            run_id, "action" if proposal.get("autonomous") else "proposal", karte
         )
     # Das Ergebnis geht **immer** zurueck ans Modell, auch wenn es
     # nur "wartet auf den Menschen" lautet. Das Protokoll verlangt zu
@@ -3624,13 +3764,18 @@ def _runde_filtern(
     if kinds == {"read", "write"}:
         # Gemischte Runde: die Lesewerkzeuge laufen, die Schreibaufrufe
         # bekommen eine Absage mit Begruendung und werden nachgeholt.
-        deferred_calls = [
+        #
+        # `extend` und nicht `=`: hier stand eine Zuweisung, und die warf die
+        # Absagen des blinden Blicks darueber weg. Ein Modell ohne Bildsicht,
+        # das in einer Runde hinsieht, liest und schreibt, verlor damit den
+        # Blick spurlos — kein Ergebnis, keine Begruendung, kein Hinweis.
+        deferred_calls.extend(
             (call, (
                 "Schreibaktionen laufen in einer eigenen Runde. Lies "
                 "erst zu Ende und rufe die Aktion danach allein auf."
             ))
             for call in current_usage.tool_calls if call.name in WRITE_TOOLS
-        ]
+        )
         current_usage.tool_calls = [
             call for call in current_usage.tool_calls if call.name in READ_TOOLS
         ]
@@ -3662,8 +3807,7 @@ def _runde_filtern(
     current_usage.tool_calls = frisch
     deferred_calls.extend(wiederholt)
 
-    zustand["rounds"] = int(zustand.get("rounds", 0)) + 1
-    if zustand["rounds"] > rundendeckel:
+    if _runde_zaehlen(zustand, rundendeckel):
         # Ein Assistent, der abbricht *weil* er gruendlich war, ist
         # schlechter als einer, der mit dem Vorhandenen antwortet. Ab
         # hier gibt es keine Werkzeuge mehr, aber eine Antwort.
@@ -3715,6 +3859,16 @@ async def _leserunde_ausfuehren(
         aufgabe=aufgabe,
         rolle=rolle,
         herkunft=herkunft,
+        # Das Gerät neben der Welt, und aus dem Zustand statt aus einem
+        # Parameter — dieselbe Quelle wie in `_desktop_behandeln` eine Phase
+        # weiter oben. Hier läuft vielleicht das fünfte Segment eines Laufs,
+        # der vor Minuten in der App begonnen hat; die Anfrage von damals gibt
+        # es nicht mehr, wohl aber ihre eingefrorene Familie. Gebraucht wird
+        # sie von genau einem Werkzeug: `worker_start` vererbt sie an den
+        # Auftrag, den es anlegt. Ohne diese Zeile begänne **jeder**
+        # Worker-Lauf mit familie=None — und weil `worker_antwort` die Familie
+        # seines Vorgängers weiterreicht, bliebe das für immer so.
+        familie=familie_aus_zustand(zustand),
         # Nur solange der Lauf es noch nicht bekommen hat. Die
         # Entscheidung fällt weiterhin unten — dort steht die Marke —,
         # aber gelesen wird jetzt gar nicht erst, was ohnehin
@@ -3724,6 +3878,10 @@ async def _leserunde_ausfuehren(
             rolle != "gehirn" and not zustand.get("anlagenwissen_gereicht")
         ),
         rundentext=rundentext,
+        # Die Frage des Laufs, nicht die dieser Runde: das Anlagenwissen waehlt
+        # und zaehlt danach, und was dieser Lauf wissen wollte, steht am Anfang.
+        # Als Kennung, damit der Laufzustand keinen Klartext dazubekommt.
+        frage_id=zustand.get("user_message_id"),
     )
     provider_messages.extend(followup)
     # Das Betriebswissen der Anlage, sobald feststeht welche. Genau
@@ -4062,8 +4220,51 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 parkgrund = "desktop_jobs"
                 break
 
+            # **Ein frei erfundener Werkzeugname kostet die Runde, nicht den
+            # Lauf.** Hier stand ein `raise`, und damit endete der ganze Lauf
+            # als 'failed': im Chat verlor der Benutzer die Antwort, in einer
+            # Heilung brach der unbeaufsichtigte Lauf ab und verbrauchte einen
+            # der acht Reparaturanläufe. Jede andere Grenzverletzung — falsche
+            # Rolle, falsche Herkunft, Guardian-Menge, blindes Modell — wird
+            # längst begründet beantwortet; ausgerechnet der Name, den ein
+            # Modell aus injiziertem Material übernimmt (ein Beispiel-Toolcall
+            # in einer Logzeile, „Vorlage schlägt Regel"), war der eine Hebel,
+            # mit dem sich ein Lauf gezielt abwürgen ließ.
+            #
+            # Verworfen wird die **ganze** Runde und nicht nur der erfundene
+            # Aufruf — dasselbe Muster wie bei der abgewiesenen Rückfrage: ein
+            # Plan, der auf einem Werkzeug aufbaut, das es nicht gibt, ist als
+            # Ganzes hinfällig. Ausgeführt wird nichts, die Allowlist bleibt
+            # unverändert scharf, und gegen hartnäckige Wiederholung steht der
+            # Rundendeckel, den diese Runde mitbezahlt.
+            if any(
+                call.name not in READ_TOOLS and call.name not in WRITE_TOOLS
+                for call in current_usage.tool_calls
+            ):
+                provider_messages.extend(_rundenfehler_nachrichten(
+                    current_usage.tool_calls,
+                    rundentext,
+                    code="AI_TOOL_UNKNOWN",
+                    hinweis=(
+                        "Diese Runde enthielt einen Werkzeugnamen, den es nicht "
+                        "gibt, und wurde deshalb vollständig verworfen. Nutze "
+                        "ausschließlich die Werkzeuge aus deinem Katalog und "
+                        "rufe die Runde damit erneut auf."
+                    ),
+                ))
+                logger.info(
+                    "Erfundener Werkzeugname, Runde verworfen run_id=%s", run_id
+                )
+                if _runde_zaehlen(zustand, rundendeckel):
+                    budget_erschoepft = True
+                    letzte_runde = True
+                current_usage = StreamUsage()
+                continue
+
+            # Ab hier ist jeder Aufruf entweder lesend oder schreibend — die
+            # dritte Moeglichkeit hat die Pruefung darueber schon abgefangen.
             kinds = {
-                "read" if call.name in READ_TOOLS else "write" if call.name in WRITE_TOOLS else "unknown"
+                "read" if call.name in READ_TOOLS else "write"
                 for call in current_usage.tool_calls
             }
             if kinds == {"write"}:
@@ -4097,8 +4298,6 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     letzte_runde = True
                 current_usage = StreamUsage()
                 continue
-            if "unknown" in kinds:
-                raise AiProviderRequestError("AI_PROVIDER_TOOL_SEQUENCE_INVALID")
 
             deferred_calls, filter_signal = _runde_filtern(
                 kinds=kinds,
@@ -4413,6 +4612,7 @@ def lauf_beginnen(
     gesprochen: bool = False,
     rolle: str | None = None,
     herkunft: str = "panel",
+    familie: str | None = None,
     intern: bool = False,
 ) -> tuple[AiRun | None, tuple[str, str] | None]:
     """Legt einen Lauf an: Benutzernachricht, Kontingent, Antwortnachricht.
@@ -4440,6 +4640,15 @@ def lauf_beginnen(
     eingefroren — jede Fortsetzung arbeitet unter derselben Rolle wie der
     erste Zug. Explizit setzt sie nur die Meldestelle: ihr Lieferlauf ist ein
     Gehirn-Zug im Dauerchat, obwohl niemand davor sitzt.
+
+    ``familie`` ist das **Gerät**, von dem die Bitte kam (die Refresh-Familie
+    der Sitzung). Es wird wie ``herkunft`` eingefroren, weil ein Lauf zwischen
+    seinen Segmenten schläft: wacht er auf, um einen Auftrag an den Rechner zu
+    legen, gibt es die Anfrage von damals längst nicht mehr. Ohne den Wert
+    holt sich den Auftrag der Rechner, der zuerst fragt — bei mehreren
+    gekoppelten Geräten also nicht zwingend der, an dem der Mensch sitzt.
+    ``None`` heißt „nicht bekannt": dann bleibt der Auftrag für alle Geräte
+    dieses Benutzers abholbar, so wie vor dieser Spalte.
 
     ``intern`` markiert die Benutzernachricht als **Maschinerie**: eine Zeile,
     die kein Mensch getippt hat und die er deshalb auch nicht lesen soll. Sie
@@ -4565,6 +4774,11 @@ def lauf_beginnen(
         # geschnitten (`herkunft_schnitt`), und eine Fortsetzung darf nicht in
         # einer anderen Welt aufwachen als der erste Zug.
         zustand["herkunft"] = herkunft
+        # Und daneben das Geraet: die Herkunft sagt "aus der App", die Familie
+        # sagt "aus **dieser** App". Nur zusammen adressieren sie einen
+        # Auftrag (`_desktop_behandeln`); die Familie allein entscheidet
+        # nichts — weder ueber Rechte noch ueber den Katalog.
+        zustand["familie"] = familie
         # Das Budget dieses Laufs, festgehalten fuer alle Fortsetzungen. Es hier
         # abzulegen statt es je Segment neu zu ermitteln ist dieselbe
         # Entscheidung wie bei `reasoning_effort`: was mitten in einer Aufgabe
@@ -4725,6 +4939,7 @@ def _anlauf_im_thread(
     guardian_briefing_unterdruecken: bool,
     gesprochen: bool = False,
     herkunft: str = "panel",
+    familie: str | None = None,
 ) -> tuple[str | None, tuple[str, str] | None]:
     """Der Anlauf mit **eigener** Sitzung — das ist der ganze Zweck.
 
@@ -4763,6 +4978,7 @@ def _anlauf_im_thread(
             guardian_briefing_unterdruecken=guardian_briefing_unterdruecken,
             gesprochen=gesprochen,
             herkunft=herkunft,
+            familie=familie,
         )
         # Nur die Kennung verlaesst den Thread. Ein ORM-Objekt aus einer gleich
         # geschlossenen Sitzung ist eine Falle: nach dem Commit sind seine
@@ -4783,6 +4999,7 @@ async def lauf_beginnen_nebenher(
     guardian_briefing_unterdruecken: bool = False,
     gesprochen: bool = False,
     herkunft: str = "panel",
+    familie: str | None = None,
 ) -> tuple[str | None, tuple[str, str] | None]:
     """`lauf_beginnen`, aber **neben** der Ereignisschleife statt auf ihr.
 
@@ -4807,4 +5024,5 @@ async def lauf_beginnen_nebenher(
             guardian_briefing_unterdruecken=guardian_briefing_unterdruecken,
             gesprochen=gesprochen,
             herkunft=herkunft,
+            familie=familie,
         )

@@ -286,19 +286,44 @@ async def test_a_write_in_a_mixed_round_never_executes(
 async def test_unknown_tool_name_is_rejected(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Ein vom Provider erfundener Toolname darf nichts ausloesen."""
+    """Ein vom Provider erfundener Toolname darf nichts ausloesen.
+
+    Die Zusicherung dieses Tests ist unveraendert und bleibt die wichtige: es
+    entsteht kein Vorschlag, ausgefuehrt wird nichts. Nur die Folge ist eine
+    andere — genau wie bei der gemischten Runde darueber.
+
+    Hier stand `AI_PROVIDER_TOOL_SEQUENCE_INVALID`, und damit endete der ganze
+    Lauf als 'failed': im Chat verlor der Benutzer die Antwort, in einer
+    unbeaufsichtigten Heilung brach der Lauf ab und verbrauchte einen der acht
+    Reparaturanlaeufe. Ein Modell uebernimmt einen erfundenen Werkzeugnamen aber
+    auch aus fremdem Text — eine Logzeile, die einen Toolcall vorfuehrt, genuegt.
+    Der Abbruch war damit ein Hebel, den jeder ziehen konnte, der in ein
+    Gameserver-Log schreiben darf.
+    """
     server = _server(db, "unknown")
     _grant(db, regular_user, server=server, server_keys=("server.view",))
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
-    _fake_stream(monkeypatch, [[
+    gesehen = _fake_stream(monkeypatch, [[
         ProviderToolCall(id="a", name="execute_shell", arguments={"cmd": "rm -rf /"}),
     ]])
 
     events = await _collect(db, regular_user, conversation, provider)
 
-    assert "AI_PROVIDER_TOOL_SEQUENCE_INVALID" in _error_codes(events)
     assert db.query(AiActionProposal).count() == 0
+    # Der Benutzer bekommt seine Antwort statt eines Fehlercodes.
+    assert _error_codes(events) == []
+    assert any(event.startswith("event: done") for event in events)
+    # Und das Modell erfaehrt, dass es den Namen erfunden hat — auf genau die
+    # `tool_call_id`, sonst waere die naechste Anbieteranfrage formal kaputt.
+    antworten = [
+        item for runde in gesehen for item in runde if item.get("role") == "tool"
+    ]
+    assert any(
+        item.get("tool_call_id") == "a"
+        and "AI_TOOL_UNKNOWN" in str(item.get("content"))
+        for item in antworten
+    )
 
 
 @pytest.mark.asyncio
@@ -979,6 +1004,60 @@ async def test_a_second_write_round_follows_an_executed_action(
 
 
 @pytest.mark.asyncio
+async def test_zwei_gleichnamige_schreibaufrufe_bekommen_getrennte_ausgaenge(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Jeder Aufruf erfaehrt seinen **eigenen** Ausgang, nicht den der Nachbarn.
+
+    Der Rueckfluss sammelte die Ergebnisse einer Schreibrunde je Werkzeugname.
+    Ruft das Modell dasselbe Werkzeug in einer Runde zweimal auf — zwei Backups,
+    zwei Aufgaben —, bekam damit jeder der beiden Aufrufe **beide** Ausgaenge.
+    Bei serverbezogenen Werkzeugen half noch die `server_id`; bei globalen wie
+    `propose_task_set` (dort ist sie immer `None`) war danach nicht mehr
+    erkennbar, welcher der beiden gescheitert ist, und das Modell meldete dem
+    Benutzer im schlechten Fall die falsche Aufgabe als angelegt.
+
+    Geprueft wird an der Stelle, an der es ankommt: der Werkzeugantwort je
+    `tool_call_id`.
+    """
+    meiner = _server(db, "eigenes-backup")
+    fremder = _server(db, "fremdes-backup")
+    _grant(db, regular_user, server=meiner, server_keys=(
+        "server.view", "server.backups.create"
+    ))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, meiner)
+    seen = _fake_stream(monkeypatch, [[
+        ProviderToolCall(id="a", name="propose_backup", arguments={
+            "server_id": meiner.id,
+            "reason": "Vor dem Update absichern.",
+            "expected_effect": "Ein Sicherungsstand liegt vor.",
+        }),
+        ProviderToolCall(id="b", name="propose_backup", arguments={
+            "server_id": fremder.id,
+            "reason": "Den anderen gleich mit.",
+            "expected_effect": "Ein Sicherungsstand liegt vor.",
+        }),
+    ]])
+
+    await _collect(db, regular_user, conversation, provider)
+
+    # Nur der erlaubte Server hat einen Vorschlag bekommen.
+    assert db.query(AiActionProposal).count() == 1
+
+    antworten = {
+        item["tool_call_id"]: json.loads(item["content"])
+        for runde in seen for item in runde if item.get("role") == "tool"
+    }
+    assert [ergebnis["status"] for ergebnis in antworten["a"]["outcomes"]] == [
+        "proposed"
+    ]
+    assert [ergebnis["status"] for ergebnis in antworten["b"]["outcomes"]] == [
+        "rejected"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_many_cheap_parallel_calls_all_run(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1079,6 +1158,115 @@ async def test_one_failing_call_does_not_kill_the_answer(
     # Der eine Aufruf meldet einen Fehler, der andere ein Ergebnis.
     assert any('"error"' in str(item.get("content")) for item in zurueck)
     assert any(str(meiner.id) in str(item.get("content")) for item in zurueck)
+
+
+@pytest.mark.asyncio
+async def test_eine_fehlende_datei_kostet_den_aufruf_nicht_den_lauf(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Dateiwerkzeuge melden per `HTTPException` — auch das ist eine Auskunft.
+
+    `read_config` wirft 404 fuer "Datei nicht gefunden", 413 fuer "zu gross";
+    `list_server_files` und `search_server_files` werfen 503, wenn der Node
+    gerade nicht antwortet. Gefangen wurde in `_werkzeug_ausfuehren` nur
+    `AiActionValidationError` — die Ausnahme lief also ungehindert bis in den
+    aeusseren Fehlerzweig, und der Lauf endete als `AI_STREAM_FAILED`. Ein
+    geratener Pfad (der Katalogtext warnt ausdruecklich davor) oder ein Node im
+    Neustart nahmen dem Benutzer damit die ganze Antwort und einer
+    unbeaufsichtigten Heilung einen ihrer acht Anlaeufe.
+
+    Zusaetzlich geprueft: der Fehlertext wird geschwaerzt. Er geht an den
+    Anbieter **und** ueber `ai_tool_results` in jede Folgerunde, und er zitiert
+    oft ein Argument des Modells woertlich zurueck — das Modell wiederum hat
+    fremden Logtext gelesen. Der Fehlerzweig kehrte vor dem Choke Point zurueck
+    und war damit der eine Weg, auf dem ein Werkzeugergebnis ungefiltert
+    hinausging.
+    """
+    from fastapi import HTTPException
+
+    server = _server(db, "fehltdatei")
+    _grant(db, regular_user, server=server, server_keys=(
+        "server.view", "server.files.read"
+    ))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+
+    def _nicht_da(*_args: object, **_kwargs: object):
+        raise HTTPException(
+            status_code=404,
+            # Ein erfundener Schluessel in der Form, die `read_config` beim
+            # Zurueckzitieren eines Pfades tatsaechlich durchreichen wuerde.
+            detail="Datei nicht gefunden: cfg/sk-testtesttest123456.properties",
+        )
+
+    monkeypatch.setattr("services.ai_action_service.read_server_text", _nicht_da)
+    seen = _fake_stream(monkeypatch, [[
+        ProviderToolCall(
+            id="a", name="read_config",
+            arguments={"server_id": server.id, "path": "server.properties"},
+        ),
+    ]])
+
+    events = await _collect(db, regular_user, conversation, provider)
+
+    # Der Lauf lebt: kein Fehlerereignis, eine fertige Antwort.
+    assert _error_codes(events) == []
+    assert any(event.startswith("event: done") for event in events)
+    # Das Modell erfaehrt den Grund als Werkzeugergebnis.
+    zurueck = [item for runde in seen for item in runde if item.get("role") == "tool"]
+    inhalte = [str(item.get("content")) for item in zurueck]
+    assert any("Datei nicht gefunden" in inhalt for inhalt in inhalte)
+    # Aber ohne den Schluessel im Text — hier lief der Choke Point vorbei.
+    assert not any("sk-testtesttest123456" in inhalt for inhalt in inhalte)
+    assert any("REDACTED" in inhalt for inhalt in inhalte)
+
+
+@pytest.mark.asyncio
+async def test_das_anlagenwissen_bekommt_die_frage_des_laufs(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Nachtrag waehlt und zaehlt nach der Frage — also muss er sie kennen.
+
+    Die einzige Produktions-Aufrufstelle uebergab keine `query`, der Parameter
+    fiel auf `""` zurueck, und damit war in `server_shared_context` jeder Reiz
+    null: die Zaehlschleife (`use_count`, `last_used_at`) war auf diesem Weg
+    unerreichbar. Anlagenwissen, das ausschliesslich ueber den Nachtrag ankommt
+    — der Normalfall bei der ersten Frage zu einer Anlage —, wurde nie als
+    gebraucht vermerkt und verlor beim naechsten Engpass gegen haeufiger
+    gezaehlte Zeilen. Der Docstring versprach das Gegenteil.
+
+    Der Weg dorthin fuehrt ueber die Kennung der Benutzernachricht und nicht
+    ueber den Text im Laufzustand: `arbeitsspeicher_leeren` raeumt dort am Ende
+    jedes Wort weg, und eine zusaetzliche Klartextfrage haette genau diese
+    Zusage gebrochen (test_ai_run.py sichert sie).
+    """
+    server = _server(db, "anlagenfrage")
+    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    provider = _provider(db)
+    conversation = _conversation(db, regular_user, server)
+    monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
+
+    gefragt: list[str] = []
+
+    def _nachtrag(_db, *, user_id, server_id, query=""):
+        del user_id, server_id
+        gefragt.append(query)
+        return None
+
+    monkeypatch.setattr(ai_stream_service, "anlagenwissen_nachtrag", _nachtrag)
+    _fake_stream(monkeypatch, [[
+        ProviderToolCall(
+            id="a", name="read_server_status", arguments={"server_id": server.id}
+        ),
+    ]])
+
+    await _collect(
+        db, regular_user, conversation, provider,
+        content="Warum kommt keiner auf den Server?",
+    )
+
+    assert gefragt == ["Warum kommt keiner auf den Server?"]
 
 
 @pytest.mark.asyncio

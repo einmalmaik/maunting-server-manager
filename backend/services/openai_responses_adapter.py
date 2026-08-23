@@ -74,6 +74,29 @@ from services.openai_compatible_adapter import (
 
 logger = logging.getLogger(__name__)
 
+#: OpenAIs Fehlerworte im Strom, uebersetzt in MSMs Marken. Dieselbe Aufgabe
+#: wie `openai_compatible_adapter._error_code` fuer HTTP-Status, nur dass hier
+#: ein Wort gemeldet wird statt einer Zahl: sind die Kopfzeilen erst draussen,
+#: steht der Status auf 200 und laesst sich nicht mehr aendern.
+#:
+#: Ohne die Zuordnung trug jeder Fehler im Strom dieselbe Marke, und der
+#: Betreiber las bei einem erschoepften Kontingent „Meist stimmt der Modellname
+#: nicht" — genau die Suche am falschen Ende, die bei ``402`` in
+#: `openai_compatible_adapter._error_code` steht.
+#:
+#: Eine Tabelle und keine Verzweigung, wie ``_FEHLERARTEN`` im
+#: `anthropic_messages_adapter`. Was nicht darin steht, bleibt
+#: ``AI_PROVIDER_REQUEST_REJECTED``; die Einzelheit traegt dann der Text.
+_FEHLERARTEN = {
+    "rate_limit_exceeded": "AI_PROVIDER_RATE_LIMITED",
+    "insufficient_quota": "AI_PROVIDER_PAYMENT_REQUIRED",
+    "billing_hard_limit_reached": "AI_PROVIDER_PAYMENT_REQUIRED",
+    "invalid_api_key": "AI_PROVIDER_AUTH_FAILED",
+    "authentication_error": "AI_PROVIDER_AUTH_FAILED",
+    "model_not_found": "AI_PROVIDER_ENDPOINT_NOT_FOUND",
+    "server_error": "AI_PROVIDER_UNAVAILABLE",
+}
+
 
 # ── Uebersetzung: MSMs Verlauf in OpenAIs `input` ─────────────────────
 
@@ -109,6 +132,38 @@ def _werkzeuge_uebersetzen(tools: list[dict] | None) -> list[dict] | None:
     return flach or None
 
 
+def _werkzeugwahl_uebersetzen(tool_choice: str | dict | None) -> str | dict:
+    """``tool_choice`` in die flache Form — dieselbe Ebene weniger wie oben.
+
+    Zeichenketten kennt die Responses-API wortgleich (``"auto"``, ``"none"``,
+    ``"required"``); durchgereicht wird also, was schon passt. Der Zwang auf
+    **genau ein** Werkzeug steht dagegen flacher als bei Chat Completions::
+
+        {"type": "function", "function": {"name": X}}
+        {"type": "function", "name": X}
+
+    Der einzige Aufrufer, der zwingt, ist `ai_mail_text`, und er schickt die
+    verschachtelte Form. Unuebersetzt weist die Responses-API sie mit einem 400
+    ab — und weil `ai_mail_text` jeden Fehler abfaengt und auf seinen festen
+    Text zurueckfaellt, waere der KI-Mailtext an OpenAI-Zugaengen still tot.
+
+    Was sich keiner Form zuordnen laesst, wird zu ``"auto"``. Dieselbe
+    Nachsicht wie in `anthropic_messages_adapter.werkzeugwahl_uebersetzen`: ein
+    unbekannter Zwang waere ein 400, „das Modell entscheidet" ist die harmlose
+    Auslegung.
+    """
+    if isinstance(tool_choice, dict):
+        funktion = tool_choice.get("function")
+        name = (
+            funktion.get("name") if isinstance(funktion, dict)
+            else tool_choice.get("name")
+        )
+        if isinstance(name, str) and name:
+            return {"type": "function", "name": name}
+        return "auto"
+    return tool_choice or "auto"
+
+
 def _text_aus_inhalt(content: Any) -> str:
     """Der Textanteil einer Nachricht, gleich in welcher Form er ankommt.
 
@@ -132,6 +187,34 @@ def _text_aus_inhalt(content: Any) -> str:
     return ""
 
 
+def _bilder_aus_inhalt(content: Any) -> list[str]:
+    """Die Bild-Adressen einer Nachricht, in der Reihenfolge, in der sie stehen.
+
+    MSM baut Bilder ueberall in derselben Form, naemlich der von Chat
+    Completions: ``{"type": "image_url", "image_url": {"url": "data:…"}}``. So
+    legt `ai_stream_service._desktopmeldung` ein Bildschirmfoto ab und so
+    `ai_attachment_service` einen Bildanhang.
+
+    Diese Form kommt hier an und muss uebersetzt werden — `_text_aus_inhalt`
+    liest sie nicht, es gibt in einem Bildblock kein ``text``. Wer sie
+    stillschweigend fallen laesst, schickt dem Modell den Begleitsatz „liegt
+    dieser Nachricht als Bild bei" **ohne** das Bild: es antwortet dann mit
+    Rueckfragen oder mit einer erfundenen Beschreibung, und beides sieht wie
+    eine Antwort aus.
+    """
+    if not isinstance(content, list):
+        return []
+    adressen: list[str] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "image_url":
+            continue
+        quelle = block.get("image_url")
+        adresse = quelle.get("url") if isinstance(quelle, dict) else quelle
+        if isinstance(adresse, str) and adresse:
+            adressen.append(adresse)
+    return adressen
+
+
 def nachrichten_uebersetzen(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """MSMs Verlauf in OpenAIs ``input``-Liste.
 
@@ -153,6 +236,12 @@ def nachrichten_uebersetzen(messages: list[dict[str, Any]]) -> list[dict[str, An
     ``assistant`` ohne Werkzeuge bekommt ``output_text`` statt ``input_text``
     als Inhaltsart — die API unterscheidet, wer gesprochen hat, nicht nur
     ueber die Rolle.
+
+    **Bilder gehen mit.** Traegt eine Benutzernachricht Bildbloecke, wird ihr
+    Inhalt listenfoermig: der Text als ``input_text``, jedes Bild als
+    ``input_image`` daneben. Ohne Bild bleibt es bei der schlichten
+    Zeichenkette — jede Runde ohne Not auf Listenform umzustellen waere eine
+    Aenderung am Praefix und kostete Prompt-Caching.
     """
     eingabe: list[dict[str, Any]] = []
     for nachricht in messages:
@@ -195,7 +284,23 @@ def nachrichten_uebersetzen(messages: list[dict[str, Any]]) -> list[dict[str, An
             continue
 
         if rolle in ("system", "user", "developer"):
-            eingabe.append({"role": rolle, "content": inhalt})
+            bilder = _bilder_aus_inhalt(nachricht.get("content"))
+            if not bilder:
+                eingabe.append({"role": rolle, "content": inhalt})
+                continue
+            teile: list[dict[str, Any]] = []
+            if inhalt:
+                # Der Text steht **vor** dem Bild; dieselbe Reihenfolge baut
+                # `ai_stream_service._desktopmeldung` fuer den anderen Dialekt.
+                teile.append({"type": "input_text", "text": inhalt})
+            for adresse in bilder:
+                # ``detail`` ist der dokumentierte Standardwert und wird hier
+                # ausgeschrieben: die Responses-API prueft streng, und ein
+                # ausgelassenes Pflichtfeld waere ein 400 statt eines Bildes.
+                teile.append({
+                    "type": "input_image", "image_url": adresse, "detail": "auto",
+                })
+            eingabe.append({"role": rolle, "content": teile})
     return eingabe
 
 
@@ -206,8 +311,11 @@ def _fehler_im_ereignis(rahmen: dict) -> tuple[str, str | None] | None:
     """Ein Fehler, der **im** Strom gemeldet wird statt als Status.
 
     Zwei Formen: ein eigenes ``response.failed``-Ereignis, und ein ``error``
-    neben den uebrigen Feldern. Beide werden hier zu derselben Marke wie im
-    Schwestermodul, damit der Aufrufer nicht zwei Fehlersprachen kennen muss.
+    neben den uebrigen Feldern. Beide werden hier zu denselben Marken wie im
+    Schwestermodul, damit der Aufrufer nicht zwei Fehlersprachen kennen muss —
+    und dazu gehoert die **Art** des Fehlers und nicht nur sein Wortlaut:
+    ``code`` sagt, ob das Kontingent leer ist oder der Modellname falsch, und
+    das sind zwei voellig verschiedene Handlungen fuer den Betreiber.
     """
     typ = rahmen.get("type")
     if typ in ("response.failed", "response.incomplete", "error"):
@@ -217,10 +325,18 @@ def _fehler_im_ereignis(rahmen: dict) -> tuple[str, str | None] | None:
             fehler = antwort.get("error") or antwort.get("incomplete_details")
         if fehler is None:
             fehler = rahmen.get("error") or rahmen
+        marke = "AI_PROVIDER_REQUEST_REJECTED"
         nachricht = ""
         if isinstance(fehler, dict):
             nachricht = str(fehler.get("message") or fehler.get("reason") or "")
-        return "AI_PROVIDER_REQUEST_REJECTED", _kurzfassung(nachricht or str(typ))
+            code = fehler.get("code")
+            # Nur Zeichenketten werden nachgeschlagen: ``code`` traegt bei
+            # ``response.incomplete`` schon einmal gar nichts, und ein Wert,
+            # der sich nicht als Schluessel eignet, wuerde die Suche nach der
+            # Fehlermeldung selbst zum Fehler machen.
+            if isinstance(code, str):
+                marke = _FEHLERARTEN.get(code, marke)
+        return marke, _kurzfassung(nachricht or str(typ))
     return None
 
 
@@ -311,7 +427,7 @@ async def stream_responses(
     flache_werkzeuge = _werkzeuge_uebersetzen(tools)
     if flache_werkzeuge:
         request_body["tools"] = flache_werkzeuge
-        request_body["tool_choice"] = tool_choice or "auto"
+        request_body["tool_choice"] = _werkzeugwahl_uebersetzen(tool_choice)
     if reasoning and reasoning_effort:
         request_body["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
     elif reasoning_effort:

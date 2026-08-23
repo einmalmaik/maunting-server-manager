@@ -56,6 +56,14 @@ KERN = {
     "slowapi",
     "limits",
     "psycopg2-binary",
+    # Seit dem 23.08.2026 hart, und das ist die richtige Antwort auf die Frage
+    # oben. `ai_memory_service` verschluesselt die Vektorspalte im Prozess mit
+    # AES-GCM (`_vektorschluessel`) — der DIS-Sidecar kostete je Zeile einen
+    # Roundtrip, und die Rangfolge liest bis zu 5.000 Vektoren je Anfrage.
+    # Weich importiert hiesse: fehlt das Paket, laeuft das Panel weiter und
+    # legt Bedeutungsvektoren des Gedaechtnisses im Klartext in die Datenbank.
+    # Ein Rueckfall, der eine Schutzzusage still aufgibt, ist keiner.
+    "cryptography",
 }
 
 

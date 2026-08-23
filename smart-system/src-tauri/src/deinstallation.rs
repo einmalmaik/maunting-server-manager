@@ -46,9 +46,14 @@ pub fn aufraeumen(app: &AppHandle) -> Aufraeumbericht {
     let mut fehler = Vec::new();
     let sandbox = crate::konfig::laden(app).ok().and_then(|k| k.sandbox_pfad);
 
-    // Zuerst das Mikrofon: ein laufender Lauschthread haelt sonst Dateien
-    // offen, die gleich geloescht werden sollen.
-    let sprachdaten_entfernt = match crate::wakeword::zuruecksetzen(app) {
+    // `aufnahmen_loeschen` und nicht `zuruecksetzen`: das stoppt zuerst das
+    // Mikrofon (ein laufender Lauschthread haelt sonst Dateien offen) und
+    // loescht dann die Aufnahmen — mehr braucht es hier nicht. Der
+    // Aktiv-Schalter waere ein Schreibzugriff auf eine Konfiguration, die
+    // gleich darunter ohnehin verschwindet; sein Fehlschlag haette
+    // `sprachdaten_entfernt` auf `false` gezogen und dieser Datei ihre eine
+    // Zusage genommen.
+    let sprachdaten_entfernt = match crate::wakeword::aufnahmen_loeschen(app) {
         Ok(()) => true,
         Err(meldung) => {
             // "nicht gefunden" ist kein Fehlschlag, sondern der Normalfall bei

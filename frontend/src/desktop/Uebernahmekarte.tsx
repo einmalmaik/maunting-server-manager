@@ -10,7 +10,7 @@
  * Menschen. Antwortet niemand, verfällt er panelseitig nach zehn Minuten, und
  * das Modell erfährt das als Verfall statt als Stille.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
 
@@ -24,31 +24,54 @@ interface Anfrage {
   auftragId: string
 }
 
+/** Die Nutzlast von `mss:uebernahme-anfrage` (auftrag.rs → `steuern`). */
+interface Anfragenutzlast {
+  anliegen: string
+  minuten: number
+  /**
+   * Der Auftrag, aus dem die Bitte stammt. Fehlt bei einer App, deren
+   * Rust-Hälfte die Kennung noch nicht mitschickt.
+   */
+  auftrag_id?: string | null
+}
+
 export const EREIGNIS_UEBERNAHME = 'mss:uebernahme-anfrage'
 
 export function Uebernahmekarte({ offenerAuftragId }: { offenerAuftragId: string | null }) {
   const { t } = useTranslation()
   const [anfrage, setAnfrage] = useState<Anfrage | null>(null)
   const [rest, setRest] = useState(0)
+  // Der Rückfall, falls das Ereignis keine Kennung trägt. In einem Ref und
+  // nicht in den Abhängigkeiten des Listeners: der müsste sich sonst bei jeder
+  // neuen Kennung ab- und wieder anmelden, und beides ist asynchron — genau in
+  // dieses Fenster fällt das Ereignis, auf das er wartet.
+  const rueckfallId = useRef<string | null>(null)
+  useEffect(() => {
+    rueckfallId.current = offenerAuftragId
+  }, [offenerAuftragId])
 
   useEffect(() => {
-    const abmelden = listen<{ anliegen: string; minuten: number }>(
-      EREIGNIS_UEBERNAHME,
-      (ereignis) => {
-        if (!offenerAuftragId) {
-          return
-        }
-        setAnfrage({
-          anliegen: ereignis.payload.anliegen,
-          minuten: ereignis.payload.minuten,
-          auftragId: offenerAuftragId,
-        })
-      },
-    )
+    const abmelden = listen<Anfragenutzlast>(EREIGNIS_UEBERNAHME, (ereignis) => {
+      // Die Kennung kommt aus dem Ereignis: sie gehört zu dem Auftrag, der
+      // gefragt hat. Vorher stand hier der Zustand der Oberfläche, und der
+      // stimmt nur, solange er rechtzeitig gesetzt wurde und keine ältere
+      // Kennung mehr trägt — sonst beantwortet die Karte den falschen Auftrag.
+      // Ohne jede Kennung kann sie gar nichts beantworten; dann verfällt der
+      // Auftrag panelseitig, und das Modell erfährt das als Verfall.
+      const auftragId = ereignis.payload.auftrag_id ?? rueckfallId.current
+      if (!auftragId) {
+        return
+      }
+      setAnfrage({
+        anliegen: ereignis.payload.anliegen,
+        minuten: ereignis.payload.minuten,
+        auftragId,
+      })
+    })
     return () => {
       void abmelden.then((weg) => weg())
     }
-  }, [offenerAuftragId])
+  }, [])
 
   // Eine laufende Übernahme muss man sehen. Eine, die man nicht sieht, wäre
   // die schlechteste Fassung dieser Funktion.

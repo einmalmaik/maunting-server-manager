@@ -70,7 +70,12 @@ def _langsames_werkzeug(monkeypatch: pytest.MonkeyPatch) -> None:
     Aufruf an einen Node blockiert seinen Thread. Ein `asyncio.sleep` waere
     hoeflich und wuerde die Frage nicht stellen.
     """
-    def _schlafen(_user_id: int, call: ProviderToolCall, _herkunft: str = "panel"):
+    def _schlafen(
+        _user_id: int,
+        call: ProviderToolCall,
+        _herkunft: str = "panel",
+        _familie: str | None = None,
+    ):
         time.sleep(WERKZEUGDAUER)
         return {"servers": [], "tool": call.name}, None
 
@@ -194,7 +199,12 @@ async def test_ein_haengender_aufruf_haelt_die_runde_nicht_fest(
     # `concurrent.futures` beim Beenden brav abwartet.
     freigabe = threading.Event()
 
-    def _einer_haengt(_user_id: int, call: ProviderToolCall, _herkunft: str = "panel"):
+    def _einer_haengt(
+        _user_id: int,
+        call: ProviderToolCall,
+        _herkunft: str = "panel",
+        _familie: str | None = None,
+    ):
         if call.id == "c0":
             freigabe.wait(timeout=5)
         return {"servers": [], "tool": call.name}, None

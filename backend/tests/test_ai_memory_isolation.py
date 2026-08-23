@@ -15,6 +15,15 @@ Was *nicht* eingeloest wird und deshalb hier auch nicht behauptet wird: das
 Panel selbst kann jeden Eintrag entschluesseln — es muss, denn der Klartext geht
 ohnehin an den KI-Anbieter. Der Schutz gilt gegen Datenbankzugriff und gegen
 andere Benutzer, nicht gegen den Betreiber.
+
+Zu "gegen Datenbankzugriff" gehoert seit dem 23.08.2026 auch der Suchvektor
+neben dem Wert. Er lag im Klartext, und weil er aus Schluessel *und* Wert
+entsteht und das Modell darunter ein statisches ist, liess sich aus ihm der
+Wortbestand einer fremden Notiz naeherungsweise zurueckholen — an der
+Verschluesselung des Werts vorbei. Sein Schluessel kommt allerdings aus dem
+Panel-Secret und nicht aus dem DIS-Sidecar (Begruendung an
+`ai_memory_service._vektorschluessel`): gegen den blossen Datenbankzugriff
+traegt das, gegen jemanden mit der Panel-Umgebung nicht.
 """
 
 from __future__ import annotations
@@ -58,10 +67,11 @@ def _team(db: Session, owner: User, *members: User) -> Team:
     _allow(db, owner, "teams.create", "ai.memory.use")
     team = team_service.create_team(db, user=owner, name=f"team-{owner.username}")
     for member in members:
-        team_service.add_member(
+        team_service.invite_member(
             db, team=team, user=owner, new_user_id=member.id,
             can_manage_skills=True, can_manage_memory=True,
         )
+        team_service.accept_invitation(db, user=member, team_id=team.id)
     return team
 
 
@@ -295,10 +305,11 @@ def test_a_member_without_the_switch_cannot_write_team_memory(
     _allow(db, colleague, "ai.memory.use")
     _allow(db, regular_user, "teams.create", "ai.memory.use")
     team = team_service.create_team(db, user=regular_user, name="Nur lesen")
-    team_service.add_member(
+    team_service.invite_member(
         db, team=team, user=regular_user, new_user_id=colleague.id,
         can_manage_skills=False, can_manage_memory=False,
     )
+    team_service.accept_invitation(db, user=colleague, team_id=team.id)
 
     with pytest.raises(Exception) as exc:
         ai_memory_service.upsert_entry(
@@ -446,10 +457,11 @@ def test_a_member_without_the_switch_cannot_clear_the_team(
     colleague = _user(db, "leser")
     _allow(db, colleague, "ai.memory.use")
     team = _team(db, regular_user)
-    team_service.add_member(
+    team_service.invite_member(
         db, team=team, user=regular_user, new_user_id=colleague.id,
         can_manage_skills=False, can_manage_memory=False,
     )
+    team_service.accept_invitation(db, user=colleague, team_id=team.id)
     ai_memory_service.upsert_entry(
         db, user=regular_user, scope="team", server_id=None, team_id=team.id,
         key="geteilt", value="Team-Notiz",
@@ -484,3 +496,84 @@ def test_clearing_writes_one_audit_entry_not_thirty(
     eintraege = db.query(AuditLog).filter(AuditLog.action == "ai.memory.cleared").all()
     assert len(eintraege) == 1
     assert '"count": 8' in (eintraege[0].details or "") or eintraege[0].details.get("count") == 8
+
+
+def test_a_teammate_sees_that_nobody_confirmed_the_line(
+    db: Session, regular_user: User
+) -> None:
+    """Wer eine Teamzeile liest, war beim Aufschreiben nicht dabei.
+
+    Dieselbe Lage wie beim Anlagenwissen, und deshalb dieselbe Marke: die KI
+    schreibt Teamwissen in der Sitzung *eines* Mitglieds, lesen tun es alle
+    anderen. Stuende dort "gemerkt", hiesse das fuer sie "die KI hat es sich im
+    Gespraech mit mir notiert" — und eine Zeile, die ein fremder Lauf aus einer
+    Logdatei abgeleitet hat, traege damit die Autoritaet einer eigenen Ansage.
+
+    Der Gegenfall gehoert dazu: eine Marke, die auf jeder Zeile steht,
+    unterscheidet nichts mehr.
+    """
+    kollege = _user(db, "kollege")
+    _allow(db, kollege, "ai.memory.use")
+    team = _team(db, regular_user, kollege)
+
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="team", server_id=None, team_id=team.id,
+        key="backup.regel", value="Sicherungen laufen nachts um drei",
+        origin="ai",
+    )
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="team", server_id=None, team_id=team.id,
+        key="wartung", value="Wartungsfenster sonntags ab 04:00", origin="user",
+    )
+    db.commit()
+
+    block = _context(db, kollege)
+
+    assert f"[team:{team.id}/unbestätigt] backup.regel" in block
+    assert f"[team:{team.id}/eingetragen] wartung" in block
+    assert "gemerkt" not in block and "gesagt" not in block
+
+
+def test_every_team_audit_entry_names_the_team(
+    db: Session, regular_user: User
+) -> None:
+    """"Jemand hat Teamwissen geaendert" ist ohne das Team keine Auskunft.
+
+    Fuer die Servernummer steht die Begruendung schon in `upsert_entry`, und
+    fuer das Team wiegt sie schwerer: der Eintrag hat bewusst keinen Besitzer,
+    und nach dem Loeschen ist die Zeile weg. Das Protokoll ist damit der einzige
+    Ort, an dem die Zuordnung ueberlebt — bei einem Benutzer in mehreren Teams
+    war "scope: team" allein nicht zuzuordnen.
+
+    Geprueft werden alle vier Schreibwege auf einmal, weil die Details in jedem
+    einzeln zusammengesetzt werden und drei davon den vierten nicht mitziehen.
+    """
+    import json
+
+    from models import AuditLog
+
+    team = _team(db, regular_user)
+    for key in ("wartung", "backup", "ports"):
+        ai_memory_service.upsert_entry(
+            db, user=regular_user, scope="team", server_id=None, team_id=team.id,
+            key=key, value=f"Notiz zu {key}",
+        )
+    db.commit()
+    eintraege = ai_memory_service.list_entries(db, regular_user, "team", None, team.id)
+
+    ai_memory_service.delete_entry(db, regular_user, eintraege[0][0].id)
+    ai_memory_service.delete_by_keys(
+        db, regular_user, scope="team", keys=["ports"], team_id=team.id
+    )
+    ai_memory_service.delete_all_entries(db, regular_user, "team", None, team.id)
+
+    zeilen = db.query(AuditLog).filter(
+        AuditLog.action.in_([
+            "ai.memory.created", "ai.memory.deleted", "ai.memory.cleared",
+        ])
+    ).all()
+    assert {zeile.action for zeile in zeilen} == {
+        "ai.memory.created", "ai.memory.deleted", "ai.memory.cleared"
+    }
+    for zeile in zeilen:
+        assert json.loads(zeile.details or "{}").get("team_id") == team.id, zeile.action

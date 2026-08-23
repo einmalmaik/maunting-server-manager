@@ -116,6 +116,15 @@ _WORKER_WORTE_BEENDET = {
     "failed": "ist gescheitert",
 }
 
+#: Wie lang ein Auftragstitel in der Lage höchstens erscheint.
+#:
+#: `worker_unterhaltung_anlegen` kappt beim Anlegen bereits auf 160 Zeichen;
+#: das hier ist die zweite Schranke für Bestandsdaten und fremde Schreibwege,
+#: wie sie `name_des_assistenten` für den Rufnamen zieht. Der Block fließt in
+#: **jede** Anfrage des Gehirns ein, und was er kostet, soll nicht davon
+#: abhängen, wie geschwätzig eine Modellausgabe ausfiel.
+_TITEL_ANZEIGE_ZEICHEN = 160
+
 #: Wie lange ein beendeter Auftrag noch in der Lage steht.
 #:
 #: Lang genug, dass die Runde, in der das Gehirn das Ergebnis liefert, ihn
@@ -226,12 +235,28 @@ def _worker_zeile(db: Session, user: User) -> str:
         # Lageblock ist zeilenbasiert und geht als ``system`` hinaus. Ein Titel
         # mit Zeilenumbruch könnte darin eine eigene Zeile öffnen und dem
         # Modell eine Auskunft des Panels andichten — etwa einen anderen
-        # Autonomiezustand. Den Titel schreibt der Benutzer, und weder `_text`
-        # noch `worker_unterhaltung_anlegen` fassen innere Umbrüche an.
-        # Abgeflacht wird beim Rendern, weil die Zeilenstruktur erst hier
-        # Bedeutung bekommt — und weil so auch die Titel erfasst sind, die
-        # heute schon in der Datenbank stehen.
+        # Autonomiezustand.
+        #
+        # Den Titel schreibt **nicht** der Benutzer: er kommt aus einer
+        # Modellausgabe (`worker_start` → `worker_unterhaltung_anlegen`
+        # schwärzt Secrets und kappt, mehr nicht), also aus einem Lauf, der
+        # Logs, Dateien und den Bildschirm gelesen haben kann. Deshalb reicht
+        # das Abflachen allein nicht: die einfachen Anführungszeichen fassen
+        # den Titel ein, und ein Titel, der eines davon schließt, erfindet
+        # innerhalb der Auftragszeile beliebige Geschwistereinträge mitsamt
+        # Zustand und Kennung — das Gehirn meldete dem Benutzer dann ein
+        # Ergebnis, das es nirgends gelesen hat. Die Einfassung wird deshalb
+        # durch das typografische ’ ersetzt: der Inhalt bleibt vollständig
+        # lesbar, aber die Form der Einfassung lässt sich aus dem Titel heraus
+        # nicht mehr nachbauen.
+        #
+        # Beides beim Rendern, weil die Zeilenstruktur erst hier Bedeutung
+        # bekommt — und weil so auch die Titel erfasst sind, die heute schon in
+        # der Datenbank stehen.
         titel_flach = " ".join(str(titel or "Auftrag").splitlines())
+        titel_flach = titel_flach.replace("'", "’")
+        if len(titel_flach) > _TITEL_ANZEIGE_ZEICHEN:
+            titel_flach = titel_flach[:_TITEL_ANZEIGE_ZEICHEN] + "…"
         return f"'{titel_flach}' ({wort}, {dauer}, id {run.conversation_id})"
 
     # Laufende zuerst: sie sind das, wonach gefragt wird.
@@ -315,28 +340,59 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
     # ist `darf_handeln` trotzdem wahr, weil irgendein einzelner Server
     # freigegeben ist — dann wäre eine Zahl daneben schlicht falsch.
     freigabe = ai_autonomy_service.resolve_grant(db, user_id=user.id, server_id=None)
+    # **Was „aktiv" für das laufende Gespräch heißt.** Die Zahlenzeile allein
+    # sagt es nicht, und der Prompt sprach bis zum 22.08.2026 ausschließlich
+    # von Aufgaben der Art "act". Was im Chat passiert, stand nirgends — also
+    # fragte das Modell weiter bei jedem Schreibvorschlag nach, obwohl
+    # `ai_proposal_service` ihn längst ohne Klick ausführt
+    # (`requires_confirmation=not autonomous`). Eine eigene Zeile und kein
+    # Anhängsel an die Zahlen: die beiden Varianten stehen wörtlich in den
+    # Tests, und eine Tatsache gehört ohnehin nicht in eine Statistik.
+    #
+    # Und **je Zweig** formuliert, denn der Satz gilt nicht überall gleich:
+    # `autonomy_allows` schlägt jeden Vorschlag gegen die Freigabe **dieses
+    # Servers** nach. Ohne panelweite Freigabe wartet ein Vorschlag auf einem
+    # nicht freigegebenen Server sehr wohl auf den Klick. Der Prompt lässt das
+    # Modell genau hier der Lage glauben ("das sagt die Lage"), also meldete es
+    # Vollzug, während die Karte unbeantwortet stand.
+    #
+    # Dieselbe Nachschlagerei trifft den panelweiten Zweig ebenfalls: eine
+    # engere Serverzeile überstimmt die panelweite Freigabe (`resolve_grant`) —
+    # abgeschaltet, oder mit einem kleineren Budget, gegen das `autonomy_allows`
+    # dann das benutzerweit gezählte Stundenkonto hält. Die unbedingte Zusage
+    # log dann ausgerechnet auf dem Server, den der Betreiber enger gefasst hat.
+    # Daher der Vorbehalt, sobald es eine solche Zeile gibt — und nur dann, damit
+    # der Block für alle anderen byteweise beim Alten bleibt. Was „enger" heißt,
+    # steht in `ai_autonomy_service`: die Autonomiebedingung wohnt dort und
+    # nirgends sonst.
     if freigabe is not None and freigabe.enabled and freigabe.max_actions_per_hour > 0:
         zeilen.append(
             f"Autonomer Modus: aktiv, {freigabe.max_actions_per_hour} "
             f"Aktionen/Stunde, davon {verbraucht} verbraucht."
         )
+        sofortlauf = (
+            "Schreibvorschläge im Gespräch laufen damit sofort, ohne Klick des "
+            "Benutzers; nur Unumkehrbares (Löschen, Backup einspielen) fragt "
+            "weiterhin."
+        )
+        if ai_autonomy_service.hat_engere_server_freigabe(
+            db, user_id=user.id, panelweit=freigabe
+        ):
+            sofortlauf += (
+                " Für einzelne Server gilt eine engere Freigabe; dort kann der "
+                "Vorschlag trotzdem auf die Bestätigung warten — ob ein "
+                "bestimmter Server dazugehört, sagt erst das Ergebnis des "
+                "Vorschlags."
+            )
+        zeilen.append(sofortlauf)
     else:
         zeilen.append(
             f"Autonomer Modus: aktiv für einzelne Server, {verbraucht} Aktionen "
             "in der letzten Stunde verbraucht."
         )
-    # **Was „aktiv" für das laufende Gespräch heißt.** Die beiden Zeilen
-    # darüber nennen nur eine Zahl, und der Prompt sprach bis zum 22.08.2026
-    # ausschließlich von Aufgaben der Art "act". Was im Chat passiert, stand
-    # nirgends — also fragte das Modell weiter bei jedem Schreibvorschlag
-    # nach, obwohl `ai_proposal_service` ihn längst ohne Klick ausführt
-    # (`requires_confirmation=not autonomous`). Eine eigene Zeile und kein
-    # Anhängsel an die Zahlen: die beiden Varianten oben stehen wörtlich in
-    # den Tests, und eine Tatsache gehört ohnehin nicht in eine Statistik.
-    zeilen.append(
-        "Schreibvorschläge im Gespräch laufen damit sofort, ohne Klick des "
-        "Benutzers; nur Unumkehrbares (Löschen, Backup einspielen) fragt "
-        "weiterhin."
-    )
+        zeilen.append(
+            "Schreibvorschläge laufen nur auf den freigegebenen Servern sofort; "
+            "anderswo wartet der Vorschlag auf die Bestätigung des Benutzers."
+        )
     zeilen.append(freigabeweg)
     return "\n".join(zeilen)

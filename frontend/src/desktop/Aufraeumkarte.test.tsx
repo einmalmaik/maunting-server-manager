@@ -9,7 +9,8 @@
  *
  * Daneben: die Ablehnung fasst nichts an und meldet trotzdem — sonst stünde
  * der Auftrag bis zum Fristablauf offen, und das Modell erführe Stille statt
- * einer Antwort.
+ * einer Antwort. Und: gemeldet wird der Auftrag, der gefragt hat — die
+ * Kennung steht im Ereignis, nicht im Zustand der Oberfläche.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
@@ -97,6 +98,22 @@ describe('Aufraeumkarte', () => {
     expect(inhalt).toEqual({ geloescht: 2 })
   })
 
+  it('beantwortet den Auftrag aus dem Ereignis, nicht den aus dem Zustand', async () => {
+    // Die Zuordnung hing daran, dass die Auftragsschleife ihre Kennung noch
+    // vor dem Ereignis in den Zustand bekommt. Kommt das Ereignis zuerst —
+    // oder liegt dort noch die Kennung des vorigen Auftrags —, quittierte der
+    // Klick den falschen: die Dateien dieses Auftrags verschwanden, und als
+    // erledigt galt ein anderer. Rust legt die richtige Kennung in die
+    // Nutzlast, und die gilt.
+    render(<Aufraeumkarte offenerAuftragId="job-alt" />)
+    await waitFor(() => expect(ereignisRuf).not.toBeNull())
+    ereignisRuf!({ payload: { ...PLAN, auftrag_id: 'job-neu' } })
+
+    fireEvent.click(await screen.findByRole('button', { name: /jaWeich/i }))
+    await waitFor(() => expect(ergebnisMeldenMock).toHaveBeenCalledTimes(1))
+    expect(ergebnisMeldenMock.mock.calls[0][0]).toBe('job-neu')
+  })
+
   it('fasst bei Ablehnung nichts an und meldet trotzdem', async () => {
     await zeigen()
     const knopf = await screen.findByRole('button', { name: /aufraeumen\.nein/i })
@@ -119,6 +136,31 @@ describe('Aufraeumkarte', () => {
     expect(ok).toBe(false)
     expect(inhalt).toEqual({ fehler: 'Zugriff verweigert' })
     expect(code).toBe('DESKTOP_TOOL_FAILED')
+  })
+
+  it('verspricht den Papierkorb nur, wenn wirklich alles dorthin geht', async () => {
+    await zeigen()
+    // Beide Posten liegen in `frei` — hier stimmt die weiche Zusage.
+    expect(await screen.findByText('mss.aufraeumen.warnungWeich')).toBeInTheDocument()
+    expect(screen.queryByText('mss.aufraeumen.sofortWeg')).toBeNull()
+  })
+
+  it('sagt es, wenn ein Posten am Papierkorb vorbei geloescht wird', async () => {
+    // Ein Muell-Posten: Rust ueberspringt dort den Papierkorb
+    // (`aufraeumen::ausfuehren`). Stuende hier weiter die weiche Zusage,
+    // bestaetigte der Mensch ein endgueltiges Loeschen mit einem
+    // "laesst sich zurueckholen" vor Augen.
+    await zeigen({
+      ...PLAN,
+      posten: [
+        PLAN.posten[0],
+        { pfad: 'C:\\Users\\einma\\AppData\\Local\\Temp\\alt.tmp', bytes: 4096, zone: 'muell' },
+      ],
+    })
+    expect(await screen.findByText('mss.aufraeumen.warnungGemischt')).toBeInTheDocument()
+    expect(screen.queryByText('mss.aufraeumen.warnungWeich')).toBeNull()
+    // Und die betroffene Zeile ist als solche erkennbar.
+    expect(screen.getByText(/mss\.aufraeumen\.sofortWeg/)).toBeInTheDocument()
   })
 
   it('braucht beim Leeren des Papierkorbs keine Liste', async () => {

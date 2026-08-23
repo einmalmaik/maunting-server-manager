@@ -109,17 +109,23 @@ fn refresh_token_loeschen() -> Result<(), String> {
 ///
 /// `Ok(None)` heisst: das Ergebnis kommt spaeter. Das ist genau ein Fall — die
 /// Bitte um die Uebernahme, ueber die ein Mensch entscheidet.
+///
+/// `auftrag_id` ist freiwillig und wird nur durchgereicht: Rust legt sie in
+/// die Nutzlast der Bestaetigungskarten, damit die Antwort des Menschen zu
+/// dem Auftrag gehoert, der gefragt hat — und nicht zu dem, den die
+/// Oberflaeche sich gerade gemerkt hat.
 #[tauri::command(async)]
 fn auftrag_ausfuehren(
     app: tauri::AppHandle,
     werkzeug: String,
     argumente: serde_json::Value,
+    auftrag_id: Option<String>,
 ) -> Result<Option<serde_json::Value>, String> {
     let pfad = konfig::laden(&app)
         .ok()
         .and_then(|k| k.sandbox_pfad)
         .map(std::path::PathBuf::from);
-    auftrag::ausfuehren(&app, pfad, &werkzeug, &argumente)
+    auftrag::ausfuehren(&app, pfad, &werkzeug, &argumente, auftrag_id.as_deref())
 }
 
 /// Erteilt die Freigabe fuer Maus und Tastatur — nur nach einem Klick des
@@ -511,8 +517,33 @@ fn app_beenden(app: tauri::AppHandle) {
 pub(crate) fn beenden_erzwingen(app: &tauri::AppHandle) {
     // Das Mikrofon zuerst: der Lausch-Faden hält ein Gerät, und ein Prozess,
     // der stirbt, während cpal noch liest, hinterlässt unter Windows
-    // gelegentlich eine belegte Aufnahmequelle.
+    // gelegentlich eine belegte Aufnahmequelle. Das hier ist **bestenfalls**
+    // ein Hinweis an den Faden: `lauschen_stoppen` setzt nur ein Flag, und
+    // der Faden sieht es erst beim nächsten Audioblock — der Prozess ist
+    // Mikrosekunden später fort. Garantiert wird davon nichts, und
+    // garantiert werden darf es auch nicht: auf einen Faden zu warten hiesse,
+    // den einen Ausgang von der Gesundheit der App abhängig zu machen.
     wakeword::lauschen_stoppen();
+    // Und den Ton der anderen zurückdrehen. Die Originallautstärken leben
+    // nur in diesem Prozess (`ducking::ORIGINALE`); wer hier ohne sie
+    // hinausgeht, lässt Musik, Spiel und Discord dauerhaft auf 40 % zurück,
+    // und niemand kann das danach noch auflösen — der Benutzer regelt jede
+    // App von Hand hoch und errät den Zusammenhang nicht.
+    //
+    // In einem eigenen Faden mit kurzer Frist: `stoppen()` nimmt dasselbe
+    // Schloss, das ein laufendes `starten()` über die COM-Enumeration und
+    // die 200-ms-Rampe hält. Hängt WASAPI, wartet dieser Aufruf sonst
+    // endlos — und der Fehler, wegen dem `app.exit` hier verschwand, wäre
+    // zurück. Nach einer Sekunde geht es so oder so weiter.
+    #[cfg(windows)]
+    {
+        let (fertig, warten) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = ducking::stoppen();
+            let _ = fertig.send(());
+        });
+        let _ = warten.recv_timeout(std::time::Duration::from_secs(1));
+    }
     app.cleanup_before_exit();
     std::process::exit(0);
 }

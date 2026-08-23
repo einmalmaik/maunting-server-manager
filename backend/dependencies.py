@@ -116,6 +116,25 @@ def get_current_user_for_ws(ws: WebSocket, db: Session) -> User:
     return _user_from_token(token, db)
 
 
+def _familie_aus_token(token: str | None) -> str | None:
+    """Die Refresh-Familie aus einem Access-Token, oder ``None``.
+
+    Eine Stelle fuer beide Wege (HTTP und WS), weil beide dieselbe Frage
+    stellen und eine auseinandergelaufene zweite Fassung genau der Fehler
+    waere, der niemandem auffaellt: ein Sprachlauf ohne Kennung sieht aus wie
+    einer mit.
+
+    Das Token wird hier **nicht** geprueft — das haben `get_current_user` bzw.
+    `get_current_user_for_ws` schon getan, und diese Auskunft laeuft nur neben
+    ihnen. Sie entscheidet auch nichts ueber Rechte: die Familie sagt nur, an
+    welches Geraet ein Auftrag gehoert.
+    """
+    if not token:
+        return None
+    familie = (AuthService.decode_token(token) or {}).get("familie")
+    return str(familie) if familie else None
+
+
 def ws_session_herkunft(ws: WebSocket) -> str:
     """`session_herkunft` fuer WebSocket-Handshakes: ``"panel"`` oder ``"desktop"``.
 
@@ -129,6 +148,23 @@ def ws_session_herkunft(ws: WebSocket) -> str:
         return "panel"
     payload = AuthService.decode_token(token) or {}
     return "desktop" if payload.get("geraet") == "desktop" else "panel"
+
+
+def ws_session_familie(ws: WebSocket) -> str | None:
+    """`session_familie` fuer WebSocket-Handshakes: **welcher** Rechner spricht.
+
+    Dieselbe Rangfolge wie nebenan — Subprotokoll vor Cookie, damit Kennung
+    und Identitaet immer demselben Token gehoeren.
+
+    Sie fehlte bis zum 23.08.2026, und damit war die Geraetebindung auf dem
+    **Hauptweg** der App wirkungslos: der Sprachmodus ist der Weg, auf dem
+    „schau auf meinen Bildschirm" ueberwiegend ankommt, und seine Laeufe
+    trugen `familie=None`. Der Auftrag war damit wieder fuer jedes gekoppelte
+    Geraet abholbar — obwohl feststeht, in welches Mikrofon gesprochen wurde.
+    """
+    return _familie_aus_token(
+        _ws_bearer_token(ws) or ws.cookies.get("__Secure-access_token")
+    )
 
 
 def session_herkunft(request: Request) -> str:
@@ -155,6 +191,27 @@ def session_herkunft(request: Request) -> str:
         return "panel"
     payload = AuthService.decode_token(token) or {}
     return "desktop" if payload.get("geraet") == "desktop" else "panel"
+
+
+def session_familie(request: Request) -> str | None:
+    """**Welches** Geraet fragt: die Refresh-Familie dieser Sitzung.
+
+    `session_herkunft` beantwortet "App oder Browser", diese hier "welcher
+    Rechner". Beides ist noetig, seit ein Benutzer mehrere Geraete koppeln darf
+    (`device_pairing_service.geraete`): ohne die Familie bekommt einen Auftrag
+    fuer den Bildschirm der Rechner, der zuerst fragt, und nicht der, an dem
+    der Mensch sitzt.
+
+    Gelesen wie die Herkunft — Bearer vor Cookie, aus demselben Token wie die
+    Identitaet.
+
+    ``None`` heisst "unbekannt" und niemals "irgendeins": ein Access-Token aus
+    der Zeit vor diesem Anspruch traegt sie nicht, und der Aufrufer muss diesen
+    Fall ausdruecklich behandeln (`desktop_job_service.naechster`).
+    """
+    return _familie_aus_token(
+        _bearer_token(request) or request.cookies.get("__Secure-access_token")
+    )
 
 
 def get_current_owner(user: User = Depends(get_current_user)) -> User:

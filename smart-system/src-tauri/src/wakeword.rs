@@ -204,20 +204,63 @@ fn mikrofon_name(bevorzugt: Option<&str>) -> Option<String> {
         .map(|beschreibung| beschreibung.name().to_string())
 }
 
-/// Löscht Aufnahmen und Modell — für „Wake-Word neu einrichten“ und für den
-/// Uninstaller (temporäre Audiodaten restlos entfernen). Der Aktiv-Schalter
-/// und das trainierte Wort fallen mit: ein Schalter auf „an" ohne Modell
-/// dahinter wäre eine Anzeige, die lügt.
+/// „Wake-Word neu einrichten": Schalter aus, Aufnahmen und Modell weg.
+///
+/// **Erst der Schalter, dann die Dateien**, und beides ohne verschluckten
+/// Fehler. Hier stand das Speichern als `let _ =` hinter dem Löschen: schlug
+/// es fehl, war das Modell weg und `wakeword_aktiv` stand weiter auf „an" —
+/// ein Schalter ohne Modell dahinter ist eine Anzeige, die lügt, und niemand
+/// erfuhr davon.
+///
+/// **Aber kein Abbruch dazwischen.** Danach hing das Löschen an einem
+/// erfolgreichen `speichern`, und `speichern` prüft das ganze Konfig-Objekt:
+/// ein einziger Altwert an unbeteiligter Stelle machte „neu einrichten"
+/// unmöglich. Beide Schritte laufen jetzt, und die Meldung nennt, was davon
+/// schiefging.
+///
+/// Die verbleibende Fehlrichtung kostet nichts: bleibt der Schalter auf „an",
+/// während das Modell weg ist, weist `lauschen_starten` den nächsten Start
+/// mit „Kein Wake-Word trainiert" ab — kein Mikrofon geht heimlich an, und
+/// der Fehler stand vorher im Klartext auf dem Bildschirm.
 pub fn zuruecksetzen(app: &AppHandle) -> Result<(), String> {
+    let schalter = schalter_aus(app);
+    let dateien = aufnahmen_loeschen(app);
+    beides_melden(schalter, dateien)
+}
+
+/// Legt den Aktiv-Schalter um und vergisst das trainierte Wort.
+fn schalter_aus(app: &AppHandle) -> Result<(), String> {
+    let mut konfig = crate::konfig::laden(app)?;
+    konfig.wakeword_aktiv = false;
+    konfig.wakeword_wort = None;
+    crate::konfig::speichern(app, &konfig)
+}
+
+/// Stoppt das Lauschen und löscht Aufnahmen, Modell und Verfahrensmarke.
+///
+/// Getrennt von `zuruecksetzen`, weil der Uninstaller genau das braucht und
+/// sonst nichts: dort wird das Konfig-Verzeichnis gleich danach ohnehin
+/// gelöscht, und `deinstallation.rs` gibt es allein dafür, dass keine
+/// Stimmaufnahmen zurückbleiben. Diese Zusage darf nicht an einem Schreibzugriff
+/// hängen, der mit den Aufnahmen nichts zu tun hat.
+///
+/// Zuerst das Mikrofon: ein laufender Lauschthread hielte sonst Dateien offen,
+/// die gleich verschwinden sollen.
+pub fn aufnahmen_loeschen(app: &AppHandle) -> Result<(), String> {
     lauschen_stoppen();
     let verzeichnis = wakeword_verzeichnis(app)?;
-    std::fs::remove_dir_all(&verzeichnis).map_err(|e| e.to_string())?;
-    if let Ok(mut konfig) = crate::konfig::laden(app) {
-        konfig.wakeword_aktiv = false;
-        konfig.wakeword_wort = None;
-        let _ = crate::konfig::speichern(app, &konfig);
+    std::fs::remove_dir_all(&verzeichnis).map_err(|e| e.to_string())
+}
+
+/// Zwei unabhängige Teilschritte, eine Meldung — keiner darf den anderen
+/// verschlucken. Ein `?` zwischen ihnen hätte den zweiten gar nicht erst
+/// laufen lassen; ein `let _ =` hätte seinen Fehler verschwiegen.
+fn beides_melden(erstes: Result<(), String>, zweites: Result<(), String>) -> Result<(), String> {
+    let fehler: Vec<String> = [erstes.err(), zweites.err()].into_iter().flatten().collect();
+    if fehler.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    Err(fehler.join(" — "))
 }
 
 /// Startet einen cpal-Eingabestream und liefert f32-Samples (interleaved,
@@ -791,6 +834,26 @@ mod tests {
         let bloecke = vec![vec![0.0_f32; 1_600], vec![0.5_f32; 3_200]];
         let fehler = sprache_schneiden(quelle(bloecke), RATE).unwrap_err();
         assert!(fehler.contains("zu kurz"), "{fehler}");
+    }
+
+    #[test]
+    fn keiner_der_beiden_teilfehler_verschwindet_in_der_meldung() {
+        // Geprüft wird `beides_melden`, nicht `zuruecksetzen` — das braucht
+        // einen `AppHandle` und ist hier nicht erreichbar. Dass beide Schritte
+        // überhaupt laufen, hängt allein daran, dass zwischen ihnen kein `?`
+        // steht; das sieht dieser Test nicht, das sieht nur ein Leser von
+        // `zuruecksetzen`.
+        //
+        // Was er sieht, ist die andere Hälfte derselben Zusage: kommen zwei
+        // Fehler an, verschweigt die Meldung keinen. Vorher stand hier ein
+        // `let _ =` — der Uninstaller meldete den Fehler des Speicherns und
+        // schwieg darüber, dass die Stimmaufnahmen liegengeblieben waren.
+        assert!(beides_melden(Ok(()), Ok(())).is_ok());
+        assert_eq!(beides_melden(Err("Schalter".into()), Ok(())).unwrap_err(), "Schalter");
+        assert_eq!(beides_melden(Ok(()), Err("Aufnahmen".into())).unwrap_err(), "Aufnahmen");
+        let beide = beides_melden(Err("Schalter".into()), Err("Aufnahmen".into())).unwrap_err();
+        assert!(beide.contains("Schalter"), "{beide}");
+        assert!(beide.contains("Aufnahmen"), "{beide}");
     }
 
     #[test]

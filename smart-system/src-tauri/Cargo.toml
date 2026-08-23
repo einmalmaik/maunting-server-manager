@@ -3,7 +3,16 @@ name = "maunting-smart-system"
 version = "0.1.0"
 description = "MSS - Maunting Smart System, Desktop Companion fuer das MSM-Panel"
 edition = "2021"
-rust-version = "1.77"
+# Die Zahl muss stimmen, sonst ist sie schaedlich: hier stand 1.77, und ein
+# Build mit dieser Toolchain kam durch die Manifestpruefung und scheiterte
+# danach mitten in der Kompilierung mit einem Methodenfehler statt mit der
+# klaren Ansage, die Toolchain sei zu alt.
+#
+# Zwei Dinge setzen den Boden. Eigener Code: `Option::is_none_or`
+# (wakeword.rs) ist seit 1.82 stabil. Und die gesperrten Abhaengigkeiten:
+# `image` 0.25.10 und `keyring` 4.1.6 verlangen selbst 1.88. Wer eine der
+# beiden Zahlen senken will, muss zuerst die Ursache anfassen.
+rust-version = "1.88"
 
 [lib]
 name = "maunting_smart_system_lib"

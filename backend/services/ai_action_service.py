@@ -18,6 +18,7 @@ from __future__ import annotations
 from datetime import timedelta
 from pathlib import PurePosixPath
 import json
+import logging
 import re
 
 from fastapi import HTTPException
@@ -31,6 +32,12 @@ from models import AiActionProposal, Server, User
 from models.ai_task import ARTEN as _AUFGABENARTEN
 from models.ai_task import KANAELE as _KANAELE
 from models.ai_task import PLANARTEN as _PLANARTEN
+# Und die des Meldemodells getrennt davon. Die beiden Listen sind heute gleich,
+# gehoeren aber zwei verschiedenen Tabellen mit je eigenem CHECK: `create_task`
+# schreibt nach `ai_tasks`, `worker_start` meldet ueber `ai_meldestelle` nach
+# `ai_meldungen`. Eine gemeinsame Konstante waere die bequeme Abschrift, vor
+# der der Kommentar oben warnt — nur in die andere Richtung.
+from models.ai_meldung import KANAELE as _MELDEKANAELE
 from services import permission_service
 from services.ai_action_errors import AiActionValidationError
 # Die Intervallgrenzen sind im Dienst eine Kostenentscheidung und stehen hier
@@ -50,6 +57,8 @@ from services.ai_redaction import redact_sensitive_text
 from services.ai_limit_service import MAX_SYSTEM_SCOPE_ENTRIES as _MAX_SCOPE_ENTRIES
 from services.server_file_access_service import read_server_text
 
+
+logger = logging.getLogger(__name__)
 
 CONFIRMATION_TTL = timedelta(minutes=5)
 MAX_CONFIG_CHARS = 64_000
@@ -154,6 +163,31 @@ _RATIONALE_SCHEMA = {
     "expected_effect": {"type": "string", "maxLength": MAX_REASON_CHARS},
 }
 _RATIONALE_REQUIRED = ["reason", "expected_effect"]
+
+
+# Wie ein Gedächtniswerkzeug ein Team anspricht — einmal, für `remember` und
+# `forget_memory` zusammen. Zwei Abschriften wären zwei Wahrheiten: die Nummer
+# stünde im einen Werkzeug und im anderen nicht, und das Modell müsste raten,
+# welches der beiden sie annimmt.
+#
+# Die Nummer steht vorn, weil sie der genaue Weg ist. Ein Teamname ist nur je
+# Gründer eindeutig, `team_id` trifft dagegen genau ein Team — dieselbe Nummer,
+# die `search_memory` neben jedem Team-Treffer meldet. Die Begründung steht bei
+# `_memory_team`, wo beide Wege zusammenlaufen.
+_MEMORY_TEAM_SCHEMA = {
+    "team_id": {
+        "type": ["integer", "null"],
+        "description": "Nur bei scope=team: die team_id aus dem Suchergebnis.",
+    },
+    "team": {
+        "type": "string",
+        "maxLength": 64,
+        "description": (
+            "Ersatz ohne team_id: Teamname aus einer Rückfrage, genau so "
+            "geschrieben."
+        ),
+    },
+}
 
 
 def _function(name: str, description: str, properties: dict, required: list[str]) -> dict:
@@ -519,15 +553,7 @@ def _global_tool_definitions() -> list[dict]:
                         "aber Pflicht. Sonst null."
                     ),
                 },
-                "team": {
-                    "type": "string",
-                    "maxLength": 64,
-                    "description": (
-                        "Nur bei scope=team und nur, wenn zuvor eine Rueckfrage "
-                        "nach dem Team kam: der Name aus dieser Rueckfrage, "
-                        "genau so geschrieben. Sonst weglassen."
-                    ),
-                },
+                **_MEMORY_TEAM_SCHEMA,
                 "key": {
                     "type": "string",
                     "maxLength": 64,
@@ -591,8 +617,8 @@ def _global_tool_definitions() -> list[dict]:
             "will, was du ueber ein Thema gespeichert hast. Findet auch, was "
             "anders formuliert ist: \"mein Hund\" findet einen Eintrag, in dem "
             "nur der Name des Hundes steht. Liefert Bereich, Schluessel und "
-            "Inhalt — bei serverbezogenen Eintraegen auch die server_id, die "
-            "`forget_memory` dann wieder braucht.",
+            "Inhalt, dazu server_id oder team_id — die braucht "
+            "`forget_memory` wieder.",
             {
                 "query": {
                     "type": "string",
@@ -630,15 +656,7 @@ def _global_tool_definitions() -> list[dict]:
                     "items": {"type": "string", "maxLength": 64},
                     "description": "Die Schluessel aus dem Suchergebnis.",
                 },
-                "team": {
-                    "type": "string",
-                    "maxLength": 64,
-                    "description": (
-                        "Nur bei scope=team und nur, wenn zuvor eine Rueckfrage "
-                        "nach dem Team kam: der Name aus dieser Rueckfrage, "
-                        "genau so geschrieben. Sonst weglassen."
-                    ),
-                },
+                **_MEMORY_TEAM_SCHEMA,
             },
             ["scope", "keys"],
         ),
@@ -1114,7 +1132,12 @@ def _worker_tool_definitions() -> list[dict]:
                 },
                 "kanal": {
                     "type": "string",
-                    "enum": list(_KANAELE),
+                    # Die Liste der Meldestelle, nicht die des Aufgabenmodells:
+                    # dieser Wert landet in `ai_meldungen`, und was der Katalog
+                    # anbietet, muss der Konsument annehmen. Beide Tupel sind
+                    # heute gleich; weichen sie einmal ab, boete der Katalog
+                    # sonst einen Kanal an, den `ai_worker_service` abweist.
+                    "enum": list(_MELDEKANAELE),
                     "description": (
                         "Wohin das Ergebnis gemeldet wird. chat = nur im "
                         "Panel (Standard), email = zusätzlich per Mail, "
@@ -2128,6 +2151,69 @@ def _execute_set_agent_name(db: Session, *, user: User, arguments: dict) -> dict
     }
 
 
+def _memory_team(
+    db: Session, user: User, *, scope: str, arguments: dict
+) -> tuple[str, int | None, str | None]:
+    """Welches Team ein Gedächtniswerkzeug meint — die Nummer schlägt den Namen.
+
+    Zwei Wege auf dasselbe Team, und der genauere gewinnt.
+
+    **Der Name trägt nicht allein.** Teamnamen sind nur je Gründer eindeutig
+    (`team_service._assert_name_is_free` lässt Gleichnamigkeit ausdrücklich zu).
+    Ist der Benutzer in zwei Teams namens "Alpha", benennt `team="Alpha"` beide;
+    `learning_team` fragt dann zurück, und seine Rückfrage unterscheidet die
+    Kandidaten über den Gründer ("Alpha (bob)"). Ein Suchtreffer, der nur den
+    blanken Namen trug, ließ sich keinem davon zuordnen — das Modell wählte
+    eines der beiden und löschte mit halber Wahrscheinlichkeit im falschen Team.
+    Folgenlos ist das nicht: Schlüssel sind bewusst stabil und wiederholen sich
+    über Teams hinweg, drüben steht also etwas zu treffen.
+
+    **Die Nummer aus dem Suchtreffer hat dieses Problem nicht.** Sie trifft
+    genau ein Team, so wie `server_id` seit jeher genau einen Server trifft. Sie
+    ist dabei **kein Freibrief**: `ai_memory_service.scope_identity` weist eine
+    Nummer ohne Mitgliedschaft mit 404 ab, `_assert_may_write` eine ohne
+    Verwaltungsschalter mit 403. Beide Schranken stehen ohnehin im Weg jedes
+    Schreibens und Löschens — durchgereicht wird hier deshalb nur eine Zahl,
+    keine Berechtigung.
+
+    Der Name bleibt als Rückfall stehen und wird nicht ersetzt. Ein Modell, das
+    ein Team nur aus dem Gespräch kennt und nie danach gesucht hat, soll nicht
+    daran scheitern, dass ihm die Nummer fehlt.
+    """
+    roh = arguments.get("team_id")
+    if scope != "team":
+        # Dieselbe Strenge wie bei `server_id` im falschen Bereich: ein Bezug,
+        # der nicht ausgewertet wird, ist ein Missverständnis und keine
+        # Nachlässigkeit, über die man hinwegsehen darf.
+        if roh is not None:
+            raise AiActionValidationError("Nur Team-Memory akzeptiert eine team_id")
+        return scope, None, None
+    if roh is not None:
+        if isinstance(roh, bool) or not isinstance(roh, int) or roh < 1:
+            raise AiActionValidationError(
+                "Ungültige team_id — nimm die Nummer aus dem Suchergebnis"
+            )
+        return scope, roh, None
+
+    from services import team_service
+
+    # `memory` und nicht `skills`: welcher Schalter zählt, entscheidet die Art
+    # des Wissens. Beide Erinnerungswerkzeuge fragten hier den Skill-Schalter ab
+    # und schrieben deshalb bei `memory=True, skills=False` still ins
+    # persönliche Gedächtnis.
+    ziel, frage = team_service.learning_team(
+        db, user, schalter="memory", wunsch=arguments.get("team"),
+    )
+    if ziel is None:
+        return scope, None, frage
+    if ziel.is_personal:
+        # Kein echtes Team vorhanden oder keine Verwaltungsberechtigung: der
+        # Eintrag wird persönlich statt gar nicht. Lieber zu eng gespeichert als
+        # zu weit.
+        return "user", None, None
+    return scope, ziel.id, None
+
+
 def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
     """Laesst die KI einen dauerhaften Fakt im Memory des Benutzers ablegen.
 
@@ -2143,11 +2229,15 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
     Anweisung. Die kann nur hier stehen: der Dienst bedient auch den Router und
     schreibt deshalb fuer einen Menschen, nicht fuer ein Modell.
     """
+    from models import AiMemoryEntry
     from services import ai_memory_service
+    from services.dis_client import DisSidecarError
 
     if not permission_service.has_global_permission(db, user, "ai.memory.use"):
         raise AiActionValidationError("Memory ist fuer diesen Benutzer nicht freigegeben")
-    if set(arguments) - {"scope", "server_id", "key", "value", "replace_user_entry", "team"}:
+    if set(arguments) - {
+        "scope", "server_id", "key", "value", "replace_user_entry", "team", "team_id",
+    }:
         raise AiActionValidationError("Memory-Werkzeug hat ungueltige Argumente")
 
     scope = arguments.get("scope")
@@ -2171,30 +2261,15 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
     elif server_id is not None:
         raise AiActionValidationError("Benutzer-Memory akzeptiert keinen Server")
 
-    # Das Team nennt nicht das Modell, sondern der Dienst: welchem Team ein
-    # Benutzer angehoert, ist eine Tatsache der Datenbank und keine Angabe, die
-    # aus einem Prompt stammen darf. Ist die Lage nicht eindeutig, bekommt das
-    # Modell die Rueckfrage als Ergebnis und fragt den Benutzer.
-    team_id = None
-    if scope == "team":
-        from services import team_service
-
-        # `memory` und nicht `skills`: welcher Schalter zaehlt, entscheidet die
-        # Art des Wissens. Beide Erinnerungswerkzeuge fragten hier den
-        # Skill-Schalter ab und schrieben deshalb bei `memory=True,
-        # skills=False` still ins persoenliche Gedaechtnis.
-        target, question = team_service.learning_team(
-            db, user, schalter="memory", wunsch=arguments.get("team"),
-        )
-        if target is None:
-            return {"remembered": False, "ask_user": question}
-        if target.is_personal:
-            # Kein echtes Team vorhanden oder keine Verwaltungsberechtigung:
-            # der Eintrag wird persoenlich statt gar nicht. Lieber zu eng
-            # gespeichert als zu weit.
-            scope = "user"
-        else:
-            team_id = target.id
+    # Welches Team gemeint ist, entscheidet `_memory_team`. Das Modell darf die
+    # Nummer nennen, aber nichts über sie behaupten: ob der Benutzer dort
+    # Mitglied ist und dessen Wissen pflegen darf, bleibt eine Tatsache der
+    # Datenbank und wird gleich in `upsert_entry` geprüft. Ist die Lage nicht
+    # eindeutig, bekommt das Modell die Rückfrage als Ergebnis und fragt den
+    # Benutzer.
+    scope, team_id, rueckfrage = _memory_team(db, user, scope=scope, arguments=arguments)
+    if rueckfrage is not None:
+        return {"remembered": False, "ask_user": rueckfrage}
 
     # Die Einwilligung gilt dem **eigenen** Gedaechtnis, also `user` und
     # `server` — `team` und `panel` haengen an Mitgliedschaft und
@@ -2272,7 +2347,23 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
             # Die Bereichsaufloesung scheitert gleich noch einmal in
             # `upsert_entry`, und dort gehoert die Fehlermeldung hin.
             kennung = None
-        if kennung:
+        # **Ein vorhandener Schlüssel ist kein Doppel, sondern das Update.**
+        #
+        # Die Absage unten empfiehlt genau diesen Aufruf — sie darf ihn nicht
+        # selbst abweisen. `aehnlicher_eintrag` schließt nur den identischen
+        # Schlüssel aus; stehen im Bereich schon zwei ähnliche Altlasten
+        # nebeneinander (genau die, gegen die die Prüfung gebaut ist:
+        # `ram.vorgabe` neben `standard_ram`), fand der Aufruf mit dem einen
+        # Schlüssel den anderen und umgekehrt. Das Modell pendelte zwischen
+        # zwei Absagen, bis die Runden aufgebraucht waren, und ein
+        # ausdrücklich gewünschtes "ich will jetzt 16 GB" scheiterte still.
+        #
+        # Eine Abfrage auf (Bereich, Schlüssel) reicht dagegen: sie beantwortet
+        # die einzige Frage, die hier zählt — Neuanlage oder Überschreiben.
+        vorhanden_schon = kennung is not None and db.query(AiMemoryEntry.id).filter(
+            AiMemoryEntry.scope_identity == kennung, AiMemoryEntry.key == key,
+        ).first() is not None
+        if kennung and not vorhanden_schon:
             treffer = ai_memory_service.aehnlicher_eintrag(
                 db, scope_kennung=kennung, key=key, value=value,
             )
@@ -2333,6 +2424,35 @@ def _execute_remember(db: Session, *, user: User, arguments: dict) -> dict:
                 "was nicht mehr gilt, sondern was zuletzt gebraucht wurde."
             )
         raise AiActionValidationError(f"{exc.detail} {hinweis}") from exc
+    except DisSidecarError:
+        # **Der Verschlüsselungsdienst antwortet nicht — und das darf nicht den
+        # Lauf kosten.**
+        #
+        # `upsert_entry` verschlüsselt über den DIS-Sidecar; bei Zeitablauf oder
+        # einer Antwort ungleich 200 kommt von dort eine gewöhnliche Ausnahme,
+        # keine `HTTPException`. Sie flog bis in den Segmentfang des Streams:
+        # der ganze Lauf endete mit `AI_STREAM_FAILED` und der Benutzer verlor
+        # die komplette Antwort — wegen einer Notiz, die das Modell nebenbei
+        # und lautlos machen sollte. Nebenan gilt längst das Gegenteil: "Ein
+        # Gedächtnis ist eine Beigabe. Es darf fehlen; es darf nicht im Weg
+        # stehen" (`ai_memory_service._entschluesseln`).
+        #
+        # `rollback` wie im Router-Zwilling: sonst trägt die Sitzung die
+        # angefangene Zeile weiter und der nächste Werkzeugaufruf desselben
+        # Laufs scheitert an ihr.
+        #
+        # Der Text sagt ausdrücklich, dass ein zweiter Versuch nichts bringt —
+        # ohne das wiederholt das Modell den Aufruf, bis die Runden alle sind.
+        db.rollback()
+        return {
+            "remembered": False,
+            "reason": "memory_unavailable",
+            "message": (
+                "Das Gedächtnis ist gerade nicht erreichbar, es wurde nichts "
+                "gespeichert. Versuch es nicht noch einmal — arbeite ohne die "
+                "Notiz weiter und beantworte die Frage des Benutzers."
+            ),
+        }
     except HTTPException as exc:
         # Secret im Wert, fremder Server, geschuetzter Eintrag, fehlendes
         # `server.config.write`: alles regulaere Faelle, die das Modell erfahren
@@ -2409,7 +2529,7 @@ def _execute_search_memory(db: Session, *, user: User, arguments: dict) -> dict:
     Bereich in genau der Form, in der es ihn annimmt.
     """
     from models import Team
-    from services import ai_memory_service
+    from services import ai_memory_service, team_service
 
     if not permission_service.has_global_permission(db, user, "ai.memory.use"):
         raise AiActionValidationError("Memory ist fuer diesen Benutzer nicht freigegeben")
@@ -2424,22 +2544,22 @@ def _execute_search_memory(db: Session, *, user: User, arguments: dict) -> dict:
     except HTTPException as exc:
         raise AiActionValidationError(str(exc.detail)) from exc
 
-    # Zu jedem Team-Treffer der Name, unter dem der Bereich ansprechbar ist.
-    # Dasselbe Muster wie in `_execute_forget_skill` weiter unten und aus
-    # demselben Grund: eine Team-ID ist wertlos, sobald jemand mit dem Bereich
-    # noch etwas vorhat. `remember` und `forget_memory` adressieren ein Team
-    # ausschliesslich ueber `team="<Name>"` (aufgeloest in
-    # `team_service.learning_team`); ein Werkzeug, das eine Nummer in einen
-    # Namen uebersetzt, gibt es nicht.
+    # Zu jedem Team-Treffer der Name, unter dem der Benutzer den Bereich kennt.
+    # Er ist die Hälfte des Rückwegs: die Nummer daneben spricht das Team an
+    # (`forget_memory(team_id=…)`), der Name macht es aussprechbar — "in Alpha
+    # steht noch das alte Wartungsfenster" ist ein Satz, "in Team 7" keiner.
+    # Damit ist auch die Auflage aus der vollen Absage befolgbar: "nur Einträge
+    # aus genau diesem Bereich", wobei der Bereich dort als Name genannt wird
+    # (`ai_memory_service._bereichsname`).
     #
-    # Erst damit ist die Auflage aus der vollen Absage befolgbar — "nur
-    # Eintraege aus genau diesem Bereich", wobei der Bereich dort als Name
-    # genannt wird (`ai_memory_service._bereichsname`). Vorher endete der Name
-    # an der Suche: Treffer trugen nur `team_id`, und weil Schluessel bewusst
-    # stabil sind und sich ueber Teams hinweg wiederholen, standen zwei
-    # gleichnamige Eintraege aus zwei Teams ununterscheidbar nebeneinander. Wer
-    # dann `forget_memory(team="Alpha")` rief, loeschte den noch gueltigen
-    # Eintrag und liess den veralteten aus dem anderen Team stehen.
+    # **Der Name kommt aus `ansprechbarer_name` und nicht aus `team.name`.**
+    # Teamnamen sind nur je Gründer eindeutig; ist der Benutzer in zwei Teams
+    # namens "Alpha", benannte der blanke Name beide. Zwei Treffer standen dann
+    # ununterscheidbar nebeneinander, und weil Schlüssel bewusst stabil sind und
+    # sich über Teams hinweg wiederholen, löschte ein
+    # `forget_memory(team="Alpha")` im falschen Team, statt ins Leere zu laufen.
+    # `ansprechbarer_name` hängt in diesem Fall den Gründer an — genau die Form,
+    # die `learning_team` in seiner Rückfrage anbietet und wieder annimmt.
     #
     # Je Team einmal fragen, nicht je Treffer: fuenfzehn Treffer aus einem Team
     # sind der Normalfall.
@@ -2451,7 +2571,10 @@ def _execute_search_memory(db: Session, *, user: User, arguments: dict) -> dict:
             return None
         if team_id not in namen:
             team = db.get(Team, team_id)
-            namen[team_id] = team.name if team is not None and team.name else None
+            namen[team_id] = (
+                team_service.ansprechbarer_name(db, user, team)
+                if team is not None and team.name else None
+            )
         return namen[team_id]
 
     results = []
@@ -2473,10 +2596,11 @@ def _execute_search_memory(db: Session, *, user: User, arguments: dict) -> dict:
             # Der Feldname ist der Argumentname von `forget_memory`, damit der
             # Weg vom Treffer zum Aufruf ohne Uebersetzung auskommt.
             treffer["team"] = name
-        # Fehlt die Zeile wider Erwarten, bleibt es bei `team_id` allein. Ein
-        # ersatzweises "Team 7" waere schlimmer als nichts: das Modell setzte
-        # es als `team` ein, `learning_team` traefe damit keinen Kandidaten und
-        # antwortete mit derselben Rueckfrage wie ohne jede Angabe.
+        # Fehlt die Zeile wider Erwarten, bleibt es bei `team_id` allein — und
+        # damit bei dem Weg, der ohnehin der genauere ist. Ein ersatzweises
+        # "Team 7" wäre schlimmer als nichts: das Modell setzte es als `team`
+        # ein, `learning_team` träfe damit keinen Kandidaten und antwortete mit
+        # derselben Rückfrage wie ohne jede Angabe.
         results.append(treffer)
 
     return {"untrusted": True, "query": query, "results": results}
@@ -2490,11 +2614,11 @@ def _execute_forget_memory(db: Session, *, user: User, arguments: dict) -> dict:
     schlechte dafuer, etwas *zu vernichten*. Deshalb sucht das Modell zuerst,
     nennt was es gefunden hat, und loescht danach die Schluessel.
     """
-    from services import ai_memory_service, team_service
+    from services import ai_memory_service
 
     if not permission_service.has_global_permission(db, user, "ai.memory.use"):
         raise AiActionValidationError("Memory ist fuer diesen Benutzer nicht freigegeben")
-    if set(arguments) - {"scope", "server_id", "keys", "team"}:
+    if set(arguments) - {"scope", "server_id", "keys", "team", "team_id"}:
         raise AiActionValidationError("Memory-Loeschung hat ungueltige Argumente")
     scope = arguments.get("scope")
     if scope not in {"user", "server", "server_shared", "team"}:
@@ -2519,17 +2643,13 @@ def _execute_forget_memory(db: Session, *, user: User, arguments: dict) -> dict:
     elif server_id is not None:
         raise AiActionValidationError("Dieser Memory-Bereich akzeptiert keinen Server")
 
-    team_id = None
-    if scope == "team":
-        target, question = team_service.learning_team(
-            db, user, schalter="memory", wunsch=arguments.get("team"),
-        )
-        if target is None:
-            return {"forgotten": [], "ask_user": question}
-        if target.is_personal:
-            scope = "user"
-        else:
-            team_id = target.id
+    # Hier zählt die Nummer am meisten: gelöscht wird nichts, was sich
+    # zurückholen lässt, und ein Griff ins gleichnamige Nachbarteam trifft dort
+    # denselben Schlüssel. Die Prüfung dahinter ist dieselbe wie beim Schreiben
+    # — `delete_by_keys` führt beide Schranken.
+    scope, team_id, rueckfrage = _memory_team(db, user, scope=scope, arguments=arguments)
+    if rueckfrage is not None:
+        return {"forgotten": [], "ask_user": rueckfrage}
 
     try:
         removed = ai_memory_service.delete_by_keys(
@@ -2545,6 +2665,11 @@ def _execute_forget_memory(db: Session, *, user: User, arguments: dict) -> dict:
         "forgotten": removed,
         "scope": scope,
         **({"server_id": server_id} if serverbezogen else {}),
+        # **Wo** gelöscht wurde, gehört ins Ergebnis. Bei zwei gleichnamigen
+        # Teams ist "im Team gelöscht" keine Auskunft, sondern eine Zusage, die
+        # das Modell nicht belegen kann — mit der Nummer sagt es dem Benutzer
+        # dasselbe, was es dem Werkzeug gesagt hat.
+        **({"team_id": team_id} if team_id is not None else {}),
         **({"not_found": missing} if missing else {}),
     }
 
@@ -2655,6 +2780,72 @@ def _execute_forget_skill(db: Session, *, user: User, arguments: dict) -> dict:
         }
 
     row, bereich = kandidaten[0]
+    # **Dieselbe Schranke wie beim Überschreiben, nur am anderen Ende.**
+    #
+    # `upsert_skill` weist einen KI-Text ab, der einen von einem Menschen
+    # geschriebenen Skill ersetzen will — was ein Mensch geschrieben hat,
+    # überschreibt die KI nicht stillschweigend. Ohne diese Prüfung war
+    # genau das in zwei Zügen zu haben: erst `forget_skill`, dann `learn_skill`
+    # unter demselben Schlüssel — und wo die Vorgabe des Betreibers stand,
+    # stand danach Modelltext, ohne dass jemand etwas bestätigt hat.
+    #
+    # Das wiegt schwerer als ein verlorener Absatz. Ein Skill wirkt in jedem
+    # künftigen Lauf des Panels oder des Teams; eine präparierte Logzeile, die
+    # das Modell zu genau diesen zwei Aufrufen bringt, wäre damit eine
+    # dauerhafte Anweisung an alle. Und `upsert_skill` führt bewusst keine
+    # Versionen — nach dem Löschen gibt es nichts zurückzuholen.
+    #
+    # Was die KI selbst gelernt hat, räumt sie weiter ohne Rückfrage weg; das
+    # ist die Hälfte, die ihr gehört. Für die andere bleibt der Weg offen, den
+    # ein Mensch ohnehin geht: `routers/ai_skills.py` löscht dieselbe Zeile
+    # ohne diese Schranke.
+    #
+    # Antwortform wie beim mitgelieferten Skill: eine Absage mit Weg statt
+    # einer Ausnahme. Ein `raise` würde das Modell eine Runde drehen lassen,
+    # statt es dem Benutzer sagen zu lassen.
+    if row.origin != "ai":
+        return {
+            "forgotten": False,
+            "skill_key": row.skill_key,
+            "scope": "global" if row.team_id is None else "team",
+            "bereich": bereich,
+            "reason": (
+                "Diesen Skill hat ein Mensch geschrieben — du löschst ihn nicht "
+                "und legst auch keinen ähnlichen zweiten an. Sag dem Benutzer, "
+                "welchen Skill du für überholt hältst und warum; entfernen kann "
+                "er ihn selbst in der Skill-Verwaltung des Panels."
+            ),
+        }
+    # **Dieselbe Schranke, an der zweiten Tür.**
+    #
+    # `upsert_skill` lässt den Schalter `enabled` nur von einem Menschen
+    # anfassen: ein abgeschalteter Skill bleibt abgeschaltet, auch wenn die KI
+    # ihn unter demselben Schlüssel neu schreibt. Genau dafür ist Abschalten da
+    # — es ist das Gegenmittel gegen einen per Injection gelernten Skill.
+    #
+    # Ohne diese Prüfung war es in zwei Zügen wieder weg: die abgeschaltete
+    # Zeile stammt von der KI, sie durfte sie also löschen — und das direkt
+    # folgende `learn_skill` landete im Anlege-Zweig, wo `enabled` wieder auf
+    # ``True`` steht. Der Betreiber hätte dasselbe am nächsten Tag noch einmal
+    # abgeschaltet, und wieder, ohne je zu erfahren, warum es zurückkommt.
+    #
+    # Es ist eine Zustandsprüfung und kein entzogenes Werkzeug: was die KI
+    # gelernt hat und was gilt, räumt sie weiter ohne Rückfrage weg. Nur die
+    # eine Zeile, über die ein Mensch bereits entschieden hat, bleibt liegen —
+    # und der Weg dorthin ist derselbe wie oben.
+    if not row.enabled:
+        return {
+            "forgotten": False,
+            "skill_key": row.skill_key,
+            "scope": "global" if row.team_id is None else "team",
+            "bereich": bereich,
+            "reason": (
+                "Diesen Skill hat ein Mensch abgeschaltet; er wirkt bereits "
+                "nicht mehr. Lösche ihn nicht und lege auch keinen ähnlichen "
+                "zweiten an — entfernen kann er ihn selbst in der "
+                "Skill-Verwaltung des Panels."
+            ),
+        }
     # Das Ergebnis entsteht **vor** dem Loeschen: nach `db.delete` und `commit`
     # sind die Attribute der Zeile nicht mehr abrufbar.
     #
@@ -2670,7 +2861,12 @@ def _execute_forget_skill(db: Session, *, user: User, arguments: dict) -> dict:
         "bereich": bereich,
     }
     try:
-        ai_skill_service.delete_skill(db, user=user, skill_id=row.id)
+        # `origin="ai"` ist der ganze Zweck des Parameters: Skills sind nicht
+        # versioniert, das Audit-Log ist die einzige Spur einer Löschung — und
+        # ohne diese Angabe stand jede von der KI ausgelöste als Klick eines
+        # Menschen im Panel darin. Nach einer per Injection ausgelösten Löschung
+        # hätte niemand mehr unterscheiden können, wessen Hand es war.
+        ai_skill_service.delete_skill(db, user=user, skill_id=row.id, origin="ai")
     except HTTPException as exc:
         raise AiActionValidationError(str(exc.detail)) from exc
     return ergebnis
@@ -3106,7 +3302,7 @@ def _execute_send_test_email(db: Session, *, user: User) -> dict:
 
 def _execute_global_read_tool(
     db: Session, *, user: User, tool_name: str, arguments: dict,
-    herkunft: str = "panel",
+    herkunft: str = "panel", familie: str | None = None,
 ) -> dict:
     """Werkzeuge ohne Serverbezug.
 
@@ -3132,8 +3328,15 @@ def _execute_global_read_tool(
         # App darf denselben Rechner sehen wie der Lauf, der ihn gestellt hat.
         # Ohne sie fiel der Worker auf "panel" und meldete dem Benutzer, er
         # koenne auf dessen Rechner nicht zugreifen (22.08.2026).
+        #
+        # Die Familie geht denselben Weg und beantwortet die zweite Hälfte
+        # derselben Frage: die Herkunft sagt „aus der App", die Familie sagt
+        # „aus **dieser** App". Nur mit ihr landet ein Desktop-Auftrag des
+        # Workers bei dem Rechner, an dem der Mensch sitzt, statt bei dem, der
+        # zuerst nach Arbeit fragt (`desktop_job_service.naechster`).
         return ai_worker_service.worker_start(
-            db, user=user, arguments=arguments, herkunft=herkunft
+            db, user=user, arguments=arguments, herkunft=herkunft,
+            familie=familie,
         )
 
     if tool_name == "worker_cancel":
@@ -3544,6 +3747,21 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
         raise AiActionValidationError("Ungültige Seitenzahl")
     mod_support = plugin.get_mod_support() or {}
 
+    # Die Anfrage geht an einen fremden Dienst (Steam oder CurseForge) und wird
+    # dort protokolliert — dieselbe Lage wie bei `web_search`, also dieselbe
+    # Schwärzung, eine Richtung früher als der Choke Point auf dem Rückweg.
+    # Der Suchbegriff ist reine Modellausgabe, und das Modell hat vorher
+    # Konfigurationsdateien und Logs gelesen: eine Zuweisung wie
+    # `ServerAdminPassword=…` kann es wörtlich übernehmen. Die Schwärzung ist
+    # wertbezogen, ein Einstellungs- oder Modname als Wort überlebt sie.
+    #
+    # Gekürzt wird auf die Länge, die das Schema verspricht. Ein Schema ist eine
+    # Bitte an das Modell und keine Schranke; was hier durchkommt, geht als
+    # URL-Parameter hinaus.
+    sichere_anfrage = redact_sensitive_text(
+        arguments["query"].strip()
+    )[:MAX_SEARCH_QUERY_CHARS]
+
     # 1. CurseForge Provider
     if mod_support.get("provider") == "curseforge" or mod_support.get("curseforge_game_id"):
         cf_game_id = str(mod_support.get("curseforge_game_id") or "")
@@ -3552,7 +3770,6 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
             return {"server_id": server.id, "available": False, "reason": "curseforge_game_id_missing"}
         try:
             import asyncio
-            import concurrent.futures
             from services.curseforge_service import get_curseforge_service, CurseForgeApiUnavailable
 
             async def _do_cf_search():
@@ -3560,21 +3777,22 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
                 return await svc.search_mods(
                     game_id=cf_game_id,
                     class_id=cf_class_id,
-                    query=arguments["query"],
+                    query=sichere_anfrage,
                     page=page,
                     per_page=20,
                 )
 
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
-            if loop and loop.is_running():
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    cf_mods = pool.submit(asyncio.run, _do_cf_search()).result()
-            else:
-                cf_mods = asyncio.run(_do_cf_search())
+            # Ohne Weiche auf eine laufende Ereignisschleife: die Lesewerkzeuge
+            # laufen ausschließlich über `_werkzeug_ausfuehren` und damit "in
+            # eigener Sitzung und eigenem Thread", wo es nie eine gibt. Hier
+            # stand ein `ThreadPoolExecutor`, der `asyncio.run` in einem zweiten
+            # Thread startete — toter Verteidigungscode, der obendrein den
+            # Eindruck machte, der Handler sei auf der Schleife aufrufbar. Wäre
+            # er das, blockierte er sie für die volle Dauer des HTTP-Aufrufs;
+            # nebenläufig wird davon nichts, der Executor verdeckt nur den
+            # Konstruktionsfehler. `asyncio.run` sagt in dem Fall selbst
+            # deutlich, was los ist.
+            cf_mods = asyncio.run(_do_cf_search())
 
             results = [
                 {
@@ -3594,7 +3812,17 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
         except CurseForgeApiUnavailable as exc:
             return {"server_id": server.id, "available": False, "reason": exc.code}
         except Exception as exc:
-            return {"server_id": server.id, "available": False, "reason": str(exc)}
+            # Ein stabiler Code wie in jedem anderen Zweig dieses Handlers.
+            # Vorher stand hier `str(exc)`: beliebiger Text aus einer beliebigen
+            # Bibliothek, der als Grund an das Modell ging und dort mit
+            # `curseforge_game_id_missing` in einer Reihe stand. Die Einzelheit
+            # gehört ins Log — und dort nur der Ausnahmetyp, wie es
+            # `curseforge_service` schon hält: eine Fehlermeldung kann den
+            # API-Schlüssel tragen.
+            logger.warning(
+                "CurseForge-Suche im Werkzeug fehlgeschlagen: %s", type(exc).__name__
+            )
+            return {"server_id": server.id, "available": False, "reason": "curseforge_fehler"}
 
     # 2. Steam Workshop Provider
     appid = mod_support.get("workshop_id")
@@ -3603,7 +3831,7 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
     try:
         results = mod_update_service.search_workshop(
             appid=str(appid),
-            query=arguments["query"],
+            query=sichere_anfrage,
             page=page,
             required_tags=mod_support.get("required_tags") or None,
         )
@@ -3679,6 +3907,7 @@ def execute_read_tool(
     tool_name: str,
     arguments: dict,
     herkunft: str = "panel",
+    familie: str | None = None,
 ) -> dict:
     """Fuehrt ein Lesewerkzeug im Namen des Benutzers aus.
 
@@ -3687,17 +3916,20 @@ def execute_read_tool(
     braucht, steht in seinen Argumenten und wird gegen die Rechte von ``user``
     geprueft.
 
-    ``herkunft`` ist die einzige Ausnahme davon, und sie steht ausdruecklich
-    **nicht** in den Argumenten: welche Welt den Aufruf gestellt hat, ist eine
-    Tatsache des Laufs. Gebraucht wird sie von genau einem Werkzeug —
-    `worker_start` gibt sie an den Auftrag weiter, den es anlegt.
+    ``herkunft`` und ``familie`` sind die einzigen Ausnahmen davon, und sie
+    stehen ausdrücklich **nicht** in den Argumenten: aus welcher Welt der
+    Aufruf kam und von welchem Gerät, sind Tatsachen des Laufs. Gebraucht
+    werden beide von genau einem Werkzeug — `worker_start` gibt sie an den
+    Auftrag weiter, den es anlegt. Die Herkunft öffnet ihm die
+    Desktop-Werkzeuge, die Familie sagt, an welchen Rechner er sich damit
+    wendet; ohne sie holt seinen Auftrag der, der zuerst fragt.
     """
     if tool_name not in READ_TOOLS:
         raise AiActionValidationError("Read-Tool ist in diesem Kontext nicht erlaubt")
     if tool_name in GLOBAL_READ_TOOLS:
         return _execute_global_read_tool(
             db, user=user, tool_name=tool_name, arguments=arguments,
-            herkunft=herkunft,
+            herkunft=herkunft, familie=familie,
         )
     server, arguments = _resolve_server(db, user, arguments)
     context = _execute_server_context_tool(

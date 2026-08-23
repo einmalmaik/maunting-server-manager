@@ -55,6 +55,7 @@ except ImportError:  # pragma: no cover - exercised on systems before deps insta
     # weiter.
     yaml = None  # type: ignore[assignment]
 from fastapi import HTTPException
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -366,14 +367,30 @@ def _stored_vector(row: AiSkill) -> list[float] | None:
 def refresh_embedding(row: AiSkill) -> None:
     """Berechnet den Auswahlvektor neu, falls ein Modell geladen ist.
 
-    Schlaegt es fehl, bleibt der alte Wert stehen und der Skill wird eben
-    alphabetisch eingeordnet. Ein Skill darf nicht daran scheitern, dass ein
-    Modell fehlt.
+    Schlägt es fehl, wird ein vorhandener Vektor **verworfen** und der Skill
+    ohne Bedeutungsanteil eingeordnet. Ein Skill darf nicht daran scheitern,
+    dass ein Modell fehlt.
+
+    Das Verwerfen ist der Punkt — dieselbe Entscheidung wie beim Gedächtnis
+    (`ai_memory_service.refresh_embedding`). Hier stand einmal ein blosses
+    ``return``: der alte Vektor blieb samt Modell-Tag stehen, `_stored_vector`
+    nahm ihn beim nächsten Lauf als gültig an, und die Auswahl in `skill_index`
+    ordnete den Skill nach der Bedeutung seines **alten** Textes. Wer während
+    einer Ausfallphase des Modells einen Skill von "Valheim-RAM" auf
+    "Portkonflikt" umschrieb, bekam ihn danach dauerhaft bei Valheim-Fragen
+    hochgezogen und bei Portfragen nicht — genau der stille Auswahlfehler, vor
+    dem `_index_text` warnt.
+
+    ``None`` heisst "kein brauchbarer Vektor"; `_candidate_vectors` kodiert
+    solche Zeilen beim nächsten Abruf ohnehin frisch nach, der Zustand heilt
+    sich also von selbst, sobald wieder ein Modell da ist.
     """
     vectors = ai_embedding_service.encode(
         [_index_text(row.skill_key, row.name, row.description)]
     )
     if not vectors:
+        row.embedding_json = None
+        row.embedding_model = None
         return
     row.embedding_json = json.dumps(vectors[0], separators=(",", ":"))
     row.embedding_model = _EMBEDDING_MODEL_TAG
@@ -598,6 +615,83 @@ def upsert_skill(
     )
     action = "ai.skill.updated"
     if row is None:
+        if origin == "ai":
+            # **Die Schranke zur Seite.** Die Suche oben findet nur den eigenen
+            # Bereich; eine Zeile daneben kollidiert also nie, und der Zweig
+            # weiter unten ("was ein Mensch geschrieben hat, überschreibt die KI
+            # nicht") lief ins Leere. Überschrieben wird dabei auch nichts — die
+            # Entscheidung des Menschen wird ausgehebelt, und zwar in beide
+            # Richtungen:
+            #
+            # *Nach unten:* über einer panelweiten Vorgabe legt die KI eine
+            # Team-Zeile an. `_overlay_rank` sagt "eng schlägt weit", und ab dem
+            # nächsten Gespräch liest jedes Mitglied Modelltext, wo der
+            # Betreiber seine Vorgabe hingeschrieben hat. Die Vorgabe selbst
+            # steht unverändert in der Datenbank, und niemandem fällt etwas auf.
+            #
+            # *Nach oben:* über einer abgeschalteten Team-Zeile legt die KI eine
+            # globale an. Verdeckt wird hier gar nichts — eine abgeschaltete
+            # Zeile verdeckt ja selbst nichts (siehe `_overlay`), die neue aktive
+            # scheint schlicht durch sie hindurch. Der Schlüssel steht nach einem
+            # einzigen Aufruf wieder im Verzeichnis, jetzt für alle.
+            #
+            # Abgefragt wird die Herkunft **und** der Zustand, weil beides
+            # dasselbe ist: eine Entscheidung eines Menschen zu diesem Schlüssel.
+            # Von Hand geschrieben ist die Ansage "so wird das hier gemacht",
+            # abgeschaltet die Ansage "dieser Schlüssel gilt hier nicht" (siehe
+            # `visible_skills`) — und Abschalten ist das Gegenmittel gegen einen
+            # per Injection gelernten Skill. Kollegen braucht es für keinen der
+            # beiden Wege: ohne echtes Team fällt `team_service.learning_team`
+            # auf das persönliche zurück, beide standen jedem mit
+            # `ai.skills.use` offen.
+            #
+            # **Der Zuschnitt kommt aus `visible_skills`**: geprüft werden genau
+            # die Bereiche, aus denen dieser Benutzer sein Verzeichnis bekommt,
+            # ohne den, in den gerade geschrieben wird. Eine abgeschaltete Zeile
+            # in irgendeinem fremden Team darf nichts blockieren — das wäre eine
+            # Sperre, die jeder Teamverwalter Unbeteiligten aufzwingen könnte.
+            #
+            # Die Menschenherkunft zählt dabei nur panelweit, und auch das kommt
+            # aus `_overlay_rank`: eine Team-Zeile verdeckt die globale, nie
+            # umgekehrt. Über eine **aktive** globale KI-Zeile legt die KI
+            # weiterhin eine Team-Fassung — dort hat kein Mensch etwas
+            # entschieden, und genommen wird ihr nichts.
+            #
+            # Eine **wartende** Zeile fängt die Schranke mit: sie wirkt zwar
+            # nicht, wird es aber mit der Freigabe — und wer freigibt, sieht den
+            # Text, nicht die abgeschaltete Zeile daneben.
+            sichtbar = [
+                "global",
+                *(_scope_identity(tid) for tid in team_service.user_team_ids(db, user)),
+            ]
+            fremde = [scope for scope in sichtbar if scope != identity]
+            entscheidung = (
+                db.query(AiSkill)
+                .filter(
+                    AiSkill.scope_identity.in_(fremde),
+                    AiSkill.skill_key == key,
+                    or_(
+                        AiSkill.enabled.is_(False),
+                        and_(
+                            AiSkill.scope_identity == "global",
+                            AiSkill.origin == "operator",
+                        ),
+                    ),
+                )
+                .first()
+            )
+            if entscheidung is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Unter diesem Schlüssel steht bereits die Entscheidung eines "
+                        "Menschen — panelweit oder in einem Team dieses Benutzers, von "
+                        "Hand geschrieben oder abgeschaltet. Eine zweite Fassung daneben "
+                        "würde sie aushebeln, ohne dass jemand sie zurücknimmt. Lege "
+                        "keinen ähnlichen zweiten an — sag dem Benutzer, was du "
+                        "herausgefunden hast."
+                    ),
+                )
         # Getrennt gezaehlt: freigegebene Skills gegen das Bereichskontingent,
         # wartende gegen ihr eigenes. Vorher zaehlte beides zusammen — und
         # wartende Zeilen entstehen ohne Zutun eines Menschen: unter der
@@ -675,7 +769,25 @@ def upsert_skill(
         row.body = safe_body
         row.origin = origin
         row.status = status
-        row.enabled = enabled
+        if origin == "operator":
+            # Den Schalter fasst nur der Mensch an. Vorher setzte jedes
+            # Speichern `enabled` bedingungslos auf den Parameterwert — und
+            # `learn_skill` übergibt ihn nie, es galt der Vorgabewert ``True``.
+            # Ein vom Betreiber abgeschalteter Skill stand damit nach einem
+            # einzigen Lernvorgang unter demselben Schlüssel wieder im
+            # Verzeichnis jedes Kontexts, und der Systemprompt verlangt genau
+            # das: für eine passende Erkenntnis denselben Schlüssel nehmen.
+            # Abschalten ist aber das Gegenmittel gegen einen per Injection
+            # gelernten Skill; wäre es nach einer Runde wieder weg, gäbe es
+            # gar keines.
+            #
+            # Was die KI darf, bleibt unberührt: Name, Beschreibung und Text
+            # einer abgeschalteten Zeile ändern sich weiter wie bisher. Sie
+            # bleibt nur verdeckt, bis ein Mensch sie über `set_enabled`
+            # zurückholt — dieselbe Trennung wie oben in `visible_skills`:
+            # Abschalten ist eine Handlung des Betreibers, und nur die
+            # Handlung darf wirken.
+            row.enabled = enabled
         # Wer zuletzt geschrieben hat, steht auch dran. Vorher blieb
         # `created_by` beim urspruenglichen Einreicher stehen — eine wartende
         # Zeile liess sich ueberschreiben, und in der Freigabe-Ansicht stand
@@ -765,6 +877,17 @@ def approve(db: Session, *, user: User, skill_id: str, fingerprint: str) -> AiSk
         raise HTTPException(status_code=409, detail="Nur globale Skills brauchen eine Freigabe")
     if not permission_service.has_global_permission(db, user, "ai.skills.manage"):
         raise HTTPException(status_code=403, detail="Keine Berechtigung")
+    # Die Zeile gesperrt neu laden, bevor der Abdruck verglichen wird. Der
+    # Abdruck schützt das Fenster zwischen Lesen in der Oberfläche und Klicken;
+    # innerhalb dieser Funktion blieb ein zweites, kleines offen: geprüft wurde
+    # gegen den Stand aus dem ersten SELECT, geschrieben erst beim Commit.
+    # Committet ein paralleler `upsert_skill` dazwischen, machte die Freigabe
+    # einen nie gelesenen Text panelweit wirksam — dieselbe persistente
+    # Prompt-Injection, gegen die der Abdruck gebaut ist, nur eine Ebene tiefer.
+    # Unter PostgreSQL wartet der parallele Schreiber jetzt bis zum Commit der
+    # Freigabe und läuft danach in seine eigenen Schranken; SQLite kennt kein
+    # FOR UPDATE und lässt die Klausel weg, dort bleibt es beim frischen Lesen.
+    db.refresh(row, with_for_update=True)
     if fingerprint != content_fingerprint(row):
         raise HTTPException(
             status_code=409,
@@ -786,12 +909,38 @@ def approve(db: Session, *, user: User, skill_id: str, fingerprint: str) -> AiSk
     return row
 
 
-def delete_skill(db: Session, *, user: User, skill_id: str) -> None:
+def delete_skill(db: Session, *, user: User, skill_id: str, origin: str = "direct") -> None:
+    """Loescht eine Skill-Zeile — und haelt fest, wer es war und was wegfiel.
+
+    Skills sind bewusst nicht versioniert (siehe `upsert_skill`); der Verweis
+    dort lautet "wer die Entwicklung nachvollziehen will, findet sie im
+    Audit-Log". Dann muss der Eintrag sie auch tragen: der blosse Schlüssel
+    sagte nach einer Löschung weder, was in der Zeile stand, noch ob ein Mensch
+    im Panel geklickt oder die KI `forget_skill` aufgerufen hat. Nach einer per
+    Injection ausgelösten Löschung war beides nicht mehr feststellbar.
+
+    ``origin`` ist deshalb dieselbe Angabe wie bei `upsert_skill`: ``"ai"`` vom
+    Werkzeugpfad, ``"direct"`` vom Panel. Name und Beschreibung dürfen in den
+    Eintrag, weil `_safe_text` Zugangsdaten schon beim Schreiben abweist; der
+    Text selbst geht als Abdruck mit statt im Klartext — er kann bis zu
+    zwölftausend Zeichen haben, und der Abdruck reicht, um eine
+    wiederhergestellte Fassung als dieselbe zu erkennen.
+    """
+    if origin not in {"direct", "ai"}:
+        raise HTTPException(status_code=422, detail="Unbekannte Skill-Herkunft")
     row = get_skill(db, skill_id)
     assert_may_write(db, user, row.team_id)
     audit_service.record_privileged_action(
         db, user_id=user.id, action="ai.skill.deleted", target_type="ai_skill",
-        target_id=row.id, details={"skill_key": row.skill_key}, origin="direct",
+        target_id=row.id,
+        details={
+            "skill_key": row.skill_key,
+            "scope": row.scope_identity,
+            "name": row.name,
+            "description": row.description,
+            "content_fingerprint": content_fingerprint(row),
+        },
+        origin=origin,
     )
     db.delete(row)
     db.commit()

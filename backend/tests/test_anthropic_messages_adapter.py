@@ -245,6 +245,59 @@ def test_attachment_blocks_do_not_become_python_syntax() -> None:
     ]
 
 
+def test_an_image_reaches_the_model_instead_of_being_dropped() -> None:
+    """**Auge ohne Sehnerv.** Der Text sagt „liegt bei" — dann muss es beiliegen.
+
+    MSM baut Bilder ueberall in OpenAIs Form (`_desktopmeldung`,
+    `ai_attachment_service`); Anthropic will die Data-URL zerlegt. Ohne die
+    Uebersetzung bekam Claude nur die Behauptung und meldete, es habe kein
+    auswertbares Bildschirmergebnis.
+    """
+    _, verlauf = nachrichten_uebersetzen([{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Ergebnis: bild liegt bei"},
+            {"type": "image_url",
+             "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQ"}},
+        ],
+    }])
+    assert verlauf == [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Ergebnis: bild liegt bei"},
+            {"type": "image", "source": {"type": "base64",
+                                         "media_type": "image/jpeg",
+                                         "data": "/9j/4AAQ"}},
+        ],
+    }]
+
+
+def test_a_message_that_is_only_an_image_survives() -> None:
+    """Sie ist nicht leer, sie ist ein Bild — und ein PNG bleibt ein PNG."""
+    _, verlauf = nachrichten_uebersetzen([{
+        "role": "user",
+        "content": [{"type": "image_url",
+                     "image_url": {"url": "data:image/png;base64,iVBORw0KGgo"}}],
+    }])
+    assert verlauf == [{
+        "role": "user",
+        "content": [{"type": "image", "source": {"type": "base64",
+                                                 "media_type": "image/png",
+                                                 "data": "iVBORw0KGgo"}}],
+    }]
+
+
+def test_an_address_that_is_no_data_url_is_not_invented() -> None:
+    """MSM baut nur Data-URLs; fuer alles andere gibt es hier keine Wahrheit."""
+    _, verlauf = nachrichten_uebersetzen([{
+        "role": "user",
+        "content": [{"type": "text", "text": "Da."},
+                    {"type": "image_url",
+                     "image_url": {"url": "https://example.invalid/bild.png"}}],
+    }])
+    assert verlauf[0]["content"] == [{"type": "text", "text": "Da."}]
+
+
 # ── Der Strom ─────────────────────────────────────────────────────────
 
 

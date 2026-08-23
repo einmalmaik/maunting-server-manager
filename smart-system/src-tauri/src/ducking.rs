@@ -163,13 +163,33 @@ pub fn starten() -> Result<(), String> {
 
 /// Stellt die gemerkten Lautstärken wieder her. Sessions, die inzwischen
 /// verschwunden sind, werden still übersprungen; neue bleiben unberührt.
+///
+/// **Scheitert der Weg dorthin, kommen die gemerkten Werte zurück in den
+/// Merkzettel.** Sie leben nur hier: wer sie auf dem Fehlerweg fallen lässt,
+/// lässt jedes fremde Programm dauerhaft auf 40 % stehen, und ein späteres
+/// `starten()` merkt sich genau diese 40 % als neues Original und duckt
+/// weiter auf 16 %. Der reale Fall ist das abgezogene Bluetooth-Headset:
+/// `GetDefaultAudioEndpoint` schlägt fehl, während die KI gerade spricht.
 pub fn stoppen() -> Result<(), String> {
     let mut originale = ORIGINALE.lock().map_err(|_| "Ducking-Zustand vergiftet")?;
     let Some(gemerkt) = originale.take() else {
         return Ok(());
     };
-    let _com = ComGast::betreten()?;
-    let plaene: Vec<Rampe> = fremde_sessions()?
+    let _com = match ComGast::betreten() {
+        Ok(gast) => gast,
+        Err(fehler) => {
+            *originale = Some(gemerkt);
+            return Err(fehler);
+        }
+    };
+    let sessions = match fremde_sessions() {
+        Ok(liste) => liste,
+        Err(fehler) => {
+            *originale = Some(gemerkt);
+            return Err(fehler);
+        }
+    };
+    let plaene: Vec<Rampe> = sessions
         .into_iter()
         .filter_map(|s| {
             let original = *gemerkt.get(&s.kennung)?;

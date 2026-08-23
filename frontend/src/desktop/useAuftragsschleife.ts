@@ -29,6 +29,9 @@ const RUHE_MS = 15_000
  * niemand: das entscheidet Rust anhand des `autonom`, das allein das Panel
  * setzt. Deshalb wird die Kennung schon **vor** dem Ausführen gemerkt und
  * hinterher wieder verworfen, wenn doch ein Ergebnis kam.
+ *
+ * Seit die Kennung mit in den Aufruf geht, ist dieser gemerkte Wert nur noch
+ * der Rückfall: die Karte liest sie aus ihrem eigenen Ereignis.
  */
 function fragtEinenMenschen(auftrag: Auftrag): boolean {
   if (auftrag.tool_name === 'desktop_aufraeumen') {
@@ -63,11 +66,17 @@ export function useAuftragsschleife(aktiv: boolean): string | null {
       try {
         // Die Kennung **vor** dem Ausführen merken: Rust schickt das Ereignis
         // für die Karte noch im Aufruf los, und eine Karte ohne Auftrag könnte
-        // nichts beantworten.
+        // nichts beantworten. Dieser Weg ist aber nur der Rückfall — er hängt
+        // daran, dass das `set` samt Neu-Render vor dem Ereignis durchläuft,
+        // und niemand sichert das zu.
         if (fragtEinenMenschen(auftrag)) {
           setOffeneUebernahme(auftrag.id)
         }
-        ergebnis = await auftragAusfuehren(auftrag.tool_name, auftrag.arguments)
+        // Der verlässliche Weg ist dieser: die Kennung reist im Aufruf mit,
+        // Rust legt sie in die Nutzlast der Karte, und die Karte beantwortet
+        // damit genau **diesen** Auftrag — auch wenn oben noch eine ältere
+        // Kennung steht oder das Ereignis schneller war als React.
+        ergebnis = await auftragAusfuehren(auftrag.tool_name, auftrag.arguments, auftrag.id)
       } catch (fehler) {
         setOffeneUebernahme(null)
         // Der Fehlertext geht als Werkzeugergebnis an das Modell — er nennt

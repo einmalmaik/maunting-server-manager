@@ -159,14 +159,24 @@ export async function wakewordZuruecksetzen(): Promise<void> {
  * `null` heißt: das Ergebnis kommt später, weil ein Mensch an einer
  * Bestätigungskarte entscheidet — die Bitte um die Übernahme, und Aufräumen
  * bei ausgeschaltetem autonomem Modus.
+ *
+ * `auftragId` wird nur durchgereicht: Rust legt sie in die Nutzlast genau
+ * dieser Karten, damit die Antwort des Menschen zu dem Auftrag gehört, der
+ * gefragt hat — und nicht zu dem, den das Fenster sich gerade gemerkt hat.
  */
 export async function auftragAusfuehren(
   werkzeug: string,
   argumente: Record<string, unknown>,
+  auftragId?: string,
 ): Promise<Record<string, unknown> | null> {
   return await invoke<Record<string, unknown> | null>('auftrag_ausfuehren', {
     werkzeug,
     argumente,
+    // camelCase, obwohl der Parameter in Rust `auftrag_id` heißt: Tauri bildet
+    // Command-Argumente standardmäßig auf camelCase ab und sucht exakt diesen
+    // Schlüssel. Ein `auftrag_id` an dieser Stelle käme drüben als `None` an —
+    // ohne Fehler, denn das Argument ist freiwillig.
+    auftragId,
   })
 }
 
@@ -212,11 +222,18 @@ export interface Aufraeumposten {
   zone: string
 }
 
+/** Die Nutzlast von `mss:aufraeumen-anfrage` — was die Karte zeigt. */
 export interface Aufraeumplan {
   /** `papierkorb` | `endgueltig` | `papierkorb_leeren`. */
   aktion: string
   grund: string
   posten: Aufraeumposten[]
+  /**
+   * Der Auftrag, aus dem die Frage stammt. Fehlt bei einer App, deren
+   * Rust-Hälfte die Kennung noch nicht mitschickt — dann bleibt der Karte
+   * nur die Kennung, die die Auftragsschleife gerade hält.
+   */
+  auftrag_id?: string | null
 }
 
 /** Führt den wartenden Plan aus und gibt sein Ergebnis zurück. */

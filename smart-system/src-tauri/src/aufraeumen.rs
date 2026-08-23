@@ -66,7 +66,23 @@ pub const MESSTIEFE: u32 = 12;
 /// mehr auf dem Hauptthread (`#[tauri::command(async)]`).
 pub const MESSFRIST: Duration = Duration::from_secs(5);
 
-/// Die Groesse eines Pfades — bei Ordnern die Summe darunter.
+/// Wie lange **ein ganzer Auftrag** hoechstens messen darf.
+///
+/// `MESSFRIST` gilt je Pfad. Beim Ausfuehren wird jeder der bis zu
+/// [`MAX_PFADE`] Posten noch einmal gemessen (`pruefen`), und fuenfhundertmal
+/// fuenf Sekunden waeren vierzig Minuten — waehrend der Desktop-Auftrag nach
+/// zehn Minuten verfaellt. Der Lauf erfuehre dann `DESKTOP_JOB_EXPIRED` und
+/// sagte dem Benutzer, es sei nichts geschehen, obwohl geloescht wird.
+///
+/// Zwanzig Sekunden reichen fuer jede normale Liste. Danach wird nicht mehr
+/// gemessen, sondern nur noch geloescht: die Zahl in `freigegebene_bytes` ist
+/// dann eine Untergrenze, und das ist allemal besser als ein Auftrag, der
+/// waehrend seiner eigenen Arbeit verfaellt.
+const MESSBUDGET: Duration = Duration::from_secs(20);
+
+/// Die Groesse eines Pfades — bei Ordnern die Summe darunter, und dazu die
+/// Auskunft, ob die Rechnung fertig geworden ist (`false` heisst: die Frist
+/// lief ab, die Zahl ist eine Untergrenze).
 ///
 /// Auch die Bestaetigungskarte rechnet damit (`auftrag::raeumen`): ein
 /// blosses `metadata().len()` meldet fuer Ordner den Verzeichniseintrag und
@@ -85,17 +101,8 @@ pub const MESSFRIST: Duration = Duration::from_secs(5);
 /// Blockade der Laenge nach unbegrenzt war — und sie lief auf dem
 /// Hauptthread, also mit eingefrorener Oberflaeche.
 ///
-/// Laeuft die Zeit ab, ist das Ergebnis eine **Untergrenze** und keine
-/// Zahl. Eine Karte, die nach fuenf Sekunden "mindestens 2,4 GB" sagt, ist
-/// besser als eine, die nie kommt.
-pub fn groesse(pfad: &Path, tiefe: u32) -> u64 {
-    let (bytes, _) = groesse_mit_frist(pfad, tiefe, Instant::now() + MESSFRIST);
-    bytes
-}
-
-/// Wie `groesse`, sagt aber dazu, ob sie fertig geworden ist.
-///
-/// `false` heisst: die Frist lief ab, die Zahl ist eine Untergrenze.
+/// Eine Karte, die nach fuenf Sekunden "mindestens 2,4 GB" sagt, ist besser
+/// als eine, die nie kommt.
 pub fn groesse_gemessen(pfad: &Path, tiefe: u32) -> (u64, bool) {
     groesse_mit_frist(pfad, tiefe, Instant::now() + MESSFRIST)
 }
@@ -137,7 +144,7 @@ fn groesse_mit_frist(pfad: &Path, tiefe: u32, bis: Instant) -> (u64, bool) {
 ///
 /// Gibt bei Ablehnung den Grund zurueck, den das Modell zu lesen bekommt —
 /// benannt und nicht "geht nicht", damit es nicht dreimal dasselbe versucht.
-fn pruefen(roh: &str, system_erlaubt: bool) -> Result<Posten, String> {
+fn pruefen(roh: &str, system_erlaubt: bool, messen_bis: Instant) -> Result<Posten, String> {
     let pfad = Path::new(roh.trim());
     if roh.trim().is_empty() {
         return Err("Leerer Pfad.".into());
@@ -161,13 +168,40 @@ fn pruefen(roh: &str, system_erlaubt: bool) -> Result<Posten, String> {
              gewinnen."
         ));
     }
-    Ok(Posten { pfad: pfad.to_path_buf(), zone, bytes: groesse(pfad, MESSTIEFE) })
+    // Die Messung ist eine Auskunft, kein Teil des Loeschens: ist das Budget
+    // des Auftrags aufgebraucht, wird der Posten trotzdem entfernt — nur ohne
+    // seine Zahl.
+    let bytes = if Instant::now() < messen_bis {
+        let (bytes, _) = groesse_mit_frist(pfad, MESSTIEFE, messen_bis);
+        bytes
+    } else {
+        0
+    };
+    Ok(Posten { pfad: pfad.to_path_buf(), zone, bytes })
 }
 
 /// Loescht einen Pfad — hart, egal was er ist.
+///
+/// Drei Faelle, nicht zwei. Eine Junction oder ein Ordner-Symlink meldet
+/// `is_symlink() == true` und `is_dir() == false`, faellt also auf den
+/// Datei-Zweig — und `DeleteFileW` scheitert an einem Verzeichnis-Reparsepunkt
+/// mit "Zugriff verweigert". Ausgerechnet in Muellordnern hinterlassen
+/// Installer solche Verweise. Fuer sie ist `remove_dir` richtig: es entfernt
+/// die **Verknuepfung** und nicht ihr Ziel — sonst raeumte ein Verweis nach
+/// `C:\Windows` genau dorthin ab.
 fn hart_weg(pfad: &Path) -> Result<(), String> {
     let daten = std::fs::symlink_metadata(pfad).map_err(|e| e.to_string())?;
-    if daten.is_dir() && !daten.is_symlink() {
+    if daten.is_symlink() {
+        // Wohin er zeigt, entscheidet die Loeschart — `metadata` folgt ihm
+        // dafuer. Ein Verweis ins Leere ist eine Datei.
+        let zeigt_auf_ordner = std::fs::metadata(pfad).map(|z| z.is_dir()).unwrap_or(false);
+        return if zeigt_auf_ordner {
+            std::fs::remove_dir(pfad).map_err(|e| e.to_string())
+        } else {
+            std::fs::remove_file(pfad).map_err(|e| e.to_string())
+        };
+    }
+    if daten.is_dir() {
         std::fs::remove_dir_all(pfad).map_err(|e| e.to_string())
     } else {
         std::fs::remove_file(pfad).map_err(|e| e.to_string())
@@ -191,12 +225,14 @@ fn ausfuehren(pfade: &[String], system_erlaubt: bool, hart: bool) -> Result<Valu
         ));
     }
 
+    // Eine Uhr fuer den ganzen Auftrag, nicht je Pfad — siehe `MESSBUDGET`.
+    let messen_bis = Instant::now() + MESSBUDGET;
     let mut ergebnisse = Vec::with_capacity(pfade.len());
     let mut freigegeben: u64 = 0;
     let mut erledigt = 0usize;
 
     for roh in pfade {
-        let posten = match pruefen(roh, system_erlaubt) {
+        let posten = match pruefen(roh, system_erlaubt, messen_bis) {
             Ok(posten) => posten,
             Err(grund) => {
                 ergebnisse.push(json!({ "pfad": roh, "erledigt": false, "grund": grund }));
@@ -382,6 +418,39 @@ mod tests {
         assert_eq!(posten["erledigt"], json!(true));
         assert_eq!(posten["zone"], json!("muell"));
         assert_eq!(posten["papierkorb"], json!(false));
+        let _ = std::fs::remove_dir_all(&ordner);
+    }
+
+    #[test]
+    fn eine_junction_laesst_sich_wegraeumen_ohne_ihr_ziel_zu_treffen() {
+        // Der Fall, an dem `remove_file` scheiterte: ein Verzeichnis-
+        // Reparsepunkt. Geprueft wird beides — dass die Verknuepfung weg ist
+        // **und** dass der Ordner dahinter noch steht.
+        let ordner = wegwerfordner("junction");
+        let ziel = ordner.join("echt");
+        std::fs::create_dir_all(&ziel).unwrap();
+        std::fs::write(ziel.join("wichtig.txt"), "bleibt").unwrap();
+        let verweis = ordner.join("verweis");
+
+        let gebaut = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&verweis)
+            .arg(&ziel)
+            .output()
+            .map(|a| a.status.success())
+            .unwrap_or(false);
+        if !gebaut {
+            // Ohne Rechte fuer Junctions ist hier nichts zu pruefen.
+            let _ = std::fs::remove_dir_all(&ordner);
+            return;
+        }
+
+        // %TEMP% ist Zone::Muell, also geht es durch `hart_weg`.
+        let ergebnis = papierkorb(&[verweis.display().to_string()], false).unwrap();
+        let posten = &ergebnis["posten"][0];
+        assert_eq!(posten["erledigt"], json!(true), "{posten}");
+        assert!(!verweis.exists(), "die Verknuepfung muesste weg sein");
+        assert!(ziel.join("wichtig.txt").exists(), "das Ziel muesste stehen bleiben");
         let _ = std::fs::remove_dir_all(&ordner);
     }
 

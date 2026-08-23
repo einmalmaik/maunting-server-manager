@@ -4,16 +4,22 @@ from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
+import hashlib
 import json
 import logging
+import os
 import re
 from uuid import UUID, uuid4
 
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import HTTPException
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Query, Session
 
+from config import settings
 from models import AiMemoryEntry, AiMemoryPreference, Server, Team, User
 from services import (
     ai_embedding_service,
@@ -22,7 +28,7 @@ from services import (
     permission_service,
 )
 from services.ai_redaction import enthaelt_zugangsdaten
-from services.ai_embedding_service import EMBEDDING_DIMENSIONS
+from services.ai_embedding_service import EMBEDDING_BYTES, EMBEDDING_DIMENSIONS
 from services.ai_embedding_service import MODEL_TAG as _EMBEDDING_MODEL_TAG
 from services.dis_client import DisClient, DisDecryptionError, DisSidecarError
 
@@ -601,7 +607,7 @@ def _assert_may_write(
 
 
 def _bereichsname(
-    db: Session, scope: str, server_id: int | None, team_id: int | None
+    db: Session, user: User, scope: str, server_id: int | None, team_id: int | None
 ) -> str:
     """Benennt einen Bereich so, dass der Satz darum vor einem Menschen besteht.
 
@@ -619,9 +625,11 @@ def _bereichsname(
     eine fertige Zeile vor, hier gibt es noch keine — geschrieben wird ja
     gerade erst.
 
-    Die Sitzung steht in der Signatur wegen des Teams: dessen Name ist das
-    einzige Stück dieses Satzes, das nicht schon in den Argumenten liegt, und
-    ohne ihn wäre der Satz für ein Team wertlos (siehe unten).
+    Sitzung und Benutzer stehen in der Signatur wegen des Teams: dessen Name
+    ist das einzige Stück dieses Satzes, das nicht schon in den Argumenten
+    liegt — und wie er lauten muss, hängt daran, in welchen Teams der Benutzer
+    sonst noch ist (siehe unten). Ohne beides wäre der Satz für ein Team
+    wertlos.
     """
     if scope == "user":
         return "dein persönliches Gedächtnis"
@@ -643,9 +651,19 @@ def _bereichsname(
         # und wiederholen sich über Teams hinweg — wer den Bereich nicht treffen
         # kann, greift den gleichnamigen Treffer des falschen Teams und löscht
         # dort.
+        #
+        # Und deshalb der **ansprechbare** Name statt des blanken: Teamnamen
+        # sind nur je Gründer eindeutig. Ist der Benutzer in zwei Teams namens
+        # „Alpha“, benennt „Alpha“ beide — aus der Sackgasse von oben würde
+        # damit dasselbe Löschen im falschen Team, nur über einen Umweg.
+        # `ansprechbarer_name` hängt dann den Gründer an, und genau diese Form
+        # wählt in `learning_team` wieder genau ein Team aus.
         ziel = db.get(Team, team_id) if team_id is not None else None
         if ziel is not None and ziel.name:
-            return f"das Wissen von Team „{ziel.name}“"
+            from services import team_service
+
+            gemeint = team_service.ansprechbarer_name(db, user, ziel)
+            return f"das Wissen von Team „{gemeint}“"
         # Kein stiller Notausgang: `scope_identity` hat die Mitgliedschaft in
         # genau diesem Team schon geprüft, die Zeile existiert also. Bliebe sie
         # wider Erwarten aus, ist die Nummer immer noch besser als ein Satz ohne
@@ -810,7 +828,9 @@ def upsert_entry(
             #
             # Verdrängt wird bewusst nichts von selbst: was ein Mensch gesagt
             # hat, wirft das Panel nicht ungefragt weg.
-            bereich = _bereichsname(db, scope, normalized_server_id, normalized_team_id)
+            bereich = _bereichsname(
+                db, user, scope, normalized_server_id, normalized_team_id
+            )
             if grenze == 0:
                 meldung = (
                     f"Für {bereich} ist kein Gedächtnis freigegeben (0 Einträge erlaubt). "
@@ -885,9 +905,16 @@ def upsert_entry(
         # Ohne sie stuende dort "jemand hat Anlagenwissen geaendert" und nicht
         # bei welcher Anlage — und genau das ist die Frage, die ein Betreiber
         # spaeter stellt.
+        #
+        # Für das Team gilt derselbe Satz, und dort wiegt er schwerer: ein
+        # Teameintrag hat bewusst keinen Besitzer (`owner_user_id` ist NULL),
+        # und nach dem Löschen ist die Zeile weg. Das Protokoll ist damit der
+        # einzige Ort, an dem die Zuordnung überlebt — bei einem Benutzer in
+        # mehreren Teams sagte "scope: team" allein gar nichts.
         details={
             "scope": scope, "origin": origin,
             **({"server_id": normalized_server_id} if normalized_server_id else {}),
+            **({"team_id": normalized_team_id} if normalized_team_id else {}),
         },
         origin="ai" if origin == "ai" else "direct",
     )
@@ -1008,6 +1035,7 @@ def delete_entry(db: Session, user: User, entry_id: str) -> None:
         details={
             "scope": row.scope,
             **({"server_id": row.server_id} if row.server_id else {}),
+            **({"team_id": row.team_id} if row.team_id else {}),
         },
         origin="direct",
     )
@@ -1056,6 +1084,7 @@ def delete_all_entries(
         details={
             "scope": scope, "count": len(rows),
             **({"server_id": normalized_server_id} if normalized_server_id else {}),
+            **({"team_id": normalized_team_id} if normalized_team_id else {}),
         },
         origin="direct",
     )
@@ -1338,14 +1367,97 @@ def _vorauswahl(
     return [row for row, _score in ranked[:limit]], True
 
 
+#: Länge der Nonce vor dem verschlüsselten Vektor — die Größe, für die AES-GCM
+#: ausgelegt ist.
+_VEKTOR_NONCE = 12
+
+
+@lru_cache(maxsize=1)
+def _vektorschluessel() -> AESGCM:
+    """Der Schlüssel, unter dem die Vektorspalte liegt.
+
+    Abgeleitet aus dem Panel-Secret und **nicht** über den DIS-Sidecar geholt.
+    Das ist der einzige Grund, warum diese Verschlüsselung überhaupt tragbar
+    ist: der Sidecar kostet je Zeile einen HTTP-Roundtrip, und die Rangfolge
+    liest bis zu 5.000 Vektoren je Anfrage. Im Prozess gemessen sind es für
+    dieselben 5.000 Zeilen 10 bis 17 ms.
+
+    Was das schützt und was nicht, steht am Modellfeld (`models/ai_memory.py`):
+    gegen bloßen Datenbankzugriff ja, gegen jemanden mit der Panel-Umgebung
+    nein. Der Wert daneben bleibt stärker geschützt, weil sein Schlüssel im
+    Sidecar liegt und nicht hier.
+
+    Einmal abgeleitet und gehalten: `settings.secret_key` ändert sich innerhalb
+    eines Prozesses nicht, und die Ableitung je Zeile kostete bei 5.000 Zeilen
+    mehr als das Entschlüsseln selbst.
+    """
+    return AESGCM(
+        hashlib.sha256(f"msm:ai:memory:vektor:{settings.secret_key}".encode()).digest()
+    )
+
+
+def _vektor_verschluesseln(roh: bytes) -> bytes:
+    """Packt die float32-Bytes in die Form, in der sie in der Spalte stehen."""
+    nonce = os.urandom(_VEKTOR_NONCE)
+    return nonce + _vektorschluessel().encrypt(nonce, roh, None)
+
+
+def _vektor_entschluesseln(gespeichert: bytes | None) -> bytes | None:
+    """Öffnet die Vektorspalte, oder ``None``, wenn das nicht geht.
+
+    ``None`` heißt hier "nicht unter diesem Schlüssel verpackt" und nicht
+    "kaputt": eine Bestandszeile mit rohen Zahlen fällt genauso hierher wie
+    eine, die unter einem gewechselten Panel-Secret entstanden ist. Was daraus
+    folgt, entscheidet `_stored_vector` — nicht diese Funktion.
+    """
+    if not gespeichert or len(gespeichert) <= _VEKTOR_NONCE:
+        return None
+    try:
+        return _vektorschluessel().decrypt(
+            gespeichert[:_VEKTOR_NONCE], gespeichert[_VEKTOR_NONCE:], None
+        )
+    except InvalidTag:
+        return None
+
+
+def _liegt_im_klartext(row: AiMemoryEntry) -> bool:
+    """Trägt diese Zeile ihren Vektor noch unverschlüsselt?
+
+    Zwei Formen aus dem Bestand: die alte Textspalte und die Bytespalte vor dem
+    23.08.2026 — dann genau `EMBEDDING_BYTES` lang, ohne Nonce und ohne Siegel,
+    und damit sauber von einer verpackten zu unterscheiden.
+
+    Beide werden weiter **gelesen**. Sie einfach für ungültig zu erklären wäre
+    der bequemere Weg gewesen und hätte das Gedächtnis schlechter gemacht, als
+    es war: in einem Bereich mit tausenden Einträgen kommen je Anfrage nur
+    `MAX_CONTEXT_ROWS` Zeilen bis zum Nachziehen, und was die Vorauswahl ohne
+    Bedeutungsanteil nie nach vorn bringt, käme dort nie an — die Zeile bliebe
+    dauerhaft ohne Vektor. Stattdessen zählt sie hier als **offen**: gelesen wie
+    bisher, aber beim nächsten Abruf in den Kontext neu geschrieben, und dabei
+    verpackt.
+    """
+    if row.embedding_json:
+        return True
+    return (
+        row.embedding_bytes is not None
+        and len(row.embedding_bytes) == EMBEDDING_BYTES
+    )
+
+
 def _stored_vector(row: AiMemoryEntry) -> Sequence[float] | None:
     """Liest den gespeicherten Vektor, wenn er zum aktuellen Modell passt.
 
     Zwei Spalten, eine Wahrheit. Geschrieben wird seit dem 19.08.2026 als
-    float32-Bytes, und von dort wird zuerst gelesen; ``embedding_json`` ist der
-    Rückfall für Bestandszeilen. Beide Formen tragen dieselben Zahlen —
-    unterschiedlich ist nur, was das Lesen kostet: 4 ms gegen 381 ms bei 5.000
-    Einträgen.
+    float32-Bytes — seit dem 23.08.2026 unter AES-GCM —, und von dort wird
+    zuerst gelesen; ``embedding_json`` ist der Rückfall für Bestandszeilen.
+    Beide Formen tragen dieselben Zahlen — unterschiedlich ist nur, was das
+    Lesen kostet: 4 ms gegen 381 ms bei 5.000 Einträgen, plus 10 bis 17 ms
+    fürs Entschlüsseln.
+
+    Lässt sich die Bytespalte nicht öffnen, wird sie **roh** gelesen: dann ist
+    es eine Bestandszeile mit unverpackten Zahlen, und `bytes_zu_vektor` erkennt
+    an der Länge, ob sie das wirklich ist. Warum sie weiter gelesen wird und
+    nicht einfach als fehlend gilt, steht an `_liegt_im_klartext`.
 
     Der Rückfall bleibt, bis die Migration `20260819_01` überall gelaufen
     ist. Zwischen dem Einspielen des Codes und diesem Lauf liegen bei jedem
@@ -1358,7 +1470,10 @@ def _stored_vector(row: AiMemoryEntry) -> Sequence[float] | None:
     """
     if row.embedding_model != _EMBEDDING_MODEL_TAG:
         return None
-    vektor = ai_embedding_service.bytes_zu_vektor(row.embedding_bytes)
+    geoeffnet = _vektor_entschluesseln(row.embedding_bytes)
+    vektor = ai_embedding_service.bytes_zu_vektor(
+        row.embedding_bytes if geoeffnet is None else geoeffnet
+    )
     if vektor is not None:
         return vektor
     if not row.embedding_json:
@@ -1384,7 +1499,9 @@ def _vektor_setzen(row: AiMemoryEntry, vektor: Sequence[float] | None) -> None:
     fehlen.
     """
     row.embedding_bytes = (
-        None if vektor is None else ai_embedding_service.vektor_zu_bytes(vektor)
+        None
+        if vektor is None
+        else _vektor_verschluesseln(ai_embedding_service.vektor_zu_bytes(vektor))
     )
     row.embedding_json = None
     row.embedding_model = None if vektor is None else _EMBEDDING_MODEL_TAG
@@ -1442,8 +1559,19 @@ def _vektoren_nachziehen(decoded: list[tuple[AiMemoryEntry, str]]) -> None:
     hin — auch nicht, seit die beiden letzten seitenweise laden und damit eine
     überschaubare Menge vor sich haben. Fehlt das Modell weiterhin, passiert
     schlicht nichts.
+
+    **Eine Zeile mit unverpacktem Vektor gilt ebenfalls als offen**, auch wenn
+    sie sich noch einwandfrei lesen lässt (`_liegt_im_klartext`). Seit dem
+    23.08.2026 gehört der Vektor verschlüsselt in die Spalte, und sie nur zu
+    lesen hieße, dass eine Bestandszeile ihre Klartextfassung behält, bis sie
+    jemand von Hand anfasst. Neu gerechnet trägt sie dieselben Zahlen —
+    `_vektor_setzen` räumt beide alten Formen dabei ab.
     """
-    offen = [(row, value) for row, value in decoded if _stored_vector(row) is None]
+    offen = [
+        (row, value)
+        for row, value in decoded
+        if _stored_vector(row) is None or _liegt_im_klartext(row)
+    ]
     if not offen:
         return
     vektoren = ai_embedding_service.encode(
@@ -1744,6 +1872,20 @@ def _memory_line(
         # laeuft. Dazu geht jede Zeile gegen dieselben 6.000 Zeichen; ein Name
         # je Zeile verdraengt Eintraege, statt welche zu erklaeren.
         scope = f"team:{row.team_id}"
+        # **Die Herkunft zählt hier wie beim Anlagenwissen darüber**, und zwar
+        # aus derselben Lage: eine Teamzeile schreibt die KI in der Sitzung
+        # *eines* Mitglieds, gelesen wird sie von allen anderen. Für die heißt
+        # "gemerkt" sonst "die KI hat es sich im Gespräch mit mir notiert" — sie
+        # waren aber nicht dabei, und die Zeile kann aus einem fremden Lauf
+        # stammen, der eine Logzeile gelesen hat. Bestätigt hat sie dort
+        # niemand.
+        #
+        # "eingetragen" trifft zu, weil eine Teamzeile mit `origin='user'` nur
+        # über die Oberfläche entsteht (`routers/ai_memory.py`); der KI-Weg
+        # schreibt ausnahmslos mit `origin='ai'`. Verboten wird ihr damit
+        # nichts — sie darf weiter ins Teamwissen schreiben, der nächste Lauf
+        # sieht nur, wie fest der Boden ist.
+        origin = "eingetragen" if row.origin == "user" else "unbestätigt"
     else:
         scope = row.scope
     # **Verblasst statt weg.** Liegt die Abrufstaerke unter der Schwelle, geht
@@ -1933,7 +2075,12 @@ def provider_memory_context(
     # Sidecar-Roundtrips statt 300 — proportional zu dem Fenster, das der
     # Betreiber sich ausgesucht hat.
     zeilen = max(1, MAX_CONTEXT_ROWS * zeichen // MAX_CONTEXT_CHARS)
+    # Was die Vorauswahl wegwirft, weiß danach niemand mehr: `rows` wird
+    # überschrieben, und `decoded` kennt nur, was ihm gegeben wurde. Die Zahl
+    # muss deshalb hier festgehalten werden — der Hinweis unten nennt sie.
+    vor_der_vorauswahl = len(rows)
     rows, vorgekuerzt = _vorauswahl(rows, query, now, zeilen)
+    vorab_verworfen = vor_der_vorauswahl - len(rows)
     decoded = _entschluesseln(rows)
     # Zeilen aus einer Ausfallphase des Modells tragen keinen Vektor. Hier
     # liegt ihr Klartext ohnehin offen, also ist hier die Stelle, an der es
@@ -2040,9 +2187,20 @@ def provider_memory_context(
     if truncated:
         # Ehrlich bleiben: das Modell soll wissen, dass es nicht alles sieht,
         # statt aus einer Luecke zu schliessen, es gebe nichts.
+        #
+        # Gezählt werden **beide** Engstellen. Hier stand allein
+        # `len(decoded) - len(selected)`, und im Zweig darüber ist das
+        # ausnahmslos 0: passte nach der Vorauswahl alles ins Budget, meldete
+        # der Block "0 weitere Eintraege wurden ausgelassen", nachdem die
+        # Vorauswahl bei 5.000 Einträgen 4.700 Zeilen weggeworfen hatte. Eine 0
+        # behauptet Vollständigkeit — das ist das Gegenteil dessen, wofür es
+        # diesen Hinweis gibt.
+        #
+        # Nicht mitgezählt wird, was `_entschluesseln` übersprungen hat: eine
+        # unlesbare Zeile fehlt nicht "aus Platzgruenden".
         block += (
-            f"\n[Hinweis] {len(decoded) - len(selected)} weitere Eintraege wurden "
-            "aus Platzgruenden ausgelassen."
+            f"\n[Hinweis] {vorab_verworfen + len(decoded) - len(selected)} weitere "
+            "Eintraege wurden aus Platzgruenden ausgelassen."
         )
     return block
 
@@ -2155,6 +2313,7 @@ def delete_by_keys(
             details={
                 "scope": row.scope, "key": row.key,
                 **({"server_id": row.server_id} if row.server_id else {}),
+                **({"team_id": row.team_id} if row.team_id else {}),
             },
             origin="ai",
         )

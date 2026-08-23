@@ -14,6 +14,7 @@ from models import (
     AiConversation,
     AiMessage,
     AiProvider,
+    AiRun,
     AiUsageEvent,
     AuditLog,
     Role,
@@ -21,7 +22,8 @@ from models import (
     ServerPermission,
     User,
 )
-from services import ai_chat_service, ai_provider_service
+from models.ai_run import BEENDET
+from services import ai_chat_service, ai_provider_service, ai_run_service
 from services.ai_stream_service import MAX_TOOL_ROUNDS
 from services.ai_context_service import build_provider_messages, redact_sensitive_text
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
@@ -772,6 +774,58 @@ def test_clearing_the_history_keeps_the_conversation_and_the_audit(
     detail = client.get("/api/ai/conversation", cookies=user_cookies).json()
     assert detail["id"] == conversation_id
     assert detail["messages"] == []
+
+
+def test_clearing_the_history_ends_the_open_run_and_wipes_its_plaintext(
+    client: TestClient,
+    db: Session,
+    regular_user: User,
+    user_cookies: dict,
+    user_csrf_token: str,
+) -> None:
+    """Löschen heißt löschen — auch für das Arbeitsgedächtnis eines Laufs.
+
+    Ein geparkter Lauf trägt in `ai_runs.state_json` seine vollständigen
+    `provider_messages`: den ganzen Verlauf und den entschlüsselten
+    Gedächtnisblock, im Klartext, in einer gewöhnlichen Textspalte.
+    `arbeitsspeicher_leeren` räumt ihn nur bei einem Endzustand, und
+    `waiting_confirmation` ist keiner — der eben gelöschte Text lag also
+    weiter da, und ein nachträglicher Klick auf die noch offene Karte weckte
+    den Lauf Wochen später in einen Chat, den es nicht mehr gibt.
+    """
+    _enable_chat(db, regular_user)
+    conversation_id = client.get("/api/ai/conversation", cookies=user_cookies).json()["id"]
+    # Frei erfunden und harmlos: es geht darum, dass der Satz **verschwindet**,
+    # nicht darum, was er sagt.
+    merksatz = "Der Betreiber wohnt in der Beispielstrasse 3"
+    run = AiRun(
+        id=str(uuid4()),
+        conversation_id=conversation_id,
+        user_id=regular_user.id,
+        status="waiting_confirmation",
+    )
+    ai_run_service.zustand_schreiben(
+        run,
+        ai_run_service.leerer_zustand(
+            [{"role": "user", "content": merksatz}], request_id=str(uuid4())
+        ),
+    )
+    db.add(run)
+    db.commit()
+
+    cleared = client.delete(
+        "/api/ai/conversation/messages",
+        cookies=user_cookies,
+        headers={"X-CSRF-Token": user_csrf_token},
+    )
+
+    assert cleared.status_code == 204
+    db.refresh(run)
+    assert run.status in BEENDET, (
+        "ein geparkter Lauf darf den geleerten Chat nicht ueberleben — sonst "
+        "wacht er spaeter auf und antwortet aus dem geloeschten Zusammenhang"
+    )
+    assert merksatz not in (run.state_json or "")
 
 
 def test_quota_rejection_never_calls_provider_or_persists_message(

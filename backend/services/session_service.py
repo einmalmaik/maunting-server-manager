@@ -9,6 +9,7 @@ Deshalb gibt es die Sitzungsausstellung genau einmal.
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from typing import NamedTuple
 
@@ -67,13 +68,31 @@ def issue_session(
     „aus dem Panel erreicht nichts den Rechner des Benutzers" eine Schranke ist
     und nicht eine Bitte an den Client: er kann sie nicht mehr selbst erklären
     (`dependencies.session_herkunft`).
+
+    **Die Familie sagt, *welches* Gerät.** `geraet` unterscheidet nur App von
+    Browser; ein Benutzer darf aber mehrere Rechner koppeln
+    (`device_pairing_service.geraete`, Geräteliste mit einzelnem Widerruf), und
+    die Refresh-Familie ist genau der Wert, der einen davon benennt: sie
+    entsteht mit der Sitzung, überlebt jede Rotation und steht in
+    `device_pairings.family` neben dem Namen, den der Mensch dem Gerät gegeben
+    hat. Deshalb wird sie **hier** erzeugt statt in `create_refresh_token` —
+    nur so kann derselbe Wert zusätzlich in das Access-Token, wo ihn jede
+    Anfrage ohne Datenbankfrage liest (`dependencies.session_familie`). Sie ist
+    kein Geheimnis: der Browser bekommt sie ohnehin über `GET /auth/devices`
+    und adressiert mit ihr `DELETE /auth/devices/{family}`.
     """
-    ansprueche = {"sub": user.username, "user_id": user.id, "jti": str(uuid.uuid4())}
+    familie = family or secrets.token_urlsafe(16)
+    ansprueche = {
+        "sub": user.username,
+        "user_id": user.id,
+        "jti": str(uuid.uuid4()),
+        "familie": familie,
+    }
     if geraet:
         ansprueche["geraet"] = geraet
     access_token = AuthService.create_access_token(ansprueche)
     refresh_token = AuthService.create_refresh_token(
-        db, user.id, family=family, geraet=geraet
+        db, user.id, family=familie, geraet=geraet
     )
     csrf_token = AuthService.create_csrf_token()
     _set_auth_cookies(response, access_token, refresh_token, csrf_token)

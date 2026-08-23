@@ -29,7 +29,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from models import AiActionApproval, AiActionProposal, Server, User
+from models import AiActionApproval, AiActionProposal, AiRun, Server, User
 from models.ai_action_approval import hash_approval_token
 
 
@@ -245,6 +245,8 @@ def entscheiden(db: Session, *, token: str, entscheidung: str) -> dict:
     Ablehnen setzt den Vorschlag auf ``expired``. Beides weckt danach den Lauf:
     ein abgelehnter Vorschlag ist fuer die KI genauso eine Auskunft wie ein
     ausgefuehrter, und ohne das Wecken stuende der Lauf bis zu seiner Frist.
+    Hat der Lauf noch weitere Vorschlaege offen, geht stattdessen die naechste
+    Frage hinaus — die Kette in `_lauf_wecken`.
     """
     from services import ai_proposal_service, audit_service
     from services.ai_action_errors import AiActionStateError
@@ -318,9 +320,12 @@ def entscheiden(db: Session, *, token: str, entscheidung: str) -> dict:
         db.rollback()
         # Derselbe Griff wie bei der Ausführung weiter unten. Das Token bleibt
         # bewusst verbraucht — es zurückzugeben öffnete das Einmal-Rennen
-        # wieder. Der Gewinn ist, dass der wartende Lauf die Absage erfährt:
-        # er kann weiterarbeiten und, weil die Zeile jetzt `consumed_at` trägt,
-        # über `offene_freigabe` sofort eine neue Freigabe anfordern.
+        # wieder. Der Gewinn liegt in der Kette: der Vorschlag steht nach dem
+        # Rollback wieder auf 'proposed', die verbrauchte Zeile blockiert
+        # `offene_freigabe` nicht mehr, und `_lauf_wecken` fordert sofort einen
+        # frischen Link an. Ohne ihn wäre die Frage tot — verbrannter Link,
+        # offener Vorschlag, und ein Wecken, das `darf_fortsetzen` ohnehin
+        # abweist.
         _lauf_wecken(db, run_id)
         raise
     audit_service.record_privileged_action(
@@ -365,16 +370,83 @@ def entscheiden(db: Session, *, token: str, entscheidung: str) -> dict:
     }
 
 
+def _naechste_freigabe_erbeten(db: Session, run_id: str) -> bool:
+    """Fragt nach dem nächsten offenen Vorschlag desselben Laufs. Kette oder Ende.
+
+    Eine Freigabemail nennt genau **einen** Vorschlag — ein Postfach voller
+    Links, von denen der Empfänger bei keinem wüsste, ob er noch gilt, hilft
+    niemandem (`ai_stream_service._freigabe_per_mail_erbeten`). Ein Lauf legt
+    aber durchaus zwei an: das Stundenkontingent ist benutzerweit, und
+    `autonomy_allows` fällt bei Erschöpfung mitten im Vorgang auf
+    Bestätigungspflicht zurück.
+
+    Ohne diese Stelle blieb der zweite Vorschlag für immer liegen. Der
+    Betreiber entschied den gemailten, `_lauf_wecken` lief — und
+    `ai_run_service.darf_fortsetzen` verlangt **null** offene Vorschläge, sah
+    den zweiten noch auf 'proposed' und weckte nicht. Eine zweite Mail forderte
+    niemand an. Der Lauf stand bis zu seiner Frist, und niemand erfuhr davon.
+
+    Die Regel "eine offene Frage je Benutzer" bleibt gewahrt: es ist weiterhin
+    immer nur eine Freigabe unterwegs, sie folgen nur aufeinander, und geweckt
+    wird nach der letzten.
+
+    Gefragt wird auch nach einem Vorschlag, dessen Bestätigung eben gescheitert
+    ist — er steht danach wieder auf 'proposed', sein Link ist aber verbrannt.
+    Genau das meint der Kommentar am Rollback in `entscheiden`.
+
+    ``False`` heißt "nichts mehr offen" **oder** "es kann niemand antworten"
+    (keine Adresse, kein Versandweg, schon eine Frage unterwegs). Beides führt
+    beim Aufrufer zum gewöhnlichen Weckversuch; im zweiten Fall bleibt der Lauf
+    geparkt, bis die Frist seines Auftrags die Vorschläge entwertet.
+    """
+    naechster = (
+        db.query(AiActionProposal)
+        .filter(
+            AiActionProposal.run_id == run_id,
+            AiActionProposal.status.in_(("proposed", "confirmed")),
+        )
+        .order_by(AiActionProposal.created_at.asc())
+        .first()
+    )
+    if naechster is None:
+        return False
+    run = db.get(AiRun, run_id)
+    if run is None:
+        return False
+    # Derselbe Mensch wie beim ersten Mal: gefragt wird der Benutzer des Laufs,
+    # wie in `_freigabe_per_mail_erbeten`. Ein stillgelegtes Konto bekommt
+    # nichts mehr — es dürfte die Antwort ohnehin nicht mehr geben.
+    user = db.query(User).filter(User.id == run.user_id).first()
+    if user is None or not getattr(user, "is_active", False):
+        return False
+    try:
+        return freigabe_anfordern(db, proposal=naechster, user=user, run_id=run_id)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        logger.warning(
+            "Naechste Freigabe nach E-Mail-Entscheidung nicht angefordert run_id=%s",
+            run_id,
+        )
+        return False
+
+
 def _lauf_wecken(db: Session, run_id: str | None) -> None:
-    """Weckt den Lauf, der auf diese Entscheidung gewartet hat.
+    """Was nach einer Entscheidung geschieht: nachfragen — oder den Lauf wecken.
 
     Wie in `routers/ai_actions._lauf_wecken`, und aus demselben Grund bei
-    Zustimmung **und** Ablehnung: bliebe der Lauf geparkt, waere die Reparatur
-    beendet, ohne dass irgendwo stuende, warum. Scheitert das Wecken selbst,
-    bleibt es bei der Entscheidung — sie darf nicht daran haengen, ob die KI
+    Zustimmung **und** Ablehnung: bliebe der Lauf geparkt, wäre die Reparatur
+    beendet, ohne dass irgendwo stünde, warum. Scheitert das Wecken selbst,
+    bleibt es bei der Entscheidung — sie darf nicht daran hängen, ob die KI
     danach noch etwas vorhat.
+
+    Trägt der Lauf noch weitere Vorschläge, geht statt des Weckrufs die nächste
+    Frage hinaus (`_naechste_freigabe_erbeten`). Wecken wäre dort ohnehin
+    wirkungslos — `darf_fortsetzen` zählt die offenen Vorschläge —, und die
+    Antwort darauf kommt an genau dieser Stelle wieder an.
     """
     if not run_id:
+        return
+    if _naechste_freigabe_erbeten(db, run_id):
         return
     from services import ai_run_service
 

@@ -861,6 +861,32 @@ def test_wer_gekuerzt_bekommt_erfaehrt_es_auch(
     assert zusatz, "der gekuerzte Block traegt keinen Hinweis auf das Fehlende"
 
 
+def test_der_hinweis_zaehlt_auch_was_die_vorauswahl_wegwarf(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eine 0 im Hinweis behauptet Vollstaendigkeit — genau verkehrt herum.
+
+    Die Zahl stand als `len(decoded) - len(selected)`. Kuerzt allein die
+    Vorauswahl und passt der Rest danach ins Budget, ist das ausnahmslos 0: das
+    Modell las "0 weitere Eintraege wurden aus Platzgruenden ausgelassen",
+    nachdem bei 5.000 Eintraegen 4.700 Zeilen nie entschluesselt worden waren.
+    Den Hinweis gibt es, damit das Modell aus einer Luecke nicht schliesst, es
+    gebe nichts — diese 0 sagte ihm das Gegenteil.
+    """
+    _allow_memory(db, regular_user)
+    for nummer in range(5):
+        _write(db, regular_user, f"eintrag{nummer}", f"Wert {nummer}")
+    # Nur die Vorauswahl kuerzt: fuenf kurze Zeilen passen locker ins Budget.
+    monkeypatch.setattr(ai_memory_service, "MAX_CONTEXT_ROWS", 2)
+
+    block = ai_memory_service.provider_memory_context(
+        db, regular_user, query="Was weisst du?"
+    )
+
+    assert "[Hinweis] 3 weitere" in block
+    assert len([zeile for zeile in block.splitlines() if zeile.startswith("[user")]) == 2
+
+
 def test_der_abruf_oeffnet_die_zeilen_gleichzeitig(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -62,6 +62,36 @@ pub fn restsekunden() -> u64 {
     }
 }
 
+/// Der Punkt, den das Modell genannt hat — als Bildkoordinate.
+///
+/// Hier stand `as i32`, und das schnitt still ab: aus 4294967396 wurde 100.
+/// Der Klick landete dann auf einem Punkt, den niemand genannt hat, und ging
+/// als Erfolg zurueck.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn bildpunkt(wert: i64, name: &str) -> Result<i32, String> {
+    i32::try_from(wert).map_err(|_| {
+        format!(
+            "'{name}' liegt mit {wert} weit ausserhalb jedes Bildschirms. \
+             Nenne Punkte im Raster des letzten Bildschirmfotos (dessen \
+             Felder 'breite' und 'hoehe'), Ursprung links oben."
+        )
+    })
+}
+
+/// Liegt der umgerechnete Punkt ueberhaupt auf dem Hauptbildschirm?
+///
+/// Windows klemmt einen absoluten Zeiger stillschweigend an die Kante: aus
+/// einem Punkt weit rechts wird der rechte Rand, und dort sitzen die
+/// Taskleiste und das Schliessen-Kreuz eines maximierten Fensters. Genau so
+/// endet ein Modell, das in der vollen Aufloesung antwortet statt im
+/// gemeldeten Raster (bei 3840x2160 ein Faktor 3) — und gemeldet wurde
+/// trotzdem "geklickt". Der Modulkopf verlangt das Gegenteil: ein Fehlschlag
+/// ist als eigener Zustand zu melden, nie als Erfolg.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn auf_dem_schirm((px, py): (i32, i32), (breite, hoehe): (i32, i32)) -> bool {
+    px >= 0 && py >= 0 && px < breite && py < hoehe
+}
+
 fn pruefen() -> Result<(), String> {
     if restsekunden() == 0 {
         return Err(
@@ -160,7 +190,25 @@ mod windows_impl {
         let (Some(x), Some(y)) = (x, y) else {
             return Ok(());
         };
-        let (px, py) = echte_punkte(x as i32, y as i32)?;
+        let (x, y) = (bildpunkt(x, "x")?, bildpunkt(y, "y")?);
+        let (px, py) = echte_punkte(x, y)?;
+        // Gegen dieselben Masse, gegen die enigo gleich rechnet
+        // (`SM_CXSCREEN`/`SM_CYSCREEN`) — was daran vorbeizeigt, klemmt
+        // Windows an die Kante, statt es abzulehnen.
+        let schirm = enigo
+            .main_display()
+            .map_err(|e| format!("Bildschirmmasse nicht lesbar: {e}"))?;
+        if !auf_dem_schirm((px, py), schirm) {
+            return Err(format!(
+                "Der Punkt ({x}|{y}) liegt nicht auf dem Bildschirm: \
+                 umgerechnet waere das ({px}|{py}), der Hauptbildschirm misst \
+                 aber {}x{} Punkte. Die Koordinaten gehoeren in das Raster \
+                 des Bildschirmfotos (Felder 'breite' und 'hoehe' der \
+                 Aufnahme), nicht in die volle Aufloesung. Es wurde nichts \
+                 angefasst — mach ein neues Foto und nenne den Punkt darin.",
+                schirm.0, schirm.1
+            ));
+        }
         enigo
             .move_mouse(px, py, Coordinate::Abs)
             .map_err(|e| format!("Maus nicht bewegbar: {e}"))
@@ -294,6 +342,32 @@ mod tests {
         assert!(restsekunden() > 0);
         widerrufen().unwrap();
         assert_eq!(restsekunden(), 0);
+    }
+
+    #[test]
+    fn ein_punkt_neben_dem_schirm_wird_nicht_geklickt() {
+        // Der Fall aus der Praxis: das Modell antwortet in der vollen
+        // Aufloesung (3840x2160) statt im gemeldeten Raster (1280x720). Der
+        // Rueckweg rechnet den Punkt noch einmal um Faktor 3 hoch, Windows
+        // klemmt ihn an die Kante — und dort sitzen Taskleiste und
+        // Schliessen-Kreuz. Gemeldet wurde trotzdem "geklickt".
+        let schirm = (3840, 2160);
+        assert!(auf_dem_schirm((0, 0), schirm));
+        assert!(auf_dem_schirm((3839, 2159), schirm));
+        assert!(!auf_dem_schirm((3840, 100), schirm));
+        assert!(!auf_dem_schirm((11517, 6477), schirm));
+        assert!(!auf_dem_schirm((-1, 100), schirm));
+        assert!(!auf_dem_schirm((100, -1), schirm));
+    }
+
+    #[test]
+    fn ein_riesiger_wert_wird_nicht_stillschweigend_abgeschnitten() {
+        // `as i32` machte aus 4294967396 die Zahl 100 — ein Klick auf einen
+        // Punkt, den niemand genannt hat, und niemand haette es gemerkt.
+        assert_eq!(bildpunkt(100, "x").unwrap(), 100);
+        let fehler = bildpunkt(4_294_967_396, "x").unwrap_err();
+        assert!(fehler.contains("ausserhalb"), "{fehler}");
+        assert!(fehler.contains('x'), "{fehler}");
     }
 
     #[test]

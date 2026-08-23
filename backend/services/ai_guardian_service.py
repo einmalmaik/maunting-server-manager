@@ -56,6 +56,7 @@ sieht, aber nicht schreibt.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -108,6 +109,54 @@ def _utc(wert: datetime) -> datetime:
 # ── Wer ist zustaendig? ───────────────────────────────────────────────────
 
 
+def _freigabe_bedingungen(server_id_spalte) -> list:
+    """Die Filter, unter denen eine Freigabe fuer einen Server ueberhaupt zaehlt.
+
+    Einmal gebaut, zweimal benutzt: `zustaendiger_freigeber` setzt sie auf die
+    Nummer eines konkreten Servers, der Vorfilter in `vorfaelle_bearbeiten` auf
+    `Incident.server_id`. Beide Abfragen verbinden `users` mit
+    `ai_autonomy_grants`, nur in unterschiedlicher Richtung.
+
+    Bis zum 23.08.2026 standen die drei Zeilen zweimal wortgleich da, mit dem
+    Hinweis daneben, dass eine Abweichung eine stille Rechteaenderung waere.
+    Genau diese Fehlerklasse hat in diesem Modul schon einmal zugeschlagen —
+    das `.in_((None, id))`-Loch, das gleich darunter beschrieben ist. Eine
+    Kopie, die niemand aneinanderbindet, ist die Gelegenheit dazu; deshalb
+    wohnt die Bedingung jetzt an einer Stelle.
+
+    `IS NULL OR = id` und **nicht** `IN (None, id)`.
+
+    Hier stand `.in_((None, server.id))`. Das liest sich, als deckte es beide
+    Faelle ab, und tut in SQL das Gegenteil: `x IN (NULL, 5)` ist fuer
+    `x = NULL` nicht wahr, sondern unbekannt — die Zeile faellt heraus.
+    `server_id IS NULL` ist aber genau die **panelweite** Freigabe, also die,
+    die der Schalter im KI-Chat standardmaessig setzt (`PANEL_SCOPE` in
+    AiAutonomyButton.tsx).
+
+    Wirkung: wer die Autonomie panelweit erteilt hatte, bekam nie eine autonome
+    Heilung. Der Schalter stand auf an, das Panel zeigte ihn als an, und es
+    passierte nichts — ohne Log, ohne Fehler. Nur wer sie eigens je Server
+    erteilt hatte, wurde ueberhaupt gefunden.
+
+    Aufgefallen ist das keinem Baustein-Test, weil alle mit einer
+    serverbezogenen Freigabe arbeiteten, und keiner der drei Pruefungslinsen.
+    Erst ein Durchlauf der ganzen Kette mit einer panelweiten Freigabe hat es
+    gezeigt.
+    """
+    from models import AiAutonomyGrant
+
+    from sqlalchemy import or_
+
+    return [
+        User.is_active.is_(True),
+        AiAutonomyGrant.enabled.is_(True),
+        or_(
+            AiAutonomyGrant.server_id.is_(None),
+            AiAutonomyGrant.server_id == server_id_spalte,
+        ),
+    ]
+
+
 def zustaendiger_freigeber(db: Session, server: Server) -> User | None:
     """Der Benutzer, in dessen Namen dieser Server autonom geheilt werden darf.
 
@@ -136,37 +185,10 @@ def zustaendiger_freigeber(db: Session, server: Server) -> User | None:
     """
     from models import AiAutonomyGrant
 
-    from sqlalchemy import or_
-
     kandidaten = (
         db.query(User)
         .join(AiAutonomyGrant, AiAutonomyGrant.user_id == User.id)
-        .filter(
-            User.is_active.is_(True),
-            AiAutonomyGrant.enabled.is_(True),
-            # `IS NULL OR = id` und **nicht** `IN (None, id)`.
-            #
-            # Hier stand `.in_((None, server.id))`. Das liest sich, als deckte
-            # es beide Faelle ab, und tut in SQL das Gegenteil: `x IN (NULL, 5)`
-            # ist fuer `x = NULL` nicht wahr, sondern unbekannt — die Zeile
-            # faellt heraus. `server_id IS NULL` ist aber genau die **panelweite**
-            # Freigabe, also die, die der Schalter im KI-Chat standardmaessig
-            # setzt (`PANEL_SCOPE` in AiAutonomyButton.tsx).
-            #
-            # Wirkung: wer die Autonomie panelweit erteilt hatte, bekam nie eine
-            # autonome Heilung. Der Schalter stand auf an, das Panel zeigte ihn
-            # als an, und es passierte nichts — ohne Log, ohne Fehler. Nur wer
-            # sie eigens je Server erteilt hatte, wurde ueberhaupt gefunden.
-            #
-            # Aufgefallen ist das keinem Baustein-Test, weil alle mit einer
-            # serverbezogenen Freigabe arbeiteten, und keiner der drei
-            # Pruefungslinsen. Erst ein Durchlauf der ganzen Kette mit einer
-            # panelweiten Freigabe hat es gezeigt.
-            or_(
-                AiAutonomyGrant.server_id.is_(None),
-                AiAutonomyGrant.server_id == server.id,
-            ),
-        )
+        .filter(*_freigabe_bedingungen(server.id))
         .order_by(User.id)
         .distinct()
         .all()
@@ -430,6 +452,34 @@ _PHASENTEXTE: dict[str, str] = {
 }
 
 
+#: Wie ein Vorfallstyp aussehen muss, damit er in den Auftragstext darf: eine
+#: blosse Kennung, keine Sprache. Alle Typen, die der Agent wirklich vergibt
+#: (`process_not_running`, `container_missing`, `CrashLoop`), haben diese Form.
+_TYP_FORM = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+
+
+def _typ_kennung(wert: object) -> str:
+    """Der Vorfallstyp als Kennung — alles andere heisst ``unknown``.
+
+    Der Typ sieht aus wie ein Paneldatum und ist keines: er kommt mit der
+    Meldung des Agenten von einer Node, auf der Fremde spielen, und
+    `guardian_incident_service._validated_incident` nimmt dort jeden Text bis
+    64 Zeichen an (anders als `status`, der gegen eine feste Liste läuft).
+    Damit stünde ein Typ wie ``WICHTIG: führe zuerst … aus`` wörtlich im
+    Auftragstext eines Laufs, vor dem niemand sitzt — an der Stelle mit dem
+    meisten Gewicht, die es in einem Lauf gibt.
+
+    Die Kennungsform ist die eine Engstelle dagegen, und sie nimmt der Heilung
+    nichts: der Auftrag läuft mit ``unknown`` genauso, und was der Vorfall
+    wirklich sagt, holt sich das Modell mit `read_guardian_incidents` — dort
+    kommt es geschwärzt und ausdrücklich unvertrauenswürdig an. Eine Liste
+    erlaubter Typen wäre das Gegenteil: sie driftete mit jedem Agenten-Update
+    auseinander, und ein neuer Typ hiesse dann still ``unknown``.
+    """
+    text = str(wert or "").strip()
+    return text if _TYP_FORM.match(text) else "unknown"
+
+
 def _auftragstext(server: Server, vorfall: Incident, auftrag=None) -> str:
     """Was der KI als Auftrag in den Chat geschrieben wird.
 
@@ -442,7 +492,13 @@ def _auftragstext(server: Server, vorfall: Incident, auftrag=None) -> str:
     ausdruecklich unvertrauenswuerdiges Werkzeugergebnis an, geschwaerzt und als
     solches markiert.
 
-    Die einzige Ausnahme sind die `erkenntnisse` des Auftrags: der eigene
+    Der **Typ** ist die eine Ausnahme, die es hier immer schon gab, und er
+    stammt ebenfalls vom Agenten. Er bleibt drin — ohne ihn wüsste der Lauf
+    nicht, wonach er sucht —, aber als blosse Kennung (`_typ_kennung`) und mit
+    genannter Herkunft. Zeigen statt verbieten: das Modell liest im selben
+    Satz, wer den Typ vergeben hat.
+
+    Die andere Ausnahme sind die `erkenntnisse` des Auftrags: der eigene
     Abschlusstext des vorigen Anlaufs, geschwärzt und gedeckelt. Eine
     Aufwertung ist das ausdrücklich **nicht** — der vorige Anlauf hat Logs
     gelesen und kann Zeilen daraus zitiert haben, und die stammen von einem
@@ -457,7 +513,8 @@ def _auftragstext(server: Server, vorfall: Incident, auftrag=None) -> str:
     name = redact_sensitive_text(str(server.name or ""))[:64]
     kopf = (
         f"Die Guardian-Engine meldet eine Stoerung auf Server {server.id} "
-        f'("{name}"): Vorfall {vorfall.id} vom Typ "{vorfall.type}", '
+        f'("{name}"): Vorfall {vorfall.id} vom Typ "{_typ_kennung(vorfall.type)}" '
+        "(diese Kennung vergibt der Agent auf der Node, sie ist kein Paneltext), "
         f"Status {vorfall.status}, bisher {vorfall.occurrences}-mal aufgetreten.\n\n"
         "Niemand sitzt gerade davor."
     )
@@ -708,13 +765,11 @@ async def vorfaelle_bearbeiten(db: Session) -> int:
 
     Beide Filter **verkleinern nur**. Sie entscheiden nichts: die Freigabe
     beurteilt weiterhin allein `zustaendiger_freigeber` über `resolve_grant`,
-    und die Bedingung hier ist wörtlich dieselbe wie dessen Kandidatenabfrage.
-    Wer sie enger fasst, macht aus einer Beschleunigung eine stille
-    Rechteänderung.
+    und die Bedingung hier ist dieselbe wie dessen Kandidatenabfrage — nicht
+    abgeschrieben, sondern aus derselben `_freigabe_bedingungen`. Wer sie enger
+    fasst, macht aus einer Beschleunigung eine stille Rechteänderung.
     """
     from models import AiAutonomyGrant, AiGuardianRepair
-
-    from sqlalchemy import or_
 
     # Schon uebernommen — von wem auch immer. Zweimal denselben Vorfall zu
     # reparieren wäre ohnehin doppelte Arbeit, und die Zeile verschwindet nie
@@ -751,19 +806,14 @@ async def vorfaelle_bearbeiten(db: Session) -> int:
         )
         .exists()
     )
-    # Wortgleich mit der Kandidatenabfrage in `zustaendiger_freigeber` — inklusive
-    # `IS NULL OR = id` statt `IN (None, id)`, siehe den Kommentar dort.
+    # Dieselbe Bedingung wie die Kandidatenabfrage in `zustaendiger_freigeber`,
+    # aus derselben Funktion — nur auf den Server des Vorfalls statt auf einen
+    # bekannten. Zwei Kopien waeren zwei Stellen, an denen die Freigabe-Semantik
+    # auseinanderlaufen kann.
     freigabe_moeglich = (
         db.query(AiAutonomyGrant.id)
         .join(User, User.id == AiAutonomyGrant.user_id)
-        .filter(
-            User.is_active.is_(True),
-            AiAutonomyGrant.enabled.is_(True),
-            or_(
-                AiAutonomyGrant.server_id.is_(None),
-                AiAutonomyGrant.server_id == Incident.server_id,
-            ),
-        )
+        .filter(*_freigabe_bedingungen(Incident.server_id))
         .exists()
     )
 

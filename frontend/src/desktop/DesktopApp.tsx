@@ -3,7 +3,8 @@
  *
  * Ablauf beim Start: Konfiguration laden → ohne Adresse oder Einrichtung den
  * Assistenten zeigen → sonst still über den OS-Tresor anmelden → gelingt das
- * nicht, nur den Kopplungsschritt zeigen. Angemeldet rendert die App die
+ * nicht, nur den Kopplungsschritt zeigen; fehlt danach nur der Sandbox-Ordner,
+ * nur diesen einen Schritt. Angemeldet rendert die App die
  * **echte** KI-Seite des Panels (`pages/Ai`) — Chat, Realtime, Guardian,
  * Aufgaben, Worker — plus die Desktop-Einstellungen.
  *
@@ -46,7 +47,7 @@ import {
 import { stillAnmelden } from './transport'
 import { useAuftragsschleife } from './useAuftragsschleife'
 
-type Phase = 'laedt' | 'einrichtung' | 'kopplung' | 'bereit'
+type Phase = 'laedt' | 'einrichtung' | 'kopplung' | 'sandbox' | 'bereit'
 
 export function DesktopApp() {
   const [phase, setPhase] = useState<Phase>('laedt')
@@ -55,10 +56,21 @@ export function DesktopApp() {
   // die stille Sitzungserneuerung schon laden — wie bei einem Spielstart.
   const [splash, setSplash] = useState(true)
   const angemeldet = useAuthStore((s) => s.isAuthenticated)
+  // Beide Phasen hinter der Anmeldung. `sandbox` ist der nachgereichte
+  // Assistentenschritt, und er kommt erst nach `stillAnmelden()` **und**
+  // erfolgreichem `checkAuth()` — das Gerät ist dort also längst gekoppelt.
+  const sitzungSteht = phase === 'bereit' || phase === 'sandbox'
   // Die Aufträge des Panels holt der Rechner selbst ab — aber erst, wenn
   // das Gerät gekoppelt ist: vorher gibt es kein Token und jede Frage wäre
   // ein 401. Läuft weiter, auch wenn das Fenster im Tray liegt.
-  const offeneUebernahme = useAuftragsschleife(phase === 'bereit')
+  //
+  // Und auch, solange der Sandbox-Schritt auf dem Schirm steht: das Wake-Word
+  // startet die Sprachsitzung unabhängig davon aus Rust im Overlay. Hinge die
+  // Schleife an `bereit`, könnte die KI dort reden, während jeder
+  // Werkzeugaufruf ins Leere greift — `desktop_system`, `desktop_steuern` und
+  // `desktop_aufraeumen` liefen in die 60-Sekunden-Grenze und meldeten
+  // „nicht abgewartet", obwohl niemand auch nur gefragt hat.
+  const offeneUebernahme = useAuftragsschleife(sitzungSteht)
 
   useEffect(() => {
     void (async () => {
@@ -69,12 +81,23 @@ export function DesktopApp() {
           setPhase('einrichtung')
           return
         }
-        if (await stillAnmelden()) {
-          await useAuthStore.getState().checkAuth()
-          setPhase(useAuthStore.getState().isAuthenticated ? 'bereit' : 'kopplung')
-        } else {
+        if (!(await stillAnmelden())) {
           setPhase('kopplung')
+          return
         }
+        await useAuthStore.getState().checkAuth()
+        if (!useAuthStore.getState().isAuthenticated) {
+          setPhase('kopplung')
+          return
+        }
+        // Der Sandbox-Ordner kann zwischen zwei Starts wegfallen: `konfig.rs`
+        // vergisst beim Laden einen Pfad, den es heute nicht mehr erlaubt —
+        // sonst blockierte der Altwert jedes weitere Speichern. Ohne ihn hat
+        // die KI keinen Ort, an dem sie Dateien anlegen darf, und ihre Absage
+        // verweist auf eine Stelle, an der man ihn festlegt. Genau die gibt es
+        // nur im Assistenten, also kommt er dafür noch einmal — mit diesem
+        // einen Schritt und mit „Später festlegen" daneben.
+        setPhase(geladen.sandbox_pfad ? 'bereit' : 'sandbox')
       } catch {
         setPhase('einrichtung')
       }
@@ -94,11 +117,14 @@ export function DesktopApp() {
   // darf gedrosselt sein, das Wake-Word muss trotzdem tragen. Hier läuft
   // deshalb kein Listener mehr.
 
-  // Tray-Farbe und Ducking folgen auch einer Sitzung in diesem Fenster.
+  // Tray-Farbe und Ducking folgen auch einer Sitzung in diesem Fenster —
+  // und aus demselben Grund wie die Auftragsschleife auch im Sandbox-Schritt:
+  // eine per Wake-Word gestartete Sitzung soll man am Tray sehen, gleich ob
+  // gerade noch ein Assistentenschritt offen ist.
   useEffect(() => {
-    if (phase !== 'bereit') return
+    if (!sitzungSteht) return
     return sprachzustandVerdrahten()
-  }, [phase])
+  }, [sitzungSteht])
 
   function fertig(neueKonfig: AppKonfig) {
     setKonfig(neueKonfig)
@@ -108,7 +134,7 @@ export function DesktopApp() {
   let inhalt: ReactNode
   if (phase === 'laedt' || konfig === null) {
     inhalt = <Startbild />
-  } else if (phase === 'einrichtung' || phase === 'kopplung') {
+  } else if (phase === 'einrichtung' || phase === 'kopplung' || phase === 'sandbox') {
     inhalt = (
       <Wizard
         konfig={konfig}
@@ -116,9 +142,13 @@ export function DesktopApp() {
         // Modulgraph fest); eine gespeicherte Adresse heißt deshalb: dort
         // weitermachen, wo der Neustart unterbrochen hat.
         startSchritt={
-          phase === 'kopplung' || konfig.backend_url ? 'kopplung' : 'backend'
+          phase === 'sandbox' ? 'sandbox'
+            : phase === 'kopplung' || konfig.backend_url ? 'kopplung'
+              : 'backend'
         }
-        nurKopplung={phase === 'kopplung'}
+        // Beide Nachzügler-Phasen brauchen genau ihren einen Schritt: die
+        // Einrichtung liegt hinter dem Benutzer, nur ein Stück davon fehlt.
+        nurDieserSchritt={phase !== 'einrichtung'}
         onFertig={fertig}
       />
     )

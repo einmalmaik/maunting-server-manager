@@ -16,6 +16,7 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
@@ -49,7 +50,29 @@ pub struct Wartend {
     pub aktion: String,
     pub pfade: Vec<String>,
     pub system_erlaubt: bool,
+    /// Bis wann der Klick zaehlt — siehe [`BESTAETIGUNGSFRIST`].
+    pub bis: Instant,
 }
+
+/// Wie lange ein wartender Plan gueltig bleibt.
+///
+/// Dieselben zehn Minuten, die das Panel dem Auftrag gibt
+/// (`FRIST_BESTAETIGUNG_SEKUNDEN`). Danach ist der Auftrag dort verfallen und
+/// der Lauf laengst mit `DESKTOP_JOB_EXPIRED` geweckt — er *weiss* also, dass
+/// nichts geschehen ist. Ein Klick, der die Dateien dann doch noch loescht,
+/// erzeugt genau die Lage, die es nie geben darf: die Dateien sind weg, und
+/// niemand erfaehrt davon. Ohne diese Frist hielt der Plan unbegrenzt, und
+/// die Fehlermeldung unten behauptete einen Verfall, den es gar nicht gab.
+const BESTAETIGUNGSFRIST: Duration = Duration::from_secs(600);
+
+/// Wie lange die Karte insgesamt messen darf, bevor sie gezeigt wird.
+///
+/// `aufraeumen::MESSFRIST` gilt je Pfad (5 s). Bei den erlaubten 500 Pfaden
+/// waeren das im schlimmsten Fall vierzig Minuten auf einem langsamen Netz-
+/// oder OneDrive-Pfad — der Auftrag ist nach zehn Minuten verfallen, und der
+/// Mensch haette die Karte nie gesehen. Zwanzig Sekunden sind genug fuer
+/// jede normale Liste; was danach kommt, steht ohne Zahl auf der Karte.
+const KARTENBUDGET: Duration = Duration::from_secs(20);
 
 static WARTEND: Mutex<Option<Wartend>> = Mutex::new(None);
 
@@ -66,6 +89,14 @@ pub fn aufraeumen_bestaetigen() -> Result<Value, String> {
         "Es wartet gerade kein Aufraeumauftrag. Vermutlich ist er verfallen \
          oder wurde schon beantwortet.",
     )?;
+    if Instant::now() > plan.bis {
+        return Err(format!(
+            "Der Aufraeumauftrag ist verfallen: zwischen der Frage und dem \
+             Klick lagen mehr als {} Minuten. Es wurde nichts angefasst. \
+             Frag erneut, wenn es noch aktuell ist.",
+            BESTAETIGUNGSFRIST.as_secs() / 60
+        ));
+    }
     aufraeumen_ausfuehren(&plan)
 }
 
@@ -86,18 +117,24 @@ fn aufraeumen_ausfuehren(plan: &Wartend) -> Result<Value, String> {
     }
 }
 
+/// `auftrag_id` ist die Kennung des Auftrags, aus dem dieser Aufruf stammt.
+/// Sie wird nur gebraucht, wo eine Karte gezeigt wird: die Antwort des
+/// Menschen gehoert zu **diesem** Auftrag, und die Karte soll das aus dem
+/// Ereignis lesen koennen statt aus einem Zustand der Oberflaeche, der
+/// vielleicht noch nicht angekommen ist.
 pub fn ausfuehren(
     app: &AppHandle,
     sandbox_pfad: Option<PathBuf>,
     werkzeug: &str,
     argumente: &Value,
+    auftrag_id: Option<&str>,
 ) -> Result<Ergebnis, String> {
     match werkzeug {
         "desktop_dateien" => dateien(sandbox_pfad, argumente).map(Some),
         "desktop_launch_app" => starten(app, argumente).map(Some),
         "desktop_system" => system::ausfuehren(app, argumente).map(Some),
-        "desktop_steuern" => steuern(app, argumente),
-        "desktop_aufraeumen" => raeumen(app, argumente),
+        "desktop_steuern" => steuern(app, argumente, auftrag_id),
+        "desktop_aufraeumen" => raeumen(app, argumente, auftrag_id),
         andere => Err(format!("Unbekanntes Werkzeug: '{andere}'")),
     }
 }
@@ -109,7 +146,11 @@ pub fn ausfuehren(
 /// seine 64.000 Zeichen erreichte. Am Ablauf hat sich nichts geaendert: die
 /// Bitte zeigt eine Karte und liefert `None`, alles andere braucht eine
 /// gueltige Freigabe und liefert sofort.
-fn steuern(app: &AppHandle, argumente: &Value) -> Result<Ergebnis, String> {
+fn steuern(
+    app: &AppHandle,
+    argumente: &Value,
+    auftrag_id: Option<&str>,
+) -> Result<Ergebnis, String> {
     if argumente["aktion"].as_str() != Some("freigabe") {
         return uebernahme::steuern(argumente).map(Some);
     }
@@ -130,10 +171,40 @@ fn steuern(app: &AppHandle, argumente: &Value) -> Result<Ergebnis, String> {
     let anliegen = argumente["anliegen"].as_str().unwrap_or("").to_string();
     app.emit(
         EREIGNIS_UEBERNAHME,
-        json!({ "anliegen": anliegen, "minuten": minuten }),
+        json!({ "anliegen": anliegen, "minuten": minuten, "auftrag_id": auftrag_id }),
     )
     .map_err(|e| format!("Karte nicht anzeigbar: {e}"))?;
     Ok(None)
+}
+
+/// Die Pfadliste aus der Nutzlast — und die billige Pruefung davor.
+///
+/// `aufraeumen::ausfuehren` kennt dieselbe Obergrenze, kommt aber erst nach
+/// der Karte an die Reihe. Eine Liste mit tausend Pfaden wurde deshalb erst
+/// Stueck fuer Stueck vermessen (bis zu 5 s je Pfad) und danach als "zu
+/// viele" abgewiesen — bis dahin war der Auftrag verfallen und die Karte nie
+/// zu sehen. Die Zaehlung gehoert vor die Messung.
+fn pfadliste(argumente: &Value) -> Result<Vec<String>, String> {
+    let pfade: Vec<String> = argumente["pfade"]
+        .as_array()
+        .map(|liste| {
+            liste
+                .iter()
+                .filter_map(|wert| wert.as_str())
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    if pfade.len() > aufraeumen::MAX_PFADE {
+        return Err(format!(
+            "{} Pfade sind zu viele; hoechstens {} auf einmal. Teil es auf \
+             und fang mit den groessten an.",
+            pfade.len(),
+            aufraeumen::MAX_PFADE
+        ));
+    }
+    Ok(pfade)
 }
 
 /// Aufraeumen — sofort oder erst nach einem Klick.
@@ -147,23 +218,18 @@ fn steuern(app: &AppHandle, argumente: &Value) -> Result<Ergebnis, String> {
 ///
 /// Gleiches gilt fuer `systembereich`: das steht im Konto des Benutzers, und
 /// ohne den Wert `schreiben` bleibt Windows selbst gesperrt.
-fn raeumen(app: &AppHandle, argumente: &Value) -> Result<Ergebnis, String> {
+fn raeumen(
+    app: &AppHandle,
+    argumente: &Value,
+    auftrag_id: Option<&str>,
+) -> Result<Ergebnis, String> {
     let aktion = argumente["aktion"].as_str().unwrap_or("").to_string();
-    let pfade: Vec<String> = argumente["pfade"]
-        .as_array()
-        .map(|liste| {
-            liste
-                .iter()
-                .filter_map(|wert| wert.as_str())
-                .map(|text| text.trim().to_string())
-                .filter(|text| !text.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
+    let pfade = pfadliste(argumente)?;
     let plan = Wartend {
         aktion,
         pfade,
         system_erlaubt: argumente["systembereich"].as_str() == Some("schreiben"),
+        bis: Instant::now() + BESTAETIGUNGSFRIST,
     };
 
     if argumente["autonom"].as_bool() == Some(true) {
@@ -172,6 +238,7 @@ fn raeumen(app: &AppHandle, argumente: &Value) -> Result<Ergebnis, String> {
 
     // Die Karte zeigt, was jeder Posten kostet und wo er liegt. Das kann nur
     // dieser Rechner beantworten — das Panel kennt weder Groessen noch Zonen.
+    let messung_bis = Instant::now() + KARTENBUDGET;
     let posten: Vec<Value> = plan
         .pfade
         .iter()
@@ -183,7 +250,18 @@ fn raeumen(app: &AppHandle, argumente: &Value) -> Result<Ergebnis, String> {
             // Untergrenze, und die Karte sagt das mit einem "mindestens".
             // Eine geschaetzte Zahl, die sich als genau ausgibt, ist bei
             // einer Loeschentscheidung die schlechtere Sorte Ungenauigkeit.
-            let (bytes, vollstaendig) = aufraeumen::groesse_gemessen(ort, aufraeumen::MESSTIEFE);
+            //
+            // Die Frist gilt je Pfad; ueber alle zusammen wacht
+            // `KARTENBUDGET`. Danach steht bei den restlichen Posten keine
+            // Zahl mehr (`bytes: null`) — die Karte kommt lieber
+            // unvollstaendig als gar nicht.
+            let (bytes, vollstaendig) = if Instant::now() < messung_bis {
+                let (bytes, vollstaendig) =
+                    aufraeumen::groesse_gemessen(ort, aufraeumen::MESSTIEFE);
+                (Some(bytes), vollstaendig)
+            } else {
+                (None, true)
+            };
             json!({
                 "pfad": pfad,
                 "bytes": bytes,
@@ -196,6 +274,7 @@ fn raeumen(app: &AppHandle, argumente: &Value) -> Result<Ergebnis, String> {
         "aktion": plan.aktion,
         "grund": argumente["grund"].as_str().unwrap_or(""),
         "posten": posten,
+        "auftrag_id": auftrag_id,
     });
 
     wartend_setzen(Some(plan));
@@ -335,5 +414,49 @@ mod tests {
         for name in ["discord", "Steam", "code", "spotify.exe"] {
             assert!(!verboten(name), "{name} muesste erlaubt sein");
         }
+    }
+
+    #[test]
+    fn ein_verfallener_plan_loescht_nichts() {
+        // Der Plan lag unbegrenzt: ein Klick eine Stunde spaeter loeschte
+        // wirklich, und das Ergebnis ging an einen Auftrag, den das Panel
+        // laengst verworfen hatte. Der Lauf war da schon mit
+        // DESKTOP_JOB_EXPIRED geweckt — er "wusste" also, dass nichts
+        // passiert ist, waehrend die Dateien weg waren.
+        let ziel = std::env::temp_dir().join(format!(
+            "mss-verfallener-plan-{}.txt",
+            std::process::id()
+        ));
+        std::fs::write(&ziel, b"bleibt").unwrap();
+        wartend_setzen(Some(Wartend {
+            aktion: "endgueltig".into(),
+            pfade: vec![ziel.display().to_string()],
+            system_erlaubt: false,
+            bis: Instant::now() - Duration::from_secs(1),
+        }));
+
+        let fehler = aufraeumen_bestaetigen().unwrap_err();
+        assert!(fehler.contains("verfallen"), "{fehler}");
+        assert!(ziel.exists(), "Der verfallene Plan hat trotzdem geloescht");
+        // Und er liegt nicht mehr herum: der naechste Klick faende ihn sonst
+        // wieder vor.
+        assert!(wartend_setzen(None).is_none());
+        let _ = std::fs::remove_file(&ziel);
+    }
+
+    #[test]
+    fn zu_viele_pfade_werden_vor_dem_messen_abgewiesen() {
+        // Die Obergrenze stand nur in `aufraeumen::ausfuehren` und damit
+        // hinter der Messung: eine zu lange Liste wurde erst Pfad fuer Pfad
+        // vermessen (bis zu 5 s je Stueck) und danach abgewiesen.
+        let viele: Vec<Value> = (0..aufraeumen::MAX_PFADE + 1)
+            .map(|n| json!(format!("C:\\x\\{n}")))
+            .collect();
+        let fehler = pfadliste(&json!({ "pfade": viele })).unwrap_err();
+        assert!(fehler.contains("zu viele"), "{fehler}");
+
+        // Und was durchgeht, kommt getrimmt und ohne Leereintraege an.
+        let liste = pfadliste(&json!({ "pfade": ["  C:\\a  ", "", "C:\\b"] })).unwrap();
+        assert_eq!(liste, vec!["C:\\a".to_string(), "C:\\b".to_string()]);
     }
 }

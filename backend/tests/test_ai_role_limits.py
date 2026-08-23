@@ -790,10 +790,11 @@ def test_teamwissen_haengt_am_gruender_nicht_am_schreiber(
     _memory_role(db, mitglied, "ai-memory-mitglied", 50)
 
     team = team_service.create_team(db, user=gruender, name="Betrieb")
-    team_service.add_member(
+    team_service.invite_member(
         db, team=team, user=gruender, new_user_id=mitglied.id,
         can_manage_skills=False, can_manage_memory=True,
     )
+    team_service.accept_invitation(db, user=mitglied, team_id=team.id)
 
     # Die beiden Zahlen muessen auseinanderliegen, sonst beweist der Test nichts:
     # nur so waere das naive Verhalten — der Vorrat des Schreibenden — hier rot.
@@ -964,10 +965,11 @@ def test_die_null_absage_schiebt_es_nicht_auf_den_tarif_des_schreibenden(
     _memory_role(db, mitglied, "ai-memory-null-mitglied", 500)
 
     team = team_service.create_team(db, user=gruender, name="Nullbetrieb")
-    team_service.add_member(
+    team_service.invite_member(
         db, team=team, user=gruender, new_user_id=mitglied.id,
         can_manage_skills=False, can_manage_memory=True,
     )
+    team_service.accept_invitation(db, user=mitglied, team_id=team.id)
 
     # Ohne diese Zeile belegt der Test nichts: erst ein Mitglied, das selbst
     # reichlich darf, macht die Aussage ueber seinen Tarif nachweislich falsch.

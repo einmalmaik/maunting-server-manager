@@ -2584,3 +2584,92 @@ def test_desktop_werkzeuge_stehen_am_katalogende() -> None:
         if eintrag["function"]["name"] not in DESKTOP_TOOLS
     ]
     assert alle[: len(panel)] == panel
+
+
+def test_die_lifecycle_vorgaenge_stehen_an_einer_stelle() -> None:
+    """Drei Fundstellen, eine Wahrheit — sonst driftet die Menge.
+
+    `_LIFECYCLE_RECHTE` ist die kanonische Zuordnung Vorgang → Recht; ihre
+    Schlüssel sind zugleich die Werteliste der Formprüfung in
+    `create_proposal`. Das Schema im Werkzeugkatalog ist die dritte Fundstelle
+    und lässt sich von dort aus nicht erreichen — `ai_proposal_service` importiert
+    aus `ai_action_service`, nicht umgekehrt. Wer im Katalog eine Operation
+    ergänzt und in der Rechtetabelle nicht, bietet dem Modell eine an, die der
+    Vorschlagspfad ohne Recht abweist; wer es umgekehrt macht, hält eine
+    erlaubte Operation vor dem Modell verborgen.
+    """
+    katalog = next(
+        eintrag for eintrag in ai_action_service.provider_tool_definitions()
+        if eintrag["function"]["name"] == "propose_server_lifecycle"
+    )
+    angeboten = katalog["function"]["parameters"]["properties"]["operation"]["enum"]
+
+    assert set(angeboten) == set(ai_proposal_service._LIFECYCLE_RECHTE)
+    # Jeder Vorgang trägt ein eigenes Recht — genau der Grund, warum er in
+    # keine Zeile von `ai_tool_registry.WERKZEUGE` passt.
+    rechte = set(ai_proposal_service._LIFECYCLE_RECHTE.values())
+    assert len(rechte) == len(ai_proposal_service._LIFECYCLE_RECHTE)
+
+
+def test_ein_lifecycle_vorschlag_mit_fremdem_argument_ist_ein_formfehler(
+    db: Session, regular_user: User, tmp_path: Path
+) -> None:
+    """Die Formmeldung kommt vor der Rechteprüfung — und nur einmal.
+
+    Sie stand zweimal da: vorgezogen (nur der Wert) und noch einmal im
+    Payload-Bau (Wert **und** Schlüsselmenge), beide mit einer eigenen
+    Literalmenge. Ein fremdes Argument bekam damit erst die Rechte-Ablehnung
+    und danach die Formmeldung, je nachdem, wie die Rechte standen — ein
+    Unterschied, der das Modell in die falsche Richtung schickt.
+
+    Der Benutzer hier darf den Server **sehen** und sonst nichts: weder
+    `server.start` noch `server.stop` noch `server.restart`. Nur so trennt der
+    Test die beiden Fassungen. Mit einem Besitzer, für den
+    `has_global_permission` zu jedem Serverrecht ja sagt, kommt vorher wie
+    nachher dieselbe Formmeldung — die Zusage bliebe ungeprüft. Die
+    Gegenprobe darunter hält fest, dass die Rechtelage wirklich die
+    behauptete ist.
+
+    Verraten wird durch das Vorziehen nichts: die Formprüfung liest keinen
+    Zustand.
+    """
+    rolle = Role(name="nur-sehen-lifecycle", description=None, is_system=False)
+    db.add(rolle)
+    db.flush()
+    db.add(RolePermission(role_id=rolle.id, permission_key="ai.chat.use"))
+    db.commit()
+    set_user_roles(db, regular_user, [rolle.id])
+
+    server = _server(db, regular_user, tmp_path)
+    db.add(ServerPermission(
+        user_id=regular_user.id, server_id=server.id, permission_key="server.view"
+    ))
+    conversation = _conversation(db, regular_user, server)
+    db.commit()
+
+    def _vorschlagen(**zusatz: object) -> None:
+        ai_proposal_service.create_proposal(
+            db,
+            user=regular_user,
+            conversation=conversation,
+            tool_name="propose_server_lifecycle",
+            arguments={
+                "server_id": server.id, "operation": "start", **zusatz,
+                "reason": "Testbegruendung", "expected_effect": "Testwirkung",
+            },
+            correlation_id=str(uuid4()),
+        )
+
+    # Die Gegenprobe zuerst: in einwandfreier Form ist es die Rechte-Ablehnung,
+    # die kommt. Ohne sie könnte jemand dem Benutzer später `server.start`
+    # mitgeben, und der Test prüfte still nur noch den zweiten Fall.
+    with pytest.raises(
+        ai_action_errors.AiActionValidationError, match="nicht erlaubt"
+    ):
+        _vorschlagen()
+
+    with pytest.raises(
+        ai_action_errors.AiActionValidationError, match="Lifecycle"
+    ):
+        _vorschlagen(force=True)
+    assert db.query(AiActionProposal).count() == 0

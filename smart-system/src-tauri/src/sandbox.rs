@@ -47,12 +47,30 @@ pub fn grenzfehler(pfad: &str) -> String {
     )
 }
 
+/// Warum ein Pfad *innerhalb* der Wurzel trotzdem gesperrt ist.
+///
+/// Der Sandbox-Ordner kommt aus `konfig.json`, und die Datei kann aelter sein
+/// als die Pruefung, die dort heute keinen Systembereich mehr als Wurzel
+/// zulaesst. Stand `C:\` einmal drin, laege `Windows\System32` innerhalb der
+/// Grenze — deshalb entscheidet zusaetzlich `zonen::zone` ueber das Ziel und
+/// nicht nur seine Lage zur Wurzel.
+fn systemfehler(pfad: &str) -> String {
+    format!(
+        "Systembereich: '{pfad}' gehoert zu Windows und bleibt auch dann \
+         gesperrt, wenn der eingerichtete Sandbox-Ordner ihn umfasst. Der \
+         Ordner ist zu weit gefasst; das aendert der Benutzer in den \
+         Einstellungen der App, nicht ein zweiter Versuch."
+    )
+}
+
 /// Loest einen relativen Pfad im Sandbox-Ordner auf — oder lehnt ihn ab.
 ///
 /// `muss_existieren = false` ist der Fall „Datei anlegen": dann wird das
 /// **Elternverzeichnis** kanonisiert und geprueft, denn ein noch nicht
 /// existierender Pfad laesst sich nicht aufloesen. Der Dateiname selbst darf
-/// dabei keine eigenen Pfadanteile mehr tragen.
+/// dabei keine eigenen Pfadanteile mehr tragen — und wenn es ihn schon gibt,
+/// wird auch er kanonisiert, sonst fuehrte eine Verknuepfung am Blatt am
+/// Elternvergleich vorbei.
 pub fn aufloesen(wurzel: &Path, relativ: &str, muss_existieren: bool) -> Result<PathBuf, String> {
     let wurzel = dunce::canonicalize(wurzel)
         .map_err(|e| format!("Sandbox-Ordner nicht lesbar: {e}"))?;
@@ -75,6 +93,9 @@ pub fn aufloesen(wurzel: &Path, relativ: &str, muss_existieren: bool) -> Result<
         if !echt.starts_with(&wurzel) {
             return Err(grenzfehler(relativ));
         }
+        if crate::zonen::zone(&echt) == crate::zonen::Zone::System {
+            return Err(systemfehler(relativ));
+        }
         return Ok(echt);
     }
 
@@ -90,7 +111,27 @@ pub fn aufloesen(wurzel: &Path, relativ: &str, muss_existieren: bool) -> Result<
     if !echte_eltern.starts_with(&wurzel) {
         return Err(grenzfehler(relativ));
     }
-    Ok(echte_eltern.join(dateiname))
+    let ergebnis = echte_eltern.join(dateiname);
+    // Der gepruefte Elternordner reicht nicht: das **Blatt** kann selbst eine
+    // Verknuepfung sein. `fs::write` oeffnet unter Windows mit CREATE_ALWAYS
+    // und folgt dem Reparse-Point, der Inhalt laege also ausserhalb — genau
+    // der Ausbruchsweg aus dem Modulkopf, nur eine Ebene tiefer.
+    //
+    // `symlink_metadata` und nicht `exists`: letzteres folgt der Verknuepfung
+    // und saehe eine ins Leere zeigende gar nicht — dabei legt ein Schreiben
+    // darauf die Zieldatei draussen erst an.
+    if ergebnis.symlink_metadata().is_ok() {
+        // Kanonisiert, nicht abgelehnt: eine Verknuepfung *innerhalb* des
+        // Sandbox-Ordners bleibt damit benutzbar, nur eine hinaus nicht.
+        let echt = dunce::canonicalize(&ergebnis).map_err(|_| grenzfehler(relativ))?;
+        if !echt.starts_with(&wurzel) {
+            return Err(grenzfehler(relativ));
+        }
+    }
+    if crate::zonen::zone(&ergebnis) == crate::zonen::Zone::System {
+        return Err(systemfehler(relativ));
+    }
+    Ok(ergebnis)
 }
 
 pub fn auflisten(wurzel: &Path, relativ: &str) -> Result<serde_json::Value, String> {
@@ -199,6 +240,17 @@ mod tests {
         pfad
     }
 
+    /// Eine eigene, leere Wurzel fuer die Verknuepfungstests. Nicht die
+    /// gemeinsame `sandbox()`: die Tests laufen nebenlaeufig im selben
+    /// Prozess, und ein Link, den ein anderer Test gerade sieht, waere ein
+    /// Ergebnis, das mal so und mal so ausfaellt.
+    fn eigene_wurzel(name: &str) -> PathBuf {
+        let pfad = std::env::temp_dir().join(format!("mss-test-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&pfad);
+        fs::create_dir_all(&pfad).unwrap();
+        pfad
+    }
+
     #[test]
     fn relativer_pfad_bleibt_drinnen() {
         let wurzel = sandbox();
@@ -241,5 +293,98 @@ mod tests {
         let gelesen = lesen(&wurzel, "rund.txt").unwrap();
         assert_eq!(gelesen["inhalt"], "Grüße mit Umlaut");
         assert!(schreiben(&wurzel, "../ausbruch.txt", "nein").is_err());
+    }
+
+    #[test]
+    fn eine_junction_traegt_die_grenze_nicht_weiter() {
+        // Der Fall aus dem Modulkopf, den bisher kein Test abdeckte: ein
+        // Ordnerlink im Sandbox-Ordner, der nach C:\Windows zeigt. Auf der
+        // Eingabe sieht das aus wie ein harmloser Unterordner.
+        let wurzel = eigene_wurzel("junction");
+        let link = wurzel.join("harmlos");
+        let gebaut = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg("C:\\Windows")
+            .output()
+            .map(|a| a.status.success())
+            .unwrap_or(false);
+        if !gebaut {
+            // Ohne Windows oder ohne Rechte fuer Junctions ist hier nichts zu
+            // pruefen — dann still aufhoeren, statt eine fremde Umgebung
+            // rotzufaerben.
+            let _ = fs::remove_dir_all(&wurzel);
+            return;
+        }
+
+        assert!(auflisten(&wurzel, "harmlos").is_err());
+        assert!(lesen(&wurzel, "harmlos\\System32\\drivers\\etc\\hosts").is_err());
+        let fehler = schreiben(&wurzel, "harmlos\\mss.txt", "nein").unwrap_err();
+        assert!(fehler.contains("Ausserhalb"), "{fehler}");
+
+        // `remove_dir` und nicht `remove_dir_all`: es loescht den Reparse-Point
+        // und scheitert an jedem echten, nicht leeren Ordner. Ein Aufraeumen,
+        // das im Fehlerfall C:\Windows leeren koennte, waere schlimmer als
+        // ein liegengebliebener Testordner.
+        let _ = fs::remove_dir(&link);
+        let _ = fs::remove_dir_all(&wurzel);
+    }
+
+    #[test]
+    fn eine_zu_weite_wurzel_oeffnet_windows_trotzdem_nicht() {
+        // Die Wurzel kommt aus `konfig.json`. Eine Datei, die eine aeltere
+        // Fassung geschrieben hat, kann `C:\` enthalten — dann laege Windows
+        // *innerhalb* der Grenze, und der Wurzelvergleich allein saehe nichts
+        // Falsches. Geprueft wird die Meldung und nicht nur „irgendein
+        // Fehler": ein verweigerter Schreibzugriff waere sonst dasselbe
+        // Ergebnis aus dem falschen Grund.
+        let wurzel = Path::new("C:\\");
+        if !wurzel.exists() {
+            return;
+        }
+        let fehler = lesen(wurzel, "Windows\\System32\\drivers\\etc\\hosts").unwrap_err();
+        assert!(fehler.contains("Systembereich"), "{fehler}");
+        let fehler = schreiben(wurzel, "Windows\\mss-test.txt", "nein").unwrap_err();
+        assert!(fehler.contains("Systembereich"), "{fehler}");
+        assert!(!Path::new("C:\\Windows\\mss-test.txt").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ein_dateisymlink_am_blatt_schreibt_nicht_nach_draussen() {
+        // Die Luecke, wegen der diese Tests entstanden sind: beim Anlegen
+        // wurde nur der Elternordner kanonisiert. Zeigte der Dateiname selbst
+        // schon als Verknuepfung nach draussen, folgte `fs::write` ihr.
+        let wurzel = eigene_wurzel("symlink");
+        let draussen = std::env::temp_dir().join(format!("mss-opfer-{}.txt", std::process::id()));
+        fs::write(&draussen, "unberuehrt").unwrap();
+
+        let link = wurzel.join("harmlos.txt");
+        if std::os::windows::fs::symlink_file(&draussen, &link).is_err() {
+            // Dateisymlinks braucht der Entwicklermodus. Fehlt er, ist hier
+            // nichts zu pruefen.
+            let _ = fs::remove_dir_all(&wurzel);
+            let _ = fs::remove_file(&draussen);
+            return;
+        }
+
+        let fehler = schreiben(&wurzel, "harmlos.txt", "uebernommen").unwrap_err();
+        assert!(fehler.contains("Ausserhalb"), "{fehler}");
+        assert_eq!(fs::read_to_string(&draussen).unwrap(), "unberuehrt");
+        assert!(loeschen(&wurzel, "harmlos.txt").is_err());
+
+        // Und die Gegenprobe, damit die Grenze keine Faehigkeit kostet: eine
+        // Verknuepfung, die *innerhalb* des Ordners bleibt, ist weiter
+        // beschreibbar.
+        fs::write(wurzel.join("echt.txt"), "alt").unwrap();
+        if std::os::windows::fs::symlink_file(wurzel.join("echt.txt"), wurzel.join("zeiger.txt"))
+            .is_ok()
+        {
+            schreiben(&wurzel, "zeiger.txt", "neu").unwrap();
+            assert_eq!(fs::read_to_string(wurzel.join("echt.txt")).unwrap(), "neu");
+        }
+
+        let _ = fs::remove_dir_all(&wurzel);
+        let _ = fs::remove_file(&draussen);
     }
 }

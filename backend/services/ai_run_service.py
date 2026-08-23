@@ -699,7 +699,7 @@ def _wecken_erlaubt(db: Session, run: AiRun) -> bool:
     return False
 
 
-#: Wieviele faellige Weckfristen ein Takt-Durchlauf hoechstens einloest.
+#: Wieviele geparkte Laeufe ein Takt-Durchlauf hoechstens weckt — je Handgriff.
 #: Dieselbe Ueberlegung wie MAX_AUFGABEN_JE_DURCHLAUF bei den Aufgaben: jeder
 #: geweckte Lauf ist ein Anbieteraufruf, und der Takt kommt jede Minute wieder.
 MAX_WECKEN_JE_DURCHLAUF = 20
@@ -736,6 +736,67 @@ def faellige_wecken(db: Session) -> int:
         except Exception:
             db.rollback()
             logger.warning("Wecken fehlgeschlagen run_id=%s", run.id)
+    return geweckt
+
+
+def verpuffte_bestaetigungen_wecken(db: Session) -> int:
+    """Läufe auf ``waiting_confirmation``, die nichts Offenes mehr haben.
+
+    Der Zwilling von `desktop_job_service._verpuffte_wecken`, und er entsteht
+    aus demselben Rennen. Die Karte steht im Chat, sobald die Schreibrunde den
+    Vorschlag veröffentlicht hat — bis der Lauf **parkt**, liegen aber noch
+    eine Schlussrunde und das ganze `_finalize_stream` dazwischen. Bestätigt
+    ein Mensch in dieser Spanne, ruft `execute_proposal` `lauf_fortsetzen`, und
+    `darf_fortsetzen` weist es ab, weil der Lauf noch auf 'running' steht. Der
+    Weckruf ist damit weg, danach weckt ihn niemand mehr, und der Lauf parkte
+    für immer — mit einer ausgeführten Aktion, über die er nie berichtet hat.
+
+    Nachgeholt wird es hier und nicht im geparkt-Zweig selbst: dort läge
+    zwischen dem Park-Commit und dem Ende der asyncio-Aufgabe ein zusätzlicher
+    `await`, und genau in dem Fenster fände der Weckruf den Segmentplatz belegt
+    (`_platz_belegen`) — der Lauf stünde danach dauerhaft auf 'running', also
+    schlimmer als vorher. Im Takt ist die Aufgabe des Laufs längst beendet.
+
+    Ausgewählt wird über dieselbe Frage, die `darf_fortsetzen` stellt, nur in
+    SQL: kein Vorschlag mehr auf 'proposed' oder 'confirmed'. Das trifft neben
+    dem Rennen einen zweiten Fall, und der gehört ausdrücklich dazu — endet
+    eine Reparaturkampagne, entwertet `ai_guardian_repair_service` die offene
+    Freigabe und setzt ihren Vorschlag auf 'expired', ohne den Lauf anzufassen.
+    Auch der muss aufwachen: sonst zählte er über `aktiver_lauf` für immer als
+    beschäftigt und ließe keine weitere Heilung dieses Benutzers mehr beginnen.
+    """
+    if http_client() is None:
+        return 0
+    # Die Auswahl gehört **vor** die Obergrenze und damit in die Abfrage: der
+    # gewöhnliche Fall ist ein Lauf, der völlig zu Recht auf einen Klick
+    # wartet, und zwanzig davon verdeckten sonst jeden, der wirklich hängt.
+    # Korreliertes EXISTS wie in `ai_guardian_service` — ein `NOT IN` über die
+    # nullbare `run_id` liefert, sobald ein Vorschlag ohne Lauf dabei ist,
+    # überhaupt keine Zeile mehr.
+    offene_vorschlaege = (
+        db.query(AiActionProposal.id)
+        .filter(
+            AiActionProposal.run_id == AiRun.id,
+            AiActionProposal.status.in_(("proposed", "confirmed")),
+        )
+        .exists()
+    )
+    schlafend = (
+        db.query(AiRun)
+        .filter(AiRun.status == "waiting_confirmation", ~offene_vorschlaege)
+        .order_by(AiRun.updated_at.asc())
+        .limit(MAX_WECKEN_JE_DURCHLAUF)
+        .all()
+    )
+    geweckt = 0
+    for run in schlafend:
+        try:
+            if lauf_fortsetzen(db, run_id=run.id):
+                geweckt += 1
+                logger.info("Verpuffte Bestaetigung nachgeholt run_id=%s", run.id)
+        except Exception:
+            db.rollback()
+            logger.warning("Verpuffte Bestaetigung nicht nachgeholt run_id=%s", run.id)
     return geweckt
 
 
@@ -976,6 +1037,7 @@ async def _wiederanlauf_versuchen(db: Session, run: AiRun, rahmen: dict) -> bool
     from models import AiConversation, User
     from services import ai_meldestelle, permission_service
     from services.ai_stream_service import (
+        familie_aus_zustand,
         herkunft_aus_zustand,
         lauf_beginnen,
         rolle_aus_zustand,
@@ -1046,6 +1108,15 @@ async def _wiederanlauf_versuchen(db: Session, run: AiRun, rahmen: dict) -> bool
     # Aufgabenlauf zum Worker. Er verloere damit den Aufgaben-Werkzeugschnitt
     # und wuerde in der Schreibrunde auf einen Klick parken, den bei einem um
     # drei Uhr faellig gewordenen Auftrag niemand tut (siehe `niemand_da`).
+    #
+    # Und die **Familie** wandert aus demselben Grund mit wie die Herkunft:
+    # die eine sagt „aus der App", die andere „aus dieser App", und erst
+    # zusammen adressieren sie einen Rechner. Der Neustart des Panels ist der
+    # einzige Grund, warum dieser Lauf noch einmal anfängt — der Mensch sitzt
+    # unverändert vor demselben Gerät. Fällt die Kennung hier weg, wären die
+    # Desktop-Aufträge des Nachfolgers wieder für jedes gekoppelte Gerät
+    # abholbar (`desktop_job_service.naechster`), und zwar dauerhaft: eine
+    # Familie bekommt ein Lauf nur beim Anlegen.
     alter_zustand = zustand_lesen(run)
     neuer, fehler = lauf_beginnen(
         db,
@@ -1058,6 +1129,7 @@ async def _wiederanlauf_versuchen(db: Session, run: AiRun, rahmen: dict) -> bool
         reasoning_effort=stufe,
         context_chars=flug.fenster.zeichen if flug.fenster.bekannt else None,
         herkunft=herkunft_aus_zustand(alter_zustand),
+        familie=familie_aus_zustand(alter_zustand),
         rolle=rolle_aus_zustand(alter_zustand),
         guardian_briefing_unterdruecken=True,
         unbeaufsichtigt=True,

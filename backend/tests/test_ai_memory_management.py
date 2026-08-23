@@ -12,6 +12,8 @@ gefunden hat, und loescht danach benannte Schluessel.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -250,10 +252,11 @@ def test_team_deletion_requires_the_switch(db: Session, regular_user: User) -> N
     _allow(db, regular_user, "ai.memory.use", "teams.create")
     _allow(db, colleague, "ai.memory.use")
     team = team_service.create_team(db, user=regular_user, name="Betrieb")
-    team_service.add_member(
+    team_service.invite_member(
         db, team=team, user=regular_user, new_user_id=colleague.id,
         can_manage_skills=False, can_manage_memory=False,
     )
+    team_service.accept_invitation(db, user=colleague, team_id=team.id)
     ai_memory_service.upsert_entry(
         db, user=regular_user, scope="team", server_id=None, team_id=team.id,
         key="valheim.ram", value="Valheim braucht mindestens 6 GB",
@@ -265,6 +268,158 @@ def test_team_deletion_requires_the_switch(db: Session, regular_user: User) -> N
         db, user=colleague, tool_name="forget_memory",
         arguments={"scope": "team", "keys": ["valheim.ram"]},
     )
+
+    assert db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == f"team:{team.id}"
+    ).count() == 1
+
+
+def test_die_team_id_trifft_das_gleichnamige_nachbarteam_nicht(
+    db: Session, regular_user: User
+) -> None:
+    """Zwei Teams namens "Alpha", ein Schlüssel — weg ist genau einer.
+
+    Teamnamen sind nur je Gründer eindeutig (`_assert_name_is_free` lässt
+    Gleichnamigkeit ausdrücklich zu). Solange `forget_memory` ein Team
+    ausschließlich über `team="<Name>"` erreichte, war "Alpha" für diesen
+    Benutzer keine Adresse: `learning_team` fragte zurück, und seine Rückfrage
+    unterschied die beiden Kandidaten über den Gründer — eine Angabe, die im
+    Suchtreffer nicht stand. Das Modell konnte seinen Treffer keinem der beiden
+    Angebote zuordnen, wählte eines und traf zur Hälfte das falsche. Folgenlos
+    ist das nicht: Schlüssel sind bewusst stabil und wiederholen sich über Teams
+    hinweg, drüben steht also etwas zu treffen — deshalb liegt hier in beiden
+    Teams derselbe Schlüssel.
+
+    Geprüft wird der ganze Rückweg und nicht das Argument allein: der Treffer
+    aus der Suche muss die Nummer **mitbringen**, sonst kann das Modell sie
+    nicht zurückreichen.
+    """
+    zweiter = _user(db, "zweiter")
+    kollege = _user(db, "kollege")
+    _allow(db, regular_user, "teams.create")
+    _allow(db, zweiter, "teams.create")
+    _allow(db, kollege, "ai.memory.use")
+    eins = team_service.create_team(db, user=regular_user, name="Alpha")
+    zwei = team_service.create_team(db, user=zweiter, name="Alpha")
+    for team, owner in ((eins, regular_user), (zwei, zweiter)):
+        team_service.invite_member(
+            db, team=team, user=owner, new_user_id=kollege.id,
+            can_manage_skills=True, can_manage_memory=True,
+        )
+        team_service.accept_invitation(db, user=kollege, team_id=team.id)
+    for team, wert in (
+        (eins, "Wartungsfenster ist sonntags um 20 Uhr"),
+        (zwei, "Wartungsfenster ist mittwochs um 6 Uhr"),
+    ):
+        ai_memory_service.upsert_entry(
+            db, user=kollege, scope="team", server_id=None, team_id=team.id,
+            key="wartungsfenster", value=wert,
+        )
+
+    gefunden = ai_action_service.execute_read_tool(
+        db, user=kollege, tool_name="search_memory",
+        arguments={"query": "Wartungsfenster"},
+    )
+    treffer = [item for item in gefunden["results"] if item["scope"] == "team"]
+    assert len(treffer) == 2, "Beide Teams müssen im Suchergebnis stehen"
+    gemeint = next(item for item in treffer if item.get("team_id") == eins.id)
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=kollege, tool_name="forget_memory",
+        arguments={
+            "scope": "team", "team_id": gemeint["team_id"],
+            "keys": ["wartungsfenster"],
+        },
+    )
+
+    assert ergebnis["forgotten"] == ["wartungsfenster"]
+    # Und das Ergebnis sagt auch, **wo** — sonst wäre "im Team gelöscht" bei
+    # zwei gleichnamigen Teams keine Auskunft.
+    assert ergebnis["team_id"] == eins.id
+    assert db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == f"team:{eins.id}"
+    ).count() == 0
+    assert db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == f"team:{zwei.id}"
+    ).count() == 1
+
+
+def test_eine_fremde_team_id_loescht_und_schreibt_nichts(
+    db: Session, regular_user: User
+) -> None:
+    """Die Nummer wählt aus, sie berechtigt nicht.
+
+    Sie kommt aus einem Werkzeugergebnis, also aus derselben Richtung wie jeder
+    andere Modelltext — geraten ist sie schnell. Dass eine erfundene Nummer
+    nichts trifft, entscheidet nicht das Werkzeug, sondern
+    `ai_memory_service.scope_identity`: ohne Mitgliedschaft ein 404, und zwar
+    ohne Auskunft darüber, ob es das Team überhaupt gibt.
+    """
+    fremder = _user(db, "fremder")
+    _allow(db, regular_user, "ai.memory.use")
+    _allow(db, fremder, "teams.create")
+    fremd = team_service.create_team(db, user=fremder, name="Geheim")
+    ai_memory_service.upsert_entry(
+        db, user=fremder, scope="team", server_id=None, team_id=fremd.id,
+        key="wartungsfenster", value="Sonntags um 20 Uhr",
+    )
+
+    with pytest.raises(AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="forget_memory",
+            arguments={
+                "scope": "team", "team_id": fremd.id, "keys": ["wartungsfenster"],
+            },
+        )
+    with pytest.raises(AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db, user=regular_user, tool_name="remember",
+            arguments={
+                "scope": "team", "team_id": fremd.id,
+                "key": "ram.minimum", "value": "Mindestens 6 GB",
+            },
+        )
+
+    # Nichts gelöscht und nichts dazugeschrieben — auch nicht still im
+    # persönlichen Bereich.
+    assert db.query(AiMemoryEntry).count() == 1
+    assert db.query(AiMemoryEntry).filter(
+        AiMemoryEntry.scope_identity == f"team:{fremd.id}"
+    ).count() == 1
+
+
+def test_eine_team_id_ohne_verwaltungsschalter_loescht_nichts(
+    db: Session, regular_user: User
+) -> None:
+    """Die Nummer überspringt die Auswahl, nicht die Berechtigung.
+
+    Über den Namen kam dieser Fall gar nicht erst an: `learning_teams` führt nur
+    Teams mit gesetztem Schalter, ein Mitglied ohne ihn landete im persönlichen
+    Bereich. Die Nummer geht an dieser Auswahl vorbei — und muss deshalb an
+    `_assert_may_write` hängenbleiben, sonst wäre der genauere Weg zugleich der
+    laxere.
+    """
+    kollege = _user(db, "kollege")
+    _allow(db, regular_user, "teams.create")
+    _allow(db, kollege, "ai.memory.use")
+    team = team_service.create_team(db, user=regular_user, name="Betrieb")
+    team_service.invite_member(
+        db, team=team, user=regular_user, new_user_id=kollege.id,
+        can_manage_skills=False, can_manage_memory=False,
+    )
+    team_service.accept_invitation(db, user=kollege, team_id=team.id)
+    ai_memory_service.upsert_entry(
+        db, user=regular_user, scope="team", server_id=None, team_id=team.id,
+        key="valheim.ram", value="Valheim braucht mindestens 6 GB",
+    )
+
+    with pytest.raises(AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db, user=kollege, tool_name="forget_memory",
+            arguments={
+                "scope": "team", "team_id": team.id, "keys": ["valheim.ram"],
+            },
+        )
 
     assert db.query(AiMemoryEntry).filter(
         AiMemoryEntry.scope_identity == f"team:{team.id}"
@@ -420,10 +575,11 @@ def test_wer_wissen_pflegen_darf_schreibt_ins_team_und_nicht_zu_sich(
     _allow(db, regular_user, "ai.memory.use", "teams.create")
     _allow(db, colleague, "ai.memory.use")
     team = team_service.create_team(db, user=regular_user, name="Betrieb")
-    team_service.add_member(
+    team_service.invite_member(
         db, team=team, user=regular_user, new_user_id=colleague.id,
         can_manage_skills=False, can_manage_memory=True,
     )
+    team_service.accept_invitation(db, user=colleague, team_id=team.id)
 
     ergebnis = ai_action_service.execute_read_tool(
         db, user=colleague, tool_name="remember",
@@ -441,6 +597,65 @@ def test_wer_wissen_pflegen_darf_schreibt_ins_team_und_nicht_zu_sich(
     assert db.query(AiMemoryEntry).filter(
         AiMemoryEntry.scope_identity == f"user:{colleague.id}"
     ).count() == 0
+
+
+def test_eine_volle_absage_benennt_das_gemeinte_team_eindeutig(
+    db: Session, regular_user: User
+) -> None:
+    """Der Bereich in der Absage muss derselbe sein, den man danach ansprechen kann.
+
+    Die volle Absage nennt den Bereich beim Namen und macht daraus eine
+    Auflage: „nur Einträge aus genau diesem Bereich“. Teamnamen sind aber nur
+    je Gründer eindeutig — hiess der Bereich schlicht „Alpha“, benannte er
+    zwei Teams auf einmal, und `learning_team` konnte daraus keines wählen.
+    Das blieb nicht folgenlos: Schlüssel wiederholen sich über Teams hinweg,
+    also gibt es im anderen Team etwas zu treffen.
+
+    Geprüft wird deshalb nicht der Wortlaut, sondern der Rückweg — der Name
+    aus der Absage muss genau das Team auswählen, über das sie sprach.
+    """
+    from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
+
+    zweiter = _user(db, "zweiter")
+    kollege = _user(db, "kollege")
+    _allow(db, regular_user, "teams.create")
+    _allow(db, zweiter, "teams.create")
+    _allow(db, kollege, "ai.memory.use")
+    eins = team_service.create_team(db, user=regular_user, name="Alpha")
+    zwei = team_service.create_team(db, user=zweiter, name="Alpha")
+    for team, owner in ((eins, regular_user), (zwei, zweiter)):
+        team_service.invite_member(
+            db, team=team, user=owner, new_user_id=kollege.id,
+            can_manage_skills=True, can_manage_memory=True,
+        )
+        team_service.accept_invitation(db, user=kollege, team_id=team.id)
+
+    # Der Vorrat eines Teams hängt am Gründer — der hier keinen freigibt.
+    rolle = db.query(Role).filter(Role.name == f"mgmt-{regular_user.username}").one()
+    set_role_limit(db, rolle.id, {feld: 0 for feld in LIMIT_FIELDS})
+    db.commit()
+
+    with pytest.raises(ai_memory_service.MemoryScopeVoll) as exc:
+        ai_memory_service.upsert_entry(
+            db, user=kollege, scope="team", server_id=None, team_id=eins.id,
+            key="wartungsfenster", value="Sonntags um 20 Uhr",
+        )
+
+    genannt = re.search("„(.+)“", exc.value.bereich)
+    assert genannt is not None, exc.value.bereich
+    ziel, frage = team_service.learning_team(
+        db, kollege, schalter="memory", wunsch=genannt.group(1),
+    )
+    assert frage is None, f"„{genannt.group(1)}“ wählt kein Team aus"
+    assert ziel is not None and ziel.id == eins.id
+    # Und nicht bloss irgendeines: das andere trägt denselben Namen.
+    assert ziel.id != zwei.id
+    # Die Probe aufs Exempel — der blanke Name, der hier bis zuletzt stand,
+    # benennt beide Teams und wählt deshalb keines aus.
+    _, ohne_gruender = team_service.learning_team(
+        db, kollege, schalter="memory", wunsch=eins.name,
+    )
+    assert ohne_gruender is not None
 
 
 def test_servernotizen_stehen_im_persoenlichen_bereich(
@@ -855,3 +1070,112 @@ def test_eine_bereichsseite_bleibt_hinter_der_mitgliedschaft(
     with pytest.raises(HTTPException) as fehler:
         ai_memory_service.scope_entries(db, fremder, "team", None, team.id)
     assert fehler.value.status_code == 404
+
+
+# ── Wenn das Merken selbst schiefgeht ─────────────────────────────────
+
+
+def test_ein_stummer_sidecar_kostet_die_notiz_und_nicht_den_lauf(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein Gedächtnis ist eine Beigabe: es darf fehlen, nicht im Weg stehen.
+
+    `upsert_entry` verschlüsselt über den Sidecar. Antwortet der nicht, kommt
+    von dort eine gewöhnliche Ausnahme — keine `HTTPException`, und
+    `_execute_remember` fing nur die. Sie flog durch die Werkzeugschicht bis in
+    den Segmentfang des Streams: der ganze Lauf endete mit `AI_STREAM_FAILED`
+    und der Benutzer verlor die komplette Antwort, wegen einer Notiz, die das
+    Modell nebenbei und lautlos machen sollte.
+
+    Die andere Hälfte steht weiter oben: beim **Lesen** über die
+    Verwaltungsansicht muss derselbe Fehler nach wie vor durchkommen.
+    """
+    from services.dis_client import DisClient, DisSidecarError
+
+    _allow(db, regular_user, "ai.memory.use")
+
+    def tot(payload, *, aad):
+        raise DisSidecarError("Sidecar nicht erreichbar")
+
+    monkeypatch.setattr(DisClient, "encrypt", staticmethod(tot))
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="remember",
+        arguments={
+            "scope": "user", "key": "ram.vorgabe",
+            "value": "Fuer neue Server immer 16 GB Arbeitsspeicher.",
+        },
+    )
+
+    assert ergebnis["remembered"] is False
+    assert ergebnis["reason"] == "memory_unavailable"
+    # Das Modell soll weiterarbeiten und nicht denselben Aufruf wiederholen,
+    # bis die Runden alle sind.
+    assert "nicht noch einmal" in ergebnis["message"]
+    # Und die halb angefangene Zeile bleibt nicht in der Sitzung liegen.
+    assert db.query(AiMemoryEntry).count() == 0
+
+
+def test_ein_vorhandener_schluessel_ist_kein_doppel_sondern_das_update(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Absage empfiehlt einen Aufruf — den darf sie nicht selbst abweisen.
+
+    `aehnlicher_eintrag` schließt nur den identischen Schlüssel aus. Stehen im
+    Bereich schon zwei ähnliche Altlasten nebeneinander — `ram.vorgabe` neben
+    `standard_ram`, genau der Bestand, gegen den die Prüfung gebaut ist —, fand
+    der Aufruf mit dem einen Schlüssel den anderen und umgekehrt: zwei Absagen,
+    die aufeinander verweisen, bis die Runden aufgebraucht sind. Ein
+    ausdrücklich gewünschtes "ich will jetzt 16 GB" scheiterte dabei still.
+
+    Der Bedeutungsvergleich wird hier ersetzt statt gemessen: das
+    Einbettungsmodell fehlt auf vielen Rechnern (dann liefert
+    `aehnlicher_eintrag` bewusst `None`), die Weiche davor gilt trotzdem.
+    """
+    _allow(db, regular_user, "ai.memory.use")
+    for key, value in (
+        ("ram.vorgabe", "Fuer neue Server immer 8 GB."),
+        ("standard_ram", "Neue Server bekommen 8 GB."),
+    ):
+        # `origin="ai"`, weil hier die Duplikatweiche gemessen wird und nicht
+        # der Schutz vor dem Überschreiben einer Ansage des Benutzers.
+        ai_memory_service.upsert_entry(
+            db, user=regular_user, scope="user", server_id=None,
+            key=key, value=value, origin="ai",
+        )
+    altlast = db.query(AiMemoryEntry).filter(AiMemoryEntry.key == "standard_ram").one()
+
+    # Jeder Aufruf findet ein Doppel — so verhält sich der Bestand oben.
+    monkeypatch.setattr(
+        ai_memory_service, "aehnlicher_eintrag", lambda db, **kwargs: (altlast, 0.91),
+    )
+
+    ergebnis = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="remember",
+        arguments={
+            "scope": "user", "key": "ram.vorgabe",
+            "value": "Fuer neue Server immer 16 GB.",
+        },
+    )
+
+    assert ergebnis["remembered"] is True
+    werte = {
+        row.key: value
+        for row, value in ai_memory_service.list_entries(db, regular_user, "user", None)
+    }
+    assert "16 GB" in werte["ram.vorgabe"]
+    # Kein dritter Schlüssel: überschrieben, nicht verdoppelt.
+    assert set(werte) == {"ram.vorgabe", "standard_ram"}
+
+    # Die Schranke selbst bleibt stehen — ein wirklich neuer Schlüssel wird
+    # weiterhin abgewiesen, mit dem Namen des vorhandenen daneben.
+    absage = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="remember",
+        arguments={
+            "scope": "user", "key": "speicher.default",
+            "value": "Neue Server bekommen 16 GB.",
+        },
+    )
+    assert absage["remembered"] is False
+    assert absage["reason"] == "duplicate"
+    assert absage["existing_key"] == "standard_ram"

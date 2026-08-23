@@ -16,6 +16,26 @@ export interface TeamMember {
   joined_at: string
 }
 
+/**
+ * Eine ausgesprochene, noch nicht angenommene Einladung.
+ *
+ * Dieselbe Zeile aus zwei Blickwinkeln: der Gründer sieht in seiner Teamansicht,
+ * wen er angeschrieben hat, der Eingeladene in seiner eigenen Liste, wer ihn
+ * haben will und was ihm dabei angeboten wird. Ein Eingeladener ist **kein**
+ * Mitglied — Wissen und Serverrechte des Teams erreichen ihn erst mit der
+ * Annahme.
+ */
+export interface TeamInvitation {
+  team_id: number
+  team_name: string
+  user_id: number
+  username: string
+  invited_by_username: string | null
+  can_manage_skills: boolean
+  can_manage_memory: boolean
+  invited_at: string
+}
+
 export interface TeamServer {
   server_id: number
   server_name: string
@@ -38,6 +58,8 @@ export interface Team {
 export interface TeamDetail extends Team {
   members: TeamMember[]
   servers: TeamServer[]
+  /** Offene Einladungen dieses Teams — das Backend füllt sie nur für den Gründer. */
+  invitations: TeamInvitation[]
 }
 
 export const teamsApi = {
@@ -47,7 +69,13 @@ export const teamsApi = {
     method: 'POST', body: JSON.stringify({ name }),
   }),
   remove: (teamId: number) => api(`/teams/${teamId}`, { method: 'DELETE' }),
-  addMember: (teamId: number, payload: {
+  /**
+   * Lädt einen Benutzer ein. Mitglied wird er erst, wenn er annimmt — die
+   * Antwort führt ihn deshalb unter `invitations` und nicht unter `members`.
+   * Der Name sagt das absichtlich: bis eben hieß dieser Aufruf `addMember`,
+   * und die Oberfläche meldete danach eine Aufnahme, die nie stattfand.
+   */
+  inviteMember: (teamId: number, payload: {
     user_id: number; can_manage_skills: boolean; can_manage_memory: boolean
   }) => api<TeamDetail>(`/teams/${teamId}/members`, {
     method: 'POST', body: JSON.stringify(payload),
@@ -72,4 +100,13 @@ export const teamsApi = {
    * offenbaren.
    */
   assignableServers: (teamId: number) => api<TeamServer[]>(`/teams/${teamId}/assignable-servers`),
+  /** Die eigenen offenen Einladungen — über sie entscheidet nur der Eingeladene. */
+  invitations: () => api<TeamInvitation[]>('/teams/invitations'),
+  /** Beitreten. Erst hier entsteht die Mitgliedschaft. */
+  acceptInvitation: (teamId: number) => api<TeamDetail>(
+    `/teams/invitations/${teamId}/accept`, { method: 'POST' },
+  ),
+  declineInvitation: (teamId: number) => api(
+    `/teams/invitations/${teamId}`, { method: 'DELETE' },
+  ),
 }

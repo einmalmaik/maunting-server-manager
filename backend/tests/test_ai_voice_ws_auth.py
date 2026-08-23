@@ -14,6 +14,11 @@ Die Invarianten, an denen dieser Weg haengt:
 3. Subprotokoll vor Cookie — Herkunft und Identitaet gehoeren demselben Token.
 4. Die Herkunft des Sprachlaufs kommt aus dem `geraet`-Anspruch dieses Tokens;
    ein Browser bleibt "panel", die App wird "desktop".
+5. Und **welcher** Rechner spricht, aus dem `familie`-Anspruch desselben
+   Tokens. Der Sprachmodus ist der Hauptweg der App — „schau auf meinen
+   Bildschirm" kommt ueberwiegend gesprochen an. Ohne diese Kennung trug jeder
+   Sprachlauf `familie=None`, und sein Auftrag war wieder fuer jedes gekoppelte
+   Geraet abholbar (`desktop_job_service.naechster`).
 """
 
 from starlette.datastructures import Headers
@@ -25,6 +30,7 @@ from sqlalchemy.orm import Session
 from dependencies import (
     WS_BEARER_PROTOKOLL,
     get_current_user_for_ws,
+    ws_session_familie,
     ws_session_herkunft,
     ws_subprotokoll,
 )
@@ -48,10 +54,14 @@ class _Handshake:
         self.cookies = {"__Secure-access_token": cookie} if cookie else {}
 
 
-def _token(user: User, jti: str, geraet: str | None = None) -> str:
+def _token(
+    user: User, jti: str, geraet: str | None = None, familie: str | None = None
+) -> str:
     ansprueche: dict = {"sub": user.username, "user_id": user.id, "jti": jti}
     if geraet:
         ansprueche["geraet"] = geraet
+    if familie:
+        ansprueche["familie"] = familie
     return AuthService.create_access_token(ansprueche)
 
 
@@ -127,16 +137,49 @@ class TestHerkunftAmHandshake:
         assert ws_session_herkunft(_Handshake(cookie="kaputt")) == "panel"
 
 
-class TestBrueckeTraegtDieHerkunft:
+class TestGeraetAmHandshake:
+    """Nicht nur "eine App", sondern **welche**.
+
+    Die Herkunft schneidet den Werkzeugkatalog, die Familie adressiert den
+    Auftrag. Beide muessen aus demselben Token kommen wie die Identitaet —
+    sonst haengt ein Auftrag am Geraet einer anderen Sitzung.
+    """
+
+    def test_die_app_traegt_ihre_familie_im_subprotokoll(self, regular_user: User):
+        marke = _token(regular_user, "ws-h", geraet="desktop", familie="fam-laptop")
+        ws = _Handshake(protokolle=f"{WS_BEARER_PROTOKOLL}, {marke}")
+        assert ws_session_familie(ws) == "fam-laptop"
+
+    def test_das_subprotokoll_schlaegt_auch_hier_das_cookie(
+        self, regular_user: User, owner_user: User
+    ):
+        """Identitaet und Kennung gehoeren demselben Token — sonst bekaeme ein
+        Auftrag die Familie einer Browsersitzung, die nebenher offen ist."""
+        marke = _token(regular_user, "ws-i", geraet="desktop", familie="fam-laptop")
+        ws = _Handshake(
+            protokolle=f"{WS_BEARER_PROTOKOLL}, {marke}",
+            cookie=_token(owner_user, "ws-j", familie="fam-browser"),
+        )
+        assert ws_session_familie(ws) == "fam-laptop"
+
+    def test_ohne_anspruch_ist_die_familie_unbekannt(self, regular_user: User):
+        """``None`` heisst "unbekannt", nicht "irgendeins" — was daraus folgt,
+        entscheidet `desktop_job_service.naechster`."""
+        assert ws_session_familie(_Handshake()) is None
+        assert ws_session_familie(_Handshake(cookie="kaputt")) is None
+        assert ws_session_familie(_Handshake(cookie=_token(regular_user, "ws-k"))) is None
+
+
+class TestBrueckeTraegtDieSitzung:
     @pytest.mark.asyncio
-    async def test_der_sprachlauf_bekommt_die_herkunft_der_sitzung(
+    async def test_der_sprachlauf_bekommt_herkunft_und_geraet_der_sitzung(
         self, monkeypatch, regular_user: User
     ):
-        """Von `__init__` bis `lauf_beginnen_nebenher` — die eine Durchreiche.
+        """Von `__init__` bis `lauf_beginnen_nebenher` — die zwei Durchreichen.
 
         Der Lauf wird nicht gestartet: `lauf_beginnen_nebenher` wird abgefangen
-        und antwortet mit einer Ablehnung. Geprueft wird nur, was ankommt —
-        genau das Feld, das bis zum 21.08. ein Festwert war.
+        und antwortet mit einer Ablehnung. Geprueft wird nur, was ankommt — die
+        beiden Felder, die bis zum 21.08. bzw. 23.08. Festwerte waren.
         """
         import httpx
 
@@ -170,7 +213,13 @@ class TestBrueckeTraegtDieHerkunft:
             stimm_schluessel="k",
             http_client=httpx.AsyncClient(),
             herkunft="desktop",
+            familie="fam-laptop",
         )
         await bruecke._antworten("mach das Licht an")
 
         assert angekommen["herkunft"] == "desktop"
+        # Und mit ihr das Geraet. Bis zum 23.08. stand hier nichts: der Lauf
+        # bekam `familie=None`, und sein Auftrag an den Rechner war wieder fuer
+        # jedes gekoppelte Geraet abholbar — auf dem Weg, auf dem "schau auf
+        # meinen Bildschirm" ueberwiegend ankommt.
+        assert angekommen["familie"] == "fam-laptop"

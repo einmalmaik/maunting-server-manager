@@ -289,6 +289,56 @@ def test_workshop_search_reports_a_missing_api_key_honestly(
     assert "results" not in result
 
 
+def test_die_workshop_anfrage_verlaesst_das_panel_geschwaerzt(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der zweite Ausgang neben `web_search` — und er stand offen.
+
+    Der Suchbegriff ist reine Modellausgabe und geht als URL-Parameter an
+    Steam, wo er protokolliert wird. Das Modell hat vorher Konfigurationsdateien
+    und Logs gelesen; eine Zuweisung daraus kann es woertlich uebernehmen.
+    `web_search` schwaerzt deshalb vor dem Absenden — `search_workshop_mods`
+    reichte die Anfrage unveraendert durch, und der Choke Point greift erst auf
+    dem Rueckweg.
+    """
+    server, _conversation = _setup(
+        db, regular_user, server_keys=("server.view", "server.mods.read")
+    )
+    gesehen: list[str] = []
+
+    def _suche(*, appid, query, page, required_tags):
+        gesehen.append(query)
+        return []
+
+    monkeypatch.setattr("services.mod_update_service.search_workshop", _suche)
+
+    ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="search_workshop_mods",
+        arguments={
+            "server_id": server.id,
+            "query": "ServerAdminPassword=Maik1234 base building",
+        },
+    )
+
+    assert gesehen == ["ServerAdminPassword=[REDACTED] base building"]
+    # Die Schwaerzung ist wertbezogen: der Einstellungsname als Wort ueberlebt
+    # sie, sonst waere die Suche fuer ihren haeufigsten Zweck unbrauchbar.
+    assert "ServerAdminPassword" in gesehen[0]
+
+    # Und die Laenge, die das Schema verspricht, gilt auch dann, wenn das
+    # Modell sich nicht daran haelt: ein Schema ist eine Bitte, keine Schranke.
+    gesehen.clear()
+    ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="search_workshop_mods",
+        arguments={"server_id": server.id, "query": "a" * 300},
+    )
+    assert len(gesehen[0]) == ai_action_service.MAX_SEARCH_QUERY_CHARS
+
+
 def test_mod_install_proposal_with_name_stores_mod_name(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:

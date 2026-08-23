@@ -23,6 +23,7 @@ from services.openai_responses_adapter import (
     _fehler_im_ereignis,
     _usage_uebernehmen,
     _werkzeuge_uebersetzen,
+    _werkzeugwahl_uebersetzen,
     nachrichten_uebersetzen,
     spricht_responses,
     stream_responses,
@@ -74,6 +75,36 @@ def test_an_already_flat_catalog_is_left_alone() -> None:
 def test_no_tools_stays_none() -> None:
     assert _werkzeuge_uebersetzen(None) is None
     assert _werkzeuge_uebersetzen([]) is None
+
+
+# ── Werkzeugwahl ──────────────────────────────────────────────────────
+
+
+def test_a_forced_tool_loses_the_same_wrapper_as_the_catalog() -> None:
+    """`ai_mail_text` zwingt in OpenAIs verschachtelter Form auf ein Werkzeug.
+
+    Unuebersetzt ist das ein 400, und weil `ai_mail_text` jeden Fehler
+    abfaengt und auf seinen festen Text zurueckfaellt, waere der KI-Mailtext an
+    einem OpenAI-Zugang still tot.
+    """
+    assert _werkzeugwahl_uebersetzen(
+        {"type": "function", "function": {"name": "msm_mailtext"}}
+    ) == {"type": "function", "name": "msm_mailtext"}
+
+
+def test_plain_words_go_through_untouched() -> None:
+    """``auto`` und ``none`` kennt die Responses-API wortgleich."""
+    assert _werkzeugwahl_uebersetzen(None) == "auto"
+    assert _werkzeugwahl_uebersetzen("auto") == "auto"
+    # Die Schlussrunde eines Laufs will noch einen Satz, aber keinen Aufruf.
+    assert _werkzeugwahl_uebersetzen("none") == "none"
+
+
+def test_an_already_flat_choice_survives_and_nonsense_becomes_auto() -> None:
+    assert _werkzeugwahl_uebersetzen(
+        {"type": "function", "name": "msm_mailtext"}
+    ) == {"type": "function", "name": "msm_mailtext"}
+    assert _werkzeugwahl_uebersetzen({"quatsch": 1}) == "auto"
 
 
 # ── Der Verlauf ───────────────────────────────────────────────────────
@@ -146,6 +177,39 @@ def test_block_content_is_flattened_to_text() -> None:
     }]) == [{"role": "user", "content": "Teil A Teil B"}]
 
 
+def test_an_image_reaches_the_model_instead_of_being_dropped() -> None:
+    """**Auge ohne Sehnerv.** Der Text sagt „liegt bei" — dann muss es beiliegen.
+
+    So baut `ai_stream_service._desktopmeldung` ein Bildschirmfoto und so
+    `ai_attachment_service` einen Bildanhang. Wurde der Bildblock hier
+    stillschweigend verworfen, bekam das Modell nur die Behauptung und
+    antwortete mit einer erfundenen Beschreibung.
+    """
+    eingabe = nachrichten_uebersetzen([{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Ergebnis: bild liegt bei"},
+            {"type": "image_url",
+             "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQ"}},
+        ],
+    }])
+    assert eingabe == [{
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "Ergebnis: bild liegt bei"},
+            {"type": "input_image", "image_url": "data:image/jpeg;base64,/9j/4AAQ",
+             "detail": "auto"},
+        ],
+    }]
+
+
+def test_a_message_without_images_keeps_its_plain_string() -> None:
+    """Listenform ohne Not waere eine Aenderung am Praefix — und kostete Cache."""
+    assert nachrichten_uebersetzen([
+        {"role": "user", "content": "Hallo"},
+    ]) == [{"role": "user", "content": "Hallo"}]
+
+
 # ── Abrechnung ────────────────────────────────────────────────────────
 
 
@@ -200,6 +264,35 @@ def test_a_failed_response_is_recognised() -> None:
 def test_an_ordinary_event_is_not_an_error() -> None:
     assert _fehler_im_ereignis({"type": "response.output_text.delta",
                                 "delta": "Hallo"}) is None
+
+
+def test_the_error_keeps_its_class_and_not_only_its_words() -> None:
+    """Ein leeres Kontingent ist keine abgelehnte Anfrage.
+
+    Unter derselben Marke las der Betreiber „Meist stimmt der Modellname
+    nicht" und suchte am falschen Ende — genau die Irrefuehrung, die bei 402
+    in `openai_compatible_adapter._error_code` beschrieben ist.
+    """
+    for code, marke in (
+        ("insufficient_quota", "AI_PROVIDER_PAYMENT_REQUIRED"),
+        ("rate_limit_exceeded", "AI_PROVIDER_RATE_LIMITED"),
+        ("invalid_api_key", "AI_PROVIDER_AUTH_FAILED"),
+        ("server_error", "AI_PROVIDER_UNAVAILABLE"),
+        ("voellig_neue_art", "AI_PROVIDER_REQUEST_REJECTED"),
+    ):
+        assert _fehler_im_ereignis({
+            "type": "response.failed",
+            "response": {"error": {"code": code, "message": "x"}},
+        }) == (marke, "x")
+
+
+def test_an_unusable_code_does_not_become_the_error_itself() -> None:
+    """``code`` muss kein Wort sein — dann bleibt es bei der allgemeinen Marke."""
+    marke, _text = _fehler_im_ereignis({
+        "type": "response.failed",
+        "response": {"error": {"code": {"unerwartet": 1}, "message": "kaputt"}},
+    })
+    assert marke == "AI_PROVIDER_REQUEST_REJECTED"
 
 
 # ── Der Strom als Ganzes ──────────────────────────────────────────────
@@ -313,6 +406,31 @@ async def test_the_request_carries_effort_and_asks_for_a_summary() -> None:
     assert client.gesendet["store"] is False
     assert "messages" not in client.gesendet
     assert client.gesendet["input"] == [{"role": "user", "content": "Hallo"}]
+
+
+@pytest.mark.asyncio
+async def test_the_mail_texts_forced_choice_leaves_flat() -> None:
+    """Genau die Eingabe, die `ai_mail_text` schickt — bis in den Koerper.
+
+    Ein ``function``-Unterobjekt im ``tool_choice`` ist hier ein 400, und der
+    Fehlschlag waere unsichtbar: `ai_mail_text` faengt ihn ab und schickt
+    seinen festen Text.
+    """
+    client = _FakeClient(_sse(
+        {"type": "response.output_text.delta", "delta": "ok"},
+        {"type": "response.completed", "response": {"usage": {}}},
+    ))
+    async for _ in stream_responses(
+        client, provider=_provider(), api_key="sk-test",
+        messages=[{"role": "user", "content": "Hallo"}], usage=StreamUsage(),
+        tools=[{"type": "function",
+                "function": {"name": "msm_mailtext", "parameters": {}}}],
+        tool_choice={"type": "function", "function": {"name": "msm_mailtext"}},
+    ):
+        pass
+    assert client.gesendet["tool_choice"] == {
+        "type": "function", "name": "msm_mailtext",
+    }
 
 
 @pytest.mark.asyncio

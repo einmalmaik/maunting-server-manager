@@ -40,6 +40,24 @@ class TeamMemberResponse(BaseModel):
     joined_at: datetime
 
 
+class TeamInvitationResponse(BaseModel):
+    """Eine ausgesprochene, noch nicht angenommene Einladung.
+
+    Dieselbe Zeile aus beiden Blickwinkeln: der Gruender sieht in der
+    Teamansicht, wen er angeschrieben hat, der Eingeladene in seiner eigenen
+    Liste, wer ihn haben will und was ihm dabei angeboten wird.
+    """
+
+    team_id: int
+    team_name: str
+    user_id: int
+    username: str
+    invited_by_username: str | None
+    can_manage_skills: bool
+    can_manage_memory: bool
+    invited_at: datetime
+
+
 class TeamServerResponse(BaseModel):
     server_id: int
     server_name: str
@@ -63,3 +81,6 @@ class TeamResponse(BaseModel):
 class TeamDetailResponse(TeamResponse):
     members: list[TeamMemberResponse]
     servers: list[TeamServerResponse]
+    # Wer eingeladen ist, ist noch niemand im Team — steht aber hier, damit der
+    # Gruender nicht den Eindruck bekommt, seine Einladung sei verschwunden.
+    invitations: list[TeamInvitationResponse] = []

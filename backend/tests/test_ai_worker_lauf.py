@@ -10,6 +10,8 @@ festgehalten:
   waere ueber jeden Bestaetigungspfad faelschlich weckbar.
 * Beim Wecken eines Workers werden die Rechte **neu** geprueft; Wegfall heisst
   ``cancelled`` mit benanntem Grund plus Meldung, nie stiller Schwund.
+* Eine Bestaetigung, die vor dem Parken ankommt, verpufft — der Takt holt den
+  Lauf nach, sobald er nichts Offenes mehr traegt.
 * Der Startabgleich saet je unterbrochenem Worker hoechstens **einen**
   automatischen Wiederanlauf.
 """
@@ -24,7 +26,16 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.orm import Session
 
-from models import AiConversation, AiMeldung, AiMessage, AiRun, Role, RolePermission, User
+from models import (
+    AiActionProposal,
+    AiConversation,
+    AiMeldung,
+    AiMessage,
+    AiRun,
+    Role,
+    RolePermission,
+    User,
+)
 from services import ai_provider_service, ai_run_service
 from services.role_service import set_user_roles
 
@@ -188,6 +199,85 @@ class TestTakt:
         assert run.status == "waiting_wake"
 
 
+def _vorschlag(db: Session, run: AiRun, *, status: str) -> AiActionProposal:
+    zeile = AiActionProposal(
+        id=str(uuid4()),
+        conversation_id=run.conversation_id,
+        user_id=run.user_id,
+        tool_name="propose_server_lifecycle",
+        payload_encrypted="x",
+        preview_json="{}",
+        status=status,
+        run_id=run.id,
+        correlation_id=str(uuid4()),
+    )
+    db.add(zeile)
+    db.commit()
+    return zeile
+
+
+class TestVerpuffteBestaetigung:
+    """Wer bestaetigt, bevor der Lauf parkt, dessen Weckruf verpufft.
+
+    Zwischen der Karte im Chat und dem Parken liegen noch eine Schlussrunde und
+    `_finalize_stream`. Ein Klick in dieser Spanne ruft `lauf_fortsetzen` auf
+    einen Lauf, der noch auf 'running' steht — `darf_fortsetzen` weist ab, und
+    danach weckte ihn niemand mehr: er parkte fuer immer, mit einer
+    ausgefuehrten Aktion, ueber die er nie berichtet hat. Der Takt holt das
+    nach, wie `desktop_job_service._verpuffte_wecken` bei den Auftraegen.
+    """
+
+    def test_ein_lauf_ohne_offene_vorschlaege_wird_nachgeholt(
+        self, db: Session
+    ) -> None:
+        """Und nur er.
+
+        Der zweite Lauf haelt eine offene Karte, der dritte einen Vorschlag
+        ohne Laufbezug — beide duerfen die Auswahl weder betreten noch (als
+        ``NOT IN`` mit einer nullbaren Spalte) leerfegen.
+        """
+        user = _benutzer(db, "verpufft")
+        nachzuholen = _worker_lauf(
+            db, user, status="waiting_confirmation",
+            stop_reason="awaiting_confirmation",
+        )
+        _vorschlag(db, nachzuholen, status="succeeded")
+        wartend = _worker_lauf(
+            db, user, status="waiting_confirmation",
+            stop_reason="awaiting_confirmation",
+        )
+        _vorschlag(db, wartend, status="proposed")
+        ohne_lauf = _vorschlag(db, wartend, status="proposed")
+        ohne_lauf.run_id = None
+        db.commit()
+
+        with (
+            patch.object(ai_run_service, "http_client", lambda: object()),
+            patch.object(ai_run_service, "_aufgabe_planen", lambda run_id: True),
+        ):
+            geweckt = ai_run_service.verpuffte_bestaetigungen_wecken(db)
+
+        assert geweckt == 1
+        db.refresh(nachzuholen)
+        db.refresh(wartend)
+        assert nachzuholen.status == "running"
+        assert wartend.status == "waiting_confirmation"
+
+    def test_ohne_laufzeit_wird_niemand_angefasst(self, db: Session) -> None:
+        user = _benutzer(db, "verpufft-ohne-laufzeit")
+        run = _worker_lauf(
+            db, user, status="waiting_confirmation",
+            stop_reason="awaiting_confirmation",
+        )
+        _vorschlag(db, run, status="succeeded")
+
+        with patch.object(ai_run_service, "http_client", lambda: None):
+            assert ai_run_service.verpuffte_bestaetigungen_wecken(db) == 0
+
+        db.refresh(run)
+        assert run.status == "waiting_confirmation"
+
+
 class TestAusfuehrungsWecken:
     def test_finish_lifecycle_task_weckt_den_wartenden_lauf(
         self, db: Session, tmp_path
@@ -332,6 +422,72 @@ class TestWiederanlauf:
             .one()
         )
         assert ai_run_service.zustand_lesen(neuer).get("rolle") == "voll"
+
+    def test_das_geraet_des_gestorbenen_laufs_wandert_mit(
+        self, db: Session
+    ) -> None:
+        """Die Kennung des Rechners geht denselben Weg wie die Herkunft.
+
+        Die Herkunft sagt "aus der App", die Familie sagt "aus **dieser**
+        App" — erst zusammen adressieren sie einen Rechner
+        (`desktop_job_service.naechster`). Der Neustart des Panels ist der
+        einzige Grund, warum dieser Auftrag noch einmal anfaengt; der Mensch
+        sitzt unveraendert vor demselben Geraet.
+
+        Faellt die Kennung beim Wiederanlauf weg, ist sie dauerhaft weg: eine
+        Familie bekommt ein Lauf nur beim Anlegen, und `worker_antwort`
+        reicht nur weiter, was schon dasteht. Die Desktop-Auftraege des
+        Nachfolgers waeren also wieder von jedem gekoppelten Geraet abholbar
+        — auch dann, wenn `worker_start` seine Kennung laengst erbt.
+
+        Der gestorbene Lauf entsteht deshalb ueber `worker_start` und nicht
+        von Hand: genau so entsteht in der Anwendung ein Auftrag, der eine
+        Geraetekennung traegt.
+        """
+        from services import ai_worker_service
+
+        user = _benutzer(db, "geraeteerbe")
+        ai_provider_service.create_provider(
+            db,
+            name="Zugang-geraeteerbe",
+            provider_kind="openrouter",
+            default_model="modell",
+            enabled=True,
+            requires_api_key=True,
+            operator_api_key="sk-or-v1-test",
+        )
+        db.commit()
+        with patch.object(ai_run_service, "anlauf", lambda db_, run: True):
+            ergebnis = ai_worker_service.worker_start(
+                db, user=user,
+                arguments={"auftrag": "Raeum den Rechner auf", "titel": "Putzen"},
+                herkunft="desktop", familie="fam-laptop",
+            )
+        assert ergebnis["started"] is True
+        alter = (
+            db.query(AiRun)
+            .filter(AiRun.conversation_id == ergebnis["worker_id"])
+            .one()
+        )
+        # Der Endzustand, den `unterbrochene_laeufe_abgleichen` nach einem
+        # Neustart hinterlaesst — der Ausgangspunkt des Wiederanlaufs.
+        alter.status = "failed"
+        alter.stop_reason = "process_restart"
+        db.commit()
+
+        assert self._saehen(db) == 1
+
+        neuer = (
+            db.query(AiRun)
+            .filter(
+                AiRun.conversation_id == ergebnis["worker_id"],
+                AiRun.id != alter.id,
+            )
+            .one()
+        )
+        zustand = ai_run_service.zustand_lesen(neuer)
+        assert zustand.get("herkunft") == "desktop"
+        assert zustand.get("familie") == "fam-laptop"
 
     def test_der_zweite_neustart_saet_nicht_mehr(self, db: Session) -> None:
         user = _benutzer(db, "zweiterneustart")

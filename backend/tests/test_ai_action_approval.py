@@ -6,7 +6,7 @@ Der Server blieb kaputt, und die Mail sagte "konnte nicht behoben werden" —
 obwohl der Betreiber ein Telefon in der Tasche hat.
 
 Was hier geprueft wird, ist die andere Haelfte davon: dass aus diesem Link kein
-zweiter, schwaecherer Weg ins Panel wird. Fuenf Zusagen, jede mit einem
+zweiter, schwaecherer Weg ins Panel wird. Sechs Zusagen, jede mit einem
 eigenen Test:
 
 * **Einmalverbrauch**, atomar — zwei Klicks sind nicht zwei Ausfuehrungen.
@@ -18,6 +18,9 @@ eigenen Test:
 * **Der Rueckfall bleibt.** Ohne Adresse wird zurueckgenommen und beendet, genau
   wie vorher — ein Lauf, der auf eine Antwort wartet, die nie kommen kann, waere
   schlimmer als einer, der ehrlich aufhoert.
+* **Die Kette bricht nicht ab.** Traegt ein Lauf mehrere Vorschlaege, folgt auf
+  jede Entscheidung die naechste Frage — eine zur Zeit, geweckt wird nach der
+  letzten.
 """
 
 from __future__ import annotations
@@ -597,6 +600,108 @@ class TestAnfordern:
         # Kein `fakten`-Feld: diese Mail ist eine Frage mit einem Knopf, keine
         # Erzaehlung. Ein umformulierter Text koennte den Anlass verschieben.
         assert gesehen.get("fakten") is None
+
+
+class TestKette:
+    """Zwei offene Vorschläge, eine Frage nach der anderen.
+
+    Eine Mail nennt genau einen Vorschlag. Ein Lauf legt aber durchaus zwei an
+    — das Stundenkontingent ist benutzerweit, und `autonomy_allows` fällt bei
+    Erschöpfung mitten im Vorgang auf Bestätigungspflicht zurück. Ohne die
+    Kette entschied der Betreiber den gemailten, `darf_fortsetzen` sah den
+    zweiten noch auf 'proposed' und weckte nicht, und eine zweite Mail forderte
+    niemand an: der Lauf stand bis zu seiner Frist, ohne dass jemand davon
+    erfuhr.
+    """
+
+    def test_nach_der_entscheidung_geht_die_naechste_frage_hinaus(
+        self, db: Session, lage
+    ) -> None:
+        erster = _vorschlag(db, lage)
+        zweiter = _vorschlag(db, lage)
+        _, token = _freigabe(db, lage, erster)
+
+        with patch("services.ai_mail.empfaenger", return_value="a@b.de"), patch(
+            "services.ai_mail.einreihen", return_value="outbox-1"
+        ), patch("services.ai_run_service.lauf_fortsetzen") as wecken:
+            ai_approval_service.entscheiden(db, token=token, entscheidung="rejected")
+
+        db.refresh(erster)
+        assert erster.status == "expired"
+        # Genau eine offene Frage, und sie gilt dem zweiten Vorschlag.
+        offen = (
+            db.query(AiActionApproval)
+            .filter(AiActionApproval.consumed_at.is_(None))
+            .all()
+        )
+        assert [zeile.proposal_id for zeile in offen] == [zweiter.id]
+        # Geweckt wird noch nicht — der Lauf trägt weiterhin etwas Offenes.
+        assert not wecken.called
+
+    def test_der_lauf_wacht_erst_nach_der_letzten_frage_auf(
+        self, db: Session, lage
+    ) -> None:
+        """Und der zweite Link aus der Kette funktioniert wirklich.
+
+        Deshalb wird er aus dem Mailtext gefischt statt von Hand gebaut: eine
+        Kette, deren zweite Mail keinen brauchbaren Link trägt, wäre genau
+        derselbe hängende Lauf mit einem Postfacheintrag mehr.
+        """
+        _, _, _, run = lage
+        erster = _vorschlag(db, lage)
+        zweiter = _vorschlag(db, lage)
+        _, token = _freigabe(db, lage, erster)
+        gesehen: dict = {}
+
+        def _merken(db_, **kwargs):
+            gesehen.update(kwargs)
+            return "outbox-1"
+
+        with patch("services.ai_mail.empfaenger", return_value="a@b.de"), patch(
+            "services.ai_mail.einreihen", side_effect=_merken
+        ), patch("services.ai_run_service.lauf_fortsetzen") as wecken:
+            ai_approval_service.entscheiden(db, token=token, entscheidung="rejected")
+            zweites_token = str(gesehen["text"]).split("/ai/freigabe/", 1)[1].split()[0]
+            ergebnis = ai_approval_service.entscheiden(
+                db, token=zweites_token, entscheidung="rejected"
+            )
+
+        assert ergebnis["decision"] == "rejected"
+        db.refresh(zweiter)
+        assert zweiter.status == "expired"
+        # Jetzt ist nichts mehr offen — und erst jetzt läuft der Lauf weiter.
+        assert wecken.call_args.kwargs["run_id"] == run.id
+
+    def test_ein_stillgelegtes_konto_bekommt_keine_zweite_frage(
+        self, db: Session, lage
+    ) -> None:
+        """Die Kette fragt niemanden, der nicht mehr antworten darf.
+
+        `entscheiden` weist ein stillgelegtes Konto ab, bevor es den Vorschlag
+        überhaupt liest — die Kette läuft danach trotzdem an, und sie muss
+        dieselbe Antwort geben.
+        """
+        user, _, _, _ = lage
+        _vorschlag(db, lage)
+        zweiter = _vorschlag(db, lage)
+        _, token = _freigabe(db, lage, zweiter)
+        user.is_active = False
+        db.commit()
+
+        with patch("services.ai_mail.empfaenger", return_value="a@b.de"), patch(
+            "services.ai_mail.einreihen", return_value="outbox-1"
+        ):
+            with pytest.raises(AiActionStateError):
+                ai_approval_service.entscheiden(
+                    db, token=token, entscheidung="approved"
+                )
+
+        assert (
+            db.query(AiActionApproval)
+            .filter(AiActionApproval.consumed_at.is_(None))
+            .count()
+            == 0
+        )
 
 
 class TestMailrahmen:

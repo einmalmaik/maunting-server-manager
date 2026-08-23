@@ -623,6 +623,42 @@ def test_eine_frage_kann_sich_nicht_als_werkzeugdaten_ausgeben(
     assert nachrichten[stelle]["content"].endswith("F" * 3_000)
 
 
+def test_eine_gekuerzte_historienzeile_zeigt_ihre_kuerzung(
+    db: Session, regular_user: User
+) -> None:
+    """Die Randnachricht der Historie wurde still abgeschnitten.
+
+    Die Begründung der Marke steht an ihrer eigenen Konstante: „Ohne sie haelt
+    das Modell den Ausschnitt fuer das vollstaendige Ergebnis und zieht
+    Schluesse aus einem Log, dessen Ende es nie gesehen hat." Betroffen ist im
+    schlimmsten Fall die soeben gestellte Frage — `rows` ist absteigend
+    sortiert, die erste Zeile der Schleife ist also die Frage, und neben einem
+    großen Anhang bleibt ihr nur der Sockel aus `MIN_HISTORY_CHARS`. Das Modell
+    sah dann einen mitten im Satz endenden Auftrag, hielt ihn für vollständig
+    und beantwortete die Hälfte.
+    """
+    conversation = _conversation(db, regular_user)
+    db.add(AiMessage(
+        id=str(uuid4()), conversation_id=conversation.id, role="user",
+        content="Warum startet der Server nicht? " + "F" * 60_000,
+        status="complete",
+    ))
+    db.commit()
+
+    nachrichten = build_provider_messages(db, conversation)
+
+    zeile = next(
+        item["content"] for item in nachrichten
+        if isinstance(item.get("content"), str)
+        and "Warum startet der Server nicht?" in item["content"]
+    )
+    assert len(zeile) < 60_000, "die Zeile wurde gar nicht gekuerzt"
+    assert zeile.endswith(TOOL_RESULT_TRUNCATION_MARK), (
+        "der Schnitt ist unsichtbar — das Modell haelt den Ausschnitt fuer den "
+        "ganzen Auftrag"
+    )
+
+
 def test_the_nachspann_still_counts_against_the_window(
     db: Session, regular_user: User
 ) -> None:

@@ -97,7 +97,12 @@ def _werkzeuge_taeuschen(monkeypatch: pytest.MonkeyPatch) -> None:
     liefert. Echte Aufrufe brauchten Server, Rechte und Nodes und würden die
     Frage dieser Datei mit ihrem eigenen Aufbau zudecken.
     """
-    def _sofort(_user_id: int, call: ProviderToolCall, _herkunft: str = "panel"):
+    def _sofort(
+        _user_id: int,
+        call: ProviderToolCall,
+        _herkunft: str = "panel",
+        _familie: str | None = None,
+    ):
         return {"tool": call.name}, None
 
     monkeypatch.setattr(ai_stream_service, "_werkzeug_ausfuehren", _sofort)

@@ -77,6 +77,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 import logging
 
 import httpx
@@ -102,7 +103,11 @@ ABRUF_TIMEOUT = 30.0
 #: Ausfall einmal bezahlt wird statt bei jeder Anfrage neu.
 FEHLER_RUHE = timedelta(seconds=60)
 #: Schutz gegen eine Antwort, die kein Katalog mehr ist. Der echte Katalog liegt
-#: bei rund 660 KB; alles jenseits dieser Grenze wird nicht erst geparst.
+#: bei rund 660 KB; jenseits dieser Grenze wird der Abruf **abgebrochen** —
+#: nicht erst das Ergebnis verworfen. Der Unterschied ist der ganze Zweck: eine
+#: fehlgeleitete Gegenstelle mit einer endlosen Antwort haette den Panelprozess
+#: sonst schon im Speicher, bevor die Prüfung ihn ablehnt, und ``ABRUF_TIMEOUT``
+#: begrenzt bei httpx nur die Wartezeit je Lesevorgang, nie die Datenmenge.
 MAX_KATALOG_BYTES = 8 * 1024 * 1024
 #: Wie lange ein Aufrufer hoechstens auf den **allerersten** Katalog wartet.
 #: Danach bekommt er die leere Liste und der Abruf laeuft im Hintergrund weiter;
@@ -411,12 +416,20 @@ async def _hole(
         if spec.katalog_braucht_schluessel and schluessel
         else None
     )
-    antwort = await client.get(spec.catalog_url, timeout=ABRUF_TIMEOUT, headers=kopf)
-    antwort.raise_for_status()
-    if len(antwort.content) > MAX_KATALOG_BYTES:
-        raise ValueError("Katalog ist unerwartet groß")
+    # Stückweise gelesen und nicht am Stück geholt: nur so wirkt die Grenze
+    # darunter **während** der Übertragung. Ein ``client.get`` hätte den ganzen
+    # Körper längst im Speicher, wenn die Prüfung ihn verwirft.
+    roh = bytearray()
+    async with client.stream(
+        "GET", spec.catalog_url, timeout=ABRUF_TIMEOUT, headers=kopf
+    ) as antwort:
+        antwort.raise_for_status()
+        async for stueck in antwort.aiter_bytes():
+            roh += stueck
+            if len(roh) > MAX_KATALOG_BYTES:
+                raise ValueError("Katalog ist unerwartet groß")
 
-    nutzlast = antwort.json()
+    nutzlast = json.loads(bytes(roh))
     if spec.katalog_liste_feld is None:
         # Die Antwort **ist** die Liste. Kein Sonderfall, nur eine andere
         # Hausordnung — ElevenLabs macht es so.
