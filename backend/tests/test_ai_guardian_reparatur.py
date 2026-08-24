@@ -95,6 +95,8 @@ def _server(db: Session, name: str = "Reparaturserver", **felder) -> Server:
 
 
 def _freigabe(db: Session, user: User, server: Server) -> None:
+    from services.ai_guardian_settings import set_guardian_ai_enabled
+    set_guardian_ai_enabled(True)
     db.add(ServerPermission(user_id=user.id, server_id=server.id, permission_key="server.view"))
     db.add(AiAutonomyGrant(
         user_id=user.id, server_id=server.id, enabled=True, max_actions_per_hour=10

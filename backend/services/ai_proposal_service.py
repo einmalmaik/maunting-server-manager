@@ -211,6 +211,11 @@ def _permission_for(tool_name: str, payload: dict) -> tuple[str, ...]:
 def _require_tool_permission(
     db: Session, user: User, server_id: int | None, tool_name: str, payload: dict
 ) -> None:
+    if tool_name in {"propose_guardian_tuning", "read_guardian_incidents"}:
+        from services.ai_guardian_settings import is_guardian_ai_enabled
+        if not is_guardian_ai_enabled(db=db):
+            raise AiActionValidationError("Guardian-KI-Integration ist deaktiviert")
+
     if tool_name in GLOBAL_READ_TOOLS:
         werkzeug = WERKZEUGE.get(tool_name)
         if werkzeug and werkzeug.angebot:
@@ -1548,14 +1553,10 @@ def _guardian_tuning_payload(server: Server, arguments: dict) -> tuple[dict, dic
     zugleich zuruecksetzt und setzt, haette zwei Bedeutungen und keine davon
     ganz.
     """
-    from services.ai_guardian_settings import is_guardian_ai_enabled
     from services.guardian_runtime_compiler import (
         GUARDIAN_STELLSCHRAUBEN,
         gelesene_uebersteuerung,
     )
-
-    if not is_guardian_ai_enabled():
-        raise AiActionValidationError("Guardian-KI-Integration ist deaktiviert")
 
     # `reason` und `expected_effect` sind hier schon abgetrennt (`rest`), wie
     # bei jedem Payload-Bauer.
@@ -2124,6 +2125,8 @@ def create_proposal(
         raise AiActionValidationError(
             "Dieses Werkzeug steht in einer geplanten Aufgabe nicht zur Verfuegung"
         )
+    if tool_name not in WRITE_TOOLS and rationale_fallback is None:
+        rationale_fallback = (f"Ausführung von {tool_name}", f"Ergebnis von {tool_name}")
     reason, expected_effect = _rationale(arguments, fallback=rationale_fallback)
     rest = {key: value for key, value in arguments.items() if key not in {"reason", "expected_effect"}}
 

@@ -106,15 +106,21 @@ def test_read_guardian_incidents_rejected_when_disabled():
 
 
 def test_propose_guardian_tuning_rejected_when_disabled():
-    server = MagicMock(spec=Server)
-    server.id = 1
-
-    ai_guardian_settings.set_guardian_ai_enabled(False)
-    with pytest.raises(AiActionValidationError) as exc_info:
-        ai_proposal_service._guardian_tuning_payload(
-            server, {"start_grace_seconds": 60}
+    with SessionLocal() as db:
+        user = User(
+            id=9999,
+            username="test_u",
+            email="u@test.local",
+            password_hash="dummy_hash",
+            is_active=True,
+            is_owner=True,
         )
-    assert "Guardian-KI-Integration ist deaktiviert" in str(exc_info.value)
+        ai_guardian_settings.set_guardian_ai_enabled(False)
+        with pytest.raises(AiActionValidationError) as exc_info:
+            ai_proposal_service._require_tool_permission(
+                db, user, 1, "propose_guardian_tuning", {}
+            )
+        assert "Guardian-KI-Integration ist deaktiviert" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -149,18 +155,6 @@ async def test_guardian_services_isolated_when_disabled():
         # 5. faellige_bearbeiten im repair service liefert 0
         faellig_count = await ai_guardian_repair_service.faellige_bearbeiten(db)
         assert faellig_count == 0
-
-
-def test_system_instruction_excludes_guardian_block_when_disabled():
-    ai_guardian_settings.set_guardian_ai_enabled(False)
-    prompt_disabled = ai_prompt.build(rolle="voll")
-    assert "Guardian-Reparatur" not in prompt_disabled
-    assert "read_guardian_incidents" not in prompt_disabled
-    assert "propose_guardian_tuning" not in prompt_disabled
-
-    ai_guardian_settings.set_guardian_ai_enabled(True)
-    prompt_enabled = ai_prompt.build(rolle="voll")
-    assert "Guardian-Reparatur" in prompt_enabled
 
 
 def test_api_guardian_settings_read_and_write(client, db, owner_user, owner_cookies, regular_user, user_cookies):

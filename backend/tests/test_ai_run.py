@@ -81,13 +81,17 @@ def _server(db: Session, name: str) -> Server:
 
 
 def _grant(db: Session, user: User, *, server: Server, server_keys: tuple[str, ...],
-           global_keys: tuple[str, ...] = ()) -> None:
+           global_keys: tuple[str, ...] = (), autonomy: bool = False) -> None:
     role = Role(name=f"lauf-{user.id}", description=None, is_system=False)
     db.add(role)
     db.flush()
     db.add(RolePermission(role_id=role.id, permission_key="ai.chat.use"))
     for key in global_keys:
         db.add(RolePermission(role_id=role.id, permission_key=key))
+    if autonomy:
+        db.add(RolePermission(role_id=role.id, permission_key="ai.autonomous.use"))
+        from models import AiAutonomyGrant
+        db.add(AiAutonomyGrant(user_id=user.id, server_id=None, enabled=True, max_actions_per_hour=50))
     set_role_limit(db, role.id, {field: None for field in LIMIT_FIELDS})
     db.commit()
     set_user_roles(db, user, [role.id])
@@ -970,7 +974,7 @@ async def test_reading_a_server_leaves_a_trace(
     from models import AuditLog
 
     server = _server(db, "protokoll")
-    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    _grant(db, regular_user, server=server, server_keys=("server.view",), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -1015,7 +1019,7 @@ async def test_a_run_remembers_which_server_it_looked_into(
     `serverbezug_merken`, und ohne zwei Runden bliebe er ungeprueft.
     """
     server = _server(db, "thema")
-    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    _grant(db, regular_user, server=server, server_keys=("server.view",), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -1072,7 +1076,7 @@ async def test_the_topic_survives_the_next_message(
     zu sehen, dass der Bezug vom Vorgaenger kommt und nicht neu entsteht.
     """
     server = _server(db, "erbe")
-    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    _grant(db, regular_user, server=server, server_keys=("server.view",), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -1134,7 +1138,7 @@ async def test_the_machines_manual_reaches_the_provider_in_the_same_round(
     server = _server(db, "handbuch")
     _grant(db, regular_user, server=server,
            server_keys=("server.view", "server.config.write"),
-           global_keys=("ai.memory.use",))
+           global_keys=("ai.memory.use",), autonomy=True)
     ai_memory_service.set_preference(db, regular_user, True)
     ai_memory_service.upsert_entry(
         db, user=regular_user, scope="server_shared", server_id=server.id,
@@ -1208,7 +1212,7 @@ async def test_loop_detection_survives_a_question(
     ausdruecklich nicht: eine Klaerung ist kein Fehler des Benutzers.
     """
     server = _server(db, "frage-erbe")
-    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    _grant(db, regular_user, server=server, server_keys=("server.view",), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -1251,7 +1255,7 @@ async def test_a_run_that_ran_out_of_rounds_says_so(
     """
     server = _server(db, "budgetende")
     _grant(db, regular_user, server=server,
-           server_keys=("server.view", "server.console.read"))
+           server_keys=("server.view", "server.console.read"), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)

@@ -82,6 +82,14 @@ KI_RECHTE = ("ai.chat.use", "ai.autonomous.use")
 SERVER_RECHTE = tuple(sorted(SERVER_KEYS))
 
 
+@pytest.fixture(autouse=True)
+def _enable_guardian_ai():
+    from services import ai_guardian_settings
+    ai_guardian_settings.set_guardian_ai_enabled(True)
+    yield
+    ai_guardian_settings.set_guardian_ai_enabled(False)
+
+
 # ── Aufbau ────────────────────────────────────────────────────────────────
 
 

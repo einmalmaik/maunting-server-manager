@@ -69,7 +69,7 @@ KI_RECHTE = ("ai.chat.use", "ai.tasks.manage", "ai.autonomous.use")
 # ── Aufbau ────────────────────────────────────────────────────────────────
 
 
-def _benutzer(db: Session, name: str, *, rechte=KI_RECHTE) -> User:
+def _benutzer(db: Session, name: str, *, rechte=KI_RECHTE, freigabe: bool = True) -> User:
     user = AuthService.create_user(db, name, f"{name}@test.de", "UserPass123!")
     user.email_verified = True
     user.email_notifications = True
@@ -84,6 +84,8 @@ def _benutzer(db: Session, name: str, *, rechte=KI_RECHTE) -> User:
     set_role_limit(db, rolle.id, {field: None for field in LIMIT_FIELDS})
     db.commit()
     set_user_roles(db, user, [rolle.id])
+    if freigabe:
+        _freigabe(db, user)
     db.refresh(user)
     return user
 
@@ -111,12 +113,24 @@ def _sichtbar(db: Session, user: User, server: Server) -> None:
 def _freigabe(
     db: Session, user: User, *, budget: int = 10, server: Server | None = None
 ) -> None:
-    db.add(AiAutonomyGrant(
-        user_id=user.id,
-        server_id=None if server is None else server.id,
-        enabled=True,
-        max_actions_per_hour=budget,
-    ))
+    grant = (
+        db.query(AiAutonomyGrant)
+        .filter(
+            AiAutonomyGrant.user_id == user.id,
+            AiAutonomyGrant.server_id == (None if server is None else server.id),
+        )
+        .first()
+    )
+    if grant is not None:
+        grant.enabled = True
+        grant.max_actions_per_hour = budget
+    else:
+        db.add(AiAutonomyGrant(
+            user_id=user.id,
+            server_id=None if server is None else server.id,
+            enabled=True,
+            max_actions_per_hour=budget,
+        ))
     db.commit()
 
 
@@ -923,10 +937,11 @@ async def test_der_auftrag_steht_als_nachricht_im_chat(db: Session, monkeypatch)
     user = _benutzer(db, "sichtbar")
     _anbieter(db)
     _laufzeit_faelschen(monkeypatch)
+    Anbieter([]).einbauen(monkeypatch)
     aufgabe = _aufgabe(db, user, title="Wetterbericht")
 
     run = await ai_task_service.aufgabenlauf_starten(db, aufgabe=aufgabe)
-
+    assert run is not None
     nachrichten = (
         db.query(AiMessage)
         .filter(AiMessage.conversation_id == run.conversation_id,

@@ -41,6 +41,8 @@ def _rolle_mit(db: Session, user: User, *keys: str) -> None:
 
 
 def _angebot(db: Session, user: User) -> frozenset[str]:
+    from services.ai_guardian_settings import set_guardian_ai_enabled
+    set_guardian_ai_enabled(True)
     return ai_action_service.angebotene_werkzeuge(db, user)
 
 

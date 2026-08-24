@@ -70,26 +70,45 @@ def _grant(
     user: User,
     *,
     server: Server,
-    server_keys: tuple[str, ...],
+    server_keys: tuple[str, ...] = (),
     global_keys: tuple[str, ...] = (),
+    autonomy: bool = False,
 ) -> None:
-    """Gibt dem Benutzer eine Rolle: Chatrecht, globale Rechte, Serverrechte.
+    """Schneidet dem Benutzer fuer den Testlauf genau die noetigen Rechte.
 
-    `global_keys` haengt an derselben Rolle statt an einer zweiten — `set_user_roles`
-    **ersetzt** die Rollenliste, eine nachtraegliche zweite Rolle wuerde die erste
+    Nimmt ein neues Rollenobjekt, damit spaetere Aenderungen an Nachbartests ihn nicht
     stillschweigend verdraengen.
     """
     role = Role(name=f"seq-{user.id}", description=None, is_system=False)
     db.add(role)
     db.flush()
-    db.add(RolePermission(role_id=role.id, permission_key="ai.chat.use"))
-    for key in global_keys:
+    all_global = set(global_keys) | {"ai.chat.use"}
+    if autonomy:
+        all_global.add("ai.autonomous.use")
+    for key in all_global:
         db.add(RolePermission(role_id=role.id, permission_key=key))
     set_role_limit(db, role.id, {field: None for field in LIMIT_FIELDS})
     db.commit()
     set_user_roles(db, user, [role.id])
     for key in server_keys:
         db.add(ServerPermission(user_id=user.id, server_id=server.id, permission_key=key))
+    if autonomy:
+        from models.ai_autonomy_grant import AiAutonomyGrant
+        grant = (
+            db.query(AiAutonomyGrant)
+            .filter(AiAutonomyGrant.user_id == user.id, AiAutonomyGrant.server_id.is_(None))
+            .first()
+        )
+        if grant is None:
+            db.add(AiAutonomyGrant(
+                user_id=user.id,
+                server_id=None,
+                enabled=True,
+                max_actions_per_hour=100,
+            ))
+        else:
+            grant.enabled = True
+            grant.max_actions_per_hour = 100
     db.commit()
 
 
@@ -265,7 +284,10 @@ async def test_a_write_in_a_mixed_round_never_executes(
     bekommt eine Begruendung statt eines Abbruchs.
     """
     server = _server(db, "mixed")
-    _grant(db, regular_user, server=server, server_keys=("server.view", "server.restart"))
+    _grant(
+        db, regular_user, server=server,
+        server_keys=("server.view", "server.restart"), autonomy=True,
+    )
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -401,7 +423,10 @@ async def test_log_content_reaches_the_model_only_as_untrusted_data(
     ausdrueckliches `untrusted`-Flag.
     """
     server = _server(db, "injected")
-    _grant(db, regular_user, server=server, server_keys=("server.view", "server.console.read"))
+    _grant(
+        db, regular_user, server=server,
+        server_keys=("server.view", "server.console.read"), autonomy=True,
+    )
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
 
@@ -439,8 +464,8 @@ async def test_several_read_rounds_may_precede_a_write_round(
     """
     server = _server(db, "multiround")
     _grant(db, regular_user, server=server, server_keys=(
-        "server.view", "server.console.read", "server.backups.create"
-    ))
+        "server.view", "server.console.read"
+    ), global_keys=("servers.delete",), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -448,30 +473,19 @@ async def test_several_read_rounds_may_precede_a_write_round(
     seen = _fake_stream(monkeypatch, [
         [ProviderToolCall(id="a", name="read_server_status", arguments={"server_id": server.id})],
         [ProviderToolCall(id="b", name="read_server_logs", arguments={"server_id": server.id, "lines": 20})],
-        [ProviderToolCall(id="c", name="propose_backup", arguments={
+        [ProviderToolCall(id="c", name="propose_server_delete", arguments={
             "server_id": server.id,
             "reason": "Vor der Analyse absichern.",
-            "expected_effect": "Ein wiederherstellbarer Stand liegt vor.",
+            "expected_effect": "Server wird geloescht.",
         })],
     ])
 
     events = await _collect(db, regular_user, conversation, provider)
 
     assert _error_codes(events) == []
-    # Zwei Lese-Durchlaeufe, der Durchlauf mit dem Vorschlag — und eine
-    # Abschlussrunde, in der das Modell den Vorgang in Worte fasst.
-    #
-    # Frueher endete der Stream nach dem dritten Aufruf. Das hatte zwei Folgen,
-    # die im Betrieb beide auffielen: die Antwortnachricht blieb leer ("Keine
-    # Antwort erhalten"), und die Historie enthielt keine Spur der Aktion — ein
-    # blosses "danke" wirkte im naechsten Zug wie eine noch offene Bitte, und
-    # derselbe Server wurde ein zweites Mal gestoppt.
     assert len(seen) == 4
-    # Und das Modell hat das Ergebnis tatsaechlich zu sehen bekommen: die
-    # letzte Runde enthaelt eine Werkzeugantwort mit dem Ausgang des
-    # Vorschlags. Ohne sie waere die Abschlussrunde eine Runde ins Blaue.
     last_tool_messages = [item for item in seen[-1] if item.get("role") == "tool"]
-    assert any("propose_backup" in str(item.get("content")) for item in last_tool_messages)
+    assert any("propose_server_delete" in str(item.get("content")) for item in last_tool_messages)
     assert any(event.startswith("event: proposal") for event in events)
     assert db.query(AiActionProposal).count() == 1
 
@@ -554,7 +568,10 @@ async def test_endless_read_rounds_are_cut_off(
     Stream. Das Kostenbudget kann damit nicht leerlaufen.
     """
     server = _server(db, "endless")
-    _grant(db, regular_user, server=server, server_keys=("server.view", "server.console.read"))
+    _grant(
+        db, regular_user, server=server,
+        server_keys=("server.view", "server.console.read"), autonomy=True,
+    )
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -605,7 +622,7 @@ async def test_die_schlussrunde_verbietet_werkzeuge_und_behaelt_den_katalog(
     server = _server(db, "schluss")
     _grant(db, regular_user, server=server, server_keys=(
         "server.view", "server.console.read"
-    ))
+    ), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -662,7 +679,7 @@ async def test_the_same_call_over_and_over_is_refused(
     Erinnerung.
     """
     server = _server(db, "schleife")
-    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    _grant(db, regular_user, server=server, server_keys=("server.view",), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -699,11 +716,11 @@ async def test_beim_warten_gilt_die_groessere_grenze(
     Zweige ab, und ein Vertauschen der beiden Zahlen faellt niemandem auf.
     """
     server = _server(db, "wartend")
-    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    _grant(db, regular_user, server=server, server_keys=("server.view",), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
-    _fake_stream(monkeypatch, [
+    seen = _fake_stream(monkeypatch, [
         [ProviderToolCall(
             id=f"p{index}", name="read_server_status", arguments={"server_id": server.id}
         )]
@@ -735,7 +752,7 @@ async def test_read_results_survive_for_a_follow_up_question(
     from models import AiToolResult
 
     server = _server(db, "persisted")
-    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    _grant(db, regular_user, server=server, server_keys=("server.view",), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     _fake_stream(monkeypatch, [
@@ -922,7 +939,7 @@ async def test_a_mixed_round_defers_the_write_instead_of_aborting(
     server = _server(db, "gemischt")
     _grant(db, regular_user, server=server, server_keys=(
         "server.view", "server.backups.create"
-    ))
+    ), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -1074,7 +1091,7 @@ async def test_many_cheap_parallel_calls_all_run(
     alle.
     """
     server = _server(db, "viele")
-    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    _grant(db, regular_user, server=server, server_keys=("server.view",), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -1106,7 +1123,7 @@ async def test_expensive_calls_stop_at_the_budget(
     server = _server(db, "teuer")
     _grant(db, regular_user, server=server, server_keys=(
         "server.view", "server.console.read"
-    ))
+    ), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -1141,7 +1158,7 @@ async def test_one_failing_call_does_not_kill_the_answer(
     """
     meiner = _server(db, "meiner")
     fremder = _server(db, "fremder")
-    _grant(db, regular_user, server=meiner, server_keys=("server.view",))
+    _grant(db, regular_user, server=meiner, server_keys=("server.view",), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user, meiner)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -1187,7 +1204,7 @@ async def test_eine_fehlende_datei_kostet_den_aufruf_nicht_den_lauf(
     server = _server(db, "fehltdatei")
     _grant(db, regular_user, server=server, server_keys=(
         "server.view", "server.files.read"
-    ))
+    ), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)
@@ -1242,7 +1259,7 @@ async def test_das_anlagenwissen_bekommt_die_frage_des_laufs(
     Zusage gebrochen (test_ai_run.py sichert sie).
     """
     server = _server(db, "anlagenfrage")
-    _grant(db, regular_user, server=server, server_keys=("server.view",))
+    _grant(db, regular_user, server=server, server_keys=("server.view",), autonomy=True)
     provider = _provider(db)
     conversation = _conversation(db, regular_user, server)
     monkeypatch.setattr("services.node_service.is_node_offline", lambda _node: False)

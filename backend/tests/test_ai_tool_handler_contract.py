@@ -412,6 +412,8 @@ def test_every_server_read_tool_survives_being_called(
     Der Benutzer hat bewusst jedes Recht: sonst endete die Kette an der ersten
     Rechteprüfung, und geprüft wäre wieder nur die Prüfung.
     """
+    from services.ai_guardian_settings import set_guardian_ai_enabled
+    set_guardian_ai_enabled(True)
     arguments = {
         "server_id": rauchtest_server.id,
         **BEISPIELARGUMENTE.get(tool_name, {}),

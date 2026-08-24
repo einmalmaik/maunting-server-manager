@@ -136,7 +136,7 @@ export function AiActionProposalCard({
   const path = previewText(proposal.preview.path)
   const diff = previewText(proposal.preview.diff)
   const tatsachen = tatsachenZeilen(proposal.preview as Record<string, unknown>)
-  const Icon = {
+  const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
     propose_config_update: FilePenLine,
     propose_config_patch: FilePenLine,
     propose_config_set: FilePenLine,
@@ -182,7 +182,8 @@ export function AiActionProposalCard({
     read_server_logs: Eye,
     read_config: FilePenLine,
     list_my_servers: ServerCog,
-  }[proposal.tool_name] ?? Power
+  }
+  const Icon = ICONS[proposal.tool_name] ?? Power
   // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb
   // eine eigene, neutrale Farbgebung statt der warnenden — und keinen Knopf.
   const tone = proposal.autonomous

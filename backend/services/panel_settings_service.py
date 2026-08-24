@@ -1,3 +1,5 @@
+from sqlalchemy.orm import Session
+
 from database import SessionLocal
 from models import PanelSetting
 
@@ -12,42 +14,55 @@ class PanelSettingsService:
     _cache_loaded: bool = False
 
     @classmethod
-    def _load_cache(cls) -> None:
+    def _load_cache(cls, db: Session | None = None) -> None:
         if cls._cache_loaded:
             return
-        db = SessionLocal()
-        try:
+        if db is not None:
             for row in db.query(PanelSetting).all():
                 cls._cache[row.key] = row.value
+            cls._cache_loaded = True
+            return
+        db_session = SessionLocal()
+        try:
+            for row in db_session.query(PanelSetting).all():
+                cls._cache[row.key] = row.value
+            cls._cache_loaded = True
         finally:
-            db.close()
-        cls._cache_loaded = True
+            db_session.close()
 
     @classmethod
-    def get(cls, key: str, default: str = "") -> str:
-        cls._load_cache()
+    def get(cls, key: str, default: str = "", db: Session | None = None) -> str:
+        cls._load_cache(db)
         return cls._cache.get(key, default)
 
     @classmethod
-    def set(cls, key: str, value: str) -> None:
-        db = SessionLocal()
-        try:
+    def set(cls, key: str, value: str, db: Session | None = None) -> None:
+        cls._cache[key] = value
+        if db is not None:
             row = db.query(PanelSetting).filter_by(key=key).first()
             if row:
                 row.value = value
             else:
                 db.add(PanelSetting(key=key, value=value))
-            db.commit()
+            return
+        db_session = SessionLocal()
+        try:
+            row = db_session.query(PanelSetting).filter_by(key=key).first()
+            if row:
+                row.value = value
+            else:
+                db_session.add(PanelSetting(key=key, value=value))
+            db_session.commit()
         finally:
-            db.close()
-        cls._cache[key] = value
+            db_session.close()
 
     @classmethod
-    def get_all(cls) -> dict[str, str]:
-        cls._load_cache()
+    def get_all(cls, db: Session | None = None) -> dict[str, str]:
+        cls._load_cache(db)
         return dict(cls._cache)
 
     @classmethod
     def invalidate_cache(cls) -> None:
         cls._cache_loaded = False
         cls._cache.clear()
+

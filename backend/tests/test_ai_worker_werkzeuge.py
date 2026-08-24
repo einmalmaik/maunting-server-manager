@@ -20,7 +20,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.orm import Query, Session
 
-from models import AiConversation, AiRun, Role, RolePermission, User
+from models import AiAutonomyGrant, AiConversation, AiRun, Role, RolePermission, User
 from services import (
     ai_provider_service,
     ai_run_service,
@@ -45,7 +45,8 @@ def _benutzer(db: Session, name: str, *, mit_recht: bool = True) -> User:
         role = Role(name=f"worker-{name}", description=None, is_system=False)
         db.add(role)
         db.flush()
-        db.add(RolePermission(role_id=role.id, permission_key="ai.background.use"))
+        for perm in ("ai.background.use", "ai.autonomous.use", "ai.chat.use"):
+            db.add(RolePermission(role_id=role.id, permission_key=perm))
         db.commit()
         set_user_roles(db, user, [role.id])
     db.commit()
@@ -631,6 +632,7 @@ class TestHerkunftUndGeraet:
             id=str(uuid4()), user_id=user.id, kind="primary", title="Chat"
         )
         db.add(chat)
+        db.add(AiAutonomyGrant(user_id=user.id, server_id=None, enabled=True, max_actions_per_hour=10))
         db.commit()
 
         # Genau der Aufruf, den der Chat-Endpunkt aus der App macht: Herkunft

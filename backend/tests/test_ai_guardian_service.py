@@ -47,6 +47,14 @@ from services.role_service import set_user_roles
 KI_RECHTE = ("ai.chat.use", "ai.autonomous.use")
 
 
+@pytest.fixture(autouse=True)
+def _enable_guardian_ai():
+    from services import ai_guardian_settings
+    ai_guardian_settings.set_guardian_ai_enabled(True)
+    yield
+    ai_guardian_settings.set_guardian_ai_enabled(False)
+
+
 def _benutzer(db: Session, name: str, *, rechte=KI_RECHTE, aktiv: bool = True) -> User:
     user = AuthService.create_user(db, name, f"{name}@test.de", "UserPass123!")
     user.email_verified = True

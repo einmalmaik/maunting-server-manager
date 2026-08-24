@@ -104,6 +104,8 @@ def _server(db: Session, name: str, kennung: str) -> Server:
 
 @pytest.fixture
 def lage(db: Session, regular_user: User) -> Lage:
+    from services.ai_guardian_settings import set_guardian_ai_enabled
+    set_guardian_ai_enabled(True)
     rolle = Role(name="guardian-freigeber", description=None, is_system=False)
     db.add(rolle)
     db.flush()

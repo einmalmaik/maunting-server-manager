@@ -95,6 +95,8 @@ def _sichtbar(db: Session, user: User, server: Server) -> None:
 
 
 def _freigabe(db: Session, user: User, server: Server) -> None:
+    from services.ai_guardian_settings import set_guardian_ai_enabled
+    set_guardian_ai_enabled(True)
     db.add(
         AiAutonomyGrant(
             user_id=user.id,

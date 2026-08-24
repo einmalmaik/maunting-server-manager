@@ -42,11 +42,15 @@ def _csrf(cookies: dict) -> dict[str, str]:
     return {"X-CSRF-Token": cookies.get("__Secure-csrf_token", "")}
 
 
-def _enable_chat(db: Session, user: User) -> None:
+def _enable_chat(db: Session, user: User, autonomy: bool = False) -> None:
     role = Role(name=f"ai-chat-{user.id}", description=None, is_system=False)
     db.add(role)
     db.flush()
     db.add(RolePermission(role_id=role.id, permission_key="ai.chat.use"))
+    if autonomy:
+        db.add(RolePermission(role_id=role.id, permission_key="ai.autonomous.use"))
+        from models import AiAutonomyGrant
+        db.add(AiAutonomyGrant(user_id=user.id, server_id=None, enabled=True, max_actions_per_hour=50))
     set_role_limit(db, role.id, {field: None for field in LIMIT_FIELDS})
     db.commit()
     set_user_roles(db, user, [role.id])
@@ -535,7 +539,7 @@ def test_a_tool_call_cannot_reach_a_server_the_user_may_not_see(
     dieselbe geblieben — **es kommt nichts durch** —, nur die Form der Absage
     ist eine bessere.
     """
-    _enable_chat(db, regular_user)
+    _enable_chat(db, regular_user, autonomy=True)
     provider = _provider(db, monkeypatch)
     permission = ServerPermission(
         user_id=regular_user.id,

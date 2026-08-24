@@ -178,43 +178,6 @@ def teilbudgets(context_chars: int | None) -> Teilbudgets:
 def _skill_index_block(
     db: Session, user: User | None, query: str, unbeaufsichtigt: bool = False
 ) -> str:
-    """Stufe eins des schrittweisen Ladens: Name und Beschreibung je Skill.
-
-    Rund hundert Tokens pro Eintrag. Der eigentliche Text kommt erst, wenn das
-    Modell ihn mit `read_skill` anfordert — deshalb kosten fuenfzig hinterlegte
-    Skills nichts, solange keiner passt.
-
-    Ohne diesen Block wuesste das Modell nicht, dass es Skills gibt. Genau das
-    war der Zustand vor dieser Phase: die mitgelieferten Vorgehensweisen lagen
-    bereit und wurden nie angefasst.
-
-    **Die Kopfzeile nennt seit dem Betriebsfall auch den Nein-Fall.** Sie sagte
-    nur, wann ein Skill zu lesen ist, und stellte das mit "zuerst" an den Anfang
-    des Zuges. Ein Modell liest das als Pflichtschritt: auf die Frage, wie man
-    in 7 Days to Die die Erntemenge einstellt, las es den Skill "Server startet
-    nicht oder stuerzt sofort ab" — der Server lief, es gab keine Stoerung, und
-    im Verzeichnis stand nichts Passenderes. Aus einer Handvoll Störungsskills
-    wählt ein Modell den nächstbesten, wenn ihm niemand sagt, dass "keiner"
-    eine Antwort ist.
-
-    **In einem Lauf ohne Zuschauer entfällt der Block.** Er fordert
-    ausdrücklich dazu auf, einen Skill mit ``read_skill`` zu lesen — und genau
-    dieses Werkzeug steht weder in ``GUARDIAN_HEILUNG_TOOLS`` noch in
-    ``AUFGABEN_LESEN``. Ein Heilungslauf bekam damit das Verzeichnis der
-    Störungsdrehbücher samt der Aufforderung, sie zu lesen, und hatte kein
-    Werkzeug dafür: der Versuch kostete eine Runde, das Verzeichnis kostete in
-    jeder Runde Tokens.
-
-    Aufgelöst wird der Widerspruch auf der Prompt-Seite und nicht durch eine
-    Erweiterung der Werkzeugmengen. Die sind von Hand gepflegte Allowlists für
-    Läufe, bei denen niemand danebensitzt; was in einem Skilltext steht, kann
-    die KI aus einem Kundengespräch gelernt haben, und dieser Text lenkte dann
-    einen Lauf, der unter der Freigabe des Betreibers handelt. Sie zu
-    erweitern ist dessen Entscheidung, nicht die einer Aufräumrunde.
-
-    Wer ``read_skill`` später dort aufnimmt, nimmt diesen Zweig wieder weg —
-    ``test_ai_werkzeug_angebot.py`` hält beide Stellen zusammen.
-    """
     if user is None or unbeaufsichtigt:
         return ""
     from services import permission_service
@@ -226,14 +189,6 @@ def _skill_index_block(
     views = ai_skill_service.skill_index(db, user, query)
     if not views:
         return ""
-    # Abgeflacht wie im Gedächtnis (`ai_memory_service._memory_line`): das
-    # Verzeichnis ist zeilenbasiert, also könnte ein Zeilenumbruch in Name oder
-    # Beschreibung beliebig viele fremde Zeilen vortäuschen — ein Ende des
-    # Verzeichnisses und dahinter eine angebliche Betreiberregel. `_safe_text`
-    # prüft Länge und Zugangsdaten, nicht Form. Abgeflacht wird beim Rendern
-    # und nicht beim Schreiben, damit auch die Skills erfasst sind, die heute
-    # schon in der Datenbank stehen. Der Fließtext eines Skills (`body`) bleibt
-    # unberührt — der lebt von seinen Zeilen und steht ohnehin nicht hier.
     lines = [
         f"- {view.skill_key}: {' '.join(view.name.splitlines())}"
         f" — {' '.join(view.description.splitlines())}"
@@ -256,23 +211,6 @@ def _skill_index_block(
 def _skill_index_message(
     db: Session, user: User | None, query: str, unbeaufsichtigt: bool = False
 ) -> dict[str, Any] | None:
-    """Das Skill-Verzeichnis als eigene Nachricht — nicht im Systemprompt.
-
-    Bewusst ``role="user"`` wie bei Memory und Anhaengen, und aus demselben
-    Grund: Name und Beschreibung eines Skills sind von Benutzern verfasster
-    Text (`learn_skill` schreibt, was die KI aus einem Gespraech gelernt hat —
-    auch aus einem Kundengespraech oder einer praeparierten Logzeile). Im
-    Systemprompt trug dieser Text dieselbe Autoritaet wie die MSM-Regeln
-    selbst, und Prompt Injection war nur noch eine Frage der Formulierung;
-    `_safe_text` prueft Laenge und Zugangsdaten, nicht Weisungsform.
-
-    Der zweite Gewinn ist der Zwischenspeicher: der Systemprompt ist damit
-    byteweise statisch. Oberhalb von ``MAX_INDEXED_SKILLS`` waehlt
-    `skill_index` weiterhin nach Bedeutungsaehnlichkeit **zur aktuellen Frage**
-    — dort endet der wiederverwendbare Praefix dann an dieser Nachricht statt
-    mitten im Systemprompt. Das ist gewollt: bei mehr Skills als Plaetzen
-    schlaegt Treffsicherheit den Zwischenspeicher.
-    """
     block = _skill_index_block(db, user, query, unbeaufsichtigt)
     if not block:
         return None
@@ -581,20 +519,10 @@ def build_provider_messages(
     grenzen = teilbudgets(context_chars)
     user = db.get(User, conversation.user_id)
     result: list[dict[str, Any]] = [
-        # Der Systemprompt ist byteweise statisch (bis auf den `gesprochen`-
-        # Schalter, der je Sitzung feststeht, und die Rolle, die je Lauf
-        # feststeht) — er ist der groesste stabile Block und der Anker des
-        # Anbieter-Zwischenspeichers. Er ist **nicht** die Sicherheitsgrenze;
-        # die liegt in RBAC, der Tool-Allowlist, `_resolve_server` und der
-        # Bestaetigungspflicht.
         {"role": "system", "content": ai_prompt.build(
-            gesprochen=gesprochen, rolle=rolle, desktop=herkunft == "desktop",
+            gesprochen=gesprochen, rolle=rolle, desktop=herkunft == "desktop", db=db,
         )}
     ]
-    # Direkt dahinter das Skill-Verzeichnis: es aendert sich seltener als
-    # Memory und haelt den Praefix deshalb laenger stabil, wenn dahinter etwas
-    # wechselt. Warum es eine `user`-Nachricht ist und kein Teil des
-    # Systemprompts, steht an `_skill_index_message`.
     skill_verzeichnis = None
     if rolle != "gehirn":
         skill_verzeichnis = _skill_index_message(
@@ -606,30 +534,11 @@ def build_provider_messages(
         from services import ai_memory_service, permission_service
 
         if permission_service.has_global_permission(db, user, "ai.memory.use"):
-            # Panelweite, benutzereigene und serverbezogene Eintraege — bei
-            # letzteren nur fuer Server, die der Benutzer gerade sehen darf.
-            # Das Budget kommt aus derselben Rechnung wie das aller anderen
-            # Blöcke; ohne diese Übergabe rechnete das Gedächtnis als einziges
-            # gegen eine feste Zahl weiter.
             memory = ai_memory_service.provider_memory_context(
                 db, user, query, server_id, budget=grenzen.gedaechtnis_zeichen
             )
             if memory:
                 result.append(_memory_message(memory))
-    # Die Historie wird **vor** den Anhaengen geladen, obwohl sie hinter ihnen
-    # steht: welche Anhaenge mitgehen, haengt davon ab, welche Nachrichten
-    # ueberhaupt geladen werden. Frueher gingen schlicht die letzten fuenf der
-    # Unterhaltung mit — auch solche, deren Nachricht laengst herausgefallen
-    # war, und dieselben wieder und wieder bei jeder Folgefrage.
-    #
-    # „Geladen" und nicht „ausgewaehlt": der wirksame Filter ist der
-    # Zeichenschnitt weiter unten, und der laeuft erst **nach** der Anhangswahl
-    # — er braucht `used` inklusive der Anhaenge, sonst bekaeme die Historie
-    # ein Budget, das die Anhaenge danach ueberziehen. Ein Anhang, dessen
-    # Nachricht dem Schnitt zum Opfer faellt, geht deshalb weiterhin mit. Ihn
-    # danach herauszunehmen ginge nur ueber eine zweite Entschluesselung je
-    # Anhang (der Dienst gibt die Bindung nicht mit heraus); solange das nicht
-    # gemessen ist, steht hier lieber die Wahrheit als ein Versprechen.
     query_set = (
         db.query(AiMessage)
         .filter(
@@ -638,22 +547,15 @@ def build_provider_messages(
         )
     )
     if conversation.summarized_until is not None:
-        # Alles davor steckt bereits in `summary`. Ohne diesen Filter waeren
-        # zusammengefasste Nachrichten zusaetzlich einzeln im Kontext — die
-        # Kompression haette dann gar nichts gespart.
         query_set = query_set.filter(
             AiMessage.created_at > conversation.summarized_until
         )
     rows = (
         query_set
-        # `id` als zweites Kriterium wie im GET-Endpunkt: bei gleichem
-        # Zeitstempel gingen User- und Assistentenzeile sonst je nach
-        # Datenbank vertauscht an das Modell.
         .order_by(AiMessage.created_at.desc(), AiMessage.id.desc())
         .limit(grenzen.historie_zeilen)
         .all()
     )
-
     if user is not None:
         from services import permission_service
 

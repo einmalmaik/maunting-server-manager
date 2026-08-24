@@ -1494,8 +1494,8 @@ def _persist_write_proposals(
     ist. Das Feld gehoert **nicht** in die Vorschlagskarte: sie traegt denselben
     Vertrag wie die REST-Antwort, und der Aufrufer laesst es dort weg.
     """
-    if len(tool_calls) > MAX_TOOL_CALLS or any(call.name not in WRITE_TOOLS for call in tool_calls):
-        raise AiActionValidationError("Ungueltige Write-Tool-Sequenz")
+    if len(tool_calls) > MAX_TOOL_CALLS or any(call.name not in (WRITE_TOOLS | READ_TOOLS | WORKER_STEUERUNG) for call in tool_calls):
+        raise AiActionValidationError("Ungueltige Tool-Sequenz")
     with SessionLocal() as db:
         user = db.get(User, user_id)
         if user is None or not user.is_active:
@@ -4277,14 +4277,68 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 current_usage = StreamUsage()
                 continue
 
-            # Pruefen, ob ALLE Werkzeugaufrufe in dieser Runde Lesewerkzeuge sind
+            # Ab hier ist jeder Aufruf entweder lesend oder schreibend/delegierend — die
+            # dritte Moeglichkeit hat die Pruefung darueber schon abgefangen.
+            kinds = {
+                "read" if call.name in READ_TOOLS else "write"
+                for call in current_usage.tool_calls
+            }
+            if kinds == {"write"}:
+                schreib = await _schreibrunde_ausfuehren(
+                    run_id=run_id,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    vorbereitung=vorbereitung,
+                    guardian=guardian,
+                    aufgabe=aufgabe,
+                    unbeaufsichtigt=unbeaufsichtigt,
+                    rolle=rolle,
+                    rundendeckel=rundendeckel,
+                    rundentext=rundentext,
+                    current_usage=current_usage,
+                    provider_messages=provider_messages,
+                    zustand=zustand,
+                    chunks=chunks,
+                    thoughts=thoughts,
+                    denknaht=denknaht,
+                )
+                denknaht = schreib.denknaht
+                if schreib.abgeloest:
+                    abgeloest = True
+                    break
+                if schreib.geparkt:
+                    geparkt = True
+                if schreib.budget_erschoepft:
+                    budget_erschoepft = True
+                if schreib.letzte_runde:
+                    letzte_runde = True
+                current_usage = StreamUsage()
+                continue
+
+            deferred_calls, filter_signal = _runde_filtern(
+                kinds=kinds,
+                current_usage=current_usage,
+                signaturen=signaturen,
+                zustand=zustand,
+                run_id=run_id,
+                rundendeckel=rundendeckel,
+            )
+            if filter_signal == "budget":
+                budget_erschoepft = True
+                letzte_runde = True
+                current_usage = StreamUsage()
+                continue
+            if filter_signal == "fertig":
+                break
+
+            # Pruefen, ob die verbleibenden Werkzeugaufrufe Lesewerkzeuge sind
             # UND autonom ausgefuehrt werden duerfen.
             #
             # Maunting Studios Grundsatz („Sicherheit braucht Vertrauen“):
             # Der Autonomie-Modus beschreibt, dass die KI ohne Bestaetigung arbeiten kann.
             # Ist der Autonomie-Modus an, braucht es keine Bestaetigung.
             # Ist der Autonomie-Modus aus, verlangt ausnahmslos jede Handlung und jedes
-            # Werkzeug (Lesen, Schreiben, Worker-Deklaration etc.) eine Bestaetigung.
+            # Werkzeug eine Bestaetigung ueber den Vorschlagspfad.
             from services import ai_autonomy_service
 
             with SessionLocal() as db_check:
@@ -4331,21 +4385,6 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     budget_erschoepft = True
                 if schreib.letzte_runde:
                     letzte_runde = True
-                current_usage = StreamUsage()
-                continue
-
-            kinds = {"read"}
-            deferred_calls, filter_signal = _runde_filtern(
-                kinds=kinds,
-                current_usage=current_usage,
-                signaturen=signaturen,
-                zustand=zustand,
-                run_id=run_id,
-                rundendeckel=rundendeckel,
-            )
-            if filter_signal == "budget":
-                budget_erschoepft = True
-                letzte_runde = True
                 current_usage = StreamUsage()
                 continue
             if filter_signal == "fertig":
@@ -4591,7 +4630,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             )
             code, message_key = "AI_TOOL_REJECTED", "ai.chat.errors.toolRejected"
         else:
-            logger.warning("AI-Lauf fehlgeschlagen error=%s", type(exc).__name__)
+            logger.exception("AI-Lauf fehlgeschlagen error=%s", type(exc).__name__)
             code, message_key = "AI_STREAM_FAILED", "ai.chat.errors.unavailable"
         if not abgerechnet:
             _abbruch_abrechnen()
@@ -4701,31 +4740,20 @@ def lauf_beginnen(
     if rolle is None:
         rolle = _rolle_ableiten(db, user, conversation, provider, unbeaufsichtigt)
     try:
-        # Wer eine neue Nachricht schreibt, statt einen Vorschlag zu bestaetigen,
-        # hat die Richtung gewechselt. Ein alter, geparkter Lauf darf danach
-        # nicht mehr in denselben Chat weiterschreiben.
-        #
-        # War der Vorgaenger dagegen eine **Rueckfrage**, ist diese Nachricht die
-        # Antwort darauf. Dann erbt der neue Lauf dessen Schleifensignaturen:
-        # ohne das liest das Modell nach jeder Klaerung dieselbe Datei wieder von
-        # vorn, und die Erkennung greift nie.
         geerbte_signaturen = ai_run_service.vorgaenger_abloesen(
             db, conversation_id=conversation.id
         )
 
         benutzernachricht_id = str(uuid4())
-        db.add(AiMessage(
+        user_msg = AiMessage(
             id=benutzernachricht_id,
             conversation_id=conversation.id,
             role="user",
             content=safe_content,
             status="complete",
             intern=intern,
-        ))
-        # Hochgeladene Anhaenge gehoeren ab jetzt zu **dieser** Frage. Vorher
-        # hingen sie nur an der Unterhaltung: sie blieben als Chip stehen und
-        # gingen bei jeder weiteren Frage erneut mit, bis sie aus den letzten
-        # fuenf herausfielen.
+        )
+        db.add(user_msg)
         ai_attachment_service.bind_to_message(
             db, conversation_id=conversation.id, user_id=user.id,
             message_id=benutzernachricht_id,
@@ -4833,6 +4861,7 @@ def lauf_beginnen(
             last_server_id=serverbezug,
         )
         db.commit()
+        print("IN LAUF_BEGINNEN AFTER COMMIT:", [(m.id, m.role, m.content[:20]) for m in db.query(AiMessage).all()])
         return run, None
     except IntegrityError:
         db.rollback()
