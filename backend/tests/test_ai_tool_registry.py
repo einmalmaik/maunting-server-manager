@@ -468,7 +468,7 @@ def test_das_gehirn_hat_nie_server_werkzeuge() -> None:
     assert ai_tool_registry.GEHIRN_TOOLS == (
         ai_tool_registry.MEMORY_TOOLS
         | {"worker_start", "worker_cancel", "worker_antwort"}
-        | {"desktop_system", "desktop_steuern"}
+        | {"desktop_system", "desktop_steuern", "desktop_launch_app"}
     )
     assert ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.SERVER_READ_TOOLS == set()
     assert ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.WRITE_TOOLS == set()
@@ -479,13 +479,11 @@ def test_das_gehirn_hat_nie_server_werkzeuge() -> None:
 def test_dem_gehirn_gehoert_das_sehen_und_zeigen_nicht_die_arbeit() -> None:
     """Die Grenze innerhalb der Desktop-Werkzeuge.
 
-    Sehen und zeigen ist Gespraech — dafuer einen Auftrag zu starten hiesse,
-    dem Benutzer sein eigenes Bild aus zweiter Hand zu beschreiben. Dateien
-    anlegen, aufraeumen und Programme starten ist Arbeit, und Arbeit delegiert
-    das Gehirn.
+    Sehen, Steuern und Programme starten gehoert dem direkten Computer-Use am Rechner.
+    Dateien in der Sandbox und System-Aufraeumen bleiben beim Worker.
     """
     assert ai_tool_registry.GEHIRN_DESKTOP <= ai_tool_registry.DESKTOP_TOOLS
-    for arbeit in ("desktop_dateien", "desktop_aufraeumen", "desktop_launch_app"):
+    for arbeit in ("desktop_dateien", "desktop_aufraeumen"):
         assert arbeit in ai_tool_registry.DESKTOP_TOOLS
         assert arbeit not in ai_tool_registry.GEHIRN_TOOLS
 

@@ -763,13 +763,14 @@ NUR_WORKER = frozenset({"wait_until", "worker_frage"})
 # ohnehin schon darstellt, nur bei der einen Sache, bei der er am meisten
 # kostet.
 #
-# `desktop_dateien`, `desktop_aufraeumen` und `desktop_launch_app` bleiben
-# draussen: das ist Arbeit, und Arbeit delegiert das Gehirn. Sehen und zeigen
-# ist Gespraech.
+# `desktop_dateien` und `desktop_aufraeumen` bleiben draussen: das ist
+# Hintergrund- und Loescharbeit, und die delegiert das Gehirn. Sehen, zeigen
+# (`desktop_system`, `desktop_steuern`) und lokale Programme/Spiele/URLs
+# starten (`desktop_launch_app`) gehoeren dem Computer-Use direkt am Rechner.
 #
 # Erreichbar sind sie ohnehin nur aus der App (`herkunft_schnitt`) — aus dem
 # Panel bleibt der Katalog des Gehirns exakt der von vorher.
-GEHIRN_DESKTOP = frozenset({"desktop_system", "desktop_steuern"})
+GEHIRN_DESKTOP = frozenset({"desktop_system", "desktop_steuern", "desktop_launch_app"})
 
 # Der komplette Katalog des Gehirns. Eine Aufzaehlung wie bei den
 # unbeaufsichtigten Laeufen: das Gehirn ist die schnelle, dauerpraesente

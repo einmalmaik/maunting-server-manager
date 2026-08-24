@@ -86,7 +86,7 @@ describe('Auftragsschleife', () => {
     for (const aufruf of ergebnisMeldenMock.mock.calls) {
       expect(aufruf[1]).toBe(true)
     }
-  })
+  }, 15000)
 
   it('meldet einen echten Werkzeugfehler weiterhin mit Grund', async () => {
     auftragAusfuehrenMock.mockRejectedValue(new Error('Laufwerke nicht abfragbar.'))

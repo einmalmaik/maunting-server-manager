@@ -915,11 +915,9 @@ def test_das_gehirn_sieht_selbst_hin_und_delegiert_den_rest() -> None:
 
     assert "`desktop_system`" in gehirn
     assert "`desktop_steuern`" in gehirn
-    # Und die Gegenrichtung: die Arbeit bleibt beim Auftrag.
-    assert "Dateien, Aufräumen, Programme starten" in gehirn
-    # Der Preis steht auch drin — ein Gehirn, das klickt, ist ein Gehirn, das
-    # nicht zuhoert.
-    assert "wartet der Benutzer auf dich" in gehirn
+    assert "`desktop_launch_app`" in gehirn
+    # Und die Gegenrichtung: Datei- und Aufräumarbeiten bleiben beim Worker.
+    assert "Datei- und Aufräumarbeiten" in gehirn
 
 
 def test_der_worker_lernt_bevor_er_berichtet() -> None:

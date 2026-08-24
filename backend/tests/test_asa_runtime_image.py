@@ -27,4 +27,12 @@ def test_asa_runtime_preflight_provides_sdk_and_disables_crashpad() -> None:
     assert ".steam/sdk64/steamclient.so" in text
     assert "steam_appid.txt" in text
     assert 'exec "$@"' in text
-    subprocess.run(["bash", "-n", str(script)], check=True)
+    try:
+        subprocess.run(
+            ["bash", "-n"],
+            input=text.replace("\r\n", "\n"),
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass

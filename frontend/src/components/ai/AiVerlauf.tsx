@@ -232,10 +232,11 @@ export const AiAntwortblase = memo(function AiAntwortblase({
           </div>
         ) : message.content ? (
           <AiMarkdown content={message.content} />
-        ) : !isStreaming && !message.question ? (
+        ) : !isStreaming && !message.question && !message.reasoning ? (
           // Eine Rückfrage *ist* die Antwort. Früher stand hier "Keine Antwort
           // erhalten" unter jeder gestellten Frage, weil die Frage in einer
-          // eigenen Karte lag und der Nachrichtentext leer blieb.
+          // eigenen Karte lag und der Nachrichtentext leer blieb. Ebenso ist ein
+          // Denkabschnitt eine Ausgabe, unter der kein fälschliches "Keine Antwort" steht.
           <p className="text-sm text-on-surface-variant">{t('ai.chat.noResponse')}</p>
         ) : null}
         {/* Die Wartezeile steht **einmal** und immer als letzte Zeile der

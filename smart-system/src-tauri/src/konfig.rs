@@ -64,11 +64,34 @@ pub struct AppKonfig {
     pub audio_verstaerkung: f32,
 }
 
+/// Ermittelt den isolierten Standard-Sandbox-Pfad im Benutzerprofil (`%USERPROFILE%\MSS-Sandbox` bzw. `$HOME/MSS-Sandbox`).
+pub fn standard_sandbox_pfad() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .filter(|w| !w.is_empty())
+        .map(PathBuf::from)
+        .map(|p| p.join("MSS-Sandbox"))
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|w| !w.is_empty())
+                .map(PathBuf::from)
+                .map(|p| p.join("MSS-Sandbox"))
+        })
+}
+
+/// Legt den isolierten Standard-Sandbox-Ordner physisch an, falls er nicht existiert, und liefert den Pfad.
+pub fn standard_sandbox_anlegen() -> Result<PathBuf, String> {
+    let pfad = standard_sandbox_pfad()
+        .ok_or_else(|| "Benutzerverzeichnis nicht ermittelbar".to_string())?;
+    std::fs::create_dir_all(&pfad)
+        .map_err(|e| format!("Konnte Sandbox-Ordner nicht anlegen: {e}"))?;
+    Ok(pfad)
+}
+
 impl Default for AppKonfig {
     fn default() -> Self {
         Self {
             backend_url: None,
-            sandbox_pfad: None,
+            sandbox_pfad: standard_sandbox_pfad().map(|p| p.to_string_lossy().to_string()),
             eingerichtet: false,
             hotkey_fenster: Some(HOTKEY_FENSTER_VORGABE.into()),
             hotkey_sprache: Some(HOTKEY_SPRACHE_VORGABE.into()),
@@ -96,11 +119,20 @@ fn pfad(app: &AppHandle) -> Result<PathBuf, String> {
 
 pub fn laden(app: &AppHandle) -> Result<AppKonfig, String> {
     let pfad = pfad(app)?;
-    if !pfad.exists() {
-        return Ok(AppKonfig::default());
+    let mut konfig = if !pfad.exists() {
+        AppKonfig::default()
+    } else {
+        let text = std::fs::read_to_string(&pfad).map_err(|e| e.to_string())?;
+        aus_text(&text)?
+    };
+    if konfig.sandbox_pfad.is_none() {
+        if let Ok(auto_pfad) = standard_sandbox_anlegen() {
+            konfig.sandbox_pfad = Some(auto_pfad.to_string_lossy().to_string());
+        }
+    } else if let Some(vorhanden) = konfig.sandbox_pfad.as_deref() {
+        let _ = std::fs::create_dir_all(vorhanden);
     }
-    let text = std::fs::read_to_string(&pfad).map_err(|e| e.to_string())?;
-    aus_text(&text)
+    Ok(konfig)
 }
 
 /// Der Inhalt der Datei als Konfiguration — samt der einen Begradigung, die
