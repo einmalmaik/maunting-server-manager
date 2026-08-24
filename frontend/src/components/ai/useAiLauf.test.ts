@@ -18,7 +18,11 @@ vi.mock('@/api/ai', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/api/ai')>()
   return {
     ...original,
-    aiApi: { listAttachments: vi.fn() },
+    aiApi: {
+      ...original.aiApi,
+      listAttachments: vi.fn(),
+      stopRun: vi.fn().mockResolvedValue({ ok: true, stopped: true }),
+    },
     streamAiMessage: vi.fn(),
     attachAiRun: vi.fn(),
   }
@@ -279,5 +283,27 @@ describe('useAiLauf', () => {
     expect(signale).toHaveLength(1)
     expect(signale[0]?.aborted).toBe(true)
     expect(useToastStore.getState().toasts).toEqual([])
+  })
+
+  it('stoppeLauf bricht den aktiven Lauf ab und setzt streaming auf false', async () => {
+    const signale: (AbortSignal | undefined)[] = []
+    vi.mocked(streamAiMessage).mockImplementation((_payload, _onEvent, signal) => (
+      new Promise((_erfuellen, verwerfen) => {
+        signale.push(signal)
+        signal?.addEventListener('abort', () => {
+          verwerfen(new DOMException('Aborted', 'AbortError'))
+        })
+      })
+    ))
+    const { result } = baueLauf()
+
+    void act(() => { void result.current.sendContent('Was ist los?') })
+    await act(async () => {})
+    expect(result.current.streaming).toBe(true)
+
+    await act(async () => { await result.current.stoppeLauf() })
+
+    expect(result.current.streaming).toBe(false)
+    expect(signale[0]?.aborted).toBe(true)
   })
 })

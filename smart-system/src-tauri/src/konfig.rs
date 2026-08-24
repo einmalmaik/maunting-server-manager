@@ -62,6 +62,9 @@ pub struct AppKonfig {
     pub audio_autogain: bool,
     /// Software-Eingangsverstärkung der Sprachsitzung (1,0 = neutral).
     pub audio_verstaerkung: f32,
+    /// Ob Computer-Use (Maus, Tastatur, Bildschirmsteuerung) durch die KI
+    /// erlaubt ist. Vorgabe ist `false` (Datenschutz & Sicherheit).
+    pub computer_use_aktiv: bool,
 }
 
 /// Ermittelt den isolierten Standard-Sandbox-Pfad im Benutzerprofil (`%USERPROFILE%\MSS-Sandbox` bzw. `$HOME/MSS-Sandbox`).
@@ -104,6 +107,7 @@ impl Default for AppKonfig {
             audio_rauschen: true,
             audio_autogain: true,
             audio_verstaerkung: 1.0,
+            computer_use_aktiv: false,
         }
     }
 }
@@ -466,5 +470,15 @@ mod tests {
         assert!(backend_url_verboten("http://localhost.fremder.example"));
         assert!(backend_url_verboten("ftp://panel.example.com"));
         assert!(backend_url_verboten("panel.example.com"));
+    }
+
+    #[test]
+    fn computer_use_ist_standardmaessig_deaktiviert() {
+        let standard = AppKonfig::default();
+        assert!(!standard.computer_use_aktiv);
+
+        let alt = r#"{"eingerichtet": true}"#;
+        let geladen = aus_text(alt).unwrap();
+        assert!(!geladen.computer_use_aktiv);
     }
 }

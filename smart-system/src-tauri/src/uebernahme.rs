@@ -124,6 +124,7 @@ mod windows_impl {
         match name.to_ascii_lowercase().as_str() {
             "ctrl" | "control" | "strg" => Some(Key::Control),
             "alt" => Some(Key::Alt),
+            "altgr" => Some(Key::Alt),
             "shift" | "umschalt" => Some(Key::Shift),
             "super" | "win" | "meta" => Some(Key::Meta),
             "return" | "enter" | "eingabe" => Some(Key::Return),
@@ -138,6 +139,20 @@ mod windows_impl {
             "right" | "rechts" => Some(Key::RightArrow),
             "home" | "pos1" => Some(Key::Home),
             "end" | "ende" => Some(Key::End),
+            "pageup" | "bildauf" => Some(Key::PageUp),
+            "pagedown" | "bildab" => Some(Key::PageDown),
+            "f1" => Some(Key::F1),
+            "f2" => Some(Key::F2),
+            "f3" => Some(Key::F3),
+            "f4" => Some(Key::F4),
+            "f5" => Some(Key::F5),
+            "f6" => Some(Key::F6),
+            "f7" => Some(Key::F7),
+            "f8" => Some(Key::F8),
+            "f9" => Some(Key::F9),
+            "f10" => Some(Key::F10),
+            "f11" => Some(Key::F11),
+            "f12" => Some(Key::F12),
             einzeln => {
                 let mut zeichen = einzeln.chars();
                 match (zeichen.next(), zeichen.next()) {
@@ -173,6 +188,64 @@ mod windows_impl {
             let _ = enigo.key(key, Direction::Release);
         }
         ergebnis
+    }
+
+    /// Hält eine Tastenkombination (z. B. "W", "Shift+W", "Ctrl+Space") für die angegebene Zeitspanne gedrückt.
+    fn tasten_halten(enigo: &mut Enigo, folge: &str, dauer_ms: u64) -> Result<(), String> {
+        let teile: Vec<&str> = folge.split('+').filter(|t| !t.is_empty()).collect();
+        if teile.is_empty() {
+            return Err("Leere Tastenfolge".into());
+        }
+        let dauer = Duration::from_millis(dauer_ms.clamp(10, 10000));
+        let mut gedrueckt = Vec::new();
+        let mut fehler = None;
+        for name in &teile {
+            match taste(name) {
+                Some(key) => {
+                    if let Err(e) = enigo.key(key, Direction::Press) {
+                        fehler = Some(format!("Taste '{name}' nicht drueckbar: {e}"));
+                        break;
+                    }
+                    gedrueckt.push(key);
+                }
+                None => {
+                    fehler = Some(format!("Unbekannte Taste: '{name}'"));
+                    break;
+                }
+            }
+        }
+        if fehler.is_none() {
+            std::thread::sleep(dauer);
+        }
+        // Alle Tasten in umgekehrter Reihenfolge sicher wieder loslassen
+        for key in gedrueckt.into_iter().rev() {
+            let _ = enigo.key(key, Direction::Release);
+        }
+        if let Some(err) = fehler {
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Hält eine Maustaste für eine bestimmte Zeit gedrückt (z. B. Dauerfeuer, Aufladen, Ziehen).
+    fn maus_halten(enigo: &mut Enigo, knopf: Button, dauer_ms: u64) -> Result<(), String> {
+        let dauer = Duration::from_millis(dauer_ms.clamp(10, 10000));
+        enigo
+            .button(knopf, Direction::Press)
+            .map_err(|e| format!("Maustaste nicht drueckbar: {e}"))?;
+        std::thread::sleep(dauer);
+        let _ = enigo.button(knopf, Direction::Release);
+        Ok(())
+    }
+
+    /// Führt relative Mausbewegungen aus (z. B. 3D-Kamerasteuerung in Spielen).
+    fn maus_relativ(enigo: &mut Enigo, dx: i64, dy: i64) -> Result<(), String> {
+        let dx = i32::try_from(dx).unwrap_or(0).clamp(-2000, 2000);
+        let dy = i32::try_from(dy).unwrap_or(0).clamp(-2000, 2000);
+        enigo
+            .move_mouse(dx, dy, Coordinate::Rel)
+            .map_err(|e| format!("Relative Mausbewegung nicht moeglich: {e}"))?;
+        Ok(())
     }
 
     /// Rechnet Bildkoordinaten in echte Bildschirmpunkte zurueck.
@@ -231,6 +304,12 @@ mod windows_impl {
                 zeigen(&mut enigo, x, y)?;
                 Ok(json!({ "bewegt": true }))
             }
+            "maus_relativ" | "kamera_drehen" => {
+                let dx = argumente["dx"].as_i64().unwrap_or(0);
+                let dy = argumente["dy"].as_i64().unwrap_or(0);
+                maus_relativ(&mut enigo, dx, dy)?;
+                Ok(json!({ "relativ_bewegt": true, "dx": dx, "dy": dy }))
+            }
             "klick" | "doppelklick" | "rechtsklick" => {
                 zeigen(&mut enigo, x, y)?;
                 let knopf = if aktion == "rechtsklick" {
@@ -245,6 +324,18 @@ mod windows_impl {
                         .map_err(|e| format!("Klick nicht moeglich: {e}"))?;
                 }
                 Ok(json!({ "geklickt": aktion }))
+            }
+            "maus_halten" => {
+                zeigen(&mut enigo, x, y)?;
+                let knopf_str = argumente["knopf"].as_str().unwrap_or("links");
+                let knopf = match knopf_str {
+                    "rechts" | "right" => Button::Right,
+                    "mitte" | "middle" => Button::Middle,
+                    _ => Button::Left,
+                };
+                let dauer_ms = argumente["dauer_ms"].as_u64().unwrap_or(500);
+                maus_halten(&mut enigo, knopf, dauer_ms)?;
+                Ok(json!({ "maus_gehalten": knopf_str, "dauer_ms": dauer_ms }))
             }
             "tippen" => {
                 if text.is_empty() {
@@ -264,6 +355,19 @@ mod windows_impl {
                 }
                 tastenfolge(&mut enigo, text)?;
                 Ok(json!({ "gedrueckt": text }))
+            }
+            "taste_halten" => {
+                let taste_text = if !text.is_empty() {
+                    text
+                } else {
+                    argumente["tasten"].as_str().unwrap_or("")
+                };
+                if taste_text.is_empty() {
+                    return Err("Keine Tasten angegeben: 'text' oder 'tasten' fehlt".into());
+                }
+                let dauer_ms = argumente["dauer_ms"].as_u64().unwrap_or(500);
+                tasten_halten(&mut enigo, taste_text, dauer_ms)?;
+                Ok(json!({ "gehalten": taste_text, "dauer_ms": dauer_ms }))
             }
             "scrollen" => {
                 zeigen(&mut enigo, x, y)?;
@@ -376,5 +480,23 @@ mod tests {
         freigeben(999).unwrap();
         assert!(restsekunden() <= MAX_MINUTEN * 60);
         widerrufen().unwrap();
+    }
+
+    #[test]
+    fn taste_halten_und_maus_relativ_verlangen_freigabe_oder_autonom() {
+        widerrufen().unwrap();
+        let fehler_taste = steuern(&json!({
+            "aktion": "taste_halten",
+            "text": "w",
+            "dauer_ms": 100
+        })).unwrap_err();
+        assert!(fehler_taste.contains("Keine gueltige Freigabe"));
+
+        let fehler_maus = steuern(&json!({
+            "aktion": "maus_relativ",
+            "dx": 50,
+            "dy": -50
+        })).unwrap_err();
+        assert!(fehler_maus.contains("Keine gueltige Freigabe"));
     }
 }

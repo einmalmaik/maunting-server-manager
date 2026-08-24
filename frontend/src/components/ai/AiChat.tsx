@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Brain, Check, Loader2, Paperclip, Pencil, Send, Sparkles, Trash2, User, X, Zap } from 'lucide-react'
+import { Brain, Check, ListPlus, Loader2, Paperclip, Pencil, Send, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -191,6 +191,8 @@ export function AiChat() {
   // Steht der Verlauf unten? Nur dann wird nachgeschoben. Anfangs ja — ein
   // frisch geöffneter Chat zeigt die letzte Nachricht.
   const [amEnde, setAmEnde] = useState(true)
+  // Warteschlange fuer Nachrichten, die waehrend des Streams eingegeben werden.
+  const [queuedMessages, setQueuedMessages] = useState<string[]>([])
 
   const verlaufRef = useRef<HTMLDivElement | null>(null)
   const mountedRef = useRef(true)
@@ -310,7 +312,7 @@ export function AiChat() {
    */
   const {
     entries, setEntries, streaming, laufendeWerkzeuge, runId, setRunId,
-    merkeVorschlag, sendContent, haengeAn,
+    merkeVorschlag, sendContent, haengeAn, stoppeLauf,
   } = useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttachments })
 
   /**
@@ -447,10 +449,40 @@ export function AiChat() {
     }
   }
 
+  // Abarbeiten der Warteschlange, sobald der vorherige Lauf beendet ist
+  useEffect(() => {
+    if (!streaming && queuedMessages.length > 0 && providerId) {
+      const nextContent = queuedMessages[0]
+      setQueuedMessages((q) => q.slice(1))
+      void sendContent(nextContent)
+    }
+  }, [providerId, queuedMessages, sendContent, streaming])
+
+  const enqueueMessage = useCallback((content: string) => {
+    const text = content.trim()
+    if (!text) return
+    setQueuedMessages((q) => [...q, text])
+    setInput('')
+  }, [])
+
+  const sendImmediatelyAndInterrupt = useCallback(async (content: string) => {
+    const text = content.trim()
+    if (!text || !providerId) return
+    setInput('')
+    if (streaming) {
+      await stoppeLauf()
+    }
+    await sendContent(text)
+  }, [providerId, sendContent, stoppeLauf, streaming])
+
   const send = async (event: React.FormEvent) => {
     event.preventDefault()
     const content = input.trim()
-    if (!content || !providerId || streaming) return
+    if (!content || !providerId) return
+    if (streaming) {
+      enqueueMessage(content)
+      return
+    }
     setInput('')
     await sendContent(content)
   }
@@ -862,11 +894,46 @@ export function AiChat() {
             </div>
           )}
 
+          {queuedMessages.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-outline-variant/30 bg-surface-container-high/60 px-2.5 py-1.5 text-xs text-on-surface-variant">
+              <span className="flex items-center gap-1 font-medium text-on-surface">
+                <ListPlus className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+                Warteschlange ({queuedMessages.length}):
+              </span>
+              {queuedMessages.map((msg, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex max-w-[220px] items-center gap-1 rounded bg-surface-container-highest px-2 py-0.5 text-on-surface border border-outline-variant/40"
+                  title={msg}
+                >
+                  <span className="truncate">{msg}</span>
+                  <button
+                    type="button"
+                    className="text-on-surface-variant hover:text-status-danger transition-colors"
+                    onClick={() => setQueuedMessages((q) => q.filter((_, i) => i !== idx))}
+                    aria-label="Aus Warteschlange entfernen"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+              {queuedMessages.length > 1 && (
+                <button
+                  type="button"
+                  className="ml-auto text-[11px] text-on-surface-variant hover:text-status-danger underline transition-colors"
+                  onClick={() => setQueuedMessages([])}
+                >
+                  Alle leeren
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="flex items-end gap-2 rounded-2xl border border-outline-variant/50 bg-surface-container-low/50 p-2 focus-within:border-primary/50">
             {canAttach && (
               <label
                 className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-on-surface-variant transition-colors ${
-                  busy ? 'pointer-events-none opacity-50' : 'cursor-pointer hover:bg-surface-container-high hover:text-on-surface'
+                  uploading ? 'pointer-events-none opacity-50' : 'cursor-pointer hover:bg-surface-container-high hover:text-on-surface'
                 }`}
                 title={t('ai.attachments.add')}
               >
@@ -874,7 +941,7 @@ export function AiChat() {
                   ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                   : <Paperclip className="h-4 w-4" aria-hidden="true" />}
                 <input
-                  type="file" className="sr-only" disabled={busy} accept={ATTACHMENT_ACCEPT}
+                  type="file" className="sr-only" disabled={uploading} accept={ATTACHMENT_ACCEPT}
                   aria-label={t('ai.attachments.add')}
                   onChange={(event) => {
                     void uploadAttachment(event.target.files?.[0])
@@ -898,16 +965,18 @@ export function AiChat() {
                 event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`
               }}
               onKeyDown={(event) => {
-                // Enter sendet, Shift+Enter macht einen Umbruch. Bei aktiver
-                // IME-Komposition darf Enter nichts ausloesen, sonst schickt
-                // eine Zeichenauswahl die halbe Nachricht ab.
+                // Enter sendet/reiht ein, Shift+Enter macht einen Umbruch. Alt+Enter unterbricht und sendet sofort.
                 if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault()
-                  void send(event as unknown as React.FormEvent)
+                  if (event.altKey && streaming) {
+                    void sendImmediatelyAndInterrupt(input)
+                  } else {
+                    void send(event as unknown as React.FormEvent)
+                  }
                 }
               }}
-              placeholder={t('ai.chat.placeholder')}
-              disabled={busy || availableProviders.length === 0}
+              placeholder={streaming ? 'Nachricht in Warteschlange einreihen oder mit Alt+Enter sofort senden…' : t('ai.chat.placeholder')}
+              disabled={uploading || availableProviders.length === 0}
               aria-label={t('ai.chat.message')}
             />
             {/* Direkt neben dem Absenden, weil dort die Entscheidung faellt:
@@ -915,17 +984,56 @@ export function AiChat() {
                 die naechste Frage anders. In einer Einstellungsseite haette
                 dieselbe Zahl niemanden erreicht. */}
             <AiContextMeter status={contextStatus} />
-            <Button
-              type="submit"
-              size="sm"
-              className="h-9 w-9 shrink-0 rounded-full p-0"
-              disabled={busy || !input.trim() || !providerId}
-              aria-label={t('ai.chat.send')}
-            >
-              {streaming
-                ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                : <Send className="h-4 w-4" aria-hidden="true" />}
-            </Button>
+            {streaming ? (
+              !input.trim() ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  className="h-9 w-9 shrink-0 rounded-full p-0 flex items-center justify-center bg-status-danger/15 text-status-danger hover:bg-status-danger/25 border border-status-danger/30 transition-colors"
+                  onClick={() => void stoppeLauf()}
+                  aria-label="KI stoppen (abbrechen)"
+                  title="KI stoppen (abbrechen)"
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+                </Button>
+              ) : (
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-9 shrink-0 rounded-full px-2.5 text-xs flex items-center gap-1"
+                    onClick={() => enqueueMessage(input)}
+                    title="In Warteschlange einreihen (Enter)"
+                    aria-label="In Warteschlange einreihen"
+                  >
+                    <ListPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span className="hidden sm:inline">Einreihen</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    className="h-9 w-9 shrink-0 rounded-full p-0 flex items-center justify-center bg-status-danger/15 text-status-danger hover:bg-status-danger/25 border border-status-danger/30"
+                    onClick={() => void sendImmediatelyAndInterrupt(input)}
+                    title="Sofort senden & Unterbrechen (Alt+Enter)"
+                    aria-label="Sofort senden & Unterbrechen"
+                  >
+                    <Zap className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </div>
+              )
+            ) : (
+              <Button
+                type="submit"
+                size="sm"
+                className="h-9 w-9 shrink-0 rounded-full p-0"
+                disabled={uploading || !input.trim() || !providerId}
+                aria-label={t('ai.chat.send')}
+              >
+                <Send className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            )}
           </div>
 
           {availableProviders.length === 0 && (

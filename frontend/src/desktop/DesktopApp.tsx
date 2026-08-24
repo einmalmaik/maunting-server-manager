@@ -15,6 +15,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
+import { Eye, ShieldAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
@@ -155,9 +156,36 @@ export function DesktopApp() {
   } else {
     inhalt = (
       <Routes>
-        <Route path="/ai" element={<Hauptseite bereich="ki" />} />
-        <Route path="/gedaechtnis" element={<Hauptseite bereich="gedaechtnis" />} />
-        <Route path="/einstellungen" element={<Hauptseite bereich="einstellungen" />} />
+        <Route
+          path="/ai"
+          element={
+            <Hauptseite
+              bereich="ki"
+              konfig={konfig}
+              offeneUebernahme={offeneUebernahme}
+            />
+          }
+        />
+        <Route
+          path="/gedaechtnis"
+          element={
+            <Hauptseite
+              bereich="gedaechtnis"
+              konfig={konfig}
+              offeneUebernahme={offeneUebernahme}
+            />
+          }
+        />
+        <Route
+          path="/einstellungen"
+          element={
+            <Hauptseite
+              bereich="einstellungen"
+              konfig={konfig}
+              offeneUebernahme={offeneUebernahme}
+            />
+          }
+        />
         <Route path="*" element={<Navigate to="/ai" replace />} />
       </Routes>
     )
@@ -364,7 +392,15 @@ function SprachwacheHaupt() {
  * `pages/Ai` rechnet seine Höhe als `100dvh − (Topbar + Seitenränder)`, und
  * dieselbe Rechnung soll hier aufgehen.
  */
-function Hauptseite({ bereich }: { bereich: 'ki' | 'gedaechtnis' | 'einstellungen' }) {
+function Hauptseite({
+  bereich,
+  konfig,
+  offeneUebernahme,
+}: {
+  bereich: 'ki' | 'gedaechtnis' | 'einstellungen'
+  konfig: AppKonfig | null
+  offeneUebernahme: string | null
+}) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
@@ -378,11 +414,19 @@ function Hauptseite({ bereich }: { bereich: 'ki' | 'gedaechtnis' | 'einstellunge
   return (
     <>
       <header className="msm-topbar flex h-16 items-center justify-between px-4 md:px-6">
-        <div className="min-w-0">
-          <h1 className="truncate font-headline text-title-lg text-on-surface">{agentName}</h1>
-          <p className="truncate text-xs text-on-surface-variant">
-            {user ? t('mss.app.angemeldetAls', { name: user.username }) : ''}
-          </p>
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="min-w-0">
+            <h1 className="truncate font-headline text-title-lg text-on-surface">{agentName}</h1>
+            <p className="truncate text-xs text-on-surface-variant">
+              {user ? t('mss.app.angemeldetAls', { name: user.username }) : ''}
+            </p>
+          </div>
+          {offeneUebernahme && (
+            <div className="flex items-center gap-1.5 rounded-full border border-status-warning/40 bg-status-warning/10 px-2.5 py-1 text-xs font-medium text-status-warning animate-pulse">
+              <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{t('mss.einstellungen.banner.aktivitaetLaeuft')}</span>
+            </div>
+          )}
         </div>
         <nav className="flex items-center gap-2" aria-label={t('mss.app.bereiche')}>
           <Reiter
@@ -411,7 +455,24 @@ function Hauptseite({ bereich }: { bereich: 'ki' | 'gedaechtnis' | 'einstellunge
         <div className="relative z-10 w-full flex-1">
           {bereich === 'ki' ? (
             darfChatten ? (
-              <Ai />
+              <>
+                {konfig && !konfig.computer_use_aktiv && (
+                  <div className="mb-3 flex items-center justify-between rounded-lg border border-outline-variant/40 bg-surface-container-low/60 p-3 text-xs">
+                    <div className="flex items-center gap-2 text-on-surface-variant">
+                      <ShieldAlert className="h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
+                      <span>{t('mss.einstellungen.banner.computerUseHinweis')}</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => navigate('/einstellungen?tab=desktop')}
+                    >
+                      {t('mss.einstellungen.banner.computerUseLink')}
+                    </Button>
+                  </div>
+                )}
+                <Ai />
+              </>
             ) : (
               <KeinChatrecht />
             )

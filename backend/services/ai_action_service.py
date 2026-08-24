@@ -1250,15 +1250,8 @@ def _desktop_tool_definitions() -> list[dict]:
     return [
         _function(
             "desktop_dateien",
-            "Arbeitet mit Dateien im Sandbox-Ordner auf dem Rechner des "
-            "Benutzers. Pfade sind **immer** relativ zu diesem Ordner; "
-            "außerhalb geht nichts, und der Rechner weist es ab. Nutze das "
-            "für alles, was der Benutzer an den Dateien in diesem Ordner "
-            "möchte — lesen, anlegen, ändern, aufräumen. Gelöschtes landet "
-            "im Papierkorb, nicht im Nichts. Zum bloßen Ansehen anderswo auf "
-            "dem Rechner nimm desktop_system (absolute Pfade). "
-            "Nicht nutzen für Serverdateien; dafür gibt es eigene Werkzeuge "
-            "im Panel.",
+            "Arbeitet mit Dateien im Sandbox-Ordner auf dem Benutzer-Rechner "
+            "(Pfade immer relativ zur Sandbox). Gelöschtes landet im Papierkorb.",
             {
                 "aktion": {
                     "type": "string",
@@ -1267,27 +1260,24 @@ def _desktop_tool_definitions() -> list[dict]:
                 "pfad": {
                     "type": "string",
                     "maxLength": 400,
-                    "description": "Relativ zum Sandbox-Ordner. Leer = der Ordner selbst.",
+                    "description": "Relativ zur Sandbox. Leer = Ordner selbst.",
                 },
                 "ziel": {
                     "type": "string",
                     "maxLength": 400,
-                    "description": "Nur bei verschieben: der neue Pfad, ebenfalls relativ.",
+                    "description": "Bei verschieben: neuer Pfad.",
                 },
                 "inhalt": {
                     "type": "string",
                     "maxLength": MAX_DESKTOP_INHALT_CHARS,
-                    "description": "Nur bei schreiben: der vollständige neue Dateiinhalt.",
+                    "description": "Bei schreiben: Dateiinhalt.",
                 },
             },
             ["aktion"],
         ),
         _function(
             "desktop_launch_app",
-            "Startet ein Programm oder öffnet eine Adresse im Standardbrowser "
-            "des Benutzers. Für \"mach mir Discord auf\", \"öffne die Seite\". "
-            "Der Rechner entscheidet, was startbar ist; Systemwerkzeuge von "
-            "Windows sind ausgeschlossen.",
+            "Startet Programme oder Web-URLs im Standardbrowser des Benutzers.",
             {
                 "programm": {
                     "type": "string",
@@ -1297,38 +1287,30 @@ def _desktop_tool_definitions() -> list[dict]:
                 "url": {
                     "type": "string",
                     "maxLength": 2000,
-                    "description": "Adresse (http/https). Statt programm.",
+                    "description": "Web-Adresse (http/https).",
                 },
             },
             [],
         ),
         _function(
             "desktop_steuern",
-            "Übernimmt Maus und Tastatur. Beginne **immer** mit "
-            "aktion='freigabe': im autonomen Modus bekommst du sie sofort, "
-            "sonst bestätigt sie der Benutzer an seinem Rechner, befristet. "
-            "Erst danach greifen klick, tippen und der Rest; ohne Freigabe "
-            "wird jeder Aufruf abgewiesen. Nutze das erst, wenn es nicht "
-            "anders geht — Dateien, "
-            "Programme und Adressen laufen ohne Übernahme. Koordinaten sind "
-            "Bildpunkte des zuletzt gelieferten Bildschirmfotos, Ursprung "
-            "links oben, nur der Hauptbildschirm; sieh vor jedem Klick mit "
-            "desktop_system(aktion='bildschirm') nach.",
+            "Übernimmt Maus und Tastatur. Starte mit aktion='freigabe': "
+            "im autonomen Modus sofort erteilt, sonst vom Benutzer bestätigt. "
+            "Koordinaten sind Bildpunkte des Bildschirmfotos (Ursprung links oben, "
+            "Hauptbildschirm). Vor Klicks mit desktop_system(aktion='bildschirm') prüfen.",
             {
                 "aktion": {
                     "type": "string",
                     "enum": [
                         "freigabe", "klick", "doppelklick", "rechtsklick",
-                        "maus_bewegen", "tippen", "taste", "scrollen", "warten",
+                        "maus_halten", "maus_bewegen", "maus_relativ", "kamera_drehen",
+                        "tippen", "taste", "taste_halten", "scrollen", "warten",
                     ],
                 },
                 "anliegen": {
                     "type": "string",
                     "maxLength": 300,
-                    "description": (
-                        "Nur bei freigabe: was du tun willst, in einem Satz — "
-                        "der Benutzer liest genau das."
-                    ),
+                    "description": "Nur bei freigabe: Grund in einem Satz.",
                 },
                 "minuten": {
                     "type": "integer",
@@ -1336,38 +1318,39 @@ def _desktop_tool_definitions() -> list[dict]:
                     "maximum": 30,
                     "description": "Nur bei freigabe: Geltungsdauer.",
                 },
-                "x": {"type": "integer", "description": "Bildpunkt von links."},
-                "y": {"type": "integer", "description": "Bildpunkt von oben."},
+                "x": {"type": "integer", "description": "Bildpunkt X."},
+                "y": {"type": "integer", "description": "Bildpunkt Y."},
+                "dx": {"type": "integer", "description": "Relative X-Bewegung bei maus_relativ."},
+                "dy": {"type": "integer", "description": "Relative Y-Bewegung bei maus_relativ."},
+                "knopf": {
+                    "type": "string",
+                    "enum": ["links", "rechts", "mitte"],
+                    "description": "Mausknopf bei maus_halten.",
+                },
                 "text": {
                     "type": "string",
                     "maxLength": 2000,
-                    "description": (
-                        "Bei tippen der Text, bei taste die Tastenfolge "
-                        "(z. B. 'ctrl+s', 'Return')."
-                    ),
+                    "description": "Text bei tippen; Taste(n) bei taste/taste_halten (z. B. 'w', 'shift+w').",
+                },
+                "dauer_ms": {
+                    "type": "integer",
+                    "minimum": 10,
+                    "maximum": 10000,
+                    "description": "Haltedauer in ms bei taste_halten / maus_halten.",
                 },
                 "menge": {
                     "type": "integer",
-                    "description": "Bei scrollen die Rasten, bei warten die Sekunden.",
+                    "description": "Scroll-Rasten oder Warte-Sekunden.",
                 },
             },
             ["aktion"],
         ),
         _function(
             "desktop_system",
-            "Sieht den Rechner des Benutzers an — nur lesend, nie ändernd. "
-            "aktion='laufwerke': alle Laufwerke mit Gesamt- und freiem Platz "
-            "(\"wie voll ist meine C-Platte\"). aktion='verzeichnis': listet "
-            "einen Ordner irgendwo auf dem Rechner. aktion='groesste': findet "
-            "die Platzfresser unter einem Pfad (größte Dateien und "
-            "Unterordner; lange Läufe werden nach Zeitbudget gekürzt und als "
-            "gekürzt gemeldet). aktion='bildschirm': ein Foto des "
-            "Hauptbildschirms — dafür, was gerade zu sehen ist, und immer "
-            "direkt vor einem Klick. aktion='virenscan': prüft Datei oder "
-            "Ordner mit dem Virenschutz; gemeldet wird nur, entfernt nichts. "
-            "Pfade sind hier **absolut** (z. B. 'C:\\Users\\Name\\Downloads') "
-            "— anders als bei desktop_dateien. Löschen geht über "
-            "desktop_aufraeumen.",
+            "Sieht den Benutzer-Rechner an (lesend). aktion='laufwerke': Speicherplatz. "
+            "aktion='verzeichnis': Ordnerinhalt. aktion='groesste': Platzfresser. "
+            "aktion='bildschirm': Screenshot des Hauptbildschirms. aktion='virenscan': Virenprüfung. "
+            "Pfade sind absolut.",
             {
                 "aktion": {
                     "type": "string",
@@ -1379,24 +1362,15 @@ def _desktop_tool_definitions() -> list[dict]:
                 "pfad": {
                     "type": "string",
                     "maxLength": 400,
-                    "description": (
-                        "Absoluter Pfad; nötig bei verzeichnis, groesste "
-                        "und virenscan."
-                    ),
+                    "description": "Absoluter Pfad.",
                 },
             },
             ["aktion"],
         ),
         _function(
             "desktop_aufraeumen",
-            "Löscht auf dem Rechner, auch außerhalb des Sandbox-Ordners. "
-            "Kandidaten vorher mit desktop_system(groesste) suchen und nennen. "
-            "**'papierkorb' ist der Normalfall** — sag danach, dass es im "
-            "Papierkorb liegt und zurückgeholt werden kann. 'endgueltig' nur, "
-            "wenn der Benutzer es ausdrücklich verlangt hat (\"endgültig\", "
-            "\"ganz weg\"); sonst nie. 'papierkorb_leeren' braucht keine "
-            "Pfade und gibt den Platz erst wirklich frei. Windows und "
-            "Programmordner sind gesperrt.",
+            "Löscht Pfade auf dem Rechner in den Papierkorb (auch außerhalb Sandbox). "
+            "'papierkorb' ist Standard. 'endgueltig' nur auf ausdrücklichen Wunsch.",
             {
                 "aktion": {
                     "type": "string",
@@ -1411,7 +1385,7 @@ def _desktop_tool_definitions() -> list[dict]:
                 "grund": {
                     "type": "string",
                     "maxLength": 200,
-                    "description": "Wofür, in einem Satz — der Benutzer liest ihn.",
+                    "description": "Begründung für den Benutzer.",
                 },
             },
             ["aktion", "grund"],

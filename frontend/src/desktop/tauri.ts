@@ -37,6 +37,8 @@ export interface AppKonfig {
   audio_autogain: boolean
   /** Software-Eingangsverstärkung der Sprachsitzung, 1 = neutral. */
   audio_verstaerkung: number
+  /** Ob Computer-Use (Maus, Tastatur, Bildschirmsteuerung) durch die KI erlaubt ist. */
+  computer_use_aktiv: boolean
 }
 
 export async function konfigLaden(): Promise<AppKonfig> {

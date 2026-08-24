@@ -505,8 +505,27 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
     }
   }, [denken.an, denken.stufe, providerId, streaming, verfolge])
 
+  /** Bricht den laufenden Strom und den serverseitigen Lauf kontrolliert ab. */
+  const stoppeLauf = useCallback(async () => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setStreaming(false)
+    streamingRef.current = false
+    setLaufendeWerkzeuge([])
+    setEntries((current) => current.map((entry) => (
+      entry.kind === 'message' && entry.message.status === 'streaming'
+        ? { ...entry, message: { ...entry.message, status: 'complete' } }
+        : entry
+    )))
+    try {
+      await aiApi.stopRun('primary')
+    } catch {
+      // Stoppen schlägt fehl, wenn der Lauf bereits ruht — harmlos
+    }
+  }, [])
+
   return {
     entries, setEntries, streaming, laufendeWerkzeuge, runId, setRunId,
-    merkeVorschlag, sendContent, haengeAn,
+    merkeVorschlag, sendContent, haengeAn, stoppeLauf,
   }
 }

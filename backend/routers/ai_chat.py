@@ -582,6 +582,21 @@ def guardian_uebernehmen(
     return {"aborted": beendet}
 
 
+@router.post("/stop")
+def stop_active_run(
+    kind: str = Query("primary"),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Bricht den derzeit aktiven Lauf dieser Unterhaltung kontrolliert ab."""
+    fenster_art = _art(kind)
+    conversation = ai_chat_service.get_or_create_conversation(db, user, fenster_art)
+    ai_run_service.vorgaenger_abloesen(db, conversation_id=conversation.id)
+    db.commit()
+    return {"ok": True, "stopped": True}
+
+
 @router.get("/run/{run_id}/stream")
 def attach_run(
     run_id: str,

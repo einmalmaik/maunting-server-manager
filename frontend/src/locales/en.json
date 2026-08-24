@@ -3478,8 +3478,9 @@
   },
   "privacyPolicy": {
     "title": "Privacy policy",
-    "intro": "This policy describes the data flows supported by Maunting Service Manager. The operator of this self-hosted instance selects optional providers and is responsible for the instance-specific legal basis, notices, retention periods, and contact details.",
-    "callout": "Summary: MSM minimizes data, protects sensitive credentials, and does not hide infrastructure metadata that is required to operate servers and nodes.",
+    "slogan": "Security requires trust",
+    "intro": "In a digital world where privacy is increasingly lost and every digital interaction can be monitored, Maunting Studios stands for the opposite: protection requires trust. This policy describes transparently and comprehensively all data flows of the Maunting Service Manager and the Desktop App. We never track or surveil anyone covertly: all actions are transparent, auditable, self-hosted, and remain under the complete control of the user.",
+    "callout": "Summary: Maunting Studios – Security requires trust. Complete data sovereignty, no covert tracking, high-risk capabilities (like Computer-Use) are disabled by default, and every AI action remains transparently controllable and switchable.",
     "documentLabel": "MSM privacy",
     "summaryLabel": "Data protection",
     "versionLabel": "Version",
@@ -3487,7 +3488,7 @@
     "sections": {
       "scope": {
         "heading": "1. Scope and operator",
-        "body": "MSM is self-hosted. MauntingStudios provides the software; the organization operating this instance determines purposes, optional integrations, access rules, and retention for its deployment."
+        "body": "MSM is self-hosted. Maunting Studios provides the software; the organization operating this instance determines purposes, optional integrations, access rules, and retention for its deployment."
       },
       "accounts": {
         "heading": "2. Accounts, authentication, and authorization",
@@ -3549,6 +3550,7 @@
         "heading": "7. The desktop app (Maunting Smart System)",
         "body": "The Maunting Smart System is an optional Windows app that runs on the user’s computer and works there on behalf of the AI. It is not a second panel but the same account with a computer attached: pairing happens through a code issued by the panel, and without the “AI tools on your own computer” permission it fetches no jobs at all. This section describes what stays on the machine and what leaves it. All outgoing connections go exclusively to the panel address entered during setup — there is no updater, no telemetry and no hard-wired third party.",
         "items": {
+          "computerUse": "Computer-Use & Desktop Control (disabled by default): Computer-Use is completely deactivated upon installation. Only after your explicit activation in the settings and confirmation of the educational dialog can the AI control mouse and keyboard or inspect the screen. With autonomous mode disabled, every single action requires manual on-screen confirmation.",
           "wakeword": "Wake word (off by default): once enabled, the app continuously reads the microphone and compares what it hears against a reference model — entirely on the machine, with no network connection. Until the word is recognised, not a single audio sample leaves the process, and nothing is recorded. The price of this listening is continuous CPU load (measured at roughly one sixth of a core).",
           "wakewordAufnahmen": "Calibration voice recordings: to train the model you speak your chosen name several times. These are real voice recordings and are kept indefinitely as WAV files in the local app data directory, together with the reference model derived from them. They are never transmitted. They are removed by “Reset” in the wake word settings or by uninstalling.",
           "sprachsitzung": "Voice session: only after the wake word is recognised (or after the voice shortcut is pressed) does the app open the audio channel to the panel and transmit your utterance. The panel forwards it to the configured model provider for transcription; the spoken reply is additionally produced by a speech provider. From that point the statements in section 6 about external model providers apply.",
@@ -4889,6 +4891,21 @@
     },
     "einstellungen": {
       "desktopIntegration": "Desktop integration",
+      "computerUse": {
+        "titel": "Computer-Use & Desktop Control",
+        "beschreibung": "Allows the AI to control mouse and keyboard and inspect the screen. Disabled by default to protect your privacy.",
+        "statusAktiv": "Enabled",
+        "statusDeaktiviert": "Disabled (Recommended)",
+        "aktivierenTitel": "Enable Computer-Use?",
+        "aktivierenWarnung": "Important Security Notice: Enabling Computer-Use allows the AI to perform mouse movements, clicks, keystrokes, and screenshots on your machine after permission or in autonomous mode. With autonomous mode disabled, you must confirm each action manually in chat or via a confirmation dialog. Do you want to enable Computer-Use now?",
+        "aktivierenBestaetigen": "Yes, enable Computer-Use",
+        "abbrechen": "Cancel"
+      },
+      "banner": {
+        "computerUseHinweis": "Computer-Use is currently disabled. The AI cannot control or inspect your desktop.",
+        "computerUseLink": "View in Settings",
+        "aktivitaetLaeuft": "AI performing desktop action"
+      },
       "autostart": "Start with Windows",
       "autostartHinweis": "The app starts minimised to the tray — only then does the wake word listen from the start.",
       "autostartFehler": "Autostart could not be changed.",

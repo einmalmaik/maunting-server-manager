@@ -46,6 +46,7 @@ const KONFIG = {
   audio_rauschen: true,
   audio_autogain: true,
   audio_verstaerkung: 1,
+  computer_use_aktiv: false,
 }
 
 function json(status: number, koerper: unknown): Response {

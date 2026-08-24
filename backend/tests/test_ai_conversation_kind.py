@@ -466,3 +466,36 @@ class TestHeilungImHintergrund:
 
         db.refresh(run)
         assert run.status == "running"
+
+    def test_stop_active_run_beendet_offenen_lauf(
+        self, db: Session, client, regular_user: User, user_cookies: dict
+    ) -> None:
+        """Der Stop-Endpoint beendet den aktiven Lauf der Unterhaltung."""
+        rolle = Role(name=f"ki-stop-{regular_user.id}", description=None, is_system=False)
+        db.add(rolle)
+        db.flush()
+        db.add(RolePermission(role_id=rolle.id, permission_key="ai.chat.use"))
+        db.commit()
+        set_user_roles(db, regular_user, [rolle.id])
+
+        chat = ai_chat_service.get_or_create_conversation(db, regular_user, "primary")
+        run = AiRun(
+            id="run-zu-stoppen",
+            user_id=regular_user.id,
+            conversation_id=chat.id,
+            status="running",
+        )
+        db.add(run)
+        db.commit()
+
+        csrf = user_cookies.get("__Secure-csrf_token", "")
+        res = client.post(
+            "/api/ai/conversation/stop?kind=primary",
+            cookies=user_cookies,
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert res.status_code == 200
+        assert res.json() == {"ok": True, "stopped": True}
+
+        db.refresh(run)
+        assert run.status == "cancelled"

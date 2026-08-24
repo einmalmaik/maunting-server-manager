@@ -1090,6 +1090,11 @@ export const aiApi = {
     if (before) suche.set('before', before)
     return api<AiConversationDetail>(`/ai/conversation?${suche.toString()}`)
   },
+  /** Bricht den aktiven Lauf der Unterhaltung serverseitig kontrolliert ab. */
+  stopRun: (kind: AiConversationKind = 'primary') =>
+    api<{ ok: boolean; stopped: boolean }>(`/ai/conversation/stop?kind=${encodeURIComponent(kind)}`, {
+      method: 'POST',
+    }),
   clearHistory: () => api('/ai/conversation/messages', { method: 'DELETE' }),
   /**
    * Nimmt eine eigene Nachricht zurück: sie und alles Spätere verschwinden.

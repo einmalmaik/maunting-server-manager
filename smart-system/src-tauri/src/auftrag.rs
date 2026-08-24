@@ -22,6 +22,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 use crate::aufraeumen;
+use crate::konfig;
 use crate::sandbox;
 use crate::system;
 use crate::uebernahme;
@@ -151,6 +152,14 @@ fn steuern(
     argumente: &Value,
     auftrag_id: Option<&str>,
 ) -> Result<Ergebnis, String> {
+    let app_konfig = konfig::laden(app).unwrap_or_default();
+    if !app_konfig.computer_use_aktiv {
+        return Err(
+            "Computer-Use ist in den Desktop-Einstellungen deaktiviert. Der \
+             Benutzer kann es in den Einstellungen aktivieren."
+                .into(),
+        );
+    }
     if argumente["aktion"].as_str() != Some("freigabe") {
         return uebernahme::steuern(argumente).map(Some);
     }

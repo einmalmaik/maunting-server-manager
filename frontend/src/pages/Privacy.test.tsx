@@ -133,19 +133,19 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die zur Desktop-App gehoerende Fassung 2.6 vom 2026-08-23 aus', () => {
+  it('weist die zur Desktop-App gehoerende Fassung 2.7 vom 2026-08-24 aus', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(`${i18n.t('privacyPolicy.versionLabel')} v2.6`),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?2\\.7`)),
     ).toBeInTheDocument();
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-08-23');
-    expect(stand).toHaveTextContent('2026-08-23');
+    expect(stand).toHaveAttribute('datetime', '2026-08-24');
+    expect(stand).toHaveTextContent('2026-08-24');
   });
 
   /**
@@ -242,6 +242,18 @@ describe('Privacy nach hartem Reload', () => {
     // Und die beiden Tatsachen ausdruecklich, nicht nur irgendein Text:
     expect(dauerhaft).toMatch(/dauerhaft/i);
     expect(aufnahmen).toMatch(/unbefristet/i);
+  });
+
+  it('nennt die Standard-Deaktivierung und Bestaetigungspflicht von Computer-Use', () => {
+    renderPrivacy();
+
+    const computerUse = i18n.t(
+      'privacyPolicy.sections.desktopApp.items.computerUse',
+    );
+    expect(computerUse).not.toContain('privacyPolicy.');
+    expect(computerUse.length).toBeGreaterThan(40);
+    expect(screen.getByText(computerUse)).toBeInTheDocument();
+    expect(computerUse).toMatch(/deaktiviert/i);
   });
 
   /**

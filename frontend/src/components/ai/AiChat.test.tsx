@@ -40,6 +40,7 @@ vi.mock('@/api/ai', async (importOriginal) => {
       getContextStatus: vi.fn(),
       listWorkers: vi.fn(),
       typing: vi.fn(),
+      stopRun: vi.fn().mockResolvedValue({ ok: true, stopped: true }),
     },
     streamAiMessage: vi.fn(),
     attachAiRun: vi.fn(),
@@ -1133,4 +1134,45 @@ describe('AiChat', () => {
     expect(screen.getByText('Erste Zeile der Antwort.')).toBeInTheDocument()
   })
 
+  it('zeigt waehrend des Streams einen Stopp-Knopf und bricht den Lauf auf Klick ab', async () => {
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(streamAiMessage).mockReset().mockImplementation(() => new Promise(() => {}))
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
+    await screen.findByText('synthetic-note.txt')
+
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Langer Auftrag' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    // Der Stopp-Knopf ist sichtbar
+    const stopButton = await screen.findByRole('button', { name: 'KI stoppen (abbrechen)' })
+    expect(stopButton).toBeInTheDocument()
+
+    // Klick auf Stopp ruft stopRun auf
+    fireEvent.click(stopButton)
+    expect(aiApi.stopRun).toHaveBeenCalledWith('primary')
+  })
+
+  it('ermoeglicht das Einreihen von Nachrichten in die Warteschlange waehrend des Streams', async () => {
+    const { streamAiMessage } = await import('@/api/ai')
+    vi.mocked(streamAiMessage).mockReset().mockImplementation(() => new Promise(() => {}))
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
+    await screen.findByText('synthetic-note.txt')
+
+    // Erste Nachricht starten
+    fireEvent.change(screen.getByLabelText('Nachricht'), { target: { value: 'Erste Nachricht' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Senden' }))
+
+    // Eingabefeld bleibt entsperrt und laesst zweite Nachricht tippen
+    const textarea = screen.getByLabelText('Nachricht')
+    expect(textarea).not.toBeDisabled()
+    fireEvent.change(textarea, { target: { value: 'Zweite Nachricht in Queue' } })
+
+    // Einreihen-Knopf klicken
+    const einreihenButton = await screen.findByRole('button', { name: 'In Warteschlange einreihen' })
+    fireEvent.click(einreihenButton)
+
+    // Warteschlangen-Anzeige sichtbar
+    expect(await screen.findByText(/Warteschlange \(1\)/)).toBeInTheDocument()
+    expect(screen.getByText('Zweite Nachricht in Queue')).toBeInTheDocument()
+  })
 })
