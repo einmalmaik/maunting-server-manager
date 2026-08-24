@@ -338,6 +338,10 @@ export interface AiWebSearchStatus {
   configured: boolean
 }
 
+export interface AiGuardianPolicy {
+  enabled: boolean
+}
+
 export interface AiProviderTestResult {
   ok: boolean
   code: string | null
@@ -1266,6 +1270,10 @@ export const aiApi = {
   getLearningPolicy: () => api<AiLearningPolicy>('/ai/settings/learning'),
   setLearningPolicy: (policy: AiLearningPolicy['policy']) => api<AiLearningPolicy>('/ai/settings/learning', {
     method: 'PUT', body: JSON.stringify({ policy }),
+  }),
+  getGuardianPolicy: () => api<AiGuardianPolicy>('/ai/settings/guardian'),
+  setGuardianPolicy: (enabled: boolean) => api<AiGuardianPolicy>('/ai/settings/guardian', {
+    method: 'PUT', body: JSON.stringify({ enabled }),
   }),
   getContextPolicy: () => api<AiContextPolicy>('/ai/settings/context'),
   setContextPolicy: (percent: number) => api<AiContextPolicy>('/ai/settings/context', {

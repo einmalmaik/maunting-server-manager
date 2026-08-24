@@ -857,6 +857,14 @@ angefasst — auch dann nicht, wenn der Lauf nur an seinem Rundenbudget endete.
 - **Ohne Freigabe passiert nichts** — kein Lauf, kein Anbieteraufruf, keine
   Tokens. Der Vorfall wird nur vorgemerkt und beim nächsten Chat des Benutzers
   als Meldung des Panels erwähnt.
+- **Modulare Trennung & Datensouveränität:** In den Panel-Einstellungen unter
+  **KI → Funktionen & Wissen** kann die Verknüpfung zwischen KI und Guardian
+  Engine modular gesteuert werden (Standard: deaktiviert / isoliert). Ist sie
+  deaktiviert, arbeitet Guardian vollständig isoliert als regelbasierter
+  Sicherheitsdienst: es werden keinerlei KI-Token verbraucht, keine automatischen
+  Reparaturaufträge gestartet und sämtliche Guardian-Werkzeuge
+  (`read_guardian_incidents`, `propose_guardian_tuning`) sind backendseitig
+  gesperrt und aus allen Chat- und Modell-Prompts getrennt.
 - **Die Reparatur läuft in einem eigenen Fenster**, nicht im Dauerchat. Jeder
   Benutzer hat zwei Unterhaltungen: den Chat und das Guardian-Fenster
   (`/ai?ansicht=guardian`). Damit würgen sich beide nicht mehr gegenseitig ab —

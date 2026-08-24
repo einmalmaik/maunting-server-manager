@@ -166,7 +166,11 @@ def auftrag_anlegen(
     Anspruchnahme davor. Zwei Wege waeren zwei Stellen, an denen der Anspruch
     vergessen werden kann.
     """
+    from services.ai_guardian_settings import is_guardian_ai_enabled
     from sqlalchemy.exc import IntegrityError
+
+    if not is_guardian_ai_enabled():
+        return None
 
     jetzt = _jetzt()
     auftrag = AiGuardianRepair(
@@ -831,7 +835,11 @@ async def faellige_bearbeiten(db: Session) -> int:
     laeuft neben der Guardian-Reconciliation, und ein abgebrochener
     Scheduler-Auftrag zieht keine Vorfaelle mehr ein.
     """
+    from services.ai_guardian_settings import is_guardian_ai_enabled
     from services import ai_run_service
+
+    if not is_guardian_ai_enabled():
+        return 0
 
     if ai_run_service.http_client() is None:
         # Keine laufende Anwendung, also keine Ereignisschleife, auf der ein

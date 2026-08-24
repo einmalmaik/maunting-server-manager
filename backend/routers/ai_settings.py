@@ -18,6 +18,8 @@ from schemas.ai_settings import (
     AiCostPolicyStatus,
     AiCostPolicyUpdate,
     AiDesktopSettings,
+    AiGuardianPolicyStatus,
+    AiGuardianPolicyUpdate,
     AiLearningPolicyStatus,
     AiLearningPolicyUpdate,
     AiRoleLimitsResponse,
@@ -251,6 +253,48 @@ def set_learning_policy(
     return AiLearningPolicyStatus(
         policy=current, pending_count=len(ai_skill_service.pending_skills(db))
     )
+
+
+@router.get("/settings/guardian", response_model=AiGuardianPolicyStatus)
+def get_guardian_policy(
+    _: User = Depends(require_global("panel.settings.read")),
+) -> AiGuardianPolicyStatus:
+    """Ob die KI mit der Guardian Engine interagieren darf."""
+    from services import ai_guardian_settings
+
+    return AiGuardianPolicyStatus(
+        enabled=ai_guardian_settings.is_guardian_ai_enabled()
+    )
+
+
+@router.put("/settings/guardian", response_model=AiGuardianPolicyStatus)
+def set_guardian_policy(
+    payload: AiGuardianPolicyUpdate,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_global("panel.settings.write")),
+    _: None = Depends(verify_csrf),
+) -> AiGuardianPolicyStatus:
+    """Schaltet die Guardian-KI-Integration panelweit an oder aus.
+
+    Ist sie aus, arbeitet die Guardian Engine vollkommen autark und isoliert
+    ohne KI — es werden keine KI-Token verbraucht und keine automatischen
+    Heilungsläufe gestartet.
+    """
+    from services import ai_guardian_settings
+
+    enabled = ai_guardian_settings.set_guardian_ai_enabled(payload.enabled)
+
+    audit_service.record_privileged_action(
+        db,
+        user_id=actor.id,
+        action="ai.guardian.integration.updated",
+        target_type="panel_setting",
+        target_id=None,
+        details={"enabled": enabled},
+    )
+    db.commit()
+    return AiGuardianPolicyStatus(enabled=enabled)
+
 
 
 @router.get("/settings/context", response_model=AiContextPolicyStatus)

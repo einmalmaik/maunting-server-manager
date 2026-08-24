@@ -21,6 +21,7 @@ import { toast } from '@/stores/toastStore'
 import { AiContextSettings } from './AiContextSettings'
 import { AiCostSettings } from './AiCostSettings'
 import { AiWorkerSettings } from './AiWorkerSettings'
+import { AiGuardianSettings } from './AiGuardianSettings'
 import { AiLearningSettings } from './AiLearningSettings'
 import { AiProvidersSettings } from './AiProvidersSettings'
 import { AiUsageSettings } from './AiUsageSettings'
@@ -318,6 +319,7 @@ export function AiTab() {
 
       {activeTab === 'features' && (
         <div className="space-y-6">
+          <AiGuardianSettings canWrite={canWrite} />
           <AiWebSearchSettings canWrite={canWrite} />
           <AiLearningSettings canWrite={canWrite} />
 

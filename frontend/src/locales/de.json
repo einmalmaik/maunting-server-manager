@@ -130,6 +130,17 @@
         "save": "Worker-Deckel konnten nicht gespeichert werden."
       }
     },
+    "guardian": {
+      "title": "Guardian-Engine & KI-Integration",
+      "description": "Legt fest, ob die KI mit der Guardian Engine interagieren und automatische Reparatur-Läufe ausführen darf. Ist die Integration deaktiviert, arbeitet die Guardian Engine vollkommen isoliert ohne KI — es werden weder Token verbraucht noch Guardian-Werkzeuge im Chat bereitgestellt.",
+      "statusEnabled": "KI-Integration aktiv",
+      "statusDisabled": "KI-Integration deaktiviert (isoliert)",
+      "saved": "Guardian-KI-Einstellung gespeichert.",
+      "errors": {
+        "load": "Guardian-Einstellung konnte nicht geladen werden.",
+        "save": "Guardian-Einstellung konnte nicht gespeichert werden."
+      }
+    },
     "tabsAriaLabel": "KI-Einstellungen Bereiche",
     "subtabs": {
       "providers": "KI-Anbieter",

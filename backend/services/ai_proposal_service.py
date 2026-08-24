@@ -1532,10 +1532,14 @@ def _guardian_tuning_payload(server: Server, arguments: dict) -> tuple[dict, dic
     zugleich zuruecksetzt und setzt, haette zwei Bedeutungen und keine davon
     ganz.
     """
+    from services.ai_guardian_settings import is_guardian_ai_enabled
     from services.guardian_runtime_compiler import (
         GUARDIAN_STELLSCHRAUBEN,
         gelesene_uebersteuerung,
     )
+
+    if not is_guardian_ai_enabled():
+        raise AiActionValidationError("Guardian-KI-Integration ist deaktiviert")
 
     # `reason` und `expected_effect` sind hier schon abgetrennt (`rest`), wie
     # bei jedem Payload-Bauer.

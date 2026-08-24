@@ -363,6 +363,10 @@ def briefing_nachricht(db: Session, user: User) -> tuple[str, list[int]] | None:
     ``None`` heisst: nichts Offenes, kein Block, keine Zeichen im Kontext.
     """
     import json
+    from services.ai_guardian_settings import is_guardian_ai_enabled
+
+    if not is_guardian_ai_enabled():
+        return None
 
     vorfaelle = offene_briefings(db, user)
     if not vorfaelle:
@@ -572,7 +576,12 @@ async def heilungslauf_starten(
 
     ``None`` heisst immer: es wurde nichts angelegt und nichts verbraucht.
     """
+    from services.ai_guardian_settings import is_guardian_ai_enabled
     from services.ai_stream_service import lauf_beginnen
+
+    if not is_guardian_ai_enabled():
+        logger.debug("Guardian-Heilung uebersprungen: KI-Integration deaktiviert")
+        return None
 
     client = ai_run_service.http_client()
     if client is None:
@@ -769,6 +778,11 @@ async def vorfaelle_bearbeiten(db: Session) -> int:
     abgeschrieben, sondern aus derselben `_freigabe_bedingungen`. Wer sie enger
     fasst, macht aus einer Beschleunigung eine stille Rechteänderung.
     """
+    from services.ai_guardian_settings import is_guardian_ai_enabled
+
+    if not is_guardian_ai_enabled():
+        return 0
+
     from models import AiAutonomyGrant, AiGuardianRepair
 
     # Schon uebernommen — von wem auch immer. Zweimal denselben Vorfall zu

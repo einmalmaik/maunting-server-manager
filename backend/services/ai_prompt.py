@@ -1478,8 +1478,16 @@ def build(*, gesprochen: bool = False, rolle: str = "voll", desktop: bool = Fals
         raise ValueError(f"Unbekannte Prompt-Rolle: {rolle}")
     if gesprochen and rolle == "worker":
         raise ValueError("Ein Worker-Lauf wird nie gesprochen")
+
+    from services.ai_guardian_settings import is_guardian_ai_enabled
+
+    guardian_aktiv = is_guardian_ai_enabled()
     basis = ROLLEN_BLOECKE[rolle]
-    teile = [block for block in basis if not (gesprochen and block in NUR_GETIPPT)]
+    teile = [
+        block for block in basis
+        if not (gesprochen and block in NUR_GETIPPT)
+        and not (not guardian_aktiv and block == GUARDIAN)
+    ]
     if desktop:
         # Vor `GESPROCHEN`, falls beides zutrifft: jenes sagt, wie dieser Kanal
         # zu bedienen ist, und soll das Zuletztgelesene bleiben.

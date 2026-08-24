@@ -912,6 +912,15 @@ GUARDIAN_HEILUNG_TOOLS = frozenset({
 })
 
 
+#: Werkzeuge, die der KI Interaktion mit der Guardian Engine ermöglichen.
+#: Sind bei deaktivierter Guardian-KI-Integration panelweit ausgeschlossen.
+GUARDIAN_TOOLS = frozenset({
+    "read_guardian_incidents",
+    "propose_guardian_tuning",
+})
+
+
+
 # Werkzeuge, die in einem Heilungslauf ein nachweislich geglecktes Backup
 # voraussetzen — juenger als der Vorfall, mit gesetztem `verified_at`.
 #

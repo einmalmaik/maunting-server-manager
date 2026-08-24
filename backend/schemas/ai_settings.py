@@ -297,3 +297,14 @@ class AiDesktopSettings(BaseModel):
     """
 
     systembereich: Literal["aus", "lesen", "schreiben"]
+
+
+class AiGuardianPolicyStatus(BaseModel):
+    """Ob die KI mit der Guardian Engine interagieren darf."""
+
+    enabled: bool
+
+
+class AiGuardianPolicyUpdate(BaseModel):
+    enabled: bool
+

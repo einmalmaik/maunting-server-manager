@@ -130,6 +130,17 @@
         "save": "Worker limits could not be saved."
       }
     },
+    "guardian": {
+      "title": "Guardian Engine & AI Integration",
+      "description": "Controls whether the AI is allowed to interact with the Guardian Engine and execute automated repair runs. When disabled, the Guardian Engine runs completely isolated without AI — no tokens are consumed and no Guardian tools are exposed in chat.",
+      "statusEnabled": "AI integration active",
+      "statusDisabled": "AI integration disabled (isolated)",
+      "saved": "Guardian AI setting saved.",
+      "errors": {
+        "load": "Failed to load Guardian setting.",
+        "save": "Failed to save Guardian setting."
+      }
+    },
     "tabsAriaLabel": "AI Settings Sections",
     "subtabs": {
       "providers": "AI Providers",

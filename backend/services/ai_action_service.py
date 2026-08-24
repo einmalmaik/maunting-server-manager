@@ -1980,10 +1980,16 @@ def angebotene_werkzeuge(db: Session, user: User) -> frozenset[str]:
     verlangt = {key for name in WERKZEUGE for key in angebotsrechte(name)}
     gehalten = permission_service.rechte_irgendwo(db, user, verlangt)
 
-    return frozenset(
+    from services.ai_guardian_settings import is_guardian_ai_enabled
+    from services.ai_tool_registry import GUARDIAN_TOOLS
+
+    verfuegbar = set(
         name for name in WERKZEUGE
         if not angebotsrechte(name) or any(key in gehalten for key in angebotsrechte(name))
     )
+    if not is_guardian_ai_enabled():
+        verfuegbar -= GUARDIAN_TOOLS
+    return frozenset(verfuegbar)
 
 
 #: Wieviele Wiederherstellungsversuche eines Vorfalls die KI zu sehen bekommt.
@@ -3585,6 +3591,11 @@ def _execute_server_context_tool(
 
     if tool_name == "read_guardian_incidents":
         _require_no_arguments(tool_name, arguments)
+        from services.ai_guardian_settings import is_guardian_ai_enabled
+
+        if not is_guardian_ai_enabled():
+            raise AiActionValidationError("Die Guardian-KI-Integration ist deaktiviert.")
+
         from models import Incident
 
         rows = (
