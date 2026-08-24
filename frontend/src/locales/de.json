@@ -519,6 +519,8 @@
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
       "error": "Der KI-Vorschlag konnte nicht ausgeführt werden.",
+      "reject": "Ablehnen",
+      "rejectedToast": "Aktion abgelehnt.",
       "queued": "KI-Vorschlag wurde autorisiert. Die Aktion läuft jetzt im Hintergrund.",
       "confirmDiffLines": "Betroffen sind {{count}} Diff-Zeilen. Die vollständige Vorschau steht in der Karte hinter diesem Dialog.",
       "confirmProvenance": "Dieser Vorschlag kann aus der Analyse unvertrauenswürdiger Daten stammen — Logzeilen, Konfigurationsinhalte oder Anhänge. Prüfe ihn, bevor du ihn ausführst.",

@@ -519,6 +519,8 @@
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",
       "error": "The AI proposal could not be executed.",
+      "reject": "Reject",
+      "rejectedToast": "Action rejected.",
       "queued": "AI proposal authorised. The action is now running in the background.",
       "confirmDiffLines": "{{count}} diff lines are affected. The full preview is in the card behind this dialog.",
       "confirmProvenance": "This proposal may originate from analysing untrusted data — log lines, configuration contents or attachments. Review it before you execute it.",

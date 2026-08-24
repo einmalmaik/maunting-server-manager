@@ -2052,13 +2052,30 @@ def _vorschlag_ergebnisse(db, proposal_ids: list[str]) -> list[dict]:
                 "error_code": "AI_ACTION_NOT_FOUND",
             })
             continue
-        ergebnisse.append({
+        entry = {
             "tool_name": row.tool_name,
             "status": row.status,
             "autonomous": bool(row.autonomous),
             "server_id": row.server_id,
             **({"error_code": row.error_code} if row.error_code else {}),
-        })
+        }
+        if row.status in ("succeeded", "executing"):
+            tool_res = (
+                db.query(AiToolResult)
+                .filter(
+                    AiToolResult.conversation_id == row.conversation_id,
+                    AiToolResult.run_id == row.run_id,
+                    AiToolResult.tool_name == row.tool_name,
+                )
+                .order_by(AiToolResult.created_at.desc())
+                .first()
+            )
+            if tool_res is not None and tool_res.result_json:
+                try:
+                    entry["result"] = json.loads(tool_res.result_json)
+                except Exception:
+                    pass
+        ergebnisse.append(entry)
     return ergebnisse
 
 
@@ -4260,13 +4277,32 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 current_usage = StreamUsage()
                 continue
 
-            # Ab hier ist jeder Aufruf entweder lesend oder schreibend — die
-            # dritte Moeglichkeit hat die Pruefung darueber schon abgefangen.
-            kinds = {
-                "read" if call.name in READ_TOOLS else "write"
-                for call in current_usage.tool_calls
-            }
-            if kinds == {"write"}:
+            # Pruefen, ob ALLE Werkzeugaufrufe in dieser Runde Lesewerkzeuge sind
+            # UND autonom ausgefuehrt werden duerfen.
+            #
+            # Maunting Studios Grundsatz („Sicherheit braucht Vertrauen“):
+            # Der Autonomie-Modus beschreibt, dass die KI ohne Bestaetigung arbeiten kann.
+            # Ist der Autonomie-Modus an, braucht es keine Bestaetigung.
+            # Ist der Autonomie-Modus aus, verlangt ausnahmslos jede Handlung und jedes
+            # Werkzeug (Lesen, Schreiben, Worker-Deklaration etc.) eine Bestaetigung.
+            from services import ai_autonomy_service
+
+            with SessionLocal() as db_check:
+                benutzer = db_check.get(User, user_id)
+                alle_autonom = False
+                if benutzer is not None:
+                    alle_autonom = all(
+                        call.name in READ_TOOLS
+                        and ai_autonomy_service.autonomy_allows(
+                            db_check,
+                            user=benutzer,
+                            server_id=(call.arguments or {}).get("server_id"),
+                            tool_name=call.name,
+                        )
+                        for call in current_usage.tool_calls
+                    )
+
+            if not alle_autonom:
                 schreib = await _schreibrunde_ausfuehren(
                     run_id=run_id,
                     user_id=user_id,
@@ -4298,6 +4334,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 current_usage = StreamUsage()
                 continue
 
+            kinds = {"read"}
             deferred_calls, filter_signal = _runde_filtern(
                 kinds=kinds,
                 current_usage=current_usage,

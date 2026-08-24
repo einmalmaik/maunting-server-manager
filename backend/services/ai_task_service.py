@@ -826,12 +826,11 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
     if not darf_verwalten(db, user):
         _stilllegen(db, aufgabe, grund="kein_aufgabenrecht")
         return None
-    if aufgabe.kind == "act" and not darf_handeln(db, user):
-        # **Der Fall, fuer den `enabled` existiert.** Die Freigabe wurde nach
-        # dem Anlegen zurueckgezogen, vielleicht mit Absicht. Ein handelnder
-        # Auftrag, der ab jetzt nur noch Vorschlaege erzeugt, auf deren
-        # Bestaetigung niemand wartet, waere die schlechtere Antwort: er sieht
-        # jede Nacht nach Arbeit aus und tut nichts.
+    if not darf_handeln(db, user):
+        # Alle Aufgaben laufen im Hintergrund. Gemäß Maunting Studios Grundsatz
+        # ("Sicherheit braucht Vertrauen") und den Anforderungen des Autonomie-Modus
+        # können geplante Aufgaben im Hintergrund nur ausgeführt werden, wenn der
+        # Autonomie-Modus für den Benutzer aktiv ist.
         _stilllegen(db, aufgabe, grund="autonomie_entzogen")
         return None
 

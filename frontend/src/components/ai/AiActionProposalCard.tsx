@@ -1,4 +1,4 @@
-import { AlertTriangle, Blocks, Bot, CalendarClock, FilePenLine, FileX, HardDriveDownload, HardDriveUpload, Network, Package, Plug, Power, ServerCog, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
+import { Activity, AlertTriangle, Blocks, Bot, CalendarClock, Eye, FilePenLine, FileX, Globe, HardDriveDownload, HardDriveUpload, Network, Package, Plug, Power, ServerCog, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -175,12 +175,33 @@ export function AiActionProposalCard({
     // neu gestartet oder gesichert wird — nicht der Vorgang selbst.
     propose_restart_schedule_set: CalendarClock,
     propose_backup_schedule_set: CalendarClock,
+    worker_start: Bot,
+    worker_cancel: Bot,
+    web_search: Globe,
+    read_server_status: Activity,
+    read_server_logs: Eye,
+    read_config: FilePenLine,
+    list_my_servers: ServerCog,
   }[proposal.tool_name] ?? Power
   // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb
   // eine eigene, neutrale Farbgebung statt der warnenden — und keinen Knopf.
   const tone = proposal.autonomous
     ? 'border-outline-variant bg-surface-container'
     : 'border-status-warning/35 bg-status-warning/5'
+
+  const reject = async () => {
+    setBusy(true)
+    try {
+      const rejected = await aiApi.rejectAction(proposal.id)
+      onChange(rejected)
+      toast.success(t('ai.actions.rejectedToast', 'Aktion abgelehnt.'))
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.actions.error'))
+      void aiApi.getAction(proposal.id).then(onChange).catch(() => undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const execute = async () => {
     // Der Dialog zeigte bisher nur Operation und Pfad — Tool-Name und Diff
@@ -238,7 +259,7 @@ export function AiActionProposalCard({
         <span className={`rounded-lg p-2 ${proposal.autonomous ? 'bg-surface-container-highest text-primary' : 'bg-status-warning/10 text-status-warning'}`}><Icon className="h-4 w-4" /></span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold text-on-surface">{t(`ai.actions.tools.${proposal.tool_name}`)}</h3>
+            <h3 className="text-sm font-semibold text-on-surface">{t(`ai.actions.tools.${proposal.tool_name}`, proposal.tool_name)}</h3>
             <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs text-on-surface-variant">{t(`ai.actions.status.${proposal.status}`)}</span>
             {proposal.autonomous && (
               <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
@@ -280,7 +301,26 @@ export function AiActionProposalCard({
           )}
           {proposal.error_code && <p className="mt-2 flex items-center gap-1 text-xs text-status-error"><AlertTriangle className="h-3.5 w-3.5" />{t('ai.actions.failed')}</p>}
         </div>
-        {proposal.status === 'proposed' && !proposal.autonomous && <Button type="button" variant={proposal.tool_name === 'propose_server_lifecycle' ? 'destructive' : 'primary'} disabled={busy} onClick={() => void execute()}>{busy ? t('ai.actions.executing') : t('ai.actions.review')}</Button>}
+        {proposal.status === 'proposed' && !proposal.autonomous && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void reject()}
+            >
+              {t('ai.actions.reject', 'Ablehnen')}
+            </Button>
+            <Button
+              type="button"
+              variant={proposal.tool_name === 'propose_server_lifecycle' ? 'destructive' : 'primary'}
+              disabled={busy}
+              onClick={() => void execute()}
+            >
+              {busy ? t('ai.actions.executing') : t('ai.actions.review')}
+            </Button>
+          </div>
+        )}
       </div>
       {geheimnisse.map((geheimnis) => (
         <div key={geheimnis.label} className="mt-3">

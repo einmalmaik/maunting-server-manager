@@ -446,7 +446,7 @@ export interface AiActionProposal {
   conversation_id: string
   /** Null bei einem Erstellungsvorschlag — den Server gibt es dann noch nicht. */
   server_id: number | null
-  tool_name: AiWriteTool
+  tool_name: AiWriteTool | (string & {})
   preview: Record<string, unknown>
   expected_revision: string | null
   requires_confirmation: boolean
@@ -1171,6 +1171,9 @@ export const aiApi = {
   typing: () => api('/ai/conversation/typing', { method: 'POST' }),
   getAction: (proposalId: string) => api<AiActionProposal>(`/ai/actions/${proposalId}`),
   confirmAction: (proposalId: string) => api<{ proposal_id: string; confirmation_token: string; expires_at: string }>(`/ai/actions/${proposalId}/confirm`, {
+    method: 'POST',
+  }),
+  rejectAction: (proposalId: string) => api<AiActionProposal>(`/ai/actions/${proposalId}/reject`, {
     method: 'POST',
   }),
   executeAction: (proposalId: string, confirmationToken: string) => api<{ proposal: AiActionProposal; result: Record<string, unknown> }>(`/ai/actions/${proposalId}/execute`, {

@@ -294,3 +294,29 @@ def execute_action(
         raise HTTPException(
             status_code=503, detail="ai.errors.codes.AI_ACTION_STORE_UNAVAILABLE"
         ) from exc
+
+
+@router.post(
+    "/actions/{proposal_id}/reject",
+    response_model=AiActionProposalResponse,
+)
+def reject_action(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+    _: None = Depends(verify_csrf),
+) -> AiActionProposalResponse:
+    run_id: str | None = None
+    try:
+        vorab = ai_proposal_service.owned_proposal(db, proposal_id, user)
+        run_id = vorab.run_id if vorab is not None else None
+        proposal = ai_proposal_service.reject_proposal(
+            db, proposal_id=proposal_id, user=user
+        )
+        _lauf_wecken(db, proposal.run_id or run_id)
+        return proposal_response(proposal)
+    except ai_action_errors.AiActionStateError as exc:
+        db.rollback()
+        _lauf_wecken(db, run_id)
+        raise _state_error(exc) from exc
+

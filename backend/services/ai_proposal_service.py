@@ -63,9 +63,13 @@ from services.ai_ini_edit import ini_setzen
 from services import ai_task_service
 from services import server_config_wishes
 from services.ai_tool_registry import (
+    GLOBAL_READ_TOOLS,
     GLOBAL_WRITE_TOOLS,
     GUARDIAN_HEILUNG_TOOLS,
+    READ_TOOLS,
+    SERVER_READ_TOOLS,
     WERKZEUGE,
+    WORKER_STEUERUNG,
     WRITE_TOOLS,
     aufgaben_tools,
 )
@@ -180,29 +184,7 @@ _LIFECYCLE_RECHTE = {
 
 
 def _permission_for(tool_name: str, payload: dict) -> tuple[str, ...]:
-    """Die Permission-Keys, die dieses Werkzeug verlangt — alle zugleich.
-
-    Sie stehen in `ai_tool_registry.WERKZEUGE` — dort, wo auch alles andere
-    ueber ein Werkzeug steht. Vorher war das hier eine if-Kette: ein zweiter
-    Ort, an dem ein neues Werkzeug eingetragen werden musste, und der Ort, an
-    dem man es am ehesten vergisst. Ein vergessener Eintrag lieferte die leere
-    Menge und damit eine Ablehnung — immerhin die sichere Richtung, aber erst
-    bemerkbar, wenn ein Benutzer davorsteht.
-
-    Zwei Ausnahmen bleiben, beide haengen am *Vorgang* statt am Werkzeug und
-    lassen sich in einer Tabellenzeile nicht ausdruecken: der Lebenszyklus
-    (Starten, Stoppen und Neustarten sind drei verschiedene Rechte) und die
-    Reparatur (`_REPARATUR_RECHTE`).
-
-    Eine **unbekannte** Reparatur-Kennung verlangt die Vereinigung beider
-    Rechte. Sie ist kein gueltiger Vorgang und wird nie ausgefuehrt — der
-    Ausfuehrungszweig weist sie als `AI_ACTION_TOOL_NOT_ALLOWED` ab und der
-    Vorschlag endet als `failed`, sichtbar fuer den Menschen davor. Eine leere
-    Menge staende dem im Weg: Bestaetigung und Ausfuehrung braechen dann schon
-    an der Rechtepruefung mit `AI_ACTION_ACCESS_REVOKED` ab — eine Meldung, die
-    von entzogenen Rechten spricht, wo eine manipulierte Nutzlast vorliegt.
-    Strenger als jede gueltige Wahl bleibt die Vereinigung trotzdem.
-    """
+    """Die Permission-Keys, die dieses Werkzeug verlangt — alle zugleich."""
     if tool_name == "propose_server_lifecycle":
         recht = _LIFECYCLE_RECHTE.get(str(payload.get("operation")), "")
         return (recht,) if recht else ()
@@ -211,27 +193,61 @@ def _permission_for(tool_name: str, payload: dict) -> tuple[str, ...]:
         if recht:
             return (recht,)
         return tuple(_REPARATUR_RECHTE.values())
+    if tool_name in WORKER_STEUERUNG:
+        return ("ai.background.use",)
+    if tool_name in SERVER_READ_TOOLS:
+        werkzeug = WERKZEUGE.get(tool_name)
+        if werkzeug and werkzeug.angebot:
+            return ("server.view", *werkzeug.angebot)
+        return ("server.view",)
     werkzeug = WERKZEUGE.get(tool_name)
-    return (werkzeug.recht,) if werkzeug and werkzeug.recht else ()
+    if werkzeug and werkzeug.recht:
+        return (werkzeug.recht,)
+    if werkzeug and werkzeug.angebot:
+        return werkzeug.angebot
+    return ()
 
 
 def _require_tool_permission(
     db: Session, user: User, server_id: int | None, tool_name: str, payload: dict
 ) -> None:
+    if tool_name in GLOBAL_READ_TOOLS:
+        werkzeug = WERKZEUGE.get(tool_name)
+        if werkzeug and werkzeug.angebot:
+            has_any = any(
+                permission_service.has_global_permission(db, user, p)
+                for p in werkzeug.angebot
+            )
+            if not has_any:
+                raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
+        return
+
+    if tool_name in WORKER_STEUERUNG:
+        if not permission_service.has_global_permission(db, user, "ai.background.use"):
+            raise AiActionValidationError("Hintergrund-Worker sind nicht erlaubt")
+        return
+
+    if tool_name in SERVER_READ_TOOLS:
+        if server_id is None:
+            raise AiActionValidationError("Server-ID fehlt")
+        if not permission_service.has_server_permission(db, user, server_id, "server.view"):
+            raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
+        werkzeug = WERKZEUGE.get(tool_name)
+        if werkzeug and werkzeug.angebot:
+            has_any = any(
+                permission_service.has_server_permission(db, user, server_id, p)
+                for p in werkzeug.angebot
+            )
+            if not has_any:
+                raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
+        return
+
     permissions = _permission_for(tool_name, payload)
     if not permissions:
         raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
 
     werkzeug = WERKZEUGE.get(tool_name)
     if werkzeug is not None and werkzeug.recht_global:
-        # Manche Rechte sind bewusst global und nicht delegierbar: `servers.create`
-        # (es gibt noch keinen Server, auf den sich ein Recht beziehen koennte)
-        # und `servers.delete` (destruktiv, nur Admin/Owner).
-        #
-        # Bei `propose_server_delete` gilt trotzdem **beides**: `_resolve_server`
-        # hat vorher `server.view` geprueft, sonst waere die Server-ID ein Weg,
-        # die Existenz fremder Server zu erraten. Sehen duerfen und loeschen
-        # duerfen sind zwei Huerden, nicht eine.
         for permission in permissions:
             if not permission_service.has_global_permission(db, user, permission):
                 raise AiActionValidationError("AI-Aktion ist nicht erlaubt")
@@ -2091,7 +2107,7 @@ def create_proposal(
     sonst — der, der die Freigabe erteilt hat —, und `_require_tool_permission`
     laeuft unveraendert.
     """
-    if tool_name not in WRITE_TOOLS:
+    if tool_name not in WRITE_TOOLS and tool_name not in READ_TOOLS and tool_name not in WORKER_STEUERUNG:
         raise AiActionValidationError("Tool ist in diesem Kontext nicht erlaubt")
     if guardian is not None and tool_name not in GUARDIAN_HEILUNG_TOOLS:
         # Die Menge steht in der Registry und wird hier durchgesetzt, nicht im
@@ -2123,6 +2139,11 @@ def create_proposal(
         # `servers.create`.
         _require_tool_permission(db, user, None, tool_name, rest)
         payload, preview = bauer(db, user, rest, arguments, guardian)
+        expected_revision = None
+    elif tool_name in GLOBAL_READ_TOOLS or tool_name in WORKER_STEUERUNG:
+        _require_tool_permission(db, user, None, tool_name, rest)
+        payload = dict(rest)
+        preview = {"operation": tool_name, **rest}
         expected_revision = None
     elif tool_name in GLOBAL_WRITE_TOOLS:
         # **Der Waechter hinter der Tabelle.** Hier stand frueher
@@ -2277,13 +2298,17 @@ def create_proposal(
             expected_revision = None
         elif tool_name == "propose_file_delete":
             payload, preview, expected_revision = _file_delete_payload(db, server, rest)
+        elif tool_name in SERVER_READ_TOOLS:
+            _require_tool_permission(db, user, server.id, tool_name, rest)
+            payload = dict(rest)
+            preview = {
+                "operation": tool_name,
+                "server_name": server.name,
+                "current_status": server.status,
+                **rest,
+            }
+            expected_revision = None
         else:
-            # Dieselbe Falle wie oben bei den globalen Werkzeugen, nur eine
-            # Ebene tiefer: hier stand ein namenloses `else`, das jedes neue
-            # serverbezogene Schreibwerkzeug als Konfigurationsaenderung gebaut
-            # haette. Der Vorschlag waere entstanden, haette plausibel
-            # ausgesehen und beim Ausfuehren etwas anderes getan, als sein Name
-            # sagt.
             raise AiActionValidationError(f"Kein Payload-Bau fuer Werkzeug: {tool_name}")
 
     preview["reason"] = reason
@@ -3592,18 +3617,46 @@ def _ausfuehren_task_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgef
     return _Ausgefuehrt(result={"deleted": True, "title": geloescht})
 
 
-#: Die Ausfuehrung der bestaetigten Schreibwerkzeuge — Werkzeugname → Funktion.
-#:
-#: Hier stand eine Kette aus 19 `elif`-Zweigen in `execute_proposal`, und jeder
-#: Zweig musste `result`, `task_id` und `queued` selbst setzen —
-#: vorinitialisiert war nichts, ein vergessenes Feld fiel erst beim Bestaetigen
-#: als `NameError` auf. Die Tabelle macht das strukturell, nach demselben
-#: Muster wie `_GLOBALE_PAYLOADS`: einen Eintrag ohne benannte Funktion gibt es
-#: nicht, und `_Ausgefuehrt` erzwingt die Vollstaendigkeit per Konstruktion.
-#:
-#: Ein unbekannter Name faellt an der einen Aufrufstelle weiterhin in
-#: `AI_ACTION_TOOL_NOT_ALLOWED` — derselbe Waechter, der vorher der letzte
-#: `else`-Zweig der Kette war.
+def _ausfuehren_read_tool(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from services.ai_action_service import execute_read_tool
+
+    args = dict(rahmen.payload)
+    if rahmen.server_id is not None and "server_id" not in args:
+        args["server_id"] = rahmen.server_id
+    res = execute_read_tool(
+        db,
+        user=rahmen.active_user,
+        tool_name=rahmen.tool_name,
+        arguments=args,
+        herkunft="panel",
+    )
+    return _Ausgefuehrt(result=res if isinstance(res, dict) else {"result": res})
+
+
+def _ausfuehren_worker_start(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from services import ai_worker_service
+
+    res = ai_worker_service.worker_start(
+        db,
+        user=rahmen.active_user,
+        arguments=rahmen.payload,
+        herkunft="panel",
+    )
+    return _Ausgefuehrt(result=res if isinstance(res, dict) else {"result": res})
+
+
+def _ausfuehren_worker_cancel(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from services import ai_worker_service
+
+    res = ai_worker_service.worker_cancel(
+        db,
+        user=rahmen.active_user,
+        arguments=rahmen.payload,
+    )
+    return _Ausgefuehrt(result=res if isinstance(res, dict) else {"result": res})
+
+
+#: Die Ausfuehrung der bestaetigten Schreib- und Lesewerkzeuge — Werkzeugname → Funktion.
 _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]] = {
     "propose_server_lifecycle": _ausfuehren_server_lifecycle,
     "propose_backup": _ausfuehren_backup,
@@ -3631,6 +3684,10 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_ai_tarif_role": _ausfuehren_hoster_schreiben,
     "propose_task_set": _ausfuehren_task_set,
     "propose_task_delete": _ausfuehren_task_delete,
+    "worker_start": _ausfuehren_worker_start,
+    "worker_cancel": _ausfuehren_worker_cancel,
+    "worker_antwort": _ausfuehren_read_tool,
+    **{name: _ausfuehren_read_tool for name in READ_TOOLS},
 }
 
 
@@ -3779,6 +3836,22 @@ def execute_proposal(
                 and server_id is not None
             ):
                 proposal.server_id = server_id
+            if proposal.conversation_id and proposal.run_id:
+                from models import AiToolResult
+
+                db.add(
+                    AiToolResult(
+                        id=str(uuid4()),
+                        conversation_id=proposal.conversation_id,
+                        run_id=proposal.run_id,
+                        tool_name=tool_name,
+                        result_json=json.dumps(
+                            result if isinstance(result, dict) else {"result": result},
+                            ensure_ascii=True,
+                            separators=(",", ":"),
+                        ),
+                    )
+                )
             _ausfuehrung_protokollieren(
                 db,
                 user_id=active_user.id,
@@ -3870,3 +3943,38 @@ def reconcile_interrupted_actions(db: Session) -> int:
     if rows:
         db.commit()
     return len(rows)
+
+
+def reject_proposal(
+    db: Session,
+    *,
+    proposal_id: str,
+    user: User,
+) -> AiActionProposal:
+    """Lehnt einen offenen Vorschlag ab und vermerkt das im Audit."""
+    proposal = owned_proposal(db, proposal_id, user)
+    if proposal is None:
+        raise AiActionStateError("AI_ACTION_NOT_FOUND")
+    proposal = _lock_proposal(db, proposal.id)
+    if proposal.status not in ("proposed", "confirmed"):
+        raise AiActionStateError("AI_ACTION_NOT_PROPOSED")
+    proposal.status = "expired"
+    proposal.confirmation_token_hash = None
+    proposal.error_code = "AI_ACTION_REJECTED"
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="ai.action.rejected",
+        target_type="server" if proposal.server_id is not None else "ai_action",
+        target_id=proposal.server_id,
+        details={
+            "proposal_id": proposal.id,
+            "tool": proposal.tool_name,
+        },
+        origin="ai",
+        correlation_id=proposal.correlation_id,
+    )
+    db.commit()
+    db.refresh(proposal)
+    return proposal
+
