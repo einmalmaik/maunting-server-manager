@@ -101,15 +101,13 @@ class TestDasModellSetztSichNichtSelbstFrei:
         assert argumente["autonom"] is False
         assert argumente["systembereich"] == "aus"
 
-    def test_das_lesewerkzeug_bekommt_den_bereich_aber_kein_autonom(
+    def test_das_lesewerkzeug_bekommt_den_bereich_und_autonomie_urteil(
         self, db: Session, regular_user: User
     ):
         """`aus` verschliesst auch den **Blick** — sonst waere es keine Stufe.
 
-        Ohne dieses Feld haette `aus` nur bedeutet: sie darf dort alles
-        sehen, nur nichts wegnehmen. Der Betreiber hat drei Stufen bestellt,
-        nicht zwei. `autonom` steht trotzdem nicht dabei: `desktop_system`
-        liest und fragt nie.
+        Gemäß Maunting Studios Grundsatz 'Sicherheit braucht Vertrauen'
+        erhalten alle Desktop-Werkzeuge das echte Autonomie-Urteil vom Backend.
         """
         regular_user.ai_desktop_systembereich = "aus"
         db.commit()
@@ -119,26 +117,21 @@ class TestDasModellSetztSichNichtSelbstFrei:
             call=_aufruf("desktop_system", {"aktion": "verzeichnis", "pfad": "C:\\Windows"}),
         )
         assert argumente["systembereich"] == "aus"
-        assert "autonom" not in argumente
+        assert "autonom" in argumente
 
-    def test_andere_desktop_werkzeuge_bekommen_kein_urteil(
+    def test_andere_desktop_werkzeuge_bekommen_echtes_urteil(
         self, db: Session, regular_user: User
     ):
-        """Dateien, Programme und Steuern brauchen die Felder nicht.
-
-        Sie ueberall mitzuschicken waere kein Sicherheitsgewinn, aber ein
-        Angebot an eine kuenftige Fassung der App, sie auch woanders zu
-        beachten — und damit eine Regel an zwei Orten.
-        """
+        """Dateien, Programme und Steuern werden ebenfalls geschützt."""
         argumente = _desktop_argumente(
             db,
             user_id=regular_user.id,
             call=_aufruf("desktop_dateien", {"aktion": "loeschen", "pfad": "a.txt"}),
         )
-        assert "autonom" not in argumente
-        assert "systembereich" not in argumente
+        assert "autonom" in argumente
+        assert "systembereich" in argumente
 
-    def test_auch_dort_fliegen_die_gesetzten_felder_raus(
+    def test_auch_dort_wird_gefaelschtes_autonom_ueberschrieben(
         self, db: Session, regular_user: User
     ):
         argumente = _desktop_argumente(
@@ -146,7 +139,8 @@ class TestDasModellSetztSichNichtSelbstFrei:
             user_id=regular_user.id,
             call=_aufruf("desktop_dateien", {"aktion": "auflisten", "autonom": True}),
         )
-        assert "autonom" not in argumente
+        # Darf nicht das übergebene True sein, sondern muss das echte Backend-Urteil sein (hier False)
+        assert argumente["autonom"] is False
 
 
 class TestLangeFrist:

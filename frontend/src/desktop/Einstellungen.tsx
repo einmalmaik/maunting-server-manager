@@ -13,8 +13,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { emit } from '@tauri-apps/api/event'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
-import { AlertTriangle, Mic, MonitorCog, Volume2 } from 'lucide-react'
+import { AlertTriangle, ExternalLink, FileSignature, Mic, MonitorCog, ShieldCheck, Volume2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 
 import {
   aktuelleVerarbeitung,
@@ -25,6 +26,7 @@ import {
   type AudioVerarbeitung,
 } from '@/components/ai/voice/audioGeraete'
 import { api } from '@/api/client'
+import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { Badge, Button, ProgressBar, Slider, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
@@ -37,6 +39,7 @@ import {
   hotkeysSetzen,
   konfigLaden,
   konfigSpeichern,
+  oeffneBrowser,
   overlayTesten,
   setzeStatus,
   wakewordLauschen,
@@ -54,12 +57,13 @@ const STATUS_REIHE: AgentStatus[] = ['bereit', 'hoert', 'denkt', 'spricht']
  */
 const VERARBEITUNG_SPEICHERN_MS = 400
 
-type EinstellungsTab = 'desktop' | 'wakeword' | 'audio' | 'gefahr'
+type EinstellungsTab = 'desktop' | 'wakeword' | 'audio' | 'rechtliches' | 'gefahr'
 
 const TABS: TabDef<EinstellungsTab>[] = [
   { id: 'desktop', labelKey: 'mss.einstellungen.tab.desktop', icon: MonitorCog },
   { id: 'wakeword', labelKey: 'mss.einstellungen.tab.wakeword', icon: Mic },
   { id: 'audio', labelKey: 'mss.einstellungen.tab.audio', icon: Volume2 },
+  { id: 'rechtliches', labelKey: 'mss.einstellungen.tab.rechtliches', icon: FileSignature },
   { id: 'gefahr', labelKey: 'mss.einstellungen.tab.gefahr', icon: AlertTriangle, variant: 'danger' },
 ]
 
@@ -68,7 +72,7 @@ function tabAusSuche(suche: string): EinstellungsTab {
   return TABS.some((tab) => tab.id === wunsch) ? (wunsch as EinstellungsTab) : 'desktop'
 }
 
-export function Einstellungen() {
+export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () => void }) {
   const { t } = useTranslation()
   const ort = useLocation()
   const [tab, setTab] = useState<EinstellungsTab>(() => tabAusSuche(ort.search))
@@ -87,9 +91,10 @@ export function Einstellungen() {
         onChange={setTab}
         ariaLabel={t('mss.app.einstellungen')}
       />
-      {tab === 'desktop' && <DesktopIntegration />}
+      {tab === 'desktop' && <DesktopIntegration onKonfigAenderung={onKonfigAenderung} />}
       {tab === 'wakeword' && <WakewordEinrichtung />}
       {tab === 'audio' && <AudioEinstellungen />}
+      {tab === 'rechtliches' && <RechtlichesEinstellungen />}
       {tab === 'gefahr' && <Gefahrenzone />}
       <p className="text-center text-xs text-on-surface-variant/60">
         {t('mss.einstellungen.fussnote')}
@@ -98,7 +103,7 @@ export function Einstellungen() {
   )
 }
 
-function DesktopIntegration() {
+function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => void }) {
   const { t } = useTranslation()
   const [autostart, setAutostart] = useState<boolean | null>(null)
   const [status, setStatus] = useState<AgentStatus>('bereit')
@@ -153,7 +158,7 @@ function DesktopIntegration() {
         />
       </div>
 
-      <ComputerUseSektion />
+      <ComputerUseSektion onKonfigAenderung={onKonfigAenderung} />
 
       <Hotkeys />
 
@@ -195,7 +200,7 @@ function DesktopIntegration() {
   )
 }
 
-function ComputerUseSektion() {
+function ComputerUseSektion({ onKonfigAenderung }: { onKonfigAenderung?: () => void }) {
   const { t } = useTranslation()
   const [konfig, setKonfig] = useState<AppKonfig | null>(null)
   const [dialogOffen, setDialogOffen] = useState(false)
@@ -212,6 +217,7 @@ function ComputerUseSektion() {
       const neu = { ...konfig, computer_use_aktiv: false }
       setKonfig(neu)
       await konfigSpeichern(neu).catch(() => {})
+      onKonfigAenderung?.()
     }
   }
 
@@ -221,6 +227,7 @@ function ComputerUseSektion() {
     setKonfig(neu)
     setDialogOffen(false)
     await konfigSpeichern(neu).catch(() => {})
+    onKonfigAenderung?.()
   }
 
   return (
@@ -862,3 +869,109 @@ function Hotkeys() {
     </div>
   )
 }
+
+function RechtlichesEinstellungen() {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const legal = usePublicLegalSettings()
+
+  async function impressumOeffnen(url: string) {
+    try {
+      await oeffneBrowser(url)
+    } catch {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* Slogan & Philosophie */}
+      <section className="msm-card bg-surface-container-low/40 p-5">
+        <div className="flex items-center gap-3">
+          <div className="rounded-lg bg-primary/10 p-2.5 text-primary">
+            <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div>
+            <h2 className="font-headline text-base font-semibold text-on-surface">
+              {t('mss.einstellungen.rechtliches.slogan', 'Maunting Studios — Sicherheit braucht Vertrauen')}
+            </h2>
+            <p className="mt-1 text-xs text-on-surface-variant">
+              {t('mss.einstellungen.rechtliches.beschreibung', 'Vollständige Transparenz, echte Datenhoheit und kein unbemerktes Handeln auf Ihren Systemen.')}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Datenschutzerklärung */}
+      <section className="msm-card flex flex-col gap-4 p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-medium text-on-surface">
+                {t('mss.einstellungen.rechtliches.datenschutzTitel', 'Datenschutzerklärung')}
+              </h3>
+              <Badge variant="default">
+                {t('mss.einstellungen.rechtliches.datenschutzVersion', { version: 'v2.7' })}
+              </Badge>
+            </div>
+            <p className="mt-1 text-xs text-on-surface-variant max-w-xl">
+              {t('mss.einstellungen.rechtliches.datenschutzDesc', 'Erfahren Sie im Detail, wie Ihre Daten, Einstellungen und Sitzungen geschützt und minimiert verarbeitet werden.')}
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => navigate('/privacy')}
+            className="shrink-0"
+          >
+            {t('mss.einstellungen.rechtliches.datenschutzOeffnen', 'Datenschutzerklärung öffnen')}
+          </Button>
+        </div>
+      </section>
+
+      {/* Impressum */}
+      <section className="msm-card flex flex-col gap-4 p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-medium text-on-surface">
+                {t('mss.einstellungen.rechtliches.impressumTitel', 'Betreiber-Impressum')}
+              </h3>
+              <Badge
+                variant={legal.imprint_enabled && legal.imprint_url ? 'success' : 'default'}
+              >
+                {legal.imprint_enabled && legal.imprint_url
+                  ? t('mss.einstellungen.rechtliches.impressumAktiv', 'Aktiviert')
+                  : t('mss.einstellungen.rechtliches.impressumInaktiv', 'Nicht konfiguriert')}
+              </Badge>
+            </div>
+            <p className="mt-1 text-xs text-on-surface-variant">
+              {t('mss.einstellungen.rechtliches.impressumDesc', 'Rechtliche Angaben und Kontaktinformationen des Betreibers dieser Server-Manager-Instanz.')}
+            </p>
+            {legal.imprint_enabled && legal.imprint_url ? (
+              <p className="mt-2 text-xs font-mono text-primary truncate max-w-md">
+                {legal.imprint_url}
+              </p>
+            ) : (
+              <p className="mt-2 text-xs italic text-on-surface-variant/70">
+                {t('mss.einstellungen.rechtliches.impressumKeinHinweis', 'Für diese Instanz wurde kein externes Betreiber-Impressum hinterlegt.')}
+              </p>
+            )}
+          </div>
+          {legal.imprint_enabled && legal.imprint_url && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => void impressumOeffnen(legal.imprint_url)}
+              className="shrink-0"
+            >
+              <ExternalLink className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+              {t('mss.einstellungen.rechtliches.impressumOeffnen', 'Impressum im Browser öffnen')}
+            </Button>
+          )}
+        </div>
+      </section>
+    </div>
+  )
+}
+

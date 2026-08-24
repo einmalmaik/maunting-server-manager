@@ -3082,9 +3082,6 @@ def _desktop_argumente(db, *, user_id: int, call) -> dict:
         for name, wert in (call.arguments or {}).items()
         if name not in GESETZTE_FELDER
     }
-    if call.name not in ("desktop_aufraeumen", "desktop_system", "desktop_steuern"):
-        return argumente
-
     from models import User
     from models.user import systembereich_des_benutzers
     from services import ai_autonomy_service
@@ -3097,12 +3094,14 @@ def _desktop_argumente(db, *, user_id: int, call) -> dict:
     # Der Systembereich betrifft Pfade — Maus und Tastatur haben keine.
     if call.name != "desktop_steuern":
         argumente["systembereich"] = systembereich_des_benutzers(benutzer)
-    # `desktop_system` liest und fragt nie; die beiden anderen koennen ohne
-    # Rueckfrage handeln, wenn der Betreiber es erlaubt hat.
-    if call.name in ("desktop_aufraeumen", "desktop_steuern"):
-        argumente["autonom"] = ai_autonomy_service.autonomy_allows(
-            db, user=benutzer, server_id=None, tool_name=call.name
-        )
+
+    # Gemäß Maunting Studios Grundsatz („Sicherheit braucht Vertrauen“):
+    # Jedes Werkzeug auf dem Rechner des Benutzers unterliegt der Autonomie-
+    # Freigabe des Betreibers. Ist autonomer Modus aus, muss der Benutzer
+    # jede einzelne Aktion bestätigen.
+    argumente["autonom"] = ai_autonomy_service.autonomy_allows(
+        db, user=benutzer, server_id=None, tool_name=call.name
+    )
     return argumente
 
 

@@ -4770,6 +4770,11 @@
       "keinChatrecht": "Your account lacks the permission to chat with the AI (ai.chat.use). Ask your operator to grant it — until then this window stays empty.",
       "gedaechtnis": "Memory"
     },
+    "aktion": {
+      "freigabeErforderlich": "Confirmation required",
+      "bestaetigen": "Yes, execute",
+      "ablehnen": "No, reject"
+    },
     "aufraeumen": {
       "fragePapierkorb": "Move to the recycle bin?",
       "frageHart": "Delete permanently?",
@@ -4933,7 +4938,23 @@
         "desktop": "Desktop integration",
         "wakeword": "Wake word",
         "audio": "Audio",
+        "rechtliches": "Legal & Privacy",
         "gefahr": "Danger zone"
+      },
+      "rechtliches": {
+        "titel": "Legal & Privacy",
+        "slogan": "Maunting Studios — Security requires trust",
+        "beschreibung": "Full transparency, true data sovereignty, and no unnoticed actions on your systems.",
+        "datenschutzTitel": "Privacy Policy",
+        "datenschutzVersion": "Version {{version}}",
+        "datenschutzDesc": "Learn in detail how your data, settings, and sessions are protected and minimally processed.",
+        "datenschutzOeffnen": "Open Privacy Policy",
+        "impressumTitel": "Operator Imprint",
+        "impressumAktiv": "Enabled",
+        "impressumInaktiv": "Not configured",
+        "impressumDesc": "Legal details and contact information of the operator of this server manager instance.",
+        "impressumKeinHinweis": "No external operator imprint has been configured for this instance.",
+        "impressumOeffnen": "Open Imprint in Browser"
       },
       "overlayTesten": "Test overlay",
       "overlayTestenHinweis": "Opens the overlay as a showcase: you see the orb and state text, but no microphone runs and nobody listens. Use the state buttons above to preview each colour. Click again (or X/ESC) to close."

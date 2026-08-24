@@ -248,6 +248,35 @@ export async function aufraeumenAblehnen(): Promise<void> {
   await invoke('aufraeumen_ablehnen')
 }
 
+// ── Allgemeine Desktop-Aktionen (Nicht-Autonom) ──────────────────────────
+
+export interface DesktopAktionAnfrage {
+  auftrag_id: string
+  werkzeug: string
+  titel: string
+  beschreibung: string
+  argumente: Record<string, unknown>
+}
+
+/** Bestätigt eine wartende allgemeine Desktop-Aktion und liefert das Ergebnis. */
+export async function desktopAktionBestaetigen(
+  auftragId: string,
+): Promise<Record<string, unknown>> {
+  return await invoke<Record<string, unknown>>('desktop_aktion_bestaetigen', {
+    auftragId,
+  })
+}
+
+/** Lehnt eine wartende allgemeine Desktop-Aktion ab. */
+export async function desktopAktionAblehnen(auftragId: string): Promise<void> {
+  await invoke('desktop_aktion_ablehnen', { auftragId })
+}
+
+/** Öffnet eine externe URL sicher im Standard-Browser des Benutzers. */
+export async function oeffneBrowser(url: string): Promise<void> {
+  await invoke('oeffne_browser', { url })
+}
+
 // ── Deinstallation ───────────────────────────────────────────────────────
 
 export interface Aufraeumbericht {

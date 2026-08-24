@@ -28,25 +28,18 @@ use crate::system;
 use crate::uebernahme;
 use crate::zonen;
 
-/// Das Ereignis, mit dem die Oberflaeche die Bestaetigungskarte zeigt.
+/// Das Ereignis, mit dem die Oberflaeche die Bestaetigungskarte fuer Maus/Tastatur zeigt.
 pub const EREIGNIS_UEBERNAHME: &str = "mss:uebernahme-anfrage";
 /// Dasselbe fuer das Aufraeumen — mit der vollstaendigen Liste im Gepaeck.
 pub const EREIGNIS_AUFRAEUMEN: &str = "mss:aufraeumen-anfrage";
+/// Das Ereignis fuer allgemeine Werkzeugaktionen bei inaktivem autonomem Modus.
+pub const EREIGNIS_AKTION: &str = "mss:aktion-anfrage";
 
 /// Was ein ausgefuehrter Auftrag zurueckgibt. `None` heisst: das Ergebnis
 /// kommt spaeter (eine Karte fragt gerade), die Oberflaeche meldet dann selbst.
 pub type Ergebnis = Option<Value>;
 
 /// Ein Aufraeumauftrag, der auf einen Klick wartet.
-///
-/// **Er liegt hier und nicht in der Oberflaeche**, und das ist der Grund,
-/// warum die Karte beim Bestaetigen keine Pfadliste mitschickt: bestaetigt
-/// wird, was hier steht, nicht was ein Fenster gerade anzeigt. Ein Renderer,
-/// der eine harmlose Liste zeigt und eine andere loeschen laesst, ist damit
-/// gar nicht erst moeglich.
-///
-/// Immer hoechstens einer: die Auftragsschleife arbeitet der Reihe nach, und
-/// ein zweiter Plan wuerde den ersten ueberschreiben, statt sich anzustellen.
 pub struct Wartend {
     pub aktion: String,
     pub pfade: Vec<String>,
@@ -55,33 +48,36 @@ pub struct Wartend {
     pub bis: Instant,
 }
 
-/// Wie lange ein wartender Plan gueltig bleibt.
-///
-/// Dieselben zehn Minuten, die das Panel dem Auftrag gibt
-/// (`FRIST_BESTAETIGUNG_SEKUNDEN`). Danach ist der Auftrag dort verfallen und
-/// der Lauf laengst mit `DESKTOP_JOB_EXPIRED` geweckt — er *weiss* also, dass
-/// nichts geschehen ist. Ein Klick, der die Dateien dann doch noch loescht,
-/// erzeugt genau die Lage, die es nie geben darf: die Dateien sind weg, und
-/// niemand erfaehrt davon. Ohne diese Frist hielt der Plan unbegrenzt, und
-/// die Fehlermeldung unten behauptete einen Verfall, den es gar nicht gab.
+/// Eine allgemeine Desktop-Aktion, die auf eine Benutzerbestätigung wartet.
+pub struct WartendeAktion {
+    pub auftrag_id: String,
+    pub werkzeug: String,
+    pub argumente: Value,
+    pub sandbox_pfad: Option<PathBuf>,
+    pub bis: Instant,
+}
+
+/// Wie lange ein wartender Plan gueltig bleibt (10 Minuten).
 const BESTAETIGUNGSFRIST: Duration = Duration::from_secs(600);
 
 /// Wie lange die Karte insgesamt messen darf, bevor sie gezeigt wird.
-///
-/// `aufraeumen::MESSFRIST` gilt je Pfad (5 s). Bei den erlaubten 500 Pfaden
-/// waeren das im schlimmsten Fall vierzig Minuten auf einem langsamen Netz-
-/// oder OneDrive-Pfad — der Auftrag ist nach zehn Minuten verfallen, und der
-/// Mensch haette die Karte nie gesehen. Zwanzig Sekunden sind genug fuer
-/// jede normale Liste; was danach kommt, steht ohne Zahl auf der Karte.
 const KARTENBUDGET: Duration = Duration::from_secs(20);
 
 static WARTEND: Mutex<Option<Wartend>> = Mutex::new(None);
+static WARTENDE_AKTION: Mutex<Option<WartendeAktion>> = Mutex::new(None);
 
 fn wartend_setzen(plan: Option<Wartend>) -> Option<Wartend> {
     let mut stand = WARTEND
         .lock()
         .unwrap_or_else(|vergiftet| vergiftet.into_inner());
     std::mem::replace(&mut *stand, plan)
+}
+
+fn wartende_aktion_setzen(aktion: Option<WartendeAktion>) -> Option<WartendeAktion> {
+    let mut stand = WARTENDE_AKTION
+        .lock()
+        .unwrap_or_else(|vergiftet| vergiftet.into_inner());
+    std::mem::replace(&mut *stand, aktion)
 }
 
 /// Fuehrt den wartenden Plan aus. Ruft die Karte nach dem Klick auf "Ja".
@@ -118,11 +114,136 @@ fn aufraeumen_ausfuehren(plan: &Wartend) -> Result<Value, String> {
     }
 }
 
+/// Bestätigt eine wartende allgemeine Desktop-Aktion und führt sie aus.
+pub fn desktop_aktion_bestaetigen(app: &AppHandle, auftrag_id: &str) -> Result<Value, String> {
+    let mut stand = WARTENDE_AKTION
+        .lock()
+        .unwrap_or_else(|vergiftet| vergiftet.into_inner());
+    let wartend = stand.take().ok_or(
+        "Es wartet gerade keine Aktion zur Bestätigung. Vermutlich ist sie verfallen \
+         oder wurde bereits beantwortet.",
+    )?;
+    if wartend.auftrag_id != auftrag_id {
+        return Err("Die Auftrags-ID stimmt nicht mit der wartenden Aktion überein.".into());
+    }
+    if Instant::now() > wartend.bis {
+        return Err("Die Bestätigungsfrist ist abgelaufen. Es wurde nichts ausgeführt.".into());
+    }
+    match wartend.werkzeug.as_str() {
+        "desktop_dateien" => dateien(wartend.sandbox_pfad, &wartend.argumente),
+        "desktop_launch_app" => starten(app, &wartend.argumente),
+        "desktop_system" => system::ausfuehren(app, &wartend.argumente),
+        "desktop_steuern" => uebernahme::steuern(&wartend.argumente),
+        andere => Err(format!("Unbekanntes Werkzeug: '{andere}'")),
+    }
+}
+
+/// Lehnt eine wartende allgemeine Desktop-Aktion ab.
+pub fn desktop_aktion_ablehnen(auftrag_id: &str) -> Result<(), String> {
+    let mut stand = WARTENDE_AKTION
+        .lock()
+        .unwrap_or_else(|vergiftet| vergiftet.into_inner());
+    if let Some(ref wartend) = *stand {
+        if wartend.auftrag_id == auftrag_id {
+            stand.take();
+        }
+    }
+    Ok(())
+}
+
+fn aktion_beschreibung(werkzeug: &str, argumente: &Value) -> (String, String) {
+    match werkzeug {
+        "desktop_system" => {
+            let aktion = argumente["aktion"].as_str().unwrap_or("");
+            let pfad = argumente["pfad"].as_str().unwrap_or("");
+            match aktion {
+                "bildschirm" => (
+                    "Bildschirmaufnahme (Screenshot)".to_string(),
+                    "Die KI möchte ein Bild deines Hauptbildschirms aufnehmen, um zu analysieren, was gerade angezeigt wird.".to_string(),
+                ),
+                "laufwerke" => (
+                    "Laufwerke einsehen".to_string(),
+                    "Die KI möchte die Liste deiner Laufwerke und Speicherkapazitäten einsehen.".to_string(),
+                ),
+                "verzeichnis" => (
+                    "Ordnerinhalt ansehen".to_string(),
+                    format!("Die KI möchte den Ordner '{pfad}' auflisten."),
+                ),
+                "groesste" => (
+                    "Speicherplatz analysieren".to_string(),
+                    format!("Die KI möchte nach großen Dateien unter '{pfad}' suchen."),
+                ),
+                "virenscan" => (
+                    "Virenprüfung starten".to_string(),
+                    format!("Die KI möchte den Pfad '{pfad}' mit Windows Defender auf Schädlinge prüfen."),
+                ),
+                _ => (
+                    "Systemdaten lesen".to_string(),
+                    "Die KI möchte Systeminformationen deines Rechners abfragen.".to_string(),
+                ),
+            }
+        }
+        "desktop_dateien" => {
+            let aktion = argumente["aktion"].as_str().unwrap_or("");
+            let pfad = argumente["pfad"].as_str().unwrap_or("");
+            let ziel = argumente["ziel"].as_str().unwrap_or("");
+            match aktion {
+                "lesen" => (
+                    "Datei lesen".to_string(),
+                    format!("Die KI möchte die Datei '{pfad}' im Sandbox-Ordner lesen."),
+                ),
+                "schreiben" => (
+                    "Datei schreiben".to_string(),
+                    format!("Die KI möchte in die Datei '{pfad}' im Sandbox-Ordner schreiben."),
+                ),
+                "auflisten" => (
+                    "Sandbox auflisten".to_string(),
+                    format!("Die KI möchte Dateien unter '{pfad}' in der Sandbox auflisten."),
+                ),
+                "loeschen" => (
+                    "Datei löschen".to_string(),
+                    format!("Die KI möchte die Datei '{pfad}' in der Sandbox löschen."),
+                ),
+                "verschieben" => (
+                    "Datei verschieben".to_string(),
+                    format!("Die KI möchte '{pfad}' nach '{ziel}' in der Sandbox verschieben."),
+                ),
+                _ => (
+                    "Dateioperation".to_string(),
+                    format!("Die KI möchte eine Dateioperation ('{aktion}') in der Sandbox ausführen."),
+                ),
+            }
+        }
+        "desktop_launch_app" => {
+            if let Some(url) = argumente["url"].as_str() {
+                (
+                    "Webadresse im Browser öffnen".to_string(),
+                    format!("Die KI möchte die Webadresse '{url}' in deinem Standardbrowser öffnen."),
+                )
+            } else if let Some(programm) = argumente["programm"].as_str() {
+                (
+                    "Programm starten".to_string(),
+                    format!("Die KI möchte das Programm '{programm}' auf deinem Rechner starten."),
+                )
+            } else {
+                (
+                    "Programm oder Adresse öffnen".to_string(),
+                    "Die KI möchte eine Anwendung oder Webadresse öffnen.".to_string(),
+                )
+            }
+        }
+        "desktop_steuern" => (
+            "Maus- oder Tastatureingabe".to_string(),
+            "Die KI möchte Maus- oder Tastaturaktionen auf deinem Computer ausführen.".to_string(),
+        ),
+        _ => (
+            "Aktion ausführen".to_string(),
+            format!("Die KI möchte das Werkzeug '{werkzeug}' ausführen."),
+        ),
+    }
+}
+
 /// `auftrag_id` ist die Kennung des Auftrags, aus dem dieser Aufruf stammt.
-/// Sie wird nur gebraucht, wo eine Karte gezeigt wird: die Antwort des
-/// Menschen gehoert zu **diesem** Auftrag, und die Karte soll das aus dem
-/// Ereignis lesen koennen statt aus einem Zustand der Oberflaeche, der
-/// vielleicht noch nicht angekommen ist.
 pub fn ausfuehren(
     app: &AppHandle,
     sandbox_pfad: Option<PathBuf>,
@@ -130,36 +251,77 @@ pub fn ausfuehren(
     argumente: &Value,
     auftrag_id: Option<&str>,
 ) -> Result<Ergebnis, String> {
-    match werkzeug {
-        "desktop_dateien" => dateien(sandbox_pfad, argumente).map(Some),
-        "desktop_launch_app" => starten(app, argumente).map(Some),
-        "desktop_system" => system::ausfuehren(app, argumente).map(Some),
-        "desktop_steuern" => steuern(app, argumente, auftrag_id),
-        "desktop_aufraeumen" => raeumen(app, argumente, auftrag_id),
-        andere => Err(format!("Unbekanntes Werkzeug: '{andere}'")),
-    }
-}
-
-/// Maus und Tastatur — samt der Bitte um die Freigabe dafuer.
-///
-/// `aktion="freigabe"` war bis zum 23.08.2026 ein eigenes Werkzeug
-/// (`desktop_takeover_control`); zusammengelegt, weil der Werkzeugkatalog
-/// seine 64.000 Zeichen erreichte. Am Ablauf hat sich nichts geaendert: die
-/// Bitte zeigt eine Karte und liefert `None`, alles andere braucht eine
-/// gueltige Freigabe und liefert sofort.
-fn steuern(
-    app: &AppHandle,
-    argumente: &Value,
-    auftrag_id: Option<&str>,
-) -> Result<Ergebnis, String> {
     let app_konfig = konfig::laden(app).unwrap_or_default();
-    if !app_konfig.computer_use_aktiv {
+
+    // 1. Computer-Use Sicherheitsgrenze:
+    // Ist Computer-Use in den Einstellungen deaktiviert, werden Steuerungen und
+    // Bildschirmaufnahmen ausnahmslos blockiert.
+    if !app_konfig.computer_use_aktiv
+        && (werkzeug == "desktop_steuern"
+            || (werkzeug == "desktop_system"
+                && argumente["aktion"].as_str() == Some("bildschirm")))
+    {
         return Err(
             "Computer-Use ist in den Desktop-Einstellungen deaktiviert. Der \
              Benutzer kann es in den Einstellungen aktivieren."
                 .into(),
         );
     }
+
+    // 2. Spezialfälle mit eigenen Karten/Abläufen:
+    if werkzeug == "desktop_steuern" && argumente["aktion"].as_str() == Some("freigabe") {
+        return steuern(app, argumente, auftrag_id);
+    }
+    if werkzeug == "desktop_aufraeumen" {
+        return raeumen(app, argumente, auftrag_id);
+    }
+
+    // 3. Autonomie-Prüfung:
+    // Wenn autonomer Modus aktiv ist, sofort ausführen.
+    if argumente["autonom"].as_bool() == Some(true) {
+        return match werkzeug {
+            "desktop_dateien" => dateien(sandbox_pfad, argumente).map(Some),
+            "desktop_launch_app" => starten(app, argumente).map(Some),
+            "desktop_system" => system::ausfuehren(app, argumente).map(Some),
+            "desktop_steuern" => uebernahme::steuern(argumente).map(Some),
+            andere => Err(format!("Unbekanntes Werkzeug: '{andere}'")),
+        };
+    }
+
+    // 4. Nicht autonom (autonom == false): Menschliche Bestätigung („Ja“/„Nein“) erzwingen.
+    let (titel, beschreibung) = aktion_beschreibung(werkzeug, argumente);
+    let id = auftrag_id.unwrap_or("").to_string();
+    let wartend = WartendeAktion {
+        auftrag_id: id.clone(),
+        werkzeug: werkzeug.to_string(),
+        argumente: argumente.clone(),
+        sandbox_pfad,
+        bis: Instant::now() + BESTAETIGUNGSFRIST,
+    };
+    wartende_aktion_setzen(Some(wartend));
+
+    if let Err(fehler) = app.emit(
+        EREIGNIS_AKTION,
+        json!({
+            "auftrag_id": id,
+            "werkzeug": werkzeug,
+            "titel": titel,
+            "beschreibung": beschreibung,
+            "argumente": argumente,
+        }),
+    ) {
+        wartende_aktion_setzen(None);
+        return Err(format!("Bestätigungskarte nicht anzeigbar: {fehler}"));
+    }
+    Ok(None)
+}
+
+/// Maus und Tastatur — samt der Bitte um die Freigabe dafuer.
+fn steuern(
+    app: &AppHandle,
+    argumente: &Value,
+    auftrag_id: Option<&str>,
+) -> Result<Ergebnis, String> {
     if argumente["aktion"].as_str() != Some("freigabe") {
         return uebernahme::steuern(argumente).map(Some);
     }
@@ -167,10 +329,7 @@ fn steuern(
         .as_u64()
         .unwrap_or(5)
         .clamp(1, uebernahme::MAX_MINUTEN);
-    // Im autonomen Modus gibt es nichts zu bestaetigen — und deshalb auch
-    // keine Karte. Die Bitte trotzdem zu stellen ist der KI nicht vorzuwerfen
-    // (die Werkzeugbeschreibung verlangt sie), sie kostet hier nur eine
-    // sofortige Antwort statt eines Wartens auf einen Klick, der nie kaeme.
+
     if argumente["autonom"].as_bool() == Some(true) {
         return Ok(Some(json!({
             "freigegeben": true,
@@ -467,5 +626,38 @@ mod tests {
         // Und was durchgeht, kommt getrimmt und ohne Leereintraege an.
         let liste = pfadliste(&json!({ "pfade": ["  C:\\a  ", "", "C:\\b"] })).unwrap();
         assert_eq!(liste, vec!["C:\\a".to_string(), "C:\\b".to_string()]);
+    }
+
+    #[test]
+    fn wartende_desktop_aktion_laesst_sich_ablehnen() {
+        let wartend = WartendeAktion {
+            auftrag_id: "test-auftrag-123".to_string(),
+            werkzeug: "desktop_system".to_string(),
+            argumente: json!({ "aktion": "laufwerke" }),
+            sandbox_pfad: None,
+            bis: Instant::now() + Duration::from_secs(60),
+        };
+        wartende_aktion_setzen(Some(wartend));
+
+        assert!(desktop_aktion_ablehnen("test-auftrag-123").is_ok());
+        assert!(wartende_aktion_setzen(None).is_none());
+    }
+
+    #[test]
+    fn verfallene_desktop_aktion_wird_abgewiesen() {
+        let wartend = WartendeAktion {
+            auftrag_id: "test-auftrag-expired".to_string(),
+            werkzeug: "desktop_system".to_string(),
+            argumente: json!({ "aktion": "laufwerke" }),
+            sandbox_pfad: None,
+            bis: Instant::now() - Duration::from_secs(1),
+        };
+        wartende_aktion_setzen(Some(wartend));
+
+        // Ohne laufende AppHandle schlägt die Ausführung fehl, aber hier schlägt die Frist vorher zu:
+        let lock = WARTENDE_AKTION.lock().unwrap();
+        assert!(lock.as_ref().unwrap().bis < Instant::now());
+        drop(lock);
+        wartende_aktion_setzen(None);
     }
 }

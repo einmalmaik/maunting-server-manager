@@ -158,6 +158,34 @@ fn aufraeumen_ablehnen() {
     auftrag::aufraeumen_ablehnen()
 }
 
+/// Bestätigt eine wartende allgemeine Desktop-Aktion.
+#[tauri::command(async)]
+fn desktop_aktion_bestaetigen(
+    app: tauri::AppHandle,
+    auftrag_id: String,
+) -> Result<serde_json::Value, String> {
+    auftrag::desktop_aktion_bestaetigen(&app, &auftrag_id)
+}
+
+/// Lehnt eine wartende allgemeine Desktop-Aktion ab.
+#[tauri::command]
+fn desktop_aktion_ablehnen(auftrag_id: String) -> Result<(), String> {
+    auftrag::desktop_aktion_ablehnen(&auftrag_id)
+}
+
+/// Öffnet eine externe URL sicher im Standard-Browser des Betriebssystems.
+#[tauri::command(async)]
+fn oeffne_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let getrimmt = url.trim();
+    if !(getrimmt.starts_with("https://") || getrimmt.starts_with("http://")) {
+        return Err(format!("Nur http- und https-Adressen erlaubt: '{getrimmt}'"));
+    }
+    app.opener()
+        .open_url(getrimmt, None::<&str>)
+        .map_err(|e| format!("Browser konnte nicht geöffnet werden: {e}"))
+}
+
 /// Wie lange die Freigabe noch laeuft. Die Oberflaeche zeigt es an — eine
 /// laufende Uebernahme, die man nicht sieht, waere die schlechteste Fassung.
 #[tauri::command]
@@ -608,6 +636,9 @@ pub fn run() {
             uebernahme_rest,
             aufraeumen_bestaetigen,
             aufraeumen_ablehnen,
+            desktop_aktion_bestaetigen,
+            desktop_aktion_ablehnen,
+            oeffne_browser,
             deinstallation_aufraeumen,
             deinstallation_starten
         ])

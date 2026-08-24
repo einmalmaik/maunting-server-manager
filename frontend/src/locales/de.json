@@ -4770,6 +4770,11 @@
       "keinChatrecht": "Dein Konto hat kein Recht, mit der KI zu chatten (ai.chat.use). Bitte deinen Betreiber, es dir zu geben — vorher bleibt dieses Fenster leer.",
       "gedaechtnis": "Gedächtnis"
     },
+    "aktion": {
+      "freigabeErforderlich": "Bestätigung erforderlich",
+      "bestaetigen": "Ja, ausführen",
+      "ablehnen": "Nein, ablehnen"
+    },
     "aufraeumen": {
       "fragePapierkorb": "In den Papierkorb verschieben?",
       "frageHart": "Endgültig löschen?",
@@ -4933,7 +4938,23 @@
         "desktop": "Desktop-Integration",
         "wakeword": "Wake-Word",
         "audio": "Audio",
+        "rechtliches": "Rechtliches",
         "gefahr": "Gefahrenzone"
+      },
+      "rechtliches": {
+        "titel": "Rechtliches & Datenschutz",
+        "slogan": "Maunting Studios — Sicherheit braucht Vertrauen",
+        "beschreibung": "Vollständige Transparenz, echte Datenhoheit und kein unbemerktes Handeln auf Ihren Systemen.",
+        "datenschutzTitel": "Datenschutzerklärung",
+        "datenschutzVersion": "Version {{version}}",
+        "datenschutzDesc": "Erfahren Sie im Detail, wie Ihre Daten, Einstellungen und Sitzungen geschützt und minimiert verarbeitet werden.",
+        "datenschutzOeffnen": "Datenschutzerklärung öffnen",
+        "impressumTitel": "Betreiber-Impressum",
+        "impressumAktiv": "Aktiviert",
+        "impressumInaktiv": "Nicht konfiguriert",
+        "impressumDesc": "Rechtliche Angaben und Kontaktinformationen des Betreibers dieser Server-Manager-Instanz.",
+        "impressumKeinHinweis": "Für diese Instanz wurde kein externes Betreiber-Impressum hinterlegt.",
+        "impressumOeffnen": "Impressum im Browser öffnen"
       },
       "overlayTesten": "Overlay testen",
       "overlayTestenHinweis": "Öffnet das Overlay als Schaufenster: man sieht Blase und Zustandstext, aber kein Mikrofon läuft und niemand hört zu. Mit den Zustandsknöpfen oben lässt sich jede Farbe ansehen. Noch ein Klick (oder X/ESC) schließt es."

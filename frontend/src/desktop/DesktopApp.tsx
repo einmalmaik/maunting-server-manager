@@ -12,7 +12,7 @@
  * navigieren mit `navigate('/ai?ansicht=…')` (Glocke, Guardian, Aufgaben),
  * und genau diese Route gibt es hier. Eine Adressleiste hat das Fenster nicht.
  */
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
 import { Eye, ShieldAlert } from 'lucide-react'
@@ -26,11 +26,13 @@ import { ToastContainer } from '@/components/ui/ToastContainer'
 import { Button } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Ai } from '@/pages/Ai'
+import { Privacy } from '@/pages/Privacy'
 import { useAuthStore } from '@/stores/authStore'
 import { abmelden } from './auth'
 import { Einstellungen } from './Einstellungen'
 import { Splash } from './Splash'
 import { Aufraeumkarte } from './Aufraeumkarte'
+import { DesktopAktionKarte } from './DesktopAktionKarte'
 import { Uebernahmekarte } from './Uebernahmekarte'
 import { Wizard } from './Wizard'
 import {
@@ -53,25 +55,17 @@ type Phase = 'laedt' | 'einrichtung' | 'kopplung' | 'sandbox' | 'bereit'
 export function DesktopApp() {
   const [phase, setPhase] = useState<Phase>('laedt')
   const [konfig, setKonfig] = useState<AppKonfig | null>(null)
-  // Die Boot-Sequenz läuft über allem, während darunter Konfiguration und
-  // die stille Sitzungserneuerung schon laden — wie bei einem Spielstart.
   const [splash, setSplash] = useState(true)
   const angemeldet = useAuthStore((s) => s.isAuthenticated)
-  // Beide Phasen hinter der Anmeldung. `sandbox` ist der nachgereichte
-  // Assistentenschritt, und er kommt erst nach `stillAnmelden()` **und**
-  // erfolgreichem `checkAuth()` — das Gerät ist dort also längst gekoppelt.
   const sitzungSteht = phase === 'bereit' || phase === 'sandbox'
-  // Die Aufträge des Panels holt der Rechner selbst ab — aber erst, wenn
-  // das Gerät gekoppelt ist: vorher gibt es kein Token und jede Frage wäre
-  // ein 401. Läuft weiter, auch wenn das Fenster im Tray liegt.
-  //
-  // Und auch, solange der Sandbox-Schritt auf dem Schirm steht: das Wake-Word
-  // startet die Sprachsitzung unabhängig davon aus Rust im Overlay. Hinge die
-  // Schleife an `bereit`, könnte die KI dort reden, während jeder
-  // Werkzeugaufruf ins Leere greift — `desktop_system`, `desktop_steuern` und
-  // `desktop_aufraeumen` liefen in die 60-Sekunden-Grenze und meldeten
-  // „nicht abgewartet", obwohl niemand auch nur gefragt hat.
   const offeneUebernahme = useAuftragsschleife(sitzungSteht)
+
+  const ladeKonfigNeu = useCallback(async () => {
+    try {
+      const geladen = await konfigLaden()
+      setKonfig(geladen)
+    } catch {}
+  }, [])
 
   useEffect(() => {
     void (async () => {
@@ -91,44 +85,30 @@ export function DesktopApp() {
           setPhase('kopplung')
           return
         }
-        // Der Sandbox-Ordner kann zwischen zwei Starts wegfallen: `konfig.rs`
-        // vergisst beim Laden einen Pfad, den es heute nicht mehr erlaubt —
-        // sonst blockierte der Altwert jedes weitere Speichern. Ohne ihn hat
-        // die KI keinen Ort, an dem sie Dateien anlegen darf, und ihre Absage
-        // verweist auf eine Stelle, an der man ihn festlegt. Genau die gibt es
-        // nur im Assistenten, also kommt er dafür noch einmal — mit diesem
-        // einen Schritt und mit „Später festlegen" daneben.
-        setPhase(geladen.sandbox_pfad ? 'bereit' : 'sandbox')
+        if (!geladen.sandbox_pfad) {
+          setPhase('sandbox')
+          return
+        }
+        setPhase('bereit')
       } catch {
         setPhase('einrichtung')
       }
     })()
   }, [])
 
-  // Endet die Sitzung im Betrieb (Refresh verbrannt, Zugang entzogen), führt
-  // jeder Weg über `clearSession` — und von dort zurück zur Kopplung.
   useEffect(() => {
     if (phase === 'bereit' && !angemeldet) {
       setPhase('kopplung')
     }
   }, [phase, angemeldet])
 
-  // Das erkannte Wake-Word öffnet das Overlay direkt in Rust
-  // (wakeword.rs → sprachsitzung_starten) — ein verstecktes Hauptfenster
-  // darf gedrosselt sein, das Wake-Word muss trotzdem tragen. Hier läuft
-  // deshalb kein Listener mehr.
-
-  // Tray-Farbe und Ducking folgen auch einer Sitzung in diesem Fenster —
-  // und aus demselben Grund wie die Auftragsschleife auch im Sandbox-Schritt:
-  // eine per Wake-Word gestartete Sitzung soll man am Tray sehen, gleich ob
-  // gerade noch ein Assistentenschritt offen ist.
   useEffect(() => {
     if (!sitzungSteht) return
     return sprachzustandVerdrahten()
   }, [sitzungSteht])
 
-  function fertig(neueKonfig: AppKonfig) {
-    setKonfig(neueKonfig)
+  function fertig(neueKonfig?: AppKonfig) {
+    if (neueKonfig) setKonfig(neueKonfig)
     setPhase('bereit')
   }
 
@@ -139,16 +119,13 @@ export function DesktopApp() {
     inhalt = (
       <Wizard
         konfig={konfig}
-        // Nach dem Adress-Schritt lädt die App neu (der API-Origin steht im
-        // Modulgraph fest); eine gespeicherte Adresse heißt deshalb: dort
-        // weitermachen, wo der Neustart unterbrochen hat.
         startSchritt={
-          phase === 'sandbox' ? 'sandbox'
-            : phase === 'kopplung' || konfig.backend_url ? 'kopplung'
+          phase === 'sandbox'
+            ? 'sandbox'
+            : phase === 'kopplung' || konfig.backend_url
+              ? 'kopplung'
               : 'backend'
         }
-        // Beide Nachzügler-Phasen brauchen genau ihren einen Schritt: die
-        // Einrichtung liegt hinter dem Benutzer, nur ein Stück davon fehlt.
         nurDieserSchritt={phase !== 'einrichtung'}
         onFertig={fertig}
       />
@@ -163,6 +140,7 @@ export function DesktopApp() {
               bereich="ki"
               konfig={konfig}
               offeneUebernahme={offeneUebernahme}
+              onKonfigAenderung={ladeKonfigNeu}
             />
           }
         />
@@ -173,6 +151,7 @@ export function DesktopApp() {
               bereich="gedaechtnis"
               konfig={konfig}
               offeneUebernahme={offeneUebernahme}
+              onKonfigAenderung={ladeKonfigNeu}
             />
           }
         />
@@ -183,7 +162,16 @@ export function DesktopApp() {
               bereich="einstellungen"
               konfig={konfig}
               offeneUebernahme={offeneUebernahme}
+              onKonfigAenderung={ladeKonfigNeu}
             />
+          }
+        />
+        <Route
+          path="/privacy"
+          element={
+            <div className="mx-auto w-full max-w-4xl p-4 md:p-6">
+              <Privacy />
+            </div>
           }
         />
         <Route path="*" element={<Navigate to="/ai" replace />} />
@@ -194,7 +182,6 @@ export function DesktopApp() {
   return (
     <MemoryRouter initialEntries={['/ai']}>
       <div className="relative min-h-screen overflow-x-clip bg-background text-on-surface">
-        {/* Dasselbe Gitter wie im Panel-Shell — exakt dieselben Werte. */}
         <div className="msm-deep-grid pointer-events-none absolute inset-0 opacity-30" />
         <div className="relative z-10 flex min-h-screen flex-col">{inhalt}</div>
 
@@ -202,21 +189,12 @@ export function DesktopApp() {
           <>
             <SprachwacheHaupt />
             <KalibrierungsHinweis />
-            {/* Die Glocke ist mehr als eine Meldung: ihr Takt feuert das
-                Zustell-Ereignis, über das der offene Chat Fremdes nachlädt. */}
             <AiRunNotice />
           </>
         )}
-        {/* Über allem außer der Boot-Sequenz: eine Bitte um die Übernahme von
-            Maus und Tastatur darf nicht hinter einem Reiter verschwinden. Für
-            die Aufräumfrage gilt dasselbe — es geht um Dateien, die gleich
-            weg sind. Beide bekommen dieselbe Auftragskennung; jede Karte
-            wacht erst auf, wenn ihr eigenes Ereignis kommt, und es kann immer
-            nur eine offen sein (die Auftragsschleife arbeitet der Reihe nach). */}
+        <DesktopAktionKarte offenerAuftragId={offeneUebernahme} />
         <Uebernahmekarte offenerAuftragId={offeneUebernahme} />
         <Aufraeumkarte offenerAuftragId={offeneUebernahme} />
-        {/* Immer gemountet, nicht erst ab `bereit`: das X gibt es auch im
-            Assistenten. */}
         <SchliessenDialog />
         <ToastContainer />
         <ConfirmDialog />
@@ -396,13 +374,16 @@ function Hauptseite({
   bereich,
   konfig,
   offeneUebernahme,
+  onKonfigAenderung,
 }: {
   bereich: 'ki' | 'gedaechtnis' | 'einstellungen'
   konfig: AppKonfig | null
   offeneUebernahme: string | null
+  onKonfigAenderung?: () => void
 }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const location = useLocation()
   const user = useAuthStore((s) => s.user)
   const darfChatten = useHasPermission('ai.chat.use')
   // Im Panel wohnt die Ansicht unter Profil → KI; die App hat kein Profil,
@@ -410,6 +391,10 @@ function Hauptseite({
   // Komponente ohnehin nichts — dann lieber gar kein Reiter.
   const darfGedaechtnis = useHasPermission('ai.memory.use')
   const agentName = user?.agent_name?.trim() || 'Singra'
+
+  useEffect(() => {
+    onKonfigAenderung?.()
+  }, [location.pathname, onKonfigAenderung])
 
   return (
     <>
@@ -483,7 +468,7 @@ function Hauptseite({
               <AiMemoryManager />
             </div>
           ) : (
-            <Einstellungen />
+            <Einstellungen onKonfigAenderung={onKonfigAenderung} />
           )}
         </div>
       </main>
