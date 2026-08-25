@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
+import pytest_asyncio
 
 from services.curseforge_service import (
     CurseForgeService,
@@ -11,7 +12,7 @@ from services.curseforge_service import (
 )
 
 
-@pytest.fixture(autouse=True)
+@pytest_asyncio.fixture(autouse=True)
 async def _cleanup():
     yield
     await close_curseforge_service()

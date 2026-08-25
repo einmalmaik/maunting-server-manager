@@ -14,7 +14,7 @@ export function ConnectedCalendarsSection() {
 
   // Form State
   const [name, setName] = useState('')
-  const [providerType, setProviderType] = useState('caldav')
+  const providerType = 'caldav'
   const [isDefault, setIsDefault] = useState(false)
   const [caldavUrl, setCaldavUrl] = useState('')
   const [caldavUsername, setCaldavUsername] = useState('')

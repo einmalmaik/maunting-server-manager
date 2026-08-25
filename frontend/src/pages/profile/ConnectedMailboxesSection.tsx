@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Mail, Plus, Trash2, CheckCircle2, XCircle, RefreshCw, Star, ShieldCheck } from 'lucide-react'
+import { Mail, Plus, Trash2, RefreshCw, Star, ShieldCheck } from 'lucide-react'
 import { userIntegrationsApi, type MailboxItem, type MailboxCreateInput } from '@/api/userIntegrations'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
@@ -15,14 +15,14 @@ export function ConnectedMailboxesSection() {
   // Form State
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [providerType, setProviderType] = useState('custom')
+  const providerType = 'custom'
   const [isDefault, setIsDefault] = useState(false)
   const [imapHost, setImapHost] = useState('')
   const [imapPort, setImapPort] = useState(993)
-  const [imapSsl, setImapSsl] = useState(true)
+  const imapSsl = true
   const [smtpHost, setSmtpHost] = useState('')
   const [smtpPort, setSmtpPort] = useState(587)
-  const [smtpTls, setSmtpTls] = useState(true)
+  const smtpTls = true
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [syncEnabled, setSyncEnabled] = useState(true)
