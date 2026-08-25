@@ -176,6 +176,11 @@ class AiProviderCreate(BaseModel):
     # laufen auch Schreibwege vorbei, die dieses Formular nie sehen.
     worker_model: Modellkennung = Field(default=None, max_length=256)
     worker_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
+    # Die optionale Ethics Engine dieses Zugangs: das Modell fuer ethische
+    # Abwaegungen und Reflexion, feste Denkstufe und der Modus (Zoning-Stufe).
+    ethics_model: Modellkennung = Field(default=None, max_length=256)
+    ethics_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
+    ethics_mode: str = Field(default="auto", max_length=32)
     # Der Name der Azure-Ressource. Wie Stimme und Gehoer nicht gegen
     # `provider_kind` geprueft: **ob** er noetig ist, entscheidet die Registry,
     # und das tut der Service.
@@ -206,6 +211,9 @@ class AiProviderUpdate(BaseModel):
     # durch `model_dump(exclude_unset=True)` im Router.
     worker_model: Modellkennung = Field(default=None, max_length=256)
     worker_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
+    ethics_model: Modellkennung = Field(default=None, max_length=256)
+    ethics_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
+    ethics_mode: str | None = Field(default=None, max_length=32)
     # Wie die Felder darueber: „nicht mitgeschickt" laesst den Namen stehen,
     # ausdrueckliches ``null`` (bzw. leeres Feld) nimmt ihn zurueck. Der
     # Unterschied zaehlt hier doppelt — ein geaenderter Ressourcenname loescht
@@ -241,6 +249,9 @@ class AiProviderResponse(BaseModel):
     #: stellt Worker nicht ein.
     worker_model: str | None = None
     worker_reasoning_effort: str | None = None
+    ethics_model: str | None = None
+    ethics_reasoning_effort: str | None = None
+    ethics_mode: str = "auto"
     #: Der Azure-Ressourcenname, roh aus der Zeile — wie `default_voice`
     #: ungeprueft gelesen und aus demselben Grund: eine 500 beim blossen
     #: Anzeigen waere die schlechteste Art, dem Betreiber einen Formfehler

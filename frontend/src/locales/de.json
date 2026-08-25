@@ -211,6 +211,21 @@
       "workerEffort": "Feste Denkstufe",
       "workerEffortOff": "Nicht nachdenken",
       "workerEffortHint": "Gilt für jeden Worker-Lauf. Der Kunde wählt sie nicht — die Hintergrundarbeit zahlt der Betreiber.",
+      "ethicsSection": "Ethics Engine (Ethische Reflexion)",
+      "ethicsHint": "Optionale Hintergrund-Instanz zur ethischen Abwägung, Schadensprüfung und Alternativenfindung bei folgenreichen Systementscheidungen.",
+      "ethicsModel": "Ethik-Modell",
+      "ethicsOff": "Keine Ethics Engine (Deaktiviert)",
+      "ethicsEffort": "Feste Denkstufe für Ethik",
+      "ethicsEffortOff": "Nicht nachdenken",
+      "ethicsEffortHint": "Gilt für ethische Reflexionsrunden im Hintergrund.",
+      "ethicsMode": "Zoning-Modus (Aktivierungsstufe)",
+      "ethicsModeHint": "Bestimmt, wann die Ethics Engine beratend eingeschaltet wird.",
+      "ethicsModes": {
+        "auto": "Automatisch (bei folgenreichen oder heiklen Aktionen)",
+        "off": "Deaktiviert (keine Ethik-Prüfung)",
+        "always": "Immer (jede geplante Systemhandlung vorab prüfen)",
+        "critical": "Kritische Fälle (nur unumkehrbare oder destruktive Aktionen)"
+      },
       "recommendationHint": "MSM ist mit {{model}} erprobt — schnell genug für den Chat und mit Denkstufen. Ein anderes Modell geht auch.",
       "recommendationApply": "Übernehmen",
       "caps": {

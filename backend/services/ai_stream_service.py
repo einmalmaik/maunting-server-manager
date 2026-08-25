@@ -3468,6 +3468,42 @@ async def _schreibrunde_ausfuehren(
     # Sie steht hier und nicht in `_persist_write_proposals`, weil
     # diese Funktion gleich in einem Thread laeuft; `veroeffentlichen`
     # gehoert auf die Ereignisschleife.
+    # Ethics Engine Reflexion: Falls konfiguriert und vom Trigger als pruefbeduerftig
+    # eingestuft, beraet die Engine das System vor Ausfuehrung der Schreibvorschlaege.
+    from services import ai_ethics_service, ai_ethics_trigger, ai_memory_service
+    if ai_provider_service.fuer_ethics(vorbereitung.provider):
+        for call in current_usage.tool_calls:
+            trigger = ai_ethics_trigger.should_trigger_ethics(
+                call.name,
+                getattr(call, "arguments", None) or {},
+                ethics_mode=vorbereitung.provider.ethics_mode or "auto",
+                goal=f"Ausführung von {call.name}",
+                planned_action=f"{call.name} in Schreibrunde",
+            )
+            if trigger.should_evaluate:
+                with SessionLocal() as db_ethics:
+                    benutzer = db_ethics.get(User, user_id)
+                    if benutzer is not None:
+                        mem_context = ai_memory_service.provider_memory_context(
+                            db_ethics, benutzer, query=call.name
+                        )
+                        try:
+                            eval_res = await ai_ethics_service.evaluate_decision(
+                                client,
+                                db_ethics,
+                                vorbereitung.provider,
+                                benutzer,
+                                trigger.decision_context,
+                                relevant_memories=[mem_context] if mem_context else None,
+                            )
+                            if eval_res.assessment in ("review", "critical"):
+                                logger.info(
+                                    "Ethics Engine Hinweis für %s: %s (assessment=%s)",
+                                    call.name, eval_res.recommendation, eval_res.assessment,
+                                )
+                        except Exception as fehler:
+                            logger.warning("Ethics Engine Auswertung fehlgeschlagen: %s", fehler)
+
     _werkzeuge_ansagen(run_id, current_usage.tool_calls)
     # **Als Ganzes in einen Thread, innen unveraendert sequenziell.**
     #

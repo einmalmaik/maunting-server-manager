@@ -54,6 +54,19 @@ export interface AiProviderAdmin {
    */
   worker_reasoning_effort: string | null
   /**
+   * Das Modell der Ethics Engine — die Reflexions- und Urteilsebene.
+   * `null` heisst: keine Ethics Engine konfiguriert (deaktiviert).
+   */
+  ethics_model: string | null
+  /**
+   * Die feste Denkstufe fuer das Ethics-Modell.
+   */
+  ethics_reasoning_effort: string | null
+  /**
+   * Der Modus / die Zoning-Stufe: 'off' | 'auto' | 'always' | 'critical'.
+   */
+  ethics_mode: 'off' | 'auto' | 'always' | 'critical'
+  /**
    * Der Name der Azure-Ressource dieses Zugangs — das eine Stueck Adresse, das
    * MSM nicht selbst weiss. Nur Anbieter mit `ressource_noetig` brauchen ihn;
    * bei allen anderen ist `null` der Normalfall und das Feld unbeachtet.
@@ -919,6 +932,9 @@ export interface AiProviderWrite {
    */
   worker_model?: string | null
   worker_reasoning_effort?: string | null
+  ethics_model?: string | null
+  ethics_reasoning_effort?: string | null
+  ethics_mode?: 'off' | 'auto' | 'always' | 'critical'
   /**
    * Wie `default_voice`: „nicht genannt" laesst den Namen stehen,
    * ausdrueckliches `null` nimmt ihn zurueck. Der Unterschied zaehlt hier

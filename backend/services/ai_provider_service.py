@@ -127,6 +127,16 @@ def fuer_chat(provider: AiProvider) -> bool:
     )
 
 
+def fuer_ethics(provider: AiProvider) -> bool:
+    """Ob dieser Zugang eine betriebsbereite Ethics Engine besitzt."""
+    return bool(
+        provider.enabled
+        and spricht(provider, ai_provider_registry.CHAT)
+        and (provider.ethics_model or "").strip()
+        and (provider.ethics_mode or "auto").strip().lower() != "off"
+    )
+
+
 def _hint(secret: str) -> str:
     return "********" + secret[-4:] if len(secret) >= 4 else "********"
 
@@ -326,6 +336,44 @@ def _assert_worker_rolle(
     return modell, stufe
 
 
+ETHICS_MODI = ("off", "auto", "always", "critical")
+
+
+def _assert_ethics_rolle(
+    ethics_model: str | None,
+    ethics_reasoning_effort: str | None,
+    ethics_mode: str | None,
+    default_model: str | None,
+) -> tuple[str | None, str | None, str]:
+    """Die Ethics-Engine-Konfiguration eines Zugangs — schlüssig oder gar nicht.
+
+    * Der Modus muss in ETHICS_MODI liegen (Standard: 'auto').
+    * Die Denkstufe muss ein Wort aus `ai_reasoning.RANGFOLGE` sein, falls angegeben.
+    * Eine Denkstufe ohne Ethics-Modell gibt es nicht.
+    * Ein Ethics-Modell braucht ein Standardmodell am selben Zugang.
+    """
+    modell = (ethics_model or "").strip() or None
+    stufe = (ethics_reasoning_effort or "").strip() or None
+    modus = (ethics_mode or "auto").strip().lower()
+    if modus not in ETHICS_MODI:
+        raise AiProviderConfigurationError(
+            f"Unbekannter Ethik-Modus '{modus}'. Zulässig sind: {', '.join(ETHICS_MODI)}"
+        )
+    if stufe is not None and stufe not in RANGFOLGE:
+        raise AiProviderConfigurationError(
+            "Unbekannte Ethik-Denkstufe. Zulässig sind: " + ", ".join(RANGFOLGE)
+        )
+    if stufe is not None and modell is None:
+        raise AiProviderConfigurationError(
+            "Eine Ethik-Denkstufe braucht ein Ethik-Modell"
+        )
+    if modell is not None and not (default_model or "").strip():
+        raise AiProviderConfigurationError(
+            "Ein Ethik-Modell braucht ein Standardmodell am selben Zugang"
+        )
+    return modell, stufe, modus
+
+
 def create_provider(
     db: Session,
     *,
@@ -350,6 +398,11 @@ def create_provider(
     # erben den Zugang des Gehirns, allein trüge das Modell nichts.
     worker_model: str | None = None,
     worker_reasoning_effort: str | None = None,
+    # Optional: die Ethics-Engine-Rolle dieses Zugangs. Reflektiert und beraet
+    # das Gehirn vor kritischen Handlungen.
+    ethics_model: str | None = None,
+    ethics_reasoning_effort: str | None = None,
+    ethics_mode: str = "auto",
     # Optional: der Name der Azure-Ressource dieses Zugangs. Nur Anbieter mit
     # ``ressource_noetig`` brauchen ihn; bei allen anderen bleibt er leer und
     # unbeachtet. Er wird trotzdem **nicht** gegen `provider_kind` geprüft —
@@ -369,6 +422,9 @@ def create_provider(
         )
     arbeitsmodell, arbeitsstufe = _assert_worker_rolle(
         worker_model, worker_reasoning_effort, modell
+    )
+    ethikmodell, ethikstufe, ethikmodus = _assert_ethics_rolle(
+        ethics_model, ethics_reasoning_effort, ethics_mode, modell
     )
     kind = _assert_kind(provider_kind)
     schluessel = _assert_key_passt(kind, operator_api_key)
@@ -390,6 +446,9 @@ def create_provider(
         transcription_model=gehoer,
         worker_model=arbeitsmodell,
         worker_reasoning_effort=arbeitsstufe,
+        ethics_model=ethikmodell,
+        ethics_reasoning_effort=ethikstufe,
+        ethics_mode=ethikmodus,
         azure_resource_name=ressource,
     )
     db.add(provider)
@@ -462,12 +521,23 @@ def update_provider(
         else provider.worker_reasoning_effort,
         new_default_model,
     )
+    new_ethics_model, new_ethics_effort, new_ethics_mode = _assert_ethics_rolle(
+        values["ethics_model"] if "ethics_model" in values else provider.ethics_model,
+        values["ethics_reasoning_effort"]
+        if "ethics_reasoning_effort" in values
+        else provider.ethics_reasoning_effort,
+        values["ethics_mode"] if "ethics_mode" in values else provider.ethics_mode,
+        new_default_model,
+    )
     provider.name = new_name
     provider.default_model = new_default_model
     provider.default_voice = new_default_voice
     provider.transcription_model = new_transcription_model
     provider.worker_model = new_worker_model
     provider.worker_reasoning_effort = new_worker_effort
+    provider.ethics_model = new_ethics_model
+    provider.ethics_reasoning_effort = new_ethics_effort
+    provider.ethics_mode = new_ethics_mode
     for field in ("enabled", "requires_api_key"):
         # ``null`` heisst bei einer NOT-NULL-Spalte nicht „aus", sondern
         # „nichts gesagt" — es wird wie ein fehlendes Feld behandelt, statt als

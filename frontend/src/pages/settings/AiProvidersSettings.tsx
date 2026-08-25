@@ -32,6 +32,7 @@ interface ProviderDraft extends AiProviderWrite {
  * verdecken: kein Anbieter führt ein Modell dieses Namens.
  */
 const KEIN_WORKER = '__aus__'
+const KEINE_ETHICS = '__aus__'
 
 /**
  * Der Hinweis unter einer Modellzeile: Anzeigename, Empfehlung, Bildsicht.
@@ -73,6 +74,9 @@ const EMPTY_PROVIDER: ProviderDraft = {
   // Fallback (docs/agentic-framework.md, §5), keine Pflichtangabe.
   worker_model: null,
   worker_reasoning_effort: null,
+  ethics_model: null,
+  ethics_reasoning_effort: null,
+  ethics_mode: 'auto',
   // Nur Anbieter mit `ressource_noetig` brauchen ihn; ohne Vorbelegung, weil
   // MSM die Ressourcen des fremden Kontos nicht kennt.
   azure_resource_name: null,
@@ -92,6 +96,9 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     transcription_model: provider.transcription_model,
     worker_model: provider.worker_model,
     worker_reasoning_effort: provider.worker_reasoning_effort,
+    ethics_model: provider.ethics_model,
+    ethics_reasoning_effort: provider.ethics_reasoning_effort,
+    ethics_mode: provider.ethics_mode || 'auto',
     azure_resource_name: provider.azure_resource_name,
     operator_api_key: '',
     operator_key_configured: provider.operator_key_configured,
@@ -186,6 +193,11 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
             worker_reasoning_effort: draft.worker_model?.trim()
               ? draft.worker_reasoning_effort || null
               : null,
+            ethics_model: draft.ethics_model?.trim() || null,
+            ethics_reasoning_effort: draft.ethics_model?.trim()
+              ? draft.ethics_reasoning_effort || null
+              : null,
+            ethics_mode: draft.ethics_mode || 'auto',
           }
         : {}),
       // Wie die Felder darueber: nur mit dem Zugang, der ihn braucht. Ein
@@ -387,21 +399,19 @@ function ProviderForm({
   }, [draft.provider_kind, draft.id, fuehrtKatalog])
 
   /*
-   * Anbieter ohne Katalog: die zwei eingetippten Kennungen einzeln nachschlagen.
+   * Anbieter ohne Katalog: die eingetippten Kennungen einzeln nachschlagen.
    *
-   * Sonst bliebe bei Azure die Auswahl der Worker-Denkstufe leer — sie haengt
-   * an der Katalogliste, und die ist dort leer. Der Chat wusste es laengst
-   * besser (er fragt `finde`), das Formular nicht: dasselbe Modell hatte je
-   * nach Bildschirm Stufen oder keine.
+   * Sonst bliebe bei Azure die Auswahl der Worker- oder Ethik-Denkstufe leer — sie haengt
+   * an der Katalogliste, und die ist dort leer.
    *
    * Nur bei `fuehrt_katalog === false`. Ein Anbieter **mit** Katalog behaelt
    * seine Liste als einzige Wahrheit — sonst zeigte das Formular Stufen zu
    * einem Modell, das seine Liste nicht fuehrt.
    */
   const [einzelmodelle, setEinzelmodelle] = useState<Record<string, AiCatalogModel | null>>({})
-  const kennungen = [draft.default_model?.trim(), draft.worker_model?.trim()]
+  const kennungen = [draft.default_model?.trim(), draft.worker_model?.trim(), draft.ethics_model?.trim()]
     .filter((wert): wert is string => Boolean(wert))
-    .join(' ')
+    .join(' ')
   useEffect(() => {
     if (fuehrtKatalog !== false || !draft.provider_kind || !kennungen) return
     let active = true
@@ -409,7 +419,7 @@ function ProviderForm({
     // Tastendruck eine Anfrage.
     const timer = window.setTimeout(() => {
       void Promise.all(
-        kennungen.split(' ').map((kennung) =>
+        kennungen.split(' ').map((kennung) =>
           aiApi.findCatalogModel(draft.provider_kind, kennung)
             .then((modell) => [kennung, modell] as const)
             .catch(() => [kennung, null] as const),
@@ -431,6 +441,9 @@ function ProviderForm({
   // verschwindet dann mit, denn Stufen kommen immer aus dem Katalog.
   const workerModell = models?.find((item) => item.model_id === draft.worker_model)
     ?? nachgeschlagen(draft.worker_model)
+  // Das Modell der Ethics Engine — ebenfalls aus demselben Katalog.
+  const ethicsModell = models?.find((item) => item.model_id === draft.ethics_model)
+    ?? nachgeschlagen(draft.ethics_model)
   // Kommt aus dem Katalog, nicht aus der Oberflaeche: fuehrt der Anbieter die
   // empfohlene Kennung nicht mehr, gibt es hier `null` und die Empfehlung
   // verschwindet von selbst — statt auf ein Modell zu zeigen, das es nicht gibt.
@@ -444,6 +457,9 @@ function ProviderForm({
   const preisId = useId()
   const workerModellId = useId()
   const workerStufeId = useId()
+  const ethicsModellId = useId()
+  const ethicsStufeId = useId()
+  const ethicsModusId = useId()
   const ttsModellId = useId()
   const ressourceId = useId()
 
@@ -818,6 +834,106 @@ function ProviderForm({
                     aria-label={t('ai.providers.workerEffort')}
                   />
                   <p className="msm-field-help">{t('ai.providers.workerEffortHint')}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Ethics Engine: Die Reflexions- und Urteilsebene.
+            Berät das Gehirn im Hintergrund vor folgenreichen Entscheidungen. */}
+        {spec?.protokoll === 'chat_completions' && (
+          <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                ⚖️ {t('ai.providers.ethicsSection')}
+              </h4>
+              <p className="msm-field-help mt-1">{t('ai.providers.ethicsHint')}</p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="space-y-1.5">
+                {models && models.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <label htmlFor={ethicsModellId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                      {t('ai.providers.ethicsModel')}
+                    </label>
+                    <Dropdown
+                      id={ethicsModellId}
+                      value={draft.ethics_model || KEINE_ETHICS}
+                      onChange={(ethics_model) => change({
+                        ethics_model: ethics_model === KEINE_ETHICS ? null : ethics_model,
+                        ethics_reasoning_effort: null,
+                      })}
+                      options={[
+                        { value: KEINE_ETHICS, label: t('ai.providers.ethicsOff') },
+                        ...[...models]
+                          .sort((a, b) => Number(b.recommended) - Number(a.recommended))
+                          .map((item) => ({
+                            value: item.model_id,
+                            label: item.model_id,
+                            hint: modellHinweis(item, t),
+                          })),
+                      ]}
+                      aria-label={t('ai.providers.ethicsModel')}
+                    />
+                  </div>
+                ) : (
+                  <ProviderInput
+                    label={t('ai.providers.ethicsModel')}
+                    value={draft.ethics_model ?? ''}
+                    onChange={(ethics_model) => change({
+                      ethics_model: ethics_model || null,
+                      ethics_reasoning_effort: null,
+                    })}
+                  />
+                )}
+                {ethicsModell && <ModelCapabilities model={ethicsModell} />}
+              </div>
+
+              {/* Modus / Zoning-Stufe */}
+              <div className="space-y-1.5">
+                <label htmlFor={ethicsModusId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  {t('ai.providers.ethicsMode')}
+                </label>
+                <Dropdown
+                  id={ethicsModusId}
+                  value={draft.ethics_mode || 'auto'}
+                  onChange={(mode) => change({ ethics_mode: mode as ProviderDraft['ethics_mode'] })}
+                  options={[
+                    { value: 'auto', label: t('ai.providers.ethicsModes.auto') },
+                    { value: 'critical', label: t('ai.providers.ethicsModes.critical') },
+                    { value: 'always', label: t('ai.providers.ethicsModes.always') },
+                    { value: 'off', label: t('ai.providers.ethicsModes.off') },
+                  ]}
+                  aria-label={t('ai.providers.ethicsMode')}
+                />
+                <p className="msm-field-help">{t('ai.providers.ethicsModeHint')}</p>
+              </div>
+
+              {/* Feste Denkstufe für Ethik-Reflexion */}
+              {ethicsModell?.reasoning && ethicsModell.efforts.length > 0 && (
+                <div className="space-y-1.5">
+                  <label htmlFor={ethicsStufeId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                    {t('ai.providers.ethicsEffort')}
+                  </label>
+                  <Dropdown
+                    id={ethicsStufeId}
+                    value={draft.ethics_reasoning_effort || KEINE_ETHICS}
+                    onChange={(stufe) => change({
+                      ethics_reasoning_effort: stufe === KEINE_ETHICS ? null : stufe,
+                    })}
+                    options={[
+                      ...(ethicsModell.mandatory
+                        ? []
+                        : [{ value: KEINE_ETHICS, label: t('ai.providers.ethicsEffortOff') }]),
+                      ...ethicsModell.efforts.map((effort) => ({
+                        value: effort,
+                        label: t(`ai.reasoning.levels.${effort}`, { defaultValue: effort }),
+                      })),
+                    ]}
+                    aria-label={t('ai.providers.ethicsEffort')}
+                  />
+                  <p className="msm-field-help">{t('ai.providers.ethicsEffortHint')}</p>
                 </div>
               )}
             </div>

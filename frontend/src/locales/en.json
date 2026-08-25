@@ -211,6 +211,21 @@
       "workerEffort": "Fixed reasoning effort",
       "workerEffortOff": "No reasoning",
       "workerEffortHint": "Applies to every worker run. Customers do not choose it — the operator pays for background work.",
+      "ethicsSection": "Ethics Engine (Ethical Reflection)",
+      "ethicsHint": "Optional background advisor for ethical consideration, harm evaluation, and safer alternatives during impactful actions.",
+      "ethicsModel": "Ethics Model",
+      "ethicsOff": "No Ethics Engine (Disabled)",
+      "ethicsEffort": "Fixed Reasoning Effort",
+      "ethicsEffortOff": "No reasoning",
+      "ethicsEffortHint": "Applies to ethical deliberation passes in the background.",
+      "ethicsMode": "Zoning Mode (Trigger Level)",
+      "ethicsModeHint": "Controls when the Ethics Engine is consulted.",
+      "ethicsModes": {
+        "auto": "Automatic (on impactful or sensitive actions)",
+        "off": "Disabled (no ethics check)",
+        "always": "Always (review every planned action)",
+        "critical": "Critical cases (destructive or irreversible actions only)"
+      },
       "recommendationHint": "MSM is tested with {{model}} — fast enough for chat and it knows reasoning levels. Another model works too.",
       "recommendationApply": "Use it",
       "caps": {

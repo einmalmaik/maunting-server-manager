@@ -109,6 +109,17 @@ class AiProvider(Base):
     # ``None`` heißt „nicht nachdenken" — derselbe Standard wie heute bei
     # unbeaufsichtigten Läufen, keine geratene Tiefe.
     worker_reasoning_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Das Modell fuer die optionale, dynamische Ethics Engine — die fuenfte
+    # Funktion an derselben Zeile: `default_model` denkt im Gespraech (Gehirn),
+    # `transcription_model` hoert, `default_voice` spricht, `worker_model` arbeitet,
+    # dieses Modell reflektiert und beraet das Gehirn bei heiklen Entscheidungen.
+    #
+    # ``None`` heisst: keine Ethics Engine konfiguriert (deaktiviert).
+    ethics_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # Die feste Denkstufe fuer das Ethik-Modell (aus `ai_reasoning.RANGFOLGE`).
+    ethics_reasoning_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Der Modus / die Zoning-Stufe: 'off', 'auto', 'always', 'critical'. Standard: 'auto'.
+    ethics_mode: Mapped[str] = mapped_column(String(32), default="auto", nullable=False)
     # Der Name der Azure-Ressource dieses Zugangs — das eine Stück Adresse, das
     # MSM nicht selbst weiß.
     #

@@ -153,6 +153,27 @@ Jeder Auftrag ist ein eigener, unbeaufsichtigter Lauf — das heutige Arbeitsmod
   bestehen, weil ausgeführte Remote-Befehle auditierbar bleiben müssen (Sicherheitsregel, nicht
   verhandelbar). Das Ergebnis steht ohnehin als Nachricht im Dauerchat.
 
+### Die Ethics Engine (intern: Ethischer Berater / Reflexionsebene)
+
+Die dritte Rolle im Provider-Verbund neben Gehirn und Worker (seit 26.08.2026). Sie agiert als
+interne ethische Reflexions- und Urteilsinstanz bei folgenreichen Systementscheidungen.
+
+- **Reine Beratungsfunktion (Advisory):** Die Ethics Engine redet nicht mit dem Nutzer, führt keine
+  Werkzeuge aus und ersetzt weder Gehirn noch Worker. Sie liefert strukturierte Bewertungen
+  (`assessment`, `concerns`, `affected_interests`, `possible_harm`, `alternative`, `recommendation`).
+- **100 % KI-gesteuert, keine Regex-Filter:** Unter keinen Umständen werden statische Wortlisten
+  oder Regex-Muster gepflegt. Die Trigger-Entscheidung stützt sich auf strukturierte Metadaten
+  der Werkzeuge (`ai_tool_registry.py`), Reversibilität und Autonomie; die inhaltliche Abwägung
+  übernimmt ein vollwertiges LLM-Modell mit optionaler Denkstufe.
+- **Zoning-Stufen (`ethics_mode`):**
+  1. `auto` (Standard): Prüfung bei folgenreichen, schreibenden oder sicherheitsrelevanten Aktionen.
+  2. `critical`: Beschränkt auf unumkehrbare oder destruktive Systemeingriffe.
+  3. `always`: Vorabprüfung jeder geplanten Systemhandlung.
+  4. `off`: Vollständig deaktiviert (0 ms Latenz).
+- **Echte Sicherheit bleibt mechanisch:** Bestätigungskarten, RBAC, Dateisnapshots und
+  Ausführungsbeschränkungen bleiben unberührt und verbindlich.
+
+
 ### Diagramm
 
 ```
