@@ -98,7 +98,7 @@ fn send_activity(
                 },
                 "assets": {
                     "large_image": "logo",
-                    "large_text": "Maunting Smart System"
+                    "large_text": "MSS"
                 }
             }
         },
@@ -158,8 +158,8 @@ pub fn starten(client_id_override: Option<String>) {
                     let (details, state) = match current_status {
                         Some(s) => (s.details, s.state),
                         None => (
-                            "Maunting Smart System".to_string(),
-                            "Server Manager Companion".to_string(),
+                            "Security needs trust".to_string(),
+                            "Sicherheit braucht Vertrauen".to_string(),
                         ),
                     };
 

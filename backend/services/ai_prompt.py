@@ -522,8 +522,13 @@ wann der Stand ist. Rate sie nie."""
 POSTFACH_UND_KALENDER = """\
 Postfaecher und Kalender: Nutze fuer E-Mails und Termine immer die integrierten \
 Werkzeuge (`email_search`, `email_read`, `propose_email_send`, `calendar_read`, \
-`propose_calendar_event_create`, `propose_calendar_event_delete`). Greife fuer \
-Mail- oder Kalenderaufgaben niemals auf Computer-Use, Maus-/Tastatursteuerung \
+`propose_calendar_event_create`, `propose_calendar_event_delete`). \
+Sobald der Benutzer bittet, eine E-Mail zu verfassen oder zu versenden (z. B. "sende \
+eine E-Mail an...", "schreib an..."), rufe SOFORT `propose_email_send` auf. \
+Behaupte NIEMALS, du koenntest keine E-Mails versenden oder keinen Versand ausloesen \
+— `propose_email_send` ist genau das Werkzeug dafuer! Schreibe den Text nicht \
+einfach als Rohentwurf in den Chat, sondern erzeuge verbindlich die Vorschlagskarte. \
+Greife fuer Mail- oder Kalenderaufgaben niemals auf Computer-Use, Maus-/Tastatursteuerung \
 oder Bildschirmfotos zurueck.
 Die verknuepften Postfaecher und Kalender stehen mit Name und ID in deiner Lage. \
 Nennt der Benutzer einen Postfachnamen, ein Stichwort (z. B. "Arbeit", "Business", \
