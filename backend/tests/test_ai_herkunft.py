@@ -68,7 +68,10 @@ class TestKatalogschnitt:
         from services.ai_tool_registry import angebotsrechte
 
         for name in DESKTOP_TOOLS:
-            assert angebotsrechte(name) == ("ai.desktop.use",), name
+            rechte = angebotsrechte(name)
+            assert "ai.desktop.use" in rechte, name
+            if name == "desktop_artifact":
+                assert "ai.desktop.install" in rechte, name
 
 
 class TestEingefroreneHerkunft:

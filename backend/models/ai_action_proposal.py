@@ -15,6 +15,10 @@ class AiActionProposal(Base):
             "status IN ('proposed', 'confirmed', 'executing', 'succeeded', 'failed', 'expired')",
             name="ck_ai_action_proposals_status",
         ),
+        CheckConstraint(
+            "proposal_type IN ('read', 'worker', 'write')",
+            name="ck_ai_action_proposals_proposal_type",
+        ),
         Index("ix_ai_action_proposals_user_created", "user_id", "created_at"),
         Index("ix_ai_action_proposals_conversation_created", "conversation_id", "created_at"),
         # Traegt die Stundenbudget-Abfrage des autonomen Modus.
@@ -52,6 +56,7 @@ class AiActionProposal(Base):
         Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True, index=True
     )
     tool_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    proposal_type: Mapped[str] = mapped_column(String(16), default="write", nullable=False)
     # Tool-Payload kann Config-Inhalt enthalten und ist deshalb immer DIS-
     # verschluesselt. Preview enthaelt nur redigierte Metadaten/Diff-Zeilen.
     payload_encrypted: Mapped[str] = mapped_column(Text, nullable=False)

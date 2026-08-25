@@ -136,6 +136,17 @@ Was die App zum Betrieb braucht:
 - Für die Werkzeuge auf dem eigenen Rechner zusätzlich `ai.desktop.use`. Ohne
   dieses Recht ist die App ein Chatfenster: sie holt keine Aufträge ab, und
   die KI bekommt die Desktop-Werkzeuge gar nicht erst angeboten.
+- Für Downloads, Mod-Deployments und Software-Installationen über die Smart-System-App
+  wird zusätzlich das globale Recht `ai.desktop.install` sowie die Aktivierung in den
+  Desktop-Einstellungen (`artifact_install_aktiv`) benötigt.
+- **Artefakt-Pipeline & Windows Sandbox**: Heruntergeladene Dateien werden in einer privaten
+  Quarantäne (`%LOCALAPPDATA%\Singra\MSS-Quarantine`) abgelegt. Nach SHA-256-Abgleich und
+  Microsoft-Defender-Prüfung (`-DisableRemediation`) wird das Artefakt verbindlich in einer
+  flüchtigen, isolierten Windows Sandbox (schreibgeschützter Mount, kein Netzwerk, keine
+  Zwischenablage, Protected Client aktiv) bereitgestellt.
+- **Autonomie-Freigabefluss**: Bei deaktiviertem autonomen Modus lehnt die KI Werkzeugaufrufe
+  nicht textuell ab, sondern erzeugt standardisierte Bestätigungskarten (`AiActionProposalCard`)
+  mit dem passenden `proposal_type` (`read`, `worker`, `write`).
 - Panelseitig müssen `tauri://localhost`, `http://tauri.localhost` und
   `https://tauri.localhost` als Origins erlaubt sein. Das ist in
   `backend/config.py` fest hinterlegt (`TAURI_ORIGINS`) und braucht keine

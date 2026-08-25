@@ -62,6 +62,17 @@ const TATSACHEN: readonly string[] = [
   'startup_after',
   'image_after',
   'env_after',
+  'server_name',
+  'zugriff',
+  'pfad',
+  'zeilen_angefragt',
+  'titel',
+  'beschreibung',
+  'aktion',
+  'target_id',
+  'quarantine_id',
+  'snapshot_id',
+  'publisher_hash',
 ]
 
 function tatsachenZeilen(preview: Record<string, unknown>): [string, string][] {
@@ -132,7 +143,7 @@ export function AiActionProposalCard({
   // `ai_messages`, nicht im Lauf-Snapshot. Nach einem Neuladen sind sie weg, und
   // genau das heisst „genau einmal“.
   const [geheimnisse, setGeheimnisse] = useState<{ label: string; value: string }[]>([])
-  const operation = previewText(proposal.preview.operation)
+  const operation = previewText(proposal.preview.operation ?? proposal.preview.aktion)
   const path = previewText(proposal.preview.path)
   const diff = previewText(proposal.preview.diff)
   const tatsachen = tatsachenZeilen(proposal.preview as Record<string, unknown>)
@@ -182,6 +193,7 @@ export function AiActionProposalCard({
     read_server_logs: Eye,
     read_config: FilePenLine,
     list_my_servers: ServerCog,
+    desktop_artifact: Package,
   }
   const Icon = ICONS[proposal.tool_name] ?? Power
   // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb
@@ -218,10 +230,10 @@ export function AiActionProposalCard({
     ].filter(Boolean).join('\n\n')
 
     const accepted = await confirm({
-      title: t('ai.actions.confirmTitle'),
+      title: t(`ai.actions.tools.${proposal.tool_name}`, proposal.tool_name),
       message,
-      confirmText: t('ai.actions.execute'),
-      danger: UNUMKEHRBAR.includes(proposal.tool_name),
+      confirmLabel: t('ai.actions.execute', 'Ausführen'),
+      variant: UNUMKEHRBAR.includes(proposal.tool_name) ? 'danger' : 'warning',
     })
     if (!accepted) return
     setBusy(true)
@@ -231,13 +243,10 @@ export function AiActionProposalCard({
       const confirmation = await aiApi.confirmAction(proposal.id)
       const executed = await aiApi.executeAction(proposal.id, confirmation.confirmation_token)
       onChange(executed.proposal)
-      // `result` wird nirgends persistiert, steht nicht im Audit und fliesst
-      // nicht zum Modell zurueck — der einzige Weg vom Backend an die
-      // Oberflaeche, der das Modell umgeht. Ein API-Key, den das Modell nie
-      // gesehen hat, kann es auch nicht ausplaudern; auf die Redaktion waere
-      // hier kein Verlass, ein `token_urlsafe(32)` passt auf kein Muster.
-      const frisch = (executed.result as { secrets?: { label: string; value: string }[] } | null)
-        ?.secrets
+      // Genau-einmal-Anzeige: das Backend liefert Secrets ausschliesslich
+      // in der Rueckgabe dieses einen POSTs aus. Wir heben sie in den State
+      // der Karte, und nirgendwo sonst hin.
+      const frisch = (executed.result as { secrets?: { label: string; value: string }[] } | null)?.secrets
       if (Array.isArray(frisch) && frisch.length) setGeheimnisse(frisch)
       // Lifecycle-Aktionen laufen im Hintergrund weiter. Eine Erfolgsmeldung
       // waere hier eine Aussage ueber einen noch offenen Ausgang.
@@ -262,6 +271,16 @@ export function AiActionProposalCard({
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold text-on-surface">{t(`ai.actions.tools.${proposal.tool_name}`, proposal.tool_name)}</h3>
             <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs text-on-surface-variant">{t(`ai.actions.status.${proposal.status}`)}</span>
+            {proposal.proposal_type === 'read' && (
+              <span className="rounded-full bg-secondary/15 px-2 py-0.5 text-xs text-secondary">
+                {t('ai.actions.type.read', 'Lese-Zugriff')}
+              </span>
+            )}
+            {proposal.proposal_type === 'worker' && (
+              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs text-primary">
+                {t('ai.actions.type.worker', 'Worker')}
+              </span>
+            )}
             {proposal.autonomous && (
               <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
                 <Bot className="h-3 w-3" />

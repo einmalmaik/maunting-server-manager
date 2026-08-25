@@ -23,6 +23,7 @@
 //! Harte Grenze: dieses Backend kennt keine Server-Werkzeuge und wird nie
 //! welche bekommen — Server-Verwaltung bleibt exklusiv dem Web-Panel.
 
+pub mod artefakt;
 mod audio;
 mod aufraeumen;
 mod auftrag;
@@ -33,6 +34,7 @@ mod ducking;
 mod geheimnisse;
 mod konfig;
 mod sandbox;
+pub mod sandbox_container;
 mod sichtfeld;
 mod system;
 mod tray;
@@ -99,6 +101,12 @@ fn refresh_token_laden() -> Result<Option<String>, String> {
 #[tauri::command(async)]
 fn refresh_token_loeschen() -> Result<(), String> {
     geheimnisse::loeschen()
+}
+
+/// Prueft, ob Windows Sandbox auf diesem System verfuegbar ist.
+#[tauri::command(async)]
+fn sandbox_verfuegbar() -> bool {
+    sandbox_container::ist_verfuegbar()
 }
 
 /// Fuehrt einen Auftrag des Panels aus (Dateien, Programme, Uebernahme).
@@ -640,7 +648,8 @@ pub fn run() {
             desktop_aktion_ablehnen,
             oeffne_browser,
             deinstallation_aufraeumen,
-            deinstallation_starten
+            deinstallation_starten,
+            sandbox_verfuegbar
         ])
         .setup(|app| {
             tray::erstellen(app.handle())?;

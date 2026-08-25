@@ -52,6 +52,9 @@ serde_json = "1"
 keyring = "4"
 # Ordner-Auswahl fuer den Sandbox-Schritt des Einrichtungs-Assistenten.
 tauri-plugin-dialog = "2"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
 
 # Lokales Wake-Word (Phase 3): rustpotter erkennt ein aus eigenen Aufnahmen
 # gebautes Referenz-Wakeword komplett offline (Apache-2.0, kein Netzwerk).

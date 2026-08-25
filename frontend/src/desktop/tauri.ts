@@ -39,6 +39,12 @@ export interface AppKonfig {
   audio_verstaerkung: number
   /** Ob Computer-Use (Maus, Tastatur, Bildschirmsteuerung) durch die KI erlaubt ist. */
   computer_use_aktiv: boolean
+  /** Ob Artefakt-Installationen (Software, Mods, Installer) durch die KI erlaubt sind. */
+  artifact_install_aktiv: boolean
+  /** Maximales Download-Limit pro Artefakt in Bytes (Standard 10 GiB, max 100 GiB). */
+  max_download_bytes: number
+  /** Vom Benutzer freigegebene Suchwurzeln für Spiele und Software. */
+  search_roots: string[]
 }
 
 export async function konfigLaden(): Promise<AppKonfig> {
@@ -47,6 +53,10 @@ export async function konfigLaden(): Promise<AppKonfig> {
 
 export async function konfigSpeichern(konfig: AppKonfig): Promise<void> {
   await invoke('konfig_speichern', { konfig })
+}
+
+export async function sandboxVerfuegbar(): Promise<boolean> {
+  return await invoke<boolean>('sandbox_verfuegbar')
 }
 
 /** Setzt den Tray-Status (Icon-Farbe + Tooltip). */

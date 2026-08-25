@@ -475,7 +475,23 @@
         "propose_task_delete": "Delete recurring task",
         "propose_task_set": "Set up recurring task",
         "propose_restart_schedule_set": "Configure server auto-restart",
-        "propose_backup_schedule_set": "Configure server auto-backup"
+        "propose_backup_schedule_set": "Configure server auto-backup",
+        "desktop_artifact": "Desktop artifact (software/mod/installer)",
+        "read_server_status": "Read server status",
+        "read_server_capacity": "Read server capacity",
+        "read_server_logs": "Read server logs",
+        "list_server_files": "List server files",
+        "search_server_files": "Search server files",
+        "read_config": "Read server config",
+        "list_my_servers": "List servers",
+        "worker_start": "Start worker research",
+        "worker_cancel": "Cancel worker",
+        "web_search": "Web search"
+      },
+      "type": {
+        "read": "Read access",
+        "worker": "Worker",
+        "write": "Modification"
       },
       "status": {
         "proposed": "Review required",
@@ -586,6 +602,7 @@
       "desktop_steuern": "Computer operated",
       "desktop_system": "Looked around your computer",
       "desktop_aufraeumen": "Cleaned up",
+      "desktop_artifact": "Managed software/mod",
       "forget_memory": "Deleted memories",
       "forget_skill": "Deleted a skill",
       "learn_skill": "Learned a skill",
@@ -633,6 +650,7 @@
       "desktop_steuern": "Operating your computer",
       "desktop_system": "Looking around your computer",
       "desktop_aufraeumen": "I am cleaning up",
+      "desktop_artifact": "I am processing the artifact",
       "forget_memory": "Deleting the memory",
       "forget_skill": "Deleting the skill",
       "learn_skill": "Learning the skill",
@@ -1799,6 +1817,10 @@
     "ai_desktop_use": {
       "title": "AI tools on your own computer",
       "desc": "Allows the AI to work on the user's computer — through the Smart System app, never through the panel. It may look at whatever the user can see: drives, folders, disk space, the screen and a virus check — all read-only, and an indicator lights up at the edge of the screen whenever it looks. Creating and changing files happens only inside the self-chosen sandbox folder. Cleaning up is also allowed outside it: deleted items go to the recycle bin, permanently only on explicit request, and with autonomous mode off a card with the full list appears first. Windows itself, program folders and other user profiles stay locked until the user unlocks them in the app's settings. It takes over mouse and keyboard without asking only in autonomous mode; with that off, the user must confirm it on their machine, and the grant is then time-limited and revocable at any time. A request from the browser never reaches these tools — the origin is in the token of the paired session, no client can claim it."
+    },
+    "ai_desktop_install": {
+      "title": "Install desktop artifacts & software",
+      "desc": "Allows the AI to download, test (Defender & Sandbox), deploy with snapshot rollback, or start user-level installers for software, game mods, and applications via the Smart System app."
     },
     "ai_usage_read_all": {
       "title": "View overall AI usage",
@@ -4918,6 +4940,27 @@
         "aktivierenWarnung": "Important Security Notice: Enabling Computer-Use allows the AI to perform mouse movements, clicks, keystrokes, and screenshots on your machine after permission or in autonomous mode. With autonomous mode disabled, you must confirm each action manually in chat or via a confirmation dialog. Do you want to enable Computer-Use now?",
         "aktivierenBestaetigen": "Yes, enable Computer-Use",
         "abbrechen": "Cancel"
+      },
+      "artefakte": {
+        "titel": "Artifact Installations & Quarantine",
+        "statusAktiv": "Enabled",
+        "statusDeaktiviert": "Disabled (Recommended)",
+        "beschreibung": "Allows the AI to download, test (Defender & Sandbox), deploy and roll back software, mods and installers.",
+        "sandboxTitel": "Windows Sandbox Isolation",
+        "sandboxVerfuegbar": "Ephemeral Windows Sandbox is available and active on this machine.",
+        "sandboxNichtVerfuegbar": "Windows Sandbox is not enabled or not supported (Hyper-V / BIOS Virtualization required).",
+        "sandboxBereit": "Ready",
+        "sandboxFehlt": "Not available",
+        "downloadLimitTitel": "Download limit per file",
+        "downloadLimitHinweis": "Standard 10 GiB, configurable up to 100 GiB. Larger downloads are immediately aborted for security.",
+        "suchwurzelnTitel": "Approved search areas for games & software",
+        "suchwurzelHinzufuegen": "+ Add folder",
+        "keineSuchwurzeln": "No custom search folders added. Standard Steam libraries are detected automatically.",
+        "ordnerFehler": "Could not select folder.",
+        "aktivierenTitel": "Enable Artifact Installations?",
+        "aktivierenWarnung": "Enabling this feature allows the AI to download files (such as game mods or software installers) on your request. All downloads undergo isolated quarantine, SHA-256 verification, Microsoft Defender scan and ephemeral Windows Sandbox testing prior to installation.",
+        "abbrechen": "Cancel",
+        "aktivierenBestaetigen": "Enable"
       },
       "banner": {
         "computerUseHinweis": "Computer-Use is currently disabled. The AI cannot control or inspect your desktop.",

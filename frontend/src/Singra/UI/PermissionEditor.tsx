@@ -61,6 +61,7 @@ const SUBGROUPS = [
       'ai.tasks.manage',
       'ai.background.use',
       'ai.desktop.use',
+      'ai.desktop.install',
       'ai.usage.read.all',
     ],
   },

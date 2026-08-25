@@ -20,6 +20,9 @@ pub const HOTKEY_SPRACHE_VORGABE: &str = "Alt+Shift+Space";
 /// Vorgabe der Wake-Word-Empfindlichkeit (rustpotter-Schwelle, Median-Score).
 pub const WAKEWORD_SCHWELLE_VORGABE: f32 = 0.45;
 
+pub const STANDARD_DOWNLOAD_LIMIT_BYTES: u64 = 10 * 1024 * 1024 * 1024; // 10 GiB
+pub const MAX_DOWNLOAD_LIMIT_BYTES: u64 = 100 * 1024 * 1024 * 1024; // 100 GiB
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct AppKonfig {
@@ -65,6 +68,13 @@ pub struct AppKonfig {
     /// Ob Computer-Use (Maus, Tastatur, Bildschirmsteuerung) durch die KI
     /// erlaubt ist. Vorgabe ist `false` (Datenschutz & Sicherheit).
     pub computer_use_aktiv: bool,
+    /// Ob Artefakt-Installationen (Software, Mods, Installer) durch die KI
+    /// erlaubt sind. Vorgabe ist `false` (Sicherheit & Privatsphäre).
+    pub artifact_install_aktiv: bool,
+    /// Maximales Download-Limit pro Artefakt in Bytes (Standard 10 GiB, max 100 GiB).
+    pub max_download_bytes: u64,
+    /// Vom Benutzer freigegebene Suchwurzeln für Spiele und Software.
+    pub search_roots: Vec<String>,
 }
 
 /// Ermittelt den isolierten Standard-Sandbox-Pfad im Benutzerprofil (`%USERPROFILE%\MSS-Sandbox` bzw. `$HOME/MSS-Sandbox`).
@@ -108,6 +118,9 @@ impl Default for AppKonfig {
             audio_autogain: true,
             audio_verstaerkung: 1.0,
             computer_use_aktiv: false,
+            artifact_install_aktiv: false,
+            max_download_bytes: STANDARD_DOWNLOAD_LIMIT_BYTES,
+            search_roots: Vec::new(),
         }
     }
 }

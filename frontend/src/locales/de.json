@@ -475,7 +475,23 @@
         "propose_task_delete": "Wiederkehrende Aufgabe löschen",
         "propose_task_set": "Wiederkehrende Aufgabe einrichten",
         "propose_restart_schedule_set": "Auto-Neustart des Servers einstellen",
-        "propose_backup_schedule_set": "Auto-Backup des Servers einstellen"
+        "propose_backup_schedule_set": "Auto-Backup des Servers einstellen",
+        "desktop_artifact": "Desktop-Artefakt (Software/Mod/Installer)",
+        "read_server_status": "Server-Status lesen",
+        "read_server_capacity": "Server-Kapazität lesen",
+        "read_server_logs": "Server-Logs lesen",
+        "list_server_files": "Server-Dateien auflisten",
+        "search_server_files": "Server-Dateien durchsuchen",
+        "read_config": "Server-Konfiguration lesen",
+        "list_my_servers": "Server-Übersicht lesen",
+        "worker_start": "Worker-Recherche starten",
+        "worker_cancel": "Worker abbrechen",
+        "web_search": "Web-Recherche"
+      },
+      "type": {
+        "read": "Lese-Zugriff",
+        "worker": "Worker",
+        "write": "Änderung"
       },
       "status": {
         "proposed": "Prüfung erforderlich",
@@ -586,6 +602,7 @@
       "desktop_steuern": "Rechner bedient",
       "desktop_system": "Auf deinem Rechner nachgesehen",
       "desktop_aufraeumen": "Aufgeräumt",
+      "desktop_artifact": "Software/Mod verwaltet",
       "forget_memory": "Erinnerungen gelöscht",
       "forget_skill": "Skill gelöscht",
       "learn_skill": "Skill gelernt",
@@ -633,6 +650,7 @@
       "desktop_steuern": "Ich bediene deinen Rechner",
       "desktop_system": "Ich sehe auf deinem Rechner nach",
       "desktop_aufraeumen": "Ich räume auf",
+      "desktop_artifact": "Ich verarbeite das Artefakt",
       "forget_memory": "Ich lösche die Erinnerung",
       "forget_skill": "Ich lösche den Skill",
       "learn_skill": "Ich lerne den Skill",
@@ -1799,6 +1817,10 @@
     "ai_desktop_use": {
       "title": "KI-Werkzeuge auf dem eigenen Rechner",
       "desc": "Erlaubt der KI, auf dem Rechner des Benutzers zu arbeiten — über die Smart-System-App, nie über das Panel. Ansehen darf sie, was der Benutzer selbst sehen kann: Laufwerke, Ordner, Speicherplatz, den Bildschirm und eine Virenprüfung — alles nur lesend, und ein Hinweis am Bildschirmrand leuchtet auf, sobald sie hinsieht. Angelegt und geändert wird ausschließlich im selbst gewählten Sandbox-Ordner. Aufräumen darf sie auch außerhalb: Gelöschtes geht in den Papierkorb, endgültig nur auf ausdrücklichen Wunsch, und bei ausgeschaltetem autonomem Modus liegt vorher eine Karte mit der vollständigen Liste vor. Windows selbst, Programmordner und fremde Benutzerprofile bleiben gesperrt, bis der Benutzer sie in den Einstellungen der App freigibt. Maus und Tastatur übernimmt sie ohne Rückfrage nur im autonomen Modus; ist er aus, muss der Benutzer das an seinem Rechner bestätigen, und die Freigabe ist dann befristet und jederzeit widerrufbar. Eine Bitte aus dem Browser erreicht diese Werkzeuge nie — die Herkunft steht im Token der gekoppelten Sitzung, kein Client kann sie behaupten."
+    },
+    "ai_desktop_install": {
+      "title": "Desktop-Artefakte & Software installieren",
+      "desc": "Erlaubt der KI, über die Smart-System-App Software, Spiel-Mods und Setup-Installer auf dem Rechner des Benutzers herunterzuladen, zu prüfen (Defender & Sandbox), mit Snapshot-Rollback zu installieren oder Setup-Programme im Benutzerkontext zu starten."
     },
     "ai_usage_read_all": {
       "title": "Gesamte KI-Nutzung einsehen",
@@ -4918,6 +4940,27 @@
         "aktivierenWarnung": "Wichtiger Sicherheitshinweis: Wenn Sie Computer-Use aktivieren, kann die KI nach Freigabe oder im autonomen Modus Mausbewegungen, Klicks, Tastatureingaben und Bildschirmaufnahmen auf Ihrem Rechner durchführen. Bei ausgeschaltetem autonomen Modus müssen Sie jede Aktion manuell im Chat oder per Dialog bestätigen. Möchten Sie Computer-Use jetzt aktivieren?",
         "aktivierenBestaetigen": "Ja, Computer-Use aktivieren",
         "abbrechen": "Abbrechen"
+      },
+      "artefakte": {
+        "titel": "Artefakt-Installationen & Quarantäne",
+        "statusAktiv": "Aktiviert",
+        "statusDeaktiviert": "Deaktiviert (Empfohlen)",
+        "beschreibung": "Erlaubt der KI das Herunterladen, Prüfen (Defender & Sandbox), Deployen und Rollbacken von Software, Mods und Installern.",
+        "sandboxTitel": "Windows Sandbox Isolation",
+        "sandboxVerfuegbar": "Flüchtige Windows Sandbox ist auf diesem Rechner verfügbar und aktiv.",
+        "sandboxNichtVerfuegbar": "Windows Sandbox ist nicht aktiviert oder nicht unterstützt (Hyper-V / BIOS Virtualisierung nötig).",
+        "sandboxBereit": "Bereit",
+        "sandboxFehlt": "Nicht verfügbar",
+        "downloadLimitTitel": "Download-Limit pro Datei",
+        "downloadLimitHinweis": "Standard 10 GiB, konfigurierbar bis 100 GiB. Größere Downloads werden aus Sicherheitsgründen sofort abgebrochen.",
+        "suchwurzelnTitel": "Freigegebene Suchbereiche für Spiele & Software",
+        "suchwurzelHinzufuegen": "+ Ordner freigeben",
+        "keineSuchwurzeln": "Keine benutzerdefinierten Suchordner hinzugefügt. Standard-Steam-Bibliotheken werden automatisch erkannt.",
+        "ordnerFehler": "Ordner konnte nicht ausgewählt werden.",
+        "aktivierenTitel": "Artefakt-Installationen aktivieren?",
+        "aktivierenWarnung": "Wenn du diese Funktion aktivierst, kann die KI auf deinen Wunsch hin Dateien (z. B. Spiel-Mods oder Software-Installer) herunterladen. Alle Downloads durchlaufen eine isolierte Quarantäne, SHA-256-Prüfung, Microsoft Defender Scan und eine flüchtige Windows Sandbox vor der eigentlichen Installation.",
+        "abbrechen": "Abbrechen",
+        "aktivierenBestaetigen": "Aktivieren"
       },
       "banner": {
         "computerUseHinweis": "Computer-Use ist derzeit deaktiviert. Die KI kann Ihren Desktop nicht steuern oder einsehen.",

@@ -1390,6 +1390,53 @@ def _desktop_tool_definitions() -> list[dict]:
             },
             ["aktion", "grund"],
         ),
+        _function(
+            "desktop_artifact",
+            "Verwaltet Desktop-Artefakte (Software, Mods, Installer). "
+            "aktion='download': Lädt Datei via HTTPS in Quarantäne. "
+            "aktion='pruefen': SHA-256- und Defender-Scan. "
+            "aktion='sandbox': Startet isolierte Windows Sandbox zur Prüfung. "
+            "aktion='locator': Sucht Spiel- und Softwareinstallationen. "
+            "aktion='deploy': Installiert Artefakt mit Snapshot-Manifest. "
+            "aktion='rollback': Stellt vorherigen Snapshot-Zustand wieder her. "
+            "aktion='installer': Startet Setup-Installer im Benutzerkontext. "
+            "aktion='status': Prüft Quarantäne- und Sandbox-Status.",
+            {
+                "aktion": {
+                    "type": "string",
+                    "enum": [
+                        "download", "pruefen", "sandbox", "locator",
+                        "deploy", "rollback", "installer", "status",
+                    ],
+                },
+                "url": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "description": "HTTPS-Download-URL des Artefakts.",
+                },
+                "artifact_id": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Opake Kennung des heruntergeladenen Artefakts.",
+                },
+                "target_id": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Opake Kennung des Installationsziels aus locator.",
+                },
+                "sha256": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Erwarteter SHA-256-Hash des Herausgebers.",
+                },
+                "installer_args": {
+                    "type": "array",
+                    "items": {"type": "string", "maxLength": 200},
+                    "description": "Optionale Argumente für Installer.",
+                },
+            },
+            ["aktion"],
+        ),
     ]
 
 
@@ -3346,6 +3393,7 @@ def _execute_global_read_tool(
         "desktop_steuern",
         "desktop_system",
         "desktop_aufraeumen",
+        "desktop_artifact",
     ):
         # Dieselbe Lage wie bei `wait_until`: die fuenf werden im Rundenlauf
         # abgefangen (`_desktop_behandeln`), werden zu einem Auftrag an den

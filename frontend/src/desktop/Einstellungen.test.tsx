@@ -33,6 +33,7 @@ vi.mock('./tauri', () => ({
   hotkeysSetzen: vi.fn().mockResolvedValue(undefined),
   overlayTesten: vi.fn().mockResolvedValue(undefined),
   setzeStatus: vi.fn().mockResolvedValue(undefined),
+  sandboxVerfuegbar: vi.fn().mockResolvedValue(true),
   wakewordLauschen: vi.fn().mockResolvedValue(undefined),
   wakewordStand: vi.fn().mockResolvedValue({ aufnahmen: 0, gesamt: 3, schwelle: 0.45, trainiert: false, mikrofon: null, erkannt: null }),
 }))

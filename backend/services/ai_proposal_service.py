@@ -2022,6 +2022,7 @@ def proposal_response(proposal: AiActionProposal) -> AiActionProposalResponse:
         conversation_id=proposal.conversation_id,
         server_id=proposal.server_id,
         tool_name=proposal.tool_name,
+        proposal_type=getattr(proposal, "proposal_type", None) or "write",
         preview=preview,
         expected_revision=proposal.expected_revision,
         requires_confirmation=proposal.requires_confirmation,
@@ -2146,7 +2147,23 @@ def create_proposal(
     elif tool_name in GLOBAL_READ_TOOLS or tool_name in WORKER_STEUERUNG:
         _require_tool_permission(db, user, None, tool_name, rest)
         payload = dict(rest)
-        preview = {"operation": tool_name, **rest}
+        if tool_name == "worker_start":
+            auftrag_text = str(rest.get("auftrag") or rest.get("prompt") or "")
+            titel = rest.get("title") or (auftrag_text[:60] if auftrag_text else "Worker-Auftrag")
+            preview = {
+                "operation": "worker_start",
+                "title": redact_sensitive_text(str(titel)),
+                "kanal": rest.get("kanal", "chat"),
+            }
+        elif tool_name == "web_search":
+            preview = {
+                "operation": "web_search",
+                "query": redact_sensitive_text(str(rest.get("query", ""))[:120]),
+            }
+        elif tool_name == "list_my_servers":
+            preview = {"operation": "list_my_servers"}
+        else:
+            preview = {"operation": tool_name}
         expected_revision = None
     elif tool_name in GLOBAL_WRITE_TOOLS:
         # **Der Waechter hinter der Tabelle.** Hier stand frueher
@@ -2308,8 +2325,11 @@ def create_proposal(
                 "operation": tool_name,
                 "server_name": server.name,
                 "current_status": server.status,
-                **rest,
             }
+            if "path" in rest:
+                preview["path"] = redact_sensitive_text(str(rest["path"]))
+            if "lines" in rest:
+                preview["lines"] = rest["lines"]
             expected_revision = None
         else:
             raise AiActionValidationError(f"Kein Payload-Bau fuer Werkzeug: {tool_name}")
@@ -2336,6 +2356,13 @@ def create_proposal(
     # diesem Modul und wuerde beim Modulimport einen Zirkel bilden.
     from services.ai_autonomy_service import autonomy_allows
 
+    if tool_name in WORKER_STEUERUNG:
+        proposal_type = "worker"
+    elif tool_name in SERVER_READ_TOOLS or tool_name in GLOBAL_READ_TOOLS:
+        proposal_type = "read"
+    else:
+        proposal_type = "write"
+
     autonomous = autonomy_allows(db, user=user, server_id=server_id, tool_name=tool_name)
     proposal = AiActionProposal(
         id=proposal_id,
@@ -2343,6 +2370,7 @@ def create_proposal(
         user_id=user.id,
         server_id=server_id,
         tool_name=tool_name,
+        proposal_type=proposal_type,
         payload_encrypted=encrypted,
         preview_json=json.dumps(preview, ensure_ascii=True, separators=(",", ":")),
         expected_revision=expected_revision,

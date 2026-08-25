@@ -41,7 +41,7 @@ WOCHENTAGE = (
 
 #: Ungefähre Länge des fertigen Blocks in Zeichen. Für den Ring am Absendeknopf
 #: (`ai_context_service.geschaetzte_belegung`).
-TYPISCHE_ZEICHEN = 245
+TYPISCHE_ZEICHEN = 475
 
 #: Standardname des Assistenten, wenn der Benutzer keinen vergeben hat.
 STANDARD_NAME = "Singra"
@@ -312,8 +312,10 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
 
     if not ai_task_service.darf_handeln(db, user):
         zeilen.append(
-            'Autonomer Modus: nicht aktiv. Aufgaben der Art "act" weist das '
-            "Panel ab."
+            'Autonomer Modus: nicht aktiv. Aufgaben der Art "act" und Guardian-Läufe '
+            "können ohne Freigabe nicht unbeaufsichtigt handeln. Im interaktiven Chat "
+            "erzeugt jeder Werkzeugaufruf eine Bestätigungskarte für den Benutzer — "
+            "rufe Werkzeuge normal auf und sage niemals wegen fehlender Autonomie ab."
         )
         return "\n".join(zeilen)
 

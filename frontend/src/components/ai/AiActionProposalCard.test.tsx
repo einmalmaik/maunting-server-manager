@@ -214,4 +214,65 @@ describe('AiActionProposalCard', () => {
     // Eine bereits gelaufene Aktion darf keinen Ausfuehren-Knopf anbieten.
     expect(screen.queryByRole('button', { name: 'Prüfen und ausführen' })).not.toBeInTheDocument()
   })
+
+  it('renders read proposal type badge and preview without leaking file contents', () => {
+    const readProposal: AiActionProposal = {
+      ...proposal,
+      id: 'proposal-read-1',
+      tool_name: 'read_server_logs',
+      proposal_type: 'read',
+      preview: {
+        server_name: 'Mein Server',
+        zugriff: 'Logdatei einsehen',
+        pfad: 'logs/latest.log',
+        zeilen_angefragt: 50,
+      },
+    }
+
+    render(<AiActionProposalCard proposal={readProposal} onChange={vi.fn()} />)
+
+    expect(screen.getByText('Lese-Zugriff')).toBeInTheDocument()
+    expect(screen.getByText('Mein Server')).toBeInTheDocument()
+    expect(screen.getByText('Logdatei einsehen')).toBeInTheDocument()
+    expect(screen.getByText('logs/latest.log')).toBeInTheDocument()
+    expect(screen.getByText('50')).toBeInTheDocument()
+  })
+
+  it('renders worker proposal type badge and title preview', () => {
+    const workerProposal: AiActionProposal = {
+      ...proposal,
+      id: 'proposal-worker-1',
+      tool_name: 'worker_start',
+      proposal_type: 'worker',
+      preview: {
+        titel: 'Recherche zu Backup-Fehler',
+        beschreibung: 'Untersucht die Server-Fehlermeldungen im Hintergrund',
+      },
+    }
+
+    render(<AiActionProposalCard proposal={workerProposal} onChange={vi.fn()} />)
+
+    expect(screen.getByText('Worker')).toBeInTheDocument()
+    expect(screen.getByText('Recherche zu Backup-Fehler')).toBeInTheDocument()
+    expect(screen.getByText('Untersucht die Server-Fehlermeldungen im Hintergrund')).toBeInTheDocument()
+  })
+
+  it('renders desktop_artifact proposal with operation badge', () => {
+    const artifactProposal: AiActionProposal = {
+      ...proposal,
+      id: 'proposal-art-1',
+      tool_name: 'desktop_artifact',
+      proposal_type: 'write',
+      preview: {
+        aktion: 'download',
+        url: 'https://example.com/mod.zip',
+        publisher_hash: 'abc12345',
+      },
+    }
+
+    render(<AiActionProposalCard proposal={artifactProposal} onChange={vi.fn()} />)
+
+    expect(screen.getByText('Desktop-Artefakt (Software/Mod/Installer)')).toBeInTheDocument()
+    expect(screen.getByText('Aktion: download')).toBeInTheDocument()
+  })
 })

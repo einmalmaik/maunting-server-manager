@@ -666,6 +666,14 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "desktop_steuern": Werkzeug(
         "delegation", gruppe="desktop", angebot=("ai.desktop.use",)
     ),
+    # Desktop-Artefakte: generische Pipeline fuer Software, Mods und Installer.
+    # Download, SHA-256, Defender-Pruefung, fluechtige Windows Sandbox, Locator,
+    # Deployment mit Snapshot-Manifest und dateibasiertem Rollback.
+    "desktop_artifact": Werkzeug(
+        "delegation",
+        gruppe="desktop",
+        angebot=("ai.desktop.install", "ai.desktop.use"),
+    ),
 }
 
 

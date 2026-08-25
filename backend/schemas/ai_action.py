@@ -11,6 +11,7 @@ class AiActionProposalResponse(BaseModel):
     # Ein Erstellungsvorschlag hat vor der Ausfuehrung noch keinen Server.
     server_id: int | None
     tool_name: str
+    proposal_type: str = "write"
     preview: dict
     expected_revision: str | None
     requires_confirmation: bool

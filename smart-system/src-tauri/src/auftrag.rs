@@ -134,6 +134,7 @@ pub fn desktop_aktion_bestaetigen(app: &AppHandle, auftrag_id: &str) -> Result<V
         "desktop_launch_app" => starten(app, &wartend.argumente),
         "desktop_system" => system::ausfuehren(app, &wartend.argumente),
         "desktop_steuern" => uebernahme::steuern(&wartend.argumente),
+        "desktop_artifact" => crate::artefakt::ausfuehren(app, &wartend.argumente),
         andere => Err(format!("Unbekanntes Werkzeug: '{andere}'")),
     }
 }
@@ -236,6 +237,41 @@ fn aktion_beschreibung(werkzeug: &str, argumente: &Value) -> (String, String) {
             "Maus- oder Tastatureingabe".to_string(),
             "Die KI möchte Maus- oder Tastaturaktionen auf deinem Computer ausführen.".to_string(),
         ),
+        "desktop_artifact" => {
+            let aktion = argumente["aktion"].as_str().unwrap_or("");
+            let url = argumente["url"].as_str().unwrap_or("");
+            let art_id = argumente["artifact_id"].as_str().unwrap_or("");
+            match aktion {
+                "download" => (
+                    "Artefakt herunterladen".to_string(),
+                    format!("Die KI möchte eine Datei via HTTPS in die lokale Quarantäne herunterladen: '{url}'."),
+                ),
+                "pruefen" | "sandbox" => (
+                    "Artefakt prüfen & Sandbox starten".to_string(),
+                    format!("Die KI möchte das Quarantäne-Artefakt '{art_id}' mit Microsoft Defender prüfen und in einer flüchtigen Windows Sandbox isoliert öffnen."),
+                ),
+                "locator" => (
+                    "Software & Spiele lokalisieren".to_string(),
+                    "Die KI möchte installierte Spiele und Software in freigegebenen Suchbereichen ermitteln.".to_string(),
+                ),
+                "deploy" => (
+                    "Artefakt installieren (Snapshot-Deployment)".to_string(),
+                    format!("Die KI möchte das geprüfte Artefakt '{art_id}' mit automatischem Rollback-Snapshot installieren."),
+                ),
+                "rollback" => (
+                    "Rollback ausführen".to_string(),
+                    format!("Die KI möchte den vorherigen Zustand für Artefakt '{art_id}' aus dem Snapshot wiederherstellen."),
+                ),
+                "installer" => (
+                    "Setup-Programm ausführen".to_string(),
+                    format!("Die KI möchte das Setup-Programm '{art_id}' auf deinem Rechner starten."),
+                ),
+                _ => (
+                    "Artefakt-Aktion".to_string(),
+                    format!("Die KI möchte eine Artefakt-Aktion ('{aktion}') ausführen."),
+                ),
+            }
+        }
         _ => (
             "Aktion ausführen".to_string(),
             format!("Die KI möchte das Werkzeug '{werkzeug}' ausführen."),
@@ -268,6 +304,15 @@ pub fn ausfuehren(
         );
     }
 
+    // 1b. Artefakt-Installationen Sicherheitsgrenze:
+    if werkzeug == "desktop_artifact" && !app_konfig.artifact_install_aktiv {
+        return Err(
+            "Artefakt-Installationen sind in den Desktop-Einstellungen deaktiviert. Der \
+             Benutzer kann sie in den Einstellungen aktivieren."
+                .into(),
+        );
+    }
+
     // 2. Spezialfälle mit eigenen Karten/Abläufen:
     if werkzeug == "desktop_steuern" && argumente["aktion"].as_str() == Some("freigabe") {
         return steuern(app, argumente, auftrag_id);
@@ -284,6 +329,7 @@ pub fn ausfuehren(
             "desktop_launch_app" => starten(app, argumente).map(Some),
             "desktop_system" => system::ausfuehren(app, argumente).map(Some),
             "desktop_steuern" => uebernahme::steuern(argumente).map(Some),
+            "desktop_artifact" => crate::artefakt::ausfuehren(app, argumente).map(Some),
             andere => Err(format!("Unbekanntes Werkzeug: '{andere}'")),
         };
     }

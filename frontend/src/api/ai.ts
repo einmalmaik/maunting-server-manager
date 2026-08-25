@@ -447,6 +447,7 @@ export interface AiActionProposal {
   /** Null bei einem Erstellungsvorschlag — den Server gibt es dann noch nicht. */
   server_id: number | null
   tool_name: AiWriteTool | (string & {})
+  proposal_type?: 'read' | 'worker' | 'write'
   preview: Record<string, unknown>
   expected_revision: string | null
   requires_confirmation: boolean

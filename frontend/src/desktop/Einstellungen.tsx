@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { emit } from '@tauri-apps/api/event'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
+import { open as ordnerDialog } from '@tauri-apps/plugin-dialog'
 import { AlertTriangle, ExternalLink, FileSignature, Mic, MonitorCog, ShieldCheck, Volume2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
@@ -41,6 +42,7 @@ import {
   konfigSpeichern,
   oeffneBrowser,
   overlayTesten,
+  sandboxVerfuegbar,
   setzeStatus,
   wakewordLauschen,
   type AgentStatus,
@@ -159,6 +161,8 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
       </div>
 
       <ComputerUseSektion onKonfigAenderung={onKonfigAenderung} />
+
+      <ArtefaktInstallationSektion onKonfigAenderung={onKonfigAenderung} />
 
       <Hotkeys />
 
@@ -281,6 +285,201 @@ function ComputerUseSektion({ onKonfigAenderung }: { onKonfigAenderung?: () => v
               </Button>
               <Button autoFocus size="sm" onClick={() => void bestaetigenAktivieren()}>
                 {t('mss.einstellungen.computerUse.aktivierenBestaetigen')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+function ArtefaktInstallationSektion({ onKonfigAenderung }: { onKonfigAenderung?: () => void }) {
+  const { t } = useTranslation()
+  const [konfig, setKonfig] = useState<AppKonfig | null>(null)
+  const [dialogOffen, setDialogOffen] = useState(false)
+  const [sandboxOk, setSandboxOk] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    void konfigLaden().then(setKonfig).catch(() => {})
+    void sandboxVerfuegbar().then(setSandboxOk).catch(() => setSandboxOk(false))
+  }, [])
+
+  async function toggle(an: boolean) {
+    if (!konfig) return
+    if (an) {
+      setDialogOffen(true)
+    } else {
+      const neu = { ...konfig, artifact_install_aktiv: false }
+      setKonfig(neu)
+      await konfigSpeichern(neu).catch(() => {})
+      onKonfigAenderung?.()
+    }
+  }
+
+  async function bestaetigenAktivieren() {
+    if (!konfig) return
+    const neu = { ...konfig, artifact_install_aktiv: true }
+    setKonfig(neu)
+    setDialogOffen(false)
+    await konfigSpeichern(neu).catch(() => {})
+    onKonfigAenderung?.()
+  }
+
+  async function downloadLimitAendern(gib: number) {
+    if (!konfig) return
+    const bytes = Math.max(1, Math.min(100, gib)) * 1024 * 1024 * 1024
+    const neu = { ...konfig, max_download_bytes: bytes }
+    setKonfig(neu)
+    await konfigSpeichern(neu).catch(() => {})
+    onKonfigAenderung?.()
+  }
+
+  async function suchwurzelHinzufuegen() {
+    if (!konfig) return
+    try {
+      const gewaehlt = await ordnerDialog({ directory: true, multiple: false })
+      if (typeof gewaehlt === 'string' && gewaehlt && !konfig.search_roots.includes(gewaehlt)) {
+        const neu = { ...konfig, search_roots: [...konfig.search_roots, gewaehlt] }
+        setKonfig(neu)
+        await konfigSpeichern(neu).catch(() => {})
+        onKonfigAenderung?.()
+      }
+    } catch {
+      toast.error(t('mss.einstellungen.artefakte.ordnerFehler', 'Ordner konnte nicht ausgewählt werden.'))
+    }
+  }
+
+  async function suchwurzelEntfernen(pfad: string) {
+    if (!konfig) return
+    const neu = { ...konfig, search_roots: konfig.search_roots.filter((w) => w !== pfad) }
+    setKonfig(neu)
+    await konfigSpeichern(neu).catch(() => {})
+    onKonfigAenderung?.()
+  }
+
+  const limitGiB = Math.round((konfig?.max_download_bytes ?? 10 * 1024 * 1024 * 1024) / (1024 * 1024 * 1024))
+
+  return (
+    <>
+      <div className="flex flex-col gap-3 border-t border-outline-variant/40 pt-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-on-surface">{t('mss.einstellungen.artefakte.titel', 'Artefakt-Installationen & Quarantäne')}</p>
+              {konfig?.artifact_install_aktiv ? (
+                <Badge variant="success">
+                  {t('mss.einstellungen.artefakte.statusAktiv', 'Aktiviert')}
+                </Badge>
+              ) : (
+                <Badge variant="default">
+                  {t('mss.einstellungen.artefakte.statusDeaktiviert', 'Deaktiviert')}
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-on-surface-variant">
+              {t('mss.einstellungen.artefakte.beschreibung', 'Erlaubt der KI das Herunterladen, Prüfen (Defender & Sandbox), Deployen und Rollbacken von Software, Mods und Installern.')}
+            </p>
+          </div>
+          <Switch
+            checked={konfig?.artifact_install_aktiv === true}
+            disabled={konfig === null}
+            onCheckedChange={(an) => void toggle(an)}
+            aria-label={t('mss.einstellungen.artefakte.titel', 'Artefakt-Installationen')}
+          />
+        </div>
+
+        {konfig?.artifact_install_aktiv && (
+          <div className="mt-2 flex flex-col gap-4 rounded-xl border border-outline-variant/30 bg-surface-container-low/30 p-4">
+            {/* Windows Sandbox Status */}
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-medium text-on-surface">{t('mss.einstellungen.artefakte.sandboxTitel', 'Windows Sandbox Isolation')}</p>
+                <p className="text-xs text-on-surface-variant">
+                  {sandboxOk
+                    ? t('mss.einstellungen.artefakte.sandboxVerfuegbar', 'Flüchtige Windows Sandbox ist auf diesem Rechner verfügbar und aktiv.')
+                    : t('mss.einstellungen.artefakte.sandboxNichtVerfuegbar', 'Windows Sandbox ist nicht aktiviert oder nicht unterstützt (Hyper-V / BIOS Virtualisierung nötig).')}
+                </p>
+              </div>
+              <Badge variant={sandboxOk ? 'success' : 'warning'}>
+                {sandboxOk ? t('mss.einstellungen.artefakte.sandboxBereit', 'Bereit') : t('mss.einstellungen.artefakte.sandboxFehlt', 'Nicht verfügbar')}
+              </Badge>
+            </div>
+
+            {/* Download Limit */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-on-surface font-medium">{t('mss.einstellungen.artefakte.downloadLimitTitel', 'Download-Limit pro Datei')}</span>
+                <span className="font-mono text-primary">{limitGiB} GiB</span>
+              </div>
+              <Slider
+                min={1}
+                max={100}
+                step={1}
+                value={limitGiB}
+                onValueChange={(val) => void downloadLimitAendern(val)}
+                ariaLabel={t('mss.einstellungen.artefakte.downloadLimitTitel', 'Download-Limit')}
+              />
+              <p className="text-xs text-on-surface-variant">
+                {t('mss.einstellungen.artefakte.downloadLimitHinweis', 'Standard 10 GiB, konfigurierbar bis 100 GiB. Größere Downloads werden aus Sicherheitsgründen sofort abgebrochen.')}
+              </p>
+            </div>
+
+            {/* Freigegebene Suchwurzeln */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-on-surface">{t('mss.einstellungen.artefakte.suchwurzelnTitel', 'Freigegebene Suchbereiche für Spiele & Software')}</p>
+                <Button variant="secondary" size="sm" onClick={() => void suchwurzelHinzufuegen()}>
+                  {t('mss.einstellungen.artefakte.suchwurzelHinzufuegen', '+ Ordner freigeben')}
+                </Button>
+              </div>
+              {konfig.search_roots.length === 0 ? (
+                <p className="text-xs italic text-on-surface-variant/70">
+                  {t('mss.einstellungen.artefakte.keineSuchwurzeln', 'Keine benutzerdefinierten Suchordner hinzugefügt. Standard-Steam-Bibliotheken werden automatisch erkannt.')}
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-1">
+                  {konfig.search_roots.map((wurzel) => (
+                    <li key={wurzel} className="flex items-center justify-between gap-2 rounded-lg bg-surface-container px-3 py-1.5 text-xs">
+                      <span className="break-all font-mono text-on-surface">{wurzel}</span>
+                      <Button variant="ghost" size="sm" onClick={() => void suchwurzelEntfernen(wurzel)}>
+                        ✕
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {dialogOffen && (
+        <div
+          className="msm-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('mss.einstellungen.artefakte.aktivierenTitel', 'Artefakt-Installationen aktivieren')}
+        >
+          <div className="msm-card flex w-full max-w-md flex-col gap-4 p-5">
+            <div className="flex items-center gap-2 text-status-warning">
+              <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden="true" />
+              <h2 className="text-base font-semibold text-on-surface">
+                {t('mss.einstellungen.artefakte.aktivierenTitel', 'Artefakt-Installationen aktivieren')}
+              </h2>
+            </div>
+            <p className="text-xs leading-relaxed text-on-surface-variant">
+              {t(
+                'mss.einstellungen.artefakte.aktivierenWarnung',
+                'Wenn du diese Funktion aktivierst, kann die KI auf deinen Wunsch hin Dateien (z. B. Spiel-Mods oder Software-Installer) herunterladen. Alle Downloads durchlaufen eine isolierte Quarantäne, SHA-256-Prüfung, Microsoft Defender Scan und eine flüchtige Windows Sandbox vor der eigentlichen Installation.',
+              )}
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button variant="ghost" size="sm" onClick={() => setDialogOffen(false)}>
+                {t('mss.einstellungen.artefakte.abbrechen', 'Abbrechen')}
+              </Button>
+              <Button autoFocus size="sm" onClick={() => void bestaetigenAktivieren()}>
+                {t('mss.einstellungen.artefakte.aktivierenBestaetigen', 'Aktivieren')}
               </Button>
             </div>
           </div>

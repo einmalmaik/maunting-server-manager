@@ -110,6 +110,7 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # Serverwerkzeuge erreicht ein Auftrag aus der Desktop-App nie, unabhaengig
     # von diesem Recht (harte Grenze in ai_stream_service, Herkunft 'desktop').
     PermissionDef("ai.desktop.use",            "ai",      "KI-Werkzeuge auf dem eigenen Rechner (Smart System)"),
+    PermissionDef("ai.desktop.install",        "ai",      "Desktop-Artefakte (Software, Mods, Installer) über das Smart System herunterladen, prüfen und installieren"),
     # OAuth-Provider-Konfiguration (Phase 4 — Social Login).
     # `secret_update` ist bewusst separat: erfordert zusaetzliche Audit-Bestaetigung.
     # `test` ist read-only, damit ein Operator ohne write-Rechte die Konfiguration pruefen kann.
