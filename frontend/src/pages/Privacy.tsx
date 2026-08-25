@@ -10,8 +10,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-08-24',
-    version: '2.7',
+    lastUpdated: '2026-08-25',
+    version: '2.8',
     meta: 'Maunting Studios — Sicherheit braucht Vertrauen',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -85,6 +85,11 @@ export function Privacy() {
           // die Aufbewahrung (Auftragstext, Zeitplan, Zeitzone) ist eine
           // eigene Aussage.
           t('privacyPolicy.sections.ai.items.tasks'),
+          // Verknuepfte Postfaecher (IMAP/SMTP) und Kalender (CalDAV) fuer den
+          // KI-Assistenten: DIS AES-256-GCM verschluesselt, kein unbemerkter
+          // E-Mail-Versand oder Terminanlage ohne manuelle Freigabekarte.
+          t('privacyPolicy.sections.ai.items.mailboxes'),
+          t('privacyPolicy.sections.ai.items.calendars'),
         ],
       },
       {

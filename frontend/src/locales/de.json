@@ -2818,7 +2818,18 @@
       "password": "Passwort / App-Passwort",
       "passwordHint": "Leer lassen, um bestehendes Passwort nicht zu ändern",
       "syncEnabled": "Automatische Benachrichtigung bei neuen E-Mails",
-      "credentialsStoredEncrypted": "Passwörter werden mit DIS AES-256-GCM verschlüsselt gespeichert und niemals im Klartext übertragen."
+      "credentialsStoredEncrypted": "Passwörter werden mit DIS AES-256-GCM verschlüsselt gespeichert und niemals im Klartext übertragen.",
+      "template": "Anbieter-Vorlage",
+      "templateCustom": "Benutzerdefiniert (IMAP / SMTP)",
+      "templateGmail": "Google Mail / Gmail (App-Passwort)",
+      "templateOutlook": "Microsoft Outlook / Office 365",
+      "templateGmx": "GMX Mail",
+      "templateWebde": "WEB.DE",
+      "templateIcloud": "Apple iCloud (App-spezifisch)",
+      "protocolHelp": "Du kannst nur IMAP (nur Lesen), nur SMTP (nur Senden) oder beides zusammen eintragen. Mindestens ein Protokoll ist erforderlich.",
+      "imapHelp": "Wird zum Suchen und Lesen von E-Mails durch den KI-Assistenten benötigt (z. B. Posteingang durchsuchen). Kann freigelassen werden, wenn du nur E-Mails versenden möchtest.",
+      "smtpHelp": "Wird zum Vorbereiten und Absenden von E-Mails durch den KI-Assistenten benötigt. Kann freigelassen werden, wenn du nur E-Mails lesen möchtest.",
+      "gmailNotice": "Hinweis für Gmail: Google erfordert ein 16-stelliges App-Passwort, sofern 2-Faktor-Authentifizierung aktiv ist."
     },
     "calendars": {
       "title": "Verknüpfte Kalender (CalDAV)",
@@ -2836,7 +2847,9 @@
       "caldavUrl": "CalDAV-URL",
       "caldavUsername": "CalDAV-Benutzername",
       "password": "Passwort / App-Passwort",
-      "isDefault": "Als Standardkalender verwenden"
+      "isDefault": "Als Standardkalender verwenden",
+      "protocolHelp": "Wird zum Abfragen von Terminen und Vorbereiten von Termineinträgen durch den KI-Assistenten verwendet. Termine werden erst nach deiner ausdrücklichen Bestätigung erstellt oder geändert.",
+      "caldavHelp": "Vollständige CalDAV-URL deines Kalenders (z. B. Nextcloud, Baïkal, mailbox.org oder Google CalDAV)."
     },
     "confirmDeleteWordLabel": "Tippe delete zur Bestätigung (nicht kopierbar)"
   },
@@ -3668,7 +3681,9 @@
           "autonomy": "Der autonome Modus ist optional und muss pro Server oder panelweit ausdrücklich freigegeben werden; freigegebene Aktionen laufen ohne weitere Rückfrage, werden aber unverändert gegen die Berechtigungen des Nutzers geprüft und vollständig im Audit-Log als automatisch ausgeführt festgehalten",
           "tools": "Beim Einsatz von Werkzeugen können begrenzte, redigierte Ausschnitte aus Serverlogs, Konfigurationsdateien, Mod- und Backup-Listen sowie Guardian-Vorfällen an den Modellanbieter übertragen werden; diese Ergebnisse werden für Rückfragen im selben Chat gespeichert und mit dem Chat gelöscht",
           "guardian": "Bei erteilter Autonomiefreigabe kann ein Guardian-Vorfall eine Verarbeitung auslösen, ohne dass der Nutzer anwesend ist: übertragen werden Vorfallart, Status und die ohnehin freigegebenen Serverdaten; Logauszüge werden dabei zusätzlich um öffentliche IP-Adressen und E-Mail-Adressen bereinigt. Verbrauch und Verantwortung liegen beim Freigeber. Der Ergebnisbericht per E-Mail enthält modellerzeugten Text.",
-          "tasks": "Ein im Chat oder in der Aufgabenliste angelegter stehender Auftrag („KI-Aufgabe“) speichert Name, Auftragstext, Zeitplan, Zeitzone und Zustellweg und löst zum vereinbarten Zeitpunkt eine Verarbeitung aus, ohne dass der Nutzer anwesend ist. Sie läuft im Hintergrund mit den Rechten und dem Kontingent des Anlegenden; bei jedem fälligen Lauf werden Auftragstext und die abgerufenen Serverdaten an den gewählten Modellanbieter übertragen. Auf Wunsch geht das Ergebnis zusätzlich per E-Mail an die hinterlegte Adresse und enthält modellerzeugten Text. Aufträge sind im Chat und in der Aufgabenliste jederzeit auflistbar, pausierbar und löschbar."
+          "tasks": "Ein im Chat oder in der Aufgabenliste angelegter stehender Auftrag („KI-Aufgabe“) speichert Name, Auftragstext, Zeitplan, Zeitzone und Zustellweg und löst zum vereinbarten Zeitpunkt eine Verarbeitung aus, ohne dass der Nutzer anwesend ist. Sie läuft im Hintergrund mit den Rechten und dem Kontingent des Anlegenden; bei jedem fälligen Lauf werden Auftragstext und die abgerufenen Serverdaten an den gewählten Modellanbieter übertragen. Auf Wunsch geht das Ergebnis zusätzlich per E-Mail an die hinterlegte Adresse und enthält modellerzeugten Text. Aufträge sind im Chat und in der Aufgabenliste jederzeit auflistbar, pausierbar und löschbar.",
+          "mailboxes": "Verknüpfte E-Mail-Postfächer (IMAP / SMTP): Hinterlegte Zugangsdaten (Passwörter, App-Passwörter oder OAuth-Tokens) werden mit DIS AES-256-GCM verschlüsselt gespeichert und verlassen das Panel niemals im Klartext. E-Mails werden ausschließlich auf Ihre Anweisung hin durchsucht oder gelesen. Der KI-Assistent sendet niemals eigenständig E-Mails: Jeder E-Mail-Versand wird im Chat als Vorschlagskarte mit Betreff, Empfänger und Inhalt vorgelegt und erst nach Ihrer ausdrücklichen manuellen Bestätigung versendet.",
+          "calendars": "Verknüpfte Kalender (CalDAV): Kalender-Zugangsdaten werden ebenfalls über DIS verschlüsselt abgelegt. Die KI greift nur bei ausdrücklichen Fragen zu Terminen oder Verfügbarkeiten lesend auf den Kalender zu. Neue Termine oder Terminlöschungen werden stets als Vorschlagskarte vorgelegt und erfordern Ihre manuelle Bestätigung."
         }
       },
       "desktopApp": {

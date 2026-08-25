@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { Calendar, Plus, Trash2, ShieldCheck, RefreshCw, Star } from 'lucide-react'
+import { Calendar, Plus, Trash2, ShieldCheck, RefreshCw, Star, Info, X } from 'lucide-react'
 import { userIntegrationsApi, type CalendarItem, type CalendarCreateInput } from '@/api/userIntegrations'
+import { Checkbox } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 
@@ -81,8 +83,8 @@ export function ConnectedCalendarsSection() {
         name,
         provider_type: providerType,
         is_default: isDefault,
-        caldav_url: caldavUrl,
-        caldav_username: caldavUsername || undefined,
+        caldav_url: caldavUrl.trim(),
+        caldav_username: caldavUsername.trim() || undefined,
         password_or_token: password || undefined,
       }
       await userIntegrationsApi.createCalendar(input)
@@ -101,7 +103,7 @@ export function ConnectedCalendarsSection() {
   }
 
   return (
-    <div className="msm-card p-6 mt-6">
+    <div className="msm-card p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Calendar className="h-5 w-5 text-secondary" aria-hidden="true" />
@@ -183,106 +185,138 @@ export function ConnectedCalendarsSection() {
         </ul>
       )}
 
-      {/* Add Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-          <div className="msm-card max-w-lg w-full p-6 shadow-xl border border-outline">
-            <h3 className="font-headline text-lg font-semibold text-on-surface mb-2">
-              {t('profile.calendars.add', 'Kalender hinzufügen')}
-            </h3>
-            <p className="font-body-md text-xs text-on-surface-variant mb-4">
-              CalDAV-Zugangsdaten werden verschlüsselt gespeichert und sicher für Termin-Abfragen und -Entwürfe verwendet.
-            </p>
-
-            <form onSubmit={handleCreate} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-on-surface mb-1">
-                  {t('profile.calendars.name', 'Bezeichnung')}
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="z. B. Mein Arbeitskalender / Nextcloud"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="msm-input w-full text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-on-surface mb-1">
-                  {t('profile.calendars.caldavUrl', 'CalDAV-Server URL')}
-                </label>
-                <input
-                  type="url"
-                  required
-                  placeholder="https://caldav.example.com/dav/calendars/user/work/"
-                  value={caldavUrl}
-                  onChange={(e) => setCaldavUrl(e.target.value)}
-                  className="msm-input w-full text-sm font-mono"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-on-surface mb-1">
-                    {t('profile.calendars.caldavUsername', 'Benutzername')}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="user@example.com"
-                    value={caldavUsername}
-                    onChange={(e) => setCaldavUsername(e.target.value)}
-                    className="msm-input w-full text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-on-surface mb-1">
-                    {t('profile.calendars.password', 'Passwort / App-Passwort')}
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="••••••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="msm-input w-full text-sm font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4 pt-2">
-                <label className="flex items-center gap-2 text-xs text-on-surface cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isDefault}
-                    onChange={(e) => setIsDefault(e.target.checked)}
-                    className="rounded border-outline text-primary focus:ring-primary"
-                  />
-                  {t('profile.calendars.isDefault', 'Als Standardkalender festlegen')}
-                </label>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-4 border-t border-outline-variant/30">
+      {/* Add Modal with createPortal */}
+      {showAddModal &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm overflow-y-auto"
+            onClick={() => setShowAddModal(false)}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="msm-card max-w-lg w-full p-6 shadow-2xl border border-outline max-h-[90vh] overflow-y-auto my-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-headline text-lg font-semibold text-on-surface">
+                  {t('profile.calendars.add', 'Kalender hinzufügen')}
+                </h3>
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="msm-btn-secondary px-4 py-2 text-sm"
-                  disabled={saving}
+                  className="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container"
+                  aria-label="Schließen"
                 >
-                  Abbrechen
-                </button>
-                <button
-                  type="submit"
-                  className="msm-btn-primary px-4 py-2 text-sm"
-                  disabled={saving}
-                >
-                  {saving ? 'Speichert...' : 'Kalender speichern'}
+                  <X className="w-5 h-5" />
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+              <p className="font-body-md text-xs text-on-surface-variant mb-4">
+                {t('profile.mailboxes.credentialsStoredEncrypted', 'Passwörter werden mit DIS AES-256-GCM verschlüsselt gespeichert und niemals im Klartext übertragen.')}
+              </p>
+
+              {/* Protocol explanation hint */}
+              <div className="mb-4 p-3 rounded-lg bg-surface-container-high/60 border border-outline-variant/40 flex items-start gap-2.5">
+                <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                <p className="font-body-md text-xs text-on-surface-variant">
+                  {t('profile.calendars.protocolHelp', 'Wird zum Abfragen von Terminen und Vorbereiten von Termineinträgen durch den KI-Assistenten verwendet. Termine werden erst nach deiner ausdrücklichen Bestätigung erstellt oder geändert.')}
+                </p>
+              </div>
+
+              <form onSubmit={handleCreate} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-on-surface mb-1">
+                    {t('profile.calendars.name', 'Bezeichnung (z. B. Team-Kalender)')}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="z. B. Mein Arbeitskalender / Nextcloud"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="msm-input w-full text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-on-surface mb-1">
+                    {t('profile.calendars.caldavUrl', 'CalDAV-Server URL')}
+                  </label>
+                  <input
+                    type="url"
+                    required
+                    placeholder="https://caldav.example.com/dav/calendars/user/work/"
+                    value={caldavUrl}
+                    onChange={(e) => setCaldavUrl(e.target.value)}
+                    className="msm-input w-full text-sm font-mono"
+                  />
+                  <p className="text-[11px] text-on-surface-variant mt-1">
+                    {t('profile.calendars.caldavHelp', 'Vollständige CalDAV-URL deines Kalenders (z. B. Nextcloud, Baïkal, mailbox.org oder Google CalDAV).')}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-on-surface mb-1">
+                      {t('profile.calendars.caldavUsername', 'Benutzername')}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="user@example.com"
+                      value={caldavUsername}
+                      onChange={(e) => setCaldavUsername(e.target.value)}
+                      className="msm-input w-full text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-on-surface mb-1">
+                      {t('profile.calendars.password', 'Passwort / App-Passwort')}
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="••••••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="msm-input w-full text-sm font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 pt-2">
+                  <label className="flex items-center gap-2.5 text-xs text-on-surface cursor-pointer select-none">
+                    <Checkbox
+                      checked={isDefault}
+                      onCheckedChange={setIsDefault}
+                    />
+                    <span>{t('profile.calendars.isDefault', 'Als Standardkalender verwenden')}</span>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-4 border-t border-outline-variant/30">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddModal(false)}
+                    className="msm-btn-secondary px-4 py-2 text-sm"
+                    disabled={saving}
+                  >
+                    Abbrechen
+                  </button>
+                  <button
+                    type="submit"
+                    className="msm-btn-primary px-4 py-2 text-sm"
+                    disabled={saving}
+                  >
+                    {saving ? 'Speichert...' : 'Kalender speichern'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   )
 }
+

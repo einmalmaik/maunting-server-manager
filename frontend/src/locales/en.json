@@ -2818,7 +2818,18 @@
       "password": "Password / App Password",
       "passwordHint": "Leave empty to keep existing password",
       "syncEnabled": "Automatic notifications for incoming emails",
-      "credentialsStoredEncrypted": "Passwords are stored encrypted with DIS AES-256-GCM and never sent in plaintext."
+      "credentialsStoredEncrypted": "Passwords are stored encrypted with DIS AES-256-GCM and never sent in plaintext.",
+      "template": "Provider Preset",
+      "templateCustom": "Custom (IMAP / SMTP)",
+      "templateGmail": "Google Mail / Gmail (App Password)",
+      "templateOutlook": "Microsoft Outlook / Office 365",
+      "templateGmx": "GMX Mail",
+      "templateWebde": "WEB.DE",
+      "templateIcloud": "Apple iCloud (App-specific)",
+      "protocolHelp": "You can configure only IMAP (read-only), only SMTP (send-only), or both together. At least one protocol is required.",
+      "imapHelp": "Used for searching and reading emails by the AI assistant (e.g. searching incoming messages). Can be left blank if you only wish to send emails.",
+      "smtpHelp": "Used for preparing and sending emails by the AI assistant. Can be left blank if you only wish to read emails.",
+      "gmailNotice": "Note for Gmail: Google requires a 16-character App Password if 2-factor authentication is active."
     },
     "calendars": {
       "title": "Connected Calendars (CalDAV)",
@@ -2836,7 +2847,9 @@
       "caldavUrl": "CalDAV URL",
       "caldavUsername": "CalDAV Username",
       "password": "Password / App Password",
-      "isDefault": "Use as default calendar"
+      "isDefault": "Use as default calendar",
+      "protocolHelp": "Used for querying calendar events and preparing schedule drafts by the AI assistant. Events are only created or modified after your explicit approval.",
+      "caldavHelp": "Full CalDAV URL of your calendar (e.g. Nextcloud, Baïkal, mailbox.org, or Google CalDAV)."
     },
     "confirmDeleteWordLabel": "Type delete to confirm (paste disabled)"
   },
@@ -3668,7 +3681,9 @@
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
           "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat",
           "guardian": "With autonomy granted, a Guardian incident can trigger processing while the user is not present: the incident type, its status and the server data already shared with the assistant are transmitted; log excerpts are additionally stripped of public IP addresses and email addresses. Usage and responsibility remain with the grantor. The result report sent by email contains model-generated text.",
-          "tasks": "A standing task created in chat or in the task list (“AI task”) stores its name, instruction, schedule, time zone and delivery channel, and triggers processing at the agreed time while the user is not present. It runs in the background with the permissions and quota of whoever created it; on each due run the instruction and the server data it retrieves are transmitted to the selected model provider. On request the result is additionally sent by email to the stored address and contains model-generated text. Tasks can be listed, paused and deleted from the chat and the task list at any time."
+          "tasks": "A standing task created in chat or in the task list (“AI task”) stores its name, instruction, schedule, time zone and delivery channel, and triggers processing at the agreed time while the user is not present. It runs in the background with the permissions and quota of whoever created it; on each due run the instruction and the server data it retrieves are transmitted to the selected model provider. On request the result is additionally sent by email to the stored address and contains model-generated text. Tasks can be listed, paused and deleted from the chat and the task list at any time.",
+          "mailboxes": "Connected Mailboxes (IMAP / SMTP): Stored credentials (passwords, app passwords, or OAuth tokens) are encrypted with DIS AES-256-GCM and never leave the panel in plain text. Emails are searched or read solely upon your instruction. The AI assistant never sends emails autonomously: Every email dispatch is presented as a chat proposal card with subject, recipient, and body, and is only sent after your explicit manual approval.",
+          "calendars": "Connected Calendars (CalDAV): Calendar credentials are encrypted via DIS as well. The AI reads calendar entries only when explicitly asked about events or schedule availability. Creating or deleting events is always presented as a proposal card requiring your manual confirmation."
         }
       },
       "desktopApp": {

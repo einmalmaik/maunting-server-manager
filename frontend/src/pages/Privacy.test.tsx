@@ -50,6 +50,8 @@ const KI_PUNKTE = [
   'tools',
   'guardian',
   'tasks',
+  'mailboxes',
+  'calendars',
 ] as const;
 
 describe('Privacy page', () => {
@@ -133,19 +135,19 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die zur Desktop-App gehoerende Fassung 2.7 vom 2026-08-24 aus', () => {
+  it('weist die zur Desktop-App und Postfächern gehoerende Fassung 2.8 vom 2026-08-25 aus', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?2\\.7`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?2\\.8`)),
     ).toBeInTheDocument();
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-08-24');
-    expect(stand).toHaveTextContent('2026-08-24');
+    expect(stand).toHaveAttribute('datetime', '2026-08-25');
+    expect(stand).toHaveTextContent('2026-08-25');
   });
 
   /**
@@ -166,8 +168,9 @@ describe('Privacy page', () => {
       KI_PUNKTE.map((schluessel) => i18n.t(`privacyPolicy.sections.ai.items.${schluessel}`)),
     );
     // Ausdruecklich als Zahl festgehalten: neun Punkte vor der
-    // Guardian-Kopplung, zehn danach, elf seit den stehenden KI-Aufgaben.
-    expect(gerendert).toHaveLength(11);
+    // Guardian-Kopplung, zehn danach, elf seit den stehenden KI-Aufgaben,
+    // dreizehn seit verknüpften Postfächern und Kalendern.
+    expect(gerendert).toHaveLength(13);
   });
 });
 
