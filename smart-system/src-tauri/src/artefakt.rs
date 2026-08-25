@@ -250,7 +250,14 @@ fn manifest_speichern(
         .map_err(|e| format!("Konnte Manifest nicht schreiben: {e}"))
 }
 
-// ── Download in Quarantäne ──────────────────────────────────────────────────
+// ── Artefakt-ID & Dateiname Sanitization ────────────────────────────────────
+
+pub fn artifact_id_gueltig(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && !id.contains("..")
+}
 
 fn dateiname_bereinigen(original: &str) -> String {
     let raw = original.trim();
@@ -431,6 +438,9 @@ pub fn download(
 // ── Statische Prüfung & Windows Sandbox ─────────────────────────────────────
 
 pub fn pruefen_und_sandbox(app: &AppHandle, artifact_id: &str) -> Result<Value, String> {
+    if !artifact_id_gueltig(artifact_id) {
+        return Err(format!("Ungültige oder potenziell schadhafte Artefakt-ID '{artifact_id}'."));
+    }
     let basis = quarantaene_basis(app)?;
     let mut manifest = manifest_laden(&basis);
     let eintrag = manifest.get_mut(artifact_id).ok_or_else(|| {
@@ -570,6 +580,9 @@ pub fn deployen(
     artifact_id: &str,
     target_id: &str,
 ) -> Result<Value, String> {
+    if !artifact_id_gueltig(artifact_id) {
+        return Err(format!("Ungültige oder potenziell schadhafte Artefakt-ID '{artifact_id}'."));
+    }
     let basis = quarantaene_basis(app)?;
     let mut manifest = manifest_laden(&basis);
     let eintrag = manifest.get_mut(artifact_id).ok_or_else(|| {
@@ -678,6 +691,9 @@ pub fn deployen(
 }
 
 pub fn rollback(app: &AppHandle, artifact_id: &str) -> Result<Value, String> {
+    if !artifact_id_gueltig(artifact_id) {
+        return Err(format!("Ungültige oder potenziell schadhafte Artefakt-ID '{artifact_id}'."));
+    }
     let basis = quarantaene_basis(app)?;
     let mut manifest = manifest_laden(&basis);
     let eintrag = manifest.get_mut(artifact_id).ok_or_else(|| {
@@ -767,6 +783,9 @@ pub fn installer_starten(
     artifact_id: &str,
     installer_args: &[String],
 ) -> Result<Value, String> {
+    if !artifact_id_gueltig(artifact_id) {
+        return Err(format!("Ungültige oder potenziell schadhafte Artefakt-ID '{artifact_id}'."));
+    }
     let basis = quarantaene_basis(app)?;
     let manifest = manifest_laden(&basis);
     let eintrag = manifest.get(artifact_id).ok_or_else(|| {
@@ -919,5 +938,56 @@ mod tests {
         assert_eq!(dateiname_bereinigen("../../evil.exe"), "evil.exe");
         assert_eq!(dateiname_bereinigen("C:\\Windows\\cmd.exe"), "cmd.exe");
         assert_eq!(dateiname_bereinigen("foo;bar&baz.mod"), "foo_bar_baz.mod");
+        assert_eq!(dateiname_bereinigen("CON.exe"), "artefakt.bin");
+        assert_eq!(dateiname_bereinigen("prn"), "artefakt.bin");
+        assert_eq!(dateiname_bereinigen("aux.dll"), "artefakt.bin");
+        assert_eq!(dateiname_bereinigen("nul.zip"), "artefakt.bin");
+        assert_eq!(dateiname_bereinigen("com1.bin"), "artefakt.bin");
+        assert_eq!(dateiname_bereinigen("lpt1.tar"), "artefakt.bin");
+        assert_eq!(dateiname_bereinigen(".."), "artefakt.bin");
+        assert_eq!(dateiname_bereinigen("..."), "artefakt.bin");
+    }
+
+    #[test]
+    fn ssrf_prueft_auch_ipv4_mapped_ipv6_und_spezielle_bereiche() {
+        use std::net::Ipv6Addr;
+        // IPv4-mapped IPv6 Adressen fuer Loopback und private Netze
+        let mapped_loopback: Ipv6Addr = "::ffff:127.0.0.1".parse().unwrap();
+        let mapped_privat: Ipv6Addr = "::ffff:192.168.1.1".parse().unwrap();
+        let mapped_cgnat: Ipv6Addr = "::ffff:100.64.0.1".parse().unwrap();
+        let mapped_meta: Ipv6Addr = "::ffff:169.254.169.254".parse().unwrap();
+        let link_local: Ipv6Addr = "fe80::1".parse().unwrap();
+        let ula: Ipv6Addr = "fc00::1".parse().unwrap();
+
+        assert!(!ist_ip_erlaubt(&IpAddr::V6(mapped_loopback)));
+        assert!(!ist_ip_erlaubt(&IpAddr::V6(mapped_privat)));
+        assert!(!ist_ip_erlaubt(&IpAddr::V6(mapped_cgnat)));
+        assert!(!ist_ip_erlaubt(&IpAddr::V6(mapped_meta)));
+        assert!(!ist_ip_erlaubt(&IpAddr::V6(link_local)));
+        assert!(!ist_ip_erlaubt(&IpAddr::V6(ula)));
+    }
+
+    #[test]
+    fn url_validierung_blockiert_nicht_https_schemes_und_ports() {
+        assert!(url_sicher_pruefen("http://insecure.example.com/mod.zip").is_err());
+        assert!(url_sicher_pruefen("ftp://ftp.example.com/mod.zip").is_err());
+        assert!(url_sicher_pruefen("file:///C:/Windows/System32/calc.exe").is_err());
+        assert!(url_sicher_pruefen("gopher://example.com/").is_err());
+        assert!(url_sicher_pruefen("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn artifact_id_validierung_blockiert_directory_traversal() {
+        assert!(artifact_id_gueltig("a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"));
+        assert!(artifact_id_gueltig("custom-mod-123"));
+        assert!(!artifact_id_gueltig(""));
+        assert!(!artifact_id_gueltig("../evil"));
+        assert!(!artifact_id_gueltig("..\\evil"));
+        assert!(!artifact_id_gueltig("evil/nested"));
+        assert!(!artifact_id_gueltig("evil\\nested"));
+        assert!(!artifact_id_gueltig("C:\\Windows"));
+        assert!(!artifact_id_gueltig("id_with_space "));
+        assert!(!artifact_id_gueltig("id_with_semi;calc"));
+        assert!(!artifact_id_gueltig("id_with_pipe|whoami"));
     }
 }
