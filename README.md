@@ -241,14 +241,20 @@ sudo systemctl start msm-update.timer
 
 ## Discord Rich Presence (Optional)
 
-Die Desktop-App (*Maunting Smart System* / MSS) unterstützt Discord Rich Presence (RPC). Wenn Discord auf Ihrem Rechner geöffnet ist, wird der Status im Discord-Profil angezeigt (z. B. „MSS Desktop Companion“).
+Die Desktop-App (*Maunting Smart System* / MSS) unterstützt Discord Rich Presence (RPC). Wenn Discord auf Ihrem Rechner läuft, wird Ihr Status im Discord-Profil angezeigt (Standard: „Security needs trust“ / „Sicherheit braucht Vertrauen“).
 
-- **Funktionsweise**: Die Verbindung läuft rein lokal über die Windows-Pipe (`\\.\pipe\discord-ipc-0`). Es werden keine externen Anfragen an Discord-Server gesendet und keine Server-Adressen, Kennwörter oder Chat-Inhalte übertragen.
-- **Standard**: Die Standard-Anwendungs-ID (`1512525013155057735`) ist fest hinterlegt und bei laufendem Discord automatisch aktiv.
-- **Eigene Anwendungs-ID (Self-Hosting)**: Wer im [Discord Developer Portal](https://discord.com/developers/applications) eine eigene Discord-App hinterlegt hat, kann die Client-ID in der lokalen Konfigurationsdatei (`konfig.json`) eintragen:
+- **Lokale Verbindung**: Die Kommunikation erfolgt rein lokal über die Windows Named Pipe (`\\.\pipe\discord-ipc-0`). Es werden keine externen Anfragen an Discord-Server gesendet und keine Server-Adressen, Kennwörter oder Chat-Inhalte übertragen.
+- **Standard**: Die Standard-Anwendungs-ID (`1512525013155057735`) ist fest hinterlegt.
+- **Texte und Application-ID anpassen**: Sie können die Discord-Texte und die Client-ID nach eigenen Wünschen anpassen. Entweder über die `konfig.json` der Desktop-App:
   ```json
-  "discord_client_id": "DEINE_APPLICATION_ID"
+  {
+    "discord_rpc_aktiv": true,
+    "discord_client_id": "DEINE_APPLICATION_ID",
+    "discord_details": "Eigener Statustext Zeile 1",
+    "discord_state": "Eigener Statustext Zeile 2"
+  }
   ```
+  Oder direkt im Quellcode in [`smart-system/src-tauri/src/discord.rs`](smart-system/src-tauri/src/discord.rs).
 - **Deaktivieren**: Rich Presence lässt sich in der `konfig.json` der Desktop-App mit `"discord_rpc_aktiv": false` jederzeit vollständig abschalten.
 
 ---

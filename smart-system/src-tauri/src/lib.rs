@@ -681,7 +681,11 @@ pub fn run() {
             // Discord Rich Presence: wenn in der Konfiguration aktiv (Standard),
             // verbindet sich die Desktop App mit der lokalen Discord Named Pipe.
             if konfig.discord_rpc_aktiv {
-                discord::starten(konfig.discord_client_id);
+                discord::starten(
+                    konfig.discord_client_id,
+                    konfig.discord_details,
+                    konfig.discord_state,
+                );
             }
             // Sanfter Start: beim Boot-Autostart bleibt das Fenster im Tray —
             // niemand will nach dem Hochfahren eine Boot-Sequenz vor der Nase.

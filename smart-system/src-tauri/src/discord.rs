@@ -110,7 +110,11 @@ fn send_activity(
 }
 
 /// Startet den Hintergrund-Thread für Discord Rich Presence.
-pub fn starten(client_id_override: Option<String>) {
+pub fn starten(
+    client_id_override: Option<String>,
+    details_override: Option<String>,
+    state_override: Option<String>,
+) {
     if DISCORD_LAEUFT.swap(true, Ordering::SeqCst) {
         return; // Läuft bereits
     }
@@ -118,6 +122,14 @@ pub fn starten(client_id_override: Option<String>) {
     let client_id = client_id_override
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| STANDARD_DISCORD_CLIENT_ID.to_string());
+
+    let standard_details = details_override
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Security needs trust".to_string());
+
+    let standard_state = state_override
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Sicherheit braucht Vertrauen".to_string());
 
     let start_timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -158,8 +170,8 @@ pub fn starten(client_id_override: Option<String>) {
                     let (details, state) = match current_status {
                         Some(s) => (s.details, s.state),
                         None => (
-                            "Security needs trust".to_string(),
-                            "Sicherheit braucht Vertrauen".to_string(),
+                            standard_details.clone(),
+                            standard_state.clone(),
                         ),
                     };
 

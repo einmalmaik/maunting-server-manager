@@ -79,6 +79,10 @@ pub struct AppKonfig {
     pub discord_rpc_aktiv: bool,
     /// Optionale benutzerdefinierte Discord Application Client ID für Self-Hosting.
     pub discord_client_id: Option<String>,
+    /// Optionaler benutzerdefinierter Details-Text (Zeile 1 in Discord).
+    pub discord_details: Option<String>,
+    /// Optionaler benutzerdefinierter State-Text (Zeile 2 in Discord).
+    pub discord_state: Option<String>,
 }
 
 /// Ermittelt den isolierten Standard-Sandbox-Pfad im Benutzerprofil (`%USERPROFILE%\MSS-Sandbox` bzw. `$HOME/MSS-Sandbox`).
@@ -127,6 +131,8 @@ impl Default for AppKonfig {
             search_roots: Vec::new(),
             discord_rpc_aktiv: true,
             discord_client_id: None,
+            discord_details: None,
+            discord_state: None,
         }
     }
 }

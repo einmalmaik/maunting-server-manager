@@ -147,7 +147,7 @@ Was die App zum Betrieb braucht:
 - **Autonomie-Freigabefluss**: Bei deaktiviertem autonomen Modus lehnt die KI Werkzeugaufrufe
   nicht textuell ab, sondern erzeugt standardisierte Bestätigungskarten (`AiActionProposalCard`)
   mit dem passenden `proposal_type` (`read`, `worker`, `write`).
-- **Discord Rich Presence (RPC, optional)**: Die App meldet bei geöffnetem Discord den Status lokal über die Windows-Pipe (`\\.\pipe\discord-ipc-0`). Eigene Application-IDs können in der Konfigurationsdatei (`konfig.json`) über `"discord_client_id": "..."` hinterlegt oder mit `"discord_rpc_aktiv": false` deaktiviert werden.
+- **Discord Rich Presence (RPC, optional)**: Die App meldet bei geöffnetem Discord den Status lokal über die Windows-Pipe (`\\.\pipe\discord-ipc-0`). Eigene Application-IDs und Statustexte können in der Konfigurationsdatei (`konfig.json`) über `"discord_client_id"`, `"discord_details"` und `"discord_state"` hinterlegt oder mit `"discord_rpc_aktiv": false` deaktiviert werden.
 - Panelseitig müssen `tauri://localhost`, `http://tauri.localhost` und
   `https://tauri.localhost` als Origins erlaubt sein. Das ist in
   `backend/config.py` fest hinterlegt (`TAURI_ORIGINS`) und braucht keine
