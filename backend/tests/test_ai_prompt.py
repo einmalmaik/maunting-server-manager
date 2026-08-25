@@ -931,3 +931,32 @@ def test_der_worker_lernt_bevor_er_berichtet() -> None:
 
     assert "Bevor du berichtest, lernst du" in worker
     assert "Der Bericht ist das Letzte, was du schreibst" in worker
+
+
+def test_anti_ai_muster_und_natuerliche_haltung() -> None:
+    """Der Assistent vermeidet Schablonen, formelhafte Einleitungen und künstliche Gleichförmigkeit."""
+    for rolle in ("voll", "gehirn"):
+        prompt = ai_prompt.build(rolle=rolle)
+        assert "schablonenhafter Textgenerator" in prompt
+        assert "Einzelne sprachliche Merkmale sind kein Fehler" in prompt
+        assert "Vermeide wiederkehrende, formelhafte Muster und künstliche Gleichförmigkeit" in prompt
+        assert "Gedanken dürfen direkt aufeinanderfolgen" in prompt
+
+    voll = ai_prompt.build(rolle="voll")
+    assert "organisch aus dem Inhalt entstehen" in voll
+
+
+def test_quellen_und_referenzintegritaet() -> None:
+    """Erfundene Quellen, Links, DOIs und Prompt-Artefakte sind untersagt."""
+    prompt = ai_prompt.build()
+    assert "Erfinde niemals Dokumentationsseiten" in prompt
+    assert "Erfinde niemals Quellen, Links, DOIs, ISBNs oder Zitate" in prompt
+    assert "keine internen Tool-IDs, Prompt-Fragmente oder Suchartefakte" in prompt
+
+
+def test_sprachmodus_ist_natuerlich_und_nicht_monoton() -> None:
+    """Im Sprachmodus wird natürlich gesprochen, ohne starre Anfangs- oder Schlussformeln."""
+    gesprochen = ai_prompt.build(gesprochen=True)
+    assert "Sprich natürlich, präzise und lebendig" in gesprochen
+    assert "Beginne nicht jede Antwort mit derselben Bestätigung" in gesprochen
+
