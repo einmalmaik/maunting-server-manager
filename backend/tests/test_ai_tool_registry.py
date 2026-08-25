@@ -167,7 +167,10 @@ def test_only_the_irreversible_tools_are_confirm_only() -> None:
     harmlos. `switch_server_blueprint` ruft `wipe_server_root` und loescht das
     **gesamte** Serververzeichnis: Welt, Configs, Mods. Der Weg zurueck ist eine
     Wiederherstellung, die selbst Stunden dauert — genau das Kriterium, unter
-    dem `propose_backup_restore` seit jeher hier steht.
+    `propose_email_send`, `propose_calendar_event_create` und
+    `propose_calendar_event_delete` sind externe Interaktionen mit fremden
+    Systemen (E-Mail-Empfaenger, Kalenderserver). Eine versendete E-Mail laesst
+    sich nicht zurueckholen ("Draft & Confirm"-Invariante).
     """
     gebaut = {
         name for name, spec in ai_tool_registry.WERKZEUGE.items()
@@ -181,6 +184,9 @@ def test_only_the_irreversible_tools_are_confirm_only() -> None:
         "propose_hoster_integration",
         "propose_hoster_product",
         "propose_ai_tarif_role",
+        "propose_email_send",
+        "propose_calendar_event_create",
+        "propose_calendar_event_delete",
     }
 
 

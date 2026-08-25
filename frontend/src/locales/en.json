@@ -476,6 +476,9 @@
         "propose_task_set": "Set up recurring task",
         "propose_restart_schedule_set": "Configure server auto-restart",
         "propose_backup_schedule_set": "Configure server auto-backup",
+        "propose_email_send": "Send email",
+        "propose_calendar_event_create": "Create calendar event",
+        "propose_calendar_event_delete": "Delete calendar event",
         "desktop_artifact": "Desktop artifact (software/mod/installer)",
         "read_server_status": "Read server status",
         "read_server_capacity": "Read server capacity",
@@ -530,7 +533,10 @@
         "propose_task_set": "This task will run on its own from now on, even when you are not in the panel. It acts with your permissions and from your AI quota. You can pause or delete it any time from the chat.",
         "propose_task_delete": "This task will be removed for good and will no longer run. If it should only rest for a while, have it paused instead.",
         "propose_restart_schedule_set": "Configure this server's auto-restart like this? The schedule then appears in the server's restart section and stays editable by hand. If you later change it manually, AI management ends and the responsible task is paused.",
-        "propose_backup_schedule_set": "Configure this server's auto-backup like this? The settings then appear in the server's backup section and stay editable by hand. If you later change them manually, AI management ends and the responsible task is paused."
+        "propose_backup_schedule_set": "Configure this server's auto-backup like this? The settings then appear in the server's backup section and stay editable by hand. If you later change them manually, AI management ends and the responsible task is paused.",
+        "propose_email_send": "Send the drafted email to “{{recipient}}” with subject “{{subject}}” now?",
+        "propose_calendar_event_create": "Create the event “{{title}}” in your calendar now?",
+        "propose_calendar_event_delete": "Delete this event from your calendar now?"
       },
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",
@@ -640,7 +646,10 @@
       "worker_cancel": "Worker cancelled",
       "worker_frage": "Question raised",
       "worker_start": "Worker started",
-      "set_agent_name": "Name changed"
+      "set_agent_name": "Name changed",
+      "email_search": "Emails searched",
+      "email_read": "Email read",
+      "calendar_read": "Calendar queried"
     },
     "toolsRunning": {
       "ask_user": "Asking a quick question",
@@ -682,6 +691,12 @@
       "propose_backup_schedule_set": "Configuring the server's auto-backup",
       "propose_task_delete": "Preparing to delete the task",
       "propose_task_set": "Preparing the recurring task",
+      "propose_email_send": "Drafting the email to send",
+      "propose_calendar_event_create": "Preparing the calendar event",
+      "propose_calendar_event_delete": "Preparing to delete the calendar event",
+      "email_search": "Searching your emails",
+      "email_read": "Reading the email",
+      "calendar_read": "Checking your calendar events",
       "read_ai_action_history": "Looking at earlier AI actions",
       "read_blueprint": "Reading the blueprint",
       "read_config": "Reading the configuration file",
@@ -1822,6 +1837,14 @@
       "title": "Install desktop artifacts & software",
       "desc": "Allows the AI to download, test (Defender & Sandbox), deploy with snapshot rollback, or start user-level installers for software, game mods, and applications via the Smart System app."
     },
+    "ai_mailbox_use": {
+      "title": "Use AI Mailbox Integration",
+      "desc": "Allows the AI to search linked user mailboxes, read emails, and draft messages. Sending emails always requires explicit user confirmation."
+    },
+    "ai_calendar_use": {
+      "title": "Use AI Calendar Integration",
+      "desc": "Allows the AI to query linked user CalDAV calendars and prepare events. Creating or deleting events always requires explicit user confirmation."
+    },
     "ai_usage_read_all": {
       "title": "View overall AI usage",
       "desc": "Shows under Settings → AI which user spent how many tokens and how much money. This makes other users' behaviour visible — which is why it is a permission of its own and not part of the settings permission. Everyone sees their own usage without it."
@@ -2749,6 +2772,53 @@
       "linkErrorProviderUnavailable": "Provider is no longer available.",
       "linkErrorPresetUnknown": "Preset for this provider is unknown.",
       "linkErrorUnknown": "Link failed."
+    },
+    "mailboxes": {
+      "title": "Connected Mailboxes (Email)",
+      "subtitle": "Email accounts for AI assistants (Smart-System & Panel) to read and draft emails.",
+      "empty": "No connected mailboxes found.",
+      "add": "Add Mailbox",
+      "edit": "Edit",
+      "delete": "Remove",
+      "deleteConfirm": "Do you really want to remove mailbox {{email}}?",
+      "test": "Test Connection",
+      "testSuccess": "Connection test successful!",
+      "testFailed": "Connection test failed: {{details}}",
+      "saveSuccess": "Mailbox saved",
+      "deleteSuccess": "Mailbox removed",
+      "name": "Label (e.g. Work / Personal)",
+      "email": "Email Address",
+      "providerType": "Provider",
+      "isDefault": "Use as default mailbox",
+      "imapHost": "IMAP Host",
+      "imapPort": "IMAP Port",
+      "imapSsl": "IMAP SSL/TLS",
+      "smtpHost": "SMTP Host",
+      "smtpPort": "SMTP Port",
+      "smtpTls": "SMTP STARTTLS",
+      "username": "Username",
+      "password": "Password / App Password",
+      "passwordHint": "Leave empty to keep existing password",
+      "syncEnabled": "Automatic notifications for incoming emails",
+      "credentialsStoredEncrypted": "Passwords are stored encrypted with DIS AES-256-GCM and never sent in plaintext."
+    },
+    "calendars": {
+      "title": "Connected Calendars (CalDAV)",
+      "subtitle": "Calendar integration for AI event queries and event drafts.",
+      "empty": "No connected calendars found.",
+      "add": "Add Calendar",
+      "delete": "Remove",
+      "deleteConfirm": "Do you really want to remove calendar {{name}}?",
+      "test": "Test Connection",
+      "testSuccess": "Connection test successful!",
+      "testFailed": "Connection test failed: {{details}}",
+      "saveSuccess": "Calendar saved",
+      "deleteSuccess": "Calendar removed",
+      "name": "Label (e.g. Team Calendar)",
+      "caldavUrl": "CalDAV URL",
+      "caldavUsername": "CalDAV Username",
+      "password": "Password / App Password",
+      "isDefault": "Use as default calendar"
     },
     "confirmDeleteWordLabel": "Type delete to confirm (paste disabled)"
   },

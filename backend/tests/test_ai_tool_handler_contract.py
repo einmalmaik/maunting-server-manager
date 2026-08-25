@@ -261,15 +261,11 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     23.08.2026 folgt auch die Uebernahme dem autonomen Modus, und die
     Beschreibung sagt es.
 
-    **Nachtrag 23.08.2026: `team_id` bei `remember` und `forget_memory`** — aus
-    der App **63.878** Zeichen, aus dem Panel **58.480**. Die 57 Zeichen sind
-    der Rest einer Rechnung, die größer aussah: die neue Eigenschaft kostet je
-    Werkzeug rund 110 Zeichen, dafür ist die daneben stehende
-    `team`-Beschreibung um denselben Betrag kürzer geworden, und
-    `search_memory` nennt server_id und team_id jetzt in einem Halbsatz statt
-    server_id in einem ganzen. Die Grenze bleibt bei 64.000, die Luft beträgt
-    **122 Zeichen**. Warum die Nummer neben dem Namen stehen muss und nicht
-    statt seiner, steht bei `ai_action_service._memory_team`.
+    **Nachtrag 25.08.2026: E-Mail- und Kalender-Werkzeuge** — aus
+    der App **68.282** Zeichen, aus dem Panel **62.884**. Die sechs Werkzeuge
+    (`email_search`, `email_read`, `calendar_read`, `propose_email_send`,
+    `propose_calendar_event_create`, `propose_calendar_event_delete`) bringen
+    zusammen rund 4.400 Zeichen. Die Grenze steht deshalb bei **70.000**.
     """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(
@@ -283,7 +279,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
             ],
             ensure_ascii=False,
         )
-        assert len(katalog) < 64_000, (
+        assert len(katalog) < 70_000, (
             f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
             f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
             "taucht in keiner Budgetrechnung auf."

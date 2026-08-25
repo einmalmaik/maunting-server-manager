@@ -211,6 +211,17 @@ WERKZEUGE: dict[str, Werkzeug] = {
         "global_read", gruppe="skill", angebot=("ai.skills.use",)
     ),
 
+    # E-Mail- & Kalender-Lesewerkzeuge (Verknuepfte Postfaecher & Kalender).
+    "email_search": Werkzeug(
+        "global_read", gruppe="mailbox", angebot=("ai.mailbox.use",)
+    ),
+    "email_read": Werkzeug(
+        "global_read", gruppe="mailbox", angebot=("ai.mailbox.use",)
+    ),
+    "calendar_read": Werkzeug(
+        "global_read", gruppe="calendar", angebot=("ai.calendar.use",)
+    ),
+
     # ── Rueckfrage ────────────────────────────────────────────────────
     "ask_user": Werkzeug("ask"),
 
@@ -594,6 +605,29 @@ WERKZEUGE: dict[str, Werkzeug] = {
         "global_write",
         immer_bestaetigen=True,
         recht="roles.manage",
+        recht_global=True,
+    ),
+
+    # ── E-Mail & Kalender Aktionen (Vorschlagspflichtig) ──────────────
+    "propose_email_send": Werkzeug(
+        "global_write",
+        immer_bestaetigen=True,
+        gruppe="mailbox",
+        recht="ai.mailbox.use",
+        recht_global=True,
+    ),
+    "propose_calendar_event_create": Werkzeug(
+        "global_write",
+        immer_bestaetigen=True,
+        gruppe="calendar",
+        recht="ai.calendar.use",
+        recht_global=True,
+    ),
+    "propose_calendar_event_delete": Werkzeug(
+        "global_write",
+        immer_bestaetigen=True,
+        gruppe="calendar",
+        recht="ai.calendar.use",
         recht_global=True,
     ),
 

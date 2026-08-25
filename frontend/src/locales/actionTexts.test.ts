@@ -63,6 +63,9 @@ const SCHREIBWERKZEUGE = [
   // stellt ein, was der Benutzer am Server sieht und selbst ändern kann.
   'propose_restart_schedule_set',
   'propose_backup_schedule_set',
+  'propose_email_send',
+  'propose_calendar_event_create',
+  'propose_calendar_event_delete',
 ] as const
 
 const SPRACHEN = { de, en } as Record<string, typeof de>

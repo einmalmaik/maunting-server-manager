@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Blocks, Bot, CalendarClock, Eye, FilePenLine, FileX, Globe, HardDriveDownload, HardDriveUpload, Network, Package, Plug, Power, ServerCog, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
+import { Activity, AlertTriangle, Blocks, Bot, CalendarClock, Eye, FilePenLine, FileX, Globe, HardDriveDownload, HardDriveUpload, Mail, Network, Package, Plug, Power, ServerCog, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -73,6 +73,13 @@ const TATSACHEN: readonly string[] = [
   'quarantine_id',
   'snapshot_id',
   'publisher_hash',
+  'recipient',
+  'subject',
+  'start_time',
+  'end_time',
+  'location',
+  'calendar_id',
+  'event_id',
 ]
 
 function tatsachenZeilen(preview: Record<string, unknown>): [string, string][] {
@@ -194,6 +201,9 @@ export function AiActionProposalCard({
     read_config: FilePenLine,
     list_my_servers: ServerCog,
     desktop_artifact: Package,
+    propose_email_send: Mail,
+    propose_calendar_event_create: CalendarClock,
+    propose_calendar_event_delete: Trash2,
   }
   const Icon = ICONS[proposal.tool_name] ?? Power
   // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb

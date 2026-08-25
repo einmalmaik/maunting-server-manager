@@ -476,6 +476,9 @@
         "propose_task_set": "Wiederkehrende Aufgabe einrichten",
         "propose_restart_schedule_set": "Auto-Neustart des Servers einstellen",
         "propose_backup_schedule_set": "Auto-Backup des Servers einstellen",
+        "propose_email_send": "E-Mail versenden",
+        "propose_calendar_event_create": "Kalendertermin anlegen",
+        "propose_calendar_event_delete": "Kalendertermin löschen",
         "desktop_artifact": "Desktop-Artefakt (Software/Mod/Installer)",
         "read_server_status": "Server-Status lesen",
         "read_server_capacity": "Server-Kapazität lesen",
@@ -530,7 +533,10 @@
         "propose_task_set": "Diese Aufgabe läuft ab jetzt von selbst — auch dann, wenn du nicht im Panel bist. Sie handelt mit deinen Berechtigungen und aus deinem KI-Kontingent. Du kannst sie jederzeit im Chat pausieren oder löschen.",
         "propose_task_delete": "Diese Aufgabe wird endgültig entfernt und läuft nicht mehr. Soll sie nur eine Weile ruhen, lass sie stattdessen pausieren.",
         "propose_restart_schedule_set": "Den Auto-Neustart dieses Servers so einstellen? Der Zeitplan steht danach im Neustart-Bereich des Servers und bleibt dort von Hand änderbar. Änderst du ihn später manuell, endet die Verwaltung durch die KI und die zuständige Aufgabe wird pausiert.",
-        "propose_backup_schedule_set": "Das Auto-Backup dieses Servers so einstellen? Die Einstellungen stehen danach im Backup-Bereich des Servers und bleiben dort von Hand änderbar. Änderst du sie später manuell, endet die Verwaltung durch die KI und die zuständige Aufgabe wird pausiert."
+        "propose_backup_schedule_set": "Das Auto-Backup dieses Servers so einstellen? Die Einstellungen stehen danach im Backup-Bereich des Servers und bleiben dort von Hand änderbar. Änderst du sie später manuell, endet die Verwaltung durch die KI und die zuständige Aufgabe wird pausiert.",
+        "propose_email_send": "Die vorbereitete E-Mail jetzt wirklich absenden? Empfänger, Betreff und Inhalt werden unmittelbar vor dem Versand geprüft.",
+        "propose_calendar_event_create": "Diesen Termin jetzt verbindlich in deinen Kalender eintragen? Berechtigungen und Kalenderdaten werden vor der Anlage geprüft.",
+        "propose_calendar_event_delete": "Diesen Termin jetzt wirklich aus deinem Kalender entfernen? Das Löschen lässt sich nicht rückgängig machen."
       },
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
@@ -640,7 +646,10 @@
       "worker_cancel": "Worker abgebrochen",
       "worker_frage": "Rückfrage gestellt",
       "worker_start": "Worker gestartet",
-      "set_agent_name": "Rufname geändert"
+      "set_agent_name": "Rufname geändert",
+      "email_search": "E-Mails durchsucht",
+      "email_read": "E-Mail gelesen",
+      "calendar_read": "Kalender abgefragt"
     },
     "toolsRunning": {
       "ask_user": "Ich frage kurz nach",
@@ -682,6 +691,12 @@
       "propose_backup_schedule_set": "Ich stelle das Auto-Backup des Servers ein",
       "propose_task_delete": "Ich bereite das Löschen der Aufgabe vor",
       "propose_task_set": "Ich bereite die wiederkehrende Aufgabe vor",
+      "propose_email_send": "Ich bereite den E-Mail-Versand vor",
+      "propose_calendar_event_create": "Ich bereite den Kalendertermin vor",
+      "propose_calendar_event_delete": "Ich bereite das Löschen des Kalendertermins vor",
+      "email_search": "Ich durchsuche deine E-Mails",
+      "email_read": "Ich lese die E-Mail",
+      "calendar_read": "Ich prüfe deinen Kalender",
       "read_ai_action_history": "Ich sehe mir frühere KI-Aktionen an",
       "read_blueprint": "Ich lese den Blueprint",
       "read_config": "Ich lese die Konfigurationsdatei",
@@ -1822,6 +1837,14 @@
       "title": "Desktop-Artefakte & Software installieren",
       "desc": "Erlaubt der KI, über die Smart-System-App Software, Spiel-Mods und Setup-Installer auf dem Rechner des Benutzers herunterzuladen, zu prüfen (Defender & Sandbox), mit Snapshot-Rollback zu installieren oder Setup-Programme im Benutzerkontext zu starten."
     },
+    "ai_mailbox_use": {
+      "title": "KI-E-Mail-Postfächer verwenden",
+      "desc": "Erlaubt der KI, verknüpfte E-Mail-Postfächer des Benutzers zu durchsuchen, E-Mails zu lesen und E-Mail-Entwürfe vorzubereiten. Das Versenden von E-Mails bleibt stets manuell bestätigungspflichtig."
+    },
+    "ai_calendar_use": {
+      "title": "KI-Kalender verwenden",
+      "desc": "Erlaubt der KI, verknüpfte CalDAV-Kalender des Benutzers abzufragen und Termine vorzubereiten. Das Erstellen oder Löschen von Terminen bleibt stets manuell bestätigungspflichtig."
+    },
     "ai_usage_read_all": {
       "title": "Gesamte KI-Nutzung einsehen",
       "desc": "Zeigt unter Einstellungen → KI, welcher Benutzer wieviele Tokens und Kosten verbraucht hat. Damit wird das Nutzungsverhalten fremder Benutzer sichtbar — deshalb ein eigenes Recht und nicht Teil der Einstellungsberechtigung. Den eigenen Verbrauch sieht jeder ohne dieses Recht."
@@ -2749,6 +2772,53 @@
       "linkErrorProviderUnavailable": "Provider ist nicht mehr verfügbar.",
       "linkErrorPresetUnknown": "Preset für diesen Provider ist unbekannt.",
       "linkErrorUnknown": "Verknüpfung fehlgeschlagen."
+    },
+    "mailboxes": {
+      "title": "Verknüpfte Postfächer (E-Mail)",
+      "subtitle": "E-Mail-Konten für KI-Assistenten (Smart-System & Panel) zum Lesen und Entwerfen von E-Mails.",
+      "empty": "Keine verknüpften Postfächer vorhanden.",
+      "add": "Postfach hinzufügen",
+      "edit": "Bearbeiten",
+      "delete": "Entfernen",
+      "deleteConfirm": "Möchtest du das Postfach {{email}} wirklich entfernen?",
+      "test": "Verbindung testen",
+      "testSuccess": "Verbindungstest erfolgreich!",
+      "testFailed": "Verbindungstest fehlgeschlagen: {{details}}",
+      "saveSuccess": "Postfach gespeichert",
+      "deleteSuccess": "Postfach entfernt",
+      "name": "Bezeichnung (z. B. Arbeit / Privat)",
+      "email": "E-Mail-Adresse",
+      "providerType": "Provider",
+      "isDefault": "Als Standardpostfach verwenden",
+      "imapHost": "IMAP-Host",
+      "imapPort": "IMAP-Port",
+      "imapSsl": "IMAP SSL/TLS",
+      "smtpHost": "SMTP-Host",
+      "smtpPort": "SMTP-Port",
+      "smtpTls": "SMTP STARTTLS",
+      "username": "Benutzername",
+      "password": "Passwort / App-Passwort",
+      "passwordHint": "Leer lassen, um bestehendes Passwort nicht zu ändern",
+      "syncEnabled": "Automatische Benachrichtigung bei neuen E-Mails",
+      "credentialsStoredEncrypted": "Passwörter werden mit DIS AES-256-GCM verschlüsselt gespeichert und niemals im Klartext übertragen."
+    },
+    "calendars": {
+      "title": "Verknüpfte Kalender (CalDAV)",
+      "subtitle": "Kalender-Integration für KI-Terminprüfungen und Entwürfe von Terminen.",
+      "empty": "Keine verknüpften Kalender vorhanden.",
+      "add": "Kalender hinzufügen",
+      "delete": "Entfernen",
+      "deleteConfirm": "Möchtest du den Kalender {{name}} wirklich entfernen?",
+      "test": "Verbindung testen",
+      "testSuccess": "Verbindungstest erfolgreich!",
+      "testFailed": "Verbindungstest fehlgeschlagen: {{details}}",
+      "saveSuccess": "Kalender gespeichert",
+      "deleteSuccess": "Kalender entfernt",
+      "name": "Bezeichnung (z. B. Team-Kalender)",
+      "caldavUrl": "CalDAV-URL",
+      "caldavUsername": "CalDAV-Benutzername",
+      "password": "Passwort / App-Passwort",
+      "isDefault": "Als Standardkalender verwenden"
     },
     "confirmDeleteWordLabel": "Tippe delete zur Bestätigung (nicht kopierbar)"
   },

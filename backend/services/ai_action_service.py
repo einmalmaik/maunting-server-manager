@@ -944,6 +944,7 @@ def _global_tool_definitions() -> list[dict]:
         ),
         *_aufgaben_tool_definitions(),
         *_worker_tool_definitions(),
+        *_mailbox_and_calendar_tool_definitions(),
     ]
 
 
@@ -1089,6 +1090,165 @@ def _aufgaben_tool_definitions() -> list[dict]:
                 **_RATIONALE_SCHEMA,
             },
             ["task_id", *_RATIONALE_REQUIRED],
+        ),
+    ]
+
+
+def _mailbox_and_calendar_tool_definitions() -> list[dict]:
+    """E-Mail- und Kalender-Werkzeuge (Verknüpfte Postfächer und Kalender)."""
+    return [
+        _function(
+            "email_search",
+            "Sucht in den verknüpften Postfächern des Benutzers nach E-Mails. "
+            "Liefert Betreff, Absender, Empfänger, Datum und Nachrichten-ID.",
+            {
+                "query": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Suchbegriff für Betreff oder Inhalt.",
+                },
+                "sender": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Filter nach Absender-Adresse oder Name.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 25,
+                    "description": "Maximale Anzahl Ergebnisse (Standard: 10).",
+                },
+                "mailbox_id": {
+                    "type": "integer",
+                    "description": "Optionale ID des Postfachs.",
+                },
+            },
+            [],
+        ),
+        _function(
+            "email_read",
+            "Liest den bereinigten Volltext einer E-Mail anhand ihrer Nachrichten-ID (aus email_search).",
+            {
+                "message_id": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "description": "ID der Nachricht aus email_search.",
+                },
+                "mailbox_id": {
+                    "type": "integer",
+                    "description": "Optionale ID des Postfachs.",
+                },
+            },
+            ["message_id"],
+        ),
+        _function(
+            "calendar_read",
+            "Liest Termine aus dem verknüpften Kalender des Benutzers.",
+            {
+                "start_date": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "Startdatum (z. B. YYYY-MM-DD oder ISO-8601).",
+                },
+                "end_date": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "Enddatum (z. B. YYYY-MM-DD oder ISO-8601).",
+                },
+                "calendar_id": {
+                    "type": "integer",
+                    "description": "Optionale Kalender-ID.",
+                },
+            },
+            [],
+        ),
+        _function(
+            "propose_email_send",
+            "Schlägt das Verfassen und Versenden einer E-Mail über ein verknüpftes Postfach vor. "
+            "Erfordert zwingend eine Bestätigung des Benutzers vor dem tatsächlichen Versand.",
+            {
+                "recipient": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Empfänger-E-Mail-Adresse.",
+                },
+                "subject": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Betreff der E-Mail.",
+                },
+                "body_text": {
+                    "type": "string",
+                    "maxLength": 8000,
+                    "description": "Vollständiger Textinhalt der E-Mail.",
+                },
+                "body_html": {
+                    "type": "string",
+                    "maxLength": 16000,
+                    "description": "Optionaler HTML-Inhalt.",
+                },
+                "mailbox_id": {
+                    "type": "integer",
+                    "description": "Optionales Absender-Postfach. Fehlt es, wird das Standard-Postfach genutzt.",
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            ["recipient", "subject", "body_text", *_RATIONALE_REQUIRED],
+        ),
+        _function(
+            "propose_calendar_event_create",
+            "Schlägt einen neuen Termin im verknüpften Kalender vor. "
+            "Erfordert die Freigabe des Benutzers.",
+            {
+                "title": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Titel des Termins.",
+                },
+                "start_time": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "Startzeit (z. B. 2026-08-26 14:00 oder ISO-8601).",
+                },
+                "end_time": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "Endzeit (z. B. 2026-08-26 15:00 oder ISO-8601).",
+                },
+                "description": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "Optionale Beschreibung / Agenda.",
+                },
+                "location": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Optionaler Ort oder Meeting-Link.",
+                },
+                "calendar_id": {
+                    "type": "integer",
+                    "description": "Optionale Kalender-ID.",
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            ["title", "start_time", "end_time", *_RATIONALE_REQUIRED],
+        ),
+        _function(
+            "propose_calendar_event_delete",
+            "Schlägt das Löschen eines Termins aus dem Kalender vor.",
+            {
+                "event_id": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "ID des zu löschenden Termins.",
+                },
+                "calendar_id": {
+                    "type": "integer",
+                    "description": "Optionale Kalender-ID.",
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            ["event_id", *_RATIONALE_REQUIRED],
         ),
     ]
 
@@ -3463,6 +3623,43 @@ def _execute_global_read_tool(
 
     if tool_name == "forget_skill":
         return _execute_forget_skill(db, user=user, arguments=arguments)
+
+    if tool_name == "email_search":
+        from services.mailbox_service import MailboxService
+
+        query = str(arguments.get("query", "")) if arguments.get("query") else None
+        sender = str(arguments.get("sender", "")) if arguments.get("sender") else None
+        limit = int(arguments.get("limit", 10))
+        mailbox_id = int(arguments["mailbox_id"]) if arguments.get("mailbox_id") else None
+        messages = MailboxService.search_messages(
+            db, user=user, mailbox_id=mailbox_id, query=query, sender=sender, limit=limit
+        )
+        return {"messages": messages, "count": len(messages)}
+
+    if tool_name == "email_read":
+        from services.mailbox_service import MailboxService
+
+        if "message_id" not in arguments:
+            raise AiActionValidationError("message_id ist erforderlich")
+        message_id = str(arguments["message_id"]).strip()
+        mailbox_id = int(arguments["mailbox_id"]) if arguments.get("mailbox_id") else None
+        msg = MailboxService.read_message(
+            db, user=user, message_id=message_id, mailbox_id=mailbox_id
+        )
+        if not msg:
+            return {"error": "Nachricht nicht gefunden oder Postfach nicht erreichbar"}
+        return msg
+
+    if tool_name == "calendar_read":
+        from services.calendar_service import CalendarService
+
+        start_date = str(arguments.get("start_date", "")) if arguments.get("start_date") else None
+        end_date = str(arguments.get("end_date", "")) if arguments.get("end_date") else None
+        calendar_id = int(arguments["calendar_id"]) if arguments.get("calendar_id") else None
+        events = CalendarService.get_events(
+            db, user=user, calendar_id=calendar_id, start_date=start_date, end_date=end_date
+        )
+        return {"events": events, "count": len(events)}
 
     if tool_name == "read_blueprint":
         # Ein Blueprint ist eine Vorlage, kein Betriebsgeheimnis: wer Server

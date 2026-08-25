@@ -48,6 +48,8 @@ from .webhook_delivery import WebhookDelivery
 from .singra_webhook_event import SingraWebhookEvent
 from .incident import Incident, GuardianIncidentDelivery
 from .change_event import ChangeEvent
+from .user_mailbox import UserMailbox
+from .user_calendar import UserCalendar
 from .credential import (
     CREDENTIAL_KINDS,
     KIND_GITHUB_TOKEN,
@@ -83,4 +85,5 @@ __all__ = [
     "HosterHandoff", "HosterWebhookDelivery",
     "UserCredential", "ServerCredentialBinding",
     "CREDENTIAL_KINDS", "KIND_GITHUB_TOKEN", "KIND_STEAM_ACCOUNT",
+    "UserMailbox", "UserCalendar",
 ]  # noqa: E501

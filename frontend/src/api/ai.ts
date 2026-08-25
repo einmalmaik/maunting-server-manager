@@ -426,6 +426,9 @@ export const SCHREIBWERKZEUGE = [
   'propose_restart_schedule_set',
   'propose_backup_schedule_set',
   'propose_file_delete',
+  'propose_email_send',
+  'propose_calendar_event_create',
+  'propose_calendar_event_delete',
 ] as const
 
 export type AiWriteTool = (typeof SCHREIBWERKZEUGE)[number]

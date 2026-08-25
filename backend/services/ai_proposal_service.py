@@ -1848,6 +1848,82 @@ _AUFGABEN_FELDER = frozenset({
 })
 
 
+def _email_send_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
+    recipient = str(rest.get("recipient", "")).strip()
+    subject = str(rest.get("subject", "")).strip()
+    body_text = str(rest.get("body_text", "")).strip()
+    if not recipient or not subject or not body_text:
+        raise AiActionValidationError("E-Mail-Versand erfordert recipient, subject und body_text")
+
+    mailbox_id = rest.get("mailbox_id")
+    body_html = rest.get("body_html")
+
+    payload = {
+        "recipient": recipient,
+        "subject": redact_sensitive_text(subject),
+        "body_text": redact_sensitive_text(body_text),
+        "mailbox_id": int(mailbox_id) if mailbox_id else None,
+        "body_html": str(body_html) if body_html else None,
+    }
+    preview = {
+        "operation": "email_send",
+        "recipient": recipient,
+        "subject": redact_sensitive_text(subject),
+        "body_preview": redact_sensitive_text(body_text)[:500],
+        "mailbox_id": mailbox_id,
+    }
+    return payload, preview
+
+
+def _calendar_event_create_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
+    title = str(rest.get("title", "")).strip()
+    start_time = str(rest.get("start_time", "")).strip()
+    end_time = str(rest.get("end_time", "")).strip()
+    if not title or not start_time or not end_time:
+        raise AiActionValidationError("Kalender-Eintrag erfordert title, start_time und end_time")
+
+    description = rest.get("description")
+    location = rest.get("location")
+    calendar_id = rest.get("calendar_id")
+
+    payload = {
+        "title": redact_sensitive_text(title),
+        "start_time": start_time,
+        "end_time": end_time,
+        "description": redact_sensitive_text(str(description)) if description else None,
+        "location": redact_sensitive_text(str(location)) if location else None,
+        "calendar_id": int(calendar_id) if calendar_id else None,
+    }
+    preview = {
+        "operation": "calendar_event_create",
+        "title": redact_sensitive_text(title),
+        "start_time": start_time,
+        "end_time": end_time,
+        "location": redact_sensitive_text(str(location)) if location else None,
+        "calendar_id": calendar_id,
+    }
+    return payload, preview
+
+
+def _calendar_event_delete_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
+    event_id = str(rest.get("event_id", "")).strip()
+    if not event_id:
+        raise AiActionValidationError("Termin-Löschung erfordert event_id")
+
+    calendar_id = rest.get("calendar_id")
+    payload = {
+        "event_id": event_id,
+        "calendar_id": int(calendar_id) if calendar_id else None,
+    }
+    preview = {
+        "operation": "calendar_event_delete",
+        "event_id": event_id,
+        "calendar_id": calendar_id,
+        "irreversible": True,
+    }
+    return payload, preview
+
+
 def _task_set_payload(db: Session, user: User, arguments: dict) -> tuple[dict, dict]:
     """Nutzlast fuer `propose_task_set` — anlegen oder aendern.
 
@@ -2079,6 +2155,15 @@ _GLOBALE_PAYLOADS: dict = {
     ),
     "propose_task_delete": lambda db, user, rest, arguments, guardian: (
         _task_delete_payload(db, user, rest)
+    ),
+    "propose_email_send": lambda db, user, rest, arguments, guardian: (
+        _email_send_payload(db, user, rest)
+    ),
+    "propose_calendar_event_create": lambda db, user, rest, arguments, guardian: (
+        _calendar_event_create_payload(db, user, rest)
+    ),
+    "propose_calendar_event_delete": lambda db, user, rest, arguments, guardian: (
+        _calendar_event_delete_payload(db, user, rest)
     ),
 }
 
@@ -3648,6 +3733,52 @@ def _ausfuehren_task_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgef
     return _Ausgefuehrt(result={"deleted": True, "title": geloescht})
 
 
+def _ausfuehren_email_send(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from services.mailbox_service import MailboxService
+
+    p = rahmen.payload
+    result = MailboxService.send_email(
+        db,
+        user=rahmen.active_user,
+        recipient=str(p["recipient"]),
+        subject=str(p["subject"]),
+        body_text=str(p["body_text"]),
+        mailbox_id=int(p["mailbox_id"]) if p.get("mailbox_id") else None,
+        body_html=str(p["body_html"]) if p.get("body_html") else None,
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_calendar_event_create(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from services.calendar_service import CalendarService
+
+    p = rahmen.payload
+    result = CalendarService.create_event(
+        db,
+        user=rahmen.active_user,
+        title=str(p["title"]),
+        start_time=str(p["start_time"]),
+        end_time=str(p["end_time"]),
+        description=str(p["description"]) if p.get("description") else None,
+        location=str(p["location"]) if p.get("location") else None,
+        calendar_id=int(p["calendar_id"]) if p.get("calendar_id") else None,
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_calendar_event_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from services.calendar_service import CalendarService
+
+    p = rahmen.payload
+    result = CalendarService.delete_event(
+        db,
+        user=rahmen.active_user,
+        event_id=str(p["event_id"]),
+        calendar_id=int(p["calendar_id"]) if p.get("calendar_id") else None,
+    )
+    return _Ausgefuehrt(result=result)
+
+
 def _ausfuehren_read_tool(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     from services.ai_action_service import execute_read_tool
 
@@ -3715,6 +3846,9 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_ai_tarif_role": _ausfuehren_hoster_schreiben,
     "propose_task_set": _ausfuehren_task_set,
     "propose_task_delete": _ausfuehren_task_delete,
+    "propose_email_send": _ausfuehren_email_send,
+    "propose_calendar_event_create": _ausfuehren_calendar_event_create,
+    "propose_calendar_event_delete": _ausfuehren_calendar_event_delete,
     "worker_start": _ausfuehren_worker_start,
     "worker_cancel": _ausfuehren_worker_cancel,
     "worker_antwort": _ausfuehren_read_tool,
