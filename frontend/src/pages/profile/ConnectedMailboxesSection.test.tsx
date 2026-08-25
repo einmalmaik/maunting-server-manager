@@ -20,7 +20,6 @@ vi.mock('@/api/userIntegrations', () => ({
 
 const mockMailbox: MailboxItem = {
   id: 1,
-  user_id: 10,
   name: 'Arbeitskonto',
   email: 'work@example.com',
   provider_type: 'custom',
@@ -33,9 +32,9 @@ const mockMailbox: MailboxItem = {
   smtp_use_tls: true,
   imap_username: 'work@example.com',
   smtp_username: 'work@example.com',
-  has_password: true,
+  has_credentials: true,
   sync_enabled: true,
-  last_sync_at: null,
+  notify_filter_rules: [],
   created_at: '2026-08-25T10:00:00Z',
   updated_at: '2026-08-25T10:00:00Z',
 }
@@ -45,7 +44,7 @@ describe('ConnectedMailboxesSection', () => {
     await i18n.changeLanguage('de')
     vi.mocked(userIntegrationsApi.getMailboxes).mockReset().mockResolvedValue([mockMailbox])
     vi.mocked(userIntegrationsApi.createMailbox).mockReset().mockResolvedValue(mockMailbox)
-    vi.mocked(userIntegrationsApi.deleteMailbox).mockReset().mockResolvedValue({ ok: true })
+    vi.mocked(userIntegrationsApi.deleteMailbox).mockReset().mockResolvedValue(undefined)
     vi.mocked(userIntegrationsApi.testMailbox).mockReset().mockResolvedValue({ ok: true, details: 'OK' })
   })
 

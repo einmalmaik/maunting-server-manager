@@ -20,13 +20,12 @@ vi.mock('@/api/userIntegrations', () => ({
 
 const mockCalendar: CalendarItem = {
   id: 1,
-  user_id: 10,
   name: 'Team-Kalender',
   provider_type: 'caldav',
   is_default: true,
   caldav_url: 'https://caldav.example.com/dav/calendars/team',
   caldav_username: 'teamuser',
-  has_password: true,
+  has_credentials: true,
   created_at: '2026-08-25T10:00:00Z',
   updated_at: '2026-08-25T10:00:00Z',
 }
@@ -36,7 +35,7 @@ describe('ConnectedCalendarsSection', () => {
     await i18n.changeLanguage('de')
     vi.mocked(userIntegrationsApi.getCalendars).mockReset().mockResolvedValue([mockCalendar])
     vi.mocked(userIntegrationsApi.createCalendar).mockReset().mockResolvedValue(mockCalendar)
-    vi.mocked(userIntegrationsApi.deleteCalendar).mockReset().mockResolvedValue({ ok: true })
+    vi.mocked(userIntegrationsApi.deleteCalendar).mockReset().mockResolvedValue(undefined)
     vi.mocked(userIntegrationsApi.testCalendar).mockReset().mockResolvedValue({ ok: true, details: 'OK' })
   })
 
