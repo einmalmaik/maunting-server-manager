@@ -268,6 +268,36 @@ def _worker_zeile(db: Session, user: User) -> str:
     return "Aufträge im Hintergrund: " + "; ".join(teile) + "."
 
 
+def _postfach_und_kalender_zeilen(db: Session, user: User) -> list[str]:
+    """Listet verknüpfte E-Mail-Postfächer und Kalender des Benutzers für den Lageblock."""
+    from models.user_mailbox import UserMailbox
+    from models.user_calendar import UserCalendar
+    from sqlalchemy import select
+
+    zeilen: list[str] = []
+    mailboxes = db.scalars(
+        select(UserMailbox).where(UserMailbox.user_id == user.id).order_by(UserMailbox.id.asc())
+    ).all()
+    if mailboxes:
+        mb_texte = []
+        for mb in mailboxes:
+            zusatz = "Standard, " if mb.is_default else ""
+            mb_texte.append(f"'{mb.name}' ({mb.email}, {zusatz}id {mb.id})")
+        zeilen.append(f"Verknüpfte Postfächer: {', '.join(mb_texte)}.")
+
+    calendars = db.scalars(
+        select(UserCalendar).where(UserCalendar.user_id == user.id).order_by(UserCalendar.id.asc())
+    ).all()
+    if calendars:
+        cal_texte = []
+        for cal in calendars:
+            zusatz = "Standard, " if cal.is_default else ""
+            cal_texte.append(f"'{cal.name}' ({zusatz}id {cal.id})")
+        zeilen.append(f"Verknüpfte Kalender: {', '.join(cal_texte)}.")
+
+    return zeilen
+
+
 def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
     """Uhrzeit, Zeitzone und autonomer Modus in wenigen Zeilen.
 
@@ -302,6 +332,9 @@ def lageblock(db: Session, user: User, *, mit_workern: bool = False) -> str:
         # Name bedeutet und was daraus folgt, erklärt ai_prompt.IDENTITAET.
         f"Dein Name: {name_des_assistenten(user)}.",
     ]
+
+    # Verknüpfte Postfächer und Kalender (für automatische Zuordnung ohne Rückfragen)
+    zeilen.extend(_postfach_und_kalender_zeilen(db, user))
 
     # Die Worker-Zeile steht **vor** dem Autonomie-Teil, weil der bei
     # inaktivem Modus früh zurückkehrt — sonst fehlte sie genau den Benutzern

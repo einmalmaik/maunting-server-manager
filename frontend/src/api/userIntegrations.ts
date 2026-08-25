@@ -91,7 +91,8 @@ export interface CalendarUpdateInput {
 
 export interface TestResult {
   ok: boolean
-  details: string
+  message?: string
+  details?: string
 }
 
 export const userIntegrationsApi = {

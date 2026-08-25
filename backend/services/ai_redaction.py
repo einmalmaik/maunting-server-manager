@@ -343,12 +343,11 @@ def redact_and_count(value: str) -> tuple[str, int]:
     text, h = _SECRET_XML_ATTRIBUT_RE.subn(_ersetze_xml_attribut, text)
     text, d = _BEARER_RE.subn("Bearer [REDACTED]", text)
     text, e = _KNOWN_TOKEN_RE.subn("[REDACTED_TOKEN]", text)
-    text, f = _EMAIL_RE.subn("[REDACTED_EMAIL]", text)
-    return text, a + b + c + d + e + f + g + h
+    return text, a + b + c + d + e + g + h
 
 
 def redact_sensitive_text(value: str) -> str:
-    """Entfernt typische Credentials vor Persistenz und Providertransfer."""
+    """Entfernt typische Credentials (Passwörter, Tokens, Keys) vor Persistenz und Providertransfer."""
     return redact_and_count(value)[0]
 
 
@@ -419,26 +418,16 @@ def _ersetze_ip(match: re.Match[str]) -> str:
 
 
 def redact_freetext(value: str) -> str:
-    """Wie `redact_sensitive_text`, zusaetzlich ohne fremde IP-Adressen.
+    """Wie `redact_sensitive_text`, zusätzlich ohne fremde E-Mail- und IP-Adressen.
 
-    Gedacht fuer Text, der **von aussen** in den Server hineingekommen ist:
+    Gedacht für Text, der **von aussen** in den Server hineingekommen ist:
     Logzeilen, Inhalte von Konfigurations- und Weltdateien, Beschreibungen von
-    Guardian-Vorfaellen. Dort steht die Adresse eines Spielers, und die ist ein
-    personenbezogenes Datum, das kein Modellanbieter zu sehen braucht.
+    Guardian-Vorfaellen. Dort steht die Adresse oder E-Mail eines Spielers, und
+    die ist ein personenbezogenes Datum, das kein Modellanbieter zu sehen braucht.
 
-    Ausdruecklich **nicht** fuer strukturierte Serverangaben. `read_server_network`
-    liefert die Bind-Adresse und die Portbelegung des Servers; das sind
-    Betriebsangaben, und ohne sie kann die KI eine falsche Bindung weder
-    erkennen noch mit `propose_bind_ip_update` berichtigen. Deshalb liegt die
-    IP-Schwaerzung in dieser zweiten Funktion und nicht im allgemeinen Muster —
-    eine gemeinsame Regel wuerde entweder die Spieleradresse durchlassen oder
-    die Netzwerkdiagnose zerstoeren.
-
-    Was diese Funktion **nicht** kann: Spielernamen. Ein Name ist ein Wort und
-    hat kein Muster; ihn zu erkennen hiesse, gegen eine Liste zu pruefen, die es
-    nicht gibt. Die Grenze steht so auch in der Datenschutzerklaerung, statt sie
-    zu ueberschreiben.
+    Ausdrücklich **nicht** für strukturierte Serverangaben oder Benutzer-E-Mail-Tools.
     """
     text = redact_sensitive_text(value)
+    text = _EMAIL_RE.sub("[REDACTED_EMAIL]", text)
     text = _IPV4_RE.sub(_ersetze_ip, text)
     return _IPV6_RE.sub(_ersetze_ip, text)

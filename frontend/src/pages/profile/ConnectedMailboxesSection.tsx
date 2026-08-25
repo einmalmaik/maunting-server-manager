@@ -97,7 +97,8 @@ export function ConnectedMailboxesSection() {
       if (res.ok) {
         toast.success(t('profile.mailboxes.testSuccess', 'Verbindungstest erfolgreich!'))
       } else {
-        toast.error(t('profile.mailboxes.testFailed', { details: res.details, defaultValue: `Fehlgeschlagen: ${res.details}` }))
+        const fehlerText = res.message || res.details || 'Verbindung fehlgeschlagen'
+        toast.error(t('profile.mailboxes.testFailed', { details: fehlerText, defaultValue: `Fehlgeschlagen: ${fehlerText}` }))
       }
     } catch (err: any) {
       toast.error(err.message || 'Verbindungstest fehlgeschlagen')

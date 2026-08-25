@@ -502,6 +502,41 @@ Die `backup_id` holst du aus `read_server_backups` und nennst dem Benutzer, von 
 wann der Stand ist. Rate sie nie."""
 
 
+# Verknüpfte Postfächer und Kalender des Benutzers.
+#
+# Aus dem Betrieb (26.08.2026): Der Benutzer bat, eine E-Mail über sein
+# Postfach zu versenden. Das Modell fragte mehrfach nach der Absenderadresse,
+# behauptete fälschlicherweise, es gäbe kein E-Mail-Tool, und wich auf
+# Computer-Use aus.
+#
+# Dieser Block stellt drei Handlungsregeln klar:
+# 1. Für E-Mails und Termine existieren die integrierten Werkzeuge
+#    (`email_search`, `email_read`, `propose_email_send`, `calendar_read`,
+#    `propose_calendar_event_create`, `propose_calendar_event_delete`).
+# 2. Die verknüpften Postfächer und Kalender stehen mit Name und ID in der Lage.
+#    Nennt der Benutzer einen Namen ("einmalmmaik", "geschäftlich", "Arbeit", "privat")
+#    oder Teile der Adresse, wird das passende Postfach direkt gewählt — ohne Rückfrage.
+#    Fehlt die Angabe, gilt das Standard-Postfach.
+# 3. Für E-Mails und Kalender wird NIEMALS Computer-Use (Maus, Tastatur, Bildschirmfoto)
+#    benutzt.
+POSTFACH_UND_KALENDER = """\
+Postfaecher und Kalender: Nutze fuer E-Mails und Termine immer die integrierten \
+Werkzeuge (`email_search`, `email_read`, `propose_email_send`, `calendar_read`, \
+`propose_calendar_event_create`, `propose_calendar_event_delete`). Greife fuer \
+Mail- oder Kalenderaufgaben niemals auf Computer-Use, Maus-/Tastatursteuerung \
+oder Bildschirmfotos zurueck.
+Die verknuepften Postfaecher und Kalender stehen mit Name und ID in deiner Lage. \
+Nennt der Benutzer einen Postfachnamen, ein Stichwort (z. B. "Arbeit", "Business", \
+"Privat") oder einen Teil seiner E-Mail-Adresse, ordne die `mailbox_id` sofort \
+dem passenden Postfach zu. Nennt er kein bestimmtes Postfach, verwende das \
+Standard-Postfach. Frage niemals nach vollstaendigen Adressen oder Bestaetigungen \
+der Absenderadresse, wenn ein passendes Postfach in deiner Lage steht.
+Erstelle fuer den E-Mail-Versand oder neue Termine direkt die Vorschlagskarte \
+(`propose_email_send`, `propose_calendar_event_create`) — der Benutzer sieht \
+alle Angaben dort auf einen Blick und gibt sie frei."""
+
+
+
 # Ohne diese Anweisung merkt sich das Modell entweder nichts oder alles. Beides
 # ist unbrauchbar. Der Ausloeser muss ein *beobachtbares Ereignis* sein, nicht
 # eine Kategorie, die das Modell erst auf den Satz anwenden muss. Gemessen: mit
@@ -1198,6 +1233,7 @@ BLOECKE = (
     ERREICHBARKEIT,
     WEBSUCHE,
     UNWIDERRUFLICHES,
+    POSTFACH_UND_KALENDER,
     GEDAECHTNIS,
     # Direkt hinter dem Gedaechtnis, weil die Sprechweise dort landet: was
     # ueber Tage gilt, wird als persoenliche Beobachtung festgehalten. Getrennt
@@ -1246,6 +1282,7 @@ GEHIRN_BLOECKE = (
     # es sie nicht weiterreichen, sondern beantworten koennen.
     ERMESSEN,
     KEIN_STUMMER_ZUG,
+    POSTFACH_UND_KALENDER,
     GEDAECHTNIS,
     SPRECHWEISE,
     GEDAECHTNIS_AUFRAEUMEN,

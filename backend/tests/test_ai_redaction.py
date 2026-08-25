@@ -160,6 +160,13 @@ def test_ordinary_text_is_left_alone(harmlos: str) -> None:
     assert redact_sensitive_text(harmlos) == harmlos
 
 
+def test_email_addresses_preserved_in_sensitive_text_and_redacted_in_freetext() -> None:
+    """E-Mails im Chat/Tool-Aufruf bleiben erhalten, in Freitext/Logs werden sie geschwärzt."""
+    prompt = "Sende eine E-Mail an max@mustermann.de mit Betreff Hallo"
+    assert redact_sensitive_text(prompt) == prompt
+    assert "[REDACTED_EMAIL]" in redact_freetext("Log: User registered with email max@mustermann.de")
+
+
 # ── Die Abweisung beim Merken: enger als die Schwärzung ───────────────
 #
 # `enthaelt_zugangsdaten` entscheidet, ob ein Memory-/Skill-Text abgewiesen

@@ -107,6 +107,7 @@ export function Privacy() {
           t('privacyPolicy.sections.desktopApp.items.aufraeumen'),
           t('privacyPolicy.sections.desktopApp.items.virenscan'),
           t('privacyPolicy.sections.desktopApp.items.eingabe'),
+          t('privacyPolicy.sections.desktopApp.items.discordRpc'),
           t('privacyPolicy.sections.desktopApp.items.lokal'),
         ],
       },

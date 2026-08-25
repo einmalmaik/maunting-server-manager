@@ -813,6 +813,16 @@ class Sprachbruecke:
             return True
 
         if ereignis in ("tool", "tool_plan"):
+            # Restlichen Text im Puffer sofort an die Stimme weitergeben,
+            # damit die Ansage vor der Werkzeugausführung vollständig zu Ende gesprochen wird.
+            rest, belege = filter_.ausklingen()
+            for beleg in belege:
+                await self._senden(beleg)
+            if rest.strip():
+                if self._zustand != ZUSTAND_SPRICHT:
+                    await self._zustand_melden(ZUSTAND_SPRICHT)
+                await stimme.sagen(rest)
+
             # Nur der Name auf den Schirm, nie die Argumente — dieselbe Regel
             # wie zuvor. Vorgelesen wird nichts davon: dass etwas passiert,
             # hört der Mensch daran, dass gerade nichts gesagt wird.
@@ -842,7 +852,15 @@ class Sprachbruecke:
             return True
 
         if ereignis == "run":
-            return str(daten.get("status") or "") == "running"
+            status = str(daten.get("status") or "")
+            stop_reason = str(daten.get("stop_reason") or "")
+            if status == "waiting_wake" and stop_reason == "desktop_jobs":
+                # Der Lauf pausiert nur kurz für die Ausführung eines Desktop-Jobs
+                # (z. B. Bildschirmfoto / Mausklick) und wird nach Upload des Ergebnisses
+                # in Segment 2 fortgesetzt. Wir bleiben im Event-Loop und signalisieren DENKT.
+                await self._zustand_melden(ZUSTAND_DENKT)
+                return True
+            return status == "running"
 
         return True
 

@@ -129,10 +129,10 @@ class MailboxService:
                 if mailbox.imap_use_ssl:
                     context = ssl.create_default_context()
                     client = imaplib.IMAP4_SSL(
-                        mailbox.imap_host, mailbox.imap_port or 993, ssl_context=context
+                        mailbox.imap_host, mailbox.imap_port or 993, ssl_context=context, timeout=10
                     )
                 else:
-                    client = imaplib.IMAP4(mailbox.imap_host, mailbox.imap_port or 143)
+                    client = imaplib.IMAP4(mailbox.imap_host, mailbox.imap_port or 143, timeout=10)
                     if hasattr(client, "starttls"):
                         client.starttls()
 
@@ -143,6 +143,9 @@ class MailboxService:
                 else:
                     client.login(username, secret)
                 client.logout()
+            except (TimeoutError, OSError) as e:
+                _log.warning("IMAP Timeout für %s (%s): %s", mailbox.email, mailbox.imap_host, e)
+                return False, f"IMAP-Verbindung zeitüberschritten (Host nicht erreichbar oder falscher Port): {e}"
             except Exception as e:
                 _log.warning("IMAP Test fehlgeschlagen für %s: %s", mailbox.email, e)
                 return False, f"IMAP-Verbindung fehlgeschlagen: {e}"
@@ -170,6 +173,9 @@ class MailboxService:
                 else:
                     server.login(username, secret)
                 server.quit()
+            except (TimeoutError, OSError) as e:
+                _log.warning("SMTP Timeout für %s (%s): %s", mailbox.email, mailbox.smtp_host, e)
+                return False, f"SMTP-Verbindung zeitüberschritten (Host nicht erreichbar oder falscher Port): {e}"
             except Exception as e:
                 _log.warning("SMTP Test fehlgeschlagen für %s: %s", mailbox.email, e)
                 return False, f"SMTP-Verbindung fehlgeschlagen: {e}"
@@ -200,10 +206,10 @@ class MailboxService:
             if mailbox.imap_use_ssl:
                 context = ssl.create_default_context()
                 client = imaplib.IMAP4_SSL(
-                    mailbox.imap_host, mailbox.imap_port or 993, ssl_context=context
+                    mailbox.imap_host, mailbox.imap_port or 993, ssl_context=context, timeout=15
                 )
             else:
-                client = imaplib.IMAP4(mailbox.imap_host, mailbox.imap_port or 143)
+                client = imaplib.IMAP4(mailbox.imap_host, mailbox.imap_port or 143, timeout=15)
 
             username = mailbox.imap_username or mailbox.email
             if mailbox.provider_type in ("oauth_google", "oauth_microsoft"):
@@ -277,10 +283,10 @@ class MailboxService:
             if mailbox.imap_use_ssl:
                 context = ssl.create_default_context()
                 client = imaplib.IMAP4_SSL(
-                    mailbox.imap_host, mailbox.imap_port or 993, ssl_context=context
+                    mailbox.imap_host, mailbox.imap_port or 993, ssl_context=context, timeout=15
                 )
             else:
-                client = imaplib.IMAP4(mailbox.imap_host, mailbox.imap_port or 143)
+                client = imaplib.IMAP4(mailbox.imap_host, mailbox.imap_port or 143, timeout=15)
 
             username = mailbox.imap_username or mailbox.email
             if mailbox.provider_type in ("oauth_google", "oauth_microsoft"):

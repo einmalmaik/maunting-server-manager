@@ -29,6 +29,7 @@ mod aufraeumen;
 mod auftrag;
 mod bildschirm;
 mod deinstallation;
+pub mod discord;
 #[cfg(windows)]
 mod ducking;
 mod geheimnisse;
@@ -580,6 +581,7 @@ pub(crate) fn beenden_erzwingen(app: &tauri::AppHandle) {
         });
         let _ = warten.recv_timeout(std::time::Duration::from_secs(1));
     }
+    discord::beenden();
     app.cleanup_before_exit();
     std::process::exit(0);
 }
@@ -675,6 +677,11 @@ pub fn run() {
                 if let Err(fehler) = wakeword::lauschen_starten(app.handle().clone()) {
                     eprintln!("Wake-Word-Lauschen nicht gestartet: {fehler}");
                 }
+            }
+            // Discord Rich Presence: wenn in der Konfiguration aktiv (Standard),
+            // verbindet sich die Desktop App mit der lokalen Discord Named Pipe.
+            if konfig.discord_rpc_aktiv {
+                discord::starten(konfig.discord_client_id);
             }
             // Sanfter Start: beim Boot-Autostart bleibt das Fenster im Tray —
             // niemand will nach dem Hochfahren eine Boot-Sequenz vor der Nase.

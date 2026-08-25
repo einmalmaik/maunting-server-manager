@@ -239,6 +239,20 @@ sudo systemctl start msm-update.timer
 
 ---
 
+## Discord Rich Presence (Optional)
+
+Die Desktop-App (*Maunting Smart System* / MSS) unterstützt Discord Rich Presence (RPC). Wenn Discord auf Ihrem Rechner geöffnet ist, wird der Status im Discord-Profil angezeigt (z. B. „MSS Desktop Companion“).
+
+- **Funktionsweise**: Die Verbindung läuft rein lokal über die Windows-Pipe (`\\.\pipe\discord-ipc-0`). Es werden keine externen Anfragen an Discord-Server gesendet und keine Server-Adressen, Kennwörter oder Chat-Inhalte übertragen.
+- **Standard**: Die Standard-Anwendungs-ID (`1512525013155057735`) ist fest hinterlegt und bei laufendem Discord automatisch aktiv.
+- **Eigene Anwendungs-ID (Self-Hosting)**: Wer im [Discord Developer Portal](https://discord.com/developers/applications) eine eigene Discord-App hinterlegt hat, kann die Client-ID in der lokalen Konfigurationsdatei (`konfig.json`) eintragen:
+  ```json
+  "discord_client_id": "DEINE_APPLICATION_ID"
+  ```
+- **Deaktivieren**: Rich Presence lässt sich in der `konfig.json` der Desktop-App mit `"discord_rpc_aktiv": false` jederzeit vollständig abschalten.
+
+---
+
 ## Lizenz
 
 Dieses Projekt steht unter der [MIT-Lizenz](LICENSE).

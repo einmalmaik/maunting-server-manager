@@ -75,6 +75,10 @@ pub struct AppKonfig {
     pub max_download_bytes: u64,
     /// Vom Benutzer freigegebene Suchwurzeln für Spiele und Software.
     pub search_roots: Vec<String>,
+    /// Ob Discord Rich Presence (RPC) aktiviert ist. Vorgabe ist `true`.
+    pub discord_rpc_aktiv: bool,
+    /// Optionale benutzerdefinierte Discord Application Client ID für Self-Hosting.
+    pub discord_client_id: Option<String>,
 }
 
 /// Ermittelt den isolierten Standard-Sandbox-Pfad im Benutzerprofil (`%USERPROFILE%\MSS-Sandbox` bzw. `$HOME/MSS-Sandbox`).
@@ -121,6 +125,8 @@ impl Default for AppKonfig {
             artifact_install_aktiv: false,
             max_download_bytes: STANDARD_DOWNLOAD_LIMIT_BYTES,
             search_roots: Vec::new(),
+            discord_rpc_aktiv: true,
+            discord_client_id: None,
         }
     }
 }
