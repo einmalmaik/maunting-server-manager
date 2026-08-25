@@ -230,11 +230,11 @@
       "skillsMoved": "Skills stehen nicht mehr hier: ein Skill gilt entweder für ein Team oder panelweit, nie „für dieses Profil“. Deine eigenen findest du unter",
       "skillsMovedLink": "Teams → Persönlich",
       "agentNameTitle": "Name des Assistenten",
-      "agentNameDescription": "Gib deinem Assistenten einen eigenen Rufnamen. Leer gelassen heißt er Singra. Der Name gilt überall — im Panel wie in der Desktop-App.",
+      "agentNameDescription": "Gib deinem Assistenten einen eigenen Rufnamen. Leer gelassen heißt er Singra. Der Name gilt überall: im Panel wie in der Desktop-App.",
       "agentNameLabel": "Rufname",
       "agentNameSaved": "Name gespeichert.",
       "devicesTitle": "Geräte koppeln",
-      "devicesDescription": "Die Desktop-App meldet sich nicht mit Passwort an, sondern mit einem Code, den du hier erzeugst. Er gilt zehn Minuten und genau einmal. Ein gekoppeltes Gerät führt dieselbe Unterhaltung wie das Panel — und die KI kann dort zusätzlich auf deinem Rechner arbeiten.",
+      "devicesDescription": "Die Desktop-App meldet sich nicht mit Passwort an, sondern mit einem Code, den du hier erzeugst. Er gilt zehn Minuten und genau einmal. Ein gekoppeltes Gerät führt dieselbe Unterhaltung wie das Panel, und die KI kann dort zusätzlich auf deinem Rechner arbeiten.",
       "devicesApiAddress": "Diese Adresse in der App eintragen",
       "devicesApiAddressHint": "Die Adresse der API, nicht die der Oberfläche. Trägst du die Adresse der Weboberfläche ein, antwortet sie mit einer Webseite statt mit Daten.",
       "devicesNameLabel": "Name des Geräts",
@@ -243,6 +243,7 @@
       "devicesCodeLabel": "Kopplungscode",
       "devicesRevoke": "Zugang entziehen",
       "devicesRevoked": "Zugang entzogen.",
+      "deviceRevoked": "Zugang entzogen.",
       "devicesUnnamed": "Unbenanntes Gerät"
     },
     "memory": {
@@ -732,9 +733,9 @@
     "errors": {
       "codes": {
         "AI_PROVIDER_AUTH_FAILED": "Der API-Key wurde vom Anbieter abgelehnt. Prüfe den Operator-Key oder deinen eigenen Key im Profil.",
-        "AI_PROVIDER_ENDPOINT_NOT_FOUND": "Der Anbieter kennt diese Adresse nicht. Die Basis-URL endet auf /v1 — nicht auf /chat/completions.",
+        "AI_PROVIDER_ENDPOINT_NOT_FOUND": "Der Anbieter kennt diese Adresse nicht. Die Basis-URL endet auf /v1, nicht auf /chat/completions.",
         "AI_PROVIDER_REQUEST_REJECTED": "Der Anbieter hat die Anfrage abgelehnt. Meist stimmt der Modellname nicht.",
-        "AI_PROVIDER_PAYMENT_REQUIRED": "Der Anbieter meldet aufgebrauchtes Guthaben. Der Schlüssel ist in Ordnung — das Konto braucht Geld.",
+        "AI_PROVIDER_PAYMENT_REQUIRED": "Der Anbieter meldet aufgebrauchtes Guthaben. Der Schlüssel ist gültig, das Guthaben muss aufgeladen werden.",
         "AI_PROVIDER_RATE_LIMITED": "Der Anbieter drosselt gerade. Versuche es in einem Moment erneut.",
         "AI_PROVIDER_UNAVAILABLE": "Der Anbieter ist nicht erreichbar.",
         "AI_PROVIDER_KEY_MISSING": "Für diesen Provider ist kein API-Key hinterlegt.",
@@ -755,9 +756,9 @@
         "AI_APPROVAL_INVALID": "Dieser Freigabelink ist nicht mehr gültig. Entweder wurde bereits entschieden, oder die Anfrage ist abgelaufen.",
         "AI_APPROVAL_FAILED": "Die Entscheidung konnte nicht übernommen werden.",
         "AI_ACTION_ACCESS_REVOKED": "Die Berechtigung für diesen Server wurde entzogen. Der Vorschlag bleibt bestehen, ausführen darfst du ihn nicht mehr.",
-        "AI_ACTION_STORE_UNAVAILABLE": "Der sichere Speicher des Panels ist gerade nicht erreichbar. Der Vorschlag bleibt bestehen — versuche es in einem Moment erneut.",
+        "AI_ACTION_STORE_UNAVAILABLE": "Der sichere Speicher des Panels ist gerade nicht erreichbar. Der Vorschlag bleibt bestehen; versuche es gleich erneut.",
         "AI_ACTION_PAYLOAD_INVALID": "Die Daten des Vorschlags sind unbrauchbar. Lass dir den Vorschlag neu erstellen.",
-        "AI_ACTION_NOT_PROPOSED": "Dieser Vorschlag wartet nicht mehr auf eine Entscheidung — er wurde bereits bestätigt, ausgeführt oder verworfen.",
+        "AI_ACTION_NOT_PROPOSED": "Dieser Vorschlag wartet nicht mehr auf eine Entscheidung: Er wurde bereits bestätigt, ausgeführt oder verworfen.",
         "AI_ACTION_NOT_AUTONOMOUS": "Diese Aktion darf nicht ohne Rückfrage laufen.",
         "AI_ACTION_NOT_CONFIRMED": "Der Vorschlag ist nicht mehr bestätigt. Bestätige ihn erneut.",
         "AI_ACTION_CONFIRMATION_EXPIRED": "Die Bestätigung ist abgelaufen. Sieh dir den Vorschlag noch einmal an und bestätige ihn erneut.",
@@ -769,10 +770,11 @@
         "AI_ACTION_TOOL_NOT_ALLOWED": "Dieses Werkzeug ist für die KI nicht freigegeben.",
         "AI_ACTION_BIND_IP_REJECTED": "Die gewünschte Bind-IP ist für diesen Server nicht verwendbar.",
         "AI_ACTION_BLUEPRINT_REJECTED": "Der vorgeschlagene Blueprint wurde bei der Prüfung abgelehnt.",
-        "AI_ACTION_HOSTER_REJECTED": "Die Shop-Anbindung hat den Vorschlag abgelehnt — etwa weil der Slug schon vergeben ist oder der Dienstbenutzer die nötigen Rechte nicht hat.",
+        "AI_ACTION_HOSTER_REJECTED": "Die Shop-Anbindung hat den Vorschlag abgelehnt (beispielsweise weil der Slug vergeben ist oder Berechtigungen fehlen).",
         "AI_ACTION_BLUEPRINT_SWITCH_FAILED": "Der Wechsel auf den anderen Blueprint ist fehlgeschlagen.",
         "AI_ACTION_EXECUTION_FAILED": "Die Aktion ist fehlgeschlagen. Einzelheiten stehen im Protokoll.",
-        "AI_ACTION_INTERRUPTED": "Das Panel wurde neu gestartet, während die Aktion lief. Wie weit sie gekommen ist, weiß es nicht — sieh am Server nach, bevor du sie erneut auslöst."
+        "AI_ACTION_INTERRUPTED": "Das Panel wurde neu gestartet, während die Aktion lief. Wie weit sie gekommen ist, ist unklar: Prüfe den Server, bevor du die Aktion erneut auslöst.",
+        "DESKTOP_JOB_NOT_FOUND": "Der angeforderte Desktop-Auftrag wurde nicht gefunden oder ist bereits abgelaufen."
       }
     },
     "voice": {
@@ -844,19 +846,20 @@
     "tasks": {
       "toTasks": "Aufgabenliste",
       "title": "Aufgabenliste",
-      "subtitle": "Stehende Aufträge — sie laufen im Hintergrund und unterbrechen den Chat nie.",
+      "subtitle": "Stehende Aufträge: Sie laufen im Hintergrund und unterbrechen den Chat nicht.",
       "emptyTitle": "Noch keine Aufgaben",
-      "emptyDescription": "Leg hier eine Aufgabe an oder bitte die KI im Chat darum — etwa „prüf jeden Morgen die Logs“. Drei Angaben genügen: Name, Auftrag, Zeitplan.",
+      "emptyDescription": "Erstelle hier eine Aufgabe oder beauftrage die KI im Chat (z. B. „prüfe jeden Morgen die Logs“). Drei Angaben genügen: Name, Auftrag, Zeitplan.",
       "new": "Neue Aufgabe",
       "editTitle": "Aufgabe bearbeiten",
       "name": "Aufgabenname",
       "prompt": "Auftrag an die KI",
-      "promptHint": "Der Name ist für dich und die Sortierung — die KI liest den Auftragstext.",
+      "promptHint": "Der Name dient der Übersicht, die KI verarbeitet den Auftragstext.",
       "schedule": "Zeitplan",
       "planKindDaily": "Täglich / Wochentage",
       "planKindInterval": "Intervall",
       "planKindOnce": "Einmalig",
       "timeOfDay": "Uhrzeit",
+      "weekdays": "Wochentage",
       "weekdaysHint": "Keine Auswahl bedeutet: jeden Tag.",
       "intervalHours": "Stundenabstand (1–168)",
       "onceAt": "Zeitpunkt",
@@ -865,7 +868,7 @@
       "timezoneHint": "IANA-Name, zum Beispiel Europe/Berlin. Der Zeitplan richtet sich danach.",
       "email": "Ergebnis zusätzlich per E-Mail",
       "act": "Darf dabei handeln",
-      "actHint": "Nur mit freigegebenem autonomem Modus — ohne Häkchen berichtet die Aufgabe nur.",
+      "actHint": "Nur mit freigegebenem autonomem Modus; ohne Häkchen berichtet die Aufgabe nur.",
       "create": "Aufgabe anlegen",
       "created": "Aufgabe angelegt.",
       "saved": "Aufgabe gespeichert.",
@@ -3084,12 +3087,14 @@
   "common": {
     "unlimited": "unbegrenzt",
     "save": "Speichern",
+    "saving": "Speichern …",
+    "clipboardError": "Zwischenablage nicht verfügbar",
     "cancel": "Abbrechen",
     "delete": "Löschen",
     "edit": "Bearbeiten",
     "create": "Erstellen",
     "search": "Suchen",
-    "loading": "Laden...",
+    "loading": "Laden …",
     "error": "Fehler",
     "success": "Erfolg",
     "close": "Schließen",
@@ -3583,9 +3588,9 @@
   },
   "privacyPolicy": {
     "title": "Datenschutzerklärung",
-    "slogan": "Sicherheit braucht Vertrauen",
-    "intro": "In einer digitalen Welt, in der Privatsphäre zunehmend verloren geht und jede Interaktion digital erfasst werden kann, setzt Maunting Studios das Gegenmodell: Schutz braucht Vertrauen. Diese Erklärung beschreibt transparent und lückenlos alle Datenflüsse des Maunting Service Managers und der Desktop-App. Wir überwachen niemanden heimlich: Alle Aktionen sind transparent, auditierbar, self-hosted und liegen vollständig unter der Kontrolle des Nutzers.",
-    "callout": "Kurzfassung: Maunting Studios – Sicherheit braucht Vertrauen. Volle Datenhoheit, kein heimliches Tracking, risikobehaftete Funktionen (wie Computer-Use) sind standardmäßig deaktiviert und jede KI-Aktion ist für Sie transparent kontrollier- und abschaltbar.",
+    "slogan": "Schutz braucht Vertrauen",
+    "intro": "In einer Zeit zunehmender digitaler Überwachung und schwindender Privatsphäre setzt Maunting Studios das Gegenmodell: Schutz braucht Vertrauen. Diese Erklärung beschreibt transparent und lückenlos alle Datenflüsse des Maunting Service Managers und der Desktop-App. Wir überwachen niemanden heimlich: Alle Aktionen sind transparent, auditierbar, self-hosted und liegen vollständig unter der Kontrolle des Nutzers.",
+    "callout": "Kurzfassung: Maunting Studios – Schutz braucht Vertrauen. Volle Datenhoheit, kein heimliches Tracking, risikobehaftete Funktionen (wie Computer-Use) sind standardmäßig deaktiviert und jede KI-Aktion ist für Sie transparent kontrollier- und abschaltbar.",
     "documentLabel": "MSM Datenschutz",
     "summaryLabel": "Datenschutz",
     "versionLabel": "Version",
@@ -3643,7 +3648,7 @@
           "credentials": "Persönliche und zentrale Provider-API-Keys werden über DIS kontextgebunden verschlüsselt und nach dem Speichern nur als Konfigurationsstatus beziehungsweise Maske angezeigt",
           "usage": "Provider, Modell, Tokenreservierung, tatsächlicher oder konservativ geschätzter Verbrauch und Zeitpunkte werden zur Kontingentdurchsetzung gespeichert; Preiswerte werden ohne belastbare Preisquelle nicht behauptet",
           "memory": "Optionale Memory-Einträge werden verschlüsselt und an ihren Bereich gebunden gespeichert, sind jederzeit einsehbar und löschbar. Es gibt fünf Bereiche: persönliche und persönliche serverbezogene Einträge sieht niemand außer dem Nutzer selbst; teambezogene sehen alle Mitglieder des jeweiligen Teams; das Wissen eines Servers sehen alle, die diesen Server sehen dürfen, und es bleibt bestehen, wenn der Verfasser das Panel verlässt; panelweite Einträge sieht jeder Nutzer des Panels",
-          "memoryConsent": "Das persönliche Gedächtnis ist standardmäßig ausgeschaltet und wird erst nach ausdrücklicher Zustimmung im Chat aktiv; die Zustimmung ist jederzeit widerrufbar und umfasst auch die eigenen serverbezogenen Notizen. Geteilte Bereiche (Team, Server, panelweit) hängen nicht an dieser Zustimmung, sondern an Berechtigungen - sie enthalten Betriebswissen und keine Angaben zur Person. Die Verschlüsselung schützt die Datenbank im Ruhezustand; der Klartext gemerkter Einträge wird bei jeder Anfrage an den gewählten Modellanbieter übertragen",
+          "memoryConsent": "Das persönliche Gedächtnis ist standardmäßig ausgeschaltet und wird erst nach ausdrücklicher Zustimmung im Chat aktiv; die Zustimmung ist jederzeit widerrufbar und umfasst auch die eigenen serverbezogenen Notizen. Geteilte Bereiche (Team, Server, panelweit) hängen nicht an dieser Zustimmung, sondern an Berechtigungen – sie enthalten Betriebswissen und keine Angaben zur Person. Die Verschlüsselung schützt die Datenbank im Ruhezustand; der Klartext gemerkter Einträge wird bei jeder Anfrage an den gewählten Modellanbieter übertragen",
           "attachments": "Freigegebene Text-, Konfigurations-, Log- und Bildanhänge werden größen- und typgeprüft, verschlüsselt im Panel gespeichert und zusammen mit der Unterhaltung an den gewählten Modellanbieter übertragen",
           "autonomy": "Der autonome Modus ist optional und muss pro Server oder panelweit ausdrücklich freigegeben werden; freigegebene Aktionen laufen ohne weitere Rückfrage, werden aber unverändert gegen die Berechtigungen des Nutzers geprüft und vollständig im Audit-Log als automatisch ausgeführt festgehalten",
           "tools": "Beim Einsatz von Werkzeugen können begrenzte, redigierte Ausschnitte aus Serverlogs, Konfigurationsdateien, Mod- und Backup-Listen sowie Guardian-Vorfällen an den Modellanbieter übertragen werden; diese Ergebnisse werden für Rückfragen im selben Chat gespeichert und mit dem Chat gelöscht",
@@ -3653,19 +3658,19 @@
       },
       "desktopApp": {
         "heading": "7. Die Desktop-App (Maunting Smart System)",
-        "body": "Das Maunting Smart System ist eine optionale Windows-App, die auf dem Rechner des Benutzers läuft und dort im Auftrag der KI arbeitet. Sie ist kein zweites Panel, sondern derselbe Zugang mit einem Rechner daran: die Kopplung erfolgt über einen Code aus dem Panel, und ohne das Recht „KI-Werkzeuge auf dem eigenen Rechner\" holt sie keine Aufträge ab. Dieser Abschnitt beschreibt, was dabei auf dem Rechner bleibt und was ihn verlässt. Alle ausgehenden Verbindungen der App gehen ausschließlich an die im Einrichtungsassistenten eingetragene Panel-Adresse — es gibt keinen Updater, keine Telemetrie und keinen fest verdrahteten Fremdanbieter.",
+        "body": "Das Maunting Smart System ist eine optionale Windows-App, die auf dem Rechner des Benutzers läuft und dort im Auftrag der KI arbeitet. Sie ist kein zweites Panel, sondern derselbe Zugang mit einem Rechner daran: Die Kopplung erfolgt über einen Code aus dem Panel, und ohne das Recht „KI-Werkzeuge auf dem eigenen Rechner“ holt sie keine Aufträge ab. Dieser Abschnitt beschreibt, was dabei auf dem Rechner bleibt und was ihn verlässt. Alle ausgehenden Verbindungen der App gehen ausschließlich an die im Einrichtungsassistenten eingetragene Panel-Adresse: Es gibt keinen Updater, keine Telemetrie und keinen fest verdrahteten Fremdanbieter.",
         "items": {
           "computerUse": "Computer-Use & Desktop-Steuerung (standardmäßig aus): Computer-Use ist ab Installation vollständig deaktiviert. Erst nach Ihrer ausdrücklichen Aktivierung in den Einstellungen und nach Bestätigung des Aufklärungsdialogs kann die KI Maus und Tastatur bedienen oder den Bildschirm betrachten. Bei deaktiviertem autonomen Modus erfordert jede einzelne Aktion eine Bestätigung am Bildschirm.",
-          "wakeword": "Wake-Word (standardmäßig aus): Wird es eingeschaltet, liest die App das Mikrofon dauerhaft mit und vergleicht das Gehörte gegen ein Referenzmodell — vollständig auf dem Rechner, ohne Netzverbindung. Solange das Wort nicht erkannt ist, verlässt kein einziges Audio-Sample den Prozess; es wird auch nichts mitgeschnitten. Der Preis dieses Zuhörens ist dauerhafte Rechenlast (gemessen etwa ein Sechstel eines Prozessorkerns).",
-          "wakewordAufnahmen": "Stimmaufnahmen der Kalibrierung: Zum Anlernen sprechen Sie den frei gewählten Namen mehrfach ein. Diese Aufnahmen sind echte Sprachaufzeichnungen und liegen als WAV-Dateien unbefristet im lokalen App-Datenverzeichnis, zusammen mit dem daraus erzeugten Referenzmodell. Sie werden nie übertragen. Entfernt werden sie durch „Zurücksetzen\" in den Wake-Word-Einstellungen oder durch die Deinstallation.",
+          "wakeword": "Wake-Word (standardmäßig aus): Wird es eingeschaltet, liest die App das Mikrofon dauerhaft mit und vergleicht das Gehörte gegen ein Referenzmodell, vollständig auf dem Rechner ohne Netzverbindung. Solange das Wort nicht erkannt ist, verlässt kein einziges Audio-Sample den Prozess; es wird auch nichts mitgeschnitten. Das dauerhafte Zuhören erzeugt eine messbare Rechenlast (etwa ein Sechstel eines Prozessorkerns).",
+          "wakewordAufnahmen": "Stimmaufnahmen der Kalibrierung: Zum Anlernen sprechen Sie den frei gewählten Namen mehrfach ein. Diese Aufnahmen sind echte Sprachaufzeichnungen und liegen als WAV-Dateien unbefristet im lokalen App-Datenverzeichnis, zusammen mit dem daraus erzeugten Referenzmodell. Sie werden nie übertragen. Entfernt werden sie durch „Zurücksetzen“ in den Wake-Word-Einstellungen oder durch die Deinstallation.",
           "sprachsitzung": "Sprachsitzung: Erst ab dem erkannten Wake-Word (oder nach dem Drücken des Sprach-Kürzels) öffnet die App den Audiokanal zum Panel und überträgt Ihre Äußerung. Das Panel gibt sie zur Abschrift an den eingestellten Modellanbieter weiter; die gesprochene Antwort erzeugt zusätzlich ein Sprachdienstleister. Ab diesem Punkt gelten die Aussagen aus Abschnitt 6 zu externen Modellanbietern.",
-          "bildschirm": "Bildschirmfotos: Die KI kann den Hauptbildschirm ansehen. Das Bild wird verkleinert, nicht auf der Festplatte gespeichert und als Werkzeugergebnis an das Panel übertragen, das es verschlüsselt ablegt und an den Modellanbieter weitergibt. Der Anbieter sieht damit alles, was zu diesem Zeitpunkt sichtbar war — auch fremde Fenster, Nachrichten und geöffnete Dokumente. Bei jeder Aufnahme leuchtet ein Hinweis am Bildschirmrand auf; er lässt sich nicht abschalten.",
-          "dateien": "Lesender Zugriff auf den Rechner: Die KI kann Laufwerke, Ordner und Speicherplatz einsehen — so weit, wie der angemeldete Windows-Benutzer es selbst darf. Übertragen werden dabei Laufwerksangaben sowie Ordner- und Dateinamen mit Größen. Dateiinhalte werden nur aus dem selbst gewählten Sandbox-Ordner gelesen und übertragen. Ob der Windows-Systembereich mitgelesen werden darf, stellen Sie im Panel je Konto ein.",
+          "bildschirm": "Bildschirmfotos: Die KI kann den Hauptbildschirm ansehen. Das Bild wird verkleinert, nicht auf der Festplatte gespeichert und als Werkzeugergebnis an das Panel übertragen, das es verschlüsselt ablegt und an den Modellanbieter weitergibt. Der Anbieter sieht damit alles, was zu diesem Zeitpunkt sichtbar war, einschließlich fremder Fenster, Nachrichten und geöffneter Dokumente. Bei jeder Aufnahme leuchtet ein Hinweis am Bildschirmrand auf; er lässt sich nicht abschalten.",
+          "dateien": "Lesender Zugriff auf den Rechner: Die KI kann Laufwerke, Ordner und Speicherplatz einsehen, soweit der angemeldete Windows-Benutzer dies selbst darf. Übertragen werden dabei Laufwerksangaben sowie Ordner- und Dateinamen mit Größen. Dateiinhalte werden nur aus dem selbst gewählten Sandbox-Ordner gelesen und übertragen. Ob der Windows-Systembereich mitgelesen werden darf, stellen Sie im Panel je Konto ein.",
           "schreiben": "Schreibender Zugriff: Angelegt und geändert wird ausschließlich im Sandbox-Ordner, den Sie selbst auswählen. Geprüft wird der aufgelöste Pfad, damit eine Verknüpfung nicht aus dem Ordner herausführt.",
           "aufraeumen": "Aufräumen außerhalb der Sandbox: Löschen ist auch außerhalb möglich. Gelöschtes geht in den Papierkorb, endgültig nur auf ausdrücklichen Wunsch. Windows selbst, Programmordner und fremde Benutzerprofile bleiben gesperrt, bis Sie sie freigeben. An Panel und Modellanbieter gehen dabei die betroffenen Dateipfade, ihre Größe und ihre Einordnung. Ist der autonome Modus aus, legt die App Ihnen vorher eine Liste zur Bestätigung vor.",
-          "virenscan": "Virenprüfung: Auf Wunsch prüft die App eine Datei mit dem lokal installierten Microsoft Defender, ohne sie zu verändern oder zu entfernen. Der geprüfte Pfad und im Fundfall ein Auszug der Defender-Ausgabe — der Dateipfade und Bedrohungsnamen enthält — gehen an den Modellanbieter.",
-          "eingabe": "Maus und Tastatur: Die App zeichnet Ihre Eingaben nicht auf — es gibt keinen Mitschnitt von Tastenanschlägen oder Mausbewegungen, weder lokal noch übertragen. Umgekehrt kann die KI Maus und Tastatur übernehmen; ist der autonome Modus aus, muss jede Übernahme an Ihrem Rechner bestätigt werden und ist zeitlich befristet. Text, den die KI tippen lässt, stammt aus dem Modell und steht im übertragenen Auftrag.",
-          "lokal": "Was lokal gespeichert wird: eine Konfigurationsdatei im Klartext (Panel-Adresse, Sandbox-Pfad, gewählter Assistentenname, Tastenkürzel, Namen der Audiogeräte, Wake-Word-Empfindlichkeit), die Wake-Word-Aufnahmen samt Modell — und im Windows-Anmeldeinformations-Manager genau ein Eintrag: das vom Betriebssystem verschlüsselte Erneuerungs-Token der gekoppelten Sitzung. Ihr Passwort und Ihr Zwei-Faktor-Code erreichen die App nie; die Anmeldung läuft ausschließlich über den Kopplungscode aus dem Panel. Die Deinstallation entfernt all das."
+          "virenscan": "Virenprüfung: Auf Wunsch prüft die App eine Datei mit dem lokal installierten Microsoft Defender, ohne sie zu verändern oder zu entfernen. Der geprüfte Pfad und im Fundfall ein Auszug der Defender-Ausgabe (der Dateipfade und Bedrohungsnamen enthält) gehen an den Modellanbieter.",
+          "eingabe": "Maus und Tastatur: Die App zeichnet Ihre Eingaben nicht auf. Es gibt keinen Mitschnitt von Tastenanschlägen oder Mausbewegungen, weder lokal noch übertragen. Umgekehrt kann die KI Maus und Tastatur übernehmen; ist der autonome Modus aus, muss jede Übernahme an Ihrem Rechner bestätigt werden und ist zeitlich befristet. Text, den die KI tippen lässt, stammt aus dem Modell und steht im übertragenen Auftrag.",
+          "lokal": "Was lokal gespeichert wird: Eine Konfigurationsdatei im Klartext (Panel-Adresse, Sandbox-Pfad, gewählter Assistentenname, Tastenkürzel, Namen der Audiogeräte, Wake-Word-Empfindlichkeit), die Wake-Word-Aufnahmen samt Modell und im Windows-Anmeldeinformations-Manager genau ein Eintrag: das vom Betriebssystem verschlüsselte Erneuerungs-Token der gekoppelten Sitzung. Ihr Passwort und Ihr Zwei-Faktor-Code erreichen die App nie; die Anmeldung läuft ausschließlich über den Kopplungscode aus dem Panel. Die Deinstallation entfernt all das."
         }
       },
       "storage": {
@@ -3692,13 +3697,13 @@
       },
       "hoster": {
         "heading": "Hoster- und Shop-Anbindung",
-        "body": "Wenn der Betreiber einen externen Shop angebunden hat, verwaltet MSM nur den technischen Zugang und den Server — nicht den Kauf, die Zahlung oder die Rechnung.",
+        "body": "Wenn der Betreiber einen externen Shop angebunden hat, verwaltet MSM nur den technischen Zugang und den Server, nicht den Kauf, die Zahlung oder die Rechnung.",
         "items": {
           "identity": "Zuordnung des Kunden: Die Kundenkennung des Shops wird ausschließlich als nicht umkehrbarer Hashwert gespeichert, zusammen mit einem vierstelligen Hinweis für den Support. Eine E-Mail-Adresse wird nur übernommen, wenn sie im Panel noch frei ist.",
           "contract": "Vertragsdaten: externe Service-Kennung, gewünschter Zustand, erreichter Status, zugeordneter Server und Zeitstempel. Zahlungs-, Rechnungs- und Adressdaten werden nicht übertragen und nicht gespeichert.",
           "noPassword": "Passwörter des Shops werden weder übernommen noch synchronisiert. Der Kunde erhält einen eigenen Panel-Zugang ohne zweites Passwort.",
           "handoff": "Ein Weiterleitungslink aus dem Shop gilt fünf Minuten und genau einmal. Gespeichert wird nur sein Hashwert; der Link selbst erscheint weder im Protokoll noch in Logs.",
-          "webhook": "Statusmeldungen an den Shop enthalten nur Vertragskennung, Zustand und Zeitstempel — keine Serveradressen, Ports, Pfade oder Zugangsdaten."
+          "webhook": "Statusmeldungen an den Shop enthalten nur Vertragskennung, Zustand und Zeitstempel, keine Serveradressen, Ports, Pfade oder Zugangsdaten."
         }
       },
       "credentials": {
@@ -3706,7 +3711,7 @@
         "body": "Du kannst eigene Steam-Konten oder GitHub-Token hinterlegen, damit deine Server nicht die zentralen Zugänge des Betreibers mitbenutzen.",
         "items": {
           "storage": "Speicherung: Der Wert wird ausschließlich verschlüsselt abgelegt und ist an genau diesen Eintrag gebunden. Es gibt keinen Weg, ihn im Panel oder über die API wieder im Klartext auszulesen.",
-          "visibility": "Sichtbarkeit: Angezeigt werden nur die von dir vergebene Bezeichnung, der Benutzername und die letzten vier Zeichen. Andere Benutzer sehen deine Einträge nicht — auch nicht mit Serverrechten.",
+          "visibility": "Sichtbarkeit: Angezeigt werden nur die von dir vergebene Bezeichnung, der Benutzername und die letzten vier Zeichen. Andere Benutzer sehen deine Einträge nicht, auch nicht mit Serverrechten.",
           "usage": "Verwendung: Der Klartext wird nur an den ausführenden Vorgang übergeben (SteamCMD-Anmeldung, Git-Abruf) und erscheint weder in Protokollen noch in Fehlermeldungen.",
           "deletion": "Löschung: Du kannst jeden Eintrag jederzeit entfernen, sobald ihn kein Server mehr verwendet. Mit deinem Konto werden alle Einträge mitgelöscht."
         }

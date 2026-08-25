@@ -5,7 +5,7 @@
 
 # Maunting Service Manager (MSM)
 
-Maunting Service Manager (MSM) ist ein selbstgehostetes Web-Panel zur zentralen Steuerung von Game-Servern, Anwendungen und Linux-Workloads auf eigenen Servern oder VPS — ohne Notwendigkeit täglicher SSH-Eingaben.
+Maunting Service Manager (MSM) ist ein selbstgehostetes Web-Panel zur zentralen Steuerung von Game-Servern, Anwendungen und Linux-Workloads auf eigenen Servern oder VPS, ohne Notwendigkeit täglicher SSH-Eingaben.
 
 ---
 
@@ -31,7 +31,7 @@ MSM trennt die Benutzeroberfläche (Control Plane) von den eigentlichen Ausführ
 Eine zentrale Control Plane steuert beliebig viele Nodes. Neue Nodes werden über ein mTLS-Verfahren mit HMAC-Challenge und expliziter Bestätigung durch den Administrator eingebunden.
 
 ### 2. Guardian Engine (Autonomes Self-Healing)
-Auf jedem Node läuft die Guardian Engine als lokaler Hintergrunddienst. Sie überwacht Container-Zustände sowie HTTP-, TCP- und Regex-Probes. Bei Ausfällen führt der Node selbstständig definierte Recovery-Aktionen (z. B. Container-Neustart oder Quarantäne) durch — auch wenn die zentrale Control Plane offline oder nicht erreichbar ist. Incidents und Statusänderungen werden lokal protokolliert und synchronisiert, sobald die Verbindung wieder steht.
+Auf jedem Node läuft die Guardian Engine als lokaler Hintergrunddienst. Sie überwacht Container-Zustände sowie HTTP-, TCP- und Regex-Probes. Bei Ausfällen führt der Node selbstständig definierte Recovery-Aktionen (z. B. Container-Neustart oder Quarantäne) durch, auch wenn die zentrale Control Plane offline oder nicht erreichbar ist. Incidents und Statusänderungen werden lokal protokolliert und synchronisiert, sobald die Verbindung wieder steht.
 
 ### 3. Blueprint Integration
 Anwendungen werden nicht über starre Skripte, sondern über deklarative Blueprint-Dateien (YAML/JSON) definiert. Ein Blueprint legt Umgebungsvariablen, Ports, Docker-Images, Lautstärken-Mounts, Konfigurations-Templates und Guardian-Healthchecks fest. MSM ist dadurch nicht auf Game-Server beschränkt.
@@ -49,13 +49,13 @@ Verschlüsselung von Server- und Datenbank-Backups über den DIS Cryptographic S
 Integrierter CLI-Assistent zum Verschieben von Control Plane, externem Frontend oder einzelnen Server-Instanzen zwischen Nodes inklusive atomarem Cutover und Rollback-Schutz.
 
 ### 8. Hoster- und Shop-Anbindung (optional)
-Ein externer Shop kann Server über eine idempotente Desired-State-API bestellen, sperren und kündigen. Die Anbindung verwendet dieselbe Provisionierungs- und Lifecycle-Logik wie das Panel — es gibt keinen zweiten Weg, einen Server anzulegen. Kunden gelangen über einen signierten Einmal-Link direkt ins Panel und benötigen kein zweites Passwort. **Ohne angelegte Integration ändert sich am Self-Hosted-Betrieb nichts.** Einrichtung und Betrieb in [`docs/self-hosting.md`](docs/self-hosting.md#hoster--und-shop-anbindung-optional-phase-6), die vollständige Endpunkt-, Webhook- und Signaturreferenz in [`docs/hoster-api.md`](docs/hoster-api.md) (im Panel auch unter **Hilfe → Hoster-API**).
+Ein externer Shop kann Server über eine idempotente Desired-State-API bestellen, sperren und kündigen. Die Anbindung verwendet dieselbe Provisionierungs- und Lifecycle-Logik wie das Panel: Es gibt keinen zweiten Weg, einen Server anzulegen. Kunden gelangen über einen signierten Einmal-Link direkt ins Panel und benötigen kein zweites Passwort. **Ohne angelegte Integration ändert sich am Self-Hosted-Betrieb nichts.** Einrichtung und Betrieb in [`docs/self-hosting.md`](docs/self-hosting.md#hoster--und-shop-anbindung-optional-phase-6), die vollständige Endpunkt-, Webhook- und Signaturreferenz in [`docs/hoster-api.md`](docs/hoster-api.md) (im Panel auch unter **Hilfe → Hoster-API**).
 
 ### 9. Sprachmodus (optional)
-Mit dem KI-Agenten reden statt tippen — und zwar buchstäblich **derselbe Agent**: dieselbe Unterhaltung, derselbe Lauf, derselbe Werkzeugkatalog, dieselbe Rechteprüfung. Der Sprachmodus ist kein zweites Modell, sondern der gewöhnliche Chatlauf mit zwei Wandlern davor und dahinter — Gehör über den bestehenden OpenRouter-Zugang, Stimme über ElevenLabs. Der Ton läuft **durch das Panel** und nicht daran vorbei: die Werkzeugschleife bleibt serverseitig, und die Anbieterschlüssel verlassen den Panelprozess nie. Die KI erbt dabei genau die Rechte des Sprechenden und keines mehr. Änderungen erzeugen dieselbe Vorschlagskarte wie im Chat; die KI sagt, was sie vorhat, und ein klares „Ja" führt aus — es ersetzt den Klick, nicht die Prüfung. Logzeilen erscheinen auf dem Bildschirm statt vorgelesen zu werden. **Ohne eingerichtete Zugänge erscheint die Funktion gar nicht.** Einrichtung in [`docs/self-hosting.md`](docs/self-hosting.md#sprachmodus-mit-der-ki-reden).
+Mit dem KI-Agenten sprechen statt tippen: Der Sprachmodus nutzt dieselbe Unterhaltung, denselben Lauf, denselben Werkzeugkatalog und dieselbe Rechteprüfung wie der Chat. Es handelt sich um denselben Agentenablauf mit Audiowandlern davor und dahinter (Spracherkennung über den bestehenden OpenRouter-Zugang, Sprachausgabe über ElevenLabs). Das Audiosignal läuft direkt über das Panel; die Werkzeugschleife bleibt serverseitig und API-Schlüssel verlassen den Panel-Prozess nicht. Die KI erbt die Rechte des Nutzers. Änderungen erzeugen dieselbe Vorschlagskarte wie im Chat; eine Bestätigung führt die Aktion aus. **Ohne eingerichtete Zugänge bleibt die Funktion ausgeblendet.** Einrichtung in [`docs/self-hosting.md`](docs/self-hosting.md#sprachmodus-mit-der-ki-reden).
 
 ### 10. Getrennte Zugangsdaten und Kubernetes
-GitHub-Token und Steam-Konto können panelweit, pro Benutzer oder pro Server hinterlegt werden. Ein Server verweist auf ein Credential, statt dessen Wert zu kopieren; der Klartext ist nach dem Speichern nicht mehr auslesbar. Der Betreiber entscheidet, ob ein Server ohne eigene Zuordnung den zentralen Zugang mitbenutzen darf. Für den Cluster-Betrieb liegen Manifeste unter [`deploy/kubernetes/`](deploy/kubernetes/README.md) — sie betreiben die Control Plane; Gameserver bleiben Docker-Container auf den angebundenen Nodes. **Self-Hosted funktioniert unverändert ohne beides.**
+GitHub-Token und Steam-Konten können panelweit, pro Benutzer oder pro Server hinterlegt werden. Ein Server verweist auf Zugangsdaten, statt deren Werte zu kopieren. Der Klartext ist nach dem Speichern nicht mehr auslesbar. Der Betreiber entscheidet, ob ein Server ohne eigene Zuordnung den zentralen Zugang nutzen darf. Für den Cluster-Betrieb liegen Kubernetes-Manifeste unter [`deploy/kubernetes/`](deploy/kubernetes/README.md) bereit (sie betreiben die Control Plane; Gameserver bleiben Docker-Container auf den angebundenen Nodes). **Der Standard-Self-Hosted-Betrieb funktioniert ohne beides.**
 
 ---
 

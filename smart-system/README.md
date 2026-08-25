@@ -1,66 +1,28 @@
 # MSS — Maunting Smart System
 
-Der Desktop-Companion zum MSM-Panel: Konversation, Sprachbedienung und lokale
-Assistenz auf dem eigenen Rechner — als Tauri-v2-App (Rust-Hülle, Oberfläche
-aus `frontend/`).
+Der Desktop-Companion zum MSM-Panel: Konversation, Sprachbedienung und lokale Assistenz auf dem eigenen Rechner (als Tauri-v2-App mit Rust-Hülle und Oberfläche aus `frontend/`).
 
 ## Eine Oberfläche, zwei Bauten
 
-Seit dem 21.08.2026 gibt es hier **keinen eigenen React-Code mehr**: die App
-rendert dieselbe KI-Seite wie der Browser (Chat, Realtime-Modus,
-Guardian-Fenster, Aufgabenliste, Denkstufen-Wahl), gebaut aus `../frontend/`
-über den Desktop-Einstieg `frontend/desktop.html` → `frontend/src/desktop/`
-(`npm run build:desktop`, `vite.desktop.config.ts`, Ergebnis in
-`frontend/dist-desktop/`). Eine zweite Chat-Implementierung veraltete gegen
-die erste — genau das ist passiert, und deshalb wurde sie gelöscht statt
-angeglichen. Die Web-Oberfläche ist die Single Source of Truth.
+Seit dem 21.08.2026 gibt es hier **keinen eigenen React-Code mehr**: Die App rendert dieselbe KI-Seite wie der Browser (Chat, Realtime-Modus, Guardian-Fenster, Aufgabenliste, Denkstufen-Wahl), gebaut aus `../frontend/` über den Desktop-Einstieg `frontend/desktop.html` → `frontend/src/desktop/` (`npm run build:desktop`, `vite.desktop.config.ts`, Ergebnis in `frontend/dist-desktop/`). Eine zweite Chat-Implementierung veraltete gegen die erste; deshalb wurde sie entfernt und vereinheitlicht. Die Web-Oberfläche ist die Single Source of Truth.
 
-Der Unterschied zum Browser ist der Transport: statt Cookies trägt jede
-Anfrage das Bearer-Token der Kopplung (`frontend/src/desktop/transport.ts`
-registriert es beim Panel-API-Client), und der Sprach-WebSocket legt es als
-Subprotokoll `msm.bearer` in den Handshake — nie in die URL.
+Der Unterschied zum Browser ist der Transport: Statt Cookies trägt jede Anfrage das Bearer-Token der Kopplung (`frontend/src/desktop/transport.ts` registriert es beim Panel-API-Client), und der Sprach-WebSocket legt es als Subprotokoll `msm.bearer` in den Handshake (nicht in die URL).
 
 ## Harte Architektur-Grenze
 
-Die App hat als **Oberfläche** keine Serververwaltung: die KI-Seite und die
-Desktop-Einstellungen, keine Serverliste, keine Konsole. Die KI darin ist aber
-derselbe Account mit denselben Rechten — im Gespräch bedient sie Server genauso
-wie im Panel und bekommt die Werkzeuge für diesen Rechner zusätzlich.
+Die App hat als **Oberfläche** keine Serververwaltung: Nur die KI-Seite und die Desktop-Einstellungen, keine Serverliste, keine Konsole. Die KI darin ist jedoch derselbe Account mit denselben Rechten: Im Gespräch bedient sie Server genauso wie im Panel und erhält die Werkzeuge für den lokalen Rechner zusätzlich.
 
-Die Grenze läuft in die andere Richtung: **aus dem Panel erreicht kein Werkzeug
-den Rechner.** Sie ist keine UI-Entscheidung, sondern eine Schranke im Backend
-(`services/ai_tool_registry.herkunft_schnitt` plus ein Spiegel je Aufruf), und
-die Herkunft steht im Token der gekoppelten Sitzung — kein Client kann sie
-behaupten. Der Grund ist praktisch: die Übernahme von Maus und Tastatur wird an
-einer Karte in dieser App bestätigt, und aus dem Browser abgeschickt liefe der
-Aufruf in eine Frist statt in eine Antwort.
+Die Grenze läuft in die andere Richtung: **Aus dem Panel erreicht kein Werkzeug den lokalen Rechner.** Dies ist eine Schranke im Backend (`services/ai_tool_registry.herkunft_schnitt` plus ein Spiegel je Aufruf), und die Herkunft steht im Token der gekoppelten Sitzung. Der Grund ist praxisnah: Die Übernahme von Maus und Tastatur wird über eine Karte in dieser App bestätigt; aus dem Browser abgeschickt liefe der Aufruf in ein Timeout.
 
 ## Anmelden: nur per Kopplung
 
-Die App kennt weder Passwort noch 2FA-Code. Im Panel unter **Profil → KI →
-Geräte koppeln** entsteht ein Code (zwölf Zeichen, zehn Minuten, genau einmal),
-der hier eingetragen wird. Nötig ist das, weil `/api/auth/login` bei
-aktiviertem Captcha einen Turnstile-Token verlangt und Cloudflare-Schlüssel an
-Domains hängen — `tauri.localhost` lässt sich dort nicht hinterlegen. So bleiben
-Passwort, 2FA und Captcha vollständig im Browser.
+Die App kennt weder Passwort noch 2FA-Code. Im Panel unter **Profil → KI → Geräte koppeln** entsteht ein Code (zwölf Zeichen, zehn Minuten, genau einmal), der hier eingetragen wird. Nötig ist das, weil `/api/auth/login` bei aktiviertem Captcha einen Turnstile-Token verlangt und Cloudflare-Schlüssel an Domains gebunden sind (`tauri.localhost` lässt sich dort nicht hinterlegen). So bleiben Passwort, 2FA und Captcha vollständig im Browser.
 
-Einzutragen ist die **Adresse der API**, nicht die der Weboberfläche. Das Panel
-zeigt sie unter Einstellungen → Allgemein und noch einmal beim Koppeln.
+Einzutragen ist die **Adresse der API**, nicht die der Weboberfläche. Das Panel zeigt sie unter Einstellungen → Allgemein und noch einmal beim Koppeln.
 
 ## Aufbau
 
-- `src-tauri/` — das ganze Zuhause der App: Fensterverwaltung (Haupt + Overlay),
-  System-Tray (im Ruhezustand das App-Logo — Farbe hieße „nimmt auf"; aktiv:
-  Blau: hört zu, Lila: denkt, Gelb: spricht), zwei konfigurierbare globale
-  Hotkeys (Fenster: `Alt+Space`, Sprachsitzung im Overlay: `Alt+Shift+Space`
-  — beide in den Einstellungen änderbar und einzeln abschaltbar), Autostart,
-  Wake-Word (rustpotter, offline), Audiogeräte-Auswahl (Ein- und
-  Ausgabegerät unabhängig vom Windows-Standard, `audio.rs`), Audio-Ducking
-  (WASAPI), Sandbox-Dateizugriff, lesende Systemsicht (Laufwerke, Ordner,
-  Platzfresser — `system.rs`, enthält bewusst keinen schreibenden Aufruf; die
-  Schreibgrenze bleibt der Sandbox-Ordner), Übernahme von Maus und Tastatur,
-  Tresor (Anmeldeinformations-Manager). Das X schließt nicht: ein kleiner Dialog
-  fragt, ob die App in den Hintergrund geht (Standard) oder wirklich endet.
+- `src-tauri/`: Die Rust-Basis der App mit Fensterverwaltung (Hauptfenster und Overlay), System-Tray (im Ruhezustand das App-Logo; aktiv: Blau = hört zu, Lila = denkt, Gelb = spricht), zwei konfigurierbare globale Hotkeys (Fenster: `Alt+Space`, Sprachsitzung im Overlay: `Alt+Shift+Space`, beide in den Einstellungen änderbar und einzeln abschaltbar), Autostart, Wake-Word (rustpotter, offline), Audiogeräte-Auswahl (Ein- und Ausgabegerät unabhängig vom Windows-Standard, `audio.rs`), Audio-Ducking (WASAPI), Sandbox-Dateizugriff, lesende Systemsicht (Laufwerke, Ordner, Speicherbelegung; `system.rs` enthält bewusst keinen schreibenden Aufruf; die Schreibgrenze bleibt der Sandbox-Ordner), Übernahme von Maus und Tastatur, Tresor (Anmeldeinformations-Manager). Ein Dialog fragt beim Schließen, ob die App in den Hintergrund wechselt (Standard) oder beendet wird.
 - `frontend/src/desktop/` (im Nachbarordner) — der Desktop-Einstieg der
   gemeinsamen Oberfläche: Bootstrap mit Laufzeit-API-Adresse, Splash,
   Einrichtungs-Assistent, Desktop-Einstellungen (Reiter wie im Panel:

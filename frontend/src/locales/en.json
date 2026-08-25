@@ -230,11 +230,11 @@
       "skillsMoved": "Skills no longer live here: a skill applies either to a team or panel-wide, never “to this profile”. You will find your own under",
       "skillsMovedLink": "Teams → Personal",
       "agentNameTitle": "Assistant name",
-      "agentNameDescription": "Give your assistant its own name. Left empty, it is called Singra. The name applies everywhere — in the panel and in the desktop app.",
+      "agentNameDescription": "Give your assistant its own name. Left empty, it is called Singra. The name applies everywhere: in the panel and in the desktop app.",
       "agentNameLabel": "Name",
       "agentNameSaved": "Name saved.",
       "devicesTitle": "Pair devices",
-      "devicesDescription": "The desktop app does not sign in with a password but with a code you create here. It is valid for ten minutes and exactly once. A paired device joins the same conversation as the panel — and the AI can additionally work on your computer there.",
+      "devicesDescription": "The desktop app does not sign in with a password but with a code you create here. It is valid for ten minutes and exactly once. A paired device joins the same conversation as the panel, and the AI can additionally work on your computer there.",
       "devicesApiAddress": "Enter this address in the app",
       "devicesApiAddressHint": "The address of the API, not of the web interface. Enter the web interface and it answers with a web page instead of data.",
       "devicesNameLabel": "Device name",
@@ -243,6 +243,7 @@
       "devicesCodeLabel": "Pairing code",
       "devicesRevoke": "Revoke access",
       "devicesRevoked": "Access revoked.",
+      "deviceRevoked": "Access revoked.",
       "devicesUnnamed": "Unnamed device"
     },
     "memory": {
@@ -732,9 +733,9 @@
     "errors": {
       "codes": {
         "AI_PROVIDER_AUTH_FAILED": "The provider rejected the API key. Check the operator key or your own key in your profile.",
-        "AI_PROVIDER_ENDPOINT_NOT_FOUND": "The provider does not know this address. The base URL ends in /v1 — not /chat/completions.",
+        "AI_PROVIDER_ENDPOINT_NOT_FOUND": "The provider does not know this address. The base URL ends in /v1, not /chat/completions.",
         "AI_PROVIDER_REQUEST_REJECTED": "The provider rejected the request. Usually the model name is wrong.",
-        "AI_PROVIDER_PAYMENT_REQUIRED": "The provider reports an exhausted balance. The key is fine — the account needs funds.",
+        "AI_PROVIDER_PAYMENT_REQUIRED": "The provider reports an exhausted balance. The key is fine, but the account needs funds.",
         "AI_PROVIDER_RATE_LIMITED": "The provider is rate limiting. Try again in a moment.",
         "AI_PROVIDER_UNAVAILABLE": "The provider is unreachable.",
         "AI_PROVIDER_KEY_MISSING": "No API key is configured for this provider.",
@@ -755,9 +756,9 @@
         "AI_APPROVAL_INVALID": "This approval link is no longer valid. Either a decision was already made, or the request has expired.",
         "AI_APPROVAL_FAILED": "The decision could not be applied.",
         "AI_ACTION_ACCESS_REVOKED": "Your permission for this server was revoked. The proposal is still there, but you may no longer run it.",
-        "AI_ACTION_STORE_UNAVAILABLE": "The panel's secure store is currently unreachable. The proposal is still there — try again in a moment.",
+        "AI_ACTION_STORE_UNAVAILABLE": "The panel's secure store is currently unreachable. The proposal is still there; try again in a moment.",
         "AI_ACTION_PAYLOAD_INVALID": "The proposal's data is unusable. Have the proposal created again.",
-        "AI_ACTION_NOT_PROPOSED": "This proposal is no longer awaiting a decision — it was already confirmed, executed or discarded.",
+        "AI_ACTION_NOT_PROPOSED": "This proposal is no longer awaiting a decision: It was already confirmed, executed or discarded.",
         "AI_ACTION_NOT_AUTONOMOUS": "This action is not allowed to run without asking.",
         "AI_ACTION_NOT_CONFIRMED": "The proposal is no longer confirmed. Confirm it again.",
         "AI_ACTION_CONFIRMATION_EXPIRED": "The confirmation has expired. Review the proposal and confirm it again.",
@@ -769,10 +770,11 @@
         "AI_ACTION_TOOL_NOT_ALLOWED": "This tool is not enabled for the AI.",
         "AI_ACTION_BIND_IP_REJECTED": "The requested bind IP cannot be used for this server.",
         "AI_ACTION_BLUEPRINT_REJECTED": "The proposed blueprint was rejected by validation.",
-        "AI_ACTION_HOSTER_REJECTED": "The shop integration rejected the proposal — for example because the slug is already taken or the service user lacks the required permissions.",
+        "AI_ACTION_HOSTER_REJECTED": "The shop integration rejected the proposal (for example because the slug is already taken or permissions are missing).",
         "AI_ACTION_BLUEPRINT_SWITCH_FAILED": "Switching to the other blueprint failed.",
         "AI_ACTION_EXECUTION_FAILED": "The action failed. Details are in the log.",
-        "AI_ACTION_INTERRUPTED": "The panel restarted while the action was running. How far it got is unknown — check on the server before triggering it again."
+        "AI_ACTION_INTERRUPTED": "The panel restarted while the action was running. Progress is uncertain: Check on the server before triggering it again.",
+        "DESKTOP_JOB_NOT_FOUND": "The requested desktop job was not found or has already expired."
       }
     },
     "voice": {
@@ -844,19 +846,20 @@
     "tasks": {
       "toTasks": "Task list",
       "title": "Task list",
-      "subtitle": "Standing orders — they run in the background and never interrupt the chat.",
+      "subtitle": "Standing orders: They run in the background and never interrupt the chat.",
       "emptyTitle": "No tasks yet",
-      "emptyDescription": "Create a task here or ask the AI in the chat — for example “check the logs every morning”. Three inputs are enough: name, instruction, schedule.",
+      "emptyDescription": "Create a task here or ask the AI in the chat (e.g. “check the logs every morning”). Three inputs are enough: name, instruction, schedule.",
       "new": "New task",
       "editTitle": "Edit task",
       "name": "Task name",
       "prompt": "Instruction for the AI",
-      "promptHint": "The name is for you and for sorting — the AI reads the instruction.",
+      "promptHint": "The name is for sorting, the AI reads the instruction.",
       "schedule": "Schedule",
       "planKindDaily": "Daily / weekdays",
       "planKindInterval": "Interval",
       "planKindOnce": "Once",
       "timeOfDay": "Time",
+      "weekdays": "Weekdays",
       "weekdaysHint": "No selection means: every day.",
       "intervalHours": "Every … hours (1–168)",
       "onceAt": "Date and time",
@@ -865,7 +868,7 @@
       "timezoneHint": "IANA name, for example Europe/Berlin. The schedule follows it.",
       "email": "Also send the result by email",
       "act": "May act on its own",
-      "actHint": "Requires autonomous mode to be granted — unchecked, the task only reports.",
+      "actHint": "Requires autonomous mode; unchecked, the task only reports.",
       "create": "Create task",
       "created": "Task created.",
       "saved": "Task saved.",
@@ -3084,12 +3087,14 @@
   "common": {
     "unlimited": "unlimited",
     "save": "Save",
+    "saving": "Saving …",
+    "clipboardError": "Clipboard not available",
     "cancel": "Cancel",
     "delete": "Delete",
     "edit": "Edit",
     "create": "Create",
     "search": "Search",
-    "loading": "Loading...",
+    "loading": "Loading …",
     "error": "Error",
     "success": "Success",
     "close": "Close",
@@ -3583,9 +3588,9 @@
   },
   "privacyPolicy": {
     "title": "Privacy policy",
-    "slogan": "Security requires trust",
-    "intro": "In a digital world where privacy is increasingly lost and every digital interaction can be monitored, Maunting Studios stands for the opposite: protection requires trust. This policy describes transparently and comprehensively all data flows of the Maunting Service Manager and the Desktop App. We never track or surveil anyone covertly: all actions are transparent, auditable, self-hosted, and remain under the complete control of the user.",
-    "callout": "Summary: Maunting Studios – Security requires trust. Complete data sovereignty, no covert tracking, high-risk capabilities (like Computer-Use) are disabled by default, and every AI action remains transparently controllable and switchable.",
+    "slogan": "Protection requires trust",
+    "intro": "In a time of increasing digital surveillance and dwindling privacy, Maunting Studios stands for the counter-model: protection requires trust. This policy describes transparently and comprehensively all data flows of the Maunting Service Manager and the Desktop App. We never track or surveil anyone covertly: all actions are transparent, auditable, self-hosted, and remain under the complete control of the user.",
+    "callout": "Summary: Maunting Studios – Protection requires trust. Complete data sovereignty, no covert tracking: High-risk capabilities (like Computer-Use) are disabled by default, and every AI action remains transparently controllable and switchable.",
     "documentLabel": "MSM privacy",
     "summaryLabel": "Data protection",
     "versionLabel": "Version",
@@ -3643,7 +3648,7 @@
           "credentials": "Personal and central provider API keys are context-bound and encrypted through DIS, then shown only as configuration status or a mask",
           "usage": "Provider, model, token reservation, actual or conservatively estimated usage, and timestamps are stored to enforce quotas; monetary cost is not claimed without an authoritative price source",
           "memory": "Optional memory entries are stored encrypted and cryptographically bound to their scope, and can be reviewed and deleted at any time. There are five scopes: personal entries and personal server-scoped notes are visible to nobody but the user; team entries are visible to every member of that team; a server's own knowledge is visible to everyone allowed to see that server and remains when its author leaves the panel; panel-wide entries are visible to every user of the panel",
-          "memoryConsent": "Personal memory is disabled by default and only becomes active after explicit consent in the chat; consent can be withdrawn at any time and also covers your own server-scoped notes. Shared scopes (team, server, panel-wide) do not depend on that consent but on permissions - they hold operational knowledge, not personal data. Encryption protects the database at rest; the plaintext of remembered entries is transmitted to the chosen model provider with every request",
+          "memoryConsent": "Personal memory is disabled by default and only becomes active after explicit consent in the chat; consent can be withdrawn at any time and also covers your own server-scoped notes. Shared scopes (team, server, panel-wide) do not depend on that consent but on permissions – they hold operational knowledge, not personal data. Encryption protects the database at rest; the plaintext of remembered entries is transmitted to the chosen model provider with every request",
           "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider",
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
           "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat",
@@ -3653,19 +3658,19 @@
       },
       "desktopApp": {
         "heading": "7. The desktop app (Maunting Smart System)",
-        "body": "The Maunting Smart System is an optional Windows app that runs on the user’s computer and works there on behalf of the AI. It is not a second panel but the same account with a computer attached: pairing happens through a code issued by the panel, and without the “AI tools on your own computer” permission it fetches no jobs at all. This section describes what stays on the machine and what leaves it. All outgoing connections go exclusively to the panel address entered during setup — there is no updater, no telemetry and no hard-wired third party.",
+        "body": "The Maunting Smart System is an optional Windows app that runs on the user’s computer and works there on behalf of the AI. It is not a second panel but the same account with a computer attached: pairing happens through a code issued by the panel, and without the “AI tools on your own computer” permission it fetches no jobs at all. This section describes what stays on the machine and what leaves it. All outgoing connections go exclusively to the panel address entered during setup: there is no updater, no telemetry and no hard-wired third party.",
         "items": {
           "computerUse": "Computer-Use & Desktop Control (disabled by default): Computer-Use is completely deactivated upon installation. Only after your explicit activation in the settings and confirmation of the educational dialog can the AI control mouse and keyboard or inspect the screen. With autonomous mode disabled, every single action requires manual on-screen confirmation.",
-          "wakeword": "Wake word (off by default): once enabled, the app continuously reads the microphone and compares what it hears against a reference model — entirely on the machine, with no network connection. Until the word is recognised, not a single audio sample leaves the process, and nothing is recorded. The price of this listening is continuous CPU load (measured at roughly one sixth of a core).",
+          "wakeword": "Wake word (off by default): once enabled, the app continuously reads the microphone and compares what it hears against a reference model, entirely on the machine with no network connection. Until the word is recognised, not a single audio sample leaves the process, and nothing is recorded. Continuous listening creates a measurable CPU load (roughly one sixth of a core).",
           "wakewordAufnahmen": "Calibration voice recordings: to train the model you speak your chosen name several times. These are real voice recordings and are kept indefinitely as WAV files in the local app data directory, together with the reference model derived from them. They are never transmitted. They are removed by “Reset” in the wake word settings or by uninstalling.",
           "sprachsitzung": "Voice session: only after the wake word is recognised (or after the voice shortcut is pressed) does the app open the audio channel to the panel and transmit your utterance. The panel forwards it to the configured model provider for transcription; the spoken reply is additionally produced by a speech provider. From that point the statements in section 6 about external model providers apply.",
-          "bildschirm": "Screenshots: the AI can look at the main screen. The image is downscaled, never written to disk, and transmitted as a tool result to the panel, which stores it encrypted and passes it to the model provider. The provider therefore sees everything visible at that moment — including other windows, messages and open documents. An indicator lights up at the edge of the screen for every capture; it cannot be switched off.",
-          "dateien": "Read access to the computer: the AI can inspect drives, folders and disk space — as far as the signed-in Windows user may do so. Drive details as well as folder and file names with sizes are transmitted. File contents are only read and transmitted from the sandbox folder you select yourself. Whether the Windows system area may be read is configured per account in the panel.",
+          "bildschirm": "Screenshots: the AI can look at the main screen. The image is downscaled, never written to disk, and transmitted as a tool result to the panel, which stores it encrypted and passes it to the model provider. The provider therefore sees everything visible at that moment, including other windows, messages and open documents. An indicator lights up at the edge of the screen for every capture; it cannot be switched off.",
+          "dateien": "Read access to the computer: the AI can inspect drives, folders and disk space, as far as the signed-in Windows user may do so. Drive details as well as folder and file names with sizes are transmitted. File contents are only read and transmitted from the sandbox folder you select yourself. Whether the Windows system area may be read is configured per account in the panel.",
           "schreiben": "Write access: creating and changing files happens exclusively inside the sandbox folder you select. The resolved path is checked so that a link cannot lead out of the folder.",
           "aufraeumen": "Cleaning up outside the sandbox: deleting is possible outside it too. Deleted items go to the recycle bin; permanent deletion only on explicit request. Windows itself, program folders and other user profiles stay locked until you unlock them. The affected file paths, their size and their classification are sent to the panel and the model provider. With autonomous mode off, the app shows you the full list for confirmation first.",
-          "virenscan": "Virus check: on request the app checks a file with the locally installed Microsoft Defender, without changing or removing it. The checked path and, if something is found, an excerpt of the Defender output — which contains file paths and threat names — go to the model provider.",
-          "eingabe": "Mouse and keyboard: the app does not record your input — there is no capture of keystrokes or mouse movement, neither locally nor transmitted. Conversely the AI can take over mouse and keyboard; with autonomous mode off, every takeover must be confirmed on your machine and is time-limited. Text the AI types originates from the model and is contained in the transmitted job.",
-          "lokal": "What is stored locally: a plain-text configuration file (panel address, sandbox path, chosen assistant name, shortcuts, audio device names, wake word sensitivity), the wake word recordings and model — and exactly one entry in the Windows Credential Manager: the operating-system-encrypted refresh token of the paired session. Your password and two-factor code never reach the app; signing in works solely through the pairing code from the panel. Uninstalling removes all of it."
+          "virenscan": "Virus check: on request the app checks a file with the locally installed Microsoft Defender, without changing or removing it. The checked path and, if something is found, an excerpt of the Defender output (which contains file paths and threat names) go to the model provider.",
+          "eingabe": "Mouse and keyboard: the app does not record your input. There is no capture of keystrokes or mouse movement, neither locally nor transmitted. Conversely the AI can take over mouse and keyboard; with autonomous mode off, every takeover must be confirmed on your machine and is time-limited. Text the AI types originates from the model and is contained in the transmitted job.",
+          "lokal": "What is stored locally: a plain-text configuration file (panel address, sandbox path, chosen assistant name, shortcuts, audio device names, wake word sensitivity), the wake word recordings and model, and exactly one entry in the Windows Credential Manager: the operating-system-encrypted refresh token of the paired session. Your password and two-factor code never reach the app; signing in works solely through the pairing code from the panel. Uninstalling removes all of it."
         }
       },
       "storage": {
@@ -3692,13 +3697,13 @@
       },
       "hoster": {
         "heading": "Hoster and shop integration",
-        "body": "If the operator has connected an external shop, MSM only manages the technical access and the server — not the purchase, the payment or the invoice.",
+        "body": "If the operator has connected an external shop, MSM only manages the technical access and the server, not the purchase, the payment or the invoice.",
         "items": {
           "identity": "Customer mapping: the shop's customer identifier is stored only as a non-reversible hash, together with a four-character hint for support. An email address is adopted only if it is still unused in the panel.",
           "contract": "Contract data: external service identifier, desired state, reached status, assigned server and timestamps. Payment, invoice and address data are neither transferred nor stored.",
           "noPassword": "Shop passwords are neither adopted nor synchronised. The customer gets their own panel access without a second password.",
           "handoff": "A forwarding link from the shop is valid for five minutes and exactly once. Only its hash is stored; the link itself appears neither in the audit trail nor in logs.",
-          "webhook": "Status notifications to the shop contain only the contract identifier, state and timestamp — no server addresses, ports, paths or credentials."
+          "webhook": "Status notifications to the shop contain only the contract identifier, state and timestamp, no server addresses, ports, paths or credentials."
         }
       },
       "credentials": {
@@ -3706,7 +3711,7 @@
         "body": "You can store your own Steam accounts or GitHub tokens so that your servers do not have to use the operator's central access.",
         "items": {
           "storage": "Storage: the value is stored encrypted only and bound to exactly this entry. There is no way to read it back in plaintext, neither in the panel nor through the API.",
-          "visibility": "Visibility: only the name you chose, the username and the last four characters are shown. Other users cannot see your entries — not even with server permissions.",
+          "visibility": "Visibility: only the name you chose, the username and the last four characters are shown. Other users cannot see your entries, even with server permissions.",
           "usage": "Use: the plaintext is only handed to the executing operation (SteamCMD login, git fetch) and appears neither in logs nor in error messages.",
           "deletion": "Deletion: you can remove any entry at any time once no server uses it. Deleting your account removes all entries with it."
         }
