@@ -571,21 +571,21 @@ mod tests {
         pfad
     }
 
-    fn baum() -> PathBuf {
-        let pfad = std::env::temp_dir().join(format!("mss-system-test-{}", std::process::id()));
+    fn baum(name: &str) -> PathBuf {
+        let pfad = std::env::temp_dir().join(format!("mss-system-test-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&pfad);
         fs::create_dir_all(pfad.join("gross")).unwrap();
         fs::create_dir_all(pfad.join("klein")).unwrap();
-        fs::write(pfad.join("gross/riese.bin"), vec![0u8; 4096]).unwrap();
-        fs::write(pfad.join("gross/mittel.bin"), vec![0u8; 1024]).unwrap();
-        fs::write(pfad.join("klein/zwerg.txt"), b"winzig").unwrap();
+        fs::write(pfad.join("gross").join("riese.bin"), vec![0u8; 4096]).unwrap();
+        fs::write(pfad.join("gross").join("mittel.bin"), vec![0u8; 1024]).unwrap();
+        fs::write(pfad.join("klein").join("zwerg.txt"), b"winzig").unwrap();
         fs::write(pfad.join("wurzel.txt"), b"direkt hier").unwrap();
         pfad
     }
 
     #[test]
     fn die_groessenanalyse_findet_die_platzfresser() {
-        let wurzel = baum();
+        let wurzel = baum("groesse");
         let ergebnis = groesste(&wurzel.to_string_lossy(), false).unwrap();
 
         // Der groesste Unterordner steht vorn, die groesste Datei auch.
@@ -609,7 +609,7 @@ mod tests {
 
     #[test]
     fn die_auflistung_nennt_ordner_zuerst() {
-        let wurzel = baum();
+        let wurzel = baum("auflistung");
         let ergebnis = verzeichnis(&wurzel.to_string_lossy()).unwrap();
         let namen: Vec<&str> = ergebnis["eintraege"]
             .as_array()

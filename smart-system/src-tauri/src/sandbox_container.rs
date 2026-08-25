@@ -58,9 +58,26 @@ pub fn windows_sandbox_exe() -> Option<PathBuf> {
     }
 }
 
-/// Prueft, ob Windows Sandbox auf diesem System verfuegbar ist.
+/// Prueft, ob CPU-Virtualisierung im BIOS/UEFI aktiviert ist (PF_VIRT_FIRMWARE_ENABLED = 21).
+#[cfg(windows)]
+pub fn cpu_virtualisierung_aktiv() -> bool {
+    extern "system" {
+        fn IsProcessorFeaturePresent(ProcessorFeature: u32) -> i32;
+    }
+    const PF_VIRT_FIRMWARE_ENABLED: u32 = 21;
+    unsafe { IsProcessorFeaturePresent(PF_VIRT_FIRMWARE_ENABLED) != 0 }
+}
+
+#[cfg(not(windows))]
+pub fn cpu_virtualisierung_aktiv() -> bool {
+    false
+}
+
+/// Prueft, ob Windows Sandbox auf diesem System verfuegbar und einsatzbereit ist:
+/// 1. WindowsSandbox.exe existiert in System32 (Windows Pro/Enterprise mit aktiviertem Feature).
+/// 2. CPU-Virtualisierung (VT-x / AMD-V) ist im BIOS/UEFI aktiv.
 pub fn ist_verfuegbar() -> bool {
-    windows_sandbox_exe().is_some()
+    windows_sandbox_exe().is_some() && cpu_virtualisierung_aktiv()
 }
 
 /// Erzeugt den Inhalt einer isolierten .wsb-Konfigurationsdatei.

@@ -232,8 +232,8 @@ export function AiActionProposalCard({
     const accepted = await confirm({
       title: t(`ai.actions.tools.${proposal.tool_name}`, proposal.tool_name),
       message,
-      confirmLabel: t('ai.actions.execute', 'Ausführen'),
-      variant: UNUMKEHRBAR.includes(proposal.tool_name) ? 'danger' : 'warning',
+      confirmText: t('ai.actions.execute', 'Ausführen'),
+      danger: UNUMKEHRBAR.includes(proposal.tool_name),
     })
     if (!accepted) return
     setBusy(true)

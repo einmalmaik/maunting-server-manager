@@ -47,6 +47,9 @@ const KONFIG = {
   audio_autogain: true,
   audio_verstaerkung: 1,
   computer_use_aktiv: false,
+  artifact_install_aktiv: false,
+  max_download_bytes: 524288000,
+  search_roots: [],
 }
 
 function json(status: number, koerper: unknown): Response {
