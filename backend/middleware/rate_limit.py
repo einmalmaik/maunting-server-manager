@@ -5,6 +5,7 @@ Das Default-Limit pro IP kommt dynamisch aus panel_settings
 liegen separat in main.auth_rate_limit. Enrollment- und Webhook-Limits
 bleiben fest in den jeweiligen Routern.
 """
+from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -24,3 +25,29 @@ limiter = Limiter(
     in_memory_fallback_enabled=True,
     key_style="endpoint",
 )
+
+
+def auth_rate_limit(request: Request) -> None:
+    """Strenges Rate-Limit für Login/2FA/Passwort-Reset/Setup pro IP.
+
+    Liest rate_limit_auth aus den Panel-Settings (3–50, Default 10).
+    Bei ungültigen/fehlenden Werten fail-closed auf Default — nie unlimitiert.
+    """
+    from limits import parse
+    from fastapi import HTTPException
+    from services.rate_limit_settings import current_auth_limit_from_settings
+
+    key = get_remote_address(request)
+    try:
+        per_minute = current_auth_limit_from_settings()
+    except Exception:
+        # DB/Cache-Fehler dürfen Auth nie ungeschützt lassen
+        per_minute = 10
+    limit_item = parse(f"{per_minute}/minute")
+    if not limiter.limiter.hit(limit_item, key):
+        raise HTTPException(
+            status_code=429,
+            detail="Zu viele Anfragen. Bitte warten Sie einen Moment.",
+            headers={"Retry-After": "60"},
+        )
+

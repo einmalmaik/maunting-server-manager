@@ -47,6 +47,36 @@ export function AiDevicePairingCard() {
 
   useEffect(laden, [])
 
+  useEffect(() => {
+    if (!code) return
+    let aktiv = true
+    const interval = setInterval(async () => {
+      try {
+        const res = await api<{ exists: boolean; redeemed: boolean; expired: boolean; label?: string }>(
+          `/auth/devices/pairing/${encodeURIComponent(code)}/status`,
+        )
+        if (!aktiv) return
+        if (res.redeemed) {
+          toast.success(t('ai.profile.devicePairSuccess', 'Gerät erfolgreich gekoppelt!'))
+          setCode(null)
+          setQrDataUri(null)
+          laden()
+        } else if (res.expired) {
+          toast.error(t('ai.profile.devicePairExpired', 'Kopplungscode abgelaufen.'))
+          setCode(null)
+          setQrDataUri(null)
+        }
+      } catch {
+        // Hintergrund-Prüfung tolerant halten
+      }
+    }, 2000)
+
+    return () => {
+      aktiv = false
+      clearInterval(interval)
+    }
+  }, [code])
+
   const koppeln = async () => {
     setBusy(true)
     try {

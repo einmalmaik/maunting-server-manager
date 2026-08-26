@@ -2,10 +2,11 @@ from datetime import datetime, timedelta, timezone
 import uuid
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from config import settings
+from middleware.rate_limit import auth_rate_limit
 # Nur noch das Loeschen der Cookies passiert hier direkt. Das Setzen laeuft
 # ausnahmslos ueber `issue_session`, damit kein Ausstellungsort die dort
 # zugesicherte `jti` erneut vergessen kann.
@@ -134,7 +135,7 @@ def setup_status(db: Session = Depends(get_db)) -> dict:
     }
 
 
-@router.post("/setup", status_code=201)
+@router.post("/setup", status_code=201, dependencies=[Depends(auth_rate_limit)])
 async def setup_owner(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> dict:
     if AuthService.is_owner_exists(db):
         raise HTTPException(status_code=400, detail="Setup bereits abgeschlossen")
@@ -178,7 +179,7 @@ async def setup_owner(req: OwnerSetupRequest, db: Session = Depends(get_db)) -> 
     return {"message": "Verifikations-Code gesendet", "requires_verification": True}
 
 
-@router.post("/setup-verify")
+@router.post("/setup-verify", dependencies=[Depends(auth_rate_limit)])
 def setup_verify(req: SetupVerifyRequest, db: Session = Depends(get_db)) -> dict:
     user = AuthService.get_user_by_email(db, req.email)
     if not user:
@@ -195,7 +196,7 @@ def setup_verify(req: SetupVerifyRequest, db: Session = Depends(get_db)) -> dict
     return {"message": "E-Mail verifiziert", "setup_completed": True}
 
 
-@router.post("/setup-resend")
+@router.post("/setup-resend", dependencies=[Depends(auth_rate_limit)])
 async def setup_resend(req: ResendVerificationRequest, db: Session = Depends(get_db)) -> dict:
     user = AuthService.get_user_by_email(db, req.email)
     if not user or user.email_verified:
@@ -214,7 +215,7 @@ async def setup_resend(req: ResendVerificationRequest, db: Session = Depends(get
     return {"message": "Code erneut gesendet"}
 
 
-@router.post("/resend-verification")
+@router.post("/resend-verification", dependencies=[Depends(auth_rate_limit)])
 async def resend_verification(req: ResendVerificationRequest, db: Session = Depends(get_db)) -> dict:
     """Neuen Verifizierungscode für einen unverifizierten User senden."""
     user = AuthService.get_user_by_email(db, req.email)
@@ -234,7 +235,7 @@ async def resend_verification(req: ResendVerificationRequest, db: Session = Depe
     return {"message": "Code erneut gesendet"}
 
 
-@router.post("/register", response_model=RegistrationResponse, status_code=201)
+@router.post("/register", response_model=RegistrationResponse, status_code=201, dependencies=[Depends(auth_rate_limit)])
 async def register(
     req: UserCreate,
     request: Request,
@@ -264,10 +265,11 @@ async def register(
     return {"email": user.email, "requires_verification": True}
 
 
-@router.post("/register-verify", response_model=TokenResponse)
+@router.post("/register-verify", response_model=TokenResponse, dependencies=[Depends(auth_rate_limit)])
 async def register_verify(
     req: SetupVerifyRequest,
     response: Response,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
     user = AuthService.get_user_by_email(db, req.email)
@@ -284,16 +286,20 @@ async def register_verify(
     db.commit()
     tokens = _set_login_session(response, db, user)
 
-    # Email-Benachrichtigung für erfolgreiche Registrierung (normaler Flow)
-    if EmailService.is_configured() and user.email_notifications:
-        await EmailService.send_account_registered_notification(user.email, user.username)
+    # Email-Benachrichtigung für erfolgreiche Registrierung (asynchron im Hintergrund)
+    if EmailService.is_configured() and user.email_notifications and user.email:
+        background_tasks.add_task(
+            EmailService.send_account_registered_notification,
+            user.email,
+            user.username,
+        )
 
     if req.native_client:
         return _native_token_body(tokens)
     return {"access_token": "", "token_type": "bearer", "requires_2fa": False, "requires_verification": False}
 
 
-@router.post("/login-verify", response_model=TokenResponse)
+@router.post("/login-verify", response_model=TokenResponse, dependencies=[Depends(auth_rate_limit)])
 def login_verify(
     req: LoginVerifyRequest,
     response: Response,
@@ -334,11 +340,12 @@ def login_verify(
     return {"access_token": "", "token_type": "bearer", "requires_2fa": False, "requires_verification": False}
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=TokenResponse, dependencies=[Depends(auth_rate_limit)])
 async def login(
     req: LoginRequest,
     response: Response,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> dict:
     await CaptchaService.verify_token(req.captcha_token, client_ip=request.client.host if request.client else None)
@@ -373,26 +380,17 @@ async def login(
 
     tokens = _set_login_session(response, db, user)
 
-    # Sicherheitsbenachrichtigung bei Login
-    if EmailService.is_configured() and user.email_notifications:
-        try:
-            email = user.email
-            if email:
-                client_ip = request.client.host if request.client else "unbekannt"
-                user_agent = request.headers.get("user-agent", "unbekannt")
-                await EmailService.send_new_device_login_notification(
-                    email, user.username, client_ip, user_agent
-                )
-        except Exception as exc:
-            # Eine optionale Benachrichtigung darf eine bereits erfolgreich
-            # authentifizierte Session nicht in einen HTTP 500 verwandeln.
-            # Keine Exception-Details loggen: SMTP-/DIS-Fehler koennen
-            # sensible Infrastrukturinformationen enthalten.
-            logger.warning(
-                "Login-Benachrichtigung fehlgeschlagen user_id=%s error_type=%s",
-                user.id,
-                type(exc).__name__,
-            )
+    # Sicherheitsbenachrichtigung bei Login (asynchron im Hintergrund, blockiert Login-Antwort nicht)
+    if EmailService.is_configured() and user.email_notifications and user.email:
+        client_ip = request.client.host if request.client else "unbekannt"
+        user_agent = request.headers.get("user-agent", "unbekannt")
+        background_tasks.add_task(
+            EmailService.send_new_device_login_notification,
+            user.email,
+            user.username,
+            client_ip,
+            user_agent,
+        )
 
     if req.native_client:
         return _native_token_body(tokens)
@@ -408,9 +406,8 @@ async def login(
 # Statt die Anmeldestrecke im Desktop-Fenster nachzubauen, laedt der bereits
 # angemeldete Mensch sein Geraet ein.
 #
-# Alle vier Routen liegen bewusst in diesem Router: `main.py` haengt ihn unter
-# `auth_rate_limit`, und das gilt damit auch fuer das Einloesen — die eine
-# Stelle, an der jemand raten koennte.
+# `/devices/redeem` haengt unter `auth_rate_limit`, um Brute-Force-Versuche
+# auf Kopplungscodes zu verhindern.
 
 
 @router.post("/devices/pairing", response_model=PairingCreated)
@@ -434,7 +431,17 @@ def create_device_pairing(
     }
 
 
-@router.post("/devices/redeem", response_model=TokenResponse)
+@router.get("/devices/pairing/{code}/status")
+def get_device_pairing_status(
+    code: str,
+    user: User = Depends(require_global("ai.chat.use")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Prueft den Einloesestatus eines erzeugten Kopplungscodes fuer das Panel."""
+    return device_pairing_service.status(db, user, code)
+
+
+@router.post("/devices/redeem", response_model=TokenResponse, dependencies=[Depends(auth_rate_limit)])
 def redeem_device_pairing(
     req: PairingRedeemRequest,
     response: Response,
@@ -755,7 +762,7 @@ async def change_email(
     return {"message": "E-Mail geändert. Bitte neue E-Mail verifizieren."}
 
 
-@router.post("/forgot-password")
+@router.post("/forgot-password", dependencies=[Depends(auth_rate_limit)])
 async def forgot_password(
     req: PasswordResetRequest,
     request: Request,
@@ -770,7 +777,7 @@ async def forgot_password(
     return {"message": "Falls die E-Mail existiert, wurde eine Nachricht gesendet"}
 
 
-@router.post("/reset-password")
+@router.post("/reset-password", dependencies=[Depends(auth_rate_limit)])
 async def reset_password(
     req: PasswordResetConfirm,
     request: Request,

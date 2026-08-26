@@ -281,6 +281,8 @@
       "devicesRevoke": "Revoke access",
       "devicesRevoked": "Access revoked.",
       "deviceRevoked": "Access revoked.",
+      "devicePairSuccess": "Device successfully paired!",
+      "devicePairExpired": "Pairing code has expired.",
       "devicesUnnamed": "Unnamed device"
     },
     "memory": {

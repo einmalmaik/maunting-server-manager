@@ -306,3 +306,38 @@ class TestHerkunftAmToken:
         # Alles Unklare faellt auf die engere Seite.
         assert session_herkunft(_Anfrage(None)) == "panel"
         assert session_herkunft(_Anfrage("kaputt")) == "panel"
+
+
+class TestPairingStatus:
+    def test_status_vor_und_nach_dem_einloesen(
+        self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
+    ):
+        _mit_chatrecht(db, regular_user)
+        daten = _code_erzeugen(client, user_cookies)
+        code = daten["code"]
+
+        # 1. Vor dem Einlösen: exists=True, redeemed=False
+        st1 = client.get(
+            f"/api/auth/devices/pairing/{code}/status",
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        assert st1.status_code == 200
+        assert st1.json()["exists"] is True
+        assert st1.json()["redeemed"] is False
+        assert st1.json()["expired"] is False
+
+        # 2. Einlösen vom Gerät
+        redeem_res = client.post("/api/auth/devices/redeem", json={"code": code})
+        assert redeem_res.status_code == 200
+
+        # 3. Nach dem Einlösen: exists=True, redeemed=True
+        st2 = client.get(
+            f"/api/auth/devices/pairing/{code}/status",
+            cookies=user_cookies,
+            headers=_kopf(user_cookies),
+        )
+        assert st2.status_code == 200
+        assert st2.json()["exists"] is True
+        assert st2.json()["redeemed"] is True
+

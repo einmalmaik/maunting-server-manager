@@ -281,6 +281,8 @@
       "devicesRevoke": "Zugang entziehen",
       "devicesRevoked": "Zugang entzogen.",
       "deviceRevoked": "Zugang entzogen.",
+      "devicePairSuccess": "Gerät erfolgreich gekoppelt!",
+      "devicePairExpired": "Kopplungscode abgelaufen.",
       "devicesUnnamed": "Unbenanntes Gerät"
     },
     "memory": {

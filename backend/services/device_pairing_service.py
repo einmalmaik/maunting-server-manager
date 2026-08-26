@@ -164,3 +164,27 @@ def vergessen(db: Session, user: User, family: str) -> DevicePairing | None:
     db.delete(einladung)
     db.commit()
     return einladung
+
+
+def status(db: Session, user: User, code: str) -> dict:
+    """Prueft den Status eines erzeugten Kopplungscodes fuer den Ersteller."""
+    einladung = (
+        db.query(DevicePairing)
+        .filter(
+            DevicePairing.user_id == user.id,
+            DevicePairing.code_hash == _hash(normalisieren(code)),
+        )
+        .first()
+    )
+    if einladung is None:
+        return {"exists": False, "redeemed": False, "expired": True}
+    is_redeemed = einladung.redeemed_at is not None
+    is_expired = einladung.expires_at <= _jetzt(einladung.expires_at)
+    return {
+        "exists": True,
+        "redeemed": is_redeemed,
+        "expired": is_expired and not is_redeemed,
+        "label": einladung.label,
+        "family": einladung.family,
+    }
+
