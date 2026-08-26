@@ -41,6 +41,8 @@ export interface GespeicherteDenkwahl {
   stufe: string | null
 }
 
+export type Denkwahl = GespeicherteDenkwahl
+
 /**
  * Liest die gemerkte Denkwahl. Alles Unerwartete gilt als „nichts gemerkt":
  * der Aufrufer faellt dann auf den Vorschlag des Modells zurueck, und niemand

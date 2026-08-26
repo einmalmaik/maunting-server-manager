@@ -20,11 +20,12 @@ import { useTranslation } from 'react-i18next'
 
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
+import { MobileAiControls } from '@/components/ai/MobileAiControls'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PromptDialog } from '@/components/ui/PromptDialog'
 import { ToastContainer } from '@/components/ui/ToastContainer'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
-import { Button } from '@/Singra/UI'
+import { BenachrichtigungsGlocke, Button } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Ai } from '@/pages/Ai'
 import { Calendar } from '@/pages/Calendar'
@@ -225,7 +226,7 @@ export function DesktopApp() {
   return (
     <MemoryRouter initialEntries={['/ai']}>
       <NavigationEmpfaenger />
-      <div className="relative h-[100dvh] max-h-[100dvh] w-full overflow-hidden bg-background text-on-surface pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] flex flex-col">
+      <div className="relative h-[100dvh] max-h-[100dvh] w-full overflow-hidden bg-background text-on-surface pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] flex flex-col">
         <div className="msm-deep-grid pointer-events-none absolute inset-0 opacity-30" />
         <div className="relative z-10 flex h-full max-h-full min-h-0 flex-1 flex-col overflow-hidden">{inhalt}</div>
 
@@ -468,7 +469,7 @@ function Hauptseite({
 
   return (
     <>
-      <header className="msm-topbar flex h-14 sm:h-16 items-center justify-between px-3 sm:px-4 md:px-6">
+      <header className="msm-topbar flex pt-[env(safe-area-inset-top,0px)] h-[calc(3.5rem+env(safe-area-inset-top,0px))] sm:h-[calc(4rem+env(safe-area-inset-top,0px))] items-center justify-between px-3 sm:px-4 md:px-6">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <div className="min-w-0">
             <h1 className="truncate font-headline text-base sm:text-title-lg font-bold text-on-surface">{agentName}</h1>
@@ -510,18 +511,29 @@ function Hauptseite({
             onClick={() => navigate('/einstellungen')}
             label={t('mss.app.einstellungen')}
           />
-          <Button variant="secondary" size="sm" onClick={() => void abmelden()}>
-            {t('mss.app.abmelden')}
-          </Button>
         </nav>
 
-        {/* Mobile Navigation Trigger */}
-        <div className="flex md:hidden items-center gap-1">
+        <div className="flex items-center gap-1 sm:gap-2">
+          <BenachrichtigungsGlocke />
+          <div className="hidden md:block">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => void abmelden()}
+              aria-label={t('mss.app.abmelden')}
+              className="text-on-surface-variant hover:text-status-error"
+            >
+              <LogOut className="h-4 w-4 mr-1.5" aria-hidden="true" />
+              {t('mss.app.abmelden')}
+            </Button>
+          </div>
+
           <button
             type="button"
             onClick={() => setMobileMenuOffen(!mobileMenuOffen)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-outline-variant/50 bg-surface-container-high/60 text-on-surface hover:bg-surface-container-highest transition-colors"
-            aria-label="Navigation öffnen"
+            className="p-2 rounded-xl border border-outline-variant/40 bg-surface-container-low text-on-surface hover:bg-surface-container md:hidden transition-colors"
+            aria-label={t('mss.app.menueOeffnen')}
             aria-expanded={mobileMenuOffen}
           >
             {mobileMenuOffen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -533,7 +545,7 @@ function Hauptseite({
       {mobileMenuOffen && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end bg-background/80 backdrop-blur-sm md:hidden animate-fade-in">
           <div className="fixed inset-0" onClick={() => setMobileMenuOffen(false)} />
-          <div className="relative z-10 w-full rounded-t-2xl border-t border-outline-variant/50 bg-surface-container-low p-4 pb-8 shadow-2xl space-y-2">
+          <div className="relative z-10 w-full max-h-[85vh] overflow-y-auto rounded-t-2xl border-t border-outline-variant/50 bg-surface-container-low p-4 pb-8 shadow-2xl space-y-3">
             <div className="flex items-center justify-between pb-3 border-b border-outline-variant/40">
               <div className="min-w-0">
                 <span className="font-headline font-semibold text-sm text-on-surface">{agentName}</span>
@@ -604,18 +616,24 @@ function Hauptseite({
                 <SettingsIcon className="h-4 w-4" />
                 <span>{t('mss.app.einstellungen')}</span>
               </button>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => { setMobileMenuOffen(false); void abmelden(); }}
-                  className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium text-status-error hover:bg-status-error/10 transition-colors"
-                >
-                  <LogOut className="h-4 w-4" />
-                  <span>{t('mss.app.abmelden')}</span>
-                </button>
-              </div>
             </nav>
+
+            {bereich === 'ki' && darfChatten && (
+              <div className="pt-2 border-t border-outline-variant/40">
+                <MobileAiControls onActionDone={() => setMobileMenuOffen(false)} />
+              </div>
+            )}
+
+            <div className="pt-2 border-t border-outline-variant/40">
+              <button
+                type="button"
+                onClick={() => { setMobileMenuOffen(false); void abmelden(); }}
+                className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium text-status-error hover:bg-status-error/10 transition-colors"
+              >
+                <LogOut className="h-4 w-4" />
+                <span>{t('mss.app.abmelden')}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

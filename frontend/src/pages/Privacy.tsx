@@ -101,6 +101,7 @@ export function Privacy() {
           t('privacyPolicy.sections.desktopApp.items.wakeword'),
           t('privacyPolicy.sections.desktopApp.items.wakewordAufnahmen'),
           t('privacyPolicy.sections.desktopApp.items.sprachsitzung'),
+          t('privacyPolicy.sections.desktopApp.items.benachrichtigungen'),
           t('privacyPolicy.sections.desktopApp.items.bildschirm'),
           t('privacyPolicy.sections.desktopApp.items.dateien'),
           t('privacyPolicy.sections.desktopApp.items.schreiben'),

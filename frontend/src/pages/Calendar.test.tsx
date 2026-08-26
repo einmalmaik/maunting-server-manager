@@ -16,13 +16,16 @@ describe('Calendar Page Component', () => {
   })
 
   it('renders calendar header, month view and action buttons', async () => {
-    vi.mocked(client.api).mockResolvedValueOnce([
+    const now = new Date()
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0).toISOString()
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 0, 0).toISOString()
+    vi.mocked(client.api).mockResolvedValue([
       {
         id: 1,
         event_id: 'evt-test-1',
         title: 'Team Meeting Test',
-        start: new Date().toISOString(),
-        end: new Date(Date.now() + 3600000).toISOString(),
+        start,
+        end,
         description: 'Test agenda',
         location: 'Office',
         color: 'primary',
@@ -82,4 +85,30 @@ describe('Calendar Page Component', () => {
     expect(screen.getByPlaceholderText('z. B. Team-Meeting, Wartung Server 1')).toBeInTheDocument()
     expect(screen.getByText('Speichern')).toBeInTheDocument()
   })
+
+  it('triggers test-reminder API when clicking Push testen button', async () => {
+    vi.mocked(client.api).mockResolvedValueOnce([]) // fetchEvents
+    vi.mocked(client.api).mockResolvedValueOnce({
+      status: 'success',
+      email_sent: true,
+      device_notifications_enabled: true,
+      title: 'Test-Termin: Server-Wartung & Backup-Check',
+      start: '27.08.2026 um 14:00 Uhr',
+      time_hint: 'in 1 Tag',
+    })
+
+    render(
+      <MemoryRouter>
+        <Calendar />
+      </MemoryRouter>,
+    )
+
+    const testBtn = screen.getByRole('button', { name: /Push testen/i })
+    fireEvent.click(testBtn)
+
+    await waitFor(() => {
+      expect(client.api).toHaveBeenCalledWith('/calendar/test-reminder', { method: 'POST' })
+    })
+  })
 })
+

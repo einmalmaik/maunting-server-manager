@@ -38,13 +38,10 @@ export function SprachAnsicht({
     useSprachsitzung(providerId)
   const [einstellungenOffen, setEinstellungenOffen] = useState(false)
   const kasten = useRef<HTMLDivElement>(null)
-  const gestartet = useRef(false)
 
   // Wer in den Sprachmodus wechselt, will sprechen. Ein zweiter Klick auf
   // „jetzt aber wirklich" wäre eine Tür hinter der Tür.
   useEffect(() => {
-    if (gestartet.current) return
-    gestartet.current = true
     void starten()
   }, [starten])
 

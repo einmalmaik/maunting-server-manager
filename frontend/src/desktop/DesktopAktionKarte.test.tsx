@@ -60,7 +60,7 @@ describe('DesktopAktionKarte', () => {
       screen.getByText('Die KI möchte ein Bild deines Hauptbildschirms aufnehmen.'),
     ).toBeInTheDocument()
 
-    const jaBtn = screen.getByRole('button', { name: /mss\.aktion\.bestaetigen|Ja, ausführen/i })
+    const jaBtn = screen.getByRole('button', { name: /(mss\.aktion\.bestaetigen|Ja, ausführen|Yes, execute)/i })
     fireEvent.click(jaBtn)
 
     await waitFor(() => expect(bestaetigenMock).toHaveBeenCalledWith('job-screen-123'))
@@ -85,7 +85,7 @@ describe('DesktopAktionKarte', () => {
       },
     })
 
-    const neinBtn = await screen.findByRole('button', { name: /mss\.aktion\.ablehnen|Nein, ablehnen/i })
+    const neinBtn = await screen.findByRole('button', { name: /(mss\.aktion\.ablehnen|Nein, ablehnen|No, reject)/i })
     fireEvent.click(neinBtn)
 
     await waitFor(() => expect(ablehnenMock).toHaveBeenCalledWith('job-app-456'))

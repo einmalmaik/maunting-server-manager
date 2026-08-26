@@ -99,3 +99,14 @@ def test_calendar_disabled_returns_403(override_deps):
         assert res.status_code == 403
     finally:
         PanelSettingsService.set("calendar_enabled", "true")
+
+
+def test_calendar_test_reminder_endpoint(override_deps):
+    client = TestClient(app)
+    res = client.post("/api/calendar/test-reminder")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert "Test-Termin" in data["title"]
+    assert data["time_hint"] == "in 1 Tag"
+

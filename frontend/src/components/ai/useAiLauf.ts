@@ -16,6 +16,7 @@ import {
 } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
 
 /** Ein Eintrag im sichtbaren Verlauf — chronologisch, nicht nach Typ sortiert. */
 export type Entry =
@@ -351,9 +352,26 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
         // Die Frage gehört an die Antwort, nicht neben sie. Als eigener
         // Eintrag stand sie früher VOR der noch leeren Assistentenblase,
         // unter der dann "Keine Antwort erhalten" erschien.
-        aendere(aktuell!, (message) => ({ ...message, question: data }))
+        aendere(aktuell!, (message) => {
+          if (typeof document !== 'undefined' && document.hidden) {
+            void sendeGeraeteBenachrichtigung({
+              titel: 'Singra',
+              text: data?.question || 'Rückfrage der KI',
+            })
+          }
+          return { ...message, question: data }
+        })
       } else if (name === 'done') {
-        aendere(aktuell!, (message) => ({ ...message, status: 'complete' }))
+        aendere(aktuell!, (message) => {
+          if (typeof document !== 'undefined' && document.hidden) {
+            const vorschau = (message.content || 'Antwort bereit').slice(0, 160)
+            void sendeGeraeteBenachrichtigung({
+              titel: 'Singra',
+              text: vorschau,
+            })
+          }
+          return { ...message, status: 'complete' }
+        })
         // Der Zug ist durch: Frage, Antwort und alles Gelesene stehen jetzt im
         // Kontext. Genau hier hat sich der Füllstand geändert.
         void ladeKontext()

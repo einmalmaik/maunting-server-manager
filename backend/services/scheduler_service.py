@@ -67,6 +67,7 @@ def start_scheduler():
     _ensure_background_update_check_job()
     _ensure_git_update_check_job()
     _ensure_node_heartbeat_job()
+    _ensure_calendar_reminder_job()
 
 
 def _utcnow() -> datetime:
@@ -1169,6 +1170,36 @@ def _ensure_hoster_maintenance_job() -> None:
     )
 
 
+async def _calendar_reminder_task() -> None:
+    """Regelmäßiger Hintergrund-Task zur Prüfung und Versendung fälliger Kalender-Erinnerungen."""
+    from services.calendar_service import CalendarService
+    db = SessionLocal()
+    try:
+        await CalendarService.check_and_send_due_reminders(db)
+    except Exception as e:
+        logger.error("Fehler beim Ausführen der Kalender-Erinnerungsprüfung: %s", e)
+    finally:
+        db.close()
+
+
+def _ensure_calendar_reminder_job() -> None:
+    scheduler = get_scheduler()
+    job_id = "global_calendar_reminders"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler.add_job(
+        func=_calendar_reminder_task,
+        trigger=IntervalTrigger(minutes=15),
+        id=job_id,
+        name="Kalender Erinnerungen (48h / 24h vorab)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+
 def init_server_schedules(db):
     """Initialize schedules for all servers on startup."""
     from models import Server
@@ -1181,6 +1212,7 @@ def init_server_schedules(db):
     _ensure_ai_guardian_job()
     _ensure_ai_tasks_job()
     _ensure_hoster_maintenance_job()
+    _ensure_calendar_reminder_job()
 
     servers = db.query(Server).all()
     for server in servers:

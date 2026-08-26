@@ -14,6 +14,9 @@ interface ToastState {
 }
 
 let _nextId = 0
+export const MAX_TOASTS = 5
+export const AUTO_DISMISS_SUCCESS_MS = 5000
+export const AUTO_DISMISS_ERROR_MS = 20000
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
@@ -22,12 +25,16 @@ export const useToastStore = create<ToastState>((set, get) => ({
     // Sekundentakt oder eine doppelt gemeldete 429-Sperre identische Toasts auf.
     if (get().toasts.some((t) => t.message === message && t.type === type)) return
     const id = ++_nextId
-    set((s) => ({ toasts: [...s.toasts, { id, message, type }] }))
-    if (type === 'success') {
-      setTimeout(() => {
-        set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
-      }, 5000)
-    }
+    set((s) => {
+      // Maximal 5 Toasts gleichzeitig im Stapel behalten, um Überflutung zu verhindern.
+      const base = s.toasts.length >= MAX_TOASTS ? s.toasts.slice(s.toasts.length - (MAX_TOASTS - 1)) : s.toasts
+      return { toasts: [...base, { id, message, type }] }
+    })
+
+    const timeout = type === 'success' ? AUTO_DISMISS_SUCCESS_MS : AUTO_DISMISS_ERROR_MS
+    setTimeout(() => {
+      set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
+    }, timeout)
   },
   removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 

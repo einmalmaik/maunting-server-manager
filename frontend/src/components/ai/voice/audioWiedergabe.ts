@@ -158,7 +158,14 @@ export class Wiedergabe {
    */
   private hole(): AudioContext {
     if (this.kontext === null) {
-      this.kontext = new AudioContext({ sampleRate: ABTASTRATE })
+      try {
+        this.kontext = new AudioContext({ sampleRate: ABTASTRATE })
+      } catch {
+        this.kontext = new AudioContext()
+      }
+      if (this.kontext.state === 'suspended') {
+        void this.kontext.resume().catch(() => undefined)
+      }
       // Das Wunschgerät der Desktop-App — im Panel ein No-Op (`null`).
       // `setSinkId` gibt es erst seit Chromium 110; wo es fehlt oder das
       // Gerät weg ist, bleibt der Systemstandard — Ton geht vor Gerätetreue.

@@ -16,7 +16,7 @@ import remarkGfm from 'remark-gfm'
  */
 export const AiMarkdown = memo(function AiMarkdown({ content }: { content: string }) {
   return (
-    <div className="text-sm leading-6 text-on-surface">
+    <div className="text-base sm:text-sm leading-relaxed sm:leading-6 text-on-surface">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

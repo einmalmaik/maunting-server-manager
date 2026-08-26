@@ -100,3 +100,39 @@ def test_native_calendar_crud_and_export(db_session, test_user):
 
     events_after = CalendarService.get_events(db_session, test_user)
     assert len(events_after) == 0
+
+
+@pytest.mark.asyncio
+async def test_calendar_reminders_and_test_dispatch(db_session, test_user):
+    from datetime import datetime, timedelta, timezone
+
+    test_user.email_notifications = True
+    test_user.device_notifications = True
+    db_session.commit()
+
+    # 1. Test-Reminder
+    res = await CalendarService.send_test_reminder(db_session, test_user)
+    assert res["status"] == "success"
+    assert "Test-Termin" in res["title"]
+    assert res["time_hint"] == "in 1 Tag"
+
+    # 2. Due Reminders check (Event in 24 hours)
+    tomorrow = datetime.now(timezone.utc) + timedelta(hours=24)
+    start_str = tomorrow.strftime("%Y-%m-%d %H:%M")
+    end_str = (tomorrow + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+
+    CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        title="Dringendes Review",
+        start_time=start_str,
+        end_time=end_str,
+    )
+
+    sent = await CalendarService.check_and_send_due_reminders(db_session)
+    assert sent >= 1
+
+    # Dedup: 2. Aufruf darf nichts doppelt senden
+    sent_again = await CalendarService.check_and_send_due_reminders(db_session)
+    assert sent_again == 0
+

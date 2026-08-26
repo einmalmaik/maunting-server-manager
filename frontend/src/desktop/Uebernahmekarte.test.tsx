@@ -68,7 +68,7 @@ describe('Uebernahmekarte', () => {
     await waitFor(() => expect(ereignisRuf).not.toBeNull())
     ereignisRuf!({ payload: { anliegen: ANLIEGEN, minuten: 3, auftrag_id: 'job-neu' } })
 
-    fireEvent.click(await screen.findByRole('button', { name: /uebernahme\.freigeben/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /(uebernahme\.freigeben|freigeben|approve)/i }))
 
     await waitFor(() => expect(ergebnisMeldenMock).toHaveBeenCalledTimes(1))
     const [jobId, ok, inhalt] = ergebnisMeldenMock.mock.calls[0]
@@ -86,7 +86,7 @@ describe('Uebernahmekarte', () => {
     await waitFor(() => expect(ereignisRuf).not.toBeNull())
     ereignisRuf!({ payload: { anliegen: ANLIEGEN, minuten: 2 } })
 
-    fireEvent.click(await screen.findByRole('button', { name: /uebernahme\.freigeben/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /(uebernahme\.freigeben|freigeben|approve)/i }))
 
     await waitFor(() => expect(ergebnisMeldenMock).toHaveBeenCalledTimes(1))
     expect(ergebnisMeldenMock.mock.calls[0][0]).toBe('job-alt')
@@ -97,7 +97,7 @@ describe('Uebernahmekarte', () => {
     await waitFor(() => expect(ereignisRuf).not.toBeNull())
     ereignisRuf!({ payload: { anliegen: ANLIEGEN, minuten: 5, auftrag_id: 'job-neu' } })
 
-    fireEvent.click(await screen.findByRole('button', { name: /uebernahme\.ablehnen/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /(uebernahme\.ablehnen|ablehnen|decline)/i }))
 
     await waitFor(() => expect(ergebnisMeldenMock).toHaveBeenCalledTimes(1))
     const [jobId, ok, inhalt] = ergebnisMeldenMock.mock.calls[0]

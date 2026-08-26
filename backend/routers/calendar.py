@@ -168,3 +168,14 @@ def export_ical_feed(
             "Content-Disposition": 'attachment; filename="msm-calendar.ics"',
         },
     )
+
+
+@router.post("/test-reminder")
+async def test_calendar_reminder(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Sendet eine Test-Terminerinnerung per E-Mail und gibt die Push-Payload zurück."""
+    _check_calendar_enabled()
+    return await CalendarService.send_test_reminder(db=db, user=user)
+

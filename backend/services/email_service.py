@@ -1168,3 +1168,41 @@ Maunting Service Manager
             f'Ein Update für den Mod <strong>"{mod_name}"</strong> auf Server "{server_name}" ist verfügbar.'
         )
         return await EmailService.send_email(to, subject, body, html)
+
+    @staticmethod
+    async def send_calendar_reminder_notification(
+        to: str,
+        username: str,
+        title: str,
+        start_str: str,
+        location_str: str = "",
+        time_hint: str = "in 2 Tagen",
+    ) -> bool:
+        """Sendet E-Mail-Erinnerung für anstehende Kalendertermine (z. B. 2 Tage oder 1 Tag vorab)."""
+        subject = f"Terminerinnerung: {title} ({time_hint})"
+        loc_line = f"\nOrt: {location_str}" if location_str else ""
+        body = f"""Hallo {username},
+
+Erinnerung an deinen bevorstehenden Termin {time_hint}:
+
+Termin: {title}
+Zeitpunkt: {start_str}{loc_line}
+
+Maunting Studios Zeitmanagement
+"""
+        loc_html = f"<p><strong>Ort:</strong> {html.escape(location_str)}</p>" if location_str else ""
+        content_html = f"""
+<p>Erinnerung an deinen bevorstehenden Termin <strong>{time_hint}</strong>:</p>
+<div style="background: rgba(255,255,255,0.05); padding: 12px 16px; border-radius: 8px; margin: 12px 0; border: 1px solid rgba(255,255,255,0.1);">
+  <p style="margin: 0 0 6px 0; font-size: 16px; font-weight: bold; color: #fff;">{html.escape(title)}</p>
+  <p style="margin: 0; color: #cbd5e1;"><strong>Zeitpunkt:</strong> {html.escape(start_str)}</p>
+  {loc_html}
+</div>
+"""
+        email_html = EmailService._notification_email_html(
+            username,
+            f"Terminerinnerung ({time_hint})",
+            content_html,
+        )
+        return await EmailService.send_email(to, subject, body, email_html)
+

@@ -10,7 +10,7 @@ Sicherheitsinvariante:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 import re
 from typing import Any
@@ -23,8 +23,12 @@ from sqlalchemy.orm import Session
 from models.calendar_event import CalendarEvent
 from models.user import User
 from models.user_calendar import UserCalendar
+from services.email_service import EmailService
 
 _log = logging.getLogger("msm.calendar")
+
+# Dedup-Speicher für gesendete Terminerinnerungen (im Speicher je Server-Lauf)
+_sent_reminder_keys: set[str] = set()
 
 
 def _parse_datetime(dt_input: str | datetime) -> datetime:
@@ -596,3 +600,111 @@ class CalendarService:
 
         lines.append("END:VCALENDAR\r\n")
         return "\r\n".join(lines)
+
+    @classmethod
+    async def check_and_send_due_reminders(cls, db: Session) -> int:
+        """Prüft anstehende Kalendertermine auf 48h- und 24h-Erinnerungen und versendet Benachrichtigungen."""
+        now = datetime.now(timezone.utc)
+        users = db.scalars(select(User)).all()
+        sent_count = 0
+
+        for user in users:
+            # Wenn weder E-Mail noch Geräte-Benachrichtigung aktiv ist, überspringen
+            if not user.email_notifications and not user.device_notifications:
+                continue
+
+            try:
+                events = cls.get_events(db, user)
+            except Exception as e:
+                _log.warning("Konnte Termine für Benutzer %s nicht laden: %s", user.id, e)
+                continue
+
+            for ev in events:
+                start_raw = ev.get("start")
+                if not start_raw:
+                    continue
+                try:
+                    start_dt = _parse_datetime(start_raw)
+                except Exception:
+                    continue
+
+                diff = start_dt - now
+                diff_hours = diff.total_seconds() / 3600.0
+
+                time_hint = None
+                key_suffix = None
+
+                # 48h Fenster (zwischen 47 und 49 Stunden vor Termin)
+                if 47.0 <= diff_hours <= 49.0:
+                    time_hint = "in 2 Tagen"
+                    key_suffix = "48h"
+                # 24h Fenster (zwischen 23 und 25 Stunden vor Termin)
+                elif 23.0 <= diff_hours <= 25.0:
+                    time_hint = "in 1 Tag"
+                    key_suffix = "24h"
+
+                if not time_hint or not key_suffix:
+                    continue
+
+                event_id = str(ev.get("event_id", ""))
+                dedup_key = f"{user.id}_{event_id}_{key_suffix}"
+                if dedup_key in _sent_reminder_keys:
+                    continue
+
+                title = ev.get("title", "Termin")
+                loc = ev.get("location", "")
+                start_formatted = start_dt.strftime("%d.%m.%Y um %H:%M Uhr")
+
+                # 1. E-Mail Benachrichtigung
+                if user.email_notifications and user.email:
+                    try:
+                        await EmailService.send_calendar_reminder_notification(
+                            to=user.email,
+                            username=user.username,
+                            title=title,
+                            start_str=start_formatted,
+                            location_str=loc,
+                            time_hint=time_hint,
+                        )
+                    except Exception as e:
+                        _log.error("Fehler beim Senden der Terminerinnerungs-Mail an %s: %s", user.email, e)
+
+                _sent_reminder_keys.add(dedup_key)
+                sent_count += 1
+
+        return sent_count
+
+    @classmethod
+    async def send_test_reminder(cls, db: Session, user: User) -> dict[str, Any]:
+        """Sendet einen sofortigen Test-Erinnerungsdurchlauf für den eingeloggten Benutzer."""
+        title = "Test-Termin: Server-Wartung & Backup-Check"
+        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+        start_formatted = tomorrow.strftime("%d.%m.%Y um 14:00 Uhr")
+        loc = "MSM Leitstand"
+        time_hint = "in 1 Tag"
+
+        email_sent = False
+        if user.email_notifications and user.email:
+            try:
+                email_sent = await EmailService.send_calendar_reminder_notification(
+                    to=user.email,
+                    username=user.username,
+                    title=title,
+                    start_str=start_formatted,
+                    location_str=loc,
+                    time_hint=time_hint,
+                )
+            except Exception as e:
+                _log.error("Fehler beim Test-Senden der Terminerinnerungs-Mail an %s: %s", user.email, e)
+
+        return {
+            "status": "success",
+            "email_sent": email_sent,
+            "device_notifications_enabled": bool(user.device_notifications),
+            "email_notifications_enabled": bool(user.email_notifications),
+            "title": title,
+            "start": start_formatted,
+            "location": loc,
+            "time_hint": time_hint,
+        }
+

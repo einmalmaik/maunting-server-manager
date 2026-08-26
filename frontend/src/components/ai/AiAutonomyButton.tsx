@@ -19,11 +19,16 @@ const PANEL_SCOPE = 'panel'
  * Hinweistext: Berechtigungen gelten unveraendert weiter, und destruktive
  * Aktionen bleiben immer bestaetigungspflichtig.
  */
+export interface ServerOption {
+  id: number
+  name: string
+}
+
 export function AiAutonomyButton({
   servers,
   disabled = false,
 }: {
-  servers: Array<{ id: number; name: string }>
+  servers: ServerOption[]
   disabled?: boolean
 }) {
   const { t } = useTranslation()

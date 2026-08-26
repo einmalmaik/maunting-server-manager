@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Brain, Check, ListPlus, Loader2, Paperclip, Pencil, Send, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
+import { Check, ListPlus, Loader2, Paperclip, Pencil, Send, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -11,7 +11,7 @@ import {
   type AiRunInfo,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
-import { Button, Dropdown, type DropdownOption } from '@/Singra/UI'
+import { Button, Dropdown } from '@/Singra/UI'
 import {
   aiChatPreferenceKeys,
   readAiProviderChoice,
@@ -27,6 +27,7 @@ import { AiActionProposalCard } from './AiActionProposalCard'
 import { AiAutonomyButton } from './AiAutonomyButton'
 import { AiContextMeter } from './AiContextMeter'
 import { AiMemoryNotice } from './AiMemoryNotice'
+import { denkwahlFuer, ReasoningPicker } from './ReasoningPicker'
 // Die Blase und ihre Bestandteile standen hier, solange es genau ein Fenster
 // gab. Sie liegen jetzt in `AiVerlauf`, weil das Guardian-Fenster denselben
 // Verlauf zeichnet — zwei Zeichner wären zwei Wahrheiten darüber, wie ein Zug
@@ -76,43 +77,7 @@ interface Denkwahl {
   stufe: string | null
 }
 
-/**
- * Die zwei Eintraege der Auswahlliste, die keine Stufe sind.
- *
- * Unser `Dropdown` traegt Zeichenketten als Werte; `null` waere dort „nichts
- * gewaehlt" und wuerde den Platzhalter zeigen statt einer Entscheidung. Beide
- * Werte koennen keine echte Stufe verdecken: `ai_reasoning.RANGFOLGE` kennt sie
- * nicht, und `none` — das Wort, das OpenRouter fuer „aus" in die Stufenliste
- * schreibt — filtert der Server bereits heraus.
- */
-const AUS = '__aus__'
-const AN_OHNE_STUFE = '__an__'
 
-function wahlAusOption(wert: string): Denkwahl {
-  if (wert === AUS) return { an: false, stufe: null }
-  if (wert === AN_OHNE_STUFE) return { an: true, stufe: null }
-  return { an: true, stufe: wert }
-}
-
-/**
- * Die Denkwahl beim Providerwechsel auf etwas Gueltiges bringen.
- *
- * Jedes Modell kennt andere Stufen — „xhigh" beim einen gibt es beim naechsten
- * nicht. Bliebe die alte Wahl stehen, senkte der Server sie stillschweigend,
- * und die Oberflaeche zeigte etwas anderes an, als tatsaechlich gilt. Bei einem
- * Modell mit Denkzwang ist ausserdem „aus" keine gueltige Wahl.
- *
- * Eine reine Funktion, damit sie sich ohne gerendertes Bauteil pruefen laesst.
- */
-function denkwahlFuer(jetzt: Denkwahl, provider: AiProviderAvailable): Denkwahl {
-  if (!provider.reasoning) return { an: false, stufe: null }
-  // Ausgeschaltet lassen, wo das Modell das zulaesst — auch beim Wechsel. Eine
-  // stillschweigend wieder eingeschaltete Denktiefe kostet Geld.
-  if (!jetzt.an && provider.can_disable) return { an: false, stufe: null }
-  if (provider.efforts.length === 0) return { an: true, stufe: null }
-  if (jetzt.stufe && provider.efforts.includes(jetzt.stufe)) return { an: true, stufe: jetzt.stufe }
-  return { an: true, stufe: provider.default_effort ?? provider.efforts[0] }
-}
 
 /**
  * Mit welchem Modell der Chat aufgeht: dem zuletzt gewaehlten, sonst dem
@@ -205,6 +170,29 @@ export function AiChat() {
   // Render, dasselbe Muster wie `autoscrollRef` in ServerConsolePanel.
   const providerRef = useRef<number | null>(null)
   providerRef.current = providerId
+
+  useEffect(() => {
+    const handlePrefChange = () => {
+      const savedProvider = readAiProviderChoice(merkSchluessel.provider)
+      if (savedProvider !== null && savedProvider !== providerId) {
+        setProviderId(savedProvider)
+      }
+      const savedReasoning = readAiReasoningChoice(merkSchluessel.reasoning)
+      if (savedReasoning !== null) {
+        setDenken(savedReasoning)
+      }
+    }
+    const handleCleared = () => {
+      setEntries([])
+      setContextStatus(null)
+    }
+    window.addEventListener('msm:ai-preference-changed', handlePrefChange)
+    window.addEventListener('msm:ai-chat-cleared', handleCleared)
+    return () => {
+      window.removeEventListener('msm:ai-preference-changed', handlePrefChange)
+      window.removeEventListener('msm:ai-chat-cleared', handleCleared)
+    }
+  }, [merkSchluessel, providerId])
 
   useEffect(() => {
     // StrictMode fuehrt Setup/Cleanup in Entwicklung absichtlich doppelt aus.
@@ -632,7 +620,7 @@ export function AiChat() {
       }}
     >
       {/* ── Kopfzeile: Provider, Denkschritte, Autonomie, Skills ───────── */}
-      <header className="flex flex-wrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/40 px-2.5 py-1.5 sm:px-4 sm:py-2">
+      <header className="hidden sm:flex flex-wrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/40 px-2.5 py-1.5 sm:px-4 sm:py-2">
         <div className="min-w-[6.5rem] max-w-[12rem] sm:min-w-[10rem] sm:max-w-[16rem] flex-1">
           <Dropdown
             value={providerId ? String(providerId) : null}
@@ -807,7 +795,7 @@ export function AiChat() {
                           <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
                         </button>
                         <div className="flex max-w-[85%] flex-col items-end rounded-2xl rounded-br-md border border-primary/25 bg-primary/10 px-4 py-2.5">
-                          <p className="w-full whitespace-pre-wrap break-words text-sm leading-6 text-on-surface">
+                          <p className="w-full whitespace-pre-wrap break-words text-base sm:text-sm leading-relaxed sm:leading-6 text-on-surface">
                             {message.content}
                           </p>
                           {/* Die Anhaenge stehen **in** der Nachricht, mit der
@@ -1063,65 +1051,7 @@ export function AiChat() {
  * passiert das ständig. Jetzt wird redigiert, und der Hinweis hier ist der
  * Grund, warum niemand sich über ein `[REDACTED]` im eigenen Log wundern muss.
  */
-/**
- * Die Wahl der Denktiefe — je Modell verschieden, deshalb keine feste Liste.
- *
- * Gemessen am 2026-08-11 ueber alle 402 Modelle im OpenRouter-Katalog gibt es
- * genau vier Faelle. Sie fuehren zu **einer** Bedienung, nicht zu vieren:
- *
- * 1. **Modell denkt nicht** (130) → gar keine Anzeige. Ein Regler, der nichts
- *    bewirkt, ist schlimmer als keiner.
- * 2. **Stufen** (127, in 20 verschiedenen Zusammenstellungen) → eine Auswahl
- *    aus genau diesen Stufen. Deshalb kommt die Liste aus dem Katalog und nicht
- *    aus einer Konstante: `gpt-5.6-luna` kennt `max`, `gpt-5.5` hoert bei
- *    `xhigh` auf, `gpt-5.5-pro` faengt erst bei `medium` an.
- * 3. **Nur an/aus** (145) → dieselbe Liste mit zwei Eintraegen. Hier stand
- *    einmal ein `Switch` daneben; das waren zwei Bedienelemente fuer dieselbe
- *    Entscheidung, je nach Modell ein anderes.
- * 4. **Nicht abschaltbar** (82) → „aus" fehlt in der Liste. Der Anbieter denkt
- *    ohnehin und rechnet es ab; ein Aus-Knopf waere gelogen.
- *
- * Die Stufen sind bereits auf die Rolle des Benutzers geklemmt — das erledigt
- * der Server in `ai_reasoning.waehlbare_stufen`. Hier wird nichts entschieden,
- * nur angezeigt.
- */
-function ReasoningPicker({ provider, wahl, onChange, disabled }: {
-  provider: AiProviderAvailable | null
-  wahl: Denkwahl
-  onChange: (wahl: Denkwahl) => void
-  disabled: boolean
-}) {
-  const { t } = useTranslation()
-  if (!provider?.reasoning) return null
 
-  const optionen: DropdownOption[] = []
-  if (provider.can_disable) optionen.push({ value: AUS, label: t('ai.reasoning.off') })
-  if (provider.efforts.length === 0) {
-    optionen.push({ value: AN_OHNE_STUFE, label: t('ai.chat.reasoning') })
-  } else {
-    for (const stufe of provider.efforts) {
-      optionen.push({ value: stufe, label: t(`ai.reasoning.levels.${stufe}`, { defaultValue: stufe }) })
-    }
-  }
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <Brain className="h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
-      <div className="min-w-[7rem] max-w-[11rem]">
-        <Dropdown
-          value={wahl.an ? (wahl.stufe ?? AN_OHNE_STUFE) : AUS}
-          onChange={(gewaehlt) => onChange(wahlAusOption(gewaehlt))}
-          options={optionen}
-          // Nur eine Option heisst: es gibt nichts zu waehlen. Das kommt bei
-          // einem Modell mit Denkzwang und ohne Stufen vor — die Anzeige ist
-          // dann eine Auskunft, keine Frage.
-          disabled={disabled || optionen.length < 2}
-          aria-label={t('ai.chat.reasoningLevel')}
-        />
-      </div>
-    </div>
-  )
-}
 
 function AnhangListe({ anhaenge, t }: { anhaenge: AiAttachment[]; t: TFunction }) {
   if (anhaenge.length === 0) return null

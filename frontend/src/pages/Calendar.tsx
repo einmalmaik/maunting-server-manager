@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
+  BellRing,
   Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
@@ -17,6 +18,7 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Button } from '@/components/ui/Button'
+import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
 
 export interface CalendarEventItem {
   id?: number
@@ -124,6 +126,39 @@ export function Calendar() {
   }, [rangeStart, rangeEnd])
 
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null)
+  const [animationClass, setAnimationClass] = useState('')
+  const [animKey, setAnimKey] = useState(0)
+  const [testingPush, setTestingPush] = useState(false)
+
+  const handleTestPush = async () => {
+    setTestingPush(true)
+    try {
+      const res = await api<{
+        status: string
+        email_sent: boolean
+        device_notifications_enabled: boolean
+        title: string
+        start: string
+        time_hint: string
+      }>('/calendar/test-reminder', { method: 'POST' })
+
+      await sendeGeraeteBenachrichtigung({
+        titel: `Terminerinnerung (${res.time_hint})`,
+        text: `${res.title} am ${res.start}`,
+        erzwingen: true,
+      })
+
+      if (res.email_sent) {
+        toast.success(t('calendar.testReminderSentEmail', 'Test-Erinnerung per Push und E-Mail versendet!'))
+      } else {
+        toast.success(t('calendar.testReminderSent', 'Test-Erinnerung per Push ausgelöst!'))
+      }
+    } catch (err: any) {
+      toast.error(err?.message || t('calendar.testReminderFailed', 'Test-Erinnerung fehlgeschlagen.'))
+    } finally {
+      setTestingPush(false)
+    }
+  }
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1) {
@@ -148,6 +183,8 @@ export function Calendar() {
   }
 
   const handlePrev = () => {
+    setAnimationClass('animate-calendar-slide-right')
+    setAnimKey((k) => k + 1)
     const d = new Date(currentDate)
     if (viewMode === 'month') {
       d.setMonth(d.getMonth() - 1)
@@ -160,6 +197,8 @@ export function Calendar() {
   }
 
   const handleNext = () => {
+    setAnimationClass('animate-calendar-slide-left')
+    setAnimKey((k) => k + 1)
     const d = new Date(currentDate)
     if (viewMode === 'month') {
       d.setMonth(d.getMonth() + 1)
@@ -172,6 +211,8 @@ export function Calendar() {
   }
 
   const handleToday = () => {
+    setAnimationClass('animate-fade-in')
+    setAnimKey((k) => k + 1)
     setCurrentDate(new Date())
   }
 
@@ -369,10 +410,20 @@ export function Calendar() {
         title={t('calendar.title', 'Kalender & Termine')}
         description={t(
           'calendar.description',
-          'Integrierter nativer Kalender für Termine, Besprechungen und KI-gestützte Zeitplanung — ohne Drittanbieter-Zwang.'
+          'Integrierter nativer Kalender für Termine, Besprechungen und KI-gestützte Zeitplanung, direkt und ohne Drittanbieter-Zwang.'
         )}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleTestPush}
+              disabled={testingPush}
+              className="gap-1.5"
+            >
+              <BellRing className={`w-4 h-4 ${testingPush ? 'animate-spin' : ''}`} />
+              {t('calendar.testPush', 'Push testen')}
+            </Button>
             <Button
               variant="secondary"
               size="sm"
@@ -461,7 +512,8 @@ export function Calendar() {
 
       {/* Kalender-Inhaltsbereich mit horizontaler Wischgesten-Steuerung */}
       <div
-        className="touch-pan-y"
+        key={animKey}
+        className={`touch-pan-y ${animationClass}`}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >

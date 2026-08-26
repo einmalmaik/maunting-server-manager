@@ -166,13 +166,13 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
     function codeGefunden(code: string) {
       scannt = false
       setErkannt(true)
+      stoppen()
       try {
         navigator.vibrate?.([40, 30, 40])
       } catch {}
 
       // Kurzer visueller Bestaetigungsimpuls, dann Callback ausloesen
       setTimeout(() => {
-        stoppen()
         onCodeGefunden(code)
         onSchliessen()
       }, 300)
@@ -192,8 +192,14 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
       animRef.current = null
     }
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop())
+      streamRef.current.getTracks().forEach((t) => {
+        t.stop()
+        t.enabled = false
+      })
       streamRef.current = null
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
     }
     setAktiv(false)
   }

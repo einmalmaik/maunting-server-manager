@@ -131,11 +131,33 @@ export async function starteAufnahme(
   }
 }
 
+function resampleFloat32(input: Float32Array, fromRate: number, toRate: number): Float32Array {
+  if (fromRate === toRate || fromRate <= 0 || toRate <= 0) return input
+  const ratio = fromRate / toRate
+  const outLength = Math.round(input.length / ratio)
+  const result = new Float32Array(outLength)
+  for (let i = 0; i < outLength; i++) {
+    const srcIndex = Math.min(input.length - 1, Math.round(i * ratio))
+    result[i] = input[srcIndex]
+  }
+  return result
+}
+
 function baueKette(
   strom: MediaStream,
   aufPaket: (paket: ArrayBuffer) => void,
 ): Aufnahme {
-  const kontext = new AudioContext({ sampleRate: ABTASTRATE })
+  let kontext: AudioContext
+  try {
+    kontext = new AudioContext({ sampleRate: ABTASTRATE })
+  } catch {
+    kontext = new AudioContext()
+  }
+
+  if (kontext.state === 'suspended') {
+    void kontext.resume().catch(() => {})
+  }
+
   const quelle = kontext.createMediaStreamSource(strom)
   const prozessor = kontext.createScriptProcessor(PAKETGROESSE, 1, 1)
 
@@ -149,25 +171,20 @@ function baueKette(
   // auf Anschlag; die Blase zappelte dann, statt zu atmen.
   let geglaettet = 0
   prozessor.onaudioprocess = (ereignis) => {
+    if (kontext.state === 'suspended') {
+      void kontext.resume().catch(() => {})
+    }
     const werte = ereignis.inputBuffer.getChannelData(0)
     geglaettet = geglaettet * 0.7 + effektivwert(werte) * 0.3
-    aufPaket(zuInt16(werte))
+    const resampled = kontext.sampleRate === ABTASTRATE
+      ? werte
+      : resampleFloat32(werte, kontext.sampleRate, ABTASTRATE)
+    aufPaket(zuInt16(resampled))
   }
 
   // Ein `ScriptProcessorNode` läuft nur an, wenn sein Ausgang irgendwo endet —
   // auch dann, wenn niemand ihn hören soll. Der Weg dorthin führt deshalb über
   // eine Verstärkung von null.
-  //
-  // Hier stand `createScriptProcessor(…, 1, 0)` mit einem Kommentar, der
-  // erklärte, warum das sicher sei. Es war das Gegenteil: Chrome wirft beim
-  // Verbinden `InvalidAccessError: cannot connect a ScriptProcessorNode with 0
-  // output channels to any destination node`. Das passierte **nach** der
-  // Mikrofonfreigabe, und der Aufrufer meldete daraufhin „kein Zugriff auf das
-  // Mikrofon" — eine Meldung über eine Erlaubnis, die längst erteilt war.
-  //
-  // Ein Ausgangskanal und `gain = 0`. Die Verstärkung ist nicht Zierrat: ohne
-  // sie hinge das Mikrofon am Lautsprecher, und das ist keine leise Panne,
-  // sondern eine Rückkopplung.
   const stumm = kontext.createGain()
   stumm.gain.value = 0
   quelle.connect(eingang)
@@ -186,10 +203,6 @@ function baueKette(
       stumm.disconnect()
       eingang.disconnect()
       quelle.disconnect()
-      // Ohne dieses `stop()` bleibt die Aufnahmeanzeige des Browsers stehen,
-      // auch wenn niemand mehr zuhört. Das ist kein Schönheitsfehler: der
-      // rote Punkt im Tab ist das Einzige, woran ein Mensch erkennt, ob sein
-      // Mikrofon offen ist.
       strom.getTracks().forEach((spur) => spur.stop())
       void kontext.close().catch(() => undefined)
     },
@@ -198,10 +211,6 @@ function baueKette(
 
 /**
  * Der Effektivwert eines Blocks, auf 0 bis 1 gebracht.
- *
- * RMS und nicht der Spitzenwert: der Spitzenwert einer normal gesprochenen
- * Silbe liegt nahe eins und sagt damit nichts. Der Faktor holt gesprochene
- * Sprache (grob 0,05 bis 0,25) in einen Bereich, in dem man Bewegung sieht.
  */
 function effektivwert(eingabe: Float32Array): number {
   let summe = 0
@@ -211,11 +220,6 @@ function effektivwert(eingabe: Float32Array): number {
 
 /**
  * Float32 (−1 bis 1) zu Int16 Little Endian — das Format der Gegenstelle.
- *
- * Geklemmt wird ausdrücklich: ein Wert über 1 entsteht bei übersteuerter
- * Eingabe, und ohne Klemmung liefe er über und würde aus einem lauten Wort ein
- * Knacken. Die beiden Faktoren sind verschieden, weil Int16 unten eine Stufe
- * mehr hat als oben (−32768 bis 32767).
  */
 function zuInt16(eingabe: Float32Array): ArrayBuffer {
   const ausgabe = new Int16Array(eingabe.length)
