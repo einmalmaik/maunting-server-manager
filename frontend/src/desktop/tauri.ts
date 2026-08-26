@@ -45,6 +45,8 @@ export interface AppKonfig {
   max_download_bytes: number
   /** Vom Benutzer freigegebene Suchwurzeln für Spiele und Software. */
   search_roots: string[]
+  /** Ob der Splashscreen beim Erststart bereits gesehen wurde. */
+  splash_gesehen?: boolean
 }
 
 export async function konfigLaden(): Promise<AppKonfig> {

@@ -47,6 +47,7 @@ import {
   appBeenden,
   hauptfensterVerstecken,
   konfigLaden,
+  konfigSpeichern,
   wakewordStand,
   type AppKonfig,
 } from './tauri'
@@ -56,11 +57,18 @@ import { useAuftragsschleife } from './useAuftragsschleife'
 type Phase = 'laedt' | 'einrichtung' | 'kopplung' | 'sandbox' | 'bereit'
 
 const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
+const SPLASH_GESEHEN_KEY = 'mss:splash_gesehen'
 
 export function DesktopApp() {
   const [phase, setPhase] = useState<Phase>('laedt')
   const [konfig, setKonfig] = useState<AppKonfig | null>(null)
-  const [splash, setSplash] = useState(true)
+  const [splash, setSplash] = useState(() => {
+    try {
+      return localStorage.getItem(SPLASH_GESEHEN_KEY) !== 'true'
+    } catch {
+      return false
+    }
+  })
   const angemeldet = useAuthStore((s) => s.isAuthenticated)
   const sitzungSteht = phase === 'bereit' || phase === 'sandbox'
   const offeneUebernahme = useAuftragsschleife(sitzungSteht)
@@ -72,11 +80,29 @@ export function DesktopApp() {
     } catch {}
   }, [])
 
+  const splashBeenden = useCallback(() => {
+    setSplash(false)
+    try {
+      localStorage.setItem(SPLASH_GESEHEN_KEY, 'true')
+    } catch {}
+    void konfigLaden().then((k) => {
+      if (!k.splash_gesehen) {
+        void konfigSpeichern({ ...k, splash_gesehen: true })
+      }
+    }).catch(() => {})
+  }, [])
+
   useEffect(() => {
     void (async () => {
       try {
         const geladen = await konfigLaden()
         setKonfig(geladen)
+        if (geladen.splash_gesehen) {
+          setSplash(false)
+          try {
+            localStorage.setItem(SPLASH_GESEHEN_KEY, 'true')
+          } catch {}
+        }
         if (!geladen.backend_url || !geladen.eingerichtet) {
           setPhase('einrichtung')
           return
@@ -219,7 +245,7 @@ export function DesktopApp() {
         <ToastContainer />
         <ConfirmDialog />
         <PromptDialog />
-        {splash && <Splash onFertig={() => setSplash(false)} />}
+        {splash && <Splash onFertig={splashBeenden} />}
       </div>
     </MemoryRouter>
   )

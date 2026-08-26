@@ -25,6 +25,7 @@ class PairingCreated(BaseModel):
     code: str
     expires_at: datetime
     label: str
+    qr_data_uri: str | None = None
 
 
 class PairingRedeemRequest(BaseModel):

@@ -74,10 +74,14 @@ class TestCodeErzeugen:
         self, client: TestClient, db: Session, regular_user: User, user_cookies: dict
     ):
         _mit_chatrecht(db, regular_user)
-        code = _code_erzeugen(client, user_cookies)["code"]
+        daten = _code_erzeugen(client, user_cookies)
+        code = daten["code"]
         assert len(code) == 14  # 12 Zeichen, zwei Striche
         # Kein I, O, 0 oder 1: das sind die Verwechslungen beim Abtippen.
         assert not set("IO01") & set(code.replace("-", ""))
+        # QR-Code wird als lokaler SVG Data-URI mitgeliefert
+        assert daten.get("qr_data_uri", "").startswith("data:image/svg+xml")
+        assert "%3Csvg" in daten["qr_data_uri"] or "<svg" in daten["qr_data_uri"]
 
     def test_ohne_chatrecht_kein_code(
         self, client: TestClient, db: Session, regular_user: User, user_cookies: dict

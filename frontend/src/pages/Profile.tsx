@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { User, KeyRound, Shield, Link2, AlertTriangle, Bot } from 'lucide-react'
+import { User, KeyRound, Shield, Link2, AlertTriangle, Bot, MonitorSmartphone } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { AccountTab } from './profile/AccountTab'
 import { PasswordTab } from './profile/PasswordTab'
@@ -8,11 +8,12 @@ import { TwoFactorTab } from './profile/TwoFactorTab'
 import { LinkedAccountsTab } from './profile/LinkedAccountsTab'
 import { DangerZoneTab } from './profile/DangerZoneTab'
 import { AiTab } from './profile/AiTab'
+import { DevicesTab } from './profile/DevicesTab'
 import { CredentialsTab } from './profile/CredentialsTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
-type TabId = 'account' | 'password' | '2fa' | 'linked' | 'credentials' | 'ai' | 'danger'
+type TabId = 'account' | 'password' | '2fa' | 'linked' | 'credentials' | 'ai' | 'devices' | 'danger'
 
 const BASE_TABS: TabDef<TabId>[] = [
   { id: 'account', labelKey: 'profile.tabs.account', icon: User },
@@ -42,6 +43,7 @@ export function Profile() {
   const tabs: TabDef<TabId>[] = [
     ...BASE_TABS,
     ...(canUseAi ? [{ id: 'ai' as const, labelKey: 'profile.tabs.ai', icon: Bot }] : []),
+    ...(canUseAi ? [{ id: 'devices' as const, labelKey: 'profile.tabs.devices', icon: MonitorSmartphone }] : []),
     { id: 'danger', labelKey: 'profile.tabs.danger', icon: AlertTriangle, variant: 'danger' },
   ]
 
@@ -62,6 +64,7 @@ export function Profile() {
       {activeTab === 'linked' && <LinkedAccountsTab />}
       {activeTab === 'credentials' && <CredentialsTab />}
       {activeTab === 'ai' && canUseAi && <AiTab />}
+      {activeTab === 'devices' && canUseAi && <DevicesTab />}
       {activeTab === 'danger' && <DangerZoneTab />}
     </div>
   )

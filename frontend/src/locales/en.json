@@ -2781,7 +2781,8 @@
       "password": "Password",
       "2fa": "Two-Factor",
       "linked": "Linked Accounts",
-      "ai": "AI memory",
+      "ai": "AI",
+      "devices": "Pair device",
       "danger": "Danger Zone",
       "credentials": "Credentials"
     },
@@ -3771,7 +3772,7 @@
           "virenscan": "Virus check: on request the app checks a file with the locally installed Microsoft Defender, without changing or removing it. The checked path and, if something is found, an excerpt of the Defender output (which contains file paths and threat names) go to the model provider.",
           "eingabe": "Mouse and keyboard: the app does not record your input. There is no capture of keystrokes or mouse movement, neither locally nor transmitted. Conversely the AI can take over mouse and keyboard; with autonomous mode off, every takeover must be confirmed on your machine and is time-limited. Text the AI types originates from the model and is contained in the transmitted job.",
           "discordRpc": "Discord Rich Presence (RPC): If the Discord desktop app is running on your computer, the desktop app can report your activity status locally via a Windows pipe to Discord (e.g. 'MSS Desktop Companion'). No server addresses, chat histories, IP addresses, or sensitive credentials are ever transmitted. This feature can be completely disabled in the desktop app configuration ('konfig.json' -> 'discord_rpc_aktiv': false).",
-          "lokal": "What is stored locally: a plain-text configuration file (panel address, sandbox path, chosen assistant name, shortcuts, audio device names, wake word sensitivity), the wake word recordings and model, and exactly one entry in the Windows Credential Manager: the operating-system-encrypted refresh token of the paired session. Your password and two-factor code never reach the app; signing in works solely through the pairing code from the panel. Uninstalling removes all of it."
+          "lokal": "What is stored locally: a plain-text configuration file (panel address, sandbox path, chosen assistant name, shortcuts, audio device names, wake word sensitivity, initial start introduction state), the wake word recordings and model, and exactly one entry in the operating system vault: the operating-system-encrypted refresh token of the paired session. Your password and two-factor code never reach the app; signing in works solely through the pairing code or QR code from the panel. Uninstalling removes all of it completely."
         }
       },
       "storage": {
@@ -5040,9 +5041,12 @@
       "antwortIstWebseite": "This address serves the panel's interface, not its data. We need the address where the API answers — with split hosting that is the backend, locally usually http://localhost:8000.",
       "prueft": "Checking …",
       "verbinden": "Connect",
-      "kopplungErklaerung": "Sign in to your panel in the browser and open Profile → AI → Pair devices. The code there is valid for ten minutes and exactly once.",
+      "kopplungErklaerung": "Sign in to your panel in the browser and open Profile → Pair device. The code or QR code there is valid for ten minutes and exactly once.",
       "codeLabel": "Pairing code",
       "codeHinweis": "Case does not matter, and you can leave out the dashes.",
+      "qrCodeScannen": "Scan QR code via camera",
+      "scannen": "Scan",
+      "qrScanHint": "Scan this QR code directly with your smartphone or desktop camera.",
       "geraetenameLabel": "Name of this device",
       "geraetenameBeispiel": "Work PC",
       "geraetenameHinweis": "Only for recognising it later, should you want to revoke its access.",
@@ -5235,6 +5239,13 @@
       "frage": "Your assistant is now called “{{neu}}” — the wake word is still calibrated to “{{alt}}”. You can record it again; until then the app keeps listening for “{{alt}}”. This is optional.",
       "spaeter": "Later",
       "jetzt": "Recalibrate"
+    },
+    "qrScanner": {
+      "titel": "Scan pairing code",
+      "anweisung": "Point the camera at the QR code displayed in the panel.",
+      "fehler": "Could not open camera.",
+      "keineKamera": "No camera access available on this device.",
+      "hinweisManuell": "You can manually type the 12-character pairing code at any time."
     }
   },
   "popups": {

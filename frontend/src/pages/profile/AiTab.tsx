@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
 import { AiAgentNameCard } from '@/components/ai/AiAgentNameCard'
-import { AiDevicePairingCard } from '@/components/ai/AiDevicePairingCard'
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiUsageCard } from '@/components/ai/AiUsageCard'
 
@@ -42,9 +41,6 @@ export function AiTab() {
         </p>
       </div>
       <AiAgentNameCard />
-      {/* Die Kopplung steht direkt darunter, weil sie zum selben Assistenten
-          gehört: dieselbe Unterhaltung, nur auf dem eigenen Rechner. */}
-      <AiDevicePairingCard />
       {/* Das eigene Kontingent gehört hierher: es ist die Antwort auf „warum
           hat die KI mich abgewiesen?", und die darf nicht nur der Betreiber
           nachschlagen können. */}

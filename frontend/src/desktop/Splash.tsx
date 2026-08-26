@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import disLogo from './assets/dis-logo.png'
+import firmenLogo from './assets/firmen-logo.png'
 import msmLogo from './assets/msm-logo.png'
 
 interface Stufe {
@@ -25,9 +26,7 @@ interface Stufe {
 
 const STUFEN: Stufe[] = [
   { bild: disLogo, alt: 'DIS', untertitel: 'Geschützt durch DIS' },
-  // Das Firmenlogo fehlt weiterhin als Datei — die Stufe läuft ohne Bild,
-  // bis der Betreiber es liefert (dann hier importieren wie die anderen).
-  { bild: '/firmen-logo.png', alt: 'MauntingStudios', untertitel: 'Ein Produkt von MauntingStudios' },
+  { bild: firmenLogo, alt: 'MauntingStudios', untertitel: 'Ein Produkt von MauntingStudios' },
   { bild: msmLogo, alt: 'Maunting Server Manager', untertitel: 'Maunting Smart System' },
 ]
 

@@ -2781,7 +2781,8 @@
       "password": "Passwort",
       "2fa": "2-Faktor",
       "linked": "Verknüpfte Konten",
-      "ai": "KI-Gedächtnis",
+      "ai": "KI",
+      "devices": "Gerät koppeln",
       "danger": "Gefahrenzone",
       "credentials": "Zugangsdaten"
     },
@@ -3771,7 +3772,7 @@
           "virenscan": "Virenprüfung: Auf Wunsch prüft die App eine Datei mit dem lokal installierten Microsoft Defender, ohne sie zu verändern oder zu entfernen. Der geprüfte Pfad und im Fundfall ein Auszug der Defender-Ausgabe (der Dateipfade und Bedrohungsnamen enthält) gehen an den Modellanbieter.",
           "eingabe": "Maus und Tastatur: Die App zeichnet Ihre Eingaben nicht auf. Es gibt keinen Mitschnitt von Tastenanschlägen oder Mausbewegungen, weder lokal noch übertragen. Umgekehrt kann die KI Maus und Tastatur übernehmen; ist der autonome Modus aus, muss jede Übernahme an Ihrem Rechner bestätigt werden und ist zeitlich befristet. Text, den die KI tippen lässt, stammt aus dem Modell und steht im übertragenen Auftrag.",
           "discordRpc": "Discord Rich Presence (RPC): Wenn auf Ihrem Rechner die Discord-Desktop-App läuft, kann die Desktop-App Ihren Aktivitätsstatus lokal über eine Windows-Pipe an Discord melden (z. B. 'MSS Desktop Companion'). Hierbei werden zu keinem Zeitpunkt Serveradressen, Chatverläufe, IP-Adressen oder vertrauliche Daten übertragen. Die Funktion kann in der Konfigurationsdatei der Desktop-App ('konfig.json' -> 'discord_rpc_aktiv': false) vollständig deaktiviert werden.",
-          "lokal": "Was lokal gespeichert wird: Eine Konfigurationsdatei im Klartext (Panel-Adresse, Sandbox-Pfad, gewählter Assistentenname, Tastenkürzel, Namen der Audiogeräte, Wake-Word-Empfindlichkeit), die Wake-Word-Aufnahmen samt Modell und im Windows-Anmeldeinformations-Manager genau ein Eintrag: das vom Betriebssystem verschlüsselte Erneuerungs-Token der gekoppelten Sitzung. Ihr Passwort und Ihr Zwei-Faktor-Code erreichen die App nie; die Anmeldung läuft ausschließlich über den Kopplungscode aus dem Panel. Die Deinstallation entfernt all das."
+          "lokal": "Was lokal gespeichert wird: Eine Konfigurationsdatei im Klartext (Panel-Adresse, Sandbox-Pfad, gewählter Assistentenname, Tastenkürzel, Namen der Audiogeräte, Wake-Word-Empfindlichkeit, Status der Erststart-Einführung), die Wake-Word-Aufnahmen samt Modell und im Betriebssystem-Tresor genau ein Eintrag: das vom Betriebssystem verschlüsselte Erneuerungs-Token der gekoppelten Sitzung. Ihr Passwort und Ihr Zwei-Faktor-Code erreichen die App nie; die Anmeldung läuft ausschließlich über den Kopplungscode oder QR-Code aus dem Panel. Die Deinstallation entfernt all das restlos."
         }
       },
       "storage": {
@@ -5040,9 +5041,12 @@
       "antwortIstWebseite": "Diese Adresse liefert die Oberfläche des Panels, nicht seine Daten. Gesucht ist die Adresse, unter der die API antwortet — bei getrenntem Hosting die des Backends, lokal meist http://localhost:8000.",
       "prueft": "Prüfe …",
       "verbinden": "Verbinden",
-      "kopplungErklaerung": "Melde dich im Browser bei deinem Panel an und öffne Profil → KI → Geräte koppeln. Der Code dort gilt zehn Minuten und genau einmal.",
+      "kopplungErklaerung": "Melde dich im Browser bei deinem Panel an und öffne Profil → Gerät koppeln. Der Code bzw. QR-Code dort gilt zehn Minuten und genau einmal.",
       "codeLabel": "Kopplungscode",
       "codeHinweis": "Groß- und Kleinschreibung sind egal, die Striche kannst du weglassen.",
+      "qrCodeScannen": "QR-Code per Kamera scannen",
+      "scannen": "Scannen",
+      "qrScanHint": "Diesen QR-Code direkt mit der Smartphone- oder Desktop-Kamera scannen.",
       "geraetenameLabel": "Name dieses Geräts",
       "geraetenameBeispiel": "Arbeitsrechner",
       "geraetenameHinweis": "Nur zur Wiedererkennung, wenn du den Zugang später entziehen willst.",
@@ -5235,6 +5239,13 @@
       "frage": "Dein Assistent heißt jetzt „{{neu}}“ — das Wake-Word ist noch auf „{{alt}}“ kalibriert. Du kannst es neu einsprechen; bis dahin hört die App weiter auf „{{alt}}“. Das ist optional.",
       "spaeter": "Später",
       "jetzt": "Neu kalibrieren"
+    },
+    "qrScanner": {
+      "titel": "Kopplungscode scannen",
+      "anweisung": "Halte die Kamera auf den im Panel angezeigten QR-Code.",
+      "fehler": "Kamera konnte nicht geöffnet werden.",
+      "keineKamera": "Kein Kamerazugriff auf diesem Gerät verfügbar.",
+      "hinweisManuell": "Du kannst den 12-stelligen Kopplungscode jederzeit manuell abtippen."
     }
   },
   "popups": {

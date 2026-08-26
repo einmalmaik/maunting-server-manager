@@ -15,12 +15,14 @@
  */
 import { useState } from 'react'
 import { open as ordnerDialog } from '@tauri-apps/plugin-dialog'
+import { Camera } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button, Dropdown } from '@/Singra/UI'
 import { Input } from '@/components/ui/Input'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
+import { QrScannerModal } from './QrScannerModal'
 import { WakewordEinrichtung } from './WakewordEinrichtung'
 import { erreichbar, koppeln } from './auth'
 import { konfigSpeichern, type AppKonfig } from './tauri'
@@ -204,12 +206,15 @@ function SchrittKopplung({ onWeiter }: { onWeiter: () => Promise<void> }) {
   const [name, setName] = useState('')
   const [fehler, setFehler] = useState<string | null>(null)
   const [laeuft, setLaeuft] = useState(false)
+  const [scannerOffen, setScannerOffen] = useState(false)
 
-  async function absenden() {
+  async function absenden(manuellerCode?: string) {
+    const zielCode = (manuellerCode ?? code).trim()
+    if (!zielCode) return
     setFehler(null)
     setLaeuft(true)
     try {
-      await koppeln(code.trim(), name.trim())
+      await koppeln(zielCode, name.trim())
       await onWeiter()
     } catch (e) {
       setFehler(e instanceof Error ? e.message : String(e))
@@ -218,43 +223,72 @@ function SchrittKopplung({ onWeiter }: { onWeiter: () => Promise<void> }) {
     }
   }
 
+  function onQrGefunden(gescannterCode: string) {
+    const sauber = gescannterCode.trim()
+    setCode(sauber)
+    void absenden(sauber)
+  }
+
   return (
-    <form
-      className="flex flex-col gap-4"
-      onSubmit={(e) => {
-        e.preventDefault()
-        void absenden()
-      }}
-    >
-      <p className="text-sm text-on-surface-variant">{t('mss.wizard.kopplungErklaerung')}</p>
-      <div>
-        <Input
-          id="mss-kopplungscode"
-          label={t('mss.wizard.codeLabel')}
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder="ABCD-EFGH-JKLM"
-          autoFocus
-        />
-        <p className="msm-field-help">{t('mss.wizard.codeHinweis')}</p>
-      </div>
-      <div>
-        <Input
-          id="mss-geraetename"
-          label={t('mss.wizard.geraetenameLabel')}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={t('mss.wizard.geraetenameBeispiel')}
-        />
-        <p className="msm-field-help">{t('mss.wizard.geraetenameHinweis')}</p>
-      </div>
-      <Fehlerzeile text={fehler} />
-      <div className="flex justify-end">
-        <Button type="submit" disabled={laeuft || code.trim() === ''}>
-          {laeuft ? t('mss.wizard.koppelt') : t('mss.wizard.koppeln')}
-        </Button>
-      </div>
-    </form>
+    <>
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void absenden()
+        }}
+      >
+        <p className="text-sm text-on-surface-variant">{t('mss.wizard.kopplungErklaerung')}</p>
+        <div>
+          <label htmlFor="mss-kopplungscode" className="text-sm font-medium text-foreground mb-1.5 block">
+            {t('mss.wizard.codeLabel')}
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              id="mss-kopplungscode"
+              className="msm-input h-10 flex-1 font-mono tracking-wider uppercase"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="ABCD-EFGH-JKLM"
+              autoFocus
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              className="px-3 h-10 inline-flex items-center gap-1.5 shrink-0"
+              onClick={() => setScannerOffen(true)}
+              title={t('mss.wizard.qrCodeScannen', 'QR-Code per Kamera scannen')}
+            >
+              <Camera className="h-4 w-4 text-primary" />
+              <span className="hidden sm:inline text-xs">{t('mss.wizard.scannen', 'Scannen')}</span>
+            </Button>
+          </div>
+          <p className="msm-field-help">{t('mss.wizard.codeHinweis')}</p>
+        </div>
+        <div>
+          <Input
+            id="mss-geraetename"
+            label={t('mss.wizard.geraetenameLabel')}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t('mss.wizard.geraetenameBeispiel')}
+          />
+          <p className="msm-field-help">{t('mss.wizard.geraetenameHinweis')}</p>
+        </div>
+        <Fehlerzeile text={fehler} />
+        <div className="flex justify-end">
+          <Button type="submit" disabled={laeuft || code.trim() === ''}>
+            {laeuft ? t('mss.wizard.koppelt') : t('mss.wizard.koppeln')}
+          </Button>
+        </div>
+      </form>
+
+      <QrScannerModal
+        offen={scannerOffen}
+        onSchliessen={() => setScannerOffen(false)}
+        onCodeGefunden={onQrGefunden}
+      />
+    </>
   )
 }
 

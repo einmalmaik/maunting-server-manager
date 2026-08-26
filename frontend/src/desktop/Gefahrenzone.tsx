@@ -30,6 +30,9 @@ export function Gefahrenzone() {
   async function aufraeumen() {
     setFehler(null)
     try {
+      try {
+        localStorage.removeItem('mss:splash_gesehen')
+      } catch {}
       setBericht(await deinstallationAufraeumen())
       setSchritt('aufgeraeumt')
     } catch (e) {

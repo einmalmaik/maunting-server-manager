@@ -36,6 +36,7 @@ export function AiDevicePairingCard() {
   const [geraete, setGeraete] = useState<Geraet[]>([])
   const [name, setName] = useState('')
   const [code, setCode] = useState<string | null>(null)
+  const [qrDataUri, setQrDataUri] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const laden = () => {
@@ -49,11 +50,12 @@ export function AiDevicePairingCard() {
   const koppeln = async () => {
     setBusy(true)
     try {
-      const antwort = await api<{ code: string }>('/auth/devices/pairing', {
+      const antwort = await api<{ code: string; qr_data_uri?: string | null }>('/auth/devices/pairing', {
         method: 'POST',
         body: JSON.stringify({ label: name.trim() }),
       })
       setCode(antwort.code)
+      setQrDataUri(antwort.qr_data_uri || null)
       setName('')
     } catch (err: any) {
       toast.error(err.message || t('common.error'))
@@ -118,8 +120,11 @@ export function AiDevicePairingCard() {
         <SecretOnce
           label={t('ai.profile.devicesCodeLabel', 'Kopplungscode')}
           value={code}
+          qrDataUri={qrDataUri}
+          hinweis={t('ai.profile.devicesOnceHint', 'Gültig für 10 Minuten. Einmalig nutzbar über Code-Eingabe oder QR-Scan.')}
           onDismiss={() => {
             setCode(null)
+            setQrDataUri(null)
             laden()
           }}
         />

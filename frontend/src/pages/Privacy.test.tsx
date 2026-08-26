@@ -135,19 +135,19 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die zur Desktop-App und Postfächern gehoerende Fassung 2.8 vom 2026-08-25 aus', () => {
+  it('weist die zur Desktop-App und Postfächern gehoerende Fassung 2.9 vom 2026-08-26 aus', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?2\\.8`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?2\\.9`)),
     ).toBeInTheDocument();
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();
     // Maschinenlesbar und sichtbar muessen dasselbe Datum tragen: ein Leser
     // vergleicht den Text, ein Archiv das Attribut.
-    expect(stand).toHaveAttribute('datetime', '2026-08-25');
-    expect(stand).toHaveTextContent('2026-08-25');
+    expect(stand).toHaveAttribute('datetime', '2026-08-26');
+    expect(stand).toHaveTextContent('2026-08-26');
   });
 
   /**

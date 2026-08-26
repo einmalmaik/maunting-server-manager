@@ -22,18 +22,43 @@ import { toast } from '@/stores/toastStore'
 export function SecretOnce({
   label,
   value,
+  qrDataUri,
+  hinweis,
   onDismiss,
 }: {
   label: string
   value: string
+  qrDataUri?: string | null
+  hinweis?: string
   onDismiss: () => void
 }) {
   const { t } = useTranslation()
   return (
-    <div className="msm-card space-y-3 border border-warning/40 p-6">
-      <p className="text-sm font-semibold text-on-surface">{t('hoster.secretOnce', { label })}</p>
-      <p className="text-xs text-on-surface-variant">{t('hoster.secretOnceHint')}</p>
-      <code className="block break-all rounded-lg bg-surface-container-low/60 p-3 text-sm">{value}</code>
+    <div className="msm-card space-y-4 border border-warning/40 p-6">
+      <div>
+        <p className="text-sm font-semibold text-on-surface">{t('hoster.secretOnce', { label })}</p>
+        <p className="text-xs text-on-surface-variant">{hinweis || t('hoster.secretOnceHint')}</p>
+      </div>
+
+      {qrDataUri && (
+        <div className="flex flex-col items-center justify-center gap-2 rounded-xl bg-surface-container-lowest/60 p-4 border border-outline-variant/30">
+          <div className="rounded-lg bg-white p-2.5 shadow-sm">
+            <img
+              src={qrDataUri}
+              alt="QR-Code"
+              className="h-44 w-44 object-contain"
+              draggable={false}
+            />
+          </div>
+          <p className="text-center text-xs text-on-surface-variant max-w-xs">
+            {t('mss.wizard.qrScanHint', 'Diesen QR-Code direkt mit der Smartphone- oder Desktop-Kamera scannen.')}
+          </p>
+        </div>
+      )}
+
+      <code className="block break-all rounded-lg bg-surface-container-low/60 p-3 text-center font-mono text-sm tracking-wider font-semibold text-primary select-all">
+        {value}
+      </code>
       <div className="flex flex-wrap justify-end gap-2">
         <Button
           type="button"
