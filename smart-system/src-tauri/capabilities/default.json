@@ -5,10 +5,8 @@
   "windows": ["main", "overlay"],
   "permissions": [
     "core:default",
-    "autostart:allow-enable",
-    "autostart:allow-disable",
-    "autostart:allow-is-enabled",
     "dialog:allow-open",
-    "notification:default"
+    "notification:default",
+    "opener:default"
   ]
 }
