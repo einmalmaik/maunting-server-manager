@@ -632,8 +632,8 @@ export function AiChat() {
       }}
     >
       {/* ── Kopfzeile: Provider, Denkschritte, Autonomie, Skills ───────── */}
-      <header className="flex flex-wrap items-center gap-2 border-b border-outline-variant/40 px-3 py-2 sm:px-4">
-        <div className="min-w-[10rem] max-w-[16rem] flex-1">
+      <header className="flex flex-wrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/40 px-2.5 py-1.5 sm:px-4 sm:py-2">
+        <div className="min-w-[6.5rem] max-w-[12rem] sm:min-w-[10rem] sm:max-w-[16rem] flex-1">
           <Dropdown
             value={providerId ? String(providerId) : null}
             onChange={waehleProvider}
@@ -657,7 +657,7 @@ export function AiChat() {
 
         {canUseAutonomy && <AiAutonomyButton servers={servers} disabled={busy} />}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-1 sm:gap-2">
           <Button
             type="button" variant="ghost" size="sm"
             disabled={busy || empty}
@@ -1042,7 +1042,7 @@ export function AiChat() {
               {t('ai.chat.noProvider')}
             </p>
           )}
-          <p className="mt-2 text-center text-xs text-on-surface-variant">{t('ai.chat.privacyHint')}</p>
+          <p className="mt-2 text-center text-xs text-on-surface-variant hidden sm:block">{t('ai.chat.privacyHint')}</p>
         </div>
       </form>
     </section>

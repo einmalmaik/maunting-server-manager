@@ -249,44 +249,80 @@ export function Ai() {
     // kleiner werden als sein Inhalt, und der Verlauf würde die Seite statt
     // seines eigenen Bereichs scrollen.
     <div className="flex h-[calc(100dvh-6rem)] min-h-0 flex-col md:h-[calc(100dvh-9rem)]">
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pb-2">
-        {/* Der Autonomie-Schalter, solange gesprochen wird — die Begründung
-            steht im Doc-Kommentar oben. Er steht **vor** der Umschaltreihe,
-            weil er kein Wechsel ist, sondern eine Einstellung: zwischen den
-            Modusknöpfen sähe er aus wie ein vierter Modus. */}
-        {canUseAutonomy && ansicht === 'sprache' && <AiAutonomyButton servers={servers} />}
-        {ansicht !== 'text' && (
-          <Umschalter
-            aktiv={false}
-            onClick={() => setzeAnsicht('text')}
-            icon={<MessageSquare className="h-4 w-4" aria-hidden="true" />}
-            label={t('ai.voice.toTextMode')}
-          />
-        )}
-        {/* Die Aufgabenliste steht vor dem Guardian-Knopf — der Wunsch des
-            Betreibers. Ohne `ai.tasks.manage` gibt es sie gar nicht: das
-            Backend gibt der Liste ohne das Recht nichts heraus. */}
-        {canManageTasks && (
-          <Umschalter
-            aktiv={ansicht === 'aufgaben'}
-            onClick={() => setzeAnsicht(ansicht === 'aufgaben' ? 'text' : 'aufgaben')}
-            icon={<CalendarClock className="h-4 w-4" aria-hidden="true" />}
-            label={t('ai.tasks.toTasks')}
-          />
-        )}
-        <Umschalter
-          aktiv={ansicht === 'guardian'}
-          onClick={() => setzeAnsicht(ansicht === 'guardian' ? 'text' : 'guardian')}
-          icon={<ShieldAlert className="h-4 w-4" aria-hidden="true" />}
-          label={t('ai.guardian.toGuardianMode')}
-        />
-        {sprachkonfiguration && ansicht !== 'sprache' && (
-          <Umschalter
-            aktiv={false}
-            onClick={() => setzeAnsicht('sprache')}
-            icon={<AudioLines className="h-4 w-4" aria-hidden="true" />}
-            label={t('ai.voice.toVoiceMode')}
-          />
+      <div className="flex shrink-0 items-center justify-between sm:justify-end gap-2 pb-2">
+        {ansicht !== 'text' ? (
+          <div className="flex items-center justify-between w-full sm:w-auto gap-2">
+            <Umschalter
+              aktiv={false}
+              onClick={() => setzeAnsicht('text')}
+              icon={<MessageSquare className="h-4 w-4" aria-hidden="true" />}
+              label={t('ai.voice.toTextMode')}
+            />
+            {canUseAutonomy && ansicht === 'sprache' && <AiAutonomyButton servers={servers} />}
+          </div>
+        ) : (
+          <>
+            {/* Mobile Ansichten-Leiste (1 schlanke Zeile) */}
+            <div className="flex sm:hidden items-center justify-between w-full gap-2">
+              <div className="flex items-center gap-1.5">
+                {canManageTasks && (
+                  <button
+                    type="button"
+                    onClick={() => setzeAnsicht('aufgaben')}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/40 bg-surface-container-low/60 px-2.5 py-1.5 text-xs font-medium text-on-surface-variant hover:text-on-surface"
+                    title={t('ai.tasks.toTasks')}
+                  >
+                    <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>Aufgaben</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setzeAnsicht('guardian')}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/40 bg-surface-container-low/60 px-2.5 py-1.5 text-xs font-medium text-on-surface-variant hover:text-on-surface"
+                  title={t('ai.guardian.toGuardianMode')}
+                >
+                  <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Guardian</span>
+                </button>
+              </div>
+
+              {sprachkonfiguration && (
+                <Umschalter
+                  aktiv={false}
+                  onClick={() => setzeAnsicht('sprache')}
+                  icon={<AudioLines className="h-4 w-4" aria-hidden="true" />}
+                  label={t('ai.voice.toVoiceMode')}
+                />
+              )}
+            </div>
+
+            {/* Desktop Ansichten-Leiste */}
+            <div className="hidden sm:flex items-center gap-2">
+              {canManageTasks && (
+                <Umschalter
+                  aktiv={false}
+                  onClick={() => setzeAnsicht('aufgaben')}
+                  icon={<CalendarClock className="h-4 w-4" aria-hidden="true" />}
+                  label={t('ai.tasks.toTasks')}
+                />
+              )}
+              <Umschalter
+                aktiv={false}
+                onClick={() => setzeAnsicht('guardian')}
+                icon={<ShieldAlert className="h-4 w-4" aria-hidden="true" />}
+                label={t('ai.guardian.toGuardianMode')}
+              />
+              {sprachkonfiguration && (
+                <Umschalter
+                  aktiv={false}
+                  onClick={() => setzeAnsicht('sprache')}
+                  icon={<AudioLines className="h-4 w-4" aria-hidden="true" />}
+                  label={t('ai.voice.toVoiceMode')}
+                />
+              )}
+            </div>
+          </>
         )}
       </div>
 

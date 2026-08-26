@@ -221,31 +221,57 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
 
     // Audio-Wiedergabe direkt bei der Nutzergeste (Klick) initialisieren,
     // um den AudioContext sofort im Zustand 'running' zu haben.
-    const spiele = new Wiedergabe()
-    spiele.bereitMachen()
-    lautsprecher.current = spiele
+    try {
+      const spiele = new Wiedergabe()
+      spiele.bereitMachen()
+      lautsprecher.current = spiele
+    } catch (e) {
+      console.warn('AudioContext-Initialisierung fehlgeschlagen:', e)
+    }
 
     // Im Panel `undefined` (Cookie im Handshake); in der Desktop-App trägt das
     // Subprotokoll das Bearer-Token — der eine Header, den ein Browser-WebSocket
     // erreicht. Der Server spiegelt es in accept() (routers/ai_voice.py).
-    // Asynchron, weil das Token dafür frisch sein muss: ein Handshake kennt
-    // keinen 401-Retry, und mit einem abgelaufenen Token wäre die einzige
-    // Auskunft „Verbindung verloren". Die Wiedergabe oben bleibt bewusst vor
-    // dem await — sie braucht die Nutzergeste, das Warten nicht.
-    const protokolle = await wsProtokolle()
+    let protokolle: string[] | undefined
+    try {
+      protokolle = await wsProtokolle()
+    } catch (e) {
+      console.warn('wsProtokolle Fehler:', e)
+    }
+
     // Während des Wartens beendet oder anderweitig verbunden? Kein zweiter
     // Socket — derselbe Grund wie die Sperre am Funktionsanfang.
     if (!gewollt.current || ws.current !== null) return
 
-    const verbindung = new WebSocket(adresse(providerId), protokolle)
-    verbindung.binaryType = 'arraybuffer'
-    ws.current = verbindung
+    let verbindung: WebSocket
+    try {
+      verbindung = new WebSocket(adresse(providerId), protokolle)
+      verbindung.binaryType = 'arraybuffer'
+      ws.current = verbindung
+    } catch (e) {
+      console.error('WebSocket-Aufbau fehlgeschlagen:', e)
+      setFehler('ai.voice.errors.connection')
+      setZustand('aus')
+      return
+    }
+
     // Ob der Handshake je durchkam — entscheidet in `onclose`, ob eine
     // Erklärung gesucht wird (nur die App, nur beim Scheitern vor `onopen`).
     let verbunden = false
 
+    const verbindungTimeout = window.setTimeout(() => {
+      if (!verbunden && ws.current === verbindung) {
+        try {
+          verbindung.close()
+        } catch {}
+        setFehler('ai.voice.errors.connection')
+        setZustand('aus')
+      }
+    }, 10_000)
+
     verbindung.onopen = () => {
       verbunden = true
+      window.clearTimeout(verbindungTimeout)
       lautsprecher.current?.bereitMachen()
       void starteAufnahme((paket) => {
         // Nur senden, wenn die Leitung wirklich offen ist. Ein Paket auf einen
@@ -412,6 +438,7 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     }
 
     verbindung.onclose = () => {
+      window.clearTimeout(verbindungTimeout)
       mikro.current?.beenden()
       mikro.current = null
       lautsprecher.current?.schliessen()

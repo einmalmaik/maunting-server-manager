@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Blocks, Bot, CalendarClock, Eye, FilePenLine, FileX, Globe, HardDriveDownload, HardDriveUpload, Mail, Network, Package, Plug, Power, ServerCog, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
+import { Activity, AlertTriangle, Blocks, Bot, CalendarClock, ChevronDown, Eye, FilePenLine, FileX, Globe, HardDriveDownload, HardDriveUpload, Mail, Network, Package, Plug, Power, ServerCog, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -150,6 +150,7 @@ export function AiActionProposalCard({
   // `ai_messages`, nicht im Lauf-Snapshot. Nach einem Neuladen sind sie weg, und
   // genau das heisst „genau einmal“.
   const [geheimnisse, setGeheimnisse] = useState<{ label: string; value: string }[]>([])
+  const [detailsOpen, setDetailsOpen] = useState(proposal.status === 'proposed')
   const operation = previewText(proposal.preview.operation ?? proposal.preview.aktion)
   const path = previewText(proposal.preview.path)
   const diff = previewText(proposal.preview.diff)
@@ -209,7 +210,7 @@ export function AiActionProposalCard({
   // Eine autonom ausgefuehrte Aktion ist keine Anfrage. Sie bekommt deshalb
   // eine eigene, neutrale Farbgebung statt der warnenden — und keinen Knopf.
   const tone = proposal.autonomous
-    ? 'border-outline-variant bg-surface-container'
+    ? 'border-outline-variant/50 bg-surface-container/60'
     : 'border-status-warning/35 bg-status-warning/5'
 
   const reject = async () => {
@@ -273,9 +274,11 @@ export function AiActionProposalCard({
     }
   }
 
+  const hasDetails = (tatsachen.length > 0) || Boolean(proposal.reason) || Boolean(proposal.expected_effect) || Boolean(diff)
+
   return (
-    <article className={`rounded-xl border p-4 ${tone}`} aria-label={t('ai.actions.title')}>
-      <div className="flex flex-wrap items-start gap-3">
+    <article className={`rounded-xl border p-3 sm:p-4 ${tone}`} aria-label={t('ai.actions.title')}>
+      <div className="flex flex-wrap items-start gap-2.5 sm:gap-3">
         <span className={`rounded-lg p-2 ${proposal.autonomous ? 'bg-surface-container-highest text-primary' : 'bg-status-warning/10 text-status-warning'}`}><Icon className="h-4 w-4" /></span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -297,45 +300,60 @@ export function AiActionProposalCard({
                 {t('ai.actions.autonomousBadge')}
               </span>
             )}
+            {proposal.status !== 'proposed' && hasDetails && (
+              <button
+                type="button"
+                onClick={() => setDetailsOpen((prev) => !prev)}
+                className="ml-auto inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-on-surface py-0.5 px-1.5 rounded transition-colors"
+                aria-expanded={detailsOpen}
+              >
+                <span>{detailsOpen ? 'Weniger Details' : 'Details'}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform ${detailsOpen ? 'rotate-180' : ''}`} />
+              </button>
+            )}
           </div>
-          {operation && <p className="mt-1 text-sm text-on-surface-variant">{t('ai.actions.operation', { operation })}</p>}
-          {path && <p className="mt-1 break-all font-mono text-xs text-on-surface-variant">{path}</p>}
-          {tatsachen.length > 0 && (
-            <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
-              {tatsachen.map(([key, wert]) => (
-                <div key={key} className="min-w-0">
-                  <dt className="text-on-surface-variant">{t(`ai.actions.fields.${key}`, key)}</dt>
-                  <dd className="break-words font-medium text-on-surface">{wert}</dd>
-                </div>
-              ))}
-            </dl>
+          {operation && <p className="mt-1 text-xs sm:text-sm text-on-surface-variant">{t('ai.actions.operation', { operation })}</p>}
+          {path && <p className="mt-0.5 break-all font-mono text-[11px] sm:text-xs text-on-surface-variant">{path}</p>}
+          
+          {detailsOpen && (
+            <div className="mt-2 space-y-2">
+              {tatsachen.length > 0 && (
+                <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+                  {tatsachen.map(([key, wert]) => (
+                    <div key={key} className="min-w-0">
+                      <dt className="text-on-surface-variant">{t(`ai.actions.fields.${key}`, key)}</dt>
+                      <dd className="break-words font-medium text-on-surface">{wert}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              {proposal.reason && (
+                <p className="text-xs sm:text-sm text-on-surface-variant">
+                  <span className="font-semibold text-on-surface">{t('ai.actions.reasonLabel')}</span>{' '}
+                  {proposal.reason}
+                </p>
+              )}
+              {proposal.expected_effect && (
+                <p className="text-xs sm:text-sm text-on-surface-variant">
+                  <span className="font-semibold text-on-surface">{t('ai.actions.effectLabel')}</span>{' '}
+                  {proposal.expected_effect}
+                </p>
+              )}
+              {diff && <pre className="max-h-64 overflow-auto rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-2.5 sm:p-3 text-[11px] sm:text-xs text-on-surface-variant">{diff}</pre>}
+            </div>
           )}
-          {/* Zielpunkt 3.6: warum geaendert wird und welche Folgen erwartet
-              werden. Beides stammt vom Modell und wird als dessen Begruendung
-              gekennzeichnet, nicht als Zusage des Panels. */}
-          {proposal.reason && (
-            <p className="mt-2 text-sm text-on-surface-variant">
-              <span className="font-semibold text-on-surface">{t('ai.actions.reasonLabel')}</span>{' '}
-              {proposal.reason}
-            </p>
-          )}
-          {proposal.expected_effect && (
-            <p className="mt-1 text-sm text-on-surface-variant">
-              <span className="font-semibold text-on-surface">{t('ai.actions.effectLabel')}</span>{' '}
-              {proposal.expected_effect}
-            </p>
-          )}
-          {diff && <pre className="mt-3 max-h-64 overflow-auto rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-3 text-xs text-on-surface-variant">{diff}</pre>}
+
           {proposal.autonomous && (
-            <p className="mt-2 text-xs text-on-surface-variant">{t('ai.actions.autonomousHint')}</p>
+            <p className="mt-1 text-[11px] text-on-surface-variant">{t('ai.actions.autonomousHint')}</p>
           )}
-          {proposal.error_code && <p className="mt-2 flex items-center gap-1 text-xs text-status-error"><AlertTriangle className="h-3.5 w-3.5" />{t('ai.actions.failed')}</p>}
+          {proposal.error_code && <p className="mt-1.5 flex items-center gap-1 text-xs text-status-error"><AlertTriangle className="h-3.5 w-3.5" />{t('ai.actions.failed')}</p>}
         </div>
         {proposal.status === 'proposed' && !proposal.autonomous && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full sm:w-auto flex-wrap items-center gap-2 justify-end mt-2 sm:mt-0">
             <Button
               type="button"
               variant="secondary"
+              size="sm"
               disabled={busy}
               onClick={() => void reject()}
             >
@@ -343,6 +361,7 @@ export function AiActionProposalCard({
             </Button>
             <Button
               type="button"
+              size="sm"
               variant={proposal.tool_name === 'propose_server_lifecycle' ? 'destructive' : 'primary'}
               disabled={busy}
               onClick={() => void execute()}

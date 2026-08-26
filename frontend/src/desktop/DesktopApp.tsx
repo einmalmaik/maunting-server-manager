@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
-import { Eye, ShieldAlert } from 'lucide-react'
+import { BrainCircuit, Calendar as CalendarIcon, Eye, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
@@ -225,7 +225,7 @@ export function DesktopApp() {
   return (
     <MemoryRouter initialEntries={['/ai']}>
       <NavigationEmpfaenger />
-      <div className="relative min-h-screen overflow-x-clip bg-background text-on-surface">
+      <div className="relative min-h-screen overflow-x-clip bg-background text-on-surface pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]">
         <div className="msm-deep-grid pointer-events-none absolute inset-0 opacity-30" />
         <div className="relative z-10 flex min-h-screen flex-col">{inhalt}</div>
 
@@ -457,6 +457,8 @@ function Hauptseite({
   // also bekommt sie einen eigenen Reiter. Ohne das Recht rendert die
   // Komponente ohnehin nichts — dann lieber gar kein Reiter.
   const darfGedaechtnis = useHasPermission('ai.memory.use')
+  const [mobileMenuOffen, setMobileMenuOffen] = useState(false)
+
   const agentName = user?.agent_name?.trim() || 'Singra'
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
@@ -466,22 +468,24 @@ function Hauptseite({
 
   return (
     <>
-      <header className="msm-topbar flex h-16 items-center justify-between px-4 md:px-6">
-        <div className="flex min-w-0 items-center gap-3">
+      <header className="msm-topbar flex h-14 sm:h-16 items-center justify-between px-3 sm:px-4 md:px-6">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <div className="min-w-0">
-            <h1 className="truncate font-headline text-title-lg text-on-surface">{agentName}</h1>
-            <p className="truncate text-xs text-on-surface-variant">
+            <h1 className="truncate font-headline text-base sm:text-title-lg font-bold text-on-surface">{agentName}</h1>
+            <p className="truncate text-[11px] sm:text-xs text-on-surface-variant">
               {user ? t('mss.app.angemeldetAls', { name: user.username }) : ''}
             </p>
           </div>
           {offeneUebernahme && (
-            <div className="flex items-center gap-1.5 rounded-full border border-status-warning/40 bg-status-warning/10 px-2.5 py-1 text-xs font-medium text-status-warning animate-pulse">
-              <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+            <div className="flex items-center gap-1 rounded-full border border-status-warning/40 bg-status-warning/10 px-2 py-0.5 text-[11px] font-medium text-status-warning animate-pulse">
+              <Eye className="h-3 w-3" aria-hidden="true" />
               <span>{t('mss.einstellungen.banner.aktivitaetLaeuft')}</span>
             </div>
           )}
         </div>
-        <nav className="flex items-center gap-2" aria-label={t('mss.app.bereiche')}>
+
+        {/* Desktop-Navigation */}
+        <nav className="hidden md:flex items-center gap-2" aria-label={t('mss.app.bereiche')}>
           <Reiter
             aktiv={bereich === 'ki'}
             onClick={() => navigate('/ai')}
@@ -510,7 +514,111 @@ function Hauptseite({
             {t('mss.app.abmelden')}
           </Button>
         </nav>
+
+        {/* Mobile Navigation Trigger */}
+        <div className="flex md:hidden items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setMobileMenuOffen(!mobileMenuOffen)}
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-outline-variant/50 bg-surface-container-high/60 text-on-surface hover:bg-surface-container-highest transition-colors"
+            aria-label="Navigation öffnen"
+            aria-expanded={mobileMenuOffen}
+          >
+            {mobileMenuOffen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </div>
       </header>
+
+      {/* Mobile Drawer / Overlay */}
+      {mobileMenuOffen && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end bg-background/80 backdrop-blur-sm md:hidden animate-fade-in">
+          <div className="fixed inset-0" onClick={() => setMobileMenuOffen(false)} />
+          <div className="relative z-10 w-full rounded-t-2xl border-t border-outline-variant/50 bg-surface-container-low p-4 pb-8 shadow-2xl space-y-2">
+            <div className="flex items-center justify-between pb-3 border-b border-outline-variant/40">
+              <div className="min-w-0">
+                <span className="font-headline font-semibold text-sm text-on-surface">{agentName}</span>
+                <p className="text-xs text-on-surface-variant">{user?.username}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileMenuOffen(false)}
+                className="p-1 rounded-lg text-on-surface-variant hover:text-on-surface"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <nav className="flex flex-col gap-1 pt-1" aria-label={t('mss.app.bereiche')}>
+              <button
+                type="button"
+                onClick={() => { navigate('/ai'); setMobileMenuOffen(false); }}
+                className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                  bereich === 'ki'
+                    ? 'bg-primary/15 text-primary border border-primary/30'
+                    : 'text-on-surface hover:bg-surface-container-high'
+                }`}
+              >
+                <MessageSquare className="h-4 w-4" />
+                <span>{t('mss.app.chat')}</span>
+              </button>
+
+              {darfKalender && (
+                <button
+                  type="button"
+                  onClick={() => { navigate('/kalender'); setMobileMenuOffen(false); }}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                    bereich === 'kalender'
+                      ? 'bg-primary/15 text-primary border border-primary/30'
+                      : 'text-on-surface hover:bg-surface-container-high'
+                  }`}
+                >
+                  <CalendarIcon className="h-4 w-4" />
+                  <span>{t('mss.app.kalender')}</span>
+                </button>
+              )}
+
+              {darfGedaechtnis && (
+                <button
+                  type="button"
+                  onClick={() => { navigate('/gedaechtnis'); setMobileMenuOffen(false); }}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                    bereich === 'gedaechtnis'
+                      ? 'bg-primary/15 text-primary border border-primary/30'
+                      : 'text-on-surface hover:bg-surface-container-high'
+                  }`}
+                >
+                  <BrainCircuit className="h-4 w-4" />
+                  <span>{t('mss.app.gedaechtnis')}</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => { navigate('/einstellungen'); setMobileMenuOffen(false); }}
+                className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                  bereich === 'einstellungen'
+                    ? 'bg-primary/15 text-primary border border-primary/30'
+                    : 'text-on-surface hover:bg-surface-container-high'
+                }`}
+              >
+                <SettingsIcon className="h-4 w-4" />
+                <span>{t('mss.app.einstellungen')}</span>
+              </button>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setMobileMenuOffen(false); void abmelden(); }}
+                  className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium text-status-error hover:bg-status-error/10 transition-colors"
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span>{t('mss.app.abmelden')}</span>
+                </button>
+              </div>
+            </nav>
+          </div>
+        </div>
+      )}
       <main className="p-margin-mobile md:p-margin-desktop relative flex flex-1 flex-col">
         <div className="relative z-10 w-full flex-1">
           {bereich === 'ki' ? (

@@ -75,7 +75,7 @@ export function Wizard({
   }
 
   return (
-    <main className="flex flex-1 items-center justify-center p-6">
+    <main className="flex flex-1 items-center justify-center p-4 sm:p-6 pt-[max(1.5rem,env(safe-area-inset-top,0px))] pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] pl-[max(1rem,env(safe-area-inset-left,0px))] pr-[max(1rem,env(safe-area-inset-right,0px))]">
       <div className="flex w-full max-w-lg flex-col gap-4">
         <header className="flex flex-col items-center gap-1">
           <h1 className="font-headline text-headline-sm text-on-surface">
@@ -307,6 +307,12 @@ function SchrittPersonalisierung({ onWeiter }: { onWeiter: () => Promise<void> }
   )
   const [fehler, setFehler] = useState<string | null>(null)
   const [laeuft, setLaeuft] = useState(false)
+
+  useEffect(() => {
+    if (!benutzer) {
+      void useAuthStore.getState().checkAuth()
+    }
+  }, [benutzer])
 
   useEffect(() => {
     if (benutzer?.agent_name && !name) {
