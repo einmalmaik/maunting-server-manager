@@ -708,3 +708,57 @@ class CalendarService:
             "time_hint": time_hint,
         }
 
+    @classmethod
+    def get_due_reminders(cls, db: Session, user: User) -> list[dict[str, Any]]:
+        """Liefert anstehende Termine für Push-Benachrichtigungen (48h / 24h vor Beginn)."""
+        if not user.device_notifications:
+            return []
+
+        now = datetime.now(timezone.utc)
+        reminders: list[dict[str, Any]] = []
+
+        try:
+            events = cls.get_events(db, user)
+        except Exception:
+            return []
+
+        for ev in events:
+            start_raw = ev.get("start")
+            if not start_raw:
+                continue
+            try:
+                start_dt = _parse_datetime(start_raw)
+            except Exception:
+                continue
+
+            diff = start_dt - now
+            diff_hours = diff.total_seconds() / 3600.0
+
+            time_hint = None
+            key_suffix = None
+            if 0.0 <= diff_hours <= 49.0:
+                if 25.0 < diff_hours <= 49.0:
+                    time_hint = "in 2 Tagen"
+                    key_suffix = "48h"
+                elif 0.0 <= diff_hours <= 25.0:
+                    time_hint = "in 1 Tag" if diff_hours > 2.0 else "in Kürze"
+                    key_suffix = "24h"
+
+            if not time_hint or not key_suffix:
+                continue
+
+            event_id = str(ev.get("event_id", ""))
+            reminders.append(
+                {
+                    "event_id": event_id,
+                    "title": ev.get("title", "Termin"),
+                    "start": start_dt.strftime("%d.%m.%Y um %H:%M Uhr"),
+                    "location": ev.get("location", ""),
+                    "time_hint": time_hint,
+                    "key": f"{user.id}_{event_id}_{key_suffix}",
+                }
+            )
+
+        return reminders
+
+

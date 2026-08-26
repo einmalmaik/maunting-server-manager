@@ -179,3 +179,14 @@ async def test_calendar_reminder(
     _check_calendar_enabled()
     return await CalendarService.send_test_reminder(db=db, user=user)
 
+
+@router.get("/due-reminders")
+def get_due_calendar_reminders(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """Gibt anstehende Termine zurück, die für Push-Benachrichtigungen relevant sind."""
+    _check_calendar_enabled()
+    return CalendarService.get_due_reminders(db=db, user=user)
+
+

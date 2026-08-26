@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { VersionFooter } from '@/components/VersionFooter'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
+import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
 
 export function Shell() {
@@ -80,6 +81,9 @@ export function Shell() {
           weiterarbeitet: sonst muesste man den Chat offen lassen, also genau
           das tun, was nicht mehr noetig sein soll. */}
       <AiRunNotice />
+
+      {/* Push- & Pop-up-Benachrichtigungen bei Server-Vorfällen & Kalender-Erinnerungen */}
+      <ServerIncidentNotifier />
 
       {/* Aktive Pop-ups / Ankündigungen des Panels */}
       <PanelPopupModal />

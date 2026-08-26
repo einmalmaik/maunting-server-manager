@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
+import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
 import { MobileAiControls } from '@/components/ai/MobileAiControls'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PromptDialog } from '@/components/ui/PromptDialog'
@@ -235,6 +236,7 @@ export function DesktopApp() {
             <SprachwacheHaupt />
             <KalibrierungsHinweis />
             <AiRunNotice />
+            <ServerIncidentNotifier />
             <PanelPopupModal />
             {isAndroid && <OverlayFenster inApp={true} />}
           </>

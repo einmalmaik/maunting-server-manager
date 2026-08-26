@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   BellRing,
@@ -10,7 +10,6 @@ import {
   Link,
   MapPin,
   Plus,
-  RefreshCw,
   Trash2,
   X,
 } from 'lucide-react'
@@ -18,7 +17,7 @@ import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Button } from '@/components/ui/Button'
-import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
+import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 
 export interface CalendarEventItem {
   id?: number
@@ -62,7 +61,6 @@ export function Calendar() {
   const [currentDate, setCurrentDate] = useState(() => new Date())
   const [viewMode, setViewMode] = useState<ViewMode>('month')
   const [events, setEvents] = useState<CalendarEventItem[]>([])
-  const [loading, setLoading] = useState(true)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isFeedModalOpen, setIsFeedModalOpen] = useState(false)
 
@@ -109,21 +107,51 @@ export function Calendar() {
     }
   }, [currentDate, viewMode])
 
-  const fetchEvents = () => {
-    setLoading(true)
-    api<CalendarEventItem[]>(`/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}`)
+  const fetchEvents = useCallback(() => {
+    api<CalendarEventItem[]>(
+      `/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}`
+    )
       .then((data) => {
         setEvents(Array.isArray(data) ? data : [])
       })
       .catch((err) => {
         toast.error(err.message)
       })
-      .finally(() => setLoading(false))
-  }
+  }, [rangeStart, rangeEnd])
 
   useEffect(() => {
     fetchEvents()
-  }, [rangeStart, rangeEnd])
+
+    // Automatische Aktualisierung in Echtzeit alle 10 Sekunden (still im Hintergrund)
+    const interval = setInterval(() => {
+      api<CalendarEventItem[]>(
+        `/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}`
+      )
+        .then((data) => {
+          if (Array.isArray(data)) setEvents(data)
+        })
+        .catch(() => {})
+    }, 10_000)
+
+    const handleFocusOrUpdate = () => {
+      api<CalendarEventItem[]>(
+        `/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}`
+      )
+        .then((data) => {
+          if (Array.isArray(data)) setEvents(data)
+        })
+        .catch(() => {})
+    }
+
+    window.addEventListener('focus', handleFocusOrUpdate)
+    window.addEventListener('msm:calendar-updated', handleFocusOrUpdate)
+
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('focus', handleFocusOrUpdate)
+      window.removeEventListener('msm:calendar-updated', handleFocusOrUpdate)
+    }
+  }, [rangeStart, rangeEnd, fetchEvents])
 
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null)
   const [animationClass, setAnimationClass] = useState('')
@@ -133,6 +161,9 @@ export function Calendar() {
   const handleTestPush = async () => {
     setTestingPush(true)
     try {
+      // Vorab Berechtigung prüfen & anfordern
+      await pruefeUndFrageGeraeteBerechtigung()
+
       const res = await api<{
         status: string
         email_sent: boolean
@@ -218,7 +249,11 @@ export function Calendar() {
 
   const openCreateModal = (prefilledDate?: Date) => {
     const start = prefilledDate ? new Date(prefilledDate) : new Date()
-    if (!prefilledDate) {
+    if (prefilledDate) {
+      if (start.getHours() === 0 && start.getMinutes() === 0) {
+        start.setHours(9, 0, 0, 0)
+      }
+    } else {
       start.setMinutes(0, 0, 0)
       start.setHours(start.getHours() + 1)
     }
@@ -288,6 +323,7 @@ export function Calendar() {
       }
       setIsModalOpen(false)
       fetchEvents()
+      window.dispatchEvent(new Event('msm:calendar-updated'))
     } catch (err: any) {
       toast.error(err.message)
     } finally {
@@ -307,6 +343,7 @@ export function Calendar() {
       toast.success('Termin gelöscht')
       setIsModalOpen(false)
       fetchEvents()
+      window.dispatchEvent(new Event('msm:calendar-updated'))
     } catch (err: any) {
       toast.error(err.message)
     } finally {
@@ -406,12 +443,7 @@ export function Calendar() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={t('calendar.eyebrow', 'MSM / MSS Zeitmanagement')}
-        title={t('calendar.title', 'Kalender & Termine')}
-        description={t(
-          'calendar.description',
-          'Integrierter nativer Kalender für Termine, Besprechungen und KI-gestützte Zeitplanung, direkt und ohne Drittanbieter-Zwang.'
-        )}
+        title={t('calendar.title', 'Kalender')}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -432,24 +464,6 @@ export function Calendar() {
             >
               <Download className="w-4 h-4" />
               {t('calendar.subscribe', 'Abonnieren')}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={fetchEvents}
-              disabled={loading}
-              className="gap-1.5"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              {t('calendar.refresh', 'Aktualisieren')}
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => openCreateModal()}
-              className="gap-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              {t('calendar.newEvent', 'Neuer Termin')}
             </Button>
           </div>
         }

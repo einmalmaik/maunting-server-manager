@@ -26,6 +26,16 @@ const ablehnenMock = vi.fn()
 const ergebnisMeldenMock = vi.fn()
 let ereignisRuf: ((e: { payload: unknown }) => void) | null = null
 
+vi.mock('react-i18next', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-i18next')>()
+  return {
+    ...actual,
+    useTranslation: () => ({
+      t: (k: string) => k,
+    }),
+  }
+})
+
 vi.mock('@tauri-apps/api/event', () => ({
   listen: (_name: string, rueckruf: (e: { payload: unknown }) => void) => {
     ereignisRuf = rueckruf

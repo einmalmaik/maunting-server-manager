@@ -39,10 +39,10 @@ describe('Calendar Page Component', () => {
     )
 
     // Check title and action buttons
-    expect(screen.getByText('Kalender & Termine')).toBeInTheDocument()
-    expect(screen.getByText('Neuer Termin')).toBeInTheDocument()
+    expect(screen.getByText('Kalender')).toBeInTheDocument()
+    expect(screen.getByText('Push testen')).toBeInTheDocument()
     expect(screen.getByText('Abonnieren')).toBeInTheDocument()
-    expect(screen.getByText('Aktualisieren')).toBeInTheDocument()
+    expect(screen.queryByText('Aktualisieren')).not.toBeInTheDocument()
 
     // Wait for event chip to appear
     await waitFor(() => {
@@ -70,7 +70,7 @@ describe('Calendar Page Component', () => {
     expect(screen.getByText(/Termine für diesen Tag eingetragen/i)).toBeInTheDocument()
   })
 
-  it('opens create event modal when clicking Neuer Termin', async () => {
+  it('opens create event modal when clicking on a calendar day', async () => {
     vi.mocked(client.api).mockResolvedValue([])
 
     render(
@@ -79,8 +79,9 @@ describe('Calendar Page Component', () => {
       </MemoryRouter>,
     )
 
-    const createBtn = screen.getByRole('button', { name: /Neuer Termin/i })
-    fireEvent.click(createBtn)
+    // In month view, clicking the 15th day number cell opens the creation modal
+    const dayCells = screen.getAllByText('15')
+    fireEvent.click(dayCells[0])
 
     expect(screen.getByPlaceholderText('z. B. Team-Meeting, Wartung Server 1')).toBeInTheDocument()
     expect(screen.getByText('Speichern')).toBeInTheDocument()

@@ -46,10 +46,26 @@ mod wakeword;
 mod zonen;
 
 use tauri::{Emitter, Manager};
+use tauri_plugin_notification::NotificationExt;
 #[cfg(not(target_os = "android"))]
 use tauri_plugin_autostart::MacosLauncher;
 #[cfg(not(target_os = "android"))]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+
+#[tauri::command]
+fn benachrichtigung_senden(
+    app: tauri::AppHandle,
+    titel: String,
+    text: String,
+) -> Result<(), String> {
+    app.notification()
+        .builder()
+        .title(titel)
+        .body(text)
+        .channel_id("singra_alerts_v2")
+        .show()
+        .map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 fn setze_status(app: tauri::AppHandle, status: String) -> Result<(), String> {
@@ -681,7 +697,8 @@ pub fn run() {
             oeffne_browser,
             deinstallation_aufraeumen,
             deinstallation_starten,
-            sandbox_verfuegbar
+            sandbox_verfuegbar,
+            benachrichtigung_senden
         ])
         .setup(|app| {
             tray::erstellen(app.handle())?;

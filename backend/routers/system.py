@@ -8,9 +8,10 @@ import psutil
 from sqlalchemy import text
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
 from config import settings
-from database import SessionLocal
+from database import SessionLocal, get_db
 from dependencies import get_current_user, require_global, verify_csrf
 from games import list_game_info
 from models import User
@@ -372,3 +373,55 @@ def update_nodes_endpoint(
         return res
     finally:
         db.close()
+
+
+@router.get("/incident-alerts")
+def incident_alerts(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Liefert ungelöste Server-Vorfälle für Push & Alert-Benachrichtigungen."""
+    if not user.device_notifications:
+        return []
+
+    from models import Incident, Server, ServerPermission
+
+    # Server ermitteln, auf die der User Zugriff hat
+    if user.is_superuser or any(r.role.name == "admin" for r in user.user_roles if r.role):
+        server_rows = db.query(Server.id, Server.name).all()
+        server_map = {s[0]: s[1] for s in server_rows}
+    else:
+        perms = (
+            db.query(ServerPermission.server_id, Server.name)
+            .join(Server, ServerPermission.server_id == Server.id)
+            .filter(ServerPermission.user_id == user.id)
+            .all()
+        )
+        server_map = {p[0]: p[1] for p in perms}
+
+    if not server_map:
+        return []
+
+    incidents = (
+        db.query(Incident)
+        .filter(Incident.server_id.in_(list(server_map.keys())), Incident.status != "resolved")
+        .order_by(Incident.created_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    return [
+        {
+            "id": inc.id,
+            "uuid": inc.uuid,
+            "server_id": inc.server_id,
+            "server_name": server_map.get(inc.server_id, f"Server #{inc.server_id}"),
+            "title": inc.title,
+            "description": inc.description,
+            "type": inc.type,
+            "status": inc.status,
+            "created_at": inc.created_at.isoformat() if inc.created_at else None,
+        }
+        for inc in incidents
+    ]
+
