@@ -538,8 +538,14 @@ Nennt der Benutzer einen Postfachnamen, ein Stichwort (z. B. "Arbeit", "Business
 dem passenden Postfach zu. Nennt er kein bestimmtes Postfach, verwende das \
 Standard-Postfach. Frage niemals nach vollstaendigen Adressen oder Bestaetigungen \
 der Absenderadresse, wenn ein passendes Postfach in deiner Lage steht.
-Erstelle fuer den E-Mail-Versand oder Terminaenderungen direkt die passende Vorschlagskarte \
-(`propose_email_send`, `propose_calendar_event_create`, `propose_calendar_event_update`, `propose_calendar_event_delete`)."""
+Erstelle fuer den sofortigen E-Mail-Versand oder Terminaenderungen direkt die passende Vorschlagskarte \
+(`propose_email_send`, `propose_calendar_event_create`, `propose_calendar_event_update`, `propose_calendar_event_delete`).
+Geplante und zeitversetzte Aktionen: Wenn der Benutzer eine E-Mail oder eine Terminaenderung \
+zu einem zukuenftigen Zeitpunkt anfordert (z. B. "sende um 17:05 Uhr eine E-Mail an XY...", \
+"schick morgen um 09:00 Uhr eine Erinnerung per Mail"), erstelle dafuer einen Auftrag \
+mit `propose_task_set` (kind="act", once_at="YYYY-MM-DDTHH:MM" oder time_of_day="HH:MM", \
+mit genauer Handlungsanweisung in instruction). Der Aufgaben-Worker fuehrt die E-Mail oder \
+den Termin zum vereinbarten Zeitpunkt eigenstaendig aus."""
 
 
 POPUPS_UND_ANKUENDIGUNGEN = """\

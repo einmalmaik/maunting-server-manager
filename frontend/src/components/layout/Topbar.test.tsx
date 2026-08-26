@@ -11,7 +11,7 @@ vi.mock('@/api/client', () => ({
   api: vi.fn(),
 }))
 
-function setUser(emailNotifications: boolean, aiNotifications = true) {
+function setUser(emailNotifications: boolean, aiNotifications = true, deviceNotifications = true) {
   useAuthStore.setState({
     user: {
       id: 1,
@@ -23,6 +23,7 @@ function setUser(emailNotifications: boolean, aiNotifications = true) {
       two_factor_enabled: false,
       email_notifications: emailNotifications,
       ai_notifications: aiNotifications,
+      device_notifications: deviceNotifications,
       role_id: null,
       created_at: '2026-05-31T00:00:00Z',
     },
@@ -103,5 +104,23 @@ describe('Topbar', () => {
       expect(useToastStore.getState().toasts).toHaveLength(1)
     })
     expect(schalter).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('schaltet die Geräte-Benachrichtigungen getrennt davon', async () => {
+    render(
+      <MemoryRouter>
+        <Topbar />
+      </MemoryRouter>,
+    )
+
+    oeffneGlocke()
+    fireEvent.click(screen.getByRole('switch', { name: 'Geräte-Benachrichtigungen' }))
+
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith('/auth/me/notifications?device=false', { method: 'PATCH' })
+    })
+    expect(useAuthStore.getState().user?.device_notifications).toBe(false)
+    expect(useAuthStore.getState().user?.email_notifications).toBe(true)
+    expect(useAuthStore.getState().user?.ai_notifications).toBe(true)
   })
 })

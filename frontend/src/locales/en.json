@@ -2956,7 +2956,9 @@
     "emailLabel": "Email notifications",
     "emailHint": "Sign-ins, server events, updates.",
     "aiLabel": "AI notices in the panel",
-    "aiHint": "A note when a task finishes or is waiting. No emails."
+    "aiHint": "A note when a task finishes or is waiting. No emails.",
+    "deviceLabel": "Device notifications",
+    "deviceHint": "Pop-up alerts on Windows and Android devices for server events, appointments, and AI tasks."
   },
   "updater": {
     "manualConfigsRestored": "Manual configuration files were automatically restored.",
@@ -5266,6 +5268,8 @@
   },
   "desktopBadge": {
     "tooltip": "Download Maunting Smart System Desktop App",
-    "label": "Desktop App for Windows"
+    "label": "Desktop App for Windows",
+    "androidTooltip": "Download Maunting Smart System Android App",
+    "androidLabel": "App for Android (.apk)"
   }
 }

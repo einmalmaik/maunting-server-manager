@@ -610,35 +610,28 @@ def me(
 def update_notifications(
     enabled: bool | None = None,
     ai: bool | None = None,
+    device: bool | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     _: None = Depends(verify_csrf),
 ) -> dict:
-    """Schaltet E-Mail- und KI-Meldungen — einzeln.
+    """Schaltet E-Mail-, KI- und Geräte-Meldungen einzeln.
 
-    ``enabled`` war frueher Pflicht und steuerte nur die E-Mails. Es bleibt
-    unveraendert bestehen, damit aeltere Oberflaechen weiter funktionieren; neu
-    ist ``ai``. Beide sind optional: wer nur eines umlegt, ruehrt das andere
-    nicht an.
-
-    Getrennt, weil es zwei verschiedene Dinge sind: ``enabled`` entscheidet
-    ueber Post, ``ai`` ueber den Hinweis im Panel. Wer keine Post will, will
-    deswegen nicht auch keinen Hinweis mehr sehen, dass ein laufender Auftrag
-    auf seine Bestaetigung wartet.
-
-    Hier stand "Die KI verschickt keine E-Mails". Das stimmt seit dem
-    Guardian-Bericht nicht mehr und seit den stehenden Aufgaben erst recht
-    nicht: beide gehen ueber ``enabled``, denselben Schalter wie jede andere
-    Benachrichtigung. Einen dritten gibt es bewusst nicht.
+    ``enabled`` steuert die E-Mails, ``ai`` steuert KI-Hinweise im Panel,
+    ``device`` steuert Pop-up-Meldungen auf Windows- und Android-Geräten.
+    Alle drei sind optional: wer nur eines umlegt, rührt die anderen nicht an.
     """
     if enabled is not None:
         user.email_notifications = enabled
     if ai is not None:
         user.ai_notifications = ai
+    if device is not None:
+        user.device_notifications = device
     db.commit()
     return {
         "email_notifications": user.email_notifications,
         "ai_notifications": user.ai_notifications,
+        "device_notifications": user.device_notifications,
     }
 
 

@@ -1114,6 +1114,12 @@ AUFGABEN_HANDELN = frozenset({
     # neuen Auftrag an — es stellt die Felder, die der Benutzer im Panel sieht.
     "propose_restart_schedule_set",
     "propose_backup_schedule_set",
+    # E-Mail und Kalender: Zeitgesteuerte E-Mails oder Terminänderungen über
+    # stehende Aufgaben (`propose_task_set` mit `kind="act"`). Termine löschen
+    # steht wie Server/Backups in ALWAYS_CONFIRM_TOOLS und bleibt draussen.
+    "propose_email_send",
+    "propose_calendar_event_create",
+    "propose_calendar_event_update",
 })
 
 

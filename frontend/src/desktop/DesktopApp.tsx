@@ -32,6 +32,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { abmelden } from './auth'
 import { Einstellungen } from './Einstellungen'
 import { Splash } from './Splash'
+import { OverlayFenster } from './OverlayFenster'
 import { Aufraeumkarte } from './Aufraeumkarte'
 import { DesktopAktionKarte } from './DesktopAktionKarte'
 import { Uebernahmekarte } from './Uebernahmekarte'
@@ -192,6 +193,7 @@ export function DesktopApp() {
             <KalibrierungsHinweis />
             <AiRunNotice />
             <PanelPopupModal />
+            <OverlayFenster inApp={true} />
           </>
         )}
         <DesktopAktionKarte offenerAuftragId={offeneUebernahme} />

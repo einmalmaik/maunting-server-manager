@@ -620,6 +620,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         // Programme, Dateien und Adressen oeffnen — der offizielle Weg in
         // Tauri v2 (tauri-plugin-shell::open ist deprecated).
         .plugin(tauri_plugin_opener::init())

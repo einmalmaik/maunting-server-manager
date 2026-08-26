@@ -56,6 +56,7 @@ class UserUpdate(BaseModel):
     two_factor_enabled: bool | None = None
     email_notifications: bool | None = None
     ai_notifications: bool | None = None
+    device_notifications: bool | None = None
     time_zone: str | None = None
 
     @field_validator("time_zone")
@@ -98,6 +99,7 @@ class UserResponse(BaseModel):
     two_factor_enabled: bool
     email_notifications: bool
     ai_notifications: bool = True
+    device_notifications: bool = True
     time_zone: str | None = None
     agent_name: str | None = None
     ai_provider_id: int | None = None

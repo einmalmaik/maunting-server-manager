@@ -262,10 +262,10 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     Beschreibung sagt es.
 
     **Nachtrag 25.08.2026: E-Mail- und Kalender-Werkzeuge** — aus
-    der App **68.282** Zeichen, aus dem Panel **62.884**. Die sechs Werkzeuge
+    der App **71.065** Zeichen, aus dem Panel **65.667**. Die sieben Werkzeuge
     (`email_search`, `email_read`, `calendar_read`, `propose_email_send`,
-    `propose_calendar_event_create`, `propose_calendar_event_delete`) bringen
-    zusammen rund 4.400 Zeichen. Die Grenze steht deshalb bei **70.000**.
+    `propose_calendar_event_create`, `propose_calendar_event_update`, `propose_calendar_event_delete`) bringen
+    zusammen rund 5.500 Zeichen. Die Grenze steht deshalb bei **73.000**.
     """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(
@@ -279,7 +279,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
             ],
             ensure_ascii=False,
         )
-        assert len(katalog) < 70_000, (
+        assert len(katalog) < 73_000, (
             f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
             f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
             "taucht in keiner Budgetrechnung auf."

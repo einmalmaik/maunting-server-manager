@@ -42,7 +42,11 @@ import { konfigLaden, overlaySichtbar } from './tauri'
  */
 const STILLE_SCHLIESST_MS = 20_000
 
-export function OverlayFenster() {
+interface OverlayFensterProps {
+  inApp?: boolean
+}
+
+export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
   const { t } = useTranslation()
   // Keine eigene Providerwahl: `provider_id` ist am Voice-WS optional, und
   // ohne sie nimmt das Backend die am Konto gespeicherte Wahl — dieselbe, die
@@ -59,11 +63,13 @@ export function OverlayFenster() {
   const transkriptEnde = useRef<HTMLDivElement>(null)
 
   // Frameless und transparent: der Fensterhintergrund kommt vom Panel-
-  // Stylesheet und muss hier weg, sonst schwebt ein dunkles Rechteck.
+  // Stylesheet und muss hier weg, sonst schwebt ein dunkles Rechteck (nur im Desktop-Fenstermodus).
   useEffect(() => {
-    document.documentElement.style.background = 'transparent'
-    document.body.style.background = 'transparent'
-  }, [])
+    if (!inApp) {
+      document.documentElement.style.background = 'transparent'
+      document.body.style.background = 'transparent'
+    }
+  }, [inApp])
 
   useEffect(() => {
     const abo = listen(OVERLAY_SPRACHE_START, () => {
@@ -193,10 +199,12 @@ export function OverlayFenster() {
     ? () => (testZustand === 'hoert' || testZustand === 'spricht' ? 0.35 : 0)
     : pegel
 
-  return (
+  const container = (
     <div
       data-tauri-drag-region
-      className="flex h-screen flex-col items-center justify-start overflow-hidden rounded-2xl border border-outline-variant/50 bg-surface-container-lowest/90 px-4 pb-3 pt-1 backdrop-blur-xl"
+      className={`flex flex-col items-center justify-start overflow-hidden rounded-2xl border border-outline-variant/50 bg-surface-container-lowest/95 px-4 pb-3 pt-1 backdrop-blur-xl shadow-2xl ${
+        inApp ? 'w-full max-w-sm sm:max-w-md mx-auto max-h-[360px]' : 'h-screen'
+      }`}
     >
       <div className="flex w-full items-center justify-end" data-tauri-drag-region>
         <button
@@ -228,4 +236,14 @@ export function OverlayFenster() {
       )}
     </div>
   )
+
+  if (inApp) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+        {container}
+      </div>
+    )
+  }
+
+  return container
 }

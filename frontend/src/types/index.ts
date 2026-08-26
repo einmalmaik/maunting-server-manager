@@ -9,6 +9,8 @@ export interface User {
   email_notifications: boolean
   /** Hinweise der KI im Panel. Getrennt von den E-Mails — sie verschickt keine. */
   ai_notifications: boolean
+  /** Geräte-Benachrichtigungen (Pop-ups auf Windows und Android). */
+  device_notifications?: boolean
   /** IANA-Zeitzone des Benutzers (z. B. 'Europe/Berlin'). */
   time_zone?: string | null
   /** Rufname des KI-Assistenten; null heißt Standardname 'Singra'. */

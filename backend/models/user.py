@@ -95,6 +95,9 @@ class User(Base):
     # laufender Auftrag auf seine Bestaetigung wartet.
     ai_notifications: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False,
                                                   server_default=text('1'))
+    # Geräte-Benachrichtigungen (Pop-ups auf Windows und Android).
+    device_notifications: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False,
+                                                      server_default=text('1'))
     # IANA-Zeitzone des Benutzers (z. B. 'Europe/Berlin').
     # Einzige kanonische Zeitzonen-Quelle für Lageblock, Chat-Zeitstempel und Aufgaben.
     time_zone: Mapped[str | None] = mapped_column(String(64), nullable=True)

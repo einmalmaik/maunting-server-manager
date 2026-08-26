@@ -2956,7 +2956,9 @@
     "emailLabel": "E-Mail-Benachrichtigungen",
     "emailHint": "Anmeldungen, Server-Ereignisse, Updates.",
     "aiLabel": "KI-Meldungen im Panel",
-    "aiHint": "Hinweis, wenn ein Auftrag fertig ist oder wartet. Keine E-Mails."
+    "aiHint": "Hinweis, wenn ein Auftrag fertig ist oder wartet. Keine E-Mails.",
+    "deviceLabel": "Geräte-Benachrichtigungen",
+    "deviceHint": "Pop-up-Meldungen auf Windows- und Android-Geräten bei Server-Vorfällen, Terminen und KI-Aufträgen."
   },
   "updater": {
     "manualConfigsRestored": "Manuelle Konfigurationen wurden automatisch wiederhergestellt.",
@@ -5266,6 +5268,8 @@
   },
   "desktopBadge": {
     "tooltip": "Maunting Smart System Desktop-App herunterladen",
-    "label": "Desktop-App für Windows"
+    "label": "Desktop-App für Windows",
+    "androidTooltip": "Maunting Smart System Android-App herunterladen",
+    "androidLabel": "App für Android (.apk)"
   }
 }

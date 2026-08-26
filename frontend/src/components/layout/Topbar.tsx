@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { useNavigate } from 'react-router-dom'
 import { Logo } from '@/components/Logo'
-import { Bell, Bot, Mail, Menu, User, LogOut } from 'lucide-react'
+import { Bell, Bot, Mail, Menu, Smartphone, User, LogOut } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { Switch } from '@/components/ui/Switch'
@@ -22,18 +22,19 @@ export function Topbar({ onOpenNavigation, menuButtonRef }: TopbarProps) {
 
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(user?.email_notifications ?? true)
   const [aiNotificationsEnabled, setAiNotificationsEnabled] = useState<boolean>(user?.ai_notifications ?? true)
+  const [deviceNotificationsEnabled, setDeviceNotificationsEnabled] = useState<boolean>(user?.device_notifications ?? true)
   const [bellOpen, setBellOpen] = useState(false)
-  // Der Punkt an der Glocke sagt nur noch: irgendetwas ist an. Zwei Punkte
-  // fuer zwei Schalter waeren an dieser Groesse nicht mehr lesbar.
-  const irgendwasAn = notificationsEnabled || aiNotificationsEnabled
+  // Der Punkt an der Glocke sagt: mindestens ein Kanal ist aktiv.
+  const irgendwasAn = notificationsEnabled || aiNotificationsEnabled || deviceNotificationsEnabled
   const bellRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (user) {
       setNotificationsEnabled(user.email_notifications)
       setAiNotificationsEnabled(user.ai_notifications !== false)
+      setDeviceNotificationsEnabled(user.device_notifications !== false)
     }
-  }, [user?.email_notifications, user?.ai_notifications])
+  }, [user?.email_notifications, user?.ai_notifications, user?.device_notifications])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -58,34 +59,33 @@ export function Topbar({ onOpenNavigation, menuButtonRef }: TopbarProps) {
   }
 
   /**
-   * Legt einen der beiden Schalter um.
-   *
-   * Vorher hing an der Glocke **ein** Schalter mit einem Bestaetigungsdialog,
-   * und er steuerte ausschliesslich den E-Mail-Versand. Seit die KI Auftraege im
-   * Hintergrund zu Ende fuehrt, gibt es eine zweite Sorte Meldung — und sie an
-   * denselben Schalter zu haengen waere falsch: die KI verschickt keine E-Mails,
-   * und wer keine Post will, will deswegen nicht auch keinen Hinweis mehr, dass
-   * ein laufender Auftrag auf seine Bestaetigung wartet.
-   *
-   * Der Bestaetigungsdialog faellt dabei weg. Ein Schalter, den man mit einem
-   * zweiten Klick zurueckstellt, braucht keine Rueckfrage; sie stand nur im Weg.
+   * Legt einen der drei Schalter (E-Mail, KI-Panel, Geräte-Popups) um.
    */
-  const schalte = async (feld: 'email' | 'ai', naechster: boolean) => {
+  const schalte = async (feld: 'email' | 'ai' | 'device', naechster: boolean) => {
     if (!user) return
-    const vorher = feld === 'email' ? notificationsEnabled : aiNotificationsEnabled
-    // Erst anzeigen, dann senden — und bei einem Fehler zurueckdrehen. Ein
-    // Schalter, der nach dem Klick eine Sekunde nichts tut, wirkt kaputt.
+    const vorher =
+      feld === 'email'
+        ? notificationsEnabled
+        : feld === 'ai'
+        ? aiNotificationsEnabled
+        : deviceNotificationsEnabled
     if (feld === 'email') setNotificationsEnabled(naechster)
-    else setAiNotificationsEnabled(naechster)
+    else if (feld === 'ai') setAiNotificationsEnabled(naechster)
+    else setDeviceNotificationsEnabled(naechster)
     try {
-      const param = feld === 'email' ? 'enabled' : 'ai'
+      const param = feld === 'email' ? 'enabled' : feld === 'ai' ? 'ai' : 'device'
       await api(`/auth/me/notifications?${param}=${naechster}`, { method: 'PATCH' })
       updateUser(
-        feld === 'email' ? { email_notifications: naechster } : { ai_notifications: naechster },
+        feld === 'email'
+          ? { email_notifications: naechster }
+          : feld === 'ai'
+          ? { ai_notifications: naechster }
+          : { device_notifications: naechster },
       )
     } catch {
       if (feld === 'email') setNotificationsEnabled(vorher)
-      else setAiNotificationsEnabled(vorher)
+      else if (feld === 'ai') setAiNotificationsEnabled(vorher)
+      else setDeviceNotificationsEnabled(vorher)
       toast.error(t('notifications.updateFailed'))
     }
   }
@@ -116,7 +116,7 @@ export function Topbar({ onOpenNavigation, menuButtonRef }: TopbarProps) {
         {/* Right Actions */}
         <div className="flex items-center gap-4">
 
-          {/* Benachrichtigungen: E-Mail und KI, getrennt schaltbar */}
+          {/* Benachrichtigungen: E-Mail, KI und Geräte-Popups getrennt schaltbar */}
           <div className="relative" ref={bellRef}>
             <button
               onClick={() => setBellOpen((offen) => !offen)}
@@ -138,7 +138,7 @@ export function Topbar({ onOpenNavigation, menuButtonRef }: TopbarProps) {
             </button>
 
             {bellOpen && (
-              <div role="menu" className="absolute right-0 top-full mt-2 w-72 bg-surface-container-high border border-outline-variant rounded-lg shadow-lg z-50 overflow-hidden">
+              <div role="menu" className="absolute right-0 top-full mt-2 w-80 bg-surface-container-high border border-outline-variant rounded-lg shadow-lg z-50 overflow-hidden">
                 <div className="p-3 border-b border-outline-variant/30">
                   <p className="font-label-md text-sm text-on-surface font-medium">
                     {t('notifications.title', 'Benachrichtigungen')}
@@ -160,15 +160,13 @@ export function Topbar({ onOpenNavigation, menuButtonRef }: TopbarProps) {
                     aria-label={t('notifications.emailLabel', 'E-Mail-Benachrichtigungen')}
                   />
                 </label>
-                <label className="flex items-start gap-3 px-3 py-2.5 hover:bg-surface-container-highest transition-colors cursor-pointer">
+                <label className="flex items-start gap-3 px-3 py-2.5 hover:bg-surface-container-highest transition-colors cursor-pointer border-t border-outline-variant/20">
                   <Bot className="mt-0.5 h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm text-on-surface">
                       {t('notifications.aiLabel', 'KI-Meldungen im Panel')}
                     </span>
                     <span className="block text-xs text-on-surface-variant">
-                      {/* Die KI verschickt keine E-Mails — deshalb ein eigener
-                          Schalter und ein eigener Satz dazu. */}
                       {t('notifications.aiHint', 'Hinweis, wenn ein Auftrag fertig ist oder wartet. Keine E-Mails.')}
                     </span>
                   </span>
@@ -176,6 +174,22 @@ export function Topbar({ onOpenNavigation, menuButtonRef }: TopbarProps) {
                     checked={aiNotificationsEnabled}
                     onCheckedChange={(wert) => void schalte('ai', wert)}
                     aria-label={t('notifications.aiLabel', 'KI-Meldungen im Panel')}
+                  />
+                </label>
+                <label className="flex items-start gap-3 px-3 py-2.5 hover:bg-surface-container-highest transition-colors cursor-pointer border-t border-outline-variant/20">
+                  <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm text-on-surface">
+                      {t('notifications.deviceLabel', 'Geräte-Benachrichtigungen')}
+                    </span>
+                    <span className="block text-xs text-on-surface-variant">
+                      {t('notifications.deviceHint', 'Pop-up-Meldungen auf Windows- und Android-Geräten bei Server-Vorfällen, Terminen und KI-Aufträgen.')}
+                    </span>
+                  </span>
+                  <Switch
+                    checked={deviceNotificationsEnabled}
+                    onCheckedChange={(wert) => void schalte('device', wert)}
+                    aria-label={t('notifications.deviceLabel', 'Geräte-Benachrichtigungen')}
                   />
                 </label>
               </div>
