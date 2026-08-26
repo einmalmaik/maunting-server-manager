@@ -298,12 +298,21 @@ function SchrittPersonalisierung({ onWeiter }: { onWeiter: () => Promise<void> }
   const { t } = useTranslation()
   const benutzer = useAuthStore((s) => s.user)
   const updateUser = useAuthStore((s) => s.updateUser)
-  const [name, setName] = useState(benutzer?.agent_name ?? 'Singra')
+  const [name, setName] = useState(benutzer?.agent_name ?? '')
   const [zeitzone, setZeitzone] = useState(
     benutzer?.time_zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
   )
   const [fehler, setFehler] = useState<string | null>(null)
   const [laeuft, setLaeuft] = useState(false)
+
+  useEffect(() => {
+    if (benutzer?.agent_name && !name) {
+      setName(benutzer.agent_name)
+    }
+    if (benutzer?.time_zone) {
+      setZeitzone(benutzer.time_zone)
+    }
+  }, [benutzer, name])
 
   async function speichern() {
     setFehler(null)

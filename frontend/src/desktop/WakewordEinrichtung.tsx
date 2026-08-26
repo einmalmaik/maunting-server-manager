@@ -163,6 +163,18 @@ export function WakewordEinrichtung() {
     setMeldung(null)
     abbruch.current = false
     try {
+      // Explizite Mikrofon-Berechtigungsabfrage (fuer Android-System-Dialog)
+      if (navigator.mediaDevices?.getUserMedia) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+          stream.getTracks().forEach((t) => t.stop())
+        } catch (e: any) {
+          setBeschaeftigt(null)
+          setMeldung(t('mss.wakeword.keinMikrofon', 'Mikrofonzugriff wurde verweigert oder ist nicht verfügbar.'))
+          return
+        }
+      }
+
       let aktueller = await standLaden()
       let fehlversuche = 0
       while (
