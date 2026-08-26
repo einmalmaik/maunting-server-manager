@@ -3526,7 +3526,17 @@ async def _schreibrunde_ausfuehren(
         guardian=guardian,
         aufgabe=aufgabe,
     )
+    call_by_id = {call.id: call for call in current_usage.tool_calls}
     for proposal in proposals:
+        call = call_by_id.get(proposal.get("call_id"))
+        if call is not None:
+            anzeige = _anzeigeeintrag(
+                call,
+                {"proposal_id": proposal.get("id"), "autonomous": bool(proposal.get("autonomous"))},
+                proposal.get("error"),
+            )
+            if run_id is not None:
+                ai_run_broker.veroeffentlichen(run_id, "tool", anzeige)
         # Nur echte Vorschlaege bekommen eine Karte. Ein abgelehnter
         # Aufruf hat keine Zeile und keine Kennung; ihn als
         # Vorschlagsereignis zu senden waere eine Karte ohne Knopf.

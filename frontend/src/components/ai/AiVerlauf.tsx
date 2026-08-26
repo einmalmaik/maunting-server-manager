@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import { AlertTriangle, BookOpen, Bot, BrainCircuit, CalendarClock, ChevronDown, ChevronRight, Loader2, Sparkles, User, Wrench } from 'lucide-react'
+import { AlertTriangle, BookOpen, Bot, BrainCircuit, Calendar, CalendarClock, ChevronDown, ChevronRight, Loader2, Mail, Sparkles, User, Wrench } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type {
@@ -299,7 +299,11 @@ function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {
             ? <BookOpen className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
             : gruppe === 'tasks'
               ? <CalendarClock className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
-              : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
+              : gruppe === 'mailbox'
+                ? <Mail className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+                : gruppe === 'calendar'
+                  ? <Calendar className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+                  : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
       {skillLabel ?? t(`ai.tools.${tool.tool_name}`, { defaultValue: tool.tool_name })}
       {/* Ohne diesen Zusatz behauptet die Zeile einen Beleg, den es nicht gibt
           — der gefaehrlichste Fall bei den Doku-Werkzeugen. */}
