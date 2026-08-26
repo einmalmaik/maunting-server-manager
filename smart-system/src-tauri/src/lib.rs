@@ -612,6 +612,7 @@ fn hauptfenster_verstecken(app: tauri::AppHandle) -> Result<(), String> {
     fenster.hide().map_err(|e| e.to_string())
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();

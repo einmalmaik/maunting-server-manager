@@ -18,6 +18,7 @@ fn main() {
             r"{ndk}\toolchains\llvm\prebuilt\windows-x86_64\sysroot\usr\lib\{arch_triple}\26"
         );
         println!("cargo:rustc-link-search=native={lib_dir}");
+        println!("cargo:rustc-link-arg=-Wl,-z,max-page-size=16384");
     }
     tauri_build::build()
 }

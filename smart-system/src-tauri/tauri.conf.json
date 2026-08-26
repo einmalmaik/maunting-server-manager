@@ -6,7 +6,7 @@
   "identifier": "com.mauntingstudios.smart-system",
   "build": {
     "beforeDevCommand": "npm --prefix ../frontend run dev:desktop",
-    "devUrl": "http://localhost:1430/desktop.html",
+    "devUrl": "http://localhost:1430",
     "beforeBuildCommand": "npm --prefix ../frontend run build:desktop",
     "frontendDist": "../../frontend/dist-desktop"
   },

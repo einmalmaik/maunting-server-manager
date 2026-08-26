@@ -15,7 +15,9 @@ import { OverlayFenster } from './OverlayFenster'
 import { konfigLaden } from './tauri'
 
 export function DesktopRoot() {
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
   const overlay =
+    !isMobile &&
     new URLSearchParams(window.location.search).get('fenster') === 'overlay'
 
   // Gerätewahl und Mikrofon-Verarbeitung gelten in **beiden** Fenstern —
