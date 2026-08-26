@@ -5112,6 +5112,8 @@
         "beschreibung": "Allows the AI to control mouse and keyboard and inspect the screen. Disabled by default to protect your privacy.",
         "statusAktiv": "Enabled",
         "statusDeaktiviert": "Disabled (Recommended)",
+        "statusNichtVerfuegbar": "Not available",
+        "androidHinweis": "Computer-Use (mouse, keyboard, and screen control) is a desktop feature (Windows) and disabled on mobile devices.",
         "aktivierenTitel": "Enable Computer-Use?",
         "aktivierenWarnung": "Important Security Notice: Enabling Computer-Use allows the AI to perform mouse movements, clicks, keystrokes, and screenshots on your machine after permission or in autonomous mode. With autonomous mode disabled, you must confirm each action manually in chat or via a confirmation dialog. Do you want to enable Computer-Use now?",
         "aktivierenBestaetigen": "Yes, enable Computer-Use",

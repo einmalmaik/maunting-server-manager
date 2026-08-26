@@ -126,4 +126,32 @@ describe('Einstellungen Component', () => {
     ))
     expect(onKonfigChange).toHaveBeenCalled()
   })
+
+  it('deaktiviert Computer-Use Schalter auf Android und zeigt Hinweis', async () => {
+    const originalUserAgent = navigator.userAgent
+    Object.defineProperty(navigator, 'userAgent', {
+      value: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36',
+      configurable: true,
+    })
+
+    render(
+      <MemoryRouter>
+        <Einstellungen />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(konfigLadenMock).toHaveBeenCalled())
+
+    const switchBtn = await screen.findByRole('switch', { name: /mss\.einstellungen\.computerUse\.titel/i })
+    expect(switchBtn).toBeDisabled()
+    expect(switchBtn).toHaveAttribute('aria-checked', 'false')
+
+    expect(screen.getByText(/mss\.einstellungen\.computerUse\.statusNichtVerfuegbar/i)).toBeInTheDocument()
+    expect(screen.getByText(/mss\.einstellungen\.computerUse\.androidHinweis/i)).toBeInTheDocument()
+
+    Object.defineProperty(navigator, 'userAgent', {
+      value: originalUserAgent,
+      configurable: true,
+    })
+  })
 })

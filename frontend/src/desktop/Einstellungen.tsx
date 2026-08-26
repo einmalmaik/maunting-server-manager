@@ -234,13 +234,19 @@ function ComputerUseSektion({ onKonfigAenderung }: { onKonfigAenderung?: () => v
     onKonfigAenderung?.()
   }
 
+  const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
+
   return (
     <>
       <div className="flex items-center justify-between gap-3 border-t border-outline-variant/40 pt-4">
         <div>
           <div className="flex items-center gap-2">
             <p className="text-sm text-on-surface">{t('mss.einstellungen.computerUse.titel')}</p>
-            {konfig?.computer_use_aktiv ? (
+            {isAndroid ? (
+              <Badge variant="default">
+                {t('mss.einstellungen.computerUse.statusNichtVerfuegbar')}
+              </Badge>
+            ) : konfig?.computer_use_aktiv ? (
               <Badge variant="success">
                 {t('mss.einstellungen.computerUse.statusAktiv')}
               </Badge>
@@ -251,12 +257,14 @@ function ComputerUseSektion({ onKonfigAenderung }: { onKonfigAenderung?: () => v
             )}
           </div>
           <p className="text-xs text-on-surface-variant">
-            {t('mss.einstellungen.computerUse.beschreibung')}
+            {isAndroid
+              ? t('mss.einstellungen.computerUse.androidHinweis')
+              : t('mss.einstellungen.computerUse.beschreibung')}
           </p>
         </div>
         <Switch
-          checked={konfig?.computer_use_aktiv === true}
-          disabled={konfig === null}
+          checked={!isAndroid && konfig?.computer_use_aktiv === true}
+          disabled={isAndroid || konfig === null}
           onCheckedChange={(an) => void toggle(an)}
           aria-label={t('mss.einstellungen.computerUse.titel')}
         />

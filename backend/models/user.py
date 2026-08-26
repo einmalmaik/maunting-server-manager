@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import hashlib
 
-from sqlalchemy import Boolean, CheckConstraint, String, DateTime, ForeignKey, Integer, text
+from sqlalchemy import Boolean, CheckConstraint, String, DateTime, ForeignKey, Integer, text, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -94,10 +94,10 @@ class User(Base):
     # Post will, will deswegen nicht auch keine Hinweise mehr sehen, dass ein
     # laufender Auftrag auf seine Bestaetigung wartet.
     ai_notifications: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False,
-                                                  server_default=text('1'))
+                                                  server_default=true())
     # Geräte-Benachrichtigungen (Pop-ups auf Windows und Android).
     device_notifications: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False,
-                                                      server_default=text('1'))
+                                                      server_default=true())
     # IANA-Zeitzone des Benutzers (z. B. 'Europe/Berlin').
     # Einzige kanonische Zeitzonen-Quelle für Lageblock, Chat-Zeitstempel und Aufgaben.
     time_zone: Mapped[str | None] = mapped_column(String(64), nullable=True)

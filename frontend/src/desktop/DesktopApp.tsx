@@ -395,6 +395,7 @@ function Hauptseite({
   // Komponente ohnehin nichts — dann lieber gar kein Reiter.
   const darfGedaechtnis = useHasPermission('ai.memory.use')
   const agentName = user?.agent_name?.trim() || 'Singra'
+  const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
   useEffect(() => {
     onKonfigAenderung?.()
@@ -445,7 +446,7 @@ function Hauptseite({
           {bereich === 'ki' ? (
             darfChatten ? (
               <>
-                {konfig && !konfig.computer_use_aktiv && (
+                {konfig && !isAndroid && !konfig.computer_use_aktiv && (
                   <div className="mb-3 flex items-center justify-between rounded-lg border border-outline-variant/40 bg-surface-container-low/60 p-3 text-xs">
                     <div className="flex items-center gap-2 text-on-surface-variant">
                       <ShieldAlert className="h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />

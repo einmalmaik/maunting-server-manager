@@ -5112,6 +5112,8 @@
         "beschreibung": "Erlaubt der KI, Maus und Tastatur zu bedienen sowie den Bildschirm zu betrachten. Standardmäßig zum Schutz Ihrer Privatsphäre deaktiviert.",
         "statusAktiv": "Aktiviert",
         "statusDeaktiviert": "Deaktiviert (Empfohlen)",
+        "statusNichtVerfuegbar": "Nicht verfügbar",
+        "androidHinweis": "Computer-Use (Maus-, Tastatur- und Bildschirmsteuerung) ist eine reine Desktop-Funktion (Windows) und auf Mobilgeräten deaktiviert.",
         "aktivierenTitel": "Computer-Use aktivieren?",
         "aktivierenWarnung": "Wichtiger Sicherheitshinweis: Wenn Sie Computer-Use aktivieren, kann die KI nach Freigabe oder im autonomen Modus Mausbewegungen, Klicks, Tastatureingaben und Bildschirmaufnahmen auf Ihrem Rechner durchführen. Bei ausgeschaltetem autonomen Modus müssen Sie jede Aktion manuell im Chat oder per Dialog bestätigen. Möchten Sie Computer-Use jetzt aktivieren?",
         "aktivierenBestaetigen": "Ja, Computer-Use aktivieren",

@@ -22,16 +22,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "users",
-        sa.Column(
-            "device_notifications",
-            sa.Boolean(),
-            nullable=False,
-            server_default=sa.text("1"),
-        ),
-    )
+    with op.batch_alter_table("users") as batch:
+        batch.add_column(
+            sa.Column(
+                "device_notifications",
+                sa.Boolean(),
+                nullable=False,
+                server_default=sa.true(),
+            )
+        )
 
 
 def downgrade() -> None:
-    op.drop_column("users", "device_notifications")
+    with op.batch_alter_table("users") as batch:
+        batch.drop_column("device_notifications")
