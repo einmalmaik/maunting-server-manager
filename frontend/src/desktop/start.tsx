@@ -23,6 +23,7 @@ import '@fontsource/jetbrains-mono/500.css'
 import '@/i18n'
 import '@/index.css'
 
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { transportEinrichten } from './transport'
 import { DesktopRoot } from './DesktopRoot'
 
@@ -30,6 +31,8 @@ transportEinrichten()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <DesktopRoot />
+    <ErrorBoundary>
+      <DesktopRoot />
+    </ErrorBoundary>
   </React.StrictMode>,
 )

@@ -29,7 +29,10 @@ import { konfigSpeichern, type AppKonfig } from './tauri'
 
 export type Schritt = 'backend' | 'kopplung' | 'personalisierung' | 'sandbox' | 'wakeword'
 
-const REIHENFOLGE: Schritt[] = ['backend', 'kopplung', 'personalisierung', 'sandbox', 'wakeword']
+const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
+const REIHENFOLGE: Schritt[] = isAndroid
+  ? ['backend', 'kopplung', 'personalisierung', 'wakeword']
+  : ['backend', 'kopplung', 'personalisierung', 'sandbox', 'wakeword']
 
 interface WizardProps {
   konfig: AppKonfig
@@ -353,7 +356,22 @@ function SchrittPersonalisierung({ onWeiter }: { onWeiter: () => Promise<void> }
         <Dropdown
           value={zeitzone}
           onChange={(wert) => setZeitzone(wert ?? '')}
-          options={Intl.supportedValuesOf('timeZone').map((tz) => ({ value: tz, label: tz }))}
+          options={(() => {
+            try {
+              if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
+                return Intl.supportedValuesOf('timeZone').map((tz) => ({ value: tz, label: tz }))
+              }
+            } catch {}
+            return [
+              'Europe/Berlin',
+              'Europe/London',
+              'Europe/Paris',
+              'UTC',
+              'America/New_York',
+              'America/Los_Angeles',
+              'Asia/Tokyo',
+            ].map((tz) => ({ value: tz, label: tz }))
+          })()}
           searchable
           aria-label={t('mss.wizard.zeitzoneLabel')}
         />
