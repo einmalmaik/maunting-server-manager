@@ -82,18 +82,11 @@ ABTASTRATE = 24_000
 #:
 #: Wer länger spricht, wird nicht abgeschnitten — die Sprechpausenerkennung
 #: (`ai_voice_vad`) trennt vorher. Diese Grenze ist die Schranke dahinter, für
-#: den Fall, dass gar keine Pause kommt.
-MAX_SEKUNDEN = 30
+#: den Fall, dass gar keine Pause kommt (3 Minuten Puffer für lange Monologe).
+MAX_SEKUNDEN = 180
 
-#: Wie lang ein Transkript höchstens sein darf. Was länger ist, hat mit dem, was
-#: jemand in 30 Sekunden sagen kann, nichts mehr zu tun.
-#:
-#: Am Endpunkt ist das kaum zu erwarten, am Chatweg sehr wohl: dort antwortet
-#: ein Chatmodell, und ein Chatmodell kann auf die Idee kommen, das Gehörte zu
-#: kommentieren. Die Grenze gilt für beide Wege, weil sie hier steht und nicht
-#: dort — sie schützt den Verlauf auch vor einem Endpunkt, der eines Tages
-#: Zeitmarken oder ein Protokoll mitschickt.
-MAX_ZEICHEN = 2_000
+#: Wie lang ein Transkript höchstens sein darf.
+MAX_ZEICHEN = 10_000
 
 #: Wie kurz eine Äusserung sein darf, damit sie überhaupt hinausgeht.
 #:

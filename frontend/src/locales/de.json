@@ -271,7 +271,7 @@
       "skillsMoved": "Skills stehen nicht mehr hier: ein Skill gilt entweder für ein Team oder panelweit, nie „für dieses Profil“. Deine eigenen findest du unter",
       "skillsMovedLink": "Teams → Persönlich",
       "agentNameTitle": "Name des Assistenten",
-      "agentNameDescription": "Gib deinem Assistenten einen eigenen Rufnamen. Leer gelassen heißt er Singra. Der Name gilt überall: im Panel wie in der Desktop-App.",
+      "agentNameDescription": "Gib deinem Assistenten einen eigenen Rufnamen. Leer gelassen heißt er Assistent. Der Name gilt überall: im Panel wie in der Desktop-App.",
       "agentNameLabel": "Rufname",
       "agentNameSaved": "Name gespeichert.",
       "devicesTitle": "Geräte koppeln",
@@ -3776,7 +3776,8 @@
           "wakeword": "Wake-Word (standardmäßig aus): Wird es eingeschaltet, liest die App das Mikrofon dauerhaft mit und vergleicht das Gehörte gegen ein Referenzmodell, vollständig auf dem Rechner ohne Netzverbindung. Solange das Wort nicht erkannt ist, verlässt kein einziges Audio-Sample den Prozess; es wird auch nichts mitgeschnitten. Das dauerhafte Zuhören erzeugt eine messbare Rechenlast (etwa ein Sechstel eines Prozessorkerns).",
           "wakewordAufnahmen": "Stimmaufnahmen der Kalibrierung: Zum Anlernen sprechen Sie den frei gewählten Namen mehrfach ein. Diese Aufnahmen sind echte Sprachaufzeichnungen und liegen als WAV-Dateien unbefristet im lokalen App-Datenverzeichnis, zusammen mit dem daraus erzeugten Referenzmodell. Sie werden nie übertragen. Entfernt werden sie durch „Zurücksetzen“ in den Wake-Word-Einstellungen oder durch die Deinstallation.",
           "sprachsitzung": "Sprachsitzung: Erst ab dem erkannten Wake-Word (oder nach dem Drücken des Sprach-Kürzels) öffnet die App den Audiokanal zum Panel und überträgt Ihre Äußerung. Das Panel gibt sie zur Abschrift an den eingestellten Modellanbieter weiter; die gesprochene Antwort erzeugt zusätzlich ein Sprachdienstleister. Ab diesem Punkt gelten die Aussagen aus Abschnitt 6 zu externen Modellanbietern.",
-          "benachrichtigungen": "Hintergrunddienst und Benachrichtigungen: Auf Mobilgeräten (Android) und Windows kann die App im Hintergrund laufen, um auf das gelernte Weckwort zu lauschen und Benachrichtigungen zuzustellen. Während des Weckwort-Lauschens zeigt das System eine transparente Benachrichtigung in der Statusleiste an („Singra lauscht“), sodass das Mithören jederzeit für den Nutzer sichtbar bleibt. Die Audiodaten werden rein lokal auf dem Gerät verarbeitet und verlassen dieses nicht ohne Weckwort-Aktivierung. Push-Benachrichtigungen für Terminerinnerungen und KI-Antworten können über die Glocke im Panel und in der App jederzeit getrennt deaktiviert werden.",
+          "benachrichtigungen": "Hintergrunddienst und Benachrichtigungen: Auf Mobilgeräten (Android) und Windows kann die App im Hintergrund laufen, um auf das gelernte Weckwort zu lauschen und Benachrichtigungen zuzustellen. Während des Hintergrundbetriebs zeigt das System eine Benachrichtigung in der Statusleiste an („Hintergrunddienst aktiv“). Die Audiodaten werden rein lokal auf dem Gerät verarbeitet und verlassen dieses nicht ohne Weckwort-Aktivierung. Push-Benachrichtigungen für Terminerinnerungen und KI-Antworten können über die Glocke im Panel und in der App jederzeit getrennt deaktiviert werden.",
+          "autostart": "Autostart und Hintergrundüberwachung (standardmäßig aktiv, jederzeit abschaltbar): Auf Windows und Android kann die Anwendung beim System- bzw. Handystart automatisch im Hintergrund gestartet werden, um kontinuierlich auf Server-Vorfälle und fällige Kalendertermine zu prüfen und diese per nativer System- und Statusleisten-Benachrichtigung (Heads-up-Banner) zuzustellen. Die Abfrage erfolgt direkt gegen Ihre eigene MSM-Instanz ohne Zwischenschaltung fremder Server. Der Autostart kann in den App-Einstellungen unter „Geräteintegration“ (Windows) bzw. „Beim Handystart ausführen“ (Android) jederzeit deaktiviert werden.",
           "bildschirm": "Bildschirmfotos: Die KI kann den Hauptbildschirm ansehen. Das Bild wird verkleinert, nicht auf der Festplatte gespeichert und als Werkzeugergebnis an das Panel übertragen, das es verschlüsselt ablegt und an den Modellanbieter weitergibt. Der Anbieter sieht damit alles, was zu diesem Zeitpunkt sichtbar war, einschließlich fremder Fenster, Nachrichten und geöffneter Dokumente. Bei jeder Aufnahme leuchtet ein Hinweis am Bildschirmrand auf; er lässt sich nicht abschalten.",
           "dateien": "Lesender Zugriff auf den Rechner: Die KI kann Laufwerke, Ordner und Speicherplatz einsehen, soweit der angemeldete Windows-Benutzer dies selbst darf. Übertragen werden dabei Laufwerksangaben sowie Ordner- und Dateinamen mit Größen. Dateiinhalte werden nur aus dem selbst gewählten Sandbox-Ordner gelesen und übertragen. Ob der Windows-Systembereich mitgelesen werden darf, stellen Sie im Panel je Konto ein.",
           "schreiben": "Schreibender Zugriff: Angelegt und geändert wird ausschließlich im Sandbox-Ordner, den Sie selbst auswählen. Geprüft wird der aufgelöste Pfad, damit eine Verknüpfung nicht aus dem Ordner herausführt.",
@@ -5023,7 +5024,7 @@
     },
     "systembereich": {
       "titel": "Windows-Systembereich",
-      "hinweis": "Wie weit Singra in Windows selbst greifen darf – also in den Windows-Ordner, in Programmordner und in fremde Benutzerprofile. Deine eigenen Dateien sind davon nicht betroffen.",
+      "hinweis": "Wie weit der Assistent in Windows selbst greifen darf – also in den Windows-Ordner, in Programmordner und in fremde Benutzerprofile. Deine eigenen Dateien sind davon nicht betroffen.",
       "fehler": "Konnte nicht gespeichert werden.",
       "stufe": {
         "aus": "Aus",
@@ -5031,9 +5032,9 @@
         "schreiben": "Arbeiten"
       },
       "erklaerung": {
-        "aus": "Singra sieht dort nichts und fasst dort nichts an.",
-        "lesen": "Singra darf hineinsehen – etwa um zu finden, was den Platz belegt –, aber nichts ändern.",
-        "schreiben": "Singra darf dort auch aufräumen. Bei ausgeschaltetem autonomem Modus fragt sie vorher; im autonomen Modus nicht."
+        "aus": "Der Assistent sieht dort nichts und fasst dort nichts an.",
+        "lesen": "Der Assistent darf hineinsehen – etwa um zu finden, was den Platz belegt –, aber nichts ändern.",
+        "schreiben": "Der Assistent darf dort auch aufräumen. Bei ausgeschaltetem autonomem Modus fragt er vorher; im autonomen Modus nicht."
       }
     },
     "wizard": {
@@ -5067,7 +5068,7 @@
       "koppeln": "Koppeln",
       "personalisierungErklaerung": "Gib deinem Assistenten einen Namen — so sprichst du ihn an, und so meldet er sich. Beides gilt überall: hier und im Panel.",
       "agentnameLabel": "Name des Assistenten",
-      "agentnameHinweis": "2–32 Zeichen; leer lassen für den Standardnamen Singra.",
+      "agentnameHinweis": "2–32 Zeichen; leer lassen für den Standardnamen Assistent.",
       "zeitzoneLabel": "Zeitzone",
       "speichert": "Speichert …",
       "weiter": "Weiter",

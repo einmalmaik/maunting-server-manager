@@ -173,7 +173,7 @@ export function Calendar() {
         time_hint: string
       }>('/calendar/test-reminder', { method: 'POST' })
 
-      await sendeGeraeteBenachrichtigung({
+      const sent = await sendeGeraeteBenachrichtigung({
         titel: `Terminerinnerung (${res.time_hint})`,
         text: `${res.title} am ${res.start}`,
         erzwingen: true,
@@ -181,11 +181,15 @@ export function Calendar() {
 
       if (res.email_sent) {
         toast.success(t('calendar.testReminderSentEmail', 'Test-Erinnerung per Push und E-Mail versendet!'))
-      } else {
+      } else if (sent) {
         toast.success(t('calendar.testReminderSent', 'Test-Erinnerung per Push ausgelöst!'))
+      } else {
+        toast.error(
+          'Test-Erinnerung generiert. Falls kein Pop-up erscheint, bitte Benachrichtigungen für diese App in den Smartphone-Einstellungen erlauben.'
+        )
       }
-    } catch (err: any) {
-      toast.error(err?.message || t('calendar.testReminderFailed', 'Test-Erinnerung fehlgeschlagen.'))
+    } catch {
+      toast.error(t('calendar.testReminderError', 'Fehler beim Senden der Test-Erinnerung'))
     } finally {
       setTestingPush(false)
     }

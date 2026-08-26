@@ -182,7 +182,7 @@ fn fenster_zeigen(app: &AppHandle) -> Result<(), String> {
         // Fensterliste des Betriebssystems. Ein namenloses Fenster, das immer
         // oben liegt und Klicks durchlaesst, ist genau das, was man sonst bei
         // Schadsoftware sucht — dieses sagt, was es ist.
-        .title("Singra sieht den Bildschirm")
+        .title("MSS sieht den Bildschirm")
         .inner_size(BREITE, HOEHE)
         .resizable(false)
         .decorations(false)
@@ -256,7 +256,7 @@ font-size:13px;line-height:1}
 .punkt{flex:none;width:10px;height:10px;border-radius:999px;
 background:hsl(0 70% 55%);box-shadow:0 0 8px hsl(0 70% 55% / 0.9)}
 </style></head><body><div class="schild"><span class="punkt"></span>
-<span>Singra sieht den Bildschirm</span></div></body></html>"#;
+<span>MSS sieht den Bildschirm</span></div></body></html>"#;
 
 /// Der Fensterinhalt als `data:`-URL — so braucht der Indikator keine eigene
 /// HTML-Datei im Bundle, die ein Installer auslassen oder ein Build vergessen
@@ -361,7 +361,7 @@ mod tests {
         // Umbauen der Auszeichnung heraus, zeigt der Indikator einen roten
         // Punkt ohne Erklaerung.
         assert!(
-            HTML.contains("Singra sieht den Bildschirm"),
+            HTML.contains("MSS sieht den Bildschirm"),
             "Der Satz fehlt in der Auszeichnung"
         );
     }

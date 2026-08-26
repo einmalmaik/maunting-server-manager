@@ -48,6 +48,8 @@ export interface AppKonfig {
   search_roots: string[]
   /** Ob der Splashscreen beim Erststart bereits gesehen wurde. */
   splash_gesehen?: boolean
+  /** Ob der Autostart beim Systemstart (Windows / Android) aktiviert ist. */
+  autostart_aktiv?: boolean
 }
 
 export async function konfigLaden(): Promise<AppKonfig> {

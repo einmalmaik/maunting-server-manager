@@ -59,7 +59,7 @@ export function AiAgentNameCard() {
             className="msm-input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Singra"
+            placeholder="Assistent"
             maxLength={32}
           />
         </label>

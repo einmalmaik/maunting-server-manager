@@ -349,7 +349,7 @@ function SchliessenDialog() {
 function KalibrierungsHinweis() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const agentName = useAuthStore((s) => s.user?.agent_name?.trim() || 'Singra')
+  const agentName = useAuthStore((s) => s.user?.agent_name?.trim() || 'Assistent')
   const [altesWort, setAltesWort] = useState<string | null>(null)
 
   useEffect(() => {
@@ -462,7 +462,7 @@ function Hauptseite({
   const darfGedaechtnis = useHasPermission('ai.memory.use')
   const [mobileMenuOffen, setMobileMenuOffen] = useState(false)
 
-  const agentName = user?.agent_name?.trim() || 'Singra'
+  const agentName = user?.agent_name?.trim() || 'Assistent'
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
   useEffect(() => {

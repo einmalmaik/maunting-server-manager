@@ -329,7 +329,7 @@ pub fn schwelle_klemmen(wert: f32) -> f32 {
     if !wert.is_finite() {
         return crate::konfig::WAKEWORD_SCHWELLE_VORGABE;
     }
-    wert.clamp(0.30, 0.60)
+    wert.clamp(0.40, 0.75)
 }
 
 /// Quadratischer Mittelwert eines Fensters — das Maß für „hier ist Energie".
@@ -589,57 +589,16 @@ fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
     // käme nie auf den Pegel, mit dem trainiert wurde. Der Preis: er hebt
     // auch Rauschen an — deshalb die drei Tore darunter.
     rp_konfig.filters.gain_normalizer.enabled = true;
-    rp_konfig.filters.gain_normalizer.max_gain = 4.0;
-    // Tor 1 — VAD: ohne Sprachaktivität läuft der Template-Vergleich gar
-    // nicht erst (detector.rs: process_new_mfccs). Ohne dieses Gate wurde
-    // jedes Rausch-Frame gescort, und ein zufälliger Ausreißer öffnete das
-    // Overlay, ohne dass jemand gesprochen hatte. Easy statt Medium/Hard:
-    // eine laufende Teil-Erkennung umgeht das Gate ohnehin, das strengere
-    // Gate kostete nur echte, leise Rufe.
-    rp_konfig.detector.vad_mode = Some(VADMode::Easy);
-    // Tor 2 — Median statt Max: der Einheitsscore braucht die Mehrheit der
-    // Aufnahmen, nicht die eine, die dem Rauschen zufällig ähnelt. Median
-    // ist ein Perzentil und keine Anzahl — der geforderte Anteil bleibt
-    // derselbe, egal wie viele Aufnahmen es gibt.
+    rp_konfig.filters.gain_normalizer.max_gain = 1.8;
+    rp_konfig.detector.vad_mode = Some(VADMode::Medium);
     rp_konfig.detector.score_mode = ScoreMode::Median;
-    // Tor 3 — das Durchschnitts-Tor auf Werkswert. Hier stand 0,0 mit der
-    // Begründung „reine CPU-Sparmaßnahme" — falsch gelesen: es verwirft
-    // Erkennungen gegen das gemittelte Template und ist damit ein zweites,
-    // unabhängiges Ähnlichkeitskriterium (wakeword_comp.rs).
-    rp_konfig.detector.avg_threshold = 0.2;
-    // Die Empfindlichkeit gehört dem Benutzer (Einstellungen → Wake-Word):
-    // kleiner = empfindlicher. Geklemmt, damit kein Wert aus einer von Hand
-    // editierten Datei die Erkennung lahmlegt oder dauerfeuern lässt.
+    rp_konfig.detector.avg_threshold = 0.38;
     rp_konfig.detector.threshold = schwelle_klemmen(
         crate::konfig::laden(app)
             .map(|k| k.wakeword_schwelle)
             .unwrap_or(crate::konfig::WAKEWORD_SCHWELLE_VORGABE),
     );
-    // Ein echtes Wort, das nur in drei, vier Frames über der Schwelle liegt,
-    // wurde mit dem Werkswert 5 stumm verworfen. Drei reicht als Beleg, die
-    // Tore oben fangen das Rauschen.
-    rp_konfig.detector.min_scores = 3;
-    // **Sofort melden, statt auf das Ende einer Nachlaufuhr zu warten.**
-    //
-    // Das war am 23.08.2026 die eigentliche Ursache für „das Wake-Word
-    // funktioniert gar nicht". Ohne `eager` meldet rustpotter erst, wenn
-    // `detection_countdown` auf 0 steht (detector.rs: `is_detection_done`),
-    // und der Zähler steht auf `max_mfcc_frames / 2` — bei den damaligen
-    // Aufnahmen also 1,25 s. Gemessen kam die Meldung **3,08 s** nach dem
-    // Wort. Für einen Menschen ist das nicht „erkannt", sondern „nicht
-    // gehört".
-    //
-    // Schlimmer: der Countdown wird bei **jedem** Frame über der Schwelle
-    // neu gestellt (detector.rs:429, ausserhalb der „besserer Score"-
-    // Verzweigung). Wer den Namen aus Ungeduld noch einmal ruft, dreht die
-    // Uhr zurück — viermal gerufen ergab gemessen 7,58 s statt 3,08 s.
-    // Genau das hat der Betreiber erlebt, und genau deshalb wurde es
-    // schlimmer, je öfter er es versuchte.
-    //
-    // Der Kommentar an `min_scores` nannte das früher als Grund für „man
-    // muss es mehrmals sagen". Das war die falsche Stellschraube: solange
-    // der Countdown läuft, sieht `is_detection_done` den Zähler gar nicht
-    // an. Mit `eager` wird gemeldet, sobald `min_scores` erreicht ist.
+    rp_konfig.detector.min_scores = 5;
     rp_konfig.detector.eager = true;
     let mut erkenner = Rustpotter::new(&rp_konfig)?;
     erkenner.add_wakeword_from_file(
@@ -652,10 +611,8 @@ fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
     let stream = stream_starten(&geraet, &konfig, sender)?;
 
     let mut puffer: Vec<f32> = Vec::with_capacity(je_frame * 4);
-    // Gedrosselter Pegel für die Einstellungen: was das Wake-Word gerade
-    // hört (RMS nach Filtern) und wie stark der Normalizer verstärkt. Nur
-    // Zahlen — nie Audio — verlassen das Modul.
     let mut letzter_pegel = std::time::Instant::now();
+    let mut letzter_treffer = std::time::Instant::now() - Duration::from_secs(5);
     while LAUSCHT.load(Ordering::SeqCst) {
         match empfaenger.recv_timeout(Duration::from_millis(500)) {
             Ok(block) => {
@@ -673,26 +630,17 @@ fn lausch_schleife(app: &AppHandle, modell: &Path) -> Result<(), String> {
                 while puffer.len() >= je_frame {
                     let frame: Vec<f32> = puffer.drain(..je_frame).collect();
                     if let Some(erkennung) = erkenner.process_samples(frame) {
-                        // Nur Name und Score verlassen dieses Modul — nie Audio.
-                        let _ = app.emit(
-                            "wakeword-erkannt",
-                            serde_json::json!({
-                                "name": erkennung.name,
-                                "score": erkennung.score,
-                            }),
-                        );
-                        // Das Overlay öffnet **hier**, nicht im Hauptfenster-JS:
-                        // ein verstecktes WebView darf gedrosselt sein, Rust
-                        // nicht — das Wake-Word muss auch dann tragen, wenn
-                        // kein Fenster offen ist. Läuft dort schon eine
-                        // Sitzung, passiert nichts.
-                        // Über den Hauptthread, nicht von hier aus:
-                        // `sprachsitzung_starten` fragt das Overlay nach
-                        // seiner Sichtbarkeit, und dieser Getter blockiert
-                        // aus einem Nebenfaden, bis die Ereignisschleife
-                        // antwortet. Genau daran hing der Deadlock gegen
-                        // `wakeword_lauschen`, das diesen Faden joint.
-                        crate::am_hauptthread(app, crate::sprachsitzung_starten);
+                        if letzter_treffer.elapsed() >= Duration::from_millis(2500) {
+                            letzter_treffer = std::time::Instant::now();
+                            let _ = app.emit(
+                                "wakeword-erkannt",
+                                serde_json::json!({
+                                    "name": erkennung.name,
+                                    "score": erkennung.score,
+                                }),
+                            );
+                            crate::am_hauptthread(app, crate::sprachsitzung_starten);
+                        }
                     }
                 }
             }
@@ -861,9 +809,9 @@ mod tests {
         // Werte kommen aus konfig.json und damit potenziell von Hand: NaN,
         // 0 oder 3 dürfen die Erkennung weder dauerfeuern lassen noch taub
         // machen.
-        assert_eq!(schwelle_klemmen(0.45), 0.45);
-        assert_eq!(schwelle_klemmen(0.0), 0.30);
-        assert_eq!(schwelle_klemmen(3.0), 0.60);
+        assert_eq!(schwelle_klemmen(0.55), 0.55);
+        assert_eq!(schwelle_klemmen(0.0), 0.40);
+        assert_eq!(schwelle_klemmen(3.0), 0.75);
         assert_eq!(
             schwelle_klemmen(f32::NAN),
             crate::konfig::WAKEWORD_SCHWELLE_VORGABE

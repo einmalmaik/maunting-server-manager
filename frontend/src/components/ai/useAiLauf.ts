@@ -354,8 +354,9 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
         // unter der dann "Keine Antwort erhalten" erschien.
         aendere(aktuell!, (message) => {
           if (typeof document !== 'undefined' && document.hidden) {
+            const titel = useAuthStore.getState().user?.agent_name?.trim() || 'Assistent'
             void sendeGeraeteBenachrichtigung({
-              titel: 'Singra',
+              titel,
               text: data?.question || 'Rückfrage der KI',
             })
           }
@@ -364,9 +365,10 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
       } else if (name === 'done') {
         aendere(aktuell!, (message) => {
           if (typeof document !== 'undefined' && document.hidden) {
+            const titel = useAuthStore.getState().user?.agent_name?.trim() || 'Assistent'
             const vorschau = (message.content || 'Antwort bereit').slice(0, 160)
             void sendeGeraeteBenachrichtigung({
-              titel: 'Singra',
+              titel,
               text: vorschau,
             })
           }

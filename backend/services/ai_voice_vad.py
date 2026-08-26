@@ -57,75 +57,45 @@ RAHMEN_MS = 20
 #: nicht als Ende gilt. 0,7 s waren für das Erste richtig und für das Zweite
 #: viel zu knapp.
 #:
-#: Deshalb ist das hier nur noch der **Ausgangswert** für kurze Äusserungen.
-STILLE_SEKUNDEN = 0.7
+#: Wie lange es still sein muss, damit die Äusserung als beendet gilt.
+#:
+#: **Der Wert wächst mit der Länge der Äusserung** (`_stille_grenze`).
+#: 1,5 s als Ausgangswert erlaubt natürliches Luftholen und kurze Denkpausen,
+#: ohne dass ein Satz vorzeitig zerteilt wird.
+STILLE_SEKUNDEN = 1.5
 
 #: Die Obergrenze, auf die die Stillegrenze bei langer Rede anwächst.
 #:
-#: Wer zwei Sätze am Stück gesprochen hat, ist erkennbar beim Diktieren und
-#: nicht beim Zurufen — dort darf eine Atempause zwei Sekunden dauern, ohne
-#: dass der Satz abgeschickt wird. Höher wäre es nicht mehr angenehm: nach dem
-#: letzten Wort wartet der Mensch diese Zeit tatsächlich ab.
-STILLE_SEKUNDEN_MAX = 2.0
+#: Wer längere Aufträge oder Absätze diktiert, darf bis zu 4 Sekunden
+#: nachdenken oder Luft holen, ohne dass die Äusserung abgegeben wird.
+STILLE_SEKUNDEN_MAX = 4.0
 
 #: Ab welcher gesprochenen Dauer die volle Stillegrenze gilt.
-#:
-#: Dazwischen wird linear interpoliert: ein 1-Sekunden-„Ja" wird nach 0,7 s
-#: abgegeben, ein 6-Sekunden-Satz erst nach 2,0 s. Der Übergang ist gleitend,
-#: damit es keine Schwelle gibt, an der sich das Verhalten sprunghaft ändert —
-#: so etwas fühlt sich für den Sprechenden wie ein Fehler an.
-STILLE_VOLL_AB_SEKUNDEN = 6.0
+#: Dazwischen wird linear interpoliert.
+STILLE_VOLL_AB_SEKUNDEN = 10.0
 
 #: Wie lange am Stück laut sein muss, damit Rede beginnt. Drei Rahmen sind
 #: 60 ms — ein Türklappen ist kürzer, die kürzeste gesprochene Silbe länger.
 REDE_RAHMEN = 3
 
 #: Wie viel Ton **vor** dem erkannten Beginn mitgenommen wird.
-#:
-#: Ohne diesen Vorlauf fehlt der Anlaut. Ein „Starte den Server" beginnt leise
-#: mit dem „St", überschreitet die Schwelle erst beim „a", und das hörende
-#: Modell bekäme „arte den Server" — es versteht dann irgendetwas, nur nicht
-#: das. 300 ms decken jeden Anlaut ab.
+#: 300 ms decken jeden Anlaut ab.
 VORLAUF_SEKUNDEN = 0.3
 
-#: Die absolute Untergrenze, unterhalb derer nichts als Rede gilt — auch dann
-#: nicht, wenn der Raum vollkommen still ist und der gemessene Grundpegel
-#: entsprechend niedrig. Ohne sie würde in einem stillen Raum das Rauschen des
-#: Mikrofons selbst zur Rede erklärt, weil es den Grundpegel um ein Vielfaches
-#: übersteigt.
+#: Die absolute Untergrenze, unterhalb derer nichts als Rede gilt.
 MINDESTPEGEL = 220.0
 
-#: Um welchen Faktor der Grundpegel überschritten sein muss. Der Grundpegel
-#: selbst wird laufend nachgeführt, damit ein brummender Lüfter nach wenigen
-#: Sekunden nicht mehr als Rede zählt.
+#: Um welchen Faktor der Grundpegel überschritten sein muss.
 PEGELFAKTOR = 3.0
 
-#: Wie träge der Grundpegel nachgeführt wird. Klein heisst träge: ein einzelner
-#: lauter Rahmen hebt ihn kaum, ein dauerhaft lauter Raum nach ein paar
-#: Sekunden schon.
+#: Wie träge der Grundpegel nachgeführt wird.
 NACHFUEHRUNG = 0.05
 
 #: Wie lange eine Äusserung höchstens dauert, bevor sie auch ohne Pause
-#: abgegeben wird. Die Schranke dahinter, falls jemand ohne Punkt und Komma
-#: spricht oder das Mikrofon in einer lauten Umgebung steht.
-#:
-#: 30 s waren dafür zu knapp: der Betreiber diktiert längere Aufträge am
-#: Stück, und die wurden mitten im Satz zerteilt — sichtbar wurde das nicht
-#: einmal, denn `Aeusserung.abgeschnitten` wertet die Brücke nicht aus. Zwei
-#: Minuten decken auch einen langen zusammenhängenden Auftrag ab und bleiben
-#: eine wirksame Schranke gegen ein dauerlautes Mikrofon.
-MAX_SEKUNDEN = 120.0
+#: abgegeben wird (3 Minuten Puffer für lange Monologe).
+MAX_SEKUNDEN = 180.0
 
 #: Wieviel **laute** Zeit eine Äusserung mindestens enthalten muss.
-#:
-#: Kürzeres ist ein Husten, ein Stuhlrücken, ein Klicken — und jeder davon würde
-#: sonst eine Anfrage auslösen und Geld kosten.
-#:
-#: Gemessen wird ausdrücklich die laute Zeit und **nicht** die Länge des
-#: aufgezeichneten Stücks. Die beiden gehen weit auseinander: um jede Äusserung
-#: liegen `VORLAUF_SEKUNDEN` davor und `STILLE_SEKUNDEN` dahinter, zusammen eine
-#: ganze Sekunde Polster. Ein Husten von 0,12 Sekunden ergab damit ein Stück von
-#: 1,06 Sekunden — und kam durch jede Prüfung, die auf die Gesamtlänge sah.
 MIN_SEKUNDEN = 0.35
 
 
@@ -135,15 +105,6 @@ class Aeusserung:
 
     pcm: bytes
     sekunden: float
-    #: Ob die Äusserung wegen `MAX_SEKUNDEN` abgegeben wurde und nicht, weil
-    #: jemand aufgehört hat zu reden.
-    #:
-    #: Die Brücke liest das Feld heute **nicht**, und das ist eine bekannte
-    #: Lücke, keine Entscheidung: wer dreissig Sekunden am Stück redet, bekommt
-    #: eine Antwort auf die erste Hälfte und erfährt nicht, dass die zweite nie
-    #: ankam. Es zu ändern heisst, ein Ereignis dafür zu erfinden — und ein
-    #: Ereignis ist eine Zeile im Backend, ein `case` im Browser und ein Satz in
-    #: zwei Sprachdateien. Wer das tut, fängt hier an.
     abgeschnitten: bool = False
 
 
@@ -152,14 +113,6 @@ class Pausenerkennung:
 
     Zustandsbehaftet und **nicht** nebenläufig benutzbar: eine Instanz je
     Sprachsitzung, gefüttert aus der einen Schleife, die auch den Ton empfängt.
-
-    .. code-block:: python
-
-        erkennung = Pausenerkennung()
-        while True:
-            rahmen = await browser.receive_bytes()
-            if (aeusserung := erkennung.fuettern(rahmen)) is not None:
-                await verarbeiten(aeusserung)
     """
 
     def __init__(
@@ -172,15 +125,15 @@ class Pausenerkennung:
         vorlauf_sekunden: float = VORLAUF_SEKUNDEN,
         max_sekunden: float = MAX_SEKUNDEN,
         min_sekunden: float = MIN_SEKUNDEN,
+        kadenz_faktor: float = 1.0,
     ) -> None:
         self._abtastrate = abtastrate
         self._rahmen_bytes = abtastrate * RAHMEN_MS // 1000 * 2
-        self._stille_rahmen = max(1, int(stille_sekunden * 1000 / RAHMEN_MS))
-        # Die Obergrenze darf nie unter dem Ausgangswert liegen — sonst würde
-        # längeres Sprechen die Pause *verkürzen*, also genau das Gegenteil.
-        self._stille_rahmen_max = max(
-            self._stille_rahmen, int(stille_sekunden_max * 1000 / RAHMEN_MS)
-        )
+        self._stille_sekunden_basis = stille_sekunden
+        self._stille_sekunden_max_basis = stille_sekunden_max
+        self._kadenz_faktor = max(0.5, min(3.0, kadenz_faktor))
+        self._berechne_schwellen()
+
         self._voll_ab_rahmen = max(1, int(stille_voll_ab_sekunden * 1000 / RAHMEN_MS))
         self._vorlauf_rahmen = max(0, int(vorlauf_sekunden * 1000 / RAHMEN_MS))
         self._max_bytes = int(max_sekunden * abtastrate * 2)
@@ -194,11 +147,30 @@ class Pausenerkennung:
         self._laute_rahmen = 0
         self._laute_gesamt = 0
         self._stille_zaehler = 0
-        #: Der Grundpegel des Raums. Startet bewusst hoch und sinkt in den ersten
-        #: Sekunden auf den tatsächlichen Wert: andersherum — von null kommend —
-        #: gälte das erste Rauschen als Rede, und die Sitzung begänne mit einer
-        #: Äusserung, die niemand gesprochen hat.
+        self._gemessene_pausen_ms: list[int] = []
         self._grundpegel = MINDESTPEGEL
+
+    def _berechne_schwellen(self) -> None:
+        eff_stille = self._stille_sekunden_basis * self._kadenz_faktor
+        eff_max = self._stille_sekunden_max_basis * self._kadenz_faktor
+        self._stille_rahmen = max(1, int(eff_stille * 1000 / RAHMEN_MS))
+        self._stille_rahmen_max = max(
+            self._stille_rahmen, int(eff_max * 1000 / RAHMEN_MS)
+        )
+
+    def kadenz_anpassen(self, faktor: float) -> None:
+        """Passt den gelernten Geduldsfaktor dynamisch an."""
+        self._kadenz_faktor = max(0.5, min(3.0, faktor))
+        self._berechne_schwellen()
+
+    @property
+    def kadenz_faktor(self) -> float:
+        return self._kadenz_faktor
+
+    @property
+    def gemessene_pausen(self) -> list[int]:
+        """Innersprachliche Pausenlängen in ms zur Rhythmusanalyse."""
+        return list(self._gemessene_pausen_ms)
 
     @property
     def spricht(self) -> bool:
@@ -310,6 +282,12 @@ class Pausenerkennung:
         self._aufnahme.append(rahmen)
         self._aufnahme_bytes += len(rahmen)
         if laut:
+            if self._stille_zaehler > 0:
+                pause_ms = self._stille_zaehler * RAHMEN_MS
+                if pause_ms >= 100:
+                    self._gemessene_pausen_ms.append(pause_ms)
+                    if len(self._gemessene_pausen_ms) > 50:
+                        self._gemessene_pausen_ms.pop(0)
             self._stille_zaehler = 0
             self._laute_gesamt += 1
         else:

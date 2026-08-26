@@ -144,6 +144,31 @@ MAX_BELEG_ZEILEN = 40
 #: viertausend Zeichen ist keine Stelle mehr, sondern eine Datei.
 MAX_BELEG_ZEICHEN = 2_000
 
+#: Gespeicherte gelernte Sprechkadenz je Benutzer-ID (Faktor 0.7 bis 2.5).
+_USER_KADENZ_CACHE: dict[int, float] = {}
+
+#: Typische unvollständige Satzendungen in mehreren Sprachen.
+_UNVOLLSTAENDIGE_ENDUNGEN = (
+    ",", "...", "…", "-", "—", ":", ";",
+    " und", " oder", " aber", " weil", " dass", " denn", " den", " die", " das",
+    " dem", " des", " ein", " eine", " einen", " einem", " einer", " eines",
+    " bitte", " um", " wie", " mit", " für", " in", " an", " auf", " aus", " bei",
+    " also", " bzw", " bzw.", " resp", " resp.", " äh", " ähm",
+    " and", " or", " but", " because", " that", " the", " a", " an", " to", " with", " for",
+)
+
+
+def _ist_gedanke_abgeschlossen(text: str) -> bool:
+    """Prüft sprachunabhängig anhand von Satzzeichen und Wortendungen, ob ein Satz fertig ist."""
+    sauber = (text or "").strip().lower()
+    if not sauber:
+        return False
+    if sauber.endswith((".", "!", "?", "。", "！", "？")):
+        return not sauber.endswith(("...", "…", "..!", "..?", ".."))
+    if any(sauber.endswith(endung) for endung in _UNVOLLSTAENDIGE_ENDUNGEN):
+        return False
+    return False
+
 
 @dataclass
 class Belegfilter:
@@ -348,7 +373,8 @@ class Sprachbruecke:
         #: den Browser und für Token von vor dem Anspruch.
         self._familie = familie
 
-        self._erkennung = ai_voice_vad.Pausenerkennung()
+        self._kadenz_faktor = _USER_KADENZ_CACHE.get(user_id, 1.0)
+        self._erkennung = ai_voice_vad.Pausenerkennung(kadenz_faktor=self._kadenz_faktor)
         self._lage = Lage()
         self._zustand = ""
         #: Der Lauf, der gerade antwortet. Solange einer läuft, wird eine neue
@@ -358,11 +384,25 @@ class Sprachbruecke:
         self._stimme: ai_tts.Stimmsitzung | None = None
         #: Vorschläge, die auf ein gesprochenes Ja warten.
         self._offene_vorschlaege: list[str] = []
+        #: Turn-Merging & Kadenz-Lernen: unfertige Sätze bei Unterbrechung verschmelzen.
+        self._letzte_eingabe: str | None = None
+        self._letzte_eingabe_zeit: float = 0.0
+        self._letzte_antwort_fertig: bool = True
+        self._unterbrochen_fuer_merge: bool = False
         #: Der Zusteller: spricht Worker-Meldungen, sobald das Gespräch Ruhe
         #: hat. Lebt neben der Sitzungsschleife, weil die in
         #: `browser.receive()` blockiert und nur bei Browser-Rahmen aufwacht —
         #: eine Meldung käme sonst erst zu Wort, wenn der Mensch etwas sagt.
         self._zusteller: asyncio.Task | None = None
+
+    def _kadenz_anpassen(self, *, erhoehen: bool) -> None:
+        """Passt den gelernten Geduldsfaktor dynamisch an das Sprechtempo an."""
+        if erhoehen:
+            self._kadenz_faktor = min(2.5, self._kadenz_faktor + 0.15)
+        else:
+            self._kadenz_faktor = max(0.8, self._kadenz_faktor * 0.99)
+        _USER_KADENZ_CACHE[self._user_id] = self._kadenz_faktor
+        self._erkennung.kadenz_anpassen(self._kadenz_faktor)
 
     async def fuehren(self) -> Lage:
         """Die Sitzung, bis der Browser geht oder die Zeit um ist."""
@@ -478,12 +518,44 @@ class Sprachbruecke:
             wortlaut = await self._abhoeren(aeusserung)
             if wortlaut is None:
                 return
+
+            jetzt = time.monotonic()
+            ist_fortsetzung = (
+                self._unterbrochen_fuer_merge
+                or (
+                    self._letzte_eingabe is not None
+                    and (jetzt - self._letzte_eingabe_zeit < 5.0)
+                    and not self._letzte_antwort_fertig
+                )
+            )
+            self._unterbrochen_fuer_merge = False
+
+            if ist_fortsetzung and self._letzte_eingabe:
+                kombiniert = f"{self._letzte_eingabe} {wortlaut}".strip()
+                logger.info(
+                    "Turn-Merge: '%s' + '%s' -> '%s' user=%s",
+                    self._letzte_eingabe,
+                    wortlaut,
+                    kombiniert,
+                    self._user_id,
+                )
+                self._kadenz_anpassen(erhoehen=True)
+                wortlaut = kombiniert
+
+            self._letzte_eingabe = wortlaut
+            self._letzte_eingabe_zeit = jetzt
+            self._letzte_antwort_fertig = False
+
             await self._senden({"art": "gehoert", "text": wortlaut})
 
             if self._offene_vorschlaege:
                 if await self._entscheidung(wortlaut):
+                    self._letzte_antwort_fertig = True
                     return
             await self._antworten(wortlaut)
+            self._letzte_antwort_fertig = True
+            if _ist_gedanke_abgeschlossen(wortlaut):
+                self._kadenz_anpassen(erhoehen=False)
         except asyncio.CancelledError:
             raise
         except Exception as fehler:  # pragma: no cover - Netz und Anbieter
@@ -1231,6 +1303,8 @@ class Sprachbruecke:
 
     async def _abwuergen(self) -> None:
         """Den laufenden Zug abbrechen — der Mensch redet dazwischen."""
+        if (self._laufende is not None and not self._laufende.done()) or (self._stimme is not None):
+            self._unterbrochen_fuer_merge = True
         stimme = self._stimme
         if stimme is not None:
             with contextlib.suppress(Exception):

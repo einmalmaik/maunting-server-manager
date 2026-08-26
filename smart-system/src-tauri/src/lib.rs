@@ -53,16 +53,25 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[tauri::command]
-fn benachrichtigung_senden(
+async fn benachrichtigung_senden(
     app: tauri::AppHandle,
     titel: String,
     text: String,
 ) -> Result<(), String> {
-    app.notification()
+    let notif = app.notification();
+    if let Ok(perm) = notif.permission_state() {
+        if perm != tauri_plugin_notification::PermissionState::Granted {
+            let _ = notif.request_permission();
+        }
+    }
+
+    notif
         .builder()
         .title(titel)
         .body(text)
-        .channel_id("singra_alerts_v2")
+        .icon("ic_launcher")
+        .large_icon("ic_launcher")
+        .channel_id("mss_alerts")
         .show()
         .map_err(|e| e.to_string())
 }

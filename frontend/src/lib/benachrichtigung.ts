@@ -109,8 +109,10 @@ export async function sendeGeraeteBenachrichtigung({
             options: {
               title: titel,
               body: text,
-              channelId: 'singra_alerts_v2',
-              channel_id: 'singra_alerts_v2',
+              icon: 'ic_launcher',
+              largeIcon: 'ic_launcher',
+              channelId: 'mss_alerts',
+              channel_id: 'mss_alerts',
             },
           })
           return true
@@ -123,21 +125,53 @@ export async function sendeGeraeteBenachrichtigung({
     }
   }
 
-  // 2. Web-Browser Umgebung (HTML5 Notification API)
-  if (typeof window !== 'undefined' && 'Notification' in window) {
-    try {
-      if (Notification.permission === 'granted') {
-        new Notification(titel, { body: text })
-        return true
-      } else if (Notification.permission !== 'denied') {
-        const permission = await Notification.requestPermission()
-        if (permission === 'granted') {
+  // 2. Web-Browser Umgebung (ServiceWorker / HTML5 Notification API)
+  if (typeof window !== 'undefined') {
+    // A. ServiceWorker Benachrichtigung (für Android Chrome & PWA-Browser zwingend erforderlich)
+    if ('serviceWorker' in navigator && 'Notification' in window) {
+      try {
+        let perm = Notification.permission
+        if (perm !== 'granted' && perm !== 'denied') {
+          perm = await Notification.requestPermission()
+        }
+        if (perm === 'granted') {
+          try {
+            const reg = await navigator.serviceWorker.getRegistration() || await navigator.serviceWorker.ready
+            if (reg && typeof reg.showNotification === 'function') {
+              await reg.showNotification(titel, {
+                body: text,
+                icon: '/favicon.ico',
+                badge: '/favicon.ico',
+                vibrate: [200, 100, 200],
+                tag: 'msm-push-alert',
+              } as NotificationOptions)
+              return true
+            }
+          } catch {
+            // Weiter mit new Notification Fallback
+          }
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    // B. Standard HTML5 Notification (Desktop Browser: Chrome, Firefox, Safari, Edge)
+    if ('Notification' in window) {
+      try {
+        if (Notification.permission === 'granted') {
           new Notification(titel, { body: text })
           return true
+        } else if (Notification.permission !== 'denied') {
+          const permission = await Notification.requestPermission()
+          if (permission === 'granted') {
+            new Notification(titel, { body: text })
+            return true
+          }
         }
+      } catch {
+        // Stiller Fallback
       }
-    } catch {
-      // Stiller Fallback
     }
   }
 

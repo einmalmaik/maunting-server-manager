@@ -118,7 +118,13 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
   const [status, setStatus] = useState<AgentStatus>('bereit')
 
   useEffect(() => {
-    if (!isAndroid) {
+    if (isAndroid) {
+      void konfigLaden()
+        .then((cfg) => {
+          setAutostart(cfg.autostart_aktiv ?? true)
+        })
+        .catch(() => setAutostart(true))
+    } else {
       void isEnabled()
         .then(setAutostart)
         .catch(() => setAutostart(null))
@@ -127,12 +133,31 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
 
   async function autostartUmschalten(an: boolean) {
     try {
-      if (an) {
-        await enable()
+      if (isAndroid) {
+        const akt = await konfigLaden().catch(() => null)
+        if (akt) {
+          await konfigSpeichern({ ...akt, autostart_aktiv: an })
+        }
+        setAutostart(an)
+        onKonfigAenderung?.()
+        toast.success(
+          an
+            ? 'Hintergrundüberwachung bei Handystart aktiviert'
+            : 'Hintergrundüberwachung bei Handystart deaktiviert'
+        )
       } else {
-        await disable()
+        if (an) {
+          await enable()
+        } else {
+          await disable()
+        }
+        const akt = await konfigLaden().catch(() => null)
+        if (akt) {
+          await konfigSpeichern({ ...akt, autostart_aktiv: an })
+        }
+        setAutostart(an)
+        onKonfigAenderung?.()
       }
-      setAutostart(an)
     } catch {
       toast.error(t('mss.einstellungen.autostartFehler'))
     }
@@ -151,26 +176,30 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
   return (
     <section className="msm-card flex flex-col gap-4 p-5">
       <h2 className="text-sm font-medium text-on-surface">
-        {isAndroid ? 'Gerätediagnose & App-Status' : t('mss.einstellungen.desktopIntegration')}
+        {isAndroid ? 'Geräteintegration & App-Status' : t('mss.einstellungen.desktopIntegration')}
       </h2>
+
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-on-surface">
+            {isAndroid ? 'Beim Handystart ausführen' : t('mss.einstellungen.autostart')}
+          </p>
+          <p className="text-xs text-on-surface-variant">
+            {isAndroid
+              ? 'Startet die Hintergrundüberwachung für Server-Alarme und Terminerinnerungen automatisch beim Einschalten des Smartphones.'
+              : t('mss.einstellungen.autostartHinweis')}
+          </p>
+        </div>
+        <Switch
+          checked={autostart === true}
+          disabled={autostart === null}
+          onCheckedChange={(an) => void autostartUmschalten(an)}
+          aria-label={isAndroid ? 'Beim Handystart ausführen' : t('mss.einstellungen.autostart')}
+        />
+      </div>
 
       {!isAndroid && (
         <>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm text-on-surface">{t('mss.einstellungen.autostart')}</p>
-              <p className="text-xs text-on-surface-variant">
-                {t('mss.einstellungen.autostartHinweis')}
-              </p>
-            </div>
-            <Switch
-              checked={autostart === true}
-              disabled={autostart === null}
-              onCheckedChange={(an) => void autostartUmschalten(an)}
-              aria-label={t('mss.einstellungen.autostart')}
-            />
-          </div>
-
           <ArtefaktInstallationSektion onKonfigAenderung={onKonfigAenderung} />
 
           <Hotkeys />

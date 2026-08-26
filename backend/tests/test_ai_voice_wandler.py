@@ -47,7 +47,7 @@ def test_eine_aeusserung_endet_an_der_pause_und_nicht_vorher() -> None:
     """Die Nachlaufzeit ist der einzige Regler, der sich anfühlt.
 
     Zu kurz, und die KI fällt einem ins Wort, sobald man Luft holt — genau das
-    prüft die Mitte dieses Tests: eine Pause von 0,3 Sekunden mitten im Satz
+    prüft die Mitte dieses Tests: eine Pause von 0,8 Sekunden mitten im Satz
     darf ihn **nicht** beenden.
     """
     erkennung = ai_voice_vad.Pausenerkennung()
@@ -55,11 +55,11 @@ def test_eine_aeusserung_endet_an_der_pause_und_nicht_vorher() -> None:
     assert erkennung.fuettern(_stille(0.5)) is None
     assert erkennung.fuettern(_ton(0.6, pegel=6000)) is None
     assert erkennung.spricht is True
-    # Luft holen. Kürzer als STILLE_SEKUNDEN — der Satz läuft weiter.
-    assert erkennung.fuettern(_stille(0.3)) is None
+    # Luft holen. Kürzer als STILLE_SEKUNDEN (1.5s) — der Satz läuft weiter.
+    assert erkennung.fuettern(_stille(0.8)) is None
     assert erkennung.fuettern(_ton(0.6, pegel=6000)) is None
-    # Und jetzt wirklich fertig.
-    aeusserung = erkennung.fuettern(_stille(1.0))
+    # Und jetzt wirklich fertig (über 1,5s Stille).
+    aeusserung = erkennung.fuettern(_stille(2.0))
 
     assert aeusserung is not None
     assert erkennung.spricht is False
@@ -70,21 +70,43 @@ def test_eine_aeusserung_endet_an_der_pause_und_nicht_vorher() -> None:
 
 
 def test_der_anlaut_geht_nicht_verloren() -> None:
-    """Ohne Vorlauf fehlt vorne, was zum Überschreiten der Schwelle fehlte.
-
-    Ein „Starte den Server" beginnt leise mit dem „St" und wird erst beim „a"
-    laut genug. Ohne den Vorlaufpuffer bekäme das hörende Modell „arte den
-    Server" — und versteht dann irgendetwas, nur nicht das. Der Fehler sieht
-    von aussen aus wie eine schlechte Spracherkennung.
-    """
+    """Ohne Vorlauf fehlt vorne, was zum Überschreiten der Schwelle fehlte."""
     erkennung = ai_voice_vad.Pausenerkennung()
     erkennung.fuettern(_stille(0.5))
     erkennung.fuettern(_ton(0.5, pegel=6000))
-    aeusserung = erkennung.fuettern(_stille(1.0))
+    aeusserung = erkennung.fuettern(_stille(2.0))
 
     assert aeusserung is not None
     # Länger als die reine Rede: der Vorlauf ist mit drin.
     assert aeusserung.sekunden > 0.5
+
+
+def test_kadenz_skalierung_und_pausenmessung() -> None:
+    """Prüft, dass der Kadenzfaktor die Stillegrenzen skaliert und Pausen misst."""
+    erkennung = ai_voice_vad.Pausenerkennung(kadenz_faktor=1.5)
+    assert erkennung.kadenz_faktor == 1.5
+
+    erkennung.fuettern(_stille(0.5))
+    erkennung.fuettern(_ton(0.5, pegel=6000))
+    # 1.0s Pause innerhalb der Rede: wird erfasst, beendet den Satz bei Kadenz 1.5 (2.25s Basis) noch nicht
+    assert erkennung.fuettern(_stille(1.0)) is None
+    assert erkennung.fuettern(_ton(0.5, pegel=6000)) is None
+    assert len(erkennung.gemessene_pausen) > 0
+
+    # Dynamische Anpassung
+    erkennung.kadenz_anpassen(0.8)
+    assert erkennung.kadenz_faktor == 0.8
+
+
+def test_ist_gedanke_abgeschlossen() -> None:
+    """Prüft sprachunabhängig abgeschlossene und unvollständige Satzstrukturen."""
+    assert ai_voice_bridge._ist_gedanke_abgeschlossen("Der Server läuft einwandfrei.") is True
+    assert ai_voice_bridge._ist_gedanke_abgeschlossen("Kannst du das bitte prüfen?") is True
+    assert ai_voice_bridge._ist_gedanke_abgeschlossen("Fertig!") is True
+    assert ai_voice_bridge._ist_gedanke_abgeschlossen("Würdest du mal bitte") is False
+    assert ai_voice_bridge._ist_gedanke_abgeschlossen("und um...") is False
+    assert ai_voice_bridge._ist_gedanke_abgeschlossen("ich hätte gerne,") is False
+    assert ai_voice_bridge._ist_gedanke_abgeschlossen("please restart the server and") is False
 
 
 def test_ein_huster_loest_keine_anfrage_aus() -> None:
@@ -309,19 +331,15 @@ def test_anfuehrungszeichen_um_das_transkript_fallen_weg() -> None:
 
 
 def test_ein_kurzes_ja_geht_weiterhin_sofort_durch() -> None:
-    """Die Geduld darf die schnelle Antwort nicht ausbremsen.
-
-    Wer nur zustimmt, wartet sonst zwei Sekunden auf die Reaktion — im
-    Gespraech ist das eine Ewigkeit und fuehlt sich an, als haenge das Panel.
-    """
+    """Die Geduld darf die schnelle Antwort nicht ausbremsen."""
     erkennung = ai_voice_vad.Pausenerkennung()
 
     erkennung.fuettern(_stille(0.5))
     erkennung.fuettern(_ton(0.4, pegel=6000))
     assert erkennung.spricht is True
 
-    # Knapp ueber STILLE_SEKUNDEN: bei kurzer Rede reicht das.
-    aeusserung = erkennung.fuettern(_stille(0.9))
+    # Knapp ueber STILLE_SEKUNDEN (1.5s): bei kurzer Rede reicht das.
+    aeusserung = erkennung.fuettern(_stille(1.7))
 
     assert aeusserung is not None, (
         "ein kurzes Ja wartet auf die volle Geduld — dann fuehlt sich jede "
@@ -330,30 +348,26 @@ def test_ein_kurzes_ja_geht_weiterhin_sofort_durch() -> None:
 
 
 def test_eine_atempause_im_diktat_beendet_den_satz_nicht() -> None:
-    """Nach laengerem Sprechen darf die Pause deutlich laenger sein.
-
-    Das ist der gemeldete Fall: ein diktierter Auftrag, mitten darin ein
-    Schluck Wasser. Mit der alten festen Nachlaufzeit von 0,7 s war der Satz
-    an dieser Stelle weg.
-    """
+    """Nach laengerem Sprechen darf die Pause deutlich laenger sein."""
     erkennung = ai_voice_vad.Pausenerkennung()
 
     erkennung.fuettern(_stille(0.5))
     # Lange genug fuer die volle Geduld (STILLE_VOLL_AB_SEKUNDEN).
-    erkennung.fuettern(_ton(7.0, pegel=6000))
+    erkennung.fuettern(_ton(10.0, pegel=6000))
     assert erkennung.spricht is True
 
-    # Eine Pause, die frueher das Ende bedeutet haette.
-    assert erkennung.fuettern(_stille(1.2)) is None, (
+    # Eine Pause von 2.0s beendet ein langes Diktat noch nicht (Max ist 4.0s).
+    assert erkennung.fuettern(_stille(2.0)) is None, (
         "die Atempause hat den Satz beendet — genau der gemeldete Fehler"
     )
 
     # Weiterreden geht, und der Satz bleibt einer.
     erkennung.fuettern(_ton(1.0, pegel=6000))
-    aeusserung = erkennung.fuettern(_stille(2.5))
+    # Erst bei Stille über der Max-Schwelle fertig.
+    aeusserung = erkennung.fuettern(_stille(4.5))
 
     assert aeusserung is not None
-    assert aeusserung.sekunden > 8.0, "der Satz wurde in Stuecke zerlegt"
+    assert aeusserung.sekunden > 11.0, "der Satz wurde in Stuecke zerlegt"
 
 
 def test_die_geduld_waechst_und_bleibt_begrenzt() -> None:

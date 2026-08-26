@@ -51,12 +51,12 @@ const RUNDEN_PAUSE_MS = 900
  */
 const SCHWELLE_SPEICHERN_MS = 600
 /** Dieselben Grenzen wie `wakeword::schwelle_klemmen` in Rust. */
-const SCHWELLE_MIN = 0.3
-const SCHWELLE_MAX = 0.6
+const SCHWELLE_MIN = 0.4
+const SCHWELLE_MAX = 0.75
 
 export function WakewordEinrichtung() {
   const { t } = useTranslation()
-  const agentName = useAuthStore((s) => s.user?.agent_name?.trim() || 'Singra')
+  const agentName = useAuthStore((s) => s.user?.agent_name?.trim() || 'Assistent')
   const [stand, setStand] = useState<WakewordStand>({
     aufnahmen: 0,
     trainiert: false,

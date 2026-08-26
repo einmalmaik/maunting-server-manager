@@ -18,7 +18,7 @@ const DATEI: &str = "konfig.json";
 pub const HOTKEY_FENSTER_VORGABE: &str = "Alt+Space";
 pub const HOTKEY_SPRACHE_VORGABE: &str = "Alt+Shift+Space";
 /// Vorgabe der Wake-Word-Empfindlichkeit (rustpotter-Schwelle, Median-Score).
-pub const WAKEWORD_SCHWELLE_VORGABE: f32 = 0.45;
+pub const WAKEWORD_SCHWELLE_VORGABE: f32 = 0.52;
 
 pub const STANDARD_DOWNLOAD_LIMIT_BYTES: u64 = 10 * 1024 * 1024 * 1024; // 10 GiB
 pub const MAX_DOWNLOAD_LIMIT_BYTES: u64 = 100 * 1024 * 1024 * 1024; // 100 GiB
@@ -85,6 +85,8 @@ pub struct AppKonfig {
     pub discord_state: Option<String>,
     /// Ob der Splashscreen beim Erststart bereits gesehen wurde.
     pub splash_gesehen: bool,
+    /// Ob der Autostart beim Systemstart (Windows / Android) aktiviert ist. Vorgabe: true.
+    pub autostart_aktiv: bool,
 }
 
 /// Ermittelt den isolierten Standard-Sandbox-Pfad im Benutzerprofil (`%USERPROFILE%\MSS-Sandbox` bzw. `$HOME/MSS-Sandbox`).
@@ -136,6 +138,7 @@ impl Default for AppKonfig {
             discord_details: None,
             discord_state: None,
             splash_gesehen: false,
+            autostart_aktiv: true,
         }
     }
 }

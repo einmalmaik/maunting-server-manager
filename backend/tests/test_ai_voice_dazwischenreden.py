@@ -147,9 +147,41 @@ async def test_ein_verworfenes_geraeusch_laesst_die_anzeige_nicht_haengen() -> N
 
     await bruecke._ton(_stille(0.5))
     await bruecke._ton(_ton(0.12, pegel=9000))
-    await bruecke._ton(_stille(1.0))
+    await bruecke._ton(_stille(2.0))
 
     assert bruecke.zustaende() == [
         ai_voice_bridge.ZUSTAND_HOERT,
         ai_voice_bridge.ZUSTAND_BEREIT,
     ]
+
+
+@pytest.mark.asyncio
+async def test_turn_merging_und_kadenz_anpassung() -> None:
+    """Prüft, dass unterbrochene oder unfertige Äußerungen nahtlos verschmolzen werden."""
+    bruecke = _Attrappe()
+    bruecke._letzte_eingabe = "Würdest du bitte den Server neustarten"
+    bruecke._letzte_eingabe_zeit = 100.0
+    bruecke._letzte_antwort_fertig = False
+    bruecke._unterbrochen_fuer_merge = True
+    anfangs_kadenz = bruecke._kadenz_faktor
+
+    # Mock für _abhoeren und _antworten
+    async def mock_abhoeren(aeusserung):
+        return "und um 15 Uhr das Backup machen."
+
+    async def mock_antworten(text):
+        pass
+
+    bruecke._abhoeren = mock_abhoeren  # type: ignore[method-assign]
+    bruecke._antworten = mock_antworten  # type: ignore[method-assign]
+
+    fake_aeusserung = ai_voice_vad.Aeusserung(pcm=b"\x00\x00", sekunden=1.0)
+    await bruecke._zug(fake_aeusserung)
+
+    assert bruecke._letzte_eingabe == "Würdest du bitte den Server neustarten und um 15 Uhr das Backup machen."
+    # Durch den Merge wurde die Kadenz erhöht (mehr Geduld für längere Pausen)
+    assert bruecke._kadenz_faktor > anfangs_kadenz
+    # Transkript-Ereignis wurde mit dem verschmolzenen Text gesendet
+    gehoert_ereignisse = [e for e in bruecke.ereignisse if e.get("art") == "gehoert"]
+    assert len(gehoert_ereignisse) == 1
+    assert gehoert_ereignisse[0]["text"] == "Würdest du bitte den Server neustarten und um 15 Uhr das Backup machen."
