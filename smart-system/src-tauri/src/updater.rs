@@ -6,9 +6,12 @@
 //! es sauber und stößt einen Neustart der Anwendung an.
 
 use tauri::AppHandle;
+
+#[cfg(not(target_os = "android"))]
 use tauri_plugin_updater::UpdaterExt;
 
 pub fn pruefe_und_installiere_update_hintergrund(app_handle: AppHandle) {
+    #[cfg(not(target_os = "android"))]
     tauri::async_runtime::spawn(async move {
         // 5 Sekunden Pause nach dem Start, damit die Oberfläche sofort
         // reagiert und der Render-Thread nicht behindert wird.

@@ -8,11 +8,14 @@
 //! Compile-Zeit eingebettet — kein Dateizugriff zur Laufzeit, nichts, das
 //! ein Installer vergessen kann.
 
+#[cfg(not(target_os = "android"))]
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager,
 };
+#[cfg(target_os = "android")]
+use tauri::{AppHandle, Manager};
 
 const TRAY_ID: &str = "mss";
 
@@ -32,6 +35,7 @@ fn status_eintrag(status: &str) -> Option<&'static (&'static str, &'static str, 
 
 /// Baut den Tray beim App-Start. Linksklick öffnet das Hauptfenster,
 /// Rechtsklick das Menü (Öffnen/Kalender/Beenden).
+#[cfg(not(target_os = "android"))]
 pub fn erstellen(app: &AppHandle) -> tauri::Result<()> {
     let oeffnen = MenuItem::with_id(app, "oeffnen", "Öffnen", true, None::<&str>)?;
     let kalender = MenuItem::with_id(app, "kalender", "Kalender", true, None::<&str>)?;
@@ -72,8 +76,14 @@ pub fn erstellen(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "android")]
+pub fn erstellen(_app: &AppHandle) -> tauri::Result<()> {
+    Ok(())
+}
+
 /// Wechselt Icon und Tooltip auf den genannten Status.
 /// Ein unbekannter Status ist ein Fehler des Aufrufers, kein stiller Default.
+#[cfg(not(target_os = "android"))]
 pub fn set_status(app: &AppHandle, status: &str) -> Result<(), String> {
     let (_, tooltip, bytes) =
         status_eintrag(status).ok_or_else(|| format!("Unbekannter Status: {status}"))?;
@@ -84,10 +94,16 @@ pub fn set_status(app: &AppHandle, status: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "android")]
+pub fn set_status(_app: &AppHandle, _status: &str) -> Result<(), String> {
+    Ok(())
+}
+
 /// Holt das Hauptfenster nach vorn (Tray-Klick, Hotkey, Menü „Öffnen“).
 pub fn hauptfenster_zeigen(app: &AppHandle) {
     if let Some(fenster) = app.get_webview_window("main") {
         let _ = fenster.show();
+        #[cfg(not(target_os = "android"))]
         let _ = fenster.unminimize();
         let _ = fenster.set_focus();
     }

@@ -31,18 +31,9 @@ tauri-build = { version = "2", features = [] }
 # zieht nur `data-url` neu in den Baum (Servo, MIT/Apache-2.0, reines Parsen,
 # kein I/O); `dom_query` fuer die CSP-Einbettung steht ohnehin schon im Lock.
 tauri = { version = "2", features = [
-    "tray-icon",
     "image-png",
     "webview-data-url",
 ] }
-# Zwei globale Hotkeys (Fenster, Sprachsitzung; konfigurierbar, einzeln
-# abschaltbar) — Plugin statt eigener Hook: stabil, 0 % CPU.
-tauri-plugin-global-shortcut = "2"
-# Windows-Autostart; das Argument "--autostart" markiert Boot-Starts, damit
-# spaeter Crash-Guard und sanfter Start unterscheiden koennen, wer gestartet hat.
-tauri-plugin-autostart = "2"
-# Automatischer Updater fuer echte GitHub Releases
-tauri-plugin-updater = "2"
 # Plattformuebergreifende System-Benachrichtigungen (Windows & Android)
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
@@ -114,6 +105,15 @@ features = ["png", "jpeg"]
 version = "0.22"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+# Zwei globale Hotkeys (Fenster, Sprachsitzung; konfigurierbar, einzeln
+# abschaltbar) — Plugin statt eigener Hook: stabil, 0 % CPU.
+tauri-plugin-global-shortcut = "2"
+# Windows-Autostart; das Argument "--autostart" markiert Boot-Starts, damit
+# spaeter Crash-Guard und sanfter Start unterscheiden koennen, wer gestartet hat.
+tauri-plugin-autostart = "2"
+# Automatischer Updater fuer echte GitHub Releases
+tauri-plugin-updater = "2"
 # Papierkorb statt endgueltig: Geloeschtes in der Sandbox bleibt
 # wiederherstellbar. Ein `fs::remove_file` waere die unumkehrbare Fassung
 # derselben Zeile.

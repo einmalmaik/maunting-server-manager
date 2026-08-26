@@ -46,7 +46,9 @@ mod wakeword;
 mod zonen;
 
 use tauri::{Emitter, Manager};
+#[cfg(not(target_os = "android"))]
 use tauri_plugin_autostart::MacosLauncher;
+#[cfg(not(target_os = "android"))]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[tauri::command]
@@ -464,6 +466,7 @@ fn mikrofon_freigeben(app: &tauri::AppHandle) {
 
 /// Prüft eine Tastenkombination, bevor irgendetwas umgestellt wird — die
 /// Fehlermeldung nennt die Kombination, nicht nur den Parserfehler.
+#[cfg(not(target_os = "android"))]
 fn hotkey_pruefen(kombi: &str) -> Result<Shortcut, String> {
     kombi
         .parse::<Shortcut>()
@@ -475,6 +478,7 @@ fn hotkey_pruefen(kombi: &str) -> Result<Shortcut, String> {
 /// ist ein Fehler an den Aufrufer — beim Start wird er nur protokolliert
 /// (die App bleibt über das Tray erreichbar), beim Umstellen rollt
 /// `hotkeys_setzen` auf den alten Stand zurück.
+#[cfg(not(target_os = "android"))]
 fn hotkeys_registrieren(
     app: &tauri::AppHandle,
     fenster: Option<&str>,
@@ -505,6 +509,15 @@ fn hotkeys_registrieren(
     Ok(())
 }
 
+#[cfg(target_os = "android")]
+fn hotkeys_registrieren(
+    _app: &tauri::AppHandle,
+    _fenster: Option<&str>,
+    _sprache: Option<&str>,
+) -> Result<(), String> {
+    Ok(())
+}
+
 /// Stellt beide Hotkeys um und speichert sie. Scheitert die Registrierung
 /// (belegt, ungültig, doppelt), kommt der alte Stand zurück — halb
 /// umgestellte Hotkeys wären schlimmer als die Fehlermeldung.
@@ -515,13 +528,16 @@ fn hotkeys_setzen(
     sprache: Option<String>,
 ) -> Result<(), String> {
     let mut konfig = konfig::laden(&app)?;
-    if let Err(fehler) = hotkeys_registrieren(&app, fenster.as_deref(), sprache.as_deref()) {
-        let _ = hotkeys_registrieren(
-            &app,
-            konfig.hotkey_fenster.as_deref(),
-            konfig.hotkey_sprache.as_deref(),
-        );
-        return Err(fehler);
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Err(fehler) = hotkeys_registrieren(&app, fenster.as_deref(), sprache.as_deref()) {
+            let _ = hotkeys_registrieren(
+                &app,
+                konfig.hotkey_fenster.as_deref(),
+                konfig.hotkey_sprache.as_deref(),
+            );
+            return Err(fehler);
+        }
     }
     konfig.hotkey_fenster = fenster;
     konfig.hotkey_sprache = sprache;
@@ -595,7 +611,10 @@ fn hauptfenster_verstecken(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(not(target_os = "android"))]
+    {
         // "--autostart" markiert Boot-Starts: Crash-Guard und sanfter Start
         // (spaetere Ausbaustufe) muessen wissen, ob ein Mensch gestartet hat.
         //
@@ -610,16 +629,20 @@ pub fn run() {
         // tauri.conf.json `"mainBinaryName": "MauntingSmartSystem"` ohne
         // Leerzeichen; die lesbare Beschriftung im Task-Manager kommt
         // ohnehin aus `productName` und nicht aus dem Dateinamen.
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            Some(vec!["--autostart"]),
-        ))
-        // Die Handler hängen an den einzelnen Hotkeys (`on_shortcut` in
-        // `hotkeys_registrieren`) — ein globaler Handler müsste selbst
-        // auseinanderhalten, welcher der beiden gedrückt wurde.
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        builder = builder
+            .plugin(tauri_plugin_autostart::init(
+                MacosLauncher::LaunchAgent,
+                Some(vec!["--autostart"]),
+            ))
+            // Die Handler hängen an den einzelnen Hotkeys (`on_shortcut` in
+            // `hotkeys_registrieren`) — ein globaler Handler müsste selbst
+            // auseinanderhalten, welcher der beiden gedrückt wurde.
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+            .plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         // Programme, Dateien und Adressen oeffnen — der offizielle Weg in
         // Tauri v2 (tauri-plugin-shell::open ist deprecated).
@@ -717,7 +740,7 @@ pub fn run() {
         .expect("Fehler beim Start des Maunting Smart Systems");
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::hotkey_pruefen;
 
