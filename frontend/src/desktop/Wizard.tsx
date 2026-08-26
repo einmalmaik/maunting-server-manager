@@ -13,7 +13,7 @@
  * setzen — der Bootstrap sieht danach die gespeicherte Adresse und steigt
  * direkt beim Kopplungsschritt wieder ein.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { open as ordnerDialog } from '@tauri-apps/plugin-dialog'
 import { Camera } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
