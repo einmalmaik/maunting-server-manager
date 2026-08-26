@@ -63,6 +63,7 @@ from services.ai_proposal_service import (
 )
 from services.ai_tool_registry import (
     ASK_TOOLS,
+    CHAT_INTERACTION_TOOLS,
     DESKTOP_TOOLS,
     GEHIRN_TOOLS,
     GUARDIAN_HEILUNG_TOOLS,
@@ -3431,34 +3432,30 @@ async def _schreibrunde_ausfuehren(
     # einzige Punkt, an dem der Lauf etwas veraendert.
     if ai_run_broker.lauf_status(run_id) != "running":
         return _SchreibrundenErgebnis(denknaht=denknaht, abgeloest=True)
-    # **Das Gehirn schreibt nie.** GEHIRN_TOOLS enthaelt kein einziges
-    # Schreibwerkzeug — dieser Zweig ist der Spiegel dazu im Vorschlagspfad,
-    # denn der Katalogschnitt ist eine Bitte und keine Zusage. Ohne ihn
-    # liefe ein halluzinierter Schreibaufruf mit den vollen Rechten des
-    # Benutzers in `create_proposal`, und "das Gehirn fasst keinen Server an"
-    # waere nur noch Prompt-Prosa.
-    #
-    # Nicht mehr betroffen ist der Rechner des Benutzers: `desktop_system` und
-    # `desktop_steuern` gehoeren dem Gehirn seit dem 23.08.2026 (GEHIRN_DESKTOP)
-    # und laufen ohnehin nicht hier durch — Desktop-Werkzeuge sind
-    # `art="delegation"` und werden lange vor dieser Stelle geparkt.
-    # Beantwortet statt geworfen, wie ueberall am Werkzeugrand: die Runde
-    # zaehlt, das Modell erfaehrt den Weg (worker_start), der Lauf lebt.
+    # **Das Gehirn fasst keine Server an.** Server-Schreibwerkzeuge bleiben dem
+    # Worker vorbehalten — dieser Zweig ist der Spiegel dazu im Vorschlagspfad,
+    # denn der Katalogschnitt ist eine Bitte und keine Zusage. Kommunikations-
+    # und Dialogvorschlaege (E-Mail, Kalender, Pop-up) legt das Gehirn direkt an.
     if rolle == "gehirn":
-        provider_messages.extend(_rundenfehler_nachrichten(
-            current_usage.tool_calls,
-            rundentext,
-            code="AI_GEHIRN_READONLY",
-            hinweis=(
-                "Das Gehirn führt keine Aktionen aus. Der Aufruf lief nicht — "
-                "gib die Arbeit mit worker_start als Auftrag in den Hintergrund."
-            ),
-        ))
-        if _runde_zaehlen(zustand, rundendeckel):
-            return _SchreibrundenErgebnis(
-                denknaht=denknaht, budget_erschoepft=True, letzte_runde=True
-            )
-        return _SchreibrundenErgebnis(denknaht=denknaht)
+        unzulässig = [
+            call for call in current_usage.tool_calls
+            if call.name not in (CHAT_INTERACTION_TOOLS & WRITE_TOOLS)
+        ]
+        if unzulässig:
+            provider_messages.extend(_rundenfehler_nachrichten(
+                unzulässig,
+                rundentext,
+                code="AI_GEHIRN_READONLY",
+                hinweis=(
+                    "Das Gehirn führt keine direkten Server-Aktionen aus. Der Aufruf lief nicht — "
+                    "gib die Server-Arbeit mit worker_start als Auftrag in den Hintergrund."
+                ),
+            ))
+            if _runde_zaehlen(zustand, rundendeckel):
+                return _SchreibrundenErgebnis(
+                    denknaht=denknaht, budget_erschoepft=True, letzte_runde=True
+                )
+            return _SchreibrundenErgebnis(denknaht=denknaht)
     # **Dieselbe Ansage wie im Lesepfad**, an derselben Stelle im
     # Ablauf: geprueft ist geprueft, angelegt ist noch nichts.
     # Achtzehn der zweiundfuenfzig gepflegten Verlaufssaetze

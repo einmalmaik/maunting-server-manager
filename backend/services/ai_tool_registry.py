@@ -777,6 +777,10 @@ WRITE_TOOLS = SERVER_WRITE_TOOLS | GLOBAL_WRITE_TOOLS
 MEMORY_TOOLS = _mit_gruppe("memory")
 SKILL_TOOLS = _mit_gruppe("skill")
 DOCS_TOOLS = _mit_gruppe("docs")
+MAIL_TOOLS = _mit_gruppe("mailbox")
+CALENDAR_TOOLS = _mit_gruppe("calendar")
+POPUP_TOOLS = _mit_gruppe("popup")
+CHAT_INTERACTION_TOOLS = MAIL_TOOLS | CALENDAR_TOOLS | POPUP_TOOLS
 ASK_TOOLS = _mit_art("ask")
 DELEGATION_TOOLS = _mit_art("delegation")
 # Die Werkzeuge, die nicht im Panel laufen, sondern auf dem Rechner des
@@ -822,21 +826,16 @@ GEHIRN_DESKTOP = frozenset({"desktop_system", "desktop_steuern", "desktop_launch
 
 # Der komplette Katalog des Gehirns. Eine Aufzaehlung wie bei den
 # unbeaufsichtigten Laeufen: das Gehirn ist die schnelle, dauerpraesente
-# Instanz. Kein Server-Werkzeug, kein Vorschlag, keine Websuche — es erinnert
+# Instanz. Kein Server-Werkzeug, keine Websuche — es erinnert
 # sich (der Charakter gehoert ihm), sieht seinem Benutzer bei Bedarf ueber die
-# Schulter und delegiert alles andere an Worker mit den Rechten des Benutzers.
-#
-# **Hier stand bis zum 23.08.2026 "darf strukturell keine Aussenwirkung
-# entfalten".** Das gilt seit `GEHIRN_DESKTOP` nicht mehr uneingeschraenkt:
-# `desktop_steuern` bewegt eine echte Maus. Der Satz ist ersetzt und nicht
-# ergaenzt, weil eine Zusage mit einer stillen Ausnahme schlimmer ist als
-# keine — der naechste Leser haette sich weiter darauf verlassen.
-#
-# Was von der Trennung bleibt und weiterhin traegt: das Gehirn fasst **keinen
-# Server** an und legt **keinen Vorschlag** an (`_schreibrunde_ausfuehren`
-# weist es ausdruecklich ab). Seine Aussenwirkung endet am Rechner, vor dem
-# der Benutzer gerade sitzt und zusieht.
-GEHIRN_TOOLS = frozenset(MEMORY_TOOLS) | WORKER_STEUERUNG | GEHIRN_DESKTOP
+# Schulter, steuert E-Mails, Kalender und Ankuendigungen direkt im Dialog
+# und delegiert Serverarbeiten an Worker mit den Rechten des Benutzers.
+GEHIRN_TOOLS = (
+    frozenset(MEMORY_TOOLS)
+    | WORKER_STEUERUNG
+    | GEHIRN_DESKTOP
+    | CHAT_INTERACTION_TOOLS
+)
 
 
 def worker_ausschluss() -> frozenset[str]:
@@ -1054,6 +1053,9 @@ AUFGABEN_LESEN = frozenset({
     "search_docs",
     "read_docs",
     "web_search",
+    "email_search",
+    "email_read",
+    "calendar_read",
     # Damit ein Auftrag ueber die eigenen Auftraege berichten kann. Liest
     # ausschliesslich, was diesem Benutzer gehoert.
     "list_tasks",

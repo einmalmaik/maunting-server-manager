@@ -475,9 +475,14 @@ def test_das_gehirn_hat_nie_server_werkzeuge() -> None:
         ai_tool_registry.MEMORY_TOOLS
         | {"worker_start", "worker_cancel", "worker_antwort"}
         | {"desktop_system", "desktop_steuern", "desktop_launch_app"}
+        | ai_tool_registry.CHAT_INTERACTION_TOOLS
     )
     assert ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.SERVER_READ_TOOLS == set()
-    assert ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.WRITE_TOOLS == set()
+    assert ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.SERVER_WRITE_TOOLS == set()
+    assert (
+        ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.WRITE_TOOLS
+        == ai_tool_registry.CHAT_INTERACTION_TOOLS & ai_tool_registry.WRITE_TOOLS
+    )
     assert "ask_user" not in ai_tool_registry.GEHIRN_TOOLS
     assert "web_search" not in ai_tool_registry.GEHIRN_TOOLS
 
@@ -498,10 +503,8 @@ def test_aus_dem_panel_bleibt_das_gehirn_ohne_rechner() -> None:
     """Zwei Schnitte hintereinander, und der zweite ist der scharfe.
 
     `GEHIRN_TOOLS` sagt, was dem Gehirn gehoert; `herkunft_schnitt` sagt, was
-    diese Herkunft ueberhaupt erreicht. Aus dem Browser bleibt der Katalog des
-    Gehirns damit exakt der von vor dem 23.08.2026 — dort sitzt niemand vor
-    der Bestaetigungskarte, und es gibt keinen Rechner, auf den zu zeigen
-    waere.
+    diese Herkunft ueberhaupt erreicht. Aus dem Browser bleibt der Desktop-Katalog
+    des Gehirns draußen — dort sitzt niemand vor der Bestaetigungskarte.
     """
     aus_dem_panel = ai_tool_registry.herkunft_schnitt(
         ai_tool_registry.GEHIRN_TOOLS, "panel"
@@ -509,6 +512,7 @@ def test_aus_dem_panel_bleibt_das_gehirn_ohne_rechner() -> None:
     assert aus_dem_panel == (
         ai_tool_registry.MEMORY_TOOLS
         | {"worker_start", "worker_cancel", "worker_antwort"}
+        | ai_tool_registry.CHAT_INTERACTION_TOOLS
     )
     aus_der_app = ai_tool_registry.herkunft_schnitt(
         ai_tool_registry.GEHIRN_TOOLS, "desktop"

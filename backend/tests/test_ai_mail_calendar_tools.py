@@ -184,3 +184,36 @@ def test_email_send_without_permission_fails(db: Session, regular_user: User):
             },
             correlation_id=str(uuid.uuid4()),
         )
+
+
+def test_mail_and_calendar_tools_available_in_gehirn_mode(db: Session, mailbox_user: User):
+    from services.ai_action_service import angebotene_werkzeuge, provider_tool_definitions
+    from services.ai_tool_registry import GEHIRN_TOOLS, MAIL_TOOLS, CALENDAR_TOOLS
+
+    # 1. Check GEHIRN_TOOLS includes mail & calendar tools
+    assert MAIL_TOOLS <= GEHIRN_TOOLS
+    assert CALENDAR_TOOLS <= GEHIRN_TOOLS
+
+    # 2. Check angebotene_werkzeuge for user with mailbox permission
+    erlaubt = angebotene_werkzeuge(db, mailbox_user)
+    assert "propose_email_send" in erlaubt
+    assert "email_search" in erlaubt
+    assert "email_read" in erlaubt
+    assert "calendar_read" in erlaubt
+    assert "propose_calendar_event_create" in erlaubt
+    assert "propose_calendar_event_delete" in erlaubt
+
+    # 3. Check provider_tool_definitions includes schemas
+    names = {t["function"]["name"] for t in provider_tool_definitions()}
+    assert "propose_email_send" in names
+    assert "email_search" in names
+    assert "calendar_read" in names
+
+
+def test_tasks_include_email_and_calendar_read_tools():
+    from services.ai_tool_registry import AUFGABEN_LESEN
+
+    assert "email_search" in AUFGABEN_LESEN
+    assert "email_read" in AUFGABEN_LESEN
+    assert "calendar_read" in AUFGABEN_LESEN
+
