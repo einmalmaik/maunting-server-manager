@@ -46,7 +46,9 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, LogicalPosition, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager};
+#[cfg(not(target_os = "android"))]
+use tauri::{LogicalPosition, WebviewUrl, WebviewWindowBuilder};
 
 /// Kennung des Fensters. Bewusst kein Eintrag in `tauri.conf.json`: das
 /// Fenster entsteht erst beim ersten Blick und lebt nur, solange geschaut
@@ -63,8 +65,11 @@ const NACHLAUF: Duration = Duration::from_millis(1500);
 
 /// Groesse und Abstand zur Bildschirmkante, in logischen Punkten. Klein genug,
 /// dass niemand es wegmachen will, gross genug, dass man den Satz liest.
+#[allow(dead_code)]
 const BREITE: f64 = 180.0;
+#[allow(dead_code)]
 const HOEHE: f64 = 44.0;
+#[allow(dead_code)]
 const RAND: f64 = 16.0;
 
 /// Bis wann das Schild stehen bleibt. `None` heisst: es ist aus.
@@ -166,6 +171,7 @@ fn waechter(app: AppHandle) {
 /// Kein Neubau, solange es steht: das waere sichtbares Flackern, und der
 /// WebView muesste jedes Mal neu laden — mitten in einer Folge von Blicken
 /// gaebe es genau dann kein Schild, wenn geschaut wird.
+#[cfg(not(target_os = "android"))]
 fn fenster_zeigen(app: &AppHandle) -> Result<(), String> {
     if let Some(fenster) = app.get_webview_window(KENNUNG) {
         return fenster.show().map_err(|e| e.to_string());
@@ -206,10 +212,16 @@ fn fenster_zeigen(app: &AppHandle) -> Result<(), String> {
     fenster.show().map_err(|e| e.to_string())
 }
 
+#[cfg(target_os = "android")]
+fn fenster_zeigen(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
 /// Obere rechte Ecke des Hauptbildschirms, innerhalb des Arbeitsbereichs.
 /// Oben, weil unten die Taskleiste sitzt; rechts, weil Windows dort selbst
 /// seine Aufnahme- und Mikrofonhinweise zeigt — dort sucht das Auge.
 /// `None` heisst: kein Monitor bekannt, dann bleibt die Vorgabe von Tauri.
+#[allow(dead_code)]
 fn ecke(app: &AppHandle) -> Option<(f64, f64)> {
     let monitor = app.primary_monitor().ok().flatten()?;
     let skalierung = monitor.scale_factor();
@@ -231,6 +243,7 @@ fn ecke(app: &AppHandle) -> Option<(f64, f64)> {
 /// Bewusst ohne `#`-Notation — jede Raute muesste in der Adresse unten
 /// maskiert werden, und eine vergessene zerlegte die Seite in Pfad und
 /// Fragment.
+#[allow(dead_code)]
 const HTML: &str = r#"<!doctype html>
 <html lang="de"><head><meta charset="utf-8"><title></title><style>
 html,body{margin:0;height:100%;background:transparent;overflow:hidden}
@@ -248,6 +261,7 @@ background:hsl(0 70% 55%);box-shadow:0 0 8px hsl(0 70% 55% / 0.9)}
 /// Der Fensterinhalt als `data:`-URL — so braucht der Indikator keine eigene
 /// HTML-Datei im Bundle, die ein Installer auslassen oder ein Build vergessen
 /// koennte. Genau das waere die stille Art, ihn loszuwerden.
+#[allow(dead_code)]
 fn inhalt() -> Result<tauri::Url, String> {
     tauri::Url::parse(&format!("data:text/html;charset=utf-8,{}", prozent(HTML)))
         .map_err(|e| format!("Inhalt nicht baubar: {e}"))
@@ -258,6 +272,7 @@ fn inhalt() -> Result<tauri::Url, String> {
 /// Fragment, und die halbe Seite ist weg — ohne Fehlermeldung, das Fenster
 /// bliebe einfach leer. Durchgelassen wird deshalb nur, was in einer Adresse
 /// unstrittig ist; alles andere reist als Byte.
+#[allow(dead_code)]
 fn prozent(text: &str) -> String {
     let mut aus = String::with_capacity(text.len() * 2);
     for byte in text.as_bytes() {

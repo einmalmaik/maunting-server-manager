@@ -17,10 +17,12 @@ use tauri::{
 #[cfg(target_os = "android")]
 use tauri::{AppHandle, Manager};
 
+#[allow(dead_code)]
 const TRAY_ID: &str = "mss";
 
 /// (Statusname, Tooltip, Icon) — die eine Tabelle, aus der Command und
 /// Anzeige lesen. Ein neuer Status ist eine neue Zeile, kein neuer Code.
+#[allow(dead_code)]
 const STATUS: &[(&str, &str, &[u8])] = &[
     // Bereit = das Logo, nicht der grüne Kreis: Farbe signalisiert Aktivität.
     ("bereit", "MSS — bereit", include_bytes!("../icons/32x32.png")),
@@ -29,6 +31,7 @@ const STATUS: &[(&str, &str, &[u8])] = &[
     ("spricht", "MSS — spricht", include_bytes!("../icons/status-spricht.png")),
 ];
 
+#[allow(dead_code)]
 fn status_eintrag(status: &str) -> Option<&'static (&'static str, &'static str, &'static [u8])> {
     STATUS.iter().find(|(name, _, _)| *name == status)
 }
@@ -100,6 +103,7 @@ pub fn set_status(_app: &AppHandle, _status: &str) -> Result<(), String> {
 }
 
 /// Holt das Hauptfenster nach vorn (Tray-Klick, Hotkey, Menü „Öffnen“).
+#[allow(dead_code)]
 pub fn hauptfenster_zeigen(app: &AppHandle) {
     if let Some(fenster) = app.get_webview_window("main") {
         let _ = fenster.show();

@@ -156,6 +156,7 @@ pub fn uninstaller_starten(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(target_os = "android"))]
 fn autostart_aus(app: &AppHandle) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
 
@@ -166,6 +167,11 @@ fn autostart_aus(app: &AppHandle) -> Result<(), String> {
         Ok(false) => Ok(()),
         Err(problem) => Err(problem.to_string()),
     }
+}
+
+#[cfg(target_os = "android")]
+fn autostart_aus(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(test)]

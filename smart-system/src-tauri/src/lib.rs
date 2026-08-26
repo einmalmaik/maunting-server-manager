@@ -319,6 +319,7 @@ pub(crate) fn am_hauptthread(app: &tauri::AppHandle, arbeit: impl FnOnce(&tauri:
 ///
 /// Läuft **auf dem Hauptthread** (siehe `am_hauptthread`): der Hotkey-Faden
 /// des Plugins darf hier nicht selbst fragen.
+#[allow(dead_code)]
 fn hauptfenster_umschalten(app: &tauri::AppHandle) {
     if let Some(fenster) = app.get_webview_window("main") {
         let sichtbar = fenster.is_visible().unwrap_or(false);
@@ -361,6 +362,7 @@ pub(crate) fn sprachsitzung_starten(app: &tauri::AppHandle) {
 /// Sprach-Hotkey: Sitzung im Overlay starten — oder beenden, wenn dort schon
 /// eine läuft. Ein offenes Schaufenster zählt nicht als laufende Sitzung:
 /// wer den Sprach-Hotkey drückt, will reden, nicht das Testfenster schließen.
+#[allow(dead_code)]
 fn sprachsitzung_umschalten(app: &tauri::AppHandle) {
     let Some(overlay) = app.get_webview_window("overlay") else {
         return;
@@ -611,6 +613,7 @@ fn hauptfenster_verstecken(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 pub fn run() {
+    #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
 
     #[cfg(not(target_os = "android"))]

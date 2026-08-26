@@ -180,6 +180,7 @@ pub fn aufnehmen(app: &AppHandle) -> Result<Value, String> {
 
 /// Rechnet Bildkoordinaten in echte Bildschirmpunkte zurueck — der Gegenweg
 /// zu dem Raster, das `aufnehmen` meldet.
+#[allow(dead_code)]
 pub fn echte_punkte(x: i32, y: i32) -> Result<(i32, i32), String> {
     aufnahme_impl::echte_punkte(x, y)
 }
