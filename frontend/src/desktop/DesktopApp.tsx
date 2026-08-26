@@ -71,7 +71,7 @@ export function DesktopApp() {
   })
   const angemeldet = useAuthStore((s) => s.isAuthenticated)
   const sitzungSteht = phase === 'bereit' || phase === 'sandbox'
-  const offeneUebernahme = useAuftragsschleife(sitzungSteht)
+  const offeneUebernahme = useAuftragsschleife(sitzungSteht && !isAndroid)
 
   const ladeKonfigNeu = useCallback(async () => {
     try {
@@ -116,7 +116,7 @@ export function DesktopApp() {
           setPhase('kopplung')
           return
         }
-        if (!geladen.sandbox_pfad) {
+        if (!isAndroid && !geladen.sandbox_pfad) {
           setPhase('sandbox')
           return
         }
@@ -225,9 +225,9 @@ export function DesktopApp() {
   return (
     <MemoryRouter initialEntries={['/ai']}>
       <NavigationEmpfaenger />
-      <div className="relative min-h-screen overflow-x-clip bg-background text-on-surface pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]">
+      <div className="relative h-[100dvh] max-h-[100dvh] w-full overflow-hidden bg-background text-on-surface pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] flex flex-col">
         <div className="msm-deep-grid pointer-events-none absolute inset-0 opacity-30" />
-        <div className="relative z-10 flex min-h-screen flex-col">{inhalt}</div>
+        <div className="relative z-10 flex h-full max-h-full min-h-0 flex-1 flex-col overflow-hidden">{inhalt}</div>
 
         {phase === 'bereit' && (
           <>
@@ -619,13 +619,13 @@ function Hauptseite({
           </div>
         </div>
       )}
-      <main className="p-margin-mobile md:p-margin-desktop relative flex flex-1 flex-col">
-        <div className="relative z-10 w-full flex-1">
+      <main className="p-margin-mobile md:p-margin-desktop relative flex flex-1 min-h-0 flex-col overflow-hidden">
+        <div className="relative z-10 flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden">
           {bereich === 'ki' ? (
             darfChatten ? (
-              <>
+              <div className="flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden">
                 {konfig && !isAndroid && !konfig.computer_use_aktiv && (
-                  <div className="mb-3 flex items-center justify-between rounded-lg border border-outline-variant/40 bg-surface-container-low/60 p-3 text-xs">
+                  <div className="mb-3 shrink-0 flex items-center justify-between rounded-lg border border-outline-variant/40 bg-surface-container-low/60 p-3 text-xs">
                     <div className="flex items-center gap-2 text-on-surface-variant">
                       <ShieldAlert className="h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
                       <span>{t('mss.einstellungen.banner.computerUseHinweis')}</span>
@@ -639,23 +639,27 @@ function Hauptseite({
                     </Button>
                   </div>
                 )}
-                <Ai />
-              </>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <Ai />
+                </div>
+              </div>
             ) : (
               <KeinChatrecht />
             )
           ) : bereich === 'kalender' ? (
-            <div className="mx-auto w-full max-w-6xl pb-8">
+            <div className="mx-auto w-full max-w-6xl flex-1 min-h-0 overflow-y-auto pb-8">
               <Calendar />
             </div>
           ) : bereich === 'gedaechtnis' ? (
             // Dieselbe Komponente wie im Panel unter Profil → KI, Standard-
             // Scope „user": die persönlichen Einträge samt Servernotizen.
-            <div className="mx-auto w-full max-w-3xl">
+            <div className="mx-auto w-full max-w-3xl flex-1 min-h-0 overflow-y-auto pb-8">
               <AiMemoryManager />
             </div>
           ) : (
-            <Einstellungen onKonfigAenderung={onKonfigAenderung} />
+            <div className="mx-auto w-full max-w-3xl flex-1 min-h-0 overflow-y-auto pb-8">
+              <Einstellungen onKonfigAenderung={onKonfigAenderung} />
+            </div>
           )}
         </div>
       </main>

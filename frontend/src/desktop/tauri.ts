@@ -6,6 +6,7 @@
  * Transport und liegen in `transport.ts`.)
  */
 import { invoke } from '@tauri-apps/api/core'
+import { setRuntimeApiUrl } from '@/config/api'
 
 export type AgentStatus = 'bereit' | 'hoert' | 'denkt' | 'spricht'
 
@@ -50,10 +51,17 @@ export interface AppKonfig {
 }
 
 export async function konfigLaden(): Promise<AppKonfig> {
-  return await invoke<AppKonfig>('konfig_laden')
+  const konfig = await invoke<AppKonfig>('konfig_laden')
+  if (konfig.backend_url) {
+    setRuntimeApiUrl(konfig.backend_url)
+  }
+  return konfig
 }
 
 export async function konfigSpeichern(konfig: AppKonfig): Promise<void> {
+  if (konfig.backend_url) {
+    setRuntimeApiUrl(konfig.backend_url)
+  }
   await invoke('konfig_speichern', { konfig })
 }
 

@@ -860,7 +860,7 @@ export function AiChat() {
       </div>
 
       {/* ── Eingabe ───────────────────────────────────────────────────── */}
-      <form className="border-t border-outline-variant/40 px-3 py-3 sm:px-4" onSubmit={send}>
+      <form className="shrink-0 border-t border-outline-variant/40 px-2.5 py-2 sm:px-4 sm:py-3 bg-surface" onSubmit={send}>
         {/* Der Hinweis steht ueber dem Eingabefeld, nicht in einer
             Einstellungsseite: er soll dort auftauchen, wo die Entscheidung
             Folgen hat — bevor jemand etwas Persoenliches tippt. */}

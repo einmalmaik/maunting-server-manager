@@ -57,27 +57,29 @@ function ansichtAusAbfrage(wert: string | null, id: string | null): Ansicht {
 }
 
 /** Ein Knopf der Umschaltreihe. Aktiv heisst: diese Ansicht steht gerade. */
-function Umschalter({ aktiv, onClick, icon, label }: {
+function Umschalter({ aktiv, onClick, icon, label, shortLabel }: {
   aktiv: boolean
   onClick: () => void
   icon: React.ReactNode
   label: string
+  shortLabel?: string
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={aktiv}
+      aria-label={label}
       className={[
-        'inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium',
-        'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
+        'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 shrink-0',
         aktiv
           ? 'border-outline-variant/60 bg-surface-container-low/50 text-on-surface-variant hover:text-on-surface'
-          : 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15',
+          : 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/20',
       ].join(' ')}
     >
       {icon}
-      {label}
+      <span>{shortLabel || label}</span>
     </button>
   )
 }
@@ -240,16 +242,8 @@ export function Ai() {
   }
 
   return (
-    // Volle Höhe abzüglich dessen, was der Rahmen schon verbraucht: 4rem Topbar
-    // (Topbar.tsx, `h-16` auf allen Breakpoints) plus die Polsterung von `main`
-    // (Shell.tsx, `p-margin-mobile md:p-margin-desktop` = 1rem bzw. 2.5rem, oben
-    // und unten). Macht 6rem mobil und 9rem ab `md`. Wird die Polsterung in
-    // Shell.tsx geändert, muss diese Rechnung mit.
-    // `min-h-0` ist hier nicht kosmetisch: ohne das kann ein Flex-Kind nicht
-    // kleiner werden als sein Inhalt, und der Verlauf würde die Seite statt
-    // seines eigenen Bereichs scrollen.
-    <div className="flex h-[calc(100dvh-6rem)] min-h-0 flex-col md:h-[calc(100dvh-9rem)]">
-      <div className="flex shrink-0 items-center justify-between sm:justify-end gap-2 pb-2">
+    <div className="flex h-full max-h-full min-h-0 w-full flex-1 flex-col overflow-hidden">
+      <div className="flex shrink-0 items-center justify-between sm:justify-end gap-1.5 sm:gap-2 pb-1.5 sm:pb-2">
         {ansicht !== 'text' ? (
           <div className="flex items-center justify-between w-full sm:w-auto gap-2">
             <Umschalter
@@ -261,68 +255,36 @@ export function Ai() {
             {canUseAutonomy && ansicht === 'sprache' && <AiAutonomyButton servers={servers} />}
           </div>
         ) : (
-          <>
-            {/* Mobile Ansichten-Leiste (1 schlanke Zeile) */}
-            <div className="flex sm:hidden items-center justify-between w-full gap-2">
-              <div className="flex items-center gap-1.5">
-                {canManageTasks && (
-                  <button
-                    type="button"
-                    onClick={() => setzeAnsicht('aufgaben')}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/40 bg-surface-container-low/60 px-2.5 py-1.5 text-xs font-medium text-on-surface-variant hover:text-on-surface"
-                    title={t('ai.tasks.toTasks')}
-                  >
-                    <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span>Aufgaben</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setzeAnsicht('guardian')}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-outline-variant/40 bg-surface-container-low/60 px-2.5 py-1.5 text-xs font-medium text-on-surface-variant hover:text-on-surface"
-                  title={t('ai.guardian.toGuardianMode')}
-                >
-                  <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span>Guardian</span>
-                </button>
-              </div>
-
-              {sprachkonfiguration && (
-                <Umschalter
-                  aktiv={false}
-                  onClick={() => setzeAnsicht('sprache')}
-                  icon={<AudioLines className="h-4 w-4" aria-hidden="true" />}
-                  label={t('ai.voice.toVoiceMode')}
-                />
-              )}
-            </div>
-
-            {/* Desktop Ansichten-Leiste */}
-            <div className="hidden sm:flex items-center gap-2">
+          <div className="flex items-center justify-between sm:justify-end w-full gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-1 sm:gap-1.5">
               {canManageTasks && (
                 <Umschalter
                   aktiv={false}
                   onClick={() => setzeAnsicht('aufgaben')}
-                  icon={<CalendarClock className="h-4 w-4" aria-hidden="true" />}
+                  icon={<CalendarClock className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" aria-hidden="true" />}
                   label={t('ai.tasks.toTasks')}
+                  shortLabel="Aufgaben"
                 />
               )}
               <Umschalter
                 aktiv={false}
                 onClick={() => setzeAnsicht('guardian')}
-                icon={<ShieldAlert className="h-4 w-4" aria-hidden="true" />}
+                icon={<ShieldAlert className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" aria-hidden="true" />}
                 label={t('ai.guardian.toGuardianMode')}
+                shortLabel="Guardian"
               />
-              {sprachkonfiguration && (
-                <Umschalter
-                  aktiv={false}
-                  onClick={() => setzeAnsicht('sprache')}
-                  icon={<AudioLines className="h-4 w-4" aria-hidden="true" />}
-                  label={t('ai.voice.toVoiceMode')}
-                />
-              )}
             </div>
-          </>
+
+            {sprachkonfiguration && (
+              <Umschalter
+                aktiv={false}
+                onClick={() => setzeAnsicht('sprache')}
+                icon={<AudioLines className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" aria-hidden="true" />}
+                label={t('ai.voice.toVoiceMode')}
+                shortLabel="Realtime"
+              />
+            )}
+          </div>
         )}
       </div>
 
@@ -345,7 +307,7 @@ export function Ai() {
       )}
 
       {canUseSkills && ansicht === 'text' && (
-        <div className="shrink-0 border-t border-outline-variant/40">
+        <div className="shrink-0 border-t border-outline-variant/40 hidden sm:block">
           <button
             type="button"
             onClick={() => setSkillsOpen((current) => !current)}

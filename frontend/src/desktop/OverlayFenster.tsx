@@ -202,15 +202,15 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
   const container = (
     <div
       data-tauri-drag-region
-      className={`flex flex-col items-center justify-start overflow-hidden rounded-2xl border border-outline-variant/50 bg-surface-container-lowest/95 px-4 pb-3 pt-1 backdrop-blur-xl shadow-2xl ${
-        inApp ? 'w-full max-w-sm sm:max-w-md mx-auto max-h-[360px]' : 'h-screen'
+      className={`flex flex-col items-center justify-start overflow-hidden rounded-3xl border border-primary/20 bg-surface-container-lowest/90 px-4 pb-4 pt-2 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.8)] backdrop-blur-2xl transition-all duration-300 ease-out animate-in zoom-in-95 slide-in-from-bottom-6 ${
+        inApp ? 'w-full max-w-sm sm:max-w-md mx-auto max-h-[380px]' : 'h-screen'
       }`}
     >
       <div className="flex w-full items-center justify-end" data-tauri-drag-region>
         <button
           onClick={schliessen}
           aria-label={t('mss.overlay.schliessen')}
-          className="rounded-md p-1 text-on-surface-variant transition-colors hover:text-on-surface"
+          className="rounded-full p-1.5 text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
         >
           <X className="h-4 w-4" />
         </button>
@@ -218,15 +218,15 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
       <div className="-mt-2" data-tauri-drag-region>
         <Sprachblase zustand={anzeigeZustand} pegel={anzeigePegel} breite={420} hoehe={150} />
       </div>
-      <p className="-mt-2 text-sm text-on-surface" aria-live="polite">
+      <p className="-mt-2 text-sm font-medium text-on-surface" aria-live="polite">
         {!schaufenster && fehler ? t(fehler) : t(`ai.voice.zustand.${anzeigeZustand}`)}
       </p>
       {letzteZeilen.length > 0 && (
-        <div className="mt-1 max-h-16 w-full overflow-y-auto text-xs leading-5">
+        <div className="mt-2 max-h-20 w-full overflow-y-auto rounded-xl bg-surface-container-low/50 px-3 py-2 text-xs leading-5">
           {letzteZeilen.map((zeile, i) => (
             <p
               key={i}
-              className={zeile.wer === 'ich' ? 'text-on-surface-variant/70' : 'text-on-surface'}
+              className={zeile.wer === 'ich' ? 'text-on-surface-variant/80' : 'font-medium text-on-surface'}
             >
               {zeile.wer === 'ich' ? t('mss.overlay.ich') : t('mss.overlay.ki')} {zeile.text}
             </p>
@@ -239,7 +239,7 @@ export function OverlayFenster({ inApp = false }: OverlayFensterProps) {
 
   if (inApp) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md transition-all duration-300 ease-out animate-in fade-in">
         {container}
       </div>
     )

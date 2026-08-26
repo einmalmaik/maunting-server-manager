@@ -287,6 +287,18 @@ pub fn ausfuehren(
     argumente: &Value,
     auftrag_id: Option<&str>,
 ) -> Result<Ergebnis, String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, sandbox_pfad, werkzeug, argumente, auftrag_id);
+        return Err(
+            "Auf Android sind lokale System-, Datei- und Steuerungs-Werkzeuge \
+             aus Sicherheitsgründen physikalisch deaktiviert."
+                .into(),
+        );
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
     let app_konfig = konfig::laden(app).unwrap_or_default();
 
     // 1. Computer-Use Sicherheitsgrenze:
@@ -360,6 +372,7 @@ pub fn ausfuehren(
         return Err(format!("Bestätigungskarte nicht anzeigbar: {fehler}"));
     }
     Ok(None)
+    }
 }
 
 /// Maus und Tastatur — samt der Bitte um die Freigabe dafuer.

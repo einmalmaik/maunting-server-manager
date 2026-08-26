@@ -161,7 +161,10 @@ export function AiAutonomyButton({
       </button>
 
       {open && (
-        <div id={panelId} className="absolute left-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-outline-variant bg-surface-container-high p-4 shadow-panel">
+        <div
+          id={panelId}
+          className="fixed inset-x-4 top-28 z-50 mx-auto max-w-sm rounded-xl border border-outline-variant bg-surface-container-high p-4 shadow-panel sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80 sm:max-w-none"
+        >
           <h3 className="text-sm font-semibold text-on-surface">{t('ai.autonomy.title')}</h3>
           <p className="mt-1 text-xs leading-5 text-on-surface-variant">
             {/* Der Text stand fest auf „panelweit ... auf allen deinen Servern“

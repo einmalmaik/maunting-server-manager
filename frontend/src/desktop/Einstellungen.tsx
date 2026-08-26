@@ -29,7 +29,7 @@ import {
 import { api } from '@/api/client'
 import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
-import { Badge, Button, ProgressBar, Slider, Switch } from '@/Singra/UI'
+import { Badge, Button, Dropdown, type DropdownOption, ProgressBar, Slider, Switch } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 import { Gefahrenzone } from './Gefahrenzone'
 import { OVERLAY_ZUSTAND_TEST } from './sprachKoordination'
@@ -61,8 +61,14 @@ const VERARBEITUNG_SPEICHERN_MS = 400
 
 type EinstellungsTab = 'desktop' | 'wakeword' | 'audio' | 'rechtliches' | 'gefahr'
 
+const isAndroidClient = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
+
 const TABS: TabDef<EinstellungsTab>[] = [
-  { id: 'desktop', labelKey: 'mss.einstellungen.tab.desktop', icon: MonitorCog },
+  {
+    id: 'desktop',
+    labelKey: isAndroidClient ? 'mss.einstellungen.tab.app' : 'mss.einstellungen.tab.desktop',
+    icon: MonitorCog,
+  },
   { id: 'wakeword', labelKey: 'mss.einstellungen.tab.wakeword', icon: Mic },
   { id: 'audio', labelKey: 'mss.einstellungen.tab.audio', icon: Volume2 },
   { id: 'rechtliches', labelKey: 'mss.einstellungen.tab.rechtliches', icon: FileSignature },
@@ -107,14 +113,17 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
 
 function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => void }) {
   const { t } = useTranslation()
+  const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
   const [autostart, setAutostart] = useState<boolean | null>(null)
   const [status, setStatus] = useState<AgentStatus>('bereit')
 
   useEffect(() => {
-    void isEnabled()
-      .then(setAutostart)
-      .catch(() => setAutostart(null))
-  }, [])
+    if (!isAndroid) {
+      void isEnabled()
+        .then(setAutostart)
+        .catch(() => setAutostart(null))
+    }
+  }, [isAndroid])
 
   async function autostartUmschalten(an: boolean) {
     try {
@@ -142,33 +151,37 @@ function DesktopIntegration({ onKonfigAenderung }: { onKonfigAenderung?: () => v
   return (
     <section className="msm-card flex flex-col gap-4 p-5">
       <h2 className="text-sm font-medium text-on-surface">
-        {t('mss.einstellungen.desktopIntegration')}
+        {isAndroid ? 'Gerätediagnose & App-Status' : t('mss.einstellungen.desktopIntegration')}
       </h2>
 
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm text-on-surface">{t('mss.einstellungen.autostart')}</p>
-          <p className="text-xs text-on-surface-variant">
-            {t('mss.einstellungen.autostartHinweis')}
-          </p>
-        </div>
-        <Switch
-          checked={autostart === true}
-          disabled={autostart === null}
-          onCheckedChange={(an) => void autostartUmschalten(an)}
-          aria-label={t('mss.einstellungen.autostart')}
-        />
-      </div>
+      {!isAndroid && (
+        <>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-on-surface">{t('mss.einstellungen.autostart')}</p>
+              <p className="text-xs text-on-surface-variant">
+                {t('mss.einstellungen.autostartHinweis')}
+              </p>
+            </div>
+            <Switch
+              checked={autostart === true}
+              disabled={autostart === null}
+              onCheckedChange={(an) => void autostartUmschalten(an)}
+              aria-label={t('mss.einstellungen.autostart')}
+            />
+          </div>
+
+          <ArtefaktInstallationSektion onKonfigAenderung={onKonfigAenderung} />
+
+          <Hotkeys />
+
+          <Systembereich />
+        </>
+      )}
 
       <ComputerUseSektion onKonfigAenderung={onKonfigAenderung} />
 
-      <ArtefaktInstallationSektion onKonfigAenderung={onKonfigAenderung} />
-
-      <Hotkeys />
-
-      <Systembereich />
-
-      <div className="border-t border-outline-variant/40 pt-4">
+      <div className={isAndroid ? '' : 'border-t border-outline-variant/40 pt-4'}>
         <p className="text-sm text-on-surface">{t('mss.einstellungen.diagnose')}</p>
         <p className="mb-3 text-xs text-on-surface-variant">
           {t('mss.einstellungen.diagnoseHinweis')}
@@ -632,31 +645,33 @@ function AudioEinstellungen() {
     standard: string | null,
   ) => {
     const wert = konfig?.[feld] ?? ''
+    const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
+    const standardLabel = isAndroid
+      ? standard
+        ? t('mss.audio.standardSystemMit', { name: standard })
+        : t('mss.audio.standardSystem')
+      : standard
+        ? t('mss.audio.standardMit', { name: standard })
+        : t('mss.audio.standard')
+
+    const options: DropdownOption[] = [
+      { value: '', label: standardLabel },
+      ...(wert !== '' && !liste.includes(wert)
+        ? [{ value: wert, label: t('mss.audio.fehlt', { name: wert }) }]
+        : []),
+      ...liste.map((name) => ({ value: name, label: name })),
+    ]
+
     return (
-      <select
-        value={wert}
-        onChange={(e) => void waehlen(feld, e.target.value)}
-        disabled={konfig === null}
-        className="msm-input"
-        aria-label={t(`mss.audio.${feld === 'audio_eingabe' ? 'eingabe' : 'ausgabe'}`)}
-      >
-        <option value="">
-          {standard
-            ? t('mss.audio.standardMit', { name: standard })
-            : t('mss.audio.standard')}
-        </option>
-        {/* Ein gespeichertes Gerät, das gerade fehlt, bleibt wählbar sichtbar —
-            sonst spränge die Anzeige stumm auf den Standard, obwohl die Wahl
-            gespeichert bleibt. */}
-        {wert !== '' && !liste.includes(wert) && (
-          <option value={wert}>{t('mss.audio.fehlt', { name: wert })}</option>
-        )}
-        {liste.map((name) => (
-          <option key={name} value={name}>
-            {name}
-          </option>
-        ))}
-      </select>
+      <div className="w-full">
+        <Dropdown
+          value={wert}
+          onChange={(val) => void waehlen(feld, val)}
+          options={options}
+          disabled={konfig === null}
+          aria-label={t(`mss.audio.${feld === 'audio_eingabe' ? 'eingabe' : 'ausgabe'}`)}
+        />
+      </div>
     )
   }
 
@@ -785,15 +800,17 @@ function AudioEinstellungen() {
         }}
       />
 
-      <div className="border-t border-outline-variant/40 pt-4">
-        <p className="text-sm text-on-surface">{t('mss.audio.ducking')}</p>
-        <p className="mb-3 text-xs text-on-surface-variant">{t('mss.audio.duckingHinweis')}</p>
-        <Button variant="secondary" onClick={() => void duckingTesten()} disabled={duckt}>
-          {duckt
-            ? t('mss.einstellungen.duckingLaeuft')
-            : t('mss.einstellungen.duckingTesten')}
-        </Button>
-      </div>
+      {!isAndroidClient && (
+        <div className="border-t border-outline-variant/40 pt-4">
+          <p className="text-sm text-on-surface">{t('mss.audio.ducking')}</p>
+          <p className="mb-3 text-xs text-on-surface-variant">{t('mss.audio.duckingHinweis')}</p>
+          <Button variant="secondary" onClick={() => void duckingTesten()} disabled={duckt}>
+            {duckt
+              ? t('mss.einstellungen.duckingLaeuft')
+              : t('mss.einstellungen.duckingTesten')}
+          </Button>
+        </div>
+      )}
     </section>
   )
 }
@@ -855,6 +872,9 @@ function Testhoeren({ verarbeitung }: { verarbeitung: AudioVerarbeitung }) {
         return
       }
       const kontext = new AudioContext()
+      if (kontext.state === 'suspended') {
+        await kontext.resume().catch(() => {})
+      }
       // Dieselbe Gerätewahl wie die Stimme der KI (`audioWiedergabe`):
       // `setSinkId` gibt es erst seit Chromium 110; wo es fehlt, bleibt der
       // Systemstandard — Ton geht vor Gerätetreue.

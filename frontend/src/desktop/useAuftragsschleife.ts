@@ -48,6 +48,8 @@ function fragtEinenMenschen(auftrag: Auftrag): boolean {
  * auf einen Menschen wartet — oder `null`. Genau diese Aufträge beantwortet
  * nicht die Schleife, sondern die jeweilige Karte.
  */
+const isAndroidClient = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
+
 export function useAuftragsschleife(aktiv: boolean): string | null {
   const [offeneUebernahme, setOffeneUebernahme] = useState<string | null>(null)
   // In einem Ref und nicht im State: die Schleife soll sich davon nicht neu
@@ -55,7 +57,7 @@ export function useAuftragsschleife(aktiv: boolean): string | null {
   const laeuft = useRef(false)
 
   useEffect(() => {
-    if (!aktiv) {
+    if (!aktiv || isAndroidClient) {
       return
     }
     let gestoppt = false

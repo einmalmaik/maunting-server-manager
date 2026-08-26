@@ -11,12 +11,16 @@
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    height: 100%;
+    overscroll-behavior: none;
   }
 
   body {
+    height: 100%;
     min-height: 100vh;
     margin: 0;
     padding: 0;
+    overscroll-behavior: none;
     background:
       radial-gradient(70rem 32rem at 50% -12rem, hsl(var(--dna-focus) / 0.12), transparent 68%),
       hsl(var(--dna-background));

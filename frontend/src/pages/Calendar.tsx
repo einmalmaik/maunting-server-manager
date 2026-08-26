@@ -123,6 +123,30 @@ export function Calendar() {
     fetchEvents()
   }, [rangeStart, rangeEnd])
 
+  const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null)
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      setTouchStart({ x: e.touches[0].clientX, y: e.touches[0].clientY })
+    }
+  }
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStart || e.changedTouches.length === 0) return
+    const deltaX = e.changedTouches[0].clientX - touchStart.x
+    const deltaY = e.changedTouches[0].clientY - touchStart.y
+    setTouchStart(null)
+
+    // Nur bei dominanter horizontaler Wischbewegung (mind. 50px und 1.5x steiler als vertikal)
+    if (Math.abs(deltaX) >= 50 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+      if (deltaX > 0) {
+        handlePrev()
+      } else {
+        handleNext()
+      }
+    }
+  }
+
   const handlePrev = () => {
     const d = new Date(currentDate)
     if (viewMode === 'month') {
@@ -435,9 +459,15 @@ export function Calendar() {
         </div>
       </div>
 
-      {/* Hauptansicht: MONAT */}
-      {viewMode === 'month' && (
-        <div className="msm-card p-0 overflow-hidden">
+      {/* Kalender-Inhaltsbereich mit horizontaler Wischgesten-Steuerung */}
+      <div
+        className="touch-pan-y"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        {/* Hauptansicht: MONAT */}
+        {viewMode === 'month' && (
+          <div className="msm-card p-0 overflow-hidden">
           {/* Wochentag-Kopfzeile */}
           <div className="grid grid-cols-7 border-b border-outline-variant/40 bg-surface-container/50 text-center font-label-md text-xs font-semibold uppercase tracking-wider text-on-surface-variant py-2.5">
             <div>Mo</div>
@@ -666,6 +696,7 @@ export function Calendar() {
           </div>
         </div>
       )}
+      </div>
 
       {/* MODAL: Termin anlegen / bearbeiten */}
       {isModalOpen && (

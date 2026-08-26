@@ -64,7 +64,22 @@ export function Wizard({
       return
     }
     const index = REIHENFOLGE.indexOf(schritt)
-    const naechster = REIHENFOLGE[index + 1]
+    let naechsterIdx = index + 1
+    let naechster = REIHENFOLGE[naechsterIdx]
+
+    // Falls der Assistenten-Name bereits existiert, Schritt Personalisierung überspringen
+    const benutzer = useAuthStore.getState().user
+    if (naechster === 'personalisierung' && benutzer?.agent_name) {
+      naechsterIdx += 1
+      naechster = REIHENFOLGE[naechsterIdx]
+    }
+
+    // Sandbox auf Android auslassen
+    if (naechster === 'sandbox' && isAndroid) {
+      naechsterIdx += 1
+      naechster = REIHENFOLGE[naechsterIdx]
+    }
+
     if (naechster) {
       setSchritt(naechster)
       return
@@ -73,6 +88,14 @@ export function Wizard({
     await konfigSpeichern(fertig)
     onFertig(fertig)
   }
+
+  useEffect(() => {
+    // Falls direkt beim Startschritt Personalisierung eingestiegen wird, aber Name schon vorliegt
+    const benutzer = useAuthStore.getState().user
+    if (schritt === 'personalisierung' && benutzer?.agent_name && !nurDieserSchritt) {
+      void weiter()
+    }
+  }, [])
 
   return (
     <main className="flex flex-1 items-center justify-center p-4 sm:p-6 pt-[max(1.5rem,env(safe-area-inset-top,0px))] pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] pl-[max(1rem,env(safe-area-inset-left,0px))] pr-[max(1rem,env(safe-area-inset-right,0px))]">
