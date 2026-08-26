@@ -147,15 +147,15 @@ MAX_BELEG_ZEICHEN = 2_000
 #: Gespeicherte gelernte Sprechkadenz je Benutzer-ID (Faktor 0.7 bis 2.5).
 _USER_KADENZ_CACHE: dict[int, float] = {}
 
-#: Typische unvollständige Satzendungen in mehreren Sprachen.
-_UNVOLLSTAENDIGE_ENDUNGEN = (
-    ",", "...", "…", "-", "—", ":", ";",
-    " und", " oder", " aber", " weil", " dass", " denn", " den", " die", " das",
-    " dem", " des", " ein", " eine", " einen", " einem", " einer", " eines",
-    " bitte", " um", " wie", " mit", " für", " in", " an", " auf", " aus", " bei",
-    " also", " bzw", " bzw.", " resp", " resp.", " äh", " ähm",
-    " and", " or", " but", " because", " that", " the", " a", " an", " to", " with", " for",
-)
+#: Typische unvollständige Satzendungen und Satzzeichen.
+_UNVOLLSTAENDIGE_SATZZEICHEN = (",", "...", "…", "-", "—", ":", ";")
+_UNVOLLSTAENDIGE_WOERTER = {
+    "und", "oder", "aber", "weil", "dass", "denn", "den", "die", "das",
+    "dem", "des", "ein", "eine", "einen", "einem", "einer", "eines",
+    "bitte", "um", "wie", "mit", "für", "fuer", "in", "an", "auf", "aus", "bei",
+    "also", "bzw", "bzw.", "resp", "resp.", "äh", "ähm", "aeh", "aehm",
+    "and", "or", "but", "because", "that", "the", "a", "an", "to", "with", "for",
+}
 
 
 def _ist_gedanke_abgeschlossen(text: str) -> bool:
@@ -163,11 +163,14 @@ def _ist_gedanke_abgeschlossen(text: str) -> bool:
     sauber = (text or "").strip().lower()
     if not sauber:
         return False
+    if any(sauber.endswith(sz) for sz in _UNVOLLSTAENDIGE_SATZZEICHEN):
+        return False
     if sauber.endswith((".", "!", "?", "。", "！", "？")):
         return not sauber.endswith(("...", "…", "..!", "..?", ".."))
-    if any(sauber.endswith(endung) for endung in _UNVOLLSTAENDIGE_ENDUNGEN):
+    woerter = sauber.split()
+    if woerter and woerter[-1] in _UNVOLLSTAENDIGE_WOERTER:
         return False
-    return False
+    return len(woerter) >= 4
 
 
 @dataclass
@@ -547,6 +550,14 @@ class Sprachbruecke:
             self._letzte_antwort_fertig = False
 
             await self._senden({"art": "gehoert", "text": wortlaut})
+
+            if not _ist_gedanke_abgeschlossen(wortlaut):
+                # Kurze Gnadenfrist für offene Gedanken, damit bei unmittelbarem
+                # Weiterreden der Satz noch vor der LLM-Antwort verschmilzt.
+                try:
+                    await asyncio.sleep(0.8)
+                except asyncio.CancelledError:
+                    raise
 
             if self._offene_vorschlaege:
                 if await self._entscheidung(wortlaut):
