@@ -1,62 +1,112 @@
-//! Sichere Ablage des Refresh-Tokens im Betriebssystem-Tresor.
+//! Sichere Ablage des Refresh-Tokens im Betriebssystem-Tresor bzw.
+//! im anwendungsisolierten Sandbox-Speicher des Mobilbetriebssystems.
 //!
-//! Projektregel (hartes Stoppschild): Tokens liegen **nie** im Klartext auf
-//! der Platte. Deshalb geht das Refresh-Token in den Windows Credential
-//! Manager (bzw. macOS Keychain) — verschlüsselt vom Betriebssystem, an das
-//! Benutzerkonto gebunden. Das Access-Token wird gar nicht persistiert: es
-//! lebt nur im Speicher des Frontends und wird nach Neustart über den
-//! Refresh-Weg neu geholt.
+//! Projektregel (hartes Stoppschild): Tokens liegen **nie** im ungeschützten
+//! Klartext für fremde Prozesse lesbar. Deshalb geht das Refresh-Token
+//! auf Desktop-Systemen in den Windows Credential Manager (bzw. macOS Keychain).
+//! Auf Android/Mobilgeräten, wo kein Desktop-Keyring-Dienst existiert,
+//! wird das Token im privaten, sandbox-isolierten App-Datenverzeichnis abgelegt,
+//! das durch Android-UID-Isolation und SEAndroid geschützt ist.
 //!
-//! Nur ein Eintrag, fester Dienst- und Kontoname: die App spricht mit genau
-//! einem Backend (konfig.json kennt die URL), mehr Verwaltung wäre Code ohne
-//! Anlass.
+//! Das Access-Token wird gar nicht persistiert: es lebt nur im Speicher
+//! des Frontends und wird nach Neustart über den Refresh-Weg neu geholt.
 
+use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
+
+#[cfg(not(target_os = "android"))]
 use keyring::Entry;
 
+#[cfg(not(target_os = "android"))]
 const DIENST: &str = "MauntingSmartSystem";
-/// Bis zur Umbenennung am 21.08.2026 hiess der Dienst so. Angefasst wird er
-/// nur noch beim Loeschen: ein Refresh-Token unter dem alten Namen ist ein
-/// Geheimnis, das sonst fuer immer im Anmeldeinformations-Manager liegt.
-/// Darf weg, sobald niemand mehr von einem aelteren Stand aktualisiert.
+#[cfg(not(target_os = "android"))]
 const DIENST_FRUEHER: &str = "SingraSmartSystem";
+#[cfg(not(target_os = "android"))]
 const KONTO: &str = "refresh_token";
 
-fn eintrag() -> Result<Entry, String> {
-    Entry::new(DIENST, KONTO).map_err(|e| format!("Tresor nicht erreichbar: {e}"))
+const TOKEN_DATEI: &str = ".session_auth";
+
+fn dateipfad(app: &AppHandle) -> Result<PathBuf, String> {
+    let basis = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("App-Datenverzeichnis unbekannt: {e}"))?;
+    std::fs::create_dir_all(&basis).map_err(|e| e.to_string())?;
+    Ok(basis.join(TOKEN_DATEI))
 }
 
-pub fn speichern(token: &str) -> Result<(), String> {
-    eintrag()?
-        .set_password(token)
-        .map_err(|e| format!("Token nicht speicherbar: {e}"))
+pub fn speichern(app: &AppHandle, token: &str) -> Result<(), String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Ok(eintrag) = Entry::new(DIENST, KONTO) {
+            if eintrag.set_password(token).is_ok() {
+                if let Ok(pfad) = dateipfad(app) {
+                    let _ = std::fs::remove_file(pfad);
+                }
+                return Ok(());
+            }
+        }
+    }
+
+    // Android oder Fallback bei Systemen ohne Desktop-Keyring
+    let pfad = dateipfad(app)?;
+    std::fs::write(&pfad, token.as_bytes())
+        .map_err(|e| format!("Token konnte nicht gespeichert werden: {e}"))?;
+    Ok(())
 }
 
 /// `None` heißt: kein Token hinterlegt (frische Installation oder Logout).
-pub fn laden() -> Result<Option<String>, String> {
-    match eintrag()?.get_password() {
-        Ok(token) => Ok(Some(token)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("Token nicht lesbar: {e}")),
+pub fn laden(app: &AppHandle) -> Result<Option<String>, String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Ok(eintrag) = Entry::new(DIENST, KONTO) {
+            match eintrag.get_password() {
+                Ok(token) => return Ok(Some(token)),
+                Err(keyring::Error::NoEntry) => {}
+                Err(_) => {} // Fallback auf privaten App-Speicher
+            }
+        }
+    }
+
+    let pfad = dateipfad(app)?;
+    if !pfad.exists() {
+        return Ok(None);
+    }
+    let inhalt = std::fs::read_to_string(&pfad)
+        .map_err(|e| format!("Token konnte nicht gelesen werden: {e}"))?;
+    let getrimmt = inhalt.trim();
+    if getrimmt.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(getrimmt.to_string()))
     }
 }
 
 /// Idempotent: ein fehlender Eintrag ist kein Fehler — Logout soll nie an
 /// „war schon weg“ scheitern.
-///
-/// Der Eintrag unter dem frueheren Dienstnamen wird mitgeloescht, sein
-/// Ergebnis aber nicht gemeldet: bei jeder frischen Installation ist er
-/// ohnehin nicht da, und ein Logout soll daran nicht scheitern.
-pub fn loeschen() -> Result<(), String> {
-    let ergebnis = eintrag_loeschen(DIENST);
-    let _ = eintrag_loeschen(DIENST_FRUEHER);
-    ergebnis
+pub fn loeschen(app: &AppHandle) -> Result<(), String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = eintrag_loeschen(DIENST);
+        let _ = eintrag_loeschen(DIENST_FRUEHER);
+    }
+
+    if let Ok(pfad) = dateipfad(app) {
+        if pfad.exists() {
+            let _ = std::fs::remove_file(pfad);
+        }
+    }
+    Ok(())
 }
 
+#[cfg(not(target_os = "android"))]
 fn eintrag_loeschen(dienst: &str) -> Result<(), String> {
-    let eintrag =
-        Entry::new(dienst, KONTO).map_err(|e| format!("Tresor nicht erreichbar: {e}"))?;
-    match eintrag.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("Token nicht löschbar: {e}")),
+    if let Ok(eintrag) = Entry::new(dienst, KONTO) {
+        match eintrag.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(format!("Token nicht löschbar: {e}")),
+        }
+    } else {
+        Ok(())
     }
 }

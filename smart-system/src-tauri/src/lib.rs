@@ -90,21 +90,21 @@ fn konfig_speichern(app: tauri::AppHandle, konfig: konfig::AppKonfig) -> Result<
     konfig::speichern(&app, &konfig)
 }
 
-/// Refresh-Token in den OS-Tresor. Das Access-Token wird bewusst nie
-/// gespeichert — es lebt nur im Speicher des Frontends.
+/// Refresh-Token in den OS-Tresor bzw. Sandbox-Speicher. Das Access-Token wird
+/// bewusst nie gespeichert — es lebt nur im flüchtigen Speicher des Frontends.
 #[tauri::command(async)]
-fn refresh_token_speichern(token: String) -> Result<(), String> {
-    geheimnisse::speichern(&token)
+fn refresh_token_speichern(app: tauri::AppHandle, token: String) -> Result<(), String> {
+    geheimnisse::speichern(&app, &token)
 }
 
 #[tauri::command(async)]
-fn refresh_token_laden() -> Result<Option<String>, String> {
-    geheimnisse::laden()
+fn refresh_token_laden(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    geheimnisse::laden(&app)
 }
 
 #[tauri::command(async)]
-fn refresh_token_loeschen() -> Result<(), String> {
-    geheimnisse::loeschen()
+fn refresh_token_loeschen(app: tauri::AppHandle) -> Result<(), String> {
+    geheimnisse::loeschen(&app)
 }
 
 /// Prueft, ob Windows Sandbox auf diesem System verfuegbar ist.

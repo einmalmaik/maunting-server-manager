@@ -67,7 +67,7 @@ pub fn aufraeumen(app: &AppHandle) -> Aufraeumbericht {
         }
     };
 
-    let tresor_geleert = match crate::geheimnisse::loeschen() {
+    let tresor_geleert = match crate::geheimnisse::loeschen(app) {
         Ok(()) => true,
         Err(meldung) => {
             fehler.push(format!("Tresor: {meldung}"));
