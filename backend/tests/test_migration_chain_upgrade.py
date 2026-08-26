@@ -44,6 +44,8 @@ BRANCH_TABLES = (
     "ai_tool_results",
     "ai_tasks",
     "team_invitations",
+    "panel_popups",
+    "user_popup_states",
 )
 
 
