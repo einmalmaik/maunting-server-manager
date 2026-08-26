@@ -621,6 +621,12 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="ai.calendar.use",
         recht_global=True,
     ),
+    "propose_calendar_event_update": Werkzeug(
+        "global_write",
+        gruppe="calendar",
+        recht="ai.calendar.use",
+        recht_global=True,
+    ),
     "propose_calendar_event_delete": Werkzeug(
         "global_write",
         immer_bestaetigen=True,

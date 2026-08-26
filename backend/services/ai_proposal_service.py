@@ -1921,6 +1921,43 @@ def _calendar_event_delete_payload(db: Session, user: User, rest: dict) -> tuple
         "calendar_id": calendar_id,
         "irreversible": True,
     }
+    return payload, preview
+
+
+def _calendar_event_update_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
+    event_id = str(rest.get("event_id", "")).strip()
+    if not event_id:
+        raise AiActionValidationError("Termin-Änderung erfordert event_id")
+
+    title = rest.get("title")
+    start_time = rest.get("start_time")
+    end_time = rest.get("end_time")
+    description = rest.get("description")
+    location = rest.get("location")
+    calendar_id = rest.get("calendar_id")
+
+    payload = {
+        "event_id": event_id,
+        "title": str(title).strip() if title else None,
+        "start_time": str(start_time).strip() if start_time else None,
+        "end_time": str(end_time).strip() if end_time else None,
+        "description": str(description).strip() if description else None,
+        "location": str(location).strip() if location else None,
+        "calendar_id": int(calendar_id) if calendar_id else None,
+    }
+    preview = {
+        "operation": "calendar_event_update",
+        "event_id": event_id,
+        "title": payload["title"],
+        "start_time": payload["start_time"],
+        "end_time": payload["end_time"],
+        "description": payload["description"],
+        "location": payload["location"],
+        "calendar_id": calendar_id,
+    }
+    return payload, preview
+
+
 def _popup_create_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
     title = str(rest.get("title", "")).strip()
     content_markdown = str(rest.get("content_markdown", "")).strip()
@@ -2191,6 +2228,9 @@ _GLOBALE_PAYLOADS: dict = {
     ),
     "propose_calendar_event_create": lambda db, user, rest, arguments, guardian: (
         _calendar_event_create_payload(db, user, rest)
+    ),
+    "propose_calendar_event_update": lambda db, user, rest, arguments, guardian: (
+        _calendar_event_update_payload(db, user, rest)
     ),
     "propose_calendar_event_delete": lambda db, user, rest, arguments, guardian: (
         _calendar_event_delete_payload(db, user, rest)
@@ -3799,6 +3839,24 @@ def _ausfuehren_calendar_event_create(db: Session, rahmen: _AusfuehrungsRahmen) 
     return _Ausgefuehrt(result=result)
 
 
+def _ausfuehren_calendar_event_update(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from services.calendar_service import CalendarService
+
+    p = rahmen.payload
+    result = CalendarService.update_event(
+        db,
+        user=rahmen.active_user,
+        event_id=str(p["event_id"]),
+        title=str(p["title"]) if p.get("title") else None,
+        start_time=str(p["start_time"]) if p.get("start_time") else None,
+        end_time=str(p["end_time"]) if p.get("end_time") else None,
+        description=str(p["description"]) if p.get("description") else None,
+        location=str(p["location"]) if p.get("location") else None,
+        calendar_id=int(p["calendar_id"]) if p.get("calendar_id") else None,
+    )
+    return _Ausgefuehrt(result=result)
+
+
 def _ausfuehren_calendar_event_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     from services.calendar_service import CalendarService
 
@@ -3913,6 +3971,7 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_task_delete": _ausfuehren_task_delete,
     "propose_email_send": _ausfuehren_email_send,
     "propose_calendar_event_create": _ausfuehren_calendar_event_create,
+    "propose_calendar_event_update": _ausfuehren_calendar_event_update,
     "propose_calendar_event_delete": _ausfuehren_calendar_event_delete,
     "propose_popup_create": _ausfuehren_popup_create,
     "worker_start": _ausfuehren_worker_start,

@@ -4,6 +4,7 @@
   },
   "nav": {
     "dashboard": "Dashboard",
+    "calendar": "Kalender",
     "servers": "Server",
     "users": "Benutzer",
     "roles": "Rollen",
@@ -24,6 +25,27 @@
     "administration": "Administration",
     "panel": "Panel",
     "help": "Hilfe"
+  },
+  "calendar": {
+    "eyebrow": "MSM / MSS Zeitmanagement",
+    "title": "Kalender & Termine",
+    "description": "Integrierter nativer Kalender für Termine, Besprechungen und KI-gestützte Zeitplanung — ohne Drittanbieter-Zwang.",
+    "subscribe": "Abonnieren",
+    "refresh": "Aktualisieren",
+    "newEvent": "Neuer Termin",
+    "today": "Heute",
+    "week": "Woche",
+    "viewMonth": "Monat",
+    "viewWeek": "Woche",
+    "viewDay": "Tag",
+    "createEvent": "Neuer Termin",
+    "editEvent": "Termin bearbeiten",
+    "eventTitle": "Titel / Anlass",
+    "start": "Beginn",
+    "end": "Ende",
+    "location": "Ort / Meeting-Link",
+    "descriptionLabel": "Beschreibung / Notizen",
+    "color": "Farbkennzeichnung"
   },
   "pageContext": {
     "overview": "Übersicht",
@@ -494,6 +516,7 @@
         "propose_backup_schedule_set": "Auto-Backup des Servers einstellen",
         "propose_email_send": "E-Mail versenden",
         "propose_calendar_event_create": "Kalendertermin anlegen",
+        "propose_calendar_event_update": "Kalendertermin ändern",
         "propose_calendar_event_delete": "Kalendertermin löschen",
         "propose_popup_create": "Pop-up-Ankündigung erstellen",
         "desktop_artifact": "Desktop-Artefakt (Software/Mod/Installer)",
@@ -553,6 +576,7 @@
         "propose_backup_schedule_set": "Das Auto-Backup dieses Servers so einstellen? Die Einstellungen stehen danach im Backup-Bereich des Servers und bleiben dort von Hand änderbar. Änderst du sie später manuell, endet die Verwaltung durch die KI und die zuständige Aufgabe wird pausiert.",
         "propose_email_send": "Die vorbereitete E-Mail jetzt wirklich absenden? Empfänger, Betreff und Inhalt werden unmittelbar vor dem Versand geprüft.",
         "propose_calendar_event_create": "Diesen Termin jetzt verbindlich in deinen Kalender eintragen? Berechtigungen und Kalenderdaten werden vor der Anlage geprüft.",
+        "propose_calendar_event_update": "Diesen Termin jetzt mit den neuen Angaben in deinem Kalender aktualisieren?",
         "propose_calendar_event_delete": "Diesen Termin jetzt wirklich aus deinem Kalender entfernen? Das Löschen lässt sich nicht rückgängig machen.",
         "propose_popup_create": "Soll diese Pop-up-Ankündigung für das Panel erstellt werden?"
       },
@@ -670,6 +694,7 @@
       "calendar_read": "Kalender abgefragt",
       "propose_email_send": "E-Mail vorbereitet",
       "propose_calendar_event_create": "Termin vorbereitet",
+      "propose_calendar_event_update": "Terminänderung vorbereitet",
       "propose_calendar_event_delete": "Terminlöschung vorbereitet",
       "propose_popup_create": "Pop-up vorbereitet",
       "propose_server_lifecycle": "Serveraktion vorbereitet",
@@ -739,6 +764,7 @@
       "propose_task_set": "Ich bereite die wiederkehrende Aufgabe vor",
       "propose_email_send": "Ich bereite den E-Mail-Versand vor",
       "propose_calendar_event_create": "Ich bereite den Kalendertermin vor",
+      "propose_calendar_event_update": "Ich passe den Kalendertermin an",
       "propose_calendar_event_delete": "Ich bereite das Löschen des Kalendertermins vor",
       "propose_popup_create": "Ich bereite die Pop-up-Ankündigung vor",
       "email_search": "Ich durchsuche deine E-Mails",
@@ -3725,7 +3751,7 @@
           "guardian": "Bei erteilter Autonomiefreigabe kann ein Guardian-Vorfall eine Verarbeitung auslösen, ohne dass der Nutzer anwesend ist: übertragen werden Vorfallart, Status und die ohnehin freigegebenen Serverdaten; Logauszüge werden dabei zusätzlich um öffentliche IP-Adressen und E-Mail-Adressen bereinigt. Verbrauch und Verantwortung liegen beim Freigeber. Der Ergebnisbericht per E-Mail enthält modellerzeugten Text.",
           "tasks": "Ein im Chat oder in der Aufgabenliste angelegter stehender Auftrag („KI-Aufgabe“) speichert Name, Auftragstext, Zeitplan, Zeitzone und Zustellweg und löst zum vereinbarten Zeitpunkt eine Verarbeitung aus, ohne dass der Nutzer anwesend ist. Sie läuft im Hintergrund mit den Rechten und dem Kontingent des Anlegenden; bei jedem fälligen Lauf werden Auftragstext und die abgerufenen Serverdaten an den gewählten Modellanbieter übertragen. Auf Wunsch geht das Ergebnis zusätzlich per E-Mail an die hinterlegte Adresse und enthält modellerzeugten Text. Aufträge sind im Chat und in der Aufgabenliste jederzeit auflistbar, pausierbar und löschbar.",
           "mailboxes": "Verknüpfte E-Mail-Postfächer (IMAP / SMTP): Hinterlegte Zugangsdaten (Passwörter, App-Passwörter oder OAuth-Tokens) werden mit DIS AES-256-GCM verschlüsselt gespeichert und verlassen das Panel niemals im Klartext. E-Mails werden ausschließlich auf Ihre Anweisung hin durchsucht oder gelesen. Der KI-Assistent sendet niemals eigenständig E-Mails: Jeder E-Mail-Versand wird im Chat als Vorschlagskarte mit Betreff, Empfänger und Inhalt vorgelegt und erst nach Ihrer ausdrücklichen manuellen Bestätigung versendet.",
-          "calendars": "Verknüpfte Kalender (CalDAV): Kalender-Zugangsdaten werden ebenfalls über DIS verschlüsselt abgelegt. Die KI greift nur bei ausdrücklichen Fragen zu Terminen oder Verfügbarkeiten lesend auf den Kalender zu. Neue Termine oder Terminlöschungen werden stets als Vorschlagskarte vorgelegt und erfordern Ihre manuelle Bestätigung."
+          "calendars": "Integrierter & verknüpfter Kalender: Termine des nativen Kalenders verbleiben in der lokalen Panel-Datenbank unter voller Datenhoheit des Nutzers. Bei externen CalDAV-Konten werden Zugangsdaten über DIS AES-256-GCM verschlüsselt abgelegt. Die KI liest Termine nur auf konkrete Anfrage. Das Erstellen, Ändern oder Löschen von Terminen erzeugt eine verbindliche Vorschlagskarte im Chat und wird erst nach Prüfung durch den Nutzer ausgeführt (im autonomen Modus automatisch protokolliert)."
         }
       },
       "desktopApp": {

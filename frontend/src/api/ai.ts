@@ -441,6 +441,7 @@ export const SCHREIBWERKZEUGE = [
   'propose_file_delete',
   'propose_email_send',
   'propose_calendar_event_create',
+  'propose_calendar_event_update',
   'propose_calendar_event_delete',
   'propose_popup_create',
 ] as const

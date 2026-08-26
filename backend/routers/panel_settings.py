@@ -112,6 +112,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "singra_webhook_secret_source": singra_secret.current_source(),
         "updates_automatic": all_db.get("updates_automatic", "false") == "true",
         "desktop_app_download_enabled": all_db.get("desktop_app_download_enabled", "true") != "false",
+        "calendar_enabled": all_db.get("calendar_enabled", "true") != "false",
         "captcha_enabled": all_db.get("captcha_enabled", "false") == "true",
         "captcha_provider": all_db.get("captcha_provider", "none"),
         "captcha_site_key": all_db.get("captcha_site_key", ""),
@@ -189,6 +190,8 @@ def update_settings(
         if key == "support_widget_enabled":
             value = "true" if bool(value) else "false"
         if key == "updates_automatic":
+            value = "true" if bool(value) else "false"
+        if key == "calendar_enabled":
             value = "true" if bool(value) else "false"
         if key == "captcha_enabled":
             value = "true" if bool(value) else "false"

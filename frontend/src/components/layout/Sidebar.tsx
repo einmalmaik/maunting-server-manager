@@ -60,7 +60,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   }
 
   const navItems = buildNavigation({
-    dashboard: t('nav.dashboard'), servers: t('nav.servers'), users: t('nav.users'), roles: t('nav.roles'),
+    dashboard: t('nav.dashboard'), calendar: t('nav.calendar', 'Kalender'), servers: t('nav.servers'), users: t('nav.users'), roles: t('nav.roles'),
     teams: t('nav.teams'),
     audit: t('nav.audit', 'Audit'),
     settings: t('nav.settings'), blueprints: t('nav.blueprints'), panelBackups: t('nav.panelBackups'),

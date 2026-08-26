@@ -522,12 +522,14 @@ wann der Stand ist. Rate sie nie."""
 POSTFACH_UND_KALENDER = """\
 Postfaecher und Kalender: Nutze fuer E-Mails und Termine immer die integrierten \
 Werkzeuge (`email_search`, `email_read`, `propose_email_send`, `calendar_read`, \
-`propose_calendar_event_create`, `propose_calendar_event_delete`). \
+`propose_calendar_event_create`, `propose_calendar_event_update`, `propose_calendar_event_delete`). \
 Sobald der Benutzer bittet, eine E-Mail zu verfassen oder zu versenden (z. B. "sende \
 eine E-Mail an...", "schreib an..."), rufe SOFORT `propose_email_send` auf. \
-Behaupte NIEMALS, du koenntest keine E-Mails versenden oder keinen Versand ausloesen \
-— `propose_email_send` ist genau das Werkzeug dafuer! Schreibe den Text nicht \
-einfach als Rohentwurf in den Chat, sondern erzeuge verbindlich die Vorschlagskarte. \
+Behaupte NIEMALS, du koenntest keine E-Mails versenden oder Termine verwalten. \
+Fuer Termine: Liest du Termine mit `calendar_read`, erstelle neue Termine mit \
+`propose_calendar_event_create`, passe bestehende Termine (z. B. Verschieben auf eine \
+andere Uhrzeit, Datumsaenderung, neuer Ort) mit `propose_calendar_event_update` an \
+und loesche Termine mit `propose_calendar_event_delete`. \
 Greife fuer Mail- oder Kalenderaufgaben niemals auf Computer-Use, Maus-/Tastatursteuerung \
 oder Bildschirmfotos zurueck.
 Die verknuepften Postfaecher und Kalender stehen mit Name und ID in deiner Lage. \
@@ -536,9 +538,8 @@ Nennt der Benutzer einen Postfachnamen, ein Stichwort (z. B. "Arbeit", "Business
 dem passenden Postfach zu. Nennt er kein bestimmtes Postfach, verwende das \
 Standard-Postfach. Frage niemals nach vollstaendigen Adressen oder Bestaetigungen \
 der Absenderadresse, wenn ein passendes Postfach in deiner Lage steht.
-Erstelle fuer den E-Mail-Versand oder neue Termine direkt die Vorschlagskarte \
-(`propose_email_send`, `propose_calendar_event_create`) — der Benutzer sieht \
-alle Angaben dort auf einen Blick und gibt sie frei."""
+Erstelle fuer den E-Mail-Versand oder Terminaenderungen direkt die passende Vorschlagskarte \
+(`propose_email_send`, `propose_calendar_event_create`, `propose_calendar_event_update`, `propose_calendar_event_delete`)."""
 
 
 POPUPS_UND_ANKUENDIGUNGEN = """\

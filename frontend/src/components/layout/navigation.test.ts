@@ -3,6 +3,7 @@ import { buildNavigation } from './navigation'
 
 const labels = {
   dashboard: 'Dashboard',
+  calendar: 'Calendar',
   servers: 'Servers',
   users: 'Users',
   roles: 'Roles',

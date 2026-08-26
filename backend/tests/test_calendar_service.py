@@ -1,0 +1,102 @@
+from datetime import datetime, timezone
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from database import Base
+from models import User, UserCalendar, CalendarEvent
+from services.calendar_service import CalendarService
+
+
+@pytest.fixture
+def db_session():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    yield session
+    session.close()
+
+
+@pytest.fixture
+def test_user(db_session):
+    user = User(
+        username="testowner",
+        email="owner@example.com",
+        password_hash="fakehash",
+        is_owner=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+def test_native_calendar_auto_creation(db_session, test_user):
+    cal = CalendarService.get_calendar(db_session, test_user)
+    assert cal is not None
+    assert cal.provider_type == "native"
+    assert cal.name == "Persönlicher Kalender"
+    assert cal.is_default is True
+
+
+def test_native_calendar_crud_and_export(db_session, test_user):
+    # 1. Create Event
+    ev_data = CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        title="Team Standup",
+        start_time="2026-08-26 10:00",
+        end_time="2026-08-26 10:30",
+        description="Daily sync",
+        location="Meeting Room 1",
+        color="emerald",
+    )
+    assert ev_data["status"] == "created"
+    assert ev_data["title"] == "Team Standup"
+    event_id = ev_data["event_id"]
+
+    # 2. Get Events
+    events = CalendarService.get_events(
+        db=db_session,
+        user=test_user,
+        start_date="2026-08-26 00:00",
+        end_date="2026-08-26 23:59",
+    )
+    assert len(events) == 1
+    assert events[0]["title"] == "Team Standup"
+    assert events[0]["location"] == "Meeting Room 1"
+    assert events[0]["color"] == "emerald"
+
+    # 3. Update Event (Reschedule & change title)
+    updated = CalendarService.update_event(
+        db=db_session,
+        user=test_user,
+        event_id=event_id,
+        title="Weekly Team Standup",
+        start_time="2026-08-26 14:00",
+        end_time="2026-08-26 15:00",
+        location="Online / Zoom",
+    )
+    assert updated["status"] == "updated"
+    assert updated["title"] == "Weekly Team Standup"
+    assert updated["location"] == "Online / Zoom"
+    assert "14:00" in updated["start"]
+
+    # 4. iCal Export
+    ics_text = CalendarService.export_ical(db_session, test_user)
+    assert "BEGIN:VCALENDAR" in ics_text
+    assert "SUMMARY:Weekly Team Standup" in ics_text
+    assert "LOCATION:Online / Zoom" in ics_text
+    assert "END:VCALENDAR" in ics_text
+
+    # 5. Delete Event
+    del_res = CalendarService.delete_event(
+        db=db_session,
+        user=test_user,
+        event_id=event_id,
+    )
+    assert del_res["status"] == "deleted"
+
+    events_after = CalendarService.get_events(db_session, test_user)
+    assert len(events_after) == 0

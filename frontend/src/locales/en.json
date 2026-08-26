@@ -4,6 +4,7 @@
   },
   "nav": {
     "dashboard": "Dashboard",
+    "calendar": "Calendar",
     "servers": "Servers",
     "users": "Users",
     "roles": "Roles",
@@ -24,6 +25,27 @@
     "administration": "Administration",
     "panel": "Panel",
     "help": "Help"
+  },
+  "calendar": {
+    "eyebrow": "MSM / MSS Time Management",
+    "title": "Calendar & Appointments",
+    "description": "Integrated native calendar for events, meetings, and AI-driven scheduling — without third-party requirement.",
+    "subscribe": "Subscribe",
+    "refresh": "Refresh",
+    "newEvent": "New Event",
+    "today": "Today",
+    "week": "Week",
+    "viewMonth": "Month",
+    "viewWeek": "Week",
+    "viewDay": "Day",
+    "createEvent": "New Event",
+    "editEvent": "Edit Event",
+    "eventTitle": "Title / Purpose",
+    "start": "Start",
+    "end": "End",
+    "location": "Location / Meeting Link",
+    "descriptionLabel": "Description / Notes",
+    "color": "Color Tag"
   },
   "pageContext": {
     "overview": "Overview",
@@ -494,6 +516,7 @@
         "propose_backup_schedule_set": "Configure server auto-backup",
         "propose_email_send": "Send email",
         "propose_calendar_event_create": "Create calendar event",
+        "propose_calendar_event_update": "Update calendar event",
         "propose_calendar_event_delete": "Delete calendar event",
         "propose_popup_create": "Create pop-up announcement",
         "desktop_artifact": "Desktop artifact (software/mod/installer)",
@@ -553,7 +576,8 @@
         "propose_backup_schedule_set": "Configure this server's auto-backup like this? The settings then appear in the server's backup section and stay editable by hand. If you later change them manually, AI management ends and the responsible task is paused.",
         "propose_email_send": "Send the drafted email to “{{recipient}}” with subject “{{subject}}” now?",
         "propose_calendar_event_create": "Create the event “{{title}}” in your calendar now?",
-        "propose_calendar_event_delete": "Delete this event from your calendar now?",
+        "propose_calendar_event_update": "Update this event in your calendar with the new details now?",
+        "propose_calendar_event_delete": "Delete this event from your calendar now? This cannot be undone.",
         "propose_popup_create": "Create this pop-up announcement for the panel now?"
       },
       "executed": "AI proposal was authorized and executed.",
@@ -670,6 +694,7 @@
       "calendar_read": "Calendar queried",
       "propose_email_send": "Email prepared",
       "propose_calendar_event_create": "Calendar event prepared",
+      "propose_calendar_event_update": "Calendar event update prepared",
       "propose_calendar_event_delete": "Calendar event deletion prepared",
       "propose_popup_create": "Pop-up prepared",
       "propose_server_lifecycle": "Server action prepared",
@@ -739,6 +764,7 @@
       "propose_task_set": "Preparing the recurring task",
       "propose_email_send": "Drafting the email to send",
       "propose_calendar_event_create": "Preparing the calendar event",
+      "propose_calendar_event_update": "Updating the calendar event",
       "propose_calendar_event_delete": "Preparing to delete the calendar event",
       "propose_popup_create": "Preparing the pop-up announcement",
       "email_search": "Searching your emails",
@@ -3724,8 +3750,8 @@
           "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat",
           "guardian": "With autonomy granted, a Guardian incident can trigger processing while the user is not present: the incident type, its status and the server data already shared with the assistant are transmitted; log excerpts are additionally stripped of public IP addresses and email addresses. Usage and responsibility remain with the grantor. The result report sent by email contains model-generated text.",
           "tasks": "A standing task created in chat or in the task list (“AI task”) stores its name, instruction, schedule, time zone and delivery channel, and triggers processing at the agreed time while the user is not present. It runs in the background with the permissions and quota of whoever created it; on each due run the instruction and the server data it retrieves are transmitted to the selected model provider. On request the result is additionally sent by email to the stored address and contains model-generated text. Tasks can be listed, paused and deleted from the chat and the task list at any time.",
-          "mailboxes": "Connected Mailboxes (IMAP / SMTP): Stored credentials (passwords, app passwords, or OAuth tokens) are encrypted with DIS AES-256-GCM and never leave the panel in plain text. Emails are searched or read solely upon your instruction. The AI assistant never sends emails autonomously: Every email dispatch is presented as a chat proposal card with subject, recipient, and body, and is only sent after your explicit manual approval.",
-          "calendars": "Connected Calendars (CalDAV): Calendar credentials are encrypted via DIS as well. The AI reads calendar entries only when explicitly asked about events or schedule availability. Creating or deleting events is always presented as a proposal card requiring your manual confirmation."
+          "mailboxes": "Linked email mailboxes (IMAP / SMTP): Stored credentials (passwords, app passwords, or OAuth tokens) are encrypted with DIS AES-256-GCM and never leave the panel in plaintext. Emails are searched or read solely upon your explicit instruction. The AI assistant never sends emails autonomously: every email transmission is presented in the chat as an action proposal card with subject, recipient, and content, and is only sent after your explicit confirmation.",
+          "calendars": "Integrated & linked calendar: Events of the native calendar remain within the local panel database under full user data sovereignty. For external CalDAV accounts, credentials are encrypted with DIS AES-256-GCM. The AI only reads events upon specific request. Creating, modifying, or deleting events produces an action proposal card in the chat and is executed only after user confirmation (or logged automatically when autonomous mode is enabled)."
         }
       },
       "desktopApp": {

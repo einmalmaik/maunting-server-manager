@@ -48,6 +48,7 @@ export function GeneralTab() {
           time_format: settings.time_format,
           updates_automatic: settings.updates_automatic,
           desktop_app_download_enabled: settings.desktop_app_download_enabled,
+          calendar_enabled: settings.calendar_enabled,
         }),
       })
       toast.success(t('settings.saved'))
@@ -181,6 +182,24 @@ export function GeneralTab() {
                   onCheckedChange={(checked) => setSettings({ ...settings, desktop_app_download_enabled: checked })}
                   disabled={!canWrite}
                   aria-label={t('settings.desktopDownloadPromo', 'Desktop-App Download-Banner anzeigen')}
+                />
+              </label>
+            </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.calendarEnabled', 'Integrierter Kalender')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.calendarEnabledHint', 'Aktiviert das Kalendermodul im Panel und ermöglicht der KI die Terminverwaltung.')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.calendar_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, calendar_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.calendarEnabled', 'Integrierter Kalender')}
                 />
               </label>
             </div>

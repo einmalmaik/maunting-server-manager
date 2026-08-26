@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Archive, BookOpen, Bot, Boxes, Database, History, LayoutDashboard, Network, Server, Settings, Shield, Users, UsersRound } from 'lucide-react'
+import { Archive, BookOpen, Bot, Boxes, Calendar as CalendarIcon, Database, History, LayoutDashboard, Network, Server, Settings, Shield, Users, UsersRound } from 'lucide-react'
 
 export type NavGroupName = 'Overview' | 'Infrastructure' | 'Administration' | 'Panel' | 'Help'
 export interface NavigationItem { to: string; icon: LucideIcon; label: string; group: NavGroupName }
@@ -32,6 +32,7 @@ interface NavigationAccess {
 export function buildNavigation(labels: Record<string, string>, access: NavigationAccess): NavigationItem[] {
   return [
     { to: '/', icon: LayoutDashboard, label: labels.dashboard, group: 'Overview' },
+    { to: '/calendar', icon: CalendarIcon, label: labels.calendar || 'Kalender', group: 'Overview' },
     ...(access.owner || access.canUseAi ? [{ to: '/ai', icon: Bot, label: labels.ai, group: 'Overview' as const }] : []),
     { to: '/servers', icon: Server, label: labels.servers, group: 'Infrastructure' },
     ...(access.owner || access.canViewNodes ? [{ to: '/admin/nodes', icon: Network, label: labels.nodes, group: 'Infrastructure' as const }] : []),

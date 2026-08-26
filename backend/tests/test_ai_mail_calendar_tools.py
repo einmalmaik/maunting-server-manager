@@ -162,6 +162,41 @@ def test_propose_calendar_event_lifecycle(db: Session, mailbox_user: User, conve
         mock_create.assert_called_once()
 
 
+def test_propose_calendar_event_update_lifecycle(db: Session, mailbox_user: User, conversation: AiConversation):
+    # 1. Create proposal
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=mailbox_user,
+        conversation=conversation,
+        tool_name="propose_calendar_event_update",
+        arguments={
+            "event_id": "evt-wartung-1",
+            "title": "Verschobene Server-Wartung",
+            "start_time": "2026-08-27 16:00",
+            "end_time": "2026-08-27 17:00",
+            "reason": "Wartungsfenster verschoben",
+            "expected_effect": "Termin wird im Kalender aktualisiert",
+        },
+        correlation_id=str(uuid.uuid4()),
+    )
+    assert proposal.tool_name == "propose_calendar_event_update"
+    assert proposal.status == "proposed"
+
+    # 2. Confirm and execute
+    _, token = ai_proposal_service.confirm_proposal(db, proposal_id=proposal.id, user=mailbox_user)
+    with patch("services.calendar_service.CalendarService.update_event") as mock_update:
+        mock_update.return_value = {"updated": True, "event_id": "evt-wartung-1"}
+        exec_prop, result = ai_proposal_service.execute_proposal(
+            db,
+            proposal_id=proposal.id,
+            user=mailbox_user,
+            confirmation_token=token,
+        )
+        assert exec_prop.status == "succeeded"
+        assert result["updated"] is True
+        mock_update.assert_called_once()
+
+
 def test_email_send_without_permission_fails(db: Session, regular_user: User):
     conv = AiConversation(id=str(uuid.uuid4()), user_id=regular_user.id, title="No Perm Conv")
     db.add(conv)
@@ -201,6 +236,7 @@ def test_mail_and_calendar_tools_available_in_gehirn_mode(db: Session, mailbox_u
     assert "email_read" in erlaubt
     assert "calendar_read" in erlaubt
     assert "propose_calendar_event_create" in erlaubt
+    assert "propose_calendar_event_update" in erlaubt
     assert "propose_calendar_event_delete" in erlaubt
 
     # 3. Check provider_tool_definitions includes schemas
@@ -208,6 +244,7 @@ def test_mail_and_calendar_tools_available_in_gehirn_mode(db: Session, mailbox_u
     assert "propose_email_send" in names
     assert "email_search" in names
     assert "calendar_read" in names
+    assert "propose_calendar_event_update" in names
 
 
 def test_tasks_include_email_and_calendar_read_tools():

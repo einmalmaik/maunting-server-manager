@@ -1234,6 +1234,49 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
             ["title", "start_time", "end_time", *_RATIONALE_REQUIRED],
         ),
         _function(
+            "propose_calendar_event_update",
+            "Schlägt die Anpassung oder Verschiebung eines bestehenden Termins im Kalender vor (z. B. neue Uhrzeit, geänderter Titel, Ort). "
+            "Erfordert die Freigabe des Benutzers.",
+            {
+                "event_id": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "ID oder UID des zu ändernden Termins aus calendar_read.",
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Neuer Titel des Termins (optional).",
+                },
+                "start_time": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "Neue Startzeit (z. B. 2026-08-26 15:00 oder ISO-8601).",
+                },
+                "end_time": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "Neue Endzeit (z. B. 2026-08-26 16:00 oder ISO-8601).",
+                },
+                "description": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "Neue Beschreibung / Agenda.",
+                },
+                "location": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Neuer Ort oder Link.",
+                },
+                "calendar_id": {
+                    "type": "integer",
+                    "description": "Optionale Kalender-ID.",
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            ["event_id", *_RATIONALE_REQUIRED],
+        ),
+        _function(
             "propose_calendar_event_delete",
             "Schlägt das Löschen eines Termins aus dem Kalender vor.",
             {

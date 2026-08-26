@@ -1,0 +1,170 @@
+"""Router für Kalender-Verwaltung und Termine (Nativ und CalDAV).
+
+Ermöglicht das Anzeigen, Erstellen, Bearbeiten, Löschen und Exportieren von Terminen.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from database import get_db
+from models.user import User
+from routers.auth import get_current_user
+from services.calendar_service import CalendarService
+from services.panel_settings_service import PanelSettingsService
+
+router = APIRouter(prefix="/api/calendar", tags=["calendar"])
+
+
+class CalendarEventCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    start_time: str
+    end_time: str
+    description: str | None = None
+    location: str | None = None
+    calendar_id: int | None = None
+    all_day: bool = False
+    color: str | None = None
+
+
+class CalendarEventUpdate(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=255)
+    start_time: str | None = None
+    end_time: str | None = None
+    description: str | None = None
+    location: str | None = None
+    calendar_id: int | None = None
+    all_day: bool | None = None
+    color: str | None = None
+
+
+def _check_calendar_enabled() -> None:
+    """Prüft, ob das Kalendermodul in den Panel-Einstellungen aktiv ist."""
+    if PanelSettingsService.get("calendar_enabled", "true") == "false":
+        raise HTTPException(
+            status_code=403,
+            detail="Das Kalendermodul ist in diesem Panel deaktiviert.",
+        )
+
+
+@router.get("/status")
+def get_calendar_status(
+    _: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Liefert den Aktivierungsstatus des Kalenders."""
+    enabled = PanelSettingsService.get("calendar_enabled", "true") != "false"
+    return {"enabled": enabled}
+
+
+@router.get("/events")
+def list_events(
+    start: str | None = Query(None, description="Startzeitpunkt (ISO)"),
+    end: str | None = Query(None, description="Endzeitpunkt (ISO)"),
+    calendar_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """Gibt Termine des Benutzers im angegebenen Zeitraum zurück."""
+    _check_calendar_enabled()
+    return CalendarService.get_events(
+        db=db,
+        user=user,
+        calendar_id=calendar_id,
+        start_date=start,
+        end_date=end,
+    )
+
+
+@router.post("/events", status_code=201)
+def create_event(
+    payload: CalendarEventCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Erstellt einen neuen Termin im Kalender des Benutzers."""
+    _check_calendar_enabled()
+    try:
+        return CalendarService.create_event(
+            db=db,
+            user=user,
+            title=payload.title,
+            start_time=payload.start_time,
+            end_time=payload.end_time,
+            description=payload.description,
+            location=payload.location,
+            calendar_id=payload.calendar_id,
+            all_day=payload.all_day,
+            color=payload.color,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/events/{event_id}")
+def update_event(
+    event_id: str,
+    payload: CalendarEventUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Aktualisiert einen bestehenden Termin."""
+    _check_calendar_enabled()
+    try:
+        return CalendarService.update_event(
+            db=db,
+            user=user,
+            event_id=event_id,
+            title=payload.title,
+            start_time=payload.start_time,
+            end_time=payload.end_time,
+            description=payload.description,
+            location=payload.location,
+            calendar_id=payload.calendar_id,
+            all_day=payload.all_day,
+            color=payload.color,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/events/{event_id}")
+def delete_event(
+    event_id: str,
+    calendar_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Löscht einen Termin aus dem Kalender."""
+    _check_calendar_enabled()
+    try:
+        return CalendarService.delete_event(
+            db=db,
+            user=user,
+            event_id=event_id,
+            calendar_id=calendar_id,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/feed.ics")
+def export_ical_feed(
+    calendar_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Exportiert alle Termine als iCal (.ics) zur Einbindung in externe Kalender-Apps."""
+    _check_calendar_enabled()
+    ical_content = CalendarService.export_ical(db, user, calendar_id)
+    return Response(
+        content=ical_content,
+        media_type="text/calendar",
+        headers={
+            "Content-Disposition": 'attachment; filename="msm-calendar.ics"',
+        },
+    )
