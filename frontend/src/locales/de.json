@@ -2518,7 +2518,7 @@
     "updatesAutomatic": "Automatische Updates",
     "updatesAutomaticHint": "Das Panel und die remote Nodes aktualisieren sich automatisch, sobald ein neues Commit auf GitHub verfügbar ist.",
     "desktopDownloadPromo": "Desktop-App Download-Banner anzeigen",
-    "desktopDownloadPromoHint": "Blendet in der Seitenleiste einen Download-Link zur MSS Desktop-App (Windows Companion) ein.",
+    "desktopDownloadPromoHint": "Blendet in der Seitenleiste einen Download-Link zur Desktop-App für Windows (MSS) ein.",
     "testEmail": "Test-E-Mail senden",
     "testEmailTo": "Test-E-Mail an",
     "testEmailSent": "Test-E-Mail gesendet",
@@ -3336,7 +3336,7 @@
     },
     "smartSystem": {
       "title": "MSS — Maunting Smart System (Desktop-App)",
-      "intro": "Optionaler Begleiter für Windows: derselbe Dauerchat wie im Browser, ein offline trainiertes Wake-Wort und Arbeit in einem Ordner, den der Benutzer selbst freigibt. Die App ersetzt das Panel nicht — sie ist ein zweiter Weg in dieselbe Unterhaltung, mit denselben Rechten und einem Rechner daran.",
+      "intro": "Optionale Desktop-App für Windows: derselbe Dauerchat wie im Browser, ein offline trainiertes Wake-Wort und Arbeit in einem Ordner, den der Benutzer selbst freigibt. Die App ersetzt das Panel nicht — sie ist ein zweiter Weg in dieselbe Unterhaltung, mit denselben Rechten und einem Rechner daran.",
       "artifact": {
         "title": "Installer",
         "body": "Der Workflow smart-system-release.yml baut den NSIS-Installer auf smart-v*-Tags, bewusst getrennt von den Panel-Releases. Nur Windows: Audio-Ducking, Übernahme und Tresor sind Windows-Funktionen."
@@ -5212,6 +5212,6 @@
   },
   "desktopBadge": {
     "tooltip": "Maunting Smart System Desktop-App herunterladen",
-    "label": "Windows Companion"
+    "label": "Desktop-App für Windows"
   }
 }

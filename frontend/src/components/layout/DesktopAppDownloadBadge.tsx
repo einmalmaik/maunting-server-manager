@@ -46,7 +46,7 @@ export function DesktopAppDownloadBadge() {
             <Download className="w-3 h-3 text-primary opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
           <p className="text-[11px] text-on-surface-variant/80 truncate">
-            {t('desktopBadge.label', 'Windows Companion')}
+            {t('desktopBadge.label', 'Desktop-App für Windows')}
           </p>
         </div>
       </a>

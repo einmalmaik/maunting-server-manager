@@ -173,7 +173,7 @@ export function GeneralTab() {
                     {t('settings.desktopDownloadPromo', 'Desktop-App Download-Banner anzeigen')}
                   </span>
                   <span className="block font-body text-xs text-on-surface-variant">
-                    {t('settings.desktopDownloadPromoHint', 'Blendet in der Seitenleiste einen Download-Link zur MSS Desktop-App (Windows Companion) ein.')}
+                    {t('settings.desktopDownloadPromoHint', 'Blendet in der Seitenleiste einen Download-Link zur Desktop-App für Windows (MSS) ein.')}
                   </span>
                 </span>
                 <Switch
