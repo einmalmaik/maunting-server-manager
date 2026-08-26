@@ -184,8 +184,6 @@ def test_only_the_irreversible_tools_are_confirm_only() -> None:
         "propose_hoster_integration",
         "propose_hoster_product",
         "propose_ai_tarif_role",
-        "propose_email_send",
-        "propose_calendar_event_create",
         "propose_calendar_event_delete",
     }
 

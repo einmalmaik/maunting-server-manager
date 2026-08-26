@@ -611,14 +611,12 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # ── E-Mail & Kalender Aktionen (Vorschlagspflichtig) ──────────────
     "propose_email_send": Werkzeug(
         "global_write",
-        immer_bestaetigen=True,
         gruppe="mailbox",
         recht="ai.mailbox.use",
         recht_global=True,
     ),
     "propose_calendar_event_create": Werkzeug(
         "global_write",
-        immer_bestaetigen=True,
         gruppe="calendar",
         recht="ai.calendar.use",
         recht_global=True,
