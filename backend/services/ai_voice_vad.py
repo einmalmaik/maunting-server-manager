@@ -82,13 +82,22 @@ REDE_RAHMEN = 3
 #: 300 ms decken jeden Anlaut ab.
 VORLAUF_SEKUNDEN = 0.3
 
-#: Die absolute Untergrenze, unterhalb derer nichts als Rede gilt.
-MINDESTPEGEL = 220.0
+#: Die absolute Untergrenze, unterhalb derer kein Sprachstart erkannt wird.
+MINDESTPEGEL = 100.0
 
-#: Um welchen Faktor der Grundpegel überschritten sein muss.
-PEGELFAKTOR = 3.0
+#: Die Untergrenze zum Halten bereits erkannter Sprache (Hysterese für sanfte Silben).
+MINDESTPEGEL_HALTEN = 50.0
 
-#: Wie träge der Grundpegel nachgeführt wird.
+#: Um welchen Faktor der Grundpegel überschritten sein muss, um Sprache zu starten.
+PEGELFAKTOR = 2.0
+
+#: Faktor zum Halten bereits erkannter Sprache.
+PEGELFAKTOR_HALTEN = 1.25
+
+#: Obergrenze für den Grundpegel, damit lautes Rauschen die Schwelle nicht blockiert.
+GRUNDPEGEL_MAX = 120.0
+
+#: Wie träge der Grundpegel vor dem Sprechen nachgeführt wird.
 NACHFUEHRUNG = 0.05
 
 #: Wie lange eine Äusserung höchstens dauert, bevor sie auch ohne Pause
@@ -148,7 +157,7 @@ class Pausenerkennung:
         self._laute_gesamt = 0
         self._stille_zaehler = 0
         self._gemessene_pausen_ms: list[int] = []
-        self._grundpegel = MINDESTPEGEL
+        self._grundpegel = 50.0
 
     def _berechne_schwellen(self) -> None:
         eff_stille = self._stille_sekunden_basis * self._kadenz_faktor
@@ -250,15 +259,20 @@ class Pausenerkennung:
 
     def _rahmen_verarbeiten(self, rahmen: bytes) -> Aeusserung | None:
         pegel = _effektivwert(rahmen)
-        schwelle = max(MINDESTPEGEL, self._grundpegel * PEGELFAKTOR)
+        bg = min(GRUNDPEGEL_MAX, self._grundpegel)
+        if self._spricht:
+            schwelle = max(MINDESTPEGEL_HALTEN, bg * PEGELFAKTOR_HALTEN)
+        else:
+            schwelle = max(MINDESTPEGEL, bg * PEGELFAKTOR)
         laut = pegel >= schwelle
 
-        if not laut:
-            # Den Grundpegel **nur** in der Stille nachführen. Ihn während der
-            # Rede mitzuziehen hiesse, die Schwelle mit der eigenen Stimme
-            # anzuheben — wer lange spricht, würde dabei leiser als seine
-            # eigene Schwelle und schnitte sich selbst ab.
+        if not self._spricht and not laut:
+            # Den Grundpegel **nur** vor dem Sprechen in echter Stille nachführen.
+            # Ihn während der Rede mitzuziehen hiesse, die Schwelle mit der eigenen
+            # Stimme anzuheben — wer lange spricht, würde dabei leiser als seine
+            # eigene Schwelle und schnitte sich selbst mitten im Satz ab.
             self._grundpegel += (pegel - self._grundpegel) * NACHFUEHRUNG
+            self._grundpegel = min(GRUNDPEGEL_MAX, max(10.0, self._grundpegel))
 
         if not self._spricht:
             self._vorlauf.append(rahmen)

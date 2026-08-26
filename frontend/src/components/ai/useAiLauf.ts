@@ -16,6 +16,7 @@ import {
 } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { useAuthStore } from '@/stores/authStore'
 import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
 
 /** Ein Eintrag im sichtbaren Verlauf — chronologisch, nicht nach Typ sortiert. */

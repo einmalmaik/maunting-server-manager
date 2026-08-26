@@ -209,6 +209,12 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
         const kopie = bisher.slice(0, -1)
         return [...kopie, { wer, text: letzte.text + text }].slice(-MAX_ZEILEN)
       }
+      // Wenn der Nutzer weiterspricht (Turn-Merge oder Korrektur), wird die
+      // letzte eigene Zeile nahtlos aktualisiert statt dupliziert dargestellt.
+      if (letzte && letzte.wer === wer && wer === 'ich') {
+        const kopie = bisher.slice(0, -1)
+        return [...kopie, { wer, text }].slice(-MAX_ZEILEN)
+      }
       return [...bisher, { wer, text }].slice(-MAX_ZEILEN)
     })
   }, [])
