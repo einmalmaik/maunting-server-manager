@@ -61,7 +61,6 @@ export function Calendar() {
   const [viewMode, setViewMode] = useState<ViewMode>('month')
   const [events, setEvents] = useState<CalendarEventItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEventItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isFeedModalOpen, setIsFeedModalOpen] = useState(false)
 
@@ -331,7 +330,6 @@ export function Calendar() {
     if (viewMode === 'month') {
       return currentDate.toLocaleDateString(locale, { month: 'long', year: 'numeric' })
     } else if (viewMode === 'week') {
-      const d = new Date(currentDate)
       return `${t('calendar.week', 'Woche')} (${currentDate.toLocaleDateString(locale, { month: 'short', year: 'numeric' })})`
     } else {
       return currentDate.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -352,7 +350,7 @@ export function Calendar() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={() => setIsFeedModalOpen(true)}
               className="gap-1.5"
@@ -361,7 +359,7 @@ export function Calendar() {
               {t('calendar.subscribe', 'Abonnieren')}
             </Button>
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={fetchEvents}
               disabled={loading}
@@ -385,13 +383,13 @@ export function Calendar() {
       {/* Kalender Steuerleiste */}
       <div className="msm-card p-4 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handlePrev} aria-label="Zurück">
+          <Button variant="secondary" size="sm" onClick={handlePrev} aria-label="Zurück">
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <Button variant="outline" size="sm" onClick={handleToday}>
+          <Button variant="secondary" size="sm" onClick={handleToday}>
             {t('calendar.today', 'Heute')}
           </Button>
-          <Button variant="outline" size="sm" onClick={handleNext} aria-label="Vor">
+          <Button variant="secondary" size="sm" onClick={handleNext} aria-label="Vor">
             <ChevronRight className="w-4 h-4" />
           </Button>
           <span className="font-headline text-lg font-bold text-on-surface ml-3">
@@ -618,7 +616,7 @@ export function Calendar() {
                 <CalendarIcon className="w-10 h-10 mx-auto opacity-30 mb-2" />
                 <p className="text-sm">Keine Termine für diesen Tag vorhanden.</p>
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={() => openCreateModal(currentDate)}
                   className="mt-4 gap-1.5"
@@ -780,7 +778,7 @@ export function Calendar() {
                 {formEventId ? (
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="secondary"
                     onClick={handleDeleteEvent}
                     disabled={saving}
                     className="text-error border-error/40 hover:bg-error/10 gap-1.5"
@@ -793,7 +791,7 @@ export function Calendar() {
                 <div className="flex items-center gap-2">
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="secondary"
                     onClick={() => setIsModalOpen(false)}
                     disabled={saving}
                   >
@@ -845,7 +843,7 @@ export function Calendar() {
                 />
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   onClick={() => {
                     navigator.clipboard.writeText(feedUrl)
                     toast.success('URL in die Zwischenablage kopiert')
