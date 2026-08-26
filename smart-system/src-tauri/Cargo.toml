@@ -41,6 +41,8 @@ tauri-plugin-global-shortcut = "2"
 # Windows-Autostart; das Argument "--autostart" markiert Boot-Starts, damit
 # spaeter Crash-Guard und sanfter Start unterscheiden koennen, wer gestartet hat.
 tauri-plugin-autostart = "2"
+# Automatischer Updater fuer echte GitHub Releases
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

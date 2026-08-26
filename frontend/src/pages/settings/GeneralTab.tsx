@@ -47,6 +47,7 @@ export function GeneralTab() {
           default_language: normalizePanelLanguage(i18n.language),
           time_format: settings.time_format,
           updates_automatic: settings.updates_automatic,
+          desktop_app_download_enabled: settings.desktop_app_download_enabled,
         }),
       })
       toast.success(t('settings.saved'))
@@ -162,6 +163,24 @@ export function GeneralTab() {
                   onCheckedChange={(checked) => setSettings({ ...settings, updates_automatic: checked })}
                   disabled={!canWrite}
                   aria-label={t('settings.updatesAutomatic', 'Automatische Updates')}
+                />
+              </label>
+            </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.desktopDownloadPromo', 'Desktop-App Download-Banner anzeigen')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.desktopDownloadPromoHint', 'Blendet in der Seitenleiste einen Download-Link zur MSS Desktop-App (Windows Companion) ein.')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.desktop_app_download_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, desktop_app_download_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.desktopDownloadPromo', 'Desktop-App Download-Banner anzeigen')}
                 />
               </label>
             </div>

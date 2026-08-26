@@ -113,6 +113,7 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("ai.desktop.install",        "ai",      "Desktop-Artefakte (Software, Mods, Installer) über das Smart System herunterladen, prüfen und installieren"),
     PermissionDef("ai.mailbox.use",            "ai",      "Eigenes Postfach über die KI verwenden (Mails lesen/entwerfen)"),
     PermissionDef("ai.calendar.use",           "ai",      "Eigenen Kalender über die KI verwenden (Termine lesen/erstellen)"),
+    PermissionDef("ai.popups.manage",          "ai",      "Pop-ups und Ankündigungen über die KI (Worker) erstellen"),
     # OAuth-Provider-Konfiguration (Phase 4 — Social Login).
     # `secret_update` ist bewusst separat: erfordert zusaetzliche Audit-Bestaetigung.
     # `test` ist read-only, damit ein Operator ohne write-Rechte die Konfiguration pruefen kann.
@@ -122,6 +123,8 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("panel.oauth.delete",        "panel",   "OAuth-Provider löschen"),
     PermissionDef("panel.oauth.secret_update", "panel",   "OAuth-Client-Secret ändern (rotieren)"),
     PermissionDef("panel.oauth.test",          "panel",   "OAuth-Provider-Verbindung testen"),
+    # Panel Pop-ups & Ankündigungen
+    PermissionDef("panel.popups.manage",       "panel",   "Panel-weite Pop-ups und Ankündigungen verwalten"),
     # Hoster-Anbindung (Phase 6). Bewusst getrennt von panel.settings.*, damit
     # ein Support-Mitarbeiter Vertraege einsehen kann, ohne API-Keys rotieren
     # oder Produkte umkonfigurieren zu duerfen.

@@ -119,7 +119,7 @@ class AiProvider(Base):
     # Die feste Denkstufe fuer das Ethik-Modell (aus `ai_reasoning.RANGFOLGE`).
     ethics_reasoning_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Der Modus / die Zoning-Stufe: 'off', 'auto', 'always', 'critical'. Standard: 'auto'.
-    ethics_mode: Mapped[str] = mapped_column(String(32), default="auto", nullable=False)
+    ethics_mode: Mapped[str] = mapped_column(String(32), default="auto", server_default="auto", nullable=False)
     # Der Name der Azure-Ressource dieses Zugangs — das eine Stück Adresse, das
     # MSM nicht selbst weiß.
     #

@@ -45,6 +45,7 @@ const SUBGROUPS = [
       'panel.oauth.test',
       'panel.hoster.read',
       'panel.hoster.write',
+      'panel.popups.manage',
     ],
   },
   {
@@ -64,6 +65,7 @@ const SUBGROUPS = [
       'ai.desktop.install',
       'ai.mailbox.use',
       'ai.calendar.use',
+      'ai.popups.manage',
       'ai.usage.read.all',
     ],
   },

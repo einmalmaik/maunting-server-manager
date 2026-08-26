@@ -1250,6 +1250,51 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
             },
             ["event_id", *_RATIONALE_REQUIRED],
         ),
+        _function(
+            "propose_popup_create",
+            "Schlägt das Erstellen eines Panel-weiten Pop-ups / einer Ankündigung vor. "
+            "Der Inhalt soll im sauberen Markdown-Format formuliert sein — menschlich, "
+            "verständlich und frei von künstlichen KI-Schablonen oder Gedankenstrich-Ketten. "
+            "Erfordert zwingend die Freigabe des Benutzers über eine Vorschlagskarte.",
+            {
+                "title": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Prägnanter Titel des Pop-ups.",
+                },
+                "content_markdown": {
+                    "type": "string",
+                    "maxLength": 32000,
+                    "description": "Vollständiger Textinhalt als Markdown.",
+                },
+                "is_active": {
+                    "type": "boolean",
+                    "description": "Ob das Pop-up sofort aktiv geschaltet werden soll (Standard: true).",
+                },
+                "start_at": {
+                    "type": ["string", "null"],
+                    "maxLength": 32,
+                    "description": "Optionales Startdatum (ISO-8601, z. B. 2026-08-26T12:00:00Z).",
+                },
+                "end_at": {
+                    "type": ["string", "null"],
+                    "maxLength": 32,
+                    "description": "Optionales Enddatum (ISO-8601).",
+                },
+                "button_text": {
+                    "type": ["string", "null"],
+                    "maxLength": 100,
+                    "description": "Optionaler Beschriftungstext für einen zusätzlichen Aktions-Button (z. B. 'Mehr erfahren').",
+                },
+                "button_url": {
+                    "type": ["string", "null"],
+                    "maxLength": 2048,
+                    "description": "Optionale Web-Adresse für den Aktions-Button (http:// oder https://).",
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            ["title", "content_markdown", *_RATIONALE_REQUIRED],
+        ),
     ]
 
 

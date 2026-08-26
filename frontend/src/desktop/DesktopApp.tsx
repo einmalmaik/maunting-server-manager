@@ -23,6 +23,7 @@ import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PromptDialog } from '@/components/ui/PromptDialog'
 import { ToastContainer } from '@/components/ui/ToastContainer'
+import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
 import { Button } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Ai } from '@/pages/Ai'
@@ -190,6 +191,7 @@ export function DesktopApp() {
             <SprachwacheHaupt />
             <KalibrierungsHinweis />
             <AiRunNotice />
+            <PanelPopupModal />
           </>
         )}
         <DesktopAktionKarte offenerAuftragId={offeneUebernahme} />

@@ -111,6 +111,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "singra_webhook_secret_configured": bool(singra_secret.resolve_secret()),
         "singra_webhook_secret_source": singra_secret.current_source(),
         "updates_automatic": all_db.get("updates_automatic", "false") == "true",
+        "desktop_app_download_enabled": all_db.get("desktop_app_download_enabled", "true") != "false",
         "captcha_enabled": all_db.get("captcha_enabled", "false") == "true",
         "captcha_provider": all_db.get("captcha_provider", "none"),
         "captcha_site_key": all_db.get("captcha_site_key", ""),
@@ -123,6 +124,17 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         # Rate-Limits: immer resolved (Default wenn unset/invalid), nie Rohmüll
         "rate_limit_auth": resolve_auth_limit(all_db.get(RATE_LIMIT_AUTH_KEY, "")),
         "rate_limit_global": resolve_global_limit(all_db.get(RATE_LIMIT_GLOBAL_KEY, "")),
+    }
+
+
+@router.get("/public", status_code=200)
+def get_public_settings() -> dict:
+    """Öffentlich abfragbare Panel-Einstellungen (z. B. Desktop-Download-Banner)."""
+    all_db = PanelSettingsService.get_all()
+    return {
+        "desktop_app_download_enabled": all_db.get("desktop_app_download_enabled", "true") != "false",
+        "imprint_enabled": all_db.get("imprint_enabled", "false") == "true",
+        "imprint_url": all_db.get("imprint_url", ""),
     }
 
 

@@ -6,6 +6,7 @@ import { useHasPermission } from '@/hooks/useHasPermission'
 import { Logo } from '@/components/Logo'
 import { LogOut, Plus, X } from 'lucide-react'
 import { buildNavigation, type NavGroupName } from './navigation'
+import { DesktopAppDownloadBadge } from './DesktopAppDownloadBadge'
 
 interface SidebarProps {
   mobile?: boolean
@@ -122,8 +123,11 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
         ))}
       </nav>
 
+      {/* Desktop App Download Badge */}
+      <DesktopAppDownloadBadge />
+
       {/* Footer */}
-      <div className="mt-auto pt-4 border-t border-outline-variant/30 px-2 pb-4">
+      <div className="mt-auto pt-2 border-t border-outline-variant/30 px-2 pb-4">
         <button
           onClick={handleLogout}
           className="msm-nav-link text-on-surface-variant hover:text-error hover:bg-error-container/20"

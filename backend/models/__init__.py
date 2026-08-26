@@ -50,6 +50,7 @@ from .incident import Incident, GuardianIncidentDelivery
 from .change_event import ChangeEvent
 from .user_mailbox import UserMailbox
 from .user_calendar import UserCalendar
+from .panel_popup import PanelPopup, UserPopupState
 from .credential import (
     CREDENTIAL_KINDS,
     KIND_GITHUB_TOKEN,
@@ -86,4 +87,5 @@ __all__ = [
     "UserCredential", "ServerCredentialBinding",
     "CREDENTIAL_KINDS", "KIND_GITHUB_TOKEN", "KIND_STEAM_ACCOUNT",
     "UserMailbox", "UserCalendar",
+    "PanelPopup", "UserPopupState",
 ]  # noqa: E501

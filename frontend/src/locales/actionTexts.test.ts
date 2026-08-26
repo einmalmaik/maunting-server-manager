@@ -66,6 +66,7 @@ const SCHREIBWERKZEUGE = [
   'propose_email_send',
   'propose_calendar_event_create',
   'propose_calendar_event_delete',
+  'propose_popup_create',
 ] as const
 
 const SPRACHEN = { de, en } as Record<string, typeof de>

@@ -495,6 +495,7 @@
         "propose_email_send": "Send email",
         "propose_calendar_event_create": "Create calendar event",
         "propose_calendar_event_delete": "Delete calendar event",
+        "propose_popup_create": "Create pop-up announcement",
         "desktop_artifact": "Desktop artifact (software/mod/installer)",
         "read_server_status": "Read server status",
         "read_server_capacity": "Read server capacity",
@@ -552,7 +553,8 @@
         "propose_backup_schedule_set": "Configure this server's auto-backup like this? The settings then appear in the server's backup section and stay editable by hand. If you later change them manually, AI management ends and the responsible task is paused.",
         "propose_email_send": "Send the drafted email to “{{recipient}}” with subject “{{subject}}” now?",
         "propose_calendar_event_create": "Create the event “{{title}}” in your calendar now?",
-        "propose_calendar_event_delete": "Delete this event from your calendar now?"
+        "propose_calendar_event_delete": "Delete this event from your calendar now?",
+        "propose_popup_create": "Create this pop-up announcement for the panel now?"
       },
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",
@@ -710,6 +712,7 @@
       "propose_email_send": "Drafting the email to send",
       "propose_calendar_event_create": "Preparing the calendar event",
       "propose_calendar_event_delete": "Preparing to delete the calendar event",
+      "propose_popup_create": "Preparing the pop-up announcement",
       "email_search": "Searching your emails",
       "email_read": "Reading the email",
       "calendar_read": "Checking your calendar events",
@@ -1899,6 +1902,14 @@
       "title": "Manage hoster integration",
       "desc": "Allows creating and changing hoster integrations, product assignments and their API keys."
     },
+    "panel_popups_manage": {
+      "title": "Manage pop-up announcements",
+      "desc": "Allows creating, editing, deleting, and publishing global pop-ups in the panel."
+    },
+    "ai_popups_manage": {
+      "title": "Create pop-ups with AI",
+      "desc": "Allows the AI to propose and create pop-up announcements for the panel."
+    },
     "server_view": {
       "title": "View server",
       "desc": "Allows seeing the server in the list and opening its detail pages."
@@ -2506,6 +2517,8 @@
     "saved": "Settings saved",
     "updatesAutomatic": "Automatic Updates",
     "updatesAutomaticHint": "The panel and remote nodes will automatically update as soon as a new commit is available on GitHub.",
+    "desktopDownloadPromo": "Show Desktop App download banner",
+    "desktopDownloadPromoHint": "Displays a download link to the MSS Desktop App (Windows Companion) in the sidebar.",
     "testEmail": "Send test email",
     "testEmailTo": "Test email to",
     "testEmailSent": "Test email sent",
@@ -2524,6 +2537,7 @@
       "captcha": "CAPTCHA",
       "imprint": "Imprint",
       "supportWidget": "Support widget",
+      "popup": "Pop-up",
       "backup": "Backup",
       "security": "Security",
       "ai": "AI",
@@ -5163,5 +5177,41 @@
       "spaeter": "Later",
       "jetzt": "Recalibrate"
     }
+  },
+  "popups": {
+    "title": "Pop-ups & Announcements",
+    "subtitle": "Create important notices and announcements for all panel users.",
+    "newPopup": "Create New Pop-up",
+    "createHeader": "Create New Pop-up",
+    "editHeader": "Edit Pop-up",
+    "fieldTitle": "Title / Headline",
+    "fieldContent": "Content (Markdown)",
+    "fieldStartAt": "Valid from (optional)",
+    "fieldEndAt": "Valid until (optional)",
+    "fieldButtonText": "Action button text (optional)",
+    "fieldButtonUrl": "Action button URL (optional)",
+    "fieldIsActive": "Enable pop-up",
+    "fieldIsActiveHint": "When enabled, the pop-up is shown to eligible users in the panel.",
+    "preview": "Live Preview",
+    "previewBtn": "Preview",
+    "saved": "Pop-up successfully updated.",
+    "created": "Pop-up successfully created.",
+    "deleted": "Pop-up deleted.",
+    "deleteTitle": "Delete pop-up?",
+    "deleteConfirm": "Do you really want to permanently delete this pop-up?",
+    "validationRequired": "Title and markdown content are required.",
+    "listTitle": "Created Announcements",
+    "empty": "No pop-ups or announcements found.",
+    "emptyHint": "Click 'Create New Pop-up' above to create an announcement.",
+    "statusActive": "Active",
+    "statusScheduled": "Scheduled",
+    "statusExpired": "Expired",
+    "statusInactive": "Inactive",
+    "understand": "Understood",
+    "neverShowAgain": "Don't show again"
+  },
+  "desktopBadge": {
+    "tooltip": "Download Maunting Smart System Desktop App",
+    "label": "Windows Companion"
   }
 }

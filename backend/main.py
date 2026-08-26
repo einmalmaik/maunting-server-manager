@@ -60,6 +60,7 @@ from routers import (
     hoster_api_router,
     hoster_handoff_router,
     user_integrations_router,
+    popups_router,
 )
 from middleware.rate_limit import limiter
 from services.rate_limit_settings import current_auth_limit_from_settings
@@ -891,6 +892,7 @@ app.include_router(hoster_handoff_router)
 app.include_router(credentials_router)
 app.include_router(teams_router)
 app.include_router(user_integrations_router)
+app.include_router(popups_router)
 
 
 

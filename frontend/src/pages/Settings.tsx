@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Globe, Mail, Gamepad2, Flame, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot, Plug } from 'lucide-react'
+import { Globe, Mail, Gamepad2, Flame, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot, Plug, Megaphone } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { GeneralTab } from './settings/GeneralTab'
 import { EmailTab } from './settings/EmailTab'
@@ -15,6 +15,7 @@ import { CaptchaTab } from './settings/CaptchaTab'
 import { SecurityTab } from './settings/SecurityTab'
 import { AiTab } from './settings/AiTab'
 import { HosterTab } from './settings/HosterTab'
+import { PopupTab } from './settings/PopupTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
@@ -31,6 +32,7 @@ type TabId =
   | 'backup'
   | 'security'
   | 'ai'
+  | 'popup'
   | 'hoster'
 
 export function Settings() {
@@ -55,6 +57,7 @@ export function Settings() {
     { id: 'captcha', labelKey: 'settings.tabs.captcha', icon: Shield },
     { id: 'imprint', labelKey: 'settings.tabs.imprint', icon: FileText },
     { id: 'supportWidget', labelKey: 'settings.tabs.supportWidget', icon: LifeBuoy },
+    { id: 'popup', labelKey: 'settings.tabs.popup', icon: Megaphone },
     ...(canManageBackup ? [{ id: 'backup' as TabId, labelKey: 'settings.tabs.backup', icon: Cloud }] : []),
     { id: 'security', labelKey: 'settings.tabs.security', icon: ShieldAlert },
     { id: 'ai', labelKey: 'settings.tabs.ai', icon: Bot },
@@ -81,6 +84,7 @@ export function Settings() {
       {activeTab === 'captcha' && <CaptchaTab />}
       {activeTab === 'imprint' && <ImprintTab />}
       {activeTab === 'supportWidget' && <SupportWidgetTab />}
+      {activeTab === 'popup' && <PopupTab />}
       {activeTab === 'backup' && <BackupTab />}
       {activeTab === 'security' && <SecurityTab />}
       {activeTab === 'ai' && <AiTab />}

@@ -630,6 +630,12 @@ WERKZEUGE: dict[str, Werkzeug] = {
         recht="ai.calendar.use",
         recht_global=True,
     ),
+    "propose_popup_create": Werkzeug(
+        "global_write",
+        gruppe="popup",
+        recht="ai.popups.manage",
+        recht_global=True,
+    ),
 
     # ── Der Rechner des Benutzers (Smart System) ────────────────────────────
     #

@@ -40,6 +40,7 @@ mod sichtfeld;
 mod system;
 mod tray;
 mod uebernahme;
+pub mod updater;
 mod virenscan;
 mod wakeword;
 mod zonen;
@@ -618,6 +619,7 @@ pub fn run() {
         // auseinanderhalten, welcher der beiden gedrückt wurde.
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // Programme, Dateien und Adressen oeffnen — der offizielle Weg in
         // Tauri v2 (tauri-plugin-shell::open ist deprecated).
         .plugin(tauri_plugin_opener::init())
@@ -687,6 +689,8 @@ pub fn run() {
                     konfig.discord_state,
                 );
             }
+            // Automatischer Updater: prüft asynchron im Hintergrund auf neuere GitHub Releases
+            updater::pruefe_und_installiere_update_hintergrund(app.handle().clone());
             // Sanfter Start: beim Boot-Autostart bleibt das Fenster im Tray —
             // niemand will nach dem Hochfahren eine Boot-Sequenz vor der Nase.
             if std::env::args().any(|arg| arg == "--autostart") {

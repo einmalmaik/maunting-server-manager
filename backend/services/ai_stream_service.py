@@ -38,6 +38,7 @@ from services.ai_chat_service import get_owned_conversation
 from services import (
     ai_attachment_service,
     ai_model_catalog,
+    ai_provider_service,
     ai_reasoning,
     ai_run_broker,
     ai_run_service,

@@ -495,6 +495,7 @@
         "propose_email_send": "E-Mail versenden",
         "propose_calendar_event_create": "Kalendertermin anlegen",
         "propose_calendar_event_delete": "Kalendertermin löschen",
+        "propose_popup_create": "Pop-up-Ankündigung erstellen",
         "desktop_artifact": "Desktop-Artefakt (Software/Mod/Installer)",
         "read_server_status": "Server-Status lesen",
         "read_server_capacity": "Server-Kapazität lesen",
@@ -552,7 +553,8 @@
         "propose_backup_schedule_set": "Das Auto-Backup dieses Servers so einstellen? Die Einstellungen stehen danach im Backup-Bereich des Servers und bleiben dort von Hand änderbar. Änderst du sie später manuell, endet die Verwaltung durch die KI und die zuständige Aufgabe wird pausiert.",
         "propose_email_send": "Die vorbereitete E-Mail jetzt wirklich absenden? Empfänger, Betreff und Inhalt werden unmittelbar vor dem Versand geprüft.",
         "propose_calendar_event_create": "Diesen Termin jetzt verbindlich in deinen Kalender eintragen? Berechtigungen und Kalenderdaten werden vor der Anlage geprüft.",
-        "propose_calendar_event_delete": "Diesen Termin jetzt wirklich aus deinem Kalender entfernen? Das Löschen lässt sich nicht rückgängig machen."
+        "propose_calendar_event_delete": "Diesen Termin jetzt wirklich aus deinem Kalender entfernen? Das Löschen lässt sich nicht rückgängig machen.",
+        "propose_popup_create": "Soll diese Pop-up-Ankündigung für das Panel erstellt werden?"
       },
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
@@ -710,6 +712,7 @@
       "propose_email_send": "Ich bereite den E-Mail-Versand vor",
       "propose_calendar_event_create": "Ich bereite den Kalendertermin vor",
       "propose_calendar_event_delete": "Ich bereite das Löschen des Kalendertermins vor",
+      "propose_popup_create": "Ich bereite die Pop-up-Ankündigung vor",
       "email_search": "Ich durchsuche deine E-Mails",
       "email_read": "Ich lese die E-Mail",
       "calendar_read": "Ich prüfe deinen Kalender",
@@ -1899,6 +1902,14 @@
       "title": "Hoster-Anbindung verwalten",
       "desc": "Erlaubt das Anlegen und Ändern von Hoster-Integrationen, Produktzuordnungen und deren API-Schlüsseln."
     },
+    "panel_popups_manage": {
+      "title": "Pop-up-Ankündigungen verwalten",
+      "desc": "Erlaubt das Erstellen, Bearbeiten, Löschen und Veröffentlichen globaler Pop-ups im Panel."
+    },
+    "ai_popups_manage": {
+      "title": "Pop-ups per KI erstellen",
+      "desc": "Erlaubt der KI, Pop-up-Ankündigungen für das Panel vorzuschlagen und anzulegen."
+    },
     "server_view": {
       "title": "Server anzeigen",
       "desc": "Erlaubt das Betrachten des Servers in der Liste und das Öffnen der Detail-Seiten."
@@ -2506,6 +2517,8 @@
     "saved": "Einstellungen gespeichert",
     "updatesAutomatic": "Automatische Updates",
     "updatesAutomaticHint": "Das Panel und die remote Nodes aktualisieren sich automatisch, sobald ein neues Commit auf GitHub verfügbar ist.",
+    "desktopDownloadPromo": "Desktop-App Download-Banner anzeigen",
+    "desktopDownloadPromoHint": "Blendet in der Seitenleiste einen Download-Link zur MSS Desktop-App (Windows Companion) ein.",
     "testEmail": "Test-E-Mail senden",
     "testEmailTo": "Test-E-Mail an",
     "testEmailSent": "Test-E-Mail gesendet",
@@ -2527,6 +2540,7 @@
       "backup": "Backup",
       "security": "Sicherheit",
       "ai": "KI",
+      "popup": "Pop-up",
       "hoster": "Hoster"
     },
     "imprint": {
@@ -5163,5 +5177,41 @@
       "spaeter": "Später",
       "jetzt": "Neu kalibrieren"
     }
+  },
+  "popups": {
+    "title": "Pop-ups & Ankündigungen",
+    "subtitle": "Erstelle wichtige Hinweise und Ankündigungen für alle Benutzer des Panels.",
+    "newPopup": "Neues Pop-up anlegen",
+    "createHeader": "Neues Pop-up erstellen",
+    "editHeader": "Pop-up bearbeiten",
+    "fieldTitle": "Titel / Überschrift",
+    "fieldContent": "Inhalt (Markdown)",
+    "fieldStartAt": "Gültig ab (optional)",
+    "fieldEndAt": "Gültig bis (optional)",
+    "fieldButtonText": "Aktions-Button Text (optional)",
+    "fieldButtonUrl": "Aktions-Button URL (optional)",
+    "fieldIsActive": "Pop-up aktivieren",
+    "fieldIsActiveHint": "Wenn aktiv, wird das Pop-up berechtigten Nutzern im Panel angezeigt.",
+    "preview": "Live-Vorschau",
+    "previewBtn": "Vorschau",
+    "saved": "Pop-up erfolgreich aktualisiert.",
+    "created": "Pop-up erfolgreich erstellt.",
+    "deleted": "Pop-up gelöscht.",
+    "deleteTitle": "Pop-up löschen?",
+    "deleteConfirm": "Möchtest du dieses Pop-up wirklich unwiderruflich löschen?",
+    "validationRequired": "Titel und Textinhalt sind Pflichtfelder.",
+    "listTitle": "Angelegte Ankündigungen",
+    "empty": "Keine Pop-ups oder Ankündigungen vorhanden.",
+    "emptyHint": "Klicke oben auf „Neues Pop-up anlegen“, um eine Ankündigung zu erstellen.",
+    "statusActive": "Aktiv",
+    "statusScheduled": "Geplant",
+    "statusExpired": "Abgelaufen",
+    "statusInactive": "Inaktiv",
+    "understand": "Verstanden",
+    "neverShowAgain": "Nicht mehr anzeigen"
+  },
+  "desktopBadge": {
+    "tooltip": "Maunting Smart System Desktop-App herunterladen",
+    "label": "Windows Companion"
   }
 }

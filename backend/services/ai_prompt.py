@@ -541,6 +541,17 @@ Erstelle fuer den E-Mail-Versand oder neue Termine direkt die Vorschlagskarte \
 alle Angaben dort auf einen Blick und gibt sie frei."""
 
 
+POPUPS_UND_ANKUENDIGUNGEN = """\
+Pop-ups und Ankuendigungen: Soll ein Pop-up oder eine Ankuendigung fuer das Panel \
+erstellt werden (z. B. "erstelle ein Pop-up", "mach eine Ankuendigung"), nutze dafuer \
+`propose_popup_create`. \
+Beachte zwingend unsere Richtlinien fuer menschliche Texte: \
+Verfasse die Texte direkt, klar, sachlich und natuerlich. Vermeide kuenstliche \
+KI-Schablonen, formelhafte Floskeln, uebermaessige Gedankenstriche und \
+austauschbare Werbephrasen. \
+Formatiere den Inhalt in lesbarem Markdown."""
+
+
 
 # Ohne diese Anweisung merkt sich das Modell entweder nichts oder alles. Beides
 # ist unbrauchbar. Der Ausloeser muss ein *beobachtbares Ereignis* sein, nicht
@@ -1239,6 +1250,7 @@ BLOECKE = (
     WEBSUCHE,
     UNWIDERRUFLICHES,
     POSTFACH_UND_KALENDER,
+    POPUPS_UND_ANKUENDIGUNGEN,
     GEDAECHTNIS,
     # Direkt hinter dem Gedaechtnis, weil die Sprechweise dort landet: was
     # ueber Tage gilt, wird als persoenliche Beobachtung festgehalten. Getrennt
@@ -1288,6 +1300,7 @@ GEHIRN_BLOECKE = (
     ERMESSEN,
     KEIN_STUMMER_ZUG,
     POSTFACH_UND_KALENDER,
+    POPUPS_UND_ANKUENDIGUNGEN,
     GEDAECHTNIS,
     SPRECHWEISE,
     GEDAECHTNIS_AUFRAEUMEN,

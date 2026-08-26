@@ -1921,6 +1921,36 @@ def _calendar_event_delete_payload(db: Session, user: User, rest: dict) -> tuple
         "calendar_id": calendar_id,
         "irreversible": True,
     }
+def _popup_create_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
+    title = str(rest.get("title", "")).strip()
+    content_markdown = str(rest.get("content_markdown", "")).strip()
+    if not title or not content_markdown:
+        raise AiActionValidationError("Pop-up erfordert title und content_markdown")
+
+    is_active = bool(rest.get("is_active", True))
+    start_at = rest.get("start_at")
+    end_at = rest.get("end_at")
+    button_text = rest.get("button_text")
+    button_url = rest.get("button_url")
+
+    payload = {
+        "title": redact_sensitive_text(title),
+        "content_markdown": redact_sensitive_text(content_markdown),
+        "is_active": is_active,
+        "start_at": str(start_at).strip() if start_at else None,
+        "end_at": str(end_at).strip() if end_at else None,
+        "button_text": redact_sensitive_text(str(button_text).strip()) if button_text else None,
+        "button_url": str(button_url).strip() if button_url else None,
+    }
+    preview = {
+        "operation": "popup_create",
+        "title": redact_sensitive_text(title),
+        "content_preview": redact_sensitive_text(content_markdown)[:300],
+        "is_active": is_active,
+        "start_at": str(start_at).strip() if start_at else None,
+        "end_at": str(end_at).strip() if end_at else None,
+        "button_text": redact_sensitive_text(str(button_text).strip()) if button_text else None,
+    }
     return payload, preview
 
 
@@ -2164,6 +2194,9 @@ _GLOBALE_PAYLOADS: dict = {
     ),
     "propose_calendar_event_delete": lambda db, user, rest, arguments, guardian: (
         _calendar_event_delete_payload(db, user, rest)
+    ),
+    "propose_popup_create": lambda db, user, rest, arguments, guardian: (
+        _popup_create_payload(db, user, rest)
     ),
 }
 
@@ -3779,6 +3812,38 @@ def _ausfuehren_calendar_event_delete(db: Session, rahmen: _AusfuehrungsRahmen) 
     return _Ausgefuehrt(result=result)
 
 
+def _ausfuehren_popup_create(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from models import PanelPopup
+    from datetime import datetime
+
+    p = rahmen.payload
+    start_dt = (
+        datetime.fromisoformat(p["start_at"].replace("Z", "+00:00"))
+        if p.get("start_at")
+        else None
+    )
+    end_dt = (
+        datetime.fromisoformat(p["end_at"].replace("Z", "+00:00"))
+        if p.get("end_at")
+        else None
+    )
+
+    popup = PanelPopup(
+        title=str(p["title"]),
+        content_markdown=str(p["content_markdown"]),
+        is_active=bool(p.get("is_active", True)),
+        start_at=start_dt,
+        end_at=end_dt,
+        button_text=str(p["button_text"]) if p.get("button_text") else None,
+        button_url=str(p["button_url"]) if p.get("button_url") else None,
+        created_by_user_id=rahmen.active_user.id,
+    )
+    db.add(popup)
+    db.commit()
+    db.refresh(popup)
+    return _Ausgefuehrt(result={"created": True, "popup_id": popup.id, "title": popup.title})
+
+
 def _ausfuehren_read_tool(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     from services.ai_action_service import execute_read_tool
 
@@ -3849,6 +3914,7 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_email_send": _ausfuehren_email_send,
     "propose_calendar_event_create": _ausfuehren_calendar_event_create,
     "propose_calendar_event_delete": _ausfuehren_calendar_event_delete,
+    "propose_popup_create": _ausfuehren_popup_create,
     "worker_start": _ausfuehren_worker_start,
     "worker_cancel": _ausfuehren_worker_cancel,
     "worker_antwort": _ausfuehren_read_tool,

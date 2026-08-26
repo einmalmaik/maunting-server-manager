@@ -21,7 +21,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from models import AiMessage, AiRun, AiTask, User
-from services.ai_redaction import redact_sensitive_text
+from services.ai_redaction import redact_freetext, redact_sensitive_text
 
 
 logger = logging.getLogger(__name__)
@@ -142,11 +142,11 @@ def abschlusstext(db: Session, run: AiRun, zustand: dict | None = None) -> str:
     # Zuerst die Gliederung: sie **weiss**, wo die letzte Runde anfing.
     schluss = _letzte_runde(zeile)
     if schluss:
-        return redact_sensitive_text(schluss).strip()[-MAX_BERICHT_ZEICHEN:]
+        return redact_freetext(schluss).strip()[-MAX_BERICHT_ZEICHEN:]
 
     if not zeile.content:
         return ""
-    text = redact_sensitive_text(str(zeile.content)).strip()
+    text = redact_freetext(str(zeile.content)).strip()
 
     # Ab hier wird geraten, weil es nichts Besseres gibt — die Nachricht hat
     # keine Gliederung.

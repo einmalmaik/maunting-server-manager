@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { VersionFooter } from '@/components/VersionFooter'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
+import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
 
 export function Shell() {
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
@@ -79,6 +80,9 @@ export function Shell() {
           weiterarbeitet: sonst muesste man den Chat offen lassen, also genau
           das tun, was nicht mehr noetig sein soll. */}
       <AiRunNotice />
+
+      {/* Aktive Pop-ups / Ankündigungen des Panels */}
+      <PanelPopupModal />
     </div>
   )
 }

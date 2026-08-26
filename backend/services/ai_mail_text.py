@@ -52,7 +52,7 @@ from services.ai_provider_service import (
     estimate_cost_microunits,
     resolve_api_key,
 )
-from services.ai_redaction import redact_sensitive_text
+from services.ai_redaction import redact_freetext, redact_sensitive_text
 from services.ai_usage_service import (
     AiQuotaExceeded,
     AiUsageConflict,
@@ -210,7 +210,7 @@ def _feldtext(roh: Any, grenze: int) -> str:
     """
     if roh is None or isinstance(roh, (dict, list)):
         return ""
-    return redact_sensitive_text(str(roh)).strip()[:grenze]
+    return redact_freetext(str(roh)).strip()[:grenze]
 
 
 def _liste(roh: Any, *, grenze: int, anzahl: int) -> list[str]:
@@ -245,7 +245,7 @@ def auswerten(argumente: Any) -> Mailtext | None:
     if not isinstance(argumente, dict):
         return None
     betreff = betreff_bereinigen(
-        redact_sensitive_text(str(argumente.get("betreff") or ""))
+        redact_freetext(str(argumente.get("betreff") or ""))
     )
     absaetze = _liste(
         argumente.get("absaetze"), grenze=MAX_ABSATZ_ZEICHEN, anzahl=MAX_ABSAETZE
