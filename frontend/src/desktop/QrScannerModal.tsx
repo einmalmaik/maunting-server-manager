@@ -37,13 +37,10 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
           throw new Error(t('mss.qrScanner.keineKamera', 'Kein Kamerazugriff auf diesem Gerät verfügbar.'))
         }
 
-        // Hohe Aufloesung & kontinuierlicher Autofokus fuer schnelle Distanzerkennung
+        // Natuerliche Orientierung ohne erzwungenes Querformat (Portrait-kompatibel)
         const constraints: MediaStreamConstraints = {
           video: {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1920, min: 640 },
-            height: { ideal: 1080, min: 480 },
-            frameRate: { ideal: 60, min: 30 },
           },
           audio: false,
         }
@@ -95,8 +92,15 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
       }
 
       const video = videoRef.current
+      const vw = video.videoWidth
+      const vh = video.videoHeight
 
-      // 1. Prioritaet: Nativer Hardware-BarcodeDetector (falls im Browser verfuegbar)
+      if (!vw || !vh) {
+        if (scannt) animRef.current = requestAnimationFrame(scannen)
+        return
+      }
+
+      // 1. Hardware BarcodeDetector falls vorhanden
       if (detector) {
         try {
           const codes = await detector.detect(video)
@@ -110,14 +114,17 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
         } catch {}
       }
 
-      // 2. Prioritaet: Blitzschnelle jsQR-Erkennung (Ultra-Fast Canvas Analysis)
+      // 2. High-Speed jsQR-Analyse mit Vollbild & Distanz-Zentrums-Scan
       try {
         if (!canvasRef.current) {
           canvasRef.current = document.createElement('canvas')
         }
         const canvas = canvasRef.current
-        const w = video.videoWidth || 640
-        const h = video.videoHeight || 480
+
+        // Begrenze Rechenlast auf max 720px fuer 60 FPS Analyse
+        const scale = Math.min(1, 720 / Math.max(vw, vh))
+        const w = Math.round(vw * scale)
+        const h = Math.round(vh * scale)
 
         if (canvas.width !== w || canvas.height !== h) {
           canvas.width = w
@@ -128,9 +135,21 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
         if (ctx) {
           ctx.drawImage(video, 0, 0, w, h)
           const imageData = ctx.getImageData(0, 0, w, h)
-          const qr = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: 'attemptBoth', // Erkennt auch invertierte & kontrastreiche QR-Codes sofort
+          let qr = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: 'attemptBoth',
           })
+
+          // Falls aus weiter Entfernung: untersuche zusaetzlich den vergroesserten Bildausschnitt
+          if (!qr && w >= 320 && h >= 320) {
+            const cropW = Math.round(w * 0.6)
+            const cropH = Math.round(h * 0.6)
+            const cropX = Math.round((w - cropW) / 2)
+            const cropY = Math.round((h - cropH) / 2)
+            const cropData = ctx.getImageData(cropX, cropY, cropW, cropH)
+            qr = jsQR(cropData.data, cropData.width, cropData.height, {
+              inversionAttempts: 'attemptBoth',
+            })
+          }
 
           if (qr && qr.data && qr.data.trim()) {
             codeGefunden(qr.data.trim())
@@ -156,7 +175,7 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
         stoppen()
         onCodeGefunden(code)
         onSchliessen()
-      }, 350)
+      }, 300)
     }
 
     animRef.current = requestAnimationFrame(scannen)
@@ -183,16 +202,16 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-3 sm:p-4 animate-in fade-in duration-200"
       role="dialog"
       aria-modal="true"
       aria-labelledby="qr-scanner-title"
     >
-      <div className="relative flex w-full max-w-sm flex-col items-center gap-4 rounded-3xl border border-primary/30 bg-surface-container-high/95 p-6 shadow-[0_0_50px_rgba(56,189,248,0.2)]">
+      <div className="relative flex w-full max-w-sm max-h-[92vh] flex-col items-center gap-3.5 rounded-3xl border border-primary/30 bg-surface-container-high/95 p-5 shadow-[0_0_50px_rgba(56,189,248,0.2)]">
         <button
           type="button"
           onClick={onSchliessen}
-          className="absolute right-4 top-4 rounded-xl p-2 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors"
+          className="absolute right-3.5 top-3.5 rounded-xl p-2 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors"
           aria-label={t('common.close', 'Schließen')}
         >
           <X className="h-5 w-5" />
@@ -216,7 +235,7 @@ export function QrScannerModal({ offen, onSchliessen, onCodeGefunden }: QrScanne
             </p>
           </div>
         ) : (
-          <div className="relative flex h-72 w-72 items-center justify-center overflow-hidden rounded-2xl bg-black border border-outline-variant/40 shadow-inner">
+          <div className="relative flex w-full aspect-square max-w-[280px] sm:max-w-[320px] max-h-[46vh] items-center justify-center overflow-hidden rounded-2xl bg-black border border-outline-variant/40 shadow-inner">
             <video
               ref={videoRef}
               playsInline

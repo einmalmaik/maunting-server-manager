@@ -66,7 +66,7 @@ SKALIERUNG = 8
 RUHEBEREICH = 4
 
 
-def qr_datenuri(otpauth_uri: str) -> str | None:
+def qr_datenuri(otpauth_uri: str, error: str = FEHLERKORREKTUR, border: int = RUHEBEREICH) -> str | None:
     """Erzeugt den QR-Code zur `otpauth://`-URI als `data:`-URI.
 
     Gibt None zurueck, wenn sich kein Code erzeugen laesst. Die Einrichtung von
@@ -79,10 +79,10 @@ def qr_datenuri(otpauth_uri: str) -> str | None:
     if segno is None or not otpauth_uri:
         return None
     try:
-        code = segno.make(otpauth_uri, error=FEHLERKORREKTUR)
+        code = segno.make(otpauth_uri, error=error)
         return code.svg_data_uri(
             scale=SKALIERUNG,
-            border=RUHEBEREICH,
+            border=border,
             dark="black",
             light="white",
         )

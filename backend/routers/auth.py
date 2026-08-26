@@ -430,7 +430,7 @@ def create_device_pairing(
         "code": code,
         "expires_at": einladung.expires_at,
         "label": einladung.label,
-        "qr_data_uri": qr_datenuri(code),
+        "qr_data_uri": qr_datenuri(code, error="h", border=1),
     }
 
 

@@ -33,23 +33,23 @@ export function SecretOnce({
   const [generiertesQr, setGeneriertesQr] = useState<string | null>(qrDataUri || null)
 
   useEffect(() => {
-    if (qrDataUri) {
-      setGeneriertesQr(qrDataUri)
-      return
-    }
-    // Lokale Client-seitige Level-H QR-Code-Generierung als robuster Fallback
+    // Erzeuge immer einen hochaufloesenden Level-H QR-Code mit minimalem Rand (margin: 1)
     if (value) {
       QRCode.toDataURL(value.trim(), {
-        errorCorrectionLevel: 'H', // 30% Fehlertoleranz fuer Logo-Einbettung und Sofort-Scan
-        margin: 2,
-        scale: 10,
+        errorCorrectionLevel: 'H', // 30% Fehlertoleranz
+        margin: 1, // Minimaler Rand: QR-Code fuellt ueber 92% der Flaeche
+        scale: 12,
         color: {
           dark: '#020617',
           light: '#ffffff',
         },
       })
         .then((url) => setGeneriertesQr(url))
-        .catch(() => {})
+        .catch(() => {
+          if (qrDataUri) setGeneriertesQr(qrDataUri)
+        })
+    } else if (qrDataUri) {
+      setGeneriertesQr(qrDataUri)
     }
   }, [value, qrDataUri])
 
@@ -64,21 +64,21 @@ export function SecretOnce({
       </div>
 
       {generiertesQr && (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl bg-surface-container-lowest/80 p-5 border border-primary/25 shadow-[0_0_35px_rgba(56,189,248,0.12)]">
-          <div className="relative inline-flex items-center justify-center rounded-2xl bg-white p-3.5 shadow-xl ring-4 ring-primary/20">
+        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl bg-surface-container-lowest/80 p-4 sm:p-5 border border-primary/25 shadow-[0_0_35px_rgba(56,189,248,0.12)]">
+          <div className="relative inline-flex items-center justify-center rounded-2xl bg-white p-2 sm:p-2.5 shadow-xl ring-4 ring-primary/20">
             <img
               src={generiertesQr}
               alt="QR-Code"
-              className="h-48 w-48 sm:h-56 sm:w-56 object-contain rounded-lg"
+              className="h-56 w-56 sm:h-64 sm:w-64 object-contain rounded-lg"
               draggable={false}
             />
             {/* Zentriertes Marken-Emblem (wie Discord/Steam) */}
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-950 p-1.5 shadow-2xl border-2 border-primary ring-2 ring-primary/40">
+              <div className="flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-xl bg-slate-950 p-1 shadow-2xl border-2 border-white ring-2 ring-primary/60">
                 <img
                   src={firmenLogo}
                   alt="MauntingStudios"
-                  className="h-full w-full object-contain rounded-md"
+                  className="h-full w-full object-contain rounded-lg"
                   draggable={false}
                 />
               </div>
