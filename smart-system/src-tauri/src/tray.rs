@@ -11,7 +11,7 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager,
+    AppHandle, Emitter, Manager,
 };
 
 const TRAY_ID: &str = "mss";
@@ -31,11 +31,12 @@ fn status_eintrag(status: &str) -> Option<&'static (&'static str, &'static str, 
 }
 
 /// Baut den Tray beim App-Start. Linksklick öffnet das Hauptfenster,
-/// Rechtsklick das Menü (Öffnen/Beenden).
+/// Rechtsklick das Menü (Öffnen/Kalender/Beenden).
 pub fn erstellen(app: &AppHandle) -> tauri::Result<()> {
     let oeffnen = MenuItem::with_id(app, "oeffnen", "Öffnen", true, None::<&str>)?;
+    let kalender = MenuItem::with_id(app, "kalender", "Kalender", true, None::<&str>)?;
     let beenden = MenuItem::with_id(app, "beenden", "Beenden", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&oeffnen, &beenden])?;
+    let menu = Menu::with_items(app, &[&oeffnen, &kalender, &beenden])?;
 
     let (_, tooltip, bytes) = status_eintrag("bereit").expect("Status 'bereit' existiert");
     TrayIconBuilder::with_id(TRAY_ID)
@@ -44,6 +45,12 @@ pub fn erstellen(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "oeffnen" => hauptfenster_zeigen(app),
+            "kalender" => {
+                hauptfenster_zeigen(app);
+                if let Some(fenster) = app.get_webview_window("main") {
+                    let _ = fenster.emit("mss:navigiere-zu", "/kalender");
+                }
+            }
             // Derselbe harte Ausgang wie im Schliessen-Dialog. `app.exit(0)`
             // stand hier und reihte die Bitte nur in die Ereignisschleife
             // ein — genau der Griff, den man benutzt, *weil* die App nicht

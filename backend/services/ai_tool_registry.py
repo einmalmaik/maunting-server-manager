@@ -784,7 +784,8 @@ DOCS_TOOLS = _mit_gruppe("docs")
 MAIL_TOOLS = _mit_gruppe("mailbox")
 CALENDAR_TOOLS = _mit_gruppe("calendar")
 POPUP_TOOLS = _mit_gruppe("popup")
-CHAT_INTERACTION_TOOLS = MAIL_TOOLS | CALENDAR_TOOLS | POPUP_TOOLS
+TASK_TOOLS = _mit_gruppe("tasks")
+CHAT_INTERACTION_TOOLS = MAIL_TOOLS | CALENDAR_TOOLS | POPUP_TOOLS | TASK_TOOLS
 ASK_TOOLS = _mit_art("ask")
 DELEGATION_TOOLS = _mit_art("delegation")
 # Die Werkzeuge, die nicht im Panel laufen, sondern auf dem Rechner des

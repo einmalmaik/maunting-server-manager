@@ -215,8 +215,17 @@ pub fn loeschen(wurzel: &Path, relativ: &str) -> Result<serde_json::Value, Strin
     // In den Papierkorb, nicht ins Nichts. Der autonome Modus erlaubt der KI,
     // in der Sandbox ohne Rueckfrage zu arbeiten — dann muss das Schlimmste,
     // was ein Missverstaendnis anrichtet, umkehrbar sein.
+    #[cfg(not(target_os = "android"))]
     trash::delete(&ziel).map_err(|e| format!("Nicht in den Papierkorb verschiebbar: {e}"))?;
-    Ok(serde_json::json!({ "geloescht": relativ, "papierkorb": true }))
+    #[cfg(target_os = "android")]
+    {
+        if ziel.is_dir() {
+            fs::remove_dir_all(&ziel).map_err(|e| format!("Nicht loeschbar: {e}"))?;
+        } else {
+            fs::remove_file(&ziel).map_err(|e| format!("Nicht loeschbar: {e}"))?;
+        }
+    }
+    Ok(serde_json::json!({ "geloescht": relativ, "papierkorb": cfg!(not(target_os = "android")) }))
 }
 
 pub fn verschieben(wurzel: &Path, von: &str, nach: &str) -> Result<serde_json::Value, String> {

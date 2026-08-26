@@ -240,11 +240,14 @@ fn ausfuehren(pfade: &[String], system_erlaubt: bool, hart: bool) -> Result<Valu
             }
         };
         let in_den_papierkorb = !hart && posten.zone != Zone::Muell;
+        #[cfg(not(target_os = "android"))]
         let versuch = if in_den_papierkorb {
             trash::delete(&posten.pfad).map_err(|e| e.to_string())
         } else {
             hart_weg(&posten.pfad)
         };
+        #[cfg(target_os = "android")]
+        let versuch = hart_weg(&posten.pfad);
         match versuch {
             Ok(()) => {
                 freigegeben += posten.bytes;

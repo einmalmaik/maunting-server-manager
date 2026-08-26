@@ -76,10 +76,6 @@ hound = "3.5"
 # `starts_with` gegen einen normalen Pfad schlaegt damit fehl — genau die
 # Pruefung, die die Sandbox-Grenze traegt. dunce ist der De-facto-Ersatz.
 dunce = "1"
-# Papierkorb statt endgueltig: Geloeschtes in der Sandbox bleibt
-# wiederherstellbar. Ein `fs::remove_file` waere die unumkehrbare Fassung
-# derselben Zeile.
-trash = "5"
 # Programme, Dateien und Adressen oeffnen. Der offizielle Weg in Tauri v2;
 # `tauri-plugin-shell::open` ist deprecated und hatte GHSA-c9pr-q8gx-3mgp.
 tauri-plugin-opener = "2"
@@ -117,6 +113,12 @@ features = ["png", "jpeg"]
 # Das Bild reist als Text durch JSON zum Panel und weiter zum Modell.
 version = "0.22"
 
+[target.'cfg(not(target_os = "android"))'.dependencies]
+# Papierkorb statt endgueltig: Geloeschtes in der Sandbox bleibt
+# wiederherstellbar. Ein `fs::remove_file` waere die unumkehrbare Fassung
+# derselben Zeile.
+trash = "5"
+
 [target.'cfg(windows)'.dependencies]
 # Offizielle Microsoft-Bindings — fuer das WASAPI-Audio-Ducking
 # (Session-Lautstaerken) und die Laufwerksuebersicht (system.rs, nur lesend:
@@ -134,7 +136,6 @@ windows = { version = "0.62", features = [
     # generiert und ziehen nichts nach.
     "Win32_UI_Shell",
 ] }
-
 # Keine neue Kiste im Baum: exakt die Version, die wry/tauri ohnehin
 # mitbringen (Cargo.lock). Direkt gebraucht nur fuer den
 # PermissionRequested-Handler der Mikrofonfreigabe — WebView2 zeigt fuer

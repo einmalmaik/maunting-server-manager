@@ -4976,6 +4976,7 @@
       "angemeldetAls": "Signed in as {{name}}",
       "bereiche": "View",
       "chat": "Chat",
+      "kalender": "Calendar",
       "einstellungen": "Settings",
       "abmelden": "Sign out",
       "keinChatrecht": "Your account lacks the permission to chat with the AI (ai.chat.use). Ask your operator to grant it — until then this window stays empty.",

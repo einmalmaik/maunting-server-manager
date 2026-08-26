@@ -57,6 +57,7 @@
   },
   "plugins": {
     "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQyODVGRUU0NUFGRjdCNTkKUldSWmUvOWE1UDZGUWxySngrT0pPcERHU21lamxjUHlRS3dTSnpFRnlucHIzK3hGcDFVN1o3blEK",
       "endpoints": [
         "https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/latest.json"
       ]

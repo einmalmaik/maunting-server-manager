@@ -27,6 +27,7 @@ import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
 import { Button } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Ai } from '@/pages/Ai'
+import { Calendar } from '@/pages/Calendar'
 import { Privacy } from '@/pages/Privacy'
 import { useAuthStore } from '@/stores/authStore'
 import { abmelden } from './auth'
@@ -53,6 +54,8 @@ import { stillAnmelden } from './transport'
 import { useAuftragsschleife } from './useAuftragsschleife'
 
 type Phase = 'laedt' | 'einrichtung' | 'kopplung' | 'sandbox' | 'bereit'
+
+const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
 export function DesktopApp() {
   const [phase, setPhase] = useState<Phase>('laedt')
@@ -147,6 +150,18 @@ export function DesktopApp() {
           }
         />
         <Route
+          path="/kalender"
+          element={
+            <Hauptseite
+              bereich="kalender"
+              konfig={konfig}
+              offeneUebernahme={offeneUebernahme}
+              onKonfigAenderung={ladeKonfigNeu}
+            />
+          }
+        />
+        <Route path="/calendar" element={<Navigate to="/kalender" replace />} />
+        <Route
           path="/gedaechtnis"
           element={
             <Hauptseite
@@ -183,6 +198,7 @@ export function DesktopApp() {
 
   return (
     <MemoryRouter initialEntries={['/ai']}>
+      <NavigationEmpfaenger />
       <div className="relative min-h-screen overflow-x-clip bg-background text-on-surface">
         <div className="msm-deep-grid pointer-events-none absolute inset-0 opacity-30" />
         <div className="relative z-10 flex min-h-screen flex-col">{inhalt}</div>
@@ -193,7 +209,7 @@ export function DesktopApp() {
             <KalibrierungsHinweis />
             <AiRunNotice />
             <PanelPopupModal />
-            <OverlayFenster inApp={true} />
+            {isAndroid && <OverlayFenster inApp={true} />}
           </>
         )}
         <DesktopAktionKarte offenerAuftragId={offeneUebernahme} />
@@ -207,6 +223,21 @@ export function DesktopApp() {
       </div>
     </MemoryRouter>
   )
+}
+
+function NavigationEmpfaenger() {
+  const navigate = useNavigate()
+  useEffect(() => {
+    const unlisten = listen<string>('mss:navigiere-zu', (event) => {
+      if (event.payload) {
+        navigate(event.payload)
+      }
+    })
+    return () => {
+      void unlisten.then((u) => u())
+    }
+  }, [navigate])
+  return null
 }
 
 function Startbild() {
@@ -361,9 +392,14 @@ function SprachwacheHaupt() {
   useEffect(
     () =>
       beiFremdemSprachstart('haupt', () => {
-        navigate('/ai', { replace: true })
+        // Nur wenn das Hauptfenster gerade selbst in der Sprachansicht ist,
+        // verlassen wir diese (zurück zum Textchat), damit kein doppelter Audiostream läuft.
+        // Ist der Nutzer auf /kalender oder /einstellungen, bleibt er ungestört dort.
+        if (inSprache) {
+          navigate('/ai', { replace: true })
+        }
       }),
-    [navigate],
+    [inSprache, navigate],
   )
 
   return null
@@ -380,7 +416,7 @@ function Hauptseite({
   offeneUebernahme,
   onKonfigAenderung,
 }: {
-  bereich: 'ki' | 'gedaechtnis' | 'einstellungen'
+  bereich: 'ki' | 'kalender' | 'gedaechtnis' | 'einstellungen'
   konfig: AppKonfig | null
   offeneUebernahme: string | null
   onKonfigAenderung?: () => void
@@ -390,6 +426,7 @@ function Hauptseite({
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
   const darfChatten = useHasPermission('ai.chat.use')
+  const darfKalender = useHasPermission('ai.calendar.use')
   // Im Panel wohnt die Ansicht unter Profil → KI; die App hat kein Profil,
   // also bekommt sie einen eigenen Reiter. Ohne das Recht rendert die
   // Komponente ohnehin nichts — dann lieber gar kein Reiter.
@@ -424,6 +461,13 @@ function Hauptseite({
             onClick={() => navigate('/ai')}
             label={t('mss.app.chat')}
           />
+          {darfKalender && (
+            <Reiter
+              aktiv={bereich === 'kalender'}
+              onClick={() => navigate('/kalender')}
+              label={t('mss.app.kalender')}
+            />
+          )}
           {darfGedaechtnis && (
             <Reiter
               aktiv={bereich === 'gedaechtnis'}
@@ -466,6 +510,10 @@ function Hauptseite({
             ) : (
               <KeinChatrecht />
             )
+          ) : bereich === 'kalender' ? (
+            <div className="mx-auto w-full max-w-6xl pb-8">
+              <Calendar />
+            </div>
           ) : bereich === 'gedaechtnis' ? (
             // Dieselbe Komponente wie im Panel unter Profil → KI, Standard-
             // Scope „user": die persönlichen Einträge samt Servernotizen.
