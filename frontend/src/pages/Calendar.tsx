@@ -22,7 +22,7 @@ import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { DateTimePicker } from '@/Singra/UI'
+import { DateTimePicker, Dropdown, type DropdownOption } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 
@@ -102,6 +102,7 @@ export function Calendar() {
 
   const [teamsList, setTeamsList] = useState<{ id: number; name: string }[]>([])
   const [serversList, setServersList] = useState<{ id: number; name: string }[]>([])
+  const [nodesList, setNodesList] = useState<{ id: number; name: string }[]>([])
 
   // Formular-State
   const [formEventId, setFormEventId] = useState<string | null>(null)
@@ -163,7 +164,7 @@ export function Calendar() {
   }, [rangeStart, rangeEnd, selectedCategory])
 
   useEffect(() => {
-    // Lade Teams und Server für Zuordnungs-Dropdowns
+    // Lade Teams, Server und Nodes für Zuordnungs-Dropdowns
     api<any[]>('/teams')
       .then((res) => {
         if (Array.isArray(res)) {
@@ -176,6 +177,15 @@ export function Calendar() {
       .then((res) => {
         if (Array.isArray(res)) {
           setServersList(res.map((s) => ({ id: s.id, name: s.name })))
+        }
+      })
+      .catch(() => {})
+
+    api<any>('/nodes')
+      .then((res) => {
+        const items = Array.isArray(res) ? res : res?.items || res?.nodes || []
+        if (Array.isArray(items)) {
+          setNodesList(items.map((n: any) => ({ id: n.id, name: n.name || `Node #${n.id}` })))
         }
       })
       .catch(() => {})
@@ -1200,19 +1210,18 @@ export function Calendar() {
                   <label htmlFor="cal-form-team" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
                     {t('calendar.teamSelect', 'Team zuordnen')}
                   </label>
-                  <select
+                  <Dropdown
                     id="cal-form-team"
-                    value={formTeamId || ''}
-                    onChange={(e) => setFormTeamId(e.target.value ? Number(e.target.value) : null)}
-                    className="msm-input w-full text-xs"
-                  >
-                    <option value="">-- {t('calendar.selectTeamOptional', 'Team wählen (optional)')} --</option>
-                    {teamsList.map((tm) => (
-                      <option key={tm.id} value={tm.id}>
-                        {tm.name}
-                      </option>
-                    ))}
-                  </select>
+                    value={formTeamId ? String(formTeamId) : ''}
+                    onChange={(val) => setFormTeamId(val ? Number(val) : null)}
+                    options={[
+                      { value: '', label: `-- ${t('calendar.selectTeamOptional', 'Team wählen (optional)')} --` },
+                      ...teamsList.map((tm) => ({ value: String(tm.id), label: tm.name })),
+                    ]}
+                    searchable={teamsList.length > 5}
+                    placeholder={t('calendar.selectTeamOptional', 'Team wählen (optional)')}
+                    className="w-full"
+                  />
                 </div>
               )}
 
@@ -1221,19 +1230,38 @@ export function Calendar() {
                   <label htmlFor="cal-form-server" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
                     {t('calendar.serverSelect', 'Server zuordnen')}
                   </label>
-                  <select
+                  <Dropdown
                     id="cal-form-server"
-                    value={formServerId || ''}
-                    onChange={(e) => setFormServerId(e.target.value ? Number(e.target.value) : null)}
-                    className="msm-input w-full text-xs"
-                  >
-                    <option value="">-- {t('calendar.selectServerOptional', 'Server wählen (optional)')} --</option>
-                    {serversList.map((srv) => (
-                      <option key={srv.id} value={srv.id}>
-                        {srv.name}
-                      </option>
-                    ))}
-                  </select>
+                    value={formServerId ? String(formServerId) : ''}
+                    onChange={(val) => setFormServerId(val ? Number(val) : null)}
+                    options={[
+                      { value: '', label: `-- ${t('calendar.selectServerOptional', 'Server wählen (optional)')} --` },
+                      ...serversList.map((srv) => ({ value: String(srv.id), label: srv.name })),
+                    ]}
+                    searchable={serversList.length > 5}
+                    placeholder={t('calendar.selectServerOptional', 'Server wählen (optional)')}
+                    className="w-full"
+                  />
+                </div>
+              )}
+
+              {formEventType === 'node' && nodesList.length > 1 && (
+                <div>
+                  <label htmlFor="cal-form-node" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
+                    {t('calendar.nodeSelect', 'Node zuordnen')}
+                  </label>
+                  <Dropdown
+                    id="cal-form-node"
+                    value={formLocation || ''}
+                    onChange={(val) => setFormLocation(val)}
+                    options={[
+                      { value: '', label: `-- ${t('calendar.allNodesOrLocal', 'Lokale Node (Standard)')} --` },
+                      ...nodesList.map((nd) => ({ value: nd.name, label: nd.name })),
+                    ]}
+                    searchable={nodesList.length > 5}
+                    placeholder={t('calendar.selectNodeOptional', 'Node wählen (optional)')}
+                    className="w-full"
+                  />
                 </div>
               )}
 
