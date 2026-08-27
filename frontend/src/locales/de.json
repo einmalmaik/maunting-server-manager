@@ -1052,7 +1052,14 @@
       "satelliteData": "Satellitendaten",
       "backToChat": "Zurück zur Vollansicht",
       "toggleGlobe": "3D-Globus ein-/ausblenden",
-      "globe": "3D-Globus"
+      "globe": "3D-Globus",
+      "apparentTemp": "Gefühlt {{temp}}°C",
+      "windSpeed": "{{speed}} km/h Wind",
+      "humidity": "{{percent}} % Luftfeuchte",
+      "precipitation": "{{mm}} mm Niederschlag",
+      "cloudCover": "Bewölkung",
+      "openPreview": "Vorschau öffnen",
+      "current": "Aktuell"
     },
     "usage": {
       "title": "KI-Nutzung",

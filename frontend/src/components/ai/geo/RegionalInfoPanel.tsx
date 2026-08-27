@@ -47,7 +47,7 @@ export function RegionalInfoPanel({ data, loading, onClose }: RegionalInfoPanelP
             {location}
           </h2>
           <p className="text-xs text-on-surface-variant">
-            {coordinates.latitude.toFixed(4)}° N, {coordinates.longitude.toFixed(4)}° E
+            {Math.abs(coordinates.latitude).toFixed(4)}° {coordinates.latitude >= 0 ? 'N' : 'S'}, {Math.abs(coordinates.longitude).toFixed(4)}° {coordinates.longitude >= 0 ? 'E' : 'W'}
           </p>
         </div>
 
@@ -83,23 +83,23 @@ export function RegionalInfoPanel({ data, loading, onClose }: RegionalInfoPanelP
               {Math.round(weather.temperature_celsius)}°C
             </span>
             <span className="text-xs text-on-surface-variant">
-              (Gefühlt {Math.round(weather.apparent_temperature_celsius)}°C)
+              ({t('ai.geo.apparentTemp', { temp: Math.round(weather.apparent_temperature_celsius) })})
             </span>
           </div>
 
           <div className="grid grid-cols-2 gap-2 pt-1 text-xs text-on-surface-variant">
             <div className="flex items-center gap-1.5">
               <Wind className="h-3.5 w-3.5 text-sky-400" aria-hidden="true" />
-              <span>{weather.wind_speed_kmh} km/h Wind</span>
+              <span>{t('ai.geo.windSpeed', { speed: weather.wind_speed_kmh })}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <Cloud className="h-3.5 w-3.5 text-indigo-400" aria-hidden="true" />
-              <span>{weather.humidity_percent}% Luftfeuchte</span>
+              <span>{t('ai.geo.humidity', { percent: weather.humidity_percent })}</span>
             </div>
             {typeof weather.precipitation_mm === 'number' && weather.precipitation_mm > 0 && (
               <div className="flex items-center gap-1.5 col-span-2 text-primary">
                 <CloudRain className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>{weather.precipitation_mm} mm Niederschlag</span>
+                <span>{t('ai.geo.precipitation', { mm: weather.precipitation_mm })}</span>
               </div>
             )}
           </div>
@@ -126,14 +126,16 @@ export function RegionalInfoPanel({ data, loading, onClose }: RegionalInfoPanelP
               <div className="flex items-center justify-between font-medium">
                 <span className="text-on-surface">{scene.mission}</span>
                 <span className="text-on-surface-variant">
-                  {scene.datetime ? new Date(scene.datetime).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'Aktuell'}
+                  {scene.datetime
+                    ? new Date(scene.datetime).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' })
+                    : t('ai.geo.current')}
                 </span>
               </div>
 
               {typeof scene.cloud_cover_percent === 'number' && (
                 <div className="space-y-1">
                   <div className="flex justify-between text-[11px] text-on-surface-variant">
-                    <span>Bewölkung</span>
+                    <span>{t('ai.geo.cloudCover')}</span>
                     <span>{scene.cloud_cover_percent}%</span>
                   </div>
                   <div className="h-1.5 w-full rounded-full bg-surface-container-highest overflow-hidden">
@@ -153,7 +155,7 @@ export function RegionalInfoPanel({ data, loading, onClose }: RegionalInfoPanelP
                   className="flex items-center gap-1 text-[11px] text-primary hover:underline pt-1"
                 >
                   <ExternalLink className="h-3 w-3" />
-                  <span>Vorschau öffnen</span>
+                  <span>{t('ai.geo.openPreview')}</span>
                 </a>
               )}
             </div>
