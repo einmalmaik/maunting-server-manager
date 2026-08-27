@@ -107,6 +107,13 @@ def _parse_datetime(
     return datetime.now(timezone.utc)
 
 
+def _escape_ical_text(text: str | None) -> str:
+    """Escaped Sonderzeichen für iCalendar-Textfelder nach RFC 5545."""
+    if not text:
+        return ""
+    return str(text).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\r\n", "\\n").replace("\n", "\\n")
+
+
 def _format_ical_date(dt_input: str | datetime, user: User | None = None) -> str:
     """Konvertiert Datums-Strings oder datetime in iCal UTC Format (YYYYMMDDTHHMMSSZ)."""
     dt = _parse_datetime(dt_input, user=user)
@@ -614,45 +621,61 @@ class CalendarService:
 
     @classmethod
     def export_ical(cls, db: Session, user: User, calendar_id: int | None = None) -> str:
-        """Exportiert alle Termine des Benutzers als iCalendar (.ics) String."""
+        """Exportiert alle Termine des Benutzers als RFC-5545-konformen iCalendar (.ics) String."""
         calendar = cls.get_calendar(db, user, calendar_id)
-        if not calendar:
-            return "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Maunting Studios//MSM Calendar//DE\r\nEND:VCALENDAR\r\n"
-
-        events = cls.get_events(db, user, calendar.id)
-        dt_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        cal_name = calendar.name if calendar else "MSM Kalender"
+        tz_name = getattr(user, "time_zone", None) or "Europe/Berlin"
 
         lines = [
             "BEGIN:VCALENDAR",
             "VERSION:2.0",
             "PRODID:-//Maunting Studios//MSM Calendar//DE",
-            f"X-WR-CALNAME:{calendar.name}",
+            f"X-WR-CALNAME:{_escape_ical_text(cal_name)}",
+            f"X-WR-TIMEZONE:{tz_name}",
             "CALSCALE:GREGORIAN",
             "METHOD:PUBLISH",
         ]
 
-        for ev in events:
-            dt_start = _format_ical_date(ev.get("start", ""), user=user)
-            dt_end = _format_ical_date(ev.get("end", ""), user=user)
-            uid = ev.get("event_id", str(uuid.uuid4()))
-            title = ev.get("title", "Termin")
-            desc = ev.get("description", "")
-            loc = ev.get("location", "")
+        if calendar:
+            events = cls.get_events(db, user, calendar.id)
+            dt_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
-            lines.extend([
-                "BEGIN:VEVENT",
-                f"UID:{uid}",
-                f"DTSTAMP:{dt_stamp}",
-                f"DTSTART:{dt_start}",
-                f"DTEND:{dt_end}",
-                f"SUMMARY:{title}",
-                f"DESCRIPTION:{desc}",
-                f"LOCATION:{loc}",
-                "END:VEVENT",
-            ])
+            for ev in events:
+                is_all_day = bool(ev.get("all_day"))
+                start_dt = _parse_datetime(ev.get("start", ""), user=user)
+                end_dt = _parse_datetime(ev.get("end", ""), user=user)
 
-        lines.append("END:VCALENDAR\r\n")
-        return "\r\n".join(lines)
+                if is_all_day:
+                    dt_start_line = f"DTSTART;VALUE=DATE:{start_dt.strftime('%Y%m%d')}"
+                    dt_end_line = f"DTEND;VALUE=DATE:{end_dt.strftime('%Y%m%d')}"
+                else:
+                    dt_start_line = f"DTSTART:{start_dt.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+                    dt_end_line = f"DTEND:{end_dt.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+
+                raw_uid = str(ev.get("event_id") or uuid.uuid4())
+                uid = f"{raw_uid}@msm.mauntingstudios.de" if "@" not in raw_uid else raw_uid
+                title = _escape_ical_text(ev.get("title", "Termin"))
+                desc = _escape_ical_text(ev.get("description", ""))
+                loc = _escape_ical_text(ev.get("location", ""))
+
+                event_lines = [
+                    "BEGIN:VEVENT",
+                    f"UID:{uid}",
+                    f"DTSTAMP:{dt_stamp}",
+                    dt_start_line,
+                    dt_end_line,
+                    f"SUMMARY:{title}",
+                ]
+                if desc:
+                    event_lines.append(f"DESCRIPTION:{desc}")
+                if loc:
+                    event_lines.append(f"LOCATION:{loc}")
+                event_lines.append("END:VEVENT")
+
+                lines.extend(event_lines)
+
+        lines.append("END:VCALENDAR")
+        return "\r\n".join(lines) + "\r\n"
 
     @classmethod
     def generate_feed_token(cls, user: User) -> str:

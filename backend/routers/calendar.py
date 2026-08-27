@@ -194,7 +194,7 @@ def get_calendar_feed_url(
     return {"feed_url": f"/api/calendar/feed.ics?token={encoded_token}", "token": token}
 
 
-@router.get("/feed.ics")
+@router.api_route("/feed.ics", methods=["GET", "HEAD"])
 def export_ical_feed(
     calendar_id: int | None = Query(None),
     db: Session = Depends(get_db),
@@ -205,10 +205,11 @@ def export_ical_feed(
     ical_content = CalendarService.export_ical(db, user, calendar_id)
     return Response(
         content=ical_content,
-        media_type="text/calendar; charset=utf-8",
+        media_type="text/calendar",
         headers={
             "Content-Disposition": 'inline; filename="msm-calendar.ics"',
             "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Access-Control-Allow-Origin": "*",
         },
     )
 
