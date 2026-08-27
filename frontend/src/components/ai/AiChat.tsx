@@ -304,22 +304,39 @@ export function AiChat() {
     merkeVorschlag, sendContent, haengeAn, stoppeLauf,
   } = useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttachments })
 
+  const initialScrollDoneRef = useRef(false)
+
+  const scrolleNachUnten = useCallback(() => {
+    const kasten = verlaufRef.current
+    if (kasten) {
+      kasten.scrollTop = kasten.scrollHeight
+    }
+  }, [])
+
   /**
    * Beim ersten Laden den Verlauf verlässlich ganz nach unten scrollen.
+   * Läuft mehrstufig (sofort, nächster Frame, nach Layout/Rendern),
+   * damit auch umfangreiche Verläufe mit Markdown und Karten sofort unten landen.
    */
   useEffect(() => {
-    if (!loading) {
-      const kasten = verlaufRef.current
-      if (kasten) {
-        kasten.scrollTop = kasten.scrollHeight
-        requestAnimationFrame(() => {
-          if (verlaufRef.current) {
-            verlaufRef.current.scrollTop = verlaufRef.current.scrollHeight
-          }
-        })
+    if (!loading && entries.length > 0 && !initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true
+      setAmEnde(true)
+      scrolleNachUnten()
+      const frame = requestAnimationFrame(() => {
+        scrolleNachUnten()
+      })
+      const timer50 = setTimeout(scrolleNachUnten, 50)
+      const timer150 = setTimeout(scrolleNachUnten, 150)
+      const timer300 = setTimeout(scrolleNachUnten, 300)
+      return () => {
+        cancelAnimationFrame(frame)
+        clearTimeout(timer50)
+        clearTimeout(timer150)
+        clearTimeout(timer300)
       }
     }
-  }, [loading])
+  }, [loading, entries.length, scrolleNachUnten])
 
   /**
    * Nachschieben — aber nur, solange der Verlauf unten steht.
@@ -448,6 +465,7 @@ export function AiChat() {
     if (!accepted) return
     try {
       await aiApi.clearHistory()
+      initialScrollDoneRef.current = false
       setEntries([])
       setAttachments([])
       setContextStatus(null)

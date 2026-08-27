@@ -445,10 +445,10 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Werkzeuge haetten den Zeitplan zweimal im Katalog gehabt, und der geht in
     # jeder Runde der Werkzeugschleife mit ueber die Leitung.
     "propose_task_set": Werkzeug(
-        "global_write", recht="ai.tasks.manage", recht_global=True
+        "global_write", gruppe="tasks", recht="ai.tasks.manage", recht_global=True
     ),
     "propose_task_delete": Werkzeug(
-        "global_write", recht="ai.tasks.manage", recht_global=True
+        "global_write", gruppe="tasks", recht="ai.tasks.manage", recht_global=True
     ),
 
     # ── Heilung: Reparatur der Anlage, nicht des Spielstands ──────────
