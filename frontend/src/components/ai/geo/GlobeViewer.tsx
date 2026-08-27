@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Compass, Maximize2, Minus, Plus, RotateCcw } from 'lucide-react'
+import { Compass, Minus, Plus, RotateCcw } from 'lucide-react'
 
 interface GlobeViewerProps {
   latitude?: number | null

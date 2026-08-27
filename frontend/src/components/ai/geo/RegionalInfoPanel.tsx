@@ -1,4 +1,4 @@
-import { Cloud, CloudRain, Compass, ExternalLink, Globe, Satellite, Thermometer, Wind, X } from 'lucide-react'
+import { Cloud, CloudRain, Compass, ExternalLink, Satellite, Thermometer, Wind, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { AiRegionalAnalysis } from '@/api/ai'

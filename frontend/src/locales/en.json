@@ -1024,6 +1024,33 @@
         "save": "Search key could not be saved."
       }
     },
+    "satellite": {
+      "title": "Satellite data (Copernicus / Sentinel)",
+      "description": "Credentials for the Copernicus Data Space Ecosystem (CDSE). Lets the assistant fetch Earth observation and Sentinel satellite data during regional analysis.",
+      "clientId": "Client ID",
+      "clientIdPlaceholder": "Copernicus CDSE Client ID",
+      "clientSecret": "Client Secret",
+      "clientSecretPlaceholder": "Copernicus CDSE Client Secret",
+      "configured": "Credentials stored; enter new values to replace them",
+      "removeConfirm": "Remove the stored satellite credentials? Satellite features will be disabled.",
+      "saved": "Satellite credentials saved.",
+      "removed": "Satellite credentials removed.",
+      "hint": "Credentials are stored encrypted and never leave the backend.",
+      "errors": {
+        "load": "Satellite configuration could not be loaded.",
+        "save": "Satellite credentials could not be saved."
+      }
+    },
+    "geo": {
+      "panelTitle": "Regional information overview",
+      "region": "Region",
+      "close": "Close panel",
+      "weather": "Weather",
+      "satelliteData": "Satellite data",
+      "backToChat": "Back to full view",
+      "toggleGlobe": "Show or hide 3D globe",
+      "globe": "3D globe"
+    },
     "usage": {
       "title": "AI usage",
       "description": "Overview of token usage and costs. Aborted requests are not billed.",
