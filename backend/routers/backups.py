@@ -10,6 +10,7 @@ from database import get_db
 from models import Backup, Server, User
 from schemas import BackupResponse
 from dependencies import get_current_user, verify_csrf, require_server_permission
+from services import audit_service
 from services.actor_context import ActorContext
 from services.backup_restore_service import restore_server_backup
 from config import settings
@@ -91,6 +92,16 @@ def create_backup(server_id: int, body: CreateBackupRequest | None = None, db: S
         raise HTTPException(status_code=400, detail="Server-Verzeichnis existiert nicht. Ist der Server installiert?")
     except Exception:
         raise HTTPException(status_code=500, detail="Backup fehlgeschlagen")
+
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="server.backups.create",
+        target_type="server",
+        target_id=server_id,
+        details={"backup_id": backup.id, "name": backup.name, "size_mb": backup.size_mb},
+        commit=True,
+    )
     return {"message": "Backup erstellt", "backup_id": backup.id, "size_mb": backup.size_mb}
 
 
@@ -183,6 +194,19 @@ def update_backup_settings(server_id: int, body: BackupSettingsRequest, db: Sess
             logger.warning("Backup-Zeitplan-Sync fehlgeschlagen (Server %s)", server_id)
             raise HTTPException(status_code=500, detail="Zeitplan konnte nicht übernommen werden")
     db.commit()
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="server.backups.settings.update",
+        target_type="server",
+        target_id=server_id,
+        details={
+            "backup_on_start": server.backup_on_start,
+            "backup_interval_hours": server.backup_interval_hours,
+            "backup_retention_count": server.backup_retention_count,
+        },
+        commit=True,
+    )
     return {"message": "Einstellungen gespeichert"}
 
 
@@ -274,6 +298,15 @@ def upload_to_cloud(server_id: int, backup_id: int, db: Session = Depends(get_db
     from services.backup_orchestrator import upload_backup_to_cloud
     success = upload_backup_to_cloud(backup, db, server_id)
     if success:
+        audit_service.record_privileged_action(
+            db,
+            user_id=user.id,
+            action="server.backups.upload_cloud",
+            target_type="server",
+            target_id=server_id,
+            details={"backup_id": backup_id, "name": backup.name},
+            commit=True,
+        )
         return {"message": "Backup in Cloud hochgeladen"}
     raise HTTPException(status_code=500, detail="Cloud-Upload fehlgeschlagen")
 
@@ -285,6 +318,7 @@ def delete_backup(server_id: int, backup_id: int, db: Session = Depends(get_db),
     if not backup:
         raise HTTPException(status_code=404, detail="Backup nicht gefunden")
 
+    backup_name = backup.name
     # S3-Delete (best-effort, nur wenn s3_key vorhanden).
     # S3-Fehler blockiert nicht das lokale Delete (Warning-Log, keine Secrets).
     if backup.s3_key:
@@ -305,4 +339,13 @@ def delete_backup(server_id: int, backup_id: int, db: Session = Depends(get_db),
             pass
     db.delete(backup)
     db.commit()
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="server.backups.delete",
+        target_type="server",
+        target_id=server_id,
+        details={"backup_id": backup_id, "name": backup_name},
+        commit=True,
+    )
     return {"message": "Backup gelöscht"}

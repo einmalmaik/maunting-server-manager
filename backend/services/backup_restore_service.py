@@ -358,6 +358,19 @@ def restore_server_backup(
             server.status = "stopped"
             server.status_message = None
             db.commit()
+
+            from services import audit_service
+
+            audit_service.record_privileged_action(
+                db,
+                user_id=actor.user.id,
+                action="server.backups.restore",
+                target_type="server",
+                target_id=server_id,
+                origin=actor.origin,
+                details={"backup_id": backup_id, "backup_name": backup.name},
+                commit=True,
+            )
     finally:
         # Lock IMMER freigeben (Erfolg, Fehler, HTTPException) — kein Deadlock.
         lock.release()

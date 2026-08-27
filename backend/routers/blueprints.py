@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from services import blueprint_service
+from services import audit_service, blueprint_service
 
 from blueprints import (
     Blueprint,
@@ -120,6 +120,7 @@ async def import_blueprint(
     request: Request,
     _user: User = Depends(require_global("blueprints.manage")),
     __=Depends(verify_csrf),
+    db: Session = Depends(get_db),
 ) -> JSONResponse:
     """Importiert eine Community-Blueprint via Roh-JSON-Body.
 
@@ -146,6 +147,18 @@ async def import_blueprint(
         ) from exc
 
     blueprint_id = blueprint_service.save_community_blueprint(raw)
+    audit_service.record_privileged_action(
+        db,
+        user_id=_user.id,
+        action="blueprints.import",
+        target_type="blueprint",
+        target_id=blueprint_id,
+        details={
+            "id": blueprint_id,
+            "name": raw.get("name") if isinstance(raw, dict) else None,
+        },
+        commit=True,
+    )
     return JSONResponse(
         status_code=201,
         content={"message": "Blueprint importiert", "id": blueprint_id},
@@ -168,4 +181,13 @@ def delete_blueprint(
     Frage zu beantworten.
     """
     blueprint_service.delete_community_blueprint(blueprint_id, db=db)
+    audit_service.record_privileged_action(
+        db,
+        user_id=_user.id,
+        action="blueprints.delete",
+        target_type="blueprint",
+        target_id=blueprint_id,
+        details={"id": blueprint_id},
+        commit=True,
+    )
     return Response(status_code=204)

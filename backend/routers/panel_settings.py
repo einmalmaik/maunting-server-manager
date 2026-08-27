@@ -22,6 +22,8 @@ from schemas.panel_settings import (
     SingraWidgetInstallIdRequest,
     SingraWebhookSecretRequest,
 )
+from models import User
+from services import audit_service
 from services.panel_settings_service import PanelSettingsService
 from services.rate_limit_settings import (
     KEY_AUTH as RATE_LIMIT_AUTH_KEY,
@@ -171,7 +173,7 @@ def _validate_imprint_url(value: str) -> str:
 def update_settings(
     req: PanelSettingsUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_global("panel.settings.write")),
+    user: User = Depends(require_global("panel.settings.write")),
     __=Depends(verify_csrf),
 ) -> dict:
     """Speichert Panel-Einstellungen in der Datenbank.
@@ -248,6 +250,16 @@ def update_settings(
             PanelSettingsService.set("captcha_secret_key", "")  # Lösche legacy plain-text
         else:
             PanelSettingsService.set(key, str(value))
+
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="panel.settings.update",
+        target_type="setting",
+        target_id="global",
+        details={"keys": sorted(data.keys())},
+        commit=True,
+    )
     return {"message": "Einstellungen gespeichert"}
 
 

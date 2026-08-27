@@ -49,7 +49,7 @@ def sanitize_audit_details(details: str | dict[str, Any] | None) -> str | None:
     if details is None:
         return None
     if isinstance(details, dict):
-        text = json.dumps(_redact_mapping(details), ensure_ascii=True, sort_keys=True)
+        text = json.dumps(_redact_mapping(details), ensure_ascii=True, sort_keys=True, default=str)
     else:
         text = str(details).strip()
         # Grobe Absicherung: bekannte Secret-Praefixe in freiem Text maskieren.

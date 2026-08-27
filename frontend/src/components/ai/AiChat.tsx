@@ -185,6 +185,7 @@ export function AiChat() {
     const handleCleared = () => {
       setEntries([])
       setContextStatus(null)
+      setAttachments([])
     }
     window.addEventListener('msm:ai-preference-changed', handlePrefChange)
     window.addEventListener('msm:ai-chat-cleared', handleCleared)
@@ -302,6 +303,23 @@ export function AiChat() {
     entries, setEntries, streaming, laufendeWerkzeuge, runId, setRunId,
     merkeVorschlag, sendContent, haengeAn, stoppeLauf,
   } = useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttachments })
+
+  /**
+   * Beim ersten Laden den Verlauf verlässlich ganz nach unten scrollen.
+   */
+  useEffect(() => {
+    if (!loading) {
+      const kasten = verlaufRef.current
+      if (kasten) {
+        kasten.scrollTop = kasten.scrollHeight
+        requestAnimationFrame(() => {
+          if (verlaufRef.current) {
+            verlaufRef.current.scrollTop = verlaufRef.current.scrollHeight
+          }
+        })
+      }
+    }
+  }, [loading])
 
   /**
    * Nachschieben — aber nur, solange der Verlauf unten steht.
@@ -432,6 +450,8 @@ export function AiChat() {
       await aiApi.clearHistory()
       setEntries([])
       setAttachments([])
+      setContextStatus(null)
+      window.dispatchEvent(new Event('msm:ai-chat-cleared'))
     } catch (error: unknown) {
       toast.error(error instanceof SanitizedApiError ? error.message : t('ai.chat.errors.delete'))
     }

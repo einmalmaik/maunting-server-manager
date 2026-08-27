@@ -30,7 +30,7 @@ from schemas.device_pairing import (
     PairingCreateRequest,
     PairingRedeemRequest,
 )
-from services import AuthService, EmailService
+from services import AuthService, EmailService, audit_service
 from services import device_pairing_service
 from services.email_verification_service import EmailVerificationService
 from services.jwt_blacklist_service import blacklist_jwt
@@ -381,12 +381,18 @@ async def login(
     tokens = _set_login_session(response, db, user)
 
     # Sicherheitsbenachrichtigung bei Login (asynchron im Hintergrund, blockiert Login-Antwort nicht)
-    if EmailService.is_configured() and user.email_notifications and user.email:
+    try:
+        should_notify = EmailService.is_configured() and user.email_notifications and bool(user.email)
+        user_email = user.email if should_notify else None
+    except Exception:
+        user_email = None
+
+    if user_email:
         client_ip = request.client.host if request.client else "unbekannt"
         user_agent = request.headers.get("user-agent", "unbekannt")
         background_tasks.add_task(
             EmailService.send_new_device_login_notification,
-            user.email,
+            user_email,
             user.username,
             client_ip,
             user_agent,
@@ -730,6 +736,15 @@ async def change_password(
             raise HTTPException(status_code=401, detail="Ungültiger 2FA-Code")
 
     AuthService.reset_password(db, user, req.new_password)
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="auth.password.change",
+        target_type="user",
+        target_id=user.id,
+        details={"username": user.username},
+        commit=True,
+    )
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_password_changed_notification(user.email, user.username)
     return {"message": "Passwort geändert"}
@@ -909,6 +924,15 @@ async def enable_2fa(
         raise HTTPException(status_code=400, detail="Ungültiger Code")
     user.two_factor_enabled = True
     db.commit()
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="auth.2fa.enable",
+        target_type="user",
+        target_id=user.id,
+        details={"username": user.username},
+        commit=True,
+    )
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_2fa_status_notification(user.email, user.username, enabled=True)
     return {"message": "2FA aktiviert"}
@@ -930,6 +954,15 @@ async def disable_2fa(
     user.two_factor_secret_encrypted = None
     BackupCodeService.clear_all_backup_codes(db, user.id)
     db.commit()
+    audit_service.record_privileged_action(
+        db,
+        user_id=user.id,
+        action="auth.2fa.disable",
+        target_type="user",
+        target_id=user.id,
+        details={"username": user.username},
+        commit=True,
+    )
     if EmailService.is_configured() and user.email_notifications:
         await EmailService.send_2fa_status_notification(user.email, user.username, enabled=False)
     return {"message": "2FA deaktiviert"}

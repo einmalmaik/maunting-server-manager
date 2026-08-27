@@ -171,20 +171,14 @@ def get_or_create_primary_conversation(db: Session, user: User) -> AiConversatio
 def clear_history(db: Session, conversation: AiConversation) -> int:
     """Loescht den Verlauf, behaelt aber die Unterhaltung selbst.
 
-    Die Unterhaltung bleibt, weil sie die Identitaet des Chats ist — an ihr
-    haengen laufende Vorschlaege und die Idempotenz der Anfragen. Geloescht wird,
-    was der Benutzer sieht: Nachrichten, Werkzeugergebnisse, Anhänge und die
-    Zusammenfassung. Bereits ausgefuehrte Aktionen bleiben im Audit; ein
-    Chatverlauf ist kein Loeschknopf fuer die Nachvollziehbarkeit.
-
-    Die Anhänge gehen über die Unterhaltung weg, nicht über die Nachrichten:
-    `ai_attachments.message_id` trägt bewusst keinen Fremdschlüssel, ein
-    Bulk-Delete auf `ai_messages` räumt dort also nichts mit ab. Und weil die
-    Unterhaltung selbst stehen bleibt, greift auch ihre Kaskade nie. Gebundene
-    und noch ungebundene Anhänge fallen zusammen — genau das zeigt die
-    Oberfläche nach dem Leeren.
+    Die Unterhaltung bleibt, weil sie die Identitaet des Chats ist.
+    Geloescht wird, was der Benutzer sieht: Nachrichten, Werkzeugergebnisse,
+    Aktionsvorschlaege, Anhaenge und die Zusammenfassung. Bereits ausgefuehrte
+    Aktionen bleiben im Audit (audit_logs); die fliegenden Vorschlagskarten
+    des Chats werden mit dem Verlauf abgeraeumt, damit kein verwaister
+    Zustand im leeren Chat stehenbleibt.
     """
-    from models import AiAttachment, AiToolResult
+    from models import AiActionProposal, AiAttachment, AiToolResult
 
     removed = (
         db.query(AiMessage)
@@ -196,6 +190,9 @@ def clear_history(db: Session, conversation: AiConversation) -> int:
     ).delete(synchronize_session=False)
     db.query(AiAttachment).filter(
         AiAttachment.conversation_id == conversation.id
+    ).delete(synchronize_session=False)
+    db.query(AiActionProposal).filter(
+        AiActionProposal.conversation_id == conversation.id
     ).delete(synchronize_session=False)
     conversation.summary = None
     conversation.summarized_until = None
