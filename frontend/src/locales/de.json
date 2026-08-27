@@ -244,7 +244,7 @@
       "modelChoose": "Modell wählen …",
       "reloadModels": "Modelle neu laden",
       "catalogUnavailable": "Der Modellkatalog des Anbieters ist gerade nicht erreichbar. Du kannst den Modellnamen so lange von Hand eintragen; die Denkstufen bleiben dann unbekannt.",
-      "catalogNone": "Azure führt keine Modellliste. Trage den Namen deines Deployments so ein, wie du es in Azure angelegt hast.",
+      "catalogNone": "Azure führt keine Modelliste. Trage den Deployment-Namen so ein, wie du ihn in Azure angelegt hast.",
       "catalogNeedsKey": "Dieser Anbieter liefert seine Modellliste erst nach Eingabe des Schlüssels. Trage den Schlüssel ein und speichere den Zugang.",
       "ttsModel": "Sprachmodell",
       "defaultVoice": "Stimme",
@@ -656,8 +656,8 @@
     },
     "autonomy": {
       "title": "Autonomer Modus",
-      "descriptionPanel": "Ohne Freigabe fragt die KI vor jeder Aktion nach. Bei panelweiter Freigabe führt sie freigegebene Lese- und Standardaktionen auf allen Servern direkt aus.",
-      "descriptionServer": "Ohne Freigabe fragt die KI vor jeder Aktion nach. Bei Freigabe führt sie freigegebene Lese- und Standardaktionen auf diesem Server direkt aus.",
+      "descriptionPanel": "Ohne Freigabe fragt die KI vor jeder Aktion nach. Mit panelweiter Freigabe führt sie freigegebene Lese- und Standardaktionen auf allen deinen Servern sofort aus.",
+      "descriptionServer": "Ohne Freigabe fragt die KI vor jeder Aktion nach. Mit Freigabe führt sie freigegebene Lese- und Standardaktionen auf genau diesem Server sofort aus.",
       "toggle": "Aktionen ohne Rückfrage ausführen",
       "budget": "Höchstens Aktionen pro Stunde",
       "budgetHint": "In der letzten Stunde automatisch ausgeführt: {{used}}. Ist das Kontingent erschöpft, fragt die KI wieder nach — es schlägt nichts fehl.",
@@ -1121,7 +1121,7 @@
       "waitingUser": "wartet auf deine Antwort",
       "waitingWake": "schläft bis zum nächsten Wecken",
       "finished": "abgeschlossen",
-      "readOnly": "Hier schreibt nur der Worker. Die Steuerung erfolgt im Chat (z. B. „Stopp diesen Auftrag“).",
+      "readOnly": "Hier schreibt nur der Worker. Gesteuert wird im Gespräch, etwa mit „Stopp diesen Auftrag“.",
       "emptyTitle": "Noch nichts zu lesen",
       "emptyDescription": "Der Worker hat noch keine Ausgaben erzeugt. Sobald die Ausführung startet, erscheint der Verlauf hier.",
       "notFoundTitle": "Diesen Worker gibt es nicht",
@@ -1900,8 +1900,8 @@
       "desc": "Neue Teams anlegen und Mitglieder verwalten."
     },
     "ai_chat_use": {
-      "title": "KI-Chat nutzen",
-      "desc": "Mit dem integrierten KI-Assistenten chatten."
+      "title": "KI-Chat verwenden",
+      "desc": "Erlaubt die Interaktion mit dem integrierten KI-Assistenten. Rollenlimits und Werkzeugrechte werden im Backend geprüft."
     },
     "ai_voice_use": {
       "title": "Sprachmodus nutzen",
@@ -1956,8 +1956,8 @@
       "desc": "Kalender zur Termin- und Aufgabenplanung verbinden."
     },
     "ai_usage_read_all": {
-      "title": "Verbrauchsdaten aller Benutzer einsehen",
-      "desc": "Token- und Kostenmetriken aller registrierten Benutzer einsehen."
+      "title": "Gesamte KI-Nutzung einsehen",
+      "desc": "Verbrauchsdaten und Kosten aller Benutzer einsehen."
     },
     "panel_oauth_read": {
       "title": "OAuth-Provider einsehen",
@@ -3678,7 +3678,7 @@
   },
   "panelBackups": {
     "title": "Panel-Backups",
-    "subtitle": "Sicherungen des MSM-Panels (Datenbank und Konfiguration).",
+    "subtitle": "Sicherungen des MSM-Panels (Datenbank + Konfiguration)",
     "create": "Panel-Backup erstellen",
     "created": "Panel-Backup erfolgreich erstellt",
     "confirmDelete": "Panel-Backup wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.",

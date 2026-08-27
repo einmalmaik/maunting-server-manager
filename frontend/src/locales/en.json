@@ -1121,7 +1121,7 @@
       "waitingUser": "waiting for your reply",
       "waitingWake": "sleeping until the next wake-up",
       "finished": "finished",
-      "readOnly": "Only the worker writes here. Steer tasks directly via chat (e.g. “stop this task”).",
+      "readOnly": "Only the worker writes here. Steered via chat, for example: “stop this task”.",
       "emptyTitle": "Nothing to read yet",
       "emptyDescription": "The worker has not written anything yet. Once execution begins, the transcript appears here.",
       "notFoundTitle": "This worker does not exist",
@@ -1901,7 +1901,7 @@
     },
     "ai_chat_use": {
       "title": "Use AI chat",
-      "desc": "Interact with the built-in AI assistant."
+      "desc": "Allows interacting with the integrated AI assistant. Role limits and tool permissions are checked in the backend."
     },
     "ai_voice_use": {
       "title": "Use voice mode",
@@ -3678,7 +3678,7 @@
   },
   "panelBackups": {
     "title": "Panel Backups",
-    "subtitle": "Backups of the MSM panel (database and configuration).",
+    "subtitle": "Backups of the MSM panel (database + configuration)",
     "create": "Create Panel Backup",
     "created": "Panel backup created successfully",
     "confirmDelete": "Really delete this panel backup? This action cannot be undone.",
