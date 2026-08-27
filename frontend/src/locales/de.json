@@ -1964,6 +1964,10 @@
       "title": "Websuche nutzen",
       "desc": "Ermöglicht der KI Web-Recherchen über die Such-API."
     },
+    "ai_satellite_use": {
+      "title": "Satelliten- & Regionsanalyse nutzen",
+      "desc": "Ermöglicht der KI den Abruf von Sentinel-2-Satellitenbildern, Geodaten und Wetteranalysen."
+    },
     "ai_autonomous_use": {
       "title": "Autonomen Modus nutzen",
       "desc": "Erlaubt der KI die direkte Ausführung freigegebener Lese- und Standardwerkzeuge."
@@ -2061,8 +2065,8 @@
       "desc": "Initiale Installation der Spieldateien anstoßen."
     },
     "server_update": {
-      "title": "Server aktualisieren",
-      "desc": "Spieldateien und Server-Binaries auf die neueste Version aktualisieren."
+      "title": "Outbound-Webhooks verwalten",
+      "desc": "Outbound-Webhooks für diesen Server einrichten und steuern."
     },
     "server_config_write": {
       "title": "Server-Konfiguration bearbeiten",

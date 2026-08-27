@@ -1964,6 +1964,10 @@
       "title": "Use web search",
       "desc": "Allow the AI to search the web via search API."
     },
+    "ai_satellite_use": {
+      "title": "Use satellite & regional analysis",
+      "desc": "Allows the assistant to query Sentinel-2 satellite data, geodata, and weather analysis."
+    },
     "ai_autonomous_use": {
       "title": "Use autonomous mode",
       "desc": "Allow the AI to execute approved read and standard tools directly."
@@ -2061,8 +2065,8 @@
       "desc": "Trigger initial installation of server game files."
     },
     "server_update": {
-      "title": "Update server",
-      "desc": "Update game files and server binaries to the latest version."
+      "title": "Manage outbound webhooks",
+      "desc": "Configure and manage outbound webhook notifications for this server."
     },
     "server_config_write": {
       "title": "Edit server configuration",

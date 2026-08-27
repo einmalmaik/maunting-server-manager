@@ -58,6 +58,7 @@ const SUBGROUPS = [
       'ai.skills.use',
       'ai.skills.manage',
       'ai.web_search.use',
+      'ai.satellite.use',
       'ai.autonomous.use',
       'ai.tasks.manage',
       'ai.background.use',
