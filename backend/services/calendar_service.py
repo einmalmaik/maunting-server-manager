@@ -15,6 +15,7 @@ import logging
 import re
 from typing import Any
 import uuid
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from sqlalchemy import select
@@ -31,32 +32,82 @@ _log = logging.getLogger("msm.calendar")
 _sent_reminder_keys: set[str] = set()
 
 
-def _parse_datetime(dt_input: str | datetime) -> datetime:
-    """Parst Eingabedaten in ein timezone-aware UTC datetime-Objekt."""
+def _user_timezone(user: User | None = None, user_tz: str | None = None) -> timezone | ZoneInfo:
+    """Bestimmt die Zeitzone des Benutzers oder UTC als Fallback."""
+    tz_str = user_tz or (getattr(user, "time_zone", None) or "").strip()
+    if tz_str:
+        try:
+            return ZoneInfo(tz_str)
+        except (ZoneInfoNotFoundError, ValueError, ModuleNotFoundError):
+            pass
+    return timezone.utc
+
+
+def _iso_utc(dt: datetime) -> str:
+    """Gibt ein ISO-8601-Format mit explizitem Z-Suffix in UTC zurück."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_datetime(
+    dt_input: str | datetime,
+    user: User | None = None,
+    user_tz: str | None = None,
+) -> datetime:
+    """Parst Eingabedaten in ein timezone-aware UTC datetime-Objekt.
+
+    Wenn der Eingabestring KEINE Zeitzoneninformation enthält (z. B. '2026-08-27 12:00'
+    oder '2026-08-27T12:00:00'), wird er als Uhrzeit in der Benutzerzeitzone
+    (z. B. Europe/Berlin) interpretiert und anschließend sauber nach UTC konvertiert.
+    """
+    tz = _user_timezone(user, user_tz)
+
     if isinstance(dt_input, datetime):
-        return dt_input if dt_input.tzinfo else dt_input.replace(tzinfo=timezone.utc)
+        if dt_input.tzinfo is not None:
+            return dt_input.astimezone(timezone.utc)
+        return dt_input.replace(tzinfo=tz).astimezone(timezone.utc)
 
     dt_str = str(dt_input).strip()
+    # 1. Prüfe auf explizites ISO-Format mit Z oder Offset (+02:00, -05:00)
     try:
-        # ISO-Format (z. B. 2026-08-26T15:00:00Z oder 2026-08-26T15:00:00+02:00)
-        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        if "Z" in dt_str or "+" in dt_str or re.search(r"-\d\d:\d\d$", dt_str):
+            dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                return dt.astimezone(timezone.utc)
+            return dt.replace(tzinfo=tz).astimezone(timezone.utc)
     except Exception:
         pass
 
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+    # 2. Formate ohne Zeitzone (gelten als lokale Benutzerzeit!)
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    ):
         try:
             dt = datetime.strptime(dt_str, fmt)
-            return dt.replace(tzinfo=timezone.utc)
+            return dt.replace(tzinfo=tz).astimezone(timezone.utc)
         except Exception:
             continue
+
+    # Fallback ISO-Parsing
+    try:
+        dt = datetime.fromisoformat(dt_str)
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc)
+        return dt.replace(tzinfo=tz).astimezone(timezone.utc)
+    except Exception:
+        pass
 
     return datetime.now(timezone.utc)
 
 
-def _format_ical_date(dt_input: str | datetime) -> str:
+def _format_ical_date(dt_input: str | datetime, user: User | None = None) -> str:
     """Konvertiert Datums-Strings oder datetime in iCal UTC Format (YYYYMMDDTHHMMSSZ)."""
-    dt = _parse_datetime(dt_input)
+    dt = _parse_datetime(dt_input, user=user)
     return dt.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
@@ -195,10 +246,10 @@ class CalendarService:
                 CalendarEvent.user_id == user.id,
             )
             if start_date:
-                start_dt = _parse_datetime(start_date)
+                start_dt = _parse_datetime(start_date, user=user)
                 query = query.where(CalendarEvent.end_time >= start_dt)
             if end_date:
-                end_dt = _parse_datetime(end_date)
+                end_dt = _parse_datetime(end_date, user=user)
                 query = query.where(CalendarEvent.start_time <= end_dt)
 
             query = query.order_by(CalendarEvent.start_time.asc())
@@ -208,8 +259,8 @@ class CalendarService:
                     "event_id": ev.event_uid,
                     "id": ev.id,
                     "title": ev.title,
-                    "start": ev.start_time.isoformat(),
-                    "end": ev.end_time.isoformat(),
+                    "start": _iso_utc(ev.start_time),
+                    "end": _iso_utc(ev.end_time),
                     "description": ev.description or "",
                     "location": ev.location or "",
                     "all_day": ev.all_day,
@@ -286,8 +337,8 @@ class CalendarService:
 
         # 1. Nativer Kalender
         if calendar.provider_type == "native":
-            start_dt = _parse_datetime(start_time)
-            end_dt = _parse_datetime(end_time)
+            start_dt = _parse_datetime(start_time, user=user)
+            end_dt = _parse_datetime(end_time, user=user)
             if end_dt <= start_dt:
                 # Falls Endzeit vor Startzeit liegt, auf mindestens 30 Min danach setzen
                 from datetime import timedelta
@@ -314,8 +365,8 @@ class CalendarService:
                 "event_id": ev.event_uid,
                 "id": ev.id,
                 "title": ev.title,
-                "start": ev.start_time.isoformat(),
-                "end": ev.end_time.isoformat(),
+                "start": _iso_utc(ev.start_time),
+                "end": _iso_utc(ev.end_time),
                 "description": ev.description or "",
                 "location": ev.location or "",
                 "all_day": ev.all_day,
@@ -414,9 +465,9 @@ class CalendarService:
             if title is not None:
                 ev.title = title
             if start_time is not None:
-                ev.start_time = _parse_datetime(start_time)
+                ev.start_time = _parse_datetime(start_time, user=user)
             if end_time is not None:
-                ev.end_time = _parse_datetime(end_time)
+                ev.end_time = _parse_datetime(end_time, user=user)
             if description is not None:
                 ev.description = description
             if location is not None:
@@ -437,8 +488,8 @@ class CalendarService:
                 "event_id": ev.event_uid,
                 "id": ev.id,
                 "title": ev.title,
-                "start": ev.start_time.isoformat(),
-                "end": ev.end_time.isoformat(),
+                "start": _iso_utc(ev.start_time),
+                "end": _iso_utc(ev.end_time),
                 "description": ev.description or "",
                 "location": ev.location or "",
                 "all_day": ev.all_day,
@@ -455,8 +506,8 @@ class CalendarService:
             raise ValueError(f"Keine Zugangsdaten für Kalender {calendar.name}")
 
         dt_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        dt_start = _format_ical_date(start_time) if start_time else dt_stamp
-        dt_end = _format_ical_date(end_time) if end_time else dt_stamp
+        dt_start = _format_ical_date(start_time, user=user) if start_time else dt_stamp
+        dt_end = _format_ical_date(end_time, user=user) if end_time else dt_stamp
 
         ical_payload = (
             "BEGIN:VCALENDAR\r\n"
@@ -579,8 +630,8 @@ class CalendarService:
         ]
 
         for ev in events:
-            dt_start = _format_ical_date(ev.get("start", ""))
-            dt_end = _format_ical_date(ev.get("end", ""))
+            dt_start = _format_ical_date(ev.get("start", ""), user=user)
+            dt_end = _format_ical_date(ev.get("end", ""), user=user)
             uid = ev.get("event_id", str(uuid.uuid4()))
             title = ev.get("title", "Termin")
             desc = ev.get("description", "")
@@ -624,7 +675,7 @@ class CalendarService:
                 if not start_raw:
                     continue
                 try:
-                    start_dt = _parse_datetime(start_raw)
+                    start_dt = _parse_datetime(start_raw, user=user)
                 except Exception:
                     continue
 
@@ -727,7 +778,7 @@ class CalendarService:
             if not start_raw:
                 continue
             try:
-                start_dt = _parse_datetime(start_raw)
+                start_dt = _parse_datetime(start_raw, user=user)
             except Exception:
                 continue
 

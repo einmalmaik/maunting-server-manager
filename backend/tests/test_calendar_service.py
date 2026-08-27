@@ -136,3 +136,38 @@ async def test_calendar_reminders_and_test_dispatch(db_session, test_user):
     sent_again = await CalendarService.check_and_send_due_reminders(db_session)
     assert sent_again == 0
 
+
+def test_calendar_timezone_handling(db_session, test_user):
+    # 1. Benutzer in Europe/Berlin (Sommerzeit CEST = UTC+2)
+    test_user.time_zone = "Europe/Berlin"
+    db_session.commit()
+
+    ev = CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        title="Sport am Mittag",
+        start_time="2026-08-27 12:00",
+        end_time="2026-08-27 13:00",
+    )
+    assert ev["status"] == "created"
+    # 12:00 Berlin (UTC+2) muss zu 10:00 UTC konvertiert werden
+    assert ev["start"] == "2026-08-27T10:00:00Z"
+    assert ev["end"] == "2026-08-27T11:00:00Z"
+
+    # 2. Benutzer in America/New_York (Sommerzeit EDT = UTC-4)
+    test_user.time_zone = "America/New_York"
+    db_session.commit()
+
+    ev_ny = CalendarService.create_event(
+        db=db_session,
+        user=test_user,
+        title="NY Meeting",
+        start_time="2026-08-27 12:00",
+        end_time="2026-08-27 13:00",
+    )
+    assert ev_ny["status"] == "created"
+    # 12:00 New York (UTC-4) muss zu 16:00 UTC konvertiert werden
+    assert ev_ny["start"] == "2026-08-27T16:00:00Z"
+    assert ev_ny["end"] == "2026-08-27T17:00:00Z"
+
+
