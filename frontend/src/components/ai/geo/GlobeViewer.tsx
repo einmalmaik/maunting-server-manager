@@ -40,8 +40,18 @@ export function GlobeViewer({
       const targetX = (latitude * Math.PI) / 180
       targetRotRef.current = { x: targetX, y: targetY }
       setAutoRotate(false)
+
+      // Adaptiver Zoom basierend auf der Gebietsgröße (bbox)
+      if (bbox && bbox.length === 4) {
+        const dLon = Math.abs(bbox[2] - bbox[0])
+        const dLat = Math.abs(bbox[3] - bbox[1])
+        const maxSpan = Math.max(dLon, dLat)
+        if (maxSpan > 25) setZoom(0.9)
+        else if (maxSpan > 5) setZoom(1.1)
+        else setZoom(1.35)
+      }
     }
-  }, [latitude, longitude])
+  }, [latitude, longitude, bbox])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -214,7 +224,46 @@ export function GlobeViewer({
       }
       ctx.stroke()
 
-      // 5. Zielort-Marker & Radar-Pulsar
+      // 5. Region / Bounding Box Umrandung (wenn bbox übergeben wurde)
+      if (bbox && bbox.length === 4) {
+        const [minLon, minLat, maxLon, maxLat] = bbox
+        const points = [
+          [minLat, minLon],
+          [minLat, maxLon],
+          [maxLat, maxLon],
+          [maxLat, minLon],
+        ]
+        ctx.beginPath()
+        let visibleCount = 0
+        points.forEach(([pLat, pLon], idx) => {
+          const phi = (pLat * Math.PI) / 180
+          const theta = ((pLon + 90) * Math.PI) / 180 + ry
+          const cosPhi = Math.cos(phi)
+          const sinPhi = Math.sin(phi)
+          const px = Math.cos(theta) * cosPhi
+          const py = sinPhi
+          const pz = Math.sin(theta) * cosPhi
+          const rotY = py * Math.cos(rx) - pz * Math.sin(rx)
+          const rotZ = py * Math.sin(rx) + pz * Math.cos(rx)
+          if (rotZ > -0.2) {
+            visibleCount++
+            const sx = cx + px * radius
+            const sy = cy - rotY * radius
+            if (idx === 0) ctx.moveTo(sx, sy)
+            else ctx.lineTo(sx, sy)
+          }
+        })
+        if (visibleCount >= 2) {
+          ctx.closePath()
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)'
+          ctx.lineWidth = 1.5
+          ctx.fillStyle = 'rgba(56, 189, 248, 0.12)'
+          ctx.fill()
+          ctx.stroke()
+        }
+      }
+
+      // 6. Zielort-Marker & Radar-Pulsar
       if (typeof latitude === 'number' && typeof longitude === 'number') {
         const phi = (latitude * Math.PI) / 180
         const theta = ((longitude + 90) * Math.PI) / 180 + ry
