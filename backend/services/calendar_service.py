@@ -11,6 +11,8 @@ Sicherheitsinvariante:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
+import hmac
 import logging
 import re
 from typing import Any
@@ -651,6 +653,41 @@ class CalendarService:
 
         lines.append("END:VCALENDAR\r\n")
         return "\r\n".join(lines)
+
+    @classmethod
+    def generate_feed_token(cls, user: User) -> str:
+        """Erzeugt ein kryptographisch signiertes Feed-Token für externe Kalender-Abonnements (Webcal/iCal)."""
+        from config import settings
+        secret = (getattr(settings, "JWT_SECRET", None) or "msm-ical-feed-secret").encode("utf-8")
+        pwd_salt = (user.password_hash or "")[:16]
+        msg = f"msm_ical_feed:{user.id}:{pwd_salt}".encode("utf-8")
+        sig = hmac.new(secret, msg, hashlib.sha256).hexdigest()[:32]
+        return f"{user.id}_{sig}"
+
+    @classmethod
+    def verify_feed_token(cls, token: str, db: Session) -> User | None:
+        """Validiert ein iCal-Feed-Token und liefert den zugehörigen aktiven Benutzer."""
+        if not token or "_" not in token:
+            return None
+        try:
+            user_id_str, sig = token.split("_", 1)
+            user_id = int(user_id_str)
+        except Exception:
+            return None
+
+        user = db.get(User, user_id)
+        if not user or not user.is_active:
+            return None
+
+        from config import settings
+        secret = (getattr(settings, "JWT_SECRET", None) or "msm-ical-feed-secret").encode("utf-8")
+        pwd_salt = (user.password_hash or "")[:16]
+        msg = f"msm_ical_feed:{user.id}:{pwd_salt}".encode("utf-8")
+        expected_sig = hmac.new(secret, msg, hashlib.sha256).hexdigest()[:32]
+
+        if hmac.compare_digest(sig, expected_sig):
+            return user
+        return None
 
     @classmethod
     async def check_and_send_due_reminders(cls, db: Session) -> int:

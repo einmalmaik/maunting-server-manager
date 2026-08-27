@@ -387,7 +387,7 @@ def incident_alerts(
     from models import Incident, Server, ServerPermission
 
     # Server ermitteln, auf die der User Zugriff hat
-    if user.is_superuser or any(r.role.name == "admin" for r in user.user_roles if r.role):
+    if user.is_owner or any(r.role.name == "admin" for r in user.user_roles if r.role):
         server_rows = db.query(Server.id, Server.name).all()
         server_map = {s[0]: s[1] for s in server_rows}
     else:

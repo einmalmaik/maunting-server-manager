@@ -450,7 +450,24 @@ export function Calendar() {
     }
   }, [currentDate, viewMode, locale, t])
 
-  const feedUrl = `${window.location.origin}/api/calendar/feed.ics`
+  const [feedUrl, setFeedUrl] = useState('')
+  const [loadingFeedUrl, setLoadingFeedUrl] = useState(false)
+
+  const openFeedModal = () => {
+    setIsFeedModalOpen(true)
+    setLoadingFeedUrl(true)
+    api<{ feed_url: string; token: string }>('/calendar/feed-url')
+      .then((res) => {
+        const fullUrl = `${window.location.origin}${res.feed_url}`
+        setFeedUrl(fullUrl)
+      })
+      .catch(() => {
+        setFeedUrl(`${window.location.origin}/api/calendar/feed.ics`)
+      })
+      .finally(() => {
+        setLoadingFeedUrl(false)
+      })
+  }
 
   return (
     <div className="space-y-6">
@@ -471,7 +488,7 @@ export function Calendar() {
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => setIsFeedModalOpen(true)}
+              onClick={openFeedModal}
               className="gap-1.5"
             >
               <Download className="w-4 h-4" />
@@ -1041,12 +1058,13 @@ export function Calendar() {
                 <input
                   type="text"
                   readOnly
-                  value={feedUrl}
+                  value={loadingFeedUrl ? 'Lade Feed-URL...' : feedUrl}
                   className="msm-input flex-1 font-mono text-xs select-all"
                 />
                 <Button
                   size="sm"
                   variant="secondary"
+                  disabled={loadingFeedUrl || !feedUrl}
                   onClick={() => {
                     navigator.clipboard.writeText(feedUrl)
                     toast.success('URL in die Zwischenablage kopiert')

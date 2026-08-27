@@ -6,11 +6,12 @@ Ermöglicht das Anzeigen, Erstellen, Bearbeiten, Löschen und Exportieren von Te
 from __future__ import annotations
 
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import get_db
+from dependencies import _bearer_token, _user_from_token
 from models.user import User
 from routers.auth import get_current_user
 from services.calendar_service import CalendarService
@@ -152,20 +153,60 @@ def delete_event(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def get_calendar_feed_user(
+    request: Request,
+    token: str | None = Query(None, description="Signiertes Feed-Token für externe Kalender-Apps"),
+    db: Session = Depends(get_db),
+) -> User:
+    """Authentifiziert den iCal-Feed-Aufruf entweder per signiertem URL-Token oder per Session/Bearer."""
+    if token:
+        user = CalendarService.verify_feed_token(token, db)
+        if user:
+            return user
+        raise HTTPException(
+            status_code=401,
+            detail="Ungültiges Kalender-Token. Bitte verwende den vollständigen Feed-Link aus deinem MSM-Panel.",
+        )
+
+    from main import app
+    if get_current_user in app.dependency_overrides:
+        override = app.dependency_overrides[get_current_user]
+        return override()
+
+    token_str = _bearer_token(request) or request.cookies.get("__Secure-access_token")
+    if not token_str:
+        raise HTTPException(
+            status_code=401,
+            detail="Ungültiges oder fehlendes Kalender-Token. Bitte verwende den vollständigen Feed-Link aus deinem MSM-Panel.",
+        )
+    return _user_from_token(token_str, db)
+
+
+@router.get("/feed-url")
+def get_calendar_feed_url(
+    user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Liefert die signierte Feed-URL für externe Kalender-Abonnements (z. B. Google Kalender, Apple, Outlook)."""
+    _check_calendar_enabled()
+    token = CalendarService.generate_feed_token(user)
+    return {"feed_url": f"/api/calendar/feed.ics?token={token}", "token": token}
+
+
 @router.get("/feed.ics")
 def export_ical_feed(
     calendar_id: int | None = Query(None),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_calendar_feed_user),
 ) -> Response:
     """Exportiert alle Termine als iCal (.ics) zur Einbindung in externe Kalender-Apps."""
     _check_calendar_enabled()
     ical_content = CalendarService.export_ical(db, user, calendar_id)
     return Response(
         content=ical_content,
-        media_type="text/calendar",
+        media_type="text/calendar; charset=utf-8",
         headers={
-            "Content-Disposition": 'attachment; filename="msm-calendar.ics"',
+            "Content-Disposition": 'inline; filename="msm-calendar.ics"',
+            "Cache-Control": "no-cache, no-store, must-revalidate",
         },
     )
 
