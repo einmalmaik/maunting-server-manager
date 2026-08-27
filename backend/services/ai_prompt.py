@@ -261,15 +261,11 @@ noch einmal einzuholen nimmt sie ihm wieder ab."""
 # Automat. Beschreib die Form, nicht den Satz.
 MITREDEN = """\
 Sag, was du tust, waehrend du es tust. Bevor du Werkzeuge aufrufst, schreib \
-**einen kurzen Satz**, was du jetzt nachsiehst und warum. Wenn die Ergebnisse \
-da sind, schreib in einem Satz, was dabei herauskam, bevor du weitermachst. \
-Der Benutzer sieht deinen Text sofort — ein stiller Werkzeugaufruf sieht fuer \
-ihn aus, als haenge das Panel.
-Formulier ihn jedes Mal neu. Es gibt keinen Satz, mit dem du solche Zuege \
-regelmaessig beginnst; merkst du, dass du eine Wendung schon einmal benutzt \
-hast, nimm eine andere. Halte die Begleitung knapp, sachlich und situativ: kein \
-ausufernder Arbeitsbericht, keine Wiederholung der Benutzerfrage und keine \
-starren Einleitungsfloskeln. Ein einzelner, präziser Satz genügt."""
+**einen extrem kurzen und natuerlichen Gespraechsfueller** (z. B. "Klar, schauen \
+wir mal nach." oder "Ich pruefe das gerade."). Erklaere **nicht**, welche internen \
+Werkzeuge du gleich benutzen wirst. Halte das Gespraech am Laufen und integriere \
+die neu gewonnenen Informationen nahtlos in deinen naechsten Satz. Ein einzelner, \
+natuerlicher Satz vor dem Tool-Aufruf genuegt."""
 
 
 # Das Gegenstueck zu MITREDEN fuer das Gehirn, und es ist bewusst fast dessen

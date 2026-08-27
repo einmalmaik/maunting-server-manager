@@ -31,7 +31,7 @@ const VORLAUF_SEKUNDEN = 0.08
 export class Wiedergabe {
   private kontext: AudioContext | null = null
   private naechsterStart = 0
-  private quellen = new Set<AudioBufferSourceNode>()
+  private quellen = new Set<{ quelle: AudioBufferSourceNode; start: number; dauer: number }>()
   /**
    * Misst, wie laut gerade gesprochen wird.
    *
@@ -101,32 +101,48 @@ export class Wiedergabe {
     if (this.naechsterStart < jetzt) {
       this.naechsterStart = jetzt + VORLAUF_SEKUNDEN
     }
-    quelle.start(this.naechsterStart)
-    this.naechsterStart += puffer.duration
+    const startZeit = this.naechsterStart
+    const dauer = puffer.duration
 
-    this.quellen.add(quelle)
+    quelle.start(startZeit)
+    this.naechsterStart += dauer
+
+    const eintrag = { quelle, start: startZeit, dauer }
+    this.quellen.add(eintrag)
     quelle.onended = () => {
-      this.quellen.delete(quelle)
+      this.quellen.delete(eintrag)
     }
   }
 
   /**
-   * Alles Laufende und Eingeplante verwerfen — der Mensch redet dazwischen.
-   *
-   * `stop()` löst `onended` aus, deshalb wird über eine Kopie gelaufen: sonst
-   * würde das Set währenddessen verändert, über das gerade iteriert wird.
+   * Die noch nicht angefangenen Stücke verwerfen — der Mensch redet dazwischen.
+   * Der laufende Satz darf gemütlich zu Ende reden.
    */
   abbrechen(): void {
-    for (const quelle of [...this.quellen]) {
-      try {
-        quelle.stop()
-      } catch {
-        // Ein Stück, das noch nie lief oder schon vorbei ist, wirft. Beides
-        // ist genau das, was wir wollten.
+    const jetzt = this.kontext?.currentTime ?? 0
+    let laeuftNoch = false
+    let spaetesterEnde = jetzt
+
+    for (const eintrag of [...this.quellen]) {
+      // Wenn das Stück noch nicht angefangen hat, würgen wir es ab
+      if (eintrag.start > jetzt + 0.1) {
+        try {
+          eintrag.quelle.stop()
+        } catch {}
+        this.quellen.delete(eintrag)
+      } else {
+        // Stück läuft -> wir lassen es fertig reden
+        laeuftNoch = true
+        const ende = eintrag.start + eintrag.dauer
+        if (ende > spaetesterEnde) spaetesterEnde = ende
       }
     }
-    this.quellen.clear()
-    this.naechsterStart = 0
+
+    if (laeuftNoch) {
+      this.naechsterStart = spaetesterEnde
+    } else {
+      this.naechsterStart = 0
+    }
   }
 
   /** Aufräumen am Ende der Sitzung. */

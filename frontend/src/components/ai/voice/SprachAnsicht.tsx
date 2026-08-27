@@ -105,28 +105,6 @@ export function SprachAnsicht({
         )}
       </div>
 
-      {zeilen.length > 0 && (
-        <div
-          ref={kasten}
-          className="mt-6 max-h-32 w-full max-w-2xl space-y-1.5 overflow-y-auto rounded-xl border border-outline-variant/30 bg-surface-container-low/30 px-4 py-3"
-          aria-live="polite"
-        >
-          {zeilen.map((zeile, index) => (
-            <p
-              key={index}
-              className={`text-sm leading-relaxed ${
-                zeile.wer === 'ich' ? 'text-on-surface-variant/70' : 'text-on-surface'
-              }`}
-            >
-              <span className="mr-1.5 font-medium text-on-surface-variant/50">
-                {t(zeile.wer === 'ich' ? 'ai.voice.you' : 'ai.voice.assistant')}
-              </span>
-              {zeile.text}
-            </p>
-          ))}
-        </div>
-      )}
-
       {vorschlag && <Vorschlagskasten vorschlag={vorschlag} />}
       {beleg && <Belegkasten beleg={beleg} />}
 
