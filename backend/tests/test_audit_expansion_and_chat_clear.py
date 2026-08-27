@@ -55,17 +55,111 @@ def test_clear_history_deletes_action_proposals(db: Session, owner_user: User):
         ),
     )
     db.add(proposal)
+
+    # Autonom ausgeführter Vorschlag (z. B. Serverstatus geändert / Blueprint)
+    auto_proposal = AiActionProposal(
+        id=str(uuid4()),
+        conversation_id=conv.id,
+        user_id=owner_user.id,
+        server_id=None,
+        tool_name="propose_server_lifecycle",
+        proposal_type="write",
+        preview_json='{"action": "start"}',
+        correlation_id=str(uuid4()),
+        status="succeeded",
+        autonomous=True,
+        payload_encrypted=AuthService.encrypt_secret(
+            json.dumps({"server_id": 1, "action": "start"}), aad=f"msm:ai:action:{conv.id}"
+        ),
+    )
+    db.add(auto_proposal)
+
+    # Worker-Unterhaltung mit eigenem Proposal
+    worker_conv = AiConversation(
+        id=str(uuid4()),
+        kind="worker",
+        user_id=owner_user.id,
+        title="Worker 1",
+    )
+    db.add(worker_conv)
+    db.flush()
+
+    worker_prop = AiActionProposal(
+        id=str(uuid4()),
+        conversation_id=worker_conv.id,
+        user_id=owner_user.id,
+        server_id=None,
+        tool_name="propose_blueprint_change",
+        proposal_type="write",
+        preview_json="{}",
+        correlation_id=str(uuid4()),
+        status="succeeded",
+        autonomous=True,
+        payload_encrypted=AuthService.encrypt_secret(
+            json.dumps({}), aad=f"msm:ai:action:{worker_conv.id}"
+        ),
+    )
+    db.add(worker_prop)
     db.commit()
 
     assert db.query(AiMessage).filter(AiMessage.conversation_id == conv.id).count() == 1
-    assert db.query(AiActionProposal).filter(AiActionProposal.conversation_id == conv.id).count() == 1
+    assert db.query(AiActionProposal).filter(AiActionProposal.user_id == owner_user.id).count() == 3
+    assert db.query(AiConversation).filter(AiConversation.user_id == owner_user.id, AiConversation.kind == "worker").count() == 1
 
     removed = ai_chat_service.clear_history(db, conv)
     db.commit()
 
     assert removed == 1
     assert db.query(AiMessage).filter(AiMessage.conversation_id == conv.id).count() == 0
-    assert db.query(AiActionProposal).filter(AiActionProposal.conversation_id == conv.id).count() == 0
+    assert db.query(AiActionProposal).filter(AiActionProposal.user_id == owner_user.id).count() == 0
+    assert db.query(AiConversation).filter(AiConversation.user_id == owner_user.id, AiConversation.kind == "worker").count() == 0
+
+
+def test_clear_history_via_api_removes_all_cards(client: TestClient, db: Session, owner_user: User, owner_cookies: dict):
+    """Prueft das vollständige Leeren des Verlaufs über die DELETE-Route inklusive nachfolgendem list_conversation_actions."""
+    headers = _csrf(owner_cookies)
+    conv = ai_chat_service.get_or_create_primary_conversation(db, owner_user)
+
+    # Nachricht und autonome Vorschlagskarte anlegen
+    msg = AiMessage(
+        id=str(uuid4()),
+        conversation_id=conv.id,
+        role="user",
+        content="Mach Serverprüfung",
+        intern=False,
+    )
+    db.add(msg)
+    prop = AiActionProposal(
+        id=str(uuid4()),
+        conversation_id=conv.id,
+        user_id=owner_user.id,
+        server_id=None,
+        tool_name="propose_server_lifecycle",
+        proposal_type="write",
+        preview_json='{"action": "start"}',
+        correlation_id=str(uuid4()),
+        status="succeeded",
+        autonomous=True,
+        payload_encrypted=AuthService.encrypt_secret(
+            json.dumps({"server_id": 1, "action": "start"}), aad=f"msm:ai:action:{conv.id}"
+        ),
+    )
+    db.add(prop)
+    db.commit()
+
+    # Vor dem Löschen existiert die Aktionskarte
+    resp_actions = client.get("/api/ai/conversation/actions?kind=primary", cookies=owner_cookies)
+    assert resp_actions.status_code == 200
+    assert len(resp_actions.json()) >= 1
+
+    # Verlauf löschen (Mülltonne)
+    resp_delete = client.delete("/api/ai/conversation/messages", cookies=owner_cookies, headers=headers)
+    assert resp_delete.status_code == 204
+
+    # Danach liefert list_conversation_actions ein leeres Array
+    resp_actions_after = client.get("/api/ai/conversation/actions?kind=primary", cookies=owner_cookies)
+    assert resp_actions_after.status_code == 200
+    assert resp_actions_after.json() == []
 
 
 def test_roles_audit_logging(client: TestClient, db: Session, owner_cookies: dict):

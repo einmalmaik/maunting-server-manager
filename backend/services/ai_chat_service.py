@@ -176,24 +176,57 @@ def clear_history(db: Session, conversation: AiConversation) -> int:
     Aktionsvorschlaege, Anhaenge und die Zusammenfassung. Bereits ausgefuehrte
     Aktionen bleiben im Audit (audit_logs); die fliegenden Vorschlagskarten
     des Chats werden mit dem Verlauf abgeraeumt, damit kein verwaister
-    Zustand im leeren Chat stehenbleibt.
+    Zustand im leeren Chat stehenbleibt. Auch Worker-Unterhaltungen und alle
+    zugehoerigen Vorschlaege des Benutzers werden restlos bereinigt.
     """
-    from models import AiActionProposal, AiAttachment, AiToolResult
+    from models import (
+        AiActionProposal,
+        AiAttachment,
+        AiConversation,
+        AiMeldung,
+        AiToolResult,
+    )
+    from services import ai_run_service
+
+    worker_conv_ids = [
+        row[0]
+        for row in db.query(AiConversation.id)
+        .filter(
+            AiConversation.user_id == conversation.user_id,
+            AiConversation.kind == "worker",
+        )
+        .all()
+    ]
+    alle_conv_ids = [conversation.id, *worker_conv_ids]
+
+    for cid in alle_conv_ids:
+        ai_run_service.vorgaenger_abloesen(db, conversation_id=cid)
+
+    db.query(AiMeldung).filter(AiMeldung.user_id == conversation.user_id).delete(
+        synchronize_session=False
+    )
 
     removed = (
         db.query(AiMessage)
-        .filter(AiMessage.conversation_id == conversation.id)
+        .filter(AiMessage.conversation_id.in_(alle_conv_ids))
         .delete(synchronize_session=False)
     )
     db.query(AiToolResult).filter(
-        AiToolResult.conversation_id == conversation.id
+        AiToolResult.conversation_id.in_(alle_conv_ids)
     ).delete(synchronize_session=False)
     db.query(AiAttachment).filter(
-        AiAttachment.conversation_id == conversation.id
+        AiAttachment.conversation_id.in_(alle_conv_ids)
     ).delete(synchronize_session=False)
     db.query(AiActionProposal).filter(
-        AiActionProposal.conversation_id == conversation.id
+        (AiActionProposal.conversation_id.in_(alle_conv_ids))
+        | (AiActionProposal.user_id == conversation.user_id)
     ).delete(synchronize_session=False)
+
+    if worker_conv_ids:
+        db.query(AiConversation).filter(
+            AiConversation.id.in_(worker_conv_ids)
+        ).delete(synchronize_session=False)
+
     conversation.summary = None
     conversation.summarized_until = None
     conversation.updated_at = datetime.now(timezone.utc)

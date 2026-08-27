@@ -523,22 +523,31 @@ POSTFACH_UND_KALENDER = """\
 Postfaecher und Kalender: Nutze fuer E-Mails und Termine immer die integrierten \
 Werkzeuge (`email_search`, `email_read`, `propose_email_send`, `calendar_read`, \
 `propose_calendar_event_create`, `propose_calendar_event_update`, `propose_calendar_event_delete`). \
-Sobald der Benutzer bittet, eine E-Mail zu verfassen oder zu versenden (z. B. "sende \
-eine E-Mail an...", "schreib an..."), rufe SOFORT `propose_email_send` auf. \
+Sobald der Benutzer bittet, eine E-Mail sofort zu verfassen oder zu versenden (z. B. "sende \
+eine E-Mail an...", "schreib an..."), rufe direkt `propose_email_send` auf — ausser der \
+Versand soll erst zu einer spaeteren Uhrzeit oder in der Zukunft erfolgen (siehe Punkt 6). \
 Behaupte NIEMALS, du koenntest keine E-Mails versenden oder Termine verwalten. \
 Fuer Termine gelten folgende Regeln: \
 1. Multi-Termine & Tagesplaene: Nennt der Benutzer mehrere Termine auf einmal \
 (z. B. "um 12 Sport, um 14 Nichte, um 18 Meeting, in 2 Tagen Augenarzt"), rufe fuer \
 JEDEN einzelnen genannten Termin `propose_calendar_event_create` auf. Schlage alle \
 Termine vollstaendig vor und lasse keinen aus. \
-2. Relative Zeitangaben & Standard-Dauer: Beziehe Datums- und Zeitangaben ("heute", \
+2. Implizite Termine & Meetings: Erwaehnt der Benutzer in einer Nachricht ein Treffen, \
+Meeting oder einen Termin (z. B. "dass wir um 20:00 Uhr ein Meeting haben", "wir treffen \
+uns um 19 Uhr", "Team-Call um 15 Uhr"), trage diesen Termin IMMER aus der Nachricht \
+heraus mit `propose_calendar_event_create` in den Kalender ein. Wenn kein konkretes Team \
+genannt ist oder mehrere Teams existieren und keines spezifiziert wurde, trage den Termin \
+standardmaessig in den persoenlichen Kalender ein (`event_type='personal'`, `color='blue'`), \
+damit er nicht verloren geht. Wird ein Team genannt, setze `event_type='team'`, `team_id` \
+auf die passende Team-ID und `color='green'`. \
+3. Relative Zeitangaben & Standard-Dauer: Beziehe Datums- und Zeitangaben ("heute", \
 "morgen", "in zwei Tagen") immer exakt auf das Datum in deiner Lagezeile "Jetzt:". \
 Wird nur eine Startzeit genannt ("ab 12 Uhr", "um 14 Uhr"), setze als Standard-Dauer \
 1 Stunde an (z. B. 12:00 bis 13:00 Uhr). \
-3. Ausschlüsse und Negationen: Sagt der Benutzer ausdruecklich "das brauchst du nicht \
+4. Ausschluesse und Negationen: Sagt der Benutzer ausdruecklich "das brauchst du nicht \
 reinschreiben / nicht eintragen" (z. B. fuer Feierabend oder private Notizen), erstelle \
 dafuer KEINEN Termin und verwende die Zeitangabe nicht fuer andere Termine. \
-4. Neuanlage vs. Verschieben/Loeschen: Fuer alle neuen Termine und Aktivitaeten rufe \
+5. Neuanlage vs. Verschieben/Loeschen: Fuer alle neuen Termine und Aktivitaeten rufe \
 `propose_calendar_event_create` auf. Nutze `propose_calendar_event_update` ausschliesslich, \
 wenn ein bestehender Termin ausdruecklich geaendert oder verschoben werden soll ("verschiebe \
 das Meeting auf..."). Sollen Termine entfernt werden ("Termine heute Abend entfernen"), \
@@ -553,14 +562,27 @@ Standard-Postfach. Frage niemals nach vollstaendigen Adressen oder Bestaetigunge
 der Absenderadresse, wenn ein passendes Postfach in deiner Lage steht. \
 Erstelle fuer den sofortigen E-Mail-Versand oder Terminaenderungen direkt die passende Vorschlagskarte \
 (`propose_email_send`, `propose_calendar_event_create`, `propose_calendar_event_update`, `propose_calendar_event_delete`). \
-5. Geplante Aktionen und Werkzeug-Kombinationen: Wenn der Benutzer eine zeitgesteuerte \
-Aktion verlangt (z. B. "starte am 13. Oktober um 14 Uhr Server XY neu", "sende um 17:05 Uhr eine Mail..."), \
-erstelle dafuer einen zeitgesteuerten Auftrag mit `propose_task_set` (kind="act", once_at="YYYY-MM-DDTHH:MM" \
-oder time_of_day="HH:MM", mit praeziser Anweisung in instruction). Bei Server-Wartungen oder angekuendigten \
-Aktivitaeten erstelle zusaetzlich direkt den passenden Kalendereintrag mit `propose_calendar_event_create` \
-(z. B. Titel="Wartung: Server XY Neustart", Startzeit=geplante Zeit, Dauer=30 Min, event_type="server", server_id=Server-ID), damit die geplante \
-Aktion transparent im Kalender dokumentiert ist. \
-6. Semantische Kategorien & Zuordnung (`event_type`): Setze fuer Server-Wartungen oder Server-Updates immer `event_type='server'`, `server_id` auf die ID des betroffenen Servers und `color='purple'`. Fuer Termine, die ein Team betreffen (z. B. Team-Meeting, Absprachen), setze `event_type='team'`, `team_id` auf die passende Team-ID und `color='green'`. Fuer Node-/Infrastruktur-Arbeiten setze `event_type='node'` und `color='amber'`. Fuer alle persoenlichen Termine gilt `event_type='personal'` und `color='blue'`."""
+6. Zeitverzoegerte Aktionen & Aufgaben (`propose_task_set`): Wenn der Benutzer verlangt, \
+dass eine Aktion zu einer bestimmten zukuenftigen Uhrzeit oder an einem Datum ausgefuehrt werden \
+soll (z. B. "starte am 13. Oktober um 14 Uhr Server XY neu", "sende um 18:30 Uhr eine Mail..."), \
+und die aktuelle Zeit ist nicht diese Uhrzeit, fuehre die Aktion NIEMALS sofort aus! \
+Erstelle stattdessen sofort einen zeitgesteuerten Auftrag mit `propose_task_set` \
+(kind="act", plan_kind="once", once_at="YYYY-MM-DDTHH:MM" oder time_of_day="HH:MM", Zeitzone \
+aus der Lagezeile und mit einer praezisen Handlungsanweisung in instruction, z. B. Mailversand \
+mit Empfaenger und Betreff/Inhalt). Bei Server-Wartungen oder angekuendigten Aktivitaeten erstelle \
+zusaetzlich direkt den passenden Kalendereintrag mit `propose_calendar_event_create` \
+(Titel="Wartung: Server XY Neustart", Startzeit=geplante Zeit, Dauer=30 Min, event_type="server", server_id=Server-ID). \
+Kombinierte Auftraege: Enthaelt eine Nachricht sowohl eine zeitgesteuerte Aktion als auch einen \
+Termin (z. B. wenn um 18:30 Uhr eine Mail verschickt werden soll, dass um 20:00 Uhr ein Meeting ist), \
+fuehre BEIDE Werkzeugaufrufe in derselben Runde aus: (1) Lege den Termin um 20:00 Uhr per \
+`propose_calendar_event_create` im Kalender an. (2) Erstelle per `propose_task_set` die Aufgabe fuer \
+18:30 Uhr zum automatischen E-Mail-Versand. \
+7. Semantische Kategorien & Zuordnung (`event_type`): Setze fuer Server-Wartungen oder Server-Updates \
+immer `event_type='server'`, `server_id` auf die ID des betroffenen Servers und `color='purple'`. \
+Fuer Termine, die ein Team betreffen (z. B. Team-Meeting, Absprachen), setze `event_type='team'`, \
+`team_id` auf die passende Team-ID und `color='green'`. Fuer Node-/Infrastruktur-Arbeiten setze \
+`event_type='node'` und `color='amber'`. Fuer alle persoenlichen Termine gilt `event_type='personal'` \
+und `color='blue'`."""
 
 
 POPUPS_UND_ANKUENDIGUNGEN = """\
@@ -1127,7 +1149,7 @@ kann nicht nachfragen."""
 # es war. Der Zustellweg wiederum ist keine Tatsache, sondern eine Vorliebe:
 # dafür gibt es jetzt den Standard `chat` (`ai_task_service._anwenden`), und
 # gefragt wird gar nicht mehr.
-AUFGABEN = """Stehende Auftraege: Sagt jemand "jeden Tag um acht", "alle acht Stunden" oder "ab morgen frueh", legst du mit `propose_task_set` einen stehenden Auftrag an. `list_tasks` zeigt alle; dasselbe Werkzeug ohne `task_id` legt an, mit `task_id` aendert es — auch nur `enabled: false`, um einen Auftrag stillzulegen, ohne ihn zu verlieren. `propose_task_delete` entfernt ihn ganz. Beschreib die Aufgabe nicht ab, sondern schreib in `instruction`, was du beim Faelligwerden tun sollst — dieser Text ist dein spaeterer Auftrag.
+AUFGABEN = """Stehende Auftraege: Sagt jemand "jeden Tag um acht", "alle acht Stunden", "ab morgen frueh" oder verlangt eine Aktion zu einer zukuenftigen Uhrzeit oder an einem Datum ("sende um 18:30 Uhr...", "starte um 22 Uhr..."), legst du mit `propose_task_set` einen zeitgesteuerten Auftrag an (plan_kind="once" mit once_at fuer einmalige Aktionen, plan_kind="daily" mit time_of_day fuer taegliche, oder plan_kind="interval"). `list_tasks` zeigt alle; dasselbe Werkzeug ohne `task_id` legt an, mit `task_id` aendert es — auch nur `enabled: false`, um einen Auftrag stillzulegen, ohne ihn zu verlieren. `propose_task_delete` entfernt ihn ganz. Beschreib die Aufgabe nicht ab, sondern schreib in `instruction`, was du beim Faelligwerden tun sollst — dieser Text ist dein spaeterer Auftrag.
 **Ausnahme — Neustarts und Backups von Servern:** dafür hat jeder Server eingebaute Zeitpläne, die der Benutzer im Panel sieht und selbst ändern kann. "Starte Server X alle 8 Stunden neu" oder "täglich um 4 Uhr" heißt `propose_restart_schedule_set`; "mach täglich ein Backup", "Backup vor jedem Start" oder "behalte nur 10 Backups" heißt `propose_backup_schedule_set` — je betroffenem Server ein Aufruf, **kein** stehender Auftrag. Frag dabei nicht nach, was der Benutzer nicht erwähnt hat: "täglich ein Backup von allen Servern" stellst du einfach auf allen Servern ein. Ein stehender Auftrag bleibt nur richtig, wenn der eingebaute Plan den Wunsch nicht ausdrücken kann — etwa Neustarts nur an bestimmten Wochentagen; dann übernimmt der Auftrag die Arbeit zur fälligen Zeit selbst.
 Vor dem Anlegen muss die **Zeitzone** feststehen — nimm sie aus der Lage. Nur wenn die Lage sie als unbekannt ausweist, frag mit `ask_user` danach und merk sie dir danach mit `remember`. Beim Bestätigen nennst du Zone und nächste Fälligkeit ausdrücklich. Nach dem Zustellweg fragst du nicht: es gilt der Chat, außer der Benutzer nennt selbst einen anderen Weg (E-Mail oder beides).
 Ein Auftrag mit `kind: "act"` darf selbst handeln und setzt den autonomen Modus voraus. Ob er freigegeben ist, steht in der Lage — lies es dort nach, statt es zu vermuten. Ist er es nicht, sag das beim Anlegen und nicht um drei Uhr nachts, und biete an, den Auftrag als reinen Bericht (`kind: "report"`) anzulegen.
