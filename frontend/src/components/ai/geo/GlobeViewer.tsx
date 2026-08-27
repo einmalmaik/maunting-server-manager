@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Clock, Cloud, Compass, MapPin, Minus, Plus, RotateCcw, Satellite } from 'lucide-react'
+import { Clock, Cloud, Compass, MapPin, Minus, Plus, RotateCcw, Satellite, Target } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { AiRegionalAnalysis } from '@/api/ai'
@@ -13,9 +13,74 @@ interface GlobeViewerProps {
   className?: string
 }
 
+// Hochauflösende Kontur-Vektoren für alle Kontinente der Erde [lat, lon]
+const CONTINENTS: [number, number][][] = [
+  // Nordamerika
+  [
+    [70, -160], [72, -130], [60, -140], [55, -130], [50, -125], [38, -123], [32, -117],
+    [23, -110], [19, -104], [15, -93], [14, -87], [9, -79], [12, -75], [18, -88],
+    [22, -97], [29, -95], [29, -89], [25, -80], [31, -81], [35, -75], [41, -70],
+    [45, -65], [47, -53], [52, -56], [58, -62], [62, -75], [64, -85], [70, -95],
+    [75, -100], [72, -125], [71, -156], [65, -168], [60, -165], [70, -160],
+  ],
+  // Südamerika
+  [
+    [12, -72], [10, -62], [5, -52], [-2, -44], [-8, -35], [-18, -39], [-23, -42],
+    [-34, -53], [-42, -63], [-54, -68], [-55, -71], [-50, -75], [-40, -73], [-30, -71],
+    [-18, -70], [-14, -76], [-5, -81], [1, -79], [8, -77], [12, -72],
+  ],
+  // Europa & Skandinavien
+  [
+    [36, -6], [37, -9], [43, -9], [44, -1], [48, -4], [50, 1], [53, 5], [54, 8],
+    [58, 8], [62, 5], [69, 15], [71, 28], [68, 40], [60, 30], [55, 21], [54, 14],
+    [46, 13], [44, 8], [41, 0], [36, -6],
+  ],
+  // Großbritannien & Irland
+  [
+    [50, -5], [54, -3], [58, -5], [58, -3], [55, -1], [51, 1], [50, -5],
+  ],
+  // Afrika
+  [
+    [35, -6], [37, 10], [32, 25], [31, 32], [28, 34], [22, 37], [12, 44], [11, 51],
+    [2, 45], [-5, 40], [-11, 40], [-26, 33], [-34, 26], [-34, 18], [-28, 16], [-15, 12],
+    [-5, 12], [4, 9], [5, 1], [5, -4], [6, -11], [12, -16], [16, -17], [21, -17],
+    [28, -13], [35, -6],
+  ],
+  // Asien & Eurasien
+  [
+    [75, 40], [77, 80], [76, 100], [70, 130], [72, 145], [66, 170], [60, 165],
+    [55, 155], [45, 136], [40, 128], [37, 126], [30, 122], [22, 114], [21, 108],
+    [10, 107], [1, 104], [8, 98], [16, 96], [22, 89], [17, 82], [8, 77],
+    [20, 72], [25, 62], [27, 51], [15, 53], [12, 44], [22, 38], [30, 35],
+    [36, 36], [41, 28], [45, 36], [50, 50], [55, 60], [60, 60], [68, 65], [75, 40],
+  ],
+  // Australien
+  [
+    [-11, 142], [-15, 145], [-24, 153], [-33, 152], [-38, 147], [-38, 140],
+    [-35, 136], [-32, 132], [-34, 115], [-22, 114], [-18, 122], [-14, 129],
+    [-12, 136], [-11, 142],
+  ],
+  // Japan
+  [
+    [31, 130], [35, 135], [40, 140], [45, 145], [43, 141], [35, 133], [31, 130],
+  ],
+  // Madagaskar
+  [
+    [-12, 49], [-16, 50], [-25, 47], [-25, 44], [-16, 44], [-12, 49],
+  ],
+  // Grönland
+  [
+    [76, -70], [83, -30], [80, -15], [70, -22], [60, -43], [65, -53], [76, -70],
+  ],
+  // Neuseeland
+  [
+    [-35, 173], [-38, 178], [-41, 175], [-46, 168], [-44, 170], [-41, 172], [-35, 173],
+  ],
+]
+
 /**
- * 3D-Globus-Komponente mit flüssiger Rotationsanimation, Zielort-Fokussierung
- * und unterer Live-Metriken-Leiste im Kommandozentren-Stil.
+ * 3D-Globus-Komponente mit echten Kontinent-Vektoren, flüssiger Rotationsanimation,
+ * Zielort-Fokussierung, Mausrad-Zoom und unterer Live-Metriken-Leiste.
  */
 export function GlobeViewer({
   latitude,
@@ -44,24 +109,27 @@ export function GlobeViewer({
   const lastMouseRef = useRef({ x: 0, y: 0 })
   const animFrameRef = useRef<number | null>(null)
 
+  // Zentrierungs-Funktion für Zielort
+  const flyToTarget = (lat: number, lon: number, customBbox?: [number, number, number, number] | null) => {
+    const targetY = -((lon + 90) * Math.PI) / 180
+    const targetX = (lat * Math.PI) / 180
+    targetRotRef.current = { x: targetX, y: targetY }
+    setAutoRotate(false)
+
+    if (customBbox && customBbox.length === 4) {
+      const dLon = Math.abs(customBbox[2] - customBbox[0])
+      const dLat = Math.abs(customBbox[3] - customBbox[1])
+      const maxSpan = Math.max(dLon, dLat)
+      if (maxSpan > 25) setZoom(0.9)
+      else if (maxSpan > 5) setZoom(1.15)
+      else setZoom(1.4)
+    }
+  }
+
   // Wenn Zielkoordinaten übergeben werden: flüssige Kamerafahrt (flyTo)
   useEffect(() => {
     if (typeof effLat === 'number' && typeof effLon === 'number') {
-      // Umrechnung Lat/Lon in Rotationswinkel der Kugel
-      const targetY = -((effLon + 90) * Math.PI) / 180
-      const targetX = (effLat * Math.PI) / 180
-      targetRotRef.current = { x: targetX, y: targetY }
-      setAutoRotate(false)
-
-      // Adaptiver Zoom basierend auf der Gebietsgröße (bbox)
-      if (effBbox && effBbox.length === 4) {
-        const dLon = Math.abs(effBbox[2] - effBbox[0])
-        const dLat = Math.abs(effBbox[3] - effBbox[1])
-        const maxSpan = Math.max(dLon, dLat)
-        if (maxSpan > 25) setZoom(0.9)
-        else if (maxSpan > 5) setZoom(1.1)
-        else setZoom(1.35)
-      }
+      flyToTarget(effLat, effLon, effBbox)
     }
   }, [effLat, effLon, effBbox])
 
@@ -91,42 +159,43 @@ export function GlobeViewer({
         while (dy > Math.PI) dy -= Math.PI * 2
         while (dy < -Math.PI) dy += Math.PI * 2
 
-        rotRef.current.x += dx * 0.06
-        rotRef.current.y += dy * 0.06
+        rotRef.current.x += dx * 0.07
+        rotRef.current.y += dy * 0.07
 
-        if (Math.abs(dx) < 0.002 && Math.abs(dy) < 0.002) {
+        if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
           rotRef.current = targetRotRef.current
           targetRotRef.current = null
         }
       } else if (autoRotate && !isDraggingRef.current) {
-        rotRef.current.y += 0.003
+        rotRef.current.y += 0.002
       }
 
       pulse = (pulse + 0.05) % (Math.PI * 2)
 
-      // 1. Atmosphärischer Glüheffekt (Glow)
-      const glowGrad = ctx.createRadialGradient(cx, cy, radius * 0.85, cx, cy, radius * 1.3)
-      glowGrad.addColorStop(0, 'rgba(56, 189, 248, 0.28)')
-      glowGrad.addColorStop(0.5, 'rgba(14, 165, 233, 0.14)')
+      // 1. Atmosphärischer Glüheffekt (Atmospheric Halo Glow)
+      const glowGrad = ctx.createRadialGradient(cx, cy, radius * 0.82, cx, cy, radius * 1.35)
+      glowGrad.addColorStop(0, 'rgba(56, 189, 248, 0.32)')
+      glowGrad.addColorStop(0.4, 'rgba(14, 165, 233, 0.16)')
       glowGrad.addColorStop(1, 'rgba(14, 165, 233, 0)')
 
       ctx.fillStyle = glowGrad
       ctx.beginPath()
-      ctx.arc(cx, cy, radius * 1.3, 0, Math.PI * 2)
+      ctx.arc(cx, cy, radius * 1.35, 0, Math.PI * 2)
       ctx.fill()
 
-      // 2. Erdkörper (Tiefen-Verlauf)
+      // 2. Erdkörper (Tiefen-Verlauf mit Ozeanblau)
       const earthGrad = ctx.createRadialGradient(
         cx - radius * 0.35,
         cy - radius * 0.35,
-        radius * 0.1,
+        radius * 0.08,
         cx,
         cy,
         radius,
       )
-      earthGrad.addColorStop(0, '#0f172a')
-      earthGrad.addColorStop(0.7, '#090d16')
-      earthGrad.addColorStop(1, '#020617')
+      earthGrad.addColorStop(0, '#0f2744')
+      earthGrad.addColorStop(0.5, '#0b1b30')
+      earthGrad.addColorStop(0.85, '#050d18')
+      earthGrad.addColorStop(1, '#02060e')
 
       ctx.save()
       ctx.beginPath()
@@ -135,12 +204,55 @@ export function GlobeViewer({
       ctx.fill()
       ctx.clip()
 
-      // 3. Längen- und Breitengrade (3D Drahtgitter)
       const rx = rotRef.current.x
       const ry = rotRef.current.y
 
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.18)'
-      ctx.lineWidth = 1
+      // 3. Echte Kontinent-Landmassen & Küstenlinien zeichnen
+      CONTINENTS.forEach((poly) => {
+        ctx.beginPath()
+        let first = true
+        let visibleCount = 0
+
+        poly.forEach(([cLat, cLon]) => {
+          const phi = (cLat * Math.PI) / 180
+          const theta = ((cLon + 90) * Math.PI) / 180 + ry
+          const cosPhi = Math.cos(phi)
+          const sinPhi = Math.sin(phi)
+
+          const px = Math.cos(theta) * cosPhi
+          const py = sinPhi
+          const pz = Math.sin(theta) * cosPhi
+
+          const rotY = py * Math.cos(rx) - pz * Math.sin(rx)
+          const rotZ = py * Math.sin(rx) + pz * Math.cos(rx)
+
+          if (rotZ > -0.15) {
+            visibleCount++
+            const sx = cx + px * radius
+            const sy = cy - rotY * radius
+            if (first) {
+              ctx.moveTo(sx, sy)
+              first = false
+            } else {
+              ctx.lineTo(sx, sy)
+            }
+          } else {
+            first = true
+          }
+        })
+
+        if (visibleCount >= 2) {
+          ctx.fillStyle = 'rgba(14, 165, 233, 0.22)'
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)'
+          ctx.lineWidth = 1.3
+          ctx.fill()
+          ctx.stroke()
+        }
+      })
+
+      // 4. Längen- und Breitengrade (3D Drahtgitter)
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.14)'
+      ctx.lineWidth = 0.8
 
       // Breitengrade
       for (let latDeg = -80; latDeg <= 80; latDeg += 20) {
@@ -208,9 +320,9 @@ export function GlobeViewer({
         ctx.stroke()
       }
 
-      // 4. Äquator hervorheben
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)'
-      ctx.lineWidth = 1.5
+      // Äquatorlinie
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)'
+      ctx.lineWidth = 1.2
       ctx.beginPath()
       let eqFirst = true
       for (let lonDeg = -180; lonDeg <= 180; lonDeg += 5) {
@@ -266,9 +378,9 @@ export function GlobeViewer({
         })
         if (visibleCount >= 2) {
           ctx.closePath()
-          ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)'
-          ctx.lineWidth = 1.5
-          ctx.fillStyle = 'rgba(56, 189, 248, 0.12)'
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)'
+          ctx.lineWidth = 1.6
+          ctx.fillStyle = 'rgba(56, 189, 248, 0.15)'
           ctx.fill()
           ctx.stroke()
         }
@@ -294,14 +406,14 @@ export function GlobeViewer({
 
           // Pulsierender Radar-Ring
           const pulseRadius = 10 + Math.sin(pulse) * 8
-          ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)'
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)'
           ctx.lineWidth = 2
           ctx.beginPath()
           ctx.arc(screenX, screenY, pulseRadius, 0, Math.PI * 2)
           ctx.stroke()
 
           // Äußerer Zielring
-          ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)'
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)'
           ctx.lineWidth = 1
           ctx.beginPath()
           ctx.arc(screenX, screenY, 22, 0, Math.PI * 2)
@@ -321,8 +433,8 @@ export function GlobeViewer({
             const badgeY = screenY - 14
 
             // Badge Hintergrund
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'
-            ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)'
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.9)'
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)'
             ctx.lineWidth = 1
             ctx.beginPath()
             ctx.roundRect(badgeX, badgeY - 12, textWidth + 14, 22, 6)
@@ -339,7 +451,7 @@ export function GlobeViewer({
       ctx.restore()
 
       // Kugel-Rand-Lichtbogen
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)'
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)'
       ctx.lineWidth = 1.5
       ctx.beginPath()
       ctx.arc(cx, cy, radius, 0, Math.PI * 2)
@@ -355,10 +467,11 @@ export function GlobeViewer({
     }
   }, [zoom, autoRotate, effLat, effLon, effLocation, effBbox])
 
-  // Mausinteraktion (Drehen)
+  // Mausinteraktion (Freies Drehen ohne Zurückspringen)
   const handleMouseDown = (e: React.MouseEvent) => {
     isDraggingRef.current = true
     setAutoRotate(false)
+    targetRotRef.current = null // Automatisches Zurückspringen stoppen
     lastMouseRef.current = { x: e.clientX, y: e.clientY }
   }
 
@@ -373,6 +486,11 @@ export function GlobeViewer({
 
   const handleMouseUp = () => {
     isDraggingRef.current = false
+  }
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault()
+    setZoom((z) => Math.max(0.4, Math.min(3.5, z - e.deltaY * 0.0015)))
   }
 
   const aktualitaetText = satellite?.scenes?.[0]?.datetime
@@ -392,14 +510,26 @@ export function GlobeViewer({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
         aria-label={`3D Globus Ansicht ${effLocation ? `für ${effLocation}` : ''}`}
       />
 
-      {/* Steuerungselemente */}
+      {/* Steuerungselemente (Zoom, Zentrieren, Rotation) */}
       <div className="absolute top-3 right-3 flex items-center gap-1 rounded-xl border border-outline-variant/40 bg-surface-container-low/80 p-1 backdrop-blur-md z-10">
+        {typeof effLat === 'number' && typeof effLon === 'number' && (
+          <button
+            type="button"
+            onClick={() => flyToTarget(effLat, effLon, effBbox)}
+            className="rounded-lg p-1.5 text-primary hover:bg-primary/10 transition-colors"
+            title={t('ai.geo.recenter', 'Auf Zielort zentrieren')}
+            aria-label={t('ai.geo.recenter', 'Auf Zielort zentrieren')}
+          >
+            <Target className="h-4 w-4" />
+          </button>
+        )}
         <button
           type="button"
-          onClick={() => setZoom((z) => Math.min(2.5, z + 0.2))}
+          onClick={() => setZoom((z) => Math.min(3.0, z + 0.2))}
           className="rounded-lg p-1.5 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors"
           title={t('ai.geo.zoomIn', 'Vergrößern')}
           aria-label={t('ai.geo.zoomIn', 'Vergrößern')}
@@ -408,7 +538,7 @@ export function GlobeViewer({
         </button>
         <button
           type="button"
-          onClick={() => setZoom((z) => Math.max(0.6, z - 0.2))}
+          onClick={() => setZoom((z) => Math.max(0.4, z - 0.2))}
           className="rounded-lg p-1.5 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors"
           title={t('ai.geo.zoomOut', 'Verkleinern')}
           aria-label={t('ai.geo.zoomOut', 'Verkleinern')}
@@ -419,11 +549,12 @@ export function GlobeViewer({
           type="button"
           onClick={() => {
             setZoom(1.0)
-            setAutoRotate(true)
+            targetRotRef.current = null
+            setAutoRotate((r) => !r)
           }}
-          className="rounded-lg p-1.5 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors"
-          title={t('ai.geo.resetView', 'Ansicht zurücksetzen')}
-          aria-label={t('ai.geo.resetView', 'Ansicht zurücksetzen')}
+          className={`rounded-lg p-1.5 transition-colors ${autoRotate ? 'text-primary bg-primary/10' : 'text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface'}`}
+          title={t('ai.geo.resetView', 'Rotation umschalten')}
+          aria-label={t('ai.geo.resetView', 'Rotation umschalten')}
         >
           <RotateCcw className="h-4 w-4" />
         </button>
