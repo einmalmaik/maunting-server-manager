@@ -22,7 +22,7 @@ import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
-import { DateTimePicker, Dropdown, type DropdownOption } from '@/Singra/UI'
+import { DateTimePicker, Dropdown } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 

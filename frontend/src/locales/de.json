@@ -29,7 +29,7 @@
   "calendar": {
     "eyebrow": "MSM / MSS Zeitmanagement",
     "title": "Kalender",
-    "description": "Integrierter nativer Kalender für Termine, Besprechungen und KI-gestützte Zeitplanung, direkt und ohne Drittanbieter-Zwang.",
+    "description": "Integrierter Kalender für Termine, Besprechungen und KI-gestützte Zeitplanung.",
     "subscribe": "Abonnieren",
     "refresh": "Aktualisieren",
     "newEvent": "Neuer Termin",
@@ -37,6 +37,7 @@
     "testReminderSentEmail": "Test-Erinnerung per Push und E-Mail versendet!",
     "testReminderSent": "Test-Erinnerung per Push ausgelöst!",
     "testReminderFailed": "Test-Erinnerung fehlgeschlagen.",
+    "testReminderError": "Fehler beim Testen der Erinnerung.",
     "today": "Heute",
     "week": "Woche",
     "viewMonth": "Monat",
@@ -45,11 +46,36 @@
     "createEvent": "Neuer Termin",
     "editEvent": "Termin bearbeiten",
     "eventTitle": "Titel / Anlass",
+    "eventTitlePlaceholder": "z. B. Team-Meeting, Wartung Server 1",
     "start": "Beginn",
+    "selectStart": "Beginn wählen",
     "end": "Ende",
+    "selectEnd": "Ende wählen",
     "location": "Ort / Meeting-Link",
+    "locationPlaceholder": "z. B. Konferenzraum A oder Teams / Zoom",
     "descriptionLabel": "Beschreibung / Notizen",
-    "color": "Farbkennzeichnung"
+    "descriptionPlaceholder": "Agenda, Vorbereitungspunkte oder Details...",
+    "color": "Farbkennzeichnung",
+    "category": "Kategorie",
+    "teamSelect": "Team zuordnen",
+    "selectTeamOptional": "Team wählen (optional)",
+    "serverSelect": "Server zuordnen",
+    "selectServerOptional": "Server wählen (optional)",
+    "nodeSelect": "Node zuordnen",
+    "selectNodeOptional": "Node wählen (optional)",
+    "allNodesOrLocal": "Lokale Node (Standard)",
+    "saving": "Speichern...",
+    "feedModalTitle": "Kalender abonnieren & exportieren",
+    "feedModalDescription": "Du kannst deinen MSM-Kalender in jeder gängigen Kalender-App (Windows Kalender, Microsoft Outlook, Thunderbird, Apple Calendar, Google Calendar) synchronisieren oder als .ics-Datei herunterladen.",
+    "feedUrlLabel": "iCal / Webcal Feed-URL",
+    "loadingFeedUrl": "Lade Feed-URL...",
+    "feedUrlCopied": "URL in die Zwischenablage kopiert",
+    "downloadIcs": ".ics-Datei herunterladen",
+    "filterAll": "Alle",
+    "filterPersonal": "Persönlich",
+    "filterTeam": "Team",
+    "filterServer": "Server-Wartung",
+    "filterNode": "Node"
   },
   "pageContext": {
     "overview": "Übersicht",
@@ -61,21 +87,21 @@
   },
   "panelDatabase": {
     "title": "Panel-Datenbank",
-    "subtitle": "Verwalte die PostgreSQL-Datenbank des Panels ohne Terminal-Zugriff.",
+    "subtitle": "PostgreSQL-Datenbank des Panels ohne Terminal-Zugriff verwalten.",
     "workspace": "Datenbank-Explorer",
-    "workspaceSubtitle": "Prüfe Tabellen, Zeilen und Datenbankstatistiken.",
+    "workspaceSubtitle": "Tabellen, Zeilen und Datenbankstatistiken einsehen.",
     "admin": "Admin-Zugriff",
     "readOnly": "Nur lesen"
   },
   "audit": {
     "title": "Audit-Protokoll",
-    "subtitle": "Privilegierte Operator-Aktionen (wer, wann, was) — ohne Passwörter oder Tokens.",
+    "subtitle": "Protokoll privilegierter Operator-Aktionen (wer, wann, was). Passwörter und Tokens werden nicht erfasst.",
     "entries": "Einträge",
     "filterAction": "Action-Filter",
     "filterActionPlaceholder": "z. B. postgres.admin.rotate",
     "limit": "Limit",
     "applyFilter": "Filtern",
-    "empty": "Noch keine Audit-Einträge für diesen Filter.",
+    "empty": "Keine Audit-Einträge für diesen Filter.",
     "loadFailed": "Audit-Log konnte nicht geladen werden.",
     "colTime": "Zeit",
     "colUser": "User-ID",
@@ -93,14 +119,14 @@
   },
   "security": {
     "clusterAdminTitle": "Managed-Postgres Cluster-Admin",
-    "clusterAdminBody": "Das interne Passwort von msm_admin steuert Provisioning und Admin-DDL der Managed-Postgres-Instanz pro Node. Es ist verschlüsselt im Panel gespeichert. Rotation erneuert es auf den Nodes und im Panel — das neue Passwort erscheint nie in der UI.",
+    "clusterAdminBody": "Das interne Passwort von msm_admin steuert Provisioning und Admin-DDL der Managed-Postgres-Instanz pro Node. Es wird verschlüsselt gespeichert. Eine Rotation erneuert das Passwort auf den Nodes und im Panel, ohne es in der UI anzuzeigen.",
     "notPanelLogin": "Nicht: Panel-Login-Passwort",
     "notAppDbUser": "Nicht: App-DB-User pro Gameserver (msm_s…_u…)",
     "isMsmAdmin": "Ja: Cluster-Rolle msm_admin (Managed Postgres)",
     "rotateBtn": "Cluster-Admin-Passwort rotieren",
     "rotating": "Rotiere…",
     "rotateConfirmTitle": "Managed-Postgres-Admin rotieren?",
-    "rotateConfirmBody": "Erneuert das interne Cluster-Admin-Passwort (msm_admin) auf allen Nodes und im Panel. Das ist nicht dein Panel-Login und nicht das Passwort der Kunden-App-Datenbanken. Das neue Passwort wird dir nicht angezeigt.",
+    "rotateConfirmBody": "Erneuert das interne Cluster-Admin-Passwort (msm_admin) auf allen Nodes und im Panel. Das neue Passwort wird nicht in der UI angezeigt.",
     "rotateConfirmBtn": "Jetzt rotieren",
     "rotateSuccess": "Cluster-Admin erfolgreich rotiert.",
     "rotateFailed": "Rotation fehlgeschlagen.",
@@ -118,15 +144,15 @@
     "rateLimitAuthInvalid": "Login-Limit muss eine ganze Zahl sein.",
     "rateLimitGlobalInvalid": "API-Limit muss eine ganze Zahl sein.",
     "rateLimitSaveFailed": "Rate-Limits konnten nicht gespeichert werden.",
-    "rotateHiddenHint": "Cluster-Admin-Rotation ist nur mit system.secrets.rotate (oder Owner) sichtbar."
+    "rotateHiddenHint": "Cluster-Admin-Rotation erfordert das Recht system.secrets.rotate (oder Owner)."
   },
   "aiSettings": {
     "title": "KI-Kontingente pro Rolle",
-    "description": "Konfiguriere Token-, Anfrage-, Parallelitäts- und Kostengrenzen getrennt von den Rollenrechten. Die Durchsetzung erfolgt ausschließlich im Backend.",
-    "ruleHelp": "Solange keine Rolle eines Benutzers ein Kontingent hinterlegt hat, gilt unbegrenzt. Sobald mindestens eine Rolle konfiguriert ist, gewinnt der höchste Wert; eine explizit unbegrenzte Rolle gewinnt über begrenzte Rollen. 0 sperrt das jeweilige Kontingent. Ausgenommen ist „Max. Memory-Einträge je Bereich“: dort gewinnt „Unbegrenzt“ nicht, sondern trägt gar nichts bei — die Systemgrenze gilt erst, wenn keine Rolle des Benutzers eine Zahl trägt.",
+    "description": "Token-, Anfrage-, Parallelitäts- und Kostengrenzen getrennt von den Rollenrechten konfigurieren. Die Durchsetzung erfolgt im Backend.",
+    "ruleHelp": "Wenn für keine Rolle ein Kontingent gesetzt ist, gilt unbegrenzt. Sobald mindestens eine Rolle konfiguriert ist, gilt der höchste Wert. Eine explizit unbegrenzte Rolle hat Vorrang vor beschränkten Rollen. Der Wert 0 sperrt das Kontingent. Ausnahme bei „Max. Memory-Einträge je Bereich“: Die Systemgrenze greift erst, wenn keine Rolle des Benutzers einen Wert definiert.",
     "selectRole": "Rolle",
     "notConfigured": "Nicht konfiguriert",
-    "notConfiguredHint": "Für diese Rolle ist noch kein Kontingent gespeichert. Solange keine Rolle eines Benutzers konfiguriert ist, gilt unbegrenzt — außer bei „Max. Memory-Einträge je Bereich“, wo dann die Systemgrenze gilt. Beim Speichern werden genau die hier gezeigten Werte festgeschrieben.",
+    "notConfiguredHint": "Für diese Rolle ist noch kein Kontingent gespeichert. Solange keine Rolle eines Benutzers konfiguriert ist, gilt unbegrenzt (außer bei „Max. Memory-Einträge je Bereich“, wo die Systemgrenze greift). Beim Speichern werden die aktuellen Werte übernommen.",
     "dailyTokens": "Tägliches Tokenlimit",
     "weeklyTokens": "Wöchentliches Tokenlimit",
     "monthlyTokens": "Monatliches Tokenlimit",
@@ -141,11 +167,11 @@
     "saveFailed": "KI-Limits konnten nicht gespeichert werden.",
     "saved": "KI-Limits gespeichert.",
     "maxMemoryEntries": "Max. Memory-Einträge je Bereich",
-    "maxMemoryEntriesHint": "Gilt je persönlichem Bereich — allgemein und je Server getrennt gezählt. Ein leeres Feld senkt den Vorrat nicht: die Systemgrenze von 100 Einträgen gilt erst, wenn keine Rolle des Benutzers eine Zahl trägt. Beim Teamwissen zählt die Rolle des Gründers, nicht die des Schreibenden. „Wissen dieses Servers“ und „Panelweites KI-Gedächtnis“ hängen an keiner Rolle; dort gilt immer die Systemgrenze.",
+    "maxMemoryEntriesHint": "Gilt je persönlichem Bereich (allgemein und je Server getrennt gezählt). Ein leeres Feld senkt den Vorrat nicht: Die Systemgrenze von 100 Einträgen gilt erst, wenn keine Rolle des Benutzers einen Wert vorgibt. Beim Teamwissen zählt die Rolle des Gründers. Für „Wissen dieses Servers“ und „Panelweites KI-Gedächtnis“ gilt immer die Systemgrenze.",
     "maxReasoningEffort": "Höchste Denkstufe",
     "worker": {
       "title": "Worker-Deckel",
-      "description": "Wie viel Hintergrundarbeit ein einzelner Benutzer gleichzeitig auslösen darf. Beide Deckel gelten panelweit — welche Modelle die Worker benutzen, steht am jeweiligen Zugang.",
+      "description": "Gleichzeitige Hintergrundaufgaben pro Benutzer. Beide Limits gelten panelweit; die genutzten Modelle werden am jeweiligen Anbieter konfiguriert.",
       "maxParallel": "Worker je Benutzer",
       "maxParallelHint": "Gleichzeitig laufende oder wartende Aufträge. Ein geparkter Langläufer belegt seinen Platz, bis er fertig ist.",
       "roundsPerWorker": "Runden je Worker",
@@ -158,7 +184,7 @@
     },
     "guardian": {
       "title": "Guardian-Engine & KI-Integration",
-      "description": "Legt fest, ob die KI mit der Guardian Engine interagieren und automatische Reparatur-Läufe ausführen darf. Ist die Integration deaktiviert, arbeitet die Guardian Engine vollkommen isoliert ohne KI — es werden weder Token verbraucht noch Guardian-Werkzeuge im Chat bereitgestellt.",
+      "description": "Steuert, ob die KI mit der Guardian-Engine interagieren und Reparaturen vorschlagen darf. Ohne KI-Integration arbeitet Guardian eigenständig; es werden keine Tokens verbraucht und keine Guardian-Werkzeuge im Chat angeboten.",
       "statusEnabled": "KI-Integration aktiv",
       "statusDisabled": "KI-Integration deaktiviert (isoliert)",
       "saved": "Guardian-KI-Einstellung gespeichert.",
@@ -178,7 +204,7 @@
   "ai": {
     "providers": {
       "title": "KI-Provider",
-      "description": "Wähle einen unterstützten Anbieter und ein Modell aus dessen Katalog. Anbieter und API-Key sind ausschließlich für Panel-Administratoren sichtbar.",
+      "description": "Unterstützten Anbieter und ein Modell aus dessen Katalog wählen. Anbieter und API-Key sind nur für Panel-Administratoren sichtbar.",
       "add": "Provider hinzufügen",
       "empty": "Noch kein KI-Provider konfiguriert.",
       "name": "Name",
@@ -202,7 +228,7 @@
         "delete": "KI-Provider konnte nicht gelöscht werden."
       },
       "tokenPrice": "Rückfallpreis je 1 Mio. Tokens ({{currency}})",
-      "tokenPriceHint": "Nur die Rückfallebene: normalerweise wird gebucht, was der Anbieter meldet. Dieser Wert greift, wenn er dazu schweigt — solche Zeilen stehen in der Aufstellung als „geschätzt“. Ohne Wert werden Kosten mit null verbucht und das rollenbasierte Kostenlimit greift nicht.",
+      "tokenPriceHint": "Rückfallwert: Greift, wenn der Anbieter keine Verbrauchsdaten übermittelt. Solche Zeilen werden als „geschätzt“ verbucht. Ohne Wert werden Kosten mit null verbucht und das rollenbasierte Kostenlimit greift nicht.",
       "test": "Verbindung testen",
       "testOk": "Verbindung erfolgreich. Der Anbieter hat geantwortet.",
       "testFailed": "Der Test ist fehlgeschlagen.",
@@ -213,16 +239,16 @@
       "azureResourceHint": "Nur der Name deiner Azure-Ressource, keine vollständige Adresse. MSM spricht damit {{url}} an. Erlaubt sind Buchstaben, Ziffern und Bindestriche (2 bis 63 Zeichen).",
       "azureResourceMissing": "Ohne Ressourcennamen hat dieser Zugang keine Adresse.",
       "keyLink": "Schlüssel erstellen",
-      "kindMissing": "— kein unterstützter Anbieter —",
+      "kindMissing": "Kein unterstützter Anbieter",
       "kindMissingHint": "Dieser Zugang zeigte auf eine Adresse, die MSM nicht mehr unterstützt. Wähle einen Anbieter, bevor du ihn aktivierst.",
       "modelChoose": "Modell wählen …",
       "reloadModels": "Modelle neu laden",
       "catalogUnavailable": "Der Modellkatalog des Anbieters ist gerade nicht erreichbar. Du kannst den Modellnamen so lange von Hand eintragen; die Denkstufen bleiben dann unbekannt.",
-      "catalogNone": "Azure führt keine Modelliste. Trage den Namen deines Deployments ein — so, wie du es in Azure angelegt hast.",
-      "catalogNeedsKey": "Dieser Anbieter gibt seine Modelliste nur gegen den Schlüssel heraus. Trage den Schlüssel ein und speichere den Zugang — danach steht die Auswahl hier.",
+      "catalogNone": "Azure führt keine Modellliste. Trage den Namen deines Deployments so ein, wie du es in Azure angelegt hast.",
+      "catalogNeedsKey": "Dieser Anbieter liefert seine Modellliste erst nach Eingabe des Schlüssels. Trage den Schlüssel ein und speichere den Zugang.",
       "ttsModel": "Sprachmodell",
       "defaultVoice": "Stimme",
-      "defaultVoiceHint": "Die Stimm-Kennung aus deinem ElevenLabs-Konto — zu finden in der Stimmenbibliothek unter „Voice ID“. Ohne sie gibt es keinen Sprachmodus; eine Standardstimme rät MSM nicht, denn sie stünde auf deiner Rechnung.",
+      "defaultVoiceHint": "Stimm-ID aus dem ElevenLabs-Konto (in der Stimmenbibliothek unter „Voice ID“). Erforderlich für den Sprachmodus.",
       "protokoll": {
         "chat_completions": "Chat und Gehör",
         "chat_only": "Nur Chat",
@@ -231,12 +257,12 @@
       "recommended": "Empfohlen",
       "vision": "Sieht Bilder",
       "workerSection": "Worker (Hintergrund-Aufträge)",
-      "workerHint": "Mit diesem Modell und dieser festen Denkstufe arbeiten die Worker im Hintergrund — es darf langsam und gründlich sein. Leer gelassen gilt der Ein-Modell-Betrieb: das Chat-Modell oben erledigt dann auch die Hintergrundarbeit.",
+      "workerHint": "Modell und feste Denkstufe für Hintergrundaufgaben. Bleibt das Feld leer, übernimmt das primäre Chat-Modell auch die Hintergrundarbeit.",
       "workerModel": "Worker-Modell",
       "workerOff": "Kein eigenes Worker-Modell",
       "workerEffort": "Feste Denkstufe",
       "workerEffortOff": "Nicht nachdenken",
-      "workerEffortHint": "Gilt für jeden Worker-Lauf. Der Kunde wählt sie nicht — die Hintergrundarbeit zahlt der Betreiber.",
+      "workerEffortHint": "Gilt für jeden Worker-Lauf. Hintergrundarbeit wird zentral über das Betreiberkontingent abgerechnet.",
       "ethicsSection": "Ethics Engine (Ethische Reflexion)",
       "ethicsHint": "Optionale Hintergrund-Instanz zur ethischen Abwägung, Schadensprüfung und Alternativenfindung bei folgenreichen Systementscheidungen.",
       "ethicsModel": "Ethik-Modell",
@@ -252,15 +278,15 @@
         "always": "Immer (jede geplante Systemhandlung vorab prüfen)",
         "critical": "Kritische Fälle (nur unumkehrbare oder destruktive Aktionen)"
       },
-      "recommendationHint": "MSM ist mit {{model}} erprobt — schnell genug für den Chat und mit Denkstufen. Ein anderes Modell geht auch.",
+      "recommendationHint": "MSM ist mit {{model}} erprobt (schnelle Antwortzeiten und Denkstufen). Andere Modelle sind ebenfalls möglich.",
       "recommendationApply": "Übernehmen",
       "caps": {
         "none": "Dieses Modell denkt nicht nach.",
         "levels": "Denkstufen:",
-        "toggleOnly": "Dieses Modell denkt nach, kennt aber keine Stufen — nur an oder aus.",
+        "toggleOnly": "Dieses Modell unterstützt Reasoning, jedoch ohne variable Stufen (nur an oder aus).",
         "mandatory": "Nachdenken lässt sich bei diesem Modell nicht abschalten."
       },
-      "tokenPriceConverted": "Gespeichert wird {{amount}} — gebucht wird in Dollar.",
+      "tokenPriceConverted": "Gespeichert als {{amount}} (Abrechnung in USD).",
       "ttsHint": "Ein Stimmzugang. Er erscheint nicht in der Modellauswahl des Chats, sondern liest im Sprachmodus vor, was das Chatmodell antwortet. Wer ihn nutzen darf, entscheidet das Recht „Mit der KI sprechen“.",
       "transcriptionModel": "Modell für Gesprochenes",
       "transcriptionModelHint": "Wandelt im Sprachmodus Gesprochenes in Text um (z. B. openai/gpt-transcribe oder whisper-1). Ohne Eintrag bleibt der Sprachmodus deaktiviert."
@@ -323,7 +349,7 @@
       "clearTitle": "Gesamtes Gedächtnis löschen?",
       "clearConfirm": "Wirklich alle {{count}} Einträge löschen? Das lässt sich nicht rückgängig machen.",
       "cleared": "{{count}} Einträge gelöscht.",
-      "enabledScopeHint": "Der Schalter gilt für dein eigenes Gedächtnis, einschließlich der Notizen zu einzelnen Servern. Nicht betroffen sind das Wissen deiner Teams und das eines Servers — die gehören dem Team beziehungsweise der Anlage.",
+      "enabledScopeHint": "Gilt für dein persönliches Gedächtnis und serverspezifische Notizen. Teamwissen und Serverwissen bleiben davon unberührt.",
       "titles": {
         "user": "Persönliches KI-Memory",
         "server_shared": "Wissen dieses Servers",
@@ -331,10 +357,10 @@
         "panel": "Panelweites KI-Gedächtnis"
       },
       "descriptions": {
-        "user": "Was der Assistent über dich weiß — allgemein und zu einzelnen Servern. Niemand sonst sieht es.",
+        "user": "Persönliche Notizen des Assistenten (allgemein und zu einzelnen Servern). Nur für dich sichtbar.",
         "server_shared": "Was der Assistent über diese Anlage weiß. Jeder, der den Server sehen darf, liest es mit; ändern darf es, wer die Konfiguration ändern darf. Es bleibt bestehen, wenn ein Kollege geht, und verschwindet mit dem Server.",
         "team": "Was der Assistent für dieses Team weiß. Alle Mitglieder sehen es; ändern darf es, wer den Schalter „Wissen pflegen“ hat.",
-        "panel": "Gilt für jeden Benutzer dieses Panels und läuft in jedem Gespräch mit. Nichts Persönliches — es sieht jeder."
+        "panel": "Panelweites Wissen für alle Benutzer in jedem Gespräch. Nicht für persönliche Daten geeignet."
       },
       "forServer": "Server: {{name}}",
       "serverSharedHint": "Das hier ist geteilt: alle Kollegen, die diesen Server sehen dürfen, lesen es mit. Was nur dich betrifft, gehört in dein persönliches Gedächtnis im Profil.",
@@ -346,10 +372,10 @@
     },
     "skills": {
       "title": "Skills",
-      "description": "Skills sind erlernte Vorgehensweisen als Text. Die KI liest sie, wenn eine Beschreibung zur Frage passt — und legt selbst neue an, wenn sie etwas gelöst hat, das wiederkehrt.",
+      "description": "Skills sind dokumentierte Vorgehensweisen. Die KI nutzt passende Skills automatisch bei relevanten Anfragen und legt nach erfolgreichen Lösungen neue an.",
       "used": "Skill „{{name}}“ genutzt",
       "learned": "Skill „{{name}}“ gelernt",
-      "learnedPending": "Skill „{{name}}“ gelernt — wartet auf Freigabe",
+      "learnedPending": "Skill „{{name}}“ gelernt (wartet auf Freigabe)",
       "scopes": {
         "shipped": "mitgeliefert",
         "global": "panelweit",
@@ -364,7 +390,7 @@
       },
       "pending": "wartet auf Freigabe",
       "disabled": "deaktiviert",
-      "readOnly": "Mitgelieferte Skills sind nicht änderbar. Lege einen panelweiten Skill mit demselben Schlüssel an, um sie zu ersetzen — oder schalte sie dort ab.",
+      "readOnly": "Integrierte Skills können nicht direkt geändert werden. Lege einen panelweiten Skill mit demselben Schlüssel an, um sie zu überschreiben, oder schalte sie ab.",
       "add": "Neuer Skill",
       "key": "Schlüssel",
       "keyHint": "Kleinbuchstaben, Ziffern, Bindestriche. Zum Beispiel valheim-ram.",
@@ -397,7 +423,7 @@
       "panelDescription": "Vorgehensweisen, die auf diesem Panel für alle gelten. Was hier steht, liest der Assistent in jedem Gespräch jedes Benutzers.",
       "personalDescription": "Deine eigenen Vorgehensweisen. Niemand sonst sieht sie, und die KI liest sie nur in deinen Gesprächen.",
       "directoryTitle": "Skills des Assistenten",
-      "directoryDescription": "Alles, was für dich gerade gilt — mitgeliefert, panelweit, persönlich und aus deinen Teams.",
+      "directoryDescription": "Aktuell wirksame Skills: integriert, panelweit, persönlich und aus deinen Teams.",
       "directoryManageHint": "Geändert wird ein Skill dort, wo er gilt: persönliche und Team-Skills unter Teams, panelweite in den Einstellungen."
     },
     "attachments": {
@@ -454,11 +480,11 @@
       "thought": "Nachgedacht",
       "noPermission": "Keine Berechtigung für den KI-Assistenten.",
       "examples": {
-        "logs": "Mein Server startet nicht — schau dir mal die Logs an.",
+        "logs": "Mein Server startet nicht, schau dir bitte die Logs an.",
         "network": "Mein Minecraft-Server ist an, aber nicht erreichbar. Woran liegt das?",
         "mods": "Welche Mods sind auf meinem Server installiert und gibt es Updates?"
       },
-      "toolFailed": "— fehlgeschlagen",
+      "toolFailed": "Fehlgeschlagen",
       "toolsUsed_one": "{{count}} Werkzeug verwendet",
       "toolsUsed_other": "{{count}} Werkzeuge verwendet",
       "toolsCollapse": "Werkzeuge einklappen",
@@ -471,7 +497,7 @@
     },
     "context": {
       "title": "Kontext und Zusammenfassung",
-      "description": "Wie groß der Kontext ist, sagt das gewählte Modell — MSM liest das Fenster aus dem Modellkatalog des Anbieters. Einzustellen bleibt nur, wie voll es werden darf, bevor der ältere Teil des Gesprächs zu einer Zusammenfassung gefaltet wird.",
+      "description": "Die Kontextgröße richtet sich nach dem gewählten Modell (aus dem Modellkatalog des Anbieters). Hier legst du fest, ab welchem Füllstand ältere Gesprächsabschnitte zusammengefasst werden.",
       "threshold": "Zusammenfassen ab",
       "percent": "{{percent}} % des Fensters",
       "saved": "Faltmarke gespeichert",
@@ -557,37 +583,37 @@
       "review": "Prüfen und ausführen",
       "execute": "Jetzt ausführen",
       "executing": "Wird ausgeführt …",
-      "confirmTitle": "KI-Vorschlag manuell bestätigen?",
+      "confirmTitle": "KI-Vorschlag bestätigen?",
       "confirm": {
-        "propose_server_lifecycle": "Die Aktion „{{operation}}“ wirkt auf den Serverbetrieb. Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.",
-        "propose_backup": "Jetzt ein Server-Backup erstellen? Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.",
-        "propose_config_patch": "Nur die angezeigten Stellen in „{{path}}“ ersetzen? Der übrige Inhalt der Datei bleibt unverändert. Die Änderung wird dauerhaft hinterlegt und vor jedem Start erneut geschrieben. Bei zwischenzeitlicher Änderung wird die Ausführung blockiert.",
-        "propose_config_set": "Die angezeigten Einstellungen in „{{path}}“ setzen? Sie werden dauerhaft hinterlegt und vor jedem Start erneut geschrieben — auch wenn das Spiel seine Konfiguration selbst zurückschreibt. Wirksam mit dem nächsten Neustart.",
-        "propose_config_update": "Die angezeigte Änderung an „{{path}}“ revisionsgebunden schreiben? Bei zwischenzeitlicher Änderung wird die Ausführung blockiert.",
-        "propose_mod_install": "Die Mod „{{path}}“ über den vorhandenen Installationspfad einspielen? Der Download läuft im Hintergrund, die Mod wirkt erst nach einem Neustart.",
-        "propose_mod_toggle": "Den Schalter der Mod „{{path}}“ umlegen? Dateien werden dabei weder geladen noch gelöscht; wirksam mit dem nächsten Start des Servers.",
-        "propose_server_create": "Einen neuen Server anlegen? Blueprint, Kapazität, Ports und Rechte werden dabei genauso geprüft wie beim Anlegen über das Panel.",
-        "propose_server_delete": "Diesen Server endgültig löschen? Container, Spieldateien und Datenbankeintrag werden entfernt. Das lässt sich nicht rückgängig machen — vorhandene Backups sind danach die einzige Quelle.",
-        "propose_backup_restore": "Das Backup „{{path}}“ einspielen? Der aktuelle Stand der Spieldateien wird dabei überschrieben. Alles seit dem Backup ist danach weg.",
-        "propose_bind_ip_update": "Die Bind-IP dieses Servers ändern? Der Server wird dafür neu gestartet, und Spieler müssen sich unter der neuen Adresse verbinden.",
-        "propose_blueprint_change": "Aus diesem Server einen neuen Blueprint ableiten? Der Blueprint steht danach allen zur Verfügung, die Server anlegen dürfen.",
-        "propose_blueprint_delete": "Diesen ungenutzten Community-Blueprint endgültig löschen? Er steht danach nicht mehr zur Erstellung neuer Server zur Verfügung. Aktive Server, die ihn nutzen, verhindern das Löschen.",
-        "propose_ai_tarif_role": "Die Rolle „{{path}}“ anlegen? Sie bekommt bewusst keine Rechte, nur das angezeigte KI-Kontingent — Rechte vergibt weiterhin die Rollenverwaltung.",
-        "propose_hoster_integration": "Die Shop-Anbindung „{{path}}“ speichern? Beim Anlegen entsteht dabei ein API-Key, der genau einmal angezeigt wird und danach nur noch rotierbar ist.",
-        "propose_hoster_product": "Die Produktzuordnung „{{path}}“ speichern? Jeder künftige Kauf dieses Produkts erzeugt einen Server mit diesen Grenzen — und, falls hinterlegt, mit der angezeigten Rolle.",
-        "propose_server_blueprint_switch": "Diesen Server auf einen anderen Blueprint umstellen? Startbefehl, Image und Variablen werden ersetzt; die Spieldateien bleiben liegen und passen unter Umständen nicht mehr dazu.",
-        "propose_guardian_tuning": "Die Autopilot-Einstellungen dieses Servers ändern? Sie gelten nur für diesen Server und überschreiben, was der Blueprint vorgibt — etwa das Startfenster oder die Zahl der Wiederherstellungsversuche. Der Blueprint selbst und alle anderen Server bleiben unberührt; im Autopilot-Reiter steht danach, was gilt, und ein Knopf setzt es zurück.",
-        "propose_server_repair": "Die Reparatur „{{operation}}“ an der Anlage dieses Servers ausführen? „repair_permissions“ setzt die Besitzrechte am Serververzeichnis neu, „reallocate_port“ vergibt belegte Ports neu und startet den Server dafür. Spieldateien werden in beiden Fällen nicht angefasst.",
-        "propose_file_delete": "Die Datei „{{path}}“ löschen? Sie ist danach nur noch aus einem Backup zurückzuholen. Vor dem Löschen wird ein Schnappschuss in der Dateihistorie angelegt.",
-        "propose_task_set": "Diese Aufgabe läuft ab jetzt von selbst — auch dann, wenn du nicht im Panel bist. Sie handelt mit deinen Berechtigungen und aus deinem KI-Kontingent. Du kannst sie jederzeit im Chat pausieren oder löschen.",
-        "propose_task_delete": "Diese Aufgabe wird endgültig entfernt und läuft nicht mehr. Soll sie nur eine Weile ruhen, lass sie stattdessen pausieren.",
-        "propose_restart_schedule_set": "Den Auto-Neustart dieses Servers so einstellen? Der Zeitplan steht danach im Neustart-Bereich des Servers und bleibt dort von Hand änderbar. Änderst du ihn später manuell, endet die Verwaltung durch die KI und die zuständige Aufgabe wird pausiert.",
-        "propose_backup_schedule_set": "Das Auto-Backup dieses Servers so einstellen? Die Einstellungen stehen danach im Backup-Bereich des Servers und bleiben dort von Hand änderbar. Änderst du sie später manuell, endet die Verwaltung durch die KI und die zuständige Aufgabe wird pausiert.",
-        "propose_email_send": "Die vorbereitete E-Mail jetzt wirklich absenden? Empfänger, Betreff und Inhalt werden unmittelbar vor dem Versand geprüft.",
-        "propose_calendar_event_create": "Diesen Termin jetzt verbindlich in deinen Kalender eintragen? Berechtigungen und Kalenderdaten werden vor der Anlage geprüft.",
-        "propose_calendar_event_update": "Diesen Termin jetzt mit den neuen Angaben in deinem Kalender aktualisieren?",
-        "propose_calendar_event_delete": "Diesen Termin jetzt wirklich aus deinem Kalender entfernen? Das Löschen lässt sich nicht rückgängig machen.",
-        "propose_popup_create": "Soll diese Pop-up-Ankündigung für das Panel erstellt werden?"
+        "propose_server_lifecycle": "Die Aktion „{{operation}}“ steuert den Serverbetrieb. Berechtigungen und Serverzustand werden unmittelbar vor der Ausführung erneut geprüft.",
+        "propose_backup": "Server-Backup jetzt erstellen? Berechtigungen und Serverzustand werden vor der Ausführung geprüft.",
+        "propose_config_patch": "Nur die angezeigten Abschnitte in „{{path}}“ anpassen? Die restliche Datei bleibt unverändert. Die Änderung wird dauerhaft gespeichert und vor jedem Start angewendet.",
+        "propose_config_set": "Die angezeigten Einstellungen in „{{path}}“ setzen? Sie werden dauerhaft hinterlegt und vor jedem Start neu geschrieben, auch wenn das Spiel Konfigurationsdateien überschreibt. Wirksam ab dem nächsten Neustart.",
+        "propose_config_update": "Die angezeigte versionsgebundene Änderung in „{{path}}“ schreiben? Bei zwischenzeitlichen Änderungen der Datei wird die Ausführung blockiert.",
+        "propose_mod_install": "Mod „{{path}}“ installieren? Der Download läuft im Hintergrund und die Mod wird beim nächsten Serverstart aktiv.",
+        "propose_mod_toggle": "Status für Mod „{{path}}“ umschalten? Es werden keine Dateien gelöscht. Die Änderung wird beim nächsten Serverstart wirksam.",
+        "propose_server_create": "Neuen Server anlegen? Blueprint, Kapazitäten, Ports und Berechtigungen werden wie bei einer manuellen Erstellung geprüft.",
+        "propose_server_delete": "Diesen Server endgültig löschen? Container, Spieldateien und Datenbankeintrag werden entfernt. Das lässt sich nicht rückgängig machen. Backups sind danach die einzige Quelle.",
+        "propose_backup_restore": "Das Backup „{{path}}“ wiederherstellen? Der aktuelle Stand der Spieldateien wird überschrieben. Alles seit diesem Backup ist danach weg.",
+        "propose_bind_ip_update": "Host-Bind-IP dieses Servers ändern? Der Server wird neu gestartet und Spieler müssen die neue Adresse verwenden.",
+        "propose_blueprint_change": "Neuen Blueprint aus diesem Server ableiten? Der Blueprint steht anschließend allen berechtigten Benutzern zur Verfügung.",
+        "propose_blueprint_delete": "Diesen ungenutzten Community-Blueprint endgültig löschen? Er steht danach nicht mehr für neue Server bereit.",
+        "propose_ai_tarif_role": "Rolle „{{path}}“ erstellen? Erhält ausschließlich das angezeigte KI-Kontingent, keine administrativen Rechte.",
+        "propose_hoster_integration": "Shop-Integration „{{path}}“ speichern? Beim Erstellen wird ein API-Key generiert, der einmalig angezeigt wird.",
+        "propose_hoster_product": "Produktzuordnung „{{path}}“ speichern? Künftige Käufe dieses Produkts erstellen Server mit diesen Ressourcenlimits.",
+        "propose_server_blueprint_switch": "Diesen Server auf einen anderen Blueprint umstellen? Startbefehl, Image und Variablen werden ersetzt. Vorhandene Spieldateien bleiben erhalten.",
+        "propose_guardian_tuning": "Autopilot-Einstellungen für diesen Server anpassen? Überschreibt die Standardwerte des Blueprints für diesen Server (z. B. Start-Grace-Period oder Wiederherstellungsversuche).",
+        "propose_server_repair": "Infrastruktur-Reparatur „{{operation}}“ auf diesem Server ausführen? „repair_permissions“ setzt Verzeichnisberechtigungen zurück, „reallocate_port“ weist belegte Ports neu zu. Spieldateien werden nicht verändert.",
+        "propose_file_delete": "Datei „{{path}}“ löschen? Vor dem Löschen wird ein Snapshot in der Versionshistorie abgelegt.",
+        "propose_task_set": "Diese Aufgabe läuft künftig automatisch im Hintergrund mit deinen Rechten und deinem KI-Kontingent. Sie kann jederzeit im Chat pausiert oder gelöscht werden.",
+        "propose_task_delete": "Diese Aufgabe endgültig entfernen? Zum vorübergehenden Deaktivieren kannst du die Aufgabe stattdessen pausieren.",
+        "propose_restart_schedule_set": "Automatischen Neustart für diesen Server einrichten? Der Zeitplan ist im Reiter „Automatische Neustarts“ jederzeit manuell anpassbar.",
+        "propose_backup_schedule_set": "Automatische Backups für diesen Server einrichten? Die Einstellungen sind im Reiter „Backups“ jederzeit manuell anpassbar.",
+        "propose_email_send": "Entwurf als E-Mail an „{{recipient}}“ mit dem Betreff „{{subject}}“ senden?",
+        "propose_calendar_event_create": "Termin „{{title}}“ im Kalender anlegen?",
+        "propose_calendar_event_update": "Termin im Kalender mit den neuen Details aktualisieren?",
+        "propose_calendar_event_delete": "Diesen Termin aus dem Kalender löschen? Das lässt sich nicht rückgängig machen.",
+        "propose_popup_create": "Pop-up-Ankündigung für das Panel erstellen?"
       },
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
@@ -630,8 +656,8 @@
     },
     "autonomy": {
       "title": "Autonomer Modus",
-      "descriptionPanel": "Ohne Freigabe fragt die KI vor jeder Aktion nach. Mit panelweiter Freigabe führt sie erlaubte Aktionen auf allen deinen Servern sofort aus.",
-      "descriptionServer": "Ohne Freigabe fragt die KI vor jeder Aktion nach. Mit Freigabe führt sie erlaubte Aktionen auf genau diesem Server sofort aus.",
+      "descriptionPanel": "Ohne Freigabe fragt die KI vor jeder Aktion nach. Bei panelweiter Freigabe führt sie freigegebene Lese- und Standardaktionen auf allen Servern direkt aus.",
+      "descriptionServer": "Ohne Freigabe fragt die KI vor jeder Aktion nach. Bei Freigabe führt sie freigegebene Lese- und Standardaktionen auf diesem Server direkt aus.",
       "toggle": "Aktionen ohne Rückfrage ausführen",
       "budget": "Höchstens Aktionen pro Stunde",
       "budgetHint": "In der letzten Stunde automatisch ausgeführt: {{used}}. Ist das Kontingent erschöpft, fragt die KI wieder nach — es schlägt nichts fehl.",
@@ -866,7 +892,7 @@
       "zustand": {
         "aus": "Sprachmodus aus",
         "verbindet": "Verbindet …",
-        "bereit": "Bereit — sprich einfach los",
+        "bereit": "Bereit, sprich einfach los",
         "hoert": "Hört zu",
         "denkt": "Denkt nach",
         "spricht": "Spricht"
@@ -875,9 +901,9 @@
         "microphone": "Kein Zugriff auf das Mikrofon. Erlaube ihn in den Browsereinstellungen.",
         "audio": "Der Browser konnte die Tonverbindung nicht aufbauen. Einzelheiten stehen in der Entwicklerkonsole.",
         "provider": "Das hat gerade nicht geklappt.",
-        "quota": "Kontingent erschöpft — das Gespräch pausiert. Warte kurz oder erhöhe dein Limit.",
+        "quota": "Kontingent erschöpft. Das Gespräch pausiert. Bitte kurz warten oder Limit anpassen.",
         "connection": "Verbindung zum Sprachmodus verloren.",
-        "veraltet": "Das Panel ist zu alt für den Sprachmodus der App — bitte den Server aktualisieren."
+        "veraltet": "Das Panel unterstützt diesen Sprachmodus noch nicht. Bitte das Panel aktualisieren."
       },
       "toVoiceMode": "Realtime-Modus",
       "toTextMode": "Text-Modus",
@@ -888,10 +914,10 @@
         "aus": "Der Sprachmodus ist beendet.",
         "verbindet": "Die Verbindung wird aufgebaut.",
         "bereit": "Sprich mit mir, ich bin bereit.",
-        "hoert": "Ich höre zu — sprich einfach weiter.",
+        "hoert": "Ich höre zu, sprich einfach weiter.",
         "denkt": "Einen Moment, ich sehe nach.",
         "spricht": "Du kannst mich jederzeit unterbrechen.",
-        "error": "Der Versuch ist gescheitert — sprich einfach weiter."
+        "error": "Die Anfrage ist fehlgeschlagen, sprich einfach weiter."
       },
       "info": {
         "model": "Modell",
@@ -903,7 +929,7 @@
       },
       "beleg": {
         "heading": "Belegstelle",
-        "untrusted": "Dieser Text stammt unverändert aus der genannten Quelle — die KI hat ihn herausgesucht, nicht geschrieben. Lies ihn selbst, statt der Erklärung zu glauben."
+        "untrusted": "Dieser Text stammt aus der angegebenen Quelle und wurde nicht von der KI verfasst."
       },
       "vorschlag": {
         "heading": "Wartet auf dich",
@@ -915,9 +941,9 @@
       "subtitle": "Läuft im Hintergrund. Ausgelöst hat es eine Störung, nicht du.",
       "toGuardianMode": "Guardian-Fenster",
       "running": "Arbeitet gerade",
-      "readOnly": "Hier wird gelesen, nicht geschrieben — eine Nachricht würde die laufende Reparatur ablösen. Fragen gehören in den Chat.",
+      "readOnly": "Nur Lesezugriff. Eine neue Nachricht würde die laufende Reparatur unterbrechen. Fragen bitte im Chat stellen.",
       "emptyTitle": "Nichts zu reparieren",
-      "emptyDescription": "Meldet die Guardian-Engine eine Störung und ist die Autonomie freigegeben, arbeitet die KI hier — auch wenn niemand davorsitzt.",
+      "emptyDescription": "Meldet die Guardian-Engine eine Störung bei aktiver Autonomie, übernimmt die KI hier automatisch die Analyse.",
       "takeOver": "Übernehmen",
       "takeOverHint": "Beendet die laufenden Reparaturen und öffnet den Chat. Die KI fängt danach nicht von selbst wieder an.",
       "takeOverDone": "Übernommen. Die Reparatur ist beendet.",
@@ -934,7 +960,7 @@
       "editTitle": "Aufgabe bearbeiten",
       "name": "Aufgabenname",
       "prompt": "Auftrag an die KI",
-      "promptHint": "Der Name dient der Übersicht, die KI verarbeitet den Auftragstext.",
+      "promptHint": "Aufgabenname dient der Übersicht, die Anweisung wird von der KI ausgeführt.",
       "schedule": "Zeitplan",
       "planKindDaily": "Täglich / Wochentage",
       "planKindInterval": "Intervall",
@@ -956,7 +982,7 @@
       "resumed": "Aufgabe wieder aktiv.",
       "pausedToast": "Aufgabe pausiert.",
       "deleted": "Aufgabe „{{title}}“ gelöscht.",
-      "deleteConfirm": "Diese Aufgabe endgültig löschen? Soll sie nur eine Weile ruhen, pausiere sie stattdessen.",
+      "deleteConfirm": "Aufgabe endgültig löschen? Zum vorübergehenden Deaktivieren kannst du die Aufgabe pausieren.",
       "openWindow": "Verlauf öffnen",
       "nextRun": "Nächster Lauf: {{when}}",
       "paused": "Pausiert",
@@ -985,14 +1011,14 @@
     },
     "webSearch": {
       "title": "Websuche",
-      "description": "Hinterlege einen Brave-Search-Schlüssel, damit die KI im Web nachschlagen kann. Ohne Schlüssel steht das Werkzeug gar nicht zur Verfügung. Die Rolle des Benutzers braucht zusätzlich das Recht „Websuche über die KI verwenden“.",
+      "description": "Brave-Search-API-Schlüssel für Websuchen des Assistenten. Die Benutzerrolle benötigt zusätzlich das Recht „Websuche über die KI verwenden“.",
       "apiKey": "Brave-Search-API-Schlüssel",
       "configured": "Schlüssel hinterlegt; neuen Schlüssel eingeben, um ihn zu ersetzen",
       "placeholder": "Schlüssel eingeben",
       "remove": "Schlüssel entfernen",
       "saved": "Suchschlüssel gespeichert.",
       "removed": "Suchschlüssel entfernt.",
-      "hint": "Suchtreffer werden gekürzt, redigiert und wie jeder andere Fremdtext als nicht vertrauenswürdig behandelt.",
+      "hint": "Suchergebnisse werden gekürzt, bereinigt und als nicht vertrauenswürdiger Text verarbeitet.",
       "errors": {
         "load": "Zustand der Websuche konnte nicht geladen werden.",
         "save": "Suchschlüssel konnte nicht gespeichert werden."
@@ -1000,7 +1026,7 @@
     },
     "usage": {
       "title": "KI-Nutzung",
-      "description": "Wer wieviel verbraucht hat. Dieselben Zahlen, gegen die auch die Kontingente laufen — abgebrochene Anfragen zählen nicht mit, weil sie beim Anbieter nie angekommen sind.",
+      "description": "Übersicht über den Token- und Kostenverbrauch. Abgebrochene Anfragen werden nicht berechnet.",
       "empty": "In diesem Zeitraum hat noch niemand die KI genutzt.",
       "user": "Benutzer",
       "today": "Heute",
@@ -1011,7 +1037,7 @@
       "total": "Gesamt",
       "hint": "Wer nichts verbraucht hat, steht nicht in der Liste. Die Woche beginnt am Montag, alle Zeiträume in UTC.",
       "mineTitle": "Dein KI-Kontingent",
-      "mineDescription": "Dein Verbrauch und die Grenzen, die für deine Rollen gelten. Wirst du mit „Kontingent ausgeschöpft“ abgewiesen, steht hier, woran es liegt.",
+      "mineDescription": "Persönlicher Verbrauch und Kontingentgrenzen deiner Rollen.",
       "noLimit": "Keine Grenze hinterlegt",
       "blocked": "Gesperrt: Für diesen Zeitraum ist kein Kontingent freigegeben.",
       "mineCost": "Diesen Monat: {{requests}} Anfragen, {{cost}} Kosten.",
@@ -1020,7 +1046,7 @@
       },
       "events": {
         "title": "Einzelne Anfragen",
-        "description": "Der Nachweis hinter den Summen. Eine Chatnachricht ist nicht eine Anfrage: jede Werkzeugrunde ruft den Anbieter erneut und schickt den gewachsenen Verlauf komplett mit — die Spalte „Rufe“ sagt, wie oft. Diese Zeilen lassen sich einzeln gegen das Dashboard des Anbieters halten.",
+        "description": "Detaillierte Anfrageübersicht. Jede Werkzeugrunde erzeugt einen separaten API-Aufruf (Spalte „Rufe“).",
         "when": "Zeit",
         "model": "Modell",
         "input": "Eingabe",
@@ -1040,17 +1066,17 @@
     },
     "memoryNotice": {
       "title": "Die KI kann sich Dinge über dich merken",
-      "body": "Wenn du es erlaubst, merkt sich der Assistent dauerhaft Vorlieben und Eigenheiten — auch Persönliches. Diese Notizen werden bei jeder Anfrage an den KI-Anbieter übertragen. Achte darauf, was du teilst. Derzeit ist das Gedächtnis deaktiviert.",
+      "body": "Der Assistent kann sich Vorlieben und projektspezifische Hinweise merken. Diese Notizen werden bei Anfragen an den konfigurierten KI-Anbieter übermittelt. Aktuell ist das Gedächtnis deaktiviert.",
       "enable": "Aktivieren",
       "later": "Später",
       "never": "Nicht mehr fragen",
-      "hint": "Du kannst das jederzeit ändern und einzelne Einträge einsehen und löschen — im Panel unter Profil → KI, in der Desktop-App im Reiter „Gedächtnis\".",
+      "hint": "Einträge können jederzeit unter Profil → KI oder in der Desktop-App unter „Gedächtnis“ eingesehen und gelöscht werden.",
       "enabled": "Gedächtnis aktiviert.",
       "failed": "Die Antwort konnte nicht gespeichert werden."
     },
     "learning": {
       "title": "Selbstlernen der KI",
-      "description": "Die KI hält gelöste Probleme als Skills fest. Team-Skills entstehen immer automatisch. Für panelweite Skills entscheidest du hier — sie wirken für alle Benutzer, bei einem Hoster also für jeden Kunden.",
+      "description": "Der Assistent hält gelöste Probleme als Skills fest. Team-Skills werden automatisch angelegt. Für panelweite Skills legst du hier die Richtlinie fest (wirksam für alle Benutzer).",
       "policy": "Panelweites Lernen",
       "options": {
         "off": "Aus — nur ich lege panelweite Skills an",
@@ -1058,9 +1084,9 @@
         "instant": "Sofort wirksam aus jedem Gespräch"
       },
       "hints": {
-        "off": "Die KI lernt ausschließlich ins jeweilige Team und weiß das.",
-        "review": "Personal mit „KI-Skills verwalten“ wirkt sofort, alles andere wartet auf dich.",
-        "instant": "Am flüssigsten. Ein Kunde kann die KI damit zu einem sofort wirksamen Text im Kontext aller anderen überreden."
+        "off": "Die KI lernt ausschließlich in das jeweilige Team.",
+        "review": "Benutzer mit dem Recht „KI-Skills verwalten“ wirken sofort, andere Vorschläge erfordern eine Freigabe.",
+        "instant": "Gelerntes Wissen wird sofort panelweit übernommen."
       },
       "saved": "Einstellung gespeichert.",
       "errors": {
@@ -1088,16 +1114,16 @@
     },
     "worker": {
       "title": "Worker",
-      "subtitle": "Ein Auftrag im Hintergrund — hier liest du mit.",
+      "subtitle": "Hintergrundaufgaben und deren Ausführungsverlauf.",
       "listLabel": "Worker",
       "running": "arbeitet",
       "waitingApproval": "wartet auf deine Freigabe",
       "waitingUser": "wartet auf deine Antwort",
       "waitingWake": "schläft bis zum nächsten Wecken",
       "finished": "abgeschlossen",
-      "readOnly": "Hier schreibt nur der Worker. Gesteuert wird im Gespräch — sag der KI zum Beispiel „Stopp diesen Auftrag“.",
+      "readOnly": "Hier schreibt nur der Worker. Die Steuerung erfolgt im Chat (z. B. „Stopp diesen Auftrag“).",
       "emptyTitle": "Noch nichts zu lesen",
-      "emptyDescription": "Der Worker hat noch nichts geschrieben. Sobald er arbeitet, steht sein Verlauf hier — jede Werkzeugrunde eingeschlossen.",
+      "emptyDescription": "Der Worker hat noch keine Ausgaben erzeugt. Sobald die Ausführung startet, erscheint der Verlauf hier.",
       "notFoundTitle": "Diesen Worker gibt es nicht",
       "notFoundDescription": "Der Auftrag wurde aufgeräumt, gehört einem anderen Benutzer oder die Adresse ist veraltet."
     },
@@ -1114,12 +1140,12 @@
     },
     "cost": {
       "title": "Währung der Kostenanzeige",
-      "description": "Gebucht wird immer in US-Dollar — so rechnet der Anbieter ab, und eine Umrechnung vor der Buchung wäre eine zweite Fehlerquelle. Hier steht nur, in welcher Währung du die Beträge liest.",
+      "description": "Abrechnung und Kontingente basieren auf US-Dollar. Hier legst du fest, in welcher Währung Beträge im Panel angezeigt werden.",
       "currency": "Anzeigewährung",
       "rate": "Ein US-Dollar entspricht in {{currency}}",
-      "rateRange": "Zwischen {{min}} und {{max}}. MSM holt keinen Kurs aus dem Internet — trag den deiner Bank ein.",
-      "example": "Beispiel: 10,00 US-Dollar erscheinen als {{amount}}.",
-      "bookingHint": "Der Kurs wirkt nur auf die Anzeige. Bereits gebuchte Anfragen ändern sich nicht, wenn du ihn anpasst.",
+      "rateRange": "Wert zwischen {{min}} und {{max}}. Trage den aktuellen Umrechnungskurs deiner Bank ein.",
+      "example": "Beispiel: 10,00 USD entsprechen {{amount}}.",
+      "bookingHint": "Der Umrechnungskurs beeinflusst nur die Anzeige. Bereits erfasste Buchungen ändern sich dadurch nicht.",
       "saved": "Währung gespeichert.",
       "currencies": {
         "EUR": "Euro (EUR)",
@@ -1139,8 +1165,8 @@
       "expiresAt": "Dieser Link gilt bis {{date}}.",
       "approve": "Freigeben",
       "reject": "Ablehnen",
-      "approvedDone": "Freigegeben. Die KI arbeitet weiter und meldet sich per E-Mail, sobald sie fertig ist.",
-      "rejectedDone": "Abgelehnt. Die KI versucht einen anderen Weg und meldet sich per E-Mail.",
+      "approvedDone": "Freigegeben. Die KI setzt die Aufgabe fort und benachrichtigt per E-Mail nach Abschluss.",
+      "rejectedDone": "Abgelehnt. Die KI bricht den Vorgang ab oder wählt einen alternativen Lösungsweg.",
       "invalid": "Dieser Link ist nicht mehr gültig. Entweder wurde bereits entschieden, oder die Anfrage ist abgelaufen.",
       "failed": "Die Entscheidung konnte nicht übernommen werden."
     }
@@ -1153,7 +1179,7 @@
     "openUserMenu": "Benutzermenü öffnen"
   },
   "nodes": {
-    "subtitle": "Remote- und Local-Nodes verwalten, Status prüfen und Agenten-Tokens hinterlegen.",
+    "subtitle": "Lokale und entfernte Nodes verwalten, Systemauslastung überwachen und Agenten anbinden.",
     "add": "Node hinzufügen",
     "edit": "Node bearbeiten",
     "updateAll": "Nodes updaten",
@@ -1172,7 +1198,7 @@
     "name": "Name",
     "host": "Host-URL (HTTPS)",
     "agentToken": "Agent-Token",
-    "tokenHint": "Wird im Panel mit DIS verschlüsselt gespeichert und nie wieder im Klartext angezeigt.",
+    "tokenHint": "Wird im Panel verschlüsselt gespeichert und nie wieder im Klartext angezeigt.",
     "tokenLeaveBlank": "Leer lassen, um den Token nicht zu ändern",
     "tokenTooShort": "Token muss mindestens 16 Zeichen haben.",
     "tlsFingerprint": "TLS-Fingerprint (SHA-256)",
@@ -1186,7 +1212,7 @@
     "deleted": "Node gelöscht.",
     "confirmDelete": "Node „{{name}}“ wirklich löschen?",
     "cannotDeleteLocal": "Der lokale Default-Node kann nicht gelöscht werden.",
-    "cannotDeleteWithServers": "Node hat noch {{count}} Server — zuerst Server verschieben oder löschen.",
+    "cannotDeleteWithServers": "Auf diesem Node laufen noch {{count}} Server. Zuerst Server verschieben oder löschen.",
     "healthCheck": "Health-Check",
     "healthOnline": "Node ist online.",
     "healthOffline": "Node ist offline oder nicht erreichbar.",
@@ -1218,7 +1244,7 @@
     "capacityLoadFailed": "Node-Kapazität konnte nicht geladen werden.",
     "enrollment": {
       "title": "Node verbinden",
-      "subtitle": "Führe einen Befehl auf dem neuen Linux-Server aus und bestätige anschließend den passenden Code.",
+      "subtitle": "Installationsbefehl auf dem neuen Linux-Server ausführen und den passenden Code im Panel bestätigen.",
       "steps": {
         "copy": "Befehl kopieren",
         "run": "Als root auf dem Zielserver ausführen",
@@ -1254,7 +1280,7 @@
     "notFoundTitle": "Seite nicht gefunden",
     "notFoundBody": "Diese Route ist im Panel nicht registriert.",
     "errorTitle": "Berechtigungen konnten nicht geladen werden",
-    "errorBody": "Bitte lade die Seite erneut. Wenn das Problem bleibt, prüfe die Verbindung zum Panel."
+    "errorBody": "Bitte lade die Seite neu. Wenn das Problem bestehen bleibt, prüfe die Verbindung zum Panel."
   },
   "blueprints": {
     "eyebrow": "Panel · Bereitstellung",
@@ -1271,7 +1297,7 @@
     "originNative": "Nativ",
     "originCommunity": "Community",
     "uploadNew": "Neu hochladen",
-    "uploadHint": "Wähle eine .blueprint.json. Datei wird gegen das offizielle Schema geprüft, bevor sie aktiv wird.",
+    "uploadHint": "Wähle eine .blueprint.json. Die Datei wird vor dem Import gegen das offizielle Schema validiert.",
     "uploadSuccess": "Blueprint „{{id}}\" importiert.",
     "uploadInvalidJson": "Die Datei ist kein gültiges JSON.",
     "uploadFailed": "Upload fehlgeschlagen.",
@@ -1280,7 +1306,7 @@
     "replaceIdMismatch": "Die hochgeladene Datei trägt nicht die ID „{{expected}}\". Beim Ersetzen müssen die meta.id-Werte übereinstimmen.",
     "delete": "Löschen",
     "deleteConfirmTitle": "Blueprint löschen?",
-    "deleteConfirmBody": "Blueprint „{{name}}\" ({{id}}) wirklich löschen? Bereits erstellte Server bleiben davon unberührt, neue Server-Instanzen mit dieser Blueprint sind danach nicht mehr möglich.",
+    "deleteConfirmBody": "Blueprint „{{name}}\" ({{id}}) wirklich löschen? Bereits erstellte Server bleiben unberührt. Neue Server-Instanzen mit dieser Blueprint sind danach nicht mehr möglich.",
     "deleteConfirm": "Löschen",
     "deleteSuccess": "Blueprint „{{id}}\" gelöscht.",
     "deleteFailed": "Löschen fehlgeschlagen.",
@@ -1302,7 +1328,7 @@
       "actions": "Aktionen"
     },
     "docsBannerTitle": "Eigene Blueprints & Discord-Bots hosten",
-    "docsBannerText": "Möchtest du einen eigenen Discord-Bot oder Open-Source-Software per GitHub-ZIP hosten? Lies unsere How-To Anleitung in der Dokumentation.",
+    "docsBannerText": "Möchtest du einen eigenen Discord-Bot oder Open-Source-Software per GitHub-ZIP hosten? Lies die Anleitung in der Dokumentation.",
     "docsBannerBtn": "Anleitung lesen"
   },
   "docs": {
@@ -1327,7 +1353,7 @@
       "guardian": "Guardian konfigurieren"
     },
     "intro": {
-      "body": "Eine Blueprint ist eine reine JSON-Definition für einen Server-Typ — also z. B. „DayZ-Server\" oder „Minecraft-Server\", noch nicht der laufende Server selbst. Sie sagt dem Panel, welches Docker-Image genutzt wird, welche Ports der Server braucht, wie er startet und woher die Server-Dateien kommen (Steam, HTTPS-Download, fertiges Image oder manuell). Aus einer Blueprint können beliebig viele Server-Instanzen erstellt werden.\n\nBlueprints enthalten niemals Skripte oder Hooks — sie werden vor dem Start streng vom Panel validiert. Dadurch bleibt das System sicher und performant."
+      "body": "Eine Blueprint ist eine JSON-Definition für einen Server-Typ (z. B. DayZ oder Minecraft), noch nicht der laufende Server selbst. Sie definiert das Docker-Image, Ports, Startbefehle und Bezugsquellen der Spieldateien (Steam, HTTPS-Download, fertiges Image oder manuell). Aus einem Blueprint können beliebig viele Server-Instanzen erstellt werden.\n\nBlueprints enthalten keine Skripte oder Hooks und werden vor dem Start streng validiert."
     },
     "guardian": {
       "body": "Guardian ist eine optionale, strikt begrenzte Agent-Funktion. Im Web-Editor deaktiviert ein einzelner Schalter alle Guardian-Blöcke; aktiviert werden nur vom Backend und Agent unterstützte Werte angeboten.",
@@ -1345,9 +1371,9 @@
     "quickstart": {
       "p1": "So erstellst du deinen ersten eigenen Server-Typ (Community Blueprint):",
       "s1": "Lade das Blueprint-Template über den Button oben herunter.",
-      "s2": "Öffne die Datei (z.B. my_custom_server.blueprint.json) in einem Editor und passe die Werte an. Lass die Kommentare (//) gerne stehen – das Panel ignoriert sie beim Upload automatisch.",
+      "s2": "Öffne die Datei (z. B. my_custom_server.blueprint.json) in einem Editor und passe die Werte an. Kommentare (//) ignoriert das Panel beim Upload automatisch.",
       "s3": "Gehe im Menü auf „Blueprints\" und klicke auf „Neu hochladen\".",
-      "s4": "Gehe zu „Server\", klicke „Server erstellen\" – dein neues Spiel taucht nun im Dropdown auf!",
+      "s4": "Gehe zu „Server“, klicke auf „Server erstellen“: Das neue Spiel erscheint nun im Dropdown-Menü.",
       "alertTitle": "Wichtig: Die Blueprint-ID ist maßgeblich",
       "alertBody": "Der Upload-Dateiname ist frei wählbar. Das Panel validiert meta.id und speichert die Community-Blueprint unter dieser ID."
     },
@@ -1368,7 +1394,7 @@
       "runtimeEnv": "Umgebungsvariablen als Key-Value-Dict. Werte dürfen Port-Platzhalter enthalten: {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}. Kein {INSTALL_DIR} oder {ENV.<KEY>} in env-Werten.",
       "runtimeStartup": "Startbefehl (wird als argv übergeben, KEINE Shell). Gültige Platzhalter: {SERVER_NAME}, {GAME_PORT}, {QUERY_PORT}, {RCON_PORT}, {VOICE_PORT}, {WEB_PORT}, {INSTALL_DIR}, {MOD_ARG}. {SERVER_NAME} übernimmt den individuellen Namen des MSM-Servers. Zusätzlich {ENV.<KEY>} für eigene Env-Variablen. Verbotene Zeichen: $, Backtick.",
       "runtimeEnsureDirs": "Relative Ordner, die vor jedem Start im Server-Verzeichnis angelegt werden. Geeignet für Profile-, Log-, Cache- oder Runtime-Ordner, die der Startbefehl erwartet.",
-      "runtimeConfigPatches": "Liste von Konfigurations-Patches, die vor dem Start angewendet werden. Jeder Patch muss type, file und value enthalten (sowie section/key für 'ini' oder regex für 'regex'). Sie gelten für alle Server dieses Blueprints. Werte für einen einzelnen Server setzt die KI mit „Einstellung dauerhaft setzen“ — diese werden nach den Blueprint-Patches angewendet und überschreiben sie damit.",
+      "runtimeConfigPatches": "Liste von Konfigurations-Patches, die vor dem Start angewendet werden. Jeder Patch muss type, file und value enthalten (sowie section/key für ini oder regex für regex). Sie gelten für alle Server dieses Blueprints. Einzelne Server-Werte können über den Assistenten mit „Einstellung dauerhaft setzen“ definiert werden.",
       "runtimeEnableExec": "Exec-Tab aktivieren. Default: false. Self-Hosted, aber Befehle laufen NUR im MSM-verwalteten Container dieses Servers, NIEMALS auf dem Host oder in fremden Containern.",
       "runtimeExecTimeoutSeconds": "Timeout pro Exec-Aufruf in Sekunden (1..600). Default: 60.",
       "logsSources": "Logquellen für Guardian und sichtbare Server-Konsole. stdout zeigt Docker-Ausgabe; sichere relative Dateipfade und einfache Dateinamen-Wildcards werden zusätzlich live verfolgt.",
@@ -1424,7 +1450,7 @@
       "hCurseForge": "Wie aktiviere ich CurseForge-Mods?",
       "bCurseForge": "Setze supportsMods=true, supportsCurseForge=true und trage die curseforgeGameId ein (z. B. 83374 für ARK: Survival Ascended oder 432 für Minecraft). Für dateibasierte Spiele wie Minecraft setze curseforgeInstallPath auf 'mods' oder 'plugins'. Für Spiele wie ASA, die Mods über Startparameter laden, setze modInjection auf 'startupArg' und modStartupArgumentSeparator auf ','. Der API-Key wird global im Panel unter Einstellungen → CurseForge hinterlegt.",
       "h2": "Wie patche ich eine Konfigurationsdatei?",
-      "b2": "Nutze 'runtime.configPatches'. Pflichtfelder pro Patch: type ('ini' oder 'regex'), file (relativer Pfad zur Datei) und value (Wert). Bei type=ini sind zusätzlich section (Sektion, z. B. 'URL') und key erforderlich. Bei type=regex ist stattdessen regex (Suchmuster als regulärer Ausdruck) erforderlich. Im value-Feld sind Port-Platzhalter erlaubt ({GAME_PORT} etc.) — aber KEIN {ENV.<KEY>} und KEIN {MOD_ARG}, da diese nur im startup-Befehl sinnvoll sind.",
+      "b2": "Nutze runtime.configPatches. Pflichtfelder pro Patch: type (ini oder regex), file (relativer Dateipfad) und value (Wert). Bei type=ini sind zusätzlich section und key erforderlich. Bei type=regex ist stattdessen regex (Suchmuster) erforderlich. Im value-Feld sind Port-Platzhalter erlaubt ({GAME_PORT} etc.), jedoch keine {ENV.<KEY>} oder {MOD_ARG}.",
       "hSeedFiles": "Wie liefere ich Standard-Konfigurationsdateien (seedFiles) mit?",
       "bSeedFiles": "Nutze 'runtime.seedFiles' (Liste von Objekten mit 'file' und 'content'). MSM schreibt diese Dateien NUR DANN, wenn sie im Server-Verzeichnis noch fehlen (seed-once). Dadurch kannst du Standard-Konfigurationen oder Voreinstellungen mitliefern, ohne dass spätere Nutzer-Änderungen überschrieben werden. In Kombination mit 'runtime.configPatches' stellen sie sicher, dass sowohl neu angelegte als auch vom Spiel/Steam heruntergeladene Dateien vor jedem Start automatisch gepatcht werden (z. B. Port-Anpassungen oder das Deaktivieren fehlerhafter Crossplay-Module).",
       "h3": "Wie hoste ich Discord-Bots oder andere Apps aus GitHub?",
@@ -1436,9 +1462,9 @@
       "voiceExampleTitle": "Beispiel: Open-Source-Voice-Server (Mumble)",
       "steamLegacyExampleTitle": "Beispiel: Steam-Branch (Conan Legacy)",
       "h4": "Wie prüft MSM Spiel-Updates und Workshop-Mods?",
-      "b4": "Workshop-Mods werden periodisch per Steam-API geprüft; veraltete Mods installieren beim Neustart. Spiel-Binaries (Steam) nutzen buildid + Branch. GitHub/HTTP-Quellen vergleichen Remote-Stand mit lokal (Commit bzw. Last-Modified) und pullen bei checkBased vor Start/Restart. Badge und „Spiel-Updates prüfen“ erscheinen bei Blueprints mit verwalteter Quelle (steam, http, github) — Workshop-Mods nur im Mod-Manager.",
+      "b4": "Workshop-Mods werden periodisch über die Steam-API geprüft; veraltete Mods aktualisieren sich beim Neustart. Spiel-Binaries via Steam nutzen buildid und Branch. GitHub/HTTP-Quellen vergleichen Remote- und lokalen Stand und aktualisieren vor dem Start. Statusanzeigen für Updates erscheinen bei Blueprints mit verwalteter Quelle (steam, http, github).",
       "h5": "Wie begrenze ich Backups auf Config und Savegames?",
-      "b5": "Optional top-level backup mit includePaths: relative Pfade oder Globs (z. B. ConanSandbox/Saved/Config, profiles). MSM packt nur existierende Treffer ins Archiv — empfohlen bei großen Steam-Spielen."
+      "b5": "Optional: backup.includePaths mit relativen Pfaden oder Globs definieren (z. B. Saved/Config, profiles). MSM sichert nur existierende Dateien (empfohlen bei großen Spielen)."
     },
     "updates": {
       "body": "Server-Binaries und Workshop-Mods werden getrennt behandelt. Beides kann im Panel sichtbar sein (Mod-Status bzw. Server-Update-Badge), die Installation passiert aber beim Lifecycle (Start/Restart), nicht live während der Laufzeit.",
@@ -1454,7 +1480,7 @@
       "gameWhat": "Spiel-Binaries (Steam App)",
       "gameDetect": "buildid-Vergleich für source.steam.branch",
       "gameInstall": "Beim Start/Restart bei positivem Check oder alwaysValidate; manuell: „Spiel-Updates prüfen“ auf der Server-Detailseite",
-      "gameAutoRestart": "Nein — nur manuell oder auto_restart ohne Update-Trigger",
+      "gameAutoRestart": "Nein (nur manuell oder über geplante Neustarts ohne Update-Zwang).",
       "githubWhat": "Git-Quellen (GitHub)",
       "githubDetect": "git ls-remote vs. lokaler HEAD",
       "githubInstall": "git fetch/reset + setupCommands vor Start/Restart bei checkBased",
@@ -1462,7 +1488,7 @@
       "branchNote": "Legacy- oder Beta-Branches setzt du mit source.steam.branch. SteamCMD erhält -beta <name> (außer public). Der Update-Check nutzt dieselbe Branch-Metadaten."
     },
     "backups": {
-      "body": "Mit backup.includePaths in der Blueprint sichert MSM nur Konfiguration und Savegames — nicht Steam, Workshop oder Binaries. Archive bleiben klein; Restore überschreibt nur die gelisteten Pfade.",
+      "body": "Mit backup.includePaths im Blueprint sichert MSM gezielt Konfigurationsdateien und Spielstände statt gesamter Steam- oder Workshop-Binaries. Das hält Archive kompakt und die Wiederherstellung schnell.",
       "exampleTitle": "Beispiel: Conan (Config, Saves, game.db)",
       "restoreTitle": "Wiederherstellen",
       "restoreNote": "Selective Backups enthalten .msm/backup-manifest.json. Alte Voll-Backups ohne Manifest ersetzen weiterhin den ganzen Ordner.",
@@ -1491,9 +1517,9 @@
       "err10Body": "Oft nach root-owned Dateien im Server-Ordner (z. B. sudo-Sync). MSM bricht den Start dafür nicht mehr ab. Langfristig: Kopien über MSM oder chown auf Container-UID (runtime.user)."
     },
     "exec": {
-      "intro": "Mit dem Exec-Tab können authentifizierte User mit der Permission server.console.exec einmalige Befehle im MSM-verwalteten Container des Servers ausführen — z. B. docker compose logs, npm run build, ls -la /data. Self-Hosted, aber die Befehle laufen NUR im MSM-Container dieses einen Servers, niemals auf dem Host oder in fremden Containern.",
+      "intro": "Im Exec-Tab können berechtigte Benutzer (server.console.exec) einmalige Befehle direkt im Container des Servers ausführen (z. B. docker compose logs, npm run build, ls -la /data). Die Ausführung erfolgt isoliert im Container dieses Servers und berührt weder den Host noch andere Instanzen.",
       "safetyTitle": "Sicherheits-Modell",
-      "safety1": "argv statt Shell-String: Wir reichen das Befehls-Array 1:1 an docker exec weiter. Es gibt keine Shell dazwischen, also können Shell-Metazeichen (;, |, $(), Backticks) nicht eskaliert werden — sie sind literaler Text.",
+      "safety1": "argv statt Shell-String: Das Befehls-Array wird direkt an docker exec übergeben. Ohne zwischengeschaltete Shell werden Metazeichen (;, |, $(), Backticks) als reiner Text interpretiert.",
       "safety2": "Container-Name kommt nur aus container_name_for(server.id): Es gibt kein Request-Feld, mit dem der User den Zielcontainer beeinflussen kann. Host-Exec oder Container-eines-anderen-Servers ist strukturell ausgeschlossen.",
       "safety3": "Blueprint-Gate: runtime.enableExec muss true sein, sonst lehnt der Endpoint auch für Owner mit Permission ab (403). Default ist false.",
       "safety4": "Separate Permission server.console.exec (nicht console.write). Wer Exec bekommt, bekommt es explizit.",
@@ -1549,7 +1575,7 @@
     "consoleSend": "Senden",
     "consoleInputFailed": "Eingabe konnte nicht zugestellt werden.",
     "consoleConnecting": "Verbinde…",
-    "consoleReconnecting": "Verbindung verloren — verbinde neu…",
+    "consoleReconnecting": "Verbindung verloren. Neuer Verbindungsaufbau…",
     "consoleConnectionFailed": "Verbindung fehlgeschlagen",
     "execTab": "Exec (Container)",
     "execPlaceholder": "Befehl im Container ausführen (z. B. ls -la /data)",
@@ -1558,14 +1584,14 @@
     "gameLogs": "Game-Logs",
     "install": "Installieren",
     "reinstall": "Neu installieren",
-    "reinstallConfirm": "Server wirklich neu installieren? Aktuelle Spiel-Binaries werden von Steam/HTTP geholt und überschrieben. Manuelle Konfigurationen bleiben erhalten. Workshop-Mods werden nicht neu installiert — dafür den Mod-Manager nutzen.",
+    "reinstallConfirm": "Server wirklich neu installieren? Aktuelle Spiel-Binaries werden von Steam/HTTP bezogen und überschrieben. Eigene Konfigurationen bleiben erhalten. Workshop-Mods werden im Mod-Manager verwaltet.",
     "serverFileUpdateAvailable": "Server-Update verfügbar",
     "checkServerFileUpdates": "Spiel-Updates prüfen",
     "serverFileUpdateCheckDone": "Kein Spiel-Update verfügbar (Check abgeschlossen).",
-    "serverFileUpdateCheckFound": "Spiel-Update verfügbar — beim nächsten Start/Restart wird installiert.",
+    "serverFileUpdateCheckFound": "Spiel-Update verfügbar. Die Installation erfolgt beim nächsten Serverstart.",
     "serverFileUpdateCheckFailed": "Spiel-Update-Check fehlgeschlagen.",
     "deleted": "Server gelöscht",
-    "confirmDelete": "Server wirklich löschen? Alle Daten werden unwiderruflich entfernt — auch das Wissen, das der Assistent über diese Anlage gesammelt hat und das deine Kollegen mitlesen.",
+    "confirmDelete": "Server wirklich löschen? Alle Daten und das zugehörige Serverwissen des Assistenten werden unwiderruflich entfernt.",
     "switchBlueprintAction": "Spiel / Blueprint wechseln",
     "switchBlueprintTitle": "Spiel / Blueprint wechseln",
     "switchBlueprintSubtitle": "Wechsle das Spiel oder die Blueprint-Variante für diesen Server.",
@@ -1576,7 +1602,7 @@
     "selectNewBlueprint": "Neues Spiel / Blueprint auswählen",
     "confirmSwitchBtn": "Spiel wechseln & Backup erstellen",
     "blueprintSwitchedSuccess": "Spiel / Blueprint erfolgreich gewechselt! Pflicht-Backup wurde erzeugt.",
-    "createDescription": "Erstelle einen neuen Game-Server.",
+    "createDescription": "Neuen Game-Server erstellen.",
     "node": "Node",
     "selectNode": "Node auswählen",
     "nodeHint": "Ziel-Node für Docker und Dateien dieses Servers (Local oder Remote).",
@@ -1605,7 +1631,7 @@
       "private": "privat",
       "unset": "nicht gesetzt",
       "startBlockedTitle": "Start blockiert: Host-IP fehlt",
-      "startBlockedBody": "Der Server kann erst gestartet werden, wenn eine Host-IP zugewiesen ist. Ohne explizite Bind-IP würde Docker die UFW-Regeln umgehen (Anti-Leak).",
+      "startBlockedBody": "Der Server kann erst starten, wenn eine Host-IP zugewiesen ist (erforderlich für saubere UFW-Bindung).",
       "assignNow": "IP zuweisen"
     },
     "postgres": {
@@ -1618,8 +1644,8 @@
     },
     "disk": {
       "usage": "Disk-Verbrauch",
-      "softLimitWarning": "Disk-Verbrauch erreicht {percent} % des Soft-Limits ({usedMb} MB / {limitMb} MB). Bereinige alte Daten, sonst wird der Server bei 100 % automatisch gestoppt.",
-      "softLimitStopped": "Server wurde wegen Disk-Soft-Limit gestoppt ({usedMb} MB / {limitMb} MB)."
+      "softLimitWarning": "Speicherplatz bei {{percent}}% des Soft-Limits ({{usedMb}} MB / {{limitMb}} MB). Bitte alte Daten bereinigen: Bei 100% wird der Server gestoppt.",
+      "softLimitStopped": "Server wurde wegen Erreichen des Disk-Soft-Limits gestoppt ({{usedMb}} MB / {{limitMb}} MB)."
     },
     "status": {
       "running": "läuft",
@@ -1635,7 +1661,7 @@
       "restarting": "Wird neu gestartet...",
       "node_unreachable": "Node offline"
     },
-    "nodeUnreachableHint": "Node ist offline — Start/Stopp und Dateioperationen sind deaktiviert, bis der Agent wieder erreichbar ist.",
+    "nodeUnreachableHint": "Node ist offline. Start-, Stopp- und Dateioperationen sind deaktiviert, bis der Agent wieder erreichbar ist.",
     "guardian": {
       "syncErrorTitle": "Autopilot-Synchronisationsfehler",
       "tabTitle": "Autopilot",
@@ -1652,7 +1678,7 @@
       },
       "override": {
         "title": "Abweichende Autopilot-Einstellungen",
-        "originAi": "Von der KI gesetzt am {{date}} — Vorfall #{{incident}}.",
+        "originAi": "Eingestellt durch KI am {{date}} (Vorfall #{{incident}}).",
         "originHuman": "Für diesen Server abweichend vom Blueprint eingestellt.",
         "reset": "Auf Blueprint zurücksetzen",
         "resetDenied": "Dafür fehlt dir das Recht, Server-Einstellungen zu ändern.",
@@ -1675,7 +1701,7 @@
       },
       "quarantine": {
         "title": "Autopilot: Server in Quarantäne versetzt",
-        "description": "Der Server schlug mehrfach fehl und wurde vom Autopiloten geschützt. Automatische Wiederherstellung ist pausiert.",
+        "description": "Der Server ist mehrfach fehlgeschlagen und wurde vom Autopiloten isoliert. Automatische Neustartversuche sind pausiert.",
         "clearAction": "Freigabe anfordern",
         "requestedSuccess": "Freigabe wurde angefordert. Der Agent bestätigt den Zustandswechsel.",
         "requestFailed": "Die Freigabe konnte nicht angefordert werden.",
@@ -1691,7 +1717,7 @@
         "lastProbe": "Letzter Health-Check",
         "noProbe": "Kein Check durchgeführt",
         "historyTitle": "Incident- & Wiederherstellungs-Historie",
-        "noIncidents": "Keine Ereignisse vorhanden. Der Autopilot hat bisher keine Störungen verzeichnet.",
+        "noIncidents": "Keine Vorfälle erfasst. Der Autopilot arbeitet unauffällig.",
         "status": {
           "open": "Offen",
           "recovering": "In Wiederherstellung",
@@ -1714,10 +1740,10 @@
         "historyErrorBody": "Die Störungen konnten nicht geladen werden. Das ist kein Beleg für eine leere Historie.",
         "quarantinePendingNote": "Die Freigabe wurde angefordert, ist aber noch nicht vom Agenten bestätigt. Die Quarantäne bleibt bis zur nächsten bestätigten Beobachtung aktiv.",
         "aiHeading": "KI-Eingriff",
-        "aiHealing": "Die KI bearbeitet diesen Vorfall.",
-        "aiHealed": "Die KI hat diesen Vorfall bearbeitet: behoben.",
-        "aiFailed": "Die KI hat diesen Vorfall bearbeitet: nicht behoben.",
-        "aiBriefed": "Die KI weist beim nächsten Chat auf diesen Vorfall hin.",
+        "aiHealing": "Die KI analysiert und bearbeitet diesen Vorfall.",
+        "aiHealed": "Die KI hat diesen Vorfall erfolgreich behoben.",
+        "aiFailed": "Die KI konnte diesen Vorfall nicht automatisch beheben.",
+        "aiBriefed": "Die KI fasst diesen Vorfall im nächsten Chat zusammen.",
         "aiUnknown": "Die KI hat diesen Vorfall bearbeitet; der Lauf ist nicht mehr vorhanden.",
         "aiOpenChat": "Im KI-Chat ansehen"
       },
@@ -1731,11 +1757,11 @@
       }
     },
     "kill": "Erzwingen",
-    "killConfirm": "Server wirklich erzwungen beenden? Alle ungespeicherten Daten gehen verloren.",
+    "killConfirm": "Server sofort beenden (SIGKILL)? Nicht gespeicherte Daten können verloren gehen.",
     "killSuccess": "Server wurde erzwungen beendet"
   },
   "users": {
-    "subtitle": "Benutzer und Berechtigungen verwalten",
+    "subtitle": "Benutzerkonten, Rollen und Status verwalten.",
     "createUser": "User erstellen",
     "confirmDelete": "User wirklich löschen?",
     "delete": "Löschen",
@@ -1756,7 +1782,7 @@
   },
   "roles": {
     "title": "Rollen",
-    "subtitle": "Globale Rollen und Berechtigungen verwalten",
+    "subtitle": "Globale Rollen und Zugriffsrechte konfigurieren.",
     "create": "Rolle erstellen",
     "name": "Name",
     "namePlaceholder": "z.B. moderator",
@@ -1769,8 +1795,8 @@
     "updated": "Rolle aktualisiert.",
     "deleted": "Rolle gelöscht.",
     "confirmDelete": "Rolle wirklich löschen?",
-    "adminLocked": "Die admin-Rolle ist fest verdrahtet (alle Rechte). Nicht editierbar.",
-    "userEditable": "Standard-Rolle für neue User. Permissions können angepasst werden.",
+    "adminLocked": "Die Admin-Rolle besitzt feste Vollberechtigung und kann nicht bearbeitet werden.",
+    "userEditable": "Standardrolle für neue Benutzer. Berechtigungen können angepasst werden.",
     "selectAll": "Alle auswählen",
     "deselectAll": "Auswahl entfernen",
     "noPermissions": "Keine Permissions ausgewählt",
@@ -1803,288 +1829,288 @@
   "permissionDetails": {
     "users_read": {
       "title": "Benutzerliste einsehen",
-      "desc": "Erlaubt das Auflisten und Betrachten aller registrierten Benutzer im System."
+      "desc": "Benutzer anzeigen und Kontodetails einsehen."
     },
     "users_manage": {
       "title": "Benutzer verwalten",
-      "desc": "Erlaubt das Erstellen, Bearbeiten und Löschen von Benutzern im Panel."
+      "desc": "Benutzer erstellen, bearbeiten und löschen."
     },
     "users_permissions_manage": {
       "title": "Berechtigungen zuweisen",
-      "desc": "Erlaubt das Zuweisen von Rollen an Benutzer sowie das Delegieren von Server-Rechten."
+      "desc": "Rollen an Benutzer zuweisen und Server-Rechte vergeben."
     },
     "roles_manage": {
       "title": "Rollen verwalten",
-      "desc": "Erlaubt das Erstellen, Ändern und Löschen von Berechtigungsrollen."
+      "desc": "Berechtigungsrollen anlegen, bearbeiten und löschen."
     },
     "panel_settings_read": {
       "title": "Einstellungen lesen",
-      "desc": "Erlaubt das Einsehen der allgemeinen Panel-Konfiguration."
+      "desc": "Allgemeine Panel-Konfiguration einsehen."
     },
     "panel_settings_write": {
       "title": "Einstellungen bearbeiten",
-      "desc": "Erlaubt das Ändern globaler Panel-Einstellungen (z.B. SMTP, Steam, Backups)."
+      "desc": "Globale Panel-Einstellungen anpassen (z. B. SMTP, Steam, Backups)."
     },
     "panel_database_read": {
       "title": "Panel-Datenbank lesen",
-      "desc": "Erlaubt das Einsehen von Systemdatenbank-Tabellen (nur für Diagnose)."
+      "desc": "System-Datenbanktabellen zu Diagnosezwecken einsehen."
     },
     "panel_database_admin": {
       "title": "Panel-Datenbank verwalten",
-      "desc": "Erlaubt administrative Aufgaben und direkte Änderungen an der Panel-Datenbank."
+      "desc": "Administrative SQL-Abfragen und Datenbankoperationen ausführen."
     },
     "servers_create": {
       "title": "Server erstellen",
-      "desc": "Erlaubt das Erstellen neuer Gameserver auf verfügbaren Nodes."
+      "desc": "Neue Server-Instanzen anlegen und initial konfigurieren."
     },
     "servers_delete": {
       "title": "Server löschen",
-      "desc": "Erlaubt das dauerhafte Löschen von Gameservern aus dem System (global, destruktiv)."
+      "desc": "Bestehende Server-Instanzen und zugehörige Daten endgültig entfernen."
     },
     "servers_hoster_customers_view": {
-      "title": "Hoster-Kundenserver einsehen",
-      "desc": "Ohne dieses Recht sind Server aus Shop-Verträgen für pauschale Rollenrechte unsichtbar und unbedienbar — sichtbar bleiben sie nur für Owner, Inhaber dieses Rechts und den Kunden selbst. Es gilt für alle Serverrechte einer Rolle (Ansicht, Konsole, Dateien), nicht nur für die Liste."
+      "title": "Shop-Kunden einsehen",
+      "desc": "Zuordnungen externer Shop-Kunden zu Servern anzeigen."
     },
     "blueprints_manage": {
       "title": "Blueprints verwalten",
-      "desc": "Erlaubt das Anlegen, Ändern und Löschen von Blueprints — den Vorlagen, aus denen Server entstehen. Damit lässt sich zum Beispiel eine andere Spielversion bereitstellen. Mitgelieferte Blueprints bleiben unveränderbar; man leitet eigene davon ab."
+      "desc": "Server-Blueprints erstellen, importieren, bearbeiten und löschen."
     },
     "system_view": {
-      "title": "Systemstatus anzeigen",
-      "desc": "Erlaubt das Betrachten der Systemauslastung, Log-Dateien und Netzwerkschnittstellen des Host-Systems."
+      "title": "System-Status einsehen",
+      "desc": "Hardware-, Host- und Prozessmetriken des Panels überwachen."
     },
     "system_audit_read": {
-      "title": "Audit-Log lesen",
-      "desc": "Erlaubt das Einsehen des Admin-Audit-Logs mit allen privilegierten Aktionen. Secrets und vollständige Logdateien stehen dort bewusst nicht drin."
+      "title": "Audit-Log einsehen",
+      "desc": "Audit-Einträge und Sicherheitsereignisse einsehen."
     },
     "system_secrets_rotate": {
-      "title": "Cluster-Secrets rotieren",
-      "desc": "Erlaubt das Erneuern der Managed-Postgres-Admin-Zugangsdaten. Stark privilegiert: betrifft alle verwalteten Datenbanken gleichzeitig."
+      "title": "Secrets rotieren",
+      "desc": "Interne Passwörter und kryptografische Schlüssel rotieren."
     },
     "nodes_read": {
-      "title": "Nodes anzeigen",
-      "desc": "Erlaubt das Auflisten der Nodes (Infrastruktur-Server) und deren Systemauslastung."
+      "title": "Nodes einsehen",
+      "desc": "Registrierte Nodes und deren Auslastung anzeigen."
     },
     "nodes_manage": {
       "title": "Nodes verwalten",
-      "desc": "Erlaubt das Hinzufügen, Editieren, Löschen und Registrieren von Nodes."
+      "desc": "Neue Nodes anbinden, konfigurieren und entfernen."
     },
     "teams_create": {
-      "title": "Teams gründen",
-      "desc": "Erlaubt das Gründen eigener Teams, um KI-Wissen und Serverrechte mit Kollegen zu teilen. Ein Team kann dabei nie mehr Rechte weitergeben, als sein Gründer selbst besitzt."
+      "title": "Teams erstellen",
+      "desc": "Neue Teams anlegen und Mitglieder verwalten."
     },
     "ai_chat_use": {
-      "title": "KI-Chat verwenden",
-      "desc": "Erlaubt den KI-Chat. Rollenlimits und Tool-Rechte werden zusätzlich im Backend geprüft."
+      "title": "KI-Chat nutzen",
+      "desc": "Mit dem integrierten KI-Assistenten chatten."
     },
     "ai_voice_use": {
-      "title": "Mit der KI sprechen",
-      "desc": "Erlaubt den Sprachmodus. Getrennt vom Chat, weil Änderungen hier gesprochen bestätigt werden statt angeklickt — auch Löschen und Backup-Einspielen. Wer dieses Recht hat, kann per Stimme alles auslösen, was er im Chat auch auslösen könnte: die Rechteprüfung ist dieselbe, die Bestätigung ist es nicht. Außerdem kostet Sprache extra, je Äußerung eine Abschrift und je gesprochenem Zeichen die Stimme."
+      "title": "Sprachmodus nutzen",
+      "desc": "Echtzeit-Sprachkommunikation mit der KI verwenden."
     },
     "ai_attachments_use": {
-      "title": "KI-Anhänge verwenden",
-      "desc": "Erlaubt geprüfte Anhänge im KI-Chat; Dateityp-, Größen- und Pfadgrenzen bleiben aktiv."
+      "title": "Dateianhänge im Chat",
+      "desc": "Dokumente und Logs zur Analyse an die KI übermitteln."
     },
     "ai_memory_use": {
-      "title": "KI-Memory verwenden",
-      "desc": "Erlaubt das eigene, sichtbare und löschbare KI-Memory."
+      "title": "KI-Gedächtnis nutzen",
+      "desc": "Persönliche und serverspezifische Notizen im Assistenten speichern."
     },
     "ai_skills_use": {
-      "title": "KI-Skills verwenden",
-      "desc": "Erlaubt freigegebene, versionierte Skills aus der MSM-Aktions-Whitelist."
+      "title": "KI-Skills nutzen",
+      "desc": "Vom Assistenten erlernte Fähigkeiten und Workflows abrufen."
     },
     "ai_skills_manage": {
       "title": "KI-Skills verwalten",
-      "desc": "Erlaubt das Erstellen und Verwalten von Skills, aber keine freien Skripte."
+      "desc": "Skills für Teams und das gesamte Panel anlegen, anpassen und löschen."
     },
     "ai_web_search_use": {
-      "title": "KI-Websuche verwenden",
-      "desc": "Erlaubt der KI, im Web nachzuschlagen. Sucht über den in den KI-Einstellungen hinterlegten Suchdienst; ohne Schlüssel steht das Werkzeug gar nicht zur Verfügung. Treffer werden gekürzt und als unvertrauenswürdige Daten behandelt."
+      "title": "Websuche nutzen",
+      "desc": "Ermöglicht der KI Web-Recherchen über die Such-API."
     },
     "ai_autonomous_use": {
-      "title": "Autonomen KI-Modus verwenden",
-      "desc": "Erlaubt dem Benutzer, den autonomen Modus pro Server oder panelweit freizugeben. Ohne zusätzliche Freigabe bleibt jede Aktion bestätigungspflichtig; Berechtigungen gelten unverändert."
+      "title": "Autonomen Modus nutzen",
+      "desc": "Erlaubt der KI die direkte Ausführung freigegebener Lese- und Standardwerkzeuge."
     },
     "ai_tasks_manage": {
-      "title": "Wiederkehrende KI-Aufgaben verwalten",
-      "desc": "Erlaubt es, stehende Aufträge anzulegen — im Chat oder von Hand in der Aufgabenliste auf der KI-Seite; ohne das Recht gibt es dort weder Knopf noch Liste. Ein fälliger Auftrag läuft im Hintergrund ohne anwesenden Benutzer, aber mit dessen Berechtigungen und aus dessen Kontingent. Aufträge, die selbst etwas ändern, setzen zusätzlich den autonomen Modus voraus."
+      "title": "KI-Aufgaben verwalten",
+      "desc": "Wiederkehrende und geplante Hintergrundaufgaben für die KI einrichten."
     },
     "ai_background_use": {
-      "title": "KI-Worker im Hintergrund verwenden",
-      "desc": "Erlaubt der KI, Aufträge an Worker zu übergeben, die im Hintergrund weiterarbeiten — auch während das Gespräch weitergeht oder der Browser geschlossen ist. Ein Worker läuft mit den Berechtigungen und aus dem Kontingent des Auftraggebers; jede Änderung an Servern bleibt bestätigungspflichtig wie im Chat. Ohne dieses Recht arbeitet die KI wie bisher in einem einzelnen Lauf."
+      "title": "Worker-Aufträge starten",
+      "desc": "Recherche- und Analyseaufträge an Hintergrund-Worker übergeben."
     },
     "ai_desktop_use": {
-      "title": "KI-Werkzeuge auf dem eigenen Rechner",
-      "desc": "Erlaubt der KI, auf dem Rechner des Benutzers zu arbeiten — über die Smart-System-App, nie über das Panel. Ansehen darf sie, was der Benutzer selbst sehen kann: Laufwerke, Ordner, Speicherplatz, den Bildschirm und eine Virenprüfung — alles nur lesend, und ein Hinweis am Bildschirmrand leuchtet auf, sobald sie hinsieht. Angelegt und geändert wird ausschließlich im selbst gewählten Sandbox-Ordner. Aufräumen darf sie auch außerhalb: Gelöschtes geht in den Papierkorb, endgültig nur auf ausdrücklichen Wunsch, und bei ausgeschaltetem autonomem Modus liegt vorher eine Karte mit der vollständigen Liste vor. Windows selbst, Programmordner und fremde Benutzerprofile bleiben gesperrt, bis der Benutzer sie in den Einstellungen der App freigibt. Maus und Tastatur übernimmt sie ohne Rückfrage nur im autonomen Modus; ist er aus, muss der Benutzer das an seinem Rechner bestätigen, und die Freigabe ist dann befristet und jederzeit widerrufbar. Eine Bitte aus dem Browser erreicht diese Werkzeuge nie — die Herkunft steht im Token der gekoppelten Sitzung, kein Client kann sie behaupten."
+      "title": "Desktop-App koppeln",
+      "desc": "Die lokale Desktop-Anwendung mit dem Panel verbinden."
     },
     "ai_desktop_install": {
-      "title": "Desktop-Artefakte & Software installieren",
-      "desc": "Erlaubt der KI, über die Smart-System-App Software, Spiel-Mods und Setup-Installer auf dem Rechner des Benutzers herunterzuladen, zu prüfen (Defender & Sandbox), mit Snapshot-Rollback zu installieren oder Setup-Programme im Benutzerkontext zu starten."
+      "title": "Artefakt-Installationen",
+      "desc": "Erlaubt der Desktop-App das Herunterladen und Bereitstellen von Artefakten."
     },
     "ai_mailbox_use": {
-      "title": "KI-E-Mail-Postfächer verwenden",
-      "desc": "Erlaubt der KI, verknüpfte E-Mail-Postfächer des Benutzers zu durchsuchen, E-Mails zu lesen und E-Mail-Entwürfe vorzubereiten. Das Versenden von E-Mails bleibt stets manuell bestätigungspflichtig."
+      "title": "Postfächer anbinden",
+      "desc": "E-Mail-Postfächer zur Bearbeitung durch den Assistenten verknüpfen."
     },
     "ai_calendar_use": {
-      "title": "KI-Kalender verwenden",
-      "desc": "Erlaubt der KI, verknüpfte CalDAV-Kalender des Benutzers abzufragen und Termine vorzubereiten. Das Erstellen oder Löschen von Terminen bleibt stets manuell bestätigungspflichtig."
+      "title": "Kalender anbinden",
+      "desc": "Kalender zur Termin- und Aufgabenplanung verbinden."
     },
     "ai_usage_read_all": {
-      "title": "Gesamte KI-Nutzung einsehen",
-      "desc": "Zeigt unter Einstellungen → KI, welcher Benutzer wieviele Tokens und Kosten verbraucht hat. Damit wird das Nutzungsverhalten fremder Benutzer sichtbar — deshalb ein eigenes Recht und nicht Teil der Einstellungsberechtigung. Den eigenen Verbrauch sieht jeder ohne dieses Recht."
+      "title": "Verbrauchsdaten aller Benutzer einsehen",
+      "desc": "Token- und Kostenmetriken aller registrierten Benutzer einsehen."
     },
     "panel_oauth_read": {
-      "title": "OAuth-Anbieter anzeigen",
-      "desc": "Erlaubt das Einsehen der konfigurierten OAuth/Social-Login-Anbieter."
+      "title": "OAuth-Provider einsehen",
+      "desc": "Konfigurierte Social-Login- und SSO-Provider anzeigen."
     },
     "panel_oauth_create": {
-      "title": "OAuth-Anbieter erstellen",
-      "desc": "Erlaubt das Hinzufügen neuer OAuth2-Identitätsprovider."
+      "title": "OAuth-Provider erstellen",
+      "desc": "Neue OAuth-/OIDC-Identitäts-Provider im Panel registrieren."
     },
     "panel_oauth_update": {
-      "title": "OAuth-Anbieter bearbeiten",
-      "desc": "Erlaubt das Ändern von Client-IDs und Endpunkten der Login-Provider."
+      "title": "OAuth-Provider bearbeiten",
+      "desc": "Client-IDs, Endpunkte und Optionen von Identity-Providern anpassen."
     },
     "panel_oauth_delete": {
-      "title": "OAuth-Anbieter löschen",
-      "desc": "Erlaubt das Löschen von Social-Login-Anbietern."
+      "title": "OAuth-Provider löschen",
+      "desc": "Registrierte OAuth- und SSO-Provider entfernen."
     },
     "panel_oauth_secret_update": {
-      "title": "OAuth Client-Secret ändern",
-      "desc": "Erlaubt das Rotieren und Aktualisieren des OAuth Client-Secrets."
+      "title": "OAuth-Client-Secrets ändern",
+      "desc": "Client-Secrets für Identity-Provider aktualisieren."
     },
     "panel_oauth_test": {
-      "title": "OAuth-Verbindung testen",
-      "desc": "Erlaubt das Testen der Authentifizierungsverbindung zum OAuth-Provider."
+      "title": "OAuth-Provider testen",
+      "desc": "OAuth- und OIDC-Verbindungen auf Erreichbarkeit und Konfiguration prüfen."
     },
     "panel_hoster_read": {
-      "title": "Hoster-Verträge einsehen",
-      "desc": "Erlaubt das Betrachten der Hoster-Integrationen, Produkte und gebuchten Services — ohne Zugriff auf API-Schlüssel."
+      "title": "Hoster-Integrationen einsehen",
+      "desc": "Verknüpfte Shop-Integrationen und Produktzuordnungen anzeigen."
     },
     "panel_hoster_write": {
-      "title": "Hoster-Anbindung verwalten",
-      "desc": "Erlaubt das Anlegen und Ändern von Hoster-Integrationen, Produktzuordnungen und deren API-Schlüsseln."
+      "title": "Hoster-Integrationen verwalten",
+      "desc": "Shop-Integrationen anlegen, bearbeiten und API-Keys rotieren."
     },
     "panel_popups_manage": {
-      "title": "Pop-up-Ankündigungen verwalten",
-      "desc": "Erlaubt das Erstellen, Bearbeiten, Löschen und Veröffentlichen globaler Pop-ups im Panel."
+      "title": "Pop-ups verwalten",
+      "desc": "Systemweite Ankündigungen für Benutzer anlegen und bearbeiten."
     },
     "ai_popups_manage": {
-      "title": "Pop-ups per KI erstellen",
-      "desc": "Erlaubt der KI, Pop-up-Ankündigungen für das Panel vorzuschlagen und anzulegen."
+      "title": "KI-gestützte Pop-ups",
+      "desc": "Erlaubt der KI das Entwerfen und Vorschlagen von Ankündigungen."
     },
     "server_view": {
       "title": "Server anzeigen",
-      "desc": "Erlaubt das Betrachten des Servers in der Liste und das Öffnen der Detail-Seiten."
+      "desc": "Diesen Server in der Übersicht und den Detailansichten einsehen."
     },
     "server_start": {
       "title": "Server starten",
-      "desc": "Erlaubt das Starten des Spieleservers."
+      "desc": "Diesen Server einschalten und hochfahren."
     },
     "server_stop": {
       "title": "Server stoppen",
-      "desc": "Erlaubt das Herunterfahren des Spieleservers."
+      "desc": "Diesen Server ordnungsgemäß herunterfahren."
     },
     "server_restart": {
-      "title": "Server neustarten",
-      "desc": "Erlaubt den Neustart des Spieleservers."
+      "title": "Server neu starten",
+      "desc": "Diesen Server stoppen und direkt wieder starten."
     },
     "server_kill": {
-      "title": "Server stoppen erzwingen",
-      "desc": "Erlaubt das sofortige Beenden (SIGKILL) des Containers bei Hängern."
+      "title": "Server-Prozess beenden (SIGKILL)",
+      "desc": "Server-Container bei Stillstand oder Fehlern sofort hart beenden."
     },
     "server_install": {
       "title": "Server installieren",
-      "desc": "Erlaubt das (Neu-)Installieren des Servers über das Installationsskript."
+      "desc": "Initiale Installation der Spieldateien anstoßen."
     },
     "server_update": {
-      "title": "Outbound-Webhooks verwalten",
-      "desc": "Erlaubt das Anlegen und Ändern der Webhooks, die dieser Server an fremde Dienste sendet. Das Neuaufsetzen des Servers steckt in „Server installieren\"."
+      "title": "Server aktualisieren",
+      "desc": "Spieldateien und Server-Binaries auf die neueste Version aktualisieren."
     },
     "server_config_write": {
-      "title": "Einstellungen anpassen",
-      "desc": "Erlaubt das Ändern von Servername, Auto-Restart und Startparametern — und auch den Blueprint-/Spielwechsel, der den Server neu installiert: Welt, Configs und Mods werden dabei ersetzt, ein Backup wird vorher erzwungen."
+      "title": "Server-Konfiguration bearbeiten",
+      "desc": "Startparameter, Umgebungsvariablen und Spiel-Konfigurationsdateien ändern."
     },
     "server_network_manage": {
-      "title": "Netzwerk bearbeiten",
-      "desc": "Erlaubt das Zuweisen von Ports und Ändern der Bind-IP."
+      "title": "Netzwerk & Ports verwalten",
+      "desc": "Bind-IP und zugewiesene Port-Weiterleitungen anpassen."
     },
     "server_resources_manage": {
-      "title": "Ressourcen anpassen",
-      "desc": "Erlaubt das Festlegen von CPU-, RAM- und Festplatten-Limits."
+      "title": "Ressourcen-Limits verwalten",
+      "desc": "CPU-, Arbeitsspeicher- und Festplattengrenzen für den Container anpassen."
     },
     "server_console_read": {
-      "title": "Konsole mitlesen",
-      "desc": "Erlaubt das Betrachten der Live-Konsole und Logs. Jeder Lesezugriff wird im Admin-Audit-Log festgehalten (ein Eintrag je Benutzer, Server und 10 Minuten)."
+      "title": "Server-Konsole lesen",
+      "desc": "Live-Konsolenausgaben und Log-Streams des Servers verfolgen."
     },
     "server_console_write": {
-      "title": "Befehle senden",
-      "desc": "Erlaubt das Senden von Spielbefehlen an die Server-Konsole."
+      "title": "Befehle an Konsole senden",
+      "desc": "Befehle über die Standardeingabe an den Serverprozess übermitteln."
     },
     "server_console_exec": {
-      "title": "Exec ausführen",
-      "desc": "Erlaubt das Ausführen beliebiger Befehle im Server-Container."
+      "title": "Befehle im Container ausführen",
+      "desc": "Shell-Befehle direkt im Server-Container ausführen."
     },
     "server_files_read": {
-      "title": "Dateien anzeigen",
-      "desc": "Erlaubt das Browsen und Herunterladen von Spieldateien. Jeder Lesezugriff wird im Admin-Audit-Log festgehalten (ein Eintrag je Benutzer, Server und 10 Minuten)."
+      "title": "Dateien lesen",
+      "desc": "Verzeichnisse durchsuchen, Dateiinhalte anzeigen und Dateien herunterladen."
     },
     "server_files_write": {
-      "title": "Dateien hochladen/ändern",
-      "desc": "Erlaubt das Erstellen, Editieren, Hochladen und Entpacken von Dateien."
+      "title": "Dateien bearbeiten & hochladen",
+      "desc": "Dateien erstellen, hochladen, umbenennen und Inhalte speichern."
     },
     "server_files_delete": {
       "title": "Dateien löschen",
-      "desc": "Erlaubt das Löschen von Dateien aus dem Dateisystem des Servers."
+      "desc": "Dateien und Ordner aus dem Serververzeichnis entfernen."
     },
     "server_backups_read": {
-      "title": "Backups anzeigen",
-      "desc": "Erlaubt das Auflisten der Backups."
+      "title": "Backups einsehen",
+      "desc": "Vorhandene Backups und Zeitpläne auflisten."
     },
     "server_backups_create": {
       "title": "Backups erstellen",
-      "desc": "Erlaubt das Erstellen von Server-Sicherungen."
+      "desc": "Backups dieses Servers erstellen und Zeitpläne konfigurieren."
     },
     "server_backups_restore": {
-      "title": "Backups einspielen",
-      "desc": "Erlaubt das Wiederherstellen von Spieldateien aus einem Backup."
+      "title": "Backups wiederherstellen",
+      "desc": "Backups auf diesem Server einspielen (überschreibt aktuelle Dateien)."
     },
     "server_backups_delete": {
       "title": "Backups löschen",
-      "desc": "Erlaubt das dauerhafte Löschen von Server-Sicherungen."
+      "desc": "Gespeicherte Backups dieses Servers entfernen."
     },
     "server_mods_read": {
-      "title": "Mods anzeigen",
-      "desc": "Erlaubt das Auflisten installierter Mods und das Durchsuchen des Steam Workshops."
+      "title": "Mods einsehen",
+      "desc": "Installierte Mods, Plugins und Load-Orders anzeigen."
     },
     "server_mods_write": {
-      "title": "Mods verwalten",
-      "desc": "Erlaubt das Abonnieren, Sortieren und Deinstallieren von Workshop-Mods."
+      "title": "Mods installieren & deinstallieren",
+      "desc": "Mods aus dem Workshop oder Dateisystem installieren und entfernen."
     },
     "server_mods_toggle": {
-      "title": "Mods ein/ausschalten",
-      "desc": "Erlaubt das temporäre Aktivieren oder Deaktivieren installierter Mods."
+      "title": "Mods aktivieren & deaktivieren",
+      "desc": "Einzelne Mods ohne Deinstallation ein- oder ausschalten."
     },
     "server_databases_read": {
-      "title": "PostgreSQL lesen",
-      "desc": "Erlaubt das Betrachten der PostgreSQL-Datenbanken des Servers."
+      "title": "Server-Datenbanken einsehen",
+      "desc": "Zugeordnete PostgreSQL-Datenbanken und Verbindungsdaten anzeigen."
     },
     "server_databases_write": {
-      "title": "PostgreSQL bearbeiten",
-      "desc": "Erlaubt das Ändern von Tabellen und Daten der Server-Datenbank."
+      "title": "Server-Datenbanken anlegen",
+      "desc": "Neue interne PostgreSQL-Datenbanken und Benutzer für diesen Server erstellen."
     },
     "server_databases_admin": {
-      "title": "PostgreSQL verwalten",
-      "desc": "Erlaubt das Hinzufügen, Löschen und Konfigurieren von PostgreSQL-Datenbanken und Usern."
+      "title": "Server-Datenbanken verwalten",
+      "desc": "Tabellen, Daten und Berechtigungen der Server-Datenbank administrieren."
     },
     "server_credentials_manage": {
       "title": "Zugangsdaten zuweisen",
-      "desc": "Erlaubt das Verknüpfen dieses Servers mit einem hinterlegten Steam- oder GitHub-Zugang. Der Klartext bleibt dabei verborgen; eigene Zugangsdaten anlegen darf jeder im eigenen Profil."
+      "desc": "Eigene Steam- oder GitHub-Zugangsdaten diesem Server zuordnen."
     }
   },
   "serverPermissions": {
     "title": "Berechtigungen",
-    "subtitle": "Welcher User darf was an diesem Server",
+    "subtitle": "Zugriffsrechte für Sub-User auf diesem Server festlegen.",
     "addUser": "User hinzufügen",
     "selectUser": "User wählen",
     "noUsers": "Keine Sub-User für diesen Server",
@@ -2092,9 +2118,9 @@
     "revokeConfirm": "Alle Berechtigungen dieses Users für diesen Server entfernen?",
     "saved": "Berechtigungen gespeichert.",
     "loadFailed": "Berechtigungen konnten nicht geladen werden für: {{users}}. Die Liste ist unvollständig.",
-    "ownerHint": "Owner hat immer alle Rechte. Admin-Rolle hat alle Rechte pauschal.",
+    "ownerHint": "Owner und Administratoren besitzen stets Vollzugriff auf alle Server.",
     "adminTitle": "Server-Berechtigungen verwalten",
-    "adminSubtitle": "Delegiere Server-Rechte an einzelne Sub-User. Wähle zuerst den Server.",
+    "adminSubtitle": "Server-Berechtigungen an Sub-User delegieren. Wähle zuerst den Server aus.",
     "selectServer": "Server",
     "selectServerPlaceholder": "-- Server wählen --",
     "searchServer": "Server suchen …",
@@ -2106,7 +2132,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "subtitle": "Übersicht aller Server und Systemstatus",
+    "subtitle": "Übersicht über aktive Server, Node-Auslastung und Systemstatus.",
     "servers": "Server",
     "running": "läuft",
     "supportedGames": "Unterstützte Spiele",
@@ -2169,17 +2195,17 @@
     "backupCode": "Backup-Code",
     "resendFailed": "Der Code konnte nicht erneut gesendet werden.",
     "use2FAInstead": "Stattdessen einen 2FA-Code verwenden",
-    "captchaLoadFailed": "Sicherheitsabfrage konnte nicht geladen werden — bitte Werbeblocker deaktivieren oder Seite neu laden."
+    "captchaLoadFailed": "Sicherheitsabfrage konnte nicht geladen werden. Bitte Werbeblocker prüfen oder Seite neu laden."
   },
   "setup": {
     "welcome": "Willkommen beim MSM",
-    "welcomeDesc": "Der Maunting Service Manager ist bereit. Erstelle jetzt den Owner-Account, um deine Game-Server zu verwalten.",
+    "welcomeDesc": "Der Maunting Service Manager ist bereit. Erstelle jetzt das Owner-Konto, um deine Game-Server zu verwalten.",
     "start": "Loslegen",
     "title": "Ersteinrichtung",
     "description": "Erstelle den Owner-Account für deinen Service Manager",
     "createOwner": "Owner erstellen",
     "emailDelivery": "E-Mail-Versand",
-    "emailDeliveryDesc": "Wird einmalig für Verifizierung und System-E-Mails eingerichtet. Zugangsdaten werden verschlüsselt gespeichert.",
+    "emailDeliveryDesc": "Wird für Verifizierungs- und System-E-Mails verwendet. Zugangsdaten werden verschlüsselt gespeichert.",
     "resendRecommended": "Sicherer Schnellstart mit Resend",
     "fromAddress": "Absenderadresse",
     "resendApiKey": "Resend API-Key",
@@ -2221,7 +2247,7 @@
   },
   "mods": {
     "title": "Mod-Manager",
-    "subtitle": "Workshop- und CurseForge-Mods verwalten und Load-Order anpassen",
+    "subtitle": "Workshop- und CurseForge-Mods verwalten und Load-Order festlegen.",
     "addMod": "Mod hinzufügen",
     "searchSteam": "Steam Workshop durchsuchen",
     "searchPlaceholder": "Mods durchsuchen...",
@@ -2230,7 +2256,7 @@
     "curseforgeModId": "CurseForge Mod-ID",
     "viewInCurseForge": "Auf CurseForge anzeigen",
     "noMods": "Keine Mods installiert",
-    "noModsHint": "Füge den ersten Workshop-Mod hinzu.",
+    "noModsHint": "Füge die erste Mod aus dem Workshop oder Dateisystem hinzu.",
     "noSearchResults": "Keine Mods gefunden",
     "searchHint": "Versuche einen anderen Suchbegriff.",
     "workshopId": "Workshop ID",
@@ -2319,7 +2345,7 @@
   },
   "files": {
     "title": "Datei-Manager",
-    "subtitle": "Server-Dateien durchsuchen und bearbeiten",
+    "subtitle": "Serverdateien durchsuchen, bearbeiten und verwalten.",
     "upload": "Hochladen",
     "uploaded": "hochgeladen",
     "uploadAlreadyRunning": "„{{name}}“ wird bereits hochgeladen.",
@@ -2354,7 +2380,7 @@
     "searchByName": "Name",
     "searchByContent": "Inhalt",
     "searchEmpty": "Keine Treffer",
-    "searchTruncated": "Zu viele Treffer — bitte Suchbegriff verfeinern.",
+    "searchTruncated": "Zu viele Treffer. Bitte Suchbegriff verfeinern.",
     "hideTree": "Datei-Baum ausblenden",
     "showTree": "Datei-Baum anzeigen",
     "showInspector": "Datei-Informationen anzeigen",
@@ -2432,18 +2458,18 @@
     }
   },
   "backups": {
-    "subtitle": "Backup-Verwaltung",
+    "subtitle": "Backups erstellen, wiederherstellen und verwalten.",
     "comingSoon": "Backup-Funktionen werden hier verfügbar sein.",
     "create": "Backup erstellen",
     "created": "Backup erstellt",
     "restore": "Wiederherstellen",
     "restored": "Backup wiederhergestellt",
-    "confirmRestore": "Backup wirklich wiederherstellen? Aktuelle Daten werden überschrieben.",
+    "confirmRestore": "Backup wirklich wiederherstellen? Der aktuelle Stand der Spieldateien wird überschrieben.",
     "confirmDelete": "Backup wirklich löschen?",
     "deletedBackup": "Backup gelöscht",
     "noBackups": "Keine Backups vorhanden",
     "loadFailed": "Die Backups konnten nicht geladen werden.",
-    "createHint": "Erstelle dein erstes Backup.",
+    "createHint": "Erstelle ein manuelles Backup oder richte automatische Sicherungen ein.",
     "selectServer": "Wähle einen Server, um Backups zu verwalten.",
     "settingsSaved": "Einstellungen gespeichert",
     "scheduling": "Einstellungen",
@@ -2482,7 +2508,7 @@
     "nextAutoBackup": "Nächstes Auto-Backup",
     "aiManaged": "Von der KI verwaltet",
     "aiManagedByTask": "Von der KI verwaltet ({{title}})",
-    "aiManagedHint": "Die KI hat diesen Backup-Zeitplan eingestellt. Du kannst ihn jederzeit ändern — dann übernimmst du die Verwaltung wieder.",
+    "aiManagedHint": "Dieser Backup-Zeitplan wurde von der KI eingerichtet. Bei manuellen Änderungen übernimmst du die Verwaltung wieder.",
     "aiManagedSaveHint": "Beim Speichern übernimmst du die Verwaltung: der zuständige KI-Auftrag wird automatisch deaktiviert."
   },
   "tabs": {
@@ -2507,12 +2533,12 @@
     "nextRun": "Nächste Ausführung"
   },
   "restarts": {
-    "subtitle": "Automatische Neustarts für diesen Server.",
+    "subtitle": "Automatische Neustart-Zeitpläne für diesen Server konfigurieren.",
     "enabled": "Automatische Restarts aktivieren",
     "modeInterval": "Intervall",
-    "modeIntervalHint": "Neustart nach festem Stundenabstand.",
+    "modeIntervalHint": "Regelmäßiger Neustart nach festem Stundenintervall.",
     "modeFixed": "Feste Zeiten",
-    "modeFixedHint": "Neustart zu ausgewählten Uhrzeiten.",
+    "modeFixedHint": "Neustart zu ausgewählten Uhrzeiten am Tag.",
     "interval": "Intervall",
     "everyHours": "Alle {{count}} Stunde(n)",
     "fixedTimes": "Restart-Zeiten",
@@ -2523,7 +2549,7 @@
     "lastAutoRestart": "Letzter Auto-Restart",
     "nextAutoRestart": "Nächster Auto-Restart",
     "aiManaged": "Von der KI verwaltet",
-    "aiManagedHint": "Die KI hat diesen Neustart-Zeitplan eingestellt. Du kannst ihn jederzeit ändern — beim Speichern übernimmst du die Verwaltung, und der zuständige KI-Auftrag wird automatisch deaktiviert."
+    "aiManagedHint": "Dieser Neustart-Zeitplan wurde von der KI eingerichtet. Bei manuellen Änderungen übernimmst du die Verwaltung und der KI-Auftrag wird pausiert."
   },
   "settings": {
     "title": "Einstellungen",
@@ -2531,7 +2557,7 @@
     "panelUrl": "Panel-URL",
     "panelUrlHint": "Wird automatisch aus der aktuellen Adresse ermittelt.",
     "apiUrl": "API-Adresse",
-    "apiUrlHint": "Die Adresse, unter der dieses Panel seine API anbietet. Genau diese trägt man im Maunting Smart System ein — nicht die der Weboberfläche.",
+    "apiUrlHint": "Adresse des API-Endpunkts dieses Panels. Wird im Maunting Smart System für die Verbindung eingetragen.",
     "smtpHost": "SMTP-Host",
     "smtpPort": "SMTP-Port",
     "smtpUser": "SMTP-Benutzer",
@@ -2641,7 +2667,7 @@
         "custom": "Sonstiger Anbieter",
         "customHint": "HTML-Snippet"
       },
-      "singraAutoInject": "Entspricht dem HTML-Snippet: widget.js mit data-widget-id — das Panel setzt die Installations-ID automatisch ein.",
+      "singraAutoInject": "Entspricht dem HTML-Snippet widget.js mit data-widget-id (das Panel setzt die Installations-ID automatisch ein).",
       "installIdConfigured": "Installations-ID hinterlegt",
       "installIdMissing": "Keine Installations-ID",
       "installIdSource": {
@@ -2935,7 +2961,7 @@
   },
   "errorBoundary": {
     "title": "Diese Ansicht konnte nicht geladen werden",
-    "hint": "Meist hilft ein Neuladen — etwa nach einer Panel-Aktualisierung. Bleibt es dabei, melde dich bei deinem Betreiber.",
+    "hint": "Ein Neuladen der Seite hilft meistens (z. B. nach einem Panel-Update). Bei anhaltenden Problemen wende dich an deinen Administrator.",
     "reload": "Neu laden"
   },
   "errors": {
@@ -2974,7 +3000,7 @@
   },
   "updater": {
     "manualConfigsRestored": "Manuelle Konfigurationen wurden automatisch wiederhergestellt.",
-    "manualConfigsFailed": "Wiederherstellung manueller Konfigurationen fehlgeschlagen – bitte Dateien manuell prüfen.",
+    "manualConfigsFailed": "Wiederherstellung manueller Konfigurationen fehlgeschlagen. Bitte Dateien manuell prüfen.",
     "panelUpdateAvailable": "Panel-Aktualisierung verfügbar",
     "current": "Aktuell",
     "viewRelease": "Release ansehen",
@@ -2988,14 +3014,14 @@
   },
   "connection": {
     "connecting": "Verbinde…",
-    "reconnecting": "Verbindung verloren — verbinde neu…",
+    "reconnecting": "Verbindung unterbrochen. Neuer Verbindungsaufbau…",
     "failed": "Verbindung fehlgeschlagen. Bitte Seite neu laden.",
     "rejected": "Verbindung abgelehnt (Auth/Origin/fehlende Rechte)."
   },
   "databases": {
-    "subtitle": "Servergebundene PostgreSQL-Verwaltung ohne öffentliche Freigabe.",
+    "subtitle": "Servergebundene PostgreSQL-Datenbanken ohne öffentliche Freigabe verwalten.",
     "emptyTitle": "Keine Datenbanken angelegt",
-    "emptyHint": "Starte die interne PostgreSQL-Provisionierung für diesen Server.",
+    "emptyHint": "PostgreSQL-Provisionierung für diesen Server starten.",
     "bootstrap": "PostgreSQL aktivieren",
     "database": "Datenbank",
     "user": "User",
@@ -3054,7 +3080,7 @@
     "connectDatabase": "Datenbank verbinden",
     "rowsUnit": "Zeilen",
     "reset": "Zurücksetzen",
-    "rowNotAddressable": "Zeile ohne Primärschlüssel nicht eindeutig adressierbar — Löschen und Bearbeiten sind hier gesperrt.",
+    "rowNotAddressable": "Zeile ohne Primärschlüssel ist nicht eindeutig adressierbar. Löschen und Bearbeiten sind gesperrt.",
     "metrics": {
       "database": "Datenbank",
       "status": "Status",
@@ -3234,7 +3260,7 @@
     "resources": "Ressourcen",
     "resourceEditor": {
       "title": "Ressourcen-Limits bearbeiten",
-      "description": "CPU-, RAM- und Disk-Limits anpassen. Feld leer lassen für unbegrenzt.",
+      "description": "CPU-, Arbeitsspeicher- und Festplattengrenzen anpassen. Feld leer lassen für unbegrenzt.",
       "cpu": "CPU-Limit (%)",
       "cpuHint": "100% = 1 Kern. Bereich: 10 bis 3200.",
       "ram": "RAM-Limit (MB)",
@@ -3258,10 +3284,10 @@
     "title": "Hilfe & Dokumentation",
     "subtitle": "Anleitungen, Referenzen und How-Tos für das Panel.",
     "blueprintsTitle": "Blueprints",
-    "blueprintsDesc": "Eigene Server-Typen definieren: Schema-Referenz, Quickstart, Konfigurations-Patches, Steam Workshop.",
+    "blueprintsDesc": "Eigene Server-Typen definieren: Schema-Referenz, Quickstart, Konfigurations-Patches und Workshop.",
     "blueprintsLink": "Blueprint-Doku öffnen",
     "oauthTitle": "OAuth & Social Login",
-    "oauthDesc": "Login mit Google, Discord, GitHub, Microsoft, Twitter oder einem eigenen OIDC-Provider (Authentik, Keycloak, Zitadel).",
+    "oauthDesc": "Anmeldung mit Google, Discord, GitHub, Microsoft, Twitter oder eigenen OIDC-Providern (Authentik, Keycloak, Zitadel).",
     "oauthLink": "OAuth-Doku öffnen",
     "selfHostingTitle": "Self-Hosting & Deployment",
     "selfHostingDesc": "Panel, Frontend und Remote-Nodes ausliefern, ohne auf jedem Host das vollständige Monorepo zu klonen.",
@@ -3277,7 +3303,7 @@
   "docsSelfHosting": {
     "eyebrow": "Betriebshandbuch",
     "title": "Self-Hosting & Deployment",
-    "subtitle": "Verstehe, welche MSM-Komponente auf welchen Host gehört, nutze versionierte Release-Artefakte und verbinde neue Nodes ohne Agent-Zugangsdaten offenzulegen.",
+    "subtitle": "Verstehe, welche MSM-Komponente auf welchen Host gehört, nutze versionierte Release-Artefakte und verbinde neue Nodes ohne manuelle Token-Weitergabe.",
     "units": {
       "title": "Ein Repository, drei Deployment-Einheiten",
       "intro": "Das Monorepo ist die gemeinsame Quelle für Entwicklung und Releases. Produktivsysteme erhalten nur das Artefakt für ihre Rolle; ein vollständiger Git-Checkout ist nicht erforderlich.",
@@ -3415,7 +3441,7 @@
       },
       "permission": {
         "title": "Rechte",
-        "body": "Koppeln und Chatten braucht ai.chat.use. Für die Werkzeuge auf dem eigenen Rechner kommt ai.desktop.use dazu; ohne dieses Recht holt die App keine Aufträge ab, und die KI bekommt die Werkzeuge gar nicht erst angeboten. Aus dem Browser bekommt sie diese Werkzeuge nie — dort sitzt niemand vor der Bestätigungskarte."
+        "body": "Kopplung und Chat erfordern ai.chat.use. Werkzeuge auf dem lokalen Rechner benötigen zusätzlich ai.desktop.use. Ohne dieses Recht ruft die App keine Aufträge ab und der KI werden diese Werkzeuge nicht angeboten. Aus dem Browser erhält sie diese nie: Dort kann niemand die Bestätigungskarte bedienen."
       },
       "sandbox": {
         "title": "Sandbox",
@@ -3423,17 +3449,17 @@
       },
       "takeover": {
         "title": "Maus und Tastatur",
-        "body": "Bei ausgeschaltetem autonomem Modus kann die KI um die Übernahme nur bitten; erteilen kann sie allein der Mensch am Rechner, auf einer Bestätigungskarte und befristet. Die Frist liegt in der App, nicht im Panel, und lässt sich jederzeit beenden. Im autonomen Modus entfällt die Karte — dann hat der Betreiber vorab entschieden, so wie bei jeder anderen Handlung auch."
+        "body": "Bei deaktiviertem autonomem Modus bittet die KI um Übernahme; freigeben kann dies nur der Benutzer am Rechner über eine befristete Bestätigungskarte. Die Frist läuft in der App und kann jederzeit beendet werden. Im autonomen Modus entfällt die Abfragekarte, da die Freigabe vorab erteilt wurde."
       },
       "pairing": {
         "title": "Anmelden per Kopplung",
-        "body": "Die App kennt weder Passwort noch 2FA-Code. Im Panel unter Profil → KI entsteht ein Code (zehn Minuten, genau einmal), der in der App eingetragen wird; gespeichert wird nur sein Hash. Das ist nötig, weil ein Captcha-Widget in einem Tauri-Fenster nicht funktioniert — so bleiben Passwort, 2FA und Captcha vollständig im Browser. Gekoppelte Geräte lassen sich dort einzeln wieder aussperren."
+        "body": "Die App kennt weder Passwort noch 2FA-Code. Im Panel unter Profil → KI wird ein zehn Minuten gültiger Einmalcode erzeugt und in der App eingegeben. Gespeichert wird nur der Hash. So verbleiben Passwort, 2FA und Captcha vollständig im Browser. Gekoppelte Geräte können im Panel einzeln widerrufen werden."
       },
       "uninstall": {
         "title": "Deinstallation",
-        "body": "In der App unter Einstellungen → Gefahrenzone. Sie entfernt zusätzlich, was Windows stehen lässt: Einstellungen, Stimmaufnahmen, den Tresor-Eintrag und den Autostart. Der Sandbox-Ordner bleibt — er gehört dem Benutzer."
+        "body": "In der App unter Einstellungen → Gefahrenzone. Entfernt zusätzlich verbleibende Dateien: Konfiguration, Stimmaufnahmen, Tresor-Eintrag und Autostart. Der Sandbox-Ordner bleibt erhalten."
       },
-      "unsigned": "Der Installer ist nicht signiert. Windows SmartScreen meldet einen unbekannten Herausgeber; über „Weitere Informationen“ lässt er sich starten. Vergleiche vorher die SHA256-Summe aus dem Release — sie ersetzt die fehlende Signatur."
+      "unsigned": "Der Installer ist nicht signiert. Windows SmartScreen meldet einen unbekannten Herausgeber; die Installation lässt sich über „Weitere Informationen“ starten. Vergleiche vorher die SHA256-Summe aus dem Release zur Verifikation."
     },
     "compatibility": {
       "title": "Neue Installationen ausschließlich mit PostgreSQL",
@@ -3446,7 +3472,7 @@
     },
     "hoster": {
       "title": "Hoster- und Shop-Anbindung (optional)",
-      "intro": "Ein externer Shop kann Server automatisch bestellen, sperren und kündigen. MSM übernimmt dabei nur den technischen Zugang und den Server — nicht Shop, Zahlung oder Rechnung.",
+      "intro": "Ein externer Shop kann Server automatisiert bestellen, sperren und kündigen. MSM übernimmt dabei den technischen Zugriff und die Server-Verwaltung (keine Zahlungs- oder Rechnungsabwicklung).",
       "setup": {
         "title": "Einrichtung",
         "body": "Einstellungen → Tab Hoster. Zuerst einen Dienstbenutzer mit dem Recht 'servers.create' anlegen, dann die Integration. Der API-Key wird genau einmal angezeigt und nur als Hash gespeichert."
@@ -3482,7 +3508,7 @@
       },
       "vault": {
         "title": "Eigener Tresor",
-        "body": "Profil → Zugangsdaten. Der Wert wird verschlüsselt gespeichert und nie wieder angezeigt — sichtbar bleiben Bezeichnung, Benutzername und die letzten vier Zeichen."
+        "body": "Profil → Zugangsdaten. Werte werden verschlüsselt gespeichert und danach nicht mehr im Klartext angezeigt. Sichtbar bleiben Bezeichnung, Benutzername und die letzten 4 Zeichen."
       },
       "server": {
         "title": "Serverzuordnung",
@@ -3503,14 +3529,14 @@
     },
     "voice": {
       "title": "Sprachmodus",
-      "intro": "Mit der KI reden statt tippen — und zwar mit demselben Agenten: dieselbe Unterhaltung, derselbe Lauf, dieselben Werkzeuge, dieselben Rechte. Es ist kein zweites Modell, sondern der gewöhnliche Chatlauf mit zwei Wandlern davor und dahinter. Umgeschaltet wird oben rechts auf der KI-Seite: der Chat weicht einer Kugel, die sich zum gesprochenen Wort bewegt.",
+      "intro": "Mit der KI sprechen statt tippen: Derselbe Agent, derselbe Lauf, dieselben Werkzeuge und Rechte. Die Transkription und Sprachsynthese sind dem Standard-Chatlauf vor- und nachgeschaltet. Die Umschaltung erfolgt oben rechts auf der KI-Seite.",
       "access": {
         "title": "Was eingerichtet sein muss",
-        "body": "Zweierlei. An einem Chatzugang — OpenRouter oder OpenAI — ein „Modell für Gesprochenes\". Und ein zweiter Zugang der Art „ElevenLabs (Stimme)\" mit Schlüssel, Sprachmodell und Voice ID. Fehlt eines davon, erscheint der Umschalter gar nicht. Und der Reverse-Proxy muss dem Panel das Mikrofon erlauben: die Caddy-Site aus install.sh setzt Permissions-Policy microphone=(self) — Installationen von vor dem 22.08.2026 tragen noch microphone=(), womit der Browser getUserMedia ohne jede Rückfrage blockiert. Die Zeile von Hand anpassen und Caddy neu laden."
+        "body": "Zwei Komponenten: Ein Chatzugang (OpenRouter oder OpenAI) mit einem Modell für Spracheingabe sowie ein zweiter Zugang der Art „ElevenLabs (Stimme)“ mit API-Key, Sprachmodell und Voice ID. Der Reverse-Proxy muss dem Panel das Mikrofon über die Permissions-Policy microphone=(self) erlauben."
       },
       "model": {
         "title": "Modelle und Stimme",
-        "body": "Gehör: ein Transkriptionsmodell wie openai/gpt-transcribe, angesprochen über /audio/transcriptions. Es steht nicht in der Modellauswahl — die liest /models, und dort stehen Chatmodelle. Deshalb ist das Feld ein Textfeld. Eine Falle bei OpenRouter: dieser Endpunkt wird aus Guthaben bezahlt, nicht über deinen hinterlegten Fremdschlüssel — ohne Guthaben chattet der Zugang weiter und hört nicht mehr. Dann hilft MSM_AI_STT_WEG=chat: der Ton geht als input_audio an ein hörfähiges Chatmodell, und davon gibt es kostenlose. Stimme: eleven_flash_v2_5, rund 75 ms Rechenzeit. Die Voice ID stammt aus deiner Stimmenbibliothek und ist ebenfalls ein Textfeld — MSM kennt deine Stimmen nicht und rät deshalb keine."
+        "body": "Spracherkennung: Ein Transkriptionsmodell (z. B. openai/gpt-transcribe über /audio/transcriptions). Stimm-Ausgabe: eleven_flash_v2_5. Die Voice ID stammt aus deiner ElevenLabs-Bibliothek."
       },
       "permission": {
         "title": "Recht ai.voice.use",
@@ -3518,22 +3544,22 @@
       },
       "confirm": {
         "title": "Bestätigen per Stimme",
-        "body": "Die KI sagt, was sie vorhat; daneben zeigt ein Kasten den Namen der Aktion — ohne Knopf, denn entschieden wird gesprochen. Gesprochen ist „ich lösche dann mal den Server\" eindeutig genug, um zuzustimmen, und zu ungenau, um zu wissen, welchen. Ein klares „Ja\" führt aus. Klar heisst wörtlich: die Äußerung muss nichts als eine Zustimmung sein — „ja, aber schau vorher nochmal nach\" ist ein neuer Auftrag und keine. Das gesprochene Ja ersetzt den Klick und keine einzige Prüfung."
+        "body": "Die KI nennt ihr Vorhaben; parallel zeigt ein Hinweisfeld die Aktion. Die Bestätigung erfolgt per Spracheingabe mit einem klaren „Ja“."
       },
       "quota": {
         "title": "Kontingent",
-        "body": "Jede Äußerung ist eine Anfrage — dieselbe Buchung wie eine getippte Nachricht. Ein Rollenlimit „Anfragen pro Minute\" von fünf zerreißt damit ein Gespräch; ohne gesetztes Limit passiert nichts. Dafür greifen Token- und Kostengrenze jetzt genauso wie im Chat. Die Zeichen bei ElevenLabs zählt MSM nicht mit; eine Antwort ist auf 4.000 gedeckelt. Die Abschrift des Gesprochenen zählt MSM ebenfalls nicht mit: sie geht dem Lauf voraus und gehört zu keinem. Beim Anbieter steht sie trotzdem auf der Rechnung."
+        "body": "Jede Spracheingabe zählt als eine Anfrage, identisch zu getippten Chat-Nachrichten. Token- und Kostengrenzen greifen analog zum Chat."
       },
       "relay": {
         "title": "Der Ton läuft durch das Panel",
-        "body": "Browser → Panel → Anbieter, nicht daran vorbei. Bei einer Direktverbindung liefe die Werkzeugschleife über den Browser — er sähe jeden Aufruf und könnte welche erfinden. Auch wann jemand aufgehört hat zu reden, entscheidet das Backend. Die Schlüssel verlassen den Panelprozess nie. Kein zusätzlicher Port; der Reverse-Proxy muss WebSocket-Upgrades unter /api/ durchlassen, was er für die Server-Konsole ohnehin tut."
+        "body": "Verbindungsfluss: Browser → Panel → Anbieter. Bei einer Direktverbindung liefe die Werkzeugausführung über den Client. API-Keys verbleiben stets im Panelprozess."
       },
-      "spokenLimit": "Löschen und das Einspielen eines Backups sind seit dem 16.08.2026 auch per Stimme bestätigbar — der Betreiber hat das ausdrücklich so entschieden. Das Restrisiko: im Audit steht danach eine gesprochene Zustimmung, und wer im Raum mithört, kann sie aussprechen. Wem das zu weit geht, nimmt ai.voice.use aus der Rolle. Gesprochenes geht als Ton an den Chatanbieter, der Antworttext an ElevenLabs; deren EU-Datenresidenz ist Enterprise-Kunden vorbehalten."
+      "spokenLimit": "Löschen und Backup-Wiederherstellungen können per Stimme bestätigt werden, wenn der Betreiber dies freigibt. Im Audit-Protokoll wird die gesprochene Zustimmung dokumentiert."
     }
   },
   "docsOAuth": {
     "title": "OAuth & Social Login",
-    "subtitle": "Externe Identitäts-Provider für den Login einbinden.",
+    "subtitle": "Externe Identitäts-Provider für die Anmeldung konfigurieren.",
     "tocTitle": "Inhalt",
     "toc": {
       "intro": "Was ist OAuth im MSM?",
@@ -3543,7 +3569,7 @@
       "troubleshooting": "Troubleshooting"
     },
     "intro": {
-      "body": "OAuth / OIDC erlaubt Login mit externen Identitäts-Providern (IdP). Das MSM entscheidet im Backend, ob ein User registriert, verknüpft oder nur 2FA-genehmigt wird — das Frontend zeigt nur die verfügbaren Provider an und startet den Flow."
+      "body": "OAuth / OIDC ermöglicht die Anmeldung mit externen Identity-Providern (IdP). Das MSM-Backend prüft und entscheidet, ob ein Benutzer registriert, verknüpft oder zugelassen wird."
     },
     "presets": {
       "title": "Preset-Übersicht",
@@ -3568,7 +3594,7 @@
       "title": "Sicherheit & Datenminimierung",
       "rule1": "OAuth liefert nur Identität. Berechtigungen vergibt ausschließlich das MSM-Backend.",
       "rule2": "Client-Secrets werden niemals im Klartext ans Frontend geschickt. Das UI zeigt nur eine Maske (****1234).",
-      "rule3": "PKCE (S256) ist für alle Provider aktiv — verhindert Authorization-Code-Interception.",
+      "rule3": "PKCE (S256) ist für alle Provider aktiv (schützt vor Authorization-Code-Interception).",
       "rule4": "State-Cookie ist HttpOnly + Secure + SameSite=Lax, 10 Minuten gültig und Fernet-encrypted.",
       "rule5": "Hat ein User 2FA aktiv, wird der OAuth-Login in einer 5-Minuten-Challenge pausiert. Der User muss den 2FA-Code explizit bestätigen.",
       "rule6": "E-Mail-Verifikation wird standardmäßig erzwungen: User mit nicht-verifizierter IdP-E-Mail werden abgelehnt (Schalter im UI).",
@@ -3608,7 +3634,7 @@
   "oauth_unknown": "OAuth-Login fehlgeschlagen.",
   "webhook": {
     "outTitle": "Webhooks an Drittsysteme",
-    "outSubtitle": "MSM schickt Status- und Spielerzahl-Updates aktiv an eine URL, die du hier hinterlegst — z. B. ein Discord-Bot, der den Server-Status anzeigt.",
+    "outSubtitle": "MSM sendet Status- und Spielerzahl-Updates an die hinterlegte URL, beispielsweise für Discord-Bots oder externe Monitoring-Dienste.",
     "add": "Webhook hinzufügen",
     "empty": "Noch keine Webhooks konfiguriert. Klicke oben auf „Webhook hinzufügen“, um einen anzulegen.",
     "label": "Bezeichnung (optional)",
@@ -3624,7 +3650,7 @@
     "rotate": "Secret rotieren",
     "rotated": "Secret rotiert",
     "rotateTitle": "Webhook-Secret rotieren?",
-    "rotateMsg": "Das neue Secret wird einmalig angezeigt. Du musst es im Empfänger (Bot, Monitor) aktualisieren — sonst empfängt der nichts mehr.",
+    "rotateMsg": "Das neue Secret wird einmalig angezeigt. Bitte im Empfänger (Bot, Monitoring) aktualisieren, da alte Signaturen abgewiesen werden.",
     "pause": "Pausieren",
     "resume": "Fortsetzen",
     "disable": "Deaktivieren",
@@ -3638,7 +3664,7 @@
     "lastDelivery": "Letzte Zustellung",
     "test": "Test senden",
     "testHintDisabled": "Webhook muss aktiv sein für Test-Send",
-    "testQueued": "Test-Event versendet — Antwort erscheint im Live-Feed",
+    "testQueued": "Test-Event versendet. Antwort erscheint im Live-Feed.",
     "testFailed": "Test konnte nicht versendet werden",
     "lastUsed": "Zuletzt benutzt",
     "secretNew": "Neues Webhook-Secret",
@@ -3652,7 +3678,7 @@
   },
   "panelBackups": {
     "title": "Panel-Backups",
-    "subtitle": "Sicherungen des MSM-Panels (Datenbank + Konfiguration)",
+    "subtitle": "Sicherungen des MSM-Panels (Datenbank und Konfiguration).",
     "create": "Panel-Backup erstellen",
     "created": "Panel-Backup erfolgreich erstellt",
     "confirmDelete": "Panel-Backup wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
@@ -3686,7 +3712,7 @@
     "s3ItemEncryption": "Verschlüsselung erfolgt vor dem Upload clientseitig (AES-256-GCM)",
     "s3ItemZeroKnowledge": "S3-Anbieter kann ausschließlich verschlüsselte Daten einsehen (Zero-Knowledge)",
     "s3ItemPassword": "Entschlüsselung ist nur mit dem auf dieser Instanz gesetzten Backup-Passwort möglich",
-    "s3ItemLocalOnly": "Keine Konfiguration: Backups verbleiben lokal — es werden keine Daten an Dritte übertragen",
+    "s3ItemLocalOnly": "Ohne S3-Konfiguration verbleiben Backups lokal. Es werden keine Daten an Dritte übertragen.",
     "section4Updated": "Es erfolgt keine Weitergabe von personenbezogenen Daten an Dritte. Technisch bedingt können verschlüsselte Backup-Daten auf externem, S3-kompatiblem Speicher abgelegt werden, sofern der Administrator dies konfiguriert (siehe Abschnitt 6). In diesem Fall erhält der Speicher-Anbieter ausschließlich verschlüsselte Daten."
   },
   "privacyNotice": {
@@ -3758,7 +3784,7 @@
           "credentials": "Persönliche und zentrale Provider-API-Keys werden über DIS kontextgebunden verschlüsselt und nach dem Speichern nur als Konfigurationsstatus beziehungsweise Maske angezeigt",
           "usage": "Provider, Modell, Tokenreservierung, tatsächlicher oder konservativ geschätzter Verbrauch und Zeitpunkte werden zur Kontingentdurchsetzung gespeichert; Preiswerte werden ohne belastbare Preisquelle nicht behauptet",
           "memory": "Optionale Memory-Einträge werden verschlüsselt und an ihren Bereich gebunden gespeichert, sind jederzeit einsehbar und löschbar. Es gibt fünf Bereiche: persönliche und persönliche serverbezogene Einträge sieht niemand außer dem Nutzer selbst; teambezogene sehen alle Mitglieder des jeweiligen Teams; das Wissen eines Servers sehen alle, die diesen Server sehen dürfen, und es bleibt bestehen, wenn der Verfasser das Panel verlässt; panelweite Einträge sieht jeder Nutzer des Panels",
-          "memoryConsent": "Das persönliche Gedächtnis ist standardmäßig ausgeschaltet und wird erst nach ausdrücklicher Zustimmung im Chat aktiv; die Zustimmung ist jederzeit widerrufbar und umfasst auch die eigenen serverbezogenen Notizen. Geteilte Bereiche (Team, Server, panelweit) hängen nicht an dieser Zustimmung, sondern an Berechtigungen – sie enthalten Betriebswissen und keine Angaben zur Person. Die Verschlüsselung schützt die Datenbank im Ruhezustand; der Klartext gemerkter Einträge wird bei jeder Anfrage an den gewählten Modellanbieter übertragen",
+          "memoryConsent": "Das persönliche Gedächtnis ist standardmäßig deaktiviert und wird erst nach ausdrücklicher Zustimmung im Chat aktiv. Die Zustimmung ist jederzeit widerrufbar und umfasst auch eigene serverbezogene Notizen. Geteilte Bereiche (Team, Server, panelweit) enthalten Betriebswissen ohne Personenbezug.",
           "attachments": "Freigegebene Text-, Konfigurations-, Log- und Bildanhänge werden größen- und typgeprüft, verschlüsselt im Panel gespeichert und zusammen mit der Unterhaltung an den gewählten Modellanbieter übertragen",
           "autonomy": "Der autonome Modus ist optional und muss pro Server oder panelweit ausdrücklich freigegeben werden; freigegebene Aktionen laufen ohne weitere Rückfrage, werden aber unverändert gegen die Berechtigungen des Nutzers geprüft und vollständig im Audit-Log als automatisch ausgeführt festgehalten",
           "tools": "Beim Einsatz von Werkzeugen können begrenzte, redigierte Ausschnitte aus Serverlogs, Konfigurationsdateien, Mod- und Backup-Listen sowie Guardian-Vorfällen an den Modellanbieter übertragen werden; diese Ergebnisse werden für Rückfragen im selben Chat gespeichert und mit dem Chat gelöscht",
@@ -4454,7 +4480,7 @@
   "server": {
     "authSetup": {
       "required": "Setup-Autorisierung erforderlich",
-      "instructions": "Im Konsolen-Tab erscheint eine URL — bitte im Browser öffnen und Anmeldung abschließen. Der Server startet danach automatisch.",
+      "instructions": "Im Konsolen-Tab erscheint ein Autorisierungs-Link. Bitte im Browser öffnen und die Anmeldung abschließen. Der Server startet danach automatisch.",
       "cancel": "Abbrechen",
       "cancelled": "Auth-Setup abgebrochen",
       "cancelFailed": "Auth-Setup konnte nicht abgebrochen werden"
@@ -4462,10 +4488,10 @@
   },
   "hoster": {
     "title": "Hoster-Anbindung",
-    "description": "Verbindet einen externen Shop mit MSM. Der Shop meldet nur den gewünschten Vertragszustand; Servererstellung, Rechte und Lifecycle laufen über dieselbe Logik wie im Panel.",
+    "description": "Verbindet einen externen Shop mit MSM. Der Shop übermittelt den gewünschten Vertragszustand; Servererstellung, Rechte und Lifecycle folgen der regulären Panel-Logik.",
     "docsLink": "Vollständige Referenz für Shop-Entwickler",
     "add": "Integration hinzufügen",
-    "empty": "Noch keine Hoster-Integration angelegt. Self-Hosted-Betrieb funktioniert unverändert ohne diesen Bereich.",
+    "empty": "Noch keine Hoster-Integration angelegt. Der reguläre Betrieb funktioniert ohne diesen Bereich.",
     "integration": "Integration",
     "name": "Name",
     "nameHint": "Anzeigename für die Liste im Panel. Rein beschreibend — technisch wirkt er nirgends.",
@@ -4568,14 +4594,14 @@
   },
   "credentials": {
     "title": "Zugangsdaten",
-    "description": "Hier hinterlegst du eigene Steam-Konten oder GitHub-Token. Der Wert wird verschlüsselt gespeichert und danach nie wieder angezeigt. Zugewiesen wird ein Eintrag erst im jeweiligen Server unter „Zugangsdaten“.",
+    "description": "Hier hinterlegst du eigene Steam-Konten oder GitHub-Tokens. Der Wert wird verschlüsselt gespeichert und danach nicht mehr angezeigt. Die Zuweisung erfolgt am jeweiligen Server unter „Zugangsdaten“.",
     "empty": "Noch keine eigenen Zugangsdaten hinterlegt.",
     "add": "Zugangsdaten hinzufügen",
     "kind": "Art",
     "label": "Bezeichnung",
     "username": "Benutzername",
     "secret": "Geheimnis",
-    "secretHint": "Wird ausschließlich verschlüsselt gespeichert. Nach dem Speichern siehst du nur noch die letzten vier Zeichen — eine Änderung ist jederzeit möglich.",
+    "secretHint": "Wird ausschließlich verschlüsselt gespeichert. Nach dem Speichern sind nur noch die letzten 4 Zeichen sichtbar.",
     "save": "Speichern",
     "saved": "Zugangsdaten gespeichert",
     "deleted": "Zugangsdaten entfernt",
@@ -4621,7 +4647,7 @@
     "subtitle": "Endpunkt-, Webhook- und Signaturreferenz für die Anbindung eines externen Shops.",
     "backToDocs": "Zurück zur Dokumentation",
     "navigationLabel": "Abschnitte dieser Seite",
-    "optionalNote": "Ohne angelegte Integration existiert nichts aus diesem Dokument. Ein Self-Hosted-Betrieb ohne Shop hat keinen offenen Endpunkt, der ohne API-Key etwas tut.",
+    "optionalNote": "Ohne eingerichtete Integration bleibt dieser Bereich inaktiv. Ein Self-Hosted-Betrieb ohne Shop benötigt keine Hoster-Endpunkte.",
     "principle": {
       "title": "Grundprinzip",
       "desiredState": "Der Shop sendet keine Befehle, sondern einen gewünschten Zustand. Statt „starte den Server“ meldet er „dieser Vertrag soll aktiv sein“. Das ist der Kern der Idempotenz: ein Befehl, der wegen eines Timeouts zweimal ankommt, wäre gefährlich — ein Zielzustand, der zweimal ankommt, ist folgenlos.",
@@ -4920,7 +4946,7 @@
   "teams": {
     "eyebrow": "Zusammenarbeit",
     "title": "Teams",
-    "description": "Ein Team teilt KI-Wissen — Skills und Erinnerungen — und kann Serverrechte bündeln. Jeder hat ein persönliches Ein-Mann-Team, damit die KI immer einen Ort zum Lernen hat.",
+    "description": "In Teams teilst du KI-Wissen (Skills und Erinnerungen) und bündelst Serverrechte. Für jeden Benutzer existiert zusätzlich ein persönliches Team als Lernbereich.",
     "create": "Team gründen",
     "created": "Team gegründet.",
     "name": "Teamname",
@@ -4994,7 +5020,7 @@
       "einstellungen": "Einstellungen",
       "abmelden": "Abmelden",
       "menueOeffnen": "Menü öffnen",
-      "keinChatrecht": "Dein Konto hat kein Recht, mit der KI zu chatten (ai.chat.use). Bitte deinen Betreiber, es dir zu geben — vorher bleibt dieses Fenster leer.",
+      "keinChatrecht": "Dein Konto besitzt kein Recht für den KI-Chat (ai.chat.use). Wende dich an deinen Administrator, um die Berechtigung zu erhalten.",
       "gedaechtnis": "Gedächtnis"
     },
     "aktion": {
@@ -5222,7 +5248,7 @@
     },
     "audio": {
       "titel": "Audio",
-      "hinweis": "Welches Mikrofon hört und welcher Lautsprecher spricht — unabhängig vom Windows-Standard. Die Wahl gilt für Wake-Word und Sprachsitzung und bleibt gespeichert.",
+      "hinweis": "Auswahl von Mikrofon und Lautsprecher für Sprachmodus und Aktivierungswort (unabhängig vom Windows-Standard).",
       "eingabe": "Eingabegerät (Mikrofon)",
       "eingabeHinweis": "Fehlt das gewählte Gerät gerade (abgezogen), nimmt die App den Windows-Standard, bis es wieder da ist — die Wahl bleibt bestehen.",
       "ausgabe": "Ausgabegerät (Lautsprecher)",
@@ -5233,13 +5259,13 @@
       "standardSystemMit": "Systemstandard ({{name}})",
       "fehlt": "{{name}} (zurzeit nicht gefunden)",
       "ducking": "Ton absenken (Ducking)",
-      "duckingHinweis": "Spricht die KI, senkt die App die Lautstärke aller anderen Programme um 60 % ab — Musik wird leiser, statt übertönt zu werden. Der Test senkt drei Sekunden lang ab: ohne laufende Musik oder Video ist er unhörbar.",
+      "duckingHinweis": "Während die KI spricht, wird die Lautstärke anderer Programme um 60% abgesenkt.",
       "verarbeitung": "Mikrofon-Verarbeitung",
       "verarbeitungHinweis": "Chromiums eingebaute, lokale Verarbeitung — nichts davon geht ins Netz. Die Vorgaben passen für die meisten Mikrofone.",
       "echo": "Echounterdrückung",
-      "echoHinweis": "Filtert die Stimme der KI aus dem Mikrofon — ohne sie hört sie sich selbst und antwortet auf sich (Laptop ohne Kopfhörer).",
+      "echoHinweis": "Filtert die eigene Tonausgabe aus dem Mikrofonsignal, um Rückkopplungen zu vermeiden.",
       "rauschen": "Rauschunterdrückung",
-      "rauschenHinweis": "Nimmt Lüfter, Brummen und Zimmerrauschen aus dem Signal.",
+      "rauschenHinweis": "Entfernt Hintergrundgeräusche und Lüfterrauschen aus dem Mikrofonsignal.",
       "autogain": "Automatische Pegelanpassung",
       "autogainHinweis": "Gleicht leise und laute Stimmen automatisch an — hilft schwachen Mikrofonen am meisten.",
       "verstaerkung": "Eingangsverstärkung",
@@ -5267,7 +5293,7 @@
   },
   "popups": {
     "title": "Pop-ups & Ankündigungen",
-    "subtitle": "Erstelle wichtige Hinweise und Ankündigungen für alle Benutzer des Panels.",
+    "subtitle": "Wichtige Hinweise und Ankündigungen für Benutzer des Panels verwalten.",
     "newPopup": "Neues Pop-up anlegen",
     "createHeader": "Neues Pop-up erstellen",
     "editHeader": "Pop-up bearbeiten",
