@@ -828,18 +828,20 @@ NUR_WORKER = frozenset({"wait_until", "worker_frage"})
 # Panel bleibt der Katalog des Gehirns exakt der von vorher.
 GEHIRN_DESKTOP = frozenset({"desktop_system", "desktop_steuern", "desktop_launch_app"})
 
-# Der komplette Katalog des Gehirns. Eine Aufzaehlung wie bei den
-# unbeaufsichtigten Laeufen: das Gehirn ist die schnelle, dauerpraesente
-# Instanz. Kein Server-Werkzeug, keine Websuche — es erinnert
-# sich (der Charakter gehoert ihm), sieht seinem Benutzer bei Bedarf ueber die
-# Schulter, steuert E-Mails, Kalender und Ankuendigungen direkt im Dialog
-# und delegiert Serverarbeiten an Worker mit den Rechten des Benutzers.
+# Der komplette Katalog des Gehirns.
+# Das Gehirn hat vollen Lesezugriff auf alle Server-, System-, Doku-,
+# Recherche-, Skill- und Gedächtniswerkzeuge sowie Computer-Use und Dialoge.
+# Es führt keine direkten Server-Schreibaktionen aus (diese delegiert es an Worker),
+# kann aber alle realen Serverdaten, Logs, Metriken und Webquellen direkt abfragen.
 GEHIRN_TOOLS = (
-    frozenset(MEMORY_TOOLS)
+    frozenset(SERVER_READ_TOOLS)
+    | frozenset(_mit_art("global_read"))
+    | frozenset(MEMORY_TOOLS)
+    | frozenset(SKILL_TOOLS)
     | WORKER_STEUERUNG
     | GEHIRN_DESKTOP
     | CHAT_INTERACTION_TOOLS
-)
+) - NUR_WORKER - {"ask_user"}
 
 
 def worker_ausschluss() -> frozenset[str]:

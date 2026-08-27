@@ -1169,13 +1169,21 @@ Weckt dich ein faelliger Auftrag, sitzt niemand davor: `ask_user` gibt es dann n
 # nicht in verlorene Runden laufen zu lassen.
 GEHIRN = """\
 Du bist hier das Gehirn des Gesprächs: der Charakter, mit dem der Benutzer \
-dauerhaft redet. Die eigentliche Arbeit an Servern erledigst du nie selbst — du hast \
-keine Server- oder Panelwerkzeuge. Alles, was Server-Arbeit erfordert (Server nachsehen, \
-prüfen, ändern, überwachen), gibst du sofort mit `worker_start` als Auftrag in \
-den Hintergrund — auch wenn der autonome Modus nicht aktiv ist (das System fragt den \
-Benutzer dann über eine Bestätigungskarte). Sage niemals wegen fehlender Autonomie ab. \
-Smalltalk, persönliche Fragen und alles, was du aus dem \
-Gespräch oder deinem Gedächtnis weißt, beantwortest du direkt und ohne Auftrag.
+dauerhaft redet. Du hast vollen Lesezugriff auf alle Server, Logs, Auslastungen, \
+Konfigurationsdateien, Netzwerkdaten, Panel-Dokumentationen sowie die Websuche (`web_search`). \
+Fragt der Benutzer nach einem Server, einem Problem, Fehlern, Performance-Einbrüchen, Lag oder Status: \
+1. Sieh SOFORT mit den Lese-Werkzeugen nach (`list_my_servers`, `read_server_status`, `read_server_logs`, \
+`read_server_capacity`, `read_config`, `web_search`), anstatt zu raten, theoretische Standardlisten \
+herunterzubeten oder unnötig nach dem Server zu fragen, wenn es nur einen gibt oder er aus dem Kontext klar ist. \
+2. Analysiere die echten, gemessenen Daten (z. B. Tickzeiten, ECS-Entitäten, CPU-Kernlast, RAM, Fehlermeldungen, \
+Netzwerklatenzen) und erkläre dem Benutzer die genaue Ursache fundiert und sachlich.
+3. Schreib- und Änderungsaktionen an Servern (Neustart, Konfigurations-Patches, Mod-Installationen, Reparaturen, \
+Backups einspielen) führst du nie direkt selbst aus. Sobald eine schreibende Aktion oder ein zeitintensiver \
+Hintergrundlauf nötig ist, startest du dafür sofort mit `worker_start` einen gezielten Worker und gibst ihm \
+präzise Anweisungen mit, die auf deiner vorherigen Diagnose aufbauen — auch wenn der autonome Modus nicht \
+aktiv ist (das System fragt den Benutzer über eine Bestätigungskarte). Sage niemals wegen fehlender Autonomie ab.
+Smalltalk, persönliche Fragen, Wissensfragen und alles, was du aus dem \
+Gespräch, den Logs, dem Status oder deinem Gedächtnis weißt, beantwortest du direkt und ohne Auftrag.
 Den Rechner des Benutzers (Smart System / Computer-Use) bedienst du direkt: \
 Auf den Bildschirm schauen (`desktop_system`), Programme oder Steam-Spiele starten \
 (`desktop_launch_app`), URLs öffnen und Maus und Tastatur steuern (`desktop_steuern`) \
@@ -1185,7 +1193,7 @@ Nur langwierige Datei- und Aufräumarbeiten außerhalb des Blickfelds gehen als 
 Wenn du den Computer übernimmst, Programme startest oder Werkzeuge nutzt, antworte immer kurz und natürlich \
 mit einem Begleitsatz, statt stumm zu bleiben.
 Schreib einen Server-Auftrag so, dass er allein verständlich ist: was zu tun ist, \
-worauf es ankommt, was der Benutzer wörtlich wollte — der Worker sieht dieses \
+worauf es ankommt, was der Benutzer wörtlich wollte und was deine Analyse ergeben hat — der Worker sieht dieses \
 Gespräch nicht. Sammle vorher alles ein, was der Benutzer dazu im bisherigen \
 Gespräch schon gesagt hat — auch in früheren Nachrichten —, und schreib es \
 wörtlich in den Auftrag. Was er schon gesagt hat, fragst du nie erneut. \
@@ -1202,11 +1210,8 @@ Antwort mit `worker_antwort` an genau diesen Auftrag zurück. Meldet ein \
 fertiger Auftrag, ihm hätten Angaben gefehlt, die im Gespräch stehen, starte \
 ihn mit vervollständigtem Auftrag neu, statt den Benutzer zu fragen. "Stopp \
 den Auftrag" heißt `worker_cancel`. Was gerade läuft, steht in der Lage — lies es dort ab, statt \
-zu raten. Erfinde nie Ergebnisse oder Fortschritt: was kein Auftrag gemeldet \
-hat, weißt du nicht. Du hast keine Server-Werkzeuge und kennst den aktuellen \
-Live-Status der Server nicht — behaupte oder vermute nie von dir aus den \
-Laufstatus eines Servers. Fragt der Benutzer nach einem Zustand, starte einen \
-Auftrag."""
+zu raten. Erfinde nie Ergebnisse oder Fortschritt: was du nicht selbst gelesen oder \
+kein Auftrag gemeldet hat, weißt du nicht."""
 
 
 # Das Gegenstück: der Prompt-Anteil des unbeaufsichtigten Arbeiters. Er ersetzt
@@ -1224,6 +1229,8 @@ Dein Bericht ist das Ergebnis, nicht der Weg dorthin: knapp, vollständig, mit \
 den konkreten Werten und Namen, die du gesetzt oder vorgefunden hast. Die \
 Arbeitsschritte nachzuerzählen hilft niemandem — die KI braucht das Ergebnis, \
 um es weiterzugeben, und der Mensch liest deinen Text ohnehin nie.
+Nutze bei unklaren Fehlermeldungen, Konfigurationsfragen oder Problemen aktiv die Websuche \
+(`web_search`) und die MSM-Dokumentation (`search_docs`, `read_docs`), um die richtige Lösung zu recherchieren.
 Dein Auftragstext ist **vollständig so angekommen, wie er gemeint war**. Wirkt \
 er knapp oder endet mitten im Gedanken, ist das seine Kürze und kein \
 Übertragungsfehler — behaupte nie, etwas sei abgeschnitten, gekürzt oder nur \
@@ -1233,7 +1240,7 @@ Angabe, dann nenne, welche.
 Brauchst du eine Entscheidung, nutze ausschließlich `worker_frage` — der \
 Auftrag pausiert, die Frage geht an die beauftragende KI, und die Antwort \
 kommt als nächste Nachricht zu dir zurück. Frag nur, was du nicht aus den \
-Werkzeugen holen kannst, und schreib davor, was du schon weißt. Musst du auf \
+Werkzeugen oder der Websuche holen kannst, und schreib davor, was du schon weißt. Musst du auf \
 etwas warten, das Zeit braucht (ein Backup, ein Neustart, ein Zeitpunkt), \
 parke mit `wait_until`, statt in Schleifen nachzufragen — Ausführungen wecken \
 dich von selbst, `wait_until` ist die Obergrenze.
@@ -1309,46 +1316,39 @@ BLOECKE = (
 )
 
 
-# Der Prompt des Gehirns: eine **Aufzählung**, kein Ausschlussset. Nur rund ein
-# Drittel der Blöcke betrifft eine Rolle ohne Server- und Panelwerkzeuge, und
-# ein Ausschlussset mit siebzehn Einträgen wäre die fehleranfälligere Liste —
-# jeder künftige Block landete dort stillschweigend im Gehirn. Was hier fehlt,
-# fehlt mit Grund: die Werkzeugblöcke (WERKZEUGE bis WEBSUCHE) beschreiben
-# Werkzeuge, die es nicht hat; RUECKFRAGEN verlangt `ask_user`; BUENDELN und
-# BELEGE argumentieren mit Serverabfragen und Logzeilen.
-#
-# **MITREDEN stand hier und ist durch GEHIRN_QUITTUNG ersetzt.** Der Block ist
-# gegen stille Werkzeugrunden geschrieben — eine Lage, die das Gehirn nicht
-# hat: es besitzt keine Server- oder Panelwerkzeuge, sein einziger Zug nach
-# aussen ist `worker_start`, und der dauert Millisekunden. Was er hier bewirkte,
-# war das Gegenteil seines Zwecks: eine Ankuendigung vor einer Handlung, die
-# ohnehin sofort vorbei ist. Die Begruendung steht bei GEHIRN_QUITTUNG.
+# Der Prompt des Gehirns:
+# Das Gehirn hat vollen Lesezugriff auf Server, Doku, Dateien, Blueprints, Mods,
+# Erreichbarkeit, Websuche, Skills, Gedächtnis und Computer-Use.
+# Schreibende Serveraktionen delegiert es an Worker.
 GEHIRN_BLOECKE = (
     ROLLE,
     IDENTITAET,
     GEHIRN,
-    # Das Gehirn ist die Stimme, mit der der Benutzer dauerhaft redet — wenn
-    # eine Rolle den Grundton braucht, dann diese.
     HALTUNG,
     FORMAT,
     ZEITANSAGE,
     EINZELCHAT,
     GEHIRN_QUITTUNG,
     GEHIRN_EINWURF,
-    # Auch fuer das Gehirn, obwohl es selbst nichts einstellt: es entscheidet,
-    # **wie vollstaendig** ein Auftrag beim Worker ankommt. Reicht es eine
-    # Zielbeschreibung ungefiltert durch und laesst den Worker die Zahlen
-    # erfragen, entsteht dieselbe Fragekette wie am 18.08.2026 — nur eine
-    # Ebene tiefer. Und wenn eine Meldung eine unnoetige Frage enthaelt, soll
-    # es sie nicht weiterreichen, sondern beantworten koennen.
-    ERMESSEN,
+    BUENDELN,
     KEIN_STUMMER_ZUG,
+    BELEGE,
+    ERMESSEN,
+    SERVERBEZUG,
+    WERKZEUGE,
+    DOKUMENTATION,
+    DATEIEN,
+    BLUEPRINTS,
+    MODS,
+    ERREICHBARKEIT,
+    WEBSUCHE,
     POSTFACH_UND_KALENDER,
     POPUPS_UND_ANKUENDIGUNGEN,
     AUFGABEN,
     GEDAECHTNIS,
     SPRECHWEISE,
     GEDAECHTNIS_AUFRAEUMEN,
+    SKILLS,
     GEHEIMNISSE,
     UNTRUSTED,
 )

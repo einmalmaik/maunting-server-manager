@@ -644,18 +644,13 @@ def test_der_skillblock_nennt_den_fall_ohne_werkzeug() -> None:
         assert "gilt dieser Abschnitt nicht" in ai_prompt.build(rolle=rolle), rolle
 
 
-def test_the_brain_keeps_the_memory_not_the_skills() -> None:
-    """Das Gedaechtnis gehoert zum Charakter, und der ist das Gehirn.
-
-    Umgekehrte Aufteilung: Memory ja, `learn_skill` nein. Das Gehirn arbeitet
-    nicht selbst — es hat keine Server- oder Panelwerkzeuge und damit auch
-    keine Gelegenheit, etwas Wiederverwendbares herauszufinden.
-    """
+def test_the_brain_has_memory_and_skills() -> None:
+    """Das Gehirn nutzt Gedächtnis und Skills für die Unterhaltung und Diagnose."""
     gehirn = ai_prompt.build(rolle="gehirn")
 
     assert ai_prompt.GEDAECHTNIS in gehirn
     assert ai_prompt.GEDAECHTNIS_AUFRAEUMEN in gehirn
-    assert ai_prompt.SKILLS not in gehirn
+    assert ai_prompt.SKILLS in gehirn
 
 
 def test_memory_is_triggered_by_worth_not_by_wording() -> None:
@@ -773,12 +768,13 @@ def test_einzelchat_enthaelt_begruessungsregeln_und_momentaufnahmen_grenze() -> 
     assert "Server koennen in der Zwischenzeit gestartet, gestoppt oder repariert worden sein" in prompt
 
 
-def test_gehirn_darf_keine_serverzustaende_vermuten() -> None:
-    """Das Gehirn hat keine Werkzeuge und darf keinen Laufstatus erfinden."""
+def test_gehirn_hat_lesezugriff_und_prueft_sofort() -> None:
+    """Das Gehirn hat Lesezugriff und prüft Serverzustände sofort mit Lesewerkzeugen nach."""
     gehirn = ai_prompt.build(rolle="gehirn")
 
-    assert "Du hast keine Server-Werkzeuge und kennst den aktuellen Live-Status der Server nicht" in gehirn
-    assert "behaupte oder vermute nie von dir aus den Laufstatus eines Servers" in gehirn
+    assert "Du hast vollen Lesezugriff auf alle Server, Logs, Auslastungen" in gehirn
+    assert "Sieh SOFORT mit den Lese-Werkzeugen nach" in gehirn
+    assert "Erfinde nie Ergebnisse oder Fortschritt: was du nicht selbst gelesen oder" in gehirn
 
 
 

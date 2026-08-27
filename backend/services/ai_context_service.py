@@ -523,11 +523,9 @@ def build_provider_messages(
             gesprochen=gesprochen, rolle=rolle, desktop=herkunft == "desktop", db=db,
         )}
     ]
-    skill_verzeichnis = None
-    if rolle != "gehirn":
-        skill_verzeichnis = _skill_index_message(
-            db, user, query, unbeaufsichtigt and rolle != "worker"
-        )
+    skill_verzeichnis = _skill_index_message(
+        db, user, query, unbeaufsichtigt and rolle != "worker"
+    )
     if skill_verzeichnis is not None:
         result.append(skill_verzeichnis)
     if user is not None and rolle != "worker":

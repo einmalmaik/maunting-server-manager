@@ -78,19 +78,17 @@ def test_die_rollen_teilen_bloecke_statt_sie_zu_kopieren() -> None:
     assert not (eigene & set(ai_prompt.BLOECKE))
 
 
-def test_das_gehirn_liest_keine_werkzeugbloecke() -> None:
+def test_das_gehirn_prompt_aufbau() -> None:
     prompt = ai_prompt.build(rolle="gehirn")
 
     assert ai_prompt.GEHIRN in prompt
     assert ai_prompt.GEDAECHTNIS in prompt
     assert ai_prompt.UNTRUSTED in prompt
-    # Werkzeuge, die es nicht hat, sollen ihm auch nicht beschrieben werden —
-    # jeder Versuch, sie zu benutzen, kostete eine Runde.
+    assert ai_prompt.WERKZEUGE in prompt
+    assert ai_prompt.SKILLS in prompt
     assert ai_prompt.RUECKFRAGEN not in prompt
-    assert ai_prompt.WERKZEUGE not in prompt
     assert ai_prompt.GUARDIAN not in prompt
-    assert ai_prompt.AUFGABEN not in prompt
-    assert ai_prompt.SKILLS not in prompt
+    assert ai_prompt.AUFGABEN in prompt
 
 
 def test_der_worker_fragt_nie_mit_ask_user() -> None:
@@ -253,11 +251,12 @@ def _katalog(rolle: str, *, guardian=None) -> set[str]:
 
 
 class TestKatalogschnitt:
-    def test_das_gehirn_bekommt_nur_gedaechtnis_und_steuerung(self) -> None:
+    def test_das_gehirn_bekommt_lesewerkzeuge_gedaechtnis_und_steuerung(self) -> None:
         namen = _katalog("gehirn")
         assert namen == {
             "remember", "search_memory", "forget_memory",
             "worker_start", "worker_cancel", "worker_antwort",
+            "list_my_servers", "read_server_status",
         }
 
     def test_der_worker_verliert_gedaechtnis_steuerung_und_ask_user(self) -> None:
@@ -335,18 +334,16 @@ def _benutzer_mit_fenster(db: Session, name: str):
     return user, fenster
 
 
-def test_die_spiegelschranke_haelt_das_gehirn_von_servern_fern(db: Session) -> None:
+def test_die_spiegelschranke_haelt_worker_spezifische_tools_vom_gehirn_fern(db: Session) -> None:
     """Der Katalog ist eine Bitte — die Schranke sitzt am Aufruf selbst.
 
-    Ein Gehirn-Lauf, dessen Modell einen Server-Werkzeugnamen halluziniert,
-    bekommt eine Absage als Werkzeugergebnis; ausgefuehrt wird nichts. Der
-    Test laesst die Ausfuehrung absichtlich explodieren — sie darf nie
-    erreicht werden.
+    Ein Gehirn-Lauf, dessen Modell ein reines Worker-Werkzeug (wie worker_frage) aufruft,
+    bekommt eine Absage als Werkzeugergebnis; ausgefuehrt wird nichts.
     """
     user, fenster = _benutzer_mit_fenster(db, "spiegel")
 
     def _niemals(*args, **kwargs):
-        raise AssertionError("Ein Gehirn-Lauf darf kein Werkzeug ausfuehren")
+        raise AssertionError("Dieses Werkzeug darf im Gehirn nicht ausgefuehrt werden")
 
     with patch.object(ai_stream_service, "_werkzeug_ausfuehren", _niemals):
         followup, used, nachtrag = asyncio.run(
@@ -354,8 +351,8 @@ def test_die_spiegelschranke_haelt_das_gehirn_von_servern_fern(db: Session) -> N
                 user_id=user.id,
                 conversation_id=fenster.id,
                 tool_calls=[ProviderToolCall(
-                    id="call1", name="read_server_status",
-                    arguments={"server_id": 1},
+                    id="call1", name="worker_frage",
+                    arguments={"frage": "Welcher Port?"},
                 )],
                 rolle="gehirn",
                 anlagenwissen_noetig=False,
@@ -416,8 +413,8 @@ def test_alle_vier_schnitte_sortieren_aus_statt_zu_werfen(db: Session) -> None:
         task_id="t1", kind="report", channel="email", title="Nachtlauf",
     )
     faelle = {
-        "Gehirn": dict(rolle="gehirn", name="read_server_status",
-                       arguments={"server_id": 1}),
+        "Gehirn": dict(rolle="gehirn", name="worker_frage",
+                       arguments={"frage": "x"}),
         "Voll-Betrieb": dict(rolle="voll", name="worker_start",
                              arguments={"auftrag": "x"}),
         "Worker": dict(rolle="worker", name="search_memory",

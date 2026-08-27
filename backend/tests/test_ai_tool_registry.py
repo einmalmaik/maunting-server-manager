@@ -458,36 +458,21 @@ def test_die_backup_pflicht_gilt_nur_fuer_erreichbare_werkzeuge() -> None:
 # ── Gehirn und Worker (docs/agentic-framework.md) ─────────────────────────
 
 
-def test_das_gehirn_hat_nie_server_werkzeuge() -> None:
-    """Die Rollentrennung ist die Sicherheitsinvariante von v3.
-
-    Das Gehirn ist die schnelle, dauerpraesente Instanz. Sein Katalog besteht
-    aus drei Dingen: dem Gedaechtnis (der Charakter gehoert ihm), den drei
-    Handgriffen, Auftraege zu deklarieren, ihnen Antworten zuzustellen und sie
-    einzufangen — und seit dem 23.08.2026 dem Rechner, vor dem der Benutzer
-    sitzt (`GEHIRN_DESKTOP`). Kein Lese-, kein Schreib-, kein Frage-Werkzeug
-    eines Servers — auch kein kuenftiges: die Menge ist eine Aufzaehlung, kein
-    Filter.
-
-    Der Satz "das Gehirn darf strukturell keine Aussenwirkung entfalten" stand
-    hier bis zu diesem Tag und ist bewusst weg: `desktop_steuern` bewegt eine
-    echte Maus. Was traegt, ist die engere und wahre Fassung darunter — kein
-    Server, kein Vorschlag.
+def test_das_gehirn_hat_alle_lesewerkzeuge_aber_keine_server_schreibwerkzeuge() -> None:
+    """Das Gehirn hat vollen Lesezugriff auf alle Server und globale Read-Tools.
+    Server-Schreibwerkzeuge bleiben dem Worker vorbehalten.
     """
-    assert ai_tool_registry.GEHIRN_TOOLS == (
-        ai_tool_registry.MEMORY_TOOLS
-        | {"worker_start", "worker_cancel", "worker_antwort"}
-        | {"desktop_system", "desktop_steuern", "desktop_launch_app"}
-        | ai_tool_registry.CHAT_INTERACTION_TOOLS
-    )
-    assert ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.SERVER_READ_TOOLS == set()
+    assert ai_tool_registry.SERVER_READ_TOOLS <= ai_tool_registry.GEHIRN_TOOLS
+    assert "web_search" in ai_tool_registry.GEHIRN_TOOLS
+    assert "read_docs" in ai_tool_registry.GEHIRN_TOOLS
+    assert "list_my_servers" in ai_tool_registry.GEHIRN_TOOLS
+    assert "read_skill" in ai_tool_registry.GEHIRN_TOOLS
     assert ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.SERVER_WRITE_TOOLS == set()
     assert (
         ai_tool_registry.GEHIRN_TOOLS & ai_tool_registry.WRITE_TOOLS
         == ai_tool_registry.CHAT_INTERACTION_TOOLS & ai_tool_registry.WRITE_TOOLS
     )
     assert "ask_user" not in ai_tool_registry.GEHIRN_TOOLS
-    assert "web_search" not in ai_tool_registry.GEHIRN_TOOLS
 
 
 def test_dem_gehirn_gehoert_das_sehen_und_zeigen_nicht_die_arbeit() -> None:
@@ -512,11 +497,12 @@ def test_aus_dem_panel_bleibt_das_gehirn_ohne_rechner() -> None:
     aus_dem_panel = ai_tool_registry.herkunft_schnitt(
         ai_tool_registry.GEHIRN_TOOLS, "panel"
     )
-    assert aus_dem_panel == (
-        ai_tool_registry.MEMORY_TOOLS
-        | {"worker_start", "worker_cancel", "worker_antwort"}
-        | ai_tool_registry.CHAT_INTERACTION_TOOLS
-    )
+    assert ai_tool_registry.GEHIRN_DESKTOP & aus_dem_panel == set()
+    assert ai_tool_registry.SERVER_READ_TOOLS <= aus_dem_panel
+    assert ai_tool_registry.MEMORY_TOOLS <= aus_dem_panel
+    assert {"worker_start", "worker_cancel", "worker_antwort"} <= aus_dem_panel
+    assert ai_tool_registry.CHAT_INTERACTION_TOOLS <= aus_dem_panel
+
     aus_der_app = ai_tool_registry.herkunft_schnitt(
         ai_tool_registry.GEHIRN_TOOLS, "desktop"
     )

@@ -131,15 +131,9 @@ def lauf_beginnen(
         # davor. Einmal ermittelt und zweimal gebraucht — fuer den Kontext
         # dieser Nachricht und als Startwert des neuen Laufs.
         #
-        # **Nie fuer das Gehirn.** Der Dauerchat traegt Serverbezuege aus der
-        # Ein-Modell-Zeit, und ueber `server_id` zoege der Kontext das
-        # Anlagenwissen (`server_shared`) in eine Rolle, die strukturell kein
-        # Serverwissen hat (§7 Datenminimierung).
-        serverbezug = None
-        if rolle != "gehirn":
-            serverbezug = ai_run_service.letzter_serverbezug(
-                db, conversation_id=conversation.id
-            )
+        serverbezug = ai_run_service.letzter_serverbezug(
+            db, conversation_id=conversation.id
+        )
         provider_messages = build_provider_messages(
             db, conversation, query=safe_content, server_id=serverbezug,
             context_chars=context_chars, unbeaufsichtigt=unbeaufsichtigt,
