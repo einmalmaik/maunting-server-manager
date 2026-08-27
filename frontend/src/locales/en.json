@@ -564,7 +564,8 @@
         "list_my_servers": "List servers",
         "worker_start": "Start worker research",
         "worker_cancel": "Cancel worker",
-        "web_search": "Web search"
+        "web_search": "Web search",
+        "analyze_region": "Regional and satellite analysis"
       },
       "type": {
         "read": "Read access",
@@ -755,7 +756,8 @@
       "propose_guardian_tuning": "Guardian tuning prepared",
       "propose_restart_schedule_set": "Restart schedule prepared",
       "propose_backup_schedule_set": "Backup schedule prepared",
-      "propose_file_delete": "File deletion prepared"
+      "propose_file_delete": "File deletion prepared",
+      "analyze_region": "Analyzed the region and satellite data"
     },
     "toolsRunning": {
       "ask_user": "Asking a quick question",
@@ -835,7 +837,8 @@
       "worker_cancel": "Stopping the worker",
       "worker_frage": "Asking you a question",
       "worker_start": "Starting a worker in the background",
-      "set_agent_name": "Taking on my new name"
+      "set_agent_name": "Taking on my new name",
+      "analyze_region": "Analyzing the region and satellite data"
     },
     "errors": {
       "codes": {
