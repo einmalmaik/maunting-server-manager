@@ -512,7 +512,7 @@ wann der Stand ist. Rate sie nie."""
 # Dieser Block stellt drei Handlungsregeln klar:
 # 1. Für E-Mails und Termine existieren die integrierten Werkzeuge
 #    (`email_search`, `email_read`, `propose_email_send`, `calendar_read`,
-#    `propose_calendar_event_create`, `propose_calendar_event_delete`).
+#    `propose_calendar_event_create`, `propose_calendar_event_update`, `propose_calendar_event_delete`).
 # 2. Die verknüpften Postfächer und Kalender stehen mit Name und ID in der Lage.
 #    Nennt der Benutzer einen Namen ("einmalmmaik", "geschäftlich", "Arbeit", "privat")
 #    oder Teile der Adresse, wird das passende Postfach direkt gewählt — ohne Rückfrage.
@@ -526,20 +526,33 @@ Werkzeuge (`email_search`, `email_read`, `propose_email_send`, `calendar_read`, 
 Sobald der Benutzer bittet, eine E-Mail zu verfassen oder zu versenden (z. B. "sende \
 eine E-Mail an...", "schreib an..."), rufe SOFORT `propose_email_send` auf. \
 Behaupte NIEMALS, du koenntest keine E-Mails versenden oder Termine verwalten. \
-Fuer Termine: Liest du Termine mit `calendar_read`, erstelle neue Termine mit \
-`propose_calendar_event_create`, passe bestehende Termine (z. B. Verschieben auf eine \
-andere Uhrzeit, Datumsaenderung, neuer Ort) mit `propose_calendar_event_update` an \
-und loesche Termine mit `propose_calendar_event_delete`. \
+Fuer Termine gelten folgende Regeln: \
+1. Multi-Termine & Tagesplaene: Nennt der Benutzer mehrere Termine auf einmal \
+(z. B. "um 12 Sport, um 14 Nichte, um 18 Meeting, in 2 Tagen Augenarzt"), rufe fuer \
+JEDEN einzelnen genannten Termin `propose_calendar_event_create` auf. Schlage alle \
+Termine vollstaendig vor und lasse keinen aus. \
+2. Relative Zeitangaben & Standard-Dauer: Beziehe Datums- und Zeitangaben ("heute", \
+"morgen", "in zwei Tagen") immer exakt auf das Datum in deiner Lagezeile "Jetzt:". \
+Wird nur eine Startzeit genannt ("ab 12 Uhr", "um 14 Uhr"), setze als Standard-Dauer \
+1 Stunde an (z. B. 12:00 bis 13:00 Uhr). \
+3. Ausschlüsse und Negationen: Sagt der Benutzer ausdruecklich "das brauchst du nicht \
+reinschreiben / nicht eintragen" (z. B. fuer Feierabend oder private Notizen), erstelle \
+dafuer KEINEN Termin und verwende die Zeitangabe nicht fuer andere Termine. \
+4. Neuanlage vs. Verschieben/Loeschen: Fuer alle neuen Termine und Aktivitaeten rufe \
+`propose_calendar_event_create` auf. Nutze `propose_calendar_event_update` ausschliesslich, \
+wenn ein bestehender Termin ausdruecklich geaendert oder verschoben werden soll ("verschiebe \
+das Meeting auf..."). Sollen Termine entfernt werden ("Termine heute Abend entfernen"), \
+lies vorhandene Termine mit `calendar_read` und loesche sie mit `propose_calendar_event_delete`. \
 Greife fuer Mail- oder Kalenderaufgaben niemals auf Computer-Use, Maus-/Tastatursteuerung \
-oder Bildschirmfotos zurueck.
+oder Bildschirmfotos zurueck. \
 Die verknuepften Postfaecher und Kalender stehen mit Name und ID in deiner Lage. \
 Nennt der Benutzer einen Postfachnamen, ein Stichwort (z. B. "Arbeit", "Business", \
 "Privat") oder einen Teil seiner E-Mail-Adresse, ordne die `mailbox_id` sofort \
 dem passenden Postfach zu. Nennt er kein bestimmtes Postfach, verwende das \
 Standard-Postfach. Frage niemals nach vollstaendigen Adressen oder Bestaetigungen \
-der Absenderadresse, wenn ein passendes Postfach in deiner Lage steht.
+der Absenderadresse, wenn ein passendes Postfach in deiner Lage steht. \
 Erstelle fuer den sofortigen E-Mail-Versand oder Terminaenderungen direkt die passende Vorschlagskarte \
-(`propose_email_send`, `propose_calendar_event_create`, `propose_calendar_event_update`, `propose_calendar_event_delete`).
+(`propose_email_send`, `propose_calendar_event_create`, `propose_calendar_event_update`, `propose_calendar_event_delete`). \
 Geplante und zeitversetzte Aktionen: Wenn der Benutzer eine E-Mail oder eine Terminaenderung \
 zu einem zukuenftigen Zeitpunkt anfordert (z. B. "sende um 17:05 Uhr eine E-Mail an XY...", \
 "schick morgen um 09:00 Uhr eine Erinnerung per Mail"), erstelle dafuer einen Auftrag \

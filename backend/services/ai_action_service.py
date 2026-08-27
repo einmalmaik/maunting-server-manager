@@ -1197,7 +1197,7 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_calendar_event_create",
-            "Schlägt einen neuen Termin im verknüpften Kalender vor. "
+            "Schlägt einen neuen Termin im verknüpften Kalender vor (kann mehrfach aufgerufen werden für mehrere Termine in einem Tagesplan; Standard-Dauer 1 Stunde wenn keine Endzeit genannt). "
             "Erfordert die Freigabe des Benutzers.",
             {
                 "title": {
@@ -1235,7 +1235,7 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_calendar_event_update",
-            "Schlägt die Anpassung oder Verschiebung eines bestehenden Termins im Kalender vor (z. B. neue Uhrzeit, geänderter Titel, Ort). "
+            "Schlägt die Anpassung oder Verschiebung eines bestehenden Termins im Kalender vor (nur wenn ein Termin explizit geändert werden soll, für neue Termine propose_calendar_event_create nutzen). "
             "Erfordert die Freigabe des Benutzers.",
             {
                 "event_id": {
