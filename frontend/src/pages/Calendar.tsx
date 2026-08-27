@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import { api } from '@/api/client'
+import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
@@ -458,11 +459,18 @@ export function Calendar() {
     setLoadingFeedUrl(true)
     api<{ feed_url: string; token: string }>('/calendar/feed-url')
       .then((res) => {
-        const fullUrl = `${window.location.origin}${res.feed_url}`
+        const resolved = apiUrl(res.feed_url)
+        const fullUrl = resolved.startsWith('http')
+          ? resolved
+          : `${window.location.origin}${resolved}`
         setFeedUrl(fullUrl)
       })
       .catch(() => {
-        setFeedUrl(`${window.location.origin}/api/calendar/feed.ics`)
+        const fallback = apiUrl('/calendar/feed.ics')
+        const fullUrl = fallback.startsWith('http')
+          ? fallback
+          : `${window.location.origin}${fallback}`
+        setFeedUrl(fullUrl)
       })
       .finally(() => {
         setLoadingFeedUrl(false)

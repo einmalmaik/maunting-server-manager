@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 import re
 from typing import Any
+import urllib.parse
 import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -665,6 +666,11 @@ class CalendarService:
         """Validiert und entschlüsselt ein iCal-Feed-Token über DIS (AES-256-GCM)."""
         if not token:
             return None
+        # URL-Decoding und Reparatur von `+` zu ` ` Ersetzungen durch Query-Parser
+        token = urllib.parse.unquote(token.strip())
+        if " " in token:
+            token = token.replace(" ", "+")
+
         try:
             decrypted = DisClient.decrypt(token, aad="msm:calendar:feed")
             user_id_str, pwd_salt = decrypted.split(":", 1)

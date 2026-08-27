@@ -6,6 +6,7 @@ Ermöglicht das Anzeigen, Erstellen, Bearbeiten, Löschen und Exportieren von Te
 from __future__ import annotations
 
 from typing import Any
+import urllib.parse
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -189,7 +190,8 @@ def get_calendar_feed_url(
     """Liefert die signierte Feed-URL für externe Kalender-Abonnements (z. B. Google Kalender, Apple, Outlook)."""
     _check_calendar_enabled()
     token = CalendarService.generate_feed_token(user)
-    return {"feed_url": f"/api/calendar/feed.ics?token={token}", "token": token}
+    encoded_token = urllib.parse.quote(token, safe="")
+    return {"feed_url": f"/api/calendar/feed.ics?token={encoded_token}", "token": token}
 
 
 @router.get("/feed.ics")
