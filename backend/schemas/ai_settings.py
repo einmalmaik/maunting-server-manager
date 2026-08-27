@@ -94,6 +94,19 @@ class AiWebSearchStatus(BaseModel):
     configured: bool
 
 
+class AiSatelliteCredentialsUpdate(BaseModel):
+    """Zugangsdaten für Copernicus Data Space Ecosystem (CDSE)."""
+
+    client_id: SecretStr | None = Field(default=None, max_length=256)
+    client_secret: SecretStr | None = Field(default=None, max_length=512)
+
+
+class AiSatelliteStatus(BaseModel):
+    """Nur der Zustand — Zugangsdaten verlassen das Backend nie."""
+
+    configured: bool
+
+
 class AiLearningPolicyUpdate(BaseModel):
     """Wie die KI global gueltige Skills anlegen darf.
 

@@ -351,6 +351,42 @@ export interface AiWebSearchStatus {
   configured: boolean
 }
 
+/** Nur der Zustand — Satelliten-Zugangsdaten verlassen das Backend nie. */
+export interface AiSatelliteStatus {
+  configured: boolean
+}
+
+export interface AiSatelliteScene {
+  id: string
+  mission: string
+  datetime: string
+  cloud_cover_percent: number | null
+  preview_url: string
+}
+
+export interface AiRegionalAnalysis {
+  status: 'success' | 'error'
+  location: string
+  country: string
+  coordinates: {
+    latitude: number
+    longitude: number
+    bbox: [number, number, number, number]
+  }
+  weather?: {
+    temperature_celsius: number
+    apparent_temperature_celsius: number
+    humidity_percent: number
+    precipitation_mm: number
+    wind_speed_kmh: number
+    condition: string
+  } | null
+  satellite?: {
+    available: boolean
+    scenes: AiSatelliteScene[]
+  } | null
+}
+
 export interface AiGuardianPolicy {
   enabled: boolean
 }
@@ -1104,6 +1140,12 @@ export const aiApi = {
     method: 'PUT',
     body: JSON.stringify({ api_key: apiKey || null }),
   }),
+  getSatelliteStatus: () => api<AiSatelliteStatus>('/ai/settings/satellite'),
+  setSatelliteCredentials: (clientId: string, clientSecret: string) =>
+    api<AiSatelliteStatus>('/ai/settings/satellite', {
+      method: 'PUT',
+      body: JSON.stringify({ client_id: clientId || null, client_secret: clientSecret || null }),
+    }),
   /**
    * Eine Unterhaltung. Wird beim ersten Aufruf serverseitig angelegt.
    *

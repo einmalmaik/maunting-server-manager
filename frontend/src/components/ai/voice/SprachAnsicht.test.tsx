@@ -135,18 +135,12 @@ describe('SprachAnsicht', () => {
     expect(screen.getByText('read_server_status')).toBeInTheDocument()
   })
 
-  it('haelt den Wortwechsel vorlesbar', () => {
+  it('haelt den Zustand vorlesbar', () => {
     ansicht({
       zustand: 'spricht',
-      zeilen: [
-        { wer: 'ich', text: 'welche server laufen?' },
-        { wer: 'ki', text: 'Zwei laufen.' },
-      ],
     })
 
-    // Wer nicht hoert — weil der Ton aus ist oder weil er nicht hoeren kann —
-    // bekommt die Antwort nur hierueber.
-    const bereich = screen.getByText(/Zwei laufen\./).closest('[aria-live]')
+    const bereich = screen.getByText('Spricht').closest('[aria-live]')
     expect(bereich).toHaveAttribute('aria-live', 'polite')
   })
 

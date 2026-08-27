@@ -564,7 +564,8 @@
         "list_my_servers": "Server-Übersicht lesen",
         "worker_start": "Worker-Recherche starten",
         "worker_cancel": "Worker abbrechen",
-        "web_search": "Web-Recherche"
+        "web_search": "Web-Recherche",
+        "analyze_region": "Regions- und Satellitenanalyse"
       },
       "type": {
         "read": "Lese-Zugriff",
@@ -719,6 +720,7 @@
       "send_test_email": "Testmail verschickt",
       "wait_until": "Wartezeit eingeplant",
       "web_search": "Im Web gesucht",
+      "analyze_region": "Region und Satellitendaten analysiert",
       "worker_antwort": "Antwort an den Worker übergeben",
       "worker_cancel": "Worker abgebrochen",
       "worker_frage": "Rückfrage gestellt",
@@ -831,6 +833,7 @@
       "send_test_email": "Ich verschicke eine Testmail",
       "wait_until": "Ich lege eine Wartezeit ein",
       "web_search": "Ich suche im Web",
+      "analyze_region": "Ich analysiere die Region und Satellitendaten",
       "worker_antwort": "Ich gebe deine Antwort an den Worker weiter",
       "worker_cancel": "Ich halte den Worker an",
       "worker_frage": "Ich stelle dir eine Frage",
@@ -1023,6 +1026,33 @@
         "load": "Zustand der Websuche konnte nicht geladen werden.",
         "save": "Suchschlüssel konnte nicht gespeichert werden."
       }
+    },
+    "satellite": {
+      "title": "Satellitendaten (Copernicus / Sentinel)",
+      "description": "Zugangsdaten für das Copernicus Data Space Ecosystem (CDSE). Ermöglicht der KI den Abruf von Erdbeobachtungs- und Sentinel-Satellitendaten bei regionalen Analysen.",
+      "clientId": "Client ID",
+      "clientIdPlaceholder": "Copernicus CDSE Client ID",
+      "clientSecret": "Client Secret",
+      "clientSecretPlaceholder": "Copernicus CDSE Client Secret",
+      "configured": "Zugangsdaten hinterlegt; neue Werte eingeben, um sie zu ersetzen",
+      "removeConfirm": "Möchtest du die hinterlegten Satelliten-Zugangsdaten wirklich löschen? Die Satellitenfunktion wird danach deaktiviert.",
+      "saved": "Satelliten-Zugangsdaten gespeichert.",
+      "removed": "Satelliten-Zugangsdaten entfernt.",
+      "hint": "Die Zugangsdaten werden sicher verschlüsselt gespeichert und verlassen das Backend niemals.",
+      "errors": {
+        "load": "Satelliten-Konfiguration konnte nicht geladen werden.",
+        "save": "Satelliten-Zugangsdaten konnten nicht gespeichert werden."
+      }
+    },
+    "geo": {
+      "panelTitle": "Regionale Informationsübersicht",
+      "region": "Region",
+      "close": "Panel schließen",
+      "weather": "Wetterlage",
+      "satelliteData": "Satellitendaten",
+      "backToChat": "Zurück zur Vollansicht",
+      "toggleGlobe": "3D-Globus ein-/ausblenden",
+      "globe": "3D-Globus"
     },
     "usage": {
       "title": "KI-Nutzung",

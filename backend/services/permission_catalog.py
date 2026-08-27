@@ -65,6 +65,9 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # Durchgesetzt in ai_action_service._execute_web_search. Ohne hinterlegten
     # Suchschluessel wird das Werkzeug dem Modell gar nicht erst angeboten.
     PermissionDef("ai.web_search.use",         "ai",      "Websuche über die KI verwenden"),
+    # Durchgesetzt in ai_action_service._execute_analyze_region. Ohne hinterlegte
+    # Copernicus-Zugangsdaten wird das Werkzeug dem Modell nicht angeboten.
+    PermissionDef("ai.satellite.use",          "ai",      "Satelliten- und Regionsanalyse über die KI verwenden"),
     # Durchgesetzt in routers/ai_settings.py::get_usage_overview. Bewusst nicht
     # an `panel.settings.read` gehaengt: wer Verbraeuche sieht, sieht das
     # Nutzungsverhalten fremder Kunden. Den *eigenen* Verbrauch zeigt

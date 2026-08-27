@@ -1033,6 +1033,17 @@ Erfinde niemals Quellen, Links, DOIs, ISBNs oder Zitate — nenne nur echte, \
 gefundene Fundstellen, die den Inhalt tatsächlich belegen."""
 
 
+REGIONSANALYSE = """\
+Regions- & Satellitendaten: Wenn der Benutzer nach einer bestimmten Stadt, Region oder einem \
+geografischen Ort fragt („Was ist in Berlin los?“, „Wetter und Lage in Tokio“), nutze \
+`analyze_region`, um Koordinaten, Wetterbedingungen und aktuelle Satellitenaufnahmen \
+(Copernicus/Sentinel-2) abzurufen.
+Kombiniere diese Daten bei Bedarf mit der Websuche (`web_search`), um aktuelle Nachrichten, \
+Ereignisse oder regionale Entwicklungen zu recherchieren.
+Behaupte niemals, Satelliten aktiv im Weltall zu steuern oder Echtzeit-Kamerabilder zu lenken; \
+es handelt sich um den Abruf von Erdbeobachtungs- und Fernerkundungsdaten."""
+
+
 # Hier stand einmal ein einziger Satz ohne Aufzaehlung, und danach eine
 # Aufzaehlung, die nur noch Panel-Interna nannte. Beide Fassungen hatten
 # dieselbe Luecke an verschiedenen Enden: das, was in einer Spielserver-Datei
@@ -1296,6 +1307,7 @@ BLOECKE = (
     MODS,
     ERREICHBARKEIT,
     WEBSUCHE,
+    REGIONSANALYSE,
     UNWIDERRUFLICHES,
     POSTFACH_UND_KALENDER,
     POPUPS_UND_ANKUENDIGUNGEN,
@@ -1339,6 +1351,7 @@ GEHIRN_BLOECKE = (
     MODS,
     ERREICHBARKEIT,
     WEBSUCHE,
+    REGIONSANALYSE,
     POSTFACH_UND_KALENDER,
     POPUPS_UND_ANKUENDIGUNGEN,
     AUFGABEN,

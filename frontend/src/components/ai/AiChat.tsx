@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ListPlus, Loader2, Paperclip, Pencil, Send, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
+import { Check, Globe2, ListPlus, Loader2, Paperclip, Pencil, Send, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -8,6 +8,7 @@ import {
   type AiAttachment,
   type AiContextStatus,
   type AiProviderAvailable,
+  type AiRegionalAnalysis,
   type AiRunInfo,
 } from '@/api/ai'
 import { api, SanitizedApiError } from '@/api/client'
@@ -36,6 +37,7 @@ import { denkwahlFuer, ReasoningPicker } from './ReasoningPicker'
 import { AiAntwortblase, formatMessageTime, KEINE_AUFRUFE, mergeEntries } from './AiVerlauf'
 import { WorkerLeiste } from './WorkerLeiste'
 import { useAiLauf } from './useAiLauf'
+import { RegionalAnalysisLayout } from './geo/RegionalAnalysisLayout'
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
@@ -158,6 +160,9 @@ export function AiChat() {
   const [amEnde, setAmEnde] = useState(true)
   // Warteschlange fuer Nachrichten, die waehrend des Streams eingegeben werden.
   const [queuedMessages, setQueuedMessages] = useState<string[]>([])
+  // Regionale Analyse & Globus-Zustand
+  const [geoData, setGeoData] = useState<AiRegionalAnalysis | null>(null)
+  const [geoOpen, setGeoOpen] = useState(false)
 
   const verlaufRef = useRef<HTMLDivElement | null>(null)
   const mountedRef = useRef(true)
@@ -262,6 +267,8 @@ export function AiChat() {
     }
   }, [canAttach, canUseAutonomy, canUseMemory, merkSchluessel.provider, t])
 
+
+
   /**
    * Die Zahlen hinter dem Ring — abhaengig vom **Modell**, nicht nur vom Chat.
    *
@@ -303,6 +310,14 @@ export function AiChat() {
     entries, setEntries, streaming, laufendeWerkzeuge, runId, setRunId,
     merkeVorschlag, sendContent, haengeAn, stoppeLauf,
   } = useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttachments })
+
+  // Automatische Aktivierung des 3D-Globus bei einer regionalen Analyse
+  useEffect(() => {
+    const isAnalyzing = laufendeWerkzeuge.some((w) => w.tool_name === 'analyze_region')
+    if (isAnalyzing) {
+      setGeoOpen(true)
+    }
+  }, [laufendeWerkzeuge])
 
   const initialScrollDoneRef = useRef(false)
 
@@ -633,9 +648,15 @@ export function AiChat() {
   const empty = entries.length === 0
 
   return (
-    <section
-      className="flex min-h-0 flex-1 flex-col overflow-hidden"
-      aria-label={t('ai.chat.title')}
+    <RegionalAnalysisLayout
+      active={geoOpen}
+      data={geoData}
+      loading={streaming && laufendeWerkzeuge.some((w) => w.tool_name === 'analyze_region')}
+      onClose={() => setGeoOpen(false)}
+    >
+      <section
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        aria-label={t('ai.chat.title')}
       onDragEnter={(event) => {
         if (!canAttach || busy) return
         event.preventDefault()
@@ -684,6 +705,20 @@ export function AiChat() {
         {canUseAutonomy && <AiAutonomyButton servers={servers} disabled={busy} />}
 
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
+          {geoData && (
+            <Button
+              type="button"
+              variant={geoOpen ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setGeoOpen((open) => !open)}
+              aria-label={t('ai.geo.toggleGlobe')}
+              title={t('ai.geo.toggleGlobe')}
+              className="flex items-center gap-1.5"
+            >
+              <Globe2 className="h-4 w-4" aria-hidden="true" />
+              <span className="hidden md:inline">{t('ai.geo.globe')}</span>
+            </Button>
+          )}
           <Button
             type="button" variant="ghost" size="sm"
             disabled={busy || empty}
@@ -1072,6 +1107,7 @@ export function AiChat() {
         </div>
       </form>
     </section>
+    </RegionalAnalysisLayout>
   )
 }
 

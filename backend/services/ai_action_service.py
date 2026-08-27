@@ -248,6 +248,24 @@ def _global_tool_definitions() -> list[dict]:
             ["query"],
         ))
 
+    from services.ai_satellite_service import is_configured as is_satellite_configured
+
+    if is_satellite_configured():
+        optional.append(_function(
+            "analyze_region",
+            "Führt eine regionale Analyse für einen geografischen Ort durch. "
+            "Ermittelt Koordinaten, Wetterdaten und ruft aktuelle "
+            "Satellitendaten (Copernicus/Sentinel-2) der Region ab.",
+            {
+                "location": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "description": "Name der Stadt, Region oder des Ortes (z.B. 'Berlin', 'Washington').",
+                },
+            },
+            ["location"],
+        ))
+
     # Globales Lernen kann der Betreiber abschalten. Dann steht "global" gar
     # nicht erst in der Auswahl — ein Modell, das eine Moeglichkeit angeboten
     # bekommt, die immer abgewiesen wird, versucht sie mehrfach.
@@ -3450,6 +3468,21 @@ def _execute_web_search(db: Session, *, user: User, arguments: dict) -> dict:
     return {"available": True, "query": sichere_anfrage[:200], "results": results}
 
 
+def _execute_analyze_region(db: Session, *, user: User, arguments: dict) -> dict:
+    """Führt eine regionale Analyse für einen Ort durch."""
+    from services import ai_geo_service, permission_service
+
+    if not permission_service.has_global_permission(db, user, "ai.satellite.use"):
+        raise AiActionValidationError("Satelliten- und Regionsanalyse ist für diesen Benutzer nicht freigegeben")
+
+    location = arguments.get("location")
+    if not isinstance(location, str) or not location.strip():
+        raise AiActionValidationError("Ort (location) fehlt oder ist ungültig")
+
+    safe_location = redact_sensitive_text(location.strip())[:100]
+    return ai_geo_service.analyze_region(safe_location)
+
+
 def _node_health(db: Session) -> dict:
     """Zustand aller Hosts — ohne Hostnamen und ohne IP.
 
@@ -3730,6 +3763,9 @@ def _execute_global_read_tool(
 
     if tool_name == "web_search":
         return _execute_web_search(db, user=user, arguments=arguments)
+
+    if tool_name == "analyze_region":
+        return _execute_analyze_region(db, user=user, arguments=arguments)
 
     if tool_name == "read_skill":
         return _execute_read_skill(db, user=user, arguments=arguments)

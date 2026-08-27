@@ -24,6 +24,8 @@ from schemas.ai_settings import (
     AiLearningPolicyUpdate,
     AiRoleLimitsResponse,
     AiRoleLimitsUpdate,
+    AiSatelliteCredentialsUpdate,
+    AiSatelliteStatus,
     AiUsageEntry,
     AiUsageEventEntry,
     AiUsageEvents,
@@ -205,6 +207,53 @@ def set_web_search_key(
         )
         audit_db.commit()
     return AiWebSearchStatus(configured=configured)
+
+
+@router.get("/settings/satellite", response_model=AiSatelliteStatus)
+def get_satellite_status(
+    _: User = Depends(require_global("panel.settings.read")),
+) -> AiSatelliteStatus:
+    """Nur ob Satellitendaten konfiguriert sind — nie Zugangsdaten selbst."""
+    from services import ai_satellite_service
+
+    return AiSatelliteStatus(configured=ai_satellite_service.is_configured())
+
+
+@router.put("/settings/satellite", response_model=AiSatelliteStatus)
+def set_satellite_credentials(
+    payload: AiSatelliteCredentialsUpdate,
+    actor: User = Depends(require_global("panel.settings.write")),
+    _: None = Depends(verify_csrf),
+) -> AiSatelliteStatus:
+    """Hinterlegt oder entfernt die Copernicus CDSE Zugangsdaten.
+
+    Ein leeres Feldpaar entfernt sie — dann verschwindet auch das Werkzeug
+    aus dem Katalog.
+    """
+    from services import ai_satellite_service
+
+    cid = payload.client_id.get_secret_value() if payload.client_id else ""
+    csec = payload.client_secret.get_secret_value() if payload.client_secret else ""
+    try:
+        ai_satellite_service.store_credentials(cid, csec)
+    except DisSidecarError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Satelliten-Zugangsdaten konnten nicht sicher gespeichert werden",
+        ) from exc
+
+    configured = ai_satellite_service.is_configured()
+    with SessionLocal() as audit_db:
+        audit_service.record_privileged_action(
+            audit_db,
+            user_id=actor.id,
+            action="ai.satellite.credentials.updated",
+            target_type="panel_setting",
+            target_id=None,
+            details={"configured": configured},
+        )
+        audit_db.commit()
+    return AiSatelliteStatus(configured=configured)
 
 
 @router.get("/settings/learning", response_model=AiLearningPolicyStatus)

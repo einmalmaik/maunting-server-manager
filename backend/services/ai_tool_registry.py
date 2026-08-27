@@ -154,6 +154,12 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # (`ai_action_service._global_tool_definitions`).
     "web_search": Werkzeug("global_read", angebot=("ai.web_search.use",)),
 
+    # Satelliten- und Regionsanalyse ueber Copernicus / Sentinel & Open-Meteo.
+    # Steht ohne hinterlegte Zugangsdaten gar nicht erst im Katalog.
+    "analyze_region": Werkzeug(
+        "global_read", gruppe="geo", angebot=("ai.satellite.use",)
+    ),
+
     # Die Doku des Panels. Kein zusaetzliches Recht: dieselben Seiten stehen
     # jedem angemeldeten Benutzer im Panel offen — ein Gate hier waere eine
     # Schranke, die es nebenan nicht gibt.
@@ -1059,6 +1065,7 @@ AUFGABEN_LESEN = frozenset({
     "search_docs",
     "read_docs",
     "web_search",
+    "analyze_region",
     "email_search",
     "email_read",
     "calendar_read",
