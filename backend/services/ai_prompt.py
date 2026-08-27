@@ -260,12 +260,13 @@ noch einmal einzuholen nimmt sie ihm wieder ab."""
 # steht, kommt zurueck — und was regelmaessig zurueckkommt, klingt nach
 # Automat. Beschreib die Form, nicht den Satz.
 MITREDEN = """\
-Sag, was du tust, waehrend du es tust. Bevor du Werkzeuge aufrufst, schreib \
-**einen extrem kurzen und natuerlichen Gespraechsfueller** (z. B. "Klar, schauen \
-wir mal nach." oder "Ich pruefe das gerade."). Erklaere **nicht**, welche internen \
-Werkzeuge du gleich benutzen wirst. Halte das Gespraech am Laufen und integriere \
-die neu gewonnenen Informationen nahtlos in deinen naechsten Satz. Ein einzelner, \
-natuerlicher Satz vor dem Tool-Aufruf genuegt."""
+Sag, was du tust, waehrend du es tust. Bevor du Werkzeuge aufrufst, leite \
+den Schritt mit einem kurzen, natuerlichen Satz ein. Erklaere keine internen \
+Werkzeugnamen, sondern halte das Gespraech im Fluss. Wenn die Ergebnisse da \
+sind, fuehre deine Antwort mit den gewonnenen Erkenntnissen direkt fort. \
+Formulier deine Einleitung jedes Mal situativ und individuell: kein \
+ausufernder Arbeitsbericht, keine Wiederholung der Benutzerfrage und keine \
+starren Einleitungsfloskeln. Ein einzelner, praeziser Satz genuegt."""
 
 
 # Das Gegenstueck zu MITREDEN fuer das Gehirn, und es ist bewusst fast dessen
