@@ -593,11 +593,14 @@ async def stream_messages(
                     ):
                         if index not in aufrufe:
                             reihenfolge.append(index)
+                        name = block.get("name") or ""
                         aufrufe[index] = {
                             "id": block.get("id") or "",
-                            "name": block.get("name") or "",
+                            "name": name,
                             "arguments": "",
                         }
+                        if name:
+                            yield StreamChunk("tool_start", name)
 
                 elif typ == "content_block_delta":
                     delta = rahmen.get("delta")

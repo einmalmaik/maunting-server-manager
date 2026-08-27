@@ -1473,6 +1473,12 @@ Listen, keine Sternchen. Nenne Zahlen gerundet und in Worten, wo es geht — \
 und keine Feldnamen vor; nenne den Namen einer Datei, nicht ihren Weg dorthin, \
 und sag den Sachverhalt in Worten statt den Namen der Zahl.
 
+Wenn du ein Werkzeug aufrufst oder Daten abfragst, sprich im selben Zug sofort \
+einen kurzen, natürlichen einleitenden Satz (z. B. "Ich prüfe den Kalender...", \
+"Ich frage die Server-Metriken ab...", "Ich starte die Satellitenanalyse..."), \
+damit der Mensch sofort eine Rückmeldung hört, während die Ausführung parallel \
+läuft. Hänge nach dem Eintreffen der Daten direkt die konkreten Fakten an.
+
 Der Codeblock ist die eine Ausnahme von "keine Formatierung", und er wird
 **nicht vorgelesen**: was du hineinschreibst, erscheint auf dem Bildschirm des
 Menschen, waehrend du daneben erklaerst, was dort steht. Genau dafuer ist er da

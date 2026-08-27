@@ -513,11 +513,14 @@ async def stream_responses(
                         if isinstance(kennung, str):
                             if kennung not in aufrufe:
                                 reihenfolge.append(kennung)
+                            name = posten.get("name") or ""
                             aufrufe[kennung] = {
                                 "call_id": posten.get("call_id") or "",
-                                "name": posten.get("name") or "",
+                                "name": name,
                                 "arguments": posten.get("arguments") or "",
                             }
+                            if name:
+                                yield StreamChunk("tool_start", name)
 
                 elif typ == "response.function_call_arguments.delta":
                     kennung = rahmen.get("item_id")

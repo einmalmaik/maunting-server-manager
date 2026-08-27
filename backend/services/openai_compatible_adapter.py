@@ -707,6 +707,7 @@ async def stream_chat_completion(
             usage.anfragen += 1
             saw_done = False
             tool_buffers: dict[int, dict[str, str]] = {}
+            seen_tool_starts: set[int] = set()
             async for line in _iter_sse_lines(response, deadline=deadline):
                 if time.monotonic() > deadline:
                     raise AiProviderRequestError("AI_PROVIDER_STREAM_TIMEOUT")
@@ -757,8 +758,9 @@ async def stream_chat_completion(
                     for item in tool_deltas:
                         if not isinstance(item, dict) or not isinstance(item.get("index"), int):
                             raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
+                        idx = item["index"]
                         buffer = tool_buffers.setdefault(
-                            item["index"], {"id": "", "name": "", "arguments": ""}
+                            idx, {"id": "", "name": "", "arguments": ""}
                         )
                         if isinstance(item.get("id"), str):
                             buffer["id"] += item["id"]
@@ -770,6 +772,9 @@ async def stream_chat_completion(
                                 buffer["arguments"] += function["arguments"]
                                 if len(buffer["arguments"]) > MAX_TOOL_ARGUMENT_CHARS:
                                     raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
+                        if idx not in seen_tool_starts and buffer["name"]:
+                            seen_tool_starts.add(idx)
+                            yield StreamChunk("tool_start", buffer["name"])
                 if isinstance(delta, dict):
                     # `reasoning` ist OpenRouter, `reasoning_content` der in
                     # OpenAI-kompatiblen Servern verbreitete Name. Beide sind

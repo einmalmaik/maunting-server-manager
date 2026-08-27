@@ -285,6 +285,9 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 reasoning_effort=denkstufe,
                 cache_marke=cache_marke,
             ):
+                if chunk.kind == "tool_start":
+                    ai_run_broker.veroeffentlichen(run_id, "tool_start", {"tool_name": chunk.text, "spekulativ": True})
+                    continue
                 if chunk.kind == "reasoning":
                     # Die Grenze steht hier und nicht erst beim Speichern.
                     # Geschnitten wird auch **innerhalb** eines Stücks: nur so

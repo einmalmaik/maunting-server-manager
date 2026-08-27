@@ -388,6 +388,17 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
         case 'antworttext':
           zeileAnhaengen('ki', String(nachricht.text ?? ''))
           break
+        case 'werkzeug_gestartet':
+        case 'tool_start': {
+          const name = String(nachricht.name || nachricht.tool_name || '')
+          if (name) {
+            setWerkzeug(name)
+            if (nachricht.geo_analysis && typeof nachricht.geo_analysis === 'object') {
+              setGeoData(nachricht.geo_analysis as AiRegionalAnalysis)
+            }
+          }
+          break
+        }
         case 'werkzeug':
           setWerkzeug(String(nachricht.name ?? ''))
           if (nachricht.geo_analysis && typeof nachricht.geo_analysis === 'object') {

@@ -537,4 +537,39 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.zustand).toBe('aus')
     expect(leitung().readyState).toBe(FakeWebSocket.CLOSED)
   })
+
+  it('reagiert sofort spekulativ auf werkzeug_gestartet und tool_start', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'werkzeug_gestartet', name: 'calendar_read', spekulativ: true }))
+    expect(haken.result.current.werkzeug).toBe('calendar_read')
+
+    act(() => leitung().simulateMessage({ art: 'tool_start', tool_name: 'read_server_status' }))
+    expect(haken.result.current.werkzeug).toBe('read_server_status')
+  })
+
+  it('uebernimmt Geodaten bei werkzeug_gestartet oder werkzeug mit geo_analysis', async () => {
+    const haken = await sitzung()
+    const mockGeo = {
+      region: 'Berlin',
+      summary: 'Wetter sonnig',
+      coordinates: { lat: 52.52, lon: 13.405 },
+      satellite: { cloud_coverage: 10, confidence: 95 },
+      weather: { temperature: 22, condition: 'Clear' },
+      news: [],
+      social: [],
+      traffic: [],
+      timestamp: '2026-08-28T00:00:00Z',
+    }
+
+    act(() =>
+      leitung().simulateMessage({
+        art: 'werkzeug_gestartet',
+        name: 'analyze_region',
+        geo_analysis: mockGeo,
+      }),
+    )
+    expect(haken.result.current.werkzeug).toBe('analyze_region')
+    expect(haken.result.current.geoData).toEqual(mockGeo)
+  })
 })

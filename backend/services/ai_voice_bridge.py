@@ -173,6 +173,43 @@ def _ist_gedanke_abgeschlossen(text: str) -> bool:
     return len(woerter) >= 4
 
 
+def _verbal_bridge_phrase(tool_name: str) -> str:
+    """Erzeugt eine kurze, natürliche deutsche Überbrückungsphrase für ein beliebiges Werkzeug."""
+    from services.ai_tool_registry import WERKZEUGE
+
+    info = WERKZEUGE.get(tool_name)
+    gruppe = info.gruppe if info else None
+
+    if gruppe == "calendar" or "calendar" in tool_name:
+        return "Ich prüfe deinen Kalender..."
+    if gruppe == "mailbox" or "email" in tool_name:
+        return "Ich sehe in den E-Mails nach..."
+    if gruppe == "geo" or tool_name == "analyze_region":
+        return "Ich starte die regionale Satellitenanalyse..."
+    if gruppe == "memory" or "memory" in tool_name:
+        return "Ich prüfe das Gedächtnis..."
+    if gruppe == "skill" or "skill" in tool_name:
+        return "Ich schlage die Vorgehensweise nach..."
+    if gruppe == "tasks" or "task" in tool_name:
+        return "Ich rufe die Aufträge ab..."
+    if gruppe == "docs" or "docs" in tool_name:
+        return "Ich durchsuche die Dokumentation..."
+    if tool_name == "web_search":
+        return "Ich recherchiere im Web..."
+    if tool_name in ("read_server_status", "read_server_capacity", "list_my_servers"):
+        return "Ich frage die Server-Metriken ab..."
+    if tool_name in ("read_server_logs", "read_server_network", "read_server_ports"):
+        return "Ich prüfe die Server-Logs und Systemdaten..."
+    if tool_name in ("read_config", "list_server_files", "search_server_files"):
+        return "Ich lese die Dateikonfiguration..."
+    if tool_name in ("read_server_mods", "search_workshop_mods", "read_mod_updates"):
+        return "Ich prüfe die Mod-Informationen..."
+    if tool_name in ("read_server_backups", "read_node_capacity", "read_node_health"):
+        return "Ich frage den Systemstatus ab..."
+
+    return "Ich prüfe das kurz..."
+
+
 @dataclass
 class Belegfilter:
     """Trennt im laufenden Text das Gesprochene vom Gezeigten.
@@ -385,6 +422,8 @@ class Sprachbruecke:
         self._laufende: asyncio.Task | None = None
         #: Die Stimme des laufenden Zuges. Zum Abwürgen beim Dazwischenreden.
         self._stimme: ai_tts.Stimmsitzung | None = None
+        #: Ob im aktuellen Lauf bereits Text oder Verbal Bridging an TTS gesendet wurde.
+        self._lauf_gesprochen: bool = False
         #: Vorschläge, die auf ein gesprochenes Ja warten.
         self._offene_vorschlaege: list[str] = []
         #: Turn-Merging & Kadenz-Lernen: unfertige Sätze bei Unterbrechung verschmelzen.
@@ -837,7 +876,7 @@ class Sprachbruecke:
             return
         _abzug, warteschlange = abo
         filter_ = Belegfilter()
-        gesprochen = False
+        self._lauf_gesprochen = False
 
         async with self._stimmweg.Stimme(
             adresse=self._stimm_adresse,
@@ -857,8 +896,6 @@ class Sprachbruecke:
                     if ereignis is None:
                         break
                     weiter = await self._ereignis(ereignis, daten, stimme, filter_)
-                    if ereignis == "delta":
-                        gesprochen = True
                     if not weiter:
                         break
                 rest, belege = filter_.ausklingen()
@@ -866,8 +903,8 @@ class Sprachbruecke:
                     await self._senden(beleg)
                 if rest.strip():
                     await stimme.sagen(rest)
-                    gesprochen = True
-                if gesprochen:
+                    self._lauf_gesprochen = True
+                if self._lauf_gesprochen:
                     await self._zustand_melden(ZUSTAND_SPRICHT)
                 await stimme.ausklingen()
             finally:
@@ -888,11 +925,31 @@ class Sprachbruecke:
             for beleg in belege:
                 await self._senden(beleg)
             if sprechbar.strip():
+                self._lauf_gesprochen = True
                 if self._zustand != ZUSTAND_SPRICHT:
                     await self._zustand_melden(ZUSTAND_SPRICHT)
                 await stimme.sagen(sprechbar)
             if text:
                 await self._senden({"art": "antworttext", "text": text})
+            return True
+
+        if ereignis in ("tool_start", "werkzeug_gestartet"):
+            name = str(daten.get("tool_name") or daten.get("name") or "")
+            if name:
+                # Pre-Tool Verbal Bridging (Zero-Latency), falls noch kein Audio gesprochen wurde:
+                if not getattr(self, "_lauf_gesprochen", False):
+                    phrase = _verbal_bridge_phrase(name)
+                    self._lauf_gesprochen = True
+                    if self._zustand != ZUSTAND_SPRICHT:
+                        await self._zustand_melden(ZUSTAND_SPRICHT)
+                    await self._senden({"art": "antworttext", "text": phrase})
+                    await stimme.sagen(phrase)
+                # Spekulatives UI-Event unmittelbar an das Frontend weiterleiten:
+                await self._senden({
+                    "art": "werkzeug_gestartet",
+                    "name": name,
+                    "spekulativ": True,
+                })
             return True
 
         if ereignis in ("tool", "tool_plan"):
@@ -902,12 +959,21 @@ class Sprachbruecke:
             for beleg in belege:
                 await self._senden(beleg)
             if rest.strip():
+                self._lauf_gesprochen = True
                 if self._zustand != ZUSTAND_SPRICHT:
                     await self._zustand_melden(ZUSTAND_SPRICHT)
                 await stimme.sagen(rest)
 
             name = self._werkzeugname(daten)
             if name:
+                if not getattr(self, "_lauf_gesprochen", False):
+                    phrase = _verbal_bridge_phrase(name)
+                    self._lauf_gesprochen = True
+                    if self._zustand != ZUSTAND_SPRICHT:
+                        await self._zustand_melden(ZUSTAND_SPRICHT)
+                    await self._senden({"art": "antworttext", "text": phrase})
+                    await stimme.sagen(phrase)
+
                 nachricht: dict = {"art": "werkzeug", "name": name}
                 if "geo_analysis" in daten and daten["geo_analysis"]:
                     nachricht["geo_analysis"] = daten["geo_analysis"]
