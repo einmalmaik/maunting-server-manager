@@ -103,3 +103,10 @@ claude.md
 docs/smart-system-notes.md
 GEMINI.md
 /smart-system/.idea
+
+# AI Agent / Dev environment ignore
+.chrome-profile/
+local-plans/
+mcps/
+scratch/
+git_log.txt
