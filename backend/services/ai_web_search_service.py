@@ -133,11 +133,13 @@ def search(query: str, count: int = MAX_RESULTS) -> list[dict]:
         raise WebSearchUnavailable("AI_WEB_SEARCH_UNAVAILABLE") from exc
 
     if response.status_code in {401, 403}:
+        logger.warning("Websuche Authentifizierung fehlgeschlagen status=%s (API-Schlüssel prüfen)", response.status_code)
         raise WebSearchUnavailable("AI_WEB_SEARCH_AUTH_FAILED")
     if response.status_code == 429:
+        logger.warning("Websuche Rate-Limit erreicht (429)")
         raise WebSearchUnavailable("AI_WEB_SEARCH_RATE_LIMITED")
     if response.status_code != 200:
-        logger.info("Websuche abgelehnt status=%s", response.status_code)
+        logger.warning("Websuche abgelehnt status=%s text=%s", response.status_code, response.text[:200])
         raise WebSearchUnavailable("AI_WEB_SEARCH_REJECTED")
 
     try:

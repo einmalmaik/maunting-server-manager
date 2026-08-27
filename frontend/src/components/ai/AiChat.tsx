@@ -33,11 +33,12 @@ import { denkwahlFuer, ReasoningPicker } from './ReasoningPicker'
 // gab. Sie liegen jetzt in `AiVerlauf`, weil das Guardian-Fenster denselben
 // Verlauf zeichnet — zwei Zeichner wären zwei Wahrheiten darüber, wie ein Zug
 // der KI aussieht. Die Schleife hier bleibt: an ihr hängen Bearbeiten und
-// Anhänge, und die gehören nicht in einen Verlauf, den man nur liest.
 import { AiAntwortblase, formatMessageTime, KEINE_AUFRUFE, mergeEntries } from './AiVerlauf'
 import { WorkerLeiste } from './WorkerLeiste'
 import { useAiLauf } from './useAiLauf'
+import { ActiveProcessesCard } from './geo/ActiveProcessesCard'
 import { RegionalAnalysisLayout } from './geo/RegionalAnalysisLayout'
+import type { NewsItem } from './geo/RegionalInfoPanel'
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
@@ -332,11 +333,48 @@ export function AiChat() {
             section.werkzeug.geo_analysis
           ) {
             setGeoData(section.werkzeug.geo_analysis)
+            setGeoOpen(true)
             return
           }
         }
       }
     }
+  }, [entries])
+
+  const newsFromSearch = useMemo<NewsItem[]>(() => {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i]
+      if (entry.kind === 'message' && entry.message.sections) {
+        for (let j = entry.message.sections.length - 1; j >= 0; j--) {
+          const section = entry.message.sections[j]
+          if (
+            section.art === 'tool' &&
+            section.werkzeug?.tool_name === 'web_search' &&
+            (section.werkzeug.web_results || section.werkzeug.ergebnis)
+          ) {
+            const rawResults = section.werkzeug.web_results || (section.werkzeug.ergebnis as { results?: Array<{ title?: string; url?: string; description?: string; snippet?: string }> })?.results
+            if (Array.isArray(rawResults) && rawResults.length > 0) {
+              return rawResults.map((r, idx) => {
+                let domain = 'Websuche'
+                try {
+                  if (r.url) domain = new URL(r.url).hostname.replace(/^www\./, '')
+                } catch {}
+                return {
+                  id: `search-news-${idx}`,
+                  title: r.title || 'Nachrichtenbericht',
+                  source: domain,
+                  timeAgo: 'Aktuell',
+                  category: 'Websuche',
+                  url: r.url,
+                  snippet: r.description || r.snippet,
+                }
+              })
+            }
+          }
+        }
+      }
+    }
+    return []
   }, [entries])
 
   const initialScrollDoneRef = useRef(false)
@@ -671,6 +709,7 @@ export function AiChat() {
     <RegionalAnalysisLayout
       active={geoOpen}
       data={geoData}
+      news={newsFromSearch}
       loading={streaming && laufendeWerkzeuge.some((w) => w.tool_name === 'analyze_region')}
       onClose={() => setGeoOpen(false)}
     >
@@ -752,6 +791,13 @@ export function AiChat() {
 
       {/* ── Die Worker-Leiste: lebende Hintergrund-Aufträge, einsehbar ── */}
       <WorkerLeiste />
+
+      {/* ── Aktive Prozesse im 3-Spalten-Kommandozentrum ── */}
+      {geoOpen && (
+        <div className="px-3 pt-2.5 shrink-0">
+          <ActiveProcessesCard />
+        </div>
+      )}
 
       {/* ── Verlauf ───────────────────────────────────────────────────── */}
       <div

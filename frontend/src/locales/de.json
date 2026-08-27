@@ -1059,7 +1059,48 @@
       "precipitation": "{{mm}} mm Niederschlag",
       "cloudCover": "Bewölkung",
       "openPreview": "Vorschau öffnen",
-      "current": "Aktuell"
+      "current": "Aktuell",
+      "liveActive": "Live-Analyse aktiv",
+      "zoomIn": "Vergrößern",
+      "zoomOut": "Verkleinern",
+      "resetView": "Ansicht zurücksetzen",
+      "fullscreen": "Vollbild",
+      "currentNews": "Aktuelle Nachrichten",
+      "newsAndWeb": "Nachrichten & Lageberichte",
+      "readMore": "Quelle",
+      "readArticle": "Artikel lesen",
+      "socialMedia": "Soziale Medien & Trends",
+      "trafficStatus": "Verkehr & Bewegung",
+      "weatherDetails": "Detaillierte Wetterdaten",
+      "scenes": "Sentinel-2 L2A Szenen",
+      "openFullScene": "Szene in Vollauflösung öffnen",
+      "noScenes": "Keine Satellitenszenen gefunden",
+      "noSatellitePreview": "Keine direkte Bildvorschau verfügbar",
+      "tabs": {
+        "overview": "Übersicht",
+        "satellite": "Satellit",
+        "news": "Nachrichten",
+        "social": "Soziale Medien",
+        "traffic": "Verkehr",
+        "weather": "Wetter"
+      },
+      "categories": {
+        "local": "Lokales",
+        "environment": "Umwelt",
+        "politics": "Politik",
+        "events": "Ereignisse"
+      },
+      "processes": {
+        "title": "Aktive Prozesse",
+        "satellite": "Satellitendaten (Sentinel-2)",
+        "weather": "Wetterdaten",
+        "news": "Nachrichten & Websuche",
+        "social": "Soziale Medien Analyse",
+        "traffic": "Verkehr & Bewegung",
+        "done": "Fertig",
+        "running": "Läuft...",
+        "waiting": "Wartet..."
+      }
     },
     "usage": {
       "title": "KI-Nutzung",

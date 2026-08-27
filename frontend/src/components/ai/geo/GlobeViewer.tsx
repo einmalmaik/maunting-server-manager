@@ -1,30 +1,41 @@
 import { useEffect, useRef, useState } from 'react'
-import { Compass, Minus, Plus, RotateCcw } from 'lucide-react'
+import { Clock, Cloud, Compass, MapPin, Minus, Plus, RotateCcw, Satellite } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+
+import type { AiRegionalAnalysis } from '@/api/ai'
 
 interface GlobeViewerProps {
   latitude?: number | null
   longitude?: number | null
   locationName?: string | null
   bbox?: [number, number, number, number] | null
+  data?: AiRegionalAnalysis | null
   className?: string
 }
 
 /**
- * 3D-Globus-Komponente mit flüssiger Rotationsanimation und Zielort-Fokussierung.
- *
- * Zeichnet eine interaktive 3D-Erde mit atmosphärischem Glühen, Kontinental-Raster,
- * Koordinatengitter und Zielort-Pulsar.
+ * 3D-Globus-Komponente mit flüssiger Rotationsanimation, Zielort-Fokussierung
+ * und unterer Live-Metriken-Leiste im Kommandozentren-Stil.
  */
 export function GlobeViewer({
   latitude,
   longitude,
   locationName,
   bbox,
+  data,
   className = '',
 }: GlobeViewerProps) {
+  const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [zoom, setZoom] = useState(1.0)
   const [autoRotate, setAutoRotate] = useState(true)
+
+  const effLat = latitude ?? data?.coordinates?.latitude
+  const effLon = longitude ?? data?.coordinates?.longitude
+  const effLocation = locationName ?? data?.location
+  const effBbox = bbox ?? data?.coordinates?.bbox
+  const weather = data?.weather
+  const satellite = data?.satellite
 
   // Aktuelle Rotationswinkel (Radiant)
   const rotRef = useRef({ x: 0.3, y: -0.8 })
@@ -35,24 +46,24 @@ export function GlobeViewer({
 
   // Wenn Zielkoordinaten übergeben werden: flüssige Kamerafahrt (flyTo)
   useEffect(() => {
-    if (typeof latitude === 'number' && typeof longitude === 'number') {
+    if (typeof effLat === 'number' && typeof effLon === 'number') {
       // Umrechnung Lat/Lon in Rotationswinkel der Kugel
-      const targetY = -((longitude + 90) * Math.PI) / 180
-      const targetX = (latitude * Math.PI) / 180
+      const targetY = -((effLon + 90) * Math.PI) / 180
+      const targetX = (effLat * Math.PI) / 180
       targetRotRef.current = { x: targetX, y: targetY }
       setAutoRotate(false)
 
       // Adaptiver Zoom basierend auf der Gebietsgröße (bbox)
-      if (bbox && bbox.length === 4) {
-        const dLon = Math.abs(bbox[2] - bbox[0])
-        const dLat = Math.abs(bbox[3] - bbox[1])
+      if (effBbox && effBbox.length === 4) {
+        const dLon = Math.abs(effBbox[2] - effBbox[0])
+        const dLat = Math.abs(effBbox[3] - effBbox[1])
         const maxSpan = Math.max(dLon, dLat)
         if (maxSpan > 25) setZoom(0.9)
         else if (maxSpan > 5) setZoom(1.1)
         else setZoom(1.35)
       }
     }
-  }, [latitude, longitude, bbox])
+  }, [effLat, effLon, effBbox])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -94,13 +105,14 @@ export function GlobeViewer({
       pulse = (pulse + 0.05) % (Math.PI * 2)
 
       // 1. Atmosphärischer Glüheffekt (Glow)
-      const glowGrad = ctx.createRadialGradient(cx, cy, radius * 0.85, cx, cy, radius * 1.25)
-      glowGrad.addColorStop(0, 'rgba(56, 189, 248, 0.25)')
-      glowGrad.addColorStop(0.5, 'rgba(14, 165, 233, 0.12)')
+      const glowGrad = ctx.createRadialGradient(cx, cy, radius * 0.85, cx, cy, radius * 1.3)
+      glowGrad.addColorStop(0, 'rgba(56, 189, 248, 0.28)')
+      glowGrad.addColorStop(0.5, 'rgba(14, 165, 233, 0.14)')
       glowGrad.addColorStop(1, 'rgba(14, 165, 233, 0)')
+
       ctx.fillStyle = glowGrad
       ctx.beginPath()
-      ctx.arc(cx, cy, radius * 1.25, 0, Math.PI * 2)
+      ctx.arc(cx, cy, radius * 1.3, 0, Math.PI * 2)
       ctx.fill()
 
       // 2. Erdkörper (Tiefen-Verlauf)
@@ -140,12 +152,10 @@ export function GlobeViewer({
           const cosPhi = Math.cos(phi)
           const sinPhi = Math.sin(phi)
 
-          // 3D Kugelkoordinaten
           const px = Math.cos(theta) * cosPhi
           const py = sinPhi
           const pz = Math.sin(theta) * cosPhi
 
-          // Drehung um X-Achse (Latitude-Tilt)
           const rotY = py * Math.cos(rx) - pz * Math.sin(rx)
           const rotZ = py * Math.sin(rx) + pz * Math.cos(rx)
 
@@ -226,8 +236,8 @@ export function GlobeViewer({
       ctx.stroke()
 
       // 5. Region / Bounding Box Umrandung (wenn bbox übergeben wurde)
-      if (bbox && bbox.length === 4) {
-        const [minLon, minLat, maxLon, maxLat] = bbox
+      if (effBbox && effBbox.length === 4) {
+        const [minLon, minLat, maxLon, maxLat] = effBbox
         const points = [
           [minLat, minLon],
           [minLat, maxLon],
@@ -265,9 +275,9 @@ export function GlobeViewer({
       }
 
       // 6. Zielort-Marker & Radar-Pulsar
-      if (typeof latitude === 'number' && typeof longitude === 'number') {
-        const phi = (latitude * Math.PI) / 180
-        const theta = ((longitude + 90) * Math.PI) / 180 + ry
+      if (typeof effLat === 'number' && typeof effLon === 'number') {
+        const phi = (effLat * Math.PI) / 180
+        const theta = ((effLon + 90) * Math.PI) / 180 + ry
         const cosPhi = Math.cos(phi)
         const sinPhi = Math.sin(phi)
 
@@ -283,27 +293,45 @@ export function GlobeViewer({
           const screenY = cy - rotY * radius
 
           // Pulsierender Radar-Ring
-          const pulseRadius = 8 + Math.sin(pulse) * 6
-          ctx.strokeStyle = 'rgba(239, 68, 68, 0.75)'
+          const pulseRadius = 10 + Math.sin(pulse) * 8
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)'
           ctx.lineWidth = 2
           ctx.beginPath()
           ctx.arc(screenX, screenY, pulseRadius, 0, Math.PI * 2)
           ctx.stroke()
 
-          // Zentraler Pin
-          ctx.fillStyle = '#ef4444'
+          // Äußerer Zielring
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)'
+          ctx.lineWidth = 1
           ctx.beginPath()
-          ctx.arc(screenX, screenY, 4, 0, Math.PI * 2)
+          ctx.arc(screenX, screenY, 22, 0, Math.PI * 2)
+          ctx.stroke()
+
+          // Zentraler Pin
+          ctx.fillStyle = '#38bdf8'
+          ctx.beginPath()
+          ctx.arc(screenX, screenY, 4.5, 0, Math.PI * 2)
           ctx.fill()
 
-          // Beschriftung
-          if (locationName) {
+          // Beschriftungs-Badge
+          if (effLocation) {
             ctx.font = '600 12px Inter, sans-serif'
-            ctx.fillStyle = '#ffffff'
-            ctx.shadowColor = 'rgba(0,0,0,0.8)'
-            ctx.shadowBlur = 4
-            ctx.fillText(locationName, screenX + 12, screenY + 4)
-            ctx.shadowBlur = 0
+            const textWidth = ctx.measureText(effLocation).width
+            const badgeX = screenX + 14
+            const badgeY = screenY - 14
+
+            // Badge Hintergrund
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)'
+            ctx.lineWidth = 1
+            ctx.beginPath()
+            ctx.roundRect(badgeX, badgeY - 12, textWidth + 14, 22, 6)
+            ctx.fill()
+            ctx.stroke()
+
+            // Badge Text
+            ctx.fillStyle = '#f8fafc'
+            ctx.fillText(effLocation, badgeX + 7, badgeY + 3)
           }
         }
       }
@@ -325,7 +353,7 @@ export function GlobeViewer({
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
     }
-  }, [zoom, autoRotate, latitude, longitude, locationName])
+  }, [zoom, autoRotate, effLat, effLon, effLocation, effBbox])
 
   // Mausinteraktion (Drehen)
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -347,9 +375,15 @@ export function GlobeViewer({
     isDraggingRef.current = false
   }
 
+  const aktualitaetText = satellite?.scenes?.[0]?.datetime
+    ? new Date(satellite.scenes[0].datetime).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })
+    : t('ai.geo.current', 'Aktuell')
+
+  const satelliteMission = satellite?.scenes?.[0]?.mission || 'Sentinel-2'
+
   return (
     <div
-      className={`relative flex h-full w-full min-h-[300px] flex-col items-center justify-center overflow-hidden rounded-2xl bg-surface-container-lowest border border-outline-variant/30 ${className}`}
+      className={`relative flex h-full w-full min-h-[320px] flex-col items-center justify-center overflow-hidden rounded-2xl bg-surface-container-lowest border border-outline-variant/30 ${className}`}
     >
       <canvas
         ref={canvasRef}
@@ -358,17 +392,17 @@ export function GlobeViewer({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        aria-label={`3D Globus Ansicht ${locationName ? `für ${locationName}` : ''}`}
+        aria-label={`3D Globus Ansicht ${effLocation ? `für ${effLocation}` : ''}`}
       />
 
       {/* Steuerungselemente */}
-      <div className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-xl border border-outline-variant/40 bg-surface-container-low/80 p-1 backdrop-blur-md">
+      <div className="absolute top-3 right-3 flex items-center gap-1 rounded-xl border border-outline-variant/40 bg-surface-container-low/80 p-1 backdrop-blur-md z-10">
         <button
           type="button"
           onClick={() => setZoom((z) => Math.min(2.5, z + 0.2))}
           className="rounded-lg p-1.5 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors"
-          title="Vergrößern"
-          aria-label="Vergrößern"
+          title={t('ai.geo.zoomIn', 'Vergrößern')}
+          aria-label={t('ai.geo.zoomIn', 'Vergrößern')}
         >
           <Plus className="h-4 w-4" />
         </button>
@@ -376,8 +410,8 @@ export function GlobeViewer({
           type="button"
           onClick={() => setZoom((z) => Math.max(0.6, z - 0.2))}
           className="rounded-lg p-1.5 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors"
-          title="Verkleinern"
-          aria-label="Verkleinern"
+          title={t('ai.geo.zoomOut', 'Verkleinern')}
+          aria-label={t('ai.geo.zoomOut', 'Verkleinern')}
         >
           <Minus className="h-4 w-4" />
         </button>
@@ -388,24 +422,51 @@ export function GlobeViewer({
             setAutoRotate(true)
           }}
           className="rounded-lg p-1.5 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors"
-          title="Ansicht zurücksetzen"
-          aria-label="Ansicht zurücksetzen"
+          title={t('ai.geo.resetView', 'Ansicht zurücksetzen')}
+          aria-label={t('ai.geo.resetView', 'Ansicht zurücksetzen')}
         >
           <RotateCcw className="h-4 w-4" />
         </button>
       </div>
 
-      {locationName && (
-        <div className="absolute top-3 left-3 flex items-center gap-2 rounded-xl border border-primary/30 bg-surface-container-low/80 px-3 py-1.5 text-xs font-medium text-primary backdrop-blur-md">
-          <Compass className="h-3.5 w-3.5" />
-          <span>{locationName}</span>
-          {typeof latitude === 'number' && typeof longitude === 'number' && (
-            <span className="text-on-surface-variant">
-              ({latitude.toFixed(2)}°, {longitude.toFixed(2)}°)
+      {/* Standort-Badge oben links */}
+      {effLocation && (
+        <div className="absolute top-3 left-3 flex items-center gap-2 rounded-xl border border-primary/30 bg-surface-container-low/85 px-3 py-1.5 text-xs font-medium text-primary backdrop-blur-md z-10">
+          <Compass className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-semibold">{effLocation}</span>
+          {typeof effLat === 'number' && typeof effLon === 'number' && (
+            <span className="text-on-surface-variant text-[11px]">
+              ({Math.abs(effLat).toFixed(2)}°{effLat >= 0 ? 'N' : 'S'}, {Math.abs(effLon).toFixed(2)}°{effLon >= 0 ? 'E' : 'W'})
             </span>
           )}
         </div>
       )}
+
+      {/* Untere Metriken-Leiste (Bottom Metrics Bar) */}
+      <div className="absolute bottom-3 left-3 right-3 sm:right-auto flex flex-wrap items-center gap-2.5 sm:gap-4 rounded-xl border border-outline-variant/30 bg-surface-container-lowest/85 px-3.5 py-2 text-xs backdrop-blur-md text-on-surface-variant z-10">
+        {typeof effLat === 'number' && typeof effLon === 'number' && (
+          <div className="flex items-center gap-1.5">
+            <MapPin className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+            <span className="font-medium text-on-surface">
+              {Math.abs(effLat).toFixed(2)}°{effLat >= 0 ? 'N' : 'S'}, {Math.abs(effLon).toFixed(2)}°{effLon >= 0 ? 'E' : 'W'}
+            </span>
+          </div>
+        )}
+        <div className="flex items-center gap-1.5 border-l border-outline-variant/30 pl-2.5 sm:pl-3">
+          <Clock className="h-3.5 w-3.5 text-sky-400 shrink-0" aria-hidden="true" />
+          <span>{aktualitaetText}</span>
+        </div>
+        {weather && (
+          <div className="flex items-center gap-1.5 border-l border-outline-variant/30 pl-2.5 sm:pl-3">
+            <Cloud className="h-3.5 w-3.5 text-amber-400 shrink-0" aria-hidden="true" />
+            <span>{Math.round(weather.temperature_celsius)}°C, {weather.condition}</span>
+          </div>
+        )}
+        <div className="flex items-center gap-1.5 border-l border-outline-variant/30 pl-2.5 sm:pl-3 hidden md:flex">
+          <Satellite className="h-3.5 w-3.5 text-teal-400 shrink-0" aria-hidden="true" />
+          <span>{satelliteMission}</span>
+        </div>
+      </div>
     </div>
   )
 }

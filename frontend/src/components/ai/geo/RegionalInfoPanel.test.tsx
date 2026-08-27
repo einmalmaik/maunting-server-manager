@@ -48,7 +48,11 @@ describe('RegionalInfoPanel', () => {
     expect(screen.getByText(/52.5200° N, 13.4050° E/)).toBeInTheDocument()
     expect(screen.getByText('19°C')).toBeInTheDocument()
     expect(screen.getByText('Teilweise bewölkt')).toBeInTheDocument()
-    expect(screen.getByText('Sentinel-2 L2A')).toBeInTheDocument()
+    expect(screen.getAllByText(/Sentinel-2 L2A/).length).toBeGreaterThan(0)
+
+    // Tab-Wechsel zu Satellit testen
+    const satelliteTab = screen.getByRole('button', { name: /Satellit/i })
+    fireEvent.click(satelliteTab)
     expect(screen.getByText(/4.2%/)).toBeInTheDocument()
 
     const closeBtn = screen.getByRole('button', { name: i18n.t('ai.geo.close') })

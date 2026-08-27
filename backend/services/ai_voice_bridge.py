@@ -906,12 +906,17 @@ class Sprachbruecke:
                     await self._zustand_melden(ZUSTAND_SPRICHT)
                 await stimme.sagen(rest)
 
-            # Nur der Name auf den Schirm, nie die Argumente — dieselbe Regel
-            # wie zuvor. Vorgelesen wird nichts davon: dass etwas passiert,
-            # hört der Mensch daran, dass gerade nichts gesagt wird.
             name = self._werkzeugname(daten)
             if name:
-                await self._senden({"art": "werkzeug", "name": name})
+                nachricht: dict = {"art": "werkzeug", "name": name}
+                if "geo_analysis" in daten and daten["geo_analysis"]:
+                    nachricht["geo_analysis"] = daten["geo_analysis"]
+                elif "aufrufe" in daten and isinstance(daten["aufrufe"], list):
+                    for aufruf in daten["aufrufe"]:
+                        if isinstance(aufruf, dict) and aufruf.get("geo_analysis"):
+                            nachricht["geo_analysis"] = aufruf["geo_analysis"]
+                            break
+                await self._senden(nachricht)
             return True
 
         if ereignis == "question":

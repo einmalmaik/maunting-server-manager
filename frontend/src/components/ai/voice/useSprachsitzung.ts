@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { aiApi } from '@/api/ai'
+import { aiApi, type AiRegionalAnalysis } from '@/api/ai'
 import { wsProtokolle } from '@/api/client'
 import { wsUrl } from '@/config/api'
 import { AufnahmeAbbruch, starteAufnahme, type Aufnahme } from './audioAufnahme'
@@ -92,6 +92,9 @@ interface Ergebnis {
   belege: Beleg[]
   /** Die Schreibaktion, auf die gerade ein Ja fehlt. `null`, wenn keine. */
   vorschlag: Vorschlag | null
+  /** Regionale Satelliten- und Geodaten, falls ein entsprechendes Werkzeug lief. */
+  geoData: AiRegionalAnalysis | null
+  setGeoData: React.Dispatch<React.SetStateAction<AiRegionalAnalysis | null>>
   /**
    * Der aktuelle Lautstärkepegel zwischen 0 und 1 — wer gerade redet, egal wer.
    *
@@ -172,6 +175,7 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
   const [fehler, setFehler] = useState<string | null>(null)
   const [belege, setBelege] = useState<Beleg[]>([])
   const [vorschlag, setVorschlag] = useState<Vorschlag | null>(null)
+  const [geoData, setGeoData] = useState<AiRegionalAnalysis | null>(null)
 
   const ws = useRef<WebSocket | null>(null)
   const mikro = useRef<Aufnahme | null>(null)
@@ -386,6 +390,9 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
           break
         case 'werkzeug':
           setWerkzeug(String(nachricht.name ?? ''))
+          if (nachricht.geo_analysis && typeof nachricht.geo_analysis === 'object') {
+            setGeoData(nachricht.geo_analysis as AiRegionalAnalysis)
+          }
           break
         case 'beleg': {
           // Der Rahmen kommt aus unserem Backend, sein Inhalt aber aus einem
@@ -502,5 +509,17 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     [zustand],
   )
 
-  return { zustand, zeilen, werkzeug, fehler, belege, vorschlag, pegel, starten, beenden }
+  return {
+    zustand,
+    zeilen,
+    werkzeug,
+    fehler,
+    belege,
+    vorschlag,
+    geoData,
+    setGeoData,
+    pegel,
+    starten,
+    beenden,
+  }
 }

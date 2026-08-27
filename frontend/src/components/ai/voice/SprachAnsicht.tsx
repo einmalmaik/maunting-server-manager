@@ -3,26 +3,16 @@ import { FileText, Loader2, Mic, MicOff, Settings, ShieldAlert, Wrench, X } from
 import { useTranslation } from 'react-i18next'
 
 import type { AiVoiceConfig } from '@/api/ai'
+import { ActiveProcessesCard } from '../geo/ActiveProcessesCard'
+import { RegionalAnalysisLayout } from '../geo/RegionalAnalysisLayout'
 import { Sprachblase } from './Sprachblase'
 import { useSprachsitzung, type Beleg, type Vorschlag } from './useSprachsitzung'
 
 /**
  * Der Sprachmodus als eigener Modus — der Chat tritt zurück.
  *
- * **Warum nicht neben dem Chat.** Ein Sprachmodus neben einem Textfeld ist
- * beides halb: man weiss nicht, wohin man schaut, und das Textfeld verspricht
- * eine Eingabe, die gerade niemand benutzt. Wer spricht, schaut auf eine Sache.
- * Hier stand zuerst eine schmale Leiste unter dem Chat; sie war sparsam und
- * falsch.
- *
- * Der Chat ist einen Klick weit weg, nicht gelöscht. Er ist derselbe Lauf mit
- * demselben Verlauf — wer mitten im Gespräch auf ihn wechselt, liest dort
- * weiter, was er eben gehört hat.
- *
- * Eine per Stimme angestossene Änderung erzeugt denselben Vorschlag wie im
- * Chat, aber hier ohne Knopf: die KI fragt, der Mensch antwortet, und der
- * `Vorschlagskasten` zeigt dazu, *was* gleich passiert. Bestätigt wird
- * ausschliesslich gesprochen — siehe `useSprachsitzung.Vorschlag`.
+ * Unterstützt sowohl die zentrierte Sprachansicht als auch das 3-Spalten-Kommandozentrum,
+ * sobald eine regionale Analyse oder Satellitendaten aktiv sind.
  */
 export function SprachAnsicht({
   konfiguration,
@@ -34,19 +24,17 @@ export function SprachAnsicht({
   providerId?: number | null
 }) {
   const { t } = useTranslation()
-  const { zustand, zeilen, werkzeug, fehler, belege, vorschlag, pegel, starten, beenden } =
+  const { zustand, zeilen, werkzeug, fehler, belege, vorschlag, geoData, setGeoData, pegel, starten, beenden } =
     useSprachsitzung(providerId)
   const [einstellungenOffen, setEinstellungenOffen] = useState(false)
   const kasten = useRef<HTMLDivElement>(null)
 
-  // Wer in den Sprachmodus wechselt, will sprechen. Ein zweiter Klick auf
-  // „jetzt aber wirklich" wäre eine Tür hinter der Tür.
+  // Wer in den Sprachmodus wechselt, will sprechen.
   useEffect(() => {
     void starten()
   }, [starten])
 
-  // ESC beendet das Gespräch. Es steht auch am Knopf — eine Tastenkombination,
-  // die man nicht sieht, ist keine.
+  // ESC beendet das Gespräch.
   useEffect(() => {
     const taste = (ereignis: KeyboardEvent) => {
       if (ereignis.key !== 'Escape') return
@@ -68,11 +56,112 @@ export function SprachAnsicht({
 
   const laeuft = zustand !== 'aus'
   const hoert = zustand === 'hoert' || zustand === 'bereit'
-  // Gezeigt wird immer die zuletzt gezeigte Stelle. Eine Liste übereinander
-  // wäre ein Protokoll — und genau das soll der Sprachmodus nicht sein: die KI
-  // spricht über *eine* Stelle, und die steht dann da.
   const beleg = belege.length > 0 ? belege[belege.length - 1] : null
 
+  // 1. DREI-SPALTEN-KOMMANDOZENTRALE BEI AKTIVER REGIONALANALYSE
+  if (geoData) {
+    return (
+      <RegionalAnalysisLayout
+        active={true}
+        data={geoData}
+        onClose={() => setGeoData(null)}
+      >
+        <div className="flex h-full w-full flex-col justify-between p-4 overflow-y-auto space-y-4">
+          {/* Kopfbereich: Sprachblase und Status */}
+          <div className="flex items-center gap-3 border-b border-outline-variant/20 pb-3 shrink-0">
+            <div className="relative shrink-0">
+              <Sprachblase zustand={zustand} pegel={pegel} />
+              {zustand === 'verbindet' && (
+                <Loader2
+                  className="absolute inset-0 m-auto h-5 w-5 animate-spin text-on-surface-variant/70"
+                  aria-hidden="true"
+                />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-headline text-sm font-bold text-on-surface truncate">
+                {fehler ? t(fehler) : t(`ai.voice.zustand.${zustand}`)}
+              </h3>
+              <p className="text-xs text-on-surface-variant truncate">
+                {fehler ? t('ai.voice.hint.error') : t(`ai.voice.hint.${zustand}`)}
+              </p>
+            </div>
+          </div>
+
+          {/* Aktive Prozesse Card */}
+          <ActiveProcessesCard />
+
+          {/* Gesprächs-Transkript */}
+          {zeilen.length > 0 && (
+            <div
+              ref={kasten}
+              className="flex-1 max-h-48 overflow-y-auto rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 p-3 space-y-2 text-xs"
+            >
+              {zeilen.slice(-8).map((zeile, idx) => (
+                <div
+                  key={idx}
+                  className={`flex flex-col ${
+                    zeile.wer === 'ich' ? 'items-end' : 'items-start'
+                  }`}
+                >
+                  <span className="text-[10px] font-semibold text-on-surface-variant/70 mb-0.5">
+                    {zeile.wer === 'ich' ? t('ai.voice.you', 'Du') : 'MSM'}
+                  </span>
+                  <div
+                    className={`rounded-lg px-2.5 py-1.5 leading-relaxed max-w-[88%] ${
+                      zeile.wer === 'ich'
+                        ? 'bg-primary/15 text-primary border border-primary/25'
+                        : 'bg-surface-container-high text-on-surface'
+                    }`}
+                  >
+                    {zeile.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {vorschlag && <Vorschlagskasten vorschlag={vorschlag} />}
+          {beleg && <Belegkasten beleg={beleg} />}
+
+          {/* Steuerungsleiste unten */}
+          <div className="flex items-center justify-center gap-3 pt-2 border-t border-outline-variant/20 shrink-0">
+            <RunderKnopf
+              label={t(laeuft ? 'ai.voice.stop' : 'ai.voice.start')}
+              aktiv={laeuft && hoert}
+              onClick={laeuft ? beenden : starten}
+            >
+              {laeuft ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+            </RunderKnopf>
+
+            <button
+              type="button"
+              onClick={() => {
+                beenden()
+                aufChat()
+              }}
+              className="msm-btn-secondary flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-medium"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{t('ai.voice.end')}</span>
+            </button>
+
+            <RunderKnopf
+              label={t('ai.voice.settings')}
+              aktiv={einstellungenOffen}
+              onClick={() => setEinstellungenOffen((offen) => !offen)}
+            >
+              <Settings className="h-4 w-4" />
+            </RunderKnopf>
+          </div>
+
+          {einstellungenOffen && <Einstellungen konfiguration={konfiguration} />}
+        </div>
+      </RegionalAnalysisLayout>
+    )
+  }
+
+  // 2. STANDARD-ZENTRIERTE SPRACHANSICHT
   return (
     <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6 py-6">
       <div className="relative flex items-center justify-center">
@@ -85,9 +174,7 @@ export function SprachAnsicht({
         )}
       </div>
 
-      {/* Der Zustand als Text. Die Kugel ist schön, aber sie ist keine
-          Auskunft: wer sie nicht sieht — kein Bild, kein Licht, kein Auge
-          dafür —, muss hier lesen können, was gerade passiert. */}
+      {/* Zustand als Text */}
       <div className="-mt-4 flex flex-col items-center gap-2 text-center">
         <h2 className="font-headline text-headline-md text-on-surface" aria-live="polite">
           {fehler ? t(fehler) : t(`ai.voice.zustand.${zustand}`)}
@@ -98,8 +185,6 @@ export function SprachAnsicht({
         {werkzeug && (
           <p className="flex items-center gap-1.5 text-xs text-on-surface-variant/70">
             <Wrench className="h-3 w-3 shrink-0" aria-hidden="true" />
-            {/* Nur der Name. Argumente tragen Serverkennungen und Pfade und
-                gehören nicht in eine Anzeige, die nebenbei mitläuft. */}
             {werkzeug}
           </p>
         )}
@@ -120,9 +205,6 @@ export function SprachAnsicht({
         <button
           type="button"
           onClick={() => {
-            // Erst auflegen, dann umschalten. Andersherum bliebe für einen
-            // Wimpernschlag ein offenes Mikrofon hinter einer Ansicht stehen,
-            // die es nicht mehr anzeigt.
             beenden()
             aufChat()
           }}
@@ -151,20 +233,6 @@ export function SprachAnsicht({
   )
 }
 
-/**
- * Was gleich passiert, wenn der Mensch Ja sagt — gezeigt, nicht anklickbar.
- *
- * **Kein Knopf, und das ist Absicht.** Der Sprachmodus bestätigt gesprochen;
- * ein Knopf daneben wäre ein zweiter Weg zum selben Ziel und damit ein zweiter
- * Zustand, den Brücke und Anzeige auseinanderhalten müssten. Was der Kasten
- * beiträgt, ist das, was gesprochen schlecht ankommt: der genaue Name der
- * Aktion. „Ich lösche dann mal den Server" ist gehört eindeutig genug, um Ja zu
- * sagen, und zu ungenau, um zu wissen, welchen.
- *
- * Der Werkzeugname wird übersetzt (`ai.actions.tools.*`, dieselbe Quelle wie
- * die Karte im Chat), die erwartete Wirkung ist vom Modell verfasst und steht
- * deshalb als reiner Text da.
- */
 function Vorschlagskasten({ vorschlag }: { vorschlag: Vorschlag }) {
   const { t } = useTranslation()
   return (
@@ -196,22 +264,6 @@ function Vorschlagskasten({ vorschlag }: { vorschlag: Vorschlag }) {
   )
 }
 
-/**
- * Die Stelle, über die gerade gesprochen wird — gezeigt, nicht vorgelesen.
- *
- * Eine Java-Ausnahme vorgelesen zu bekommen, dauert zwanzig Sekunden und sagt
- * nichts; gelesen dauert sie zwei und sagt alles. Der Betreiber wollte deshalb
- * beides getrennt: die Zeilen auf dem Schirm, die Erklärung im Ohr.
- *
- * **Fremdtext, und zwar zweifach.** Die Zeilen stammen aus einem
- * Werkzeugergebnis — Logs, also Text, den irgendwer auf einen Server geschrieben
- * hat. Die `quelle` benennt das Modell. Beides wird als **reiner Text**
- * gezeichnet: kein Markdown, kein HTML, keine Verlinkung. React maskiert von
- * sich aus, und `<pre>` gibt keine Gelegenheit, das zu vergessen — ein
- * `AiMarkdown` an dieser Stelle wäre der kürzeste Weg von einer Logzeile zu
- * einem klickbaren Link im Panel. Der Hinweis darunter steht dort, weil sonst
- * niemand unterscheiden kann, was die KI *sagt* und was sie nur *zeigt*.
- */
 function Belegkasten({ beleg }: { beleg: Beleg }) {
   const { t } = useTranslation()
   return (
@@ -224,10 +276,6 @@ function Belegkasten({ beleg }: { beleg: Beleg }) {
         <h3 className="shrink-0 text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
           {t('ai.voice.beleg.heading')}
         </h3>
-        {/* Auch die Quelle ist Fremdtext: sie benennt das Modell, und ein Modell
-            kann dort einen ganzen Absatz hinschreiben. `min-w-0` gehört dazu —
-            ohne das greift `truncate` in einer Flexzeile nicht, und die
-            Kopfzeile wüchse mit. */}
         <span className="ml-auto min-w-0 truncate font-mono text-xs text-on-surface-variant/70">
           {beleg.quelle}
         </span>
@@ -273,29 +321,10 @@ function RunderKnopf({
   )
 }
 
-/**
- * Was hinter dem Zahnrad steht — und was ausdrücklich nicht.
- *
- * Es sind **Angaben**, keine Regler. Am Sprachmodus lässt sich von hier aus
- * nichts einstellen: Modell und Schlüssel gehören dem Betreiber, die Stimme
- * auch (sie steht als Voice ID am Stimmzugang unter „Stimme"), und die
- * Höchstdauer hängt an der Lebensdauer des Anmeldetokens. Ein Zahnrad, das drei Schalter
- * zeigt, die nichts tun, wäre schlimmer als keines — hier steht, woran man
- * gerade dran ist, und wo man es ändert.
- *
- * Die Stimme kam dazu, als sie wählbar wurde. Sie gehört hierher und nicht in
- * einen Regler: wer spricht, hört sie ohnehin — er will nur wissen, *welche*
- * es ist, wenn er sie beim Betreiber ändern lassen will.
- */
 function Einstellungen({ konfiguration }: { konfiguration: AiVoiceConfig | null }) {
   const { t } = useTranslation()
   const zeilen: [string, string][] = [
     ['ai.voice.info.model', konfiguration?.model ?? '—'],
-    // Die Voice ID des Stimmzugangs, so wie der Server sie führt. Eine
-    // Standardstimme gibt es nicht — ohne hinterlegte Kennung ist `available`
-    // falsch und diese Ansicht erscheint gar nicht. Deshalb wird hier nichts
-    // geraten und nichts eingesetzt; `—` deckt nur den Fall ab, dass die
-    // Konfiguration noch gar nicht da ist.
     ['ai.voice.info.voice', konfiguration?.voice || '—'],
     ['ai.voice.info.sampleRate', `${(konfiguration?.sample_rate ?? 0) / 1000} kHz`],
     [

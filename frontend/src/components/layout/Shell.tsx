@@ -9,7 +9,21 @@ import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
 
 export function Shell() {
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
+  const [sidebarHidden, setSidebarHidden] = useState(false)
   const mobileNavigationTriggerRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    const handleToggle = (e: Event) => {
+      const custom = e as CustomEvent<{ hidden?: boolean }>
+      setSidebarHidden(
+        typeof custom.detail?.hidden === 'boolean'
+          ? custom.detail.hidden
+          : (prev) => !prev,
+      )
+    }
+    window.addEventListener('msm:toggle-sidebar', handleToggle)
+    return () => window.removeEventListener('msm:toggle-sidebar', handleToggle)
+  }, [])
 
   useEffect(() => {
     if (!mobileNavigationOpen) return
@@ -45,7 +59,7 @@ export function Shell() {
       <div className="absolute inset-0 msm-deep-grid opacity-30 pointer-events-none" />
 
       {/* Sidebar */}
-      <Sidebar />
+      {!sidebarHidden && <Sidebar />}
 
       {mobileNavigationOpen && (
         <div className="fixed inset-0 z-50 h-[100dvh] w-screen overflow-hidden lg:hidden" role="presentation" data-testid="mobile-navigation-layer">
@@ -59,7 +73,7 @@ export function Shell() {
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 lg:ml-64 flex flex-col min-w-0 relative z-10">
+      <div className={`flex-1 ${sidebarHidden ? 'ml-0' : 'lg:ml-64'} flex flex-col min-w-0 relative z-10 transition-all duration-300`}>
         <Topbar menuButtonRef={mobileNavigationTriggerRef} onOpenNavigation={() => setMobileNavigationOpen(true)} />
         {/* Ohne `overflow-auto`: `main` hat als `flex-1` in einer Spalte ohne
             feste Höhe immer genau seine Inhaltshöhe, lief also nie über. Die
@@ -67,8 +81,8 @@ export function Shell() {
             Klebeelemente der Seiten (Reiterleiste, Inhaltsverzeichnisse)
             vergeblich ausgerichtet haben. Breite Inhalte bringen ihr eigenes
             `overflow-x-auto` mit. */}
-        <main className="flex-1 p-margin-mobile md:p-margin-desktop relative flex flex-col">
-          <div className="relative z-10 flex-1 w-full">
+        <main className="flex-1 p-margin-mobile md:p-margin-desktop relative flex flex-col min-h-0">
+          <div className="relative z-10 flex-1 w-full flex flex-col min-h-0">
             <Outlet />
           </div>
 

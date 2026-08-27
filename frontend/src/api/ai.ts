@@ -330,6 +330,12 @@ export interface AiToolUse {
    * Ergebnis einer regionalen Satelliten- und Geo-Analyse (analyze_region).
    */
   geo_analysis?: AiRegionalAnalysis | null
+  /**
+   * Trefferliste einer Websuche (web_search).
+   */
+  web_results?: Array<{ title?: string; url?: string; snippet?: string; description?: string }> | null
+  /** Generisches Werkzeugergebnis für erweiterte Anzeigen. */
+  ergebnis?: unknown
 }
 
 /**

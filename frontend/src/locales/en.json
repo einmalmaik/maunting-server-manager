@@ -1059,7 +1059,48 @@
       "precipitation": "{{mm}} mm precipitation",
       "cloudCover": "Cloud cover",
       "openPreview": "Open preview",
-      "current": "Current"
+      "current": "Current",
+      "liveActive": "Live analysis active",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
+      "resetView": "Reset view",
+      "fullscreen": "Fullscreen",
+      "currentNews": "Recent news",
+      "newsAndWeb": "News & situation reports",
+      "readMore": "Source",
+      "readArticle": "Read article",
+      "socialMedia": "Social media & trends",
+      "trafficStatus": "Traffic & movement",
+      "weatherDetails": "Detailed weather data",
+      "scenes": "Sentinel-2 L2A scenes",
+      "openFullScene": "Open full resolution scene",
+      "noScenes": "No satellite scenes found",
+      "noSatellitePreview": "No direct image preview available",
+      "tabs": {
+        "overview": "Overview",
+        "satellite": "Satellite",
+        "news": "News",
+        "social": "Social media",
+        "traffic": "Traffic",
+        "weather": "Weather"
+      },
+      "categories": {
+        "local": "Local",
+        "environment": "Environment",
+        "politics": "Politics",
+        "events": "Events"
+      },
+      "processes": {
+        "title": "Active processes",
+        "satellite": "Satellite data (Sentinel-2)",
+        "weather": "Weather data",
+        "news": "News & web search",
+        "social": "Social media analysis",
+        "traffic": "Traffic & mobility",
+        "done": "Done",
+        "running": "Running...",
+        "waiting": "Waiting..."
+      }
     },
     "usage": {
       "title": "AI usage",
