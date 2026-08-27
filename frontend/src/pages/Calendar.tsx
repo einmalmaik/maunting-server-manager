@@ -626,72 +626,166 @@ export function Calendar() {
       {/* Hauptansicht: WOCHE */}
       {viewMode === 'week' && (
         <div className="msm-card p-0 overflow-hidden">
-          <div className="grid grid-cols-7 border-b border-outline-variant/40 bg-surface-container/50 text-center py-2.5">
-            {weekDays.map(({ date, isToday }, idx) => (
-              <div key={idx} className="flex flex-col items-center">
-                <span className="text-[11px] font-label-md uppercase text-on-surface-variant">
-                  {date.toLocaleDateString(locale, { weekday: 'short' })}
-                </span>
-                <span
-                  className={`mt-0.5 inline-flex items-center justify-center text-xs font-semibold rounded-full w-6 h-6 ${
-                    isToday ? 'bg-primary text-on-primary' : 'text-on-surface'
-                  }`}
-                >
-                  {date.getDate()}
-                </span>
-              </div>
-            ))}
+          {/* Desktop & Tablet: 7-Spalten Kalender-Raster */}
+          <div className="hidden md:block">
+            <div className="grid grid-cols-7 border-b border-outline-variant/40 bg-surface-container/50 text-center py-2.5">
+              {weekDays.map(({ date, isToday }, idx) => (
+                <div key={idx} className="flex flex-col items-center">
+                  <span className="text-[11px] font-label-md uppercase text-on-surface-variant">
+                    {date.toLocaleDateString(locale, { weekday: 'short' })}
+                  </span>
+                  <span
+                    className={`mt-0.5 inline-flex items-center justify-center text-xs font-semibold rounded-full w-6 h-6 ${
+                      isToday ? 'bg-primary text-on-primary' : 'text-on-surface'
+                    }`}
+                  >
+                    {date.getDate()}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-7 divide-x divide-outline-variant/20 min-h-[500px] bg-surface">
+              {weekDays.map(({ date, isToday }, idx) => {
+                const dayEvents = getEventsForDay(date)
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => openCreateModal(date)}
+                    className={`p-2 space-y-2 hover:bg-surface-container/30 cursor-pointer ${
+                      isToday ? 'bg-primary/5' : ''
+                    }`}
+                  >
+                    {dayEvents.length === 0 ? (
+                      <div className="h-full flex items-center justify-center text-xs text-on-surface-variant/40 italic">
+                        Keine Termine
+                      </div>
+                    ) : (
+                      dayEvents.map((ev) => {
+                        const colorStyle = getColorClass(ev.color)
+                        const startStr = new Date(ev.start).toLocaleTimeString(locale, {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                        const endStr = new Date(ev.end).toLocaleTimeString(locale, {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                        return (
+                          <div
+                            key={ev.event_id}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openEditModal(ev)
+                            }}
+                            className={`p-2 rounded-lg border text-xs ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border} hover:brightness-110`}
+                          >
+                            <div className="font-semibold text-sm truncate">{ev.title}</div>
+                            <div className="flex items-center gap-1 text-[10px] opacity-80 mt-1">
+                              <Clock className="w-3 h-3" />
+                              <span>{startStr} – {endStr}</span>
+                            </div>
+                            {ev.location && (
+                              <div className="flex items-center gap-1 text-[10px] opacity-80 mt-0.5 truncate">
+                                <MapPin className="w-3 h-3" />
+                                <span className="truncate">{ev.location}</span>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
 
-          <div className="grid grid-cols-7 divide-x divide-outline-variant/20 min-h-[500px] bg-surface">
+          {/* Smartphone & Mobilansicht: Vertikale Tages-Kartenliste der Woche */}
+          <div className="block md:hidden divide-y divide-outline-variant/20 bg-surface">
             {weekDays.map(({ date, isToday }, idx) => {
               const dayEvents = getEventsForDay(date)
+              const weekdayStr = date.toLocaleDateString(locale, { weekday: 'long' })
+              const dateStr = date.toLocaleDateString(locale, { day: 'numeric', month: 'short' })
               return (
                 <div
                   key={idx}
-                  onClick={() => openCreateModal(date)}
-                  className={`p-2 space-y-2 hover:bg-surface-container/30 cursor-pointer ${
+                  className={`p-3 space-y-2 transition-colors ${
                     isToday ? 'bg-primary/5' : ''
                   }`}
                 >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex items-center justify-center text-xs font-bold rounded-full w-6 h-6 ${
+                          isToday ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface'
+                        }`}
+                      >
+                        {date.getDate()}
+                      </span>
+                      <span className="text-sm font-semibold text-on-surface">
+                        {weekdayStr}, {dateStr}
+                      </span>
+                      {isToday && (
+                        <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-primary/15 text-primary">
+                          Heute
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openCreateModal(date)}
+                      className="p-1 rounded-md text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors"
+                      title="Termin hinzufügen"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+
                   {dayEvents.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-xs text-on-surface-variant/40 italic">
-                      Keine Termine
+                    <div
+                      onClick={() => openCreateModal(date)}
+                      className="py-2 px-3 rounded-lg border border-dashed border-outline-variant/40 text-xs text-on-surface-variant/50 hover:bg-surface-container/20 cursor-pointer text-center"
+                    >
+                      Keine Termine — Tippen zum Erstellen
                     </div>
                   ) : (
-                    dayEvents.map((ev) => {
-                      const colorStyle = getColorClass(ev.color)
-                      const startStr = new Date(ev.start).toLocaleTimeString(locale, {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })
-                      const endStr = new Date(ev.end).toLocaleTimeString(locale, {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })
-                      return (
-                        <div
-                          key={ev.event_id}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            openEditModal(ev)
-                          }}
-                          className={`p-2 rounded-lg border text-xs ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border} hover:brightness-110`}
-                        >
-                          <div className="font-semibold text-sm truncate">{ev.title}</div>
-                          <div className="flex items-center gap-1 text-[10px] opacity-80 mt-1">
-                            <Clock className="w-3 h-3" />
-                            <span>{startStr} – {endStr}</span>
-                          </div>
-                          {ev.location && (
-                            <div className="flex items-center gap-1 text-[10px] opacity-80 mt-0.5 truncate">
-                              <MapPin className="w-3 h-3" />
-                              <span className="truncate">{ev.location}</span>
+                    <div className="space-y-1.5">
+                      {dayEvents.map((ev) => {
+                        const colorStyle = getColorClass(ev.color)
+                        const startStr = new Date(ev.start).toLocaleTimeString(locale, {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                        const endStr = new Date(ev.end).toLocaleTimeString(locale, {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                        return (
+                          <div
+                            key={ev.event_id}
+                            onClick={() => openEditModal(ev)}
+                            className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-center justify-between gap-2 ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border} hover:brightness-110`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="font-semibold text-sm truncate">{ev.title}</div>
+                              <div className="flex items-center gap-3 text-[11px] opacity-80 mt-1">
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-3.5 h-3.5" />
+                                  {startStr} – {endStr}
+                                </span>
+                                {ev.location && (
+                                  <span className="flex items-center gap-1 truncate">
+                                    <MapPin className="w-3.5 h-3.5" />
+                                    <span className="truncate">{ev.location}</span>
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                          )}
-                        </div>
-                      )
-                    })
+                          </div>
+                        )
+                      })}
+                    </div>
                   )}
                 </div>
               )

@@ -553,12 +553,13 @@ Standard-Postfach. Frage niemals nach vollstaendigen Adressen oder Bestaetigunge
 der Absenderadresse, wenn ein passendes Postfach in deiner Lage steht. \
 Erstelle fuer den sofortigen E-Mail-Versand oder Terminaenderungen direkt die passende Vorschlagskarte \
 (`propose_email_send`, `propose_calendar_event_create`, `propose_calendar_event_update`, `propose_calendar_event_delete`). \
-Geplante und zeitversetzte Aktionen: Wenn der Benutzer eine E-Mail oder eine Terminaenderung \
-zu einem zukuenftigen Zeitpunkt anfordert (z. B. "sende um 17:05 Uhr eine E-Mail an XY...", \
-"schick morgen um 09:00 Uhr eine Erinnerung per Mail"), erstelle dafuer einen Auftrag \
-mit `propose_task_set` (kind="act", once_at="YYYY-MM-DDTHH:MM" oder time_of_day="HH:MM", \
-mit genauer Handlungsanweisung in instruction). Der Aufgaben-Worker fuehrt die E-Mail oder \
-den Termin zum vereinbarten Zeitpunkt eigenstaendig aus."""
+5. Geplante Aktionen und Werkzeug-Kombinationen: Wenn der Benutzer eine zeitgesteuerte \
+Aktion verlangt (z. B. "starte am 13. Oktober um 14 Uhr Server XY neu", "sende um 17:05 Uhr eine Mail..."), \
+erstelle dafuer einen zeitgesteuerten Auftrag mit `propose_task_set` (kind="act", once_at="YYYY-MM-DDTHH:MM" \
+oder time_of_day="HH:MM", mit praeziser Anweisung in instruction). Bei Server-Wartungen oder angekuendigten \
+Aktivitaeten erstelle zusaetzlich direkt den passenden Kalendereintrag mit `propose_calendar_event_create` \
+(z. B. Titel="Wartung: Server XY Neustart", Startzeit=geplante Zeit, Dauer=30 Min), damit die geplante \
+Aktion transparent im Kalender dokumentiert ist."""
 
 
 POPUPS_UND_ANKUENDIGUNGEN = """\
