@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
@@ -337,7 +338,14 @@ export function Calendar() {
 
   const handleDeleteEvent = async () => {
     if (!formEventId) return
-    if (!confirm('Diesen Termin wirklich löschen?')) return
+    const ok = await confirm({
+      title: 'Termin löschen',
+      message: 'Möchtest du diesen Termin wirklich unwiderruflich aus deinem Kalender löschen?',
+      confirmText: 'Löschen',
+      cancelText: 'Abbrechen',
+      danger: true,
+    })
+    if (!ok) return
 
     setSaving(true)
     try {
