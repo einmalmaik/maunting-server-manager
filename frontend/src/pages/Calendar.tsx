@@ -18,6 +18,7 @@ import { apiUrl } from '@/config/api'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { PageHeader } from '@/Singra/UI/PageHeader'
+import { DateTimePicker } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 
@@ -933,24 +934,26 @@ export function Calendar() {
                   <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
                     {t('calendar.start', 'Beginn')} *
                   </label>
-                  <input
-                    type="datetime-local"
-                    required
+                  <DateTimePicker
                     value={formStart}
-                    onChange={(e) => setFormStart(e.target.value)}
-                    className="msm-input w-full text-xs"
+                    onChange={(val) => setFormStart(val)}
+                    locale={i18n.language.startsWith('de') ? 'de' : 'en'}
+                    placeholder={t('calendar.selectStart', 'Beginn wählen')}
+                    aria-label={t('calendar.start', 'Beginn')}
+                    className="w-full"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
                     {t('calendar.end', 'Ende')} *
                   </label>
-                  <input
-                    type="datetime-local"
-                    required
+                  <DateTimePicker
                     value={formEnd}
-                    onChange={(e) => setFormEnd(e.target.value)}
-                    className="msm-input w-full text-xs"
+                    onChange={(val) => setFormEnd(val)}
+                    locale={i18n.language.startsWith('de') ? 'de' : 'en'}
+                    placeholder={t('calendar.selectEnd', 'Ende wählen')}
+                    aria-label={t('calendar.end', 'Ende')}
+                    className="w-full"
                   />
                 </div>
               </div>
