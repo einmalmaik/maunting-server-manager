@@ -622,8 +622,18 @@ class CalendarService:
     @classmethod
     def export_ical(cls, db: Session, user: User, calendar_id: int | None = None) -> str:
         """Exportiert alle Termine des Benutzers als RFC-5545-konformen iCalendar (.ics) String."""
-        calendar = cls.get_calendar(db, user, calendar_id)
-        cal_name = calendar.name if calendar else "MSM Kalender"
+        if calendar_id is not None:
+            c = cls.get_calendar(db, user, calendar_id)
+            calendars_to_export = [c] if c else []
+            cal_name = calendars_to_export[0].name if calendars_to_export else "MSM Kalender"
+        else:
+            calendars_to_export = db.scalars(
+                select(UserCalendar).where(UserCalendar.user_id == user.id)
+            ).all()
+            if not calendars_to_export:
+                calendars_to_export = [cls.get_or_create_native_calendar(db, user)]
+            cal_name = "MSM Kalender"
+
         tz_name = getattr(user, "time_zone", None) or "Europe/Berlin"
 
         lines = [
@@ -636,11 +646,17 @@ class CalendarService:
             "METHOD:PUBLISH",
         ]
 
-        if calendar:
-            events = cls.get_events(db, user, calendar.id)
-            dt_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        seen_uids = set()
+        dt_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
+        for cal in calendars_to_export:
+            events = cls.get_events(db, user, cal.id)
             for ev in events:
+                raw_uid = str(ev.get("event_id") or uuid.uuid4())
+                if raw_uid in seen_uids:
+                    continue
+                seen_uids.add(raw_uid)
+
                 is_all_day = bool(ev.get("all_day"))
                 start_dt = _parse_datetime(ev.get("start", ""), user=user)
                 end_dt = _parse_datetime(ev.get("end", ""), user=user)
@@ -652,7 +668,6 @@ class CalendarService:
                     dt_start_line = f"DTSTART:{start_dt.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
                     dt_end_line = f"DTEND:{end_dt.astimezone(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
 
-                raw_uid = str(ev.get("event_id") or uuid.uuid4())
                 uid = f"{raw_uid}@msm.mauntingstudios.de" if "@" not in raw_uid else raw_uid
                 title = _escape_ical_text(ev.get("title", "Termin"))
                 desc = _escape_ical_text(ev.get("description", ""))
