@@ -30,6 +30,9 @@ class CalendarEventCreate(BaseModel):
     calendar_id: int | None = None
     all_day: bool = False
     color: str | None = None
+    event_type: str = "personal"
+    team_id: int | None = None
+    server_id: int | None = None
 
 
 class CalendarEventUpdate(BaseModel):
@@ -41,6 +44,9 @@ class CalendarEventUpdate(BaseModel):
     calendar_id: int | None = None
     all_day: bool | None = None
     color: str | None = None
+    event_type: str | None = None
+    team_id: int | None = None
+    server_id: int | None = None
 
 
 def _check_calendar_enabled() -> None:
@@ -66,6 +72,9 @@ def list_events(
     start: str | None = Query(None, description="Startzeitpunkt (ISO)"),
     end: str | None = Query(None, description="Endzeitpunkt (ISO)"),
     calendar_id: int | None = Query(None),
+    event_type: str | None = Query(None, description="Typ-Filter (personal, team, server, node)"),
+    team_id: int | None = Query(None),
+    server_id: int | None = Query(None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
@@ -77,6 +86,9 @@ def list_events(
         calendar_id=calendar_id,
         start_date=start,
         end_date=end,
+        event_type=event_type,
+        team_id=team_id,
+        server_id=server_id,
     )
 
 
@@ -100,6 +112,9 @@ def create_event(
             calendar_id=payload.calendar_id,
             all_day=payload.all_day,
             color=payload.color,
+            event_type=payload.event_type,
+            team_id=payload.team_id,
+            server_id=payload.server_id,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -127,6 +142,9 @@ def update_event(
             calendar_id=payload.calendar_id,
             all_day=payload.all_day,
             color=payload.color,
+            event_type=payload.event_type,
+            team_id=payload.team_id,
+            server_id=payload.server_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

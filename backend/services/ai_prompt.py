@@ -558,8 +558,9 @@ Aktion verlangt (z. B. "starte am 13. Oktober um 14 Uhr Server XY neu", "sende u
 erstelle dafuer einen zeitgesteuerten Auftrag mit `propose_task_set` (kind="act", once_at="YYYY-MM-DDTHH:MM" \
 oder time_of_day="HH:MM", mit praeziser Anweisung in instruction). Bei Server-Wartungen oder angekuendigten \
 Aktivitaeten erstelle zusaetzlich direkt den passenden Kalendereintrag mit `propose_calendar_event_create` \
-(z. B. Titel="Wartung: Server XY Neustart", Startzeit=geplante Zeit, Dauer=30 Min), damit die geplante \
-Aktion transparent im Kalender dokumentiert ist."""
+(z. B. Titel="Wartung: Server XY Neustart", Startzeit=geplante Zeit, Dauer=30 Min, event_type="server", server_id=Server-ID), damit die geplante \
+Aktion transparent im Kalender dokumentiert ist. \
+6. Semantische Kategorien & Zuordnung (`event_type`): Setze fuer Server-Wartungen oder Server-Updates immer `event_type='server'`, `server_id` auf die ID des betroffenen Servers und `color='purple'`. Fuer Termine, die ein Team betreffen (z. B. Team-Meeting, Absprachen), setze `event_type='team'`, `team_id` auf die passende Team-ID und `color='green'`. Fuer Node-/Infrastruktur-Arbeiten setze `event_type='node'` und `color='amber'`. Fuer alle persoenlichen Termine gilt `event_type='personal'` und `color='blue'`."""
 
 
 POPUPS_UND_ANKUENDIGUNGEN = """\

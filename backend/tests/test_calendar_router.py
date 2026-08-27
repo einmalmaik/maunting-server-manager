@@ -143,3 +143,50 @@ def test_calendar_feed_token_and_unauthenticated_export(override_deps):
     finally:
         app.dependency_overrides[get_current_user] = lambda: user
 
+
+def test_calendar_router_categories(override_deps):
+    client = TestClient(app)
+
+    # 1. Create personal event
+    res1 = client.post(
+        "/api/calendar/events",
+        json={
+            "title": "Persönlicher Termin",
+            "start_time": "2026-08-28 10:00",
+            "end_time": "2026-08-28 11:00",
+            "event_type": "personal",
+        },
+    )
+    assert res1.status_code == 201
+    assert res1.json()["event_type"] == "personal"
+    assert res1.json()["color"] == "blue"
+
+    # 2. Create server event
+    res2 = client.post(
+        "/api/calendar/events",
+        json={
+            "title": "Server Backup & Reboot",
+            "start_time": "2026-08-28 14:00",
+            "end_time": "2026-08-28 15:00",
+            "event_type": "server",
+        },
+    )
+    assert res2.status_code == 201
+    assert res2.json()["event_type"] == "server"
+    assert res2.json()["color"] == "purple"
+
+    # 3. Filter by event_type=server
+    res_server = client.get("/api/calendar/events?event_type=server")
+    assert res_server.status_code == 200
+    events_server = res_server.json()
+    assert len(events_server) == 1
+    assert events_server[0]["title"] == "Server Backup & Reboot"
+
+    # 4. Filter by event_type=personal
+    res_pers = client.get("/api/calendar/events?event_type=personal")
+    assert res_pers.status_code == 200
+    events_pers = res_pers.json()
+    assert len(events_pers) == 1
+    assert events_pers[0]["title"] == "Persönlicher Termin"
+
+

@@ -49,6 +49,17 @@ class CalendarEvent(Base):
     all_day: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     color: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
+    # Semantische Kategorie: personal, team, server, node
+    event_type: Mapped[str] = mapped_column(
+        String(32), default="personal", nullable=False, index=True
+    )
+    team_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    server_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
@@ -58,3 +69,6 @@ class CalendarEvent(Base):
 
     # Relationships
     calendar = relationship("UserCalendar", backref="events", lazy="joined")
+    user = relationship("User", lazy="joined")
+    team = relationship("Team", lazy="joined")
+    server = relationship("Server", lazy="joined")

@@ -659,7 +659,10 @@ export function Teams() {
                     >
                       <span className="block text-sm font-medium text-on-surface">{server.server_name}</span>
                       <MultiSelect
-                        options={server.permission_keys.map((key) => ({ value: key, label: key }))}
+                        options={server.permission_keys.map((key) => ({
+                          value: key,
+                          label: t(`permissionDetails.${key.replace(/\./g, '_')}.title`, { defaultValue: key }),
+                        }))}
                         values={current?.permission_keys ?? []}
                         onChange={(keys) => void setServerKeys(server.server_id, keys)}
                         disabled={busy}

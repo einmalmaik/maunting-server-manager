@@ -9,8 +9,12 @@ import {
   Download,
   Link,
   MapPin,
+  Network,
   Plus,
+  Server,
   Trash2,
+  User,
+  Users,
   X,
 } from 'lucide-react'
 import { api } from '@/api/client'
@@ -21,6 +25,8 @@ import { PageHeader } from '@/Singra/UI/PageHeader'
 import { DateTimePicker } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
+
+export type EventCategoryType = 'personal' | 'team' | 'server' | 'node'
 
 export interface CalendarEventItem {
   id?: number
@@ -33,6 +39,14 @@ export interface CalendarEventItem {
   all_day?: boolean
   color?: string
   calendar?: string
+  event_type?: EventCategoryType | string
+  team_id?: number | null
+  team_name?: string | null
+  server_id?: number | null
+  server_name?: string | null
+  creator_name?: string | null
+  user_id?: number
+  can_edit?: boolean
 }
 
 type ViewMode = 'month' | 'week' | 'day'
@@ -47,8 +61,26 @@ const COLOR_PALETTE = [
 ]
 
 function getColorClass(colorId?: string) {
-  const found = COLOR_PALETTE.find((c) => c.id === colorId)
+  // Mapping von Backend-Farbnamen (blue -> primary, green -> emerald, etc.)
+  let normalizedId = colorId
+  if (colorId === 'blue') normalizedId = 'primary'
+  if (colorId === 'green') normalizedId = 'emerald'
+  const found = COLOR_PALETTE.find((c) => c.id === normalizedId)
   return found || COLOR_PALETTE[0]
+}
+
+function getDefaultColorForType(type: EventCategoryType): string {
+  switch (type) {
+    case 'team':
+      return 'emerald'
+    case 'server':
+      return 'purple'
+    case 'node':
+      return 'amber'
+    case 'personal':
+    default:
+      return 'primary'
+  }
 }
 
 function pad(n: number) {
@@ -63,9 +95,13 @@ export function Calendar() {
   const { t, i18n } = useTranslation()
   const [currentDate, setCurrentDate] = useState(() => new Date())
   const [viewMode, setViewMode] = useState<ViewMode>('month')
+  const [selectedCategory, setSelectedCategory] = useState<'all' | EventCategoryType>('all')
   const [events, setEvents] = useState<CalendarEventItem[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isFeedModalOpen, setIsFeedModalOpen] = useState(false)
+
+  const [teamsList, setTeamsList] = useState<{ id: number; name: string }[]>([])
+  const [serversList, setServersList] = useState<{ id: number; name: string }[]>([])
 
   // Formular-State
   const [formEventId, setFormEventId] = useState<string | null>(null)
@@ -76,6 +112,9 @@ export function Calendar() {
   const [formLocation, setFormLocation] = useState('')
   const [formAllDay, setFormAllDay] = useState(false)
   const [formColor, setFormColor] = useState('primary')
+  const [formEventType, setFormEventType] = useState<EventCategoryType>('personal')
+  const [formTeamId, setFormTeamId] = useState<number | null>(null)
+  const [formServerId, setFormServerId] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
 
   const locale = i18n.language.startsWith('de') ? 'de-DE' : 'en-US'
@@ -111,8 +150,9 @@ export function Calendar() {
   }, [currentDate, viewMode])
 
   const fetchEvents = useCallback(() => {
+    const catParam = selectedCategory !== 'all' ? `&event_type=${encodeURIComponent(selectedCategory)}` : ''
     api<CalendarEventItem[]>(
-      `/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}`
+      `/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}${catParam}`
     )
       .then((data) => {
         setEvents(Array.isArray(data) ? data : [])
@@ -120,15 +160,35 @@ export function Calendar() {
       .catch((err) => {
         toast.error(err.message)
       })
-  }, [rangeStart, rangeEnd])
+  }, [rangeStart, rangeEnd, selectedCategory])
+
+  useEffect(() => {
+    // Lade Teams und Server für Zuordnungs-Dropdowns
+    api<any[]>('/teams')
+      .then((res) => {
+        if (Array.isArray(res)) {
+          setTeamsList(res.map((t) => ({ id: t.id, name: t.name })))
+        }
+      })
+      .catch(() => {})
+
+    api<any[]>('/servers')
+      .then((res) => {
+        if (Array.isArray(res)) {
+          setServersList(res.map((s) => ({ id: s.id, name: s.name })))
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     fetchEvents()
 
     // Automatische Aktualisierung in Echtzeit alle 10 Sekunden (still im Hintergrund)
     const interval = setInterval(() => {
+      const catParam = selectedCategory !== 'all' ? `&event_type=${encodeURIComponent(selectedCategory)}` : ''
       api<CalendarEventItem[]>(
-        `/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}`
+        `/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}${catParam}`
       )
         .then((data) => {
           if (Array.isArray(data)) setEvents(data)
@@ -137,8 +197,9 @@ export function Calendar() {
     }, 10_000)
 
     const handleFocusOrUpdate = () => {
+      const catParam = selectedCategory !== 'all' ? `&event_type=${encodeURIComponent(selectedCategory)}` : ''
       api<CalendarEventItem[]>(
-        `/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}`
+        `/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}${catParam}`
       )
         .then((data) => {
           if (Array.isArray(data)) setEvents(data)
@@ -154,7 +215,7 @@ export function Calendar() {
       window.removeEventListener('focus', handleFocusOrUpdate)
       window.removeEventListener('msm:calendar-updated', handleFocusOrUpdate)
     }
-  }, [rangeStart, rangeEnd, fetchEvents])
+  }, [rangeStart, rangeEnd, selectedCategory, fetchEvents])
 
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null)
   const [animationClass, setAnimationClass] = useState('')
@@ -267,6 +328,8 @@ export function Calendar() {
     const end = new Date(start)
     end.setHours(start.getHours() + 1)
 
+    const targetType: EventCategoryType = selectedCategory !== 'all' ? selectedCategory : 'personal'
+
     setFormEventId(null)
     setFormTitle('')
     setFormStart(formatIsoForInput(start))
@@ -274,11 +337,19 @@ export function Calendar() {
     setFormDescription('')
     setFormLocation('')
     setFormAllDay(false)
-    setFormColor('primary')
+    setFormEventType(targetType)
+    setFormTeamId(null)
+    setFormServerId(null)
+    setFormColor(getDefaultColorForType(targetType))
     setIsModalOpen(true)
   }
 
   const openEditModal = (ev: CalendarEventItem) => {
+    const rawType = (ev.event_type as EventCategoryType) || 'personal'
+    const evType: EventCategoryType = ['personal', 'team', 'server', 'node'].includes(rawType)
+      ? rawType
+      : 'personal'
+
     setFormEventId(ev.event_id)
     setFormTitle(ev.title)
     setFormStart(formatIsoForInput(new Date(ev.start)))
@@ -286,7 +357,10 @@ export function Calendar() {
     setFormDescription(ev.description || '')
     setFormLocation(ev.location || '')
     setFormAllDay(Boolean(ev.all_day))
-    setFormColor(ev.color || 'primary')
+    setFormEventType(evType)
+    setFormTeamId(ev.team_id || null)
+    setFormServerId(ev.server_id || null)
+    setFormColor(ev.color ? (ev.color === 'blue' ? 'primary' : ev.color === 'green' ? 'emerald' : ev.color) : getDefaultColorForType(evType))
     setIsModalOpen(true)
   }
 
@@ -310,6 +384,9 @@ export function Calendar() {
             location: formLocation.trim() || null,
             all_day: formAllDay,
             color: formColor,
+            event_type: formEventType,
+            team_id: formEventType === 'team' ? formTeamId : null,
+            server_id: formEventType === 'server' ? formServerId : null,
           }),
         })
         toast.success('Termin aktualisiert')
@@ -324,6 +401,9 @@ export function Calendar() {
             location: formLocation.trim() || null,
             all_day: formAllDay,
             color: formColor,
+            event_type: formEventType,
+            team_id: formEventType === 'team' ? formTeamId : null,
+            server_id: formEventType === 'server' ? formServerId : null,
           }),
         })
         toast.success('Termin erfolgreich erstellt')
@@ -478,6 +558,49 @@ export function Calendar() {
       })
   }
 
+  const renderCategoryBadge = (ev: CalendarEventItem, isCompact = false) => {
+    if (ev.event_type === 'team') {
+      return (
+        <span
+          title={ev.team_name ? `Team: ${ev.team_name}` : 'Team-Termin'}
+          className={`inline-flex items-center gap-1 rounded font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 ${
+            isCompact ? 'text-[9px] px-1 py-0.5' : 'text-[10px] px-1.5 py-0.5'
+          }`}
+        >
+          <Users className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
+          <span className="truncate max-w-[85px]">{ev.team_name || 'Team'}</span>
+        </span>
+      )
+    }
+    if (ev.event_type === 'server') {
+      return (
+        <span
+          title={ev.server_name ? `Server: ${ev.server_name}` : 'Server-Wartung'}
+          className={`inline-flex items-center gap-1 rounded font-semibold bg-purple-500/20 text-purple-400 border border-purple-500/30 ${
+            isCompact ? 'text-[9px] px-1 py-0.5' : 'text-[10px] px-1.5 py-0.5'
+          }`}
+        >
+          <Server className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
+          <span className="truncate max-w-[85px]">{ev.server_name || 'Server'}</span>
+        </span>
+      )
+    }
+    if (ev.event_type === 'node') {
+      return (
+        <span
+          title="Node / Infrastruktur"
+          className={`inline-flex items-center gap-1 rounded font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 ${
+            isCompact ? 'text-[9px] px-1 py-0.5' : 'text-[10px] px-1.5 py-0.5'
+          }`}
+        >
+          <Network className={isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
+          <span>Node</span>
+        </span>
+      )
+    }
+    return null
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -506,6 +629,83 @@ export function Calendar() {
           </div>
         }
       />
+
+      {/* Kategorie Filter Leiste */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+        <button
+          type="button"
+          onClick={() => setSelectedCategory('all')}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+            selectedCategory === 'all'
+              ? 'bg-primary text-on-primary border-primary shadow-sm'
+              : 'bg-surface-container/60 text-on-surface-variant border-outline-variant/40 hover:bg-surface-container hover:text-on-surface'
+          }`}
+        >
+          <CalendarIcon className="w-3.5 h-3.5" />
+          <span>{t('calendar.filterAll', 'Alle')}</span>
+          <span className="text-[10px] opacity-80 font-mono">({events.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelectedCategory('personal')}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+            selectedCategory === 'personal'
+              ? 'bg-primary/20 text-primary border-primary/60 shadow-sm ring-1 ring-primary/40'
+              : 'bg-surface-container/60 text-on-surface-variant border-outline-variant/40 hover:bg-surface-container hover:text-on-surface'
+          }`}
+        >
+          <User className="w-3.5 h-3.5 text-primary" />
+          <span>{t('calendar.filterPersonal', 'Persönlich')}</span>
+          <span className="text-[10px] opacity-80 font-mono">
+            ({events.filter((e) => !e.event_type || e.event_type === 'personal').length})
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelectedCategory('team')}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+            selectedCategory === 'team'
+              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/60 shadow-sm ring-1 ring-emerald-500/40'
+              : 'bg-surface-container/60 text-on-surface-variant border-outline-variant/40 hover:bg-surface-container hover:text-on-surface'
+          }`}
+        >
+          <Users className="w-3.5 h-3.5 text-emerald-400" />
+          <span>{t('calendar.filterTeam', 'Team')}</span>
+          <span className="text-[10px] opacity-80 font-mono">
+            ({events.filter((e) => e.event_type === 'team').length})
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelectedCategory('server')}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+            selectedCategory === 'server'
+              ? 'bg-purple-500/20 text-purple-400 border-purple-500/60 shadow-sm ring-1 ring-purple-500/40'
+              : 'bg-surface-container/60 text-on-surface-variant border-outline-variant/40 hover:bg-surface-container hover:text-on-surface'
+          }`}
+        >
+          <Server className="w-3.5 h-3.5 text-purple-400" />
+          <span>{t('calendar.filterServer', 'Server-Wartung')}</span>
+          <span className="text-[10px] opacity-80 font-mono">
+            ({events.filter((e) => e.event_type === 'server').length})
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelectedCategory('node')}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+            selectedCategory === 'node'
+              ? 'bg-amber-500/20 text-amber-400 border-amber-500/60 shadow-sm ring-1 ring-amber-500/40'
+              : 'bg-surface-container/60 text-on-surface-variant border-outline-variant/40 hover:bg-surface-container hover:text-on-surface'
+          }`}
+        >
+          <Network className="w-3.5 h-3.5 text-amber-400" />
+          <span>{t('calendar.filterNode', 'Node')}</span>
+          <span className="text-[10px] opacity-80 font-mono">
+            ({events.filter((e) => e.event_type === 'node').length})
+          </span>
+        </button>
+      </div>
 
       {/* Kalender Steuerleiste */}
       <div className="msm-card p-4 flex flex-col md:flex-row items-center justify-between gap-4">
@@ -631,7 +831,10 @@ export function Calendar() {
                           }}
                           className={`text-[11px] leading-tight px-1.5 py-0.5 rounded border truncate flex items-center gap-1 ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border} hover:brightness-110`}
                         >
-                          <span className="font-semibold">{timeStr}</span>
+                          {ev.event_type === 'team' && <Users className="w-2.5 h-2.5 shrink-0 opacity-90 text-emerald-400" />}
+                          {ev.event_type === 'server' && <Server className="w-2.5 h-2.5 shrink-0 opacity-90 text-purple-400" />}
+                          {ev.event_type === 'node' && <Network className="w-2.5 h-2.5 shrink-0 opacity-90 text-amber-400" />}
+                          <span className="font-semibold shrink-0">{timeStr}</span>
                           <span className="truncate">{ev.title}</span>
                         </div>
                       )
@@ -706,7 +909,10 @@ export function Calendar() {
                             }}
                             className={`p-2 rounded-lg border text-xs ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border} hover:brightness-110`}
                           >
-                            <div className="font-semibold text-sm truncate">{ev.title}</div>
+                            <div className="flex items-start justify-between gap-1">
+                              <div className="font-semibold text-sm truncate flex-1">{ev.title}</div>
+                              {renderCategoryBadge(ev, true)}
+                            </div>
                             <div className="flex items-center gap-1 text-[10px] opacity-80 mt-1">
                               <Clock className="w-3 h-3" />
                               <span>{startStr} – {endStr}</span>
@@ -794,7 +1000,10 @@ export function Calendar() {
                             className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-center justify-between gap-2 ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border} hover:brightness-110`}
                           >
                             <div className="min-w-0 flex-1">
-                              <div className="font-semibold text-sm truncate">{ev.title}</div>
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="font-semibold text-sm truncate">{ev.title}</div>
+                                {renderCategoryBadge(ev, true)}
+                              </div>
                               <div className="flex items-center gap-3 text-[11px] opacity-80 mt-1">
                                 <span className="flex items-center gap-1">
                                   <Clock className="w-3.5 h-3.5" />
@@ -870,8 +1079,11 @@ export function Calendar() {
                     onClick={() => openEditModal(ev)}
                     className={`p-4 rounded-xl border cursor-pointer transition-all hover:scale-[1.01] ${colorStyle.bg} ${colorStyle.text} ${colorStyle.border}`}
                   >
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-headline font-bold text-base">{ev.title}</h4>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-headline font-bold text-base">{ev.title}</h4>
+                        {renderCategoryBadge(ev)}
+                      </div>
                       <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-surface/50">
                         {startStr} – {endStr}
                       </span>
@@ -899,7 +1111,7 @@ export function Calendar() {
       {/* MODAL: Termin anlegen / bearbeiten */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-fade-in">
-          <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in">
+          <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3">
               <h3 className="font-headline text-lg font-bold text-on-surface">
                 {formEventId ? t('calendar.editEvent', 'Termin bearbeiten') : t('calendar.createEvent', 'Neuer Termin')}
@@ -917,14 +1129,125 @@ export function Calendar() {
             <form onSubmit={handleSaveEvent} className="space-y-4">
               <div>
                 <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
+                  {t('calendar.category', 'Kategorie')} *
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormEventType('personal')
+                      setFormColor('primary')
+                    }}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                      formEventType === 'personal'
+                        ? 'bg-primary/20 text-primary border-primary ring-1 ring-primary'
+                        : 'bg-surface-container-low text-on-surface-variant border-outline-variant/40 hover:bg-surface-container'
+                    }`}
+                  >
+                    <User className="w-3.5 h-3.5 text-primary" />
+                    Persönlich
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormEventType('team')
+                      setFormColor('emerald')
+                    }}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                      formEventType === 'team'
+                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500 ring-1 ring-emerald-500'
+                        : 'bg-surface-container-low text-on-surface-variant border-outline-variant/40 hover:bg-surface-container'
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5 text-emerald-400" />
+                    Team
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormEventType('server')
+                      setFormColor('purple')
+                    }}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                      formEventType === 'server'
+                        ? 'bg-purple-500/20 text-purple-400 border-purple-500 ring-1 ring-purple-500'
+                        : 'bg-surface-container-low text-on-surface-variant border-outline-variant/40 hover:bg-surface-container'
+                    }`}
+                  >
+                    <Server className="w-3.5 h-3.5 text-purple-400" />
+                    Server
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormEventType('node')
+                      setFormColor('amber')
+                    }}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                      formEventType === 'node'
+                        ? 'bg-amber-500/20 text-amber-400 border-amber-500 ring-1 ring-amber-500'
+                        : 'bg-surface-container-low text-on-surface-variant border-outline-variant/40 hover:bg-surface-container'
+                    }`}
+                  >
+                    <Network className="w-3.5 h-3.5 text-amber-400" />
+                    Node
+                  </button>
+                </div>
+              </div>
+
+              {formEventType === 'team' && (
+                <div>
+                  <label htmlFor="cal-form-team" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
+                    {t('calendar.teamSelect', 'Team zuordnen')}
+                  </label>
+                  <select
+                    id="cal-form-team"
+                    value={formTeamId || ''}
+                    onChange={(e) => setFormTeamId(e.target.value ? Number(e.target.value) : null)}
+                    className="msm-input w-full text-xs"
+                  >
+                    <option value="">-- {t('calendar.selectTeamOptional', 'Team wählen (optional)')} --</option>
+                    {teamsList.map((tm) => (
+                      <option key={tm.id} value={tm.id}>
+                        {tm.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {formEventType === 'server' && (
+                <div>
+                  <label htmlFor="cal-form-server" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
+                    {t('calendar.serverSelect', 'Server zuordnen')}
+                  </label>
+                  <select
+                    id="cal-form-server"
+                    value={formServerId || ''}
+                    onChange={(e) => setFormServerId(e.target.value ? Number(e.target.value) : null)}
+                    className="msm-input w-full text-xs"
+                  >
+                    <option value="">-- {t('calendar.selectServerOptional', 'Server wählen (optional)')} --</option>
+                    {serversList.map((srv) => (
+                      <option key={srv.id} value={srv.id}>
+                        {srv.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label htmlFor="cal-form-title" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
                   {t('calendar.eventTitle', 'Titel / Anlass')} *
                 </label>
                 <input
+                  id="cal-form-title"
                   type="text"
                   required
                   value={formTitle}
                   onChange={(e) => setFormTitle(e.target.value)}
-                  placeholder="z. B. Team-Meeting, Wartung Server 1"
+                  placeholder={t('calendar.eventTitlePlaceholder', 'z. B. Team-Meeting, Wartung Server 1')}
                   className="msm-input w-full"
                 />
               </div>
@@ -959,27 +1282,29 @@ export function Calendar() {
               </div>
 
               <div>
-                <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
+                <label htmlFor="cal-form-location" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
                   {t('calendar.location', 'Ort / Meeting-Link')}
                 </label>
                 <input
+                  id="cal-form-location"
                   type="text"
                   value={formLocation}
                   onChange={(e) => setFormLocation(e.target.value)}
-                  placeholder="z. B. Konferenzraum A oder Teams / Zoom"
+                  placeholder={t('calendar.locationPlaceholder', 'z. B. Konferenzraum A oder Teams / Zoom')}
                   className="msm-input w-full"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
+                <label htmlFor="cal-form-description" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase mb-1">
                   {t('calendar.descriptionLabel', 'Beschreibung / Notizen')}
                 </label>
                 <textarea
+                  id="cal-form-description"
                   rows={3}
                   value={formDescription}
                   onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder="Agenda, Vorbereitungspunkte oder Details..."
+                  placeholder={t('calendar.descriptionPlaceholder', 'Agenda, Vorbereitungspunkte oder Details...')}
                   className="msm-input w-full resize-none text-xs"
                 />
               </div>
@@ -1015,7 +1340,7 @@ export function Calendar() {
                     className="text-error border-error/40 hover:bg-error/10 gap-1.5"
                   >
                     <Trash2 className="w-4 h-4" />
-                    Löschen
+                    {t('common.delete', 'Löschen')}
                   </Button>
                 ) : <div />}
 
@@ -1026,10 +1351,10 @@ export function Calendar() {
                     onClick={() => setIsModalOpen(false)}
                     disabled={saving}
                   >
-                    Abbrechen
+                    {t('common.cancel', 'Abbrechen')}
                   </Button>
                   <Button type="submit" disabled={saving}>
-                    {saving ? 'Speichern...' : 'Speichern'}
+                    {saving ? t('calendar.saving', 'Speichern...') : t('common.save', 'Speichern')}
                   </Button>
                 </div>
               </div>
@@ -1044,32 +1369,35 @@ export function Calendar() {
           <div className="msm-card w-full max-w-lg p-6 shadow-2xl space-y-5 animate-scale-in">
             <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3">
               <h3 className="font-headline text-lg font-bold text-on-surface">
-                Kalender abonnieren & exportieren
+                {t('calendar.feedModalTitle', 'Kalender abonnieren & exportieren')}
               </h3>
               <button
                 type="button"
                 onClick={() => setIsFeedModalOpen(false)}
                 className="text-on-surface-variant hover:text-on-surface p-1 rounded-md"
-                aria-label="Schließen"
+                aria-label={t('common.close', 'Schließen')}
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <p className="text-xs leading-relaxed text-on-surface-variant">
-              Du kannst deinen MSM-Kalender in jeder gängigen Kalender-App (Windows Kalender, Microsoft Outlook,
-              Thunderbird, Apple Calendar, Google Calendar) synchronisieren oder als .ics-Datei herunterladen.
+              {t(
+                'calendar.feedModalDescription',
+                'Du kannst deinen MSM-Kalender in jeder gängigen Kalender-App (Windows Kalender, Microsoft Outlook, Thunderbird, Apple Calendar, Google Calendar) synchronisieren oder als .ics-Datei herunterladen.'
+              )}
             </p>
 
             <div className="space-y-2">
-              <label className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase">
-                iCal / Webcal Feed-URL
+              <label htmlFor="cal-feed-url-input" className="block text-xs font-label-md font-semibold text-on-surface-variant uppercase">
+                {t('calendar.feedUrlLabel', 'iCal / Webcal Feed-URL')}
               </label>
               <div className="flex items-center gap-2">
                 <input
+                  id="cal-feed-url-input"
                   type="text"
                   readOnly
-                  value={loadingFeedUrl ? 'Lade Feed-URL...' : feedUrl}
+                  value={loadingFeedUrl ? t('calendar.loadingFeedUrl', 'Lade Feed-URL...') : feedUrl}
                   className="msm-input flex-1 font-mono text-xs select-all"
                 />
                 <Button
@@ -1078,12 +1406,12 @@ export function Calendar() {
                   disabled={loadingFeedUrl || !feedUrl}
                   onClick={() => {
                     navigator.clipboard.writeText(feedUrl)
-                    toast.success('URL in die Zwischenablage kopiert')
+                    toast.success(t('calendar.feedUrlCopied', 'URL in die Zwischenablage kopiert'))
                   }}
                   className="gap-1"
                 >
                   <Link className="w-4 h-4" />
-                  Kopieren
+                  {t('common.copy', 'Kopieren')}
                 </Button>
               </div>
             </div>
@@ -1095,10 +1423,10 @@ export function Calendar() {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-surface-container border border-outline-variant/60 text-xs font-semibold text-on-surface hover:bg-surface-container-high"
               >
                 <Download className="w-4 h-4" />
-                .ics-Datei herunterladen
+                {t('calendar.downloadIcs', '.ics-Datei herunterladen')}
               </a>
               <Button onClick={() => setIsFeedModalOpen(false)}>
-                Schließen
+                {t('common.close', 'Schließen')}
               </Button>
             </div>
           </div>

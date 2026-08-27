@@ -19,7 +19,7 @@ import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from models.calendar_event import CalendarEvent
@@ -27,11 +27,24 @@ from models.user import User
 from models.user_calendar import UserCalendar
 from services.dis_client import DisClient, DisDecryptionError
 from services.email_service import EmailService
+from services import permission_service, team_service
 
 _log = logging.getLogger("msm.calendar")
 
 # Dedup-Speicher für gesendete Terminerinnerungen (im Speicher je Server-Lauf)
 _sent_reminder_keys: set[str] = set()
+
+
+def _default_color_for_type(event_type: str | None) -> str:
+    """Liefert die semantische Standardfarbe für einen Termintyp."""
+    et = (event_type or "personal").lower().strip()
+    if et == "team":
+        return "green"
+    elif et == "server":
+        return "purple"
+    elif et == "node":
+        return "amber"
+    return "blue"
 
 
 def _user_timezone(user: User | None = None, user_tz: str | None = None) -> timezone | ZoneInfo:
@@ -242,18 +255,56 @@ class CalendarService:
         calendar_id: int | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        event_type: str | None = None,
+        team_id: int | None = None,
+        server_id: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Liest Termine aus dem nativen oder CalDAV-Kalender."""
+        """Liest Termine aus dem nativen oder CalDAV-Kalender.
+        
+        Nativer Kalender berücksichtigt persönliche Termine, Team-Termine des Nutzers,
+        Server-Wartungstermine für zugängliche Server und Node-Termine.
+        """
         calendar = cls.get_calendar(db, user, calendar_id)
         if not calendar:
-            return []
+            # Falls noch kein nativer Kalender existiert, automatisch anlegen
+            calendar = cls.get_or_create_native_calendar(db, user)
 
         # 1. Nativer Kalender
         if calendar.provider_type == "native":
-            query = select(CalendarEvent).where(
-                CalendarEvent.calendar_id == calendar.id,
-                CalendarEvent.user_id == user.id,
-            )
+            user_teams = team_service.list_user_teams(db, user)
+            user_team_ids = [t.id for t in user_teams]
+
+            visible_servers = permission_service.list_visible_servers(db, user)
+            user_server_ids = [s.id for s in visible_servers]
+
+            has_nodes_access = user.is_owner or permission_service.has_global_permission(db, user, "nodes.read")
+
+            # Sichtbarkeits-Filter:
+            # 1. Eigene Termine
+            visibility_filters = [CalendarEvent.user_id == user.id]
+            # 2. Team-Termine für Teams, in denen der User Mitglied ist
+            if user_team_ids:
+                visibility_filters.append(
+                    (CalendarEvent.event_type == "team") & (CalendarEvent.team_id.in_(user_team_ids))
+                )
+            # 3. Server-Termine für Server, auf die der User Zugriff hat
+            if user_server_ids:
+                visibility_filters.append(
+                    (CalendarEvent.event_type == "server") & (CalendarEvent.server_id.in_(user_server_ids))
+                )
+            # 4. Node-Termine für Admins / Operator mit nodes.read
+            if has_nodes_access:
+                visibility_filters.append(CalendarEvent.event_type == "node")
+
+            query = select(CalendarEvent).where(or_(*visibility_filters))
+
+            if event_type:
+                query = query.where(CalendarEvent.event_type == event_type)
+            if team_id is not None:
+                query = query.where(CalendarEvent.team_id == team_id)
+            if server_id is not None:
+                query = query.where(CalendarEvent.server_id == server_id)
+
             if start_date:
                 start_dt = _parse_datetime(start_date, user=user)
                 query = query.where(CalendarEvent.end_time >= start_dt)
@@ -263,8 +314,17 @@ class CalendarService:
 
             query = query.order_by(CalendarEvent.start_time.asc())
             rows = db.scalars(query).all()
-            return [
-                {
+
+            result: list[dict[str, Any]] = []
+            for ev in rows:
+                ev_type = ev.event_type or "personal"
+                ev_color = ev.color or _default_color_for_type(ev_type)
+
+                can_edit = (ev.user_id == user.id) or user.is_owner
+                if ev.event_type == "team" and ev.team and ev.team.owner_user_id == user.id:
+                    can_edit = True
+
+                result.append({
                     "event_id": ev.event_uid,
                     "id": ev.id,
                     "title": ev.title,
@@ -273,11 +333,18 @@ class CalendarService:
                     "description": ev.description or "",
                     "location": ev.location or "",
                     "all_day": ev.all_day,
-                    "color": ev.color or "",
-                    "calendar": calendar.name,
-                }
-                for ev in rows
-            ]
+                    "color": ev_color,
+                    "event_type": ev_type,
+                    "team_id": ev.team_id,
+                    "team_name": ev.team.name if ev.team else None,
+                    "server_id": ev.server_id,
+                    "server_name": ev.server.name if ev.server else None,
+                    "creator_name": ev.user.username if ev.user else None,
+                    "user_id": ev.user_id,
+                    "can_edit": can_edit,
+                    "calendar": calendar.name if calendar else "MSM Kalender",
+                })
+            return result
 
         # 2. Externer CalDAV-Kalender
         if not calendar.caldav_url:
@@ -338,6 +405,9 @@ class CalendarService:
         calendar_id: int | None = None,
         all_day: bool = False,
         color: str | None = None,
+        event_type: str = "personal",
+        team_id: int | None = None,
+        server_id: int | None = None,
     ) -> dict[str, Any]:
         """Erstellt einen neuen Termin im nativen oder CalDAV-Kalender."""
         calendar = cls.get_calendar(db, user, calendar_id)
@@ -349,9 +419,28 @@ class CalendarService:
             start_dt = _parse_datetime(start_time, user=user)
             end_dt = _parse_datetime(end_time, user=user)
             if end_dt <= start_dt:
-                # Falls Endzeit vor Startzeit liegt, auf mindestens 30 Min danach setzen
-                from datetime import timedelta
                 end_dt = start_dt + timedelta(minutes=30)
+
+            # Validierung event_type & Verknüpfungen
+            norm_type = (event_type or "personal").lower().strip()
+            if norm_type not in ("personal", "team", "server", "node"):
+                norm_type = "personal"
+
+            final_team_id = None
+            if norm_type == "team" and team_id:
+                user_teams = team_service.list_user_teams(db, user)
+                if not any(t.id == team_id for t in user_teams) and not user.is_owner:
+                    raise ValueError(f"Sie sind kein Mitglied von Team {team_id}.")
+                final_team_id = team_id
+
+            final_server_id = None
+            if norm_type == "server" and server_id:
+                visible_servers = permission_service.list_visible_servers(db, user)
+                if not any(s.id == server_id for s in visible_servers) and not user.is_owner:
+                    raise ValueError(f"Kein Zugriff auf Server {server_id}.")
+                final_server_id = server_id
+
+            final_color = color or _default_color_for_type(norm_type)
 
             event_uid = str(uuid.uuid4())
             ev = CalendarEvent(
@@ -364,7 +453,10 @@ class CalendarService:
                 start_time=start_dt,
                 end_time=end_dt,
                 all_day=all_day,
-                color=color,
+                color=final_color,
+                event_type=norm_type,
+                team_id=final_team_id,
+                server_id=final_server_id,
             )
             db.add(ev)
             db.commit()
@@ -380,6 +472,14 @@ class CalendarService:
                 "location": ev.location or "",
                 "all_day": ev.all_day,
                 "color": ev.color or "",
+                "event_type": ev.event_type,
+                "team_id": ev.team_id,
+                "team_name": ev.team.name if ev.team else None,
+                "server_id": ev.server_id,
+                "server_name": ev.server.name if ev.server else None,
+                "creator_name": user.username,
+                "user_id": user.id,
+                "can_edit": True,
                 "calendar": calendar.name,
             }
 
@@ -448,28 +548,36 @@ class CalendarService:
         calendar_id: int | None = None,
         all_day: bool | None = None,
         color: str | None = None,
+        event_type: str | None = None,
+        team_id: int | None = None,
+        server_id: int | None = None,
     ) -> dict[str, Any]:
         """Aktualisiert einen bestehenden Termin."""
         calendar = cls.get_calendar(db, user, calendar_id)
         if not calendar:
-            raise ValueError(f"Kein Kalender für Benutzer {user.id} verfügbar")
+            calendar = cls.get_or_create_native_calendar(db, user)
 
         # 1. Nativer Kalender
         if calendar.provider_type == "native":
-            query = select(CalendarEvent).where(
-                CalendarEvent.user_id == user.id,
-            )
             # Match by event_uid or integer ID
             if event_id.isdigit():
-                query = query.where(
+                query = select(CalendarEvent).where(
                     (CalendarEvent.event_uid == event_id) | (CalendarEvent.id == int(event_id))
                 )
             else:
-                query = query.where(CalendarEvent.event_uid == event_id)
+                query = select(CalendarEvent).where(CalendarEvent.event_uid == event_id)
 
             ev = db.scalar(query)
             if not ev:
                 raise ValueError(f"Termin '{event_id}' wurde nicht gefunden.")
+
+            # Berechtigungsprüfung: User selbst, Owner oder Team-Owner
+            can_edit = (ev.user_id == user.id) or user.is_owner
+            if ev.event_type == "team" and ev.team and ev.team.owner_user_id == user.id:
+                can_edit = True
+
+            if not can_edit:
+                raise ValueError("Keine Berechtigung zur Bearbeitung dieses Termins.")
 
             if title is not None:
                 ev.title = title
@@ -483,11 +591,43 @@ class CalendarService:
                 ev.location = location
             if all_day is not None:
                 ev.all_day = all_day
+
+            if event_type is not None:
+                norm_type = event_type.lower().strip()
+                if norm_type in ("personal", "team", "server", "node"):
+                    ev.event_type = norm_type
+                    if norm_type in ("personal", "node"):
+                        ev.team_id = None
+                        ev.server_id = None
+                    elif norm_type == "team":
+                        ev.server_id = None
+                    elif norm_type == "server":
+                        ev.team_id = None
+
+            if team_id is not None:
+                if team_id <= 0:
+                    ev.team_id = None
+                else:
+                    if not user.is_owner:
+                        user_teams = team_service.list_user_teams(db, user)
+                        if not any(t.id == team_id for t in user_teams):
+                            raise ValueError(f"Sie sind kein Mitglied des Teams {team_id}.")
+                    ev.team_id = team_id
+
+            if server_id is not None:
+                if server_id <= 0:
+                    ev.server_id = None
+                else:
+                    if not user.is_owner:
+                        visible_servers = permission_service.list_visible_servers(db, user)
+                        if not any(s.id == server_id for s in visible_servers):
+                            raise ValueError(f"Sie haben keinen Zugriff auf Server {server_id}.")
+                    ev.server_id = server_id
+
             if color is not None:
-                ev.color = color
+                ev.color = color if color.strip() else _default_color_for_type(ev.event_type)
 
             if ev.end_time <= ev.start_time:
-                from datetime import timedelta
                 ev.end_time = ev.start_time + timedelta(minutes=30)
 
             db.commit()
@@ -502,7 +642,15 @@ class CalendarService:
                 "description": ev.description or "",
                 "location": ev.location or "",
                 "all_day": ev.all_day,
-                "color": ev.color or "",
+                "color": ev.color or _default_color_for_type(ev.event_type),
+                "event_type": ev.event_type,
+                "team_id": ev.team_id,
+                "team_name": ev.team.name if ev.team else None,
+                "server_id": ev.server_id,
+                "server_name": ev.server.name if ev.server else None,
+                "creator_name": ev.user.username if ev.user else None,
+                "user_id": ev.user_id,
+                "can_edit": True,
                 "calendar": calendar.name,
             }
 
@@ -567,22 +715,26 @@ class CalendarService:
         """Löscht einen Termin aus dem nativen oder CalDAV-Kalender."""
         calendar = cls.get_calendar(db, user, calendar_id)
         if not calendar:
-            raise ValueError(f"Kein Kalender für Benutzer {user.id} konfiguriert")
+            calendar = cls.get_or_create_native_calendar(db, user)
 
         # 1. Nativer Kalender
         if calendar.provider_type == "native":
-            query = select(CalendarEvent).where(
-                CalendarEvent.user_id == user.id,
-            )
             if event_id.isdigit():
-                query = query.where(
+                query = select(CalendarEvent).where(
                     (CalendarEvent.event_uid == event_id) | (CalendarEvent.id == int(event_id))
                 )
             else:
-                query = query.where(CalendarEvent.event_uid == event_id)
+                query = select(CalendarEvent).where(CalendarEvent.event_uid == event_id)
 
             ev = db.scalar(query)
             if ev:
+                can_delete = (ev.user_id == user.id) or user.is_owner
+                if ev.event_type == "team" and ev.team and ev.team.owner_user_id == user.id:
+                    can_delete = True
+
+                if not can_delete:
+                    raise ValueError("Keine Berechtigung zum Löschen dieses Termins.")
+
                 db.delete(ev)
                 db.commit()
 

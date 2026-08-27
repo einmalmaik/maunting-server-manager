@@ -1885,6 +1885,10 @@ def _calendar_event_create_payload(db: Session, user: User, rest: dict) -> tuple
     description = rest.get("description")
     location = rest.get("location")
     calendar_id = rest.get("calendar_id")
+    event_type = rest.get("event_type", "personal")
+    team_id = rest.get("team_id")
+    server_id = rest.get("server_id")
+    color = rest.get("color")
 
     payload = {
         "title": redact_sensitive_text(title),
@@ -1893,6 +1897,10 @@ def _calendar_event_create_payload(db: Session, user: User, rest: dict) -> tuple
         "description": redact_sensitive_text(str(description)) if description else None,
         "location": redact_sensitive_text(str(location)) if location else None,
         "calendar_id": int(calendar_id) if calendar_id else None,
+        "event_type": str(event_type) if event_type else "personal",
+        "team_id": int(team_id) if team_id else None,
+        "server_id": int(server_id) if server_id else None,
+        "color": str(color).strip() if color else None,
     }
     preview = {
         "operation": "calendar_event_create",
@@ -1901,6 +1909,9 @@ def _calendar_event_create_payload(db: Session, user: User, rest: dict) -> tuple
         "end_time": end_time,
         "location": redact_sensitive_text(str(location)) if location else None,
         "calendar_id": calendar_id,
+        "event_type": payload["event_type"],
+        "team_id": payload["team_id"],
+        "server_id": payload["server_id"],
     }
     return payload, preview
 
@@ -1935,6 +1946,10 @@ def _calendar_event_update_payload(db: Session, user: User, rest: dict) -> tuple
     description = rest.get("description")
     location = rest.get("location")
     calendar_id = rest.get("calendar_id")
+    event_type = rest.get("event_type")
+    team_id = rest.get("team_id")
+    server_id = rest.get("server_id")
+    color = rest.get("color")
 
     payload = {
         "event_id": event_id,
@@ -1944,6 +1959,10 @@ def _calendar_event_update_payload(db: Session, user: User, rest: dict) -> tuple
         "description": str(description).strip() if description else None,
         "location": str(location).strip() if location else None,
         "calendar_id": int(calendar_id) if calendar_id else None,
+        "event_type": str(event_type).strip() if event_type else None,
+        "team_id": int(team_id) if team_id else None,
+        "server_id": int(server_id) if server_id else None,
+        "color": str(color).strip() if color else None,
     }
     preview = {
         "operation": "calendar_event_update",
@@ -1954,6 +1973,9 @@ def _calendar_event_update_payload(db: Session, user: User, rest: dict) -> tuple
         "description": payload["description"],
         "location": payload["location"],
         "calendar_id": calendar_id,
+        "event_type": payload["event_type"],
+        "team_id": payload["team_id"],
+        "server_id": payload["server_id"],
     }
     return payload, preview
 
@@ -3835,6 +3857,10 @@ def _ausfuehren_calendar_event_create(db: Session, rahmen: _AusfuehrungsRahmen) 
         description=str(p["description"]) if p.get("description") else None,
         location=str(p["location"]) if p.get("location") else None,
         calendar_id=int(p["calendar_id"]) if p.get("calendar_id") else None,
+        event_type=str(p.get("event_type", "personal")),
+        team_id=int(p["team_id"]) if p.get("team_id") else None,
+        server_id=int(p["server_id"]) if p.get("server_id") else None,
+        color=str(p["color"]) if p.get("color") else None,
     )
     return _Ausgefuehrt(result=result)
 
@@ -3853,6 +3879,10 @@ def _ausfuehren_calendar_event_update(db: Session, rahmen: _AusfuehrungsRahmen) 
         description=str(p["description"]) if p.get("description") else None,
         location=str(p["location"]) if p.get("location") else None,
         calendar_id=int(p["calendar_id"]) if p.get("calendar_id") else None,
+        event_type=str(p["event_type"]) if p.get("event_type") else None,
+        team_id=int(p["team_id"]) if p.get("team_id") else None,
+        server_id=int(p["server_id"]) if p.get("server_id") else None,
+        color=str(p["color"]) if p.get("color") else None,
     )
     return _Ausgefuehrt(result=result)
 

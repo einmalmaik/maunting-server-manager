@@ -1229,6 +1229,23 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                     "type": "integer",
                     "description": "Optionale Kalender-ID.",
                 },
+                "event_type": {
+                    "type": "string",
+                    "enum": ["personal", "team", "server", "node"],
+                    "description": "Semantische Kategorie des Termins: personal (privat, Standard), team (Team-Termin), server (Server-Wartung), node (Node-Infrastruktur).",
+                },
+                "team_id": {
+                    "type": "integer",
+                    "description": "Optionale Team-ID für Team-Termine (event_type=team).",
+                },
+                "server_id": {
+                    "type": "integer",
+                    "description": "Optionale Server-ID für Server-Wartungstermine (event_type=server).",
+                },
+                "color": {
+                    "type": "string",
+                    "description": "Optionale Farbe (z. B. blue, green, purple, amber, red, cyan).",
+                },
                 **_RATIONALE_SCHEMA,
             },
             ["title", "start_time", "end_time", *_RATIONALE_REQUIRED],
@@ -1271,6 +1288,23 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                 "calendar_id": {
                     "type": "integer",
                     "description": "Optionale Kalender-ID.",
+                },
+                "event_type": {
+                    "type": "string",
+                    "enum": ["personal", "team", "server", "node"],
+                    "description": "Kategorie anpassen: personal, team, server, node.",
+                },
+                "team_id": {
+                    "type": "integer",
+                    "description": "Optionale Team-ID.",
+                },
+                "server_id": {
+                    "type": "integer",
+                    "description": "Optionale Server-ID.",
+                },
+                "color": {
+                    "type": "string",
+                    "description": "Optionale Farbe.",
                 },
                 **_RATIONALE_SCHEMA,
             },

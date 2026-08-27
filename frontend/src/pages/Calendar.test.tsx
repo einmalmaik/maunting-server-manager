@@ -88,14 +88,18 @@ describe('Calendar Page Component', () => {
   })
 
   it('triggers test-reminder API when clicking Push testen button', async () => {
-    vi.mocked(client.api).mockResolvedValueOnce([]) // fetchEvents
-    vi.mocked(client.api).mockResolvedValueOnce({
-      status: 'success',
-      email_sent: true,
-      device_notifications_enabled: true,
-      title: 'Test-Termin: Server-Wartung & Backup-Check',
-      start: '27.08.2026 um 14:00 Uhr',
-      time_hint: 'in 1 Tag',
+    vi.mocked(client.api).mockImplementation(async (url: string) => {
+      if (url === '/calendar/test-reminder') {
+        return {
+          status: 'success',
+          email_sent: true,
+          device_notifications_enabled: true,
+          title: 'Test-Termin: Server-Wartung & Backup-Check',
+          start: '27.08.2026 um 14:00 Uhr',
+          time_hint: 'in 1 Tag',
+        }
+      }
+      return []
     })
 
     render(
@@ -109,6 +113,56 @@ describe('Calendar Page Component', () => {
 
     await waitFor(() => {
       expect(client.api).toHaveBeenCalledWith('/calendar/test-reminder', { method: 'POST' })
+    })
+  })
+
+  it('renders category filter buttons and filters events', async () => {
+    vi.mocked(client.api).mockImplementation(async (url: string) => {
+      if (url.includes('/calendar/events')) {
+        return [
+          {
+            id: 1,
+            event_id: 'evt-1',
+            title: 'Team Meeting',
+            start: '2026-08-28T10:00:00Z',
+            end: '2026-08-28T11:00:00Z',
+            event_type: 'team',
+            team_name: 'DevOps',
+            color: 'emerald',
+          },
+          {
+            id: 2,
+            event_id: 'evt-2',
+            title: 'Server Reboot',
+            start: '2026-08-28T14:00:00Z',
+            end: '2026-08-28T15:00:00Z',
+            event_type: 'server',
+            server_name: 'Node-1',
+            color: 'purple',
+          },
+        ]
+      }
+      return []
+    })
+
+    render(
+      <MemoryRouter>
+        <Calendar />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('Alle')).toBeInTheDocument()
+    expect(screen.getByText('Persönlich')).toBeInTheDocument()
+    expect(screen.getByText('Team')).toBeInTheDocument()
+    expect(screen.getByText('Server-Wartung')).toBeInTheDocument()
+    expect(screen.getByText('Node')).toBeInTheDocument()
+
+    // Click on Server filter button
+    const serverFilterBtn = screen.getByRole('button', { name: /Server-Wartung/i })
+    fireEvent.click(serverFilterBtn)
+
+    await waitFor(() => {
+      expect(client.api).toHaveBeenCalledWith(expect.stringContaining('event_type=server'))
     })
   })
 })
