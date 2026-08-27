@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from models.calendar_event import CalendarEvent
 from models.user import User
 from models.user_calendar import UserCalendar
+from services.dis_client import DisClient, DisDecryptionError
 from services.email_service import EmailService
 
 _log = logging.getLogger("msm.calendar")
@@ -656,21 +657,19 @@ class CalendarService:
 
     @classmethod
     def generate_feed_token(cls, user: User) -> str:
-        """Erzeugt ein kryptographisch signiertes Feed-Token für externe Kalender-Abonnements (Webcal/iCal)."""
-        from config import settings
-        secret = (getattr(settings, "JWT_SECRET", None) or "msm-ical-feed-secret").encode("utf-8")
+        """Erzeugt ein mit DIS (AES-256-GCM) verschlüsseltes Feed-Token für externe Kalender-Abonnements."""
         pwd_salt = (user.password_hash or "")[:16]
-        msg = f"msm_ical_feed:{user.id}:{pwd_salt}".encode("utf-8")
-        sig = hmac.new(secret, msg, hashlib.sha256).hexdigest()[:32]
-        return f"{user.id}_{sig}"
+        payload = f"{user.id}:{pwd_salt}"
+        return DisClient.encrypt(payload, aad="msm:calendar:feed")
 
     @classmethod
     def verify_feed_token(cls, token: str, db: Session) -> User | None:
-        """Validiert ein iCal-Feed-Token und liefert den zugehörigen aktiven Benutzer."""
-        if not token or "_" not in token:
+        """Validiert und entschlüsselt ein iCal-Feed-Token über DIS (AES-256-GCM)."""
+        if not token:
             return None
         try:
-            user_id_str, sig = token.split("_", 1)
+            decrypted = DisClient.decrypt(token, aad="msm:calendar:feed")
+            user_id_str, pwd_salt = decrypted.split(":", 1)
             user_id = int(user_id_str)
         except Exception:
             return None
@@ -679,15 +678,12 @@ class CalendarService:
         if not user or not user.is_active:
             return None
 
-        from config import settings
-        secret = (getattr(settings, "JWT_SECRET", None) or "msm-ical-feed-secret").encode("utf-8")
-        pwd_salt = (user.password_hash or "")[:16]
-        msg = f"msm_ical_feed:{user.id}:{pwd_salt}".encode("utf-8")
-        expected_sig = hmac.new(secret, msg, hashlib.sha256).hexdigest()[:32]
+        current_salt = (user.password_hash or "")[:16]
+        if pwd_salt != current_salt:
+            # Passwort wurde geändert -> altes Feed-Token ungültig
+            return None
 
-        if hmac.compare_digest(sig, expected_sig):
-            return user
-        return None
+        return user
 
     @classmethod
     async def check_and_send_due_reminders(cls, db: Session) -> int:
