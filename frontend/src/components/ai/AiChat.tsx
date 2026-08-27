@@ -161,7 +161,7 @@ export function AiChat() {
   // Warteschlange fuer Nachrichten, die waehrend des Streams eingegeben werden.
   const [queuedMessages, setQueuedMessages] = useState<string[]>([])
   // Regionale Analyse & Globus-Zustand
-  const [geoData] = useState<AiRegionalAnalysis | null>(null)
+  const [geoData, setGeoData] = useState<AiRegionalAnalysis | null>(null)
   const [geoOpen, setGeoOpen] = useState(false)
 
   const verlaufRef = useRef<HTMLDivElement | null>(null)

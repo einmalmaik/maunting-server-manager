@@ -19,6 +19,7 @@ export function GlobeViewer({
   latitude,
   longitude,
   locationName,
+  bbox,
   className = '',
 }: GlobeViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
