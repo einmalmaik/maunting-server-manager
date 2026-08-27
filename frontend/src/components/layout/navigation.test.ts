@@ -107,4 +107,22 @@ describe('buildNavigation', () => {
       buildNavigation(labels, { ...access, canUseSkills: false }).some((item) => item.to === '/teams'),
     ).toBe(false)
   })
+
+  it('hides calendar from sidebar when calendarEnabled is false', () => {
+    const access = {
+      owner: false,
+      canManageUsers: false,
+      canManageRoles: false,
+      canViewAudit: false,
+      canViewSettings: false,
+      canManagePanelBackups: false,
+      canReadPanelDatabase: false,
+      canViewNodes: false,
+      canUseAi: false,
+      canUseSkills: false,
+    }
+    expect(buildNavigation(labels, access).some((item) => item.to === '/calendar')).toBe(true)
+    expect(buildNavigation(labels, { ...access, calendarEnabled: true }).some((item) => item.to === '/calendar')).toBe(true)
+    expect(buildNavigation(labels, { ...access, calendarEnabled: false }).some((item) => item.to === '/calendar')).toBe(false)
+  })
 })

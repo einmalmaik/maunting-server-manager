@@ -23,6 +23,7 @@ interface NavigationAccess {
    * lesen darf, aber nicht chatten.
    */
   canUseSkills: boolean
+  calendarEnabled?: boolean
 }
 
 /**
@@ -32,7 +33,7 @@ interface NavigationAccess {
 export function buildNavigation(labels: Record<string, string>, access: NavigationAccess): NavigationItem[] {
   return [
     { to: '/', icon: LayoutDashboard, label: labels.dashboard, group: 'Overview' },
-    { to: '/calendar', icon: CalendarIcon, label: labels.calendar || 'Kalender', group: 'Overview' },
+    ...(access.calendarEnabled !== false ? [{ to: '/calendar', icon: CalendarIcon, label: labels.calendar || 'Kalender', group: 'Overview' as const }] : []),
     ...(access.owner || access.canUseAi ? [{ to: '/ai', icon: Bot, label: labels.ai, group: 'Overview' as const }] : []),
     { to: '/servers', icon: Server, label: labels.servers, group: 'Infrastructure' },
     ...(access.owner || access.canViewNodes ? [{ to: '/admin/nodes', icon: Network, label: labels.nodes, group: 'Infrastructure' as const }] : []),

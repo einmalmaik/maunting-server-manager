@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Logo } from '@/components/Logo'
@@ -54,6 +55,18 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
     return () => document.removeEventListener('keydown', trapFocus)
   }, [mobile])
 
+  const [calendarEnabled, setCalendarEnabled] = useState(true)
+
+  useEffect(() => {
+    api<{ calendar_enabled?: boolean }>('/settings/public')
+      .then((res) => {
+        if (typeof res.calendar_enabled === 'boolean') {
+          setCalendarEnabled(res.calendar_enabled)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   const handleLogout = async () => {
     await logout()
     navigate('/login', { replace: true })
@@ -68,6 +81,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   }, {
     owner: Boolean(user?.is_owner), canManageUsers, canManageRoles, canViewAudit, canViewSettings,
     canManagePanelBackups, canReadPanelDatabase, canViewNodes: canReadNodes || canManageNodes, canUseAi, canUseSkills,
+    calendarEnabled,
   })
   const groupLabels: Record<NavGroupName, string> = {
     Overview: t('navGroups.overview', 'Overview'), Infrastructure: t('navGroups.infrastructure', 'Infrastructure'),

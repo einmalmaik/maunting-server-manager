@@ -130,12 +130,13 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
 
 @router.get("/public", status_code=200)
 def get_public_settings() -> dict:
-    """Öffentlich abfragbare Panel-Einstellungen (z. B. Desktop-Download-Banner)."""
+    """Öffentlich abfragbare Panel-Einstellungen (z. B. Desktop-Download-Banner, Kalender)."""
     all_db = PanelSettingsService.get_all()
     return {
         "desktop_app_download_enabled": all_db.get("desktop_app_download_enabled", "true") != "false",
         "imprint_enabled": all_db.get("imprint_enabled", "false") == "true",
         "imprint_url": all_db.get("imprint_url", ""),
+        "calendar_enabled": all_db.get("calendar_enabled", "true") != "false",
     }
 
 
