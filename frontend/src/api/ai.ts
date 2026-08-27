@@ -326,6 +326,10 @@ export interface AiToolUse {
    * und `forget_memory` daneben.
    */
   gruppe?: string | null
+  /**
+   * Ergebnis einer regionalen Satelliten- und Geo-Analyse (analyze_region).
+   */
+  geo_analysis?: AiRegionalAnalysis | null
 }
 
 /**

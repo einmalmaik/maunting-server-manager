@@ -232,6 +232,8 @@ def _anzeigeeintrag(call, wert, fehlgeschlagen: str | None) -> dict:
         eintrag["skill_name"] = wert.get("name")
         eintrag["skill_status"] = wert.get("status")
         eintrag["skill_learned"] = bool(wert.get("learned"))
+    if call.name == "analyze_region" and isinstance(wert, dict):
+        eintrag["geo_analysis"] = wert
     return eintrag
 
 

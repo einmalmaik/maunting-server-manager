@@ -319,6 +319,26 @@ export function AiChat() {
     }
   }, [laufendeWerkzeuge])
 
+  // Aktualisiert geoData aus der jüngsten Analyse im Verlauf
+  useEffect(() => {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i]
+      if (entry.kind === 'message' && entry.message.sections) {
+        for (let j = entry.message.sections.length - 1; j >= 0; j--) {
+          const section = entry.message.sections[j]
+          if (
+            section.art === 'tool' &&
+            section.werkzeug?.tool_name === 'analyze_region' &&
+            section.werkzeug.geo_analysis
+          ) {
+            setGeoData(section.werkzeug.geo_analysis)
+            return
+          }
+        }
+      }
+    }
+  }, [entries])
+
   const initialScrollDoneRef = useRef(false)
 
   const scrolleNachUnten = useCallback(() => {
