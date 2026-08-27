@@ -184,7 +184,6 @@ def test_only_the_irreversible_tools_are_confirm_only() -> None:
         "propose_hoster_integration",
         "propose_hoster_product",
         "propose_ai_tarif_role",
-        "propose_calendar_event_delete",
     }
 
 
@@ -204,7 +203,7 @@ def test_ein_loeschwerkzeug_traegt_die_sperre_oder_nennt_seinen_rueckweg() -> No
     einzige Hinweis, den ein neues Werkzeug von sich aus gibt, und diese
     Zusicherung macht daraus eine Entscheidung, die jemand treffen muss.
 
-    Die beiden Ausnahmen sind keine Nachlaessigkeit, sondern haben einen
+    Die drei Ausnahmen sind keine Nachlaessigkeit, sondern haben einen
     nachpruefbaren Rueckweg im Code:
 
     * `propose_file_delete` — im Heilungslauf laeuft es ueberhaupt nur mit einem
@@ -217,12 +216,18 @@ def test_ein_loeschwerkzeug_traegt_die_sperre_oder_nennt_seinen_rueckweg() -> No
       Zeitplan und Prompt. Sie wieder anzulegen kostet einen Vorschlag, keine
       Wiederherstellung; es geht nichts verloren, das ausserhalb der Zeile
       existiert.
+    * `propose_calendar_event_delete` — ein Kalendertermin kann im Chat oder Kalender
+      jederzeit neu angelegt oder angepasst werden.
 
     Faellt dieser Test, ist das die Frage: verschwindet hier etwas, das niemand
     zurueckholt? Dann gehoert `immer_bestaetigen` an die Zeile. Sonst gehoert
     der Grund hierher.
     """
-    RUECKWEG_NACHGEWIESEN = {"propose_file_delete", "propose_task_delete"}
+    RUECKWEG_NACHGEWIESEN = {
+        "propose_file_delete",
+        "propose_task_delete",
+        "propose_calendar_event_delete",
+    }
 
     loeschwerkzeuge = {
         name for name in ai_tool_registry.WERKZEUGE if name.endswith("_delete")

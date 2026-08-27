@@ -53,16 +53,13 @@ describe('AiActionProposalCard', () => {
     vi.mocked(toast.error).mockReset()
   })
 
-  it('requires explicit confirmation and passes the one-time token only to execute', async () => {
+  it('executes a regular proposal directly upon clicking Ausführen without double modal', async () => {
     const onChange = vi.fn()
     render(<AiActionProposalCard proposal={proposal} onChange={onChange} />)
 
     expect(screen.getByText('server.cfg')).toBeInTheDocument()
     expect(screen.queryByText(/one-time-secret/)).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Prüfen und ausführen' }))
-    expect(aiApi.confirmAction).not.toHaveBeenCalled()
-
-    await act(async () => useConfirmStore.getState().resolve(true))
+    fireEvent.click(screen.getByRole('button', { name: 'Jetzt ausführen' }))
 
     await waitFor(() => expect(aiApi.confirmAction).toHaveBeenCalledWith(proposal.id))
     await waitFor(() => expect(aiApi.executeAction).toHaveBeenCalledWith(
@@ -74,40 +71,32 @@ describe('AiActionProposalCard', () => {
   })
 
   /**
-   * Das Nein ist die eigentliche Zusage dieser Karte.
-   *
-   * Sie ist die Stelle, an der ein Mensch einen Modellvorschlag ausfuehrt —
-   * Server loeschen, Backup ueberspielen, Datei entfernen. Alles davor ist
-   * Anzeige; erst hier faellt die Entscheidung. Ein `if (!accepted) return`,
-   * das niemand prueft, laesst sich beim naechsten Umbau streichen, ohne dass
-   * eine Zeile rot wird.
+   * Das Nein ist die eigentliche Zusage bei unumkehrbaren Aktionen.
    */
-  it('leaves the API untouched when the confirmation is declined', async () => {
-    render(<AiActionProposalCard proposal={proposal} onChange={vi.fn()} />)
+  it('leaves the API untouched when unrecoverable confirmation is declined', async () => {
+    const destructiveProposal: AiActionProposal = {
+      ...proposal,
+      tool_name: 'propose_server_delete',
+      preview: { operation: 'server_delete', path: '/servers/1' },
+    }
+    render(<AiActionProposalCard proposal={destructiveProposal} onChange={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Prüfen und ausführen' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Jetzt ausführen' }))
     await act(async () => useConfirmStore.getState().resolve(false))
 
     expect(aiApi.confirmAction).not.toHaveBeenCalled()
     expect(aiApi.executeAction).not.toHaveBeenCalled()
     expect(toast.success).not.toHaveBeenCalled()
-    // Ein Nein ist kein laufender Vorgang: der Knopf bleibt bedienbar, sonst
-    // waere die Karte nach einem Fehlklick tot.
-    expect(screen.getByRole('button', { name: 'Prüfen und ausführen' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Jetzt ausführen' })).toBeEnabled()
   })
 
   it('never reaches execute when the confirmation call itself fails', async () => {
-    // Der Token ist die Autorisierung. Bricht sein Abruf ab — abgelaufener
-    // Vorschlag, entzogenes Recht —, darf `executeAction` gar nicht erst
-    // versucht werden; ein Ersatzwert an dieser Stelle waere ein Ausfuehren
-    // ohne Freigabe.
     vi.mocked(aiApi.confirmAction).mockRejectedValue(
       new SanitizedApiError('Die Freigabe ist abgelaufen.', { status: 410 }),
     )
     render(<AiActionProposalCard proposal={proposal} onChange={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Prüfen und ausführen' }))
-    await act(async () => useConfirmStore.getState().resolve(true))
+    fireEvent.click(screen.getByRole('button', { name: 'Jetzt ausführen' }))
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Die Freigabe ist abgelaufen.'))
     expect(aiApi.executeAction).not.toHaveBeenCalled()
@@ -115,9 +104,6 @@ describe('AiActionProposalCard', () => {
   })
 
   it('reports a failed execution and reloads the proposal instead of claiming success', async () => {
-    // Ohne das Nachladen bliebe die Karte auf „proposed" stehen und boete den
-    // Knopf ein zweites Mal an — obwohl der Vorschlag im Backend laengst
-    // verbraucht oder fehlgeschlagen ist.
     vi.mocked(aiApi.executeAction).mockRejectedValue(
       new SanitizedApiError('Der Server ist gesperrt.', { status: 409 }),
     )
@@ -127,18 +113,14 @@ describe('AiActionProposalCard', () => {
     const onChange = vi.fn()
     render(<AiActionProposalCard proposal={proposal} onChange={onChange} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Prüfen und ausführen' }))
-    await act(async () => useConfirmStore.getState().resolve(true))
+    fireEvent.click(screen.getByRole('button', { name: 'Jetzt ausführen' }))
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Der Server ist gesperrt.'))
     expect(toast.success).not.toHaveBeenCalled()
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'failed', error_code: 'server_locked' }),
     ))
-    // Kein halb ausgefuehrter Zustand: der Token ist verbraucht, die Karte ist
-    // wieder bedienbar, und ein Geheimnis aus einem gescheiterten Lauf gibt es
-    // nicht.
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Prüfen und ausführen' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Jetzt ausführen' })).toBeEnabled())
     expect(screen.queryByText(/one-time-secret/)).not.toBeInTheDocument()
   })
 
@@ -149,25 +131,23 @@ describe('AiActionProposalCard', () => {
     expect(screen.getByText(/ohne Portkonflikt/)).toBeInTheDocument()
   })
 
-  it('names the tool and warns about untrusted provenance in the confirm dialog', () => {
-    render(<AiActionProposalCard proposal={proposal} onChange={vi.fn()} />)
+  it('names the tool and warns about untrusted provenance in the confirm dialog for destructive actions', () => {
+    const destructiveProposal: AiActionProposal = {
+      ...proposal,
+      tool_name: 'propose_server_delete',
+      preview: { operation: 'server_delete', path: '/servers/1' },
+    }
+    render(<AiActionProposalCard proposal={destructiveProposal} onChange={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Prüfen und ausführen' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Jetzt ausführen' }))
 
     const message = useConfirmStore.getState().pending?.message ?? ''
-    expect(message).toContain('Konfiguration ändern')
-    expect(message).toContain('server.cfg')
+    expect(message).toContain('Server löschen')
     expect(message).toMatch(/unvertrauenswürdiger Daten/i)
   })
 
   /**
    * Der API-Key einer frisch angelegten Shop-Anbindung.
-   *
-   * Er entsteht erst beim Ausfuehren, geht ueber `result` an genau diese Karte
-   * und wird nirgends gespeichert — nicht in `preview`, nicht im Verlauf, nicht
-   * im Modellkontext. Das Backend sichert die eine Haelfte zu; hier steht die
-   * andere: er erscheint einmal und ueberlebt kein Neuladen, weil er nur im
-   * Zustand dieser Komponente lebt.
    */
   it('shows a freshly created secret exactly once, from result and not from preview', async () => {
     const hosterProposal: AiActionProposal = {
@@ -188,13 +168,10 @@ describe('AiActionProposalCard', () => {
 
     render(<AiActionProposalCard proposal={hosterProposal} onChange={vi.fn()} />)
 
-    // Vom Panel aufgeloeste Tatsache, nicht Modellprosa: der Dienstbenutzer
-    // steht mit Namen da, bevor jemand bestaetigt.
     expect(screen.getByText('shop-dienst')).toBeInTheDocument()
     expect(screen.queryByText(/Zx9-KpQ2/)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Prüfen und ausführen' }))
-    await act(async () => useConfirmStore.getState().resolve(true))
+    fireEvent.click(screen.getByRole('button', { name: 'Jetzt ausführen' }))
 
     await waitFor(() => expect(screen.getByText(/Zx9-KpQ2/)).toBeInTheDocument())
 
@@ -212,7 +189,7 @@ describe('AiActionProposalCard', () => {
 
     expect(screen.getByText('Automatisch ausgeführt')).toBeInTheDocument()
     // Eine bereits gelaufene Aktion darf keinen Ausfuehren-Knopf anbieten.
-    expect(screen.queryByRole('button', { name: 'Prüfen und ausführen' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Jetzt ausführen' })).not.toBeInTheDocument()
   })
 
   it('renders read proposal type badge and preview without leaking file contents', () => {

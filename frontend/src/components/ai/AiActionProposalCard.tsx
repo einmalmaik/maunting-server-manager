@@ -228,25 +228,25 @@ export function AiActionProposalCard({
   }
 
   const execute = async () => {
-    // Der Dialog zeigte bisher nur Operation und Pfad — Tool-Name und Diff
-    // standen ausschliesslich in der Karte dahinter. Im Bestaetigungsmoment sah
-    // der Benutzer damit weniger als vorher. Jetzt steht alles Wesentliche im
-    // Dialog, inklusive des Hinweises, woher ein Vorschlag stammen kann:
-    // Logs, Configs und Anhaenge sind Daten aus dem Server, nicht aus dem Panel.
-    const message = [
-      t(`ai.actions.tools.${proposal.tool_name}`),
-      t(`ai.actions.confirm.${proposal.tool_name}`, { operation, path }),
-      diff ? t('ai.actions.confirmDiffLines', { count: diff.split('\n').length }) : '',
-      t('ai.actions.confirmProvenance'),
-    ].filter(Boolean).join('\n\n')
+    // Bei unumkehrbaren, destruktiven Aktionen (z. B. Server oder Backups löschen) fragen wir
+    // zur Sicherheit einmal per Bestätigungsdialog nach.
+    // Bei allen regulären Vorschlägen genügt der Klick auf "Ausführen" direkt auf der Karte.
+    if (UNUMKEHRBAR.includes(proposal.tool_name)) {
+      const message = [
+        t(`ai.actions.tools.${proposal.tool_name}`),
+        t(`ai.actions.confirm.${proposal.tool_name}`, { operation, path }),
+        diff ? t('ai.actions.confirmDiffLines', { count: diff.split('\n').length }) : '',
+        t('ai.actions.confirmProvenance'),
+      ].filter(Boolean).join('\n\n')
 
-    const accepted = await confirm({
-      title: t(`ai.actions.tools.${proposal.tool_name}`, proposal.tool_name),
-      message,
-      confirmText: t('ai.actions.execute', 'Ausführen'),
-      danger: UNUMKEHRBAR.includes(proposal.tool_name),
-    })
-    if (!accepted) return
+      const accepted = await confirm({
+        title: t(`ai.actions.tools.${proposal.tool_name}`, proposal.tool_name),
+        message,
+        confirmText: t('ai.actions.execute', 'Ausführen'),
+        danger: true,
+      })
+      if (!accepted) return
+    }
     setBusy(true)
     try {
       // Der kurzlebige Token bleibt nur in dieser Funktion und wird unmittelbar
@@ -362,11 +362,11 @@ export function AiActionProposalCard({
             <Button
               type="button"
               size="sm"
-              variant={proposal.tool_name === 'propose_server_lifecycle' ? 'destructive' : 'primary'}
+              variant={UNUMKEHRBAR.includes(proposal.tool_name) ? 'destructive' : 'primary'}
               disabled={busy}
               onClick={() => void execute()}
             >
-              {busy ? t('ai.actions.executing') : t('ai.actions.review')}
+              {busy ? t('ai.actions.executing') : t('ai.actions.execute', 'Ausführen')}
             </Button>
           </div>
         )}
