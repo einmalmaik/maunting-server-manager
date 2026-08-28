@@ -55,6 +55,13 @@ describe('RegionalInfoPanel', () => {
     fireEvent.click(satelliteTab)
     expect(screen.getByText(/4.2%/)).toBeInTheDocument()
 
+    fireEvent.click(screen.getByRole('button', { name: /Soziale Medien/i }))
+    expect(screen.getByText(i18n.t('ai.geo.socialUnavailableTitle'))).toBeInTheDocument()
+    expect(screen.queryByText(/Normal \/ Stabil/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Verkehr/i }))
+    expect(screen.getByText(i18n.t('ai.geo.trafficUnavailableTitle'))).toBeInTheDocument()
+
     const closeBtn = screen.getByRole('button', { name: i18n.t('ai.geo.close') })
     fireEvent.click(closeBtn)
     expect(onClose).toHaveBeenCalled()

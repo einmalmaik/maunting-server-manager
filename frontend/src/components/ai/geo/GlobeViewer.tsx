@@ -78,6 +78,64 @@ const CONTINENTS: [number, number][][] = [
   ],
 ]
 
+interface TexturePoint {
+  lat: number
+  lon: number
+  tone: number
+  light: boolean
+}
+
+interface Star {
+  x: number
+  y: number
+  size: number
+  alpha: number
+  phase: number
+}
+
+function seededRandom(seed: number) {
+  let state = seed >>> 0
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0
+    return state / 0x1_0000_0000
+  }
+}
+
+function containsCoordinate(lat: number, lon: number, polygon: [number, number][]) {
+  let inside = false
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
+    const [latA, lonA] = polygon[index]
+    const [latB, lonB] = polygon[previous]
+    const intersects = (latA > lat) !== (latB > lat) &&
+      lon < ((lonB - lonA) * (lat - latA)) / (latB - latA) + lonA
+    if (intersects) inside = !inside
+  }
+  return inside
+}
+
+// Einmal vorbereitete Punkte geben den Landmassen Tiefe, ohne Bilddateien
+// herunterzuladen oder je Animationsbild Zufall/Allokationen zu erzeugen.
+const LAND_TEXTURE: TexturePoint[] = (() => {
+  const random = seededRandom(0x4d534d)
+  const points: TexturePoint[] = []
+  while (points.length < 420) {
+    const lat = random() * 150 - 75
+    const lon = random() * 360 - 180
+    if (CONTINENTS.some((polygon) => containsCoordinate(lat, lon, polygon))) {
+      points.push({ lat, lon, tone: random(), light: random() > 0.76 })
+    }
+  }
+  return points
+})()
+
+const STAR_FIELD: Star[] = (() => {
+  const random = seededRandom(0x45525448)
+  return Array.from({ length: 180 }, () => ({
+    x: random(), y: random(), size: 0.35 + random() * 1.45,
+    alpha: 0.2 + random() * 0.68, phase: random() * Math.PI * 2,
+  }))
+})()
+
 interface ProjectedPoint {
   rotX: number
   rotY: number
@@ -277,6 +335,7 @@ export function GlobeViewer({
     if (!ctx) return
 
     let pulse = 0
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
 
     const render = () => {
       const width = (canvas.width = canvas.parentElement?.clientWidth || 400)
@@ -287,6 +346,39 @@ export function GlobeViewer({
 
       // Hintergrund
       ctx.clearRect(0, 0, width, height)
+
+      const space = ctx.createRadialGradient(width * 0.48, height * 0.42, 0, width * 0.5, height * 0.5, Math.max(width, height) * 0.78)
+      space.addColorStop(0, '#081628')
+      space.addColorStop(0.55, '#030916')
+      space.addColorStop(1, '#01040a')
+      ctx.fillStyle = space
+      ctx.fillRect(0, 0, width, height)
+
+      // Der Sternenhimmel wird einmal deterministisch vorbereitet und nur
+      // gezeichnet. Das hält die Animation auch auf Mobilgeräten leicht.
+      for (const star of STAR_FIELD) {
+        const twinkle = reducedMotion ? 0.72 : 0.72 + Math.sin(pulse * 0.35 + star.phase) * 0.18
+        ctx.fillStyle = `rgba(186, 220, 255, ${star.alpha * twinkle})`
+        ctx.fillRect(star.x * width, star.y * height, star.size, star.size)
+      }
+
+      // Eine entfernte, unscharfe Planetenscheibe und eine seitliche Sonne
+      // geben Tiefe, ohne das eigentliche Lagebild zu überladen.
+      const distantPlanet = ctx.createRadialGradient(width * 0.84, height * 0.18, 0, width * 0.84, height * 0.18, Math.min(width, height) * 0.11)
+      distantPlanet.addColorStop(0, 'rgba(147, 197, 253, 0.38)')
+      distantPlanet.addColorStop(0.7, 'rgba(49, 83, 132, 0.16)')
+      distantPlanet.addColorStop(1, 'rgba(15, 23, 42, 0)')
+      ctx.fillStyle = distantPlanet
+      ctx.beginPath()
+      ctx.arc(width * 0.84, height * 0.18, Math.min(width, height) * 0.11, 0, Math.PI * 2)
+      ctx.fill()
+
+      const sunlight = ctx.createRadialGradient(width * 0.04, height * 0.14, 0, width * 0.04, height * 0.14, Math.min(width, height) * 0.55)
+      sunlight.addColorStop(0, 'rgba(255, 241, 190, 0.23)')
+      sunlight.addColorStop(0.22, 'rgba(253, 186, 116, 0.08)')
+      sunlight.addColorStop(1, 'rgba(251, 191, 36, 0)')
+      ctx.fillStyle = sunlight
+      ctx.fillRect(0, 0, width, height)
 
       // Sanfte Annäherung an Zielwinkel (Kameraflug)
       if (targetRotRef.current) {
@@ -303,11 +395,11 @@ export function GlobeViewer({
           rotRef.current = targetRotRef.current
           targetRotRef.current = null
         }
-      } else if (autoRotate && !isDraggingRef.current) {
+      } else if (autoRotate && !isDraggingRef.current && !reducedMotion) {
         rotRef.current.y += 0.002
       }
 
-      pulse = (pulse + 0.05) % (Math.PI * 2)
+      if (!reducedMotion) pulse = (pulse + 0.05) % (Math.PI * 2)
 
       // 1. Atmosphärischer Glüheffekt (Atmospheric Halo Glow)
       const glowGrad = ctx.createRadialGradient(cx, cy, radius * 0.82, cx, cy, radius * 1.35)
@@ -320,7 +412,7 @@ export function GlobeViewer({
       ctx.arc(cx, cy, radius * 1.35, 0, Math.PI * 2)
       ctx.fill()
 
-      // 2. Erdkörper (Tiefen-Verlauf mit Ozeanblau)
+      // 2. Erdkörper (Tiefen-Verlauf mit Ozeanblau und sonniger Kante)
       const earthGrad = ctx.createRadialGradient(
         cx - radius * 0.35,
         cy - radius * 0.35,
@@ -329,9 +421,10 @@ export function GlobeViewer({
         cy,
         radius,
       )
-      earthGrad.addColorStop(0, '#0f2744')
-      earthGrad.addColorStop(0.5, '#0b1b30')
-      earthGrad.addColorStop(0.85, '#050d18')
+      earthGrad.addColorStop(0, '#245777')
+      earthGrad.addColorStop(0.36, '#123b5c')
+      earthGrad.addColorStop(0.7, '#08243f')
+      earthGrad.addColorStop(0.9, '#030d1b')
       earthGrad.addColorStop(1, '#02060e')
 
       ctx.save()
@@ -344,9 +437,42 @@ export function GlobeViewer({
       const rx = rotRef.current.x
       const ry = rotRef.current.y
 
-      // 3. Echte Kontinent-Landmassen & Küstenlinien mit sauberem Horizont-Clipping
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)'
-      ctx.lineWidth = 1.4
+      // Feine Strömungsbänder lassen den Ozean nach Oberfläche aussehen, nicht
+      // nach einer flachen blauen Scheibe.
+      ctx.strokeStyle = 'rgba(125, 211, 252, 0.055)'
+      ctx.lineWidth = 0.65
+      for (let band = -0.8; band <= 0.8; band += 0.12) {
+        ctx.beginPath()
+        for (let x = -radius; x <= radius; x += 7) {
+          const y = band * radius + Math.sin(x * 0.055 + pulse) * radius * 0.012
+          if (x === -radius) ctx.moveTo(cx + x, cy + y)
+          else ctx.lineTo(cx + x, cy + y)
+        }
+        ctx.stroke()
+      }
+
+      // Vorbereitete Landtextur: Gelände-, Vegetations- und Nachtlichtpunkte
+      // liegen exakt auf der rotierenden Kugel und werden am Horizont gekappt.
+      for (const point of LAND_TEXTURE) {
+        const projected = projectPoint(point.lat, point.lon, rx, ry, cx, cy, radius)
+        if (projected.rotZ <= 0) continue
+        const day = Math.max(0, projected.rotX * -0.55 + projected.rotY * 0.2 + 0.6)
+        const size = Math.max(0.7, 1.35 * projected.rotZ)
+        if (point.light && day < 0.55) {
+          ctx.fillStyle = `rgba(255, 204, 112, ${(0.25 + (0.55 - day) * 0.45) * projected.rotZ})`
+          ctx.fillRect(projected.sx, projected.sy, size, size)
+        } else if (point.tone > 0.78) {
+          ctx.fillStyle = `rgba(203, 213, 164, ${0.28 * projected.rotZ})`
+          ctx.fillRect(projected.sx, projected.sy, size, size)
+        } else {
+          ctx.fillStyle = `rgba(73, 128, 93, ${(0.22 + point.tone * 0.18) * projected.rotZ})`
+          ctx.fillRect(projected.sx, projected.sy, size, size)
+        }
+      }
+
+      // 3. Küstenlinien über der Textur für gut lesbare Kontinente
+      ctx.strokeStyle = 'rgba(168, 230, 194, 0.72)'
+      ctx.lineWidth = 1.15
       ctx.beginPath()
 
       CONTINENTS.forEach((poly) => {

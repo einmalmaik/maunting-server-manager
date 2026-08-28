@@ -35,16 +35,6 @@ export function ActiveProcessesCard({ processes, className = '' }: ActiveProcess
       label: t('ai.geo.processes.news', 'Nachrichten & Websuche'),
       status: 'fertig',
     },
-    {
-      id: 'social',
-      label: t('ai.geo.processes.social', 'Soziale Medien Analyse'),
-      status: 'fertig',
-    },
-    {
-      id: 'traffic',
-      label: t('ai.geo.processes.traffic', 'Verkehr & Bewegung'),
-      status: 'fertig',
-    },
   ]
 
   return (

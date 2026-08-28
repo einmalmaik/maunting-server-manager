@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   Car,
+  CircleDashed,
   Cloud,
   CloudRain,
   ExternalLink,
@@ -576,21 +577,16 @@ function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions):
               <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
                 {t('ai.geo.socialMedia', 'Soziale Medien & Trends')}
               </span>
-              <span className="rounded-full bg-indigo-500/10 px-2 py-0.5 text-[11px] font-medium text-indigo-400 border border-indigo-500/20">
-                Stimmungsanalyse
+              <span className="rounded-full border border-outline-variant/30 bg-surface-container-high px-2 py-0.5 text-[11px] font-medium text-on-surface-variant">
+                {t('ai.geo.dataSourceUnavailable', 'Keine Datenquelle')}
               </span>
             </div>
 
-            <div className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/80 p-3.5 space-y-2.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-on-surface-variant">Regionale Aktivität</span>
-                <span className="font-semibold text-emerald-400">Normal / Stabil</span>
-              </div>
-              <div className="h-1.5 w-full rounded-full bg-surface-container-highest overflow-hidden">
-                <div className="h-full bg-indigo-400 rounded-full w-2/3" />
-              </div>
-              <p className="text-xs text-on-surface-variant pt-1">
-                Keine ungewöhnlichen Aktivitätsspitzen oder Warnungen in den öffentlichen Feeds für {location}.
+            <div className="rounded-xl border border-dashed border-outline-variant/30 bg-surface-container-lowest/80 p-4 text-center">
+              <CircleDashed className="mx-auto h-5 w-5 text-on-surface-variant/60" aria-hidden="true" />
+              <p className="mt-2 text-xs font-medium text-on-surface">{t('ai.geo.socialUnavailableTitle', 'Keine verifizierten Trenddaten')}</p>
+              <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
+                {t('ai.geo.socialUnavailableBody', 'Für diese Region ist keine Social-Media-Quelle eingerichtet. Es wird keine Aktivitätsbewertung angezeigt.')}
               </p>
             </div>
           </div>
@@ -603,21 +599,16 @@ function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions):
               <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
                 {t('ai.geo.trafficStatus', 'Verkehr & Bewegung')}
               </span>
-              <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-400 border border-sky-500/20">
-                Live-Telemetrie
+              <span className="rounded-full border border-outline-variant/30 bg-surface-container-high px-2 py-0.5 text-[11px] font-medium text-on-surface-variant">
+                {t('ai.geo.dataSourceUnavailable', 'Keine Datenquelle')}
               </span>
             </div>
 
-            <div className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/80 p-3.5 space-y-2.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-on-surface-variant">Verkehrsfluss</span>
-                <span className="font-semibold text-emerald-400">Frei fließend</span>
-              </div>
-              <div className="h-1.5 w-full rounded-full bg-surface-container-highest overflow-hidden">
-                <div className="h-full bg-emerald-400 rounded-full w-4/5" />
-              </div>
-              <p className="text-xs text-on-surface-variant pt-1">
-                Hauptverkehrsachsen und Zubringer im Umkreis von {location} melden reguläre Fahrzeiten.
+            <div className="rounded-xl border border-dashed border-outline-variant/30 bg-surface-container-lowest/80 p-4 text-center">
+              <CircleDashed className="mx-auto h-5 w-5 text-on-surface-variant/60" aria-hidden="true" />
+              <p className="mt-2 text-xs font-medium text-on-surface">{t('ai.geo.trafficUnavailableTitle', 'Keine Verkehrsdaten')}</p>
+              <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
+                {t('ai.geo.trafficUnavailableBody', 'Für diese Region ist keine Verkehrsquelle eingerichtet. Es wird kein Verkehrsstatus geschätzt.')}
               </p>
             </div>
           </div>
