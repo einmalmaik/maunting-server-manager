@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Globe2, ListPlus, Loader2, Paperclip, Pencil, Send, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
+import { Check, ListPlus, Loader2, Paperclip, Pencil, Send, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -314,14 +314,16 @@ export function AiChat() {
 
   const manuallyClosedGeoRef = useRef(false)
   const lastSeenGeoIdRef = useRef<string | null>(null)
+  const wasAnalyzingRegionRef = useRef(false)
 
   // Automatische Aktivierung des 3D-Globus bei einer regionalen Analyse
   useEffect(() => {
     const isAnalyzing = laufendeWerkzeuge.some((w) => w.tool_name === 'analyze_region')
-    if (isAnalyzing) {
+    if (isAnalyzing && !wasAnalyzingRegionRef.current) {
       manuallyClosedGeoRef.current = false
       setGeoOpen(true)
     }
+    wasAnalyzingRegionRef.current = isAnalyzing
   }, [laufendeWerkzeuge])
 
   // Aktualisiert geoData aus der jüngsten Analyse im Verlauf
@@ -343,8 +345,9 @@ export function AiChat() {
             // Nur automatisch öffnen, wenn dies eine NEUE Analyse ist und der Nutzer nicht manuell geschlossen hat
             if (lastSeenGeoIdRef.current !== geoId) {
               lastSeenGeoIdRef.current = geoId
-              manuallyClosedGeoRef.current = false
-              setGeoOpen(true)
+              if (!manuallyClosedGeoRef.current) {
+                setGeoOpen(true)
+              }
             } else if (!manuallyClosedGeoRef.current) {
               setGeoOpen(true)
             }
@@ -828,20 +831,6 @@ export function AiChat() {
         {canUseAutonomy && <AiAutonomyButton servers={servers} disabled={busy} />}
 
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
-          {geoData && (
-            <Button
-              type="button"
-              variant={geoOpen ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setGeoOpen((open) => !open)}
-              aria-label={t('ai.geo.toggleGlobe')}
-              title={t('ai.geo.toggleGlobe')}
-              className="flex items-center gap-1.5"
-            >
-              <Globe2 className="h-4 w-4" aria-hidden="true" />
-              <span className="hidden md:inline">{t('ai.geo.globe')}</span>
-            </Button>
-          )}
           <Button
             type="button" variant="ghost" size="sm"
             disabled={busy || empty}
@@ -858,7 +847,7 @@ export function AiChat() {
 
       {/* ── Aktive Prozesse im 3-Spalten-Kommandozentrum ── */}
       {geoOpen && (
-        <div className="px-3 pt-2.5 shrink-0">
+        <div className="hidden shrink-0 px-3 pt-2.5 lg:block">
           <ActiveProcessesCard />
         </div>
       )}

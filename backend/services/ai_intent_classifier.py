@@ -47,7 +47,7 @@ _KNOWN_LOCATIONS = frozenset({
     "berlin", "hamburg", "muenchen", "münchen", "munich", "koeln", "köln", "cologne",
     "frankfurt", "stuttgart", "duesseldorf", "düsseldorf", "paris", "london", "tokio",
     "tokyo", "washington", "new york", "madrid", "barcelona", "rome", "rom", "vienna",
-    "wien", "zurich", "zürich", "singapore", "singapur", "sydney", "toronto",
+    "wien", "zurich", "zürich", "moscow", "moskau", "singapore", "singapur", "sydney", "toronto",
 })
 
 

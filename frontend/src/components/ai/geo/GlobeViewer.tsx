@@ -210,6 +210,18 @@ export function GlobeViewer({
   const [zoom, setZoom] = useState(1.0)
   const [autoRotate, setAutoRotate] = useState(true)
 
+  // Reacts Wheel-Handler aktualisiert den Zoom. Der native, nicht-passive
+  // Listener stellt zusätzlich sicher, dass Browser den Wheel-Impuls nicht an
+  // den Seiten-Scroller weiterreichen.
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const preventPageScroll = (event: WheelEvent) => event.preventDefault()
+    canvas.addEventListener('wheel', preventPageScroll, { passive: false })
+    return () => canvas.removeEventListener('wheel', preventPageScroll)
+  }, [])
+
   const effLocation = locationName ?? data?.location
   const preset = effLocation ? CITY_PRESETS[effLocation.toLowerCase().trim()] : undefined
   const effLat = latitude ?? data?.coordinates?.latitude ?? preset?.lat
@@ -525,7 +537,36 @@ export function GlobeViewer({
 
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault()
+    e.stopPropagation()
     setZoom((z) => Math.max(0.4, Math.min(3.5, z - e.deltaY * 0.0015)))
+  }
+
+  const handleTouchPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'mouse') return
+    e.preventDefault()
+    isDraggingRef.current = true
+    setAutoRotate(false)
+    targetRotRef.current = null
+    lastMouseRef.current = { x: e.clientX, y: e.clientY }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const handleTouchPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'mouse' || !isDraggingRef.current) return
+    e.preventDefault()
+    const dx = e.clientX - lastMouseRef.current.x
+    const dy = e.clientY - lastMouseRef.current.y
+    rotRef.current.y += dx * 0.008
+    rotRef.current.x = Math.max(-1.4, Math.min(1.4, rotRef.current.x + dy * 0.008))
+    lastMouseRef.current = { x: e.clientX, y: e.clientY }
+  }
+
+  const handleTouchPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'mouse') return
+    isDraggingRef.current = false
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
   }
 
   const rawDt = satellite?.scenes?.[0]?.datetime
@@ -541,16 +582,23 @@ export function GlobeViewer({
 
   return (
     <div
-      className={`relative flex h-full w-full min-h-[320px] flex-col items-center justify-center overflow-hidden rounded-2xl bg-surface-container-lowest border border-outline-variant/30 ${className}`}
+      className={`relative flex h-full w-full min-h-[320px] flex-col items-center justify-center overflow-hidden overscroll-contain rounded-2xl bg-surface-container-lowest border border-outline-variant/30 ${className}`}
+      onWheelCapture={(e) => {
+        e.preventDefault()
+      }}
     >
       <canvas
         ref={canvasRef}
-        className="h-full w-full cursor-grab active:cursor-grabbing"
+        className="h-full w-full touch-none cursor-grab active:cursor-grabbing"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
+        onPointerDown={handleTouchPointerDown}
+        onPointerMove={handleTouchPointerMove}
+        onPointerUp={handleTouchPointerUp}
+        onPointerCancel={handleTouchPointerUp}
         aria-label={`3D Globus Ansicht ${effLocation ? `für ${effLocation}` : ''}`}
       />
 

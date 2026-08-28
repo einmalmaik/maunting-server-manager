@@ -48,18 +48,18 @@ export function RegionalAnalysisLayout({
 
   return (
     <div
-      className={`flex h-full w-full min-h-0 flex-1 ${
+      className={`flex w-full min-h-0 flex-1 ${
         active
-          ? 'flex-col lg:flex-row gap-3 overflow-hidden p-1 sm:p-2'
-          : 'flex-col overflow-hidden'
+          ? 'h-[calc(100dvh-5.5rem)] flex-col gap-3 overflow-y-auto overscroll-contain p-1 sm:p-2 lg:flex-row lg:overflow-hidden'
+          : 'h-full flex-col overflow-hidden'
       } transition-all duration-300 ease-out`}
     >
       {/* Linke Spalte (Chat oder Voice-Container) */}
       <div
-        className={`flex flex-col min-h-0 h-full w-full ${
+        className={`order-3 flex min-h-0 w-full flex-col ${
           active
-            ? 'lg:w-[380px] xl:w-[420px] shrink-0 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest/50'
-            : 'flex-1'
+            ? 'shrink-0 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest/50 lg:order-1 lg:h-full lg:w-[380px] xl:w-[420px]'
+            : 'order-1 h-full flex-1'
         } overflow-hidden transition-all duration-300`}
       >
         {children}
@@ -68,7 +68,7 @@ export function RegionalAnalysisLayout({
       {/* Mittlere Spalte: 3D-Globus */}
       {active && (
         <>
-          <div className="flex flex-1 min-h-[320px] lg:min-h-0 h-full rounded-2xl overflow-hidden shadow-sm">
+          <div className="order-1 flex h-[52dvh] min-h-[360px] w-full shrink-0 overflow-hidden rounded-2xl shadow-sm sm:h-[58dvh] lg:order-2 lg:h-full lg:min-h-0 lg:flex-1">
             <GlobeViewer
               data={data}
               latitude={coords?.latitude}
@@ -80,7 +80,7 @@ export function RegionalAnalysisLayout({
           </div>
 
           {/* Rechte Spalte: Informationspanel */}
-          <div className="flex flex-col min-h-0 h-full w-full lg:w-[340px] xl:w-[380px] shrink-0">
+          <div className="order-2 flex w-full shrink-0 flex-col lg:order-3 lg:h-full lg:min-h-0 lg:w-[340px] xl:w-[380px]">
             <RegionalInfoPanel data={data} news={news} loading={loading} onClose={onClose} />
           </div>
         </>

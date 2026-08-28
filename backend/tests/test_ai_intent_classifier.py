@@ -18,6 +18,7 @@ from services.ai_intent_classifier import (
 CASES = [
     ("Wie ist das Wetter in Berlin heute", "analyze_region"),
     ("Show satellite information for London", "analyze_region"),
+    ("Wie ist das Wetter in Moskau heute", "analyze_region"),
     ("Suche aktuelle Nachrichten zu OpenSSH", "web_search"),
     ("Search the web for Python releases", "web_search"),
     ("Welche Termine habe ich im Kalender", "calendar_read"),

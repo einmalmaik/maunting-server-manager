@@ -7,8 +7,11 @@ Satellitendaten aus Copernicus/Sentinel.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import logging
+import threading
+import time
 from typing import Any
 import httpx
 
@@ -20,7 +23,9 @@ logger = logging.getLogger(__name__)
 
 _NOMINATIM_ENDPOINT = "https://nominatim.openstreetmap.org/search"
 _OPEN_METEO_ENDPOINT = "https://api.open-meteo.com/v1/forecast"
-_TIMEOUT = 10.0
+_TIMEOUT = 3.0
+_GEO_CACHE_TTL_SECONDS = 300.0
+_GEO_CACHE_MAX_DYNAMIC_ENTRIES = 128
 
 # In-Memory Cache für Geocoding (Ortsname -> Geo-Objekt)
 _geo_cache: dict[str, dict[str, Any]] = {
@@ -59,7 +64,25 @@ _geo_cache: dict[str, dict[str, Any]] = {
         "bbox": [-0.5103, 51.2867, 0.3340, 51.6918],
         "country": "Vereinigtes Königreich",
     },
+    "moscow": {
+        "name": "Moscow, Russia",
+        "latitude": 55.7558,
+        "longitude": 37.6173,
+        "bbox": [37.3539, 55.4899, 37.9674, 55.9575],
+        "country": "Russia",
+    },
+    "moskau": {
+        "name": "Moscow, Russia",
+        "latitude": 55.7558,
+        "longitude": 37.6173,
+        "bbox": [37.3539, 55.4899, 37.9674, 55.9575],
+        "country": "Russia",
+    },
 }
+_static_geo_keys = frozenset(_geo_cache)
+_geo_cache_expires_at: dict[str, float] = {}
+_geo_inflight: dict[str, threading.Event] = {}
+_geo_cache_lock = threading.Lock()
 
 # WMO Weather Code Übersetzungen
 WMO_CODES: dict[int, str] = {
@@ -92,8 +115,30 @@ def geocode_location(location_name: str) -> dict[str, Any] | None:
         return None
 
     clean_key = query.lower()
-    if clean_key in _geo_cache:
-        return _geo_cache[clean_key]
+    with _geo_cache_lock:
+        cached = _geo_cache.get(clean_key)
+        expires_at = _geo_cache_expires_at.get(clean_key)
+        if cached and (clean_key in _static_geo_keys or (expires_at is not None and expires_at > time.monotonic())):
+            return cached
+        if cached:
+            _geo_cache.pop(clean_key, None)
+            _geo_cache_expires_at.pop(clean_key, None)
+
+        pending = _geo_inflight.get(clean_key)
+        if pending is None:
+            pending = threading.Event()
+            _geo_inflight[clean_key] = pending
+            owner = True
+        else:
+            owner = False
+
+    # Die Vorschau und der eigentliche Prefetch können denselben Ort fast
+    # gleichzeitig anfragen. Nur der erste Thread darf Nominatim ansprechen;
+    # der zweite übernimmt anschließend das gecachte Ergebnis.
+    if not owner:
+        pending.wait(_TIMEOUT + 0.5)
+        with _geo_cache_lock:
+            return _geo_cache.get(clean_key)
 
     try:
         resp = httpx.get(
@@ -129,10 +174,23 @@ def geocode_location(location_name: str) -> dict[str, Any] | None:
                     "bbox": bbox,
                     "country": redact_sensitive_text(country),
                 }
-                _geo_cache[clean_key] = result
+                with _geo_cache_lock:
+                    dynamic_keys = [key for key in _geo_cache if key not in _static_geo_keys]
+                    while len(dynamic_keys) >= _GEO_CACHE_MAX_DYNAMIC_ENTRIES:
+                        oldest = min(dynamic_keys, key=lambda key: _geo_cache_expires_at.get(key, 0.0))
+                        _geo_cache.pop(oldest, None)
+                        _geo_cache_expires_at.pop(oldest, None)
+                        dynamic_keys.remove(oldest)
+                    _geo_cache[clean_key] = result
+                    _geo_cache_expires_at[clean_key] = time.monotonic() + _GEO_CACHE_TTL_SECONDS
                 return result
     except Exception as exc:
-        logger.info("Geocoding fehlgeschlagen query=%s error=%s", query, type(exc).__name__)
+        logger.info("Geocoding fehlgeschlagen error=%s", type(exc).__name__)
+    finally:
+        with _geo_cache_lock:
+            event = _geo_inflight.pop(clean_key, None)
+            if event is not None:
+                event.set()
 
     return None
 
@@ -186,15 +244,26 @@ def analyze_region(location_name: str) -> dict[str, Any]:
     lon = geo["longitude"]
     bbox = geo["bbox"]
 
-    weather = get_current_weather(lat, lon)
-
-    satellite_data: list[dict[str, Any]] = []
     satellite_configured = ai_satellite_service.is_configured()
-    if satellite_configured:
+
+    def satellite_search() -> list[dict[str, Any]]:
+        if not satellite_configured:
+            return []
         try:
-            satellite_data = ai_satellite_service.search_satellite_imagery(bbox=bbox, limit=2)
+            return ai_satellite_service.search_satellite_imagery(bbox=bbox, limit=2)
         except Exception as exc:
             logger.info("Satellitenbildsuche nicht erfolgreich error=%s", type(exc).__name__)
+            return []
+
+    # Wetter und die optionale CDSE-Suche sind unabhängig. Parallelisierung
+    # verhindert, dass eine langsame Satellitenantwort die Wetterabfrage noch
+    # zusätzlich verlängert.
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="msm-geo") as executor:
+        weather_future = executor.submit(get_current_weather, lat, lon)
+        satellite_future = executor.submit(satellite_search)
+        weather = weather_future.result()
+        satellite_data = satellite_future.result()
+    weather = weather or {}
 
     now_iso = datetime.now(timezone.utc).isoformat()
     min_lon, min_lat, max_lon, max_lat = bbox
@@ -313,7 +382,7 @@ def analyze_region(location_name: str) -> dict[str, Any]:
             "source": "Meteorologischer Dienst",
             "timeAgo": "Live",
             "category": "Umwelt",
-            "snippet": f"Aktuelle meteorologische Messwerte: {weather['temperature_celsius']:.1f}°C, {weather['condition']}, Wind {weather['wind_speed_kmh']:.1f} km/h.",
+            "snippet": _weather_summary(weather),
         },
         {
             "id": f"geo-news-{loc_name.lower().replace(' ', '-')}-3",
@@ -342,3 +411,13 @@ def analyze_region(location_name: str) -> dict[str, Any]:
         },
         "news": regional_news,
     }
+
+
+def _weather_summary(weather: dict[str, Any]) -> str:
+    """Erzeugt auch bei einer fehlenden Wetterantwort einen ehrlichen Kurztext."""
+    temperature = weather.get("temperature_celsius")
+    wind = weather.get("wind_speed_kmh")
+    condition = weather.get("condition") or "keine aktuellen Messwerte"
+    if isinstance(temperature, (int, float)) and isinstance(wind, (int, float)):
+        return f"Aktuelle meteorologische Messwerte: {temperature:.1f}°C, {condition}, Wind {wind:.1f} km/h."
+    return "Aktuell liegen keine vollständigen meteorologischen Messwerte vor."

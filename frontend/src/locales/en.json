@@ -1051,7 +1051,6 @@
       "weather": "Weather",
       "satelliteData": "Satellite data",
       "backToChat": "Back to full view",
-      "toggleGlobe": "Show or hide 3D globe",
       "globe": "3D globe",
       "apparentTemp": "Feels like {{temp}}°C",
       "windSpeed": "{{speed}} km/h wind",

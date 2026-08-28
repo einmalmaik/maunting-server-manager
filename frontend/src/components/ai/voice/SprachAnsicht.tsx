@@ -171,7 +171,7 @@ export function SprachAnsicht({
           </div>
 
           {/* Aktive Prozesse Card */}
-          <ActiveProcessesCard processes={dynamicProcesses} />
+          <ActiveProcessesCard processes={dynamicProcesses} className="hidden lg:block" />
 
           {/* Gesprächs-Transkript */}
           {zeilen.length > 0 && (
