@@ -312,10 +312,14 @@ export function AiChat() {
     merkeVorschlag, sendContent, haengeAn, stoppeLauf,
   } = useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttachments })
 
+  const manuallyClosedGeoRef = useRef(false)
+  const lastSeenGeoIdRef = useRef<string | null>(null)
+
   // Automatische Aktivierung des 3D-Globus bei einer regionalen Analyse
   useEffect(() => {
     const isAnalyzing = laufendeWerkzeuge.some((w) => w.tool_name === 'analyze_region')
     if (isAnalyzing) {
+      manuallyClosedGeoRef.current = false
       setGeoOpen(true)
     }
   }, [laufendeWerkzeuge])
@@ -332,8 +336,18 @@ export function AiChat() {
             section.werkzeug?.tool_name === 'analyze_region' &&
             section.werkzeug.geo_analysis
           ) {
-            setGeoData(section.werkzeug.geo_analysis)
-            setGeoOpen(true)
+            const geo = section.werkzeug.geo_analysis
+            const geoId = `${geo.location}-${geo.coordinates?.latitude}-${geo.coordinates?.longitude}`
+            setGeoData(geo)
+
+            // Nur automatisch öffnen, wenn dies eine NEUE Analyse ist und der Nutzer nicht manuell geschlossen hat
+            if (lastSeenGeoIdRef.current !== geoId) {
+              lastSeenGeoIdRef.current = geoId
+              manuallyClosedGeoRef.current = false
+              setGeoOpen(true)
+            } else if (!manuallyClosedGeoRef.current) {
+              setGeoOpen(true)
+            }
             return
           }
         }
@@ -342,9 +356,19 @@ export function AiChat() {
   }, [entries])
 
   const newsFromSearch = useMemo<NewsItem[]>(() => {
+    if (!geoData?.location) return []
+    const curLoc = geoData.location.toLowerCase().split(',')[0].trim()
+
     for (let i = entries.length - 1; i >= 0; i--) {
       const entry = entries[i]
       if (entry.kind === 'message' && entry.message.sections) {
+        const hasMatchingAnalysis = entry.message.sections.some(
+          (s) =>
+            s.art === 'tool' &&
+            s.werkzeug?.tool_name === 'analyze_region' &&
+            s.werkzeug.geo_analysis?.location?.toLowerCase().includes(curLoc),
+        )
+
         for (let j = entry.message.sections.length - 1; j >= 0; j--) {
           const section = entry.message.sections[j]
           if (
@@ -352,30 +376,50 @@ export function AiChat() {
             section.werkzeug?.tool_name === 'web_search' &&
             (section.werkzeug.web_results || section.werkzeug.ergebnis)
           ) {
-            const rawResults = section.werkzeug.web_results || (section.werkzeug.ergebnis as { results?: Array<{ title?: string; url?: string; description?: string; snippet?: string }> })?.results
-            if (Array.isArray(rawResults) && rawResults.length > 0) {
-              return rawResults.map((r, idx) => {
-                let domain = 'Websuche'
-                try {
-                  if (r.url) domain = new URL(r.url).hostname.replace(/^www\./, '')
-                } catch {}
-                return {
-                  id: `search-news-${idx}`,
-                  title: r.title || 'Nachrichtenbericht',
-                  source: domain,
-                  timeAgo: 'Aktuell',
-                  category: 'Websuche',
-                  url: r.url,
-                  snippet: r.description || r.snippet,
+            const rawResults =
+              section.werkzeug.web_results ||
+              (
+                section.werkzeug.ergebnis as {
+                  results?: Array<{
+                    title?: string
+                    url?: string
+                    description?: string
+                    snippet?: string
+                  }>
                 }
+              )?.results
+
+            if (Array.isArray(rawResults) && rawResults.length > 0) {
+              const matchingResults = rawResults.filter((r) => {
+                if (hasMatchingAnalysis) return true
+                const text = `${r.title || ''} ${r.description || ''} ${r.snippet || ''}`.toLowerCase()
+                return text.includes(curLoc)
               })
+
+              if (matchingResults.length > 0) {
+                return matchingResults.map((r, idx) => {
+                  let domain = 'Websuche'
+                  try {
+                    if (r.url) domain = new URL(r.url).hostname.replace(/^www\./, '')
+                  } catch {}
+                  return {
+                    id: `search-news-${idx}`,
+                    title: r.title || 'Nachrichtenbericht',
+                    source: domain,
+                    timeAgo: 'Aktuell',
+                    category: 'Websuche',
+                    url: r.url,
+                    snippet: r.description || r.snippet,
+                  }
+                })
+              }
             }
           }
         }
       }
     }
     return []
-  }, [entries])
+  }, [entries, geoData?.location])
 
   const initialScrollDoneRef = useRef(false)
 
@@ -385,6 +429,22 @@ export function AiChat() {
       kasten.scrollTop = kasten.scrollHeight
     }
   }, [])
+
+  const prevGeoOpenRef = useRef(geoOpen)
+  useEffect(() => {
+    if (prevGeoOpenRef.current && !geoOpen) {
+      scrolleNachUnten()
+      const t1 = setTimeout(scrolleNachUnten, 50)
+      const t2 = setTimeout(scrolleNachUnten, 150)
+      const t3 = setTimeout(scrolleNachUnten, 300)
+      return () => {
+        clearTimeout(t1)
+        clearTimeout(t2)
+        clearTimeout(t3)
+      }
+    }
+    prevGeoOpenRef.current = geoOpen
+  }, [geoOpen, scrolleNachUnten])
 
   /**
    * Beim ersten Laden den Verlauf verlässlich ganz nach unten scrollen.
@@ -711,7 +771,11 @@ export function AiChat() {
       data={geoData}
       news={newsFromSearch}
       loading={streaming && laufendeWerkzeuge.some((w) => w.tool_name === 'analyze_region')}
-      onClose={() => setGeoOpen(false)}
+      onClose={() => {
+        manuallyClosedGeoRef.current = true
+        setGeoOpen(false)
+        scrolleNachUnten()
+      }}
     >
       <section
         className="flex min-h-0 flex-1 flex-col overflow-hidden"

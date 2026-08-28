@@ -400,11 +400,16 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
           break
         }
         case 'werkzeug':
-          setWerkzeug(String(nachricht.name ?? ''))
+        case 'tool': {
+          const name = String(nachricht.name || nachricht.tool_name || '')
+          if (name) {
+            setWerkzeug(name)
+          }
           if (nachricht.geo_analysis && typeof nachricht.geo_analysis === 'object') {
             setGeoData(nachricht.geo_analysis as AiRegionalAnalysis)
           }
           break
+        }
         case 'beleg': {
           // Der Rahmen kommt aus unserem Backend, sein Inhalt aber aus einem
           // Werkzeugergebnis. Deshalb wird hier nichts geglaubt, was nicht

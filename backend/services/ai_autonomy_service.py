@@ -151,6 +151,17 @@ def autonomy_allows(
     )
     if grant is None:
         return False
+    # Persönliche Kalender-Operationen des Nutzers unterliegen bei erteilter
+    # Autonomie-Freigabe nicht dem strikten Server-Stundenkontingent.
+    if tool_name in (
+        "propose_calendar_event_create",
+        "propose_calendar_event_update",
+        "propose_calendar_event_delete",
+        "calendar_event_create",
+        "calendar_event_update",
+        "calendar_event_delete",
+    ):
+        return True
     # Die Obergrenze begrenzt nicht die Berechtigung, sondern die Menge: ein in
     # eine Schleife geratenes Modell soll nicht in einer Minute vierzig Backups
     # anstossen. Bei Erreichen faellt die Aktion zurueck auf Bestaetigungspflicht

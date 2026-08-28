@@ -198,3 +198,64 @@ async def test_wenn_ki_bereits_text_generiert_hat_wird_keine_doppelte_phrase_erz
 
     # UI-Event ging trotzdem sofort raus
     assert any(e.get("art") == "werkzeug_gestartet" for e in bruecke.ereignisse)
+
+
+@pytest.mark.asyncio
+async def test_analyze_region_voice_bridge_events_and_geo_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stellt sicher, dass werkzeug_gestartet und werkzeug Events mit vollständiger geo_analysis Payload übertragen werden."""
+    monkeypatch.setattr(ai_tts_elevenlabs, "Stimme", _StummeStimme)
+    bruecke = _Attrappe()
+
+    lauf_id = str(uuid4())
+    ai_run_broker.eroeffnen(lauf_id)
+    abo = ai_run_broker.abonnieren(lauf_id)
+
+    aufgabe = asyncio.create_task(bruecke._lauf_verfolgen(abo))
+
+    mock_geo = {
+        "status": "success",
+        "location": "London, UK",
+        "coordinates": {"latitude": 51.5074, "longitude": -0.1278},
+        "weather": {"temperature_celsius": 20},
+    }
+
+    # Spekulativer Start mit name oder tool_name und geo_analysis
+    ai_run_broker.veroeffentlichen(
+        lauf_id,
+        "tool_start",
+        {"name": "analyze_region", "spekulativ": True, "geo_analysis": mock_geo},
+    )
+    # Vollständiger Werkzeugaufruf mit aufrufe-Liste
+    ai_run_broker.veroeffentlichen(
+        lauf_id,
+        "tool",
+        {
+            "aufrufe": [
+                {"tool_name": "analyze_region", "arguments": {"location": "London"}, "geo_analysis": mock_geo}
+            ]
+        },
+    )
+    ai_run_broker.veroeffentlichen(
+        lauf_id, "delta", {"content": "Hier ist die Satellitenanalyse für London."}
+    )
+    ai_run_broker.veroeffentlichen(
+        lauf_id, "run", {"run_id": lauf_id, "status": "completed"}
+    )
+    ai_run_broker.beenden(lauf_id)
+
+    await aufgabe
+    ai_run_broker.abmelden(lauf_id, abo[1])
+
+    # Prüfen, dass werkzeug_gestartet mit geo_analysis gesendet wurde
+    start_events = [e for e in bruecke.ereignisse if e.get("art") == "werkzeug_gestartet"]
+    assert len(start_events) == 1
+    assert start_events[0]["name"] == "analyze_region"
+    assert start_events[0]["geo_analysis"] == mock_geo
+
+    # Prüfen, dass werkzeug mit geo_analysis gesendet wurde
+    tool_events = [e for e in bruecke.ereignisse if e.get("art") == "werkzeug"]
+    assert len(tool_events) == 1
+    assert tool_events[0]["name"] == "analyze_region"
+    assert tool_events[0]["geo_analysis"] == mock_geo

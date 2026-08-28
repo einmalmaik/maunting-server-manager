@@ -54,17 +54,36 @@ export function SprachAnsicht({
     if (element) element.scrollTop = element.scrollHeight
   }, [zeilen])
 
+  const [kommandozentraleGeschlossen, setKommandozentraleGeschlossen] = useState(false)
+  const lastToolRef = useRef<string | null>(null)
+
+  // Wenn ein neues Werkzeug wie analyze_region anläuft, Schließungssperre aufheben
+  useEffect(() => {
+    if (werkzeug === 'analyze_region' && lastToolRef.current !== 'analyze_region') {
+      setKommandozentraleGeschlossen(false)
+    }
+    lastToolRef.current = werkzeug
+  }, [werkzeug])
+
   const laeuft = zustand !== 'aus'
   const hoert = zustand === 'hoert' || zustand === 'bereit'
   const beleg = belege.length > 0 ? belege[belege.length - 1] : null
 
-  // 1. DREI-SPALTEN-KOMMANDOZENTRALE BEI AKTIVER REGIONALANALYSE
-  if (geoData) {
+  const istKommandozentraleAktiv = Boolean(
+    !kommandozentraleGeschlossen && (geoData || werkzeug === 'analyze_region'),
+  )
+
+  // 1. DREI-SPALTEN-KOMMANDOZENTRALE BEI AKTIVER REGIONALANALYSE (sofort bei analyze_region oder geoData)
+  if (istKommandozentraleAktiv) {
     return (
       <RegionalAnalysisLayout
         active={true}
         data={geoData}
-        onClose={() => setGeoData(null)}
+        loading={!geoData || werkzeug === 'analyze_region' || zustand === 'denkt'}
+        onClose={() => {
+          setGeoData(null)
+          setKommandozentraleGeschlossen(true)
+        }}
       >
         <div className="flex h-full w-full flex-col justify-between p-4 overflow-y-auto space-y-4">
           {/* Kopfbereich: Sprachblase und Status */}

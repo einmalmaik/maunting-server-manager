@@ -98,3 +98,13 @@ def test_geo_service_analyze_region(db: Session, regular_user: User, monkeypatch
     assert result["coordinates"]["latitude"] == 52.52
     assert result["coordinates"]["longitude"] == 13.405
     assert "weather" in result
+    assert "satellite" in result
+    assert result["satellite"]["available"] is True
+    assert "layers" in result["satellite"]
+    layers = result["satellite"]["layers"]
+    assert "true_color" in layers
+    assert "nasa_nrt" in layers
+    assert "infrared_ndvi" in layers
+    assert "arcgisonline" in layers["true_color"]["url"]
+    assert "gibs.earthdata.nasa.gov" in layers["nasa_nrt"]["url"]
+    assert "gibs.earthdata.nasa.gov" in layers["infrared_ndvi"]["url"]

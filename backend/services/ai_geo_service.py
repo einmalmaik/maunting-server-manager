@@ -195,25 +195,74 @@ def analyze_region(location_name: str) -> dict[str, Any]:
         except Exception as exc:
             logger.info("Satellitenbildsuche nicht erfolgreich error=%s", type(exc).__name__)
 
+    min_lon, min_lat, max_lon, max_lat = bbox
+
+    # Multi-Layer Satelliten-URLs für verschiedene Spektral- und Zeitbereiche:
+    # 1. HD True-Color (Sentinel-2 L2A / ArcGIS World Imagery)
+    true_color_url = (
+        f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?"
+        f"bbox={min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}&bboxSR=4326&imageSR=4326&size=1024,768&format=jpg&f=image"
+    )
+    # 2. NASA GIBS Near-Real-Time (MODIS / VIIRS Tagessatellit)
+    nasa_nrt_url = (
+        f"https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?service=WMS&request=GetMap&version=1.3.0&"
+        f"layers=MODIS_Terra_CorrectedReflectance_TrueColor&styles=&format=image%2Fjpeg&transparent=false&crs=EPSG:4326&"
+        f"bbox={min_lat:.4f},{min_lon:.4f},{max_lat:.4f},{max_lon:.4f}&width=1024&height=768"
+    )
+    # 3. Infrarot / NDVI Vegetationsanalyse
+    infrared_ndvi_url = (
+        f"https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?service=WMS&request=GetMap&version=1.3.0&"
+        f"layers=MODIS_Terra_NDVI_8Day&styles=&format=image%2Fpng&transparent=false&crs=EPSG:4326&"
+        f"bbox={min_lat:.4f},{min_lon:.4f},{max_lat:.4f},{max_lon:.4f}&width=1024&height=768"
+    )
+
+    layers: dict[str, dict[str, Any]] = {
+        "true_color": {
+            "id": "true_color",
+            "name": "HD True-Color (Sentinel-2 / ArcGIS)",
+            "url": true_color_url,
+            "resolution": "10m",
+            "mission": "Sentinel-2 L2A",
+            "description": "Optische Echtfarben-Darstellung (RGB) in hoher Auflösung",
+        },
+        "nasa_nrt": {
+            "id": "nasa_nrt",
+            "name": "NASA GIBS Near-Real-Time",
+            "url": nasa_nrt_url,
+            "resolution": "250m",
+            "mission": "NASA MODIS / VIIRS",
+            "description": "Tagesaktuelle Erdbeobachtung der NASA-Flotte (NRT)",
+        },
+        "infrared_ndvi": {
+            "id": "infrared_ndvi",
+            "name": "Infrarot / NDVI Vegetationsanalyse",
+            "url": infrared_ndvi_url,
+            "resolution": "250m",
+            "mission": "Terra MODIS NDVI",
+            "description": "Nahinfrarot- und Vegetationsindex zur Analyse von Biomasse und Feuchte",
+        },
+    }
+
     # Visuelle Satellitenvorschau: Wenn keine CDSE-Szenen mit Vorschau-Bild vorliegen,
     # erzeugen wir eine hochauflösende Sentinel-2 / Weltraum-Satellitenkachel-Vorschau
     if not satellite_data or not any(s.get("preview_url") for s in satellite_data):
-        min_lon, min_lat, max_lon, max_lat = bbox
-        preview_url = (
-            f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?"
-            f"bbox={min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}&bboxSR=4326&imageSR=4326&size=1024,768&format=jpg&f=image"
-        )
         fallback_scene = {
             "id": f"S2A_L2A_{geo['name'].upper().replace(' ', '_')}",
             "mission": "Sentinel-2 L2A",
             "datetime": "Aktueller Überflug",
             "cloud_cover_percent": 2.4,
-            "preview_url": preview_url,
+            "preview_url": true_color_url,
+            "layers": layers,
         }
         if not satellite_data:
             satellite_data = [fallback_scene]
         else:
-            satellite_data[0]["preview_url"] = preview_url
+            satellite_data[0]["preview_url"] = true_color_url
+            satellite_data[0]["layers"] = layers
+    else:
+        for s in satellite_data:
+            if not s.get("layers"):
+                s["layers"] = layers
 
     return {
         "status": "success",
@@ -228,5 +277,6 @@ def analyze_region(location_name: str) -> dict[str, Any]:
         "satellite": {
             "available": len(satellite_data) > 0,
             "scenes": satellite_data,
+            "layers": layers,
         },
     }

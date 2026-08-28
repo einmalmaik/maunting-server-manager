@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Car,
   Cloud,
@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import type { AiRegionalAnalysis } from '@/api/ai'
+import type { AiRegionalAnalysis, AiSatelliteLayer } from '@/api/ai'
 import { Button } from '@/Singra/UI'
 
 type TabType = 'overview' | 'satellite' | 'news' | 'social' | 'traffic' | 'weather'
@@ -48,44 +48,102 @@ export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfo
   const [activeTab, setActiveTab] = useState<TabType>('overview')
   const [satZoom, setSatZoom] = useState(1)
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null)
+  const [selectedLayerId, setSelectedLayerId] = useState<string>('true_color')
 
   if (loading && !data) {
     return (
-      <div className="flex h-full w-full flex-col p-4 space-y-4 animate-pulse bg-surface-container-low border border-outline-variant/30 rounded-2xl">
+      <aside
+        className="flex h-full w-full flex-col p-4 space-y-4 animate-pulse bg-surface-container-low border border-outline-variant/30 rounded-2xl"
+        aria-label={t('ai.geo.panelTitle', 'Regionale Analyse')}
+      >
         <div className="h-6 w-3/4 bg-surface-container-highest rounded-lg" />
         <div className="h-10 bg-surface-container-highest rounded-xl" />
         <div className="h-36 bg-surface-container-highest rounded-xl" />
         <div className="h-44 bg-surface-container-highest rounded-xl" />
-      </div>
+      </aside>
     )
   }
 
   if (!data) return null
 
   const { location, country, coordinates, weather, satellite } = data
-
-  // Beispiel-Nachrichtenfeed, falls keine dynamischen Treffer aus der Websuche übergeben werden
-  const newsList: NewsItem[] = news && news.length > 0 ? news : [
-    {
-      id: 'news-1',
-      title: `${location}: Kommunale Infrastruktur & Verkehrsströme stabil`,
-      source: 'MSM Regional Intel',
-      timeAgo: 'vor 12 Min.',
-      category: t('ai.geo.categories.local', 'Lokales'),
-      snippet: 'Aktuelle Lageberichte verzeichnen einen geregelten Betriebsablauf ohne kritische Störungen.',
-    },
-    {
-      id: 'news-2',
-      title: `Umweltsensoren erfassen stabile Wetter- und Luftwerte`,
-      source: 'Open-Meteo & Copernicus',
-      timeAgo: 'vor 28 Min.',
-      category: t('ai.geo.categories.environment', 'Umwelt'),
-      snippet: 'Messstationen melden normale Sichtweiten und reguläre atmosphärische Messwerte.',
-    },
-  ]
-
   const firstScene = satellite?.scenes?.[0]
   const previewImg = firstScene?.preview_url
+
+  // Mehrschichtige Satelliten-Layer (HD True-Color, NASA GIBS NRT, Infrarot/NDVI)
+  const layersMap = satellite?.layers || satellite?.scenes?.[0]?.layers
+  const availableLayers: AiSatelliteLayer[] = useMemo(() => {
+    if (layersMap && Object.keys(layersMap).length > 0) {
+      return Object.values(layersMap)
+    }
+    const [minLon, minLat, maxLon, maxLat] = coordinates?.bbox || [0, 0, 0, 0]
+    return [
+      {
+        id: 'true_color',
+        name: 'HD True-Color (Sentinel-2 / ArcGIS)',
+        url:
+          previewImg ||
+          `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${minLon.toFixed(4)},${minLat.toFixed(4)},${maxLon.toFixed(4)},${maxLat.toFixed(4)}&bboxSR=4326&imageSR=4326&size=1024,768&format=jpg&f=image`,
+        resolution: '10m',
+        mission: 'Sentinel-2 L2A',
+        description: 'Optische Echtfarben-Darstellung (RGB) in hoher Auflösung',
+      },
+      {
+        id: 'nasa_nrt',
+        name: 'NASA GIBS Near-Real-Time',
+        url: `https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?service=WMS&request=GetMap&version=1.3.0&layers=MODIS_Terra_CorrectedReflectance_TrueColor&styles=&format=image%2Fjpeg&transparent=false&crs=EPSG:4326&bbox=${minLat.toFixed(4)},${minLon.toFixed(4)},${maxLat.toFixed(4)},${maxLon.toFixed(4)}&width=1024&height=768`,
+        resolution: '250m',
+        mission: 'NASA MODIS / VIIRS',
+        description: 'Tagesaktuelle Erdbeobachtung der NASA-Flotte (Near-Real-Time)',
+      },
+      {
+        id: 'infrared_ndvi',
+        name: 'Infrarot / NDVI Vegetationsanalyse',
+        url: `https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?service=WMS&request=GetMap&version=1.3.0&layers=MODIS_Terra_NDVI_8Day&styles=&format=image%2Fpng&transparent=false&crs=EPSG:4326&bbox=${minLat.toFixed(4)},${minLon.toFixed(4)},${maxLat.toFixed(4)},${maxLon.toFixed(4)}&width=1024&height=768`,
+        resolution: '250m',
+        mission: 'Terra MODIS NDVI',
+        description: 'Nahinfrarot- und Vegetationsindex zur Analyse von Biomasse und Feuchte',
+      },
+    ]
+  }, [layersMap, coordinates?.bbox, previewImg])
+
+  const activeLayer = availableLayers.find((l) => l.id === selectedLayerId) || availableLayers[0]
+  const currentPreviewUrl = activeLayer?.url || previewImg
+
+  // Nachrichtenfeed: filtert strikt nach aktuellem Ort, um veraltete Recherchen (z. B. aus früheren Turns) zu isolieren
+  const newsList: NewsItem[] = useMemo(() => {
+    const locClean = (location || '').trim()
+    const locMain = locClean.split(',')[0].trim().toLowerCase()
+
+    if (news && news.length > 0) {
+      const matched = news.filter((item) => {
+        const fullText = `${item.title} ${item.snippet || ''} ${item.source || ''}`.toLowerCase()
+        return !locMain || fullText.includes(locMain)
+      })
+      if (matched.length > 0) {
+        return matched
+      }
+    }
+
+    return [
+      {
+        id: `news-${location}-1`,
+        title: `${location}: Kommunale Infrastruktur & Verkehrsströme stabil`,
+        source: 'MSM Regional Intel',
+        timeAgo: 'vor 12 Min.',
+        category: t('ai.geo.categories.local', 'Lokales'),
+        snippet: `Aktuelle Lageberichte für ${location} verzeichnen einen geregelten Betriebsablauf ohne kritische Störungen.`,
+      },
+      {
+        id: `news-${location}-2`,
+        title: `${location}: Umweltsensoren erfassen stabile Wetter- und Luftwerte`,
+        source: 'Open-Meteo & Copernicus',
+        timeAgo: 'vor 28 Min.',
+        category: t('ai.geo.categories.environment', 'Umwelt'),
+        snippet: `Messstationen in der Region ${location} melden normale Sichtweiten und reguläre atmosphärische Messwerte.`,
+      },
+    ]
+  }, [news, location, t])
 
   const tabs: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'overview', label: t('ai.geo.tabs.overview', 'Übersicht'), icon: Globe2 },
@@ -166,20 +224,38 @@ export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfo
         {/* TAB: ÜBERSICHT */}
         {activeTab === 'overview' && (
           <div className="space-y-4">
-            {/* Satellitenbild-Vorschaukarte */}
+            {/* Satellitenbild-Vorschaukarte mit Layer-Umschaltung */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold uppercase tracking-wider text-on-surface-variant">
                   {t('ai.geo.satelliteData', 'Satellitendaten')}
                 </span>
-                <span className="text-[11px] text-teal-400 font-medium">Copernicus Sentinel-2 L2A</span>
+                <span className="text-[11px] text-teal-400 font-medium">{activeLayer?.mission || 'Copernicus Sentinel-2 L2A'}</span>
+              </div>
+
+              {/* Layer-Auswahl-Leiste */}
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
+                {availableLayers.map((layer) => (
+                  <button
+                    key={layer.id}
+                    type="button"
+                    onClick={() => setSelectedLayerId(layer.id)}
+                    className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-all whitespace-nowrap ${
+                      selectedLayerId === layer.id
+                        ? 'bg-primary/20 text-primary border border-primary/40 font-semibold'
+                        : 'bg-surface-container-high/60 text-on-surface-variant hover:text-on-surface border border-transparent'
+                    }`}
+                  >
+                    {layer.name}
+                  </button>
+                ))}
               </div>
 
               <div className="relative overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container-lowest group">
-                {previewImg ? (
+                {currentPreviewUrl ? (
                   <div className="relative aspect-video w-full overflow-hidden">
                     <img
-                      src={previewImg}
+                      src={currentPreviewUrl}
                       alt={`Satellitenansicht von ${location}`}
                       className="h-full w-full object-cover transition-transform duration-300"
                       style={{ transform: `scale(${satZoom})` }}
@@ -188,7 +264,7 @@ export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfo
 
                     {/* Overlays */}
                     <div className="absolute top-2.5 left-2.5 rounded-md bg-black/70 px-2 py-0.5 text-[10px] font-semibold text-teal-300 backdrop-blur-md border border-teal-500/30">
-                      Sentinel-2 L2A • 10m Auflösung
+                      {activeLayer?.name || 'Sentinel-2 L2A'} • {activeLayer?.resolution || '10m'} Auflösung
                     </div>
 
                     <div className="absolute top-2.5 right-2.5 rounded-md bg-black/70 px-2 py-0.5 text-[10px] font-medium text-slate-300 backdrop-blur-md border border-white/10">
@@ -219,7 +295,7 @@ export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfo
                       </button>
                       <button
                         type="button"
-                        onClick={() => setFullscreenImage(previewImg)}
+                        onClick={() => setFullscreenImage(currentPreviewUrl)}
                         className="rounded p-1 text-slate-300 hover:bg-white/20 hover:text-white"
                         title={t('ai.geo.fullscreen', 'Vollbild')}
                         aria-label={t('ai.geo.fullscreen', 'Vollbild')}
@@ -322,67 +398,113 @@ export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfo
 
         {/* TAB: SATELLIT */}
         {activeTab === 'satellite' && (
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                {t('ai.geo.scenes', 'Sentinel-2 L2A Szenen')}
+                {t('ai.geo.scenes', 'Satelliten-Layer & Szenen')}
               </span>
               <span className="rounded-full bg-teal-500/10 px-2 py-0.5 text-[11px] font-medium text-teal-400 border border-teal-500/20">
-                Copernicus CDSE
+                Copernicus & NASA GIBS
               </span>
             </div>
 
-            {satellite?.scenes && satellite.scenes.length > 0 ? (
-              satellite.scenes.map((scene) => (
-                <div key={scene.id} className="space-y-3 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/80 p-3.5 text-xs">
-                  <div className="flex items-center justify-between font-medium">
-                    <span className="text-on-surface font-semibold">{scene.mission}</span>
-                    <span className="text-on-surface-variant">
-                      {scene.datetime
-                        ? new Date(scene.datetime).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' })
-                        : t('ai.geo.current', 'Aktuell')}
-                    </span>
+            {/* Layer-Karten */}
+            <div className="space-y-3">
+              {availableLayers.map((layer) => {
+                const isSelected = selectedLayerId === layer.id
+                return (
+                  <div
+                    key={layer.id}
+                    className={`space-y-3 rounded-xl border p-3.5 text-xs transition-all ${
+                      isSelected
+                        ? 'border-teal-500/50 bg-surface-container-high/80 shadow-sm'
+                        : 'border-outline-variant/20 bg-surface-container-lowest/80 hover:border-outline-variant/40'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-medium">
+                      <span className="text-on-surface font-semibold">{layer.name}</span>
+                      <span className="rounded bg-teal-500/15 px-1.5 py-0.5 text-[10px] font-mono text-teal-300">
+                        {layer.resolution || '10m'}
+                      </span>
+                    </div>
+
+                    {layer.description && (
+                      <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                        {layer.description}
+                      </p>
+                    )}
+
+                    {layer.url && (
+                      <div className="relative aspect-video w-full rounded-lg overflow-hidden border border-outline-variant/20 group">
+                        <img src={layer.url} alt={layer.name} className="h-full w-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedLayerId(layer.id)
+                              setFullscreenImage(layer.url)
+                            }}
+                            className="rounded-lg bg-black/80 px-3 py-1.5 text-xs font-semibold text-white border border-white/20 backdrop-blur-md flex items-center gap-1.5 hover:bg-black"
+                          >
+                            <Maximize2 className="h-3.5 w-3.5" />
+                            <span>{t('ai.geo.fullscreen', 'Vollbild')}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedLayerId(layer.id)}
+                        className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
+                          isSelected
+                            ? 'bg-teal-500 text-slate-950 font-bold'
+                            : 'bg-surface-container-highest text-on-surface hover:bg-surface-container-high'
+                        }`}
+                      >
+                        {isSelected ? 'Aktiviert' : 'Als Hauptlayer wählen'}
+                      </button>
+
+                      {layer.url && (
+                        <a
+                          href={layer.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-[11px] text-teal-400 hover:underline"
+                        >
+                          <span>{t('ai.geo.openFullScene', 'HD-Export')}</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </div>
                   </div>
+                )
+              })}
 
-                  {scene.preview_url && (
-                    <div className="relative aspect-video w-full rounded-lg overflow-hidden border border-outline-variant/20">
-                      <img src={scene.preview_url} alt={scene.mission} className="h-full w-full object-cover" />
-                    </div>
-                  )}
-
-                  {typeof scene.cloud_cover_percent === 'number' && (
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-[11px] text-on-surface-variant">
-                        <span>{t('ai.geo.cloudCover', 'Bewölkung')}</span>
-                        <span>{scene.cloud_cover_percent}%</span>
+              {/* Zusätzliche CDSE Szenen falls geladen */}
+              {satellite?.scenes && satellite.scenes.length > 0 && (
+                <div className="pt-2 space-y-2">
+                  <span className="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">
+                    Copernicus CDSE Überflugsdaten
+                  </span>
+                  {satellite.scenes.map((scene) => (
+                    <div key={scene.id} className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest/60 p-2.5 text-[11px] space-y-1">
+                      <div className="flex justify-between font-medium text-on-surface">
+                        <span>{scene.mission}</span>
+                        <span>{scene.datetime ? new Date(scene.datetime).toLocaleDateString() : t('ai.geo.current', 'Aktuell')}</span>
                       </div>
-                      <div className="h-1.5 w-full rounded-full bg-surface-container-highest overflow-hidden">
-                        <div
-                          className="h-full bg-teal-400 rounded-full"
-                          style={{ width: `${Math.min(100, scene.cloud_cover_percent)}%` }}
-                        />
-                      </div>
+                      {typeof scene.cloud_cover_percent === 'number' && (
+                        <div className="text-on-surface-variant flex justify-between text-[10px]">
+                          <span>{t('ai.geo.cloudCover', 'Bewölkung')}</span>
+                          <span>{scene.cloud_cover_percent}%</span>
+                        </div>
+                      )}
                     </div>
-                  )}
-
-                  {scene.preview_url && (
-                    <a
-                      href={scene.preview_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-1.5 rounded-lg border border-teal-500/30 bg-teal-500/10 py-1.5 text-xs font-medium text-teal-300 hover:bg-teal-500/20"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      <span>{t('ai.geo.openFullScene', 'Szene in Vollauflösung öffnen')}</span>
-                    </a>
-                  )}
+                  ))}
                 </div>
-              ))
-            ) : (
-              <p className="text-xs text-on-surface-variant text-center py-6">
-                {t('ai.geo.noScenes', 'Keine Satellitenszenen gefunden')}
-              </p>
-            )}
+              )}
+            </div>
           </div>
         )}
 
@@ -553,23 +675,132 @@ export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfo
         </Button>
       </div>
 
-      {/* Vollbild-Vorschau Modal für Satellitenbilder */}
+      {/* Vollbild-Vorschau Modal für Satellitenbilder mit Fadenkreuz und Metadaten */}
       {fullscreenImage && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md"
           role="dialog"
           aria-modal="true"
         >
-          <div className="relative max-h-[90vh] max-w-[90vw] overflow-hidden rounded-2xl border border-white/20">
-            <img src={fullscreenImage} alt="Satellitenvollbild" className="max-h-[85vh] max-w-full object-contain" />
-            <button
-              type="button"
-              onClick={() => setFullscreenImage(null)}
-              className="absolute top-3 right-3 rounded-full bg-black/70 p-2 text-white hover:bg-black/90 border border-white/20"
-              aria-label={t('ai.geo.close', 'Schließen')}
-            >
-              <X className="h-5 w-5" />
-            </button>
+          <div className="relative max-h-[92vh] max-w-[94vw] w-full overflow-hidden rounded-2xl border border-white/20 bg-black/90 flex flex-col shadow-2xl">
+            {/* Header mit Metadaten */}
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3 bg-black/70 z-10">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="rounded-lg bg-cyan-500/20 p-2 text-cyan-400 border border-cyan-500/30">
+                  <Satellite className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate">
+                    {location} — {activeLayer?.name || 'HD Satellitenanalyse'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 truncate">
+                    {Math.abs(coordinates.latitude).toFixed(4)}° {coordinates.latitude >= 0 ? 'N' : 'S'},{' '}
+                    {Math.abs(coordinates.longitude).toFixed(4)}° {coordinates.longitude >= 0 ? 'E' : 'W'} • Auflösung: {activeLayer?.resolution || '10m'} • {country}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-1 rounded-lg bg-white/10 p-1 border border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setSatZoom((z) => Math.min(3, z + 0.25))}
+                    className="rounded p-1.5 text-slate-200 hover:bg-white/20 hover:text-white"
+                    title={t('ai.geo.zoomIn', 'Vergrößern')}
+                    aria-label={t('ai.geo.zoomIn', 'Vergrößern')}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSatZoom((z) => Math.max(1, z - 0.25))}
+                    className="rounded p-1.5 text-slate-200 hover:bg-white/20 hover:text-white"
+                    title={t('ai.geo.zoomOut', 'Verkleinern')}
+                    aria-label={t('ai.geo.zoomOut', 'Verkleinern')}
+                  >
+                    <Minus className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSatZoom(1)}
+                    className="rounded px-2 py-1 text-[11px] font-semibold text-slate-200 hover:bg-white/20 hover:text-white"
+                    title="Zoom zurücksetzen"
+                  >
+                    1x
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setFullscreenImage(null)}
+                  className="rounded-full bg-white/10 p-2 text-white hover:bg-white/20 border border-white/20 transition-colors"
+                  aria-label={t('ai.geo.close', 'Schließen')}
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Bild-Container mit Fadenkreuz-Overlay */}
+            <div className="relative flex-1 overflow-hidden flex items-center justify-center p-3">
+              <div
+                className="relative overflow-hidden rounded-xl border border-white/10 transition-transform duration-200 ease-out"
+                style={{ transform: `scale(${satZoom})` }}
+              >
+                <img
+                  src={fullscreenImage}
+                  alt={`Satellitenansicht von ${location}`}
+                  className="max-h-[72vh] max-w-full object-contain"
+                />
+
+                {/* HUD Fadenkreuz (Crosshairs Overlay) */}
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  {/* Horizontale & vertikale Ziellinien */}
+                  <div className="absolute h-px w-full bg-gradient-to-r from-transparent via-cyan-400/50 to-transparent" />
+                  <div className="absolute w-px h-full bg-gradient-to-b from-transparent via-cyan-400/50 to-transparent" />
+
+                  {/* Zentraler Fadenkreuz-Ring */}
+                  <div className="relative h-16 w-16 rounded-full border border-cyan-400/70 flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.4)]">
+                    <div className="h-2 w-2 rounded-full bg-cyan-400" />
+                    <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-0.5 h-1.5 bg-cyan-400" />
+                    <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-0.5 h-1.5 bg-cyan-400" />
+                    <div className="absolute -left-2 top-1/2 -translate-y-1/2 h-0.5 w-1.5 bg-cyan-400" />
+                    <div className="absolute -right-2 top-1/2 -translate-y-1/2 h-0.5 w-1.5 bg-cyan-400" />
+                  </div>
+
+                  {/* Koordinaten-HUD-Beschriftung */}
+                  <div className="absolute bottom-4 left-4 rounded-md bg-black/80 px-2.5 py-1 text-[11px] font-mono text-cyan-300 border border-cyan-500/30 backdrop-blur-md">
+                    TARGET: {Math.abs(coordinates.latitude).toFixed(4)}°{coordinates.latitude >= 0 ? 'N' : 'S'}, {Math.abs(coordinates.longitude).toFixed(4)}°{coordinates.longitude >= 0 ? 'E' : 'W'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer mit Layer-Umschaltung im Vollbild */}
+            <div className="flex items-center justify-between border-t border-white/10 px-4 py-2.5 bg-black/70 text-xs">
+              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+                {availableLayers.map((layer) => (
+                  <button
+                    key={layer.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedLayerId(layer.id)
+                      setFullscreenImage(layer.url)
+                    }}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-all ${
+                      selectedLayerId === layer.id
+                        ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/50 shadow-sm'
+                        : 'text-slate-400 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    {layer.name}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[11px] text-slate-400 hidden sm:inline">
+                {activeLayer?.description}
+              </span>
+            </div>
           </div>
         </div>
       )}

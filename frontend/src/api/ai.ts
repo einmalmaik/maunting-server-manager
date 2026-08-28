@@ -366,12 +366,22 @@ export interface AiSatelliteStatus {
   configured: boolean
 }
 
+export interface AiSatelliteLayer {
+  id: string
+  name: string
+  url: string
+  resolution?: string
+  mission?: string
+  description?: string
+}
+
 export interface AiSatelliteScene {
   id: string
   mission: string
   datetime: string
   cloud_cover_percent: number | null
   preview_url: string
+  layers?: Record<string, AiSatelliteLayer>
 }
 
 export interface AiRegionalAnalysis {
@@ -394,6 +404,7 @@ export interface AiRegionalAnalysis {
   satellite?: {
     available: boolean
     scenes: AiSatelliteScene[]
+    layers?: Record<string, AiSatelliteLayer>
   } | null
 }
 

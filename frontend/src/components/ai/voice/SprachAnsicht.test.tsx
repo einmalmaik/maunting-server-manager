@@ -263,4 +263,11 @@ describe('SprachAnsicht', () => {
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(aufChat).toHaveBeenCalledOnce()
   })
+
+  it('oeffnet 3-Spalten-Kommandozentren-Modus sofort bei analyze_region', () => {
+    ansicht({ werkzeug: 'analyze_region', zustand: 'denkt' })
+
+    // Im 3-Spalten-Modus wird das RegionalInfoPanel gerendert
+    expect(screen.getByLabelText(i18n.t('ai.geo.panelTitle', 'Regionale Analyse'))).toBeInTheDocument()
+  })
 })

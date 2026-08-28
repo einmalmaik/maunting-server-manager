@@ -571,5 +571,15 @@ describe('useSprachsitzung', () => {
     )
     expect(haken.result.current.werkzeug).toBe('analyze_region')
     expect(haken.result.current.geoData).toEqual(mockGeo)
+
+    act(() =>
+      leitung().simulateMessage({
+        art: 'tool',
+        tool_name: 'analyze_region',
+        geo_analysis: mockGeo,
+      }),
+    )
+    expect(haken.result.current.werkzeug).toBe('analyze_region')
+    expect(haken.result.current.geoData).toEqual(mockGeo)
   })
 })

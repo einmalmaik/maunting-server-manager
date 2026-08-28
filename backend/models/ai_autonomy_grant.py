@@ -29,7 +29,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from database import Base
 
 
-DEFAULT_MAX_ACTIONS_PER_HOUR = 10
+DEFAULT_MAX_ACTIONS_PER_HOUR = 100
 MAX_ACTIONS_PER_HOUR_LIMIT = 1_000
 
 

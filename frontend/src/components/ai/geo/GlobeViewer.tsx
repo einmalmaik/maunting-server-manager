@@ -78,6 +78,91 @@ const CONTINENTS: [number, number][][] = [
   ],
 ]
 
+interface ProjectedPoint {
+  rotX: number
+  rotY: number
+  rotZ: number
+  sx: number
+  sy: number
+}
+
+function projectPoint(
+  lat: number,
+  lon: number,
+  rx: number,
+  ry: number,
+  cx: number,
+  cy: number,
+  radius: number,
+): ProjectedPoint {
+  const phi = (lat * Math.PI) / 180
+  const theta = ((lon + 90) * Math.PI) / 180 + ry
+  const cosPhi = Math.cos(phi)
+  const sinPhi = Math.sin(phi)
+
+  const px = Math.cos(theta) * cosPhi
+  const py = sinPhi
+  const pz = Math.sin(theta) * cosPhi
+
+  const rotX = px
+  const rotY = py * Math.cos(rx) - pz * Math.sin(rx)
+  const rotZ = py * Math.sin(rx) + pz * Math.cos(rx)
+
+  const sx = cx + rotX * radius
+  const sy = cy - rotY * radius
+
+  return { rotX, rotY, rotZ, sx, sy }
+}
+
+function drawClippedLineSegment(
+  ctx: CanvasRenderingContext2D,
+  p1: ProjectedPoint,
+  p2: ProjectedPoint,
+  cx: number,
+  cy: number,
+  radius: number,
+) {
+  // 1. Beide Punkte auf der Vorderseite (voll sichtbar)
+  if (p1.rotZ > 0 && p2.rotZ > 0) {
+    ctx.moveTo(p1.sx, p1.sy)
+    ctx.lineTo(p2.sx, p2.sy)
+    return
+  }
+  // 2. p1 vorne, p2 hinten (Linie tritt am Horizont aus)
+  if (p1.rotZ > 0 && p2.rotZ <= 0) {
+    const t = p1.rotZ / (p1.rotZ - p2.rotZ)
+    let rotXt = p1.rotX + t * (p2.rotX - p1.rotX)
+    let rotYt = p1.rotY + t * (p2.rotY - p1.rotY)
+    const len = Math.hypot(rotXt, rotYt)
+    if (len > 0) {
+      rotXt /= len
+      rotYt /= len
+    }
+    const sxt = cx + rotXt * radius
+    const syt = cy - rotYt * radius
+    ctx.moveTo(p1.sx, p1.sy)
+    ctx.lineTo(sxt, syt)
+    return
+  }
+  // 3. p1 hinten, p2 vorne (Linie tritt am Horizont ein)
+  if (p1.rotZ <= 0 && p2.rotZ > 0) {
+    const t = -p1.rotZ / (p2.rotZ - p1.rotZ)
+    let rotXt = p1.rotX + t * (p2.rotX - p1.rotX)
+    let rotYt = p1.rotY + t * (p2.rotY - p1.rotY)
+    const len = Math.hypot(rotXt, rotYt)
+    if (len > 0) {
+      rotXt /= len
+      rotYt /= len
+    }
+    const sxt = cx + rotXt * radius
+    const syt = cy - rotYt * radius
+    ctx.moveTo(sxt, syt)
+    ctx.lineTo(p2.sx, p2.sy)
+    return
+  }
+  // 4. Beide Punkte auf der Rückseite -> wird nicht gezeichnet
+}
+
 /**
  * 3D-Globus-Komponente mit echten Kontinent-Vektoren, flüssiger Rotationsanimation,
  * Zielort-Fokussierung, Mausrad-Zoom und unterer Live-Metriken-Leiste.
@@ -105,6 +190,7 @@ export function GlobeViewer({
   // Aktuelle Rotationswinkel (Radiant)
   const rotRef = useRef({ x: 0.3, y: -0.8 })
   const targetRotRef = useRef<{ x: number; y: number } | null>(null)
+  const lastTargetCoordRef = useRef<{ lat: number; lon: number } | null>(null)
   const isDraggingRef = useRef(false)
   const lastMouseRef = useRef({ x: 0, y: 0 })
   const animFrameRef = useRef<number | null>(null)
@@ -126,10 +212,18 @@ export function GlobeViewer({
     }
   }
 
-  // Wenn Zielkoordinaten übergeben werden: flüssige Kamerafahrt (flyTo)
+  // Wenn NEUE Zielkoordinaten übergeben werden: flüssige Kamerafahrt (flyTo)
+  // Primitives-Vergleich entkoppelt von re-renderenden Array-Referenzen (effBbox)
   useEffect(() => {
     if (typeof effLat === 'number' && typeof effLon === 'number') {
-      flyToTarget(effLat, effLon, effBbox)
+      const isNewLocation =
+        lastTargetCoordRef.current?.lat !== effLat ||
+        lastTargetCoordRef.current?.lon !== effLon
+
+      if (isNewLocation) {
+        lastTargetCoordRef.current = { lat: effLat, lon: effLon }
+        flyToTarget(effLat, effLon, effBbox)
+      }
     }
   }, [effLat, effLon, effBbox])
 
@@ -207,202 +301,112 @@ export function GlobeViewer({
       const rx = rotRef.current.x
       const ry = rotRef.current.y
 
-      // 3. Echte Kontinent-Landmassen & Küstenlinien zeichnen
+      // 3. Echte Kontinent-Landmassen & Küstenlinien mit sauberem Horizont-Clipping
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)'
+      ctx.lineWidth = 1.4
+      ctx.beginPath()
+
       CONTINENTS.forEach((poly) => {
-        ctx.beginPath()
-        let first = true
-        let visibleCount = 0
+        const len = poly.length
+        for (let i = 0; i < len; i++) {
+          const [latA, lonA] = poly[i]
+          const [latB, lonB] = poly[(i + 1) % len]
 
-        poly.forEach(([cLat, cLon]) => {
-          const phi = (cLat * Math.PI) / 180
-          const theta = ((cLon + 90) * Math.PI) / 180 + ry
-          const cosPhi = Math.cos(phi)
-          const sinPhi = Math.sin(phi)
+          // Subdivide larger segments to follow sphere curvature smoothly
+          const dLat = latB - latA
+          const dLon = lonB - lonA
+          const steps = Math.max(1, Math.min(8, Math.ceil(Math.hypot(dLat, dLon) / 5)))
 
-          const px = Math.cos(theta) * cosPhi
-          const py = sinPhi
-          const pz = Math.sin(theta) * cosPhi
+          for (let s = 0; s < steps; s++) {
+            const curLatA = latA + (dLat * s) / steps
+            const curLonA = lonA + (dLon * s) / steps
+            const curLatB = latA + (dLat * (s + 1)) / steps
+            const curLonB = lonA + (dLon * (s + 1)) / steps
 
-          const rotY = py * Math.cos(rx) - pz * Math.sin(rx)
-          const rotZ = py * Math.sin(rx) + pz * Math.cos(rx)
+            const ptA = projectPoint(curLatA, curLonA, rx, ry, cx, cy, radius)
+            const ptB = projectPoint(curLatB, curLonB, rx, ry, cx, cy, radius)
 
-          if (rotZ > -0.15) {
-            visibleCount++
-            const sx = cx + px * radius
-            const sy = cy - rotY * radius
-            if (first) {
-              ctx.moveTo(sx, sy)
-              first = false
-            } else {
-              ctx.lineTo(sx, sy)
-            }
-          } else {
-            first = true
+            drawClippedLineSegment(ctx, ptA, ptB, cx, cy, radius)
           }
-        })
-
-        if (visibleCount >= 2) {
-          ctx.fillStyle = 'rgba(14, 165, 233, 0.22)'
-          ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)'
-          ctx.lineWidth = 1.3
-          ctx.fill()
-          ctx.stroke()
         }
       })
+      ctx.stroke()
 
-      // 4. Längen- und Breitengrade (3D Drahtgitter)
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.14)'
+      // 4. Längen- und Breitengrade (3D Drahtgitter ohne Clipping-Glitches)
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.12)'
       ctx.lineWidth = 0.8
+      ctx.beginPath()
 
-      // Breitengrade
+      // Breitengrade (Parallelen)
       for (let latDeg = -80; latDeg <= 80; latDeg += 20) {
-        const phi = (latDeg * Math.PI) / 180
-        ctx.beginPath()
-        let first = true
-        for (let lonDeg = -180; lonDeg <= 180; lonDeg += 5) {
-          const theta = (lonDeg * Math.PI) / 180 + ry
-          const cosPhi = Math.cos(phi)
-          const sinPhi = Math.sin(phi)
-
-          const px = Math.cos(theta) * cosPhi
-          const py = sinPhi
-          const pz = Math.sin(theta) * cosPhi
-
-          const rotY = py * Math.cos(rx) - pz * Math.sin(rx)
-          const rotZ = py * Math.sin(rx) + pz * Math.cos(rx)
-
-          if (rotZ > 0) {
-            const screenX = cx + px * radius
-            const screenY = cy - rotY * radius
-            if (first) {
-              ctx.moveTo(screenX, screenY)
-              first = false
-            } else {
-              ctx.lineTo(screenX, screenY)
-            }
-          } else {
-            first = true
-          }
+        for (let lonDeg = -180; lonDeg < 180; lonDeg += 4) {
+          const pt1 = projectPoint(latDeg, lonDeg, rx, ry, cx, cy, radius)
+          const pt2 = projectPoint(latDeg, lonDeg + 4, rx, ry, cx, cy, radius)
+          drawClippedLineSegment(ctx, pt1, pt2, cx, cy, radius)
         }
-        ctx.stroke()
       }
 
-      // Längengrade
+      // Längengrade (Meridiane)
       for (let lonDeg = -180; lonDeg < 180; lonDeg += 30) {
-        const theta = (lonDeg * Math.PI) / 180 + ry
-        ctx.beginPath()
-        let first = true
-        for (let latDeg = -90; latDeg <= 90; latDeg += 5) {
-          const phi = (latDeg * Math.PI) / 180
-          const cosPhi = Math.cos(phi)
-          const sinPhi = Math.sin(phi)
-
-          const px = Math.cos(theta) * cosPhi
-          const py = sinPhi
-          const pz = Math.sin(theta) * cosPhi
-
-          const rotY = py * Math.cos(rx) - pz * Math.sin(rx)
-          const rotZ = py * Math.sin(rx) + pz * Math.cos(rx)
-
-          if (rotZ > 0) {
-            const screenX = cx + px * radius
-            const screenY = cy - rotY * radius
-            if (first) {
-              ctx.moveTo(screenX, screenY)
-              first = false
-            } else {
-              ctx.lineTo(screenX, screenY)
-            }
-          } else {
-            first = true
-          }
+        for (let latDeg = -90; latDeg < 90; latDeg += 4) {
+          const pt1 = projectPoint(latDeg, lonDeg, rx, ry, cx, cy, radius)
+          const pt2 = projectPoint(latDeg + 4, lonDeg, rx, ry, cx, cy, radius)
+          drawClippedLineSegment(ctx, pt1, pt2, cx, cy, radius)
         }
-        ctx.stroke()
       }
+      ctx.stroke()
 
       // Äquatorlinie
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)'
       ctx.lineWidth = 1.2
       ctx.beginPath()
-      let eqFirst = true
-      for (let lonDeg = -180; lonDeg <= 180; lonDeg += 5) {
-        const theta = (lonDeg * Math.PI) / 180 + ry
-        const px = Math.cos(theta)
-        const pz = Math.sin(theta)
-        const rotY = -pz * Math.sin(rx)
-        const rotZ = pz * Math.cos(rx)
-
-        if (rotZ > 0) {
-          const screenX = cx + px * radius
-          const screenY = cy - rotY * radius
-          if (eqFirst) {
-            ctx.moveTo(screenX, screenY)
-            eqFirst = false
-          } else {
-            ctx.lineTo(screenX, screenY)
-          }
-        } else {
-          eqFirst = true
-        }
+      for (let lonDeg = -180; lonDeg < 180; lonDeg += 4) {
+        const pt1 = projectPoint(0, lonDeg, rx, ry, cx, cy, radius)
+        const pt2 = projectPoint(0, lonDeg + 4, rx, ry, cx, cy, radius)
+        drawClippedLineSegment(ctx, pt1, pt2, cx, cy, radius)
       }
       ctx.stroke()
 
       // 5. Region / Bounding Box Umrandung (wenn bbox übergeben wurde)
       if (effBbox && effBbox.length === 4) {
         const [minLon, minLat, maxLon, maxLat] = effBbox
-        const points = [
-          [minLat, minLon],
-          [minLat, maxLon],
-          [maxLat, maxLon],
-          [maxLat, minLon],
+        const boxEdges: [number, number, number, number][] = [
+          [minLat, minLon, minLat, maxLon],
+          [minLat, maxLon, maxLat, maxLon],
+          [maxLat, maxLon, maxLat, minLon],
+          [maxLat, minLon, minLat, minLon],
         ]
+
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)'
+        ctx.lineWidth = 1.6
         ctx.beginPath()
-        let visibleCount = 0
-        points.forEach(([pLat, pLon], idx) => {
-          const phi = (pLat * Math.PI) / 180
-          const theta = ((pLon + 90) * Math.PI) / 180 + ry
-          const cosPhi = Math.cos(phi)
-          const sinPhi = Math.sin(phi)
-          const px = Math.cos(theta) * cosPhi
-          const py = sinPhi
-          const pz = Math.sin(theta) * cosPhi
-          const rotY = py * Math.cos(rx) - pz * Math.sin(rx)
-          const rotZ = py * Math.sin(rx) + pz * Math.cos(rx)
-          if (rotZ > -0.2) {
-            visibleCount++
-            const sx = cx + px * radius
-            const sy = cy - rotY * radius
-            if (idx === 0) ctx.moveTo(sx, sy)
-            else ctx.lineTo(sx, sy)
+
+        boxEdges.forEach(([bLatA, bLonA, bLatB, bLonB]) => {
+          const dLat = bLatB - bLatA
+          const dLon = bLonB - bLonA
+          const steps = 6
+          for (let s = 0; s < steps; s++) {
+            const curLatA = bLatA + (dLat * s) / steps
+            const curLonA = bLonA + (dLon * s) / steps
+            const curLatB = bLatA + (dLat * (s + 1)) / steps
+            const curLonB = bLonA + (dLon * (s + 1)) / steps
+
+            const ptA = projectPoint(curLatA, curLonA, rx, ry, cx, cy, radius)
+            const ptB = projectPoint(curLatB, curLonB, rx, ry, cx, cy, radius)
+
+            drawClippedLineSegment(ctx, ptA, ptB, cx, cy, radius)
           }
         })
-        if (visibleCount >= 2) {
-          ctx.closePath()
-          ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)'
-          ctx.lineWidth = 1.6
-          ctx.fillStyle = 'rgba(56, 189, 248, 0.15)'
-          ctx.fill()
-          ctx.stroke()
-        }
+        ctx.stroke()
       }
 
       // 6. Zielort-Marker & Radar-Pulsar
       if (typeof effLat === 'number' && typeof effLon === 'number') {
-        const phi = (effLat * Math.PI) / 180
-        const theta = ((effLon + 90) * Math.PI) / 180 + ry
-        const cosPhi = Math.cos(phi)
-        const sinPhi = Math.sin(phi)
+        const pt = projectPoint(effLat, effLon, rx, ry, cx, cy, radius)
 
-        const px = Math.cos(theta) * cosPhi
-        const py = sinPhi
-        const pz = Math.sin(theta) * cosPhi
-
-        const rotY = py * Math.cos(rx) - pz * Math.sin(rx)
-        const rotZ = py * Math.sin(rx) + pz * Math.cos(rx)
-
-        if (rotZ > -0.1) {
-          const screenX = cx + px * radius
-          const screenY = cy - rotY * radius
+        if (pt.rotZ > 0) {
+          const screenX = pt.sx
+          const screenY = pt.sy
 
           // Pulsierender Radar-Ring
           const pulseRadius = 10 + Math.sin(pulse) * 8

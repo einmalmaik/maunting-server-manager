@@ -934,27 +934,35 @@ class Sprachbruecke:
             return True
 
         if ereignis in ("tool_start", "werkzeug_gestartet"):
-            name = str(daten.get("tool_name") or daten.get("name") or "")
+            name = self._werkzeugname(daten)
             if name:
-                # Pre-Tool Verbal Bridging (Zero-Latency), falls noch kein Audio gesprochen wurde:
-                if not getattr(self, "_lauf_gesprochen", False):
+                # Verbal Bridging: Vorab-Phrase sofort sprechen, wenn noch nichts gesagt wurde
+                if not self._lauf_gesprochen:
                     phrase = _verbal_bridge_phrase(name)
-                    self._lauf_gesprochen = True
-                    if self._zustand != ZUSTAND_SPRICHT:
-                        await self._zustand_melden(ZUSTAND_SPRICHT)
-                    await self._senden({"art": "antworttext", "text": phrase})
-                    await stimme.sagen(phrase)
+                    if phrase:
+                        self._lauf_gesprochen = True
+                        if self._zustand != ZUSTAND_SPRICHT:
+                            await self._zustand_melden(ZUSTAND_SPRICHT)
+                        await stimme.sagen(phrase)
+
                 # Spekulatives UI-Event unmittelbar an das Frontend weiterleiten:
-                await self._senden({
+                nachricht_start: dict = {
                     "art": "werkzeug_gestartet",
                     "name": name,
                     "spekulativ": True,
-                })
+                }
+                if "geo_analysis" in daten and daten["geo_analysis"]:
+                    nachricht_start["geo_analysis"] = daten["geo_analysis"]
+                elif "aufrufe" in daten and isinstance(daten["aufrufe"], list):
+                    for aufruf in daten["aufrufe"]:
+                        if isinstance(aufruf, dict) and aufruf.get("geo_analysis"):
+                            nachricht_start["geo_analysis"] = aufruf["geo_analysis"]
+                            break
+                await self._senden(nachricht_start)
             return True
 
         if ereignis in ("tool", "tool_plan"):
-            # Restlichen Text im Puffer sofort an die Stimme weitergeben,
-            # damit die Ansage vor der Werkzeugausführung vollständig zu Ende gesprochen wird.
+            # Restlichen Text im Puffer sofort an die Stimme weitergeben:
             rest, belege = filter_.ausklingen()
             for beleg in belege:
                 await self._senden(beleg)
@@ -966,14 +974,6 @@ class Sprachbruecke:
 
             name = self._werkzeugname(daten)
             if name:
-                if not getattr(self, "_lauf_gesprochen", False):
-                    phrase = _verbal_bridge_phrase(name)
-                    self._lauf_gesprochen = True
-                    if self._zustand != ZUSTAND_SPRICHT:
-                        await self._zustand_melden(ZUSTAND_SPRICHT)
-                    await self._senden({"art": "antworttext", "text": phrase})
-                    await stimme.sagen(phrase)
-
                 nachricht: dict = {"art": "werkzeug", "name": name}
                 if "geo_analysis" in daten and daten["geo_analysis"]:
                     nachricht["geo_analysis"] = daten["geo_analysis"]
@@ -1020,14 +1020,14 @@ class Sprachbruecke:
 
     @staticmethod
     def _werkzeugname(daten: dict) -> str:
-        name = daten.get("name")
+        name = daten.get("name") or daten.get("tool_name")
         if isinstance(name, str) and name:
             return name
         aufrufe = daten.get("aufrufe")
         if isinstance(aufrufe, list) and aufrufe:
             erster = aufrufe[0]
-            if isinstance(erster, dict) and isinstance(erster.get("name"), str):
-                return erster["name"]
+            if isinstance(erster, dict):
+                return str(erster.get("tool_name") or erster.get("name") or "")
         return ""
 
     # ── Rückfrage und Bestätigung ─────────────────────────────────────────
