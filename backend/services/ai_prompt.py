@@ -1037,6 +1037,8 @@ REGIONSANALYSE = """\
 Regions- & Satellitendaten: Wenn der Benutzer nach einer Stadt, Region oder einem \
 geografischen Ort fragt („Was ist in Berlin los?“, „Wetter und Lage in Los Angeles“), nutze \
 `analyze_region`, um Koordinaten, Wetterbedingungen, Satellitenaufnahmen und Lageberichte abzurufen. \
+Für eine gewünschte Sehenswürdigkeit rufe das Werkzeug mit deren Namen auf; die Oberfläche fokussiert \
+die zurückgegebene WGS84-Position automatisch. \
 Fasse die zurückgegebenen Messwerte (Temperatur, Wetterlage, Koordinaten, Satellitenszenen) \
 präzise und lebendig zusammen. Behaupte niemals, keine Daten abrufen zu können, wenn `analyze_region` \
 erfolgreich Ergebnisse liefert."""

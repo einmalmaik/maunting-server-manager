@@ -255,7 +255,9 @@ def _global_tool_definitions() -> list[dict]:
             "analyze_region",
             "Führt eine regionale Analyse für einen geografischen Ort durch. "
             "Ermittelt Koordinaten, Wetterdaten und ruft aktuelle "
-            "Satellitendaten (Copernicus/Sentinel-2) der Region ab.",
+            "Satellitendaten (Copernicus/Sentinel-2) der Region ab. Der Ort "
+            "kann auch eine Sehenswürdigkeit sein; die zurückgegebene WGS84-"
+            "Position steuert die Karten- und Globusansicht.",
             {
                 "location": {
                     "type": "string",

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Clock, Cloud, Compass, MapPin, Minus, Plus, RotateCcw, Satellite, Target } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { AiRegionalAnalysis } from '@/api/ai'
+import { MapTilerDetailMap } from './MapTilerDetailMap'
 
 interface GlobeViewerProps {
   latitude?: number | null
@@ -334,7 +335,9 @@ export function GlobeViewer({
   const lastTextureRenderRef = useRef(0)
   const [textureVersion, setTextureVersion] = useState(0)
   const [zoom, setZoom] = useState(1.0)
+  const [mapTilerUnavailable, setMapTilerUnavailable] = useState(false)
   const [autoRotate, setAutoRotate] = useState(true)
+  const handleMapTilerUnavailable = useCallback(() => setMapTilerUnavailable(true), [])
 
   // Lokale, öffentliche NASA-Blue-Marble-Textur: kein Laufzeit-Netzwerkaufruf
   // und keine Standortdaten verlassen dafür den Browser.
@@ -376,6 +379,10 @@ export function GlobeViewer({
   const effLat = latitude ?? data?.coordinates?.latitude ?? preset?.lat
   const effLon = longitude ?? data?.coordinates?.longitude ?? preset?.lon
   const effBbox = bbox ?? data?.coordinates?.bbox ?? preset?.bbox
+
+  useEffect(() => {
+    setMapTilerUnavailable(false)
+  }, [effLat, effLon])
 
   const weather = data?.weather
   const satellite = data?.satellite
@@ -798,6 +805,9 @@ export function GlobeViewer({
   }
 
   const rawDt = satellite?.scenes?.[0]?.datetime
+  const mapTilerGlobeZoom = effBbox && effBbox.length === 4
+    ? Math.max(1.5, Math.min(8, Math.log2(360 / Math.max(Math.abs(effBbox[2] - effBbox[0]), Math.abs(effBbox[3] - effBbox[1]), 0.1))))
+    : 1.8
   let aktualitaetText = t('ai.geo.captureTimeUnknown', 'Aufnahmezeit unbekannt')
   if (rawDt) {
     const d = new Date(rawDt)
@@ -829,6 +839,17 @@ export function GlobeViewer({
         onPointerCancel={handleTouchPointerUp}
         aria-label={`3D Globus Ansicht ${effLocation ? `für ${effLocation}` : ''}`}
       />
+
+      {!mapTilerUnavailable && typeof effLat === 'number' && typeof effLon === 'number' && (
+        <MapTilerDetailMap
+          latitude={effLat}
+          longitude={effLon}
+          locationName={effLocation || 'Region'}
+          globe
+          zoom={mapTilerGlobeZoom}
+          onUnavailable={handleMapTilerUnavailable}
+        />
+      )}
 
       {/* Steuerungselemente (Zoom, Zentrieren, Rotation) */}
       <div className="absolute top-3 right-3 flex items-center gap-1 rounded-xl border border-outline-variant/40 bg-surface-container-low/80 p-1 backdrop-blur-md z-10">

@@ -9,13 +9,15 @@ interface MapTilerDetailMapProps {
   longitude: number
   locationName: string
   onUnavailable: () => void
+  globe?: boolean
+  zoom?: number
 }
 
 /**
  * Optionale, hochaufgeloeste Detailkarte. Sie wird nur geladen, nachdem der
  * Betreiber einen origin-beschraenkten MapTiler-Browser-Key eingerichtet hat.
  */
-export function MapTilerDetailMap({ latitude, longitude, locationName, onUnavailable }: MapTilerDetailMapProps) {
+export function MapTilerDetailMap({ latitude, longitude, locationName, onUnavailable, globe = false, zoom = 8 }: MapTilerDetailMapProps) {
   const elementRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MapLibreMap | null>(null)
   const [ready, setReady] = useState(false)
@@ -35,17 +37,20 @@ export function MapTilerDetailMap({ latitude, longitude, locationName, onUnavail
         container: elementRef.current,
         style: config.style_url,
         center: [longitude, latitude],
-        zoom: 8,
+        zoom,
+        maxZoom: 18,
+        renderWorldCopies: false,
         cooperativeGestures: true,
       })
       mapRef.current = map
+      map.setProjection(globe ? { type: 'globe' } : { type: 'mercator' })
       new Marker({ color: '#38bdf8' }).setLngLat([longitude, latitude]).addTo(map)
       map.once('load', () => { if (!disposed) setReady(true) })
       map.on('error', () => { if (!disposed) onUnavailable() })
     }
     void initialise().catch(() => { if (!disposed) onUnavailable() })
     return () => { disposed = true; mapRef.current?.remove(); mapRef.current = null }
-  }, [latitude, longitude, onUnavailable])
+  }, [globe, latitude, longitude, onUnavailable, zoom])
 
   return <div className="absolute inset-0 z-[5] bg-surface-container-lowest" aria-label={`Hochauflösende Karte für ${locationName}`}>
     <div ref={elementRef} className="h-full w-full" />
