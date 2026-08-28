@@ -135,6 +135,54 @@ function normalizeNews(value: unknown): AiRegionalAnalysis['news'] | undefined {
   })
 }
 
+function externalUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
+function normalizeTraffic(value: unknown): AiRegionalAnalysis['traffic'] | undefined {
+  if (!isRecord(value)) return undefined
+  const status = value.status
+  if (status !== 'available' && status !== 'not_configured' && status !== 'unavailable') return undefined
+
+  const optionalNumber = (entry: unknown) => finiteNumber(entry) ?? undefined
+  return {
+    status,
+    current_speed_kmh: optionalNumber(value.current_speed_kmh),
+    free_flow_speed_kmh: optionalNumber(value.free_flow_speed_kmh),
+    current_travel_time_seconds: optionalNumber(value.current_travel_time_seconds),
+    free_flow_travel_time_seconds: optionalNumber(value.free_flow_travel_time_seconds),
+    confidence: optionalNumber(value.confidence),
+    road_closure: value.road_closure === true ? true : value.road_closure === false ? false : undefined,
+  }
+}
+
+function normalizePublicPosts(value: unknown): AiRegionalAnalysis['public_posts'] | undefined {
+  if (!isRecord(value) || (value.status !== 'available' && value.status !== 'unavailable')) return undefined
+
+  const reddit = Array.isArray(value.reddit) ? value.reddit.flatMap((entry) => {
+    if (!isRecord(entry)) return []
+    const title = text(entry.title)
+    const snippet = text(entry.snippet)
+    const url = externalUrl(entry.url)
+    return title && snippet && url ? [{ title, snippet, url }] : []
+  }) : []
+  const bluesky = Array.isArray(value.bluesky) ? value.bluesky.flatMap((entry) => {
+    if (!isRecord(entry)) return []
+    const author = text(entry.author)
+    const postText = text(entry.text)
+    const url = externalUrl(entry.url)
+    return author && postText && url ? [{ author, text: postText, url }] : []
+  }) : []
+
+  return { status: value.status, reddit, bluesky, untrusted: true }
+}
+
 /**
  * Normalisiert die WebSocket-Nutzlast, bevor sie in die Kartenansicht gelangt.
  * Alte Brückenformen (`region`, `lat`, `lon`) bleiben lesbar, aber ungültige
@@ -171,6 +219,8 @@ export function normalizeRegionalAnalysis(value: unknown): AiRegionalAnalysis | 
       value.news_status === 'unavailable'
         ? value.news_status
         : undefined,
+    traffic: normalizeTraffic(value.traffic),
+    public_posts: normalizePublicPosts(value.public_posts),
     camera: cameraMode === 'overview' || cameraMode === 'focus' || cameraMode === 'detail'
       ? { mode: cameraMode }
       : undefined,

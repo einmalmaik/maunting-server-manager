@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import {
   Car,
+  Check,
   CircleDashed,
   Cloud,
   CloudRain,
@@ -97,6 +98,8 @@ function RegionalInfoContent({ data, news, onClose }: Omit<RegionalInfoPanelProp
   })
 
   const { location, country, coordinates, weather, satellite } = data
+  const traffic = data.traffic
+  const publicPosts = data.public_posts
   const firstScene = satellite?.scenes?.[0]
   const previewImg = firstScene?.preview_url
 
@@ -534,17 +537,28 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 {t('ai.geo.socialMedia', 'Soziale Medien & Trends')}
               </span>
               <span className="rounded-full border border-outline-variant/30 bg-surface-container-high px-2 py-0.5 text-[11px] font-medium text-on-surface-variant">
-                {t('ai.geo.dataSourceUnavailable', 'Keine Datenquelle')}
+                {publicPosts?.status === 'available'
+                  ? t('ai.geo.publicPostsUntrusted', 'Öffentliche, unbestätigte Hinweise')
+                  : t('ai.geo.publicPostsUnavailableBadge', 'Derzeit nicht verfügbar')}
               </span>
             </div>
-
-            <div className="rounded-xl border border-dashed border-outline-variant/30 bg-surface-container-lowest/80 p-4 text-center">
-              <CircleDashed className="mx-auto h-5 w-5 text-on-surface-variant/60" aria-hidden="true" />
-              <p className="mt-2 text-xs font-medium text-on-surface">{t('ai.geo.socialUnavailableTitle', 'Keine verifizierten Trenddaten')}</p>
-              <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
-                {t('ai.geo.socialUnavailableBody', 'Für diese Region ist keine Social-Media-Quelle eingerichtet. Es wird keine Aktivitätsbewertung angezeigt.')}
+            {publicPosts?.status === 'available' && (
+              <p className="rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-on-surface-variant">
+                {t('ai.geo.publicPostsNotice', 'Beiträge sind öffentliche, unbestätigte Hinweise und keine Lagebewertung.')}
               </p>
-            </div>
+            )}
+            {publicPosts?.reddit.length ? (
+              <SocialPostList title={t('ai.geo.reddit', 'Reddit')} posts={publicPosts.reddit} type="reddit" />
+            ) : null}
+            {publicPosts?.bluesky.length ? (
+              <SocialPostList title={t('ai.geo.bluesky', 'Bluesky')} posts={publicPosts.bluesky} type="bluesky" />
+            ) : null}
+            {(!publicPosts || publicPosts.status === 'unavailable' || (publicPosts.reddit.length === 0 && publicPosts.bluesky.length === 0)) && (
+              <RegionalEmptyState
+                title={t('ai.geo.socialUnavailableTitle', 'Keine öffentlichen Beiträge verfügbar')}
+                body={t('ai.geo.socialUnavailableBody', 'Für diese Region sind derzeit keine öffentlichen Beiträge verfügbar.')}
+              />
+            )}
           </div>
         )}
 
@@ -556,17 +570,23 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                 {t('ai.geo.trafficStatus', 'Verkehr & Bewegung')}
               </span>
               <span className="rounded-full border border-outline-variant/30 bg-surface-container-high px-2 py-0.5 text-[11px] font-medium text-on-surface-variant">
-                {t('ai.geo.dataSourceUnavailable', 'Keine Datenquelle')}
+                {traffic?.status === 'available'
+                  ? t('ai.geo.tomTomTraffic', 'TomTom-Verkehr')
+                  : traffic?.status === 'not_configured'
+                    ? t('ai.geo.trafficNotConfiguredBadge', 'Nicht eingerichtet')
+                    : t('ai.geo.trafficUnavailableBadge', 'Derzeit nicht verfügbar')}
               </span>
             </div>
-
-            <div className="rounded-xl border border-dashed border-outline-variant/30 bg-surface-container-lowest/80 p-4 text-center">
-              <CircleDashed className="mx-auto h-5 w-5 text-on-surface-variant/60" aria-hidden="true" />
-              <p className="mt-2 text-xs font-medium text-on-surface">{t('ai.geo.trafficUnavailableTitle', 'Keine Verkehrsdaten')}</p>
-              <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
-                {t('ai.geo.trafficUnavailableBody', 'Für diese Region ist keine Verkehrsquelle eingerichtet. Es wird kein Verkehrsstatus geschätzt.')}
-              </p>
-            </div>
+            {traffic?.status === 'available' ? <TrafficDetails traffic={traffic} /> : (
+              <RegionalEmptyState
+                title={traffic?.status === 'not_configured'
+                  ? t('ai.geo.trafficNotConfiguredTitle', 'Verkehrsquelle nicht eingerichtet')
+                  : t('ai.geo.trafficUnavailableTitle', 'Verkehrsdaten derzeit nicht verfügbar')}
+                body={traffic?.status === 'not_configured'
+                  ? t('ai.geo.trafficNotConfiguredBody', 'Für diese Instanz ist keine TomTom-Verkehrsquelle eingerichtet.')
+                  : t('ai.geo.trafficUnavailableBody', 'TomTom-Verkehrsdaten sind für diese Region derzeit nicht verfügbar.')}
+              />
+            )}
           </div>
         )}
 
@@ -635,5 +655,77 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
         </Button>
       </div>
     </aside>
+  )
+}
+
+function RegionalEmptyState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-outline-variant/30 bg-surface-container-lowest/80 p-4 text-center">
+      <CircleDashed className="mx-auto h-5 w-5 text-on-surface-variant/60" aria-hidden="true" />
+      <p className="mt-2 text-xs font-medium text-on-surface">{title}</p>
+      <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">{body}</p>
+    </div>
+  )
+}
+
+function SocialPostList({ title, posts, type }: {
+  title: string
+  posts: Array<{ title: string; snippet: string; url: string }> | Array<{ author: string; text: string; url: string }>
+  type: 'reddit' | 'bluesky'
+}) {
+  const { t } = useTranslation()
+  return (
+    <section aria-label={title} className="space-y-2">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{title}</h3>
+      {posts.map((post) => {
+        const isReddit = type === 'reddit'
+        const heading = isReddit ? (post as { title: string }).title : (post as { author: string }).author
+        const content = isReddit ? (post as { snippet: string }).snippet : (post as { text: string }).text
+        return (
+          <article key={post.url} className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/80 p-3 space-y-1.5">
+            <h4 className="text-xs font-semibold leading-snug text-on-surface">{heading}</h4>
+            <p className="text-xs leading-relaxed text-on-surface-variant">{content}</p>
+            <a href={post.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
+              <span>{t('ai.geo.openPublicPost', 'Beitrag öffnen')}</span>
+              <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            </a>
+          </article>
+        )
+      })}
+    </section>
+  )
+}
+
+function TrafficDetails({ traffic }: { traffic: NonNullable<AiRegionalAnalysis['traffic']> }) {
+  const { t } = useTranslation()
+  const metrics = [
+    { label: t('ai.geo.currentSpeed', 'Aktuelle Geschwindigkeit'), value: traffic.current_speed_kmh, suffix: 'km/h' },
+    { label: t('ai.geo.freeFlowSpeed', 'Freie Geschwindigkeit'), value: traffic.free_flow_speed_kmh, suffix: 'km/h' },
+    { label: t('ai.geo.currentTravelTime', 'Aktuelle Fahrzeit'), value: traffic.current_travel_time_seconds, suffix: 's' },
+    { label: t('ai.geo.freeFlowTravelTime', 'Freie Fahrzeit'), value: traffic.free_flow_travel_time_seconds, suffix: 's' },
+    { label: t('ai.geo.confidence', 'TomTom-Konfidenz'), value: traffic.confidence, suffix: '' },
+  ].filter((metric): metric is { label: string; value: number; suffix: string } => typeof metric.value === 'number')
+
+  return (
+    <div className="space-y-3">
+      {traffic.road_closure === true && (
+        <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs font-medium text-on-surface">
+          {t('ai.geo.roadClosure', 'TomTom meldet eine Straßensperrung im abgefragten Bereich.')}
+        </p>
+      )}
+      {metrics.length > 0 ? (
+        <div className="grid grid-cols-2 gap-2">
+          {metrics.map((metric) => (
+            <div key={metric.label} className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/80 p-3">
+              <p className="text-[10px] uppercase tracking-wider text-on-surface-variant">{metric.label}</p>
+              <p className="mt-1 text-lg font-semibold text-on-surface">{metric.value}{metric.suffix && <> <span className="text-xs font-medium text-on-surface-variant">{metric.suffix}</span></>}</p>
+            </div>
+          ))}
+        </div>
+      ) : <RegionalEmptyState title={t('ai.geo.trafficNoMetricsTitle', 'Keine aktuellen Messwerte')} body={t('ai.geo.trafficNoMetricsBody', 'TomTom hat für diese Abfrage keine Messwerte geliefert.')} />}
+      {traffic.road_closure === false && (
+        <p className="flex items-center gap-2 text-xs text-on-surface-variant"><Check className="h-3.5 w-3.5 text-success" aria-hidden="true" />{t('ai.geo.noRoadClosure', 'Keine Straßensperrung gemeldet.')}</p>
+      )}
+    </div>
   )
 }

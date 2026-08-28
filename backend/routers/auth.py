@@ -23,7 +23,7 @@ from models import User, EmailVerification
 from services.dis_client import DisClient
 from schemas import LoginRequest, LoginVerifyRequest, TokenResponse, RegistrationResponse, PasswordResetRequest, PasswordResetConfirm, ChangePasswordRequest, ChangeEmailRequest, DeleteAccountRequest, NativeRefreshRequest, LogoutRequest
 from schemas import ResendVerificationRequest
-from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, AgentNameUpdateRequest, AiProviderChoiceRequest
+from schemas.user import UserCreate, UserResponse, OwnerSetupRequest, SetupVerifyRequest, TimezoneUpdateRequest, LocationSharingUpdateRequest, AgentNameUpdateRequest, AiProviderChoiceRequest
 from schemas.device_pairing import (
     PairedDevice,
     PairingCreated,
@@ -662,6 +662,19 @@ def update_timezone(
     return {
         "time_zone": user.time_zone,
     }
+
+
+@router.patch("/me/location-sharing")
+def update_location_sharing(
+    req: LocationSharingUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Merkt ausschließlich die Einwilligung zur einmaligen Standortnutzung."""
+    user.location_sharing_enabled = req.enabled
+    db.commit()
+    return {"location_sharing_enabled": user.location_sharing_enabled}
 
 
 @router.patch("/me/agent-name")

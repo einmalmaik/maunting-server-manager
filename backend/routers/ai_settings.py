@@ -29,6 +29,8 @@ from schemas.ai_settings import (
     AiRoleLimitsUpdate,
     AiSatelliteCredentialsUpdate,
     AiSatelliteStatus,
+    AiTomTomKeyUpdate,
+    AiTomTomStatus,
     AiUsageEntry,
     AiUsageEventEntry,
     AiUsageEvents,
@@ -311,6 +313,47 @@ def get_maptiler_map_config(
     if not config:
         return AiMapTilerMapConfig(configured=False)
     return AiMapTilerMapConfig(configured=True, style_url=config["style_url"])
+
+
+@router.get("/settings/tomtom", response_model=AiTomTomStatus)
+def get_tomtom_status(
+    _: User = Depends(require_global("panel.settings.read")),
+) -> AiTomTomStatus:
+    """Meldet nur, ob der serverseitige TomTom-Schluessel hinterlegt ist."""
+    from services import ai_regional_connectors_service
+
+    return AiTomTomStatus(configured=ai_regional_connectors_service.is_tomtom_configured())
+
+
+@router.put("/settings/tomtom", response_model=AiTomTomStatus)
+def set_tomtom_key(
+    payload: AiTomTomKeyUpdate,
+    actor: User = Depends(require_global("panel.settings.write")),
+    _: None = Depends(verify_csrf),
+) -> AiTomTomStatus:
+    from services import ai_regional_connectors_service
+
+    key = payload.api_key.get_secret_value() if payload.api_key else ""
+    try:
+        ai_regional_connectors_service.store_tomtom_key(key)
+    except DisSidecarError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="TomTom-Schluessel konnte nicht sicher gespeichert werden",
+        ) from exc
+
+    configured = ai_regional_connectors_service.is_tomtom_configured()
+    with SessionLocal() as audit_db:
+        audit_service.record_privileged_action(
+            audit_db,
+            user_id=actor.id,
+            action="ai.tomtom.key.updated",
+            target_type="panel_setting",
+            target_id=None,
+            details={"configured": configured},
+        )
+        audit_db.commit()
+    return AiTomTomStatus(configured=configured)
 
 
 @router.get("/settings/learning", response_model=AiLearningPolicyStatus)

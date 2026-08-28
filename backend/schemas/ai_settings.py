@@ -122,6 +122,16 @@ class AiMapTilerMapConfig(BaseModel):
     style_url: str | None = None
 
 
+class AiTomTomKeyUpdate(BaseModel):
+    """Operator-Schluessel fuer den rein lesenden TomTom-Verkehrsdienst."""
+
+    api_key: SecretStr | None = Field(default=None, max_length=512)
+
+
+class AiTomTomStatus(BaseModel):
+    configured: bool
+
+
 class AiLearningPolicyUpdate(BaseModel):
     """Wie die KI global gueltige Skills anlegen darf.
 

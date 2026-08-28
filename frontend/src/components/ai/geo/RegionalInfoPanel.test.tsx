@@ -35,6 +35,21 @@ describe('RegionalInfoPanel', () => {
         },
       ],
     },
+    traffic: {
+      status: 'available',
+      current_speed_kmh: 28,
+      free_flow_speed_kmh: 50,
+      current_travel_time_seconds: 180,
+      free_flow_travel_time_seconds: 120,
+      confidence: 89,
+      road_closure: true,
+    },
+    public_posts: {
+      status: 'available',
+      untrusted: true,
+      reddit: [{ title: 'Baustelle am Ring', snippet: 'Eine Ausfahrt ist gesperrt.', url: 'https://example.invalid/reddit' }],
+      bluesky: [{ author: '@verkehr.example', text: 'Stockender Verkehr auf dem Ring.', url: 'https://example.invalid/bluesky' }],
+    },
   }
 
   it('rendert Ort, Koordinaten und Wetterdaten', async () => {
@@ -56,11 +71,17 @@ describe('RegionalInfoPanel', () => {
     expect(screen.getByText(/4.2%/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: /Soziale Medien/i }))
-    expect(screen.getByText(i18n.t('ai.geo.socialUnavailableTitle'))).toBeInTheDocument()
-    expect(screen.queryByText(/Normal \/ Stabil/)).not.toBeInTheDocument()
+    expect(screen.getByText('Baustelle am Ring')).toBeInTheDocument()
+    expect(screen.getByText('@verkehr.example')).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('ai.geo.publicPostsNotice'))).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: i18n.t('ai.geo.openPublicPost') })).toHaveLength(2)
+    screen.getAllByRole('link', { name: i18n.t('ai.geo.openPublicPost') }).forEach((link) => {
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    })
 
     fireEvent.click(screen.getByRole('tab', { name: /Verkehr/i }))
-    expect(screen.getByText(i18n.t('ai.geo.trafficUnavailableTitle'))).toBeInTheDocument()
+    expect(screen.getByText('28')).toBeInTheDocument()
+    expect(screen.getByText(i18n.t('ai.geo.roadClosure'))).toBeInTheDocument()
 
     const closeBtn = screen.getByRole('button', { name: i18n.t('ai.geo.close') })
     fireEvent.click(closeBtn)
@@ -125,5 +146,16 @@ describe('RegionalInfoPanel', () => {
     expect(satellite).toHaveAttribute('aria-selected', 'true')
     expect(satellite).toHaveFocus()
     expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', satellite.id)
+  })
+
+  it('unterscheidet nicht eingerichtete von derzeit nicht verfügbaren Verkehrsdaten', () => {
+    const onClose = vi.fn()
+    const { rerender } = render(<RegionalInfoPanel data={{ ...mockData, traffic: { status: 'not_configured' } }} onClose={onClose} />)
+
+    fireEvent.click(screen.getByRole('tab', { name: /Verkehr/i }))
+    expect(screen.getByText(i18n.t('ai.geo.trafficNotConfiguredTitle'))).toBeInTheDocument()
+
+    rerender(<RegionalInfoPanel data={{ ...mockData, traffic: { status: 'unavailable' } }} onClose={onClose} />)
+    expect(screen.getByText(i18n.t('ai.geo.trafficUnavailableTitle'))).toBeInTheDocument()
   })
 })

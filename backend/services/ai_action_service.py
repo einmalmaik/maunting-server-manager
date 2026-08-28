@@ -3522,8 +3522,13 @@ def _execute_analyze_region(
 
     # Das Geocoding startet Wetter und Sentinel intern parallel. Die Weblage
     # hängt davon nicht ab und läuft deshalb zeitgleich statt danach.
+    regional_cache_scope = (
+        f"regional:{user.id}:{prefetch_session_id}" if prefetch_session_id else None
+    )
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="msm-region") as executor:
-        analysis_future = executor.submit(ai_geo_service.analyze_region, safe_location)
+        analysis_future = executor.submit(
+            ai_geo_service.analyze_region, safe_location, cache_scope=regional_cache_scope,
+        )
         news_future = executor.submit(regional_news)
         analysis = analysis_future.result()
         news, news_status = news_future.result()

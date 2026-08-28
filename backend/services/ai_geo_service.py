@@ -18,6 +18,7 @@ import httpx
 
 from services.ai_redaction import redact_sensitive_text
 from services import ai_satellite_service
+from services import ai_regional_connectors_service
 from services.ai_latency_metrics import measure
 
 
@@ -323,7 +324,7 @@ def get_current_weather(latitude: float, longitude: float) -> dict[str, Any] | N
         return None
 
 
-def analyze_region(location_name: str) -> dict[str, Any]:
+def analyze_region(location_name: str, *, cache_scope: str | None = None) -> dict[str, Any]:
     """Führt eine kombinierte Analyse für einen Ort durch (Geodaten + Wetter + Satellit)."""
     geo = geocode_location(location_name)
     if not geo:
@@ -348,14 +349,21 @@ def analyze_region(location_name: str) -> dict[str, Any]:
             logger.info("Satellitenbildsuche nicht erfolgreich error=%s", type(exc).__name__)
             return []
 
-    # Wetter und die optionale CDSE-Suche sind unabhängig. Parallelisierung
-    # verhindert, dass eine langsame Satellitenantwort die Wetterabfrage noch
-    # zusätzlich verlängert.
-    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="msm-geo") as executor:
+    # Wetter, Bildsuche und externe Regionalsignale sind unabhängig. Jeder
+    # Connector ist rein lesend; ein Ausfall darf das Lagebild nicht blockieren.
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="msm-geo") as executor:
         weather_future = executor.submit(get_current_weather, lat, lon)
         satellite_future = executor.submit(satellite_search)
+        traffic_future = executor.submit(
+            ai_regional_connectors_service.traffic, lat, lon, cache_scope=cache_scope,
+        )
+        public_posts_future = executor.submit(
+            ai_regional_connectors_service.public_posts, geo["name"], cache_scope=cache_scope,
+        )
         weather = weather_future.result()
         satellite_data = satellite_future.result()
+        traffic = traffic_future.result()
+        public_posts = public_posts_future.result()
     weather = weather or {}
 
     min_lon, min_lat, max_lon, max_lat = bbox
@@ -412,6 +420,8 @@ def analyze_region(location_name: str) -> dict[str, Any]:
             "bbox": bbox,
         },
         "weather": weather,
+        "traffic": traffic,
+        "public_posts": public_posts,
         "satellite": {
             "available": len(satellite_data) > 0,
             "scenes": satellite_data,

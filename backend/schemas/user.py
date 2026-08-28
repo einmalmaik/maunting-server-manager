@@ -74,6 +74,12 @@ class TimezoneUpdateRequest(BaseModel):
         return _validate_time_zone(v)
 
 
+class LocationSharingUpdateRequest(BaseModel):
+    """Explizite Konto-Einwilligung, ohne Standortdaten selbst."""
+
+    enabled: bool
+
+
 class AgentNameUpdateRequest(BaseModel):
     agent_name: str | None = None
 
@@ -101,6 +107,7 @@ class UserResponse(BaseModel):
     ai_notifications: bool = True
     device_notifications: bool = True
     time_zone: str | None = None
+    location_sharing_enabled: bool = False
     agent_name: str | None = None
     ai_provider_id: int | None = None
     role_id: int | None = None

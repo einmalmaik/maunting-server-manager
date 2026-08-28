@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 
-from services import ai_geo_service, ai_satellite_service
+from services import ai_geo_service, ai_regional_connectors_service, ai_satellite_service
 
 
 class _Response:
@@ -139,8 +139,15 @@ def test_region_analysis_fetches_weather_and_satellite_in_parallel(monkeypatch) 
 
     monkeypatch.setattr(ai_geo_service, "get_current_weather", weather)
     monkeypatch.setattr(ai_satellite_service, "search_satellite_imagery", satellite)
+    monkeypatch.setattr(
+        ai_regional_connectors_service, "traffic", lambda *_args, **_kwargs: {"status": "available"},
+    )
+    monkeypatch.setattr(
+        ai_regional_connectors_service, "public_posts", lambda *_args, **_kwargs: {"status": "available", "reddit": [], "bluesky": []},
+    )
 
     result = ai_geo_service.analyze_region("Example City")
 
     assert result["status"] == "success"
     assert result["weather"]["temperature_celsius"] == 12.0
+    assert result["traffic"] == {"status": "available"}

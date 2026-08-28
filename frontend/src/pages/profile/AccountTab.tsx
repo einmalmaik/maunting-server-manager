@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
-import { Mail, AlertTriangle, Clock, Globe, Save } from 'lucide-react'
+import { Mail, AlertTriangle, Clock, Globe, MapPin, Save, ShieldCheck } from 'lucide-react'
 import { Button, Dropdown, type DropdownOption } from '@/Singra/UI'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
@@ -24,6 +24,8 @@ export function AccountTab() {
   )
   const [saving, setSaving] = useState(false)
   const [dismissedBrowserHint, setDismissedBrowserHint] = useState(false)
+  const [savingLocationSharing, setSavingLocationSharing] = useState(false)
+  const [locationSharingError, setLocationSharingError] = useState<string | null>(null)
 
   useEffect(() => {
     if (user?.time_zone) {
@@ -61,6 +63,52 @@ export function AccountTab() {
       toast.error(err.message || t('common.error'))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const requestBrowserLocationPermission = () => new Promise<void>((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('UNSUPPORTED'))
+      return
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      // Die Position wird bewusst nicht entgegengenommen: Die Konto-Einstellung
+      // speichert ausschließlich die Einwilligung. Eine konkrete Position gehört
+      // nur in den jeweiligen KI-Lauf und darf nie in diesem Profilzustand landen.
+      () => resolve(),
+      (error) => reject(error),
+      { enableHighAccuracy: false, maximumAge: 0, timeout: 10_000 },
+    )
+  })
+
+  const handleLocationSharingChange = async (enabled: boolean) => {
+    setLocationSharingError(null)
+    setSavingLocationSharing(true)
+    try {
+      if (enabled) {
+        await requestBrowserLocationPermission()
+      }
+
+      await api<{ location_sharing_enabled: boolean }>('/auth/me/location-sharing', {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled }),
+      })
+      updateUser({ location_sharing_enabled: enabled })
+    } catch (error) {
+      const geolocationErrorCode = (error as { code?: unknown } | null)?.code
+      if (
+        (typeof geolocationErrorCode === 'number' && geolocationErrorCode >= 1 && geolocationErrorCode <= 3) ||
+        (error as Error)?.message === 'UNSUPPORTED'
+      ) {
+        setLocationSharingError(
+          t('profile.locationSharingPermissionError', 'Der Standortzugriff wurde nicht freigegeben. Du kannst ihn in den Browser- oder App-Einstellungen erlauben.'),
+        )
+      } else {
+        setLocationSharingError(t('profile.locationSharingSaveError', 'Die Standortfreigabe konnte nicht gespeichert werden.'))
+      }
+    } finally {
+      setSavingLocationSharing(false)
     }
   }
 
@@ -170,7 +218,65 @@ export function AccountTab() {
           </div>
         </div>
       </div>
+
+      <section className="msm-card p-6" aria-labelledby="location-sharing-title">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${
+              user?.location_sharing_enabled
+                ? 'border-primary/30 bg-primary/10 text-primary'
+                : 'border-outline-variant bg-surface-container text-on-surface-variant'
+            }`}>
+              <MapPin className="h-4 w-4" aria-hidden="true" />
+            </div>
+            <div>
+              <h2 id="location-sharing-title" className="font-headline text-lg font-semibold text-on-surface">
+                {t('profile.locationSharingTitle', 'Standort für KI-Anfragen')}
+              </h2>
+              <p className="mt-1 max-w-2xl font-body-md text-sm leading-6 text-on-surface-variant">
+                {t('profile.locationSharingDescription', 'Gib deinen Standort nur frei, wenn eine ortsbezogene KI-Anfrage ihn braucht. Die Einwilligung gilt für dein Konto.')}
+              </p>
+            </div>
+          </div>
+          <span className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium ${
+            user?.location_sharing_enabled
+              ? 'border-status-success/30 bg-status-success/10 text-status-success'
+              : 'border-outline-variant bg-surface-container text-on-surface-variant'
+          }`}>
+            <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+            {user?.location_sharing_enabled
+              ? t('profile.locationSharingEnabled', 'Freigegeben')
+              : t('profile.locationSharingDisabled', 'Nicht freigegeben')}
+          </span>
+        </div>
+
+        <div className="mt-5 border-l-2 border-primary/40 pl-3">
+          <p className="font-body-md text-sm leading-6 text-on-surface">
+            {t('profile.locationSharingPrivacy', 'Deine Koordinaten werden nicht im Konto gespeichert. Wenn du sie bei einer Anfrage freigibst, werden sie nur für diesen einzelnen KI-Lauf verwendet.')}
+          </p>
+        </div>
+
+        {locationSharingError && (
+          <p className="mt-4 text-sm text-status-error" role="alert">
+            {locationSharingError}
+          </p>
+        )}
+
+        <div className="mt-5">
+          <Button
+            type="button"
+            variant={user?.location_sharing_enabled ? 'secondary' : 'primary'}
+            disabled={savingLocationSharing}
+            onClick={() => void handleLocationSharingChange(!user?.location_sharing_enabled)}
+          >
+            {savingLocationSharing
+              ? t('common.saving', 'Speichern …')
+              : user?.location_sharing_enabled
+                ? t('profile.locationSharingDisable', 'Standortfreigabe deaktivieren')
+                : t('profile.locationSharingEnable', 'Standortfreigabe aktivieren')}
+          </Button>
+        </div>
+      </section>
     </div>
   )
 }
-

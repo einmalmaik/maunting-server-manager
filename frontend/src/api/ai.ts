@@ -416,6 +416,21 @@ export interface AiRegionalAnalysis {
   } | null
   news?: Array<{ title?: string; url?: string; content?: string; published_date?: string }>
   news_status?: 'pending' | 'available' | 'not_allowed' | 'not_configured' | 'unavailable'
+  traffic?: {
+    status: 'available' | 'not_configured' | 'unavailable'
+    current_speed_kmh?: number
+    free_flow_speed_kmh?: number
+    current_travel_time_seconds?: number
+    free_flow_travel_time_seconds?: number
+    confidence?: number
+    road_closure?: boolean
+  }
+  public_posts?: {
+    status: 'available' | 'unavailable'
+    reddit: Array<{ title: string; snippet: string; url: string }>
+    bluesky: Array<{ author: string; text: string; url: string }>
+    untrusted: true
+  }
   camera?: { mode: 'overview' | 'focus' | 'detail' }
 }
 

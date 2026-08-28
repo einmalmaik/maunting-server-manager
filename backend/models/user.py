@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import hashlib
 
-from sqlalchemy import Boolean, CheckConstraint, String, DateTime, ForeignKey, Integer, text, true
+from sqlalchemy import Boolean, CheckConstraint, String, DateTime, ForeignKey, Integer, text, true, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -101,6 +101,11 @@ class User(Base):
     # IANA-Zeitzone des Benutzers (z. B. 'Europe/Berlin').
     # Einzige kanonische Zeitzonen-Quelle für Lageblock, Chat-Zeitstempel und Aufgaben.
     time_zone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Ausschließlich eine Einwilligung. Eine konkrete Position gehört nie in
+    # das Konto; sie darf nur für die aktuelle Ortsanfrage im Speicher leben.
+    location_sharing_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=false(),
+    )
 
     # Rufname des Assistenten für dieses Konto (Panel und Smart System).
     # NULL heisst: Standardname 'Singra' (services/ai_lage.py). Der Wert fliesst
