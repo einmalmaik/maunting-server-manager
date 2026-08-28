@@ -362,7 +362,7 @@ verbaler Rückweg Promptregel.
 | operation_task_service.py | `finish_lifecycle_task` weckt den Lauf (Erfolg und Fehlschlag) |
 | scheduler_service.py | zweiter Handgriff im bestehenden 60-s-Takt für fällige `wake_at` |
 | ai_meldestelle.py (neu) | `melden()` — schwärzender Meldepunkt, Sammel-/Pufferstelle, Ruhe-Regel, Bündelung, Frage-Routing |
-| ai_voice_bridge.py | spricht ausschließlich Gehirn-Ausgaben; Ruhe = VAD „bereit"; Barge-in bricht alles ab |
+| ai_voice_bridge.py | spricht ausschließlich Gehirn-Ausgaben; Ruhe = VAD „bereit"; Barge-in schließt nur die Ausgabe, ein ausdrücklicher Abort beendet den zugeordneten Run |
 | Frontend | Worker-Liste im Chat (einsehbar, nicht beschreibbar, räumt sich auf), Tipp-Signal für die Ruhe-Regel, Nachladen bei Zustellung; Singra/UI und Design-DNA beachten |
 | Rechte | `ai.background.use` (Worker-Nutzung je Rolle abschaltbar) + `permissionDetails`-Zusage |
 | Tests | Gehirn hat nie Server-Werkzeuge; Worker starten keine Worker; Wecken nur mit Rechten; Frage-Routing über Worker-ID; Neustart-Re-Seed genau einmal; Schwärzung aller Meldewege; Audit überlebt UI-Aufräumen |

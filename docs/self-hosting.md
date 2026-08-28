@@ -1388,8 +1388,10 @@ Browser ──WSS /api/ai/voice/ws──► MSM-Backend ──► Gehör · Chat
 ```
 
 Binärrahmen sind Ton (PCM16, 24 kHz, mono), Textrahmen sind Zustände,
-Transkripte und gezeigte Stellen. Dasselbe Format in beide Richtungen — der
-Browser nimmt so auf, wie er abspielt, und nichts wird unterwegs umgerechnet.
+sichere Tool-Anzeigen und gezeigte Stellen. Abschriften bleiben im Backend und
+werden nicht als WebSocket-Frame zurückgesendet. Dasselbe Audioformat gilt in
+beide Richtungen — der Browser nimmt so auf, wie er abspielt, und nichts wird
+unterwegs umgerechnet.
 Das ist kein Zufall, sondern die Wahl des Ausgabeformats bei ElevenLabs
 (`pcm_24000`).
 

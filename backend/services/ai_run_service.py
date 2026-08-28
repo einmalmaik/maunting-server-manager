@@ -25,6 +25,7 @@ from uuid import uuid4
 import httpx
 from sqlalchemy.orm import Session
 
+from database import SessionLocal
 from models import AiActionProposal, AiProvider, AiRun, User
 # Die Wartezustaende kommen aus dem Modell und nicht aus einer Literalkopie:
 # wer dort einen Zustand ergaenzt, soll ihn hier nicht ein zweites Mal
@@ -437,6 +438,47 @@ def eigener_lauf(db: Session, run_id: str, user: User) -> AiRun | None:
     )
 
 
+def eigene_laeufe_abbrechen(
+    *, user_id: int, run_ids: set[str], grund: str = "user_abort"
+) -> int:
+    """Bricht ausschließlich aktive, dem Benutzer gehörende Läufe ab.
+
+    Der Aufrufer liefert nur Kennungen, die er selbst im Sitzungsfluss erhalten
+    hat. Die Besitzprüfung bleibt trotzdem im Service: ein WebSocket oder eine
+    künftige Audio-Integration darf nie über eine lokale Liste fremde Läufe
+    abbrechen können.
+    """
+
+    if not run_ids:
+        return 0
+    beendet_ohne_task: list[str] = []
+    abgebrochen = 0
+    with SessionLocal() as db:
+        benutzer = db.get(User, user_id)
+        if benutzer is None:
+            return 0
+        for run_id in run_ids:
+            run = eigener_lauf(db, run_id, benutzer)
+            if run is None or run.status in BEENDET:
+                continue
+            run.status = "cancelled"
+            run.stop_reason = grund
+            run.wake_at = None
+            run.message_id = None
+            arbeitsspeicher_leeren(run)
+            run.updated_at = _jetzt()
+            if not aufgabe_abbrechen(run.id):
+                beendet_ohne_task.append(run.id)
+            abgebrochen += 1
+        db.commit()
+    # Läufe in einer aktiven asyncio-Aufgabe veröffentlichen ihren Endzustand
+    # in deren bestehenden Cancellation-Pfad. Wartende Läufe haben keine Aufgabe
+    # und müssen ihre Beobachter hier zuverlässig wecken.
+    for run_id in beendet_ohne_task:
+        _broker_abschliessen(run_id, status="cancelled", stop_reason=grund)
+    return abgebrochen
+
+
 def darf_fortsetzen(db: Session, run: AiRun) -> bool:
     """Wartet dieser Lauf noch auf Vorschlaege, die niemand entschieden hat?
 
@@ -833,6 +875,31 @@ def _broker_melden(run_id: str, *, status: str, stop_reason: str | None) -> None
     # keinen zweiten Schreiber, und der direkte Weg ist gefahrlos. Ohne die
     # Pruefung riss `call_soon_threadsafe` mit "Event loop is closed" das
     # Wecken ab, obwohl die Datenbankarbeit laengst getan war.
+    if schleife is None or laufende_schleife is schleife or schleife.is_closed():
+        _senden()
+    else:
+        schleife.call_soon_threadsafe(_senden)
+
+
+def _broker_abschliessen(run_id: str, *, status: str, stop_reason: str | None) -> None:
+    """Meldet und schließt einen wartenden Lauf auf der Broker-Ereignisschleife."""
+
+    from services import ai_run_broker
+
+    def _senden() -> None:
+        ai_run_broker.eroeffnen(run_id)
+        ai_run_broker.veroeffentlichen(
+            run_id,
+            "run",
+            {"run_id": run_id, "status": status, "stop_reason": stop_reason},
+        )
+        ai_run_broker.beenden(run_id)
+
+    schleife = _SCHLEIFE
+    try:
+        laufende_schleife = asyncio.get_running_loop()
+    except RuntimeError:
+        laufende_schleife = None
     if schleife is None or laufende_schleife is schleife or schleife.is_closed():
         _senden()
     else:

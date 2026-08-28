@@ -50,283 +50,54 @@ import asyncio
 import contextlib
 import json
 import logging
-import re
 import time
-from dataclasses import dataclass, field
 from uuid import uuid4
 
 import httpx
 from fastapi import WebSocket
-from starlette.websockets import WebSocketDisconnect, WebSocketState
+from starlette.websockets import WebSocketState
 
-from config import settings
 from database import SessionLocal
-from models import AiConversation, AiProvider, AiRun, User
+from models import AiProvider, User
 from services import (
-    ai_run_broker,
-    ai_stt,
     ai_tts,
     ai_voice_vad,
 )
-# Kein neues Paket: `ai_stt` oben importiert den Adapter bereits hart.
 from services.openai_compatible_adapter import StreamUsage
+from services.ai_voice import interactions as voice_interactions
+from services.ai_voice.prefetch import VoicePrefetch
+from services.ai_voice.run_output import VoiceRunOutput
+from services.ai_voice import transcription as voice_transcription
+from services.ai_voice.session import VoiceSession
 
 logger = logging.getLogger(__name__)
 
-
-# ── Was der Browser zu sehen bekommt ──────────────────────────────────────
-#
-# Die **Rahmenformate** sind unverändert, und darauf kommt es an: Binärrahmen
-# sind Ton (PCM16, 24 kHz, mono), Textrahmen sind JSON und beschreiben, was
-# gerade passiert. Die Liste der Ereignisse hat sich mit dem Umbau dagegen
-# geändert — `kontingent` ist weg, weil es keine eigene Sprachkontingentrechnung
-# mehr gibt, und `vorschlag` ist dazugekommen. Wer hier eines hinzufügt, muss in
-# `useSprachsitzung.ts` einen `case` dafür anlegen; unbekannte fallen dort
-# stillschweigend durch.
-
-ZUSTAND_BEREIT = "bereit"
-ZUSTAND_HOERT = "hoert"
-ZUSTAND_DENKT = "denkt"
-ZUSTAND_SPRICHT = "spricht"
-
-
-#: Wie lange eine Sprachsitzung höchstens läuft.
-#:
-#: Die Zahl ist keine Vorsicht, sondern die Lebensdauer des Access-Tokens. Ein
-#: WebSocket prüft die Anmeldung **nur beim Handshake** (`dependencies.py`), und
-#: eine Verbindung, die Stunden offen bleibt, umginge damit beides: den Ablauf
-#: des Tokens und die jti-Sperrliste. Wer abgemeldet wird, spräche weiter.
-#:
-#: Deshalb **abgeleitet** und nicht abgeschrieben: `access_token_expire_minutes`
-#: ist über ``MSM_ACCESS_TOKEN_EXPIRE_MINUTES`` einstellbar. Hier stand die 15
-#: ein zweites Mal fest im Code — wer sie auf fünf senkt, um Tokens schneller
-#: rotieren zu lassen, hätte eine Sprachsitzung bekommen, die zehn Minuten
-#: länger spricht als der Token gilt. Genau der Fall, den der Absatz darüber
-#: ausschliessen soll.
-MAX_SITZUNGSSEKUNDEN = settings.access_token_expire_minutes * 60
-
-#: Wie groß ein einzelner Tonrahmen vom Browser höchstens sein darf. Bei 24 kHz
-#: mono sind 128 KiB rund 2,7 Sekunden Ton — großzügig für Rahmen, die alle 20
-#: bis 100 Millisekunden kommen sollen, und eng genug, dass niemand über diesen
-#: Weg Speicher belegt.
-MAX_TONRAHMEN_BYTES = 128 * 1024
-
-#: Wie lang ein Textrahmen vom Browser höchstens sein darf. Der Browser schickt
-#: hier nur winzige Steuerbefehle; alles Größere ist keine Steuerung mehr.
-MAX_STEUERRAHMEN_ZEICHEN = 4_096
-
-#: Wie lange auf einen Lauf gewartet wird, der nichts mehr meldet. Die Frist ist
-#: grosszügig, weil ein Lauf mit mehreren Werkzeugrunden echte Minuten braucht —
-#: sie fängt nur den Fall ab, dass die Gegenstelle gar nicht mehr antwortet.
-LAUF_TIMEOUT = 300.0
-
-#: Wie oft der Zusteller nach offenen Meldungen sieht. Ein Poll und kein Abo,
-#: mit Absicht: Meldestelle wie Broker sind ohnehin prozesslokal (Doku §10),
-#: und die eine gezählte Abfrage alle paar Sekunden je **offener Sprachsitzung**
-#: ist billiger als ein Pub/Sub über die Threadgrenze — `melden()` läuft mal
-#: auf der Schleife, mal im Threadpool, und genau diese Weiche hat bei
-#: `_broker_melden` schon einmal einen geschlossenen Loop getroffen. Kürzer
-#: als der 60-s-Chat-Takt, damit die Stimme die Zustellung gewinnt, solange
-#: die Sitzung offen ist — der Chat bleibt der Kanal, der immer trägt.
-ZUSTELL_TAKT_S = 3.0
+# Reexports für bestehende Router, Tests und interne Aufrufer. Die konkrete
+# Sitzungslogik liegt im Paket `services.ai_voice`, der öffentliche Importpfad
+# bleibt unverändert.
+from services.ai_voice.contracts import (
+    LAUF_TIMEOUT,
+    Lage,
+    MAX_SITZUNGSSEKUNDEN,
+    MAX_STEUERRAHMEN_ZEICHEN,
+    MAX_TONRAHMEN_BYTES,
+    ZUSTELL_TAKT_S,
+    ZUSTAND_BEREIT,
+    ZUSTAND_DENKT,
+    ZUSTAND_HOERT,
+    ZUSTAND_SPRICHT,
+)
+from services.ai_voice.text import (
+    Belegfilter,
+    _ist_gedanke_abgeschlossen,
+    ist_ablehnung,
+    ist_zustimmung,
+)
 
 
-# ── Belege: was gezeigt und nicht gesprochen wird ─────────────────────────
-
-#: Ein Codeblock, wie ihn `ai_prompt.BELEGE` vom Modell verlangt.
-_ZAUN = re.compile(r"^\s*```")
-
-#: Wie viele Zeilen eine gezeigte Stelle höchstens hat. Der Prompt verlangt „ein
-#: bis fünf"; das hier ist die Schranke dahinter, nicht die Erwartung.
-MAX_BELEG_ZEILEN = 40
-
-#: Wie lang eine einzelne gezeigte Zeile höchstens ist. Eine Logzeile mit
-#: viertausend Zeichen ist keine Stelle mehr, sondern eine Datei.
-MAX_BELEG_ZEICHEN = 2_000
-
-#: Gespeicherte gelernte Sprechkadenz je Benutzer-ID (Faktor 0.7 bis 2.5).
+# Die Kadenz enthält nur einen numerischen Faktor. Weder Abschriften noch
+# PCM-Frames oder TTS-Schlüssel werden sitzungsübergreifend aufbewahrt.
 _USER_KADENZ_CACHE: dict[int, float] = {}
-
-#: Typische unvollständige Satzendungen und Satzzeichen.
-_UNVOLLSTAENDIGE_SATZZEICHEN = (",", "...", "…", "-", "—", ":", ";")
-_UNVOLLSTAENDIGE_WOERTER = {
-    "und", "oder", "aber", "weil", "dass", "denn", "den", "die", "das",
-    "dem", "des", "ein", "eine", "einen", "einem", "einer", "eines",
-    "bitte", "um", "wie", "mit", "für", "fuer", "in", "an", "auf", "aus", "bei",
-    "also", "bzw", "bzw.", "resp", "resp.", "äh", "ähm", "aeh", "aehm",
-    "and", "or", "but", "because", "that", "the", "a", "an", "to", "with", "for",
-}
-
-
-def _ist_gedanke_abgeschlossen(text: str) -> bool:
-    """Prüft sprachunabhängig anhand von Satzzeichen und Wortendungen, ob ein Satz fertig ist."""
-    sauber = (text or "").strip().lower()
-    if not sauber:
-        return False
-    if any(sauber.endswith(sz) for sz in _UNVOLLSTAENDIGE_SATZZEICHEN):
-        return False
-    if sauber.endswith((".", "!", "?", "。", "！", "？")):
-        return not sauber.endswith(("...", "…", "..!", "..?", ".."))
-    woerter = sauber.split()
-    if woerter and woerter[-1] in _UNVOLLSTAENDIGE_WOERTER:
-        return False
-    return len(woerter) >= 4
-
-
-@dataclass
-class Belegfilter:
-    """Trennt im laufenden Text das Gesprochene vom Gezeigten.
-
-    Das Modell schreibt im Sprachmodus dasselbe wie im Chat: die Stelle als
-    Codeblock, darunter die Deutung. Vorgelesen gehört nur die Deutung — ein
-    Codeblock ist gesprochen eine Aneinanderreihung von Satzzeichen.
-
-    Zustandsbehaftet, weil der Text stückweise ankommt und ein Zaun (```)
-    zwischen zwei Stücken zerrissen sein kann. Gearbeitet wird deshalb
-    zeilenweise: eine Zeile ist erst fertig, wenn ihr Zeilenumbruch da ist, und
-    vorher lässt sich über sie nichts sagen.
-    """
-
-    _puffer: str = ""
-    _im_block: bool = False
-    _block: list[str] = field(default_factory=list)
-    _quelle: str = ""
-
-    def fuettern(self, text: str) -> tuple[str, list[dict]]:
-        """Gibt (zu sprechender Text, fertige Belege) zurück."""
-        self._puffer += text
-        gesprochen: list[str] = []
-        belege: list[dict] = []
-        while "\n" in self._puffer:
-            zeile, self._puffer = self._puffer.split("\n", 1)
-            beleg = self._zeile(zeile, gesprochen)
-            if beleg is not None:
-                belege.append(beleg)
-        if not self._im_block and not self._puffer.lstrip().startswith("`"):
-            treffer = re.search(r"([.!?…:;])\s+", self._puffer)
-            if treffer is not None and treffer.end() >= 10:
-                satz = self._puffer[: treffer.end()]
-                self._puffer = self._puffer[treffer.end() :]
-                gesprochen.append(satz)
-        return "".join(gesprochen), belege
-
-    def ausklingen(self) -> tuple[str, list[dict]]:
-        """Was noch im Puffer steht, jetzt herausgeben.
-
-        Ein Codeblock ohne schliessenden Zaun ist hier kein Fehlerfall: das
-        Modell wurde mitten im Satz abgeschnitten, und die Zeilen, die es schon
-        geschrieben hat, sind so gültig wie die anderen.
-        """
-        gesprochen: list[str] = []
-        belege: list[dict] = []
-        if self._puffer:
-            beleg = self._zeile(self._puffer, gesprochen)
-            self._puffer = ""
-            if beleg is not None:
-                belege.append(beleg)
-        if self._im_block:
-            self._im_block = False
-            fertig = self._beleg_bauen()
-            if fertig is not None:
-                belege.append(fertig)
-        return "".join(gesprochen), belege
-
-    def _zeile(self, zeile: str, gesprochen: list[str]) -> dict | None:
-        if _ZAUN.match(zeile):
-            if self._im_block:
-                self._im_block = False
-                return self._beleg_bauen()
-            self._im_block = True
-            self._block = []
-            # Was hinter dem Zaun steht („```log", „```ini"), ist die Sprache
-            # des Blocks — als Herkunftsangabe besser als nichts und ohne
-            # eigenes Feld im Prompt zu haben.
-            self._quelle = zeile.strip().lstrip("`").strip()
-            return None
-        if self._im_block:
-            if len(self._block) < MAX_BELEG_ZEILEN:
-                self._block.append(zeile[:MAX_BELEG_ZEICHEN])
-            return None
-        gesprochen.append(zeile + "\n")
-        return None
-
-    def _beleg_bauen(self) -> dict | None:
-        zeilen = [zeile for zeile in self._block if zeile.strip()]
-        self._block = []
-        quelle, self._quelle = self._quelle, ""
-        if not zeilen:
-            return None
-        return {"art": "beleg", "quelle": quelle, "zeilen": zeilen}
-
-
-# ── Zustimmung und Ablehnung ──────────────────────────────────────────────
-#
-# Der heikelste Teil dieser Datei, und deshalb der engste.
-#
-# Ein gesprochenes „Ja" löst hier dasselbe aus wie ein Klick auf die Karte:
-# `confirm_proposal` und danach `execute_proposal`. Es gibt für diesen Auslöser
-# keine zweite Prüfung — Rechte, Sperre und Einmal-Token liegen unverändert
-# dort, wo sie beim Klick liegen. Was hier entschieden wird, ist allein: **war
-# das ein Ja?**
-#
-# Deshalb gilt eine Äusserung nur dann als Zustimmung, wenn sie **nichts
-# anderes** enthält. „Ja" ist ein Ja. „Ja, aber schau vorher nochmal nach" ist
-# keines — es ist eine neue Anweisung, und sie als Zustimmung zu lesen hiesse,
-# einen Server zu löschen, weil das erste Wort passte. Die Prüfung ist eine
-# Gleichheit gegen eine geschlossene Menge und ausdrücklich **keine** Suche
-# nach einem enthaltenen Wort.
-
-_ZUSTIMMUNG = frozenset({
-    "ja", "jo", "jep", "jawohl", "jaja", "ja bitte", "ja gerne", "ja genau",
-    "ja mach das", "ja mach", "ja tu das", "ja bestaetigt", "ja klar",
-    "mach das", "mach es", "mach", "tu das", "los", "leg los", "mach weiter",
-    "bestaetigt", "bestaetige", "bestaetigen", "einverstanden", "in ordnung",
-    "passt", "okay", "ok", "okay mach das", "gerne", "genau", "korrekt",
-    "yes", "yep", "yeah", "go", "do it", "confirm", "confirmed",
-})
-
-_ABLEHNUNG = frozenset({
-    "nein", "ne", "nee", "noe", "nein danke", "lass es", "lass das",
-    "nicht", "abbrechen", "abbruch", "stopp", "stop", "halt", "warte",
-    "lieber nicht", "doch nicht", "vergiss es", "nein lass",
-    "no", "nope", "cancel", "abort", "dont", "do not",
-})
-
-#: Was vor dem Vergleich wegfällt. Satzzeichen und Umlaute — „Ja!" und „Jä"
-#: sind dasselbe Ja, und ein Transkript schreibt beides mal so, mal so.
-_UMSCHRIFT = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
-
-
-def _normalisieren(text: str) -> str:
-    ohne = "".join(
-        zeichen for zeichen in text.lower().translate(_UMSCHRIFT)
-        if zeichen.isalnum() or zeichen.isspace()
-    )
-    return " ".join(ohne.split())
-
-
-def ist_zustimmung(text: str) -> bool:
-    """Ob diese Äusserung **nichts als** eine Zustimmung ist."""
-    return _normalisieren(text) in _ZUSTIMMUNG
-
-
-def ist_ablehnung(text: str) -> bool:
-    """Ob diese Äusserung **nichts als** eine Ablehnung ist."""
-    return _normalisieren(text) in _ABLEHNUNG
-
-
-# ── Die Sitzung ───────────────────────────────────────────────────────────
-
-
-@dataclass
-class Lage:
-    """Was am Ende im Protokoll steht. Zahlen, keine Inhalte."""
-
-    rahmen_hin: int = 0
-    rahmen_zurueck: int = 0
-    aeusserungen: int = 0
-    laeufe: int = 0
-    abgelaufen: bool = False
 
 
 class Sprachbruecke:
@@ -375,10 +146,12 @@ class Sprachbruecke:
         #: obwohl feststeht, in welches Mikrofon gesprochen wurde. ``None`` für
         #: den Browser und für Token von vor dem Anspruch.
         self._familie = familie
-        # Nicht aus Browser- oder Modelltext: diese Kennung bindet einen
-        # spekulativen Wert an genau diese Verbindung.
-        self._prefetch_sitzung_id = str(uuid4())
-        self._intent_revision = 0
+        self._prefetch = VoicePrefetch(
+            user_id=user_id,
+            herkunft=herkunft,
+            familie=familie,
+            senden=self._senden,
+        )
 
         self._kadenz_faktor = _USER_KADENZ_CACHE.get(user_id, 1.0)
         self._erkennung = ai_voice_vad.Pausenerkennung(kadenz_faktor=self._kadenz_faktor)
@@ -392,19 +165,26 @@ class Sprachbruecke:
         #: Berechtigungen und Freigaben gebunden. Die Menge wird nur fuer den
         #: ausdruecklichen Abbruch bzw. das Sitzungsende gebraucht.
         self._laeufe: set[asyncio.Task] = set()
+        # Ausschließlich vom Server erzeugte IDs. Sie sind die Grenze für einen
+        # expliziten Abbruch und stammen nie aus einem Browserrahmen.
+        self._voice_run_ids: set[str] = set()
         #: Die Stimme des laufenden Zuges. Zum Abwürgen beim Dazwischenreden.
         self._stimme: ai_tts.Stimmsitzung | None = None
-        #: Ob im aktuellen Lauf bereits Text oder Verbal Bridging an TTS gesendet wurde.
-        self._lauf_gesprochen: bool = False
         #: Ein Barge-In schliesst nur den Audiokanal des betroffenen Zuges.
         #: Die Kennung statt eines globalen Schalters ist wichtig: waehrend
         #: der alte Run noch seine Read-Tools beendet, kann der Mensch bereits
         #: einen neuen Zug starten.
         self._unterdrueckte_laeufe: set[asyncio.Task] = set()
-        #: Der bereits an die Stimme uebergebene, modellierte Teil der Ausgabe.
-        #: Er wird weder gespeichert noch geloggt; nur der naechste Voice-Run
-        #: bekommt ihn als fluechtigen Kontext gegen Wiederholungen.
-        self._sprechpunkt: str = ""
+        self._run_output = VoiceRunOutput(
+            user_id=user_id,
+            senden=self._senden,
+            zustand_melden=self._zustand_melden,
+            ausgabe_aktiv=self._ausgabe_aktiv,
+            stimme_oeffnen=self._stimme_oeffnen,
+            stimme_setzen=self._stimme_setzen,
+            frage_vorlesen=self._frage_vorlesen,
+            vorschlag_merken=self._vorschlag_merken,
+        )
         #: Vorschläge, die auf ein gesprochenes Ja warten.
         self._offene_vorschlaege: list[str] = []
         #: Turn-Merging & Kadenz-Lernen: unfertige Sätze bei Unterbrechung verschmelzen.
@@ -428,83 +208,14 @@ class Sprachbruecke:
         self._erkennung.kadenz_anpassen(self._kadenz_faktor)
 
     async def fuehren(self) -> Lage:
-        """Die Sitzung, bis der Browser geht oder die Zeit um ist."""
-        # Das lokale Modell darf den ersten Audiopaketfluss nicht anhalten. Bis
-        # es bereit ist, wird schlicht kein Intent gemeldet; die Sprachsitzung
-        # selbst bleibt vollständig funktionsfähig.
-        from services.ai_intent_classifier import classifier
-
-        asyncio.create_task(asyncio.to_thread(classifier.warm))
-        await self._zustand_melden(ZUSTAND_BEREIT, erstmalig=True)
-        self._zusteller = asyncio.create_task(self._meldungen_zustellen())
-        ende = time.monotonic() + self._hoechstdauer
-        try:
-            while True:
-                rest = ende - time.monotonic()
-                if rest <= 0:
-                    self._lage.abgelaufen = True
-                    await self._senden({"art": "abgelaufen"})
-                    break
-                try:
-                    nachricht = await asyncio.wait_for(
-                        self._browser.receive(), timeout=rest
-                    )
-                except asyncio.TimeoutError:
-                    continue
-                if nachricht.get("type") == "websocket.disconnect":
-                    break
-                if not await self._rahmen(nachricht):
-                    break
-        except WebSocketDisconnect:
-            pass
-        finally:
-            # Erst der Zusteller, dann der laufende Zug: der Zusteller wartet
-            # womöglich gerade auf eine Lieferung in `self._laufende`, und
-            # andersherum spräche er nach dem Abwürgen munter weiter.
-            zusteller = self._zusteller
-            self._zusteller = None
-            if zusteller is not None:
-                zusteller.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await zusteller
-            await self._abwuergen()
-        return self._lage
+        """Delegiert die langlebige Socket-Schleife an die Sitzungsorchestrierung."""
+        return await VoiceSession(self).fuehren()
 
     # ── vom Browser ───────────────────────────────────────────────────────
 
     async def _rahmen(self, nachricht: dict) -> bool:
-        """Verarbeitet einen Rahmen. ``False`` heisst: Schluss."""
-        roh = nachricht.get("bytes")
-        if roh is not None:
-            if len(roh) > MAX_TONRAHMEN_BYTES:
-                logger.info("Tonrahmen zu gross (%d Bytes), verworfen", len(roh))
-                return True
-            self._lage.rahmen_hin += 1
-            await self._ton(roh)
-            return True
-
-        text = nachricht.get("text")
-        if text is None:
-            return True
-        if len(text) > MAX_STEUERRAHMEN_ZEICHEN:
-            return True
-        try:
-            befehl = json.loads(text)
-        except (TypeError, ValueError):
-            return True
-        if isinstance(befehl, dict):
-            art = befehl.get("art")
-            if art == "unterbrechen":
-                await self._ausgabe_unterbrechen()
-                await self._zustand_melden(ZUSTAND_BEREIT)
-            elif art in ("abbrechen", "abort"):
-                await self._abwuergen()
-                await self._zustand_melden(ZUSTAND_BEREIT)
-            elif art in ("teil_transkript", "partial_transcript", "transkript_chunk", "chunk"):
-                text_chunk = str(befehl.get("text") or befehl.get("chunk") or "").strip()
-                if text_chunk:
-                    await self._verarbeite_teil_transkript(text_chunk)
-        return True
+        """Kompatibler Test-Hook für die extrahierte Rahmenverarbeitung."""
+        return await VoiceSession(self).rahmen(nachricht)
 
     async def _ton(self, pcm: bytes) -> None:
         vorher = self._erkennung.spricht
@@ -577,13 +288,9 @@ class Sprachbruecke:
 
             if ist_fortsetzung and self._letzte_eingabe:
                 kombiniert = f"{self._letzte_eingabe} {wortlaut}".strip()
-                logger.info(
-                    "Turn-Merge: '%s' + '%s' -> '%s' user=%s",
-                    self._letzte_eingabe,
-                    wortlaut,
-                    kombiniert,
-                    self._user_id,
-                )
+                # Gesprochene Inhalte sind privat. Für die Diagnose reicht die
+                # Tatsache, dass die VAD zwei Züge zusammengeführt hat.
+                logger.info("Turn-Merge user=%s", self._user_id)
                 self._kadenz_anpassen(erhoehen=True)
                 wortlaut = kombiniert
 
@@ -591,7 +298,8 @@ class Sprachbruecke:
             self._letzte_eingabe_zeit = jetzt
             self._letzte_antwort_fertig = False
 
-            await self._senden({"art": "gehoert", "text": wortlaut})
+            # Abschriften bleiben innerhalb des laufenden Turns. Sie sind
+            # weder Browser-Frames noch Diagnoseinhalt.
             await self._verarbeite_teil_transkript(wortlaut)
 
             if not _ist_gedanke_abgeschlossen(wortlaut):
@@ -613,20 +321,13 @@ class Sprachbruecke:
         except asyncio.CancelledError:
             raise
         except Exception as fehler:  # pragma: no cover - Netz und Anbieter
-            # Der Klassenname allein war eine Sackgasse: „AiProviderRequestError"
-            # steht gleichermassen fuer einen abgelaufenen Schluessel, ein
-            # falsch geschriebenes Modell und einen Anbieter, der gerade nicht
-            # mag. Genau dafuer traegt dieser Fehler `code` und `detail`, und
-            # beide sind ausdruecklich fuer die Ausgabe gebaut: der Code ist
-            # eine feste Kennung, das Detail die **redigierte**, einzeilige und
-            # gekuerzte Meldung des Anbieters (`_error_detail`). Sie hier
-            # wegzuwerfen hiess, den Betreiber mit dem Wort „Fehler" allein zu
-            # lassen.
+            # Der feste Fehlercode unterscheidet bekannte Ablehnungen. Details
+            # eines Anbieterfehlers können jedoch Eingaben oder Schlüsselteile
+            # spiegeln und gehören deshalb nicht in Voice-Diagnoselogs.
             kennung = getattr(fehler, "code", None)
-            einzelheit = getattr(fehler, "detail", None)
             logger.warning(
-                "Sprachzug gescheitert user=%s error=%s code=%s detail=%s",
-                self._user_id, type(fehler).__name__, kennung or "-", einzelheit or "-",
+                "Sprachzug gescheitert user=%s error=%s code=%s",
+                self._user_id, type(fehler).__name__, kennung or "-",
             )
             # Ein erschoepftes Kontingent ist keine Panne, sondern eine Grenze
             # — und sie trifft den Sprachmodus haerter als den Chat, weil jeder
@@ -644,33 +345,31 @@ class Sprachbruecke:
     async def _abhoeren(self, aeusserung: ai_voice_vad.Aeusserung) -> str | None:
         from services.ai_provider_service import resolve_api_key
 
-        zugang, schluessel = await asyncio.to_thread(
-            self._zugang_holen, resolve_api_key, self._stt_provider_id
+        ergebnis = await voice_transcription.hoeren(
+            client=self._client,
+            user_id=self._user_id,
+            provider_id=self._stt_provider_id,
+            pcm=aeusserung.pcm,
+            resolve_api_key=resolve_api_key,
         )
-        if zugang is None:
+        if ergebnis.grund == "anbieter":
             await self._senden({"art": "stoerung"})
             await self._zustand_melden(ZUSTAND_BEREIT)
             return None
-        messwerte = StreamUsage()
-        try:
-            wortlaut = await ai_stt.hoeren(
-                self._client, provider=zugang, api_key=schluessel, pcm=aeusserung.pcm,
-                usage=messwerte,
-            )
-        except ai_stt.NichtsVerstanden:
+        if ergebnis.grund == "unverstanden":
             # Kein Fehler, sondern ein Alltagsfall: Husten, Räuspern, ein Wort
             # ins Leere. Stillschweigend zurück auf „bereit" — eine Meldung
             # dafür wäre lauter als das Ereignis.
             await self._zustand_melden(ZUSTAND_BEREIT)
             return None
-        if not await asyncio.to_thread(self._abschrift_verbuchen, zugang, messwerte, wortlaut):
+        if ergebnis.grund == "kontingent":
             # Das Kontingent ist erschöpft. Die Äusserung fällt weg, aber der
             # Mensch erfährt es — mit `grund`, denn „warte eine Minute" ist
             # eine andere Auskunft als „etwas ist kaputt".
             await self._senden({"art": "stoerung", "grund": "kontingent"})
             await self._zustand_melden(ZUSTAND_BEREIT)
             return None
-        return wortlaut
+        return ergebnis.abschrift.wortlaut if ergebnis.abschrift is not None else None
 
     def _abschrift_verbuchen(
         self, zugang: AiProvider, messwerte: StreamUsage, wortlaut: str
@@ -690,83 +389,20 @@ class Sprachbruecke:
         Sprechenden für einen Buchhaltungsfehler zu bestrafen zöge die falsche
         Konsequenz. Er landet im Protokoll statt auf dem Ohr.
         """
-        from services import ai_usage_service
-        from services.ai_provider_service import estimate_cost_microunits
-
-        geschaetzt = messwerte.total_tokens
-        if geschaetzt is None:
-            # Der Anbieter schweigt: dieselbe Näherung wie überall sonst,
-            # Zeichen durch vier. Der Tonanteil bleibt dabei ungezählt — MSM
-            # erfindet keine Zahl für etwas, das der Anbieter nicht meldet.
-            geschaetzt = max(1, len(wortlaut) // 4)
-        geschaetzt = min(geschaetzt, ai_usage_service.TOKEN_LIMIT_MAX)
-        with SessionLocal() as db:
-            benutzer = db.get(User, self._user_id)
-            if benutzer is None:
-                # Kein Kontingentfall: das Konto ist mitten in der Sitzung
-                # verschwunden. `False` hiesse „warte eine Minute" — eine
-                # falsche Auskunft. Wie jeder andere Buchungsfehler: ins
-                # Protokoll, das Gespraech laeuft weiter; beendet wird die
-                # Sitzung ohnehin an der naechsten Stelle, die den Benutzer
-                # wirklich braucht (der Lauf selbst).
-                logger.warning(
-                    "Abschrift nicht verbucht user=%s: Benutzer existiert nicht mehr",
-                    self._user_id,
-                )
-                return True
-            try:
-                ereignis = ai_usage_service.reserve_ai_usage(
-                    db,
-                    benutzer,
-                    request_id=uuid4(),
-                    estimated_tokens=geschaetzt,
-                    estimated_cost_microunits=estimate_cost_microunits(zugang, geschaetzt),
-                    provider_id=zugang.id,
-                    model=zugang.transcription_model,
-                )
-                # Dieselbe Abrechnung wie im Chat und in der Verdichtung: was
-                # der Anbieter meldet, sticht die Schätzung.
-                tokens, kosten, herkunft = ai_usage_service.abrechnung(
-                    messwerte,
-                    reserved_tokens=ereignis.reserved_tokens,
-                    estimated_actual_tokens=geschaetzt,
-                    token_price_micro_usd_per_million=(
-                        zugang.token_price_micro_usd_per_million
-                    ),
-                )
-                ai_usage_service.complete_ai_usage(
-                    db, ereignis,
-                    actual_tokens=tokens,
-                    actual_cost_microunits=kosten,
-                    aufschluesselung=messwerte,
-                    cost_source=herkunft,
-                )
-                db.commit()
-            except ai_usage_service.AiQuotaExceeded as grenze:
-                db.rollback()
-                logger.info(
-                    "Abschrift ohne Kontingent user=%s grund=%s",
-                    self._user_id, grenze.reason,
-                )
-                return False
-            except Exception:
-                db.rollback()
-                logger.warning(
-                    "Abschrift nicht verbucht user=%s", self._user_id, exc_info=True
-                )
-        return True
+        return voice_transcription.abschrift_verbuchen(
+            user_id=self._user_id,
+            zugang=zugang,
+            messwerte=messwerte,
+            wortlaut=wortlaut,
+        )
 
     def _zugang_holen(self, resolve_api_key, provider_id: int) -> tuple[AiProvider | None, str | None]:
         """Zugang und Schlüssel je Zug frisch — die Sitzung hält keine offene DB."""
-        with SessionLocal() as db:
-            zugang = db.get(AiProvider, provider_id)
-            if zugang is None or not zugang.enabled:
-                return None, None
-            schluessel = resolve_api_key(db, zugang, self._user_id)
-            # Vom ORM lösen, damit das Objekt die Sitzung überlebt: gelesen
-            # werden danach nur noch Felder, die schon geladen sind.
-            db.expunge(zugang)
-            return zugang, schluessel
+        return voice_transcription.zugang_holen(
+            user_id=self._user_id,
+            provider_id=provider_id,
+            resolve_api_key=resolve_api_key,
+        )
 
     # ── Antworten ─────────────────────────────────────────────────────────
 
@@ -835,9 +471,8 @@ class Sprachbruecke:
             # `familie=None`, und sein Auftrag war wieder für jedes gekoppelte
             # Gerät abholbar (`desktop_job_service.naechster`).
             familie=self._familie,
-            voice_output_checkpoint=self._sprechpunkt or None,
+            voice_output_checkpoint=self._run_output.checkpoint_verbrauchen(),
         )
-        self._sprechpunkt = ""
         if run_id is None:
             code = fehler[0] if fehler else "AI_PROVIDER_UNAVAILABLE"
             logger.info("Sprachlauf abgelehnt user=%s code=%s", self._user_id, code)
@@ -856,6 +491,7 @@ class Sprachbruecke:
             return
 
         await asyncio.to_thread(self._prefetch_sitzung_an_lauf, run_id)
+        self._voice_run_ids.add(run_id)
 
         self._lage.laeufe += 1
         # Dieselbe Reihenfolge wie im Chat-Endpunkt, und sie ist hier alles:
@@ -869,168 +505,26 @@ class Sprachbruecke:
         # zwei Segmente desselben Laufs auseinanderhält. Ein direkter Aufruf
         # wäre ein zweiter Schreiber auf demselben Zustand, sobald eine
         # Bestätigung den Lauf gleichzeitig weckt.
-        ai_run_broker.eroeffnen(run_id)
-        abo = ai_run_broker.abonnieren(run_id)
+        abo = self._run_output.eroeffnen_und_abonnieren(run_id)
         ai_run_service.lauf_starten(run_id)
         try:
             await self._lauf_verfolgen(abo)
         finally:
-            if abo is not None:
-                ai_run_broker.abmelden(run_id, abo[1])
+            self._run_output.abmelden(run_id, abo)
 
-    async def _lauf_verfolgen(self, abo) -> None:
-        if abo is None:
-            await self._zustand_melden(ZUSTAND_BEREIT)
-            return
-        _abzug, warteschlange = abo
-        filter_ = Belegfilter()
-        self._lauf_gesprochen = False
-        async with self._stimmweg.Stimme(
+    def _stimme_oeffnen(self):
+        return self._stimmweg.Stimme(
             adresse=self._stimm_adresse,
             schluessel=self._stimm_schluessel,
             senden=self._ton_senden,
-        ) as stimme:
-            self._stimme = stimme
-            try:
-                while True:
-                    try:
-                        ereignis, daten = await asyncio.wait_for(
-                            warteschlange.get(), LAUF_TIMEOUT
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning("Sprachlauf ohne Ereignis user=%s", self._user_id)
-                        break
-                    if ereignis is None:
-                        break
-                    weiter = await self._ereignis(ereignis, daten, stimme, filter_)
-                    if not weiter:
-                        break
-                rest, belege = filter_.ausklingen()
-                for beleg in belege:
-                    await self._senden(beleg)
-                if rest.strip() and self._ausgabe_aktiv():
-                    self._sprechpunkt += rest
-                    await stimme.sagen(rest)
-                    self._lauf_gesprochen = True
-                if self._lauf_gesprochen and self._ausgabe_aktiv():
-                    await self._zustand_melden(ZUSTAND_SPRICHT)
-                if self._ausgabe_aktiv():
-                    await stimme.ausklingen()
-            finally:
-                self._stimme = None
-        await self._zustand_melden(ZUSTAND_BEREIT)
+        )
 
-    async def _ereignis(
-        self,
-        ereignis: str,
-        daten: dict,
-        stimme: ai_tts.Stimmsitzung,
-        filter_: Belegfilter,
-    ) -> bool:
-        """Ein Ereignis des Laufs. ``False`` heisst: dieser Zug ist zu Ende."""
-        if ereignis == "delta":
-            text = str(daten.get("content") or "")
-            sprechbar, belege = filter_.fuettern(text)
-            for beleg in belege:
-                await self._senden(beleg)
-            if sprechbar.strip() and self._ausgabe_aktiv():
-                self._lauf_gesprochen = True
-                if self._zustand != ZUSTAND_SPRICHT:
-                    await self._zustand_melden(ZUSTAND_SPRICHT)
-                self._sprechpunkt += sprechbar
-                await stimme.sagen(sprechbar)
-            if text:
-                await self._senden({"art": "antworttext", "text": text})
-            return True
+    def _stimme_setzen(self, stimme: ai_tts.Stimmsitzung | None) -> None:
+        self._stimme = stimme
 
-        if ereignis in ("tool_start", "werkzeug_gestartet"):
-            name = self._werkzeugname(daten)
-            if name:
-                # Spekulatives UI-Event unmittelbar an das Frontend weiterleiten:
-                nachricht_start: dict = {
-                    "art": "werkzeug_gestartet",
-                    "name": name,
-                    "spekulativ": True,
-                }
-                if "geo_analysis" in daten and daten["geo_analysis"]:
-                    nachricht_start["geo_analysis"] = daten["geo_analysis"]
-                elif "aufrufe" in daten and isinstance(daten["aufrufe"], list):
-                    for aufruf in daten["aufrufe"]:
-                        if isinstance(aufruf, dict) and aufruf.get("geo_analysis"):
-                            nachricht_start["geo_analysis"] = aufruf["geo_analysis"]
-                            break
-                await self._senden(nachricht_start)
-            return True
-
-        if ereignis in ("tool", "tool_plan"):
-            # Restlichen Text im Puffer sofort an die Stimme weitergeben:
-            rest, belege = filter_.ausklingen()
-            for beleg in belege:
-                await self._senden(beleg)
-            if rest.strip() and self._ausgabe_aktiv():
-                self._lauf_gesprochen = True
-                if self._zustand != ZUSTAND_SPRICHT:
-                    await self._zustand_melden(ZUSTAND_SPRICHT)
-                self._sprechpunkt += rest
-                await stimme.sagen(rest)
-
-            name = self._werkzeugname(daten)
-            if name:
-                nachricht: dict = {"art": "werkzeug", "name": name}
-                if "geo_analysis" in daten and daten["geo_analysis"]:
-                    nachricht["geo_analysis"] = daten["geo_analysis"]
-                elif "aufrufe" in daten and isinstance(daten["aufrufe"], list):
-                    for aufruf in daten["aufrufe"]:
-                        if isinstance(aufruf, dict) and aufruf.get("geo_analysis"):
-                            nachricht["geo_analysis"] = aufruf["geo_analysis"]
-                            break
-                await self._senden(nachricht)
-            return True
-
-        if ereignis == "question":
-            await self._frage_vorlesen(daten, stimme)
-            return False
-
-        if ereignis == "proposal":
-            await self._vorschlag_merken(daten)
-            return True
-
-        if ereignis == "action":
-            # Autonom ausgeführt. Es gibt nichts zu fragen — der Antworttext
-            # sagt ohnehin, was geschehen ist.
-            return True
-
-        if ereignis == "error":
-            await self._senden({"art": "stoerung"})
-            return False
-
-        if ereignis == "done":
-            return True
-
-        if ereignis == "run":
-            status = str(daten.get("status") or "")
-            stop_reason = str(daten.get("stop_reason") or "")
-            if status == "waiting_wake" and stop_reason == "desktop_jobs":
-                # Der Lauf pausiert nur kurz für die Ausführung eines Desktop-Jobs
-                # (z. B. Bildschirmfoto / Mausklick) und wird nach Upload des Ergebnisses
-                # in Segment 2 fortgesetzt. Wir bleiben im Event-Loop und signalisieren DENKT.
-                await self._zustand_melden(ZUSTAND_DENKT)
-                return True
-            return status == "running"
-
-        return True
-
-    @staticmethod
-    def _werkzeugname(daten: dict) -> str:
-        name = daten.get("name") or daten.get("tool_name")
-        if isinstance(name, str) and name:
-            return name
-        aufrufe = daten.get("aufrufe")
-        if isinstance(aufrufe, list) and aufrufe:
-            erster = aufrufe[0]
-            if isinstance(erster, dict):
-                return str(erster.get("tool_name") or erster.get("name") or "")
-        return ""
+    async def _lauf_verfolgen(self, abo) -> None:
+        """Kompatibler Delegationspunkt für bestehende Voice-Tests."""
+        await self._run_output.verfolgen(abo)
 
     # ── Rückfrage und Bestätigung ─────────────────────────────────────────
 
@@ -1165,67 +659,9 @@ class Sprachbruecke:
         ``None`` heisst: es gibt nichts zu verfolgen — der Vorschlag hing an
         keinem Lauf, oder die Fortsetzung kam nicht zustande.
         """
-        from services import ai_action_errors, ai_proposal_service, ai_run_service
-
-        with SessionLocal() as db:
-            benutzer = db.get(User, self._user_id)
-            if benutzer is None:
-                return False, None
-            try:
-                vorschlag = ai_proposal_service.owned_proposal(db, kennung, benutzer)
-                if vorschlag is None:
-                    # Nicht seiner. `confirm_proposal` würde das gleich
-                    # darauf ebenfalls feststellen und ablehnen — aber ein
-                    # Aufruf, von dem hier schon feststeht, dass er
-                    # scheitern muss, liest sich wie einer, der gelingen
-                    # könnte. Die Kennung stammt aus einem Ereignis dieser
-                    # Sitzung; steht sie trotzdem nicht in seinem Bestand,
-                    # ist das kein Alltagsfall, sondern einer fürs
-                    # Protokoll.
-                    logger.info(
-                        "Gesprochene Bestaetigung fuer fremden Vorschlag user=%s",
-                        self._user_id,
-                    )
-                    return False, None
-                lauf_id = getattr(vorschlag, "run_id", None)
-                _, token = ai_proposal_service.confirm_proposal(
-                    db, proposal_id=kennung, user=benutzer
-                )
-                ai_proposal_service.execute_proposal(
-                    db, proposal_id=kennung, user=benutzer, confirmation_token=token
-                )
-                db.commit()
-                fortgesetzt: str | None = None
-                if lauf_id:
-                    with contextlib.suppress(Exception):
-                        if ai_run_service.lauf_fortsetzen(db, run_id=lauf_id):
-                            fortgesetzt = lauf_id
-                        db.commit()
-                if fortgesetzt:
-                    # Ein geweckter **Worker** wird nicht verfolgt: die Stimme
-                    # spricht ausschliesslich Gehirn-Ausgaben (Doku §12). Das
-                    # Wecken selbst ist richtig und bleibt — sein Ergebnis
-                    # kommt als Meldung, und die spricht der Zusteller.
-                    lauf = db.get(AiRun, fortgesetzt)
-                    fenster = (
-                        db.get(AiConversation, lauf.conversation_id)
-                        if lauf is not None else None
-                    )
-                    if fenster is not None and fenster.kind == "worker":
-                        fortgesetzt = None
-                return True, fortgesetzt
-            except ai_action_errors.AiActionStateError as fehler:
-                db.rollback()
-                logger.info(
-                    "Gesprochene Bestaetigung abgewiesen user=%s code=%s",
-                    self._user_id, fehler.args[0] if fehler.args else "?",
-                )
-            except Exception:
-                db.rollback()
-                logger.warning(
-                    "Gesprochene Bestaetigung gescheitert user=%s", self._user_id
-                )
-        return False, None
+        return voice_interactions.vorschlag_ausfuehren(
+            user_id=self._user_id, kennung=kennung
+        )
 
     async def _fortsetzung_verfolgen(self, lauf_id: str | None) -> None:
         """Nach dem gesprochenen Ja dem geweckten Lauf zuhören.
@@ -1241,12 +677,12 @@ class Sprachbruecke:
             # der Browser „denkt" für etwas, das längst erledigt ist.
             await self._zustand_melden(ZUSTAND_BEREIT)
             return
-        abo = ai_run_broker.abonnieren(lauf_id)
+        self._voice_run_ids.add(lauf_id)
+        abo = self._run_output.abonnieren(lauf_id)
         try:
             await self._lauf_verfolgen(abo)
         finally:
-            if abo is not None:
-                ai_run_broker.abmelden(lauf_id, abo[1])
+            self._run_output.abmelden(lauf_id, abo)
 
     # ── Der Zusteller: Worker-Meldungen als gesprochener Zwischenruf ───────
 
@@ -1342,17 +778,17 @@ class Sprachbruecke:
             if run is None:
                 await self._zustand_melden(ZUSTAND_BEREIT)
                 return
+            self._voice_run_ids.add(run.id)
             self._lage.laeufe += 1
             # `zustellung_anstossen` hat den Lauf ueber `anlauf` bereits
             # eroeffnet und sein Segment geplant — die Aufgabe laeuft aber
             # erst am naechsten Haltepunkt an, und bis hierher gibt es
             # keinen: das Abo kommt nie zu spaet.
-            abo = ai_run_broker.abonnieren(run.id)
+            abo = self._run_output.abonnieren(run.id)
             try:
                 await self._lauf_verfolgen(abo)
             finally:
-                if abo is not None:
-                    ai_run_broker.abmelden(run.id, abo[1])
+                self._run_output.abmelden(run.id, abo)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1386,111 +822,11 @@ class Sprachbruecke:
         await self._senden({"art": "zustand", "zustand": zustand})
 
     async def _verarbeite_teil_transkript(self, text_chunk: str) -> None:
-        """Klassifiziert partielle Transkripte und stößt spekulatives Prefetching an."""
-        from services.ai_intent_classifier import classify_streaming_intent, is_side_effect_free, prefetch_cache
-        from services.ai_latency_metrics import metrics
-
-        started_at = time.perf_counter()
-        prediction = classify_streaming_intent(text_chunk)
-        metrics.record(
-            "voice", "intent_classification", (time.perf_counter() - started_at) * 1000,
-            "matched" if prediction is not None else "no_match",
-        )
-        if prediction is None:
-            return
-        self._intent_revision += 1
-        revision = self._intent_revision
-        # Ein neues erkanntes Ziel ersetzt jeden älteren spekulativen Abruf,
-        # auch wenn der neue Chunk noch keine vollständigen Tool-Argumente
-        # enthält. Abgebrochene Thread-Arbeit darf später nie wieder sichtbar
-        # werden oder einen Cache-Hit erzeugen.
-        prefetch_cache.invalidate(session_id=self._prefetch_sitzung_id, user_id=self._user_id)
-
-        nachricht: dict = {
-            "art": "intent_erkannt",
-            "intent": prediction.intent,
-            "confidence": prediction.confidence,
-            "entities": prediction.entities,
-            "arguments": prediction.arguments,
-            "spekulativ": bool(prediction.arguments),
-            "prefetch_status": "erkannt",
-            "revision": revision,
-        }
-        await self._senden(nachricht)
-
-        # Ohne vollständige Argumente gibt es absichtlich keinen Abruf. Das
-        # trifft derzeit insbesondere Kalenderfragen ohne eindeutigen Zeitraum.
-        if not prediction.arguments or not is_side_effect_free(prediction.intent):
-            return
-        task = await prefetch_cache.prefetch(
-            session_id=self._prefetch_sitzung_id,
-            user_id=self._user_id,
-            tool_name=prediction.intent,
-            arguments=prediction.arguments,
-            executor=lambda: asyncio.to_thread(self._prefetch_lesen, prediction.intent, prediction.arguments),
-        )
-        if task is not None:
-            await self._senden({**nachricht, "prefetch_status": "gestartet"})
-            asyncio.create_task(self._prefetch_beobachten(task, prediction, revision))
-            if prediction.intent == "analyze_region":
-                asyncio.create_task(self._geo_ziel_senden(prediction, revision))
-
-    def _prefetch_lesen(self, tool_name: str, arguments: dict) -> dict:
-        """Derselbe Dispatcher wie der LLM-Aufruf, samt aller Rechteprüfungen."""
-        from services.ai_action_service import execute_read_tool
-
-        with SessionLocal() as db:
-            user = db.get(User, self._user_id)
-            if user is None or not user.is_active:
-                raise RuntimeError("user unavailable")
-            return execute_read_tool(
-                db, user=user, tool_name=tool_name, arguments=arguments,
-                herkunft=self._herkunft, familie=self._familie,
-            )
-
-    async def _prefetch_beobachten(self, task: asyncio.Task, prediction, revision: int) -> None:
-        try:
-            value = await task
-            status = "fertig" if value is not None else "fehler"
-        except asyncio.CancelledError:
-            status = "abgebrochen"
-        except Exception:
-            status = "fehler"
-        if revision != self._intent_revision:
-            return
-        await self._senden({
-            "art": "intent_erkannt", "intent": prediction.intent,
-            "confidence": prediction.confidence, "entities": prediction.entities,
-            "arguments": prediction.arguments, "spekulativ": True,
-            "prefetch_status": status, "revision": revision,
-        })
-
-    async def _geo_ziel_senden(self, prediction, revision: int) -> None:
-        from services import ai_geo_service
-
-        location = str(prediction.arguments["location"])
-        geo = await asyncio.to_thread(ai_geo_service.geocode_location, location)
-        if not geo or revision != self._intent_revision:
-            return
-        await self._senden({
-            "art": "intent_erkannt", "intent": prediction.intent,
-            "confidence": prediction.confidence, "entities": prediction.entities,
-            "arguments": prediction.arguments, "spekulativ": True,
-            "prefetch_status": "gestartet", "revision": revision,
-            "geo_target": {"location": geo["name"], "latitude": geo["latitude"], "longitude": geo["longitude"], "bbox": geo["bbox"]},
-        })
+        """Klassifiziert partielle Transkripte ohne einen zweiten Tool-Pfad."""
+        await self._prefetch.verarbeite(text_chunk)
 
     def _prefetch_sitzung_an_lauf(self, run_id: str) -> None:
-        from services import ai_run_service
-
-        with SessionLocal() as db:
-            run = db.get(AiRun, run_id)
-            if run is None:
-                return
-            zustand = ai_run_service.zustand_lesen(run)
-            zustand["prefetch_session_id"] = self._prefetch_sitzung_id
-            ai_run_service.zustand_schreiben(run, zustand)
-            db.commit()
+        self._prefetch.an_lauf_binden(run_id)
 
     async def _ausgabe_unterbrechen(self) -> None:
         """Stoppt sofort nur die Ausgabe; Tool-Runs laufen kontrolliert weiter."""
@@ -1507,11 +843,18 @@ class Sprachbruecke:
         aufgabe = asyncio.current_task()
         return aufgabe is None or aufgabe not in self._unterdrueckte_laeufe
 
-    async def _abwuergen(self) -> None:
-        """Bricht einen Lauf nur auf ausdruecklichen Benutzerwunsch ab."""
-        from services.ai_intent_classifier import prefetch_cache
+    async def _abwuergen(self, *, runs_abbrechen: bool = False) -> None:
+        """Räumt Voice-Ausgabe auf; nur ein expliziter Abort beendet AI-Runs."""
+        self._prefetch.invalidieren()
+        if runs_abbrechen and self._voice_run_ids:
+            from services import ai_run_service
 
-        prefetch_cache.invalidate(session_id=self._prefetch_sitzung_id, user_id=self._user_id)
+            await asyncio.to_thread(
+                ai_run_service.eigene_laeufe_abbrechen,
+                user_id=self._user_id,
+                run_ids=set(self._voice_run_ids),
+            )
+            self._voice_run_ids.clear()
         if (self._laufende is not None and not self._laufende.done()) or (self._stimme is not None):
             self._unterbrochen_fuer_merge = True
         await self._ausgabe_unterbrechen()

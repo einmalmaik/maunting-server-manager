@@ -101,7 +101,10 @@ Das Abonnieren vor `lauf_starten` schließt ein Rennen: Der erste Text-Delta kan
 
 `backend/routers/ai_voice.py` schützt den WebSocket mit Origin-Prüfung, Session-Authentifizierung und Berechtigung. Der Socket liegt bewusst unter `/api`, damit die sichere Cookie-/Desktop-Authentifizierung greift und kein Token in einer URL nötig ist.
 
-`backend/services/ai_voice_bridge.py` ist die Übersetzungsschicht:
+`backend/services/ai_voice_bridge.py` ist die kompatible Fassade. Die
+Sitzungs-, Text-, STT-, Prefetch-, Interaktions- und Broker-Ausgabe-Bausteine
+liegen darunter in `backend/services/ai_voice/`; sie eröffnen keinen zweiten
+Run- oder Tool-Pfad.
 
 ```text
 Browser-Mikrofon (PCM16)
@@ -113,7 +116,7 @@ Browser-Mikrofon (PCM16)
   → Browser-Lautsprecher und Bildschirmtext
 ```
 
-Die Voice-Brücke entscheidet nicht über Rechte oder Aktionen. Sie übersetzt Ein- und Ausgabe. Sie kann Beleg-Codeblöcke auf dem Bildschirm anzeigen, statt sie vorzulesen, und kann eine gesprochene Zustimmung an den bestehenden Vorschlagsfluss weitergeben.
+Die Voice-Brücke entscheidet nicht über Rechte oder Aktionen. Sie übersetzt Ein- und Ausgabe. Der typisierte Broker→Voice-Vertrag projiziert nur sichere Tool-Anzeigedaten: Tool-Plan, Tool-Name, Gruppen- und Statusdaten sowie Geo- und Web-Ergebnisse. Tool-Argumente, Rohresultate und Abschriften verlassen den Broker nicht. Sie kann Beleg-Codeblöcke auf dem Bildschirm anzeigen, statt sie vorzulesen, und kann eine gesprochene Zustimmung an den bestehenden Vorschlagsfluss weitergeben.
 
 ### Teiltranskripte und Intent-Prefetch
 
@@ -307,10 +310,10 @@ Die Voice-Brücke erhält Broker-Ereignisse und verarbeitet sie so:
 - Text-Deltas werden durch `Belegfilter` geführt.
 - Fertige Sätze gehen unmittelbar an die offene TTS-Sitzung.
 - Code-/Logbelege gehen als Bildschirmereignis heraus und werden nicht vorgelesen.
-- Tool-Start und Tool-Resultate werden als UI-Ereignisse weitergereicht.
+- Tool-Start und Tool-Resultate werden als UI-Ereignisse weitergereicht; bei Tool-Plänen bleiben alle Aufrufe in Reihenfolge erhalten. `geo_analysis` und `web_results` werden additiv übertragen.
 - Vorschläge werden gesprochen und warten dann auf dieselbe serverseitige Bestätigung wie im Chat.
 
-Bei Barge-In schließt die aktuelle TTS-Ausgabe. Ein expliziter `abbrechen`-/`abort`-Rahmen ist von einer bloßen Sprachunterbrechung getrennt. Der letzte an die Stimme gegebene Text wird nur flüchtig für den nächsten Voice-Zug verwendet, damit bereits gesprochene Inhalte nicht automatisch wiederholt werden.
+Bei Barge-In schließt ausschließlich die aktuelle TTS-Ausgabe; der zugrunde liegende Run und sein read-only Prefetch arbeiten kontrolliert weiter. Ein expliziter `abbrechen`-/`abort`-Rahmen invalidiert den Prefetch und beendet nur die serverseitig dieser Sitzung zugeordneten, besitzgeprüften Runs. Der letzte an die Stimme gegebene Text wird nur flüchtig für den nächsten Voice-Zug verwendet, damit bereits gesprochene Inhalte nicht automatisch wiederholt werden.
 
 Der Frontend-Hook `frontend/src/components/ai/voice/useSprachsitzung.ts` verwaltet WebSocket, Mikrofon und Wiedergabe, aber keine Berechtigungslogik. Er reagiert auf Status, Audio, Text, Tool-, Vorschlags-, Intent- und Geo-Ereignisse.
 
@@ -377,7 +380,7 @@ Vor einer Migration müssen die bestehenden Sicherheitsinvarianten als Tests fes
 | Bereich | Primäre Quelldateien |
 |---|---|
 | Chat-Eingang/SSE | `backend/routers/ai_chat.py`, `backend/services/ai_run_broker.py` |
-| Voice/WebSocket | `backend/routers/ai_voice.py`, `backend/services/ai_voice_bridge.py`, `backend/services/ai_voice_vad.py`, `backend/services/ai_stt.py`, `backend/services/ai_tts.py`, `backend/services/ai_tts_elevenlabs.py` |
+| Voice/WebSocket | `backend/routers/ai_voice.py`, `backend/services/ai_voice_bridge.py`, `backend/services/ai_voice/`, `backend/services/ai_voice_vad.py`, `backend/services/ai_stt.py`, `backend/services/ai_tts.py`, `backend/services/ai_tts_elevenlabs.py` |
 | Run-Start und Lebenszyklus | `backend/services/ai_stream/launcher.py`, `backend/services/ai_run_service.py`, `backend/services/ai_stream/lifecycle.py` |
 | Modellstream | `backend/services/ai_stream/engine.py`, `backend/services/openai_compatible_adapter.py`, `backend/services/openai_responses_adapter.py`, `backend/services/anthropic_messages_adapter.py` |
 | Tools | `backend/services/ai_tool_registry.py`, `backend/services/ai_action_service.py`, `backend/services/ai_stream/read_tools.py`, `backend/services/ai_stream/write_tools.py` |

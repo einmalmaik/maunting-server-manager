@@ -25,8 +25,8 @@ nicht.
 
 **Wie man eine Hörweise wieder loswird:** die Datei löschen, ihren Eintrag aus
 `_WEGE` streichen, ihren Namen aus `gehoer_wege` des betroffenen Anbieters
-nehmen. Sonst hängt nichts an ihr — kein Aufrufer kennt sie, `ai_voice_bridge`
-ruft nur `hoeren()`.
+nehmen. Sonst hängt nichts an ihr — kein Aufrufer kennt sie,
+`ai_voice.transcription` ruft nur `hoeren()`.
 
 **Was hier bewusst nicht passiert.** Kein Bewerten, kein Zusammenfassen, kein
 Beantworten. Was zurückkommt, ist der Wortlaut des Menschen und wird behandelt
@@ -34,7 +34,7 @@ wie eine getippte Zeile — mit derselben Skepsis und denselben Rechten, nicht m
 mehr. Ein hörendes Modell, das aus dem Gesagten Schlüsse zöge, wäre eine zweite
 Denkstelle neben Luna, und genau die ist am 16.08.2026 abgeschafft worden.
 
-**Gebucht wird die Abschrift beim Aufrufer**, nicht hier. `ai_voice_bridge`
+**Gebucht wird die Abschrift beim Aufrufer**, nicht hier. `ai_voice.transcription`
 übergibt ein `StreamUsage` und verbucht es nach gelungener Abschrift als
 eigenen Verbrauch (`_abschrift_verbuchen`) — das Zuhören zählt damit gegen
 dieselben Tages- und Monatsgrenzen wie der Denk- und der Sprechweg. Die
@@ -270,7 +270,7 @@ async def hoeren(
     weiss, wo er endet.
 
     ``usage`` nimmt die vom Anbieter gemeldeten Tokenzahlen auf, wenn der
-    Aufrufer sie sehen will — `ai_voice_bridge` verbucht sie damit nach
+    Aufrufer sie sehen will — `ai_voice.transcription` verbucht sie damit nach
     gelungener Abschrift als eigenen Verbrauch (siehe Modulkopf). Ohne Angabe
     werden sie verworfen; das ist der Fall für Aufrufe ohne Buchungspflicht,
     etwa einen Testlauf.

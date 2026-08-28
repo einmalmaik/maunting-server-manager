@@ -659,6 +659,70 @@ def test_a_restart_closes_running_runs_honestly(db: Session, regular_user: User)
 
 
 @pytest.mark.asyncio
+async def test_explicit_voice_abort_only_cancels_owned_runs_and_clears_memory(
+    db: Session, regular_user: User, owner_user: User
+) -> None:
+    """Ein Sprach-Abbruch ist serverseitig besitzgeprüft, auch mit fremder ID."""
+
+    provider = _provider(db)
+    eigener = ai_run_service.lauf_anlegen(
+        db,
+        conversation_id=_conversation(db, regular_user).id,
+        user_id=regular_user.id,
+        provider_id=provider.id,
+        message_id=None,
+        reasoning=False,
+        zustand=ai_run_service.leerer_zustand(
+            [{"role": "user", "content": "synthetic-private-voice-text"}],
+            request_id=str(uuid4()),
+        ),
+    )
+    fremder = ai_run_service.lauf_anlegen(
+        db,
+        conversation_id=_conversation(db, owner_user).id,
+        user_id=owner_user.id,
+        provider_id=provider.id,
+        message_id=None,
+        reasoning=False,
+        zustand=ai_run_service.leerer_zustand([], request_id=str(uuid4())),
+    )
+    db.commit()
+    ai_run_broker.eroeffnen(eigener.id)
+    abo = ai_run_broker.abonnieren(eigener.id)
+    assert abo is not None
+    _abzug, warteschlange = abo
+    vorherige_schleife = ai_run_service._SCHLEIFE
+    vorheriger_client = ai_run_service._HTTP
+    ai_run_service.laufzeit_setzen(asyncio.get_running_loop(), vorheriger_client)
+
+    try:
+        assert ai_run_service.eigene_laeufe_abbrechen(
+            user_id=regular_user.id, run_ids={eigener.id, fremder.id}
+        ) == 1
+        ereignis, daten = await asyncio.wait_for(warteschlange.get(), timeout=1)
+        assert ereignis == "run"
+        assert daten == {
+            "run_id": eigener.id,
+            "status": "cancelled",
+            "stop_reason": "user_abort",
+        }
+        assert await asyncio.wait_for(warteschlange.get(), timeout=1) == (None, None)
+    finally:
+        ai_run_broker.abmelden(eigener.id, warteschlange)
+        ai_run_service.laufzeit_setzen(vorherige_schleife, vorheriger_client)
+
+    db.expire_all()
+    abgebrochen = db.get(AiRun, eigener.id)
+    unberuehrt = db.get(AiRun, fremder.id)
+    assert abgebrochen is not None
+    assert abgebrochen.status == "cancelled"
+    assert abgebrochen.stop_reason == "user_abort"
+    assert ai_run_service.zustand_lesen(abgebrochen)["provider_messages"] == []
+    assert unberuehrt is not None
+    assert unberuehrt.status == "running"
+
+
+@pytest.mark.asyncio
 async def test_a_finished_run_keeps_no_working_memory(
     db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
