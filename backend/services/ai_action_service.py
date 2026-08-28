@@ -15,6 +15,7 @@ Die Zuordnung "welches Werkzeug gehoert in welche Menge" steht in
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import PurePosixPath
 import json
@@ -3484,7 +3485,9 @@ def _execute_web_search(
     return {"available": True, "query": sichere_anfrage[:200], "results": results}
 
 
-def _execute_analyze_region(db: Session, *, user: User, arguments: dict) -> dict:
+def _execute_analyze_region(
+    db: Session, *, user: User, arguments: dict, prefetch_session_id: str | None = None,
+) -> dict:
     """Führt eine regionale Analyse samt optionaler, aktueller Weblage durch."""
     from services import ai_geo_service, ai_web_search_service, permission_service
 
@@ -3499,32 +3502,36 @@ def _execute_analyze_region(db: Session, *, user: User, arguments: dict) -> dict
         raise AiActionValidationError("Kameramodus ist ungültig")
 
     safe_location = redact_sensitive_text(location.strip())[:100]
-    analysis = ai_geo_service.analyze_region(safe_location)
+    can_search = permission_service.has_global_permission(db, user, "ai.web_search.use")
+    search_configured = can_search and ai_web_search_service.is_configured()
+
+    def regional_news() -> tuple[list[dict], str]:
+        if not can_search:
+            return [], "not_allowed"
+        if not search_configured:
+            return [], "not_configured"
+        try:
+            results = ai_web_search_service.search(
+                f"{safe_location} aktuelle Nachrichten Lagebericht",
+                5,
+                cache_scope=(f"voice:{user.id}:{prefetch_session_id}" if prefetch_session_id else None),
+            )
+            return results, "available"
+        except ai_web_search_service.WebSearchUnavailable as exc:
+            return [], exc.code.lower()
+
+    # Das Geocoding startet Wetter und Sentinel intern parallel. Die Weblage
+    # hängt davon nicht ab und läuft deshalb zeitgleich statt danach.
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="msm-region") as executor:
+        analysis_future = executor.submit(ai_geo_service.analyze_region, safe_location)
+        news_future = executor.submit(regional_news)
+        analysis = analysis_future.result()
+        news, news_status = news_future.result()
     if analysis.get("status") != "success":
         return analysis
-    # Ausschliesslich eine lokale, reversible UI-Anweisung. Sie führt keinen
-    # Systembefehl aus und gibt keine zusätzlichen Daten frei.
     analysis["camera"] = {"mode": camera}
-
-    # Die regionale Weblage wird breit abgefragt. Persoenliche Erinnerungen
-    # beeinflussen ausschliesslich die spaetere Gewichtung im Modellkontext,
-    # nie die Anfrage an einen externen Anbieter.
-    if not permission_service.has_global_permission(db, user, "ai.web_search.use"):
-        analysis["news_status"] = "not_allowed"
-        return analysis
-    if not ai_web_search_service.is_configured():
-        analysis["news_status"] = "not_configured"
-        return analysis
-    try:
-        news = _execute_web_search(
-            db,
-            user=user,
-            arguments={"query": f"{safe_location} aktuelle Nachrichten Lagebericht", "count": 5},
-        )
-        analysis["news"] = news.get("results", [])
-        analysis["news_status"] = "available" if news.get("available") else "unavailable"
-    except AiActionValidationError:
-        analysis["news_status"] = "unavailable"
+    analysis["news"] = news
+    analysis["news_status"] = news_status
     return analysis
 
 
@@ -3813,7 +3820,9 @@ def _execute_global_read_tool(
         )
 
     if tool_name == "analyze_region":
-        return _execute_analyze_region(db, user=user, arguments=arguments)
+        return _execute_analyze_region(
+            db, user=user, arguments=arguments, prefetch_session_id=prefetch_session_id,
+        )
 
     if tool_name == "read_skill":
         return _execute_read_skill(db, user=user, arguments=arguments)

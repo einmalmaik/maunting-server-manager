@@ -51,15 +51,15 @@ describe('RegionalInfoPanel', () => {
     expect(screen.getAllByText(/Sentinel-2 L2A/).length).toBeGreaterThan(0)
 
     // Tab-Wechsel zu Satellit testen
-    const satelliteTab = screen.getByRole('button', { name: /Satellit/i })
+    const satelliteTab = screen.getByRole('tab', { name: /Satellit/i })
     fireEvent.click(satelliteTab)
     expect(screen.getByText(/4.2%/)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /Soziale Medien/i }))
+    fireEvent.click(screen.getByRole('tab', { name: /Soziale Medien/i }))
     expect(screen.getByText(i18n.t('ai.geo.socialUnavailableTitle'))).toBeInTheDocument()
     expect(screen.queryByText(/Normal \/ Stabil/)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /Verkehr/i }))
+    fireEvent.click(screen.getByRole('tab', { name: /Verkehr/i }))
     expect(screen.getByText(i18n.t('ai.geo.trafficUnavailableTitle'))).toBeInTheDocument()
 
     const closeBtn = screen.getByRole('button', { name: i18n.t('ai.geo.close') })
@@ -104,9 +104,26 @@ describe('RegionalInfoPanel', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /Nachrichten/i }))
+    fireEvent.click(screen.getByRole('tab', { name: /Nachrichten/i }))
     expect(screen.getByText('Wichtige Meldung')).toBeInTheDocument()
     expect(screen.getByText('Lage geprüft.')).toBeInTheDocument()
     expect(screen.queryByText(/<strong>|<em>/)).not.toBeInTheDocument()
+  })
+
+  it('stellt die Bereiche als zugängliche Tab-Navigation bereit', () => {
+    render(<RegionalInfoPanel data={mockData} onClose={vi.fn()} />)
+
+    const tablist = screen.getByRole('tablist', { name: i18n.t('ai.geo.tabsLabel') })
+    expect(tablist).toBeInTheDocument()
+
+    const overview = screen.getByRole('tab', { name: /Übersicht/i })
+    const satellite = screen.getByRole('tab', { name: /Satellit/i })
+    expect(overview).toHaveAttribute('aria-selected', 'true')
+
+    overview.focus()
+    fireEvent.keyDown(overview, { key: 'ArrowRight' })
+    expect(satellite).toHaveAttribute('aria-selected', 'true')
+    expect(satellite).toHaveFocus()
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', satellite.id)
   })
 })

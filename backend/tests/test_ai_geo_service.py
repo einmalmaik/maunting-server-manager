@@ -52,6 +52,71 @@ def test_geocode_reuses_inflight_lookup(monkeypatch) -> None:
     assert results[0] == results[1]
 
 
+def test_geocode_retries_without_postcode_when_exact_query_has_no_match(monkeypatch) -> None:
+    queries: list[str] = []
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, payload: list[dict[str, object]]) -> None:
+            self._payload = payload
+
+        def json(self) -> list[dict[str, object]]:
+            return self._payload
+
+    class FakeClient:
+        @staticmethod
+        def get(_url, *, params, **_kwargs):
+            queries.append(params["q"])
+            if params["q"] == "Testburg 12345":
+                return Response([])
+            return Response([{
+                "lat": "53.5", "lon": "13.7",
+                "boundingbox": ["53.4", "53.6", "13.6", "13.8"],
+                "display_name": "Testburg, Deutschland",
+                "address": {"country": "Deutschland", "postcode": "12345"},
+            }])
+
+    monkeypatch.setattr(ai_geo_service, "_geo_cache", {})
+    monkeypatch.setattr(ai_geo_service, "_static_geo_keys", frozenset())
+    monkeypatch.setattr(ai_geo_service, "_geo_cache_expires_at", {})
+    monkeypatch.setattr(ai_geo_service, "_geo_inflight", {})
+    monkeypatch.setattr(ai_geo_service, "_external_http_client", lambda: FakeClient())
+
+    result = ai_geo_service.geocode_location(" Testburg   12345 ")
+
+    assert queries == ["Testburg 12345", "Testburg"]
+    assert result is not None
+    assert result["latitude"] == 53.5
+    assert result["longitude"] == 13.7
+
+
+def test_geocode_rejects_mismatching_postcode_candidates(monkeypatch) -> None:
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json() -> list[dict[str, object]]:
+            return [{
+                "lat": "50.0", "lon": "8.0",
+                "display_name": "Other Testburg",
+                "address": {"country": "Deutschland", "postcode": "99999"},
+            }]
+
+    class FakeClient:
+        @staticmethod
+        def get(*_args, **_kwargs):
+            return Response()
+
+    monkeypatch.setattr(ai_geo_service, "_geo_cache", {})
+    monkeypatch.setattr(ai_geo_service, "_static_geo_keys", frozenset())
+    monkeypatch.setattr(ai_geo_service, "_geo_cache_expires_at", {})
+    monkeypatch.setattr(ai_geo_service, "_geo_inflight", {})
+    monkeypatch.setattr(ai_geo_service, "_external_http_client", lambda: FakeClient())
+
+    assert ai_geo_service.geocode_location("Testburg 12345") is None
+
+
 def test_region_analysis_fetches_weather_and_satellite_in_parallel(monkeypatch) -> None:
     monkeypatch.setattr(ai_geo_service, "geocode_location", lambda _location: {
         "name": "Example City", "country": "Exampleland", "latitude": 1.0,

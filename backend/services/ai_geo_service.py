@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import logging
+import re
 import threading
 import time
+import unicodedata
 from typing import Any
 import httpx
 
@@ -144,11 +146,76 @@ WMO_CODES: dict[int, str] = {
 }
 
 
+def _normalise_location_query(value: str) -> str:
+    """Normalisiert nur verlustfreie Schreibvarianten eines Ortsnamens."""
+    return " ".join(unicodedata.normalize("NFC", value).split())
+
+
+def _geocode_queries(query: str) -> tuple[str, ...]:
+    """Erzeugt maximal eine konservative PLZ-Variante fuer Nominatim.
+
+    Eine Postleitzahl macht einen Ort eindeutiger, wird von Nominatim in einem
+    freien ``q`` aber nicht bei jedem Ortsformat akzeptiert. Die Variante ohne
+    PLZ ist keine semantische Korrektur, sondern dieselbe Ortsangabe ohne das
+    formale Zusatzfeld.
+    """
+    without_postcode = re.sub(r"(?<!\w)\d{4,6}(?!\w)", " ", query)
+    without_postcode = re.sub(r"\s*,\s*", ", ", without_postcode)
+    without_postcode = " ".join(without_postcode.split()).strip(" ,")
+    return tuple(dict.fromkeys(candidate for candidate in (query, without_postcode) if candidate))
+
+
+def _result_from_geocoder_item(item: object, fallback_name: str) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    try:
+        lat = float(item["lat"])
+        lon = float(item["lon"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    raw_bbox = item.get("boundingbox", [])
+    try:
+        bbox = [float(raw_bbox[2]), float(raw_bbox[0]), float(raw_bbox[3]), float(raw_bbox[1])]
+    except (IndexError, TypeError, ValueError):
+        bbox = [lon - 0.05, lat - 0.05, lon + 0.05, lat + 0.05]
+    address = item.get("address", {})
+    country = address.get("country", "") if isinstance(address, dict) else ""
+    return {
+        "name": redact_sensitive_text(str(item.get("display_name") or fallback_name)),
+        "latitude": lat,
+        "longitude": lon,
+        "bbox": bbox,
+        "country": redact_sensitive_text(str(country)),
+    }
+
+
+def _select_geocoder_result(data: list[object], fallback_name: str, postcode: str | None) -> dict[str, Any] | None:
+    """Wählt einen validen Provider-Treffer, mit PLZ als harter Präferenz."""
+    parsed = [
+        (item, result)
+        for item in data
+        if (result := _result_from_geocoder_item(item, fallback_name)) is not None
+    ]
+    if not parsed:
+        return None
+    if not postcode:
+        return parsed[0][1]
+    for item, result in parsed:
+        address = item.get("address", {}) if isinstance(item, dict) else {}
+        if isinstance(address, dict) and str(address.get("postcode", "")) == postcode:
+            return result
+    return None
+
+
 def geocode_location(location_name: str) -> dict[str, Any] | None:
     """Löst einen Ortsnamen in Koordinaten und eine Bounding-Box auf."""
-    query = (location_name or "").strip()
+    query = _normalise_location_query(location_name or "")
     if not query:
         return None
+    postcode_match = re.search(r"(?<!\w)(\d{4,6})(?!\w)", query)
+    postcode = postcode_match.group(1) if postcode_match else None
 
     clean_key = query.lower()
     with _geo_cache_lock:
@@ -177,49 +244,39 @@ def geocode_location(location_name: str) -> dict[str, Any] | None:
             return _geo_cache.get(clean_key)
 
     try:
-        with measure("geo", "geocode_request"):
-            resp = _external_http_client().get(
-                _NOMINATIM_ENDPOINT,
-                params={
-                    "q": query[:100],
-                    "format": "jsonv2",
-                    "limit": 1,
-                    "addressdetails": 1,
-                },
-                headers={"User-Agent": "MSM-Server-Manager/3.0 (RegionalAnalysis)"},
-            )
-        if resp.status_code == 200:
+        for candidate in _geocode_queries(query):
+            with measure("geo", "geocode_request"):
+                resp = _external_http_client().get(
+                    _NOMINATIM_ENDPOINT,
+                    params={
+                        "q": candidate[:100],
+                        "format": "jsonv2",
+                        "limit": 5,
+                        "addressdetails": 1,
+                    },
+                    headers={"User-Agent": "MSM-Server-Manager/3.0 (RegionalAnalysis)"},
+                )
+            if resp.status_code != 200:
+                continue
             data = resp.json()
-            if isinstance(data, list) and len(data) > 0:
-                item = data[0]
-                lat = float(item["lat"])
-                lon = float(item["lon"])
-                bb = item.get("boundingbox", [])  # [min_lat, max_lat, min_lon, max_lon]
-                if len(bb) == 4:
-                    bbox = [float(bb[2]), float(bb[0]), float(bb[3]), float(bb[1])]
-                else:
-                    bbox = [lon - 0.05, lat - 0.05, lon + 0.05, lat + 0.05]
-
-                address = item.get("address", {})
-                country = address.get("country", "")
-
-                result = {
-                    "name": redact_sensitive_text(str(item.get("display_name") or query)),
-                    "latitude": lat,
-                    "longitude": lon,
-                    "bbox": bbox,
-                    "country": redact_sensitive_text(country),
-                }
-                with _geo_cache_lock:
-                    dynamic_keys = [key for key in _geo_cache if key not in _static_geo_keys]
-                    while len(dynamic_keys) >= _GEO_CACHE_MAX_DYNAMIC_ENTRIES:
-                        oldest = min(dynamic_keys, key=lambda key: _geo_cache_expires_at.get(key, 0.0))
-                        _geo_cache.pop(oldest, None)
-                        _geo_cache_expires_at.pop(oldest, None)
-                        dynamic_keys.remove(oldest)
-                    _geo_cache[clean_key] = result
-                    _geo_cache_expires_at[clean_key] = time.monotonic() + _GEO_CACHE_TTL_SECONDS
-                return result
+            if not isinstance(data, list):
+                continue
+            # Nominatim ordnet Treffer bereits nach Relevanz. Bei einer vom
+            # Nutzer genannten PLZ akzeptieren wir ausschließlich denselben
+            # PLZ-Treffer; ansonsten bleibt die Provider-Reihenfolge erhalten.
+            result = _select_geocoder_result(data, candidate, postcode)
+            if result is None:
+                continue
+            with _geo_cache_lock:
+                dynamic_keys = [key for key in _geo_cache if key not in _static_geo_keys]
+                while len(dynamic_keys) >= _GEO_CACHE_MAX_DYNAMIC_ENTRIES:
+                    oldest = min(dynamic_keys, key=lambda key: _geo_cache_expires_at.get(key, 0.0))
+                    _geo_cache.pop(oldest, None)
+                    _geo_cache_expires_at.pop(oldest, None)
+                    dynamic_keys.remove(oldest)
+                _geo_cache[clean_key] = result
+                _geo_cache_expires_at[clean_key] = time.monotonic() + _GEO_CACHE_TTL_SECONDS
+            return result
     except Exception as exc:
         logger.info("Geocoding fehlgeschlagen error=%s", type(exc).__name__)
     finally:

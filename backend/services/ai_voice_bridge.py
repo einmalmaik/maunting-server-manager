@@ -1371,6 +1371,11 @@ class Sprachbruecke:
             return
         self._intent_revision += 1
         revision = self._intent_revision
+        # Ein neues erkanntes Ziel ersetzt jeden älteren spekulativen Abruf,
+        # auch wenn der neue Chunk noch keine vollständigen Tool-Argumente
+        # enthält. Abgebrochene Thread-Arbeit darf später nie wieder sichtbar
+        # werden oder einen Cache-Hit erzeugen.
+        prefetch_cache.invalidate(session_id=self._prefetch_sitzung_id, user_id=self._user_id)
 
         nachricht: dict = {
             "art": "intent_erkannt",
@@ -1422,6 +1427,8 @@ class Sprachbruecke:
             status = "abgebrochen"
         except Exception:
             status = "fehler"
+        if revision != self._intent_revision:
+            return
         await self._senden({
             "art": "intent_erkannt", "intent": prediction.intent,
             "confidence": prediction.confidence, "entities": prediction.entities,
@@ -1434,7 +1441,7 @@ class Sprachbruecke:
 
         location = str(prediction.arguments["location"])
         geo = await asyncio.to_thread(ai_geo_service.geocode_location, location)
-        if not geo:
+        if not geo or revision != self._intent_revision:
             return
         await self._senden({
             "art": "intent_erkannt", "intent": prediction.intent,

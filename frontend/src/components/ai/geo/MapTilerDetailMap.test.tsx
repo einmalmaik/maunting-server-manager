@@ -79,4 +79,36 @@ describe('MapTilerDetailMap', () => {
     await waitFor(() => expect(onUnavailable).toHaveBeenCalledOnce())
     expect(mapHarness.configs).toHaveLength(0)
   })
+
+  it('behält die Karte beim Wechsel des Kameramodus für dasselbe Ziel bei', async () => {
+    mapHarness.getMapTilerMapConfig.mockResolvedValue({
+      configured: true,
+      style_url: 'https://maps.example.test/style.json',
+    })
+
+    const { rerender } = render(
+      <MapTilerDetailMap
+        latitude={52.52}
+        longitude={13.405}
+        locationName="Berlin"
+        globe
+        cameraMode="focus"
+        onUnavailable={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(mapHarness.configs).toHaveLength(1))
+    rerender(
+      <MapTilerDetailMap
+        latitude={52.52}
+        longitude={13.405}
+        locationName="Berlin"
+        globe
+        cameraMode="detail"
+        onUnavailable={vi.fn()}
+      />,
+    )
+
+    expect(mapHarness.configs).toHaveLength(1)
+  })
 })

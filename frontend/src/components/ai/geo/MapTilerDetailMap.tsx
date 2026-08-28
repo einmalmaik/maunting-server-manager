@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Map as MapLibreMap } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { useTranslation } from 'react-i18next'
 
 import { aiApi } from '@/api/ai'
 
@@ -20,17 +21,33 @@ interface MapTilerDetailMapProps {
  * Betreiber einen origin-beschraenkten MapTiler-Browser-Key eingerichtet hat.
  */
 export function MapTilerDetailMap({ latitude, longitude, locationName, onUnavailable, onReady, globe = false, zoom = 8, cameraMode = 'focus' }: MapTilerDetailMapProps) {
+  const { t } = useTranslation()
   const elementRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MapLibreMap | null>(null)
+  const manuallyControlledTargetRef = useRef<string | null>(null)
+  const onUnavailableRef = useRef(onUnavailable)
+  const onReadyRef = useRef(onReady)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
+    onUnavailableRef.current = onUnavailable
+    onReadyRef.current = onReady
+  }, [onReady, onUnavailable])
+
+  useEffect(() => {
+    const target = `${longitude}:${latitude}`
+    // Nur ein neuer, serverseitig bestätigter Zielpunkt darf wieder eine
+    // Kamerafahrt auslösen. Änderungen am Kameramodus bleiben für denselben
+    // Zielpunkt folgenlos, sobald der Nutzer die Karte gesteuert hat.
+    if (manuallyControlledTargetRef.current !== target) {
+      manuallyControlledTargetRef.current = null
+    }
     let disposed = false
     let unavailableReported = false
     const unavailable = () => {
       if (disposed || unavailableReported) return
       unavailableReported = true
-      onUnavailable()
+      onUnavailableRef.current()
     }
     const initialise = async () => {
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
@@ -85,8 +102,14 @@ export function MapTilerDetailMap({ latitude, longitude, locationName, onUnavail
         }
         styleReady = true
         setReady(true)
-        onReady?.()
+        onReadyRef.current?.()
       })
+      const markManualCameraControl = () => {
+        manuallyControlledTargetRef.current = target
+      }
+      map.on('dragstart', markManualCameraControl)
+      map.on('zoomstart', markManualCameraControl)
+      map.on('rotatestart', markManualCameraControl)
       // Ein einzelner fehlender Bildtile darf nicht den kompletten Globus
       // abschalten. Nur ein Fehler vor dem geladenen Stil bedeutet, dass die
       // optionale Karte wirklich nicht verfügbar ist.
@@ -96,12 +119,12 @@ export function MapTilerDetailMap({ latitude, longitude, locationName, onUnavail
     }
     void initialise().catch(unavailable)
     return () => { disposed = true; mapRef.current?.remove(); mapRef.current = null }
-  }, [cameraMode, globe, latitude, longitude, onReady, onUnavailable, zoom])
+  }, [globe, latitude, longitude])
 
   // In der Globusansicht bleibt der Container transparent: darunter zeichnet
   // GlobeViewer ausschließlich den gemeinsamen Weltraum mit Sternen und Sonne.
   return <div className="absolute inset-0 z-[5] bg-transparent" aria-label={`Interaktive Karte für ${locationName}`}>
     <div ref={elementRef} className="h-full w-full" />
-    {!ready && <div className="pointer-events-none absolute inset-0 grid place-items-center bg-surface-container-lowest/70 text-sm text-on-surface-variant">Karte wird geladen</div>}
+    {!ready && <div className="pointer-events-none absolute inset-0 grid place-items-center bg-surface-container-lowest/70 text-sm text-on-surface-variant">{t('ai.geo.mapLoading', 'Karte wird geladen')}</div>}
   </div>
 }
