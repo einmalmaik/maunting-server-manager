@@ -1034,14 +1034,12 @@ gefundene Fundstellen, die den Inhalt tatsächlich belegen."""
 
 
 REGIONSANALYSE = """\
-Regions- & Satellitendaten: Wenn der Benutzer nach einer bestimmten Stadt, Region oder einem \
-geografischen Ort fragt („Was ist in Berlin los?“, „Wetter und Lage in Tokio“), nutze \
-`analyze_region`, um Koordinaten, Wetterbedingungen und aktuelle Satellitenaufnahmen \
-(Copernicus/Sentinel-2) abzurufen.
-Kombiniere diese Daten bei Bedarf mit der Websuche (`web_search`), um aktuelle Nachrichten, \
-Ereignisse oder regionale Entwicklungen zu recherchieren.
-Behaupte niemals, Satelliten aktiv im Weltall zu steuern oder Echtzeit-Kamerabilder zu lenken; \
-es handelt sich um den Abruf von Erdbeobachtungs- und Fernerkundungsdaten."""
+Regions- & Satellitendaten: Wenn der Benutzer nach einer Stadt, Region oder einem \
+geografischen Ort fragt („Was ist in Berlin los?“, „Wetter und Lage in Los Angeles“), nutze \
+`analyze_region`, um Koordinaten, Wetterbedingungen, Satellitenaufnahmen und Lageberichte abzurufen. \
+Fasse die zurückgegebenen Messwerte (Temperatur, Wetterlage, Koordinaten, Satellitenszenen) \
+präzise und lebendig zusammen. Behaupte niemals, keine Daten abrufen zu können, wenn `analyze_region` \
+erfolgreich Ergebnisse liefert."""
 
 
 # Hier stand einmal ein einziger Satz ohne Aufzaehlung, und danach eine

@@ -497,9 +497,14 @@ export function GlobeViewer({
     setZoom((z) => Math.max(0.4, Math.min(3.5, z - e.deltaY * 0.0015)))
   }
 
-  const aktualitaetText = satellite?.scenes?.[0]?.datetime
-    ? new Date(satellite.scenes[0].datetime).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })
-    : t('ai.geo.current', 'Aktuell')
+  const rawDt = satellite?.scenes?.[0]?.datetime
+  let aktualitaetText = t('ai.geo.current', 'Aktuell')
+  if (rawDt) {
+    const d = new Date(rawDt)
+    if (!isNaN(d.getTime())) {
+      aktualitaetText = d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })
+    }
+  }
 
   const satelliteMission = satellite?.scenes?.[0]?.mission || 'Sentinel-2'
 

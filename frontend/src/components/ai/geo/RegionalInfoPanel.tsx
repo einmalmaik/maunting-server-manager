@@ -107,6 +107,13 @@ export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfo
     ]
   }, [layersMap, coordinates?.bbox, previewImg])
 
+function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions): string {
+  if (!val) return 'Aktuell'
+  const d = new Date(val)
+  if (isNaN(d.getTime())) return 'Aktuell'
+  return d.toLocaleDateString(undefined, opts || { day: '2-digit', month: '2-digit' })
+}
+
   const activeLayer = availableLayers.find((l) => l.id === selectedLayerId) || availableLayers[0]
   const currentPreviewUrl = activeLayer?.url || previewImg
 
@@ -115,8 +122,10 @@ export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfo
     const locClean = (location || '').trim()
     const locMain = locClean.split(',')[0].trim().toLowerCase()
 
-    if (news && news.length > 0) {
-      const matched = news.filter((item) => {
+    const rawNews = (news && news.length > 0) ? news : ((data as any)?.news && (data as any).news.length > 0) ? (data as any).news : null
+
+    if (rawNews && rawNews.length > 0) {
+      const matched = (rawNews as NewsItem[]).filter((item) => {
         const fullText = `${item.title} ${item.snippet || ''} ${item.source || ''}`.toLowerCase()
         return !locMain || fullText.includes(locMain)
       })
@@ -268,9 +277,7 @@ export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfo
                     </div>
 
                     <div className="absolute top-2.5 right-2.5 rounded-md bg-black/70 px-2 py-0.5 text-[10px] font-medium text-slate-300 backdrop-blur-md border border-white/10">
-                      {firstScene?.datetime
-                        ? new Date(firstScene.datetime).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })
-                        : t('ai.geo.current', 'Aktuell')}
+                      {formatSafeDate(firstScene?.datetime)}
                     </div>
 
                     {/* Zoom & Fullscreen Controls */}
@@ -492,7 +499,7 @@ export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfo
                     <div key={scene.id} className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest/60 p-2.5 text-[11px] space-y-1">
                       <div className="flex justify-between font-medium text-on-surface">
                         <span>{scene.mission}</span>
-                        <span>{scene.datetime ? new Date(scene.datetime).toLocaleDateString() : t('ai.geo.current', 'Aktuell')}</span>
+                        <span>{formatSafeDate(scene.datetime, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                       </div>
                       {typeof scene.cloud_cover_percent === 'number' && (
                         <div className="text-on-surface-variant flex justify-between text-[10px]">

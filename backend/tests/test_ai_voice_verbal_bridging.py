@@ -15,7 +15,6 @@ from uuid import uuid4
 import pytest
 
 from services import ai_run_broker, ai_tts_elevenlabs, ai_voice_bridge
-from services.ai_voice_bridge import _verbal_bridge_phrase
 
 
 class _Attrappe(ai_voice_bridge.Sprachbruecke):
@@ -70,43 +69,8 @@ class _StummeStimme:
         return None
 
 
-def test_verbal_bridge_phrases_fuer_verschiedene_werkzeuge() -> None:
-    """Prüft, dass für alle Werkzeuggruppen präzise und natürliche Sätze erzeugt werden."""
-    # Kalender
-    phrase_cal = _verbal_bridge_phrase("calendar_read")
-    assert "kalender" in phrase_cal.lower()
-
-    # E-Mail
-    phrase_mail = _verbal_bridge_phrase("email_search")
-    assert "e-mail" in phrase_mail.lower() or "mail" in phrase_mail.lower()
-
-    # Geo / Satellit
-    phrase_geo = _verbal_bridge_phrase("analyze_region")
-    assert "analyse" in phrase_geo.lower() or "satellit" in phrase_geo.lower()
-
-    # Server-Status & Metriken
-    phrase_server = _verbal_bridge_phrase("read_server_status")
-    assert "server" in phrase_server.lower()
-
-    # Server-Logs
-    phrase_logs = _verbal_bridge_phrase("read_server_logs")
-    assert "log" in phrase_logs.lower()
-
-    # Websuche
-    phrase_web = _verbal_bridge_phrase("web_search")
-    assert "web" in phrase_web.lower()
-
-    # Gedächtnis
-    phrase_mem = _verbal_bridge_phrase("search_memory")
-    assert "gedächtnis" in phrase_mem.lower() or "gedaechtnis" in phrase_mem.lower()
-
-    # Unbekanntes Werkzeug -> generischer Fallback
-    phrase_generic = _verbal_bridge_phrase("unknown_custom_tool")
-    assert len(phrase_generic) > 5
-
-
 @pytest.mark.asyncio
-async def test_tool_start_loest_sofort_verbal_bridging_und_spekulatives_ui_event_aus(
+async def test_tool_start_loest_sofort_spekulatives_ui_event_aus(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Wenn ein tool_start-Event eintrifft und die KI noch nichts gesagt hat,
@@ -140,12 +104,10 @@ async def test_tool_start_loest_sofort_verbal_bridging_und_spekulatives_ui_event
 
     stimme = _StummeStimme.letzte
     assert stimme is not None
-    # 1. Die verbale Überbrückungsphrase wurde sofort gesprochen
-    assert any("kalender" in s.lower() for s in stimme.saetze)
-    # 2. Die finale Antwort wurde nahtlos gesprochen
+    # 1. Die finale Antwort wurde nahtlos gesprochen
     assert any("15 uhr" in s.lower() for s in stimme.saetze)
 
-    # 3. Spekulatives UI-Event wurde an den WebSocket gesendet
+    # 2. Spekulatives UI-Event wurde sofort an das Frontend weitergeleitet (< 300ms)
     events = [e for e in bruecke.ereignisse if e.get("art") == "werkzeug_gestartet"]
     assert len(events) == 1
     assert events[0]["name"] == "calendar_read"

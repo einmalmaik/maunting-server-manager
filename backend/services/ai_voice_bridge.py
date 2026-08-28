@@ -173,43 +173,6 @@ def _ist_gedanke_abgeschlossen(text: str) -> bool:
     return len(woerter) >= 4
 
 
-def _verbal_bridge_phrase(tool_name: str) -> str:
-    """Erzeugt eine kurze, natürliche deutsche Überbrückungsphrase für ein beliebiges Werkzeug."""
-    from services.ai_tool_registry import WERKZEUGE
-
-    info = WERKZEUGE.get(tool_name)
-    gruppe = info.gruppe if info else None
-
-    if gruppe == "calendar" or "calendar" in tool_name:
-        return "Ich prüfe deinen Kalender..."
-    if gruppe == "mailbox" or "email" in tool_name:
-        return "Ich sehe in den E-Mails nach..."
-    if gruppe == "geo" or tool_name == "analyze_region":
-        return "Ich starte die regionale Satellitenanalyse..."
-    if gruppe == "memory" or "memory" in tool_name:
-        return "Ich prüfe das Gedächtnis..."
-    if gruppe == "skill" or "skill" in tool_name:
-        return "Ich schlage die Vorgehensweise nach..."
-    if gruppe == "tasks" or "task" in tool_name:
-        return "Ich rufe die Aufträge ab..."
-    if gruppe == "docs" or "docs" in tool_name:
-        return "Ich durchsuche die Dokumentation..."
-    if tool_name == "web_search":
-        return "Ich recherchiere im Web..."
-    if tool_name in ("read_server_status", "read_server_capacity", "list_my_servers"):
-        return "Ich frage die Server-Metriken ab..."
-    if tool_name in ("read_server_logs", "read_server_network", "read_server_ports"):
-        return "Ich prüfe die Server-Logs und Systemdaten..."
-    if tool_name in ("read_config", "list_server_files", "search_server_files"):
-        return "Ich lese die Dateikonfiguration..."
-    if tool_name in ("read_server_mods", "search_workshop_mods", "read_mod_updates"):
-        return "Ich prüfe die Mod-Informationen..."
-    if tool_name in ("read_server_backups", "read_node_capacity", "read_node_health"):
-        return "Ich frage den Systemstatus ab..."
-
-    return "Ich prüfe das kurz..."
-
-
 @dataclass
 class Belegfilter:
     """Trennt im laufenden Text das Gesprochene vom Gezeigten.
@@ -936,15 +899,6 @@ class Sprachbruecke:
         if ereignis in ("tool_start", "werkzeug_gestartet"):
             name = self._werkzeugname(daten)
             if name:
-                # Verbal Bridging: Vorab-Phrase sofort sprechen, wenn noch nichts gesagt wurde
-                if not self._lauf_gesprochen:
-                    phrase = _verbal_bridge_phrase(name)
-                    if phrase:
-                        self._lauf_gesprochen = True
-                        if self._zustand != ZUSTAND_SPRICHT:
-                            await self._zustand_melden(ZUSTAND_SPRICHT)
-                        await stimme.sagen(phrase)
-
                 # Spekulatives UI-Event unmittelbar an das Frontend weiterleiten:
                 nachricht_start: dict = {
                     "art": "werkzeug_gestartet",
