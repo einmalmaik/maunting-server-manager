@@ -805,9 +805,11 @@ export function GlobeViewer({
   }
 
   const rawDt = satellite?.scenes?.[0]?.datetime
-  const mapTilerGlobeZoom = effBbox && effBbox.length === 4
-    ? Math.max(1.5, Math.min(8, Math.log2(360 / Math.max(Math.abs(effBbox[2] - effBbox[0]), Math.abs(effBbox[3] - effBbox[1]), 0.1))))
-    : 1.8
+  // Der Einstieg bleibt bewusst in der Kugelprojektion. Erst die gleiche
+  // Wheel-/Pinch-Geste wie beim alten Globus führt in die Detailkarten.
+  const mapTilerGlobeZoom = effBbox && effBbox.length === 4 && Math.max(Math.abs(effBbox[2] - effBbox[0]), Math.abs(effBbox[3] - effBbox[1])) > 25
+    ? 1.2
+    : 2.2
   let aktualitaetText = t('ai.geo.captureTimeUnknown', 'Aufnahmezeit unbekannt')
   if (rawDt) {
     const d = new Date(rawDt)

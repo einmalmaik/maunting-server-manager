@@ -43,10 +43,20 @@ export function MapTilerDetailMap({ latitude, longitude, locationName, onUnavail
         cooperativeGestures: true,
       })
       mapRef.current = map
-      map.setProjection(globe ? { type: 'globe' } : { type: 'mercator' })
       new Marker({ color: '#38bdf8' }).setLngLat([longitude, latitude]).addTo(map)
-      map.once('load', () => { if (!disposed) setReady(true) })
-      map.on('error', () => { if (!disposed) onUnavailable() })
+      let styleReady = false
+      map.once('style.load', () => {
+        if (disposed) return
+        map.setProjection(globe ? { type: 'globe' } : { type: 'mercator' })
+        styleReady = true
+        setReady(true)
+      })
+      // Ein einzelner fehlender Bildtile darf nicht den kompletten Globus
+      // abschalten. Nur ein Fehler vor dem geladenen Stil bedeutet, dass die
+      // optionale Karte wirklich nicht verfügbar ist.
+      map.on('error', () => {
+        if (!disposed && !styleReady) onUnavailable()
+      })
     }
     void initialise().catch(() => { if (!disposed) onUnavailable() })
     return () => { disposed = true; mapRef.current?.remove(); mapRef.current = null }
