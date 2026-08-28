@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { AiRegionalAnalysis, AiSatelliteLayer } from '@/api/ai'
 import { Button } from '@/Singra/UI'
+import { MapTilerDetailMap } from './MapTilerDetailMap'
 
 type TabType = 'overview' | 'satellite' | 'news' | 'social' | 'traffic' | 'weather'
 
@@ -69,6 +70,7 @@ function RegionalInfoLoading() {
 function RegionalInfoContent({ data, news, onClose }: Omit<RegionalInfoPanelProps, 'data' | 'loading'> & { data: AiRegionalAnalysis }) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<TabType>('overview')
+  const [mapTilerAvailable, setMapTilerAvailable] = useState(true)
   const [satZoom, setSatZoom] = useState(1)
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null)
   const [selectedLayerId, setSelectedLayerId] = useState<string>('latest_imagery')
@@ -391,6 +393,23 @@ function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions):
                 {activeLayer?.mission || 'Bildquelle'}
               </span>
             </div>
+
+            {mapTilerAvailable && data.coordinates && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                  <span>Hochauflösende Kartenansicht</span>
+                  <span className="text-primary">MapTiler</span>
+                </div>
+                <div className="relative aspect-video overflow-hidden rounded-xl border border-primary/25 bg-surface-container-lowest">
+                  <MapTilerDetailMap
+                    latitude={data.coordinates.latitude}
+                    longitude={data.coordinates.longitude}
+                    locationName={data.location}
+                    onUnavailable={() => setMapTilerAvailable(false)}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Layer-Karten */}
             <div className="space-y-3">
