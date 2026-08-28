@@ -97,12 +97,12 @@ async def test_ein_kurzes_geraeusch_wuergt_die_antwort_nicht_ab() -> None:
 
 
 @pytest.mark.asyncio
-async def test_echtes_dazwischenreden_kommt_weiterhin_durch() -> None:
-    """Wer die Mindestrede erreicht, würgt die laufende Antwort ab.
+async def test_echtes_dazwischenreden_stoppt_nur_die_ausgabe() -> None:
+    """Wer die Mindestrede erreicht, stoppt Audio, aber nicht den Tool-Run.
 
-    Das Tor darf das Dazwischenreden nicht abschaffen — es verschiebt es nur
-    hinter dieselbe Messlatte, die auch der Huster-Filter anlegt. Sobald sie
-    gerissen ist, wird der Zug abgebrochen und „hört zu" gemeldet.
+    Die Unterbrechung gilt global fuer Sprache, nicht als stiller Abbruch von
+    Read-Tools. Ein ausdruecklicher ``abbrechen``-Rahmen ist der einzige Weg,
+    der den Run selbst beendet.
     """
     bruecke = _Attrappe()
     bruecke._zustand = ai_voice_bridge.ZUSTAND_SPRICHT
@@ -112,9 +112,27 @@ async def test_echtes_dazwischenreden_kommt_weiterhin_durch() -> None:
     await bruecke._ton(_stille(0.5))
     await bruecke._ton(_ton(0.6, pegel=6000))
 
+    assert not laufende.done()
+    assert bruecke._laufende is laufende
+    assert laufende in bruecke._unterdrueckte_laeufe
+    assert bruecke.zustaende() == [ai_voice_bridge.ZUSTAND_HOERT]
+
+    laufende.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await laufende
+
+
+@pytest.mark.asyncio
+async def test_expliziter_abbruch_beendet_den_lauf() -> None:
+    """Nur der klare Abbruch darf aus einer Sprachunterbrechung einen Run-Abbruch machen."""
+    bruecke = _Attrappe()
+    laufende = asyncio.create_task(asyncio.sleep(60))
+    bruecke._laufende = laufende
+
+    await bruecke._rahmen({"text": '{"art":"abbrechen"}'})
+
     assert laufende.cancelled()
     assert bruecke._laufende is None
-    assert bruecke.zustaende() == [ai_voice_bridge.ZUSTAND_HOERT]
 
 
 @pytest.mark.asyncio

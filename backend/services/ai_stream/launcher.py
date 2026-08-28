@@ -55,6 +55,7 @@ def lauf_beginnen(
     rolle: str | None = None,
     herkunft: str = "panel",
     familie: str | None = None,
+    voice_output_checkpoint: str | None = None,
     intern: bool = False,
 ) -> tuple[AiRun | None, tuple[str, str] | None]:
     """Legt einen Lauf an: Benutzernachricht, Kontingent, Antwortnachricht.
@@ -139,6 +140,20 @@ def lauf_beginnen(
             context_chars=context_chars, unbeaufsichtigt=unbeaufsichtigt,
             gesprochen=gesprochen, rolle=rolle, herkunft=herkunft,
         )
+        # Eine Unterbrechung ist keine neue Information des Benutzers und darf
+        # deshalb weder als Chatzeile gespeichert noch in die Erinnerung
+        # uebernommen werden. Das Modell braucht sie trotzdem im naechsten
+        # Sprachzug, damit es nicht bei einem bereits gehoerten Satz wieder
+        # einsetzt. Der Hinweis lebt darum nur in dieser Provider-Anfrage.
+        if voice_output_checkpoint:
+            provider_messages.append({
+                "role": "system",
+                "content": (
+                    "Die vorige Sprachausgabe wurde unterbrochen. Bis hierher "
+                    "wurde bereits gehoert: " + voice_output_checkpoint[:2_000]
+                    + "\nSetze diesen Inhalt nicht ungefragt fort und wiederhole ihn nicht."
+                ),
+            })
         # Was Guardian gemeldet hat, waehrend niemand da war. Nur wenn dieser
         # Lauf nicht selbst aus einer Heilung stammt — sonst berichtete die KI
         # sich selbst von dem Vorfall, an dem sie gerade arbeitet.
@@ -222,7 +237,6 @@ def lauf_beginnen(
             last_server_id=serverbezug,
         )
         db.commit()
-        print("IN LAUF_BEGINNEN AFTER COMMIT:", [(m.id, m.role, m.content[:20]) for m in db.query(AiMessage).all()])
         return run, None
     except IntegrityError:
         db.rollback()
@@ -332,6 +346,7 @@ def _anlauf_im_thread(
     gesprochen: bool = False,
     herkunft: str = "panel",
     familie: str | None = None,
+    voice_output_checkpoint: str | None = None,
 ) -> tuple[str | None, tuple[str, str] | None]:
     """Der Anlauf mit **eigener** Sitzung — das ist der ganze Zweck.
 
@@ -371,6 +386,7 @@ def _anlauf_im_thread(
             gesprochen=gesprochen,
             herkunft=herkunft,
             familie=familie,
+            voice_output_checkpoint=voice_output_checkpoint,
         )
         # Nur die Kennung verlaesst den Thread. Ein ORM-Objekt aus einer gleich
         # geschlossenen Sitzung ist eine Falle: nach dem Commit sind seine
@@ -392,6 +408,7 @@ async def lauf_beginnen_nebenher(
     gesprochen: bool = False,
     herkunft: str = "panel",
     familie: str | None = None,
+    voice_output_checkpoint: str | None = None,
 ) -> tuple[str | None, tuple[str, str] | None]:
     """`lauf_beginnen`, aber **neben** der Ereignisschleife statt auf ihr.
 
@@ -417,5 +434,6 @@ async def lauf_beginnen_nebenher(
             gesprochen=gesprochen,
             herkunft=herkunft,
             familie=familie,
+            voice_output_checkpoint=voice_output_checkpoint,
         )
 

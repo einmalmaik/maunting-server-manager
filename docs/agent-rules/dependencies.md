@@ -775,3 +775,27 @@ Kapselung und Exit:
   beim Hineinzoomen. Entfernen heißt: diese Komponente, die optionale
   Einstellung und die drei MapTiler-Endpunkte löschen; Sentinel und der
   bestehende Globus bleiben unverändert.
+
+## Pipecat — für die Voice-Pipeline vorerst nicht freigegeben (28.08.2026)
+
+Die Jarvis-Voice-Spezifikation nennt Pipecat als mögliche Orchestrierung. Die
+Prüfung von `pipecat-ai` 1.8.1 (BSD-2-Clause, Python ab 3.11) hat jedoch einen
+nicht lokalen Umbau des Python-Stacks ergeben: Pydantic ab 2.10.6, OpenAI SDK,
+ONNX Runtime, Numba, Audio-Resampling, NLTK, Pillow, Protobuf und weitere
+direkte Laufzeitpakete. MSM pinnt derzeit Pydantic 2.8.2 und benutzt für
+OpenAI-kompatible Anbieter, Whisper und ElevenLabs bewusst kleine, eigene
+Adapter. Ein erzwungenes Upgrade würde deren Verträge und den gesamten
+Abhängigkeitsbaum gleichzeitig ändern.
+
+Die Version 0.0.108 reduziert diese Fläche nicht; sie verlangt ebenfalls
+Pydantic ab 2.10.6 sowie ONNX Runtime, Numba, Transformer und Audio-Pakete.
+Deshalb wird Pipecat nicht als optionaler zweiter Voice-Pfad eingebaut. Das
+würde die zentrale Tool- und Berechtigungspipeline duplizieren und bei einem
+Fehler zwei voneinander abweichende Sicherheitswege schaffen.
+
+Stattdessen bleibt der vorhandene, zentrale Voice-Run die einzige Pipeline:
+Streaming-Adapter → Run-Broker → Tool-Registry/Guardian → TTS. Barge-In
+schließt dort ausschließlich die Ausgabe; ein ausdrücklicher Abbruch beendet
+den Run. Eine spätere Pipecat-Einführung braucht zuerst einen eigenen
+Kompatibilitäts- und Migrationsentscheid für Pydantic, den Audio-Stack,
+Provider-Adapter und vollständige Sicherheits-/Lasttests.

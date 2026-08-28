@@ -387,10 +387,24 @@ class Sprachbruecke:
         #: Der Lauf, der gerade antwortet. Solange einer läuft, wird eine neue
         #: Äusserung als Dazwischenreden behandelt und nicht als zweite Frage.
         self._laufende: asyncio.Task | None = None
+        #: Auch bei einer Sprachunterbrechung weiterlaufende Zuege. Lesen darf
+        #: weiterlaufen; schreibende Werkzeuge bleiben weiter an Guardian,
+        #: Berechtigungen und Freigaben gebunden. Die Menge wird nur fuer den
+        #: ausdruecklichen Abbruch bzw. das Sitzungsende gebraucht.
+        self._laeufe: set[asyncio.Task] = set()
         #: Die Stimme des laufenden Zuges. Zum Abwürgen beim Dazwischenreden.
         self._stimme: ai_tts.Stimmsitzung | None = None
         #: Ob im aktuellen Lauf bereits Text oder Verbal Bridging an TTS gesendet wurde.
         self._lauf_gesprochen: bool = False
+        #: Ein Barge-In schliesst nur den Audiokanal des betroffenen Zuges.
+        #: Die Kennung statt eines globalen Schalters ist wichtig: waehrend
+        #: der alte Run noch seine Read-Tools beendet, kann der Mensch bereits
+        #: einen neuen Zug starten.
+        self._unterdrueckte_laeufe: set[asyncio.Task] = set()
+        #: Der bereits an die Stimme uebergebene, modellierte Teil der Ausgabe.
+        #: Er wird weder gespeichert noch geloggt; nur der naechste Voice-Run
+        #: bekommt ihn als fluechtigen Kontext gegen Wiederholungen.
+        self._sprechpunkt: str = ""
         #: Vorschläge, die auf ein gesprochenes Ja warten.
         self._offene_vorschlaege: list[str] = []
         #: Turn-Merging & Kadenz-Lernen: unfertige Sätze bei Unterbrechung verschmelzen.
@@ -481,6 +495,9 @@ class Sprachbruecke:
         if isinstance(befehl, dict):
             art = befehl.get("art")
             if art == "unterbrechen":
+                await self._ausgabe_unterbrechen()
+                await self._zustand_melden(ZUSTAND_BEREIT)
+            elif art in ("abbrechen", "abort"):
                 await self._abwuergen()
                 await self._zustand_melden(ZUSTAND_BEREIT)
             elif art in ("teil_transkript", "partial_transcript", "transkript_chunk", "chunk"):
@@ -505,7 +522,7 @@ class Sprachbruecke:
             # nur um die Mindestrede später. `_abwuergen` leert `_laufende`,
             # darum feuert dieses Tor je Äusserung höchstens einmal.
             if self._erkennung.rede_nachgewiesen:
-                await self._abwuergen()
+                await self._ausgabe_unterbrechen()
                 await self._zustand_melden(ZUSTAND_HOERT)
         elif not vorher and self._erkennung.spricht:
             # Ohne laufende Antwort gibt es nichts zu schützen — „hört zu"
@@ -530,7 +547,14 @@ class Sprachbruecke:
         # ganzen Antwort weiterreden, und seine Rahmen müssen währenddessen
         # gelesen werden. Genau das ging im alten Sprachmodus verloren — die
         # Schleife stand still, solange ein Werkzeug arbeitete.
-        self._laufende = asyncio.create_task(self._zug(aeusserung))
+        zug = asyncio.create_task(self._zug(aeusserung))
+        self._laufende = zug
+        self._laeufe.add(zug)
+        def _zug_fertig(aufgabe: asyncio.Task) -> None:
+            self._laeufe.discard(aufgabe)
+            self._unterdrueckte_laeufe.discard(aufgabe)
+
+        zug.add_done_callback(_zug_fertig)
 
     # ── ein Zug ───────────────────────────────────────────────────────────
 
@@ -811,7 +835,9 @@ class Sprachbruecke:
             # `familie=None`, und sein Auftrag war wieder für jedes gekoppelte
             # Gerät abholbar (`desktop_job_service.naechster`).
             familie=self._familie,
+            voice_output_checkpoint=self._sprechpunkt or None,
         )
+        self._sprechpunkt = ""
         if run_id is None:
             code = fehler[0] if fehler else "AI_PROVIDER_UNAVAILABLE"
             logger.info("Sprachlauf abgelehnt user=%s code=%s", self._user_id, code)
@@ -859,7 +885,6 @@ class Sprachbruecke:
         _abzug, warteschlange = abo
         filter_ = Belegfilter()
         self._lauf_gesprochen = False
-
         async with self._stimmweg.Stimme(
             adresse=self._stimm_adresse,
             schluessel=self._stimm_schluessel,
@@ -883,12 +908,14 @@ class Sprachbruecke:
                 rest, belege = filter_.ausklingen()
                 for beleg in belege:
                     await self._senden(beleg)
-                if rest.strip():
+                if rest.strip() and self._ausgabe_aktiv():
+                    self._sprechpunkt += rest
                     await stimme.sagen(rest)
                     self._lauf_gesprochen = True
-                if self._lauf_gesprochen:
+                if self._lauf_gesprochen and self._ausgabe_aktiv():
                     await self._zustand_melden(ZUSTAND_SPRICHT)
-                await stimme.ausklingen()
+                if self._ausgabe_aktiv():
+                    await stimme.ausklingen()
             finally:
                 self._stimme = None
         await self._zustand_melden(ZUSTAND_BEREIT)
@@ -906,10 +933,11 @@ class Sprachbruecke:
             sprechbar, belege = filter_.fuettern(text)
             for beleg in belege:
                 await self._senden(beleg)
-            if sprechbar.strip():
+            if sprechbar.strip() and self._ausgabe_aktiv():
                 self._lauf_gesprochen = True
                 if self._zustand != ZUSTAND_SPRICHT:
                     await self._zustand_melden(ZUSTAND_SPRICHT)
+                self._sprechpunkt += sprechbar
                 await stimme.sagen(sprechbar)
             if text:
                 await self._senden({"art": "antworttext", "text": text})
@@ -939,10 +967,11 @@ class Sprachbruecke:
             rest, belege = filter_.ausklingen()
             for beleg in belege:
                 await self._senden(beleg)
-            if rest.strip():
+            if rest.strip() and self._ausgabe_aktiv():
                 self._lauf_gesprochen = True
                 if self._zustand != ZUSTAND_SPRICHT:
                     await self._zustand_melden(ZUSTAND_SPRICHT)
+                self._sprechpunkt += rest
                 await stimme.sagen(rest)
 
             name = self._werkzeugname(daten)
@@ -1463,20 +1492,40 @@ class Sprachbruecke:
             ai_run_service.zustand_schreiben(run, zustand)
             db.commit()
 
+    async def _ausgabe_unterbrechen(self) -> None:
+        """Stoppt sofort nur die Ausgabe; Tool-Runs laufen kontrolliert weiter."""
+        if self._laufende is not None:
+            self._unterdrueckte_laeufe.add(self._laufende)
+        stimme = self._stimme
+        if stimme is not None:
+            with contextlib.suppress(Exception):
+                await stimme.schliessen()
+            await self._senden({"art": "ausgabe_unterbrochen"})
+
+    def _ausgabe_aktiv(self) -> bool:
+        """Ob der aktuell lesende Zug noch an die Stimme senden darf."""
+        aufgabe = asyncio.current_task()
+        return aufgabe is None or aufgabe not in self._unterdrueckte_laeufe
+
     async def _abwuergen(self) -> None:
-        """Den laufenden Zug abbrechen — der Mensch redet dazwischen."""
+        """Bricht einen Lauf nur auf ausdruecklichen Benutzerwunsch ab."""
         from services.ai_intent_classifier import prefetch_cache
 
         prefetch_cache.invalidate(session_id=self._prefetch_sitzung_id, user_id=self._user_id)
         if (self._laufende is not None and not self._laufende.done()) or (self._stimme is not None):
             self._unterbrochen_fuer_merge = True
-        stimme = self._stimme
-        if stimme is not None:
-            with contextlib.suppress(Exception):
-                await stimme.schliessen()
-        aufgabe = self._laufende
+        await self._ausgabe_unterbrechen()
+        aufgaben = list(self._laeufe)
+        if self._laufende is not None and self._laufende not in aufgaben:
+            # Auch Test- und Sonderaufrufer duerfen den expliziten Abbruch
+            # nicht umgehen, nur weil sie den Zug nicht ueber `_ton` angelegt
+            # haben.
+            aufgaben.append(self._laufende)
         self._laufende = None
-        if aufgabe is not None and not aufgabe.done():
-            aufgabe.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await aufgabe
+        for aufgabe in aufgaben:
+            if not aufgabe.done():
+                aufgabe.cancel()
+        for aufgabe in aufgaben:
+            if not aufgabe.done():
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await aufgabe
