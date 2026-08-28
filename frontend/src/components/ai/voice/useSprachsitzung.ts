@@ -366,7 +366,7 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
               verbindung.send(JSON.stringify({ art: 'unterbrechen' }))
             }
           }
-          if (neu === 'bereit') setWerkzeug(null)
+          if (neu === 'bereit' && !geoData) setWerkzeug(null)
           // Nur ein Zustand, in dem wirklich gesprochen oder gehört wird,
           // beweist, dass die Leitung trägt — ein `bereit` folgt auch auf jede
           // Störung und darf sie deshalb nicht wegräumen (siehe

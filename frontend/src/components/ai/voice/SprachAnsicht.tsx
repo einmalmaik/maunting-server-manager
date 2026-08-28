@@ -56,21 +56,30 @@ export function SprachAnsicht({
 
   const [kommandozentraleGeschlossen, setKommandozentraleGeschlossen] = useState(false)
   const lastToolRef = useRef<string | null>(null)
+  const kommandozentraleWarAktiv = useRef(false)
 
   // Wenn ein neues Werkzeug wie analyze_region anläuft, Schließungssperre aufheben
   useEffect(() => {
     if (werkzeug === 'analyze_region' && lastToolRef.current !== 'analyze_region') {
       setKommandozentraleGeschlossen(false)
+      kommandozentraleWarAktiv.current = true
     }
     lastToolRef.current = werkzeug
   }, [werkzeug])
+
+  // geoData allein reicht ebenfalls, um die Kommandozentrale zu aktivieren
+  useEffect(() => {
+    if (geoData) {
+      kommandozentraleWarAktiv.current = true
+    }
+  }, [geoData])
 
   const laeuft = zustand !== 'aus'
   const hoert = zustand === 'hoert' || zustand === 'bereit'
   const beleg = belege.length > 0 ? belege[belege.length - 1] : null
 
   const istKommandozentraleAktiv = Boolean(
-    !kommandozentraleGeschlossen && (geoData || werkzeug === 'analyze_region'),
+    !kommandozentraleGeschlossen && (geoData || werkzeug === 'analyze_region' || kommandozentraleWarAktiv.current),
   )
 
   // 1. DREI-SPALTEN-KOMMANDOZENTRALE BEI AKTIVER REGIONALANALYSE (sofort bei analyze_region oder geoData)
@@ -83,6 +92,7 @@ export function SprachAnsicht({
         onClose={() => {
           setGeoData(null)
           setKommandozentraleGeschlossen(true)
+          kommandozentraleWarAktiv.current = false
         }}
       >
         <div className="flex h-full w-full flex-col justify-between p-4 overflow-y-auto space-y-4">
