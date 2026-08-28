@@ -7,6 +7,7 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import logging
+import time
 from typing import AsyncIterator
 from uuid import UUID
 
@@ -30,6 +31,7 @@ from services.ai_context_service import (
     auf_budget_kuerzen,
     message_character_count,
 )
+from services.ai_latency_metrics import metrics
 from services.ai_proposal_service import (
     AufgabenKontext,
     GuardianKontext,
@@ -116,7 +118,12 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     Die Kommentare zu den einzelnen Entscheidungen stehen bei den Helfern —
     sie sind mit dem Code dorthin gewandert.
     """
+    anlauf_started_at = time.perf_counter()
     anlauf = await ai_stream._segment_anlaufen(run_id, client)
+    metrics.record(
+        "ai_stream", "segment_preparation", (time.perf_counter() - anlauf_started_at) * 1000,
+        "ok" if anlauf is not None else "stopped",
+    )
     if anlauf is None:
         return
     vorbereitung = anlauf.vorbereitung
@@ -272,6 +279,8 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             # einbaut, die den Zustand vor dem Segmentende schreibt, speicherte
             # sonst einen Verlauf ohne alle seither gelesenen Werkzeugergebnisse.
             zustand["provider_messages"] = provider_messages
+            provider_started_at = time.perf_counter()
+            first_provider_chunk = True
             async for chunk in ai_stream.stream_chat_completion(
                 client,
                 provider=vorbereitung.provider,
@@ -285,7 +294,17 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 reasoning_effort=denkstufe,
                 cache_marke=cache_marke,
             ):
+                if first_provider_chunk:
+                    metrics.record(
+                        "ai_stream", "first_provider_chunk",
+                        (time.perf_counter() - provider_started_at) * 1000,
+                    )
+                    first_provider_chunk = False
                 if chunk.kind == "tool_start":
+                    metrics.record(
+                        "ai_stream", "tool_start",
+                        (time.perf_counter() - provider_started_at) * 1000,
+                    )
                     ai_run_broker.veroeffentlichen(run_id, "tool_start", {"tool_name": chunk.text, "spekulativ": True})
                     continue
                 if chunk.kind == "reasoning":

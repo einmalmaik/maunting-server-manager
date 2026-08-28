@@ -72,7 +72,6 @@ def test_store_and_retrieve_credentials(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(AuthService, "decrypt_secret", lambda enc, aad=None: enc.replace("enc:", "", 1) if enc.startswith("enc:") else "")
 
     assert ai_satellite_service.is_configured() is False
-
     ai_satellite_service.store_credentials("client_123", "secret_abc")
     assert ai_satellite_service.is_configured() is True
     creds = ai_satellite_service.get_credentials()
@@ -80,6 +79,28 @@ def test_store_and_retrieve_credentials(monkeypatch: pytest.MonkeyPatch) -> None
 
     ai_satellite_service.store_credentials("", "")
     assert ai_satellite_service.is_configured() is False
+
+
+def test_satellite_search_coalesces_token_and_short_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class FakeClient:
+        def post(self, url, **_kwargs):
+            calls.append(url)
+            if url == ai_satellite_service._TOKEN_ENDPOINT:
+                return httpx.Response(200, json={"access_token": "synthetic-token", "expires_in": 300})
+            return httpx.Response(200, json={"features": []})
+
+    ai_satellite_service.shutdown_http_client()
+    ai_satellite_service._token_cache.clear()
+    ai_satellite_service._search_cache.clear()
+    monkeypatch.setattr(ai_satellite_service, "get_credentials", lambda: {"client_id": "client", "client_secret": "secret"})
+    monkeypatch.setattr(ai_satellite_service, "_external_http_client", lambda: FakeClient())
+
+    assert ai_satellite_service.search_satellite_imagery([1, 2, 3, 4]) == []
+    assert ai_satellite_service.search_satellite_imagery([1, 2, 3, 4]) == []
+
+    assert calls == [ai_satellite_service._TOKEN_ENDPOINT, ai_satellite_service._STAC_ENDPOINT]
 
 
 def test_geo_service_analyze_region(db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,9 +123,8 @@ def test_geo_service_analyze_region(db: Session, regular_user: User, monkeypatch
     assert result["satellite"]["available"] is True
     assert "layers" in result["satellite"]
     layers = result["satellite"]["layers"]
-    assert "true_color" in layers
-    assert "nasa_nrt" in layers
-    assert "infrared_ndvi" in layers
-    assert "arcgisonline" in layers["true_color"]["url"]
-    assert "gibs.earthdata.nasa.gov" in layers["nasa_nrt"]["url"]
-    assert "gibs.earthdata.nasa.gov" in layers["infrared_ndvi"]["url"]
+    assert list(layers) == ["latest_imagery"]
+    latest_imagery = layers["latest_imagery"]
+    assert "arcgisonline" in latest_imagery["url"]
+    assert latest_imagery["mission"] == "ArcGIS World Imagery"
+    assert latest_imagery["resolution"] == "anbieterabhängig"

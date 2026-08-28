@@ -13,6 +13,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import logging
 import re
+import threading
+import time
 from typing import Any
 import urllib.parse
 import uuid
@@ -28,11 +30,60 @@ from models.user_calendar import UserCalendar
 from services.dis_client import DisClient, DisDecryptionError
 from services.email_service import EmailService
 from services import permission_service, team_service
+from services.ai_latency_metrics import measure
 
 _log = logging.getLogger("msm.calendar")
 
 # Dedup-Speicher für gesendete Terminerinnerungen (im Speicher je Server-Lauf)
 _sent_reminder_keys: set[str] = set()
+_CALDAV_CACHE_TTL_SECONDS = 10.0
+_caldav_cache: dict[tuple[int, int, str | None, str | None], tuple[float, list[dict[str, Any]]]] = {}
+_caldav_cache_lock = threading.Lock()
+_caldav_client: httpx.Client | None = None
+_caldav_client_lock = threading.Lock()
+
+
+def _caldav_http_client() -> httpx.Client:
+    """Langlebiger, TLS-prüfender Client für CalDAV-Rundreisen."""
+    global _caldav_client
+    with _caldav_client_lock:
+        if _caldav_client is None:
+            _caldav_client = httpx.Client(
+                timeout=httpx.Timeout(connect=5.0, read=15.0, write=15.0, pool=5.0),
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=8),
+                verify=True,
+                follow_redirects=False,
+            )
+        return _caldav_client
+
+
+def shutdown_caldav_client() -> None:
+    """Wird beim App-Shutdown aufgerufen; Tests können den Prozesszustand leeren."""
+    global _caldav_client
+    with _caldav_client_lock:
+        if _caldav_client is not None:
+            _caldav_client.close()
+            _caldav_client = None
+    with _caldav_cache_lock:
+        _caldav_cache.clear()
+
+
+def _invalidate_caldav_cache(calendar_id: int) -> None:
+    with _caldav_cache_lock:
+        for key in list(_caldav_cache):
+            if key[1] == calendar_id:
+                _caldav_cache.pop(key, None)
+
+
+def _caldav_time_range(start_date: str | None, end_date: str | None, *, user: User) -> str:
+    if not start_date and not end_date:
+        return ""
+    attrs: list[str] = []
+    if start_date:
+        attrs.append(f'start="{_parse_datetime(start_date, user=user).astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")}"')
+    if end_date:
+        attrs.append(f'end="{_parse_datetime(end_date, user=user).astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")}"')
+    return "      <C:time-range " + " ".join(attrs) + " />\n"
 
 
 def _default_color_for_type(event_type: str | None) -> str:
@@ -239,8 +290,8 @@ class CalendarService:
             else:
                 auth = (calendar.caldav_username or "", secret)
 
-            with httpx.Client(timeout=10, verify=True) as client:
-                resp = client.request("PROPFIND", calendar.caldav_url, auth=auth, headers=headers)
+            with measure("calendar", "caldav_connection_test"):
+                resp = _caldav_http_client().request("PROPFIND", calendar.caldav_url, auth=auth, headers=headers)
                 if resp.status_code in (200, 207):
                     return True, "Verbindung zum Kalender erfolgreich"
                 return False, f"CalDAV meldet HTTP {resp.status_code}"
@@ -350,6 +401,12 @@ class CalendarService:
         if not calendar.caldav_url:
             return []
 
+        cache_key = (user.id, calendar.id, start_date, end_date)
+        with _caldav_cache_lock:
+            cached = _caldav_cache.get(cache_key)
+            if cached and cached[0] > time.monotonic():
+                return cached[1]
+
         secret = calendar.get_credentials()
         if not secret:
             return []
@@ -373,19 +430,24 @@ class CalendarService:
             "  </D:prop>\n"
             "  <C:filter>\n"
             '    <C:comp-filter name="VCALENDAR">\n'
-            '      <C:comp-filter name="VEVENT" />\n'
+            '      <C:comp-filter name="VEVENT">\n'
+            + _caldav_time_range(start_date, end_date, user=user)
+            + '      </C:comp-filter>\n'
             "    </C:comp-filter>\n"
             "  </C:filter>\n"
             "</C:calendar-query>"
         )
 
         try:
-            with httpx.Client(timeout=15, verify=True) as client:
-                resp = client.request(
+            with measure("calendar", "caldav_read"):
+                resp = _caldav_http_client().request(
                     "REPORT", calendar.caldav_url, auth=auth, headers=headers, content=query_body
                 )
                 if resp.status_code in (200, 207):
-                    return _parse_vevents(resp.text)
+                    events = _parse_vevents(resp.text)
+                    with _caldav_cache_lock:
+                        _caldav_cache[cache_key] = (time.monotonic() + _CALDAV_CACHE_TTL_SECONDS, events)
+                    return events
                 _log.warning("CalDAV REPORT HTTP %d für %s", resp.status_code, calendar.name)
         except Exception as e:
             _log.warning("Fehler beim Abruf von Terminen für %s: %s", calendar.name, e)
@@ -520,10 +582,11 @@ class CalendarService:
         else:
             auth = (calendar.caldav_username or "", secret)
 
-        with httpx.Client(timeout=15, verify=True) as client:
-            resp = client.put(target_url, auth=auth, headers=headers, content=ical_payload)
+        with measure("calendar", "caldav_create"):
+            resp = _caldav_http_client().put(target_url, auth=auth, headers=headers, content=ical_payload)
             if resp.status_code not in (200, 201, 204):
                 raise RuntimeError(f"CalDAV Erstellung fehlgeschlagen (HTTP {resp.status_code})")
+        _invalidate_caldav_cache(calendar.id)
 
         return {
             "status": "created",
@@ -690,10 +753,11 @@ class CalendarService:
         else:
             auth = (calendar.caldav_username or "", secret)
 
-        with httpx.Client(timeout=15, verify=True) as client:
-            resp = client.put(target_url, auth=auth, headers=headers, content=ical_payload)
+        with measure("calendar", "caldav_update"):
+            resp = _caldav_http_client().put(target_url, auth=auth, headers=headers, content=ical_payload)
             if resp.status_code not in (200, 201, 204):
                 raise RuntimeError(f"CalDAV Aktualisierung fehlgeschlagen (HTTP {resp.status_code})")
+        _invalidate_caldav_cache(calendar.id)
 
         return {
             "status": "updated",
@@ -760,10 +824,11 @@ class CalendarService:
         else:
             auth = (calendar.caldav_username or "", secret)
 
-        with httpx.Client(timeout=15, verify=True) as client:
-            resp = client.delete(target_url, auth=auth, headers=headers)
+        with measure("calendar", "caldav_delete"):
+            resp = _caldav_http_client().delete(target_url, auth=auth, headers=headers)
             if resp.status_code not in (200, 204, 404):
                 raise RuntimeError(f"CalDAV Löschung fehlgeschlagen (HTTP {resp.status_code})")
+        _invalidate_caldav_cache(calendar.id)
 
         return {
             "status": "deleted",
@@ -1038,5 +1103,3 @@ class CalendarService:
             )
 
         return reminders
-
-

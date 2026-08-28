@@ -1359,8 +1359,14 @@ class Sprachbruecke:
     async def _verarbeite_teil_transkript(self, text_chunk: str) -> None:
         """Klassifiziert partielle Transkripte und stößt spekulatives Prefetching an."""
         from services.ai_intent_classifier import classify_streaming_intent, is_side_effect_free, prefetch_cache
+        from services.ai_latency_metrics import metrics
 
+        started_at = time.perf_counter()
         prediction = classify_streaming_intent(text_chunk)
+        metrics.record(
+            "voice", "intent_classification", (time.perf_counter() - started_at) * 1000,
+            "matched" if prediction is not None else "no_match",
+        )
         if prediction is None:
             return
         self._intent_revision += 1

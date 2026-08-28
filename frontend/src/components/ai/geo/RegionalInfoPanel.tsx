@@ -71,13 +71,14 @@ function RegionalInfoContent({ data, news, onClose }: Omit<RegionalInfoPanelProp
   const [activeTab, setActiveTab] = useState<TabType>('overview')
   const [satZoom, setSatZoom] = useState(1)
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null)
-  const [selectedLayerId, setSelectedLayerId] = useState<string>('true_color')
+  const [selectedLayerId, setSelectedLayerId] = useState<string>('latest_imagery')
 
   const { location, country, coordinates, weather, satellite } = data
   const firstScene = satellite?.scenes?.[0]
   const previewImg = firstScene?.preview_url
 
-  // Mehrschichtige Satelliten-Layer (HD True-Color, NASA GIBS NRT, Infrarot/NDVI)
+  // Eine einzige, aktuelle Bildquelle statt visueller Filter, die keine
+  // zusätzlichen Satellitendaten darstellen würden.
   const layersMap = satellite?.layers || satellite?.scenes?.[0]?.layers
   const availableLayers: AiSatelliteLayer[] = useMemo(() => {
     if (layersMap && Object.keys(layersMap).length > 0) {
@@ -86,38 +87,24 @@ function RegionalInfoContent({ data, news, onClose }: Omit<RegionalInfoPanelProp
     const [minLon, minLat, maxLon, maxLat] = coordinates?.bbox || [0, 0, 0, 0]
     return [
       {
-        id: 'true_color',
-        name: 'HD True-Color (Sentinel-2 / ArcGIS)',
+        id: 'latest_imagery',
+        name: 'Aktuellste verfügbare Bilddaten',
         url:
           previewImg ||
-          `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${minLon.toFixed(4)},${minLat.toFixed(4)},${maxLon.toFixed(4)},${maxLat.toFixed(4)}&bboxSR=4326&imageSR=4326&size=1024,768&format=jpg&f=image`,
-        resolution: '10m',
-        mission: 'Sentinel-2 L2A',
-        description: 'Optische Echtfarben-Darstellung (RGB) in hoher Auflösung',
-      },
-      {
-        id: 'nasa_nrt',
-        name: 'NASA GIBS Near-Real-Time',
-        url: `https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?service=WMS&request=GetMap&version=1.3.0&layers=MODIS_Terra_CorrectedReflectance_TrueColor&styles=&format=image%2Fjpeg&transparent=false&crs=EPSG:4326&bbox=${minLat.toFixed(4)},${minLon.toFixed(4)},${maxLat.toFixed(4)},${maxLon.toFixed(4)}&width=1024&height=768`,
-        resolution: '250m',
-        mission: 'NASA MODIS / VIIRS',
-        description: 'Tagesaktuelle Erdbeobachtung der NASA-Flotte (Near-Real-Time)',
-      },
-      {
-        id: 'infrared_ndvi',
-        name: 'Infrarot / NDVI Vegetationsanalyse',
-        url: `https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?service=WMS&request=GetMap&version=1.3.0&layers=MODIS_Terra_NDVI_8Day&styles=&format=image%2Fpng&transparent=false&crs=EPSG:4326&bbox=${minLat.toFixed(4)},${minLon.toFixed(4)},${maxLat.toFixed(4)},${maxLon.toFixed(4)}&width=1024&height=768`,
-        resolution: '250m',
-        mission: 'Terra MODIS NDVI',
-        description: 'Nahinfrarot- und Vegetationsindex zur Analyse von Biomasse und Feuchte',
+          `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${minLon.toFixed(4)},${minLat.toFixed(4)},${maxLon.toFixed(4)},${maxLat.toFixed(4)}&bboxSR=4326&imageSR=4326&size=1600,1200&format=jpg&f=image`,
+        resolution: firstScene?.preview_url ? 'gemäß Szene' : 'anbieterabhängig',
+        mission: firstScene?.preview_url ? firstScene.mission : 'ArcGIS World Imagery',
+        description: firstScene?.preview_url
+          ? 'Neueste verfügbare Szene. Zeitpunkt und Bewölkung stehen in den Metadaten.'
+          : 'Aktuelles verfügbares Bildmosaik. Aufnahmezeit und native Auflösung variieren je Kachel.',
       },
     ]
-  }, [layersMap, coordinates?.bbox, previewImg])
+  }, [layersMap, coordinates?.bbox, previewImg, firstScene?.mission])
 
 function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions): string {
-  if (!val) return 'Aktuell'
+  if (!val) return 'Zeitpunkt nicht angegeben'
   const d = new Date(val)
-  if (isNaN(d.getTime())) return 'Aktuell'
+  if (isNaN(d.getTime())) return 'Zeitpunkt nicht angegeben'
   return d.toLocaleDateString(undefined, opts || { day: '2-digit', month: '2-digit' })
 }
 
@@ -141,24 +128,7 @@ function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions):
       }
     }
 
-    return [
-      {
-        id: `news-${location}-1`,
-        title: `${location}: Kommunale Infrastruktur & Verkehrsströme stabil`,
-        source: 'MSM Regional Intel',
-        timeAgo: 'vor 12 Min.',
-        category: t('ai.geo.categories.local', 'Lokales'),
-        snippet: `Aktuelle Lageberichte für ${location} verzeichnen einen geregelten Betriebsablauf ohne kritische Störungen.`,
-      },
-      {
-        id: `news-${location}-2`,
-        title: `${location}: Umweltsensoren erfassen stabile Wetter- und Luftwerte`,
-        source: 'Open-Meteo & Copernicus',
-        timeAgo: 'vor 28 Min.',
-        category: t('ai.geo.categories.environment', 'Umwelt'),
-        snippet: `Messstationen in der Region ${location} melden normale Sichtweiten und reguläre atmosphärische Messwerte.`,
-      },
-    ]
+    return []
   }, [news, location, t])
 
   const tabs: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -418,7 +388,7 @@ function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions):
                 {t('ai.geo.scenes', 'Satelliten-Layer & Szenen')}
               </span>
               <span className="rounded-full bg-teal-500/10 px-2 py-0.5 text-[11px] font-medium text-teal-400 border border-teal-500/20">
-                Copernicus & NASA GIBS
+                {activeLayer?.mission || 'Bildquelle'}
               </span>
             </div>
 
@@ -531,6 +501,16 @@ function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions):
               </span>
               <span className="text-[11px] text-primary">{newsList.length} Einträge</span>
             </div>
+
+            {newsList.length === 0 && (
+              <div className="rounded-xl border border-dashed border-outline-variant/30 bg-surface-container-lowest/80 p-4 text-center">
+                <Newspaper className="mx-auto h-5 w-5 text-on-surface-variant/60" aria-hidden="true" />
+                <p className="mt-2 text-xs font-medium text-on-surface">Keine verifizierten Nachrichten</p>
+                <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
+                  Für diese Region ist keine Nachrichtenquelle eingerichtet. Es werden keine Lageberichte geschätzt.
+                </p>
+              </div>
+            )}
 
             {newsList.map((item) => (
               <div

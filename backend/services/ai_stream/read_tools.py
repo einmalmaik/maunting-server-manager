@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timezone
 import json
 import logging
@@ -675,6 +676,8 @@ async def _tool_followup_messages(
 
     async def _einer(call):
         async with schloss:
+            started_at = time.perf_counter()
+            outcome = "ok"
             try:
                 wert, fehlgeschlagen = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -682,7 +685,10 @@ async def _tool_followup_messages(
                     ),
                     timeout=ai_stream.WERKZEUG_ZEITGRENZE,
                 )
+                if fehlgeschlagen:
+                    outcome = "error"
             except TimeoutError:
+                outcome = "timeout"
                 # **Nicht "fehlgeschlagen", sondern "nicht abgewartet".** Der
                 # Unterschied ist der ganze Grund für den Wortlaut: der Thread
                 # läuft weiter und darf zu Ende committen. Ein Modell, dem hier
@@ -703,6 +709,14 @@ async def _tool_followup_messages(
                     "erst nach, ob er gewirkt hat."
                 )
                 wert, fehlgeschlagen = {"error": grund}, grund
+            finally:
+                from services.ai_latency_metrics import metrics
+
+                metrics.record(
+                    "ai_stream", "read_tool_execution",
+                    (time.perf_counter() - started_at) * 1000,
+                    outcome,
+                )
         anzeige = _anzeigeeintrag(call, wert, fehlgeschlagen)
         # **Sofort melden.** Hier stand nichts — die Chips gingen erst raus,
         # nachdem die ganze Runde fertig war (die Schleife im Aufrufer). Bei

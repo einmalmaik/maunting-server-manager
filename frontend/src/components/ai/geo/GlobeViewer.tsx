@@ -172,6 +172,70 @@ function projectPoint(
   return { rotX, rotY, rotZ, sx, sy }
 }
 
+/**
+ * Zeichnet die NASA-Blue-Marble-Karte als perspektivisch korrekte Kugel.
+ * Die Textur ist equirektangular (WGS84): Jeder Bildschirm-Pixel wird über
+ * die inverse Kamerarotation auf seinen echten Breiten- und Längengrad
+ * zurückgeführt. Der Ortsmarker verwendet dieselbe Projektion.
+ */
+function drawEarthTexture(
+  ctx: CanvasRenderingContext2D,
+  texture: ImageData,
+  target: HTMLCanvasElement,
+  rx: number,
+  ry: number,
+  cx: number,
+  cy: number,
+  radius: number,
+) {
+  const diameter = Math.max(192, Math.min(384, Math.round(radius * 1.55)))
+  if (target.width !== diameter || target.height !== diameter) {
+    target.width = diameter
+    target.height = diameter
+  }
+
+  const output = new ImageData(diameter, diameter)
+  const source = texture.data
+  const pixels = output.data
+  const cosRx = Math.cos(rx)
+  const sinRx = Math.sin(rx)
+  const radiusSq = (diameter / 2) ** 2
+  const half = diameter / 2
+
+  for (let y = 0; y < diameter; y += 1) {
+    const screenY = (half - y) / half
+    for (let x = 0; x < diameter; x += 1) {
+      const screenX = (x - half) / half
+      const flatDistance = screenX * screenX + screenY * screenY
+      if (flatDistance > 1) continue
+
+      // Vorderseite der Einheitskugel; anschließend inverse X-Rotation.
+      const frontZ = Math.sqrt(Math.max(0, 1 - flatDistance))
+      const py = screenY * cosRx + frontZ * sinRx
+      const pz = -screenY * sinRx + frontZ * cosRx
+      const theta = Math.atan2(pz, screenX)
+      const latitude = Math.asin(Math.max(-1, Math.min(1, py)))
+      const longitude = theta - ry - Math.PI / 2
+      const sourceX = Math.max(0, Math.min(texture.width - 1, Math.floor((((longitude * 180) / Math.PI + 180) % 360 + 360) % 360 / 360 * texture.width)))
+      const sourceY = Math.max(0, Math.min(texture.height - 1, Math.floor((0.5 - latitude / Math.PI) * texture.height)))
+      const sourceOffset = (sourceY * texture.width + sourceX) * 4
+      const targetOffset = (y * diameter + x) * 4
+
+      // Sanftes Tageslicht und Randabschattung geben Tiefe, ohne Geografie zu verfälschen.
+      const light = 0.48 + 0.52 * Math.max(0, screenX * -0.5 + screenY * 0.2 + frontZ * 0.55)
+      pixels[targetOffset] = Math.round(source[sourceOffset] * light)
+      pixels[targetOffset + 1] = Math.round(source[sourceOffset + 1] * light)
+      pixels[targetOffset + 2] = Math.round(source[sourceOffset + 2] * light + 12 * (1 - light))
+      pixels[targetOffset + 3] = Math.round(255 * Math.min(1, (radiusSq - ((x - half) ** 2 + (y - half) ** 2)) / (diameter * 0.8) + 0.92))
+    }
+  }
+
+  const targetContext = target.getContext('2d')
+  if (!targetContext) return
+  targetContext.putImageData(output, 0, 0)
+  ctx.drawImage(target, cx - radius, cy - radius, radius * 2, radius * 2)
+}
+
 function drawClippedLineSegment(
   ctx: CanvasRenderingContext2D,
   p1: ProjectedPoint,
@@ -265,8 +329,35 @@ export function GlobeViewer({
 }: GlobeViewerProps) {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const earthTextureRef = useRef<ImageData | null>(null)
+  const earthTextureCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const lastTextureRenderRef = useRef(0)
+  const [textureVersion, setTextureVersion] = useState(0)
   const [zoom, setZoom] = useState(1.0)
   const [autoRotate, setAutoRotate] = useState(true)
+
+  // Lokale, öffentliche NASA-Blue-Marble-Textur: kein Laufzeit-Netzwerkaufruf
+  // und keine Standortdaten verlassen dafür den Browser.
+  useEffect(() => {
+    const image = new Image()
+    image.onload = () => {
+      const textureCanvas = document.createElement('canvas')
+      textureCanvas.width = image.naturalWidth
+      textureCanvas.height = image.naturalHeight
+      const textureContext = textureCanvas.getContext('2d', { willReadFrequently: true })
+      if (!textureContext) return
+
+      textureContext.drawImage(image, 0, 0)
+      earthTextureRef.current = textureContext.getImageData(0, 0, textureCanvas.width, textureCanvas.height)
+      earthTextureCanvasRef.current = document.createElement('canvas')
+      setTextureVersion((version) => version + 1)
+    }
+    image.src = '/earth/blue-marble.jpg'
+
+    return () => {
+      image.onload = null
+    }
+  }, [])
 
   // Reacts Wheel-Handler aktualisiert den Zoom. Der native, nicht-passive
   // Listener stellt zusätzlich sicher, dass Browser den Wheel-Impuls nicht an
@@ -437,41 +528,51 @@ export function GlobeViewer({
       const rx = rotRef.current.x
       const ry = rotRef.current.y
 
+      const earthTexture = earthTextureRef.current
+      const earthTextureCanvas = earthTextureCanvasRef.current
+      if (earthTexture && earthTextureCanvas) {
+        const now = performance.now()
+        if (now - lastTextureRenderRef.current >= 33 || earthTextureCanvas.width === 0) {
+          drawEarthTexture(ctx, earthTexture, earthTextureCanvas, rx, ry, cx, cy, radius)
+          lastTextureRenderRef.current = now
+        } else {
+          ctx.drawImage(earthTextureCanvas, cx - radius, cy - radius, radius * 2, radius * 2)
+        }
+      }
+
       // Feine Strömungsbänder lassen den Ozean nach Oberfläche aussehen, nicht
       // nach einer flachen blauen Scheibe.
-      ctx.strokeStyle = 'rgba(125, 211, 252, 0.055)'
-      ctx.lineWidth = 0.65
-      for (let band = -0.8; band <= 0.8; band += 0.12) {
-        ctx.beginPath()
-        for (let x = -radius; x <= radius; x += 7) {
-          const y = band * radius + Math.sin(x * 0.055 + pulse) * radius * 0.012
-          if (x === -radius) ctx.moveTo(cx + x, cy + y)
-          else ctx.lineTo(cx + x, cy + y)
+      if (!earthTexture) {
+        ctx.strokeStyle = 'rgba(125, 211, 252, 0.055)'
+        ctx.lineWidth = 0.65
+        for (let band = -0.8; band <= 0.8; band += 0.12) {
+          ctx.beginPath()
+          for (let x = -radius; x <= radius; x += 7) {
+            const y = band * radius + Math.sin(x * 0.055 + pulse) * radius * 0.012
+            if (x === -radius) ctx.moveTo(cx + x, cy + y)
+            else ctx.lineTo(cx + x, cy + y)
+          }
+          ctx.stroke()
         }
-        ctx.stroke()
       }
 
       // Vorbereitete Landtextur: Gelände-, Vegetations- und Nachtlichtpunkte
       // liegen exakt auf der rotierenden Kugel und werden am Horizont gekappt.
-      for (const point of LAND_TEXTURE) {
-        const projected = projectPoint(point.lat, point.lon, rx, ry, cx, cy, radius)
-        if (projected.rotZ <= 0) continue
-        const day = Math.max(0, projected.rotX * -0.55 + projected.rotY * 0.2 + 0.6)
-        const size = Math.max(0.7, 1.35 * projected.rotZ)
-        if (point.light && day < 0.55) {
-          ctx.fillStyle = `rgba(255, 204, 112, ${(0.25 + (0.55 - day) * 0.45) * projected.rotZ})`
-          ctx.fillRect(projected.sx, projected.sy, size, size)
-        } else if (point.tone > 0.78) {
-          ctx.fillStyle = `rgba(203, 213, 164, ${0.28 * projected.rotZ})`
-          ctx.fillRect(projected.sx, projected.sy, size, size)
-        } else {
-          ctx.fillStyle = `rgba(73, 128, 93, ${(0.22 + point.tone * 0.18) * projected.rotZ})`
+      if (!earthTexture) {
+        for (const point of LAND_TEXTURE) {
+          const projected = projectPoint(point.lat, point.lon, rx, ry, cx, cy, radius)
+          if (projected.rotZ <= 0) continue
+          const day = Math.max(0, projected.rotX * -0.55 + projected.rotY * 0.2 + 0.6)
+          const size = Math.max(0.7, 1.35 * projected.rotZ)
+          ctx.fillStyle = point.light && day < 0.55
+            ? `rgba(255, 204, 112, ${(0.25 + (0.55 - day) * 0.45) * projected.rotZ})`
+            : `rgba(73, 128, 93, ${(0.22 + point.tone * 0.18) * projected.rotZ})`
           ctx.fillRect(projected.sx, projected.sy, size, size)
         }
       }
 
       // 3. Küstenlinien über der Textur für gut lesbare Kontinente
-      ctx.strokeStyle = 'rgba(168, 230, 194, 0.72)'
+      ctx.strokeStyle = earthTexture ? 'rgba(205, 238, 255, 0.22)' : 'rgba(168, 230, 194, 0.72)'
       ctx.lineWidth = 1.15
       ctx.beginPath()
 
@@ -638,7 +739,7 @@ export function GlobeViewer({
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
     }
-  }, [zoom, autoRotate, effLat, effLon, effLocation, effBbox])
+  }, [zoom, autoRotate, effLat, effLon, effLocation, effBbox, textureVersion])
 
   // Mausinteraktion (Freies Drehen ohne Zurückspringen)
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -696,7 +797,7 @@ export function GlobeViewer({
   }
 
   const rawDt = satellite?.scenes?.[0]?.datetime
-  let aktualitaetText = t('ai.geo.current', 'Aktuell')
+  let aktualitaetText = t('ai.geo.captureTimeUnknown', 'Aufnahmezeit unbekannt')
   if (rawDt) {
     const d = new Date(rawDt)
     if (!isNaN(d.getTime())) {

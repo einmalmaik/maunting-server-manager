@@ -15,6 +15,7 @@ import imaplib
 import logging
 import smtplib
 import ssl
+import time
 from typing import Any
 
 from sqlalchemy import select
@@ -22,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from models.user import User
 from models.user_mailbox import UserMailbox
+from services.ai_latency_metrics import metrics
 
 _log = logging.getLogger("msm.mailbox")
 
@@ -238,12 +240,24 @@ class MailboxService:
             # Neueste Nachrichten zuerst
             msg_ids = msg_ids[::-1][: min(limit, 25)]
 
-            for mid in msg_ids:
-                f_status, f_data = client.fetch(mid, "(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM TO DATE)])")
-                if f_status != "OK" or not f_data or not f_data[0] or not isinstance(f_data[0], tuple):
+            # Ein Batch spart bei Fernpostfächern bis zu 25 IMAP-Rundreisen.
+            # Die IDs kommen ausschließlich aus dem gerade autorisierten
+            # Suchergebnis und werden nicht aus Nutzereingaben übernommen.
+            started_at = time.perf_counter()
+            f_status, f_data = client.fetch(
+                b",".join(msg_ids), "(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM TO DATE)])"
+            )
+            metrics.record(
+                "mailbox", "imap_header_fetch", (time.perf_counter() - started_at) * 1000,
+                "ok" if f_status == "OK" else "error",
+            )
+            if f_status != "OK" or not f_data:
+                client.logout()
+                return []
+            for record in f_data:
+                if not isinstance(record, tuple) or len(record) < 2 or not isinstance(record[1], bytes):
                     continue
-
-                raw_header = f_data[0][1]
+                raw_header = record[1]
                 msg = email.message_from_bytes(raw_header)
                 results.append(
                     {
@@ -369,8 +383,12 @@ class MailboxService:
         else:
             server.login(username, secret)
 
-        server.send_message(msg)
-        server.quit()
+        started_at = time.perf_counter()
+        try:
+            server.send_message(msg)
+        finally:
+            server.quit()
+            metrics.record("mailbox", "smtp_send", (time.perf_counter() - started_at) * 1000)
 
         return {
             "status": "sent",

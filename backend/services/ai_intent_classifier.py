@@ -202,16 +202,22 @@ class PrefetchCache:
             return task
 
     def get(self, *, session_id: str | None, user_id: int, tool_name: str, arguments: dict[str, Any]) -> tuple[bool, Any]:
+        from services.ai_latency_metrics import metrics
+
         if not session_id:
+            metrics.record("prefetch", "cache_lookup", 0, "miss")
             return False, None
         with self._lock:
             entry = self._entries.get((session_id, user_id))
             if not entry or entry.expired():
                 self.invalidate(session_id=session_id, user_id=user_id)
+                metrics.record("prefetch", "cache_lookup", 0, "miss")
                 return False, None
             if entry.tool_name != tool_name or entry.arguments_key != _arguments_key(arguments) or not entry.completed:
+                metrics.record("prefetch", "cache_lookup", 0, "miss")
                 return False, None
             self._entries.pop((session_id, user_id), None)
+            metrics.record("prefetch", "cache_lookup", 0, "hit")
             return True, entry.result
 
     def invalidate(self, *, session_id: str | None = None, user_id: int | None = None, keep: tuple[str, str] | None = None) -> None:

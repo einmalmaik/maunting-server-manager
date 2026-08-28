@@ -24,10 +24,13 @@ es hilft — es versucht es erneut, formuliert um und verbraucht dabei Tokens.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 
 import httpx
 
 from services.ai_redaction import redact_sensitive_text
+from services.ai_latency_metrics import measure
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +45,12 @@ MAX_TITLE_CHARS = 160
 MAX_SNIPPET_CHARS = 400
 MAX_URL_CHARS = 300
 _TIMEOUT = 15.0
+_CACHE_TTL_SECONDS = 15.0
+_client: httpx.Client | None = None
+_client_lock = threading.Lock()
+_cache: dict[tuple[str, str, int], tuple[float, list[dict]]] = {}
+_inflight: dict[tuple[str, str, int], threading.Event] = {}
+_cache_lock = threading.Lock()
 
 
 class WebSearchUnavailable(RuntimeError):
@@ -50,6 +59,37 @@ class WebSearchUnavailable(RuntimeError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+def _http_client() -> httpx.Client:
+    global _client
+    with _client_lock:
+        if _client is None:
+            _client = httpx.Client(
+                timeout=httpx.Timeout(connect=5.0, read=_TIMEOUT, write=10.0, pool=5.0),
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=8),
+                follow_redirects=False,
+            )
+        return _client
+
+
+def shutdown_http_client() -> None:
+    global _client
+    with _client_lock:
+        if _client is not None:
+            _client.close()
+            _client = None
+    with _cache_lock:
+        _cache.clear()
+        _inflight.clear()
+
+
+def _finish_inflight(cache_key: tuple[str, str, int] | None, pending: threading.Event | None) -> None:
+    if cache_key is None or pending is None:
+        return
+    with _cache_lock:
+        _inflight.pop(cache_key, None)
+        pending.set()
 
 
 def api_key() -> str | None:
@@ -103,7 +143,7 @@ def is_configured() -> bool:
         return False
 
 
-def search(query: str, count: int = MAX_RESULTS) -> list[dict]:
+def search(query: str, count: int = MAX_RESULTS, *, cache_scope: str | None = None) -> list[dict]:
     """Fuehrt eine Suche aus und liefert minimierte, redigierte Treffer.
 
     Bewusst wenig je Treffer: Titel, Adresse, Kurztext. Ganze Seiteninhalte
@@ -118,38 +158,66 @@ def search(query: str, count: int = MAX_RESULTS) -> list[dict]:
         raise WebSearchUnavailable("AI_WEB_SEARCH_QUERY_EMPTY")
     limit = max(1, min(int(count or MAX_RESULTS), MAX_RESULTS))
 
+    # Der Scope wird ausschließlich vom autorisierten Aufrufer gesetzt. Ohne
+    # Scope gibt es keinen Cache, damit Suchergebnisse niemals Nutzergrenzen
+    # überschreiten.
+    cache_key = (cache_scope, safe_query.casefold(), limit) if cache_scope else None
+    owner = False
+    pending: threading.Event | None = None
+    if cache_key:
+        with _cache_lock:
+            cached = _cache.get(cache_key)
+            if cached and cached[0] > time.monotonic():
+                return cached[1]
+            pending = _inflight.get(cache_key)
+            if pending is None:
+                pending = threading.Event()
+                _inflight[cache_key] = pending
+                owner = True
+        if not owner:
+            pending.wait(_TIMEOUT + 0.5)
+            with _cache_lock:
+                cached = _cache.get(cache_key)
+                return cached[1] if cached and cached[0] > time.monotonic() else []
+
     try:
-        response = httpx.get(
-            _ENDPOINT,
-            params={"q": safe_query, "count": limit},
-            headers={
-                "Accept": "application/json",
-                "X-Subscription-Token": key,
-            },
-            timeout=_TIMEOUT,
-        )
+        with measure("web_search", "provider_request"):
+            response = _http_client().get(
+                _ENDPOINT,
+                params={"q": safe_query, "count": limit},
+                headers={
+                    "Accept": "application/json",
+                    "X-Subscription-Token": key,
+                },
+            )
     except httpx.HTTPError as exc:
         logger.info("Websuche nicht erreichbar error=%s", type(exc).__name__)
+        _finish_inflight(cache_key, pending)
         raise WebSearchUnavailable("AI_WEB_SEARCH_UNAVAILABLE") from exc
 
     if response.status_code in {401, 403}:
         logger.warning("Websuche Authentifizierung fehlgeschlagen status=%s (API-Schlüssel prüfen)", response.status_code)
+        _finish_inflight(cache_key, pending)
         raise WebSearchUnavailable("AI_WEB_SEARCH_AUTH_FAILED")
     if response.status_code == 429:
         logger.warning("Websuche Rate-Limit erreicht (429)")
+        _finish_inflight(cache_key, pending)
         raise WebSearchUnavailable("AI_WEB_SEARCH_RATE_LIMITED")
     if response.status_code != 200:
         logger.warning("Websuche abgelehnt status=%s text=%s", response.status_code, response.text[:200])
+        _finish_inflight(cache_key, pending)
         raise WebSearchUnavailable("AI_WEB_SEARCH_REJECTED")
 
     try:
         payload = response.json()
     except ValueError as exc:
+        _finish_inflight(cache_key, pending)
         raise WebSearchUnavailable("AI_WEB_SEARCH_PROTOCOL_ERROR") from exc
 
     web = payload.get("web") if isinstance(payload, dict) else None
     entries = web.get("results") if isinstance(web, dict) else None
     if not isinstance(entries, list):
+        _finish_inflight(cache_key, pending)
         return []
 
     results: list[dict] = []
@@ -168,4 +236,9 @@ def search(query: str, count: int = MAX_RESULTS) -> list[dict]:
                 str(entry.get("description") or "")
             )[:MAX_SNIPPET_CHARS],
         })
+    if cache_key and pending:
+        with _cache_lock:
+            _cache[cache_key] = (time.monotonic() + _CACHE_TTL_SECONDS, results)
+            _inflight.pop(cache_key, None)
+            pending.set()
     return results

@@ -3396,7 +3396,9 @@ def _execute_learn_skill(db: Session, *, user: User, arguments: dict) -> dict:
     }
 
 
-def _execute_web_search(db: Session, *, user: User, arguments: dict) -> dict:
+def _execute_web_search(
+    db: Session, *, user: User, arguments: dict, prefetch_session_id: str | None = None
+) -> dict:
     """Websuche im Namen des Benutzers.
 
     Die Rechtegrenze ist `ai.web_search.use` — und sie ist die **einzige**.
@@ -3460,7 +3462,13 @@ def _execute_web_search(db: Session, *, user: User, arguments: dict) -> dict:
     sichere_anfrage = redact_sensitive_text(query.strip())
 
     try:
-        results = ai_web_search_service.search(sichere_anfrage, count)
+        if prefetch_session_id:
+            results = ai_web_search_service.search(
+                sichere_anfrage, count,
+                cache_scope=f"voice:{user.id}:{prefetch_session_id}",
+            )
+        else:
+            results = ai_web_search_service.search(sichere_anfrage, count)
     except ai_web_search_service.WebSearchUnavailable as exc:
         # Ehrlich melden statt eine leere Trefferliste liefern: "nichts
         # gefunden" waere eine falsche Aussage ueber das Web.
@@ -3645,6 +3653,7 @@ def _execute_send_test_email(db: Session, *, user: User) -> dict:
 def _execute_global_read_tool(
     db: Session, *, user: User, tool_name: str, arguments: dict,
     herkunft: str = "panel", familie: str | None = None,
+    prefetch_session_id: str | None = None,
 ) -> dict:
     """Werkzeuge ohne Serverbezug.
 
@@ -3762,7 +3771,9 @@ def _execute_global_read_tool(
         return _execute_set_agent_name(db, user=user, arguments=arguments)
 
     if tool_name == "web_search":
-        return _execute_web_search(db, user=user, arguments=arguments)
+        return _execute_web_search(
+            db, user=user, arguments=arguments, prefetch_session_id=prefetch_session_id
+        )
 
     if tool_name == "analyze_region":
         return _execute_analyze_region(db, user=user, arguments=arguments)
@@ -4345,7 +4356,7 @@ def execute_read_tool(
     if tool_name in GLOBAL_READ_TOOLS:
         return _execute_global_read_tool(
             db, user=user, tool_name=tool_name, arguments=arguments,
-            herkunft=herkunft, familie=familie,
+            herkunft=herkunft, familie=familie, prefetch_session_id=prefetch_session_id,
         )
     server, arguments = _resolve_server(db, user, arguments)
     context = _execute_server_context_tool(

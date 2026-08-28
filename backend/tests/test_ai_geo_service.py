@@ -35,7 +35,10 @@ def test_geocode_reuses_inflight_lookup(monkeypatch) -> None:
     monkeypatch.setattr(ai_geo_service, "_static_geo_keys", frozenset())
     monkeypatch.setattr(ai_geo_service, "_geo_cache_expires_at", {})
     monkeypatch.setattr(ai_geo_service, "_geo_inflight", {})
-    monkeypatch.setattr(ai_geo_service.httpx, "get", fake_get)
+    class FakeClient:
+        get = staticmethod(fake_get)
+
+    monkeypatch.setattr(ai_geo_service, "_external_http_client", lambda: FakeClient())
 
     results: list[dict | None] = []
     threads = [threading.Thread(target=lambda: results.append(ai_geo_service.geocode_location("Example City"))) for _ in range(2)]

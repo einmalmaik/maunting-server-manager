@@ -8,7 +8,6 @@ Satellitendaten aus Copernicus/Sentinel.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 import logging
 import threading
 import time
@@ -17,6 +16,7 @@ import httpx
 
 from services.ai_redaction import redact_sensitive_text
 from services import ai_satellite_service
+from services.ai_latency_metrics import measure
 
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,8 @@ _OPEN_METEO_ENDPOINT = "https://api.open-meteo.com/v1/forecast"
 _TIMEOUT = 3.0
 _GEO_CACHE_TTL_SECONDS = 300.0
 _GEO_CACHE_MAX_DYNAMIC_ENTRIES = 128
+_http_client: httpx.Client | None = None
+_http_client_lock = threading.Lock()
 
 # In-Memory Cache für Geocoding (Ortsname -> Geo-Objekt)
 _geo_cache: dict[str, dict[str, Any]] = {
@@ -84,6 +86,26 @@ _geo_cache_expires_at: dict[str, float] = {}
 _geo_inflight: dict[str, threading.Event] = {}
 _geo_cache_lock = threading.Lock()
 
+
+def _external_http_client() -> httpx.Client:
+    global _http_client
+    with _http_client_lock:
+        if _http_client is None:
+            _http_client = httpx.Client(
+                timeout=httpx.Timeout(connect=3.0, read=_TIMEOUT, write=5.0, pool=3.0),
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=8),
+                follow_redirects=False,
+            )
+        return _http_client
+
+
+def shutdown_http_client() -> None:
+    global _http_client
+    with _http_client_lock:
+        if _http_client is not None:
+            _http_client.close()
+            _http_client = None
+
 # WMO Weather Code Übersetzungen
 WMO_CODES: dict[int, str] = {
     0: "Klarer Himmel",
@@ -141,17 +163,17 @@ def geocode_location(location_name: str) -> dict[str, Any] | None:
             return _geo_cache.get(clean_key)
 
     try:
-        resp = httpx.get(
-            _NOMINATIM_ENDPOINT,
-            params={
-                "q": query[:100],
-                "format": "jsonv2",
-                "limit": 1,
-                "addressdetails": 1,
-            },
-            headers={"User-Agent": "MSM-Server-Manager/3.0 (RegionalAnalysis)"},
-            timeout=_TIMEOUT,
-        )
+        with measure("geo", "geocode_request"):
+            resp = _external_http_client().get(
+                _NOMINATIM_ENDPOINT,
+                params={
+                    "q": query[:100],
+                    "format": "jsonv2",
+                    "limit": 1,
+                    "addressdetails": 1,
+                },
+                headers={"User-Agent": "MSM-Server-Manager/3.0 (RegionalAnalysis)"},
+            )
         if resp.status_code == 200:
             data = resp.json()
             if isinstance(data, list) and len(data) > 0:
@@ -198,15 +220,15 @@ def geocode_location(location_name: str) -> dict[str, Any] | None:
 def get_current_weather(latitude: float, longitude: float) -> dict[str, Any] | None:
     """Ruft aktuelle Wetterdaten für die Koordinaten ab (Open-Meteo)."""
     try:
-        resp = httpx.get(
-            _OPEN_METEO_ENDPOINT,
-            params={
-                "latitude": latitude,
-                "longitude": longitude,
-                "current": "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m",
-            },
-            timeout=_TIMEOUT,
-        )
+        with measure("geo", "weather_request"):
+            resp = _external_http_client().get(
+                _OPEN_METEO_ENDPOINT,
+                params={
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "current": "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m",
+                },
+            )
         if resp.status_code != 200:
             return None
         data = resp.json()
@@ -265,134 +287,49 @@ def analyze_region(location_name: str) -> dict[str, Any]:
         satellite_data = satellite_future.result()
     weather = weather or {}
 
-    now_iso = datetime.now(timezone.utc).isoformat()
     min_lon, min_lat, max_lon, max_lat = bbox
 
-    # Multi-Layer Satelliten- und Geländekarten:
-    # 1. HD True-Color (Sentinel-2 L2A / ArcGIS World Imagery HD 10m)
+    # Ein ehrliches Lagebild statt Filter, die eine aktuelle Aufnahme nur
+    # vortäuschen würden. ArcGIS liefert ein Bildmosaik; Zeitpunkt und native
+    # Auflösung unterscheiden sich je Kachel.
     true_color_url = (
         f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?"
-        f"bbox={min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}&bboxSR=4326&imageSR=4326&size=1024,768&format=jpg&f=image"
+        f"bbox={min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}&bboxSR=4326&imageSR=4326&size=1600,1200&format=jpg&f=image"
     )
-    # 2. NASA GIBS / Blue Marble Global Earth Observation (timeless & always available)
-    nasa_nrt_url = (
-        f"https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?service=WMS&request=GetMap&version=1.1.1&"
-        f"layers=BlueMarble_ShadedRelief_Bathymetry&styles=&format=image%2Fjpeg&transparent=false&srs=EPSG:4326&"
-        f"bbox={min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}&width=1024&height=768"
-    )
-    # 3. Infrarot / NDVI Vegetationsanalyse
-    infrared_ndvi_url = (
-        f"https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?service=WMS&request=GetMap&version=1.1.1&"
-        f"layers=MODIS_Terra_NDVI_8Day&styles=&format=image%2Fpng&transparent=false&srs=EPSG:4326&"
-        f"bbox={min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}&width=1024&height=768"
-    )
-    # 4. Topografie & Geländerelief (ArcGIS World Topo)
-    topo_url = (
-        f"https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/export?"
-        f"bbox={min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}&bboxSR=4326&imageSR=4326&size=1024,768&format=jpg&f=image"
-    )
-    # 5. Taktische Nachtansicht / Dark Matter Base
-    dark_canvas_url = (
-        f"https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/export?"
-        f"bbox={min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}&bboxSR=4326&imageSR=4326&size=1024,768&format=jpg&f=image"
-    )
+    preview_scene = next((scene for scene in satellite_data if scene.get("preview_url")), None)
+    if preview_scene:
+        preview_url = str(preview_scene["preview_url"])
+        source_name = str(preview_scene.get("mission") or "Copernicus")
+        source_resolution = "gemäß Szene"
+        source_description = "Neueste in Copernicus gefundene Szene. Zeitpunkt und Bewölkung stehen unten."
+    else:
+        preview_url = true_color_url
+        source_name = "ArcGIS World Imagery"
+        source_resolution = "anbieterabhängig"
+        source_description = "Aktuelles verfügbares Bildmosaik. Aufnahmezeit und native Auflösung variieren je Kachel."
+        satellite_data = [{
+            "id": f"world-imagery-{lat:.4f}-{lon:.4f}",
+            "mission": source_name,
+            "datetime": "",
+            "cloud_cover_percent": None,
+            "preview_url": preview_url,
+        }]
 
     layers: dict[str, dict[str, Any]] = {
-        "true_color": {
-            "id": "true_color",
-            "name": "HD True-Color (Sentinel-2 / ArcGIS)",
-            "url": true_color_url,
-            "resolution": "10m",
-            "mission": "Sentinel-2 L2A",
-            "description": "Optische Echtfarben-Darstellung (RGB) in hoher Auflösung",
-        },
-        "nasa_nrt": {
-            "id": "nasa_nrt",
-            "name": "NASA Blue Marble Erdbeobachtung",
-            "url": nasa_nrt_url,
-            "resolution": "500m",
-            "mission": "NASA Earth Observatory",
-            "description": "Globale hochauflösende Erd- und Ozeanbeobachtung der NASA",
-        },
-        "infrared_ndvi": {
-            "id": "infrared_ndvi",
-            "name": "Infrarot / NDVI Vegetationsanalyse",
-            "url": infrared_ndvi_url,
-            "resolution": "250m",
-            "mission": "Terra MODIS NDVI",
-            "description": "Nahinfrarot- und Vegetationsindex zur Analyse von Biomasse und Feuchte",
-        },
-        "topo": {
-            "id": "topo",
-            "name": "Topografie & Geländerelief",
-            "url": topo_url,
-            "resolution": "25m",
-            "mission": "ArcGIS Topo / Relief",
-            "description": "Topografische Höhenlinien, Geländestruktur und Landmarken",
-        },
-        "dark_canvas": {
-            "id": "dark_canvas",
-            "name": "Taktische Nacht- & Infrastrukturkarte",
-            "url": dark_canvas_url,
-            "resolution": "30m",
-            "mission": "Carto Tactical Dark",
-            "description": "Kontrastreiche Nacht- und Infrastrukturansicht für Aufklärungsdaten",
+        "latest_imagery": {
+            "id": "latest_imagery",
+            "name": "Aktuellste verfügbare Bilddaten",
+            "url": preview_url,
+            "resolution": source_resolution,
+            "mission": source_name,
+            "description": source_description,
         },
     }
+    for scene in satellite_data:
+        scene["layers"] = layers
 
-    # Visuelle Satellitenvorschau: Wenn keine CDSE-Szenen mit Vorschau-Bild vorliegen,
-    # erzeugen wir eine hochauflösende Sentinel-2 / Weltraum-Satellitenkachel-Vorschau
-    if not satellite_data or not any(s.get("preview_url") for s in satellite_data):
-        fallback_scene = {
-            "id": f"S2A_L2A_{geo['name'].upper().replace(' ', '_')}",
-            "mission": "Sentinel-2 L2A",
-            "datetime": now_iso,
-            "cloud_cover_percent": 2.4,
-            "preview_url": true_color_url,
-            "layers": layers,
-        }
-        if not satellite_data:
-            satellite_data = [fallback_scene]
-        else:
-            satellite_data[0]["preview_url"] = true_color_url
-            satellite_data[0]["layers"] = layers
-            satellite_data[0]["datetime"] = now_iso
-    else:
-        for s in satellite_data:
-            if not s.get("layers"):
-                s["layers"] = layers
-            if not s.get("datetime"):
-                s["datetime"] = now_iso
-
-    # Standortbezogene Lageberichte & Telemetrie
     loc_name = geo["name"]
     loc_country = geo["country"]
-    regional_news = [
-        {
-            "id": f"geo-news-{loc_name.lower().replace(' ', '-')}-1",
-            "title": f"{loc_name}: Infrastruktur & Verkehrsnetze regulär",
-            "source": "Regionale Telemetrie",
-            "timeAgo": "Aktuell",
-            "category": "Infrastruktur",
-            "snippet": f"Die städtischen Versorgungs- und Verkehrsnetze in {loc_name} ({loc_country}) weisen stabile Betriebsparameter auf.",
-        },
-        {
-            "id": f"geo-news-{loc_name.lower().replace(' ', '-')}-2",
-            "title": f"Umwelt- und Wetterüberwachung {loc_name}",
-            "source": "Meteorologischer Dienst",
-            "timeAgo": "Live",
-            "category": "Umwelt",
-            "snippet": _weather_summary(weather),
-        },
-        {
-            "id": f"geo-news-{loc_name.lower().replace(' ', '-')}-3",
-            "title": f"Fernerkundung & Satellitenüberflug für {loc_name}",
-            "source": "Copernicus Sentinel",
-            "timeAgo": "1h",
-            "category": "Satellit",
-            "snippet": f"Optische Multispektral-Aufnahme für Koordinaten {lat:.2f}°, {lon:.2f}° mit niedriger Bewölkungsrate von {satellite_data[0].get('cloud_cover_percent', 0):.1f}% erfasst.",
-        },
-    ]
 
     return {
         "status": "success",
@@ -409,15 +346,7 @@ def analyze_region(location_name: str) -> dict[str, Any]:
             "scenes": satellite_data,
             "layers": layers,
         },
-        "news": regional_news,
+        # Diese Analyse beschafft keine Nachrichten. Ein leerer Feed ist
+        # sicherer als generierte regionale Lageberichte.
+        "news": [],
     }
-
-
-def _weather_summary(weather: dict[str, Any]) -> str:
-    """Erzeugt auch bei einer fehlenden Wetterantwort einen ehrlichen Kurztext."""
-    temperature = weather.get("temperature_celsius")
-    wind = weather.get("wind_speed_kmh")
-    condition = weather.get("condition") or "keine aktuellen Messwerte"
-    if isinstance(temperature, (int, float)) and isinstance(wind, (int, float)):
-        return f"Aktuelle meteorologische Messwerte: {temperature:.1f}°C, {condition}, Wind {wind:.1f} km/h."
-    return "Aktuell liegen keine vollständigen meteorologischen Messwerte vor."

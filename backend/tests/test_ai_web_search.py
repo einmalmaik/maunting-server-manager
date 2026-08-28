@@ -33,13 +33,16 @@ def _mock_response(monkeypatch: pytest.MonkeyPatch, payload: dict, status: int =
     """Ersetzt den Suchaufruf und gibt zurueck, was tatsaechlich gesendet wurde."""
     seen: dict = {}
 
-    def fake_get(url, *, params=None, headers=None, timeout=None):
+    def fake_get(url, *, params=None, headers=None):
         seen["url"] = url
         seen["params"] = params or {}
         seen["headers"] = headers or {}
         return httpx.Response(status, json=payload)
 
-    monkeypatch.setattr(ai_web_search_service.httpx, "get", fake_get)
+    class FakeClient:
+        get = staticmethod(fake_get)
+
+    monkeypatch.setattr(ai_web_search_service, "_http_client", lambda: FakeClient())
     monkeypatch.setattr(ai_web_search_service, "api_key", lambda: "test-schluessel")
     return seen
 
@@ -173,6 +176,28 @@ def test_the_target_is_fixed_and_the_key_travels_in_the_header(
     assert seen["headers"]["X-Subscription-Token"] == "test-schluessel"
     # Die Anfrage landet als Parameter, nicht als Ziel.
     assert seen["params"]["q"] == "https://interner-host.invalid/admin"
+
+
+def test_session_scoped_cache_reuses_only_the_same_voice_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    class FakeClient:
+        def get(self, *_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200, json={"web": {"results": []}})
+
+    ai_web_search_service.shutdown_http_client()
+    monkeypatch.setattr(ai_web_search_service, "api_key", lambda: "test-schluessel")
+    monkeypatch.setattr(ai_web_search_service, "_http_client", lambda: FakeClient())
+
+    assert ai_web_search_service.search("MSM update", cache_scope="voice:1:a") == []
+    assert ai_web_search_service.search("MSM update", cache_scope="voice:1:a") == []
+    assert ai_web_search_service.search("MSM update", cache_scope="voice:1:b") == []
+
+    assert calls == 2
 
 
 @pytest.mark.parametrize(

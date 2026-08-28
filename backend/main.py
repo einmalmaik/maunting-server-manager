@@ -684,6 +684,15 @@ async def lifespan(app: FastAPI):
 
     await app.state.http_client.aclose()
     await app.state.ai_http_client.aclose()
+    from services.calendar_service import shutdown_caldav_client
+    from services.ai_web_search_service import shutdown_http_client
+    from services.ai_geo_service import shutdown_http_client as shutdown_geo_http_client
+    from services.ai_satellite_service import shutdown_http_client as shutdown_satellite_http_client
+
+    shutdown_caldav_client()
+    shutdown_http_client()
+    shutdown_geo_http_client()
+    shutdown_satellite_http_client()
     stop_scheduler()
     await close_steam_service()
 

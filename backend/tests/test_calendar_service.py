@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -6,6 +7,28 @@ from sqlalchemy.orm import sessionmaker
 from database import Base
 from models import User, UserCalendar, CalendarEvent
 from services.calendar_service import CalendarService
+
+
+def test_caldav_read_adds_time_range_and_reuses_short_cache(monkeypatch, db_session, test_user):
+    sent: list[str] = []
+    calendar = SimpleNamespace(
+        id=77, provider_type="caldav", caldav_url="https://calendar.invalid/dav/",
+        caldav_username="user", name="Test", get_credentials=lambda: "synthetic-secret",
+    )
+
+    class FakeClient:
+        def request(self, _method, _url, **kwargs):
+            sent.append(kwargs["content"])
+            return SimpleNamespace(status_code=207, text="")
+
+    monkeypatch.setattr(CalendarService, "get_calendar", lambda *_args, **_kwargs: calendar)
+    monkeypatch.setattr("services.calendar_service._caldav_http_client", lambda: FakeClient())
+
+    assert CalendarService.get_events(db_session, test_user, start_date="2026-08-01", end_date="2026-08-31") == []
+    assert CalendarService.get_events(db_session, test_user, start_date="2026-08-01", end_date="2026-08-31") == []
+
+    assert len(sent) == 1
+    assert '<C:time-range start="20260801T000000Z" end="20260831T000000Z" />' in sent[0]
 
 
 @pytest.fixture
@@ -333,7 +356,6 @@ def test_calendar_categories_and_visibility(db_session, test_user):
             event_id=member_pers_ev["event_id"],
             team_id=99999,
         )
-
 
 
 
