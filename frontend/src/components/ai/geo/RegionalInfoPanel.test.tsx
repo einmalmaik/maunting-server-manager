@@ -78,6 +78,15 @@ describe('RegionalInfoPanel', () => {
     expect(screen.getByText('Berlin')).toBeInTheDocument()
   })
 
+  it('bleibt bei unvollständigen Echtzeitdaten im sicheren Ladezustand', () => {
+    const incompleteData = { location: 'Berlin', coordinates: { latitude: 52.52 } } as unknown as AiRegionalAnalysis
+
+    render(<RegionalInfoPanel data={incompleteData} loading onClose={vi.fn()} />)
+
+    expect(screen.getByLabelText(i18n.t('ai.geo.panelTitle', 'Regionale Analyse'))).toBeInTheDocument()
+    expect(screen.queryByText('Berlin')).not.toBeInTheDocument()
+  })
+
   it('zeigt Nachrichten als bereinigten Text statt XML-Markup', () => {
     render(
       <RegionalInfoPanel

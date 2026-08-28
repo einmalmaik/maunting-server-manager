@@ -26,11 +26,21 @@ export function MapTilerDetailMap({ latitude, longitude, locationName, onUnavail
 
   useEffect(() => {
     let disposed = false
+    let unavailableReported = false
+    const unavailable = () => {
+      if (disposed || unavailableReported) return
+      unavailableReported = true
+      onUnavailable()
+    }
     const initialise = async () => {
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        unavailable()
+        return
+      }
       const config = await aiApi.getMapTilerMapConfig()
       if (disposed) return
       if (!config.configured || !config.style_url || !elementRef.current) {
-        onUnavailable()
+        unavailable()
         return
       }
       const { Map: MapLibre, Marker } = await import('maplibre-gl')
@@ -52,21 +62,26 @@ export function MapTilerDetailMap({ latitude, longitude, locationName, onUnavail
       let styleReady = false
       map.once('style.load', () => {
         if (disposed) return
-        map.setProjection(globe ? { type: 'globe' } : { type: 'mercator' })
-        if (globe) {
-          const backgroundLayer = map.getStyle().layers?.find((layer) => layer.type === 'background')
-          if (backgroundLayer) map.setPaintProperty(backgroundLayer.id, 'background-opacity', 0)
-          map.getCanvas().style.backgroundColor = 'transparent'
-          // Die Kartendaten bleiben unverändert; der Schatten folgt allein
-          // der transparenten Kugelkontur und ergänzt den gemeinsamen
-          // Weltraum-Hintergrund um das bisherige atmosphärische Leuchten.
-          map.getCanvas().style.filter = 'drop-shadow(0 0 10px rgba(56, 189, 248, 0.68)) drop-shadow(0 0 24px rgba(14, 165, 233, 0.3))'
-          map.flyTo({
-            center: [longitude, latitude],
-            zoom: cameraMode === 'overview' ? 1.2 : cameraMode === 'detail' ? 7 : Math.max(2.2, Math.min(4.5, zoom)),
-            duration: 1800,
-            essential: true,
-          })
+        try {
+          map.setProjection(globe ? { type: 'globe' } : { type: 'mercator' })
+          if (globe) {
+            const backgroundLayer = map.getStyle().layers?.find((layer) => layer.type === 'background')
+            if (backgroundLayer) map.setPaintProperty(backgroundLayer.id, 'background-opacity', 0)
+            map.getCanvas().style.backgroundColor = 'transparent'
+            // Die Kartendaten bleiben unverändert; der Schatten folgt allein
+            // der transparenten Kugelkontur und ergänzt den gemeinsamen
+            // Weltraum-Hintergrund um das bisherige atmosphärische Leuchten.
+            map.getCanvas().style.filter = 'drop-shadow(0 0 10px rgba(56, 189, 248, 0.68)) drop-shadow(0 0 24px rgba(14, 165, 233, 0.3))'
+            map.flyTo({
+              center: [longitude, latitude],
+              zoom: cameraMode === 'overview' ? 1.2 : cameraMode === 'detail' ? 7 : Math.max(2.2, Math.min(4.5, zoom)),
+              duration: 1800,
+              essential: true,
+            })
+          }
+        } catch {
+          // Die optionale Kartenveredelung darf die Echtzeitansicht nicht
+          // gefährden. Die Karte bleibt mit ihrer Standardprojektion sichtbar.
         }
         styleReady = true
         setReady(true)
@@ -76,10 +91,10 @@ export function MapTilerDetailMap({ latitude, longitude, locationName, onUnavail
       // abschalten. Nur ein Fehler vor dem geladenen Stil bedeutet, dass die
       // optionale Karte wirklich nicht verfügbar ist.
       map.on('error', () => {
-        if (!disposed && !styleReady) onUnavailable()
+        if (!disposed && !styleReady) unavailable()
       })
     }
-    void initialise().catch(() => { if (!disposed) onUnavailable() })
+    void initialise().catch(unavailable)
     return () => { disposed = true; mapRef.current?.remove(); mapRef.current = null }
   }, [cameraMode, globe, latitude, longitude, onReady, onUnavailable, zoom])
 

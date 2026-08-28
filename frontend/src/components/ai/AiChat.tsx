@@ -39,6 +39,7 @@ import { useAiLauf } from './useAiLauf'
 import { ActiveProcessesCard } from './geo/ActiveProcessesCard'
 import { RegionalAnalysisLayout } from './geo/RegionalAnalysisLayout'
 import type { NewsItem } from './geo/RegionalInfoPanel'
+import { normalizeRegionalAnalysis } from './geo/regionalAnalysis'
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
@@ -338,7 +339,8 @@ export function AiChat() {
             section.werkzeug?.tool_name === 'analyze_region' &&
             section.werkzeug.geo_analysis
           ) {
-            const geo = section.werkzeug.geo_analysis
+            const geo = normalizeRegionalAnalysis(section.werkzeug.geo_analysis)
+            if (!geo) continue
             const geoId = `${geo.location}-${geo.coordinates?.latitude}-${geo.coordinates?.longitude}`
             setGeoData(geo)
 

@@ -24,6 +24,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { aiApi, type AiRegionalAnalysis } from '@/api/ai'
 import { wsProtokolle } from '@/api/client'
 import { wsUrl } from '@/config/api'
+import { normalizeRegionalAnalysis } from '../geo/regionalAnalysis'
 import { AufnahmeAbbruch, starteAufnahme, type Aufnahme } from './audioAufnahme'
 import { Wiedergabe } from './audioWiedergabe'
 
@@ -441,8 +442,9 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
           if (intent) {
             setWerkzeug(intent)
           }
-          if (nachricht.geo_analysis && typeof nachricht.geo_analysis === 'object') {
-            setGeoData(nachricht.geo_analysis as AiRegionalAnalysis)
+          const analysis = normalizeRegionalAnalysis(nachricht.geo_analysis)
+          if (analysis) {
+            setGeoData(analysis)
           } else if (
             nachricht.geo_target &&
             typeof nachricht.geo_target === 'object' &&
@@ -450,14 +452,15 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
             typeof (nachricht.geo_target as Record<string, unknown>).longitude === 'number'
           ) {
             const target = nachricht.geo_target as Record<string, unknown>
-            setGeoData({
+            const targetAnalysis = normalizeRegionalAnalysis({
               location: String(target.location ?? entities.location ?? ''),
               coordinates: {
-                latitude: target.latitude as number,
-                longitude: target.longitude as number,
-                bbox: Array.isArray(target.bbox) ? target.bbox as [number, number, number, number] : undefined,
+                latitude: target.latitude,
+                longitude: target.longitude,
+                bbox: target.bbox,
               },
-            } as AiRegionalAnalysis)
+            })
+            if (targetAnalysis) setGeoData(targetAnalysis)
           }
           break
         }
@@ -466,9 +469,8 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
           const name = String(nachricht.name || nachricht.tool_name || '')
           if (name) {
             setWerkzeug(name)
-            if (nachricht.geo_analysis && typeof nachricht.geo_analysis === 'object') {
-              setGeoData(nachricht.geo_analysis as AiRegionalAnalysis)
-            }
+            const analysis = normalizeRegionalAnalysis(nachricht.geo_analysis)
+            if (analysis) setGeoData(analysis)
           }
           break
         }
@@ -478,9 +480,8 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
           if (name) {
             setWerkzeug(name)
           }
-          if (nachricht.geo_analysis && typeof nachricht.geo_analysis === 'object') {
-            setGeoData(nachricht.geo_analysis as AiRegionalAnalysis)
-          }
+          const analysis = normalizeRegionalAnalysis(nachricht.geo_analysis)
+          if (analysis) setGeoData(analysis)
           break
         }
         case 'beleg': {

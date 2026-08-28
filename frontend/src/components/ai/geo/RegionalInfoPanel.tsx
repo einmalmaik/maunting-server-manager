@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next'
 import type { AiRegionalAnalysis, AiSatelliteLayer } from '@/api/ai'
 import { Button } from '@/Singra/UI'
 import { MapTilerDetailMap } from './MapTilerDetailMap'
+import { hasRegionalCoordinates } from './regionalAnalysis'
 
 type TabType = 'overview' | 'satellite' | 'news' | 'social' | 'traffic' | 'weather'
 
@@ -39,8 +40,8 @@ type RawNewsItem = Partial<NewsItem> & {
   published_date?: string
 }
 
-function plainNewsText(value?: string): string {
-  return (value || '')
+function plainNewsText(value?: unknown): string {
+  return (typeof value === 'string' ? value : '')
     .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/\s+([,.;:!?])/g, '$1')
@@ -70,7 +71,7 @@ interface RegionalInfoPanelProps {
  */
 export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfoPanelProps) {
   if (loading && !data) return <RegionalInfoLoading />
-  if (!data) return null
+  if (!data || !hasRegionalCoordinates(data)) return loading ? <RegionalInfoLoading /> : null
 
   return <RegionalInfoContent data={data} news={news} onClose={onClose} />
 }

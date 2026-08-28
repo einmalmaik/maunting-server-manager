@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { AiVoiceConfig } from '@/api/ai'
+import type { AiRegionalAnalysis, AiVoiceConfig } from '@/api/ai'
 import i18n from '@/i18n'
 import { SprachAnsicht } from './SprachAnsicht'
 import type { Beleg, Sprachzeile, Sprachzustand, Vorschlag } from './useSprachsitzung'
@@ -16,6 +16,8 @@ let sitzung: {
   fehler: string | null
   belege: Beleg[]
   vorschlag: Vorschlag | null
+  geoData: AiRegionalAnalysis | null
+  setGeoData: ReturnType<typeof vi.fn>
 }
 
 vi.mock('./useSprachsitzung', () => ({
@@ -50,6 +52,8 @@ function ansicht(
     fehler: null,
     belege: [],
     vorschlag: null,
+    geoData: null,
+    setGeoData: vi.fn(),
     ...teil,
   }
   const ergebnis = render(
@@ -278,5 +282,16 @@ describe('SprachAnsicht', () => {
     })
 
     expect(screen.queryByText('Wie ist es in Los Angeles?')).not.toBeInTheDocument()
+  })
+
+  it('bleibt bei einem unvollständigen Echtzeit-Payload bedienbar', () => {
+    ansicht({
+      werkzeug: 'analyze_region',
+      geoData: { location: 'Berlin', coordinates: { latitude: 52.52 } } as unknown as AiRegionalAnalysis,
+    })
+
+    expect(screen.getByLabelText(i18n.t('ai.geo.panelTitle', 'Regionale Analyse'))).toBeInTheDocument()
+    expect(screen.queryByText('52.5200° N')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: i18n.t('ai.voice.end') })).toBeInTheDocument()
   })
 })

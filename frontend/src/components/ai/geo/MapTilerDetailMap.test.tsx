@@ -62,4 +62,21 @@ describe('MapTilerDetailMap', () => {
     await waitFor(() => expect(onReady).toHaveBeenCalledOnce())
     expect(mapHarness.configs[0]?.center).toEqual([13.405, 52.52])
   })
+
+  it('meldet eine nicht konfigurierte Detailkarte genau einmal und lässt den Fallback zu', async () => {
+    mapHarness.getMapTilerMapConfig.mockResolvedValue({ configured: false, style_url: null })
+    const onUnavailable = vi.fn()
+
+    render(
+      <MapTilerDetailMap
+        latitude={52.52}
+        longitude={13.405}
+        locationName="Berlin"
+        onUnavailable={onUnavailable}
+      />,
+    )
+
+    await waitFor(() => expect(onUnavailable).toHaveBeenCalledOnce())
+    expect(mapHarness.configs).toHaveLength(0)
+  })
 })

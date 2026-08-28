@@ -548,7 +548,7 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.werkzeug).toBe('read_server_status')
   })
 
-  it('uebernimmt Geodaten bei werkzeug_gestartet oder werkzeug mit geo_analysis', async () => {
+  it('normalisiert Geodaten aus alten Werkzeugereignissen vor der Anzeige', async () => {
     const haken = await sitzung()
     const mockGeo = {
       region: 'Berlin',
@@ -570,7 +570,12 @@ describe('useSprachsitzung', () => {
       }),
     )
     expect(haken.result.current.werkzeug).toBe('analyze_region')
-    expect(haken.result.current.geoData).toEqual(mockGeo)
+    expect(haken.result.current.geoData).toMatchObject({
+      status: 'success',
+      location: 'Berlin',
+      country: '',
+      coordinates: { latitude: 52.52, longitude: 13.405 },
+    })
 
     act(() =>
       leitung().simulateMessage({
@@ -580,7 +585,22 @@ describe('useSprachsitzung', () => {
       }),
     )
     expect(haken.result.current.werkzeug).toBe('analyze_region')
-    expect(haken.result.current.geoData).toEqual(mockGeo)
+    expect(haken.result.current.geoData?.coordinates.bbox).toHaveLength(4)
+  })
+
+  it('ignoriert unvollständige Geodaten, statt die Echtzeitansicht zu beschädigen', async () => {
+    const haken = await sitzung()
+
+    act(() =>
+      leitung().simulateMessage({
+        art: 'tool_start',
+        tool_name: 'analyze_region',
+        geo_analysis: { location: 'Berlin', coordinates: { latitude: 52.52 } },
+      }),
+    )
+
+    expect(haken.result.current.werkzeug).toBe('analyze_region')
+    expect(haken.result.current.geoData).toBeNull()
   })
 
   it('verarbeitet intent_erkannt mit Intent, Entities und Geodaten', async () => {
@@ -612,6 +632,11 @@ describe('useSprachsitzung', () => {
       revision: undefined,
     })
     expect(haken.result.current.werkzeug).toBe('analyze_region')
-    expect(haken.result.current.geoData).toEqual(mockGeo)
+    expect(haken.result.current.geoData).toMatchObject({
+      status: 'success',
+      location: 'Berlin, Deutschland',
+      country: '',
+      coordinates: mockGeo.coordinates,
+    })
   })
 })

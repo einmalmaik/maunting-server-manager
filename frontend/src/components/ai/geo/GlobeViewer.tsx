@@ -379,11 +379,14 @@ export function GlobeViewer({
     return () => canvas.removeEventListener('wheel', preventPageScroll)
   }, [])
 
-  const effLocation = locationName ?? data?.location
+  const rawLocation = locationName ?? data?.location
+  const effLocation = typeof rawLocation === 'string' ? rawLocation : ''
   const preset = effLocation ? CITY_PRESETS[effLocation.toLowerCase().trim()] : undefined
   const effLat = latitude ?? data?.coordinates?.latitude ?? preset?.lat
   const effLon = longitude ?? data?.coordinates?.longitude ?? preset?.lon
   const effBbox = bbox ?? data?.coordinates?.bbox ?? preset?.bbox
+  const validLatitude = typeof effLat === 'number' && Number.isFinite(effLat) ? effLat : null
+  const validLongitude = typeof effLon === 'number' && Number.isFinite(effLon) ? effLon : null
 
   useEffect(() => {
     setMapTilerUnavailable(false)
@@ -421,17 +424,17 @@ export function GlobeViewer({
   // Wenn NEUE Zielkoordinaten übergeben werden: flüssige Kamerafahrt (flyTo)
   // Primitives-Vergleich entkoppelt von re-renderenden Array-Referenzen (effBbox)
   useEffect(() => {
-    if (typeof effLat === 'number' && typeof effLon === 'number') {
+    if (validLatitude !== null && validLongitude !== null) {
       const isNewLocation =
-        lastTargetCoordRef.current?.lat !== effLat ||
-        lastTargetCoordRef.current?.lon !== effLon
+        lastTargetCoordRef.current?.lat !== validLatitude ||
+        lastTargetCoordRef.current?.lon !== validLongitude
 
       if (isNewLocation) {
-        lastTargetCoordRef.current = { lat: effLat, lon: effLon }
-        flyToTarget(effLat, effLon, effBbox)
+        lastTargetCoordRef.current = { lat: validLatitude, lon: validLongitude }
+        flyToTarget(validLatitude, validLongitude, effBbox)
       }
     }
-  }, [effLat, effLon, effBbox])
+  }, [effBbox, validLatitude, validLongitude])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -841,10 +844,10 @@ export function GlobeViewer({
         aria-label={`3D Globus Ansicht ${effLocation ? `für ${effLocation}` : ''}`}
       />
 
-      {!mapTilerUnavailable && typeof effLat === 'number' && typeof effLon === 'number' && (
+      {!mapTilerUnavailable && validLatitude !== null && validLongitude !== null && (
         <MapTilerDetailMap
-          latitude={effLat}
-          longitude={effLon}
+          latitude={validLatitude}
+          longitude={validLongitude}
           locationName={effLocation || 'Region'}
           globe
           zoom={mapTilerGlobeZoom}
