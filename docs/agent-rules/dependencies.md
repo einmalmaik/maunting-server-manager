@@ -747,3 +747,31 @@ Kapselung:
 Exit-Plan:
   Fällt `image` weg, fällt beides mit. Ein eigener JPEG-Kodierer kommt nicht
   in Frage; dann lieber wieder PNG und eine kleinere Kantenlänge.
+
+## `maplibre-gl` 6.6.0 — optionale MapTiler-Detailkarte (28.08.2026)
+
+Problem und Notwendigkeit:
+  Die Canvas-Kugel kann eine Welttextur mathematisch korrekt darstellen, aber
+  keine stufenlos lesbaren Stadt- und Landkarten liefern. MapTiler stellt
+  hierfür Vektorkacheln und aktuelle Bildkarten bereit; MapLibre ist der
+  schlanke, providerneutrale WebGL-Renderer. Ein eigenes Tile-Rendering wäre
+  deutlich mehr Code und würde keine Kartenquelle ersetzen.
+
+Security und Datenschutz:
+  Die Bibliothek verarbeitet nur Kartenkacheln im Browser. Sie erhält weder
+  Panel-Credentials noch Servermetadaten. Der Betreiber hinterlegt einen
+  verschlüsselt gespeicherten, auf die Panel-Origin beschränkten MapTiler-
+  Browser-Key. Der Key wird nur nach `ai.satellite.use` an die Kartenansicht
+  ausgegeben; ein unbeschränkter oder serverseitiger MapTiler-Key ist verboten.
+
+Wartung, Lizenz und Fläche:
+  Version 6.6.0, BSD-3-Clause, aktives Open-Source-Projekt. Die direkte
+  Abhängigkeitsfläche besteht aus 12 kleinen Geometrie-/Vektorkachel-Paketen.
+  `npm audit --omit=dev` meldet keine MapLibre-Advisory; drei bereits
+  vorhandene React-Router-Advisories bleiben separat offen.
+
+Kapselung und Exit:
+  Ausschließlich `MapTilerDetailMap.tsx` importiert MapLibre, dynamisch erst
+  beim Hineinzoomen. Entfernen heißt: diese Komponente, die optionale
+  Einstellung und die drei MapTiler-Endpunkte löschen; Sentinel und der
+  bestehende Globus bleiben unverändert.

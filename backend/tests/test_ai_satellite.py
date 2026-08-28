@@ -128,3 +128,5 @@ def test_geo_service_analyze_region(db: Session, regular_user: User, monkeypatch
     assert "arcgisonline" in latest_imagery["url"]
     assert latest_imagery["mission"] == "ArcGIS World Imagery"
     assert latest_imagery["resolution"] == "anbieterabhängig"
+    assert result["news"] == []
+    assert result["news_status"] == "not_allowed"

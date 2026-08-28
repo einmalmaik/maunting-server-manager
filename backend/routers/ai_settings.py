@@ -22,6 +22,9 @@ from schemas.ai_settings import (
     AiGuardianPolicyUpdate,
     AiLearningPolicyStatus,
     AiLearningPolicyUpdate,
+    AiMapTilerKeyUpdate,
+    AiMapTilerMapConfig,
+    AiMapTilerStatus,
     AiRoleLimitsResponse,
     AiRoleLimitsUpdate,
     AiSatelliteCredentialsUpdate,
@@ -254,6 +257,60 @@ def set_satellite_credentials(
         )
         audit_db.commit()
     return AiSatelliteStatus(configured=configured)
+
+
+@router.get("/settings/maptiler", response_model=AiMapTilerStatus)
+def get_maptiler_status(
+    _: User = Depends(require_global("panel.settings.read")),
+) -> AiMapTilerStatus:
+    """Meldet nur, ob ein optionaler MapTiler-Browser-Key hinterlegt ist."""
+    from services import ai_maptiler_service
+
+    return AiMapTilerStatus(configured=ai_maptiler_service.is_configured())
+
+
+@router.put("/settings/maptiler", response_model=AiMapTilerStatus)
+def set_maptiler_key(
+    payload: AiMapTilerKeyUpdate,
+    actor: User = Depends(require_global("panel.settings.write")),
+    _: None = Depends(verify_csrf),
+) -> AiMapTilerStatus:
+    from services import ai_maptiler_service
+
+    key = payload.api_key.get_secret_value() if payload.api_key else ""
+    try:
+        ai_maptiler_service.store_browser_key(key)
+    except DisSidecarError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="MapTiler-Schluessel konnte nicht sicher gespeichert werden",
+        ) from exc
+
+    configured = ai_maptiler_service.is_configured()
+    with SessionLocal() as audit_db:
+        audit_service.record_privileged_action(
+            audit_db,
+            user_id=actor.id,
+            action="ai.maptiler.key.updated",
+            target_type="panel_setting",
+            target_id=None,
+            details={"configured": configured},
+        )
+        audit_db.commit()
+    return AiMapTilerStatus(configured=configured)
+
+
+@router.get("/maptiler/config", response_model=AiMapTilerMapConfig)
+def get_maptiler_map_config(
+    _: User = Depends(require_global("ai.satellite.use")),
+) -> AiMapTilerMapConfig:
+    """Liefert den bewusst origin-beschraenkten Browser-Key nur fuer die Karte."""
+    from services import ai_maptiler_service
+
+    config = ai_maptiler_service.browser_map_config()
+    if not config:
+        return AiMapTilerMapConfig(configured=False)
+    return AiMapTilerMapConfig(configured=True, style_url=config["style_url"])
 
 
 @router.get("/settings/learning", response_model=AiLearningPolicyStatus)

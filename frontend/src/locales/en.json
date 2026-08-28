@@ -1044,6 +1044,18 @@
         "save": "Satellite credentials could not be saved."
       }
     },
+    "maptiler": {
+      "title": "High-resolution map (MapTiler)",
+      "description": "An optional Sentinel complement: the map provides high-resolution imagery when zooming in. Sentinel remains active without a key.",
+      "apiKey": "MapTiler browser key",
+      "placeholder": "Paste browser key",
+      "configured": "Browser key saved",
+      "saved": "MapTiler configuration saved",
+      "removed": "MapTiler configuration removed",
+      "removeConfirm": "Remove the MapTiler configuration?",
+      "hint": "Create a new browser key in MapTiler and restrict it to this panel's domain. Do not use the default key for this.",
+      "errors": { "load": "Could not load MapTiler status", "save": "Could not save MapTiler configuration" }
+    },
     "geo": {
       "panelTitle": "Regional information overview",
       "region": "Region",
@@ -1059,6 +1071,7 @@
       "cloudCover": "Cloud cover",
       "openPreview": "Open preview",
       "current": "Current",
+      "captureTimeUnknown": "Capture time unknown",
       "liveActive": "Live analysis active",
       "zoomIn": "Zoom in",
       "zoomOut": "Zoom out",

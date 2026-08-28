@@ -366,6 +366,14 @@ export interface AiSatelliteStatus {
   configured: boolean
 }
 
+export interface AiMapTilerStatus {
+  configured: boolean
+}
+
+export interface AiMapTilerMapConfig extends AiMapTilerStatus {
+  style_url: string | null
+}
+
 export interface AiSatelliteLayer {
   id: string
   name: string
@@ -406,6 +414,8 @@ export interface AiRegionalAnalysis {
     scenes: AiSatelliteScene[]
     layers?: Record<string, AiSatelliteLayer>
   } | null
+  news?: Array<{ title?: string; url?: string; content?: string; published_date?: string }>
+  news_status?: 'pending' | 'available' | 'not_allowed' | 'not_configured' | 'unavailable'
 }
 
 export interface AiGuardianPolicy {
@@ -1167,6 +1177,12 @@ export const aiApi = {
       method: 'PUT',
       body: JSON.stringify({ client_id: clientId || null, client_secret: clientSecret || null }),
     }),
+  getMapTilerStatus: () => api<AiMapTilerStatus>('/ai/settings/maptiler'),
+  setMapTilerKey: (apiKey: string) => api<AiMapTilerStatus>('/ai/settings/maptiler', {
+    method: 'PUT',
+    body: JSON.stringify({ api_key: apiKey || null }),
+  }),
+  getMapTilerMapConfig: () => api<AiMapTilerMapConfig>('/ai/maptiler/config'),
   /**
    * Eine Unterhaltung. Wird beim ersten Aufruf serverseitig angelegt.
    *

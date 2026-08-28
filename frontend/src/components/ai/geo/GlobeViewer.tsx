@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Clock, Cloud, Compass, MapPin, Minus, Plus, RotateCcw, Satellite, Target } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { AiRegionalAnalysis } from '@/api/ai'
+import { MapTilerDetailMap } from './MapTilerDetailMap'
 
 interface GlobeViewerProps {
   latitude?: number | null
@@ -334,7 +335,9 @@ export function GlobeViewer({
   const lastTextureRenderRef = useRef(0)
   const [textureVersion, setTextureVersion] = useState(0)
   const [zoom, setZoom] = useState(1.0)
+  const [mapUnavailable, setMapUnavailable] = useState(false)
   const [autoRotate, setAutoRotate] = useState(true)
+  const handleMapUnavailable = useCallback(() => setMapUnavailable(true), [])
 
   // Lokale, öffentliche NASA-Blue-Marble-Textur: kein Laufzeit-Netzwerkaufruf
   // und keine Standortdaten verlassen dafür den Browser.
@@ -376,6 +379,10 @@ export function GlobeViewer({
   const effLat = latitude ?? data?.coordinates?.latitude ?? preset?.lat
   const effLon = longitude ?? data?.coordinates?.longitude ?? preset?.lon
   const effBbox = bbox ?? data?.coordinates?.bbox ?? preset?.bbox
+
+  useEffect(() => {
+    setMapUnavailable(false)
+  }, [effLat, effLon])
   const weather = data?.weather
   const satellite = data?.satellite
 
@@ -399,7 +406,7 @@ export function GlobeViewer({
       const dLat = Math.abs(customBbox[3] - customBbox[1])
       const maxSpan = Math.max(dLon, dLat)
       if (maxSpan > 25) setZoom(0.9)
-      else if (maxSpan > 5) setZoom(1.15)
+      else if (maxSpan > 5) setZoom(1.35)
       else setZoom(1.4)
     }
   }
@@ -797,6 +804,7 @@ export function GlobeViewer({
   }
 
   const rawDt = satellite?.scenes?.[0]?.datetime
+  const showDetailMap = !mapUnavailable && typeof effLat === 'number' && typeof effLon === 'number' && zoom >= 1.35
   let aktualitaetText = t('ai.geo.captureTimeUnknown', 'Aufnahmezeit unbekannt')
   if (rawDt) {
     const d = new Date(rawDt)
@@ -828,6 +836,13 @@ export function GlobeViewer({
         onPointerCancel={handleTouchPointerUp}
         aria-label={`3D Globus Ansicht ${effLocation ? `für ${effLocation}` : ''}`}
       />
+
+      {showDetailMap && <MapTilerDetailMap
+        latitude={effLat}
+        longitude={effLon}
+        locationName={effLocation || 'Region'}
+        onUnavailable={handleMapUnavailable}
+      />}
 
       {/* Steuerungselemente (Zoom, Zentrieren, Rotation) */}
       <div className="absolute top-3 right-3 flex items-center gap-1 rounded-xl border border-outline-variant/40 bg-surface-container-low/80 p-1 backdrop-blur-md z-10">

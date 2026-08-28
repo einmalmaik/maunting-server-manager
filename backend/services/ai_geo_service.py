@@ -31,6 +31,20 @@ _http_client_lock = threading.Lock()
 
 # In-Memory Cache für Geocoding (Ortsname -> Geo-Objekt)
 _geo_cache: dict[str, dict[str, Any]] = {
+    "deutschland": {
+        "name": "Deutschland",
+        "latitude": 51.1657,
+        "longitude": 10.4515,
+        "bbox": [5.8663, 47.2701, 15.0419, 55.0581],
+        "country": "Deutschland",
+    },
+    "germany": {
+        "name": "Germany",
+        "latitude": 51.1657,
+        "longitude": 10.4515,
+        "bbox": [5.8663, 47.2701, 15.0419, 55.0581],
+        "country": "Germany",
+    },
     "berlin": {
         "name": "Berlin, Deutschland",
         "latitude": 52.5200,
@@ -346,7 +360,8 @@ def analyze_region(location_name: str) -> dict[str, Any]:
             "scenes": satellite_data,
             "layers": layers,
         },
-        # Diese Analyse beschafft keine Nachrichten. Ein leerer Feed ist
-        # sicherer als generierte regionale Lageberichte.
+        # Wird vom autorisierten Werkzeugpfad durch reale Suchtreffer ergänzt.
+        # Der Dienst selbst kennt keinen Benutzer und darf daher nie suchen.
         "news": [],
+        "news_status": "pending",
     }

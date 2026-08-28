@@ -107,6 +107,21 @@ class AiSatelliteStatus(BaseModel):
     configured: bool
 
 
+class AiMapTilerKeyUpdate(BaseModel):
+    """Browser-Key fuer eine optional hochaufgeloeste Kartenansicht."""
+
+    api_key: SecretStr | None = Field(default=None, max_length=512)
+
+
+class AiMapTilerStatus(BaseModel):
+    configured: bool
+
+
+class AiMapTilerMapConfig(BaseModel):
+    configured: bool
+    style_url: str | None = None
+
+
 class AiLearningPolicyUpdate(BaseModel):
     """Wie die KI global gueltige Skills anlegen darf.
 
@@ -320,4 +335,3 @@ class AiGuardianPolicyStatus(BaseModel):
 
 class AiGuardianPolicyUpdate(BaseModel):
     enabled: bool
-

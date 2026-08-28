@@ -1044,6 +1044,18 @@
         "save": "Satelliten-Zugangsdaten konnten nicht gespeichert werden."
       }
     },
+    "maptiler": {
+      "title": "Hochauflösende Karte (MapTiler)",
+      "description": "Optionale Ergänzung zu Sentinel: Die Karte zeigt hochauflösende Bilddaten beim Hineinzoomen. Ohne Schlüssel bleibt die Sentinel-Ansicht aktiv.",
+      "apiKey": "MapTiler Browser-Key",
+      "placeholder": "Browser-Key einfügen",
+      "configured": "Browser-Key hinterlegt",
+      "saved": "MapTiler-Konfiguration gespeichert",
+      "removed": "MapTiler-Konfiguration entfernt",
+      "removeConfirm": "MapTiler-Konfiguration wirklich entfernen?",
+      "hint": "Lege in MapTiler einen neuen Browser-Key an und beschränke ihn auf die Domain dieses Panels. Der Standard-Key ist dafür nicht geeignet.",
+      "errors": { "load": "MapTiler-Status konnte nicht geladen werden", "save": "MapTiler-Konfiguration konnte nicht gespeichert werden" }
+    },
     "geo": {
       "panelTitle": "Regionale Informationsübersicht",
       "region": "Region",
@@ -1059,6 +1071,7 @@
       "cloudCover": "Bewölkung",
       "openPreview": "Vorschau öffnen",
       "current": "Aktuell",
+      "captureTimeUnknown": "Aufnahmezeit unbekannt",
       "liveActive": "Live-Analyse aktiv",
       "zoomIn": "Vergrößern",
       "zoomOut": "Verkleinern",

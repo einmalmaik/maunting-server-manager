@@ -3477,8 +3477,8 @@ def _execute_web_search(
 
 
 def _execute_analyze_region(db: Session, *, user: User, arguments: dict) -> dict:
-    """Führt eine regionale Analyse für einen Ort durch."""
-    from services import ai_geo_service, permission_service
+    """Führt eine regionale Analyse samt optionaler, aktueller Weblage durch."""
+    from services import ai_geo_service, ai_web_search_service, permission_service
 
     if not permission_service.has_global_permission(db, user, "ai.satellite.use"):
         raise AiActionValidationError("Satelliten- und Regionsanalyse ist für diesen Benutzer nicht freigegeben")
@@ -3488,7 +3488,30 @@ def _execute_analyze_region(db: Session, *, user: User, arguments: dict) -> dict
         raise AiActionValidationError("Ort (location) fehlt oder ist ungültig")
 
     safe_location = redact_sensitive_text(location.strip())[:100]
-    return ai_geo_service.analyze_region(safe_location)
+    analysis = ai_geo_service.analyze_region(safe_location)
+    if analysis.get("status") != "success":
+        return analysis
+
+    # Die regionale Weblage wird breit abgefragt. Persoenliche Erinnerungen
+    # beeinflussen ausschliesslich die spaetere Gewichtung im Modellkontext,
+    # nie die Anfrage an einen externen Anbieter.
+    if not permission_service.has_global_permission(db, user, "ai.web_search.use"):
+        analysis["news_status"] = "not_allowed"
+        return analysis
+    if not ai_web_search_service.is_configured():
+        analysis["news_status"] = "not_configured"
+        return analysis
+    try:
+        news = _execute_web_search(
+            db,
+            user=user,
+            arguments={"query": f"{safe_location} aktuelle Nachrichten Lagebericht", "count": 5},
+        )
+        analysis["news"] = news.get("results", [])
+        analysis["news_status"] = "available" if news.get("available") else "unavailable"
+    except AiActionValidationError:
+        analysis["news_status"] = "unavailable"
+    return analysis
 
 
 def _node_health(db: Session) -> dict:
