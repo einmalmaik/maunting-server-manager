@@ -416,6 +416,7 @@ export interface AiRegionalAnalysis {
   } | null
   news?: Array<{ title?: string; url?: string; content?: string; published_date?: string }>
   news_status?: 'pending' | 'available' | 'not_allowed' | 'not_configured' | 'unavailable'
+  camera?: { mode: 'overview' | 'focus' | 'detail' }
 }
 
 export interface AiGuardianPolicy {

@@ -130,3 +130,4 @@ def test_geo_service_analyze_region(db: Session, regular_user: User, monkeypatch
     assert latest_imagery["resolution"] == "anbieterabhängig"
     assert result["news"] == []
     assert result["news_status"] == "not_allowed"
+    assert result["camera"] == {"mode": "focus"}

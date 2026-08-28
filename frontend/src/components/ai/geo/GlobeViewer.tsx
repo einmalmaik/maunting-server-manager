@@ -379,6 +379,9 @@ export function GlobeViewer({
   const effLat = latitude ?? data?.coordinates?.latitude ?? preset?.lat
   const effLon = longitude ?? data?.coordinates?.longitude ?? preset?.lon
   const effBbox = bbox ?? data?.coordinates?.bbox ?? preset?.bbox
+  const mapCenter = effBbox && effBbox.length === 4
+    ? { latitude: (effBbox[1] + effBbox[3]) / 2, longitude: (effBbox[0] + effBbox[2]) / 2 }
+    : null
 
   useEffect(() => {
     setMapTilerUnavailable(false)
@@ -846,9 +849,12 @@ export function GlobeViewer({
         <MapTilerDetailMap
           latitude={effLat}
           longitude={effLon}
+          centerLatitude={mapCenter?.latitude}
+          centerLongitude={mapCenter?.longitude}
           locationName={effLocation || 'Region'}
           globe
           zoom={mapTilerGlobeZoom}
+          cameraMode={data?.camera?.mode}
           onUnavailable={handleMapTilerUnavailable}
         />
       )}

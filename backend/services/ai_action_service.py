@@ -257,12 +257,18 @@ def _global_tool_definitions() -> list[dict]:
             "Ermittelt Koordinaten, Wetterdaten und ruft aktuelle "
             "Satellitendaten (Copernicus/Sentinel-2) der Region ab. Der Ort "
             "kann auch eine Sehenswürdigkeit sein; die zurückgegebene WGS84-"
-            "Position steuert die Karten- und Globusansicht.",
+            "Position steuert die Karten- und Globusansicht. Waehle den "
+            "Kameramodus passend zum Wunsch des Benutzers.",
             {
                 "location": {
                     "type": "string",
                     "maxLength": 100,
                     "description": "Name der Stadt, Region oder des Ortes (z.B. 'Berlin', 'Washington').",
+                },
+                "camera": {
+                    "type": "string",
+                    "enum": ["overview", "focus", "detail"],
+                    "description": "overview fuer Weltuebersicht, focus fuer eine Region, detail nur wenn der Benutzer gezielt hineinzoomen moechte.",
                 },
             },
             ["location"],
@@ -3488,11 +3494,17 @@ def _execute_analyze_region(db: Session, *, user: User, arguments: dict) -> dict
     location = arguments.get("location")
     if not isinstance(location, str) or not location.strip():
         raise AiActionValidationError("Ort (location) fehlt oder ist ungültig")
+    camera = arguments.get("camera", "focus")
+    if camera not in {"overview", "focus", "detail"}:
+        raise AiActionValidationError("Kameramodus ist ungültig")
 
     safe_location = redact_sensitive_text(location.strip())[:100]
     analysis = ai_geo_service.analyze_region(safe_location)
     if analysis.get("status") != "success":
         return analysis
+    # Ausschliesslich eine lokale, reversible UI-Anweisung. Sie führt keinen
+    # Systembefehl aus und gibt keine zusätzlichen Daten frei.
+    analysis["camera"] = {"mode": camera}
 
     # Die regionale Weblage wird breit abgefragt. Persoenliche Erinnerungen
     # beeinflussen ausschliesslich die spaetere Gewichtung im Modellkontext,

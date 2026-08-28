@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next'
 import type { AiRegionalAnalysis, AiSatelliteLayer } from '@/api/ai'
 import { Button } from '@/Singra/UI'
 import { MapTilerDetailMap } from './MapTilerDetailMap'
+import { sentinelViewportCenter } from './geoViewport'
 
 type TabType = 'overview' | 'satellite' | 'news' | 'social' | 'traffic' | 'weather'
 
@@ -404,7 +405,9 @@ function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions):
                   <MapTilerDetailMap
                     latitude={data.coordinates.latitude}
                     longitude={data.coordinates.longitude}
+                    {...sentinelViewportCenter(data.coordinates)}
                     locationName={data.location}
+                    zoom={13}
                     onUnavailable={() => setMapTilerAvailable(false)}
                   />
                 </div>
@@ -437,7 +440,10 @@ function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions):
                       </p>
                     )}
 
-                    {layer.url && (
+                    {/* MapTiler ist die einzige Bildfläche, sobald es verfügbar
+                        ist. Sentinel bleibt als präzise Mess-/Szenenquelle
+                        darunter, ohne ein zweites, unscharfes Bild zu zeigen. */}
+                    {layer.url && !mapTilerAvailable && (
                       <div className="relative aspect-video w-full rounded-lg overflow-hidden border border-outline-variant/20 group">
                         <img src={layer.url} alt={layer.name} className="h-full w-full object-cover" />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
