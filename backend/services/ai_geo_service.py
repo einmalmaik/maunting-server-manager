@@ -262,7 +262,7 @@ def get_current_weather(latitude: float, longitude: float) -> dict[str, Any] | N
             "condition": condition,
         }
     except Exception as exc:
-        logger.info("Wetterabfrage fehlgeschlagen lat=%s lon=%s error=%s", latitude, longitude, type(exc).__name__)
+        logger.info("Wetterabfrage fehlgeschlagen error=%s", type(exc).__name__)
         return None
 
 
@@ -320,7 +320,7 @@ def analyze_region(location_name: str) -> dict[str, Any]:
         preview_url = true_color_url
         source_name = "ArcGIS World Imagery"
         source_resolution = "anbieterabhängig"
-        source_description = "Aktuelles verfügbares Bildmosaik. Aufnahmezeit und native Auflösung variieren je Kachel."
+        source_description = "Kartenbild für den abgefragten Bereich; eine Sentinel-Szene war nicht verfügbar."
         satellite_data = [{
             "id": f"world-imagery-{lat:.4f}-{lon:.4f}",
             "mission": source_name,
@@ -332,7 +332,7 @@ def analyze_region(location_name: str) -> dict[str, Any]:
     layers: dict[str, dict[str, Any]] = {
         "latest_imagery": {
             "id": "latest_imagery",
-            "name": "Aktuellste verfügbare Bilddaten",
+            "name": "Kartenbild",
             "url": preview_url,
             "resolution": source_resolution,
             "mission": source_name,

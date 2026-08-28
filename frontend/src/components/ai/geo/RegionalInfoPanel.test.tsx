@@ -77,4 +77,27 @@ describe('RegionalInfoPanel', () => {
 
     expect(screen.getByText('Berlin')).toBeInTheDocument()
   })
+
+  it('zeigt Nachrichten als bereinigten Text statt XML-Markup', () => {
+    render(
+      <RegionalInfoPanel
+        data={mockData}
+        onClose={vi.fn()}
+        news={[{
+          id: 'news-1',
+          title: '<strong>Wichtige Meldung</strong>',
+          snippet: 'Lage <em>geprüft</em>.',
+          source: 'Regional <b>News</b>',
+          timeAgo: 'vor 10 Min.',
+          category: 'Lokal',
+          url: 'https://example.test/news-1',
+        }]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Nachrichten/i }))
+    expect(screen.getByText('Wichtige Meldung')).toBeInTheDocument()
+    expect(screen.getByText('Lage geprüft.')).toBeInTheDocument()
+    expect(screen.queryByText(/<strong>|<em>/)).not.toBeInTheDocument()
+  })
 })

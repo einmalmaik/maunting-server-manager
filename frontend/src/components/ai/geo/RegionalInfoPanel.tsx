@@ -21,7 +21,6 @@ import { useTranslation } from 'react-i18next'
 import type { AiRegionalAnalysis, AiSatelliteLayer } from '@/api/ai'
 import { Button } from '@/Singra/UI'
 import { MapTilerDetailMap } from './MapTilerDetailMap'
-import { sentinelViewportCenter } from './geoViewport'
 
 type TabType = 'overview' | 'satellite' | 'news' | 'social' | 'traffic' | 'weather'
 
@@ -33,6 +32,29 @@ export interface NewsItem {
   category: string
   url?: string
   snippet?: string
+}
+
+type RawNewsItem = Partial<NewsItem> & {
+  content?: string
+  published_date?: string
+}
+
+function plainNewsText(value?: string): string {
+  return (value || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .trim()
+}
+
+function safeExternalUrl(value?: string): string | undefined {
+  if (!value) return undefined
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : undefined
+  } catch {
+    return undefined
+  }
 }
 
 interface RegionalInfoPanelProps {
@@ -80,29 +102,25 @@ function RegionalInfoContent({ data, news, onClose }: Omit<RegionalInfoPanelProp
   const firstScene = satellite?.scenes?.[0]
   const previewImg = firstScene?.preview_url
 
-  // Eine einzige, aktuelle Bildquelle statt visueller Filter, die keine
-  // zusätzlichen Satellitendaten darstellen würden.
+  // Sentinel liefert Szenen und Metadaten. Ohne echte Sentinel-Vorschau wird
+  // kein anderes Kartenbild als vermeintliche Satellitenszene ausgegeben.
   const layersMap = satellite?.layers || satellite?.scenes?.[0]?.layers
   const availableLayers: AiSatelliteLayer[] = useMemo(() => {
     if (layersMap && Object.keys(layersMap).length > 0) {
       return Object.values(layersMap)
     }
-    const [minLon, minLat, maxLon, maxLat] = coordinates?.bbox || [0, 0, 0, 0]
+    if (!previewImg) return []
     return [
       {
-        id: 'latest_imagery',
-        name: 'Aktuellste verfügbare Bilddaten',
-        url:
-          previewImg ||
-          `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${minLon.toFixed(4)},${minLat.toFixed(4)},${maxLon.toFixed(4)},${maxLat.toFixed(4)}&bboxSR=4326&imageSR=4326&size=1600,1200&format=jpg&f=image`,
-        resolution: firstScene?.preview_url ? 'gemäß Szene' : 'anbieterabhängig',
-        mission: firstScene?.preview_url ? firstScene.mission : 'ArcGIS World Imagery',
-        description: firstScene?.preview_url
-          ? 'Neueste verfügbare Szene. Zeitpunkt und Bewölkung stehen in den Metadaten.'
-          : 'Aktuelles verfügbares Bildmosaik. Aufnahmezeit und native Auflösung variieren je Kachel.',
+        id: 'sentinel_scene',
+        name: firstScene?.mission || 'Satellitenszene',
+        url: previewImg,
+        resolution: 'gemäß Szene',
+        mission: firstScene?.mission || 'Sentinel',
+        description: 'Aufnahmezeit und Bewölkung stehen in den Szenenmetadaten.',
       },
     ]
-  }, [layersMap, coordinates?.bbox, previewImg, firstScene?.mission])
+  }, [layersMap, previewImg, firstScene?.mission])
 
 function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions): string {
   if (!val) return 'Zeitpunkt nicht angegeben'
@@ -114,25 +132,20 @@ function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions):
   const activeLayer = availableLayers.find((l) => l.id === selectedLayerId) || availableLayers[0]
   const currentPreviewUrl = activeLayer?.url || previewImg
 
-  // Nachrichtenfeed: filtert strikt nach aktuellem Ort, um veraltete Recherchen (z. B. aus früheren Turns) zu isolieren
+  // Nachrichtenfeed: Text bleibt reiner Text. Fremde HTML/XML-Fragmente werden
+  // nicht als Inhalt oder Markup in die Oberfläche übernommen.
   const newsList: NewsItem[] = useMemo(() => {
-    const locClean = (location || '').trim()
-    const locMain = locClean.split(',')[0].trim().toLowerCase()
-
-    const rawNews = (news && news.length > 0) ? news : ((data as any)?.news && (data as any).news.length > 0) ? (data as any).news : null
-
-    if (rawNews && rawNews.length > 0) {
-      const matched = (rawNews as NewsItem[]).filter((item) => {
-        const fullText = `${item.title} ${item.snippet || ''} ${item.source || ''}`.toLowerCase()
-        return !locMain || fullText.includes(locMain)
-      })
-      if (matched.length > 0) {
-        return matched
-      }
-    }
-
-    return []
-  }, [news, location, t])
+    const rawNews: RawNewsItem[] = news && news.length > 0 ? news : (data.news || [])
+    return rawNews.map((item, index): NewsItem => ({
+      id: item.id || item.url || `news-${index}`,
+      title: plainNewsText(item.title),
+      source: plainNewsText(item.source),
+      timeAgo: plainNewsText(item.timeAgo || item.published_date),
+      category: plainNewsText(item.category),
+      snippet: plainNewsText(item.snippet || item.content),
+      url: safeExternalUrl(item.url),
+    }))
+  }, [data.news, news])
 
   const tabs: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'overview', label: t('ai.geo.tabs.overview', 'Übersicht'), icon: Globe2 },
@@ -396,21 +409,14 @@ function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions):
             </div>
 
             {mapTilerAvailable && data.coordinates && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
-                  <span>Hochauflösende Kartenansicht</span>
-                  <span className="text-primary">MapTiler</span>
-                </div>
-                <div className="relative aspect-video overflow-hidden rounded-xl border border-primary/25 bg-surface-container-lowest">
-                  <MapTilerDetailMap
-                    latitude={data.coordinates.latitude}
-                    longitude={data.coordinates.longitude}
-                    {...sentinelViewportCenter(data.coordinates)}
-                    locationName={data.location}
-                    zoom={13}
-                    onUnavailable={() => setMapTilerAvailable(false)}
-                  />
-                </div>
+              <div className="relative aspect-video overflow-hidden rounded-xl border border-primary/25 bg-surface-container-lowest">
+                <MapTilerDetailMap
+                  latitude={data.coordinates.latitude}
+                  longitude={data.coordinates.longitude}
+                  locationName={data.location}
+                  zoom={13}
+                  onUnavailable={() => setMapTilerAvailable(false)}
+                />
               </div>
             )}
 
@@ -462,20 +468,8 @@ function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions):
                       </div>
                     )}
 
-                    <div className="flex items-center justify-between pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedLayerId(layer.id)}
-                        className={`rounded-lg px-3 py-1 text-xs font-medium transition-colors ${
-                          isSelected
-                            ? 'bg-teal-500 text-slate-950 font-bold'
-                            : 'bg-surface-container-highest text-on-surface hover:bg-surface-container-high'
-                        }`}
-                      >
-                        {isSelected ? 'Aktiviert' : 'Als Hauptlayer wählen'}
-                      </button>
-
-                      {layer.url && (
+                    {layer.url && (
+                      <div className="flex justify-end pt-1">
                         <a
                           href={layer.url}
                           target="_blank"
@@ -485,8 +479,8 @@ function formatSafeDate(val?: string | null, opts?: Intl.DateTimeFormatOptions):
                           <span>{t('ai.geo.openFullScene', 'HD-Export')}</span>
                           <ExternalLink className="h-3 w-3" />
                         </a>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}

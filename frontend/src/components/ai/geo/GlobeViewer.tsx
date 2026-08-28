@@ -336,8 +336,13 @@ export function GlobeViewer({
   const [textureVersion, setTextureVersion] = useState(0)
   const [zoom, setZoom] = useState(1.0)
   const [mapTilerUnavailable, setMapTilerUnavailable] = useState(false)
+  const [mapTilerReady, setMapTilerReady] = useState(false)
   const [autoRotate, setAutoRotate] = useState(true)
-  const handleMapTilerUnavailable = useCallback(() => setMapTilerUnavailable(true), [])
+  const handleMapTilerUnavailable = useCallback(() => {
+    setMapTilerReady(false)
+    setMapTilerUnavailable(true)
+  }, [])
+  const handleMapTilerReady = useCallback(() => setMapTilerReady(true), [])
 
   // Lokale, öffentliche NASA-Blue-Marble-Textur: kein Laufzeit-Netzwerkaufruf
   // und keine Standortdaten verlassen dafür den Browser.
@@ -379,12 +384,10 @@ export function GlobeViewer({
   const effLat = latitude ?? data?.coordinates?.latitude ?? preset?.lat
   const effLon = longitude ?? data?.coordinates?.longitude ?? preset?.lon
   const effBbox = bbox ?? data?.coordinates?.bbox ?? preset?.bbox
-  const mapCenter = effBbox && effBbox.length === 4
-    ? { latitude: (effBbox[1] + effBbox[3]) / 2, longitude: (effBbox[0] + effBbox[2]) / 2 }
-    : null
 
   useEffect(() => {
     setMapTilerUnavailable(false)
+    setMapTilerReady(false)
   }, [effLat, effLon])
 
   const weather = data?.weather
@@ -464,17 +467,6 @@ export function GlobeViewer({
         ctx.fillRect(star.x * width, star.y * height, star.size, star.size)
       }
 
-      // Eine entfernte, unscharfe Planetenscheibe und eine seitliche Sonne
-      // geben Tiefe, ohne das eigentliche Lagebild zu überladen.
-      const distantPlanet = ctx.createRadialGradient(width * 0.84, height * 0.18, 0, width * 0.84, height * 0.18, Math.min(width, height) * 0.11)
-      distantPlanet.addColorStop(0, 'rgba(147, 197, 253, 0.38)')
-      distantPlanet.addColorStop(0.7, 'rgba(49, 83, 132, 0.16)')
-      distantPlanet.addColorStop(1, 'rgba(15, 23, 42, 0)')
-      ctx.fillStyle = distantPlanet
-      ctx.beginPath()
-      ctx.arc(width * 0.84, height * 0.18, Math.min(width, height) * 0.11, 0, Math.PI * 2)
-      ctx.fill()
-
       const sunlight = ctx.createRadialGradient(width * 0.04, height * 0.14, 0, width * 0.04, height * 0.14, Math.min(width, height) * 0.55)
       sunlight.addColorStop(0, 'rgba(255, 241, 190, 0.23)')
       sunlight.addColorStop(0.22, 'rgba(253, 186, 116, 0.08)')
@@ -503,6 +495,9 @@ export function GlobeViewer({
 
       if (!reducedMotion) pulse = (pulse + 0.05) % (Math.PI * 2)
 
+      // MapTiler zeichnet die einzige interaktive Erde. Der Canvas bleibt
+      // darunter bewusst beim gemeinsamen Weltraumhintergrund.
+      if (!mapTilerReady) {
       // 1. Atmosphärischer Glüheffekt (Atmospheric Halo Glow)
       const glowGrad = ctx.createRadialGradient(cx, cy, radius * 0.82, cx, cy, radius * 1.35)
       glowGrad.addColorStop(0, 'rgba(56, 189, 248, 0.32)')
@@ -741,6 +736,7 @@ export function GlobeViewer({
       ctx.beginPath()
       ctx.arc(cx, cy, radius, 0, Math.PI * 2)
       ctx.stroke()
+      }
 
       animFrameRef.current = requestAnimationFrame(render)
     }
@@ -750,7 +746,7 @@ export function GlobeViewer({
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
     }
-  }, [zoom, autoRotate, effLat, effLon, effLocation, effBbox, textureVersion])
+  }, [zoom, autoRotate, effLat, effLon, effLocation, effBbox, mapTilerReady, textureVersion])
 
   // Mausinteraktion (Freies Drehen ohne Zurückspringen)
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -849,18 +845,18 @@ export function GlobeViewer({
         <MapTilerDetailMap
           latitude={effLat}
           longitude={effLon}
-          centerLatitude={mapCenter?.latitude}
-          centerLongitude={mapCenter?.longitude}
           locationName={effLocation || 'Region'}
           globe
           zoom={mapTilerGlobeZoom}
           cameraMode={data?.camera?.mode}
           onUnavailable={handleMapTilerUnavailable}
+          onReady={handleMapTilerReady}
         />
       )}
 
-      {/* Steuerungselemente (Zoom, Zentrieren, Rotation) */}
-      <div className="absolute top-3 right-3 flex items-center gap-1 rounded-xl border border-outline-variant/40 bg-surface-container-low/80 p-1 backdrop-blur-md z-10">
+      {/* Canvas-Steuerung nur für den Canvas-Fallback. MapLibre übernimmt
+          Interaktion mit Drag und Mausrad selbst. */}
+      {!mapTilerReady && <div className="absolute top-3 right-3 flex items-center gap-1 rounded-xl border border-outline-variant/40 bg-surface-container-low/80 p-1 backdrop-blur-md z-10">
         {typeof effLat === 'number' && typeof effLon === 'number' && (
           <button
             type="button"
@@ -903,7 +899,7 @@ export function GlobeViewer({
         >
           <RotateCcw className="h-4 w-4" />
         </button>
-      </div>
+      </div>}
 
       {/* Standort-Badge oben links */}
       {effLocation && (
