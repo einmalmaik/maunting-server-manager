@@ -1093,6 +1093,7 @@
       },
       "processes": {
         "title": "Aktive Prozesse",
+        "prefetch": "Spekulativer Abruf",
         "satellite": "Satellitendaten (Sentinel-2)",
         "weather": "Wetterdaten",
         "news": "Nachrichten & Websuche",

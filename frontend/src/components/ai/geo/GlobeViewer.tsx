@@ -167,6 +167,36 @@ function drawClippedLineSegment(
  * 3D-Globus-Komponente mit echten Kontinent-Vektoren, flüssiger Rotationsanimation,
  * Zielort-Fokussierung, Mausrad-Zoom und unterer Live-Metriken-Leiste.
  */
+// Bekannte Schnell-Koordinaten für spekulative Drehung schon vor Abschluss des vollständigen Geocodings
+const CITY_PRESETS: Record<string, { lat: number; lon: number; bbox?: [number, number, number, number] }> = {
+  berlin: { lat: 52.52, lon: 13.405, bbox: [13.0883, 52.3382, 13.7611, 52.6755] },
+  hamburg: { lat: 53.5511, lon: 9.9937 },
+  muenchen: { lat: 48.1351, lon: 11.582 },
+  münchen: { lat: 48.1351, lon: 11.582 },
+  munich: { lat: 48.1351, lon: 11.582 },
+  koeln: { lat: 50.9375, lon: 6.9603 },
+  köln: { lat: 50.9375, lon: 6.9603 },
+  cologne: { lat: 50.9375, lon: 6.9603 },
+  frankfurt: { lat: 50.1109, lon: 8.6821 },
+  stuttgart: { lat: 48.7758, lon: 9.1829 },
+  duesseldorf: { lat: 51.2277, lon: 6.7735 },
+  düsseldorf: { lat: 51.2277, lon: 6.7735 },
+  paris: { lat: 48.8566, lon: 2.3522, bbox: [2.2241, 48.8155, 2.4699, 48.9021] },
+  london: { lat: 51.5074, lon: -0.1278, bbox: [-0.5103, 51.2867, 0.334, 51.6918] },
+  tokio: { lat: 35.6762, lon: 139.6503, bbox: [138.9427, 35.5288, 139.9213, 35.8984] },
+  tokyo: { lat: 35.6762, lon: 139.6503, bbox: [138.9427, 35.5288, 139.9213, 35.8984] },
+  washington: { lat: 38.8951, lon: -77.0364, bbox: [-77.1197, 38.7916, -76.9093, 38.9955] },
+  'new york': { lat: 40.7128, lon: -74.006 },
+  madrid: { lat: 40.4168, lon: -3.7038 },
+  rom: { lat: 41.9028, lon: 12.4964 },
+  rome: { lat: 41.9028, lon: 12.4964 },
+  wien: { lat: 48.2082, lon: 16.3738 },
+  vienna: { lat: 48.2082, lon: 16.3738 },
+  zuerich: { lat: 47.3769, lon: 8.5417 },
+  zürich: { lat: 47.3769, lon: 8.5417 },
+  zurich: { lat: 47.3769, lon: 8.5417 },
+}
+
 export function GlobeViewer({
   latitude,
   longitude,
@@ -180,10 +210,11 @@ export function GlobeViewer({
   const [zoom, setZoom] = useState(1.0)
   const [autoRotate, setAutoRotate] = useState(true)
 
-  const effLat = latitude ?? data?.coordinates?.latitude
-  const effLon = longitude ?? data?.coordinates?.longitude
   const effLocation = locationName ?? data?.location
-  const effBbox = bbox ?? data?.coordinates?.bbox
+  const preset = effLocation ? CITY_PRESETS[effLocation.toLowerCase().trim()] : undefined
+  const effLat = latitude ?? data?.coordinates?.latitude ?? preset?.lat
+  const effLon = longitude ?? data?.coordinates?.longitude ?? preset?.lon
+  const effBbox = bbox ?? data?.coordinates?.bbox ?? preset?.bbox
   const weather = data?.weather
   const satellite = data?.satellite
 

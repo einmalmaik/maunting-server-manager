@@ -76,6 +76,19 @@ export interface Vorschlag {
   wirkung: string
 }
 
+/**
+ * Eine während des Sprechens vorhersagend erkannte Werkzeug-Absicht.
+ */
+export interface IntentErkannt {
+  intent: string
+  confidence: number
+  entities: Record<string, unknown>
+  arguments: Record<string, unknown>
+  spekulativ?: boolean
+  prefetchStatus?: 'erkannt' | 'gestartet' | 'fertig' | 'abgebrochen' | 'fehler'
+  revision?: number
+}
+
 interface Ergebnis {
   zustand: Sprachzustand
   /** Der laufende Wortwechsel, für die Anzeige. */
@@ -92,6 +105,8 @@ interface Ergebnis {
   belege: Beleg[]
   /** Die Schreibaktion, auf die gerade ein Ja fehlt. `null`, wenn keine. */
   vorschlag: Vorschlag | null
+  /** Spekulativ vorab erkannte Absicht des Nutzers. */
+  intentErkannt: IntentErkannt | null
   /** Regionale Satelliten- und Geodaten, falls ein entsprechendes Werkzeug lief. */
   geoData: AiRegionalAnalysis | null
   setGeoData: React.Dispatch<React.SetStateAction<AiRegionalAnalysis | null>>
@@ -175,7 +190,9 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
   const [fehler, setFehler] = useState<string | null>(null)
   const [belege, setBelege] = useState<Beleg[]>([])
   const [vorschlag, setVorschlag] = useState<Vorschlag | null>(null)
+  const [intentErkannt, setIntentErkannt] = useState<IntentErkannt | null>(null)
   const [geoData, setGeoData] = useState<AiRegionalAnalysis | null>(null)
+  const intentRevision = useRef(0)
 
   const ws = useRef<WebSocket | null>(null)
   const mikro = useRef<Aufnahme | null>(null)
@@ -202,6 +219,8 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     setZustand('aus')
     setWerkzeug(null)
     setVorschlag(null)
+    setIntentErkannt(null)
+    intentRevision.current = 0
   }, [aufraeumen])
 
   const zeileAnhaengen = useCallback((wer: Sprachzeile['wer'], text: string) => {
@@ -388,6 +407,60 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
         case 'antworttext':
           zeileAnhaengen('ki', String(nachricht.text ?? ''))
           break
+        case 'intent_erkannt': {
+          const intent = String(nachricht.intent ?? '')
+          const confidence = Number(nachricht.confidence ?? 1.0)
+          if (!/^[a-z0-9_]{1,64}$/.test(intent) || !Number.isFinite(confidence)) break
+          const revision = Number(nachricht.revision ?? 0)
+          if (Number.isFinite(revision) && revision > 0 && revision < intentRevision.current) break
+          if (Number.isFinite(revision) && revision > 0) intentRevision.current = revision
+          const entities =
+            nachricht.entities && typeof nachricht.entities === 'object'
+              ? (nachricht.entities as Record<string, unknown>)
+              : {}
+          const args =
+            nachricht.arguments && typeof nachricht.arguments === 'object'
+              ? (nachricht.arguments as Record<string, unknown>)
+              : {}
+          setIntentErkannt({
+            intent,
+            confidence,
+            entities,
+            arguments: args,
+            spekulativ: Boolean(nachricht.spekulativ ?? true),
+            prefetchStatus:
+              nachricht.prefetch_status === 'erkannt' ||
+              nachricht.prefetch_status === 'gestartet' ||
+              nachricht.prefetch_status === 'fertig' ||
+              nachricht.prefetch_status === 'abgebrochen' ||
+              nachricht.prefetch_status === 'fehler'
+                ? nachricht.prefetch_status
+                : undefined,
+            revision: Number.isFinite(revision) && revision > 0 ? revision : undefined,
+          })
+          if (intent) {
+            setWerkzeug(intent)
+          }
+          if (nachricht.geo_analysis && typeof nachricht.geo_analysis === 'object') {
+            setGeoData(nachricht.geo_analysis as AiRegionalAnalysis)
+          } else if (
+            nachricht.geo_target &&
+            typeof nachricht.geo_target === 'object' &&
+            typeof (nachricht.geo_target as Record<string, unknown>).latitude === 'number' &&
+            typeof (nachricht.geo_target as Record<string, unknown>).longitude === 'number'
+          ) {
+            const target = nachricht.geo_target as Record<string, unknown>
+            setGeoData({
+              location: String(target.location ?? entities.location ?? ''),
+              coordinates: {
+                latitude: target.latitude as number,
+                longitude: target.longitude as number,
+                bbox: Array.isArray(target.bbox) ? target.bbox as [number, number, number, number] : undefined,
+              },
+            } as AiRegionalAnalysis)
+          }
+          break
+        }
         case 'werkzeug_gestartet':
         case 'tool_start': {
           const name = String(nachricht.name || nachricht.tool_name || '')
@@ -532,6 +605,7 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     fehler,
     belege,
     vorschlag,
+    intentErkannt,
     geoData,
     setGeoData,
     pegel,

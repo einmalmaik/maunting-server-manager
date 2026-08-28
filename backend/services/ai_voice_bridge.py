@@ -375,6 +375,10 @@ class Sprachbruecke:
         #: obwohl feststeht, in welches Mikrofon gesprochen wurde. ``None`` für
         #: den Browser und für Token von vor dem Anspruch.
         self._familie = familie
+        # Nicht aus Browser- oder Modelltext: diese Kennung bindet einen
+        # spekulativen Wert an genau diese Verbindung.
+        self._prefetch_sitzung_id = str(uuid4())
+        self._intent_revision = 0
 
         self._kadenz_faktor = _USER_KADENZ_CACHE.get(user_id, 1.0)
         self._erkennung = ai_voice_vad.Pausenerkennung(kadenz_faktor=self._kadenz_faktor)
@@ -411,6 +415,12 @@ class Sprachbruecke:
 
     async def fuehren(self) -> Lage:
         """Die Sitzung, bis der Browser geht oder die Zeit um ist."""
+        # Das lokale Modell darf den ersten Audiopaketfluss nicht anhalten. Bis
+        # es bereit ist, wird schlicht kein Intent gemeldet; die Sprachsitzung
+        # selbst bleibt vollständig funktionsfähig.
+        from services.ai_intent_classifier import classifier
+
+        asyncio.create_task(asyncio.to_thread(classifier.warm))
         await self._zustand_melden(ZUSTAND_BEREIT, erstmalig=True)
         self._zusteller = asyncio.create_task(self._meldungen_zustellen())
         ende = time.monotonic() + self._hoechstdauer
@@ -468,9 +478,15 @@ class Sprachbruecke:
             befehl = json.loads(text)
         except (TypeError, ValueError):
             return True
-        if isinstance(befehl, dict) and befehl.get("art") == "unterbrechen":
-            await self._abwuergen()
-            await self._zustand_melden(ZUSTAND_BEREIT)
+        if isinstance(befehl, dict):
+            art = befehl.get("art")
+            if art == "unterbrechen":
+                await self._abwuergen()
+                await self._zustand_melden(ZUSTAND_BEREIT)
+            elif art in ("teil_transkript", "partial_transcript", "transkript_chunk", "chunk"):
+                text_chunk = str(befehl.get("text") or befehl.get("chunk") or "").strip()
+                if text_chunk:
+                    await self._verarbeite_teil_transkript(text_chunk)
         return True
 
     async def _ton(self, pcm: bytes) -> None:
@@ -552,6 +568,7 @@ class Sprachbruecke:
             self._letzte_antwort_fertig = False
 
             await self._senden({"art": "gehoert", "text": wortlaut})
+            await self._verarbeite_teil_transkript(wortlaut)
 
             if not _ist_gedanke_abgeschlossen(wortlaut):
                 # Kurze Gnadenfrist für offene Gedanken, damit bei unmittelbarem
@@ -811,6 +828,8 @@ class Sprachbruecke:
                 await self._senden({"art": "stoerung"})
             await self._zustand_melden(ZUSTAND_BEREIT)
             return
+
+        await asyncio.to_thread(self._prefetch_sitzung_an_lauf, run_id)
 
         self._lage.laeufe += 1
         # Dieselbe Reihenfolge wie im Chat-Endpunkt, und sie ist hier alles:
@@ -1337,8 +1356,105 @@ class Sprachbruecke:
             return
         await self._senden({"art": "zustand", "zustand": zustand})
 
+    async def _verarbeite_teil_transkript(self, text_chunk: str) -> None:
+        """Klassifiziert partielle Transkripte und stößt spekulatives Prefetching an."""
+        from services.ai_intent_classifier import classify_streaming_intent, is_side_effect_free, prefetch_cache
+
+        prediction = classify_streaming_intent(text_chunk)
+        if prediction is None:
+            return
+        self._intent_revision += 1
+        revision = self._intent_revision
+
+        nachricht: dict = {
+            "art": "intent_erkannt",
+            "intent": prediction.intent,
+            "confidence": prediction.confidence,
+            "entities": prediction.entities,
+            "arguments": prediction.arguments,
+            "spekulativ": bool(prediction.arguments),
+            "prefetch_status": "erkannt",
+            "revision": revision,
+        }
+        await self._senden(nachricht)
+
+        # Ohne vollständige Argumente gibt es absichtlich keinen Abruf. Das
+        # trifft derzeit insbesondere Kalenderfragen ohne eindeutigen Zeitraum.
+        if not prediction.arguments or not is_side_effect_free(prediction.intent):
+            return
+        task = await prefetch_cache.prefetch(
+            session_id=self._prefetch_sitzung_id,
+            user_id=self._user_id,
+            tool_name=prediction.intent,
+            arguments=prediction.arguments,
+            executor=lambda: asyncio.to_thread(self._prefetch_lesen, prediction.intent, prediction.arguments),
+        )
+        if task is not None:
+            await self._senden({**nachricht, "prefetch_status": "gestartet"})
+            asyncio.create_task(self._prefetch_beobachten(task, prediction, revision))
+            if prediction.intent == "analyze_region":
+                asyncio.create_task(self._geo_ziel_senden(prediction, revision))
+
+    def _prefetch_lesen(self, tool_name: str, arguments: dict) -> dict:
+        """Derselbe Dispatcher wie der LLM-Aufruf, samt aller Rechteprüfungen."""
+        from services.ai_action_service import execute_read_tool
+
+        with SessionLocal() as db:
+            user = db.get(User, self._user_id)
+            if user is None or not user.is_active:
+                raise RuntimeError("user unavailable")
+            return execute_read_tool(
+                db, user=user, tool_name=tool_name, arguments=arguments,
+                herkunft=self._herkunft, familie=self._familie,
+            )
+
+    async def _prefetch_beobachten(self, task: asyncio.Task, prediction, revision: int) -> None:
+        try:
+            value = await task
+            status = "fertig" if value is not None else "fehler"
+        except asyncio.CancelledError:
+            status = "abgebrochen"
+        except Exception:
+            status = "fehler"
+        await self._senden({
+            "art": "intent_erkannt", "intent": prediction.intent,
+            "confidence": prediction.confidence, "entities": prediction.entities,
+            "arguments": prediction.arguments, "spekulativ": True,
+            "prefetch_status": status, "revision": revision,
+        })
+
+    async def _geo_ziel_senden(self, prediction, revision: int) -> None:
+        from services import ai_geo_service
+
+        location = str(prediction.arguments["location"])
+        geo = await asyncio.to_thread(ai_geo_service.geocode_location, location)
+        if not geo:
+            return
+        await self._senden({
+            "art": "intent_erkannt", "intent": prediction.intent,
+            "confidence": prediction.confidence, "entities": prediction.entities,
+            "arguments": prediction.arguments, "spekulativ": True,
+            "prefetch_status": "gestartet", "revision": revision,
+            "geo_target": {"location": geo["name"], "latitude": geo["latitude"], "longitude": geo["longitude"], "bbox": geo["bbox"]},
+        })
+
+    def _prefetch_sitzung_an_lauf(self, run_id: str) -> None:
+        from services import ai_run_service
+
+        with SessionLocal() as db:
+            run = db.get(AiRun, run_id)
+            if run is None:
+                return
+            zustand = ai_run_service.zustand_lesen(run)
+            zustand["prefetch_session_id"] = self._prefetch_sitzung_id
+            ai_run_service.zustand_schreiben(run, zustand)
+            db.commit()
+
     async def _abwuergen(self) -> None:
         """Den laufenden Zug abbrechen — der Mensch redet dazwischen."""
+        from services.ai_intent_classifier import prefetch_cache
+
+        prefetch_cache.invalidate(session_id=self._prefetch_sitzung_id, user_id=self._user_id)
         if (self._laufende is not None and not self._laufende.done()) or (self._stimme is not None):
             self._unterbrochen_fuer_merge = True
         stimme = self._stimme

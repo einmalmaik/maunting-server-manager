@@ -1093,6 +1093,7 @@
       },
       "processes": {
         "title": "Active processes",
+        "prefetch": "Speculative prefetch",
         "satellite": "Satellite data (Sentinel-2)",
         "weather": "Weather data",
         "news": "News & web search",

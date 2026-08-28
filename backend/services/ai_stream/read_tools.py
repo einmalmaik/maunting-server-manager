@@ -240,7 +240,8 @@ def _anzeigeeintrag(call, wert, fehlgeschlagen: str | None) -> dict:
 
 
 def _werkzeug_ausfuehren(
-    user_id: int, call, herkunft: str = "panel", familie: str | None = None
+    user_id: int, call, herkunft: str = "panel", familie: str | None = None,
+    prefetch_session_id: str | None = None,
 ) -> tuple[object, str | None]:
     """Genau **ein** Lesewerkzeug, in eigener Sitzung und eigenem Thread.
 
@@ -276,7 +277,7 @@ def _werkzeug_ausfuehren(
         try:
             wert = ai_stream.execute_read_tool(
                 db, user=user, tool_name=call.name, arguments=call.arguments,
-                herkunft=herkunft, familie=familie,
+                herkunft=herkunft, familie=familie, prefetch_session_id=prefetch_session_id,
             )
             db.commit()
         except (AiActionValidationError, HTTPException) as exc:
@@ -449,6 +450,7 @@ async def _tool_followup_messages(
     rolle: str = "voll",
     herkunft: str = "panel",
     familie: str | None = None,
+    prefetch_session_id: str | None = None,
     anlagenwissen_noetig: bool = True,
     rundentext: str | None = None,
     frage_id: str | None = None,
@@ -676,7 +678,7 @@ async def _tool_followup_messages(
             try:
                 wert, fehlgeschlagen = await asyncio.wait_for(
                     asyncio.to_thread(
-                        ai_stream._werkzeug_ausfuehren, user_id, call, herkunft, familie
+                        ai_stream._werkzeug_ausfuehren, user_id, call, herkunft, familie, prefetch_session_id
                     ),
                     timeout=ai_stream.WERKZEUG_ZEITGRENZE,
                 )
@@ -1009,6 +1011,10 @@ async def _leserunde_ausfuehren(
         # Worker-Lauf mit familie=None — und weil `worker_antwort` die Familie
         # seines Vorgängers weiterreicht, bliebe das für immer so.
         familie=familie_aus_zustand(zustand),
+        prefetch_session_id=(
+            str(zustand["prefetch_session_id"])
+            if zustand.get("prefetch_session_id") else None
+        ),
         # Nur solange der Lauf es noch nicht bekommen hat. Die
         # Entscheidung fällt weiterhin unten — dort steht die Marke —,
         # aber gelesen wird jetzt gar nicht erst, was ohnehin

@@ -24,8 +24,20 @@ export function SprachAnsicht({
   providerId?: number | null
 }) {
   const { t } = useTranslation()
-  const { zustand, zeilen, werkzeug, fehler, belege, vorschlag, geoData, setGeoData, pegel, starten, beenden } =
-    useSprachsitzung(providerId)
+  const {
+    zustand,
+    zeilen,
+    werkzeug,
+    fehler,
+    belege,
+    vorschlag,
+    intentErkannt,
+    geoData,
+    setGeoData,
+    pegel,
+    starten,
+    beenden,
+  } = useSprachsitzung(providerId)
   const [einstellungenOffen, setEinstellungenOffen] = useState(false)
   const kasten = useRef<HTMLDivElement>(null)
 
@@ -58,14 +70,17 @@ export function SprachAnsicht({
   const lastToolRef = useRef<string | null>(null)
   const kommandozentraleWarAktiv = useRef(false)
 
-  // Wenn ein neues Werkzeug wie analyze_region anläuft, Schließungssperre aufheben
+  // Wenn ein neues Werkzeug oder spekulativer Geo-Intent anläuft, Schließungssperre aufheben
+  const isGeoIntent =
+    intentErkannt?.intent === 'analyze_region' || Boolean(intentErkannt?.entities?.location)
+
   useEffect(() => {
-    if (werkzeug === 'analyze_region' && lastToolRef.current !== 'analyze_region') {
+    if ((werkzeug === 'analyze_region' || isGeoIntent) && lastToolRef.current !== 'analyze_region') {
       setKommandozentraleGeschlossen(false)
       kommandozentraleWarAktiv.current = true
     }
     lastToolRef.current = werkzeug
-  }, [werkzeug])
+  }, [werkzeug, isGeoIntent])
 
   // geoData allein reicht ebenfalls, um die Kommandozentrale zu aktivieren
   useEffect(() => {
@@ -79,15 +94,53 @@ export function SprachAnsicht({
   const beleg = belege.length > 0 ? belege[belege.length - 1] : null
 
   const istKommandozentraleAktiv = Boolean(
-    !kommandozentraleGeschlossen && (geoData || werkzeug === 'analyze_region' || kommandozentraleWarAktiv.current),
+    !kommandozentraleGeschlossen &&
+      (geoData || werkzeug === 'analyze_region' || isGeoIntent || kommandozentraleWarAktiv.current),
   )
 
-  // 1. DREI-SPALTEN-KOMMANDOZENTRALE BEI AKTIVER REGIONALANALYSE (sofort bei analyze_region oder geoData)
+  const dynamicProcesses = intentErkannt
+    ? [
+        {
+          id: 'speculative_prefetch',
+          label: intentErkannt.entities.location
+            ? `${t('ai.geo.processes.prefetch', 'Spekulativer Abruf')} (${String(intentErkannt.entities.location)})`
+            : `${t('ai.geo.processes.prefetch', 'Spekulativer Abruf')} (${intentErkannt.intent})`,
+          status:
+            intentErkannt.prefetchStatus === 'fertig'
+              ? ('fertig' as const)
+              : intentErkannt.prefetchStatus === 'abgebrochen' || intentErkannt.prefetchStatus === 'fehler'
+                ? ('wartet' as const)
+                : ('laeuft' as const),
+        },
+        {
+          id: 'satellite',
+          label: t('ai.geo.processes.satellite', 'Satellitendaten (Sentinel-2)'),
+          status: geoData?.satellite?.available ? ('fertig' as const) : ('laeuft' as const),
+        },
+        {
+          id: 'weather',
+          label: t('ai.geo.processes.weather', 'Wetterdaten'),
+          status: geoData?.weather ? ('fertig' as const) : ('laeuft' as const),
+        },
+        {
+          id: 'news',
+          label: t('ai.geo.processes.news', 'Nachrichten & Websuche'),
+          status: geoData ? ('fertig' as const) : ('laeuft' as const),
+        },
+      ]
+    : undefined
+
+  // 1. DREI-SPALTEN-KOMMANDOZENTRALE BEI AKTIVER REGIONALANALYSE (sofort bei analyze_region, Intent oder geoData)
   if (istKommandozentraleAktiv) {
+    const activeLocationName =
+      (intentErkannt?.entities?.location ? String(intentErkannt.entities.location) : null) ??
+      geoData?.location
+
     return (
       <RegionalAnalysisLayout
         active={true}
         data={geoData}
+        locationName={activeLocationName}
         loading={!geoData || werkzeug === 'analyze_region' || zustand === 'denkt'}
         onClose={() => {
           setGeoData(null)
@@ -118,7 +171,7 @@ export function SprachAnsicht({
           </div>
 
           {/* Aktive Prozesse Card */}
-          <ActiveProcessesCard />
+          <ActiveProcessesCard processes={dynamicProcesses} />
 
           {/* Gesprächs-Transkript */}
           {zeilen.length > 0 && (

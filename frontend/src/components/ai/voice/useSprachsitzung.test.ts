@@ -582,4 +582,36 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.werkzeug).toBe('analyze_region')
     expect(haken.result.current.geoData).toEqual(mockGeo)
   })
+
+  it('verarbeitet intent_erkannt mit Intent, Entities und Geodaten', async () => {
+    const haken = await sitzung()
+    const mockGeo = {
+      location: 'Berlin, Deutschland',
+      coordinates: { latitude: 52.52, longitude: 13.405, bbox: [13.0883, 52.3382, 13.7611, 52.6755] },
+    }
+
+    act(() =>
+      leitung().simulateMessage({
+        art: 'intent_erkannt',
+        intent: 'analyze_region',
+        confidence: 0.95,
+        entities: { location: 'Berlin' },
+        arguments: { location_name: 'Berlin' },
+        spekulativ: true,
+        geo_analysis: mockGeo,
+      }),
+    )
+
+    expect(haken.result.current.intentErkannt).toEqual({
+      intent: 'analyze_region',
+      confidence: 0.95,
+      entities: { location: 'Berlin' },
+      arguments: { location_name: 'Berlin' },
+      spekulativ: true,
+      prefetchStatus: undefined,
+      revision: undefined,
+    })
+    expect(haken.result.current.werkzeug).toBe('analyze_region')
+    expect(haken.result.current.geoData).toEqual(mockGeo)
+  })
 })

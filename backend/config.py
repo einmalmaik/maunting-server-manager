@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     # Fehlt das Modell, laeuft die Suche ohne Vektoren weiter.
     ai_embedding_model_dir: str = ""
 
+    # Lokale mehrsprachige Intent-Erkennung im Sprachmodus. Unterhalb von 0.7
+    # wäre ein spekulativer Abruf zu leicht auslösbar und deshalb nicht zulässig.
+    ai_intent_prefetch_confidence: float = 0.8
+
     # Auf welchem Weg der Sprachmodus zuhoert. Leer heisst: der beste, den der
     # gewaehlte Anbieter kann (`Anbieter.gehoer_wege`, nach Guete sortiert).
     #

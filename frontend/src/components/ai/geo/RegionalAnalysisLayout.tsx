@@ -8,6 +8,7 @@ interface RegionalAnalysisLayoutProps {
   children: ReactNode
   active: boolean
   data: AiRegionalAnalysis | null
+  locationName?: string | null
   news?: NewsItem[]
   loading?: boolean
   onClose: () => void
@@ -26,6 +27,7 @@ export function RegionalAnalysisLayout({
   children,
   active,
   data,
+  locationName,
   news,
   loading,
   onClose,
@@ -71,7 +73,7 @@ export function RegionalAnalysisLayout({
               data={data}
               latitude={coords?.latitude}
               longitude={coords?.longitude}
-              locationName={data?.location}
+              locationName={locationName ?? data?.location}
               bbox={coords?.bbox}
               className="h-full w-full"
             />

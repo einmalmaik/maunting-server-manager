@@ -4296,6 +4296,7 @@ def execute_read_tool(
     arguments: dict,
     herkunft: str = "panel",
     familie: str | None = None,
+    prefetch_session_id: str | None = None,
 ) -> dict:
     """Fuehrt ein Lesewerkzeug im Namen des Benutzers aus.
 
@@ -4314,6 +4315,33 @@ def execute_read_tool(
     """
     if tool_name not in READ_TOOLS:
         raise AiActionValidationError("Read-Tool ist in diesem Kontext nicht erlaubt")
+
+    # Ein Cache-Hit kommt nur aus derselben Sprachsitzung. Die kleinen,
+    # werkzeugspezifischen Vorprüfungen sind die zweite Schranke nach dem
+    # Prefetch und verhindern, dass ein inzwischen entzogener Zugriff ein altes
+    # Ergebnis erhält.
+    from services.ai_intent_classifier import prefetch_cache
+    if prefetch_session_id and tool_name == "analyze_region":
+        if not permission_service.has_global_permission(db, user, "ai.satellite.use"):
+            raise AiActionValidationError("Satelliten- und Regionsanalyse ist für diesen Benutzer nicht freigegeben")
+    elif prefetch_session_id and tool_name == "web_search":
+        if not permission_service.has_global_permission(db, user, "ai.web_search.use"):
+            raise AiActionValidationError("Websuche ist fuer diesen Benutzer nicht freigegeben")
+    elif prefetch_session_id and tool_name == "calendar_read":
+        if not permission_service.has_global_permission(db, user, "ai.calendar.use"):
+            raise AiActionValidationError("Kalender ist fuer diesen Benutzer nicht freigegeben")
+    elif prefetch_session_id and tool_name == "search_memory":
+        if not permission_service.has_global_permission(db, user, "ai.memory.use"):
+            raise AiActionValidationError("Memory ist fuer diesen Benutzer nicht freigegeben")
+    elif prefetch_session_id and tool_name == "read_server_status":
+        _resolve_server(db, user, arguments)
+    hit, cached_result = prefetch_cache.get(
+        session_id=prefetch_session_id, user_id=user.id, tool_name=tool_name, arguments=arguments,
+    )
+    if hit and cached_result is not None:
+        logger.info("Spekulativer Prefetch-Cache HIT für tool=%s user=%s", tool_name, user.id)
+        return cached_result
+
     if tool_name in GLOBAL_READ_TOOLS:
         return _execute_global_read_tool(
             db, user=user, tool_name=tool_name, arguments=arguments,
