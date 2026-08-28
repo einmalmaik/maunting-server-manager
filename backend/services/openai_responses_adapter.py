@@ -442,7 +442,25 @@ async def stream_responses(
     # Stuecken, und mehrere Aufrufe einer Runde laufen verschraenkt ein.
     aufrufe: dict[str, dict[str, str]] = {}
     reihenfolge: list[str] = []
+    fertige_aufrufe: set[str] = set()
     abgeschlossen = False
+
+    def fertiger_aufruf(kennung: str) -> ProviderToolCall:
+        eintrag = aufrufe.get(kennung)
+        if not eintrag or not eintrag["call_id"] or not eintrag["name"]:
+            raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
+        try:
+            argumente = json.loads(eintrag["arguments"] or "{}")
+        except json.JSONDecodeError as exc:
+            raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
+        if not isinstance(argumente, dict):
+            raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
+        # `call_id` und nicht `id`: das ist die Kennung, die beim Rueckkanal
+        # wieder gebraucht wird (`function_call_output`).
+        return ProviderToolCall(
+            id=eintrag["call_id"], name=eintrag["name"], arguments=argumente
+        )
+
     try:
         async with client.stream(
             "POST", target, headers=headers, json=request_body
@@ -550,6 +568,11 @@ async def stream_responses(
                                 "name": posten.get("name") or "",
                                 "arguments": posten.get("arguments") or "",
                             }
+                            if kennung not in fertige_aufrufe:
+                                call = fertiger_aufruf(kennung)
+                                fertige_aufrufe.add(kennung)
+                                usage.tool_calls.append(call)
+                                yield StreamChunk("tool_ready", tool_call=call)
 
                 elif typ == "response.completed":
                     abgeschlossen = True
@@ -561,20 +584,12 @@ async def stream_responses(
                 raise AiProviderRequestError("AI_PROVIDER_STREAM_INCOMPLETE")
 
             for kennung in reihenfolge:
-                eintrag = aufrufe.get(kennung)
-                if not eintrag or not eintrag["call_id"] or not eintrag["name"]:
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
-                try:
-                    argumente = json.loads(eintrag["arguments"] or "{}")
-                except json.JSONDecodeError as exc:
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
-                if not isinstance(argumente, dict):
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
-                # `call_id` und nicht `id`: das ist die Kennung, die beim
-                # Rueckkanal wieder gebraucht wird (`function_call_output`).
-                usage.tool_calls.append(ProviderToolCall(
-                    id=eintrag["call_id"], name=eintrag["name"], arguments=argumente
-                ))
+                if kennung in fertige_aufrufe:
+                    continue
+                call = fertiger_aufruf(kennung)
+                fertige_aufrufe.add(kennung)
+                usage.tool_calls.append(call)
+                yield StreamChunk("tool_ready", tool_call=call)
     except AiProviderRequestError:
         raise
     except (httpx.TimeoutException, httpx.NetworkError) as exc:

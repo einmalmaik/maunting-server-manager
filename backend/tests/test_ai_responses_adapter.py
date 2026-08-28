@@ -362,7 +362,7 @@ async def test_thinking_and_a_tool_call_arrive_in_the_same_round() -> None:
     )
     usage = StreamUsage()
     client = _FakeClient(koerper)
-    gedanken = []
+    gedanken, fertige_aufrufe = [], []
     async for stueck in stream_responses(
         client, provider=_provider(), api_key="sk-test",
         messages=[{"role": "user", "content": "Status von Server 1?"}],
@@ -373,6 +373,8 @@ async def test_thinking_and_a_tool_call_arrive_in_the_same_round() -> None:
     ):
         if stueck.kind == "reasoning":
             gedanken.append(stueck.text)
+        elif stueck.kind == "tool_ready":
+            fertige_aufrufe.append(stueck.tool_call)
 
     assert gedanken == ["**Checking server status**"]
     assert len(usage.tool_calls) == 1
@@ -380,6 +382,7 @@ async def test_thinking_and_a_tool_call_arrive_in_the_same_round() -> None:
     # `call_id` und nicht `id`: nur damit findet die Folgerunde den Aufruf.
     assert usage.tool_calls[0].id == "call_xyz"
     assert usage.tool_calls[0].arguments == {"server_id": 1}
+    assert fertige_aufrufe == [usage.tool_calls[0]]
     assert usage.reasoning_tokens == 32
     assert usage.anfragen == 1
 

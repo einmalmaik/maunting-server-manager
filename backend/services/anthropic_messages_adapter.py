@@ -527,7 +527,26 @@ async def stream_messages(
     # verschraenkt ein.
     aufrufe: dict[int, dict[str, str]] = {}
     reihenfolge: list[int] = []
+    fertige_aufrufe: set[int] = set()
     abgeschlossen = False
+
+    def fertiger_aufruf(index: int) -> ProviderToolCall:
+        eintrag = aufrufe.get(index)
+        if not eintrag or not eintrag["id"] or not eintrag["name"]:
+            raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
+        try:
+            # Ein Werkzeug ohne Parameter bekommt gar kein
+            # ``input_json_delta``; die leere Kette ist dort das leere Objekt
+            # und kein Protokollfehler.
+            argumente = json.loads(eintrag["arguments"] or "{}")
+        except json.JSONDecodeError as exc:
+            raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
+        if not isinstance(argumente, dict):
+            raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
+        return ProviderToolCall(
+            id=eintrag["id"], name=eintrag["name"], arguments=argumente
+        )
+
     try:
         async with client.stream(
             "POST", target, headers=headers, json=request_body
@@ -640,6 +659,14 @@ async def stream_messages(
                     # unbekannte Art: die Doku verlangt es ausdruecklich
                     # („your code should handle unknown event types gracefully").
 
+                elif typ == "content_block_stop":
+                    index = rahmen.get("index")
+                    if isinstance(index, int) and index in aufrufe and index not in fertige_aufrufe:
+                        call = fertiger_aufruf(index)
+                        fertige_aufrufe.add(index)
+                        usage.tool_calls.append(call)
+                        yield StreamChunk("tool_ready", tool_call=call)
+
                 elif typ == "message_delta":
                     _usage_aus_delta(usage, rahmen.get("usage"))
 
@@ -651,21 +678,12 @@ async def stream_messages(
                 raise AiProviderRequestError("AI_PROVIDER_STREAM_INCOMPLETE")
 
             for index in reihenfolge:
-                eintrag = aufrufe.get(index)
-                if not eintrag or not eintrag["id"] or not eintrag["name"]:
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
-                try:
-                    # Ein Werkzeug ohne Parameter bekommt gar kein
-                    # ``input_json_delta``; die leere Kette ist dort das
-                    # leere Objekt und kein Protokollfehler.
-                    argumente = json.loads(eintrag["arguments"] or "{}")
-                except json.JSONDecodeError as exc:
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
-                if not isinstance(argumente, dict):
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
-                usage.tool_calls.append(ProviderToolCall(
-                    id=eintrag["id"], name=eintrag["name"], arguments=argumente
-                ))
+                if index in fertige_aufrufe:
+                    continue
+                call = fertiger_aufruf(index)
+                fertige_aufrufe.add(index)
+                usage.tool_calls.append(call)
+                yield StreamChunk("tool_ready", tool_call=call)
     except AiProviderRequestError:
         raise
     except (httpx.TimeoutException, httpx.NetworkError) as exc:

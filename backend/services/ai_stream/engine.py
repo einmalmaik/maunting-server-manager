@@ -64,6 +64,8 @@ from services.ai_stream.lifecycle import (
     _werkzeuge_und_grenze,
 )
 from services.ai_stream.read_tools import (
+    _fruehstart_lesewerkzeug_erlaubt,
+    _lesewerkzeug_ausfuehren,
     _leserunde_ausfuehren,
     _runde_zaehlen,
     _rundenfehler_nachrichten,
@@ -101,6 +103,33 @@ from services.openai_compatible_adapter import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _fruehe_leseaufgaben_verwerfen(aufgaben: dict[str, asyncio.Task]) -> None:
+    """Beendet fruehe Read-Tasks, ohne deren Ergebnis sichtbar werden zu lassen."""
+    if not aufgaben:
+        return
+    for aufgabe in aufgaben.values():
+        if not aufgabe.done():
+            aufgabe.cancel()
+    await asyncio.gather(*aufgaben.values(), return_exceptions=True)
+    aufgaben.clear()
+
+
+async def _fruehe_leseaufgaben_filtern(
+    aufgaben: dict[str, asyncio.Task], erlaubte_call_ids: set[str]
+) -> None:
+    """Verwirft Ergebnisse von Calls, die die vollstaendige Runde nicht bestehen."""
+    verworfen = [
+        aufgaben.pop(call_id)
+        for call_id in tuple(aufgaben)
+        if call_id not in erlaubte_call_ids
+    ]
+    for aufgabe in verworfen:
+        if not aufgabe.done():
+            aufgabe.cancel()
+    if verworfen:
+        await asyncio.gather(*verworfen, return_exceptions=True)
 
 
 async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = None) -> None:
@@ -208,6 +237,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     # Unterschied gehoert ins Protokoll. Genau dafuer stand `stop_reason`
     # ('budget') im Modell und wurde nie gesetzt.
     budget_erschoepft = False
+    fruehe_leseaufgaben: dict[str, asyncio.Task] = {}
 
     def _abbruch_abrechnen() -> None:
         """Der ehrliche Abschluss eines Laufs, der nicht zu Ende kam.
@@ -244,6 +274,13 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             herkunft=herkunft,
             zustand=zustand,
         )
+        angebotene_werkzeuge = frozenset(
+            name
+            for tool in tools
+            if isinstance(tool, dict)
+            and isinstance(tool.get("function"), dict)
+            and isinstance((name := tool["function"].get("name")), str)
+        )
         # Das Modell dieses Laufs — je Rolle, siehe `_modell_fuer`. Einmal je
         # Segment: dieselbe Lebensdauer wie der Katalogzuschnitt darueber.
         modellname = _modell_fuer(vorbereitung.provider, rolle)
@@ -263,6 +300,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         current_usage = usage
         signaturen: dict[str, int] = dict(zustand.get("tool_signatures") or {})
         while True:
+            frueh_schloss = asyncio.Semaphore(ai_stream._werkzeug_nebenlaeufigkeit())
             # Wo diese Runde im flachen Textpuffer beginnt. Daraus entsteht
             # unten `rundentext`: der Text, den das Modell in derselben
             # Anbieterantwort neben seinen Werkzeugaufrufen gesagt hat. Er geht
@@ -307,6 +345,36 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     )
                     ai_run_broker.veroeffentlichen(run_id, "tool_start", {"tool_name": chunk.text, "spekulativ": True})
                     continue
+                if chunk.kind == "tool_ready":
+                    call = chunk.tool_call
+                    if (
+                        call is not None
+                        and call.id not in fruehe_leseaufgaben
+                        and await asyncio.to_thread(
+                            _fruehstart_lesewerkzeug_erlaubt,
+                            run_id=run_id,
+                            user_id=user_id,
+                            conversation_id=conversation_id,
+                            call=call,
+                            angebotene_werkzeuge=angebotene_werkzeuge,
+                        )
+                    ):
+                        fruehe_leseaufgaben[call.id] = asyncio.create_task(
+                            _lesewerkzeug_ausfuehren(
+                                user_id=user_id,
+                                call=call,
+                                herkunft=herkunft,
+                                familie=familie_aus_zustand(zustand),
+                                prefetch_session_id=(
+                                    str(zustand["prefetch_session_id"])
+                                    if zustand.get("prefetch_session_id") else None
+                                ),
+                                schloss=frueh_schloss,
+                            )
+                        )
+                    # Vollstaendige Tool-Calls sind intern. Ihre Anzeige und
+                    # Persistenz bleiben ausschliesslich in der Rundenphase.
+                    continue
                 if chunk.kind == "reasoning":
                     # Die Grenze steht hier und nicht erst beim Speichern.
                     # Geschnitten wird auch **innerhalb** eines Stücks: nur so
@@ -336,6 +404,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 # Anfragen fielen weg.
                 usage_addieren(usage, current_usage)
             if not current_usage.tool_calls:
+                await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                 break
             if letzte_runde:
                 # Diese Runde war die abschließende: sie ging mit
@@ -349,6 +418,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     "werden verworfen run_id=%s anzahl=%d",
                     run_id, len(current_usage.tool_calls),
                 )
+                await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                 break
 
             # Was das Modell in dieser Runde neben den Aufrufen gesagt hat —
@@ -367,12 +437,14 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             )
             if fragen is not None:
                 if fragen.signal == "frage":
+                    await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                     gestellte_frage = fragen.frage
                     break
                 if fragen.budget_erschoepft:
                     budget_erschoepft = True
                 if fragen.letzte_runde:
                     letzte_runde = True
+                await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                 current_usage = StreamUsage()
                 continue
 
@@ -387,12 +459,14 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             )
             if warten is not None:
                 if warten.signal == "parken":
+                    await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                     wecker = warten.wake_at
                     break
                 if warten.budget_erschoepft:
                     budget_erschoepft = True
                 if warten.letzte_runde:
                     letzte_runde = True
+                await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                 current_usage = StreamUsage()
                 continue
 
@@ -409,9 +483,11 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             if desktop_budget:
                 budget_erschoepft = True
                 letzte_runde = True
+                await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                 current_usage = StreamUsage()
                 continue
             if desktop_frist is not None:
+                await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                 wecker = desktop_frist
                 parkgrund = "desktop_jobs"
                 break
@@ -454,6 +530,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 if _runde_zaehlen(zustand, rundendeckel):
                     budget_erschoepft = True
                     letzte_runde = True
+                await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                 current_usage = StreamUsage()
                 continue
 
@@ -464,6 +541,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 for call in current_usage.tool_calls
             }
             if kinds == {"write"}:
+                await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                 schreib = await ai_stream._schreibrunde_ausfuehren(
                     run_id=run_id,
                     user_id=user_id,
@@ -495,6 +573,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 current_usage = StreamUsage()
                 continue
 
+            rundenaufrufe = list(current_usage.tool_calls)
             deferred_calls, filter_signal = ai_stream._runde_filtern(
                 kinds=kinds,
                 current_usage=current_usage,
@@ -503,12 +582,18 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 run_id=run_id,
                 rundendeckel=rundendeckel,
             )
+            await _fruehe_leseaufgaben_filtern(
+                fruehe_leseaufgaben,
+                {call.id for call in current_usage.tool_calls},
+            )
             if filter_signal == "budget":
                 budget_erschoepft = True
                 letzte_runde = True
+                await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                 current_usage = StreamUsage()
                 continue
             if filter_signal == "fertig":
+                await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                 break
 
             # Pruefen, ob die verbleibenden Werkzeugaufrufe Lesewerkzeuge sind
@@ -537,6 +622,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     )
 
             if not alle_autonom:
+                await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                 schreib = await ai_stream._schreibrunde_ausfuehren(
                     run_id=run_id,
                     user_id=user_id,
@@ -568,6 +654,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 current_usage = StreamUsage()
                 continue
             if filter_signal == "fertig":
+                await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
                 break
             denknaht = await ai_stream._leserunde_ausfuehren(
                 user_id=user_id,
@@ -586,6 +673,9 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 chunks=chunks,
                 thoughts=thoughts,
                 denknaht=denknaht,
+                vorab_aufgaben=fruehe_leseaufgaben,
+                schloss=frueh_schloss,
+                call_reihenfolge=rundenaufrufe,
             )
             current_usage = StreamUsage()
 
@@ -748,6 +838,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         )
     except asyncio.CancelledError:
         # Der Prozess faehrt herunter. Nicht mehr als ehrlich abschliessen.
+        await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
         if not abgerechnet:
             _abbruch_abrechnen()
         # Der Abschluss steht **außerhalb** der Bedingung, so wie im Zweig
@@ -760,6 +851,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
         ai_stream._lauf_abschliessen(run_id, status="cancelled", stop_reason="cancelled")
         raise
     except Exception as exc:
+        await _fruehe_leseaufgaben_verwerfen(fruehe_leseaufgaben)
         if isinstance(exc, AiProviderRequestError):
             code, message_key = exc.code, "ai.chat.errors.provider"
             # Der Satz des Anbieters endete hier lange im Nichts: der Adapter zog

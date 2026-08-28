@@ -131,10 +131,13 @@ class StreamUsage:
 
 @dataclass(frozen=True)
 class StreamChunk:
-    """Ein Stueck Providerausgabe — entweder Antwort oder Denkschritt."""
+    """Ein Stueck Providerausgabe oder ein internes Werkzeug-Signal."""
 
-    kind: str  # "content" | "reasoning"
-    text: str
+    kind: str  # "content" | "reasoning" | "tool_start" | "tool_ready"
+    text: str = ""
+    # ``tool_ready`` ist ein reines Adapter-/Engine-Ereignis. Es darf nie
+    # unverarbeitet in Broker, Verlauf oder Frontend gelangen.
+    tool_call: "ProviderToolCall | None" = None
 
 
 @dataclass(frozen=True)
@@ -708,6 +711,21 @@ async def stream_chat_completion(
             saw_done = False
             tool_buffers: dict[int, dict[str, str]] = {}
             seen_tool_starts: set[int] = set()
+            emitted_tool_calls: set[int] = set()
+
+            def fertiger_aufruf(index: int) -> ProviderToolCall:
+                item = tool_buffers[index]
+                if not item["id"] or not item["name"]:
+                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
+                try:
+                    arguments = json.loads(item["arguments"] or "{}")
+                except json.JSONDecodeError as exc:
+                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
+                if not isinstance(arguments, dict):
+                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
+                return ProviderToolCall(
+                    id=item["id"], name=item["name"], arguments=arguments
+                )
             async for line in _iter_sse_lines(response, deadline=deadline):
                 if time.monotonic() > deadline:
                     raise AiProviderRequestError("AI_PROVIDER_STREAM_TIMEOUT")
@@ -792,27 +810,34 @@ async def stream_chat_completion(
                             yield StreamChunk("reasoning", thought)
 
                 content = delta.get("content") if isinstance(delta, dict) else None
-                if not isinstance(content, str) or not content:
-                    continue
-                usage.output_chars += len(content)
-                if usage.output_chars > MAX_ASSISTANT_CHARS:
-                    raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
-                yield StreamChunk("content", content)
+                if isinstance(content, str) and content:
+                    usage.output_chars += len(content)
+                    if usage.output_chars > MAX_ASSISTANT_CHARS:
+                        raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
+                    yield StreamChunk("content", content)
+
+                finish_reason = (
+                    choices[0].get("finish_reason")
+                    if isinstance(choices[0], dict)
+                    else None
+                )
+                if finish_reason == "tool_calls":
+                    for index in sorted(tool_buffers):
+                        if index in emitted_tool_calls:
+                            continue
+                        call = fertiger_aufruf(index)
+                        emitted_tool_calls.add(index)
+                        usage.tool_calls.append(call)
+                        yield StreamChunk("tool_ready", tool_call=call)
             if not saw_done:
                 raise AiProviderRequestError("AI_PROVIDER_STREAM_INCOMPLETE")
             for index in sorted(tool_buffers):
-                item = tool_buffers[index]
-                if not item["id"] or not item["name"]:
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
-                try:
-                    arguments = json.loads(item["arguments"] or "{}")
-                except json.JSONDecodeError as exc:
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
-                if not isinstance(arguments, dict):
-                    raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
-                usage.tool_calls.append(ProviderToolCall(
-                    id=item["id"], name=item["name"], arguments=arguments
-                ))
+                if index in emitted_tool_calls:
+                    continue
+                call = fertiger_aufruf(index)
+                emitted_tool_calls.add(index)
+                usage.tool_calls.append(call)
+                yield StreamChunk("tool_ready", tool_call=call)
     except AiProviderRequestError:
         raise
     except (httpx.TimeoutException, httpx.NetworkError) as exc:

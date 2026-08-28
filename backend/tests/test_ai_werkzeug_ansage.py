@@ -31,6 +31,7 @@ ein Backup dauert Sekunden bis Minuten, ein Neustart auch.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from uuid import uuid4
 
@@ -39,6 +40,7 @@ from sqlalchemy.orm import Session
 
 from models import (
     AiConversation,
+    AiAutonomyGrant,
     AiProvider,
     AiRun,
     Role,
@@ -50,6 +52,7 @@ from models import (
 from services import ai_run_broker, ai_stream_service
 from services.ai_limit_service import LIMIT_FIELDS, set_role_limit
 from services.ai_proposal_service import AufgabenKontext
+from services.ai_stream.read_tools import _fruehstart_lesewerkzeug_erlaubt
 from services.openai_compatible_adapter import ProviderToolCall, StreamChunk, StreamUsage
 from services.role_service import set_user_roles
 
@@ -102,6 +105,7 @@ def _werkzeuge_taeuschen(monkeypatch: pytest.MonkeyPatch) -> None:
         call: ProviderToolCall,
         _herkunft: str = "panel",
         _familie: str | None = None,
+        _prefetch_session_id: str | None = None,
     ):
         return {"tool": call.name}, None
 
@@ -293,6 +297,100 @@ def _anbieter_taeuschen(
         yield StreamChunk("content", "ok")
 
     monkeypatch.setattr(ai_stream_service, "stream_chat_completion", fake)
+
+
+@pytest.mark.asyncio
+async def test_sicherer_read_startet_vor_dem_provider_streamende(
+    db: Session, regular_user: User, test_server: Server,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ein `tool_ready` startet nur den sicheren Read noch im Providerstrom."""
+    _rechte_geben(db, regular_user, test_server, "server.view")
+    rolle = db.query(Role).filter(Role.name == f"ansage-{regular_user.id}").one()
+    db.add(RolePermission(role_id=rolle.id, permission_key="ai.autonomous.use"))
+    db.add(AiAutonomyGrant(
+        user_id=regular_user.id,
+        server_id=None,
+        enabled=True,
+        max_actions_per_hour=50,
+    ))
+    db.commit()
+    run = _lauf(db, regular_user)
+    executor_started = asyncio.Event()
+    provider_darf_enden = asyncio.Event()
+    provider_beendet = asyncio.Event()
+    call = ProviderToolCall(
+        id="call_read",
+        name="read_server_status",
+        arguments={"server_id": test_server.id},
+    )
+    runden = {"n": 0}
+
+    def executor(*_args):
+        executor_started.set()
+        return {"status": "running"}, None
+
+    async def fake_stream(_client, *, usage, **_kwargs):
+        runden["n"] += 1
+        if runden["n"] == 1:
+            usage.tool_calls = [call]
+            yield StreamChunk("tool_ready", tool_call=call)
+            await provider_darf_enden.wait()
+            provider_beendet.set()
+            return
+        yield StreamChunk("content", "Status ist da.")
+
+    monkeypatch.setattr(ai_stream_service, "_werkzeug_ausfuehren", executor)
+    monkeypatch.setattr(ai_stream_service, "stream_chat_completion", fake_stream)
+
+    task = asyncio.create_task(
+        ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
+    )
+    await asyncio.wait_for(executor_started.wait(), timeout=1)
+    assert not provider_beendet.is_set()
+    provider_darf_enden.set()
+    await task
+
+
+def test_unsichere_und_unautorisierte_calls_starten_nicht_frueh(
+    db: Session, regular_user: User, test_server: Server,
+) -> None:
+    """Read-Katalog ist nicht gleich der engen, autonomen Vorstart-Allowlist."""
+    _rechte_geben(db, regular_user, test_server, "server.view")
+    run = _lauf(db, regular_user)
+    erlaubte = frozenset({
+        "read_server_status", "list_my_servers", "propose_backup",
+    })
+    basis = {
+        "run_id": run.id,
+        "user_id": regular_user.id,
+        "conversation_id": run.conversation_id,
+        "angebotene_werkzeuge": erlaubte,
+    }
+    assert not _fruehstart_lesewerkzeug_erlaubt(
+        call=ProviderToolCall(
+            id="write", name="propose_backup", arguments={"server_id": test_server.id}
+        ),
+        **basis,
+    )
+    assert not _fruehstart_lesewerkzeug_erlaubt(
+        call=ProviderToolCall(id="other-read", name="list_my_servers", arguments={}),
+        **basis,
+    )
+    assert not _fruehstart_lesewerkzeug_erlaubt(
+        call=ProviderToolCall(
+            id="invalid", name="read_server_status", arguments={"server_id": "1"}
+        ),
+        **basis,
+    )
+    assert not _fruehstart_lesewerkzeug_erlaubt(
+        call=ProviderToolCall(
+            id="no-autonomy",
+            name="read_server_status",
+            arguments={"server_id": test_server.id},
+        ),
+        **basis,
+    )
 
 
 def _sicherung(server: Server, call_id: str) -> ProviderToolCall:

@@ -335,7 +335,7 @@ async def test_text_thinking_and_a_tool_call_in_one_round() -> None:
     )
     usage = StreamUsage()
     client = _FakeClient(koerper)
-    text, gedanken = [], []
+    text, gedanken, fertige_aufrufe = [], [], []
     async for stueck in stream_messages(
         client, provider=_provider(), api_key="azure-key",
         messages=[{"role": "user", "content": "Status von Server 1?"}],
@@ -344,7 +344,12 @@ async def test_text_thinking_and_a_tool_call_in_one_round() -> None:
                 "function": {"name": "read_server_status", "parameters": {}}}],
         reasoning=True, reasoning_effort="high",
     ):
-        (gedanken if stueck.kind == "reasoning" else text).append(stueck.text)
+        if stueck.kind == "reasoning":
+            gedanken.append(stueck.text)
+        elif stueck.kind == "content":
+            text.append(stueck.text)
+        elif stueck.kind == "tool_ready":
+            fertige_aufrufe.append(stueck.tool_call)
 
     assert text == ["Ich sehe nach."]
     assert gedanken == ["Ich pruefe den Status"]
@@ -352,6 +357,7 @@ async def test_text_thinking_and_a_tool_call_in_one_round() -> None:
     assert usage.tool_calls[0].id == "toolu_1"
     assert usage.tool_calls[0].name == "read_server_status"
     assert usage.tool_calls[0].arguments == {"server_id": 1}
+    assert fertige_aufrufe == [usage.tool_calls[0]]
     assert usage.anfragen == 1
 
 

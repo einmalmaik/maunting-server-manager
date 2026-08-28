@@ -328,6 +328,129 @@ def _werkzeug_ausfuehren(
     return _ergebnis_schwaerzen(wert, freitext=call.name in _FREITEXT_WERKZEUGE), None
 
 
+def _gueltige_spekulative_argumente(call) -> bool:
+    """Prueft nur die enge, nebenwirkungsfreie Vorstart-Allowlist.
+
+    Die fachliche Autoritaet bleibt `execute_read_tool`. Diese kleine
+    Vorpruefung verhindert lediglich, dass offensichtlich unvollstaendige oder
+    falsch typisierte Anbieterargumente schon waehrend des Stroms Arbeit
+    ausloesen. Neue Read-Tools werden hier absichtlich nicht automatisch
+    zugelassen.
+    """
+    argumente = call.arguments
+    if not isinstance(argumente, dict):
+        return False
+    if call.name == "read_server_status":
+        server_id = argumente.get("server_id")
+        return set(argumente) == {"server_id"} and isinstance(server_id, int) and not isinstance(server_id, bool) and server_id > 0
+    if call.name == "search_memory":
+        return set(argumente) == {"query"} and isinstance(argumente.get("query"), str) and bool(argumente["query"].strip())
+    if call.name == "web_search":
+        if set(argumente) - {"query", "count", "server_id"}:
+            return False
+        if not isinstance(argumente.get("query"), str) or not argumente["query"].strip():
+            return False
+        count = argumente.get("count")
+        if count is not None and (isinstance(count, bool) or not isinstance(count, int) or count < 1):
+            return False
+        server_id = argumente.get("server_id")
+        return server_id is None or (isinstance(server_id, int) and not isinstance(server_id, bool) and server_id > 0)
+    if call.name == "analyze_region":
+        return (
+            set(argumente) <= {"location", "camera"}
+            and isinstance(argumente.get("location"), str)
+            and bool(argumente["location"].strip())
+            and argumente.get("camera", "focus") in {"overview", "focus", "detail"}
+        )
+    if call.name == "calendar_read":
+        if set(argumente) - {"start_date", "end_date", "calendar_id"}:
+            return False
+        if any(
+            value is not None and not isinstance(value, str)
+            for key in ("start_date", "end_date")
+            if (value := argumente.get(key))
+        ):
+            return False
+        kalender_id = argumente.get("calendar_id")
+        return kalender_id is None or (isinstance(kalender_id, int) and not isinstance(kalender_id, bool) and kalender_id > 0)
+    return False
+
+
+def _fruehstart_lesewerkzeug_erlaubt(
+    *, run_id: str, user_id: int, conversation_id: str, call, angebotene_werkzeuge: frozenset[str]
+) -> bool:
+    """Ob ein fertiger Provider-Call schon waehrend des Stroms laufen darf."""
+    from services import ai_autonomy_service
+    from services.ai_intent_classifier import is_side_effect_free
+
+    if (
+        call.name not in angebotene_werkzeuge
+        or not is_side_effect_free(call.name)
+        or not _gueltige_spekulative_argumente(call)
+        or ai_run_broker.lauf_status(run_id) != "running"
+    ):
+        return False
+    with SessionLocal() as db:
+        user = db.get(User, user_id)
+        if user is None or not user.is_active:
+            return False
+        if get_owned_conversation(db, conversation_id, user) is None:
+            return False
+        return ai_autonomy_service.autonomy_allows(
+            db,
+            user=user,
+            server_id=_servernummer(call),
+            tool_name=call.name,
+        )
+
+
+async def _lesewerkzeug_ausfuehren(
+    *, user_id: int, call, herkunft: str, familie: str | None,
+    prefetch_session_id: str | None, schloss: asyncio.Semaphore,
+) -> tuple[object, object, dict]:
+    """Fuehrt einen einzelnen Read-Call ohne sichtbares Broker-Ereignis aus."""
+    ausfuehrung = (
+        ai_stream._werkzeug_ausfuehren,
+        user_id,
+        call,
+        herkunft,
+        familie,
+    )
+    if prefetch_session_id is not None:
+        ausfuehrung = (*ausfuehrung, prefetch_session_id)
+    async with schloss:
+        started_at = time.perf_counter()
+        outcome = "ok"
+        try:
+            wert, fehlgeschlagen = await asyncio.wait_for(
+                asyncio.to_thread(
+                    *ausfuehrung,
+                ),
+                timeout=ai_stream.WERKZEUG_ZEITGRENZE,
+            )
+            if fehlgeschlagen:
+                outcome = "error"
+        except TimeoutError:
+            outcome = "timeout"
+            grund = (
+                f"Der Aufruf antwortete nicht innerhalb von "
+                f"{ai_stream.WERKZEUG_ZEITGRENZE:.0f} Sekunden und wurde nicht "
+                "weiter abgewartet. Er kann im Hintergrund noch "
+                "durchlaufen — wiederhole ihn nicht blind, sondern prüfe "
+                "erst nach, ob er gewirkt hat."
+            )
+            wert, fehlgeschlagen = {"error": grund}, grund
+        finally:
+            from services.ai_latency_metrics import metrics
+
+            metrics.record(
+                "ai_stream", "read_tool_execution",
+                (time.perf_counter() - started_at) * 1000,
+                outcome,
+            )
+    return call, wert, _anzeigeeintrag(call, wert, fehlgeschlagen)
+
+
 def _aufrufnachricht(calls, text: str | None = None) -> dict:
     """Der Assistentenzug, der die Werkzeugaufrufe trägt.
 
@@ -455,6 +578,9 @@ async def _tool_followup_messages(
     anlagenwissen_noetig: bool = True,
     rundentext: str | None = None,
     frage_id: str | None = None,
+    vorab_aufgaben: dict[str, asyncio.Task] | None = None,
+    schloss: asyncio.Semaphore | None = None,
+    call_reihenfolge=None,
 ) -> tuple[list[dict], list[dict], dict | None]:
     """Fuehrt Lesewerkzeuge aus und baut daraus die Folge-Nachrichten.
 
@@ -659,9 +785,13 @@ async def _tool_followup_messages(
         if get_owned_conversation(db, conversation_id, user) is None:
             raise AiActionValidationError("Unterhaltung ist nicht mehr verfuegbar")
 
-    assistant_call = _aufrufnachricht(
-        [*tool_calls, *(item[0] for item in deferred)], rundentext
-    )
+    geordnete_aufrufe = []
+    bekannte_call_ids: set[str] = set()
+    for call in call_reihenfolge or [*tool_calls, *(item[0] for item in deferred)]:
+        if call.id not in bekannte_call_ids:
+            bekannte_call_ids.add(call.id)
+            geordnete_aufrufe.append(call)
+    assistant_call = _aufrufnachricht(geordnete_aufrufe, rundentext)
 
     # ── Ausfuehren ───────────────────────────────────────────────────────
     #
@@ -672,52 +802,40 @@ async def _tool_followup_messages(
     # auffaellt. Die aeussere Grenze halten ohnehin der Standard-Threadpool und
     # der Verbindungspool.
     breite = ai_stream._werkzeug_nebenlaeufigkeit()
-    schloss = asyncio.Semaphore(breite)
+    schloss = schloss or asyncio.Semaphore(breite)
+    vorab_aufgaben = vorab_aufgaben or {}
 
     async def _einer(call):
-        async with schloss:
-            started_at = time.perf_counter()
-            outcome = "ok"
+        vorab = vorab_aufgaben.pop(call.id, None)
+        if vorab is not None:
             try:
-                wert, fehlgeschlagen = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        ai_stream._werkzeug_ausfuehren, user_id, call, herkunft, familie, prefetch_session_id
-                    ),
-                    timeout=ai_stream.WERKZEUG_ZEITGRENZE,
+                ergebnis = await vorab
+            except Exception as exc:
+                # Eine fruehe Aufgabe ist nur eine Latenzoptimierung. Fiel sie
+                # technisch aus, folgt der normale, bereits freigegebene Weg.
+                logger.info(
+                    "Fruehes Lesewerkzeug wird regulär wiederholt tool=%s error=%s",
+                    call.name,
+                    type(exc).__name__,
                 )
-                if fehlgeschlagen:
-                    outcome = "error"
-            except TimeoutError:
-                outcome = "timeout"
-                # **Nicht "fehlgeschlagen", sondern "nicht abgewartet".** Der
-                # Unterschied ist der ganze Grund für den Wortlaut: der Thread
-                # läuft weiter und darf zu Ende committen. Ein Modell, dem hier
-                # "fehlgeschlagen" gesagt wird, wiederholt den Aufruf — und
-                # legt bei `remember` einen zweiten Eintrag an oder löscht bei
-                # `forget_memory` etwas, das schon weg ist. Die Formulierung
-                # ist die einzige Stelle, an der diese Doppelung verhindert
-                # wird; eine Sperre dagegen gibt es nicht.
-                #
-                # Die Form ist dieselbe wie beim Rechtefehler oben
-                # (`{"error": …}` plus Grund): so bleiben Anzeige, Protokoll
-                # und Rückgabe an den Anbieter unverändert.
-                grund = (
-                    f"Der Aufruf antwortete nicht innerhalb von "
-                    f"{ai_stream.WERKZEUG_ZEITGRENZE:.0f} Sekunden und wurde nicht "
-                    "weiter abgewartet. Er kann im Hintergrund noch "
-                    "durchlaufen — wiederhole ihn nicht blind, sondern prüfe "
-                    "erst nach, ob er gewirkt hat."
+                ergebnis = await _lesewerkzeug_ausfuehren(
+                    user_id=user_id,
+                    call=call,
+                    herkunft=herkunft,
+                    familie=familie,
+                    prefetch_session_id=prefetch_session_id,
+                    schloss=schloss,
                 )
-                wert, fehlgeschlagen = {"error": grund}, grund
-            finally:
-                from services.ai_latency_metrics import metrics
-
-                metrics.record(
-                    "ai_stream", "read_tool_execution",
-                    (time.perf_counter() - started_at) * 1000,
-                    outcome,
-                )
-        anzeige = _anzeigeeintrag(call, wert, fehlgeschlagen)
+        else:
+            ergebnis = await _lesewerkzeug_ausfuehren(
+                user_id=user_id,
+                call=call,
+                herkunft=herkunft,
+                familie=familie,
+                prefetch_session_id=prefetch_session_id,
+                schloss=schloss,
+            )
+        _, wert, anzeige = ergebnis
         # **Sofort melden.** Hier stand nichts — die Chips gingen erst raus,
         # nachdem die ganze Runde fertig war (die Schleife im Aufrufer). Bei
         # neun Aufrufen sah der Benutzer siebenundzwanzig Sekunden nichts und
@@ -726,7 +844,7 @@ async def _tool_followup_messages(
             ai_run_broker.veroeffentlichen(run_id, "tool", anzeige)
         return call, wert, anzeige
 
-    results: list[dict] = [assistant_call]
+    antworten: dict[str, dict] = {}
     display: list[dict] = []
     behalten: list[tuple[object, object]] = []
     spent = 0
@@ -806,23 +924,27 @@ async def _tool_followup_messages(
                 )))
                 continue
             spent += len(serialized)
-            results.append({
+            antworten[call.id] = {
                 "role": "tool",
                 "tool_call_id": call.id,
                 "content": serialized,
-            })
+            }
     # Erst hier: die Schleife oben legt selbst weitere Aufrufe zurueck, sobald
     # das Budget aufgebraucht ist. Wuerden die Absagen vorher erzeugt, blieben
     # genau diese `tool_call_id` ohne Antwort — und manche Anbieter weisen die
     # naechste Anfrage deswegen ab.
     for call, reason in deferred:
-        results.append({
+        antworten[call.id] = {
             "role": "tool",
             "tool_call_id": call.id,
             "content": json.dumps({
                 "executed": False, "reason": reason,
             }, ensure_ascii=True, separators=(",", ":")),
-        })
+        }
+    # Der Anbieter erwartet genau eine Antwort je Call. Die sichtbaren
+    # Ergebnisse erscheinen weiterhin bei Fertigstellung, der Rueckkanal
+    # bleibt jedoch in der Reihenfolge des vom Anbieter gelieferten Calls.
+    results = [assistant_call, *(antworten[call.id] for call in geordnete_aufrufe)]
 
     def _festhalten() -> dict | None:
         """Protokoll, Ergebnisse und Serverbezug — in **einer** Transaktion.
@@ -995,6 +1117,9 @@ async def _leserunde_ausfuehren(
     chunks: list[str],
     thoughts: list[str],
     denknaht: str,
+    vorab_aufgaben: dict[str, asyncio.Task] | None = None,
+    schloss: asyncio.Semaphore | None = None,
+    call_reihenfolge=None,
 ) -> str:
     """Die Lesephase einer Runde: Werkzeuge ausfuehren, Folgen anhaengen.
 
@@ -1042,6 +1167,9 @@ async def _leserunde_ausfuehren(
         # und zaehlt danach, und was dieser Lauf wissen wollte, steht am Anfang.
         # Als Kennung, damit der Laufzustand keinen Klartext dazubekommt.
         frage_id=zustand.get("user_message_id"),
+        vorab_aufgaben=vorab_aufgaben,
+        schloss=schloss,
+        call_reihenfolge=call_reihenfolge,
     )
     provider_messages.extend(followup)
     # Das Betriebswissen der Anlage, sobald feststeht welche. Genau

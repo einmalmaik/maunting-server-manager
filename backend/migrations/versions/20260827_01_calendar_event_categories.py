@@ -22,7 +22,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("calendar_events") as batch:
+    # Die Tabelle stammt aus einer aelteren Migration mit namenlosen Foreign
+    # Keys. SQLite rekonstruiert sie bei Batch-Aenderungen; ohne eine
+    # Namenskonvention kann Alembic diese Constraints dabei nicht uebernehmen.
+    # Die Namen halten Upgrade und den spaeteren Rollback auf allen Dialekten
+    # eindeutig und reversible.
+    with op.batch_alter_table(
+        "calendar_events",
+        naming_convention={
+            "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+        },
+    ) as batch:
         batch.add_column(
             sa.Column(
                 "event_type",
@@ -35,7 +45,11 @@ def upgrade() -> None:
             sa.Column(
                 "team_id",
                 sa.Integer(),
-                sa.ForeignKey("teams.id", ondelete="CASCADE"),
+                sa.ForeignKey(
+                    "teams.id",
+                    name="fk_calendar_events_team_id_teams",
+                    ondelete="CASCADE",
+                ),
                 nullable=True,
             )
         )
@@ -43,7 +57,11 @@ def upgrade() -> None:
             sa.Column(
                 "server_id",
                 sa.Integer(),
-                sa.ForeignKey("servers.id", ondelete="SET NULL"),
+                sa.ForeignKey(
+                    "servers.id",
+                    name="fk_calendar_events_server_id_servers",
+                    ondelete="SET NULL",
+                ),
                 nullable=True,
             )
         )
@@ -53,7 +71,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("calendar_events") as batch:
+    with op.batch_alter_table(
+        "calendar_events",
+        naming_convention={
+            "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+        },
+    ) as batch:
         batch.drop_index("ix_calendar_events_server_id")
         batch.drop_index("ix_calendar_events_team_id")
         batch.drop_index("ix_calendar_events_event_type")

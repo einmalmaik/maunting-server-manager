@@ -348,7 +348,15 @@ async def test_adapter_reassembles_fragmented_tool_calls(
             tools=tools,
         )]
 
-    assert chunks == []
+    assert [(chunk.kind, chunk.text) for chunk in chunks] == [
+        ("tool_start", "propose_"),
+        ("tool_ready", ""),
+    ]
+    assert chunks[1].tool_call == ProviderToolCall(
+        id="call-1",
+        name="propose_backup",
+        arguments={"operation": "restart"},
+    )
     assert usage.tool_calls == [ProviderToolCall(
         id="call-1",
         name="propose_backup",
