@@ -59,4 +59,15 @@ describe('RegionalInfoPanel', () => {
     fireEvent.click(closeBtn)
     expect(onClose).toHaveBeenCalled()
   })
+
+  it('wechselt von der Ladeansicht zu Daten ohne Hook-Reihenfolgefehler', () => {
+    const onClose = vi.fn()
+    const { rerender } = render(<RegionalInfoPanel data={null} loading onClose={onClose} />)
+
+    expect(screen.getByLabelText(i18n.t('ai.geo.panelTitle', 'Regionale Analyse'))).toBeInTheDocument()
+
+    rerender(<RegionalInfoPanel data={mockData} loading={false} onClose={onClose} />)
+
+    expect(screen.getByText('Berlin')).toBeInTheDocument()
+  })
 })

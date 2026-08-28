@@ -26,7 +26,6 @@ export function SprachAnsicht({
   const { t } = useTranslation()
   const {
     zustand,
-    zeilen,
     werkzeug,
     fehler,
     belege,
@@ -39,7 +38,6 @@ export function SprachAnsicht({
     beenden,
   } = useSprachsitzung(providerId)
   const [einstellungenOffen, setEinstellungenOffen] = useState(false)
-  const kasten = useRef<HTMLDivElement>(null)
 
   // Wer in den Sprachmodus wechselt, will sprechen.
   useEffect(() => {
@@ -60,11 +58,6 @@ export function SprachAnsicht({
     window.addEventListener('keydown', taste)
     return () => window.removeEventListener('keydown', taste)
   }, [beenden, aufChat, einstellungenOffen])
-
-  useEffect(() => {
-    const element = kasten.current
-    if (element) element.scrollTop = element.scrollHeight
-  }, [zeilen])
 
   const [kommandozentraleGeschlossen, setKommandozentraleGeschlossen] = useState(false)
   const lastToolRef = useRef<string | null>(null)
@@ -148,11 +141,12 @@ export function SprachAnsicht({
           kommandozentraleWarAktiv.current = false
         }}
       >
-        <div className="flex h-full w-full flex-col justify-between p-4 overflow-y-auto space-y-4">
-          {/* Kopfbereich: Sprachblase und Status */}
-          <div className="flex items-center gap-3 border-b border-outline-variant/20 pb-3 shrink-0">
-            <div className="relative shrink-0">
-              <Sprachblase zustand={zustand} pegel={pegel} />
+        <div className="flex h-full min-h-0 w-full flex-col gap-4 overflow-hidden p-4">
+          {/* Sprachstatus bleibt vollständig sichtbar; Transkriptzeilen gehören
+              nicht in den fokussierten Regionalmodus. */}
+          <div className="shrink-0 border-b border-outline-variant/20 pb-3">
+            <div className="relative mx-auto w-full max-w-md">
+              <Sprachblase zustand={zustand} pegel={pegel} breite={440} hoehe={160} />
               {zustand === 'verbindet' && (
                 <Loader2
                   className="absolute inset-0 m-auto h-5 w-5 animate-spin text-on-surface-variant/70"
@@ -160,54 +154,21 @@ export function SprachAnsicht({
                 />
               )}
             </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="font-headline text-sm font-bold text-on-surface truncate">
+            <div className="mt-1 min-w-0 text-center">
+              <h3 className="font-headline text-sm font-bold text-on-surface">
                 {fehler ? t(fehler) : t(`ai.voice.zustand.${zustand}`)}
               </h3>
-              <p className="text-xs text-on-surface-variant truncate">
+              <p className="text-xs text-on-surface-variant">
                 {fehler ? t('ai.voice.hint.error') : t(`ai.voice.hint.${zustand}`)}
               </p>
             </div>
           </div>
 
           {/* Aktive Prozesse Card */}
-          <ActiveProcessesCard processes={dynamicProcesses} className="hidden lg:block" />
-
-          {/* Gesprächs-Transkript */}
-          {zeilen.length > 0 && (
-            <div
-              ref={kasten}
-              className="flex-1 max-h-48 overflow-y-auto rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 p-3 space-y-2 text-xs"
-            >
-              {zeilen.slice(-8).map((zeile, idx) => (
-                <div
-                  key={idx}
-                  className={`flex flex-col ${
-                    zeile.wer === 'ich' ? 'items-end' : 'items-start'
-                  }`}
-                >
-                  <span className="text-[10px] font-semibold text-on-surface-variant/70 mb-0.5">
-                    {zeile.wer === 'ich' ? t('ai.voice.you', 'Du') : 'MSM'}
-                  </span>
-                  <div
-                    className={`rounded-lg px-2.5 py-1.5 leading-relaxed max-w-[88%] ${
-                      zeile.wer === 'ich'
-                        ? 'bg-primary/15 text-primary border border-primary/25'
-                        : 'bg-surface-container-high text-on-surface'
-                    }`}
-                  >
-                    {zeile.text}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {vorschlag && <Vorschlagskasten vorschlag={vorschlag} />}
-          {beleg && <Belegkasten beleg={beleg} />}
+          <ActiveProcessesCard processes={dynamicProcesses} className="hidden min-h-0 lg:block" />
 
           {/* Steuerungsleiste unten */}
-          <div className="flex items-center justify-center gap-3 pt-2 border-t border-outline-variant/20 shrink-0">
+          <div className="mt-auto flex shrink-0 items-center justify-center gap-3 border-t border-outline-variant/20 pt-2">
             <RunderKnopf
               label={t(laeuft ? 'ai.voice.stop' : 'ai.voice.start')}
               aktiv={laeuft && hoert}

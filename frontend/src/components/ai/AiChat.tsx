@@ -855,7 +855,7 @@ export function AiChat() {
       {/* ── Verlauf ───────────────────────────────────────────────────── */}
       <div
         ref={verlaufRef}
-        className="relative min-h-0 flex-1 overflow-y-auto"
+        className={`relative min-h-0 flex-1 overflow-y-auto ${geoOpen ? 'hidden lg:block' : ''}`}
         aria-live="polite"
         onScroll={(event) => {
           // Die 50 Pixel Spielraum sind derselbe Wert wie in der Konsole: wer

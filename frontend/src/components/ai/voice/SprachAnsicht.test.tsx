@@ -270,4 +270,13 @@ describe('SprachAnsicht', () => {
     // Im 3-Spalten-Modus wird das RegionalInfoPanel gerendert
     expect(screen.getByLabelText(i18n.t('ai.geo.panelTitle', 'Regionale Analyse'))).toBeInTheDocument()
   })
+
+  it('zeigt im regionalen Echtzeitmodus keine Transkriptzeilen', () => {
+    ansicht({
+      werkzeug: 'analyze_region',
+      zeilen: [{ wer: 'ich', text: 'Wie ist es in Los Angeles?' }],
+    })
+
+    expect(screen.queryByText('Wie ist es in Los Angeles?')).not.toBeInTheDocument()
+  })
 })

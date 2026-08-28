@@ -44,27 +44,33 @@ interface RegionalInfoPanelProps {
  * Aufklärungsdaten mit interaktiven Reitern (Übersicht, Satellit, Nachrichten, Wetter etc.).
  */
 export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfoPanelProps) {
+  if (loading && !data) return <RegionalInfoLoading />
+  if (!data) return null
+
+  return <RegionalInfoContent data={data} news={news} onClose={onClose} />
+}
+
+function RegionalInfoLoading() {
+  const { t } = useTranslation()
+  return (
+    <aside
+      className="flex h-full w-full flex-col space-y-4 rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4 animate-pulse"
+      aria-label={t('ai.geo.panelTitle', 'Regionale Analyse')}
+    >
+      <div className="h-6 w-3/4 rounded-lg bg-surface-container-highest" />
+      <div className="h-10 rounded-xl bg-surface-container-highest" />
+      <div className="h-36 rounded-xl bg-surface-container-highest" />
+      <div className="h-44 rounded-xl bg-surface-container-highest" />
+    </aside>
+  )
+}
+
+function RegionalInfoContent({ data, news, onClose }: Omit<RegionalInfoPanelProps, 'data' | 'loading'> & { data: AiRegionalAnalysis }) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<TabType>('overview')
   const [satZoom, setSatZoom] = useState(1)
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null)
   const [selectedLayerId, setSelectedLayerId] = useState<string>('true_color')
-
-  if (loading && !data) {
-    return (
-      <aside
-        className="flex h-full w-full flex-col p-4 space-y-4 animate-pulse bg-surface-container-low border border-outline-variant/30 rounded-2xl"
-        aria-label={t('ai.geo.panelTitle', 'Regionale Analyse')}
-      >
-        <div className="h-6 w-3/4 bg-surface-container-highest rounded-lg" />
-        <div className="h-10 bg-surface-container-highest rounded-xl" />
-        <div className="h-36 bg-surface-container-highest rounded-xl" />
-        <div className="h-44 bg-surface-container-highest rounded-xl" />
-      </aside>
-    )
-  }
-
-  if (!data) return null
 
   const { location, country, coordinates, weather, satellite } = data
   const firstScene = satellite?.scenes?.[0]

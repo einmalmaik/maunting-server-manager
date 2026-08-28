@@ -56,7 +56,7 @@ export function RegionalAnalysisLayout({
     >
       {/* Linke Spalte (Chat oder Voice-Container) */}
       <div
-        className={`order-3 flex min-h-0 w-full flex-col ${
+        className={`order-2 flex min-h-0 w-full flex-col ${
           active
             ? 'shrink-0 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest/50 lg:order-1 lg:h-full lg:w-[380px] xl:w-[420px]'
             : 'order-1 h-full flex-1'
@@ -80,7 +80,7 @@ export function RegionalAnalysisLayout({
           </div>
 
           {/* Rechte Spalte: Informationspanel */}
-          <div className="order-2 flex w-full shrink-0 flex-col lg:order-3 lg:h-full lg:min-h-0 lg:w-[340px] xl:w-[380px]">
+          <div className="order-3 flex w-full shrink-0 flex-col lg:order-3 lg:h-full lg:min-h-0 lg:w-[340px] xl:w-[380px]">
             <RegionalInfoPanel data={data} news={news} loading={loading} onClose={onClose} />
           </div>
         </>
