@@ -36,7 +36,6 @@ export function MapTilerDetailMap({ latitude, longitude, locationName, onUnavail
         style: config.style_url,
         center: [longitude, latitude],
         zoom: 8,
-        attributionControl: true,
         cooperativeGestures: true,
       })
       mapRef.current = map
