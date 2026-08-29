@@ -8,9 +8,11 @@ const mapHarness = vi.hoisted(() => ({
   dragPanEnables: 0,
   scrollZoomEnables: 0,
   touchZoomEnables: 0,
+  dragRotateEnables: 0,
   trackpadZoomRates: [] as number[],
   wheelZoomRates: [] as number[],
   stops: 0,
+  handlers: new Map<string, (event: unknown) => void>(),
   getMapTilerMapConfig: vi.fn(),
 }))
 
@@ -28,6 +30,7 @@ vi.mock('maplibre-gl', () => {
       setWheelZoomRate: (rate: number) => { mapHarness.wheelZoomRates.push(rate) },
     }
     touchZoomRotate = { enable: () => { mapHarness.touchZoomEnables += 1 } }
+    dragRotate = { enable: () => { mapHarness.dragRotateEnables += 1 } }
 
     constructor(config: { center: [number, number]; zoom: number }) {
       mapHarness.configs.push(config)
@@ -35,7 +38,7 @@ vi.mock('maplibre-gl', () => {
     }
 
     once(_event: string, callback: () => void) { callback() }
-    on() {}
+    on(event: string, callback: (value: unknown) => void) { mapHarness.handlers.set(event, callback) }
     setProjection() {}
     getStyle() { return { layers: [] } }
     getCanvas() { return { style: {} } }
@@ -70,9 +73,11 @@ describe('MapTilerDetailMap', () => {
     mapHarness.dragPanEnables = 0
     mapHarness.scrollZoomEnables = 0
     mapHarness.touchZoomEnables = 0
+    mapHarness.dragRotateEnables = 0
     mapHarness.trackpadZoomRates.length = 0
     mapHarness.wheelZoomRates.length = 0
     mapHarness.stops = 0
+    mapHarness.handlers.clear()
     vi.clearAllMocks()
   })
 
@@ -98,6 +103,7 @@ describe('MapTilerDetailMap', () => {
     expect(mapHarness.dragPanEnables).toBe(1)
     expect(mapHarness.scrollZoomEnables).toBe(1)
     expect(mapHarness.touchZoomEnables).toBe(1)
+    expect(mapHarness.dragRotateEnables).toBe(1)
     expect(mapHarness.trackpadZoomRates).toEqual([1 / 50])
     expect(mapHarness.wheelZoomRates).toEqual([1 / 120])
   })
@@ -262,5 +268,41 @@ describe('MapTilerDetailMap', () => {
       center: [116.3972, 39.9163],
       zoom: 16,
     }))
+  })
+
+  it('lässt eine manuell bewegte Karte nicht durch einen verspäteten Fokus zurückspringen', async () => {
+    mapHarness.getMapTilerMapConfig.mockResolvedValue({
+      configured: true,
+      style_url: 'https://maps.example.test/style.json',
+    })
+
+    const { rerender } = render(
+      <MapTilerDetailMap
+        latitude={52.52}
+        longitude={13.405}
+        locationName="Berlin"
+        globe
+        cameraCommandId="focus-1"
+        onUnavailable={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(mapHarness.flyTos).toHaveLength(1))
+
+    mapHarness.handlers.get('dragstart')?.({ originalEvent: new MouseEvent('mousedown') })
+    expect(mapHarness.stops).toBeGreaterThan(0)
+
+    rerender(
+      <MapTilerDetailMap
+        latitude={52.52}
+        longitude={13.405}
+        locationName="Berlin"
+        globe
+        cameraCommandId="focus-2"
+        onUnavailable={vi.fn()}
+      />,
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mapHarness.flyTos).toHaveLength(1)
   })
 })

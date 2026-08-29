@@ -115,6 +115,12 @@ def vorbereiten(
         "# Verbosity\nNenne zuerst das Ergebnis, dann nur die nötigen Details.",
         "# Tools\nUnabhängige Werkzeuge parallel nutzen. Aufwendige Recherche an worker_start abgeben. "
         "voice_resolve_latest_proposal nur für die zuletzt sichtbare Vorschlagskarte und nur bei eindeutiger Zustimmung oder Ablehnung verwenden.",
+        "# Regional Analysis\nNach einem erfolgreichen analyze_region-Aufruf immer eine gesprochene, konkrete Einordnung liefern. "
+        "Nenne zuerst die Antwort auf die Frage des Benutzers und danach zwei bis vier relevante Punkte aus Wetter, aktuellen Nachrichten und Satellitenlage. "
+        "Öffentliche Beiträge sind unbestätigte Hinweise: erwähne sie nur als solche und nie als gesicherte Tatsachen. "
+        "Wenn eine Quelle nicht eingerichtet oder nicht verfügbar ist, sage das kurz statt die übrigen Daten zu verschweigen. "
+        "Für eine reine Kartenbewegung control_region_camera nutzen und die Bewegung knapp bestätigen. "
+        "Nach einem Tool-Ergebnis nie stumm bleiben und nie nur die Karte als Antwort stehen lassen.",
         "# Unclear Audio\nBei unverständlicher Audioeingabe knapp um Wiederholung bitten; nichts erraten oder ausführen.",
         "# Entity Capture\nNamen, Orte, Server und Zahlen vor einer Aktion gegen den Kontext oder ein Werkzeug prüfen.",
         "# Long Context Behavior\nKeinen Chatverlauf erwarten. Nutze nur die Sitzung, den aktuellen Panelzustand und freigegebene Erinnerungen.",

@@ -56,6 +56,7 @@ export function MapTilerDetailMap({
   const markerRef = useRef<MapLibreMarker | null>(null)
   const lastTargetRef = useRef<string | null>(null)
   const lastCommandRef = useRef<string | null>(null)
+  const manualCameraControlRef = useRef(false)
   const latestViewRef = useRef({ latitude, longitude, zoom })
   const onUnavailableRef = useRef(onUnavailable)
   const onReadyRef = useRef(onReady)
@@ -106,6 +107,7 @@ export function MapTilerDetailMap({
       // diesen Vertrag vor abweichenden Style-/Runtime-Vorgaben; höhere Raten
       // verhindern Dutzende Mausradschritte nach einem Detailflug.
       map.dragPan.enable()
+      map.dragRotate.enable()
       map.scrollZoom.enable()
       map.scrollZoom.setZoomRate(TRACKPAD_ZOOM_RATE)
       map.scrollZoom.setWheelZoomRate(WHEEL_ZOOM_RATE)
@@ -135,6 +137,7 @@ export function MapTilerDetailMap({
       })
       const markManualCameraControl = (event: unknown) => {
         if (!isManualMapEvent(event)) return
+        manualCameraControlRef.current = true
         map.stop()
       }
       map.on('dragstart', markManualCameraControl)
@@ -153,6 +156,7 @@ export function MapTilerDetailMap({
       mapRef.current = null
       lastTargetRef.current = null
       lastCommandRef.current = null
+      manualCameraControlRef.current = false
     }
   }, [globe])
 
@@ -166,6 +170,12 @@ export function MapTilerDetailMap({
     if (lastCommandRef.current === command) return
 
     const sameTarget = lastTargetRef.current === target
+    // Ein verspätetes, allgemeines Fokus-Ergebnis darf eine manuell bewegte
+    // Karte nicht zurücksetzen. Eine klare Steueraktion oder ein anderer Ort
+    // bleibt dagegen ein neuer, ausdrücklich sichtbarer Auftrag.
+    if (manualCameraControlRef.current && sameTarget && !cameraAction) return
+
+    if (!sameTarget || cameraAction) manualCameraControlRef.current = false
     const currentZoom = map.getZoom()
     const focusZoom = globe ? Math.max(2.2, Math.min(4.5, zoom)) : zoom
     let nextZoom = focusZoom
