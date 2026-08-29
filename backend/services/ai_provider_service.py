@@ -496,6 +496,12 @@ def create_provider(
     operator_api_key: str | None,
     # Optional: ohne Preis bleiben die Kosten bei null (siehe estimate_cost_microunits).
     token_price_micro_usd_per_million: int | None = None,
+    standard_input_price_micro_usd_per_million: int | None = None,
+    standard_output_price_micro_usd_per_million: int | None = None,
+    worker_input_price_micro_usd_per_million: int | None = None,
+    worker_output_price_micro_usd_per_million: int | None = None,
+    ethics_input_price_micro_usd_per_million: int | None = None,
+    ethics_output_price_micro_usd_per_million: int | None = None,
     # Optional: ohne Stimme gibt es über diesen Zugang keinen Sprachmodus. Eine
     # Standardstimme wird bewusst **nicht** eingetragen — warum, steht an der
     # Spalte in `models/ai_provider.py`.
@@ -563,6 +569,12 @@ def create_provider(
         enabled=enabled,
         requires_api_key=requires_api_key,
         token_price_micro_usd_per_million=token_price_micro_usd_per_million,
+        standard_input_price_micro_usd_per_million=standard_input_price_micro_usd_per_million,
+        standard_output_price_micro_usd_per_million=standard_output_price_micro_usd_per_million,
+        worker_input_price_micro_usd_per_million=worker_input_price_micro_usd_per_million,
+        worker_output_price_micro_usd_per_million=worker_output_price_micro_usd_per_million,
+        ethics_input_price_micro_usd_per_million=ethics_input_price_micro_usd_per_million,
+        ethics_output_price_micro_usd_per_million=ethics_output_price_micro_usd_per_million,
         default_voice=stimme,
         transcription_model=gehoer,
         realtime_default=False,
@@ -715,6 +727,16 @@ def update_provider(
         provider.token_price_micro_usd_per_million = values[
             "token_price_micro_usd_per_million"
         ]
+    for field in (
+        "standard_input_price_micro_usd_per_million",
+        "standard_output_price_micro_usd_per_million",
+        "worker_input_price_micro_usd_per_million",
+        "worker_output_price_micro_usd_per_million",
+        "ethics_input_price_micro_usd_per_million",
+        "ethics_output_price_micro_usd_per_million",
+    ):
+        if field in values:
+            setattr(provider, field, values[field])
     if clear_operator_api_key:
         provider.operator_api_key_encrypted = None
         provider.operator_api_key_hint = None

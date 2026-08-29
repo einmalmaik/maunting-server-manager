@@ -116,6 +116,12 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         operator_key_configured=bool(provider.operator_api_key_encrypted),
         operator_key_hint=provider.operator_api_key_hint,
         token_price_micro_usd_per_million=provider.token_price_micro_usd_per_million,
+        standard_input_price_micro_usd_per_million=provider.standard_input_price_micro_usd_per_million,
+        standard_output_price_micro_usd_per_million=provider.standard_output_price_micro_usd_per_million,
+        worker_input_price_micro_usd_per_million=provider.worker_input_price_micro_usd_per_million,
+        worker_output_price_micro_usd_per_million=provider.worker_output_price_micro_usd_per_million,
+        ethics_input_price_micro_usd_per_million=provider.ethics_input_price_micro_usd_per_million,
+        ethics_output_price_micro_usd_per_million=provider.ethics_output_price_micro_usd_per_million,
         updated_at=provider.updated_at,
     )
 

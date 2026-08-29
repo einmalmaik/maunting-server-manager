@@ -372,13 +372,23 @@ class RealtimeSitzung:
                 self._offener_vorschlag = kennung
                 await self._panel_senden({"art": "vorschlag", "vorschlag": karte})
         if self._sideband is not None:
-            output = json.dumps(wert, ensure_ascii=False, separators=(",", ":"))
-            await self._sideband.send(json.dumps({
-                "type": "conversation.item.create",
-                "item": {"type": "function_call_output", "call_id": call_id, "output": output},
-            }))
-            self._response_aktiv = True
-            await self._sideband.send(json.dumps({"type": "response.create"}))
+            # Werkzeugwerte stammen auch aus Datenbank- und Servermetadaten.
+            # Ein einzelnes Datumsobjekt oder ein anderer nicht JSON-fähiger
+            # Wert darf den Folgezug nicht still aufhalten. Die UI sieht
+            # weiterhin nur die sichere Projektion oben.
+            try:
+                output = json.dumps(wert, ensure_ascii=False, separators=(",", ":"), default=str)
+                await self._sideband.send(json.dumps({
+                    "type": "conversation.item.create",
+                    "item": {"type": "function_call_output", "call_id": call_id, "output": output},
+                }))
+                self._response_aktiv = True
+                await self._sideband.send(json.dumps({"type": "response.create"}))
+            except Exception:
+                # Der Transportfehler beendet nicht die lokale Sitzung und
+                # leakt weder Call-ID noch Rohresultat in Browser oder Logs.
+                self._response_aktiv = False
+                await self._panel_senden({"art": "fehler", "code": "REALTIME_TOOL_DELIVERY_FAILED"})
         if fehler:
             await self._panel_senden({"art": "zustand", "zustand": "denkt"})
 

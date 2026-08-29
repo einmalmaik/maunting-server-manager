@@ -158,6 +158,12 @@ class AiProviderCreate(BaseModel):
     token_price_micro_usd_per_million: int | None = Field(
         default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD
     )
+    standard_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    standard_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    worker_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    worker_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    ethics_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    ethics_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     # Nur fuer einen Sprachzugang von Bedeutung; bei einem Chatzugang bleibt das
     # Feld schlicht leer. Es wird trotzdem nicht gegen `provider_kind` geprueft:
     # der Anbieter laesst sich spaeter aendern, und eine hinterlegte Stimme, die
@@ -208,6 +214,12 @@ class AiProviderUpdate(BaseModel):
     token_price_micro_usd_per_million: int | None = Field(
         default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD
     )
+    standard_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    standard_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    worker_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    worker_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    ethics_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    ethics_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     # Wie beim Preis eine Zeile darueber gibt es hier zwei verschiedene Dinge,
     # die beide wie ``None`` aussehen: „nicht mitgeschickt" laesst die Stimme
     # stehen, ein ausdrueckliches ``null`` loescht sie. Auseinander haelt die
@@ -293,6 +305,12 @@ class AiProviderResponse(BaseModel):
     operator_key_configured: bool
     operator_key_hint: str | None
     token_price_micro_usd_per_million: int | None
+    standard_input_price_micro_usd_per_million: int | None = None
+    standard_output_price_micro_usd_per_million: int | None = None
+    worker_input_price_micro_usd_per_million: int | None = None
+    worker_output_price_micro_usd_per_million: int | None = None
+    ethics_input_price_micro_usd_per_million: int | None = None
+    ethics_output_price_micro_usd_per_million: int | None = None
     updated_at: datetime
 
 

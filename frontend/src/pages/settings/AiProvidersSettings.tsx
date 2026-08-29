@@ -79,6 +79,12 @@ const EMPTY_PROVIDER: ProviderDraft = {
   enabled: true,
   requires_api_key: true,
   token_price_micro_usd_per_million: null,
+  standard_input_price_micro_usd_per_million: null,
+  standard_output_price_micro_usd_per_million: null,
+  worker_input_price_micro_usd_per_million: null,
+  worker_output_price_micro_usd_per_million: null,
+  ethics_input_price_micro_usd_per_million: null,
+  ethics_output_price_micro_usd_per_million: null,
   // Keine Vorbelegung, bei beiden. Es gibt weder eine Standardstimme noch ein
   // Standard-Hoermodell — MSM kennt die Stimmen des fremden Kontos nicht, und
   // ein geratenes Hoermodell stuende auf der Rechnung des Betreibers.
@@ -116,6 +122,12 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     enabled: provider.enabled,
     requires_api_key: provider.requires_api_key,
     token_price_micro_usd_per_million: provider.token_price_micro_usd_per_million,
+    standard_input_price_micro_usd_per_million: provider.standard_input_price_micro_usd_per_million,
+    standard_output_price_micro_usd_per_million: provider.standard_output_price_micro_usd_per_million,
+    worker_input_price_micro_usd_per_million: provider.worker_input_price_micro_usd_per_million,
+    worker_output_price_micro_usd_per_million: provider.worker_output_price_micro_usd_per_million,
+    ethics_input_price_micro_usd_per_million: provider.ethics_input_price_micro_usd_per_million,
+    ethics_output_price_micro_usd_per_million: provider.ethics_output_price_micro_usd_per_million,
     default_voice: provider.default_voice,
     transcription_model: provider.transcription_model,
     realtime_default: provider.realtime_default ?? false,
@@ -212,6 +224,12 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
       enabled: draft.enabled,
       requires_api_key: draft.requires_api_key,
       token_price_micro_usd_per_million: draft.token_price_micro_usd_per_million ?? null,
+      standard_input_price_micro_usd_per_million: draft.standard_input_price_micro_usd_per_million ?? null,
+      standard_output_price_micro_usd_per_million: draft.standard_output_price_micro_usd_per_million ?? null,
+      worker_input_price_micro_usd_per_million: draft.worker_input_price_micro_usd_per_million ?? null,
+      worker_output_price_micro_usd_per_million: draft.worker_output_price_micro_usd_per_million ?? null,
+      ethics_input_price_micro_usd_per_million: draft.ethics_input_price_micro_usd_per_million ?? null,
+      ethics_output_price_micro_usd_per_million: draft.ethics_output_price_micro_usd_per_million ?? null,
       ...(protokoll === 'tts' ? { default_voice: draft.default_voice?.trim() || null } : {}),
       ...(protokoll === 'chat_completions'
         ? {
@@ -1197,6 +1215,24 @@ function ProviderForm({
             </p>
           )}
           <p className="msm-field-help">{t('ai.providers.tokenPriceHint')}</p>
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            {([
+              ['Standard Input', 'standard_input_price_micro_usd_per_million'],
+              ['Standard Output', 'standard_output_price_micro_usd_per_million'],
+              ['Worker Input', 'worker_input_price_micro_usd_per_million'],
+              ['Worker Output', 'worker_output_price_micro_usd_per_million'],
+              ['Ethik Input', 'ethics_input_price_micro_usd_per_million'],
+              ['Ethik Output', 'ethics_output_price_micro_usd_per_million'],
+            ] as const).map(([label, field]) => (
+              <ProviderInput
+                key={field}
+                label={`${label} · ${waehrung.currency} / 1 Mio. Tokens`}
+                value={microUsdInEingabe(draft[field] ?? null, waehrung)}
+                inputMode="decimal"
+                onChange={(value) => change({ [field]: eingabeInMicroUsd(value, waehrung) } as Partial<ProviderDraft>)}
+              />
+            ))}
+          </div>
         </div>
       </fieldset>
       {testResult && (

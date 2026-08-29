@@ -99,6 +99,12 @@ export interface AiProviderAdmin {
    * Cent ließ sich „1,20 €" nicht eintragen.
    */
   token_price_micro_usd_per_million: number | null
+  standard_input_price_micro_usd_per_million?: number | null
+  standard_output_price_micro_usd_per_million?: number | null
+  worker_input_price_micro_usd_per_million?: number | null
+  worker_output_price_micro_usd_per_million?: number | null
+  ethics_input_price_micro_usd_per_million?: number | null
+  ethics_output_price_micro_usd_per_million?: number | null
   updated_at: string
 }
 
@@ -1045,6 +1051,12 @@ export interface AiProviderWrite {
   enabled: boolean
   requires_api_key: boolean
   token_price_micro_usd_per_million?: number | null
+  standard_input_price_micro_usd_per_million?: number | null
+  standard_output_price_micro_usd_per_million?: number | null
+  worker_input_price_micro_usd_per_million?: number | null
+  worker_output_price_micro_usd_per_million?: number | null
+  ethics_input_price_micro_usd_per_million?: number | null
+  ethics_output_price_micro_usd_per_million?: number | null
   /**
    * Nur ein Sprachzugang schickt das Feld mit; ein Chatzugang laesst es weg,
    * statt `null` zu senden. Der Unterschied zaehlt, weil `PATCH` in die

@@ -195,6 +195,14 @@ class AiProvider(Base):
     token_price_micro_usd_per_million: Mapped[int | None] = mapped_column(
         BigInteger, nullable=True
     )
+    # Rollenpreise sind getrennt, weil Standard-, Worker- und Ethics-Modell
+    # unterschiedliche Modelle und damit unterschiedliche Tarife sein können.
+    standard_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    standard_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    worker_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    worker_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    ethics_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    ethics_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
