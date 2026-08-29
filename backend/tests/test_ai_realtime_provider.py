@@ -247,6 +247,7 @@ def test_realtime_never_offers_background_workers(db: Session, regular_user, mon
 
     namen = {tool["name"] for tool in vorbereiten.tools}
     assert "voice_resolve_latest_proposal" in namen
+    assert {"voice_set_region_view", "voice_leave_region_view"} <= namen
     assert namen.isdisjoint({"worker_start", "worker_cancel", "worker_antwort"})
     assert "keine Hintergrund-Worker starten" in vorbereiten.instructions
     assert rollen == ["voll"]

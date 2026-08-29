@@ -279,6 +279,11 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # schneiden `voice_control` aus ihren Rollenmengen heraus. Die Kennung des
     # Vorschlags bleibt dabei serverseitig in genau einer Sprachsitzung.
     "voice_resolve_latest_proposal": Werkzeug("voice_control"),
+    # Rein lokale, sitzungsgebundene Darstellung. Diese Befehle lesen weder
+    # Regionaldaten noch verändern sie Serverzustand; sie dürfen deshalb nur
+    # im Realtime-Transport und nie im allgemeinen Chatlauf erscheinen.
+    "voice_set_region_view": Werkzeug("voice_control"),
+    "voice_leave_region_view": Werkzeug("voice_control"),
 
     # ── Schreiben: erzeugen ausschliesslich Vorschlaege ───────────────
     #

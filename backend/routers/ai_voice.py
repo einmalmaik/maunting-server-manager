@@ -55,6 +55,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ai/voice", tags=["ai-voice"])
 
 
+async def _ws_ablehnen(websocket: WebSocket, *, grund: str) -> None:
+    """Lehnt einen Sprach-Handshake ab, ohne Auth- oder Anbieterdaten zu leaken.
+
+    Uvicorn kann vor ``accept()`` nur ``403`` melden. Die klassifizierte
+    Serverdiagnose ist daher nötig, um eine fehlerhafte Desktop-Sitzung von
+    einer fehlenden Anbieter-Konfiguration zu unterscheiden. Token, Origin,
+    Providerdaten und Fehlermeldungen werden absichtlich nicht protokolliert.
+    """
+    logger.warning("Sprach-WebSocket vor Upgrade abgelehnt: grund=%s", grund)
+    await websocket.close(code=1008)
+
+
 def _ws_origin_erlaubt(websocket: WebSocket) -> bool:
     """Derselbe Origin-Check wie beim Konsolen-WebSocket.
 
@@ -310,7 +322,7 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
     über den Zustand des Panels.
     """
     if not _ws_origin_erlaubt(websocket):
-        await websocket.close(code=1008)
+        await _ws_ablehnen(websocket, grund="origin")
         return
 
     db = SessionLocal()
@@ -318,11 +330,11 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
         try:
             user = get_current_user_for_ws(websocket, db)
         except HTTPException:
-            await websocket.close(code=1008)
+            await _ws_ablehnen(websocket, grund="auth")
             return
 
         if not has_global_permission(db, user, "ai.voice.use"):
-            await websocket.close(code=1008)
+            await _ws_ablehnen(websocket, grund="permission")
             return
 
         realtime = ai_provider_service.realtime_zugang(db)
@@ -337,11 +349,15 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
                     user=user,
                     herkunft=herkunft,
                 )
-            except Exception:
+            except Exception as exc:
                 # Kein Anbieterfehler, Schlüssel oder Quotendetail verlässt
                 # den noch nicht aufgebauten authentifizierten Kanal.
                 db.rollback()
-                await websocket.close(code=1008)
+                logger.warning(
+                    "Realtime-Sprachvorbereitung fehlgeschlagen: error=%s",
+                    type(exc).__name__,
+                )
+                await _ws_ablehnen(websocket, grund="realtime_setup")
                 return
             benutzer_id = user.id
         else:
@@ -350,7 +366,7 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
         # Pipecat ist ausschließlich der Legacy-Voice-Rand. Realtime darf weder
         # von seiner Installation noch von ElevenLabs oder STT abhängen.
         if realtime is None and not pipecat_verfuegbar():
-            await websocket.close(code=1008)
+            await _ws_ablehnen(websocket, grund="legacy_runtime")
             return
 
         # Ab hier gilt nur noch der Legacy-Vertrag. Fehlt dort ein Zugang,
@@ -360,7 +376,7 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
             # Nicht eingerichtet. Für den Benutzer ist das dasselbe wie „gibt es
             # nicht" — er hat den Knopf nur deshalb gesehen, weil der Betreiber
             # zwischen Seitenaufruf und Klick etwas entfernt hat.
-            await websocket.close(code=1008)
+            await _ws_ablehnen(websocket, grund="legacy_configuration")
             return
         if realtime is None:
             assert zugaenge is not None
@@ -378,7 +394,7 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
                 ai_provider_service.resolve_api_key, db, sprechen, user.id
             )
             if not stimm_schluessel:
-                await websocket.close(code=1008)
+                await _ws_ablehnen(websocket, grund="tts_key")
                 return
 
             gespraech = await run_in_threadpool(_gespraech_holen, db, user)

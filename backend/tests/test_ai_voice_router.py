@@ -343,7 +343,7 @@ def test_a_failed_probe_answers_in_a_code_and_not_in_the_providers_words(
 
 
 def test_a_missing_origin_is_rejected(
-    client: TestClient, owner_cookies: dict, db
+    client: TestClient, owner_cookies: dict, db, caplog
 ) -> None:
     """Der Origin-Check ersetzt den CSRF-Schutz — WebSockets koennen keinen.
 
@@ -355,6 +355,10 @@ def test_a_missing_origin_is_rejected(
     with pytest.raises(Exception):
         with client.websocket_connect("/api/ai/voice/ws", cookies=owner_cookies) as ws:
             ws.receive_text()
+    assert any(
+        "Sprach-WebSocket vor Upgrade abgelehnt: grund=origin" in record.message
+        for record in caplog.records
+    )
 
 
 def test_a_foreign_origin_is_rejected(
