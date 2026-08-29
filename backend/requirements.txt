@@ -2,7 +2,7 @@ fastapi==0.111.0
 uvicorn[standard]==0.30.0
 sqlalchemy==2.0.31
 alembic==1.18.5
-pydantic==2.8.2
+pydantic==2.10.6
 pydantic-settings==2.3.4
 python-jose[cryptography]==3.3.0
 # Temporaer fuer Passwort-Migration (passlib -> DIS Argon2id).
@@ -82,6 +82,13 @@ model2vec==0.8.2
 # Exit-Plan: ai_tts_elevenlabs kapselt die gesamte Nutzung; ein Wechsel auf
 # aiohttp oder wsproto beruehrt nur diese eine Datei.
 websockets==16.0
+# Pipecat orchestriert ausschließlich die internen Audio- und Steuerframes des
+# Sprachmodus. Die vorhandenen MSM-Adapter bleiben für STT, TTS, Provider,
+# AiRun, RBAC und Tool-Ausführung zuständig; deshalb keine Provider-Extras.
+# Der Import ist in services/ai_voice/pipecat_pipeline.py gekapselt und weich,
+# damit ein defektes optionales Voice-Paket weder Anmeldung noch Serverbetrieb
+# blockiert. Sicherheitsentscheidung und Exit-Plan: docs/agent-rules/dependencies.md.
+pipecat-ai==1.8.1
 # Transitiv durch model2vec, hier gepinnt, weil ai_embedding_service direkt
 # damit rechnet (Normalisierung, Skalarprodukt).
 numpy==2.5.1

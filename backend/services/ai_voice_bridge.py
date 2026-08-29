@@ -51,6 +51,7 @@ import contextlib
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
 import httpx
@@ -64,6 +65,7 @@ from services import (
     ai_voice_vad,
 )
 from services.openai_compatible_adapter import StreamUsage
+from services.ai_latency_metrics import metrics
 from services.ai_voice import interactions as voice_interactions
 from services.ai_voice.prefetch import VoicePrefetch
 from services.ai_voice.run_output import VoiceRunOutput
@@ -133,6 +135,12 @@ class Sprachbruecke:
         self._stimm_schluessel = stimm_schluessel
         self._client = http_client
         self._hoechstdauer = hoechstdauer
+        # Werden ausschließlich von der verpflichtenden Pipecat-Sitzung
+        # gesetzt. Ohne sie kann die Bridge weiterhin isoliert getestet werden;
+        # der produktive Weg setzt sie vor dem ersten Browserrahmen.
+        self._pipecat_ton_ausgeben: Callable[[bytes], Awaitable[None]] | None = None
+        self._pipecat_steuerung_ausgeben: Callable[[dict], Awaitable[None]] | None = None
+        self._pipecat_ausgabe_unterbrechen: Callable[[], Awaitable[None]] | None = None
         #: Panel oder Desktop — entscheidet die Werkzeugmenge der Laeufe
         #: (`ai_tool_registry.herkunft_schnitt`), nie Rechte. Kommt aus dem
         #: Handshake-Token (`dependencies.ws_session_herkunft`) und steht fuer
@@ -233,7 +241,12 @@ class Sprachbruecke:
             # nur um die Mindestrede später. `_abwuergen` leert `_laufende`,
             # darum feuert dieses Tor je Äusserung höchstens einmal.
             if self._erkennung.rede_nachgewiesen:
+                unterbrechung_beginn = time.perf_counter()
                 await self._ausgabe_unterbrechen()
+                metrics.record(
+                    "ai_voice", "barge_in_output_stop",
+                    (time.perf_counter() - unterbrechung_beginn) * 1000,
+                )
                 await self._zustand_melden(ZUSTAND_HOERT)
         elif not vorher and self._erkennung.spricht:
             # Ohne laufende Antwort gibt es nichts zu schützen — „hört zu"
@@ -798,6 +811,14 @@ class Sprachbruecke:
     # ── zum Browser ───────────────────────────────────────────────────────
 
     async def _ton_senden(self, pcm: bytes) -> None:
+        ausgeben = self._pipecat_ton_ausgeben
+        if ausgeben is not None:
+            await ausgeben(pcm)
+            return
+        await self._ton_senden_direkt(pcm)
+
+    async def _ton_senden_direkt(self, pcm: bytes) -> None:
+        """Schreibt nur der Pipecat-Ausgang tatsächlich auf den WebSocket."""
         if self._browser.client_state is not WebSocketState.CONNECTED:
             return
         with contextlib.suppress(Exception):
@@ -807,6 +828,14 @@ class Sprachbruecke:
                 logger.info("Erster Tonrahmen (TTS) an Browser gesendet (%d Bytes)", len(pcm))
 
     async def _senden(self, nutzlast: dict) -> None:
+        ausgeben = self._pipecat_steuerung_ausgeben
+        if ausgeben is not None:
+            await ausgeben(nutzlast)
+            return
+        await self._senden_direkt(nutzlast)
+
+    async def _senden_direkt(self, nutzlast: dict) -> None:
+        """Serialisiert nur bereits bereinigte UI-Rahmen am Pipecat-Ausgang."""
         if self._browser.client_state is not WebSocketState.CONNECTED:
             return
         with contextlib.suppress(Exception):
@@ -832,6 +861,9 @@ class Sprachbruecke:
         """Stoppt sofort nur die Ausgabe; Tool-Runs laufen kontrolliert weiter."""
         if self._laufende is not None:
             self._unterdrueckte_laeufe.add(self._laufende)
+        unterbrechen = self._pipecat_ausgabe_unterbrechen
+        if unterbrechen is not None:
+            await unterbrechen()
         stimme = self._stimme
         if stimme is not None:
             with contextlib.suppress(Exception):

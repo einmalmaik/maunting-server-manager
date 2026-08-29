@@ -352,7 +352,7 @@ export function SelfHostingDocs() {
           </div>
         </div>
         <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
-          {(['access', 'model', 'permission', 'confirm', 'quota', 'relay'] as const).map(item => (
+          {(['access', 'model', 'permission', 'confirm', 'quota', 'relay', 'pipeline'] as const).map(item => (
             <div key={item} className="bg-surface-container p-4">
               <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.voice.${item}.title`)}</dt>
               <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.voice.${item}.body`)}</dd>

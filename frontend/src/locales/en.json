@@ -3701,6 +3701,10 @@
         "title": "Audio travels through the panel",
         "body": "Data flow: Browser → Panel → Provider. API keys remain strictly within the panel backend."
       },
+      "pipeline": {
+        "title": "Voice frames in the panel",
+        "body": "Pipecat orders audio and safe control frames inside the existing panel process. It opens no separate port, stores no recordings and receives no provider keys. Transcription, tools and voice output remain MSM services."
+      },
       "spokenLimit": "Server deletion and backup restores can be confirmed by voice if allowed by the operator. Spoken approvals are logged in the audit trail."
     }
   },

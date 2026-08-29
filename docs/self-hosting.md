@@ -1387,6 +1387,16 @@ Browser ──WSS /api/ai/voice/ws──► MSM-Backend ──► Gehör · Chat
        (Cookie, Origin-Check)      (Betreiberschlüssel, Werkzeuge, RBAC)
 ```
 
+Im Backend ordnet `pipecat-ai==1.8.1` nur die Audio- und sicheren
+Steuerframes dieser Sitzung. Pipecat läuft im bestehenden Panelprozess, öffnet
+keinen eigenen Port und braucht keinen zusätzlichen Anbieterzugang oder
+Schlüssel. Die bisherigen MSM-Dienste bleiben für Pausenerkennung,
+Transkription, AiRun, Werkzeuge und ElevenLabs zuständig. Der Pipecat-Runner
+und LiveKit-Serialisierung gehören nicht zum Release. Fehlt das Paket nach
+einem unvollständigen Update, bleibt das Panel erreichbar; der Sprachmodus ist
+bis zur Reparatur oder zum Rollback des vorherigen Release-Artefakts nicht
+verfügbar.
+
 Binärrahmen sind Ton (PCM16, 24 kHz, mono), Textrahmen sind Zustände,
 sichere Tool-Anzeigen und gezeigte Stellen. Abschriften bleiben im Backend und
 werden nicht als WebSocket-Frame zurückgesendet. Dasselbe Audioformat gilt in

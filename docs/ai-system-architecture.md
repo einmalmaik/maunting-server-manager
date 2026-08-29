@@ -101,18 +101,20 @@ Das Abonnieren vor `lauf_starten` schließt ein Rennen: Der erste Text-Delta kan
 
 `backend/routers/ai_voice.py` schützt den WebSocket mit Origin-Prüfung, Session-Authentifizierung und Berechtigung. Der Socket liegt bewusst unter `/api`, damit die sichere Cookie-/Desktop-Authentifizierung greift und kein Token in einer URL nötig ist.
 
-`backend/services/ai_voice_bridge.py` ist die kompatible Fassade. Die
-Sitzungs-, Text-, STT-, Prefetch-, Interaktions- und Broker-Ausgabe-Bausteine
-liegen darunter in `backend/services/ai_voice/`; sie eröffnen keinen zweiten
-Run- oder Tool-Pfad.
+`backend/services/ai_voice_bridge.py` ist die kompatible Fassade.
+`backend/services/ai_voice/pipecat_pipeline.py` ist der verpflichtende interne
+Frame-Rand; die Sitzungs-, Text-, STT-, Prefetch-, Interaktions- und
+Broker-Ausgabe-Bausteine liegen darunter in `backend/services/ai_voice/`. Sie
+eröffnen keinen zweiten Run- oder Tool-Pfad.
 
 ```text
 Browser-Mikrofon (PCM16)
+  → Pipecat-Audio-/Steuerframes
   → Pausenerkennung (`ai_voice_vad`)
   → Transkription (`ai_stt`)
   → derselbe AiRun wie im Chat
   → Broker-Ereignisse
-  → Satzpuffer / ElevenLabs-TTS
+  → Satzpuffer / ElevenLabs-TTS / Pipecat-Ausgabeframes
   → Browser-Lautsprecher und Bildschirmtext
 ```
 
@@ -217,13 +219,24 @@ Provider-Schlüssel werden serverseitig aufgelöst. Sie werden weder an das Fron
 - optionalen Denktext (`reasoning`);
 - den erkannten Tool-Namen (`tool_start`).
 
-Tool-Argumente werden fragmentweise gesammelt. Erst nach dem `[DONE]`-Rahmen werden sie als JSON geparst und als `ProviderToolCall` in `StreamUsage.tool_calls` abgelegt. Anthropic und OpenAI-Responses besitzen entsprechende Adapter, damit die Engine ein einheitliches internes Format erhält.
+Tool-Argumente werden fragmentweise gesammelt. Bei einem expliziten
+Provider-Abschluss für den Tool-Call erzeugen die Adapter `tool_ready`; der
+Read-Dispatcher kann die eng erlaubten, erneut autorisierten Read-Tools noch
+während des restlichen Providerstreams starten. Anthropic und OpenAI-Responses
+besitzen entsprechende Adapter, damit die Engine ein einheitliches internes
+Format erhält.
 
 ### Was heute tatsächlich parallel läuft
 
-Während ein Modell Text streamt, veröffentlicht die Engine jeden Text-Delta sofort im Broker. Die Voice-Brücke gibt vollständige Sätze ohne Warten auf die Gesamtantwort an TTS weiter. Read-Tools derselben Tool-Runde werden anschließend mit begrenzter Nebenläufigkeit parallel ausgeführt.
+Während ein Modell Text streamt, veröffentlicht die Engine jeden Text-Delta
+sofort im Broker. Der Pipecat-Voice-Rand gibt vollständige Sätze ohne Warten auf
+die Gesamtantwort an TTS weiter. Sichere Read-Tools starten nach `tool_ready`
+mit begrenzter Nebenläufigkeit; Write-Tools bleiben außerhalb dieses Pfads.
 
-Das ist echtes Text-Streaming und echte Parallelität zwischen mehreren Read-Tools. Es ist noch keine vollständige „Tool während der laufenden Modellrunde starten“-Architektur: Die Engine beginnt die konkrete Tool-Ausführung erst, nachdem die Provider-Runde beendet ist und alle Tool-Argumente vollständig vorliegen. `tool_start` ist heute daher ein frühes UI-Ereignis, kein Beweis, dass das Tool bereits läuft.
+`tool_start` wird weiterhin sofort als UI-Ereignis veröffentlicht. Nach
+`tool_ready` folgt bei erlaubten Read-Tools die tatsächliche, serverseitig
+erneut autorisierte Ausführung. Das Ereignis ersetzt keine Berechtigungsprüfung
+und erlaubt keine spekulativen Schreibaktionen.
 
 ## 5. Werkzeugkatalog und Ausführung
 
@@ -349,31 +362,19 @@ Leistungsrelevante Caches sind absichtlich unterschiedlich geschnitten:
 
 Diese Punkte sind wichtig, damit „vorhanden“ nicht mit „Ziel erreicht“ verwechselt wird.
 
-1. **Keine Pipecat-Schicht:** Voice nutzt heute eine eigene Bridge aus VAD, STT, AiRun-Broker und TTS. Es gibt keine einheitliche Frame-Pipeline für Audio, Text, Tool-Argumente und UI.
-2. **Tools starten nicht beim vollständigen Argument-JSON:** Der Adapter sammelt Tool-Argumente während des Streams, aber die Engine dispatcht die Ausführung erst nach dem Ende der Provider-Runde. Das verhindert die gewünschte Überlappung aus natürlicher Erstreaktion, laufendem Tool und eintreffenden Daten.
-3. **Chat und Voice teilen den Run, aber nicht einen vollständigen Interaktionsvertrag:** Beide sehen Broker-Ereignisse, doch Kamera-, Fortschritts-, TTS- und Tool-Ready-Ereignisse sind nicht als ein gemeinsames Frame-Protokoll modelliert.
-4. **STT ist pro abgeschlossener Äußerung:** VAD trennt erst eine Äußerung, danach erfolgt die Transkription. Die Teiltranskript-Schnittstelle versorgt Classifier/UI, ersetzt aber keine vollständig streamingfähige STT-Pipeline.
-5. **Intent-Prefetch ist bewusst begrenzt:** Nur fünf sichere Read-Tools sind zugelassen. Das ist sicher, aber keine generische Beschleunigung aller Tools.
-6. **Natürliche Informationsdosierung ist vor allem Prompt-Verhalten:** Der Sprachprompt fordert kurze, direkte Antworten. Es gibt noch keinen technischen Antwortplan, der Nachrichten, Wetter, Verkehr, Social-Signale und Sehenswürdigkeiten als priorisierte Datenereignisse einzeln in die Sprechreihenfolge einsortiert.
-7. **Konzept und Code können auseinanderlaufen:** `docs/agentic-framework.md` enthält Architekturziele, die über den heute nachweisbaren Code hinausgehen. Bei einer Refactor-Entscheidung ist Code plus Tests die operative Wahrheit.
+1. **Voice hat einen Pipecat-Frame-Rand, Chat nicht:** Der Browservertrag bleibt getrennt, weil SSE und Audio unterschiedliche Transporte sind. AiRun und Broker sind der gemeinsame Kern.
+2. **STT ist pro abgeschlossener Äußerung:** VAD trennt erst eine Äußerung, danach erfolgt die Transkription. Die Teiltranskript-Schnittstelle versorgt Classifier/UI, ersetzt aber keine vollständig streamingfähige STT-Pipeline.
+3. **Intent-Prefetch ist bewusst begrenzt:** Nur fünf sichere Read-Tools sind zugelassen. Das ist sicher, aber keine generische Beschleunigung aller Tools.
+4. **Natürliche Informationsdosierung ist vor allem Prompt-Verhalten:** Der Sprachprompt fordert kurze, direkte Antworten. Es gibt noch keinen technischen Antwortplan, der Nachrichten, Wetter, Verkehr, Social-Signale und Sehenswürdigkeiten als priorisierte Datenereignisse einzeln in die Sprechreihenfolge einsortiert.
+5. **Konzept und Code können auseinanderlaufen:** `docs/agentic-framework.md` enthält Architekturziele, die über den heute nachweisbaren Code hinausgehen. Bei einer Refactor-Entscheidung ist Code plus Tests die operative Wahrheit.
 
-## 11. Zielbild für den nächsten Realtime-Refactor
+## 11. Pipecat-Grenze
 
-Der nächste Umbau sollte nicht Tool-Registry, Guardian, DIS oder Aktionsexekutoren ersetzen. Diese Schichten sind die Sicherheitsbasis. Er sollte den Transport und die Zeitsteuerung vereinheitlichen:
-
-```text
-Input/Audio/Chat
-  → einheitliche Interaktionsereignisse
-  → Intent-/Geo-Prefetch (nur sichere Reads)
-  → LLM-Stream mit inkrementellen Tool-Argumenten
-  → Tool-ready-Dispatcher mit zentralen Sicherheitsprüfungen
-  → Ergebnisse als Ereignisse an UI, TTS und nächste Modellrunde
-  → persistierter AiRun bleibt Audit- und Wiederanbindungsschicht
-```
-
-Pipecat kann den Voice-Rand dieser Architektur übernehmen: Audioframes, VAD/STT, TTS, Satzpuffer, Playback und Interrupts. Die bestehende MSM-Agentenlogik sollte als klar abgegrenzter Processor dahinter bleiben. Für Chat braucht es denselben Ereignisvertrag, auch wenn Chat selbst kein Audio transportiert.
-
-Vor einer Migration müssen die bestehenden Sicherheitsinvarianten als Tests festgehalten werden: keine Tool-Ausführung ohne Backend-Rechte, keine spekulativen Writes, keine Provider-Schlüssel im Client, keine freie Desktop-Herkunft, keine alte Run-Ausführung nach kontrollierter Ablösung und keine unbestätigte destruktive Aktion.
+Pipecat ordnet ausschließlich Voice-Audio und die bereits bereinigten
+Steuer-/Ausgabeframes. Es besitzt keinen eigenen Providerzugang, keinen
+Tool-Dispatcher und keinen Netzlistener. Chat bleibt beim bestehenden
+SSE-Vertrag. Diese Grenze verhindert, dass eine zweite Sicherheits- oder
+Autonomiepolitik entsteht.
 
 ## Quellindex
 

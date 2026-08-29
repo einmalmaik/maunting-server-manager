@@ -46,6 +46,7 @@ from services import (
     ai_voice_vad,
 )
 from services.permission_service import has_global_permission
+from services.ai_voice.pipecat_pipeline import pipecat_verfuegbar
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +225,7 @@ def voice_config(
     zugaenge = sprachzugang(db, user, bevorzugter_provider_id=provider_id)
     hoeren, denken, sprechen = zugaenge if zugaenge else (None, None, None)
     return {
-        "available": zugaenge is not None,
+        "available": zugaenge is not None and pipecat_verfuegbar(),
         # Das denkende Modell, nicht das hörende: danach fragt, wer wissen will,
         # wer da antwortet.
         "model": denken.default_model if denken else None,
@@ -265,6 +266,14 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
             return
 
         if not has_global_permission(db, user, "ai.voice.use"):
+            await websocket.close(code=1008)
+            return
+
+        # Pipecat ist der einzige Voice-Rand. Fehlt das Paket oder passt seine
+        # Version nicht, bleibt das Panel erreichbar, aber der Socket wird wie
+        # ein nicht eingerichteter Sprachmodus abgewiesen. Es gibt keinen
+        # zweiten, stillen Orchestrierungspfad.
+        if not pipecat_verfuegbar():
             await websocket.close(code=1008)
             return
 

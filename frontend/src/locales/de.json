@@ -3701,6 +3701,10 @@
         "title": "Der Ton läuft durch das Panel",
         "body": "Verbindungsfluss: Browser → Panel → Anbieter. Bei einer Direktverbindung liefe die Werkzeugausführung über den Client. API-Keys verbleiben stets im Panelprozess."
       },
+      "pipeline": {
+        "title": "Voice-Frames im Panel",
+        "body": "Pipecat ordnet Audio und sichere Steuerframes im bestehenden Panelprozess. Es öffnet keinen eigenen Port, speichert keine Aufnahmen und erhält keine Provider-Schlüssel. Transkription, Werkzeuge und Stimme bleiben MSM-Dienste."
+      },
       "spokenLimit": "Löschen und Backup-Wiederherstellungen können per Stimme bestätigt werden, wenn der Betreiber dies freigibt. Im Audit-Protokoll wird die gesprochene Zustimmung dokumentiert."
     }
   },

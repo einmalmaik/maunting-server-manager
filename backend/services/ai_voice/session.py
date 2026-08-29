@@ -1,19 +1,14 @@
-"""WebSocket-Sitzungsschleife des Sprachmodus.
+"""Steuerframe-Validierung des Sprachmodus.
 
-Die Klasse benutzt nur die schmale Oberfläche der kompatiblen Brücke. Damit
-bleiben Transport und Session-Orchestrierung getrennt, ohne eine hypothetische
-zweite Pipeline oder ein Framework einzuführen.
+Der produktive WebSocket-Transport läuft über ``pipecat_pipeline``. Diese
+Klasse behält nur den kleinen, zentral getesteten Steuerframe-Vertrag, damit
+Unterbrechen, Abort und Teiltranskripte nicht doppelt implementiert werden.
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
-import time
 from typing import Any
-
-from starlette.websockets import WebSocketDisconnect
 
 from services.ai_voice.contracts import (
     MAX_STEUERRAHMEN_ZEICHEN,
@@ -23,46 +18,15 @@ from services.ai_voice.contracts import (
 
 
 class VoiceSession:
-    """Besitzt die langlebige Empfangsschleife einer bestehenden Brücke."""
+    """Besitzt den kompatiblen, begrenzten Steuerframe-Handler."""
 
     def __init__(self, bridge: Any) -> None:
         self._bridge = bridge
 
     async def fuehren(self):
-        from services.ai_intent_classifier import classifier
+        from services.ai_voice.pipecat_pipeline import PipecatVoicePipeline
 
-        asyncio.create_task(asyncio.to_thread(classifier.warm))
-        await self._bridge._zustand_melden(ZUSTAND_BEREIT, erstmalig=True)
-        self._bridge._zusteller = asyncio.create_task(self._bridge._meldungen_zustellen())
-        ende = time.monotonic() + self._bridge._hoechstdauer
-        try:
-            while True:
-                rest = ende - time.monotonic()
-                if rest <= 0:
-                    self._bridge._lage.abgelaufen = True
-                    await self._bridge._senden({"art": "abgelaufen"})
-                    break
-                try:
-                    nachricht = await asyncio.wait_for(self._bridge._browser.receive(), timeout=rest)
-                except asyncio.TimeoutError:
-                    continue
-                if nachricht.get("type") == "websocket.disconnect":
-                    break
-                if not await self.rahmen(nachricht):
-                    break
-        except WebSocketDisconnect:
-            pass
-        finally:
-            zusteller = self._bridge._zusteller
-            self._bridge._zusteller = None
-            if zusteller is not None:
-                zusteller.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await zusteller
-            # Ein Socket-Ende ist kein Benutzer-Abort. Die Ausgabe wird
-            # bereinigt, der zentrale Run arbeitet kontrolliert weiter.
-            await self._bridge._abwuergen()
-        return self._bridge._lage
+        return await PipecatVoicePipeline(self._bridge).fuehren()
 
     async def rahmen(self, nachricht: dict) -> bool:
         roh = nachricht.get("bytes")
