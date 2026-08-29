@@ -177,12 +177,13 @@ describe('MapTilerDetailMap', () => {
         longitude={13.405}
         locationName="Berlin"
         globe
+        zoom={10}
         cameraCommandId="berlin-focus"
         onUnavailable={vi.fn()}
       />,
     )
 
-    await waitFor(() => expect(mapHarness.flyTos[0]).toMatchObject({ zoom: 6 }))
+    await waitFor(() => expect(mapHarness.flyTos[0]).toMatchObject({ zoom: 10 }))
   })
 
   it('führt wiederholte Zoom-Befehle relativ bis zum maximalen Detailzoom aus', async () => {

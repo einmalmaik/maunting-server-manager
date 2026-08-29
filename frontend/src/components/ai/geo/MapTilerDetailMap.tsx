@@ -22,7 +22,7 @@ interface MapTilerDetailMapProps {
 }
 
 const MAX_AI_ZOOM = 18
-const MAX_GLOBE_FOCUS_ZOOM = 6
+const MAX_GLOBE_FOCUS_ZOOM = 10
 const DETAIL_ZOOM = 13
 const LANDMARK_ZOOM = 16
 const CAMERA_DURATION_MS = 700
@@ -178,7 +178,7 @@ export function MapTilerDetailMap({
 
     if (!sameTarget || cameraAction) manualCameraControlRef.current = false
     const currentZoom = map.getZoom()
-    const focusZoom = globe ? Math.max(3, Math.min(MAX_GLOBE_FOCUS_ZOOM, zoom)) : zoom
+    const focusZoom = globe ? Math.max(5, Math.min(MAX_GLOBE_FOCUS_ZOOM, zoom)) : zoom
     let nextZoom = focusZoom
     if (cameraAction === 'focus_location') {
       nextZoom = Math.min(MAX_AI_ZOOM, Math.max(LANDMARK_ZOOM, currentZoom))
@@ -205,8 +205,8 @@ export function MapTilerDetailMap({
     })
   }, [cameraAction, cameraCommandId, cameraMode, globe, latitude, longitude, ready, zoom])
 
-  return <div className="absolute inset-0 z-[5] bg-transparent" aria-label={`Interaktive Karte für ${locationName}`}>
-    <div ref={elementRef} className="h-full w-full" />
+  return <div className="absolute inset-0 z-[5] touch-none bg-transparent" aria-label={`Interaktive Karte für ${locationName}`}>
+    <div ref={elementRef} className="h-full w-full touch-none cursor-grab active:cursor-grabbing" />
     {!ready && <div className="pointer-events-none absolute inset-0 grid place-items-center bg-surface-container-lowest/70 text-sm text-on-surface-variant">{t('ai.geo.mapLoading', 'Karte wird geladen')}</div>}
   </div>
 }

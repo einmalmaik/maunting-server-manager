@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 import config
 from config import get_cors_origins
-from main import app, _csp_connect_src
+from main import _FRONTEND_ASSETS, _csp_connect_src, app
 
 
 class TestCorsOrigins:
@@ -61,6 +61,12 @@ class TestServeFrontendFlag:
     def test_serve_frontend_setting_defaults_true(self):
         # Abwaertskompatibel: Single-Host liefert SPA weiterhin.
         assert hasattr(config.settings, "serve_frontend")
+
+    def test_assets_mount_targets_vite_asset_directory(self):
+        # Der /assets-Mount entfernt seinen Prefix vor der Dateisuche. Ohne
+        # diesen Ordner würden Vite-Chunks als fehlende Dateien enden und ein
+        # vorgeschalteter SPA-Fallback könnte HTML statt JavaScript liefern.
+        assert _FRONTEND_ASSETS.endswith("/frontend/dist/assets")
 
 
 class TestMeEchoesCsrfHeader:

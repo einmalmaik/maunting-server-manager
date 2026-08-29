@@ -107,7 +107,7 @@ export function GlobeViewer({
   // Der Globus darf den Ort nicht nur markieren. Nach einer Ortsanalyse soll
   // die Umgebung bereits erkennbar sein, ohne gleich in die Straßenansicht
   // einer ausdrücklich angeforderten Detailkamera zu wechseln.
-  const detailZoom = bbox && Math.max(Math.abs(bbox[2] - bbox[0]), Math.abs(bbox[3] - bbox[1])) > 25 ? 3 : 6
+  const detailZoom = bbox && Math.max(Math.abs(bbox[2] - bbox[0]), Math.abs(bbox[3] - bbox[1])) > 25 ? 5 : 10
 
   return (
     <section className={`relative h-full min-h-[320px] overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-lowest ${className}`} aria-label={t('ai.geo.globeTitle', 'Regionale Karte')}>

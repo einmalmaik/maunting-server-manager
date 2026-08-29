@@ -925,10 +925,16 @@ def health():
 # /assets/* ohne html-Fallback: fehlende JS-Chunks liefern 404 (text/plain),
 # nicht index.html — verhindert „MIME type text/html“ bei veralteten Lazy-Chunks.
 _FRONTEND_DIST = "/opt/msm/frontend/dist"
+_FRONTEND_ASSETS = f"{_FRONTEND_DIST}/assets"
 if settings.serve_frontend and os.path.exists(_FRONTEND_DIST):
     app.mount(
         "/assets",
-        StaticFiles(directory=_FRONTEND_DIST, html=False),
+        # Der Mount entfernt `/assets` vor der Dateisuche. Vite legt seine
+        # Chunks aber in `dist/assets` ab; `dist` würde daher nach
+        # `dist/<chunk>.js` statt nach `dist/assets/<chunk>.js` suchen.
+        # Fehlende Chunks dürfen nie als SPA-HTML zurückkommen, weil das den
+        # laufenden Client (unter anderem die Realtime-WebRTC-Sitzung) stoppt.
+        StaticFiles(directory=_FRONTEND_ASSETS, html=False),
         name="frontend-assets",
     )
     app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")
