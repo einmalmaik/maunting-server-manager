@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import time
+
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -276,6 +280,99 @@ async def test_tool_name_is_announced_before_execution_and_payload_is_projected(
     assert "arguments" not in panel.sent[0]
     assert panel.sent[1]["web_results"][0]["title"] == "Quelle"
     assert len(sideband.sent) == 2
+
+
+@pytest.mark.asyncio
+async def test_slow_realtime_tool_returns_a_safe_timeout_and_starts_the_followup(monkeypatch) -> None:
+    class Panel:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, value):
+            self.sent.append(value)
+
+    class Sideband:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, value):
+            self.sent.append(value)
+
+    panel = Panel()
+    sideband = Sideband()
+    session = realtime_session.RealtimeSitzung(
+        panel,
+        vorbereitung=_vorbereitung(),
+        user_id=7,
+        http_client=None,
+        herkunft="panel",
+        familie=None,
+    )
+    session._sideband = sideband
+    monkeypatch.setattr(realtime_session, "REALTIME_TOOL_TIMEOUT_SECONDS", 0.01)
+
+    def slow_tool(*_args, **_kwargs):
+        time.sleep(0.05)
+        return {}, None, {"tool_name": "web_search"}, []
+
+    monkeypatch.setattr(realtime_session, "voice_werkzeug_ausfuehren", slow_tool)
+
+    await session._tool_ausfuehren({
+        "call_id": "call_timeout",
+        "name": "web_search",
+        "arguments": '{"query":"Berlin"}',
+    })
+
+    assert panel.sent[1] == {"art": "werkzeug", "name": "web_search", "tool_name": "web_search", "failed": True}
+    output_frame = json.loads(sideband.sent[0])
+    assert json.loads(output_frame["item"]["output"]) == {"error": "TOOL_TIMEOUT"}
+    assert json.loads(sideband.sent[1]) == {"type": "response.create"}
+
+
+@pytest.mark.asyncio
+async def test_parallel_realtime_tools_start_one_followup_response(monkeypatch) -> None:
+    class Panel:
+        async def send_json(self, _value):
+            pass
+
+    class Sideband:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, value):
+            self.sent.append(value)
+
+    session = realtime_session.RealtimeSitzung(
+        Panel(),
+        vorbereitung=_vorbereitung(),
+        user_id=7,
+        http_client=None,
+        herkunft="panel",
+        familie=None,
+    )
+    sideband = Sideband()
+    session._sideband = sideband
+    monkeypatch.setattr(
+        realtime_session,
+        "voice_werkzeug_ausfuehren",
+        lambda *_args, **_kwargs: ({"ok": True}, None, {"tool_name": "web_search"}, []),
+    )
+
+    for call_id in ("call_one", "call_two"):
+        task = asyncio.create_task(session._tool_ausfuehren({
+            "call_id": call_id,
+            "name": "web_search",
+            "arguments": '{"query":"Berlin"}',
+        }))
+        session._tool_tasks.add(task)
+        task.add_done_callback(session._tool_task_fertig)
+
+    await asyncio.gather(*tuple(session._tool_tasks))
+    await asyncio.sleep(0)
+
+    frames = [json.loads(value) for value in sideband.sent]
+    assert [frame["type"] for frame in frames].count("conversation.item.create") == 2
+    assert [frame["type"] for frame in frames].count("response.create") == 1
 
 
 @pytest.mark.asyncio

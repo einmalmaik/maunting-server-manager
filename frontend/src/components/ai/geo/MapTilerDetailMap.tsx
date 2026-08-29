@@ -22,6 +22,7 @@ interface MapTilerDetailMapProps {
 }
 
 const MAX_AI_ZOOM = 18
+const MAX_GLOBE_FOCUS_ZOOM = 6
 const DETAIL_ZOOM = 13
 const LANDMARK_ZOOM = 16
 const CAMERA_DURATION_MS = 700
@@ -177,7 +178,7 @@ export function MapTilerDetailMap({
 
     if (!sameTarget || cameraAction) manualCameraControlRef.current = false
     const currentZoom = map.getZoom()
-    const focusZoom = globe ? Math.max(2.2, Math.min(4.5, zoom)) : zoom
+    const focusZoom = globe ? Math.max(3, Math.min(MAX_GLOBE_FOCUS_ZOOM, zoom)) : zoom
     let nextZoom = focusZoom
     if (cameraAction === 'focus_location') {
       nextZoom = Math.min(MAX_AI_ZOOM, Math.max(LANDMARK_ZOOM, currentZoom))

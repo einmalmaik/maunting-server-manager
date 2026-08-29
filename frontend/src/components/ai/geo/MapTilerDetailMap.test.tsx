@@ -165,6 +165,26 @@ describe('MapTilerDetailMap', () => {
     }))
   })
 
+  it('fokussiert einen neu gewählten Ort zunächst auf eine sichtbare Umgebung', async () => {
+    mapHarness.getMapTilerMapConfig.mockResolvedValue({
+      configured: true,
+      style_url: 'https://maps.example.test/style.json',
+    })
+
+    render(
+      <MapTilerDetailMap
+        latitude={52.52}
+        longitude={13.405}
+        locationName="Berlin"
+        globe
+        cameraCommandId="berlin-focus"
+        onUnavailable={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(mapHarness.flyTos[0]).toMatchObject({ zoom: 6 }))
+  })
+
   it('führt wiederholte Zoom-Befehle relativ bis zum maximalen Detailzoom aus', async () => {
     mapHarness.getMapTilerMapConfig.mockResolvedValue({
       configured: true,

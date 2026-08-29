@@ -36,6 +36,7 @@ from services.openai_compatible_adapter import ProviderToolCall
 MAX_SDP_ZEICHEN = 64 * 1024
 MAX_TOOL_ARGUMENTE_ZEICHEN = 32 * 1024
 MAX_OUTPUT_TOKENS = 512
+REALTIME_TOOL_TIMEOUT_SECONDS = 12.0
 _CALL_ID = re.compile(r"^[A-Za-z0-9_-]{1,160}$")
 _SPRACHNAMEN = {"de": "Deutsch", "en": "Englisch"}
 
@@ -121,6 +122,8 @@ def vorbereiten(
         "Wenn eine Quelle nicht eingerichtet oder nicht verfügbar ist, sage das kurz statt die übrigen Daten zu verschweigen. "
         "Für eine reine Kartenbewegung control_region_camera nutzen und die Bewegung knapp bestätigen. "
         "Nach einem Tool-Ergebnis nie stumm bleiben und nie nur die Karte als Antwort stehen lassen.",
+        "Bei einem geöffneten Ort sind Anweisungen wie näher heran, herauszoomen oder den Fernsehturm zeigen verbindliche Kamerabefehle: "
+        "Rufe control_region_camera dafür auf, statt nur zu bestätigen.",
         "# Unclear Audio\nBei unverständlicher Audioeingabe knapp um Wiederholung bitten; nichts erraten oder ausführen.",
         "# Entity Capture\nNamen, Orte, Server und Zahlen vor einer Aktion gegen den Kontext oder ein Werkzeug prüfen.",
         "# Long Context Behavior\nKeinen Chatverlauf erwarten. Nutze nur die Sitzung, den aktuellen Panelzustand und freigegebene Erinnerungen.",
@@ -224,6 +227,8 @@ class RealtimeSitzung:
         self._offener_vorschlag: str | None = None
         self._tool_tasks: set[asyncio.Task] = set()
         self._tool_schloss = asyncio.Semaphore(_werkzeug_nebenlaeufigkeit())
+        self._tool_folgeantwort_ausstehend = False
+        self._tool_folgeantwort_schloss = asyncio.Lock()
         self._verbrauch_tokens = [0, 0, 0, 0]
         self._verbrauch_kosten = 0
 
@@ -350,14 +355,27 @@ class RealtimeSitzung:
                     call = ProviderToolCall(id=call_id, name=name, arguments=argumente)
                     try:
                         async with self._tool_schloss:
-                            wert, fehler, anzeige, vorschlaege = await asyncio.to_thread(
-                                voice_werkzeug_ausfuehren,
-                                self.user_id,
-                                call,
-                                conversation_id=self.v.conversation_id,
-                                herkunft=self.herkunft,
-                                familie=self.familie,
+                            wert, fehler, anzeige, vorschlaege = await asyncio.wait_for(
+                                asyncio.to_thread(
+                                    voice_werkzeug_ausfuehren,
+                                    self.user_id,
+                                    call,
+                                    conversation_id=self.v.conversation_id,
+                                    herkunft=self.herkunft,
+                                    familie=self.familie,
+                                ),
+                                timeout=REALTIME_TOOL_TIMEOUT_SECONDS,
                             )
+                    except TimeoutError:
+                        # Der Thread kann einen fremden HTTP-Aufruf nicht
+                        # sicher abbrechen. Der Sprachzug darf deshalb nicht
+                        # darauf warten oder stumm bleiben; das Modell erhält
+                        # einen festen, nicht sensiblen Fehler und kann direkt
+                        # weiterreden.
+                        fehler = "Werkzeug hat nicht rechtzeitig geantwortet"
+                        wert = {"error": "TOOL_TIMEOUT"}
+                        anzeige = {"tool_name": name, "failed": True}
+                        vorschlaege = []
                     except Exception:
                         # Rohfehler können Zielsystemdaten enthalten. Der
                         # Anbieter und das Frontend erhalten nur diesen festen
@@ -389,7 +407,13 @@ class RealtimeSitzung:
                     "item": {"type": "function_call_output", "call_id": call_id, "output": output},
                 }))
                 self._response_aktiv = True
-                await self._sideband.send(json.dumps({"type": "response.create"}))
+                self._tool_folgeantwort_ausstehend = True
+                # Direkte Aufrufe werden in Tests und in einzelnen sicheren
+                # Verwaltungsflüssen verwendet. Im normalen Realtime-Pfad
+                # startet _tool_task_fertig die Folgeantwort erst, wenn alle
+                # parallelen Tool-Ergebnisse geliefert wurden.
+                if not self._tool_tasks:
+                    await self._tool_folgeantwort_starten()
             except Exception:
                 # Der Transportfehler beendet nicht die lokale Sitzung und
                 # leakt weder Call-ID noch Rohresultat in Browser oder Logs.
@@ -397,6 +421,21 @@ class RealtimeSitzung:
                 await self._panel_senden({"art": "fehler", "code": "REALTIME_TOOL_DELIVERY_FAILED"})
         if fehler:
             await self._panel_senden({"art": "zustand", "zustand": "denkt"})
+
+    async def _tool_folgeantwort_starten(self) -> None:
+        async with self._tool_folgeantwort_schloss:
+            if (
+                not self._tool_folgeantwort_ausstehend
+                or self._tool_tasks
+                or self._sideband is None
+            ):
+                return
+            self._tool_folgeantwort_ausstehend = False
+            try:
+                await self._sideband.send(json.dumps({"type": "response.create"}))
+            except Exception:
+                self._response_aktiv = False
+                await self._panel_senden({"art": "fehler", "code": "REALTIME_TOOL_DELIVERY_FAILED"})
 
     def _vorschlag_entscheiden(self, entscheidung: object) -> tuple[dict, str | None]:
         kennung = self._offener_vorschlag
@@ -466,6 +505,8 @@ class RealtimeSitzung:
         # abgeholt, damit kein Detail ungeprüft in den Event-Loop gelangt.
         with contextlib.suppress(asyncio.CancelledError, Exception):
             task.exception()
+        if not self._tool_tasks and self._tool_folgeantwort_ausstehend:
+            asyncio.create_task(self._tool_folgeantwort_starten())
 
     async def _panel_lesen(self) -> None:
         while True:
