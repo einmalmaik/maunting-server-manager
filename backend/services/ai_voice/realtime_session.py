@@ -27,7 +27,7 @@ from models import AiProvider, User
 from services import ai_action_service, ai_chat_service, ai_meldestelle, ai_memory_service, ai_prompt, ai_provider_service, ai_usage_service
 from services.ai_redaction import redact_sensitive_text
 from services.ai_stream.read_tools import _werkzeug_nebenlaeufigkeit, voice_werkzeug_ausfuehren
-from services.ai_tool_registry import GEHIRN_TOOLS, VOICE_CONTROL_TOOLS, herkunft_schnitt
+from services.ai_tool_registry import GEHIRN_TOOLS, VOICE_CONTROL_TOOLS, WORKER_STEUERUNG, herkunft_schnitt
 from services.ai_voice import interactions as voice_interactions
 from services.ai_voice.contracts import Lage, MAX_SITZUNGSSEKUNDEN, voice_tool_frame
 from services.openai_compatible_adapter import ProviderToolCall
@@ -73,9 +73,12 @@ def vorbereiten(
     if not api_key:
         raise RealtimeSitzungsfehler("REALTIME_NOT_CONFIGURED")
 
-    erlaubt = herkunft_schnitt(
-        ai_action_service.angebotene_werkzeuge(db, user) & GEHIRN_TOOLS,
-        herkunft,
+    erlaubt = (
+        herkunft_schnitt(
+            ai_action_service.angebotene_werkzeuge(db, user) & GEHIRN_TOOLS,
+            herkunft,
+        )
+        - WORKER_STEUERUNG
     ) | VOICE_CONTROL_TOOLS
     tools = []
     for eintrag in (
@@ -114,7 +117,8 @@ def vorbereiten(
         "# Message Channels\nAudio ist die einzige Ausgabe. Keine Untertitel oder Chatnachrichten erzeugen.",
         "# Preambles\nNicht ankündigen, dass du prüfst oder ein Werkzeug verwendest.",
         "# Verbosity\nNenne zuerst das Ergebnis, dann nur die nötigen Details.",
-        "# Tools\nUnabhängige Werkzeuge parallel nutzen. Aufwendige Recherche an worker_start abgeben. "
+        "# Tools\nUnabhängige Werkzeuge parallel nutzen. Recherchen und Kartenanfragen in diesem Realtime-Zug selbst erledigen; "
+        "keine Hintergrund-Worker starten. "
         "voice_resolve_latest_proposal nur für die zuletzt sichtbare Vorschlagskarte und nur bei eindeutiger Zustimmung oder Ablehnung verwenden.",
         "# Regional Analysis\nNach einem erfolgreichen analyze_region-Aufruf immer eine gesprochene, konkrete Einordnung liefern. "
         "Nenne zuerst die Antwort auf die Frage des Benutzers und danach zwei bis vier relevante Punkte aus Wetter, aktuellen Nachrichten und Satellitenlage. "

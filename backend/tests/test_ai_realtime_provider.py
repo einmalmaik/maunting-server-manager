@@ -221,6 +221,28 @@ def test_realtime_session_uses_semantic_vad_without_transcription() -> None:
     assert config["max_output_tokens"] == 512
 
 
+def test_realtime_never_offers_background_workers(db: Session, regular_user, monkeypatch) -> None:
+    provider = _realtime(db, "Realtime ohne Worker")
+    monkeypatch.setattr(
+        realtime_session.ai_action_service,
+        "angebotene_werkzeuge",
+        lambda *_args: {"web_search", "worker_start", "worker_cancel", "worker_antwort"},
+    )
+    monkeypatch.setattr(realtime_session.ai_provider_service, "resolve_api_key", lambda *_args: "test-key")
+
+    vorbereiten = realtime_session.vorbereiten(
+        db,
+        provider=provider,
+        user=regular_user,
+        herkunft="panel",
+    )
+
+    namen = {tool["name"] for tool in vorbereiten.tools}
+    assert "voice_resolve_latest_proposal" in namen
+    assert namen.isdisjoint({"worker_start", "worker_cancel", "worker_antwort"})
+    assert "keine Hintergrund-Worker starten" in vorbereiten.instructions
+
+
 def test_realtime_2_sends_the_operator_reasoning_effort() -> None:
     vorbereiten = _vorbereitung()
     config = realtime_session._session_config(
