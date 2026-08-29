@@ -215,10 +215,10 @@ def test_realtime_session_uses_semantic_vad_without_transcription() -> None:
         "type": "semantic_vad",
         "eagerness": "high",
         "create_response": True,
-        "interrupt_response": True,
+        "interrupt_response": False,
     }
     assert "transcription" not in config["audio"]["input"]
-    assert config["max_output_tokens"] == 512
+    assert config["max_output_tokens"] == 2048
 
 
 def test_realtime_never_offers_background_workers(db: Session, regular_user, monkeypatch) -> None:

@@ -3827,6 +3827,7 @@ def _execute_global_read_tool(
     db: Session, *, user: User, tool_name: str, arguments: dict,
     herkunft: str = "panel", familie: str | None = None,
     prefetch_session_id: str | None = None,
+    fast_region: bool = False,
 ) -> dict:
     """Werkzeuge ohne Serverbezug.
 
@@ -3949,6 +3950,8 @@ def _execute_global_read_tool(
         )
 
     if tool_name == "analyze_region":
+        if fast_region:
+            return execute_realtime_region_initial(db, user=user, arguments=arguments)
         return _execute_analyze_region(
             db, user=user, arguments=arguments, prefetch_session_id=prefetch_session_id,
         )
@@ -4486,6 +4489,7 @@ def execute_read_tool(
     herkunft: str = "panel",
     familie: str | None = None,
     prefetch_session_id: str | None = None,
+    fast_region: bool = False,
 ) -> dict:
     """Fuehrt ein Lesewerkzeug im Namen des Benutzers aus.
 
@@ -4538,6 +4542,7 @@ def execute_read_tool(
         return _execute_global_read_tool(
             db, user=user, tool_name=tool_name, arguments=arguments,
             herkunft=herkunft, familie=familie, prefetch_session_id=prefetch_session_id,
+            fast_region=fast_region,
         )
     server, arguments = _resolve_server(db, user, arguments)
     context = _execute_server_context_tool(

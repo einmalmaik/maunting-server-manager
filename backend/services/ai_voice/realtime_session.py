@@ -35,7 +35,10 @@ from services.openai_compatible_adapter import ProviderToolCall
 
 MAX_SDP_ZEICHEN = 64 * 1024
 MAX_TOOL_ARGUMENTE_ZEICHEN = 32 * 1024
-MAX_OUTPUT_TOKENS = 512
+# Audioausgabe braucht deutlich mehr Tokens als derselbe Inhalt als Text. 512
+# schnitt längere Antworten nach wenigen Sätzen ab; das ist kein sinnvolles
+# Produktlimit, sondern nur ein zu enger alter Schutzdeckel.
+MAX_OUTPUT_TOKENS = 2048
 REALTIME_TOOL_TIMEOUT_SECONDS = 12.0
 _CALL_ID = re.compile(r"^[A-Za-z0-9_-]{1,160}$")
 _SPRACHNAMEN = {"de": "Deutsch", "en": "Englisch"}
@@ -125,6 +128,7 @@ def vorbereiten(
         "# Regional Analysis\nNach einem erfolgreichen analyze_region-Aufruf immer eine gesprochene, konkrete Einordnung liefern. "
         "Wetter und Satellitenlage können zuerst eintreffen: Beginne damit sofort und warte nicht auf Verkehr, Nachrichten oder öffentliche Beiträge. "
         "Nenne zuerst die Antwort auf die Frage des Benutzers und danach zwei bis vier relevante verfügbare Punkte. "
+        "Bei news_status=pending fehlen Nachrichten nicht, sie laden noch: behaupte dann weder, es gebe keine aktuellen Nachrichten, noch erwähne die Verzögerung ungefragt. "
         "Öffentliche Beiträge sind unbestätigte Hinweise: erwähne sie nur als solche und nie als gesicherte Tatsachen. "
         "Wenn eine Quelle nicht eingerichtet oder nicht verfügbar ist, sage das kurz statt die übrigen Daten zu verschweigen. "
         "Für eine reine Kartenbewegung control_region_camera nutzen und die Bewegung knapp bestätigen. "
@@ -188,7 +192,9 @@ def _session_config(v: RealtimeVorbereitung) -> dict:
                     "type": "semantic_vad",
                     "eagerness": v.vad_eagerness,
                     "create_response": True,
-                    "interrupt_response": True,
+                    # Laptop-Lautsprecher und Hintergrundgeräusche dürfen den
+                    # laufenden Satz nicht als Benutzerunterbrechung beenden.
+                    "interrupt_response": False,
                 }
             },
             "output": {"voice": v.voice},

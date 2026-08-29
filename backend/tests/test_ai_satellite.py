@@ -14,6 +14,7 @@ from services import (
     ai_action_errors,
     ai_action_service,
     ai_geo_service,
+    ai_regional_connectors_service,
     ai_satellite_service,
 )
 from services.role_service import set_user_roles
@@ -214,3 +215,28 @@ def test_geo_service_analyze_region(db: Session, regular_user: User, monkeypatch
     assert result["news_status"] == "not_allowed"
     assert result["camera"]["mode"] == "focus"
     assert isinstance(result["camera"]["command_id"], str)
+
+
+def test_chat_region_initial_skips_optional_connectors(db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch) -> None:
+    _allow_satellite(db, regular_user)
+    monkeypatch.setattr(ai_satellite_service, "is_configured", lambda: False)
+    monkeypatch.setattr(
+        ai_regional_connectors_service, "traffic",
+        lambda *_args, **_kwargs: pytest.fail("traffic must not block the first chat result"),
+    )
+    monkeypatch.setattr(
+        ai_regional_connectors_service, "public_posts",
+        lambda *_args, **_kwargs: pytest.fail("public posts must not block the first chat result"),
+    )
+
+    result = ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="analyze_region",
+        arguments={"location": "Berlin"},
+        fast_region=True,
+    )
+
+    assert result["status"] == "success"
+    assert "traffic" not in result
+    assert result["news_status"] == "pending"

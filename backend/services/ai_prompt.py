@@ -1050,7 +1050,9 @@ Bestätige eine reine Kamerabewegung höchstens mit wenigen natürlichen Worten;
 Behaupte bei diesem Werkzeug nicht, die Kartenansicht nicht steuern zu können: die Kamera folgt dem Werkzeugergebnis. \
 Fasse die zurückgegebenen Messwerte (Temperatur, Wetterlage, Koordinaten, Satellitenszenen) \
 präzise und lebendig zusammen. Behaupte niemals, keine Daten abrufen zu können, wenn `analyze_region` \
-erfolgreich Ergebnisse liefert."""
+erfolgreich Ergebnisse liefert. Steht `news_status` auf `pending`, sind Nachrichten noch nicht \
+eingetroffen: behaupte dann nicht, es gebe keine aktuellen Nachrichten, sondern bleibe bei den \
+bereits verfügbaren Fakten."""
 
 
 # Hier stand einmal ein einziger Satz ohne Aufzaehlung, und danach eine

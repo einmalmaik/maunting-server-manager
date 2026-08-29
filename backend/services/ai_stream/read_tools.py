@@ -244,7 +244,7 @@ def _anzeigeeintrag(call, wert, fehlgeschlagen: str | None) -> dict:
 
 def _werkzeug_ausfuehren(
     user_id: int, call, herkunft: str = "panel", familie: str | None = None,
-    prefetch_session_id: str | None = None,
+    prefetch_session_id: str | None = None, fast_region: bool = False,
 ) -> tuple[object, str | None]:
     """Genau **ein** Lesewerkzeug, in eigener Sitzung und eigenem Thread.
 
@@ -281,6 +281,7 @@ def _werkzeug_ausfuehren(
             wert = ai_stream.execute_read_tool(
                 db, user=user, tool_name=call.name, arguments=call.arguments,
                 herkunft=herkunft, familie=familie, prefetch_session_id=prefetch_session_id,
+                fast_region=fast_region,
             )
             db.commit()
         except (AiActionValidationError, HTTPException) as exc:
@@ -472,9 +473,9 @@ async def _lesewerkzeug_ausfuehren(
         call,
         herkunft,
         familie,
+        prefetch_session_id,
+        True,
     )
-    if prefetch_session_id is not None:
-        ausfuehrung = (*ausfuehrung, prefetch_session_id)
     async with schloss:
         started_at = time.perf_counter()
         outcome = "ok"
