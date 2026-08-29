@@ -51,20 +51,20 @@ def _realtime(db: Session, name: str):
     return provider
 
 
-def test_realtime_needs_openai_key_voice_model_and_all_prices(db: Session) -> None:
-    with pytest.raises(ai_provider_service.AiProviderConfigurationError):
-        ai_provider_service.create_provider(
-            db,
-            name="Unvollständig",
-            provider_kind="openai",
-            enabled=True,
-            requires_api_key=True,
-            operator_api_key="sk-test-realtime-not-real",
-            realtime_default=True,
-            realtime_model="gpt-realtime",
-            realtime_voice="marin",
-        )
-    db.rollback()
+def test_realtime_needs_openai_key_voice_and_model_but_not_prices(db: Session) -> None:
+    provider = ai_provider_service.create_provider(
+        db,
+        name="Ohne Preise",
+        provider_kind="openai",
+        enabled=True,
+        requires_api_key=True,
+        operator_api_key="sk-test-realtime-not-real",
+        realtime_default=True,
+        realtime_model="gpt-realtime",
+        realtime_voice="marin",
+    )
+    assert provider.realtime_default is True
+    assert provider.realtime_audio_output_price_micro_usd_per_million is None
 
     with pytest.raises(ai_provider_service.AiProviderConfigurationError):
         ai_provider_service.create_provider(

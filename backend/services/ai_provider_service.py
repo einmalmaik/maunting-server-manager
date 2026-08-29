@@ -372,8 +372,6 @@ def _assert_realtime_werte(provider: AiProvider) -> None:
         raise AiProviderConfigurationError("Unbekannte Realtime-Antwortsprache")
     if provider.realtime_vad_eagerness not in REALTIME_VAD:
         raise AiProviderConfigurationError("Unbekannte Realtime-VAD-Empfindlichkeit")
-    if any(getattr(provider, feld) is None for feld in REALTIME_PREISFELDER):
-        raise AiProviderConfigurationError("Für Realtime müssen alle vier Preise gesetzt sein")
 
 
 def _realtime_ist_zwei(modell: str | None) -> bool:
