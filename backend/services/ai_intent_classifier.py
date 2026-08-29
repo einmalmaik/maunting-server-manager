@@ -27,7 +27,8 @@ PREFETCH_TTL_SECONDS = 10.0
 # Diese Menge ist absichtlich enger als der allgemeine Read-Katalog. Ein neues
 # Werkzeug darf erst nach Sicherheitsreview und einem echten Executor hier rein.
 SPECULATIVE_READ_TOOLS = frozenset({
-    "analyze_region", "web_search", "calendar_read", "read_server_status", "search_memory",
+    "analyze_region", "control_region_camera", "web_search", "calendar_read",
+    "read_server_status", "search_memory",
 })
 
 _PROTOTYPES = {
@@ -162,8 +163,14 @@ class PrefetchEntry:
         return time.monotonic() - self.created_at >= PREFETCH_TTL_SECONDS
 
 
-def _arguments_key(arguments: dict[str, Any]) -> str:
-    return json.dumps(arguments, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+def _arguments_key(tool_name: str, arguments: dict[str, Any]) -> str:
+    normalized = dict(arguments)
+    # Der Tool-Vertrag definiert `focus` als Standard. Der lokale Intent-
+    # Classifier muss ihn deshalb nicht künstlich mitsenden; für den Cache ist
+    # ein späterer expliziter Standardwert aber derselbe Aufruf.
+    if tool_name == "analyze_region" and "camera" not in normalized:
+        normalized["camera"] = "focus"
+    return json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
 class PrefetchCache:
@@ -177,7 +184,7 @@ class PrefetchCache:
         if not is_side_effect_free(tool_name) or not arguments:
             return None
         key = (session_id, user_id)
-        args_key = _arguments_key(arguments)
+        args_key = _arguments_key(tool_name, arguments)
         with self._lock:
             self.invalidate(session_id=session_id, user_id=user_id, keep=(tool_name, args_key))
             current = self._entries.get(key)
@@ -214,7 +221,7 @@ class PrefetchCache:
                 self.invalidate(session_id=session_id, user_id=user_id)
                 metrics.record("prefetch", "cache_lookup", 0, "miss")
                 return False, None
-            if entry.tool_name != tool_name or entry.arguments_key != _arguments_key(arguments) or not entry.completed:
+            if entry.tool_name != tool_name or entry.arguments_key != _arguments_key(tool_name, arguments) or not entry.completed:
                 metrics.record("prefetch", "cache_lookup", 0, "miss")
                 return False, None
             self._entries.pop((session_id, user_id), None)

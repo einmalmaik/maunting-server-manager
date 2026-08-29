@@ -274,9 +274,10 @@ starren Einleitungsfloskeln. Ein einzelner, praeziser Satz genuegt."""
 #
 # MITREDEN loest ein echtes Problem: wer sechs Werkzeugrunden lang still
 # arbeitet, laesst den Menschen vor einem haengenden Panel sitzen. Das Gehirn
-# hat diese Lage nicht. Es besitzt **keine** Server- oder Panelwerkzeuge; sein
-# einziger Zug nach aussen ist `worker_start`, und der dauert Millisekunden.
-# Es gibt hier keine Stille zu ueberbruecken.
+# nutzt heute kurze Lesewerkzeuge direkt; deren Start wird der Oberflaeche
+# spekulativ gemeldet. Laengere Arbeit gibt es mit `worker_start` in
+# Millisekunden ab. Eine ausformulierte Arbeitsankuendigung verkuerzt keinen
+# der beiden Wege.
 #
 # Trotzdem stand MITREDEN im Gehirn-Prompt, und zusammen mit der Quittungspflicht
 # aus GEHIRN ergab das den Ton, den der Betreiber am 18.08.2026 als "dumm"
@@ -1040,6 +1041,9 @@ geografischen Ort fragt („Was ist in Berlin los?“, „Wetter und Lage in Los
 Für eine gewünschte Sehenswürdigkeit rufe das Werkzeug mit deren Namen auf; die Oberfläche fokussiert \
 die zurückgegebene WGS84-Position automatisch. Nutze `camera: "focus"` für eine normale Ortsanalyse, \
 `camera: "detail"` nur auf ausdrücklichen Wunsch zum Hineinzoomen und `camera: "overview"` für die Weltübersicht. \
+Ist bereits eine Regionskarte geöffnet und der Benutzer möchte nur näher heran, weiter heraus oder zur Übersicht, \
+nutze `control_region_camera` statt `analyze_region`; dafür dürfen Wetter, Satellit und Nachrichten nicht erneut geladen werden. \
+Bestätige eine reine Kamerabewegung höchstens mit wenigen natürlichen Worten; wiederhole dabei keine Koordinaten, Wetter- oder Nachrichtendaten. \
 Behaupte bei diesem Werkzeug nicht, die Kartenansicht nicht steuern zu können: die Kamera folgt dem Werkzeugergebnis. \
 Fasse die zurückgegebenen Messwerte (Temperatur, Wetterlage, Koordinaten, Satellitenszenen) \
 präzise und lebendig zusammen. Behaupte niemals, keine Daten abrufen zu können, wenn `analyze_region` \
@@ -1187,6 +1191,13 @@ Fragt der Benutzer nach einem Server, einem Problem, Fehlern, Performance-Einbr�
 herunterzubeten oder unnötig nach dem Server zu fragen, wenn es nur einen gibt oder er aus dem Kontext klar ist. \
 2. Analysiere die echten, gemessenen Daten (z. B. Tickzeiten, ECS-Entitäten, CPU-Kernlast, RAM, Fehlermeldungen, \
 Netzwerklatenzen) und erkläre dem Benutzer die genaue Ursache fundiert und sachlich.
+Halte die Arbeitsaufteilung klein und zweckgebunden: kurze Lesezugriffe und `analyze_region` für die sichtbare \
+Karte führst du direkt aus. Gibt es daneben mehrere voneinander unabhängige, zeitintensive Rechercheziele, \
+starte sie in derselben Werkzeugwelle als getrennte Worker, damit sie parallel laufen und das Gespräch offen \
+bleibt. Bei einer Ortslage kann das zum Beispiel die direkte Kartenanalyse plus je ein Worker für eine tiefe \
+Web- oder Fachrecherche sein, aber nur wenn der Benutzer diese Tiefe oder das Fachgebiet verlangt. Ein Worker \
+steht für ein Ergebnisziel, nicht für jeden API-Aufruf. Nutze nie zusätzliche Worker nur weil Plätze frei sind \
+und führe dieselbe Recherche nicht direkt und im Worker doppelt aus.
 3. Schreib- und Änderungsaktionen an Servern (Neustart, Konfigurations-Patches, Mod-Installationen, Reparaturen, \
 Backups einspielen) führst du nie direkt selbst aus. Sobald eine schreibende Aktion oder ein zeitintensiver \
 Hintergrundlauf nötig ist, startest du dafür sofort mit `worker_start` einen gezielten Worker und gibst ihm \

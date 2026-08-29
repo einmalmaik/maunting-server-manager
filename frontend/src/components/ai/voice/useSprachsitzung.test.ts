@@ -603,6 +603,33 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.geoData).toBeNull()
   })
 
+  it('wendet einen Kartenbefehl auf die vorhandene Analyse an', async () => {
+    const haken = await sitzung()
+    act(() =>
+      leitung().simulateMessage({
+        art: 'tool',
+        tool_name: 'analyze_region',
+        geo_analysis: {
+          location: 'Moskau',
+          coordinates: { latitude: 55.7558, longitude: 37.6173 },
+        },
+      }),
+    )
+
+    act(() =>
+      leitung().simulateMessage({
+        art: 'tool',
+        tool_name: 'control_region_camera',
+        geo_camera: { action: 'zoom_in', command_id: 'camera-1' },
+      }),
+    )
+
+    expect(haken.result.current.geoData).toMatchObject({
+      location: 'Moskau',
+      camera: { mode: 'focus', action: 'zoom_in', command_id: 'camera-1' },
+    })
+  })
+
   it('verarbeitet intent_erkannt mit Intent, Entities und Geodaten', async () => {
     const haken = await sitzung()
     const mockGeo = {

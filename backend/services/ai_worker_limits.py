@@ -35,13 +35,13 @@ logger = logging.getLogger(__name__)
 #: auch geparkte (`waiting_*`): ein geparkter Langlaeufer ist ein offener
 #: Auftrag, kein freier Platz.
 MAX_WORKER_KEY = "ai_worker_max_parallel"
-STANDARD_WORKER = 3
+STANDARD_WORKER = 15
 MIN_WORKER = 1
-#: Obergrenze der Einstellung, nicht des Bedarfs: mehr als 16 gleichzeitige
+#: Obergrenze der Einstellung, nicht des Bedarfs: mehr als 15 gleichzeitige
 #: Auftraege **eines** Benutzers sind kein Arbeitsstil mehr, sondern eine
 #: Schleife — und jeder davon zahlt auf `concurrent_operations` und
 #: `requests_per_minute` desselben Benutzers ein.
-MAX_WORKER = 16
+MAX_WORKER = 15
 
 #: Wieviele Werkzeugrunden ein einzelner Worker-Lauf hoechstens bekommt.
 #: Unterschreitet die harte Code-Kappe `ai_stream_service.MAX_TOOL_ROUNDS`
@@ -49,7 +49,7 @@ MAX_WORKER = 16
 #: kein Import: `ai_stream_service` wird diesen Modul kuenftig lesen, und ein
 #: Import in die Gegenrichtung waere ein Zyklus.
 RUNDEN_KEY = "ai_worker_rundenbudget"
-STANDARD_RUNDEN = 48
+STANDARD_RUNDEN = 15
 MIN_RUNDEN = 4
 MAX_RUNDEN = 48
 

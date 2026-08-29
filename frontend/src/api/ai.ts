@@ -330,6 +330,8 @@ export interface AiToolUse {
    * Ergebnis einer regionalen Satelliten- und Geo-Analyse (analyze_region).
    */
   geo_analysis?: AiRegionalAnalysis | null
+  /** Einmaliger Befehl für die bereits sichtbare Regionskarte. */
+  geo_camera?: AiGeoCameraCommand | null
   /**
    * Trefferliste einer Websuche (web_search).
    */
@@ -414,7 +416,14 @@ export interface AiRegionalAnalysis {
     scenes: AiSatelliteScene[]
     layers?: Record<string, AiSatelliteLayer>
   } | null
-  news?: Array<{ title?: string; url?: string; content?: string; published_date?: string }>
+  news?: Array<{
+    title?: string
+    url?: string
+    snippet?: string
+    description?: string
+    content?: string
+    published_date?: string
+  }>
   news_status?: 'pending' | 'available' | 'not_allowed' | 'not_configured' | 'unavailable'
   traffic?: {
     status: 'available' | 'not_configured' | 'unavailable'
@@ -431,7 +440,16 @@ export interface AiRegionalAnalysis {
     bluesky: Array<{ author: string; text: string; url: string }>
     untrusted: true
   }
-  camera?: { mode: 'overview' | 'focus' | 'detail' }
+  camera?: {
+    mode: 'overview' | 'focus' | 'detail'
+    action?: 'zoom_in' | 'zoom_out' | 'overview'
+    command_id?: string
+  }
+}
+
+export interface AiGeoCameraCommand {
+  action: 'zoom_in' | 'zoom_out' | 'overview'
+  command_id: string
 }
 
 export interface AiGuardianPolicy {

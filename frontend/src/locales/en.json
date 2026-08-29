@@ -173,7 +173,7 @@
       "title": "Worker limits",
       "description": "How much background work a single user may run concurrently. Both limits apply panel-wide; model selection is configured on each provider.",
       "maxParallel": "Workers per user",
-      "maxParallelHint": "Tasks running or waiting at the same time. A parked long-runner keeps its slot until it finishes.",
+      "maxParallelHint": "Tasks running or waiting at the same time, up to 15. A parked long-runner keeps its slot until it finishes.",
       "roundsPerWorker": "Rounds per worker",
       "roundsHint": "The maximum number of provider requests a single task may spend before it honestly gives up.",
       "saved": "Worker limits saved.",
@@ -565,7 +565,8 @@
         "worker_start": "Start worker research",
         "worker_cancel": "Cancel worker",
         "web_search": "Web search",
-        "analyze_region": "Regional and satellite analysis"
+        "analyze_region": "Regional and satellite analysis",
+        "control_region_camera": "Control map view"
       },
       "type": {
         "read": "Read access",
@@ -757,7 +758,8 @@
       "propose_restart_schedule_set": "Restart schedule prepared",
       "propose_backup_schedule_set": "Backup schedule prepared",
       "propose_file_delete": "File deletion prepared",
-      "analyze_region": "Analyzed the region and satellite data"
+      "analyze_region": "Analyzed the region and satellite data",
+      "control_region_camera": "Adjusted the map view"
     },
     "toolsRunning": {
       "ask_user": "Asking a quick question",
@@ -838,7 +840,8 @@
       "worker_frage": "Asking you a question",
       "worker_start": "Starting a worker in the background",
       "set_agent_name": "Taking on my new name",
-      "analyze_region": "Analyzing the region and satellite data"
+      "analyze_region": "Analyzing the region and satellite data",
+      "control_region_camera": "Adjusting the map view"
     },
     "errors": {
       "codes": {

@@ -173,7 +173,7 @@
       "title": "Worker-Deckel",
       "description": "Gleichzeitige Hintergrundaufgaben pro Benutzer. Beide Limits gelten panelweit; die genutzten Modelle werden am jeweiligen Anbieter konfiguriert.",
       "maxParallel": "Worker je Benutzer",
-      "maxParallelHint": "Gleichzeitig laufende oder wartende Aufträge. Ein geparkter Langläufer belegt seinen Platz, bis er fertig ist.",
+      "maxParallelHint": "Gleichzeitig laufende oder wartende Aufträge, maximal 15. Ein geparkter Langläufer belegt seinen Platz, bis er fertig ist.",
       "roundsPerWorker": "Runden je Worker",
       "roundsHint": "Anbieter-Anfragen, die ein einzelner Auftrag höchstens verbraucht, bevor er ehrlich aufgibt.",
       "saved": "Worker-Deckel gespeichert.",
@@ -565,7 +565,8 @@
         "worker_start": "Worker-Recherche starten",
         "worker_cancel": "Worker abbrechen",
         "web_search": "Web-Recherche",
-        "analyze_region": "Regions- und Satellitenanalyse"
+        "analyze_region": "Regions- und Satellitenanalyse",
+        "control_region_camera": "Kartenansicht steuern"
       },
       "type": {
         "read": "Lese-Zugriff",
@@ -721,6 +722,7 @@
       "wait_until": "Wartezeit eingeplant",
       "web_search": "Im Web gesucht",
       "analyze_region": "Region und Satellitendaten analysiert",
+      "control_region_camera": "Kartenansicht angepasst",
       "worker_antwort": "Antwort an den Worker übergeben",
       "worker_cancel": "Worker abgebrochen",
       "worker_frage": "Rückfrage gestellt",
@@ -834,6 +836,7 @@
       "wait_until": "Ich lege eine Wartezeit ein",
       "web_search": "Ich suche im Web",
       "analyze_region": "Ich analysiere die Region und Satellitendaten",
+      "control_region_camera": "Kartenansicht wird angepasst",
       "worker_antwort": "Ich gebe deine Antwort an den Worker weiter",
       "worker_cancel": "Ich halte den Worker an",
       "worker_frage": "Ich stelle dir eine Frage",

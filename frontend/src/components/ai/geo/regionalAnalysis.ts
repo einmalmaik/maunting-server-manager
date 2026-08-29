@@ -1,4 +1,4 @@
-import type { AiRegionalAnalysis, AiSatelliteLayer, AiSatelliteScene } from '@/api/ai'
+import type { AiGeoCameraCommand, AiRegionalAnalysis, AiSatelliteLayer, AiSatelliteScene } from '@/api/ai'
 
 type RecordValue = Record<string, unknown>
 
@@ -128,6 +128,8 @@ function normalizeNews(value: unknown): AiRegionalAnalysis['news'] | undefined {
     const item = {
       title: text(entry.title) || undefined,
       url: text(entry.url) || undefined,
+      snippet: text(entry.snippet) || text(entry.description) || text(entry.content) || undefined,
+      description: text(entry.description) || undefined,
       content: text(entry.content) || undefined,
       published_date: text(entry.published_date) || undefined,
     }
@@ -201,6 +203,8 @@ export function normalizeRegionalAnalysis(value: unknown): AiRegionalAnalysis | 
   }
 
   const cameraMode = value.camera && isRecord(value.camera) ? value.camera.mode : undefined
+  const cameraAction = value.camera && isRecord(value.camera) ? value.camera.action : undefined
+  const cameraCommandId = value.camera && isRecord(value.camera) ? text(value.camera.command_id) : ''
   return {
     status: value.status === 'error' ? 'error' : 'success',
     location: text(value.location) || text(value.region),
@@ -222,8 +226,43 @@ export function normalizeRegionalAnalysis(value: unknown): AiRegionalAnalysis | 
     traffic: normalizeTraffic(value.traffic),
     public_posts: normalizePublicPosts(value.public_posts),
     camera: cameraMode === 'overview' || cameraMode === 'focus' || cameraMode === 'detail'
-      ? { mode: cameraMode }
+      ? {
+          mode: cameraMode,
+          action: cameraAction === 'zoom_in' || cameraAction === 'zoom_out' || cameraAction === 'overview'
+            ? cameraAction
+            : undefined,
+          command_id: cameraCommandId || undefined,
+        }
       : undefined,
+  }
+}
+
+export function normalizeGeoCameraCommand(value: unknown): AiGeoCameraCommand | null {
+  if (!isRecord(value)) return null
+  const action = value.action
+  const commandId = text(value.command_id)
+  if (
+    (action !== 'zoom_in' && action !== 'zoom_out' && action !== 'overview') ||
+    !commandId || commandId.length > 64
+  ) {
+    return null
+  }
+  return { action, command_id: commandId }
+}
+
+export function applyGeoCameraCommand(
+  analysis: AiRegionalAnalysis | null,
+  value: unknown,
+): AiRegionalAnalysis | null {
+  const command = normalizeGeoCameraCommand(value)
+  if (!analysis || !command) return analysis
+  return {
+    ...analysis,
+    camera: {
+      mode: command.action === 'overview' ? 'overview' : (analysis.camera?.mode ?? 'focus'),
+      action: command.action,
+      command_id: command.command_id,
+    },
   }
 }
 

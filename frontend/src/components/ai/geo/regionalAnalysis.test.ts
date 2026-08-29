@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { normalizeRegionalAnalysis } from './regionalAnalysis'
+import { applyGeoCameraCommand, normalizeRegionalAnalysis } from './regionalAnalysis'
 
 describe('normalizeRegionalAnalysis', () => {
   it('überführt eine alte Koordinatenform in den stabilen Kartenvertrag', () => {
@@ -63,5 +63,35 @@ describe('normalizeRegionalAnalysis', () => {
       reddit: [{ title: 'Baustelle', snippet: 'Abfahrt gesperrt', url: 'https://example.invalid/reddit' }],
       bluesky: [],
     })
+  })
+
+  it('erhält den Kurztext regionaler Nachrichten aus dem Websuchvertrag', () => {
+    const analysis = normalizeRegionalAnalysis({
+      location: 'Moskau',
+      coordinates: { latitude: 55.7558, longitude: 37.6173 },
+      news: [{ title: 'Lagebericht', url: 'https://example.invalid', snippet: 'Der Kurztext bleibt sichtbar.' }],
+    })
+
+    expect(analysis?.news?.[0]?.snippet).toBe('Der Kurztext bleibt sichtbar.')
+  })
+
+  it('wendet einen einmaligen Kamerabefehl an, ohne die Regionaldaten zu ersetzen', () => {
+    const analysis = normalizeRegionalAnalysis({
+      location: 'Moskau',
+      coordinates: { latitude: 55.7558, longitude: 37.6173 },
+      weather: {
+        temperature_celsius: 20,
+        apparent_temperature_celsius: 20,
+        humidity_percent: 55,
+        precipitation_mm: 0,
+        wind_speed_kmh: 4,
+        condition: 'partly_cloudy',
+      },
+    })
+    const changed = applyGeoCameraCommand(analysis, { action: 'zoom_in', command_id: 'camera-1' })
+
+    expect(changed?.weather?.temperature_celsius).toBe(20)
+    expect(changed?.camera).toEqual({ mode: 'focus', action: 'zoom_in', command_id: 'camera-1' })
+    expect(applyGeoCameraCommand(analysis, { action: 'zoom_in' })).toBe(analysis)
   })
 })

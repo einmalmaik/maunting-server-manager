@@ -34,6 +34,7 @@ export interface NewsItem {
 }
 
 type RawNewsItem = Partial<NewsItem> & {
+  description?: string
   content?: string
   published_date?: string
 }
@@ -142,7 +143,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
       source: plainNewsText(item.source),
       timeAgo: plainNewsText(item.timeAgo || item.published_date),
       category: plainNewsText(item.category),
-      snippet: plainNewsText(item.snippet || item.content),
+      snippet: plainNewsText(item.snippet || item.description || item.content),
       url: safeExternalUrl(item.url),
     }))
   }, [data.news, news])

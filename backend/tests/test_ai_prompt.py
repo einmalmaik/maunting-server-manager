@@ -308,6 +308,16 @@ def test_the_brain_carries_known_facts_into_the_order() -> None:
     assert "fragst du nie erneut" in gehirn
 
 
+def test_the_brain_parallelizes_only_independent_research_goals() -> None:
+    """Die Worker-Grenze ist Kapazität, kein Auftrag zur maximalen Auffächerung."""
+    gehirn = ai_prompt.build(rolle="gehirn")
+
+    assert "kurze Lesezugriffe und `analyze_region`" in gehirn
+    assert "voneinander unabhängige, zeitintensive Rechercheziele" in gehirn
+    assert "Ein Worker steht für ein Ergebnisziel, nicht für jeden API-Aufruf" in gehirn
+    assert "Nutze nie zusätzliche Worker nur weil Plätze frei sind" in gehirn
+
+
 def test_the_brain_answers_worker_questions_from_the_conversation() -> None:
     """Eine Worker-Frage geht erst durchs Gespräch, dann zum Benutzer.
 
@@ -955,4 +965,3 @@ def test_sprachmodus_ist_natuerlich_und_nicht_monoton() -> None:
     gesprochen = ai_prompt.build(gesprochen=True)
     assert "Sprich natürlich, präzise und lebendig" in gesprochen
     assert "Beginne nicht jede Antwort mit derselben Bestätigung" in gesprochen
-

@@ -183,7 +183,7 @@ class AiWorkerPolicyUpdate(BaseModel):
     Fehlermeldung ohne Ort.
     """
 
-    max_parallel_workers: int = Field(ge=1, le=16)
+    max_parallel_workers: int = Field(ge=1, le=15)
     rounds_per_worker: int = Field(ge=4, le=48)
 
 

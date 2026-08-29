@@ -7,12 +7,14 @@ import pytest
 
 from services import ai_embedding_service
 from services.ai_intent_classifier import (
+    IntentPrediction,
     PREFETCH_TTL_SECONDS,
     SPECULATIVE_READ_TOOLS,
     PrefetchCache,
     StreamingIntentClassifier,
     is_side_effect_free,
 )
+from services.ai_voice.prefetch import VoicePrefetch
 
 
 CASES = [
@@ -75,7 +77,8 @@ def test_classifier_is_fast_after_warmup(monkeypatch):
 
 def test_allowlist_is_closed_to_read_tools():
     assert SPECULATIVE_READ_TOOLS == {
-        "analyze_region", "web_search", "calendar_read", "read_server_status", "search_memory",
+        "analyze_region", "control_region_camera", "web_search", "calendar_read",
+        "read_server_status", "search_memory",
     }
     assert not is_side_effect_free("propose_server_delete")
     assert not is_side_effect_free("calendar_create")
@@ -93,6 +96,52 @@ async def test_prefetch_cache_is_session_scoped_and_consumed():
     await task
     assert cache.get(session_id="voice-b", user_id=7, tool_name="analyze_region", arguments={"location": "Berlin"}) == (False, None)
     assert cache.get(session_id="voice-a", user_id=7, tool_name="analyze_region", arguments={"location": "Berlin"}) == (True, {"location": "Berlin"})
+
+
+@pytest.mark.asyncio
+async def test_prefetch_default_camera_matches_explicit_focus() -> None:
+    cache = PrefetchCache()
+    task = await cache.prefetch(
+        session_id="voice-a", user_id=7, tool_name="analyze_region",
+        arguments={"location": "Moskau"}, executor=lambda: {"location": "Moskau"},
+    )
+    assert task is not None
+    await task
+
+    assert cache.get(
+        session_id="voice-a",
+        user_id=7,
+        tool_name="analyze_region",
+        arguments={"location": "Moskau", "camera": "focus"},
+    ) == (True, {"location": "Moskau"})
+
+
+@pytest.mark.asyncio
+async def test_voice_prefetch_sends_completed_geo_payload_immediately() -> None:
+    messages: list[dict] = []
+
+    async def send(message: dict) -> None:
+        messages.append(message)
+
+    prefetch = VoicePrefetch(user_id=7, herkunft="panel", familie=None, senden=send)
+    prefetch.revision = 1
+    prediction = IntentPrediction(
+        intent="analyze_region",
+        confidence=0.95,
+        entities={"location": "Moskau"},
+        arguments={"location": "Moskau"},
+    )
+    result = {
+        "status": "success",
+        "location": "Moskau",
+        "coordinates": {"latitude": 55.7558, "longitude": 37.6173},
+    }
+    task = asyncio.create_task(asyncio.sleep(0, result=result))
+
+    await prefetch._beobachten(task, prediction, 1)
+
+    assert messages[-1]["prefetch_status"] == "fertig"
+    assert messages[-1]["geo_analysis"] == result
 
 
 @pytest.mark.asyncio

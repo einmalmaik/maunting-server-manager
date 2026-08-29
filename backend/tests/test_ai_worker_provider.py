@@ -220,8 +220,9 @@ class TestWorkerDeckel:
     def test_die_vorgaben_gelten_ohne_konfiguration(self, db: Session) -> None:
         assert ai_worker_limits.max_worker_je_benutzer() == ai_worker_limits.STANDARD_WORKER
         assert ai_worker_limits.rundenbudget_je_worker() == ai_worker_limits.STANDARD_RUNDEN
-        assert ai_worker_limits.STANDARD_WORKER >= 1
-        assert ai_worker_limits.STANDARD_RUNDEN >= ai_worker_limits.MIN_RUNDEN
+        assert ai_worker_limits.STANDARD_WORKER == 15
+        assert ai_worker_limits.MAX_WORKER == 15
+        assert ai_worker_limits.STANDARD_RUNDEN == 15
 
     def test_gesetzte_deckel_kommen_zurueck(self, db: Session) -> None:
         try:
@@ -233,7 +234,7 @@ class TestWorkerDeckel:
             ai_worker_limits.set_max_worker_je_benutzer(ai_worker_limits.STANDARD_WORKER)
             ai_worker_limits.set_rundenbudget_je_worker(ai_worker_limits.STANDARD_RUNDEN)
 
-    @pytest.mark.parametrize("wert", [0, -1, 17, True])
+    @pytest.mark.parametrize("wert", [0, -1, 16, True])
     def test_unsinnige_worker_zahlen_werden_abgewiesen(self, wert) -> None:
         with pytest.raises(ValueError):
             ai_worker_limits.set_max_worker_je_benutzer(wert)
@@ -266,6 +267,14 @@ def test_die_deckel_endpunkte_gehoeren_dem_betreiber(
     assert vorher.json()["max_parallel_workers"] == ai_worker_limits.STANDARD_WORKER
 
     try:
+        zu_viele = client.put(
+            "/api/ai/settings/worker",
+            json={"max_parallel_workers": 16, "rounds_per_worker": 15},
+            cookies=owner_cookies,
+            headers=_csrf(owner_cookies),
+        )
+        assert zu_viele.status_code == 422
+
         gesetzt = client.put(
             "/api/ai/settings/worker",
             json={"max_parallel_workers": 2, "rounds_per_worker": 16},

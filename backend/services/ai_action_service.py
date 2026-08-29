@@ -21,6 +21,7 @@ from pathlib import PurePosixPath
 import json
 import logging
 import re
+from uuid import uuid4
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -273,6 +274,21 @@ def _global_tool_definitions() -> list[dict]:
                 },
             },
             ["location"],
+        ))
+        optional.append(_function(
+            "control_region_camera",
+            "Steuert ausschließlich die bereits geöffnete Regionskarte, ohne "
+            "Wetter, Satellitenbilder oder Nachrichten erneut abzurufen. "
+            "Nutze dies für kurze Folgeanweisungen wie näher heranzoomen, "
+            "herauszoomen oder zur Weltübersicht wechseln.",
+            {
+                "action": {
+                    "type": "string",
+                    "enum": ["zoom_in", "zoom_out", "overview"],
+                    "description": "Relative Kamerabewegung der bereits sichtbaren Karte.",
+                },
+            },
+            ["action"],
         ))
 
     # Globales Lernen kann der Betreiber abschalten. Dann steht "global" gar
@@ -3534,10 +3550,22 @@ def _execute_analyze_region(
         news, news_status = news_future.result()
     if analysis.get("status") != "success":
         return analysis
-    analysis["camera"] = {"mode": camera}
+    analysis["camera"] = {"mode": camera, "command_id": str(uuid4())}
     analysis["news"] = news
     analysis["news_status"] = news_status
     return analysis
+
+
+def _execute_control_region_camera(db: Session, *, user: User, arguments: dict) -> dict:
+    """Erzeugt einen einmaligen, bereinigten Kamerabefehl ohne Datenabruf."""
+    if not permission_service.has_global_permission(db, user, "ai.satellite.use"):
+        raise AiActionValidationError("Kartensteuerung ist für diesen Benutzer nicht freigegeben")
+    if set(arguments) != {"action"}:
+        raise AiActionValidationError("Kartensteuerung hat ungültige Argumente")
+    action = arguments.get("action")
+    if action not in {"zoom_in", "zoom_out", "overview"}:
+        raise AiActionValidationError("Kartenaktion ist ungültig")
+    return {"action": action, "command_id": str(uuid4())}
 
 
 def _node_health(db: Session) -> dict:
@@ -3828,6 +3856,9 @@ def _execute_global_read_tool(
         return _execute_analyze_region(
             db, user=user, arguments=arguments, prefetch_session_id=prefetch_session_id,
         )
+
+    if tool_name == "control_region_camera":
+        return _execute_control_region_camera(db, user=user, arguments=arguments)
 
     if tool_name == "read_skill":
         return _execute_read_skill(db, user=user, arguments=arguments)
@@ -4386,6 +4417,9 @@ def execute_read_tool(
     if prefetch_session_id and tool_name == "analyze_region":
         if not permission_service.has_global_permission(db, user, "ai.satellite.use"):
             raise AiActionValidationError("Satelliten- und Regionsanalyse ist für diesen Benutzer nicht freigegeben")
+    elif prefetch_session_id and tool_name == "control_region_camera":
+        if not permission_service.has_global_permission(db, user, "ai.satellite.use"):
+            raise AiActionValidationError("Kartensteuerung ist für diesen Benutzer nicht freigegeben")
     elif prefetch_session_id and tool_name == "web_search":
         if not permission_service.has_global_permission(db, user, "ai.web_search.use"):
             raise AiActionValidationError("Websuche ist fuer diesen Benutzer nicht freigegeben")

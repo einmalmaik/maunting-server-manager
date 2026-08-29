@@ -131,6 +131,25 @@ describe('RegionalInfoPanel', () => {
     expect(screen.queryByText(/<strong>|<em>/)).not.toBeInTheDocument()
   })
 
+  it('zeigt die Beschreibung aus regionalen Suchtreffern', () => {
+    render(
+      <RegionalInfoPanel
+        data={{
+          ...mockData,
+          news: [{
+            title: 'Meldung aus Moskau',
+            description: 'Dieser Kurztext stammt aus dem regionalen Suchtreffer.',
+            url: 'https://example.test/moskau',
+          }],
+        }}
+        onClose={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: /Nachrichten/i }))
+    expect(screen.getByText('Dieser Kurztext stammt aus dem regionalen Suchtreffer.')).toBeInTheDocument()
+  })
+
   it('stellt die Bereiche als zugängliche Tab-Navigation bereit', () => {
     render(<RegionalInfoPanel data={mockData} onClose={vi.fn()} />)
 

@@ -24,7 +24,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { aiApi, type AiRegionalAnalysis } from '@/api/ai'
 import { wsProtokolle } from '@/api/client'
 import { wsUrl } from '@/config/api'
-import { normalizeRegionalAnalysis } from '../geo/regionalAnalysis'
+import { applyGeoCameraCommand, normalizeRegionalAnalysis } from '../geo/regionalAnalysis'
 import { AufnahmeAbbruch, starteAufnahme, type Aufnahme } from './audioAufnahme'
 import { Wiedergabe } from './audioWiedergabe'
 
@@ -471,6 +471,9 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
             setWerkzeug(name)
             const analysis = normalizeRegionalAnalysis(nachricht.geo_analysis)
             if (analysis) setGeoData(analysis)
+            if (nachricht.geo_camera) {
+              setGeoData((current) => applyGeoCameraCommand(current, nachricht.geo_camera))
+            }
           }
           break
         }
@@ -482,6 +485,9 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
           }
           const analysis = normalizeRegionalAnalysis(nachricht.geo_analysis)
           if (analysis) setGeoData(analysis)
+          if (nachricht.geo_camera) {
+            setGeoData((current) => applyGeoCameraCommand(current, nachricht.geo_camera))
+          }
           break
         }
         case 'beleg': {

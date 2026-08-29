@@ -84,6 +84,22 @@ def test_tool_result_keeps_web_results_for_voice_clients() -> None:
     }
 
 
+def test_tool_result_keeps_only_the_sanitized_camera_command() -> None:
+    command = {"action": "zoom_in", "command_id": "camera-1"}
+    frame = voice_tool_frame("tool", {
+        "tool_name": "control_region_camera",
+        "geo_camera": command,
+        "arguments": {"action": "zoom_in", "private": "must-not-leak"},
+    })
+
+    assert frame == {
+        "art": "werkzeug",
+        "name": "control_region_camera",
+        "tool_name": "control_region_camera",
+        "geo_camera": command,
+    }
+
+
 def test_tool_start_stays_immediate_and_compatible() -> None:
     frame = voice_tool_frame("tool_start", {"tool_name": "calendar_read", "spekulativ": False})
 

@@ -118,7 +118,7 @@ Browser-Mikrofon (PCM16)
   → Browser-Lautsprecher und Bildschirmtext
 ```
 
-Die Voice-Brücke entscheidet nicht über Rechte oder Aktionen. Sie übersetzt Ein- und Ausgabe. Der typisierte Broker→Voice-Vertrag projiziert nur sichere Tool-Anzeigedaten: Tool-Plan, Tool-Name, Gruppen- und Statusdaten sowie Geo- und Web-Ergebnisse. Tool-Argumente, Rohresultate und Abschriften verlassen den Broker nicht. Sie kann Beleg-Codeblöcke auf dem Bildschirm anzeigen, statt sie vorzulesen, und kann eine gesprochene Zustimmung an den bestehenden Vorschlagsfluss weitergeben.
+Die Voice-Brücke entscheidet nicht über Rechte oder Aktionen. Sie übersetzt Ein- und Ausgabe. Der typisierte Broker→Voice-Vertrag projiziert nur sichere Tool-Anzeigedaten: Tool-Plan, Tool-Name, Gruppen- und Statusdaten sowie Geo-, Kamera- und Web-Ergebnisse. Tool-Argumente, Rohresultate und Abschriften verlassen den Broker nicht. Sie kann Beleg-Codeblöcke auf dem Bildschirm anzeigen, statt sie vorzulesen, und kann eine gesprochene Zustimmung an den bestehenden Vorschlagsfluss weitergeben.
 
 ### Teiltranskripte und Intent-Prefetch
 
@@ -127,12 +127,13 @@ Der Browser kann zusätzlich `teil_transkript`-Rahmen senden. `Sprachbruecke._ve
 Aktuell ist die spekulative Allowlist bewusst klein:
 
 - `analyze_region`
+- `control_region_camera`
 - `web_search`
 - `calendar_read`
 - `read_server_status`
 - `search_memory`
 
-Nur ein Intent mit ausreichender Konfidenz und vollständigen Argumenten startet einen Prefetch. Der Cache ist pro Voice-Sitzung und Benutzer getrennt, hat zehn Sekunden TTL und wird bei Intent-/Entitätswechsel invalidiert. Ein späterer normaler Tool-Aufruf prüft Berechtigungen erneut, bevor ein Treffer zurückgegeben wird.
+Nur ein Intent mit ausreichender Konfidenz und vollständigen Argumenten startet einen Prefetch. Der Cache ist pro Voice-Sitzung und Benutzer getrennt, hat zehn Sekunden TTL und wird bei Intent-/Entitätswechsel invalidiert. Beim Regionswerkzeug gilt der im Schema definierte Standard `camera: "focus"` für den Cache als gleichwertig zu einem ausgelassenen Kamerawert. Sobald die vorab autorisierte Regionsanalyse fertig ist, erhält die Voice-Oberfläche ihre bereinigte `geo_analysis`-Nutzlast sofort; die sprachliche Antwort bleibt beim normalen Gehirn-Lauf. Ein späterer normaler Tool-Aufruf prüft Berechtigungen erneut, bevor ein Treffer zurückgegeben wird.
 
 Wichtig: Diese spekulative Schicht ist ein Zusatzpfad. Sie ist nicht die zentrale Tool-Orchestrierung aller Werkzeuge.
 
@@ -271,6 +272,7 @@ Nach einer Provider-Runde führt `ai_stream.read_tools._tool_followup_messages` 
 - Websuche;
 - Kalender-Lesezugriffe;
 - `analyze_region` für Geo, Wetter, Satellit, regionale Signale.
+- `control_region_camera` für relative Bewegungen einer bereits sichtbaren Karte ohne erneuten Datenabruf.
 
 Ein Read-Tool kann intern selbst mehrere Datenquellen kombinieren. `ai_geo_service.analyze_region` geocodiert beispielsweise WGS84-Koordinaten, lädt Wetterdaten und verbindet sie mit Sentinel-/regionalen Daten. Diese Fachparallelität gehört in den Geo-Service, nicht in das Frontend.
 
@@ -314,7 +316,7 @@ Abhängige Aktionen bleiben sequenziell: Eine Konfigurationsänderung soll nicht
 
 `ai_regional_connectors_service.py` bündelt ergänzende regionale Quellen, etwa Nachrichten, öffentliche soziale Signale oder Verkehr, soweit ein Anbieter konfiguriert bzw. öffentlich verfügbar ist. Ein leerer Bereich bedeutet nicht automatisch „normal und stabil“, sondern kann auch fehlende Quelle, fehlende Regionabdeckung oder einen Fehler bedeuten. Die UI sollte diese Zustände getrennt darstellen.
 
-Die Karten-/Globusdarstellung ist Frontend-Logik. Geo-Daten aus Tool- und Voice-Events müssen über die bestehenden WebSocket-/SSE-Nutzlasten ankommen; sonst kann der Sprachmodus die korrekten Satelliten- und Rechercheergebnisse nicht rendern.
+Die Karten-/Globusdarstellung ist Frontend-Logik. Geo-Daten und bereinigte, einmalige Kamerabefehle aus Tool- und Voice-Events müssen über die bestehenden WebSocket-/SSE-Nutzlasten ankommen; sonst kann der Sprachmodus die korrekten Satelliten- und Rechercheergebnisse nicht rendern. Orts- und Kamerakommandos verwenden dieselbe MapLibre-Instanz. Nur ein neuer expliziter Kamerabefehl bewegt sie; manuelle Maus- oder Touch-Eingriffe stoppen eine laufende automatische Fahrt.
 
 ## 7. Voice-Ausgabe und Unterbrechung
 
@@ -355,7 +357,7 @@ Leistungsrelevante Caches sind absichtlich unterschiedlich geschnitten:
 - Geo: kurzer Geocoding-Cache plus In-Flight-Deduplizierung;
 - Sentinel: Token-Cache, Single-Flight und kurzer STAC-Cache;
 - Web-/Regionalsignale: fachbezogene Kurzzeitcaches;
-- Voice-Prefetch: zehn Sekunden, nur Sitzung plus Benutzer plus exakte Argumente;
+- Voice-Prefetch: zehn Sekunden, nur Sitzung plus Benutzer plus kanonische Argumente;
 - Erinnerung: persistiert und zugriffsgeschützt, keine globale Ergebnisweitergabe.
 
 ## 10. Bekannte Architekturgrenzen
@@ -364,7 +366,7 @@ Diese Punkte sind wichtig, damit „vorhanden“ nicht mit „Ziel erreicht“ v
 
 1. **Voice hat einen Pipecat-Frame-Rand, Chat nicht:** Der Browservertrag bleibt getrennt, weil SSE und Audio unterschiedliche Transporte sind. AiRun und Broker sind der gemeinsame Kern.
 2. **STT ist pro abgeschlossener Äußerung:** VAD trennt erst eine Äußerung, danach erfolgt die Transkription. Die Teiltranskript-Schnittstelle versorgt Classifier/UI, ersetzt aber keine vollständig streamingfähige STT-Pipeline.
-3. **Intent-Prefetch ist bewusst begrenzt:** Nur fünf sichere Read-Tools sind zugelassen. Das ist sicher, aber keine generische Beschleunigung aller Tools.
+3. **Intent-Prefetch ist bewusst begrenzt:** Nur sechs sichere Read-Tools sind zugelassen. Das ist sicher, aber keine generische Beschleunigung aller Tools.
 4. **Natürliche Informationsdosierung ist vor allem Prompt-Verhalten:** Der Sprachprompt fordert kurze, direkte Antworten. Es gibt noch keinen technischen Antwortplan, der Nachrichten, Wetter, Verkehr, Social-Signale und Sehenswürdigkeiten als priorisierte Datenereignisse einzeln in die Sprechreihenfolge einsortiert.
 5. **Konzept und Code können auseinanderlaufen:** `docs/agentic-framework.md` enthält Architekturziele, die über den heute nachweisbaren Code hinausgehen. Bei einer Refactor-Entscheidung ist Code plus Tests die operative Wahrheit.
 

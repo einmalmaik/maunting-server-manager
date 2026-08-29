@@ -39,7 +39,7 @@ import { useAiLauf } from './useAiLauf'
 import { ActiveProcessesCard } from './geo/ActiveProcessesCard'
 import { RegionalAnalysisLayout } from './geo/RegionalAnalysisLayout'
 import type { NewsItem } from './geo/RegionalInfoPanel'
-import { normalizeRegionalAnalysis } from './geo/regionalAnalysis'
+import { applyGeoCameraCommand, normalizeGeoCameraCommand, normalizeRegionalAnalysis } from './geo/regionalAnalysis'
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
@@ -315,11 +315,14 @@ export function AiChat() {
 
   const manuallyClosedGeoRef = useRef(false)
   const lastSeenGeoIdRef = useRef<string | null>(null)
+  const lastSeenCameraCommandRef = useRef<string | null>(null)
   const wasAnalyzingRegionRef = useRef(false)
 
   // Automatische Aktivierung des 3D-Globus bei einer regionalen Analyse
   useEffect(() => {
-    const isAnalyzing = laufendeWerkzeuge.some((w) => w.tool_name === 'analyze_region')
+    const isAnalyzing = laufendeWerkzeuge.some(
+      (w) => w.tool_name === 'analyze_region' || w.tool_name === 'control_region_camera',
+    )
     if (isAnalyzing && !wasAnalyzingRegionRef.current) {
       manuallyClosedGeoRef.current = false
       setGeoOpen(true)
@@ -341,12 +344,12 @@ export function AiChat() {
           ) {
             const geo = normalizeRegionalAnalysis(section.werkzeug.geo_analysis)
             if (!geo) continue
-            const geoId = `${geo.location}-${geo.coordinates?.latitude}-${geo.coordinates?.longitude}`
-            setGeoData(geo)
+            const geoId = geo.camera?.command_id || `${entry.message.id}:${j}:${geo.location}`
 
             // Nur automatisch öffnen, wenn dies eine NEUE Analyse ist und der Nutzer nicht manuell geschlossen hat
             if (lastSeenGeoIdRef.current !== geoId) {
               lastSeenGeoIdRef.current = geoId
+              setGeoData(geo)
               if (!manuallyClosedGeoRef.current) {
                 setGeoOpen(true)
               }
@@ -359,6 +362,28 @@ export function AiChat() {
       }
     }
   }, [entries])
+
+  // Ein reiner Kamerabefehl verändert die vorhandene Analyse. Er ersetzt sie
+  // nicht und löst insbesondere keinen zweiten Datenabruf aus.
+  useEffect(() => {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i]
+      if (entry.kind !== 'message' || !entry.message.sections) continue
+      for (let j = entry.message.sections.length - 1; j >= 0; j--) {
+        const section = entry.message.sections[j]
+        if (section.art !== 'tool') continue
+        if (section.werkzeug?.tool_name === 'analyze_region') return
+        if (section.werkzeug?.tool_name !== 'control_region_camera') continue
+        const command = normalizeGeoCameraCommand(section.werkzeug.geo_camera)
+        if (!command || command.command_id === lastSeenCameraCommandRef.current || !geoData) return
+        lastSeenCameraCommandRef.current = command.command_id
+        setGeoData((current) => applyGeoCameraCommand(current, command))
+        manuallyClosedGeoRef.current = false
+        setGeoOpen(true)
+        return
+      }
+    }
+  }, [entries, geoData])
 
   const newsFromSearch = useMemo<NewsItem[]>(() => {
     if (!geoData?.location) return []

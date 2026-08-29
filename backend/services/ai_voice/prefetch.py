@@ -100,6 +100,7 @@ class VoicePrefetch:
             )
 
     async def _beobachten(self, task: asyncio.Task, prediction, revision: int) -> None:
+        value = None
         try:
             value = await task
             status = "fertig" if value is not None else "fehler"
@@ -109,7 +110,7 @@ class VoicePrefetch:
             status = "fehler"
         if revision != self.revision:
             return
-        await self._senden({
+        nachricht = {
             "art": "intent_erkannt",
             "intent": prediction.intent,
             "confidence": prediction.confidence,
@@ -118,7 +119,18 @@ class VoicePrefetch:
             "spekulativ": True,
             "prefetch_status": status,
             "revision": revision,
-        })
+        }
+        # Das Ergebnis ist bereits unter der Benutzeridentität ausgeführt und
+        # auf den engen Geo-Vertrag begrenzt. Es direkt zu zeigen spart die
+        # zweite Modellrunde für die Karte; gesprochen wird weiterhin nur die
+        # eigentliche Modellantwort.
+        if (
+            status == "fertig"
+            and prediction.intent == "analyze_region"
+            and isinstance(value, dict)
+        ):
+            nachricht["geo_analysis"] = value
+        await self._senden(nachricht)
 
     async def _geo_ziel_senden(self, prediction, revision: int) -> None:
         from services import ai_geo_service

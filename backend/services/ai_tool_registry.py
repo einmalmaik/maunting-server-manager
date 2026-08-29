@@ -159,6 +159,13 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "analyze_region": Werkzeug(
         "global_read", gruppe="geo", angebot=("ai.satellite.use",)
     ),
+    # Reine Steuerung einer bereits sichtbaren Karte. Das Werkzeug ruft keine
+    # Geo-, Wetter- oder Nachrichtendienste erneut ab, prueft aber dasselbe
+    # Recht wie die Regionsanalyse: ohne Kartenfreigabe gibt es auch keinen
+    # verdeckten zweiten Steuerpfad.
+    "control_region_camera": Werkzeug(
+        "global_read", gruppe="geo", angebot=("ai.satellite.use",)
+    ),
 
     # Die Doku des Panels. Kein zusaetzliches Recht: dieselben Seiten stehen
     # jedem angemeldeten Benutzer im Panel offen — ein Gate hier waere eine
@@ -875,7 +882,9 @@ def worker_ausschluss() -> frozenset[str]:
     Als Funktion nach dem Vorbild von `aufgaben_tools`: die Fallunterscheidung
     wohnt in der Registry, nicht beim Aufrufer.
     """
-    return frozenset(MEMORY_TOOLS) | WORKER_STEUERUNG | {"ask_user"}
+    return frozenset(MEMORY_TOOLS) | WORKER_STEUERUNG | {
+        "ask_user", "control_region_camera",
+    }
 
 
 # Was ein von Guardian ausgeloester Heilungslauf ueberhaupt aufrufen darf.

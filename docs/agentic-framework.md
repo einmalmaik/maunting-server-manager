@@ -239,7 +239,9 @@ Die Provider-/Modellkonfiguration bekommt statt „Standard-Modell" zwei Einträ
 | Gehirn (Orchestrator) | Modell: Betreiber · Denkstufe: **Kunde** (wie heute, aus dem Katalog) | latenzoptimiertes Chat-Modell, z. B. Luna |
 | Worker | **Betreiber** (Modell + feste Denkstufe + Deckel) | Arbeitsmodell; darf langsam und gründlich sein |
 
-- **Deckel beim Betreiber** (er zahlt): max. N Worker gleichzeitig je Benutzer, Rundenbudget je Worker.
+- **Deckel beim Betreiber** (er zahlt): standardmäßig und höchstens 15 Worker gleichzeitig je
+  Benutzer; auch wartende Worker zählen. Das Rundenbudget startet bei 15 Runden je Worker und bleibt
+  innerhalb der harten Laufgrenze konfigurierbar.
   Ohne Deckel wird „schau die Server nach, mach den Kalender, und noch drei Sachen" zum unsichtbaren
   Dauerverbraucher.
 - **Fallback:** Ist keine Worker-Rolle konfiguriert, gilt der heutige Ein-Modell-Betrieb (Gehirn =
@@ -269,6 +271,12 @@ Am Ende: Meldestelle → Chat + Mail + gesprochener Zwischenruf, wenn eine Sprac
 **Mehrere Aufträge:** „Schau nach den Servern — und kümmere dich um den Kalender" → zwei Worker,
 unabhängig, unterschiedlich schnell fertig. Ergebnisse werden gebündelt geliefert, Kanäle je Auftrag
 („die Serverliste auch per E-Mail" → `kanal` des einen Workers).
+
+**Parallele Recherche:** Die Parallelität folgt Ergebniszielen, nicht einzelnen APIs. Kurze Reads und die
+sichtbare Regionskarte bleiben beim Gehirn, damit UI-Daten ohne Umweg ankommen. Nur unabhängige, tiefere
+Rechercheziele werden in derselben Werkzeugwelle an getrennte Worker gegeben, etwa ein Web-Lagebild und
+eine ausdrücklich verlangte Fachrecherche. Freie Worker-Plätze sind kein Grund, Arbeit künstlich aufzuteilen
+oder dieselbe Abfrage doppelt auszuführen.
 
 **Rückfrage:** Worker braucht eine Entscheidung → parkt, Frage läuft mit Worker-ID über die Meldestelle,
 das Gehirn stellt sie menschlich in der nächsten Ruhephase. Die Antwort weckt genau diesen Worker.

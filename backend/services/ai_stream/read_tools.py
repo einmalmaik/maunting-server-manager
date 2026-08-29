@@ -235,6 +235,8 @@ def _anzeigeeintrag(call, wert, fehlgeschlagen: str | None) -> dict:
         eintrag["skill_learned"] = bool(wert.get("learned"))
     if call.name == "analyze_region" and isinstance(wert, dict):
         eintrag["geo_analysis"] = wert
+    if call.name == "control_region_camera" and isinstance(wert, dict):
+        eintrag["geo_camera"] = wert
     if call.name == "web_search" and isinstance(wert, dict) and isinstance(wert.get("results"), list):
         eintrag["web_results"] = wert["results"]
     return eintrag
@@ -361,6 +363,11 @@ def _gueltige_spekulative_argumente(call) -> bool:
             and isinstance(argumente.get("location"), str)
             and bool(argumente["location"].strip())
             and argumente.get("camera", "focus") in {"overview", "focus", "detail"}
+        )
+    if call.name == "control_region_camera":
+        return (
+            set(argumente) == {"action"}
+            and argumente.get("action") in {"zoom_in", "zoom_out", "overview"}
         )
     if call.name == "calendar_read":
         if set(argumente) - {"start_date", "end_date", "calendar_id"}:

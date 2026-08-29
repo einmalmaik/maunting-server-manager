@@ -67,7 +67,6 @@ export function GlobeViewer({
 
   useEffect(() => {
     setMapUnavailable(false)
-    setMapReady(false)
   }, [resolvedLatitude, resolvedLongitude])
 
   useEffect(() => {
@@ -119,6 +118,8 @@ export function GlobeViewer({
           globe
           zoom={detailZoom}
           cameraMode={data?.camera?.mode}
+          cameraAction={data?.camera?.action}
+          cameraCommandId={data?.camera?.command_id}
           onUnavailable={() => setMapUnavailable(true)}
           onReady={() => setMapReady(true)}
         />

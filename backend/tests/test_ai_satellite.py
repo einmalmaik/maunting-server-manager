@@ -49,6 +49,7 @@ def test_without_credentials_tool_is_not_offered(
 
     names = {item["function"]["name"] for item in ai_action_service.provider_tool_definitions()}
     assert "analyze_region" not in names
+    assert "control_region_camera" not in names
 
 
 def test_with_credentials_tool_appears_in_catalog(
@@ -58,6 +59,31 @@ def test_with_credentials_tool_appears_in_catalog(
 
     names = {item["function"]["name"] for item in ai_action_service.provider_tool_definitions()}
     assert "analyze_region" in names
+    assert "control_region_camera" in names
+
+
+def test_region_camera_control_is_permission_checked_and_does_not_fetch(
+    db: Session, regular_user: User,
+) -> None:
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db,
+            user=regular_user,
+            tool_name="control_region_camera",
+            arguments={"action": "zoom_in"},
+        )
+
+    _allow_satellite(db, regular_user)
+    result = ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="control_region_camera",
+        arguments={"action": "zoom_in"},
+    )
+
+    assert result["action"] == "zoom_in"
+    assert isinstance(result["command_id"], str)
+    assert result["command_id"]
 
 
 def test_store_and_retrieve_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -130,4 +156,5 @@ def test_geo_service_analyze_region(db: Session, regular_user: User, monkeypatch
     assert latest_imagery["resolution"] == "anbieterabhängig"
     assert result["news"] == []
     assert result["news_status"] == "not_allowed"
-    assert result["camera"] == {"mode": "focus"}
+    assert result["camera"]["mode"] == "focus"
+    assert isinstance(result["camera"]["command_id"], str)
