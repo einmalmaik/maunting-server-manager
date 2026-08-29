@@ -5,7 +5,7 @@
 
 # Maunting Service Manager (MSM)
 
-Maunting Service Manager (MSM) ist ein selbstgehostetes Web-Panel zur zentralen Steuerung von Game-Servern, Anwendungen und Linux-Workloads auf eigenen Servern oder VPS, ohne Notwendigkeit täglicher SSH-Eingaben.
+Maunting Service Manager (MSM) ist eine selbstgehostete Plattform für Infrastruktur und persönliche Organisation. Sie verbindet die Verwaltung von Game-Servern, Anwendungen und Linux-Workloads mit einer KI-gestützten Kommandozentrale, Kalendern, Recherche und regionalen Lageinformationen. Der Betreiber behält dabei die Kontrolle: Zugriffe, Werkzeuge und jede schreibende Aktion werden serverseitig geprüft.
 
 ---
 
@@ -56,6 +56,13 @@ Der Betreiber kann zwischen zwei Wegen wählen. Ohne OpenAI Realtime bleibt der 
 
 ### 10. Getrennte Zugangsdaten und Kubernetes
 GitHub-Token und Steam-Konten können panelweit, pro Benutzer oder pro Server hinterlegt werden. Ein Server verweist auf Zugangsdaten, statt deren Werte zu kopieren. Der Klartext ist nach dem Speichern nicht mehr auslesbar. Der Betreiber entscheidet, ob ein Server ohne eigene Zuordnung den zentralen Zugang nutzen darf. Für den Cluster-Betrieb liegen Kubernetes-Manifeste unter [`deploy/kubernetes/`](deploy/kubernetes/README.md) bereit (sie betreiben die Control Plane; Gameserver bleiben Docker-Container auf den angebundenen Nodes). **Der Standard-Self-Hosted-Betrieb funktioniert ohne beides.**
+
+### 11. KI-Kommandozentrale, Recherche und persönliche Organisation
+MSM ist mehr als ein Server-Panel. Der KI-Chat und der Sprachmodus nutzen einen zentralen, serverseitig kontrollierten Werkzeugkatalog. Die KI kann, abhängig von den erteilten Berechtigungen, Serverzustände, Logs, Dateien und Backups auswerten, Erinnerungen und Kalenderdaten einbeziehen, Webrecherchen durchführen und Aufgaben vorbereiten. Schreibende Änderungen werden als prüfbare Vorschläge ausgeführt oder benötigen eine bewusst aktivierte serverseitige Autonomie-Policy.
+
+Für regionale Fragen kombiniert die KI Geocoding, Wetter, Sentinel-Satellitendaten sowie verfügbare Verkehrs-, Nachrichten- und öffentliche soziale Signale. Die Ergebnisse erscheinen im Chat und Sprachmodus in einer interaktiven Karten- beziehungsweise Globusansicht. Satelliten- und Anbieterzugänge bleiben verschlüsselt im Backend; Rohdaten und Schlüssel werden nicht an den Browser gegeben.
+
+Mit einem aktiven OpenAI-Realtime-Zugang kann Audio direkt per WebRTC zwischen Browser oder Desktop-App und OpenAI laufen. MSM behält über einen serverseitigen Sideband-Kanal die Hoheit über Werkzeuge, RBAC, Bestätigungen, Guardian und Abrechnung. API-Schlüssel erreichen den Client nicht. Details zu Datenflüssen, Berechtigungen und den verfügbaren Werkzeugen stehen in [`docs/ai-system-architecture.md`](docs/ai-system-architecture.md).
 
 ---
 
