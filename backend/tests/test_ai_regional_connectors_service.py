@@ -9,11 +9,13 @@ from services import ai_regional_connectors_service as connectors
 class _Response:
     status_code = 200
 
-    def __init__(self, payload: dict) -> None:
+    def __init__(self, payload: dict | None = None, *, status_code: int = 200, text: str = "") -> None:
         self._payload = payload
+        self.status_code = status_code
+        self.text = text
 
     def json(self) -> dict:
-        return self._payload
+        return self._payload or {}
 
 
 def test_tomtom_traffic_uses_fixed_endpoint_and_never_returns_key(monkeypatch) -> None:
@@ -97,3 +99,32 @@ def test_public_posts_reduce_and_redact_provider_payload(monkeypatch) -> None:
     assert result["reddit"][0]["url"] == "https://www.reddit.com/r/berlin/comments/example/post/"
     assert "test@example.invalid" not in result["reddit"][0]["title"]
     assert result["bluesky"][0]["url"] == "https://bsky.app/profile/news.example/post/abc123"
+
+
+def test_reddit_uses_public_feed_when_json_access_is_blocked(monkeypatch) -> None:
+    requested: list[str] = []
+    feed = """<?xml version="1.0" encoding="UTF-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom">
+      <entry>
+        <title>Neue Sperrung im Zentrum</title>
+        <content type="html">&lt;p&gt;Details zur aktuellen Verkehrslage.&lt;/p&gt;</content>
+        <link rel="alternate" href="https://www.reddit.com/r/berlin/comments/example/lage/" />
+      </entry>
+    </feed>"""
+
+    class FakeClient:
+        @staticmethod
+        def get(url, **_kwargs):
+            requested.append(url)
+            if url == connectors._REDDIT_SEARCH_ENDPOINT:
+                return _Response(status_code=403)
+            return _Response(text=feed)
+
+    monkeypatch.setattr(connectors, "_http_client", lambda: FakeClient())
+
+    assert connectors._reddit_posts("Berlin") == [{
+        "title": "Neue Sperrung im Zentrum",
+        "snippet": "Details zur aktuellen Verkehrslage.",
+        "url": "https://www.reddit.com/r/berlin/comments/example/lage/",
+    }]
+    assert requested == [connectors._REDDIT_SEARCH_ENDPOINT, connectors._REDDIT_FEED_ENDPOINT]

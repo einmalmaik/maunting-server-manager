@@ -34,12 +34,13 @@ Die tatsächliche Berechtigung wird nicht durch den Modellprompt und nicht im Fr
 
 ### Was ist „Realtime“ in MSM?
 
-MSM besitzt zwei Echtzeit-Ränder, die denselben AI-Run nutzen:
+MSM besitzt einen Chat-Rand und zwei wählbare Voice-Transporte:
 
 - Chat: HTTP-Endpunkt startet einen Run und liefert Server-Sent Events (SSE).
-- Voice: WebSocket überträgt PCM-Audio und Statusrahmen; das Backend transkribiert, startet denselben Run und gibt Audio-/Text-/Werkzeugereignisse über den Socket zurück.
+- Legacy Voice: WebSocket überträgt PCM-Audio und Statusrahmen; das Backend transkribiert, startet denselben Run und gibt Audio-/Text-/Werkzeugereignisse zurück.
+- OpenAI Realtime: WebRTC überträgt Audio direkt zwischen Client und OpenAI. Der authentifizierte Panel-WebSocket signalisiert SDP und überträgt nur MSM-Zustände sowie bereinigte Anzeigen. Das Backend führt Werkzeuge über den Sideband-Kanal aus.
 
-Der gemeinsame Kern ist nicht der HTTP- oder WebSocket-Transport, sondern `AiRun` plus `ai_run_broker`. Deshalb kann ein Browser-Stream getrennt werden, ohne dass der Run zwangsläufig abbricht. Ein späterer Abonnent erhält zuerst einen Snapshot und anschließend die Live-Fortsetzung.
+Chat und Legacy Voice teilen `AiRun` plus `ai_run_broker`. Eine Realtime-Verbindung führt dagegen einen flüchtigen Gesprächskontext beim Anbieter und legt keine gesprochenen Nachrichten im Chat ab. Gemeinsam bleiben der serverseitige Werkzeugkatalog, die Rechteprüfung, der Vorschlagsfluss, Worker, Schwärzung und Kontingente.
 
 ## Systemübersicht
 
@@ -106,6 +107,17 @@ Das Abonnieren vor `lauf_starten` schließt ein Rennen: Der erste Text-Delta kan
 Frame-Rand; die Sitzungs-, Text-, STT-, Prefetch-, Interaktions- und
 Broker-Ausgabe-Bausteine liegen darunter in `backend/services/ai_voice/`. Sie
 eröffnen keinen zweiten Run- oder Tool-Pfad.
+
+Ist ein gültiger OpenAI-Zugang panelweit als Realtime-Standard markiert, hat er
+Vorrang vor der persönlichen Chat-Providerwahl. `realtime_session.py` erstellt
+die WebRTC-Sitzung serverseitig und verbindet anschließend einen Sideband-
+WebSocket mit derselben Call-ID. Call-ID und API-Schlüssel bleiben im Backend.
+Der Browser erhält nur die SDP-Antwort; Audio läuft danach nicht durch das
+Panel. Realtime lädt Erinnerungen und den aktuellen Systemprompt, jedoch keinen
+Chatverlauf und keine Eingabetranskription. Ohne aktive Auswahl bleibt der
+Legacy-Weg unverändert. Die Betreiberkonfiguration nutzt Modell, Stimme,
+Antwortsprache und Semantic-VAD. Bei einem Realtime-2-Modell kommt zusätzlich
+die feste Denkstufe hinzu; für Realtime-1.5 wird sie nicht gesendet.
 
 ```text
 Browser-Mikrofon (PCM16)
@@ -271,8 +283,8 @@ Nach einer Provider-Runde führt `ai_stream.read_tools._tool_followup_messages` 
 - Dokumentation und Skills;
 - Websuche;
 - Kalender-Lesezugriffe;
-- `analyze_region` für Geo, Wetter, Satellit, regionale Signale.
-- `control_region_camera` für relative Bewegungen einer bereits sichtbaren Karte ohne erneuten Datenabruf.
+- `analyze_region` für Geo, Wetter, Satellit und regionale Signale;
+- `control_region_camera` für relative Bewegungen einer bereits sichtbaren Karte. `focus_location` geocodiert nur den neuen Zielpunkt; Wetter, Satellit und Nachrichten werden nicht erneut geladen.
 
 Ein Read-Tool kann intern selbst mehrere Datenquellen kombinieren. `ai_geo_service.analyze_region` geocodiert beispielsweise WGS84-Koordinaten, lädt Wetterdaten und verbindet sie mit Sentinel-/regionalen Daten. Diese Fachparallelität gehört in den Geo-Service, nicht in das Frontend.
 
@@ -314,9 +326,9 @@ Abhängige Aktionen bleiben sequenziell: Eine Konfigurationsänderung soll nicht
 
 `ai_satellite_service.py` kapselt Copernicus Data Space Ecosystem / Sentinel. Zugangsdaten liegen verschlüsselt in den Panel-Einstellungen; Token und STAC-Suchen haben In-Memory-Caches und Single-Flight-Schutz gegen parallele identische Kaltstarts. Externe Metadaten werden vor der Modellübergabe redigiert.
 
-`ai_regional_connectors_service.py` bündelt ergänzende regionale Quellen, etwa Nachrichten, öffentliche soziale Signale oder Verkehr, soweit ein Anbieter konfiguriert bzw. öffentlich verfügbar ist. Ein leerer Bereich bedeutet nicht automatisch „normal und stabil“, sondern kann auch fehlende Quelle, fehlende Regionabdeckung oder einen Fehler bedeuten. Die UI sollte diese Zustände getrennt darstellen.
+`ai_regional_connectors_service.py` bündelt ergänzende regionale Quellen, etwa Nachrichten, öffentliche soziale Signale oder Verkehr, soweit ein Anbieter konfiguriert bzw. öffentlich verfügbar ist. Der TomTom-Schlüssel wird über die KI-Funktionen im Betreiberbereich eingerichtet, verschlüsselt gespeichert und nie an den Browser zurückgegeben. Reddit nutzt zuerst den öffentlichen JSON-Endpunkt und weicht bei blockiertem anonymem Zugriff auf den öffentlichen Atom-Feed aus. Ein leerer Bereich bedeutet nicht automatisch „normal und stabil“, sondern kann auch fehlende Quelle, fehlende Regionabdeckung oder einen Fehler bedeuten. Die UI sollte diese Zustände getrennt darstellen.
 
-Die Karten-/Globusdarstellung ist Frontend-Logik. Geo-Daten und bereinigte, einmalige Kamerabefehle aus Tool- und Voice-Events müssen über die bestehenden WebSocket-/SSE-Nutzlasten ankommen; sonst kann der Sprachmodus die korrekten Satelliten- und Rechercheergebnisse nicht rendern. Orts- und Kamerakommandos verwenden dieselbe MapLibre-Instanz. Nur ein neuer expliziter Kamerabefehl bewegt sie; manuelle Maus- oder Touch-Eingriffe stoppen eine laufende automatische Fahrt.
+Die Karten-/Globusdarstellung ist Frontend-Logik. Geo-Daten und bereinigte, einmalige Kamerabefehle aus Tool- und Voice-Events müssen über die bestehenden WebSocket-/SSE-Nutzlasten ankommen; sonst kann der Sprachmodus die korrekten Satelliten- und Rechercheergebnisse nicht rendern. Orts- und Kamerakommandos verwenden dieselbe MapLibre-Instanz. Nur ein neuer expliziter Kamerabefehl bewegt sie; manuelle Maus- oder Touch-Eingriffe stoppen eine laufende automatische Fahrt. Eine Sehenswürdigkeit in der bereits sichtbaren Region wird mit `focus_location` geocodiert und parallel über `web_search` erklärt, ohne eine zweite vollständige Regionsanalyse oder einen Worker zu starten.
 
 ## 7. Voice-Ausgabe und Unterbrechung
 

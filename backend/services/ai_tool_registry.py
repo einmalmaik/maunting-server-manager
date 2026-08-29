@@ -33,7 +33,8 @@ from dataclasses import dataclass
 # - `delegation`   — laeuft sofort im Handler, ohne Vorschlagskarte: reine
 #                    MSM-interne Orchestrierung (Gehirn↔Worker), keine
 #                    Aussenwirkung auf einen Server (docs/agentic-framework.md)
-ARTEN = ("server_read", "global_read", "server_write", "global_write", "ask", "delegation")
+# - `voice_control` — steuert nur Zustand der aktuellen Sprachsitzung
+ARTEN = ("server_read", "global_read", "server_write", "global_write", "ask", "delegation", "voice_control")
 
 
 @dataclass(frozen=True)
@@ -273,6 +274,11 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Broker-Frage) und das Park-Ziel unterscheiden sich. Kein `angebot` aus
     # demselben Grund wie bei `wait_until`.
     "worker_frage": Werkzeug("ask", gruppe="worker"),
+
+    # Nur OpenAI Realtime bekommt dieses Werkzeug. Der normale Chat und Worker
+    # schneiden `voice_control` aus ihren Rollenmengen heraus. Die Kennung des
+    # Vorschlags bleibt dabei serverseitig in genau einer Sprachsitzung.
+    "voice_resolve_latest_proposal": Werkzeug("voice_control"),
 
     # ── Schreiben: erzeugen ausschliesslich Vorschlaege ───────────────
     #
@@ -780,11 +786,10 @@ def _mit_gruppe(gruppe: str) -> set[str]:
 
 
 SERVER_READ_TOOLS = _mit_art("server_read")
-# `ask` und `delegation` fahren bewusst im Lesepfad mit: beide fassen keinen
-# Server an und brauchen keine Vorschlagskarte. `ask` wird vor der Lesephase
-# abgefangen; `delegation` laeuft ueber denselben Dispatch wie die globalen
-# Lesewerkzeuge (eigene Session, Commit, 60-s-Grenze) — genau die Umgebung,
-# die "laeuft sofort im Handler" braucht.
+# `ask` und `delegation` fahren bewusst im globalen Lesepfad mit: sie brauchen
+# keine `server_id` und erzeugen keine neue Vorschlagskarte. `voice_control`
+# bleibt davon getrennt: Es ist ausschließlich ein Realtime-Sitzungsbefehl und
+# hat keinen Handler im allgemeinen Chatlauf.
 GLOBAL_READ_TOOLS = _mit_art("global_read", "ask", "delegation")
 READ_TOOLS = SERVER_READ_TOOLS | GLOBAL_READ_TOOLS
 SERVER_WRITE_TOOLS = _mit_art("server_write")
@@ -816,6 +821,7 @@ ALWAYS_CONFIRM_TOOLS = (
 # `_mit_gruppe("worker")` abgeleitet: `wait_until` und `worker_frage` tragen
 # dieselbe Gruppe, sind aber ausdruecklich **keine** Gehirn-Werkzeuge.
 WORKER_STEUERUNG = frozenset({"worker_start", "worker_cancel", "worker_antwort"})
+VOICE_CONTROL_TOOLS = frozenset(_mit_art("voice_control"))
 
 # Was nur in einem Worker-Lauf etwas zu suchen hat.
 NUR_WORKER = frozenset({"wait_until", "worker_frage"})

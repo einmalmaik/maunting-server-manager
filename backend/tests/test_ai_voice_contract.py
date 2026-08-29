@@ -85,11 +85,17 @@ def test_tool_result_keeps_web_results_for_voice_clients() -> None:
 
 
 def test_tool_result_keeps_only_the_sanitized_camera_command() -> None:
-    command = {"action": "zoom_in", "command_id": "camera-1"}
+    command = {
+        "action": "focus_location",
+        "command_id": "camera-1",
+        "location": "Verbotene Stadt, Peking",
+        "country": "China",
+        "coordinates": {"latitude": 39.9163, "longitude": 116.3972},
+    }
     frame = voice_tool_frame("tool", {
         "tool_name": "control_region_camera",
         "geo_camera": command,
-        "arguments": {"action": "zoom_in", "private": "must-not-leak"},
+        "arguments": {"action": "focus_location", "private": "must-not-leak"},
     })
 
     assert frame == {

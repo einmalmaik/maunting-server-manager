@@ -88,6 +88,7 @@ from services.ai_tool_registry import (
     READ_TOOLS,
     SERVER_READ_TOOLS,
     SKILL_TOOLS,
+    VOICE_CONTROL_TOOLS,
     WERKZEUGE,
     WORKER_STEUERUNG,
     WRITE_TOOLS,
@@ -809,7 +810,12 @@ async def _werkzeuge_und_grenze(
     # nicht steht, soll auch dann nicht in einen unbeaufsichtigten Lauf
     # geraten, wenn der Benutzer das Recht dazu haette. Und umgekehrt darf
     # ein Eintrag dort kein Recht ersetzen, das dem Benutzer fehlt.
-    erlaubt = vorbereitung.angebotene_werkzeuge
+    # Sitzungsgebundene Sprachwerkzeuge tragen fluechtigen Realtime-Zustand
+    # (zum Beispiel den zuletzt angezeigten Vorschlag). Ein normaler Chat-,
+    # Worker- oder Guardian-Lauf besitzt diesen Zustand nicht und darf die
+    # Werkzeuge deshalb auch dann nicht sehen, wenn sie im zentralen Katalog
+    # registriert sind. Realtime fuegt sie in seiner Sitzung gezielt hinzu.
+    erlaubt = vorbereitung.angebotene_werkzeuge - VOICE_CONTROL_TOOLS
     # Der Rollenschnitt zuerst (docs/agentic-framework.md, §3): das Gehirn
     # behaelt nur Gedaechtnis und Worker-Steuerung, ein Worker verliert genau
     # diese beiden Gruppen plus `ask_user`, und der heutige Voll-Betrieb

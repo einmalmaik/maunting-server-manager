@@ -85,6 +85,23 @@ def karenz_sekunden() -> int:
 # das Signal haelt die Karenz offen, solange es eintrifft.
 
 _TIPPT: dict[int, float] = {}
+_REALTIME_AKTIV: dict[int, int] = {}
+
+
+def realtime_sitzung_start(user_id: int) -> None:
+    _REALTIME_AKTIV[user_id] = _REALTIME_AKTIV.get(user_id, 0) + 1
+
+
+def realtime_sitzung_ende(user_id: int) -> None:
+    anzahl = _REALTIME_AKTIV.get(user_id, 0) - 1
+    if anzahl > 0:
+        _REALTIME_AKTIV[user_id] = anzahl
+    else:
+        _REALTIME_AKTIV.pop(user_id, None)
+
+
+def realtime_aktiv(user_id: int) -> bool:
+    return _REALTIME_AKTIV.get(user_id, 0) > 0
 
 
 def tippen_melden(user_id: int) -> None:
@@ -98,6 +115,7 @@ def _tippt_gerade(user_id: int, karenz: int) -> bool:
 
 def zuruecksetzen_fuer_tests() -> None:
     _TIPPT.clear()
+    _REALTIME_AKTIV.clear()
 
 
 # ── Melden ────────────────────────────────────────────────────────────────
@@ -282,6 +300,26 @@ def _lieferauftrag(meldungen: list[AiMeldung]) -> str:
         "stelle ihm so, dass er es beantworten kann, und nenne dabei, um "
         "welchen Auftrag es geht. Erfinde nichts dazu.\n" + nutzlast
     )
+
+
+def realtime_meldungen_abholen(db: Session, *, user_id: int) -> str | None:
+    """Reserviert ein Meldungsbündel transaktional für eine Realtime-Sitzung."""
+    meldungen = (
+        db.query(AiMeldung)
+        .filter(AiMeldung.user_id == user_id, AiMeldung.zugestellt_at.is_(None))
+        .order_by(AiMeldung.created_at.asc())
+        .limit(MAX_BUENDEL)
+        .with_for_update(skip_locked=True)
+        .all()
+    )
+    if not meldungen:
+        return None
+    jetzt = datetime.now(timezone.utc)
+    for meldung in meldungen:
+        meldung.zugestellt_at = jetzt
+    text = _lieferauftrag(meldungen)
+    db.commit()
+    return text
 
 
 async def zustellung_anstossen(db: Session, *, user: User, ruhe_noetig: bool = True):
@@ -487,6 +525,8 @@ async def faellige_zustellungen(db: Session) -> int:
     )
     geliefert = 0
     for (user_id,) in zeilen:
+        if realtime_aktiv(user_id):
+            continue
         user = db.get(User, user_id)
         if user is None:
             continue

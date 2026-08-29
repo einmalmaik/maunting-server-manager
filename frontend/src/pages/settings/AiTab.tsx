@@ -28,6 +28,7 @@ import { AiUsageSettings } from './AiUsageSettings'
 import { AiWebSearchSettings } from './AiWebSearchSettings'
 import { AiSatelliteSettings } from './AiSatelliteSettings'
 import { AiMapTilerSettings } from './AiMapTilerSettings'
+import { AiTomTomSettings } from './AiTomTomSettings'
 
 export type AiSubTab = 'providers' | 'features' | 'limits' | 'usage'
 
@@ -325,6 +326,7 @@ export function AiTab() {
           <AiWebSearchSettings canWrite={canWrite} />
           <AiSatelliteSettings canWrite={canWrite} />
           <AiMapTilerSettings canWrite={canWrite} />
+          <AiTomTomSettings canWrite={canWrite} />
           <AiLearningSettings canWrite={canWrite} />
 
           {/* Panelweite Skills gehören zum Betreiber, nicht ins Profil eines

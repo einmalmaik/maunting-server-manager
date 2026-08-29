@@ -1,8 +1,9 @@
 /**
- * Was der KI-Chat sich zwischen zwei Besuchen merkt: das gewaehlte **Modell**
- * und die gewaehlte **Denkstufe**.
+ * Was der KI-Chat sich zwischen zwei Besuchen merkt: das gewaehlte **Modell**,
+ * die gewaehlte **Denkstufe** und welche Kartenanalyse bewusst geschlossen
+ * wurde.
  *
- * Beides gehoert nicht in die Unterhaltung: es gilt fuer die naechste Frage,
+ * Diese Werte gehoeren nicht in die Unterhaltung: sie gelten fuer den naechsten Besuch,
  * nicht fuer die vorige Antwort, und `ai_runs` haelt ohnehin fest, womit jeder
  * einzelne Lauf tatsaechlich gelaufen ist. Der Browser ist der richtige Ort —
  * es sind Einstellungen dieses Arbeitsplatzes, keine Serverwahrheit.
@@ -22,13 +23,30 @@ export const AI_CHAT_PREFERENCE_PREFIX = 'msm_ai_chat'
 export interface AiChatPreferenceKeys {
   provider: string
   reasoning: string
+  closedGeoAnalysis: string
 }
 
 export function aiChatPreferenceKeys(userId: number | string): AiChatPreferenceKeys {
   return {
     provider: `${AI_CHAT_PREFERENCE_PREFIX}:provider:${userId}`,
     reasoning: `${AI_CHAT_PREFERENCE_PREFIX}:reasoning:${userId}`,
+    closedGeoAnalysis: `${AI_CHAT_PREFERENCE_PREFIX}:closed-geo:${userId}`,
   }
+}
+
+/** Kennung der zuletzt bewusst geschlossenen Kartenanalyse, ohne Ortsdaten. */
+export function readClosedGeoAnalysis(key: string): string | null {
+  try {
+    const value = localStorage.getItem(key)
+    return value && value.length <= 128 ? value : null
+  } catch {
+    return null
+  }
+}
+
+export function writeClosedGeoAnalysis(key: string, analysisId: string): void {
+  if (!analysisId || analysisId.length > 128) return
+  schreibe(key, analysisId)
 }
 
 /**

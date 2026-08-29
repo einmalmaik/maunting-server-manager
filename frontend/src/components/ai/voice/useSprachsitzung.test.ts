@@ -90,6 +90,54 @@ describe('useSprachsitzung', () => {
     expect(sockets.instances).toHaveLength(1)
   })
 
+  it('handelt Realtime per WebRTC aus und sendet kein Mikrofon-Audio über den Panel-Socket', async () => {
+    class FakePeer {
+      static instances: FakePeer[] = []
+      localDescription: RTCSessionDescriptionInit | null = null
+      remoteDescription: RTCSessionDescriptionInit | null = null
+      ontrack: ((event: RTCTrackEvent) => void) | null = null
+      geschlossen = false
+
+      constructor() {
+        FakePeer.instances.push(this)
+      }
+
+      addTrack() {}
+      createDataChannel() { return {} }
+      async createOffer() { return { type: 'offer' as const, sdp: 'v=0\r\nrealtime-offer' } }
+      async setLocalDescription(value: RTCSessionDescriptionInit) { this.localDescription = value }
+      async setRemoteDescription(value: RTCSessionDescriptionInit) { this.remoteDescription = value }
+      close() { this.geschlossen = true }
+    }
+    const originalPeer = globalThis.RTCPeerConnection
+    ;(globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection = FakePeer
+    try {
+      const haken = renderHook(() => useSprachsitzung(undefined, 'openai_realtime'))
+      await act(() => haken.result.current.starten())
+      await act(async () => {
+        leitung().simulateOpen()
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(FakePeer.instances).toHaveLength(1)
+      expect(leitung().sent).toHaveLength(1)
+      expect(JSON.parse(leitung().sent[0])).toEqual({
+        art: 'webrtc_offer',
+        sdp: 'v=0\r\nrealtime-offer',
+      })
+      act(() => leitung().simulateMessage({ art: 'webrtc_answer', sdp: 'v=0\r\nanswer' }))
+      await waitFor(() => expect(FakePeer.instances[0].remoteDescription?.sdp).toContain('answer'))
+      act(() => haken.result.current.beenden())
+      expect(FakePeer.instances[0].geschlossen).toBe(true)
+      expect(audio.letzterStrom()?.spuren[0].gestoppt).toBe(true)
+    } finally {
+      if (originalPeer) globalThis.RTCPeerConnection = originalPeer
+      else delete (globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection
+    }
+  })
+
   it('uebernimmt den Zustand vom Server', async () => {
     const haken = await sitzung()
 
@@ -288,6 +336,30 @@ describe('useSprachsitzung', () => {
     // aber aus einem Werkzeugergebnis — hier wird nichts geglaubt, was nicht
     // dasteht.
     expect(haken.result.current.belege).toEqual([])
+  })
+
+  it('zeigt bereinigte Websuchergebnisse im Quellenbereich', async () => {
+    const haken = await sitzung()
+
+    act(() => {
+      leitung().simulateMessage({
+        art: 'werkzeug',
+        name: 'web_search',
+        web_results: [{
+          title: 'Meldung aus Moskau',
+          url: 'https://example.invalid/moskau',
+          description: 'Kurzer, bereits serverseitig bereinigter Auszug.',
+        }],
+      })
+    })
+
+    expect(haken.result.current.belege).toEqual([{
+      quelle: 'Meldung aus Moskau',
+      zeilen: [
+        'https://example.invalid/moskau',
+        'Kurzer, bereits serverseitig bereinigter Auszug.',
+      ],
+    }])
   })
 
   it('zeigt den Vorschlag an, auf den ein Ja fehlt', async () => {
@@ -603,7 +675,7 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.geoData).toBeNull()
   })
 
-  it('wendet einen Kartenbefehl auf die vorhandene Analyse an', async () => {
+  it('wendet einen Landmarkenbefehl auf die vorhandene Analyse an', async () => {
     const haken = await sitzung()
     act(() =>
       leitung().simulateMessage({
@@ -620,13 +692,20 @@ describe('useSprachsitzung', () => {
       leitung().simulateMessage({
         art: 'tool',
         tool_name: 'control_region_camera',
-        geo_camera: { action: 'zoom_in', command_id: 'camera-1' },
+        geo_camera: {
+          action: 'focus_location',
+          command_id: 'camera-1',
+          location: 'Basilius-Kathedrale, Moskau',
+          country: 'Russland',
+          coordinates: { latitude: 55.7525, longitude: 37.6231 },
+        },
       }),
     )
 
     expect(haken.result.current.geoData).toMatchObject({
-      location: 'Moskau',
-      camera: { mode: 'focus', action: 'zoom_in', command_id: 'camera-1' },
+      location: 'Basilius-Kathedrale, Moskau',
+      coordinates: { latitude: 55.7525, longitude: 37.6231 },
+      camera: { mode: 'detail', action: 'focus_location', command_id: 'camera-1' },
     })
   })
 

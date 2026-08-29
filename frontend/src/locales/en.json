@@ -289,7 +289,28 @@
       "tokenPriceConverted": "Stored as {{amount}} (billed in USD).",
       "ttsHint": "A voice access. It does not appear in the chat model picker; it reads out what the chat model answers in voice mode. Who may use it is decided by the “Talk to the AI” permission.",
       "transcriptionModel": "Model for speech",
-      "transcriptionModelHint": "Converts speech to text in voice mode (e.g. openai/gpt-transcribe or whisper-1). Left empty, voice mode remains disabled."
+      "transcriptionModelHint": "Converts speech to text for legacy voice mode and chat dictation.",
+      "realtime": {
+        "title": "OpenAI Realtime",
+        "hint": "Sends speech directly to OpenAI over WebRTC. Tools, permissions and billing remain under panel control.",
+        "enabled": "Use for Realtime voice mode",
+        "model": "Realtime model",
+        "voice": "OpenAI voice",
+        "voiceChoose": "Choose a voice …",
+        "reasoning": "Reasoning effort",
+        "reasoningOff": "No reasoning effort",
+        "reasoningHint": "Only Realtime 2 supports a reasoning effort. It stays off for Realtime 1.5.",
+        "reasoningValues": { "low": "Low", "medium": "Medium", "high": "High" },
+        "language": "Response language",
+        "auto": "Automatic",
+        "vad": "Response to speech pauses",
+        "vadValues": { "auto": "Automatic", "low": "Patient", "medium": "Balanced", "high": "Fast" },
+        "textInputPrice": "Text input per 1M tokens",
+        "textOutputPrice": "Text output per 1M tokens",
+        "audioInputPrice": "Audio input per 1M tokens",
+        "audioOutputPrice": "Audio output per 1M tokens",
+        "legacyPaused": "While this access is active, voice mode does not use ElevenLabs, Pipecat or the transcription model."
+      }
     },
     "profile": {
       "title": "AI assistant",
@@ -451,6 +472,9 @@
       "noResponse": "No response received.",
       "failed": "This response could not be completed.",
       "placeholder": "Enter a message …",
+      "dictationStart": "Dictate message",
+      "dictationStop": "Stop recording",
+      "dictationError": "The recording could not be transcribed.",
       "message": "Message",
       "send": "Send",
       "noProvider": "No provider is available. Add your own API key in your profile or ask an administrator to configure one.",
@@ -759,7 +783,8 @@
       "propose_backup_schedule_set": "Backup schedule prepared",
       "propose_file_delete": "File deletion prepared",
       "analyze_region": "Analyzed the region and satellite data",
-      "control_region_camera": "Adjusted the map view"
+      "control_region_camera": "Adjusted the map view",
+      "voice_resolve_latest_proposal": "Voice confirmation processed"
     },
     "toolsRunning": {
       "ask_user": "Asking a quick question",
@@ -841,7 +866,8 @@
       "worker_start": "Starting a worker in the background",
       "set_agent_name": "Taking on my new name",
       "analyze_region": "Analyzing the region and satellite data",
-      "control_region_camera": "Adjusting the map view"
+      "control_region_camera": "Adjusting the map view",
+      "voice_resolve_latest_proposal": "Processing voice confirmation"
     },
     "errors": {
       "codes": {
@@ -1058,6 +1084,21 @@
       "removeConfirm": "Remove the MapTiler configuration?",
       "hint": "Create a new browser key in MapTiler and restrict it to this panel's domain. Do not use the default key for this.",
       "errors": { "load": "Could not load MapTiler status", "save": "Could not save MapTiler configuration" }
+    },
+    "tomtom": {
+      "title": "Traffic data (TomTom)",
+      "description": "TomTom provides current traffic flow for the selected map location.",
+      "apiKey": "TomTom API key",
+      "placeholder": "Paste API key",
+      "configured": "API key saved",
+      "saved": "TomTom configuration saved",
+      "removed": "TomTom configuration removed",
+      "removeConfirm": "Remove the TomTom configuration?",
+      "hint": "The key is encrypted in the backend and is never returned to the browser.",
+      "errors": {
+        "load": "Could not load TomTom status",
+        "save": "Could not save TomTom configuration"
+      }
     },
     "geo": {
       "panelTitle": "Regional information overview",
@@ -3679,14 +3720,14 @@
     },
     "voice": {
       "title": "Voice mode",
-      "intro": "Speak with the AI instead of typing: the same agent, same run, same tools, and permissions. Standard chat execution with speech-to-text and text-to-speech converters. Switch via the top-right toggle on the AI page.",
+      "intro": "Voice mode has two operating modes. OpenAI Realtime speaks directly over WebRTC; without an active Realtime selection, the existing transcription, chat model, Pipecat, and ElevenLabs flow remains in place.",
       "access": {
         "title": "What has to be configured",
-        "body": "Two components: A chat provider (OpenRouter or OpenAI) with a spoken-word model, plus a second provider of type “ElevenLabs (Voice)” with key, model, and Voice ID. The reverse proxy must allow microphone access via Permissions-Policy microphone=(self)."
+        "body": "Realtime needs an enabled OpenAI provider with a key, Realtime model, built-in voice, and all four prices. Legacy instead needs a transcription model and an ElevenLabs provider. The reverse proxy must allow microphone=(self), WebSocket upgrades, and WebRTC connections."
       },
       "model": {
         "title": "Models and voice",
-        "body": "Speech recognition: A transcription model (e.g. openai/gpt-transcribe via /audio/transcriptions). Voice output: eleven_flash_v2_5. The Voice ID is taken from your ElevenLabs library."
+        "body": "OpenAI Realtime uses the selected Realtime model and a built-in OpenAI voice. Legacy uses the chat provider's transcription model and the ElevenLabs provider's voice. Enabling Realtime does not delete ElevenLabs; it only bypasses it for those sessions."
       },
       "permission": {
         "title": "Permission ai.voice.use",
@@ -3698,15 +3739,15 @@
       },
       "quota": {
         "title": "Quota",
-        "body": "Each voice utterance counts as one request, identical to a typed chat message. Token and cost limits apply just like in chat."
+        "body": "A Realtime session occupies one concurrent operation. Every completed model response increments provider requests; text and audio tokens in both directions are recorded separately. Legacy continues to account for transcription and chat execution as before."
       },
       "relay": {
-        "title": "Audio travels through the panel",
-        "body": "Data flow: Browser → Panel → Provider. API keys remain strictly within the panel backend."
+        "title": "WebRTC with sideband",
+        "body": "With OpenAI Realtime, audio travels directly between the client and OpenAI. The panel negotiates the connection and controls tools and permissions over sideband. Neither the API key nor call ID reaches the client. Legacy audio still travels through the panel."
       },
       "pipeline": {
         "title": "Voice frames in the panel",
-        "body": "Pipecat orders audio and safe control frames inside the existing panel process. It opens no separate port, stores no recordings and receives no provider keys. Transcription, tools and voice output remain MSM services."
+        "body": "Pipecat remains part of legacy mode. OpenAI Realtime uses native browser WebRTC APIs without another SDK. The panel WebSocket carries signaling, status, and redacted map, source, and proposal data only."
       },
       "spokenLimit": "Server deletion and backup restores can be confirmed by voice if allowed by the operator. Spoken approvals are logged in the audit trail."
     }
@@ -3942,6 +3983,7 @@
           "attachments": "Approved text, configuration, log, and image attachments are size- and type-checked, stored encrypted in the panel, and transferred with the conversation to the selected model provider",
           "autonomy": "Autonomous mode is optional and must be granted explicitly, per server or panel-wide; granted actions run without a further prompt but are still checked against the user's permissions unchanged and are recorded in full in the audit log as executed automatically",
           "tools": "When tools are used, limited and redacted excerpts from server logs, configuration files, mod and backup lists and Guardian incidents may be transmitted to the model provider; these results are stored for follow-up questions in the same chat and are deleted together with the chat",
+          "voice": "Voice mode: in legacy mode, microphone audio passes through the panel for transcription and reply text is additionally sent to ElevenLabs. With OpenAI Realtime enabled, microphone audio is sent directly to OpenAI over WebRTC while the panel connects in parallel for tool control and accounting. Spoken turns are not stored as chat messages in this mode. The OpenAI key and call ID remain in the backend.",
           "guardian": "With autonomy granted, a Guardian incident can trigger processing while the user is not present: the incident type, its status and the server data already shared with the assistant are transmitted; log excerpts are additionally stripped of public IP addresses and email addresses. Usage and responsibility remain with the grantor. The result report sent by email contains model-generated text.",
           "tasks": "A standing task created in chat or in the task list (“AI task”) stores its name, instruction, schedule, time zone and delivery channel, and triggers processing at the agreed time while the user is not present. It runs in the background with the permissions and quota of whoever created it; on each due run the instruction and the server data it retrieves are transmitted to the selected model provider. On request the result is additionally sent by email to the stored address and contains model-generated text. Tasks can be listed, paused and deleted from the chat and the task list at any time.",
           "mailboxes": "Linked email mailboxes (IMAP / SMTP): Stored credentials (passwords, app passwords, or OAuth tokens) are encrypted with DIS AES-256-GCM and never leave the panel in plaintext. Emails are searched or read solely upon your explicit instruction. The AI assistant never sends emails autonomously: every email transmission is presented in the chat as an action proposal card with subject, recipient, and content, and is only sent after your explicit confirmation.",
@@ -3955,7 +3997,7 @@
           "computerUse": "Computer-Use & Desktop Control (disabled by default): Computer-Use is completely deactivated upon installation. Only after your explicit activation in the settings and confirmation of the educational dialog can the AI control mouse and keyboard or inspect the screen. With autonomous mode disabled, every single action requires manual on-screen confirmation.",
           "wakeword": "Wake word (off by default): once enabled, the app continuously reads the microphone and compares what it hears against a reference model, entirely on the machine with no network connection. Until the word is recognised, not a single audio sample leaves the process, and nothing is recorded. Continuous listening creates a measurable CPU load (roughly one sixth of a core).",
           "wakewordAufnahmen": "Calibration voice recordings: to train the model you speak your chosen name several times. These are real voice recordings and are kept indefinitely as WAV files in the local app data directory, together with the reference model derived from them. They are never transmitted. They are removed by “Reset” in the wake word settings or by uninstalling.",
-          "sprachsitzung": "Voice session & pause detection: only after the wake word is recognised (or after the voice shortcut is pressed) does the app open the audio channel to the panel and transmit your utterance. Pause detection and dynamic cadence adaptation occur ephemerally in the backend's memory. The panel forwards audio to the configured model provider for transcription; the spoken reply is additionally produced by a speech provider. From that point the statements in section 6 about external model providers apply.",
+          "sprachsitzung": "Voice session: only after the wake word is recognised or the voice shortcut is pressed does the app open an audio channel. In legacy mode it runs through the panel, where pause detection is ephemeral before audio and reply text reach the configured providers. With OpenAI Realtime, the app connects directly to OpenAI over WebRTC while the panel remains responsible for permissions, tools, and accounting through a separate control channel.",
           "benachrichtigungen": "Background service and notifications: On mobile devices (Android) and Windows, the app can run in the background to listen for the trained wake word and deliver notifications. While in the background, the system displays a notification in the status bar (“Background service active”). Audio data is processed purely locally on the device and never leaves it without wake word trigger. Push notifications for calendar reminders and AI replies can be managed and disabled independently via the notification bell in the panel and the app at any time.",
           "autostart": "Autostart and background monitoring (enabled by default, can be disabled at any time): On Windows and Android, the application can start automatically in the background on system boot or phone startup to continuously monitor server incidents and due calendar appointments, delivering notifications directly to the system tray or Android status bar (heads-up banner). Requests are made directly to your own MSM instance without third-party relay servers. Autostart can be disabled at any time in the app settings under 'Device Integration' (Windows) or 'Run on phone startup' (Android).",
           "bildschirm": "Screenshots: the AI can look at the main screen. The image is downscaled, never written to disk, and transmitted as a tool result to the panel, which stores it encrypted and passes it to the model provider. The provider therefore sees everything visible at that moment, including other windows, messages and open documents. An indicator lights up at the edge of the screen for every capture; it cannot be switched off.",

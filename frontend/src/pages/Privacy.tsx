@@ -73,6 +73,7 @@ export function Privacy() {
           // ausloest. Das gehoert ausdruecklich in den Datenschutzhinweis.
           t('privacyPolicy.sections.ai.items.autonomy'),
           t('privacyPolicy.sections.ai.items.tools'),
+          t('privacyPolicy.sections.ai.items.voice'),
           // Die Kopplung an die Guardian-Engine: seit ihr kann eine
           // Verarbeitung beginnen, ohne dass jemand am Panel sitzt. Das ist die
           // eine Aussage, die aus keinem der anderen Punkte folgt — alle

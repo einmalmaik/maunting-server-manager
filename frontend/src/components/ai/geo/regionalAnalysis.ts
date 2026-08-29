@@ -228,7 +228,8 @@ export function normalizeRegionalAnalysis(value: unknown): AiRegionalAnalysis | 
     camera: cameraMode === 'overview' || cameraMode === 'focus' || cameraMode === 'detail'
       ? {
           mode: cameraMode,
-          action: cameraAction === 'zoom_in' || cameraAction === 'zoom_out' || cameraAction === 'overview'
+          action: cameraAction === 'zoom_in' || cameraAction === 'zoom_out' ||
+            cameraAction === 'overview' || cameraAction === 'focus_location'
             ? cameraAction
             : undefined,
           command_id: cameraCommandId || undefined,
@@ -242,12 +243,38 @@ export function normalizeGeoCameraCommand(value: unknown): AiGeoCameraCommand | 
   const action = value.action
   const commandId = text(value.command_id)
   if (
-    (action !== 'zoom_in' && action !== 'zoom_out' && action !== 'overview') ||
+    (
+      action !== 'zoom_in' && action !== 'zoom_out' &&
+      action !== 'overview' && action !== 'focus_location'
+    ) ||
     !commandId || commandId.length > 64
   ) {
     return null
   }
-  return { action, command_id: commandId }
+  if (action !== 'focus_location') return { action, command_id: commandId }
+
+  if (!isRecord(value.coordinates)) return null
+  const latitude = finiteNumber(value.coordinates.latitude)
+  const longitude = finiteNumber(value.coordinates.longitude)
+  if (
+    latitude === null || longitude === null ||
+    latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180
+  ) {
+    return null
+  }
+  const location = text(value.location)
+  if (!location) return null
+  return {
+    action,
+    command_id: commandId,
+    location,
+    country: text(value.country) || undefined,
+    coordinates: {
+      latitude,
+      longitude,
+      bbox: normalizeBbox(value.coordinates.bbox, latitude, longitude),
+    },
+  }
 }
 
 export function applyGeoCameraCommand(
@@ -258,8 +285,19 @@ export function applyGeoCameraCommand(
   if (!analysis || !command) return analysis
   return {
     ...analysis,
+    ...(command.action === 'focus_location' && command.coordinates
+      ? {
+          location: command.location ?? analysis.location,
+          country: command.country ?? analysis.country,
+          coordinates: command.coordinates,
+        }
+      : {}),
     camera: {
-      mode: command.action === 'overview' ? 'overview' : (analysis.camera?.mode ?? 'focus'),
+      mode: command.action === 'overview'
+        ? 'overview'
+        : command.action === 'focus_location'
+          ? 'detail'
+          : (analysis.camera?.mode ?? 'focus'),
       action: command.action,
       command_id: command.command_id,
     },

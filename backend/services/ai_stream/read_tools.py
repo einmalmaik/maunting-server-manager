@@ -330,6 +330,52 @@ def _werkzeug_ausfuehren(
     return _ergebnis_schwaerzen(wert, freitext=call.name in _FREITEXT_WERKZEUGE), None
 
 
+def voice_werkzeug_ausfuehren(
+    user_id: int,
+    call,
+    *,
+    conversation_id: str | None = None,
+    herkunft: str = "panel",
+    familie: str | None = None,
+) -> tuple[object, str | None, dict, list[dict]]:
+    """Gemeinsamer, autoritativer Werkzeugpfad für Voice-Transporte.
+
+    Realtime bekommt keinen zweiten Katalog und keinen verkürzten RBAC-Pfad.
+    Das Ergebnis ist bereits am bestehenden Choke Point geschwärzt; die
+    Anzeigeprojektion enthält weiterhin keine Argumente oder Rohresultate.
+    """
+    from services.ai_tool_registry import CHAT_INTERACTION_TOOLS, WRITE_TOOLS
+
+    if call.name in WRITE_TOOLS:
+        if call.name not in CHAT_INTERACTION_TOOLS or not conversation_id:
+            fehler = "Das Gehirn delegiert Server-Aktionen an einen Worker"
+            wert = {"error": fehler}
+            return wert, fehler, _anzeigeeintrag(call, wert, fehler), []
+        # Dieselbe Vorschlagserzeugung wie im Chat. Es entstehen keine
+        # Chatnachrichten; die Unterhaltung dient nur als Besitzergrenze für
+        # Karte, Audit und spätere Bestätigung.
+        from services.ai_stream.write_tools import _persist_write_proposals
+
+        vorschlaege = _persist_write_proposals(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            tool_calls=[call],
+            correlation_id=str(uuid4()),
+            run_id=None,
+        )
+        fehler = next(
+            (str(v.get("error")) for v in vorschlaege if v.get("error")),
+            None,
+        )
+        wert = {"proposals": vorschlaege}
+        return wert, fehler, _anzeigeeintrag(call, wert, fehler), vorschlaege
+
+    wert, fehler = _werkzeug_ausfuehren(
+        user_id, call, herkunft=herkunft, familie=familie
+    )
+    return wert, fehler, _anzeigeeintrag(call, wert, fehler), []
+
+
 def _gueltige_spekulative_argumente(call) -> bool:
     """Prueft nur die enge, nebenwirkungsfreie Vorstart-Allowlist.
 
@@ -365,10 +411,14 @@ def _gueltige_spekulative_argumente(call) -> bool:
             and argumente.get("camera", "focus") in {"overview", "focus", "detail"}
         )
     if call.name == "control_region_camera":
-        return (
-            set(argumente) == {"action"}
-            and argumente.get("action") in {"zoom_in", "zoom_out", "overview"}
-        )
+        action = argumente.get("action")
+        if action == "focus_location":
+            return (
+                set(argumente) == {"action", "location"}
+                and isinstance(argumente.get("location"), str)
+                and bool(argumente["location"].strip())
+            )
+        return set(argumente) == {"action"} and action in {"zoom_in", "zoom_out", "overview"}
     if call.name == "calendar_read":
         if set(argumente) - {"start_date", "end_date", "calendar_id"}:
             return False

@@ -5,6 +5,11 @@ const mapHarness = vi.hoisted(() => ({
   configs: [] as Array<{ center: [number, number]; zoom: number }>,
   flyTos: [] as Array<{ center: [number, number]; zoom: number; duration: number }>,
   markerTargets: [] as Array<[number, number]>,
+  dragPanEnables: 0,
+  scrollZoomEnables: 0,
+  touchZoomEnables: 0,
+  trackpadZoomRates: [] as number[],
+  wheelZoomRates: [] as number[],
   stops: 0,
   getMapTilerMapConfig: vi.fn(),
 }))
@@ -16,6 +21,13 @@ vi.mock('@/api/ai', () => ({
 vi.mock('maplibre-gl', () => {
   class Map {
     private zoom: number
+    dragPan = { enable: () => { mapHarness.dragPanEnables += 1 } }
+    scrollZoom = {
+      enable: () => { mapHarness.scrollZoomEnables += 1 },
+      setZoomRate: (rate: number) => { mapHarness.trackpadZoomRates.push(rate) },
+      setWheelZoomRate: (rate: number) => { mapHarness.wheelZoomRates.push(rate) },
+    }
+    touchZoomRotate = { enable: () => { mapHarness.touchZoomEnables += 1 } }
 
     constructor(config: { center: [number, number]; zoom: number }) {
       mapHarness.configs.push(config)
@@ -55,6 +67,11 @@ describe('MapTilerDetailMap', () => {
     mapHarness.configs.length = 0
     mapHarness.flyTos.length = 0
     mapHarness.markerTargets.length = 0
+    mapHarness.dragPanEnables = 0
+    mapHarness.scrollZoomEnables = 0
+    mapHarness.touchZoomEnables = 0
+    mapHarness.trackpadZoomRates.length = 0
+    mapHarness.wheelZoomRates.length = 0
     mapHarness.stops = 0
     vi.clearAllMocks()
   })
@@ -78,6 +95,11 @@ describe('MapTilerDetailMap', () => {
 
     await waitFor(() => expect(onReady).toHaveBeenCalledOnce())
     expect(mapHarness.configs[0]?.center).toEqual([13.405, 52.52])
+    expect(mapHarness.dragPanEnables).toBe(1)
+    expect(mapHarness.scrollZoomEnables).toBe(1)
+    expect(mapHarness.touchZoomEnables).toBe(1)
+    expect(mapHarness.trackpadZoomRates).toEqual([1 / 50])
+    expect(mapHarness.wheelZoomRates).toEqual([1 / 120])
   })
 
   it('meldet eine nicht konfigurierte Detailkarte genau einmal und lässt den Fallback zu', async () => {
@@ -215,5 +237,30 @@ describe('MapTilerDetailMap', () => {
 
     await waitFor(() => expect(mapHarness.flyTos[mapHarness.flyTos.length - 1]?.center).toEqual([37.6173, 55.7558]))
     expect(mapHarness.configs).toHaveLength(1)
+  })
+
+  it('fokussiert eine Sehenswürdigkeit direkt auf Straßenebene', async () => {
+    mapHarness.getMapTilerMapConfig.mockResolvedValue({
+      configured: true,
+      style_url: 'https://maps.example.test/style.json',
+    })
+
+    render(
+      <MapTilerDetailMap
+        latitude={39.9163}
+        longitude={116.3972}
+        locationName="Verbotene Stadt, Peking"
+        globe
+        cameraMode="detail"
+        cameraAction="focus_location"
+        cameraCommandId="landmark-1"
+        onUnavailable={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(mapHarness.flyTos[mapHarness.flyTos.length - 1]).toMatchObject({
+      center: [116.3972, 39.9163],
+      zoom: 16,
+    }))
   })
 })

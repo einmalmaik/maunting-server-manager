@@ -48,9 +48,10 @@ Die KI soll sich wie ein menschlicher Assistent verhalten:
 6. **Projektgesetze:** KISS vor Cleverness, RBAC-Wahrheit nur im Backend, Vorschlags-/Bestätigungsfluss
    wird nie umgangen, keine Secrets in Logs/Toasts/Mails, Datenminimierung. **Die KI kann — egal in
    welcher Rolle — immer nur das, was der Benutzer selbst kann.**
-7. **Chat = Realtime.** Beides ist dasselbe System mit denselben Modellen und Läufen; der Sprachmodus ist
-   nur die Stimmschicht davor (heute schon so gebaut: die Sprachbrücke startet denselben Lauf wie der
-   Chat). Jede Regel in diesem Dokument gilt für beide identisch.
+7. **Gemeinsame Regeln, zwei Laufarten.** Chat und Legacy Voice verwenden dieselben Modelle und
+   `AiRun`-Läufe. Der optionale OpenAI-Realtime-Modus hält seinen Gesprächskontext flüchtig bei OpenAI,
+   verwendet aber denselben zentralen Werkzeugkatalog, dieselben Rollen, Worker, RBAC-, Guardian-,
+   Vorschlags- und Schwärzungsdienste. Gesprochene Realtime-Sätze werden nicht in den Chat geschrieben.
 
 ## 3. Das Rollenmodell
 

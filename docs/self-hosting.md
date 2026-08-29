@@ -1139,8 +1139,11 @@ handelnde Aufträge kommt `ai.autonomous.use` samt Freigabe dazu.
 
 ## Sprachmodus (mit der KI reden)
 
-Derselbe Agent, dieselbe Unterhaltung, dieselben Werkzeuge — nur gesprochen
-statt getippt. Reinreden bricht die Antwort der KI ab, wie bei einem Menschen.
+Der Sprachmodus hat zwei wählbare Architekturen. Ohne OpenAI-Realtime-Auswahl
+bleibt der bestehende Legacy-Ablauf unverändert. Ist ein OpenAI-Zugang panelweit
+für Realtime aktiviert, führt OpenAI einen flüchtigen Sprachkontext; Werkzeuge,
+Rechte, Guardian, Worker und Abrechnung bleiben unter Kontrolle des Backends.
+Reinreden bricht die laufende Antwort in beiden Modi ab.
 
 **Es ist ein eigener Modus, kein Zusatz neben dem Chat.** Oben rechts auf der
 KI-Seite steht *Realtime-Modus*; ein Klick, und der Chat weicht einer Kugel, die
@@ -1149,9 +1152,10 @@ sich zum gesprochenen Wort bewegt. Zurück geht es über *Text-Modus* oder mit
 man weiss nicht, wohin man schaut, und das Textfeld verspricht eine Eingabe, die
 gerade niemand benutzt.
 
-Der Chat ist dabei einen Klick weit weg, nicht gelöscht — es ist dieselbe
-Unterhaltung, und wer mitten im Gespräch hinüberwechselt, liest dort weiter, was
-er eben gehört hat.
+Der Chat ist dabei einen Klick weit weg und wird nicht gelöscht. Legacy Voice
+nutzt weiterhin denselben Chatlauf. Realtime speichert weder die gesprochenen
+Sätze noch Antworten als Chatnachrichten; der Kontext lebt nur bis zum Ende der
+Verbindung.
 
 **Bestätigt wird gesprochen.** Eine Schreibaktion erzeugt denselben Vorschlag wie
 im Chat, aber ohne Knopf: die KI sagt, was sie vorhat, ein *Ja* führt es aus,
@@ -1160,7 +1164,35 @@ gesprochen ist „ich lösche dann mal den Server" eindeutig genug, um zuzustimm
 und zu ungenau, um zu wissen, welchen. Das gilt auch für Löschen und
 Backup-Einspielen; der Sprachmodus kennt keine Aktion, die er dem Chat vorbehält.
 
-### Ein zweiter Anbieterzugang, und warum
+### OpenAI Realtime oder Legacy
+
+Unter *Einstellungen → KI → Anbieter* kann genau ein aktiver OpenAI-Zugang mit
+*Für Realtime-Sprachmodus verwenden* markiert werden. Er braucht einen
+OpenAI-Schlüssel, ein Realtime-Modell, eine der eingebauten Stimmen, die
+Antwortsprache beziehungsweise *Automatisch*, Semantic-VAD-Empfindlichkeit und
+vier bewusst gepflegte Preise je eine Million Tokens: Text-Eingabe,
+Text-Ausgabe, Audio-Eingabe und Audio-Ausgabe. `marin` und `cedar` sind in der
+Auswahl empfohlen, werden aber nie automatisch gesetzt. Verfügbar sind
+`alloy`, `ash`, `ballad`, `coral`, `echo`, `sage`, `shimmer`, `verse`, `marin`
+und `cedar`. Custom Voices und Live Translation gehören nicht zu diesem Modus.
+Der Modellkatalog enthält die Realtime-1.5- und Realtime-2-Reihe. Für ein
+Realtime-2-Modell kann der Betreiber zusätzlich die Denkstufe *Niedrig*,
+*Mittel* oder *Hoch* wählen; bei Realtime-1.5 ist diese Auswahl deaktiviert und
+wird nicht an die API übertragen.
+
+Die Aktivierung ersetzt eine bisherige Realtime-Auswahl atomar. Wird der Zugang
+deaktiviert, gelöscht oder unvollständig, fällt die Auswahl weg und neue
+Sitzungen verwenden wieder Legacy. Eine bereits gestartete Realtime-Sitzung
+wechselt bei einem Fehler dagegen nicht still zu ElevenLabs.
+
+Realtime nutzt unabhängig von der persönlichen Chat-Providerwahl immer diesen
+panelweiten Zugang. ElevenLabs und das Transkriptionsmodell bleiben gespeichert,
+werden in Realtime-Sitzungen aber weder aufgerufen noch berechnet. Das
+Transkriptionsmodell kann weiterhin den Mikrofonknopf im Texteingabefeld
+bedienen: Die Aufnahme wird nur transkribiert, an der Cursorposition eingefügt
+und nie automatisch gesendet.
+
+#### Legacy: zwei Anbieterzugänge
 
 Der Sprachmodus benutzt **dasselbe Modell wie der getippte Chat**. Es denkt,
 ruft Werkzeuge, legt Vorschläge an — genau wie sonst. Davor und dahinter stehen
@@ -1170,12 +1202,10 @@ zwei Wandler:
 Mikrofon ─► Gehör (Chatanbieter) ─► derselbe Chatlauf ─► Stimme (ElevenLabs) ─► Lautsprecher
 ```
 
-Hier stand bis zum 16.08.2026 OpenAIs Realtime-API — ein **zweites** Modell, das
-selbst sprach und dafür einen eigenen Werkzeuglauf, eine eigene Bestätigung und
-ein eigenes Gedächtnis neben denen des Chats brauchte. Zwei Wege, die dasselbe
-Panel bedienen durften, hiess: jeder Befund musste zweimal behoben werden, und
-beim zweiten Mal regelmässig anders. Der Sprachmodus kann seitdem alles, was der
-Chat kann, weil er der Chat ist.
+Dieser Weg bleibt für Betreiber erhalten, die ihre bestehende Modellwahl und
+ElevenLabs-Stimme nutzen möchten oder keine direkte Audioverbindung zu OpenAI
+zulassen. Pipecat ordnet dabei ausschließlich Audio- und Steuerframes; die
+fachliche Ausführung bleibt im normalen Chatlauf.
 
 Der Betreiber braucht dafür zweierlei. Erstens **an einem Chatzugang** —
 OpenRouter oder OpenAI — ein Modell, das zuhört:
@@ -1282,7 +1312,7 @@ werden.
 > vorbehalten; standardmässig routet der Dienst global. Das gehört in die
 > Datenschutzerklärung des Betreibers.
 
-**Ohne beide Zugänge gibt es keinen Sprachknopf.** Nicht ausgegraut, sondern gar
+**Ohne Realtime-Zugang und ohne beide Legacy-Zugänge gibt es keinen Sprachknopf.** Nicht ausgegraut, sondern gar
 nicht — dieselbe Regel wie bei der Websuche, die ohne Schlüssel nicht einmal im
 Werkzeugkatalog steht. „Beide" heisst dabei vollständig: ein Chatzugang ohne
 hörendes Modell zählt so wenig wie ein ElevenLabs-Zugang ohne Stimme — und ein
@@ -1346,6 +1376,16 @@ die Deutung — ein Codeblock ist vorgelesen nichts als Satzzeichen.
 
 ### Kontingent
 
+Im Realtime-Modus belegt jede Sitzung eine logische Anfrage und einen
+gleichzeitigen Vorgang. Jede abgeschlossene OpenAI-Antwort erhöht die Zahl der
+Provideranfragen. Text- und Audiotokens werden für Ein- und Ausgabe getrennt
+gespeichert und mit den vier hinterlegten Preisen bewertet. Cached Input wird
+zum jeweiligen normalen Eingabepreis berechnet. Vor Sitzungsbeginn und nach
+jeder Antwort gelten dieselben Rollenlimits wie im Chat; Antworten sind
+serverseitig auf 512 Ausgabetokens begrenzt.
+
+Die folgende Abrechnung beschreibt den Legacy-Modus:
+
 **Jede Äusserung sind zwei Buchungen.** Das ist der eine Punkt, an dem sich für
 den Betreiber etwas geändert hat: wo eine Sprachsitzung früher **eine** Buchung
 war, bucht jetzt jeder Zug zweimal — einmal die Abschrift des Gesprochenen,
@@ -1380,6 +1420,26 @@ Minute* und über `ai.voice.use` — nicht über die Tokengrenze allein.
 
 ### Was technisch passiert
 
+OpenAI Realtime:
+
+```
+Browser/App ══ WebRTC-Audio ══ OpenAI Realtime
+     │                               │
+     └── WSS /api/ai/voice/ws ─► MSM-Backend ── Sideband ──┘
+                                  Werkzeuge · RBAC · Guardian · Abrechnung
+```
+
+Der Client schickt ein begrenztes SDP-Angebot über den authentifizierten
+Voice-WebSocket. Das Backend erstellt `/v1/realtime/calls`, behält OpenAI-Key
+und Call-ID und gibt nur die SDP-Antwort zurück. Danach fließt Audio direkt per
+WebRTC. Der Panel-WebSocket trägt nur Zustände und bereits bereinigte
+Karten-, Quellen- und Vorschlagsdaten. Toolargumente und Rohresultate werden
+nicht an den Browser geschickt. Für den Sideband-Kanal muss die Installation
+ausgehende HTTPS- und WSS-Verbindungen zu `api.openai.com` erlauben; der Browser
+benötigt die für WebRTC üblichen ausgehenden Verbindungen.
+
+Legacy:
+
 Der Ton läuft **durch das Panel** und nicht am Panel vorbei:
 
 ```
@@ -1411,11 +1471,10 @@ trotzdem richtig: die Grenzen einer Äusserung entscheiden, was als Frage an ein
 Modell mit Werkzeugen geht — ein manipulierter Browser könnte sonst Tonstücke zu
 einer Äusserung zusammensetzen, die so nie gesprochen wurde.
 
-Eine Direktverbindung des Browsers zu den Anbietern wäre schneller. Dann liefe
-die Werkzeugschleife aber über den Browser — er sähe jeden Werkzeugaufruf und
-könnte welche erfinden. Der Umweg über das Panel kostet rund eine Viertelsekunde
-und erspart zugleich die Ausgabe von Anbieterschlüsseln an den Browser: der
-Betreiberschlüssel verlässt den Panelprozess nie.
+Im Realtime-Modus trennt Sideband genau diese Verantwortungen: Audio nimmt den
+direkten WebRTC-Weg, während der Browser keine Werkzeugausführung autorisiert.
+Das Backend prüft Nutzer, Rechte und Zielzugriff bei jedem Aufruf erneut. Der
+Betreiberschlüssel verlässt den Panelprozess in keinem der beiden Modi.
 
 Kein zusätzlicher Port, kein zusätzlicher Dienst. Der Reverse-Proxy muss
 WebSocket-Upgrades unter `/api/` durchlassen — das tut er bereits für die

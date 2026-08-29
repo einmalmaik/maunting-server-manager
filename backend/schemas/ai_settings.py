@@ -279,6 +279,10 @@ class AiUsageEventEntry(BaseModel):
     #: es beide braucht, steht bei der Spalte in `models/ai_usage_event.py`.
     cache_write_tokens: int | None = None
     reasoning_tokens: int | None = None
+    realtime_text_input_tokens: int | None = None
+    realtime_text_output_tokens: int | None = None
+    realtime_audio_input_tokens: int | None = None
+    realtime_audio_output_tokens: int | None = None
     #: Wieviele Anbieteranfragen in dieser Zeile stecken. Eine Chatnachricht ist
     #: nicht eine Anfrage: jede Werkzeugrunde ruft den Anbieter erneut.
     provider_requests: int | None = None

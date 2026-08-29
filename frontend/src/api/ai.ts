@@ -40,6 +40,16 @@ export interface AiProviderAdmin {
    * Bei einem Stimmzugang bleibt das Feld unbeachtet.
    */
   transcription_model: string | null
+  realtime_default?: boolean
+  realtime_model?: string | null
+  realtime_voice?: 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'sage' | 'shimmer' | 'verse' | 'marin' | 'cedar' | null
+  realtime_reasoning_effort?: 'low' | 'medium' | 'high' | null
+  realtime_language?: 'auto' | 'de' | 'en'
+  realtime_vad_eagerness?: 'auto' | 'low' | 'medium' | 'high'
+  realtime_text_input_price_micro_usd_per_million?: number | null
+  realtime_text_output_price_micro_usd_per_million?: number | null
+  realtime_audio_input_price_micro_usd_per_million?: number | null
+  realtime_audio_output_price_micro_usd_per_million?: number | null
   /**
    * Das Arbeitsmodell der Worker — die zweite Hälfte der Provider-Zweiteilung
    * (docs/agentic-framework.md, §5). `null` heisst: kein Hintergrund-Betrieb
@@ -376,6 +386,11 @@ export interface AiMapTilerMapConfig extends AiMapTilerStatus {
   style_url: string | null
 }
 
+/** Nur der Zustand; der TomTom-Schlüssel bleibt im Backend. */
+export interface AiTomTomStatus {
+  configured: boolean
+}
+
 export interface AiSatelliteLayer {
   id: string
   name: string
@@ -442,14 +457,17 @@ export interface AiRegionalAnalysis {
   }
   camera?: {
     mode: 'overview' | 'focus' | 'detail'
-    action?: 'zoom_in' | 'zoom_out' | 'overview'
+    action?: 'zoom_in' | 'zoom_out' | 'overview' | 'focus_location'
     command_id?: string
   }
 }
 
 export interface AiGeoCameraCommand {
-  action: 'zoom_in' | 'zoom_out' | 'overview'
+  action: 'zoom_in' | 'zoom_out' | 'overview' | 'focus_location'
   command_id: string
+  location?: string
+  country?: string
+  coordinates?: AiRegionalAnalysis['coordinates']
 }
 
 export interface AiGuardianPolicy {
@@ -465,14 +483,13 @@ export interface AiProviderTestResult {
 /**
  * Was der Sprachmodus braucht, um überhaupt angeboten zu werden.
  *
- * `available` ist `false`, solange nicht **beide** Zugänge stehen: ein
- * Chatzugang mit hinterlegtem Modell für Gesprochenes und ein Stimmzugang mit
- * Voice ID, jeder mit eigenem Schlüssel. Fehlt einer, erscheint der Sprachknopf
- * gar nicht — kein ausgegrauter Schalter für etwas, das der Betreiber nicht
- * bestellt hat.
+ * OpenAI Realtime hat panelweit Vorrang. Ohne diese Auswahl beschreibt der
+ * Vertrag weiterhin den Legacy-Weg aus Transkriptions- und Stimmzugang.
+ * `available=false` blendet den Sprachknopf vollständig aus.
  */
 export interface AiVoiceConfig {
   available: boolean
+  mode?: 'legacy' | 'openai_realtime'
   /** Nur zur Anzeige. `null`, solange nichts eingerichtet ist. */
   model: string | null
   /**
@@ -481,6 +498,9 @@ export interface AiVoiceConfig {
    * nicht. Sinnvoll belegt nur, solange `available` wahr ist.
    */
   voice: string | null
+  language?: string
+  reasoning_effort?: 'low' | 'medium' | 'high' | null
+  dictation_available?: boolean
   sample_rate: number
   max_seconds: number
   /**
@@ -790,6 +810,10 @@ export interface AiUsageEvent {
   /** Die Gegenzahl dazu: was in den Zwischenspeicher geschrieben wurde. */
   cache_write_tokens: number | null
   reasoning_tokens: number | null
+  realtime_text_input_tokens?: number | null
+  realtime_text_output_tokens?: number | null
+  realtime_audio_input_tokens?: number | null
+  realtime_audio_output_tokens?: number | null
   /** Eine Chatnachricht ist nicht eine Anfrage: jede Werkzeugrunde ruft neu. */
   provider_requests: number | null
   cost_micro_usd: number
@@ -1029,6 +1053,16 @@ export interface AiProviderWrite {
    */
   default_voice?: string | null
   transcription_model?: string | null
+  realtime_default?: boolean
+  realtime_model?: string | null
+  realtime_voice?: AiProviderAdmin['realtime_voice']
+  realtime_reasoning_effort?: AiProviderAdmin['realtime_reasoning_effort']
+  realtime_language?: AiProviderAdmin['realtime_language']
+  realtime_vad_eagerness?: AiProviderAdmin['realtime_vad_eagerness']
+  realtime_text_input_price_micro_usd_per_million?: number | null
+  realtime_text_output_price_micro_usd_per_million?: number | null
+  realtime_audio_input_price_micro_usd_per_million?: number | null
+  realtime_audio_output_price_micro_usd_per_million?: number | null
   /**
    * Wie `default_voice`: „nicht genannt" lässt den Stand stehen,
    * ausdrückliches `null` schaltet den Hintergrund-Betrieb ab.
@@ -1179,6 +1213,12 @@ export const aiApi = {
    */
   getVoiceConfig: (providerId?: number | null) =>
     api<AiVoiceConfig>(providerId ? `/ai/voice/config?provider_id=${providerId}` : '/ai/voice/config'),
+  transcribeVoice: (providerId: number, pcm: ArrayBuffer) =>
+    api<{ text: string }>(`/ai/voice/transcribe?provider_id=${providerId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: pcm,
+    }),
   /**
    * Der eigene Verbrauch. Ohne Sonderrecht — wer von der KI wegen des
    * Kontingents abgewiesen wird, muss nachsehen können, woran es lag.
@@ -1217,6 +1257,11 @@ export const aiApi = {
     body: JSON.stringify({ api_key: apiKey || null }),
   }),
   getMapTilerMapConfig: () => api<AiMapTilerMapConfig>('/ai/maptiler/config'),
+  getTomTomStatus: () => api<AiTomTomStatus>('/ai/settings/tomtom'),
+  setTomTomKey: (apiKey: string) => api<AiTomTomStatus>('/ai/settings/tomtom', {
+    method: 'PUT',
+    body: JSON.stringify({ api_key: apiKey || null }),
+  }),
   /**
    * Eine Unterhaltung. Wird beim ersten Aufruf serverseitig angelegt.
    *

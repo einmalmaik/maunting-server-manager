@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ListPlus, Loader2, Paperclip, Pencil, Send, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
+import { Check, ListPlus, Loader2, Mic, Paperclip, Pencil, Send, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -15,8 +15,10 @@ import { api, SanitizedApiError } from '@/api/client'
 import { Button, Dropdown } from '@/Singra/UI'
 import {
   aiChatPreferenceKeys,
+  readClosedGeoAnalysis,
   readAiProviderChoice,
   readAiReasoningChoice,
+  writeClosedGeoAnalysis,
   writeAiProviderChoice,
   writeAiReasoningChoice,
 } from '@/lib/aiChatPreferences'
@@ -42,6 +44,7 @@ import type { NewsItem } from './geo/RegionalInfoPanel'
 import { applyGeoCameraCommand, normalizeGeoCameraCommand, normalizeRegionalAnalysis } from './geo/regionalAnalysis'
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { useHasPermission } from '@/hooks/useHasPermission'
+import { starteAufnahme, type Aufnahme } from './voice/audioAufnahme'
 
 interface ServerOption {
   id: number
@@ -118,6 +121,7 @@ export function AiChat() {
   const canAttach = useHasPermission('ai.attachments.use')
   const canUseAutonomy = useHasPermission('ai.autonomous.use')
   const canUseMemory = useHasPermission('ai.memory.use')
+  const canUseVoice = useHasPermission('ai.voice.use')
   // Modell und Denkstufe merkt sich der Browser — je Benutzer, begruendet in
   // `aiChatPreferences`. Die Kennung kommt aus dem Auth-Store statt aus einer
   // Prop, damit keine Einbindung sie vergessen kann.
@@ -145,6 +149,9 @@ export function AiChat() {
   // das Backend — hier steht nur das Ergebnis.
   const [memoryNoticeDue, setMemoryNoticeDue] = useState(false)
   const [input, setInput] = useState('')
+  const [dictationAvailable, setDictationAvailable] = useState(false)
+  const [dictating, setDictating] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
   // Welche eigene Nachricht gerade umformuliert wird, und womit.
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
@@ -176,7 +183,69 @@ export function AiChat() {
   // Antwort zu erkennen, die zu einer älteren Wahl gehört. Zuweisung beim
   // Render, dasselbe Muster wie `autoscrollRef` in ServerConsolePanel.
   const providerRef = useRef<number | null>(null)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const dictationRef = useRef<Aufnahme | null>(null)
+  const dictationChunksRef = useRef<ArrayBuffer[]>([])
   providerRef.current = providerId
+
+  useEffect(() => {
+    let active = true
+    if (!providerId || !canUseVoice) {
+      setDictationAvailable(false)
+      return
+    }
+    aiApi.getVoiceConfig(providerId)
+      .then((config) => { if (active) setDictationAvailable(Boolean(config.dictation_available)) })
+      .catch(() => { if (active) setDictationAvailable(false) })
+    return () => { active = false }
+  }, [providerId, canUseVoice])
+
+  const diktatUmschalten = useCallback(async () => {
+    if (!providerId || transcribing) return
+    if (!dictationRef.current) {
+      dictationChunksRef.current = []
+      try {
+        dictationRef.current = await starteAufnahme((chunk) => dictationChunksRef.current.push(chunk))
+        setDictating(true)
+      } catch {
+        toast.error(t('ai.chat.dictationError'))
+      }
+      return
+    }
+    dictationRef.current.beenden()
+    dictationRef.current = null
+    setDictating(false)
+    const chunks = dictationChunksRef.current
+    dictationChunksRef.current = []
+    const bytes = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
+    if (!bytes) return
+    const pcm = new Uint8Array(bytes)
+    let offset = 0
+    for (const chunk of chunks) {
+      pcm.set(new Uint8Array(chunk), offset)
+      offset += chunk.byteLength
+    }
+    setTranscribing(true)
+    try {
+      const { text } = await aiApi.transcribeVoice(providerId, pcm.buffer)
+      const feld = inputRef.current
+      const start = feld?.selectionStart ?? input.length
+      const end = feld?.selectionEnd ?? start
+      const neu = `${input.slice(0, start)}${text}${input.slice(end)}`.slice(0, 16_000)
+      setInput(neu)
+      requestAnimationFrame(() => {
+        const cursor = Math.min(neu.length, start + text.length)
+        inputRef.current?.setSelectionRange(cursor, cursor)
+        inputRef.current?.focus()
+      })
+    } catch {
+      toast.error(t('ai.chat.dictationError'))
+    } finally {
+      setTranscribing(false)
+    }
+  }, [input, providerId, t, transcribing])
+
+  useEffect(() => () => dictationRef.current?.beenden(), [])
 
   useEffect(() => {
     const handlePrefChange = () => {
@@ -314,9 +383,14 @@ export function AiChat() {
   } = useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttachments })
 
   const manuallyClosedGeoRef = useRef(false)
+  const closedGeoIdRef = useRef(readClosedGeoAnalysis(merkSchluessel.closedGeoAnalysis))
   const lastSeenGeoIdRef = useRef<string | null>(null)
   const lastSeenCameraCommandRef = useRef<string | null>(null)
   const wasAnalyzingRegionRef = useRef(false)
+
+  useEffect(() => {
+    closedGeoIdRef.current = readClosedGeoAnalysis(merkSchluessel.closedGeoAnalysis)
+  }, [merkSchluessel.closedGeoAnalysis])
 
   // Automatische Aktivierung des 3D-Globus bei einer regionalen Analyse
   useEffect(() => {
@@ -344,16 +418,16 @@ export function AiChat() {
           ) {
             const geo = normalizeRegionalAnalysis(section.werkzeug.geo_analysis)
             if (!geo) continue
-            const geoId = geo.camera?.command_id || `${entry.message.id}:${j}:${geo.location}`
+            const geoId = geo.camera?.command_id || `${entry.message.id}:${j}`
 
             // Nur automatisch öffnen, wenn dies eine NEUE Analyse ist und der Nutzer nicht manuell geschlossen hat
             if (lastSeenGeoIdRef.current !== geoId) {
               lastSeenGeoIdRef.current = geoId
               setGeoData(geo)
-              if (!manuallyClosedGeoRef.current) {
+              if (!manuallyClosedGeoRef.current && closedGeoIdRef.current !== geoId) {
                 setGeoOpen(true)
               }
-            } else if (!manuallyClosedGeoRef.current) {
+            } else if (!manuallyClosedGeoRef.current && closedGeoIdRef.current !== geoId) {
               setGeoOpen(true)
             }
             return
@@ -377,9 +451,11 @@ export function AiChat() {
         const command = normalizeGeoCameraCommand(section.werkzeug.geo_camera)
         if (!command || command.command_id === lastSeenCameraCommandRef.current || !geoData) return
         lastSeenCameraCommandRef.current = command.command_id
+        lastSeenGeoIdRef.current = command.command_id
         setGeoData((current) => applyGeoCameraCommand(current, command))
-        manuallyClosedGeoRef.current = false
-        setGeoOpen(true)
+        const wasClosed = closedGeoIdRef.current === command.command_id
+        manuallyClosedGeoRef.current = wasClosed
+        setGeoOpen(!wasClosed)
         return
       }
     }
@@ -803,6 +879,10 @@ export function AiChat() {
       loading={streaming && laufendeWerkzeuge.some((w) => w.tool_name === 'analyze_region')}
       onClose={() => {
         manuallyClosedGeoRef.current = true
+        if (lastSeenGeoIdRef.current) {
+          closedGeoIdRef.current = lastSeenGeoIdRef.current
+          writeClosedGeoAnalysis(merkSchluessel.closedGeoAnalysis, lastSeenGeoIdRef.current)
+        }
         setGeoOpen(false)
         scrolleNachUnten()
       }}
@@ -1158,6 +1238,7 @@ export function AiChat() {
               </label>
             )}
             <textarea
+              ref={inputRef}
               className="max-h-40 min-h-9 flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-6 text-on-surface placeholder:text-on-surface-variant focus:outline-none"
               rows={1}
               maxLength={16000}
@@ -1186,6 +1267,22 @@ export function AiChat() {
               disabled={uploading || availableProviders.length === 0}
               aria-label={t('ai.chat.message')}
             />
+            {dictationAvailable && (
+              <Button
+                type="button"
+                size="sm"
+                variant={dictating ? 'secondary' : 'ghost'}
+                className="h-9 w-9 shrink-0 rounded-full p-0"
+                disabled={transcribing || uploading || !providerId}
+                onClick={() => void diktatUmschalten()}
+                aria-label={dictating ? t('ai.chat.dictationStop') : t('ai.chat.dictationStart')}
+                title={dictating ? t('ai.chat.dictationStop') : t('ai.chat.dictationStart')}
+              >
+                {transcribing
+                  ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  : <Mic className={`h-4 w-4 ${dictating ? 'text-status-danger' : ''}`} aria-hidden="true" />}
+              </Button>
+            )}
             {/* Direkt neben dem Absenden, weil dort die Entscheidung faellt:
                 wer sieht, dass der Kontext gleich zusammengefasst wird, formuliert
                 die naechste Frage anders. In einer Einstellungsseite haette

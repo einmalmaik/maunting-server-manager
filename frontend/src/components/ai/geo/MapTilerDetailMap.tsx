@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { aiApi } from '@/api/ai'
 
 type CameraMode = 'overview' | 'focus' | 'detail'
-type CameraAction = 'zoom_in' | 'zoom_out' | 'overview'
+type CameraAction = 'zoom_in' | 'zoom_out' | 'overview' | 'focus_location'
 
 interface MapTilerDetailMapProps {
   latitude: number
@@ -23,7 +23,10 @@ interface MapTilerDetailMapProps {
 
 const MAX_AI_ZOOM = 18
 const DETAIL_ZOOM = 13
+const LANDMARK_ZOOM = 16
 const CAMERA_DURATION_MS = 700
+const TRACKPAD_ZOOM_RATE = 1 / 50
+const WHEEL_ZOOM_RATE = 1 / 120
 
 function isManualMapEvent(value: unknown): boolean {
   return typeof value === 'object' && value !== null && 'originalEvent' in value && Boolean(
@@ -99,6 +102,14 @@ export function MapTilerDetailMap({
         renderWorldCopies: false,
         cooperativeGestures: false,
       })
+      // MapLibre ist bereits interaktiv. Die explizite Aktivierung schützt
+      // diesen Vertrag vor abweichenden Style-/Runtime-Vorgaben; höhere Raten
+      // verhindern Dutzende Mausradschritte nach einem Detailflug.
+      map.dragPan.enable()
+      map.scrollZoom.enable()
+      map.scrollZoom.setZoomRate(TRACKPAD_ZOOM_RATE)
+      map.scrollZoom.setWheelZoomRate(WHEEL_ZOOM_RATE)
+      map.touchZoomRotate.enable()
       mapRef.current = map
       markerRef.current = new Marker({ color: '#38bdf8' })
         .setLngLat([view.longitude, view.latitude])
@@ -158,7 +169,9 @@ export function MapTilerDetailMap({
     const currentZoom = map.getZoom()
     const focusZoom = globe ? Math.max(2.2, Math.min(4.5, zoom)) : zoom
     let nextZoom = focusZoom
-    if (cameraAction === 'zoom_in' || cameraMode === 'detail') {
+    if (cameraAction === 'focus_location') {
+      nextZoom = Math.min(MAX_AI_ZOOM, Math.max(LANDMARK_ZOOM, currentZoom))
+    } else if (cameraAction === 'zoom_in' || cameraMode === 'detail') {
       nextZoom = Math.min(MAX_AI_ZOOM, Math.max(DETAIL_ZOOM, currentZoom + 4))
     } else if (cameraAction === 'zoom_out') {
       nextZoom = Math.max(1.2, currentZoom - 4)

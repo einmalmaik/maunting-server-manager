@@ -280,12 +280,18 @@ def _global_tool_definitions() -> list[dict]:
             "Steuert ausschließlich die bereits geöffnete Regionskarte, ohne "
             "Wetter, Satellitenbilder oder Nachrichten erneut abzurufen. "
             "Nutze dies für kurze Folgeanweisungen wie näher heranzoomen, "
-            "herauszoomen oder zur Weltübersicht wechseln.",
+            "herauszoomen, zur Weltübersicht wechseln oder eine konkrete "
+            "Sehenswürdigkeit fokussieren.",
             {
                 "action": {
                     "type": "string",
-                    "enum": ["zoom_in", "zoom_out", "overview"],
-                    "description": "Relative Kamerabewegung der bereits sichtbaren Karte.",
+                    "enum": ["zoom_in", "zoom_out", "overview", "focus_location"],
+                    "description": "Kamerabefehl für die bereits sichtbare Karte.",
+                },
+                "location": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "description": "Nur bei focus_location: genauer Name der Sehenswürdigkeit samt Stadt.",
                 },
             },
             ["action"],
@@ -1556,6 +1562,31 @@ def _worker_tool_definitions() -> list[dict]:
             ["question", "options"],
         ),
     ]
+
+
+def _voice_tool_definitions() -> list[dict]:
+    """Sitzungsgebundene Werkzeuge; andere Rollen filtern sie aus."""
+    return [
+        _function(
+            "voice_resolve_latest_proposal",
+            "Bestätigt oder verwirft ausschließlich den zuletzt in dieser "
+            "Sprachsitzung angezeigten Vorschlag. Nutze dies nur, wenn der "
+            "Benutzer dem sichtbaren Vorschlag eindeutig zustimmt oder ihn "
+            "eindeutig ablehnt.",
+            {
+                "decision": {
+                    "type": "string",
+                    "enum": ["confirm", "reject"],
+                },
+            },
+            ["decision"],
+        )
+    ]
+
+
+def voice_control_tool_definitions() -> list[dict]:
+    """Nur der Realtime-Transport erhält diese sitzungsgebundenen Tools."""
+    return _voice_tool_definitions()
 
 
 def _desktop_tool_definitions() -> list[dict]:
@@ -3557,14 +3588,37 @@ def _execute_analyze_region(
 
 
 def _execute_control_region_camera(db: Session, *, user: User, arguments: dict) -> dict:
-    """Erzeugt einen einmaligen, bereinigten Kamerabefehl ohne Datenabruf."""
+    """Erzeugt einen einmaligen Kamerabefehl ohne erneute Regionsanalyse."""
+    from services import ai_geo_service
+
     if not permission_service.has_global_permission(db, user, "ai.satellite.use"):
         raise AiActionValidationError("Kartensteuerung ist für diesen Benutzer nicht freigegeben")
-    if set(arguments) != {"action"}:
+    if set(arguments) - {"action", "location"}:
         raise AiActionValidationError("Kartensteuerung hat ungültige Argumente")
     action = arguments.get("action")
-    if action not in {"zoom_in", "zoom_out", "overview"}:
+    if action not in {"zoom_in", "zoom_out", "overview", "focus_location"}:
         raise AiActionValidationError("Kartenaktion ist ungültig")
+    if action == "focus_location":
+        location = arguments.get("location")
+        if not isinstance(location, str) or not location.strip():
+            raise AiActionValidationError("Sehenswürdigkeit (location) fehlt oder ist ungültig")
+        safe_location = redact_sensitive_text(location.strip())[:100]
+        geo = ai_geo_service.geocode_location(safe_location)
+        if not geo:
+            raise AiActionValidationError("Sehenswürdigkeit konnte nicht geocodiert werden")
+        return {
+            "action": action,
+            "command_id": str(uuid4()),
+            "location": geo["name"],
+            "country": geo["country"],
+            "coordinates": {
+                "latitude": geo["latitude"],
+                "longitude": geo["longitude"],
+                "bbox": geo["bbox"],
+            },
+        }
+    if set(arguments) != {"action"}:
+        raise AiActionValidationError("location ist nur für focus_location zulässig")
     return {"action": action, "command_id": str(uuid4())}
 
 

@@ -318,6 +318,17 @@ def test_the_brain_parallelizes_only_independent_research_goals() -> None:
     assert "Nutze nie zusätzliche Worker nur weil Plätze frei sind" in gehirn
 
 
+def test_landmarks_use_the_open_map_without_repeating_the_city_report() -> None:
+    """Eine Sehenswürdigkeit braucht Geocoding und Fakten, keine zweite Lageanalyse."""
+    gehirn = ai_prompt.build(rolle="gehirn")
+
+    assert '`control_region_camera` mit `action: "focus_location"`' in gehirn
+    assert "sowie `web_search`" in gehirn
+    assert "keinen Worker" in gehirn
+    assert "weder Wetter noch Koordinaten" in gehirn
+    assert "zwei bis vier interessante Fakten" in gehirn
+
+
 def test_the_brain_answers_worker_questions_from_the_conversation() -> None:
     """Eine Worker-Frage geht erst durchs Gespräch, dann zum Benutzer.
 

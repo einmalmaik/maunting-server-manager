@@ -63,7 +63,7 @@ def test_with_credentials_tool_appears_in_catalog(
 
 
 def test_region_camera_control_is_permission_checked_and_does_not_fetch(
-    db: Session, regular_user: User,
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with pytest.raises(ai_action_errors.AiActionValidationError):
         ai_action_service.execute_read_tool(
@@ -74,6 +74,11 @@ def test_region_camera_control_is_permission_checked_and_does_not_fetch(
         )
 
     _allow_satellite(db, regular_user)
+    monkeypatch.setattr(
+        ai_geo_service,
+        "geocode_location",
+        lambda _location: pytest.fail("Ein relativer Zoom darf keine Geodaten abrufen"),
+    )
     result = ai_action_service.execute_read_tool(
         db,
         user=regular_user,
@@ -84,6 +89,57 @@ def test_region_camera_control_is_permission_checked_and_does_not_fetch(
     assert result["action"] == "zoom_in"
     assert isinstance(result["command_id"], str)
     assert result["command_id"]
+
+
+def test_region_camera_focus_geocodes_only_the_landmark(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _allow_satellite(db, regular_user)
+    requested: list[str] = []
+
+    def geocode(location: str) -> dict:
+        requested.append(location)
+        return {
+            "name": "Verbotene Stadt, Peking",
+            "country": "China",
+            "latitude": 39.9163,
+            "longitude": 116.3972,
+            "bbox": [116.3872, 39.9063, 116.4072, 39.9263],
+        }
+
+    monkeypatch.setattr(ai_geo_service, "geocode_location", geocode)
+    result = ai_action_service.execute_read_tool(
+        db,
+        user=regular_user,
+        tool_name="control_region_camera",
+        arguments={"action": "focus_location", "location": "Verbotene Stadt, Peking"},
+    )
+
+    assert requested == ["Verbotene Stadt, Peking"]
+    assert result["action"] == "focus_location"
+    assert result["location"] == "Verbotene Stadt, Peking"
+    assert result["coordinates"]["latitude"] == 39.9163
+
+
+def test_region_camera_focus_validates_action_specific_arguments(
+    db: Session, regular_user: User,
+) -> None:
+    _allow_satellite(db, regular_user)
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db,
+            user=regular_user,
+            tool_name="control_region_camera",
+            arguments={"action": "focus_location"},
+        )
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_action_service.execute_read_tool(
+            db,
+            user=regular_user,
+            tool_name="control_region_camera",
+            arguments={"action": "zoom_in", "location": "Peking"},
+        )
 
 
 def test_store_and_retrieve_credentials(monkeypatch: pytest.MonkeyPatch) -> None:

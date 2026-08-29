@@ -94,4 +94,38 @@ describe('normalizeRegionalAnalysis', () => {
     expect(changed?.camera).toEqual({ mode: 'focus', action: 'zoom_in', command_id: 'camera-1' })
     expect(applyGeoCameraCommand(analysis, { action: 'zoom_in' })).toBe(analysis)
   })
+
+  it('fokussiert eine Sehenswürdigkeit, ohne Wetter und Lagebild neu zu laden', () => {
+    const analysis = normalizeRegionalAnalysis({
+      location: 'Peking',
+      country: 'China',
+      coordinates: { latitude: 39.9042, longitude: 116.4074 },
+      weather: {
+        temperature_celsius: 26,
+        apparent_temperature_celsius: 27,
+        humidity_percent: 52,
+        precipitation_mm: 0,
+        wind_speed_kmh: 8,
+        condition: 'clear',
+      },
+      news: [{ title: 'Lagebericht', url: 'https://example.invalid/news', snippet: 'Bleibt erhalten.' }],
+    })
+
+    const changed = applyGeoCameraCommand(analysis, {
+      action: 'focus_location',
+      command_id: 'landmark-1',
+      location: 'Verbotene Stadt, Peking',
+      country: 'China',
+      coordinates: { latitude: 39.9163, longitude: 116.3972 },
+    })
+
+    expect(changed).toMatchObject({
+      location: 'Verbotene Stadt, Peking',
+      country: 'China',
+      coordinates: { latitude: 39.9163, longitude: 116.3972 },
+      camera: { mode: 'detail', action: 'focus_location', command_id: 'landmark-1' },
+    })
+    expect(changed?.weather).toBe(analysis?.weather)
+    expect(changed?.news).toBe(analysis?.news)
+  })
 })

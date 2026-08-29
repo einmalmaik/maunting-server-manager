@@ -101,6 +101,10 @@ class AiUsageEvent(Base):
     # Behebungen, und sie sahen bisher gleich aus.
     cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     reasoning_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    realtime_text_input_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    realtime_text_output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    realtime_audio_input_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    realtime_audio_output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Wieviele Anbieteranfragen in dieser Zeile stecken. Eine Chatnachricht ist
     # nicht eine Anfrage: jede Werkzeugrunde ruft den Anbieter erneut und
     # schickt den gewachsenen Verlauf komplett mit. Ohne diese Zahl sieht eine

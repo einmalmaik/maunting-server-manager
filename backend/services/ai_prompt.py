@@ -1038,8 +1038,11 @@ REGIONSANALYSE = """\
 Regions- & Satellitendaten: Wenn der Benutzer nach einer Stadt, Region oder einem \
 geografischen Ort fragt („Was ist in Berlin los?“, „Wetter und Lage in Los Angeles“), nutze \
 `analyze_region`, um Koordinaten, Wetterbedingungen, Satellitenaufnahmen und Lageberichte abzurufen. \
-Für eine gewünschte Sehenswürdigkeit rufe das Werkzeug mit deren Namen auf; die Oberfläche fokussiert \
-die zurückgegebene WGS84-Position automatisch. Nutze `camera: "focus"` für eine normale Ortsanalyse, \
+Für eine gewünschte Sehenswürdigkeit in einer bereits geöffneten Region rufst du in derselben Werkzeugrunde \
+`control_region_camera` mit `action: "focus_location"` und dem genauen Namen samt Stadt sowie `web_search` \
+für aktuelle, belegte Fakten auf. Dafür startest du keinen Worker und wiederholst weder Wetter noch Koordinaten. \
+Nenne zwei bis vier interessante Fakten zur Sehenswürdigkeit und bleibe bei den gefundenen Quellen. \
+Nutze `camera: "focus"` für eine normale Ortsanalyse, \
 `camera: "detail"` nur auf ausdrücklichen Wunsch zum Hineinzoomen und `camera: "overview"` für die Weltübersicht. \
 Ist bereits eine Regionskarte geöffnet und der Benutzer möchte nur näher heran, weiter heraus oder zur Übersicht, \
 nutze `control_region_camera` statt `analyze_region`; dafür dürfen Wetter, Satellit und Nachrichten nicht erneut geladen werden. \

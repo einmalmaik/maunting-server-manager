@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   aiChatPreferenceKeys,
+  readClosedGeoAnalysis,
   readAiProviderChoice,
   readAiReasoningChoice,
+  writeClosedGeoAnalysis,
   writeAiProviderChoice,
   writeAiReasoningChoice,
 } from './aiChatPreferences'
@@ -57,6 +59,15 @@ describe('aiChatPreferences', () => {
     const anderer = aiChatPreferenceKeys(2)
     expect(readAiReasoningChoice(anderer.reasoning)).toBeNull()
     expect(readAiProviderChoice(anderer.provider)).toBeNull()
+    expect(readClosedGeoAnalysis(anderer.closedGeoAnalysis)).toBeNull()
+  })
+
+  it('merkt nur die Kennung der bewusst geschlossenen Kartenanalyse', () => {
+    const keys = aiChatPreferenceKeys(42)
+    writeClosedGeoAnalysis(keys.closedGeoAnalysis, 'camera-command-17')
+
+    expect(readClosedGeoAnalysis(keys.closedGeoAnalysis)).toBe('camera-command-17')
+    expect(localStorage.getItem(keys.closedGeoAnalysis)).not.toContain('Moskau')
   })
 
   it('behandelt kaputten oder fremden Inhalt als „nichts gemerkt"', () => {
@@ -82,6 +93,7 @@ describe('aiChatPreferences', () => {
     try {
       expect(() => writeAiReasoningChoice(keys.reasoning, { an: true, stufe: 'low' })).not.toThrow()
       expect(() => writeAiProviderChoice(keys.provider, 7)).not.toThrow()
+      expect(() => writeClosedGeoAnalysis(keys.closedGeoAnalysis, 'camera-command-17')).not.toThrow()
     } finally {
       Storage.prototype.setItem = original
     }

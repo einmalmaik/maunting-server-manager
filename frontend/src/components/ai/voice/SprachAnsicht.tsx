@@ -36,7 +36,7 @@ export function SprachAnsicht({
     pegel,
     starten,
     beenden,
-  } = useSprachsitzung(providerId)
+  } = useSprachsitzung(providerId, konfiguration?.mode ?? 'legacy')
   const [einstellungenOffen, setEinstellungenOffen] = useState(false)
 
   // Wer in den Sprachmodus wechselt, will sprechen.

@@ -338,6 +338,119 @@ def _assert_worker_rolle(
 
 ETHICS_MODI = ("off", "auto", "always", "critical")
 
+REALTIME_STIMMEN = frozenset(
+    {"alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"}
+)
+REALTIME_SPRACHEN = frozenset({"auto", "de", "en"})
+REALTIME_VAD = frozenset({"auto", "low", "medium", "high"})
+REALTIME_2_REASONING = frozenset({"low", "medium", "high"})
+REALTIME_PREISFELDER = (
+    "realtime_text_input_price_micro_usd_per_million",
+    "realtime_text_output_price_micro_usd_per_million",
+    "realtime_audio_input_price_micro_usd_per_million",
+    "realtime_audio_output_price_micro_usd_per_million",
+)
+
+
+def _assert_realtime_werte(provider: AiProvider) -> None:
+    """Prüft einen aktivierten Realtime-Zugang gegen seinen Zielzustand."""
+    if provider.provider_kind != "openai":
+        raise AiProviderConfigurationError("Realtime-Sprachmodus ist nur mit OpenAI möglich")
+    if not provider.enabled:
+        raise AiProviderConfigurationError("Der Realtime-Zugang muss aktiviert sein")
+    if not provider.operator_api_key_encrypted:
+        raise AiProviderConfigurationError("Der Realtime-Zugang braucht einen OpenAI-API-Schlüssel")
+    realtime_model = (provider.realtime_model or "").strip()
+    if not realtime_model:
+        raise AiProviderConfigurationError("Wähle ein Realtime-Modell aus")
+    if "realtime" not in realtime_model.lower():
+        raise AiProviderConfigurationError("Das gewählte Modell ist kein OpenAI-Realtime-Modell")
+    _assert_realtime_reasoning(realtime_model, provider.realtime_reasoning_effort)
+    if provider.realtime_voice not in REALTIME_STIMMEN:
+        raise AiProviderConfigurationError("Wähle eine eingebaute OpenAI-Stimme aus")
+    if provider.realtime_language not in REALTIME_SPRACHEN:
+        raise AiProviderConfigurationError("Unbekannte Realtime-Antwortsprache")
+    if provider.realtime_vad_eagerness not in REALTIME_VAD:
+        raise AiProviderConfigurationError("Unbekannte Realtime-VAD-Empfindlichkeit")
+    if any(getattr(provider, feld) is None for feld in REALTIME_PREISFELDER):
+        raise AiProviderConfigurationError("Für Realtime müssen alle vier Preise gesetzt sein")
+
+
+def _realtime_ist_zwei(modell: str | None) -> bool:
+    """Nur die explizite Realtime-2-Reihe erhält eine Denkstufe."""
+    return "realtime-2" in (modell or "").strip().lower()
+
+
+def _assert_realtime_reasoning(modell: str | None, effort: str | None) -> str | None:
+    wert = (effort or "").strip().lower() or None
+    if wert is None:
+        return None
+    if not _realtime_ist_zwei(modell):
+        raise AiProviderConfigurationError(
+            "Eine Realtime-Denkstufe ist nur für die OpenAI-Realtime-2-Reihe verfügbar"
+        )
+    if wert not in REALTIME_2_REASONING:
+        raise AiProviderConfigurationError("Unbekannte Realtime-Denkstufe")
+    return wert
+
+
+def realtime_zugang(db: Session) -> AiProvider | None:
+    """Der eine betriebsbereite panelweite Realtime-Zugang, falls aktiviert."""
+    provider = db.query(AiProvider).filter(AiProvider.realtime_default.is_(True)).first()
+    if provider is None:
+        return None
+    _assert_realtime_werte(provider)
+    return provider
+
+
+def _realtime_felder_setzen(provider: AiProvider, values: dict) -> None:
+    for feld in (
+        "realtime_model",
+        "realtime_voice",
+        "realtime_reasoning_effort",
+        "realtime_language",
+        "realtime_vad_eagerness",
+        *REALTIME_PREISFELDER,
+    ):
+        if feld not in values or values[feld] is None and feld in {"realtime_language", "realtime_vad_eagerness"}:
+            continue
+        wert = values[feld]
+        if feld in {"realtime_model", "realtime_voice", "realtime_reasoning_effort"}:
+            wert = (wert or "").strip() or None
+        elif feld in {"realtime_language", "realtime_vad_eagerness"}:
+            wert = str(wert).strip().lower()
+        setattr(provider, feld, wert)
+    if provider.realtime_voice is not None and provider.realtime_voice not in REALTIME_STIMMEN:
+        raise AiProviderConfigurationError("Unbekannte OpenAI-Realtime-Stimme")
+    provider.realtime_reasoning_effort = _assert_realtime_reasoning(
+        provider.realtime_model, provider.realtime_reasoning_effort
+    )
+    if provider.realtime_language not in REALTIME_SPRACHEN:
+        raise AiProviderConfigurationError("Unbekannte Realtime-Antwortsprache")
+    if provider.realtime_vad_eagerness not in REALTIME_VAD:
+        raise AiProviderConfigurationError("Unbekannte Realtime-VAD-Empfindlichkeit")
+
+
+def _realtime_auswahl_anwenden(db: Session, provider: AiProvider, *, verlangt: bool | None) -> None:
+    if verlangt is True:
+        _assert_realtime_werte(provider)
+        db.query(AiProvider).filter(
+            AiProvider.id != provider.id,
+            AiProvider.realtime_default.is_(True),
+        ).update({AiProvider.realtime_default: False}, synchronize_session=False)
+        provider.realtime_default = True
+        return
+    if verlangt is False:
+        provider.realtime_default = False
+        return
+    if provider.realtime_default:
+        try:
+            _assert_realtime_werte(provider)
+        except AiProviderConfigurationError:
+            # Eine explizite Deaktivierung, ein Providerwechsel oder das
+            # Entfernen eines Pflichtfelds schaltet Realtime sicher ab.
+            provider.realtime_default = False
+
 
 def _assert_ethics_rolle(
     ethics_model: str | None,
@@ -392,6 +505,16 @@ def create_provider(
     # Optional: das hörende Modell eines Chatzugangs. Ohne es gibt es über
     # diesen Zugang ebenfalls keinen Sprachmodus.
     transcription_model: str | None = None,
+    realtime_default: bool = False,
+    realtime_model: str | None = None,
+    realtime_voice: str | None = None,
+    realtime_reasoning_effort: str | None = None,
+    realtime_language: str = "auto",
+    realtime_vad_eagerness: str = "auto",
+    realtime_text_input_price_micro_usd_per_million: int | None = None,
+    realtime_text_output_price_micro_usd_per_million: int | None = None,
+    realtime_audio_input_price_micro_usd_per_million: int | None = None,
+    realtime_audio_output_price_micro_usd_per_million: int | None = None,
     # Optional: die Worker-Rolle dieses Zugangs (docs/agentic-framework.md,
     # Abschnitt 5). Ohne Worker-Modell gilt der heutige Ein-Modell-Betrieb.
     # Zählt bewusst **nicht** als Funktion im Sinne der Prüfung unten: Worker
@@ -416,7 +539,7 @@ def create_provider(
     modell = (default_model or "").strip() or None
     gehoer = (transcription_model or "").strip() or None
     stimme = _assert_stimme(default_voice)
-    if not (modell or gehoer or stimme):
+    if not (modell or gehoer or stimme or (realtime_model or "").strip()):
         raise AiProviderConfigurationError(
             "Mindestens eine Funktion (Standardmodell, Modell für Gesprochenes oder Stimme) muss hinterlegt sein"
         )
@@ -444,6 +567,16 @@ def create_provider(
         token_price_micro_usd_per_million=token_price_micro_usd_per_million,
         default_voice=stimme,
         transcription_model=gehoer,
+        realtime_default=False,
+        realtime_model=(realtime_model or "").strip() or None,
+        realtime_voice=(realtime_voice or "").strip() or None,
+        realtime_reasoning_effort=(realtime_reasoning_effort or "").strip().lower() or None,
+        realtime_language=(realtime_language or "auto").strip().lower(),
+        realtime_vad_eagerness=(realtime_vad_eagerness or "auto").strip().lower(),
+        realtime_text_input_price_micro_usd_per_million=realtime_text_input_price_micro_usd_per_million,
+        realtime_text_output_price_micro_usd_per_million=realtime_text_output_price_micro_usd_per_million,
+        realtime_audio_input_price_micro_usd_per_million=realtime_audio_input_price_micro_usd_per_million,
+        realtime_audio_output_price_micro_usd_per_million=realtime_audio_output_price_micro_usd_per_million,
         worker_model=arbeitsmodell,
         worker_reasoning_effort=arbeitsstufe,
         ethics_model=ethikmodell,
@@ -458,6 +591,18 @@ def create_provider(
             schluessel, aad=_operator_aad(provider.id)
         )
         provider.operator_api_key_hint = _hint(schluessel)
+    _realtime_felder_setzen(provider, {
+        "realtime_model": realtime_model,
+        "realtime_voice": realtime_voice,
+        "realtime_reasoning_effort": realtime_reasoning_effort,
+        "realtime_language": realtime_language,
+        "realtime_vad_eagerness": realtime_vad_eagerness,
+        "realtime_text_input_price_micro_usd_per_million": realtime_text_input_price_micro_usd_per_million,
+        "realtime_text_output_price_micro_usd_per_million": realtime_text_output_price_micro_usd_per_million,
+        "realtime_audio_input_price_micro_usd_per_million": realtime_audio_input_price_micro_usd_per_million,
+        "realtime_audio_output_price_micro_usd_per_million": realtime_audio_output_price_micro_usd_per_million,
+    })
+    _realtime_auswahl_anwenden(db, provider, verlangt=realtime_default)
     db.flush()
     return provider
 
@@ -507,7 +652,8 @@ def update_provider(
     new_default_model = (values["default_model"] or "").strip() or None if "default_model" in values else provider.default_model
     new_default_voice = _assert_stimme(values["default_voice"]) if "default_voice" in values else provider.default_voice
     new_transcription_model = (values["transcription_model"] or "").strip() or None if "transcription_model" in values else provider.transcription_model
-    if not (new_default_model or new_transcription_model or new_default_voice):
+    new_realtime_model = (values.get("realtime_model") or "").strip() or None if "realtime_model" in values else provider.realtime_model
+    if not (new_default_model or new_transcription_model or new_default_voice or new_realtime_model):
         raise AiProviderConfigurationError(
             "Mindestens eine Funktion (Standardmodell, Modell für Gesprochenes oder Stimme) muss hinterlegt sein"
         )
@@ -533,6 +679,7 @@ def update_provider(
     provider.default_model = new_default_model
     provider.default_voice = new_default_voice
     provider.transcription_model = new_transcription_model
+    _realtime_felder_setzen(provider, values)
     provider.worker_model = new_worker_model
     provider.worker_reasoning_effort = new_worker_effort
     provider.ethics_model = new_ethics_model
@@ -578,6 +725,11 @@ def update_provider(
             schluessel, aad=_operator_aad(provider.id)
         )
         provider.operator_api_key_hint = _hint(schluessel)
+    _realtime_auswahl_anwenden(
+        db,
+        provider,
+        verlangt=values.get("realtime_default") if "realtime_default" in values else None,
+    )
     db.flush()
     return provider
 

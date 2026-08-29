@@ -57,6 +57,17 @@ describe('AiProvidersSettings', () => {
       fuehrt_katalog: true,
       kann_hoeren: true,
     }, {
+      kind: 'openai',
+      label: 'OpenAI',
+      base_url: 'https://api.openai.com/v1',
+      key_url: 'https://platform.openai.com/api-keys',
+      key_prefix: 'sk-',
+      protokoll: 'chat_completions',
+      katalog_braucht_schluessel: true,
+      ressource_noetig: false,
+      fuehrt_katalog: true,
+      kann_hoeren: true,
+    }, {
       // Der zweite Anbieter steht hier, damit die Auswahl im Test dieselbe
       // Entscheidung zu treffen hat wie im Betrieb: zwei Zugänge, die
       // verschiedene Dinge tun.
@@ -377,6 +388,86 @@ describe('AiProvidersSettings', () => {
       transcription_model: null,
     })))
   })
+
+  it('zeigt OpenAI-Realtime ausschließlich mit Design-DNA-Auswahlen und speichert alle Preise', async () => {
+    vi.mocked(aiApi.listProviderSettings).mockResolvedValue([{
+      ...provider,
+      provider_kind: 'openai',
+      base_url: 'https://api.openai.com/v1',
+      default_model: 'gpt-4.1',
+      realtime_default: true,
+      realtime_model: 'gpt-realtime',
+      realtime_voice: 'marin',
+      realtime_language: 'de',
+      realtime_vad_eagerness: 'high',
+      realtime_text_input_price_micro_usd_per_million: 1_000_000,
+      realtime_text_output_price_micro_usd_per_million: 2_000_000,
+      realtime_audio_input_price_micro_usd_per_million: 3_000_000,
+      realtime_audio_output_price_micro_usd_per_million: 4_000_000,
+    }])
+    vi.mocked(aiApi.listCatalogModels).mockResolvedValue([
+      {
+        model_id: 'gpt-4.1', name: 'GPT-4.1', reasoning: false, efforts: [],
+        default_effort: null, mandatory: false, recommended: false, vision: null,
+      },
+      {
+        model_id: 'gpt-realtime', name: 'GPT Realtime', reasoning: false, efforts: [],
+        default_effort: null, mandatory: false, recommended: false, vision: null,
+      },
+    ])
+
+    const { container } = render(<AiProvidersSettings canWrite />)
+
+    await waitFor(() => expect(screen.getByLabelText('Realtime-Modell')).toHaveTextContent('gpt-realtime'))
+    expect(screen.getByLabelText('Realtime-Modell').tagName).toBe('BUTTON')
+    expect(screen.getByLabelText('OpenAI-Stimme').tagName).toBe('BUTTON')
+    expect(screen.getByLabelText('Antwortsprache').tagName).toBe('BUTTON')
+    expect(screen.getByLabelText('Reaktion auf Sprechpausen').tagName).toBe('BUTTON')
+    expect(container.querySelector('select')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+    await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(4, expect.objectContaining({
+      realtime_default: true,
+      realtime_model: 'gpt-realtime',
+      realtime_voice: 'marin',
+      realtime_language: 'de',
+      realtime_vad_eagerness: 'high',
+      realtime_text_input_price_micro_usd_per_million: 1_000_000,
+      realtime_text_output_price_micro_usd_per_million: 2_000_000,
+      realtime_audio_input_price_micro_usd_per_million: 3_000_000,
+      realtime_audio_output_price_micro_usd_per_million: 4_000_000,
+    })))
+  })
+
+  it('zeigt die Denkstufe nur für die Realtime-2-Reihe und speichert sie', async () => {
+    vi.mocked(aiApi.listProviderSettings).mockResolvedValue([{
+      ...provider,
+      provider_kind: 'openai',
+      realtime_default: true,
+      realtime_model: 'gpt-realtime-2',
+      realtime_voice: 'marin',
+      realtime_reasoning_effort: 'medium',
+      realtime_text_input_price_micro_usd_per_million: 1,
+      realtime_text_output_price_micro_usd_per_million: 1,
+      realtime_audio_input_price_micro_usd_per_million: 1,
+      realtime_audio_output_price_micro_usd_per_million: 1,
+    }])
+    vi.mocked(aiApi.listCatalogModels).mockResolvedValue([{
+      model_id: 'gpt-realtime-2', name: 'GPT Realtime 2', reasoning: true, efforts: ['low', 'medium', 'high'],
+      default_effort: 'medium', mandatory: false, recommended: true, vision: null,
+    }])
+
+    render(<AiProvidersSettings canWrite />)
+    const reasoning = await screen.findByLabelText('Denkstufe')
+    expect(reasoning).toHaveTextContent('Mittel')
+    expect(reasoning).not.toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
+    await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(4, expect.objectContaining({
+      realtime_reasoning_effort: 'medium',
+    })))
+  })
+
   it('holt die Denkstufen einzeln, wo es keinen Katalog gibt', async () => {
     // Die Luecke, die den Worker eines Azure-Zugangs stumpf liess: die
     // Stufenauswahl haengt an der Katalogliste, und die ist dort leer. Der

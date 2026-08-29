@@ -213,6 +213,7 @@ _ANGEBOT = frozenset({
     "worker_start", "worker_cancel", "worker_antwort",
     "wait_until", "worker_frage", "ask_user",
     "list_my_servers", "read_server_status",
+    "voice_resolve_latest_proposal",
 })
 
 
@@ -251,6 +252,10 @@ def _katalog(rolle: str, *, guardian=None) -> set[str]:
 
 
 class TestKatalogschnitt:
+    def test_sitzungsgebundene_sprachwerkzeuge_bleiben_aus_normalen_laeufen(self) -> None:
+        for rolle in ("gehirn", "worker", "voll"):
+            assert "voice_resolve_latest_proposal" not in _katalog(rolle)
+
     def test_das_gehirn_bekommt_lesewerkzeuge_gedaechtnis_und_steuerung(self) -> None:
         namen = _katalog("gehirn")
         assert namen == {

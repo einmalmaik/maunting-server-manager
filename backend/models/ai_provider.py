@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Index, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -38,6 +38,15 @@ class AiProvider(Base):
     """
 
     __tablename__ = "ai_providers"
+    __table_args__ = (
+        Index(
+            "uq_ai_providers_realtime_default",
+            "realtime_default",
+            unique=True,
+            sqlite_where=text("realtime_default = 1"),
+            postgresql_where=text("realtime_default"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
@@ -83,6 +92,27 @@ class AiProvider(Base):
     # ``None`` heißt „nichts hinterlegt": dann gibt es keinen Sprachmodus über
     # diesen Zugang. Auch hier wird nie ein Standard hineingeschrieben.
     transcription_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # Optionaler panelweiter OpenAI-Realtime-Zugang. Die vier Preise bleiben
+    # nullable, weil eine inaktive Konfiguration noch unvollständig sein darf.
+    # Aktivieren darf der Service sie erst, wenn alle vier bewusst gesetzt sind.
+    realtime_default: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
+    realtime_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    realtime_voice: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Realtime-2 unterstützt eine feste, vom Betreiber bezahlte Denkstufe.
+    # Bei Realtime-1.5 bleibt der Wert leer und wird nie an OpenAI gesendet.
+    realtime_reasoning_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    realtime_language: Mapped[str] = mapped_column(
+        String(16), default="auto", server_default="auto", nullable=False
+    )
+    realtime_vad_eagerness: Mapped[str] = mapped_column(
+        String(16), default="auto", server_default="auto", nullable=False
+    )
+    realtime_text_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    realtime_text_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    realtime_audio_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    realtime_audio_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Das Modell, mit dem die Worker dieses Zugangs arbeiten — die vierte
     # Funktion an derselben Zeile (docs/agentic-framework.md, Abschnitt 5):
     # `default_model` denkt im Gespräch (Gehirn), `transcription_model` hört,

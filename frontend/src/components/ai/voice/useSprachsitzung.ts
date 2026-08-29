@@ -27,6 +27,7 @@ import { wsUrl } from '@/config/api'
 import { applyGeoCameraCommand, normalizeRegionalAnalysis } from '../geo/regionalAnalysis'
 import { AufnahmeAbbruch, starteAufnahme, type Aufnahme } from './audioAufnahme'
 import { Wiedergabe } from './audioWiedergabe'
+import { aktuelleVerarbeitung, ausgabeGeraetId, eingabeGeraetId } from './audioGeraete'
 
 export type Sprachzustand =
   | 'aus'
@@ -138,6 +139,24 @@ const MAX_ZEILEN = 40
  */
 const MAX_BELEGE = 5
 
+function webBelege(roh: unknown): Beleg[] {
+  if (!Array.isArray(roh)) return []
+  return roh.flatMap((eintrag): Beleg[] => {
+    if (!eintrag || typeof eintrag !== 'object') return []
+    const daten = eintrag as Record<string, unknown>
+    const titel = typeof daten.title === 'string' ? daten.title.trim().slice(0, 240) : ''
+    const url = typeof daten.url === 'string' ? daten.url.trim().slice(0, 2_000) : ''
+    const beschreibung = typeof daten.description === 'string'
+      ? daten.description.trim().slice(0, 1_000)
+      : typeof daten.snippet === 'string'
+        ? daten.snippet.trim().slice(0, 1_000)
+        : ''
+    const zeilen = [url, beschreibung].filter(Boolean)
+    if (!titel && zeilen.length === 0) return []
+    return [{ quelle: titel || url, zeilen }]
+  }).slice(0, MAX_BELEGE)
+}
+
 /**
  * Zustände, deren Eintreffen beweist, dass die Leitung wieder trägt.
  *
@@ -184,7 +203,10 @@ function adresse(providerId?: number | null): string {
   return providerId ? `${base}?provider_id=${providerId}` : base
 }
 
-export function useSprachsitzung(providerId?: number | null): Ergebnis {
+export function useSprachsitzung(
+  providerId?: number | null,
+  modus: 'legacy' | 'openai_realtime' = 'legacy',
+): Ergebnis {
   const [zustand, setZustand] = useState<Sprachzustand>('aus')
   const [zeilen, setZeilen] = useState<Sprachzeile[]>([])
   const [werkzeug, setWerkzeug] = useState<string | null>(null)
@@ -198,6 +220,12 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
   const ws = useRef<WebSocket | null>(null)
   const mikro = useRef<Aufnahme | null>(null)
   const lautsprecher = useRef<Wiedergabe | null>(null)
+  const rtc = useRef<RTCPeerConnection | null>(null)
+  const rtcMikro = useRef<MediaStream | null>(null)
+  const rtcAudio = useRef<HTMLAudioElement | null>(null)
+  const rtcKontext = useRef<AudioContext | null>(null)
+  const rtcMesser = useRef<AnalyserNode | null>(null)
+  const rtcProbe = useRef<Uint8Array<ArrayBuffer> | null>(null)
   /** Ob der letzte Abbruch planmäßig war — dann wird neu verbunden. */
   const planmaessig = useRef(false)
   /** Verhindert, dass ein Neustart eine bereits beendete Sitzung wiederbelebt. */
@@ -208,6 +236,16 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     mikro.current = null
     lautsprecher.current?.schliessen()
     lautsprecher.current = null
+    rtc.current?.close()
+    rtc.current = null
+    rtcMikro.current?.getTracks().forEach((spur) => spur.stop())
+    rtcMikro.current = null
+    rtcAudio.current?.pause()
+    rtcAudio.current = null
+    void rtcKontext.current?.close().catch(() => undefined)
+    rtcKontext.current = null
+    rtcMesser.current = null
+    rtcProbe.current = null
     const offen = ws.current
     ws.current = null
     if (offen && offen.readyState <= WebSocket.OPEN) offen.close()
@@ -249,14 +287,18 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     setFehler(null)
     setZustand('verbindet')
 
+    const istRealtime = modus === 'openai_realtime'
+
     // Audio-Wiedergabe direkt bei der Nutzergeste (Klick) initialisieren,
     // um den AudioContext sofort im Zustand 'running' zu haben.
-    try {
-      const spiele = new Wiedergabe()
-      spiele.bereitMachen()
-      lautsprecher.current = spiele
-    } catch (e) {
-      console.warn('AudioContext-Initialisierung fehlgeschlagen:', e)
+    if (!istRealtime) {
+      try {
+        const spiele = new Wiedergabe()
+        spiele.bereitMachen()
+        lautsprecher.current = spiele
+      } catch (e) {
+        console.warn('AudioContext-Initialisierung fehlgeschlagen:', e)
+      }
     }
 
     // Im Panel `undefined` (Cookie im Handshake); in der Desktop-App trägt das
@@ -302,6 +344,66 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
     verbindung.onopen = () => {
       verbunden = true
       window.clearTimeout(verbindungTimeout)
+      if (istRealtime) {
+        void (async () => {
+          const verarbeitung = aktuelleVerarbeitung()
+          const geraet = await eingabeGeraetId().catch(() => null)
+          const strom = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              channelCount: 1,
+              echoCancellation: verarbeitung.echo,
+              noiseSuppression: verarbeitung.rauschen,
+              autoGainControl: verarbeitung.autogain,
+              ...(geraet ? { deviceId: { ideal: geraet } } : {}),
+            },
+          })
+          if (!gewollt.current || ws.current !== verbindung) {
+            strom.getTracks().forEach((spur) => spur.stop())
+            return
+          }
+          rtcMikro.current = strom
+          const peer = new RTCPeerConnection()
+          rtc.current = peer
+          const kontext = new AudioContext()
+          const quelle = kontext.createMediaStreamSource(strom)
+          const gain = kontext.createGain()
+          gain.gain.value = verarbeitung.verstaerkung
+          const messer = kontext.createAnalyser()
+          messer.fftSize = 256
+          const ziel = kontext.createMediaStreamDestination()
+          quelle.connect(gain)
+          gain.connect(messer)
+          messer.connect(ziel)
+          rtcKontext.current = kontext
+          rtcMesser.current = messer
+          rtcProbe.current = new Uint8Array(messer.fftSize)
+          ziel.stream.getTracks().forEach((spur) => peer.addTrack(spur, ziel.stream))
+          peer.createDataChannel('oai-events')
+          peer.ontrack = (event) => {
+            const audio = new Audio()
+            audio.autoplay = true
+            audio.srcObject = event.streams[0] ?? new MediaStream([event.track])
+            rtcAudio.current = audio
+            void ausgabeGeraetId().then((sink) => {
+              const mitSink = audio as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
+              if (sink && mitSink.setSinkId) return mitSink.setSinkId(sink)
+            }).then(() => audio.play()).catch(() => setFehler('ai.voice.errors.audio'))
+          }
+          const offer = await peer.createOffer()
+          await peer.setLocalDescription(offer)
+          // OpenAIs WebRTC-Endpunkt übernimmt die ICE-Aushandlung. Auf ein
+          // lokales `complete` zu warten fügte bei manchen Browsern bis zu drei
+          // Sekunden hinzu, ohne den Vertrag des Endpunkts zu verbessern.
+          if (verbindung.readyState === WebSocket.OPEN && peer.localDescription?.sdp) {
+            verbindung.send(JSON.stringify({ art: 'webrtc_offer', sdp: peer.localDescription.sdp }))
+          }
+        })().catch((fehler: unknown) => {
+          const name = (fehler as { name?: string })?.name ?? ''
+          setFehler(name === 'NotAllowedError' ? 'ai.voice.errors.microphone' : 'ai.voice.errors.audio')
+          beenden()
+        })
+        return
+      }
       lautsprecher.current?.bereitMachen()
       void starteAufnahme((paket) => {
         // Nur senden, wenn die Leitung wirklich offen ist. Ein Paket auf einen
@@ -357,6 +459,12 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
         return
       }
       switch (nachricht.art) {
+        case 'webrtc_answer':
+          if (istRealtime && rtc.current && typeof nachricht.sdp === 'string') {
+            void rtc.current.setRemoteDescription({ type: 'answer', sdp: nachricht.sdp })
+              .catch(() => setFehler('ai.voice.errors.provider'))
+          }
+          break
         case 'bereit':
           setFehler(null)
           setZustand('bereit')
@@ -488,6 +596,10 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
           if (nachricht.geo_camera) {
             setGeoData((current) => applyGeoCameraCommand(current, nachricht.geo_camera))
           }
+          const quellen = webBelege(nachricht.web_results)
+          if (quellen.length > 0) {
+            setBelege((bisher) => [...bisher, ...quellen].slice(-MAX_BELEGE))
+          }
           break
         }
         case 'beleg': {
@@ -511,7 +623,11 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
           // wie eine solche Kennung aussieht. Ohne diese Prüfung liesse ein
           // Feld voller Punkte den Menschen in `de.json` spazieren gehen.
           const daten = nachricht.vorschlag
-          if (!daten || typeof daten !== 'object') break
+          if (daten === null) {
+            setVorschlag(null)
+            break
+          }
+          if (typeof daten !== 'object') break
           const roh = daten as Record<string, unknown>
           const werkzeug = String(roh.tool_name ?? '')
           if (!/^[a-z0-9_]{1,64}$/.test(werkzeug)) break
@@ -525,6 +641,9 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
           // Planmäßiges Ende nach der Höchstdauer. Der Server schließt gleich;
           // `onclose` verbindet dann neu.
           planmaessig.current = true
+          break
+        case 'fehler':
+          setFehler('ai.voice.errors.provider')
           break
         case 'stoerung':
           // `grund` wird nicht als Schluessel durchgereicht, nur der eine
@@ -552,6 +671,16 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
       mikro.current = null
       lautsprecher.current?.schliessen()
       lautsprecher.current = null
+      rtc.current?.close()
+      rtc.current = null
+      rtcMikro.current?.getTracks().forEach((spur) => spur.stop())
+      rtcMikro.current = null
+      rtcAudio.current?.pause()
+      rtcAudio.current = null
+      void rtcKontext.current?.close().catch(() => undefined)
+      rtcKontext.current = null
+      rtcMesser.current = null
+      rtcProbe.current = null
       ws.current = null
       setWerkzeug(null)
       // Die offenen Vorschläge der Brücke leben in der Sitzung und nicht in
@@ -580,7 +709,7 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
       }
       setZustand('aus')
     }
-  }, [beenden, providerId, zeileAnhaengen])
+  }, [beenden, modus, providerId, zeileAnhaengen])
 
   // Wer die Seite verlässt, lässt kein offenes Mikrofon zurück.
   useEffect(() => () => {
@@ -601,7 +730,18 @@ export function useSprachsitzung(providerId?: number | null): Ergebnis {
   // die Stimme der KI. Ein Maximum über beide wäre bequemer und falsch — dann
   // atmete die Blase auch dann, wenn nur ein Lüfter neben dem Mikrofon steht.
   const pegel = useCallback(
-    () => (zustand === 'hoert' ? mikro.current?.pegel() : lautsprecher.current?.pegel()) ?? 0,
+    () => {
+      if (zustand === 'hoert' && rtcMesser.current && rtcProbe.current) {
+        rtcMesser.current.getByteTimeDomainData(rtcProbe.current)
+        let summe = 0
+        for (const sample of rtcProbe.current) {
+          const wert = (sample - 128) / 128
+          summe += wert * wert
+        }
+        return Math.min(1, Math.sqrt(summe / rtcProbe.current.length) * 4)
+      }
+      return (zustand === 'hoert' ? mikro.current?.pegel() : lautsprecher.current?.pegel()) ?? 0
+    },
     [zustand],
   )
 

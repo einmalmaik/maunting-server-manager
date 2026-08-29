@@ -168,6 +168,16 @@ class AiProviderCreate(BaseModel):
     # hoerende Modell des Chatzugangs. Auch dieses Feld wird nicht gegen
     # `provider_kind` geprueft, aus demselben Grund wie die Stimme darueber.
     transcription_model: Modellkennung = Field(default=None, max_length=256)
+    realtime_default: bool = False
+    realtime_model: Modellkennung = Field(default=None, max_length=256)
+    realtime_voice: str | None = Field(default=None, max_length=16)
+    realtime_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
+    realtime_language: str = Field(default="auto", max_length=16)
+    realtime_vad_eagerness: str = Field(default="auto", max_length=16)
+    realtime_text_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    realtime_text_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    realtime_audio_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    realtime_audio_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     # Die Worker-Rolle dieses Zugangs: das Modell, mit dem Auftraege im
     # Hintergrund arbeiten, und seine **feste** Denkstufe. Leer heisst „keine
     # Worker-Rolle" — dann gilt der heutige Ein-Modell-Betrieb. Die Stufe wird
@@ -206,6 +216,16 @@ class AiProviderUpdate(BaseModel):
     # als der Schluessel darunter, den die Antwort nie zurueckgibt.
     default_voice: Stimme = None
     transcription_model: Modellkennung = Field(default=None, max_length=256)
+    realtime_default: bool | None = None
+    realtime_model: Modellkennung = Field(default=None, max_length=256)
+    realtime_voice: str | None = Field(default=None, max_length=16)
+    realtime_reasoning_effort: Stufenwort = Field(default=None, max_length=16)
+    realtime_language: str | None = Field(default=None, max_length=16)
+    realtime_vad_eagerness: str | None = Field(default=None, max_length=16)
+    realtime_text_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    realtime_text_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    realtime_audio_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    realtime_audio_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     # Wie bei Stimme und Gehoer: „nicht mitgeschickt" laesst den Wert stehen,
     # ein ausdrueckliches ``null`` (bzw. leeres Feld) loescht ihn — getrennt
     # durch `model_dump(exclude_unset=True)` im Router.
@@ -243,6 +263,16 @@ class AiProviderResponse(BaseModel):
     default_voice: str | None = None
     #: Wie `default_voice` ungeprueft gelesen, aus demselben Grund.
     transcription_model: str | None = None
+    realtime_default: bool = False
+    realtime_model: str | None = None
+    realtime_voice: str | None = None
+    realtime_reasoning_effort: str | None = None
+    realtime_language: str = "auto"
+    realtime_vad_eagerness: str = "auto"
+    realtime_text_input_price_micro_usd_per_million: int | None = None
+    realtime_text_output_price_micro_usd_per_million: int | None = None
+    realtime_audio_input_price_micro_usd_per_million: int | None = None
+    realtime_audio_output_price_micro_usd_per_million: int | None = None
     #: Die Worker-Rolle des Zugangs, roh aus der Zeile. ``None`` heisst „keine
     #: Worker-Rolle konfiguriert" (Ein-Modell-Betrieb). Nur der Betreiber sieht
     #: das — `AiProviderAvailableResponse` traegt es bewusst nicht: der Kunde

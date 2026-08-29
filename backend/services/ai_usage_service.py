@@ -121,6 +121,8 @@ def reserve_ai_usage(
     provider_id: int | None = None,
     model: str | None = None,
     now: datetime | None = None,
+    minimum_token_headroom: int = 0,
+    minimum_cost_headroom_microunits: int = 0,
 ) -> AiUsageEvent:
     """Reserviert eine Anfrage atomar oder liefert dieselbe Reservierung erneut."""
     request_key = _canonical_request_id(request_id)
@@ -129,6 +131,10 @@ def reserve_ai_usage(
         or estimated_tokens > TOKEN_LIMIT_MAX
         or estimated_cost_microunits < 0
         or estimated_cost_microunits > MAX_COST_MICROUNITS
+        or minimum_token_headroom < 0
+        or minimum_token_headroom > TOKEN_LIMIT_MAX
+        or minimum_cost_headroom_microunits < 0
+        or minimum_cost_headroom_microunits > MAX_COST_MICROUNITS
     ):
         raise ValueError("Geschätzter AI-Verbrauch liegt außerhalb des erlaubten Bereichs")
 
@@ -154,6 +160,8 @@ def reserve_ai_usage(
     current_time = now or datetime.now(timezone.utc)
     day_start, week_start, month_start = _period_starts(current_time)
     limits = resolve_effective_limits(db, user)
+    pruef_tokens = max(estimated_tokens, minimum_token_headroom)
+    pruef_kosten = max(estimated_cost_microunits, minimum_cost_headroom_microunits)
 
     minute_count = (
         db.query(func.count(AiUsageEvent.id))
@@ -180,25 +188,25 @@ def reserve_ai_usage(
     _ensure_within(
         limits.daily_token_limit,
         _sum_since(db, user.id, day_start, AiUsageEvent.accounted_tokens),
-        estimated_tokens,
+        pruef_tokens,
         "daily_token_limit",
     )
     _ensure_within(
         limits.weekly_token_limit,
         _sum_since(db, user.id, week_start, AiUsageEvent.accounted_tokens),
-        estimated_tokens,
+        pruef_tokens,
         "weekly_token_limit",
     )
     _ensure_within(
         limits.monthly_token_limit,
         _sum_since(db, user.id, month_start, AiUsageEvent.accounted_tokens),
-        estimated_tokens,
+        pruef_tokens,
         "monthly_token_limit",
     )
     _ensure_within(
         None if limits.monthly_cost_limit_cents is None else limits.monthly_cost_limit_cents * MICROUNITS_PER_CENT,
         _sum_since(db, user.id, month_start, AiUsageEvent.accounted_cost_microunits),
-        estimated_cost_microunits,
+        pruef_kosten,
         "monthly_cost_limit_cents",
     )
 
@@ -409,6 +417,75 @@ def fail_ai_usage(db: Session, event: AiUsageEvent) -> AiUsageEvent:
     return event
 
 
+def realtime_verbrauch_ergaenzen(
+    db: Session,
+    *,
+    event_id: int,
+    text_input: int,
+    text_output: int,
+    audio_input: int,
+    audio_output: int,
+    cost_microunits: int,
+) -> AiUsageEvent:
+    """Ergänzt eine laufende Realtime-Sitzung atomar um genau eine Antwort."""
+    werte = (text_input, text_output, audio_input, audio_output, cost_microunits)
+    if any(wert < 0 for wert in werte):
+        raise ValueError("Realtime-Verbrauch darf nicht negativ sein")
+    event = (
+        db.query(AiUsageEvent)
+        .filter(AiUsageEvent.id == event_id)
+        .with_for_update()
+        .one()
+    )
+    if event.status != "reserved":
+        raise AiUsageConflict("Realtime-Sitzung ist bereits abgeschlossen")
+    delta_tokens = text_input + text_output + audio_input + audio_output
+    neue_tokens = int(event.accounted_tokens or 0) + delta_tokens
+    neue_kosten = int(event.accounted_cost_microunits or 0) + cost_microunits
+    if neue_tokens > TOKEN_LIMIT_MAX or neue_kosten > MAX_COST_MICROUNITS:
+        raise AiQuotaExceeded("realtime_session_limit")
+
+    user = db.query(User).filter(User.id == event.user_id).with_for_update().one()
+    now = datetime.now(timezone.utc)
+    day, week, month = _period_starts(now)
+    limits = resolve_effective_limits(db, user)
+    # Die Summen enthalten den bisherigen Wert dieser offenen Zeile. Nur die
+    # neue Antwort wird als requested addiert.
+    _ensure_within(limits.daily_token_limit, _sum_since(db, user.id, day, AiUsageEvent.accounted_tokens), delta_tokens, "daily_token_limit")
+    _ensure_within(limits.weekly_token_limit, _sum_since(db, user.id, week, AiUsageEvent.accounted_tokens), delta_tokens, "weekly_token_limit")
+    _ensure_within(limits.monthly_token_limit, _sum_since(db, user.id, month, AiUsageEvent.accounted_tokens), delta_tokens, "monthly_token_limit")
+    _ensure_within(
+        None if limits.monthly_cost_limit_cents is None else limits.monthly_cost_limit_cents * MICROUNITS_PER_CENT,
+        _sum_since(db, user.id, month, AiUsageEvent.accounted_cost_microunits),
+        cost_microunits,
+        "monthly_cost_limit_cents",
+    )
+    event.accounted_tokens = neue_tokens
+    event.reserved_tokens = neue_tokens
+    event.accounted_cost_microunits = neue_kosten
+    event.reserved_cost_microunits = neue_kosten
+    event.realtime_text_input_tokens = int(event.realtime_text_input_tokens or 0) + text_input
+    event.realtime_text_output_tokens = int(event.realtime_text_output_tokens or 0) + text_output
+    event.realtime_audio_input_tokens = int(event.realtime_audio_input_tokens or 0) + audio_input
+    event.realtime_audio_output_tokens = int(event.realtime_audio_output_tokens or 0) + audio_output
+    event.provider_requests = int(event.provider_requests or 0) + 1
+    event.cost_source = "estimate"
+    db.flush()
+    return event
+
+
+def realtime_sitzung_abschliessen(db: Session, event_id: int) -> None:
+    event = db.query(AiUsageEvent).filter(AiUsageEvent.id == event_id).with_for_update().one_or_none()
+    if event is None or event.status != "reserved":
+        return
+    if not event.provider_requests:
+        fail_ai_usage(db, event)
+        return
+    event.status = "completed"
+    event.completed_at = datetime.now(timezone.utc)
+    db.flush()
+
+
 # ── Auswertung ────────────────────────────────────────────────────────
 #
 # Getrennt von der Reservierung, weil es eine andere Frage beantwortet: dort
@@ -514,6 +591,10 @@ class AiUsageEventRow:
     cached_tokens: int | None
     cache_write_tokens: int | None
     reasoning_tokens: int | None
+    realtime_text_input_tokens: int | None
+    realtime_text_output_tokens: int | None
+    realtime_audio_input_tokens: int | None
+    realtime_audio_output_tokens: int | None
     provider_requests: int | None
     cost_micro_usd: int
     cost_source: str | None
@@ -588,6 +669,10 @@ def usage_events(
             cached_tokens=event.cached_tokens,
             cache_write_tokens=event.cache_write_tokens,
             reasoning_tokens=event.reasoning_tokens,
+            realtime_text_input_tokens=event.realtime_text_input_tokens,
+            realtime_text_output_tokens=event.realtime_text_output_tokens,
+            realtime_audio_input_tokens=event.realtime_audio_input_tokens,
+            realtime_audio_output_tokens=event.realtime_audio_output_tokens,
             provider_requests=event.provider_requests,
             cost_micro_usd=int(event.accounted_cost_microunits or 0),
             cost_source=event.cost_source,

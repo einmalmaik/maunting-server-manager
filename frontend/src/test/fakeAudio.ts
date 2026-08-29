@@ -191,6 +191,10 @@ export class FakeAudioContext {
     return { connect: () => undefined, disconnect: () => undefined }
   }
 
+  createMediaStreamDestination(): { stream: FakeMediaStream } {
+    return { stream: new FakeMediaStream() }
+  }
+
   createScriptProcessor(
     groesse: number,
     _eingang = 1,

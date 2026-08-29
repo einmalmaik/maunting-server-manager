@@ -21,6 +21,8 @@ spricht und keine Antwort hoert.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -190,6 +192,56 @@ def test_the_config_names_the_voice_the_operator_chose(
     daten = client.get("/api/ai/voice/config", cookies=owner_cookies).json()
 
     assert daten["voice"] == STIMME
+
+
+def test_dictation_transcribes_pcm_without_sending_a_chat_message(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db, monkeypatch
+) -> None:
+    provider = _zugang(db, kind="openrouter")
+    seen = {}
+
+    async def fake_transcription(**kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(
+            grund=None,
+            abschrift=SimpleNamespace(wortlaut="eingefügter Text"),
+        )
+
+    monkeypatch.setattr(ai_voice, "transkribieren", fake_transcription)
+    response = client.post(
+        f"/api/ai/voice/transcribe?provider_id={provider.id}",
+        content=b"\x00\x00\x01\x00",
+        headers={
+            "X-CSRF-Token": csrf_token,
+            "Content-Type": "application/octet-stream",
+        },
+        cookies=owner_cookies,
+    )
+    assert response.status_code == 200
+    assert response.json() == {"text": "eingefügter Text"}
+    assert seen["provider_id"] == provider.id
+    assert seen["pcm"] == b"\x00\x00\x01\x00"
+
+
+def test_dictation_rejects_non_pcm_payload_before_provider_call(
+    client: TestClient, owner_cookies: dict, csrf_token: str, db, monkeypatch
+) -> None:
+    provider = _zugang(db, kind="openrouter")
+    called = False
+
+    async def fake_transcription(**kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(ai_voice, "transkribieren", fake_transcription)
+    response = client.post(
+        f"/api/ai/voice/transcribe?provider_id={provider.id}",
+        content=b"not pcm",
+        headers={"X-CSRF-Token": csrf_token, "Content-Type": "text/plain"},
+        cookies=owner_cookies,
+    )
+    assert response.status_code == 415
+    assert called is False
 
 
 def test_the_test_button_speaks_instead_of_chatting(

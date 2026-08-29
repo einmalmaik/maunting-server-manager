@@ -12,7 +12,10 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from html import unescape
 from typing import Any, Callable
+from urllib.parse import urlparse
+from xml.etree import ElementTree
 
 import httpx
 
@@ -26,6 +29,7 @@ SETTINGS_KEY = "ai_tomtom_traffic_key_encrypted"
 _AAD = "msm:settings:ai_tomtom_traffic_key"
 _TOMTOM_FLOW_ENDPOINT = "https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json"
 _REDDIT_SEARCH_ENDPOINT = "https://www.reddit.com/search.json"
+_REDDIT_FEED_ENDPOINT = "https://www.reddit.com/search.rss"
 _BLUESKY_SEARCH_ENDPOINT = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts"
 _TIMEOUT = 4.0
 _CACHE_TTL_SECONDS = 20.0
@@ -207,11 +211,11 @@ def _reddit_posts(query: str) -> list[dict[str, str]]:
                 headers={"Accept": "application/json", "User-Agent": "MSM-Server-Manager/3.0"},
             )
         if response.status_code != 200:
-            return []
+            return _reddit_feed_posts(query)
         children = response.json().get("data", {}).get("children", [])
     except (httpx.HTTPError, ValueError, AttributeError) as exc:
         logger.info("Reddit-Suche nicht verfuegbar error=%s", type(exc).__name__)
-        return []
+        return _reddit_feed_posts(query)
     results: list[dict[str, str]] = []
     for child in children[:_MAX_RESULTS] if isinstance(children, list) else []:
         data = child.get("data", {}) if isinstance(child, dict) else {}
@@ -220,9 +224,55 @@ def _reddit_posts(query: str) -> list[dict[str, str]]:
             continue
         results.append({
             "title": _safe_text(data.get("title"), 160),
-            "snippet": _safe_text(data.get("selftext"), 300),
+            "snippet": _safe_text(
+                data.get("selftext") or data.get("subreddit_name_prefixed"),
+                300,
+            ),
             "url": f"https://www.reddit.com{permalink[:300]}",
         })
+    return results or _reddit_feed_posts(query)
+
+
+def _reddit_feed_posts(query: str) -> list[dict[str, str]]:
+    """Use Reddit's public Atom feed when anonymous JSON access is blocked."""
+    try:
+        with measure("regional_connectors", "reddit_feed_request"):
+            response = _http_client().get(
+                _REDDIT_FEED_ENDPOINT,
+                params={"q": query, "limit": _MAX_RESULTS, "sort": "new"},
+                headers={
+                    "Accept": "application/atom+xml, application/rss+xml",
+                    "User-Agent": "MSM-Server-Manager/3.0",
+                },
+            )
+        if response.status_code != 200:
+            return []
+        root = ElementTree.fromstring(response.text)
+    except (httpx.HTTPError, ElementTree.ParseError, AttributeError) as exc:
+        logger.info("Reddit-Feed nicht verfuegbar error=%s", type(exc).__name__)
+        return []
+
+    namespace = {"atom": "http://www.w3.org/2005/Atom"}
+    results: list[dict[str, str]] = []
+    for entry in root.findall("atom:entry", namespace)[:_MAX_RESULTS]:
+        title = _safe_text(entry.findtext("atom:title", default="", namespaces=namespace), 160)
+        content = entry.findtext("atom:content", default="", namespaces=namespace)
+        summary = entry.findtext("atom:summary", default="", namespaces=namespace)
+        snippet = re.sub(r"<[^>]+>", " ", unescape(content or summary or ""))
+        snippet = _safe_text(re.sub(r"\s+", " ", snippet).strip(), 300)
+        link_element = entry.find("atom:link[@rel='alternate']", namespace)
+        if link_element is None:
+            link_element = entry.find("atom:link", namespace)
+        url = link_element.get("href", "") if link_element is not None else ""
+        parsed = urlparse(url)
+        if (
+            not title
+            or parsed.scheme != "https"
+            or parsed.hostname not in {"reddit.com", "www.reddit.com"}
+            or not parsed.path.startswith("/r/")
+        ):
+            continue
+        results.append({"title": title, "snippet": snippet, "url": url[:300]})
     return results
 
 

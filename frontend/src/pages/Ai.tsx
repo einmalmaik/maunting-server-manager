@@ -149,7 +149,7 @@ export function Ai() {
 
   const workerId = suchParameter.get('id')
   const gewuenscht = ansichtAusAbfrage(suchParameter.get('ansicht'), workerId)
-  // Ohne eingerichteten Realtime-Zugang gibt es den Sprachmodus nicht — auch
+  // Ohne eingerichteten Sprachzugang gibt es den Sprachmodus nicht — auch
   // dann nicht, wenn er in der Adresse steht. Dieselbe Regel wie beim Knopf.
   // Und ohne `ai.tasks.manage` keine Aufgabenliste: das Backend wiese den
   // Abruf ohnehin mit 403 ab, aber eine Ansicht, die nur einen Fehler zeigen
@@ -174,10 +174,8 @@ export function Ai() {
   }
 
   // Zwei Bedingungen, und beide müssen stimmen: das Recht *und* ein
-  // eingerichteter Sprachweg. Der besteht aus zwei Zugängen — Gehör und Stimme
-  // —, aber das entscheidet das Backend: `available` ist erst wahr, wenn beide
-  // stehen. Fehlt einer, gibt es keinen Knopf — nicht ausgegraut, sondern gar
-  // nicht. Dieselbe Regel wie bei `web_search`.
+  // eingerichteter Sprachweg. Das Backend entscheidet, ob OpenAI Realtime oder
+  // der Legacy-Weg aus Gehör und Stimme betriebsbereit ist.
   useEffect(() => {
     if (!canSpeak) return
     let lebt = true
@@ -190,17 +188,15 @@ export function Ai() {
           return
         }
         console.info(
-          'Sprachmodus nicht verfuegbar: es braucht zwei Zugaenge — einen Chatzugang ' +
-            'mit hinterlegtem Modell fuer Gesprochenes und einen ElevenLabs-Zugang mit ' +
-            'Voice ID. Einzurichten unter Einstellungen → KI → Anbieter.',
+          'Sprachmodus nicht verfuegbar: OpenAI Realtime oder der Legacy-Weg ' +
+            'aus Transkriptionsmodell und ElevenLabs ist nicht vollständig eingerichtet.',
           konfiguration,
         )
       })
       .catch((fehler: unknown) => {
         console.error(
-          'Sprachmodus: /api/ai/voice/config nicht abrufbar. Steht die Migration noch ' +
-            'aus (`alembic upgrade head`)? Die Spalten `transcription_model` und ' +
-            '`default_voice` kamen am 16.08.2026 dazu.',
+          'Sprachmodus: /api/ai/voice/config ist nicht abrufbar. Prüfe Backend, ' +
+            'Datenbankmigration und Provider-Konfiguration.',
           fehler,
         )
       })

@@ -33,6 +33,20 @@ interface ProviderDraft extends AiProviderWrite {
  */
 const KEIN_WORKER = '__aus__'
 const KEINE_ETHICS = '__aus__'
+const EMPFOHLENE_REALTIME_MODELLE = ['gpt-realtime-1.5', 'gpt-realtime-2'] as const
+
+function realtimeModellOptionen(models: AiCatalogModel[] | null | undefined, t: (key: string) => string) {
+  const ausKatalog = (models ?? [])
+    .filter((item) => item.model_id.toLowerCase().includes('realtime'))
+    .map((item) => ({ value: item.model_id, label: item.model_id, hint: modellHinweis(item, t) }))
+  const vorhanden = new Set(ausKatalog.map((item) => item.value))
+  for (const model of EMPFOHLENE_REALTIME_MODELLE) {
+    if (!vorhanden.has(model)) {
+      ausKatalog.push({ value: model, label: model, hint: t('ai.providers.recommended') })
+    }
+  }
+  return ausKatalog
+}
 
 /**
  * Der Hinweis unter einer Modellzeile: Anzeigename, Empfehlung, Bildsicht.
@@ -70,6 +84,16 @@ const EMPTY_PROVIDER: ProviderDraft = {
   // ein geratenes Hoermodell stuende auf der Rechnung des Betreibers.
   default_voice: null,
   transcription_model: null,
+  realtime_default: false,
+  realtime_model: null,
+  realtime_voice: null,
+  realtime_reasoning_effort: null,
+  realtime_language: 'auto',
+  realtime_vad_eagerness: 'auto',
+  realtime_text_input_price_micro_usd_per_million: null,
+  realtime_text_output_price_micro_usd_per_million: null,
+  realtime_audio_input_price_micro_usd_per_million: null,
+  realtime_audio_output_price_micro_usd_per_million: null,
   // Ohne Worker-Modell gilt der heutige Ein-Modell-Betrieb — der dokumentierte
   // Fallback (docs/agentic-framework.md, §5), keine Pflichtangabe.
   worker_model: null,
@@ -94,6 +118,16 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     token_price_micro_usd_per_million: provider.token_price_micro_usd_per_million,
     default_voice: provider.default_voice,
     transcription_model: provider.transcription_model,
+    realtime_default: provider.realtime_default ?? false,
+    realtime_model: provider.realtime_model ?? null,
+    realtime_voice: provider.realtime_voice ?? null,
+    realtime_reasoning_effort: provider.realtime_reasoning_effort ?? null,
+    realtime_language: provider.realtime_language ?? 'auto',
+    realtime_vad_eagerness: provider.realtime_vad_eagerness ?? 'auto',
+    realtime_text_input_price_micro_usd_per_million: provider.realtime_text_input_price_micro_usd_per_million ?? null,
+    realtime_text_output_price_micro_usd_per_million: provider.realtime_text_output_price_micro_usd_per_million ?? null,
+    realtime_audio_input_price_micro_usd_per_million: provider.realtime_audio_input_price_micro_usd_per_million ?? null,
+    realtime_audio_output_price_micro_usd_per_million: provider.realtime_audio_output_price_micro_usd_per_million ?? null,
     worker_model: provider.worker_model,
     worker_reasoning_effort: provider.worker_reasoning_effort,
     ethics_model: provider.ethics_model,
@@ -198,6 +232,20 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
               ? draft.ethics_reasoning_effort || null
               : null,
             ethics_mode: draft.ethics_mode || 'auto',
+            ...(draft.provider_kind === 'openai' ? {
+              realtime_default: Boolean(draft.realtime_default),
+              realtime_model: draft.realtime_model?.trim() || null,
+              realtime_voice: draft.realtime_voice || null,
+              realtime_reasoning_effort: draft.realtime_model?.toLowerCase().includes('realtime-2')
+                ? draft.realtime_reasoning_effort || null
+                : null,
+              realtime_language: draft.realtime_language || 'auto',
+              realtime_vad_eagerness: draft.realtime_vad_eagerness || 'auto',
+              realtime_text_input_price_micro_usd_per_million: draft.realtime_text_input_price_micro_usd_per_million ?? null,
+              realtime_text_output_price_micro_usd_per_million: draft.realtime_text_output_price_micro_usd_per_million ?? null,
+              realtime_audio_input_price_micro_usd_per_million: draft.realtime_audio_input_price_micro_usd_per_million ?? null,
+              realtime_audio_output_price_micro_usd_per_million: draft.realtime_audio_output_price_micro_usd_per_million ?? null,
+            } : {}),
           }
         : {}),
       // Wie die Felder darueber: nur mit dem Zugang, der ihn braucht. Ein
@@ -462,6 +510,11 @@ function ProviderForm({
   const ethicsModusId = useId()
   const ttsModellId = useId()
   const ressourceId = useId()
+  const realtimeModelId = useId()
+  const realtimeVoiceId = useId()
+  const realtimeReasoningId = useId()
+  const realtimeLanguageId = useId()
+  const realtimeVadId = useId()
 
   // Solange die Politik nicht geladen ist, gilt USD 1:1 — die Waehrung der
   // Buchung. Ein Rueckfall auf Euro wuerde einen getippten Preis stillschweigend
@@ -508,7 +561,7 @@ function ProviderForm({
   const valid = Boolean(
     draft.name.trim() &&
     draft.provider_kind &&
-    (draft.default_model?.trim() || draft.transcription_model?.trim() || draft.default_voice?.trim()) &&
+    (draft.default_model?.trim() || draft.transcription_model?.trim() || draft.default_voice?.trim() || draft.realtime_model?.trim()) &&
     // Ein Azure-Zugang ohne Ressourcennamen hat keine Adresse. Der Server
     // lehnt ihn ohnehin ab; hier gesperrt, damit der Betreiber die Absage
     // nicht erst nach dem Klick liest.
@@ -752,6 +805,90 @@ function ProviderForm({
               </div>
               )}
             </div>
+          </div>
+        )}
+
+        {draft.provider_kind === 'openai' && (
+          <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  {t('ai.providers.realtime.title')}
+                </h4>
+                <p className="msm-field-help mt-1">{t('ai.providers.realtime.hint')}</p>
+              </div>
+              <Switch
+                checked={Boolean(draft.realtime_default)}
+                onCheckedChange={(realtime_default) => change({ realtime_default })}
+                aria-label={t('ai.providers.realtime.enabled')}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <label htmlFor={realtimeModelId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  {t('ai.providers.realtime.model')}
+                </label>
+                <Dropdown
+                  id={realtimeModelId}
+                  value={draft.realtime_model || null}
+                  onChange={(realtime_model) => change({
+                    realtime_model,
+                    realtime_reasoning_effort: realtime_model.toLowerCase().includes('realtime-2')
+                      ? draft.realtime_reasoning_effort
+                      : null,
+                  })}
+                  placeholder={t('ai.providers.modelChoose')}
+                  options={realtimeModellOptionen(models, t)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor={realtimeVoiceId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.voice')}</label>
+                <Dropdown
+                  id={realtimeVoiceId}
+                  value={draft.realtime_voice || null}
+                  onChange={(realtime_voice) => change({ realtime_voice: realtime_voice as AiProviderAdmin['realtime_voice'] })}
+                  placeholder={t('ai.providers.realtime.voiceChoose')}
+                  options={['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'].map((voice) => ({
+                    value: voice,
+                    label: voice,
+                    hint: voice === 'marin' || voice === 'cedar' ? t('ai.providers.recommended') : undefined,
+                  }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor={realtimeReasoningId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.reasoning')}</label>
+                <Dropdown
+                  id={realtimeReasoningId}
+                  value={draft.realtime_reasoning_effort || null}
+                  disabled={!draft.realtime_model?.toLowerCase().includes('realtime-2')}
+                  onChange={(realtime_reasoning_effort) => change({ realtime_reasoning_effort: realtime_reasoning_effort as AiProviderAdmin['realtime_reasoning_effort'] })}
+                  placeholder={t('ai.providers.realtime.reasoningOff')}
+                  options={['low', 'medium', 'high'].map((value) => ({ value, label: t(`ai.providers.realtime.reasoningValues.${value}`) }))}
+                />
+                <p className="msm-field-help">{t('ai.providers.realtime.reasoningHint')}</p>
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor={realtimeLanguageId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.language')}</label>
+                <Dropdown id={realtimeLanguageId} value={draft.realtime_language || 'auto'} onChange={(value) => change({ realtime_language: value as AiProviderAdmin['realtime_language'] })} options={[
+                  { value: 'auto', label: t('ai.providers.realtime.auto') },
+                  { value: 'de', label: 'Deutsch' },
+                  { value: 'en', label: 'English' },
+                ]} />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor={realtimeVadId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{t('ai.providers.realtime.vad')}</label>
+                <Dropdown id={realtimeVadId} value={draft.realtime_vad_eagerness || 'auto'} onChange={(value) => change({ realtime_vad_eagerness: value as AiProviderAdmin['realtime_vad_eagerness'] })} options={['auto', 'low', 'medium', 'high'].map((value) => ({ value, label: t(`ai.providers.realtime.vadValues.${value}`) }))} />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <RealtimePreisInput label={t('ai.providers.realtime.textInputPrice')} value={draft.realtime_text_input_price_micro_usd_per_million ?? null} policy={waehrung} onChange={(value) => change({ realtime_text_input_price_micro_usd_per_million: value })} />
+              <RealtimePreisInput label={t('ai.providers.realtime.textOutputPrice')} value={draft.realtime_text_output_price_micro_usd_per_million ?? null} policy={waehrung} onChange={(value) => change({ realtime_text_output_price_micro_usd_per_million: value })} />
+              <RealtimePreisInput label={t('ai.providers.realtime.audioInputPrice')} value={draft.realtime_audio_input_price_micro_usd_per_million ?? null} policy={waehrung} onChange={(value) => change({ realtime_audio_input_price_micro_usd_per_million: value })} />
+              <RealtimePreisInput label={t('ai.providers.realtime.audioOutputPrice')} value={draft.realtime_audio_output_price_micro_usd_per_million ?? null} policy={waehrung} onChange={(value) => change({ realtime_audio_output_price_micro_usd_per_million: value })} />
+            </div>
+            {draft.realtime_default && (
+              <p className="text-xs text-on-surface-variant">{t('ai.providers.realtime.legacyPaused')}</p>
+            )}
           </div>
         )}
 
@@ -1137,6 +1274,25 @@ function ProviderInput({ label, value, onChange, className = '', ...props }: {
   className?: string
 } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'>) {
   return <label className={`space-y-1.5 ${className}`}><span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">{label}</span><input className="msm-input" value={value} onChange={(event) => onChange(event.target.value)} {...props} /></label>
+}
+
+function RealtimePreisInput({ label, value, policy, onChange }: {
+  label: string
+  value: number | null
+  policy: Pick<AiCostPolicy, 'currency' | 'usd_rate'>
+  onChange: (value: number | null) => void
+}) {
+  const [text, setText] = useState(() => microUsdInEingabe(value, policy))
+  useEffect(() => setText(microUsdInEingabe(value, policy)), [value, policy.currency, policy.usd_rate])
+  return (
+    <ProviderInput
+      label={label}
+      value={text}
+      inputMode="decimal"
+      onChange={setText}
+      onBlur={() => onChange(eingabeInMicroUsd(text, policy))}
+    />
+  )
 }
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {

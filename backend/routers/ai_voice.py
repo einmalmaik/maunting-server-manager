@@ -12,19 +12,18 @@ Origin gegen die CORS-Allowlist statt CSRF, dann Cookie, dann Recht, Abweisung
 jeweils als ``close(1008)``. Wer das kopiert, kopiert eine Entscheidung, die
 schon einmal getroffen und begründet wurde.
 
-**Der Sprachmodus braucht zwei Zugänge, nicht einen.** Das Modell, das denkt,
-ist dasselbe wie im getippten Chat (OpenRouter); dazu kommt eine Stimme
-(ElevenLabs). Fehlt einer von beiden, gibt es keinen Sprachmodus — und der
-Knopf erscheint erst gar nicht. Bis zum 16.08.2026 stand hier ein einziger
-Zugang, weil OpenAIs Realtime-API beides in einem tat: sie dachte und sprach.
-Sie tat damit auch alles doppelt, was der Chat schon konnte.
+Der Router wählt genau einen von zwei Wegen. Ein panelweit aktivierter
+OpenAI-Realtime-Zugang hat Vorrang und verwendet WebRTC plus serverseitiges
+Sideband. Ohne ihn bleibt der Legacy-Weg aus Transkription, normalem Chatlauf,
+Pipecat und ElevenLabs unverändert. Ein Laufzeitfehler wechselt niemals still
+zwischen diesen Wegen.
 """
 
 from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
@@ -32,6 +31,7 @@ from database import SessionLocal, get_db
 from dependencies import (
     get_current_user_for_ws,
     require_global,
+    verify_csrf,
     ws_session_familie,
     ws_session_herkunft,
     ws_subprotokoll,
@@ -47,6 +47,8 @@ from services import (
 )
 from services.permission_service import has_global_permission
 from services.ai_voice.pipecat_pipeline import pipecat_verfuegbar
+from services.ai_voice.realtime_session import RealtimeSitzung, vorbereiten as realtime_vorbereiten
+from services.ai_voice.transcription import hoeren as transkribieren
 
 logger = logging.getLogger(__name__)
 
@@ -222,19 +224,27 @@ def voice_config(
     `web_search`, das ohne hinterlegten Schlüssel nicht einmal im
     Werkzeugkatalog steht.
     """
-    zugaenge = sprachzugang(db, user, bevorzugter_provider_id=provider_id)
+    realtime = ai_provider_service.realtime_zugang(db)
+    zugaenge = None if realtime else sprachzugang(db, user, bevorzugter_provider_id=provider_id)
     hoeren, denken, sprechen = zugaenge if zugaenge else (None, None, None)
+    diktat = _hoerender_zugang(db, provider_id or user.ai_provider_id)
     return {
-        "available": zugaenge is not None and pipecat_verfuegbar(),
+        "available": realtime is not None or (zugaenge is not None and pipecat_verfuegbar()),
+        "mode": "openai_realtime" if realtime else "legacy",
         # Das denkende Modell, nicht das hörende: danach fragt, wer wissen will,
         # wer da antwortet.
-        "model": denken.default_model if denken else None,
+        "model": realtime.realtime_model if realtime else (denken.default_model if denken else None),
         "sample_rate": ai_voice_vad.ABTASTRATE,
         "max_seconds": ai_voice_bridge.MAX_SITZUNGSSEKUNDEN,
         # Die Stimm-Kennung. Sie steht im Info-Dialog und ist ohne
         # eingerichteten Zugang ``null`` — es gibt hier nichts aufzulösen, weil
         # es keine Standardstimme gibt und geben soll.
-        "voice": sprechen.default_voice if sprechen else None,
+        "voice": realtime.realtime_voice if realtime else (sprechen.default_voice if sprechen else None),
+        "language": realtime.realtime_language if realtime else "auto",
+        "reasoning_effort": realtime.realtime_reasoning_effort if realtime else None,
+        "dictation_available": bool(
+            diktat and has_global_permission(db, user, "ai.chat.use")
+        ),
         # Fähigkeitsmarker für die Desktop-App: dieses Backend nimmt das
         # Bearer-Token als WebSocket-Subprotokoll an. Ein gescheiterter
         # WS-Handshake verrät dem Browser nichts — die App fragt dann hier
@@ -242,6 +252,52 @@ def voice_config(
         # älteren Ständen fehlt das Feld, und genau das ist die Auskunft.
         "bearer_ws": True,
     }
+
+
+@router.post("/transcribe")
+async def transcribe_voice_input(
+    request: Request,
+    provider_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_global("ai.chat.use")),
+    _: None = Depends(verify_csrf),
+) -> dict:
+    """Transkribiert begrenztes PCM für das Chat-Eingabefeld, ohne zu senden."""
+    if not has_global_permission(db, user, "ai.voice.use"):
+        raise HTTPException(status_code=403, detail="Nicht erlaubt")
+    if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/octet-stream":
+        raise HTTPException(status_code=415, detail="Audio muss als PCM übertragen werden")
+    zugang = _hoerender_zugang(db, provider_id)
+    if zugang is None or zugang.id != provider_id:
+        raise HTTPException(status_code=400, detail="Kein Transkriptionsmodell eingerichtet")
+    max_bytes = ai_voice_vad.ABTASTRATE * 2 * 180
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > max_bytes:
+                raise HTTPException(status_code=413, detail="Audioaufnahme ist zu lang")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Ungültige Audioaufnahme") from exc
+    pcm_puffer = bytearray()
+    async for teil in request.stream():
+        if len(pcm_puffer) + len(teil) > max_bytes:
+            raise HTTPException(status_code=413, detail="Audioaufnahme ist zu lang")
+        pcm_puffer.extend(teil)
+    pcm = bytes(pcm_puffer)
+    if not pcm or len(pcm) % 2:
+        raise HTTPException(status_code=400, detail="Ungültige Audioaufnahme")
+    ergebnis = await transkribieren(
+        client=request.app.state.ai_http_client,
+        user_id=user.id,
+        provider_id=provider_id,
+        pcm=pcm,
+        resolve_api_key=ai_provider_service.resolve_api_key,
+    )
+    if ergebnis.grund == "kontingent":
+        raise HTTPException(status_code=429, detail="KI-Kontingent ist ausgeschöpft")
+    if ergebnis.abschrift is None:
+        raise HTTPException(status_code=502, detail="Sprache konnte nicht erkannt werden")
+    return {"text": ergebnis.abschrift.wortlaut}
 
 
 @router.websocket("/ws")
@@ -269,22 +325,46 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
             await websocket.close(code=1008)
             return
 
-        # Pipecat ist der einzige Voice-Rand. Fehlt das Paket oder passt seine
-        # Version nicht, bleibt das Panel erreichbar, aber der Socket wird wie
-        # ein nicht eingerichteter Sprachmodus abgewiesen. Es gibt keinen
-        # zweiten, stillen Orchestrierungspfad.
-        if not pipecat_verfuegbar():
+        realtime = ai_provider_service.realtime_zugang(db)
+        if realtime is not None:
+            herkunft = ws_session_herkunft(websocket)
+            familie = ws_session_familie(websocket)
+            try:
+                realtime_daten = await run_in_threadpool(
+                    realtime_vorbereiten,
+                    db,
+                    provider=realtime,
+                    user=user,
+                    herkunft=herkunft,
+                )
+            except Exception:
+                # Kein Anbieterfehler, Schlüssel oder Quotendetail verlässt
+                # den noch nicht aufgebauten authentifizierten Kanal.
+                db.rollback()
+                await websocket.close(code=1008)
+                return
+            benutzer_id = user.id
+        else:
+            realtime_daten = None
+
+        # Pipecat ist ausschließlich der Legacy-Voice-Rand. Realtime darf weder
+        # von seiner Installation noch von ElevenLabs oder STT abhängen.
+        if realtime is None and not pipecat_verfuegbar():
             await websocket.close(code=1008)
             return
 
-        zugaenge = sprachzugang(db, user, bevorzugter_provider_id=provider_id)
-        if zugaenge is None:
+        # Ab hier gilt nur noch der Legacy-Vertrag. Fehlt dort ein Zugang,
+        # bleibt das Panel erreichbar, aber der Socket wird abgewiesen.
+        zugaenge = None if realtime else sprachzugang(db, user, bevorzugter_provider_id=provider_id)
+        if realtime is None and zugaenge is None:
             # Nicht eingerichtet. Für den Benutzer ist das dasselbe wie „gibt es
             # nicht" — er hat den Knopf nur deshalb gesehen, weil der Betreiber
             # zwischen Seitenaufruf und Klick etwas entfernt hat.
             await websocket.close(code=1008)
             return
-        hoeren, denken, sprechen = zugaenge
+        if realtime is None:
+            assert zugaenge is not None
+            hoeren, denken, sprechen = zugaenge
 
         # Der Schlüssel wird **vor** dem Upgrade geholt, und zwar im
         # Threadpool: `DisClient.decrypt` ist ein synchroner HTTP-Aufruf mit
@@ -294,33 +374,33 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
         # Nur der für die Stimme: den des Chatzugangs holt die Brücke sich je
         # Zug selbst, weil ein Lauf ohnehin eine eigene Datenbanksitzung
         # aufmacht und ein über Minuten gehaltener Schlüssel nichts gewinnt.
-        stimm_schluessel = await run_in_threadpool(
-            ai_provider_service.resolve_api_key, db, sprechen, user.id
-        )
-        if not stimm_schluessel:
-            await websocket.close(code=1008)
-            return
+            stimm_schluessel = await run_in_threadpool(
+                ai_provider_service.resolve_api_key, db, sprechen, user.id
+            )
+            if not stimm_schluessel:
+                await websocket.close(code=1008)
+                return
 
-        gespraech = await run_in_threadpool(_gespraech_holen, db, user)
-        stimm_kind = sprechen.provider_kind
-        stimm_adresse = ai_tts.stimmweg(stimm_kind).verbindungsadresse(
-            ai_provider_service.base_url(sprechen),
-            sprechen.default_voice or "",
-            sprechen.default_model,
-        )
-        benutzer_id = user.id
-        hoeren_id = hoeren.id
-        denken_id = denken.id
+            gespraech = await run_in_threadpool(_gespraech_holen, db, user)
+            stimm_kind = sprechen.provider_kind
+            stimm_adresse = ai_tts.stimmweg(stimm_kind).verbindungsadresse(
+                ai_provider_service.base_url(sprechen),
+                sprechen.default_voice or "",
+                sprechen.default_model,
+            )
+            benutzer_id = user.id
+            hoeren_id = hoeren.id
+            denken_id = denken.id
         # Aus demselben Token wie die Identitaet — eine gekoppelte App traegt
         # `geraet="desktop"` im Anspruch, und ihre Sprachlaeufe bekommen damit
         # dieselbe Werkzeugmenge wie ihr getippter Chat.
-        herkunft = ws_session_herkunft(websocket)
+            herkunft = ws_session_herkunft(websocket)
         # Und **welcher** Rechner spricht. Der Sprachmodus ist der Hauptweg der
         # App — „schau auf meinen Bildschirm" kommt überwiegend gesprochen an,
         # nicht getippt. Ohne diesen Wert trug jeder Sprachlauf `familie=None`,
         # und sein Desktop-Auftrag war wieder für jedes gekoppelte Gerät
         # abholbar (`desktop_job_service.naechster`).
-        familie = ws_session_familie(websocket)
+            familie = ws_session_familie(websocket)
     finally:
         # Die Sitzung der Anfrage gehört dem Request-Thread. Ab hier läuft eine
         # Verbindung über Minuten; sie darf keine offene Datenbanksitzung
@@ -331,6 +411,24 @@ async def voice_ws(websocket: WebSocket, provider_id: int | None = None) -> None
     # es spiegeln — ein Browser-WebSocket bricht sonst ab, obwohl der Server
     # laengst angenommen hat. Cookie-Clients bekommen das unveraenderte `None`.
     await websocket.accept(subprotocol=ws_subprotokoll(websocket))
+    if realtime_daten is not None:
+        sitzung = RealtimeSitzung(
+            websocket,
+            vorbereitung=realtime_daten,
+            user_id=benutzer_id,
+            http_client=websocket.app.state.ai_http_client,
+            herkunft=herkunft,
+            familie=familie,
+        )
+        try:
+            await sitzung.fuehren()
+        finally:
+            from starlette.websockets import WebSocketState
+
+            if websocket.client_state is WebSocketState.CONNECTED:
+                await websocket.close()
+        return
+
     bruecke = ai_voice_bridge.Sprachbruecke(
         websocket,
         user_id=benutzer_id,

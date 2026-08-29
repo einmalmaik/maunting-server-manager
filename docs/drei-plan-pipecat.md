@@ -2,7 +2,7 @@
 
 Stand: 29. August 2026
 
-Pipecat ist die interne Frame-Orchestrierung des Sprachmodus. Die
+Pipecat ist die interne Frame-Orchestrierung des Legacy-Sprachmodus. Die
 Sicherheitsarchitektur bleibt MSM: AiRun, Run-Broker, Guardian, Tool-Registry,
 RBAC, Proposal-Flow und DIS werden nicht ersetzt.
 
@@ -60,10 +60,12 @@ Listener, Ports und HTTP-Endpunkte sind nicht Teil der Integration. Vor einem
 Release werden die aufgelösten Python-3.12-/Linux-Abhängigkeiten, Lizenzen,
 Wheels und aktuelle High-/Critical-Advisories erneut geprüft.
 
-Die Datenflüsse zu Modell- und Sprachdienstleistern ändern sich nicht. Pipecat
-läuft ausschließlich im Panelprozess und speichert keine Aufnahmen. Deshalb
-entsteht kein zusätzlicher Datenempfänger; die Datenschutzerklärung bleibt
-inhaltlich unverändert.
+Die Datenflüsse zu Modell- und Sprachdienstleistern ändern sich im Legacy-Modus
+nicht. Ein panelweit aktivierter OpenAI-Realtime-Zugang wählt stattdessen WebRTC
+mit serverseitigem Sideband und ruft Pipecat, STT und ElevenLabs nicht auf.
+Pipecat läuft ausschließlich im Panelprozess und speichert keine Aufnahmen. Der
+abweichende direkte Audiofluss des Realtime-Modus ist in der Betriebsdoku und
+der Datenschutzerklärung getrennt beschrieben.
 
 ## Abnahme
 

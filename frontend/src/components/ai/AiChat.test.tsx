@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -16,6 +17,7 @@ import {
 import * as client from '@/api/client'
 import i18n from '@/i18n'
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
+import { aiChatPreferenceKeys } from '@/lib/aiChatPreferences'
 import { useAuthStore } from '@/stores/authStore'
 import { usePermissionsStore } from '@/stores/permissionsStore'
 import { AiChat } from './AiChat'
@@ -39,12 +41,19 @@ vi.mock('@/api/ai', async (importOriginal) => {
       saveAutonomyGrant: vi.fn(),
       getContextStatus: vi.fn(),
       listWorkers: vi.fn(),
+      getVoiceConfig: vi.fn(),
+      transcribeVoice: vi.fn(),
       typing: vi.fn(),
       stopRun: vi.fn().mockResolvedValue({ ok: true, stopped: true }),
     },
     streamAiMessage: vi.fn(),
     attachAiRun: vi.fn(),
   }
+})
+
+vi.mock('./voice/audioAufnahme', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./voice/audioAufnahme')>()
+  return { ...original, starteAufnahme: vi.fn() }
 })
 
 vi.mock('@/api/client', async (importOriginal) => {
@@ -63,6 +72,17 @@ vi.mock('./AiActionProposalCard', () => ({
     <button type="button" onClick={() => onChange({ ...proposal, status: 'succeeded' })}>
       bestaetigen-attrappe
     </button>
+  ),
+}))
+
+vi.mock('./geo/RegionalAnalysisLayout', () => ({
+  RegionalAnalysisLayout: ({
+    active, children, onClose,
+  }: { active: boolean; children: ReactNode; onClose: () => void }) => (
+    <div data-testid="regional-layout" data-active={String(active)}>
+      {children}
+      {active && <button type="button" onClick={onClose}>geo-schliessen</button>}
+    </div>
   ),
 }))
 
@@ -105,6 +125,56 @@ const eigeneNachricht: AiMessage = {
   id: 'msg-user', role: 'user', content: 'urspruengliche Frage', reasoning: null,
   question: null, status: 'complete', provider_id: null, model: null,
   created_at: '2026-08-01T12:00:00Z',
+}
+
+const geoNachricht: AiMessage = {
+  id: 'msg-geo',
+  role: 'assistant',
+  content: 'Peking ist fokussiert.',
+  reasoning: null,
+  question: null,
+  status: 'complete',
+  provider_id: 1,
+  model: 'test-model',
+  created_at: '2026-08-01T12:01:00Z',
+  sections: [{
+    art: 'tool',
+    werkzeug: {
+      tool_name: 'analyze_region',
+      server_id: null,
+      geo_analysis: {
+        status: 'success',
+        location: 'Peking',
+        country: 'China',
+        coordinates: {
+          latitude: 39.9042,
+          longitude: 116.4074,
+          bbox: [116.2, 39.7, 116.6, 40.1],
+        },
+        camera: { mode: 'focus', command_id: 'geo-command-1' },
+      },
+    },
+  }],
+}
+
+const geoKameraNachricht: AiMessage = {
+  id: 'msg-geo-camera',
+  role: 'assistant',
+  content: 'Die Ansicht ist näher.',
+  reasoning: null,
+  question: null,
+  status: 'complete',
+  provider_id: 1,
+  model: 'test-model',
+  created_at: '2026-08-01T12:02:00Z',
+  sections: [{
+    art: 'tool',
+    werkzeug: {
+      tool_name: 'control_region_camera',
+      server_id: null,
+      geo_camera: { action: 'zoom_in', command_id: 'geo-camera-command-2' },
+    },
+  }],
 }
 
 describe('AiChat', () => {
@@ -152,6 +222,17 @@ describe('AiChat', () => {
     // Keine Hintergrund-Auftraege: die Worker-Leiste bleibt dann unsichtbar,
     // und der Chat sieht aus wie vor ihrer Einfuehrung.
     vi.mocked(aiApi.listWorkers).mockReset().mockResolvedValue([])
+    vi.mocked(aiApi.getVoiceConfig).mockReset().mockResolvedValue({
+      available: false,
+      mode: 'legacy',
+      model: null,
+      voice: null,
+      language: 'auto',
+      dictation_available: false,
+      sample_rate: 24_000,
+      max_seconds: 900,
+    })
+    vi.mocked(aiApi.transcribeVoice).mockReset().mockResolvedValue({ text: '' })
     vi.mocked(aiApi.typing).mockReset().mockResolvedValue(undefined)
     vi.mocked(attachAiRun).mockReset().mockResolvedValue(undefined)
   })
@@ -163,6 +244,53 @@ describe('AiChat', () => {
     // Der Kern der Aenderung: kein "Neue Unterhaltung", keine Chatliste.
     expect(screen.queryByRole('button', { name: /neue unterhaltung/i })).not.toBeInTheDocument()
     expect(aiApi.getConversation).toHaveBeenCalledWith()
+  })
+
+  it('öffnet eine bewusst geschlossene alte Kartenanalyse nach dem Neuladen nicht erneut', async () => {
+    vi.mocked(aiApi.getConversation).mockResolvedValue({
+      ...CONVERSATION,
+      messages: [eigeneNachricht, geoNachricht, geoKameraNachricht],
+    })
+
+    const first = render(<MemoryRouter><AiChat /></MemoryRouter>)
+    expect(await screen.findByRole('button', { name: 'geo-schliessen' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'geo-schliessen' }))
+
+    expect(localStorage.getItem(aiChatPreferenceKeys('anonym').closedGeoAnalysis)).toBe('geo-camera-command-2')
+    first.unmount()
+
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
+    await screen.findByText('urspruengliche Frage')
+    await waitFor(() => expect(screen.getByTestId('regional-layout')).toHaveAttribute('data-active', 'false'))
+    expect(screen.queryByRole('button', { name: 'geo-schliessen' })).not.toBeInTheDocument()
+  })
+
+  it('öffnet die Karte nach einem neuen ausdrücklichen Kamerabefehl wieder', async () => {
+    localStorage.setItem(
+      aiChatPreferenceKeys('anonym').closedGeoAnalysis,
+      'geo-camera-command-2',
+    )
+    const neuerBefehl: AiMessage = {
+      ...geoKameraNachricht,
+      id: 'msg-geo-camera-new',
+      created_at: '2026-08-01T12:03:00Z',
+      sections: [{
+        art: 'tool',
+        werkzeug: {
+          tool_name: 'control_region_camera',
+          server_id: null,
+          geo_camera: { action: 'overview', command_id: 'geo-camera-command-3' },
+        },
+      }],
+    }
+    vi.mocked(aiApi.getConversation).mockResolvedValue({
+      ...CONVERSATION,
+      messages: [eigeneNachricht, geoNachricht, geoKameraNachricht, neuerBefehl],
+    })
+
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
+
+    expect(await screen.findByRole('button', { name: 'geo-schliessen' })).toBeInTheDocument()
   })
 
   it('holt die Serverliste nicht ohne Autonomierecht', async () => {
@@ -1150,6 +1278,53 @@ describe('AiChat', () => {
     // Klick auf Stopp ruft stopRun auf
     fireEvent.click(stopButton)
     expect(aiApi.stopRun).toHaveBeenCalledWith('primary')
+  })
+
+  it('fügt ein Diktat am Cursor ein und sendet es nicht automatisch', async () => {
+    const { streamAiMessage } = await import('@/api/ai')
+    const { starteAufnahme } = await import('./voice/audioAufnahme')
+    usePermissionsStore.setState({
+      me: {
+        is_owner: false, role_id: null, role_name: null,
+        global_keys: ['ai.chat.use', 'ai.voice.use'],
+        server_keys: {},
+      },
+      isLoading: false,
+      error: null,
+    })
+    vi.mocked(aiApi.getVoiceConfig).mockResolvedValue({
+      available: true,
+      mode: 'openai_realtime',
+      model: 'gpt-realtime',
+      voice: 'marin',
+      language: 'de',
+      dictation_available: true,
+      sample_rate: 24_000,
+      max_seconds: 900,
+    })
+    vi.mocked(aiApi.transcribeVoice).mockResolvedValue({ text: 'Moskau ' })
+    let audioLiefern: (chunk: ArrayBuffer) => void = () => undefined
+    const beenden = vi.fn()
+    vi.mocked(starteAufnahme).mockImplementation(async (onChunk) => {
+      audioLiefern = onChunk
+      return { beenden, pegel: () => 0 }
+    })
+    vi.mocked(streamAiMessage).mockReset()
+
+    render(<MemoryRouter><AiChat /></MemoryRouter>)
+    const feld = await screen.findByLabelText('Nachricht') as HTMLTextAreaElement
+    fireEvent.change(feld, { target: { value: 'Zeig mir mehr' } })
+    feld.setSelectionRange(9, 9)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Nachricht diktieren' }))
+    await waitFor(() => expect(starteAufnahme).toHaveBeenCalledTimes(1))
+    act(() => audioLiefern(new Int16Array([1, -1]).buffer))
+    fireEvent.click(screen.getByRole('button', { name: 'Aufnahme beenden' }))
+
+    await waitFor(() => expect(feld).toHaveValue('Zeig mir Moskau mehr'))
+    expect(aiApi.transcribeVoice).toHaveBeenCalledWith(1, expect.any(ArrayBuffer))
+    expect(beenden).toHaveBeenCalledTimes(1)
+    expect(streamAiMessage).not.toHaveBeenCalled()
   })
 
   it('ermoeglicht das Einreihen von Nachrichten in die Warteschlange waehrend des Streams', async () => {
