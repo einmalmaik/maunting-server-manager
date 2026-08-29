@@ -217,13 +217,13 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.werkzeug).toBeNull()
   })
 
-  it('folgt beim Vorlesen dem passenden Regionalbereich', async () => {
+  it('folgt dem strukturierten Regionalfokus ohne Sprachheuristik', async () => {
     const haken = await sitzung()
 
-    act(() => leitung().simulateMessage({ art: 'antworttext', text: 'Auf Reddit wird darüber gerade diskutiert.' }))
+    act(() => leitung().simulateMessage({ art: 'region_ui', focus: { tab: 'social' } }))
     expect(haken.result.current.regionalFocus).toEqual({ tab: 'social' })
 
-    act(() => leitung().simulateMessage({ art: 'antworttext', text: 'Beim Verkehr gibt es aktuell keine Sperrung.' }))
+    act(() => leitung().simulateMessage({ art: 'region_ui', focus: { tab: 'traffic' } }))
     expect(haken.result.current.regionalFocus).toEqual({ tab: 'traffic' })
   })
 

@@ -205,8 +205,8 @@ export function MapTilerDetailMap({
     })
   }, [cameraAction, cameraCommandId, cameraMode, globe, latitude, longitude, ready, zoom])
 
-  return <div className="absolute inset-0 z-[5] touch-none bg-transparent" aria-label={`Interaktive Karte für ${locationName}`}>
-    <div ref={elementRef} className="h-full w-full touch-none cursor-grab active:cursor-grabbing" />
+  return <div className="absolute inset-0 z-[5] bg-transparent" aria-label={`Interaktive Karte für ${locationName}`}>
+    <div ref={elementRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
     {!ready && <div className="pointer-events-none absolute inset-0 grid place-items-center bg-surface-container-lowest/70 text-sm text-on-surface-variant">{t('ai.geo.mapLoading', 'Karte wird geladen')}</div>}
   </div>
 }

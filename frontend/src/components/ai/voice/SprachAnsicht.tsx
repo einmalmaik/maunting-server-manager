@@ -33,6 +33,7 @@ export function SprachAnsicht({
     intentErkannt,
     geoData,
     regionalFocus,
+    regionalContextActive = true,
     setGeoData,
     pegel,
     starten,
@@ -89,6 +90,7 @@ export function SprachAnsicht({
 
   const istKommandozentraleAktiv = Boolean(
     !kommandozentraleGeschlossen &&
+      regionalContextActive &&
       (geoData || werkzeug === 'analyze_region' || isGeoIntent || kommandozentraleWarAktiv.current),
   )
 

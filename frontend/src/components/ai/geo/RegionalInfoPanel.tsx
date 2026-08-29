@@ -505,7 +505,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               <div
                 key={item.id}
                 className={`rounded-xl border bg-surface-container-lowest/80 p-3.5 space-y-2 transition-colors hover:border-primary/40 ${
-                  focus?.tab === 'news' && focus.source && item.url === focus.source
+                  focus?.tab === 'news' && focus.sourceId && item.url === focus.sourceId
                     ? 'border-primary/70 ring-1 ring-primary/40 shadow-[0_0_20px_hsl(var(--primary)/0.2)]'
                     : 'border-outline-variant/20'
                 }`}
@@ -562,10 +562,10 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               </p>
             )}
             {publicPosts?.reddit.length ? (
-              <SocialPostList title={t('ai.geo.reddit', 'Reddit')} posts={publicPosts.reddit} type="reddit" highlightedSource={focus?.tab === 'social' ? focus.source : undefined} />
+              <SocialPostList title={t('ai.geo.reddit', 'Reddit')} posts={publicPosts.reddit} type="reddit" highlightedSource={focus?.tab === 'social' ? focus.sourceId : undefined} />
             ) : null}
             {publicPosts?.bluesky.length ? (
-              <SocialPostList title={t('ai.geo.bluesky', 'Bluesky')} posts={publicPosts.bluesky} type="bluesky" highlightedSource={focus?.tab === 'social' ? focus.source : undefined} />
+              <SocialPostList title={t('ai.geo.bluesky', 'Bluesky')} posts={publicPosts.bluesky} type="bluesky" highlightedSource={focus?.tab === 'social' ? focus.sourceId : undefined} />
             ) : null}
             {(!publicPosts || publicPosts.status === 'unavailable' || (publicPosts.reddit.length === 0 && publicPosts.bluesky.length === 0)) && (
               <RegionalEmptyState

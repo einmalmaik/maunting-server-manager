@@ -1580,7 +1580,26 @@ def _voice_tool_definitions() -> list[dict]:
                 },
             },
             ["decision"],
-        )
+        ),
+        _function(
+            "voice_set_region_view",
+            "Steuert ausschließlich die sichtbare Regionalansicht dieser Sprachsitzung. "
+            "Nutze es unmittelbar bevor du über Wetter, Nachrichten, soziale Beiträge, Verkehr oder eine Satellitenszene sprichst. "
+            "source_id und scene_id müssen aus den zuletzt erhaltenen Regionaldaten stammen.",
+            {
+                "tab": {"type": "string", "enum": ["overview", "satellite", "news", "social", "traffic", "weather"]},
+                "source_id": {"type": "string", "maxLength": 512},
+                "scene_id": {"type": "string", "maxLength": 128},
+            },
+            ["tab"],
+        ),
+        _function(
+            "voice_leave_region_view",
+            "Schließt die Regionalansicht, wenn das Gespräch zu einem Thema ohne Ortsbezug wechselt. "
+            "Keine Server-, Log-, Kalender- oder allgemeine Antwort in einer alten Ortsansicht lassen.",
+            {},
+            [],
+        ),
     ]
 
 

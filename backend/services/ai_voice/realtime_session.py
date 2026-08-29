@@ -139,6 +139,8 @@ def vorbereiten(
         "Bei einer Führung durch mehrere Sehenswürdigkeiten: Fokussiere jede Sehenswürdigkeit mit control_region_camera, "
         "erkläre sie erst nach dem sichtbaren Kameraflug und gehe vor dem nächsten Ziel wieder auf die Übersicht zurück. "
         "Führe diesen Ablauf für alle verlangten Orte fort, statt nur eine Liste vorzulesen.",
+        "Steuere die Regionalansicht mit voice_set_region_view, bevor du einen ihrer Bereiche erklärst. "
+        "Bei einem Themenwechsel ohne Ortsbezug rufe voice_leave_region_view auf, damit die normale Sprachansicht zurückkehrt.",
         "# Unclear Audio\nBei unverständlicher Audioeingabe knapp um Wiederholung bitten; nichts erraten oder ausführen.",
         "# Entity Capture\nNamen, Orte, Server und Zahlen vor einer Aktion gegen den Kontext oder ein Werkzeug prüfen.",
         "# Long Context Behavior\nKeinen Chatverlauf erwarten. Nutze nur die Sitzung, den aktuellen Panelzustand und freigegebene Erinnerungen.",
@@ -250,6 +252,7 @@ class RealtimeSitzung:
         self._tool_folgeantwort_schloss = asyncio.Lock()
         self._verbrauch_tokens = [0, 0, 0, 0]
         self._verbrauch_kosten = 0
+        self._antwort_hat_audio = False
 
     @staticmethod
     def _tokenzahl(daten: dict, name: str) -> int:
@@ -370,6 +373,21 @@ class RealtimeSitzung:
                     anzeige = {"tool_name": name, **({"failed": True} if fehler else {})}
                     vorschlaege = []
                     await self._panel_senden({"art": "vorschlag", "vorschlag": None})
+                elif name == "voice_set_region_view":
+                    tab = argumente.get("tab")
+                    source_id = argumente.get("source_id")
+                    scene_id = argumente.get("scene_id")
+                    if tab not in {"overview", "satellite", "news", "social", "traffic", "weather"}:
+                        wert, fehler, anzeige, vorschlaege = {"error": "Ungültiger Regionalbereich"}, "Ungültiger Regionalbereich", {"tool_name": name, "failed": True}, []
+                    elif (source_id is not None and not isinstance(source_id, str)) or (scene_id is not None and not isinstance(scene_id, str)):
+                        wert, fehler, anzeige, vorschlaege = {"error": "Ungültige Regionalreferenz"}, "Ungültige Regionalreferenz", {"tool_name": name, "failed": True}, []
+                    else:
+                        fokus = {"tab": tab, **({"source_id": source_id} if source_id else {}), **({"scene_id": scene_id} if scene_id else {})}
+                        await self._panel_senden({"art": "region_ui", "focus": fokus})
+                        wert, fehler, anzeige, vorschlaege = {"ok": True}, None, {"tool_name": name}, []
+                elif name == "voice_leave_region_view":
+                    await self._panel_senden({"art": "region_ui", "leave": True})
+                    wert, fehler, anzeige, vorschlaege = {"ok": True}, None, {"tool_name": name}, []
                 else:
                     if name == "analyze_region":
                         try:
@@ -523,19 +541,15 @@ class RealtimeSitzung:
             await self._panel_senden(frame)
 
         # Ein Nachtrag darf einen laufenden Satz oder eine neue Frage nie
-        # unterbrechen. Das Panel erhält ihn trotzdem bereits sofort.
-        for _ in range(100):
-            if (
-                not self._user_spricht
-                and not self._assistant_spricht
-                and not self._response_aktiv
-                and not self._tool_tasks
-                and self._sideband is not None
-            ):
-                break
+        # unterbrechen. Langsame Nachrichtenquellen werden aber nicht mehr
+        # nach zwanzig Sekunden verworfen.
+        while (
+            self._user_spricht
+            or self._assistant_spricht
+            or self._response_aktiv
+            or self._tool_tasks
+        ):
             await asyncio.sleep(0.2)
-        else:
-            return
         if self._sideband is None:
             return
         nachtrag = {
@@ -601,11 +615,13 @@ class RealtimeSitzung:
             elif art == "input_audio_buffer.speech_stopped":
                 self._user_spricht = False
                 self._response_aktiv = True
+                self._antwort_hat_audio = False
                 await self._panel_senden({"art": "zustand", "zustand": "denkt"})
             elif art == "response.created":
                 self._response_aktiv = True
             elif art in {"response.output_audio.delta", "response.audio.delta"}:
                 self._assistant_spricht = True
+                self._antwort_hat_audio = True
                 await self._panel_senden({"art": "zustand", "zustand": "spricht"})
             elif art == "response.output_item.added":
                 item = event.get("item") or {}
@@ -630,6 +646,8 @@ class RealtimeSitzung:
                 self._response_aktiv = False
                 self.lage.laeufe += 1
                 if not self._tool_tasks:
+                    if not self._antwort_hat_audio:
+                        await self._panel_senden({"art": "stoerung", "grund": "leere_antwort"})
                     await self._panel_senden({"art": "zustand", "zustand": "bereit"})
             elif art == "error":
                 raise RealtimeSitzungsfehler("REALTIME_PROVIDER_ERROR")
