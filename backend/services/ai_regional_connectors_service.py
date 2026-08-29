@@ -36,6 +36,13 @@ _CACHE_TTL_SECONDS = 20.0
 _MAX_QUERY_CHARS = 100
 _MAX_RESULTS = 3
 
+_TOMTOM_FAILURES = {
+    401: "invalid_key",
+    403: "traffic_not_enabled",
+    404: "no_coverage",
+    429: "rate_limited",
+}
+
 _client: httpx.Client | None = None
 _client_lock = threading.Lock()
 _cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
@@ -151,16 +158,17 @@ def traffic(latitude: float, longitude: float, *, cache_scope: str | None = None
                 )
         except httpx.HTTPError as exc:
             logger.info("TomTom-Verkehr nicht erreichbar error=%s", type(exc).__name__)
-            return {"status": "unavailable"}
+            return {"status": "unavailable", "reason": "network_error"}
         if response.status_code != 200:
-            logger.info("TomTom-Verkehr nicht verfuegbar status=%s", response.status_code)
-            return {"status": "unavailable"}
+            reason = _TOMTOM_FAILURES.get(response.status_code, "provider_error")
+            logger.info("TomTom-Verkehr nicht verfuegbar status=%s reason=%s", response.status_code, reason)
+            return {"status": "unavailable", "reason": reason}
         try:
             segment = response.json().get("flowSegmentData", {})
         except (ValueError, AttributeError):
-            return {"status": "unavailable"}
+            return {"status": "unavailable", "reason": "invalid_response"}
         if not isinstance(segment, dict):
-            return {"status": "unavailable"}
+            return {"status": "unavailable", "reason": "invalid_response"}
         return {
             "status": "available",
             "current_speed_kmh": segment.get("currentSpeed"),

@@ -91,6 +91,14 @@ export interface IntentErkannt {
   revision?: number
 }
 
+export type RegionalTab = 'overview' | 'satellite' | 'news' | 'social' | 'traffic' | 'weather'
+
+/** Der Bereich und, falls vorhanden, die Quelle, auf die die Stimme gerade verweist. */
+export interface RegionalFocus {
+  tab: RegionalTab
+  source?: string
+}
+
 interface Ergebnis {
   zustand: Sprachzustand
   /** Der laufende Wortwechsel, für die Anzeige. */
@@ -111,6 +119,8 @@ interface Ergebnis {
   intentErkannt: IntentErkannt | null
   /** Regionale Satelliten- und Geodaten, falls ein entsprechendes Werkzeug lief. */
   geoData: AiRegionalAnalysis | null
+  /** Der von der KI gerade erklärte Bereich der Regionalansicht. */
+  regionalFocus: RegionalFocus | null
   setGeoData: React.Dispatch<React.SetStateAction<AiRegionalAnalysis | null>>
   /**
    * Der aktuelle Lautstärkepegel zwischen 0 und 1 — wer gerade redet, egal wer.
@@ -138,6 +148,27 @@ const MAX_ZEILEN = 40
  * Logzeilen sind das Größte, was hier je über die Leitung kommt.
  */
 const MAX_BELEGE = 5
+
+function regionalFocusForTool(name: string, webResults: unknown): RegionalFocus | null {
+  if (name === 'analyze_region' || name === 'control_region_camera') return { tab: 'overview' }
+  if (name !== 'web_search') return null
+  const firstUrl = Array.isArray(webResults)
+    ? webResults.find((result) => result && typeof result === 'object' && typeof (result as { url?: unknown }).url === 'string') as { url?: string } | undefined
+    : undefined
+  const source = firstUrl?.url
+  return source && /(?:reddit\.com|bsky\.app|bluesky)/i.test(source)
+    ? { tab: 'social', source }
+    : { tab: 'news', source }
+}
+
+function regionalFocusForSpeech(text: string): RegionalFocus | null {
+  const normalized = text.toLocaleLowerCase('de-DE')
+  if (/\b(reddit|bluesky|social media|soziale medien)\b/.test(normalized)) return { tab: 'social' }
+  if (/\b(verkehr|stau|straßensperr|strassensperr|fahrzeit)\b/.test(normalized)) return { tab: 'traffic' }
+  if (/\b(nachricht|zeitung|artikel|lagebericht|quelle)\b/.test(normalized)) return { tab: 'news' }
+  if (/\b(wetter|temperatur|niederschlag|wind)\b/.test(normalized)) return { tab: 'weather' }
+  return null
+}
 
 function webBelege(roh: unknown): Beleg[] {
   if (!Array.isArray(roh)) return []
@@ -215,6 +246,7 @@ export function useSprachsitzung(
   const [vorschlag, setVorschlag] = useState<Vorschlag | null>(null)
   const [intentErkannt, setIntentErkannt] = useState<IntentErkannt | null>(null)
   const [geoData, setGeoData] = useState<AiRegionalAnalysis | null>(null)
+  const [regionalFocus, setRegionalFocus] = useState<RegionalFocus | null>(null)
   const intentRevision = useRef(0)
 
   const ws = useRef<WebSocket | null>(null)
@@ -259,6 +291,7 @@ export function useSprachsitzung(
     setWerkzeug(null)
     setVorschlag(null)
     setIntentErkannt(null)
+    setRegionalFocus(null)
     intentRevision.current = 0
   }, [aufraeumen])
 
@@ -514,7 +547,12 @@ export function useSprachsitzung(
           zeileAnhaengen('ich', String(nachricht.text ?? ''))
           break
         case 'antworttext':
-          zeileAnhaengen('ki', String(nachricht.text ?? ''))
+          {
+            const text = String(nachricht.text ?? '')
+            zeileAnhaengen('ki', text)
+            const focus = regionalFocusForSpeech(text)
+            if (focus) setRegionalFocus(focus)
+          }
           break
         case 'intent_erkannt': {
           const intent = String(nachricht.intent ?? '')
@@ -577,6 +615,8 @@ export function useSprachsitzung(
           const name = String(nachricht.name || nachricht.tool_name || '')
           if (name) {
             setWerkzeug(name)
+            const focus = regionalFocusForTool(name, nachricht.web_results)
+            if (focus) setRegionalFocus(focus)
             const analysis = normalizeRegionalAnalysis(nachricht.geo_analysis)
             if (analysis) setGeoData(analysis)
             if (nachricht.geo_camera) {
@@ -590,6 +630,8 @@ export function useSprachsitzung(
           const name = String(nachricht.name || nachricht.tool_name || '')
           if (name) {
             setWerkzeug(name)
+            const focus = regionalFocusForTool(name, nachricht.web_results)
+            if (focus) setRegionalFocus(focus)
           }
           const analysis = normalizeRegionalAnalysis(nachricht.geo_analysis)
           if (analysis) setGeoData(analysis)
@@ -651,7 +693,9 @@ export function useSprachsitzung(
           // andere Auskunft als „etwas ist kaputt", und ein unbekannter Grund
           // soll nicht in `de.json` spazieren gehen.
           setFehler(
-            nachricht.grund === 'kontingent'
+            nachricht.grund === 'realtime_kontingent'
+              ? 'ai.voice.errors.realtimeQuota'
+              : nachricht.grund === 'kontingent'
               ? 'ai.voice.errors.quota'
               : 'ai.voice.errors.provider',
           )
@@ -754,6 +798,7 @@ export function useSprachsitzung(
     vorschlag,
     intentErkannt,
     geoData,
+    regionalFocus,
     setGeoData,
     pegel,
     starten,

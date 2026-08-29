@@ -217,6 +217,16 @@ describe('useSprachsitzung', () => {
     expect(haken.result.current.werkzeug).toBeNull()
   })
 
+  it('folgt beim Vorlesen dem passenden Regionalbereich', async () => {
+    const haken = await sitzung()
+
+    act(() => leitung().simulateMessage({ art: 'antworttext', text: 'Auf Reddit wird darüber gerade diskutiert.' }))
+    expect(haken.result.current.regionalFocus).toEqual({ tab: 'social' })
+
+    act(() => leitung().simulateMessage({ art: 'antworttext', text: 'Beim Verkehr gibt es aktuell keine Sperrung.' }))
+    expect(haken.result.current.regionalFocus).toEqual({ tab: 'traffic' })
+  })
+
   it('meldet einen Stoerungsrahmen als uebersetzbaren Schluessel', async () => {
     const haken = await sitzung()
 

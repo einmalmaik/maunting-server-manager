@@ -17,6 +17,7 @@ let sitzung: {
   belege: Beleg[]
   vorschlag: Vorschlag | null
   geoData: AiRegionalAnalysis | null
+  regionalFocus: { tab: 'overview' | 'satellite' | 'news' | 'social' | 'traffic' | 'weather'; source?: string } | null
   setGeoData: ReturnType<typeof vi.fn>
 }
 
@@ -53,6 +54,7 @@ function ansicht(
     belege: [],
     vorschlag: null,
     geoData: null,
+    regionalFocus: null,
     setGeoData: vi.fn(),
     ...teil,
   }

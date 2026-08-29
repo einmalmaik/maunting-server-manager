@@ -138,6 +138,7 @@ LIMIT_FIELDS = (
     "requests_per_minute",
     "concurrent_operations",
     "monthly_cost_limit_cents",
+    "monthly_realtime_cost_limit_cents",
     # Kein Kontingent, sondern eine Obergrenze fuer die Denktiefe — passt aber
     # in genau dieselbe Aufloesung: "None heisst unbegrenzt", "der hoechste
     # Wert der konfigurierten Rollen gewinnt", "keine Rolle konfiguriert heisst
@@ -177,6 +178,7 @@ LIMIT_MAXIMA = {
     "requests_per_minute": REQUESTS_PER_MINUTE_MAX,
     "concurrent_operations": CONCURRENT_OPERATIONS_MAX,
     "monthly_cost_limit_cents": MONTHLY_COST_LIMIT_CENTS_MAX,
+    "monthly_realtime_cost_limit_cents": MONTHLY_COST_LIMIT_CENTS_MAX,
     "max_reasoning_effort": MAX_REASONING_EFFORT_MAX,
     "max_memory_entries": MAX_MEMORY_ENTRIES_MAX,
 }
@@ -192,6 +194,7 @@ class EffectiveAiLimits:
     requests_per_minute: int | None
     concurrent_operations: int | None
     monthly_cost_limit_cents: int | None
+    monthly_realtime_cost_limit_cents: int | None
     #: Hoechste erlaubte Denkstufe als Rang; ``None`` heisst unbegrenzt.
     max_reasoning_effort: int | None
     #: Rohe Rollenaufloesung des Memory-Vorrats je Bereich. ``None`` heisst hier

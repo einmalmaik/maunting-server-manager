@@ -395,6 +395,8 @@ export interface AiMapTilerMapConfig extends AiMapTilerStatus {
 /** Nur der Zustand; der TomTom-Schlüssel bleibt im Backend. */
 export interface AiTomTomStatus {
   configured: boolean
+  traffic_status?: 'available' | 'not_configured' | 'unavailable' | null
+  reason?: 'invalid_key' | 'traffic_not_enabled' | 'no_coverage' | 'rate_limited' | 'network_error' | 'provider_error' | 'invalid_response' | null
 }
 
 export interface AiSatelliteLayer {
@@ -448,6 +450,7 @@ export interface AiRegionalAnalysis {
   news_status?: 'pending' | 'available' | 'not_allowed' | 'not_configured' | 'unavailable'
   traffic?: {
     status: 'available' | 'not_configured' | 'unavailable'
+    reason?: 'invalid_key' | 'traffic_not_enabled' | 'no_coverage' | 'rate_limited' | 'network_error' | 'provider_error' | 'invalid_response'
     current_speed_kmh?: number
     free_flow_speed_kmh?: number
     current_travel_time_seconds?: number
@@ -843,6 +846,7 @@ export interface AiUsageMine extends AiUsageEntry {
     requests_per_minute: number | null
     concurrent_operations: number | null
     monthly_cost_limit_cents: number | null
+    monthly_realtime_cost_limit_cents: number | null
     role_ids: number[]
   }
 }
@@ -1274,6 +1278,7 @@ export const aiApi = {
     method: 'PUT',
     body: JSON.stringify({ api_key: apiKey || null }),
   }),
+  testTomTomConnection: () => api<AiTomTomStatus>('/ai/settings/tomtom/test', { method: 'POST' }),
   /**
    * Eine Unterhaltung. Wird beim ersten Aufruf serverseitig angelegt.
    *

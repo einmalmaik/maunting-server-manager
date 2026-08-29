@@ -48,6 +48,7 @@ class AiLimitsBase(BaseModel):
     requests_per_minute: RequestLimit
     concurrent_operations: ConcurrencyLimit
     monthly_cost_limit_cents: CostLimit
+    monthly_realtime_cost_limit_cents: CostLimit = None
     # Kein Kontingent, sondern eine Obergrenze. Steht trotzdem hier, weil der
     # Betreiber sie an derselben Stelle setzt und dieselbe Auflösung über
     # mehrere Rollen gilt.
@@ -130,6 +131,11 @@ class AiTomTomKeyUpdate(BaseModel):
 
 class AiTomTomStatus(BaseModel):
     configured: bool
+    traffic_status: Literal["available", "not_configured", "unavailable"] | None = None
+    reason: Literal[
+        "invalid_key", "traffic_not_enabled", "no_coverage", "rate_limited",
+        "network_error", "provider_error", "invalid_response",
+    ] | None = None
 
 
 class AiLearningPolicyUpdate(BaseModel):

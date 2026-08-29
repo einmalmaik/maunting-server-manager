@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 from models import AiProvider, AiRun, User
 import re
 
-from services import ai_provider_registry
+from services import ai_provider_registry, ai_model_price_service
 from services.ai_reasoning import RANGFOLGE
 from services.dis_client import DisClient
 
@@ -554,6 +554,18 @@ def create_provider(
         ethics_model, ethics_reasoning_effort, ethics_mode, modell
     )
     kind = _assert_kind(provider_kind)
+    automatic_prices: dict[str, object] = {
+        "default_model": modell,
+        "worker_model": arbeitsmodell,
+        "ethics_model": ethikmodell,
+        "standard_input_price_micro_usd_per_million": standard_input_price_micro_usd_per_million,
+        "standard_output_price_micro_usd_per_million": standard_output_price_micro_usd_per_million,
+        "worker_input_price_micro_usd_per_million": worker_input_price_micro_usd_per_million,
+        "worker_output_price_micro_usd_per_million": worker_output_price_micro_usd_per_million,
+        "ethics_input_price_micro_usd_per_million": ethics_input_price_micro_usd_per_million,
+        "ethics_output_price_micro_usd_per_million": ethics_output_price_micro_usd_per_million,
+    }
+    ai_model_price_service.fill_missing_role_prices(kind, automatic_prices)
     schluessel = _assert_key_passt(kind, operator_api_key)
     ressource = _assert_ressource(
         azure_resource_name,
@@ -569,12 +581,12 @@ def create_provider(
         enabled=enabled,
         requires_api_key=requires_api_key,
         token_price_micro_usd_per_million=token_price_micro_usd_per_million,
-        standard_input_price_micro_usd_per_million=standard_input_price_micro_usd_per_million,
-        standard_output_price_micro_usd_per_million=standard_output_price_micro_usd_per_million,
-        worker_input_price_micro_usd_per_million=worker_input_price_micro_usd_per_million,
-        worker_output_price_micro_usd_per_million=worker_output_price_micro_usd_per_million,
-        ethics_input_price_micro_usd_per_million=ethics_input_price_micro_usd_per_million,
-        ethics_output_price_micro_usd_per_million=ethics_output_price_micro_usd_per_million,
+        standard_input_price_micro_usd_per_million=automatic_prices["standard_input_price_micro_usd_per_million"],
+        standard_output_price_micro_usd_per_million=automatic_prices["standard_output_price_micro_usd_per_million"],
+        worker_input_price_micro_usd_per_million=automatic_prices["worker_input_price_micro_usd_per_million"],
+        worker_output_price_micro_usd_per_million=automatic_prices["worker_output_price_micro_usd_per_million"],
+        ethics_input_price_micro_usd_per_million=automatic_prices["ethics_input_price_micro_usd_per_million"],
+        ethics_output_price_micro_usd_per_million=automatic_prices["ethics_output_price_micro_usd_per_million"],
         default_voice=stimme,
         transcription_model=gehoer,
         realtime_default=False,
@@ -685,6 +697,23 @@ def update_provider(
         values["ethics_mode"] if "ethics_mode" in values else provider.ethics_mode,
         new_default_model,
     )
+    price_values: dict[str, object] = {
+        "default_model": new_default_model,
+        "worker_model": new_worker_model,
+        "ethics_model": new_ethics_model,
+        **{
+            field: values[field] if field in values else getattr(provider, field)
+            for field in (
+                "standard_input_price_micro_usd_per_million",
+                "standard_output_price_micro_usd_per_million",
+                "worker_input_price_micro_usd_per_million",
+                "worker_output_price_micro_usd_per_million",
+                "ethics_input_price_micro_usd_per_million",
+                "ethics_output_price_micro_usd_per_million",
+            )
+        },
+    }
+    ai_model_price_service.fill_missing_role_prices(provider.provider_kind, price_values)
     provider.name = new_name
     provider.default_model = new_default_model
     provider.default_voice = new_default_voice
@@ -735,8 +764,8 @@ def update_provider(
         "ethics_input_price_micro_usd_per_million",
         "ethics_output_price_micro_usd_per_million",
     ):
-        if field in values:
-            setattr(provider, field, values[field])
+        if field in values or price_values[field] != getattr(provider, field):
+            setattr(provider, field, price_values[field])
     if clear_operator_api_key:
         provider.operator_api_key_encrypted = None
         provider.operator_api_key_hint = None

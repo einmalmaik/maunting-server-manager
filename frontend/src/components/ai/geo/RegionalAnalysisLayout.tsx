@@ -3,6 +3,7 @@ import { ReactNode, useEffect } from 'react'
 import type { AiRegionalAnalysis } from '@/api/ai'
 import { GlobeViewer } from './GlobeViewer'
 import { RegionalInfoPanel, type NewsItem } from './RegionalInfoPanel'
+import type { RegionalFocus } from '../voice/useSprachsitzung'
 
 interface RegionalAnalysisLayoutProps {
   children: ReactNode
@@ -11,6 +12,7 @@ interface RegionalAnalysisLayoutProps {
   locationName?: string | null
   news?: NewsItem[]
   loading?: boolean
+  regionalFocus?: RegionalFocus | null
   onClose: () => void
 }
 
@@ -30,6 +32,7 @@ export function RegionalAnalysisLayout({
   locationName,
   news,
   loading,
+  regionalFocus,
   onClose,
 }: RegionalAnalysisLayoutProps) {
   const coords = data?.coordinates
@@ -81,7 +84,7 @@ export function RegionalAnalysisLayout({
 
           {/* Rechte Spalte: Informationspanel */}
           <div className="order-3 flex min-h-0 flex-1 w-full flex-col lg:h-full lg:flex-none lg:w-[340px] xl:w-[380px]">
-            <RegionalInfoPanel data={data} news={news} loading={loading} onClose={onClose} />
+            <RegionalInfoPanel data={data} news={news} loading={loading} focus={regionalFocus} onClose={onClose} />
           </div>
         </>
       )}

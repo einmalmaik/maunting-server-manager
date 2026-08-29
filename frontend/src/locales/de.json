@@ -159,6 +159,7 @@
     "requestsPerMinute": "Anfragen pro Minute",
     "concurrentOperations": "Gleichzeitige KI-Vorgänge",
     "monthlyCostCents": "Monatliches Kostenlimit (Cent)",
+    "monthlyRealtimeCostCents": "Monatliches Realtime-Kostenlimit (Cent)",
     "unlimited": "Unbegrenzt",
     "configured": "Konfiguriert",
     "noRoles": "Es sind noch keine Rollen vorhanden.",
@@ -229,6 +230,10 @@
       },
       "tokenPrice": "Rückfallpreis je 1 Mio. Tokens ({{currency}})",
       "tokenPriceHint": "Rückfallwert: Greift, wenn der Anbieter keine Verbrauchsdaten übermittelt. Solche Zeilen werden als „geschätzt“ verbucht. Ohne Wert werden Kosten mit null verbucht und das rollenbasierte Kostenlimit greift nicht.",
+      "modelPrices": {
+        "input": "Eingabe · {{currency}} / 1 Mio. Tokens",
+        "output": "Ausgabe · {{currency}} / 1 Mio. Tokens"
+      },
       "test": "Verbindung testen",
       "testOk": "Verbindung erfolgreich. Der Anbieter hat geantwortet.",
       "testFailed": "Der Test ist fehlgeschlagen.",
@@ -933,7 +938,8 @@
         "microphone": "Kein Zugriff auf das Mikrofon. Erlaube ihn in den Browsereinstellungen.",
         "audio": "Der Browser konnte die Tonverbindung nicht aufbauen. Einzelheiten stehen in der Entwicklerkonsole.",
         "provider": "Das hat gerade nicht geklappt.",
-        "quota": "Kontingent erschöpft. Das Gespräch pausiert. Bitte kurz warten oder Limit anpassen.",
+          "quota": "Kontingent erschöpft. Das Gespräch pausiert. Bitte kurz warten oder Limit anpassen.",
+          "realtimeQuota": "Das Realtime-Kostenlimit dieser Rolle ist erreicht. Das Gespräch pausiert.",
         "connection": "Verbindung zum Sprachmodus verloren.",
         "veraltet": "Das Panel unterstützt diesen Sprachmodus noch nicht. Bitte das Panel aktualisieren."
       },
@@ -1085,19 +1091,31 @@
       "hint": "Lege in MapTiler einen neuen Browser-Key an und beschränke ihn auf die Domain dieses Panels. Der Standard-Key ist dafür nicht geeignet.",
       "errors": { "load": "MapTiler-Status konnte nicht geladen werden", "save": "MapTiler-Konfiguration konnte nicht gespeichert werden" }
     },
-    "tomtom": {
+      "tomtom": {
       "title": "Verkehrsdaten (TomTom)",
       "description": "TomTom liefert den aktuellen Verkehrsfluss für den ausgewählten Kartenpunkt.",
       "apiKey": "TomTom API-Key",
       "placeholder": "API-Key einfügen",
       "configured": "API-Key hinterlegt",
-      "saved": "TomTom-Konfiguration gespeichert",
-      "removed": "TomTom-Konfiguration entfernt",
+        "saved": "TomTom-Konfiguration gespeichert",
+        "removed": "TomTom-Konfiguration entfernt",
+        "test": "Verbindung testen",
+        "testAvailable": "TomTom liefert Verkehrsdaten für Berlin.",
       "removeConfirm": "TomTom-Konfiguration wirklich entfernen?",
-      "hint": "Der Schlüssel wird verschlüsselt im Backend gespeichert und nie an den Browser zurückgegeben.",
-      "errors": {
+        "hint": "Der Schlüssel wird verschlüsselt im Backend gespeichert und nie an den Browser zurückgegeben.",
+        "testReasons": {
+          "invalid_key": "TomTom hat den Schlüssel abgelehnt.",
+          "traffic_not_enabled": "Der Schlüssel darf den TomTom-Verkehrsfluss noch nicht abrufen.",
+          "no_coverage": "TomTom liefert für den Testpunkt keine Verkehrsdaten.",
+          "rate_limited": "TomTom begrenzt die Anfragen gerade. Bitte später erneut testen.",
+          "network_error": "TomTom ist vom Server aus derzeit nicht erreichbar.",
+          "provider_error": "TomTom hat keine verwertbare Antwort geliefert.",
+          "invalid_response": "TomTom hat eine unerwartete Antwort geliefert."
+        },
+        "errors": {
         "load": "TomTom-Status konnte nicht geladen werden",
-        "save": "TomTom-Konfiguration konnte nicht gespeichert werden"
+          "save": "TomTom-Konfiguration konnte nicht gespeichert werden",
+          "test": "TomTom-Verbindung konnte nicht getestet werden"
       }
     },
     "geo": {
@@ -1128,7 +1146,7 @@
       "overflightMetadata": "Copernicus-CDSE-Überflugsdaten",
       "newsCount_one": "{{count}} Bericht",
       "newsCount_other": "{{count}} Berichte",
-      "newsUnavailableTitle": "Keine verifizierten Nachrichten",
+      "newsUnavailableTitle": "Keine Nachrichten verfügbar",
       "newsUnavailableBody": "Für diese Region ist keine Nachrichtenquelle eingerichtet.",
       "tabsLabel": "Analysebereiche",
       "globeTitle": "Regionale Karte",
@@ -1161,6 +1179,15 @@
       "trafficNotConfiguredBody": "Für diese Instanz ist keine TomTom-Verkehrsquelle eingerichtet.",
       "trafficUnavailableTitle": "Verkehrsdaten derzeit nicht verfügbar",
       "trafficUnavailableBody": "TomTom-Verkehrsdaten sind für diese Region derzeit nicht verfügbar.",
+      "trafficReasons": {
+        "invalid_key": "Der TomTom-Schlüssel wurde abgelehnt.",
+        "traffic_not_enabled": "Der Schlüssel darf den TomTom-Traffic-Dienst nicht nutzen. Aktiviere die Traffic API im TomTom-Portal.",
+        "no_coverage": "TomTom bietet für diesen Kartenpunkt keine Verkehrsabdeckung.",
+        "rate_limited": "TomTom begrenzt Anfragen für diesen Schlüssel gerade.",
+        "network_error": "TomTom war für diese Abfrage nicht erreichbar.",
+        "provider_error": "TomTom hat die Verkehrsabfrage abgelehnt.",
+        "invalid_response": "TomTom hat keine lesbaren Verkehrsdaten geliefert."
+      },
       "currentSpeed": "Aktuelle Geschwindigkeit",
       "freeFlowSpeed": "Freie Geschwindigkeit",
       "currentTravelTime": "Aktuelle Fahrzeit",

@@ -104,6 +104,21 @@ def _sum_since(db: Session, user_id: int, since: datetime, column) -> int:
     return int(value or 0)
 
 
+def _sum_realtime_since(db: Session, user_id: int, since: datetime) -> int:
+    """Summiert nur Realtime-Sitzungen; die Modellkennung ist serverseitig gesetzt."""
+    value = (
+        db.query(func.coalesce(func.sum(AiUsageEvent.accounted_cost_microunits), 0))
+        .filter(
+            AiUsageEvent.user_id == user_id,
+            AiUsageEvent.status.in_(ACTIVE_STATUSES),
+            AiUsageEvent.created_at >= since,
+            AiUsageEvent.model.like("gpt-realtime%"),
+        )
+        .scalar()
+    )
+    return int(value or 0)
+
+
 def _ensure_within(limit: int | None, current: int, requested: int, reason: str) -> None:
     """Prüft eine Grenze; ``None`` ist explizit unbegrenzt."""
     if limit is not None and current + requested > limit:
@@ -123,6 +138,7 @@ def reserve_ai_usage(
     now: datetime | None = None,
     minimum_token_headroom: int = 0,
     minimum_cost_headroom_microunits: int = 0,
+    realtime: bool = False,
 ) -> AiUsageEvent:
     """Reserviert eine Anfrage atomar oder liefert dieselbe Reservierung erneut."""
     request_key = _canonical_request_id(request_id)
@@ -209,6 +225,13 @@ def reserve_ai_usage(
         pruef_kosten,
         "monthly_cost_limit_cents",
     )
+    if realtime:
+        _ensure_within(
+            None if limits.monthly_realtime_cost_limit_cents is None else limits.monthly_realtime_cost_limit_cents * MICROUNITS_PER_CENT,
+            _sum_realtime_since(db, user.id, month_start),
+            pruef_kosten,
+            "monthly_realtime_cost_limit_cents",
+        )
 
     event = AiUsageEvent(
         request_id=request_key,
@@ -459,6 +482,12 @@ def realtime_verbrauch_ergaenzen(
         _sum_since(db, user.id, month, AiUsageEvent.accounted_cost_microunits),
         cost_microunits,
         "monthly_cost_limit_cents",
+    )
+    _ensure_within(
+        None if limits.monthly_realtime_cost_limit_cents is None else limits.monthly_realtime_cost_limit_cents * MICROUNITS_PER_CENT,
+        _sum_realtime_since(db, user.id, month),
+        cost_microunits,
+        "monthly_realtime_cost_limit_cents",
     )
     event.accounted_tokens = neue_tokens
     event.reserved_tokens = neue_tokens

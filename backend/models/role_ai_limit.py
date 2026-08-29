@@ -36,6 +36,9 @@ class RoleAiLimit(Base):
     requests_per_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
     concurrent_operations: Mapped[int | None] = mapped_column(Integer, nullable=True)
     monthly_cost_limit_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Eigener Monatsdeckel für die deutlich teurere Realtime-Audioabrechnung.
+    # Das allgemeine Kostenlimit bleibt zusätzlich wirksam.
+    monthly_realtime_cost_limit_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Wie tief Benutzer dieser Rolle die KI nachdenken lassen dürfen — als Rang
     # aus `ai_reasoning.RANGFOLGE`: 0 = gar nicht, 1 = minimal … 6 = max.
     #

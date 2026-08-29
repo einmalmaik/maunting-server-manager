@@ -797,6 +797,13 @@ function ProviderForm({
                   </p>
                 )}
                 {gewaehltesModell && <ModelCapabilities model={gewaehltesModell} />}
+                <ModellPreisPaar
+                  policy={waehrung}
+                  inputValue={draft.standard_input_price_micro_usd_per_million ?? null}
+                  outputValue={draft.standard_output_price_micro_usd_per_million ?? null}
+                  onInputChange={(value) => change({ standard_input_price_micro_usd_per_million: value })}
+                  onOutputChange={(value) => change({ standard_output_price_micro_usd_per_million: value })}
+                />
               </div>
 
               {/* Gehör / Transkription — nur bei Anbietern, die zuhören
@@ -961,6 +968,15 @@ function ProviderForm({
                   />
                 )}
                 {workerModell && <ModelCapabilities model={workerModell} />}
+                {draft.worker_model && (
+                  <ModellPreisPaar
+                    policy={waehrung}
+                    inputValue={draft.worker_input_price_micro_usd_per_million ?? null}
+                    outputValue={draft.worker_output_price_micro_usd_per_million ?? null}
+                    onInputChange={(value) => change({ worker_input_price_micro_usd_per_million: value })}
+                    onOutputChange={(value) => change({ worker_output_price_micro_usd_per_million: value })}
+                  />
+                )}
               </div>
               {/* Die feste Denkstufe — nur wählbar, wenn der Katalog das
                   Modell kennt und es Stufen hat: die Stufen kommen immer aus
@@ -1043,6 +1059,15 @@ function ProviderForm({
                   />
                 )}
                 {ethicsModell && <ModelCapabilities model={ethicsModell} />}
+                {draft.ethics_model && (
+                  <ModellPreisPaar
+                    policy={waehrung}
+                    inputValue={draft.ethics_input_price_micro_usd_per_million ?? null}
+                    outputValue={draft.ethics_output_price_micro_usd_per_million ?? null}
+                    onInputChange={(value) => change({ ethics_input_price_micro_usd_per_million: value })}
+                    onOutputChange={(value) => change({ ethics_output_price_micro_usd_per_million: value })}
+                  />
+                )}
               </div>
 
               {/* Modus / Zoning-Stufe */}
@@ -1215,24 +1240,6 @@ function ProviderForm({
             </p>
           )}
           <p className="msm-field-help">{t('ai.providers.tokenPriceHint')}</p>
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-            {([
-              ['Standard Input', 'standard_input_price_micro_usd_per_million'],
-              ['Standard Output', 'standard_output_price_micro_usd_per_million'],
-              ['Worker Input', 'worker_input_price_micro_usd_per_million'],
-              ['Worker Output', 'worker_output_price_micro_usd_per_million'],
-              ['Ethik Input', 'ethics_input_price_micro_usd_per_million'],
-              ['Ethik Output', 'ethics_output_price_micro_usd_per_million'],
-            ] as const).map(([label, field]) => (
-              <ProviderInput
-                key={field}
-                label={`${label} · ${waehrung.currency} / 1 Mio. Tokens`}
-                value={microUsdInEingabe(draft[field] ?? null, waehrung)}
-                inputMode="decimal"
-                onChange={(value) => change({ [field]: eingabeInMicroUsd(value, waehrung) } as Partial<ProviderDraft>)}
-              />
-            ))}
-          </div>
         </div>
       </fieldset>
       {testResult && (
@@ -1328,6 +1335,33 @@ function RealtimePreisInput({ label, value, policy, onChange }: {
       onChange={setText}
       onBlur={() => onChange(eingabeInMicroUsd(text, policy))}
     />
+  )
+}
+
+/** Preisfelder bleiben bei dem Modell, dessen Verbrauch sie abbilden. */
+function ModellPreisPaar({ policy, inputValue, outputValue, onInputChange, onOutputChange }: {
+  policy: Pick<AiCostPolicy, 'currency' | 'usd_rate'>
+  inputValue: number | null
+  outputValue: number | null
+  onInputChange: (value: number | null) => void
+  onOutputChange: (value: number | null) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <RealtimePreisInput
+        label={t('ai.providers.modelPrices.input', { currency: policy.currency })}
+        value={inputValue}
+        policy={policy}
+        onChange={onInputChange}
+      />
+      <RealtimePreisInput
+        label={t('ai.providers.modelPrices.output', { currency: policy.currency })}
+        value={outputValue}
+        policy={policy}
+        onChange={onOutputChange}
+      />
+    </div>
   )
 }
 

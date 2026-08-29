@@ -50,6 +50,7 @@ export interface AiRoleLimits {
   requests_per_minute: number | null
   concurrent_operations: number | null
   monthly_cost_limit_cents: number | null
+  monthly_realtime_cost_limit_cents: number | null
   /**
    * Wieviele Memory-Eintraege in **je einem Bereich** liegen duerfen — hier
    * stand vorher „was ein Benutzer dieser Rolle anlegen darf", und das war
@@ -159,6 +160,7 @@ const FIELD_DEFINITIONS: Array<{
   { key: 'requests_per_minute', labelKey: 'aiSettings.requestsPerMinute', max: 10_000, step: 1 },
   { key: 'concurrent_operations', labelKey: 'aiSettings.concurrentOperations', max: 100, step: 1 },
   { key: 'monthly_cost_limit_cents', labelKey: 'aiSettings.monthlyCostCents', max: 1_000_000_000, step: 100 },
+  { key: 'monthly_realtime_cost_limit_cents', labelKey: 'aiSettings.monthlyRealtimeCostCents', max: 1_000_000_000, step: 100 },
   // 5_000 muss `MAX_MEMORY_ENTRIES_MAX` im Backend entsprechen: dort steht die
   // Zahl nicht höher, weil sie den gespeicherten Bestand begrenzt — und der
   // wächst je Bereich, von denen ein Benutzer beliebig viele haben kann.

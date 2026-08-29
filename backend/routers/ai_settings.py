@@ -356,6 +356,36 @@ def set_tomtom_key(
     return AiTomTomStatus(configured=configured)
 
 
+@router.post("/settings/tomtom/test", response_model=AiTomTomStatus)
+def test_tomtom_connection(
+    actor: User = Depends(require_global("panel.settings.write")),
+    _: None = Depends(verify_csrf),
+) -> AiTomTomStatus:
+    """Prueft den hinterlegten Schluessel nach einer ausdruecklichen Panel-Aktion."""
+    from services import ai_regional_connectors_service
+
+    result = ai_regional_connectors_service.traffic(52.5200, 13.4050)
+    status = result.get("status")
+    reason = result.get("reason")
+    safe_status = status if status in {"available", "not_configured", "unavailable"} else "unavailable"
+    safe_reason = reason if reason in {
+        "invalid_key", "traffic_not_enabled", "no_coverage", "rate_limited",
+        "network_error", "provider_error", "invalid_response",
+    } else None
+    with SessionLocal() as audit_db:
+        audit_service.record_privileged_action(
+            audit_db, user_id=actor.id, action="ai.tomtom.connection.tested",
+            target_type="panel_setting", target_id=None,
+            details={"status": safe_status, "reason": safe_reason},
+        )
+        audit_db.commit()
+    return AiTomTomStatus(
+        configured=ai_regional_connectors_service.is_tomtom_configured(),
+        traffic_status=safe_status,
+        reason=safe_reason,
+    )
+
+
 @router.get("/settings/learning", response_model=AiLearningPolicyStatus)
 def get_learning_policy(
     db: Session = Depends(get_db),

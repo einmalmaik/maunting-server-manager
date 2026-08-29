@@ -159,6 +159,7 @@
     "requestsPerMinute": "Requests per minute",
     "concurrentOperations": "Concurrent AI operations",
     "monthlyCostCents": "Monthly cost limit (cents)",
+    "monthlyRealtimeCostCents": "Monthly Realtime cost limit (cents)",
     "unlimited": "Unlimited",
     "configured": "Configured",
     "noRoles": "No roles exist yet.",
@@ -229,6 +230,10 @@
       },
       "tokenPrice": "Fallback price per 1M tokens ({{currency}})",
       "tokenPriceHint": "Fallback value: Used only if the provider does not report consumption metrics. These lines appear as estimated. Without a value, costs are recorded as zero and role cost limits do not apply.",
+      "modelPrices": {
+        "input": "Input · {{currency}} / 1M tokens",
+        "output": "Output · {{currency}} / 1M tokens"
+      },
       "test": "Test connection",
       "testOk": "Connection successful. The provider responded.",
       "testFailed": "The test failed.",
@@ -933,7 +938,8 @@
         "microphone": "No access to the microphone. Allow it in your browser settings.",
         "audio": "The browser could not set up the audio chain. Details are in the developer console.",
         "provider": "That didn't work just now.",
-        "quota": "Quota exhausted. Conversation paused. Please wait a moment or adjust your limit.",
+          "quota": "Quota exhausted. Conversation paused. Please wait a moment or adjust your limit.",
+          "realtimeQuota": "This role's Realtime cost limit has been reached. The conversation is paused.",
         "connection": "Lost the connection to voice mode.",
         "veraltet": "The panel does not support this voice mode yet. Please update the panel."
       },
@@ -1091,13 +1097,25 @@
       "apiKey": "TomTom API key",
       "placeholder": "Paste API key",
       "configured": "API key saved",
-      "saved": "TomTom configuration saved",
-      "removed": "TomTom configuration removed",
+        "saved": "TomTom configuration saved",
+        "removed": "TomTom configuration removed",
+        "test": "Test connection",
+        "testAvailable": "TomTom is returning traffic data for Berlin.",
       "removeConfirm": "Remove the TomTom configuration?",
-      "hint": "The key is encrypted in the backend and is never returned to the browser.",
-      "errors": {
+        "hint": "The key is encrypted in the backend and is never returned to the browser.",
+        "testReasons": {
+          "invalid_key": "TomTom rejected the key.",
+          "traffic_not_enabled": "The key is not allowed to retrieve TomTom traffic flow yet.",
+          "no_coverage": "TomTom has no traffic data for the test location.",
+          "rate_limited": "TomTom is rate limiting requests. Please try again later.",
+          "network_error": "TomTom is currently unreachable from the server.",
+          "provider_error": "TomTom did not return usable data.",
+          "invalid_response": "TomTom returned an unexpected response."
+        },
+        "errors": {
         "load": "Could not load TomTom status",
-        "save": "Could not save TomTom configuration"
+          "save": "Could not save TomTom configuration",
+          "test": "Could not test the TomTom connection"
       }
     },
     "geo": {
@@ -1128,7 +1146,7 @@
       "overflightMetadata": "Copernicus CDSE overflight data",
       "newsCount_one": "{{count}} report",
       "newsCount_other": "{{count}} reports",
-      "newsUnavailableTitle": "No verified news",
+      "newsUnavailableTitle": "No news available",
       "newsUnavailableBody": "No news source is configured for this region.",
       "tabsLabel": "Analysis sections",
       "globeTitle": "Regional map",
@@ -1161,6 +1179,15 @@
       "trafficNotConfiguredBody": "No TomTom traffic source is configured for this instance.",
       "trafficUnavailableTitle": "Traffic data currently unavailable",
       "trafficUnavailableBody": "TomTom traffic data is currently unavailable for this region.",
+      "trafficReasons": {
+        "invalid_key": "TomTom rejected the configured key.",
+        "traffic_not_enabled": "The key cannot use TomTom Traffic. Enable the Traffic API in the TomTom portal.",
+        "no_coverage": "TomTom has no traffic coverage for this map point.",
+        "rate_limited": "TomTom is currently limiting requests for this key.",
+        "network_error": "TomTom could not be reached for this request.",
+        "provider_error": "TomTom rejected the traffic request.",
+        "invalid_response": "TomTom returned no readable traffic data."
+      },
       "currentSpeed": "Current speed",
       "freeFlowSpeed": "Free-flow speed",
       "currentTravelTime": "Current travel time",

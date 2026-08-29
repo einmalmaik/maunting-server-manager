@@ -48,6 +48,21 @@ def test_tomtom_traffic_uses_fixed_endpoint_and_never_returns_key(monkeypatch) -
     assert "synthetic-secret" not in str(result)
 
 
+def test_tomtom_reports_a_safe_reason_when_traffic_access_is_missing(monkeypatch) -> None:
+    class FakeClient:
+        @staticmethod
+        def get(*_args, **_kwargs):
+            return _Response(status_code=403)
+
+    monkeypatch.setattr(connectors, "get_tomtom_key", lambda: "synthetic-secret")
+    monkeypatch.setattr(connectors, "_http_client", lambda: FakeClient())
+
+    assert connectors.traffic(52.52, 13.405) == {
+        "status": "unavailable",
+        "reason": "traffic_not_enabled",
+    }
+
+
 def test_public_posts_session_cache_deduplicates_inflight_requests(monkeypatch) -> None:
     calls = 0
     lock = threading.Lock()

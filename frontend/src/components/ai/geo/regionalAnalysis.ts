@@ -153,8 +153,13 @@ function normalizeTraffic(value: unknown): AiRegionalAnalysis['traffic'] | undef
   if (status !== 'available' && status !== 'not_configured' && status !== 'unavailable') return undefined
 
   const optionalNumber = (entry: unknown) => finiteNumber(entry) ?? undefined
+  const reason = typeof value.reason === 'string' && [
+    'invalid_key', 'traffic_not_enabled', 'no_coverage', 'rate_limited',
+    'network_error', 'provider_error', 'invalid_response',
+  ].includes(value.reason) ? value.reason as NonNullable<AiRegionalAnalysis['traffic']>['reason'] : undefined
   return {
     status,
+    reason,
     current_speed_kmh: optionalNumber(value.current_speed_kmh),
     free_flow_speed_kmh: optionalNumber(value.free_flow_speed_kmh),
     current_travel_time_seconds: optionalNumber(value.current_travel_time_seconds),

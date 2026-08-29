@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Car, Save, Trash2 } from 'lucide-react'
+import { Car, CircleCheck, CircleX, Save, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi } from '@/api/ai'
@@ -15,6 +15,7 @@ export function AiTomTomSettings({ canWrite }: { canWrite: boolean }) {
   const [apiKey, setApiKey] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [testStatus, setTestStatus] = useState<Awaited<ReturnType<typeof aiApi.testTomTomConnection>> | null>(null)
 
   useEffect(() => {
     let active = true
@@ -71,6 +72,21 @@ export function AiTomTomSettings({ canWrite }: { canWrite: boolean }) {
     }
   }
 
+  const testConnection = async () => {
+    if (!canWrite || busy || !configured) return
+    setBusy(true)
+    setTestStatus(null)
+    try {
+      const status = await aiApi.testTomTomConnection()
+      setTestStatus(status)
+      if (status.traffic_status === 'available') toast.success(t('ai.tomtom.testAvailable'))
+    } catch (error: unknown) {
+      toast.error(error instanceof SanitizedApiError ? error.message : t('ai.tomtom.errors.test'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (loading) return null
 
   return (
@@ -106,6 +122,12 @@ export function AiTomTomSettings({ canWrite }: { canWrite: boolean }) {
               {t('settings.save')}
             </Button>
             {configured && (
+              <Button type="button" variant="secondary" disabled={busy} onClick={() => void testConnection()}>
+                <Car className="h-4 w-4" aria-hidden="true" />
+                {t('ai.tomtom.test')}
+              </Button>
+            )}
+            {configured && (
               <Button type="button" variant="destructive" disabled={busy} onClick={() => void remove()}>
                 <Trash2 className="h-4 w-4" aria-hidden="true" />
                 {t('common.delete')}
@@ -114,6 +136,20 @@ export function AiTomTomSettings({ canWrite }: { canWrite: boolean }) {
           </div>
         )}
       </form>
+      {testStatus && (
+        <p className={`flex items-center gap-2 rounded-lg border p-3 text-xs ${
+          testStatus.traffic_status === 'available'
+            ? 'border-status-success/30 bg-status-success/10 text-status-success'
+            : 'border-status-error/30 bg-status-error/10 text-status-error'
+        }`} role="status">
+          {testStatus.traffic_status === 'available'
+            ? <CircleCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+            : <CircleX className="h-4 w-4 shrink-0" aria-hidden="true" />}
+          {testStatus.traffic_status === 'available'
+            ? t('ai.tomtom.testAvailable')
+            : t(`ai.tomtom.testReasons.${testStatus.reason ?? 'provider_error'}`)}
+        </p>
+      )}
       <p className="text-xs text-on-surface-variant">{t('ai.tomtom.hint')}</p>
     </section>
   )

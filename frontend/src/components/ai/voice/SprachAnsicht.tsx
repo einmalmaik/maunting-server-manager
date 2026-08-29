@@ -32,6 +32,7 @@ export function SprachAnsicht({
     vorschlag,
     intentErkannt,
     geoData,
+    regionalFocus,
     setGeoData,
     pegel,
     starten,
@@ -135,6 +136,7 @@ export function SprachAnsicht({
         data={geoData}
         locationName={activeLocationName}
         loading={!geoData || werkzeug === 'analyze_region' || zustand === 'denkt'}
+        regionalFocus={regionalFocus}
         onClose={() => {
           setGeoData(null)
           setKommandozentraleGeschlossen(true)

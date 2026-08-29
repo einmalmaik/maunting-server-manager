@@ -44,6 +44,7 @@ const row: AiRoleLimits = {
   requests_per_minute: 20,
   concurrent_operations: 2,
   monthly_cost_limit_cents: 5_000,
+  monthly_realtime_cost_limit_cents: 2_500,
   max_memory_entries: 250,
   // Rang 4 = "hoch". Diese Rolle darf tief denken lassen, aber nicht maximal.
   max_reasoning_effort: 4,
@@ -61,6 +62,7 @@ const blankRow: AiRoleLimits = {
   requests_per_minute: null,
   concurrent_operations: null,
   monthly_cost_limit_cents: null,
+  monthly_realtime_cost_limit_cents: null,
   max_memory_entries: null,
   max_reasoning_effort: null,
   updated_at: null,

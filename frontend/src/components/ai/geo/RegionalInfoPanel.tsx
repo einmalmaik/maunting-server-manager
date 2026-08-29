@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Car,
   Check,
@@ -20,6 +20,7 @@ import type { AiRegionalAnalysis, AiSatelliteLayer } from '@/api/ai'
 import { Button } from '@/Singra/UI'
 import { MapTilerDetailMap } from './MapTilerDetailMap'
 import { hasRegionalCoordinates } from './regionalAnalysis'
+import type { RegionalFocus } from '../voice/useSprachsitzung'
 
 type TabType = 'overview' | 'satellite' | 'news' | 'social' | 'traffic' | 'weather'
 
@@ -61,6 +62,7 @@ interface RegionalInfoPanelProps {
   data: AiRegionalAnalysis | null
   news?: NewsItem[]
   loading?: boolean
+  focus?: RegionalFocus | null
   onClose: () => void
 }
 
@@ -68,11 +70,11 @@ interface RegionalInfoPanelProps {
  * Modulares Kommandozentren-Panel für regionale Satelliten-, Umwelt- und
  * Aufklärungsdaten mit interaktiven Reitern (Übersicht, Satellit, Nachrichten, Wetter etc.).
  */
-export function RegionalInfoPanel({ data, news, loading, onClose }: RegionalInfoPanelProps) {
+export function RegionalInfoPanel({ data, news, loading, focus, onClose }: RegionalInfoPanelProps) {
   if (loading && !data) return <RegionalInfoLoading />
   if (!data || !hasRegionalCoordinates(data)) return loading ? <RegionalInfoLoading /> : null
 
-  return <RegionalInfoContent data={data} news={news} onClose={onClose} />
+  return <RegionalInfoContent data={data} news={news} focus={focus} onClose={onClose} />
 }
 
 function RegionalInfoLoading() {
@@ -90,13 +92,20 @@ function RegionalInfoLoading() {
   )
 }
 
-function RegionalInfoContent({ data, news, onClose }: Omit<RegionalInfoPanelProps, 'data' | 'loading'> & { data: AiRegionalAnalysis }) {
+function RegionalInfoContent({ data, news, focus, onClose }: Omit<RegionalInfoPanelProps, 'data' | 'loading'> & { data: AiRegionalAnalysis }) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<TabType>('overview')
   const [mapTilerAvailable, setMapTilerAvailable] = useState(true)
   const tabRefs = useRef<Record<TabType, HTMLButtonElement | null>>({
     overview: null, satellite: null, news: null, social: null, traffic: null, weather: null,
   })
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!focus) return
+    setActiveTab(focus.tab)
+    panelRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [focus])
 
   const { location, country, coordinates, weather, satellite } = data
   const traffic = data.traffic
@@ -233,7 +242,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
       </div>
 
       {/* 3. Reiterinhalte (Scrollbar-Container) */}
-      <div role="tabpanel" id={`regional-panel-${activeTab}`} aria-labelledby={`regional-tab-${activeTab}`} tabIndex={0} className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={panelRef} role="tabpanel" id={`regional-panel-${activeTab}`} aria-labelledby={`regional-tab-${activeTab}`} tabIndex={0} className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* TAB: ÜBERSICHT */}
         {activeTab === 'overview' && (
           <div className="space-y-4">
@@ -293,7 +302,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               <div className="space-y-2">
                 {newsList.length === 0 && (
                   <div className="rounded-xl border border-dashed border-outline-variant/30 bg-surface-container-lowest/70 p-3 text-center">
-                    <p className="text-xs font-medium text-on-surface">{t('ai.geo.newsUnavailableTitle', 'Keine verifizierten Nachrichten')}</p>
+                    <p className="text-xs font-medium text-on-surface">{t('ai.geo.newsUnavailableTitle', 'Keine Nachrichten verfügbar')}</p>
                     <p className="mt-1 text-xs text-on-surface-variant">{t('ai.geo.newsUnavailableBody', 'Für diese Region ist keine Nachrichtenquelle eingerichtet.')}</p>
                   </div>
                 )}
@@ -485,7 +494,7 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
             {newsList.length === 0 && (
               <div className="rounded-xl border border-dashed border-outline-variant/30 bg-surface-container-lowest/80 p-4 text-center">
                 <Newspaper className="mx-auto h-5 w-5 text-on-surface-variant/60" aria-hidden="true" />
-                <p className="mt-2 text-xs font-medium text-on-surface">Keine verifizierten Nachrichten</p>
+                <p className="mt-2 text-xs font-medium text-on-surface">{t('ai.geo.newsUnavailableTitle', 'Keine Nachrichten verfügbar')}</p>
                 <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
                   Für diese Region ist keine Nachrichtenquelle eingerichtet. Es werden keine Lageberichte geschätzt.
                 </p>
@@ -495,7 +504,11 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
             {newsList.map((item) => (
               <div
                 key={item.id}
-                className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/80 p-3.5 space-y-2 transition-colors hover:border-primary/40"
+                className={`rounded-xl border bg-surface-container-lowest/80 p-3.5 space-y-2 transition-colors hover:border-primary/40 ${
+                  focus?.tab === 'news' && focus.source && item.url === focus.source
+                    ? 'border-primary/70 ring-1 ring-primary/40 shadow-[0_0_20px_hsl(var(--primary)/0.2)]'
+                    : 'border-outline-variant/20'
+                }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary border border-primary/20">
@@ -549,10 +562,10 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
               </p>
             )}
             {publicPosts?.reddit.length ? (
-              <SocialPostList title={t('ai.geo.reddit', 'Reddit')} posts={publicPosts.reddit} type="reddit" />
+              <SocialPostList title={t('ai.geo.reddit', 'Reddit')} posts={publicPosts.reddit} type="reddit" highlightedSource={focus?.tab === 'social' ? focus.source : undefined} />
             ) : null}
             {publicPosts?.bluesky.length ? (
-              <SocialPostList title={t('ai.geo.bluesky', 'Bluesky')} posts={publicPosts.bluesky} type="bluesky" />
+              <SocialPostList title={t('ai.geo.bluesky', 'Bluesky')} posts={publicPosts.bluesky} type="bluesky" highlightedSource={focus?.tab === 'social' ? focus.source : undefined} />
             ) : null}
             {(!publicPosts || publicPosts.status === 'unavailable' || (publicPosts.reddit.length === 0 && publicPosts.bluesky.length === 0)) && (
               <RegionalEmptyState
@@ -585,7 +598,9 @@ function formatSafeDate(val: string | null | undefined, unavailableText: string,
                   : t('ai.geo.trafficUnavailableTitle', 'Verkehrsdaten derzeit nicht verfügbar')}
                 body={traffic?.status === 'not_configured'
                   ? t('ai.geo.trafficNotConfiguredBody', 'Für diese Instanz ist keine TomTom-Verkehrsquelle eingerichtet.')
-                  : t('ai.geo.trafficUnavailableBody', 'TomTom-Verkehrsdaten sind für diese Region derzeit nicht verfügbar.')}
+                  : traffic?.reason
+                    ? t(`ai.geo.trafficReasons.${traffic.reason}`, 'TomTom-Verkehrsdaten sind für diese Region derzeit nicht verfügbar.')
+                    : t('ai.geo.trafficUnavailableBody', 'TomTom-Verkehrsdaten sind für diese Region derzeit nicht verfügbar.')}
               />
             )}
           </div>
@@ -669,10 +684,11 @@ function RegionalEmptyState({ title, body }: { title: string; body: string }) {
   )
 }
 
-function SocialPostList({ title, posts, type }: {
+function SocialPostList({ title, posts, type, highlightedSource }: {
   title: string
   posts: Array<{ title: string; snippet: string; url: string }> | Array<{ author: string; text: string; url: string }>
   type: 'reddit' | 'bluesky'
+  highlightedSource?: string
 }) {
   const { t } = useTranslation()
   return (
@@ -683,7 +699,11 @@ function SocialPostList({ title, posts, type }: {
         const heading = isReddit ? (post as { title: string }).title : (post as { author: string }).author
         const content = isReddit ? (post as { snippet: string }).snippet : (post as { text: string }).text
         return (
-          <article key={post.url} className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/80 p-3 space-y-1.5">
+          <article key={post.url} className={`rounded-xl border bg-surface-container-lowest/80 p-3 space-y-1.5 ${
+            highlightedSource === post.url
+              ? 'border-primary/70 ring-1 ring-primary/40 shadow-[0_0_20px_hsl(var(--primary)/0.2)]'
+              : 'border-outline-variant/20'
+          }`}>
             <h4 className="text-xs font-semibold leading-snug text-on-surface">{heading}</h4>
             <p className="text-xs leading-relaxed text-on-surface-variant">{content}</p>
             <a href={post.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
