@@ -223,12 +223,20 @@ def test_realtime_session_uses_semantic_vad_without_transcription() -> None:
 
 def test_realtime_never_offers_background_workers(db: Session, regular_user, monkeypatch) -> None:
     provider = _realtime(db, "Realtime ohne Worker")
+    provider.worker_model = "gpt-worker"
+    db.commit()
+    rollen: list[str] = []
     monkeypatch.setattr(
         realtime_session.ai_action_service,
         "angebotene_werkzeuge",
         lambda *_args: {"web_search", "worker_start", "worker_cancel", "worker_antwort"},
     )
     monkeypatch.setattr(realtime_session.ai_provider_service, "resolve_api_key", lambda *_args: "test-key")
+    monkeypatch.setattr(
+        realtime_session.ai_prompt,
+        "build",
+        lambda **kwargs: rollen.append(kwargs["rolle"]) or "Direkt antworten",
+    )
 
     vorbereiten = realtime_session.vorbereiten(
         db,
@@ -241,6 +249,7 @@ def test_realtime_never_offers_background_workers(db: Session, regular_user, mon
     assert "voice_resolve_latest_proposal" in namen
     assert namen.isdisjoint({"worker_start", "worker_cancel", "worker_antwort"})
     assert "keine Hintergrund-Worker starten" in vorbereiten.instructions
+    assert rollen == ["voll"]
 
 
 def test_realtime_2_sends_the_operator_reasoning_effort() -> None:

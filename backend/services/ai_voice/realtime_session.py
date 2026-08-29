@@ -105,7 +105,9 @@ def vorbereiten(
             )
     basis_prompt = ai_prompt.build(
         gesprochen=True,
-        rolle="gehirn" if provider.worker_model else "voll",
+        # Realtime ist ein einzelner, latenzkritischer Zug. Es darf weder
+        # Worker-Werkzeuge noch die dazugehörige Gehirn-Orchestrierung sehen.
+        rolle="voll",
         desktop=herkunft == "desktop",
         db=db,
     )
