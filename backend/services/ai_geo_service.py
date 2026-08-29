@@ -324,53 +324,18 @@ def get_current_weather(latitude: float, longitude: float) -> dict[str, Any] | N
         return None
 
 
-def analyze_region(location_name: str, *, cache_scope: str | None = None) -> dict[str, Any]:
-    """Führt eine kombinierte Analyse für einen Ort durch (Geodaten + Wetter + Satellit)."""
-    geo = geocode_location(location_name)
-    if not geo:
-        return {
-            "status": "error",
-            "error_code": "LOCATION_NOT_FOUND",
-            "message": f"Der Ort '{location_name}' konnte nicht eindeutig geocodiert werden.",
-        }
-
+def _region_result(
+    geo: dict[str, Any],
+    weather: dict[str, Any] | None,
+    satellite_data: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Baut den sofort nutzbaren, vollständigen Karten- und Wetterstand."""
     lat = geo["latitude"]
     lon = geo["longitude"]
     bbox = geo["bbox"]
-
-    satellite_configured = ai_satellite_service.is_configured()
-
-    def satellite_search() -> list[dict[str, Any]]:
-        if not satellite_configured:
-            return []
-        try:
-            return ai_satellite_service.search_satellite_imagery(bbox=bbox, limit=2)
-        except Exception as exc:
-            logger.info("Satellitenbildsuche nicht erfolgreich error=%s", type(exc).__name__)
-            return []
-
-    # Wetter, Bildsuche und externe Regionalsignale sind unabhängig. Jeder
-    # Connector ist rein lesend; ein Ausfall darf das Lagebild nicht blockieren.
-    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="msm-geo") as executor:
-        weather_future = executor.submit(get_current_weather, lat, lon)
-        satellite_future = executor.submit(satellite_search)
-        traffic_future = executor.submit(
-            ai_regional_connectors_service.traffic, lat, lon, cache_scope=cache_scope,
-        )
-        public_posts_future = executor.submit(
-            ai_regional_connectors_service.public_posts, geo["name"], cache_scope=cache_scope,
-        )
-        weather = weather_future.result()
-        satellite_data = satellite_future.result()
-        traffic = traffic_future.result()
-        public_posts = public_posts_future.result()
     weather = weather or {}
-
     min_lon, min_lat, max_lon, max_lat = bbox
 
-    # Ein ehrliches Lagebild statt Filter, die eine aktuelle Aufnahme nur
-    # vortäuschen würden. ArcGIS liefert ein Bildmosaik; Zeitpunkt und native
-    # Auflösung unterscheiden sich je Kachel.
     true_color_url = (
         f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?"
         f"bbox={min_lon:.4f},{min_lat:.4f},{max_lon:.4f},{max_lat:.4f}&bboxSR=4326&imageSR=4326&size=1600,1200&format=jpg&f=image"
@@ -409,7 +374,6 @@ def analyze_region(location_name: str, *, cache_scope: str | None = None) -> dic
 
     loc_name = geo["name"]
     loc_country = geo["country"]
-
     return {
         "status": "success",
         "location": loc_name,
@@ -420,15 +384,79 @@ def analyze_region(location_name: str, *, cache_scope: str | None = None) -> dic
             "bbox": bbox,
         },
         "weather": weather,
-        "traffic": traffic,
-        "public_posts": public_posts,
         "satellite": {
             "available": len(satellite_data) > 0,
             "scenes": satellite_data,
             "layers": layers,
         },
-        # Wird vom autorisierten Werkzeugpfad durch reale Suchtreffer ergänzt.
-        # Der Dienst selbst kennt keinen Benutzer und darf daher nie suchen.
+        # Nachrichten und externe Regionalsignale ergänzt der aufrufende Pfad.
         "news": [],
         "news_status": "pending",
     }
+
+
+def analyze_region_initial(location_name: str) -> dict[str, Any]:
+    """Liefert Wetter und Kartenbild, ohne auf optionale Quellen zu warten."""
+    geo = geocode_location(location_name)
+    if not geo:
+        return {
+            "status": "error",
+            "error_code": "LOCATION_NOT_FOUND",
+            "message": f"Der Ort '{location_name}' konnte nicht eindeutig geocodiert werden.",
+        }
+
+    lat = geo["latitude"]
+    lon = geo["longitude"]
+    bbox = geo["bbox"]
+
+    satellite_configured = ai_satellite_service.is_configured()
+
+    def satellite_search() -> list[dict[str, Any]]:
+        if not satellite_configured:
+            return []
+        try:
+            return ai_satellite_service.search_satellite_imagery(bbox=bbox, limit=2)
+        except Exception as exc:
+            logger.info("Satellitenbildsuche nicht erfolgreich error=%s", type(exc).__name__)
+            return []
+
+    # Diese zwei Quellen bestimmen, ob die Karte sofort sinnvoll nutzbar ist.
+    # Verkehrs- und Social-Connectoren laufen bewusst erst im Nachladepfad.
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="msm-geo") as executor:
+        weather_future = executor.submit(get_current_weather, lat, lon)
+        satellite_future = executor.submit(satellite_search)
+        weather = weather_future.result()
+        satellite_data = satellite_future.result()
+    return _region_result(geo, weather, satellite_data)
+
+
+def enrich_region(analysis: dict[str, Any], *, cache_scope: str | None = None) -> dict[str, Any]:
+    """Lädt optionale Regionalsignale parallel nach dem ersten Kartenstand."""
+    coordinates = analysis.get("coordinates")
+    location = analysis.get("location")
+    if not isinstance(coordinates, dict) or not isinstance(location, str):
+        return {}
+    lat = coordinates.get("latitude")
+    lon = coordinates.get("longitude")
+    if isinstance(lat, bool) or isinstance(lon, bool) or not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+        return {}
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="msm-region") as executor:
+        traffic_future = executor.submit(
+            ai_regional_connectors_service.traffic, float(lat), float(lon), cache_scope=cache_scope,
+        )
+        public_posts_future = executor.submit(
+            ai_regional_connectors_service.public_posts, location, cache_scope=cache_scope,
+        )
+        return {
+            "traffic": traffic_future.result(),
+            "public_posts": public_posts_future.result(),
+        }
+
+
+def analyze_region(location_name: str, *, cache_scope: str | None = None) -> dict[str, Any]:
+    """Führt für nicht-latenzkritische Aufrufer die vollständige Analyse aus."""
+    analysis = analyze_region_initial(location_name)
+    if analysis.get("status") != "success":
+        return analysis
+    analysis.update(enrich_region(analysis, cache_scope=cache_scope))
+    return analysis

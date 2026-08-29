@@ -361,6 +361,61 @@ async def test_slow_realtime_tool_returns_a_safe_timeout_and_starts_the_followup
 
 
 @pytest.mark.asyncio
+async def test_realtime_region_sends_initial_data_before_optional_enrichment(monkeypatch) -> None:
+    class Panel:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, value):
+            self.sent.append(value)
+
+    class Sideband:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, value):
+            self.sent.append(value)
+
+    panel = Panel()
+    sideband = Sideband()
+    session = realtime_session.RealtimeSitzung(
+        panel,
+        vorbereitung=_vorbereitung(),
+        user_id=7,
+        http_client=None,
+        herkunft="panel",
+        familie=None,
+    )
+    session._angeboten.add("analyze_region")
+    session._sideband = sideband
+    initial = {
+        "status": "success",
+        "location": "Berlin",
+        "coordinates": {"latitude": 52.52, "longitude": 13.405, "bbox": [13, 52, 14, 53]},
+        "weather": {"temperature_celsius": 20},
+        "satellite": {"available": True, "scenes": [], "layers": {}},
+    }
+    complete = {**initial, "traffic": {"status": "available"}, "news": [], "news_status": "available"}
+    monkeypatch.setattr(session, "_region_anfang", lambda _args: initial)
+    monkeypatch.setattr(session, "_region_ergaenzen", lambda _args, _initial: complete)
+
+    await session._tool_ausfuehren({
+        "call_id": "call_region",
+        "name": "analyze_region",
+        "arguments": '{"location":"Berlin"}',
+    })
+
+    first_output = json.loads(sideband.sent[0])
+    assert json.loads(first_output["item"]["output"]) == initial
+    assert panel.sent[1]["geo_analysis"] == initial
+
+    session._response_aktiv = False
+    await asyncio.gather(*tuple(session._region_tasks))
+    assert panel.sent[2]["geo_analysis"] == complete
+    assert json.loads(sideband.sent[-1]) == {"type": "response.create"}
+
+
+@pytest.mark.asyncio
 async def test_parallel_realtime_tools_start_one_followup_response(monkeypatch) -> None:
     class Panel:
         async def send_json(self, _value):

@@ -3532,11 +3532,11 @@ def _execute_web_search(
     return {"available": True, "query": sichere_anfrage[:200], "results": results}
 
 
-def _execute_analyze_region(
-    db: Session, *, user: User, arguments: dict, prefetch_session_id: str | None = None,
-) -> dict:
-    """Führt eine regionale Analyse samt optionaler, aktueller Weblage durch."""
-    from services import ai_geo_service, ai_web_search_service, permission_service
+def _region_request(
+    db: Session, *, user: User, arguments: dict,
+) -> tuple[str, str]:
+    """Prüft die gemeinsame Berechtigungs- und Eingabegrenze der Regionsanalyse."""
+    from services import permission_service
 
     if not permission_service.has_global_permission(db, user, "ai.satellite.use"):
         raise AiActionValidationError("Satelliten- und Regionsanalyse ist für diesen Benutzer nicht freigegeben")
@@ -3547,8 +3547,37 @@ def _execute_analyze_region(
     camera = arguments.get("camera", "focus")
     if camera not in {"overview", "focus", "detail"}:
         raise AiActionValidationError("Kameramodus ist ungültig")
+    return redact_sensitive_text(location.strip())[:100], camera
 
-    safe_location = redact_sensitive_text(location.strip())[:100]
+
+def execute_realtime_region_initial(
+    db: Session, *, user: User, arguments: dict,
+) -> dict:
+    """Liefert den ersten, sofort darstellbaren Stand für den Sprachmodus."""
+    from services import ai_geo_service
+
+    safe_location, camera = _region_request(db, user=user, arguments=arguments)
+    analysis = ai_geo_service.analyze_region_initial(safe_location)
+    if analysis.get("status") == "success":
+        analysis["camera"] = {"mode": camera, "command_id": str(uuid4())}
+    return analysis
+
+
+def execute_realtime_region_enrichment(
+    db: Session,
+    *,
+    user: User,
+    arguments: dict,
+    initial: dict,
+    prefetch_session_id: str | None = None,
+) -> dict:
+    """Ergänzt einen bereits gezeigten Regionsstand um langsame, optionale Quellen."""
+    from services import ai_geo_service, ai_web_search_service, permission_service
+
+    safe_location, _camera = _region_request(db, user=user, arguments=arguments)
+    if initial.get("status") != "success":
+        return initial
+
     can_search = permission_service.has_global_permission(db, user, "ai.web_search.use")
     search_configured = can_search and ai_web_search_service.is_configured()
 
@@ -3567,24 +3596,37 @@ def _execute_analyze_region(
         except ai_web_search_service.WebSearchUnavailable as exc:
             return [], exc.code.lower()
 
-    # Das Geocoding startet Wetter und Sentinel intern parallel. Die Weblage
-    # hängt davon nicht ab und läuft deshalb zeitgleich statt danach.
     regional_cache_scope = (
         f"regional:{user.id}:{prefetch_session_id}" if prefetch_session_id else None
     )
+    # Verkehr, öffentliche Beiträge und Weblage dürfen den sofort sichtbaren
+    # Wetter-/Kartenstand nie aufhalten, laden aber untereinander parallel.
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="msm-region") as executor:
-        analysis_future = executor.submit(
-            ai_geo_service.analyze_region, safe_location, cache_scope=regional_cache_scope,
+        signals_future = executor.submit(
+            ai_geo_service.enrich_region, initial, cache_scope=regional_cache_scope,
         )
         news_future = executor.submit(regional_news)
-        analysis = analysis_future.result()
+        signals = signals_future.result()
         news, news_status = news_future.result()
-    if analysis.get("status") != "success":
-        return analysis
-    analysis["camera"] = {"mode": camera, "command_id": str(uuid4())}
+    analysis = dict(initial)
+    analysis.update(signals)
     analysis["news"] = news
     analysis["news_status"] = news_status
     return analysis
+
+
+def _execute_analyze_region(
+    db: Session, *, user: User, arguments: dict, prefetch_session_id: str | None = None,
+) -> dict:
+    """Führt für den Chat die vollständige regionale Analyse aus."""
+    initial = execute_realtime_region_initial(db, user=user, arguments=arguments)
+    return execute_realtime_region_enrichment(
+        db,
+        user=user,
+        arguments=arguments,
+        initial=initial,
+        prefetch_session_id=prefetch_session_id,
+    )
 
 
 def _execute_control_region_camera(db: Session, *, user: User, arguments: dict) -> dict:

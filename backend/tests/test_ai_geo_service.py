@@ -151,3 +151,33 @@ def test_region_analysis_fetches_weather_and_satellite_in_parallel(monkeypatch) 
     assert result["status"] == "success"
     assert result["weather"]["temperature_celsius"] == 12.0
     assert result["traffic"] == {"status": "available"}
+
+
+def test_region_initial_does_not_wait_for_optional_signals(monkeypatch) -> None:
+    monkeypatch.setattr(ai_geo_service, "geocode_location", lambda _location: {
+        "name": "Example City", "country": "Exampleland", "latitude": 1.0,
+        "longitude": 2.0, "bbox": [1.0, 2.0, 3.0, 4.0],
+    })
+    monkeypatch.setattr(ai_satellite_service, "is_configured", lambda: False)
+    monkeypatch.setattr(ai_geo_service, "get_current_weather", lambda *_args: {"temperature_celsius": 12.0})
+    calls: list[str] = []
+    monkeypatch.setattr(
+        ai_regional_connectors_service, "traffic",
+        lambda *_args, **_kwargs: calls.append("traffic") or {"status": "available"},
+    )
+    monkeypatch.setattr(
+        ai_regional_connectors_service, "public_posts",
+        lambda *_args, **_kwargs: calls.append("public_posts") or {"status": "available"},
+    )
+
+    initial = ai_geo_service.analyze_region_initial("Example City")
+
+    assert initial["status"] == "success"
+    assert initial["weather"] == {"temperature_celsius": 12.0}
+    assert "traffic" not in initial
+    assert calls == []
+    assert ai_geo_service.enrich_region(initial) == {
+        "traffic": {"status": "available"},
+        "public_posts": {"status": "available"},
+    }
+    assert sorted(calls) == ["public_posts", "traffic"]
