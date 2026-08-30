@@ -139,8 +139,10 @@ export function MapTilerDetailMap({
       })
       const markManualCameraControl = (event: unknown) => {
         if (!isManualMapEvent(event)) return
+        // Do not call map.stop() here. MapLibre owns the active drag gesture;
+        // stopping the map from dragstart aborts the gesture and makes panning
+        // advance in tiny frame-sized steps instead of following the pointer.
         manualCameraControlRef.current = true
-        map.stop()
       }
       map.on('dragstart', markManualCameraControl)
       map.on('dragend', () => {

@@ -104,8 +104,8 @@ describe('MapTilerDetailMap', () => {
     expect(mapHarness.scrollZoomEnables).toBe(1)
     expect(mapHarness.touchZoomEnables).toBe(1)
     expect(mapHarness.dragRotateEnables).toBe(1)
-    expect(mapHarness.trackpadZoomRates).toEqual([1 / 30])
-    expect(mapHarness.wheelZoomRates).toEqual([1 / 60])
+    expect(mapHarness.trackpadZoomRates).toEqual([0.2])
+    expect(mapHarness.wheelZoomRates).toEqual([0.15])
   })
 
   it('meldet eine nicht konfigurierte Detailkarte genau einmal und lässt den Fallback zu', async () => {
@@ -309,8 +309,10 @@ describe('MapTilerDetailMap', () => {
     )
     await waitFor(() => expect(mapHarness.flyTos).toHaveLength(1))
 
+    // Ignore the stop used to interrupt the initial camera animation.
+    mapHarness.stops = 0
     mapHarness.handlers.get('dragstart')?.({ originalEvent: new MouseEvent('mousedown') })
-    expect(mapHarness.stops).toBeGreaterThan(0)
+    expect(mapHarness.stops).toBe(0)
 
     rerender(
       <MapTilerDetailMap
