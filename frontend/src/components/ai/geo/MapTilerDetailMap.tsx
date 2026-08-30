@@ -26,8 +26,8 @@ const MAX_GLOBE_FOCUS_ZOOM = 10
 const DETAIL_ZOOM = 13
 const LANDMARK_ZOOM = 16
 const CAMERA_DURATION_MS = 700
-const TRACKPAD_ZOOM_RATE = 1 / 50
-const WHEEL_ZOOM_RATE = 1 / 120
+const TRACKPAD_ZOOM_RATE = 1 / 30
+const WHEEL_ZOOM_RATE = 1 / 60
 
 function isManualMapEvent(value: unknown): boolean {
   return typeof value === 'object' && value !== null && 'originalEvent' in value && Boolean(
@@ -175,8 +175,7 @@ export function MapTilerDetailMap({
     // Karte nicht zurücksetzen. Eine klare Steueraktion oder ein anderer Ort
     // bleibt dagegen ein neuer, ausdrücklich sichtbarer Auftrag.
     if (manualCameraControlRef.current && sameTarget && !cameraAction) return
-
-    if (!sameTarget || cameraAction) manualCameraControlRef.current = false
+    if (!sameTarget) manualCameraControlRef.current = false
     const currentZoom = map.getZoom()
     const focusZoom = globe ? Math.max(5, Math.min(MAX_GLOBE_FOCUS_ZOOM, zoom)) : zoom
     let nextZoom = focusZoom
@@ -201,7 +200,6 @@ export function MapTilerDetailMap({
       center: [longitude, latitude],
       zoom: nextZoom,
       duration: CAMERA_DURATION_MS,
-      essential: true,
     })
   }, [cameraAction, cameraCommandId, cameraMode, globe, latitude, longitude, ready, zoom])
 

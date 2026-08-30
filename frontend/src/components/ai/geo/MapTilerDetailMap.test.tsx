@@ -104,8 +104,8 @@ describe('MapTilerDetailMap', () => {
     expect(mapHarness.scrollZoomEnables).toBe(1)
     expect(mapHarness.touchZoomEnables).toBe(1)
     expect(mapHarness.dragRotateEnables).toBe(1)
-    expect(mapHarness.trackpadZoomRates).toEqual([1 / 50])
-    expect(mapHarness.wheelZoomRates).toEqual([1 / 120])
+    expect(mapHarness.trackpadZoomRates).toEqual([1 / 30])
+    expect(mapHarness.wheelZoomRates).toEqual([1 / 60])
   })
 
   it('meldet eine nicht konfigurierte Detailkarte genau einmal und lässt den Fallback zu', async () => {
@@ -325,5 +325,56 @@ describe('MapTilerDetailMap', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mapHarness.flyTos).toHaveLength(1)
+  })
+
+  it('führt einen expliziten cameraAction trotz manueller Kontrolle aus, blockiert aber nachfolgende Fokus-Updates', async () => {
+    mapHarness.getMapTilerMapConfig.mockResolvedValue({
+      configured: true,
+      style_url: 'https://maps.example.test/style.json',
+    })
+
+    const { rerender } = render(
+      <MapTilerDetailMap
+        latitude={52.52}
+        longitude={13.405}
+        locationName="Berlin"
+        globe
+        cameraCommandId="focus-1"
+        onUnavailable={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(mapHarness.flyTos).toHaveLength(1))
+
+    // Nutzer greift manuell ein
+    mapHarness.handlers.get('dragstart')?.({ originalEvent: new MouseEvent('mousedown') })
+
+    // Expliziter zoom_in-Befehl der KI auf denselben Ort
+    rerender(
+      <MapTilerDetailMap
+        latitude={52.52}
+        longitude={13.405}
+        locationName="Berlin"
+        globe
+        cameraAction="zoom_in"
+        cameraCommandId="zoom-1"
+        onUnavailable={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(mapHarness.flyTos).toHaveLength(2))
+
+    // Nachfolgendes Update ohne cameraAction auf denselben Ort muss ignoriert werden,
+    // weil die manuelle Kontrolle nach dem cameraAction bestehen bleibt.
+    rerender(
+      <MapTilerDetailMap
+        latitude={52.52}
+        longitude={13.405}
+        locationName="Berlin"
+        globe
+        cameraCommandId="focus-3"
+        onUnavailable={vi.fn()}
+      />,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mapHarness.flyTos).toHaveLength(2)
   })
 })
