@@ -280,6 +280,10 @@ def set_maptiler_key(
     from services import ai_maptiler_service
 
     key = payload.api_key.get_secret_value() if payload.api_key else ""
+    if key.strip():
+        ok, detail = ai_maptiler_service.validate_browser_key(key)
+        if not ok:
+            raise HTTPException(status_code=400, detail=detail or "MapTiler-Key ungueltig")
     try:
         ai_maptiler_service.store_browser_key(key)
     except DisSidecarError as exc:

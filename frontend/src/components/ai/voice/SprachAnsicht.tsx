@@ -29,6 +29,8 @@ export function SprachAnsicht({
     werkzeug,
     fehlerWerkzeug,
     fehlerCode,
+    debugCode,
+    debugHint,
     fehler,
     belege,
     vorschlag,
@@ -167,6 +169,11 @@ export function SprachAnsicht({
               <p className="text-xs text-on-surface-variant">
                 {fehler ? (fehlerCode === 'REALTIME_TOOL_TIMEOUT' ? 'Werkzeug hat zu lange gebraucht. Die Sprachsitzung bleibt offen.' : t('ai.voice.hint.error')) : t(`ai.voice.hint.${zustand}`)}
               </p>
+              {(fehlerCode || debugCode) && (
+                <p className="mt-1 font-mono text-[11px] text-on-surface-variant/70">
+                  {fehlerCode || debugCode}{debugHint ? ` — ${debugHint}` : ''}{fehlerWerkzeug && fehlerCode !== fehlerWerkzeug ? ` (${fehlerWerkzeug})` : ''}
+                </p>
+              )}
             </div>
           </div>
 
@@ -231,6 +238,11 @@ export function SprachAnsicht({
         <p className="max-w-md text-sm text-on-surface-variant">
           {fehler ? (fehlerCode === 'REALTIME_TOOL_TIMEOUT' ? 'Werkzeug hat zu lange gebraucht. Die Sprachsitzung bleibt offen.' : t('ai.voice.hint.error')) : t(`ai.voice.hint.${zustand}`)}
         </p>
+        {(fehlerCode || debugCode) && (
+          <p className="font-mono text-xs text-on-surface-variant/60">
+            {fehlerCode || debugCode}{debugHint ? ` — ${debugHint}` : ''}{fehlerWerkzeug && fehlerCode !== fehlerWerkzeug ? ` (${fehlerWerkzeug})` : ''}
+          </p>
+        )}
         {werkzeug && (
           <div className="flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3.5 py-1 text-xs font-medium text-primary animate-pulse">
             <Wrench className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />

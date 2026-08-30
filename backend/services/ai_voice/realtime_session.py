@@ -30,6 +30,7 @@ from services.ai_stream.read_tools import _werkzeug_nebenlaeufigkeit, voice_werk
 from services.ai_tool_registry import GEHIRN_TOOLS, VOICE_CONTROL_TOOLS, WORKER_STEUERUNG, herkunft_schnitt
 from services.ai_voice import interactions as voice_interactions
 from services.ai_voice.contracts import Lage, MAX_SITZUNGSSEKUNDEN, voice_tool_frame
+from services.ai_voice_debug import emit as voice_debug
 from services.openai_compatible_adapter import ProviderToolCall
 
 
@@ -86,14 +87,16 @@ def vorbereiten(
         )
         - WORKER_STEUERUNG
     ) | VOICE_CONTROL_TOOLS
+    from services.ai_tool_compat import realtime_tool_schema
+
     tools = []
     for eintrag in (
         ai_action_service.provider_tool_definitions()
         + ai_action_service.voice_control_tool_definitions()
     ):
-        funktion = eintrag.get("function", {})
-        if funktion.get("name") in erlaubt:
-            tools.append({"type": "function", **funktion})
+        schema = realtime_tool_schema(eintrag)
+        if schema and schema.get("name") in erlaubt:
+            tools.append(schema)
 
     sprache = provider.realtime_language or "auto"
     sprachregel = (
@@ -311,10 +314,19 @@ class RealtimeSitzung:
             await self.websocket.send_json(daten)
             self.lage.rahmen_zurueck += 1
 
+    async def _debug_senden(self, code: str, hint: str = "", **fields: object) -> None:
+        voice_debug(code, hint=hint, **fields)
+        try:
+            await self._panel_senden({"art": "debug", "code": code, "hint": hint})
+        except Exception:
+            pass
+
     async def _handshake(self, sdp: str) -> str:
         if not sdp or len(sdp) > MAX_SDP_ZEICHEN:
+            await self._debug_senden("REALTIME_SDP_INVALID", hint="SDP groesse ungueltig")
             raise RealtimeSitzungsfehler("REALTIME_SDP_INVALID")
         if websockets is None:
+            await self._debug_senden("REALTIME_NOT_AVAILABLE", hint="websockets Paket fehlt")
             raise RealtimeSitzungsfehler("REALTIME_NOT_AVAILABLE")
         try:
             response = await self.http.post(
@@ -326,10 +338,12 @@ class RealtimeSitzung:
                 },
             )
             if response.status_code not in {200, 201}:
+                await self._debug_senden("REALTIME_HANDSHAKE_FAILED", hint=f"HTTP {response.status_code}")
                 raise RealtimeSitzungsfehler("REALTIME_HANDSHAKE_FAILED")
             call_id = _call_id(response.headers.get("location"))
             answer = response.text
             if not answer or len(answer) > MAX_SDP_ZEICHEN:
+                await self._debug_senden("REALTIME_HANDSHAKE_FAILED", hint="Antwort-SDP ungueltig")
                 raise RealtimeSitzungsfehler("REALTIME_HANDSHAKE_FAILED")
             self._sideband = await websockets.connect(
                 f"wss://api.openai.com/v1/realtime?call_id={call_id}",
@@ -337,10 +351,12 @@ class RealtimeSitzung:
                 max_size=2 * 1024 * 1024,
                 open_timeout=10,
             )
+            await self._debug_senden("REALTIME_HANDSHAKE_OK", hint="WebRTC verbunden")
             return answer
         except RealtimeSitzungsfehler:
             raise
         except Exception as exc:
+            await self._debug_senden("REALTIME_HANDSHAKE_FAILED", hint=type(exc).__name__)
             raise RealtimeSitzungsfehler("REALTIME_HANDSHAKE_FAILED") from exc
 
     async def _tool_start(self, call_id: str, name: str) -> None:
@@ -409,11 +425,13 @@ class RealtimeSitzung:
                             wert = {"error": "TOOL_TIMEOUT"}
                             anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_TIMEOUT", "reason": "timeout"}
                             vorschlaege = []
+                            await self._debug_senden("REALTIME_TOOL_TIMEOUT", hint=name)
                         except Exception:
                             fehler = "Werkzeug konnte nicht ausgeführt werden"
                             wert = {"error": fehler}
                             anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_FAILED", "reason": "execution_error"}
                             vorschlaege = []
+                            await self._debug_senden("REALTIME_TOOL_FAILED", hint=name)
                     else:
                         call = ProviderToolCall(id=call_id, name=name, arguments=argumente)
                         try:
@@ -430,23 +448,19 @@ class RealtimeSitzung:
                                     timeout=REALTIME_TOOL_TIMEOUT_SECONDS,
                                 )
                         except TimeoutError:
-                            # Der Thread kann einen fremden HTTP-Aufruf nicht
-                            # sicher abbrechen. Der Sprachzug darf deshalb nicht
-                            # darauf warten oder stumm bleiben; das Modell erhält
-                            # einen festen, nicht sensiblen Fehler und kann direkt
-                            # weiterreden.
                             fehler = "Werkzeug hat nicht rechtzeitig geantwortet"
                             wert = {"error": "TOOL_TIMEOUT"}
                             anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_TIMEOUT", "reason": "timeout"}
                             vorschlaege = []
+                            await self._debug_senden("REALTIME_TOOL_TIMEOUT", hint=name)
                         except Exception:
-                            # Rohfehler können Zielsystemdaten enthalten. Der
-                            # Anbieter und das Frontend erhalten nur diesen festen
-                            # Fehlervertrag; der nächste Gesprächszug bleibt offen.
                             fehler = "Werkzeug konnte nicht ausgeführt werden"
                             wert = {"error": fehler}
                             anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_FAILED", "reason": "execution_error"}
                             vorschlaege = []
+                            await self._debug_senden("REALTIME_TOOL_FAILED", hint=name)
+        if fehler:
+            await self._debug_senden("REALTIME_TOOL_ERROR" if anzeige.get("failed") else "REALTIME_TOOL_OK", hint=name, code=anzeige.get("code") or "")
         frame = voice_tool_frame("tool", anzeige)
         if frame:
             await self._panel_senden(frame)
@@ -459,10 +473,6 @@ class RealtimeSitzung:
                 self._offener_vorschlag = kennung
                 await self._panel_senden({"art": "vorschlag", "vorschlag": karte})
         if self._sideband is not None:
-            # Werkzeugwerte stammen auch aus Datenbank- und Servermetadaten.
-            # Ein einzelnes Datumsobjekt oder ein anderer nicht JSON-fähiger
-            # Wert darf den Folgezug nicht still aufhalten. Die UI sieht
-            # weiterhin nur die sichere Projektion oben.
             try:
                 output = json.dumps(wert, ensure_ascii=False, separators=(",", ":"), default=str)
                 await self._sideband.send(json.dumps({
@@ -471,16 +481,11 @@ class RealtimeSitzung:
                 }))
                 self._response_aktiv = True
                 self._tool_folgeantwort_ausstehend = True
-                # Direkte Aufrufe werden in Tests und in einzelnen sicheren
-                # Verwaltungsflüssen verwendet. Im normalen Realtime-Pfad
-                # startet _tool_task_fertig die Folgeantwort erst, wenn alle
-                # parallelen Tool-Ergebnisse geliefert wurden.
                 if not self._tool_tasks:
                     await self._tool_folgeantwort_starten()
             except Exception:
-                # Der Transportfehler beendet nicht die lokale Sitzung und
-                # leakt weder Call-ID noch Rohresultat in Browser oder Logs.
                 self._response_aktiv = False
+                await self._debug_senden("REALTIME_TOOL_DELIVERY_FAILED", hint=name)
                 await self._panel_senden({"art": "fehler", "code": "REALTIME_TOOL_DELIVERY_FAILED"})
         if fehler:
             await self._panel_senden({"art": "zustand", "zustand": "denkt"})
@@ -653,6 +658,7 @@ class RealtimeSitzung:
                         if exc.reason == "monthly_realtime_cost_limit_cents"
                         else "kontingent"
                     )
+                    await self._debug_senden("REALTIME_QUOTA", hint=grund)
                     await self._panel_senden({"art": "stoerung", "grund": grund})
                     raise RealtimeSitzungsfehler("REALTIME_QUOTA") from exc
                 self._assistant_spricht = False
@@ -661,13 +667,13 @@ class RealtimeSitzung:
                 if status == "completed":
                     self.lage.laeufe += 1
                 if status in {"failed", "cancelled", "incomplete"}:
-                    # Tool-Folgeantworten und spätere Nutzerturns dürfen die
-                    # Sitzung weiterbenutzen. Ein einzelner abgebrochener
-                    # Provider-Response ist kein Socket-Fehler.
+                    await self._debug_senden("REALTIME_RESPONSE_FAILED", hint=str(status))
                     await self._panel_senden({"art": "stoerung", "grund": "realtime_response"})
                 if not self._tool_tasks:
                     if status == "completed" and not self._antwort_hat_audio:
+                        await self._debug_senden("REALTIME_LEERE_ANTWORT", hint="kein Audio")
                         await self._panel_senden({"art": "stoerung", "grund": "leere_antwort"})
+                        await self._panel_senden({"art": "debug", "code": "REALTIME_LEERE_ANTWORT", "hint": "Modell blieb stumm"})
                     if status == "completed":
                         await self._panel_senden({"art": "zustand", "zustand": "bereit"})
                     if self._response_nachtrag_ausstehend is not None and status in {"completed", "failed", "cancelled", "incomplete"}:
@@ -680,7 +686,9 @@ class RealtimeSitzung:
                                 await self._sideband.send(json.dumps({"type": "response.create"}))
                             except Exception:
                                 self._response_aktiv = False
+                                await self._debug_senden("REALTIME_NACHTRAG_FAILED", hint="sideband send failed")
             elif art == "error":
+                await self._debug_senden("REALTIME_SIDEBAND_ERROR", hint=str(event.get("error") or event))
                 await self._panel_senden({"art": "stoerung", "grund": "realtime_response"})
 
     def _tool_task_fertig(self, task: asyncio.Task) -> None:
@@ -751,12 +759,16 @@ class RealtimeSitzung:
         except WebSocketDisconnect:
             pass
         except RealtimeSitzungsfehler as exc:
+            voice_debug(str(exc), hint="RealtimeSitzung abgebrochen")
             if str(exc) != "REALTIME_QUOTA":
                 with contextlib.suppress(Exception):
                     await self._panel_senden({"art": "fehler", "code": str(exc)})
-        except Exception:
+                    await self._panel_senden({"art": "debug", "code": str(exc), "hint": "Realtime Fehler"})
+        except Exception as exc:
+            voice_debug("REALTIME_INTERNAL_ERROR", hint=type(exc).__name__)
             with contextlib.suppress(Exception):
                 await self._panel_senden({"art": "fehler", "code": "REALTIME_INTERNAL_ERROR"})
+                await self._panel_senden({"art": "debug", "code": "REALTIME_INTERNAL_ERROR", "hint": type(exc).__name__})
         finally:
             for task in self._tool_tasks:
                 task.cancel()

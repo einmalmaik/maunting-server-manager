@@ -24,6 +24,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { aiApi, type AiRegionalAnalysis } from '@/api/ai'
 import { wsProtokolle } from '@/api/client'
 import { wsUrl } from '@/config/api'
+import { voiceDebug, voiceWarn, voiceError } from '@/lib/voiceDebug'
 import { applyGeoCameraCommand, normalizeRegionalAnalysis } from '../geo/regionalAnalysis'
 import { AufnahmeAbbruch, starteAufnahme, type Aufnahme } from './audioAufnahme'
 import { Wiedergabe } from './audioWiedergabe'
@@ -110,6 +111,8 @@ interface Ergebnis {
   fehler: string | null
   fehlerWerkzeug: string | null
   fehlerCode: string | null
+  debugCode: string | null
+  debugHint: string | null
   /**
    * Die gezeigten Stellen, die zuletzt gezeigte am Ende. Die Anzeige braucht
    * nur die letzte; die davor bleiben ein paar Schritte stehen, damit ein
@@ -237,6 +240,8 @@ export function useSprachsitzung(
   const [werkzeug, setWerkzeug] = useState<string | null>(null)
   const [fehlerWerkzeug, setFehlerWerkzeug] = useState<string | null>(null)
   const [fehlerCode, setFehlerCode] = useState<string | null>(null)
+  const [debugCode, setDebugCode] = useState<string | null>(null)
+  const [debugHint, setDebugHint] = useState<string | null>(null)
   const [fehler, setFehler] = useState<string | null>(null)
   const [belege, setBelege] = useState<Beleg[]>([])
   const [vorschlag, setVorschlag] = useState<Vorschlag | null>(null)
@@ -291,6 +296,7 @@ export function useSprachsitzung(
     setRegionalFocus(null)
     setRegionalContextActive(true)
     intentRevision.current = 0
+    voiceDebug('VOICE_BEENDET', { zustand: 'aus' })
   }, [aufraeumen])
 
   const zeileAnhaengen = useCallback((wer: Sprachzeile['wer'], text: string) => {
@@ -316,7 +322,11 @@ export function useSprachsitzung(
     if (ws.current !== null) return
     gewollt.current = true
     setFehler(null)
+    setFehlerCode(null)
+    setDebugCode(null)
+    setDebugHint(null)
     setZustand('verbindet')
+    voiceDebug('VOICE_START', { providerId, modus })
 
     const istRealtime = modus === 'openai_realtime'
 
@@ -351,9 +361,10 @@ export function useSprachsitzung(
       verbindung = new WebSocket(adresse(providerId), protokolle)
       verbindung.binaryType = 'arraybuffer'
       ws.current = verbindung
-    } catch (e) {
-      console.error('WebSocket-Aufbau fehlgeschlagen:', e)
+     } catch (e) {
+      voiceError('VOICE_WS_AUFBAU_FEHLER', { error: String(e) })
       setFehler('ai.voice.errors.connection')
+      setFehlerCode('WS_SETUP_FAILED')
       setZustand('aus')
       return
     }
@@ -364,10 +375,12 @@ export function useSprachsitzung(
 
     const verbindungTimeout = window.setTimeout(() => {
       if (!verbunden && ws.current === verbindung) {
+        voiceWarn('VOICE_WS_TIMEOUT', { timeoutMs: 10000 })
         try {
           verbindung.close()
         } catch {}
         setFehler('ai.voice.errors.connection')
+        setFehlerCode('WS_TIMEOUT')
         setZustand('aus')
       }
     }, 10_000)
@@ -375,6 +388,7 @@ export function useSprachsitzung(
     verbindung.onopen = () => {
       verbunden = true
       window.clearTimeout(verbindungTimeout)
+      voiceDebug('VOICE_WS_OPEN', { modus })
       if (istRealtime) {
         void (async () => {
           const verarbeitung = aktuelleVerarbeitung()
@@ -430,7 +444,9 @@ export function useSprachsitzung(
           }
         })().catch((fehler: unknown) => {
           const name = (fehler as { name?: string })?.name ?? ''
+          voiceError('VOICE_RTC_FEHLER', { name, error: String(fehler) })
           setFehler(name === 'NotAllowedError' ? 'ai.voice.errors.microphone' : 'ai.voice.errors.audio')
+          setFehlerCode(name || 'RTC_FAILED')
           beenden()
         })
         return
@@ -467,7 +483,7 @@ export function useSprachsitzung(
           // Der Wortlaut bleibt in der Konsole. Ohne ihn ist ein Browserfehler
           // in dieser Kette nicht auffindbar — er sieht von aussen aus wie ein
           // Mikrofon, das nicht will.
-          console.error('Sprachmodus: Aufnahme nicht moeglich', fehler)
+          voiceError('VOICE_AUFNAHME_FEHLER', { error: String(fehler) })
           beenden()
         })
     }
@@ -497,9 +513,24 @@ export function useSprachsitzung(
           }
           break
         case 'bereit':
+          voiceDebug('VOICE_BEREIT')
           setFehler(null)
           setZustand('bereit')
           break
+        case 'debug': {
+          const code = typeof nachricht.code === 'string' ? nachricht.code : null
+          const hint = typeof nachricht.hint === 'string' ? nachricht.hint : null
+          if (code) {
+            setDebugCode(code)
+            setDebugHint(hint)
+            voiceDebug(code, { hint: hint ?? undefined })
+            if (code === 'REALTIME_TOOL_TIMEOUT' || code === 'REALTIME_TOOL_FAILED') {
+              setFehlerCode(code)
+              setFehlerWerkzeug(typeof nachricht.hint === 'string' ? nachricht.hint : null)
+            }
+          }
+          break
+        }
         case 'zustand': {
           const neu = String(nachricht.zustand)
           if (neu === 'hoert' && lautsprecher.current?.spricht) {
@@ -623,6 +654,7 @@ export function useSprachsitzung(
         case 'tool_start': {
           const name = String(nachricht.name || nachricht.tool_name || '')
           if (name) {
+            voiceDebug('VOICE_TOOL_START', { name })
             setWerkzeug(name)
             const analysis = normalizeRegionalAnalysis(nachricht.geo_analysis)
             if (analysis) {
@@ -643,7 +675,10 @@ export function useSprachsitzung(
           }
           if (nachricht.failed) {
             setFehlerWerkzeug(name || null)
-            setFehlerCode(typeof nachricht.code === 'string' ? nachricht.code : null)
+            setFehlerCode(typeof nachricht.code === 'string' ? nachricht.code : 'TOOL_FAILED')
+            voiceWarn('VOICE_TOOL_FAILED', { name, code: nachricht.code })
+          } else {
+            voiceDebug('VOICE_TOOL_OK', { name })
           }
           const analysis = normalizeRegionalAnalysis(nachricht.geo_analysis)
           if (analysis) {
@@ -699,29 +734,40 @@ export function useSprachsitzung(
           // `onclose` verbindet dann neu.
           planmaessig.current = true
           break
-        case 'fehler':
+        case 'fehler': {
+          const code = typeof nachricht.code === 'string' ? nachricht.code : 'UNKNOWN'
+          voiceWarn('VOICE_FEHLER', { code })
           setFehler('ai.voice.errors.provider')
+          setFehlerCode(code)
           break
-        case 'stoerung':
-          // `grund` wird nicht als Schluessel durchgereicht, nur der eine
-          // bekannte Wert waehlt die eigene Meldung: „warte kurz" ist eine
-          // andere Auskunft als „etwas ist kaputt", und ein unbekannter Grund
-          // soll nicht in `de.json` spazieren gehen.
+        }
+        case 'stoerung': {
+          const grund = typeof nachricht.grund === 'string' ? nachricht.grund : 'unknown'
+          voiceWarn('VOICE_STOERUNG', { grund })
+          setDebugCode(grund)
           setFehler(
-            nachricht.grund === 'realtime_kontingent'
+            grund === 'realtime_kontingent'
               ? 'ai.voice.errors.realtimeQuota'
-              : nachricht.grund === 'kontingent'
+              : grund === 'kontingent'
               ? 'ai.voice.errors.quota'
+              : grund === 'leere_antwort'
+              ? 'ai.voice.errors.provider'
+              : grund === 'realtime_response'
+              ? 'ai.voice.errors.provider'
               : 'ai.voice.errors.provider',
           )
+          setFehlerCode(grund === 'leere_antwort' ? 'REALTIME_LEERE_ANTWORT' : grund === 'realtime_response' ? 'REALTIME_RESPONSE_FAILED' : null)
           break
+        }
         default:
           break
       }
     }
 
     verbindung.onerror = () => {
+      voiceError('VOICE_WS_ERROR')
       setFehler('ai.voice.errors.connection')
+      setFehlerCode('WS_ERROR')
     }
 
     verbindung.onclose = () => {
@@ -748,10 +794,7 @@ export function useSprachsitzung(
       setVorschlag(null)
 
       if (planmaessig.current && gewollt.current) {
-        // Die 15 Minuten sind um. Neu verbinden heißt: erneut anmelden — das
-        // erledigt `starten` selbst (frisches Token vor dem Handshake); die
-        // Sitzungshöchstdauer ist exakt die Token-Laufzeit, ohne Erneuerung
-        // käme dieser Reconnect also immer mit einem toten Token an.
+        voiceDebug('VOICE_ABGELAUFEN_RECONNECT')
         planmaessig.current = false
         setZustand('verbindet')
         window.setTimeout(() => {
@@ -810,6 +853,8 @@ export function useSprachsitzung(
     werkzeug,
     fehlerWerkzeug,
     fehlerCode,
+    debugCode,
+    debugHint,
     fehler,
     belege,
     vorschlag,
