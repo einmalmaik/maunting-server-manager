@@ -27,6 +27,8 @@ export function SprachAnsicht({
   const {
     zustand,
     werkzeug,
+    fehlerWerkzeug,
+    fehlerCode,
     fehler,
     belege,
     vorschlag,
@@ -160,10 +162,10 @@ export function SprachAnsicht({
             </div>
             <div className="mt-1 min-w-0 text-center">
               <h3 className="font-headline text-sm font-bold text-on-surface">
-                {fehler ? t(fehler) : t(`ai.voice.zustand.${zustand}`)}
+                {fehler ? (fehlerWerkzeug ? `${t(fehler)} (${fehlerWerkzeug})` : t(fehler)) : t(`ai.voice.zustand.${zustand}`)}
               </h3>
               <p className="text-xs text-on-surface-variant">
-                {fehler ? t('ai.voice.hint.error') : t(`ai.voice.hint.${zustand}`)}
+                {fehler ? (fehlerCode === 'REALTIME_TOOL_TIMEOUT' ? 'Werkzeug hat zu lange gebraucht. Die Sprachsitzung bleibt offen.' : t('ai.voice.hint.error')) : t(`ai.voice.hint.${zustand}`)}
               </p>
             </div>
           </div>
@@ -224,10 +226,10 @@ export function SprachAnsicht({
       {/* Zustand als Text */}
       <div className="-mt-4 flex flex-col items-center gap-2 text-center">
         <h2 className="font-headline text-headline-md text-on-surface" aria-live="polite">
-          {fehler ? t(fehler) : t(`ai.voice.zustand.${zustand}`)}
+          {fehler ? (fehlerWerkzeug ? `${t(fehler)} (${fehlerWerkzeug})` : t(fehler)) : t(`ai.voice.zustand.${zustand}`)}
         </h2>
         <p className="max-w-md text-sm text-on-surface-variant">
-          {fehler ? t('ai.voice.hint.error') : t(`ai.voice.hint.${zustand}`)}
+          {fehler ? (fehlerCode === 'REALTIME_TOOL_TIMEOUT' ? 'Werkzeug hat zu lange gebraucht. Die Sprachsitzung bleibt offen.' : t('ai.voice.hint.error')) : t(`ai.voice.hint.${zustand}`)}
         </p>
         {werkzeug && (
           <div className="flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3.5 py-1 text-xs font-medium text-primary animate-pulse">
