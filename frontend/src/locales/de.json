@@ -470,6 +470,7 @@
       "status": "Kontrollierter Kontext",
       "selectProvider": "Provider auswählen",
       "provider": "KI-Modell & Anbieter",
+        "toolTimeout": "Werkzeug „{{tool}}“ hat zu lange gebraucht. Die Sprachsitzung bleibt offen.",
       "cleared": "Chatverlauf gelöscht",
       "emptyTitle": "Womit kann ich helfen?",
       "emptyDescription": "Der Assistent erhält nur den freigegebenen, minimierten Kontext. Prüfe wichtige Aussagen vor operativen Änderungen.",
