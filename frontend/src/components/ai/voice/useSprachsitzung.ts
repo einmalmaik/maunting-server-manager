@@ -108,6 +108,8 @@ interface Ergebnis {
   werkzeug: string | null
   /** Was schiefging, als Übersetzungsschlüssel. `null`, wenn nichts. */
   fehler: string | null
+  fehlerWerkzeug: string | null
+  fehlerCode: string | null
   /**
    * Die gezeigten Stellen, die zuletzt gezeigte am Ende. Die Anzeige braucht
    * nur die letzte; die davor bleiben ein paar Schritte stehen, damit ein
@@ -233,6 +235,8 @@ export function useSprachsitzung(
   const [zustand, setZustand] = useState<Sprachzustand>('aus')
   const [zeilen, setZeilen] = useState<Sprachzeile[]>([])
   const [werkzeug, setWerkzeug] = useState<string | null>(null)
+  const [fehlerWerkzeug, setFehlerWerkzeug] = useState<string | null>(null)
+  const [fehlerCode, setFehlerCode] = useState<string | null>(null)
   const [fehler, setFehler] = useState<string | null>(null)
   const [belege, setBelege] = useState<Beleg[]>([])
   const [vorschlag, setVorschlag] = useState<Vorschlag | null>(null)
@@ -637,6 +641,10 @@ export function useSprachsitzung(
           if (name) {
             setWerkzeug(name)
           }
+          if (nachricht.failed) {
+            setFehlerWerkzeug(name || null)
+            setFehlerCode(typeof nachricht.code === 'string' ? nachricht.code : null)
+          }
           const analysis = normalizeRegionalAnalysis(nachricht.geo_analysis)
           if (analysis) {
             setGeoData(analysis)
@@ -800,6 +808,8 @@ export function useSprachsitzung(
     zustand,
     zeilen,
     werkzeug,
+    fehlerWerkzeug,
+    fehlerCode,
     fehler,
     belege,
     vorschlag,
