@@ -117,19 +117,13 @@ def vorbereiten(
     realtime_static_extra = {
         "propose_server_lifecycle",
         "read_server_capacity",
-        "read_server_ports",
-        "list_server_files",
-        "search_memory",
-        "set_agent_name",
         "control_region_camera",
-        "read_docs",
-        "list_tasks",
-        "read_server_backups",
-        "propose_config_set",
+        "search_memory",
         "propose_backup",
     }
     from services.tool_selection_port import HOTSET
-    keep_static = (HOTSET | realtime_static_extra | VOICE_CONTROL_TOOLS) & erlaubt
+    hot_realtime = HOTSET - {"worker_start"}
+    keep_static = (hot_realtime | realtime_static_extra | VOICE_CONTROL_TOOLS) & erlaubt
     if keep_static:
         tools = [t for t in tools if t.get("name") in keep_static]
     try:
@@ -154,9 +148,7 @@ def vorbereiten(
             )
     basis_prompt = ai_prompt.build(
         gesprochen=True,
-        # Realtime ist ein einzelner, latenzkritischer Zug. Es darf weder
-        # Worker-Werkzeuge noch die dazugehörige Gehirn-Orchestrierung sehen.
-        rolle="voll",
+        rolle="realtime",
         desktop=herkunft == "desktop",
         db=db,
     )

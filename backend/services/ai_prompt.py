@@ -1521,10 +1521,33 @@ ihn nicht auf einen Knopf; im Sprachmodus gibt es keinen."""
 #: Die drei Rollen und ihre Blockfolgen — die einzige Stelle, an der ein
 #: Rollenname in einen Prompt übersetzt wird. "voll" ist der heutige
 #: Ein-Modell-Betrieb und bleibt byteweise unverändert.
+REALTIME_BLOECKE = (
+    ROLLE,
+    IDENTITAET,
+    HALTUNG,
+    ZEITANSAGE,
+    EINZELCHAT,
+    MITREDEN,
+    BUENDELN,
+    KEIN_STUMMER_ZUG,
+    BELEGE,
+    ERMESSEN,
+    SERVERBEZUG,
+    WERKZEUGE,
+    DOKUMENTATION,
+    WEBSUCHE,
+    REGIONSANALYSE,
+    GEDAECHTNIS,
+    SKILLS,
+    GEHEIMNISSE,
+    UNTRUSTED,
+)
+
 ROLLEN_BLOECKE = {
     "voll": BLOECKE,
     "gehirn": GEHIRN_BLOECKE,
     "worker": WORKER_BLOECKE,
+    "realtime": REALTIME_BLOECKE,
 }
 
 
