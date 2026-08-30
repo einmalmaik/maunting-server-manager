@@ -355,7 +355,14 @@ async def test_slow_realtime_tool_returns_a_safe_timeout_and_starts_the_followup
         "arguments": '{"query":"Berlin"}',
     })
 
-    assert panel.sent[1] == {"art": "werkzeug", "name": "web_search", "tool_name": "web_search", "failed": True}
+    assert panel.sent[1] == {
+        "art": "werkzeug",
+        "name": "web_search",
+        "tool_name": "web_search",
+        "failed": True,
+        "code": "REALTIME_TOOL_TIMEOUT",
+        "reason": "timeout",
+    }
     output_frame = json.loads(sideband.sent[0])
     assert json.loads(output_frame["item"]["output"]) == {"error": "TOOL_TIMEOUT"}
     assert json.loads(sideband.sent[1]) == {"type": "response.create"}
