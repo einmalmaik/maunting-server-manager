@@ -842,6 +842,51 @@ async def _werkzeuge_und_grenze(
         eintrag for eintrag in tools
         if str(eintrag.get("function", {}).get("name")) in erlaubt
     ]
+    try:
+        from services.semantic_tool_router_adapter import SemanticToolRouterAdapter
+        from services.tool_selection_port import HOTSET
+        import logging
+        _log = logging.getLogger(__name__)
+        def _content_text(c) -> str:
+            if isinstance(c, str):
+                return c
+            if isinstance(c, list):
+                parts = []
+                for p in c:
+                    if isinstance(p, dict) and isinstance(p.get("text"), str):
+                        parts.append(p["text"])
+                    elif isinstance(p, str):
+                        parts.append(p)
+                return " ".join(parts)
+            return ""
+        letzte = ""
+        msgs = zustand.get("provider_messages", []) if isinstance(zustand, dict) else []
+        for m in reversed(msgs):
+            if isinstance(m, dict) and m.get("role") == "user":
+                txt = _content_text(m.get("content")).strip()
+                if txt:
+                    letzte = txt[:500]
+                    break
+        if not letzte:
+            letzte = str(zustand.get("query", "") if isinstance(zustand, dict) else "").strip()[:500]
+        hot_and_topk = len([n for n in HOTSET if n in erlaubt]) + 5
+        if letzte and len(erlaubt) > hot_and_topk:
+            router = SemanticToolRouterAdapter({str(e.get("function", {}).get("name")): e for e in tools})
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, router.warm, frozenset(erlaubt))
+                routed = await loop.run_in_executor(None, router.select, letzte, frozenset(erlaubt), 5)
+            except RuntimeError:
+                router.warm(frozenset(erlaubt))
+                routed = router.select(letzte, frozenset(erlaubt), top_k=5)
+            hot = [n for n in HOTSET if n in erlaubt]
+            keep = set(hot) | set(routed)
+            tools = [e for e in tools if str(e.get("function", {}).get("name")) in keep]
+            _log.info("Tool-Routing: erlaubt=%d keep=%d routed=%s query=%.80s", len(erlaubt), len(keep), routed, letzte)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).debug("Tool-Routing uebersprungen: %s", type(exc).__name__)
     # Was der Katalog selbst kostet. Er geht in Zeile `tools=tools` neben den
     # Nachrichten über dieselbe Leitung, wurde aber in keinem Budget
     # mitgezählt: `message_character_count` summiert nur `content`. Bei 51

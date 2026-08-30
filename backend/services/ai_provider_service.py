@@ -102,8 +102,9 @@ def spricht(provider: AiProvider, protokoll: str) -> bool:
 
 
 def fuer_chat(provider: AiProvider) -> bool:
-    return (
-        spricht(provider, ai_provider_registry.CHAT)
+    return bool(
+        provider.enabled
+        and spricht(provider, ai_provider_registry.CHAT)
         and bool(getattr(provider, "standard_enabled", True))
         and bool((provider.default_model or "").strip())
     )
@@ -759,7 +760,15 @@ def update_provider(
         elif model is None:
             setattr(provider, flag, False)
     if "realtime_enabled" in values and values["realtime_enabled"] is not None:
-        pass
+        if values["realtime_enabled"]:
+            _assert_realtime_werte(provider)
+            provider.realtime_enabled = bool(new_realtime_model)
+            if not provider.realtime_enabled:
+                raise AiProviderConfigurationError("Realtime-Modell fehlt, Rolle kann nicht aktiviert werden")
+        else:
+            provider.realtime_enabled = False
+    elif new_realtime_model is None:
+        provider.realtime_enabled = False
     for field in ("enabled", "requires_api_key"):
         # ``null`` heisst bei einer NOT-NULL-Spalte nicht „aus", sondern
         # „nichts gesagt" — es wird wie ein fehlendes Feld behandelt, statt als

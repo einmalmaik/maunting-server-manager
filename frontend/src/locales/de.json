@@ -946,6 +946,7 @@
         "provider": "Das hat gerade nicht geklappt.",
           "quota": "Kontingent erschöpft. Das Gespräch pausiert. Bitte kurz warten oder Limit anpassen.",
           "realtimeQuota": "Das Realtime-Kostenlimit dieser Rolle ist erreicht. Das Gespräch pausiert.",
+        "rateLimit": "Rate-Limit erreicht. Bitte kurz warten. Limit 40.000 TPM — verwende weniger Tools oder erhöhe das Limit unter https://platform.openai.com/account/rate-limits.",
         "connection": "Verbindung zum Sprachmodus verloren.",
         "veraltet": "Das Panel unterstützt diesen Sprachmodus noch nicht. Bitte das Panel aktualisieren."
       },

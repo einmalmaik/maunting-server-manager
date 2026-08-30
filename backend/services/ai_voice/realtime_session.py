@@ -93,6 +93,17 @@ def vorbereiten(
         )
         - WORKER_STEUERUNG
     ) | VOICE_CONTROL_TOOLS
+    realtime_schwer = {
+        "propose_hoster_integration",
+        "propose_hoster_product",
+        "propose_ai_tarif_role",
+        "propose_blueprint_change",
+        "propose_blueprint_delete",
+        "propose_server_create",
+        "propose_server_delete",
+        "propose_server_blueprint_switch",
+    }
+    erlaubt = erlaubt - realtime_schwer
     from services.ai_tool_compat import realtime_tool_schema
 
     tools = []
@@ -103,6 +114,29 @@ def vorbereiten(
         schema = realtime_tool_schema(eintrag)
         if schema and schema.get("name") in erlaubt:
             tools.append(schema)
+    realtime_static_extra = {
+        "propose_server_lifecycle",
+        "read_server_capacity",
+        "read_server_ports",
+        "list_server_files",
+        "search_memory",
+        "set_agent_name",
+        "control_region_camera",
+        "read_docs",
+        "list_tasks",
+        "read_server_backups",
+        "propose_config_set",
+        "propose_backup",
+    }
+    from services.tool_selection_port import HOTSET
+    keep_static = (HOTSET | realtime_static_extra | VOICE_CONTROL_TOOLS) & erlaubt
+    if keep_static:
+        tools = [t for t in tools if t.get("name") in keep_static]
+    try:
+        from services.ai_voice_debug import emit as _dbg
+        _dbg("REALTIME_TOOLS_COMPILED", hint=f"{len(tools)} tools", provider=provider.provider_kind, model=provider.realtime_model or "")
+    except Exception:
+        pass
 
     sprache = provider.realtime_language or "auto"
     sprachregel = (
@@ -729,7 +763,24 @@ class RealtimeSitzung:
                         "details": details,
                         "error": err,
                     })
-                    await self._panel_senden({"art": "stoerung", "grund": "realtime_response", "code": "REALTIME_RESPONSE_FAILED", "hint": hint})
+                    is_rate_limit = (ex_code or "") == "rate_limit_exceeded" or "rate_limit" in (ex_msg or "").lower()
+                    retry_after = None
+                    if is_rate_limit and ex_msg:
+                        import re as _re
+                        _m = _re.search(r"try again in (\d+(?:\.\d+)?)s", ex_msg)
+                        if _m:
+                            try:
+                                retry_after = float(_m.group(1))
+                            except Exception:
+                                retry_after = None
+                    await self._panel_senden({
+                        "art": "stoerung",
+                        "grund": "rate_limit" if is_rate_limit else "realtime_response",
+                        "code": "REALTIME_RATE_LIMIT" if is_rate_limit else "REALTIME_RESPONSE_FAILED",
+                        "hint": hint,
+                        "retry_after": retry_after,
+                        "message": (ex_msg or "")[:400],
+                    })
                 if not self._tool_tasks:
                     if status == "completed" and not self._antwort_hat_audio:
                         await self._debug_senden("REALTIME_LEERE_ANTWORT", hint="kein Audio")

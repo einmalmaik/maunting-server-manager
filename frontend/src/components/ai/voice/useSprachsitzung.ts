@@ -755,8 +755,19 @@ export function useSprachsitzung(
         case 'stoerung': {
           const grund = typeof nachricht.grund === 'string' ? nachricht.grund : 'unknown'
           const hint = typeof nachricht.hint === 'string' ? nachricht.hint : null
-          voiceWarn('VOICE_STOERUNG', { grund, hint: hint ?? undefined, code: nachricht.code })
-          if (grund !== 'realtime_response') setDebugCode(grund)
+          const retryAfter = typeof nachricht.retry_after === 'number' ? nachricht.retry_after : null
+          const message = typeof nachricht.message === 'string' ? nachricht.message : null
+          voiceWarn('VOICE_STOERUNG', { grund, hint: hint ?? undefined, code: nachricht.code, retry_after: retryAfter ?? undefined })
+          if (grund !== 'realtime_response' && grund !== 'rate_limit') setDebugCode(grund)
+          if (grund === 'rate_limit') {
+            setFehler('ai.voice.errors.rateLimit')
+            setFehlerCode('RATE_LIMIT_EXCEEDED')
+            const secs = retryAfter ? Math.ceil(retryAfter) : 27
+            setDebugHint(`Rate limit — erneut in ${secs}s · ${hint ?? ''}`)
+            setFehlerDetails({ grund, hint, retry_after: retryAfter, message, details: nachricht.details as unknown, error: nachricht.error as unknown })
+            setDebugCode('RATE_LIMIT_EXCEEDED')
+            break
+          }
           setFehler(
             grund === 'realtime_kontingent'
               ? 'ai.voice.errors.realtimeQuota'
@@ -767,8 +778,8 @@ export function useSprachsitzung(
           if (grund === 'leere_antwort') setFehlerCode('REALTIME_LEERE_ANTWORT')
           else if (grund === 'realtime_response' && !fehlerCode) setFehlerCode((nachricht.code as string) || 'REALTIME_RESPONSE_FAILED')
           if (hint) setDebugHint(hint)
-          if (nachricht.details || nachricht.error) {
-            setFehlerDetails({ details: nachricht.details as unknown, error: nachricht.error as unknown, hint })
+          if (nachricht.details || nachricht.error || message) {
+            setFehlerDetails({ details: nachricht.details as unknown, error: nachricht.error as unknown, hint, message })
           }
           break
         }

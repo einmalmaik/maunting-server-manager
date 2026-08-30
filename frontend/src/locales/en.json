@@ -946,6 +946,7 @@
         "provider": "That didn't work just now.",
           "quota": "Quota exhausted. Conversation paused. Please wait a moment or adjust your limit.",
           "realtimeQuota": "This role's Realtime cost limit has been reached. The conversation is paused.",
+        "rateLimit": "Rate limit reached. Please wait a moment. Limit 40,000 TPM — use fewer tools or raise the limit at https://platform.openai.com/account/rate-limits.",
         "connection": "Lost the connection to voice mode.",
         "veraltet": "The panel does not support this voice mode yet. Please update the panel."
       },
