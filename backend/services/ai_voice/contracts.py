@@ -47,6 +47,8 @@ class ToolAufruf(TypedDict):
     geo_camera: NotRequired[dict]
     web_results: NotRequired[list[dict]]
     failed: NotRequired[bool]
+    code: NotRequired[str]
+    reason: NotRequired[str]
     gruppe: NotRequired[str]
     skill_key: NotRequired[str]
     skill_name: NotRequired[str]
@@ -66,6 +68,8 @@ class VoiceToolFrame(TypedDict):
     geo_camera: NotRequired[dict]
     web_results: NotRequired[list[dict]]
     failed: NotRequired[bool]
+    code: NotRequired[str]
+    reason: NotRequired[str]
     gruppe: NotRequired[str]
     skill_key: NotRequired[str]
     skill_name: NotRequired[str]
@@ -75,7 +79,7 @@ class VoiceToolFrame(TypedDict):
 
 _TOOL_FIELDS = (
     "geo_analysis", "geo_camera", "web_results", "failed", "gruppe", "skill_key",
-    "skill_name", "skill_status", "skill_learned",
+    "skill_name", "skill_status", "skill_learned", "code", "reason",
 )
 
 
