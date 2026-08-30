@@ -470,6 +470,7 @@
       "status": "Controlled context",
       "selectProvider": "Select provider",
       "provider": "AI Model & Provider",
+        "toolTimeout": "Tool “{{tool}}” took too long. Voice mode stays open.",
       "cleared": "Chat history cleared",
       "emptyTitle": "How can I help?",
       "emptyDescription": "The assistant receives only approved, minimized context. Verify important statements before operational changes.",
