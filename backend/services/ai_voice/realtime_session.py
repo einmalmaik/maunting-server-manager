@@ -705,7 +705,7 @@ class RealtimeSitzung:
                         "REALTIME_RESPONSE_FAILED",
                         hint=hint,
                         status=status,
-                        code=ex_code or "",
+                        error_code=ex_code or "",
                         reason=ex_reason or "",
                         message=(ex_msg or "")[:400],
                         param=ex_param or "",
