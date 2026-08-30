@@ -286,6 +286,8 @@ class Anbieter:
     #: der im Hintergrund arbeitet: er soll nachdenken duerfen, waehrend er
     #: Werkzeuge benutzt.
     protokoll_chat: str = "chat_completions"
+    #: Ob dieser Anbieter einen Realtime-Sprachmodus anbietet (OpenAI, Azure OpenAI).
+    realtime_tauglich: bool = False
 
 
 @dataclass(frozen=True)

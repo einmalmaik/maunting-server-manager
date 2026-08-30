@@ -85,14 +85,8 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         id=provider.id,
         name=provider.name,
         provider_kind=provider.provider_kind,
-        # Abgeleitet, nicht gespeichert — eine Kopie in der Zeile wuerde nach
-        # einer Änderung an der Registry still veralten.
         base_url=_adresse_zum_anzeigen(provider),
         default_model=provider.default_model,
-        # Roh aus der Zeile, ``None`` bleibt ``None``. Hier die Standardstimme
-        # einzusetzen wäre bequem und falsch: das Formular zeigte dann eine
-        # Wahl, die der Betreiber nie getroffen hat, und speicherte sie beim
-        # nächsten Klick auf „Speichern" als seine.
         default_voice=provider.default_voice,
         transcription_model=provider.transcription_model,
         realtime_default=provider.realtime_default,
@@ -105,6 +99,11 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         realtime_text_output_price_micro_usd_per_million=provider.realtime_text_output_price_micro_usd_per_million,
         realtime_audio_input_price_micro_usd_per_million=provider.realtime_audio_input_price_micro_usd_per_million,
         realtime_audio_output_price_micro_usd_per_million=provider.realtime_audio_output_price_micro_usd_per_million,
+        standard_enabled=bool(getattr(provider, "standard_enabled", bool(provider.default_model))),
+        worker_enabled=bool(getattr(provider, "worker_enabled", bool(provider.worker_model))),
+        ethics_enabled=bool(getattr(provider, "ethics_enabled", bool(provider.ethics_model))),
+        transcription_enabled=bool(getattr(provider, "transcription_enabled", bool(provider.transcription_model))),
+        realtime_enabled=bool(getattr(provider, "realtime_enabled", provider.realtime_default)),
         worker_model=provider.worker_model,
         worker_reasoning_effort=provider.worker_reasoning_effort,
         ethics_model=provider.ethics_model,
@@ -118,10 +117,13 @@ def _admin_response(provider: AiProvider) -> AiProviderResponse:
         token_price_micro_usd_per_million=provider.token_price_micro_usd_per_million,
         standard_input_price_micro_usd_per_million=provider.standard_input_price_micro_usd_per_million,
         standard_output_price_micro_usd_per_million=provider.standard_output_price_micro_usd_per_million,
+        standard_cache_price_micro_usd_per_million=getattr(provider, "standard_cache_price_micro_usd_per_million", None),
         worker_input_price_micro_usd_per_million=provider.worker_input_price_micro_usd_per_million,
         worker_output_price_micro_usd_per_million=provider.worker_output_price_micro_usd_per_million,
+        worker_cache_price_micro_usd_per_million=getattr(provider, "worker_cache_price_micro_usd_per_million", None),
         ethics_input_price_micro_usd_per_million=provider.ethics_input_price_micro_usd_per_million,
         ethics_output_price_micro_usd_per_million=provider.ethics_output_price_micro_usd_per_million,
+        ethics_cache_price_micro_usd_per_million=getattr(provider, "ethics_cache_price_micro_usd_per_million", None),
         updated_at=provider.updated_at,
     )
 
@@ -391,15 +393,8 @@ def list_provider_kinds(
             protokoll=spec.protokoll,
             katalog_braucht_schluessel=spec.katalog_braucht_schluessel,
             ressource_noetig=spec.ressource_noetig,
-            # Aus der Registry abgeleitet und nicht als eigenes Feld dort
-            # gefuehrt: „hat eine Katalogadresse" **ist** die Antwort auf
-            # „fuehrt eine Modelliste". Ein zweites Feld waere eine zweite
-            # Wahrheit, die irgendwann auseinanderliefe.
+            realtime_tauglich=bool(getattr(spec, "realtime_tauglich", False)),
             fuehrt_katalog=spec.catalog_url is not None,
-            # Dieselbe Ableitung wie oben und aus demselben Grund: „hat einen
-            # Weg zum Zuhoeren" **ist** die Antwort auf „kann hoeren". Es ist
-            # genau die Bedingung, an der `routers/ai_voice.py` einen Zugang
-            # fuer den Sprachmodus annimmt oder ueberspringt.
             kann_hoeren=bool(spec.gehoer_wege),
         )
         for spec in ai_provider_registry.alle()

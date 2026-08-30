@@ -101,10 +101,18 @@ export interface AiProviderAdmin {
   token_price_micro_usd_per_million: number | null
   standard_input_price_micro_usd_per_million?: number | null
   standard_output_price_micro_usd_per_million?: number | null
+  standard_cache_price_micro_usd_per_million?: number | null
   worker_input_price_micro_usd_per_million?: number | null
   worker_output_price_micro_usd_per_million?: number | null
+  worker_cache_price_micro_usd_per_million?: number | null
   ethics_input_price_micro_usd_per_million?: number | null
   ethics_output_price_micro_usd_per_million?: number | null
+  ethics_cache_price_micro_usd_per_million?: number | null
+  standard_enabled?: boolean
+  worker_enabled?: boolean
+  ethics_enabled?: boolean
+  transcription_enabled?: boolean
+  realtime_enabled?: boolean
   updated_at: string
 }
 
@@ -186,6 +194,7 @@ export interface AiProviderKind {
    * hoerende Modell steht — deshalb zeigt das Formular es dann gar nicht erst.
    */
   kann_hoeren: boolean
+  realtime_tauglich?: boolean
 }
 
 /** Ein Modell aus dem Katalog des Anbieters, mit seinen Denkfaehigkeiten. */
@@ -1057,10 +1066,18 @@ export interface AiProviderWrite {
   token_price_micro_usd_per_million?: number | null
   standard_input_price_micro_usd_per_million?: number | null
   standard_output_price_micro_usd_per_million?: number | null
+  standard_cache_price_micro_usd_per_million?: number | null
   worker_input_price_micro_usd_per_million?: number | null
   worker_output_price_micro_usd_per_million?: number | null
+  worker_cache_price_micro_usd_per_million?: number | null
   ethics_input_price_micro_usd_per_million?: number | null
   ethics_output_price_micro_usd_per_million?: number | null
+  ethics_cache_price_micro_usd_per_million?: number | null
+  standard_enabled?: boolean
+  worker_enabled?: boolean
+  ethics_enabled?: boolean
+  transcription_enabled?: boolean
+  realtime_enabled?: boolean
   /**
    * Nur ein Sprachzugang schickt das Feld mit; ein Chatzugang laesst es weg,
    * statt `null` zu senden. Der Unterschied zaehlt, weil `PATCH` in die

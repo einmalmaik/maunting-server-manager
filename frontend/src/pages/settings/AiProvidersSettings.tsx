@@ -13,7 +13,7 @@ import {
 } from '@/api/ai'
 import { SanitizedApiError } from '@/api/client'
 import { Button, Dropdown, Switch } from '@/Singra/UI'
-import { eingabeInMicroUsd, microUsdInEingabe, preisFormatieren } from '@/utils/geld'
+import { eingabeInMicroUsd, microUsdInEingabe } from '@/utils/geld'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
@@ -81,10 +81,18 @@ const EMPTY_PROVIDER: ProviderDraft = {
   token_price_micro_usd_per_million: null,
   standard_input_price_micro_usd_per_million: null,
   standard_output_price_micro_usd_per_million: null,
+  standard_cache_price_micro_usd_per_million: null,
   worker_input_price_micro_usd_per_million: null,
   worker_output_price_micro_usd_per_million: null,
+  worker_cache_price_micro_usd_per_million: null,
   ethics_input_price_micro_usd_per_million: null,
   ethics_output_price_micro_usd_per_million: null,
+  ethics_cache_price_micro_usd_per_million: null,
+  standard_enabled: false,
+  worker_enabled: false,
+  ethics_enabled: false,
+  transcription_enabled: false,
+  realtime_enabled: false,
   // Keine Vorbelegung, bei beiden. Es gibt weder eine Standardstimme noch ein
   // Standard-Hoermodell — MSM kennt die Stimmen des fremden Kontos nicht, und
   // ein geratenes Hoermodell stuende auf der Rechnung des Betreibers.
@@ -124,10 +132,18 @@ function toDraft(provider: AiProviderAdmin): ProviderDraft {
     token_price_micro_usd_per_million: provider.token_price_micro_usd_per_million,
     standard_input_price_micro_usd_per_million: provider.standard_input_price_micro_usd_per_million,
     standard_output_price_micro_usd_per_million: provider.standard_output_price_micro_usd_per_million,
+    standard_cache_price_micro_usd_per_million: provider.standard_cache_price_micro_usd_per_million ?? null,
     worker_input_price_micro_usd_per_million: provider.worker_input_price_micro_usd_per_million,
     worker_output_price_micro_usd_per_million: provider.worker_output_price_micro_usd_per_million,
+    worker_cache_price_micro_usd_per_million: provider.worker_cache_price_micro_usd_per_million ?? null,
     ethics_input_price_micro_usd_per_million: provider.ethics_input_price_micro_usd_per_million,
     ethics_output_price_micro_usd_per_million: provider.ethics_output_price_micro_usd_per_million,
+    ethics_cache_price_micro_usd_per_million: provider.ethics_cache_price_micro_usd_per_million ?? null,
+    standard_enabled: provider.standard_enabled ?? Boolean(provider.default_model),
+    worker_enabled: provider.worker_enabled ?? Boolean(provider.worker_model),
+    ethics_enabled: provider.ethics_enabled ?? Boolean(provider.ethics_model),
+    transcription_enabled: provider.transcription_enabled ?? Boolean(provider.transcription_model),
+    realtime_enabled: provider.realtime_enabled ?? provider.realtime_default ?? false,
     default_voice: provider.default_voice,
     transcription_model: provider.transcription_model,
     realtime_default: provider.realtime_default ?? false,
@@ -223,25 +239,27 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
       default_model: draft.default_model?.trim() || null,
       enabled: draft.enabled,
       requires_api_key: draft.requires_api_key,
-      token_price_micro_usd_per_million: draft.token_price_micro_usd_per_million ?? null,
       standard_input_price_micro_usd_per_million: draft.standard_input_price_micro_usd_per_million ?? null,
       standard_output_price_micro_usd_per_million: draft.standard_output_price_micro_usd_per_million ?? null,
+      standard_cache_price_micro_usd_per_million: draft.standard_cache_price_micro_usd_per_million ?? null,
       worker_input_price_micro_usd_per_million: draft.worker_input_price_micro_usd_per_million ?? null,
       worker_output_price_micro_usd_per_million: draft.worker_output_price_micro_usd_per_million ?? null,
+      worker_cache_price_micro_usd_per_million: draft.worker_cache_price_micro_usd_per_million ?? null,
       ethics_input_price_micro_usd_per_million: draft.ethics_input_price_micro_usd_per_million ?? null,
       ethics_output_price_micro_usd_per_million: draft.ethics_output_price_micro_usd_per_million ?? null,
+      ethics_cache_price_micro_usd_per_million: draft.ethics_cache_price_micro_usd_per_million ?? null,
+      standard_enabled: draft.id ? Boolean(draft.standard_enabled && draft.default_model?.trim()) : Boolean(draft.default_model?.trim()),
+      worker_enabled: draft.id ? Boolean(draft.worker_enabled && draft.worker_model?.trim()) : Boolean(draft.worker_model?.trim()),
+      ethics_enabled: draft.id ? Boolean(draft.ethics_enabled && draft.ethics_model?.trim()) : Boolean(draft.ethics_model?.trim()),
+      transcription_enabled: draft.id ? Boolean(draft.transcription_enabled && draft.transcription_model?.trim()) : Boolean(draft.transcription_model?.trim()),
+      realtime_enabled: draft.id ? Boolean((draft.realtime_enabled || draft.realtime_default) && draft.realtime_model?.trim()) : Boolean(draft.realtime_model?.trim()),
       ...(protokoll === 'tts' ? { default_voice: draft.default_voice?.trim() || null } : {}),
       ...(protokoll === 'chat_completions'
         ? {
-            // Kann der Anbieter nicht zuhoeren, zeigt das Formular das Feld
-            // nicht — dann darf auch kein alter Wert stehen bleiben, den
-            // niemand mehr sehen und keiner mehr loeschen kann.
             transcription_model: gewaehlt?.kann_hoeren
               ? draft.transcription_model?.trim() || null
               : null,
             worker_model: draft.worker_model?.trim() || null,
-            // Eine Denkstufe ohne Arbeitsmodell ist keine Einstellung — sie
-            // geht mit dem Modell und faellt mit ihm.
             worker_reasoning_effort: draft.worker_model?.trim()
               ? draft.worker_reasoning_effort || null
               : null,
@@ -250,8 +268,9 @@ export function AiProvidersSettings({ canWrite }: { canWrite: boolean }) {
               ? draft.ethics_reasoning_effort || null
               : null,
             ethics_mode: draft.ethics_mode || 'auto',
-            ...(draft.provider_kind === 'openai' ? {
-              realtime_default: Boolean(draft.realtime_default),
+            ...(gewaehlt?.realtime_tauglich ? {
+              realtime_default: Boolean(draft.realtime_default || draft.realtime_enabled),
+              realtime_enabled: Boolean(draft.realtime_enabled || draft.realtime_default),
               realtime_model: draft.realtime_model?.trim() || null,
               realtime_voice: draft.realtime_voice || null,
               realtime_reasoning_effort: draft.realtime_model?.toLowerCase().includes('realtime-2')
@@ -397,7 +416,7 @@ function ProviderForm({
   onCancel?: () => void
   onTest?: () => Promise<AiProviderTestResult>
 }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const [local, setLocal] = useState<ProviderDraft>({ ...initialDraft })
   const [testResult, setTestResult] = useState<AiProviderTestResult | null>(null)
   const [testing, setTesting] = useState(false)
@@ -520,7 +539,6 @@ function ProviderForm({
   const modelId = useId()
   const stimmeId = useId()
   const hoerenId = useId()
-  const preisId = useId()
   const workerModellId = useId()
   const workerStufeId = useId()
   const ethicsModellId = useId()
@@ -538,20 +556,6 @@ function ProviderForm({
   // Buchung. Ein Rueckfall auf Euro wuerde einen getippten Preis stillschweigend
   // durch einen Kurs teilen, den es an dieser Stelle noch gar nicht gab.
   const waehrung = costPolicy ?? { currency: 'USD', usd_rate: '1' }
-  const preisMicro = draft.token_price_micro_usd_per_million ?? null
-  // Eigener Zustand fuer das Feld: waehrend jemand „1," tippt, ist die Eingabe
-  // noch keine Zahl. Wuerde sie sofort durch den Umrechner laufen, spraenge der
-  // Cursor beim dritten Zeichen. Uebernommen wird beim Verlassen des Feldes.
-  const [preisText, setPreisText] = useState(() => microUsdInEingabe(preisMicro, waehrung))
-  // Kommt der Wert von aussen — nach dem Speichern, oder wenn die Politik
-  // nachlaedt —, folgt das Feld. Der Vergleich verhindert, dass es das auch
-  // waehrend des Tippens tut.
-  useEffect(() => {
-    const frisch = microUsdInEingabe(preisMicro, waehrung)
-    setPreisText((aktuell) => (
-      eingabeInMicroUsd(aktuell, waehrung) === preisMicro ? aktuell : frisch
-    ))
-  }, [preisMicro, waehrung.currency, waehrung.usd_rate])
 
   /**
    * Schickt eine echte Mini-Anfrage an den Anbieter.
@@ -712,14 +716,23 @@ function ProviderForm({
           />
         </div>
 
+        <Toggle label={t('ai.providers.enabled')} checked={draft.enabled} onChange={(enabled) => change({ enabled })} />
         {/* Modelle & Fähigkeiten */}
         {spec?.protokoll === 'chat_completions' && (
           <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-              {spec.kann_hoeren
-                ? `${t('ai.providers.model')} & ${t('ai.providers.transcriptionModel')}`
-                : t('ai.providers.model')}
-            </h4>
+            <div className="flex items-center justify-between gap-4">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                {spec.kann_hoeren
+                  ? `${t('ai.providers.model')} & ${t('ai.providers.transcriptionModel')}`
+                  : t('ai.providers.model')}
+              </h4>
+              <Switch
+                checked={Boolean(draft.standard_enabled)}
+                onCheckedChange={(standard_enabled) => change({ standard_enabled })}
+                disabled={!draft.default_model?.trim()}
+                aria-label={t('ai.providers.standardEnabled')}
+              />
+            </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {/* Chat & Denken */}
               <div className="space-y-1.5">
@@ -801,8 +814,10 @@ function ProviderForm({
                   policy={waehrung}
                   inputValue={draft.standard_input_price_micro_usd_per_million ?? null}
                   outputValue={draft.standard_output_price_micro_usd_per_million ?? null}
+                  cacheValue={draft.standard_cache_price_micro_usd_per_million ?? null}
                   onInputChange={(value) => change({ standard_input_price_micro_usd_per_million: value })}
                   onOutputChange={(value) => change({ standard_output_price_micro_usd_per_million: value })}
+                  onCacheChange={(value) => change({ standard_cache_price_micro_usd_per_million: value })}
                 />
               </div>
 
@@ -812,9 +827,17 @@ function ProviderForm({
                   `gehoer_wege`), wäre eine Zusage ohne Deckung. */}
               {spec.kann_hoeren && (
               <div className="space-y-1.5">
-                <label htmlFor={hoerenId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                  👂 {t('ai.providers.transcriptionModel')}
-                </label>
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor={hoerenId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                    👂 {t('ai.providers.transcriptionModel')}
+                  </label>
+                  <Switch
+                    checked={Boolean(draft.transcription_enabled)}
+                    onCheckedChange={(transcription_enabled) => change({ transcription_enabled })}
+                    disabled={!draft.transcription_model?.trim()}
+                    aria-label={t('ai.providers.transcriptionEnabled')}
+                  />
+                </div>
                 <input
                   id={hoerenId}
                   type="text"
@@ -833,7 +856,7 @@ function ProviderForm({
           </div>
         )}
 
-        {draft.provider_kind === 'openai' && (
+        {spec?.realtime_tauglich && (
           <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -843,8 +866,9 @@ function ProviderForm({
                 <p className="msm-field-help mt-1">{t('ai.providers.realtime.hint')}</p>
               </div>
               <Switch
-                checked={Boolean(draft.realtime_default)}
-                onCheckedChange={(realtime_default) => change({ realtime_default })}
+                checked={Boolean(draft.realtime_enabled || draft.realtime_default)}
+                onCheckedChange={(checked) => change({ realtime_enabled: checked, realtime_default: checked })}
+                disabled={!draft.realtime_model?.trim()}
                 aria-label={t('ai.providers.realtime.enabled')}
               />
             </div>
@@ -917,18 +941,22 @@ function ProviderForm({
           </div>
         )}
 
-        {/* Worker-Rolle: die zweite Hälfte der Provider-Zweiteilung. Das
-            Gehirn antwortet mit dem Modell oben (Denkstufe wählt der Kunde im
-            Chat-Kopf); die Worker arbeiten im Hintergrund mit diesem Modell
-            und dieser **festen** Stufe — beides bestimmt der Betreiber, denn
-            er zahlt. Leer heisst: heutiger Ein-Modell-Betrieb, kein Fehler. */}
+        {/* Worker-Rolle */}
         {spec?.protokoll === 'chat_completions' && (
           <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
-            <div>
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                🛠️ {t('ai.providers.workerSection')}
-              </h4>
-              <p className="msm-field-help mt-1">{t('ai.providers.workerHint')}</p>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  🛠️ {t('ai.providers.workerSection')}
+                </h4>
+                <p className="msm-field-help mt-1">{t('ai.providers.workerHint')}</p>
+              </div>
+              <Switch
+                checked={Boolean(draft.worker_enabled)}
+                onCheckedChange={(worker_enabled) => change({ worker_enabled })}
+                disabled={!draft.worker_model?.trim()}
+                aria-label={t('ai.providers.workerEnabled')}
+              />
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-1.5">
@@ -973,8 +1001,10 @@ function ProviderForm({
                     policy={waehrung}
                     inputValue={draft.worker_input_price_micro_usd_per_million ?? null}
                     outputValue={draft.worker_output_price_micro_usd_per_million ?? null}
+                    cacheValue={draft.worker_cache_price_micro_usd_per_million ?? null}
                     onInputChange={(value) => change({ worker_input_price_micro_usd_per_million: value })}
                     onOutputChange={(value) => change({ worker_output_price_micro_usd_per_million: value })}
+                    onCacheChange={(value) => change({ worker_cache_price_micro_usd_per_million: value })}
                   />
                 )}
               </div>
@@ -1011,15 +1041,22 @@ function ProviderForm({
           </div>
         )}
 
-        {/* Ethics Engine: Die Reflexions- und Urteilsebene.
-            Berät das Gehirn im Hintergrund vor folgenreichen Entscheidungen. */}
+        {/* Ethics Engine */}
         {spec?.protokoll === 'chat_completions' && (
           <div className="space-y-4 rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
-            <div>
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                ⚖️ {t('ai.providers.ethicsSection')}
-              </h4>
-              <p className="msm-field-help mt-1">{t('ai.providers.ethicsHint')}</p>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                  ⚖️ {t('ai.providers.ethicsSection')}
+                </h4>
+                <p className="msm-field-help mt-1">{t('ai.providers.ethicsHint')}</p>
+              </div>
+              <Switch
+                checked={Boolean(draft.ethics_enabled)}
+                onCheckedChange={(ethics_enabled) => change({ ethics_enabled })}
+                disabled={!draft.ethics_model?.trim()}
+                aria-label={t('ai.providers.ethicsEnabled')}
+              />
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <div className="space-y-1.5">
@@ -1064,8 +1101,10 @@ function ProviderForm({
                     policy={waehrung}
                     inputValue={draft.ethics_input_price_micro_usd_per_million ?? null}
                     outputValue={draft.ethics_output_price_micro_usd_per_million ?? null}
+                    cacheValue={draft.ethics_cache_price_micro_usd_per_million ?? null}
                     onInputChange={(value) => change({ ethics_input_price_micro_usd_per_million: value })}
                     onOutputChange={(value) => change({ ethics_output_price_micro_usd_per_million: value })}
+                    onCacheChange={(value) => change({ ethics_cache_price_micro_usd_per_million: value })}
                   />
                 )}
               </div>
@@ -1209,38 +1248,7 @@ function ProviderForm({
           </div>
         )}
 
-        {/* Provider aktivieren Toggle */}
-        <Toggle label={t('ai.providers.enabled')} checked={draft.enabled} onChange={(enabled) => change({ enabled })} />
-
-        {/* Rückfallpreis */}
-        <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4">
-          <div className="space-y-1.5">
-            <label htmlFor={preisId} className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-              {t('ai.providers.tokenPrice', { currency: waehrung.currency })}
-            </label>
-            <input
-              id={preisId}
-              type="text"
-              inputMode="decimal"
-              className="msm-input w-full"
-              placeholder="1,20"
-              value={preisText}
-              onChange={(event) => setPreisText(event.target.value)}
-              onBlur={() => change({
-                token_price_micro_usd_per_million: eingabeInMicroUsd(preisText, waehrung),
-              })}
-              aria-label={t('ai.providers.tokenPrice', { currency: waehrung.currency })}
-            />
-          </div>
-          {waehrung.currency !== 'USD' && preisMicro !== null && (
-            <p className="msm-field-help">
-              {t('ai.providers.tokenPriceConverted', {
-                amount: preisFormatieren(preisMicro, 'USD', i18n.language),
-              })}
-            </p>
-          )}
-          <p className="msm-field-help">{t('ai.providers.tokenPriceHint')}</p>
-        </div>
+        {/* Rückfallpreis entfernt — Preise stehen bei den Rollen; Feld bleibt nur als Deprecated-Spalte */}
       </fieldset>
       {testResult && (
         <p
@@ -1339,16 +1347,18 @@ function RealtimePreisInput({ label, value, policy, onChange }: {
 }
 
 /** Preisfelder bleiben bei dem Modell, dessen Verbrauch sie abbilden. */
-function ModellPreisPaar({ policy, inputValue, outputValue, onInputChange, onOutputChange }: {
+function ModellPreisPaar({ policy, inputValue, outputValue, cacheValue, onInputChange, onOutputChange, onCacheChange }: {
   policy: Pick<AiCostPolicy, 'currency' | 'usd_rate'>
   inputValue: number | null
   outputValue: number | null
+  cacheValue?: number | null
   onInputChange: (value: number | null) => void
   onOutputChange: (value: number | null) => void
+  onCacheChange?: (value: number | null) => void
 }) {
   const { t } = useTranslation()
   return (
-    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
       <RealtimePreisInput
         label={t('ai.providers.modelPrices.input', { currency: policy.currency })}
         value={inputValue}
@@ -1361,6 +1371,14 @@ function ModellPreisPaar({ policy, inputValue, outputValue, onInputChange, onOut
         policy={policy}
         onChange={onOutputChange}
       />
+      {onCacheChange && (
+        <RealtimePreisInput
+          label={t('ai.providers.modelPrices.cache', { currency: policy.currency })}
+          value={cacheValue ?? null}
+          policy={policy}
+          onChange={onCacheChange}
+        />
+      )}
     </div>
   )
 }

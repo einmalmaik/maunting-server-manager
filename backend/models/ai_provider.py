@@ -113,6 +113,14 @@ class AiProvider(Base):
     realtime_text_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     realtime_audio_input_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     realtime_audio_output_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    standard_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+    worker_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+    ethics_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+    transcription_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+    realtime_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
+    standard_cache_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    worker_cache_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    ethics_cache_price_micro_usd_per_million: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Das Modell, mit dem die Worker dieses Zugangs arbeiten — die vierte
     # Funktion an derselben Zeile (docs/agentic-framework.md, Abschnitt 5):
     # `default_model` denkt im Gespräch (Gehirn), `transcription_model` hört,

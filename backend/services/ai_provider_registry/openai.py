@@ -105,6 +105,7 @@ ANBIETER = Anbieter(
     # Abrechnung. Eine zweite Runde mit `function_call_output` fuehrt den Lauf
     # sauber fort (145 Eingabe-, 147 Ausgabetokens).
     protokoll_chat="responses",
+    realtime_tauglich=True,
     # **Keine Empfehlung fuer den Chat**, und das ist keine Nachlaessigkeit.
     # Die Empfehlung wird gegen den Katalog geprueft und faellt weg, wenn die
     # Kennung dort nicht steht — sie waere hier also im besten Fall wirkungslos.

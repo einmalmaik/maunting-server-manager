@@ -160,10 +160,18 @@ class AiProviderCreate(BaseModel):
     )
     standard_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     standard_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    standard_cache_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     worker_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     worker_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    worker_cache_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     ethics_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     ethics_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    ethics_cache_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    standard_enabled: bool = False
+    worker_enabled: bool = False
+    ethics_enabled: bool = False
+    transcription_enabled: bool = False
+    realtime_enabled: bool = False
     # Nur fuer einen Sprachzugang von Bedeutung; bei einem Chatzugang bleibt das
     # Feld schlicht leer. Es wird trotzdem nicht gegen `provider_kind` geprueft:
     # der Anbieter laesst sich spaeter aendern, und eine hinterlegte Stimme, die
@@ -216,10 +224,18 @@ class AiProviderUpdate(BaseModel):
     )
     standard_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     standard_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    standard_cache_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     worker_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     worker_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    worker_cache_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     ethics_input_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
     ethics_output_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    ethics_cache_price_micro_usd_per_million: int | None = Field(default=None, ge=0, le=MAX_TOKEN_PRICE_MICRO_USD)
+    standard_enabled: bool | None = None
+    worker_enabled: bool | None = None
+    ethics_enabled: bool | None = None
+    transcription_enabled: bool | None = None
+    realtime_enabled: bool | None = None
     # Wie beim Preis eine Zeile darueber gibt es hier zwei verschiedene Dinge,
     # die beide wie ``None`` aussehen: „nicht mitgeschickt" laesst die Stimme
     # stehen, ein ausdrueckliches ``null`` loescht sie. Auseinander haelt die
@@ -285,6 +301,14 @@ class AiProviderResponse(BaseModel):
     realtime_text_output_price_micro_usd_per_million: int | None = None
     realtime_audio_input_price_micro_usd_per_million: int | None = None
     realtime_audio_output_price_micro_usd_per_million: int | None = None
+    standard_enabled: bool = False
+    worker_enabled: bool = False
+    ethics_enabled: bool = False
+    transcription_enabled: bool = False
+    realtime_enabled: bool = False
+    standard_cache_price_micro_usd_per_million: int | None = None
+    worker_cache_price_micro_usd_per_million: int | None = None
+    ethics_cache_price_micro_usd_per_million: int | None = None
     #: Die Worker-Rolle des Zugangs, roh aus der Zeile. ``None`` heisst „keine
     #: Worker-Rolle konfiguriert" (Ein-Modell-Betrieb). Nur der Betreiber sieht
     #: das — `AiProviderAvailableResponse` traegt es bewusst nicht: der Kunde
@@ -307,10 +331,13 @@ class AiProviderResponse(BaseModel):
     token_price_micro_usd_per_million: int | None
     standard_input_price_micro_usd_per_million: int | None = None
     standard_output_price_micro_usd_per_million: int | None = None
+    standard_cache_price_micro_usd_per_million: int | None = None
     worker_input_price_micro_usd_per_million: int | None = None
     worker_output_price_micro_usd_per_million: int | None = None
+    worker_cache_price_micro_usd_per_million: int | None = None
     ethics_input_price_micro_usd_per_million: int | None = None
     ethics_output_price_micro_usd_per_million: int | None = None
+    ethics_cache_price_micro_usd_per_million: int | None = None
     updated_at: datetime
 
 
@@ -345,6 +372,7 @@ class AiProviderKindResponse(BaseModel):
     #: Frontend waere die Registry an einem zweiten Ort, und der erste
     #: vergessene Eintrag darin ein Anbieter, den man nicht einrichten kann.
     ressource_noetig: bool
+    realtime_tauglich: bool = False
     #: Ob dieser Anbieter ueberhaupt eine Modelliste fuehrt. ``False`` heisst
     #: **nicht** „Katalog gerade nicht erreichbar": bei Azure heisst ein Modell
     #: so, wie der Betreiber sein Deployment genannt hat, und eine Liste dafuer

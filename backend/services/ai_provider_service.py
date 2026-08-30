@@ -102,36 +102,37 @@ def spricht(provider: AiProvider, protokoll: str) -> bool:
 
 
 def fuer_chat(provider: AiProvider) -> bool:
-    """Taugt dieser Zugang, um einen Chatlauf zu tragen?
-
-    Zwei Bedingungen und keine dritte: er spricht ``/chat/completions``, und es
-    ist ein Standardmodell hinterlegt. Ein Stimmzugang fällt an der ersten, ein
-    halb eingerichteter Chatzugang an der zweiten.
-
-    Die Regel stand vorher an sechs Stellen ausgeschrieben — in der Auswahlliste
-    der Provider, im Chat-Router, im Sprach-Router und zweimal hier. Sie war
-    dabei schon auseinandergelaufen: eine Fassung prüfte zusätzlich den
-    Betreiberschlüssel, die anderen nicht. Wer eine Auswahl anders beantwortet
-    als die Annahme dahinter, baut genau den Fall, in dem der Benutzer einen
-    Zugang wählen kann, der ihn danach mit einem 404 abweist.
-
-    Ausdrücklich **nicht** enthalten ist die Frage, ob der Zugang betriebsbereit
-    ist (Schlüssel hinterlegt, sofern verlangt). Das ist eine zweite Frage mit
-    einer eigenen Antwort: die Providerliste zeigt einen Zugang ohne Schlüssel
-    bewusst an — als ``available: false``, damit der Betreiber sieht, dass er
-    noch etwas zu tun hat.
-    """
     return (
         spricht(provider, ai_provider_registry.CHAT)
+        and bool(getattr(provider, "standard_enabled", True))
         and bool((provider.default_model or "").strip())
     )
 
 
-def fuer_ethics(provider: AiProvider) -> bool:
-    """Ob dieser Zugang eine betriebsbereite Ethics Engine besitzt."""
+def fuer_worker(provider: AiProvider) -> bool:
     return bool(
         provider.enabled
         and spricht(provider, ai_provider_registry.CHAT)
+        and bool(getattr(provider, "worker_enabled", False))
+        and (provider.worker_model or "").strip()
+    )
+
+
+def fuer_transcription(provider: AiProvider) -> bool:
+    return bool(
+        provider.enabled
+        and spricht(provider, ai_provider_registry.CHAT)
+        and bool(getattr(provider, "transcription_enabled", False))
+        and (provider.transcription_model or "").strip()
+        and bool(ai_provider_registry.anbieter(provider.provider_kind).gehoer_wege)
+    )
+
+
+def fuer_ethics(provider: AiProvider) -> bool:
+    return bool(
+        provider.enabled
+        and spricht(provider, ai_provider_registry.CHAT)
+        and bool(getattr(provider, "ethics_enabled", False))
         and (provider.ethics_model or "").strip()
         and (provider.ethics_mode or "auto").strip().lower() != "off"
     )
@@ -353,13 +354,13 @@ REALTIME_PREISFELDER = (
 
 
 def _assert_realtime_werte(provider: AiProvider) -> None:
-    """Prüft einen aktivierten Realtime-Zugang gegen seinen Zielzustand."""
-    if provider.provider_kind != "openai":
-        raise AiProviderConfigurationError("Realtime-Sprachmodus ist nur mit OpenAI möglich")
+    spec = ai_provider_registry.anbieter(provider.provider_kind) if ai_provider_registry.bekannt(provider.provider_kind) else None
+    if spec is None or not getattr(spec, "realtime_tauglich", False):
+        raise AiProviderConfigurationError("Realtime-Sprachmodus wird von diesem Anbieter nicht unterstützt")
     if not provider.enabled:
         raise AiProviderConfigurationError("Der Realtime-Zugang muss aktiviert sein")
     if not provider.operator_api_key_encrypted:
-        raise AiProviderConfigurationError("Der Realtime-Zugang braucht einen OpenAI-API-Schlüssel")
+        raise AiProviderConfigurationError("Der Realtime-Zugang braucht einen API-Schlüssel")
     realtime_model = (provider.realtime_model or "").strip()
     if not realtime_model:
         raise AiProviderConfigurationError("Wähle ein Realtime-Modell aus")
@@ -435,19 +436,20 @@ def _realtime_auswahl_anwenden(db: Session, provider: AiProvider, *, verlangt: b
         db.query(AiProvider).filter(
             AiProvider.id != provider.id,
             AiProvider.realtime_default.is_(True),
-        ).update({AiProvider.realtime_default: False}, synchronize_session=False)
+        ).update({AiProvider.realtime_default: False, AiProvider.realtime_enabled: False}, synchronize_session=False)
         provider.realtime_default = True
+        provider.realtime_enabled = True
         return
     if verlangt is False:
         provider.realtime_default = False
+        provider.realtime_enabled = False
         return
     if provider.realtime_default:
         try:
             _assert_realtime_werte(provider)
         except AiProviderConfigurationError:
-            # Eine explizite Deaktivierung, ein Providerwechsel oder das
-            # Entfernen eines Pflichtfelds schaltet Realtime sicher ab.
             provider.realtime_default = False
+            provider.realtime_enabled = False
 
 
 def _assert_ethics_rolle(
@@ -498,10 +500,18 @@ def create_provider(
     token_price_micro_usd_per_million: int | None = None,
     standard_input_price_micro_usd_per_million: int | None = None,
     standard_output_price_micro_usd_per_million: int | None = None,
+    standard_cache_price_micro_usd_per_million: int | None = None,
     worker_input_price_micro_usd_per_million: int | None = None,
     worker_output_price_micro_usd_per_million: int | None = None,
+    worker_cache_price_micro_usd_per_million: int | None = None,
     ethics_input_price_micro_usd_per_million: int | None = None,
     ethics_output_price_micro_usd_per_million: int | None = None,
+    ethics_cache_price_micro_usd_per_million: int | None = None,
+    standard_enabled: bool | None = None,
+    worker_enabled: bool | None = None,
+    ethics_enabled: bool | None = None,
+    transcription_enabled: bool | None = None,
+    realtime_enabled: bool | None = None,
     # Optional: ohne Stimme gibt es über diesen Zugang keinen Sprachmodus. Eine
     # Standardstimme wird bewusst **nicht** eingetragen — warum, steht an der
     # Spalte in `models/ai_provider.py`.
@@ -560,10 +570,13 @@ def create_provider(
         "ethics_model": ethikmodell,
         "standard_input_price_micro_usd_per_million": standard_input_price_micro_usd_per_million,
         "standard_output_price_micro_usd_per_million": standard_output_price_micro_usd_per_million,
+        "standard_cache_price_micro_usd_per_million": standard_cache_price_micro_usd_per_million,
         "worker_input_price_micro_usd_per_million": worker_input_price_micro_usd_per_million,
         "worker_output_price_micro_usd_per_million": worker_output_price_micro_usd_per_million,
+        "worker_cache_price_micro_usd_per_million": worker_cache_price_micro_usd_per_million,
         "ethics_input_price_micro_usd_per_million": ethics_input_price_micro_usd_per_million,
         "ethics_output_price_micro_usd_per_million": ethics_output_price_micro_usd_per_million,
+        "ethics_cache_price_micro_usd_per_million": ethics_cache_price_micro_usd_per_million,
     }
     ai_model_price_service.fill_missing_role_prices(kind, automatic_prices)
     schluessel = _assert_key_passt(kind, operator_api_key)
@@ -583,10 +596,18 @@ def create_provider(
         token_price_micro_usd_per_million=token_price_micro_usd_per_million,
         standard_input_price_micro_usd_per_million=automatic_prices["standard_input_price_micro_usd_per_million"],
         standard_output_price_micro_usd_per_million=automatic_prices["standard_output_price_micro_usd_per_million"],
+        standard_cache_price_micro_usd_per_million=automatic_prices["standard_cache_price_micro_usd_per_million"],
         worker_input_price_micro_usd_per_million=automatic_prices["worker_input_price_micro_usd_per_million"],
         worker_output_price_micro_usd_per_million=automatic_prices["worker_output_price_micro_usd_per_million"],
+        worker_cache_price_micro_usd_per_million=automatic_prices["worker_cache_price_micro_usd_per_million"],
         ethics_input_price_micro_usd_per_million=automatic_prices["ethics_input_price_micro_usd_per_million"],
         ethics_output_price_micro_usd_per_million=automatic_prices["ethics_output_price_micro_usd_per_million"],
+        ethics_cache_price_micro_usd_per_million=automatic_prices["ethics_cache_price_micro_usd_per_million"],
+        standard_enabled=bool(modell) if standard_enabled is None else bool(standard_enabled and modell),
+        worker_enabled=bool(arbeitsmodell) if worker_enabled is None else bool(worker_enabled and arbeitsmodell),
+        ethics_enabled=bool(ethikmodell) if ethics_enabled is None else bool(ethics_enabled and ethikmodell),
+        transcription_enabled=bool(gehoer) if transcription_enabled is None else bool(transcription_enabled and gehoer),
+        realtime_enabled=bool((realtime_model or "").strip()) if realtime_enabled is None else bool(realtime_enabled and (realtime_model or "").strip()),
         default_voice=stimme,
         transcription_model=gehoer,
         realtime_default=False,
@@ -706,10 +727,13 @@ def update_provider(
             for field in (
                 "standard_input_price_micro_usd_per_million",
                 "standard_output_price_micro_usd_per_million",
+                "standard_cache_price_micro_usd_per_million",
                 "worker_input_price_micro_usd_per_million",
                 "worker_output_price_micro_usd_per_million",
+                "worker_cache_price_micro_usd_per_million",
                 "ethics_input_price_micro_usd_per_million",
                 "ethics_output_price_micro_usd_per_million",
+                "ethics_cache_price_micro_usd_per_million",
             )
         },
     }
@@ -724,6 +748,18 @@ def update_provider(
     provider.ethics_model = new_ethics_model
     provider.ethics_reasoning_effort = new_ethics_effort
     provider.ethics_mode = new_ethics_mode
+    for flag, model in (
+        ("standard_enabled", new_default_model),
+        ("worker_enabled", new_worker_model),
+        ("ethics_enabled", new_ethics_model),
+        ("transcription_enabled", new_transcription_model),
+    ):
+        if flag in values:
+            setattr(provider, flag, bool(values[flag] and model))
+        elif model is None:
+            setattr(provider, flag, False)
+    if "realtime_enabled" in values and values["realtime_enabled"] is not None:
+        pass
     for field in ("enabled", "requires_api_key"):
         # ``null`` heisst bei einer NOT-NULL-Spalte nicht „aus", sondern
         # „nichts gesagt" — es wird wie ein fehlendes Feld behandelt, statt als
@@ -759,10 +795,13 @@ def update_provider(
     for field in (
         "standard_input_price_micro_usd_per_million",
         "standard_output_price_micro_usd_per_million",
+        "standard_cache_price_micro_usd_per_million",
         "worker_input_price_micro_usd_per_million",
         "worker_output_price_micro_usd_per_million",
+        "worker_cache_price_micro_usd_per_million",
         "ethics_input_price_micro_usd_per_million",
         "ethics_output_price_micro_usd_per_million",
+        "ethics_cache_price_micro_usd_per_million",
     ):
         if field in values or price_values[field] != getattr(provider, field):
             setattr(provider, field, price_values[field])

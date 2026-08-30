@@ -36,18 +36,18 @@ def _micro_usd_per_million(value: object) -> int | None:
     return int((amount * Decimal("1000000000000")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def _catalog() -> dict[str, tuple[int, int]]:
+def _catalog() -> dict[str, tuple[int, int, int | None]]:
     global _cache
     with _lock:
         if _cache is not None and _cache[0] > time.monotonic():
-            return _cache[1]
+            return _cache[1]  # type: ignore[return-value]
     try:
         response = httpx.get(_URL, timeout=2.0, headers={"Accept": "application/json"})
         response.raise_for_status()
         entries = response.json().get("data", [])
     except (httpx.HTTPError, ValueError, AttributeError):
         return {}
-    prices: dict[str, tuple[int, int]] = {}
+    prices: dict[str, tuple[int, int, int | None]] = {}
     if isinstance(entries, list):
         for entry in entries:
             if not isinstance(entry, dict) or not isinstance(entry.get("id"), str):
@@ -57,10 +57,11 @@ def _catalog() -> dict[str, tuple[int, int]]:
                 continue
             input_price = _micro_usd_per_million(pricing.get("prompt"))
             output_price = _micro_usd_per_million(pricing.get("completion"))
+            cache_price = _micro_usd_per_million(pricing.get("input_cache_read") or pricing.get("cached"))
             if input_price is not None and output_price is not None:
-                prices[entry["id"]] = (input_price, output_price)
+                prices[entry["id"]] = (input_price, output_price, cache_price)
     with _lock:
-        _cache = (time.monotonic() + _TTL_SECONDS, prices)
+        _cache = (time.monotonic() + _TTL_SECONDS, prices)  # type: ignore[assignment]
     return prices
 
 
@@ -78,7 +79,8 @@ def fill_missing_role_prices(provider_kind: str, values: dict[str, Any]) -> None
     ):
         input_field = f"{role}_input_price_micro_usd_per_million"
         output_field = f"{role}_output_price_micro_usd_per_million"
-        if values.get(input_field) is not None and values.get(output_field) is not None:
+        cache_field = f"{role}_cache_price_micro_usd_per_million"
+        if values.get(input_field) is not None and values.get(output_field) is not None and values.get(cache_field) is not None:
             continue
         model = values.get(model_field)
         if not isinstance(model, str) or not model.strip():
@@ -93,3 +95,5 @@ def fill_missing_role_prices(provider_kind: str, values: dict[str, Any]) -> None
             values[input_field] = price[0]
         if values.get(output_field) is None:
             values[output_field] = price[1]
+        if values.get(cache_field) is None and len(price) > 2 and price[2] is not None:
+            values[cache_field] = price[2]

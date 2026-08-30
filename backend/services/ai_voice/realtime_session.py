@@ -55,16 +55,22 @@ class RealtimeSitzungsfehler(RuntimeError):
 @dataclass(frozen=True)
 class RealtimeVorbereitung:
     provider_id: int
-    model: str
-    voice: str
-    reasoning_effort: str | None
-    language: str
-    vad_eagerness: str
-    api_key: str
-    instructions: str
-    tools: list[dict]
-    conversation_id: str
-    usage_event_id: int
+    provider_kind: str = "openai"
+    base_url: str = "https://api.openai.com/v1"
+    model: str = ""
+    voice: str = ""
+    reasoning_effort: str | None = None
+    language: str = "auto"
+    vad_eagerness: str = "auto"
+    api_key: str = ""
+    instructions: str = ""
+    tools: list[dict] = None  # type: ignore[assignment]
+    conversation_id: str = ""
+    usage_event_id: int = 0
+
+    def __post_init__(self):
+        if self.tools is None:
+            object.__setattr__(self, "tools", [])
 
 
 def vorbereiten(
@@ -176,6 +182,8 @@ def vorbereiten(
     db.commit()
     return RealtimeVorbereitung(
         provider_id=provider.id,
+        provider_kind=provider.provider_kind,
+        base_url=ai_provider_service.base_url(provider),
         model=provider.realtime_model or "",
         voice=provider.realtime_voice or "",
         reasoning_effort=provider.realtime_reasoning_effort,
@@ -321,6 +329,20 @@ class RealtimeSitzung:
         except Exception:
             pass
 
+    def _realtime_endpoint(self) -> tuple[str, dict[str, str], str]:
+        if self.v.provider_kind == "azure_openai":
+            base = self.v.base_url.rstrip("/")
+            return (
+                f"{base}/realtime/calls",
+                {"api-key": self.v.api_key},
+                f"wss://{base.removeprefix('https://').removeprefix('http://')}/realtime?call_id={{call_id}}",
+            )
+        return (
+            "https://api.openai.com/v1/realtime/calls",
+            {"Authorization": f"Bearer {self.v.api_key}"},
+            "wss://api.openai.com/v1/realtime?call_id={call_id}",
+        )
+
     async def _handshake(self, sdp: str) -> str:
         if not sdp or len(sdp) > MAX_SDP_ZEICHEN:
             await self._debug_senden("REALTIME_SDP_INVALID", hint="SDP groesse ungueltig")
@@ -328,10 +350,11 @@ class RealtimeSitzung:
         if websockets is None:
             await self._debug_senden("REALTIME_NOT_AVAILABLE", hint="websockets Paket fehlt")
             raise RealtimeSitzungsfehler("REALTIME_NOT_AVAILABLE")
+        url, headers, ws_template = self._realtime_endpoint()
         try:
             response = await self.http.post(
-                "https://api.openai.com/v1/realtime/calls",
-                headers={"Authorization": f"Bearer {self.v.api_key}"},
+                url,
+                headers=headers,
                 files={
                     "sdp": (None, sdp, "application/sdp"),
                     "session": (None, json.dumps(_session_config(self.v)), "application/json"),
@@ -346,12 +369,12 @@ class RealtimeSitzung:
                 await self._debug_senden("REALTIME_HANDSHAKE_FAILED", hint="Antwort-SDP ungueltig")
                 raise RealtimeSitzungsfehler("REALTIME_HANDSHAKE_FAILED")
             self._sideband = await websockets.connect(
-                f"wss://api.openai.com/v1/realtime?call_id={call_id}",
-                additional_headers={"Authorization": f"Bearer {self.v.api_key}"},
+                ws_template.format(call_id=call_id),
+                additional_headers=headers,
                 max_size=2 * 1024 * 1024,
                 open_timeout=10,
             )
-            await self._debug_senden("REALTIME_HANDSHAKE_OK", hint="WebRTC verbunden")
+            await self._debug_senden("REALTIME_HANDSHAKE_OK", hint=f"WebRTC verbunden via {self.v.provider_kind}")
             return answer
         except RealtimeSitzungsfehler:
             raise
@@ -425,13 +448,11 @@ class RealtimeSitzung:
                             wert = {"error": "TOOL_TIMEOUT"}
                             anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_TIMEOUT", "reason": "timeout"}
                             vorschlaege = []
-                            await self._debug_senden("REALTIME_TOOL_TIMEOUT", hint=name)
                         except Exception:
                             fehler = "Werkzeug konnte nicht ausgeführt werden"
                             wert = {"error": fehler}
                             anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_FAILED", "reason": "execution_error"}
                             vorschlaege = []
-                            await self._debug_senden("REALTIME_TOOL_FAILED", hint=name)
                     else:
                         call = ProviderToolCall(id=call_id, name=name, arguments=argumente)
                         try:
@@ -452,18 +473,16 @@ class RealtimeSitzung:
                             wert = {"error": "TOOL_TIMEOUT"}
                             anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_TIMEOUT", "reason": "timeout"}
                             vorschlaege = []
-                            await self._debug_senden("REALTIME_TOOL_TIMEOUT", hint=name)
                         except Exception:
                             fehler = "Werkzeug konnte nicht ausgeführt werden"
                             wert = {"error": fehler}
                             anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_FAILED", "reason": "execution_error"}
                             vorschlaege = []
-                            await self._debug_senden("REALTIME_TOOL_FAILED", hint=name)
-        if fehler:
-            await self._debug_senden("REALTIME_TOOL_ERROR" if anzeige.get("failed") else "REALTIME_TOOL_OK", hint=name, code=anzeige.get("code") or "")
         frame = voice_tool_frame("tool", anzeige)
         if frame:
             await self._panel_senden(frame)
+        if fehler:
+            await self._debug_senden("REALTIME_TOOL_ERROR" if anzeige.get("failed") else "REALTIME_TOOL_OK", hint=name)
         for vorschlag in vorschlaege:
             kennung = vorschlag.get("id")
             if not isinstance(kennung, str) or not kennung:
