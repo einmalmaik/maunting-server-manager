@@ -12,7 +12,7 @@ except Exception:
 
 
 def emit(code: str, hint: str = "", **fields: object) -> None:
-    safe_fields = {k: v for k, v in fields.items() if k not in {"api_key", "sdp", "call_id", "arguments", "output"}}
+    safe_fields = {k: v for k, v in fields.items() if k not in {"api_key", "sdp", "call_id", "arguments", "output", "raw_event"}}
     payload = " ".join(f"{k}={v}" for k, v in safe_fields.items())
     suffix = f" {payload}" if payload else ""
     msg = f"[voice] code={code} hint={hint}{suffix}" if hint else f"[voice] code={code}{suffix}"

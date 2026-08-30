@@ -686,8 +686,50 @@ class RealtimeSitzung:
                 if status == "completed":
                     self.lage.laeufe += 1
                 if status in {"failed", "cancelled", "incomplete"}:
-                    await self._debug_senden("REALTIME_RESPONSE_FAILED", hint=str(status))
-                    await self._panel_senden({"art": "stoerung", "grund": "realtime_response"})
+                    details = response.get("status_details") or {}
+                    err = response.get("error") or (details.get("error") if isinstance(details, dict) else None) or event.get("error") or {}
+                    if not isinstance(err, dict):
+                        err = {"message": str(err)[:800]} if err else {}
+                    if not isinstance(details, dict):
+                        details = {"raw": str(details)[:2000]} if details else {}
+                    ex_code = err.get("code") or err.get("type") or details.get("type") if isinstance(err, dict) else None
+                    ex_reason = details.get("reason") if isinstance(details, dict) else None
+                    ex_msg = err.get("message") or err.get("msg") or details.get("message") if isinstance(err, dict) else None
+                    ex_param = err.get("param") if isinstance(err, dict) else None
+                    hint = f"{status}:{ex_code or ex_reason or ''}".rstrip(":")
+                    safe_details = json.dumps(details, ensure_ascii=False, default=str)[:2000] if details else ""
+                    provider_kind = getattr(self.v, "provider_kind", "unknown")
+                    model_name = response.get("model") or getattr(self.v, "model", "")
+                    resp_id = response.get("id") or ""
+                    await self._debug_senden(
+                        "REALTIME_RESPONSE_FAILED",
+                        hint=hint,
+                        status=status,
+                        code=ex_code or "",
+                        reason=ex_reason or "",
+                        message=(ex_msg or "")[:400],
+                        param=ex_param or "",
+                        provider=provider_kind,
+                        model=model_name,
+                        response_id=resp_id,
+                        status_details=safe_details,
+                    )
+                    await self._panel_senden({
+                        "art": "debug",
+                        "code": "REALTIME_RESPONSE_FAILED",
+                        "hint": hint,
+                        "status": status,
+                        "code_detail": ex_code,
+                        "reason": ex_reason,
+                        "message": (ex_msg or "")[:400],
+                        "param": ex_param,
+                        "provider": provider_kind,
+                        "model": model_name,
+                        "response_id": resp_id,
+                        "details": details,
+                        "error": err,
+                    })
+                    await self._panel_senden({"art": "stoerung", "grund": "realtime_response", "code": "REALTIME_RESPONSE_FAILED", "hint": hint})
                 if not self._tool_tasks:
                     if status == "completed" and not self._antwort_hat_audio:
                         await self._debug_senden("REALTIME_LEERE_ANTWORT", hint="kein Audio")
@@ -707,8 +749,13 @@ class RealtimeSitzung:
                                 self._response_aktiv = False
                                 await self._debug_senden("REALTIME_NACHTRAG_FAILED", hint="sideband send failed")
             elif art == "error":
-                await self._debug_senden("REALTIME_SIDEBAND_ERROR", hint=str(event.get("error") or event))
-                await self._panel_senden({"art": "stoerung", "grund": "realtime_response"})
+                err = event.get("error") or event
+                err_code = err.get("code") if isinstance(err, dict) else None
+                err_msg = err.get("message") if isinstance(err, dict) else str(err)[:400]
+                provider_kind = getattr(self.v, "provider_kind", "unknown")
+                await self._debug_senden("REALTIME_SIDEBAND_ERROR", hint=str(err_code or err_msg)[:100], error=str(err)[:800], provider=provider_kind)
+                await self._panel_senden({"art": "debug", "code": "REALTIME_SIDEBAND_ERROR", "hint": str(err_code or "")[:100], "error": err, "provider": provider_kind})
+                await self._panel_senden({"art": "stoerung", "grund": "realtime_response", "code": "REALTIME_SIDEBAND_ERROR"})
 
     def _tool_task_fertig(self, task: asyncio.Task) -> None:
         self._tool_tasks.discard(task)

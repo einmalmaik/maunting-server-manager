@@ -31,6 +31,7 @@ export function SprachAnsicht({
     fehlerCode,
     debugCode,
     debugHint,
+    fehlerDetails,
     fehler,
     belege,
     vorschlag,
@@ -174,6 +175,12 @@ export function SprachAnsicht({
                   {fehlerCode || debugCode}{debugHint ? ` — ${debugHint}` : ''}{fehlerWerkzeug && fehlerCode !== fehlerWerkzeug ? ` (${fehlerWerkzeug})` : ''}
                 </p>
               )}
+              {fehlerDetails && fehlerCode === 'REALTIME_RESPONSE_FAILED' && (
+                <p className="mt-1 max-w-md break-words font-mono text-[10px] leading-tight text-on-surface-variant/60">
+                  {String((fehlerDetails as Record<string, unknown>).message || (fehlerDetails as Record<string, unknown>).reason || JSON.stringify((fehlerDetails as Record<string, unknown>).details || '').slice(0,400))}
+                  {(fehlerDetails as Record<string, unknown>).provider ? ` · ${(fehlerDetails as Record<string, unknown>).provider}` : ''}{(fehlerDetails as Record<string, unknown>).model ? ` ${(fehlerDetails as Record<string, unknown>).model}` : ''}{(fehlerDetails as Record<string, unknown>).param ? ` · param ${(fehlerDetails as Record<string, unknown>).param}` : ''}
+                </p>
+              )}
             </div>
           </div>
 
@@ -241,6 +248,12 @@ export function SprachAnsicht({
         {(fehlerCode || debugCode) && (
           <p className="font-mono text-xs text-on-surface-variant/60">
             {fehlerCode || debugCode}{debugHint ? ` — ${debugHint}` : ''}{fehlerWerkzeug && fehlerCode !== fehlerWerkzeug ? ` (${fehlerWerkzeug})` : ''}
+          </p>
+        )}
+        {fehlerDetails && fehlerCode === 'REALTIME_RESPONSE_FAILED' && (
+          <p className="max-w-lg break-words font-mono text-[11px] leading-tight text-on-surface-variant/60">
+            {String((fehlerDetails as Record<string, unknown>).message || (fehlerDetails as Record<string, unknown>).reason || JSON.stringify((fehlerDetails as Record<string, unknown>).details || '').slice(0,400))}
+            {(fehlerDetails as Record<string, unknown>).provider ? ` · ${(fehlerDetails as Record<string, unknown>).provider}` : ''}{(fehlerDetails as Record<string, unknown>).model ? ` ${(fehlerDetails as Record<string, unknown>).model}` : ''}{(fehlerDetails as Record<string, unknown>).param ? ` · param ${(fehlerDetails as Record<string, unknown>).param}` : ''}
           </p>
         )}
         {werkzeug && (

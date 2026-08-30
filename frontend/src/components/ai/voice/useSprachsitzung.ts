@@ -113,6 +113,7 @@ interface Ergebnis {
   fehlerCode: string | null
   debugCode: string | null
   debugHint: string | null
+  fehlerDetails: Record<string, unknown> | null
   /**
    * Die gezeigten Stellen, die zuletzt gezeigte am Ende. Die Anzeige braucht
    * nur die letzte; die davor bleiben ein paar Schritte stehen, damit ein
@@ -242,6 +243,7 @@ export function useSprachsitzung(
   const [fehlerCode, setFehlerCode] = useState<string | null>(null)
   const [debugCode, setDebugCode] = useState<string | null>(null)
   const [debugHint, setDebugHint] = useState<string | null>(null)
+  const [fehlerDetails, setFehlerDetails] = useState<Record<string, unknown> | null>(null)
   const [fehler, setFehler] = useState<string | null>(null)
   const [belege, setBelege] = useState<Beleg[]>([])
   const [vorschlag, setVorschlag] = useState<Vorschlag | null>(null)
@@ -325,6 +327,7 @@ export function useSprachsitzung(
     setFehlerCode(null)
     setDebugCode(null)
     setDebugHint(null)
+    setFehlerDetails(null)
     setZustand('verbindet')
     voiceDebug('VOICE_START', { providerId, modus })
 
@@ -523,10 +526,18 @@ export function useSprachsitzung(
           if (code) {
             setDebugCode(code)
             setDebugHint(hint)
-            voiceDebug(code, { hint: hint ?? undefined })
-            if (code === 'REALTIME_TOOL_TIMEOUT' || code === 'REALTIME_TOOL_FAILED') {
+            const details: Record<string, unknown> = {}
+            for (const k of ['status', 'code_detail', 'reason', 'message', 'param', 'provider', 'model', 'response_id', 'error', 'details']) {
+              if (nachricht[k] !== undefined) details[k] = nachricht[k] as unknown
+            }
+            if (Object.keys(details).length > 0) setFehlerDetails(details)
+            voiceDebug(code, { hint: hint ?? undefined, ...details })
+            if (code === 'REALTIME_TOOL_TIMEOUT' || code === 'REALTIME_TOOL_FAILED' || code === 'REALTIME_RESPONSE_FAILED' || code === 'REALTIME_SIDEBAND_ERROR') {
               setFehlerCode(code)
-              setFehlerWerkzeug(typeof nachricht.hint === 'string' ? nachricht.hint : null)
+              if (typeof nachricht.hint === 'string') setFehlerWerkzeug(nachricht.hint)
+              if (code === 'REALTIME_RESPONSE_FAILED' && details.message) {
+                voiceWarn(code, { hint, ...details })
+              }
             }
           }
           break
@@ -743,20 +754,22 @@ export function useSprachsitzung(
         }
         case 'stoerung': {
           const grund = typeof nachricht.grund === 'string' ? nachricht.grund : 'unknown'
-          voiceWarn('VOICE_STOERUNG', { grund })
-          setDebugCode(grund)
+          const hint = typeof nachricht.hint === 'string' ? nachricht.hint : null
+          voiceWarn('VOICE_STOERUNG', { grund, hint: hint ?? undefined, code: nachricht.code })
+          if (grund !== 'realtime_response') setDebugCode(grund)
           setFehler(
             grund === 'realtime_kontingent'
               ? 'ai.voice.errors.realtimeQuota'
               : grund === 'kontingent'
               ? 'ai.voice.errors.quota'
-              : grund === 'leere_antwort'
-              ? 'ai.voice.errors.provider'
-              : grund === 'realtime_response'
-              ? 'ai.voice.errors.provider'
               : 'ai.voice.errors.provider',
           )
-          setFehlerCode(grund === 'leere_antwort' ? 'REALTIME_LEERE_ANTWORT' : grund === 'realtime_response' ? 'REALTIME_RESPONSE_FAILED' : null)
+          if (grund === 'leere_antwort') setFehlerCode('REALTIME_LEERE_ANTWORT')
+          else if (grund === 'realtime_response' && !fehlerCode) setFehlerCode((nachricht.code as string) || 'REALTIME_RESPONSE_FAILED')
+          if (hint) setDebugHint(hint)
+          if (nachricht.details || nachricht.error) {
+            setFehlerDetails({ details: nachricht.details as unknown, error: nachricht.error as unknown, hint })
+          }
           break
         }
         default:
@@ -855,6 +868,7 @@ export function useSprachsitzung(
     fehlerCode,
     debugCode,
     debugHint,
+    fehlerDetails,
     fehler,
     belege,
     vorschlag,
