@@ -26,8 +26,9 @@ const MAX_GLOBE_FOCUS_ZOOM = 10
 const DETAIL_ZOOM = 13
 const LANDMARK_ZOOM = 16
 const CAMERA_DURATION_MS = 700
-const TRACKPAD_ZOOM_RATE = 1 / 30
-const WHEEL_ZOOM_RATE = 1 / 60
+// Faster zoom rates for smoother experience
+const TRACKPAD_ZOOM_RATE = 0.2 // approx 1/5
+const WHEEL_ZOOM_RATE = 0.15 // approx 1/6.7
 
 function isManualMapEvent(value: unknown): boolean {
   return typeof value === 'object' && value !== null && 'originalEvent' in value && Boolean(
@@ -142,8 +143,18 @@ export function MapTilerDetailMap({
         map.stop()
       }
       map.on('dragstart', markManualCameraControl)
+      map.on('dragend', () => {
+        // User finished dragging; allow AI updates again.
+        manualCameraControlRef.current = false
+      })
       map.on('zoomstart', markManualCameraControl)
+      map.on('zoomend', () => {
+        manualCameraControlRef.current = false
+      })
       map.on('rotatestart', markManualCameraControl)
+      map.on('rotateend', () => {
+        manualCameraControlRef.current = false
+      })
       map.on('error', () => {
         if (!disposed && !styleReady) unavailable()
       })
