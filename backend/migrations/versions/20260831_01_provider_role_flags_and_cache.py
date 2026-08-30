@@ -28,10 +28,10 @@ def upgrade() -> None:
             batch.add_column(sa.Column(name, sa.BigInteger(), nullable=True))
     op.execute(sa.text(
         "UPDATE ai_providers SET "
-        "standard_enabled = CASE WHEN default_model IS NOT NULL AND trim(default_model) != '' THEN 1 ELSE 0 END, "
-        "worker_enabled = CASE WHEN worker_model IS NOT NULL AND trim(worker_model) != '' THEN 1 ELSE 0 END, "
-        "ethics_enabled = CASE WHEN ethics_model IS NOT NULL AND trim(ethics_model) != '' THEN 1 ELSE 0 END, "
-        "transcription_enabled = CASE WHEN transcription_model IS NOT NULL AND trim(transcription_model) != '' THEN 1 ELSE 0 END, "
+        "standard_enabled = CASE WHEN default_model IS NOT NULL AND trim(default_model) != '' THEN true ELSE false END, "
+        "worker_enabled = CASE WHEN worker_model IS NOT NULL AND trim(worker_model) != '' THEN true ELSE false END, "
+        "ethics_enabled = CASE WHEN ethics_model IS NOT NULL AND trim(ethics_model) != '' THEN true ELSE false END, "
+        "transcription_enabled = CASE WHEN transcription_model IS NOT NULL AND trim(transcription_model) != '' THEN true ELSE false END, "
         "realtime_enabled = realtime_default"
     ))
 
