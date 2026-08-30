@@ -232,8 +232,13 @@
       "tokenPriceHint": "Rückfallwert: Greift, wenn der Anbieter keine Verbrauchsdaten übermittelt. Solche Zeilen werden als „geschätzt“ verbucht. Ohne Wert werden Kosten mit null verbucht und das rollenbasierte Kostenlimit greift nicht.",
       "modelPrices": {
         "input": "Eingabe · {{currency}} / 1 Mio. Tokens",
-        "output": "Ausgabe · {{currency}} / 1 Mio. Tokens"
+        "output": "Ausgabe · {{currency}} / 1 Mio. Tokens",
+        "cache": "Cache · {{currency}} / 1 Mio. Tokens"
       },
+      "standardEnabled": "Standard-Rolle aktiv",
+      "workerEnabled": "Worker-Rolle aktiv",
+      "ethicsEnabled": "Ethik-Rolle aktiv",
+      "transcriptionEnabled": "Transkription aktiv",
       "test": "Verbindung testen",
       "testOk": "Verbindung erfolgreich. Der Anbieter hat geantwortet.",
       "testFailed": "Der Test ist fehlgeschlagen.",

@@ -232,8 +232,13 @@
       "tokenPriceHint": "Fallback value: Used only if the provider does not report consumption metrics. These lines appear as estimated. Without a value, costs are recorded as zero and role cost limits do not apply.",
       "modelPrices": {
         "input": "Input · {{currency}} / 1M tokens",
-        "output": "Output · {{currency}} / 1M tokens"
+        "output": "Output · {{currency}} / 1M tokens",
+        "cache": "Cache · {{currency}} / 1M tokens"
       },
+      "standardEnabled": "Standard role enabled",
+      "workerEnabled": "Worker role enabled",
+      "ethicsEnabled": "Ethics role enabled",
+      "transcriptionEnabled": "Transcription enabled",
       "test": "Test connection",
       "testOk": "Connection successful. The provider responded.",
       "testFailed": "The test failed.",
