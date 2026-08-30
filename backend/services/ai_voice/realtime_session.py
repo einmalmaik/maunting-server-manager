@@ -407,12 +407,12 @@ class RealtimeSitzung:
                         except TimeoutError:
                             fehler = "Werkzeug hat nicht rechtzeitig geantwortet"
                             wert = {"error": "TOOL_TIMEOUT"}
-                            anzeige = {"tool_name": name, "failed": True}
+                            anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_TIMEOUT", "reason": "timeout"}
                             vorschlaege = []
                         except Exception:
                             fehler = "Werkzeug konnte nicht ausgeführt werden"
                             wert = {"error": fehler}
-                            anzeige = {"tool_name": name, "failed": True}
+                            anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_FAILED", "reason": "execution_error"}
                             vorschlaege = []
                     else:
                         call = ProviderToolCall(id=call_id, name=name, arguments=argumente)
@@ -437,7 +437,7 @@ class RealtimeSitzung:
                             # weiterreden.
                             fehler = "Werkzeug hat nicht rechtzeitig geantwortet"
                             wert = {"error": "TOOL_TIMEOUT"}
-                            anzeige = {"tool_name": name, "failed": True}
+                            anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_TIMEOUT", "reason": "timeout"}
                             vorschlaege = []
                         except Exception:
                             # Rohfehler können Zielsystemdaten enthalten. Der
@@ -445,7 +445,7 @@ class RealtimeSitzung:
                             # Fehlervertrag; der nächste Gesprächszug bleibt offen.
                             fehler = "Werkzeug konnte nicht ausgeführt werden"
                             wert = {"error": fehler}
-                            anzeige = {"tool_name": name, "failed": True}
+                            anzeige = {"tool_name": name, "failed": True, "code": "REALTIME_TOOL_FAILED", "reason": "execution_error"}
                             vorschlaege = []
         frame = voice_tool_frame("tool", anzeige)
         if frame:
