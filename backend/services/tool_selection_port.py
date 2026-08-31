@@ -12,6 +12,8 @@ HOTSET = frozenset({
     "search_docs",
     "calendar_read",
     "notes_read",
+    "propose_calendar_event_create",
+    "propose_note_create",
     "remember",
     "search_memory",
     "learn_skill",

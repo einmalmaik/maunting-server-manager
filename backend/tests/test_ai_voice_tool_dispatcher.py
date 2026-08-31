@@ -113,3 +113,39 @@ def test_realtime_tools_contain_execute_server_action(db: Session, regular_user:
     assert "execute_server_action" in tool_names
     assert "list_my_servers" in tool_names
     assert "voice_resolve_latest_proposal" in tool_names
+
+
+def test_realtime_prompt_includes_notes_and_calendar():
+    from services.ai_prompt import build, NOTIZEN, POSTFACH_UND_KALENDER
+    prompt = build(gesprochen=True, rolle="realtime")
+    assert "Notizen und Einkaufslisten" in prompt
+    assert "propose_note_create" in prompt
+    assert "propose_calendar_event_create" in prompt
+
+
+def test_notes_tools_in_chat_interaction_tools():
+    from services.ai_tool_registry import CHAT_INTERACTION_TOOLS, WRITE_TOOLS
+    assert "propose_note_create" in CHAT_INTERACTION_TOOLS
+    assert "propose_note_create" in WRITE_TOOLS
+    assert "propose_calendar_event_create" in CHAT_INTERACTION_TOOLS
+
+
+def test_voice_werkzeug_ausfuehren_propose_note(db: Session, regular_user: User):
+    from services.ai_stream.read_tools import voice_werkzeug_ausfuehren
+    from services.openai_compatible_adapter import ProviderToolCall
+    with patch("services.ai_stream.write_tools._persist_write_proposals") as mock_persist:
+        mock_persist.return_value = [{"id": "prop-note-1", "tool_name": "propose_note_create", "status": "proposed"}]
+        call = ProviderToolCall(
+            id="call-note",
+            name="propose_note_create",
+            arguments={"title": "Einkaufsliste", "content": "- [ ] Butter\n- [ ] Milch", "category": "shopping"},
+        )
+        wert, fehler, anzeige, vorschlaege = voice_werkzeug_ausfuehren(
+            user_id=regular_user.id,
+            call=call,
+            conversation_id="conv-note-test",
+        )
+        assert fehler is None
+        assert len(vorschlaege) == 1
+        assert vorschlaege[0]["id"] == "prop-note-1"
+

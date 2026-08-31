@@ -120,6 +120,11 @@ def vorbereiten(
         "control_region_camera",
         "search_memory",
         "propose_backup",
+        "propose_calendar_event_create",
+        "propose_calendar_event_update",
+        "propose_note_create",
+        "propose_note_update",
+        "propose_task_set",
     }
     from services.tool_selection_port import HOTSET
     hot_realtime = HOTSET - {"worker_start"}
@@ -162,7 +167,8 @@ def vorbereiten(
         "# Verbosity\nNenne zuerst das Ergebnis, dann nur die nötigen Details.",
         "# Tools\nUnabhängige Werkzeuge parallel nutzen. Recherchen und Kartenanfragen in diesem Realtime-Zug selbst erledigen; "
         "keine Hintergrund-Worker starten. "
-        "Für Server-, Mod-, Konfigurations- oder Verwaltungsaktionen ohne direktes Einzelwerkzeug execute_server_action verwenden. "
+        "Persönliche Notizen (Einkaufslisten, To-Dos mit propose_note_create) und Kalendereinträge (Termine mit propose_calendar_event_create) direkt aufrufen. "
+        "Für erweiterte Server-, Mod-, Konfigurations- oder Verwaltungsaktionen ohne direktes Einzelwerkzeug execute_server_action verwenden. "
         "voice_resolve_latest_proposal nur für die zuletzt sichtbare Vorschlagskarte und nur bei eindeutiger Zustimmung oder Ablehnung verwenden.",
         "# Regional Analysis\nNach einem erfolgreichen analyze_region-Aufruf immer eine gesprochene, konkrete Einordnung liefern. "
         "Wetter und Satellitenlage können zuerst eintreffen: Beginne damit sofort und warte nicht auf Verkehr, Nachrichten oder öffentliche Beiträge. "

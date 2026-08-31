@@ -33,6 +33,7 @@ from services.ai_stream.types import (
     _Vorbereitung,
 )
 from services.ai_tool_registry import (
+    CHAT_INTERACTION_TOOLS,
     DESKTOP_TOOLS,
     GEHIRN_TOOLS,
     GUARDIAN_HEILUNG_TOOLS,
@@ -42,6 +43,7 @@ from services.ai_tool_registry import (
     SKILL_TOOLS,
     WERKZEUGE,
     WORKER_STEUERUNG,
+    WRITE_TOOLS,
     aufgaben_tools,
     worker_ausschluss,
 )
