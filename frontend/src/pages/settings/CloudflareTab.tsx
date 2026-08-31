@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { Button, Switch, Dropdown } from '@/Singra/UI'
+import { Button, Dropdown } from '@/Singra/UI'
 import type { PanelSettings } from './types'
 import { EMPTY_PANEL_SETTINGS } from './types'
 import { toast } from '@/stores/toastStore'
@@ -42,7 +42,7 @@ export function CloudflareTab() {
         await api('/settings/cloudflare-token', { method: 'POST', body: JSON.stringify({ cloudflare_api_token: token.trim() }) })
         setToken('')
       }
-      await api('/settings', { method: 'POST', body: JSON.stringify({ cloudflare_enabled: settings.cloudflare_enabled, cloudflare_default_zone: settings.cloudflare_default_zone, proactive_enabled: settings.proactive_enabled }) })
+      await api('/settings', { method: 'POST', body: JSON.stringify({ cloudflare_default_zone: settings.cloudflare_default_zone }) })
       toast.success(t('settings.saved'))
       const fresh = await api<PanelSettings>('/settings')
       setSettings({ ...EMPTY_PANEL_SETTINGS, ...(fresh || {}) })
@@ -79,12 +79,12 @@ export function CloudflareTab() {
     <form onSubmit={handleSave} className="space-y-6">
       <fieldset disabled={!canWrite} className="space-y-6">
         <div className="msm-card p-6 space-y-6">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h3 className="font-label-lg text-on-surface">{t('settings.cloudflare.title')}</h3>
-              <p className="text-sm text-on-surface-variant mt-1">{t('settings.cloudflare.description')}</p>
-            </div>
-            <Switch checked={settings.cloudflare_enabled} onCheckedChange={(v) => setSettings({ ...settings, cloudflare_enabled: v })} disabled={!canWrite} />
+          <div>
+            <h3 className="font-label-lg text-on-surface">{t('settings.cloudflare.title')}</h3>
+            <p className="text-sm text-on-surface-variant mt-1">{t('settings.cloudflare.description')}</p>
+            {!settings.cloudflare_enabled && (
+              <p className="text-sm text-amber-600 mt-2">{t('settings.cloudflare.disabledHint', 'Cloudflare ist unter Allgemein deaktiviert.')}</p>
+            )}
           </div>
 
           <div className="grid gap-6">
@@ -110,13 +110,6 @@ export function CloudflareTab() {
               <span className="text-xs text-on-surface-variant">{t('settings.cloudflare.zoneHint')}</span>
             </label>
 
-            <label className="flex items-center justify-between gap-4 p-4 rounded-lg border border-outline-variant/40 bg-surface-container-low/40">
-              <div>
-                <span className="font-label-md text-sm text-on-surface">{t('settings.proactive.title')}</span>
-                <p className="text-xs text-on-surface-variant mt-0.5">{t('settings.proactive.description')}</p>
-              </div>
-              <Switch checked={settings.proactive_enabled} onCheckedChange={(v) => setSettings({ ...settings, proactive_enabled: v })} disabled={!canWrite} />
-            </label>
           </div>
         </div>
 

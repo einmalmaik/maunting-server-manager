@@ -644,7 +644,8 @@
     "providerSmtp": "SMTP",
     "providerResend": "Reenviar",
     "tabs": {
-      "backup": "Copia de seguridad"
+      "backup": "Copia de seguridad",
+      "cloudflare": "Cloudflare"
     },
     "backup": {
       "statusTitle": "Estado de copia de seguridad",
@@ -672,7 +673,23 @@
       "passwordHint": "Se almacena cifrada. La contraseña nunca se devuelve y es necesaria para cifrar/descifrar copias.",
       "savePassword": "Guardar contraseña",
       "passwordSaved": "Contraseña de copia guardada"
-    }
+    },
+    "cloudflare": {
+      "title": "Cloudflare DNS",
+      "description": "Manage Cloudflare DNS for automatic subdomains.",
+      "tokenLabel": "API Token",
+      "tokenHint": "Bearer token with Zone:Edit. Stored encrypted.",
+      "deleteToken": "Remove token",
+      "deleted": "Token removed",
+      "defaultZoneLabel": "Default zone",
+      "zonePlaceholder": "Select zone",
+      "zoneHint": "Used for automatic subdomains: {game}-{name}.zone",
+      "disabledHint": "Cloudflare is disabled under General.",
+      "enabled": "Cloudflare DNS",
+      "enabledHint": "Enables Cloudflare DNS management and automatic subdomains."
+    },
+    "cloudflareEnabled": "Cloudflare DNS",
+    "cloudflareEnabledHint": "Enables Cloudflare DNS management and automatic subdomains."
   },
   "profile": {
     "title": "Perfil",

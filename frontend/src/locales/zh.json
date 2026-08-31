@@ -622,7 +622,8 @@
     "providerSmtp": "邮件传输协议",
     "providerResend": "重新发送",
     "tabs": {
-      "backup": "备份"
+      "backup": "备份",
+      "cloudflare": "Cloudflare"
     },
     "backup": {
       "statusTitle": "备份状态",
@@ -650,7 +651,23 @@
       "passwordHint": "加密存储。密码永远不会返回，且加密/解密备份时需要。",
       "savePassword": "保存密码",
       "passwordSaved": "备份密码已保存"
-    }
+    },
+    "cloudflare": {
+      "title": "Cloudflare DNS",
+      "description": "Manage Cloudflare DNS for automatic subdomains.",
+      "tokenLabel": "API Token",
+      "tokenHint": "Bearer token with Zone:Edit. Stored encrypted.",
+      "deleteToken": "Remove token",
+      "deleted": "Token removed",
+      "defaultZoneLabel": "Default zone",
+      "zonePlaceholder": "Select zone",
+      "zoneHint": "Used for automatic subdomains: {game}-{name}.zone",
+      "disabledHint": "Cloudflare is disabled under General.",
+      "enabled": "Cloudflare DNS",
+      "enabledHint": "Enables Cloudflare DNS management and automatic subdomains."
+    },
+    "cloudflareEnabled": "Cloudflare DNS",
+    "cloudflareEnabledHint": "Enables Cloudflare DNS management and automatic subdomains."
   },
   "profile": {
     "title": "公司简介",

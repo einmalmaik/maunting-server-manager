@@ -622,7 +622,8 @@
     "providerSmtp": "SMTP",
     "providerResend": "আবার পাঠান",
     "tabs": {
-      "backup": "ব্যাকআপ"
+      "backup": "ব্যাকআপ",
+      "cloudflare": "Cloudflare"
     },
     "backup": {
       "statusTitle": "ব্যাকআপ অবস্থা",
@@ -650,7 +651,23 @@
       "passwordHint": "এনক্রিপ্টেড অবস্থায় সংরক্ষিত। পাসওয়ার্ড কখনো ফেরত দেওয়া হয় না এবং ব্যাকআপ এনক্রিপ্ট/ডিক্রিপ্ট করতে প্রয়োজন।",
       "savePassword": "পাসওয়ার্ড সংরক্ষণ",
       "passwordSaved": "ব্যাকআপ পাসওয়ার্ড সংরক্ষিত"
-    }
+    },
+    "cloudflare": {
+      "title": "Cloudflare DNS",
+      "description": "Manage Cloudflare DNS for automatic subdomains.",
+      "tokenLabel": "API Token",
+      "tokenHint": "Bearer token with Zone:Edit. Stored encrypted.",
+      "deleteToken": "Remove token",
+      "deleted": "Token removed",
+      "defaultZoneLabel": "Default zone",
+      "zonePlaceholder": "Select zone",
+      "zoneHint": "Used for automatic subdomains: {game}-{name}.zone",
+      "disabledHint": "Cloudflare is disabled under General.",
+      "enabled": "Cloudflare DNS",
+      "enabledHint": "Enables Cloudflare DNS management and automatic subdomains."
+    },
+    "cloudflareEnabled": "Cloudflare DNS",
+    "cloudflareEnabledHint": "Enables Cloudflare DNS management and automatic subdomains."
   },
   "profile": {
     "title": "প্রোফাইল",

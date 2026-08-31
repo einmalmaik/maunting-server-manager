@@ -2915,6 +2915,8 @@
     "calendarEnabledHint": "Enables the calendar module in the panel and allows AI scheduling.",
     "notesEnabled": "Integrated Notes",
     "notesEnabledHint": "Enables the notes module in the panel and allows AI note management.",
+    "cloudflareEnabled": "Cloudflare DNS",
+    "cloudflareEnabledHint": "Enables Cloudflare DNS management and automatic subdomains. When disabled it is hidden for AI and UI.",
     "testEmail": "Send test email",
     "testEmailTo": "Test email to",
     "testEmailSent": "Test email sent",
@@ -2967,11 +2969,10 @@
       "deleted": "Token removed",
       "defaultZoneLabel": "Default zone",
       "zonePlaceholder": "Select zone",
-      "zoneHint": "Used for automatic subdomains: {game}-{name}.zone"
-    },
-    "proactive": {
-      "title": "Proactive thinking",
-      "description": "AI thinks ahead on every request and fetches missing context itself. Can be disabled."
+      "zoneHint": "Used for automatic subdomains: {game}-{name}.zone",
+      "disabledHint": "Cloudflare is disabled under General.",
+      "enabled": "Cloudflare DNS",
+      "enabledHint": "Enables Cloudflare DNS management and automatic subdomains. When disabled it is hidden for AI and UI."
     },
     "supportWidget": {
       "title": "Support widget",

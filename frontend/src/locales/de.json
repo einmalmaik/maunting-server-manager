@@ -2914,6 +2914,8 @@
     "calendarEnabledHint": "Aktiviert das Kalendermodul im Panel und ermöglicht der KI die Terminverwaltung.",
     "notesEnabled": "Integrierte Notizen",
     "notesEnabledHint": "Aktiviert das Notizmodul im Panel und ermöglicht der KI die Notizverwaltung.",
+    "cloudflareEnabled": "Cloudflare DNS",
+    "cloudflareEnabledHint": "Aktiviert die Cloudflare DNS Verwaltung und automatische Subdomains. Deaktiviert verbirgt sie für KI und UI.",
     "testEmail": "Test-E-Mail senden",
     "testEmailTo": "Test-E-Mail an",
     "testEmailSent": "Test-E-Mail gesendet",
@@ -2966,11 +2968,10 @@
       "deleted": "Token entfernt",
       "defaultZoneLabel": "Standard Zone",
       "zonePlaceholder": "Zone wählen",
-      "zoneHint": "Wird für automatische Subdomains verwendet: {game}-{name}.zone"
-    },
-    "proactive": {
-      "title": "Proaktives Mitdenken",
-      "description": "KI denkt bei jeder Anfrage mit und holt fehlenden Kontext selbst. Abschaltbar."
+      "zoneHint": "Wird für automatische Subdomains verwendet: {game}-{name}.zone",
+      "disabledHint": "Cloudflare ist unter Allgemein deaktiviert.",
+      "enabled": "Cloudflare DNS",
+      "enabledHint": "Aktiviert die Cloudflare DNS Verwaltung und automatische Subdomains. Deaktiviert verbirgt sie für KI und UI."
     },
     "supportWidget": {
       "title": "Support-Widget",

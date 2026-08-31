@@ -49,6 +49,8 @@ export function GeneralTab() {
           updates_automatic: settings.updates_automatic,
           desktop_app_download_enabled: settings.desktop_app_download_enabled,
           calendar_enabled: settings.calendar_enabled,
+          notes_enabled: settings.notes_enabled,
+          cloudflare_enabled: settings.cloudflare_enabled,
         }),
       })
       toast.success(t('settings.saved'))
@@ -218,6 +220,24 @@ export function GeneralTab() {
                   onCheckedChange={(checked) => setSettings({ ...settings, notes_enabled: checked })}
                   disabled={!canWrite}
                   aria-label={t('settings.notesEnabled', 'Notizfunktion & Einkaufslisten')}
+                />
+              </label>
+            </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.cloudflareEnabled', 'Cloudflare DNS')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.cloudflareEnabledHint', 'Aktiviert die Cloudflare DNS Verwaltung und automatische Subdomains. Deaktiviert verbirgt sie für KI und UI.')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.cloudflare_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, cloudflare_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.cloudflareEnabled', 'Cloudflare DNS')}
                 />
               </label>
             </div>

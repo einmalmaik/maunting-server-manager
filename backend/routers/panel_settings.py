@@ -140,7 +140,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "cloudflare_api_configured": bool(cf_token),
         "cloudflare_api_source": cfl_st.get("source", "none"),
         "cloudflare_default_zone": all_db.get("cloudflare_default_zone", ""),
-        "proactive_enabled": all_db.get("proactive_enabled", "true") != "false",
+        "proactive_enabled": True,
         # Rate-Limits: immer resolved (Default wenn unset/invalid), nie Rohmüll
         "rate_limit_auth": resolve_auth_limit(all_db.get(RATE_LIMIT_AUTH_KEY, "")),
         "rate_limit_global": resolve_global_limit(all_db.get(RATE_LIMIT_GLOBAL_KEY, "")),
@@ -275,8 +275,7 @@ def update_settings(
             value = str(value).strip()[:253]
             PanelSettingsService.set(key, value)
         elif key == "proactive_enabled":
-            value = "true" if bool(value) else "false"
-            PanelSettingsService.set(key, str(value))
+            PanelSettingsService.set("proactive_enabled", "true")
         else:
             PanelSettingsService.set(key, str(value))
 
