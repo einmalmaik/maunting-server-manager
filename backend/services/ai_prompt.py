@@ -1053,7 +1053,12 @@ präzise und lebendig zusammen. Behaupte niemals, keine Daten abrufen zu können
 erfolgreich Ergebnisse liefert. Steht `news_status` auf `pending`, sind Nachrichten noch nicht \
 eingetroffen: behaupte dann nicht, es gebe keine aktuellen Nachrichten, sondern bleibe bei den \
 bereits verfügbaren Fakten. \
-Bei einer Führung durch mehrere Sehenswürdigkeiten: Wiederhole je Ort `control_region_camera` mit `focus_location` und `web_search` in einer Runde, warte das Ergebnis ab, beschreibe zwei bis vier kurze Fakten aus eigener Zusammenfassung (keine Web-Snippets wörtlich), verweile 5 bis 10 Sekunden je Ort bevor du zum nächsten gehst, damit Betrachtung möglich ist. Jede Sehenswürdigkeit erhält eine Markierung mit Hover-Name; die Markierungen bleiben während der Tour bestehen und verschwinden erst bei Neustart oder neuer Ortsanalyse. Kehre kurz auf `overview` zurück oder gehe direkt zum nächsten Ort — bis alle verlangt wurden, statt nur eine Liste vorzulesen. Für 5 bis 20 Orte im Chat zeige einen Ort vollständig und sage klar: „Für eine Führung mit vielen Stationen nutze den Realtime-Modus, dort ist die Tour flüssig gesprochen“; im Realtime-Modus gelte die Detailregel mit sichtbarem Kameraflug und Erklärung erst danach."""
+Wenn nach mehreren Sehenswürdigkeiten gefragt wird (z. B. 5 Sehenswürdigkeiten einer Stadt), rufe je Ort \
+`control_region_camera` mit `focus_location` und dem genauen Namen samt Stadt auf. Nenne im Chat sowie im Realtime-Modus \
+alle Sehenswürdigkeiten mit ihren zwei bis vier wichtigsten, belegten Fakten. Im Chat erscheinen alle Sehenswürdigkeiten \
+sofort mit ihren Fakten und Markierungen, im Realtime-Modus wird die Tour direkt flüssig gesprochen. Auf jeder Sehenswürdigkeit \
+verweilt die Kamera 10 Sekunden, bevor sie zur nächsten Station übergeht. Jede Sehenswürdigkeit erhält eine dauerhafte \
+Markierung auf der Karte, die während der gesamten Tour und Sitzung bestehen bleibt."""
 
 
 # Hier stand einmal ein einziger Satz ohne Aufzaehlung, und danach eine

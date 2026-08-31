@@ -7,6 +7,7 @@ import {
   aiApi,
   type AiAttachment,
   type AiContextStatus,
+  type AiGeoCameraCommand,
   type AiProviderAvailable,
   type AiRegionalAnalysis,
   type AiRunInfo,
@@ -404,8 +405,13 @@ export function AiChat() {
     wasAnalyzingRegionRef.current = isAnalyzing
   }, [laufendeWerkzeuge])
 
-  // Aktualisiert geoData aus der jüngsten Analyse im Verlauf
+  // Aktualisiert geoData aus der jüngsten Analyse und allen nachfolgenden Kamerabefehlen im Verlauf
   useEffect(() => {
+    let latestAnalysis: AiRegionalAnalysis | null = null
+    let latestAnalysisGeoId = ''
+    let analysisMsgIdx = -1
+    let analysisSecIdx = -1
+
     for (let i = entries.length - 1; i >= 0; i--) {
       const entry = entries[i]
       if (entry.kind === 'message' && entry.message.sections) {
@@ -417,49 +423,64 @@ export function AiChat() {
             section.werkzeug.geo_analysis
           ) {
             const geo = normalizeRegionalAnalysis(section.werkzeug.geo_analysis)
-            if (!geo) continue
-            const geoId = geo.camera?.command_id || `${entry.message.id}:${j}`
-
-            // Nur automatisch öffnen, wenn dies eine NEUE Analyse ist und der Nutzer nicht manuell geschlossen hat
-            if (lastSeenGeoIdRef.current !== geoId) {
-              lastSeenGeoIdRef.current = geoId
-              setGeoData(geo)
-              if (!manuallyClosedGeoRef.current && closedGeoIdRef.current !== geoId) {
-                setGeoOpen(true)
-              }
-            } else if (!manuallyClosedGeoRef.current && closedGeoIdRef.current !== geoId) {
-              setGeoOpen(true)
+            if (geo) {
+              latestAnalysis = geo
+              latestAnalysisGeoId = geo.camera?.command_id || `${entry.message.id}:${j}`
+              analysisMsgIdx = i
+              analysisSecIdx = j
+              break
             }
-            return
+          }
+        }
+        if (latestAnalysis) break
+      }
+    }
+
+    if (!latestAnalysis) return
+
+    let combinedGeo = latestAnalysis
+    let latestCameraCommand: AiGeoCameraCommand | null = null
+
+    for (let i = Math.max(0, analysisMsgIdx); i < entries.length; i++) {
+      const entry = entries[i]
+      if (entry.kind === 'message' && entry.message.sections) {
+        const startJ = i === analysisMsgIdx ? analysisSecIdx + 1 : 0
+        for (let j = startJ; j < entry.message.sections.length; j++) {
+          const section = entry.message.sections[j]
+          if (
+            section.art === 'tool' &&
+            section.werkzeug?.tool_name === 'control_region_camera' &&
+            section.werkzeug.geo_camera
+          ) {
+            const command = normalizeGeoCameraCommand(section.werkzeug.geo_camera)
+            if (command) {
+              combinedGeo = applyGeoCameraCommand(combinedGeo, command) ?? combinedGeo
+              latestCameraCommand = command
+            }
           }
         }
       }
     }
-  }, [entries])
 
-  // Ein reiner Kamerabefehl verändert die vorhandene Analyse. Er ersetzt sie
-  // nicht und löst insbesondere keinen zweiten Datenabruf aus.
-  useEffect(() => {
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const entry = entries[i]
-      if (entry.kind !== 'message' || !entry.message.sections) continue
-      for (let j = entry.message.sections.length - 1; j >= 0; j--) {
-        const section = entry.message.sections[j]
-        if (section.art !== 'tool') continue
-        if (section.werkzeug?.tool_name === 'analyze_region') return
-        if (section.werkzeug?.tool_name !== 'control_region_camera') continue
-        const command = normalizeGeoCameraCommand(section.werkzeug.geo_camera)
-        if (!command || command.command_id === lastSeenCameraCommandRef.current || !geoData) return
-        lastSeenCameraCommandRef.current = command.command_id
-        lastSeenGeoIdRef.current = command.command_id
-        setGeoData((current) => applyGeoCameraCommand(current, command))
-        const wasClosed = closedGeoIdRef.current === command.command_id
-        manuallyClosedGeoRef.current = wasClosed
-        setGeoOpen(!wasClosed)
-        return
+    const currentGeoId = latestCameraCommand?.command_id || latestAnalysisGeoId
+
+    if (lastSeenGeoIdRef.current !== currentGeoId) {
+      lastSeenGeoIdRef.current = currentGeoId
+      if (latestCameraCommand) {
+        lastSeenCameraCommandRef.current = latestCameraCommand.command_id
       }
+      setGeoData(combinedGeo)
+      const wasClosed = closedGeoIdRef.current === currentGeoId
+      if (!manuallyClosedGeoRef.current && !wasClosed) {
+        setGeoOpen(true)
+      } else if (latestCameraCommand && !wasClosed) {
+        manuallyClosedGeoRef.current = false
+        setGeoOpen(true)
+      }
+    } else {
+      setGeoData(combinedGeo)
     }
-  }, [entries, geoData])
+  }, [entries])
 
   const newsFromSearch = useMemo<NewsItem[]>(() => {
     if (!geoData?.location) return []

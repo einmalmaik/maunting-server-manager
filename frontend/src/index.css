@@ -382,3 +382,20 @@
   animation: calendar-slide-right 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* MapLibre Sight Tooltip Popup Styling (Design DNA) */
+.msm-sight-popup.maplibregl-popup {
+  z-index: 30;
+  pointer-events: none;
+}
+
+.msm-sight-popup .maplibregl-popup-content {
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0.75rem !important;
+}
+
+.msm-sight-popup .maplibregl-popup-tip {
+  display: none !important;
+}
+

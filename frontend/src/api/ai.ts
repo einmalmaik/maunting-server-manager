@@ -478,6 +478,13 @@ export interface AiRegionalAnalysis {
     action?: 'zoom_in' | 'zoom_out' | 'overview' | 'focus_location'
     command_id?: string
   }
+  sights?: Array<{
+    latitude: number
+    longitude: number
+    name: string
+    summary?: string
+    commandId: string
+  }>
 }
 
 export interface AiGeoCameraCommand {

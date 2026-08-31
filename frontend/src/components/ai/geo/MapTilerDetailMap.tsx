@@ -49,6 +49,8 @@ function isManualMapEvent(value: unknown): boolean {
  * Optionale, hochaufgeloeste Detailkarte. Sie wird nur geladen, nachdem der
  * Betreiber einen origin-beschraenkten MapTiler-Browser-Key eingerichtet hat.
  */
+const SIGHT_DWELL_MS = 10_000
+
 export function MapTilerDetailMap({
   latitude,
   longitude,
@@ -71,6 +73,8 @@ export function MapTilerDetailMap({
   const lastCommandRef = useRef<string | null>(null)
   const manualCameraControlRef = useRef(false)
   const dwellUntilRef = useRef<number>(0)
+  const tourTimerRef = useRef<number | null>(null)
+  const processedSightCommandsRef = useRef<Set<string>>(new Set())
   const pendingQueueRef = useRef<Array<{ latitude: number; longitude: number; locationName: string; command: string; target: string; zoom: number }>>([])
   const latestViewRef = useRef({ latitude, longitude, zoom })
   const onUnavailableRef = useRef(onUnavailable)
@@ -178,6 +182,10 @@ export function MapTilerDetailMap({
     void initialise().catch(unavailable)
     return () => {
       disposed = true
+      if (tourTimerRef.current) {
+        window.clearTimeout(tourTimerRef.current)
+        tourTimerRef.current = null
+      }
       markerRef.current = null
       mapRef.current?.remove()
       mapRef.current = null
@@ -199,10 +207,22 @@ export function MapTilerDetailMap({
         const el = document.createElement('div')
         el.setAttribute('role', 'button')
         el.setAttribute('aria-label', s.name)
-        el.title = s.summary ? `${s.name} — ${s.summary}` : s.name
-        el.style.cssText = 'width:16px;height:16px;border-radius:50%;background:#38bdf8;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35);cursor:pointer'
-        const popupHtml = `<div class="rounded-xl border border-outline-variant/30 bg-surface-container-high px-3 py-2 text-xs font-medium leading-tight text-on-surface shadow-lg">${s.summary ? `${escapeHtml(s.name)}<br><span class="text-[11px] font-normal text-on-surface-variant">${escapeHtml(s.summary)}</span>` : escapeHtml(s.name)}</div>`
-        const popup = new Popup({ offset: 14, closeButton: false, className: 'msm-sight-popup', maxWidth: '260px' }).setHTML(popupHtml)
+        // Kein el.title, um den nativen Browser-Tooltip zu verhindern
+        el.className = 'msm-sight-marker'
+        el.style.cssText =
+          'width:18px;height:18px;border-radius:50%;background:#38bdf8;border:2px solid #ffffff;box-shadow:0 0 10px rgba(56,189,248,0.8),0 2px 8px rgba(0,0,0,0.4);cursor:pointer;transition:transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),box-shadow 0.2s ease;'
+
+        el.addEventListener('mouseenter', () => {
+          el.style.transform = 'scale(1.3)'
+          el.style.boxShadow = '0 0 18px rgba(56,189,248,1), 0 4px 12px rgba(0,0,0,0.5)'
+        })
+        el.addEventListener('mouseleave', () => {
+          el.style.transform = 'scale(1)'
+          el.style.boxShadow = '0 0 10px rgba(56,189,248,0.8),0 2px 8px rgba(0,0,0,0.4)'
+        })
+
+        const popupHtml = `<div class="pointer-events-none rounded-xl border border-outline-variant/60 bg-surface-container-high/95 px-3.5 py-2 text-xs font-medium leading-tight text-on-surface shadow-2xl backdrop-blur-md"><div class="flex items-center gap-1.5 font-semibold text-primary"><span class="inline-block h-2 w-2 shrink-0 rounded-full bg-primary animate-pulse"></span><span>${escapeHtml(s.name)}</span></div>${s.summary ? `<div class="mt-1 text-[11px] font-normal text-on-surface-variant leading-snug">${escapeHtml(s.summary)}</div>` : ''}</div>`
+        const popup = new Popup({ offset: 14, closeButton: false, className: 'msm-sight-popup', maxWidth: '280px' }).setHTML(popupHtml)
         const m = new Marker({ element: el }).setLngLat([s.longitude, s.latitude]).addTo(map)
         el.addEventListener('mouseenter', () => m.setPopup(popup).addTo(map))
         el.addEventListener('mouseleave', () => m.getPopup()?.remove())
@@ -219,6 +239,59 @@ export function MapTilerDetailMap({
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
+
+    const processQueue = () => {
+      const currentMap = mapRef.current
+      if (!currentMap) return
+      const p = pendingQueueRef.current.shift()
+      if (!p) return
+
+      if (lastCommandRef.current !== p.command) {
+        lastCommandRef.current = p.command
+        lastTargetRef.current = p.target
+        manualCameraControlRef.current = false
+        markerRef.current?.setLngLat([p.longitude, p.latitude])
+        const cz = currentMap.getZoom()
+        const nz = Math.min(MAX_AI_ZOOM, Math.max(LANDMARK_ZOOM, cz))
+        currentMap.stop()
+        currentMap.flyTo({ center: [p.longitude, p.latitude], zoom: nz, duration: CAMERA_DURATION_MS })
+        dwellUntilRef.current = Date.now() + SIGHT_DWELL_MS
+      }
+
+      if (pendingQueueRef.current.length > 0) {
+        if (tourTimerRef.current) window.clearTimeout(tourTimerRef.current)
+        tourTimerRef.current = window.setTimeout(processQueue, SIGHT_DWELL_MS)
+      }
+    }
+
+    // Falls sights übergeben wurden, alle neuen Stationen in die Tour einreihen
+    if (sights && sights.length > 0) {
+      let addedToTour = false
+      for (const s of sights) {
+        if (!processedSightCommandsRef.current.has(s.commandId)) {
+          processedSightCommandsRef.current.add(s.commandId)
+          const sightCmd = `id:${s.commandId}`
+          const sightTarget = `${s.longitude}:${s.latitude}`
+          if (sightCmd !== lastCommandRef.current) {
+            pendingQueueRef.current.push({
+              latitude: s.latitude,
+              longitude: s.longitude,
+              locationName: s.name,
+              command: sightCmd,
+              target: sightTarget,
+              zoom: LANDMARK_ZOOM,
+            })
+            addedToTour = true
+          }
+        }
+      }
+
+      if (addedToTour && pendingQueueRef.current.length > 0 && Date.now() >= dwellUntilRef.current) {
+        processQueue()
+        return
+      }
+    }
+
     const target = `${longitude}:${latitude}`
     const command = cameraCommandId
       ? `id:${cameraCommandId}`
@@ -233,24 +306,9 @@ export function MapTilerDetailMap({
     if (cameraAction === 'focus_location' && now < dwellUntilRef.current) {
       const delay = dwellUntilRef.current - now
       pendingQueueRef.current.push({ latitude, longitude, locationName, command, target, zoom })
-      if (pendingQueueRef.current.length === 1) {
-        window.setTimeout(function processQueue() {
-          const p = pendingQueueRef.current.shift()
-          if (!p) return
-          if (lastCommandRef.current !== p.command) {
-            lastCommandRef.current = p.command
-            lastTargetRef.current = p.target
-            markerRef.current?.setLngLat([p.longitude, p.latitude])
-            const cz = map.getZoom()
-            const nz = Math.min(MAX_AI_ZOOM, Math.max(LANDMARK_ZOOM, cz))
-            map.stop()
-            map.flyTo({ center: [p.longitude, p.latitude], zoom: nz, duration: CAMERA_DURATION_MS })
-            dwellUntilRef.current = Date.now() + 8000
-          }
-          if (pendingQueueRef.current.length > 0) {
-            window.setTimeout(processQueue, 8000)
-          }
-        }, delay)
+      if (!tourTimerRef.current || pendingQueueRef.current.length === 1) {
+        if (tourTimerRef.current) window.clearTimeout(tourTimerRef.current)
+        tourTimerRef.current = window.setTimeout(processQueue, delay)
       }
       return
     }
@@ -260,7 +318,7 @@ export function MapTilerDetailMap({
     let nextZoom = focusZoom
     if (cameraAction === 'focus_location') {
       nextZoom = Math.min(MAX_AI_ZOOM, Math.max(LANDMARK_ZOOM, currentZoom))
-      dwellUntilRef.current = Date.now() + 8000
+      dwellUntilRef.current = Date.now() + SIGHT_DWELL_MS
     } else if (cameraAction === 'zoom_in' || cameraMode === 'detail') {
       nextZoom = Math.min(MAX_AI_ZOOM, Math.max(DETAIL_ZOOM, currentZoom + 4))
     } else if (cameraAction === 'zoom_out') {
@@ -269,6 +327,10 @@ export function MapTilerDetailMap({
       nextZoom = 1.2
       dwellUntilRef.current = 0
       pendingQueueRef.current = []
+      if (tourTimerRef.current) {
+        window.clearTimeout(tourTimerRef.current)
+        tourTimerRef.current = null
+      }
     } else if (sameTarget) {
       nextZoom = Math.max(currentZoom, focusZoom)
     }

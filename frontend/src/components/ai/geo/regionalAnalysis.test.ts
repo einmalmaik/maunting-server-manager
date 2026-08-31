@@ -124,8 +124,30 @@ describe('normalizeRegionalAnalysis', () => {
       country: 'China',
       coordinates: { latitude: 39.9163, longitude: 116.3972 },
       camera: { mode: 'detail', action: 'focus_location', command_id: 'landmark-1' },
+      sights: [
+        {
+          latitude: 39.9163,
+          longitude: 116.3972,
+          name: 'Verbotene Stadt, Peking',
+          commandId: 'landmark-1',
+        },
+      ],
     })
     expect(changed?.weather).toBe(analysis?.weather)
     expect(changed?.news).toBe(analysis?.news)
+
+    const secondSight = applyGeoCameraCommand(changed, {
+      action: 'focus_location',
+      command_id: 'landmark-2',
+      location: 'Sommerpalast, Peking',
+      country: 'China',
+      coordinates: { latitude: 39.9998, longitude: 116.2755 },
+    })
+
+    expect(secondSight?.sights).toHaveLength(2)
+    expect(secondSight?.sights?.[1]).toMatchObject({
+      name: 'Sommerpalast, Peking',
+      commandId: 'landmark-2',
+    })
   })
 })

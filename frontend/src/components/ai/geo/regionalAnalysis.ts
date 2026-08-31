@@ -190,6 +190,21 @@ function normalizePublicPosts(value: unknown): AiRegionalAnalysis['public_posts'
   return { status: value.status, reddit, bluesky, untrusted: true }
 }
 
+function normalizeSights(value: unknown): AiRegionalAnalysis['sights'] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const items = value.flatMap((entry) => {
+    if (!isRecord(entry)) return []
+    const lat = finiteNumber(entry.latitude)
+    const lon = finiteNumber(entry.longitude)
+    const name = text(entry.name)
+    const commandId = text(entry.commandId || entry.command_id)
+    const summary = text(entry.summary) || undefined
+    if (lat === null || lon === null || !name || !commandId) return []
+    return [{ latitude: lat, longitude: lon, name, summary, commandId }]
+  })
+  return items.length > 0 ? items : undefined
+}
+
 /**
  * Normalisiert die WebSocket-Nutzlast, bevor sie in die Kartenansicht gelangt.
  * Alte Brückenformen (`region`, `lat`, `lon`) bleiben lesbar, aber ungültige
@@ -240,6 +255,7 @@ export function normalizeRegionalAnalysis(value: unknown): AiRegionalAnalysis | 
           command_id: cameraCommandId || undefined,
         }
       : undefined,
+    sights: normalizeSights(value.sights),
   }
 }
 
@@ -288,8 +304,30 @@ export function applyGeoCameraCommand(
 ): AiRegionalAnalysis | null {
   const command = normalizeGeoCameraCommand(value)
   if (!analysis || !command) return analysis
+
+  let sights = analysis.sights ? [...analysis.sights] : []
+  if (command.action === 'focus_location' && command.coordinates && command.location) {
+    const newSight = {
+      latitude: command.coordinates.latitude,
+      longitude: command.coordinates.longitude,
+      name: command.location,
+      commandId: command.command_id,
+    }
+    const alreadyExists = sights.some(
+      (s) =>
+        s.commandId === newSight.commandId ||
+        (s.name.toLowerCase() === newSight.name.toLowerCase() &&
+          Math.abs(s.latitude - newSight.latitude) < 0.0001 &&
+          Math.abs(s.longitude - newSight.longitude) < 0.0001),
+    )
+    if (!alreadyExists) {
+      sights.push(newSight)
+    }
+  }
+
   return {
     ...analysis,
+    sights: sights.length > 0 ? sights : undefined,
     ...(command.action === 'focus_location' && command.coordinates
       ? {
           location: command.location ?? analysis.location,

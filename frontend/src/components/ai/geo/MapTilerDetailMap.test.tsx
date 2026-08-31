@@ -5,6 +5,7 @@ const mapHarness = vi.hoisted(() => ({
   configs: [] as Array<{ center: [number, number]; zoom: number }>,
   flyTos: [] as Array<{ center: [number, number]; zoom: number; duration: number }>,
   markerTargets: [] as Array<[number, number]>,
+  markerElements: [] as HTMLElement[],
   dragPanEnables: 0,
   scrollZoomEnables: 0,
   touchZoomEnables: 0,
@@ -52,14 +53,29 @@ vi.mock('maplibre-gl', () => {
   }
 
   class Marker {
+    element?: HTMLElement
+    constructor(options?: { element?: HTMLElement; color?: string }) {
+      if (options?.element) {
+        this.element = options.element
+        mapHarness.markerElements.push(options.element)
+      }
+    }
     setLngLat(target: [number, number]) {
       mapHarness.markerTargets.push(target)
       return this
     }
     addTo() { return this }
+    remove() {}
+    setPopup() { return this }
+    getPopup() { return null }
+    togglePopup() {}
   }
 
-  return { Map, Marker }
+  class Popup {
+    setHTML() { return this }
+  }
+
+  return { Map, Marker, Popup }
 })
 
 import { MapTilerDetailMap } from './MapTilerDetailMap'
@@ -70,6 +86,7 @@ describe('MapTilerDetailMap', () => {
     mapHarness.configs.length = 0
     mapHarness.flyTos.length = 0
     mapHarness.markerTargets.length = 0
+    mapHarness.markerElements.length = 0
     mapHarness.dragPanEnables = 0
     mapHarness.scrollZoomEnables = 0
     mapHarness.touchZoomEnables = 0
@@ -378,5 +395,35 @@ describe('MapTilerDetailMap', () => {
     )
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mapHarness.flyTos).toHaveLength(2)
+  })
+
+  it('platziert Marker für alle übergebenen Sehenswürdigkeiten ohne nativen Tooltip', async () => {
+    mapHarness.getMapTilerMapConfig.mockResolvedValue({
+      configured: true,
+      style_url: 'https://maps.example.test/style.json',
+    })
+
+    const sights = [
+      { latitude: 52.5163, longitude: 13.3777, name: 'Brandenburger Tor', commandId: 'sight-1' },
+      { latitude: 52.5186, longitude: 13.3762, name: 'Reichstag', commandId: 'sight-2' },
+      { latitude: 52.5208, longitude: 13.4094, name: 'Fernsehturm', commandId: 'sight-3' },
+    ]
+
+    render(
+      <MapTilerDetailMap
+        latitude={52.52}
+        longitude={13.405}
+        locationName="Berlin"
+        globe
+        sights={sights}
+        onUnavailable={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(mapHarness.markerElements).toHaveLength(3))
+    for (const el of mapHarness.markerElements) {
+      expect(el.getAttribute('title')).toBeNull()
+      expect(el.classList.contains('msm-sight-marker')).toBe(true)
+    }
   })
 })

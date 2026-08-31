@@ -78,7 +78,9 @@ export function GlobeViewer({
   useEffect(() => {
     if (!data?.coordinates) return
     const key = `${data.location}:${data.coordinates.latitude}:${data.coordinates.longitude}`
-    if (data.camera?.action === 'focus_location' && data.camera?.command_id) {
+    if (data.sights && data.sights.length > 0) {
+      setSights(data.sights)
+    } else if (data.camera?.action === 'focus_location' && data.camera?.command_id) {
       const name = data.location ?? resolvedLocation
       setSights((prev) => {
         if (prev.some((s) => s.commandId === data.camera!.command_id)) return prev
