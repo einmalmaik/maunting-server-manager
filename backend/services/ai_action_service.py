@@ -1000,7 +1000,7 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_cloudflare_dns_record",
-            "Legt einen Cloudflare DNS Record, DNS-Eintrag oder eine Subdomain an (A/CNAME, Test-Eintrag). Immer bestaetigungspflichtig. Vorher cloudflare_list_zones aufrufen um zone_id zu ermitteln, Kollision pruefen. Name als Subdomain {game}-{slug}.{zone}, Inhalt ist Server-IP/Target.",
+            "Legt einen Cloudflare DNS Record, DNS-Eintrag oder eine Subdomain an (A/CNAME, Test-Eintrag). Vorher cloudflare_list_zones aufrufen um zone_id zu ermitteln, Kollision pruefen. Name als Subdomain {game}-{slug}.{zone}, Inhalt ist Server-IP/Target.",
             {
                 "zone_id": {"type": "string", "maxLength": 64},
                 "name": {"type": "string", "maxLength": 253},
@@ -1010,6 +1010,16 @@ def _global_tool_definitions() -> list[dict]:
                 **_RATIONALE_SCHEMA,
             },
             ["zone_id", "name", "rtype", "content", *_RATIONALE_REQUIRED],
+        ),
+        _function(
+            "propose_cloudflare_dns_delete",
+            "Loescht einen Cloudflare DNS Record / Eintrag anhand seiner record_id oder seines Namens/Subdomain (z.B. 'test.mauntingstudios.de').",
+            {
+                "record_id": {"type": "string", "maxLength": 253, "description": "Hex-ID oder Hostname/Subdomain des DNS-Records"},
+                "zone_id": {"type": "string", "maxLength": 64, "description": "Optional: Zonen-ID oder Domain"},
+                **_RATIONALE_SCHEMA,
+            },
+            ["record_id", *_RATIONALE_REQUIRED],
         ),
         _function(
             "propose_modpack_install",

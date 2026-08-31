@@ -648,7 +648,7 @@ Einkaufslisten, Supermärkte oder Lebensmittel-Besorgungen aufgerufen werden."""
 CLOUDFLARE = """\
 Cloudflare DNS & Domains: Nutze für Domain- und DNS-Verwaltung immer die \
 integrierten Werkzeuge (`cloudflare_list_zones`, `cloudflare_list_dns_records`, \
-`propose_cloudflare_dns_record`). \
+`propose_cloudflare_dns_record`, `propose_cloudflare_dns_delete`). \
 Behaupte NIEMALS, du hättest in dieser Sitzung keine Cloudflare- oder DNS-Werkzeuge \
 zur Verfügung oder dir fehle der Aufruf, wenn Cloudflare im Panel konfiguriert ist. \
 1. Sofort abrufen statt nachfragen: Wenn der Benutzer nach Domains, Zonen, Subdomains \
@@ -659,8 +659,10 @@ zu erfragen oder zu zögern. \
 gewünscht (z. B. bei Servererstellung oder Testauftrag), ermittle still die `zone_id`, \
 prüfe mit `cloudflare_list_dns_records` auf Kollisionen und setze direkt einen \
 `propose_cloudflare_dns_record` ab (Standard: Subdomain `{game}-{name}` bzw. `test`, \
-Typ `A` oder `CNAME` mit Server- oder Test-IP). Das Anlegen eines DNS-Records \
-(`propose_cloudflare_dns_record`) ist immer bestätigungspflichtig."""
+Typ `A` oder `CNAME` mit Server- oder Test-IP). \
+3. Löschen von DNS-Einträgen: Wird das Löschen eines DNS-Records verlangt, nutze \
+`propose_cloudflare_dns_delete` mit der `record_id` oder dem Namen des Eintrags (z. B. `test.mauntingstudios.de`). \
+Nutze dafür NIEMALS Server-Lifecycle-Werkzeuge wie `execute_server_action`."""
 
 
 

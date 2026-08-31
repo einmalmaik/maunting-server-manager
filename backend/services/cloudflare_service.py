@@ -156,8 +156,25 @@ async def delete_dns_record(zone_id: str | None, record_id: str) -> bool:
         raise CloudflareApiUnavailable("cloudflare_api_token_missing")
     resolved_id = await _resolve_zone_id(zone_id)
     record_id = str(record_id).strip().replace("\n", "").replace("\r", "")
+
+    # Falls record_id keine 32-Zeichen-Hex-ID ist (sondern ein Name wie test.mauntingstudios.de oder test), auflösen
+    if len(record_id) != 32 or "." in record_id or not all(c in "0123456789abcdefABCDEF" for c in record_id):
+        existing = await list_dns_records(resolved_id)
+        target_name = record_id.lower()
+        matched_id = None
+        for r in existing:
+            r_name = str(r.get("name", "")).lower()
+            if r_name == target_name or r_name.startswith(target_name + ".") or str(r.get("id", "")).lower() == target_name:
+                matched_id = str(r.get("id"))
+                break
+        if matched_id:
+            record_id = matched_id
+        else:
+            raise CloudflareApiUnavailable(f"dns_record_not_found: {record_id}")
+
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.delete(f"{API_BASE}/zones/{resolved_id}/dns_records/{record_id}", headers=_headers(key))
         _raise_if_auth(resp)
         resp.raise_for_status()
         return True
+

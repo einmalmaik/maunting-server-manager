@@ -22,6 +22,7 @@ HOTSET = frozenset({
     "cloudflare_list_zones",
     "cloudflare_list_dns_records",
     "propose_cloudflare_dns_record",
+    "propose_cloudflare_dns_delete",
     "search_curseforge_modpacks",
     "advise_node_placement",
 })

@@ -692,7 +692,12 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "propose_cloudflare_dns_record": Werkzeug(
         "global_write",
         gruppe="domains",
-        immer_bestaetigen=True,
+        recht="cloudflare.manage",
+        recht_global=True,
+    ),
+    "propose_cloudflare_dns_delete": Werkzeug(
+        "global_write",
+        gruppe="domains",
         recht="cloudflare.manage",
         recht_global=True,
     ),
@@ -846,10 +851,8 @@ CALENDAR_TOOLS = _mit_gruppe("calendar")
 POPUP_TOOLS = _mit_gruppe("popup")
 TASK_TOOLS = _mit_gruppe("tasks")
 NOTES_TOOLS = _mit_gruppe("notes")
-DOMAIN_TOOLS = _mit_gruppe("domains")
-MOD_TOOLS = _mit_gruppe("mods")
 CHAT_INTERACTION_TOOLS = (
-    MAIL_TOOLS | CALENDAR_TOOLS | POPUP_TOOLS | TASK_TOOLS | NOTES_TOOLS | DOMAIN_TOOLS | MOD_TOOLS
+    MAIL_TOOLS | CALENDAR_TOOLS | POPUP_TOOLS | TASK_TOOLS | NOTES_TOOLS
 )
 ASK_TOOLS = _mit_art("ask")
 DELEGATION_TOOLS = _mit_art("delegation")

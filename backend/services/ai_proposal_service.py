@@ -2095,6 +2095,23 @@ def _cloudflare_dns_payload(rest: dict) -> tuple[dict, dict]:
     return payload, preview
 
 
+def _cloudflare_dns_delete_payload(rest: dict) -> tuple[dict, dict]:
+    allowed = {"zone_id", "record_id", "record_name", "name"}
+    if set(rest) - allowed:
+        raise AiActionValidationError("Cloudflare DNS Delete hat ungueltige Argumente")
+    zone_id = str(rest.get("zone_id", "")).strip()
+    record_id = str(rest.get("record_id", "") or rest.get("record_name", "") or rest.get("name", "")).strip()
+    if not record_id:
+        raise AiActionValidationError("record_id oder Record-Name erforderlich")
+    if not zone_id:
+        from services.panel_settings_service import PanelSettingsService
+        zone_id = PanelSettingsService.get("cloudflare_default_zone", "")
+    payload = {"zone_id": zone_id, "record_id": record_id}
+    preview = {"operation": "cloudflare_dns_delete", "zone_id": zone_id, "record_id": record_id}
+    return payload, preview
+
+
+
 def _modpack_install_payload(db: Session, server: Server, rest: dict) -> tuple[dict, dict]:
     allowed = {"modpack_mod_id", "file_id"}
     if set(rest) - allowed:
@@ -2401,6 +2418,9 @@ _GLOBALE_PAYLOADS: dict = {
     ),
     "propose_cloudflare_dns_record": lambda db, user, rest, arguments, guardian: (
         _cloudflare_dns_payload(rest)
+    ),
+    "propose_cloudflare_dns_delete": lambda db, user, rest, arguments, guardian: (
+        _cloudflare_dns_delete_payload(rest)
     ),
 }
 
@@ -4148,6 +4168,28 @@ def _ausfuehren_cloudflare_dns(db: Session, rahmen: _AusfuehrungsRahmen) -> _Aus
     return _Ausgefuehrt(result=res if isinstance(res, dict) else {"result": res})
 
 
+def _ausfuehren_cloudflare_dns_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    import asyncio as _aio, concurrent.futures
+
+    p = rahmen.payload
+
+    def _run():
+        from services.cloudflare_service import delete_dns_record
+
+        async def _inner():
+            return await delete_dns_record(p.get("zone_id"), p["record_id"])
+
+        try:
+            return _aio.run(_inner())
+        except RuntimeError:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                return ex.submit(lambda: _aio.run(_inner())).result(timeout=15)
+
+    res = _run()
+    return _Ausgefuehrt(result={"deleted": bool(res), "record_id": p["record_id"]})
+
+
+
 def _ausfuehren_modpack_install(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     p = rahmen.payload
     return _Ausgefuehrt(result={"modpack_mod_id": p.get("modpack_mod_id"), "file_id": p.get("file_id"), "server_id": rahmen.server_id, "status": "queued", "note": "Modpack-Install wird im Hintergrund via CurseForge verarbeitet"})
@@ -4229,6 +4271,7 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_note_delete": _ausfuehren_note_delete,
     "propose_popup_create": _ausfuehren_popup_create,
     "propose_cloudflare_dns_record": _ausfuehren_cloudflare_dns,
+    "propose_cloudflare_dns_delete": _ausfuehren_cloudflare_dns_delete,
     "propose_modpack_install": _ausfuehren_modpack_install,
     "worker_start": _ausfuehren_worker_start,
     "worker_cancel": _ausfuehren_worker_cancel,
