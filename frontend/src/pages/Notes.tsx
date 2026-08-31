@@ -20,7 +20,6 @@ import remarkGfm from 'remark-gfm'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
-import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Dropdown, type DropdownOption } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { Switch } from '@/components/ui/Switch'
@@ -350,33 +349,61 @@ export function Notes() {
   }))
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title={t('notes.title', 'Notizen & Listen')}
-        description={t('notes.subtitle', 'Persönliche und geteilte Notizen, Checklisten, Einkaufslisten und KI-Diktate')}
-        actions={
-          <Button onClick={openCreateModal}>
-            <Plus className="w-4 h-4 mr-1.5" />
-            {t('notes.newNote', 'Neue Notiz')}
-          </Button>
-        }
-      />
+    <div className="space-y-3.5">
+      {/* ── Kopfzeile: Titel, Zähler & Erstellen ── */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center text-primary shadow-xs shrink-0">
+            <StickyNote className="w-4 h-4" />
+          </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <h2 className="font-headline text-base sm:text-lg font-bold text-on-surface tracking-tight truncate">
+              {t('notes.title', 'Notizen & Listen')}
+            </h2>
+            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/30 shrink-0">
+              {filteredNotes.length}
+            </span>
+          </div>
+        </div>
 
-      {/* Filter & Toolbar */}
-      <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between bg-surface-container-low border border-outline-variant/30 rounded-2xl p-3">
-        <div className="relative flex-1 min-w-[200px]">
+        <Button
+          onClick={openCreateModal}
+          size="sm"
+          className="h-8.5 px-3 sm:px-3.5 rounded-xl flex items-center gap-1.5 font-medium shadow-sm shrink-0"
+        >
+          <Plus className="w-4 h-4" />
+          <span className="hidden sm:inline">{t('notes.newNote', 'Neue Notiz')}</span>
+          <span className="sm:hidden">{t('notes.newNoteShort', 'Neu')}</span>
+        </Button>
+      </div>
+
+      {/* ── Werkzeugleiste: Suche & Filter ── */}
+      <div className="flex flex-col gap-2.5 bg-surface-container-low/80 border border-outline-variant/30 rounded-2xl p-2.5 sm:p-3 shadow-sm backdrop-blur-sm">
+        {/* Suche */}
+        <div className="relative w-full">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t('notes.searchPlaceholder', 'Notizen oder Inhalte durchsuchen...')}
-            className="w-full bg-surface-container border border-outline-variant/40 rounded-xl pl-9 pr-3.5 py-2 text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:border-primary transition-colors"
+            className="w-full bg-surface-container border border-outline-variant/40 rounded-xl pl-9 pr-8 py-2 text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:border-primary transition-colors"
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-on-surface-variant hover:text-on-surface rounded-lg"
+              aria-label={t('common.clear', 'Löschen')}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
-        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-          <div className="w-full sm:w-48">
+        {/* Untere Leiste: Filter */}
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
+          <div className="w-36 sm:w-44 shrink-0">
             <Dropdown
               value={selectedCategory}
               onChange={setSelectedCategory}
@@ -385,7 +412,7 @@ export function Notes() {
             />
           </div>
 
-          <div className="w-full sm:w-44">
+          <div className="w-32 sm:w-40 shrink-0">
             <Dropdown
               value={selectedType}
               onChange={setSelectedType}
@@ -397,52 +424,50 @@ export function Notes() {
           <button
             type="button"
             onClick={() => setShowArchived(!showArchived)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border transition-colors whitespace-nowrap ${
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl border transition-colors whitespace-nowrap shrink-0 ${
               showArchived
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 font-semibold'
                 : 'bg-surface-container text-on-surface-variant border-outline-variant/30 hover:text-on-surface'
             }`}
           >
             <Archive className="w-3.5 h-3.5" />
-            {showArchived ? t('notes.archivedView', 'Archiviert') : t('notes.activeView', 'Aktiv')}
+            <span>{showArchived ? t('notes.archivedView', 'Archiviert') : t('notes.activeView', 'Aktiv')}</span>
           </button>
         </div>
       </div>
 
       {/* Grid of Notes */}
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <div
               key={i}
-              className="h-48 rounded-2xl bg-surface-container-low border border-outline-variant/20 animate-pulse"
+              className="h-44 rounded-2xl bg-surface-container-low border border-outline-variant/20 animate-pulse"
             />
           ))}
         </div>
       ) : filteredNotes.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 px-4 bg-surface-container-low border border-outline-variant/20 rounded-2xl text-center">
-          <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-4">
-            <StickyNote className="w-7 h-7" />
+        <div className="flex flex-col items-center justify-center py-12 px-4 bg-surface-container-low/60 border border-outline-variant/20 rounded-2xl text-center">
+          <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-3">
+            <StickyNote className="w-6 h-6" />
           </div>
-          <h3 className="font-headline text-lg font-semibold text-on-surface mb-1">
+          <h3 className="font-headline text-base font-semibold text-on-surface mb-1">
             {showArchived
               ? t('notes.emptyArchivedTitle', 'Keine archivierten Notizen')
+              : searchQuery
+              ? t('notes.emptySearch', 'Keine passenden Notizen gefunden.')
               : t('notes.emptyTitle', 'Noch keine Notizen vorhanden')}
           </h3>
-          <p className="text-sm text-on-surface-variant max-w-md mb-5">
+          <p className="text-xs text-on-surface-variant max-w-sm">
             {showArchived
               ? t('notes.emptyArchivedDesc', 'Archivierte Notizen werden hier angezeigt.')
+              : searchQuery
+              ? t('notes.emptySearchDesc', 'Passe deine Suchbegriffe oder Filter an.')
               : t('notes.emptyDesc', 'Erstelle deine erste Notiz, Einkaufsliste oder diktiere per KI.')}
           </p>
-          {!showArchived && (
-            <Button onClick={openCreateModal}>
-              <Plus className="w-4 h-4 mr-1.5" />
-              {t('notes.newNote', 'Notiz erstellen')}
-            </Button>
-          )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
           {filteredNotes.map((note) => {
             const theme = getColorTheme(note.color)
             const lines = (note.content || '').split('\n')
@@ -452,13 +477,13 @@ export function Notes() {
               <div
                 key={note.id}
                 onClick={() => openEditModal(note)}
-                className={`group relative flex flex-col justify-between rounded-2xl border transition-all duration-200 cursor-pointer overflow-hidden p-4 ${theme.bg} ${theme.border} hover:shadow-lg hover:border-outline`}
+                className={`group relative flex flex-col justify-between rounded-2xl border transition-all duration-200 cursor-pointer overflow-hidden p-3.5 sm:p-4 ${theme.bg} ${theme.border} hover:shadow-md hover:border-outline/50 active:scale-[0.99]`}
               >
                 {/* Header */}
                 <div>
                   <div className="flex items-start justify-between gap-2 mb-2">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${theme.badge}`}>
+                    <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border truncate ${theme.badge}`}>
                         {note.category === 'shopping'
                           ? 'Einkauf'
                           : note.category === 'todo'
@@ -474,17 +499,17 @@ export function Notes() {
                       {note.note_type === 'team' && (
                         <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
                           <Users className="w-3 h-3" />
-                          {note.team_name || 'Team'}
+                          <span className="truncate max-w-[90px]">{note.team_name || 'Team'}</span>
                         </span>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 shrink-0">
                       <button
                         type="button"
                         onClick={(e) => handleTogglePin(note, e)}
                         title={note.is_pinned ? t('notes.unpin', 'Lösen') : t('notes.pin', 'Anpinnen')}
-                        className={`p-1 rounded-lg transition-colors ${
+                        className={`p-1.5 rounded-lg transition-colors ${
                           note.is_pinned
                             ? 'text-primary bg-primary/20 hover:bg-primary/30'
                             : 'text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high'
@@ -495,12 +520,12 @@ export function Notes() {
                     </div>
                   </div>
 
-                  <h4 className="font-headline text-base font-semibold text-on-surface mb-2 line-clamp-2">
+                  <h4 className="font-headline text-sm sm:text-base font-semibold text-on-surface mb-2 line-clamp-2 leading-snug">
                     {note.title}
                   </h4>
 
                   {/* Content Preview & Interactive Checklist */}
-                  <div className="space-y-1 text-xs text-on-surface-variant line-clamp-6 mb-4">
+                  <div className="space-y-1 text-xs text-on-surface-variant line-clamp-6 mb-3">
                     {lines.map((line, idx) => {
                       const isUnchecked = line.trimStart().startsWith('- [ ]')
                       const isChecked = line.trimStart().startsWith('- [x]') || line.trimStart().startsWith('- [X]')
@@ -512,7 +537,7 @@ export function Notes() {
                           <div
                             key={idx}
                             onClick={(e) => handleToggleCheckItem(note, itemIdx, e)}
-                            className="flex items-start gap-2 py-0.5 px-1 rounded hover:bg-surface-container-high/40 transition-colors cursor-pointer"
+                            className="flex items-start gap-2 py-1 px-1.5 rounded-lg hover:bg-surface-container-high/50 active:bg-surface-container-high/70 transition-colors cursor-pointer min-h-[26px]"
                           >
                             {isChecked ? (
                               <CheckSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
@@ -536,7 +561,7 @@ export function Notes() {
                 </div>
 
                 {/* Card Footer */}
-                <div className="flex items-center justify-between pt-2 border-t border-outline-variant/20 text-[11px] text-on-surface-variant">
+                <div className="flex items-center justify-between pt-2 border-t border-outline-variant/20 text-[11px] text-on-surface-variant/80 mt-auto">
                   <span>
                     {new Date(note.updated_at || note.created_at).toLocaleDateString('de-DE', {
                       day: '2-digit',
@@ -551,7 +576,7 @@ export function Notes() {
                       type="button"
                       onClick={(e) => handleToggleArchive(note, e)}
                       title={note.is_archived ? t('notes.unarchive', 'Wiederherstellen') : t('notes.archive', 'Archivieren')}
-                      className="p-1 text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container-high transition-colors"
+                      className="p-1.5 text-on-surface-variant hover:text-on-surface rounded-lg hover:bg-surface-container-high transition-colors"
                     >
                       {note.is_archived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                     </button>
@@ -563,7 +588,7 @@ export function Notes() {
                         void handleDelete(note)
                       }}
                       title={t('common.delete', 'Löschen')}
-                      className="p-1 text-rose-400 hover:text-rose-300 rounded-lg hover:bg-rose-500/10 transition-colors"
+                      className="p-1.5 text-rose-400 hover:text-rose-300 rounded-lg hover:bg-rose-500/10 transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -597,7 +622,7 @@ export function Notes() {
             </div>
 
             {/* Modal Body */}
-            <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-6 space-y-4">
+            <form onSubmit={handleSave} className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 space-y-4">
               {/* Title */}
               <div>
                 <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
@@ -614,7 +639,7 @@ export function Notes() {
               </div>
 
               {/* Category & Color */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
                     {t('notes.formCategory', 'Kategorie')}
@@ -663,19 +688,19 @@ export function Notes() {
                 <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
                   {t('notes.formColor', 'Farbakzent')}
                 </label>
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   {COLOR_THEMES.map((theme) => (
                     <button
                       key={theme.id}
                       type="button"
                       onClick={() => setFormColor(theme.id)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 transition-all ${
+                      className={`px-2.5 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 transition-all ${
                         formColor === theme.id
                           ? `${theme.bg} ${theme.border} ${theme.text} ring-2 ring-primary/40`
                           : 'bg-surface-container border-outline-variant/30 text-on-surface-variant hover:text-on-surface'
                       }`}
                     >
-                      <span className={`w-2.5 h-2.5 rounded-full ${theme.bg} border ${theme.border}`} />
+                      <span className={`w-2 h-2 rounded-full ${theme.bg} border ${theme.border}`} />
                       {theme.label.split(' ')[0]}
                     </button>
                   ))}
@@ -696,61 +721,59 @@ export function Notes() {
               </div>
 
               {/* Content / Editor & Dictation */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-semibold text-on-surface-variant">
-                      {t('notes.formContent', 'Inhalt & Checkliste')}
-                    </label>
-                    <div className="flex items-center bg-surface-container rounded-lg p-0.5 border border-outline-variant/30 text-[11px]">
-                      <button
-                        type="button"
-                        onClick={() => setModalTab('edit')}
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded-md font-medium transition-colors ${
-                          modalTab === 'edit'
-                            ? 'bg-primary/20 text-primary'
-                            : 'text-on-surface-variant hover:text-on-surface'
-                        }`}
-                      >
-                        <Edit3 className="w-3 h-3" />
-                        {t('notes.tabEditor', 'Editor')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setModalTab('preview')}
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded-md font-medium transition-colors ${
-                          modalTab === 'preview'
-                            ? 'bg-primary/20 text-primary'
-                            : 'text-on-surface-variant hover:text-on-surface'
-                        }`}
-                      >
-                        <Eye className="w-3 h-3" />
-                        {t('notes.tabPreview', 'Vorschau')}
-                      </button>
-                    </div>
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-semibold text-on-surface-variant">
+                    {t('notes.formContent', 'Inhalt & Checkliste')}
+                  </label>
+                  <div className="flex items-center bg-surface-container rounded-lg p-0.5 border border-outline-variant/30 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setModalTab('edit')}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-md font-medium transition-colors ${
+                        modalTab === 'edit'
+                          ? 'bg-primary/20 text-primary'
+                          : 'text-on-surface-variant hover:text-on-surface'
+                      }`}
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      {t('notes.tabEditor', 'Editor')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModalTab('preview')}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-md font-medium transition-colors ${
+                        modalTab === 'preview'
+                          ? 'bg-primary/20 text-primary'
+                          : 'text-on-surface-variant hover:text-on-surface'
+                      }`}
+                    >
+                      <Eye className="w-3 h-3" />
+                      {t('notes.tabPreview', 'Vorschau')}
+                    </button>
                   </div>
-
-                  {modalTab === 'edit' && (
-                    <div className="flex items-center gap-1.5">
-                      {/* Quick Checklist item helper */}
-                      <button
-                        type="button"
-                        onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] ` : '- [ ] '))}
-                        className="text-[11px] px-2 py-0.5 rounded-md bg-surface-container-high/60 text-on-surface-variant hover:text-primary border border-outline-variant/30 hover:border-primary/40 transition-colors font-medium"
-                      >
-                        + Checkliste
-                      </button>
-                      {/* Quick Shopping item helper */}
-                      <button
-                        type="button"
-                        onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] 1x  (~0,00 €)` : '- [ ] 1x  (~0,00 €)'))}
-                        className="text-[11px] px-2 py-0.5 rounded-md bg-surface-container-high/60 text-on-surface-variant hover:text-emerald-400 border border-outline-variant/30 hover:border-emerald-500/40 transition-colors font-medium"
-                      >
-                        + Einkaufsposten
-                      </button>
-                    </div>
-                  )}
                 </div>
+
+                {modalTab === 'edit' && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] ` : '- [ ] '))}
+                      className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-surface-container text-on-surface-variant hover:text-primary hover:bg-surface-container-high border border-outline-variant/30 transition-colors"
+                    >
+                      <Plus className="w-3 h-3 text-primary" />
+                      <span>Checkliste</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] 1x  (~0,00 €)` : '- [ ] 1x  (~0,00 €)'))}
+                      className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-surface-container text-on-surface-variant hover:text-emerald-400 hover:bg-surface-container-high border border-outline-variant/30 transition-colors"
+                    >
+                      <Plus className="w-3 h-3 text-emerald-400" />
+                      <span>Einkaufsposten</span>
+                    </button>
+                  </div>
+                )}
 
                 {modalTab === 'edit' ? (
                   <textarea

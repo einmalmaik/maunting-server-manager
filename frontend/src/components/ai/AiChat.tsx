@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Check, ListPlus, Loader2, Mic, Paperclip, Pencil, Send, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
@@ -200,6 +200,7 @@ export function AiChat() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const dictationRef = useRef<Aufnahme | null>(null)
   const dictationChunksRef = useRef<ArrayBuffer[]>([])
+  const dictationSelectionRef = useRef<{ start: number; end: number } | null>(null)
   providerRef.current = providerId
 
   useEffect(() => {
@@ -250,6 +251,10 @@ export function AiChat() {
         toast.error(t('ai.chat.dictationQuotaExceeded'))
         return
       }
+      const feld = inputRef.current
+      const start = feld?.selectionStart ?? input.length
+      const end = feld?.selectionEnd ?? start
+      dictationSelectionRef.current = { start, end }
       dictationChunksRef.current = []
       try {
         dictationRef.current = await starteAufnahme((chunk) => dictationChunksRef.current.push(chunk))
@@ -277,15 +282,18 @@ export function AiChat() {
     setTranscribing(true)
     try {
       const { text } = await aiApi.transcribeVoice(providerId, pcm.buffer)
-      const feld = inputRef.current
-      const start = feld?.selectionStart ?? input.length
-      const end = feld?.selectionEnd ?? start
-      const neu = `${input.slice(0, start)}${text}${input.slice(end)}`.slice(0, 16_000)
-      setInput(neu)
-      requestAnimationFrame(() => {
-        const cursor = Math.min(neu.length, start + text.length)
-        inputRef.current?.setSelectionRange(cursor, cursor)
-        inputRef.current?.focus()
+      const sel = dictationSelectionRef.current
+      dictationSelectionRef.current = null
+      setInput((aktuelleEingabe) => {
+        const start = sel?.start ?? (inputRef.current?.selectionStart ?? aktuelleEingabe.length)
+        const end = sel?.end ?? (inputRef.current?.selectionEnd ?? start)
+        const neu = `${aktuelleEingabe.slice(0, start)}${text}${aktuelleEingabe.slice(end)}`.slice(0, 16_000)
+        requestAnimationFrame(() => {
+          const cursor = Math.min(neu.length, start + text.length)
+          inputRef.current?.setSelectionRange(cursor, cursor)
+          inputRef.current?.focus()
+        })
+        return neu
       })
       // Restkontingent aktualisieren
       aiApi.getVoiceConfig(providerId).then((config) => {
@@ -470,7 +478,7 @@ export function AiChat() {
     closedGeoIdRef.current = readClosedGeoAnalysis(merkSchluessel.closedGeoAnalysis)
   }, [merkSchluessel.closedGeoAnalysis])
 
-  // Automatische Aktivierung des 3D-Globus bei einer regionalen Analyse
+  // Automatische Aktivierung des 3D-Globus bei einer neuen regionalen Analyse
   useEffect(() => {
     const isAnalyzing = laufendeWerkzeuge.some(
       (w) => w.tool_name === 'analyze_region' || w.tool_name === 'control_region_camera',
@@ -547,17 +555,14 @@ export function AiChat() {
         lastSeenCameraCommandRef.current = latestCameraCommand.command_id
       }
       setGeoData(combinedGeo)
-      const wasClosed = closedGeoIdRef.current === currentGeoId
-      if (!manuallyClosedGeoRef.current && !wasClosed) {
-        setGeoOpen(true)
-      } else if (latestCameraCommand && !wasClosed) {
-        manuallyClosedGeoRef.current = false
+      // Wichtig: Aus altem Verlauf niemals ungefragt öffnen — nur bei aktiver Live-Generierung (streaming)
+      if (streaming && !manuallyClosedGeoRef.current && closedGeoIdRef.current !== currentGeoId) {
         setGeoOpen(true)
       }
     } else {
       setGeoData(combinedGeo)
     }
-  }, [entries])
+  }, [entries, streaming])
 
   const newsFromSearch = useMemo<NewsItem[]>(() => {
     if (!geoData?.location) return []
@@ -651,14 +656,22 @@ export function AiChat() {
   }, [geoOpen, scrolleNachUnten])
 
   /**
-   * Beim ersten Laden den Verlauf verlässlich ganz nach unten scrollen.
-   * Läuft mehrstufig (sofort, nächster Frame, nach Layout/Rendern),
-   * damit auch umfangreiche Verläufe mit Markdown und Karten sofort unten landen.
+   * Beim ersten Laden oder Wiedereintreten den Verlauf verlässlich ganz nach unten scrollen.
+   * Läuft sofort per LayoutEffect und danach mehrstufig (nächster Frame, nach Layout/Rendern),
+   * damit auch umfangreiche Verläufe mit Markdown und Karten sofort unten an der Eingabe landen.
    */
+  useLayoutEffect(() => {
+    if (!loading && entries.length > 0) {
+      scrolleNachUnten()
+    }
+  }, [loading, entries.length, scrolleNachUnten])
+
   useEffect(() => {
-    if (!loading && entries.length > 0 && !initialScrollDoneRef.current) {
-      initialScrollDoneRef.current = true
-      setAmEnde(true)
+    if (!loading && entries.length > 0) {
+      if (!initialScrollDoneRef.current) {
+        initialScrollDoneRef.current = true
+        setAmEnde(true)
+      }
       scrolleNachUnten()
       const frame = requestAnimationFrame(() => {
         scrolleNachUnten()
@@ -824,6 +837,7 @@ export function AiChat() {
   const enqueueMessage = useCallback((content: string) => {
     const text = content.trim()
     if (!text) return
+    manuallyClosedGeoRef.current = false
     setQueuedMessages((q) => [...q, text])
     setInput('')
   }, [])
@@ -831,6 +845,7 @@ export function AiChat() {
   const sendImmediatelyAndInterrupt = useCallback(async (content: string) => {
     const text = content.trim()
     if (!text || !providerId) return
+    manuallyClosedGeoRef.current = false
     setInput('')
     if (streaming) {
       await stoppeLauf()
@@ -842,6 +857,7 @@ export function AiChat() {
     event.preventDefault()
     const content = input.trim()
     if (!content || !providerId) return
+    manuallyClosedGeoRef.current = false
     if (streaming) {
       enqueueMessage(content)
       return
@@ -1060,7 +1076,7 @@ export function AiChat() {
       {/* ── Verlauf ───────────────────────────────────────────────────── */}
       <div
         ref={verlaufRef}
-        className={`relative min-h-0 flex-1 overflow-y-auto ${geoOpen ? 'hidden lg:block' : ''}`}
+        className="relative min-h-0 flex-1 overflow-y-auto"
         aria-live="polite"
         onScroll={(event) => {
           // Die 50 Pixel Spielraum sind derselbe Wert wie in der Konsole: wer

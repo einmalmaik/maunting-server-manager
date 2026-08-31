@@ -238,7 +238,7 @@ export function Ai() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-5.5rem)] max-h-[calc(100dvh-5.5rem)] min-h-0 w-full flex-1 flex-col overflow-hidden">
+    <div className="flex h-full max-h-full min-h-0 w-full flex-1 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center justify-between sm:justify-end gap-1.5 sm:gap-2 pb-1.5 sm:pb-2">
         {ansicht !== 'text' ? (
           <div className="flex items-center justify-between w-full sm:w-auto gap-2">

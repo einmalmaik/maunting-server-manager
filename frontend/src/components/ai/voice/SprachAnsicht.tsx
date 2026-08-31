@@ -68,6 +68,7 @@ export function SprachAnsicht({
 
   const [kommandozentraleGeschlossen, setKommandozentraleGeschlossen] = useState(false)
   const lastToolRef = useRef<string | null>(null)
+  const lastIntentRef = useRef<string | null>(null)
   const kommandozentraleWarAktiv = useRef(false)
 
   // Wenn ein neues Werkzeug oder spekulativer Geo-Intent anläuft, Schließungssperre aufheben
@@ -75,19 +76,22 @@ export function SprachAnsicht({
     intentErkannt?.intent === 'analyze_region' || Boolean(intentErkannt?.entities?.location)
 
   useEffect(() => {
-    if ((werkzeug === 'analyze_region' || isGeoIntent) && lastToolRef.current !== 'analyze_region') {
+    const isNewTool = werkzeug === 'analyze_region' && lastToolRef.current !== 'analyze_region'
+    const isNewIntent = isGeoIntent && intentErkannt?.intent !== lastIntentRef.current
+    if (isNewTool || isNewIntent) {
       setKommandozentraleGeschlossen(false)
       kommandozentraleWarAktiv.current = true
     }
     lastToolRef.current = werkzeug
-  }, [werkzeug, isGeoIntent])
+    lastIntentRef.current = intentErkannt?.intent ?? null
+  }, [werkzeug, isGeoIntent, intentErkannt?.intent])
 
-  // geoData allein reicht ebenfalls, um die Kommandozentrale zu aktivieren
+  // geoData allein reicht ebenfalls, um die Kommandozentrale zu aktivieren, wenn nicht manuell geschlossen
   useEffect(() => {
-    if (geoData) {
+    if (geoData && !kommandozentraleGeschlossen) {
       kommandozentraleWarAktiv.current = true
     }
-  }, [geoData])
+  }, [geoData, kommandozentraleGeschlossen])
 
   const laeuft = zustand !== 'aus'
   const hoert = zustand === 'hoert' || zustand === 'bereit'

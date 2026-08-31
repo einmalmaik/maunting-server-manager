@@ -1321,7 +1321,7 @@ describe('AiChat', () => {
     act(() => audioLiefern(new Int16Array([1, -1]).buffer))
     fireEvent.click(screen.getByRole('button', { name: 'Aufnahme beenden' }))
 
-    await waitFor(() => expect(feld).toHaveValue('Zeig mir Moskau mehr'))
+    await waitFor(() => expect(screen.getByLabelText('Nachricht')).toHaveValue('Zeig mir Moskau mehr'))
     expect(aiApi.transcribeVoice).toHaveBeenCalledWith(1, expect.any(ArrayBuffer))
     expect(beenden).toHaveBeenCalledTimes(1)
     expect(streamAiMessage).not.toHaveBeenCalled()

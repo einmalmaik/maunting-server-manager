@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
-import { BrainCircuit, Calendar as CalendarIcon, Eye, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, X } from 'lucide-react'
+import { BrainCircuit, Calendar as CalendarIcon, Eye, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
@@ -30,6 +30,7 @@ import { BenachrichtigungsGlocke, Button } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Ai } from '@/pages/Ai'
 import { Calendar } from '@/pages/Calendar'
+import { Notes } from '@/pages/Notes'
 import { Privacy } from '@/pages/Privacy'
 import { useAuthStore } from '@/stores/authStore'
 import { abmelden } from './auth'
@@ -189,6 +190,18 @@ export function DesktopApp() {
           }
         />
         <Route path="/calendar" element={<Navigate to="/kalender" replace />} />
+        <Route
+          path="/notizen"
+          element={
+            <Hauptseite
+              bereich="notizen"
+              konfig={konfig}
+              offeneUebernahme={offeneUebernahme}
+              onKonfigAenderung={ladeKonfigNeu}
+            />
+          }
+        />
+        <Route path="/notes" element={<Navigate to="/notizen" replace />} />
         <Route
           path="/gedaechtnis"
           element={
@@ -445,7 +458,7 @@ function Hauptseite({
   offeneUebernahme,
   onKonfigAenderung,
 }: {
-  bereich: 'ki' | 'kalender' | 'gedaechtnis' | 'einstellungen'
+  bereich: 'ki' | 'kalender' | 'notizen' | 'gedaechtnis' | 'einstellungen'
   konfig: AppKonfig | null
   offeneUebernahme: string | null
   onKonfigAenderung?: () => void
@@ -456,6 +469,7 @@ function Hauptseite({
   const user = useAuthStore((s) => s.user)
   const darfChatten = useHasPermission('ai.chat.use')
   const darfKalender = useHasPermission('ai.calendar.use')
+  const darfNotizen = useHasPermission('ai.notes.use')
   // Im Panel wohnt die Ansicht unter Profil → KI; die App hat kein Profil,
   // also bekommt sie einen eigenen Reiter. Ohne das Recht rendert die
   // Komponente ohnehin nichts — dann lieber gar kein Reiter.
@@ -499,6 +513,13 @@ function Hauptseite({
               aktiv={bereich === 'kalender'}
               onClick={() => navigate('/kalender')}
               label={t('mss.app.kalender')}
+            />
+          )}
+          {darfNotizen && (
+            <Reiter
+              aktiv={bereich === 'notizen'}
+              onClick={() => navigate('/notizen')}
+              label={t('mss.app.notizen', 'Notizen')}
             />
           )}
           {darfGedaechtnis && (
@@ -547,7 +568,7 @@ function Hauptseite({
       {mobileMenuOffen && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end bg-background/80 backdrop-blur-sm md:hidden animate-fade-in">
           <div className="fixed inset-0" onClick={() => setMobileMenuOffen(false)} />
-          <div className="relative z-10 w-full max-h-[85vh] overflow-y-auto rounded-t-2xl border-t border-outline-variant/50 bg-surface-container-low p-4 pb-8 shadow-2xl space-y-3">
+          <div className="relative z-10 w-full max-h-[85vh] overflow-y-auto overscroll-contain rounded-t-2xl border-t border-outline-variant/50 bg-surface-container-low p-4 pb-8 shadow-2xl space-y-3">
             <div className="flex items-center justify-between pb-3 border-b border-outline-variant/40">
               <div className="min-w-0">
                 <span className="font-headline font-semibold text-sm text-on-surface">{agentName}</span>
@@ -588,6 +609,21 @@ function Hauptseite({
                 >
                   <CalendarIcon className="h-4 w-4" />
                   <span>{t('mss.app.kalender')}</span>
+                </button>
+              )}
+
+              {darfNotizen && (
+                <button
+                  type="button"
+                  onClick={() => { navigate('/notizen'); setMobileMenuOffen(false); }}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                    bereich === 'notizen'
+                      ? 'bg-primary/15 text-primary border border-primary/30'
+                      : 'text-on-surface hover:bg-surface-container-high'
+                  }`}
+                >
+                  <StickyNote className="h-4 w-4" />
+                  <span>{t('mss.app.notizen', 'Notizen')}</span>
                 </button>
               )}
 
@@ -669,6 +705,10 @@ function Hauptseite({
           ) : bereich === 'kalender' ? (
             <div className="mx-auto w-full max-w-6xl flex-1 min-h-0 overflow-y-auto pb-8">
               <Calendar />
+            </div>
+          ) : bereich === 'notizen' ? (
+            <div className="mx-auto w-full max-w-6xl flex-1 min-h-0 overflow-y-auto pb-8">
+              <Notes />
             </div>
           ) : bereich === 'gedaechtnis' ? (
             // Dieselbe Komponente wie im Panel unter Profil → KI, Standard-

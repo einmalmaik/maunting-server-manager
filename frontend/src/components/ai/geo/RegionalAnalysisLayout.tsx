@@ -1,6 +1,9 @@
-import { ReactNode, useEffect } from 'react'
+import { ReactNode, useEffect, useState } from 'react'
+import { Globe2, MessageSquare, Satellite, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import type { AiRegionalAnalysis } from '@/api/ai'
+import { Button } from '@/Singra/UI'
 import { GlobeViewer } from './GlobeViewer'
 import { RegionalInfoPanel, type NewsItem } from './RegionalInfoPanel'
 import type { RegionalFocus } from '../voice/useSprachsitzung'
@@ -16,14 +19,14 @@ interface RegionalAnalysisLayoutProps {
   onClose: () => void
 }
 
+type MobileTab = 'chat' | 'globe' | 'info'
+
 /**
- * Layout-Orchestrierer für das 3-Spalten-KI-Kommandozentrum (Chat & Voice).
+ * Layout-Orchestrierer für das KI-Kommandozentrum (Chat & Voice).
  *
- * Normalzustand: Chat oder Sprachblase nimmt die volle Breite ein.
- * Analysezustand:
- * - Linke Spalte: Chat- / Sprachtranskript mit aktiven Prozessen
- * - Mittlere Spalte: 3D-Globus mit Zielort-Fokussierung & Live-Metriken
- * - Rechte Spalte: RegionalInfoPanel mit Reitern (Übersicht, Satellit, News, Wetter)
+ * Desktop: 3-Spalten-Layout (Chat/Voice links, 3D-Globus mittig, RegionalInfoPanel rechts).
+ * Mobile: Reaktionsschnelle Tab-Navigation (Chat, 3D-Globus, Satellitendaten), damit
+ * jeder Bereich in voller Höhe scrollbar und interaktiv bedienbar bleibt.
  */
 export function RegionalAnalysisLayout({
   children,
@@ -35,7 +38,24 @@ export function RegionalAnalysisLayout({
   regionalFocus,
   onClose,
 }: RegionalAnalysisLayoutProps) {
+  const { t } = useTranslation()
   const coords = data?.coordinates
+  const [mobileTab, setMobileTab] = useState<MobileTab>('globe')
+
+  // Bei speziellem Fokus (z.B. Satelliten-Layer, News, Wetter) mobil direkt zum Infopanel schalten
+  useEffect(() => {
+    if (!regionalFocus) return
+    if (['overview', 'satellite', 'news', 'social', 'traffic', 'weather'].includes(regionalFocus.tab)) {
+      setMobileTab('info')
+    }
+  }, [regionalFocus])
+
+  // Bei neuem Kamerafokus mobil auf den Globus schalten
+  useEffect(() => {
+    if (data?.camera?.command_id) {
+      setMobileTab('globe')
+    }
+  }, [data?.camera?.command_id])
 
   // Blendet bei aktiver 3-Spalten-Kommandozentrale die Sidebar aus, um vollen Platz zu bieten
   useEffect(() => {
@@ -49,45 +69,134 @@ export function RegionalAnalysisLayout({
     }
   }, [active])
 
-  return (
-    <div
-      className={`flex w-full min-h-0 flex-1 ${
-        active
-          ? 'h-[calc(100dvh-5.5rem)] flex-col gap-3 overflow-hidden p-1 sm:p-2 lg:flex-row'
-          : 'h-full flex-col overflow-hidden'
-      } transition-all duration-300 ease-out`}
-    >
-      {/* Linke Spalte (Chat oder Voice-Container) */}
-      <div
-        className={`order-2 flex min-h-0 w-full flex-col ${
-          active
-            ? 'order-1 h-[34dvh] shrink-0 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest/50 lg:order-1 lg:h-full lg:w-[380px] xl:w-[420px]'
-            : 'order-1 h-full flex-1'
-        } overflow-hidden transition-all duration-300`}
-      >
+  if (!active) {
+    return (
+      <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden">
         {children}
       </div>
+    )
+  }
 
-      {/* Mittlere Spalte: 3D-Globus */}
-      {active && (
-        <>
-          <div className="order-2 flex h-[30dvh] min-h-[240px] w-full shrink-0 overflow-hidden rounded-2xl shadow-sm sm:h-[34dvh] lg:order-2 lg:h-full lg:min-h-0 lg:flex-1">
-            <GlobeViewer
-              data={data}
-              latitude={coords?.latitude}
-              longitude={coords?.longitude}
-              locationName={locationName ?? data?.location}
-              bbox={coords?.bbox}
-              className="h-full w-full"
-            />
-          </div>
+  return (
+    <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden p-1 sm:p-2 transition-all duration-300 ease-out">
+      {/* ── Mobil-Kopfzeile (< lg): Umschalter zwischen Chat, Globus und Satellitendaten ── */}
+      <div className="flex shrink-0 items-center justify-between gap-1 rounded-xl border border-outline-variant/30 bg-surface-container-low/95 p-1 mb-2 shadow-sm backdrop-blur-md lg:hidden">
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+          <button
+            type="button"
+            onClick={() => setMobileTab('chat')}
+            aria-pressed={mobileTab === 'chat'}
+            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
+              mobileTab === 'chat'
+                ? 'bg-primary text-on-primary shadow-sm font-semibold'
+                : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+            }`}
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            <span>{t('ai.geo.mobileTabs.chat', 'Chat / Sprache')}</span>
+          </button>
 
-          {/* Rechte Spalte: Informationspanel */}
-          <div className="order-3 flex min-h-0 flex-1 w-full flex-col lg:h-full lg:flex-none lg:w-[340px] xl:w-[380px]">
-            <RegionalInfoPanel data={data} news={news} loading={loading} focus={regionalFocus} onClose={onClose} />
-          </div>
-        </>
-      )}
+          <button
+            type="button"
+            onClick={() => setMobileTab('globe')}
+            aria-pressed={mobileTab === 'globe'}
+            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
+              mobileTab === 'globe'
+                ? 'bg-primary text-on-primary shadow-sm font-semibold'
+                : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+            }`}
+          >
+            <Globe2 className="h-3.5 w-3.5" />
+            <span>{t('ai.geo.mobileTabs.globe', '3D-Globus')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMobileTab('info')}
+            aria-pressed={mobileTab === 'info'}
+            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
+              mobileTab === 'info'
+                ? 'bg-primary text-on-primary shadow-sm font-semibold'
+                : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+            }`}
+          >
+            <Satellite className="h-3.5 w-3.5" />
+            <span>{t('ai.geo.mobileTabs.satellite', 'Satellit & Info')}</span>
+          </button>
+        </div>
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onClose}
+          aria-label={t('ai.geo.close', 'Schließen')}
+          title={t('ai.geo.close', 'Schließen')}
+          className="h-8 shrink-0 px-2 rounded-lg text-xs font-medium text-on-surface-variant hover:text-status-danger hover:bg-status-danger/10 border border-outline-variant/30 flex items-center gap-1 transition-colors"
+        >
+          <X className="h-4 w-4" />
+          <span className="hidden sm:inline">{t('ai.geo.close', 'Schließen')}</span>
+        </Button>
+      </div>
+
+      {/* ── Mobile Inhaltsansicht (< lg): Dauerhaft gemountet, um Scrollposition & Eingabe zu bewahren ── */}
+      <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden lg:hidden">
+        <div className={`h-full min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-lowest/50 ${mobileTab === 'chat' ? 'flex' : 'hidden'}`}>
+          {children}
+        </div>
+
+        <div className={`h-full min-h-0 w-full flex-1 overflow-hidden rounded-2xl shadow-sm ${mobileTab === 'globe' ? 'flex' : 'hidden'}`}>
+          <GlobeViewer
+            data={data}
+            latitude={coords?.latitude}
+            longitude={coords?.longitude}
+            locationName={locationName ?? data?.location}
+            bbox={coords?.bbox}
+            className="h-full w-full"
+          />
+        </div>
+
+        <div className={`h-full min-h-0 w-full flex-1 flex-col overflow-hidden ${mobileTab === 'info' ? 'flex' : 'hidden'}`}>
+          <RegionalInfoPanel
+            data={data}
+            news={news}
+            loading={loading}
+            focus={regionalFocus}
+            onClose={onClose}
+          />
+        </div>
+      </div>
+
+      {/* ── Desktop 3-Spalten-Kommandozentrale (>= lg) ── */}
+      <div className="hidden h-full min-h-0 w-full flex-1 gap-3 overflow-hidden lg:flex lg:flex-row">
+        {/* Linke Spalte: Chat- / Sprachtranskript */}
+        <div className="flex h-full min-h-0 w-[380px] xl:w-[420px] shrink-0 flex-col overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-lowest/50">
+          {children}
+        </div>
+
+        {/* Mittlere Spalte: 3D-Globus */}
+        <div className="flex h-full min-h-0 flex-1 overflow-hidden rounded-2xl shadow-sm">
+          <GlobeViewer
+            data={data}
+            latitude={coords?.latitude}
+            longitude={coords?.longitude}
+            locationName={locationName ?? data?.location}
+            bbox={coords?.bbox}
+            className="h-full w-full"
+          />
+        </div>
+
+        {/* Rechte Spalte: Informationspanel */}
+        <div className="flex h-full min-h-0 w-[340px] xl:w-[380px] shrink-0 flex-col overflow-hidden">
+          <RegionalInfoPanel
+            data={data}
+            news={news}
+            loading={loading}
+            focus={regionalFocus}
+            onClose={onClose}
+          />
+        </div>
+      </div>
     </div>
   )
 }

@@ -99,6 +99,7 @@
     "title": "Notizen",
     "description": "Notizen, Checklisten und Aufgaben organisieren, sortieren und im Team teilen.",
     "newNote": "Neue Notiz",
+    "newNoteShort": "Neu",
     "editNote": "Notiz bearbeiten",
     "deleteNote": "Notiz löschen",
     "deleteConfirm": "Möchtest du diese Notiz wirklich löschen?",
@@ -1295,6 +1296,13 @@
         "traffic": "Verkehr",
         "weather": "Wetter"
       },
+      "mobileTabs": {
+        "chat": "Chat / Sprache",
+        "globe": "3D-Globus",
+        "satellite": "Satellit & Info"
+      },
+      "zoomIn": "Vergrößern",
+      "zoomOut": "Verkleinern",
       "categories": {
         "local": "Lokales",
         "environment": "Umwelt",
@@ -5363,6 +5371,7 @@
       "bereiche": "Ansicht",
       "chat": "Chat",
       "kalender": "Kalender",
+      "notizen": "Notizen",
       "einstellungen": "Einstellungen",
       "abmelden": "Abmelden",
       "menueOeffnen": "Menü öffnen",

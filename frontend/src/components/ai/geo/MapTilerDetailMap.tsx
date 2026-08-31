@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Map as MapLibreMap, Marker as MapLibreMarker } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { Minus, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi } from '@/api/ai'
@@ -174,8 +175,20 @@ export function MapTilerDetailMap({
       map.on('rotateend', () => {
         manualCameraControlRef.current = false
       })
-      map.on('error', () => {
-        if (!disposed && !styleReady) unavailable()
+      map.on('error', (event) => {
+        const err = (event as { error?: { status?: number; message?: string } })?.error
+        const status = err?.status
+        const msg = String(err?.message || '')
+        if (
+          status === 401 ||
+          status === 403 ||
+          msg.includes('401') ||
+          msg.includes('403') ||
+          msg.includes('Forbidden') ||
+          msg.includes('Unauthorized')
+        ) {
+          if (!disposed && !styleReady) unavailable()
+        }
       })
     }
     setReady(false)
@@ -347,8 +360,42 @@ export function MapTilerDetailMap({
     })
   }, [cameraAction, cameraCommandId, cameraMode, globe, latitude, longitude, ready, zoom, sights])
 
-  return <div className="absolute inset-0 z-[5] bg-transparent" aria-label={`Interaktive Karte für ${locationName}`}>
-    <div ref={elementRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
-    {!ready && <div className="pointer-events-none absolute inset-0 grid place-items-center bg-surface-container-lowest/70 text-sm text-on-surface-variant">{t('ai.geo.mapLoading', 'Karte wird geladen')}</div>}
-  </div>
+  return (
+    <div className="absolute inset-0 z-[5] bg-transparent" aria-label={`Interaktive Karte für ${locationName}`}>
+      <div ref={elementRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
+      {!ready && (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center bg-surface-container-lowest/70 text-sm text-on-surface-variant">
+          {t('ai.geo.mapLoading', 'Karte wird geladen')}
+        </div>
+      )}
+      {ready && (
+        <div className="absolute bottom-4 right-4 z-20 flex flex-col gap-1.5 pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => {
+              if (mapRef.current) {
+                mapRef.current.zoomIn({ duration: 300 })
+              }
+            }}
+            aria-label={t('ai.geo.zoomIn', 'Vergrößern')}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-outline-variant/40 bg-surface-container-low/95 text-on-surface shadow-md backdrop-blur-md transition-colors hover:bg-surface-container-high active:scale-95"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (mapRef.current) {
+                mapRef.current.zoomOut({ duration: 300 })
+              }
+            }}
+            aria-label={t('ai.geo.zoomOut', 'Verkleinern')}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-outline-variant/40 bg-surface-container-low/95 text-on-surface shadow-md backdrop-blur-md transition-colors hover:bg-surface-container-high active:scale-95"
+          >
+            <Minus className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }

@@ -99,6 +99,7 @@
     "title": "Notes",
     "description": "Organize, sort, and share notes, checklists, and tasks across your team.",
     "newNote": "New Note",
+    "newNoteShort": "New",
     "editNote": "Edit Note",
     "deleteNote": "Delete Note",
     "deleteConfirm": "Do you really want to delete this note?",
@@ -1296,6 +1297,13 @@
         "traffic": "Traffic",
         "weather": "Weather"
       },
+      "mobileTabs": {
+        "chat": "Chat / Voice",
+        "globe": "3D Globe",
+        "satellite": "Satellite & Info"
+      },
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
       "categories": {
         "local": "Local",
         "environment": "Environment",
@@ -5364,6 +5372,7 @@
       "bereiche": "View",
       "chat": "Chat",
       "kalender": "Calendar",
+      "notizen": "Notes",
       "einstellungen": "Settings",
       "abmelden": "Sign out",
       "menueOeffnen": "Open menu",
