@@ -1,7 +1,7 @@
 """Notizsystem: notes.
 
-Revision ID: 20260831_01
-Revises: 20260829_02
+Revision ID: 20260831_02
+Revises: 20260831_01
 Create Date: 2026-08-31
 
 Erstellt die Tabelle:
@@ -16,8 +16,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "20260831_01"
-down_revision: Union[str, None] = "20260829_02"
+revision: str = "20260831_02"
+down_revision: Union[str, None] = "20260831_01"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
