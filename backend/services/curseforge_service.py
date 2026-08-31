@@ -160,6 +160,7 @@ class CurseForgeService:
         sort_order: str = "desc",
         mod_loader_type: int | None = None,
         game_version: str | None = None,
+        slug: str | None = None,
     ) -> List[CurseForgeModInfo]:
         """Sucht Mods über GET /v1/mods/search."""
         if not self.api_key:
@@ -169,7 +170,7 @@ class CurseForgeService:
         per_page = max(1, min(50, per_page))
         index = (page - 1) * per_page
 
-        cache_key = f"cf_search_{game_id}_{query}_{page}_{per_page}_{class_id}_{category_id}_{sort_field}_{sort_order}"
+        cache_key = f"cf_search_{game_id}_{query}_{slug}_{page}_{per_page}_{class_id}_{category_id}_{sort_field}_{sort_order}"
         cached = self._get_cache(cache_key)
         if cached:
             return cached
@@ -182,6 +183,8 @@ class CurseForgeService:
         }
         if query:
             params["searchFilter"] = query
+        if slug:
+            params["slug"] = slug
         if class_id is not None and str(class_id).strip():
             params["classId"] = int(class_id)
         if category_id is not None and str(category_id).strip():
@@ -331,15 +334,47 @@ class CurseForgeService:
         page: int = 1,
         per_page: int = 24,
     ) -> List[CurseForgeModInfo]:
-        """Sucht Modpacks (classId 432 bei Minecraft)."""
-        return await self.search_mods(
+        """Sucht Modpacks (classId 4471 bei Minecraft oder Fallback auf Suche ohne Class-Filter)."""
+        clean_query = str(query or "").strip()
+        slug: str | None = None
+        if "curseforge.com" in clean_query:
+            # URL Format: https://www.curseforge.com/minecraft/modpacks/cobblemon-gg
+            parts = [p.strip() for p in clean_query.split("?")[0].split("/") if p.strip()]
+            if parts:
+                clean_query = parts[-1]
+                slug = clean_query
+
+        # 1. Versuch mit classId=4471 (Minecraft Modpacks)
+        res = await self.search_mods(
             game_id=game_id,
-            query=query,
+            query=clean_query if not slug else "",
+            slug=slug,
             page=page,
             per_page=per_page,
-            class_id=432,
+            class_id=4471 if str(game_id) == "432" else None,
             sort_field=self.SORT_POPULAR,
         )
+        if not res and clean_query:
+            # Fallback 2: Volltext-Suche mit Filter
+            res = await self.search_mods(
+                game_id=game_id,
+                query=clean_query,
+                page=page,
+                per_page=per_page,
+                class_id=4471 if str(game_id) == "432" else None,
+                sort_field=self.SORT_POPULAR,
+            )
+        if not res and clean_query:
+            # Fallback 3: Ohne class_id Filter
+            res = await self.search_mods(
+                game_id=game_id,
+                query=clean_query,
+                page=page,
+                per_page=per_page,
+                class_id=None,
+                sort_field=self.SORT_POPULAR,
+            )
+        return res
 
     async def test_connection(self) -> dict[str, Any]:
         """Testet die Gültigkeit des hinterlegten API-Keys gegen die API."""

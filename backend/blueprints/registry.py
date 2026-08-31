@@ -60,10 +60,22 @@ class BlueprintRegistry:
         return sorted(self._entries.values(), key=lambda e: e.blueprint.meta.id)
 
     def get(self, blueprint_id: str) -> BlueprintEntry | None:
-        return self._entries.get(blueprint_id)
+        if not blueprint_id:
+            return None
+        entry = self._entries.get(blueprint_id)
+        if entry is not None:
+            return entry
+        normalized = blueprint_id.replace("-", "_").lower().strip()
+        entry = self._entries.get(normalized)
+        if entry is not None:
+            return entry
+        for k, v in self._entries.items():
+            if k.replace("-", "_").lower() == normalized:
+                return v
+        return None
 
     def exists(self, blueprint_id: str) -> bool:
-        return blueprint_id in self._entries
+        return self.get(blueprint_id) is not None
 
     # ── internal ─────────────────────────────────────────────────────────
 

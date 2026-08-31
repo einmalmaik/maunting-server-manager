@@ -713,45 +713,48 @@ def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
     from games import get_plugin
     from models import Node
 
-    expected = {
-        "name", "game_type", "ram_limit_mb", "cpu_limit_percent", "disk_limit_gb",
-        "reason", "expected_effect",
-    }
-    if not expected.issubset(set(arguments)) or set(arguments) - (expected | {"node_id"}):
-        raise AiActionValidationError("Servererstellung hat ungueltige Argumente")
-
-    name = arguments["name"]
-    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 128:
+    raw_name = arguments.get("name") or "Server"
+    if not isinstance(raw_name, str) or not 1 <= len(str(raw_name).strip()) <= 128:
         raise AiActionValidationError("Ungueltiger Servername")
-    name = redact_sensitive_text(name.strip())
+    name = redact_sensitive_text(str(raw_name).strip())
 
-    game_type = arguments["game_type"]
-    if not isinstance(game_type, str) or get_plugin(game_type) is None:
-        raise AiActionValidationError("Unbekannter Servertyp")
+    game_type = str(arguments.get("game_type") or "").strip()
+    plugin = get_plugin(game_type)
+    if plugin is None:
+        raise AiActionValidationError(f"Unbekannter Servertyp: {game_type}")
+    real_game_type = plugin.blueprint.meta.id
 
-    limits: dict[str, int] = {}
-    for key, low, high in (
-        ("ram_limit_mb", 512, 4_194_304),
-        ("cpu_limit_percent", 10, 3_200),
-        ("disk_limit_gb", 1, 1_048_576),
+    limits: dict[str, int] = {
+        "ram_limit_mb": 4096,
+        "cpu_limit_percent": 200,
+        "disk_limit_gb": 20,
+    }
+    for key, low, high, default in (
+        ("ram_limit_mb", 512, 4_194_304, 4096),
+        ("cpu_limit_percent", 10, 3_200, 200),
+        ("disk_limit_gb", 1, 1_048_576, 20),
     ):
-        value = arguments[key]
-        if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
-            raise AiActionValidationError(f"Ungueltiger Wert fuer {key}")
-        limits[key] = value
+        if key in arguments and arguments[key] is not None:
+            value = arguments[key]
+            if isinstance(value, int) and not isinstance(value, bool) and low <= value <= high:
+                limits[key] = value
+            elif isinstance(value, str) and value.isdigit() and low <= int(value) <= high:
+                limits[key] = int(value)
 
     node_id = arguments.get("node_id")
     if node_id is not None:
+        if isinstance(node_id, str) and node_id.isdigit():
+            node_id = int(node_id)
         if not isinstance(node_id, int) or isinstance(node_id, bool):
-            raise AiActionValidationError("Ungueltige Node-Kennung")
-        if db.query(Node).filter(Node.id == node_id).first() is None:
-            raise AiActionValidationError("Unbekannte Node")
+            node_id = None
+        elif db.query(Node).filter(Node.id == node_id).first() is None:
+            node_id = None
 
-    payload = {"name": name, "game_type": game_type, "node_id": node_id, **limits}
+    payload = {"name": name, "game_type": real_game_type, "node_id": node_id, **limits}
     preview = {
         "operation": "create_server",
         "name": name,
-        "game_type": game_type,
+        "game_type": real_game_type,
         **limits,
         "node_id": node_id,
         # Ports und Installationsverzeichnis vergibt MSM. Eine Vorschau, die

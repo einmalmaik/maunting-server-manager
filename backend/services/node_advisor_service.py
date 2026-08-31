@@ -23,19 +23,36 @@ def advise_node(db: Session, ram_need_mb: int, disk_need_gb: int = 5) -> list[di
         avail_ram = allocatable_ram_mb(n, alloc_ram)
         avail_disk = allocatable_disk_gb(n, alloc_disk)
         running_ram = sum_running_ram_mb(db, n.id)
-        score = (avail_ram if avail_ram is not None else 999999) + (avail_disk * 1024 if avail_disk is not None else 0)
+        host_total_mb = int(n.ram_total / 1024 / 1024) if n.ram_total and n.ram_total > 100_000_000 else (int(n.ram_total) if n.ram_total else None)
+        real_free_ram = max(0, (host_total_mb or 0) - running_ram) if host_total_mb else None
+        
+        # MSM erlaubt Überbuchung: Passt, wenn Platte reicht und physisch/laufend noch Platz ist
+        fits = (avail_disk is None or avail_disk >= disk_need_gb) and (
+            avail_ram is None or avail_ram >= ram_need_mb or real_free_ram is None or real_free_ram >= ram_need_mb
+        )
+        
+        reason_parts = []
+        if avail_ram is not None:
+            reason_parts.append(f"{avail_ram}MB buchbar")
+        if real_free_ram is not None:
+            reason_parts.append(f"{real_free_ram}MB physisch frei (Überbuchung erlaubt)")
+        if avail_disk is not None:
+            reason_parts.append(f"{avail_disk}GB Disk frei")
+            
         scored.append(
             {
                 "node_id": n.id,
                 "name": n.name,
                 "status": n.status,
-                "ram_total": n.ram_total,
+                "ram_total_mb": host_total_mb,
                 "ram_allocated_mb": alloc_ram,
                 "ram_running_mb": running_ram,
                 "ram_allocatable_mb": avail_ram,
+                "ram_real_free_mb": real_free_ram,
                 "disk_allocatable_gb": avail_disk,
-                "fits": (avail_ram is None or avail_ram >= ram_need_mb) and (avail_disk is None or avail_disk >= disk_need_gb),
-                "reason": f"frei {avail_ram}MB RAM / {avail_disk}GB Disk" if avail_ram is not None else "Kapazitaet unbekannt, Ueberbuchung moeglich",
+                "overcommit_supported": True,
+                "fits": fits,
+                "reason": " / ".join(reason_parts) if reason_parts else "Kapazitaet bereit, Überbuchung erlaubt",
             }
         )
     scored.sort(key=lambda x: (not x["fits"], -(x["ram_allocatable_mb"] or 0)))
