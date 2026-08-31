@@ -316,7 +316,7 @@ def _global_tool_definitions() -> list[dict]:
     from services.cloudflare_service import is_configured as is_cloudflare_configured
     if is_cloudflare_configured():
         optional.append(_function("cloudflare_list_zones", "Listet Cloudflare Zonen, Domains und Hauptdomains auf. Vor jedem DNS-Create immer aufrufen um zone_id zu ermitteln.", {}, []))
-        optional.append(_function("cloudflare_list_dns_records", "Listet alle DNS Records, Subdomains, Hostnames und Einträge einer Zone/Domain auf. Vor create auf Kollision pruefen.", {"zone_id": {"type": "string", "maxLength": 64}}, ["zone_id"]))
+        optional.append(_function("cloudflare_list_dns_records", "Listet alle DNS Records, Subdomains, Hostnames und Einträge einer Zone/Domain auf (z.B. zone_id oder Domain wie 'mauntingstudios.de' oder leer fuer Standardzone). Vor create auf Kollision pruefen.", {"zone_id": {"type": "string", "maxLength": 128}}, []))
 
     optional.append(_function("advise_node_placement", "Empfiehlt einen Host fuer einen neuen Server. Nutze vor propose_server_create um RAM/Disk bewusst zu waehlen. Unterscheidet gebucht vs wirklich belegt.", {"ram_need_mb": {"type": "integer", "minimum": 512}, "disk_need_gb": {"type": "integer", "minimum": 1}}, ["ram_need_mb"]))
     optional.append(_function("search_curseforge_modpacks", "Sucht Modpacks auf CurseForge (classId 432). Fuer Minecraft und Spiele mit Modpack-Support. Liefert id, name, downloads.", {"query": {"type": "string", "maxLength": 128}, "game_id": {"type": "string", "maxLength": 12}}, ["query"]))

@@ -55,25 +55,45 @@ async def test_connection() -> dict[str, Any]:
 
 
 async def _resolve_zone_id(zone_or_name: str | None) -> str:
-    target = (zone_or_name or "").strip().replace("\n", "").replace("\r", "")
-    # Falls es bereits eine 32-stellige Hex-Zone-ID ist
-    if len(target) == 32 and all(c in "0123456789abcdefABCDEF" for c in target):
-        return target
+    target = (zone_or_name or "").strip().replace("\n", "").replace("\r", "").lower()
     zones = await list_zones()
+    if not zones:
+        raise CloudflareApiUnavailable("no_zones_found")
+
+    # 1. Direkte Übereinstimmung mit Zonen-ID
     if target:
         for z in zones:
-            if z.get("name", "").lower() == target.lower() or z.get("id") == target:
+            if str(z.get("id", "")).lower() == target:
                 return str(z["id"])
+
+    # 2. Direkte Übereinstimmung mit Zonen-Name (z.B. "mauntingstudios.de")
+    if target:
+        for z in zones:
+            if z.get("name", "").lower() == target:
+                return str(z["id"])
+
+        # 3. Subdomain- / Suffix-Matching (z.B. target="test.mauntingstudios.de" -> zone="mauntingstudios.de")
+        for z in zones:
+            z_name = z.get("name", "").lower()
+            if z_name and (target.endswith("." + z_name) or z_name in target):
+                return str(z["id"])
+
+    # 4. Standard-Zone aus den Panel-Einstellungen
     from services.panel_settings_service import PanelSettingsService
-    default_zone = PanelSettingsService.get("cloudflare_default_zone", "")
+    default_zone = PanelSettingsService.get("cloudflare_default_zone", "").strip().lower()
     if default_zone:
         for z in zones:
-            if z.get("name", "").lower() == default_zone.lower() or z.get("id") == default_zone:
+            if z.get("name", "").lower() == default_zone or str(z.get("id", "")).lower() == default_zone:
                 return str(z["id"])
+
+    # 5. Falls genau 1 Zone vorhanden ist, nimm diese
     if len(zones) == 1:
         return str(zones[0]["id"])
-    if target:
-        raise CloudflareApiUnavailable(f"zone_not_found: {target}")
+
+    # 6. Automatischer Fallback auf die erste verfügbare Zone
+    if zones:
+        return str(zones[0]["id"])
+
     raise CloudflareApiUnavailable("zone_id_missing")
 
 
