@@ -39,6 +39,7 @@ function usage(tokensToday: number, dailyLimit: number | null): AiUsageMine {
       concurrent_operations: null,
       monthly_cost_limit_cents: null,
       monthly_realtime_cost_limit_cents: null,
+      monthly_dictation_minutes_limit: null,
       role_ids: [],
     },
   }

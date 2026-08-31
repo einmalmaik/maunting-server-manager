@@ -62,6 +62,7 @@ def _zugang(
         requires_api_key=True,
         default_voice=stimme if stimmzugang else None,
         transcription_model=None if stimmzugang else hoeren,
+        standard_enabled=not stimmzugang,
     )
     db.add(zugang)
     db.flush()
@@ -126,7 +127,6 @@ def test_with_both_accesses_the_config_names_the_thinking_model(
     _beide(db)
 
     daten = client.get("/api/ai/voice/config", cookies=owner_cookies).json()
-
     assert daten["available"] is True
     assert daten["model"] == "openai/gpt-5.6-luna"
     # Die Oberflaeche braucht beides: die Abtastrate fuer die Aufnahme und die

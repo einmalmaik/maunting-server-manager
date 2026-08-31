@@ -56,12 +56,14 @@ async def hoeren(
     except ai_stt.NichtsVerstanden:
         return HoerErgebnis(abschrift=None, grund="unverstanden")
     abschrift = Abschrift(wortlaut=wortlaut, messwerte=messwerte)
+    dauer_sekunden = max(1, round(len(pcm) / 48_000)) if pcm else 1
     gebucht = await asyncio.to_thread(
         abschrift_verbuchen,
         user_id=user_id,
         zugang=zugang,
         messwerte=abschrift.messwerte,
         wortlaut=abschrift.wortlaut,
+        dauer_sekunden=dauer_sekunden,
     )
     if not gebucht:
         return HoerErgebnis(abschrift=None, grund="kontingent")
@@ -83,7 +85,7 @@ def zugang_holen(
 
 
 def abschrift_verbuchen(
-    *, user_id: int, zugang: AiProvider, messwerte: StreamUsage, wortlaut: str
+    *, user_id: int, zugang: AiProvider, messwerte: StreamUsage, wortlaut: str, dauer_sekunden: int = 1
 ) -> bool:
     """Bucht nach erfolgreicher Transkription; ``False`` bedeutet nur Kontingent."""
 
@@ -105,6 +107,7 @@ def abschrift_verbuchen(
                 request_id=uuid4(),
                 estimated_tokens=geschaetzt,
                 estimated_cost_microunits=estimate_cost_microunits(zugang, geschaetzt),
+                dictation_seconds=dauer_sekunden,
                 provider_id=zugang.id,
                 model=zugang.transcription_model,
             )

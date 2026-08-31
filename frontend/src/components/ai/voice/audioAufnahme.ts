@@ -48,10 +48,16 @@ export interface Aufnahme {
    *
    * Fällt hier nebenbei ab: die Pakete gehen ohnehin durch, und der
    * Effektivwert kostet eine Schleife über Zahlen, die schon im Cache liegen.
-   * Ein zweiter `AnalyserNode` nur zum Anzeigen wäre ein zweiter Abgriff auf
-   * dasselbe Signal.
    */
   pegel(): number
+  /**
+   * Frequenzspektrum (0 bis 255 je Band) für Wellen-Visualisierungen.
+   */
+  frequenzen?(): Uint8Array
+  /**
+   * Zeitbereichs-Wellenform (0 bis 255 je Sample, 128 = Nulllinie).
+   */
+  wellen?(): Uint8Array
 }
 
 /**
@@ -182,6 +188,23 @@ function baueKette(
     aufPaket(zuInt16(resampled))
   }
 
+  // Ein AnalyserNode für flüssige Wellen- und Frequenzvisualisierungen.
+  let analysierer: AnalyserNode | null = null
+  let frequenzPuffer: Uint8Array | null = null
+  let wellenPuffer: Uint8Array | null = null
+  try {
+    if (typeof kontext.createAnalyser === 'function') {
+      analysierer = kontext.createAnalyser()
+      analysierer.fftSize = 128
+      analysierer.smoothingTimeConstant = 0.8
+      eingang.connect(analysierer)
+      frequenzPuffer = new Uint8Array(analysierer.frequencyBinCount)
+      wellenPuffer = new Uint8Array(analysierer.fftSize)
+    }
+  } catch {
+    analysierer = null
+  }
+
   // Ein `ScriptProcessorNode` läuft nur an, wenn sein Ausgang irgendwo endet —
   // auch dann, wenn niemand ihn hören soll. Der Weg dorthin führt deshalb über
   // eine Verstärkung von null.
@@ -195,9 +218,24 @@ function baueKette(
   let beendet = false
   return {
     pegel: () => (beendet ? 0 : geglaettet),
+    frequenzen: () => {
+      if (beendet || !analysierer || !frequenzPuffer) return new Uint8Array(0)
+      analysierer.getByteFrequencyData(frequenzPuffer as Uint8Array<ArrayBuffer>)
+      return frequenzPuffer
+    },
+    wellen: () => {
+      if (beendet || !analysierer || !wellenPuffer) return new Uint8Array(0)
+      analysierer.getByteTimeDomainData(wellenPuffer as Uint8Array<ArrayBuffer>)
+      return wellenPuffer
+    },
     beenden() {
       if (beendet) return
       beendet = true
+      if (analysierer) {
+        try {
+          analysierer.disconnect()
+        } catch {}
+      }
       prozessor.onaudioprocess = null
       prozessor.disconnect()
       stumm.disconnect()

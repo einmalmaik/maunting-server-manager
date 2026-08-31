@@ -50,6 +50,7 @@ TOKEN_LIMIT_MAX = 2_147_483_647
 REQUESTS_PER_MINUTE_MAX = 10_000
 CONCURRENT_OPERATIONS_MAX = 100
 MONTHLY_COST_LIMIT_CENTS_MAX = 1_000_000_000
+DICTATION_MINUTES_LIMIT_MAX = 100_000
 # Hoechster Rang aus `ai_reasoning.RANGFOLGE` (minimal..max). Bewusst als Zahl
 # hier statt als Import: dieses Modul soll nicht von der Denklogik abhaengen,
 # und `test_ai_reasoning_limits.py` sichert zu, dass beide Werte gleich bleiben.
@@ -139,6 +140,7 @@ LIMIT_FIELDS = (
     "concurrent_operations",
     "monthly_cost_limit_cents",
     "monthly_realtime_cost_limit_cents",
+    "monthly_dictation_minutes_limit",
     # Kein Kontingent, sondern eine Obergrenze fuer die Denktiefe — passt aber
     # in genau dieselbe Aufloesung: "None heisst unbegrenzt", "der hoechste
     # Wert der konfigurierten Rollen gewinnt", "keine Rolle konfiguriert heisst
@@ -179,6 +181,7 @@ LIMIT_MAXIMA = {
     "concurrent_operations": CONCURRENT_OPERATIONS_MAX,
     "monthly_cost_limit_cents": MONTHLY_COST_LIMIT_CENTS_MAX,
     "monthly_realtime_cost_limit_cents": MONTHLY_COST_LIMIT_CENTS_MAX,
+    "monthly_dictation_minutes_limit": DICTATION_MINUTES_LIMIT_MAX,
     "max_reasoning_effort": MAX_REASONING_EFFORT_MAX,
     "max_memory_entries": MAX_MEMORY_ENTRIES_MAX,
 }
@@ -195,6 +198,8 @@ class EffectiveAiLimits:
     concurrent_operations: int | None
     monthly_cost_limit_cents: int | None
     monthly_realtime_cost_limit_cents: int | None
+    #: Monatliches Diktier- und Transkriptionszeitlimit in Minuten; ``None`` heisst unbegrenzt.
+    monthly_dictation_minutes_limit: int | None
     #: Hoechste erlaubte Denkstufe als Rang; ``None`` heisst unbegrenzt.
     max_reasoning_effort: int | None
     #: Rohe Rollenaufloesung des Memory-Vorrats je Bereich. ``None`` heisst hier

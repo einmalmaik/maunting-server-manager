@@ -526,6 +526,9 @@ export interface AiVoiceConfig {
   language?: string
   reasoning_effort?: 'low' | 'medium' | 'high' | null
   dictation_available?: boolean
+  dictation_monthly_limit_minutes?: number | null
+  dictation_used_seconds?: number
+  dictation_remaining_seconds?: number | null
   sample_rate: number
   max_seconds: number
   /**
@@ -863,6 +866,7 @@ export interface AiUsageMine extends AiUsageEntry {
     concurrent_operations: number | null
     monthly_cost_limit_cents: number | null
     monthly_realtime_cost_limit_cents: number | null
+    monthly_dictation_minutes_limit: number | null
     role_ids: number[]
   }
 }

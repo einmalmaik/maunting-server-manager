@@ -46,6 +46,13 @@ import { applyGeoCameraCommand, normalizeGeoCameraCommand, normalizeRegionalAnal
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { starteAufnahme, type Aufnahme } from './voice/audioAufnahme'
+import { DictationWaveform } from './voice/DictationWaveform'
+
+function formatDiktatTimer(sekunden: number): string {
+  const m = Math.floor(sekunden / 60)
+  const s = sekunden % 60
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+}
 
 interface ServerOption {
   id: number
@@ -153,6 +160,12 @@ export function AiChat() {
   const [dictationAvailable, setDictationAvailable] = useState(false)
   const [dictating, setDictating] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
+  const [dictationQuota, setDictationQuota] = useState<{
+    monthly_limit_minutes: number | null
+    used_seconds: number
+    remaining_seconds: number | null
+  } | null>(null)
+  const [dictationElapsed, setDictationElapsed] = useState(0)
   // Welche eigene Nachricht gerade umformuliert wird, und womit.
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
@@ -193,21 +206,55 @@ export function AiChat() {
     let active = true
     if (!providerId || !canUseVoice) {
       setDictationAvailable(false)
+      setDictationQuota(null)
       return
     }
     aiApi.getVoiceConfig(providerId)
-      .then((config) => { if (active) setDictationAvailable(Boolean(config.dictation_available)) })
-      .catch(() => { if (active) setDictationAvailable(false) })
+      .then((config) => {
+        if (active) {
+          setDictationAvailable(Boolean(config.dictation_available))
+          setDictationQuota({
+            monthly_limit_minutes: config.dictation_monthly_limit_minutes ?? null,
+            used_seconds: config.dictation_used_seconds ?? 0,
+            remaining_seconds: config.dictation_remaining_seconds ?? null,
+          })
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setDictationAvailable(false)
+          setDictationQuota(null)
+        }
+      })
     return () => { active = false }
   }, [providerId, canUseVoice])
+
+  const diktatAbbrechen = useCallback(() => {
+    if (dictationRef.current) {
+      dictationRef.current.beenden()
+      dictationRef.current = null
+    }
+    dictationChunksRef.current = []
+    setDictating(false)
+    setDictationElapsed(0)
+  }, [])
 
   const diktatUmschalten = useCallback(async () => {
     if (!providerId || transcribing) return
     if (!dictationRef.current) {
+      if (
+        dictationQuota?.remaining_seconds !== null &&
+        dictationQuota?.remaining_seconds !== undefined &&
+        dictationQuota.remaining_seconds <= 0
+      ) {
+        toast.error(t('ai.chat.dictationQuotaExceeded'))
+        return
+      }
       dictationChunksRef.current = []
       try {
         dictationRef.current = await starteAufnahme((chunk) => dictationChunksRef.current.push(chunk))
         setDictating(true)
+        setDictationElapsed(0)
       } catch {
         toast.error(t('ai.chat.dictationError'))
       }
@@ -216,6 +263,7 @@ export function AiChat() {
     dictationRef.current.beenden()
     dictationRef.current = null
     setDictating(false)
+    setDictationElapsed(0)
     const chunks = dictationChunksRef.current
     dictationChunksRef.current = []
     const bytes = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
@@ -239,12 +287,41 @@ export function AiChat() {
         inputRef.current?.setSelectionRange(cursor, cursor)
         inputRef.current?.focus()
       })
+      // Restkontingent aktualisieren
+      aiApi.getVoiceConfig(providerId).then((config) => {
+        setDictationQuota({
+          monthly_limit_minutes: config.dictation_monthly_limit_minutes ?? null,
+          used_seconds: config.dictation_used_seconds ?? 0,
+          remaining_seconds: config.dictation_remaining_seconds ?? null,
+        })
+      }).catch(() => {})
     } catch {
       toast.error(t('ai.chat.dictationError'))
     } finally {
       setTranscribing(false)
     }
-  }, [input, providerId, t, transcribing])
+  }, [dictationQuota, input, providerId, t, transcribing])
+
+  useEffect(() => {
+    if (!dictating) {
+      setDictationElapsed(0)
+      return
+    }
+    const timer = setInterval(() => {
+      setDictationElapsed((prev) => {
+        const next = prev + 1
+        if (
+          dictationQuota?.remaining_seconds !== null &&
+          dictationQuota?.remaining_seconds !== undefined &&
+          next >= dictationQuota.remaining_seconds
+        ) {
+          void diktatUmschalten()
+        }
+        return next
+      })
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [dictating, dictationQuota, diktatUmschalten])
 
   useEffect(() => () => dictationRef.current?.beenden(), [])
 
@@ -1238,71 +1315,139 @@ export function AiChat() {
           )}
 
           <div className="flex items-end gap-2 rounded-2xl border border-outline-variant/50 bg-surface-container-low/50 p-2 focus-within:border-primary/50">
-            {canAttach && (
-              <label
-                className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-on-surface-variant transition-colors ${
-                  uploading ? 'pointer-events-none opacity-50' : 'cursor-pointer hover:bg-surface-container-high hover:text-on-surface'
-                }`}
-                title={t('ai.attachments.add')}
-              >
-                {uploading
-                  ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  : <Paperclip className="h-4 w-4" aria-hidden="true" />}
-                <input
-                  type="file" className="sr-only" disabled={uploading} accept={ATTACHMENT_ACCEPT}
-                  aria-label={t('ai.attachments.add')}
-                  onChange={(event) => {
-                    void uploadAttachment(event.target.files?.[0])
-                    event.target.value = ''
-                  }}
-                />
-              </label>
-            )}
-            <textarea
-              ref={inputRef}
-              className="max-h-40 min-h-9 flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-6 text-on-surface placeholder:text-on-surface-variant focus:outline-none"
-              rows={1}
-              maxLength={16000}
-              value={input}
-              onChange={(event) => {
-                setInput(event.target.value)
-                // Nur bei tatsächlichem Inhalt: ein geleertes Feld ist kein
-                // Schreiben, und die Karenz soll dann normal ablaufen.
-                if (event.target.value.trim()) tippSignal()
-                // Waechst mit dem Text, wie man es von einem Chat kennt.
-                event.target.style.height = 'auto'
-                event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`
-              }}
-              onKeyDown={(event) => {
-                // Enter sendet/reiht ein, Shift+Enter macht einen Umbruch. Alt+Enter unterbricht und sendet sofort.
-                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault()
-                  if (event.altKey && streaming) {
-                    void sendImmediatelyAndInterrupt(input)
-                  } else {
-                    void send(event as unknown as React.FormEvent)
+            {dictating ? (
+              <div className="flex flex-1 items-center gap-2 sm:gap-3 py-0.5 min-w-0">
+                {/* Status-Badge mit pulsierendem Punkt & Laufzeit-Timer */}
+                <div className="flex items-center gap-1.5 shrink-0 rounded-lg border border-status-danger/30 bg-status-danger/10 px-2.5 py-1 text-xs font-medium text-status-danger">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-danger opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-status-danger" />
+                  </span>
+                  <span className="tabular-nums font-semibold tracking-wider">
+                    {formatDiktatTimer(dictationElapsed)}
+                  </span>
+                </div>
+
+                {/* Restkontingent-Badge */}
+                <div
+                  className="hidden xs:flex items-center gap-1 shrink-0 rounded-lg border border-outline-variant/40 bg-surface-container-low/60 px-2 py-1 text-xs text-on-surface-variant"
+                  title={
+                    dictationQuota?.monthly_limit_minutes != null
+                      ? `Monatliches Limit: ${dictationQuota.monthly_limit_minutes} Min.`
+                      : 'Unbegrenztes Diktierkontingent'
                   }
-                }
-              }}
-              placeholder={streaming ? 'Nachricht in Warteschlange einreihen oder mit Alt+Enter sofort senden…' : t('ai.chat.placeholder')}
-              disabled={uploading || availableProviders.length === 0}
-              aria-label={t('ai.chat.message')}
-            />
-            {dictationAvailable && (
-              <Button
-                type="button"
-                size="sm"
-                variant={dictating ? 'secondary' : 'ghost'}
-                className="h-9 w-9 shrink-0 rounded-full p-0"
-                disabled={transcribing || uploading || !providerId}
-                onClick={() => void diktatUmschalten()}
-                aria-label={dictating ? t('ai.chat.dictationStop') : t('ai.chat.dictationStart')}
-                title={dictating ? t('ai.chat.dictationStop') : t('ai.chat.dictationStart')}
-              >
-                {transcribing
-                  ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  : <Mic className={`h-4 w-4 ${dictating ? 'text-status-danger' : ''}`} aria-hidden="true" />}
-              </Button>
+                >
+                  <span className="tabular-nums font-medium text-on-surface">
+                    {dictationQuota?.monthly_limit_minutes != null
+                      ? t('ai.chat.dictationRemaining', {
+                          min: Math.max(
+                            0,
+                            Math.ceil(
+                              ((dictationQuota.remaining_seconds ?? 0) - dictationElapsed) / 60,
+                            ),
+                          ),
+                        })
+                      : t('ai.chat.dictationUnlimited')}
+                  </span>
+                </div>
+
+                {/* Stimmreaktive Wellenform */}
+                <div className="flex-1 h-9 min-w-[50px] max-w-full overflow-hidden rounded-md">
+                  <DictationWaveform aufnahme={dictationRef.current} className="h-full w-full" />
+                </div>
+
+                {/* Aktionen: Verwerfen & Beenden/Einfügen */}
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 w-8 rounded-full p-0 text-on-surface-variant hover:text-status-danger hover:bg-status-danger/10"
+                    onClick={diktatAbbrechen}
+                    aria-label={t('ai.chat.dictationCancel')}
+                    title={t('ai.chat.dictationCancel')}
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 shrink-0 rounded-full px-2.5 text-xs flex items-center gap-1 bg-primary/15 text-primary hover:bg-primary/25 border border-primary/30"
+                    onClick={() => void diktatUmschalten()}
+                    aria-label={t('ai.chat.dictationStop')}
+                    title={t('ai.chat.dictationStop')}
+                  >
+                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span className="hidden sm:inline">{t('ai.chat.dictationStop')}</span>
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {canAttach && (
+                  <label
+                    className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-on-surface-variant transition-colors ${
+                      uploading ? 'pointer-events-none opacity-50' : 'cursor-pointer hover:bg-surface-container-high hover:text-on-surface'
+                    }`}
+                    title={t('ai.attachments.add')}
+                  >
+                    {uploading
+                      ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      : <Paperclip className="h-4 w-4" aria-hidden="true" />}
+                    <input
+                      type="file" className="sr-only" disabled={uploading} accept={ATTACHMENT_ACCEPT}
+                      aria-label={t('ai.attachments.add')}
+                      onChange={(event) => {
+                        void uploadAttachment(event.target.files?.[0])
+                        event.target.value = ''
+                      }}
+                    />
+                  </label>
+                )}
+                <textarea
+                  ref={inputRef}
+                  className="max-h-40 min-h-9 flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-6 text-on-surface placeholder:text-on-surface-variant focus:outline-none"
+                  rows={1}
+                  maxLength={16000}
+                  value={input}
+                  onChange={(event) => {
+                    setInput(event.target.value)
+                    if (event.target.value.trim()) tippSignal()
+                    event.target.style.height = 'auto'
+                    event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                      event.preventDefault()
+                      if (event.altKey && streaming) {
+                        void sendImmediatelyAndInterrupt(input)
+                      } else {
+                        void send(event as unknown as React.FormEvent)
+                      }
+                    }
+                  }}
+                  placeholder={streaming ? 'Nachricht in Warteschlange einreihen oder mit Alt+Enter sofort senden…' : t('ai.chat.placeholder')}
+                  disabled={uploading || availableProviders.length === 0}
+                  aria-label={t('ai.chat.message')}
+                />
+                {dictationAvailable && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-9 w-9 shrink-0 rounded-full p-0"
+                    disabled={transcribing || uploading || !providerId}
+                    onClick={() => void diktatUmschalten()}
+                    aria-label={t('ai.chat.dictationStart')}
+                    title={t('ai.chat.dictationStart')}
+                  >
+                    {transcribing
+                      ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      : <Mic className="h-4 w-4" aria-hidden="true" />}
+                  </Button>
+                )}
+              </>
             )}
             {/* Direkt neben dem Absenden, weil dort die Entscheidung faellt:
                 wer sieht, dass der Kontext gleich zusammengefasst wird, formuliert

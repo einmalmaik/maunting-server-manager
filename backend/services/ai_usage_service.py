@@ -139,6 +139,7 @@ def reserve_ai_usage(
     minimum_token_headroom: int = 0,
     minimum_cost_headroom_microunits: int = 0,
     realtime: bool = False,
+    dictation_seconds: int = 0,
 ) -> AiUsageEvent:
     """Reserviert eine Anfrage atomar oder liefert dieselbe Reservierung erneut."""
     request_key = _canonical_request_id(request_id)
@@ -151,6 +152,7 @@ def reserve_ai_usage(
         or minimum_token_headroom > TOKEN_LIMIT_MAX
         or minimum_cost_headroom_microunits < 0
         or minimum_cost_headroom_microunits > MAX_COST_MICROUNITS
+        or dictation_seconds < 0
     ):
         raise ValueError("Geschätzter AI-Verbrauch liegt außerhalb des erlaubten Bereichs")
 
@@ -232,6 +234,15 @@ def reserve_ai_usage(
             pruef_kosten,
             "monthly_realtime_cost_limit_cents",
         )
+    if dictation_seconds > 0 or limits.monthly_dictation_minutes_limit is not None:
+        if limits.monthly_dictation_minutes_limit is not None:
+            dictation_limit_seconds = limits.monthly_dictation_minutes_limit * 60
+            _ensure_within(
+                dictation_limit_seconds,
+                _sum_since(db, user.id, month_start, AiUsageEvent.dictation_seconds),
+                dictation_seconds,
+                "monthly_dictation_minutes_limit",
+            )
 
     event = AiUsageEvent(
         request_id=request_key,
@@ -244,6 +255,7 @@ def reserve_ai_usage(
         reserved_cost_microunits=estimated_cost_microunits,
         accounted_tokens=estimated_tokens,
         accounted_cost_microunits=estimated_cost_microunits,
+        dictation_seconds=dictation_seconds if dictation_seconds > 0 else None,
         created_at=current_time,
     )
     try:
@@ -435,9 +447,26 @@ def fail_ai_usage(db: Session, event: AiUsageEvent) -> AiUsageEvent:
     event.status = "failed"
     event.accounted_tokens = 0
     event.accounted_cost_microunits = 0
+    event.dictation_seconds = None
     event.completed_at = datetime.now(timezone.utc)
     db.flush()
     return event
+
+
+def get_user_dictation_quota(db: Session, user: User) -> dict[str, int | None]:
+    """Berechnet die monatliche Diktiergrenze und den bisherigen Verbrauch in Sekunden."""
+    now = datetime.now(timezone.utc)
+    _, _, month_start = _period_starts(now)
+    limits = resolve_effective_limits(db, user)
+    used_seconds = _sum_since(db, user.id, month_start, AiUsageEvent.dictation_seconds)
+    limit_minutes = limits.monthly_dictation_minutes_limit
+    limit_seconds = limit_minutes * 60 if limit_minutes is not None else None
+    remaining_seconds = max(0, limit_seconds - used_seconds) if limit_seconds is not None else None
+    return {
+        "monthly_limit_minutes": limit_minutes,
+        "used_seconds": used_seconds,
+        "remaining_seconds": remaining_seconds,
+    }
 
 
 def realtime_verbrauch_ergaenzen(

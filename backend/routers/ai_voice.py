@@ -42,6 +42,7 @@ from services import (
     ai_provider_registry,
     ai_provider_service,
     ai_tts,
+    ai_usage_service,
     ai_voice_bridge,
     ai_voice_vad,
 )
@@ -240,8 +241,9 @@ def voice_config(
     zugaenge = None if realtime else sprachzugang(db, user, bevorzugter_provider_id=provider_id)
     hoeren, denken, sprechen = zugaenge if zugaenge else (None, None, None)
     diktat = _hoerender_zugang(db, provider_id or user.ai_provider_id)
+    diktat_kontingent = ai_usage_service.get_user_dictation_quota(db, user)
     return {
-        "available": realtime is not None or (zugaenge is not None and pipecat_verfuegbar()),
+        "available": realtime is not None or zugaenge is not None,
         "mode": "openai_realtime" if realtime else "legacy",
         # Das denkende Modell, nicht das hörende: danach fragt, wer wissen will,
         # wer da antwortet.
@@ -257,6 +259,9 @@ def voice_config(
         "dictation_available": bool(
             diktat and has_global_permission(db, user, "ai.chat.use")
         ),
+        "dictation_monthly_limit_minutes": diktat_kontingent["monthly_limit_minutes"],
+        "dictation_used_seconds": diktat_kontingent["used_seconds"],
+        "dictation_remaining_seconds": diktat_kontingent["remaining_seconds"],
         # Fähigkeitsmarker für die Desktop-App: dieses Backend nimmt das
         # Bearer-Token als WebSocket-Subprotokoll an. Ein gescheiterter
         # WS-Handshake verrät dem Browser nichts — die App fragt dann hier

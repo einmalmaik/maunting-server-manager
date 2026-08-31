@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, SecretStr
 
 from services.ai_limit_service import (
     CONCURRENT_OPERATIONS_MAX,
+    DICTATION_MINUTES_LIMIT_MAX,
     MAX_MEMORY_ENTRIES_MAX,
     MAX_REASONING_EFFORT_MAX,
     MONTHLY_COST_LIMIT_CENTS_MAX,
@@ -19,6 +20,7 @@ TokenLimit = Annotated[int | None, Field(ge=0, le=TOKEN_LIMIT_MAX)]
 RequestLimit = Annotated[int | None, Field(ge=0, le=REQUESTS_PER_MINUTE_MAX)]
 ConcurrencyLimit = Annotated[int | None, Field(ge=0, le=CONCURRENT_OPERATIONS_MAX)]
 CostLimit = Annotated[int | None, Field(ge=0, le=MONTHLY_COST_LIMIT_CENTS_MAX)]
+DictationMinutesLimit = Annotated[int | None, Field(ge=0, le=DICTATION_MINUTES_LIMIT_MAX)]
 #: Denktiefe als Rang: 0 = gar nicht, 1 = minimal … 6 = max. ``None`` heißt
 #: unbegrenzt — dieselbe Bedeutung wie bei den Kontingenten darüber.
 ReasoningLimit = Annotated[int | None, Field(ge=0, le=MAX_REASONING_EFFORT_MAX)]
@@ -49,6 +51,7 @@ class AiLimitsBase(BaseModel):
     concurrent_operations: ConcurrencyLimit
     monthly_cost_limit_cents: CostLimit
     monthly_realtime_cost_limit_cents: CostLimit = None
+    monthly_dictation_minutes_limit: DictationMinutesLimit = None
     # Kein Kontingent, sondern eine Obergrenze. Steht trotzdem hier, weil der
     # Betreiber sie an derselben Stelle setzt und dieselbe Auflösung über
     # mehrere Rollen gilt.
