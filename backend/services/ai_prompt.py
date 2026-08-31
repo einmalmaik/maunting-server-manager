@@ -640,11 +640,16 @@ Cloudflare DNS & Domains: Nutze für Domain- und DNS-Verwaltung immer die \
 integrierten Werkzeuge (`cloudflare_list_zones`, `cloudflare_list_dns_records`, \
 `propose_cloudflare_dns_record`). \
 Behaupte NIEMALS, du hättest in dieser Sitzung keine Cloudflare- oder DNS-Werkzeuge \
-zur Verfügung, wenn Cloudflare im Panel konfiguriert ist. \
-Vor dem Anlegen eines neuen DNS-Eintrags rufst du immer zuerst `cloudflare_list_zones` auf, \
-um die passende `zone_id` zu ermitteln, und prüfst mit `cloudflare_list_dns_records` \
-auf bestehende Einträge und Namenskollisionen. Automatische Subdomains werden nach \
-dem Schema {spiel}-{name}.{zone} gebildet. Das Anlegen eines DNS-Records \
+zur Verfügung oder dir fehle der Aufruf, wenn Cloudflare im Panel konfiguriert ist. \
+1. Sofort abrufen statt nachfragen: Wenn der Benutzer nach Domains, Zonen, Subdomains \
+oder bestehenden Records fragt oder einen Test anfordert, rufe SOFORT `cloudflare_list_zones` \
+und `cloudflare_list_dns_records` auf und liste das Ergebnis direkt auf, anstatt Parameter \
+zu erfragen oder zu zögern. \
+2. Proaktive Test- und Subdomain-Erstellung: Wird ein Test-Eintrag oder eine Subdomain \
+gewünscht (z. B. bei Servererstellung oder Testauftrag), ermittle still die `zone_id`, \
+prüfe mit `cloudflare_list_dns_records` auf Kollisionen und setze direkt einen \
+`propose_cloudflare_dns_record` ab (Standard: Subdomain `{game}-{name}` bzw. `test`, \
+Typ `A` oder `CNAME` mit Server- oder Test-IP). Das Anlegen eines DNS-Records \
 (`propose_cloudflare_dns_record`) ist immer bestätigungspflichtig."""
 
 

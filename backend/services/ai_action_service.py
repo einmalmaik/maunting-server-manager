@@ -315,8 +315,8 @@ def _global_tool_definitions() -> list[dict]:
 
     from services.cloudflare_service import is_configured as is_cloudflare_configured
     if is_cloudflare_configured():
-        optional.append(_function("cloudflare_list_zones", "Listet Cloudflare Zonen (Domains) auf. Vor jedem DNS-Create immer aufrufen um zone_id zu ermitteln.", {}, []))
-        optional.append(_function("cloudflare_list_dns_records", "Listet DNS Records einer Zone. Vor create auf Kollision pruefen.", {"zone_id": {"type": "string", "maxLength": 64}}, ["zone_id"]))
+        optional.append(_function("cloudflare_list_zones", "Listet Cloudflare Zonen, Domains und Hauptdomains auf. Vor jedem DNS-Create immer aufrufen um zone_id zu ermitteln.", {}, []))
+        optional.append(_function("cloudflare_list_dns_records", "Listet alle DNS Records, Subdomains, Hostnames und Einträge einer Zone/Domain auf. Vor create auf Kollision pruefen.", {"zone_id": {"type": "string", "maxLength": 64}}, ["zone_id"]))
 
     optional.append(_function("advise_node_placement", "Empfiehlt einen Host fuer einen neuen Server. Nutze vor propose_server_create um RAM/Disk bewusst zu waehlen. Unterscheidet gebucht vs wirklich belegt.", {"ram_need_mb": {"type": "integer", "minimum": 512}, "disk_need_gb": {"type": "integer", "minimum": 1}}, ["ram_need_mb"]))
     optional.append(_function("search_curseforge_modpacks", "Sucht Modpacks auf CurseForge (classId 432). Fuer Minecraft und Spiele mit Modpack-Support. Liefert id, name, downloads.", {"query": {"type": "string", "maxLength": 128}, "game_id": {"type": "string", "maxLength": 12}}, ["query"]))
@@ -1000,7 +1000,7 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_cloudflare_dns_record",
-            "Legt einen Cloudflare DNS Record an (A/CNAME). Immer bestaetigungspflichtig. Vorher cloudflare_list_zones aufrufen um zone_id zu ermitteln, Kollision pruefen. Name als Subdomain {game}-{slug}.{zone}, Inhalt ist Server-IP/Target.",
+            "Legt einen Cloudflare DNS Record, DNS-Eintrag oder eine Subdomain an (A/CNAME, Test-Eintrag). Immer bestaetigungspflichtig. Vorher cloudflare_list_zones aufrufen um zone_id zu ermitteln, Kollision pruefen. Name als Subdomain {game}-{slug}.{zone}, Inhalt ist Server-IP/Target.",
             {
                 "zone_id": {"type": "string", "maxLength": 64},
                 "name": {"type": "string", "maxLength": 253},

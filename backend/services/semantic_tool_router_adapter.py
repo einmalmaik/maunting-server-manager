@@ -138,8 +138,19 @@ class SemanticToolRouterAdapter:
         hot = [n for n in HOTSET if n in allowed]
         seen = set(hot)
         result = list(hot)
+        # Cluster-Erweiterung: Wenn ein Werkzeug gewählt wurde, schalte seine gesamte Gruppe frei
+        group_peers: list[str] = []
+        for n in routed:
+            w = WERKZEUGE.get(n)
+            if w and w.gruppe:
+                for peer_name, peer_w in WERKZEUGE.items():
+                    if peer_w.gruppe == w.gruppe and peer_name in allowed and peer_name not in seen:
+                        group_peers.append(peer_name)
+                        seen.add(peer_name)
         for n in routed:
             if n not in seen:
                 result.append(n)
                 seen.add(n)
+        for n in group_peers:
+            result.append(n)
         return result

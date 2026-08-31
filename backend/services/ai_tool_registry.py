@@ -154,10 +154,10 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Suchschluessel steht `web_search` gar nicht erst im Katalog
     # (`ai_action_service._global_tool_definitions`).
     "web_search": Werkzeug("global_read", angebot=("ai.web_search.use",)),
-    "search_curseforge_modpacks": Werkzeug("global_read", angebot=("server.mods.read",)),
-    "advise_node_placement": Werkzeug("global_read", angebot=("servers.create",)),
-    "cloudflare_list_zones": Werkzeug("global_read", angebot=("cloudflare.manage",)),
-    "cloudflare_list_dns_records": Werkzeug("global_read", angebot=("cloudflare.manage",)),
+    "search_curseforge_modpacks": Werkzeug("global_read", gruppe="mods", angebot=("server.mods.read",)),
+    "advise_node_placement": Werkzeug("global_read", gruppe="nodes", angebot=("servers.create",)),
+    "cloudflare_list_zones": Werkzeug("global_read", gruppe="domains", angebot=("cloudflare.manage",)),
+    "cloudflare_list_dns_records": Werkzeug("global_read", gruppe="domains", angebot=("cloudflare.manage",)),
 
     # Satelliten- und Regionsanalyse ueber Copernicus / Sentinel & Open-Meteo.
     # Steht ohne hinterlegte Zugangsdaten gar nicht erst im Katalog.
@@ -691,12 +691,14 @@ WERKZEUGE: dict[str, Werkzeug] = {
     ),
     "propose_cloudflare_dns_record": Werkzeug(
         "global_write",
+        gruppe="domains",
         immer_bestaetigen=True,
         recht="cloudflare.manage",
         recht_global=True,
     ),
     "propose_modpack_install": Werkzeug(
         "server_write",
+        gruppe="mods",
         recht="server.mods.write",
     ),
 
