@@ -5,6 +5,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "calendar": "Calendar",
+    "notes": "Notes",
     "servers": "Servers",
     "users": "Users",
     "roles": "Roles",
@@ -92,6 +93,53 @@
     "workspaceSubtitle": "Inspect tables, rows, and database statistics.",
     "admin": "Admin access",
     "readOnly": "Read only"
+  },
+  "notes": {
+    "eyebrow": "MSM / MSS Knowledge Hub",
+    "title": "Notes",
+    "description": "Organize, sort, and share notes, checklists, and tasks across your team.",
+    "newNote": "New Note",
+    "editNote": "Edit Note",
+    "deleteNote": "Delete Note",
+    "deleteConfirm": "Do you really want to delete this note?",
+    "searchPlaceholder": "Search notes...",
+    "categoryAll": "All Categories",
+    "categoryPersonal": "Personal",
+    "categoryShopping": "Shopping List",
+    "categoryTodo": "Tasks",
+    "categoryWork": "Work",
+    "categoryIdea": "Idea",
+    "categoryMeeting": "Meeting",
+    "sortBy": "Sort by",
+    "sortUpdated": "Recently updated",
+    "sortCreated": "Date created",
+    "sortTitle": "Alphabetical",
+    "pinnedSection": "Pinned",
+    "allNotesSection": "All Notes",
+    "emptyTitle": "No notes yet",
+    "emptyDesc": "Create a new note or dictate one directly through the AI assistant.",
+    "emptySearch": "No matching notes found.",
+    "noteTitle": "Title",
+    "noteTitlePlaceholder": "e.g. Shopping List, Project Ideas...",
+    "noteContent": "Content",
+    "noteContentPlaceholder": "Write your note, checklist [ ] or formatted text...",
+    "categoryLabel": "Category",
+    "colorLabel": "Color",
+    "scopeLabel": "Visibility",
+    "scopePersonal": "Private (Only me)",
+    "scopeTeam": "Share with team",
+    "selectTeam": "Select team",
+    "pinLabel": "Pin to top",
+    "archiveLabel": "Archive",
+    "save": "Save",
+    "cancel": "Cancel",
+    "createSuccess": "Note created successfully",
+    "updateSuccess": "Note saved",
+    "deleteSuccess": "Note deleted",
+    "errorLoading": "Error loading notes",
+    "errorSaving": "Error saving note",
+    "teamBadge": "Team",
+    "archivedBadge": "Archived"
   },
   "audit": {
     "title": "Audit log",
@@ -589,6 +637,9 @@
         "propose_calendar_event_update": "Update calendar event",
         "propose_calendar_event_delete": "Delete calendar event",
         "propose_popup_create": "Create pop-up announcement",
+        "propose_note_create": "Create note",
+        "propose_note_update": "Update note",
+        "propose_note_delete": "Delete note",
         "desktop_artifact": "Desktop artifact (software/mod/installer)",
         "read_server_status": "Read server status",
         "read_server_capacity": "Read server capacity",
@@ -650,7 +701,10 @@
         "propose_calendar_event_create": "Create event “{{title}}” in your calendar now?",
         "propose_calendar_event_update": "Update this calendar event with the new details now?",
         "propose_calendar_event_delete": "Delete this event from your calendar? This cannot be undone.",
-        "propose_popup_create": "Create this pop-up announcement for the panel now?"
+        "propose_popup_create": "Create this pop-up announcement for the panel now?",
+        "propose_note_create": "Create note “{{title}}” now?",
+        "propose_note_update": "Update this note with the new details?",
+        "propose_note_delete": "Permanently delete this note? This cannot be undone."
       },
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",
@@ -795,7 +849,13 @@
       "propose_file_delete": "File deletion prepared",
       "analyze_region": "Analyzed the region and satellite data",
       "control_region_camera": "Adjusted the map view",
-      "voice_resolve_latest_proposal": "Voice confirmation processed"
+      "voice_resolve_latest_proposal": "Voice confirmation processed",
+      "notes_read": "Notes queried",
+      "voice_leave_region_view": "Exited region view",
+      "voice_set_region_view": "Opened region view",
+      "propose_note_create": "Note creation prepared",
+      "propose_note_update": "Note update prepared",
+      "propose_note_delete": "Note deletion prepared"
     },
     "toolsRunning": {
       "ask_user": "Asking a quick question",
@@ -878,7 +938,13 @@
       "set_agent_name": "Taking on my new name",
       "analyze_region": "Analyzing the region and satellite data",
       "control_region_camera": "Adjusting the map view",
-      "voice_resolve_latest_proposal": "Processing voice confirmation"
+      "voice_resolve_latest_proposal": "Processing voice confirmation",
+      "notes_read": "Looking through your notes",
+      "voice_leave_region_view": "Closing region view",
+      "voice_set_region_view": "Opening region view",
+      "propose_note_create": "Preparing the note",
+      "propose_note_update": "Preparing the note update",
+      "propose_note_delete": "Preparing to delete the note"
     },
     "errors": {
       "codes": {
@@ -2173,6 +2239,10 @@
       "title": "Connect calendars",
       "desc": "Link calendars for automated scheduling and reminders."
     },
+    "ai_notes_use": {
+      "title": "Manage notes",
+      "desc": "Create and manage personal or team notes, checklists, and tasks through the AI assistant."
+    },
     "ai_usage_read_all": {
       "title": "View all users' AI usage",
       "desc": "View token usage and cost metrics for all registered users."
@@ -2828,6 +2898,8 @@
     "desktopDownloadPromoHint": "Displays a download link to the Desktop App for Windows (MSS) in the sidebar.",
     "calendarEnabled": "Integrated Calendar",
     "calendarEnabledHint": "Enables the calendar module in the panel and allows AI scheduling.",
+    "notesEnabled": "Integrated Notes",
+    "notesEnabledHint": "Enables the notes module in the panel and allows AI note management.",
     "testEmail": "Send test email",
     "testEmailTo": "Test email to",
     "testEmailSent": "Test email sent",

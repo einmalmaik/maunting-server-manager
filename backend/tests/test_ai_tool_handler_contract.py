@@ -266,6 +266,11 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     (`email_search`, `email_read`, `calendar_read`, `propose_email_send`,
     `propose_calendar_event_create`, `propose_calendar_event_update`, `propose_calendar_event_delete`) bringen
     zusammen rund 5.500 Zeichen. Die Grenze steht deshalb bei **73.000**.
+
+    **Nachtrag 31.08.2026: Notizen- und Listen-Werkzeuge** — aus
+    der App **76.048** Zeichen, aus dem Panel **70.575**. Die vier Werkzeuge
+    (`notes_read`, `propose_note_create`, `propose_note_update`, `propose_note_delete`) bringen
+    zusammen rund 4.900 Zeichen. Die Grenze steht deshalb bei **78.000**.
     """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(
@@ -279,7 +284,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
             ],
             ensure_ascii=False,
         )
-        assert len(katalog) < 73_000, (
+        assert len(katalog) < 78_000, (
             f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
             f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
             "taucht in keiner Budgetrechnung auf."

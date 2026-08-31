@@ -203,6 +203,24 @@ export function GeneralTab() {
                 />
               </label>
             </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.notesEnabled', 'Notizfunktion & Einkaufslisten')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.notesEnabledHint', 'Ermöglicht persönliche und geteilte Notizen, strukturierte Aufgaben, Checklisten und KI-Diktierfunktionen.')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.notes_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, notes_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.notesEnabled', 'Notizfunktion & Einkaufslisten')}
+                />
+              </label>
+            </div>
           </div>
         </div>
 

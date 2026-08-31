@@ -40,6 +40,7 @@ class PanelSettingsResponse(BaseModel):
     updates_automatic: bool = False
     desktop_app_download_enabled: bool = True
     calendar_enabled: bool = True
+    notes_enabled: bool = True
     captcha_enabled: bool = False
     captcha_provider: str = "none"
     captcha_site_key: str = ""
@@ -54,6 +55,7 @@ class PanelSettingsUpdate(BaseModel):
     imprint_enabled: bool | None = None
     imprint_url: str | None = None
     calendar_enabled: bool | None = None
+    notes_enabled: bool | None = None
     smtp_host: str | None = None
     smtp_port: str | None = None
     smtp_user: str | None = None

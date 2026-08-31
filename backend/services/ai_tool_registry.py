@@ -235,6 +235,9 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "calendar_read": Werkzeug(
         "global_read", gruppe="calendar", angebot=("ai.calendar.use",)
     ),
+    "notes_read": Werkzeug(
+        "global_read", gruppe="notes", angebot=("ai.notes.use",)
+    ),
 
     # ── Rueckfrage ────────────────────────────────────────────────────
     "ask_user": Werkzeug("ask"),
@@ -655,6 +658,24 @@ WERKZEUGE: dict[str, Werkzeug] = {
         "global_write",
         gruppe="calendar",
         recht="ai.calendar.use",
+        recht_global=True,
+    ),
+    "propose_note_create": Werkzeug(
+        "global_write",
+        gruppe="notes",
+        recht="ai.notes.use",
+        recht_global=True,
+    ),
+    "propose_note_update": Werkzeug(
+        "global_write",
+        gruppe="notes",
+        recht="ai.notes.use",
+        recht_global=True,
+    ),
+    "propose_note_delete": Werkzeug(
+        "global_write",
+        gruppe="notes",
+        recht="ai.notes.use",
         recht_global=True,
     ),
     "propose_popup_create": Werkzeug(

@@ -994,6 +994,7 @@ def _global_tool_definitions() -> list[dict]:
         *_aufgaben_tool_definitions(),
         *_worker_tool_definitions(),
         *_mailbox_and_calendar_tool_definitions(),
+        *_notes_tool_definitions(),
     ]
 
 
@@ -1420,6 +1421,143 @@ def _mailbox_and_calendar_tool_definitions() -> list[dict]:
                 **_RATIONALE_SCHEMA,
             },
             ["title", "content_markdown", *_RATIONALE_REQUIRED],
+        ),
+    ]
+
+
+def _notes_tool_definitions() -> list[dict]:
+    """Notiz-Werkzeuge (Persönliche und geteilte Notizen, Aufgaben und Checklisten)."""
+    return [
+        _function(
+            "notes_read",
+            "Liest oder durchsucht die Notizen des Benutzers. Kann nach Suchbegriff, Kategorie oder Team filtern.",
+            {
+                "query": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Optionaler Suchbegriff im Titel oder Inhalt der Notiz.",
+                },
+                "category": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Optionaler Kategorie-Filter (z. B. shopping, todo, work, idea, meeting, personal).",
+                },
+                "team_id": {
+                    "type": "integer",
+                    "description": "Optionale Team-ID (0 = nur persönliche Notizen).",
+                },
+                "is_pinned": {
+                    "type": "boolean",
+                    "description": "Optional: Nur angepinnte Notizen filtern.",
+                },
+            },
+            [],
+        ),
+        _function(
+            "propose_note_create",
+            "Schlägt das Erstellen einer neuen Notiz, Checkliste oder Einkaufsliste vor. "
+            "Inhalte sollen übersichtlich und prägnant formatiert werden (z. B. Markdown, Checklisten [ ] / [x], "
+            "oder Einkaufslisten mit geschätzten Richtpreisen und Gesamtsumme).",
+            {
+                "title": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Prägnanter Titel der Notiz (z. B. 'Einkaufsliste Edeka', 'Projekt-Todos').",
+                },
+                "content": {
+                    "type": "string",
+                    "maxLength": 32000,
+                    "description": "Vollständiger Inhalt der Notiz (strukturiertes Markdown, Checklisten, Mengenangaben).",
+                },
+                "category": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Kategorie: 'personal', 'shopping', 'todo', 'work', 'idea' oder 'meeting'.",
+                },
+                "color": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "Farbakzent: 'primary' (blau), 'emerald' (grün), 'amber' (gelb/orange), 'rose' (rot), 'purple' (lila), 'cyan'.",
+                },
+                "is_pinned": {
+                    "type": "boolean",
+                    "description": "Ob die Notiz oben angepinnt werden soll (Standard: false).",
+                },
+                "note_type": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "'personal' (privat) oder 'team' (im Team geteilt).",
+                },
+                "team_id": {
+                    "type": "integer",
+                    "description": "Optionale Team-ID, falls note_type 'team' ist.",
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            ["title", *_RATIONALE_REQUIRED],
+        ),
+        _function(
+            "propose_note_update",
+            "Schlägt die Bearbeitung oder Ergänzung einer bestehenden Notiz vor.",
+            {
+                "note_id": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "ID oder UID der zu bearbeitenden Notiz.",
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Optionaler neuer Titel.",
+                },
+                "content": {
+                    "type": "string",
+                    "maxLength": 32000,
+                    "description": "Optionaler aktualisierter Inhalt.",
+                },
+                "category": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Optionale Kategorie.",
+                },
+                "color": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "Optionaler Farbakzent.",
+                },
+                "is_pinned": {
+                    "type": "boolean",
+                    "description": "Pin-Status ändern.",
+                },
+                "is_archived": {
+                    "type": "boolean",
+                    "description": "Archivierungsstatus ändern.",
+                },
+                "note_type": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "'personal' oder 'team'.",
+                },
+                "team_id": {
+                    "type": "integer",
+                    "description": "Optionale Team-ID.",
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            ["note_id", *_RATIONALE_REQUIRED],
+        ),
+        _function(
+            "propose_note_delete",
+            "Schlägt das Löschen einer Notiz vor.",
+            {
+                "note_id": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "ID oder UID der zu löschenden Notiz.",
+                },
+                **_RATIONALE_SCHEMA,
+            },
+            ["note_id", *_RATIONALE_REQUIRED],
         ),
     ]
 
@@ -4030,6 +4168,20 @@ def _execute_global_read_tool(
         )
         return {"events": events, "count": len(events)}
 
+    if tool_name == "notes_read":
+        if not permission_service.has_global_permission(db, user, "ai.notes.use"):
+            raise AiActionValidationError("Notiz-Einsicht ist nicht erlaubt")
+        from services.notes_service import NotesService
+
+        query = str(arguments.get("query", "")) if arguments.get("query") else None
+        category = str(arguments.get("category", "")) if arguments.get("category") else None
+        team_id = int(arguments["team_id"]) if arguments.get("team_id") is not None else None
+        is_pinned = bool(arguments["is_pinned"]) if arguments.get("is_pinned") is not None else None
+        notes = NotesService.get_notes(
+            db, user=user, search=query, category=category, team_id=team_id, is_pinned=is_pinned
+        )
+        return {"notes": notes, "count": len(notes)}
+
     if tool_name == "read_blueprint":
         # Ein Blueprint ist eine Vorlage, kein Betriebsgeheimnis: wer Server
         # anlegen **oder** Blueprints pflegen darf, darf ihn lesen. Ohne den
@@ -4545,6 +4697,9 @@ def execute_read_tool(
     elif prefetch_session_id and tool_name == "calendar_read":
         if not permission_service.has_global_permission(db, user, "ai.calendar.use"):
             raise AiActionValidationError("Kalender ist fuer diesen Benutzer nicht freigegeben")
+    elif prefetch_session_id and tool_name == "notes_read":
+        if not permission_service.has_global_permission(db, user, "ai.notes.use"):
+            raise AiActionValidationError("Notizen sind fuer diesen Benutzer nicht freigegeben")
     elif prefetch_session_id and tool_name == "search_memory":
         if not permission_service.has_global_permission(db, user, "ai.memory.use"):
             raise AiActionValidationError("Memory ist fuer diesen Benutzer nicht freigegeben")

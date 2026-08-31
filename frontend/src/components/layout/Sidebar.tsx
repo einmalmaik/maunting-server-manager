@@ -56,12 +56,16 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   }, [mobile])
 
   const [calendarEnabled, setCalendarEnabled] = useState(true)
+  const [notesEnabled, setNotesEnabled] = useState(true)
 
   useEffect(() => {
-    api<{ calendar_enabled?: boolean }>('/settings/public')
+    api<{ calendar_enabled?: boolean; notes_enabled?: boolean }>('/settings/public')
       .then((res) => {
         if (typeof res.calendar_enabled === 'boolean') {
           setCalendarEnabled(res.calendar_enabled)
+        }
+        if (typeof res.notes_enabled === 'boolean') {
+          setNotesEnabled(res.notes_enabled)
         }
       })
       .catch(() => {})
@@ -73,7 +77,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   }
 
   const navItems = buildNavigation({
-    dashboard: t('nav.dashboard'), calendar: t('nav.calendar', 'Kalender'), servers: t('nav.servers'), users: t('nav.users'), roles: t('nav.roles'),
+    dashboard: t('nav.dashboard'), calendar: t('nav.calendar', 'Kalender'), notes: t('nav.notes', 'Notizen'), servers: t('nav.servers'), users: t('nav.users'), roles: t('nav.roles'),
     teams: t('nav.teams'),
     audit: t('nav.audit', 'Audit'),
     settings: t('nav.settings'), blueprints: t('nav.blueprints'), panelBackups: t('nav.panelBackups'),
@@ -81,7 +85,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
   }, {
     owner: Boolean(user?.is_owner), canManageUsers, canManageRoles, canViewAudit, canViewSettings,
     canManagePanelBackups, canReadPanelDatabase, canViewNodes: canReadNodes || canManageNodes, canUseAi, canUseSkills,
-    calendarEnabled,
+    calendarEnabled, notesEnabled,
   })
   const groupLabels: Record<NavGroupName, string> = {
     Overview: t('navGroups.overview', 'Overview'), Infrastructure: t('navGroups.infrastructure', 'Infrastructure'),

@@ -66,6 +66,7 @@ const SUBGROUPS = [
       'ai.desktop.install',
       'ai.mailbox.use',
       'ai.calendar.use',
+      'ai.notes.use',
       'ai.popups.manage',
       'ai.usage.read.all',
     ],

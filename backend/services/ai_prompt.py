@@ -594,6 +594,28 @@ austauschbare Werbephrasen. \
 Formatiere den Inhalt in lesbarem Markdown."""
 
 
+NOTIZEN = """\
+Notizen und Einkaufslisten: Nutze fuer Notizen, Aufgaben und Einkaufslisten die \
+integrierten Werkzeuge (`notes_read`, `propose_note_create`, `propose_note_update`, `propose_note_delete`). \
+1. Strukturierte, praegnante Formatierung: Halte Notizen immer kurz, strukturiert und uebersichtlich \
+ohne ueberfluessige Erklaertexte. Verwende Markdown-Checklisten (`- [ ] Aufgabe`), Aufzaehlungen \
+oder Absaetze. \
+2. Einkaufslisten mit Richtpreisen: Wenn der Benutzer Artikel fuer einen Einkauf nennt oder diktiert \
+(z. B. "Butter, Eier, Brot", "Schreib auf Einkaufsliste Edeka: Milch, Kaffee..."), erstelle eine Notiz \
+mit Kategorie `category='shopping'`, Farbakzent `color='emerald'` und Titel (z. B. "Einkaufsliste Edeka"). \
+Formatiere jeden Posten als Checkliste mit Mengenangabe und realistisch geschaetztem Richtpreis \
+(unter Beruecksichtigung des Marktes bzw. aktueller Durchschnittspreise) und fuege am Ende die \
+berechnete Gesamtsumme ein (z. B. `**Geschaetzte Gesamtsumme: ca. 14,80 €**`). \
+3. Proaktive Verknuepfung von Kalender und Notiz: Enthaelt eine Nachricht sowohl einen Termin-Zeitpunkt \
+als auch konkrete Aufgaben, Besorgungspunkte oder Einkaufsartikel (z. B. "Ich muss morgen um 14 Uhr einkaufen, \
+brauche Butter und Brot"), erstelle proaktiv BEIDES in derselben Runde: \
+(1) Den Kalendereintrag per `propose_calendar_event_create` (Startzeit, Dauer, Titel z. B. "Einkaufen"). \
+(2) Die strukturierte Notiz per `propose_note_create` (Titel "Einkaufsliste", Checkliste mit Preisschaetzung). \
+4. Kategorien und Farben: Waehle passende Kategorien (`personal`, `shopping`, `todo`, `work`, `idea`, `meeting`) \
+und Farben (`primary`, `emerald`, `amber`, `rose`, `purple`, `cyan`). Fuer Team-Notizen setze `note_type='team'` \
+und die entsprechende `team_id`."""
+
+
 
 # Ohne diese Anweisung merkt sich das Modell entweder nichts oder alles. Beides
 # ist unbrauchbar. Der Ausloeser muss ein *beobachtbares Ereignis* sein, nicht
@@ -1335,6 +1357,7 @@ BLOECKE = (
     UNWIDERRUFLICHES,
     POSTFACH_UND_KALENDER,
     POPUPS_UND_ANKUENDIGUNGEN,
+    NOTIZEN,
     GEDAECHTNIS,
     # Direkt hinter dem Gedaechtnis, weil die Sprechweise dort landet: was
     # ueber Tage gilt, wird als persoenliche Beobachtung festgehalten. Getrennt
@@ -1378,6 +1401,7 @@ GEHIRN_BLOECKE = (
     REGIONSANALYSE,
     POSTFACH_UND_KALENDER,
     POPUPS_UND_ANKUENDIGUNGEN,
+    NOTIZEN,
     AUFGABEN,
     GEDAECHTNIS,
     SPRECHWEISE,

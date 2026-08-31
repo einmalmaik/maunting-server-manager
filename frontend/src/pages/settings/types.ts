@@ -38,6 +38,7 @@ export interface PanelSettings {
   updates_automatic: boolean
   desktop_app_download_enabled: boolean
   calendar_enabled: boolean
+  notes_enabled: boolean
   captcha_enabled: boolean
   captcha_provider: 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
   captcha_site_key: string
@@ -94,6 +95,7 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   updates_automatic: false,
   desktop_app_download_enabled: true,
   calendar_enabled: true,
+  notes_enabled: true,
   captcha_enabled: false,
   captcha_provider: 'none',
   captcha_site_key: '',

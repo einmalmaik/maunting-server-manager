@@ -42,6 +42,7 @@ from .hoster_api import router as hoster_api_router, redeem_router as hoster_han
 from .user_integrations import router as user_integrations_router
 from .popups import router as popups_router
 from .calendar import router as calendar_router
+from .notes import router as notes_router
 
 __all__ = [
     "auth_router",
@@ -89,4 +90,5 @@ __all__ = [
     "user_integrations_router",
     "popups_router",
     "calendar_router",
+    "notes_router",
 ]  # noqa: E501

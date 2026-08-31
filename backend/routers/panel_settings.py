@@ -115,6 +115,7 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
         "updates_automatic": all_db.get("updates_automatic", "false") == "true",
         "desktop_app_download_enabled": all_db.get("desktop_app_download_enabled", "true") != "false",
         "calendar_enabled": all_db.get("calendar_enabled", "true") != "false",
+        "notes_enabled": all_db.get("notes_enabled", "true") != "false",
         "captcha_enabled": all_db.get("captcha_enabled", "false") == "true",
         "captcha_provider": all_db.get("captcha_provider", "none"),
         "captcha_site_key": all_db.get("captcha_site_key", ""),
@@ -132,13 +133,14 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
 
 @router.get("/public", status_code=200)
 def get_public_settings() -> dict:
-    """Öffentlich abfragbare Panel-Einstellungen (z. B. Desktop-Download-Banner, Kalender)."""
+    """Öffentlich abfragbare Panel-Einstellungen (z. B. Desktop-Download-Banner, Kalender, Notizen)."""
     all_db = PanelSettingsService.get_all()
     return {
         "desktop_app_download_enabled": all_db.get("desktop_app_download_enabled", "true") != "false",
         "imprint_enabled": all_db.get("imprint_enabled", "false") == "true",
         "imprint_url": all_db.get("imprint_url", ""),
         "calendar_enabled": all_db.get("calendar_enabled", "true") != "false",
+        "notes_enabled": all_db.get("notes_enabled", "true") != "false",
     }
 
 
@@ -195,6 +197,8 @@ def update_settings(
         if key == "updates_automatic":
             value = "true" if bool(value) else "false"
         if key == "calendar_enabled":
+            value = "true" if bool(value) else "false"
+        if key == "notes_enabled":
             value = "true" if bool(value) else "false"
         if key == "captcha_enabled":
             value = "true" if bool(value) else "false"

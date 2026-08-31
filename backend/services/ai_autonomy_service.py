@@ -151,7 +151,7 @@ def autonomy_allows(
     )
     if grant is None:
         return False
-    # Persönliche Kalender-Operationen des Nutzers unterliegen bei erteilter
+    # Persönliche Kalender- und Notiz-Operationen des Nutzers unterliegen bei erteilter
     # Autonomie-Freigabe nicht dem strikten Server-Stundenkontingent.
     if tool_name in (
         "propose_calendar_event_create",
@@ -160,6 +160,12 @@ def autonomy_allows(
         "calendar_event_create",
         "calendar_event_update",
         "calendar_event_delete",
+        "propose_note_create",
+        "propose_note_update",
+        "propose_note_delete",
+        "note_create",
+        "note_update",
+        "note_delete",
     ):
         return True
     # Die Obergrenze begrenzt nicht die Berechtigung, sondern die Menge: ein in

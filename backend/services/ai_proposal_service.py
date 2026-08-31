@@ -1980,6 +1980,92 @@ def _calendar_event_update_payload(db: Session, user: User, rest: dict) -> tuple
     return payload, preview
 
 
+def _note_create_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
+    title = str(rest.get("title", "")).strip()
+    if not title:
+        raise AiActionValidationError("Notiz-Erstellung erfordert einen title")
+
+    content = rest.get("content", "")
+    category = rest.get("category", "personal")
+    color = rest.get("color", "primary")
+    is_pinned = bool(rest.get("is_pinned", False))
+    note_type = rest.get("note_type", "personal")
+    team_id = rest.get("team_id")
+
+    payload = {
+        "title": redact_sensitive_text(title),
+        "content": redact_sensitive_text(str(content)) if content else "",
+        "category": str(category).strip() if category else "personal",
+        "color": str(color).strip() if color else "primary",
+        "is_pinned": is_pinned,
+        "note_type": str(note_type).strip() if note_type else "personal",
+        "team_id": int(team_id) if team_id else None,
+    }
+    preview = {
+        "operation": "note_create",
+        "title": redact_sensitive_text(title),
+        "category": payload["category"],
+        "color": payload["color"],
+        "note_type": payload["note_type"],
+        "team_id": payload["team_id"],
+        "is_pinned": is_pinned,
+    }
+    return payload, preview
+
+
+def _note_update_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
+    note_id = str(rest.get("note_id", "")).strip()
+    if not note_id:
+        raise AiActionValidationError("Notiz-Aktualisierung erfordert note_id")
+
+    title = rest.get("title")
+    content = rest.get("content")
+    category = rest.get("category")
+    color = rest.get("color")
+    is_pinned = rest.get("is_pinned")
+    is_archived = rest.get("is_archived")
+    note_type = rest.get("note_type")
+    team_id = rest.get("team_id")
+
+    payload = {
+        "note_id": note_id,
+        "title": redact_sensitive_text(str(title)).strip() if title else None,
+        "content": redact_sensitive_text(str(content)) if content is not None else None,
+        "category": str(category).strip() if category else None,
+        "color": str(color).strip() if color else None,
+        "is_pinned": bool(is_pinned) if is_pinned is not None else None,
+        "is_archived": bool(is_archived) if is_archived is not None else None,
+        "note_type": str(note_type).strip() if note_type else None,
+        "team_id": int(team_id) if team_id else None,
+    }
+    preview = {
+        "operation": "note_update",
+        "note_id": note_id,
+        "title": payload["title"],
+        "category": payload["category"],
+        "color": payload["color"],
+        "note_type": payload["note_type"],
+        "team_id": payload["team_id"],
+        "is_pinned": payload["is_pinned"],
+        "is_archived": payload["is_archived"],
+    }
+    return payload, preview
+
+
+def _note_delete_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
+    note_id = str(rest.get("note_id", "")).strip()
+    if not note_id:
+        raise AiActionValidationError("Notiz-Löschung erfordert note_id")
+
+    payload = {"note_id": note_id}
+    preview = {
+        "operation": "note_delete",
+        "note_id": note_id,
+        "irreversible": True,
+    }
+    return payload, preview
+
+
 def _popup_create_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
     title = str(rest.get("title", "")).strip()
     content_markdown = str(rest.get("content_markdown", "")).strip()
@@ -2256,6 +2342,15 @@ _GLOBALE_PAYLOADS: dict = {
     ),
     "propose_calendar_event_delete": lambda db, user, rest, arguments, guardian: (
         _calendar_event_delete_payload(db, user, rest)
+    ),
+    "propose_note_create": lambda db, user, rest, arguments, guardian: (
+        _note_create_payload(db, user, rest)
+    ),
+    "propose_note_update": lambda db, user, rest, arguments, guardian: (
+        _note_update_payload(db, user, rest)
+    ),
+    "propose_note_delete": lambda db, user, rest, arguments, guardian: (
+        _note_delete_payload(db, user, rest)
     ),
     "propose_popup_create": lambda db, user, rest, arguments, guardian: (
         _popup_create_payload(db, user, rest)
@@ -3900,6 +3995,56 @@ def _ausfuehren_calendar_event_delete(db: Session, rahmen: _AusfuehrungsRahmen) 
     return _Ausgefuehrt(result=result)
 
 
+def _ausfuehren_note_create(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from services.notes_service import NotesService
+
+    p = rahmen.payload
+    result = NotesService.create_note(
+        db,
+        user=rahmen.active_user,
+        title=str(p["title"]),
+        content=str(p.get("content", "")),
+        category=str(p.get("category", "personal")),
+        color=str(p.get("color", "primary")),
+        is_pinned=bool(p.get("is_pinned", False)),
+        note_type=str(p.get("note_type", "personal")),
+        team_id=int(p["team_id"]) if p.get("team_id") else None,
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_note_update(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from services.notes_service import NotesService
+
+    p = rahmen.payload
+    result = NotesService.update_note(
+        db,
+        user=rahmen.active_user,
+        note_id_or_uid=str(p["note_id"]),
+        title=str(p["title"]) if p.get("title") else None,
+        content=str(p["content"]) if p.get("content") is not None else None,
+        category=str(p["category"]) if p.get("category") else None,
+        color=str(p["color"]) if p.get("color") else None,
+        is_pinned=p.get("is_pinned"),
+        is_archived=p.get("is_archived"),
+        note_type=str(p["note_type"]) if p.get("note_type") else None,
+        team_id=int(p["team_id"]) if p.get("team_id") else None,
+    )
+    return _Ausgefuehrt(result=result)
+
+
+def _ausfuehren_note_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    from services.notes_service import NotesService
+
+    p = rahmen.payload
+    result = NotesService.delete_note(
+        db,
+        user=rahmen.active_user,
+        note_id_or_uid=str(p["note_id"]),
+    )
+    return _Ausgefuehrt(result=result)
+
+
 def _ausfuehren_popup_create(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     from models import PanelPopup
     from datetime import datetime
@@ -4003,6 +4148,9 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_calendar_event_create": _ausfuehren_calendar_event_create,
     "propose_calendar_event_update": _ausfuehren_calendar_event_update,
     "propose_calendar_event_delete": _ausfuehren_calendar_event_delete,
+    "propose_note_create": _ausfuehren_note_create,
+    "propose_note_update": _ausfuehren_note_update,
+    "propose_note_delete": _ausfuehren_note_delete,
     "propose_popup_create": _ausfuehren_popup_create,
     "worker_start": _ausfuehren_worker_start,
     "worker_cancel": _ausfuehren_worker_cancel,

@@ -62,6 +62,7 @@ from routers import (
     user_integrations_router,
     popups_router,
     calendar_router,
+    notes_router,
 )
 from middleware.rate_limit import limiter, auth_rate_limit
 from services.steam_service import close_steam_service
@@ -878,6 +879,7 @@ app.include_router(teams_router)
 app.include_router(user_integrations_router)
 app.include_router(popups_router)
 app.include_router(calendar_router)
+app.include_router(notes_router)
 
 
 

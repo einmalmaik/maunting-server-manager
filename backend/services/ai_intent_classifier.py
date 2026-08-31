@@ -27,7 +27,7 @@ PREFETCH_TTL_SECONDS = 10.0
 # Diese Menge ist absichtlich enger als der allgemeine Read-Katalog. Ein neues
 # Werkzeug darf erst nach Sicherheitsreview und einem echten Executor hier rein.
 SPECULATIVE_READ_TOOLS = frozenset({
-    "analyze_region", "control_region_camera", "web_search", "calendar_read",
+    "analyze_region", "control_region_camera", "web_search", "calendar_read", "notes_read",
     "read_server_status", "search_memory",
 })
 
@@ -38,6 +38,7 @@ _PROTOTYPES = {
     ),
     "web_search": ("search current information on the web", "aktuelle Informationen im Web suchen"),
     "calendar_read": ("read my calendar appointments", "meine Kalendereintraege und Termine lesen"),
+    "notes_read": ("read my notes checklists shopping list", "meine Notizen Checklisten Einkaufsliste lesen"),
     "read_server_status": ("read server status health capacity", "Serverstatus Zustand und Auslastung lesen"),
     "search_memory": ("search my saved assistant memory", "mein gespeichertes KI Gedaechtnis durchsuchen"),
 }

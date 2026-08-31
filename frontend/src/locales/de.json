@@ -5,6 +5,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "calendar": "Kalender",
+    "notes": "Notizen",
     "servers": "Server",
     "users": "Benutzer",
     "roles": "Rollen",
@@ -92,6 +93,53 @@
     "workspaceSubtitle": "Tabellen, Zeilen und Datenbankstatistiken einsehen.",
     "admin": "Admin-Zugriff",
     "readOnly": "Nur lesen"
+  },
+  "notes": {
+    "eyebrow": "MSM / MSS Wissensmanagement",
+    "title": "Notizen",
+    "description": "Notizen, Checklisten und Aufgaben organisieren, sortieren und im Team teilen.",
+    "newNote": "Neue Notiz",
+    "editNote": "Notiz bearbeiten",
+    "deleteNote": "Notiz löschen",
+    "deleteConfirm": "Möchtest du diese Notiz wirklich löschen?",
+    "searchPlaceholder": "Notizen durchsuchen...",
+    "categoryAll": "Alle Kategorien",
+    "categoryPersonal": "Persönlich",
+    "categoryShopping": "Einkaufsliste",
+    "categoryTodo": "Aufgaben",
+    "categoryWork": "Arbeit",
+    "categoryIdea": "Idee",
+    "categoryMeeting": "Meeting",
+    "sortBy": "Sortieren",
+    "sortUpdated": "Zuletzt geändert",
+    "sortCreated": "Erstellungsdatum",
+    "sortTitle": "Alphabetisch",
+    "pinnedSection": "Angepinnt",
+    "allNotesSection": "Alle Notizen",
+    "emptyTitle": "Keine Notizen vorhanden",
+    "emptyDesc": "Erstelle eine neue Notiz oder diktiere sie direkt über den KI-Assistenten.",
+    "emptySearch": "Keine passenden Notizen gefunden.",
+    "noteTitle": "Titel",
+    "noteTitlePlaceholder": "z. B. Einkaufsliste Edeka, Projekt-Ideen...",
+    "noteContent": "Inhalt",
+    "noteContentPlaceholder": "Schreibe deine Notiz, Checkliste [ ] oder formatierten Text...",
+    "categoryLabel": "Kategorie",
+    "colorLabel": "Farbe",
+    "scopeLabel": "Sichtbarkeit",
+    "scopePersonal": "Nur für mich (Persönlich)",
+    "scopeTeam": "Mit Team teilen",
+    "selectTeam": "Team auswählen",
+    "pinLabel": "Oben anpinnen",
+    "archiveLabel": "Archivieren",
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "createSuccess": "Notiz erfolgreich erstellt",
+    "updateSuccess": "Notiz gespeichert",
+    "deleteSuccess": "Notiz gelöscht",
+    "errorLoading": "Fehler beim Laden der Notizen",
+    "errorSaving": "Fehler beim Speichern der Notiz",
+    "teamBadge": "Team",
+    "archivedBadge": "Archiviert"
   },
   "audit": {
     "title": "Audit-Protokoll",
@@ -589,6 +637,9 @@
         "propose_calendar_event_update": "Kalendertermin ändern",
         "propose_calendar_event_delete": "Kalendertermin löschen",
         "propose_popup_create": "Pop-up-Ankündigung erstellen",
+        "propose_note_create": "Notiz erstellen",
+        "propose_note_update": "Notiz bearbeiten",
+        "propose_note_delete": "Notiz löschen",
         "desktop_artifact": "Desktop-Artefakt (Software/Mod/Installer)",
         "read_server_status": "Server-Status lesen",
         "read_server_capacity": "Server-Kapazität lesen",
@@ -650,7 +701,10 @@
         "propose_calendar_event_create": "Termin „{{title}}“ im Kalender anlegen?",
         "propose_calendar_event_update": "Termin im Kalender mit den neuen Details aktualisieren?",
         "propose_calendar_event_delete": "Diesen Termin aus dem Kalender löschen? Das lässt sich nicht rückgängig machen.",
-        "propose_popup_create": "Pop-up-Ankündigung für das Panel erstellen?"
+        "propose_popup_create": "Pop-up-Ankündigung für das Panel erstellen?",
+        "propose_note_create": "Notiz „{{title}}“ jetzt anlegen?",
+        "propose_note_update": "Notiz mit den neuen Angaben aktualisieren?",
+        "propose_note_delete": "Diese Notiz endgültig löschen? Das lässt sich nicht rückgängig machen."
       },
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
@@ -795,7 +849,13 @@
       "propose_guardian_tuning": "Guardian-Tuning vorbereitet",
       "propose_restart_schedule_set": "Neustartplan vorbereitet",
       "propose_backup_schedule_set": "Backupplan vorbereitet",
-      "propose_file_delete": "Dateilöschung vorbereitet"
+      "propose_file_delete": "Dateilöschung vorbereitet",
+      "notes_read": "Notizen abgefragt",
+      "voice_leave_region_view": "Regionenansicht beendet",
+      "voice_set_region_view": "Regionenansicht geöffnet",
+      "propose_note_create": "Notizerstellung vorbereitet",
+      "propose_note_update": "Notizänderung vorbereitet",
+      "propose_note_delete": "Notizlöschung vorbereitet"
     },
     "toolsRunning": {
       "ask_user": "Ich frage kurz nach",
@@ -878,7 +938,13 @@
       "worker_cancel": "Ich halte den Worker an",
       "worker_frage": "Ich stelle dir eine Frage",
       "worker_start": "Ich starte einen Worker im Hintergrund",
-      "set_agent_name": "Ich gebe mir den neuen Namen"
+      "set_agent_name": "Ich gebe mir den neuen Namen",
+      "notes_read": "Ich sehe in deinen Notizen nach",
+      "voice_leave_region_view": "Ich schließe die Regionenansicht",
+      "voice_set_region_view": "Ich öffne die Regionenansicht",
+      "propose_note_create": "Ich bereite die Notiz vor",
+      "propose_note_update": "Ich bereite die Notizänderung vor",
+      "propose_note_delete": "Ich bereite das Löschen der Notiz vor"
     },
     "errors": {
       "codes": {
@@ -2172,6 +2238,10 @@
       "title": "Kalender anbinden",
       "desc": "Kalender zur Termin- und Aufgabenplanung verbinden."
     },
+    "ai_notes_use": {
+      "title": "Notizen verwalten",
+      "desc": "Notizen, Checklisten und Aufgaben über den Assistenten erstellen und organisieren."
+    },
     "ai_usage_read_all": {
       "title": "Gesamte KI-Nutzung einsehen",
       "desc": "Verbrauchsdaten und Kosten aller Benutzer einsehen."
@@ -2827,6 +2897,8 @@
     "desktopDownloadPromoHint": "Blendet in der Seitenleiste einen Download-Link zur Desktop-App für Windows (MSS) ein.",
     "calendarEnabled": "Integrierter Kalender",
     "calendarEnabledHint": "Aktiviert das Kalendermodul im Panel und ermöglicht der KI die Terminverwaltung.",
+    "notesEnabled": "Integrierte Notizen",
+    "notesEnabledHint": "Aktiviert das Notizmodul im Panel und ermöglicht der KI die Notizverwaltung.",
     "testEmail": "Test-E-Mail senden",
     "testEmailTo": "Test-E-Mail an",
     "testEmailSent": "Test-E-Mail gesendet",
