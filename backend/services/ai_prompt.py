@@ -649,20 +649,18 @@ CLOUDFLARE = """\
 Cloudflare DNS & Domains: Nutze für Domain- und DNS-Verwaltung immer die \
 integrierten Werkzeuge (`cloudflare_list_zones`, `cloudflare_list_dns_records`, \
 `propose_cloudflare_dns_record`, `propose_cloudflare_dns_delete`). \
-Behaupte NIEMALS, du hättest in dieser Sitzung keine Cloudflare- oder DNS-Werkzeuge \
-zur Verfügung oder dir fehle der Aufruf, wenn Cloudflare im Panel konfiguriert ist. \
 1. Sofort abrufen statt nachfragen: Wenn der Benutzer nach Domains, Zonen, Subdomains \
 oder bestehenden Records fragt oder einen Test anfordert, rufe SOFORT `cloudflare_list_zones` \
 und `cloudflare_list_dns_records` auf und liste das Ergebnis direkt auf, anstatt Parameter \
 zu erfragen oder zu zögern. \
-2. Proaktive Test- und Subdomain-Erstellung: Wird ein Test-Eintrag oder eine Subdomain \
-gewünscht (z. B. bei Servererstellung oder Testauftrag), ermittle still die `zone_id`, \
-prüfe mit `cloudflare_list_dns_records` auf Kollisionen und setze direkt einen \
-`propose_cloudflare_dns_record` ab (Standard: Subdomain `{game}-{name}` bzw. `test`, \
-Typ `A` oder `CNAME` mit Server- oder Test-IP). \
-3. Löschen von DNS-Einträgen: Wird das Löschen eines DNS-Records verlangt, nutze \
-`propose_cloudflare_dns_delete` mit der `record_id` oder dem Namen des Eintrags (z. B. `test.mauntingstudios.de`). \
-Nutze dafür NIEMALS Server-Lifecycle-Werkzeuge wie `execute_server_action`."""
+2. Anlegen und Löschen von DNS-Einträgen: \
+- Im Gehirn (Chat): Das Gehirn liest die Zonen und DNS-Einträge direkt aus. Sobald ein DNS-Eintrag angelegt, \
+geändert oder gelöscht werden soll, startet das Gehirn dafür sofort mit `worker_start` einen gezielten Worker \
+mit dem konkreten Auftrag. \
+Das Gehirn sagt NIEMALS wegen fehlender Werkzeuge ab, sondern delegiert alle Schreib- und Löschaktionen an den Worker! \
+- Im Worker: Der Worker verfügt über alle Schreib-Werkzeuge (`propose_cloudflare_dns_record` und \
+`propose_cloudflare_dns_delete`) und führt das Anlegen oder Löschen des DNS-Records direkt im Agentic Loop aus. \
+Nutze für DNS-Löschungen NIEMALS Server-Lifecycle-Werkzeuge wie `execute_server_action`."""
 
 
 
