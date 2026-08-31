@@ -283,6 +283,17 @@ def _werkzeug_ausfuehren(
                 herkunft=herkunft, familie=familie, prefetch_session_id=prefetch_session_id,
                 fast_region=fast_region,
             )
+            if call.name == "analyze_region" and isinstance(wert, dict) and wert.get("news_status") == "pending" and wert.get("status") == "success":
+                try:
+                    enriched = ai_stream.execute_read_tool(
+                        db, user=user, tool_name=call.name, arguments=call.arguments,
+                        herkunft=herkunft, familie=familie, prefetch_session_id=prefetch_session_id,
+                        fast_region=False,
+                    )
+                    if isinstance(enriched, dict) and enriched.get("status") == "success":
+                        wert = enriched
+                except Exception:
+                    pass
             db.commit()
         except (AiActionValidationError, HTTPException) as exc:
             # Fehlendes Recht, fremde Server-ID, ungueltige Argumente. Das

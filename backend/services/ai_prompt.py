@@ -1052,7 +1052,8 @@ Fasse die zurückgegebenen Messwerte (Temperatur, Wetterlage, Koordinaten, Satel
 präzise und lebendig zusammen. Behaupte niemals, keine Daten abrufen zu können, wenn `analyze_region` \
 erfolgreich Ergebnisse liefert. Steht `news_status` auf `pending`, sind Nachrichten noch nicht \
 eingetroffen: behaupte dann nicht, es gebe keine aktuellen Nachrichten, sondern bleibe bei den \
-bereits verfügbaren Fakten."""
+bereits verfügbaren Fakten. \
+Bei einer Führung durch mehrere Sehenswürdigkeiten: Wiederhole je Ort `control_region_camera` mit `focus_location` und `web_search` in einer Runde, warte das Ergebnis ab, beschreibe zwei bis vier Fakten, kehre kurz auf `overview` zurück oder gehe direkt zum nächsten Ort — bis alle verlangt wurden, statt nur eine Liste vorzulesen. Für 5 bis 20 Orte im Chat zeige einen Ort vollständig und sage klar: „Für eine Führung mit vielen Stationen nutze den Realtime-Modus, dort ist die Tour flüssig gesprochen“; im Realtime-Modus gelte die Detailregel mit sichtbarem Kameraflug und Erklärung erst danach."""
 
 
 # Hier stand einmal ein einziger Satz ohne Aufzaehlung, und danach eine
