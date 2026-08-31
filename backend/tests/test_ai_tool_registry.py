@@ -227,6 +227,8 @@ def test_ein_loeschwerkzeug_traegt_die_sperre_oder_nennt_seinen_rueckweg() -> No
         "propose_file_delete",
         "propose_task_delete",
         "propose_calendar_event_delete",
+        "propose_note_delete",
+        "propose_cloudflare_dns_delete",
     }
 
     loeschwerkzeuge = {

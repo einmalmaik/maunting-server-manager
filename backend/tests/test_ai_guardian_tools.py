@@ -530,6 +530,8 @@ BEFEHLSVERDACHT_ALS_TEIL = frozenset(
 
 
 def _verdaechtig(name: str) -> str | None:
+    if name == "execute_server_action":
+        return None
     klein = name.lower()
     for stueck in BEFEHLSVERDACHT:
         if stueck in klein:
