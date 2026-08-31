@@ -39,7 +39,7 @@ def test_hit_at_k_offline():
     hits5 = 0
     misses = []
     for query, expected in GOLDEN:
-        top5 = router.select(query, ALLOWED, top_k=5)
+        top5 = router.select_with_hot(query, ALLOWED, top_k=5)
         if top5 and top5[0] == expected:
             hits1 += 1
         if expected in top5:
@@ -57,6 +57,10 @@ def test_hotset_always_in_shortlist():
     assert "list_my_servers" in short
     assert "analyze_region" in short
     assert "web_search" in short
+    assert "remember" in short
+    assert "search_memory" in short
+    assert "notes_read" in short
+    assert "learn_skill" in short
 
 
 def test_routing_is_deterministic():

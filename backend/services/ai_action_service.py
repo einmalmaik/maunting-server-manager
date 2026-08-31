@@ -572,8 +572,7 @@ def _global_tool_definitions() -> list[dict]:
             "wenn niemand \"wir\" gesagt hat.\n"
             "Dann genauer, in dieser Reihenfolge pruefen:\n"
             "1. Persoenlich und zu genau einem Server: scope=server. "
-            "Persoenlich ohne Serverbezug: scope=user (\"ich nehme immer "
-            "8 GB\").\n"
+            "Persoenlich ohne Serverbezug: scope=user (\"ich trinke am liebsten Mio Mio\", \"ich heisse Maik\", \"ich nehme immer 8 GB\").\n"
             "2. Es geht um genau einen Server, dessen Nummer aus einem "
             "Werkzeugergebnis stammt, und gilt fuer jeden, der ihn bedient: "
             "scope=server_shared mit dieser server_id (\"dieser Server "
@@ -606,7 +605,7 @@ def _global_tool_definitions() -> list[dict]:
                 "key": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": "Kurzer stabiler Bezeichner, z. B. ram.bevorzugt.",
+                    "description": "Kurzer stabiler Bezeichner, z. B. vorlieben.getraenke, favoriten.snack, ram.bevorzugt.",
                 },
                 "value": {"type": "string", "maxLength": 2_000},
                 "replace_user_entry": {

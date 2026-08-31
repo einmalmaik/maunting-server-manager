@@ -11,6 +11,10 @@ HOTSET = frozenset({
     "web_search",
     "search_docs",
     "calendar_read",
+    "notes_read",
+    "remember",
+    "search_memory",
+    "learn_skill",
     "worker_start",
     "execute_server_action",
 })
