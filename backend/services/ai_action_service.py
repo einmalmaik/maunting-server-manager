@@ -4273,9 +4273,8 @@ def _execute_global_read_tool(
         except HTTPException as exc:
             raise AiActionValidationError(str(exc.detail)) from exc
 
-    _require_no_arguments(tool_name, arguments)
-
     if tool_name == "list_my_servers":
+        _require_no_arguments(tool_name, arguments)
         servers = _visible_servers(db, user)
         return {
             "servers": [
@@ -4293,6 +4292,7 @@ def _execute_global_read_tool(
         }
 
     if tool_name == "read_node_health":
+        _require_no_arguments(tool_name, arguments)
         # Bewusst `nodes.read` statt `servers.create`: den Zustand der Hosts zu
         # sehen ist eine Aufgabe des Betriebs, nicht der Serverplanung. Ein
         # Support-Mitarbeiter soll nachsehen koennen, ohne Server anlegen zu
@@ -4302,6 +4302,7 @@ def _execute_global_read_tool(
         return _node_health(db)
 
     if tool_name == "list_blueprints":
+        _require_no_arguments(tool_name, arguments)
         if not permission_service.has_global_permission(db, user, "servers.create"):
             raise AiActionValidationError("Serverplanung ist nicht erlaubt")
         from games import list_game_info
@@ -4318,6 +4319,7 @@ def _execute_global_read_tool(
         return {"blueprints": entries, "count": len(entries)}
 
     if tool_name == "read_node_capacity":
+        _require_no_arguments(tool_name, arguments)
         if not permission_service.has_global_permission(db, user, "servers.create"):
             raise AiActionValidationError("Serverplanung ist nicht erlaubt")
         from models import Node
