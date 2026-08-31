@@ -1193,7 +1193,8 @@
         "rate_limited": "TomTom begrenzt Anfragen für diesen Schlüssel gerade.",
         "network_error": "TomTom war für diese Abfrage nicht erreichbar.",
         "provider_error": "TomTom hat die Verkehrsabfrage abgelehnt.",
-        "invalid_response": "TomTom hat keine lesbaren Verkehrsdaten geliefert."
+        "invalid_response": "TomTom hat keine lesbaren Verkehrsdaten geliefert.",
+        "invalid_referer": "TomTom lehnt den Referer ab — im TomTom-Portal beim Key Referrer auf * setzen oder die Panel-Domain freigeben."
       },
       "currentSpeed": "Aktuelle Geschwindigkeit",
       "freeFlowSpeed": "Freie Geschwindigkeit",

@@ -1117,7 +1117,8 @@
           "rate_limited": "TomTom is rate limiting requests. Please try again later.",
           "network_error": "TomTom is currently unreachable from the server.",
           "provider_error": "TomTom did not return usable data.",
-          "invalid_response": "TomTom returned an unexpected response."
+          "invalid_response": "TomTom returned an unexpected response.",
+          "invalid_referer": "TomTom rejected the Referer — set Referrer to * in the TomTom portal key settings or allow the panel domain, then test again."
         },
         "errors": {
         "load": "Could not load TomTom status",
@@ -1193,7 +1194,8 @@
         "rate_limited": "TomTom is currently limiting requests for this key.",
         "network_error": "TomTom could not be reached for this request.",
         "provider_error": "TomTom rejected the traffic request.",
-        "invalid_response": "TomTom returned no readable traffic data."
+        "invalid_response": "TomTom returned no readable traffic data.",
+        "invalid_referer": "TomTom rejected the Referer — set Referrer to * in the TomTom portal key settings or allow the panel domain."
       },
       "currentSpeed": "Current speed",
       "freeFlowSpeed": "Free-flow speed",
