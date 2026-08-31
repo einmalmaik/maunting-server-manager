@@ -46,6 +46,14 @@ function coordinateLabel(latitude: number, longitude: number) {
  * Gemeinsamer Weltraum-Hintergrund fuer die regionale Analyse. Die Karte
  * selbst wird ausschliesslich durch MapTiler/MapLibre gezeichnet.
  */
+interface Sight {
+  latitude: number
+  longitude: number
+  name: string
+  summary?: string
+  commandId: string
+}
+
 export function GlobeViewer({
   latitude,
   longitude,
@@ -58,12 +66,30 @@ export function GlobeViewer({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [mapUnavailable, setMapUnavailable] = useState(false)
   const [mapReady, setMapReady] = useState(false)
+  const [sights, setSights] = useState<Sight[]>([])
+  const lastMainRef = useRef<string | null>(null)
 
   const resolvedLatitude = latitude ?? data?.coordinates?.latitude
   const resolvedLongitude = longitude ?? data?.coordinates?.longitude
   const resolvedLocation = locationName ?? data?.location ?? t('ai.geo.region', 'Region')
   const hasCoordinates = Number.isFinite(resolvedLatitude) && Number.isFinite(resolvedLongitude)
   const scene = data?.satellite?.scenes?.[0]
+
+  useEffect(() => {
+    if (!data?.coordinates) return
+    const key = `${data.location}:${data.coordinates.latitude}:${data.coordinates.longitude}`
+    if (data.camera?.action === 'focus_location' && data.camera?.command_id) {
+      const name = data.location ?? resolvedLocation
+      setSights((prev) => {
+        if (prev.some((s) => s.commandId === data.camera!.command_id)) return prev
+        const summary = (data as unknown as { _aiSummary?: string })._aiSummary
+        return [...prev, { latitude: data.coordinates!.latitude, longitude: data.coordinates!.longitude, name, summary, commandId: data.camera!.command_id! }]
+      })
+    } else if (data.camera?.mode === 'overview' || (lastMainRef.current && lastMainRef.current !== key && data.camera?.action !== 'focus_location')) {
+      if (data.camera?.mode === 'overview') setSights([])
+    }
+    lastMainRef.current = key
+  }, [data, resolvedLocation])
 
   useEffect(() => {
     setMapUnavailable(false)
@@ -123,6 +149,7 @@ export function GlobeViewer({
           cameraMode={data?.camera?.mode}
           cameraAction={data?.camera?.action}
           cameraCommandId={data?.camera?.command_id}
+          sights={sights}
           onUnavailable={() => setMapUnavailable(true)}
           onReady={() => setMapReady(true)}
         />

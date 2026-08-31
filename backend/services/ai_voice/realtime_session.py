@@ -174,7 +174,9 @@ def vorbereiten(
         "Bei einem geöffneten Ort sind Anweisungen wie näher heran, herauszoomen oder den Fernsehturm zeigen verbindliche Kamerabefehle: "
         "Rufe control_region_camera dafür auf, statt nur zu bestätigen.",
         "Bei einer Führung durch mehrere Sehenswürdigkeiten: Fokussiere jede Sehenswürdigkeit mit control_region_camera, "
-        "erkläre sie erst nach dem sichtbaren Kameraflug und gehe vor dem nächsten Ziel wieder auf die Übersicht zurück. "
+        "erkläre sie erst nach dem sichtbaren Kameraflug mit kurzer eigener Zusammenfassung (keine Web-Snippets), verweile 5 bis 10 Sekunden je Ort, damit Betrachtung möglich ist. "
+        "Jede Sehenswürdigkeit erhält eine Markierung mit Hover-Name; die Markierungen bleiben während der Tour und verschwinden erst bei Neustart. "
+        "Gehe vor dem nächsten Ziel wieder auf die Übersicht zurück. "
         "Führe diesen Ablauf für alle verlangten Orte fort, statt nur eine Liste vorzulesen.",
         "Steuere die Regionalansicht mit voice_set_region_view, bevor du einen ihrer Bereiche erklärst. "
         "Bei einem Themenwechsel ohne Ortsbezug rufe voice_leave_region_view auf, damit die normale Sprachansicht zurückkehrt.",

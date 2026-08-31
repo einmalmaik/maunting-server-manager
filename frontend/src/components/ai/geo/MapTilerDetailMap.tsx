@@ -8,6 +8,14 @@ import { aiApi } from '@/api/ai'
 type CameraMode = 'overview' | 'focus' | 'detail'
 type CameraAction = 'zoom_in' | 'zoom_out' | 'overview' | 'focus_location'
 
+interface Sight {
+  latitude: number
+  longitude: number
+  name: string
+  summary?: string
+  commandId: string
+}
+
 interface MapTilerDetailMapProps {
   latitude: number
   longitude: number
@@ -19,6 +27,7 @@ interface MapTilerDetailMapProps {
   cameraMode?: CameraMode
   cameraAction?: CameraAction
   cameraCommandId?: string
+  sights?: Sight[]
 }
 
 const MAX_AI_ZOOM = 18
@@ -51,14 +60,18 @@ export function MapTilerDetailMap({
   cameraMode = 'focus',
   cameraAction,
   cameraCommandId,
+  sights,
 }: MapTilerDetailMapProps) {
   const { t } = useTranslation()
   const elementRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MapLibreMap | null>(null)
   const markerRef = useRef<MapLibreMarker | null>(null)
+  const markersRef = useRef<MapLibreMarker[]>([])
   const lastTargetRef = useRef<string | null>(null)
   const lastCommandRef = useRef<string | null>(null)
   const manualCameraControlRef = useRef(false)
+  const dwellUntilRef = useRef<number>(0)
+  const pendingRef = useRef<{ latitude: number; longitude: number; locationName: string; sights?: Sight[]; command: string; target: string; zoom: number } | null>(null)
   const latestViewRef = useRef({ latitude, longitude, zoom })
   const onUnavailableRef = useRef(onUnavailable)
   const onReadyRef = useRef(onReady)
@@ -177,6 +190,27 @@ export function MapTilerDetailMap({
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
+    void (async () => {
+      for (const m of markersRef.current) m.remove()
+      markersRef.current = []
+      if (!sights || sights.length === 0) return
+      const { Marker, Popup } = await import('maplibre-gl')
+      for (const s of sights) {
+        const el = document.createElement('div')
+        el.title = s.summary ? `${s.name} — ${s.summary}` : s.name
+        el.style.cssText = 'width:14px;height:14px;border-radius:50%;background:#38bdf8;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:pointer'
+        const m = new Marker({ element: el }).setLngLat([s.longitude, s.latitude]).addTo(map)
+        const popup = new Popup({ offset: 12, closeButton: false }).setText(s.summary ? `${s.name}: ${s.summary}` : s.name)
+        el.addEventListener('mouseenter', () => m.setPopup(popup).togglePopup())
+        el.addEventListener('mouseleave', () => popup.remove())
+        markersRef.current.push(m)
+      }
+    })()
+  }, [sights, ready])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
     const target = `${longitude}:${latitude}`
     const command = cameraCommandId
       ? `id:${cameraCommandId}`
@@ -184,22 +218,46 @@ export function MapTilerDetailMap({
     if (lastCommandRef.current === command) return
 
     const sameTarget = lastTargetRef.current === target
-    // Ein verspätetes, allgemeines Fokus-Ergebnis darf eine manuell bewegte
-    // Karte nicht zurücksetzen. Eine klare Steueraktion oder ein anderer Ort
-    // bleibt dagegen ein neuer, ausdrücklich sichtbarer Auftrag.
     if (manualCameraControlRef.current && sameTarget && !cameraAction) return
     if (!sameTarget) manualCameraControlRef.current = false
+
+    const now = Date.now()
+    if (cameraAction === 'focus_location' && now < dwellUntilRef.current) {
+      const delay = dwellUntilRef.current - now
+      if (!pendingRef.current) {
+        pendingRef.current = { latitude, longitude, locationName, sights, command, target, zoom }
+        window.setTimeout(() => {
+          const p = pendingRef.current
+          pendingRef.current = null
+          if (p && lastCommandRef.current !== p.command) {
+            lastCommandRef.current = p.command
+            lastTargetRef.current = p.target
+            markerRef.current?.setLngLat([p.longitude, p.latitude])
+            const cz = map.getZoom()
+            const nz = Math.min(MAX_AI_ZOOM, Math.max(LANDMARK_ZOOM, cz))
+            map.stop()
+            map.flyTo({ center: [p.longitude, p.latitude], zoom: nz, duration: CAMERA_DURATION_MS })
+            dwellUntilRef.current = Date.now() + 8000
+          }
+        }, delay)
+      }
+      return
+    }
+
     const currentZoom = map.getZoom()
     const focusZoom = globe ? Math.max(5, Math.min(MAX_GLOBE_FOCUS_ZOOM, zoom)) : zoom
     let nextZoom = focusZoom
     if (cameraAction === 'focus_location') {
       nextZoom = Math.min(MAX_AI_ZOOM, Math.max(LANDMARK_ZOOM, currentZoom))
+      dwellUntilRef.current = Date.now() + 8000
     } else if (cameraAction === 'zoom_in' || cameraMode === 'detail') {
       nextZoom = Math.min(MAX_AI_ZOOM, Math.max(DETAIL_ZOOM, currentZoom + 4))
     } else if (cameraAction === 'zoom_out') {
       nextZoom = Math.max(1.2, currentZoom - 4)
     } else if (cameraAction === 'overview' || cameraMode === 'overview') {
       nextZoom = 1.2
+      dwellUntilRef.current = 0
+      pendingRef.current = null
     } else if (sameTarget) {
       nextZoom = Math.max(currentZoom, focusZoom)
     }
@@ -214,7 +272,7 @@ export function MapTilerDetailMap({
       zoom: nextZoom,
       duration: CAMERA_DURATION_MS,
     })
-  }, [cameraAction, cameraCommandId, cameraMode, globe, latitude, longitude, ready, zoom])
+  }, [cameraAction, cameraCommandId, cameraMode, globe, latitude, longitude, ready, zoom, sights])
 
   return <div className="absolute inset-0 z-[5] bg-transparent" aria-label={`Interaktive Karte für ${locationName}`}>
     <div ref={elementRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
