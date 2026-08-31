@@ -160,6 +160,40 @@ def traffic(latitude: float, longitude: float, *, cache_scope: str | None = None
             logger.info("TomTom-Verkehr nicht erreichbar error=%s", type(exc).__name__)
             return {"status": "unavailable", "reason": "network_error"}
         if response.status_code != 200:
+            try:
+                body = response.json()
+                code = (body.get("detailedError") or {}).get("code") if isinstance(body, dict) else None
+            except Exception:
+                code = None
+            if code == "InvalidReferer":
+                try:
+                    from config import settings as _settings
+                    _referer = str(getattr(_settings, "panel_url", "") or "").strip() or "https://msm.mauntingstudios.de/"
+                    with measure("regional_connectors", "tomtom_traffic_request_retry"):
+                        response = _http_client().get(
+                            _TOMTOM_FLOW_ENDPOINT,
+                            params={"point": request_key, "key": key},
+                            headers={"Accept": "application/json", "Referer": _referer},
+                        )
+                    if response.status_code == 200:
+                        try:
+                            segment = response.json().get("flowSegmentData", {})
+                            if isinstance(segment, dict):
+                                return {
+                                    "status": "available",
+                                    "current_speed_kmh": segment.get("currentSpeed"),
+                                    "free_flow_speed_kmh": segment.get("freeFlowSpeed"),
+                                    "current_travel_time_seconds": segment.get("currentTravelTime"),
+                                    "free_flow_travel_time_seconds": segment.get("freeFlowTravelTime"),
+                                    "confidence": segment.get("confidence"),
+                                    "road_closure": bool(segment.get("roadClosure")),
+                                }
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                logger.info("TomTom-Verkehr nicht verfuegbar status=%s reason=invalid_referer", response.status_code)
+                return {"status": "unavailable", "reason": "invalid_referer"}
             reason = _TOMTOM_FAILURES.get(response.status_code, "provider_error")
             logger.info("TomTom-Verkehr nicht verfuegbar status=%s reason=%s", response.status_code, reason)
             return {"status": "unavailable", "reason": reason}
