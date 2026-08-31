@@ -607,13 +607,16 @@ Formatiere jeden Posten als Checkliste mit Mengenangabe und realistisch geschaet
 (unter Beruecksichtigung des Marktes bzw. aktueller Durchschnittspreise) und fuege am Ende die \
 berechnete Gesamtsumme ein (z. B. `**Geschaetzte Gesamtsumme: ca. 14,80 €**`). \
 3. Proaktive Verknuepfung von Kalender und Notiz: Enthaelt eine Nachricht sowohl einen Termin-Zeitpunkt \
-als auch konkrete Aufgaben, Besorgungspunkte oder Einkaufsartikel (z. B. "Ich muss morgen um 14 Uhr einkaufen, \
-brauche Butter und Brot"), erstelle proaktiv BEIDES in derselben Runde: \
+(z. B. "ich muss nachher um 18 Uhr einkaufen", "morgen um 14 Uhr einkaufen") als auch konkrete Aufgaben oder Einkaufsartikel, \
+rufe VERBINDLICH BEIDE Werkzeuge in derselben Werkzeugrunde auf: \
 (1) Den Kalendereintrag per `propose_calendar_event_create` (Startzeit, Dauer, Titel z. B. "Einkaufen"). \
 (2) Die strukturierte Notiz per `propose_note_create` (Titel "Einkaufsliste", Checkliste mit Preisschaetzung). \
 4. Kategorien und Farben: Waehle passende Kategorien (`personal`, `shopping`, `todo`, `work`, `idea`, `meeting`) \
 und Farben (`primary`, `emerald`, `amber`, `rose`, `purple`, `cyan`). Fuer Team-Notizen setze `note_type='team'` \
-und die entsprechende `team_id`."""
+und die entsprechende `team_id`. \
+5. Bestätigter Ausgang: Sobald `propose_note_create` oder `propose_calendar_event_create` mit dem Status `succeeded` \
+oder `proposed` zurückkehren, ist die Aktion erfolgreich registriert bzw. in der Datenbank angelegt (`server_id: null` ist bei persönlichen Notizen und Terminen Standard). \
+Behaupte niemals einen technischen Fehler, wenn der Status `succeeded` oder `proposed` lautet."""
 
 
 
@@ -1060,6 +1063,8 @@ REGIONSANALYSE = """\
 Regions- & Satellitendaten: Wenn der Benutzer nach einer Stadt, Region oder einem \
 geografischen Ort fragt („Was ist in Berlin los?“, „Wetter und Lage in Los Angeles“), nutze \
 `analyze_region`, um Koordinaten, Wetterbedingungen, Satellitenaufnahmen und Lageberichte abzurufen. \
+Rufe `analyze_region` NIEMALS auf, wenn der Benutzer lediglich Geschäfte, Supermärkte (wie Rewe, Nahkauf, Lidl, Aldi, Edeka) \
+oder persönliche Erledigungen erwähnt — `analyze_region` ist ausschließlich für tatsächliche geografische Regionen, Wetter- und Satellitenlagen bestimmt. \
 Für eine gewünschte Sehenswürdigkeit in einer bereits geöffneten Region rufst du in derselben Werkzeugrunde \
 `control_region_camera` mit `action: "focus_location"` und dem genauen Namen samt Stadt sowie `web_search` \
 für aktuelle, belegte Fakten auf. Dafür startest du keinen Worker und wiederholst weder Wetter noch Koordinaten. \

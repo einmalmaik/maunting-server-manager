@@ -4,6 +4,8 @@ import {
   Archive,
   ArchiveRestore,
   CheckSquare,
+  Edit3,
+  Eye,
   Mic,
   MicOff,
   Pin,
@@ -15,6 +17,8 @@ import {
   Users,
   X,
 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
@@ -41,6 +45,28 @@ export interface NoteItem {
   can_edit?: boolean
   created_at: string
   updated_at: string
+}
+
+function InlineMarkdown({ text, strikethrough }: { text: string; strikethrough?: boolean }) {
+  return (
+    <span className={`inline-block ${strikethrough ? 'line-through text-on-surface-variant/60' : 'text-on-surface'}`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: ({ children }) => <span className="m-0 inline">{children}</span>,
+          strong: ({ children }) => <strong className="font-semibold text-on-surface">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          code: ({ children }) => (
+            <code className="px-1 py-0.5 rounded bg-surface-container-highest font-mono text-[0.85em]">
+              {children}
+            </code>
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </span>
+  )
 }
 
 const COLOR_THEMES = [
@@ -79,6 +105,7 @@ export function Notes() {
   const [formNoteType, setFormNoteType] = useState('personal')
   const [formTeamId, setFormTeamId] = useState<number | null>(null)
   const [formIsPinned, setFormIsPinned] = useState(false)
+  const [modalTab, setModalTab] = useState<'edit' | 'preview'>('edit')
   const [saving, setSaving] = useState(false)
 
   // Speech Recognition / Dictation
@@ -175,6 +202,7 @@ export function Notes() {
     setFormNoteType('personal')
     setFormTeamId(teams.length > 0 ? teams[0].id : null)
     setFormIsPinned(false)
+    setModalTab('edit')
     setIsListening(false)
     setIsModalOpen(true)
   }
@@ -188,6 +216,7 @@ export function Notes() {
     setFormNoteType(note.note_type || 'personal')
     setFormTeamId(note.team_id || (teams.length > 0 ? teams[0].id : null))
     setFormIsPinned(note.is_pinned || false)
+    setModalTab('edit')
     setIsListening(false)
     setIsModalOpen(true)
   }
@@ -554,9 +583,7 @@ export function Notes() {
                             ) : (
                               <Square className="w-3.5 h-3.5 text-on-surface-variant shrink-0 mt-0.5" />
                             )}
-                            <span className={isChecked ? 'line-through text-on-surface-variant/60' : 'text-on-surface'}>
-                              {itemText}
-                            </span>
+                            <InlineMarkdown text={itemText} strikethrough={isChecked} />
                           </div>
                         )
                       }
@@ -564,9 +591,9 @@ export function Notes() {
                       if (!line.trim()) return <div key={idx} className="h-1.5" />
 
                       return (
-                        <p key={idx} className="line-clamp-2 text-on-surface-variant leading-relaxed">
-                          {line}
-                        </p>
+                        <div key={idx} className="line-clamp-2 text-on-surface-variant leading-relaxed">
+                          <InlineMarkdown text={line} />
+                        </div>
                       )
                     })}
                   </div>
@@ -734,54 +761,132 @@ export function Notes() {
 
               {/* Content / Editor & Dictation */}
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold text-on-surface-variant">
-                    {t('notes.formContent', 'Inhalt & Checkliste')}
-                  </label>
-
-                  <div className="flex items-center gap-1.5">
-                    {/* Quick Checklist item helper */}
-                    <button
-                      type="button"
-                      onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] ` : '- [ ] '))}
-                      className="text-[11px] px-2 py-0.5 rounded-lg bg-surface-container border border-outline-variant/30 hover:text-primary transition-colors"
-                    >
-                      + Checkliste
-                    </button>
-                    {/* Quick Shopping item helper */}
-                    <button
-                      type="button"
-                      onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] 1x  (~0,00 €)` : '- [ ] 1x  (~0,00 €)'))}
-                      className="text-[11px] px-2 py-0.5 rounded-lg bg-surface-container border border-outline-variant/30 hover:text-emerald-400 transition-colors"
-                    >
-                      + Einkaufsposten
-                    </button>
-                    {/* Dictate Toggle */}
-                    <button
-                      type="button"
-                      onClick={toggleDictation}
-                      className={`text-[11px] px-2 py-0.5 rounded-lg border flex items-center gap-1 transition-colors ${
-                        isListening
-                          ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-pulse'
-                          : 'bg-surface-container text-on-surface-variant border-outline-variant/30 hover:text-primary'
-                      }`}
-                    >
-                      {isListening ? <MicOff className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
-                      {isListening ? 'Diktat aktiv...' : 'Diktieren'}
-                    </button>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-semibold text-on-surface-variant">
+                      {t('notes.formContent', 'Inhalt & Checkliste')}
+                    </label>
+                    <div className="flex items-center bg-surface-container rounded-lg p-0.5 border border-outline-variant/30 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => setModalTab('edit')}
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded-md font-medium transition-colors ${
+                          modalTab === 'edit'
+                            ? 'bg-primary/20 text-primary'
+                            : 'text-on-surface-variant hover:text-on-surface'
+                        }`}
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        {t('notes.tabEditor', 'Editor')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setModalTab('preview')}
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded-md font-medium transition-colors ${
+                          modalTab === 'preview'
+                            ? 'bg-primary/20 text-primary'
+                            : 'text-on-surface-variant hover:text-on-surface'
+                        }`}
+                      >
+                        <Eye className="w-3 h-3" />
+                        {t('notes.tabPreview', 'Vorschau')}
+                      </button>
+                    </div>
                   </div>
+
+                  {modalTab === 'edit' && (
+                    <div className="flex items-center gap-1.5">
+                      {/* Quick Checklist item helper */}
+                      <button
+                        type="button"
+                        onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] ` : '- [ ] '))}
+                        className="text-[11px] px-2 py-0.5 rounded-lg bg-surface-container border border-outline-variant/30 hover:text-primary transition-colors"
+                      >
+                        + Checkliste
+                      </button>
+                      {/* Quick Shopping item helper */}
+                      <button
+                        type="button"
+                        onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] 1x  (~0,00 €)` : '- [ ] 1x  (~0,00 €)'))}
+                        className="text-[11px] px-2 py-0.5 rounded-lg bg-surface-container border border-outline-variant/30 hover:text-emerald-400 transition-colors"
+                      >
+                        + Einkaufsposten
+                      </button>
+                      {/* Dictate Toggle */}
+                      <button
+                        type="button"
+                        onClick={toggleDictation}
+                        className={`text-[11px] px-2 py-0.5 rounded-lg border flex items-center gap-1 transition-colors ${
+                          isListening
+                            ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-pulse'
+                            : 'bg-surface-container text-on-surface-variant border-outline-variant/30 hover:text-primary'
+                        }`}
+                      >
+                        {isListening ? <MicOff className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
+                        {isListening ? 'Diktat aktiv...' : 'Diktieren'}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                <textarea
-                  rows={8}
-                  value={formContent}
-                  onChange={(e) => setFormContent(e.target.value)}
-                  placeholder={t(
-                    'notes.contentPlaceholder',
-                    '- [ ] 1x Butter (~1,89 €)\n- [ ] 6x Eier (~1,99 €)\n- [ ] 1x Brot (~2,49 €)\n\n**Geschätzte Gesamtsumme: ca. 6,37 €**'
-                  )}
-                  className="w-full bg-surface-container border border-outline-variant/40 rounded-xl p-3.5 text-xs text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary transition-colors font-mono leading-relaxed resize-y"
-                />
+                {modalTab === 'edit' ? (
+                  <textarea
+                    rows={8}
+                    value={formContent}
+                    onChange={(e) => setFormContent(e.target.value)}
+                    placeholder={t(
+                      'notes.contentPlaceholder',
+                      '- [ ] 1x Butter (~1,89 €)\n- [ ] 6x Eier (~1,99 €)\n- [ ] 1x Brot (~2,49 €)\n\n**Geschätzte Gesamtsumme: ca. 6,37 €**'
+                    )}
+                    className="w-full bg-surface-container border border-outline-variant/40 rounded-xl p-3.5 text-xs text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary transition-colors font-mono leading-relaxed resize-y"
+                  />
+                ) : (
+                  <div className="w-full min-h-[190px] max-h-[300px] overflow-y-auto bg-surface-container/60 border border-outline-variant/40 rounded-xl p-3.5 text-xs space-y-1.5">
+                    {formContent.trim() ? (
+                      formContent.split('\n').map((line, idx) => {
+                        const isUnchecked = line.trimStart().startsWith('- [ ]')
+                        const isChecked = line.trimStart().startsWith('- [x]') || line.trimStart().startsWith('- [X]')
+
+                        if (isUnchecked || isChecked) {
+                          const itemText = line.replace(/^[ \t]*- \[[ xX]\][ \t]*/, '')
+                          const toggleCheckInModal = () => {
+                            const lines = formContent.split('\n')
+                            lines[idx] = isUnchecked
+                              ? line.replace('- [ ]', '- [x]')
+                              : line.replace(/- \[[xX]\]/, '- [ ]')
+                            setFormContent(lines.join('\n'))
+                          }
+                          return (
+                            <div
+                              key={idx}
+                              onClick={toggleCheckInModal}
+                              className="flex items-start gap-2 py-0.5 px-1.5 rounded hover:bg-surface-container-high/60 transition-colors cursor-pointer"
+                            >
+                              {isChecked ? (
+                                <CheckSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                              ) : (
+                                <Square className="w-3.5 h-3.5 text-on-surface-variant shrink-0 mt-0.5" />
+                              )}
+                              <InlineMarkdown text={itemText} strikethrough={isChecked} />
+                            </div>
+                          )
+                        }
+
+                        if (!line.trim()) return <div key={idx} className="h-1.5" />
+
+                        return (
+                          <div key={idx} className="text-on-surface leading-relaxed">
+                            <InlineMarkdown text={line} />
+                          </div>
+                        )
+                      })
+                    ) : (
+                      <p className="text-xs text-on-surface-variant/60 italic py-6 text-center">
+                        {t('notes.previewEmpty', 'Noch kein Inhalt zum Anzeigen eingegeben.')}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Modal Footer */}

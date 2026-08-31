@@ -139,7 +139,10 @@
     "errorLoading": "Error loading notes",
     "errorSaving": "Error saving note",
     "teamBadge": "Team",
-    "archivedBadge": "Archived"
+    "archivedBadge": "Archived",
+    "tabEditor": "Editor",
+    "tabPreview": "Preview",
+    "previewEmpty": "No content entered yet to preview."
   },
   "audit": {
     "title": "Audit log",

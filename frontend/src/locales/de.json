@@ -139,7 +139,10 @@
     "errorLoading": "Fehler beim Laden der Notizen",
     "errorSaving": "Fehler beim Speichern der Notiz",
     "teamBadge": "Team",
-    "archivedBadge": "Archiviert"
+    "archivedBadge": "Archiviert",
+    "tabEditor": "Editor",
+    "tabPreview": "Vorschau",
+    "previewEmpty": "Noch kein Inhalt zum Anzeigen eingegeben."
   },
   "audit": {
     "title": "Audit-Protokoll",
