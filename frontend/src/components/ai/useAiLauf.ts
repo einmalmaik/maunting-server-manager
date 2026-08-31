@@ -18,6 +18,7 @@ import { SanitizedApiError } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useAuthStore } from '@/stores/authStore'
 import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
+import { zustellungMelden } from '@/lib/aiZustellung'
 
 /** Ein Eintrag im sichtbaren Verlauf — chronologisch, nicht nach Typ sortiert. */
 export type Entry =
@@ -378,6 +379,7 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
         // Der Zug ist durch: Frage, Antwort und alles Gelesene stehen jetzt im
         // Kontext. Genau hier hat sich der Füllstand geändert.
         void ladeKontext()
+        zustellungMelden()
       } else if (name === 'tool') {
         // In die laufende Nachricht, an ihr Ende — dorthin, wo der Aufruf
         // tatsächlich stattgefunden hat. Eine eigene Kennung braucht es dafür
@@ -388,6 +390,9 @@ export function useAiLauf({ providerId, canAttach, denken, ladeKontext, setAttac
         aendere(aktuell!, (message) => ({
           ...message, sections: mitWerkzeug(message.sections, data),
         }))
+        if (data?.tool_name?.startsWith('worker_')) {
+          zustellungMelden()
+        }
       } else if (name === 'compacted') {
         // Die Marke gehört an den Anfang: sie beschreibt, was *vorher* war.
         setEntries((current) => [

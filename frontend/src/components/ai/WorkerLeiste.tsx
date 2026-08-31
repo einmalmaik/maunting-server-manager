@@ -7,11 +7,11 @@ import { aiApi, type AiWorkerInfo } from '@/api/ai'
 import { AI_ZUSTELLUNG_EVENT } from '@/lib/aiZustellung'
 
 /**
- * Derselbe gemächliche Takt wie im Guardian- und Worker-Fenster: schnell genug,
- * um einen frisch gestarteten Auftrag zu sehen, ohne dass die Seite dauernd
- * fragt. Zwischendurch weckt das Zustell-Ereignis der Glocke die Leiste sofort.
+ * Dynamischer Takt: Schnell (2s), solange Aufträge aktiv sind; gemächlich (15s) in Ruhe.
+ * Das Zustell-Ereignis weckt die Leiste bei Änderungen sofort in Millisekunden.
  */
-const NACHSEHEN_MS = 20_000
+const AKTIV_TAKT_MS = 2_000
+const RUHE_TAKT_MS = 15_000
 
 const STATUS_TEXT: Record<string, string> = {
   running: 'ai.worker.running',
@@ -31,7 +31,7 @@ const STATUS_TEXT: Record<string, string> = {
  *
  * Ohne Aufträge rendert die Leiste **nichts** — der Chat sieht dann aus wie
  * immer. Kein Store, kein Reducer: lokaler State reicht für eine Liste, die
- * alle zwanzig Sekunden neu aus der Datenbank kommt (KISS).
+ * dynamisch und ereignisgesteuert aus der Datenbank kommt (KISS).
  */
 export function WorkerLeiste() {
   const { t } = useTranslation()
@@ -53,13 +53,14 @@ export function WorkerLeiste() {
 
   useEffect(() => {
     void laden()
-    const timer = window.setInterval(() => void laden(), NACHSEHEN_MS)
+    const intervall = workers.length > 0 ? AKTIV_TAKT_MS : RUHE_TAKT_MS
+    const timer = window.setInterval(() => void laden(), intervall)
     window.addEventListener(AI_ZUSTELLUNG_EVENT, laden)
     return () => {
       window.clearInterval(timer)
       window.removeEventListener(AI_ZUSTELLUNG_EVENT, laden)
     }
-  }, [laden])
+  }, [laden, workers.length])
 
   if (workers.length === 0) return null
 

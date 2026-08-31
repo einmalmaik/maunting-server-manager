@@ -176,11 +176,44 @@ def melden(
     if kanal in ("email", "both"):
         _mail_einreihen(db, user=user, meldung=meldung, worker_titel=worker_titel)
 
+    if kanal in ("chat", "both"):
+        sofort_zustellung_triggern(user.id)
+
     logger.info(
         "Meldung angenommen (user_id=%s, art=%s, kanal=%s, worker_id=%s)",
         user.id, art, kanal, worker_id,
     )
     return meldung
+
+
+def sofort_zustellung_triggern(user_id: int) -> None:
+    """Stößt sofort im Hintergrund eine asynchrone Zustellung an, sobald ein Worker meldet."""
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _zustell_lauf() -> None:
+        await asyncio.sleep(0.3)
+        from database import SessionLocal
+        db = SessionLocal()
+        try:
+            from models import User
+            user = db.get(User, user_id)
+            if user is None:
+                return
+            if realtime_aktiv(user_id):
+                return
+            from services import ai_run_service
+            if ai_run_service.aktiver_lauf(db, user_id=user.id, kind="primary") is None and not _tippt_gerade(user.id, 3):
+                await zustellung_anstossen(db, user=user, ruhe_noetig=False)
+        except Exception as exc:
+            logger.warning("Sofort-Zustellung fehlgeschlagen (user_id=%s): %s", user_id, exc)
+        finally:
+            db.close()
+
+    loop.create_task(_zustell_lauf())
 
 
 def _mail_einreihen(
