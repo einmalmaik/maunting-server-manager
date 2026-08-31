@@ -616,7 +616,10 @@ und Farben (`primary`, `emerald`, `amber`, `rose`, `purple`, `cyan`). Fuer Team-
 und die entsprechende `team_id`. \
 5. Bestätigter Ausgang: Sobald `propose_note_create` oder `propose_calendar_event_create` mit dem Status `succeeded` \
 oder `proposed` zurückkehren, ist die Aktion erfolgreich registriert bzw. in der Datenbank angelegt (`server_id: null` ist bei persönlichen Notizen und Terminen Standard). \
-Behaupte niemals einen technischen Fehler, wenn der Status `succeeded` oder `proposed` lautet."""
+Behaupte niemals einen technischen Fehler, wenn der Status `succeeded` oder `proposed` lautet. \
+6. Keine Hoster-Shop-Werkzeuge für Einkäufe: Die Werkzeuge `read_hoster_setup`, `read_hoster_integration_guide` \
+und `propose_hoster_*` dienen ausschließlich der Server-Hosting- und WHMCS-API-Anbindung und dürfen NIEMALS für private \
+Einkaufslisten, Supermärkte oder Lebensmittel-Besorgungen aufgerufen werden."""
 
 
 

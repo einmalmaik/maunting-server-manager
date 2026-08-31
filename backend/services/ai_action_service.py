@@ -365,7 +365,7 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "read_hoster_setup",
-            "Zeigt die panelseitige Shop-Anbindung vollstaendig: vorhandene "
+            "Zeigt die panelseitige Hoster-API- und WHMCS-Shop-Anbindung (Server-Hosting-Verkauf) vollstaendig: vorhandene "
             "Integrationen mit Slug, Dienstbenutzer, Webhook-Ziel und "
             "Kuendigungsfrist, ihre Produktzuordnungen, die vergebenen Slugs, "
             "die Benutzer, die als Dienstbenutzer taugen, und die Rollen, die "

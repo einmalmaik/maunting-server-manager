@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Archive,
@@ -6,8 +6,6 @@ import {
   CheckSquare,
   Edit3,
   Eye,
-  Mic,
-  MicOff,
   Pin,
   Plus,
   Search,
@@ -108,10 +106,6 @@ export function Notes() {
   const [modalTab, setModalTab] = useState<'edit' | 'preview'>('edit')
   const [saving, setSaving] = useState(false)
 
-  // Speech Recognition / Dictation
-  const [isListening, setIsListening] = useState(false)
-  const recognitionRef = useRef<any>(null)
-
   const loadNotes = useCallback(async () => {
     try {
       setLoading(true)
@@ -142,57 +136,6 @@ export function Notes() {
     void loadTeams()
   }, [loadNotes, loadTeams])
 
-  // Setup Speech Recognition
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition()
-      recognition.continuous = true
-      recognition.interimResults = true
-      recognition.lang = 'de-DE'
-
-      recognition.onresult = (event: any) => {
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          if (event.results[i].isFinal) {
-            const text = event.results[i][0].transcript.trim()
-            if (text) {
-              setFormContent((prev) => (prev ? `${prev}\n- [ ] ${text}` : `- [ ] ${text}`))
-            }
-          }
-        }
-      }
-
-      recognition.onerror = () => {
-        setIsListening(false)
-      }
-
-      recognition.onend = () => {
-        setIsListening(false)
-      }
-
-      recognitionRef.current = recognition
-    }
-  }, [])
-
-  const toggleDictation = () => {
-    if (!recognitionRef.current) {
-      toast.error(t('notes.dictationNotSupported', 'Spracherkennung wird in diesem Browser nicht direkt unterstützt.'))
-      return
-    }
-    if (isListening) {
-      recognitionRef.current.stop()
-      setIsListening(false)
-    } else {
-      try {
-        recognitionRef.current.start()
-        setIsListening(true)
-        toast.success(t('notes.dictationStarted', 'Diktat gestartet — sprich deine Punkte ein.'))
-      } catch {
-        setIsListening(false)
-      }
-    }
-  }
-
   const openCreateModal = () => {
     setEditingNote(null)
     setFormTitle('')
@@ -203,7 +146,6 @@ export function Notes() {
     setFormTeamId(teams.length > 0 ? teams[0].id : null)
     setFormIsPinned(false)
     setModalTab('edit')
-    setIsListening(false)
     setIsModalOpen(true)
   }
 
@@ -217,7 +159,6 @@ export function Notes() {
     setFormTeamId(note.team_id || (teams.length > 0 ? teams[0].id : null))
     setFormIsPinned(note.is_pinned || false)
     setModalTab('edit')
-    setIsListening(false)
     setIsModalOpen(true)
   }
 
@@ -230,11 +171,6 @@ export function Notes() {
 
     try {
       setSaving(true)
-      if (isListening && recognitionRef.current) {
-        recognitionRef.current.stop()
-        setIsListening(false)
-      }
-
       const payload = {
         title: formTitle.trim(),
         content: formContent,
@@ -800,7 +736,7 @@ export function Notes() {
                       <button
                         type="button"
                         onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] ` : '- [ ] '))}
-                        className="text-[11px] px-2 py-0.5 rounded-lg bg-surface-container border border-outline-variant/30 hover:text-primary transition-colors"
+                        className="text-[11px] px-2 py-0.5 rounded-md bg-surface-container-high/60 text-on-surface-variant hover:text-primary border border-outline-variant/30 hover:border-primary/40 transition-colors font-medium"
                       >
                         + Checkliste
                       </button>
@@ -808,22 +744,9 @@ export function Notes() {
                       <button
                         type="button"
                         onClick={() => setFormContent((prev) => (prev ? `${prev}\n- [ ] 1x  (~0,00 €)` : '- [ ] 1x  (~0,00 €)'))}
-                        className="text-[11px] px-2 py-0.5 rounded-lg bg-surface-container border border-outline-variant/30 hover:text-emerald-400 transition-colors"
+                        className="text-[11px] px-2 py-0.5 rounded-md bg-surface-container-high/60 text-on-surface-variant hover:text-emerald-400 border border-outline-variant/30 hover:border-emerald-500/40 transition-colors font-medium"
                       >
                         + Einkaufsposten
-                      </button>
-                      {/* Dictate Toggle */}
-                      <button
-                        type="button"
-                        onClick={toggleDictation}
-                        className={`text-[11px] px-2 py-0.5 rounded-lg border flex items-center gap-1 transition-colors ${
-                          isListening
-                            ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-pulse'
-                            : 'bg-surface-container text-on-surface-variant border-outline-variant/30 hover:text-primary'
-                        }`}
-                      >
-                        {isListening ? <MicOff className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
-                        {isListening ? 'Diktat aktiv...' : 'Diktieren'}
                       </button>
                     </div>
                   )}
