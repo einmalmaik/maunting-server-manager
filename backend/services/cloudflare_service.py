@@ -54,6 +54,29 @@ async def test_connection() -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+async def _resolve_zone_id(zone_or_name: str | None) -> str:
+    target = (zone_or_name or "").strip().replace("\n", "").replace("\r", "")
+    # Falls es bereits eine 32-stellige Hex-Zone-ID ist
+    if len(target) == 32 and all(c in "0123456789abcdefABCDEF" for c in target):
+        return target
+    zones = await list_zones()
+    if target:
+        for z in zones:
+            if z.get("name", "").lower() == target.lower() or z.get("id") == target:
+                return str(z["id"])
+    from services.panel_settings_service import PanelSettingsService
+    default_zone = PanelSettingsService.get("cloudflare_default_zone", "")
+    if default_zone:
+        for z in zones:
+            if z.get("name", "").lower() == default_zone.lower() or z.get("id") == default_zone:
+                return str(z["id"])
+    if len(zones) == 1:
+        return str(zones[0]["id"])
+    if target:
+        raise CloudflareApiUnavailable(f"zone_not_found: {target}")
+    raise CloudflareApiUnavailable("zone_id_missing")
+
+
 async def list_zones() -> list[dict[str, Any]]:
     from services.cloudflare_api_key_service import resolve_key
 
@@ -68,31 +91,31 @@ async def list_zones() -> list[dict[str, Any]]:
         return data.get("result") or []
 
 
-async def list_dns_records(zone_id: str) -> list[dict[str, Any]]:
+async def list_dns_records(zone_id: str | None = None) -> list[dict[str, Any]]:
     from services.cloudflare_api_key_service import resolve_key
 
     key = resolve_key()
     if not key:
         raise CloudflareApiUnavailable("cloudflare_api_token_missing")
-    zone_id = str(zone_id).strip().replace("\n", "").replace("\r", "")
+    resolved_id = await _resolve_zone_id(zone_id)
     async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(f"{API_BASE}/zones/{zone_id}/dns_records", headers=_headers(key), params={"per_page": 100})
+        resp = await client.get(f"{API_BASE}/zones/{resolved_id}/dns_records", headers=_headers(key), params={"per_page": 100})
         _raise_if_auth(resp)
         resp.raise_for_status()
         data = resp.json()
         return data.get("result") or []
 
 
-async def create_dns_record(zone_id: str, name: str, rtype: str, content: str, proxied: bool = False, ttl: int = 1) -> dict[str, Any]:
+async def create_dns_record(zone_id: str | None, name: str, rtype: str, content: str, proxied: bool = False, ttl: int = 1) -> dict[str, Any]:
     from services.cloudflare_api_key_service import resolve_key
 
     key = resolve_key()
     if not key:
         raise CloudflareApiUnavailable("cloudflare_api_token_missing")
-    zone_id = str(zone_id).strip().replace("\n", "").replace("\r", "")
+    resolved_id = await _resolve_zone_id(zone_id)
     payload: dict[str, Any] = {"type": rtype, "name": name, "content": content, "ttl": ttl, "proxied": proxied}
     async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(f"{API_BASE}/zones/{zone_id}/dns_records", headers=_headers(key), json=payload)
+        resp = await client.post(f"{API_BASE}/zones/{resolved_id}/dns_records", headers=_headers(key), json=payload)
         _raise_if_auth(resp)
         if resp.status_code >= 400:
             try:
@@ -105,16 +128,16 @@ async def create_dns_record(zone_id: str, name: str, rtype: str, content: str, p
         return data.get("result") or {}
 
 
-async def delete_dns_record(zone_id: str, record_id: str) -> bool:
+async def delete_dns_record(zone_id: str | None, record_id: str) -> bool:
     from services.cloudflare_api_key_service import resolve_key
 
     key = resolve_key()
     if not key:
         raise CloudflareApiUnavailable("cloudflare_api_token_missing")
-    zone_id = str(zone_id).strip().replace("\n", "").replace("\r", "")
+    resolved_id = await _resolve_zone_id(zone_id)
     record_id = str(record_id).strip().replace("\n", "").replace("\r", "")
     async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.delete(f"{API_BASE}/zones/{zone_id}/dns_records/{record_id}", headers=_headers(key))
+        resp = await client.delete(f"{API_BASE}/zones/{resolved_id}/dns_records/{record_id}", headers=_headers(key))
         _raise_if_auth(resp)
         resp.raise_for_status()
         return True

@@ -2075,7 +2075,10 @@ def _cloudflare_dns_payload(rest: dict) -> tuple[dict, dict]:
     rtype = str(rest.get("rtype", "")).strip()
     content = str(rest.get("content", "")).strip()[:253]
     proxied = bool(rest.get("proxied", False))
-    if not zone_id or len(zone_id) > 64:
+    if not zone_id:
+        from services.panel_settings_service import PanelSettingsService
+        zone_id = PanelSettingsService.get("cloudflare_default_zone", "")
+    if not zone_id or len(zone_id) > 128:
         raise AiActionValidationError("zone_id fehlt oder ungueltig")
     if not name or rtype not in ("A", "CNAME"):
         raise AiActionValidationError("DNS Record braucht name und rtype A/CNAME")

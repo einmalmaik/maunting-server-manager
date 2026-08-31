@@ -4421,9 +4421,7 @@ def _execute_global_read_tool(
     if tool_name == "cloudflare_list_dns_records":
         if not permission_service.has_global_permission(db, user, "cloudflare.manage"):
             raise AiActionValidationError("Cloudflare-Einsicht ist nicht erlaubt")
-        zone_id = str(arguments.get("zone_id", "")).strip()
-        if not zone_id or len(zone_id) > 64:
-            raise AiActionValidationError("zone_id fehlt oder ungueltig")
+        zone_id = str(arguments.get("zone_id", "") or arguments.get("domain", "") or arguments.get("zone", "") or arguments.get("name", "")).strip()
         try:
             import concurrent.futures, asyncio as _aio
 
@@ -4431,7 +4429,7 @@ def _execute_global_read_tool(
                 from services.cloudflare_service import list_dns_records
 
                 async def _inner():
-                    return await list_dns_records(zone_id)
+                    return await list_dns_records(zone_id if zone_id else None)
 
                 try:
                     return _aio.run(_inner())
@@ -4441,8 +4439,8 @@ def _execute_global_read_tool(
 
             records = _do_records()
             return {"records": [{"id": r.get("id"), "name": r.get("name"), "type": r.get("type"), "content": r.get("content")} for r in records], "zone_id": zone_id}
-        except Exception:
-            return {"error": "cloudflare_list_failed", "zone_id": zone_id}
+        except Exception as exc:
+            return {"error": "cloudflare_list_failed", "detail": str(exc), "zone_id": zone_id}
 
     # **Der Durchfall war die gefaehrlichste Zeile der Datei.** Bis hierher war
     # die Kapazitaetsabfrage der namenlose Rumpf am Ende der Kette: wer keinen
