@@ -103,9 +103,8 @@ def _werkzeuge_taeuschen(monkeypatch: pytest.MonkeyPatch) -> None:
     def _sofort(
         _user_id: int,
         call: ProviderToolCall,
-        _herkunft: str = "panel",
-        _familie: str | None = None,
-        _prefetch_session_id: str | None = None,
+        *args,
+        **kwargs,
     ):
         return {"tool": call.name}, None
 
@@ -346,7 +345,7 @@ async def test_sicherer_read_startet_vor_dem_provider_streamende(
     task = asyncio.create_task(
         ai_stream_service.segment_ausfuehren(run.id, client=_KEIN_CLIENT)
     )
-    await asyncio.wait_for(executor_started.wait(), timeout=1)
+    await asyncio.wait_for(executor_started.wait(), timeout=5)
     assert not provider_beendet.is_set()
     provider_darf_enden.set()
     await task

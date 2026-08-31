@@ -162,6 +162,7 @@ def vorbereiten(
         "# Verbosity\nNenne zuerst das Ergebnis, dann nur die nötigen Details.",
         "# Tools\nUnabhängige Werkzeuge parallel nutzen. Recherchen und Kartenanfragen in diesem Realtime-Zug selbst erledigen; "
         "keine Hintergrund-Worker starten. "
+        "Für Server-, Mod-, Konfigurations- oder Verwaltungsaktionen ohne direktes Einzelwerkzeug execute_server_action verwenden. "
         "voice_resolve_latest_proposal nur für die zuletzt sichtbare Vorschlagskarte und nur bei eindeutiger Zustimmung oder Ablehnung verwenden.",
         "# Regional Analysis\nNach einem erfolgreichen analyze_region-Aufruf immer eine gesprochene, konkrete Einordnung liefern. "
         "Wetter und Satellitenlage können zuerst eintreffen: Beginne damit sofort und warte nicht auf Verkehr, Nachrichten oder öffentliche Beiträge. "

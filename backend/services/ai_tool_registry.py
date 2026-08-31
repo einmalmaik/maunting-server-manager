@@ -238,6 +238,7 @@ WERKZEUGE: dict[str, Werkzeug] = {
     "notes_read": Werkzeug(
         "global_read", gruppe="notes", angebot=("ai.notes.use",)
     ),
+    "execute_server_action": Werkzeug("global_read"),
 
     # ── Rueckfrage ────────────────────────────────────────────────────
     "ask_user": Werkzeug("ask"),

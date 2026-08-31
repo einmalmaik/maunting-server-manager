@@ -1559,6 +1559,34 @@ def _notes_tool_definitions() -> list[dict]:
             },
             ["note_id", *_RATIONALE_REQUIRED],
         ),
+        _function(
+            "execute_server_action",
+            "Führt eine Server-, Mod-, Backup-, Konfigurations- oder Verwaltungsaktion aus, "
+            "für die kein direktes Schnellwerkzeug im aktuellen Aufrufsatz vorliegt (z. B. Ports abfragen, "
+            "Mods suchen/installieren, Backup anlegen/wiederherstellen, Konfigurationen ändern, Aufgaben planen). "
+            "Gib die gewünschte Anweisung als 'action' und optional 'server_id' an.",
+            {
+                "action": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "Die auszuführende Aktion oder Abfrage in natürlicher Sprache.",
+                },
+                "server_id": {
+                    "type": "integer",
+                    "description": "Optionale ID des betroffenen Servers.",
+                },
+                "tool_name": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Optionaler expliziter Werkzeugname.",
+                },
+                "parameters": {
+                    "type": "object",
+                    "description": "Optionale strukturierte Zusatzparameter.",
+                },
+            },
+            ["action"],
+        ),
     ]
 
 
@@ -4002,6 +4030,19 @@ def _execute_global_read_tool(
 
     if tool_name == "read_docs":
         return _execute_read_docs(arguments)
+
+    if tool_name == "execute_server_action":
+        from services.ai_voice.voice_dispatcher import dispatch_voice_action
+        wert, fehler, _anzeige, _vorschlaege = dispatch_voice_action(
+            user.id,
+            arguments,
+            conversation_id=None,
+            herkunft=herkunft,
+            familie=familie,
+        )
+        if fehler and isinstance(wert, dict) and "error" not in wert:
+            wert["error"] = fehler
+        return wert if isinstance(wert, dict) else {"result": wert}
 
     if tool_name == "worker_start":
         from services import ai_worker_service

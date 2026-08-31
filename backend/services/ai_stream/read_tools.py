@@ -356,7 +356,16 @@ def voice_werkzeug_ausfuehren(
     Das Ergebnis ist bereits am bestehenden Choke Point geschwärzt; die
     Anzeigeprojektion enthält weiterhin keine Argumente oder Rohresultate.
     """
-    from services.ai_tool_registry import CHAT_INTERACTION_TOOLS, WRITE_TOOLS
+    if call.name == "execute_server_action":
+        from services.ai_voice.voice_dispatcher import dispatch_voice_action
+        arguments = call.arguments if isinstance(call.arguments, dict) else {}
+        return dispatch_voice_action(
+            user_id,
+            arguments,
+            conversation_id=conversation_id,
+            herkunft=herkunft,
+            familie=familie,
+        )
 
     if call.name in WRITE_TOOLS:
         if call.name not in CHAT_INTERACTION_TOOLS or not conversation_id:

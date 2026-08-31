@@ -12,6 +12,7 @@ HOTSET = frozenset({
     "search_docs",
     "calendar_read",
     "worker_start",
+    "execute_server_action",
 })
 
 
