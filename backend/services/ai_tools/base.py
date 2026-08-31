@@ -63,7 +63,13 @@ MAX_LISTED_SERVERS = 60
 MAX_INCIDENT_ATTEMPTS = 8
 MAX_TESTMAILS_JE_STUNDE = 3
 
-_SERVER_ID_SCHEMA = {"type": "integer", "description": "Die ID des Servers"}
+_SERVER_ID_SCHEMA = {
+    "server_id": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "ID des Servers aus list_my_servers.",
+    }
+}
 _MUTEX_TOOLS = {
     "propose_server_lifecycle",
     "propose_server_start",
@@ -85,19 +91,30 @@ _MUTEX_TOOLS = {
 _RATIONALE_SCHEMA = {
     "reason": {
         "type": "string",
+        "maxLength": MAX_REASON_CHARS,
         "description": "Kurze Begruendung, warum diese Aktion vorgeschlagen wird",
     },
     "expected_effect": {
         "type": "string",
+        "maxLength": MAX_REASON_CHARS,
         "description": "Erwartete Auswirkung auf den Server oder Dienst",
     },
 }
 _RATIONALE_REQUIRED = ["reason", "expected_effect"]
 
 _MEMORY_TEAM_SCHEMA = {
-    "type": "string",
-    "enum": ["allgemein", "kueche", "technik", "redaktion", "support"],
-    "description": "Team-Zuordnung der Erinnerung (Standard: allgemein)",
+    "team_id": {
+        "type": ["integer", "null"],
+        "description": "Nur bei scope=team: die team_id aus dem Suchergebnis.",
+    },
+    "team": {
+        "type": "string",
+        "maxLength": 64,
+        "description": (
+            "Ersatz ohne team_id: Teamname aus einer Rückfrage, genau so "
+            "geschrieben."
+        ),
+    },
 }
 
 _PLAN_SCHEMA = {
