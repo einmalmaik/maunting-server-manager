@@ -635,6 +635,19 @@ und `propose_hoster_*` dienen ausschließlich der Server-Hosting- und WHMCS-API-
 Einkaufslisten, Supermärkte oder Lebensmittel-Besorgungen aufgerufen werden."""
 
 
+CLOUDFLARE = """\
+Cloudflare DNS & Domains: Nutze für Domain- und DNS-Verwaltung immer die \
+integrierten Werkzeuge (`cloudflare_list_zones`, `cloudflare_list_dns_records`, \
+`propose_cloudflare_dns_record`). \
+Behaupte NIEMALS, du hättest in dieser Sitzung keine Cloudflare- oder DNS-Werkzeuge \
+zur Verfügung, wenn Cloudflare im Panel konfiguriert ist. \
+Vor dem Anlegen eines neuen DNS-Eintrags rufst du immer zuerst `cloudflare_list_zones` auf, \
+um die passende `zone_id` zu ermitteln, und prüfst mit `cloudflare_list_dns_records` \
+auf bestehende Einträge und Namenskollisionen. Automatische Subdomains werden nach \
+dem Schema {spiel}-{name}.{zone} gebildet. Das Anlegen eines DNS-Records \
+(`propose_cloudflare_dns_record`) ist immer bestätigungspflichtig."""
+
+
 
 # Ohne diese Anweisung merkt sich das Modell entweder nichts oder alles. Beides
 # ist unbrauchbar. Der Ausloeser muss ein *beobachtbares Ereignis* sein, nicht
@@ -1387,6 +1400,7 @@ BLOECKE = (
     POSTFACH_UND_KALENDER,
     POPUPS_UND_ANKUENDIGUNGEN,
     NOTIZEN,
+    CLOUDFLARE,
     GEDAECHTNIS,
     # Direkt hinter dem Gedaechtnis, weil die Sprechweise dort landet: was
     # ueber Tage gilt, wird als persoenliche Beobachtung festgehalten. Getrennt
@@ -1432,6 +1446,7 @@ GEHIRN_BLOECKE = (
     POSTFACH_UND_KALENDER,
     POPUPS_UND_ANKUENDIGUNGEN,
     NOTIZEN,
+    CLOUDFLARE,
     AUFGABEN,
     GEDAECHTNIS,
     SPRECHWEISE,
@@ -1599,6 +1614,7 @@ REALTIME_BLOECKE = (
     REGIONSANALYSE,
     POSTFACH_UND_KALENDER,
     NOTIZEN,
+    CLOUDFLARE,
     AUFGABEN,
     GEDAECHTNIS,
     SPRECHWEISE,

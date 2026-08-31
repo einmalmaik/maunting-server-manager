@@ -19,6 +19,9 @@ HOTSET = frozenset({
     "learn_skill",
     "worker_start",
     "execute_server_action",
+    "cloudflare_list_zones",
+    "search_curseforge_modpacks",
+    "advise_node_placement",
 })
 
 
