@@ -76,7 +76,17 @@ export function GlobeViewer({
   const scene = data?.satellite?.scenes?.[0]
 
   useEffect(() => {
-    if (!data?.coordinates) return
+    if (!data?.coordinates) {
+      setSights([])
+      return
+    }
+
+    if (data.camera?.action === 'overview') {
+      setSights([])
+      lastMainRef.current = null
+      return
+    }
+
     const key = `${data.location}:${data.coordinates.latitude}:${data.coordinates.longitude}`
     const isNewLocation = lastMainRef.current !== null && lastMainRef.current !== key
 

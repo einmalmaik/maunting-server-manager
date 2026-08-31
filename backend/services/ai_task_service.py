@@ -854,6 +854,7 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
     db.commit()
 
     flug, anbieter = await ai_run_service.vorflug(client, db, user)
+    print(f"DEBUG TASK LAUF: flug={flug}, anbieter={anbieter}")
     if flug is None:
         if anbieter is None:
             logger.info("Aufgabenlauf ohne Anbieter (task_id=%s)", aufgabe.id)
@@ -873,20 +874,11 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
         reasoning=flug.denken,
         reasoning_effort=flug.stufe,
         context_chars=flug.fenster.zeichen if flug.fenster.bekannt else None,
-        # Sonst haengte der faellige Lauf dem Auftrag eine Vorfallsmeldung an
-        # und markierte sie dabei als besprochen, obwohl kein Mensch sie gesehen
-        # hat. Der Betreiber erfaehrt von der Stoerung dann nie.
         guardian_briefing_unterdruecken=True,
-        # Niemand sitzt davor: kein Skill-Verzeichnis im Systemprompt, denn
-        # `AUFGABEN_LESEN` bietet kein `read_skill` an.
         unbeaufsichtigt=True,
-        # Ausdruecklich "voll", obwohl das Fenster kind='worker' traegt: die
-        # Ableitung aus der Fensterart gaebe die Worker-Rolle samt Worker-Prompt
-        # ("Rueckfragen ueber worker_frage") — und genau dieses Werkzeug nimmt
-        # der Aufgabenschnitt gleich wieder weg. Der Aufgabenrahmen unten ist
-        # die Schranke, nicht die Rolle.
         rolle="voll",
     )
+    print(f"DEBUG TASK LAUF 2: run={run}, fehler={fehler}")
     if run is None:
         # Kontingent erschoepft, Schluessel nicht lesbar, Anfragekonflikt. Alles
         # Gruende, die beim naechsten Termin anders liegen koennen — deshalb

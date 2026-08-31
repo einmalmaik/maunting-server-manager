@@ -259,6 +259,14 @@ export function MapTilerDetailMap({
       const p = pendingQueueRef.current.shift()
       if (!p) return
 
+      // Falls die Station nicht mehr in den aktuellen Sehenswürdigkeiten liegt, verwerfen
+      if (sights && sights.length > 0 && !sights.some((s) => `id:${s.commandId}` === p.command)) {
+        if (pendingQueueRef.current.length > 0) {
+          processQueue()
+        }
+        return
+      }
+
       if (lastCommandRef.current !== p.command) {
         lastCommandRef.current = p.command
         lastTargetRef.current = p.target
@@ -328,7 +336,8 @@ export function MapTilerDetailMap({
     if (!sameTarget) {
       manualCameraControlRef.current = false
       const isInCurrentSights = sights && sights.some((s) => `${s.longitude}:${s.latitude}` === target)
-      if (!isInCurrentSights && pendingQueueRef.current.length > 0) {
+      if (!isInCurrentSights) {
+        // Neuer Ort: Alte Warteschlange und Timer sofort verwerfen
         pendingQueueRef.current = []
         if (tourTimerRef.current) {
           window.clearTimeout(tourTimerRef.current)
@@ -336,17 +345,6 @@ export function MapTilerDetailMap({
         }
         dwellUntilRef.current = 0
       }
-    }
-
-    const now = Date.now()
-    if (cameraAction === 'focus_location' && now < dwellUntilRef.current) {
-      const delay = dwellUntilRef.current - now
-      pendingQueueRef.current.push({ latitude, longitude, locationName, command, target, zoom })
-      if (!tourTimerRef.current || pendingQueueRef.current.length === 1) {
-        if (tourTimerRef.current) window.clearTimeout(tourTimerRef.current)
-        tourTimerRef.current = window.setTimeout(processQueue, delay)
-      }
-      return
     }
 
     const currentZoom = map.getZoom()
@@ -360,13 +358,14 @@ export function MapTilerDetailMap({
     } else if (cameraAction === 'zoom_out') {
       nextZoom = Math.max(1.2, currentZoom - 4)
     } else if (cameraAction === 'overview' || cameraMode === 'overview') {
-      nextZoom = 1.2
+      nextZoom = globe ? 0.65 : 1.2
       dwellUntilRef.current = 0
       pendingQueueRef.current = []
       if (tourTimerRef.current) {
         window.clearTimeout(tourTimerRef.current)
         tourTimerRef.current = null
       }
+      processedSightCommandsRef.current.clear()
     } else if (sameTarget) {
       nextZoom = Math.max(currentZoom, focusZoom)
     }

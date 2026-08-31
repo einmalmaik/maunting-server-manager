@@ -555,8 +555,7 @@ export function AiChat() {
         lastSeenCameraCommandRef.current = latestCameraCommand.command_id
       }
       setGeoData(combinedGeo)
-      // Wichtig: Aus altem Verlauf niemals ungefragt öffnen — nur bei aktiver Live-Generierung (streaming)
-      if (streaming && !manuallyClosedGeoRef.current && closedGeoIdRef.current !== currentGeoId) {
+      if (!manuallyClosedGeoRef.current && closedGeoIdRef.current !== currentGeoId) {
         setGeoOpen(true)
       }
     } else {
@@ -661,17 +660,15 @@ export function AiChat() {
    * damit auch umfangreiche Verläufe mit Markdown und Karten sofort unten an der Eingabe landen.
    */
   useLayoutEffect(() => {
-    if (!loading && entries.length > 0) {
+    if (!loading && entries.length > 0 && !initialScrollDoneRef.current) {
       scrolleNachUnten()
     }
   }, [loading, entries.length, scrolleNachUnten])
 
   useEffect(() => {
-    if (!loading && entries.length > 0) {
-      if (!initialScrollDoneRef.current) {
-        initialScrollDoneRef.current = true
-        setAmEnde(true)
-      }
+    if (!loading && entries.length > 0 && !initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true
+      setAmEnde(true)
       scrolleNachUnten()
       const frame = requestAnimationFrame(() => {
         scrolleNachUnten()

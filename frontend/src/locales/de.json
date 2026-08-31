@@ -652,6 +652,9 @@
         "propose_note_create": "Notiz erstellen",
         "propose_note_update": "Notiz bearbeiten",
         "propose_note_delete": "Notiz löschen",
+        "propose_cloudflare_dns_delete": "Cloudflare-DNS-Eintrag löschen",
+        "propose_cloudflare_dns_record": "Cloudflare-DNS-Eintrag anlegen",
+        "propose_modpack_install": "CurseForge-Modpack installieren",
         "desktop_artifact": "Desktop-Artefakt (Software/Mod/Installer)",
         "read_server_status": "Server-Status lesen",
         "read_server_capacity": "Server-Kapazität lesen",
@@ -716,7 +719,10 @@
         "propose_popup_create": "Pop-up-Ankündigung für das Panel erstellen?",
         "propose_note_create": "Notiz „{{title}}“ jetzt anlegen?",
         "propose_note_update": "Notiz mit den neuen Angaben aktualisieren?",
-        "propose_note_delete": "Diese Notiz endgültig löschen? Das lässt sich nicht rückgängig machen."
+        "propose_note_delete": "Diese Notiz endgültig löschen? Das lässt sich nicht rückgängig machen.",
+        "propose_cloudflare_dns_delete": "DNS-Eintrag für Zone „{{zone_id}}“ wirklich löschen? Das lässt sich nicht rückgängig machen.",
+        "propose_cloudflare_dns_record": "DNS-Eintrag „{{name}}“ ({{type}}) mit Ziel „{{content}}“ in Cloudflare anlegen?",
+        "propose_modpack_install": "Modpack „{{modpack_name}}“ auf dem Server installieren? Vorhandene Spieldateien können überschrieben werden."
       },
       "executed": "KI-Vorschlag wurde autorisiert und ausgeführt.",
       "failed": "Die Aktion wurde sicher beendet. Details sind im Audit-Log verfügbar.",
@@ -867,7 +873,12 @@
       "voice_set_region_view": "Regionenansicht geöffnet",
       "propose_note_create": "Notizerstellung vorbereitet",
       "propose_note_update": "Notizänderung vorbereitet",
-      "propose_note_delete": "Notizlöschung vorbereitet"
+      "propose_note_delete": "Notizlöschung vorbereitet",
+      "advise_node_placement": "Node-Platzierung empfohlen",
+      "cloudflare_list_dns_records": "DNS-Einträge gelesen",
+      "cloudflare_list_zones": "Cloudflare-Zonen gelesen",
+      "execute_server_action": "Serveraktion ausgeführt",
+      "search_curseforge_modpacks": "CurseForge-Modpacks durchsucht"
     },
     "toolsRunning": {
       "ask_user": "Ich frage kurz nach",
@@ -956,7 +967,15 @@
       "voice_set_region_view": "Ich öffne die Regionenansicht",
       "propose_note_create": "Ich bereite die Notiz vor",
       "propose_note_update": "Ich bereite die Notizänderung vor",
-      "propose_note_delete": "Ich bereite das Löschen der Notiz vor"
+      "propose_note_delete": "Ich bereite das Löschen der Notiz vor",
+      "advise_node_placement": "Ich analysiere die Hostkapazitäten",
+      "cloudflare_list_dns_records": "Ich lese die DNS-Einträge bei Cloudflare",
+      "cloudflare_list_zones": "Ich lese die Zonen bei Cloudflare",
+      "execute_server_action": "Ich führe die Serveraktion aus",
+      "search_curseforge_modpacks": "Ich suche bei CurseForge nach Modpacks",
+      "propose_cloudflare_dns_delete": "Ich bereite die Löschung des DNS-Eintrags vor",
+      "propose_cloudflare_dns_record": "Ich bereite den DNS-Eintrag vor",
+      "propose_modpack_install": "Ich bereite die Modpack-Installation vor"
     },
     "errors": {
       "codes": {

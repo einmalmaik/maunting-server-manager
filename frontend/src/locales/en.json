@@ -652,6 +652,9 @@
         "propose_note_create": "Create note",
         "propose_note_update": "Update note",
         "propose_note_delete": "Delete note",
+        "propose_cloudflare_dns_delete": "Delete Cloudflare DNS record",
+        "propose_cloudflare_dns_record": "Create Cloudflare DNS record",
+        "propose_modpack_install": "Install CurseForge modpack",
         "desktop_artifact": "Desktop artifact (software/mod/installer)",
         "read_server_status": "Read server status",
         "read_server_capacity": "Read server capacity",
@@ -716,7 +719,10 @@
         "propose_popup_create": "Create this pop-up announcement for the panel now?",
         "propose_note_create": "Create note “{{title}}” now?",
         "propose_note_update": "Update this note with the new details?",
-        "propose_note_delete": "Permanently delete this note? This cannot be undone."
+        "propose_note_delete": "Permanently delete this note? This cannot be undone.",
+        "propose_cloudflare_dns_delete": "Permanently delete DNS record for zone “{{zone_id}}”? This cannot be undone.",
+        "propose_cloudflare_dns_record": "Create DNS record “{{name}}” ({{type}}) with target “{{content}}” in Cloudflare?",
+        "propose_modpack_install": "Install modpack “{{modpack_name}}” on the server? Existing game files may be overwritten."
       },
       "executed": "AI proposal was authorized and executed.",
       "failed": "The action was stopped safely. Details are available in the audit log.",
@@ -867,7 +873,12 @@
       "voice_set_region_view": "Opened region view",
       "propose_note_create": "Note creation prepared",
       "propose_note_update": "Note update prepared",
-      "propose_note_delete": "Note deletion prepared"
+      "propose_note_delete": "Note deletion prepared",
+      "advise_node_placement": "Advised node placement",
+      "cloudflare_list_dns_records": "Read DNS records",
+      "cloudflare_list_zones": "Read Cloudflare zones",
+      "execute_server_action": "Executed server action",
+      "search_curseforge_modpacks": "Searched CurseForge modpacks"
     },
     "toolsRunning": {
       "ask_user": "Asking a quick question",
@@ -956,7 +967,15 @@
       "voice_set_region_view": "Opening region view",
       "propose_note_create": "Preparing the note",
       "propose_note_update": "Preparing the note update",
-      "propose_note_delete": "Preparing to delete the note"
+      "propose_note_delete": "Preparing to delete the note",
+      "advise_node_placement": "Analyzing host capacities",
+      "cloudflare_list_dns_records": "Reading DNS records from Cloudflare",
+      "cloudflare_list_zones": "Reading Cloudflare zones",
+      "execute_server_action": "Executing server action",
+      "search_curseforge_modpacks": "Searching CurseForge for modpacks",
+      "propose_cloudflare_dns_delete": "Preparing DNS record deletion",
+      "propose_cloudflare_dns_record": "Preparing DNS record",
+      "propose_modpack_install": "Preparing modpack installation"
     },
     "errors": {
       "codes": {

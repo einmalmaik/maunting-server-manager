@@ -298,12 +298,35 @@ export function normalizeGeoCameraCommand(value: unknown): AiGeoCameraCommand | 
   }
 }
 
+function geoDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371
+  const dLat = (lat2 - lat1) * (Math.PI / 180)
+  const dLon = (lon2 - lon1) * (Math.PI / 180)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)))
+}
+
 export function applyGeoCameraCommand(
   analysis: AiRegionalAnalysis | null,
   value: unknown,
 ): AiRegionalAnalysis | null {
   const command = normalizeGeoCameraCommand(value)
   if (!analysis || !command) return analysis
+
+  if (command.action === 'overview') {
+    return {
+      ...analysis,
+      sights: undefined,
+      camera: {
+        mode: 'overview',
+        action: 'overview',
+        command_id: command.command_id,
+      },
+    }
+  }
 
   let sights = analysis.sights ? [...analysis.sights] : []
   if (command.action === 'focus_location' && command.coordinates && command.location) {
@@ -313,15 +336,25 @@ export function applyGeoCameraCommand(
       name: command.location,
       commandId: command.command_id,
     }
-    const alreadyExists = sights.some(
-      (s) =>
-        s.commandId === newSight.commandId ||
-        (s.name.toLowerCase() === newSight.name.toLowerCase() &&
-          Math.abs(s.latitude - newSight.latitude) < 0.0001 &&
-          Math.abs(s.longitude - newSight.longitude) < 0.0001),
-    )
-    if (!alreadyExists) {
-      sights.push(newSight)
+
+    // Wenn der neue Ort mehr als 800 km vom bestehenden Bezugspunkt entfernt ist,
+    // gehört er zu einer neuen Region — alte Sehenswürdigkeiten werden verworfen.
+    const baseCoords = analysis.coordinates
+    const isFarAway = baseCoords && geoDistanceKm(baseCoords.latitude, baseCoords.longitude, newSight.latitude, newSight.longitude) > 800
+
+    if (isFarAway) {
+      sights = [newSight]
+    } else {
+      const alreadyExists = sights.some(
+        (s) =>
+          s.commandId === newSight.commandId ||
+          (s.name.toLowerCase() === newSight.name.toLowerCase() &&
+            Math.abs(s.latitude - newSight.latitude) < 0.0001 &&
+            Math.abs(s.longitude - newSight.longitude) < 0.0001),
+      )
+      if (!alreadyExists) {
+        sights.push(newSight)
+      }
     }
   }
 
@@ -336,11 +369,9 @@ export function applyGeoCameraCommand(
         }
       : {}),
     camera: {
-      mode: command.action === 'overview'
-        ? 'overview'
-        : command.action === 'focus_location'
-          ? 'detail'
-          : (analysis.camera?.mode ?? 'focus'),
+      mode: command.action === 'focus_location'
+        ? 'detail'
+        : (analysis.camera?.mode ?? 'focus'),
       action: command.action,
       command_id: command.command_id,
     },

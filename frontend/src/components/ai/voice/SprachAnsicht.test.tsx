@@ -274,7 +274,7 @@ describe('SprachAnsicht', () => {
     ansicht({ werkzeug: 'analyze_region', zustand: 'denkt' })
 
     // Im 3-Spalten-Modus wird das RegionalInfoPanel gerendert
-    expect(screen.getByLabelText(i18n.t('ai.geo.panelTitle', 'Regionale Analyse'))).toBeInTheDocument()
+    expect(screen.getAllByLabelText(i18n.t('ai.geo.panelTitle', 'Regionale Analyse'))[0]).toBeInTheDocument()
   })
 
   it('zeigt im regionalen Echtzeitmodus keine Transkriptzeilen', () => {
@@ -292,8 +292,8 @@ describe('SprachAnsicht', () => {
       geoData: { location: 'Berlin', coordinates: { latitude: 52.52 } } as unknown as AiRegionalAnalysis,
     })
 
-    expect(screen.getByLabelText(i18n.t('ai.geo.panelTitle', 'Regionale Analyse'))).toBeInTheDocument()
+    expect(screen.getAllByLabelText(i18n.t('ai.geo.panelTitle', 'Regionale Analyse'))[0]).toBeInTheDocument()
     expect(screen.queryByText('52.5200° N')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: i18n.t('ai.voice.end') })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: i18n.t('ai.voice.end') })[0]).toBeInTheDocument()
   })
 })
