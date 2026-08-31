@@ -45,6 +45,12 @@ class PanelSettingsResponse(BaseModel):
     captcha_provider: str = "none"
     captcha_site_key: str = ""
     captcha_secret_key: str = ""
+    cloudflare_enabled: bool = True
+    cloudflare_api_token: str = ""
+    cloudflare_api_configured: bool = False
+    cloudflare_api_source: str = "none"
+    cloudflare_default_zone: str = ""
+    proactive_enabled: bool = True
     # Rate-Limits (Anfragen pro Minute pro IP); Defaults = Runtime-Fallback
     rate_limit_auth: int = 10
     rate_limit_global: int = 100
@@ -77,6 +83,9 @@ class PanelSettingsUpdate(BaseModel):
     captcha_provider: str | None = None
     captcha_site_key: str | None = None
     captcha_secret_key: str | None = None
+    cloudflare_enabled: bool | None = None
+    cloudflare_default_zone: str | None = None
+    proactive_enabled: bool | None = None
     # Optional: nur mitsenden wenn der Security-Tab speichert
     rate_limit_auth: int | None = None
     rate_limit_global: int | None = None
@@ -96,6 +105,10 @@ class SteamApiKeyRequest(BaseModel):
 
 class CurseForgeApiKeyRequest(BaseModel):
     curseforge_api_key: str
+
+
+class CloudflareApiTokenRequest(BaseModel):
+    cloudflare_api_token: str
 
 
 class SteamAccountRequest(BaseModel):

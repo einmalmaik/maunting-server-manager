@@ -154,6 +154,10 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # Suchschluessel steht `web_search` gar nicht erst im Katalog
     # (`ai_action_service._global_tool_definitions`).
     "web_search": Werkzeug("global_read", angebot=("ai.web_search.use",)),
+    "search_curseforge_modpacks": Werkzeug("global_read", angebot=("server.mods.read",)),
+    "advise_node_placement": Werkzeug("global_read", angebot=("servers.create",)),
+    "cloudflare_list_zones": Werkzeug("global_read", angebot=("cloudflare.manage",)),
+    "cloudflare_list_dns_records": Werkzeug("global_read", angebot=("cloudflare.manage",)),
 
     # Satelliten- und Regionsanalyse ueber Copernicus / Sentinel & Open-Meteo.
     # Steht ohne hinterlegte Zugangsdaten gar nicht erst im Katalog.
@@ -684,6 +688,16 @@ WERKZEUGE: dict[str, Werkzeug] = {
         gruppe="popup",
         recht="ai.popups.manage",
         recht_global=True,
+    ),
+    "propose_cloudflare_dns_record": Werkzeug(
+        "global_write",
+        immer_bestaetigen=True,
+        recht="cloudflare.manage",
+        recht_global=True,
+    ),
+    "propose_modpack_install": Werkzeug(
+        "server_write",
+        recht="server.mods.write",
     ),
 
     # ── Der Rechner des Benutzers (Smart System) ────────────────────────────

@@ -16,6 +16,7 @@ from schemas.panel_settings import (
     ResendKeyRequest,
     SteamApiKeyRequest,
     CurseForgeApiKeyRequest,
+    CloudflareApiTokenRequest,
     SteamAccountRequest,
     GitHubTokenRequest,
     GitHubTokenStatus,
@@ -49,6 +50,13 @@ from services.curseforge_api_key_service import (
     clear_panel_key as clear_curseforge_panel_key,
     status as curseforge_api_status,
 )
+from services.cloudflare_api_key_service import (
+    current_source as cloudflare_api_source,
+    resolve_key as resolve_cloudflare_api_key,
+    set_panel_key as set_cloudflare_panel_key,
+    clear_panel_key as clear_cloudflare_panel_key,
+    status as cloudflare_api_status,
+)
 from services.github_token_service import status as github_token_status, set_panel_token as set_github_panel_token, clear_panel_token as clear_github_panel_token
 from services import singra_webhook_secret_service as singra_secret
 from services import singra_widget_install_service as singra_install
@@ -77,6 +85,8 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
     api_st = steam_api_status()
     curseforge_key = resolve_curseforge_api_key()
     cf_st = curseforge_api_status()
+    cf_token = resolve_cloudflare_api_key()
+    cfl_st = cloudflare_api_status()
     return {
         "panel_url": all_db.get("panel_url", ""),
         "imprint_enabled": all_db.get("imprint_enabled", "false") == "true",
@@ -125,6 +135,12 @@ def get_settings(db: Session = Depends(get_db), _=Depends(require_global("panel.
                 aad="msm:settings:captcha_secret_key"
             ) if all_db.get("captcha_secret_key_encrypted", "") else all_db.get("captcha_secret_key", "")
         ),
+        "cloudflare_enabled": all_db.get("cloudflare_enabled", "true") != "false",
+        "cloudflare_api_token": _mask_secret(cf_token),
+        "cloudflare_api_configured": bool(cf_token),
+        "cloudflare_api_source": cfl_st.get("source", "none"),
+        "cloudflare_default_zone": all_db.get("cloudflare_default_zone", ""),
+        "proactive_enabled": all_db.get("proactive_enabled", "true") != "false",
         # Rate-Limits: immer resolved (Default wenn unset/invalid), nie Rohmüll
         "rate_limit_auth": resolve_auth_limit(all_db.get(RATE_LIMIT_AUTH_KEY, "")),
         "rate_limit_global": resolve_global_limit(all_db.get(RATE_LIMIT_GLOBAL_KEY, "")),
@@ -252,6 +268,15 @@ def update_settings(
             enc = AuthService.encrypt_secret(str(value), aad="msm:settings:captcha_secret_key")
             PanelSettingsService.set("captcha_secret_key_encrypted", enc)
             PanelSettingsService.set("captcha_secret_key", "")  # Lösche legacy plain-text
+        elif key == "cloudflare_enabled":
+            value = "true" if bool(value) else "false"
+            PanelSettingsService.set(key, str(value))
+        elif key == "cloudflare_default_zone":
+            value = str(value).strip()[:253]
+            PanelSettingsService.set(key, value)
+        elif key == "proactive_enabled":
+            value = "true" if bool(value) else "false"
+            PanelSettingsService.set(key, str(value))
         else:
             PanelSettingsService.set(key, str(value))
 
@@ -473,6 +498,72 @@ def delete_curseforge_api_key(
     os.environ.pop("MSM_CURSEFORGE_API_KEY", None)
     os.environ.pop("CURSEFORGE_API_KEY", None)
     return {"message": "CurseForge API-Key entfernt"}
+
+
+@router.post("/cloudflare-token", status_code=200)
+def set_cloudflare_token(
+    req: CloudflareApiTokenRequest,
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    key = req.cloudflare_api_token.strip()
+    if not key or len(key) < 10:
+        raise HTTPException(status_code=400, detail="Ungültiger Cloudflare API-Token")
+    if any(c in key for c in ("\n", "\r", "\0")):
+        raise HTTPException(status_code=400, detail="Ungültige Zeichen")
+    if len(key) > 512:
+        raise HTTPException(status_code=400, detail="Token zu lang")
+    try:
+        _update_env_file("MSM_CLOUDFLARE_API_TOKEN", key)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f".env Update fehlgeschlagen: {e}")
+    set_cloudflare_panel_key(key)
+    settings.__dict__["cloudflare_api_token"] = key
+    os.environ["MSM_CLOUDFLARE_API_TOKEN"] = key
+    return {"message": "Cloudflare API-Token gespeichert", **cloudflare_api_status()}
+
+
+@router.delete("/cloudflare-token", status_code=200)
+def delete_cloudflare_token(
+    _=Depends(require_global("panel.settings.write")),
+    __=Depends(verify_csrf),
+) -> dict:
+    try:
+        _update_env_file("MSM_CLOUDFLARE_API_TOKEN", "")
+    except OSError:
+        pass
+    clear_cloudflare_panel_key()
+    settings.__dict__["cloudflare_api_token"] = ""
+    os.environ.pop("MSM_CLOUDFLARE_API_TOKEN", None)
+    return {"message": "Cloudflare API-Token entfernt", **cloudflare_api_status()}
+
+
+@router.post("/cloudflare-token/test", status_code=200)
+async def test_cloudflare_token(
+    _=Depends(require_global("panel.settings.read")),
+) -> dict:
+    from services.cloudflare_service import test_connection
+
+    res = await test_connection()
+    if res.get("ok"):
+        return {"message": "Cloudflare API-Token ist gültig", "valid": True}
+    return {"message": "Cloudflare API-Token pruefen fehlgeschlagen", "valid": False}
+
+
+@router.get("/cloudflare-zones", status_code=200)
+async def list_cloudflare_zones(
+    _=Depends(require_global("panel.settings.read")),
+) -> dict:
+    from services.cloudflare_service import list_zones
+    from services import permission_service
+    from database import get_db as _get_db
+    from dependencies import get_current_user
+
+    try:
+        zones = await list_zones()
+        return {"zones": [{"id": z.get("id"), "name": z.get("name"), "status": z.get("status")} for z in zones]}
+    except Exception:
+        raise HTTPException(status_code=500, detail="Cloudflare Zonen konnten nicht geladen werden")
 
 
 @router.post("/curseforge-key/test", status_code=200)

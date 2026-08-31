@@ -170,6 +170,7 @@ class Settings(BaseSettings):
     steamcmd_path: str = "/usr/games/steamcmd"
     steam_api_key: str = ""
     curseforge_api_key: str = ""
+    cloudflare_api_token: str = ""
     github_clone_token: str = ""
     """Optional: MSM_GITHUB_CLONE_TOKEN für private GitHub-Repos (source.type=github)."""
 

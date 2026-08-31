@@ -134,6 +134,7 @@ GLOBAL_PERMISSIONS: tuple[PermissionDef, ...] = (
     # oder Produkte umkonfigurieren zu duerfen.
     PermissionDef("panel.hoster.read",          "panel",   "Hoster-Integrationen und Verträge einsehen"),
     PermissionDef("panel.hoster.write",         "panel",   "Hoster-Integrationen, Produkte und Schlüssel verwalten"),
+    PermissionDef("cloudflare.manage",          "system",  "Cloudflare DNS verwalten"),
 )
 
 

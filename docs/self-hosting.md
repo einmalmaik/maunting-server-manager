@@ -654,6 +654,7 @@ allein erlauben es nicht, fremde Zugangsdaten in Betrieb zu nehmen.
   und nicht dem Zugriff auf Daten eines einzelnen Kunden; der Steam-Client ist
   zudem ein prozessglobaler Singleton.
 - Der **CurseForge-API-Key bleibt panelweit** (`MSM_CURSEFORGE_API_KEY` oder per DIS-Verschlüsselung im Panel unter Einstellungen → CurseForge). Er dient Mod-Suchabfragen, Metadaten und Downloads für Spiele wie ARK: Survival Ascended oder Minecraft.
+- Der **Cloudflare-API-Token bleibt panelweit** (`MSM_CLOUDFLARE_API_TOKEN` oder per DIS-Verschlüsselung im Panel unter Einstellungen → Cloudflare). Er dient der automatischen DNS Verwaltung (Subdomains `spiel-name.zone`). Immer bestätigungspflichtig, Wirkung verlässt MSM.
 - Ein gebundenes Credential kann nicht gelöscht werden, solange ein Server es
   verwendet — sonst fiele dieser Server bei der nächsten Installation unbemerkt
   auf den Panel-Zugang zurück.

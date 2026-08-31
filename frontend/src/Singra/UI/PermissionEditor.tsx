@@ -83,6 +83,7 @@ const SUBGROUPS = [
       'system.view',
       'system.audit.read',
       'system.secrets.rotate',
+      'cloudflare.manage',
     ],
   },
   {

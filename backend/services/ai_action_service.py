@@ -313,6 +313,14 @@ def _global_tool_definitions() -> list[dict]:
     doku_seiten = sorted(DOKU_SEITEN)
     doku_liste = ", ".join(f"{s.schluessel} ({s.titel})" for s in DOKU_SEITEN.values())
 
+    from services.cloudflare_service import is_configured as is_cloudflare_configured
+    if is_cloudflare_configured():
+        optional.append(_function("cloudflare_list_zones", "Listet Cloudflare Zonen (Domains) auf. Vor jedem DNS-Create immer aufrufen um zone_id zu ermitteln.", {}, []))
+        optional.append(_function("cloudflare_list_dns_records", "Listet DNS Records einer Zone. Vor create auf Kollision pruefen.", {"zone_id": {"type": "string", "maxLength": 64}}, ["zone_id"]))
+
+    optional.append(_function("advise_node_placement", "Empfiehlt einen Host fuer einen neuen Server. Nutze vor propose_server_create um RAM/Disk bewusst zu waehlen. Unterscheidet gebucht vs wirklich belegt.", {"ram_need_mb": {"type": "integer", "minimum": 512}, "disk_need_gb": {"type": "integer", "minimum": 1}}, ["ram_need_mb"]))
+    optional.append(_function("search_curseforge_modpacks", "Sucht Modpacks auf CurseForge (classId 432). Fuer Minecraft und Spiele mit Modpack-Support. Liefert id, name, downloads.", {"query": {"type": "string", "maxLength": 128}, "game_id": {"type": "string", "maxLength": 12}}, ["query"]))
+
     return optional + [
         _function(
             "search_docs",
@@ -989,6 +997,30 @@ def _global_tool_definitions() -> list[dict]:
                 "game_type",
                 *_RATIONALE_REQUIRED,
             ],
+        ),
+        _function(
+            "propose_cloudflare_dns_record",
+            "Legt einen Cloudflare DNS Record an (A/CNAME). Immer bestaetigungspflichtig. Vorher cloudflare_list_zones aufrufen um zone_id zu ermitteln, Kollision pruefen. Name als Subdomain {game}-{slug}.{zone}, Inhalt ist Server-IP/Target.",
+            {
+                "zone_id": {"type": "string", "maxLength": 64},
+                "name": {"type": "string", "maxLength": 253},
+                "rtype": {"type": "string", "enum": ["A", "CNAME"]},
+                "content": {"type": "string", "maxLength": 253},
+                "proxied": {"type": "boolean"},
+                **_RATIONALE_SCHEMA,
+            },
+            ["zone_id", "name", "rtype", "content", *_RATIONALE_REQUIRED],
+        ),
+        _function(
+            "propose_modpack_install",
+            "Installiert ein Modpack (CurseForge) auf einem bestehenden Server. Braucht server_id aus list_my_servers und Modpack-Info aus search_curseforge_modpacks.",
+            {
+                **_SERVER_ID_SCHEMA,
+                "modpack_mod_id": {"type": "string", "maxLength": 32},
+                "file_id": {"type": "string", "maxLength": 32},
+                **_RATIONALE_SCHEMA,
+            },
+            ["server_id", "modpack_mod_id", "file_id", *_RATIONALE_REQUIRED],
         ),
         *_aufgaben_tool_definitions(),
         *_worker_tool_definitions(),
@@ -4318,6 +4350,99 @@ def _execute_global_read_tool(
                 "ram_used_mb": int(node.ram_used / 1024 / 1024) if node.ram_used else None,
             })
         return {"nodes": entries}
+
+    if tool_name == "advise_node_placement":
+        if not permission_service.has_global_permission(db, user, "servers.create"):
+            raise AiActionValidationError("Serverplanung ist nicht erlaubt")
+        from services.node_advisor_service import advise_node
+
+        ram = int(arguments.get("ram_need_mb", 2048))
+        disk = int(arguments.get("disk_need_gb", 5))
+        return {"advice": advise_node(db, ram, disk), "requested": {"ram_need_mb": ram, "disk_need_gb": disk}}
+
+    if tool_name == "search_curseforge_modpacks":
+        from services.curseforge_api_key_service import resolve_key as _cf_resolve
+
+        if not _cf_resolve():
+            return {"error": "curseforge_api_key_missing", "hint": "CurseForge API-Key in Einstellungen hinterlegen"}
+        query = str(arguments.get("query", "") or "")[:128]
+        game_id = str(arguments.get("game_id", "432") or "432")
+        try:
+            import concurrent.futures
+
+            def _sync_search():
+                import asyncio as _aio
+
+                async def _do():
+                    from services.curseforge_service import get_curseforge_service
+
+                    s = await get_curseforge_service()
+                    return await s.search_modpacks(game_id=game_id, query=query, per_page=12)
+
+                try:
+                    return _aio.run(_do())
+                except RuntimeError:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                        fut = ex.submit(lambda: _aio.run(_do()))
+                        return fut.result(timeout=20)
+
+            mods = _sync_search()
+            return {"mods": [{"id": m.publishedfileid, "name": m.title, "downloads": m.subscriptions, "author": m.creator} for m in mods], "query": query}
+        except Exception:
+            return {"error": "curseforge_search_failed", "query": query}
+
+    if tool_name == "cloudflare_list_zones":
+        if not permission_service.has_global_permission(db, user, "cloudflare.manage"):
+            raise AiActionValidationError("Cloudflare-Einsicht ist nicht erlaubt")
+        from services.cloudflare_service import is_configured as _cf_cfg
+
+        if not _cf_cfg():
+            return {"error": "cloudflare_not_configured", "hint": "Cloudflare API-Token in Einstellungen hinterlegen und aktivieren"}
+        try:
+            import concurrent.futures, asyncio as _aio
+
+            def _do_zones():
+                from services.cloudflare_service import list_zones
+
+                async def _inner():
+                    return await list_zones()
+
+                try:
+                    return _aio.run(_inner())
+                except RuntimeError:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                        return ex.submit(lambda: _aio.run(_inner())).result(timeout=15)
+
+            zones = _do_zones()
+            return {"zones": [{"id": z.get("id"), "name": z.get("name"), "status": z.get("status")} for z in zones]}
+        except Exception:
+            return {"error": "cloudflare_list_failed"}
+
+    if tool_name == "cloudflare_list_dns_records":
+        if not permission_service.has_global_permission(db, user, "cloudflare.manage"):
+            raise AiActionValidationError("Cloudflare-Einsicht ist nicht erlaubt")
+        zone_id = str(arguments.get("zone_id", "")).strip()
+        if not zone_id or len(zone_id) > 64:
+            raise AiActionValidationError("zone_id fehlt oder ungueltig")
+        try:
+            import concurrent.futures, asyncio as _aio
+
+            def _do_records():
+                from services.cloudflare_service import list_dns_records
+
+                async def _inner():
+                    return await list_dns_records(zone_id)
+
+                try:
+                    return _aio.run(_inner())
+                except RuntimeError:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                        return ex.submit(lambda: _aio.run(_inner())).result(timeout=15)
+
+            records = _do_records()
+            return {"records": [{"id": r.get("id"), "name": r.get("name"), "type": r.get("type"), "content": r.get("content")} for r in records], "zone_id": zone_id}
+        except Exception:
+            return {"error": "cloudflare_list_failed", "zone_id": zone_id}
 
     # **Der Durchfall war die gefaehrlichste Zeile der Datei.** Bis hierher war
     # die Kapazitaetsabfrage der namenlose Rumpf am Ende der Kette: wer keinen

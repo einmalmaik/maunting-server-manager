@@ -324,6 +324,23 @@ class CurseForgeService:
             logger.warning("CurseForge download URL query failed: %s", type(e).__name__)
             return None
 
+    async def search_modpacks(
+        self,
+        game_id: int | str,
+        query: str = "",
+        page: int = 1,
+        per_page: int = 24,
+    ) -> List[CurseForgeModInfo]:
+        """Sucht Modpacks (classId 432 bei Minecraft)."""
+        return await self.search_mods(
+            game_id=game_id,
+            query=query,
+            page=page,
+            per_page=per_page,
+            class_id=432,
+            sort_field=self.SORT_POPULAR,
+        )
+
     async def test_connection(self) -> dict[str, Any]:
         """Testet die Gültigkeit des hinterlegten API-Keys gegen die API."""
         if not self.api_key:

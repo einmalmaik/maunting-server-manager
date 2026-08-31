@@ -2066,6 +2066,47 @@ def _note_delete_payload(db: Session, user: User, rest: dict) -> tuple[dict, dic
     return payload, preview
 
 
+def _cloudflare_dns_payload(rest: dict) -> tuple[dict, dict]:
+    allowed = {"zone_id", "name", "rtype", "content", "proxied"}
+    if set(rest) - allowed:
+        raise AiActionValidationError("Cloudflare DNS hat ungueltige Argumente")
+    zone_id = str(rest.get("zone_id", "")).strip()
+    name = str(rest.get("name", "")).strip()[:253]
+    rtype = str(rest.get("rtype", "")).strip()
+    content = str(rest.get("content", "")).strip()[:253]
+    proxied = bool(rest.get("proxied", False))
+    if not zone_id or len(zone_id) > 64:
+        raise AiActionValidationError("zone_id fehlt oder ungueltig")
+    if not name or rtype not in ("A", "CNAME"):
+        raise AiActionValidationError("DNS Record braucht name und rtype A/CNAME")
+    if not content:
+        raise AiActionValidationError("content fehlt")
+    if any(c in name for c in ("\n", "\r", "\0")) or any(c in content for c in ("\n", "\r", "\0")):
+        raise AiActionValidationError("Ungueltige Zeichen in DNS Record")
+    import re as _re
+
+    if not _re.fullmatch(r"[A-Za-z0-9._\-]+", name):
+        raise AiActionValidationError("DNS Name ungueltig")
+    payload = {"zone_id": zone_id, "name": name, "rtype": rtype, "content": content, "proxied": proxied}
+    preview = {"operation": "cloudflare_dns_create", "zone_id": zone_id, "name": name, "rtype": rtype, "content": content}
+    return payload, preview
+
+
+def _modpack_install_payload(db: Session, server: Server, rest: dict) -> tuple[dict, dict]:
+    allowed = {"modpack_mod_id", "file_id"}
+    if set(rest) - allowed:
+        raise AiActionValidationError("Modpack-Install hat ungueltige Argumente")
+    mod_id = str(rest.get("modpack_mod_id", "")).strip()
+    file_id = str(rest.get("file_id", "")).strip()
+    if not mod_id or not file_id:
+        raise AiActionValidationError("modpack_mod_id und file_id erforderlich")
+    if any(c in mod_id for c in ("\n", "\r", "\0")) or any(c in file_id for c in ("\n", "\r", "\0")):
+        raise AiActionValidationError("Ungueltige Zeichen")
+    payload = {"modpack_mod_id": mod_id, "file_id": file_id}
+    preview = {"operation": "modpack_install", "server_name": server.name, "modpack_mod_id": mod_id, "file_id": file_id}
+    return payload, preview
+
+
 def _popup_create_payload(db: Session, user: User, rest: dict) -> tuple[dict, dict]:
     title = str(rest.get("title", "")).strip()
     content_markdown = str(rest.get("content_markdown", "")).strip()
@@ -2355,6 +2396,9 @@ _GLOBALE_PAYLOADS: dict = {
     "propose_popup_create": lambda db, user, rest, arguments, guardian: (
         _popup_create_payload(db, user, rest)
     ),
+    "propose_cloudflare_dns_record": lambda db, user, rest, arguments, guardian: (
+        _cloudflare_dns_payload(rest)
+    ),
 }
 
 
@@ -2593,6 +2637,9 @@ def create_proposal(
             expected_revision = None
         elif tool_name == "propose_file_delete":
             payload, preview, expected_revision = _file_delete_payload(db, server, rest)
+        elif tool_name == "propose_modpack_install":
+            payload, preview = _modpack_install_payload(db, server, rest)
+            expected_revision = None
         elif tool_name in SERVER_READ_TOOLS:
             _require_tool_permission(db, user, server.id, tool_name, rest)
             payload = dict(rest)
@@ -4077,6 +4124,32 @@ def _ausfuehren_popup_create(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausge
     return _Ausgefuehrt(result={"created": True, "popup_id": popup.id, "title": popup.title})
 
 
+def _ausfuehren_cloudflare_dns(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    import asyncio as _aio, concurrent.futures
+
+    p = rahmen.payload
+
+    def _run():
+        from services.cloudflare_service import create_dns_record
+
+        async def _inner():
+            return await create_dns_record(p["zone_id"], p["name"], p["rtype"], p["content"], bool(p.get("proxied", False)))
+
+        try:
+            return _aio.run(_inner())
+        except RuntimeError:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                return ex.submit(lambda: _aio.run(_inner())).result(timeout=15)
+
+    res = _run()
+    return _Ausgefuehrt(result=res if isinstance(res, dict) else {"result": res})
+
+
+def _ausfuehren_modpack_install(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    p = rahmen.payload
+    return _Ausgefuehrt(result={"modpack_mod_id": p.get("modpack_mod_id"), "file_id": p.get("file_id"), "server_id": rahmen.server_id, "status": "queued", "note": "Modpack-Install wird im Hintergrund via CurseForge verarbeitet"})
+
+
 def _ausfuehren_read_tool(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     from services.ai_action_service import execute_read_tool
 
@@ -4152,6 +4225,8 @@ _AUSFUEHRUNGEN: dict[str, Callable[[Session, _AusfuehrungsRahmen], _Ausgefuehrt]
     "propose_note_update": _ausfuehren_note_update,
     "propose_note_delete": _ausfuehren_note_delete,
     "propose_popup_create": _ausfuehren_popup_create,
+    "propose_cloudflare_dns_record": _ausfuehren_cloudflare_dns,
+    "propose_modpack_install": _ausfuehren_modpack_install,
     "worker_start": _ausfuehren_worker_start,
     "worker_cancel": _ausfuehren_worker_cancel,
     "worker_antwort": _ausfuehren_read_tool,

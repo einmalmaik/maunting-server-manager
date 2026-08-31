@@ -43,6 +43,12 @@ export interface PanelSettings {
   captcha_provider: 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
   captcha_site_key: string
   captcha_secret_key: string
+  cloudflare_enabled: boolean
+  cloudflare_api_token: string
+  cloudflare_api_configured: boolean
+  cloudflare_api_source: 'env' | 'panel' | 'none'
+  cloudflare_default_zone: string
+  proactive_enabled: boolean
   /** Login/Auth-Anfragen pro Minute pro IP (Default 10, Range 3–50) */
   rate_limit_auth: number
   /** Globale API-Anfragen pro Minute pro IP (Default 100, Range 50–1000) */
@@ -100,6 +106,12 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   captcha_provider: 'none',
   captcha_site_key: '',
   captcha_secret_key: '',
+  cloudflare_enabled: true,
+  cloudflare_api_token: '',
+  cloudflare_api_configured: false,
+  cloudflare_api_source: 'none',
+  cloudflare_default_zone: '',
+  proactive_enabled: true,
   rate_limit_auth: RATE_LIMIT_AUTH_DEFAULT,
   rate_limit_global: RATE_LIMIT_GLOBAL_DEFAULT,
 }

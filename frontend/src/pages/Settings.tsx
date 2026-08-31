@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Globe, Mail, Gamepad2, Flame, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot, Plug, Megaphone } from 'lucide-react'
+import { Globe, Mail, Gamepad2, Flame, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot, Plug, Megaphone, CloudCog } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
 import { GeneralTab } from './settings/GeneralTab'
 import { EmailTab } from './settings/EmailTab'
@@ -12,6 +12,7 @@ import { BackupTab } from './settings/BackupTab'
 import { ImprintTab } from './settings/ImprintTab'
 import { SupportWidgetTab } from './settings/SupportWidgetTab'
 import { CaptchaTab } from './settings/CaptchaTab'
+import { CloudflareTab } from './settings/CloudflareTab'
 import { SecurityTab } from './settings/SecurityTab'
 import { AiTab } from './settings/AiTab'
 import { HosterTab } from './settings/HosterTab'
@@ -28,6 +29,7 @@ type TabId =
   | 'oauth'
   | 'imprint'
   | 'captcha'
+  | 'cloudflare'
   | 'supportWidget'
   | 'backup'
   | 'security'
@@ -55,6 +57,7 @@ export function Settings() {
     { id: 'github', labelKey: 'settings.tabs.github', icon: Github },
     { id: 'oauth', labelKey: 'settings.tabs.oauth', icon: KeyRound },
     { id: 'captcha', labelKey: 'settings.tabs.captcha', icon: Shield },
+    { id: 'cloudflare', labelKey: 'settings.tabs.cloudflare', icon: CloudCog },
     { id: 'imprint', labelKey: 'settings.tabs.imprint', icon: FileText },
     { id: 'supportWidget', labelKey: 'settings.tabs.supportWidget', icon: LifeBuoy },
     { id: 'popup', labelKey: 'settings.tabs.popup', icon: Megaphone },
@@ -82,6 +85,7 @@ export function Settings() {
       {activeTab === 'github' && <GitHubTab />}
       {activeTab === 'oauth' && <OAuthTab />}
       {activeTab === 'captcha' && <CaptchaTab />}
+      {activeTab === 'cloudflare' && <CloudflareTab />}
       {activeTab === 'imprint' && <ImprintTab />}
       {activeTab === 'supportWidget' && <SupportWidgetTab />}
       {activeTab === 'popup' && <PopupTab />}

@@ -2185,6 +2185,10 @@
       "title": "Nodes verwalten",
       "desc": "Neue Nodes anbinden, konfigurieren und entfernen."
     },
+    "cloudflare_manage": {
+      "title": "Cloudflare DNS verwalten",
+      "desc": "Cloudflare Zonen und DNS Records verwalten, Subdomains anlegen."
+    },
     "teams_create": {
       "title": "Teams erstellen",
       "desc": "Neue Teams anlegen und Mitglieder verwalten."
@@ -2926,6 +2930,7 @@
       "github": "GitHub",
       "oauth": "OAuth / Social Login",
       "captcha": "CAPTCHA",
+      "cloudflare": "Cloudflare",
       "imprint": "Impressum",
       "supportWidget": "Support-Widget",
       "backup": "Backup",
@@ -2951,6 +2956,21 @@
       "siteKeyHint": "Öffentlicher Schlüssel zur Anzeige des Widgets im Browser.",
       "secretKey": "Secret Key (Geheimer Schlüssel)",
       "secretKeyHint": "Privater Schlüssel zur serverseitigen Token-Validierung."
+    },
+    "cloudflare": {
+      "title": "Cloudflare DNS",
+      "description": "Verwalte Cloudflare DNS für automatische Subdomains. Die KI nutzt dies proaktiv bei Servererstellungen.",
+      "tokenLabel": "API Token",
+      "tokenHint": "Bearer Token mit Zone:Edit Rechten. Wird verschlüsselt gespeichert.",
+      "deleteToken": "Token entfernen",
+      "deleted": "Token entfernt",
+      "defaultZoneLabel": "Standard Zone",
+      "zonePlaceholder": "Zone wählen",
+      "zoneHint": "Wird für automatische Subdomains verwendet: {game}-{name}.zone"
+    },
+    "proactive": {
+      "title": "Proaktives Mitdenken",
+      "description": "KI denkt bei jeder Anfrage mit und holt fehlenden Kontext selbst. Abschaltbar."
     },
     "supportWidget": {
       "title": "Support-Widget",

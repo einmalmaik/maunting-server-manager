@@ -2186,6 +2186,10 @@
       "title": "Manage nodes",
       "desc": "Connect, configure, and remove nodes."
     },
+    "cloudflare_manage": {
+      "title": "Manage Cloudflare DNS",
+      "desc": "Manage Cloudflare zones and DNS records, create subdomains."
+    },
     "teams_create": {
       "title": "Create teams",
       "desc": "Create new teams and manage memberships."
@@ -2927,6 +2931,7 @@
       "github": "GitHub",
       "oauth": "OAuth / Social Login",
       "captcha": "CAPTCHA",
+      "cloudflare": "Cloudflare",
       "imprint": "Imprint",
       "supportWidget": "Support widget",
       "popup": "Pop-up",
@@ -2952,6 +2957,21 @@
       "siteKeyHint": "Public key to display the widget in the browser.",
       "secretKey": "Secret Key",
       "secretKeyHint": "Private key for server-side token validation."
+    },
+    "cloudflare": {
+      "title": "Cloudflare DNS",
+      "description": "Manage Cloudflare DNS for automatic subdomains. The AI uses this proactively on server creation.",
+      "tokenLabel": "API Token",
+      "tokenHint": "Bearer token with Zone:Edit. Stored encrypted.",
+      "deleteToken": "Remove token",
+      "deleted": "Token removed",
+      "defaultZoneLabel": "Default zone",
+      "zonePlaceholder": "Select zone",
+      "zoneHint": "Used for automatic subdomains: {game}-{name}.zone"
+    },
+    "proactive": {
+      "title": "Proactive thinking",
+      "description": "AI thinks ahead on every request and fetches missing context itself. Can be disabled."
     },
     "supportWidget": {
       "title": "Support widget",
