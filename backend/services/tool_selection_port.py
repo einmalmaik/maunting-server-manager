@@ -7,6 +7,7 @@ HOTSET = frozenset({
     "read_server_status",
     "read_server_logs",
     "analyze_region",
+    "control_region_camera",
     "web_search",
     "search_docs",
     "calendar_read",

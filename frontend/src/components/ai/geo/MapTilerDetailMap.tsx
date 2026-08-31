@@ -71,7 +71,7 @@ export function MapTilerDetailMap({
   const lastCommandRef = useRef<string | null>(null)
   const manualCameraControlRef = useRef(false)
   const dwellUntilRef = useRef<number>(0)
-  const pendingRef = useRef<{ latitude: number; longitude: number; locationName: string; sights?: Sight[]; command: string; target: string; zoom: number } | null>(null)
+  const pendingQueueRef = useRef<Array<{ latitude: number; longitude: number; locationName: string; command: string; target: string; zoom: number }>>([])
   const latestViewRef = useRef({ latitude, longitude, zoom })
   const onUnavailableRef = useRef(onUnavailable)
   const onReadyRef = useRef(onReady)
@@ -197,16 +197,24 @@ export function MapTilerDetailMap({
       const { Marker, Popup } = await import('maplibre-gl')
       for (const s of sights) {
         const el = document.createElement('div')
+        el.setAttribute('role', 'button')
+        el.setAttribute('aria-label', s.name)
         el.title = s.summary ? `${s.name} — ${s.summary}` : s.name
-        el.style.cssText = 'width:14px;height:14px;border-radius:50%;background:#38bdf8;border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:pointer'
+        el.style.cssText = 'width:16px;height:16px;border-radius:50%;background:#38bdf8;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35);cursor:pointer'
+        const popupHtml = `<div class="rounded-xl border border-outline-variant/30 bg-surface-container-high px-3 py-2 text-xs font-medium leading-tight text-on-surface shadow-lg">${s.summary ? `${escapeHtml(s.name)}<br><span class="text-[11px] font-normal text-on-surface-variant">${escapeHtml(s.summary)}</span>` : escapeHtml(s.name)}</div>`
+        const popup = new Popup({ offset: 14, closeButton: false, className: 'msm-sight-popup', maxWidth: '260px' }).setHTML(popupHtml)
         const m = new Marker({ element: el }).setLngLat([s.longitude, s.latitude]).addTo(map)
-        const popup = new Popup({ offset: 12, closeButton: false }).setText(s.summary ? `${s.name}: ${s.summary}` : s.name)
-        el.addEventListener('mouseenter', () => m.setPopup(popup).togglePopup())
-        el.addEventListener('mouseleave', () => popup.remove())
+        el.addEventListener('mouseenter', () => m.setPopup(popup).addTo(map))
+        el.addEventListener('mouseleave', () => m.getPopup()?.remove())
+        el.addEventListener('click', () => m.togglePopup())
         markersRef.current.push(m)
       }
     })()
   }, [sights, ready])
+
+  function escapeHtml(value: string): string {
+    return value.split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split('"').join('&quot;')
+  }
 
   useEffect(() => {
     const map = mapRef.current
@@ -224,12 +232,12 @@ export function MapTilerDetailMap({
     const now = Date.now()
     if (cameraAction === 'focus_location' && now < dwellUntilRef.current) {
       const delay = dwellUntilRef.current - now
-      if (!pendingRef.current) {
-        pendingRef.current = { latitude, longitude, locationName, sights, command, target, zoom }
-        window.setTimeout(() => {
-          const p = pendingRef.current
-          pendingRef.current = null
-          if (p && lastCommandRef.current !== p.command) {
+      pendingQueueRef.current.push({ latitude, longitude, locationName, command, target, zoom })
+      if (pendingQueueRef.current.length === 1) {
+        window.setTimeout(function processQueue() {
+          const p = pendingQueueRef.current.shift()
+          if (!p) return
+          if (lastCommandRef.current !== p.command) {
             lastCommandRef.current = p.command
             lastTargetRef.current = p.target
             markerRef.current?.setLngLat([p.longitude, p.latitude])
@@ -238,6 +246,9 @@ export function MapTilerDetailMap({
             map.stop()
             map.flyTo({ center: [p.longitude, p.latitude], zoom: nz, duration: CAMERA_DURATION_MS })
             dwellUntilRef.current = Date.now() + 8000
+          }
+          if (pendingQueueRef.current.length > 0) {
+            window.setTimeout(processQueue, 8000)
           }
         }, delay)
       }
@@ -257,7 +268,7 @@ export function MapTilerDetailMap({
     } else if (cameraAction === 'overview' || cameraMode === 'overview') {
       nextZoom = 1.2
       dwellUntilRef.current = 0
-      pendingRef.current = null
+      pendingQueueRef.current = []
     } else if (sameTarget) {
       nextZoom = Math.max(currentZoom, focusZoom)
     }

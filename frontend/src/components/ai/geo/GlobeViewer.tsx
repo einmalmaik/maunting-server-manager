@@ -85,8 +85,8 @@ export function GlobeViewer({
         const summary = (data as unknown as { _aiSummary?: string })._aiSummary
         return [...prev, { latitude: data.coordinates!.latitude, longitude: data.coordinates!.longitude, name, summary, commandId: data.camera!.command_id! }]
       })
-    } else if (data.camera?.mode === 'overview' || (lastMainRef.current && lastMainRef.current !== key && data.camera?.action !== 'focus_location')) {
-      if (data.camera?.mode === 'overview') setSights([])
+    } else if (lastMainRef.current && lastMainRef.current !== key && !data.camera?.command_id) {
+      setSights([])
     }
     lastMainRef.current = key
   }, [data, resolvedLocation])
