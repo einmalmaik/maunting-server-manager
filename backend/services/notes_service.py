@@ -61,8 +61,8 @@ class NotesService:
             "team_id": note.team_id,
             "team_name": note.team.name if note.team else None,
             "can_edit": can_edit,
-            "created_at": note.created_at,
-            "updated_at": note.updated_at,
+            "created_at": _iso_utc(note.created_at) if note.created_at else None,
+            "updated_at": _iso_utc(note.updated_at) if note.updated_at else None,
         }
 
     @classmethod

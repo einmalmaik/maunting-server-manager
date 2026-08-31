@@ -78,16 +78,19 @@ export function GlobeViewer({
   useEffect(() => {
     if (!data?.coordinates) return
     const key = `${data.location}:${data.coordinates.latitude}:${data.coordinates.longitude}`
+    const isNewLocation = lastMainRef.current !== null && lastMainRef.current !== key
+
     if (data.sights && data.sights.length > 0) {
       setSights(data.sights)
     } else if (data.camera?.action === 'focus_location' && data.camera?.command_id) {
       const name = data.location ?? resolvedLocation
       setSights((prev) => {
-        if (prev.some((s) => s.commandId === data.camera!.command_id)) return prev
+        const base = isNewLocation && !prev.some((s) => s.name === name) ? [] : prev
+        if (base.some((s) => s.commandId === data.camera!.command_id)) return base
         const summary = (data as unknown as { _aiSummary?: string })._aiSummary
-        return [...prev, { latitude: data.coordinates!.latitude, longitude: data.coordinates!.longitude, name, summary, commandId: data.camera!.command_id! }]
+        return [...base, { latitude: data.coordinates!.latitude, longitude: data.coordinates!.longitude, name, summary, commandId: data.camera!.command_id! }]
       })
-    } else if (lastMainRef.current && lastMainRef.current !== key && !data.camera?.command_id) {
+    } else if (isNewLocation) {
       setSights([])
     }
     lastMainRef.current = key

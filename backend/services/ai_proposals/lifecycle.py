@@ -944,6 +944,7 @@ def execute_proposal(
                             result if isinstance(result, dict) else {"result": result},
                             ensure_ascii=True,
                             separators=(",", ":"),
+                            default=str,
                         ),
                     )
                 )

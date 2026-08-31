@@ -305,6 +305,18 @@ export function MapTilerDetailMap({
       }
     }
 
+    if (!sights || sights.length === 0) {
+      if (processedSightCommandsRef.current.size > 0) {
+        processedSightCommandsRef.current.clear()
+        pendingQueueRef.current = []
+        if (tourTimerRef.current) {
+          window.clearTimeout(tourTimerRef.current)
+          tourTimerRef.current = null
+        }
+        dwellUntilRef.current = 0
+      }
+    }
+
     const target = `${longitude}:${latitude}`
     const command = cameraCommandId
       ? `id:${cameraCommandId}`
@@ -313,7 +325,18 @@ export function MapTilerDetailMap({
 
     const sameTarget = lastTargetRef.current === target
     if (manualCameraControlRef.current && sameTarget && !cameraAction) return
-    if (!sameTarget) manualCameraControlRef.current = false
+    if (!sameTarget) {
+      manualCameraControlRef.current = false
+      const isInCurrentSights = sights && sights.some((s) => `${s.longitude}:${s.latitude}` === target)
+      if (!isInCurrentSights && pendingQueueRef.current.length > 0) {
+        pendingQueueRef.current = []
+        if (tourTimerRef.current) {
+          window.clearTimeout(tourTimerRef.current)
+          tourTimerRef.current = null
+        }
+        dwellUntilRef.current = 0
+      }
+    }
 
     const now = Date.now()
     if (cameraAction === 'focus_location' && now < dwellUntilRef.current) {
