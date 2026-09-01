@@ -638,22 +638,26 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
     return []
   }, [entries, geoData?.location])
 
-  const initialScrollDoneRef = useRef(false)
+  const userScrolledUpRef = useRef(false)
+  const bottomMarkerRef = useRef<HTMLDivElement | null>(null)
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null)
 
-  const scrolleNachUnten = useCallback(() => {
+  const scrolleNachUnten = useCallback((force = false) => {
+    if (!force && userScrolledUpRef.current) return
     const kasten = verlaufRef.current
     if (kasten) {
       kasten.scrollTop = kasten.scrollHeight
     }
+    bottomMarkerRef.current?.scrollIntoView({ block: 'end' })
   }, [])
 
   const prevGeoOpenRef = useRef(geoOpen)
   useEffect(() => {
     if (prevGeoOpenRef.current !== geoOpen) {
-      scrolleNachUnten()
-      const t1 = setTimeout(scrolleNachUnten, 50)
-      const t2 = setTimeout(scrolleNachUnten, 150)
-      const t3 = setTimeout(scrolleNachUnten, 300)
+      scrolleNachUnten(true)
+      const t1 = setTimeout(() => scrolleNachUnten(true), 50)
+      const t2 = setTimeout(() => scrolleNachUnten(true), 150)
+      const t3 = setTimeout(() => scrolleNachUnten(true), 300)
       return () => {
         clearTimeout(t1)
         clearTimeout(t2)
@@ -663,51 +667,49 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
     prevGeoOpenRef.current = geoOpen
   }, [geoOpen, scrolleNachUnten])
 
-  /**
-   * Beim ersten Laden oder Wiedereintreten den Verlauf verlässlich ganz nach unten scrollen.
-   * Läuft sofort per LayoutEffect und danach mehrstufig (nächster Frame, nach Layout/Rendern),
-   * damit auch umfangreiche Verläufe mit Markdown und Karten sofort unten an der Eingabe landen.
-   */
+  // ResizeObserver: Sobald Markdown, Syntax-Highlighting, Tabellen oder Karten
+  // im Nachrichten-Container gerendert werden und die Höhe wächst, bleiben wir unten.
+  useEffect(() => {
+    const el = messagesContainerRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      if (!userScrolledUpRef.current) {
+        scrolleNachUnten(false)
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [scrolleNachUnten])
+
   useLayoutEffect(() => {
-    if (!loading && entries.length > 0 && !initialScrollDoneRef.current) {
-      scrolleNachUnten()
+    if (!loading && entries.length > 0) {
+      scrolleNachUnten(true)
     }
   }, [loading, entries.length, scrolleNachUnten])
 
   useEffect(() => {
-    if (!loading && entries.length > 0 && !initialScrollDoneRef.current) {
-      initialScrollDoneRef.current = true
+    if (!loading && entries.length > 0) {
+      userScrolledUpRef.current = false
       setAmEnde(true)
-      scrolleNachUnten()
-      const frame = requestAnimationFrame(() => {
-        scrolleNachUnten()
-      })
-      const timer50 = setTimeout(scrolleNachUnten, 50)
-      const timer150 = setTimeout(scrolleNachUnten, 150)
-      const timer300 = setTimeout(scrolleNachUnten, 300)
-      const timer600 = setTimeout(scrolleNachUnten, 600)
+      scrolleNachUnten(true)
+      const timers = [
+        setTimeout(() => scrolleNachUnten(true), 30),
+        setTimeout(() => scrolleNachUnten(true), 100),
+        setTimeout(() => scrolleNachUnten(true), 250),
+        setTimeout(() => scrolleNachUnten(true), 500),
+        setTimeout(() => scrolleNachUnten(true), 1000),
+      ]
       return () => {
-        cancelAnimationFrame(frame)
-        clearTimeout(timer50)
-        clearTimeout(timer150)
-        clearTimeout(timer300)
-        clearTimeout(timer600)
+        timers.forEach(clearTimeout)
       }
     }
   }, [loading, entries.length, scrolleNachUnten])
 
-  /**
-   * Nachschieben — aber nur, solange der Verlauf unten steht.
-   *
-   * Vorher zog jedes Textstück die Ansicht ans Ende. Wer während einer langen
-   * Antwort hochscrollte, um einen früheren Absatz oder eine Werkzeugzeile zu
-   * lesen, wurde vom nächsten Stück sofort zurückgerissen. Dasselbe Muster
-   * steht in `ServerConsolePanel`.
-   */
   useEffect(() => {
-    const kasten = verlaufRef.current
-    if (kasten && amEnde) kasten.scrollTop = kasten.scrollHeight
-  }, [amEnde, entries])
+    if (amEnde && !userScrolledUpRef.current) {
+      scrolleNachUnten(false)
+    }
+  }, [amEnde, entries, scrolleNachUnten])
 
   const availableProviders = useMemo(
     () => providers.filter((provider) => provider.available),
@@ -823,7 +825,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
     if (!accepted) return
     try {
       await aiApi.clearHistory()
-      initialScrollDoneRef.current = false
+      userScrolledUpRef.current = false
       setEntries([])
       setAttachments([])
       setContextStatus(null)
@@ -855,11 +857,14 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
     if (!text || !providerId) return
     manuallyClosedGeoRef.current = false
     setInput('')
+    userScrolledUpRef.current = false
+    setAmEnde(true)
+    scrolleNachUnten(true)
     if (streaming) {
       await stoppeLauf()
     }
     await sendContent(text)
-  }, [providerId, sendContent, stoppeLauf, streaming])
+  }, [providerId, scrolleNachUnten, sendContent, stoppeLauf, streaming])
 
   const send = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -871,6 +876,9 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
       return
     }
     setInput('')
+    userScrolledUpRef.current = false
+    setAmEnde(true)
+    scrolleNachUnten(true)
     await sendContent(content)
   }
 
@@ -899,6 +907,9 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
     })
     setEditingId(null)
     setEditDraft('')
+    userScrolledUpRef.current = false
+    setAmEnde(true)
+    scrolleNachUnten(true)
     await sendContent(content)
   }
 
@@ -1145,10 +1156,14 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
         className="relative min-h-0 flex-1 overflow-y-auto"
         aria-live="polite"
         onScroll={(event) => {
-          // Die 50 Pixel Spielraum sind derselbe Wert wie in der Konsole: wer
-          // fast unten steht, meint unten.
           const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
-          setAmEnde(scrollHeight - scrollTop - clientHeight < 50)
+          const isAtBottom = scrollHeight - scrollTop - clientHeight < 60
+          setAmEnde(isAtBottom)
+          if (isAtBottom) {
+            userScrolledUpRef.current = false
+          } else if (scrollHeight - scrollTop - clientHeight > 120) {
+            userScrolledUpRef.current = true
+          }
         }}
       >
         {dragging && (
@@ -1160,7 +1175,10 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
           </div>
         )}
 
-        <div className="mx-auto w-full max-w-4xl xl:max-w-5xl 2xl:max-w-6xl px-3 py-6 sm:px-6">
+        <div
+          ref={messagesContainerRef}
+          className="mx-auto w-full max-w-4xl xl:max-w-5xl 2xl:max-w-6xl px-3 py-6 sm:px-6"
+        >
           {empty && (
             <div className="py-16 text-center">
               <Sparkles className="mx-auto h-10 w-10 text-primary/70" aria-hidden="true" />
@@ -1323,6 +1341,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
               )
             })}
           </div>
+          <div ref={bottomMarkerRef} className="h-0 w-0 pointer-events-none" aria-hidden="true" />
         </div>
       </div>
 
