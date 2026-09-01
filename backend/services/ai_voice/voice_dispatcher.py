@@ -103,6 +103,24 @@ def dispatch_voice_action(
             target_args["begruendung"] = target_args["rationale"]
 
         if not conversation_id:
+            with SessionLocal() as db_conv:
+                from models.ai_conversation import AiConversation
+                from services.ai_chat_service import konversation_anlegen
+                conv = (
+                    db_conv.query(AiConversation)
+                    .filter(AiConversation.user_id == user_id)
+                    .order_by(AiConversation.updated_at.desc(), AiConversation.id.desc())
+                    .first()
+                )
+                if conv:
+                    conversation_id = conv.id
+                else:
+                    usr = db_conv.get(User, user_id)
+                    if usr:
+                        conv = konversation_anlegen(db_conv, usr, "Aktionen")
+                        conversation_id = conv.id
+
+        if not conversation_id:
             fehler = "Keine aktive Konversation für Schreibvorschlag"
             return {"error": fehler}, fehler, {"tool_name": target_tool, "failed": True}, []
 

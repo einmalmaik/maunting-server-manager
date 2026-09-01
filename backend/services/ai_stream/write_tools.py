@@ -101,7 +101,8 @@ def _persist_write_proposals(
             raise AiActionValidationError("AI-Zugriff wurde entzogen")
         conversation = get_owned_conversation(db, conversation_id, user)
         if conversation is None:
-            raise AiActionValidationError("Unterhaltung ist nicht mehr verfuegbar")
+            from services.ai_chat_service import get_or_create_conversation
+            conversation = get_or_create_conversation(db, user, "primary")
         proposals = []
         # Vorschlaege, die gar nicht erst entstanden sind, weil eine Bedingung
         # der Anlage fehlte — heute nur der fehlende Backup-Nachweis. Sie sind
