@@ -97,6 +97,7 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
   const [steamHasMore, setSteamHasMore] = useState(false)
   const [steamLoading, setSteamLoading] = useState(false)
   const [browserTab, setBrowserTab] = useState<BrowserTab>('trending')
+  const [contentType, setContentType] = useState<'all' | 'mods' | 'modpacks'>('all')
   // Cache pro Tab — verhindert Re-Fetch + Layout-Shift beim Tab-Wechsel,
   // dadurch bleibt die Scroll-Position erhalten.
   const [browserCache, setBrowserCache] = useState<BrowserCache>({})
@@ -138,16 +139,24 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
   }, [loadMods, mods])
 
   useEffect(() => {
-    if (browserCache[browserTab]) return // schon geladen — nicht neu fetchen
-    void loadBrowserTab(browserTab, 1, false)
+    void loadBrowserTab(browserTab, 1, false, contentType)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [browserTab, isCurseForge])
+  }, [browserTab, isCurseForge, contentType])
 
-  const loadBrowserTab = async (tab: BrowserTab, page: number, append: boolean) => {
+  const loadBrowserTab = async (
+    tab: BrowserTab,
+    page: number,
+    append: boolean,
+    typeFilter: 'all' | 'mods' | 'modpacks' = contentType,
+  ) => {
     setBrowserLoading(true)
     try {
+      const classParam =
+        isCurseForge && typeFilter !== 'all'
+          ? `&class_id=${typeFilter === 'modpacks' ? '4471' : '6'}`
+          : ''
       const endpoint = isCurseForge
-        ? `/curseforge/popular?server_id=${serverId}&sort=${tab}&limit=${BROWSER_PAGE_SIZE}&page=${page}`
+        ? `/curseforge/popular?server_id=${serverId}&sort=${tab}&limit=${BROWSER_PAGE_SIZE}&page=${page}${classParam}`
         : `/steam/workshop/popular?server_id=${serverId}&sort=${tab}&limit=${BROWSER_PAGE_SIZE}&page=${page}`
       const data = await api<SteamMod[]>(endpoint)
       setBrowserCache((prev) => {
@@ -178,19 +187,35 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
     setBrowserTab(tab) // Cache bleibt erhalten → Scroll-Position stabil
   }
 
+  const handleContentTypeChange = (newType: 'all' | 'mods' | 'modpacks') => {
+    setContentType(newType)
+    setBrowserCache({})
+    if (steamQuery.trim()) {
+      void searchSteam(1, false, newType)
+    }
+  }
+
   const loadMoreBrowser = () => {
     const entry = browserCache[browserTab]
     if (!entry || !entry.hasMore || browserLoading) return
-    void loadBrowserTab(browserTab, entry.page + 1, true)
+    void loadBrowserTab(browserTab, entry.page + 1, true, contentType)
   }
 
-  const searchSteam = async (page: number, append: boolean) => {
+  const searchSteam = async (
+    page: number,
+    append: boolean,
+    typeFilter: 'all' | 'mods' | 'modpacks' = contentType,
+  ) => {
     if (!steamQuery.trim()) return
     setSteamLoading(true)
     try {
       const q = encodeURIComponent(steamQuery)
+      const classParam =
+        isCurseForge && typeFilter !== 'all'
+          ? `&class_id=${typeFilter === 'modpacks' ? '4471' : '6'}`
+          : ''
       const endpoint = isCurseForge
-        ? `/curseforge/search?server_id=${serverId}&query=${q}&per_page=${BROWSER_PAGE_SIZE}&page=${page}`
+        ? `/curseforge/search?server_id=${serverId}&query=${q}&per_page=${BROWSER_PAGE_SIZE}&page=${page}${classParam}`
         : `/steam/workshop/search?server_id=${serverId}&query=${q}&per_page=${BROWSER_PAGE_SIZE}&page=${page}`
       const data = await api<SteamMod[]>(endpoint)
       setSteamResults((prev) => (append ? [...prev, ...data] : data))
@@ -204,12 +229,12 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
   }
 
   const runSearch = () => {
-    void searchSteam(1, false)
+    void searchSteam(1, false, contentType)
   }
 
   const loadMoreSearch = () => {
     if (!steamHasMore || steamLoading) return
-    void searchSteam(steamPage + 1, true)
+    void searchSteam(steamPage + 1, true, contentType)
   }
 
   const subscribeMod = async (workshopId: string, name?: string) => {
@@ -678,6 +703,41 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
             <Globe className="w-4 h-4 text-secondary" />
             {isCurseForge ? t('mods.curseforgeSearch', { defaultValue: 'CurseForge Browser' }) : t('mods.steamSearch')}
           </h2>
+
+          {isCurseForge && (
+            <div className="flex gap-1 bg-surface-container rounded-lg p-1">
+              <button
+                onClick={() => handleContentTypeChange('all')}
+                className={`px-3 py-1 rounded-md text-xs font-body-md transition-colors ${
+                  contentType === 'all'
+                    ? 'bg-surface text-primary shadow-sm font-semibold'
+                    : 'text-on-surface-variant hover:text-on-surface'
+                }`}
+              >
+                {t('mods.typeAll', { defaultValue: 'Alle' })}
+              </button>
+              <button
+                onClick={() => handleContentTypeChange('mods')}
+                className={`px-3 py-1 rounded-md text-xs font-body-md transition-colors ${
+                  contentType === 'mods'
+                    ? 'bg-surface text-primary shadow-sm font-semibold'
+                    : 'text-on-surface-variant hover:text-on-surface'
+                }`}
+              >
+                {t('mods.typeMods', { defaultValue: 'Mods' })}
+              </button>
+              <button
+                onClick={() => handleContentTypeChange('modpacks')}
+                className={`px-3 py-1 rounded-md text-xs font-body-md transition-colors ${
+                  contentType === 'modpacks'
+                    ? 'bg-surface text-primary shadow-sm font-semibold'
+                    : 'text-on-surface-variant hover:text-on-surface'
+                }`}
+              >
+                {t('mods.typeModpacks', { defaultValue: 'Modpacks' })}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex gap-2 items-center flex-wrap">
@@ -685,7 +745,7 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant" />
             <input
               type="search"
-              placeholder={isCurseForge ? t('mods.searchPlaceholderCurseForge', { defaultValue: 'CurseForge Mods suchen...' }) : t('mods.searchPlaceholder')}
+              placeholder={isCurseForge ? t('mods.searchPlaceholderCurseForge', { defaultValue: 'CurseForge Mods & Modpacks suchen...' }) : t('mods.searchPlaceholder')}
               value={steamQuery}
               onChange={(e) => setSteamQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && runSearch()}

@@ -56,6 +56,7 @@ async def search_curseforge_mods(
     query: str = Query("", description="Suchbegriff"),
     page: int = Query(1, ge=1, description="Seitennummer"),
     per_page: int = Query(24, ge=1, le=50, description="Ergebnisse pro Seite"),
+    class_id: Optional[str] = Query(None, description="Optionaler CurseForge class_id Filter (z. B. '6' für Mods, '4471' für Modpacks)"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> List[dict]:
@@ -75,7 +76,10 @@ async def search_curseforge_mods(
         raise HTTPException(status_code=400, detail="CurseForge für dieses Spiel nicht konfiguriert")
 
     game_id = mod_support["curseforge_game_id"]
-    class_id = mod_support.get("curseforge_class_id")
+    if class_id is not None:
+        resolved_class_id = None if class_id.strip().lower() in ("all", "0", "none", "") else class_id.strip()
+    else:
+        resolved_class_id = mod_support.get("curseforge_class_id")
 
     try:
         cf_service = await get_curseforge_service()
@@ -84,7 +88,7 @@ async def search_curseforge_mods(
             query=query,
             page=page,
             per_page=per_page,
-            class_id=class_id,
+            class_id=resolved_class_id,
         )
         return [_mod_to_dict(mod) for mod in mods]
     except CurseForgeApiUnavailable as e:
@@ -99,6 +103,7 @@ async def get_popular_mods(
     limit: int = Query(24, ge=1, le=50, description="Anzahl der Mods"),
     page: int = Query(1, ge=1, description="Seitennummer (Pagination)"),
     sort: str = Query("trending", description="Sortierung: trending | popular | newest | updated"),
+    class_id: Optional[str] = Query(None, description="Optionaler CurseForge class_id Filter (z. B. '6' für Mods, '4471' für Modpacks)"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> List[dict]:
@@ -118,7 +123,10 @@ async def get_popular_mods(
         raise HTTPException(status_code=400, detail="CurseForge für dieses Spiel nicht konfiguriert")
 
     game_id = mod_support["curseforge_game_id"]
-    class_id = mod_support.get("curseforge_class_id")
+    if class_id is not None:
+        resolved_class_id = None if class_id.strip().lower() in ("all", "0", "none", "") else class_id.strip()
+    else:
+        resolved_class_id = mod_support.get("curseforge_class_id")
 
     if sort not in ("trending", "popular", "newest", "updated"):
         sort = "trending"
@@ -130,7 +138,7 @@ async def get_popular_mods(
             limit=limit,
             page=page,
             sort=sort,
-            class_id=class_id,
+            class_id=resolved_class_id,
         )
         return [_mod_to_dict(mod) for mod in mods]
     except CurseForgeApiUnavailable as e:

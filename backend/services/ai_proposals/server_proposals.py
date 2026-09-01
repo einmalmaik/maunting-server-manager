@@ -500,16 +500,20 @@ def _rationale(arguments: dict, *, fallback: tuple[str, str] | None) -> tuple[st
     Herkunft ("Schritt 2 aus Skill X, Version 3") die ehrlichere Begruendung als
     ein Satz, den ein Modell gerade formuliert hat.
     """
-    values = []
-    for index, key in enumerate(("reason", "expected_effect")):
-        raw = arguments.get(key)
-        if not isinstance(raw, str) or not raw.strip():
-            if fallback is None:
-                raise AiActionValidationError(f"Der Vorschlag braucht eine Angabe zu '{key}'")
-            values.append(fallback[index][:MAX_REASON_CHARS])
-            continue
-        values.append(redact_sensitive_text(raw.strip())[:MAX_REASON_CHARS])
-    return values[0], values[1]
+    reason_raw = arguments.get("reason") or arguments.get("begruendung") or arguments.get("grund") or arguments.get("rationale")
+    effect_raw = arguments.get("expected_effect") or arguments.get("wirkung") or arguments.get("erwartete_wirkung") or arguments.get("effect")
+
+    if not isinstance(reason_raw, str) or not reason_raw.strip():
+        reason_val = fallback[0] if fallback is not None else "Automatische Serveraktion"
+    else:
+        reason_val = redact_sensitive_text(reason_raw.strip())[:MAX_REASON_CHARS]
+
+    if not isinstance(effect_raw, str) or not effect_raw.strip():
+        effect_val = fallback[1] if fallback is not None else "Änderung durch Serveraktion"
+    else:
+        effect_val = redact_sensitive_text(effect_raw.strip())[:MAX_REASON_CHARS]
+
+    return reason_val, effect_val
 
 def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
     """Prueft die Argumente einer Servererstellung gegen das Panel-Schema.
@@ -2575,4 +2579,50 @@ def _ausfuehren_backup_schedule_set(db: Session, rahmen: _AusfuehrungsRahmen) ->
 
 def _ausfuehren_modpack_install(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     p = rahmen.payload
-    return _Ausgefuehrt(result={"modpack_mod_id": p.get("modpack_mod_id"), "file_id": p.get("file_id"), "server_id": rahmen.server_id, "status": "queued", "note": "Modpack-Install wird im Hintergrund via CurseForge verarbeitet"})
+    server_id = rahmen.server_id
+    mod_id = str(p.get("modpack_mod_id") or "").strip()
+    file_id = p.get("file_id")
+
+    if not server_id or not mod_id:
+        return _Ausgefuehrt(result={"status": "error", "error": "server_id oder modpack_mod_id fehlt"})
+
+    from models import Mod, Server
+    from routers.mods import install_mod_bg
+    import threading
+
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        return _Ausgefuehrt(result={"status": "error", "error": "Server nicht gefunden"})
+
+    existing = db.query(Mod).filter(Mod.server_id == server_id, Mod.workshop_id == mod_id).first()
+    if not existing:
+        max_order = db.query(Mod).filter(Mod.server_id == server_id).count()
+        mod_entry = Mod(
+            server_id=server_id,
+            workshop_id=mod_id,
+            name=f"CurseForge Modpack {mod_id}",
+            load_order=max_order,
+            auto_update=True,
+            install_status="pending",
+            install_action="install",
+            install_progress=0,
+            update_status="missing",
+            update_reason="missing",
+        )
+        db.add(mod_entry)
+        db.commit()
+    else:
+        existing.install_status = "pending"
+        existing.install_action = "install"
+        db.commit()
+
+    # Hintergrund-Installation fuer Modpack anstossen
+    threading.Thread(target=install_mod_bg, args=(server_id, mod_id), daemon=True).start()
+
+    return _Ausgefuehrt(result={
+        "modpack_mod_id": mod_id,
+        "file_id": file_id,
+        "server_id": server_id,
+        "status": "installing",
+        "note": f"Modpack {mod_id} wird im Hintergrund heruntergeladen und entpackt",
+    })

@@ -877,27 +877,49 @@ class BlueprintPlugin(GamePlugin):
                     dest_file = (target_dir / dest_file_name).resolve()
                     dest_file.relative_to(base)
 
-                    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as dl_client:
+                    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as dl_client:
                         resp = await dl_client.get(dl_url, headers={"x-api-key": cf_key})
                         resp.raise_for_status()
-                        dest_file.write_bytes(resp.content)
-                    self._try_chown_install_path(server, dest_file)
-                    # Name in DB aktualisieren falls leer
-                    if mod_info.title:
-                        db = SessionLocal()
-                        try:
-                            mod_row = db.query(Mod).filter(Mod.server_id == server.id, Mod.workshop_id == wid).first()
-                            if mod_row and not mod_row.name:
-                                mod_row.name = mod_info.title
-                                db.commit()
-                        finally:
-                            db.close()
-                    applied += 1
-                    items[wid] = {"ok": True}
-                    _append_console_log(
-                        server.id,
-                        f"[MSM] CurseForge Mod {mod_info.title} ({dest_file_name}) heruntergeladen nach {target_dir_rel}/\n",
-                    )
+                        file_bytes = resp.content
+
+                    if safe_name.lower().endswith(".zip"):
+                        import io
+                        import zipfile
+                        with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                            for member in zf.infolist():
+                                # Verhindere Directory Traversal
+                                member_path = Path(member.filename)
+                                if member_path.is_absolute() or ".." in member_path.parts:
+                                    continue
+                                # Wenn overrides/ enthalten ist, in das Server-Wurzelverzeichnis entpacken
+                                if member.filename.startswith("overrides/"):
+                                    rel_part = member.filename[len("overrides/"):]
+                                    if not rel_part:
+                                        continue
+                                    extracted_path = (base / rel_part).resolve()
+                                else:
+                                    extracted_path = (base / member.filename).resolve()
+                                try:
+                                    extracted_path.relative_to(base)
+                                    if member.is_dir():
+                                        extracted_path.mkdir(parents=True, exist_ok=True)
+                                    else:
+                                        extracted_path.parent.mkdir(parents=True, exist_ok=True)
+                                        extracted_path.write_bytes(zf.read(member))
+                                        self._try_chown_install_path(server, extracted_path)
+                                except (ValueError, Exception):
+                                    pass
+                        _append_console_log(
+                            server.id,
+                            f"[MSM] CurseForge Modpack {mod_info.title} entpackt in Server-Verzeichnis\n",
+                        )
+                    else:
+                        dest_file.write_bytes(file_bytes)
+                        self._try_chown_install_path(server, dest_file)
+                        _append_console_log(
+                            server.id,
+                            f"[MSM] CurseForge Mod {mod_info.title} ({dest_file_name}) heruntergeladen nach {target_dir_rel}/\n",
+                        )
                 except Exception as exc:
                     errors.append(f"{wid}: {exc}")
                     items[wid] = {"ok": False, "error": str(exc)}

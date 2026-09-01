@@ -442,14 +442,14 @@ Wenn ein Werkzeugaufruf fehlschlägt, einen Fehler (`error`, `detail`) oder ein 
 5. Erst wenn nach mehreren Korrekturversuchen ein unlösbarer, echter Systemfehler (z. B. ungültige Zugangsdaten oder fehlende Berechtigungen) vorliegt, erkläre dem Benutzer ruhig und lösungsorientiert die genaue Ursache."""
 
 AUFTRAEGE = """\
-Auftraege zu Ende bringen: "richte ein" heisst anlegen **und** starten, danach \
+Auftraege zu Ende bringen: "richte ein" heisst anlegen, konfigurieren/Modpack installieren, DNS verbinden **und** starten, danach \
 pruefen ob er laeuft: \
 1. Prüfe `list_my_servers`. Wenn noch kein passender Server existiert: Rufe NIEMALS serverbezogene Verwaltungswerkzeuge (wie `propose_modpack_install` oder `propose_config_*`) auf, da diese zwingend eine `server_id` verlangen! \
-Lege den Server stattdessen IMMER zuerst per `propose_server_create` an (z. B. `game_type: "minecraft_fabric"` oder `minecraft_forge` / `minecraft_neoforge` für Modpacks, passender interner Name und Ressourcen wie 6–8 GB RAM und 40 GB Disk). \
-2. Sobald der Server angelegt ist bzw. die server_id vorliegt: Modpack oder Einstellungen konfigurieren bzw. installieren. \
-3. Server starten per `propose_server_lifecycle` und danach pruefen, ob er laeuft. \
-4. Proaktiv mitdenken: Bei Cloudflare-Anbindung DNS anlegen, damit der Server direkt erreichbar ist. \
-"leg an" heisst nur anlegen. Melde nichts als fertig, was du nicht bis zum laufenden Zustand geprueft hast."""
+Lege den Server stattdessen IMMER zuerst per `propose_server_create` an (passendes Blueprint für das Spiel/Modpack wie z. B. Fabric/Forge/NeoForge, passender interner Name und Ressourcen wie 6–8 GB RAM und 40 GB Disk). \
+2. Sobald der Server angelegt ist bzw. die server_id vorliegt: Modpack via `propose_modpack_install` oder Einstellungen konfigurieren/installieren. \
+3. Proaktiv DNS prüfen: Rufe `cloudflare_list_zones` auf. Ist eine Zone/Domain verfügbar, schlage direkt `propose_cloudflare_dns_record` (z. B. '{servername}.{domain}') vor, damit der Server direkt per Domain erreichbar ist. \
+4. Server starten per `propose_server_lifecycle` (action: "start") und danach den Status verifizieren. Beende die Einrichtung erst, wenn der Server hochgefahren ist! \
+Vergleiche vorher und nachher. Melde erst fertig, wenn der Server online ist. Wenn der Benutzer nach einem Server fragt und die ID weiss, nutze die ID; wenn er den Namen nennt, schau in `list_my_servers` nach der ID. Erfinde keine IDs."""
 
 
 # Der Fehler aus dem Betrieb: die KI lehnte wegen Platzmangel ab, obwohl die
