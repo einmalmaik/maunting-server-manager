@@ -40,6 +40,8 @@ class CurseForgeModInfo:
     direct_url: str = ""
     main_file_id: Optional[int] = None
     latest_files: List[Dict[str, Any]] = field(default_factory=list)
+    has_server_pack: bool = False
+    server_pack_file_id: Optional[int] = None
 
 
 class CurseForgeService:
@@ -128,8 +130,25 @@ class CurseForgeService:
 
         latest_files = item.get("latestFiles") or []
         file_size = 0
+        has_server_pack = False
+        server_pack_file_id = None
         if latest_files:
             file_size = int(latest_files[0].get("fileLength") or 0)
+            for f in latest_files:
+                if isinstance(f, dict):
+                    if f.get("isServerPack") is True:
+                        has_server_pack = True
+                        server_pack_file_id = f.get("id")
+                        break
+                    if f.get("serverPackFileId"):
+                        has_server_pack = True
+                        server_pack_file_id = f.get("serverPackFileId")
+                        break
+                    fname = str(f.get("fileName") or "").casefold()
+                    if "server" in fname:
+                        has_server_pack = True
+                        server_pack_file_id = f.get("id")
+                        break
 
         return CurseForgeModInfo(
             publishedfileid=mod_id,
@@ -146,6 +165,8 @@ class CurseForgeService:
             direct_url=direct_url,
             main_file_id=item.get("mainFileId"),
             latest_files=latest_files,
+            has_server_pack=has_server_pack,
+            server_pack_file_id=server_pack_file_id,
         )
 
     async def search_mods(

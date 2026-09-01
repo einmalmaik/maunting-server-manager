@@ -1887,7 +1887,20 @@ def _execute_global_read_tool(
                         return fut.result(timeout=20)
 
             mods = _sync_search()
-            return {"mods": [{"id": m.publishedfileid, "name": m.title, "downloads": m.subscriptions, "author": m.creator} for m in mods], "query": query}
+            return {
+                "mods": [
+                    {
+                        "id": m.publishedfileid,
+                        "name": m.title,
+                        "downloads": m.subscriptions,
+                        "author": m.creator,
+                        "has_server_pack": m.has_server_pack,
+                        "server_pack_file_id": m.server_pack_file_id,
+                    }
+                    for m in mods
+                ],
+                "query": query,
+            }
         except Exception:
             return {"error": "curseforge_search_failed", "query": query}
 
