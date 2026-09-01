@@ -53,7 +53,7 @@ describe('CloudflareTab', () => {
 
     expect(await screen.findByText('Cloudflare DNS')).toBeInTheDocument()
     expect(await screen.findByText(/Konfiguriert/i)).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/Token konfiguriert/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/Schlüssel hinterlegt/i)).toBeInTheDocument()
   })
 
   it('führt einen Verbindungstest durch', async () => {
