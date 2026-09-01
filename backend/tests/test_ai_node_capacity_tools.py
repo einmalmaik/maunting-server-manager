@@ -91,6 +91,30 @@ def test_the_tool_reports_both_numbers(db: Session, regular_user: User) -> None:
     # Und die Messung der Node selbst, als dritte unabhaengige Zahl.
     assert eintrag["ram_used_mb"] == 6_144
     assert eintrag["ram_total_mb"] == 32_768
+    assert eintrag["ram_real_free_mb"] == 32_768 - 6_144
+    assert eintrag["overcommit_allowed"] is True
+
+
+def test_the_tool_handles_node_metrics_already_in_mb(db: Session, regular_user: User) -> None:
+    """In Produktion speichert node_service ram_total / ram_used bereits in Megabyte."""
+    node = Node(
+        name="mb-node", host="10.0.0.12", auth_token_enc="x", status="online",
+        is_local=True,
+        cpu_total=8, ram_total=32_768,  # 32 GB in MB
+        ram_used=16_384,  # 16 GB in MB
+    )
+    db.add(node)
+    db.commit()
+    _allow(db, regular_user, "servers.create")
+
+    result = ai_action_service.execute_read_tool(
+        db, user=regular_user, tool_name="read_node_capacity", arguments={},
+    )
+    eintrag = next(item for item in result["nodes"] if item["node_id"] == node.id)
+    assert eintrag["ram_total_mb"] == 32_768
+    assert eintrag["ram_used_mb"] == 16_384
+    assert eintrag["ram_real_free_mb"] == 16_384
+    assert eintrag["overcommit_allowed"] is True
 
 
 def test_the_tool_description_names_the_difference(db: Session) -> None:

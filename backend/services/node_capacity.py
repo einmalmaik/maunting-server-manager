@@ -70,13 +70,25 @@ def allocated_ram_by_node_ids(db: Session, node_ids: list[int]) -> dict[int, int
     return out
 
 
+def normalize_ram_mb(val: int | float | None) -> int | None:
+    """Normalizes RAM values to Megabytes (handles both MB and raw bytes)."""
+    if val is None:
+        return None
+    try:
+        v = int(val)
+    except (TypeError, ValueError):
+        return None
+    if v > 100_000_000:
+        return v // (1024 * 1024)
+    return v
+
+
 def allocatable_ram_mb(node: Node, allocated_mb: int) -> int | None:
     """Remaining bookable RAM after headroom, or None if host total unknown."""
     if node.ram_total is None:
         return None
-    try:
-        total = int(node.ram_total)
-    except (TypeError, ValueError):
+    total = normalize_ram_mb(node.ram_total)
+    if total is None:
         return None
     budget = max(0, total - ram_headroom_mb())
     return max(0, budget - max(0, int(allocated_mb)))

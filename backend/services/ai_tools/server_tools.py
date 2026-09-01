@@ -667,12 +667,11 @@ def _global_tool_definitions() -> list[dict]:
             "read_node_capacity",
             "Liest die Kapazitaet aller Hosts. **Buchung und Verbrauch sind "
             "zweierlei**: `ram_allocated_mb` ist die Summe aller zugewiesenen "
-            "Grenzen einschliesslich **gestoppter** Server â€” die belegen "
+            "Grenzen einschliesslich **gestoppter** Server — die belegen "
             "nichts. Was tatsaechlich laeuft, steht in "
-            "`ram_allocated_running_mb`, was die Node misst in `ram_used_mb`. "
-            "Ist die Buchung voll, aber Server sind gestoppt, ist der Host "
-            "nicht ausgelastet: dann ist die Frage, ob ueberbucht werden darf, "
-            "und nicht ob Platz da ist.",
+            "`ram_allocated_running_mb`, was die Node misst in `ram_used_mb` und `ram_real_free_mb`. "
+            "Im MSM Panel ist RAM-Überbuchung (Overcommit) ausdrücklich erlaubt und Standard: "
+            "solange physisch Platz ist (`ram_real_free_mb` > 0), ist die Servererstellung immer zulässig.",
             {},
             [],
         ),
@@ -1817,13 +1816,17 @@ def _execute_global_read_tool(
             raise AiActionValidationError("Serverplanung ist nicht erlaubt")
         from models import Node
         from services.node_capacity import (
-            allocatable_ram_mb, sum_allocated_ram_mb, sum_running_ram_mb,
+            allocatable_ram_mb, sum_allocated_ram_mb, sum_running_ram_mb, normalize_ram_mb,
         )
 
         nodes = db.query(Node).order_by(Node.id).limit(MAX_LISTED_NODES).all()
         entries = []
         for node in nodes:
             allocated = sum_allocated_ram_mb(db, node.id)
+            total_mb = normalize_ram_mb(node.ram_total)
+            used_mb = normalize_ram_mb(node.ram_used)
+            running_mb = sum_running_ram_mb(db, node.id)
+            real_free_mb = max(0, total_mb - (used_mb if used_mb is not None else running_mb)) if total_mb is not None else None
             entries.append({
                 # Bewusst ohne Hostname und IP: das Modell soll Kapazitaet
                 # vergleichen koennen, nicht die Netzstruktur des Betreibers
@@ -1838,11 +1841,13 @@ def _execute_global_read_tool(
                 # Gebucht von den Servern, die gerade wirklich laufen. Die
                 # Unterscheidung ist der Kern einer wiederkehrenden Fehlauskunft:
                 # vier gestoppte Server zu je 8 GB buchen 32 GB und belegen null.
-                "ram_allocated_running_mb": sum_running_ram_mb(db, node.id),
+                "ram_allocated_running_mb": running_mb,
                 "ram_allocatable_mb": allocatable_ram_mb(node, allocated),
-                # Was die Node selbst meldet â€” die einzige echte Messung hier.
-                "ram_total_mb": int(node.ram_total / 1024 / 1024) if node.ram_total else None,
-                "ram_used_mb": int(node.ram_used / 1024 / 1024) if node.ram_used else None,
+                # Was die Node selbst meldet — echte Messung und physischer Freiraum.
+                "ram_total_mb": total_mb,
+                "ram_used_mb": used_mb,
+                "ram_real_free_mb": real_free_mb,
+                "overcommit_allowed": True,
             })
         return {"nodes": entries}
 
