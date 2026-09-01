@@ -592,7 +592,13 @@ export const SCHREIBWERKZEUGE = [
   'propose_calendar_event_create',
   'propose_calendar_event_update',
   'propose_calendar_event_delete',
+  'propose_note_create',
+  'propose_note_update',
+  'propose_note_delete',
   'propose_popup_create',
+  'propose_cloudflare_dns_record',
+  'propose_cloudflare_dns_delete',
+  'propose_modpack_install',
 ] as const
 
 export type AiWriteTool = (typeof SCHREIBWERKZEUGE)[number]
