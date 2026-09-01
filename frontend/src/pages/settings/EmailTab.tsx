@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Save, Send, Mail } from 'lucide-react'
+import { Save, Send, Mail, Trash2, Undo2 } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
@@ -18,6 +18,7 @@ export function EmailTab() {
   const [saving, setSaving] = useState(false)
   const [provider, setProvider] = useState<'smtp' | 'resend'>('smtp')
   const [newResendKey, setNewResendKey] = useState('')
+  const [clearResendKey, setClearResendKey] = useState(false)
   const [savingResend, setSavingResend] = useState(false)
   const [testEmail, setTestEmail] = useState('')
   const [sendingTest, setSendingTest] = useState(false)
@@ -26,14 +27,16 @@ export function EmailTab() {
     try {
       const data = await api<PanelSettings>('/settings')
       setSettings(data)
-    } catch (err: any) {
-      toast.error(err.message)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { fetchSettings() }, [])
+  useEffect(() => {
+    void fetchSettings()
+  }, [])
 
   useEffect(() => {
     setProvider(settings.email_provider === 'resend' ? 'resend' : 'smtp')
@@ -45,8 +48,8 @@ export function EmailTab() {
     try {
       await api('/settings', { method: 'POST', body: JSON.stringify(settings) })
       toast.success(t('settings.saved'))
-    } catch (err: any) {
-      toast.error(err.message)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
     }
@@ -61,26 +64,35 @@ export function EmailTab() {
         body: JSON.stringify({ to: testEmail }),
       })
       toast.success(t('settings.testEmailSent'))
-    } catch (err: any) {
-      toast.error(err.message)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setSendingTest(false)
     }
   }
 
   const handleSaveResendKey = async () => {
-    if (!newResendKey.trim()) return
+    if (!newResendKey.trim() && !clearResendKey) return
     setSavingResend(true)
     try {
-      await api('/settings/resend-key', {
-        method: 'POST',
-        body: JSON.stringify({ resend_api_key: newResendKey.trim() }),
-      })
+      if (clearResendKey) {
+        await api('/settings/resend-key', {
+          method: 'POST',
+          body: JSON.stringify({ resend_api_key: '' }),
+        })
+        setClearResendKey(false)
+        setNewResendKey('')
+      } else if (newResendKey.trim()) {
+        await api('/settings/resend-key', {
+          method: 'POST',
+          body: JSON.stringify({ resend_api_key: newResendKey.trim() }),
+        })
+        setNewResendKey('')
+      }
       toast.success(t('settings.saved'))
-      setNewResendKey('')
       await fetchSettings()
-    } catch (err: any) {
-      toast.error(err.message)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setSavingResend(false)
     }
@@ -100,31 +112,37 @@ export function EmailTab() {
         <div className="msm-card p-6">
           <div className="flex items-center gap-2 mb-6">
             <Mail className="h-5 w-5 text-secondary" aria-hidden="true" />
-            <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.emailConfig')}</h2>
+            <h2 className="font-headline text-lg font-semibold text-on-surface">{t('settings.emailTitle')}</h2>
           </div>
 
-          <div className="flex gap-2 mb-6">
+          <div className="flex gap-4 mb-6">
             <button
               type="button"
-              onClick={() => setProvider('smtp')}
-              className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+              onClick={() => {
+                setProvider('smtp')
+                setSettings({ ...settings, email_provider: 'smtp' })
+              }}
+              className={`px-4 py-2 rounded-lg font-headline text-sm font-medium transition-colors ${
                 provider === 'smtp'
-                  ? 'bg-secondary-container text-on-secondary-container'
-                  : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
+                  ? 'bg-primary text-on-primary'
+                  : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
               }`}
             >
-              {t('settings.providerSmtp')}
+              SMTP
             </button>
             <button
               type="button"
-              onClick={() => setProvider('resend')}
-              className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+              onClick={() => {
+                setProvider('resend')
+                setSettings({ ...settings, email_provider: 'resend' })
+              }}
+              className={`px-4 py-2 rounded-lg font-headline text-sm font-medium transition-colors ${
                 provider === 'resend'
-                  ? 'bg-secondary-container text-on-secondary-container'
-                  : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
+                  ? 'bg-primary text-on-primary'
+                  : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
               }`}
             >
-              {t('settings.providerResend')}
+              Resend
             </button>
           </div>
 
@@ -147,12 +165,10 @@ export function EmailTab() {
                   {t('settings.smtpPort')}
                 </label>
                 <NumberStepper
-                  value={Number(settings.smtp_port || 587)}
-                  onValueChange={(value) => setSettings({ ...settings, smtp_port: String(value) })}
+                  value={settings.smtp_port || '587'}
+                  onValueChange={(val) => setSettings({ ...settings, smtp_port: val })}
                   min={1}
                   max={65535}
-                  step={1}
-                  placeholder="587"
                 />
               </div>
               <div>
@@ -203,45 +219,89 @@ export function EmailTab() {
           ) : (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${settings.email_configured ? 'bg-status-success' : 'bg-on-surface-variant'}`} />
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    settings.email_configured ? 'bg-status-success' : 'bg-on-surface-variant'
+                  }`}
+                />
                 <span className="font-body-md text-sm text-on-surface">
-                  {settings.email_configured ? t('settings.steamConfigured') : t('settings.steamNotConfigured')}
+                  {settings.email_configured
+                    ? t('settings.emailConfigured', { defaultValue: 'Konfiguriert' })
+                    : t('settings.emailNotConfigured', { defaultValue: 'Nicht konfiguriert' })}
                 </span>
               </div>
 
-              {settings.resend_api_key && (
-                <div>
-                  <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                    {t('settings.steamCurrentKey')}
+              {/* Einheitliches API-Key Eingabefeld */}
+              <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                    {t('settings.resendApiKey')}
                   </label>
-                  <input
-                    type="text"
-                    value={settings.resend_api_key}
-                    readOnly
-                    className="msm-input opacity-60 cursor-not-allowed font-mono text-sm"
-                  />
+                  {clearResendKey ? (
+                    <span className="text-xs text-status-warning flex items-center gap-1.5">
+                      {t('settings.keyWillBeCleared', { defaultValue: 'Wird beim Speichern entfernt' })}
+                      <button
+                        type="button"
+                        onClick={() => setClearResendKey(false)}
+                        className="font-medium text-primary hover:underline inline-flex items-center gap-1"
+                      >
+                        <Undo2 className="h-3 w-3" />
+                        {t('common.undo', { defaultValue: 'Rückgängig' })}
+                      </button>
+                    </span>
+                  ) : settings.email_configured && canWrite ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClearResendKey(true)
+                        setNewResendKey('')
+                      }}
+                      className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                      title={t('common.delete', { defaultValue: 'Entfernen' })}
+                      aria-label={t('common.delete', { defaultValue: 'Entfernen' })}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>{t('settings.clearKey', { defaultValue: 'Key entfernen' })}</span>
+                    </button>
+                  ) : null}
                 </div>
-              )}
 
-              <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                  {t('settings.resendApiKey')}
-                </label>
                 <PasswordInput
                   value={newResendKey}
-                  onChange={(e) => setNewResendKey(e.target.value)}
-                  placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  disabled={!canWrite || savingResend || clearResendKey}
+                  onChange={(e) => {
+                    setNewResendKey(e.target.value)
+                    setClearResendKey(false)
+                  }}
+                  placeholder={
+                    clearResendKey
+                      ? t('settings.keyWillBeCleared', { defaultValue: 'Wird beim Speichern entfernt' })
+                      : settings.email_configured
+                        ? t('settings.keyConfiguredHint', {
+                            defaultValue: 'Schlüssel hinterlegt; leer lassen, um ihn beizubehalten',
+                          })
+                        : 're_xxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+                  }
                 />
+
                 <p className="msm-field-help">
-                  Resend API-Key von <a href="https://resend.com" target="_blank" rel="noopener noreferrer" className="text-secondary hover:underline">resend.com</a>
+                  Resend API-Key von{' '}
+                  <a
+                    href="https://resend.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-secondary hover:underline"
+                  >
+                    resend.com
+                  </a>
                 </p>
               </div>
 
-              <div className="flex justify-end">
+              <div className="flex justify-end pt-2">
                 <button
                   type="button"
                   onClick={handleSaveResendKey}
-                  disabled={savingResend || !newResendKey.trim() || !canWrite}
+                  disabled={savingResend || (!newResendKey.trim() && !clearResendKey) || !canWrite}
                   className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
                 >
                   {savingResend ? (
@@ -249,7 +309,7 @@ export function EmailTab() {
                   ) : (
                     <Save className="w-4 h-4" />
                   )}
-                  {t('settings.steamSaveKey')}
+                  {t('settings.save', { defaultValue: 'Speichern' })}
                 </button>
               </div>
             </div>

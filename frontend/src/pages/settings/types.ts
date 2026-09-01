@@ -14,6 +14,7 @@ export interface PanelSettings {
   email_provider: string
   steam_api_key: string
   steam_api_configured: boolean
+  steam_api_source: 'env' | 'panel' | 'none'
   curseforge_api_key: string
   curseforge_api_configured: boolean
   curseforge_api_source: 'env' | 'panel' | 'none'
@@ -77,6 +78,7 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   email_provider: 'none',
   steam_api_key: '',
   steam_api_configured: false,
+  steam_api_source: 'none',
   curseforge_api_key: '',
   curseforge_api_configured: false,
   curseforge_api_source: 'none',

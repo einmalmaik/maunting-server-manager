@@ -353,30 +353,18 @@ def _update_env_file(key: str, value: str) -> None:
 
 
 @router.post("/resend-key", status_code=200)
-def update_resend_key(
+def set_resend_key(
     req: ResendKeyRequest,
-    db: Session = Depends(get_db),
     _=Depends(require_global("panel.settings.write")),
     __=Depends(verify_csrf),
 ) -> dict:
-    """Stores the Resend API key securely in .env instead of the database.
-
-    Deletes any DB override so the .env value takes effect immediately.
-    """
+    """Stores the Resend API key securely in the panel database (DIS-encrypted)."""
     if not req.resend_api_key.startswith("re_"):
         raise HTTPException(status_code=400, detail="Ungueltiger Resend API-Key")
 
-    try:
-        _update_env_file("MSM_RESEND_API_KEY", req.resend_api_key)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f".env Update fehlgeschlagen: {e}")
-
-    # Remove DB override so .env takes precedence
+    enc = AuthService.encrypt_secret(req.resend_api_key, aad="msm:email:resend_api_key")
+    PanelSettingsService.set("resend_api_key_encrypted", enc)
     PanelSettingsService.set("resend_api_key", "")
-
-    # Update in-memory settings for immediate effect (no restart required)
-    settings.__dict__["resend_api_key"] = req.resend_api_key
-    os.environ["MSM_RESEND_API_KEY"] = req.resend_api_key
 
     return {"message": "Resend API-Key gespeichert"}
 
@@ -388,22 +376,12 @@ def update_steam_key(
     _=Depends(require_global("panel.settings.write")),
     __=Depends(verify_csrf),
 ) -> dict:
-    """Stores the Steam Web API key securely in .env."""
+    """Stores the Steam Web API key securely in the panel database (DIS-encrypted)."""
     key = req.steam_api_key.strip()
     if not key or len(key) < 10:
         raise HTTPException(status_code=400, detail="Ungültiger Steam API-Key")
 
-    try:
-        _update_env_file("MSM_STEAM_API_KEY", key)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f".env Update fehlgeschlagen: {e}")
-
     set_panel_key(key)
-
-    # Update in-memory for immediate effect
-    settings.__dict__["steam_api_key"] = key
-    os.environ["MSM_STEAM_API_KEY"] = key
-    os.environ["STEAM_API_KEY"] = key
 
     return {"message": "Steam API-Key gespeichert", "steam_api_source": steam_api_source()}
 
@@ -462,22 +440,12 @@ def update_curseforge_api_key(
     _=Depends(require_global("panel.settings.write")),
     __=Depends(verify_csrf),
 ) -> dict:
-    """Stores the CurseForge API key securely in .env and panel database (DIS-encrypted)."""
+    """Stores the CurseForge API key securely in panel database (DIS-encrypted)."""
     key = req.curseforge_api_key.strip()
     if not key or len(key) < 10:
         raise HTTPException(status_code=400, detail="Ungültiger CurseForge API-Key")
 
-    try:
-        _update_env_file("MSM_CURSEFORGE_API_KEY", key)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f".env Update fehlgeschlagen: {e}")
-
     set_curseforge_panel_key(key)
-
-    # Update in-memory for immediate effect
-    settings.__dict__["curseforge_api_key"] = key
-    os.environ["MSM_CURSEFORGE_API_KEY"] = key
-    os.environ["CURSEFORGE_API_KEY"] = key
 
     return {"message": "CurseForge API-Key gespeichert", "curseforge_api_source": curseforge_api_source()}
 
@@ -487,16 +455,9 @@ def delete_curseforge_api_key(
     _=Depends(require_global("panel.settings.write")),
     __=Depends(verify_csrf),
 ) -> dict:
-    """Removes the CurseForge API key from panel database and .env."""
-    try:
-        _update_env_file("MSM_CURSEFORGE_API_KEY", "")
-    except OSError:
-        pass
+    """Removes the CurseForge API key from panel database."""
     clear_curseforge_panel_key()
-    settings.__dict__["curseforge_api_key"] = ""
-    os.environ.pop("MSM_CURSEFORGE_API_KEY", None)
-    os.environ.pop("CURSEFORGE_API_KEY", None)
-    return {"message": "CurseForge API-Key entfernt"}
+    return {"message": "CurseForge API-Key entfernt", "curseforge_api_source": curseforge_api_source()}
 
 
 @router.post("/cloudflare-token", status_code=200)
@@ -505,6 +466,7 @@ def set_cloudflare_token(
     _=Depends(require_global("panel.settings.write")),
     __=Depends(verify_csrf),
 ) -> dict:
+    """Stores the Cloudflare API token securely in panel database (DIS-encrypted)."""
     key = req.cloudflare_api_token.strip()
     if not key or len(key) < 10:
         raise HTTPException(status_code=400, detail="Ungültiger Cloudflare API-Token")
@@ -512,13 +474,8 @@ def set_cloudflare_token(
         raise HTTPException(status_code=400, detail="Ungültige Zeichen")
     if len(key) > 512:
         raise HTTPException(status_code=400, detail="Token zu lang")
-    try:
-        _update_env_file("MSM_CLOUDFLARE_API_TOKEN", key)
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f".env Update fehlgeschlagen: {e}")
+
     set_cloudflare_panel_key(key)
-    settings.__dict__["cloudflare_api_token"] = key
-    os.environ["MSM_CLOUDFLARE_API_TOKEN"] = key
     return {"message": "Cloudflare API-Token gespeichert", **cloudflare_api_status()}
 
 
@@ -527,13 +484,8 @@ def delete_cloudflare_token(
     _=Depends(require_global("panel.settings.write")),
     __=Depends(verify_csrf),
 ) -> dict:
-    try:
-        _update_env_file("MSM_CLOUDFLARE_API_TOKEN", "")
-    except OSError:
-        pass
+    """Removes the Cloudflare API token from panel database."""
     clear_cloudflare_panel_key()
-    settings.__dict__["cloudflare_api_token"] = ""
-    os.environ.pop("MSM_CLOUDFLARE_API_TOKEN", None)
     return {"message": "Cloudflare API-Token entfernt", **cloudflare_api_status()}
 
 

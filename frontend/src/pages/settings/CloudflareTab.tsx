@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Globe, Trash2, Send, Save } from 'lucide-react'
+import { Globe, Trash2, Send, Save, Undo2 } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
-import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Dropdown } from '@/Singra/UI'
@@ -16,10 +15,10 @@ export function CloudflareTab() {
   const [settings, setSettings] = useState<PanelSettings>(EMPTY_PANEL_SETTINGS)
   const [loading, setLoading] = useState(true)
   const [newToken, setNewToken] = useState('')
+  const [clearToken, setClearToken] = useState(false)
   const [selectedZone, setSelectedZone] = useState('')
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
-  const [deleting, setDeleting] = useState(false)
   const [zones, setZones] = useState<{ id: string; name: string }[]>([])
 
   const fetchSettings = async () => {
@@ -57,7 +56,11 @@ export function CloudflareTab() {
     e.preventDefault()
     setSaving(true)
     try {
-      if (newToken.trim()) {
+      if (clearToken) {
+        await api('/settings/cloudflare-token', { method: 'DELETE' })
+        setClearToken(false)
+        setNewToken('')
+      } else if (newToken.trim()) {
         await api('/settings/cloudflare-token', {
           method: 'POST',
           body: JSON.stringify({ cloudflare_api_token: newToken.trim() }),
@@ -98,30 +101,6 @@ export function CloudflareTab() {
     }
   }
 
-  const handleDelete = async () => {
-    const ok = await confirm({
-      message: t('settings.cloudflare.deleteConfirm', {
-        defaultValue: 'Möchtest du den gespeicherten Cloudflare API-Token wirklich entfernen?',
-      }),
-      danger: true,
-      confirmText: t('common.delete', { defaultValue: 'Löschen' }),
-    })
-    if (!ok) return
-
-    setDeleting(true)
-    try {
-      await api('/settings/cloudflare-token', { method: 'DELETE' })
-      toast.success(t('settings.cloudflare.deleted', { defaultValue: 'Cloudflare API-Token entfernt' }))
-      setZones([])
-      setSelectedZone('')
-      await fetchSettings()
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : String(err))
-    } finally {
-      setDeleting(false)
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -131,7 +110,8 @@ export function CloudflareTab() {
   }
 
   const zoneOptions = zones.map((z) => ({ value: z.id, label: z.name }))
-  const hasChanges = Boolean(newToken.trim() || selectedZone !== settings.cloudflare_default_zone)
+  const hasChanges = Boolean(newToken.trim() || clearToken || selectedZone !== settings.cloudflare_default_zone)
+  const sourceLabel = settings.cloudflare_api_source === 'env' ? '.env' : 'Panel-DB'
 
   return (
     <fieldset disabled={!canWrite} className="space-y-6 border-0 p-0 m-0">
@@ -168,35 +148,65 @@ export function CloudflareTab() {
                 : t('settings.cloudflare.notConfigured', { defaultValue: 'Nicht konfiguriert' })}
               {settings.cloudflare_api_source && settings.cloudflare_api_source !== 'none' && (
                 <span className="ml-2 font-mono text-xs text-on-surface-variant">
-                  ({settings.cloudflare_api_source === 'env' ? '.env' : 'Panel-DB'})
+                  ({sourceLabel})
                 </span>
               )}
             </span>
           </div>
 
-          {settings.cloudflare_api_token && (
-            <div>
-              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                {t('settings.cloudflare.currentKey', { defaultValue: 'Aktueller API-Token' })}
+          {/* Einheitliches API-Token Eingabefeld */}
+          <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                {t('settings.cloudflare.tokenLabel', { defaultValue: 'Cloudflare API-Token' })}
               </label>
-              <input
-                type="text"
-                value={settings.cloudflare_api_token}
-                readOnly
-                className="msm-input opacity-60 cursor-not-allowed font-mono text-sm"
-              />
+              {clearToken ? (
+                <span className="text-xs text-status-warning flex items-center gap-1.5">
+                  {t('settings.keyWillBeCleared', { defaultValue: 'Wird beim Speichern entfernt' })}
+                  <button
+                    type="button"
+                    onClick={() => setClearToken(false)}
+                    className="font-medium text-primary hover:underline inline-flex items-center gap-1"
+                  >
+                    <Undo2 className="h-3 w-3" />
+                    {t('common.undo', { defaultValue: 'Rückgängig' })}
+                  </button>
+                </span>
+              ) : settings.cloudflare_api_configured && canWrite ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClearToken(true)
+                    setNewToken('')
+                  }}
+                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                  title={t('settings.cloudflare.deleteToken', { defaultValue: 'Token entfernen' })}
+                  aria-label={t('settings.cloudflare.deleteToken', { defaultValue: 'Token entfernen' })}
+                >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{t('settings.cloudflare.deleteToken', { defaultValue: 'Token entfernen' })}</span>
+                </button>
+              ) : null}
             </div>
-          )}
 
-          <div>
-            <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-              {t('settings.cloudflare.newToken', { defaultValue: 'Neuer API-Token' })}
-            </label>
             <PasswordInput
               value={newToken}
-              onChange={(e) => setNewToken(e.target.value)}
-              placeholder={t('settings.cloudflare.tokenPlaceholder', { defaultValue: 'Bearer Token...' })}
+              disabled={!canWrite || saving || clearToken}
+              onChange={(e) => {
+                setNewToken(e.target.value)
+                setClearToken(false)
+              }}
+              placeholder={
+                clearToken
+                  ? t('settings.keyWillBeCleared', { defaultValue: 'Wird beim Speichern entfernt' })
+                  : settings.cloudflare_api_configured
+                    ? t('settings.keyConfiguredHint', {
+                        defaultValue: 'Token konfiguriert; leer lassen, um ihn beizubehalten',
+                      })
+                    : t('settings.cloudflare.tokenPlaceholder', { defaultValue: 'Bearer Token...' })
+              }
             />
+
             <p className="msm-field-help">
               {t('settings.cloudflare.tokenHint', {
                 defaultValue: 'Bearer Token mit Zone:Read und DNS:Edit Rechten. Wird mit dem DIS Sidecar verschlüsselt gespeichert.',
@@ -239,17 +249,6 @@ export function CloudflareTab() {
           </div>
 
           <div className="flex gap-3 justify-end flex-wrap pt-2">
-            {settings.cloudflare_api_configured && settings.cloudflare_api_source !== 'env' && (
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={deleting || !canWrite}
-                className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 text-status-destructive hover:bg-status-destructive/10 disabled:opacity-50"
-              >
-                <Trash2 className="w-4 h-4" />
-                {t('settings.cloudflare.deleteToken', { defaultValue: 'Token entfernen' })}
-              </button>
-            )}
             <button
               type="button"
               onClick={handleTest}

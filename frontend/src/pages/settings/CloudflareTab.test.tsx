@@ -10,10 +10,6 @@ vi.mock('@/api/client', () => ({
   api: vi.fn(),
 }))
 
-vi.mock('@/stores/confirmStore', () => ({
-  confirm: vi.fn().mockResolvedValue(true),
-}))
-
 describe('CloudflareTab', () => {
   beforeEach(() => {
     i18n.changeLanguage('de')
@@ -57,7 +53,7 @@ describe('CloudflareTab', () => {
 
     expect(await screen.findByText('Cloudflare DNS')).toBeInTheDocument()
     expect(await screen.findByText(/Konfiguriert/i)).toBeInTheDocument()
-    expect(screen.getByDisplayValue('••••••••1234')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/Token konfiguriert/i)).toBeInTheDocument()
   })
 
   it('führt einen Verbindungstest durch', async () => {
@@ -71,14 +67,20 @@ describe('CloudflareTab', () => {
     })
   })
 
-  it('löscht den Cloudflare-Token nach Bestätigung', async () => {
+  it('markiert den Cloudflare-Token zum Entfernen und löscht beim Speichern', async () => {
     render(<CloudflareTab />)
 
     const deleteBtn = await screen.findByRole('button', { name: /Token entfernen/i })
     fireEvent.click(deleteBtn)
+
+    expect(await screen.findByText(/Wird beim Speichern entfernt/i)).toBeInTheDocument()
+
+    const saveBtn = screen.getByRole('button', { name: /Einstellungen speichern/i })
+    fireEvent.click(saveBtn)
 
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/settings/cloudflare-token', { method: 'DELETE' })
     })
   })
 })
+

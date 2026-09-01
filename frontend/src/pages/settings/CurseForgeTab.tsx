@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Save, Send, Flame, Trash2 } from 'lucide-react'
+import { Save, Send, Flame, Trash2, Undo2 } from 'lucide-react'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
-import { confirm } from '@/stores/confirmStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { PanelSettings, EMPTY_PANEL_SETTINGS } from './types'
@@ -14,16 +13,16 @@ export function CurseForgeTab() {
   const [settings, setSettings] = useState<PanelSettings>(EMPTY_PANEL_SETTINGS)
   const [loading, setLoading] = useState(true)
   const [newKey, setNewKey] = useState('')
+  const [clearKey, setClearKey] = useState(false)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
-  const [deleting, setDeleting] = useState(false)
 
   const fetchSettings = async () => {
     try {
       const data = await api<PanelSettings>('/settings')
       setSettings(data)
-    } catch (err: any) {
-      toast.error(err.message)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
@@ -33,19 +32,26 @@ export function CurseForgeTab() {
     void fetchSettings()
   }, [])
 
-  const handleSave = async () => {
-    if (!newKey.trim()) return
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
     setSaving(true)
     try {
-      await api('/settings/curseforge-api-key', {
-        method: 'POST',
-        body: JSON.stringify({ curseforge_api_key: newKey.trim() }),
-      })
-      toast.success(t('settings.curseforgeSaved', { defaultValue: 'CurseForge API-Schlüssel gespeichert' }))
-      setNewKey('')
+      if (clearKey) {
+        await api('/settings/curseforge-api-key', { method: 'DELETE' })
+        setClearKey(false)
+        setNewKey('')
+        toast.success(t('settings.curseforgeRemoved', { defaultValue: 'CurseForge API-Schlüssel entfernt' }))
+      } else if (newKey.trim()) {
+        await api('/settings/curseforge-api-key', {
+          method: 'POST',
+          body: JSON.stringify({ curseforge_api_key: newKey.trim() }),
+        })
+        toast.success(t('settings.curseforgeSaved', { defaultValue: 'CurseForge API-Schlüssel gespeichert' }))
+        setNewKey('')
+      }
       await fetchSettings()
-    } catch (err: any) {
-      toast.error(err.message)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
     }
@@ -62,32 +68,10 @@ export function CurseForgeTab() {
       } else {
         toast.error(res.message)
       }
-    } catch (err: any) {
-      toast.error(err.message)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setTesting(false)
-    }
-  }
-
-  const handleDelete = async () => {
-    const ok = await confirm({
-      message: t('settings.curseforgeConfirmDelete', {
-        defaultValue: 'Möchtest du den gespeicherten CurseForge API-Schlüssel wirklich entfernen?',
-      }),
-      danger: true,
-      confirmText: t('common.delete', { defaultValue: 'Löschen' }),
-    })
-    if (!ok) return
-
-    setDeleting(true)
-    try {
-      await api('/settings/curseforge-api-key', { method: 'DELETE' })
-      toast.success(t('settings.curseforgeRemoved', { defaultValue: 'CurseForge API-Schlüssel entfernt' }))
-      await fetchSettings()
-    } catch (err: any) {
-      toast.error(err.message)
-    } finally {
-      setDeleting(false)
     }
   }
 
@@ -99,6 +83,9 @@ export function CurseForgeTab() {
     )
   }
 
+  const hasChanges = Boolean(newKey.trim() || clearKey)
+  const sourceLabel = settings.curseforge_api_source === 'env' ? '.env' : 'Panel-DB'
+
   return (
     <fieldset disabled={!canWrite} className="space-y-6 border-0 p-0 m-0">
       <div className="msm-card p-6">
@@ -109,7 +96,7 @@ export function CurseForgeTab() {
           </h2>
         </div>
 
-        <div className="space-y-4">
+        <form onSubmit={handleSave} className="space-y-4">
           <div className="flex items-center gap-2">
             <span
               className={`w-2 h-2 rounded-full ${
@@ -122,35 +109,65 @@ export function CurseForgeTab() {
                 : t('settings.curseforgeNotConfigured', { defaultValue: 'Nicht konfiguriert' })}
               {settings.curseforge_api_source && settings.curseforge_api_source !== 'none' && (
                 <span className="ml-2 font-mono text-xs text-on-surface-variant">
-                  ({settings.curseforge_api_source === 'env' ? '.env' : 'Panel-DB'})
+                  ({sourceLabel})
                 </span>
               )}
             </span>
           </div>
 
-          {settings.curseforge_api_key && (
-            <div>
-              <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-                {t('settings.curseforgeCurrentKey', { defaultValue: 'Aktueller API-Schlüssel' })}
+          {/* Einheitliches API-Key Eingabefeld */}
+          <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low/35 p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+                {t('settings.curseforgeApiKey', { defaultValue: 'CurseForge API-Schlüssel' })}
               </label>
-              <input
-                type="text"
-                value={settings.curseforge_api_key}
-                readOnly
-                className="msm-input opacity-60 cursor-not-allowed font-mono text-sm"
-              />
+              {clearKey ? (
+                <span className="text-xs text-status-warning flex items-center gap-1.5">
+                  {t('settings.keyWillBeCleared', { defaultValue: 'Wird beim Speichern entfernt' })}
+                  <button
+                    type="button"
+                    onClick={() => setClearKey(false)}
+                    className="font-medium text-primary hover:underline inline-flex items-center gap-1"
+                  >
+                    <Undo2 className="h-3 w-3" />
+                    {t('common.undo', { defaultValue: 'Rückgängig' })}
+                  </button>
+                </span>
+              ) : settings.curseforge_api_configured && canWrite ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClearKey(true)
+                    setNewKey('')
+                  }}
+                  className="inline-flex items-center gap-1 text-xs text-on-surface-variant hover:text-status-error transition-colors"
+                  title={t('settings.curseforgeDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
+                  aria-label={t('settings.curseforgeDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
+                >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{t('settings.curseforgeDeleteKey', { defaultValue: 'Schlüssel entfernen' })}</span>
+                </button>
+              ) : null}
             </div>
-          )}
 
-          <div>
-            <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
-              {t('settings.curseforgeNewKey', { defaultValue: 'Neuer API-Schlüssel' })}
-            </label>
             <PasswordInput
               value={newKey}
-              onChange={(e) => setNewKey(e.target.value)}
-              placeholder="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+              disabled={!canWrite || saving || clearKey}
+              onChange={(e) => {
+                setNewKey(e.target.value)
+                setClearKey(false)
+              }}
+              placeholder={
+                clearKey
+                  ? t('settings.keyWillBeCleared', { defaultValue: 'Wird beim Speichern entfernt' })
+                  : settings.curseforge_api_configured
+                    ? t('settings.keyConfiguredHint', {
+                        defaultValue: 'Schlüssel hinterlegt; leer lassen, um ihn beizubehalten',
+                      })
+                    : 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
+              }
             />
+
             <p className="msm-field-help">
               {t('settings.curseforgeKeyHint', {
                 defaultValue:
@@ -167,18 +184,7 @@ export function CurseForgeTab() {
             </p>
           </div>
 
-          <div className="flex gap-3 justify-end flex-wrap">
-            {settings.curseforge_api_configured && (
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={deleting || !canWrite}
-                className="msm-btn-secondary px-4 py-2 inline-flex items-center gap-2 text-status-destructive hover:bg-status-destructive/10 disabled:opacity-50"
-              >
-                <Trash2 className="w-4 h-4" />
-                {t('settings.curseforgeDeleteKey', { defaultValue: 'Schlüssel entfernen' })}
-              </button>
-            )}
+          <div className="flex gap-3 justify-end flex-wrap pt-2">
             <button
               type="button"
               onClick={handleTest}
@@ -193,9 +199,8 @@ export function CurseForgeTab() {
               {t('settings.curseforgeTest', { defaultValue: 'Verbindung testen' })}
             </button>
             <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving || !newKey.trim() || !canWrite}
+              type="submit"
+              disabled={saving || !hasChanges || !canWrite}
               className="msm-btn-primary px-4 py-2 inline-flex items-center gap-2 disabled:opacity-50"
             >
               {saving ? (
@@ -203,10 +208,10 @@ export function CurseForgeTab() {
               ) : (
                 <Save className="w-4 h-4" />
               )}
-              {t('settings.curseforgeSaveKey', { defaultValue: 'API-Schlüssel speichern' })}
+              {t('settings.curseforgeSaveKey', { defaultValue: 'Einstellungen speichern' })}
             </button>
           </div>
-        </div>
+        </form>
       </div>
     </fieldset>
   )
