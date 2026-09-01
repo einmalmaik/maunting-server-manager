@@ -132,17 +132,10 @@ def _global_tool_definitions() -> list[dict]:
     if is_configured():
         optional.append(_function(
             "web_search",
-            "Sucht im Web. Fuer aktuelle Informationen, die nicht aus dem "
-            "Panel kommen â€” Fehlermeldungen, Modkompatibilitaet, "
-            "Spielversionen. Liefert Titel, Adresse und Kurztext.",
+            "Sucht im Web nach aktuellen Informationen, Fehlermeldungen, Modkompatibilitaet oder Spielversionen. Liefert Titel, Adresse und Kurztext.",
             {
-                "query": {"type": "string", "maxLength": 200},
-                "count": {"type": "integer", "minimum": 1, "maximum": MAX_RESULTS},
-                "server_id": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Server, um den es geht â€” aus list_my_servers.",
-                },
+                "query": {"type": "string", "maxLength": 200, "description": "Suchbegriff oder Frage."},
+                "count": {"type": "integer", "minimum": 1, "maximum": MAX_RESULTS, "description": "Anzahl der Treffer (Standard: 5)."},
             },
             ["query"],
         ))
@@ -739,12 +732,16 @@ def _global_tool_definitions() -> list[dict]:
             "Servererstellung automatisch installiert — ein separater propose_modpack_install "
             "ist dann NICHT noetig.",
             {
-                "name": {"type": "string", "maxLength": 128},
-                "game_type": {"type": "string", "maxLength": 64},
-                "ram_limit_mb": {"type": "integer", "minimum": 512, "maximum": 4_194_304},
-                "cpu_limit_percent": {"type": "integer", "minimum": 10, "maximum": 3_200},
-                "disk_limit_gb": {"type": "integer", "minimum": 1, "maximum": 1_048_576},
-                "node_id": {"type": ["integer", "null"]},
+                "name": {"type": "string", "maxLength": 128, "description": "Servername."},
+                "game_type": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Blueprint-ID oder Spieltyp (z. B. 'minecraft_vanilla', 'minecraft_forge', 'valheim', 'palworld', 'rust').",
+                },
+                "ram_limit_mb": {"type": "integer", "minimum": 512, "maximum": 4_194_304, "description": "RAM in MB (z. B. 6144 fuer 6 GB)."},
+                "cpu_limit_percent": {"type": "integer", "minimum": 10, "maximum": 3_200, "description": "CPU-Limit in Prozent (z. B. 200 fuer 2 Kerne)."},
+                "disk_limit_gb": {"type": "integer", "minimum": 1, "maximum": 1_048_576, "description": "Festplatten-Limit in GB (z. B. 20)."},
+                "node_id": {"type": ["integer", "null"], "description": "Optional: Node-ID aus advise_node_placement oder read_node_capacity."},
                 "public_bind_ip": {
                     "type": ["string", "null"],
                     "maxLength": 64,

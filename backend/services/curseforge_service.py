@@ -54,6 +54,7 @@ class CurseForgeModInfo:
     latest_files: List[Dict[str, Any]] = field(default_factory=list)
     has_server_pack: bool = False
     server_pack_file_id: Optional[int] = None
+    allow_mod_distribution: bool = True
 
 
 class CurseForgeService:
@@ -178,6 +179,9 @@ class CurseForgeService:
                         server_pack_file_id = f.get("id")
                         break
 
+        raw_allow = item.get("allowModDistribution")
+        allow_dist = True if raw_allow is None else bool(raw_allow)
+
         return CurseForgeModInfo(
             publishedfileid=mod_id,
             title=title,
@@ -195,6 +199,7 @@ class CurseForgeService:
             latest_files=latest_files,
             has_server_pack=has_server_pack,
             server_pack_file_id=server_pack_file_id,
+            allow_mod_distribution=allow_dist,
         )
 
     async def search_mods(
@@ -210,6 +215,7 @@ class CurseForgeService:
         mod_loader_type: int | None = None,
         game_version: str | None = None,
         slug: str | None = None,
+        only_distributable: bool = True,
     ) -> List[CurseForgeModInfo]:
         """Sucht Mods über GET /v1/mods/search."""
         if not self.api_key:
@@ -220,7 +226,7 @@ class CurseForgeService:
         index = (page - 1) * per_page
 
         norm_game_id = normalize_game_id(game_id)
-        cache_key = f"cf_search_{norm_game_id}_{query}_{slug}_{page}_{per_page}_{class_id}_{category_id}_{sort_field}_{sort_order}"
+        cache_key = f"cf_search_{norm_game_id}_{query}_{slug}_{page}_{per_page}_{class_id}_{category_id}_{sort_field}_{sort_order}_{only_distributable}"
         cached = self._get_cache(cache_key)
         if cached:
             return cached
@@ -255,6 +261,8 @@ class CurseForgeService:
             data = response.json()
             items = data.get("data") or []
             mods = [self._parse_mod_data(item) for item in items]
+            if only_distributable:
+                mods = [m for m in mods if m.allow_mod_distribution]
             self._set_cache(cache_key, mods)
             return mods
         except httpx.HTTPStatusError as e:

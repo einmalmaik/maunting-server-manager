@@ -206,3 +206,35 @@ def test_normalize_game_id():
     assert normalize_game_id("83262") == 83262
     assert normalize_game_id("invalid_text") == 432
 
+
+@pytest.mark.asyncio
+async def test_search_mods_filters_non_distributable_mods():
+    mock_payload = {
+        "data": [
+            {
+                "id": 100,
+                "name": "Allowed Mod",
+                "allowModDistribution": True,
+            },
+            {
+                "id": 200,
+                "name": "Blocked Mod",
+                "allowModDistribution": False,
+            },
+            {
+                "id": 300,
+                "name": "Default Mod",
+            },
+        ]
+    }
+    mock_resp = httpx.Response(status_code=200, json=mock_payload, request=httpx.Request("GET", "https://api.curseforge.com/v1/mods/search"))
+
+    with patch("services.curseforge_api_key_service.resolve_key", return_value="TEST_API_KEY"):
+        svc = CurseForgeService()
+        with patch.object(svc.client, "get", new=AsyncMock(return_value=mock_resp)):
+            mods = await svc.search_mods(game_id=432, query="test", only_distributable=True)
+
+        assert len(mods) == 2
+        assert [m.publishedfileid for m in mods] == ["100", "300"]
+        await svc.close()
+

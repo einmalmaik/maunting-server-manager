@@ -469,3 +469,37 @@ def test_server_create_with_invalid_modpack_id_rejected(
             correlation_id=str(uuid4()),
         )
 
+
+def test_server_create_resolves_blueprint_and_type_aliases(
+    db: Session, regular_user: User
+) -> None:
+    """Server-Erstellung akzeptiert type='vanilla', 'minecraft' und berechnet GB RAM."""
+    import json
+
+    _role(db, regular_user, ("ai.chat.use", "servers.create"))
+    conversation = _conversation(db, regular_user)
+
+    # type='vanilla' und ram=6 (als GB)
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_server_create",
+        arguments={
+            "name": "Mein Vanilla Server",
+            "type": "vanilla",
+            "ram": 6,
+            "cpu": 200,
+            "disk": 20,
+            "reason": "Test Vanilla",
+            "expected_effect": "Server wird angelegt",
+        },
+        correlation_id=str(uuid4()),
+    )
+
+    preview = json.loads(proposal.preview_json)
+    assert preview["game_type"] == "minecraft_vanilla"
+    assert preview["ram_limit_mb"] == 6144
+    assert preview["cpu_limit_percent"] == 200
+    assert preview["disk_limit_gb"] == 20
+

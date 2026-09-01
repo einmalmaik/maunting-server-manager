@@ -1220,12 +1220,8 @@ def _execute_web_search(
     if set(arguments) - {"query", "count", "server_id"}:
         raise AiActionValidationError("Websuche hat ungueltige Argumente")
 
-    # `server_id` bleibt zulaessig und laeuft weiter ueber `_resolve_server`.
-    # Sie entscheidet nichts mehr, aber sie darf auch kein Orakel werden: wer
-    # keinen Zugriff auf den Server hat, soll an der Antwort nicht ablesen
-    # koennen, ob es ihn gibt.
     server_id = arguments.get("server_id")
-    if server_id is not None:
+    if server_id is not None and server_id != "" and server_id != 0:
         _resolve_server(db, user, {"server_id": server_id})
 
     query = arguments.get("query")

@@ -274,6 +274,8 @@ def _resolve_server(db: Session, user: User, arguments: dict) -> tuple[Server, d
     """
     rest = {key: value for key, value in arguments.items() if key != "server_id"}
     raw = arguments.get("server_id")
+    if isinstance(raw, str) and raw.strip().isdigit():
+        raw = int(raw.strip())
     if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
         raise AiActionValidationError(
             "server_id fehlt oder ist ungueltig. Zuerst list_my_servers aufrufen."

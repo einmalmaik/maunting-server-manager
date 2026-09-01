@@ -530,29 +530,67 @@ def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
         raise AiActionValidationError("Ungueltiger Servername")
     name = redact_sensitive_text(str(raw_name).strip())
 
-    game_type = str(arguments.get("game_type") or "").strip()
-    plugin = get_plugin(game_type)
+    raw_game_type = str(
+        arguments.get("game_type")
+        or arguments.get("blueprint_id")
+        or arguments.get("blueprint")
+        or arguments.get("server_type")
+        or arguments.get("type")
+        or arguments.get("game")
+        or (arguments.get("server") if isinstance(arguments.get("server"), dict) else {}).get("game_type")
+        or (arguments.get("server") if isinstance(arguments.get("server"), dict) else {}).get("blueprint_id")
+        or (arguments.get("server") if isinstance(arguments.get("server"), dict) else {}).get("type")
+        or ""
+    ).strip()
+    plugin = get_plugin(raw_game_type)
     if plugin is None:
-        raise AiActionValidationError(f"Unbekannter Servertyp: {game_type}")
+        raise AiActionValidationError(f"Unbekannter Servertyp: {raw_game_type or 'nicht angegeben'}")
     bp = plugin.get_blueprint() if hasattr(plugin, "get_blueprint") else getattr(plugin, "blueprint", None)
-    real_game_type = bp.meta.id if bp and hasattr(bp, "meta") else game_type
+    real_game_type = bp.meta.id if bp and hasattr(bp, "meta") else raw_game_type
 
     limits: dict[str, int] = {
         "ram_limit_mb": 4096,
         "cpu_limit_percent": 200,
         "disk_limit_gb": 20,
     }
-    for key, low, high, default in (
-        ("ram_limit_mb", 512, 4_194_304, 4096),
-        ("cpu_limit_percent", 10, 3_200, 200),
-        ("disk_limit_gb", 1, 1_048_576, 20),
-    ):
-        if key in arguments and arguments[key] is not None:
-            value = arguments[key]
-            if isinstance(value, int) and not isinstance(value, bool) and low <= value <= high:
-                limits[key] = value
-            elif isinstance(value, str) and value.isdigit() and low <= int(value) <= high:
-                limits[key] = int(value)
+    ram_val = (
+        arguments.get("ram_limit_mb")
+        or arguments.get("ram_mb")
+        or arguments.get("memory_mb")
+        or arguments.get("ram")
+    )
+    if isinstance(ram_val, int) and not isinstance(ram_val, bool):
+        if 1 <= ram_val <= 64:
+            ram_val = ram_val * 1024
+        if 512 <= ram_val <= 4_194_304:
+            limits["ram_limit_mb"] = ram_val
+    elif isinstance(ram_val, str) and ram_val.isdigit():
+        num = int(ram_val)
+        if 1 <= num <= 64:
+            num = num * 1024
+        if 512 <= num <= 4_194_304:
+            limits["ram_limit_mb"] = num
+
+    cpu_val = (
+        arguments.get("cpu_limit_percent")
+        or arguments.get("cpu_percent")
+        or arguments.get("cpu")
+    )
+    if isinstance(cpu_val, int) and not isinstance(cpu_val, bool) and 10 <= cpu_val <= 3_200:
+        limits["cpu_limit_percent"] = cpu_val
+    elif isinstance(cpu_val, str) and cpu_val.isdigit() and 10 <= int(cpu_val) <= 3_200:
+        limits["cpu_limit_percent"] = int(cpu_val)
+
+    disk_val = (
+        arguments.get("disk_limit_gb")
+        or arguments.get("disk_gb")
+        or arguments.get("disk")
+        or arguments.get("storage_gb")
+    )
+    if isinstance(disk_val, int) and not isinstance(disk_val, bool) and 1 <= disk_val <= 1_048_576:
+        limits["disk_limit_gb"] = disk_val
+    elif isinstance(disk_val, str) and disk_val.isdigit() and 1 <= int(disk_val) <= 1_048_576:
+        limits["disk_limit_gb"] = int(disk_val)
 
     node_id = arguments.get("node_id")
     if node_id is not None:
@@ -1072,9 +1110,25 @@ def _blueprint_switch_payload(server: Server, arguments: dict) -> tuple[dict, di
     """
     from services import blueprint_service
 
-    if set(arguments) != {"blueprint_id"}:
-        raise AiActionValidationError("Umstell-Tool hat ungueltige Argumente")
-    ziel_id = str(arguments["blueprint_id"])
+    from games import get_plugin
+
+    raw_ziel = str(
+        arguments.get("blueprint_id")
+        or arguments.get("game_type")
+        or arguments.get("blueprint")
+        or arguments.get("target_blueprint_id")
+        or ""
+    ).strip()
+    if not raw_ziel:
+        raise AiActionValidationError("blueprint_id erforderlich")
+
+    plugin = get_plugin(raw_ziel)
+    if plugin is not None:
+        bp = plugin.get_blueprint() if hasattr(plugin, "get_blueprint") else getattr(plugin, "blueprint", None)
+        ziel_id = bp.meta.id if bp and hasattr(bp, "meta") else raw_ziel
+    else:
+        ziel_id = raw_ziel
+
     if ziel_id == server.game_type:
         raise AiActionValidationError("Der Server nutzt diesen Blueprint bereits")
     if server.status != "stopped":
