@@ -51,7 +51,7 @@ MAX_QUERY_CHARS = 200
 MAX_TITLE_CHARS = 160
 MAX_SNIPPET_CHARS = 400
 MAX_URL_CHARS = 300
-_TIMEOUT = 15.0
+_TIMEOUT = 8.0
 _CACHE_TTL_SECONDS = 15.0
 _client: httpx.Client | None = None
 _client_lock = threading.Lock()
@@ -73,7 +73,7 @@ def _http_client() -> httpx.Client:
     with _client_lock:
         if _client is None:
             _client = httpx.Client(
-                timeout=httpx.Timeout(connect=5.0, read=_TIMEOUT, write=10.0, pool=5.0),
+                timeout=httpx.Timeout(connect=2.5, read=_TIMEOUT, write=4.0, pool=2.5),
                 limits=httpx.Limits(max_connections=20, max_keepalive_connections=8),
                 follow_redirects=True,
             )
@@ -362,10 +362,10 @@ def search(query: str, count: int = MAX_RESULTS, *, cache_scope: str | None = No
     results: list[dict] = []
 
     # 1. SearXNG Abfrage, falls konfiguriert
-    if s_url and not key:
+    if s_url:
         results = _search_searxng(safe_query, limit)
 
-    # 2. Brave Search API Abfrage, falls Key hinterlegt
+    # 2. Brave Search API Abfrage, falls Key hinterlegt und noch keine Treffer
     if not results and key:
         try:
             with measure("web_search", "provider_request"):

@@ -194,3 +194,15 @@ async def test_test_connection_invalid_key():
         assert res["ok"] is False
         assert res["error"] == "curseforge_api_key_invalid"
         await svc.close()
+
+
+def test_normalize_game_id():
+    from services.curseforge_service import normalize_game_id
+
+    assert normalize_game_id(None) == 432
+    assert normalize_game_id("") == 432
+    assert normalize_game_id("432") == 432
+    assert normalize_game_id(432) == 432
+    assert normalize_game_id("83262") == 83262
+    assert normalize_game_id("invalid_text") == 432
+

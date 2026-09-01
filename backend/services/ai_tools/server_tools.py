@@ -216,7 +216,7 @@ def _global_tool_definitions() -> list[dict]:
         optional.append(_function("cloudflare_list_dns_records", "Listet alle DNS Records, Subdomains, Hostnames und EintrÃ¤ge einer Zone/Domain auf (z.B. zone_id oder Domain wie 'mauntingstudios.de' oder leer fuer Standardzone). Vor create auf Kollision pruefen.", {"zone_id": {"type": "string", "maxLength": 128}}, []))
 
     optional.append(_function("advise_node_placement", "Empfiehlt einen Host fuer einen neuen Server. Nutze vor propose_server_create um RAM/Disk bewusst zu waehlen. Unterscheidet gebucht vs wirklich belegt.", {"ram_need_mb": {"type": "integer", "minimum": 512}, "disk_need_gb": {"type": "integer", "minimum": 1}}, ["ram_need_mb"]))
-    optional.append(_function("search_curseforge_modpacks", "Sucht Modpacks auf CurseForge (classId 432). Fuer Minecraft und Spiele mit Modpack-Support. Liefert id, name, downloads.", {"query": {"type": "string", "maxLength": 128}, "game_id": {"type": "string", "maxLength": 12}}, ["query"]))
+    optional.append(_function("search_curseforge_modpacks", "Sucht Modpacks auf CurseForge nach einer numerischen Game-ID (z. B. via web_search ermittelt). Liefert id, name, downloads.", {"query": {"type": "string", "maxLength": 128}, "game_id": {"type": "string", "maxLength": 32, "description": "Numerische CurseForge Game-ID"}}, ["query"]))
 
     return optional + [
         _function(
@@ -922,11 +922,11 @@ def _global_tool_definitions() -> list[dict]:
             "Installiert ein Modpack (CurseForge) auf einem bestehenden Server. Braucht server_id aus list_my_servers und Modpack-Info aus search_curseforge_modpacks.",
             {
                 **_SERVER_ID_SCHEMA,
-                "modpack_mod_id": {"type": "string", "maxLength": 32},
-                "file_id": {"type": "string", "maxLength": 32},
+                "modpack_mod_id": {"type": "string", "maxLength": 32, "description": "CurseForge Modpack ID"},
+                "file_id": {"type": "string", "maxLength": 32, "description": "Optional: File-ID der Modpack-Version (falls bekannt, sonst neueste Version)"},
                 **_RATIONALE_SCHEMA,
             },
-            ["server_id", "modpack_mod_id", "file_id", *_RATIONALE_REQUIRED],
+            ["server_id", "modpack_mod_id", *_RATIONALE_REQUIRED],
         ),
         *_aufgaben_tool_definitions(),
         *_worker_tool_definitions(),

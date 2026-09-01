@@ -105,7 +105,7 @@ def dispatch_voice_action(
         if not conversation_id:
             with SessionLocal() as db_conv:
                 from models.ai_conversation import AiConversation
-                from services.ai_chat_service import konversation_anlegen
+                from services.ai_chat_service import get_or_create_primary_conversation
                 conv = (
                     db_conv.query(AiConversation)
                     .filter(AiConversation.user_id == user_id)
@@ -117,7 +117,7 @@ def dispatch_voice_action(
                 else:
                     usr = db_conv.get(User, user_id)
                     if usr:
-                        conv = konversation_anlegen(db_conv, usr, "Aktionen")
+                        conv = get_or_create_primary_conversation(db_conv, usr)
                         conversation_id = conv.id
 
         if not conversation_id:

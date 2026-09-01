@@ -24,6 +24,18 @@ class CurseForgeApiUnavailable(RuntimeError):
         self.code = code
 
 
+def normalize_game_id(game_id: int | str | None) -> int:
+    """Parst numerische Game-IDs sicher. Fallback auf 432 wenn leer oder nicht-numerisch."""
+    if not game_id:
+        return 432
+    if isinstance(game_id, int):
+        return game_id
+    raw = str(game_id).strip()
+    if raw.isdigit():
+        return int(raw)
+    return 432
+
+
 @dataclass
 class CurseForgeModInfo:
     publishedfileid: str
@@ -191,13 +203,14 @@ class CurseForgeService:
         per_page = max(1, min(50, per_page))
         index = (page - 1) * per_page
 
-        cache_key = f"cf_search_{game_id}_{query}_{slug}_{page}_{per_page}_{class_id}_{category_id}_{sort_field}_{sort_order}"
+        norm_game_id = normalize_game_id(game_id)
+        cache_key = f"cf_search_{norm_game_id}_{query}_{slug}_{page}_{per_page}_{class_id}_{category_id}_{sort_field}_{sort_order}"
         cached = self._get_cache(cache_key)
         if cached:
             return cached
 
         params: dict[str, Any] = {
-            "gameId": int(game_id),
+            "gameId": norm_game_id,
             "index": index,
             "pageSize": per_page,
             "sortOrder": sort_order,
@@ -365,30 +378,31 @@ class CurseForgeService:
                 clean_query = parts[-1]
                 slug = clean_query
 
+        norm_game_id = normalize_game_id(game_id)
         # 1. Versuch mit classId=4471 (Minecraft Modpacks)
         res = await self.search_mods(
-            game_id=game_id,
+            game_id=norm_game_id,
             query=clean_query if not slug else "",
             slug=slug,
             page=page,
             per_page=per_page,
-            class_id=4471 if str(game_id) == "432" else None,
+            class_id=4471 if norm_game_id == 432 else None,
             sort_field=self.SORT_POPULAR,
         )
         if not res and clean_query:
             # Fallback 2: Volltext-Suche mit Filter
             res = await self.search_mods(
-                game_id=game_id,
+                game_id=norm_game_id,
                 query=clean_query,
                 page=page,
                 per_page=per_page,
-                class_id=4471 if str(game_id) == "432" else None,
+                class_id=4471 if norm_game_id == 432 else None,
                 sort_field=self.SORT_POPULAR,
             )
         if not res and clean_query:
             # Fallback 3: Ohne class_id Filter
             res = await self.search_mods(
-                game_id=game_id,
+                game_id=norm_game_id,
                 query=clean_query,
                 page=page,
                 per_page=per_page,

@@ -1597,9 +1597,9 @@ def _modpack_install_payload(db: Session, server: Server, rest: dict) -> tuple[d
     if set(rest) - allowed:
         raise AiActionValidationError("Modpack-Install hat ungueltige Argumente")
     mod_id = str(rest.get("modpack_mod_id", "")).strip()
-    file_id = str(rest.get("file_id", "")).strip()
-    if not mod_id or not file_id:
-        raise AiActionValidationError("modpack_mod_id und file_id erforderlich")
+    file_id = str(rest.get("file_id", "") or "latest").strip()
+    if not mod_id:
+        raise AiActionValidationError("modpack_mod_id erforderlich")
     if any(c in mod_id for c in ("\n", "\r", "\0")) or any(c in file_id for c in ("\n", "\r", "\0")):
         raise AiActionValidationError("Ungueltige Zeichen")
     payload = {"modpack_mod_id": mod_id, "file_id": file_id}
