@@ -94,9 +94,11 @@ describe('Servers create form — dynamic port fields', () => {
     fireEvent.click(createButtons[0])
 
     // Default game_type 'conan_exiles_ue5' kennt unser Mock nicht — Fallback rendert.
-    // Wir wechseln explizit auf DayZ.
-    const selects = screen.getAllByRole('combobox')
-    fireEvent.change(selects[0], { target: { value: 'dayz' } })
+    // Wir wechseln explizit auf DayZ via Design-DNA Dropdown.
+    const gameDropdown = screen.getByTestId('create-server-game')
+    fireEvent.click(gameDropdown)
+    const dayzOption = await screen.findByRole('option', { name: /dayz/i })
+    fireEvent.click(dayzOption)
 
     const fields = screen.getByTestId('port-fields')
     expect(within(fields).getByTestId('port-input-game')).toBeInTheDocument()
@@ -114,8 +116,10 @@ describe('Servers create form — dynamic port fields', () => {
     const createButtons = await screen.findAllByRole('button', { name: /server erstellen|create server/i })
     fireEvent.click(createButtons[0])
 
-    const selects = screen.getAllByRole('combobox')
-    fireEvent.change(selects[0], { target: { value: 'voice_only' } })
+    const gameDropdown = screen.getByTestId('create-server-game')
+    fireEvent.click(gameDropdown)
+    const voiceOption = await screen.findByRole('option', { name: /voice only/i })
+    fireEvent.click(voiceOption)
 
     // 'voice' ist NICHT im roleToField-Mapping enthalten (das Mapping schreibt
     // nur in server.game_port/query_port/rcon_port). Folge: bei einer reinen

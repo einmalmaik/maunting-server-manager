@@ -139,13 +139,23 @@ export function RegionalAnalysisLayout({
         </Button>
       </div>
 
-      {/* ── Mobile Inhaltsansicht (< lg): Dauerhaft gemountet, um Scrollposition & Eingabe zu bewahren ── */}
-      <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden lg:hidden">
-        <div className={`h-full min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-lowest/50 ${mobileTab === 'chat' ? 'flex' : 'hidden'}`}>
+      {/* ── Einheitlicher Container für Mobile & Desktop (verhindert doppeltes Mounten & Scroll-Resets) ── */}
+      <div className="flex h-full min-h-0 w-full flex-1 gap-3 overflow-hidden flex-col lg:flex-row">
+        {/* Linke Spalte: Chat- / Sprachtranskript (Mobil bei Tab 'chat', Desktop dauerhaft links) */}
+        <div
+          className={`h-full min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-lowest/50 ${
+            mobileTab === 'chat' ? 'flex' : 'hidden'
+          } lg:flex lg:w-[380px] xl:w-[420px]`}
+        >
           {children}
         </div>
 
-        <div className={`h-full min-h-0 w-full flex-1 overflow-hidden rounded-2xl shadow-sm ${mobileTab === 'globe' ? 'flex' : 'hidden'}`}>
+        {/* Mittlere Spalte: 3D-Globus (Mobil bei Tab 'globe', Desktop zentriert) */}
+        <div
+          className={`h-full min-h-0 flex-1 overflow-hidden rounded-2xl shadow-sm ${
+            mobileTab === 'globe' ? 'flex' : 'hidden'
+          } lg:flex`}
+        >
           <GlobeViewer
             data={data}
             latitude={coords?.latitude}
@@ -156,38 +166,12 @@ export function RegionalAnalysisLayout({
           />
         </div>
 
-        <div className={`h-full min-h-0 w-full flex-1 flex-col overflow-hidden ${mobileTab === 'info' ? 'flex' : 'hidden'}`}>
-          <RegionalInfoPanel
-            data={data}
-            news={news}
-            loading={loading}
-            focus={regionalFocus}
-            onClose={onClose}
-          />
-        </div>
-      </div>
-
-      {/* ── Desktop 3-Spalten-Kommandozentrale (>= lg) ── */}
-      <div className="hidden h-full min-h-0 w-full flex-1 gap-3 overflow-hidden lg:flex lg:flex-row">
-        {/* Linke Spalte: Chat- / Sprachtranskript */}
-        <div className="flex h-full min-h-0 w-[380px] xl:w-[420px] shrink-0 flex-col overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-lowest/50">
-          {children}
-        </div>
-
-        {/* Mittlere Spalte: 3D-Globus */}
-        <div className="flex h-full min-h-0 flex-1 overflow-hidden rounded-2xl shadow-sm">
-          <GlobeViewer
-            data={data}
-            latitude={coords?.latitude}
-            longitude={coords?.longitude}
-            locationName={locationName ?? data?.location}
-            bbox={coords?.bbox}
-            className="h-full w-full"
-          />
-        </div>
-
-        {/* Rechte Spalte: Informationspanel */}
-        <div className="flex h-full min-h-0 w-[340px] xl:w-[380px] shrink-0 flex-col overflow-hidden">
+        {/* Rechte Spalte: Informationspanel (Mobil bei Tab 'info', Desktop rechts) */}
+        <div
+          className={`h-full min-h-0 shrink-0 flex-col overflow-hidden ${
+            mobileTab === 'info' ? 'flex' : 'hidden'
+          } lg:flex lg:w-[340px] xl:w-[380px]`}
+        >
           <RegionalInfoPanel
             data={data}
             news={news}

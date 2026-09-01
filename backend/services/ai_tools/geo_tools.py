@@ -152,20 +152,21 @@ def _execute_control_region_camera(db: Session, *, user: User, arguments: dict) 
     from services import ai_geo_service
 
     if not permission_service.has_global_permission(db, user, "ai.satellite.use"):
-        raise AiActionValidationError("Kartensteuerung ist fÃ¼r diesen Benutzer nicht freigegeben")
+        raise AiActionValidationError("Kartensteuerung ist fuer diesen Benutzer nicht freigegeben")
     if set(arguments) - {"action", "location"}:
-        raise AiActionValidationError("Kartensteuerung hat ungÃ¼ltige Argumente")
+        raise AiActionValidationError("Kartensteuerung hat ungueltige Argumente")
     action = arguments.get("action")
     if action not in {"zoom_in", "zoom_out", "overview", "focus_location"}:
-        raise AiActionValidationError("Kartenaktion ist ungÃ¼ltig")
+        raise AiActionValidationError("Kartenaktion ist ungueltig")
+
     if action == "focus_location":
         location = arguments.get("location")
         if not isinstance(location, str) or not location.strip():
-            raise AiActionValidationError("SehenswÃ¼rdigkeit (location) fehlt oder ist ungÃ¼ltig")
+            raise AiActionValidationError("Sehenswuerdigkeit (location) fehlt oder ist ungueltig")
         safe_location = redact_sensitive_text(location.strip())[:100]
         geo = ai_geo_service.geocode_location(safe_location)
         if not geo:
-            raise AiActionValidationError("SehenswÃ¼rdigkeit konnte nicht geocodiert werden")
+            raise AiActionValidationError("Sehenswuerdigkeit konnte nicht geocodiert werden")
         return {
             "action": action,
             "command_id": str(uuid4()),
@@ -177,6 +178,8 @@ def _execute_control_region_camera(db: Session, *, user: User, arguments: dict) 
                 "bbox": geo["bbox"],
             },
         }
+
     if set(arguments) != {"action"}:
-        raise AiActionValidationError("location ist nur fÃ¼r focus_location zulÃ¤ssig")
+        raise AiActionValidationError("location ist nur fuer focus_location zulaessig")
+
     return {"action": action, "command_id": str(uuid4())}

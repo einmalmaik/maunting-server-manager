@@ -654,14 +654,18 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
   const prevGeoOpenRef = useRef(geoOpen)
   useEffect(() => {
     if (prevGeoOpenRef.current !== geoOpen) {
+      userScrolledUpRef.current = false
+      setAmEnde(true)
       scrolleNachUnten(true)
       const t1 = setTimeout(() => scrolleNachUnten(true), 50)
       const t2 = setTimeout(() => scrolleNachUnten(true), 150)
-      const t3 = setTimeout(() => scrolleNachUnten(true), 300)
+      const t3 = setTimeout(() => scrolleNachUnten(true), 350)
+      const t4 = setTimeout(() => scrolleNachUnten(true), 600)
       return () => {
         clearTimeout(t1)
         clearTimeout(t2)
         clearTimeout(t3)
+        clearTimeout(t4)
       }
     }
     prevGeoOpenRef.current = geoOpen
@@ -1016,8 +1020,13 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
           closedGeoIdRef.current = lastSeenGeoIdRef.current
           writeClosedGeoAnalysis(merkSchluessel.closedGeoAnalysis, lastSeenGeoIdRef.current)
         }
+        userScrolledUpRef.current = false
+        setAmEnde(true)
         setGeoOpen(false)
-        scrolleNachUnten()
+        scrolleNachUnten(true)
+        setTimeout(() => scrolleNachUnten(true), 50)
+        setTimeout(() => scrolleNachUnten(true), 150)
+        setTimeout(() => scrolleNachUnten(true), 350)
       }}
     >
       <section

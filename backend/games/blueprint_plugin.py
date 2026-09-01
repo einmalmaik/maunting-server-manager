@@ -859,17 +859,21 @@ class BlueprintPlugin(GamePlugin):
             for wid in clean_ids:
                 try:
                     mod_info = await svc.get_mod_details(wid)
-                    if not mod_info or not mod_info.latest_files:
-                        errors.append(f"{wid}: Mod-Dateien nicht gefunden")
-                        items[wid] = {"ok": False, "error": "Dateien nicht gefunden"}
+                    if not mod_info:
+                        errors.append(f"CurseForge ID {wid} nicht gefunden (404/ungueltige ID)")
+                        items[wid] = {"ok": False, "error": f"Mod/Pack {wid} nicht auf CurseForge gefunden"}
+                        continue
+                    if not mod_info.latest_files:
+                        errors.append(f"{mod_info.title} (ID {wid}): Keine Dateien auf CurseForge verfuegbar")
+                        items[wid] = {"ok": False, "error": "Keine Release-Dateien verfuegbar"}
                         continue
                     file_obj = mod_info.latest_files[0]
                     dl_url = file_obj.get("downloadUrl")
                     if not dl_url:
                         dl_url = await svc.get_file_download_url(wid, file_obj["id"])
                     if not dl_url:
-                        errors.append(f"{wid}: Keine Download-URL verfuegbar")
-                        items[wid] = {"ok": False, "error": "Keine Download-URL"}
+                        errors.append(f"{mod_info.title}: Direkter API-Download vom Mod-Autor deaktiviert oder keine URL")
+                        items[wid] = {"ok": False, "error": "Keine Download-URL verfuegbar"}
                         continue
                     file_name = file_obj.get("fileName") or f"mod_{wid}.jar"
                     safe_name = Path(file_name).name
@@ -922,6 +926,23 @@ class BlueprintPlugin(GamePlugin):
                             server.id,
                             f"[MSM] CurseForge Mod {mod_info.title} ({dest_file_name}) heruntergeladen nach {target_dir_rel}/\n",
                         )
+
+                    applied += 1
+                    items[wid] = {"ok": True}
+
+                    # Mod-Name in Datenbank aktualisieren, falls noch generisch
+                    try:
+                        db = SessionLocal()
+                        try:
+                            mod_row = db.query(Mod).filter(Mod.server_id == server.id, Mod.workshop_id == str(wid)).first()
+                            if mod_row and (not mod_row.name or mod_row.name.startswith("CurseForge Modpack ") or mod_row.name.startswith("Mod ")):
+                                mod_row.name = mod_info.title
+                                db.commit()
+                        finally:
+                            db.close()
+                    except Exception:
+                        pass
+
                 except Exception as exc:
                     errors.append(f"{wid}: {exc}")
                     items[wid] = {"ok": False, "error": str(exc)}

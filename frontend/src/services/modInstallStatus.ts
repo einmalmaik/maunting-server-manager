@@ -30,13 +30,12 @@ export function getModInstallPresentation(mod: ModInstallState, t: Translate): M
   const action = mod.install_action === 'update' ? 'update' : 'install'
   const progress = clampProgress(mod.install_progress)
   const rawError = typeof mod.install_error === 'string' ? mod.install_error.trim() : ''
-  // Bis zu 240 Zeichen echten Fehlertext zeigen, damit der User bei
-  // "Installation fehlgeschlagen" sehen kann, was wirklich passiert ist
-  // (z. B. SteamCMD 0x202, fehlender Steam-Account, Netzwerkfehler). Fallback
-  // auf den generischen Hint, wenn das Backend keinen Fehlertext geliefert hat.
-  const errorDetail = rawError
-    ? `${t('mods.statusErrorHint')} — ${rawError.slice(0, 240)}`
-    : t('mods.statusErrorHint')
+  // Echten Fehlertext zeigen (z. B. 404, keine Download-URL, SteamCMD-Code),
+  // damit der Benutzer und die KI sofort die genaue Ursache sehen.
+  const isGenericError = !rawError || rawError === 'Installation fehlgeschlagen' || rawError === 'Installation failed' || rawError === t('mods.statusErrorHint')
+  const errorDetail = isGenericError
+    ? t('mods.statusErrorHint')
+    : `${t('mods.statusErrorHint')} — ${rawError.slice(0, 300)}`
 
   if (mod.install_status === 'pending') {
     return {

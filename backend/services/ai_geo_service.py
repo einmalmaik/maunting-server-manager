@@ -55,6 +55,76 @@ _geo_cache: dict[str, dict[str, Any]] = {
         "bbox": [13.0883, 52.3382, 13.7611, 52.6755],
         "country": "Deutschland",
     },
+    "frankfurt": {
+        "name": "Frankfurt am Main, Hessen, Deutschland",
+        "latitude": 50.1109,
+        "longitude": 8.6821,
+        "bbox": [8.4727, 50.0155, 8.8005, 50.2271],
+        "country": "Deutschland",
+    },
+    "frankfurt am main": {
+        "name": "Frankfurt am Main, Hessen, Deutschland",
+        "latitude": 50.1109,
+        "longitude": 8.6821,
+        "bbox": [8.4727, 50.0155, 8.8005, 50.2271],
+        "country": "Deutschland",
+    },
+    "münchen": {
+        "name": "München, Bayern, Deutschland",
+        "latitude": 48.1351,
+        "longitude": 11.5820,
+        "bbox": [11.3608, 48.0616, 11.7229, 48.2482],
+        "country": "Deutschland",
+    },
+    "munich": {
+        "name": "München, Bayern, Deutschland",
+        "latitude": 48.1351,
+        "longitude": 11.5820,
+        "bbox": [11.3608, 48.0616, 11.7229, 48.2482],
+        "country": "Deutschland",
+    },
+    "hamburg": {
+        "name": "Hamburg, Deutschland",
+        "latitude": 53.5511,
+        "longitude": 9.9937,
+        "bbox": [9.6888, 53.3951, 10.3251, 53.7393],
+        "country": "Deutschland",
+    },
+    "köln": {
+        "name": "Köln, Nordrhein-Westfalen, Deutschland",
+        "latitude": 50.9375,
+        "longitude": 6.9603,
+        "bbox": [6.7725, 50.8304, 7.1620, 51.0850],
+        "country": "Deutschland",
+    },
+    "cologne": {
+        "name": "Köln, Nordrhein-Westfalen, Deutschland",
+        "latitude": 50.9375,
+        "longitude": 6.9603,
+        "bbox": [6.7725, 50.8304, 7.1620, 51.0850],
+        "country": "Deutschland",
+    },
+    "amsterdam": {
+        "name": "Amsterdam, Niederlande",
+        "latitude": 52.3676,
+        "longitude": 4.9041,
+        "bbox": [4.7288, 52.2782, 5.0792, 52.4312],
+        "country": "Niederlande",
+    },
+    "zürich": {
+        "name": "Zürich, Schweiz",
+        "latitude": 47.3769,
+        "longitude": 8.5417,
+        "bbox": [8.4480, 47.3202, 8.6253, 47.4347],
+        "country": "Schweiz",
+    },
+    "wien": {
+        "name": "Wien, Österreich",
+        "latitude": 48.2082,
+        "longitude": 16.3738,
+        "bbox": [16.1827, 48.1176, 16.5775, 48.3231],
+        "country": "Österreich",
+    },
     "washington": {
         "name": "Washington, D.C., USA",
         "latitude": 38.8951,
@@ -153,17 +223,26 @@ def _normalise_location_query(value: str) -> str:
 
 
 def _geocode_queries(query: str) -> tuple[str, ...]:
-    """Erzeugt maximal eine konservative PLZ-Variante fuer Nominatim.
+    """Erzeugt konservative Suchvarianten fuer Nominatim (ohne PLZ, ohne Füllwörter)."""
+    candidates: list[str] = [query]
 
-    Eine Postleitzahl macht einen Ort eindeutiger, wird von Nominatim in einem
-    freien ``q`` aber nicht bei jedem Ortsformat akzeptiert. Die Variante ohne
-    PLZ ist keine semantische Korrektur, sondern dieselbe Ortsangabe ohne das
-    formale Zusatzfeld.
-    """
     without_postcode = re.sub(r"(?<!\w)\d{4,6}(?!\w)", " ", query)
     without_postcode = re.sub(r"\s*,\s*", ", ", without_postcode)
     without_postcode = " ".join(without_postcode.split()).strip(" ,")
-    return tuple(dict.fromkeys(candidate for candidate in (query, without_postcode) if candidate))
+    if without_postcode and without_postcode != query:
+        candidates.append(without_postcode)
+
+    # Wenn der Begriff Suchzusätze enthält (z. B. "Rechenzentren Frankfurt", "Server Frankfurt")
+    cleaned_terms = re.sub(
+        r"(?i)\b(rechenzentren|rechenzentrum|datencenter|datacenter|data\s+center|server|sehenswürdigkeiten|sehenswürdigkeit|stadt|city|tourismus|in|bei|von|am)\b",
+        " ",
+        query,
+    )
+    cleaned_terms = " ".join(cleaned_terms.split()).strip(" ,")
+    if cleaned_terms and cleaned_terms not in candidates:
+        candidates.append(cleaned_terms)
+
+    return tuple(dict.fromkeys(candidates))
 
 
 def _result_from_geocoder_item(item: object, fallback_name: str) -> dict[str, Any] | None:

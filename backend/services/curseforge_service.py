@@ -73,20 +73,36 @@ class CurseForgeService:
         from services.curseforge_api_key_service import resolve_key
 
         self.api_key = resolve_key()
-        self.client = httpx.AsyncClient(
-            timeout=30.0,
-            headers={
-                "User-Agent": "MSM/1.0 (Maunting Service Manager)",
-                "Accept": "application/json",
-                "x-api-key": self.api_key or "",
-            },
-        )
+        self._client: Optional[httpx.AsyncClient] = None
+        self._loop: Any = None
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._cache_ttl = timedelta(minutes=15)
 
+    @property
+    def client(self) -> httpx.AsyncClient:
+        import asyncio
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._client is None or self._client.is_closed or self._loop != current_loop:
+            self._loop = current_loop
+            self._client = httpx.AsyncClient(
+                timeout=30.0,
+                headers={
+                    "User-Agent": "MSM/1.0 (Maunting Service Manager)",
+                    "Accept": "application/json",
+                    "x-api-key": self.api_key or "",
+                },
+            )
+        return self._client
+
     async def close(self) -> None:
         """HTTP-Client schließen."""
-        await self.client.aclose()
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
 
     def _is_cache_valid(self, key: str) -> bool:
         if key not in self._cache:
