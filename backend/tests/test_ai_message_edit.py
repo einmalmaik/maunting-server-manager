@@ -126,15 +126,11 @@ def test_tool_results_of_the_removed_turns_go_too(
     assert verbleibend == ["read_server_logs"]
 
 
-def test_an_executed_action_survives_the_edit(db: Session, regular_user: User) -> None:
-    """Ein gestoppter Server bleibt gestoppt.
+def test_proposals_after_cutoff_are_removed_on_edit(db: Session, regular_user: User) -> None:
+    """Vorschlagskarten des abgeschnittenen Verlaufs werden aufgeraeumt.
 
-    Den Verlauf umzuschreiben aendert nichts an der Welt. Eine ausgefuehrte
-    Aktion aus dem Chat verschwinden zu lassen waere deshalb eine Luege — sie
-    bleibt, und im Audit-Log steht sie ohnehin unveraendert.
-
-    Ein noch offener Vorschlag geht dagegen mit: eine Rueckfrage zu einer
-    zurueckgenommenen Bitte ist gegenstandslos.
+    Damit keine verwaisten Aktionskarten in fruehere Nachrichten rutschen,
+    werden alle Vorschlaege ab dem Schnittpunkt entfernt.
     """
     _allow(db, regular_user)
     conversation = _conversation(db, regular_user)
@@ -171,7 +167,7 @@ def test_an_executed_action_survives_the_edit(db: Session, regular_user: User) -
         .filter(AiActionProposal.conversation_id == conversation.id)
         .all()
     ]
-    assert uebrig == ["succeeded"]
+    assert uebrig == []
 
 
 # ── Was nicht bearbeitet werden darf ──────────────────────────────────

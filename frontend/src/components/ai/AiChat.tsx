@@ -640,7 +640,7 @@ export function AiChat() {
 
   const prevGeoOpenRef = useRef(geoOpen)
   useEffect(() => {
-    if (prevGeoOpenRef.current && !geoOpen) {
+    if (prevGeoOpenRef.current !== geoOpen) {
       scrolleNachUnten()
       const t1 = setTimeout(scrolleNachUnten, 50)
       const t2 = setTimeout(scrolleNachUnten, 150)
@@ -676,11 +676,13 @@ export function AiChat() {
       const timer50 = setTimeout(scrolleNachUnten, 50)
       const timer150 = setTimeout(scrolleNachUnten, 150)
       const timer300 = setTimeout(scrolleNachUnten, 300)
+      const timer600 = setTimeout(scrolleNachUnten, 600)
       return () => {
         cancelAnimationFrame(frame)
         clearTimeout(timer50)
         clearTimeout(timer150)
         clearTimeout(timer300)
+        clearTimeout(timer600)
       }
     }
   }, [loading, entries.length, scrolleNachUnten])

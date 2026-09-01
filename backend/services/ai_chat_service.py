@@ -292,12 +292,12 @@ def truncate_from(db: Session, conversation: AiConversation, message: AiMessage)
         AiToolResult.conversation_id == conversation.id,
         AiToolResult.created_at >= cutoff,
     ).delete(synchronize_session=False)
-    # Nur was noch niemand angefasst hat. Ein `executing` oder `succeeded`
-    # beschreibt etwas, das in der Welt passiert ist.
+    # Alle Vorschlaege ab dem Schnittpunkt aufraeumen, damit keine verwaisten
+    # Karten in frueheren Nachrichten stehen bleiben. Ausgefuehrte Aktionen
+    # bleiben unverrueckbar im Audit-Log erhalten.
     db.query(AiActionProposal).filter(
         AiActionProposal.conversation_id == conversation.id,
         AiActionProposal.created_at >= cutoff,
-        AiActionProposal.status == "proposed",
     ).delete(synchronize_session=False)
     conversation.updated_at = datetime.now(timezone.utc)
     db.flush()
