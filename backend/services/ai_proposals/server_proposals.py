@@ -580,6 +580,7 @@ def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
     # Optionales Modpack: wenn mitgegeben, wird es nach der Servererstellung
     # automatisch installiert. Dieselbe Validierung wie _modpack_install_payload.
     modpack_mod_id = str(arguments.get("modpack_mod_id") or "").strip() or None
+    modpack_name = str(arguments.get("modpack_name") or "").strip() or None
     modpack_file_id = str(arguments.get("modpack_file_id") or "").strip() or None
     if modpack_mod_id is not None:
         if any(c in modpack_mod_id for c in ("\n", "\r", "\0")):
@@ -587,9 +588,12 @@ def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
         if modpack_file_id and any(c in modpack_file_id for c in ("\n", "\r", "\0")):
             raise AiActionValidationError("Ungueltige Zeichen in modpack_file_id")
         payload["modpack_mod_id"] = modpack_mod_id
+        if modpack_name:
+            payload["modpack_name"] = modpack_name
         if modpack_file_id:
             payload["modpack_file_id"] = modpack_file_id
         preview["modpack_mod_id"] = modpack_mod_id
+        preview["modpack_name"] = modpack_name or f"Modpack {modpack_mod_id}"
         preview["modpack_file_id"] = modpack_file_id or "latest"
 
     return payload, preview
@@ -2468,10 +2472,13 @@ def _ausfuehren_server_create(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausg
     # Derselbe Weg wie `_ausfuehren_modpack_install`, nur mit der neuen ID.
     modpack_mod_id = str(rahmen.payload.get("modpack_mod_id") or "").strip()
     if modpack_mod_id and created_server_id:
+        modpack_name = str(rahmen.payload.get("modpack_name") or "").strip() or None
         modpack_file_id = str(rahmen.payload.get("modpack_file_id") or "").strip() or None
         try:
-            _install_modpack_on_server(db, created_server_id, modpack_mod_id)
+            _install_modpack_on_server(db, created_server_id, modpack_mod_id, name=modpack_name)
             result["modpack_mod_id"] = modpack_mod_id
+            if modpack_name:
+                result["modpack_name"] = modpack_name
             result["modpack_file_id"] = modpack_file_id
             result["modpack_status"] = "installing"
         except Exception:
@@ -2622,7 +2629,7 @@ def _ausfuehren_backup_schedule_set(db: Session, rahmen: _AusfuehrungsRahmen) ->
         "ai_managed": True,
     })
 
-def _install_modpack_on_server(db: Session, server_id: int, mod_id: str) -> None:
+def _install_modpack_on_server(db: Session, server_id: int, mod_id: str, name: str | None = None) -> None:
     """Legt den Mod-Eintrag an und startet die Hintergrund-Installation.
 
     Gemeinsamer Kern fuer `_ausfuehren_modpack_install` und die automatische
@@ -2634,13 +2641,14 @@ def _install_modpack_on_server(db: Session, server_id: int, mod_id: str) -> None
     from routers.mods import install_mod_bg
     import threading
 
+    mod_name = name or f"CurseForge Modpack {mod_id}"
     existing = db.query(Mod).filter(Mod.server_id == server_id, Mod.workshop_id == mod_id).first()
     if not existing:
         max_order = db.query(Mod).filter(Mod.server_id == server_id).count()
         mod_entry = Mod(
             server_id=server_id,
             workshop_id=mod_id,
-            name=f"CurseForge Modpack {mod_id}",
+            name=mod_name,
             load_order=max_order,
             auto_update=True,
             install_status="pending",
@@ -2652,6 +2660,8 @@ def _install_modpack_on_server(db: Session, server_id: int, mod_id: str) -> None
         db.add(mod_entry)
         db.commit()
     else:
+        if name:
+            existing.name = name
         existing.install_status = "pending"
         existing.install_action = "install"
         db.commit()
@@ -2662,6 +2672,7 @@ def _ausfuehren_modpack_install(db: Session, rahmen: _AusfuehrungsRahmen) -> _Au
     p = rahmen.payload
     server_id = rahmen.server_id
     mod_id = str(p.get("modpack_mod_id") or "").strip()
+    mod_name = str(p.get("modpack_name") or p.get("name") or "").strip() or None
     file_id = p.get("file_id")
 
     if not server_id or not mod_id:
@@ -2671,7 +2682,7 @@ def _ausfuehren_modpack_install(db: Session, rahmen: _AusfuehrungsRahmen) -> _Au
     if not server:
         return _Ausgefuehrt(result={"status": "error", "error": "Server nicht gefunden"})
 
-    _install_modpack_on_server(db, server_id, mod_id)
+    _install_modpack_on_server(db, server_id, mod_id, name=mod_name)
 
     return _Ausgefuehrt(result={
         "modpack_mod_id": mod_id,

@@ -750,6 +750,11 @@ def _global_tool_definitions() -> list[dict]:
                     "maxLength": 32,
                     "description": "Optional: CurseForge Modpack-ID. Wird nach der Servererstellung automatisch installiert.",
                 },
+                "modpack_name": {
+                    "type": ["string", "null"],
+                    "maxLength": 128,
+                    "description": "Optional: Name des Modpacks (z. B. 'Cobblemon GG').",
+                },
                 "modpack_file_id": {
                     "type": ["string", "null"],
                     "maxLength": 32,

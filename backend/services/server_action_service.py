@@ -92,13 +92,10 @@ def _validate_lifecycle_request(
 
     if operation == "start":
         if not server.public_bind_ip:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Server hat keine Bind-IP konfiguriert. Bitte im Server-Detail "
-                    "eine Public-IP zuweisen, bevor er gestartet wird."
-                ),
-            )
+            from services.network_interfaces_service import default_bind_ip
+            assigned = default_bind_ip() or "127.0.0.1"
+            server.public_bind_ip = assigned
+            db.commit()
         blueprint = plugin.get_blueprint()
         # `missing_required_files` prueft das Dateisystem des Panels. Bei einem
         # Remote-Node liegen die Dateien aber auf dem Agent, und der Panel-Pfad

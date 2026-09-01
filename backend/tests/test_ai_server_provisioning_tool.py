@@ -366,6 +366,7 @@ def test_server_create_proposal_with_modpack(db: Session, regular_user: User) ->
             name="Cobblemon Server",
             game_type="minecraft_fabric",
             modpack_mod_id="687131",
+            modpack_name="Cobblemon GG",
             modpack_file_id="12345",
         ),
         correlation_id=str(uuid4()),
@@ -375,6 +376,7 @@ def test_server_create_proposal_with_modpack(db: Session, regular_user: User) ->
     preview = json.loads(proposal.preview_json)
     assert preview["operation"] == "create_server"
     assert preview["modpack_mod_id"] == "687131"
+    assert preview["modpack_name"] == "Cobblemon GG"
     assert preview["modpack_file_id"] == "12345"
 
 
@@ -396,6 +398,7 @@ def test_server_create_execution_triggers_modpack_installation(
             name="Cobblemon Server",
             game_type="minecraft_fabric",
             modpack_mod_id="687131",
+            modpack_name="Cobblemon GG",
         ),
         correlation_id=str(uuid4()),
     )
@@ -439,11 +442,13 @@ def test_server_create_execution_triggers_modpack_installation(
 
     assert result["server_id"] == neue_server_id
     assert result["modpack_mod_id"] == "687131"
+    assert result["modpack_name"] == "Cobblemon GG"
     assert result["modpack_status"] == "installing"
 
     # Mod-Eintrag in DB pruefen
     mod = db.query(Mod).filter(Mod.server_id == neue_server_id, Mod.workshop_id == "687131").first()
     assert mod is not None
+    assert mod.name == "Cobblemon GG"
     assert mod.install_status == "pending"
 
 

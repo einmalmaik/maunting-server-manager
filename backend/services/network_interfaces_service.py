@@ -115,8 +115,8 @@ def default_bind_ip() -> str | None:
     """Default-Bind-IP fuer neue Server: erste echte Public-IP.
 
     Wenn keine Public-IP da ist (z. B. NAT-Host hinter Router), faellt die
-    Logik auf die erste Private-IP zurueck. Loopback wird NICHT als Default
-    benutzt — Game-Server brauchen externe Erreichbarkeit.
+    Logik auf die erste Private-IP zurueck. Loopback wird als letzter Fallback
+    benutzt, wenn weder Public noch Private verfuegbar ist.
     """
     interfaces = list_host_interfaces()
     public = [h for h in interfaces if not h.is_loopback and not h.is_private and not h.is_link_local]
@@ -125,4 +125,8 @@ def default_bind_ip() -> str | None:
     private = [h for h in interfaces if h.is_private]
     if private:
         return private[0].ip
-    return None
+    loopback = [h for h in interfaces if h.is_loopback]
+    if loopback:
+        return loopback[0].ip
+    return "127.0.0.1"
+
