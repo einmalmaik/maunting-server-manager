@@ -127,6 +127,10 @@ class StreamUsage:
     # Anbieter rechnet genauso ab; ohne diese Zahl sieht die Summe im Panel
     # nur nach einem Fehler aus.
     anfragen: int = 0
+    # Native Session-/Response-Kennungen fuer Turn-Chaining und Stream-Multiplexing.
+    response_id: str | None = None
+    stream_id: str | None = None
+
 
 
 @dataclass(frozen=True)
@@ -287,6 +291,10 @@ def usage_addieren(ziel: StreamUsage, teil: StreamUsage) -> None:
     ziel.reasoning_tokens += teil.reasoning_tokens
     ziel.cost_micro_usd = _summe(ziel.cost_micro_usd, teil.cost_micro_usd)
     ziel.anfragen += teil.anfragen
+    if teil.response_id:
+        ziel.response_id = teil.response_id
+    if teil.stream_id:
+        ziel.stream_id = teil.stream_id
     ziel.vom_anbieter = ziel.vom_anbieter and teil.vom_anbieter
 
 
@@ -477,6 +485,11 @@ async def stream_chat_completion(
     reasoning: bool = False,
     reasoning_effort: str | None = None,
     cache_marke: bool = False,
+    previous_response_id: str | None = None,
+    use_websocket: bool = True,
+    compaction: bool = False,
+    background: bool = False,
+    **kwargs: Any,
 ) -> AsyncIterator[StreamChunk]:
     """Normalisiert Provider-SSE zu Antwort- und Denkschritt-Stuecken.
 
@@ -610,16 +623,10 @@ async def stream_chat_completion(
     # Spaeter Import, kein Zyklus: beide Schwestermodule holen sich von hier
     # die Grenzwerte, die Fehlerklasse und die Stueck-Datentypen. Ein Import am
     # Dateikopf zeigte damit im Kreis.
-    from services.anthropic_messages_adapter import spricht_messages, stream_messages
     from services.openai_responses_adapter import spricht_responses, stream_responses
 
-    for spricht_er, senden in (
-        (spricht_responses, stream_responses),
-        (spricht_messages, stream_messages),
-    ):
-        if not spricht_er(provider):
-            continue
-        async for stueck in senden(
+    if spricht_responses(provider):
+        async for stueck in stream_responses(
             client,
             provider=provider,
             api_key=api_key,
@@ -631,6 +638,31 @@ async def stream_chat_completion(
             reasoning=reasoning,
             reasoning_effort=reasoning_effort,
             cache_marke=cache_marke,
+            previous_response_id=previous_response_id,
+            use_websocket=use_websocket,
+            compaction=compaction,
+            background=background,
+            **kwargs,
+        ):
+            yield stueck
+        return
+
+    from services.anthropic_messages_adapter import spricht_messages, stream_messages
+
+    if spricht_messages(provider):
+        async for stueck in stream_messages(
+            client,
+            provider=provider,
+            api_key=api_key,
+            messages=messages,
+            usage=usage,
+            model=model,
+            tools=tools,
+            tool_choice=tool_choice,
+            reasoning=reasoning,
+            reasoning_effort=reasoning_effort,
+            cache_marke=cache_marke,
+            **kwargs,
         ):
             yield stueck
         return

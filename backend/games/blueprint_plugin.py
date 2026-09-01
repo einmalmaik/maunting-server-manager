@@ -886,19 +886,21 @@ class BlueprintPlugin(GamePlugin):
                         import io
                         import zipfile
                         with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                            has_overrides = any(m.filename.startswith("overrides/") for m in zf.infolist())
+                            # Zielverzeichnis: Bei Modpacks mit 'overrides/' ins Server-Hauptverzeichnis,
+                            # sonst in den vom Blueprint vorgegebenen Mod-Pfad (target_dir, z. B. mods/, plugins/, Pak-Ordner etc.)
+                            extract_root = base if has_overrides else target_dir
                             for member in zf.infolist():
-                                # Verhindere Directory Traversal
                                 member_path = Path(member.filename)
                                 if member_path.is_absolute() or ".." in member_path.parts:
                                     continue
-                                # Wenn overrides/ enthalten ist, in das Server-Wurzelverzeichnis entpacken
-                                if member.filename.startswith("overrides/"):
+                                if has_overrides and member.filename.startswith("overrides/"):
                                     rel_part = member.filename[len("overrides/"):]
                                     if not rel_part:
                                         continue
                                     extracted_path = (base / rel_part).resolve()
                                 else:
-                                    extracted_path = (base / member.filename).resolve()
+                                    extracted_path = (extract_root / member.filename).resolve()
                                 try:
                                     extracted_path.relative_to(base)
                                     if member.is_dir():
@@ -911,7 +913,7 @@ class BlueprintPlugin(GamePlugin):
                                     pass
                         _append_console_log(
                             server.id,
-                            f"[MSM] CurseForge Modpack {mod_info.title} entpackt in Server-Verzeichnis\n",
+                            f"[MSM] CurseForge Archiv {mod_info.title} ({safe_name}) entpackt nach {'Server-Wurzelverzeichnis' if has_overrides else target_dir_rel + '/'}\n",
                         )
                     else:
                         dest_file.write_bytes(file_bytes)

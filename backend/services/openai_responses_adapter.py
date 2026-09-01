@@ -1,50 +1,24 @@
 """OpenAIs Responses-API — derselbe Auftrag, ein anderer Dialekt.
 
-Diese Datei ist der zweite Chatweg neben `openai_compatible_adapter`. Sie
-existiert aus **einem** gemessenen Grund: OpenAIs ``/chat/completions`` lehnt
-eine Anfrage ab, die ``tools`` *und* eine echte Denkstufe traegt::
+Diese Datei ist der native Chat- und Tool-Weg für OpenAI direkt (`/v1/responses`
+sowie WebSocket `wss://api.openai.com/v1/responses`).
 
-    Function tools with reasoning_effort are not supported for <modell> in
-    /v1/chat/completions. To use function tools, use /v1/responses or set
-    reasoning_effort to 'none'.
-
-Gemessen am 2026-08-18 gegen OpenAI direkt, jeweils mit Werkzeugkatalog:
-``gpt-5.6-luna`` nimmt nur ``none``, ``gpt-5.2`` und ``gpt-5.1`` jede Stufe,
-``gpt-5-mini`` jede **ausser** ``none``. Die Grenze gehoert also dem Endpunkt
-und nicht dem Modell.
-
-Der billigere Ausweg — Stufe auf ``none`` senken, sobald Werkzeuge mitfahren —
-stand kurzzeitig in `ai_reasoning.klemmen` und ist verworfen. MSM schickt im
-Chat immer Werkzeuge mit; ein Zugang, an dem Nachdenken und Werkzeuge einander
-ausschliessen, taugt nicht fuer den Hintergrund-Worker, der gerade denken
-soll, waehrend er arbeitet.
-
-**Was hier anders ist als im Schwestermodul** — und mehr ist es nicht:
-
-* ``input`` statt ``messages``, mit eigenen Positionsarten statt Rollen.
-* ``tools`` flach (``{"type": "function", "name": ..., "parameters": ...}``)
-  statt in ein ``function``-Unterobjekt gewickelt.
-* Getippte Ereignisse (``response.output_text.delta``) statt ``choices[].delta``.
-* Werkzeugergebnisse gehen als ``function_call_output`` zurueck, nicht als
-  ``role="tool"``.
-
-**Was hier gleich ist** — und das ist der Punkt: die Signatur, die
-`StreamChunk`-Stuecke, das Fuellen von `StreamUsage`, die Laengengrenzen und
-die Fehlercodes. Der Aufrufer merkt nicht, welcher Dialekt gesprochen wurde;
-`ai_stream_service` hat keine einzige Verzweigung dafuer. Die Wahl trifft
-`Anbieter.protokoll_chat` in der Anbieterdatei.
-
-Die Uebersetzung sitzt bewusst **hier** und nicht in `ai_context_service`: der
-Verlauf wird einmal gebaut, in der Form, die MSM ueberall verwendet, und erst
-an der Aussenkante in die Mundart des Anbieters gebracht. Andersherum haetten
-zwei Anbieter zwei Verlaufsformate — und jede spaetere Aenderung am Kontext
-muesste an zwei Stellen richtig sein.
+Unterstützt die volle OpenAI Feature-Suite:
+- Responses API (`/v1/responses`) und persistenter WebSocket-Modus (`wss://...`)
+- Stateful Multi-Turn Chaining via `previous_response_id`
+- Stream-Multiplexing via `stream_id`
+- OpenAI Background Mode (`background: True`, Status-Polling, Event-Streaming)
+- Native File-Inputs (`input_file` für Logs, Konfigurationen, Anhänge)
+- Server-seitige Context Compaction (`compaction: True`)
+- Transparentes Fallback auf HTTP SSE und bestehende Chat-Completions-Pipelines
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import re
 import time
 from typing import Any, AsyncIterator
 
@@ -70,23 +44,15 @@ from services.openai_compatible_adapter import (
     _teilmenge,
     schluesselkopf,
 )
+from services.openai_responses_websocket import (
+    OpenAiResponsesWsSession,
+    stream_responses_ws,
+    ws_url_fuer_base_url,
+)
 
 
 logger = logging.getLogger(__name__)
 
-#: OpenAIs Fehlerworte im Strom, uebersetzt in MSMs Marken. Dieselbe Aufgabe
-#: wie `openai_compatible_adapter._error_code` fuer HTTP-Status, nur dass hier
-#: ein Wort gemeldet wird statt einer Zahl: sind die Kopfzeilen erst draussen,
-#: steht der Status auf 200 und laesst sich nicht mehr aendern.
-#:
-#: Ohne die Zuordnung trug jeder Fehler im Strom dieselbe Marke, und der
-#: Betreiber las bei einem erschoepften Kontingent „Meist stimmt der Modellname
-#: nicht" — genau die Suche am falschen Ende, die bei ``402`` in
-#: `openai_compatible_adapter._error_code` steht.
-#:
-#: Eine Tabelle und keine Verzweigung, wie ``_FEHLERARTEN`` im
-#: `anthropic_messages_adapter`. Was nicht darin steht, bleibt
-#: ``AI_PROVIDER_REQUEST_REJECTED``; die Einzelheit traegt dann der Text.
 _FEHLERARTEN = {
     "rate_limit_exceeded": "AI_PROVIDER_RATE_LIMITED",
     "insufficient_quota": "AI_PROVIDER_PAYMENT_REQUIRED",
@@ -97,22 +63,16 @@ _FEHLERARTEN = {
     "server_error": "AI_PROVIDER_UNAVAILABLE",
 }
 
+_TEXT_ATTACHMENT_HEADER = re.compile(
+    r"^Unvertrauenswuerdiger Textanhang\s+([^\n:]+):\n(.*)$", re.DOTALL
+)
+
 
 # ── Uebersetzung: MSMs Verlauf in OpenAIs `input` ─────────────────────
 
 
 def _werkzeuge_uebersetzen(tools: list[dict] | None) -> list[dict] | None:
-    """Werkzeugkatalog aus der Chat-Completions-Form in die flache Form.
-
-    Beide beschreiben dasselbe, nur eine Schachtelungsebene auseinander::
-
-        {"type": "function", "function": {"name": ..., "parameters": ...}}
-        {"type": "function", "name": ..., "parameters": ...}
-
-    Ein Katalog, der bereits flach ankommt, geht unveraendert durch — dann hat
-    ihn ein Aufrufer schon in dieser Mundart gebaut, und ihn ein zweites Mal
-    auszupacken wuerde ihn zerstoeren.
-    """
+    """Werkzeugkatalog aus der Chat-Completions-Form in die flache Form."""
     if not tools:
         return None
     flach: list[dict] = []
@@ -133,25 +93,7 @@ def _werkzeuge_uebersetzen(tools: list[dict] | None) -> list[dict] | None:
 
 
 def _werkzeugwahl_uebersetzen(tool_choice: str | dict | None) -> str | dict:
-    """``tool_choice`` in die flache Form — dieselbe Ebene weniger wie oben.
-
-    Zeichenketten kennt die Responses-API wortgleich (``"auto"``, ``"none"``,
-    ``"required"``); durchgereicht wird also, was schon passt. Der Zwang auf
-    **genau ein** Werkzeug steht dagegen flacher als bei Chat Completions::
-
-        {"type": "function", "function": {"name": X}}
-        {"type": "function", "name": X}
-
-    Der einzige Aufrufer, der zwingt, ist `ai_mail_text`, und er schickt die
-    verschachtelte Form. Unuebersetzt weist die Responses-API sie mit einem 400
-    ab — und weil `ai_mail_text` jeden Fehler abfaengt und auf seinen festen
-    Text zurueckfaellt, waere der KI-Mailtext an OpenAI-Zugaengen still tot.
-
-    Was sich keiner Form zuordnen laesst, wird zu ``"auto"``. Dieselbe
-    Nachsicht wie in `anthropic_messages_adapter.werkzeugwahl_uebersetzen`: ein
-    unbekannter Zwang waere ein 400, „das Modell entscheidet" ist die harmlose
-    Auslegung.
-    """
+    """``tool_choice`` in die flache Form."""
     if isinstance(tool_choice, dict):
         funktion = tool_choice.get("function")
         name = (
@@ -165,13 +107,7 @@ def _werkzeugwahl_uebersetzen(tool_choice: str | dict | None) -> str | dict:
 
 
 def _text_aus_inhalt(content: Any) -> str:
-    """Der Textanteil einer Nachricht, gleich in welcher Form er ankommt.
-
-    MSM baut Inhalte meist als schlichte Zeichenkette, bei Anhaengen aber als
-    Liste getippter Bloecke. Beide Formen kommen hier an, und die Liste darf
-    nicht als ``str(...)`` im Prompt landen — das waere Python-Syntax im Text
-    des Benutzers.
-    """
+    """Der Textanteil einer Nachricht, gleich in welcher Form er ankommt."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -180,33 +116,21 @@ def _text_aus_inhalt(content: Any) -> str:
             if isinstance(block, str):
                 stuecke.append(block)
             elif isinstance(block, dict):
-                wert = block.get("text")
-                if isinstance(wert, str):
-                    stuecke.append(wert)
+                if block.get("type") in ("text", "input_text"):
+                    wert = block.get("text")
+                    if isinstance(wert, str):
+                        stuecke.append(wert)
         return "".join(stuecke)
     return ""
 
 
 def _bilder_aus_inhalt(content: Any) -> list[str]:
-    """Die Bild-Adressen einer Nachricht, in der Reihenfolge, in der sie stehen.
-
-    MSM baut Bilder ueberall in derselben Form, naemlich der von Chat
-    Completions: ``{"type": "image_url", "image_url": {"url": "data:…"}}``. So
-    legt `ai_stream_service._desktopmeldung` ein Bildschirmfoto ab und so
-    `ai_attachment_service` einen Bildanhang.
-
-    Diese Form kommt hier an und muss uebersetzt werden — `_text_aus_inhalt`
-    liest sie nicht, es gibt in einem Bildblock kein ``text``. Wer sie
-    stillschweigend fallen laesst, schickt dem Modell den Begleitsatz „liegt
-    dieser Nachricht als Bild bei" **ohne** das Bild: es antwortet dann mit
-    Rueckfragen oder mit einer erfundenen Beschreibung, und beides sieht wie
-    eine Antwort aus.
-    """
+    """Die Bild-Adressen einer Nachricht, in der Reihenfolge, in der sie stehen."""
     if not isinstance(content, list):
         return []
     adressen: list[str] = []
     for block in content:
-        if not isinstance(block, dict) or block.get("type") != "image_url":
+        if not isinstance(block, dict) or block.get("type") not in ("image_url", "input_image"):
             continue
         quelle = block.get("image_url")
         adresse = quelle.get("url") if isinstance(quelle, dict) else quelle
@@ -215,45 +139,42 @@ def _bilder_aus_inhalt(content: Any) -> list[str]:
     return adressen
 
 
+def _dateien_aus_inhalt(content: Any) -> list[dict[str, Any]]:
+    """Native Datei-Eingaben (`input_file`) aus der Nachricht extrahieren."""
+    if not isinstance(content, list):
+        return []
+    dateien: list[dict[str, Any]] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        typ = block.get("type")
+        if typ in ("input_file", "file"):
+            eintrag: dict[str, Any] = {
+                "type": "input_file",
+                "filename": block.get("filename") or block.get("name") or "attachment.txt",
+                "media_type": block.get("media_type") or block.get("mime_type") or "text/plain",
+            }
+            if block.get("file_id"):
+                eintrag["file_id"] = block["file_id"]
+            if block.get("content") is not None:
+                eintrag["content"] = str(block.get("content"))
+            elif block.get("text") is not None:
+                eintrag["content"] = str(block.get("text"))
+            dateien.append(eintrag)
+    return dateien
+
+
 def nachrichten_uebersetzen(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """MSMs Verlauf in OpenAIs ``input``-Liste.
-
-    Vier Formen kommen herein, und jede hat genau eine Entsprechung:
-
-    * ``system`` — bleibt eine Position mit derselben Rolle. (Nicht als
-      ``instructions`` herausgezogen: MSM setzt den Systemtext an den Anfang
-      des Verlaufs, und ein zweiter Weg fuer dieselbe Sache waere eine Stelle
-      mehr, an der eine Faltung ihn verlieren kann.)
-    * ``user`` — ebenso.
-    * ``assistant`` **mit** ``tool_calls`` — wird zu *mehreren* Positionen: der
-      gesagte Text als Nachricht, dazu je Aufruf eine ``function_call``-Position.
-      Der Text darf nicht wegfallen; er traegt die Ansagen, auf die sich das
-      Modell in der Folgerunde bezieht.
-    * ``tool`` — wird zu ``function_call_output`` mit der ``call_id`` des
-      Aufrufs. Das ist der Rueckkanal, den die Responses-API kennt; ein
-      ``role="tool"`` wuerde sie mit einem 400 abweisen.
-
-    ``assistant`` ohne Werkzeuge bekommt ``output_text`` statt ``input_text``
-    als Inhaltsart — die API unterscheidet, wer gesprochen hat, nicht nur
-    ueber die Rolle.
-
-    **Bilder gehen mit.** Traegt eine Benutzernachricht Bildbloecke, wird ihr
-    Inhalt listenfoermig: der Text als ``input_text``, jedes Bild als
-    ``input_image`` daneben. Ohne Bild bleibt es bei der schlichten
-    Zeichenkette — jede Runde ohne Not auf Listenform umzustellen waere eine
-    Aenderung am Praefix und kostete Prompt-Caching.
-    """
+    """MSMs Verlauf in OpenAIs ``input``-Liste, inkl. nativem File-Input Support."""
     eingabe: list[dict[str, Any]] = []
     for nachricht in messages:
         if not isinstance(nachricht, dict):
             continue
         rolle = nachricht.get("role")
-        inhalt = _text_aus_inhalt(nachricht.get("content"))
+        roh_inhalt = nachricht.get("content")
+        inhalt = _text_aus_inhalt(roh_inhalt)
 
         if rolle == "tool":
-            # Der Rueckkanal. Ohne `call_id` findet die API den Aufruf nicht,
-            # zu dem dieses Ergebnis gehoert — und antwortet mit einem 400,
-            # das wie ein kaputtes Werkzeug aussieht.
             eingabe.append({
                 "type": "function_call_output",
                 "call_id": nachricht.get("tool_call_id"),
@@ -284,39 +205,74 @@ def nachrichten_uebersetzen(messages: list[dict[str, Any]]) -> list[dict[str, An
             continue
 
         if rolle in ("system", "user", "developer"):
-            bilder = _bilder_aus_inhalt(nachricht.get("content"))
-            if not bilder:
+            bilder = _bilder_aus_inhalt(roh_inhalt)
+            dateien = _dateien_aus_inhalt(roh_inhalt)
+
+            # Prüfe, ob es sich um einen formatierten Textanhang handelt
+            match = _TEXT_ATTACHMENT_HEADER.match(inhalt) if isinstance(roh_inhalt, str) else None
+            if match and not dateien:
+                dateiname = match.group(1).strip()
+                dateitext = match.group(2)
+                teile: list[dict[str, Any]] = [
+                    {
+                        "type": "input_file",
+                        "filename": dateiname,
+                        "content": dateitext,
+                        "media_type": "text/plain",
+                    }
+                ]
+                eingabe.append({"role": rolle, "content": teile})
+                continue
+
+            if not bilder and not dateien:
                 eingabe.append({"role": rolle, "content": inhalt})
                 continue
-            teile: list[dict[str, Any]] = []
-            if inhalt:
-                # Der Text steht **vor** dem Bild; dieselbe Reihenfolge baut
-                # `ai_stream_service._desktopmeldung` fuer den anderen Dialekt.
+
+            teile = []
+            if inhalt and not (dateien and not any(b.get("type") in ("text", "input_text") for b in (roh_inhalt if isinstance(roh_inhalt, list) else []))):
                 teile.append({"type": "input_text", "text": inhalt})
             for adresse in bilder:
-                # ``detail`` ist der dokumentierte Standardwert und wird hier
-                # ausgeschrieben: die Responses-API prueft streng, und ein
-                # ausgelassenes Pflichtfeld waere ein 400 statt eines Bildes.
                 teile.append({
                     "type": "input_image", "image_url": adresse, "detail": "auto",
                 })
+            for datei in dateien:
+                teile.append(datei)
             eingabe.append({"role": rolle, "content": teile})
     return eingabe
+
+
+def nachrichten_fuer_fortsetzung(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Extrahiert nur die neuen Deltas für Turn-Chaining mit `previous_response_id`.
+
+    Bei Werkzeug-Folgerunden enthält die Fortsetzung nur die neuen `tool`
+    (function_call_output) bzw. `user` Nachrichten nach der letzten Assistenten-
+    Antwort, sodass historische Tokens auf dem OpenAI-Server verbleiben.
+    """
+    if not messages:
+        return []
+
+    # Finde die Positionen ab der letzten Assistenten-Nachricht
+    letzte_assistent_idx = -1
+    for idx in range(len(messages) - 1, -1, -1):
+        msg = messages[idx]
+        if isinstance(msg, dict) and msg.get("role") == "assistant":
+            letzte_assistent_idx = idx
+            break
+
+    if letzte_assistent_idx >= 0 and letzte_assistent_idx < len(messages) - 1:
+        neue_nachrichten = messages[letzte_assistent_idx + 1:]
+        uebersetzt = nachrichten_uebersetzen(neue_nachrichten)
+        if uebersetzt:
+            return uebersetzt
+
+    return nachrichten_uebersetzen(messages)
 
 
 # ── Der Strom ─────────────────────────────────────────────────────────
 
 
 def _fehler_im_ereignis(rahmen: dict) -> tuple[str, str | None] | None:
-    """Ein Fehler, der **im** Strom gemeldet wird statt als Status.
-
-    Zwei Formen: ein eigenes ``response.failed``-Ereignis, und ein ``error``
-    neben den uebrigen Feldern. Beide werden hier zu denselben Marken wie im
-    Schwestermodul, damit der Aufrufer nicht zwei Fehlersprachen kennen muss —
-    und dazu gehoert die **Art** des Fehlers und nicht nur sein Wortlaut:
-    ``code`` sagt, ob das Kontingent leer ist oder der Modellname falsch, und
-    das sind zwei voellig verschiedene Handlungen fuer den Betreiber.
-    """
+    """Ein Fehler, der im Strom gemeldet wird statt als Status."""
     typ = rahmen.get("type")
     if typ in ("response.failed", "response.incomplete", "error"):
         antwort = rahmen.get("response")
@@ -330,10 +286,6 @@ def _fehler_im_ereignis(rahmen: dict) -> tuple[str, str | None] | None:
         if isinstance(fehler, dict):
             nachricht = str(fehler.get("message") or fehler.get("reason") or "")
             code = fehler.get("code")
-            # Nur Zeichenketten werden nachgeschlagen: ``code`` traegt bei
-            # ``response.incomplete`` schon einmal gar nichts, und ein Wert,
-            # der sich nicht als Schluessel eignet, wuerde die Suche nach der
-            # Fehlermeldung selbst zum Fehler machen.
             if isinstance(code, str):
                 marke = _FEHLERARTEN.get(code, marke)
         return marke, _kurzfassung(nachricht or str(typ))
@@ -341,13 +293,7 @@ def _fehler_im_ereignis(rahmen: dict) -> tuple[str, str | None] | None:
 
 
 def _usage_uebernehmen(usage: StreamUsage, rohdaten: Any) -> None:
-    """Die Abrechnung aus ``response.completed``.
-
-    Andere Feldnamen als bei Chat Completions (``input_tokens`` statt
-    ``prompt_tokens``), dieselbe Bedeutung. ``reasoning_tokens`` und
-    ``cached_tokens`` sind Teilmengen und werden nicht addiert — wer sie
-    aufschlaegt, zaehlt doppelt.
-    """
+    """Die Abrechnung aus ``response.completed``."""
     if not isinstance(rohdaten, dict):
         return
     eingabe = _ganzzahl(rohdaten.get("input_tokens"))
@@ -369,10 +315,10 @@ def _usage_uebernehmen(usage: StreamUsage, rohdaten: Any) -> None:
     usage.vom_anbieter = True
 
 
-async def stream_responses(
+async def stream_responses_http(
     client: httpx.AsyncClient,
     *,
-    provider,
+    provider: Any,
     api_key: str | None,
     messages: list[dict[str, Any]],
     usage: StreamUsage,
@@ -382,48 +328,36 @@ async def stream_responses(
     reasoning: bool = False,
     reasoning_effort: str | None = None,
     cache_marke: bool = False,
+    previous_response_id: str | None = None,
+    compaction: bool = False,
 ) -> AsyncIterator[StreamChunk]:
-    """Ein Chatzug ueber ``POST /responses`` — Stuecke wie ueberall sonst.
-
-    Dieselbe Signatur wie `openai_compatible_adapter.stream_chat_completion`,
-    einschliesslich der Parameter, die dieser Weg nicht kennt. ``cache_marke``
-    ist einer davon: OpenAI speichert von selbst zwischen und meldet es in
-    ``input_tokens_details.cached_tokens``; eine Marke waere hier wirkungslos
-    und ihr Fehlen ist kein Verlust. Der Parameter bleibt trotzdem stehen,
-    damit beide Wege dieselbe Form haben und der Aufrufer keinen Unterschied
-    kennen muss.
-
-    ``tool_choice="none"`` wird uebersetzt: die Responses-API kennt dafuer
-    dieselbe Zeichenkette. Die Schlussrunde eines Laufs schickt sie, um noch
-    einen Satz zu bekommen, aber keinen Aufruf mehr.
-
-    **Denkschritte kommen als Zusammenfassung**, nicht als rohe Kette —
-    ``reasoning.summary: "auto"``. Ohne diese Zeile schweigt der Strom dazu,
-    obwohl gedacht und abgerechnet wird: gemessen 904 ``reasoning_tokens`` bei
-    ``effort: high``, und der Benutzer haette einen leeren Denkkasten gesehen
-    und eine auffaellig lange Pause.
-    """
+    """Ein Chatzug über HTTP SSE ``POST /v1/responses``."""
     if provider.requires_api_key and not api_key:
         raise AiProviderRequestError("AI_PROVIDER_KEY_MISSING")
 
-    # Der Kopf kommt aus der Anbieterdatei und steht nicht mehr fest hier —
-    # siehe `openai_compatible_adapter.schluesselkopf`. Fuer OpenAI direkt
-    # aendert das nichts (``Authorization: Bearer`` ist dessen Vorgabe); es ist
-    # die Zeile, die einen Anbieter mit anderem Kopf ueberhaupt erst zulaesst.
     headers = schluesselkopf(
         ai_provider_registry.anbieter(provider.provider_kind), api_key
+    )
+    headers["OpenAI-Beta"] = "responses=v1"
+
+    # Bei Vorhandensein von previous_response_id nur Deltas senden
+    input_items = (
+        nachrichten_fuer_fortsetzung(messages)
+        if previous_response_id
+        else nachrichten_uebersetzen(messages)
     )
 
     request_body: dict[str, Any] = {
         "model": model or provider.default_model,
-        "input": nachrichten_uebersetzen(messages),
+        "input": input_items,
         "stream": True,
-        # Ohne das speichert OpenAI den Lauf 30 Tage auf seinen Servern. Ein
-        # Panel, das Serverkennungen und Logauszuege durch dieses Feld schickt,
-        # hat dafuer keinen Grund: MSM fuehrt den Verlauf selbst und schickt
-        # ihn bei jeder Runde vollstaendig mit.
         "store": False,
     }
+    if previous_response_id:
+        request_body["previous_response_id"] = previous_response_id
+    if compaction:
+        request_body["compaction"] = True
+
     flache_werkzeuge = _werkzeuge_uebersetzen(tools)
     if flache_werkzeuge:
         request_body["tools"] = flache_werkzeuge
@@ -431,15 +365,11 @@ async def stream_responses(
     if reasoning and reasoning_effort:
         request_body["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
     elif reasoning_effort:
-        # „Aus" ist bei OpenAI die Stufe `none` und kein Schalter. Ohne
-        # Zusammenfassung: es gibt keine.
         request_body["reasoning"] = {"effort": reasoning_effort}
 
     target = httpx.URL(provider_base_url(provider).rstrip("/") + "/responses")
     deadline = time.monotonic() + MAX_STREAM_SECONDS
     frames = 0
-    # Aufrufe werden ueber ihre `item_id` gesammelt: die Argumente kommen in
-    # Stuecken, und mehrere Aufrufe einer Runde laufen verschraenkt ein.
     aufrufe: dict[str, dict[str, str]] = {}
     reihenfolge: list[str] = []
     fertige_aufrufe: set[str] = set()
@@ -455,8 +385,6 @@ async def stream_responses(
             raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR") from exc
         if not isinstance(argumente, dict):
             raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
-        # `call_id` und nicht `id`: das ist die Kennung, die beim Rueckkanal
-        # wieder gebraucht wird (`function_call_output`).
         return ProviderToolCall(
             id=eintrag["call_id"], name=eintrag["name"], arguments=argumente
         )
@@ -475,8 +403,6 @@ async def stream_responses(
                 )
                 raise AiProviderRequestError(_error_code(response.status_code), detail)
 
-            # Ab hier ist die Anfrage angekommen und wird abgerechnet, auch
-            # wenn der Strom gleich abbricht — gezaehlt wird deshalb hier.
             usage.anfragen += 1
 
             async for line in _iter_sse_lines(response, deadline=deadline):
@@ -507,7 +433,17 @@ async def stream_responses(
 
                 typ = rahmen.get("type")
 
-                if typ == "response.output_text.delta":
+                if typ == "response.created":
+                    resp_obj = rahmen.get("response")
+                    if isinstance(resp_obj, dict):
+                        resp_id = resp_obj.get("id")
+                        stream_id = resp_obj.get("stream_id")
+                        if isinstance(resp_id, str):
+                            usage.response_id = resp_id
+                        if isinstance(stream_id, str):
+                            usage.stream_id = stream_id
+
+                elif typ == "response.output_text.delta":
                     stueck = rahmen.get("delta")
                     if not isinstance(stueck, str) or not stueck:
                         continue
@@ -554,9 +490,6 @@ async def stream_responses(
                             raise AiProviderRequestError("AI_PROVIDER_RESPONSE_TOO_LARGE")
 
                 elif typ == "response.output_item.done":
-                    # Der vollstaendige Posten. Er ueberschreibt das Gesammelte:
-                    # hier stehen die Argumente am Stueck, und ein verlorenes
-                    # Delta faellt damit nicht ins Gewicht.
                     posten = rahmen.get("item")
                     if isinstance(posten, dict) and posten.get("type") == "function_call":
                         kennung = posten.get("id")
@@ -578,6 +511,9 @@ async def stream_responses(
                     abgeschlossen = True
                     antwort = rahmen.get("response")
                     if isinstance(antwort, dict):
+                        resp_id = antwort.get("id")
+                        if isinstance(resp_id, str):
+                            usage.response_id = resp_id
                         _usage_uebernehmen(usage, antwort.get("usage"))
 
             if not abgeschlossen:
@@ -606,13 +542,366 @@ async def stream_responses(
         raise AiProviderRequestError("AI_PROVIDER_UNAVAILABLE") from exc
 
 
-def spricht_responses(provider) -> bool:
-    """Ob dieser Zugang den Responses-Weg spricht.
+async def stream_responses(
+    client: httpx.AsyncClient,
+    *,
+    provider: Any,
+    api_key: str | None,
+    messages: list[dict[str, Any]],
+    usage: StreamUsage,
+    model: str | None = None,
+    tools: list[dict] | None = None,
+    tool_choice: str | dict | None = None,
+    reasoning: bool = False,
+    reasoning_effort: str | None = None,
+    cache_marke: bool = False,
+    previous_response_id: str | None = None,
+    use_websocket: bool = True,
+    compaction: bool = False,
+    background: bool = False,
+    ws_session: OpenAiResponsesWsSession | None = None,
+    **kwargs: Any,
+) -> AsyncIterator[StreamChunk]:
+    """Zentraler Einstiegspunkt für den OpenAI Responses-Weg (WebSocket / HTTP / Background)."""
+    if background:
+        async for chunk in stream_background_response(
+            client,
+            provider=provider,
+            api_key=api_key,
+            messages=messages,
+            usage=usage,
+            model=model,
+            tools=tools,
+            tool_choice=tool_choice,
+            reasoning=reasoning,
+            reasoning_effort=reasoning_effort,
+            previous_response_id=previous_response_id,
+            compaction=compaction,
+        ):
+            yield chunk
+        return
 
-    Gefragt wird die Anbieterdatei, nicht der Name. Ein unbekannter
-    ``provider_kind`` ergibt ``False`` — also den verbreiteten Weg, wie vor
-    diesem Modul.
-    """
+    # WebSocket-Pfad versuchen, wenn aktiviert und passend
+    if use_websocket and provider.provider_kind == "openai":
+        try:
+            ws_url = ws_url_fuer_base_url(provider_base_url(provider))
+            headers = schluesselkopf(
+                ai_provider_registry.anbieter(provider.provider_kind), api_key
+            )
+            headers["OpenAI-Beta"] = "responses=v1"
+
+            input_items = (
+                nachrichten_fuer_fortsetzung(messages)
+                if previous_response_id
+                else nachrichten_uebersetzen(messages)
+            )
+
+            payload: dict[str, Any] = {
+                "model": model or provider.default_model,
+                "input": input_items,
+                "stream": True,
+                "store": False,
+            }
+            if previous_response_id:
+                payload["previous_response_id"] = previous_response_id
+            if compaction:
+                payload["compaction"] = True
+
+            flache_werkzeuge = _werkzeuge_uebersetzen(tools)
+            if flache_werkzeuge:
+                payload["tools"] = flache_werkzeuge
+                payload["tool_choice"] = _werkzeugwahl_uebersetzen(tool_choice)
+            if reasoning and reasoning_effort:
+                payload["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
+            elif reasoning_effort:
+                payload["reasoning"] = {"effort": reasoning_effort}
+
+            if ws_session is not None:
+                async for chunk in ws_session.stream_turn(payload, usage):
+                    yield chunk
+                return
+
+            async for chunk in stream_responses_ws(
+                ws_url, headers=headers, payload=payload, usage=usage
+            ):
+                yield chunk
+            return
+        except Exception as exc:
+            logger.info(
+                "WebSocket stream unavailable/interrupted (%s), transparently falling back to HTTP SSE",
+                exc,
+            )
+
+    # Fallback auf HTTP SSE
+    try:
+        async for chunk in stream_responses_http(
+            client,
+            provider=provider,
+            api_key=api_key,
+            messages=messages,
+            usage=usage,
+            model=model,
+            tools=tools,
+            tool_choice=tool_choice,
+            reasoning=reasoning,
+            reasoning_effort=reasoning_effort,
+            cache_marke=cache_marke,
+            previous_response_id=previous_response_id,
+            compaction=compaction,
+        ):
+            yield chunk
+    except AiProviderRequestError as exc:
+        # Falls Chaining wegen abgelaufener previous_response_id fehlschlägt: Retry mit vollem Kontext
+        if previous_response_id and exc.code in ("AI_PROVIDER_REQUEST_REJECTED", "AI_PROVIDER_ENDPOINT_NOT_FOUND"):
+            logger.info("Retrying turn without previous_response_id after chaining rejection")
+            async for chunk in stream_responses_http(
+                client,
+                provider=provider,
+                api_key=api_key,
+                messages=messages,
+                usage=usage,
+                model=model,
+                tools=tools,
+                tool_choice=tool_choice,
+                reasoning=reasoning,
+                reasoning_effort=reasoning_effort,
+                cache_marke=cache_marke,
+                previous_response_id=None,
+                compaction=compaction,
+            ):
+                yield chunk
+        else:
+            raise
+
+
+# ── OpenAI Background Mode ───────────────────────────────────────────
+
+
+async def create_background_response(
+    client: httpx.AsyncClient,
+    *,
+    provider: Any,
+    api_key: str | None,
+    messages: list[dict[str, Any]],
+    model: str | None = None,
+    tools: list[dict] | None = None,
+    tool_choice: str | dict | None = None,
+    reasoning: bool = False,
+    reasoning_effort: str | None = None,
+    previous_response_id: str | None = None,
+    compaction: bool = False,
+) -> dict[str, Any]:
+    """Startet eine asynchrone Hintergrund-Operation (`background: True`)."""
+    if provider.requires_api_key and not api_key:
+        raise AiProviderRequestError("AI_PROVIDER_KEY_MISSING")
+
+    headers = schluesselkopf(
+        ai_provider_registry.anbieter(provider.provider_kind), api_key
+    )
+    headers["OpenAI-Beta"] = "responses=v1"
+
+    request_body: dict[str, Any] = {
+        "model": model or provider.default_model,
+        "input": (
+            nachrichten_fuer_fortsetzung(messages)
+            if previous_response_id
+            else nachrichten_uebersetzen(messages)
+        ),
+        "background": True,
+        "stream": False,
+        "store": False,
+    }
+    if previous_response_id:
+        request_body["previous_response_id"] = previous_response_id
+    if compaction:
+        request_body["compaction"] = True
+
+    flache_werkzeuge = _werkzeuge_uebersetzen(tools)
+    if flache_werkzeuge:
+        request_body["tools"] = flache_werkzeuge
+        request_body["tool_choice"] = _werkzeugwahl_uebersetzen(tool_choice)
+    if reasoning and reasoning_effort:
+        request_body["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
+    elif reasoning_effort:
+        request_body["reasoning"] = {"effort": reasoning_effort}
+
+    target = httpx.URL(provider_base_url(provider).rstrip("/") + "/responses")
+    try:
+        response = await client.post(target, headers=headers, json=request_body, timeout=30.0)
+        if response.status_code not in (200, 202):
+            detail = await _error_detail(response)
+            raise AiProviderRequestError(_error_code(response.status_code), detail)
+        return response.json()
+    except AiProviderRequestError:
+        raise
+    except Exception as exc:
+        raise AiProviderRequestError("AI_PROVIDER_UNAVAILABLE") from exc
+
+
+async def get_background_response(
+    client: httpx.AsyncClient,
+    *,
+    provider: Any,
+    api_key: str | None,
+    response_id: str,
+) -> dict[str, Any]:
+    """Fragt den Status eines Hintergrund-Auftrags ab."""
+    if provider.requires_api_key and not api_key:
+        raise AiProviderRequestError("AI_PROVIDER_KEY_MISSING")
+
+    headers = schluesselkopf(
+        ai_provider_registry.anbieter(provider.provider_kind), api_key
+    )
+    headers["OpenAI-Beta"] = "responses=v1"
+    target = httpx.URL(f"{provider_base_url(provider).rstrip('/')}/responses/{response_id}")
+    try:
+        response = await client.get(target, headers=headers, timeout=30.0)
+        if response.status_code != 200:
+            detail = await _error_detail(response)
+            raise AiProviderRequestError(_error_code(response.status_code), detail)
+        return response.json()
+    except AiProviderRequestError:
+        raise
+    except Exception as exc:
+        raise AiProviderRequestError("AI_PROVIDER_UNAVAILABLE") from exc
+
+
+async def cancel_background_response(
+    client: httpx.AsyncClient,
+    *,
+    provider: Any,
+    api_key: str | None,
+    response_id: str,
+) -> dict[str, Any]:
+    """Bricht einen laufenden Hintergrund-Auftrag ab."""
+    if provider.requires_api_key and not api_key:
+        raise AiProviderRequestError("AI_PROVIDER_KEY_MISSING")
+
+    headers = schluesselkopf(
+        ai_provider_registry.anbieter(provider.provider_kind), api_key
+    )
+    headers["OpenAI-Beta"] = "responses=v1"
+    target = httpx.URL(f"{provider_base_url(provider).rstrip('/')}/responses/{response_id}/cancel")
+    try:
+        response = await client.post(target, headers=headers, timeout=30.0)
+        if response.status_code != 200:
+            detail = await _error_detail(response)
+            raise AiProviderRequestError(_error_code(response.status_code), detail)
+        return response.json()
+    except AiProviderRequestError:
+        raise
+    except Exception as exc:
+        raise AiProviderRequestError("AI_PROVIDER_UNAVAILABLE") from exc
+
+
+async def poll_background_response(
+    client: httpx.AsyncClient,
+    *,
+    provider: Any,
+    api_key: str | None,
+    response_id: str,
+    poll_interval: float = 0.5,
+    timeout: float = MAX_STREAM_SECONDS,
+) -> dict[str, Any]:
+    """Pollt den Hintergrundauftrag bis zur Fertigstellung."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        daten = await get_background_response(
+            client, provider=provider, api_key=api_key, response_id=response_id
+        )
+        status = daten.get("status")
+        if status == "completed":
+            return daten
+        if status in ("failed", "cancelled", "incomplete"):
+            fehler = daten.get("error") or {}
+            nachricht = fehler.get("message") or f"Background response {status}"
+            code = fehler.get("code")
+            marke = _FEHLERARTEN.get(code, "AI_PROVIDER_REQUEST_REJECTED") if isinstance(code, str) else "AI_PROVIDER_REQUEST_REJECTED"
+            raise AiProviderRequestError(marke, _kurzfassung(nachricht))
+
+        await asyncio.sleep(poll_interval)
+
+    raise AiProviderRequestError("AI_PROVIDER_STREAM_TIMEOUT")
+
+
+async def stream_background_response(
+    client: httpx.AsyncClient,
+    *,
+    provider: Any,
+    api_key: str | None,
+    messages: list[dict[str, Any]],
+    usage: StreamUsage,
+    model: str | None = None,
+    tools: list[dict] | None = None,
+    tool_choice: str | dict | None = None,
+    reasoning: bool = False,
+    reasoning_effort: str | None = None,
+    previous_response_id: str | None = None,
+    compaction: bool = False,
+    poll_interval: float = 0.5,
+    timeout: float = MAX_STREAM_SECONDS,
+) -> AsyncIterator[StreamChunk]:
+    """Startet und pollt einen Background-Auftrag und liefert die Resultate als StreamChunk."""
+    init_res = await create_background_response(
+        client,
+        provider=provider,
+        api_key=api_key,
+        messages=messages,
+        model=model,
+        tools=tools,
+        tool_choice=tool_choice,
+        reasoning=reasoning,
+        reasoning_effort=reasoning_effort,
+        previous_response_id=previous_response_id,
+        compaction=compaction,
+    )
+    usage.anfragen += 1
+    resp_id = init_res.get("id")
+    if not isinstance(resp_id, str):
+        raise AiProviderRequestError("AI_PROVIDER_PROTOCOL_ERROR")
+
+    usage.response_id = resp_id
+
+    final_res = await poll_background_response(
+        client,
+        provider=provider,
+        api_key=api_key,
+        response_id=resp_id,
+        poll_interval=poll_interval,
+        timeout=timeout,
+    )
+
+    _usage_uebernehmen(usage, final_res.get("usage"))
+
+    # Output Items extrahieren
+    output_items = final_res.get("output") or []
+    if isinstance(output_items, list):
+        for item in output_items:
+            if not isinstance(item, dict):
+                continue
+            typ = item.get("type")
+            if typ == "reasoning_summary_text":
+                text = item.get("text") or ""
+                if text:
+                    usage.reasoning_chars += len(text)
+                    yield StreamChunk("reasoning", text)
+            elif typ == "output_text":
+                text = item.get("text") or ""
+                if text:
+                    usage.output_chars += len(text)
+                    yield StreamChunk("content", text)
+            elif typ == "function_call":
+                name = item.get("name") or ""
+                call_id = item.get("call_id") or item.get("id") or ""
+                raw_args = item.get("arguments") or "{}"
+                args_dict = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                call = ProviderToolCall(id=call_id, name=name, arguments=args_dict)
+                usage.tool_calls.append(call)
+                yield StreamChunk("tool_ready", tool_call=call)
+
+
+def spricht_responses(provider) -> bool:
+    """Ob dieser Zugang den Responses-Weg spricht."""
     try:
         return (
             ai_provider_registry.anbieter(provider.provider_kind).protokoll_chat

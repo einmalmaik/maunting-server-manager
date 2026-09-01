@@ -81,7 +81,9 @@ ANBIETER = Anbieter(
     # Genau diese Luecke schliesst `faehigkeiten_aus` — jetzt weiss MSM es, und
     # `openai_compatible_adapter` sendet die Marke nur dann, wenn eine Stufe
     # feststeht. Kein Wissen, keine Stufe, keine Marke.
-    anfrage_erweiterungen=frozenset({"reasoning_effort"}),
+    anfrage_erweiterungen=frozenset({
+        "reasoning_effort", "websocket", "background", "file_inputs", "compaction"
+    }),
     # **Der Chatweg ist `/responses` und nicht `/chat/completions`.**
     #
     # Gemessen am 2026-08-18 gegen OpenAI direkt, jeweils mit Werkzeugkatalog

@@ -238,6 +238,8 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
     # ('budget') im Modell und wurde nie gesetzt.
     budget_erschoepft = False
     fruehe_leseaufgaben: dict[str, asyncio.Task] = {}
+    last_response_id: str | None = zustand.get("last_response_id")
+
 
     def _abbruch_abrechnen() -> None:
         """Der ehrliche Abschluss eines Laufs, der nicht zu Ende kam.
@@ -319,6 +321,10 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
             zustand["provider_messages"] = provider_messages
             provider_started_at = time.perf_counter()
             first_provider_chunk = True
+            stream_extra_kw: dict[str, Any] = {}
+            if last_response_id is not None:
+                stream_extra_kw["previous_response_id"] = last_response_id
+
             async for chunk in ai_stream.stream_chat_completion(
                 client,
                 provider=vorbereitung.provider,
@@ -331,6 +337,7 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                 reasoning=denken,
                 reasoning_effort=denkstufe,
                 cache_marke=cache_marke,
+                **stream_extra_kw,
             ):
                 if first_provider_chunk:
                     metrics.record(
@@ -397,6 +404,9 @@ async def segment_ausfuehren(run_id: str, *, client: httpx.AsyncClient | None = 
                     continue
                 chunks.append(chunk.text)
                 ai_run_broker.veroeffentlichen(run_id, "delta", {"content": chunk.text})
+            if current_usage.response_id:
+                last_response_id = current_usage.response_id
+                zustand["last_response_id"] = last_response_id
             if current_usage is not usage:
                 # Jede Werkzeugrunde ist eine eigene Anbieteranfrage mit eigenem
                 # Prompt — summiert, nicht ersetzt. Vorher wurden hier nur die
