@@ -245,7 +245,7 @@ def test_der_backup_zeitplan_kennt_die_panel_grenzen(
             "propose_backup_schedule_set", {"retention_count": 101},
         )
     db.rollback()
-    with pytest.raises(AiActionValidationError, match="Keine Änderung"):
+    with pytest.raises(AiActionValidationError, match="backup_on_start"):
         _vorschlagen(
             db, owner_user, conversation, server,
             "propose_backup_schedule_set", {},

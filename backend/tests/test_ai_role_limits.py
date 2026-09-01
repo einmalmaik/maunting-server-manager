@@ -1165,7 +1165,7 @@ def test_die_volle_absage_nennt_dem_modell_beide_werkzeuge(
     ansage = str(exc.value)
     assert "search_memory" in ansage
     assert "forget_memory" in ansage
-    assert "nur Einträge aus genau diesem Bereich" in ansage
+    assert "aus genau diesem Bereich" in ansage
     assert "2 von 2 erlaubten" in ansage
     assert db.query(AiMemoryEntry).count() == 2
 

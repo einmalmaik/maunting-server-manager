@@ -29,8 +29,11 @@ def is_configured() -> bool:
     from services.cloudflare_api_key_service import resolve_key
     from services.panel_settings_service import PanelSettingsService
 
-    enabled = PanelSettingsService.get("cloudflare_enabled", "true") != "false"
-    return enabled and bool(resolve_key())
+    try:
+        enabled = PanelSettingsService.get("cloudflare_enabled", "true") != "false"
+        return enabled and bool(resolve_key())
+    except Exception:
+        return False
 
 
 async def test_connection() -> dict[str, Any]:

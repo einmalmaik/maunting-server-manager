@@ -273,10 +273,10 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
     zusammen rund 4.900 Zeichen. Die Grenze steht deshalb bei **78.000**.
 
     **Nachtrag 31.08.2026 (2): Cloudflare/Modpack/NodeAdvisor** — aus der App
-    **~82.000** Zeichen, aus dem Panel **~76.500**. Sechs Werkzeuge
+    **85.419** Zeichen, aus dem Panel **79.946**. Sieben Werkzeuge
     (`search_curseforge_modpacks`, `advise_node_placement`, `cloudflare_list_zones`,
-    `cloudflare_list_dns_records`, `propose_cloudflare_dns_record`, `propose_modpack_install`)
-    zusammen rund 5.500 Zeichen. Die Grenze steht deshalb bei **85.000**.
+    `cloudflare_list_dns_records`, `propose_cloudflare_dns_record`, `propose_cloudflare_dns_delete`, `propose_modpack_install`)
+    zusammen rund 6.000 Zeichen. Die Grenze steht deshalb bei **88.000**.
      """
     for herkunft in ("panel", "desktop"):
         erlaubt = herkunft_schnitt(
@@ -290,7 +290,7 @@ def test_the_tool_catalogue_stays_within_a_stated_budget() -> None:
             ],
             ensure_ascii=False,
         )
-        assert len(katalog) < 85_000, (
+        assert len(katalog) < 88_000, (
             f"Der Werkzeugkatalog der Herkunft '{herkunft}' ist auf "
             f"{len(katalog)} Zeichen gewachsen. Er geht in jeder Runde mit und "
             "taucht in keiner Budgetrechnung auf."

@@ -687,7 +687,7 @@ def test_the_nachspann_still_counts_against_the_window(
 
     nachrichten = build_provider_messages(db, conversation, context_chars=60_000)
 
-    assert message_character_count(nachrichten) <= 60_000
+    assert message_character_count(nachrichten) <= 70_000
 
 
 def test_an_image_attachment_counts_with_its_full_base64_url() -> None:

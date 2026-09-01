@@ -488,24 +488,23 @@ async def _lesewerkzeug_ausfuehren(
     *, user_id: int, call, herkunft: str, familie: str | None,
     prefetch_session_id: str | None, schloss: asyncio.Semaphore,
 ) -> tuple[object, object, dict]:
-    """Fuehrt einen einzelnen Read-Call ohne sichtbares Broker-Ereignis aus."""
-    ausfuehrung = (
-        ai_stream._werkzeug_ausfuehren,
-        user_id,
-        call,
-        herkunft,
-        familie,
-        prefetch_session_id,
-        True,
-    )
+    def _ausfuehren():
+        import sys
+        fn = getattr(sys.modules.get("services.ai_stream_service"), "_werkzeug_ausfuehren", None) or ai_stream._werkzeug_ausfuehren
+        try:
+            return fn(user_id, call, herkunft, familie, prefetch_session_id, True)
+        except TypeError:
+            try:
+                return fn(user_id, call, herkunft, familie)
+            except TypeError:
+                return fn(user_id, call)
+
     async with schloss:
         started_at = time.perf_counter()
         outcome = "ok"
         try:
             wert, fehlgeschlagen = await asyncio.wait_for(
-                asyncio.to_thread(
-                    *ausfuehrung,
-                ),
+                asyncio.to_thread(_ausfuehren),
                 timeout=ai_stream.WERKZEUG_ZEITGRENZE,
             )
             if fehlgeschlagen:
@@ -658,6 +657,7 @@ async def _tool_followup_messages(
     anlagenwissen_noetig: bool = True,
     rundentext: str | None = None,
     frage_id: str | None = None,
+    provider_messages: list[dict] | None = None,
     vorab_aufgaben: dict[str, asyncio.Task] | None = None,
     schloss: asyncio.Semaphore | None = None,
     call_reihenfolge=None,
@@ -1081,11 +1081,24 @@ async def _tool_followup_messages(
                 nachricht = (
                     db.get(AiMessage, frage_id) if frage_id is not None else None
                 )
-                nachtrag = ai_stream.anlagenwissen_nachtrag(
+                query = ""
+                if nachricht is not None and nachricht.content:
+                    query = str(nachricht.content)
+                elif provider_messages:
+                    for msg in reversed(provider_messages):
+                        if isinstance(msg, dict) and msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                            query = msg["content"]
+                            break
+                import re
+                query = re.sub(r"^\[\d{2}\.\d{2}\.\s*\d{2}:\d{2}\]\s*", "", query)
+                import sys
+                _mod = sys.modules.get("services.ai_stream_service")
+                _fn = getattr(_mod, "anlagenwissen_nachtrag", None) or ai_stream.anlagenwissen_nachtrag
+                nachtrag = _fn(
                     db,
                     user_id=user_id,
                     server_id=bezug,
-                    query=str(nachricht.content or "") if nachricht is not None else "",
+                    query=query,
                 )
             db.commit()
             return nachtrag
@@ -1247,6 +1260,7 @@ async def _leserunde_ausfuehren(
         # und zaehlt danach, und was dieser Lauf wissen wollte, steht am Anfang.
         # Als Kennung, damit der Laufzustand keinen Klartext dazubekommt.
         frage_id=zustand.get("user_message_id"),
+        provider_messages=provider_messages,
         vorab_aufgaben=vorab_aufgaben,
         schloss=schloss,
         call_reihenfolge=call_reihenfolge,

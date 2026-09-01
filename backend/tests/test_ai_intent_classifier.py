@@ -36,16 +36,18 @@ def _semantic_stub(monkeypatch):
     def one(text):
         text = text.casefold()
         if "memory" in text or "gedächtnis" in text:
-            return [0, 0, 0, 0, 1.0]
+            return [0, 0, 0, 0, 0, 1.0]
         if "weather" in text or "wetter" in text or "satellite" in text:
-            return [1.0, 0, 0, 0, 0]
+            return [1.0, 0, 0, 0, 0, 0]
         if "search" in text or "suche" in text:
-            return [0, 1.0, 0, 0, 0]
+            return [0, 1.0, 0, 0, 0, 0]
         if "calendar" in text or "kalender" in text:
-            return [0, 0, 1.0, 0, 0]
+            return [0, 0, 1.0, 0, 0, 0]
+        if "notes" in text or "notizen" in text:
+            return [0, 0, 0, 1.0, 0, 0]
         if "server" in text or "node" in text:
-            return [0, 0, 0, 1.0, 0]
-        return [0, 0, 0, 0, 1.0]
+            return [0, 0, 0, 0, 1.0, 0]
+        return [0, 0, 0, 0, 0, 1.0]
 
     def encode(texts):
         return [one(text) for text in texts]
@@ -77,7 +79,7 @@ def test_classifier_is_fast_after_warmup(monkeypatch):
 
 def test_allowlist_is_closed_to_read_tools():
     assert SPECULATIVE_READ_TOOLS == {
-        "analyze_region", "control_region_camera", "web_search", "calendar_read",
+        "analyze_region", "control_region_camera", "web_search", "calendar_read", "notes_read",
         "read_server_status", "search_memory",
     }
     assert not is_side_effect_free("propose_server_delete")

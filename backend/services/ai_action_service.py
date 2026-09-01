@@ -112,4 +112,12 @@ from services.ai_tools.server_tools import (
     _execute_file_search,
     execute_read_tool,
 )
+from services.server_file_access_service import (
+    read_server_text,
+    list_server_directory,
+    search_file_contents,
+    delete_server_text,
+    write_server_text,
+)
+
 

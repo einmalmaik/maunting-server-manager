@@ -854,7 +854,6 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
     db.commit()
 
     flug, anbieter = await ai_run_service.vorflug(client, db, user)
-    print(f"DEBUG TASK LAUF: flug={flug}, anbieter={anbieter}")
     if flug is None:
         if anbieter is None:
             logger.info("Aufgabenlauf ohne Anbieter (task_id=%s)", aufgabe.id)
@@ -878,7 +877,6 @@ async def aufgabenlauf_starten(db: Session, *, aufgabe: AiTask):
         unbeaufsichtigt=True,
         rolle="voll",
     )
-    print(f"DEBUG TASK LAUF 2: run={run}, fehler={fehler}")
     if run is None:
         # Kontingent erschoepft, Schluessel nicht lesbar, Anfragekonflikt. Alles
         # Gruende, die beim naechsten Termin anders liegen koennen — deshalb

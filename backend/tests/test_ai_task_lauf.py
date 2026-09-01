@@ -140,6 +140,7 @@ def _anbieter(db: Session, name: str = "Aufgaben-Anbieter") -> AiProvider:
         provider_kind="openrouter",
         default_model="model-a",
         enabled=True,
+        standard_enabled=True,
         requires_api_key=False,
     )
     db.add(provider)

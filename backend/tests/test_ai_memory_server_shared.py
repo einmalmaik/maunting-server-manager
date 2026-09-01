@@ -904,7 +904,7 @@ async def test_the_manual_is_read_once_per_run_not_once_per_round(
     monkeypatch.setattr(
         ai_stream_service,
         "_werkzeug_ausfuehren",
-        lambda _user_id, call, _herkunft="panel", _familie=None: ({"lines": []}, None),
+        lambda *args, **kwargs: ({"lines": []}, None),
     )
     aufruf = ProviderToolCall(
         id="c1", name="read_server_logs", arguments={"server_id": server.id}

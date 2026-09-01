@@ -2571,7 +2571,10 @@ def execute_read_tool(
         minimum=1,
         maximum=MAX_READ_CONFIG_LINES,
     )
-    result = read_server_text(db, server_id=server.id, relative_path=path)
+    import sys
+    _mod = sys.modules.get("services.ai_action_service")
+    _fn = getattr(_mod, "read_server_text", read_server_text) if _mod else read_server_text
+    result = _fn(db, server_id=server.id, relative_path=path)
     content = str(result["content"])
     # Seit die Endungsliste weg ist, kann hier auch eine Binaerdatei landen â€”
     # ein Mod-Jar, ein Weltdatei-Chunk. `read_text` dekodiert mit

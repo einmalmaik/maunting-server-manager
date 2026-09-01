@@ -530,7 +530,8 @@ def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
     plugin = get_plugin(game_type)
     if plugin is None:
         raise AiActionValidationError(f"Unbekannter Servertyp: {game_type}")
-    real_game_type = plugin.blueprint.meta.id
+    bp = plugin.get_blueprint() if hasattr(plugin, "get_blueprint") else getattr(plugin, "blueprint", None)
+    real_game_type = bp.meta.id if bp and hasattr(bp, "meta") else game_type
 
     limits: dict[str, int] = {
         "ram_limit_mb": 4096,
