@@ -93,7 +93,7 @@ def _persist_write_proposals(
     ist. Das Feld gehoert **nicht** in die Vorschlagskarte: sie traegt denselben
     Vertrag wie die REST-Antwort, und der Aufrufer laesst es dort weg.
     """
-    if len(tool_calls) > MAX_TOOL_CALLS or any(call.name not in (WRITE_TOOLS | READ_TOOLS | WORKER_STEUERUNG) for call in tool_calls):
+    if len(tool_calls) > MAX_TOOL_CALLS or any(call.name not in (WRITE_TOOLS | READ_TOOLS | WORKER_STEUERUNG | CHAT_INTERACTION_TOOLS) for call in tool_calls):
         raise AiActionValidationError("Ungueltige Tool-Sequenz")
     with SessionLocal() as db:
         user = db.get(User, user_id)

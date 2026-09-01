@@ -383,6 +383,10 @@ def search(query: str, count: int = MAX_RESULTS, *, cache_scope: str | None = No
             _finish_inflight(cache_key, pending)
             raise WebSearchUnavailable("AI_WEB_SEARCH_UNAVAILABLE") from exc
 
+    # 3. DuckDuckGo Fallback, falls konfiguriert aber kein Ergebnis
+    if not results and not key and s_url:
+        results = _search_duckduckgo(safe_query, limit)
+
     if cache_key and pending:
         with _cache_lock:
             _cache[cache_key] = (time.monotonic() + _CACHE_TTL_SECONDS, results)

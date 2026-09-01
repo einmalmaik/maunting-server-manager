@@ -770,6 +770,10 @@ if $SHOULD_COPY_FILES; then
             rsync -a --chown="$MSM_USER:$MSM_USER" --delete --exclude '.env' --exclude 'node_modules/' \
                 "$SCRIPT_DIR/dis-sidecar/" "$MSM_DIR/dis-sidecar/"
         fi
+        if [[ -d "$SCRIPT_DIR/searxng-sidecar" ]]; then
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
+                "$SCRIPT_DIR/searxng-sidecar/" "$MSM_DIR/searxng-sidecar/"
+        fi
         if [[ -d "$SCRIPT_DIR/msm-agent" ]]; then
             rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
                 --exclude '.env' --exclude 'venv/' --exclude 'servers/' \
@@ -797,7 +801,7 @@ if $SHOULD_COPY_FILES; then
         2>/dev/null || true
     # In-place Install (git checkout as root) leaves trees root-owned. Backend +
     # agent venvs are created as $MSM_USER and need write access to their dirs.
-    for _msm_tree in backend frontend dis-sidecar msm-agent docs scripts helper-scripts; do
+    for _msm_tree in backend frontend dis-sidecar searxng-sidecar msm-agent docs scripts helper-scripts; do
         if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" 2>/dev/null || true
         fi
@@ -814,7 +818,7 @@ fi
 # Always re-own code trees before Python venv work — even when SHOULD_COPY_FILES
 # is false (e.g. git checkout as root left msm-agent root:root).
 if id "$MSM_USER" &>/dev/null; then
-    for _msm_tree in backend frontend dis-sidecar msm-agent docs scripts helper-scripts; do
+    for _msm_tree in backend frontend dis-sidecar searxng-sidecar msm-agent docs scripts helper-scripts; do
         if [[ -d "$MSM_DIR/$_msm_tree" ]]; then
             chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/$_msm_tree" \
                 || err "chown $MSM_USER:$MSM_USER auf $MSM_DIR/$_msm_tree fehlgeschlagen"
@@ -1313,6 +1317,21 @@ NODE_ENV=production
 EOF
 chmod 600 "$DIS_ENV_FILE"
 chown "$MSM_USER:$MSM_USER" "$DIS_ENV_FILE"
+
+# SearXNG-Sidecar Environment (zufälliger Secret-Key für CSRF & Sessions)
+if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
+    SEARXNG_ENV_FILE="$MSM_DIR/searxng-sidecar/.env"
+    if [[ ! -f "$SEARXNG_ENV_FILE" ]]; then
+        SEARXNG_SECRET=$(openssl rand -hex 32 2>/dev/null || tr -dc 'a-f0-9' < /dev/urandom | head -c 64)
+        cat > "$SEARXNG_ENV_FILE" <<EOF
+# Automatisch generiert für SearXNG-Sidecar
+SEARXNG_SECRET_KEY="$SEARXNG_SECRET"
+SEARXNG_BASE_URL=http://127.0.0.1:8888/
+EOF
+        chmod 600 "$SEARXNG_ENV_FILE"
+        chown "$MSM_USER:$MSM_USER" "$SEARXNG_ENV_FILE"
+    fi
+fi
 
 # ═══════════════════════════════════════════════════════════════
 # 7. Python-Backend einrichten

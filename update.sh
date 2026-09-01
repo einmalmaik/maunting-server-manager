@@ -63,7 +63,7 @@ restore_panel_ownership() {
     # git clean loescht untracked Dirs. Die .gitignore schuetzt jetzt die Daten-Pfade,
     # aber manuelle "Sauberkeit" Befehle sind riskant. Immer --dry-run zuerst.
     # Es gibt helper-scripts/recover-docker-storage.sh als Recovery (für den Docker-Store-Corruption-Fall).
-    for sub in backend frontend docs dis-sidecar msm-agent scripts helper-scripts; do
+    for sub in backend frontend docs dis-sidecar searxng-sidecar msm-agent scripts helper-scripts; do
         if [[ -d "$MSM_DIR/$sub" ]]; then
             # Hard fail for code trees used by venv setup — silent || true left
             # root-owned msm-agent after git pull and caused PEP 668 cascades.
@@ -620,6 +620,21 @@ NODE_ENV=production
 EOF
 chmod 600 "$DIS_ENV_FILE"
 chown "$MSM_USER:$MSM_USER" "$DIS_ENV_FILE"
+
+# SearXNG-Sidecar Environment (zufälliger Secret-Key für CSRF & Sessions)
+if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
+    SEARXNG_ENV_FILE="$MSM_DIR/searxng-sidecar/.env"
+    if [[ ! -f "$SEARXNG_ENV_FILE" ]]; then
+        SEARXNG_SECRET=$(openssl rand -hex 32 2>/dev/null || tr -dc 'a-f0-9' < /dev/urandom | head -c 64)
+        cat > "$SEARXNG_ENV_FILE" <<EOF
+# Automatisch generiert für SearXNG-Sidecar
+SEARXNG_SECRET_KEY="$SEARXNG_SECRET"
+SEARXNG_BASE_URL=http://127.0.0.1:8888/
+EOF
+        chmod 600 "$SEARXNG_ENV_FILE"
+        chown "$MSM_USER:$MSM_USER" "$SEARXNG_ENV_FILE"
+    fi
+fi
 
 # ── DIS Sidecar Abhängigkeiten installieren ──
 log "Installiere DIS Sidecar-Abhängigkeiten..."

@@ -1,0 +1,16 @@
+use_default_settings: true
+general:
+  debug: false
+  instance_name: "MSM Search Sidecar"
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  secret_key: ""
+  limiter: false
+  image_proxy: false
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json
