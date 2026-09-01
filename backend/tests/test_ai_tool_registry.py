@@ -180,7 +180,6 @@ def test_only_the_irreversible_tools_are_confirm_only() -> None:
         "propose_server_delete",
         "propose_blueprint_delete",
         "propose_backup_restore",
-        "propose_server_blueprint_switch",
         "propose_hoster_integration",
         "propose_hoster_product",
         "propose_ai_tarif_role",

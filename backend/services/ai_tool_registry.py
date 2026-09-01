@@ -437,7 +437,6 @@ WERKZEUGE: dict[str, Werkzeug] = {
     # bereits; es fehlte nur die Verbindung dorthin.
     "propose_server_blueprint_switch": Werkzeug(
         "server_write",
-        immer_bestaetigen=True,
         recht="server.config.write",
     ),
     # Kein `immer_bestaetigen`: ein Server, den es vorher nicht gab, vernichtet

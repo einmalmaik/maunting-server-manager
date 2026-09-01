@@ -360,7 +360,7 @@ def test_both_blueprint_tools_run_under_an_autonomy_grant(
     )
     db.commit()
 
-    for werkzeug in ("propose_blueprint_change",):
+    for werkzeug in ("propose_blueprint_change", "propose_server_blueprint_switch"):
         assert werkzeug not in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
         assert ai_autonomy_service.autonomy_allows(
             db, user=regular_user, server_id=server.id, tool_name=werkzeug,
@@ -371,7 +371,6 @@ def test_both_blueprint_tools_run_under_an_autonomy_grant(
         "propose_server_delete",
         "propose_backup_restore",
         "propose_blueprint_delete",
-        "propose_server_blueprint_switch",
     ):
         assert werkzeug in ai_tool_registry.ALWAYS_CONFIRM_TOOLS
         assert not ai_autonomy_service.autonomy_allows(
