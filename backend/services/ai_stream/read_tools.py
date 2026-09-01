@@ -207,29 +207,42 @@ def _anzeigeeintrag(call, wert, fehlgeschlagen: str | None) -> dict:
 
     Bewusst ohne das Ergebnis — ein Logausschnitt gehoert nicht ungefragt in den
     sichtbaren Verlauf, und die Antwort fasst ihn ohnehin zusammen.
+    Bei Fehlern werden jedoch die Fehlerbeschreibung und der Fehlercode
+    geschwärzt mitgegeben, damit das UI diese transparent aufklappen kann.
     """
+    is_failed = bool(fehlgeschlagen)
+    err_msg: str | None = str(fehlgeschlagen) if fehlgeschlagen else None
+    err_code: str | None = None
+
+    if not is_failed and isinstance(wert, dict):
+        if wert.get("available") is False:
+            is_failed = True
+            err_code = str(wert.get("reason") or "unavailable")
+            err_msg = str(wert.get("hint") or wert.get("reason") or "Dienst nicht verfügbar")
+        elif wert.get("error"):
+            is_failed = True
+            err_code = str(wert.get("error"))
+            err_msg = str(wert.get("hint") or wert.get("detail") or wert.get("error"))
+        elif wert.get("status") == "failed":
+            is_failed = True
+            err_code = str(wert.get("code") or "failed")
+            err_msg = str(wert.get("error") or wert.get("message") or wert.get("detail") or "Ausführung fehlgeschlagen")
+
     eintrag = {
         "tool_name": call.name,
         "server_id": _servernummer(call),
-        # Ein gescheiterter Aufruf gehoert sichtbar in den Verlauf. Sonst wirkt
-        # eine Antwort vollstaendig, der eine Auskunft fehlt.
-        **({"failed": True} if fehlgeschlagen else {}),
-        # Die Gruppe entscheidet ueber das Symbol im Verlauf. Sie stand seit
-        # jeher in `ai_tool_registry`, verliess das Backend aber nie — das
-        # Frontend riet sie an einem hartkodierten `tool_name === 'remember'`
-        # nach und lag bei `search_memory` und `forget_memory` daneben. Eine
-        # Zeile hier entfernt eine Abschrift, statt eine hinzuzufuegen.
+        # Ein gescheiterter Aufruf gehoert sichtbar in den Verlauf.
+        **({"failed": True} if is_failed else {}),
+        **({"error_message": redact_sensitive_text(err_msg)} if is_failed and err_msg else {}),
+        **({"error_code": redact_sensitive_text(err_code)} if is_failed and err_code else {}),
+        # Die Gruppe entscheidet ueber das Symbol im Verlauf.
         **(
             {"gruppe": WERKZEUGE[call.name].gruppe}
             if WERKZEUGE.get(call.name) is not None and WERKZEUGE[call.name].gruppe
             else {}
         ),
     }
-    # Bei Skills gehoert der Name in den Verlauf, nicht nur "read_skill". Der
-    # Betreiber will sehen, *welche* erlernte Vorgehensweise gegriffen hat —
-    # sonst wirkt eine Antwort, die aus einem Skill entstanden ist, wie geraten.
-    # Der Schluessel kommt aus dem Ergebnis und nicht aus den Argumenten: dort
-    # ist er bereits normalisiert und gegen die Sichtbarkeit geprueft.
+    # Bei Skills gehoert der Name in den Verlauf, nicht nur "read_skill".
     if call.name in SKILL_TOOLS and isinstance(wert, dict):
         eintrag["skill_key"] = wert.get("skill_key")
         eintrag["skill_name"] = wert.get("name")

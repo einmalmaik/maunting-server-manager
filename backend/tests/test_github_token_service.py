@@ -40,11 +40,15 @@ def test_panel_token_used_when_no_env(monkeypatch):
     assert st["source"] == "panel"
 
 
-def test_env_token_wins_over_panel(monkeypatch):
+def test_panel_token_wins_over_env_and_env_is_fallback(monkeypatch):
     monkeypatch.setitem(os.environ, "MSM_GITHUB_CLONE_TOKEN", "ghp_test_envtoken")
-    from services.github_token_service import set_panel_token, resolve_token, status
+    from services.github_token_service import set_panel_token, resolve_token, status, clear_panel_token
 
     set_panel_token("ghp_test_paneltoken")
+    assert resolve_token() == "ghp_test_paneltoken"
+    assert status()["source"] == "panel"
+
+    clear_panel_token()
     assert resolve_token() == "ghp_test_envtoken"
     assert status()["source"] == "env"
 

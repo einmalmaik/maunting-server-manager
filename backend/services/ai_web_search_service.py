@@ -35,6 +35,7 @@ from services.ai_latency_metrics import measure
 
 import html
 import ipaddress
+import os
 import re
 import urllib.parse
 
@@ -166,8 +167,7 @@ def scrape_url(url: str, max_chars: int = 3500) -> dict:
         return {"error": str(exc), "url": clean_url}
 
 
-def api_key() -> str | None:
-    """Liest den hinterlegten Brave-Schluessel, oder ``None``."""
+def _panel_api_key() -> str | None:
     from services.auth_service import AuthService
     from services.panel_settings_service import PanelSettingsService
 
@@ -175,7 +175,8 @@ def api_key() -> str | None:
     if not stored:
         return None
     try:
-        return AuthService.decrypt_secret(stored, aad=_AAD) or None
+        dec = AuthService.decrypt_secret(stored, aad=_AAD)
+        return dec.strip() if dec and dec.strip() else None
     except Exception as exc:
         logger.warning(
             "Websuch-Schluessel nicht lesbar error=%s", type(exc).__name__
@@ -183,12 +184,40 @@ def api_key() -> str | None:
         return None
 
 
-def searxng_url() -> str | None:
-    """Liest die hinterlegte SearXNG URL (oder None)."""
+def _env_api_key() -> str | None:
+    from config import settings
+    return (
+        (getattr(settings, "brave_search_api_key", "") or "").strip()
+        or os.getenv("MSM_BRAVE_SEARCH_API_KEY", "").strip()
+        or os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
+        or os.getenv("BRAVE_API_KEY", "").strip()
+    ) or None
+
+
+def api_key() -> str | None:
+    """Liest den hinterlegten Brave-Schluessel (Panel-DB zuerst, ENV-Fallback)."""
+    return _panel_api_key() or _env_api_key()
+
+
+def _panel_searxng_url() -> str | None:
     from services.panel_settings_service import PanelSettingsService
 
     raw = PanelSettingsService.get(SEARXNG_SETTINGS_KEY, "")
     return str(raw).strip() or None
+
+
+def _env_searxng_url() -> str | None:
+    from config import settings
+    return (
+        (getattr(settings, "searxng_url", "") or "").strip()
+        or os.getenv("MSM_SEARXNG_URL", "").strip()
+        or os.getenv("SEARXNG_URL", "").strip()
+    ) or None
+
+
+def searxng_url() -> str | None:
+    """Liest die hinterlegte SearXNG URL (Panel-DB zuerst, ENV-Fallback)."""
+    return _panel_searxng_url() or _env_searxng_url()
 
 
 def store_api_key(plaintext: str) -> None:

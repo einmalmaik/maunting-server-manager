@@ -1901,8 +1901,9 @@ def _execute_global_read_tool(
                 ],
                 "query": query,
             }
-        except Exception:
-            return {"error": "curseforge_search_failed", "query": query}
+        except Exception as exc:
+            logger.warning("CurseForge modpack search failed for query=%s error=%s", query, exc)
+            return {"error": "curseforge_search_failed", "detail": f"CurseForge-Suche fehlgeschlagen: {exc}", "query": query}
 
     if tool_name == "cloudflare_list_zones":
         if not permission_service.has_global_permission(db, user, "cloudflare.manage"):

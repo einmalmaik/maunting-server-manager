@@ -96,4 +96,28 @@ describe('gruppiert', () => {
     }
     expect(teile[2]).toEqual({ art: 'text', inhalt: 'Second' })
   })
+
+  it('preserves failed flag, error_message and error_code in grouped tools', () => {
+    const sections: AiSection[] = [
+      {
+        art: 'tool',
+        werkzeug: {
+          tool_name: 'web_search',
+          server_id: null,
+          failed: true,
+          error_code: 'AI_WEB_SEARCH_AUTH_FAILED',
+          error_message: 'Websuche Authentifizierung fehlgeschlagen',
+        },
+      },
+    ]
+
+    const teile = gruppiert(sections)
+    expect(teile).toHaveLength(1)
+    expect(teile[0].art).toBe('tools')
+    if (teile[0].art === 'tools') {
+      expect(teile[0].werkzeuge[0].failed).toBe(true)
+      expect(teile[0].werkzeuge[0].error_code).toBe('AI_WEB_SEARCH_AUTH_FAILED')
+      expect(teile[0].werkzeuge[0].error_message).toBe('Websuche Authentifizierung fehlgeschlagen')
+    }
+  })
 })

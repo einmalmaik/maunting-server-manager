@@ -269,12 +269,11 @@ export const AiAntwortblase = memo(function AiAntwortblase({
   )
 })
 
-/** Eine einzelne Werkzeugzeile: Symbol, Bezeichnung, ggf. Fehlschlag. */
+/** Eine einzelne Werkzeugzeile: Symbol, Bezeichnung, ggf. ausklappbarer Fehlschlag. */
 function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {
   const { t } = useTranslation()
-  // Die Gruppe kommt aus der Registry mit. Vorher stand hier
-  // `tool_name === 'remember'` — `search_memory` und `forget_memory` tragen
-  // dieselbe Gruppe und bekamen trotzdem das allgemeine Werkzeugsymbol.
+  const [errorOpen, setErrorOpen] = useState(false)
+  // Die Gruppe kommt aus der Registry mit.
   const gruppe = tool.gruppe
   const skillKey = tool.skill_key
   // Ein Skill bekommt seinen Namen in den Verlauf, nicht den Werkzeugnamen:
@@ -289,33 +288,57 @@ function AiWerkzeugzeile({ tool }: { tool: AiToolUse }) {
         { name: tool.skill_name || skillKey },
       )
     : null
+
+  const failureDetail = tool.error_message || tool.error_code || (tool.failed ? t('ai.chat.toolFailedGeneric', { defaultValue: 'Aufruf fehlgeschlagen oder Dienst nicht verfügbar.' }) : null)
+
   return (
-    <p className="flex items-center gap-2 text-xs text-on-surface-variant">
-      {gruppe === 'skill'
-        ? <Sparkles className="h-3.5 w-3.5 shrink-0 text-tertiary" aria-hidden="true" />
-        : gruppe === 'memory'
-          ? <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-          : gruppe === 'docs'
-            ? <BookOpen className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
-            : gruppe === 'tasks'
-              ? <CalendarClock className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
-              : gruppe === 'mailbox'
-                ? <Mail className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
-                : gruppe === 'calendar'
-                  ? <Calendar className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
-                  : gruppe === 'geo'
-                    ? <Globe2 className="h-3.5 w-3.5 shrink-0 text-teal-400" aria-hidden="true" />
-                    : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
-      {skillLabel ?? t(`ai.tools.${tool.tool_name}`, { defaultValue: tool.tool_name })}
-      {/* Ohne diesen Zusatz behauptet die Zeile einen Beleg, den es nicht gibt
-          — der gefaehrlichste Fall bei den Doku-Werkzeugen. */}
-      {tool.failed && (
-        <span className="inline-flex items-center gap-1 text-status-error">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          {t('ai.chat.toolFailed')}
-        </span>
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 text-xs text-on-surface-variant">
+        {gruppe === 'skill'
+          ? <Sparkles className="h-3.5 w-3.5 shrink-0 text-tertiary" aria-hidden="true" />
+          : gruppe === 'memory'
+            ? <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+            : gruppe === 'docs'
+              ? <BookOpen className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+              : gruppe === 'tasks'
+                ? <CalendarClock className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+                : gruppe === 'mailbox'
+                  ? <Mail className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+                  : gruppe === 'calendar'
+                    ? <Calendar className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />
+                    : gruppe === 'geo'
+                      ? <Globe2 className="h-3.5 w-3.5 shrink-0 text-teal-400" aria-hidden="true" />
+                      : <Wrench className="h-3.5 w-3.5 shrink-0 text-secondary" aria-hidden="true" />}
+        <span>{skillLabel ?? t(`ai.tools.${tool.tool_name}`, { defaultValue: tool.tool_name })}</span>
+        {/* Ausklappbare Fehlerdetails beim Klick auf den Fehlschlag */}
+        {tool.failed && (
+          <button
+            type="button"
+            onClick={() => setErrorOpen(!errorOpen)}
+            className="inline-flex items-center gap-1 text-status-error hover:underline cursor-pointer focus:outline-none"
+            title={t('ai.chat.toolFailedToggle', { defaultValue: 'Fehlerdetails anzeigen/verstecken' })}
+          >
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{t('ai.chat.toolFailed')}</span>
+            {errorOpen ? (
+              <ChevronDown className="h-3 w-3 shrink-0 opacity-80" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="h-3 w-3 shrink-0 opacity-80" aria-hidden="true" />
+            )}
+          </button>
+        )}
+      </div>
+      {tool.failed && errorOpen && failureDetail && (
+        <div className="ml-5 p-2 rounded bg-status-error/10 border border-status-error/20 text-xs text-status-error font-mono break-all whitespace-pre-wrap">
+          {tool.error_code && (
+            <div className="font-semibold mb-1 text-[11px] uppercase tracking-wider text-status-error/90">
+              {tool.error_code}
+            </div>
+          )}
+          <div>{failureDetail}</div>
+        </div>
       )}
-    </p>
+    </div>
   )
 }
 

@@ -29,13 +29,22 @@ def test_resolve_from_panel_encrypted():
     assert stat["source"] == "panel"
 
 
-def test_env_wins_over_panel(monkeypatch):
+def test_panel_wins_over_env_and_env_is_fallback(monkeypatch):
     from config import settings
 
+    # 1. Panel Key gesetzt, ENV gesetzt -> Panel gewinnt
     svc.set_panel_key("panel_cf_key")
-    monkeypatch.setenv("MSM_CURSEFORGE_API_KEY", "env_cf_key_wins")
+    monkeypatch.setenv("MSM_CURSEFORGE_API_KEY", "env_cf_key_fallback")
     monkeypatch.setattr(settings, "curseforge_api_key", "")
-    assert svc.resolve_key() == "env_cf_key_wins"
+    assert svc.resolve_key() == "panel_cf_key"
+    assert svc.current_source() == "panel"
+    stat = svc.status()
+    assert stat["configured"] is True
+    assert stat["source"] == "panel"
+
+    # 2. Panel Key gelöscht -> ENV Fallback greift
+    svc.clear_panel_key()
+    assert svc.resolve_key() == "env_cf_key_fallback"
     assert svc.current_source() == "env"
     stat = svc.status()
     assert stat["configured"] is True

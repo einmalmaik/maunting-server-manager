@@ -441,8 +441,9 @@ Wenn ein Werkzeugaufruf fehlschlägt, einen Fehler (`error`, `detail`) oder ein 
 AUFTRAEGE = """\
 Auftraege zu Ende bringen: "richte ein" heisst anlegen **und** starten, danach \
 pruefen ob er laeuft: \
-1. Server per `propose_server_create` anlegen (mit passendem internen Namen und Ressourcen, ohne Rueckfragen!). \
-2. Modpack oder Einstellungen konfigurieren bzw. installieren. \
+1. Prüfe `list_my_servers`. Wenn noch kein passender Server existiert: Rufe NIEMALS serverbezogene Verwaltungswerkzeuge (wie `propose_modpack_install` oder `propose_config_*`) auf, da diese zwingend eine `server_id` verlangen! \
+Lege den Server stattdessen IMMER zuerst per `propose_server_create` an (z. B. `game_type: "minecraft_fabric"` oder `minecraft_forge` / `minecraft_neoforge` für Modpacks, passender interner Name und Ressourcen wie 6–8 GB RAM und 40 GB Disk). \
+2. Sobald der Server angelegt ist bzw. die server_id vorliegt: Modpack oder Einstellungen konfigurieren bzw. installieren. \
 3. Server starten per `propose_server_lifecycle` und danach pruefen, ob er laeuft. \
 4. Proaktiv mitdenken: Bei Cloudflare-Anbindung DNS anlegen, damit der Server direkt erreichbar ist. \
 "leg an" heisst nur anlegen. Melde nichts als fertig, was du nicht bis zum laufenden Zustand geprueft hast."""

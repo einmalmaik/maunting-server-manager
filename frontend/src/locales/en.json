@@ -628,6 +628,8 @@
         "mods": "Which mods are installed on my server and are there updates?"
       },
       "toolFailed": "Failed",
+      "toolFailedToggle": "Show or hide error details",
+      "toolFailedGeneric": "Execution failed or service unavailable.",
       "toolsUsed_one": "{{count}} tool used",
       "toolsUsed_other": "{{count}} tools used",
       "toolsCollapse": "Collapse tools",

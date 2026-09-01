@@ -1,11 +1,11 @@
 """Panel-weites GitHub Personal Access Token (PAT) für Blueprints mit
 ``source.type=github``.
 
-Reihenfolge der Auflösung (KISS: ENV schlägt Panel):
-    1. ``MSM_GITHUB_CLONE_TOKEN`` (bzw. ``settings.github_clone_token``)
-    2. Panel-Settings-DB (über PanelSettingsService, Key ``github_clone_token_enc``)
+Reihenfolge der Auflösung (Panel-DB schlägt ENV-Fallback):
+    1. Panel-Settings-DB (über PanelSettingsService, Key ``github_clone_token_enc``)
        — DIS-verschluesselt (AES-256-GCM, AAD ``msm:github:token``)
-    3. Fallback: alter plain-text Key ``github_clone_token`` (Migration)
+    2. Fallback: alter plain-text Key ``github_clone_token`` (Migration)
+    3. ENV-Fallback: ``MSM_GITHUB_CLONE_TOKEN`` / ``settings.github_clone_token`` / ``GITHUB_TOKEN``
 
 Token wird **nie** zurückgegeben. Status-Endpoint liefert nur
 ``{configured, source}``.
@@ -26,37 +26,40 @@ _AAD = "msm:github:token"
 Source = Literal["env", "panel", "none"]
 
 
-def resolve_token() -> str:
-    """Liefert den aktuell aktiven GitHub-Token oder ``""``."""
-    env_token = (getattr(settings, "github_clone_token", "") or "").strip()
-    if env_token:
-        return env_token
-    env_token = os.getenv("MSM_GITHUB_CLONE_TOKEN", "").strip()
-    if env_token:
-        return env_token
-    # DIS-verschluesselter Wert
+def _env_token() -> str:
+    return (
+        (getattr(settings, "github_clone_token", "") or "").strip()
+        or os.getenv("MSM_GITHUB_CLONE_TOKEN", "").strip()
+        or os.getenv("GITHUB_TOKEN", "").strip()
+    )
+
+
+def _panel_token() -> str:
     enc = PanelSettingsService.get(_PANEL_KEY_ENC, "")
     if enc:
         try:
-            return AuthService.decrypt_secret(enc, aad=_AAD).strip()
+            dec = AuthService.decrypt_secret(enc, aad=_AAD).strip()
+            if dec:
+                return dec
         except Exception:
-            pass  # Korrupt oder falscher Key — falle auf Legacy zurueck
-    # Legacy: alter plain-text Wert (wird bei Migration auf DIS umgestellt)
+            pass
     return PanelSettingsService.get(_PANEL_KEY_LEGACY, "").strip()
+
+
+def resolve_token() -> str:
+    """Liefert den aktuell aktiven GitHub-Token oder ``""``."""
+    panel = _panel_token()
+    if panel:
+        return panel
+    return _env_token()
 
 
 def current_source() -> Source:
     """Woher kommt der aktuell aktive Token?"""
-    env_token = (getattr(settings, "github_clone_token", "") or "").strip()
-    if env_token:
-        return "env"
-    env_token = os.getenv("MSM_GITHUB_CLONE_TOKEN", "").strip()
-    if env_token:
-        return "env"
-    if PanelSettingsService.get(_PANEL_KEY_ENC, "").strip():
+    if _panel_token():
         return "panel"
-    if PanelSettingsService.get(_PANEL_KEY_LEGACY, "").strip():
-        return "panel"
+    if _env_token():
+        return "env"
     return "none"
 
 

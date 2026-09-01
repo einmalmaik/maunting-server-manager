@@ -21,16 +21,24 @@ _STYLE_BASE_URL = "https://api.maptiler.com/maps/hybrid/style.json"
 def get_browser_key() -> str | None:
     from services.auth_service import AuthService
     from services.panel_settings_service import PanelSettingsService
+    import os
+    from config import settings
 
     stored = PanelSettingsService.get(SETTINGS_KEY, "")
-    if not stored:
-        return None
-    try:
-        value = AuthService.decrypt_secret(stored, aad=_AAD).strip()
-        return value or None
-    except Exception as exc:
-        logger.warning("MapTiler-Konfiguration nicht lesbar error=%s", type(exc).__name__)
-        return None
+    if stored:
+        try:
+            value = AuthService.decrypt_secret(stored, aad=_AAD).strip()
+            if value:
+                return value
+        except Exception as exc:
+            logger.warning("MapTiler-Konfiguration nicht lesbar error=%s", type(exc).__name__)
+    
+    env_key = (
+        (getattr(settings, "maptiler_api_key", "") or "").strip()
+        or os.getenv("MSM_MAPTILER_API_KEY", "").strip()
+        or os.getenv("MAPTILER_API_KEY", "").strip()
+    )
+    return env_key or None
 
 
 def store_browser_key(plaintext: str) -> None:

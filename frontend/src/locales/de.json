@@ -628,6 +628,8 @@
         "mods": "Welche Mods sind auf meinem Server installiert und gibt es Updates?"
       },
       "toolFailed": "Fehlgeschlagen",
+      "toolFailedToggle": "Fehlerdetails ein- oder ausblenden",
+      "toolFailedGeneric": "Aufruf fehlgeschlagen oder Dienst nicht verfügbar.",
       "toolsUsed_one": "{{count}} Werkzeug verwendet",
       "toolsUsed_other": "{{count}} Werkzeuge verwendet",
       "toolsCollapse": "Werkzeuge einklappen",

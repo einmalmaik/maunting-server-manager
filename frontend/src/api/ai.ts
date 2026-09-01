@@ -336,13 +336,12 @@ export interface AiToolUse {
   skill_learned?: boolean
   /**
    * Der Aufruf ist gescheitert.
-   *
-   * Das Feld stand seit jeher im SSE-Payload und fehlte hier — ein
-   * fehlgeschlagener Werkzeugaufruf sah im Verlauf damit exakt aus wie ein
-   * geglückter. Für „Dokumentation gelesen" ist das der schlimmste Fall: die
-   * Zeile behauptet einen Beleg, und die Antwort darunter ist geraten.
    */
   failed?: boolean
+  /** Vollständige Fehlerbeschreibung zur transparenten Diagnose. */
+  error_message?: string | null
+  /** Fehlercode des fehlgeschlagenen Werkzeugaufrufs. */
+  error_code?: string | null
   /**
    * Themengruppe aus `ai_tool_registry` (`memory`, `skill`, `docs`).
    *

@@ -17,26 +17,30 @@ def _env_key() -> str:
     return (getattr(settings, "cloudflare_api_token", "") or "").strip() or os.getenv("MSM_CLOUDFLARE_API_TOKEN", "").strip()
 
 
-def resolve_key() -> str:
-    key = _env_key()
-    if key:
-        return key
+def _panel_key() -> str:
     enc = PanelSettingsService.get(_ENC_KEY, "")
     if enc:
         try:
-            return AuthService.decrypt_secret(enc, aad=_AAD).strip()
+            dec = AuthService.decrypt_secret(enc, aad=_AAD).strip()
+            if dec:
+                return dec
         except Exception:
             pass
     return PanelSettingsService.get(_LEGACY_KEY, "").strip()
 
 
+def resolve_key() -> str:
+    panel = _panel_key()
+    if panel:
+        return panel
+    return _env_key()
+
+
 def current_source() -> Source:
+    if _panel_key():
+        return "panel"
     if _env_key():
         return "env"
-    if PanelSettingsService.get(_ENC_KEY, "").strip():
-        return "panel"
-    if PanelSettingsService.get(_LEGACY_KEY, "").strip():
-        return "panel"
     return "none"
 
 
