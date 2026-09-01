@@ -57,7 +57,7 @@ export function Shell() {
     // — und jedes `position: sticky` darunter, allen voran `.msm-topbar`,
     // bekommt dadurch nie einen Versatz. `clip` klemmt den waagerechten
     // Überlauf genauso ab, erzeugt aber keinen Scroll-Container.
-    <div className="min-h-screen bg-background text-on-surface flex relative overflow-x-clip">
+    <div className={`bg-background text-on-surface flex relative overflow-x-clip ${isAiPage ? 'h-screen max-h-screen overflow-hidden' : 'min-h-screen'}`}>
       {/* Deep Grid Background */}
       <div className="absolute inset-0 msm-deep-grid opacity-30 pointer-events-none" />
 
@@ -76,7 +76,7 @@ export function Shell() {
       )}
 
       {/* Main Content Area */}
-      <div className={`flex-1 ${sidebarHidden ? 'ml-0' : 'lg:ml-64'} flex flex-col min-w-0 relative z-10 transition-all duration-300`}>
+      <div className={`flex-1 ${sidebarHidden ? 'ml-0' : 'lg:ml-64'} flex flex-col min-w-0 relative z-10 transition-all duration-300 ${isAiPage ? 'h-screen max-h-screen overflow-hidden' : ''}`}>
         <Topbar menuButtonRef={mobileNavigationTriggerRef} onOpenNavigation={() => setMobileNavigationOpen(true)} />
         {/* Ohne `overflow-auto`: `main` hat als `flex-1` in einer Spalte ohne
             feste Höhe immer genau seine Inhaltshöhe, lief also nie über. Die
@@ -84,8 +84,8 @@ export function Shell() {
             Klebeelemente der Seiten (Reiterleiste, Inhaltsverzeichnisse)
             vergeblich ausgerichtet haben. Breite Inhalte bringen ihr eigenes
             `overflow-x-auto` mit. */}
-        <main className={`flex-1 relative flex flex-col min-h-0 ${isAiPage ? 'p-0 overflow-hidden h-[calc(100dvh-3.5rem)]' : 'p-margin-mobile md:p-margin-desktop'}`}>
-          <div className="relative z-10 flex-1 w-full flex flex-col min-h-0">
+        <main className={`flex-1 relative flex flex-col min-h-0 ${isAiPage ? 'p-0 overflow-hidden h-[calc(100dvh-3.5rem)] max-h-[calc(100dvh-3.5rem)]' : 'p-margin-mobile md:p-margin-desktop'}`}>
+          <div className={`relative z-10 flex-1 w-full flex flex-col min-h-0 ${isAiPage ? 'h-full overflow-hidden' : ''}`}>
             <Outlet />
           </div>
 

@@ -1045,7 +1045,7 @@ export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiC
       }}
     >
       {/* ── Kopfzeile: Provider, Denkschritte, Autonomie, Skills ───────── */}
-      <header className="hidden sm:flex flex-wrap items-center gap-2 border-b border-outline-variant/30 bg-surface-container-low/40 px-3 py-2 sm:px-5 sm:py-2.5 backdrop-blur-sm shrink-0">
+      <header className="flex flex-wrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/30 bg-surface-container-low/90 px-2.5 py-2 sm:px-5 sm:py-2.5 backdrop-blur-md shrink-0 sticky top-0 z-20">
         <div className="w-48 sm:w-60 max-w-[260px] shrink-0">
           <Dropdown
             value={providerId ? String(providerId) : null}
