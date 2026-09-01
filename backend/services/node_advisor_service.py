@@ -3,7 +3,14 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from models import Node
-from services.node_capacity import allocatable_ram_mb, allocatable_disk_gb, sum_allocated_ram_mb, sum_allocated_disk_gb, sum_running_ram_mb
+from services.node_capacity import (
+    allocatable_ram_mb,
+    allocatable_disk_gb,
+    sum_allocated_ram_mb,
+    sum_allocated_disk_gb,
+    sum_running_ram_mb,
+    normalize_ram_mb,
+)
 
 
 def estimate_ram_for_modpack(mod_count: int | None, base_mb: int = 2048) -> int:
@@ -23,19 +30,35 @@ def advise_node(db: Session, ram_need_mb: int, disk_need_gb: int = 5) -> list[di
         avail_ram = allocatable_ram_mb(n, alloc_ram)
         avail_disk = allocatable_disk_gb(n, alloc_disk)
         running_ram = sum_running_ram_mb(db, n.id)
-        host_total_mb = int(n.ram_total / 1024 / 1024) if n.ram_total and n.ram_total > 100_000_000 else (int(n.ram_total) if n.ram_total else None)
-        real_free_ram = max(0, (host_total_mb or 0) - running_ram) if host_total_mb else None
+        host_total_mb = normalize_ram_mb(n.ram_total)
+        host_used_mb = normalize_ram_mb(n.ram_used)
         
-        # MSM erlaubt Überbuchung: Passt, wenn Platte reicht und physisch/laufend noch Platz ist
+        # Realer physischer Freiraum auf dem Host:
+        if host_total_mb is not None:
+            if host_used_mb is not None:
+                real_free_ram = max(0, host_total_mb - host_used_mb)
+            else:
+                real_free_ram = max(0, host_total_mb - running_ram)
+        else:
+            real_free_ram = None
+        
+        # MSM erlaubt Überbuchung: Passt, wenn Platte reicht und physisch noch Platz ist (oder Overcommit aktiv)
         fits = (avail_disk is None or avail_disk >= disk_need_gb) and (
-            avail_ram is None or avail_ram >= ram_need_mb or real_free_ram is None or real_free_ram >= ram_need_mb
+            avail_ram is None
+            or avail_ram >= ram_need_mb
+            or real_free_ram is None
+            or real_free_ram >= ram_need_mb
+            or n.status in (None, "online", "healthy")
         )
         
         reason_parts = []
-        if avail_ram is not None:
-            reason_parts.append(f"{avail_ram}MB buchbar")
-        if real_free_ram is not None:
-            reason_parts.append(f"{real_free_ram}MB physisch frei (Überbuchung erlaubt)")
+        if host_used_mb is not None and host_total_mb:
+            pct = round(host_used_mb / host_total_mb * 100)
+            reason_parts.append(f"{real_free_ram}MB physisch frei ({pct}% Host-Auslastung)")
+        elif real_free_ram is not None:
+            reason_parts.append(f"{real_free_ram}MB physisch frei")
+        if avail_ram is not None and avail_ram > 0:
+            reason_parts.append(f"{avail_ram}MB ungebucht")
         if avail_disk is not None:
             reason_parts.append(f"{avail_disk}GB Disk frei")
             
@@ -45,6 +68,7 @@ def advise_node(db: Session, ram_need_mb: int, disk_need_gb: int = 5) -> list[di
                 "name": n.name,
                 "status": n.status,
                 "ram_total_mb": host_total_mb,
+                "ram_used_mb": host_used_mb,
                 "ram_allocated_mb": alloc_ram,
                 "ram_running_mb": running_ram,
                 "ram_allocatable_mb": avail_ram,
@@ -55,5 +79,6 @@ def advise_node(db: Session, ram_need_mb: int, disk_need_gb: int = 5) -> list[di
                 "reason": " / ".join(reason_parts) if reason_parts else "Kapazitaet bereit, Überbuchung erlaubt",
             }
         )
-    scored.sort(key=lambda x: (not x["fits"], -(x["ram_allocatable_mb"] or 0)))
+    scored.sort(key=lambda x: (not x["fits"], -(x["ram_real_free_mb"] or x["ram_allocatable_mb"] or 0)))
     return scored
+
