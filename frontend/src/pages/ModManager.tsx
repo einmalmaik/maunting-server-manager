@@ -187,10 +187,12 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
     setBrowserTab(tab) // Cache bleibt erhalten → Scroll-Position stabil
   }
 
+  const [searchActive, setSearchActive] = useState(false)
+
   const handleContentTypeChange = (newType: 'all' | 'mods' | 'modpacks') => {
     setContentType(newType)
     setBrowserCache({})
-    if (steamQuery.trim()) {
+    if (steamQuery.trim() && searchActive) {
       void searchSteam(1, false, newType)
     }
   }
@@ -209,7 +211,7 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
     if (!steamQuery.trim()) return
     setSteamLoading(true)
     try {
-      const q = encodeURIComponent(steamQuery)
+      const q = encodeURIComponent(steamQuery.trim())
       const classParam =
         isCurseForge && typeFilter !== 'all'
           ? `&class_id=${typeFilter === 'modpacks' ? '4471' : '6'}`
@@ -229,7 +231,17 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
   }
 
   const runSearch = () => {
+    if (!steamQuery.trim()) return
+    setSearchActive(true)
     void searchSteam(1, false, contentType)
+  }
+
+  const clearSearch = () => {
+    setSearchActive(false)
+    setSteamResults([])
+    setSteamQuery('')
+    setSteamPage(1)
+    setSteamHasMore(false)
   }
 
   const loadMoreSearch = () => {
@@ -412,7 +424,7 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
   const anyModInstallActive = mods.some(hasActiveModInstall)
 
   // Suche zeigt Suchtreffer-Grid, sonst das gewaehlte Browser-Tab-Grid.
-  const isSearchMode = steamResults.length > 0
+  const isSearchMode = searchActive || steamResults.length > 0
   const browserEntry = browserCache[browserTab]
   const displayedMods = isSearchMode ? steamResults : browserEntry?.mods ?? []
   const showLoadMoreBrowser = !isSearchMode && !!browserEntry?.hasMore
@@ -761,12 +773,7 @@ export function ModManager({ serverId, gameInfo }: ModManagerProps) {
           </button>
           {isSearchMode && (
             <button
-              onClick={() => {
-                setSteamResults([])
-                setSteamQuery('')
-                setSteamPage(1)
-                setSteamHasMore(false)
-              }}
+              onClick={clearSearch}
               className="msm-btn-secondary px-3 py-2 text-sm"
             >
               {t('mods.clearSearch')}

@@ -599,7 +599,6 @@ async def stream_responses(
             payload: dict[str, Any] = {
                 "model": model or provider.default_model,
                 "input": input_items,
-                "stream": True,
                 "store": False,
             }
             if previous_response_id:

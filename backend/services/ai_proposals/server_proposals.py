@@ -1597,17 +1597,26 @@ def _file_delete_payload(db: Session, server: Server, arguments: dict) -> tuple[
     return payload, preview, str(ergebnis["revision"])
 
 def _modpack_install_payload(db: Session, server: Server, rest: dict) -> tuple[dict, dict]:
-    allowed = {"modpack_mod_id", "file_id"}
+    allowed = {"modpack_mod_id", "file_id", "modpack_name", "name", "game_id"}
     if set(rest) - allowed:
         raise AiActionValidationError("Modpack-Install hat ungueltige Argumente")
     mod_id = str(rest.get("modpack_mod_id", "")).strip()
     file_id = str(rest.get("file_id", "") or "latest").strip()
+    name = str(rest.get("modpack_name") or rest.get("name") or "").strip()
     if not mod_id:
         raise AiActionValidationError("modpack_mod_id erforderlich")
     if any(c in mod_id for c in ("\n", "\r", "\0")) or any(c in file_id for c in ("\n", "\r", "\0")):
         raise AiActionValidationError("Ungueltige Zeichen")
     payload = {"modpack_mod_id": mod_id, "file_id": file_id}
-    preview = {"operation": "modpack_install", "server_name": server.name, "modpack_mod_id": mod_id, "file_id": file_id}
+    if name:
+        payload["modpack_name"] = name
+    preview = {
+        "operation": "modpack_install",
+        "server_name": server.name,
+        "modpack_mod_id": mod_id,
+        "modpack_name": name or f"Modpack {mod_id}",
+        "file_id": file_id,
+    }
     return payload, preview
 
 def _execute_server_create(

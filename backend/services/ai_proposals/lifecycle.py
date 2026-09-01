@@ -392,25 +392,30 @@ def create_proposal(
         # Payload-Bau weiter unten. Dieselbe PrÃ¼fung an zwei Stellen hieÃŸe:
         # zwei Wertelisten, die auseinanderlaufen kÃ¶nnen, und eine zweite
         # Meldung fÃ¼r einen Fall, Ã¼ber den die erste schon entschieden hat.
-        if tool_name == "propose_server_lifecycle" and (
-            set(rest) != {"operation"} or rest.get("operation") not in _LIFECYCLE_RECHTE
-        ):
-            raise AiActionValidationError("Ungueltige Lifecycle-Aktion")
+        if tool_name == "propose_server_lifecycle":
+            allowed = {"operation", "action", "aktion", "vorgang"}
+            if set(rest) - allowed:
+                raise AiActionValidationError("Ungueltige Lifecycle-Aktion")
+            op = rest.get("operation") or rest.get("action") or rest.get("aktion") or rest.get("vorgang")
+            if not op or str(op).lower() not in _LIFECYCLE_RECHTE:
+                raise AiActionValidationError("Ungueltige Lifecycle-Aktion")
+            rest["operation"] = str(op).lower()
         if tool_name == "propose_server_repair":
-            if set(rest) != {"action"}:
-                raise AiActionValidationError("Reparatur-Tool hat ungueltige Argumente")
-            if rest["action"] not in REPARATUREN:
+            rep_action = rest.get("action") or rest.get("aktion") or rest.get("repair")
+            if not rep_action or rep_action not in REPARATUREN:
                 raise AiActionValidationError("Unbekannte Reparatur")
+            rest["action"] = rep_action
         _require_tool_permission(db, user, server.id, tool_name, rest)
 
         if tool_name == "propose_server_lifecycle":
-            # GeprÃ¼ft ist schon oben, vor der RechteprÃ¼fung â€” hier bleibt der
+            # Geprueft ist schon oben, vor der Rechtepruefung — hier bleibt der
             # reine Bau.
-            payload = {"operation": rest["operation"]}
+            op = rest["operation"]
+            payload = {"operation": op}
             preview = {
-                "operation": rest["operation"],
+                "operation": op,
                 "current_status": server.status,
-                "restart_required": rest["operation"] == "restart",
+                "restart_required": op == "restart",
             }
             expected_revision = None
         elif tool_name == "propose_backup":
