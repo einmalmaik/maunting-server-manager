@@ -997,13 +997,15 @@ class BlueprintPlugin(GamePlugin):
                 except Exception as exc:
                     errors.append(f"{wid}: {exc}")
                     items[wid] = {"ok": False, "error": str(exc)}
-            return {
+            res = {
                 "ok": len(errors) == 0,
                 "applied": applied,
                 "errors": errors,
                 "items": items,
-                "error": "; ".join(errors) if errors else None,
             }
+            if errors:
+                res["error"] = "; ".join(errors)
+            return res
 
         res = asyncio.run(_download_cf())
         self.update_modlist(server)

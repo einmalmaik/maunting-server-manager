@@ -89,7 +89,9 @@ def install_mod_bg(server_id: int, workshop_id: str, action: str = "install", re
                 except Exception as ce:
                     _append_console_log(server.id, f"[MSM] Mod {workshop_id} Re-Install Cleanup Warnung: {ce}\n")
             result = plugin.install_mod(server, workshop_id)
-            success = isinstance(result, dict) and result.get("ok", True) is not False and "error" not in result
+            has_error = bool(result.get("error")) if isinstance(result, dict) else bool(result)
+            is_ok = result.get("ok", True) is not False if isinstance(result, dict) else not has_error
+            success = isinstance(result, dict) and is_ok and not has_error
             if success:
                 updater.update_mod_metadata_after_success(server.id, workshop_id, remote_updated)
                 mark_mod_installed(server.id, workshop_id)
@@ -150,11 +152,9 @@ def reinstall_all_mods_bg(server_id: int, workshop_ids: list[str]) -> None:
                     mark_mod_failed(server.id, wid, _safe_error(exc))
                     _append_console_log(server.id, f"[MSM] Mod {wid}: fehlgeschlagen — {exc}\n")
                     continue
-                success = (
-                    isinstance(result, dict)
-                    and result.get("ok", True) is not False
-                    and "error" not in result
-                )
+                has_error = bool(result.get("error")) if isinstance(result, dict) else bool(result)
+                is_ok = result.get("ok", True) is not False if isinstance(result, dict) else not has_error
+                success = isinstance(result, dict) and is_ok and not has_error
                 if success:
                     updater.update_mod_metadata_after_success(server.id, wid, None)
                     mark_mod_installed(server.id, wid)
