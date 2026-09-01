@@ -549,7 +549,7 @@
       "message": "Message",
       "send": "Send",
       "noProvider": "No provider is available. Add your own API key in your profile or ask an administrator to configure one.",
-      "privacyHint": "Your message, approved context, enabled memory, and provided attachments are sent to the selected external provider and stored in the panel.",
+      "privacyHint": "AI responses may contain mistakes. Verify important information.",
       "errors": {
         "load": "AI conversations could not be loaded.",
         "create": "Conversation could not be created.",

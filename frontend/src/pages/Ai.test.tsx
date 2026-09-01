@@ -36,7 +36,34 @@ vi.mock('@/api/client', async (importOriginal) => {
 // was daneben steht — nicht, was in ihnen passiert. Dafuer haben beide eigene,
 // ausfuehrliche Testdateien.
 vi.mock('@/components/ai/AiChat', () => ({
-  AiChat: () => <div>chat-attrappe</div>,
+  AiChat: ({
+    onSwitchMode,
+    canTasks,
+    hasVoice,
+  }: {
+    onSwitchMode?: (mode: 'sprache' | 'guardian' | 'aufgaben') => void
+    canTasks?: boolean
+    hasVoice?: boolean
+  }) => (
+    <div>
+      chat-attrappe
+      {canTasks && onSwitchMode && (
+        <button type="button" onClick={() => onSwitchMode('aufgaben')}>
+          {i18n.t('ai.tasks.toTasks')}
+        </button>
+      )}
+      {onSwitchMode && (
+        <button type="button" onClick={() => onSwitchMode('guardian')}>
+          {i18n.t('ai.guardian.toGuardianMode')}
+        </button>
+      )}
+      {hasVoice && onSwitchMode && (
+        <button type="button" onClick={() => onSwitchMode('sprache')}>
+          {i18n.t('ai.voice.toVoiceMode')}
+        </button>
+      )}
+    </div>
+  ),
 }))
 vi.mock('@/components/ai/voice/SprachAnsicht', () => ({
   SprachAnsicht: () => <div>sprache-attrappe</div>,

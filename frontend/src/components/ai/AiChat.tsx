@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Check, ListPlus, Loader2, Mic, Paperclip, Pencil, Send, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
+import { AudioLines, CalendarClock, Check, ListPlus, Loader2, Mic, Paperclip, Pencil, Send, ShieldAlert, Sparkles, Square, Trash2, User, X, Zap } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
@@ -125,7 +125,13 @@ function providerBeimOeffnen(
  * autonomer Modus, Skills) haengt als Schalter am Chat statt in eigenen
  * Kaesten daneben.
  */
-export function AiChat() {
+export interface AiChatProps {
+  onSwitchMode?: (mode: 'sprache' | 'guardian' | 'aufgaben') => void
+  canTasks?: boolean
+  hasVoice?: boolean
+}
+
+export function AiChat({ onSwitchMode, canTasks = false, hasVoice = false }: AiChatProps = {}) {
   const { t } = useTranslation()
   const canAttach = useHasPermission('ai.attachments.use')
   const canUseAutonomy = useHasPermission('ai.autonomous.use')
@@ -1068,7 +1074,46 @@ export function AiChat() {
           </Button>
         )}
 
-        <div className="ml-auto flex items-center gap-1 sm:gap-2">
+        <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+          {canTasks && onSwitchMode && (
+            <button
+              type="button"
+              onClick={() => onSwitchMode('aufgaben')}
+              className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/40 bg-surface-container-high/40 px-2.5 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:border-outline-variant transition-colors"
+              aria-label={t('ai.tasks.toTasks')}
+              title={t('ai.tasks.toTasks')}
+            >
+              <CalendarClock className="h-4 w-4 shrink-0 text-secondary" aria-hidden="true" />
+              <span className="hidden md:inline">Aufgaben</span>
+            </button>
+          )}
+
+          {onSwitchMode && (
+            <button
+              type="button"
+              onClick={() => onSwitchMode('guardian')}
+              className="inline-flex items-center gap-1.5 rounded-full border border-outline-variant/40 bg-surface-container-high/40 px-2.5 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface hover:border-outline-variant transition-colors"
+              aria-label={t('ai.guardian.toGuardianMode')}
+              title={t('ai.guardian.toGuardianMode')}
+            >
+              <ShieldAlert className="h-4 w-4 shrink-0 text-tertiary" aria-hidden="true" />
+              <span className="hidden md:inline">Guardian</span>
+            </button>
+          )}
+
+          {hasVoice && onSwitchMode && (
+            <button
+              type="button"
+              onClick={() => onSwitchMode('sprache')}
+              className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+              aria-label={t('ai.voice.toVoiceMode')}
+              title={t('ai.voice.toVoiceMode')}
+            >
+              <AudioLines className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="hidden md:inline">Realtime</span>
+            </button>
+          )}
+
           <Button
             type="button"
             variant="ghost"
@@ -1076,9 +1121,10 @@ export function AiChat() {
             disabled={busy || empty}
             onClick={() => void clearHistory()}
             aria-label={t('ai.chat.clear')}
-            className="h-8 w-8 p-0 text-on-surface-variant hover:text-status-danger"
+            title={t('ai.chat.clear')}
+            className="h-9 w-9 p-0 text-on-surface-variant hover:text-status-danger transition-colors flex items-center justify-center rounded-lg"
           >
-            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            <Trash2 className="h-5 w-5" aria-hidden="true" />
           </Button>
         </div>
       </header>

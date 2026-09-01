@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { VersionFooter } from '@/components/VersionFooter'
@@ -47,6 +47,9 @@ export function Shell() {
     setMobileNavigationOpen(false)
   }
 
+  const location = useLocation()
+  const isAiPage = location.pathname === '/ai' || location.pathname.startsWith('/ai')
+
   return (
     // `overflow-x-clip` statt `overflow-x-hidden`: `hidden` auf einer Achse
     // lässt die andere zu `auto` rechnen und macht diese Wurzel damit zum
@@ -81,12 +84,12 @@ export function Shell() {
             Klebeelemente der Seiten (Reiterleiste, Inhaltsverzeichnisse)
             vergeblich ausgerichtet haben. Breite Inhalte bringen ihr eigenes
             `overflow-x-auto` mit. */}
-        <main className="flex-1 p-margin-mobile md:p-margin-desktop relative flex flex-col min-h-0">
+        <main className={`flex-1 relative flex flex-col min-h-0 ${isAiPage ? 'p-0 overflow-hidden h-[calc(100dvh-3.5rem)]' : 'p-margin-mobile md:p-margin-desktop'}`}>
           <div className="relative z-10 flex-1 w-full flex flex-col min-h-0">
             <Outlet />
           </div>
 
-          <VersionFooter />
+          {!isAiPage && <VersionFooter />}
         </main>
       </div>
 

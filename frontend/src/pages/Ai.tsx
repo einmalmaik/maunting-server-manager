@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AudioLines, CalendarClock, MessageSquare, ShieldAlert } from 'lucide-react'
+import { MessageSquare } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiVoiceConfig } from '@/api/ai'
@@ -235,9 +235,9 @@ export function Ai() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-5.5rem)] max-h-[calc(100dvh-5.5rem)] min-h-0 w-full flex-1 flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between sm:justify-end gap-1.5 sm:gap-2 pb-1.5 sm:pb-2">
-        {ansicht !== 'text' ? (
+    <div className="flex h-full w-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+      {ansicht !== 'text' && (
+        <div className="flex shrink-0 items-center justify-between sm:justify-end gap-1.5 sm:gap-2 px-3 py-2 border-b border-outline-variant/30 bg-surface-container-low/40">
           <div className="flex items-center justify-between w-full sm:w-auto gap-2">
             <Umschalter
               aktiv={false}
@@ -247,39 +247,8 @@ export function Ai() {
             />
             {canUseAutonomy && ansicht === 'sprache' && <AiAutonomyButton servers={servers} />}
           </div>
-        ) : (
-          <div className="flex items-center justify-between sm:justify-end w-full gap-1.5 sm:gap-2">
-            <div className="flex items-center gap-1 sm:gap-1.5">
-              {canManageTasks && (
-                <Umschalter
-                  aktiv={false}
-                  onClick={() => setzeAnsicht('aufgaben')}
-                  icon={<CalendarClock className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" aria-hidden="true" />}
-                  label={t('ai.tasks.toTasks')}
-                  shortLabel="Aufgaben"
-                />
-              )}
-              <Umschalter
-                aktiv={false}
-                onClick={() => setzeAnsicht('guardian')}
-                icon={<ShieldAlert className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" aria-hidden="true" />}
-                label={t('ai.guardian.toGuardianMode')}
-                shortLabel="Guardian"
-              />
-            </div>
-
-            {sprachkonfiguration && (
-              <Umschalter
-                aktiv={false}
-                onClick={() => setzeAnsicht('sprache')}
-                icon={<AudioLines className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" aria-hidden="true" />}
-                label={t('ai.voice.toVoiceMode')}
-                shortLabel="Realtime"
-              />
-            )}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {ansicht === 'sprache' && sprachkonfiguration ? (
         <SprachAnsicht
@@ -296,7 +265,11 @@ export function Ai() {
         // aufbaut, statt den Verlauf des einen in den anderen zu mischen.
         <WorkerAnsicht key={workerId} conversationId={workerId} />
       ) : (
-        <AiChat />
+        <AiChat
+          onSwitchMode={setzeAnsicht}
+          canTasks={canManageTasks}
+          hasVoice={Boolean(sprachkonfiguration)}
+        />
       )}
     </div>
   )

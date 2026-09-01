@@ -549,7 +549,7 @@
       "message": "Nachricht",
       "send": "Senden",
       "noProvider": "Kein verfügbarer Provider. Hinterlege im Profil einen eigenen API-Key oder bitte einen Administrator um Konfiguration.",
-      "privacyHint": "Nachricht, freigegebener Kontext, aktiviertes Memory und bereitgestellte Anhänge werden an den gewählten externen Provider übertragen und im Panel gespeichert.",
+      "privacyHint": "KI-Antworten können fehlerhaft sein. Bitte überprüfe wichtige Informationen selbstständig.",
       "errors": {
         "load": "KI-Unterhaltungen konnten nicht geladen werden.",
         "create": "Unterhaltung konnte nicht erstellt werden.",
