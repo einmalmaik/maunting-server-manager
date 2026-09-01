@@ -677,6 +677,33 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+    # SearXNG Search Sidecar Service
+    if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
+        cat > /etc/systemd/system/msm-searxng.service <<EOF
+[Unit]
+Description=MSM SearXNG Search Sidecar
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/searxng-sidecar
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
     # Panel Service
     cat > /etc/systemd/system/msm-panel.service <<EOF
 [Unit]
@@ -740,6 +767,9 @@ EOF
 
     systemctl daemon-reload
     systemctl enable msm-dis-sidecar.service
+    if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
+        systemctl enable msm-searxng.service 2>/dev/null || true
+    fi
     systemctl enable msm-panel.service
     if [[ -f /etc/systemd/system/msm-agent.service ]]; then
         systemctl enable msm-agent.service
@@ -866,6 +896,13 @@ if $SYSTEMD_AVAILABLE; then
         || err "DIS Sidecar konnte nicht gestartet werden."
     if ! systemctl is-active --quiet msm-dis-sidecar.service; then
         err "DIS Sidecar ist nicht aktiv. Prüfe: journalctl -u msm-dis-sidecar -n 50"
+    fi
+
+    if [[ -f /etc/systemd/system/msm-searxng.service ]]; then
+        log "Starte SearXNG Search Sidecar..."
+        systemctl restart msm-searxng.service 2>/dev/null \
+            || systemctl start msm-searxng.service 2>/dev/null || true
+        ok "SearXNG Sidecar bereit."
     fi
 
     # DIS Migration: Fernet -> DIS (einmalig, nur wenn alte Daten vorhanden)
