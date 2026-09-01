@@ -31,6 +31,7 @@ import { AiActionProposalCard } from './AiActionProposalCard'
 import { AiAutonomyButton } from './AiAutonomyButton'
 import { AiContextMeter } from './AiContextMeter'
 import { AiMemoryNotice } from './AiMemoryNotice'
+import { AiSkillModal } from './AiSkillModal'
 import { denkwahlFuer, ReasoningPicker } from './ReasoningPicker'
 // Die Blase und ihre Bestandteile standen hier, solange es genau ein Fenster
 // gab. Sie liegen jetzt in `AiVerlauf`, weil das Guardian-Fenster denselben
@@ -129,6 +130,7 @@ export function AiChat() {
   const canAttach = useHasPermission('ai.attachments.use')
   const canUseAutonomy = useHasPermission('ai.autonomous.use')
   const canUseMemory = useHasPermission('ai.memory.use')
+  const canUseSkills = useHasPermission('ai.skills.use')
   const canUseVoice = useHasPermission('ai.voice.use')
   // Modell und Denkstufe merkt sich der Browser — je Benutzer, begruendet in
   // `aiChatPreferences`. Die Kennung kommt aus dem Auth-Store statt aus einer
@@ -136,6 +138,7 @@ export function AiChat() {
   const userId = useAuthStore((state) => state.user?.id ?? 'anonym')
   const merkSchluessel = useMemo(() => aiChatPreferenceKeys(userId), [userId])
 
+  const [skillsModalOpen, setSkillsModalOpen] = useState(false)
   const [providers, setProviders] = useState<AiProviderAvailable[]>([])
   const [providerId, setProviderId] = useState<number | null>(null)
   const [attachments, setAttachments] = useState<AiAttachment[]>([])
@@ -1025,8 +1028,8 @@ export function AiChat() {
       }}
     >
       {/* ── Kopfzeile: Provider, Denkschritte, Autonomie, Skills ───────── */}
-      <header className="hidden sm:flex flex-wrap items-center gap-1.5 sm:gap-2 border-b border-outline-variant/40 px-2.5 py-1.5 sm:px-4 sm:py-2">
-        <div className="min-w-[6.5rem] max-w-[12rem] sm:min-w-[10rem] sm:max-w-[16rem] flex-1">
+      <header className="hidden sm:flex flex-wrap items-center gap-2 border-b border-outline-variant/30 bg-surface-container-low/40 px-3 py-2 sm:px-5 sm:py-2.5 backdrop-blur-sm shrink-0">
+        <div className="w-48 sm:w-60 max-w-[260px] shrink-0">
           <Dropdown
             value={providerId ? String(providerId) : null}
             onChange={waehleProvider}
@@ -1050,12 +1053,30 @@ export function AiChat() {
 
         {canUseAutonomy && <AiAutonomyButton servers={servers} disabled={busy} />}
 
+        {canUseSkills && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setSkillsModalOpen(true)}
+            className="h-8 px-2.5 text-xs flex items-center gap-1.5 border border-outline-variant/30 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/60 rounded-lg transition-colors"
+            title={t('ai.skills.directoryTitle', 'Assistenten-Skills')}
+            aria-label={t('ai.skills.directoryTitle', 'Assistenten-Skills')}
+          >
+            <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+            <span className="hidden md:inline">{t('ai.skills.directoryTitle', 'Skills')}</span>
+          </Button>
+        )}
+
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
           <Button
-            type="button" variant="ghost" size="sm"
+            type="button"
+            variant="ghost"
+            size="sm"
             disabled={busy || empty}
             onClick={() => void clearHistory()}
             aria-label={t('ai.chat.clear')}
+            className="h-8 w-8 p-0 text-on-surface-variant hover:text-status-danger"
           >
             <Trash2 className="h-4 w-4" aria-hidden="true" />
           </Button>
@@ -1093,7 +1114,7 @@ export function AiChat() {
           </div>
         )}
 
-        <div className="mx-auto w-full max-w-3xl px-3 py-6 sm:px-4">
+        <div className="mx-auto w-full max-w-4xl xl:max-w-5xl 2xl:max-w-6xl px-3 py-6 sm:px-6">
           {empty && (
             <div className="py-16 text-center">
               <Sparkles className="mx-auto h-10 w-10 text-primary/70" aria-hidden="true" />
@@ -1267,7 +1288,7 @@ export function AiChat() {
         {memoryNoticeDue && (
           <AiMemoryNotice onAnswered={() => setMemoryNoticeDue(false)} />
         )}
-        <div className="mx-auto w-full max-w-3xl">
+        <div className="mx-auto w-full max-w-4xl xl:max-w-5xl 2xl:max-w-6xl">
           {/* Nur Ungesendetes: alles Uebrige steht in seiner Nachricht. Vorher
               blieb jeder Anhang hier stehen und ging bei jeder Folgefrage
               erneut an den Anbieter. */}
@@ -1531,6 +1552,7 @@ export function AiChat() {
         </div>
       </form>
     </section>
+    <AiSkillModal open={skillsModalOpen} onClose={() => setSkillsModalOpen(false)} />
     </RegionalAnalysisLayout>
   )
 }

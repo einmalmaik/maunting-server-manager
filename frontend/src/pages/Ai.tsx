@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AudioLines, CalendarClock, ChevronDown, MessageSquare, ShieldAlert, Sparkles } from 'lucide-react'
+import { AudioLines, CalendarClock, MessageSquare, ShieldAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { aiApi, type AiVoiceConfig } from '@/api/ai'
 import { api } from '@/api/client'
 import { AiAutonomyButton } from '@/components/ai/AiAutonomyButton'
 import { AiChat } from '@/components/ai/AiChat'
-import { AiSkillDirectory } from '@/components/ai/AiSkillDirectory'
 import { AufgabenAnsicht } from '@/components/ai/AufgabenAnsicht'
 import { GuardianAnsicht } from '@/components/ai/GuardianAnsicht'
 import { WorkerAnsicht } from '@/components/ai/WorkerAnsicht'
@@ -125,11 +124,9 @@ export function Ai() {
   const { t } = useTranslation()
   const user = useAuthStore((state) => state.user)
   const canChat = useHasPermission('ai.chat.use')
-  const canUseSkills = useHasPermission('ai.skills.use')
   const canSpeak = useHasPermission('ai.voice.use')
   const canUseAutonomy = useHasPermission('ai.autonomous.use')
   const canManageTasks = useHasPermission('ai.tasks.manage')
-  const [skillsOpen, setSkillsOpen] = useState(false)
   const [sprachkonfiguration, setSprachkonfiguration] = useState<AiVoiceConfig | null>(null)
   const [servers, setServers] = useState<ServerOption[]>([])
   const [suchParameter, setzeSuchParameter] = useSearchParams()
@@ -300,29 +297,6 @@ export function Ai() {
         <WorkerAnsicht key={workerId} conversationId={workerId} />
       ) : (
         <AiChat />
-      )}
-
-      {canUseSkills && ansicht === 'text' && (
-        <div className="shrink-0 border-t border-outline-variant/40 hidden sm:block">
-          <button
-            type="button"
-            onClick={() => setSkillsOpen((current) => !current)}
-            aria-expanded={skillsOpen}
-            className="flex w-full items-center gap-2 px-4 py-2 text-xs font-medium text-on-surface-variant transition-colors hover:text-on-surface"
-          >
-            <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            {t('ai.skills.directoryTitle')}
-            <ChevronDown
-              className={`ml-auto h-3.5 w-3.5 transition-transform ${skillsOpen ? 'rotate-180' : ''}`}
-              aria-hidden="true"
-            />
-          </button>
-          {skillsOpen && (
-            <div className="max-h-[60vh] overflow-y-auto border-t border-outline-variant/40 p-4">
-              <AiSkillDirectory />
-            </div>
-          )}
-        </div>
       )}
     </div>
   )
