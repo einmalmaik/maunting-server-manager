@@ -479,15 +479,18 @@ export function Servers() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('servers.game')}
                 </label>
-                <select
-                  className="msm-input"
-                  value={form.game_type}
-                  onChange={(e) => setForm({ ...form, game_type: e.target.value })}
-                >
-                  {games.map((g) => (
-                    <option key={g.id} value={g.id}>{g.name}</option>
-                  ))}
-                </select>
+                <Dropdown
+                  value={form.game_type || null}
+                  onChange={(value) => setForm({ ...form, game_type: value })}
+                  options={games.map((g) => ({
+                    value: g.id,
+                    label: g.name,
+                  }))}
+                  searchable={games.length > 5}
+                  placeholder={t('servers.game')}
+                  aria-label={t('servers.game')}
+                  data-testid="create-server-game"
+                />
               </div>
               {/* Ziel-Node: sichtbar sobald Nodes geladen; Pflichtfeld bei Anzeige */}
               {showNodePicker && (
@@ -560,24 +563,32 @@ export function Servers() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t('servers.publicBindIp')}
                 </label>
-                <select
-                  className="msm-input"
-                  value={form.public_bind_ip}
-                  onChange={(e) => setForm({ ...form, public_bind_ip: e.target.value })}
+                <Dropdown
+                  value={form.public_bind_ip || null}
+                  onChange={(value) => setForm({ ...form, public_bind_ip: value })}
+                  options={interfaces.map((iface) => {
+                    const tag = iface.is_loopback
+                      ? ` (${t('servers.bindIp.loopback')})`
+                      : iface.is_private
+                      ? ` (${t('servers.bindIp.private')})`
+                      : ''
+                    return {
+                      value: iface.ip,
+                      label: `${iface.ip} · ${iface.interface}${tag}`,
+                      hint: iface.interface,
+                    }
+                  })}
                   disabled={interfacesLoading}
-                >
-                  {interfacesLoading && <option value="">{t('servers.bindIp.loading')}</option>}
-                  {interfaces.length === 0 && (
-                    <option value="">{t('servers.bindIp.noneAvailable')}</option>
-                  )}
-                  {interfaces.map((iface) => (
-                    <option key={`${iface.interface}-${iface.ip}`} value={iface.ip}>
-                      {iface.ip} · {iface.interface}
-                      {iface.is_loopback ? ` (${t('servers.bindIp.loopback')})` : ''}
-                      {iface.is_private && !iface.is_loopback ? ` (${t('servers.bindIp.private')})` : ''}
-                    </option>
-                  ))}
-                </select>
+                  placeholder={
+                    interfacesLoading
+                      ? t('servers.bindIp.loading')
+                      : interfaces.length === 0
+                      ? t('servers.bindIp.noneAvailable')
+                      : t('servers.bindIp.choose', 'Bind-IP auswählen')
+                  }
+                  aria-label={t('servers.publicBindIp')}
+                  data-testid="create-server-bind-ip"
+                />
                 <p className="font-body-md text-xs text-on-surface-variant mt-1">
                   {t('servers.bindIp.hint')}
                 </p>

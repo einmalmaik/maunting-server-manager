@@ -745,6 +745,11 @@ def _global_tool_definitions() -> list[dict]:
                 "cpu_limit_percent": {"type": "integer", "minimum": 10, "maximum": 3_200},
                 "disk_limit_gb": {"type": "integer", "minimum": 1, "maximum": 1_048_576},
                 "node_id": {"type": ["integer", "null"]},
+                "public_bind_ip": {
+                    "type": ["string", "null"],
+                    "maxLength": 64,
+                    "description": "Optional: Konkrete Host-/Bind-IP der Ziel-Node. Wähle die öffentliche IP oder die empfohlene Default-Bind-IP des Nodes.",
+                },
                 "modpack_mod_id": {
                     "type": ["string", "null"],
                     "maxLength": 32,
@@ -1098,9 +1103,17 @@ def provider_tool_definitions() -> list[dict]:
         # â”€â”€ Schreib-Tools: erzeugen ausschliesslich Vorschlaege â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         _server_function(
             "propose_server_lifecycle",
-            "Schlaegt Start, Stop oder Neustart zur manuellen Bestaetigung vor.",
+            "Schlaegt Start, Stop oder Neustart zur manuellen Bestaetigung vor (wird im autonomen Modus direkt ausgefuehrt).",
             {
-                "operation": {"type": "string", "enum": ["start", "stop", "restart"]},
+                "operation": {
+                    "type": "string",
+                    "enum": ["start", "stop", "restart"],
+                    "description": "Lebenszyklus-Aktion: start, stop oder restart.",
+                },
+                "action": {
+                    "type": ["string", "null"],
+                    "description": "Alias fuer operation: start, stop oder restart.",
+                },
                 **_RATIONALE_SCHEMA,
             },
             ["operation", *_RATIONALE_REQUIRED],
@@ -1845,14 +1858,42 @@ def _execute_global_read_tool(
             used_mb = normalize_ram_mb(node.ram_used)
             running_mb = sum_running_ram_mb(db, node.id)
             real_free_mb = max(0, total_mb - (used_mb if used_mb is not None else running_mb)) if total_mb is not None else None
+
+            # Netzwerk-Interfaces & IPs der Node für Vergabe und DNS
+            host_ifaces = []
+            default_bind = None
+            if node.is_local:
+                try:
+                    from services import network_interfaces_service
+                    host_ifaces = [h.to_dict() for h in network_interfaces_service.list_host_interfaces()]
+                    default_bind = network_interfaces_service.default_bind_ip()
+                except Exception:
+                    pass
+            else:
+                try:
+                    from services.node_client import NodeClient
+                    data = NodeClient.from_node(node, timeout=2.0).interfaces()
+                    host_ifaces = data.get("interfaces", []) if isinstance(data, dict) else []
+                    default_bind = data.get("default_bind_ip") if isinstance(data, dict) else None
+                except Exception:
+                    pass
+
+            public_ip = next(
+                (iface["ip"] for iface in host_ifaces if isinstance(iface, dict) and not iface.get("is_private") and not iface.get("is_loopback") and not iface.get("is_link_local")),
+                default_bind or node.host
+            )
+
             entries.append({
-                # Bewusst ohne Hostname und IP: das Modell soll Kapazitaet
-                # vergleichen koennen, nicht die Netzstruktur des Betreibers
-                # kennen. Die Auswahl trifft ohnehin MSM.
                 "node_id": node.id,
+                "name": node.name,
+                "host": node.host,
                 "status": node.status,
                 "is_local": bool(node.is_local),
+                "public_ip": public_ip,
+                "default_bind_ip": default_bind or public_ip,
+                "interfaces": host_ifaces,
                 "cpu_total": node.cpu_total,
+                "cpu_percent": node.cpu_percent,
                 # Gebucht ueber **alle** Server, auch gestoppte. Das ist die
                 # Ueberbuchungsgrenze, nicht der Verbrauch.
                 "ram_allocated_mb": allocated,

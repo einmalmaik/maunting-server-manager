@@ -445,25 +445,25 @@ Wenn ein Werkzeugaufruf fehlschlägt, einen Fehler (`error`, `detail`) oder ein 
 AUFTRAEGE = """\
 Auftraege zu Ende bringen: "richte ein" heisst anlegen, konfigurieren/Modpack installieren, DNS verbinden **und** starten, danach \
 pruefen ob er laeuft: \
-1. Prüfe `list_my_servers`. Wenn noch kein passender Server existiert: Rufe NIEMALS serverbezogene Verwaltungswerkzeuge (wie `propose_modpack_install` oder `propose_config_*`) auf, da diese zwingend eine `server_id` verlangen! \
-Lege den Server stattdessen IMMER per `propose_server_create` an (passendes Blueprint für das Spiel/Modpack wie z. B. Fabric/Forge/NeoForge, passender interner Name und Ressourcen wie 6–8 GB RAM und 40 GB Disk). \
+1. Prüfe `list_my_servers` und `read_node_capacity` (oder `advise_node_placement`). Wenn noch kein passender Server existiert: Rufe NIEMALS serverbezogene Verwaltungswerkzeuge (wie `propose_modpack_install` oder `propose_config_*`) auf, da diese zwingend eine `server_id` verlangen! \
+2. Multi-Node & Node-Auswahl: Wenn mehrere Nodes verbunden sind, wähle die am besten geeignete Node (online, geringste Auslastung). Ist eine Node überlastet oder offline, weiche im autonomen Modus selbstständig und ohne Rückfrage auf eine freie bzw. weniger ausgelastete Node aus. Wenn alle Nodes voll sind, wähle die mit der geringsten relativen Last (Überbuchung ist voll erlaubt!). \
+3. Server anlegen: Lege den Server IMMER per `propose_server_create` an (passendes Blueprint für das Spiel/Modpack wie z. B. Fabric/Forge/NeoForge, passender interner Name, Ressourcen wie 6–8 GB RAM und 40 GB Disk, sowie `node_id` und `public_bind_ip` aus der gewählten Node). \
 Wenn ein Modpack gewünscht ist, übergib dessen CurseForge-ID direkt als `modpack_mod_id` (und optional `modpack_file_id`) an `propose_server_create` — der Server wird dann angelegt und das Modpack automatisch im selben Schritt installiert! \
-2. Falls `modpack_mod_id` nicht bei der Erstellung mitgegeben wurde: Installiere das Modpack erst per `propose_modpack_install`, sobald der Server angelegt ist und die `server_id` vorliegt. Rufe `propose_modpack_install` niemals in derselben Runde wie `propose_server_create` auf. \
-3. Proaktiv DNS prüfen: Rufe `cloudflare_list_zones` auf. Ist eine Zone/Domain verfügbar, schlage direkt `propose_cloudflare_dns_record` (z. B. '{servername}.{domain}') vor, damit der Server direkt per Domain erreichbar ist. \
-4. Server starten per `propose_server_lifecycle` (action: "start") und danach den Status verifizieren. Beende die Einrichtung erst, wenn der Server hochgefahren ist! \
+4. Proaktiv DNS einrichten: Rufe `cloudflare_list_zones` auf. Ist eine Zone/Domain verfügbar, nimm die öffentliche Node-IP (`public_ip` aus `read_node_capacity` der gewählten Node) und schlage direkt per `propose_cloudflare_dns_record` (z. B. '{servername}.{domain}', rtype: 'A', content: public_ip) den DNS-Eintrag vor, damit der Server direkt per Domain erreichbar ist. \
+5. Server starten: Starte den Server per `propose_server_lifecycle` (operation: "start") und verifiziere den Online-Status. Beende die Einrichtung erst, wenn der Server hochgefahren ist! \
 Vergleiche vorher und nachher. Melde erst fertig, wenn der Server online ist. Wenn der Benutzer nach einem Server fragt und die ID weiss, nutze die ID; wenn er den Namen nennt, schau in `list_my_servers` nach der ID. Erfinde keine IDs."""
 
 
 # Der Fehler aus dem Betrieb: die KI lehnte wegen Platzmangel ab, obwohl die
 # Node leer lief — sie sah nur die Buchung, nicht den Verbrauch.
 KAPAZITAET = """\
-Kapazitaet und Überbuchung: Zugewiesener Arbeitsspeicher (`ram_allocated_mb`) ist lediglich die \
+Kapazitaet, Multi-Node-Autonomie und Überbuchung: Zugewiesener Arbeitsspeicher (`ram_allocated_mb`) ist lediglich die \
 Summe gebuchter Serverlimits und keine physische Messung. Im MSM Panel ist RAM-Überbuchung (Overcommit) \
 ausdrücklich erlaubt und Standard (`overcommit_allowed: True`). Gestoppte Server buchen RAM, aber belegen \
-keinen physischen Speicher. Selbst wenn `ram_allocatable_mb` 0 meldet, ist solange physisch noch freier RAM vorhanden ist \
-(`ram_real_free_mb` > 0 oder Node-Auslastung < 100 %) oder der Benutzer die Erstellung anfordert, \
-ein Server IMMER anzulegen. Lehne eine Servererstellung NIEMALS wegen Überbuchung oder scheinbar \
-vollem RAM ab. Lege den Server immer direkt per `propose_server_create` wie gewünscht an."""
+keinen physischen Speicher. Du hast vollen Zugriff auf alle verbundenen Nodes (`read_node_capacity`). \
+Wenn eine Node überlastet ist, weiche im autonomen Modus selbstständig auf eine andere geeignete Node aus. \
+Wenn alle Nodes ausgelastet sind, wähle die Node mit der geringsten relativen Auslastung und nutze Überbuchung. \
+Lehne eine Servererstellung NIEMALS wegen Überbuchung ab. Lege den Server immer direkt per `propose_server_create` wie gewünscht an."""
 
 
 # Seit dem Einzelchat nennt das *Modell* die server_id. Modelle bekommen ihre

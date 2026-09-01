@@ -16,7 +16,7 @@ import {
   type UserCredential,
 } from '@/api/credentials'
 import { SanitizedApiError } from '@/api/client'
-import { Button } from '@/Singra/UI'
+import { Button, Dropdown } from '@/Singra/UI'
 import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
 
@@ -163,20 +163,20 @@ export function CredentialsTab() {
           </h4>
         </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <label className="space-y-1.5">
+          <div className="space-y-1.5">
             <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
               {t('credentials.kind')}
             </span>
-            <select
-              className="msm-input"
+            <Dropdown
               value={kind}
-              onChange={(event) => setKind(event.target.value as CredentialKind)}
-            >
-              {KINDS.map((value) => (
-                <option key={value} value={value}>{t(`credentials.kinds.${value}`)}</option>
-              ))}
-            </select>
-          </label>
+              onChange={(value) => setKind(value as CredentialKind)}
+              options={KINDS.map((value) => ({
+                value,
+                label: t(`credentials.kinds.${value}`),
+              }))}
+              aria-label={t('credentials.kind')}
+            />
+          </div>
           <label className="space-y-1.5">
             <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
               {t('credentials.label')}

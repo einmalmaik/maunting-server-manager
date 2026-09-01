@@ -10,6 +10,7 @@ import { API_ORIGIN } from '@/config/api'
 import { confirm } from '@/stores/confirmStore'
 import { Switch } from '@/components/ui/Switch'
 import { NumberStepper } from '@/components/ui/NumberStepper'
+import { Dropdown } from '@/components/ui/Dropdown'
 
 interface FormState {
   id: number | null
@@ -475,18 +476,16 @@ function ProviderDialog({
             <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
               {t('settings.oauth.providerPreset')}
             </label>
-            <select
+            <Dropdown
               value={form.preset}
-              onChange={(e) => setForm({ ...form, preset: e.target.value as OAuthPreset })}
-              className="msm-input"
+              onChange={(val) => setForm({ ...form, preset: val as OAuthPreset })}
+              options={OAUTH_PRESETS.map((p) => ({
+                value: p,
+                label: t(`settings.oauth.preset.${p}` as any, p),
+              }))}
               disabled={form.id !== null}
-            >
-              {OAUTH_PRESETS.map((p) => (
-                <option key={p} value={p}>
-                  {t(`settings.oauth.preset.${p}` as any, p)}
-                </option>
-              ))}
-            </select>
+              aria-label={t('settings.oauth.providerPreset')}
+            />
           </div>
 
           <label className="flex items-center justify-between gap-4 rounded-lg border border-outline-variant/40 bg-surface-container-high px-3 py-2">

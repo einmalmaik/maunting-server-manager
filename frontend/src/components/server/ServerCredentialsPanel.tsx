@@ -18,6 +18,7 @@ import {
 } from '@/api/credentials'
 import { SanitizedApiError } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { Dropdown } from '@/components/ui/Dropdown'
 
 export function ServerCredentialsPanel({
   serverId,
@@ -132,35 +133,29 @@ export function ServerCredentialsPanel({
               )}
 
               {canManage && (
-                <label className="mt-3 block space-y-1.5">
+                <div className="mt-3 block space-y-1.5">
                   <span className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
                     {t('credentials.assign')}
                   </span>
-                  <select
-                    className="msm-input"
+                  <Dropdown
                     disabled={busy}
-                    value={row.credential_id ?? ''}
-                    onChange={(event) =>
-                      void bind(
-                        row.kind,
-                        event.target.value === '' ? null : Number(event.target.value),
-                      )
-                    }
-                  >
-                    <option value="">{t('credentials.usePanelDefault')}</option>
-                    {options.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.label}
-                        {item.username ? ` (${item.username})` : ''}
-                      </option>
-                    ))}
-                  </select>
+                    value={row.credential_id ? String(row.credential_id) : ''}
+                    onChange={(val) => void bind(row.kind, val === '' ? null : Number(val))}
+                    options={[
+                      { value: '', label: t('credentials.usePanelDefault') },
+                      ...options.map((item) => ({
+                        value: String(item.id),
+                        label: item.label + (item.username ? ` (${item.username})` : ''),
+                      })),
+                    ]}
+                    aria-label={t('credentials.assign')}
+                  />
                   {options.length === 0 && (
                     <span className="block text-xs text-on-surface-variant">
                       {t('credentials.noneStored')}
                     </span>
                   )}
-                </label>
+                </div>
               )}
             </li>
           )

@@ -38,6 +38,7 @@ import { ServerRestartPanel } from "@/components/server/ServerRestartPanel";
 import { AuthSetupBanner } from "@/components/server/AuthSetupBanner";
 import { ServerCredentialsPanel } from "@/components/server/ServerCredentialsPanel";
 import { PageHeader } from "@/Singra/UI/PageHeader";
+import { Dropdown } from "@/components/ui/Dropdown";
 import { ResourceMetricCard } from "@/Singra/UI/ResourceMetricCard";
 import { DatabaseManager } from "@/components/server/DatabaseManager";
 import { OutgoingWebhooksPanel } from "@/components/server/OutgoingWebhooksPanel";
@@ -1153,38 +1154,37 @@ export function ServerDetail() {
                 <label className="block font-label-md text-label-md text-on-surface-variant mb-1.5 uppercase tracking-wider">
                   {t("servers.publicBindIp")}
                 </label>
-                <select
-                  className="msm-input"
-                  value={networkForm.public_bind_ip}
-                  onChange={(e) =>
+                <Dropdown
+                  value={networkForm.public_bind_ip || null}
+                  onChange={(value) =>
                     setNetworkForm({
                       ...networkForm,
-                      public_bind_ip: e.target.value,
+                      public_bind_ip: value,
                     })
                   }
+                  options={interfaces.map((iface) => {
+                    const tag = iface.is_loopback
+                      ? ` (${t("servers.bindIp.loopback")})`
+                      : iface.is_private && !iface.is_loopback
+                      ? ` (${t("servers.bindIp.private")})`
+                      : "";
+                    return {
+                      value: iface.ip,
+                      label: `${iface.ip} · ${iface.interface}${tag}`,
+                      hint: iface.interface,
+                    };
+                  })}
                   disabled={interfacesLoading}
-                  required
-                >
-                  <option value="">
-                    {interfacesLoading
+                  placeholder={
+                    interfacesLoading
                       ? t("servers.bindIp.loading")
-                      : t("servers.bindIp.choose")}
-                  </option>
-                  {interfaces.map((iface) => (
-                    <option
-                      key={`${iface.interface}-${iface.ip}`}
-                      value={iface.ip}
-                    >
-                      {iface.ip} · {iface.interface}
-                      {iface.is_loopback
-                        ? ` (${t("servers.bindIp.loopback")})`
-                        : ""}
-                      {iface.is_private && !iface.is_loopback
-                        ? ` (${t("servers.bindIp.private")})`
-                        : ""}
-                    </option>
-                  ))}
-                </select>
+                      : interfaces.length === 0
+                      ? t("servers.bindIp.noneAvailable")
+                      : t("servers.bindIp.choose")
+                  }
+                  aria-label={t("servers.publicBindIp")}
+                  data-testid="server-detail-bind-ip"
+                />
                 <p className="font-body-md text-xs text-on-surface-variant mt-1">
                   {t("servers.bindIp.hint")}
                 </p>
@@ -1253,23 +1253,23 @@ export function ServerDetail() {
                               className="msm-input"
                               placeholder={t('servers.portAuto')}
                             />
-                            <select
-                              aria-label={`${label} protocol`}
-                              className="msm-input px-2"
+                            <Dropdown
                               value={protocol}
-                              onChange={(e) =>
+                              onChange={(value) =>
                                 setNetworkForm({
                                   ...networkForm,
                                   protocols: {
                                     ...networkForm.protocols,
-                                    [role]: e.target.value,
+                                    [role]: value,
                                   },
                                 })
                               }
-                            >
-                              <option value="udp">UDP</option>
-                              <option value="tcp">TCP</option>
-                            </select>
+                              options={[
+                                { value: "udp", label: "UDP" },
+                                { value: "tcp", label: "TCP" },
+                              ]}
+                              aria-label={`${label} protocol`}
+                            />
                           </div>
                         </div>
                       );

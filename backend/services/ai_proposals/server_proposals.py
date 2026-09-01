@@ -563,13 +563,21 @@ def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
         elif db.query(Node).filter(Node.id == node_id).first() is None:
             node_id = None
 
+    public_bind_ip = str(arguments.get("public_bind_ip") or arguments.get("bind_ip") or "").strip() or None
+    if public_bind_ip is not None:
+        if any(c in public_bind_ip for c in ("\n", "\r", "\0", " ")):
+            raise AiActionValidationError("Ungueltige Zeichen in public_bind_ip")
+
     payload = {"name": name, "game_type": real_game_type, "node_id": node_id, **limits}
+    if public_bind_ip:
+        payload["public_bind_ip"] = public_bind_ip
     preview = {
         "operation": "create_server",
         "name": name,
         "game_type": real_game_type,
         **limits,
         "node_id": node_id,
+        "public_bind_ip": public_bind_ip or "auto",
         # Ports und Installationsverzeichnis vergibt MSM. Eine Vorschau, die
         # konkrete Ports nennt, waere eine Zusage, die erst die Portvergabe
         # einloesen kann â€” und die kann bis dahin belegt sein.
@@ -1664,6 +1672,7 @@ def _execute_server_create(
         ram_limit_mb=int(payload["ram_limit_mb"]),
         disk_limit_gb=int(payload["disk_limit_gb"]),
         node_id=payload.get("node_id"),
+        public_bind_ip=payload.get("public_bind_ip"),
     )
     result = provision_server(
         db,

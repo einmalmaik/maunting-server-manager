@@ -62,11 +62,40 @@ def advise_node(db: Session, ram_need_mb: int, disk_need_gb: int = 5) -> list[di
         if avail_disk is not None:
             reason_parts.append(f"{avail_disk}GB Disk frei")
             
+        # Netzwerk-Interfaces & IPs der Node für Vergabe und DNS
+        host_ifaces = []
+        default_bind = None
+        if n.is_local:
+            try:
+                from services import network_interfaces_service
+                host_ifaces = [h.to_dict() for h in network_interfaces_service.list_host_interfaces()]
+                default_bind = network_interfaces_service.default_bind_ip()
+            except Exception:
+                pass
+        else:
+            try:
+                from services.node_client import NodeClient
+                data = NodeClient.from_node(n, timeout=2.0).interfaces()
+                host_ifaces = data.get("interfaces", []) if isinstance(data, dict) else []
+                default_bind = data.get("default_bind_ip") if isinstance(data, dict) else None
+            except Exception:
+                pass
+        
+        public_ip = next(
+            (iface["ip"] for iface in host_ifaces if isinstance(iface, dict) and not iface.get("is_private") and not iface.get("is_loopback") and not iface.get("is_link_local")),
+            default_bind or n.host
+        )
+
         scored.append(
             {
                 "node_id": n.id,
                 "name": n.name,
+                "host": n.host,
                 "status": n.status,
+                "is_local": bool(n.is_local),
+                "public_ip": public_ip,
+                "default_bind_ip": default_bind or public_ip,
+                "interfaces": host_ifaces,
                 "ram_total_mb": host_total_mb,
                 "ram_used_mb": host_used_mb,
                 "ram_allocated_mb": alloc_ram,
