@@ -734,7 +734,10 @@ def _global_tool_definitions() -> list[dict]:
         _function(
             "propose_server_create",
             "Schlaegt die Erstellung eines neuen Servers zur manuellen Bestaetigung vor. "
-            "Ports, Installationsverzeichnis und Host werden von MSM vergeben.",
+            "Ports, Installationsverzeichnis und Host werden von MSM vergeben. "
+            "Wenn ein Modpack mitgegeben wird (modpack_mod_id), wird es nach der "
+            "Servererstellung automatisch installiert — ein separater propose_modpack_install "
+            "ist dann NICHT noetig.",
             {
                 "name": {"type": "string", "maxLength": 128},
                 "game_type": {"type": "string", "maxLength": 64},
@@ -742,6 +745,16 @@ def _global_tool_definitions() -> list[dict]:
                 "cpu_limit_percent": {"type": "integer", "minimum": 10, "maximum": 3_200},
                 "disk_limit_gb": {"type": "integer", "minimum": 1, "maximum": 1_048_576},
                 "node_id": {"type": ["integer", "null"]},
+                "modpack_mod_id": {
+                    "type": ["string", "null"],
+                    "maxLength": 32,
+                    "description": "Optional: CurseForge Modpack-ID. Wird nach der Servererstellung automatisch installiert.",
+                },
+                "modpack_file_id": {
+                    "type": ["string", "null"],
+                    "maxLength": 32,
+                    "description": "Optional: File-ID der Modpack-Version (neueste, wenn leer).",
+                },
                 **_RATIONALE_SCHEMA,
             },
             [

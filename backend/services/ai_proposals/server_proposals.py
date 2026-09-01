@@ -576,6 +576,22 @@ def _server_create_payload(db: Session, arguments: dict) -> tuple[dict, dict]:
         "ports": "auto",
         "restart_required": False,
     }
+
+    # Optionales Modpack: wenn mitgegeben, wird es nach der Servererstellung
+    # automatisch installiert. Dieselbe Validierung wie _modpack_install_payload.
+    modpack_mod_id = str(arguments.get("modpack_mod_id") or "").strip() or None
+    modpack_file_id = str(arguments.get("modpack_file_id") or "").strip() or None
+    if modpack_mod_id is not None:
+        if any(c in modpack_mod_id for c in ("\n", "\r", "\0")):
+            raise AiActionValidationError("Ungueltige Zeichen in modpack_mod_id")
+        if modpack_file_id and any(c in modpack_file_id for c in ("\n", "\r", "\0")):
+            raise AiActionValidationError("Ungueltige Zeichen in modpack_file_id")
+        payload["modpack_mod_id"] = modpack_mod_id
+        if modpack_file_id:
+            payload["modpack_file_id"] = modpack_file_id
+        preview["modpack_mod_id"] = modpack_mod_id
+        preview["modpack_file_id"] = modpack_file_id or "latest"
+
     return payload, preview
 
 def _bind_ip_payload(db: Session, server: Server, arguments: dict) -> tuple[dict, dict]:
@@ -2439,15 +2455,35 @@ def _ausfuehren_file_delete(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgef
 
 def _ausfuehren_server_create(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
     # Ebenso wie beim Mod-Download: `provision_server` kehrt zurueck, sobald
-    # der Server existiert und die Installation laeuft â€” exakt der Punkt, an
+    # der Server existiert und die Installation laeuft — exakt der Punkt, an
     # dem auch `POST /api/servers` dem Panel antwortet. Der weitere Verlauf
     # haengt an der Operation-Task, deren ID mitgegeben wird.
     result, created_server_id, task_id = _execute_server_create(
         db, user=rahmen.active_user, payload=rahmen.payload,
         correlation_id=rahmen.correlation_id, proposal_id=rahmen.row_id,
     )
+
+    # Optionales Modpack: wenn die Payload ein `modpack_mod_id` enthaelt,
+    # starten wir die Installation direkt auf dem frisch angelegten Server.
+    # Derselbe Weg wie `_ausfuehren_modpack_install`, nur mit der neuen ID.
+    modpack_mod_id = str(rahmen.payload.get("modpack_mod_id") or "").strip()
+    if modpack_mod_id and created_server_id:
+        modpack_file_id = str(rahmen.payload.get("modpack_file_id") or "").strip() or None
+        try:
+            _install_modpack_on_server(db, created_server_id, modpack_mod_id)
+            result["modpack_mod_id"] = modpack_mod_id
+            result["modpack_file_id"] = modpack_file_id
+            result["modpack_status"] = "installing"
+        except Exception:
+            logger.warning(
+                "Modpack-Installation nach Servererstellung fehlgeschlagen "
+                "server_id=%s modpack=%s", created_server_id, modpack_mod_id,
+            )
+            result["modpack_status"] = "failed"
+            result["modpack_mod_id"] = modpack_mod_id
+
     # Nur dieses Werkzeug setzt `neuer_server_id`: `execute_proposal`
-    # uebernimmt damit die frisch vergebene Nummer â€” daran haengen der
+    # uebernimmt damit die frisch vergebene Nummer — daran haengen der
     # Fixup-Block des Erstellungsvorschlags und das Audit.
     return _Ausgefuehrt(
         result=result, task_id=task_id, neuer_server_id=created_server_id
@@ -2586,22 +2622,17 @@ def _ausfuehren_backup_schedule_set(db: Session, rahmen: _AusfuehrungsRahmen) ->
         "ai_managed": True,
     })
 
-def _ausfuehren_modpack_install(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
-    p = rahmen.payload
-    server_id = rahmen.server_id
-    mod_id = str(p.get("modpack_mod_id") or "").strip()
-    file_id = p.get("file_id")
+def _install_modpack_on_server(db: Session, server_id: int, mod_id: str) -> None:
+    """Legt den Mod-Eintrag an und startet die Hintergrund-Installation.
 
-    if not server_id or not mod_id:
-        return _Ausgefuehrt(result={"status": "error", "error": "server_id oder modpack_mod_id fehlt"})
-
-    from models import Mod, Server
+    Gemeinsamer Kern fuer `_ausfuehren_modpack_install` und die automatische
+    Modpack-Installation nach einer Servererstellung. Ein Fehler hier darf die
+    Servererstellung nicht rueckgaengig machen — der Server existiert bereits
+    und ist nutzbar, nur das Modpack fehlt dann.
+    """
+    from models import Mod
     from routers.mods import install_mod_bg
     import threading
-
-    server = db.query(Server).filter(Server.id == server_id).first()
-    if not server:
-        return _Ausgefuehrt(result={"status": "error", "error": "Server nicht gefunden"})
 
     existing = db.query(Mod).filter(Mod.server_id == server_id, Mod.workshop_id == mod_id).first()
     if not existing:
@@ -2625,8 +2656,22 @@ def _ausfuehren_modpack_install(db: Session, rahmen: _AusfuehrungsRahmen) -> _Au
         existing.install_action = "install"
         db.commit()
 
-    # Hintergrund-Installation fuer Modpack anstossen
     threading.Thread(target=install_mod_bg, args=(server_id, mod_id), daemon=True).start()
+
+def _ausfuehren_modpack_install(db: Session, rahmen: _AusfuehrungsRahmen) -> _Ausgefuehrt:
+    p = rahmen.payload
+    server_id = rahmen.server_id
+    mod_id = str(p.get("modpack_mod_id") or "").strip()
+    file_id = p.get("file_id")
+
+    if not server_id or not mod_id:
+        return _Ausgefuehrt(result={"status": "error", "error": "server_id oder modpack_mod_id fehlt"})
+
+    server = db.get(Server, server_id)
+    if not server:
+        return _Ausgefuehrt(result={"status": "error", "error": "Server nicht gefunden"})
+
+    _install_modpack_on_server(db, server_id, mod_id)
 
     return _Ausgefuehrt(result={
         "modpack_mod_id": mod_id,
@@ -2635,3 +2680,4 @@ def _ausfuehren_modpack_install(db: Session, rahmen: _AusfuehrungsRahmen) -> _Au
         "status": "installing",
         "note": f"Modpack {mod_id} wird im Hintergrund heruntergeladen und entpackt",
     })
+

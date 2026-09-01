@@ -139,21 +139,37 @@ def test_the_refusal_does_not_reveal_whether_a_node_exists(
 def test_creation_proposal_needs_a_reason_and_an_expected_effect(
     db: Session, regular_user: User
 ) -> None:
-    """Zielpunkt 3.6: ein Vorschlag ohne Begruendung ist keine Vorschau."""
+    """Zielpunkt 3.6: Resilienz bei Begruendung — Aliase und sichere Fallbacks."""
+    import json
+
     _role(db, regular_user, ("ai.chat.use", "servers.create"))
     conversation = _conversation(db, regular_user)
     arguments = _arguments()
     del arguments["reason"]
 
-    with pytest.raises(ai_action_errors.AiActionValidationError):
-        ai_proposal_service.create_proposal(
-            db,
-            user=regular_user,
-            conversation=conversation,
-            tool_name="propose_server_create",
-            arguments=arguments,
-            correlation_id=str(uuid4()),
-        )
+    # Ohne reason greift der sichere Default-Fallback
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_server_create",
+        arguments=arguments,
+        correlation_id=str(uuid4()),
+    )
+    assert proposal.reason == "Automatische Serveraktion"
+
+    # Mit deutschem Alias "begruendung"
+    arguments_alias = _arguments(begruendung="Benutzer wuenscht neuen Server")
+    del arguments_alias["reason"]
+    proposal_alias = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_server_create",
+        arguments=arguments_alias,
+        correlation_id=str(uuid4()),
+    )
+    assert proposal_alias.reason == "Benutzer wuenscht neuen Server"
 
 
 def test_unknown_game_type_is_rejected_before_a_proposal_exists(
@@ -334,3 +350,117 @@ def test_a_revoked_permission_blocks_execution_even_after_confirmation(
 
     assert excinfo.value.code == "AI_ACTION_ACCESS_REVOKED"
     assert called["count"] == 0, "Die Provisionierung darf ohne Recht nicht laufen"
+
+
+def test_server_create_proposal_with_modpack(db: Session, regular_user: User) -> None:
+    """Modpack-Felder landen in der Payload und in der Vorschau."""
+    import json
+    _role(db, regular_user, ("ai.chat.use", "servers.create"))
+    conversation = _conversation(db, regular_user)
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_server_create",
+        arguments=_arguments(
+            name="Cobblemon Server",
+            game_type="minecraft_fabric",
+            modpack_mod_id="687131",
+            modpack_file_id="12345",
+        ),
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    preview = json.loads(proposal.preview_json)
+    assert preview["operation"] == "create_server"
+    assert preview["modpack_mod_id"] == "687131"
+    assert preview["modpack_file_id"] == "12345"
+
+
+def test_server_create_execution_triggers_modpack_installation(
+    db: Session, regular_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Die Ausfuehrung stoesst nach der Erstellung automatisch die Modpack-Installation an."""
+    from dataclasses import dataclass
+    from models import Mod
+
+    _role(db, regular_user, ("ai.chat.use", "servers.create"))
+    conversation = _conversation(db, regular_user)
+    proposal = ai_proposal_service.create_proposal(
+        db,
+        user=regular_user,
+        conversation=conversation,
+        tool_name="propose_server_create",
+        arguments=_arguments(
+            name="Cobblemon Server",
+            game_type="minecraft_fabric",
+            modpack_mod_id="687131",
+        ),
+        correlation_id=str(uuid4()),
+    )
+    db.commit()
+
+    angelegt = Server(
+        name="Cobblemon Server", game_type="minecraft_fabric", install_dir="/tmp/cobblemon",
+        status="installing", container_name="msm-cobblemon",
+    )
+    db.add(angelegt)
+    db.commit()
+    db.refresh(angelegt)
+    neue_server_id = angelegt.id
+
+    @dataclass
+    class _Task:
+        id: str = "task-modpack-1"
+
+    @dataclass
+    class _Result:
+        server: Server
+        task: _Task
+
+    monkeypatch.setattr(
+        "services.server_provisioning_service.provision_server",
+        lambda *a, **kw: _Result(server=angelegt, task=_Task()),
+    )
+
+    installed_bg = []
+    monkeypatch.setattr(
+        "routers.mods.install_mod_bg",
+        lambda server_id, mod_id: installed_bg.append((server_id, mod_id)),
+    )
+
+    _, token = ai_proposal_service.confirm_proposal(
+        db, proposal_id=proposal.id, user=regular_user
+    )
+    executed, result = ai_proposal_service.execute_proposal(
+        db, proposal_id=proposal.id, user=regular_user, confirmation_token=token
+    )
+
+    assert result["server_id"] == neue_server_id
+    assert result["modpack_mod_id"] == "687131"
+    assert result["modpack_status"] == "installing"
+
+    # Mod-Eintrag in DB pruefen
+    mod = db.query(Mod).filter(Mod.server_id == neue_server_id, Mod.workshop_id == "687131").first()
+    assert mod is not None
+    assert mod.install_status == "pending"
+
+
+def test_server_create_with_invalid_modpack_id_rejected(
+    db: Session, regular_user: User
+) -> None:
+    """Ungueltige Zeichen in modpack_mod_id werden abgewiesen."""
+    _role(db, regular_user, ("ai.chat.use", "servers.create"))
+    conversation = _conversation(db, regular_user)
+
+    with pytest.raises(ai_action_errors.AiActionValidationError):
+        ai_proposal_service.create_proposal(
+            db,
+            user=regular_user,
+            conversation=conversation,
+            tool_name="propose_server_create",
+            arguments=_arguments(modpack_mod_id="687131\nmalicious"),
+            correlation_id=str(uuid4()),
+        )
+

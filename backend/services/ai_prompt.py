@@ -446,8 +446,9 @@ AUFTRAEGE = """\
 Auftraege zu Ende bringen: "richte ein" heisst anlegen, konfigurieren/Modpack installieren, DNS verbinden **und** starten, danach \
 pruefen ob er laeuft: \
 1. Prüfe `list_my_servers`. Wenn noch kein passender Server existiert: Rufe NIEMALS serverbezogene Verwaltungswerkzeuge (wie `propose_modpack_install` oder `propose_config_*`) auf, da diese zwingend eine `server_id` verlangen! \
-Lege den Server stattdessen IMMER zuerst per `propose_server_create` an (passendes Blueprint für das Spiel/Modpack wie z. B. Fabric/Forge/NeoForge, passender interner Name und Ressourcen wie 6–8 GB RAM und 40 GB Disk). \
-2. Sobald der Server angelegt ist bzw. die server_id vorliegt: Modpack via `propose_modpack_install` oder Einstellungen konfigurieren/installieren. \
+Lege den Server stattdessen IMMER per `propose_server_create` an (passendes Blueprint für das Spiel/Modpack wie z. B. Fabric/Forge/NeoForge, passender interner Name und Ressourcen wie 6–8 GB RAM und 40 GB Disk). \
+Wenn ein Modpack gewünscht ist, übergib dessen CurseForge-ID direkt als `modpack_mod_id` (und optional `modpack_file_id`) an `propose_server_create` — der Server wird dann angelegt und das Modpack automatisch im selben Schritt installiert! \
+2. Falls `modpack_mod_id` nicht bei der Erstellung mitgegeben wurde: Installiere das Modpack erst per `propose_modpack_install`, sobald der Server angelegt ist und die `server_id` vorliegt. Rufe `propose_modpack_install` niemals in derselben Runde wie `propose_server_create` auf. \
 3. Proaktiv DNS prüfen: Rufe `cloudflare_list_zones` auf. Ist eine Zone/Domain verfügbar, schlage direkt `propose_cloudflare_dns_record` (z. B. '{servername}.{domain}') vor, damit der Server direkt per Domain erreichbar ist. \
 4. Server starten per `propose_server_lifecycle` (action: "start") und danach den Status verifizieren. Beende die Einrichtung erst, wenn der Server hochgefahren ist! \
 Vergleiche vorher und nachher. Melde erst fertig, wenn der Server online ist. Wenn der Benutzer nach einem Server fragt und die ID weiss, nutze die ID; wenn er den Namen nennt, schau in `list_my_servers` nach der ID. Erfinde keine IDs."""
