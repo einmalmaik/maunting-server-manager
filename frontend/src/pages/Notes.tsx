@@ -119,7 +119,7 @@ export function Notes() {
     } finally {
       setLoading(false)
     }
-  }, [t])
+  }, [])
 
   const loadTeams = useCallback(async () => {
     try {

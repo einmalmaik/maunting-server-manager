@@ -48,6 +48,7 @@ const KI_PUNKTE = [
   'attachments',
   'autonomy',
   'tools',
+  'voice',
   'guardian',
   'tasks',
   'mailboxes',
@@ -169,8 +170,8 @@ describe('Privacy page', () => {
     );
     // Ausdruecklich als Zahl festgehalten: neun Punkte vor der
     // Guardian-Kopplung, zehn danach, elf seit den stehenden KI-Aufgaben,
-    // dreizehn seit verknüpften Postfächern und Kalendern.
-    expect(gerendert).toHaveLength(13);
+    // dreizehn seit verknüpften Postfächern und Kalendern, vierzehn mit Sprachmodus.
+    expect(gerendert).toHaveLength(14);
   });
 });
 

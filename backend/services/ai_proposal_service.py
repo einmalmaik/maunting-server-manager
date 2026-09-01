@@ -25,6 +25,7 @@ from services.ai_tool_registry import (
     WRITE_TOOLS,
     aufgaben_tools,
 )
+from services.file_history_service import MAX_HISTORY_EDIT_SIZE
 from services.ai_proposals.base import (
     _REPARATUR_RECHTE,
     _LIFECYCLE_RECHTE,

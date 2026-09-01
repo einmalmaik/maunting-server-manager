@@ -622,6 +622,8 @@ fn verboten(programm: &str) -> bool {
 mod tests {
     use super::*;
 
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
     #[test]
     fn systemwerkzeuge_sind_ausgeschlossen() {
         for name in [
@@ -645,6 +647,7 @@ mod tests {
 
     #[test]
     fn ein_verfallener_plan_loescht_nichts() {
+        let _lock = TEST_MUTEX.lock().unwrap();
         // Der Plan lag unbegrenzt: ein Klick eine Stunde spaeter loeschte
         // wirklich, und das Ergebnis ging an einen Auftrag, den das Panel
         // laengst verworfen hatte. Der Lauf war da schon mit
@@ -689,6 +692,7 @@ mod tests {
 
     #[test]
     fn wartende_desktop_aktion_laesst_sich_ablehnen() {
+        let _lock = TEST_MUTEX.lock().unwrap();
         let wartend = WartendeAktion {
             auftrag_id: "test-auftrag-123".to_string(),
             werkzeug: "desktop_system".to_string(),
@@ -704,6 +708,7 @@ mod tests {
 
     #[test]
     fn verfallene_desktop_aktion_wird_abgewiesen() {
+        let _lock = TEST_MUTEX.lock().unwrap();
         let wartend = WartendeAktion {
             auftrag_id: "test-auftrag-expired".to_string(),
             werkzeug: "desktop_system".to_string(),

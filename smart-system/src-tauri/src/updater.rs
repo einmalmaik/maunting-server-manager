@@ -1,14 +1,45 @@
 //! MSS — Maunting Smart System, Automatischer Updater.
 //!
 //! Prüft nach dem Anwendungsstart asynchron gegen echte GitHub Releases
-//! (über die kanonische `latest.json`). Liegt ein Release vor, lädt der
-//! Updater das Paket herunter, prüft Signatur und Prüfsumme, installiert
-//! es sauber und stößt einen Neustart der Anwendung an.
+//! (über die kanonische `latest.json`).
+//! - Desktop (Windows/Linux/macOS): Lädt das Paket herunter, prüft Signatur
+//!   und Prüfsumme, installiert es sauber und stößt einen Neustart an.
+//! - Android (APK): Prüft die neueste Version gegen `latest.json`, benachrichtigt
+//!   den Nutzer via nativer Benachrichtigung und sendet ein Event an das Frontend
+//!   mit dem direkten Download-Link zur aktuellen APK.
 
 use tauri::AppHandle;
 
 #[cfg(not(target_os = "android"))]
 use tauri_plugin_updater::UpdaterExt;
+
+#[cfg(target_os = "android")]
+use tauri::Emitter;
+#[cfg(target_os = "android")]
+use tauri_plugin_notification::NotificationExt;
+
+pub fn ist_neuer(ziel: &str, aktuell: &str) -> bool {
+    let ziel_teile: Vec<u64> = ziel
+        .trim_start_matches('v')
+        .split('.')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let akt_teile: Vec<u64> = aktuell
+        .trim_start_matches('v')
+        .split('.')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    for (z, a) in ziel_teile.iter().zip(akt_teile.iter()) {
+        if z > a {
+            return true;
+        }
+        if z < a {
+            return false;
+        }
+    }
+    ziel_teile.len() > akt_teile.len()
+}
 
 #[allow(unused_variables)]
 pub fn pruefe_und_installiere_update_hintergrund(app_handle: AppHandle) {
@@ -64,4 +95,86 @@ pub fn pruefe_und_installiere_update_hintergrund(app_handle: AppHandle) {
             }
         }
     });
+
+    #[cfg(target_os = "android")]
+    std::thread::spawn(move || {
+        // 5 Sekunden Pause nach dem Start
+        std::thread::sleep(std::time::Duration::from_secs(5));
+
+        let client = match reqwest::blocking::Client::builder()
+            .user_agent("MauntingSmartSystem-Android")
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[MSS Android Updater] HTTP-Client konnte nicht erstellt werden: {e}");
+                return;
+            }
+        };
+
+        let resp = match client
+            .get("https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/latest.json")
+            .send()
+        {
+            Ok(r) if r.status().is_success() => r,
+            Ok(r) => {
+                eprintln!("[MSS Android Updater] Statuscode {}: Update-Prüfung übersprungen", r.status());
+                return;
+            }
+            Err(e) => {
+                eprintln!("[MSS Android Updater] Fehler bei der Update-Prüfung: {e}");
+                return;
+            }
+        };
+
+        let text = match resp.text() {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+
+        let parsed: serde_json::Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+
+        let latest_version_str = match parsed.get("version").and_then(|v| v.as_str()) {
+            Some(v) => v.trim_start_matches('v'),
+            None => return,
+        };
+
+        let current_version = app_handle.package_info().version.to_string();
+        if ist_neuer(latest_version_str, &current_version) {
+            println!("[MSS Android Updater] Neues Release gefunden: v{latest_version_str} (aktuell: v{current_version})");
+
+            let _ = app_handle.notification().builder()
+                .title("MSS Update verfügbar")
+                .body(format!("Version v{latest_version_str} ist verfügbar. Tippe zum Herunterladen der neuen APK."))
+                .show();
+
+            let _ = app_handle.emit("mss:apk-update-verfuegbar", serde_json::json!({
+                "version": latest_version_str,
+                "aktuell": current_version,
+                "apk_url": "https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSmartSystem.apk"
+            }));
+        } else {
+            println!("[MSS Android Updater] MSS APK ist auf dem aktuellen Stand (v{current_version}).");
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_vergleich_erkennt_neuere_versionen() {
+        assert!(ist_neuer("0.2.0", "0.1.9"));
+        assert!(ist_neuer("1.0.0", "0.9.9"));
+        assert!(ist_neuer("v0.1.10", "0.1.9"));
+        assert!(ist_neuer("0.1.9.1", "0.1.9"));
+        assert!(!ist_neuer("0.1.9", "0.1.9"));
+        assert!(!ist_neuer("0.1.8", "0.1.9"));
+        assert!(!ist_neuer("0.1.0", "1.0.0"));
+    }
 }

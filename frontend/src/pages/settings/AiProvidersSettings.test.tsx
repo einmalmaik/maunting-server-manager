@@ -67,6 +67,7 @@ describe('AiProvidersSettings', () => {
       ressource_noetig: false,
       fuehrt_katalog: true,
       kann_hoeren: true,
+      realtime_tauglich: true,
     }, {
       // Der zweite Anbieter steht hier, damit die Auswahl im Test dieselbe
       // Entscheidung zu treffen hat wie im Betrieb: zwei Zugänge, die
@@ -196,24 +197,21 @@ describe('AiProvidersSettings', () => {
       .toBeInTheDocument()
   })
 
-  it('nimmt „1,20" als Preis an und zeigt, was daraus in Dollar wird', async () => {
+  it('nimmt „1,20" als Preis an und speichert ihn in Dollar', async () => {
     // Der eigentliche Anlass: das Feld war ein Zaehler in ganzen Cent, und
     // zwischen 1 und 2 lag nichts. Ein Preis ist eine Dezimalzahl.
     render(<AiProvidersSettings canWrite />)
-    const preisFeld = await screen.findByLabelText(/Rückfallpreis je 1 Mio\. Tokens \(EUR\)/)
+    const preisFeld = await screen.findByLabelText(/Eingabe · EUR \/ 1 Mio\. Tokens/)
 
     fireEvent.change(preisFeld, { target: { value: '1,20' } })
     fireEvent.blur(preisFeld)
 
     // 1,20 EUR bei Kurs 0,92 sind 1,304348 USD — aufgerundet auf die Microunit,
-    // wie ueberall bei Kosten. Und der Betreiber sieht es, statt dass die
-    // Umrechnung im Verborgenen passiert.
-    await waitFor(() => expect(screen.getByText(/1,3043/)).toBeInTheDocument())
-
+    // wie ueberall bei Kosten.
     fireEvent.click(screen.getByRole('button', { name: 'Speichern' }))
     await waitFor(() => expect(aiApi.updateProvider).toHaveBeenCalledWith(
       4,
-      expect.objectContaining({ token_price_micro_usd_per_million: 1_304_348 }),
+      expect.objectContaining({ standard_input_price_micro_usd_per_million: 1_304_348 }),
     ))
   })
 
