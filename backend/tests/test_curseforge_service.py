@@ -238,3 +238,60 @@ async def test_search_mods_filters_non_distributable_mods():
         assert [m.publishedfileid for m in mods] == ["100", "300"]
         await svc.close()
 
+
+@pytest.mark.asyncio
+async def test_search_mods_passes_mod_loader_type_and_game_version():
+    mock_resp = httpx.Response(status_code=200, json={"data": []}, request=httpx.Request("GET", "https://api.curseforge.com/v1/mods/search"))
+
+    with patch("services.curseforge_api_key_service.resolve_key", return_value="TEST_API_KEY"):
+        svc = CurseForgeService()
+        mock_get = AsyncMock(return_value=mock_resp)
+        with patch.object(svc.client, "get", new=mock_get):
+            await svc.search_mods(
+                game_id=432,
+                query="cobblemon",
+                mod_loader_type=4,
+                game_version="1.20.1",
+            )
+
+        call_params = mock_get.call_args[1]["params"]
+        assert call_params["gameId"] == 432
+        assert call_params["searchFilter"] == "cobblemon"
+        assert call_params["modLoaderType"] == 4
+        assert call_params["gameVersion"] == "1.20.1"
+        await svc.close()
+
+
+def test_detect_minecraft_modloader_and_version():
+    from routers.curseforge import _detect_minecraft_modloader_and_version
+    from unittest.mock import MagicMock
+
+    server = MagicMock()
+    plugin = MagicMock()
+
+    # Fabric
+    server.game_type = "minecraft_fabric"
+    plugin.blueprint.runtime.env = {"VERSION": "1.21.1"}
+    loader, ver, cls = _detect_minecraft_modloader_and_version(server, plugin)
+    assert loader == 4
+    assert ver == "1.21.1"
+    assert cls is None
+
+    # Forge
+    server.game_type = "minecraft_forge"
+    plugin.blueprint.runtime.env = {"VERSION": "LATEST"}
+    loader, ver, cls = _detect_minecraft_modloader_and_version(server, plugin)
+    assert loader == 1
+    assert ver is None  # LATEST ignored
+    assert cls is None
+
+    # NeoForge
+    server.game_type = "minecraft_neoforge"
+    loader, ver, cls = _detect_minecraft_modloader_and_version(server, plugin)
+    assert loader == 6
+
+    # Paper (Spigot/Bukkit plugins)
+    server.game_type = "minecraft_paper"
+    loader, ver, cls = _detect_minecraft_modloader_and_version(server, plugin)
+    assert cls == "12"
+

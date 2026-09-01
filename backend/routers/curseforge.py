@@ -5,7 +5,9 @@ CurseForge API v1. Nutzt den vom Betreiber in den Panel-Einstellungen hinterlegt
 API-Schlüssel.
 """
 
-from typing import List, Optional
+from __future__ import annotations
+
+from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -50,6 +52,33 @@ def _mod_to_dict(mod: CurseForgeModInfo) -> dict:
     }
 
 
+def _detect_minecraft_modloader_and_version(server: Server, plugin: Any) -> tuple[int | None, str | None, str | None]:
+    """Ermittelt mod_loader_type (1=Forge, 4=Fabric, 5=Quilt, 6=NeoForge), game_version und ggf. class_id."""
+    gt = (server.game_type or "").lower()
+    mod_loader_type: int | None = None
+    override_class_id: str | None = None
+
+    if "fabric" in gt:
+        mod_loader_type = 4
+    elif "neoforge" in gt:
+        mod_loader_type = 6
+    elif "forge" in gt:
+        mod_loader_type = 1
+    elif "quilt" in gt:
+        mod_loader_type = 5
+    elif any(k in gt for k in ("paper", "spigot", "purpur", "bukkit")):
+        override_class_id = "12"
+
+    game_version: str | None = None
+    bp = getattr(plugin, "blueprint", None)
+    if bp and hasattr(bp, "runtime") and hasattr(bp.runtime, "env"):
+        v = str(bp.runtime.env.get("VERSION", "")).strip()
+        if v and v.upper() != "LATEST":
+            game_version = v
+
+    return mod_loader_type, game_version, override_class_id
+
+
 @router.get("/search")
 async def search_curseforge_mods(
     server_id: int,
@@ -81,6 +110,15 @@ async def search_curseforge_mods(
     else:
         resolved_class_id = mod_support.get("curseforge_class_id")
 
+    mod_loader_type = None
+    game_version = None
+    if str(game_id) == "432":
+        auto_loader, auto_ver, auto_class = _detect_minecraft_modloader_and_version(server, plugin)
+        mod_loader_type = auto_loader
+        game_version = auto_ver
+        if auto_class and resolved_class_id in (None, "6"):
+            resolved_class_id = auto_class
+
     try:
         cf_service = await get_curseforge_service()
         mods = await cf_service.search_mods(
@@ -89,6 +127,8 @@ async def search_curseforge_mods(
             page=page,
             per_page=per_page,
             class_id=resolved_class_id,
+            mod_loader_type=mod_loader_type,
+            game_version=game_version,
         )
         return [_mod_to_dict(mod) for mod in mods]
     except CurseForgeApiUnavailable as e:
@@ -128,6 +168,15 @@ async def get_popular_mods(
     else:
         resolved_class_id = mod_support.get("curseforge_class_id")
 
+    mod_loader_type = None
+    game_version = None
+    if str(game_id) == "432":
+        auto_loader, auto_ver, auto_class = _detect_minecraft_modloader_and_version(server, plugin)
+        mod_loader_type = auto_loader
+        game_version = auto_ver
+        if auto_class and resolved_class_id in (None, "6"):
+            resolved_class_id = auto_class
+
     if sort not in ("trending", "popular", "newest", "updated"):
         sort = "trending"
 
@@ -139,6 +188,8 @@ async def get_popular_mods(
             page=page,
             sort=sort,
             class_id=resolved_class_id,
+            mod_loader_type=mod_loader_type,
+            game_version=game_version,
         )
         return [_mod_to_dict(mod) for mod in mods]
     except CurseForgeApiUnavailable as e:

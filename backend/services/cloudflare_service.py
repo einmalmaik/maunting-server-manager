@@ -129,14 +129,51 @@ async def list_dns_records(zone_id: str | None = None) -> list[dict[str, Any]]:
         return data.get("result") or []
 
 
-async def create_dns_record(zone_id: str | None, name: str, rtype: str, content: str, proxied: bool = False, ttl: int = 1) -> dict[str, Any]:
+async def create_dns_record(
+    zone_id: str | None,
+    name: str,
+    rtype: str,
+    content: str = "",
+    proxied: bool = False,
+    ttl: int = 1,
+    priority: int | None = None,
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     from services.cloudflare_api_key_service import resolve_key
 
     key = resolve_key()
     if not key:
         raise CloudflareApiUnavailable("cloudflare_api_token_missing")
     resolved_id = await _resolve_zone_id(zone_id)
-    payload: dict[str, Any] = {"type": rtype, "name": name, "content": content, "ttl": ttl, "proxied": proxied}
+    rtype_upper = rtype.upper().strip()
+    if rtype_upper not in ("A", "AAAA", "CNAME"):
+        proxied = False
+
+    payload: dict[str, Any] = {"type": rtype_upper, "name": name, "ttl": ttl, "proxied": proxied}
+    if priority is not None:
+        payload["priority"] = int(priority)
+    if data:
+        payload["data"] = data
+    if content:
+        payload["content"] = content
+
+    if rtype_upper == "SRV" and not payload.get("data") and content:
+        parts = content.split()
+        if len(parts) >= 4 and parts[0].isdigit() and parts[1].isdigit() and parts[2].isdigit():
+            name_parts = name.split(".")
+            service = name_parts[0] if name_parts[0].startswith("_") else "_minecraft"
+            proto = name_parts[1] if len(name_parts) > 1 and name_parts[1].startswith("_") else "_tcp"
+            subname = ".".join(name_parts[2:]) if len(name_parts) > 2 else name
+            payload["data"] = {
+                "priority": int(parts[0]),
+                "weight": int(parts[1]),
+                "port": int(parts[2]),
+                "target": parts[3],
+                "service": service,
+                "proto": proto,
+                "name": subname,
+            }
+
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(f"{API_BASE}/zones/{resolved_id}/dns_records", headers=_headers(key), json=payload)
         _raise_if_auth(resp)
@@ -147,8 +184,8 @@ async def create_dns_record(zone_id: str | None, name: str, rtype: str, content:
                 detail = resp.text
             raise CloudflareApiUnavailable(f"cloudflare_create_failed: {detail}")
         resp.raise_for_status()
-        data = resp.json()
-        return data.get("result") or {}
+        resp_data = resp.json()
+        return resp_data.get("result") or {}
 
 
 async def delete_dns_record(zone_id: str | None, record_id: str) -> bool:

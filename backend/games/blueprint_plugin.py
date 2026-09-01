@@ -867,7 +867,15 @@ class BlueprintPlugin(GamePlugin):
                         errors.append(f"{mod_info.title} (ID {wid}): Keine Dateien auf CurseForge verfuegbar")
                         items[wid] = {"ok": False, "error": "Keine Release-Dateien verfuegbar"}
                         continue
-                    file_obj = mod_info.latest_files[0]
+                    file_obj = None
+                    if mod_info.has_server_pack and mod_info.server_pack_file_id:
+                        for lf in mod_info.latest_files:
+                            if isinstance(lf, dict) and lf.get("id") == mod_info.server_pack_file_id:
+                                file_obj = lf
+                                break
+                    if not file_obj:
+                        file_obj = mod_info.latest_files[0]
+
                     dl_url = file_obj.get("downloadUrl")
                     if not dl_url:
                         dl_url = await svc.get_file_download_url(wid, file_obj["id"])
@@ -888,9 +896,14 @@ class BlueprintPlugin(GamePlugin):
 
                     if safe_name.lower().endswith(".zip"):
                         import io
+                        import json
                         import zipfile
                         with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                            namelist = zf.namelist()
                             has_overrides = any(m.filename.startswith("overrides/") for m in zf.infolist())
+                            manifest_bytes = None
+                            if "manifest.json" in namelist:
+                                manifest_bytes = zf.read("manifest.json")
                             # Zielverzeichnis: Bei Modpacks mit 'overrides/' ins Server-Hauptverzeichnis,
                             # sonst in den vom Blueprint vorgegebenen Mod-Pfad (target_dir, z. B. mods/, plugins/, Pak-Ordner etc.)
                             extract_root = base if has_overrides else target_dir
@@ -915,6 +928,44 @@ class BlueprintPlugin(GamePlugin):
                                         self._try_chown_install_path(server, extracted_path)
                                 except (ValueError, Exception):
                                     pass
+
+                            # Wenn manifest.json vorhanden ist: deklarierte Mod-Dateien (files) nachladen
+                            if manifest_bytes:
+                                try:
+                                    manifest_data = json.loads(manifest_bytes.decode("utf-8"))
+                                    manifest_files = manifest_data.get("files") or []
+                                    if manifest_files:
+                                        _append_console_log(
+                                            server.id,
+                                            f"[MSM] Modpack Manifest erkannt ({len(manifest_files)} Mods) — lade Mod-Dateien nach...\n",
+                                        )
+                                        mods_dir = (base / "mods").resolve()
+                                        mods_dir.mkdir(parents=True, exist_ok=True)
+                                        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as mc_client:
+                                            for idx, fentry in enumerate(manifest_files, 1):
+                                                pid = fentry.get("projectID")
+                                                fid = fentry.get("fileID")
+                                                if not pid or not fid:
+                                                    continue
+                                                try:
+                                                    m_url = await svc.get_file_download_url(pid, fid)
+                                                    if m_url:
+                                                        m_resp = await mc_client.get(m_url, headers={"x-api-key": cf_key})
+                                                        if m_resp.status_code == 200:
+                                                            m_name = Path(m_url.split("?")[0]).name or f"mod_{pid}_{fid}.jar"
+                                                            m_target = (mods_dir / m_name).resolve()
+                                                            m_target.write_bytes(m_resp.content)
+                                                            self._try_chown_install_path(server, m_target)
+                                                except Exception:
+                                                    pass
+                                                if idx % 10 == 0 or idx == len(manifest_files):
+                                                    _append_console_log(
+                                                        server.id,
+                                                        f"[MSM] Modpack Download-Fortschritt: {idx}/{len(manifest_files)} Mods geladen\n",
+                                                    )
+                                except Exception as m_err:
+                                    logger.warning("Fehler beim Nachladen der Modpack-Dateien: %s", m_err)
+
                         _append_console_log(
                             server.id,
                             f"[MSM] CurseForge Archiv {mod_info.title} ({safe_name}) entpackt nach {'Server-Wurzelverzeichnis' if has_overrides else target_dir_rel + '/'}\n",

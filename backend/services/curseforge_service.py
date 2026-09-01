@@ -226,7 +226,7 @@ class CurseForgeService:
         index = (page - 1) * per_page
 
         norm_game_id = normalize_game_id(game_id)
-        cache_key = f"cf_search_{norm_game_id}_{query}_{slug}_{page}_{per_page}_{class_id}_{category_id}_{sort_field}_{sort_order}_{only_distributable}"
+        cache_key = f"cf_search_{norm_game_id}_{query}_{slug}_{page}_{per_page}_{class_id}_{category_id}_{sort_field}_{sort_order}_{mod_loader_type}_{game_version}_{only_distributable}"
         cached = self._get_cache(cache_key)
         if cached:
             return cached
@@ -282,6 +282,8 @@ class CurseForgeService:
         sort: str = "trending",
         class_id: int | str | None = None,
         category_id: int | str | None = None,
+        mod_loader_type: int | None = None,
+        game_version: str | None = None,
     ) -> List[CurseForgeModInfo]:
         """Liefert Mods nach Sortierkriterium (trending, popular, newest, updated)."""
         sort_map = {
@@ -300,6 +302,8 @@ class CurseForgeService:
             category_id=category_id,
             sort_field=sort_field,
             sort_order="desc",
+            mod_loader_type=mod_loader_type,
+            game_version=game_version,
         )
 
     async def get_mod_details(self, mod_id: int | str) -> Optional[CurseForgeModInfo]:

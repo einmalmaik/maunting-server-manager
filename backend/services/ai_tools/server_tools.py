@@ -916,16 +916,44 @@ def _global_tool_definitions() -> list[dict]:
         ),
         _function(
             "propose_cloudflare_dns_record",
-            "Legt einen Cloudflare DNS Record, DNS-Eintrag oder eine Subdomain an (A/CNAME, Test-Eintrag). Vorher cloudflare_list_zones aufrufen um zone_id zu ermitteln, Kollision pruefen. Name als Subdomain {game}-{slug}.{zone}, Inhalt ist Server-IP/Target.",
+            "Legt einen Cloudflare DNS Record / Subdomain an. Unterstützt ausnahmslos alle DNS-Typen und Protokolle (A, AAAA, CNAME, TXT, SRV, MX, NS, PTR, CAA, HTTPS, SVCB, TLSA etc.). Vorher cloudflare_list_zones aufrufen um zone_id zu ermitteln. Name als Hostname/Subdomain (z.B. {game}-{slug}.{zone} oder _minecraft._tcp.{subdomain}.{zone}), Inhalt ist IP/Target/Content.",
             {
-                "zone_id": {"type": "string", "maxLength": 64},
-                "name": {"type": "string", "maxLength": 253},
-                "rtype": {"type": "string", "enum": ["A", "CNAME"]},
-                "content": {"type": "string", "maxLength": 253},
-                "proxied": {"type": "boolean"},
+                "zone_id": {"type": "string", "maxLength": 64, "description": "Cloudflare Zonen-ID oder Zonen-Name"},
+                "name": {"type": "string", "maxLength": 253, "description": "Vollständiger DNS-Name / Subdomain"},
+                "rtype": {
+                    "type": "string",
+                    "description": "DNS-Record-Typ (A, AAAA, CNAME, TXT, SRV, MX, NS, PTR, CAA, HTTPS, SVCB, TLSA, etc.)",
+                    "enum": [
+                        "A",
+                        "AAAA",
+                        "CNAME",
+                        "TXT",
+                        "SRV",
+                        "MX",
+                        "NS",
+                        "PTR",
+                        "CAA",
+                        "HTTPS",
+                        "SVCB",
+                        "DNSKEY",
+                        "DS",
+                        "NAPTR",
+                        "SMIMEA",
+                        "SSHFP",
+                        "TLSA",
+                        "URI",
+                        "LOC",
+                        "CERT",
+                    ],
+                },
+                "content": {"type": "string", "maxLength": 253, "description": "IP-Adresse, Ziel-Host oder Record-Inhalt (bei SRV z.B. '0 5 25566 mc.example.com')"},
+                "proxied": {"type": "boolean", "description": "Cloudflare Proxying (nur für A, AAAA, CNAME zulässig; für andere Typen automatisch False)"},
+                "priority": {"type": "integer", "description": "Priorität (z. B. für MX oder SRV Records)"},
+                "ttl": {"type": "integer", "description": "TTL in Sekunden (1 = Automatisch)"},
+                "data": {"type": "object", "description": "Optionales Datenobjekt für strukturierte Records (SRV, CAA, HTTPS, etc.)"},
                 **_RATIONALE_SCHEMA,
             },
-            ["zone_id", "name", "rtype", "content", *_RATIONALE_REQUIRED],
+            ["zone_id", "name", "rtype", *_RATIONALE_REQUIRED],
         ),
         _function(
             "propose_cloudflare_dns_delete",
@@ -2247,9 +2275,27 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
     # 1. CurseForge Provider
     if mod_support.get("provider") == "curseforge" or mod_support.get("curseforge_game_id"):
         cf_game_id = str(mod_support.get("curseforge_game_id") or "")
-        cf_class_id = str(mod_support.get("curseforge_class_id") or "") or None
-        if not cf_game_id:
-            return {"server_id": server.id, "available": False, "reason": "curseforge_game_id_missing"}
+        cf_mod_loader = None
+        cf_game_version = None
+        if cf_game_id == "432":
+            gt = (server.game_type or "").lower()
+            if "fabric" in gt:
+                cf_mod_loader = 4
+            elif "neoforge" in gt:
+                cf_mod_loader = 6
+            elif "forge" in gt:
+                cf_mod_loader = 1
+            elif "quilt" in gt:
+                cf_mod_loader = 5
+            elif any(k in gt for k in ("paper", "spigot", "purpur", "bukkit")):
+                cf_class_id = "12"
+
+            bp = getattr(plugin, "blueprint", None)
+            if bp and hasattr(bp, "runtime") and hasattr(bp.runtime, "env"):
+                v = str(bp.runtime.env.get("VERSION", "")).strip()
+                if v and v.upper() != "LATEST":
+                    cf_game_version = v
+
         try:
             import asyncio
             from services.curseforge_service import get_curseforge_service, CurseForgeApiUnavailable
@@ -2262,6 +2308,8 @@ def _execute_mod_tool(db: Session, *, server: Server, tool_name: str, arguments:
                     query=sichere_anfrage,
                     page=page,
                     per_page=20,
+                    mod_loader_type=cf_mod_loader,
+                    game_version=cf_game_version,
                 )
 
             # Ohne Weiche auf eine laufende Ereignisschleife: die Lesewerkzeuge

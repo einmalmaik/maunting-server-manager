@@ -249,3 +249,53 @@ def test_background_task_requires_autonomy(db: Session, regular_user: User, monk
     db.refresh(task)
     assert task.enabled is False
     assert task.next_run_at is None
+
+
+def test_cloudflare_dns_srv_record_payload():
+    from services.ai_proposals.network_proposals import _cloudflare_dns_payload
+
+    # SRV Record mit data/content
+    payload, preview = _cloudflare_dns_payload({
+        "zone_id": "zone123",
+        "name": "_minecraft._tcp.mc.example.com",
+        "rtype": "SRV",
+        "content": "0 5 25566 mc.example.com",
+        "proxied": True,  # should be auto-reset to False
+    })
+    assert payload["rtype"] == "SRV"
+    assert payload["name"] == "_minecraft._tcp.mc.example.com"
+    assert payload["content"] == "0 5 25566 mc.example.com"
+    assert payload["proxied"] is False
+    assert preview["operation"] == "cloudflare_dns_create"
+
+    # MX Record mit Prioritaet
+    payload_mx, _ = _cloudflare_dns_payload({
+        "zone_id": "zone123",
+        "name": "mail.example.com",
+        "rtype": "MX",
+        "content": "mailserver.example.com",
+        "priority": 10,
+    })
+    assert payload_mx["rtype"] == "MX"
+    assert payload_mx["priority"] == 10
+    assert payload_mx["proxied"] is False
+
+    # TXT Record
+    payload_txt, _ = _cloudflare_dns_payload({
+        "zone_id": "zone123",
+        "name": "example.com",
+        "rtype": "TXT",
+        "content": "v=spf1 include:_spf.google.com ~all",
+    })
+    assert payload_txt["rtype"] == "TXT"
+    assert payload_txt["content"] == "v=spf1 include:_spf.google.com ~all"
+
+    # CAA Record mit data
+    payload_caa, _ = _cloudflare_dns_payload({
+        "zone_id": "zone123",
+        "name": "example.com",
+        "rtype": "CAA",
+        "data": {"flags": 0, "tag": "issue", "value": "letsencrypt.org"},
+    })
+    assert payload_caa["rtype"] == "CAA"
+    assert payload_caa["data"]["value"] == "letsencrypt.org"
