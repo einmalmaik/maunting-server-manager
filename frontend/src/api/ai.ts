@@ -383,9 +383,11 @@ export interface AiToolPlanAufruf {
   server_id: number | null
 }
 
-/** Nur der Zustand — der Suchschluessel verlaesst das Backend nie. */
+/** Zustand der Websuch-Konfiguration. */
 export interface AiWebSearchStatus {
   configured: boolean
+  has_api_key?: boolean
+  searxng_url?: string | null
 }
 
 /** Nur der Zustand — Satelliten-Zugangsdaten verlassen das Backend nie. */
@@ -1295,6 +1297,14 @@ export const aiApi = {
     method: 'PUT',
     body: JSON.stringify({ api_key: apiKey || null }),
   }),
+  setWebSearchConfig: (payload: { apiKey?: string | null; searxngUrl?: string | null }) =>
+    api<AiWebSearchStatus>('/ai/settings/web-search', {
+      method: 'PUT',
+      body: JSON.stringify({
+        api_key: payload.apiKey !== undefined ? (payload.apiKey || null) : undefined,
+        searxng_url: payload.searxngUrl !== undefined ? (payload.searxngUrl || null) : undefined,
+      }),
+    }),
   getSatelliteStatus: () => api<AiSatelliteStatus>('/ai/settings/satellite'),
   setSatelliteCredentials: (clientId: string, clientSecret: string) =>
     api<AiSatelliteStatus>('/ai/settings/satellite', {

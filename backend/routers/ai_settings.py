@@ -172,10 +172,14 @@ def update_role_limits(
 def get_web_search_status(
     _: User = Depends(require_global("panel.settings.read")),
 ) -> AiWebSearchStatus:
-    """Nur ob ein Schluessel hinterlegt ist — nie der Schluessel selbst."""
+    """Zustand der Websuch-Konfiguration."""
     from services import ai_web_search_service
 
-    return AiWebSearchStatus(configured=ai_web_search_service.is_configured())
+    return AiWebSearchStatus(
+        configured=ai_web_search_service.is_configured(),
+        has_api_key=ai_web_search_service.api_key() is not None,
+        searxng_url=ai_web_search_service.searxng_url(),
+    )
 
 
 @router.put("/settings/web-search", response_model=AiWebSearchStatus)
@@ -184,22 +188,25 @@ def set_web_search_key(
     actor: User = Depends(require_global("panel.settings.write")),
     _: None = Depends(verify_csrf),
 ) -> AiWebSearchStatus:
-    """Hinterlegt oder entfernt den Suchschluessel.
-
-    Ein leerer Wert entfernt ihn — dann verschwindet auch das Werkzeug aus dem
-    Katalog, statt bei jedem Versuch zu scheitern.
-    """
+    """Hinterlegt oder entfernt den Suchschluessel bzw. die SearXNG-URL."""
     from services import ai_web_search_service
 
-    secret = payload.api_key.get_secret_value() if payload.api_key else ""
-    try:
-        ai_web_search_service.store_api_key(secret)
-    except DisSidecarError as exc:
-        raise HTTPException(
-            status_code=503, detail="Suchschluessel konnte nicht sicher gespeichert werden"
-        ) from exc
+    if payload.api_key is not None:
+        secret = payload.api_key.get_secret_value()
+        try:
+            ai_web_search_service.store_api_key(secret)
+        except DisSidecarError as exc:
+            raise HTTPException(
+                status_code=503, detail="Suchschluessel konnte nicht sicher gespeichert werden"
+            ) from exc
+
+    if payload.searxng_url is not None:
+        ai_web_search_service.store_searxng_url(payload.searxng_url)
 
     configured = ai_web_search_service.is_configured()
+    has_api_key = ai_web_search_service.api_key() is not None
+    s_url = ai_web_search_service.searxng_url()
+
     with SessionLocal() as audit_db:
         audit_service.record_privileged_action(
             audit_db,
@@ -207,11 +214,14 @@ def set_web_search_key(
             action="ai.web_search.key.updated",
             target_type="panel_setting",
             target_id=None,
-            # Bewusst nur der Zustand, nie ein Teil des Schluessels.
-            details={"configured": configured},
+            details={"configured": configured, "has_api_key": has_api_key, "has_searxng": bool(s_url)},
         )
         audit_db.commit()
-    return AiWebSearchStatus(configured=configured)
+    return AiWebSearchStatus(
+        configured=configured,
+        has_api_key=has_api_key,
+        searxng_url=s_url,
+    )
 
 
 @router.get("/settings/satellite", response_model=AiSatelliteStatus)

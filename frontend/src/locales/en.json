@@ -1200,18 +1200,22 @@
       }
     },
     "webSearch": {
-      "title": "Web search",
-      "description": "Store a Brave Search key for assistant web searches. The user role also requires the “Use AI web search” permission.",
-      "apiKey": "Brave Search API key",
-      "configured": "Key stored; enter a new key to replace it",
+      "title": "Web Search & Research",
+      "description": "Search and research settings for the assistant. Direct web scraping and free web search are always active by default. Optionally configure a Brave API key or your own SearXNG meta-search instance.",
+      "apiKey": "Brave Search API Key (Optional)",
+      "searxngUrl": "SearXNG Endpoint URL (Optional)",
+      "searxngPlaceholder": "e.g. http://searxng:8080 or http://localhost:8888",
+      "searxngConfigured": "SearXNG URL configured",
+      "configured": "Key configured; enter new key to replace",
       "placeholder": "Enter key",
       "remove": "Remove key",
-      "saved": "Search key saved.",
-      "removed": "Search key removed.",
-      "hint": "Search results are trimmed, sanitized, and treated as untrusted input.",
+      "removeSearxng": "Remove SearXNG URL",
+      "saved": "Web search settings saved.",
+      "removed": "Web search setting removed.",
+      "hint": "Without external keys, the system automatically uses integrated direct scraping and free web search.",
       "errors": {
-        "load": "Web search status could not be loaded.",
-        "save": "Search key could not be saved."
+        "load": "Could not load web search status.",
+        "save": "Could not save web search settings."
       }
     },
     "satellite": {

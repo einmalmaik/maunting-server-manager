@@ -203,6 +203,14 @@ def store_api_key(plaintext: str) -> None:
     PanelSettingsService.set(SETTINGS_KEY, AuthService.encrypt_secret(value, aad=_AAD))
 
 
+def store_searxng_url(url: str) -> None:
+    """Speichert oder entfernt die konfigurierte SearXNG-Endpunkt-URL."""
+    from services.panel_settings_service import PanelSettingsService
+
+    clean = (url or "").strip()
+    PanelSettingsService.set(SEARXNG_SETTINGS_KEY, clean)
+
+
 def is_configured() -> bool:
     """Ist ein Websuch-Provider oder Schluessel konfiguriert?"""
     try:

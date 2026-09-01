@@ -83,19 +83,18 @@ class EffectiveAiLimitsResponse(AiLimitsBase):
 
 
 class AiWebSearchKeyUpdate(BaseModel):
-    """Suchschluessel setzen oder entfernen.
-
-    ``SecretStr`` sorgt dafuer, dass der Wert in Logs und Fehlermeldungen als
-    Platzhalter erscheint. Ein leerer Wert entfernt den Schluessel.
-    """
+    """Suchschluessel und optionale SearXNG-URL setzen oder entfernen."""
 
     api_key: SecretStr | None = Field(default=None, max_length=512)
+    searxng_url: str | None = Field(default=None, max_length=512)
 
 
 class AiWebSearchStatus(BaseModel):
-    """Nur der Zustand — der Schluessel verlaesst das Backend nie."""
+    """Zustand der Websuch-Konfiguration."""
 
     configured: bool
+    has_api_key: bool = False
+    searxng_url: str | None = None
 
 
 class AiSatelliteCredentialsUpdate(BaseModel):

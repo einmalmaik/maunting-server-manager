@@ -1200,18 +1200,22 @@
       }
     },
     "webSearch": {
-      "title": "Websuche",
-      "description": "Brave-Search-API-Schlüssel für Websuchen des Assistenten. Die Benutzerrolle benötigt zusätzlich das Recht „Websuche über die KI verwenden“.",
-      "apiKey": "Brave-Search-API-Schlüssel",
+      "title": "Websuche & Recherche",
+      "description": "Such- und Recherche-Einstellungen für den Assistenten. Direktes Web-Scraping und freie Websuche sind standardmäßig immer aktiv. Optional können Sie einen Brave-API-Schlüssel oder eine eigene SearXNG-Metasuch-Instanz hinterlegen.",
+      "apiKey": "Brave-Search-API-Schlüssel (Optional)",
+      "searxngUrl": "SearXNG-Endpunkt-URL (Optional)",
+      "searxngPlaceholder": "z. B. http://searxng:8080 oder http://localhost:8888",
+      "searxngConfigured": "SearXNG-URL hinterlegt",
       "configured": "Schlüssel hinterlegt; neuen Schlüssel eingeben, um ihn zu ersetzen",
       "placeholder": "Schlüssel eingeben",
       "remove": "Schlüssel entfernen",
-      "saved": "Suchschlüssel gespeichert.",
-      "removed": "Suchschlüssel entfernt.",
-      "hint": "Suchergebnisse werden gekürzt, bereinigt und als nicht vertrauenswürdiger Text verarbeitet.",
+      "removeSearxng": "SearXNG-URL entfernen",
+      "saved": "Websuch-Einstellungen gespeichert.",
+      "removed": "Websuch-Einstellung entfernt.",
+      "hint": "Ohne externe Schlüssel nutzt das System automatisch integriertes Direkt-Scraping und freie Websuche.",
       "errors": {
         "load": "Zustand der Websuche konnte nicht geladen werden.",
-        "save": "Suchschlüssel konnte nicht gespeichert werden."
+        "save": "Websuch-Einstellungen konnten nicht gespeichert werden."
       }
     },
     "satellite": {
