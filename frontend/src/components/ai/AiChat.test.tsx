@@ -387,7 +387,9 @@ describe('AiChat', () => {
     render(<MemoryRouter><AiChat /></MemoryRouter>)
     await screen.findByText('synthetic-note.txt')
 
-    expect(screen.getByLabelText('Denktiefe')).toHaveTextContent('Mittel')
+    await waitFor(() => {
+      expect(screen.getByLabelText('Denktiefe')).toHaveTextContent('Mittel')
+    })
   })
 
   it('haelt das gewaehlte Modell ueber ein Neuladen hinweg', async () => {

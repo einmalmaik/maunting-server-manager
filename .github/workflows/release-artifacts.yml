@@ -211,7 +211,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
 
       - name: Install UI dependencies
         working-directory: frontend
@@ -223,9 +223,7 @@ jobs:
 
       - name: Build Android APK
         working-directory: smart-system
-        run: |
-          npx tauri android init || true
-          npx tauri android build --apk --target aarch64,armv7,x86_64
+        run: npx tauri android build --apk
 
       - name: Collect Android APK
         shell: bash
