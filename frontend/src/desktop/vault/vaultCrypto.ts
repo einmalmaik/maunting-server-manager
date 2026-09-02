@@ -9,6 +9,8 @@
  * - Memory Hygiene: `SecureBuffer` mit `.use()` und `.destroy()`.
  */
 
+import { pruefeBiometrieVerfuegbar, verifiziereBiometrie } from '../tauri'
+
 export const VAULT_ENVELOPE_V1_PREFIX = 'sv-vault-v1:'
 const AES_GCM_IV_LENGTH = 12 // 96-Bit IV
 
@@ -223,17 +225,25 @@ export function getOrCreateDeviceSalt(): Uint8Array {
 }
 
 export async function isBiometricsAvailable(): Promise<boolean> {
+  // 1. In Tauri / Desktop: Prüfe native Windows Hello / OS Biometrie über Rust
   try {
-    if (typeof window === 'undefined' || !window.PublicKeyCredential) {
-      return false
+    const nativeAvailable = await pruefeBiometrieVerfuegbar()
+    if (nativeAvailable) {
+      return true
     }
-    if (typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
-      return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+  } catch {}
+
+  // 2. WebAuthn Fallback (Browser / Android)
+  try {
+    if (typeof window !== 'undefined' && window.PublicKeyCredential) {
+      if (typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
+        const webAvailable = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+        if (webAvailable) return true
+      }
     }
-    return true
-  } catch {
-    return false
-  }
+  } catch {}
+
+  return false
 }
 
 /**
@@ -271,7 +281,21 @@ async function deriveDeviceBiometricKey(salt: Uint8Array): Promise<CryptoKey> {
 /**
  * Requests user verification from platform authenticator (Windows Hello, BiometricPrompt on Android).
  */
-export async function promptBiometricVerification(): Promise<boolean> {
+export async function promptBiometricVerification(title?: string): Promise<boolean> {
+  // 1. In Tauri / Desktop: Nutze native Windows Hello API
+  try {
+    const verified = await verifiziereBiometrie(title || 'Tresor entsperren')
+    if (verified) {
+      return true
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('abgebrochen') || msg.includes('Canceled') || msg.includes('Fehler')) {
+      throw new Error('Biometrische Authentifizierung abgebrochen.')
+    }
+  }
+
+  // 2. WebAuthn Fallback
   if (typeof window === 'undefined' || !window.PublicKeyCredential || !navigator.credentials) {
     return true
   }

@@ -28,6 +28,7 @@ mod audio;
 mod aufraeumen;
 mod auftrag;
 mod bildschirm;
+mod biometrie;
 mod deinstallation;
 pub mod discord;
 #[cfg(windows)]
@@ -668,6 +669,19 @@ fn hauptfenster_verstecken(app: tauri::AppHandle) -> Result<(), String> {
     fenster.hide().map_err(|e| e.to_string())
 }
 
+/// Prüft, ob Windows Hello oder biometrische Authentifizierung verfügbar ist.
+#[tauri::command(async)]
+async fn biometrie_verfuegbar() -> bool {
+    biometrie::pruefe_verfuegbarkeit().await
+}
+
+/// Fordert den Benutzer zur biometrischen Bestätigung (Windows Hello) auf.
+#[tauri::command(async)]
+async fn biometrie_verifizieren(nachricht: Option<String>) -> Result<bool, String> {
+    let msg = nachricht.unwrap_or_else(|| "Tresor entsperren".to_string());
+    biometrie::verifiziere_benutzer(&msg).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
@@ -739,7 +753,9 @@ pub fn run() {
             deinstallation_starten,
             sandbox_verfuegbar,
             benachrichtigung_senden,
-            setze_tresor_schutz
+            setze_tresor_schutz,
+            biometrie_verfuegbar,
+            biometrie_verifizieren
         ])
         .setup(|app| {
             tray::erstellen(app.handle())?;

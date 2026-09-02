@@ -222,7 +222,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         await decryptVaultEntry(canary, userKey, 'vault-canary')
       }
 
-      await promptBiometricVerification()
+      await promptBiometricVerification('Windows Hello für Passwort-Manager aktivieren')
 
       const wrapped = await wrapVaultCredentialsForBiometrics(masterPassword)
       if (typeof localStorage !== 'undefined') {
@@ -254,7 +254,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
 
     set({ isUnlocking: true, unlockError: null })
     try {
-      await promptBiometricVerification()
+      await promptBiometricVerification('Passwort-Manager entsperren')
       const masterPassword = await unwrapVaultCredentialsFromBiometrics(wrapped)
       const success = await get().unlock(masterPassword)
       return success
@@ -727,3 +727,9 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     }
   },
 }))
+
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    void useVaultStore.getState().checkBiometricsSupport()
+  }, 50)
+}

@@ -137,6 +137,8 @@ windows = { version = "0.62", features = [
     "Win32_UI_Shell",
     # SetWindowDisplayAffinity fuer Hardware-/OS-Schutz des Passwort-Managers vor KI-Screenshots
     "Win32_UI_WindowsAndMessaging",
+    # Windows Hello (Biometrie / PIN) Abfrage und Verifikation
+    "Security_Credentials_UI",
 ] }
 # Keine neue Kiste im Baum: exakt die Version, die wry/tauri ohnehin
 # mitbringen (Cargo.lock). Direkt gebraucht nur fuer den

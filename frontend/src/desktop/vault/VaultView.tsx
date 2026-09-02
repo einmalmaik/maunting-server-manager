@@ -56,7 +56,13 @@ export function VaultView() {
     syncWithServer,
     saveHint,
     requestHintEmail,
+    checkBiometricsSupport,
   } = useVaultStore()
+
+  // Biometrie-Verfügbarkeit (Windows Hello / Fingerabdruck) beim Laden abfragen
+  useEffect(() => {
+    void checkBiometricsSupport()
+  }, [checkBiometricsSupport])
 
   // Hardware- und Software-Schutz vor Windows Computer-Use KI-Screenshots
   useEffect(() => {

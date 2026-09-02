@@ -332,3 +332,26 @@ export async function setzeTresorSchutz(aktiv: boolean): Promise<void> {
     // Stiller No-Op im Web oder wenn Tauri-Befehl nicht bereitsteht
   }
 }
+
+/**
+ * Prüft, ob Windows Hello oder eine native biometrische Authentifizierung
+ * auf dem Endgerät verfügbar und eingerichtet ist.
+ */
+export async function pruefeBiometrieVerfuegbar(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('biometrie_verfuegbar')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Öffnet den nativen Windows Hello Bestätigungsdialog (Fingerabdruck / Gesicht / PIN).
+ */
+export async function verifiziereBiometrie(nachricht?: string): Promise<boolean> {
+  try {
+    return await invoke<boolean>('biometrie_verifizieren', { nachricht })
+  } catch {
+    return false
+  }
+}

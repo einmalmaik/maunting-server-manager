@@ -131,7 +131,12 @@ function ProfilEinstellungen() {
     setLockOnWindowBlur,
     enableBiometrics,
     disableBiometrics,
+    checkBiometricsSupport,
   } = useVaultStore()
+
+  useEffect(() => {
+    void checkBiometricsSupport()
+  }, [checkBiometricsSupport])
 
   const [biometricsModalOpen, setBiometricsModalOpen] = useState(false)
   const [masterPasswordInput, setMasterPasswordInput] = useState('')
