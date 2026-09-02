@@ -60,6 +60,29 @@ Gemäß den Sicherheitsprinzipien von Maunting Studios („Schutz braucht Vertra
 - **Kryptographischer Canary:** Beim Einrichten wird ein verschlüsselter Prüfblock (`mss:vault_canary_<bucket_id>`) erzeugt. Beim späteren Entsperren prüft das System damit sofort, ob das eingegebene Master-Passwort korrekt ist, und weist Falscheingaben direkt mit einer klaren Meldung ab.
 - **Flexibles Wechseln:** Über einen einfachen Link kann jederzeit zwischen Ersteinrichtung und Entsperren eines bereits bestehenden Tresors gewechselt werden.
 
+### 3.6 Echter QR-Code-Scan & Dedizierter Authenticator-Modus
+- **Kamera- und Bild-Upload:** Integrierter Scanner (`jsqr`) zur Erkennung von `otpauth://`-QR-Codes live per Webcam oder über Screenshot-/Datei-Upload.
+- **2FA-Cockpit:** Eigener Tab für Authenticator-Tokens mit großen, gut ablesbaren Codes, Live-Countdown-Kreis und 1-Klick-Kopieren.
+
+### 3.7 Kategorisierung, Favoriten & Zuletzt verwendet
+- **Favoriten:** Wichtige Zugänge lassen sich per Stern als Favorit markieren und werden dauerhaft oben angeheftet.
+- **Zuletzt verwendet:** Direkter Schnellfilter für kürzlich genutzte oder kopierte Zugangsdaten.
+- **Kategorien:** Saubere Trennung zwischen Logins, Authenticators und sicheren Notizen.
+
+### 3.8 Datenschutzfreundlicher Leak-Check (K-Anonymität)
+- **Leaked-Password-Prüfung:** Ermittelt sekundenschnell, ob ein Passwort in bekannten Datenlecks auftaucht.
+- **K-Anonymität:** Nur die ersten 5 Zeichen des SHA-1-Hashes verlassen das Gerät. Weder das Klartext-Passwort noch der vollständige Hash werden jemals übertragen.
+
+### 3.9 Verschlüsselte Notizen & Dateianhänge
+- **Sichere Notizen:** Geschützter Freitextbereich für sensible Dokumentationen, Wiederherstellungsschlüssel und Backup-Codes.
+- **Verschlüsselte Dateien:** Sicheres lokales Anhängen und Entschlüsseln vertraulicher Dateien (bis 25 MB pro Anhang), integriert in den AES-256-GCM Blob.
+
+### 3.10 Windows Computer-Use KI-Schutz (Human Error Guard)
+- **Hardware- & Software-Schutz:** Verhindert das versehentliche Erfassen des Passwort-Managers durch Bildschirmaufnahmen der KI bei Computer-Use.
+- **Doppelte Schutzschicht:**
+  - OS-Ebene: `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` schließt das Fenster auf DWM-Ebene aus allen Screen-Captures aus.
+  - Software-Ebene: `bildschirm.rs` maskiert das Anwendungsfenster im Capture automatisch mit solidem Schwarz, falls der Passwort-Manager geöffnet ist.
+
 ---
 
 ## 4. Multi-Node Konfiguration im Panel Manager

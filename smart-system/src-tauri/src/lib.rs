@@ -132,6 +132,37 @@ fn refresh_token_loeschen(app: tauri::AppHandle) -> Result<(), String> {
     geheimnisse::loeschen(&app)
 }
 
+/// Human Error Guard: Aktiviert/Deaktiviert Hardware- und Software-Schutz des
+/// Passwort-Managers gegen Bildschirmaufnahme durch die Computer-Use KI.
+#[tauri::command]
+fn setze_tresor_schutz(app: tauri::AppHandle, aktiv: bool) -> Result<(), String> {
+    bildschirm::setze_tresor_schutz_zustand(aktiv);
+
+    #[cfg(windows)]
+    {
+        use tauri::Manager;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+        };
+
+        if let Some(main_win) = app.get_webview_window("main") {
+            if let Ok(raw_hwnd) = main_win.hwnd() {
+                let hwnd = windows::Win32::Foundation::HWND(raw_hwnd.0);
+                let affinity = if aktiv {
+                    WDA_EXCLUDEFROMCAPTURE
+                } else {
+                    WDA_NONE
+                };
+                unsafe {
+                    let _ = SetWindowDisplayAffinity(hwnd, affinity);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Prueft, ob Windows Sandbox auf diesem System verfuegbar ist.
 #[tauri::command(async)]
 fn sandbox_verfuegbar() -> bool {
@@ -707,7 +738,8 @@ pub fn run() {
             deinstallation_aufraeumen,
             deinstallation_starten,
             sandbox_verfuegbar,
-            benachrichtigung_senden
+            benachrichtigung_senden,
+            setze_tresor_schutz
         ])
         .setup(|app| {
             tray::erstellen(app.handle())?;

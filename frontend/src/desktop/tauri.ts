@@ -319,3 +319,16 @@ export async function deinstallationAufraeumen(): Promise<Aufraeumbericht> {
 export async function deinstallationStarten(): Promise<void> {
   await invoke('deinstallation_starten')
 }
+
+/**
+ * Human Error Guard: Aktiviert oder deaktiviert den Windows-Hardware- und
+ * Software-Schutz, um das Passwort-Manager-Fenster vor KI-Screenshots
+ * (Computer-Use) zu verbergen bzw. zu schwärzen.
+ */
+export async function setzeTresorSchutz(aktiv: boolean): Promise<void> {
+  try {
+    await invoke('setze_tresor_schutz', { aktiv })
+  } catch {
+    // Stiller No-Op im Web oder wenn Tauri-Befehl nicht bereitsteht
+  }
+}

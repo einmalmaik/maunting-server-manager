@@ -34,7 +34,20 @@
 //! Zusagen still verschwinden. Hier kann er es nicht.
 
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::AppHandle;
+
+/// Human Error Guard: Schutz vor unbeabsichtigter Erfassung des Passwort-Managers
+/// bei Bildschirmaufnahmen für Computer-Use.
+pub static TRESOR_SCHUTZ_AKTIV: AtomicBool = AtomicBool::new(false);
+
+pub fn setze_tresor_schutz_zustand(aktiv: bool) {
+    TRESOR_SCHUTZ_AKTIV.store(aktiv, Ordering::SeqCst);
+}
+
+pub fn ist_tresor_schutz_aktiv() -> bool {
+    TRESOR_SCHUTZ_AKTIV.load(Ordering::SeqCst)
+}
 
 /// Laengste Kante eines Bildschirmfotos. Die Anbieter skalieren nicht
 /// selbst — sie weisen zu grosse Bilder ab. Und ein Vollbild kostet Tokens,
@@ -83,11 +96,37 @@ mod aufnahme_impl {
             .ok_or_else(|| "Kein Hauptbildschirm gefunden".to_string())
     }
 
-    pub fn aufnehmen() -> Result<Value, String> {
+    pub fn aufnehmen(app: &tauri::AppHandle) -> Result<Value, String> {
         let monitor = hauptbildschirm()?;
-        let bild = monitor
+        let mut bild = monitor
             .capture_image()
             .map_err(|e| format!("Bildschirmfoto fehlgeschlagen: {e}"))?;
+
+        // Human Error Guard: Wenn der Passwort-Manager aktiv ist,
+        // wird der Bereich des App-Fensters im Bildschirmfoto geschwärzt.
+        if super::ist_tresor_schutz_aktiv() {
+            use tauri::Manager;
+            if let Some(main_window) = app.get_webview_window("main") {
+                if let (Ok(pos), Ok(size)) = (main_window.outer_position(), main_window.outer_size()) {
+                    let win_x = pos.x.max(0) as u32;
+                    let win_y = pos.y.max(0) as u32;
+                    let win_w = size.width;
+                    let win_h = size.height;
+
+                    let img_w = bild.width();
+                    let img_h = bild.height();
+
+                    let end_x = (win_x + win_w).min(img_w);
+                    let end_y = (win_y + win_h).min(img_h);
+
+                    for y in win_y..end_y {
+                        for x in win_x..end_x {
+                            bild.put_pixel(x, y, image::Rgba([0, 0, 0, 255]));
+                        }
+                    }
+                }
+            }
+        }
 
         let (breite, hoehe) = (bild.width(), bild.height());
         let faktor = verkleinerung(breite, hoehe);
@@ -151,7 +190,7 @@ mod aufnahme_impl {
 mod aufnahme_impl {
     use serde_json::Value;
 
-    pub fn aufnehmen() -> Result<Value, String> {
+    pub fn aufnehmen(_app: &tauri::AppHandle) -> Result<Value, String> {
         Err("Bildschirmfotos gibt es bisher nur unter Windows.".into())
     }
 
@@ -175,7 +214,7 @@ mod aufnahme_impl {
 /// Wer diesen Parameter spaeter entfernt, entfernt die Zusage.
 pub fn aufnehmen(app: &AppHandle) -> Result<Value, String> {
     crate::sichtfeld::zeigen(app);
-    aufnahme_impl::aufnehmen()
+    aufnahme_impl::aufnehmen(app)
 }
 
 /// Rechnet Bildkoordinaten in echte Bildschirmpunkte zurueck — der Gegenweg

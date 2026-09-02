@@ -7,6 +7,14 @@ import {
   generateSecurePassword,
 } from './vaultCrypto'
 
+export interface VaultAttachment {
+  id: string
+  name: string
+  size: number
+  mimeType: string
+  dataBase64: string
+}
+
 export interface VaultItem {
   id: string
   service: string
@@ -16,6 +24,10 @@ export interface VaultItem {
   notes?: string
   totpSecret?: string
   category?: 'login' | 'authenticator' | 'secure_note'
+  isFavorite?: boolean
+  lastUsedAt?: number
+  attachments?: VaultAttachment[]
+  linkedServiceId?: string
   createdAt: number
   updatedAt: number
   revision: number
@@ -100,6 +112,8 @@ interface VaultState {
   createQuickPasswordEntry: (serviceName?: string) => Promise<VaultItem>
   saveItem: (item: Partial<VaultItem> & { service: string }) => Promise<void>
   deleteItem: (id: string) => Promise<void>
+  toggleFavorite: (id: string) => Promise<void>
+  markUsed: (id: string) => Promise<void>
   syncWithServer: () => Promise<void>
 }
 
@@ -240,6 +254,10 @@ export const useVaultStore = create<VaultState>((set, get) => ({
             notes: payload.notes ? String(payload.notes) : undefined,
             totpSecret: payload.totpSecret ? String(payload.totpSecret) : undefined,
             category: (payload.category as VaultItem['category']) || 'login',
+            isFavorite: !!payload.isFavorite,
+            lastUsedAt: typeof payload.lastUsedAt === 'number' ? payload.lastUsedAt : undefined,
+            attachments: Array.isArray(payload.attachments) ? (payload.attachments as VaultAttachment[]) : undefined,
+            linkedServiceId: payload.linkedServiceId ? String(payload.linkedServiceId) : undefined,
             createdAt: Number(payload.createdAt || Date.now()),
             updatedAt: Number(payload.updatedAt || Date.now()),
             revision: blob.revision,
@@ -355,7 +373,11 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       url: itemData.url,
       notes: itemData.notes,
       totpSecret: itemData.totpSecret,
-      category: itemData.category || 'login',
+      category: itemData.category || existing?.category || 'login',
+      isFavorite: itemData.isFavorite !== undefined ? itemData.isFavorite : existing?.isFavorite,
+      lastUsedAt: itemData.lastUsedAt !== undefined ? itemData.lastUsedAt : existing?.lastUsedAt,
+      attachments: itemData.attachments !== undefined ? itemData.attachments : existing?.attachments,
+      linkedServiceId: itemData.linkedServiceId !== undefined ? itemData.linkedServiceId : existing?.linkedServiceId,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       revision,
@@ -369,6 +391,10 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       notes: updatedItem.notes,
       totpSecret: updatedItem.totpSecret,
       category: updatedItem.category,
+      isFavorite: updatedItem.isFavorite,
+      lastUsedAt: updatedItem.lastUsedAt,
+      attachments: updatedItem.attachments,
+      linkedServiceId: updatedItem.linkedServiceId,
       createdAt: updatedItem.createdAt,
       updatedAt: updatedItem.updatedAt,
     }
@@ -426,6 +452,20 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     void get().syncWithServer()
   },
 
+  toggleFavorite: async (id: string) => {
+    const { items, saveItem } = get()
+    const item = items.find((i) => i.id === id)
+    if (!item) return
+    await saveItem({ ...item, isFavorite: !item.isFavorite })
+  },
+
+  markUsed: async (id: string) => {
+    const { items, saveItem } = get()
+    const item = items.find((i) => i.id === id)
+    if (!item) return
+    await saveItem({ ...item, lastUsedAt: Date.now() })
+  },
+
   syncWithServer: async () => {
     const { userKey, bucketId, syncStatus, items } = get()
     if (!userKey || !bucketId || syncStatus === 'syncing') return
@@ -476,6 +516,10 @@ export const useVaultStore = create<VaultState>((set, get) => ({
               notes: dec.notes ? String(dec.notes) : undefined,
               totpSecret: dec.totpSecret ? String(dec.totpSecret) : undefined,
               category: (dec.category as VaultItem['category']) || 'login',
+              isFavorite: !!dec.isFavorite,
+              lastUsedAt: typeof dec.lastUsedAt === 'number' ? dec.lastUsedAt : undefined,
+              attachments: Array.isArray(dec.attachments) ? (dec.attachments as VaultAttachment[]) : undefined,
+              linkedServiceId: dec.linkedServiceId ? String(dec.linkedServiceId) : undefined,
               createdAt: Number(dec.createdAt || Date.now()),
               updatedAt: Number(dec.updatedAt || Date.now()),
               revision: entry.revision,

@@ -135,6 +135,8 @@ windows = { version = "0.62", features = [
     # Keine neue Kiste, nur ein weiteres Modul derselben: die Bindungen sind
     # generiert und ziehen nichts nach.
     "Win32_UI_Shell",
+    # SetWindowDisplayAffinity fuer Hardware-/OS-Schutz des Passwort-Managers vor KI-Screenshots
+    "Win32_UI_WindowsAndMessaging",
 ] }
 # Keine neue Kiste im Baum: exakt die Version, die wry/tauri ohnehin
 # mitbringen (Cargo.lock). Direkt gebraucht nur fuer den
