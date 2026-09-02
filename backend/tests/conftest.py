@@ -376,6 +376,7 @@ def client(db: Session) -> TestClient:
 def owner_user(db: Session) -> User:
     existing = db.query(User).filter(User.username == "owner").first()
     if existing:
+        db.refresh(existing)
         return existing
     user = AuthService.create_owner(db, "owner", "owner@test.de", "OwnerPass123!")
     db.refresh(user)

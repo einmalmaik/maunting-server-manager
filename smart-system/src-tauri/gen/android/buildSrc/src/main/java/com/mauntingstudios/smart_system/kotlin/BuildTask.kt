@@ -85,6 +85,16 @@ open class BuildTask : DefaultTask() {
         val clangI686 = findClang("i686-linux-android24-clang", "i686-linux-android")
         val clangX86_64 = findClang("x86_64-linux-android24-clang", "x86_64-linux-android")
 
+        val arExt = if (isWindows) ".cmd" else ""
+        fun findAr(): String {
+            val candidate = File(llvmBin, "llvm-ar$arExt")
+            if (candidate.exists()) return candidate.absolutePath
+            val cand2 = File(llvmBin, "llvm-ar")
+            if (cand2.exists()) return cand2.absolutePath
+            return "llvm-ar"
+        }
+        val llvmAr = findAr()
+
         val cargoArgs = mutableListOf(
             "build",
             "--package", "maunting-smart-system",
@@ -103,6 +113,22 @@ open class BuildTask : DefaultTask() {
             environment("CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER", clangArmv7)
             environment("CARGO_TARGET_I686_LINUX_ANDROID_LINKER", clangI686)
             environment("CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER", clangX86_64)
+            environment("CC_aarch64_linux_android", clangAarch64)
+            environment("CC_armv7_linux_androideabi", clangArmv7)
+            environment("CC_i686_linux_android", clangI686)
+            environment("CC_x86_64_linux_android", clangX86_64)
+            environment("AR_aarch64_linux_android", llvmAr)
+            environment("AR_armv7_linux_androideabi", llvmAr)
+            environment("AR_i686_linux_android", llvmAr)
+            environment("AR_x86_64_linux_android", llvmAr)
+            environment("TARGET_CC", when (triple) {
+                "aarch64-linux-android" -> clangAarch64
+                "armv7-linux-androideabi" -> clangArmv7
+                "i686-linux-android" -> clangI686
+                "x86_64-linux-android" -> clangX86_64
+                else -> clangAarch64
+            })
+            environment("TARGET_AR", llvmAr)
             workingDir(srcTauriDir)
             executable(cargoCmd)
             args(cargoArgs)
