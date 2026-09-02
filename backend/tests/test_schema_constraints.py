@@ -1563,8 +1563,11 @@ def test_vault_entries_node_id_migration(tmp_path: Path) -> None:
     config.set_main_option("script_location", str(backend_dir / "migrations"))
     engine = create_engine(db_url)
     try:
-        # Starte auf Stand vor node_id (20260902_03)
-        command.upgrade(config, "20260902_03")
+        Base.metadata.create_all(engine)
+        command.stamp(config, "head")
+
+        # Downgrade auf Stand vor node_id (20260902_03)
+        command.downgrade(config, "20260902_03")
         inspector = _frisch(engine)
         cols_before = {c["name"] for c in inspector.get_columns("vault_entries")}
         assert "node_id" not in cols_before
