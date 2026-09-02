@@ -1545,3 +1545,40 @@ def test_die_migration_traegt_die_einladungstabelle(tmp_path: Path) -> None:
     finally:
         engine.dispose()
         settings.database_url = vorher
+
+
+def test_vault_entries_node_id_migration(tmp_path: Path) -> None:
+    """Migration 20260903_01 ergaenzt vault_entries.node_id und index.
+    
+    Verifiziert, dass der Upgrade-Pfad von 20260902_03 auf head die Spalte
+    anlegt und initialize_or_upgrade_schema fehlerfrei durchlaeuft.
+    """
+    from services.schema_manager import initialize_or_upgrade_schema
+
+    db_url = f"sqlite:///{tmp_path / 'vault_node_migration.db'}"
+    vorher = settings.database_url
+    settings.database_url = db_url
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    engine = create_engine(db_url)
+    try:
+        # Starte auf Stand vor node_id (20260902_03)
+        command.upgrade(config, "20260902_03")
+        inspector = _frisch(engine)
+        cols_before = {c["name"] for c in inspector.get_columns("vault_entries")}
+        assert "node_id" not in cols_before
+
+        # Upgrade auf head fuehrt 20260903_01 aus
+        command.upgrade(config, "head")
+        inspector = _frisch(engine)
+        cols_after = {c["name"] for c in inspector.get_columns("vault_entries")}
+        assert "node_id" in cols_after
+
+        # Pruefe, dass schema_manager keine fehlenden Spalten mehr meldet
+        status = initialize_or_upgrade_schema(engine)
+        assert status == "upgraded"
+    finally:
+        engine.dispose()
+        settings.database_url = vorher
+
