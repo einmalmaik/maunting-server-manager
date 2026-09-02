@@ -3,6 +3,7 @@ import { Check, KeyRound, RefreshCw, Server, ShieldCheck } from 'lucide-react'
 import { Button, Dropdown, type DropdownOption } from '@/Singra/UI'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
+import { confirm } from '@/stores/confirmStore'
 import { useNodeStore } from '@/stores/nodeStore'
 import { useHasPermission } from '@/hooks/useHasPermission'
 
@@ -46,9 +47,12 @@ export function VaultSettingsTab() {
       const targetName = selectedNodeId
         ? (nodes.find((n) => String(n.id) === selectedNodeId)?.name || `Node #${selectedNodeId}`)
         : 'Zentraler Panel-Node'
-      const confirmed = window.confirm(
-        `Möchtest du den Passwort-Manager wirklich auf "${targetName}" umziehen? Sämtliche verschlüsselten Tresor-Datensätze werden dabei automatisch und unterbrechungsfrei migriert.`
-      )
+      const confirmed = await confirm({
+        title: 'Passwort-Manager Node umziehen',
+        message: `Möchtest du den Passwort-Manager wirklich auf "${targetName}" umziehen? Sämtliche verschlüsselten Tresor-Datensätze werden dabei automatisch und unterbrechungsfrei migriert.`,
+        confirmText: 'Jetzt umziehen',
+        cancelText: 'Abbrechen',
+      })
       if (!confirmed) return
     }
 

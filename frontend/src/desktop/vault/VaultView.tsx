@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
+import { confirm } from '@/stores/confirmStore'
 import { getBrandIcon } from './brandCatalog'
 import { generateTotpCode, getTotpSecondsRemaining } from './totpEngine'
 import { generateSecurePassword } from './vaultCrypto'
@@ -280,9 +281,14 @@ export function VaultView() {
 
   // Löschen eines Eintrags
   const handleDeleteItem = async (item: VaultItem) => {
-    if (!window.confirm(`"${item.service}" löschen?`)) {
-      return
-    }
+    const ok = await confirm({
+      title: 'Eintrag löschen',
+      message: `Möchtest du "${item.service}" wirklich unwiderruflich aus dem Tresor löschen?`,
+      confirmText: 'Löschen',
+      cancelText: 'Abbrechen',
+      danger: true,
+    })
+    if (!ok) return
     try {
       await deleteItem(item.id)
       if (isModalOpen && editingItemId === item.id) {
