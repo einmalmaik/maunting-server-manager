@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event as sa_event
+from sqlalchemy import create_engine, event as sa_event, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -323,8 +323,10 @@ db_module.Base.metadata.create_all(bind=db_module.engine)
 def clean_db():
     """Clean all tables and rate limit store before each test."""
     with db_module.engine.begin() as conn:
+        conn.execute(text("PRAGMA foreign_keys = OFF"))
         for table in reversed(db_module.Base.metadata.sorted_tables):
             conn.execute(table.delete())
+        conn.execute(text("PRAGMA foreign_keys = ON"))
     # Reset slowapi in-memory storage between tests
     from middleware.rate_limit import limiter
     limiter.reset()
