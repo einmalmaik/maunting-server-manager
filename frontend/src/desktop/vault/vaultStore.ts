@@ -51,6 +51,8 @@ interface VaultSyncResponse {
 }
 
 const VAULT_SALT_KEY = 'mss:vault_salt'
+const VAULT_SETUP_DONE_KEY = 'mss:vault_setup_done'
+const VAULT_CANARY_PREFIX = 'mss:vault_canary_'
 const VAULT_LOCAL_STORAGE_PREFIX = 'mss:vault_blobs_'
 const VAULT_PENDING_QUEUE_PREFIX = 'mss:vault_pending_'
 const VAULT_REVISION_PREFIX = 'mss:vault_rev_'
@@ -76,6 +78,7 @@ function getOrCreateVaultSalt(): Uint8Array {
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error'
 
 interface VaultState {
+  isInitialized: boolean
   isUnlocked: boolean
   isUnlocking: boolean
   unlockError: string | null
@@ -88,8 +91,10 @@ interface VaultState {
   lastSyncTime: number | null
 
   // Aktionen
+  initializeVault: (masterPassword: string) => Promise<boolean>
   unlock: (masterPassword: string) => Promise<boolean>
   lock: () => void
+  resetLocalVaultState: () => void
   setSearchQuery: (q: string) => void
   setSelectedItemId: (id: string | null) => void
   createQuickPasswordEntry: (serviceName?: string) => Promise<VaultItem>
@@ -99,6 +104,7 @@ interface VaultState {
 }
 
 export const useVaultStore = create<VaultState>((set, get) => ({
+  isInitialized: typeof localStorage !== 'undefined' ? !!localStorage.getItem(VAULT_SETUP_DONE_KEY) : false,
   isUnlocked: false,
   isUnlocking: false,
   unlockError: null,
@@ -124,13 +130,99 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     })
   },
 
+  resetLocalVaultState: () => {
+    localStorage.removeItem(VAULT_SETUP_DONE_KEY)
+    set({
+      isInitialized: false,
+      isUnlocked: false,
+      userKey: null,
+      bucketId: null,
+      items: [],
+      selectedItemId: null,
+      unlockError: null,
+    })
+  },
+
+  initializeVault: async (masterPassword: string) => {
+    set({ isUnlocking: true, unlockError: null })
+    try {
+      const salt = getOrCreateVaultSalt()
+      const { userKey, bucketId } = await deriveVaultKeys(masterPassword, salt)
+
+      // Canary-Prüfblock verschlüsseln und lokal speichern
+      const canaryCiphertext = await encryptVaultEntry(
+        { canary: 'mss-vault-initialized-v1', createdAt: Date.now() },
+        userKey,
+        'vault-canary',
+      )
+      localStorage.setItem(`${VAULT_CANARY_PREFIX}${bucketId}`, canaryCiphertext)
+      localStorage.setItem(VAULT_SETUP_DONE_KEY, 'true')
+
+      // Falls bereits gecachte Einträge existieren, entschlüsseln
+      const cachedRaw = localStorage.getItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`)
+      const cachedBlobs: StoredEncryptedEntry[] = cachedRaw ? JSON.parse(cachedRaw) : []
+      const decryptedItems: VaultItem[] = []
+
+      for (const blob of cachedBlobs) {
+        if (blob.is_deleted) continue
+        try {
+          const payload = await decryptVaultEntry(blob.ciphertext, userKey, blob.id)
+          decryptedItems.push({
+            id: blob.id,
+            service: String(payload.service || 'Unbekannt'),
+            username: String(payload.username || ''),
+            password: String(payload.password || ''),
+            url: payload.url ? String(payload.url) : undefined,
+            notes: payload.notes ? String(payload.notes) : undefined,
+            totpSecret: payload.totpSecret ? String(payload.totpSecret) : undefined,
+            category: (payload.category as VaultItem['category']) || 'login',
+            createdAt: Number(payload.createdAt || Date.now()),
+            updatedAt: Number(payload.updatedAt || Date.now()),
+            revision: blob.revision,
+          })
+        } catch {
+          // Ignorieren falls nicht entschlüsselbar
+        }
+      }
+
+      set({
+        isInitialized: true,
+        isUnlocked: true,
+        isUnlocking: false,
+        userKey,
+        bucketId,
+        items: decryptedItems,
+        selectedItemId: decryptedItems.length > 0 ? decryptedItems[0].id : null,
+      })
+
+      // Hintergrund-Sync anstoßen
+      void get().syncWithServer()
+
+      return true
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Einrichten fehlgeschlagen'
+      set({ isUnlocking: false, unlockError: msg })
+      return false
+    }
+  },
+
   unlock: async (masterPassword: string) => {
     set({ isUnlocking: true, unlockError: null })
     try {
       const salt = getOrCreateVaultSalt()
       const { userKey, bucketId } = await deriveVaultKeys(masterPassword, salt)
 
-      // Lokale verschlüsselte Blobs aus dem Cache laden
+      // 1. Canary prüfen falls vorhanden
+      const canaryCiphertext = localStorage.getItem(`${VAULT_CANARY_PREFIX}${bucketId}`)
+      if (canaryCiphertext) {
+        try {
+          await decryptVaultEntry(canaryCiphertext, userKey, 'vault-canary')
+        } catch {
+          throw new Error('Falsches Master-Passwort. Bitte überprüfe deine Eingabe.')
+        }
+      }
+
+      // 2. Lokale verschlüsselte Blobs aus dem Cache laden
       const cachedRaw = localStorage.getItem(`${VAULT_LOCAL_STORAGE_PREFIX}${bucketId}`)
       const cachedBlobs: StoredEncryptedEntry[] = cachedRaw ? JSON.parse(cachedRaw) : []
 
@@ -153,12 +245,23 @@ export const useVaultStore = create<VaultState>((set, get) => ({
             revision: blob.revision,
           })
         } catch {
-          // Entschlüsselung fehlgeschlagen
-          throw new Error('Falsches Master-Passwort oder beschädigte Tresordaten')
+          throw new Error('Falsches Master-Passwort. Bitte überprüfe deine Eingabe.')
         }
       }
 
+      // Falls noch kein Canary da war, jetzt absichern
+      if (!canaryCiphertext) {
+        const newCanary = await encryptVaultEntry(
+          { canary: 'mss-vault-initialized-v1', createdAt: Date.now() },
+          userKey,
+          'vault-canary',
+        )
+        localStorage.setItem(`${VAULT_CANARY_PREFIX}${bucketId}`, newCanary)
+      }
+      localStorage.setItem(VAULT_SETUP_DONE_KEY, 'true')
+
       set({
+        isInitialized: true,
         isUnlocked: true,
         isUnlocking: false,
         userKey,

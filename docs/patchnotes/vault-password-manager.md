@@ -51,8 +51,14 @@ Gemäß den Sicherheitsprinzipien von Maunting Studios („Schutz braucht Vertra
 - Unterstützung für manuelle Secret-Eingabe (Base32) sowie `otpauth://totp/`-URIs (z. B. aus QR-Codes).
 
 ### 3.4 Offline-First Synchronisation
-- Einträge werden im lokalen, geschützten Browserspeicher zwischengespeichert.
+- Einträge werden im lokalen, geschützten Speicher zwischengespeichert.
 - Offline erstellte, geänderte oder gelöschte Einträge werden in einer lokalen Warteschlange vorgehalten und automatisch im Hintergrund mit dem MSM-Backend synchronisiert, sobald wieder Netzwerkempfang besteht.
+
+### 3.5 Ersteinrichtungs-Assistent & Verifikations-Canary
+- **Automatischer Einrichtungs-Modus:** Erkennt das System, dass auf dem Endgerät noch kein Master-Passwort hinterlegt wurde, öffnet sich direkt der Einrichtungs-Dialog („Passwort-Manager einrichten“) mit doppelter Passworteingabe zur Bestätigung.
+- **Validierung:** Direkte Rückmeldung zu Mindestlänge (>= 8 Zeichen) und Übereinstimmung der beiden Passwörter.
+- **Kryptographischer Canary:** Beim Einrichten wird ein verschlüsselter Prüfblock (`mss:vault_canary_<bucket_id>`) erzeugt. Beim späteren Entsperren prüft das System damit sofort, ob das eingegebene Master-Passwort korrekt ist, und weist Falscheingaben direkt mit einer klaren Meldung ab.
+- **Flexibles Wechseln:** Über einen einfachen Link kann jederzeit zwischen Ersteinrichtung und Entsperren eines bereits bestehenden Tresors gewechselt werden.
 
 ---
 

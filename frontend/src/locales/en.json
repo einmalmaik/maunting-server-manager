@@ -5477,7 +5477,7 @@
       "menueOeffnen": "Open menu",
       "keinChatrecht": "Your account lacks permission for AI chat (ai.chat.use). Contact your administrator to grant access.",
       "gedaechtnis": "Memory",
-      "tresor": "Vault"
+      "tresor": "Password Manager"
     },
     "aktion": {
       "freigabeErforderlich": "Confirmation required",

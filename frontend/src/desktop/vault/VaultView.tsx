@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   Check,
   Clock,
@@ -13,6 +13,7 @@ import {
   QrCode,
   RefreshCw,
   Search,
+  ShieldAlert,
   ShieldCheck,
   Trash2,
   Unlock,
@@ -27,6 +28,7 @@ import { useVaultStore, type VaultItem } from './vaultStore'
 
 export function VaultView() {
   const {
+    isInitialized,
     isUnlocked,
     isUnlocking,
     unlockError,
@@ -35,6 +37,7 @@ export function VaultView() {
     searchQuery,
     syncStatus,
     lastSyncTime,
+    initializeVault,
     unlock,
     lock,
     setSearchQuery,
@@ -45,9 +48,12 @@ export function VaultView() {
     syncWithServer,
   } = useVaultStore()
 
+  const [isSetupMode, setIsSetupMode] = useState(!isInitialized)
   const [masterPasswordInput, setMasterPasswordInput] = useState('')
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('')
   const [selectedItem, setSelectedItem] = useState<VaultItem | null>(null)
   const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [totpCode, setTotpCode] = useState<string>('')
   const [totpRemaining, setTotpRemaining] = useState<number>(30)
   const [copiedField, setCopiedField] = useState<string | null>(null)
@@ -196,8 +202,165 @@ export function VaultView() {
     }
   }
 
-  // ── GESPERRTER ZUSTAND ──
+  const isPasswordLongEnough = masterPasswordInput.length >= 8
+  const doPasswordsMatch =
+    masterPasswordInput.length > 0 && masterPasswordInput === confirmPasswordInput
+  const canSubmitSetup = isPasswordLongEnough && doPasswordsMatch && !isUnlocking
+
+  // ── GESPERRTER ZUSTAND / ERSTEINRICHTUNG ──
   if (!isUnlocked) {
+    if (isSetupMode) {
+      return (
+        <div className="flex h-full w-full items-center justify-center p-4">
+          <div className="msm-card w-full max-w-md p-6 sm:p-8 space-y-6">
+            <div className="text-center space-y-2">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary border border-primary/20">
+                <KeyRound className="h-7 w-7" />
+              </div>
+              <h2 className="text-title-lg font-headline font-bold text-on-surface">
+                Passwort-Manager einrichten
+              </h2>
+              <p className="text-xs text-on-surface-variant max-w-xs mx-auto">
+                Erstelle dein persönliches Master-Passwort zum Schutz deiner Zugangsdaten und 2FA-Schlüssel.
+              </p>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                if (!canSubmitSetup) return
+                const ok = await initializeVault(masterPasswordInput)
+                if (ok) {
+                  setMasterPasswordInput('')
+                  setConfirmPasswordInput('')
+                  toast.success('Passwort-Manager erfolgreich eingerichtet')
+                }
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-xs font-medium text-on-surface-variant mb-1">
+                  Neues Master-Passwort festlegen
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={masterPasswordInput}
+                    onChange={(e) => setMasterPasswordInput(e.target.value)}
+                    placeholder="Mindestens 8 Zeichen..."
+                    className="msm-input w-full pr-10"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
+                    aria-label="Passwort anzeigen"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-on-surface-variant mb-1">
+                  Master-Passwort wiederholen
+                </label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPasswordInput}
+                    onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                    placeholder="Passwort erneut eingeben..."
+                    className="msm-input w-full pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
+                    aria-label="Passwort anzeigen"
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Status Validierung */}
+              <div className="space-y-1.5 text-xs">
+                <div
+                  className={`flex items-center gap-1.5 ${isPasswordLongEnough ? 'text-status-success' : 'text-on-surface-variant'}`}
+                >
+                  <Check
+                    className={`h-3.5 w-3.5 ${isPasswordLongEnough ? 'opacity-100' : 'opacity-40'}`}
+                  />
+                  <span>Mindestens 8 Zeichen</span>
+                </div>
+                {confirmPasswordInput.length > 0 && (
+                  <div
+                    className={`flex items-center gap-1.5 ${doPasswordsMatch ? 'text-status-success' : 'text-status-error'}`}
+                  >
+                    <Check
+                      className={`h-3.5 w-3.5 ${doPasswordsMatch ? 'opacity-100' : 'opacity-0'}`}
+                    />
+                    <span>
+                      {doPasswordsMatch
+                        ? 'Passwörter stimmen überein'
+                        : 'Passwörter stimmen nicht überein'}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {unlockError && (
+                <div className="rounded-xl border border-status-error/40 bg-status-error/10 p-3 text-xs text-status-error">
+                  {unlockError}
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                size="md"
+                className="w-full flex items-center justify-center gap-2"
+                disabled={!canSubmitSetup}
+              >
+                {isUnlocking ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <KeyRound className="h-4 w-4" />
+                )}
+                {isUnlocking ? 'Wird eingerichtet...' : 'Passwort-Manager einrichten & starten'}
+              </Button>
+
+              <div className="text-center pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSetupMode(false)
+                    setMasterPasswordInput('')
+                    setConfirmPasswordInput('')
+                  }}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Bereits eingerichtet? Bestehendes Master-Passwort eingeben
+                </button>
+              </div>
+            </form>
+
+            <div className="rounded-xl border border-outline-variant/30 bg-surface-container-low p-3 text-[11px] text-on-surface-variant space-y-1">
+              <div className="font-semibold text-on-surface flex items-center gap-1.5">
+                <ShieldAlert className="h-3.5 w-3.5 text-status-warning" />
+                <span>Zero-Knowledge Hinweis</span>
+              </div>
+              <p>
+                Es gibt keine „Passwort vergessen“-Funktion. Durch die echte Ende-zu-Ende-Verschlüsselung kennt niemand außer dir dieses Master-Passwort. Bitte merke es dir gut.
+              </p>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    // Unlock Mode
     return (
       <div className="flex h-full w-full items-center justify-center p-4">
         <div className="msm-card w-full max-w-md p-6 sm:p-8 space-y-6">
@@ -206,10 +369,10 @@ export function VaultView() {
               <ShieldCheck className="h-7 w-7" />
             </div>
             <h2 className="text-title-lg font-headline font-bold text-on-surface">
-              Singra Vault Tresor
+              Passwort-Manager entsperren
             </h2>
             <p className="text-xs text-on-surface-variant max-w-xs mx-auto">
-              Zero-Knowledge Passwort-Manager & 2FA Authenticator. Geschützt mit clientseitiger DIS AES-GCM Verschlüsselung.
+              Gib dein Master-Passwort ein, um deine Passwörter und 2FA-Schlüssel zu entschlüsseln.
             </p>
           </div>
 
@@ -265,8 +428,22 @@ export function VaultView() {
               ) : (
                 <Unlock className="h-4 w-4" />
               )}
-              {isUnlocking ? 'Wird entschlüsselt...' : 'Tresor entsperren'}
+              {isUnlocking ? 'Wird entschlüsselt...' : 'Passwort-Manager entsperren'}
             </Button>
+
+            <div className="text-center pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSetupMode(true)
+                  setMasterPasswordInput('')
+                  setConfirmPasswordInput('')
+                }}
+                className="text-xs text-primary hover:underline"
+              >
+                Noch kein Master-Passwort? Jetzt neu einrichten
+              </button>
+            </div>
           </form>
 
           <div className="rounded-xl border border-outline-variant/30 bg-surface-container-low p-3 text-[11px] text-on-surface-variant space-y-1">
@@ -298,7 +475,7 @@ export function VaultView() {
           </div>
           <div>
             <h2 className="text-sm font-bold text-on-surface flex items-center gap-2">
-              <span>Tresor & Authenticator</span>
+              <span>Passwort-Manager & Authenticator</span>
               <span className="text-[11px] font-normal text-on-surface-variant">
                 ({items.length} {items.length === 1 ? 'Eintrag' : 'Einträge'})
               </span>
@@ -355,7 +532,7 @@ export function VaultView() {
             size="sm"
             variant="ghost"
             onClick={lock}
-            title="Tresor sperren"
+            title="Passwort-Manager sperren"
             className="text-on-surface-variant hover:text-status-error"
           >
             <Lock className="h-4 w-4" />

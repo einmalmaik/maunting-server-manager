@@ -545,7 +545,7 @@ function Hauptseite({
           <Reiter
             aktiv={bereich === 'tresor'}
             onClick={() => navigate('/tresor')}
-            label={t('mss.app.tresor', 'Tresor')}
+            label={t('mss.app.tresor', 'Passwort-Manager')}
           />
           <Reiter
             aktiv={bereich === 'einstellungen'}
@@ -670,7 +670,7 @@ function Hauptseite({
                 }`}
               >
                 <KeyRound className="h-4 w-4" />
-                <span>{t('mss.app.tresor', 'Tresor')}</span>
+                <span>{t('mss.app.tresor', 'Passwort-Manager')}</span>
               </button>
 
               <button
