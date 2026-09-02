@@ -99,17 +99,36 @@ export function DesktopApp() {
       checkAutoLock()
     }, 10000)
 
-    const handleVisibilityChange = () => {
-      if (document.hidden && lockOnWindowBlur) {
-        lockVault()
+    const handleWindowBlur = () => {
+      const state = useVaultStore.getState()
+      if (state.lockOnWindowBlur && state.isUnlocked && !state.isUnlocking) {
+        state.lock()
       }
     }
+
+    const handleVisibilityChange = () => {
+      const state = useVaultStore.getState()
+      if (document.hidden && state.lockOnWindowBlur && state.isUnlocked && !state.isUnlocking) {
+        state.lock()
+      }
+    }
+
+    window.addEventListener('blur', handleWindowBlur)
     document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    let unlistenTauriBlur: (() => void) | undefined
+    listen('tauri://blur', handleWindowBlur)
+      .then((unlisten) => {
+        unlistenTauriBlur = unlisten
+      })
+      .catch(() => {})
 
     return () => {
       events.forEach((evt) => window.removeEventListener(evt, handleActivity))
       clearInterval(interval)
+      window.removeEventListener('blur', handleWindowBlur)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
+      if (unlistenTauriBlur) unlistenTauriBlur()
     }
   }, [isUnlocked, lockOnWindowBlur, recordActivity, checkAutoLock, lockVault])
 

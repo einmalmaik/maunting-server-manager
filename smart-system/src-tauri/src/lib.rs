@@ -682,6 +682,25 @@ async fn biometrie_verifizieren(nachricht: Option<String>) -> Result<bool, Strin
     biometrie::verifiziere_benutzer(&msg).await
 }
 
+/// Speichert das biometrische Geheimnis im geschützten Windows Credential Manager.
+#[tauri::command]
+fn biometrie_speichern(geheimnis: String) -> Result<(), String> {
+    biometrie::speichere_biometrie_geheimnis(&geheimnis)
+}
+
+/// Fordert Windows Hello an und liest das Geheimnis erst nach erfolgreicher Authentifizierung aus.
+#[tauri::command(async)]
+async fn biometrie_entsperren(nachricht: Option<String>) -> Result<String, String> {
+    let msg = nachricht.unwrap_or_else(|| "Tresor entsperren".to_string());
+    biometrie::entsperre_mit_biometrie(&msg).await
+}
+
+/// Entfernt das biometrische Geheimnis aus dem Windows Credential Manager.
+#[tauri::command]
+fn biometrie_loeschen() -> Result<(), String> {
+    biometrie::loesche_biometrie_geheimnis()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
@@ -755,7 +774,10 @@ pub fn run() {
             benachrichtigung_senden,
             setze_tresor_schutz,
             biometrie_verfuegbar,
-            biometrie_verifizieren
+            biometrie_verifizieren,
+            biometrie_speichern,
+            biometrie_entsperren,
+            biometrie_loeschen
         ])
         .setup(|app| {
             tray::erstellen(app.handle())?;

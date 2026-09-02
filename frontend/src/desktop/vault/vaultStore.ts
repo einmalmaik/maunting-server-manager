@@ -10,6 +10,7 @@ import {
   unwrapVaultCredentialsFromBiometrics,
   wrapVaultCredentialsForBiometrics,
 } from './vaultCrypto'
+import { biometrieEntsperren, biometrieLoeschen, biometrieSpeichern } from '../tauri'
 
 export interface VaultAttachment {
   id: string
@@ -165,7 +166,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     : false,
   isBiometricsSupported: false,
   isBiometricsEnabled: typeof localStorage !== 'undefined'
-    ? localStorage.getItem(VAULT_BIOMETRICS_ENABLED_KEY) === 'true' && !!localStorage.getItem(VAULT_BIOMETRICS_WRAPPED_KEY)
+    ? localStorage.getItem(VAULT_BIOMETRICS_ENABLED_KEY) === 'true'
     : false,
   lastActivityTime: Date.now(),
 
@@ -225,8 +226,14 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       await promptBiometricVerification('Windows Hello für Passwort-Manager aktivieren')
 
       const wrapped = await wrapVaultCredentialsForBiometrics(masterPassword)
+      try {
+        await biometrieSpeichern(wrapped)
+      } catch {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(VAULT_BIOMETRICS_WRAPPED_KEY, wrapped)
+        }
+      }
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(VAULT_BIOMETRICS_WRAPPED_KEY, wrapped)
         localStorage.setItem(VAULT_BIOMETRICS_ENABLED_KEY, 'true')
       }
       set({ isBiometricsEnabled: true })
@@ -238,6 +245,9 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   },
 
   disableBiometrics: async () => {
+    try {
+      await biometrieLoeschen()
+    } catch {}
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(VAULT_BIOMETRICS_WRAPPED_KEY)
       localStorage.setItem(VAULT_BIOMETRICS_ENABLED_KEY, 'false')
@@ -246,15 +256,27 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   },
 
   unlockWithBiometrics: async () => {
-    const wrapped = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_BIOMETRICS_WRAPPED_KEY) : null
-    if (!wrapped) {
-      set({ unlockError: 'Biometrie ist auf diesem Gerät noch nicht eingerichtet.' })
-      return false
-    }
-
     set({ isUnlocking: true, unlockError: null })
     try {
-      await promptBiometricVerification('Passwort-Manager entsperren')
+      let wrapped: string | null = null
+      try {
+        // 1. Primär: Native Windows Hello Verifikation & Freigabe aus dem Windows Credential Store
+        wrapped = await biometrieEntsperren('Passwort-Manager entsperren')
+      } catch (err: unknown) {
+        // 2. Fallback: Browser-Speicher (z. B. im Web oder bei Dev-Tests)
+        const localWrapped = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_BIOMETRICS_WRAPPED_KEY) : null
+        if (!localWrapped) {
+          const msg = err instanceof Error ? err.message : 'Biometrische Authentifizierung fehlgeschlagen.'
+          throw new Error(msg)
+        }
+        await promptBiometricVerification('Passwort-Manager entsperren')
+        wrapped = localWrapped
+      }
+
+      if (!wrapped) {
+        throw new Error('Biometrischer Schlüssel konnte nicht geladen werden.')
+      }
+
       const masterPassword = await unwrapVaultCredentialsFromBiometrics(wrapped)
       const success = await get().unlock(masterPassword)
       return success

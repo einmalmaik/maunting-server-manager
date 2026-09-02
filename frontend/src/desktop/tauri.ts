@@ -355,3 +355,27 @@ export async function verifiziereBiometrie(nachricht?: string): Promise<boolean>
     return false
   }
 }
+
+/**
+ * Speichert das biometrisch geschützte Schlüsselgeheimnis im Windows Credential Manager.
+ */
+export async function biometrieSpeichern(geheimnis: string): Promise<void> {
+  await invoke('biometrie_speichern', { geheimnis })
+}
+
+/**
+ * Fordert Windows Hello an und liefert das Schlüsselgeheimnis aus dem Windows Credential Store
+ * erst nach erfolgreicher Authentifizierung zurück.
+ */
+export async function biometrieEntsperren(nachricht?: string): Promise<string> {
+  return await invoke<string>('biometrie_entsperren', { nachricht })
+}
+
+/**
+ * Löscht das biometrische Schlüsselgeheimnis aus dem Windows Credential Manager.
+ */
+export async function biometrieLoeschen(): Promise<void> {
+  try {
+    await invoke('biometrie_loeschen')
+  } catch {}
+}
