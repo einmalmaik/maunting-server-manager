@@ -376,7 +376,7 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
 
 // ── Public Offline-First Notes API ──
 
-export async function loadNotesOfflineFirst(options?: {
+export async function loadNotesOfflineFirst(_options?: {
   includeArchived?: boolean
 }): Promise<{ notes: NoteItem[]; isOffline: boolean }> {
   let localNotes = getOfflineNotes()

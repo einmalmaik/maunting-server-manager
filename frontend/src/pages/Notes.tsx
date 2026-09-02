@@ -17,7 +17,6 @@ import {
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { confirm } from '@/stores/confirmStore'
 import { Dropdown, type DropdownOption } from '@/Singra/UI'

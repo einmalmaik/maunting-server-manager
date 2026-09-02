@@ -7,7 +7,6 @@ import {
   getOutbox,
   setOutbox,
   clearMemoryStoreForTesting,
-  loadNotesOfflineFirst,
   saveNoteOffline,
   deleteNoteOffline,
   toggleNotePinOffline,
@@ -18,7 +17,6 @@ import {
   deleteCalendarEventOffline,
   replayOutbox,
   mergeNotesWithServer,
-  mergeCalendarWithServer,
   initOfflineSync,
 } from './offlineSync'
 import * as client from '@/api/client'
@@ -166,8 +164,8 @@ describe('Offline Storage & Sync Engine', () => {
       // Setup offline creations
       vi.mocked(client.api).mockRejectedValue(new TypeError('Failed to fetch'))
 
-      const { note: note1 } = await saveNoteOffline({ title: 'Notiz 1' })
-      const { note: note2 } = await saveNoteOffline({ title: 'Notiz 2' })
+      await saveNoteOffline({ title: 'Notiz 1' })
+      await saveNoteOffline({ title: 'Notiz 2' })
 
       expect(getOutbox()).toHaveLength(2)
       expect(getOutbox()[0].payload.title).toBe('Notiz 1')

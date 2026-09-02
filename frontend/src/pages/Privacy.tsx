@@ -10,8 +10,8 @@ export function Privacy() {
     title: t('privacyPolicy.title'),
     intro: t('privacyPolicy.intro'),
     callout: t('privacyPolicy.callout'),
-    lastUpdated: '2026-08-26',
-    version: '2.9',
+    lastUpdated: '2026-09-02',
+    version: '3.0',
     meta: 'Maunting Studios — Sicherheit braucht Vertrauen',
     sections: [
       { heading: t('privacyPolicy.sections.scope.heading'), body: t('privacyPolicy.sections.scope.body') },
@@ -147,6 +147,7 @@ export function Privacy() {
           t('privacyPolicy.sections.storage.items.session'),
           t('privacyPolicy.sections.storage.items.csrf'),
           t('privacyPolicy.sections.storage.items.preferences'),
+          t('privacyPolicy.sections.storage.items.offlineNotesAndCalendar'),
         ],
       },
       {

@@ -25,6 +25,11 @@ import { PageHeader } from '@/Singra/UI/PageHeader'
 import { DateTimePicker, Dropdown } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
+import {
+  loadCalendarEventsOfflineFirst,
+  saveCalendarEventOffline,
+  deleteCalendarEventOffline,
+} from '@/lib/offlineSync'
 
 export type EventCategoryType = 'personal' | 'team' | 'server' | 'node'
 
@@ -151,15 +156,12 @@ export function Calendar() {
   }, [currentDate, viewMode])
 
   const fetchEvents = useCallback(() => {
-    const catParam = selectedCategory !== 'all' ? `&event_type=${encodeURIComponent(selectedCategory)}` : ''
-    api<CalendarEventItem[]>(
-      `/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}${catParam}`
-    )
-      .then((data) => {
+    loadCalendarEventsOfflineFirst(rangeStart, rangeEnd, selectedCategory)
+      .then(({ events: data }) => {
         setEvents(Array.isArray(data) ? data : [])
       })
-      .catch((err) => {
-        toast.error(err.message)
+      .catch(() => {
+        setEvents([])
       })
   }, [rangeStart, rangeEnd, selectedCategory])
 
@@ -196,22 +198,16 @@ export function Calendar() {
 
     // Automatische Aktualisierung in Echtzeit alle 10 Sekunden (still im Hintergrund)
     const interval = setInterval(() => {
-      const catParam = selectedCategory !== 'all' ? `&event_type=${encodeURIComponent(selectedCategory)}` : ''
-      api<CalendarEventItem[]>(
-        `/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}${catParam}`
-      )
-        .then((data) => {
+      loadCalendarEventsOfflineFirst(rangeStart, rangeEnd, selectedCategory)
+        .then(({ events: data }) => {
           if (Array.isArray(data)) setEvents(data)
         })
         .catch(() => {})
     }, 10_000)
 
     const handleFocusOrUpdate = () => {
-      const catParam = selectedCategory !== 'all' ? `&event_type=${encodeURIComponent(selectedCategory)}` : ''
-      api<CalendarEventItem[]>(
-        `/calendar/events?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}${catParam}`
-      )
-        .then((data) => {
+      loadCalendarEventsOfflineFirst(rangeStart, rangeEnd, selectedCategory)
+        .then(({ events: data }) => {
           if (Array.isArray(data)) setEvents(data)
         })
         .catch(() => {})
@@ -383,39 +379,23 @@ export function Calendar() {
 
     setSaving(true)
     try {
+      const payload = {
+        title: formTitle.trim(),
+        start_time: formStart,
+        end_time: formEnd,
+        description: formDescription.trim() || null,
+        location: formLocation.trim() || null,
+        all_day: formAllDay,
+        color: formColor,
+        event_type: formEventType,
+        team_id: formEventType === 'team' ? formTeamId : null,
+        server_id: formEventType === 'server' ? formServerId : null,
+      }
+
+      await saveCalendarEventOffline(payload, formEventId)
       if (formEventId) {
-        await api(`/calendar/events/${encodeURIComponent(formEventId)}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            title: formTitle.trim(),
-            start_time: formStart,
-            end_time: formEnd,
-            description: formDescription.trim() || null,
-            location: formLocation.trim() || null,
-            all_day: formAllDay,
-            color: formColor,
-            event_type: formEventType,
-            team_id: formEventType === 'team' ? formTeamId : null,
-            server_id: formEventType === 'server' ? formServerId : null,
-          }),
-        })
         toast.success('Termin aktualisiert')
       } else {
-        await api('/calendar/events', {
-          method: 'POST',
-          body: JSON.stringify({
-            title: formTitle.trim(),
-            start_time: formStart,
-            end_time: formEnd,
-            description: formDescription.trim() || null,
-            location: formLocation.trim() || null,
-            all_day: formAllDay,
-            color: formColor,
-            event_type: formEventType,
-            team_id: formEventType === 'team' ? formTeamId : null,
-            server_id: formEventType === 'server' ? formServerId : null,
-          }),
-        })
         toast.success('Termin erfolgreich erstellt')
       }
       setIsModalOpen(false)
@@ -441,9 +421,7 @@ export function Calendar() {
 
     setSaving(true)
     try {
-      await api(`/calendar/events/${encodeURIComponent(formEventId)}`, {
-        method: 'DELETE',
-      })
+      await deleteCalendarEventOffline(formEventId)
       toast.success('Termin gelöscht')
       setIsModalOpen(false)
       fetchEvents()

@@ -43,12 +43,17 @@ import { useAuthStore } from '@/stores/authStore'
 import { PrivacyAcknowledgementNotice } from './components/ui/PrivacyAcknowledgementNotice'
 import { PrivacyNoticeVisibilityContext } from './components/ui/PrivacyNoticeVisibility'
 import { SupportWidgetLoader } from './components/SupportWidgetLoader'
+import { initOfflineSync } from './lib/offlineSync'
 
 function App() {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
   const [setupEmailConfigured, setSetupEmailConfigured] = useState(false)
   const [privacyNoticeVisible, setPrivacyNoticeVisible] = useState(true)
   const { isAuthenticated } = useAuthStore()
+
+  useEffect(() => {
+    return initOfflineSync()
+  }, [])
 
   useEffect(() => {
     fetch(apiUrl('/auth/setup-status'), { credentials: 'include' })

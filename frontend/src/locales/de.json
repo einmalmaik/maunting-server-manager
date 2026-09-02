@@ -4271,7 +4271,8 @@
         "items": {
           "session": "Session- oder Auth-Cookies, um Nutzer angemeldet zu halten",
           "csrf": "CSRF-Schutzwerte zum Schutz zustandsändernder Anfragen",
-          "preferences": "Sprache und Bestätigung des Datenschutzhinweises im lokalen Browser-Speicher"
+          "preferences": "Sprache und Bestätigung des Datenschutzhinweises im lokalen Browser-Speicher",
+          "offlineNotesAndCalendar": "Offline-Speicher und Hintergrund-Synchronisation: Persönliche Notizen, Checklisten und Kalendereinträge werden für den Offline-Betrieb (auch in der mobilen APK) lokal im Browser-/Gerätespeicher abgelegt und bei bestehender Verbindung direkt und ausschließlich mit Ihrer selbstgehosteten MSM-Instanz synchronisiert. Es findet keinerlei Weitergabe an Dritte oder Tracking statt."
         }
       },
       "retention": {

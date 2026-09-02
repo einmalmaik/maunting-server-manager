@@ -4271,7 +4271,8 @@
         "items": {
           "session": "Session or authentication cookies used to keep users signed in",
           "csrf": "CSRF protection values used to protect state-changing requests",
-          "preferences": "Language and privacy-notice acknowledgement stored locally in the browser"
+          "preferences": "Language and privacy-notice acknowledgement stored locally in the browser",
+          "offlineNotesAndCalendar": "Offline storage and background synchronization: Personal notes, checklists, and calendar entries are cached locally in browser and device storage for seamless offline access (including the mobile APK) and synchronized directly and solely with your self-hosted MSM instance upon reconnect. No third-party data sharing, tracking, or telemetry occurs."
         }
       },
       "retention": {
