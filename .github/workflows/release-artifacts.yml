@@ -52,6 +52,11 @@ jobs:
             frontend/package-lock.json
             dis-sidecar/package-lock.json
 
+      - name: Prepare /opt/msm runtime directories
+        run: |
+          sudo mkdir -p /opt/msm/servers /opt/msm/backups
+          sudo chown -R "$USER":"$USER" /opt/msm
+
       - name: Test backend
         working-directory: backend
         run: |
@@ -61,7 +66,7 @@ jobs:
             pip install -r dev-requirements.txt
           fi
           pip install pytest 2>/dev/null || true
-          python -m pytest tests -q
+          python -m pytest -q
 
       - name: Test agent
         working-directory: msm-agent
