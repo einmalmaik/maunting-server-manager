@@ -253,7 +253,7 @@ export function Sidebar({ mobile = false, onNavigate }: SidebarProps) {
           )}
 
           {/* Notification Bell */}
-          <BenachrichtigungsGlocke placement="top" align="right" />
+          <BenachrichtigungsGlocke placement="top" align="sidebar" />
         </div>
       </div>
     </aside>

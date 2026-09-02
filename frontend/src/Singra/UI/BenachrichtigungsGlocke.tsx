@@ -8,11 +8,11 @@ import { Switch } from '@/components/ui/Switch'
 
 interface BenachrichtigungsGlockeProps {
   className?: string
-  align?: 'left' | 'right'
+  align?: 'left' | 'right' | 'sidebar'
   placement?: 'top' | 'bottom'
 }
 
-export function BenachrichtigungsGlocke({ className = '', align = 'right', placement = 'top' }: BenachrichtigungsGlockeProps) {
+export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', placement = 'top' }: BenachrichtigungsGlockeProps) {
   const { t } = useTranslation()
   const { user, updateUser } = useAuthStore()
 
@@ -82,7 +82,12 @@ export function BenachrichtigungsGlocke({ className = '', align = 'right', place
     }
   }
 
-  const alignClass = align === 'left' ? 'left-0' : 'right-0'
+  const alignClass =
+    align === 'sidebar'
+      ? 'right-0 lg:left-0 lg:right-auto'
+      : align === 'left'
+      ? 'left-0'
+      : 'right-0'
   const placementClass = placement === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
 
   return (
