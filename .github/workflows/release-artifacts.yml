@@ -202,40 +202,12 @@ jobs:
           cp smart-system/src-tauri/target/release/MauntingSmartSystem.exe desktop-release/MauntingSmartSystem.exe || true
 
           # Updater-Dateien einsammeln (.nsis.zip, .zip, .sig)
-          for f in $(find smart-system/src-tauri/target/release/bundle -type f \( -name "*.nsis.zip" -o -name "*.sig" \)); do
+          for f in $(find smart-system/src-tauri/target/release -type f \( -name "*.nsis.zip" -o -name "*.zip" -o -name "*.sig" \)); do
             cp -v "$f" desktop-release/ || true
           done
 
-          # Prüfen, ob Tauri bereits ein latest.json generiert hat
-          TAURI_LATEST=$(find smart-system/src-tauri/target/release/bundle -type f -name "latest.json" | head -n 1)
-          if [ -n "$TAURI_LATEST" ]; then
-            cp -v "$TAURI_LATEST" desktop-release/latest.json
-          else
-            # Erzeuge Tauri-v2 kompatibles latest.json mit Signatur
-            SIG_FILE=$(find desktop-release -type f -name "*.sig" | head -n 1)
-            ZIP_FILE=$(find desktop-release -type f -name "*.nsis.zip" | head -n 1)
-            if [ -n "$SIG_FILE" ] && [ -n "$ZIP_FILE" ]; then
-              SIG_FILE="$SIG_FILE" ZIP_FILE="$ZIP_FILE" TAG="$TAG" node -e "
-                const fs = require('fs');
-                const path = require('path');
-                const tag = process.env.TAG || 'v4.0.0';
-                const sig = fs.readFileSync(process.env.SIG_FILE, 'utf8').trim();
-                const zip = path.basename(process.env.ZIP_FILE);
-                const data = {
-                  version: tag,
-                  notes: 'MSS Update ' + tag,
-                  pub_date: new Date().toISOString(),
-                  platforms: {
-                    'windows-x86_64': {
-                      signature: sig,
-                      url: 'https://github.com/einmalmaik/maunting-server-manager/releases/download/' + tag + '/' + zip
-                    }
-                  }
-                };
-                fs.writeFileSync('desktop-release/latest.json', JSON.stringify(data, null, 2));
-              "
-            fi
-          fi
+          # latest.json sicherstellen
+          python scripts/generate-latest-manifest.py "$TAG"
 
           if [ -f desktop-release/latest.json ]; then
             echo "--- latest.json erfolgreich bereitgestellt: ---"

@@ -45,6 +45,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "publisher": "MauntingStudios",
     "copyright": "© 2026 MauntingStudios",
     "targets": [
