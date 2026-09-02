@@ -47,7 +47,9 @@
     "active": true,
     "publisher": "MauntingStudios",
     "copyright": "© 2026 MauntingStudios",
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
