@@ -54,7 +54,7 @@ import {
   wakewordStand,
   type AppKonfig,
 } from './tauri'
-import { stillAnmelden, stillAnmeldenDetail } from './transport'
+import { stillAnmeldenDetail } from './transport'
 import { useAuftragsschleife } from './useAuftragsschleife'
 
 type Phase = 'laedt' | 'einrichtung' | 'kopplung' | 'sandbox' | 'bereit'

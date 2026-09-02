@@ -135,7 +135,7 @@ export function Notes() {
     }
   }, [])
 
-  const { isOnline, isLive, outboxCount } = useEntitySync('notes', () => {
+  useEntitySync('notes', () => {
     void loadNotes()
   })
 

@@ -22,7 +22,6 @@ import {
   initOfflineSync,
   handleIncomingSyncEvent,
   useEntitySync,
-  startLiveSync,
 } from './offlineSync'
 import * as client from '@/api/client'
 

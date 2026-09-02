@@ -194,7 +194,7 @@ export function Calendar() {
       .catch(() => {})
   }, [])
 
-  const { isOnline, isLive, outboxCount } = useEntitySync('calendar', () => {
+  useEntitySync('calendar', () => {
     fetchEvents()
   })
 

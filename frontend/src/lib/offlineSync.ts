@@ -1130,7 +1130,7 @@ export function useEntitySync(
     window.addEventListener('offline', handleOfflineEvent)
 
     // Ensure SSE is active
-    const stopLive = ensureLiveSyncRunning()
+    ensureLiveSyncRunning()
 
     return () => {
       window.removeEventListener('msm:notes-updated', handleNotes)
