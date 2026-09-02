@@ -2,13 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react'
 import {
   Check,
   Clock,
-  Cloud,
-  CloudOff,
   Copy,
   Edit2,
   ExternalLink,
   Eye,
   EyeOff,
+  HelpCircle,
   KeyRound,
   Lock,
   Plus,
@@ -43,7 +42,6 @@ export function VaultView() {
     items,
     searchQuery,
     syncStatus,
-    lastSyncTime,
     initializeVault,
     unlock,
     lock,
@@ -53,6 +51,8 @@ export function VaultView() {
     toggleFavorite,
     markUsed,
     syncWithServer,
+    saveHint,
+    requestHintEmail,
   } = useVaultStore()
 
   // Hardware- und Software-Schutz vor Windows Computer-Use KI-Screenshots
@@ -63,18 +63,20 @@ export function VaultView() {
     }
   }, [isUnlocked])
 
-  // UI-Zustände
+  // UI-Zustände für Sperre & Ersteinrichtung
   const [isSetupMode, setIsSetupMode] = useState(!isInitialized)
   const [masterPasswordInput, setMasterPasswordInput] = useState('')
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('')
+  const [hintInput, setHintInput] = useState('')
   const [showMasterPassword, setShowMasterPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [isRequestingHint, setIsRequestingHint] = useState(false)
 
   // Feedback für kopierte Felder
   const [copiedIdField, setCopiedIdField] = useState<string | null>(null)
   const [revealedPasswordId, setRevealedPasswordId] = useState<string | null>(null)
 
-  // Live TOTP Takt (Aktualisierung jede Sekunde für alle sichtbaren 2FA Codes)
+  // Live TOTP Takt (Sekunden-Ticker für 2FA)
   const [totpRemaining, setTotpRemaining] = useState<number>(30)
   const [totpCodes, setTotpCodes] = useState<Record<string, string>>({})
 
@@ -90,7 +92,6 @@ export function VaultView() {
   const [showModalPassword, setShowModalPassword] = useState(false)
   const [showQrScanner, setShowQrScanner] = useState(false)
   const [leakCheckResult, setLeakCheckResult] = useState<LeakCheckResult | null>(null)
-  const [isCheckingLeak, setIsCheckingLeak] = useState(false)
 
   // TOTP-Ticker für alle Einträge mit 2FA-Secret
   useEffect(() => {
@@ -124,14 +125,14 @@ export function VaultView() {
     }
   }, [items, isUnlocked])
 
-  // Kopieren mit visuellem Feedback
+  // Kopieren mit sofortigem Feedback
   const handleCopy = async (text: string, fieldKey: string, itemId?: string) => {
     if (!text) return
     try {
       await navigator.clipboard.writeText(text)
       setCopiedIdField(fieldKey)
-      toast.success('In die Zwischenablage kopiert')
-      setTimeout(() => setCopiedIdField(null), 1800)
+      toast.success('Kopiert')
+      setTimeout(() => setCopiedIdField(null), 1500)
 
       if (itemId) {
         void markUsed(itemId)
@@ -141,7 +142,7 @@ export function VaultView() {
     }
   }
 
-  // Passwort für 5 Sekunden aufdecken
+  // Passwort kurz aufdecken
   const handleToggleRevealPassword = (itemId: string) => {
     if (revealedPasswordId === itemId) {
       setRevealedPasswordId(null)
@@ -192,12 +193,11 @@ export function VaultView() {
       setLeakCheckResult(null)
       return
     }
-    setIsCheckingLeak(true)
     try {
       const res = await checkPasswordLeak(pwd)
       setLeakCheckResult(res)
-    } finally {
-      setIsCheckingLeak(false)
+    } catch {
+      setLeakCheckResult(null)
     }
   }
 
@@ -205,7 +205,7 @@ export function VaultView() {
   const handleModalSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!modalService.trim()) {
-      toast.error('Bitte gib den Namen des Dienstes an.')
+      toast.error('Bitte Dienstname angeben.')
       return
     }
 
@@ -220,15 +220,15 @@ export function VaultView() {
         totpSecret: modalTotpSecret.trim().toUpperCase(),
       })
       setIsModalOpen(false)
-      toast.success('Passwort sicher verschlüsselt gespeichert')
+      toast.success('Gespeichert')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Speichern fehlgeschlagen')
+      toast.error(err instanceof Error ? err.message : 'Fehler beim Speichern')
     }
   }
 
   // Löschen eines Eintrags
   const handleDeleteItem = async (item: VaultItem) => {
-    if (!window.confirm(`Möchtest du "${item.service}" wirklich unwiderruflich löschen?`)) {
+    if (!window.confirm(`"${item.service}" löschen?`)) {
       return
     }
     try {
@@ -236,9 +236,9 @@ export function VaultView() {
       if (isModalOpen && editingItemId === item.id) {
         setIsModalOpen(false)
       }
-      toast.success('Eintrag gelöscht')
+      toast.success('Gelöscht')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Löschen fehlgeschlagen')
+      toast.error(err instanceof Error ? err.message : 'Fehler beim Löschen')
     }
   }
 
@@ -251,7 +251,23 @@ export function VaultView() {
     if (payload.account && !modalUsername) {
       setModalUsername(payload.account)
     }
-    toast.success('2FA-Schlüssel aus QR-Code übernommen')
+    toast.success('2FA-Code übernommen')
+  }
+
+  // Hinweis per E-Mail anfordern (max. 1x alle 10 Minuten)
+  const handleRequestHint = async () => {
+    if (isRequestingHint) return
+    setIsRequestingHint(true)
+    try {
+      const res = await requestHintEmail()
+      if (res.ok) {
+        toast.success(res.message)
+      } else {
+        toast.error(res.message)
+      }
+    } finally {
+      setIsRequestingHint(false)
+    }
   }
 
   // Filterung nach Suchbegriff
@@ -272,7 +288,7 @@ export function VaultView() {
     return searchedItems.filter((item) => item.isFavorite)
   }, [searchedItems])
 
-  // 2. Zuletzt verwendet (letzte 5, die nicht bereits in den Favoriten sind)
+  // 2. Zuletzt verwendet
   const recentItems = useMemo(() => {
     return searchedItems
       .filter((item) => !item.isFavorite && typeof item.lastUsedAt === 'number' && item.lastUsedAt > 0)
@@ -280,7 +296,7 @@ export function VaultView() {
       .slice(0, 5)
   }, [searchedItems])
 
-  // 3. Alle anderen Einträge (alphabetisch)
+  // 3. Alle anderen Einträge
   const otherItems = useMemo(() => {
     const favoriteIds = new Set(favoriteItems.map((i) => i.id))
     const recentIds = new Set(recentItems.map((i) => i.id))
@@ -291,8 +307,8 @@ export function VaultView() {
 
   const ModalBrandIcon = getBrandIcon(modalService, modalUrl)
 
-  // ── 1. ERSTEINRICHTUNG (Wenn noch kein Master-Passwort hinterlegt ist) ──
-  if (!isUnlocked && isSetupMode) {
+  // ── 1. ERSTEINRICHTUNG (NUR wenn noch NIE eingerichtet) ──
+  if (!isUnlocked && (!isInitialized || isSetupMode)) {
     const canSubmitSetup =
       masterPasswordInput.length >= 8 &&
       masterPasswordInput === confirmPasswordInput &&
@@ -300,17 +316,14 @@ export function VaultView() {
 
     return (
       <div className="flex h-full w-full items-center justify-center p-4 bg-surface">
-        <div className="w-full max-w-md p-6 sm:p-8 space-y-6 rounded-2xl bg-surface-container border border-outline-variant/30 shadow-xl">
-          <div className="text-center space-y-2">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary border border-primary/20">
-              <KeyRound className="h-7 w-7" />
+        <div className="w-full max-w-sm p-6 space-y-5 rounded-2xl bg-surface-container border border-outline-variant/30 shadow-xl">
+          <div className="text-center space-y-1.5">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary border border-primary/20">
+              <KeyRound className="h-6 w-6" />
             </div>
-            <h2 className="text-title-lg font-headline font-bold text-on-surface">
+            <h2 className="text-base font-bold text-on-surface">
               Passwort-Manager einrichten
             </h2>
-            <p className="text-xs text-on-surface-variant max-w-xs mx-auto">
-              Erstelle dein persönliches Master-Passwort zum Schutz deiner Zugangsdaten und 2FA-Schlüssel.
-            </p>
           </div>
 
           <form
@@ -319,30 +332,36 @@ export function VaultView() {
               if (!canSubmitSetup) return
               const ok = await initializeVault(masterPasswordInput)
               if (ok) {
+                if (hintInput.trim()) {
+                  void saveHint(hintInput)
+                }
                 setMasterPasswordInput('')
                 setConfirmPasswordInput('')
-                toast.success('Passwort-Manager erfolgreich eingerichtet')
+                setHintInput('')
+                setIsSetupMode(false)
+                toast.success('Passwort-Manager eingerichtet')
               }
             }}
-            className="space-y-4"
+            className="space-y-3.5"
           >
             <div>
-              <label className="block text-xs font-medium text-on-surface-variant mb-1">
-                Neues Master-Passwort festlegen
+              <label className="block text-[11px] font-medium text-on-surface-variant mb-1">
+                Neues Master-Passwort
               </label>
               <div className="relative">
                 <input
                   type={showMasterPassword ? 'text' : 'password'}
                   value={masterPasswordInput}
                   onChange={(e) => setMasterPasswordInput(e.target.value)}
-                  placeholder="Mindestens 8 Zeichen..."
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3.5 py-2.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-10"
+                  placeholder="Mindestens 8 Zeichen"
+                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                   autoFocus
                 />
                 <button
                   type="button"
                   onClick={() => setShowMasterPassword(!showMasterPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface"
+                  tabIndex={-1}
                 >
                   {showMasterPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -350,97 +369,101 @@ export function VaultView() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-on-surface-variant mb-1">
-                Master-Passwort wiederholen
+              <label className="block text-[11px] font-medium text-on-surface-variant mb-1">
+                Passwort wiederholen
               </label>
               <div className="relative">
                 <input
                   type={showConfirmPassword ? 'text' : 'password'}
                   value={confirmPasswordInput}
                   onChange={(e) => setConfirmPasswordInput(e.target.value)}
-                  placeholder="Passwort erneut eingeben..."
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3.5 py-2.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-10"
+                  placeholder="Erneut eingeben"
+                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                 />
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface"
+                  tabIndex={-1}
                 >
                   {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
 
               {confirmPasswordInput.length > 0 && (
-                <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
+                <div className="mt-1 text-[11px]">
                   {masterPasswordInput === confirmPasswordInput ? (
                     <span className="flex items-center gap-1 text-status-success">
-                      <Check className="h-3 w-3" /> Passwörter stimmen überein
+                      <Check className="h-3 w-3" /> Stimmt überein
                     </span>
                   ) : (
-                    <span className="text-status-error">Passwörter stimmen nicht überein</span>
+                    <span className="text-status-error">Stimmt nicht überein</span>
                   )}
                 </div>
               )}
             </div>
 
+            {/* Optionaler Passwort-Hinweis */}
+            <div>
+              <label className="block text-[11px] font-medium text-on-surface-variant mb-1">
+                Passwort-Hinweis (optional)
+              </label>
+              <input
+                type="text"
+                value={hintInput}
+                onChange={(e) => setHintInput(e.target.value)}
+                placeholder="Erinnerungshilfe, z. B. erste Schule"
+                className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
+              />
+            </div>
+
             {unlockError && (
-              <div className="rounded-xl bg-status-error/15 border border-status-error/30 p-3 text-xs text-status-error">
+              <div className="rounded-xl bg-status-error/15 border border-status-error/30 p-2.5 text-xs text-status-error">
                 {unlockError}
               </div>
             )}
 
-            <div className="rounded-xl bg-surface-container-low border border-outline-variant/20 p-3 space-y-1 text-[11px] text-on-surface-variant">
-              <div className="flex items-center gap-1.5 font-medium text-on-surface">
-                <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-                <span>Zero-Knowledge Architektur</span>
-              </div>
-              <p>
-                Deine Daten werden auf dem Endgerät mit AES-256-GCM verschlüsselt. Niemand außer dir
-                kann deine Passwörter einsehen oder zurücksetzen.
-              </p>
-            </div>
-
             <Button
               type="submit"
               disabled={!canSubmitSetup}
-              className="w-full bg-primary text-on-primary hover:bg-primary-hover py-2.5"
+              className="w-full bg-primary text-on-primary hover:bg-primary-hover py-2 text-xs"
             >
-              {isUnlocking ? 'Richte ein...' : 'Passwort-Manager anlegen'}
+              {isUnlocking ? 'Richte ein...' : 'Einrichten'}
             </Button>
           </form>
 
-          <div className="text-center pt-2">
-            <button
-              type="button"
-              onClick={() => {
-                setIsSetupMode(false)
-                setMasterPasswordInput('')
-              }}
-              className="text-xs text-primary hover:underline"
-            >
-              Bereits eingerichtet? Bestehendes Master-Passwort eingeben
-            </button>
-          </div>
+          {isInitialized && (
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSetupMode(false)
+                  setMasterPasswordInput('')
+                  setConfirmPasswordInput('')
+                }}
+                className="text-xs text-primary hover:underline"
+              >
+                Abbrechen
+              </button>
+            </div>
+          )}
         </div>
       </div>
     )
   }
 
-  // ── 2. ENTSPERREN (Standard-Zustand beim Öffnen) ──
+  // ── 2. ENTSPERREN (Minimaler, absolut aufgeräumter Standard-Zustand) ──
   if (!isUnlocked) {
     return (
       <div className="flex h-full w-full items-center justify-center p-4 bg-surface">
-        <div className="w-full max-w-sm p-6 sm:p-8 space-y-6 rounded-2xl bg-surface-container border border-outline-variant/30 shadow-xl">
-          <div className="text-center space-y-2">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary border border-primary/20">
-              <Lock className="h-7 w-7" />
+        <div className="w-full max-w-sm p-6 space-y-5 rounded-2xl bg-surface-container border border-outline-variant/30 shadow-xl">
+          <div className="text-center space-y-1.5">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary border border-primary/20">
+              <Lock className="h-6 w-6" />
             </div>
-            <h2 className="text-title-lg font-headline font-bold text-on-surface">
+            <h2 className="text-base font-bold text-on-surface">
               Passwort-Manager
             </h2>
-            <p className="text-xs text-on-surface-variant">
-              Gib dein Master-Passwort ein, um deine Passwörter und 2FA-Codes zu entsperren.
-            </p>
           </div>
 
           <form
@@ -450,31 +473,32 @@ export function VaultView() {
               const ok = await unlock(masterPasswordInput)
               if (ok) {
                 setMasterPasswordInput('')
-                toast.success('Passwort-Manager entsperrt')
+                toast.success('Entsperrt')
               }
             }}
-            className="space-y-4"
+            className="space-y-3.5"
           >
             <div className="relative">
               <input
                 type={showMasterPassword ? 'text' : 'password'}
                 value={masterPasswordInput}
                 onChange={(e) => setMasterPasswordInput(e.target.value)}
-                placeholder="Master-Passwort..."
-                className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3.5 py-2.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-10"
+                placeholder="Master-Passwort"
+                className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                 autoFocus
               />
               <button
                 type="button"
                 onClick={() => setShowMasterPassword(!showMasterPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface"
+                tabIndex={-1}
               >
                 {showMasterPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
 
             {unlockError && (
-              <div className="rounded-xl bg-status-error/15 border border-status-error/30 p-3 text-xs text-status-error">
+              <div className="rounded-xl bg-status-error/15 border border-status-error/30 p-2.5 text-xs text-status-error">
                 {unlockError}
               </div>
             )}
@@ -482,40 +506,56 @@ export function VaultView() {
             <Button
               type="submit"
               disabled={isUnlocking || !masterPasswordInput}
-              className="w-full bg-primary text-on-primary hover:bg-primary-hover py-2.5 flex items-center justify-center gap-2"
+              className="w-full bg-primary text-on-primary hover:bg-primary-hover py-2 flex items-center justify-center gap-1.5 text-xs"
             >
               {isUnlocking ? (
                 <>
-                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                   <span>Entschlüssle...</span>
                 </>
               ) : (
                 <>
-                  <Unlock className="h-4 w-4" />
+                  <Unlock className="h-3.5 w-3.5" />
                   <span>Entsperren</span>
                 </>
               )}
             </Button>
           </form>
 
-          <div className="text-center pt-2">
+          {/* Hinweis per E-Mail anfordern */}
+          <div className="text-center space-y-2 pt-1">
             <button
               type="button"
-              onClick={() => {
-                setIsSetupMode(true)
-                setMasterPasswordInput('')
-              }}
-              className="text-xs text-on-surface-variant hover:text-primary transition-colors"
+              onClick={handleRequestHint}
+              disabled={isRequestingHint}
+              className="text-xs text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center gap-1 mx-auto disabled:opacity-50"
             >
-              Noch kein Master-Passwort? Jetzt neu einrichten
+              <HelpCircle className="h-3.5 w-3.5" />
+              <span>{isRequestingHint ? 'Sende E-Mail...' : 'Hinweis per E-Mail anfordern'}</span>
             </button>
+
+            {/* Link zum Einrichten NUR WENN noch gar nicht eingerichtet */}
+            {!isInitialized && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSetupMode(true)
+                    setMasterPasswordInput('')
+                  }}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Jetzt neu einrichten
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
     )
   }
 
-  // ── HILFSKOMPONENTE: EINTRAGS-ZEILE (TABELLE / LISTE) ──
+  // ── HILFSKOMPONENTE: ZEILE IN LISTE / TABELLE ──
   const renderItemRow = (item: VaultItem) => {
     const ItemBrand = getBrandIcon(item.service, item.url)
     const isRevealed = revealedPasswordId === item.id
@@ -524,42 +564,41 @@ export function VaultView() {
     return (
       <div
         key={item.id}
-        className="group flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-surface-container hover:bg-surface-container-high border border-outline-variant/20 transition-all shadow-sm"
+        className="group flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl bg-surface-container hover:bg-surface-container-high border border-outline-variant/20 transition-all shadow-xs"
       >
-        {/* Linke Seite: Logo, Dienstname, Benutzername */}
-        <div className="flex items-center gap-3.5 min-w-0 flex-1">
-          <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl bg-surface border border-outline-variant/20 p-2 shadow-xs">
-            <ItemBrand className="w-6 h-6" />
+        {/* Logo, Dienst, Benutzer */}
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-surface border border-outline-variant/20 p-1.5 shadow-xs">
+            <ItemBrand className="w-5 h-5" />
           </div>
 
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-on-surface truncate">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-on-surface truncate">
                 {item.service}
-              </h3>
+              </span>
               {item.url && (
                 <a
                   href={item.url.startsWith('http') ? item.url : `https://${item.url}`}
                   target="_blank"
                   rel="noreferrer"
                   className="text-on-surface-variant hover:text-primary transition-colors"
-                  title="Website öffnen"
                 >
                   <ExternalLink className="h-3 w-3" />
                 </a>
               )}
             </div>
 
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-xs text-on-surface-variant truncate font-mono">
-                {item.username || 'Kein Benutzername'}
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-[11px] text-on-surface-variant truncate font-mono">
+                {item.username || '—'}
               </span>
               {item.username && (
                 <button
                   type="button"
                   onClick={() => void handleCopy(item.username, `user-${item.id}`, item.id)}
-                  title="Benutzername kopieren"
                   className="text-on-surface-variant hover:text-on-surface p-0.5 rounded transition-colors"
+                  title="Benutzername kopieren"
                 >
                   {copiedIdField === `user-${item.id}` ? (
                     <Check className="h-3 w-3 text-status-success" />
@@ -572,26 +611,24 @@ export function VaultView() {
           </div>
         </div>
 
-        {/* Mittlere Seite: Passwort & 2FA Schnell-Kopieren */}
-        <div className="flex flex-wrap items-center gap-2.5 sm:justify-end">
-          {/* Passwort Schnell-Aktion */}
+        {/* Schnell-Aktionen (Passwort & 2FA) */}
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           {item.password && (
-            <div className="flex items-center rounded-lg bg-surface-container-low border border-outline-variant/20 px-2.5 py-1 gap-1.5 font-mono text-xs">
+            <div className="flex items-center rounded-lg bg-surface-container-low border border-outline-variant/20 px-2 py-0.5 gap-1 font-mono text-xs">
               <span className="text-on-surface select-none">
-                {isRevealed ? item.password : '••••••••••••'}
+                {isRevealed ? item.password : '••••••••'}
               </span>
               <button
                 type="button"
                 onClick={() => handleToggleRevealPassword(item.id)}
-                className="text-on-surface-variant hover:text-on-surface p-1 transition-colors"
-                title={isRevealed ? 'Verbergen' : '5 Sek. anzeigen'}
+                className="text-on-surface-variant hover:text-on-surface p-0.5 transition-colors"
               >
                 {isRevealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
               </button>
               <button
                 type="button"
                 onClick={() => void handleCopy(item.password, `pwd-${item.id}`, item.id)}
-                className="text-primary hover:text-primary-hover p-1 transition-colors"
+                className="text-primary hover:text-primary-hover p-0.5 transition-colors"
                 title="Passwort kopieren"
               >
                 {copiedIdField === `pwd-${item.id}` ? (
@@ -603,10 +640,9 @@ export function VaultView() {
             </div>
           )}
 
-          {/* 2FA Einmal-Code Schnell-Aktion (falls vorhanden) */}
           {item.totpSecret && itemTotp && (
-            <div className="flex items-center rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 gap-1.5 font-mono text-xs">
-              <span className="text-[10px] text-emerald-400/70 font-semibold uppercase">2FA</span>
+            <div className="flex items-center rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 gap-1 font-mono text-xs">
+              <span className="text-[10px] text-emerald-400 font-semibold">2FA</span>
               <span className="text-emerald-400 font-bold tracking-wider">
                 {itemTotp.slice(0, 3)} {itemTotp.slice(3)}
               </span>
@@ -614,8 +650,8 @@ export function VaultView() {
               <button
                 type="button"
                 onClick={() => void handleCopy(itemTotp, `totp-${item.id}`, item.id)}
-                className="text-emerald-400 hover:text-emerald-300 p-1 transition-colors"
-                title="2FA-Code kopieren"
+                className="text-emerald-400 hover:text-emerald-300 p-0.5 transition-colors"
+                title="Code kopieren"
               >
                 {copiedIdField === `totp-${item.id}` ? (
                   <Check className="h-3.5 w-3.5 text-status-success" />
@@ -626,28 +662,26 @@ export function VaultView() {
             </div>
           )}
 
-          {/* Favoriten-Stern & Bearbeiten-Aktion */}
-          <div className="flex items-center gap-1 border-l border-outline-variant/20 pl-2">
+          {/* Favorit & Edit */}
+          <div className="flex items-center gap-0.5 border-l border-outline-variant/20 pl-1.5">
             <button
               type="button"
               onClick={() => void toggleFavorite(item.id)}
-              className={`p-1.5 rounded-lg transition-colors ${
+              className={`p-1 rounded transition-colors ${
                 item.isFavorite
                   ? 'text-amber-400 hover:text-amber-300'
                   : 'text-on-surface-variant hover:text-amber-400'
               }`}
-              title={item.isFavorite ? 'Favorit entfernen' : 'Zu Favoriten hinzufügen'}
             >
-              <Star className={`h-4 w-4 ${item.isFavorite ? 'fill-current' : ''}`} />
+              <Star className={`h-3.5 w-3.5 ${item.isFavorite ? 'fill-current' : ''}`} />
             </button>
 
             <button
               type="button"
               onClick={() => openEditEntryModal(item)}
-              className="p-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest transition-colors"
-              title="Details & Bearbeiten"
+              className="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest transition-colors"
             >
-              <Edit2 className="h-4 w-4" />
+              <Edit2 className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
@@ -655,56 +689,31 @@ export function VaultView() {
     )
   }
 
-  // ── 3. HAUPTANSICHT: AUFGERÄUMTE VOLLBILD-STRUKTUR ──
+  // ── 3. HAUPTANSICHT: RADIKAL AUFGERÄUMT ──
   return (
     <div className="flex flex-col h-full bg-surface text-on-surface overflow-hidden">
       {/* KOPFZEILE */}
-      <div className="flex items-center justify-between border-b border-outline-variant/20 bg-surface-container-low px-4 sm:px-6 py-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
-            <Shield className="h-5 w-5" />
+      <div className="flex items-center justify-between border-b border-outline-variant/20 bg-surface-container-low px-4 py-2.5">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
+            <Shield className="h-4 w-4" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-base font-bold text-on-surface">Passwort-Manager</h1>
-              <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-surface-container px-2 py-0.5 text-[10px] text-on-surface-variant border border-outline-variant/20">
-                <ShieldCheck className="h-3 w-3 text-status-success" />
-                Zero-Knowledge
+              <h1 className="text-xs font-bold text-on-surface">Passwort-Manager</h1>
+              <span className="text-[10px] text-on-surface-variant">
+                ({items.length})
               </span>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-on-surface-variant">
-              <span>{items.length} gesicherte Zugänge</span>
-              {syncStatus === 'synced' && (
-                <span className="hidden md:flex items-center gap-1 text-status-success">
-                  • <Cloud className="h-3 w-3" /> Synchronisiert
-                </span>
-              )}
-              {syncStatus === 'syncing' && (
-                <span className="hidden md:flex items-center gap-1 text-primary">
-                  • <RefreshCw className="h-3 w-3 animate-spin" /> Synchronisiere...
-                </span>
-              )}
-              {syncStatus === 'offline' && (
-                <span className="hidden md:flex items-center gap-1 text-amber-500">
-                  • <CloudOff className="h-3 w-3" /> Offline
-                </span>
-              )}
-              {lastSyncTime && (
-                <span className="hidden lg:inline">
-                  • Zuletzt: {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              )}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* DER HAUPT-BUTTON: NEUES PASSWORT */}
+        <div className="flex items-center gap-1.5">
           <Button
             onClick={openNewEntryModal}
-            className="flex items-center gap-1.5 bg-primary text-on-primary hover:bg-primary-hover shadow-sm px-3.5 py-2 text-xs font-medium"
+            className="flex items-center gap-1 bg-primary text-on-primary hover:bg-primary-hover shadow-xs px-2.5 py-1.5 text-xs font-medium"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3.5 w-3.5" />
             <span>Neues Passwort</span>
           </Button>
 
@@ -712,94 +721,90 @@ export function VaultView() {
             size="sm"
             variant="ghost"
             onClick={() => void syncWithServer()}
-            title="Jetzt synchronisieren"
-            className="hidden sm:flex text-on-surface-variant hover:text-on-surface p-2"
+            title="Synchronisieren"
+            className="text-on-surface-variant hover:text-on-surface p-1.5"
           >
-            <RefreshCw className={`h-4 w-4 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
           </Button>
 
           <Button
             size="sm"
             variant="ghost"
             onClick={lock}
-            title="Passwort-Manager sperren"
-            className="text-on-surface-variant hover:text-status-error p-2"
+            title="Sperren"
+            className="text-on-surface-variant hover:text-status-error p-1.5"
           >
-            <Lock className="h-4 w-4" />
+            <Lock className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
 
       {/* SUCH-LEISTE */}
-      <div className="px-4 sm:px-6 py-3 border-b border-outline-variant/15 bg-surface-container-low/50">
-        <div className="relative max-w-xl">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-on-surface-variant" />
+      <div className="px-4 py-2 border-b border-outline-variant/15 bg-surface-container-low/40">
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-on-surface-variant" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Dienst, Website oder Benutzer suchen..."
-            className="w-full rounded-xl bg-surface-container border border-outline-variant/30 pl-10 pr-4 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary transition-colors"
+            placeholder="Suchen..."
+            className="w-full rounded-xl bg-surface-container border border-outline-variant/30 pl-8 pr-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
           />
         </div>
       </div>
 
-      {/* HAUPTINHALT: VOLLBILD-TABELLE / KARTENLISTE */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-6">
+      {/* LISTE / TABELLE */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
         {items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-12 text-center text-on-surface-variant max-w-md mx-auto">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-surface-container border border-outline-variant/30 mb-4 text-on-surface-variant/60">
-              <KeyRound className="h-8 w-8" />
+          <div className="flex flex-col items-center justify-center p-8 text-center text-on-surface-variant max-w-xs mx-auto">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-container border border-outline-variant/30 mb-3 text-on-surface-variant/60">
+              <KeyRound className="h-6 w-6" />
             </div>
-            <h3 className="text-base font-semibold text-on-surface">Noch keine Passwörter angelegt</h3>
-            <p className="text-xs text-on-surface-variant mt-1.5 mb-5">
-              Erstelle deinen ersten verschlüsselten Zugang mit sicherem Passwort und optionalem 2FA-Code.
-            </p>
-            <Button onClick={openNewEntryModal} className="bg-primary text-on-primary">
-              <Plus className="h-4 w-4 mr-1.5" />
-              Erstes Passwort anlegen
+            <h3 className="text-xs font-semibold text-on-surface mb-3">Keine Passwörter hinterlegt</h3>
+            <Button onClick={openNewEntryModal} className="bg-primary text-on-primary text-xs py-1.5 px-3">
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Passwort anlegen
             </Button>
           </div>
         ) : searchedItems.length === 0 ? (
-          <div className="p-12 text-center text-xs text-on-surface-variant">
-            Keine Passwörter gefunden für „{searchQuery}“.
+          <div className="p-8 text-center text-xs text-on-surface-variant">
+            Keine Treffer
           </div>
         ) : (
           <>
-            {/* ABSCHNITT 1: ⭐ FAVORITEN */}
+            {/* FAVORITEN */}
             {favoriteItems.length > 0 && (
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-400">
-                  <Star className="h-3.5 w-3.5 fill-current" />
-                  <span>Favoriten ({favoriteItems.length})</span>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-400">
+                  <Star className="h-3 w-3 fill-current" />
+                  <span>Favoriten</span>
                 </div>
-                <div className="grid grid-cols-1 gap-2.5">
+                <div className="grid grid-cols-1 gap-1.5">
                   {favoriteItems.map(renderItemRow)}
                 </div>
               </div>
             )}
 
-            {/* ABSCHNITT 2: 🕒 ZULETZT VERWENDET */}
+            {/* ZULETZT VERWENDET */}
             {recentItems.length > 0 && (
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
-                  <Clock className="h-3.5 w-3.5" />
-                  <span>Zuletzt verwendet ({recentItems.length})</span>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1 text-[11px] font-semibold text-primary">
+                  <Clock className="h-3 w-3" />
+                  <span>Zuletzt verwendet</span>
                 </div>
-                <div className="grid grid-cols-1 gap-2.5">
+                <div className="grid grid-cols-1 gap-1.5">
                   {recentItems.map(renderItemRow)}
                 </div>
               </div>
             )}
 
-            {/* ABSCHNITT 3: ALLE ANDEREN PASSWÖRTER */}
+            {/* ALLE ZUGÄNGE */}
             {otherItems.length > 0 && (
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
-                  <KeyRound className="h-3.5 w-3.5" />
-                  <span>Alle Zugänge ({otherItems.length})</span>
+              <div className="space-y-1.5">
+                <div className="text-[11px] font-semibold text-on-surface-variant">
+                  Alle
                 </div>
-                <div className="grid grid-cols-1 gap-2.5">
+                <div className="grid grid-cols-1 gap-1.5">
                   {otherItems.map(renderItemRow)}
                 </div>
               </div>
@@ -808,50 +813,50 @@ export function VaultView() {
         )}
       </div>
 
-      {/* ── 4. MODAL: NEUES PASSWORT / EINTRAG BEARBEITEN ── */}
+      {/* ── 4. MODAL: PASSWORT ANLEGEN / BEARBEITEN ── */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="relative w-full max-w-lg rounded-2xl bg-surface-container border border-outline-variant/30 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs">
+          <div className="relative w-full max-w-md rounded-2xl bg-surface-container border border-outline-variant/30 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/20 bg-surface-container-low">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface border border-outline-variant/20 p-1.5">
-                  <ModalBrandIcon className="w-5 h-5" />
+            <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-surface border border-outline-variant/20 p-1">
+                  <ModalBrandIcon className="w-4 h-4" />
                 </div>
-                <h3 className="text-base font-semibold text-on-surface">
-                  {editingItemId ? 'Passwort bearbeiten' : 'Neues Passwort anlegen'}
+                <h3 className="text-xs font-semibold text-on-surface">
+                  {editingItemId ? 'Bearbeiten' : 'Neues Passwort'}
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="rounded-lg p-1.5 text-on-surface-variant hover:bg-surface hover:text-on-surface transition-colors"
+                className="rounded-lg p-1 text-on-surface-variant hover:bg-surface hover:text-on-surface"
               >
-                <X className="h-5 w-5" />
+                <X className="h-4 w-4" />
               </button>
             </div>
 
             {/* Formular */}
-            <form onSubmit={handleModalSave} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
-              {/* DIENSTNAME */}
+            <form onSubmit={handleModalSave} className="p-4 space-y-3 max-h-[80vh] overflow-y-auto">
+              {/* Dienstname */}
               <div>
-                <label className="block text-xs font-medium text-on-surface mb-1">
-                  Dienstname / Website <span className="text-status-error">*</span>
+                <label className="block text-[11px] font-medium text-on-surface mb-1">
+                  Dienst / Website
                 </label>
                 <input
                   type="text"
                   value={modalService}
                   onChange={(e) => setModalService(e.target.value)}
-                  placeholder="z. B. Google, Discord, Steam, GitHub..."
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
+                  placeholder="z. B. Google, Steam, Discord"
+                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
                   autoFocus
                   required
                 />
               </div>
 
-              {/* BENUTZERNAME / E-MAIL */}
+              {/* Benutzername */}
               <div>
-                <label className="block text-xs font-medium text-on-surface mb-1">
+                <label className="block text-[11px] font-medium text-on-surface mb-1">
                   Benutzername / E-Mail
                 </label>
                 <input
@@ -859,15 +864,15 @@ export function VaultView() {
                   value={modalUsername}
                   onChange={(e) => setModalUsername(e.target.value)}
                   placeholder="name@domain.de"
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
+                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
                 />
               </div>
 
-              {/* PASSWORT MIT GENERATOR & LEAK-CHECK */}
+              {/* Passwort */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-medium text-on-surface">
-                    Passwort <span className="text-status-error">*</span>
+                  <label className="block text-[11px] font-medium text-on-surface">
+                    Passwort
                   </label>
                   <button
                     type="button"
@@ -875,12 +880,11 @@ export function VaultView() {
                       const newP = generateSecurePassword(20, true)
                       setModalPassword(newP)
                       void runLeakCheck(newP)
-                      toast.success('Neues Passwort generiert')
                     }}
-                    className="text-xs text-primary hover:underline flex items-center gap-1 font-medium"
+                    className="text-[11px] text-primary hover:underline flex items-center gap-0.5"
                   >
                     <Zap className="h-3 w-3" />
-                    Neu generieren
+                    Generieren
                   </button>
                 </div>
 
@@ -892,98 +896,75 @@ export function VaultView() {
                       setModalPassword(e.target.value)
                       void runLeakCheck(e.target.value)
                     }}
-                    placeholder="Sicheres Passwort..."
-                    className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3.5 py-2 text-xs text-on-surface font-mono placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-10"
+                    placeholder="Passwort"
+                    className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface font-mono placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
                     required
                   />
                   <button
                     type="button"
                     onClick={() => setShowModalPassword(!showModalPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface"
+                    tabIndex={-1}
                   >
                     {showModalPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
 
-                {/* Leak-Check Feedback */}
-                {isCheckingLeak && (
-                  <div className="mt-1 flex items-center gap-1 text-[11px] text-on-surface-variant">
-                    <RefreshCw className="h-3 w-3 animate-spin text-primary" />
-                    <span>Prüfe Passwörter auf bekannte Leaks...</span>
-                  </div>
-                )}
                 {leakCheckResult && leakCheckResult.checked && (
-                  <div className="mt-1.5">
+                  <div className="mt-1">
                     {leakCheckResult.isLeaked ? (
-                      <div className="flex items-center gap-1.5 rounded-lg bg-status-error/15 border border-status-error/30 px-2.5 py-1 text-xs text-status-error">
-                        <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
-                        <span>In {leakCheckResult.count.toLocaleString()} Datenlecks gefunden!</span>
-                      </div>
+                      <span className="flex items-center gap-1 text-[11px] text-status-error">
+                        <ShieldAlert className="h-3 w-3" /> In {leakCheckResult.count.toLocaleString()} Datenlecks gefunden!
+                      </span>
                     ) : (
-                      <div className="flex items-center gap-1.5 rounded-lg bg-status-success/15 border border-status-success/30 px-2.5 py-1 text-xs text-status-success">
-                        <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-                        <span>Keine bekannten Datenlecks</span>
-                      </div>
+                      <span className="flex items-center gap-1 text-[11px] text-status-success">
+                        <ShieldCheck className="h-3 w-3" /> Sicher
+                      </span>
                     )}
                   </div>
                 )}
               </div>
 
-              {/* 2FA AUTHENTICATOR (OPTIONAL) */}
-              <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/20 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-on-surface flex items-center gap-1.5">
-                    <KeyRound className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>2FA Authenticator Schlüssel (optional)</span>
+              {/* 2FA Schlüssel */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-medium text-on-surface">
+                    2FA-Schlüssel (optional)
                   </label>
                   <button
                     type="button"
                     onClick={() => setShowQrScanner(true)}
-                    className="text-xs text-primary hover:underline flex items-center gap-1 font-medium"
+                    className="text-[11px] text-primary hover:underline flex items-center gap-0.5"
                   >
-                    <QrCode className="h-3.5 w-3.5" />
-                    <span>QR-Code scannen</span>
+                    <QrCode className="h-3 w-3" />
+                    QR-Code scannen
                   </button>
                 </div>
                 <input
                   type="text"
                   value={modalTotpSecret}
                   onChange={(e) => setModalTotpSecret(e.target.value.toUpperCase())}
-                  placeholder="Base32-Schlüssel (z. B. JBSWY3DPEHPK3PXP)"
-                  className="w-full rounded-lg bg-surface border border-outline-variant/20 px-3 py-1.5 text-xs text-on-surface font-mono placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
+                  placeholder="Base32-Schlüssel"
+                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-1.5 text-xs text-on-surface font-mono placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
                 />
               </div>
 
-              {/* WEBSITE URL (OPTIONAL) */}
+              {/* Notizen */}
               <div>
-                <label className="block text-xs font-medium text-on-surface mb-1">
-                  Website / URL (optional)
-                </label>
-                <input
-                  type="text"
-                  value={modalUrl}
-                  onChange={(e) => setModalUrl(e.target.value)}
-                  placeholder="https://..."
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3.5 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary"
-                />
-              </div>
-
-              {/* NOTIZEN (OPTIONAL) */}
-              <div>
-                <label className="block text-xs font-medium text-on-surface mb-1">
-                  Sichere Notizen (optional)
+                <label className="block text-[11px] font-medium text-on-surface mb-1">
+                  Notiz (optional)
                 </label>
                 <textarea
-                  rows={3}
+                  rows={2}
                   value={modalNotes}
                   onChange={(e) => setModalNotes(e.target.value)}
-                  placeholder="Backup-Codes, Sicherheitsfragen..."
-                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 p-3 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary resize-y"
+                  placeholder="Zusätzliche Infos..."
+                  className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 p-2.5 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary resize-y"
                 />
               </div>
 
-              {/* ACTIONS */}
-              <div className="pt-2 flex items-center justify-between gap-3">
+              {/* Aktionen */}
+              <div className="pt-2 flex items-center justify-between">
                 {editingItemId ? (
                   <Button
                     type="button"
@@ -992,7 +973,7 @@ export function VaultView() {
                       const item = items.find((i) => i.id === editingItemId)
                       if (item) void handleDeleteItem(item)
                     }}
-                    className="text-status-error hover:bg-status-error/10 text-xs px-3"
+                    className="text-status-error hover:bg-status-error/10 text-xs px-2 py-1"
                   >
                     <Trash2 className="h-3.5 w-3.5 mr-1" />
                     Löschen
@@ -1001,20 +982,20 @@ export function VaultView() {
                   <div />
                 )}
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   <Button
                     type="button"
                     variant="ghost"
                     onClick={() => setIsModalOpen(false)}
-                    className="text-xs text-on-surface-variant"
+                    className="text-xs text-on-surface-variant px-2.5 py-1"
                   >
                     Abbrechen
                   </Button>
                   <Button
                     type="submit"
-                    className="bg-primary text-on-primary hover:bg-primary-hover text-xs px-4 py-2"
+                    className="bg-primary text-on-primary hover:bg-primary-hover text-xs px-3 py-1.5"
                   >
-                    Sicher speichern
+                    Speichern
                   </Button>
                 </div>
               </div>
@@ -1023,7 +1004,7 @@ export function VaultView() {
         </div>
       )}
 
-      {/* QR-CODE SCANNER MODAL */}
+      {/* QR-Code Scanner */}
       <QrScannerModal
         isOpen={showQrScanner}
         onClose={() => setShowQrScanner(false)}

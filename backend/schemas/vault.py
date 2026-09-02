@@ -46,3 +46,15 @@ class VaultNodeAssignment(BaseModel):
     node_id: str | None = Field(None, description="ID des dedizierten Nodes fuer den Passwort-Manager oder None fuer zentral")
     assigned_node_name: str | None = None
     is_multi_node_active: bool = False
+
+
+class VaultHintSetRequest(BaseModel):
+    hint: str = Field(..., min_length=1, max_length=512, description="Passwort-Hinweis fuer das Master-Passwort")
+
+
+class VaultHintStatusResponse(BaseModel):
+    has_hint: bool
+    last_requested_at: datetime | None = None
+    can_request: bool = True
+    cooldown_seconds_remaining: int = 0
+

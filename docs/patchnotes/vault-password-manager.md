@@ -83,6 +83,14 @@ Gemäß den Sicherheitsprinzipien von Maunting Studios („Schutz braucht Vertra
   - OS-Ebene: `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` schließt das Fenster auf DWM-Ebene aus allen Screen-Captures aus.
   - Software-Ebene: `bildschirm.rs` maskiert das Anwendungsfenster im Capture automatisch mit solidem Schwarz, falls der Passwort-Manager geöffnet ist.
 
+### 3.11 Passwort-Hinweis per E-Mail (10-Minuten-Schutz) & UX-Entschlackung
+- **Master-Passwort-Hinweis:** Beim Einrichten oder in den Einstellungen kann optional eine persönliche Gedankenstütze hinterlegt werden.
+- **E-Mail-Zustellung:** Im Sperrbildschirm kann der Hinweis mit 1 Klick an die verknüpfte E-Mail-Adresse des Kontos gesendet werden.
+- **10-Minuten-Missbrauchsschutz:** Ein Server-seitiges Rate-Limit blockiert mehrfaches Anfordern innerhalb von 10 Minuten.
+- **UX-Korrektur (Datenverlust-Schutz):** Wurde ein Master-Passwort bereits eingerichtet, ist der Link zur Neueinrichtung im Sperrbildschirm permanent ausgeblendet.
+- **Unterdrückung doppelter Passwort-Augen:** Native Browser-/Windows-Augen-Symbole (`::-ms-reveal`) sind neutralisiert; es wird exakt ein einheitliches Icon angezeigt.
+- **Radikale Textreduktion:** Sämtliche langen Textpassagen, Beipackzettel und Infoboxen wurden entfernt. Das UI ist minimalistisch, selbsterklärend und sauber.
+
 ---
 
 ## 4. Multi-Node Konfiguration im Panel Manager

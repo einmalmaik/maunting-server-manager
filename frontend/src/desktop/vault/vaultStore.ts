@@ -115,6 +115,8 @@ interface VaultState {
   toggleFavorite: (id: string) => Promise<void>
   markUsed: (id: string) => Promise<void>
   syncWithServer: () => Promise<void>
+  saveHint: (hint: string) => Promise<void>
+  requestHintEmail: () => Promise<{ ok: boolean; message: string }>
 }
 
 export const useVaultStore = create<VaultState>((set, get) => ({
@@ -558,6 +560,33 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     } catch {
       // Bei Netzwerk- oder Serverfehler: Im Offline-Modus bleiben
       set({ syncStatus: 'offline' })
+    }
+  },
+
+  saveHint: async (hint: string) => {
+    if (!hint.trim()) return
+    try {
+      await api('/api/vault/hint', {
+        method: 'POST',
+        body: JSON.stringify({ hint: hint.trim() }),
+      })
+    } catch {
+      // Offline / Fehler leise ignorieren oder später syncen
+    }
+  },
+
+  requestHintEmail: async (): Promise<{ ok: boolean; message: string }> => {
+    try {
+      const res = await api<{ status: string; message: string }>('/api/vault/request-hint', {
+        method: 'POST',
+      })
+      return { ok: true, message: res.message || 'Passwort-Hinweis wurde per E-Mail gesendet.' }
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'message' in err && typeof (err as { message: unknown }).message === 'string'
+          ? (err as { message: string }).message
+          : 'Fehler beim Anfordern des Hinweises.'
+      return { ok: false, message: msg }
     }
   },
 }))

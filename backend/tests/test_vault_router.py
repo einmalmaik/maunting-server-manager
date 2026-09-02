@@ -195,3 +195,48 @@ def test_vault_node_assignment(client, test_db):
     res_reset = client.put("/api/vault/node-assignment", json={"node_id": None})
     assert res_reset.status_code == 200
     assert res_reset.json()["node_id"] is None
+
+
+def test_vault_hint_flow_and_rate_limit(client, test_db, monkeypatch):
+    session, _ = test_db
+
+    # 1. Initially no hint
+    res_status = client.get("/api/vault/hint-status")
+    assert res_status.status_code == 200
+    assert res_status.json()["has_hint"] is False
+
+    # 2. Request hint without having one -> 400
+    res_req_err = client.post("/api/vault/request-hint")
+    assert res_req_err.status_code == 400
+
+    # 3. Save hint
+    res_save = client.post("/api/vault/hint", json={"hint": "Mein erstes Haustier"})
+    assert res_save.status_code == 200
+
+    # 4. Status should now show has_hint = True and can_request = True
+    res_status2 = client.get("/api/vault/hint-status")
+    assert res_status2.status_code == 200
+    assert res_status2.json()["has_hint"] is True
+    assert res_status2.json()["can_request"] is True
+
+    # 5. Mock EmailService.send_email to return True
+    from services.email_service import EmailService
+    sent_emails = []
+
+    async def fake_send_email(to, subject, body, html=None):
+        sent_emails.append({"to": to, "subject": subject, "body": body})
+        return True
+
+    monkeypatch.setattr(EmailService, "send_email", fake_send_email)
+
+    # 6. Request hint -> succeeds and sends email
+    res_req = client.post("/api/vault/request-hint")
+    assert res_req.status_code == 200
+    assert len(sent_emails) == 1
+    assert "Mein erstes Haustier" in sent_emails[0]["body"]
+
+    # 7. Request again immediately -> Rate limit (429)
+    res_req_limit = client.post("/api/vault/request-hint")
+    assert res_req_limit.status_code == 429
+    assert "10 Minuten" in res_req_limit.json()["detail"]
+

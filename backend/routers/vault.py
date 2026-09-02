@@ -9,6 +9,8 @@ from database import get_db
 from dependencies import get_current_owner, get_current_user
 from models.user import User
 from schemas.vault import (
+    VaultHintSetRequest,
+    VaultHintStatusResponse,
     VaultNodeAssignment,
     VaultSyncRequest,
     VaultSyncResponse,
@@ -63,3 +65,39 @@ def set_node_assignment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+
+@router.post("/hint")
+def save_vault_hint(
+    payload: VaultHintSetRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Hinterlegt einen Passwort-Hinweis für den Passwort-Manager."""
+    vault_service.set_vault_hint(db, current_user.id, payload.hint)
+    return {"status": "ok", "message": "Passwort-Hinweis erfolgreich hinterlegt."}
+
+
+@router.get("/hint-status", response_model=VaultHintStatusResponse)
+def get_vault_hint_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> VaultHintStatusResponse:
+    """Gibt den Status des Passwort-Hinweises und Cooldowns zurück."""
+    return vault_service.get_vault_hint_status(db, current_user.id)
+
+
+@router.post("/request-hint")
+async def send_vault_hint(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Sendet den hinterlegten Passwort-Hinweis an die E-Mail des Benutzers (max. 1x alle 10 Minuten)."""
+    success, msg = await vault_service.request_vault_hint_email(db, current_user)
+    if not success:
+        # Falls Cooldown aktiv ist: 429 Too Many Requests
+        if "10 Minuten" in msg:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=msg)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
+    return {"status": "ok", "message": msg}
+

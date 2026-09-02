@@ -7,9 +7,12 @@ from sqlalchemy.orm import Session
 
 from models.node import Node
 from models.panel_setting import PanelSetting
+from models.user import User
 from models.vault_entry import VaultEntry
+from models.vault_hint import VaultHint
 from schemas.vault import (
     VaultEntryOut,
+    VaultHintStatusResponse,
     VaultMutation,
     VaultNodeAssignment,
     VaultSyncRequest,
@@ -148,3 +151,105 @@ def set_vault_node_assignment(db: Session, node_id: str | None) -> VaultNodeAssi
 
     db.commit()
     return get_vault_node_assignment(db)
+
+
+HINT_RATE_LIMIT_SECONDS = 600  # 10 Minuten Cooldown
+
+
+def set_vault_hint(db: Session, user_id: int, hint_text: str) -> None:
+    """Hinterlegt oder aktualisiert den Passwort-Hinweis für das Master-Passwort."""
+    hint_obj = db.get(VaultHint, user_id)
+    if not hint_obj:
+        hint_obj = VaultHint(user_id=user_id, hint=hint_text.strip())
+        db.add(hint_obj)
+    else:
+        hint_obj.hint = hint_text.strip()
+        hint_obj.updated_at = _now()
+    db.commit()
+
+
+def _to_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def get_vault_hint_status(db: Session, user_id: int) -> VaultHintStatusResponse:
+    """Prüft, ob ein Hinweis hinterlegt ist und ob die 10-Minuten-Sperrfrist aktiv ist."""
+    hint_obj = db.get(VaultHint, user_id)
+    if not hint_obj or not hint_obj.hint:
+        return VaultHintStatusResponse(
+            has_hint=False,
+            last_requested_at=None,
+            can_request=False,
+            cooldown_seconds_remaining=0,
+        )
+
+    cooldown = 0
+    can_request = True
+    last_req = _to_utc(hint_obj.last_requested_at)
+    if last_req:
+        diff = (_now() - last_req).total_seconds()
+        if diff < HINT_RATE_LIMIT_SECONDS:
+            can_request = False
+            cooldown = int(HINT_RATE_LIMIT_SECONDS - diff)
+
+    return VaultHintStatusResponse(
+        has_hint=True,
+        last_requested_at=hint_obj.last_requested_at,
+        can_request=can_request,
+        cooldown_seconds_remaining=cooldown,
+    )
+
+
+async def request_vault_hint_email(db: Session, user: User) -> tuple[bool, str]:
+    """Sendet den hinterlegten Hinweis an die registrierte E-Mail-Adresse des Benutzers.
+    
+    Verbindliche Invariante: Nur 1 Anfrage alle 10 Minuten erlaubt.
+    """
+    hint_obj = db.get(VaultHint, user.id)
+    if not hint_obj or not hint_obj.hint:
+        return False, "Für dein Konto ist kein Passwort-Hinweis hinterlegt."
+
+    now = _now()
+    last_req = _to_utc(hint_obj.last_requested_at)
+    if last_req:
+        diff = (now - last_req).total_seconds()
+        if diff < HINT_RATE_LIMIT_SECONDS:
+            wait_minutes = max(1, int((HINT_RATE_LIMIT_SECONDS - diff + 59) // 60))
+            return (
+                False,
+                f"Der Hinweis kann nur alle 10 Minuten angefordert werden. Bitte warte noch {wait_minutes} Minute(n).",
+            )
+
+    from services.email_service import EmailService
+
+    subject = "Passwort-Manager — Dein Passwort-Hinweis"
+    body = f"""Hallo {user.username},
+
+du hast deinen Passwort-Hinweis für den Maunting Service Manager Passwort-Manager angefordert.
+
+Dein hinterlegter Hinweis lautet:
+{hint_obj.hint}
+
+Falls du diese Anforderung nicht ausgelöst hast, überprüfe bitte die Sicherheit deines Kontos.
+
+Maunting Service Manager
+"""
+    html_content = EmailService._notification_email_html(
+        user.username,
+        "Passwort-Hinweis",
+        "Hier ist deine persönliche Gedankenstütze für das Master-Passwort deines Passwort-Managers:",
+        f"<strong>{hint_obj.hint}</strong>",
+    )
+
+    success = await EmailService.send_email(user.email, subject, body, html_content)
+    if not success:
+        return False, "E-Mail konnte nicht versendet werden. Bitte prüfe die E-Mail-Konfiguration."
+
+    hint_obj.last_requested_at = now
+    db.commit()
+    return True, "Dein Passwort-Hinweis wurde erfolgreich an deine E-Mail-Adresse gesendet."
+
