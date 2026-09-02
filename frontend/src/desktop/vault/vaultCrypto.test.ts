@@ -8,6 +8,9 @@ import {
   decryptVaultEntry,
   generateSecurePassword,
   VAULT_ENVELOPE_V1_PREFIX,
+  BIOMETRIC_ENVELOPE_PREFIX,
+  wrapVaultCredentialsForBiometrics,
+  unwrapVaultCredentialsFromBiometrics,
 } from './vaultCrypto'
 
 describe('vaultCrypto', () => {
@@ -67,5 +70,17 @@ describe('vaultCrypto', () => {
 
     // Tampered entryId (AAD-Mismatch) must fail
     await expect(decryptVaultEntry(envelope, userKey, 'wrong-entry-id')).rejects.toThrow()
+  })
+
+  it('wraps and unwraps credentials for biometric quick unlock', async () => {
+    const masterPw = 'my-super-strong-master-password-2026'
+    const wrapped = await wrapVaultCredentialsForBiometrics(masterPw)
+    expect(wrapped.startsWith(BIOMETRIC_ENVELOPE_PREFIX)).toBe(true)
+
+    const unwrapped = await unwrapVaultCredentialsFromBiometrics(wrapped)
+    expect(unwrapped).toBe(masterPw)
+
+    // Invalid prefix / corrupted envelope must throw
+    await expect(unwrapVaultCredentialsFromBiometrics('invalid-prefix:12345')).rejects.toThrow()
   })
 })

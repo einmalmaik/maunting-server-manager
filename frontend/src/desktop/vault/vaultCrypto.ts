@@ -206,6 +206,164 @@ export async function decryptVaultEntry(
   }
 }
 
+export const BIOMETRIC_ENVELOPE_PREFIX = 'sv-bio-v1:'
+const DEVICE_SALT_KEY = 'mss:vault_device_salt'
+
+export function getOrCreateDeviceSalt(): Uint8Array {
+  const existing = typeof localStorage !== 'undefined' ? localStorage.getItem(DEVICE_SALT_KEY) : null
+  if (existing) {
+    return base64ToBytes(existing)
+  }
+  const newSalt = new Uint8Array(32)
+  window.crypto.getRandomValues(newSalt)
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(DEVICE_SALT_KEY, bytesToBase64(newSalt))
+  }
+  return newSalt
+}
+
+export async function isBiometricsAvailable(): Promise<boolean> {
+  try {
+    if (typeof window === 'undefined' || !window.PublicKeyCredential) {
+      return false
+    }
+    if (typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
+      return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Derives a device-bound key for biometric credential wrapping.
+ */
+async function deriveDeviceBiometricKey(salt: Uint8Array): Promise<CryptoKey> {
+  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : 'msm-client'
+  const appOrigin = typeof window !== 'undefined' && window.location ? window.location.origin : 'msm-origin'
+  const seedString = `msm:bio-wrap:${userAgent}:${appOrigin}`
+  const encoder = new TextEncoder()
+  const seedBytes = encoder.encode(seedString)
+
+  const baseKey = await window.crypto.subtle.importKey(
+    'raw',
+    seedBytes,
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  )
+
+  return await window.crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: salt as BufferSource,
+      iterations: 50000,
+      hash: 'SHA-256',
+    },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  )
+}
+
+/**
+ * Requests user verification from platform authenticator (Windows Hello, BiometricPrompt on Android).
+ */
+export async function promptBiometricVerification(): Promise<boolean> {
+  if (typeof window === 'undefined' || !window.PublicKeyCredential || !navigator.credentials) {
+    return true
+  }
+
+  try {
+    const challenge = new Uint8Array(32)
+    window.crypto.getRandomValues(challenge)
+
+    const credential = await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        timeout: 60000,
+        userVerification: 'preferred',
+        rpId: window.location.hostname || undefined,
+      },
+    })
+    return !!credential
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err)
+    if (errorMsg.includes('NotAllowedError') || errorMsg.includes('cancel') || errorMsg.includes('abort')) {
+      throw new Error('Biometrische Authentifizierung abgebrochen.')
+    }
+    return true
+  }
+}
+
+/**
+ * Wraps master password into a device-bound AES-GCM envelope for biometric unlocking.
+ */
+export async function wrapVaultCredentialsForBiometrics(masterPassword: string): Promise<string> {
+  const salt = getOrCreateDeviceSalt()
+  const key = await deriveDeviceBiometricKey(salt)
+  const encoder = new TextEncoder()
+  const plaintext = encoder.encode(masterPassword)
+  const iv = new Uint8Array(AES_GCM_IV_LENGTH)
+  window.crypto.getRandomValues(iv)
+
+  const encrypted = await window.crypto.subtle.encrypt(
+    {
+      name: 'AES-GCM',
+      iv,
+      additionalData: encoder.encode('msm-biometric-aad-v1'),
+      tagLength: 128,
+    },
+    key,
+    plaintext,
+  )
+
+  const encryptedBytes = new Uint8Array(encrypted)
+  const combined = new Uint8Array(iv.length + encryptedBytes.byteLength)
+  combined.set(iv, 0)
+  combined.set(encryptedBytes, iv.length)
+  plaintext.fill(0)
+
+  return `${BIOMETRIC_ENVELOPE_PREFIX}${bytesToBase64(combined)}`
+}
+
+/**
+ * Unwraps master password from biometric envelope.
+ */
+export async function unwrapVaultCredentialsFromBiometrics(wrappedEnvelope: string): Promise<string> {
+  if (!wrappedEnvelope.startsWith(BIOMETRIC_ENVELOPE_PREFIX)) {
+    throw new Error('Ungültiges Biometrie-Paket')
+  }
+
+  const salt = getOrCreateDeviceSalt()
+  const key = await deriveDeviceBiometricKey(salt)
+  const b64 = wrappedEnvelope.slice(BIOMETRIC_ENVELOPE_PREFIX.length)
+  const combined = base64ToBytes(b64)
+  if (combined.byteLength < AES_GCM_IV_LENGTH + 16) {
+    throw new Error('Biometrie-Daten beschädigt')
+  }
+
+  const iv = combined.slice(0, AES_GCM_IV_LENGTH)
+  const ciphertext = combined.slice(AES_GCM_IV_LENGTH)
+  const aad = new TextEncoder().encode('msm-biometric-aad-v1')
+
+  const decrypted = await window.crypto.subtle.decrypt(
+    {
+      name: 'AES-GCM',
+      iv,
+      additionalData: aad,
+      tagLength: 128,
+    },
+    key,
+    ciphertext,
+  )
+
+  const decoder = new TextDecoder()
+  return decoder.decode(decrypted)
+}
+
 /**
  * Kryptographischer Zufalls-Passwortgenerator (stark & vorkonfiguriert).
  */

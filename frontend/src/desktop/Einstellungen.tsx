@@ -14,7 +14,7 @@ import { useLocation } from 'react-router-dom'
 import { emit } from '@tauri-apps/api/event'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { open as ordnerDialog } from '@tauri-apps/plugin-dialog'
-import { AlertTriangle, ExternalLink, FileSignature, Mic, MonitorCog, ShieldCheck, Volume2 } from 'lucide-react'
+import { AlertTriangle, Camera, ExternalLink, FileSignature, Fingerprint, Mic, MonitorCog, ShieldCheck, Trash2, User, Volume2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 
@@ -29,11 +29,13 @@ import {
 import { api } from '@/api/client'
 import { usePublicLegalSettings } from '@/hooks/usePublicLegalSettings'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
-import { Badge, Button, Dropdown, type DropdownOption, ProgressBar, Slider, Switch } from '@/Singra/UI'
+import { Avatar, Badge, Button, Dropdown, type DropdownOption, ProgressBar, Slider, Switch } from '@/Singra/UI'
+import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { Gefahrenzone } from './Gefahrenzone'
 import { OVERLAY_ZUSTAND_TEST } from './sprachKoordination'
 import { WakewordEinrichtung } from './WakewordEinrichtung'
+import { useVaultStore } from './vault/vaultStore'
 import {
   audioGeraete,
   duckingSetzen,
@@ -59,11 +61,12 @@ const STATUS_REIHE: AgentStatus[] = ['bereit', 'hoert', 'denkt', 'spricht']
  */
 const VERARBEITUNG_SPEICHERN_MS = 400
 
-type EinstellungsTab = 'desktop' | 'wakeword' | 'audio' | 'rechtliches' | 'gefahr'
+type EinstellungsTab = 'profil' | 'desktop' | 'wakeword' | 'audio' | 'rechtliches' | 'gefahr'
 
 const isAndroidClient = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
 const TABS: TabDef<EinstellungsTab>[] = [
+  { id: 'profil', labelKey: 'profile.title', icon: User },
   {
     id: 'desktop',
     labelKey: isAndroidClient ? 'mss.einstellungen.tab.app' : 'mss.einstellungen.tab.desktop',
@@ -85,8 +88,6 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
   const ort = useLocation()
   const [tab, setTab] = useState<EinstellungsTab>(() => tabAusSuche(ort.search))
 
-  // Eine spätere Navigation mit `?tab=…` (Neukalibrierungs-Hinweis) soll auch
-  // dann greifen, wenn die Einstellungen schon offen sind.
   useEffect(() => {
     setTab(tabAusSuche(ort.search))
   }, [ort.search])
@@ -99,6 +100,7 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
         onChange={setTab}
         ariaLabel={t('mss.app.einstellungen')}
       />
+      {tab === 'profil' && <ProfilEinstellungen />}
       {tab === 'desktop' && <DesktopIntegration onKonfigAenderung={onKonfigAenderung} />}
       {tab === 'wakeword' && <WakewordEinrichtung />}
       {tab === 'audio' && <AudioEinstellungen />}
@@ -107,6 +109,308 @@ export function Einstellungen({ onKonfigAenderung }: { onKonfigAenderung?: () =>
       <p className="text-center text-xs text-on-surface-variant/60">
         {t('mss.einstellungen.fussnote')}
       </p>
+    </div>
+  )
+}
+
+function ProfilEinstellungen() {
+  const { t } = useTranslation()
+  const user = useAuthStore((s) => s.user)
+  const updateUser = useAuthStore((s) => s.updateUser)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+
+  const {
+    autoLockMinutes,
+    lockOnWindowBlur,
+    isBiometricsSupported,
+    isBiometricsEnabled,
+    setAutoLockMinutes,
+    setLockOnWindowBlur,
+    enableBiometrics,
+    disableBiometrics,
+  } = useVaultStore()
+
+  const [biometricsModalOpen, setBiometricsModalOpen] = useState(false)
+  const [masterPasswordInput, setMasterPasswordInput] = useState('')
+  const [biometricsLoading, setBiometricsLoading] = useState(false)
+
+  const handleAvatarChange = async (file?: File | null) => {
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error(t('profile.avatarSizeLimit', 'Das Profilbild darf maximal 5 MB groß sein.'))
+      return
+    }
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+    if (!allowedTypes.includes(file.type)) {
+      toast.error(t('profile.avatarInvalidType', 'Erlaubte Formate sind JPEG, PNG, WebP und GIF.'))
+      return
+    }
+
+    setUploadingAvatar(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await api<{ avatar_url: string }>('/auth/me/avatar', {
+        method: 'POST',
+        body: formData,
+      })
+      updateUser({ avatar_url: res.avatar_url })
+      toast.success(t('profile.avatarUpdated', 'Profilbild erfolgreich aktualisiert.'))
+    } catch (err: any) {
+      toast.error(err?.detail || t('profile.avatarUpdateFailed', 'Profilbild konnte nicht hochgeladen werden.'))
+    } finally {
+      setUploadingAvatar(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const handleDeleteAvatar = async () => {
+    if (!user?.avatar_url) return
+    setUploadingAvatar(true)
+    try {
+      await api('/auth/me/avatar', { method: 'DELETE' })
+      updateUser({ avatar_url: null })
+      toast.success(t('profile.avatarRemoved', 'Profilbild wurde entfernt.'))
+    } catch (err: any) {
+      toast.error(err?.detail || t('profile.avatarRemoveFailed', 'Profilbild konnte nicht entfernt werden.'))
+    } finally {
+      setUploadingAvatar(false)
+    }
+  }
+
+  const autoLockOptions: DropdownOption[] = [
+    { value: '0', label: t('mss.vault.autolock.disabled', 'Sofort beim Verlassen') },
+    { value: '5', label: t('mss.vault.autolock.5min', '5 Minuten Inaktivität') },
+    { value: '10', label: t('mss.vault.autolock.10min', '10 Minuten Inaktivität') },
+    { value: '15', label: t('mss.vault.autolock.15min', '15 Minuten Inaktivität') },
+    { value: '30', label: t('mss.vault.autolock.30min', '30 Minuten Inaktivität') },
+    { value: '60', label: t('mss.vault.autolock.60min', '1 Stunde Inaktivität') },
+  ]
+
+  const handleBiometricsToggle = async (checked: boolean) => {
+    if (!checked) {
+      await disableBiometrics()
+      toast.success('Biometrischer Schnelleinstieg deaktiviert')
+      return
+    }
+    setMasterPasswordInput('')
+    setBiometricsModalOpen(true)
+  }
+
+  const handleConfirmBiometrics = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!masterPasswordInput) return
+    setBiometricsLoading(true)
+    try {
+      const ok = await enableBiometrics(masterPasswordInput)
+      if (ok) {
+        toast.success('Biometrischer Schnelleinstieg aktiviert')
+        setBiometricsModalOpen(false)
+        setMasterPasswordInput('')
+      } else {
+        toast.error('Konnte Biometrie nicht aktivieren. Prüfe das Master-Passwort.')
+      }
+    } finally {
+      setBiometricsLoading(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* 1. Profil & Avatar */}
+      <div className="msm-card p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <User className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-on-surface">Benutzerprofil</h2>
+            <p className="text-xs text-on-surface-variant">
+              Verwalte dein Profilbild und deine Kontodaten für diese Desktop-App.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pt-2 border-t border-outline-variant/30">
+          <Avatar
+            src={user?.avatar_url}
+            name={user?.username}
+            size="lg"
+          />
+
+          <div className="space-y-1.5 flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-sm text-on-surface">{user?.username}</span>
+              {user?.is_owner && (
+                <Badge variant="default">Owner</Badge>
+              )}
+            </div>
+            <p className="text-xs text-on-surface-variant truncate">{user?.email || '—'}</p>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                className="hidden"
+                onChange={(e) => void handleAvatarChange(e.target.files?.[0])}
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={uploadingAvatar}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Camera className="h-3.5 w-3.5 mr-1.5" />
+                {user?.avatar_url ? 'Bild ändern' : 'Bild hochladen'}
+              </Button>
+
+              {user?.avatar_url && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={uploadingAvatar}
+                  onClick={() => void handleDeleteAvatar()}
+                  className="text-status-error hover:bg-status-error/10"
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                  Entfernen
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Passwort-Manager & Automatische Sperre (Auto-Lock) */}
+      <div className="msm-card p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <ShieldCheck className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-on-surface">Tresor-Sicherheit & Auto-Lock</h2>
+            <p className="text-xs text-on-surface-variant">
+              Automatische Speichersperre nach Inaktivität zum Schutz vor unbefugtem Zugriff.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-4 pt-2 border-t border-outline-variant/30">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <label className="text-xs font-medium text-on-surface">Automatische Sperre</label>
+              <p className="text-[11px] text-on-surface-variant">
+                Nach wie vielen Minuten Inaktivität der Tresor gesperrt wird.
+              </p>
+            </div>
+            <div className="w-full sm:w-56">
+              <Dropdown
+                options={autoLockOptions}
+                value={String(autoLockMinutes)}
+                onChange={(val) => setAutoLockMinutes(Number(val))}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 pt-2 border-t border-outline-variant/20">
+            <div>
+              <span className="text-xs font-medium text-on-surface">Beim Fenster-Wechsel sperren</span>
+              <p className="text-[11px] text-on-surface-variant">
+                Sperrt den Passwort-Manager sofort, sobald das Fenster minimiert oder gewechselt wird.
+              </p>
+            </div>
+            <Switch
+              checked={lockOnWindowBlur}
+              onCheckedChange={setLockOnWindowBlur}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Biometrischer Schnelleinstieg */}
+      <div className="msm-card p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Fingerprint className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-on-surface">Biometrischer Schnelleinstieg</h2>
+            <p className="text-xs text-on-surface-variant">
+              Windows Hello oder Fingerabdruck zum schnellen und sicheren Entsperren des Tresors nutzen.
+            </p>
+          </div>
+        </div>
+
+        <div className="pt-2 border-t border-outline-variant/30 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <span className="text-xs font-medium text-on-surface">
+                Biometrische Authentifizierung aktivieren
+              </span>
+              <p className="text-[11px] text-on-surface-variant">
+                Schlüssel wird gerätegebunden per Hardware-Schutz (TPM / Keystore) geschützt.
+              </p>
+            </div>
+            <Switch
+              checked={isBiometricsEnabled}
+              onCheckedChange={(checked: boolean) => void handleBiometricsToggle(checked)}
+              disabled={!isBiometricsSupported}
+            />
+          </div>
+
+          {!isBiometricsSupported && (
+            <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
+              Auf diesem Gerät ist aktuell kein biometrischer Sensor (Windows Hello / Fingerabdruck) verfügbar.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Biometrie Aktivierungs-Modal */}
+      {biometricsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs">
+          <div className="w-full max-w-sm rounded-2xl bg-surface-container border border-outline-variant/30 p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Fingerprint className="h-4 w-4" />
+              </div>
+              <h3 className="text-sm font-semibold text-on-surface">Biometrie einrichten</h3>
+            </div>
+            <p className="text-xs text-on-surface-variant">
+              Bitte gib dein Master-Passwort ein, um den biometrischen Schnelleinstieg auf diesem Gerät zu autorisieren.
+            </p>
+            <form onSubmit={handleConfirmBiometrics} className="space-y-3">
+              <input
+                type="password"
+                value={masterPasswordInput}
+                onChange={(e) => setMasterPasswordInput(e.target.value)}
+                placeholder="Master-Passwort"
+                className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface focus:outline-none focus:border-primary"
+                autoFocus
+                required
+              />
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setBiometricsModalOpen(false)}
+                  disabled={biometricsLoading}
+                >
+                  Abbrechen
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={biometricsLoading || !masterPasswordInput}
+                >
+                  {biometricsLoading ? 'Prüfe...' : 'Aktivieren'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

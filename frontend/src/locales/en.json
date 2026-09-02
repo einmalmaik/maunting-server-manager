@@ -5479,6 +5479,16 @@
       "gedaechtnis": "Memory",
       "tresor": "Password Manager"
     },
+    "vault": {
+      "autolock": {
+        "disabled": "Immediately on exit",
+        "5min": "5 minutes inactivity",
+        "10min": "10 minutes inactivity",
+        "15min": "15 minutes inactivity",
+        "30min": "30 minutes inactivity",
+        "60min": "1 hour inactivity"
+      }
+    },
     "aktion": {
       "freigabeErforderlich": "Confirmation required",
       "bestaetigen": "Yes, execute",

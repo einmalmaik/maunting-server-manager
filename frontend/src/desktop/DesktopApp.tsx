@@ -12,10 +12,10 @@
  * navigieren mit `navigate('/ai?ansicht=…')` (Glocke, Guardian, Aufgaben),
  * und genau diese Route gibt es hier. Eine Adressleiste hat das Fenster nicht.
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
-import { BrainCircuit, Calendar as CalendarIcon, Eye, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, X } from 'lucide-react'
+import { BrainCircuit, Calendar as CalendarIcon, Eye, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, User as UserIcon, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
@@ -26,7 +26,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PromptDialog } from '@/components/ui/PromptDialog'
 import { ToastContainer } from '@/components/ui/ToastContainer'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
-import { BenachrichtigungsGlocke, Button } from '@/Singra/UI'
+import { Avatar, BenachrichtigungsGlocke, Button } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Ai } from '@/pages/Ai'
 import { Calendar } from '@/pages/Calendar'
@@ -42,6 +42,7 @@ import { DesktopAktionKarte } from './DesktopAktionKarte'
 import { Uebernahmekarte } from './Uebernahmekarte'
 import { Wizard } from './Wizard'
 import { VaultView } from './vault/VaultView'
+import { useVaultStore } from './vault/vaultStore'
 import {
   beiFremdemSprachstart,
   sprachstartMelden,
@@ -76,6 +77,41 @@ export function DesktopApp() {
   const angemeldet = useAuthStore((s) => s.isAuthenticated)
   const sitzungSteht = phase === 'bereit' || phase === 'sandbox'
   const offeneUebernahme = useAuftragsschleife(sitzungSteht && !isAndroid)
+
+  const isUnlocked = useVaultStore((s) => s.isUnlocked)
+  const lockOnWindowBlur = useVaultStore((s) => s.lockOnWindowBlur)
+  const checkAutoLock = useVaultStore((s) => s.checkAutoLock)
+  const recordActivity = useVaultStore((s) => s.recordActivity)
+  const lockVault = useVaultStore((s) => s.lock)
+
+  // Automatische Tresor-Sperre bei Inaktivität oder Fenster-Wechsel
+  useEffect(() => {
+    if (!isUnlocked) return
+
+    const handleActivity = () => {
+      recordActivity()
+    }
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'pointerdown']
+    events.forEach((evt) => window.addEventListener(evt, handleActivity, { passive: true }))
+
+    const interval = setInterval(() => {
+      checkAutoLock()
+    }, 10000)
+
+    const handleVisibilityChange = () => {
+      if (document.hidden && lockOnWindowBlur) {
+        lockVault()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      events.forEach((evt) => window.removeEventListener(evt, handleActivity))
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [isUnlocked, lockOnWindowBlur, recordActivity, checkAutoLock, lockVault])
 
   const ladeKonfigNeu = useCallback(async () => {
     try {
@@ -347,8 +383,6 @@ function SchliessenDialog() {
       <div className="msm-card w-full max-w-md p-5">
         <h2 className="text-sm font-medium text-on-surface">{t('mss.schliessen.titel')}</h2>
         <p className="mt-1 text-xs text-on-surface-variant">{t('mss.schliessen.frage')}</p>
-        {/* Eine Zeile, drei Plätze: Abbrechen links, Beenden in der Mitte,
-            Hintergrund rechts — kein Umbruch, der die Knöpfe stapelt. */}
         <div className="mt-4 flex items-center justify-between gap-2">
           <Button variant="ghost" size="sm" onClick={() => setOffen(false)}>
             {t('mss.schliessen.abbrechen')}
@@ -365,13 +399,6 @@ function SchliessenDialog() {
   )
 }
 
-/**
- * Der freundliche Hinweis nach einer Umbenennung: das Wake-Word ist immer der
- * Name des Assistenten — wurde er geändert (im Chat, im Panel-Profil, egal
- * wo), ist das trainierte Modell noch auf den alten Namen kalibriert. Einmal
- * je App-Start wird das angeboten, nie erzwungen: „Später" heißt später, und
- * das alte Wort funktioniert weiter.
- */
 function KalibrierungsHinweis() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -386,8 +413,6 @@ function KalibrierungsHinweis() {
         }
       })
       .catch(() => undefined)
-    // Bewusst nur einmal je Start — nicht bei jedem Namenswechsel im Store.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (altesWort === null) return null
@@ -423,14 +448,6 @@ function KalibrierungsHinweis() {
   )
 }
 
-/**
- * Wache über den Sprachort dieses Fensters.
- *
- * Öffnet jemand hier die Sprachansicht, erfahren es alle Fenster — das
- * Overlay beendet dann seine Sitzung. Beginnt umgekehrt das Overlay, wird die
- * Sprachansicht hier verlassen: ihr Unmount beendet Mikrofon und Leitung
- * (useSprachsitzung räumt beim Verlassen auf).
- */
 function SprachwacheHaupt() {
   const ort = useLocation()
   const navigate = useNavigate()
@@ -447,9 +464,6 @@ function SprachwacheHaupt() {
   useEffect(
     () =>
       beiFremdemSprachstart('haupt', () => {
-        // Nur wenn das Hauptfenster gerade selbst in der Sprachansicht ist,
-        // verlassen wir diese (zurück zum Textchat), damit kein doppelter Audiostream läuft.
-        // Ist der Nutzer auf /kalender oder /einstellungen, bleibt er ungestört dort.
         if (inSprache) {
           navigate('/ai', { replace: true })
         }
@@ -461,9 +475,8 @@ function SprachwacheHaupt() {
 }
 
 /**
- * Kopfleiste + Inhalt. Die Leiste ist bewusst 4 rem hoch wie die Panel-Topbar:
- * `pages/Ai` rechnet seine Höhe als `100dvh − (Topbar + Seitenränder)`, und
- * dieselbe Rechnung soll hier aufgehen.
+ * Kopfleiste + Inhalt.
+ * Aufgeräumte Topbar mit Profil-Avatar-Dropdown und daumenfreundlicher Bedienung.
  */
 function Hauptseite({
   bereich,
@@ -483,14 +496,32 @@ function Hauptseite({
   const darfChatten = useHasPermission('ai.chat.use')
   const darfKalender = useHasPermission('ai.calendar.use')
   const darfNotizen = useHasPermission('ai.notes.use')
-  // Im Panel wohnt die Ansicht unter Profil → KI; die App hat kein Profil,
-  // also bekommt sie einen eigenen Reiter. Ohne das Recht rendert die
-  // Komponente ohnehin nichts — dann lieber gar kein Reiter.
   const darfGedaechtnis = useHasPermission('ai.memory.use')
   const [mobileMenuOffen, setMobileMenuOffen] = useState(false)
+  const [userDropdownOffen, setUserDropdownOffen] = useState(false)
+  const userDropdownRef = useRef<HTMLDivElement>(null)
 
   const agentName = user?.agent_name?.trim() || 'Assistent'
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (userDropdownRef.current && !userDropdownRef.current.contains(e.target as Node)) {
+        setUserDropdownOffen(false)
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setUserDropdownOffen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [])
 
   useEffect(() => {
     onKonfigAenderung?.()
@@ -499,12 +530,10 @@ function Hauptseite({
   return (
     <>
       <header className="msm-topbar flex pt-[env(safe-area-inset-top,0px)] h-[calc(3.5rem+env(safe-area-inset-top,0px))] sm:h-[calc(4rem+env(safe-area-inset-top,0px))] items-center justify-between px-3 sm:px-4 md:px-6">
+        {/* Linke Seite: Agent-Name & Aktivitätsanzeige */}
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <div className="min-w-0">
             <h1 className="truncate font-headline text-base sm:text-title-lg font-bold text-on-surface">{agentName}</h1>
-            <p className="truncate text-[11px] sm:text-xs text-on-surface-variant">
-              {user ? t('mss.app.angemeldetAls', { name: user.username }) : ''}
-            </p>
           </div>
           {offeneUebernahme && (
             <div className="flex items-center gap-1 rounded-full border border-status-warning/40 bg-status-warning/10 px-2 py-0.5 text-[11px] font-medium text-status-warning animate-pulse">
@@ -514,17 +543,19 @@ function Hauptseite({
           )}
         </div>
 
-        {/* Desktop-Navigation */}
-        <nav className="hidden md:flex items-center gap-2" aria-label={t('mss.app.bereiche')}>
+        {/* Desktop-Navigation mit Schnellzugriff */}
+        <nav className="hidden md:flex items-center gap-1.5" aria-label={t('mss.app.bereiche')}>
           <Reiter
             aktiv={bereich === 'ki'}
             onClick={() => navigate('/ai')}
+            icon={<MessageSquare className="h-4 w-4" />}
             label={t('mss.app.chat')}
           />
           {darfKalender && (
             <Reiter
               aktiv={bereich === 'kalender'}
               onClick={() => navigate('/kalender')}
+              icon={<CalendarIcon className="h-4 w-4" />}
               label={t('mss.app.kalender')}
             />
           )}
@@ -532,6 +563,7 @@ function Hauptseite({
             <Reiter
               aktiv={bereich === 'notizen'}
               onClick={() => navigate('/notizen')}
+              icon={<StickyNote className="h-4 w-4" />}
               label={t('mss.app.notizen', 'Notizen')}
             />
           )}
@@ -539,37 +571,110 @@ function Hauptseite({
             <Reiter
               aktiv={bereich === 'gedaechtnis'}
               onClick={() => navigate('/gedaechtnis')}
+              icon={<BrainCircuit className="h-4 w-4" />}
               label={t('mss.app.gedaechtnis')}
             />
           )}
           <Reiter
             aktiv={bereich === 'tresor'}
             onClick={() => navigate('/tresor')}
+            icon={<KeyRound className="h-4 w-4" />}
             label={t('mss.app.tresor', 'Passwort-Manager')}
-          />
-          <Reiter
-            aktiv={bereich === 'einstellungen'}
-            onClick={() => navigate('/einstellungen')}
-            label={t('mss.app.einstellungen')}
           />
         </nav>
 
-        <div className="flex items-center gap-1 sm:gap-2">
+        {/* Rechte Seite: Glocke + Profil-Avatar mit Dropdown-Menü */}
+        <div className="flex items-center gap-2">
           <BenachrichtigungsGlocke />
-          <div className="hidden md:block">
-            <Button
+
+          {/* Profil-Avatar Dropdown */}
+          <div className="relative" ref={userDropdownRef}>
+            <button
               type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => void abmelden()}
-              aria-label={t('mss.app.abmelden')}
-              className="text-on-surface-variant hover:text-status-error"
+              onClick={() => setUserDropdownOffen((v) => !v)}
+              aria-expanded={userDropdownOffen}
+              aria-haspopup="menu"
+              aria-label={t('shell.openUserMenu', 'Benutzermenü öffnen')}
+              className="flex items-center gap-2 rounded-xl p-1 transition-all hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
-              <LogOut className="h-4 w-4 mr-1.5" aria-hidden="true" />
-              {t('mss.app.abmelden')}
-            </Button>
+              <Avatar
+                src={user?.avatar_url}
+                name={user?.username}
+                size="sm"
+              />
+            </button>
+
+            {userDropdownOffen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full mt-2 w-60 overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-high shadow-2xl z-50 animate-fade-in"
+              >
+                {/* Benutzer-Header mit Avatar */}
+                <div className="border-b border-outline-variant/30 p-3.5 bg-surface-container">
+                  <div className="flex items-center gap-3">
+                    <Avatar
+                      src={user?.avatar_url}
+                      name={user?.username}
+                      size="md"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-label-md text-sm font-semibold text-on-surface">
+                        {user?.username}
+                      </p>
+                      <p className="truncate font-mono-sm text-xs text-on-surface-variant">
+                        {user?.is_owner ? 'Owner' : user?.email}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="py-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserDropdownOffen(false)
+                      navigate('/einstellungen?tab=profil')
+                    }}
+                    role="menuitem"
+                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-on-surface transition-colors hover:bg-surface-container-highest"
+                  >
+                    <UserIcon className="h-4 w-4 text-primary" aria-hidden="true" />
+                    <span>{t('profile.title', 'Profil & Einstellungen')}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserDropdownOffen(false)
+                      navigate('/einstellungen?tab=desktop')
+                    }}
+                    role="menuitem"
+                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-on-surface transition-colors hover:bg-surface-container-highest"
+                  >
+                    <SettingsIcon className="h-4 w-4 text-on-surface-variant" aria-hidden="true" />
+                    <span>{t('mss.app.einstellungen', 'Desktop-Optionen')}</span>
+                  </button>
+                </div>
+
+                <div className="border-t border-outline-variant/30 py-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserDropdownOffen(false)
+                      void abmelden()
+                    }}
+                    role="menuitem"
+                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-status-error transition-colors hover:bg-error-container/20"
+                  >
+                    <LogOut className="h-4 w-4" aria-hidden="true" />
+                    <span>{t('mss.app.abmelden', 'Abmelden')}</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
+          {/* Mobile Menü-Knopf */}
           <button
             type="button"
             onClick={() => setMobileMenuOffen(!mobileMenuOffen)}
@@ -588,9 +693,16 @@ function Hauptseite({
           <div className="fixed inset-0" onClick={() => setMobileMenuOffen(false)} />
           <div className="relative z-10 w-full max-h-[85vh] overflow-y-auto overscroll-contain rounded-t-2xl border-t border-outline-variant/50 bg-surface-container-low p-4 pb-8 shadow-2xl space-y-3">
             <div className="flex items-center justify-between pb-3 border-b border-outline-variant/40">
-              <div className="min-w-0">
-                <span className="font-headline font-semibold text-sm text-on-surface">{agentName}</span>
-                <p className="text-xs text-on-surface-variant">{user?.username}</p>
+              <div className="flex items-center gap-3 min-w-0">
+                <Avatar
+                  src={user?.avatar_url}
+                  name={user?.username}
+                  size="md"
+                />
+                <div className="min-w-0">
+                  <span className="font-headline font-semibold text-sm text-on-surface block truncate">{user?.username || agentName}</span>
+                  <p className="text-xs text-on-surface-variant truncate">{user?.email}</p>
+                </div>
               </div>
               <button
                 type="button"
@@ -675,7 +787,16 @@ function Hauptseite({
 
               <button
                 type="button"
-                onClick={() => { navigate('/einstellungen'); setMobileMenuOffen(false); }}
+                onClick={() => { navigate('/einstellungen?tab=profil'); setMobileMenuOffen(false); }}
+                className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium text-on-surface hover:bg-surface-container-high transition-colors"
+              >
+                <UserIcon className="h-4 w-4 text-primary" />
+                <span>{t('profile.title', 'Profil & Einstellungen')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { navigate('/einstellungen?tab=desktop'); setMobileMenuOffen(false); }}
                 className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
                   bereich === 'einstellungen'
                     ? 'bg-primary/15 text-primary border border-primary/30'
@@ -742,8 +863,6 @@ function Hauptseite({
               <Notes />
             </div>
           ) : bereich === 'gedaechtnis' ? (
-            // Dieselbe Komponente wie im Panel unter Profil → KI, Standard-
-            // Scope „user": die persönlichen Einträge samt Servernotizen.
             <div className="mx-auto w-full max-w-3xl flex-1 min-h-0 overflow-y-auto pb-8">
               <AiMemoryManager />
             </div>
@@ -762,19 +881,20 @@ function Hauptseite({
   )
 }
 
-/** Dieselbe Pill-Optik wie die Ansichts-Umschalter auf der KI-Seite. */
-function Reiter({ aktiv, onClick, label }: { aktiv: boolean; onClick: () => void; label: string }) {
+/** Pill-Optik mit Icon und Label. */
+function Reiter({ aktiv, onClick, label, icon }: { aktiv: boolean; onClick: () => void; label: string; icon?: ReactNode }) {
   return (
     <button
       onClick={onClick}
       aria-pressed={aktiv}
-      className={`rounded-lg border px-3.5 py-2 text-sm transition-colors ${
+      className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
         aktiv
           ? 'border-primary/40 bg-primary/10 text-primary'
           : 'border-outline-variant/40 bg-surface-container-low/40 text-on-surface-variant hover:text-on-surface'
       }`}
     >
-      {label}
+      {icon}
+      <span>{label}</span>
     </button>
   )
 }

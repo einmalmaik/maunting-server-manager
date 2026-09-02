@@ -5,6 +5,10 @@ import {
   deriveVaultKeys,
   encryptVaultEntry,
   generateSecurePassword,
+  isBiometricsAvailable,
+  promptBiometricVerification,
+  unwrapVaultCredentialsFromBiometrics,
+  wrapVaultCredentialsForBiometrics,
 } from './vaultCrypto'
 
 export interface VaultAttachment {
@@ -68,9 +72,13 @@ const VAULT_CANARY_PREFIX = 'mss:vault_canary_'
 const VAULT_LOCAL_STORAGE_PREFIX = 'mss:vault_blobs_'
 const VAULT_PENDING_QUEUE_PREFIX = 'mss:vault_pending_'
 const VAULT_REVISION_PREFIX = 'mss:vault_rev_'
+const VAULT_AUTOLOCK_MINUTES_KEY = 'mss:vault_autolock_minutes'
+const VAULT_LOCK_ON_BLUR_KEY = 'mss:vault_lock_on_blur'
+const VAULT_BIOMETRICS_ENABLED_KEY = 'mss:vault_biometrics_enabled'
+const VAULT_BIOMETRICS_WRAPPED_KEY = 'mss:vault_bio_wrapped'
 
 function getOrCreateVaultSalt(): Uint8Array {
-  const existing = localStorage.getItem(VAULT_SALT_KEY)
+  const existing = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_SALT_KEY) : null
   if (existing) {
     const bytes = new Uint8Array(existing.length / 2)
     for (let i = 0; i < bytes.length; i++) {
@@ -83,7 +91,9 @@ function getOrCreateVaultSalt(): Uint8Array {
   const hex = Array.from(newSalt)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
-  localStorage.setItem(VAULT_SALT_KEY, hex)
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(VAULT_SALT_KEY, hex)
+  }
   return newSalt
 }
 
@@ -102,9 +112,24 @@ interface VaultState {
   syncStatus: SyncStatus
   lastSyncTime: number | null
 
+  // Auto-Lock & Biometrie
+  autoLockMinutes: number
+  lockOnWindowBlur: boolean
+  isBiometricsSupported: boolean
+  isBiometricsEnabled: boolean
+  lastActivityTime: number
+
   // Aktionen
   initializeVault: (masterPassword: string) => Promise<boolean>
   unlock: (masterPassword: string) => Promise<boolean>
+  unlockWithBiometrics: () => Promise<boolean>
+  enableBiometrics: (masterPassword: string) => Promise<boolean>
+  disableBiometrics: () => Promise<void>
+  checkBiometricsSupport: () => Promise<boolean>
+  setAutoLockMinutes: (minutes: number) => void
+  setLockOnWindowBlur: (enabled: boolean) => void
+  recordActivity: () => void
+  checkAutoLock: () => boolean
   lock: () => void
   resetLocalVaultState: () => void
   setSearchQuery: (q: string) => void
@@ -132,8 +157,113 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   syncStatus: 'synced',
   lastSyncTime: null,
 
+  autoLockMinutes: typeof localStorage !== 'undefined'
+    ? parseInt(localStorage.getItem(VAULT_AUTOLOCK_MINUTES_KEY) || '15', 10)
+    : 15,
+  lockOnWindowBlur: typeof localStorage !== 'undefined'
+    ? localStorage.getItem(VAULT_LOCK_ON_BLUR_KEY) === 'true'
+    : false,
+  isBiometricsSupported: false,
+  isBiometricsEnabled: typeof localStorage !== 'undefined'
+    ? localStorage.getItem(VAULT_BIOMETRICS_ENABLED_KEY) === 'true' && !!localStorage.getItem(VAULT_BIOMETRICS_WRAPPED_KEY)
+    : false,
+  lastActivityTime: Date.now(),
+
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setSelectedItemId: (selectedItemId) => set({ selectedItemId }),
+
+  setAutoLockMinutes: (minutes: number) => {
+    try {
+      localStorage.setItem(VAULT_AUTOLOCK_MINUTES_KEY, String(minutes))
+    } catch {}
+    set({ autoLockMinutes: minutes })
+  },
+
+  setLockOnWindowBlur: (enabled: boolean) => {
+    try {
+      localStorage.setItem(VAULT_LOCK_ON_BLUR_KEY, enabled ? 'true' : 'false')
+    } catch {}
+    set({ lockOnWindowBlur: enabled })
+  },
+
+  recordActivity: () => {
+    set({ lastActivityTime: Date.now() })
+  },
+
+  checkAutoLock: () => {
+    const { isUnlocked, autoLockMinutes, lastActivityTime, lock } = get()
+    if (!isUnlocked || autoLockMinutes <= 0) return false
+    const now = Date.now()
+    const diffMs = now - lastActivityTime
+    if (diffMs >= autoLockMinutes * 60 * 1000) {
+      lock()
+      return true
+    }
+    return false
+  },
+
+  checkBiometricsSupport: async () => {
+    try {
+      const supported = await isBiometricsAvailable()
+      set({ isBiometricsSupported: supported })
+      return supported
+    } catch {
+      set({ isBiometricsSupported: false })
+      return false
+    }
+  },
+
+  enableBiometrics: async (masterPassword: string) => {
+    try {
+      const salt = getOrCreateVaultSalt()
+      const { userKey, bucketId } = await deriveVaultKeys(masterPassword, salt)
+      const canary = typeof localStorage !== 'undefined' ? localStorage.getItem(`${VAULT_CANARY_PREFIX}${bucketId}`) : null
+      if (canary) {
+        await decryptVaultEntry(canary, userKey, 'vault-canary')
+      }
+
+      await promptBiometricVerification()
+
+      const wrapped = await wrapVaultCredentialsForBiometrics(masterPassword)
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(VAULT_BIOMETRICS_WRAPPED_KEY, wrapped)
+        localStorage.setItem(VAULT_BIOMETRICS_ENABLED_KEY, 'true')
+      }
+      set({ isBiometricsEnabled: true })
+      return true
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Biometrie-Aktivierung fehlgeschlagen'
+      throw new Error(msg)
+    }
+  },
+
+  disableBiometrics: async () => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(VAULT_BIOMETRICS_WRAPPED_KEY)
+      localStorage.setItem(VAULT_BIOMETRICS_ENABLED_KEY, 'false')
+    }
+    set({ isBiometricsEnabled: false })
+  },
+
+  unlockWithBiometrics: async () => {
+    const wrapped = typeof localStorage !== 'undefined' ? localStorage.getItem(VAULT_BIOMETRICS_WRAPPED_KEY) : null
+    if (!wrapped) {
+      set({ unlockError: 'Biometrie ist auf diesem Gerät noch nicht eingerichtet.' })
+      return false
+    }
+
+    set({ isUnlocking: true, unlockError: null })
+    try {
+      await promptBiometricVerification()
+      const masterPassword = await unwrapVaultCredentialsFromBiometrics(wrapped)
+      const success = await get().unlock(masterPassword)
+      return success
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Biometrisches Entsperren fehlgeschlagen.'
+      set({ isUnlocking: false, unlockError: msg })
+      return false
+    }
+  },
 
   lock: () => {
     set({
@@ -143,19 +273,26 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       items: [],
       selectedItemId: null,
       unlockError: null,
+      lastActivityTime: Date.now(),
     })
   },
 
   resetLocalVaultState: () => {
-    localStorage.removeItem(VAULT_SETUP_DONE_KEY)
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(VAULT_SETUP_DONE_KEY)
+      localStorage.removeItem(VAULT_BIOMETRICS_WRAPPED_KEY)
+      localStorage.removeItem(VAULT_BIOMETRICS_ENABLED_KEY)
+    }
     set({
       isInitialized: false,
       isUnlocked: false,
+      isBiometricsEnabled: false,
       userKey: null,
       bucketId: null,
       items: [],
       selectedItemId: null,
       unlockError: null,
+      lastActivityTime: Date.now(),
     })
   },
 

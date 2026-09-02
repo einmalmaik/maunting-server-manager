@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  Fingerprint,
   HelpCircle,
   KeyRound,
   Lock,
@@ -39,11 +40,13 @@ export function VaultView() {
     isUnlocked,
     isUnlocking,
     unlockError,
+    isBiometricsEnabled,
     items,
     searchQuery,
     syncStatus,
     initializeVault,
     unlock,
+    unlockWithBiometrics,
     lock,
     setSearchQuery,
     saveItem,
@@ -478,6 +481,32 @@ export function VaultView() {
             }}
             className="space-y-3.5"
           >
+            {isBiometricsEnabled && (
+              <div className="space-y-2 pb-1">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={async () => {
+                    const ok = await unlockWithBiometrics()
+                    if (ok) {
+                      toast.success('Per Biometrie entsperrt')
+                    }
+                  }}
+                  disabled={isUnlocking}
+                  className="w-full flex items-center justify-center gap-2 py-2 text-xs border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20"
+                >
+                  <Fingerprint className="h-4 w-4" />
+                  <span>Mit Windows Hello / Fingerabdruck</span>
+                </Button>
+                <div className="relative flex items-center justify-center">
+                  <div className="border-t border-outline-variant/30 w-full" />
+                  <span className="bg-surface-container px-2 text-[10px] text-on-surface-variant uppercase tracking-wider absolute">
+                    Oder Master-Passwort
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="relative">
               <input
                 type={showMasterPassword ? 'text' : 'password'}
@@ -485,7 +514,7 @@ export function VaultView() {
                 onChange={(e) => setMasterPasswordInput(e.target.value)}
                 placeholder="Master-Passwort"
                 className="w-full rounded-xl bg-surface-container-low border border-outline-variant/30 px-3 py-2 text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:outline-none focus:border-primary pr-9 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden [&::-webkit-credentials-auto-fill-button]:hidden"
-                autoFocus
+                autoFocus={!isBiometricsEnabled}
               />
               <button
                 type="button"
