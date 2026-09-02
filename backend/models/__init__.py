@@ -53,6 +53,7 @@ from .user_calendar import UserCalendar
 from .calendar_event import CalendarEvent
 from .note import Note
 from .panel_popup import PanelPopup, UserPopupState
+from .vault_entry import VaultEntry
 from .credential import (
     CREDENTIAL_KINDS,
     KIND_GITHUB_TOKEN,
@@ -90,4 +91,5 @@ __all__ = [
     "CREDENTIAL_KINDS", "KIND_GITHUB_TOKEN", "KIND_STEAM_ACCOUNT",
     "UserMailbox", "UserCalendar", "CalendarEvent", "Note",
     "PanelPopup", "UserPopupState",
+    "VaultEntry",
 ]  # noqa: E501

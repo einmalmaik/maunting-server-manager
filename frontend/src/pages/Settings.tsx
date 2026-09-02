@@ -17,6 +17,7 @@ import { SecurityTab } from './settings/SecurityTab'
 import { AiTab } from './settings/AiTab'
 import { HosterTab } from './settings/HosterTab'
 import { PopupTab } from './settings/PopupTab'
+import { VaultSettingsTab } from './settings/VaultSettingsTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 
@@ -36,6 +37,7 @@ type TabId =
   | 'ai'
   | 'popup'
   | 'hoster'
+  | 'vault'
 
 export function Settings() {
   const { t } = useTranslation()
@@ -65,6 +67,7 @@ export function Settings() {
     { id: 'security', labelKey: 'settings.tabs.security', icon: ShieldAlert },
     { id: 'ai', labelKey: 'settings.tabs.ai', icon: Bot },
     ...(canReadHoster ? [{ id: 'hoster' as TabId, labelKey: 'settings.tabs.hoster', icon: Plug }] : []),
+    { id: 'vault' as TabId, labelKey: 'settings.tabs.vault', icon: KeyRound },
   ]
 
   return (
@@ -93,6 +96,7 @@ export function Settings() {
       {activeTab === 'security' && <SecurityTab />}
       {activeTab === 'ai' && <AiTab />}
       {activeTab === 'hoster' && canReadHoster && <HosterTab canWrite={canWriteHoster} />}
+      {activeTab === 'vault' && <VaultSettingsTab />}
     </div>
   )
 }

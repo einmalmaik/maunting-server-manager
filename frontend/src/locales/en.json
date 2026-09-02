@@ -3033,7 +3033,8 @@
       "backup": "Backup",
       "security": "Security",
       "ai": "AI",
-      "hoster": "Hoster"
+      "hoster": "Hoster",
+      "vault": "Password Manager"
     },
     "imprint": {
       "title": "Imprint",
@@ -3257,6 +3258,7 @@
     "avatarInvalidType": "Allowed formats are JPEG, PNG, WebP, and GIF.",
     "avatarUpdated": "Profile picture updated successfully.",
     "avatarUpdateFailed": "Failed to upload profile picture.",
+    "timezoneSaveFailed": "Failed to save timezone.",
     "avatarRemoved": "Profile picture removed.",
     "avatarRemoveFailed": "Failed to remove profile picture.",
     "timezoneTitle": "Time Zone",
@@ -5474,7 +5476,8 @@
       "abmelden": "Sign out",
       "menueOeffnen": "Open menu",
       "keinChatrecht": "Your account lacks permission for AI chat (ai.chat.use). Contact your administrator to grant access.",
-      "gedaechtnis": "Memory"
+      "gedaechtnis": "Memory",
+      "tresor": "Vault"
     },
     "aktion": {
       "freigabeErforderlich": "Confirmation required",

@@ -3033,7 +3033,8 @@
       "security": "Sicherheit",
       "ai": "KI",
       "popup": "Pop-up",
-      "hoster": "Hoster"
+      "hoster": "Hoster",
+      "vault": "Passwort-Manager"
     },
     "imprint": {
       "title": "Impressum",
@@ -3257,6 +3258,7 @@
     "avatarInvalidType": "Erlaubte Formate sind JPEG, PNG, WebP und GIF.",
     "avatarUpdated": "Profilbild erfolgreich aktualisiert.",
     "avatarUpdateFailed": "Profilbild konnte nicht hochgeladen werden.",
+    "timezoneSaveFailed": "Zeitzone konnte nicht gespeichert werden.",
     "avatarRemoved": "Profilbild wurde entfernt.",
     "avatarRemoveFailed": "Profilbild konnte nicht entfernt werden.",
     "timezoneTitle": "Zeitzone",
@@ -5474,7 +5476,8 @@
       "abmelden": "Abmelden",
       "menueOeffnen": "Menü öffnen",
       "keinChatrecht": "Dein Konto besitzt kein Recht für den KI-Chat (ai.chat.use). Wende dich an deinen Administrator, um die Berechtigung zu erhalten.",
-      "gedaechtnis": "Gedächtnis"
+      "gedaechtnis": "Gedächtnis",
+      "tresor": "Tresor"
     },
     "aktion": {
       "freigabeErforderlich": "Bestätigung erforderlich",

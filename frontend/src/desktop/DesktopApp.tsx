@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
-import { BrainCircuit, Calendar as CalendarIcon, Eye, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, X } from 'lucide-react'
+import { BrainCircuit, Calendar as CalendarIcon, Eye, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
@@ -41,6 +41,7 @@ import { Aufraeumkarte } from './Aufraeumkarte'
 import { DesktopAktionKarte } from './DesktopAktionKarte'
 import { Uebernahmekarte } from './Uebernahmekarte'
 import { Wizard } from './Wizard'
+import { VaultView } from './vault/VaultView'
 import {
   beiFremdemSprachstart,
   sprachstartMelden,
@@ -224,6 +225,18 @@ export function DesktopApp() {
             />
           }
         />
+        <Route
+          path="/tresor"
+          element={
+            <Hauptseite
+              bereich="tresor"
+              konfig={konfig}
+              offeneUebernahme={offeneUebernahme}
+              onKonfigAenderung={ladeKonfigNeu}
+            />
+          }
+        />
+        <Route path="/vault" element={<Navigate to="/tresor" replace />} />
         <Route
           path="/privacy"
           element={
@@ -458,7 +471,7 @@ function Hauptseite({
   offeneUebernahme,
   onKonfigAenderung,
 }: {
-  bereich: 'ki' | 'kalender' | 'notizen' | 'gedaechtnis' | 'einstellungen'
+  bereich: 'ki' | 'kalender' | 'notizen' | 'gedaechtnis' | 'tresor' | 'einstellungen'
   konfig: AppKonfig | null
   offeneUebernahme: string | null
   onKonfigAenderung?: () => void
@@ -529,6 +542,11 @@ function Hauptseite({
               label={t('mss.app.gedaechtnis')}
             />
           )}
+          <Reiter
+            aktiv={bereich === 'tresor'}
+            onClick={() => navigate('/tresor')}
+            label={t('mss.app.tresor', 'Tresor')}
+          />
           <Reiter
             aktiv={bereich === 'einstellungen'}
             onClick={() => navigate('/einstellungen')}
@@ -644,6 +662,19 @@ function Hauptseite({
 
               <button
                 type="button"
+                onClick={() => { navigate('/tresor'); setMobileMenuOffen(false); }}
+                className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                  bereich === 'tresor'
+                    ? 'bg-primary/15 text-primary border border-primary/30'
+                    : 'text-on-surface hover:bg-surface-container-high'
+                }`}
+              >
+                <KeyRound className="h-4 w-4" />
+                <span>{t('mss.app.tresor', 'Tresor')}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => { navigate('/einstellungen'); setMobileMenuOffen(false); }}
                 className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
                   bereich === 'einstellungen'
@@ -675,7 +706,7 @@ function Hauptseite({
           </div>
         </div>
       )}
-      <main className={`relative flex flex-1 min-h-0 flex-col overflow-hidden ${bereich === 'ki' ? 'p-0 bg-surface' : 'p-margin-mobile md:p-margin-desktop'}`}>
+      <main className={`relative flex flex-1 min-h-0 flex-col overflow-hidden ${bereich === 'ki' || bereich === 'tresor' ? 'p-0 bg-surface' : 'p-margin-mobile md:p-margin-desktop'}`}>
         <div className="relative z-10 flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden">
           {bereich === 'ki' ? (
             darfChatten ? (
@@ -715,6 +746,10 @@ function Hauptseite({
             // Scope „user": die persönlichen Einträge samt Servernotizen.
             <div className="mx-auto w-full max-w-3xl flex-1 min-h-0 overflow-y-auto pb-8">
               <AiMemoryManager />
+            </div>
+          ) : bereich === 'tresor' ? (
+            <div className="flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden">
+              <VaultView />
             </div>
           ) : (
             <div className="mx-auto w-full max-w-3xl flex-1 min-h-0 overflow-y-auto pb-8">

@@ -43,6 +43,7 @@ from .user_integrations import router as user_integrations_router
 from .popups import router as popups_router
 from .calendar import router as calendar_router
 from .notes import router as notes_router
+from .vault import router as vault_router
 
 __all__ = [
     "auth_router",
@@ -91,4 +92,5 @@ __all__ = [
     "popups_router",
     "calendar_router",
     "notes_router",
+    "vault_router",
 ]  # noqa: E501
