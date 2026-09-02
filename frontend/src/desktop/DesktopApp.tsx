@@ -12,10 +12,10 @@
  * navigieren mit `navigate('/ai?ansicht=…')` (Glocke, Guardian, Aufgaben),
  * und genau diese Route gibt es hier. Eine Adressleiste hat das Fenster nicht.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { MemoryRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { listen } from '@tauri-apps/api/event'
-import { BrainCircuit, Calendar as CalendarIcon, Eye, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, User as UserIcon, X } from 'lucide-react'
+import { BrainCircuit, Calendar as CalendarIcon, Eye, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
@@ -26,7 +26,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PromptDialog } from '@/components/ui/PromptDialog'
 import { ToastContainer } from '@/components/ui/ToastContainer'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
-import { Avatar, BenachrichtigungsGlocke, Button } from '@/Singra/UI'
+import { Avatar, BenachrichtigungsGlocke, Button, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { Ai } from '@/pages/Ai'
 import { Calendar } from '@/pages/Calendar'
@@ -498,30 +498,25 @@ function Hauptseite({
   const darfNotizen = useHasPermission('ai.notes.use')
   const darfGedaechtnis = useHasPermission('ai.memory.use')
   const [mobileMenuOffen, setMobileMenuOffen] = useState(false)
-  const [userDropdownOffen, setUserDropdownOffen] = useState(false)
-  const userDropdownRef = useRef<HTMLDivElement>(null)
 
   const agentName = user?.agent_name?.trim() || 'Assistent'
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (userDropdownRef.current && !userDropdownRef.current.contains(e.target as Node)) {
-        setUserDropdownOffen(false)
-      }
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setUserDropdownOffen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [])
+  const profileItems: ProfileDropdownItem[] = [
+    {
+      key: 'settings',
+      label: t('mss.app.einstellungen', 'Einstellungen'),
+      icon: <SettingsIcon className="h-4 w-4" />,
+      onClick: () => navigate('/einstellungen'),
+    },
+    {
+      key: 'logout',
+      label: t('mss.app.abmelden', 'Abmelden'),
+      icon: <LogOut className="h-4 w-4" />,
+      onClick: () => void abmelden(),
+      tone: 'danger',
+    },
+  ]
 
   useEffect(() => {
     onKonfigAenderung?.()
@@ -588,91 +583,11 @@ function Hauptseite({
           <BenachrichtigungsGlocke />
 
           {/* Profil-Avatar Dropdown */}
-          <div className="relative" ref={userDropdownRef}>
-            <button
-              type="button"
-              onClick={() => setUserDropdownOffen((v) => !v)}
-              aria-expanded={userDropdownOffen}
-              aria-haspopup="menu"
-              aria-label={t('shell.openUserMenu', 'Benutzermenü öffnen')}
-              className="flex items-center gap-2 rounded-xl p-1 transition-all hover:bg-surface-container-high focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <Avatar
-                src={user?.avatar_url}
-                name={user?.username}
-                size="sm"
-              />
-            </button>
-
-            {userDropdownOffen && (
-              <div
-                role="menu"
-                className="absolute right-0 top-full mt-2 w-60 overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-high shadow-2xl z-50 animate-fade-in"
-              >
-                {/* Benutzer-Header mit Avatar */}
-                <div className="border-b border-outline-variant/30 p-3.5 bg-surface-container">
-                  <div className="flex items-center gap-3">
-                    <Avatar
-                      src={user?.avatar_url}
-                      name={user?.username}
-                      size="md"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-label-md text-sm font-semibold text-on-surface">
-                        {user?.username}
-                      </p>
-                      <p className="truncate font-mono-sm text-xs text-on-surface-variant">
-                        {user?.is_owner ? 'Owner' : user?.email}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="py-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUserDropdownOffen(false)
-                      navigate('/einstellungen?tab=profil')
-                    }}
-                    role="menuitem"
-                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-on-surface transition-colors hover:bg-surface-container-highest"
-                  >
-                    <UserIcon className="h-4 w-4 text-primary" aria-hidden="true" />
-                    <span>{t('profile.title', 'Profil & Einstellungen')}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUserDropdownOffen(false)
-                      navigate('/einstellungen?tab=desktop')
-                    }}
-                    role="menuitem"
-                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-on-surface transition-colors hover:bg-surface-container-highest"
-                  >
-                    <SettingsIcon className="h-4 w-4 text-on-surface-variant" aria-hidden="true" />
-                    <span>{t('mss.app.einstellungen', 'Desktop-Optionen')}</span>
-                  </button>
-                </div>
-
-                <div className="border-t border-outline-variant/30 py-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUserDropdownOffen(false)
-                      void abmelden()
-                    }}
-                    role="menuitem"
-                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-status-error transition-colors hover:bg-error-container/20"
-                  >
-                    <LogOut className="h-4 w-4" aria-hidden="true" />
-                    <span>{t('mss.app.abmelden', 'Abmelden')}</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+          <ProfileDropdown
+            user={user}
+            items={profileItems}
+            placement="bottom-right"
+          />
 
           {/* Mobile Menü-Knopf */}
           <button
@@ -787,16 +702,7 @@ function Hauptseite({
 
               <button
                 type="button"
-                onClick={() => { navigate('/einstellungen?tab=profil'); setMobileMenuOffen(false); }}
-                className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium text-on-surface hover:bg-surface-container-high transition-colors"
-              >
-                <UserIcon className="h-4 w-4 text-primary" />
-                <span>{t('profile.title', 'Profil & Einstellungen')}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => { navigate('/einstellungen?tab=desktop'); setMobileMenuOffen(false); }}
+                onClick={() => { navigate('/einstellungen'); setMobileMenuOffen(false); }}
                 className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
                   bereich === 'einstellungen'
                     ? 'bg-primary/15 text-primary border border-primary/30'

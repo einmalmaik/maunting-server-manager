@@ -14,3 +14,9 @@ export { Pagination } from './Pagination'
 export { Checkbox, type CheckboxProps } from '@/components/ui/Checkbox'
 export { BenachrichtigungsGlocke } from './BenachrichtigungsGlocke'
 export { Avatar, type AvatarProps } from './Avatar'
+export {
+  ProfileDropdown,
+  type ProfileDropdownProps,
+  type ProfileDropdownItem,
+  type ProfileDropdownUser,
+} from './ProfileDropdown'

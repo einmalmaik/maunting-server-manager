@@ -121,6 +121,8 @@ function ProfilEinstellungen() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
 
   const {
+    isInitialized,
+    isUnlocked,
     autoLockMinutes,
     lockOnWindowBlur,
     isBiometricsSupported,
@@ -344,6 +346,16 @@ function ProfilEinstellungen() {
         </div>
 
         <div className="pt-2 border-t border-outline-variant/30 space-y-3">
+          {!isInitialized ? (
+            <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
+              Der Passwort-Manager wurde auf diesem Gerät noch nicht eingerichtet. Richte ihn zuerst ein, um den biometrischen Schnelleinstieg zu nutzen.
+            </div>
+          ) : !isUnlocked ? (
+            <div className="p-2.5 rounded-xl bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface-variant">
+              Der Tresor ist aktuell gesperrt. Bitte entsperre ihn zuerst im Passwort-Manager, um den biometrischen Schnelleinstieg zu verwalten.
+            </div>
+          ) : null}
+
           <div className="flex items-center justify-between gap-4">
             <div>
               <span className="text-xs font-medium text-on-surface">
@@ -356,7 +368,7 @@ function ProfilEinstellungen() {
             <Switch
               checked={isBiometricsEnabled}
               onCheckedChange={(checked: boolean) => void handleBiometricsToggle(checked)}
-              disabled={!isBiometricsSupported}
+              disabled={!isBiometricsSupported || !isInitialized || !isUnlocked}
             />
           </div>
 
