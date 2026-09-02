@@ -386,6 +386,7 @@ def owner_user(db: Session) -> User:
 def regular_user(db: Session) -> User:
     existing = db.query(User).filter(User.username == "user1").first()
     if existing:
+        db.refresh(existing)
         return existing
     user = AuthService.create_user(db, "user1", "user1@test.de", "UserPass123!")
     user.email_verified = True
@@ -398,6 +399,7 @@ def regular_user(db: Session) -> User:
 def inactive_user(db: Session) -> User:
     existing = db.query(User).filter(User.username == "inactive").first()
     if existing:
+        db.refresh(existing)
         return existing
     user = AuthService.create_user(db, "inactive", "inactive@test.de", "Inactive123!")
     user.is_active = False

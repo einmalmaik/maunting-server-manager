@@ -223,7 +223,9 @@ jobs:
 
       - name: Build Android APK
         working-directory: smart-system
-        run: npx tauri android build --apk
+        run: |
+          chmod +x src-tauri/gen/android/gradlew || true
+          npx tauri android build --apk
 
       - name: Collect Android APK
         shell: bash
