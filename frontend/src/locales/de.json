@@ -3004,6 +3004,8 @@
     "calendarEnabledHint": "Aktiviert das Kalendermodul im Panel und ermöglicht der KI die Terminverwaltung.",
     "notesEnabled": "Integrierte Notizen",
     "notesEnabledHint": "Aktiviert das Notizmodul im Panel und ermöglicht der KI die Notizverwaltung.",
+    "vaultEnabled": "Passwort-Manager & Authenticator",
+    "vaultEnabledHint": "Aktiviert den integrierten Zero-Knowledge Tresor für native Apps. Deaktiviert verbirgt ihn im gesamten Panel und in der App.",
     "cloudflareEnabled": "Cloudflare DNS",
     "cloudflareEnabledHint": "Aktiviert die Cloudflare DNS Verwaltung und automatische Subdomains. Deaktiviert verbirgt sie für KI und UI.",
     "testConnection": "Verbindung testen",

@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Globe, Mail, Gamepad2, Flame, KeyRound, Shield, Github, Cloud, FileText, LifeBuoy, ShieldAlert, Bot, Plug, Megaphone, CloudCog } from 'lucide-react'
 import { TabBar, type TabDef } from '@/components/ui/TabBar'
+import { api } from '@/api/client'
+import { PageHeader } from '@/Singra/UI/PageHeader'
 import { GeneralTab } from './settings/GeneralTab'
 import { EmailTab } from './settings/EmailTab'
 import { SteamTab } from './settings/SteamTab'
@@ -19,7 +21,6 @@ import { HosterTab } from './settings/HosterTab'
 import { PopupTab } from './settings/PopupTab'
 import { VaultSettingsTab } from './settings/VaultSettingsTab'
 import { useHasPermission } from '@/hooks/useHasPermission'
-import { PageHeader } from '@/Singra/UI/PageHeader'
 
 type TabId =
   | 'general'
@@ -39,6 +40,10 @@ type TabId =
   | 'hoster'
   | 'vault'
 
+interface PanelSettings {
+  vault_enabled: boolean
+}
+
 export function Settings() {
   const { t } = useTranslation()
   const canManageBackup = useHasPermission('panel.settings.write')
@@ -47,6 +52,25 @@ export function Settings() {
   const canReadHoster = useHasPermission('panel.hoster.read')
   const canWriteHoster = useHasPermission('panel.hoster.write')
   const [activeTab, setActiveTab] = useState<TabId>('general')
+  const [vaultEnabled, setVaultEnabled] = useState<boolean>(true)
+
+  useEffect(() => {
+    let active = true
+    api<PanelSettings>('/settings')
+      .then((data) => {
+        if (active && data && typeof data.vault_enabled === 'boolean') {
+          setVaultEnabled(data.vault_enabled)
+        }
+      })
+      .catch(() => {})
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    if (!vaultEnabled && activeTab === 'vault') {
+      setActiveTab('general')
+    }
+  }, [vaultEnabled, activeTab])
 
   // Backup-Tab: panel.settings.write.
   // Security-Tab: immer sichtbar (Rate-Limits für panel.settings.*;
@@ -67,7 +91,7 @@ export function Settings() {
     { id: 'security', labelKey: 'settings.tabs.security', icon: ShieldAlert },
     { id: 'ai', labelKey: 'settings.tabs.ai', icon: Bot },
     ...(canReadHoster ? [{ id: 'hoster' as TabId, labelKey: 'settings.tabs.hoster', icon: Plug }] : []),
-    { id: 'vault' as TabId, labelKey: 'settings.tabs.vault', icon: KeyRound },
+    ...(vaultEnabled ? [{ id: 'vault' as TabId, labelKey: 'settings.tabs.vault', icon: KeyRound }] : []),
   ]
 
   return (
@@ -96,7 +120,7 @@ export function Settings() {
       {activeTab === 'security' && <SecurityTab />}
       {activeTab === 'ai' && <AiTab />}
       {activeTab === 'hoster' && canReadHoster && <HosterTab canWrite={canWriteHoster} />}
-      {activeTab === 'vault' && <VaultSettingsTab />}
+      {activeTab === 'vault' && vaultEnabled && <VaultSettingsTab />}
     </div>
   )
 }

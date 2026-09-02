@@ -240,3 +240,47 @@ def test_vault_hint_flow_and_rate_limit(client, test_db, monkeypatch):
     assert res_req_limit.status_code == 429
     assert "10 Minuten" in res_req_limit.json()["detail"]
 
+
+def test_vault_disabled_via_settings(client, test_db):
+    from services.panel_settings_service import PanelSettingsService
+
+    PanelSettingsService.set("vault_enabled", "false")
+    try:
+        res_sync = client.post(
+            "/api/vault/sync",
+            json={
+                "bucket_id": "a" * 64,
+                "since_revision": 0,
+                "mutations": [],
+            },
+        )
+        assert res_sync.status_code == 403
+        assert "deaktiviert" in res_sync.json()["detail"]
+
+        res_hint = client.get("/api/vault/hint-status")
+        assert res_hint.status_code == 403
+    finally:
+        PanelSettingsService.set("vault_enabled", "true")
+
+
+def test_vault_node_migration_count(client, test_db):
+    session, _ = test_db
+    node = Node(id=99, name="Migration Node", host="10.0.0.9:8000", auth_token_enc="enc_token")
+    session.add(node)
+
+    # Create an entry
+    e = VaultEntry(
+        id="item-mig-1",
+        bucket_id="f" * 64,
+        ciphertext="sv-vault-v1:test",
+        revision=1,
+        node_id=None,
+    )
+    session.add(e)
+    session.commit()
+
+    # Assign node 99 -> 1 entry should be migrated
+    res = client.put("/api/vault/node-assignment", json={"node_id": "99"})
+    assert res.status_code == 200
+    assert res.json()["migrated_entries"] >= 1
+

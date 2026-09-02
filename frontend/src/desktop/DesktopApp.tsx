@@ -18,6 +18,7 @@ import { listen } from '@tauri-apps/api/event'
 import { BrainCircuit, Calendar as CalendarIcon, Eye, KeyRound, LogOut, Menu, MessageSquare, Settings as SettingsIcon, ShieldAlert, StickyNote, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { api } from '@/api/client'
 import { AiMemoryManager } from '@/components/ai/AiMemoryManager'
 import { AiRunNotice } from '@/components/ai/AiRunNotice'
 import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
@@ -518,7 +519,26 @@ function Hauptseite({
   const darfKalender = useHasPermission('ai.calendar.use')
   const darfNotizen = useHasPermission('ai.notes.use')
   const darfGedaechtnis = useHasPermission('ai.memory.use')
+  const [darfTresor, setDarfTresor] = useState(true)
   const [mobileMenuOffen, setMobileMenuOffen] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    api<{ vault_enabled?: boolean }>('/api/panel/settings/public')
+      .then((res) => {
+        if (active && res && typeof res.vault_enabled === 'boolean') {
+          setDarfTresor(res.vault_enabled)
+        }
+      })
+      .catch(() => {})
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    if (!darfTresor && bereich === 'tresor') {
+      navigate('/ai')
+    }
+  }, [darfTresor, bereich, navigate])
 
   const agentName = user?.agent_name?.trim() || 'Assistent'
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
@@ -591,12 +611,14 @@ function Hauptseite({
               label={t('mss.app.gedaechtnis')}
             />
           )}
-          <Reiter
-            aktiv={bereich === 'tresor'}
-            onClick={() => navigate('/tresor')}
-            icon={<KeyRound className="h-4 w-4" />}
-            label={t('mss.app.tresor', 'Passwort-Manager')}
-          />
+          {darfTresor && (
+            <Reiter
+              aktiv={bereich === 'tresor'}
+              onClick={() => navigate('/tresor')}
+              icon={<KeyRound className="h-4 w-4" />}
+              label={t('mss.app.tresor', 'Passwort-Manager')}
+            />
+          )}
         </nav>
 
         {/* Rechte Seite: Glocke + Profil-Avatar mit Dropdown-Menü */}
@@ -708,18 +730,20 @@ function Hauptseite({
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => { navigate('/tresor'); setMobileMenuOffen(false); }}
-                className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
-                  bereich === 'tresor'
-                    ? 'bg-primary/15 text-primary border border-primary/30'
-                    : 'text-on-surface hover:bg-surface-container-high'
-                }`}
-              >
-                <KeyRound className="h-4 w-4" />
-                <span>{t('mss.app.tresor', 'Passwort-Manager')}</span>
-              </button>
+              {darfTresor && (
+                <button
+                  type="button"
+                  onClick={() => { navigate('/tresor'); setMobileMenuOffen(false); }}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                    bereich === 'tresor'
+                      ? 'bg-primary/15 text-primary border border-primary/30'
+                      : 'text-on-surface hover:bg-surface-container-high'
+                  }`}
+                >
+                  <KeyRound className="h-4 w-4" />
+                  <span>{t('mss.app.tresor', 'Passwort-Manager')}</span>
+                </button>
+              )}
 
               <button
                 type="button"

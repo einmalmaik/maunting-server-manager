@@ -3004,6 +3004,8 @@
     "calendarEnabledHint": "Enables the calendar module in the panel and allows AI scheduling.",
     "notesEnabled": "Integrated Notes",
     "notesEnabledHint": "Enables the notes module in the panel and allows AI note management.",
+    "vaultEnabled": "Password Manager & Authenticator",
+    "vaultEnabledHint": "Enables the integrated Zero-Knowledge vault for native apps. When disabled, hides it across panel and app.",
     "cloudflareEnabled": "Cloudflare DNS",
     "cloudflareEnabledHint": "Enables Cloudflare DNS management and automatic subdomains. When disabled it is hidden for AI and UI.",
     "testConnection": "Test connection",

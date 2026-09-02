@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import List
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from models.node import Node
@@ -18,6 +18,7 @@ from schemas.vault import (
     VaultSyncRequest,
     VaultSyncResponse,
 )
+from services.auth_service import AuthService
 
 PANEL_SETTING_VAULT_NODE = "vault_assigned_node_id"
 
@@ -37,6 +38,14 @@ def sync_vault(db: Session, request: VaultSyncRequest) -> VaultSyncResponse:
     bucket_id = request.bucket_id.lower()
 
     if request.mutations:
+        # Aktuell zugewiesenen Node ermitteln
+        assigned_setting = db.get(PanelSetting, PANEL_SETTING_VAULT_NODE)
+        current_node_id = (
+            assigned_setting.value.strip()
+            if assigned_setting and assigned_setting.value
+            else None
+        )
+
         mutation_ids = [m.id for m in request.mutations]
         existing_stmt = select(VaultEntry).where(
             VaultEntry.bucket_id == bucket_id,
@@ -52,10 +61,13 @@ def sync_vault(db: Session, request: VaultSyncRequest) -> VaultSyncResponse:
                     existing.revision = m.revision
                     existing.is_deleted = m.is_deleted
                     existing.updated_at = _now()
+                    if current_node_id and existing.node_id != current_node_id:
+                        existing.node_id = current_node_id
             else:
                 new_entry = VaultEntry(
                     id=m.id,
                     bucket_id=bucket_id,
+                    node_id=current_node_id,
                     ciphertext=m.ciphertext,
                     revision=m.revision,
                     is_deleted=m.is_deleted,
@@ -128,7 +140,7 @@ def get_vault_node_assignment(db: Session) -> VaultNodeAssignment:
 
 
 def set_vault_node_assignment(db: Session, node_id: str | None) -> VaultNodeAssignment:
-    """Aktualisiert die Zuweisung des Passwort-Managers an einen dedizierten Node."""
+    """Aktualisiert die Zuweisung des Passwort-Managers an einen dedizierten Node und migriert Daten nahtlos."""
     clean_id = str(node_id).strip() if node_id and str(node_id).strip() else ""
 
     if clean_id:
@@ -142,6 +154,19 @@ def set_vault_node_assignment(db: Session, node_id: str | None) -> VaultNodeAssi
         clean_id = str(node.id)
 
     setting = db.get(PanelSetting, PANEL_SETTING_VAULT_NODE)
+    old_node_id = setting.value.strip() if setting and setting.value else None
+    target_node_id = clean_id if clean_id else None
+
+    # Automatische nahtlose Migration aller verschlüsselten Tresor-Datensätze
+    migrated_count = 0
+    if old_node_id != target_node_id:
+        mig_stmt = (
+            update(VaultEntry)
+            .values(node_id=target_node_id, updated_at=_now())
+        )
+        res = db.execute(mig_stmt)
+        migrated_count = int(res.rowcount or 0)
+
     if not setting:
         setting = PanelSetting(key=PANEL_SETTING_VAULT_NODE, value=clean_id)
         db.add(setting)
@@ -150,20 +175,25 @@ def set_vault_node_assignment(db: Session, node_id: str | None) -> VaultNodeAssi
         setting.updated_at = _now()
 
     db.commit()
-    return get_vault_node_assignment(db)
+    assignment = get_vault_node_assignment(db)
+    assignment.migrated_entries = migrated_count
+    return assignment
 
 
 HINT_RATE_LIMIT_SECONDS = 600  # 10 Minuten Cooldown
 
 
 def set_vault_hint(db: Session, user_id: int, hint_text: str) -> None:
-    """Hinterlegt oder aktualisiert den Passwort-Hinweis für das Master-Passwort."""
+    """Hinterlegt oder aktualisiert den Passwort-Hinweis (verschlüsselt at rest mit Server-Key und AAD)."""
+    encrypted_hint = AuthService.encrypt_secret(
+        hint_text.strip(), aad=f"msm:vault:hint:{user_id}"
+    )
     hint_obj = db.get(VaultHint, user_id)
     if not hint_obj:
-        hint_obj = VaultHint(user_id=user_id, hint=hint_text.strip())
+        hint_obj = VaultHint(user_id=user_id, hint=encrypted_hint)
         db.add(hint_obj)
     else:
-        hint_obj.hint = hint_text.strip()
+        hint_obj.hint = encrypted_hint
         hint_obj.updated_at = _now()
     db.commit()
 
@@ -224,6 +254,14 @@ async def request_vault_hint_email(db: Session, user: User) -> tuple[bool, str]:
                 f"Der Hinweis kann nur alle 10 Minuten angefordert werden. Bitte warte noch {wait_minutes} Minute(n).",
             )
 
+    # Entschlüsseln mit AAD (Fallback für etwaige Altdaten)
+    try:
+        raw_hint = AuthService.decrypt_secret(
+            hint_obj.hint, aad=f"msm:vault:hint:{user.id}"
+        )
+    except Exception:
+        raw_hint = hint_obj.hint
+
     from services.email_service import EmailService
 
     subject = "Passwort-Manager — Dein Passwort-Hinweis"
@@ -232,7 +270,7 @@ async def request_vault_hint_email(db: Session, user: User) -> tuple[bool, str]:
 du hast deinen Passwort-Hinweis für den Maunting Service Manager Passwort-Manager angefordert.
 
 Dein hinterlegter Hinweis lautet:
-{hint_obj.hint}
+{raw_hint}
 
 Falls du diese Anforderung nicht ausgelöst hast, überprüfe bitte die Sicherheit deines Kontos.
 
@@ -242,7 +280,7 @@ Maunting Service Manager
         user.username,
         "Passwort-Hinweis",
         "Hier ist deine persönliche Gedankenstütze für das Master-Passwort deines Passwort-Managers:",
-        f"<strong>{hint_obj.hint}</strong>",
+        f"<strong>{raw_hint}</strong>",
     )
 
     success = await EmailService.send_email(user.email, subject, body, html_content)

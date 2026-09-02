@@ -16,8 +16,17 @@ from schemas.vault import (
     VaultSyncResponse,
 )
 from services import vault_service
+from services.panel_settings_service import PanelSettingsService
 
 router = APIRouter(prefix="/api/vault", tags=["vault"])
+
+
+def _check_vault_enabled() -> None:
+    if PanelSettingsService.get("vault_enabled", "true") == "false":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Der Passwort-Manager ist in den Panel-Einstellungen deaktiviert.",
+        )
 
 
 @router.post("/sync", response_model=VaultSyncResponse)
@@ -33,6 +42,7 @@ def sync_vault_entries(
     - Es werden keine Klardaten, URLs, Passwörter oder Tags übertragen.
     - Die `bucket_id` ist blind und wird clientseitig berechnet.
     """
+    _check_vault_enabled()
     try:
         return vault_service.sync_vault(db, payload)
     except Exception as exc:
@@ -74,6 +84,7 @@ def save_vault_hint(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, str]:
     """Hinterlegt einen Passwort-Hinweis für den Passwort-Manager."""
+    _check_vault_enabled()
     vault_service.set_vault_hint(db, current_user.id, payload.hint)
     return {"status": "ok", "message": "Passwort-Hinweis erfolgreich hinterlegt."}
 
@@ -84,6 +95,7 @@ def get_vault_hint_status(
     current_user: User = Depends(get_current_user),
 ) -> VaultHintStatusResponse:
     """Gibt den Status des Passwort-Hinweises und Cooldowns zurück."""
+    _check_vault_enabled()
     return vault_service.get_vault_hint_status(db, current_user.id)
 
 
@@ -93,6 +105,7 @@ async def send_vault_hint(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, str]:
     """Sendet den hinterlegten Passwort-Hinweis an die E-Mail des Benutzers (max. 1x alle 10 Minuten)."""
+    _check_vault_enabled()
     success, msg = await vault_service.request_vault_hint_email(db, current_user)
     if not success:
         # Falls Cooldown aktiv ist: 429 Too Many Requests

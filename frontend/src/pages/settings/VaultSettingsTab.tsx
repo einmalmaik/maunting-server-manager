@@ -10,6 +10,7 @@ interface VaultNodeAssignmentResponse {
   node_id: string | null
   assigned_node_name: string | null
   is_multi_node_active: boolean
+  migrated_entries?: number
 }
 
 export function VaultSettingsTab() {
@@ -40,6 +41,17 @@ export function VaultSettingsTab() {
   }
 
   const handleSave = async () => {
+    const isChangingNode = (selectedNodeId || null) !== (currentAssignment?.node_id || null)
+    if (isChangingNode) {
+      const targetName = selectedNodeId
+        ? (nodes.find((n) => String(n.id) === selectedNodeId)?.name || `Node #${selectedNodeId}`)
+        : 'Zentraler Panel-Node'
+      const confirmed = window.confirm(
+        `Möchtest du den Passwort-Manager wirklich auf "${targetName}" umziehen? Sämtliche verschlüsselten Tresor-Datensätze werden dabei automatisch und unterbrechungsfrei migriert.`
+      )
+      if (!confirmed) return
+    }
+
     setSaving(true)
     try {
       const nodeIdToSend = selectedNodeId ? selectedNodeId : null
@@ -49,7 +61,11 @@ export function VaultSettingsTab() {
       })
       setCurrentAssignment(res)
       setSelectedNodeId(res.node_id || '')
-      toast.success('Node-Zuweisung für Passwort-Manager gespeichert')
+      if (res.migrated_entries && res.migrated_entries > 0) {
+        toast.success(`Node-Zuweisung aktualisiert. ${res.migrated_entries} Tresor-Datensätze nahtlos migriert.`)
+      } else {
+        toast.success('Node-Zuweisung für Passwort-Manager gespeichert')
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Speichern fehlgeschlagen')
     } finally {
@@ -98,21 +114,17 @@ export function VaultSettingsTab() {
           </Button>
         </div>
 
-        <div className="rounded-xl border border-outline-variant/30 bg-surface-container-low p-4 text-xs text-on-surface-variant space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-on-surface font-medium">
-              <ShieldCheck className="h-4 w-4 text-primary" />
-              <span>Zero-Knowledge Architektur & Plattform-Garantie</span>
-            </div>
-            {currentAssignment && (
-              <span className="msm-badge-info text-[11px]">
-                {currentAssignment.assigned_node_name || 'Zentraler Panel-Node'}
-              </span>
-            )}
+        <div className="rounded-xl border border-outline-variant/30 bg-surface-container-low p-3.5 text-xs text-on-surface-variant flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
+            <span className="text-on-surface font-medium">Zero-Knowledge Verschlüsselung via DIS</span>
+            <span className="hidden sm:inline text-on-surface-variant">• Native Desktop- & Mobile-App</span>
           </div>
-          <p>
-            Der Passwort-Manager läuft aus Sicherheitsgründen ausschließlich in der nativen Desktop- und Mobile-App (Tauri / APK). Die Webversion enthält keine Entschlüsselungs-Engines. Sämtliche Passwörter und 2FA-Geheimnisse werden clientseitig über das DIS AES-GCM Sidecar verschlüsselt und in der Datenbank ohne Metadaten oder Fremdschlüssel abgelegt.
-          </p>
+          {currentAssignment && (
+            <span className="msm-badge-info text-[11px] shrink-0">
+              {currentAssignment.assigned_node_name || 'Zentraler Panel-Node'}
+            </span>
+          )}
         </div>
       </div>
 

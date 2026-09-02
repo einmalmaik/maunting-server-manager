@@ -40,6 +40,7 @@ export interface PanelSettings {
   desktop_app_download_enabled: boolean
   calendar_enabled: boolean
   notes_enabled: boolean
+  vault_enabled: boolean
   captcha_enabled: boolean
   captcha_provider: 'turnstile' | 'hcaptcha' | 'recaptcha' | 'none'
   captcha_site_key: string
@@ -104,6 +105,7 @@ export const EMPTY_PANEL_SETTINGS: PanelSettings = {
   desktop_app_download_enabled: true,
   calendar_enabled: true,
   notes_enabled: true,
+  vault_enabled: true,
   captcha_enabled: false,
   captcha_provider: 'none',
   captcha_site_key: '',

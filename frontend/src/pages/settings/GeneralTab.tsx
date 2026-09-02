@@ -50,6 +50,7 @@ export function GeneralTab() {
           desktop_app_download_enabled: settings.desktop_app_download_enabled,
           calendar_enabled: settings.calendar_enabled,
           notes_enabled: settings.notes_enabled,
+          vault_enabled: settings.vault_enabled,
           cloudflare_enabled: settings.cloudflare_enabled,
         }),
       })
@@ -220,6 +221,24 @@ export function GeneralTab() {
                   onCheckedChange={(checked) => setSettings({ ...settings, notes_enabled: checked })}
                   disabled={!canWrite}
                   aria-label={t('settings.notesEnabled', 'Notizfunktion & Einkaufslisten')}
+                />
+              </label>
+            </div>
+            <div className="md:col-span-2 border-t border-outline-variant/30 pt-6">
+              <label className="flex items-center justify-between gap-4">
+                <span className="block">
+                  <span className="block font-headline text-body-md text-primary font-semibold">
+                    {t('settings.vaultEnabled', 'Passwort-Manager & Authenticator')}
+                  </span>
+                  <span className="block font-body text-xs text-on-surface-variant">
+                    {t('settings.vaultEnabledHint', 'Aktiviert den integrierten Zero-Knowledge Tresor für native Apps. Deaktiviert verbirgt ihn im gesamten Panel und in der App.')}
+                  </span>
+                </span>
+                <Switch
+                  checked={settings.vault_enabled}
+                  onCheckedChange={(checked) => setSettings({ ...settings, vault_enabled: checked })}
+                  disabled={!canWrite}
+                  aria-label={t('settings.vaultEnabled', 'Passwort-Manager & Authenticator')}
                 />
               </label>
             </div>
