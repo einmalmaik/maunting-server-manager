@@ -225,20 +225,21 @@ jobs:
         working-directory: smart-system
         run: |
           npx tauri android init || true
-          npx tauri android build --apk || true
+          npx tauri android build --apk
 
       - name: Collect Android APK
         shell: bash
         run: |
           mkdir -p android-release
-          find smart-system/src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -exec cp {} android-release/MauntingSmartSystem.apk \; 2>/dev/null || true
+          find smart-system/src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" | head -n 1 | xargs -I {} cp -v {} android-release/MauntingSmartSystem.apk || true
+          ls -la android-release/
 
       - uses: actions/upload-artifact@v4
         with:
           name: msm-mobile-android
           path: |
-            android-release/*
-          if-no-files-found: ignore
+            android-release/*.apk
+          if-no-files-found: warn
           retention-days: 7
 
   publish-release:
