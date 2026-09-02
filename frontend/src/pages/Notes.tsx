@@ -24,6 +24,14 @@ import { Dropdown, type DropdownOption } from '@/Singra/UI'
 import { Button } from '@/components/ui/Button'
 import { Switch } from '@/components/ui/Switch'
 import { teamsApi, type Team } from '@/api/teams'
+import {
+  loadNotesOfflineFirst,
+  saveNoteOffline,
+  deleteNoteOffline,
+  toggleNotePinOffline,
+  toggleNoteArchiveOffline,
+  toggleCheckItemOffline,
+} from '@/lib/offlineSync'
 
 export interface NoteItem {
   id: number
@@ -108,14 +116,11 @@ export function Notes() {
   const loadNotes = useCallback(async () => {
     try {
       setLoading(true)
-      const data = await api<NoteItem[]>('/notes?include_archived=true')
+      const { notes: data } = await loadNotesOfflineFirst()
       setNotes(Array.isArray(data) ? data : [])
-    } catch (err: any) {
-      if (err?.status === 403 || err?.status === 404) {
-        setNotes([])
-      } else {
-        toast.error(t('notes.loadError', 'Fehler beim Laden der Notizen'))
-      }
+    } catch {
+      // Offline fallback
+      setNotes([])
     } finally {
       setLoading(false)
     }
@@ -133,6 +138,14 @@ export function Notes() {
   useEffect(() => {
     void loadNotes()
     void loadTeams()
+
+    const handleNotesUpdated = () => {
+      void loadNotes()
+    }
+    window.addEventListener('msm:notes-updated', handleNotesUpdated)
+    return () => {
+      window.removeEventListener('msm:notes-updated', handleNotesUpdated)
+    }
   }, [loadNotes, loadTeams])
 
   const openCreateModal = () => {
@@ -180,17 +193,10 @@ export function Notes() {
         team_id: formNoteType === 'team' ? formTeamId : null,
       }
 
+      await saveNoteOffline(payload, editingNote)
       if (editingNote) {
-        await api(`/notes/${editingNote.note_uid}`, {
-          method: 'PUT',
-          body: JSON.stringify(payload),
-        })
         toast.success(t('notes.updated', 'Notiz erfolgreich aktualisiert.'))
       } else {
-        await api('/notes', {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        })
         toast.success(t('notes.created', 'Notiz erfolgreich erstellt.'))
       }
 
@@ -213,7 +219,7 @@ export function Notes() {
     if (!ok) return
 
     try {
-      await api(`/notes/${note.note_uid}`, { method: 'DELETE' })
+      await deleteNoteOffline(note)
       toast.success(t('notes.deleted', 'Notiz gelöscht.'))
       void loadNotes()
     } catch {
@@ -224,7 +230,7 @@ export function Notes() {
   const handleTogglePin = async (note: NoteItem, e: React.MouseEvent) => {
     e.stopPropagation()
     try {
-      await api(`/notes/${note.note_uid}/pin`, { method: 'POST' })
+      await toggleNotePinOffline(note)
       void loadNotes()
     } catch {
       toast.error(t('notes.pinError', 'Fehler beim Anpinnen der Notiz.'))
@@ -234,7 +240,7 @@ export function Notes() {
   const handleToggleArchive = async (note: NoteItem, e: React.MouseEvent) => {
     e.stopPropagation()
     try {
-      await api(`/notes/${note.note_uid}/archive`, { method: 'POST' })
+      await toggleNoteArchiveOffline(note)
       toast.success(note.is_archived ? t('notes.unarchived', 'Notiz wiederhergestellt.') : t('notes.archived', 'Notiz archiviert.'))
       void loadNotes()
     } catch {
@@ -245,37 +251,11 @@ export function Notes() {
   // Interactive Checklist Toggle
   const handleToggleCheckItem = async (note: NoteItem, itemIndex: number, e: React.MouseEvent) => {
     e.stopPropagation()
-    const lines = (note.content || '').split('\n')
-    let currentCheckIdx = 0
-    const newLines = lines.map((line) => {
-      const isUnchecked = line.trimStart().startsWith('- [ ]')
-      const isChecked = line.trimStart().startsWith('- [x]') || line.trimStart().startsWith('- [X]')
-      if (isUnchecked || isChecked) {
-        if (currentCheckIdx === itemIndex) {
-          currentCheckIdx++
-          if (isUnchecked) {
-            return line.replace('- [ ]', '- [x]')
-          } else {
-            return line.replace(/- \[[xX]\]/, '- [ ]')
-          }
-        }
-        currentCheckIdx++
-      }
-      return line
-    })
-
-    const updatedContent = newLines.join('\n')
-
-    // Optimistic UI update
-    setNotes((prev) =>
-      prev.map((n) => (n.id === note.id ? { ...n, content: updatedContent } : n))
-    )
-
     try {
-      await api(`/notes/${note.note_uid}`, {
-        method: 'PUT',
-        body: JSON.stringify({ content: updatedContent }),
-      })
+      const { updatedContent } = await toggleCheckItemOffline(note, itemIndex)
+      setNotes((prev) =>
+        prev.map((n) => (n.note_uid === note.note_uid ? { ...n, content: updatedContent } : n))
+      )
     } catch {
       void loadNotes()
     }
