@@ -810,9 +810,6 @@ export function VaultView() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xs font-bold text-on-surface">Passwort-Manager</h1>
-              <span className="text-[10px] text-on-surface-variant">
-                ({items.length})
-              </span>
               <DisBadge size={14} className="hidden sm:inline-flex py-0.5 px-2" />
             </div>
           </div>
