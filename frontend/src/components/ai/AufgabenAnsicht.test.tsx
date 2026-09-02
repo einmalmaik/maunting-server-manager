@@ -103,9 +103,9 @@ describe('AufgabenAnsicht', () => {
     const uhrzeitButton = screen.getByRole('button', { name: i18n.t('ai.tasks.timeOfDay') })
     fireEvent.click(uhrzeitButton)
     fireEvent.click(await screen.findByRole('option', { name: '07:30' }))
-    fireEvent.change(screen.getByLabelText(i18n.t('ai.tasks.timezone')), {
-      target: { value: 'Europe/Berlin' },
-    })
+    const tzButton = screen.getByRole('button', { name: i18n.t('ai.tasks.timezone') })
+    fireEvent.click(tzButton)
+    fireEvent.click(await screen.findByRole('option', { name: 'Europe/Berlin' }))
     fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.tasks.create') }))
 
     await waitFor(() => expect(aiApi.createTask).toHaveBeenCalledTimes(1))
@@ -136,9 +136,9 @@ describe('AufgabenAnsicht', () => {
     const intervallButton = screen.getByRole('button', { name: i18n.t('ai.tasks.intervalHours') })
     fireEvent.click(intervallButton)
     fireEvent.click(await screen.findByRole('option', { name: i18n.t('ai.tasks.planInterval', { count: 6 }) }))
-    fireEvent.change(screen.getByLabelText(i18n.t('ai.tasks.timezone')), {
-      target: { value: 'Europe/Berlin' },
-    })
+    const tzButton2 = screen.getByRole('button', { name: i18n.t('ai.tasks.timezone') })
+    fireEvent.click(tzButton2)
+    fireEvent.click(await screen.findByRole('option', { name: 'Europe/Berlin' }))
     fireEvent.click(screen.getByRole('button', { name: i18n.t('ai.tasks.create') }))
 
     await waitFor(() => expect(aiApi.createTask).toHaveBeenCalledTimes(1))
